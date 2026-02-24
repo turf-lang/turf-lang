@@ -1,0 +1,21 @@
+// Test string literals and variables
+string greeting = "Hello, World!"
+print greeting
+
+// Test string variables
+string name = "Kirk"
+print name
+
+// Test string assignment
+string message = "Welcome to Kirk"
+print message
+
+// Test multiple string variables
+string a = "First"
+string b = "Second"
+print a
+print b
+
+// Test string with escape sequences
+string escaped = "Line 1\nLine 2\tTabbed"
+print escaped

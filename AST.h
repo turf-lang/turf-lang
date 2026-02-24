@@ -155,4 +155,13 @@ public:
   llvm::Value *codegen() override;
 };
 
+class StringExprAST : public ExprAST {
+  std::string Val;
+
+public:
+  StringExprAST(std::string Val) : Val(std::move(Val)) {}
+  const std::string &getValue() const { return Val; }
+  llvm::Value *codegen() override;
+};
+
 #endif
