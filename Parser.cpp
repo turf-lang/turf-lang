@@ -87,9 +87,19 @@ static std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger) {
 }
 
 std::unique_ptr<ExprAST> ParseBoolExpr() {
-  auto Result = std::make_unique<BoolExprAST>(BoolVal);
+  SourceLocation KeywordLoc = CurLoc;
+  std::string IdName = IdentifierStr;
+  bool SavedBoolVal = BoolVal;
   getNextToken();
-  return Result;
+
+  if (CurTok == TOK_ASSIGN) {
+    getNextToken();
+    auto RHS = ParseExpression();
+    if (!RHS) return nullptr;
+    return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+  }
+
+  return std::make_unique<BoolExprAST>(SavedBoolVal);
 }
 
 std::unique_ptr<ExprAST> ParseStringExpr() {
@@ -138,7 +148,16 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
 }
 
 std::unique_ptr<ExprAST> ParseIfExpr() {
+  SourceLocation KeywordLoc = CurLoc;
+  std::string IdName = IdentifierStr;
   getNextToken(); // Eating the if expression
+
+  if (CurTok == TOK_ASSIGN) {
+    getNextToken();
+    auto RHS = ParseExpression();
+    if (!RHS) return nullptr;
+    return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+  }
 
   auto Cond = ParseExpression();
   if (!Cond)
@@ -250,6 +269,21 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
 
   case TOK_WHILE:
     return ParseWhileExpr();
+
+  case TOK_THEN:
+  case TOK_ELSE: {
+    SourceLocation KeywordLoc = CurLoc;
+    std::string IdName = IdentifierStr;
+    getNextToken();
+    if (CurTok == TOK_ASSIGN) {
+      getNextToken();
+      auto RHS = ParseExpression();
+      if (!RHS) return nullptr;
+      return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+    }
+    LogErrorAt(KeywordLoc, "unknown token when expecting an expression");
+    return nullptr;
+  }
 
   case TOK_TYPE_INT:
   case TOK_TYPE_DOUBLE:
@@ -363,7 +397,16 @@ std::unique_ptr<ExprAST> ParseBlock() {
 }
 
 std::unique_ptr<ExprAST> ParsePrintExpr() {
+  SourceLocation KeywordLoc = CurLoc;
+  std::string IdName = IdentifierStr;
   getNextToken();
+
+  if (CurTok == TOK_ASSIGN) {
+    getNextToken();
+    auto RHS = ParseExpression();
+    if (!RHS) return nullptr;
+    return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+  }
 
   if (CurTok != '(') {
     LogErrorAt(CurLoc, "Expected '(' after print");
@@ -385,7 +428,16 @@ std::unique_ptr<ExprAST> ParsePrintExpr() {
 }
 
 std::unique_ptr<ExprAST> ParseWhileExpr() {
+  SourceLocation KeywordLoc = CurLoc;
+  std::string IdName = IdentifierStr;
   getNextToken();
+
+  if (CurTok == TOK_ASSIGN) {
+    getNextToken();
+    auto RHS = ParseExpression();
+    if (!RHS) return nullptr;
+    return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+  }
 
   auto Cond = ParseExpression();
   if (!Cond) {
@@ -409,7 +461,8 @@ std::unique_ptr<ExprAST> ParseVarDecl() {
   KirkType Type = TokenToKirkType(CurTok);
   getNextToken();
 
-  if (CurTok != TOK_IDENTIFIER) {
+  bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() && Keywords.at(IdentifierStr) == CurTok;
+  if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
     LogErrorAt(CurLoc, "Expected identifier after type");
     return nullptr;
   }
