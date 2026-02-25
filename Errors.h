@@ -38,6 +38,31 @@ public:
       : KirkError(Loc, "Syntax Error: " + Msg) {}
 };
 
+// Keyword Error : Misspelled keywords
+class KeywordError : public KirkError {
+public:
+  KeywordError(SourceLocation Loc, const std::string &Name)
+      : KirkError(Loc, "unknown keyword '" + Name + "'") {
+    
+    std::vector<std::string> Candidates;
+    for (const auto &pair : Keywords) {
+      if (getLevenshteinDistance(Name, pair.first) <= 2) {
+        Candidates.push_back(pair.first);
+      }
+    }
+
+    if (!Candidates.empty()) {
+      Message += ". Maybe you meant: ";
+      for (size_t i = 0; i < Candidates.size(); ++i) {
+        Message += "'" + Candidates[i] + "'";
+        if (i != Candidates.size() - 1)
+          Message += ", ";
+      }
+      Message += "?";
+    }
+  }
+};
+
 // Arithmetic Error : Math issues
 class ArithmeticError : public KirkError {
 public:

@@ -2,6 +2,7 @@
 #define LEXER_H
 
 #include <fstream>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -20,6 +21,7 @@ extern std::string StringVal;
 
 extern std::vector<std::string> SourceLines;
 extern SourceLocation CurLoc;
+extern const std::map<std::string, int> Keywords;
 
 enum Token {
   TOK_EOF = -1,

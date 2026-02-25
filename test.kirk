@@ -1,2 +1,2 @@
-int print = 5
-print(print)
+int a = 1
+print(aab)
