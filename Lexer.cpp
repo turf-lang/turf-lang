@@ -194,6 +194,32 @@ int gettok() {
     return '<';
   }
 
+  if (LastChar == '&') {
+    LastChar = SourceFile.get();
+    CurCol++;
+
+    if (LastChar == '&') {
+      LastChar = SourceFile.get();
+      CurCol++;
+      return TOK_AND;
+    }
+
+    return '&';
+  }
+
+  if (LastChar == '|') {
+    LastChar = SourceFile.get();
+    CurCol++;
+
+    if (LastChar == '|') {
+      LastChar = SourceFile.get();
+      CurCol++;
+      return TOK_OR;
+    }
+
+    return '|';
+  }
+
   if (LastChar == '/') {
     if (SourceFile.peek() == '/') {
       do {

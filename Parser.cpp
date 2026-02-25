@@ -13,18 +13,34 @@ static std::map<int, int> BinopPrecedence; // Precedence table: '*' > '+'
 int getNextToken() { return CurTok = gettok(); }
 
 void InitializePrecedence() {
-  BinopPrecedence['<'] = 10;
-  BinopPrecedence['>'] = 10;
-  BinopPrecedence[TOK_EQ] = 10;
-  BinopPrecedence[TOK_NEQ] = 10;
-  BinopPrecedence[TOK_GEQ] = 10;
-  BinopPrecedence[TOK_LEQ] = 10;
-  BinopPrecedence['+'] = 20;
-  BinopPrecedence['-'] = 20;
-  BinopPrecedence['*'] = 40;
-  BinopPrecedence['/'] = 40;
-  BinopPrecedence['%'] = 40;
-  BinopPrecedence['^'] = 50;
+  // Assignment
+  BinopPrecedence['='] = 10;
+
+  // Logical
+  BinopPrecedence[TOK_OR] = 15;  // ||
+  BinopPrecedence[TOK_AND] = 20; // &&
+
+  // Equality
+  BinopPrecedence[TOK_EQ] = 25;
+  BinopPrecedence[TOK_NEQ] = 25;
+
+  // Relational
+  BinopPrecedence['<'] = 30;
+  BinopPrecedence['>'] = 30;
+  BinopPrecedence[TOK_LEQ] = 30;
+  BinopPrecedence[TOK_GEQ] = 30;
+
+  // Additive
+  BinopPrecedence['+'] = 40;
+  BinopPrecedence['-'] = 40;
+
+  // Multiplicative
+  BinopPrecedence['*'] = 50;
+  BinopPrecedence['/'] = 50;
+  BinopPrecedence['%'] = 50;
+
+  // Exponentiation
+  BinopPrecedence['^'] = 60;
 }
 
 // Returns the priority of the current operator. If it's not an operator (like a
