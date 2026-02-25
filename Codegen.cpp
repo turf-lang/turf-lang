@@ -267,6 +267,11 @@ AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
 }
 
 Value *VarDeclExprAST::codegen() {
+  if (Keywords.find(Name) != Keywords.end()) {
+    SyntaxError(Loc, "Cannot use keyword '" + Name + "' as a variable name. Keyword is reserved.").raise();
+    return nullptr;
+  }
+
   if (NamedValues.count(Name)) {
     SyntaxError(Loc, "Variable already declared").raise();
     return nullptr;
@@ -305,6 +310,11 @@ Value *AssignmentExprAST::codegen() {
   Value *Val = RHS->codegen();
   if (!Val)
     return nullptr;
+
+  if (Keywords.find(Name) != Keywords.end()) {
+    SyntaxError(Loc, "Cannot assign to keyword '" + Name + "'. Keyword is reserved.").raise();
+    return nullptr;
+  }
 
   // Look up the variable
   auto Iter = NamedValues.find(Name);
