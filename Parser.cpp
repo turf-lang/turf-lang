@@ -153,6 +153,13 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
   } else if (CurTok == '{') {
     Then = ParseBlock();
   } else {
+    // Check if the current token is a typo for 'then'
+    if (CurTok == TOK_IDENTIFIER) {
+      if (getLevenshteinDistance(IdentifierStr, "then") <= 2) {
+        KeywordError(CurLoc, IdentifierStr).raise();
+        return nullptr;
+      }
+    }
     LogErrorAt(CurLoc, "Expected 'then' or '{' after if condition");
     return nullptr;
   }
@@ -161,6 +168,12 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     return nullptr;
 
   if (CurTok != TOK_ELSE) {
+    if (CurTok == TOK_IDENTIFIER) {
+      if (getLevenshteinDistance(IdentifierStr, "else") <= 2) {
+        KeywordError(CurLoc, IdentifierStr).raise();
+        return nullptr;
+      }
+    }
     LogErrorAt(CurLoc, "expected 'else'");
     return nullptr;
   }
@@ -186,8 +199,33 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
     LogErrorAt(CurLoc, "unknown token when expecting an expression");
     return nullptr;
 
-  case TOK_IDENTIFIER:
+  case TOK_IDENTIFIER: {
+    // Check for keyword typos before standard identifier parsing
+    std::string IdName = IdentifierStr;
+    bool CouldBeKeywordTypo = false;
+    
+    // Calculate distance to keywords only if its length is > 2 or the matched keyword length is similar
+    if (IdName.length() >= 2) {
+      for (const auto &pair : Keywords) {
+        int dist = getLevenshteinDistance(IdName, pair.first);
+        // Distance 1 is always good. Distance 2 is good only for longer words to avoid 'x' -> 'if'
+        if (dist <= 1 || (dist == 2 && IdName.length() > 3 && pair.first.length() > 3)) {
+          CouldBeKeywordTypo = true;
+          break;
+        }
+      }
+    }
+
+    if (CouldBeKeywordTypo) {
+      if (CurTok != TOK_ASSIGN) {
+        KeywordError(CurLoc, IdName).raise();
+        return nullptr;
+      }
+    }
+
+    // Hand off to existing logic
     return ParseIdentifierExpr();
+  }
 
   case TOK_NUMBER:
     return ParseNumberExpr(false);
