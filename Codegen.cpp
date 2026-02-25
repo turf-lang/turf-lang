@@ -226,6 +226,22 @@ Value *BinaryExprAST::codegen() {
     return CmpType == KIRK_DOUBLE ? Builder->CreateFCmpOLE(L, R, "cmptmp")
                                   : Builder->CreateICmpSLE(L, R, "cmptmp");
   }
+
+  // Logical operators
+  case TOK_AND: {
+    // Cast both operands to bool
+    L = CastToType(L, KIRK_BOOL, "lhstobool");
+    R = CastToType(R, KIRK_BOOL, "rhstobool");
+    return Builder->CreateAnd(L, R, "andtmp");
+  }
+
+  case TOK_OR: {
+    // Cast both operands to bool
+    L = CastToType(L, KIRK_BOOL, "lhstobool");
+    R = CastToType(R, KIRK_BOOL, "rhstobool");
+    return Builder->CreateOr(L, R, "ortmp");
+  }
+
   // Power
   case '^': {
     // Ensure both operands are double

@@ -1,0 +1,89 @@
+// Operator Precedence Test for Kirk Compiler
+// Tests all operators with proper precedence and associativity
+
+// Test 1: Basic arithmetic operators
+int a = 5 + 3 * 2       // Should be 11 (multiplication first)
+print(a)
+
+int b = 10 - 4 / 2      // Should be 8 (division first)
+print(b)
+
+int c = 2 + 3 * 4 - 1   // Should be 13 (3*4=12, 2+12-1=13)
+print(c)
+
+// Test 2: Exponentiation (highest precedence)
+double d = 2.0 + 3.0 ^ 2.0    // Should be 11.0 (3^2=9, 2+9=11)
+print(d)
+
+double e = 2.0 * 3.0 ^ 2.0    // Should be 18.0 (3^2=9, 2*9=18)
+print(e)
+
+// Test 3: Modulo operator
+int f = 17 % 5 + 2      // Should be 4 (17%5=2, 2+2=4)
+print(f)
+
+// Test 4: Relational operators
+bool g = 5 > 3          // Should be true
+print(g)
+
+bool h = 10 < 20        // Should be true
+print(h)
+
+bool i = 5 >= 5         // Should be true
+print(i)
+
+bool j = 3 <= 2         // Should be false
+print(j)
+
+// Test 5: Equality operators
+bool k = 5 == 5         // Should be true
+print(k)
+
+bool l = 10 != 5        // Should be true
+print(l)
+
+// Test 6: Logical AND operator
+bool m = true && true   // Should be true
+print(m)
+
+bool n = true && false  // Should be false
+print(n)
+
+bool o = 5 > 3 && 10 < 20    // Should be true (both conditions true)
+print(o)
+
+// Test 7: Logical OR operator
+bool p = true || false  // Should be true
+print(p)
+
+bool q = false || false // Should be false
+print(q)
+
+bool r = 5 > 10 || 3 < 7     // Should be true (second condition true)
+print(r)
+
+// Test 8: Combined logical operators (AND has higher precedence than OR)
+bool s = true || false && false    // Should be true (false&&false=false, true||false=true)
+print(s)
+
+bool t = false && true || true     // Should be true (false&&true=false, false||true=true)
+print(t)
+
+// Test 9: Comparison with arithmetic
+bool u = 5 + 3 > 7      // Should be true (5+3=8, 8>7)
+print(u)
+
+bool v = 10 * 2 == 20   // Should be true (10*2=20, 20==20)
+print(v)
+
+// Test 10: Complex expression with multiple precedence levels
+bool w = 2 + 3 * 4 > 10 && 5 < 10 || false    // Should be true
+// 3*4=12, 2+12=14, 14>10=true, 5<10=true, true&&true=true, true||false=true
+print(w)
+
+// Test 11: Parentheses override precedence
+int x = (5 + 3) * 2     // Should be 16 (parentheses first: 5+3=8, 8*2=16)
+print(x)
+
+int y = (10 - 4) / 2    // Should be 3 (parentheses first: 10-4=6, 6/2=3)
+print(y)
