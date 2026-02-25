@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+cd "$(dirname "$0")/.." || exit 1
+
 BOLD="\033[1m"
 GREEN="\033[0;32m"
 BLUE="\033[0;34m"
@@ -12,9 +14,9 @@ if ! command -v llvm-config &> /dev/null; then
 fi
 
 echo -e "${GREEN}[1 / 2]${RESET} ${BOLD}Updating the Kirk Compiler...${RESET}"
-echo -e "        ${BLUE}Sources:${RESET} main.cpp Lexer.cpp Parser.cpp Codegen.cpp Algorithms.cpp"
+echo -e "        ${BLUE}Sources:${RESET} src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Algorithms.cpp"
 
-clang++ main.cpp Lexer.cpp Parser.cpp Codegen.cpp Algorithms.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core` -o kirk
+clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Algorithms.cpp -Iinclude `llvm-config --cxxflags --ldflags --system-libs --libs core` -o kirk
 
 echo -e "${GREEN}[2 / 2]${RESET} ${BOLD}Verifying build...${RESET}"
 

@@ -1,7 +1,5 @@
 # Kirk
 
-<a href="https://app.devdoq.com/dashboard/1127649459?name=kirk-lang&tab=document"><img src="https://app.devdoq.com/shields/read_docs.png" alt="Read Docs" width="120" height="45"></a> <a href="https://app.devdoq.com/dashboard/1127649459?name=kirk-lang&tab=chat"><img src="https://app.devdoq.com/shields/talk_to_code.png" alt="Talk to Code" width="165" height="60"></a>
-
 Kirk is an experimental programming language and compiler written in C++. The goal is simple: fast compilation with helpful, human-friendly error messages. Instead of plain errors, Kirk explains what went wrong and suggests fixes.
 
 - The project is in early development.

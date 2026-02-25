@@ -31,8 +31,10 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+COMPILER_PATH="$(dirname "$0")/../kirk"
+
 echo -e "${GREEN}[1 / ${TOTAL_STEPS}]${RESET} ${BOLD}Compiling Kirk source:${RESET} $INPUT_FILE"
-./kirk "$INPUT_FILE"
+"$COMPILER_PATH" "$INPUT_FILE"
 
 echo -e "${GREEN}[2 / ${TOTAL_STEPS}]${RESET} ${BOLD}Generating object file (PIC mode)...${RESET}"
 llc -relocation-model=pic -filetype=obj output.ll -o output.o
