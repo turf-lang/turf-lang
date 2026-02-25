@@ -16,6 +16,7 @@ extern double NumVal;
 extern long long IntVal;
 extern bool BoolVal;
 extern std::string IdentifierStr;
+extern std::string StringVal;
 
 extern std::vector<std::string> SourceLines;
 extern SourceLocation CurLoc;
@@ -38,7 +39,9 @@ enum Token {
   TOK_BOOL_LITERAL = -21,
   TOK_TYPE_INT = -22,
   TOK_TYPE_DOUBLE = -23,
-  TOK_TYPE_BOOL = -24
+  TOK_TYPE_BOOL = -24,
+  TOK_STRING_LITERAL = -25,
+  TOK_TYPE_STRING = -26
 };
 
 int gettok();

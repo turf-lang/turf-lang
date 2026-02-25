@@ -44,6 +44,7 @@ std::unique_ptr<ExprAST> ParsePrintExpr();
 std::unique_ptr<ExprAST> ParseWhileExpr();
 std::unique_ptr<ExprAST> ParseVarDecl();
 std::unique_ptr<ExprAST> ParseBoolExpr();
+std::unique_ptr<ExprAST> ParseStringExpr();
 
 static KirkType TokenToKirkType(int Tok) {
   switch (Tok) {
@@ -53,6 +54,8 @@ static KirkType TokenToKirkType(int Tok) {
     return KIRK_DOUBLE;
   case TOK_TYPE_BOOL:
     return KIRK_BOOL;
+  case TOK_TYPE_STRING:
+    return KIRK_STRING;
   default:
     SyntaxError(CurLoc, "Unknown type").raise();
     return KIRK_VOID;
@@ -69,6 +72,12 @@ static std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger) {
 
 std::unique_ptr<ExprAST> ParseBoolExpr() {
   auto Result = std::make_unique<BoolExprAST>(BoolVal);
+  getNextToken();
+  return Result;
+}
+
+std::unique_ptr<ExprAST> ParseStringExpr() {
+  auto Result = std::make_unique<StringExprAST>(StringVal);
   getNextToken();
   return Result;
 }
@@ -173,6 +182,9 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   case TOK_BOOL_LITERAL:
     return ParseBoolExpr();
 
+  case TOK_STRING_LITERAL:
+    return ParseStringExpr();
+
   case '(':
     return ParseParenExpr();
 
@@ -188,6 +200,7 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   case TOK_TYPE_INT:
   case TOK_TYPE_DOUBLE:
   case TOK_TYPE_BOOL:
+  case TOK_TYPE_STRING:
     return ParseVarDecl();
   }
 }

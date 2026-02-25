@@ -15,6 +15,7 @@ double NumVal;
 long long IntVal;
 bool BoolVal;
 std::string IdentifierStr;
+std::string StringVal;
 
 void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
   std::cerr << "Error at " << Loc.Line << ":" << Loc.Col << ": " << Msg << "\n";
@@ -40,7 +41,8 @@ int gettok() {
         {"float", TOK_TYPE_DOUBLE},
         {"double", TOK_TYPE_DOUBLE},
         {"bool", TOK_TYPE_BOOL}, {"true", TOK_BOOL_LITERAL},
-        {"false", TOK_BOOL_LITERAL}};
+        {"false", TOK_BOOL_LITERAL},
+        {"string", TOK_TYPE_STRING}};
 
   while (isspace(LastChar)) {
     // Handle newlines to track line numbers
@@ -78,6 +80,47 @@ int gettok() {
     }
 
     return TOK_IDENTIFIER;
+  }
+
+  // String literals: "..."
+  if (LastChar == '"') {
+    StringVal = "";
+    LastChar = SourceFile.get();
+    CurCol++;
+
+    while (LastChar != '"' && LastChar != EOF) {
+      if (LastChar == '\\') {
+        // Handle escape sequences
+        LastChar = SourceFile.get();
+        CurCol++;
+        if (LastChar == 'n') {
+          StringVal += '\n';
+        } else if (LastChar == 't') {
+          StringVal += '\t';
+        } else if (LastChar == '\\') {
+          StringVal += '\\';
+        } else if (LastChar == '"') {
+          StringVal += '"';
+        } else {
+          StringVal += LastChar;
+        }
+      } else {
+        StringVal += LastChar;
+      }
+      LastChar = SourceFile.get();
+      CurCol++;
+    }
+
+    if (LastChar == EOF) {
+      LogErrorAt(CurLoc, "Unterminated string literal");
+      return TOK_EOF;
+    }
+
+    // Consume closing "
+    LastChar = SourceFile.get();
+    CurCol++;
+
+    return TOK_STRING_LITERAL;
   }
 
   // Numbers: [0-9.]+

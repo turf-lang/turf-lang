@@ -10,20 +10,21 @@ Kirk is an experimental programming language and compiler written in C++. The go
 
 ## Features (Implemented)
 
-* **Type System:** Built-in types `int`, `float`/`double`, and `bool` with implicit type promotion (bool → int → double) during operations.
-* **Typed Variable Declarations:** Variables can be declared with explicit types (`int x = 5`, `double pi = 3.14`, `bool flag = true`).
-* **Variables:** Support for variable assignment and lookups.
-* **Boolean Literals:** Support for `true` and `false` boolean values.
-* **Math:** Full support for arithmetic operators (`+`, `-`, `*`, `/`, `%`, `^`) with operator precedence, including exponentiation.
-* **Unary Operators:** Support for unary negation (`-x`).
-* **Comparison Operators:** Full set of comparison operators (`<`, `>`, `==`, `!=`, `<=`, `>=`).
-* **Control Flow:** `if`/`else` expressions and `while` loops with block syntax (`{ ... }`).
-* **Block Expressions:** Group multiple expressions using `{ ... }` syntax.
-* **Comments:** Single-line comments using `//` syntax.
-* **Print:** Built-in `print()` function for output (supports int, double, and bool types).
-* **Memory Management:** Automatic stack allocation using LLVM `alloca`, `store`, and `load`.
-* **LLVM Backend:** Compiles source code directly to optimized LLVM IR (`output.ll`).
-* **Smart Compiler (Phase 1):** Support for smart compiler error enhancements, where it suggests you what changes to make (using Levenshtein distance for variable name suggestions).
+- **Type System:** Built-in types `int`, `float`/`double`, `bool`, and `string` with implicit type promotion (bool → int → double) during operations. Strings are treated as a distinct type and cannot be cast to/from numeric types.
+- **Typed Variable Declarations:** Variables can be declared with explicit types (`int x = 5`, `double pi = 3.14`, `bool flag = true`, `string name = "Kirk"`).
+- **String Support:** First-class string type with string literals (`"hello"`), string variables, assignment, and printing. Supports escape sequences (`\n`, `\t`, `\\`, `\"`).
+- **Variables:** Support for variable assignment and lookups.
+- **Boolean Literals:** Support for `true` and `false` boolean values.
+- **Math:** Full support for arithmetic operators (`+`, `-`, `*`, `/`, `%`, `^`) with operator precedence, including exponentiation.
+- **Unary Operators:** Support for unary negation (`-x`).
+- **Comparison Operators:** Full set of comparison operators (`<`, `>`, `==`, `!=`, `<=`, `>=`).
+- **Control Flow:** `if`/`else` expressions and `while` loops with block syntax (`{ ... }`).
+- **Block Expressions:** Group multiple expressions using `{ ... }` syntax.
+- **Comments:** Single-line comments using `//` syntax.
+- **Print:** Built-in `print()` function for output (supports int, double, bool, and string types).
+- **Memory Management:** Automatic stack allocation using LLVM `alloca`, `store`, and `load`.
+- **LLVM Backend:** Compiles source code directly to optimized LLVM IR (`output.ll`).
+- **Smart Compiler (Phase 1):** Support for smart compiler error enhancements, where it suggests you what changes to make (using Levenshtein distance for variable name suggestions).
 
 ## Build and Run
 
@@ -50,13 +51,14 @@ clang++ main.cpp Lexer.cpp Parser.cpp Codegen.cpp Algorithms.cpp `llvm-config --
 
 Rest steps will be the same from the Quick Start section.
 
-## Example Code 
+## Example Code
 
 ```kirk
 // Typed variable declarations
 int width = 10
 int height = 5
 double pi = 3.14
+string greeting = "Hello, Kirk!"
 
 // Variables are mutable and memory-managed
 int area = width * height
@@ -83,10 +85,11 @@ while counter < 5 {
   print(counter)
   counter = counter + 1
 }
-
-// Print output (supports int, double, and bool)
+bool, and string)
 print(result)
 print(pi)
+print(flag)
+print(greetin
 print(flag)
 ```
 
@@ -100,15 +103,15 @@ print(flag)
 - [x] Control Flow (if / else)
 - [x] Comparison Operators (<, >, ==, !=, <=, >=)
 - [x] While Loops
+- [x] String Type (literals, variables, printing)
 - [x] Print Function
 - [x] Comments (single-line)
 - [ ] Functions
 
 ## Status
 
-**Active Development.**
+**Active Development.**, `string`), arithmetic (including exponentiation), control flow (`if`/`else`, `while`), comparison operators, boolean literals, string literals with escape sequence
 
 The compiler supports typed variables (`int`, `double`, `bool`), arithmetic (including exponentiation), control flow (`if`/`else`, `while`), comparison operators, boolean literals, single-line comments, and output via `print()`.
 
 > After a certain phase of development, both the 'Build' and 'Run' phase will be packaged in a separate "Kirk Compiler" package.
-

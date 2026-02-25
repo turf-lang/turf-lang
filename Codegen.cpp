@@ -34,6 +34,8 @@ Type *getLLVMType(KirkType Type) {
     return llvm::Type::getDoubleTy(*TheContext);
   case KIRK_BOOL:
     return llvm::Type::getInt1Ty(*TheContext);
+  case KIRK_STRING:
+    return llvm::PointerType::get(llvm::Type::getInt8Ty(*TheContext), 0);
   case KIRK_VOID:
     return llvm::Type::getVoidTy(*TheContext);
   default:
@@ -48,6 +50,8 @@ static KirkType getKirkTypeFromLLVM(Type *Ty) {
     return KIRK_INT;
   if (Ty->isIntegerTy(1))
     return KIRK_BOOL;
+  if (Ty->isPointerTy())
+    return KIRK_STRING;
   if (Ty->isVoidTy())
     return KIRK_VOID;
   return KIRK_DOUBLE;
@@ -61,6 +65,8 @@ static int getTypeRank(KirkType T) {
     return 2;
   case KIRK_BOOL:
     return 1;
+  case KIRK_STRING:
+    return 4; // Highest rank, but not castable
   default:
     return 0;
   }
@@ -75,6 +81,13 @@ static Value *CastToType(Value *Val, KirkType DestType,
   KirkType SrcType = getKirkTypeFromLLVM(Val->getType());
   if (SrcType == DestType)
     return Val;
+
+  // Strings cannot be cast to/from other types
+  if (SrcType == KIRK_STRING || DestType == KIRK_STRING) {
+    SyntaxError(CurLoc, "Cannot cast between string and non-string types")
+        .raise();
+    return Val;
+  }
 
   switch (DestType) {
   case KIRK_DOUBLE:
@@ -115,6 +128,11 @@ Value *NumberExprAST::codegen() {
 
 Value *BoolExprAST::codegen() {
   return ConstantInt::get(Type::getInt1Ty(*TheContext), Val ? 1 : 0);
+}
+
+Value *StringExprAST::codegen() {
+  // Create a global string constant
+  return Builder->CreateGlobalStringPtr(Val, "str");
 }
 
 // Turns any expression into IR operation
@@ -213,7 +231,7 @@ Value *BinaryExprAST::codegen() {
     // Ensure both operands are double
     CastBoth(KIRK_DOUBLE);
 
-    Function *PowFunc = Intrinsic::getOrInsertDeclaration(
+    Function *PowFunc = Intrinsic::getDeclaration(
         TheModule.get(), Intrinsic::pow, Type::getDoubleTy(*TheContext));
 
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
@@ -409,6 +427,12 @@ Value *PrintExprAST::codegen() {
     Value *FormatStr =
         Builder->CreateGlobalStringPtr("%d\n", "printstrbool");
     return Builder->CreateCall(PrintfFunc, {FormatStr, Zext}, "printcall");
+  }
+
+  if (Ty->isPointerTy()) {
+    Value *FormatStr =
+        Builder->CreateGlobalStringPtr("%s\n", "printstrstr");
+    return Builder->CreateCall(PrintfFunc, {FormatStr, Val}, "printcall");
   }
 
   SyntaxError(CurLoc, "Unsupported type for print").raise();
