@@ -20,93 +20,93 @@ void InitializeModule() {
   TheContext = std::make_unique<LLVMContext>();
 
   // Holds functions
-  TheModule = std::make_unique<Module>("Kirk Compiler", *TheContext);
+  TheModule = std::make_unique<Module>("Turf Compiler", *TheContext);
 
   // Builder to insert instructions
   Builder = std::make_unique<IRBuilder<>>(*TheContext);
 }
 
-Type *getLLVMType(KirkType Type) {
+Type *getLLVMType(TurfType Type) {
   switch (Type) {
-  case KIRK_INT:
+  case TURF_INT:
     return llvm::Type::getInt64Ty(*TheContext);
-  case KIRK_DOUBLE:
+  case TURF_DOUBLE:
     return llvm::Type::getDoubleTy(*TheContext);
-  case KIRK_BOOL:
+  case TURF_BOOL:
     return llvm::Type::getInt1Ty(*TheContext);
-  case KIRK_STRING:
+  case TURF_STRING:
     return llvm::PointerType::get(llvm::Type::getInt8Ty(*TheContext), 0);
-  case KIRK_VOID:
+  case TURF_VOID:
     return llvm::Type::getVoidTy(*TheContext);
   default:
     return llvm::Type::getDoubleTy(*TheContext);
   }
 }
 
-static KirkType getKirkTypeFromLLVM(Type *Ty) {
+static TurfType getTurfTypeFromLLVM(Type *Ty) {
   if (Ty->isDoubleTy())
-    return KIRK_DOUBLE;
+    return TURF_DOUBLE;
   if (Ty->isIntegerTy(64))
-    return KIRK_INT;
+    return TURF_INT;
   if (Ty->isIntegerTy(1))
-    return KIRK_BOOL;
+    return TURF_BOOL;
   if (Ty->isPointerTy())
-    return KIRK_STRING;
+    return TURF_STRING;
   if (Ty->isVoidTy())
-    return KIRK_VOID;
-  return KIRK_DOUBLE;
+    return TURF_VOID;
+  return TURF_DOUBLE;
 }
 
-static int getTypeRank(KirkType T) {
+static int getTypeRank(TurfType T) {
   switch (T) {
-  case KIRK_DOUBLE:
+  case TURF_DOUBLE:
     return 3;
-  case KIRK_INT:
+  case TURF_INT:
     return 2;
-  case KIRK_BOOL:
+  case TURF_BOOL:
     return 1;
-  case KIRK_STRING:
+  case TURF_STRING:
     return 4; // Highest rank, but not castable
   default:
     return 0;
   }
 }
 
-static KirkType getCommonType(KirkType A, KirkType B) {
+static TurfType getCommonType(TurfType A, TurfType B) {
   return getTypeRank(A) >= getTypeRank(B) ? A : B;
 }
 
-static Value *CastToType(Value *Val, KirkType DestType,
+static Value *CastToType(Value *Val, TurfType DestType,
                          const std::string &Name) {
-  KirkType SrcType = getKirkTypeFromLLVM(Val->getType());
+  TurfType SrcType = getTurfTypeFromLLVM(Val->getType());
   if (SrcType == DestType)
     return Val;
 
   // Strings cannot be cast to/from other types
-  if (SrcType == KIRK_STRING || DestType == KIRK_STRING) {
+  if (SrcType == TURF_STRING || DestType == TURF_STRING) {
     SyntaxError(CurLoc, "Cannot cast between string and non-string types")
         .raise();
     return Val;
   }
 
   switch (DestType) {
-  case KIRK_DOUBLE:
-    if (SrcType == KIRK_INT)
+  case TURF_DOUBLE:
+    if (SrcType == TURF_INT)
       return Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext), Name);
-    if (SrcType == KIRK_BOOL)
+    if (SrcType == TURF_BOOL)
       return Builder->CreateUIToFP(Val, Type::getDoubleTy(*TheContext), Name);
     break;
-  case KIRK_INT:
-    if (SrcType == KIRK_DOUBLE)
+  case TURF_INT:
+    if (SrcType == TURF_DOUBLE)
       return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), Name);
-    if (SrcType == KIRK_BOOL)
+    if (SrcType == TURF_BOOL)
       return Builder->CreateZExt(Val, Type::getInt64Ty(*TheContext), Name);
     break;
-  case KIRK_BOOL:
-    if (SrcType == KIRK_DOUBLE)
+  case TURF_BOOL:
+    if (SrcType == TURF_DOUBLE)
       return Builder->CreateFCmpONE(
           Val, ConstantFP::get(*TheContext, APFloat(0.0)), Name);
-    if (SrcType == KIRK_INT)
+    if (SrcType == TURF_INT)
       return Builder->CreateICmpNE(
           Val, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), Name);
     break;
@@ -144,16 +144,16 @@ Value *BinaryExprAST::codegen() {
   if (!L || !R)
     return nullptr;
 
-  KirkType LTy = getKirkTypeFromLLVM(L->getType());
-  KirkType RTy = getKirkTypeFromLLVM(R->getType());
+  TurfType LTy = getTurfTypeFromLLVM(L->getType());
+  TurfType RTy = getTurfTypeFromLLVM(R->getType());
 
-  auto CastBoth = [&](KirkType Target) {
+  auto CastBoth = [&](TurfType Target) {
     L = CastToType(L, Target, "lhscast");
     R = CastToType(R, Target, "rhscast");
   };
 
-  KirkType CommonType = getCommonType(LTy, RTy);
-  KirkType NumericType = (CommonType == KIRK_BOOL) ? KIRK_INT : CommonType;
+  TurfType CommonType = getCommonType(LTy, RTy);
+  TurfType NumericType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
 
   // Create the instruction based on the operator
   switch (Op) {
@@ -161,91 +161,91 @@ Value *BinaryExprAST::codegen() {
     // Arithmetic
   case '+':
     CastBoth(NumericType);
-    return NumericType == KIRK_DOUBLE ? Builder->CreateFAdd(L, R, "addtmp")
+    return NumericType == TURF_DOUBLE ? Builder->CreateFAdd(L, R, "addtmp")
                                       : Builder->CreateAdd(L, R, "addtmp");
 
   case '-':
     CastBoth(NumericType);
-    return NumericType == KIRK_DOUBLE ? Builder->CreateFSub(L, R, "subtmp")
+    return NumericType == TURF_DOUBLE ? Builder->CreateFSub(L, R, "subtmp")
                                       : Builder->CreateSub(L, R, "subtmp");
 
   case '*':
     CastBoth(NumericType);
-    return NumericType == KIRK_DOUBLE ? Builder->CreateFMul(L, R, "multmp")
+    return NumericType == TURF_DOUBLE ? Builder->CreateFMul(L, R, "multmp")
                                       : Builder->CreateMul(L, R, "multmp");
 
   case '/':
     CastBoth(NumericType);
-    return NumericType == KIRK_DOUBLE ? Builder->CreateFDiv(L, R, "divtmp")
+    return NumericType == TURF_DOUBLE ? Builder->CreateFDiv(L, R, "divtmp")
                                       : Builder->CreateSDiv(L, R, "divtmp");
 
   case '%':
     CastBoth(NumericType);
-    return NumericType == KIRK_DOUBLE ? Builder->CreateFRem(L, R, "modtmp")
+    return NumericType == TURF_DOUBLE ? Builder->CreateFRem(L, R, "modtmp")
                                       : Builder->CreateSRem(L, R, "modtmp");
 
   // Comparison
   case '<': {
-    KirkType CmpType = (CommonType == KIRK_BOOL) ? KIRK_INT : CommonType;
+    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
     CastBoth(CmpType);
-    return CmpType == KIRK_DOUBLE ? Builder->CreateFCmpOLT(L, R, "cmptmp")
+    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpOLT(L, R, "cmptmp")
                                   : Builder->CreateICmpSLT(L, R, "cmptmp");
   }
 
   case '>': {
-    KirkType CmpType = (CommonType == KIRK_BOOL) ? KIRK_INT : CommonType;
+    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
     CastBoth(CmpType);
-    return CmpType == KIRK_DOUBLE ? Builder->CreateFCmpOGT(L, R, "cmptmp")
+    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpOGT(L, R, "cmptmp")
                                   : Builder->CreateICmpSGT(L, R, "cmptmp");
   }
 
   case TOK_EQ: {
-    KirkType CmpType = (CommonType == KIRK_BOOL) ? KIRK_INT : CommonType;
+    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
     CastBoth(CmpType);
-    return CmpType == KIRK_DOUBLE ? Builder->CreateFCmpOEQ(L, R, "cmptmp")
+    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpOEQ(L, R, "cmptmp")
                                   : Builder->CreateICmpEQ(L, R, "cmptmp");
   }
 
   case TOK_NEQ: {
-    KirkType CmpType = (CommonType == KIRK_BOOL) ? KIRK_INT : CommonType;
+    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
     CastBoth(CmpType);
-    return CmpType == KIRK_DOUBLE ? Builder->CreateFCmpONE(L, R, "cmptmp")
+    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpONE(L, R, "cmptmp")
                                   : Builder->CreateICmpNE(L, R, "cmptmp");
   }
 
   case TOK_GEQ: {
-    KirkType CmpType = (CommonType == KIRK_BOOL) ? KIRK_INT : CommonType;
+    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
     CastBoth(CmpType);
-    return CmpType == KIRK_DOUBLE ? Builder->CreateFCmpOGE(L, R, "cmptmp")
+    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpOGE(L, R, "cmptmp")
                                   : Builder->CreateICmpSGE(L, R, "cmptmp");
   }
 
   case TOK_LEQ: {
-    KirkType CmpType = (CommonType == KIRK_BOOL) ? KIRK_INT : CommonType;
+    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
     CastBoth(CmpType);
-    return CmpType == KIRK_DOUBLE ? Builder->CreateFCmpOLE(L, R, "cmptmp")
+    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpOLE(L, R, "cmptmp")
                                   : Builder->CreateICmpSLE(L, R, "cmptmp");
   }
 
   // Logical operators
   case TOK_AND: {
     // Cast both operands to bool
-    L = CastToType(L, KIRK_BOOL, "lhstobool");
-    R = CastToType(R, KIRK_BOOL, "rhstobool");
+    L = CastToType(L, TURF_BOOL, "lhstobool");
+    R = CastToType(R, TURF_BOOL, "rhstobool");
     return Builder->CreateAnd(L, R, "andtmp");
   }
 
   case TOK_OR: {
     // Cast both operands to bool
-    L = CastToType(L, KIRK_BOOL, "lhstobool");
-    R = CastToType(R, KIRK_BOOL, "rhstobool");
+    L = CastToType(L, TURF_BOOL, "lhstobool");
+    R = CastToType(R, TURF_BOOL, "rhstobool");
     return Builder->CreateOr(L, R, "ortmp");
   }
 
   // Power
   case '^': {
     // Ensure both operands are double
-    CastBoth(KIRK_DOUBLE);
+    CastBoth(TURF_DOUBLE);
 
     Function *PowFunc = Intrinsic::getDeclaration(
         TheModule.get(), Intrinsic::pow, Type::getDoubleTy(*TheContext));
@@ -260,7 +260,7 @@ Value *BinaryExprAST::codegen() {
 
 // This creates an alloca instruction in the entry block of a function
 AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
-                                   const std::string &VarName, KirkType Type) {
+                                   const std::string &VarName, TurfType Type) {
   IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                    TheFunction->getEntryBlock().begin());
   return TmpB.CreateAlloca(getLLVMType(Type), 0, VarName.c_str());
@@ -325,7 +325,7 @@ Value *AssignmentExprAST::codegen() {
   }
 
   AllocaInst *Alloca = Iter->second.Alloca;
-  KirkType VarType = Iter->second.Type;
+  TurfType VarType = Iter->second.Type;
 
   Value *CastVal = CastToType(Val, VarType, "assigncast");
 
@@ -342,7 +342,7 @@ Value *IfExprAST::codegen() {
     return nullptr;
 
   // Convert condition to a boolean
-  CondV = CastToType(CondV, KIRK_BOOL, "ifcond");
+  CondV = CastToType(CondV, TURF_BOOL, "ifcond");
 
   // Get the current function so we can insert blocks into it
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
@@ -378,9 +378,9 @@ Value *IfExprAST::codegen() {
   TheFunction->insert(TheFunction->end(), MergeBB);
   Builder->SetInsertPoint(MergeBB);
 
-  KirkType ThenType = getKirkTypeFromLLVM(ThenV->getType());
-  KirkType ElseType = getKirkTypeFromLLVM(ElseV->getType());
-  KirkType MergeType = getCommonType(ThenType, ElseType);
+  TurfType ThenType = getTurfTypeFromLLVM(ThenV->getType());
+  TurfType ElseType = getTurfTypeFromLLVM(ElseV->getType());
+  TurfType MergeType = getCommonType(ThenType, ElseType);
 
   ThenV = CastToType(ThenV, MergeType, "thencast");
   ElseV = CastToType(ElseV, MergeType, "elsecast");
@@ -399,17 +399,17 @@ Value *UnaryExprAST::codegen() {
   if (!OperandV)
     return nullptr;
 
-  KirkType OperandType = getKirkTypeFromLLVM(OperandV->getType());
-  if (OperandType == KIRK_BOOL)
-    OperandV = CastToType(OperandV, KIRK_INT, "boolneg");
+  TurfType OperandType = getTurfTypeFromLLVM(OperandV->getType());
+  if (OperandType == TURF_BOOL)
+    OperandV = CastToType(OperandV, TURF_INT, "boolneg");
 
-  OperandType = getKirkTypeFromLLVM(OperandV->getType());
+  OperandType = getTurfTypeFromLLVM(OperandV->getType());
 
   switch (Opcode) {
   case '-':
-    if (OperandType == KIRK_DOUBLE)
+    if (OperandType == TURF_DOUBLE)
       return Builder->CreateFNeg(OperandV);
-    if (OperandType == KIRK_INT)
+    if (OperandType == TURF_INT)
       return Builder->CreateNeg(OperandV);
     SyntaxError(CurLoc, "Unknown unary operand type").raise();
     return nullptr;
@@ -480,7 +480,7 @@ Value *WhileExprAST::codegen() {
   if (!CondV)
     return nullptr;
 
-  CondV = CastToType(CondV, KIRK_BOOL, "loopcond");
+  CondV = CastToType(CondV, TURF_BOOL, "loopcond");
 
   // Conditional Branch: if true -> Body, else -> After
   Builder->CreateCondBr(CondV, LoopBodyBB, AfterBB);

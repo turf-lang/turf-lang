@@ -1,4 +1,4 @@
-// Operator Precedence Test for Kirk Compiler
+// Operator Precedence Test for Turf Compiler
 // Tests all operators with proper precedence and associativity
 
 // Test 1: Basic arithmetic operators

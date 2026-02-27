@@ -130,19 +130,19 @@ public:
 
 class VarDeclExprAST : public ExprAST {
   std::string Name;
-  KirkType Type;
+  TurfType Type;
   std::unique_ptr<ExprAST> InitVal;
   SourceLocation Loc;
 
 public:
-  VarDeclExprAST(SourceLocation Loc, std::string Name, KirkType Type,
+  VarDeclExprAST(SourceLocation Loc, std::string Name, TurfType Type,
                  std::unique_ptr<ExprAST> InitVal)
       : Name(std::move(Name)), Type(Type), InitVal(std::move(InitVal)),
         Loc(Loc) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
-  KirkType getType() const { return Type; }
+  TurfType getType() const { return Type; }
 
   llvm::Value *codegen() override;
 };

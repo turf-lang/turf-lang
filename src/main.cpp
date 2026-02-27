@@ -10,7 +10,7 @@ using namespace llvm;
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::cerr << "Usage: kirk <filename.kirk>\n";
+    std::cerr << "Usage: turf <filename.tr>\n";
     return 1;
   }
 

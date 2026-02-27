@@ -13,16 +13,16 @@
 struct SourceLocation;
 
 // Base Class
-class KirkError {
+class TurfError {
 protected:
   SourceLocation Loc;
   std::string Message;
 
 public:
-  KirkError(SourceLocation Loc, const std::string &Msg)
+  TurfError(SourceLocation Loc, const std::string &Msg)
       : Loc(Loc), Message(Msg) {}
 
-  virtual ~KirkError() = default;
+  virtual ~TurfError() = default;
 
   // The main function to display the error and exit
   void raise() const {
@@ -32,17 +32,17 @@ public:
 };
 
 // Syntax Error : Parser issues
-class SyntaxError : public KirkError {
+class SyntaxError : public TurfError {
 public:
   SyntaxError(SourceLocation Loc, const std::string &Msg)
-      : KirkError(Loc, "Syntax Error: " + Msg) {}
+      : TurfError(Loc, "Syntax Error: " + Msg) {}
 };
 
 // Keyword Error : Misspelled keywords
-class KeywordError : public KirkError {
+class KeywordError : public TurfError {
 public:
   KeywordError(SourceLocation Loc, const std::string &Name)
-      : KirkError(Loc, "unknown keyword '" + Name + "'") {
+      : TurfError(Loc, "unknown keyword '" + Name + "'") {
     
     std::vector<std::string> Candidates;
     for (const auto &pair : Keywords) {
@@ -64,18 +64,18 @@ public:
 };
 
 // Arithmetic Error : Math issues
-class ArithmeticError : public KirkError {
+class ArithmeticError : public TurfError {
 public:
   ArithmeticError(SourceLocation Loc, const std::string &Msg)
-      : KirkError(Loc, "Arithmetic Error: " + Msg) {}
+      : TurfError(Loc, "Arithmetic Error: " + Msg) {}
 };
 
 // Reference Error : Variable lookup issues
-class ReferenceError : public KirkError {
+class ReferenceError : public TurfError {
 public:
   ReferenceError(SourceLocation Loc, const std::string &Name,
                  const std::map<std::string, VarInfo> &SymbolTable)
-      : KirkError(Loc, "") {
+      : TurfError(Loc, "") {
 
     Message = "Unknown variable name: '" + Name + "'";
 

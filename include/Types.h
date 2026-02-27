@@ -1,6 +1,6 @@
 #ifndef TYPES_H
 #define TYPES_H
 
-enum KirkType { KIRK_VOID, KIRK_DOUBLE, KIRK_INT, KIRK_BOOL, KIRK_STRING };
+enum TurfType { TURF_VOID, TURF_DOUBLE, TURF_INT, TURF_BOOL, TURF_STRING };
 
 #endif

@@ -62,19 +62,19 @@ std::unique_ptr<ExprAST> ParseVarDecl();
 std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 
-static KirkType TokenToKirkType(int Tok) {
+static TurfType TokenToTurfType(int Tok) {
   switch (Tok) {
   case TOK_TYPE_INT:
-    return KIRK_INT;
+    return TURF_INT;
   case TOK_TYPE_DOUBLE:
-    return KIRK_DOUBLE;
+    return TURF_DOUBLE;
   case TOK_TYPE_BOOL:
-    return KIRK_BOOL;
+    return TURF_BOOL;
   case TOK_TYPE_STRING:
-    return KIRK_STRING;
+    return TURF_STRING;
   default:
     SyntaxError(CurLoc, "Unknown type").raise();
-    return KIRK_VOID;
+    return TURF_VOID;
   }
 }
 
@@ -458,7 +458,7 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
 
 std::unique_ptr<ExprAST> ParseVarDecl() {
   SourceLocation TypeLoc = CurLoc;
-  KirkType Type = TokenToKirkType(CurTok);
+  TurfType Type = TokenToTurfType(CurTok);
   getNextToken();
 
   bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() && Keywords.at(IdentifierStr) == CurTok;
