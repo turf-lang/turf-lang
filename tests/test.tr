@@ -1,3 +1,7 @@
-int print = 1
-print(print)
+int a = 10;
+
+print(a)
+printline(a)
+
+print("Hello")
 

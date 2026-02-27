@@ -10,6 +10,7 @@
 // Token range for builtin functions: -100 to -199, might be changed later
 enum BuiltinToken {
   TOK_BUILTIN_PRINT = -100,
+  TOK_BUILTIN_PRINTLINE = -101,
 };
 
 // BuiltinDef

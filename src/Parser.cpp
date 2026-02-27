@@ -60,6 +60,8 @@ std::unique_ptr<ExprAST> ParseBlock();
 std::unique_ptr<ExprAST> ParseBuiltinCall(); // generic handler for all builtins
 std::unique_ptr<ExprAST> ParseWhileExpr();
 std::unique_ptr<ExprAST> ParseVarDecl();
+std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc, TurfType Type);
+std::unique_ptr<ExprAST> ParseCastExpr(TurfType DestType, SourceLocation Loc);
 std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 
@@ -289,7 +291,17 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   }
 
   case TOK_TYPE_INT:
-  case TOK_TYPE_DOUBLE:
+  case TOK_TYPE_DOUBLE: {
+    // if the next token is '(' this is a cast call, e.g. int(x)
+    // otherwise it is a variable declaration, e.g. int x = ...
+    TurfType DestType = (CurTok == TOK_TYPE_INT) ? TURF_INT : TURF_DOUBLE;
+    SourceLocation TypeLoc = CurLoc;
+    getNextToken(); // consume the type keyword
+    if (CurTok == '(')
+      return ParseCastExpr(DestType, TypeLoc);
+    return ParseVarDeclBody(TypeLoc, DestType);
+  }
+
   case TOK_TYPE_BOOL:
   case TOK_TYPE_STRING:
     return ParseVarDecl();
@@ -469,11 +481,9 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
   return std::make_unique<WhileExprAST>(std::move(Cond), std::move(Body));
 }
 
-std::unique_ptr<ExprAST> ParseVarDecl() {
-  SourceLocation TypeLoc = CurLoc;
-  TurfType Type = TokenToTurfType(CurTok);
-  getNextToken();
-
+// ParseVarDeclBody - called after the type keyword has already been consumed.
+// CurTok must already be the identifier (variable name) when this is called.
+std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc, TurfType Type) {
   bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() && Keywords.at(IdentifierStr) == CurTok;
   if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
     LogErrorAt(CurLoc, "Expected identifier after type");
@@ -496,4 +506,30 @@ std::unique_ptr<ExprAST> ParseVarDecl() {
 
   return std::make_unique<VarDeclExprAST>(NameLoc, Name, Type,
                                           std::move(Init));
+}
+
+// ParseVarDecl - original entry point (type token is still in CurTok).
+std::unique_ptr<ExprAST> ParseVarDecl() {
+  SourceLocation TypeLoc = CurLoc;
+  TurfType Type = TokenToTurfType(CurTok);
+  getNextToken(); // consume the type keyword
+  return ParseVarDeclBody(TypeLoc, Type);
+}
+
+// ParseCastExpr - called after the type keyword has been consumed and
+// CurTok == '('. Parses int(expr) or double(expr).
+std::unique_ptr<ExprAST> ParseCastExpr(TurfType DestType, SourceLocation Loc) {
+  getNextToken(); // eat '('
+
+  auto Operand = ParseExpression();
+  if (!Operand)
+    return nullptr;
+
+  if (CurTok != ')') {
+    LogErrorAt(CurLoc, "Expected ')' after cast expression");
+    return nullptr;
+  }
+  getNextToken(); // eat ')'
+
+  return std::make_unique<CastExprAST>(Loc, DestType, std::move(Operand));
 }

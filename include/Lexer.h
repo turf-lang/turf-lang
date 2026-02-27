@@ -45,7 +45,9 @@ enum Token {
   TOK_STRING_LITERAL = -18,
   TOK_TYPE_STRING = -19,
   TOK_AND = -20,
-  TOK_OR = -21
+  TOK_OR = -21,
+  TOK_CONV_INT = -22,   // for int(...)
+  TOK_CONV_DOUBLE = -23,   // for double(...)
 };
 
 int gettok();

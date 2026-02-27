@@ -170,4 +170,16 @@ public:
   llvm::Value *codegen() override;
 };
 
+// Explicit type conversion: int(expr) / double(expr)
+class CastExprAST : public ExprAST {
+  TurfType DestType;
+  std::unique_ptr<ExprAST> Operand;
+  SourceLocation Loc;
+public:
+  CastExprAST(SourceLocation Loc, TurfType DestType,
+              std::unique_ptr<ExprAST> Operand)
+      : DestType(DestType), Operand(std::move(Operand)), Loc(Loc) {}
+  llvm::Value *codegen() override;
+};
+
 #endif
