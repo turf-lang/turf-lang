@@ -428,6 +428,76 @@ Value *BlockExprAST::codegen() {
   return LastVal;
 }
 
+Value *CastExprAST::codegen() {
+  Value *Val = Operand->codegen();
+  if (!Val)
+    return nullptr;
+
+  TurfType SrcType = getTurfTypeFromLLVM(Val->getType());
+
+  // Identity - no-op
+  if (SrcType == DestType)
+    return Val;
+
+  // numeric → numeric
+  if (SrcType == TURF_INT && DestType == TURF_DOUBLE)
+    return Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext), "itod");
+
+  if (SrcType == TURF_DOUBLE && DestType == TURF_INT)
+    return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), "dtoi");
+
+  // string → int  : call strtoll(str, nullptr, 10)
+  if (SrcType == TURF_STRING && DestType == TURF_INT) {
+    // Declare strtoll if not already in the module
+    Function *StrtollF = TheModule->getFunction("strtoll");
+    if (!StrtollF) {
+      Type *I8Ptr  = PointerType::get(Type::getInt8Ty(*TheContext), 0);
+      Type *I8PtrPtr = PointerType::get(I8Ptr, 0);
+      FunctionType *FT = FunctionType::get(
+          Type::getInt64Ty(*TheContext),
+          {I8Ptr, I8PtrPtr, Type::getInt32Ty(*TheContext)},
+          /*isVarArg=*/false);
+      StrtollF = Function::Create(FT, Function::ExternalLinkage,
+                                  "strtoll", TheModule.get());
+    }
+    Value *NullPtr = ConstantPointerNull::get(
+        PointerType::get(PointerType::get(Type::getInt8Ty(*TheContext), 0), 0));
+    Value *Base = ConstantInt::get(Type::getInt32Ty(*TheContext), 10);
+    return Builder->CreateCall(StrtollF, {Val, NullPtr, Base}, "strtoll_res");
+  }
+
+  // string → double : call strtod(str, nullptr)
+  if (SrcType == TURF_STRING && DestType == TURF_DOUBLE) {
+    Function *StrtodF = TheModule->getFunction("strtod");
+    if (!StrtodF) {
+      Type *I8Ptr    = PointerType::get(Type::getInt8Ty(*TheContext), 0);
+      Type *I8PtrPtr = PointerType::get(I8Ptr, 0);
+      FunctionType *FT = FunctionType::get(
+          Type::getDoubleTy(*TheContext),
+          {I8Ptr, I8PtrPtr},
+          /*isVarArg=*/false);
+      StrtodF = Function::Create(FT, Function::ExternalLinkage,
+                                 "strtod", TheModule.get());
+    }
+    Value *NullPtr = ConstantPointerNull::get(
+        PointerType::get(PointerType::get(Type::getInt8Ty(*TheContext), 0), 0));
+    return Builder->CreateCall(StrtodF, {Val, NullPtr}, "strtod_res");
+  }
+
+  // Everything else is unsupported
+  const char *SrcName = (SrcType == TURF_INT)    ? "int"
+                       : (SrcType == TURF_DOUBLE) ? "double"
+                       : (SrcType == TURF_BOOL)   ? "bool"
+                       : (SrcType == TURF_STRING)  ? "string"
+                                                   : "unknown";
+  const char *DstName = (DestType == TURF_INT)    ? "int"
+                       : (DestType == TURF_DOUBLE) ? "double"
+                                                   : "unknown";
+  SyntaxError(Loc, std::string("Cannot explicitly cast '") + SrcName +
+                       "' to '" + DstName + "'").raise();
+  return nullptr;
+}
+
 Value *BuiltinCallExprAST::codegen() {
   const BuiltinDef *Def = FindBuiltin(Name);
   if (!Def) {
