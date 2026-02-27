@@ -405,21 +405,9 @@ std::unique_ptr<ExprAST> ParseBlock() {
 // function never needs to change when a new builtin is added.
 std::unique_ptr<ExprAST> ParseBuiltinCall() {
   const BuiltinDef *Def = FindBuiltinByToken(CurTok);
-  SourceLocation KeywordLoc = CurLoc;
   std::string Name = Def->Name;
   getNextToken(); // consume the builtin keyword
-
-  // Allow the builtin name to be used as a plain variable (assignment target).
-  // e.g.  print = 5  rebinds a variable called "print" if the user declared one.
-  // TODO: Not allow reassignment in the next update
-  if (CurTok == TOK_ASSIGN) {
-    getNextToken();
-    auto RHS = ParseExpression();
-    if (!RHS)
-      return nullptr;
-    return std::make_unique<AssignmentExprAST>(KeywordLoc, Name, std::move(RHS));
-  }
-
+  
   if (CurTok != '(') {
     LogErrorAt(CurLoc, "Expected '(' after '" + Name + "'");
     return nullptr;
