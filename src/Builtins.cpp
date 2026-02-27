@@ -37,8 +37,7 @@ const BuiltinDef *FindBuiltinByToken(int Tok) {
 
 void RegisterBuiltins() {
   // print(expr)
-  // Prints one value followed by a newline.
-  // Dispatches to the C runtime's printf based on the LLVM type of its arg.
+  // Prints one value.
   Builtins.push_back(
       {"print", TOK_BUILTIN_PRINT, /*ArgCount=*/1,
        [](std::vector<Value *> &Args, SourceLocation Loc) -> Value * {
@@ -47,7 +46,42 @@ void RegisterBuiltins() {
          Type *Ty = Val->getType();
 
          if (Ty->isDoubleTy()) {
-           Value *Fmt = Builder->CreateGlobalStringPtr("%.2f\n", "printstrdbl");
+           Value *Fmt = Builder->CreateGlobalStringPtr("%g", "printstrdbl");
+           return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
+         }
+
+         if (Ty->isIntegerTy(64)) {
+           Value *Fmt = Builder->CreateGlobalStringPtr("%lld", "printstrint");
+           return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
+         }
+
+         if (Ty->isIntegerTy(1)) {
+           Value *Zext =
+               Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), "booltoint");
+           Value *Fmt = Builder->CreateGlobalStringPtr("%d", "printstrbool");
+           return Builder->CreateCall(PrintfFunc, {Fmt, Zext}, "printcall");
+         }
+
+         if (Ty->isPointerTy()) {
+           Value *Fmt = Builder->CreateGlobalStringPtr("%s", "printstrstr");
+           return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
+         }
+
+         SyntaxError(Loc, "Unsupported type for print").raise();
+         return nullptr;
+       }});
+
+  // printline(expr)
+  // Prints one value followed by a new line.
+  Builtins.push_back(
+      {"printline", TOK_BUILTIN_PRINTLINE, /*ArgCount=*/1,
+       [](std::vector<Value *> &Args, SourceLocation Loc) -> Value * {
+         Value *Val = Args[0];
+         Function *PrintfFunc = TheModule->getFunction("printf");
+         Type *Ty = Val->getType();
+
+         if (Ty->isDoubleTy()) {
+           Value *Fmt = Builder->CreateGlobalStringPtr("%g\n", "printstrdbl");
            return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
          }
 
