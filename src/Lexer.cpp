@@ -17,15 +17,17 @@ bool BoolVal;
 std::string IdentifierStr;
 std::string StringVal;
 
-const std::map<std::string, int> Keywords = {
+std::map<std::string, int> Keywords = {
     {"if", TOK_IF},          {"then", TOK_THEN},
-    {"else", TOK_ELSE},      {"print", TOK_PRINT},
-    {"while", TOK_WHILE},    {"int", TOK_TYPE_INT},
-    {"float", TOK_TYPE_DOUBLE},
+    {"else", TOK_ELSE},      {"while", TOK_WHILE},
+    {"int", TOK_TYPE_INT},   {"float", TOK_TYPE_DOUBLE},
     {"double", TOK_TYPE_DOUBLE},
     {"bool", TOK_TYPE_BOOL}, {"true", TOK_BOOL_LITERAL},
     {"false", TOK_BOOL_LITERAL},
     {"string", TOK_TYPE_STRING}};
+
+// Note: builtin function names (e.g. "print") are inserted here by
+// RegisterBuiltins() at startup. See src/Builtins.cpp.
 
 void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
   std::cerr << "Error at " << Loc.Line << ":" << Loc.Col << ": " << Msg << "\n";

@@ -1,6 +1,7 @@
 #include "Codegen.h"
 #include "AST.h"
 #include "Algorithms.h"
+#include "Builtins.h"
 #include "Errors.h"
 #include "Lexer.h"
 #include "Types.h"
@@ -427,42 +428,24 @@ Value *BlockExprAST::codegen() {
   return LastVal;
 }
 
-Value *PrintExprAST::codegen() {
-  Value *Val = Expr->codegen();
-  if (!Val)
+Value *BuiltinCallExprAST::codegen() {
+  const BuiltinDef *Def = FindBuiltin(Name);
+  if (!Def) {
+    SyntaxError(CurLoc, "Unknown builtin function: '" + Name + "'").raise();
     return nullptr;
-
-  Function *PrintfFunc = TheModule->getFunction("printf");
-  Type *Ty = Val->getType();
-
-  if (Ty->isDoubleTy()) {
-    Value *FormatStr =
-        Builder->CreateGlobalStringPtr("%.2f\n", "printstrdbl");
-    return Builder->CreateCall(PrintfFunc, {FormatStr, Val}, "printcall");
   }
 
-  if (Ty->isIntegerTy(64)) {
-    Value *FormatStr =
-        Builder->CreateGlobalStringPtr("%lld\n", "printstrint");
-    return Builder->CreateCall(PrintfFunc, {FormatStr, Val}, "printcall");
+  // Evaluate every argument expression first
+  std::vector<Value *> ArgVals;
+  for (auto &Arg : Args) {
+    Value *V = Arg->codegen();
+    if (!V)
+      return nullptr;
+    ArgVals.push_back(V);
   }
 
-  if (Ty->isIntegerTy(1)) {
-    Value *Zext = Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext),
-                                      "booltoint");
-    Value *FormatStr =
-        Builder->CreateGlobalStringPtr("%d\n", "printstrbool");
-    return Builder->CreateCall(PrintfFunc, {FormatStr, Zext}, "printcall");
-  }
-
-  if (Ty->isPointerTy()) {
-    Value *FormatStr =
-        Builder->CreateGlobalStringPtr("%s\n", "printstrstr");
-    return Builder->CreateCall(PrintfFunc, {FormatStr, Val}, "printcall");
-  }
-
-  SyntaxError(CurLoc, "Unsupported type for print").raise();
-  return nullptr;
+  // Dispatch to the lambda defined in Builtins.cpp
+  return Def->Codegen(ArgVals, CurLoc);
 }
 
 Value *WhileExprAST::codegen() {

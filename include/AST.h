@@ -110,13 +110,19 @@ public:
   llvm::Value *codegen() override;
 };
 
-class PrintExprAST : public ExprAST {
-  std::unique_ptr<ExprAST> Expr;
+// Generic node for any builtin function call, e.g. print(x).
+class BuiltinCallExprAST : public ExprAST {
+  std::string Name;
+  std::vector<std::unique_ptr<ExprAST>> Args;
 
 public:
-  PrintExprAST(std::unique_ptr<ExprAST> Expr) : Expr(std::move(Expr)) {}
+  BuiltinCallExprAST(std::string Name,
+                     std::vector<std::unique_ptr<ExprAST>> Args)
+      : Name(std::move(Name)), Args(std::move(Args)) {}
+
   llvm::Value *codegen() override;
 };
+
 
 class WhileExprAST : public ExprAST {
   std::unique_ptr<ExprAST> Cond, Body;

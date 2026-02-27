@@ -1,5 +1,6 @@
 #include "Parser.h"
 #include "AST.h"
+#include "Builtins.h"
 #include "Errors.h"
 #include "Lexer.h"
 #include <map>
@@ -56,7 +57,7 @@ static int GetTokPrecedence() {
 std::unique_ptr<ExprAST> ParseExpression();
 std::unique_ptr<ExprAST> ParseUnary();
 std::unique_ptr<ExprAST> ParseBlock();
-std::unique_ptr<ExprAST> ParsePrintExpr();
+std::unique_ptr<ExprAST> ParseBuiltinCall(); // generic handler for all builtins
 std::unique_ptr<ExprAST> ParseWhileExpr();
 std::unique_ptr<ExprAST> ParseVarDecl();
 std::unique_ptr<ExprAST> ParseBoolExpr();
@@ -215,6 +216,11 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
 static std::unique_ptr<ExprAST> ParsePrimary() {
   switch (CurTok) {
   default:
+    // Check if the current token belongs to a registered builtin (e.g. print).
+    // This branch never needs to change when new builtins are added.
+    if (FindBuiltinByToken(CurTok))
+      return ParseBuiltinCall();
+
     LogErrorAt(CurLoc, "unknown token when expecting an expression");
     return nullptr;
 
@@ -263,9 +269,6 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
 
   case TOK_IF:
     return ParseIfExpr();
-
-  case TOK_PRINT:
-    return ParsePrintExpr();
 
   case TOK_WHILE:
     return ParseWhileExpr();
@@ -396,35 +399,57 @@ std::unique_ptr<ExprAST> ParseBlock() {
   return std::make_unique<BlockExprAST>(std::move(Exprs));
 }
 
-std::unique_ptr<ExprAST> ParsePrintExpr() {
+// ParseBuiltinCall -  called when CurTok is the token of a registered builtin.
+// Parses:  builtinName ( arg1, arg2, ... )
+// The number of expected arguments is taken from the BuiltinDef, so this
+// function never needs to change when a new builtin is added.
+std::unique_ptr<ExprAST> ParseBuiltinCall() {
+  const BuiltinDef *Def = FindBuiltinByToken(CurTok);
   SourceLocation KeywordLoc = CurLoc;
-  std::string IdName = IdentifierStr;
-  getNextToken();
+  std::string Name = Def->Name;
+  getNextToken(); // consume the builtin keyword
 
+  // Allow the builtin name to be used as a plain variable (assignment target).
+  // e.g.  print = 5  rebinds a variable called "print" if the user declared one.
+  // TODO: Not allow reassignment in the next update
   if (CurTok == TOK_ASSIGN) {
     getNextToken();
     auto RHS = ParseExpression();
-    if (!RHS) return nullptr;
-    return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+    if (!RHS)
+      return nullptr;
+    return std::make_unique<AssignmentExprAST>(KeywordLoc, Name, std::move(RHS));
   }
 
   if (CurTok != '(') {
-    LogErrorAt(CurLoc, "Expected '(' after print");
+    LogErrorAt(CurLoc, "Expected '(' after '" + Name + "'");
     return nullptr;
   }
-  getNextToken();
+  getNextToken(); // eat '('
 
-  auto Expr = ParseExpression();
-  if (!Expr)
-    return nullptr;
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  for (int i = 0; i < Def->ArgCount; ++i) {
+    auto Arg = ParseExpression();
+    if (!Arg)
+      return nullptr;
+    Args.push_back(std::move(Arg));
+
+    // Expect a comma between arguments (but not after the last one)
+    if (i < Def->ArgCount - 1) {
+      if (CurTok != ',') {
+        LogErrorAt(CurLoc, "Expected ',' between arguments to '" + Name + "'");
+        return nullptr;
+      }
+      getNextToken(); // eat ','
+    }
+  }
 
   if (CurTok != ')') {
-    LogErrorAt(CurLoc, "Expected ')' after print argument");
+    LogErrorAt(CurLoc, "Expected ')' after argument to '" + Name + "'");
     return nullptr;
   }
-  getNextToken();
+  getNextToken(); // eat ')'
 
-  return std::make_unique<PrintExprAST>(std::move(Expr));
+  return std::make_unique<BuiltinCallExprAST>(Name, std::move(Args));
 }
 
 std::unique_ptr<ExprAST> ParseWhileExpr() {
