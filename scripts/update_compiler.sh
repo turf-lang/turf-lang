@@ -13,14 +13,14 @@ if ! command -v llvm-config &> /dev/null; then
     exit 1
 fi
 
-echo -e "${GREEN}[1 / 2]${RESET} ${BOLD}Updating the Kirk Compiler...${RESET}"
-echo -e "        ${BLUE}Sources:${RESET} src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Algorithms.cpp"
+echo -e "${GREEN}[1 / 2]${RESET} ${BOLD}Updating the Turf Compiler...${RESET}"
+echo -e "        ${BLUE}Sources:${RESET} src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp"
 
-clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Algorithms.cpp -Iinclude `llvm-config --cxxflags --ldflags --system-libs --libs core` -o kirk
+clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp -Iinclude `llvm-config --cxxflags --ldflags --system-libs --libs core` -o turf
 
 echo -e "${GREEN}[2 / 2]${RESET} ${BOLD}Verifying build...${RESET}"
 
-if [ -f "./kirk" ]; then
+if [ -f "./turf" ]; then
     echo -e "${GREEN}Success!${RESET} The new compiler binary is now in effect."
 else
     echo "Error: Build failed to produce an executable."
