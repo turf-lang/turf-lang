@@ -54,6 +54,7 @@ enum Token {
 };
 
 int gettok();
+void resetLexer();
 void LogErrorAt(SourceLocation Loc, const std::string &Msg);
 
 #endif

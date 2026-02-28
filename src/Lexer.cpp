@@ -9,6 +9,7 @@ std::vector<std::string> SourceLines;
 SourceLocation CurLoc = {1, 0};
 int CurLine = 1;
 int CurCol = 0;
+static int LastChar = ' ';
 
 std::ifstream SourceFile;
 double NumVal;
@@ -46,8 +47,14 @@ void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
   }
 }
 
+void resetLexer() {
+  LastChar = ' ';
+  CurLine = 1;
+  CurCol = 0;
+  CurLoc = {1, 0};
+}
+
 int gettok() {
-  static int LastChar = ' ';
 
   while (isspace(LastChar)) {
     // Handle newlines to track line numbers

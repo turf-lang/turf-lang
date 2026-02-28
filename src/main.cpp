@@ -90,6 +90,10 @@ int main(int argc, char **argv) {
   // Main pass: re-enter the entry block and codegen everything.
   Builder->SetInsertPoint(Entry);
 
+  // pre-pass 1 ends
+  // Reset the lexer's internal state so that it starts from the beginning of the file
+  resetLexer();
+
   // Bootstrap the lexer for the main pass
   getNextToken();
 
