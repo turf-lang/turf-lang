@@ -148,15 +148,15 @@ jobs:
         run: ./turf.exe --emit-llvm tests/test.tr -o test_output
 
       - name: Package
-        shell: msys2 {0}
+        shell: pwsh
         run: |
-          VERSION=${GITHUB_REF_NAME}
-          DIR="turf-${VERSION}-windows-x86_64"
-          mkdir -p "${DIR}/scripts"
-          cp turf.exe "${DIR}/"
-          cp scripts/compile_and_run.sh "${DIR}/scripts/"
-          cp README.md "${DIR}/"
-          7z a "${DIR}.zip" "${DIR}"
+          $version = $env:GITHUB_REF_NAME
+          $dir = "turf-${version}-windows-x86_64"
+          New-Item -ItemType Directory -Force "$dir\scripts" | Out-Null
+          Copy-Item turf.exe "$dir\"
+          Copy-Item scripts\compile_and_run.sh "$dir\scripts\"
+          Copy-Item README.md "$dir\"
+          7z a "${dir}.zip" "$dir"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
