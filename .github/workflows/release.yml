@@ -130,15 +130,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install LLVM
-        shell: pwsh
-        run: choco install llvm --yes --no-progress
+        uses: KyleMayes/install-llvm-action@v2
+        with:
+          version: "18"
 
       - name: Build Turf
         shell: pwsh
         run: |
-          $llvm    = "C:\Program Files\LLVM\bin"
-          $flags   = (& "$llvm\llvm-config.exe" --cxxflags --ldflags --system-libs --libs core native).Split()
-          & "$llvm\clang++.exe" src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp `
+          $flags = (llvm-config --cxxflags --ldflags --system-libs --libs core native).Split()
+          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp `
             -Iinclude @flags -o turf.exe
 
       - name: Verify build
