@@ -137,8 +137,9 @@ jobs:
       - name: Build Turf
         shell: pwsh
         run: |
-          $flags = (llvm-config --cxxflags --ldflags --system-libs --libs core native).Split()
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp `
+          $bin   = "$env:LLVM_PATH\bin"
+          $flags = (& "$bin\llvm-config" --cxxflags --ldflags --system-libs --libs core native).Split()
+          & "$bin\clang++" src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp `
             -Iinclude @flags -o turf.exe
 
       - name: Verify build
