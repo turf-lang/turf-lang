@@ -1,0 +1,42 @@
+// assignment_unary_test.tr
+// Tests the new compound assignments and unary operators
+
+int a = 10
+a += 5
+printline(a) // 15
+
+a -= 3
+printline(a) // 12
+
+a *= 2
+printline(a) // 24
+
+a /= 3
+printline(a) // 8
+
+a %= 5
+printline(a) // 3
+
+a++
+printline(a) // 4
+
+a--
+printline(a) // 3
+
+// Prefix tests
+++a
+printline(a) // 4
+
+--a
+printline(a) // 3
+
+// Test float assignment operators
+double f = 5.0
+f += 2.5
+printline(f) // 7.5
+
+f *= 2.0
+printline(f) // 15.0
+
+f /= 3.0
+printline(f) // 5.0
