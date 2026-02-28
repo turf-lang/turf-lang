@@ -16,7 +16,7 @@ fi
 echo -e "${GREEN}[1 / 2]${RESET} ${BOLD}Updating the Turf Compiler...${RESET}"
 echo -e "        ${BLUE}Sources:${RESET} src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp"
 
-clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp -Iinclude `llvm-config --cxxflags --ldflags --system-libs --libs core` -o turf
+clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp -Iinclude `llvm-config --cxxflags --ldflags --system-libs --libs core native` -o turf
 
 echo -e "${GREEN}[2 / 2]${RESET} ${BOLD}Verifying build...${RESET}"
 

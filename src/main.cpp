@@ -3,27 +3,150 @@
 #include "Lexer.h"
 #include "Parser.h"
 #include "Types.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetOptions.h"
+#include "llvm/Config/llvm-config.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 
 using namespace llvm;
 
-int main(int argc, char **argv) {
-  if (argc < 2) {
-    std::cerr << "Usage: turf <filename.tr>\n";
+// CLI helpers
+struct CompilerOptions {
+  std::string InputFile;
+  std::string OutputName = "program"; // default output binary name
+  bool EmitLLVM = false;              // --emit-llvm: write .ll instead
+};
+
+static CompilerOptions parseArgs(int argc, char **argv) {
+  CompilerOptions opts;
+
+  for (int i = 1; i < argc; ++i) {
+    std::string arg = argv[i];
+
+    if (arg == "--emit-llvm") {
+      opts.EmitLLVM = true;
+    } else if (arg == "-o" && i + 1 < argc) {
+      opts.OutputName = argv[++i];
+    } else if (arg[0] == '-') {
+      std::cerr << "Unknown option: " << arg << "\n";
+      std::exit(1);
+    } else {
+      opts.InputFile = arg;
+    }
+  }
+
+  if (opts.InputFile.empty()) {
+    std::cerr << "Usage: turf <filename.tr> [-o output] [--emit-llvm]\n";
+    std::exit(1);
+  }
+
+  return opts;
+}
+
+// Emit native object file via LLVM TargetMachine
+static int emitObjectFile(Module &M, const std::string &ObjFilename) {
+  // Initialise all targets so we can produce code for the host machine.
+  InitializeAllTargetInfos();
+  InitializeAllTargets();
+  InitializeAllTargetMCs();
+  InitializeAllAsmParsers();
+  InitializeAllAsmPrinters();
+
+  Triple TargetTriple(sys::getDefaultTargetTriple());
+
+  // LLVM 20+ changed setTargetTriple to accept Triple; older versions take StringRef.
+  // arch is so much better :((
+#if LLVM_VERSION_MAJOR >= 20
+  M.setTargetTriple(TargetTriple);
+#else
+  M.setTargetTriple(TargetTriple.str());
+#endif
+
+  std::string Error;
+  auto Target = TargetRegistry::lookupTarget(TargetTriple.str(), Error);
+  if (!Target) {
+    std::cerr << "Error: " << Error << "\n";
     return 1;
   }
 
-  SourceFile.open(argv[1]);
+  auto CPU = "generic";
+  auto Features = "";
+  TargetOptions opt;
+
+  // LLVM 20+ also changed createTargetMachine to accept Triple.
+#if LLVM_VERSION_MAJOR >= 20
+  auto TM = Target->createTargetMachine(TargetTriple, CPU, Features, opt,
+                                        Reloc::PIC_);
+#else
+  auto TM = Target->createTargetMachine(TargetTriple.str(), CPU, Features, opt,
+                                        Reloc::PIC_);
+#endif
+
+  M.setDataLayout(TM->createDataLayout());
+
+  std::error_code EC;
+  raw_fd_ostream dest(ObjFilename, EC, sys::fs::OF_None);
+  if (EC) {
+    std::cerr << "Could not open file: " << EC.message() << "\n";
+    return 1;
+  }
+
+  legacy::PassManager pass;
+  auto FileType = CodeGenFileType::ObjectFile;
+  if (TM->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
+    std::cerr << "Target machine can't emit a file of this type\n";
+    return 1;
+  }
+
+  pass.run(M);
+  dest.flush();
+  return 0;
+}
+
+// Invoke system linker
+static int linkObject(const std::string &ObjFile,
+                      const std::string &OutputName) {
+  std::string Cmd;
+
+#ifdef _WIN32
+  // On Windows, try gcc (MinGW) first
+  Cmd = "gcc \"" + ObjFile + "\" -o \"" + OutputName + ".exe\" -lm";
+#else
+  // On Unix, use cc (always available on dev machines).
+  Cmd = "cc \"" + ObjFile + "\" -o \"" + OutputName + "\" -lm";
+#endif
+
+  int Ret = std::system(Cmd.c_str());
+  if (Ret != 0) {
+    std::cerr << "Linking failed (exit code " << Ret << ")\n";
+    std::cerr << "Command was: " << Cmd << "\n";
+    return 1;
+  }
+  return 0;
+}
+
+// main
+int main(int argc, char **argv) {
+  auto opts = parseArgs(argc, argv);
+
+  SourceFile.open(opts.InputFile);
   if (!SourceFile.is_open()) {
-    std::cerr << "Error: Could not open file " << argv[1] << "\n";
+    std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
     return 1;
   }
 
   // Read file into memory for error printing
-  std::ifstream File(argv[1]);
+  std::ifstream File(opts.InputFile);
   std::string Line;
   while (std::getline(File, Line)) {
     SourceLines.push_back(Line);
@@ -52,11 +175,11 @@ int main(int argc, char **argv) {
   // FuncDefExprAST nodes, which registers the LLVM prototype on first
   // codegen call (before the body exists).
   {
-    std::ifstream PrePassFile(argv[1]);
+    std::ifstream PrePassFile(opts.InputFile);
     if (PrePassFile.is_open()) {
       // Swap the global SourceFile for the pre-pass stream
       SourceFile.close();
-      SourceFile.open(argv[1]);
+      SourceFile.open(opts.InputFile);
       CurLoc = {1, 0};
 
       // Reset the lexer token stream
@@ -81,7 +204,7 @@ int main(int argc, char **argv) {
 
       // Re-open for the main pass
       SourceFile.close();
-      SourceFile.open(argv[1]);
+      SourceFile.open(opts.InputFile);
       CurLoc = {1, 0};
       CurTok = 0;
     }
@@ -130,13 +253,39 @@ int main(int argc, char **argv) {
   // Verify and Print
   verifyFunction(*TheFunction);
 
-  std::error_code EC;
-  raw_fd_ostream OutFile("output.ll", EC);
-  if (!EC) {
-    TheModule->print(OutFile, nullptr);
-    std::cout << "Successfully compiled to output.ll\n";
+  // Output stage: either emit LLVM IR text or compile to native binary
+  if (opts.EmitLLVM) {
+    // Legacy mode: write human-readable .ll file
+    std::string LLFile = opts.OutputName + ".ll";
+    std::error_code EC;
+    raw_fd_ostream OutFile(LLFile, EC);
+    if (!EC) {
+      TheModule->print(OutFile, nullptr);
+      std::cout << "Successfully compiled to " << LLFile << "\n";
+    } else {
+      std::cerr << "Error writing file: " << EC.message() << "\n";
+      return 1;
+    }
   } else {
-    std::cerr << "Error writing file: " << EC.message() << "\n";
+    // New default: emit native object code and link
+    std::string ObjFile = opts.OutputName + ".o";
+
+    if (emitObjectFile(*TheModule, ObjFile) != 0)
+      return 1;
+
+    std::cout << "Compiled to " << ObjFile << "\n";
+
+    if (linkObject(ObjFile, opts.OutputName) != 0)
+      return 1;
+
+    // Clean up intermediate object file
+    std::remove(ObjFile.c_str());
+
+#ifdef _WIN32
+    std::cout << "Successfully compiled to " << opts.OutputName << ".exe\n";
+#else
+    std::cout << "Successfully compiled to " << opts.OutputName << "\n";
+#endif
   }
 
   return 0;
