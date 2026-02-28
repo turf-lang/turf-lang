@@ -51,6 +51,15 @@ enum Token {
   TOK_TYPE_VOID = -24,
   TOK_RETURN = -25,
   TOK_FN = -26,
+  TOK_BREAK = -27,
+  TOK_CONTINUE = -28,
+  TOK_PLUS_ASSIGN = -29,
+  TOK_MINUS_ASSIGN = -30,
+  TOK_MUL_ASSIGN = -31,
+  TOK_DIV_ASSIGN = -32,
+  TOK_MOD_ASSIGN = -33,
+  TOK_PLUS_PLUS = -34,
+  TOK_MINUS_MINUS = -35,
 };
 
 int gettok();

@@ -122,7 +122,9 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
 
   getNextToken();
 
-  if (CurTok == TOK_ASSIGN) {
+  if (CurTok == TOK_ASSIGN || CurTok == TOK_PLUS_ASSIGN || CurTok == TOK_MINUS_ASSIGN ||
+      CurTok == TOK_MUL_ASSIGN || CurTok == TOK_DIV_ASSIGN || CurTok == TOK_MOD_ASSIGN) {
+    int AssignOp = CurTok;
     getNextToken();
 
     auto RHS = ParseExpression();
@@ -130,9 +132,33 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
       return nullptr;
     }
 
+    if (AssignOp != TOK_ASSIGN) {
+      char Op = '+';
+      if (AssignOp == TOK_MINUS_ASSIGN) Op = '-';
+      else if (AssignOp == TOK_MUL_ASSIGN) Op = '*';
+      else if (AssignOp == TOK_DIV_ASSIGN) Op = '/';
+      else if (AssignOp == TOK_MOD_ASSIGN) Op = '%';
+
+      auto LHSVar = std::make_unique<VariableExprAST>(VarLoc, IdName);
+      RHS = std::make_unique<BinaryExprAST>(Op, std::move(LHSVar), std::move(RHS));
+    }
+
     // Variable Assignmnent
     return std::make_unique<AssignmentExprAST>(VarLoc, IdName,
                                                std::move(RHS));
+  }
+
+  // Handle Postfix ++ and --
+  if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
+    int OpType = CurTok;
+    getNextToken();
+
+    char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
+    auto LHSVar = std::make_unique<VariableExprAST>(VarLoc, IdName);
+    auto OneNum = std::make_unique<NumberExprAST>(1LL);
+    auto RHS = std::make_unique<BinaryExprAST>(Op, std::move(LHSVar), std::move(OneNum));
+
+    return std::make_unique<AssignmentExprAST>(VarLoc, IdName, std::move(RHS));
   }
 
   // User-defined function call: name(...)
@@ -341,6 +367,31 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
 
   case TOK_RETURN:
     return ParseReturnExpr();
+  case TOK_BREAK: {
+    SourceLocation KeywordLoc = CurLoc;
+    std::string IdName = IdentifierStr;
+    getNextToken();
+    if (CurTok == TOK_ASSIGN) {
+      getNextToken();
+      auto RHS = ParseExpression();
+      if (!RHS) return nullptr;
+      return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+    }
+    return std::make_unique<BreakExprAST>(KeywordLoc);
+  }
+
+  case TOK_CONTINUE: {
+    SourceLocation KeywordLoc = CurLoc;
+    std::string IdName = IdentifierStr;
+    getNextToken();
+    if (CurTok == TOK_ASSIGN) {
+      getNextToken();
+      auto RHS = ParseExpression();
+      if (!RHS) return nullptr;
+      return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+    }
+    return std::make_unique<ContinueExprAST>(KeywordLoc);
+  }
   }
 }
 
@@ -403,6 +454,27 @@ std::unique_ptr<ExprAST> Parse() {
 }
 
 std::unique_ptr<ExprAST> ParseUnary() {
+  if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
+    int OpType = CurTok;
+    SourceLocation Loc = CurLoc;
+    getNextToken();
+
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(Loc, "Expected identifier after prefix ++ or --");
+      return nullptr;
+    }
+
+    std::string IdName = IdentifierStr;
+    getNextToken();
+
+    char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
+    auto LHSVar = std::make_unique<VariableExprAST>(Loc, IdName);
+    auto OneNum = std::make_unique<NumberExprAST>(1LL);
+    auto RHS = std::make_unique<BinaryExprAST>(Op, std::move(LHSVar), std::move(OneNum));
+
+    return std::make_unique<AssignmentExprAST>(Loc, IdName, std::move(RHS));
+  }
+
   // If the current token is not an operator that handles unary (like '-'),
   // then it must be a primary expression.
   if (CurTok != '-')
