@@ -1,0 +1,13 @@
+// Test: Early return in then branch
+// Expected: Should compile - else branch provides return path
+
+fn int test_early_return(int x) {
+    if (x < 0) {
+        return -x
+    } else {
+        return x
+    }
+}
+
+// Top-level call
+test_early_return(-5)

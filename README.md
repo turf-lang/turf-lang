@@ -66,6 +66,12 @@ Once extracted, you can compile and run Turf programs directly:
   - **Shadowing warnings**: Warns when inner scope variables shadow outer scope names
   - **Unreachable code detection**: Detects declarations after return statements
   - **Scope-aware error messages**: Error messages include declaration locations for better context
+- **Control Flow Graph (Phase 3):** Structural flow analysis for enhanced diagnostics:
+  - **Basic block construction**: Maximal sequences with single entry/exit points
+  - **Reachability analysis**: Identifies unreachable code blocks
+  - **Return path validation**: Ensures all code paths return values when required
+  - **Dead branch detection**: Finds conditional branches that never execute
+  - **Flow terminators**: Tracks return, break, and continue statements
 
 ## Build from Source (Manual)
 

@@ -159,4 +159,46 @@ public:
       : TurfError(Loc, "Unreachable " + What + " after return statement") {}
 };
 
+// Control Flow Errors
+class MissingReturnError : public TurfError {
+public:
+  MissingReturnError(const std::string &FunctionName)
+      : TurfError(SourceLocation{0, 0}, 
+                  "Function '" + FunctionName + 
+                  "' may not return a value on all paths") {}
+};
+
+class UnreachableBlockWarning : public TurfError {
+public:
+  UnreachableBlockWarning(const std::string &FunctionName, 
+                          const std::string &BlockName)
+      : TurfError(SourceLocation{0, 0},
+                  "Unreachable code in block '" + BlockName + 
+                  "' of function '" + FunctionName + "'") {
+    Message = "warning: " + Message;
+  }
+  
+  void warn() const {
+    std::cerr << Message << "\n";
+  }
+};
+
+class DeadBranchWarning : public TurfError {
+public:
+  DeadBranchWarning(SourceLocation Loc, const std::string &FunctionName)
+      : TurfError(Loc, "Dead branch in function '" + FunctionName + "'") {
+    Message = "warning: " + Message;
+  }
+  
+  void warn() const {
+    LogErrorAt(Loc, Message);
+  }
+};
+
+class StatementAfterTerminatorError : public TurfError {
+public:
+  StatementAfterTerminatorError(SourceLocation Loc, const std::string &Terminator)
+      : TurfError(Loc, "Statement after " + Terminator + " will never be executed") {}
+};
+
 #endif

@@ -1,0 +1,25 @@
+// Test: Loop with multiple exit points
+// Expected: Should compile successfully
+
+fn int test_loop_exits(int n) {
+    int i = 0
+    int sum = 0
+    
+    while (i < n) {
+        if (sum > 100) {
+            break
+        } else {
+            if (i == 10) {
+                return sum
+            } else {
+                sum = sum + i
+                i = i + 1
+            }
+        }
+    }
+    
+    return sum
+}
+
+// Top-level call
+test_loop_exits(20)

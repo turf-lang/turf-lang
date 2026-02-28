@@ -2,6 +2,7 @@
 #include "AST.h"
 #include "Algorithms.h"
 #include "Builtins.h"
+#include "CFG.h"
 #include "Errors.h"
 #include "Lexer.h"
 #include "SymbolTable.h"
@@ -414,7 +415,10 @@ Value *IfExprAST::codegen() {
   if (!ThenV)
     return nullptr;
 
-  Builder->CreateBr(MergeBB);
+  // Only branch to merge if block doesn't already have a terminator (e.g., return)
+  if (!Builder->GetInsertBlock()->getTerminator()) {
+    Builder->CreateBr(MergeBB);
+  }
   ThenBB = Builder->GetInsertBlock();
 
   TheFunction->insert(TheFunction->end(), ElseBB);
@@ -424,11 +428,30 @@ Value *IfExprAST::codegen() {
   if (!ElseV)
     return nullptr;
 
-  Builder->CreateBr(MergeBB);
+  // Only branch to merge if block doesn't already have a terminator (e.g., return)
+  if (!Builder->GetInsertBlock()->getTerminator()) {
+    Builder->CreateBr(MergeBB);
+  }
   ElseBB = Builder->GetInsertBlock();
 
   TheFunction->insert(TheFunction->end(), MergeBB);
   Builder->SetInsertPoint(MergeBB);
+
+  // Check if both branches terminated - if so, the merge block is unreachable
+  bool ThenTerminated = ThenBB->getTerminator() != nullptr;
+  bool ElseTerminated = ElseBB->getTerminator() != nullptr;
+  
+  if (ThenTerminated && ElseTerminated) {
+    // Both branches terminated - merge block is unreachable
+    // Add an unreachable instruction to properly terminate this dead block
+    Builder->CreateUnreachable();
+    // Return a dummy value (this code won't be executed)
+    TurfType ResultType = getCommonType(
+      getTurfTypeFromLLVM(ThenV->getType()),
+      getTurfTypeFromLLVM(ElseV->getType())
+    );
+    return Constant::getNullValue(getLLVMType(ResultType));
+  }
 
   TurfType ThenType = getTurfTypeFromLLVM(ThenV->getType());
   TurfType ElseType = getTurfTypeFromLLVM(ElseV->getType());
@@ -734,6 +757,18 @@ Value *FuncDefExprAST::codegen() {
 
   // Codegen the body
   Body->codegen();
+
+  // Build and analyze CFG for flow diagnostics
+  if (Body) {
+    CFGBuilder Builder;
+    auto FuncCFG = Builder.buildCFG(Name, Body.get());
+    
+    // Run flow analysis and report diagnostics
+    FuncCFG->reportFlowDiagnostics();
+    
+    // Store CFG for later use (optional)
+    GlobalCFGs.push_back(std::move(FuncCFG));
+  }
 
   // Emit a return if the block has no terminator yet.
   // IMPORTANT: ReturnExprAST::codegen() leaves the builder pointing at a
