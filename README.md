@@ -22,7 +22,7 @@ Turf is an experimental programming language and compiler written in C++. The go
 - **Print:** Built-in `print()` function for output (supports int, double, bool, and string types).
 - **Memory Management:** Automatic stack allocation using LLVM `alloca`, `store`, and `load`.
 - **LLVM Backend:** Compiles source code directly to optimized LLVM IR (`output.ll`).
-- **Smart Compiler (Phase 1):** Support for smart compiler error enhancements, where it suggests you what changes to make (using Levenshtein distance for variable name suggestions).
+- **Smart Compiler (Phase 1):** Support for smart compiler error enhancements, where it suggests you what changes to make (using Damerau-Levenshtein distance for variable name and keyword suggestions, including transposition typo detection).
 
 ## Build and Run
 

@@ -2,6 +2,7 @@
 #define ERRORS_H
 
 #include "Algorithms.h"
+#include "Builtins.h"
 #include "Codegen.h"
 #include "Lexer.h"
 #include "llvm/IR/Instructions.h"
@@ -82,6 +83,7 @@ public:
     if (Name.length() > 2) {
       std::vector<std::string> Candidates;
 
+      // Check variables in symbol table
       for (const auto &pair : SymbolTable) {
         const std::string &KnownVar = pair.first;
         if (KnownVar == Name)
@@ -89,6 +91,16 @@ public:
 
         if (getLevenshteinDistance(Name, KnownVar) <= 2) {
           Candidates.push_back(KnownVar);
+        }
+      }
+
+      // Check built-in functions
+      for (const auto &builtin : Builtins) {
+        if (builtin.Name == Name)
+          continue;
+
+        if (getLevenshteinDistance(Name, builtin.Name) <= 2) {
+          Candidates.push_back(builtin.Name);
         }
       }
 
