@@ -28,7 +28,9 @@ std::map<std::string, int> Keywords = {
     {"string", TOK_TYPE_STRING},
     {"void", TOK_TYPE_VOID},
     {"return", TOK_RETURN},
-    {"fn", TOK_FN}};
+    {"fn", TOK_FN},
+    {"break", TOK_BREAK},
+    {"continue", TOK_CONTINUE}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
@@ -232,6 +234,70 @@ int gettok() {
     return '|';
   }
 
+  if (LastChar == '+') {
+    LastChar = SourceFile.get();
+    CurCol++;
+
+    if (LastChar == '+') {
+      LastChar = SourceFile.get();
+      CurCol++;
+      return TOK_PLUS_PLUS;
+    }
+
+    if (LastChar == '=') {
+      LastChar = SourceFile.get();
+      CurCol++;
+      return TOK_PLUS_ASSIGN;
+    }
+
+    return '+';
+  }
+
+  if (LastChar == '-') {
+    LastChar = SourceFile.get();
+    CurCol++;
+
+    if (LastChar == '-') {
+      LastChar = SourceFile.get();
+      CurCol++;
+      return TOK_MINUS_MINUS;
+    }
+
+    if (LastChar == '=') {
+      LastChar = SourceFile.get();
+      CurCol++;
+      return TOK_MINUS_ASSIGN;
+    }
+
+    return '-';
+  }
+
+  if (LastChar == '*') {
+    LastChar = SourceFile.get();
+    CurCol++;
+
+    if (LastChar == '=') {
+      LastChar = SourceFile.get();
+      CurCol++;
+      return TOK_MUL_ASSIGN;
+    }
+
+    return '*';
+  }
+
+  if (LastChar == '%') {
+    LastChar = SourceFile.get();
+    CurCol++;
+
+    if (LastChar == '=') {
+      LastChar = SourceFile.get();
+      CurCol++;
+      return TOK_MOD_ASSIGN;
+    }
+
+    return '%';
+  }
+
   if (LastChar == '/') {
     if (SourceFile.peek() == '/') {
       do {
@@ -241,6 +307,12 @@ int gettok() {
 
       if (LastChar != EOF)
         return gettok();
+    } else if (SourceFile.peek() == '=') {
+      LastChar = SourceFile.get();
+      CurCol++;
+      LastChar = SourceFile.get();
+      CurCol++;
+      return TOK_DIV_ASSIGN;
     }
   }
 

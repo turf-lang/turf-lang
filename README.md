@@ -2,26 +2,63 @@
 
 Turf is an experimental programming language and compiler written in C++. The goal is simple: fast compilation with helpful, human-friendly error messages. Instead of plain errors, Turf explains what went wrong and suggests fixes.
 
-- The project is in early development.
-- Current focus is the frontend: lexer, parser, and diagnostics.
-- LLVM is used for code generation.
+Turf has matured beyond its early phases and is now a fully programmable language. It has been packaged into a standalone cross-platform compiler that handles parsing, code generation, and producing the binary seamlessly.
 
-## Features (Implemented)
+## Installation
 
-- **Type System:** Built-in types `int`, `float`/`double`, `bool`, and `string` with implicit type promotion (bool → int → double) during operations. Strings are treated as a distinct type and cannot be cast to/from numeric types.
+You don't need to build from source to start using Turf. You can download the pre-compiled binaries for your OS and architecture directly from the release assets:
+
+- **macOS (Apple Silicon / ARM64):**
+  Download `turf-v0.4.0-macos-arm64.tar.gz` and extract it:
+
+  ```bash
+  tar -xzf turf-v0.4.0-macos-arm64.tar.gz
+  ```
+
+- **Linux (x86_64):**
+  Download `turf-v0.4.0-linux-x86_64.tar.gz` and extract it:
+
+  ```bash
+  tar -xzf turf-v0.4.0-linux-x86_64.tar.gz
+  ```
+
+- **Linux (Arch x86_64):**
+  Download `turf-v0.4.0-linux-arch-x86_64.tar.gz` and extract it:
+
+  ```bash
+  tar -xzf turf-v0.4.0-linux-arch-x86_64.tar.gz
+  ```
+
+- **Windows (x86_64):**
+  Download `turf-v0.4.0-windows-x86_64.zip` and extract it using your file explorer or terminal.
+
+Once extracted, you can compile and run Turf programs directly:
+
+```bash
+# Compile the Turf source code into an executable
+./turf example.tr -o program
+
+# Run the generated executable
+./program
+```
+
+## Features
+
+- **Type System:** Built-in types `int`, `double`, `bool`, and `string` with implicit type promotion (bool → int → double) during operations.
 - **Typed Variable Declarations:** Variables can be declared with explicit types (`int x = 5`, `double pi = 3.14`, `bool flag = true`, `string name = "Turf"`).
-- **String Support:** First-class string type with string literals (`"hello"`), string variables, assignment, and printing. Supports escape sequences (`\n`, `\t`, `\\`, `\"`).
-- **Variables:** Support for variable assignment and lookups.
-- **Boolean Literals:** Support for `true` and `false` boolean values.
+- **String Support:** First-class string type with string literals (`"hello"`). Supports escape sequences (`\n`, `\t`, `\\`, `\"`).
+- **Type Casting:** Explicit type casting allows conversions like `int("100")` or `double(42)`.
+- **Variables:** Support for variable assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`), and increment/decrement operators (`++`, `--`).
 - **Math:** Full support for arithmetic operators (`+`, `-`, `*`, `/`, `%`, `^`) with operator precedence, including exponentiation.
+- **Logical Operators:** Evaluate complex conditions with `&&` (AND) and `||` (OR).
 - **Unary Operators:** Support for unary negation (`-x`).
 - **Comparison Operators:** Full set of comparison operators (`<`, `>`, `==`, `!=`, `<=`, `>=`).
-- **Control Flow:** `if`/`else` expressions and `while` loops with block syntax (`{ ... }`).
+- **Control Flow:** `if`/`else` expressions and `while` loops with block syntax (`{ ... }`), including `break` and `continue` statements.
 - **Block Expressions:** Group multiple expressions using `{ ... }` syntax.
 - **Comments:** Single-line comments using `//` syntax.
 - **Print:** Built-in `print()` function for output (supports int, double, bool, and string types).
 - **Memory Management:** Automatic stack allocation using LLVM `alloca`, `store`, and `load`.
-- **LLVM Backend:** Compiles source code directly to optimized LLVM IR (`output.ll`).
+- **LLVM Backend:** Compiles source code directly to a native executable via LLVM.
 - **Smart Compiler (Phase 1):** Support for smart compiler error enhancements, where it suggests you what changes to make (using Damerau-Levenshtein distance for variable name and keyword suggestions, including transposition typo detection).
 - **Semantic Analysis (Phase 2):** Lexical scope tracking with symbol table infrastructure:
   - **Use-before-declaration detection**: Catches variables used before being declared
@@ -30,32 +67,23 @@ Turf is an experimental programming language and compiler written in C++. The go
   - **Unreachable code detection**: Detects declarations after return statements
   - **Scope-aware error messages**: Error messages include declaration locations for better context
 
-## Build and Run
+## Build from Source (Manual)
 
-Requires LLVM and a C++ compiler.
+If you'd like to build the Turf compiler from source, ensure you have LLVM and a modern C++ compiler (like `clang++`) installed.
 
-### Quick Start
-
-Use the included helper script to compile the compiler, generate the IR, link it, and run the executable in one go:
+You can then use the included build scripts for quick setup and testing:
 
 ```bash
-chmod +x update_compiler.sh
-./update_compiler.sh
-chmod +x compile_and_run.sh
-./compile_and_run.sh test.tr
+# Compile the compiler itself
+./scripts/update_compiler.sh
+
+# Compile a Turf file and run the executable
+./scripts/compile_and_run.sh tests/test.tr
 ```
-
-### Manual Build
-
-If you want to build the compiler binary manually:
-
-```bash
-clang++ main.cpp Lexer.cpp Parser.cpp Codegen.cpp Algorithms.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core` -o turf
-```
-
-Rest steps will be the same from the Quick Start section.
 
 ## Example Code
+
+A taste of what's possible with Turf right now:
 
 ```turf
 // Typed variable declarations
@@ -64,58 +92,46 @@ int height = 5
 double pi = 3.14
 string greeting = "Hello, Turf!"
 
-// Variables are mutable and memory-managed
+// Variables are mutable
 int area = width * height
 width = 20
 int new_area = width * height
 
-// Complex expressions with precedence
+// Complex expressions with proper precedence
 int result = (width + height) * 2
 
-// Exponentiation (result is double due to type promotion)
-int x = 3
-double squared = x ^ 2
+// Exponentiation and modulo
+double squared = 3.0 ^ 2.0
+int rem = 17 % 5
 
-// Boolean values
+// Boolean values and logical operators
 bool flag = true
-bool check = x > height
+bool check = result > height && flag == true || width < 5
+
+// Type casting
+int parsed_int = int("42")
+double cast_val = double(10)
 
 // Control flow with if/else
-int max = if x > height then x else height
+int max = if width > height then width else height
 
-// While loops
+// While loops with break/continue
 int counter = 0
+int sum = 0
 while counter < 5 {
-  print(counter)
-  counter = counter + 1
+  counter++
+  if counter == 3 {
+    continue
+  } else {}
+  sum += counter
 }
-bool, and string)
+
+// Built-in print supports int, double, bool, and string ranges
+print(greeting)
 print(result)
-print(pi)
-print(flag)
-print(greetin
-print(flag)
+printline(flag)
 ```
-
-## Roadmap
-
-- [x] Basic Arithmetic
-- [x] Variables & Memory Assignment
-- [x] Type System (int, float/double, bool)
-- [x] Typed Variable Declarations
-- [x] Better Error Diagnostics
-- [x] Control Flow (if / else)
-- [x] Comparison Operators (<, >, ==, !=, <=, >=)
-- [x] While Loops
-- [x] String Type (literals, variables, printing)
-- [x] Print Function
-- [x] Comments (single-line)
-- [ ] Functions
 
 ## Status
 
-**Active Development.**, `string`), arithmetic (including exponentiation), control flow (`if`/`else`, `while`), comparison operators, boolean literals, string literals with escape sequence
-
-The compiler supports typed variables (`int`, `double`, `bool`), arithmetic (including exponentiation), control flow (`if`/`else`, `while`), comparison operators, boolean literals, single-line comments, and output via `print()`.
-
-> After a certain phase of development, both the 'Build' and 'Run' phase will be packaged in a separate "Turf Compiler" package.
+**Active Development.** The compiler is fully capable of taking code to native executables. It currently supports typed variables (`int`, `double`, `bool`, `string`), arithmetic, exponentiation, modulo, logical short-circuiting, type casting, control flow (`if`/`else`, `while`, `break`, `continue`), comparison operators, booleans, single-line comments, and output via `print()` and `printline()`.

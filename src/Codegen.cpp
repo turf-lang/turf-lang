@@ -22,6 +22,8 @@ std::map<std::string, VarInfo> NamedValues;
 TurfType CurrentFuncReturnType = TURF_VOID;
 llvm::Function *CurrentFunction = nullptr;
 
+std::vector<std::pair<llvm::BasicBlock *, llvm::BasicBlock *>> LoopBlocks;
+
 void InitializeModule() {
   // Holds types and constants
   TheContext = std::make_unique<LLVMContext>();
@@ -602,11 +604,19 @@ Value *WhileExprAST::codegen() {
   TheFunction->insert(TheFunction->end(), LoopBodyBB);
   Builder->SetInsertPoint(LoopBodyBB);
 
-  if (!Body->codegen())
+  LoopBlocks.push_back({LoopCondBB, AfterBB});
+
+  if (!Body->codegen()) {
+    LoopBlocks.pop_back();
     return nullptr;
+  }
+
+  LoopBlocks.pop_back();
 
   // Jump back to the condition to loop again
-  Builder->CreateBr(LoopCondBB);
+  if (!Builder->GetInsertBlock()->getTerminator()) {
+    Builder->CreateBr(LoopCondBB);
+  }
 
   // After Loop Block
   TheFunction->insert(TheFunction->end(), AfterBB);
@@ -614,6 +624,36 @@ Value *WhileExprAST::codegen() {
 
   // While loops always return 0.0
   return Constant::getNullValue(Type::getDoubleTy(*TheContext));
+}
+
+Value *BreakExprAST::codegen() {
+  if (LoopBlocks.empty()) {
+    SyntaxError(Loc, "'break' used outside of a loop").raise();
+    return nullptr;
+  }
+
+  Builder->CreateBr(LoopBlocks.back().second);
+
+  BasicBlock *DeadBB =
+      BasicBlock::Create(*TheContext, "after_break", CurrentFunction);
+  Builder->SetInsertPoint(DeadBB);
+
+  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+}
+
+Value *ContinueExprAST::codegen() {
+  if (LoopBlocks.empty()) {
+    SyntaxError(Loc, "'continue' used outside of a loop").raise();
+    return nullptr;
+  }
+
+  Builder->CreateBr(LoopBlocks.back().first);
+
+  BasicBlock *DeadBB =
+      BasicBlock::Create(*TheContext, "after_continue", CurrentFunction);
+  Builder->SetInsertPoint(DeadBB);
+
+  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }
 
 // FuncDefExprAST::codegen

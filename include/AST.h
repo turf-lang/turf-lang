@@ -136,6 +136,22 @@ public:
   llvm::Value *codegen() override;
 };
 
+class BreakExprAST : public ExprAST {
+  SourceLocation Loc;
+
+public:
+  BreakExprAST(SourceLocation Loc) : Loc(Loc) {}
+  llvm::Value *codegen() override;
+};
+
+class ContinueExprAST : public ExprAST {
+  SourceLocation Loc;
+
+public:
+  ContinueExprAST(SourceLocation Loc) : Loc(Loc) {}
+  llvm::Value *codegen() override;
+};
+
 class VarDeclExprAST : public ExprAST {
   std::string Name;
   TurfType Type;
