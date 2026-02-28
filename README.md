@@ -23,6 +23,12 @@ Turf is an experimental programming language and compiler written in C++. The go
 - **Memory Management:** Automatic stack allocation using LLVM `alloca`, `store`, and `load`.
 - **LLVM Backend:** Compiles source code directly to optimized LLVM IR (`output.ll`).
 - **Smart Compiler (Phase 1):** Support for smart compiler error enhancements, where it suggests you what changes to make (using Damerau-Levenshtein distance for variable name and keyword suggestions, including transposition typo detection).
+- **Semantic Analysis (Phase 2):** Lexical scope tracking with symbol table infrastructure:
+  - **Use-before-declaration detection**: Catches variables used before being declared
+  - **Duplicate declaration detection**: Prevents redeclaring variables in the same scope
+  - **Shadowing warnings**: Warns when inner scope variables shadow outer scope names
+  - **Unreachable code detection**: Detects declarations after return statements
+  - **Scope-aware error messages**: Error messages include declaration locations for better context
 
 ## Build and Run
 

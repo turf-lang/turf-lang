@@ -1,0 +1,44 @@
+// Test 5: Valid scopes - should compile successfully
+// Multiple scopes with proper variable lifetimes
+
+int global = 100;
+print(global);
+
+// Nested if blocks for scope testing
+if global > 0 {
+  int inner = 50;
+  print(inner);
+  print(global);
+  
+  if inner > 0 {
+    int deepest = 25;
+    print(deepest);
+    print(inner);
+    print(global);
+  } else {
+    print(0);
+  }
+  
+  print(inner);
+  print(global);
+} else {
+  print(0);
+}
+
+print(global);
+
+// Function with scopes
+fn int compute(int x) {
+  int result = x * 2;
+  
+  if result > 0 {
+    int temp = result + 10;
+    result = temp;
+  } else {
+    result = 0;
+  }
+  
+  return result;
+}
+
+print(compute(5));  // Should print 20

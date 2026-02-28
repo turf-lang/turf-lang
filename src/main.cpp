@@ -2,6 +2,7 @@
 #include "Codegen.h"
 #include "Lexer.h"
 #include "Parser.h"
+#include "SymbolTable.h"
 #include "Types.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/raw_ostream.h"
@@ -31,6 +32,7 @@ int main(int argc, char **argv) {
 
   RegisterBuiltins();   // Populate builtin registry + inject keywords into Lexer
   InitializeModule();   // Initialize LLVM Context, Module, Builder
+  InitializeSymbolTable(); // Initialize semantic symbol table
   InitializePrecedence();
 
   // Setup the main function wrapper to hold all the code
