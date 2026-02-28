@@ -29,5 +29,11 @@ void InitializeModule();
 llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                          const std::string &VarName,
                                          TurfType Type);
+// Map a TurfType to the corresponding LLVM Type
+llvm::Type *getLLVMType(TurfType Type);
+
+// Current function context (nullptr at top level)
+extern TurfType CurrentFuncReturnType;
+extern llvm::Function *CurrentFunction;
 
 #endif

@@ -24,7 +24,10 @@ std::map<std::string, int> Keywords = {
     {"double", TOK_TYPE_DOUBLE},
     {"bool", TOK_TYPE_BOOL}, {"true", TOK_BOOL_LITERAL},
     {"false", TOK_BOOL_LITERAL},
-    {"string", TOK_TYPE_STRING}};
+    {"string", TOK_TYPE_STRING},
+    {"void", TOK_TYPE_VOID},
+    {"return", TOK_RETURN},
+    {"fn", TOK_FN}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.

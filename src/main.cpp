@@ -2,6 +2,7 @@
 #include "Codegen.h"
 #include "Lexer.h"
 #include "Parser.h"
+#include "Types.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/raw_ostream.h"
 #include <fstream>
@@ -46,7 +47,50 @@ int main(int argc, char **argv) {
   BasicBlock *Entry = BasicBlock::Create(*TheContext, "entry", TheFunction);
   Builder->SetInsertPoint(Entry);
 
-  // Load the first token before entering the loop
+  // Pre-pass: hoist 'fn' function prototypes so that forward calls work.
+  // We perform a second full parse of the file, i.e. only processing
+  // FuncDefExprAST nodes, which registers the LLVM prototype on first
+  // codegen call (before the body exists).
+  {
+    std::ifstream PrePassFile(argv[1]);
+    if (PrePassFile.is_open()) {
+      // Swap the global SourceFile for the pre-pass stream
+      SourceFile.close();
+      SourceFile.open(argv[1]);
+      CurLoc = {1, 0};
+
+      // Reset the lexer token stream
+      CurTok = 0;
+      getNextToken();
+
+      while (CurTok != TOK_EOF) {
+        if (CurTok == ';') {
+          getNextToken();
+          continue;
+        }
+        if (CurTok == TOK_FN) {
+          // Parse and codegen prototype-only (body is parsed but we only
+          // want to register the LLVM Function* in the module)
+          auto AST = ParseExpression();
+          if (AST)
+            AST->codegen(); // creates prototype + body the first time
+        } else {
+          getNextToken(); // skip non-fn tokens
+        }
+      }
+
+      // Re-open for the main pass
+      SourceFile.close();
+      SourceFile.open(argv[1]);
+      CurLoc = {1, 0};
+      CurTok = 0;
+    }
+  }
+
+  // Main pass: re-enter the entry block and codegen everything.
+  Builder->SetInsertPoint(Entry);
+
+  // Bootstrap the lexer for the main pass
   getNextToken();
 
   // Main Loop
@@ -56,6 +100,13 @@ int main(int argc, char **argv) {
 
     if (CurTok == ';') {
       getNextToken(); // Skip semicolons
+      continue;
+    }
+
+    // fn definitions were already fully processed in the pre-pass.
+    // Parse and discard them here to keep the token stream in sync.
+    if (CurTok == TOK_FN) {
+      ParseExpression(); // parse and drop; body was already codegen'd
       continue;
     }
 
