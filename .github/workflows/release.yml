@@ -1,0 +1,227 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  # Linux (Ubuntu/Debian) — x86_64
+  linux-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
+          sudo apt-get install -y llvm-18-dev
+          echo "/usr/lib/llvm-18/bin" >> $GITHUB_PATH
+
+      - name: Build Turf
+        run: |
+          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp \
+            -Iinclude $(llvm-config-18 --cxxflags --ldflags --system-libs --libs core native) \
+            -o turf
+
+      - name: Verify build
+        run: ./turf --emit-llvm tests/test.tr -o test_output
+
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          DIR="turf-${VERSION}-linux-x86_64"
+          mkdir -p "${DIR}/scripts"
+          cp turf "${DIR}/"
+          cp scripts/compile_and_run.sh "${DIR}/scripts/"
+          cp README.md "${DIR}/"
+          tar -czf "${DIR}.tar.gz" "${DIR}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: turf-*-linux-x86_64.tar.gz
+
+  # Linux (Arch) — x86_64 via Docker
+  linux-arch-x86_64:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel llvm clang
+
+      - name: Build Turf
+        run: |
+          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp \
+            -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
+            -o turf
+
+      - name: Verify build
+        run: ./turf --emit-llvm tests/test.tr -o test_output
+
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          DIR="turf-${VERSION}-linux-arch-x86_64"
+          mkdir -p "${DIR}/scripts"
+          cp turf "${DIR}/"
+          cp scripts/compile_and_run.sh "${DIR}/scripts/"
+          cp README.md "${DIR}/"
+          tar -czf "${DIR}.tar.gz" "${DIR}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arch-x86_64
+          path: turf-*-linux-arch-x86_64.tar.gz
+
+  # macOS — x86_64 (Intel)
+  macos-x86_64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM
+        run: |
+          brew install llvm
+          echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
+
+      - name: Build Turf
+        run: |
+          export PATH="$(brew --prefix llvm)/bin:$PATH"
+          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp \
+            -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
+            -o turf
+
+      - name: Verify build
+        run: ./turf --emit-llvm tests/test.tr -o test_output
+
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          DIR="turf-${VERSION}-macos-x86_64"
+          mkdir -p "${DIR}/scripts"
+          cp turf "${DIR}/"
+          cp scripts/compile_and_run.sh "${DIR}/scripts/"
+          cp README.md "${DIR}/"
+          tar -czf "${DIR}.tar.gz" "${DIR}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-x86_64
+          path: turf-*-macos-x86_64.tar.gz
+
+  # macOS — ARM64 (Apple Silicon)
+  macos-arm64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM
+        run: |
+          brew install llvm
+          echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
+
+      - name: Build Turf
+        run: |
+          export PATH="$(brew --prefix llvm)/bin:$PATH"
+          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp \
+            -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
+            -o turf
+
+      - name: Verify build
+        run: ./turf --emit-llvm tests/test.tr -o test_output
+
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          DIR="turf-${VERSION}-macos-arm64"
+          mkdir -p "${DIR}/scripts"
+          cp turf "${DIR}/"
+          cp scripts/compile_and_run.sh "${DIR}/scripts/"
+          cp README.md "${DIR}/"
+          tar -czf "${DIR}.tar.gz" "${DIR}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: turf-*-macos-arm64.tar.gz
+
+  # Windows — x86_64
+  windows-x86_64:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM
+        shell: pwsh
+        run: choco install llvm --yes
+
+      - name: Build Turf
+        run: |
+          export PATH="/c/Program Files/LLVM/bin:$PATH"
+          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp \
+            -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
+            -o turf.exe
+
+      - name: Verify build
+        run: |
+          export PATH="/c/Program Files/LLVM/bin:$PATH"
+          ./turf.exe --emit-llvm tests/test.tr -o test_output
+
+      - name: Package
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          DIR="turf-${VERSION}-windows-x86_64"
+          mkdir -p "${DIR}/scripts"
+          cp turf.exe "${DIR}/"
+          cp scripts/compile_and_run.sh "${DIR}/scripts/"
+          cp README.md "${DIR}/"
+          7z a "${DIR}.zip" "${DIR}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: turf-*-windows-x86_64.zip
+
+  # Create GitHub Release with all artifacts
+  release:
+    needs:
+      [
+        linux-x86_64,
+        linux-arch-x86_64,
+        macos-x86_64,
+        macos-arm64,
+        windows-x86_64,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            turf-*.tar.gz
+            turf-*.zip
