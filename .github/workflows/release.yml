@@ -123,39 +123,40 @@ jobs:
           name: macos-arm64
           path: turf-*-macos-arm64.tar.gz
 
-  # Windows — x86_64
+  # Windows — x86_64 (via MSYS2 MinGW)
   windows-x86_64:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install LLVM
-        uses: KyleMayes/install-llvm-action@v2
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
         with:
-          version: "18"
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-llvm mingw-w64-x86_64-clang mingw-w64-x86_64-gcc
 
       - name: Build Turf
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          $bin   = "$env:LLVM_PATH\bin"
-          $flags = (& "$bin\llvm-config" --cxxflags --ldflags --system-libs --libs core native).Split()
-          & "$bin\clang++" src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp `
-            -Iinclude @flags -o turf.exe
+          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp \
+            -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
+            -o turf.exe
 
       - name: Verify build
-        shell: pwsh
-        run: .\turf.exe --emit-llvm tests\test.tr -o test_output
+        shell: msys2 {0}
+        run: ./turf.exe --emit-llvm tests/test.tr -o test_output
 
       - name: Package
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          $version = $env:GITHUB_REF_NAME
-          $dir = "turf-${version}-windows-x86_64"
-          New-Item -ItemType Directory -Force "$dir/scripts" | Out-Null
-          Copy-Item turf.exe "$dir/"
-          Copy-Item scripts/compile_and_run.sh "$dir/scripts/"
-          Copy-Item README.md "$dir/"
-          7z a "${dir}.zip" "$dir"
+          VERSION=${GITHUB_REF_NAME}
+          DIR="turf-${VERSION}-windows-x86_64"
+          mkdir -p "${DIR}/scripts"
+          cp turf.exe "${DIR}/"
+          cp scripts/compile_and_run.sh "${DIR}/scripts/"
+          cp README.md "${DIR}/"
+          7z a "${DIR}.zip" "${DIR}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
