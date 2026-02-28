@@ -86,50 +86,6 @@ jobs:
           name: linux-arch-x86_64
           path: turf-*-linux-arch-x86_64.tar.gz
 
-  # macOS — x86_64 (Intel, cross-compiled from ARM)
-  macos-x86_64:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install LLVM
-        run: brew install llvm
-
-      - name: Build Turf (cross-compile to x86_64)
-        run: |
-          LLVM_PREFIX="$(brew --prefix llvm)"
-          SDK="$(xcrun --sdk macosx --show-sdk-path)"
-          # Use xcrun clang++ (Apple's, SDK-aware) for cross-compile;
-          # supply LLVM include path and linker flags from Homebrew.
-          $(xcrun -f clang++) \
-            -arch x86_64 --sysroot "$SDK" \
-            -I"${LLVM_PREFIX}/include" \
-            src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp \
-            -Iinclude -std=c++17 \
-            $("${LLVM_PREFIX}/bin/llvm-config" --ldflags --system-libs --libs core native) \
-            -o turf
-
-      - name: Verify build
-        run: |
-          # x86_64 binary runs on ARM via Rosetta 2
-          ./turf --emit-llvm tests/test.tr -o test_output
-
-      - name: Package
-        run: |
-          VERSION=${GITHUB_REF_NAME}
-          DIR="turf-${VERSION}-macos-x86_64"
-          mkdir -p "${DIR}/scripts"
-          cp turf "${DIR}/"
-          cp scripts/compile_and_run.sh "${DIR}/scripts/"
-          cp README.md "${DIR}/"
-          tar -czf "${DIR}.tar.gz" "${DIR}"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-x86_64
-          path: turf-*-macos-x86_64.tar.gz
-
   # macOS — ARM64 (Apple Silicon)
   macos-arm64:
     runs-on: macos-latest
@@ -175,16 +131,14 @@ jobs:
 
       - name: Install LLVM
         shell: pwsh
-        run: |
-          choco install llvm --yes
-          # Add to GITHUB_PATH so all subsequent steps see it
-          Add-Content $env:GITHUB_PATH "C:\Program Files\LLVM\bin"
+        run: choco install llvm --yes --no-progress
 
       - name: Build Turf
         shell: pwsh
         run: |
-          $flags  = (llvm-config --cxxflags --ldflags --system-libs --libs core native).Split()
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp `
+          $llvm    = "C:\Program Files\LLVM\bin"
+          $flags   = (& "$llvm\llvm-config.exe" --cxxflags --ldflags --system-libs --libs core native).Split()
+          & "$llvm\clang++.exe" src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp `
             -Iinclude @flags -o turf.exe
 
       - name: Verify build
@@ -210,14 +164,7 @@ jobs:
 
   # Create GitHub Release with all artifacts
   release:
-    needs:
-      [
-        linux-x86_64,
-        linux-arch-x86_64,
-        macos-x86_64,
-        macos-arm64,
-        windows-x86_64,
-      ]
+    needs: [linux-x86_64, linux-arch-x86_64, macos-arm64, windows-x86_64]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
