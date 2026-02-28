@@ -11,6 +11,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 #include <cstdlib>
@@ -62,7 +63,14 @@ static int emitObjectFile(Module &M, const std::string &ObjFilename) {
   InitializeAllAsmPrinters();
 
   Triple TargetTriple(sys::getDefaultTargetTriple());
+
+  // LLVM 20+ changed setTargetTriple to accept Triple; older versions take StringRef.
+  // arch is so much better :((
+#if LLVM_VERSION_MAJOR >= 20
   M.setTargetTriple(TargetTriple);
+#else
+  M.setTargetTriple(TargetTriple.str());
+#endif
 
   std::string Error;
   auto Target = TargetRegistry::lookupTarget(TargetTriple.str(), Error);
@@ -74,8 +82,15 @@ static int emitObjectFile(Module &M, const std::string &ObjFilename) {
   auto CPU = "generic";
   auto Features = "";
   TargetOptions opt;
+
+  // LLVM 20+ also changed createTargetMachine to accept Triple.
+#if LLVM_VERSION_MAJOR >= 20
   auto TM = Target->createTargetMachine(TargetTriple, CPU, Features, opt,
                                         Reloc::PIC_);
+#else
+  auto TM = Target->createTargetMachine(TargetTriple.str(), CPU, Features, opt,
+                                        Reloc::PIC_);
+#endif
 
   M.setDataLayout(TM->createDataLayout());
 
