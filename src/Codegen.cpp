@@ -5,6 +5,7 @@
 #include "Errors.h"
 #include "Lexer.h"
 #include "Types.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Verifier.h"
 #include <iostream>
 
@@ -15,6 +16,10 @@ std::unique_ptr<IRBuilder<>> Builder;
 std::unique_ptr<Module> TheModule;
 
 std::map<std::string, VarInfo> NamedValues;
+
+// Current enclosing function context (nullptr at top level)
+TurfType CurrentFuncReturnType = TURF_VOID;
+llvm::Function *CurrentFunction = nullptr;
 
 void InitializeModule() {
   // Holds types and constants
@@ -268,6 +273,11 @@ AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
 }
 
 Value *VarDeclExprAST::codegen() {
+  if (Type == TURF_VOID) {
+    SyntaxError(Loc, "Variables of type 'void' are not allowed").raise();
+    return nullptr;
+  }
+
   if (Keywords.find(Name) != Keywords.end()) {
     SyntaxError(Loc, "Cannot use keyword '" + Name + "' as a variable name. Keyword is reserved.").raise();
     return nullptr;
@@ -554,4 +564,173 @@ Value *WhileExprAST::codegen() {
 
   // While loops always return 0.0
   return Constant::getNullValue(Type::getDoubleTy(*TheContext));
+}
+
+// FuncDefExprAST::codegen
+// Two-pass strategy:
+//   Pass 1 (prototype): if no LLVM Function yet, create it (no body).
+//   Pass 2 (body):      if function has no body yet, fill it in.
+// Calling codegen() twice is what makes forward calls work: main.cpp's
+// pre-pass creates prototypes, then the normal loop fills bodies.
+Value *FuncDefExprAST::codegen() {
+  // Build/look up the LLVM prototype
+  Function *TheFunc = TheModule->getFunction(Name);
+
+  if (!TheFunc) {
+    // Build the LLVM FunctionType
+    std::vector<Type *> ParamTypes;
+    for (const auto &P : Params)
+      ParamTypes.push_back(getLLVMType(P.Type));
+
+    FunctionType *FT =
+        FunctionType::get(getLLVMType(ReturnType), ParamTypes, /*isVarArg=*/false);
+    TheFunc = Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
+
+    // Name the arguments
+    unsigned Idx = 0;
+    for (auto &Arg : TheFunc->args())
+      Arg.setName(Params[Idx++].Name);
+  } else {
+    // If the function already has a body, this is a duplicate definition
+    if (!TheFunc->empty()) {
+      SyntaxError(Loc, "Duplicate function definition: '" + Name + "'").raise();
+      return nullptr;
+    }
+  }
+
+  // If this is a prototype-only call (pre-pass), stop here
+  // The Body will be nullptr only when called from the proto-hoisting pre-pass.
+  // Since we always parse the body in ParseFuncDef, Body is never null here.
+  // (Reserve this hook for a future separate pre-pass.)
+
+  // Fill in the function body
+  BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunc);
+
+  // Save caller context
+  auto SavedNamedValues      = NamedValues;
+  auto SavedReturnType       = CurrentFuncReturnType;
+  auto SavedFunction         = CurrentFunction;
+  auto *SavedInsertBlock     = Builder->GetInsertBlock();
+  auto  SavedInsertPoint     = Builder->GetInsertPoint();
+
+  // Switch to the new function
+  Builder->SetInsertPoint(BB);
+  NamedValues.clear();
+  CurrentFuncReturnType = ReturnType;
+  CurrentFunction       = TheFunc;
+
+  // Alloca each parameter and add to NamedValues
+  for (auto &Arg : TheFunc->args()) {
+    TurfType ParamTurfType = TURF_INT;
+    for (const auto &P : Params)
+      if (P.Name == Arg.getName())
+        ParamTurfType = P.Type;
+
+    AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunc, std::string(Arg.getName()), ParamTurfType);
+    Builder->CreateStore(&Arg, Alloca);
+    NamedValues[std::string(Arg.getName())] = {Alloca, ParamTurfType};
+  }
+
+  // Codegen the body
+  Body->codegen();
+
+  // Emit a return if the block has no terminator yet.
+  // IMPORTANT: ReturnExprAST::codegen() leaves the builder pointing at a
+  // fresh dead "after_ret" block (no predecessors, no terminator). We must
+  // erase those dead blocks instead of treating them as missing-return paths.
+  BasicBlock *CurBB = Builder->GetInsertBlock();
+  if (!CurBB->getTerminator()) {
+    bool IsDead = (CurBB != BB) && llvm::pred_empty(CurBB);
+    if (IsDead) {
+      // Dead block left behind by a return statement — erase it cleanly.
+      CurBB->eraseFromParent();
+    } else if (ReturnType == TURF_VOID) {
+      Builder->CreateRetVoid();
+    } else {
+      SyntaxError(Loc, "Non-void function '" + Name + "' may not return from all paths").raise();
+      Builder->CreateRet(Constant::getNullValue(getLLVMType(ReturnType)));
+    }
+  }
+
+  verifyFunction(*TheFunc);
+
+  // Restore caller context
+  NamedValues            = SavedNamedValues;
+  CurrentFuncReturnType  = SavedReturnType;
+  CurrentFunction        = SavedFunction;
+  if (SavedInsertBlock)
+    Builder->SetInsertPoint(SavedInsertBlock, SavedInsertPoint);
+
+  // Function definitions are statements; they do not produce a value.
+  return nullptr;
+}
+
+// ReturnExprAST::codegen
+Value *ReturnExprAST::codegen() {
+  if (CurrentFunction == nullptr) {
+    SyntaxError(Loc, "'return' used outside of a function").raise();
+    return nullptr;
+  }
+
+  if (!Val) {
+    // empty return;
+    if (CurrentFuncReturnType != TURF_VOID) {
+      SyntaxError(Loc, "'return;' is only valid inside a void function").raise();
+      return nullptr;
+    }
+    Builder->CreateRetVoid();
+  } else {
+    // return <expr>;
+    if (CurrentFuncReturnType == TURF_VOID) {
+      SyntaxError(Loc, "void function cannot return a value").raise();
+      return nullptr;
+    }
+    Value *RetVal = Val->codegen();
+    if (!RetVal)
+      return nullptr;
+    RetVal = CastToType(RetVal, CurrentFuncReturnType, "retcast");
+    Builder->CreateRet(RetVal);
+  }
+
+  // After a terminator, create a fresh unreachable block so the IR builder
+  // has a valid insert point for any subsequent statements in the same block.
+  BasicBlock *DeadBB =
+      BasicBlock::Create(*TheContext, "after_ret", CurrentFunction);
+  Builder->SetInsertPoint(DeadBB);
+
+  // Return a dummy null so the AST node has a non-null value
+  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+}
+
+// FuncCallExprAST::codegen
+Value *FuncCallExprAST::codegen() {
+  Function *CalleeF = TheModule->getFunction(Name);
+  if (!CalleeF) {
+    SyntaxError(Loc, "Unknown function: '" + Name + "'").raise();
+    return nullptr;
+  }
+
+  if (CalleeF->arg_size() != Args.size()) {
+    SyntaxError(Loc, "Wrong number of arguments to '" + Name + "': expected " +
+                         std::to_string(CalleeF->arg_size()) + ", got " +
+                         std::to_string(Args.size())).raise();
+    return nullptr;
+  }
+
+  std::vector<Value *> ArgVals;
+  unsigned Idx = 0;
+  for (auto &Arg : CalleeF->args()) {
+    Value *V = Args[Idx++]->codegen();
+    if (!V)
+      return nullptr;
+    TurfType ExpectedType = getTurfTypeFromLLVM(Arg.getType());
+    V = CastToType(V, ExpectedType, "argcast");
+    ArgVals.push_back(V);
+  }
+
+  // void functions must not be given a name (LLVM requirement)
+  if (CalleeF->getReturnType()->isVoidTy())
+    return Builder->CreateCall(CalleeF, ArgVals);
+
+  return Builder->CreateCall(CalleeF, ArgVals, "calltmp");
 }

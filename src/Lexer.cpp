@@ -9,6 +9,7 @@ std::vector<std::string> SourceLines;
 SourceLocation CurLoc = {1, 0};
 int CurLine = 1;
 int CurCol = 0;
+static int LastChar = ' ';
 
 std::ifstream SourceFile;
 double NumVal;
@@ -24,7 +25,10 @@ std::map<std::string, int> Keywords = {
     {"double", TOK_TYPE_DOUBLE},
     {"bool", TOK_TYPE_BOOL}, {"true", TOK_BOOL_LITERAL},
     {"false", TOK_BOOL_LITERAL},
-    {"string", TOK_TYPE_STRING}};
+    {"string", TOK_TYPE_STRING},
+    {"void", TOK_TYPE_VOID},
+    {"return", TOK_RETURN},
+    {"fn", TOK_FN}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
@@ -43,8 +47,14 @@ void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
   }
 }
 
+void resetLexer() {
+  LastChar = ' ';
+  CurLine = 1;
+  CurCol = 0;
+  CurLoc = {1, 0};
+}
+
 int gettok() {
-  static int LastChar = ' ';
 
   while (isspace(LastChar)) {
     // Handle newlines to track line numbers

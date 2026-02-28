@@ -5,6 +5,8 @@
 #include "Types.h"
 #include "llvm/IR/Value.h"
 #include <memory>
+#include <string>
+#include <vector>
 
 // Base Expressions Class: Everything, "5", "5 + 10", etc. are expressions
 class ExprAST {
@@ -179,6 +181,56 @@ public:
   CastExprAST(SourceLocation Loc, TurfType DestType,
               std::unique_ptr<ExprAST> Operand)
       : DestType(DestType), Operand(std::move(Operand)), Loc(Loc) {}
+  llvm::Value *codegen() override;
+};
+
+// A single function parameter descriptor.
+struct ParamDecl {
+  TurfType Type;
+  std::string Name;
+};
+
+// return expr;  or  return;
+class ReturnExprAST : public ExprAST {
+  std::unique_ptr<ExprAST> Val;
+  SourceLocation Loc;
+
+public:
+  ReturnExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Val)
+      : Loc(Loc), Val(std::move(Val)) {}
+
+  llvm::Value *codegen() override;
+};
+
+// fn RetType Name(params...) { body }
+class FuncDefExprAST : public ExprAST {
+  std::string Name;
+  TurfType ReturnType;
+  std::vector<ParamDecl> Params;
+  std::unique_ptr<ExprAST> Body;
+  SourceLocation Loc;
+
+public:
+  FuncDefExprAST(SourceLocation Loc, std::string Name, TurfType ReturnType,
+                 std::vector<ParamDecl> Params,
+                 std::unique_ptr<ExprAST> Body)
+      : Loc(Loc), Name(std::move(Name)), ReturnType(ReturnType),
+        Params(std::move(Params)), Body(std::move(Body)) {}
+
+  llvm::Value *codegen() override;
+};
+
+// Call to a user-defined function: name(arg1, arg2, ...)
+class FuncCallExprAST : public ExprAST {
+  std::string Name;
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  SourceLocation Loc;
+
+public:
+  FuncCallExprAST(SourceLocation Loc, std::string Name,
+                  std::vector<std::unique_ptr<ExprAST>> Args)
+      : Loc(Loc), Name(std::move(Name)), Args(std::move(Args)) {}
+
   llvm::Value *codegen() override;
 };
 
