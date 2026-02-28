@@ -1,0 +1,25 @@
+// Forward call: greet() is defined below, but called here
+greet()
+
+// Define a void function with an explicit return
+fn void greet() {
+  printline("Hello from void function")
+  return;
+}
+
+// Non-void function returning a value
+fn int add(int a, int b) {
+  return a + b;
+}
+
+// Non-void function with no explicit return (falls off end)
+fn int square(int n) {
+  return n * n;
+}
+
+// Call user functions and print results
+int result = add(3, 7)
+printline(result)
+
+int sq = square(5)
+printline(sq)

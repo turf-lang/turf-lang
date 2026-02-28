@@ -48,9 +48,13 @@ enum Token {
   TOK_OR = -21,
   TOK_CONV_INT = -22,   // for int(...)
   TOK_CONV_DOUBLE = -23,   // for double(...)
+  TOK_TYPE_VOID = -24,
+  TOK_RETURN = -25,
+  TOK_FN = -26,
 };
 
 int gettok();
+void resetLexer();
 void LogErrorAt(SourceLocation Loc, const std::string &Msg);
 
 #endif

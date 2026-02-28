@@ -64,6 +64,8 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc, TurfType Type)
 std::unique_ptr<ExprAST> ParseCastExpr(TurfType DestType, SourceLocation Loc);
 std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
+std::unique_ptr<ExprAST> ParseFuncDef();
+std::unique_ptr<ExprAST> ParseReturnExpr();
 
 static TurfType TokenToTurfType(int Tok) {
   switch (Tok) {
@@ -75,6 +77,8 @@ static TurfType TokenToTurfType(int Tok) {
     return TURF_BOOL;
   case TOK_TYPE_STRING:
     return TURF_STRING;
+  case TOK_TYPE_VOID:
+    return TURF_VOID;
   default:
     SyntaxError(CurLoc, "Unknown type").raise();
     return TURF_VOID;
@@ -129,6 +133,28 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
     // Variable Assignmnent
     return std::make_unique<AssignmentExprAST>(VarLoc, IdName,
                                                std::move(RHS));
+  }
+
+  // User-defined function call: name(...)
+  if (CurTok == '(') {
+    getNextToken();
+    std::vector<std::unique_ptr<ExprAST>> Args;
+    while (CurTok != ')' && CurTok != TOK_EOF) {
+      auto Arg = ParseExpression();
+      if (!Arg)
+        return nullptr;
+      Args.push_back(std::move(Arg));
+      if (CurTok == ',')
+        getNextToken();
+      else if (CurTok != ')')
+        break;
+    }
+    if (CurTok != ')') {
+      LogErrorAt(CurLoc, "Expected ')' in function call");
+      return nullptr;
+    }
+    getNextToken();
+    return std::make_unique<FuncCallExprAST>(VarLoc, IdName, std::move(Args));
   }
 
   // Variable Reference
@@ -305,6 +331,16 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   case TOK_TYPE_BOOL:
   case TOK_TYPE_STRING:
     return ParseVarDecl();
+
+  case TOK_TYPE_VOID:
+    SyntaxError(CurLoc, "'void' may only be used as a function return type").raise();
+    return nullptr;
+
+  case TOK_FN:
+    return ParseFuncDef();
+
+  case TOK_RETURN:
+    return ParseReturnExpr();
   }
 }
 
@@ -532,4 +568,92 @@ std::unique_ptr<ExprAST> ParseCastExpr(TurfType DestType, SourceLocation Loc) {
   getNextToken(); // eat ')'
 
   return std::make_unique<CastExprAST>(Loc, DestType, std::move(Operand));
+}
+
+// ParseFuncDef - called when CurTok == TOK_FN.
+// Parses: fn <rettype> <name>(<type> <param>, ...) { body }
+std::unique_ptr<ExprAST> ParseFuncDef() {
+  SourceLocation FnLoc = CurLoc;
+  getNextToken();
+
+  if (CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
+      CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING &&
+      CurTok != TOK_TYPE_VOID) {
+    LogErrorAt(CurLoc, "Expected return type after 'fn'");
+    return nullptr;
+  }
+  TurfType RetType = TokenToTurfType(CurTok);
+  getNextToken();
+
+  if (CurTok != TOK_IDENTIFIER) {
+    LogErrorAt(CurLoc, "Expected function name after return type");
+    return nullptr;
+  }
+  std::string FuncName = IdentifierStr;
+  getNextToken();
+
+  if (CurTok != '(') {
+    LogErrorAt(CurLoc, "Expected '(' after function name");
+    return nullptr;
+  }
+  getNextToken();
+
+  std::vector<ParamDecl> Params;
+  while (CurTok != ')' && CurTok != TOK_EOF) {
+    // Parse each parameter: <type> <name>
+    if (CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
+        CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING) {
+      LogErrorAt(CurLoc, "Expected parameter type in function parameter list");
+      return nullptr;
+    }
+    TurfType ParamType = TokenToTurfType(CurTok);
+    getNextToken();
+
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc, "Expected parameter name after type");
+      return nullptr;
+    }
+    std::string ParamName = IdentifierStr;
+    getNextToken();
+
+    Params.push_back({ParamType, ParamName});
+
+    if (CurTok == ',')
+      getNextToken();
+    else if (CurTok != ')')
+      break;
+  }
+
+  if (CurTok != ')') {
+    LogErrorAt(CurLoc, "Expected ')' after parameter list");
+    return nullptr;
+  }
+  getNextToken();
+
+  // Parse body block
+  if (CurTok != '{') {
+    LogErrorAt(CurLoc, "Expected '{' for function body");
+    return nullptr;
+  }
+  auto Body = ParseBlock();
+  if (!Body)
+    return nullptr;
+
+  return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType,
+                                          std::move(Params), std::move(Body));
+}
+
+// ParseReturnExpr - called when CurTok == TOK_RETURN.
+// Parses: return;   or   return <expr>;
+std::unique_ptr<ExprAST> ParseReturnExpr() {
+  SourceLocation RetLoc = CurLoc;
+  getNextToken();
+
+  if (CurTok == ';' || CurTok == '}' || CurTok == TOK_EOF) {
+    return std::make_unique<ReturnExprAST>(RetLoc, nullptr);
+  }
+  auto Val = ParseExpression();
+  if (!Val)
+    return nullptr;
+  return std::make_unique<ReturnExprAST>(RetLoc, std::move(Val));
 }
