@@ -12,6 +12,7 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -60,11 +61,11 @@ static int emitObjectFile(Module &M, const std::string &ObjFilename) {
   InitializeAllAsmParsers();
   InitializeAllAsmPrinters();
 
-  auto TargetTriple = sys::getDefaultTargetTriple();
+  Triple TargetTriple(sys::getDefaultTargetTriple());
   M.setTargetTriple(TargetTriple);
 
   std::string Error;
-  auto Target = TargetRegistry::lookupTarget(TargetTriple, Error);
+  auto Target = TargetRegistry::lookupTarget(TargetTriple.str(), Error);
   if (!Target) {
     std::cerr << "Error: " << Error << "\n";
     return 1;

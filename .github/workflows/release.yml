@@ -86,9 +86,9 @@ jobs:
           name: linux-arch-x86_64
           path: turf-*-linux-arch-x86_64.tar.gz
 
-  # macOS — x86_64 (Intel)
+  # macOS — x86_64 (Intel, cross-compiled from ARM)
   macos-x86_64:
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -97,15 +97,18 @@ jobs:
           brew install llvm
           echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
 
-      - name: Build Turf
+      - name: Build Turf (cross-compile to x86_64)
         run: |
           export PATH="$(brew --prefix llvm)/bin:$PATH"
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp \
+          clang++ -target x86_64-apple-macos12 -arch x86_64 \
+            src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp \
             -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
             -o turf
 
       - name: Verify build
-        run: ./turf --emit-llvm tests/test.tr -o test_output
+        run: |
+          # x86_64 binary runs on ARM via Rosetta 2
+          ./turf --emit-llvm tests/test.tr -o test_output
 
       - name: Package
         run: |
