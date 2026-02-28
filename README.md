@@ -9,25 +9,25 @@ Turf has matured beyond its early phases and is now a fully programmable languag
 You don't need to build from source to start using Turf. You can download the pre-compiled binaries for your OS and architecture directly from the release assets:
 
 - **macOS (Apple Silicon / ARM64):**
-  Download `turf-v0.3.0-macos-arm64.tar.gz` and extract it:
+  Download `turf-v0.4.0-macos-arm64.tar.gz` and extract it:
   ```bash
-  tar -xzf turf-v0.3.0-macos-arm64.tar.gz
+  tar -xzf turf-v0.4.0-macos-arm64.tar.gz
   ```
 
 - **Linux (x86_64):**
-  Download `turf-v0.3.0-linux-x86_64.tar.gz` and extract it:
+  Download `turf-v0.4.0-linux-x86_64.tar.gz` and extract it:
   ```bash
-  tar -xzf turf-v0.3.0-linux-x86_64.tar.gz
+  tar -xzf turf-v0.4.0-linux-x86_64.tar.gz
   ```
 
 - **Linux (Arch x86_64):**
-  Download `turf-v0.3.0-linux-arch-x86_64.tar.gz` and extract it:
+  Download `turf-v0.4.0-linux-arch-x86_64.tar.gz` and extract it:
   ```bash
-  tar -xzf turf-v0.3.0-linux-arch-x86_64.tar.gz
+  tar -xzf turf-v0.4.0-linux-arch-x86_64.tar.gz
   ```
 
 - **Windows (x86_64):**
-  Download `turf-v0.3.0-windows-x86_64.zip` and extract it using your file explorer or terminal.
+  Download `turf-v0.4.0-windows-x86_64.zip` and extract it using your file explorer or terminal.
 
 Once extracted, you can compile and run Turf programs directly:
 ```bash
@@ -44,12 +44,12 @@ Once extracted, you can compile and run Turf programs directly:
 - **Typed Variable Declarations:** Variables can be declared with explicit types (`int x = 5`, `double pi = 3.14`, `bool flag = true`, `string name = "Turf"`).
 - **String Support:** First-class string type with string literals (`"hello"`). Supports escape sequences (`\n`, `\t`, `\\`, `\"`).
 - **Type Casting:** Explicit type casting allows conversions like `int("100")` or `double(42)`.
-- **Variables:** Support for variable assignment and lookups.
+- **Variables:** Support for variable assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`), and increment/decrement operators (`++`, `--`).
 - **Math:** Full support for arithmetic operators (`+`, `-`, `*`, `/`, `%`, `^`) with operator precedence, including exponentiation.
 - **Logical Operators:** Evaluate complex conditions with `&&` (AND) and `||` (OR).
 - **Unary Operators:** Support for unary negation (`-x`).
 - **Comparison Operators:** Full set of comparison operators (`<`, `>`, `==`, `!=`, `<=`, `>=`).
-- **Control Flow:** `if`/`else` expressions and `while` loops with block syntax (`{ ... }`).
+- **Control Flow:** `if`/`else` expressions and `while` loops with block syntax (`{ ... }`), including `break` and `continue` statements.
 - **Block Expressions:** Group multiple expressions using `{ ... }` syntax.
 - **Comments:** Single-line comments using `//` syntax.
 - **Print:** Built-in `print()` function for output.
@@ -103,11 +103,15 @@ double cast_val = double(10)
 // Control flow with if/else
 int max = if width > height then width else height
 
-// While loops
+// While loops with break/continue
 int counter = 0
+int sum = 0
 while counter < 5 {
-  print(counter)
-  counter = counter + 1
+  counter++
+  if counter == 3 {
+    continue
+  } else {}
+  sum += counter
 }
 
 // Built-in print supports int, double, bool, and string ranges
@@ -118,4 +122,4 @@ printline(flag)
 
 ## Status
 
-**Active Development.** The compiler is fully capable of taking code to native executables. It currently supports typed variables (`int`, `double`, `bool`, `string`), arithmetic, exponentiation, modulo, logical short-circuiting, type casting, control flow (`if`/`else`, `while`), comparison operators, booleans, single-line comments, and output via `print()`.
+**Active Development.** The compiler is fully capable of taking code to native executables. It currently supports typed variables (`int`, `double`, `bool`, `string`), arithmetic, exponentiation, modulo, logical short-circuiting, type casting, control flow (`if`/`else`, `while`, `break`, `continue`), comparison operators, booleans, single-line comments, and output via `print()` and `printline()`.
