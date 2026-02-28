@@ -117,4 +117,46 @@ public:
   }
 };
 
+// Semantic Error : Symbol binding issues
+class UseBeforeDeclarationError : public TurfError {
+public:
+  UseBeforeDeclarationError(SourceLocation UseLoc, const std::string &Name)
+      : TurfError(UseLoc, "Use of undeclared identifier '" + Name + "'") {}
+};
+
+class DuplicateDeclarationError : public TurfError {
+public:
+  DuplicateDeclarationError(SourceLocation NewLoc, const std::string &Name,
+                            SourceLocation PrevLoc)
+      : TurfError(NewLoc, "Redeclaration of variable '" + Name + "'") {
+    Message += "\n  note: previous declaration was at " + 
+               std::to_string(PrevLoc.Line) + ":" + 
+               std::to_string(PrevLoc.Col);
+  }
+};
+
+class ShadowingWarning : public TurfError {
+public:
+  ShadowingWarning(SourceLocation NewLoc, const std::string &Name,
+                   SourceLocation PrevLoc)
+      : TurfError(NewLoc, "Declaration of '" + Name + 
+                  "' shadows variable in outer scope") {
+    Message = "warning: " + Message;
+    Message += "\n  note: previous declaration was at " + 
+               std::to_string(PrevLoc.Line) + ":" + 
+               std::to_string(PrevLoc.Col);
+  }
+  
+  // Warnings don't exit
+  void warn() const {
+    LogErrorAt(Loc, Message);
+  }
+};
+
+class UnreachableCodeError : public TurfError {
+public:
+  UnreachableCodeError(SourceLocation Loc, const std::string &What)
+      : TurfError(Loc, "Unreachable " + What + " after return statement") {}
+};
+
 #endif

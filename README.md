@@ -1,6 +1,6 @@
 # Turf
 
-Turf is an experimental programming language and compiler written in C++. The goal is simple: fast compilation with helpful, human-friendly error messages. Instead of plain errors, Turf explains what went wrong and suggests fixes. 
+Turf is an experimental programming language and compiler written in C++. The goal is simple: fast compilation with helpful, human-friendly error messages. Instead of plain errors, Turf explains what went wrong and suggests fixes.
 
 Turf has matured beyond its early phases and is now a fully programmable language. It has been packaged into a standalone cross-platform compiler that handles parsing, code generation, and producing the binary seamlessly.
 
@@ -10,18 +10,21 @@ You don't need to build from source to start using Turf. You can download the pr
 
 - **macOS (Apple Silicon / ARM64):**
   Download `turf-v0.4.0-macos-arm64.tar.gz` and extract it:
+
   ```bash
   tar -xzf turf-v0.4.0-macos-arm64.tar.gz
   ```
 
 - **Linux (x86_64):**
   Download `turf-v0.4.0-linux-x86_64.tar.gz` and extract it:
+
   ```bash
   tar -xzf turf-v0.4.0-linux-x86_64.tar.gz
   ```
 
 - **Linux (Arch x86_64):**
   Download `turf-v0.4.0-linux-arch-x86_64.tar.gz` and extract it:
+
   ```bash
   tar -xzf turf-v0.4.0-linux-arch-x86_64.tar.gz
   ```
@@ -30,6 +33,7 @@ You don't need to build from source to start using Turf. You can download the pr
   Download `turf-v0.4.0-windows-x86_64.zip` and extract it using your file explorer or terminal.
 
 Once extracted, you can compile and run Turf programs directly:
+
 ```bash
 # Compile the Turf source code into an executable
 ./turf example.tr -o program
@@ -40,7 +44,7 @@ Once extracted, you can compile and run Turf programs directly:
 
 ## Features
 
-- **Type System:** Built-in types `int`, `double`, `bool`, and `string` with implicit type promotion (bool → int → double) during operations. 
+- **Type System:** Built-in types `int`, `double`, `bool`, and `string` with implicit type promotion (bool → int → double) during operations.
 - **Typed Variable Declarations:** Variables can be declared with explicit types (`int x = 5`, `double pi = 3.14`, `bool flag = true`, `string name = "Turf"`).
 - **String Support:** First-class string type with string literals (`"hello"`). Supports escape sequences (`\n`, `\t`, `\\`, `\"`).
 - **Type Casting:** Explicit type casting allows conversions like `int("100")` or `double(42)`.
@@ -52,15 +56,23 @@ Once extracted, you can compile and run Turf programs directly:
 - **Control Flow:** `if`/`else` expressions and `while` loops with block syntax (`{ ... }`), including `break` and `continue` statements.
 - **Block Expressions:** Group multiple expressions using `{ ... }` syntax.
 - **Comments:** Single-line comments using `//` syntax.
-- **Print:** Built-in `print()` function for output.
+- **Print:** Built-in `print()` function for output (supports int, double, bool, and string types).
+- **Memory Management:** Automatic stack allocation using LLVM `alloca`, `store`, and `load`.
 - **LLVM Backend:** Compiles source code directly to a native executable via LLVM.
-- **Smart Compiler:** Detailed error messages including typo detection and context-aware suggestions (using Damerau-Levenshtein distance).
+- **Smart Compiler (Phase 1):** Support for smart compiler error enhancements, where it suggests you what changes to make (using Damerau-Levenshtein distance for variable name and keyword suggestions, including transposition typo detection).
+- **Semantic Analysis (Phase 2):** Lexical scope tracking with symbol table infrastructure:
+  - **Use-before-declaration detection**: Catches variables used before being declared
+  - **Duplicate declaration detection**: Prevents redeclaring variables in the same scope
+  - **Shadowing warnings**: Warns when inner scope variables shadow outer scope names
+  - **Unreachable code detection**: Detects declarations after return statements
+  - **Scope-aware error messages**: Error messages include declaration locations for better context
 
 ## Build from Source (Manual)
 
 If you'd like to build the Turf compiler from source, ensure you have LLVM and a modern C++ compiler (like `clang++`) installed.
 
 You can then use the included build scripts for quick setup and testing:
+
 ```bash
 # Compile the compiler itself
 ./scripts/update_compiler.sh

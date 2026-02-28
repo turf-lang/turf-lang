@@ -4,6 +4,7 @@
 #include "Builtins.h"
 #include "Errors.h"
 #include "Lexer.h"
+#include "SymbolTable.h"
 #include "Types.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Verifier.h"
@@ -285,9 +286,30 @@ Value *VarDeclExprAST::codegen() {
     return nullptr;
   }
 
-  if (NamedValues.count(Name)) {
-    SyntaxError(Loc, "Variable already declared").raise();
+  // Check for unreachable declaration
+  if (GlobalSymbolTable && GlobalSymbolTable->CurrentScopeHasEarlyExit()) {
+    UnreachableCodeError(Loc, "declaration").raise();
     return nullptr;
+  }
+
+  // Check for duplicate declaration in current scope
+  if (GlobalSymbolTable && GlobalSymbolTable->IsSymbolInCurrentScope(Name)) {
+    Symbol *Prev = GlobalSymbolTable->LookupSymbolInCurrentScope(Name);
+    if (Prev) {
+      DuplicateDeclarationError(Loc, Name, Prev->DeclLoc).raise();
+    } else {
+      SyntaxError(Loc, "Variable already declared").raise();
+    }
+    return nullptr;
+  }
+
+  // Check for shadowing
+  if (GlobalSymbolTable) {
+    Symbol *Shadowed = GlobalSymbolTable->FindShadowedSymbol(Name);
+    if (Shadowed) {
+      // Emit warning but continue compilation
+      ShadowingWarning(Loc, Name, Shadowed->DeclLoc).warn();
+    }
   }
 
   Value *Init = InitVal->codegen();
@@ -301,20 +323,37 @@ Value *VarDeclExprAST::codegen() {
 
   Builder->CreateStore(Init, Alloca);
 
-  // Store both Alloc and Type in symbol table
+  // Register in symbol table
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->DeclareSymbol(Name, Type, Loc, Alloca);
+  }
+
+  // Also keep in NamedValues for backward compatibility
   NamedValues[Name] = {Alloca, Type};
   return Init;
 }
 
 Value *VariableExprAST::codegen() {
   // Look up the variable in the symbol table
+  Symbol *Sym = nullptr;
+  if (GlobalSymbolTable) {
+    Sym = GlobalSymbolTable->LookupSymbol(Name);
+  }
+  
+  if (Sym) {
+    AllocaInst *A = Sym->Alloca;
+    return Builder->CreateLoad(A->getAllocatedType(), A, Name.c_str());
+  }
+
+  // Fall back to old table for built-in compatibility
   auto Iter = NamedValues.find(Name);
   if (Iter != NamedValues.end()) {
     AllocaInst *A = Iter->second.Alloca;
     return Builder->CreateLoad(A->getAllocatedType(), A, Name.c_str());
   }
 
-  ReferenceError(Loc, Name, NamedValues).raise();
+  // Use-before-declaration error
+  UseBeforeDeclarationError(Loc, Name).raise();
   return nullptr;
 }
 
@@ -433,10 +472,21 @@ Value *UnaryExprAST::codegen() {
 }
 
 Value *BlockExprAST::codegen() {
+  // Enter new scope
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->EnterScope();
+  }
+  
   Value *LastVal = nullptr;
   for (auto &Expr : Expressions) {
     LastVal = Expr->codegen();
   }
+  
+  // Exit scope
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->ExitScope();
+  }
+  
   return LastVal;
 }
 
@@ -659,7 +709,12 @@ Value *FuncDefExprAST::codegen() {
   CurrentFuncReturnType = ReturnType;
   CurrentFunction       = TheFunc;
 
-  // Alloca each parameter and add to NamedValues
+  // Enter a new scope for the function body
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->EnterScope();
+  }
+
+  // Alloca each parameter and add to NamedValues and GlobalSymbolTable
   for (auto &Arg : TheFunc->args()) {
     TurfType ParamTurfType = TURF_INT;
     for (const auto &P : Params)
@@ -669,6 +724,12 @@ Value *FuncDefExprAST::codegen() {
     AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunc, std::string(Arg.getName()), ParamTurfType);
     Builder->CreateStore(&Arg, Alloca);
     NamedValues[std::string(Arg.getName())] = {Alloca, ParamTurfType};
+    
+    // Add parameter to symbol table
+    if (GlobalSymbolTable) {
+      SourceLocation ParamLoc = Loc; // Use function declaration location
+      GlobalSymbolTable->DeclareSymbol(std::string(Arg.getName()), ParamTurfType, ParamLoc, Alloca);
+    }
   }
 
   // Codegen the body
@@ -694,6 +755,11 @@ Value *FuncDefExprAST::codegen() {
 
   verifyFunction(*TheFunc);
 
+  // Exit function scope
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->ExitScope();
+  }
+
   // Restore caller context
   NamedValues            = SavedNamedValues;
   CurrentFuncReturnType  = SavedReturnType;
@@ -710,6 +776,11 @@ Value *ReturnExprAST::codegen() {
   if (CurrentFunction == nullptr) {
     SyntaxError(Loc, "'return' used outside of a function").raise();
     return nullptr;
+  }
+
+  // Mark scope as having early exit for unreachable code detection
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->MarkEarlyExit();
   }
 
   if (!Val) {
