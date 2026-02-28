@@ -1,2 +1,0 @@
-int print = 5
-print(print)

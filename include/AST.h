@@ -110,13 +110,19 @@ public:
   llvm::Value *codegen() override;
 };
 
-class PrintExprAST : public ExprAST {
-  std::unique_ptr<ExprAST> Expr;
+// Generic node for any builtin function call, e.g. print(x).
+class BuiltinCallExprAST : public ExprAST {
+  std::string Name;
+  std::vector<std::unique_ptr<ExprAST>> Args;
 
 public:
-  PrintExprAST(std::unique_ptr<ExprAST> Expr) : Expr(std::move(Expr)) {}
+  BuiltinCallExprAST(std::string Name,
+                     std::vector<std::unique_ptr<ExprAST>> Args)
+      : Name(std::move(Name)), Args(std::move(Args)) {}
+
   llvm::Value *codegen() override;
 };
+
 
 class WhileExprAST : public ExprAST {
   std::unique_ptr<ExprAST> Cond, Body;
@@ -130,19 +136,19 @@ public:
 
 class VarDeclExprAST : public ExprAST {
   std::string Name;
-  KirkType Type;
+  TurfType Type;
   std::unique_ptr<ExprAST> InitVal;
   SourceLocation Loc;
 
 public:
-  VarDeclExprAST(SourceLocation Loc, std::string Name, KirkType Type,
+  VarDeclExprAST(SourceLocation Loc, std::string Name, TurfType Type,
                  std::unique_ptr<ExprAST> InitVal)
       : Name(std::move(Name)), Type(Type), InitVal(std::move(InitVal)),
         Loc(Loc) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
-  KirkType getType() const { return Type; }
+  TurfType getType() const { return Type; }
 
   llvm::Value *codegen() override;
 };
@@ -161,6 +167,18 @@ class StringExprAST : public ExprAST {
 public:
   StringExprAST(std::string Val) : Val(std::move(Val)) {}
   const std::string &getValue() const { return Val; }
+  llvm::Value *codegen() override;
+};
+
+// Explicit type conversion: int(expr) / double(expr)
+class CastExprAST : public ExprAST {
+  TurfType DestType;
+  std::unique_ptr<ExprAST> Operand;
+  SourceLocation Loc;
+public:
+  CastExprAST(SourceLocation Loc, TurfType DestType,
+              std::unique_ptr<ExprAST> Operand)
+      : DestType(DestType), Operand(std::move(Operand)), Loc(Loc) {}
   llvm::Value *codegen() override;
 };
 

@@ -1,0 +1,28 @@
+// Damerau-Levenshtein Distance Test File
+// All these should trigger suggestions with distance = 1 (transposition)
+
+// Test 1: Built-in function transposition - pritn -> print
+pritn(42);
+
+// Test 2: Variable name transposition - myConuter -> myCounter
+int myCounter = 100;
+print(myConuter);
+
+// Test 3: Another variable transposition - vlaue -> value
+int value = 50;
+print(vlaue);
+
+// Test 4: Keyword transposition - tehn -> then, esle -> else
+fi 5 > 3 tehn print(1) esle print(0);
+
+// Test 5: Multiple variable transpositions
+int firstName = 10;
+int lastName = 20;
+print(fristName);
+print(lastNmae);
+
+// Test 6: More transpositions
+int width = 100;
+int height = 200;
+print(widht);
+print(heigth);

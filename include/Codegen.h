@@ -17,7 +17,7 @@ extern std::unique_ptr<llvm::Module> TheModule;
 
 struct VarInfo {
   llvm::AllocaInst *Alloca;
-  KirkType Type;
+  TurfType Type;
 };
 
 // Symbol Table: Maps variables to their memory locations (AllocaInst)
@@ -28,6 +28,6 @@ void InitializeModule();
 // Helper function to create an alloca instruction
 llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                          const std::string &VarName,
-                                         KirkType Type);
+                                         TurfType Type);
 
 #endif

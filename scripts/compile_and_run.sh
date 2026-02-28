@@ -9,7 +9,7 @@ RESET="\033[0m"
 TOTAL_STEPS=5
 
 if [ $# -eq 0 ]; then
-    echo "Usage: $0 <input.kirk>"
+    echo "Usage: $0 <input.tr>"
     exit 1
 fi
 
@@ -31,8 +31,10 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-echo -e "${GREEN}[1 / ${TOTAL_STEPS}]${RESET} ${BOLD}Compiling Kirk source:${RESET} $INPUT_FILE"
-./kirk "$INPUT_FILE"
+COMPILER_PATH="$(dirname "$0")/../turf"
+
+echo -e "${GREEN}[1 / ${TOTAL_STEPS}]${RESET} ${BOLD}Compiling Turf source:${RESET} $INPUT_FILE"
+"$COMPILER_PATH" "$INPUT_FILE"
 
 echo -e "${GREEN}[2 / ${TOTAL_STEPS}]${RESET} ${BOLD}Generating object file (PIC mode)...${RESET}"
 llc -relocation-model=pic -filetype=obj output.ll -o output.o

@@ -1,5 +1,6 @@
 #include "Parser.h"
 #include "AST.h"
+#include "Builtins.h"
 #include "Errors.h"
 #include "Lexer.h"
 #include <map>
@@ -56,25 +57,27 @@ static int GetTokPrecedence() {
 std::unique_ptr<ExprAST> ParseExpression();
 std::unique_ptr<ExprAST> ParseUnary();
 std::unique_ptr<ExprAST> ParseBlock();
-std::unique_ptr<ExprAST> ParsePrintExpr();
+std::unique_ptr<ExprAST> ParseBuiltinCall(); // generic handler for all builtins
 std::unique_ptr<ExprAST> ParseWhileExpr();
 std::unique_ptr<ExprAST> ParseVarDecl();
+std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc, TurfType Type);
+std::unique_ptr<ExprAST> ParseCastExpr(TurfType DestType, SourceLocation Loc);
 std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 
-static KirkType TokenToKirkType(int Tok) {
+static TurfType TokenToTurfType(int Tok) {
   switch (Tok) {
   case TOK_TYPE_INT:
-    return KIRK_INT;
+    return TURF_INT;
   case TOK_TYPE_DOUBLE:
-    return KIRK_DOUBLE;
+    return TURF_DOUBLE;
   case TOK_TYPE_BOOL:
-    return KIRK_BOOL;
+    return TURF_BOOL;
   case TOK_TYPE_STRING:
-    return KIRK_STRING;
+    return TURF_STRING;
   default:
     SyntaxError(CurLoc, "Unknown type").raise();
-    return KIRK_VOID;
+    return TURF_VOID;
   }
 }
 
@@ -87,9 +90,19 @@ static std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger) {
 }
 
 std::unique_ptr<ExprAST> ParseBoolExpr() {
-  auto Result = std::make_unique<BoolExprAST>(BoolVal);
+  SourceLocation KeywordLoc = CurLoc;
+  std::string IdName = IdentifierStr;
+  bool SavedBoolVal = BoolVal;
   getNextToken();
-  return Result;
+
+  if (CurTok == TOK_ASSIGN) {
+    getNextToken();
+    auto RHS = ParseExpression();
+    if (!RHS) return nullptr;
+    return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+  }
+
+  return std::make_unique<BoolExprAST>(SavedBoolVal);
 }
 
 std::unique_ptr<ExprAST> ParseStringExpr() {
@@ -138,7 +151,16 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
 }
 
 std::unique_ptr<ExprAST> ParseIfExpr() {
+  SourceLocation KeywordLoc = CurLoc;
+  std::string IdName = IdentifierStr;
   getNextToken(); // Eating the if expression
+
+  if (CurTok == TOK_ASSIGN) {
+    getNextToken();
+    auto RHS = ParseExpression();
+    if (!RHS) return nullptr;
+    return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+  }
 
   auto Cond = ParseExpression();
   if (!Cond)
@@ -153,6 +175,13 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
   } else if (CurTok == '{') {
     Then = ParseBlock();
   } else {
+    // Check if the current token is a typo for 'then'
+    if (CurTok == TOK_IDENTIFIER) {
+      if (getLevenshteinDistance(IdentifierStr, "then") <= 2) {
+        KeywordError(CurLoc, IdentifierStr).raise();
+        return nullptr;
+      }
+    }
     LogErrorAt(CurLoc, "Expected 'then' or '{' after if condition");
     return nullptr;
   }
@@ -161,6 +190,12 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     return nullptr;
 
   if (CurTok != TOK_ELSE) {
+    if (CurTok == TOK_IDENTIFIER) {
+      if (getLevenshteinDistance(IdentifierStr, "else") <= 2) {
+        KeywordError(CurLoc, IdentifierStr).raise();
+        return nullptr;
+      }
+    }
     LogErrorAt(CurLoc, "expected 'else'");
     return nullptr;
   }
@@ -183,11 +218,41 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
 static std::unique_ptr<ExprAST> ParsePrimary() {
   switch (CurTok) {
   default:
+    // Check if the current token belongs to a registered builtin (e.g. print).
+    // This branch never needs to change when new builtins are added.
+    if (FindBuiltinByToken(CurTok))
+      return ParseBuiltinCall();
+
     LogErrorAt(CurLoc, "unknown token when expecting an expression");
     return nullptr;
 
-  case TOK_IDENTIFIER:
+  case TOK_IDENTIFIER: {
+    // Check for keyword typos before standard identifier parsing
+    std::string IdName = IdentifierStr;
+    bool CouldBeKeywordTypo = false;
+    
+    // Calculate distance to keywords only if its length is > 2 or the matched keyword length is similar
+    if (IdName.length() >= 2) {
+      for (const auto &pair : Keywords) {
+        int dist = getLevenshteinDistance(IdName, pair.first);
+        // Distance 1 is always good. Distance 2 is good only for longer words to avoid 'x' -> 'if'
+        if (dist <= 1 || (dist == 2 && IdName.length() > 3 && pair.first.length() > 3)) {
+          CouldBeKeywordTypo = true;
+          break;
+        }
+      }
+    }
+
+    if (CouldBeKeywordTypo) {
+      if (CurTok != TOK_ASSIGN) {
+        KeywordError(CurLoc, IdName).raise();
+        return nullptr;
+      }
+    }
+
+    // Hand off to existing logic
     return ParseIdentifierExpr();
+  }
 
   case TOK_NUMBER:
     return ParseNumberExpr(false);
@@ -207,14 +272,36 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   case TOK_IF:
     return ParseIfExpr();
 
-  case TOK_PRINT:
-    return ParsePrintExpr();
-
   case TOK_WHILE:
     return ParseWhileExpr();
 
+  case TOK_THEN:
+  case TOK_ELSE: {
+    SourceLocation KeywordLoc = CurLoc;
+    std::string IdName = IdentifierStr;
+    getNextToken();
+    if (CurTok == TOK_ASSIGN) {
+      getNextToken();
+      auto RHS = ParseExpression();
+      if (!RHS) return nullptr;
+      return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+    }
+    LogErrorAt(KeywordLoc, "unknown token when expecting an expression");
+    return nullptr;
+  }
+
   case TOK_TYPE_INT:
-  case TOK_TYPE_DOUBLE:
+  case TOK_TYPE_DOUBLE: {
+    // if the next token is '(' this is a cast call, e.g. int(x)
+    // otherwise it is a variable declaration, e.g. int x = ...
+    TurfType DestType = (CurTok == TOK_TYPE_INT) ? TURF_INT : TURF_DOUBLE;
+    SourceLocation TypeLoc = CurLoc;
+    getNextToken(); // consume the type keyword
+    if (CurTok == '(')
+      return ParseCastExpr(DestType, TypeLoc);
+    return ParseVarDeclBody(TypeLoc, DestType);
+  }
+
   case TOK_TYPE_BOOL:
   case TOK_TYPE_STRING:
     return ParseVarDecl();
@@ -324,30 +411,58 @@ std::unique_ptr<ExprAST> ParseBlock() {
   return std::make_unique<BlockExprAST>(std::move(Exprs));
 }
 
-std::unique_ptr<ExprAST> ParsePrintExpr() {
-  getNextToken();
-
+// ParseBuiltinCall -  called when CurTok is the token of a registered builtin.
+// Parses:  builtinName ( arg1, arg2, ... )
+// The number of expected arguments is taken from the BuiltinDef, so this
+// function never needs to change when a new builtin is added.
+std::unique_ptr<ExprAST> ParseBuiltinCall() {
+  const BuiltinDef *Def = FindBuiltinByToken(CurTok);
+  std::string Name = Def->Name;
+  getNextToken(); // consume the builtin keyword
+  
   if (CurTok != '(') {
-    LogErrorAt(CurLoc, "Expected '(' after print");
+    LogErrorAt(CurLoc, "Expected '(' after '" + Name + "'");
     return nullptr;
   }
-  getNextToken();
+  getNextToken(); // eat '('
 
-  auto Expr = ParseExpression();
-  if (!Expr)
-    return nullptr;
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  for (int i = 0; i < Def->ArgCount; ++i) {
+    auto Arg = ParseExpression();
+    if (!Arg)
+      return nullptr;
+    Args.push_back(std::move(Arg));
+
+    // Expect a comma between arguments (but not after the last one)
+    if (i < Def->ArgCount - 1) {
+      if (CurTok != ',') {
+        LogErrorAt(CurLoc, "Expected ',' between arguments to '" + Name + "'");
+        return nullptr;
+      }
+      getNextToken(); // eat ','
+    }
+  }
 
   if (CurTok != ')') {
-    LogErrorAt(CurLoc, "Expected ')' after print argument");
+    LogErrorAt(CurLoc, "Expected ')' after argument to '" + Name + "'");
     return nullptr;
   }
-  getNextToken();
+  getNextToken(); // eat ')'
 
-  return std::make_unique<PrintExprAST>(std::move(Expr));
+  return std::make_unique<BuiltinCallExprAST>(Name, std::move(Args));
 }
 
 std::unique_ptr<ExprAST> ParseWhileExpr() {
+  SourceLocation KeywordLoc = CurLoc;
+  std::string IdName = IdentifierStr;
   getNextToken();
+
+  if (CurTok == TOK_ASSIGN) {
+    getNextToken();
+    auto RHS = ParseExpression();
+    if (!RHS) return nullptr;
+    return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName, std::move(RHS));
+  }
 
   auto Cond = ParseExpression();
   if (!Cond) {
@@ -366,12 +481,11 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
   return std::make_unique<WhileExprAST>(std::move(Cond), std::move(Body));
 }
 
-std::unique_ptr<ExprAST> ParseVarDecl() {
-  SourceLocation TypeLoc = CurLoc;
-  KirkType Type = TokenToKirkType(CurTok);
-  getNextToken();
-
-  if (CurTok != TOK_IDENTIFIER) {
+// ParseVarDeclBody - called after the type keyword has already been consumed.
+// CurTok must already be the identifier (variable name) when this is called.
+std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc, TurfType Type) {
+  bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() && Keywords.at(IdentifierStr) == CurTok;
+  if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
     LogErrorAt(CurLoc, "Expected identifier after type");
     return nullptr;
   }
@@ -392,4 +506,30 @@ std::unique_ptr<ExprAST> ParseVarDecl() {
 
   return std::make_unique<VarDeclExprAST>(NameLoc, Name, Type,
                                           std::move(Init));
+}
+
+// ParseVarDecl - original entry point (type token is still in CurTok).
+std::unique_ptr<ExprAST> ParseVarDecl() {
+  SourceLocation TypeLoc = CurLoc;
+  TurfType Type = TokenToTurfType(CurTok);
+  getNextToken(); // consume the type keyword
+  return ParseVarDeclBody(TypeLoc, Type);
+}
+
+// ParseCastExpr - called after the type keyword has been consumed and
+// CurTok == '('. Parses int(expr) or double(expr).
+std::unique_ptr<ExprAST> ParseCastExpr(TurfType DestType, SourceLocation Loc) {
+  getNextToken(); // eat '('
+
+  auto Operand = ParseExpression();
+  if (!Operand)
+    return nullptr;
+
+  if (CurTok != ')') {
+    LogErrorAt(CurLoc, "Expected ')' after cast expression");
+    return nullptr;
+  }
+  getNextToken(); // eat ')'
+
+  return std::make_unique<CastExprAST>(Loc, DestType, std::move(Operand));
 }

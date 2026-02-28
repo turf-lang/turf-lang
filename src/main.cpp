@@ -1,3 +1,4 @@
+#include "Builtins.h"
 #include "Codegen.h"
 #include "Lexer.h"
 #include "Parser.h"
@@ -10,7 +11,7 @@ using namespace llvm;
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::cerr << "Usage: kirk <filename.kirk>\n";
+    std::cerr << "Usage: turf <filename.tr>\n";
     return 1;
   }
 
@@ -27,7 +28,8 @@ int main(int argc, char **argv) {
     SourceLines.push_back(Line);
   }
 
-  InitializeModule(); // Initialize LLVM Context, Module, Builder
+  RegisterBuiltins();   // Populate builtin registry + inject keywords into Lexer
+  InitializeModule();   // Initialize LLVM Context, Module, Builder
   InitializePrecedence();
 
   // Setup the main function wrapper to hold all the code

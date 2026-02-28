@@ -1,8 +1,6 @@
-# Kirk
+# Turf
 
-<a href="https://app.devdoq.com/dashboard/1127649459?name=kirk-lang&tab=document"><img src="https://app.devdoq.com/shields/read_docs.png" alt="Read Docs" width="120" height="45"></a> <a href="https://app.devdoq.com/dashboard/1127649459?name=kirk-lang&tab=chat"><img src="https://app.devdoq.com/shields/talk_to_code.png" alt="Talk to Code" width="165" height="60"></a>
-
-Kirk is an experimental programming language and compiler written in C++. The goal is simple: fast compilation with helpful, human-friendly error messages. Instead of plain errors, Kirk explains what went wrong and suggests fixes.
+Turf is an experimental programming language and compiler written in C++. The goal is simple: fast compilation with helpful, human-friendly error messages. Instead of plain errors, Turf explains what went wrong and suggests fixes.
 
 - The project is in early development.
 - Current focus is the frontend: lexer, parser, and diagnostics.
@@ -11,7 +9,7 @@ Kirk is an experimental programming language and compiler written in C++. The go
 ## Features (Implemented)
 
 - **Type System:** Built-in types `int`, `float`/`double`, `bool`, and `string` with implicit type promotion (bool → int → double) during operations. Strings are treated as a distinct type and cannot be cast to/from numeric types.
-- **Typed Variable Declarations:** Variables can be declared with explicit types (`int x = 5`, `double pi = 3.14`, `bool flag = true`, `string name = "Kirk"`).
+- **Typed Variable Declarations:** Variables can be declared with explicit types (`int x = 5`, `double pi = 3.14`, `bool flag = true`, `string name = "Turf"`).
 - **String Support:** First-class string type with string literals (`"hello"`), string variables, assignment, and printing. Supports escape sequences (`\n`, `\t`, `\\`, `\"`).
 - **Variables:** Support for variable assignment and lookups.
 - **Boolean Literals:** Support for `true` and `false` boolean values.
@@ -24,7 +22,7 @@ Kirk is an experimental programming language and compiler written in C++. The go
 - **Print:** Built-in `print()` function for output (supports int, double, bool, and string types).
 - **Memory Management:** Automatic stack allocation using LLVM `alloca`, `store`, and `load`.
 - **LLVM Backend:** Compiles source code directly to optimized LLVM IR (`output.ll`).
-- **Smart Compiler (Phase 1):** Support for smart compiler error enhancements, where it suggests you what changes to make (using Levenshtein distance for variable name suggestions).
+- **Smart Compiler (Phase 1):** Support for smart compiler error enhancements, where it suggests you what changes to make (using Damerau-Levenshtein distance for variable name and keyword suggestions, including transposition typo detection).
 
 ## Build and Run
 
@@ -38,7 +36,7 @@ Use the included helper script to compile the compiler, generate the IR, link it
 chmod +x update_compiler.sh
 ./update_compiler.sh
 chmod +x compile_and_run.sh
-./compile_and_run.sh test.kirk
+./compile_and_run.sh test.tr
 ```
 
 ### Manual Build
@@ -46,19 +44,19 @@ chmod +x compile_and_run.sh
 If you want to build the compiler binary manually:
 
 ```bash
-clang++ main.cpp Lexer.cpp Parser.cpp Codegen.cpp Algorithms.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core` -o kirk
+clang++ main.cpp Lexer.cpp Parser.cpp Codegen.cpp Algorithms.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core` -o turf
 ```
 
 Rest steps will be the same from the Quick Start section.
 
 ## Example Code
 
-```kirk
+```turf
 // Typed variable declarations
 int width = 10
 int height = 5
 double pi = 3.14
-string greeting = "Hello, Kirk!"
+string greeting = "Hello, Turf!"
 
 // Variables are mutable and memory-managed
 int area = width * height
@@ -114,4 +112,4 @@ print(flag)
 
 The compiler supports typed variables (`int`, `double`, `bool`), arithmetic (including exponentiation), control flow (`if`/`else`, `while`), comparison operators, boolean literals, single-line comments, and output via `print()`.
 
-> After a certain phase of development, both the 'Build' and 'Run' phase will be packaged in a separate "Kirk Compiler" package.
+> After a certain phase of development, both the 'Build' and 'Run' phase will be packaged in a separate "Turf Compiler" package.

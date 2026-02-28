@@ -34,13 +34,13 @@ out/
 Thumbs.db
 
 # Test inputs / local experiments
-*.kirk.out
+*.turf.out
 
 
 # Debug
 *.dSYM/
 
 # File Binary
-kirk
+turf
 program
 
