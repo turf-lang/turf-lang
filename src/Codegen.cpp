@@ -5,6 +5,7 @@
 #include "Errors.h"
 #include "Lexer.h"
 #include "Types.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/IR/Verifier.h"
 #include <iostream>
 
@@ -633,13 +634,19 @@ Value *FuncDefExprAST::codegen() {
   // Codegen the body
   Body->codegen();
 
-  // Emit a return if the block has no terminator yet
+  // Emit a return if the block has no terminator yet.
+  // IMPORTANT: ReturnExprAST::codegen() leaves the builder pointing at a
+  // fresh dead "after_ret" block (no predecessors, no terminator). We must
+  // erase those dead blocks instead of treating them as missing-return paths.
   BasicBlock *CurBB = Builder->GetInsertBlock();
   if (!CurBB->getTerminator()) {
-    if (ReturnType == TURF_VOID) {
+    bool IsDead = (CurBB != BB) && llvm::pred_empty(CurBB);
+    if (IsDead) {
+      // Dead block left behind by a return statement — erase it cleanly.
+      CurBB->eraseFromParent();
+    } else if (ReturnType == TURF_VOID) {
       Builder->CreateRetVoid();
     } else {
-      // Return a zero of the declared type (avoids missing-ret UB)
       SyntaxError(Loc, "Non-void function '" + Name + "' may not return from all paths").raise();
       Builder->CreateRet(Constant::getNullValue(getLLVMType(ReturnType)));
     }
