@@ -1,0 +1,2 @@
+string s = input()
+int x = input() // Should fail gracefully
