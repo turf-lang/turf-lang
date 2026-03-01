@@ -2,25 +2,25 @@
 
 // Test 1: Basic ascending loop
 for i in 0..5 step i += 1 {
-    println(i)
+    printline(i)
 }
 
 // Test 2: Descending loop
 for i in 5..0 step i -= 1 {
-    println(i)
+    printline(i)
 }
 
 // Test 3: Multiply step
 for i in 1..100 step i *= 2 {
-    println(i)
+    printline(i)
 }
 
 // Test 4: For loop with break
 for i in 0..10 step i += 1 {
-    if i == 3 then break else println(i)
+    if i == 3 then break else printline(i)
 }
 
 // Test 5: For loop with continue
 for i in 0..5 step i += 1 {
-    if i == 2 then continue else println(i)
+    if i == 2 then continue else printline(i)
 }
