@@ -87,6 +87,9 @@ public:
             std::unique_ptr<ExprAST> Else)
       : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
 
+  ExprAST* getThen() const { return Then.get(); }
+  ExprAST* getElse() const { return Else.get(); }
+
   llvm::Value *codegen() override;
 };
 
@@ -108,6 +111,8 @@ class BlockExprAST : public ExprAST {
 public:
   BlockExprAST(std::vector<std::unique_ptr<ExprAST>> Expressions)
       : Expressions(std::move(Expressions)) {}
+
+  const std::vector<std::unique_ptr<ExprAST>>& getExpressions() const { return Expressions; }
 
   llvm::Value *codegen() override;
 };
@@ -132,6 +137,8 @@ class WhileExprAST : public ExprAST {
 public:
   WhileExprAST(std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Body)
       : Cond(std::move(Cond)), Body(std::move(Body)) {}
+
+  ExprAST* getBody() const { return Body.get(); }
 
   llvm::Value *codegen() override;
 };

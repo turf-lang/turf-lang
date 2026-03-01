@@ -1,0 +1,18 @@
+// Test: Return in one branch but not all
+// Expected: Should warn about missing return
+
+fn int test_partial_return(int x) {
+    if (x > 0) {
+        return x
+    } else {
+        if (x < -10) {
+            return -x
+        } else {
+            // Missing return for -10 <= x <= 0 case
+            int dummy = 0
+        }
+    }
+}
+
+// Top-level call
+test_partial_return(5)

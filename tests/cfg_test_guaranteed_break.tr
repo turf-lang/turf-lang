@@ -1,0 +1,18 @@
+// Test: While loop with guaranteed break
+// Expected: Should compile successfully
+
+fn int test_guaranteed_break() {
+    int x = 0
+    while (true) {
+        x = x + 1
+        if (x >= 10) {
+            break
+        } else {
+            int dummy = 0
+        }
+    }
+    return x
+}
+
+// Top-level call
+test_guaranteed_break()

@@ -1,0 +1,25 @@
+// Test: Deeply nested if-else with all paths returning
+// Expected: Should compile successfully
+
+fn int test_nested_if(int x) {
+    if (x > 100) {
+        if (x > 200) {
+            return x * 3
+        } else {
+            return x * 2
+        }
+    } else {
+        if (x > 50) {
+            return x + 10
+        } else {
+            if (x > 25) {
+                return x + 5
+            } else {
+                return x
+            }
+        }
+    }
+}
+
+// Top-level call
+test_nested_if(150)

@@ -1,0 +1,20 @@
+// Test: Dead code after break in loop
+// Expected: Should detect unreachable code after break
+
+fn int test_break() {
+    int sum = 0
+    int i = 0
+    while (i < 10) {
+        if (i == 5) {
+            break
+            sum = sum + 100  // Unreachable after break
+        } else {
+            sum = sum + i
+            i = i + 1
+        }
+    }
+    return sum
+}
+
+// Top-level call
+test_break()
