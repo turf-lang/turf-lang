@@ -210,11 +210,11 @@ void CFGBuilder::visitExpr(ExprAST *E) {
     return;
 
   // Check if current block already has an explicit terminator or is null
-  // If so, statements after it are unreachable
+  // If so, statements after it are unreachable - report error immediately
   if (!CurrentBlock || CurrentBlock->hasExplicitTerminator()) {
-    // Create unreachable block for remaining statements
-    TurfBasicBlock *UnreachableBB = createBlock("unreachable");
-    setInsertPoint(UnreachableBB);
+    // Report the error - use generic location since we may not have specific location info
+    StatementAfterTerminatorError(SourceLocation{0, 0}, "return/break/continue").raise();
+    return;
   }
 
   // Determine expression type and dispatch
@@ -244,11 +244,7 @@ void CFGBuilder::visitBlock(ExprAST *E) {
   // Visit each statement in the block sequentially
   for (const auto &Expr : Block->getExpressions()) {
     visitExpr(Expr.get());
-    
-    // If we hit a terminator (CurrentBlock becomes null), stop processing
-    if (!CurrentBlock) {
-      break;
-    }
+    // Continue processing all statements - visitExpr will handle unreachable code
   }
 }
 

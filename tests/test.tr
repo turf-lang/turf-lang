@@ -1,3 +1,6 @@
-int apple = 10;
+fn int add(int a, int b) {
+    return a + b;
+    print("Hello dead code")
+}
 
-print(apple)
+printline(add(1,2))
