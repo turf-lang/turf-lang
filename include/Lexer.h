@@ -60,6 +60,10 @@ enum Token {
   TOK_MOD_ASSIGN = -33,
   TOK_PLUS_PLUS = -34,
   TOK_MINUS_MINUS = -35,
+  TOK_FOR = -36,
+  TOK_IN = -37,
+  TOK_STEP = -38,
+  TOK_RANGE = -39,
 };
 
 int gettok();

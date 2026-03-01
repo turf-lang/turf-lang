@@ -30,7 +30,10 @@ std::map<std::string, int> Keywords = {
     {"return", TOK_RETURN},
     {"fn", TOK_FN},
     {"break", TOK_BREAK},
-    {"continue", TOK_CONTINUE}};
+    {"continue", TOK_CONTINUE},
+    {"for", TOK_FOR},
+    {"in", TOK_IN},
+    {"step", TOK_STEP}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
@@ -137,6 +140,15 @@ int gettok() {
     return TOK_STRING_LITERAL;
   }
 
+  // Range operator: .. (must come before number handler so start..end works)
+  if (LastChar == '.' && SourceFile.peek() == '.') {
+    LastChar = SourceFile.get();
+    CurCol++;
+    LastChar = SourceFile.get();
+    CurCol++;
+    return TOK_RANGE;
+  }
+
   // Numbers: [0-9.]+
   if (isdigit(LastChar) || LastChar == '.') {
     std::string NumStr;
@@ -144,7 +156,7 @@ int gettok() {
       NumStr += LastChar;
       LastChar = SourceFile.get();
       CurCol++;
-    } while (isdigit(LastChar) || LastChar == '.');
+    } while (isdigit(LastChar) || (LastChar == '.' && SourceFile.peek() != '.'));
 
     bool IsFloat = NumStr.find('.') != std::string::npos;
     if (IsFloat) {
