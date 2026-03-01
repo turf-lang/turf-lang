@@ -106,6 +106,53 @@ void RegisterBuiltins() {
          return nullptr;
        }});
 
+  // input()
+  // Reads string from stdin
+  Builtins.push_back(
+      {"input", TOK_BUILTIN_INPUT, /*ArgCount=*/0,
+       [](std::vector<Value *> &Args, SourceLocation Loc) -> Value * {
+         // Create functions 'calloc', 'scanf', 'getchar' if they don't exist
+         Function *CallocFunc = TheModule->getFunction("calloc");
+         if (!CallocFunc) {
+           FunctionType *FT = FunctionType::get(
+               PointerType::getUnqual(*TheContext),
+               {Type::getInt64Ty(*TheContext), Type::getInt64Ty(*TheContext)},
+               false);
+           CallocFunc = Function::Create(FT, Function::ExternalLinkage,
+                                         "calloc", TheModule.get());
+         }
+
+         Function *ScanfFunc = TheModule->getFunction("scanf");
+         if (!ScanfFunc) {
+           FunctionType *FT = FunctionType::get(
+               Type::getInt32Ty(*TheContext),
+               {PointerType::getUnqual(*TheContext)}, true);
+           ScanfFunc = Function::Create(FT, Function::ExternalLinkage,
+                                        "scanf", TheModule.get());
+         }
+
+         Function *GetcharFunc = TheModule->getFunction("getchar");
+         if (!GetcharFunc) {
+           FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext), false);
+           GetcharFunc = Function::Create(FT, Function::ExternalLinkage,
+                                          "getchar", TheModule.get());
+         }
+
+         // calloc(4096, 1)
+         Value *NumItems = ConstantInt::get(Type::getInt64Ty(*TheContext), 4096);
+         Value *Size = ConstantInt::get(Type::getInt64Ty(*TheContext), 1);
+         Value *Buf = Builder->CreateCall(CallocFunc, {NumItems, Size}, "buf");
+
+         // scanf("%4095[^\n]", Buf)
+         Value *Fmt = Builder->CreateGlobalStringPtr("%4095[^\n]", "scanfmt");
+         Builder->CreateCall(ScanfFunc, {Fmt, Buf});
+
+         // getchar()
+         Builder->CreateCall(GetcharFunc, {});
+
+         return Buf;
+       }});
+
   // Register each builtin's name into the Lexer keyword table
   // This is what makes the Lexer emit the right token when it sees "print",
   // "println", etc. No change to Lexer.cpp is ever needed for new builtins.
