@@ -940,9 +940,9 @@ Value *FuncDefExprAST::codegen() {
   // Build and analyze CFG for flow diagnostics
   if (Body) {
     CFGBuilder Builder;
-    auto FuncCFG = Builder.buildCFG(Name, Body.get());
+    auto FuncCFG = Builder.buildCFG(Name, ReturnType, Body.get());
     
-    // Run flow analysis and report diagnostics
+    // Run flow analysis and report diagnostics (will raise error for missing returns in non-void)
     FuncCFG->reportFlowDiagnostics();
     
     // Store CFG for later use (optional)
@@ -962,7 +962,7 @@ Value *FuncDefExprAST::codegen() {
     } else if (ReturnType == TURF_VOID) {
       Builder->CreateRetVoid();
     } else {
-      SyntaxError(Loc, "Non-void function '" + Name + "' may not return from all paths").raise();
+      // CFG already reported the error, but we still need to generate valid IR
       Builder->CreateRet(Constant::getNullValue(getLLVMType(ReturnType)));
     }
   }

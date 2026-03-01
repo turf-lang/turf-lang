@@ -14,7 +14,7 @@ echo -e "${BLUE}=== CFG Flow Analysis Tests ===${RESET}\n"
 
 # Test 1: Unreachable code after return
 echo -e "${BLUE}Test 1: Unreachable code after return${RESET}"
-if ./turf tests/cfg_test_unreachable.tr 2>&1 | grep -q "Unreachable"; then
+if ./turf tests/cfg_test_unreachable.tr 2>&1 | grep -qi "unreachable\|impossible to reach\|will never happen"; then
   echo -e "${GREEN}✓ PASS${RESET} - Detected unreachable code after return\n"
 else
   echo -e "${RED}✗ FAIL${RESET} - Should detect unreachable code after return\n"
@@ -22,7 +22,7 @@ fi
 
 # Test 2: Missing return paths
 echo -e "${BLUE}Test 2: Missing return paths${RESET}"
-if ./turf tests/cfg_test_missing_return.tr 2>&1 | grep -qi "not all code paths return\|may not return"; then
+if ./turf tests/cfg_test_missing_return.tr 2>&1 | grep -qi "not all code paths return\|may not return\|promises to give back a result"; then
   echo -e "${GREEN}✓ PASS${RESET} - Detected missing return paths\n"
 else
   echo -e "${RED}✗ FAIL${RESET} - Should detect missing return paths\n"
@@ -30,18 +30,18 @@ fi
 
 # Test 3: Unreachable code after break
 echo -e "${BLUE}Test 3: Unreachable code after break${RESET}"
-if ./turf tests/cfg_test_break_unreachable.tr 2>&1 | grep -q "Successfully compiled"; then
-  echo -e "${GREEN}✓ PASS${RESET} - Compiled with break in loop\n"
+if ./turf tests/cfg_test_break_unreachable.tr 2>&1 | grep -qi "impossible to reach\|after a return/break/continue"; then
+  echo -e "${GREEN}✓ PASS${RESET} - Detected unreachable code after break\n"
 else
-  echo -e "${RED}✗ FAIL${RESET} - Should compile\n"
+  echo -e "${RED}✗ FAIL${RESET} - Should detect unreachable code after break\n"
 fi
 
 # Test 4: Unreachable code after continue
 echo -e "${BLUE}Test 4: Unreachable code after continue${RESET}"
-if ./turf tests/cfg_test_continue_unreachable.tr 2>&1 | grep -q "Successfully compiled"; then
-  echo -e "${GREEN}✓ PASS${RESET} - Compiled with continue in loop\n"
+if ./turf tests/cfg_test_continue_unreachable.tr 2>&1 | grep -qi "impossible to reach\|after a return/break/continue"; then
+  echo -e "${GREEN}✓ PASS${RESET} - Detected unreachable code after continue\n"
 else
-  echo -e "${RED}✗ FAIL${RESET} - Should compile\n"
+  echo -e "${RED}✗ FAIL${RESET} - Should detect unreachable code after continue\n"
 fi
 
 # Test 5: Valid control flow (should compile)
@@ -68,12 +68,12 @@ else
   echo -e "${RED}✗ FAIL${RESET} - Early return should compile\n"
 fi
 
-# Test 8: Multiple returns (should compile)
+# Test 8: Multiple returns (should detect unreachable)
 echo -e "${BLUE}Test 8: Multiple returns in sequence${RESET}"
-if ./turf tests/cfg_test_multiple_returns.tr 2>&1 | grep -q "Successfully compiled"; then
-  echo -e "${GREEN}✓ PASS${RESET} - Multiple returns compiled\n"
+if ./turf tests/cfg_test_multiple_returns.tr 2>&1 | grep -qi "impossible to reach\|after a return/break/continue"; then
+  echo -e "${GREEN}✓ PASS${RESET} - Detected unreachable returns\n"
 else
-  echo -e "${RED}✗ FAIL${RESET} - Should compile\n"
+  echo -e "${RED}✗ FAIL${RESET} - Should detect unreachable code\n"
 fi
 
 # Test 9: Deeply nested if-else (should compile)
@@ -110,7 +110,7 @@ fi
 
 # Test 13: Return in nested block (should error)
 echo -e "${BLUE}Test 13: Return in nested block${RESET}"
-if ./turf tests/cfg_test_nested_block_return.tr 2>&1 | grep -q "Unreachable"; then
+if ./turf tests/cfg_test_nested_block_return.tr 2>&1 | grep -qi "unreachable\|impossible to reach\|will never happen"; then
   echo -e "${GREEN}✓ PASS${RESET} - Detected unreachable code in nested block\n"
 else
   echo -e "${RED}✗ FAIL${RESET} - Should detect unreachable code in nested block\n"
@@ -126,7 +126,7 @@ fi
 
 # Test 15: Partial return (should warn)
 echo -e "${BLUE}Test 15: Partial return coverage${RESET}"
-if ./turf tests/cfg_test_partial_return.tr 2>&1 | grep -qi "not all code paths return\|may not return"; then
+if ./turf tests/cfg_test_partial_return.tr 2>&1 | grep -qi "not all code paths return\|may not return\|promises to give back a result"; then
   echo -e "${GREEN}✓ PASS${RESET} - Detected missing return on some paths\n"
 else
   echo -e "${RED}✗ FAIL${RESET} - Should detect missing return paths\n"

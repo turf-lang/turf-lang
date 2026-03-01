@@ -2,6 +2,7 @@
 #define CFG_H
 
 #include "Lexer.h"
+#include "Types.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -77,18 +78,20 @@ public:
 class CFG {
 private:
   std::string FunctionName;                        // Name of the function this CFG represents
+  TurfType ReturnType;                             // Return type of the function
   std::vector<std::unique_ptr<TurfBasicBlock>> Blocks; // All blocks (owned)
   TurfBasicBlock *EntryBlock;                      // First block (entry point)
   TurfBasicBlock *ExitBlock;                       // Virtual exit block (all returns jump here)
   BlockID NextID;                                  // Next available block ID
 
 public:
-  explicit CFG(std::string FunctionName)
-      : FunctionName(std::move(FunctionName)), EntryBlock(nullptr),
-        ExitBlock(nullptr), NextID(0) {}
+  explicit CFG(std::string FunctionName, TurfType ReturnType = TURF_VOID)
+      : FunctionName(std::move(FunctionName)), ReturnType(ReturnType),
+        EntryBlock(nullptr), ExitBlock(nullptr), NextID(0) {}
 
   // Accessors
   const std::string &getFunctionName() const { return FunctionName; }
+  TurfType getReturnType() const { return ReturnType; }
   TurfBasicBlock *getEntryBlock() const { return EntryBlock; }
   TurfBasicBlock *getExitBlock() const { return ExitBlock; }
   const std::vector<std::unique_ptr<TurfBasicBlock>> &getBlocks() const { return Blocks; }
@@ -123,13 +126,15 @@ private:
   TurfBasicBlock *CurrentBlock;             // Current insertion point
   TurfBasicBlock *LoopContinueTarget;       // Target for 'continue' (innermost loop header)
   TurfBasicBlock *LoopBreakTarget;          // Target for 'break' (innermost loop exit)
+  SourceLocation LastTerminatorLoc;         // Location of last terminator encountered
 
 public:
   CFGBuilder() : CurrentCFG(nullptr), CurrentBlock(nullptr),
-                 LoopContinueTarget(nullptr), LoopBreakTarget(nullptr) {}
+                 LoopContinueTarget(nullptr), LoopBreakTarget(nullptr),
+                 LastTerminatorLoc{0, 0} {}
 
   // Build CFG for a function
-  std::unique_ptr<CFG> buildCFG(const std::string &FunctionName, ExprAST *Body);
+  std::unique_ptr<CFG> buildCFG(const std::string &FunctionName, TurfType ReturnType, ExprAST *Body);
 
 private:
   // Visit methods for different AST nodes
