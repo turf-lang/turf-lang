@@ -59,6 +59,7 @@ std::unique_ptr<ExprAST> ParseUnary();
 std::unique_ptr<ExprAST> ParseBlock();
 std::unique_ptr<ExprAST> ParseBuiltinCall(); // generic handler for all builtins
 std::unique_ptr<ExprAST> ParseWhileExpr();
+std::unique_ptr<ExprAST> ParseForExpr();
 std::unique_ptr<ExprAST> ParseVarDecl();
 std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc, TurfType Type);
 std::unique_ptr<ExprAST> ParseCastExpr(TurfType DestType, SourceLocation Loc);
@@ -327,6 +328,9 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   case TOK_WHILE:
     return ParseWhileExpr();
 
+  case TOK_FOR:
+    return ParseForExpr();
+
   case TOK_THEN:
   case TOK_ELSE: {
     SourceLocation KeywordLoc = CurLoc;
@@ -587,6 +591,61 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
     return nullptr;
 
   return std::make_unique<WhileExprAST>(std::move(Cond), std::move(Body));
+}
+
+// ParseForExpr - parses:
+//   for <ident> in <start>..<end> step <step_expr> { body }
+std::unique_ptr<ExprAST> ParseForExpr() {
+  SourceLocation ForLoc = CurLoc;
+  getNextToken();
+
+  if (CurTok != TOK_IDENTIFIER) {
+    LogErrorAt(CurLoc, "Expected identifier after 'for'");
+    return nullptr;
+  }
+  std::string VarName = IdentifierStr;
+  getNextToken();
+
+  if (CurTok != TOK_IN) {
+    LogErrorAt(CurLoc, "Expected 'in' after loop variable");
+    return nullptr;
+  }
+  getNextToken();
+
+  auto Start = ParseExpression();
+  if (!Start)
+    return nullptr;
+  if (CurTok != TOK_RANGE) {
+    LogErrorAt(CurLoc, "Expected '..' in for loop range");
+    return nullptr;
+  }
+  getNextToken();
+
+  auto End = ParseExpression();
+  if (!End)
+    return nullptr;
+  if (CurTok != TOK_STEP) {
+    LogErrorAt(CurLoc, "Expected 'step' after range");
+    return nullptr;
+  }
+  getNextToken();
+
+  auto Step = ParseExpression();
+  if (!Step)
+    return nullptr;
+
+  if (CurTok != '{') {
+    LogErrorAt(CurLoc, "Expected '{' after step expression");
+    return nullptr;
+  }
+
+  auto Body = ParseBlock();
+  if (!Body)
+    return nullptr;
+
+  return std::make_unique<ForExprAST>(ForLoc, VarName, std::move(Start),
+                                      std::move(End), std::move(Step),
+                                      std::move(Body));
 }
 
 // ParseVarDeclBody - called after the type keyword has already been consumed.

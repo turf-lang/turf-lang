@@ -649,6 +649,140 @@ Value *WhileExprAST::codegen() {
   return Constant::getNullValue(Type::getDoubleTy(*TheContext));
 }
 
+// ForExprAST::codegen : desugars to init + while(cond) { body; step }
+Value *ForExprAST::codegen() {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+  //  1. Init: declare loop variable with start value
+  Value *StartV = Start->codegen();
+  if (!StartV)
+    return nullptr;
+
+  // Determine the loop variable type from the start value
+  TurfType VarType = TURF_INT;
+  if (StartV->getType()->isDoubleTy())
+    VarType = TURF_DOUBLE;
+
+  StartV = CastToType(StartV, VarType, "forstart");
+
+  AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, VarName, VarType);
+  Builder->CreateStore(StartV, Alloca);
+
+  // Register loop variable in symbol table and NamedValues
+  // Save old binding so we can restore it after the loop
+  auto OldBinding = NamedValues.find(VarName);
+  std::pair<AllocaInst *, TurfType> SavedBinding;
+  bool HadOldBinding = false;
+  if (OldBinding != NamedValues.end()) {
+    SavedBinding = OldBinding->second;
+    HadOldBinding = true;
+  }
+  NamedValues[VarName] = {Alloca, VarType};
+
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->DeclareSymbol(VarName, VarType, Loc, Alloca);
+  }
+
+  //  2. Evaluate end value
+  Value *EndV = End->codegen();
+  if (!EndV)
+    return nullptr;
+  EndV = CastToType(EndV, VarType, "forend");
+
+  // Store end value so it doesn't get re-evaluated each iteration
+  AllocaInst *EndAlloca =
+      CreateEntryBlockAlloca(TheFunction, VarName + ".end", VarType);
+  Builder->CreateStore(EndV, EndAlloca);
+
+  //  3. Determine loop direction: start < end → ascending, else descending
+  // Compare start vs end to pick the right comparison operator.
+  Value *Ascending;
+  if (VarType == TURF_INT) {
+    Ascending = Builder->CreateICmpSLT(StartV, EndV, "ascending");
+  } else {
+    Ascending = Builder->CreateFCmpOLT(StartV, EndV, "ascending");
+  }
+
+  // Store direction flag
+  AllocaInst *AscAlloca =
+      CreateEntryBlockAlloca(TheFunction, VarName + ".asc", TURF_BOOL);
+  Builder->CreateStore(Ascending, AscAlloca);
+
+  //  4. Create basic blocks
+  BasicBlock *LoopCondBB =
+      BasicBlock::Create(*TheContext, "for.cond", TheFunction);
+  BasicBlock *LoopBodyBB = BasicBlock::Create(*TheContext, "for.body");
+  BasicBlock *LoopStepBB = BasicBlock::Create(*TheContext, "for.step");
+  BasicBlock *AfterBB = BasicBlock::Create(*TheContext, "for.end");
+
+  Builder->CreateBr(LoopCondBB);
+
+  //  5. Loop condition
+  Builder->SetInsertPoint(LoopCondBB);
+  Value *CurVar = Builder->CreateLoad(getLLVMType(VarType), Alloca, VarName);
+  Value *EndVal =
+      Builder->CreateLoad(getLLVMType(VarType), EndAlloca, VarName + ".end");
+  Value *AscFlag =
+      Builder->CreateLoad(Type::getInt1Ty(*TheContext), AscAlloca, "asc");
+
+  // If ascending: cond = (i < end), else: cond = (i > end)
+  Value *CondAsc, *CondDesc;
+  if (VarType == TURF_INT) {
+    CondAsc = Builder->CreateICmpSLT(CurVar, EndVal, "lt");
+    CondDesc = Builder->CreateICmpSGT(CurVar, EndVal, "gt");
+  } else {
+    CondAsc = Builder->CreateFCmpOLT(CurVar, EndVal, "lt");
+    CondDesc = Builder->CreateFCmpOGT(CurVar, EndVal, "gt");
+  }
+
+  Value *CondV = Builder->CreateSelect(AscFlag, CondAsc, CondDesc, "forcond");
+  Builder->CreateCondBr(CondV, LoopBodyBB, AfterBB);
+
+  //  6. Loop body
+  TheFunction->insert(TheFunction->end(), LoopBodyBB);
+  Builder->SetInsertPoint(LoopBodyBB);
+
+  // Push {StepBB, AfterBB} so 'continue' jumps to step, 'break' jumps to after
+  LoopBlocks.push_back({LoopStepBB, AfterBB});
+
+  if (!Body->codegen()) {
+    LoopBlocks.pop_back();
+    return nullptr;
+  }
+
+  LoopBlocks.pop_back();
+
+  // Fall through to step block
+  if (!Builder->GetInsertBlock()->getTerminator()) {
+    Builder->CreateBr(LoopStepBB);
+  }
+
+  // 7. Loop step
+  TheFunction->insert(TheFunction->end(), LoopStepBB);
+  Builder->SetInsertPoint(LoopStepBB);
+
+  if (!Step->codegen())
+    return nullptr;
+
+  // Branch back to condition
+  if (!Builder->GetInsertBlock()->getTerminator()) {
+    Builder->CreateBr(LoopCondBB);
+  }
+
+  // 8. After loop
+  TheFunction->insert(TheFunction->end(), AfterBB);
+  Builder->SetInsertPoint(AfterBB);
+
+  // Restore old binding
+  if (HadOldBinding) {
+    NamedValues[VarName] = SavedBinding;
+  } else {
+    NamedValues.erase(VarName);
+  }
+
+  return Constant::getNullValue(Type::getDoubleTy(*TheContext));
+}
+
 Value *BreakExprAST::codegen() {
   if (LoopBlocks.empty()) {
     SyntaxError(Loc, "'break' used outside of a loop").raise();
