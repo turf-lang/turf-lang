@@ -147,7 +147,7 @@ int gettok() {
       NumStr += LastChar;
       LastChar = SourceFile.get();
       CurCol++;
-    } while (isdigit(LastChar) || LastChar == '.');
+    } while (isdigit(LastChar) || (LastChar == '.' && SourceFile.peek() != '.'));
 
     bool IsFloat = NumStr.find('.') != std::string::npos;
     if (IsFloat) {

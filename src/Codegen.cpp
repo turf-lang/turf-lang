@@ -671,7 +671,7 @@ Value *ForExprAST::codegen() {
   // Register loop variable in symbol table and NamedValues
   // Save old binding so we can restore it after the loop
   auto OldBinding = NamedValues.find(VarName);
-  std::pair<AllocaInst *, TurfType> SavedBinding;
+  VarInfo SavedBinding;
   bool HadOldBinding = false;
   if (OldBinding != NamedValues.end()) {
     SavedBinding = OldBinding->second;
