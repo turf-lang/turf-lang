@@ -791,8 +791,9 @@ Value *BreakExprAST::codegen() {
 
   Builder->CreateBr(LoopBlocks.back().second);
 
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
   BasicBlock *DeadBB =
-      BasicBlock::Create(*TheContext, "after_break", CurrentFunction);
+      BasicBlock::Create(*TheContext, "after_break", TheFunction);
   Builder->SetInsertPoint(DeadBB);
 
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
@@ -806,8 +807,9 @@ Value *ContinueExprAST::codegen() {
 
   Builder->CreateBr(LoopBlocks.back().first);
 
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
   BasicBlock *DeadBB =
-      BasicBlock::Create(*TheContext, "after_continue", CurrentFunction);
+      BasicBlock::Create(*TheContext, "after_continue", TheFunction);
   Builder->SetInsertPoint(DeadBB);
 
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
