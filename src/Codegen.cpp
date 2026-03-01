@@ -508,12 +508,12 @@ Value *CastExprAST::codegen() {
   if (SrcType == TURF_DOUBLE && DestType == TURF_INT)
     return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), "dtoi");
 
-  // string → int  : call strtoll(str, nullptr, 10)
+  // string → int  : call strtoll(str, &endptr, 10)
   if (SrcType == TURF_STRING && DestType == TURF_INT) {
     // Declare strtoll if not already in the module
     Function *StrtollF = TheModule->getFunction("strtoll");
+    Type *I8Ptr = PointerType::get(Type::getInt8Ty(*TheContext), 0);
     if (!StrtollF) {
-      Type *I8Ptr  = PointerType::get(Type::getInt8Ty(*TheContext), 0);
       Type *I8PtrPtr = PointerType::get(I8Ptr, 0);
       FunctionType *FT = FunctionType::get(
           Type::getInt64Ty(*TheContext),
@@ -522,10 +522,45 @@ Value *CastExprAST::codegen() {
       StrtollF = Function::Create(FT, Function::ExternalLinkage,
                                   "strtoll", TheModule.get());
     }
-    Value *NullPtr = ConstantPointerNull::get(
-        PointerType::get(PointerType::get(Type::getInt8Ty(*TheContext), 0), 0));
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                     TheFunction->getEntryBlock().begin());
+    AllocaInst *EndPtrAlloca = TmpB.CreateAlloca(I8Ptr, 0, "endptr");
+
     Value *Base = ConstantInt::get(Type::getInt32Ty(*TheContext), 10);
-    return Builder->CreateCall(StrtollF, {Val, NullPtr, Base}, "strtoll_res");
+    Value *Res = Builder->CreateCall(StrtollF, {Val, EndPtrAlloca, Base}, "strtoll_res");
+
+    Value *EndPtrVal = Builder->CreateLoad(I8Ptr, EndPtrAlloca, "endptr_val");
+    Value *IsSame = Builder->CreateICmpEQ(EndPtrVal, Val, "is_same_ptr");
+
+    BasicBlock *ErrorBB = BasicBlock::Create(*TheContext, "cast_error", TheFunction);
+    BasicBlock *ContBB = BasicBlock::Create(*TheContext, "cast_cont");
+
+    Builder->CreateCondBr(IsSame, ErrorBB, ContBB);
+
+    Builder->SetInsertPoint(ErrorBB);
+
+    Function *PutsF = TheModule->getFunction("puts");
+    if (!PutsF) {
+      FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext), {I8Ptr}, false);
+      PutsF = Function::Create(FT, Function::ExternalLinkage, "puts", TheModule.get());
+    }
+    Value *ErrMsg = Builder->CreateGlobalStringPtr("Runtime Error: Invalid string to int conversion.", "errmsg");
+    Builder->CreateCall(PutsF, {ErrMsg});
+
+    Function *ExitF = TheModule->getFunction("exit");
+    if (!ExitF) {
+      FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext), {Type::getInt32Ty(*TheContext)}, false);
+      ExitF = Function::Create(FT, Function::ExternalLinkage, "exit", TheModule.get());
+    }
+    Builder->CreateCall(ExitF, {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
+    Builder->CreateUnreachable();
+
+    TheFunction->insert(TheFunction->end(), ContBB);
+    Builder->SetInsertPoint(ContBB);
+
+    return Res;
   }
 
   // string → double : call strtod(str, nullptr)
