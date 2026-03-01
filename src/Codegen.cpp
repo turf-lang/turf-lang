@@ -354,7 +354,15 @@ Value *VariableExprAST::codegen() {
   }
 
   // Use-before-declaration error
-  UseBeforeDeclarationError(Loc, Name).raise();
+  std::vector<std::string> VisibleNames;
+  if (GlobalSymbolTable) {
+    VisibleNames = GlobalSymbolTable->GetAllVisibleNames();
+  } else {
+    for (const auto &pair : NamedValues) {
+      VisibleNames.push_back(pair.first);
+    }
+  }
+  UseBeforeDeclarationError(Loc, Name, VisibleNames).raise();
   return nullptr;
 }
 

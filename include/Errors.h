@@ -130,8 +130,52 @@ public:
 // Semantic Error : Symbol binding issues
 class UseBeforeDeclarationError : public TurfError {
 public:
-  UseBeforeDeclarationError(SourceLocation UseLoc, const std::string &Name)
-      : TurfError(UseLoc, Colors::BRIGHT_RED + "Hold on! You're trying to use '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' before telling me what it is." + Colors::RESET + "\n  " + Colors::BRIGHT_GREEN + "Hint: Move the line where you create '" + Name + "' above this line!" + Colors::RESET) {}
+  UseBeforeDeclarationError(SourceLocation UseLoc, const std::string &Name, const std::vector<std::string> &KnownNames)
+      : TurfError(UseLoc, "") {
+      
+    Message = Colors::BRIGHT_RED + "Hold on! You're trying to use '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' before telling me what it is." + Colors::RESET;
+    
+    bool foundCandidate = false;
+    
+    if (Name.length() > 2) {
+      std::vector<std::string> Candidates;
+      
+      // Check variables in the current scope chain
+      for (const auto &KnownVar : KnownNames) {
+        if (KnownVar == Name)
+          continue;
+
+        if (getLevenshteinDistance(Name, KnownVar) <= 2) {
+          Candidates.push_back(KnownVar);
+        }
+      }
+      
+      // Check built-in functions
+      for (const auto &builtin : Builtins) {
+        if (builtin.Name == Name)
+          continue;
+
+        if (getLevenshteinDistance(Name, builtin.Name) <= 2) {
+          Candidates.push_back(builtin.Name);
+        }
+      }
+
+      if (!Candidates.empty()) {
+        foundCandidate = true;
+        Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
+        for (size_t i = 0; i < Candidates.size(); ++i) {
+          Message += Colors::BRIGHT_YELLOW + "'" + Candidates[i] + "'" + Colors::BRIGHT_GREEN;
+          if (i != Candidates.size() - 1)
+            Message += ", ";
+        }
+        Message += "?" + Colors::RESET;
+      }
+    }
+    
+    if (!foundCandidate) {
+        Message += "\n  " + Colors::BRIGHT_GREEN + "Hint: Did you forget to create this variable? You have to create it before you can use it, like this: `int " + Name + " = 5;`" + Colors::RESET;
+    }
+  }
 };
 
 class DuplicateDeclarationError : public TurfError {
