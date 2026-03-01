@@ -140,6 +140,15 @@ int gettok() {
     return TOK_STRING_LITERAL;
   }
 
+  // Range operator: .. (must come before number handler so start..end works)
+  if (LastChar == '.' && SourceFile.peek() == '.') {
+    LastChar = SourceFile.get();
+    CurCol++;
+    LastChar = SourceFile.get();
+    CurCol++;
+    return TOK_RANGE;
+  }
+
   // Numbers: [0-9.]+
   if (isdigit(LastChar) || LastChar == '.') {
     std::string NumStr;
@@ -157,17 +166,6 @@ int gettok() {
 
     IntVal = strtoll(NumStr.c_str(), nullptr, 10);
     return TOK_INT_LITERAL;
-  }
-
-  // Range operator: ..
-  if (LastChar == '.') {
-    if (SourceFile.peek() == '.') {
-      LastChar = SourceFile.get();
-      CurCol++;
-      LastChar = SourceFile.get();
-      CurCol++;
-      return TOK_RANGE;
-    }
   }
 
   if (LastChar == '=') {
