@@ -1,4 +1,5 @@
 #include "Lexer.h"
+#include "Colors.h"
 
 #include <cctype>
 #include <cstdlib>
@@ -39,18 +40,28 @@ std::map<std::string, int> Keywords = {
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
 
 void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
-  std::cerr << "Error at " << Loc.Line << ":" << Loc.Col << ": " << Msg << "\n";
+  // Use a bold red header for the location
+  bool isWarning = Msg.find("Warning:") != std::string::npos || Msg.find("warning:") != std::string::npos;
+  std::string HeaderColor = isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
+  std::string HeaderText = isWarning ? "Warning" : "Oops! Something went wrong";
+
+  std::cerr << Colors::BOLD << HeaderColor << HeaderText << " at line " 
+            << Loc.Line << ", column " << Loc.Col << ":" << Colors::RESET << "\n\n"
+            << "  " << Msg << "\n\n";
 
   if (Loc.Line > 0 && Loc.Line <= SourceLines.size()) {
     std::string LineContent = SourceLines[Loc.Line - 1];
-    std::cerr << "  " << Loc.Line << " | " << LineContent << "\n";
+    
+    // Dim color for the line number pipe
+    std::cerr << Colors::BRIGHT_BLACK << "  " << Loc.Line << " | " << Colors::RESET << LineContent << "\n";
 
-    // Calculate indentation for the caret
+    // Calculate indentation for the caret, make the caret bold and red/yellow
     std::string LineNumStr = std::to_string(Loc.Line);
-    std::cerr << "  " << std::string(LineNumStr.length(), ' ') << " | "
-              << std::string(Loc.Col - 1, ' ') << "^" << "\n";
+    std::cerr << Colors::BRIGHT_BLACK << "  " << std::string(LineNumStr.length(), ' ') << " | " << Colors::RESET
+              << std::string(Loc.Col - 1, ' ') << Colors::BOLD << HeaderColor << "^ Here!" << Colors::RESET << "\n";
   }
 }
+
 
 void resetLexer() {
   LastChar = ' ';
