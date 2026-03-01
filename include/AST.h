@@ -164,6 +164,7 @@ class BreakExprAST : public ExprAST {
 
 public:
   BreakExprAST(SourceLocation Loc) : Loc(Loc) {}
+  const SourceLocation &getLoc() const { return Loc; }
   llvm::Value *codegen() override;
 };
 
@@ -172,6 +173,7 @@ class ContinueExprAST : public ExprAST {
 
 public:
   ContinueExprAST(SourceLocation Loc) : Loc(Loc) {}
+  const SourceLocation &getLoc() const { return Loc; }
   llvm::Value *codegen() override;
 };
 
@@ -238,6 +240,7 @@ public:
   ReturnExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Val)
       : Loc(Loc), Val(std::move(Val)) {}
 
+  const SourceLocation &getLoc() const { return Loc; }
   llvm::Value *codegen() override;
 };
 

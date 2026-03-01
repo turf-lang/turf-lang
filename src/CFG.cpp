@@ -105,11 +105,9 @@ void CFG::reportFlowDiagnostics() const {
     }
   }
 
-  // Report missing return paths (if function is non-void)
-  // This will be enhanced when we have type information
-  if (!allPathsReturn()) {
-    std::cerr << "Warning: Not all code paths return a value in function '" 
-              << FunctionName << "'\n";
+  // Report missing return paths - ERROR for non-void functions, ignore for void
+  if (ReturnType != TURF_VOID && !allPathsReturn()) {
+    MissingReturnError(FunctionName).raise();
   }
 
   // Report dead branches
@@ -168,8 +166,8 @@ void CFG::print() const {
 // CFGBuilder Implementation
 // ============================================================================
 
-std::unique_ptr<CFG> CFGBuilder::buildCFG(const std::string &FunctionName, ExprAST *Body) {
-  auto CFGPtr = std::make_unique<CFG>(FunctionName);
+std::unique_ptr<CFG> CFGBuilder::buildCFG(const std::string &FunctionName, TurfType ReturnType, ExprAST *Body) {
+  auto CFGPtr = std::make_unique<CFG>(FunctionName, ReturnType);
   CurrentCFG = CFGPtr.get();
 
   // Create entry and exit blocks
@@ -210,11 +208,11 @@ void CFGBuilder::visitExpr(ExprAST *E) {
     return;
 
   // Check if current block already has an explicit terminator or is null
-  // If so, statements after it are unreachable
+  // If so, statements after it are unreachable - report error immediately
   if (!CurrentBlock || CurrentBlock->hasExplicitTerminator()) {
-    // Create unreachable block for remaining statements
-    TurfBasicBlock *UnreachableBB = createBlock("unreachable");
-    setInsertPoint(UnreachableBB);
+    // Report the error using the location of the last terminator we encountered
+    StatementAfterTerminatorError(LastTerminatorLoc, "return/break/continue").raise();
+    return;
   }
 
   // Determine expression type and dispatch
@@ -244,11 +242,7 @@ void CFGBuilder::visitBlock(ExprAST *E) {
   // Visit each statement in the block sequentially
   for (const auto &Expr : Block->getExpressions()) {
     visitExpr(Expr.get());
-    
-    // If we hit a terminator (CurrentBlock becomes null), stop processing
-    if (!CurrentBlock) {
-      break;
-    }
+    // Continue processing all statements - visitExpr will handle unreachable code
   }
 }
 
@@ -350,7 +344,8 @@ void CFGBuilder::visitReturn(ExprAST *E) {
     return;
 
   CurrentBlock->addStatement(Ret);
-  CurrentBlock->setTerminator(TerminatorKind::Return, SourceLocation{});
+  LastTerminatorLoc = Ret->getLoc();
+  CurrentBlock->setTerminator(TerminatorKind::Return, LastTerminatorLoc);
   
   // Link to exit block
   CurrentCFG->addEdge(CurrentBlock, CurrentCFG->getExitBlock());
@@ -370,7 +365,8 @@ void CFGBuilder::visitBreak(ExprAST *E) {
   }
 
   CurrentBlock->addStatement(Brk);
-  CurrentBlock->setTerminator(TerminatorKind::Break, SourceLocation{});
+  LastTerminatorLoc = Brk->getLoc();
+  CurrentBlock->setTerminator(TerminatorKind::Break, LastTerminatorLoc);
   CurrentCFG->addEdge(CurrentBlock, LoopBreakTarget);
   
   // No further statements in this block
@@ -388,7 +384,8 @@ void CFGBuilder::visitContinue(ExprAST *E) {
   }
 
   CurrentBlock->addStatement(Cont);
-  CurrentBlock->setTerminator(TerminatorKind::Continue, SourceLocation{});
+  LastTerminatorLoc = Cont->getLoc();
+  CurrentBlock->setTerminator(TerminatorKind::Continue, LastTerminatorLoc);
   CurrentCFG->addEdge(CurrentBlock, LoopContinueTarget);
   
   // No further statements in this block
