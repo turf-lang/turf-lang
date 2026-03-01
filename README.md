@@ -60,18 +60,6 @@ Once extracted, you can compile and run Turf programs directly:
 - **Memory Management:** Automatic stack allocation using LLVM `alloca`, `store`, and `load`.
 - **LLVM Backend:** Compiles source code directly to a native executable via LLVM.
 - **Smart Compiler (Phase 1):** Support for smart compiler error enhancements, where it suggests you what changes to make (using Damerau-Levenshtein distance for variable name and keyword suggestions, including transposition typo detection).
-- **Semantic Analysis (Phase 2):** Lexical scope tracking with symbol table infrastructure:
-  - **Use-before-declaration detection**: Catches variables used before being declared
-  - **Duplicate declaration detection**: Prevents redeclaring variables in the same scope
-  - **Shadowing warnings**: Warns when inner scope variables shadow outer scope names
-  - **Unreachable code detection**: Detects declarations after return statements
-  - **Scope-aware error messages**: Error messages include declaration locations for better context
-- **Control Flow Graph (Phase 3):** Structural flow analysis for enhanced diagnostics:
-  - **Basic block construction**: Maximal sequences with single entry/exit points
-  - **Reachability analysis**: Identifies unreachable code blocks
-  - **Return path validation**: Ensures all code paths return values when required
-  - **Dead branch detection**: Finds conditional branches that never execute
-  - **Flow terminators**: Tracks return, break, and continue statements
 
 ## Build from Source (Manual)
 
@@ -141,3 +129,4 @@ printline(flag)
 ## Status
 
 **Active Development.** The compiler is fully capable of taking code to native executables. It currently supports typed variables (`int`, `double`, `bool`, `string`), arithmetic, exponentiation, modulo, logical short-circuiting, type casting, control flow (`if`/`else`, `while`, `break`, `continue`), comparison operators, booleans, single-line comments, and output via `print()` and `printline()`.
+
