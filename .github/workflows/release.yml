@@ -25,7 +25,7 @@ jobs:
 
       - name: Build Turf
         run: |
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp \
+          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp \
             -Iinclude $(llvm-config-18 --cxxflags --ldflags --system-libs --libs core native) \
             -o turf
 
@@ -63,7 +63,7 @@ jobs:
 
       - name: Build Turf
         run: |
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp \
+          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp \
             -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
             -o turf
 
@@ -100,7 +100,7 @@ jobs:
       - name: Build Turf
         run: |
           export PATH="$(brew --prefix llvm)/bin:$PATH"
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp \
+          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp \
             -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
             -o turf
 
@@ -139,7 +139,7 @@ jobs:
       - name: Build Turf
         shell: msys2 {0}
         run: |
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp \
+          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp \
             -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
             -o turf.exe
 

@@ -48,6 +48,10 @@ public:
       : Loc(Loc), Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
+  int getOp() const { return Op; }
+  const ExprAST *getLHS() const { return LHS.get(); }
+  const ExprAST *getRHS() const { return RHS.get(); }
+
   llvm::Value *codegen() override;
 };
 
@@ -64,6 +68,7 @@ public:
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
+  const ExprAST *getRHS() const { return RHS.get(); }
 
   llvm::Value *codegen() override;
 };
@@ -76,6 +81,8 @@ class VariableExprAST : public ExprAST {
 public:
   VariableExprAST(SourceLocation Loc, std::string Name)
       : Loc(Loc), Name(Name) {}
+
+  const std::string &getName() const { return Name; }
 
   llvm::Value *codegen() override;
 };
@@ -148,6 +155,7 @@ public:
 
   const SourceLocation &getLoc() const { return Loc; }
   ExprAST *getBody() const { return Body.get(); }
+  const ExprAST *getCond() const { return Cond.get(); }
 
   llvm::Value *codegen() override;
 };
@@ -211,6 +219,8 @@ class BoolExprAST : public ExprAST {
 
 public:
   BoolExprAST(bool Val) : Val(Val) {}
+  bool getVal() const { return Val; }
+
   llvm::Value *codegen() override;
 };
 

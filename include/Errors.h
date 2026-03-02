@@ -372,4 +372,136 @@ public:
                            Terminator + "' statement." + Colors::RESET) {}
 };
 
+// Lint Warnings - Reviewer-style heuristic pattern warnings
+
+// Redundant comparison: x == true, x != false, etc.
+class RedundantComparisonWarning : public TurfError {
+public:
+  RedundantComparisonWarning(SourceLocation Loc, const std::string &Expr,
+                             const std::string &Simplified)
+      : TurfError(Loc, "") {
+    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
+              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW +
+              "This comparison is redundant!" + Colors::RESET + "\n  " +
+              Colors::BRIGHT_CYAN + Expr + Colors::RESET +
+              " is the same as just writing " + Colors::BRIGHT_CYAN +
+              Simplified + Colors::RESET + "." + "\n  " + Colors::BRIGHT_GREEN +
+              "Hint: You can simplify this by removing the comparison "
+              "entirely." +
+              Colors::RESET;
+  }
+
+  void warn() const { LogErrorAt(Loc, Message); }
+};
+
+// Self-assignment: x = x
+class SelfAssignmentWarning : public TurfError {
+public:
+  SelfAssignmentWarning(SourceLocation Loc, const std::string &Name)
+      : TurfError(Loc, "") {
+    Message =
+        Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+        Colors::BRIGHT_YELLOW + "You're assigning '" + Colors::CYAN + Name +
+        Colors::BRIGHT_YELLOW + "' to itself — this doesn't do anything!" +
+        Colors::RESET + "\n  " + Colors::BRIGHT_GREEN +
+        "Hint: Did you mean to assign a different value, or is this "
+        "left over from an edit?" +
+        Colors::RESET;
+  }
+
+  void warn() const { LogErrorAt(Loc, Message); }
+};
+
+// Infinite loop: while(true) with no break/continue/return in the body
+class SuspiciousInfiniteLoopWarning : public TurfError {
+public:
+  SuspiciousInfiniteLoopWarning(SourceLocation Loc) : TurfError(Loc, "") {
+    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
+              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW +
+              "This looks like an infinite loop!" + Colors::RESET +
+              " The condition is always true and the body has no " +
+              Colors::CYAN + "'break'" + Colors::BRIGHT_YELLOW + ", " +
+              Colors::CYAN + "'continue'" + Colors::BRIGHT_YELLOW + ", or " +
+              Colors::CYAN + "'return'" + Colors::BRIGHT_YELLOW + "." +
+              Colors::RESET + "\n  " + Colors::BRIGHT_GREEN +
+              "Hint: If this is intentional, consider adding a comment. "
+              "Otherwise, add a 'break' or a proper exit condition." +
+              Colors::RESET;
+  }
+
+  void warn() const { LogErrorAt(Loc, Message); }
+};
+
+// Empty block in if/else branch
+class EmptyBranchWarning : public TurfError {
+public:
+  EmptyBranchWarning(SourceLocation Loc, const std::string &BranchKind)
+      : TurfError(Loc, "") {
+    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
+              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW + "The '" +
+              Colors::CYAN + BranchKind + Colors::BRIGHT_YELLOW +
+              "' branch is empty — it doesn't do anything!" + Colors::RESET +
+              "\n  " + Colors::BRIGHT_GREEN +
+              "Hint: If you haven't written the code yet, add a comment "
+              "like '// TODO'. Otherwise, you may be able to simplify this "
+              "'if' statement." +
+              Colors::RESET;
+  }
+
+  void warn() const { LogErrorAt(Loc, Message); }
+};
+
+// Self-comparison: x == x, x != x, x < x, etc.
+class SelfComparisonWarning : public TurfError {
+public:
+  SelfComparisonWarning(SourceLocation Loc, const std::string &Name,
+                        const std::string &Result)
+      : TurfError(Loc, "") {
+    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
+              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW +
+              "You're comparing '" + Colors::CYAN + Name +
+              Colors::BRIGHT_YELLOW + "' with itself!" + Colors::RESET +
+              " This is always " + Colors::BRIGHT_CYAN + Result +
+              Colors::RESET + "." + "\n  " + Colors::BRIGHT_GREEN +
+              "Hint: Did you mean to compare with a different variable?" +
+              Colors::RESET;
+  }
+
+  void warn() const { LogErrorAt(Loc, Message); }
+};
+
+// Division / modulo by zero literal
+class DivisionByZeroLiteralWarning : public TurfError {
+public:
+  DivisionByZeroLiteralWarning(SourceLocation Loc, const std::string &Op)
+      : TurfError(Loc, "") {
+    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
+              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW +
+              "You're using '" + Colors::CYAN + Op + Colors::BRIGHT_YELLOW +
+              "' with zero — this will crash at runtime!" + Colors::RESET +
+              "\n  " + Colors::BRIGHT_GREEN +
+              "Hint: Check the right-hand side. Division or modulo by zero "
+              "is undefined behavior." +
+              Colors::RESET;
+  }
+
+  void warn() const { LogErrorAt(Loc, Message); }
+};
+
+// Identical if/else branches
+class IdenticalBranchesWarning : public TurfError {
+public:
+  IdenticalBranchesWarning(SourceLocation Loc) : TurfError(Loc, "") {
+    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
+              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW +
+              "Both branches of this 'if' do the same thing!" + Colors::RESET +
+              "\n  " + Colors::BRIGHT_GREEN +
+              "Hint: The 'if'/'else' can be removed — just keep the body. "
+              "Or did you forget to change one of the branches?" +
+              Colors::RESET;
+  }
+
+  void warn() const { LogErrorAt(Loc, Message); }
+};
+
 #endif
