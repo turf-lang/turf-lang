@@ -997,8 +997,8 @@ Value *FuncDefExprAST::codegen() {
 
   // Build and analyze CFG for flow diagnostics
   if (Body) {
-    CFGBuilder Builder;
-    auto FuncCFG = Builder.buildCFG(Name, ReturnType, Body.get());
+    CFGBuilder CFGBuilder;
+    auto FuncCFG = CFGBuilder.buildCFG(Name, ReturnType, Body.get());
 
     // Run flow analysis and report diagnostics (will raise error for missing
     // returns in non-void)

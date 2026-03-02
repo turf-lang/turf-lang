@@ -109,7 +109,7 @@ void CFG::reportFlowDiagnostics() const {
 
   // Report missing return paths - ERROR for non-void functions, ignore for void
   if (ReturnType != TURF_VOID && !allPathsReturn()) {
-    MissingReturnError(FunctionName).raise();
+    MissingReturnError(FuncLoc, FunctionName).raise();
   }
 
   // Report dead branches

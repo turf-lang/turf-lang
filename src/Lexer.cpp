@@ -19,49 +19,58 @@ bool BoolVal;
 std::string IdentifierStr;
 std::string StringVal;
 
-std::map<std::string, int> Keywords = {
-    {"if", TOK_IF},          {"then", TOK_THEN},
-    {"else", TOK_ELSE},      {"while", TOK_WHILE},
-    {"int", TOK_TYPE_INT},   {"float", TOK_TYPE_DOUBLE},
-    {"double", TOK_TYPE_DOUBLE},
-    {"bool", TOK_TYPE_BOOL}, {"true", TOK_BOOL_LITERAL},
-    {"false", TOK_BOOL_LITERAL},
-    {"string", TOK_TYPE_STRING},
-    {"void", TOK_TYPE_VOID},
-    {"return", TOK_RETURN},
-    {"fn", TOK_FN},
-    {"break", TOK_BREAK},
-    {"continue", TOK_CONTINUE},
-    {"for", TOK_FOR},
-    {"in", TOK_IN},
-    {"step", TOK_STEP}};
+std::map<std::string, int> Keywords = {{"if", TOK_IF},
+                                       {"then", TOK_THEN},
+                                       {"else", TOK_ELSE},
+                                       {"while", TOK_WHILE},
+                                       {"int", TOK_TYPE_INT},
+                                       {"float", TOK_TYPE_DOUBLE},
+                                       {"double", TOK_TYPE_DOUBLE},
+                                       {"bool", TOK_TYPE_BOOL},
+                                       {"true", TOK_BOOL_LITERAL},
+                                       {"false", TOK_BOOL_LITERAL},
+                                       {"string", TOK_TYPE_STRING},
+                                       {"void", TOK_TYPE_VOID},
+                                       {"return", TOK_RETURN},
+                                       {"fn", TOK_FN},
+                                       {"break", TOK_BREAK},
+                                       {"continue", TOK_CONTINUE},
+                                       {"for", TOK_FOR},
+                                       {"in", TOK_IN},
+                                       {"step", TOK_STEP}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
 
 void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
   // Use a bold red header for the location
-  bool isWarning = Msg.find("Warning:") != std::string::npos || Msg.find("warning:") != std::string::npos;
-  std::string HeaderColor = isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
+  bool isWarning = Msg.find("Warning:") != std::string::npos ||
+                   Msg.find("warning:") != std::string::npos;
+  std::string HeaderColor =
+      isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
   std::string HeaderText = isWarning ? "Warning" : "Oops! Something went wrong";
 
-  std::cerr << Colors::BOLD << HeaderColor << HeaderText << " at line " 
-            << Loc.Line << ", column " << Loc.Col << ":" << Colors::RESET << "\n\n"
+  std::cerr << Colors::BOLD << HeaderColor << HeaderText << " at line "
+            << Loc.Line << ", column " << Loc.Col << ":" << Colors::RESET
+            << "\n\n"
             << "  " << Msg << "\n\n";
 
   if (Loc.Line > 0 && Loc.Line <= SourceLines.size()) {
     std::string LineContent = SourceLines[Loc.Line - 1];
-    
+
     // Dim color for the line number pipe
-    std::cerr << Colors::BRIGHT_BLACK << "  " << Loc.Line << " | " << Colors::RESET << LineContent << "\n";
+    std::cerr << Colors::BRIGHT_BLACK << "  " << Loc.Line << " | "
+              << Colors::RESET << LineContent << "\n";
 
     // Calculate indentation for the caret, make the caret bold and red/yellow
     std::string LineNumStr = std::to_string(Loc.Line);
-    std::cerr << Colors::BRIGHT_BLACK << "  " << std::string(LineNumStr.length(), ' ') << " | " << Colors::RESET
-              << std::string(Loc.Col - 1, ' ') << Colors::BOLD << HeaderColor << "^ Here!" << Colors::RESET << "\n";
+    int CaretOffset = (Loc.Col > 0) ? Loc.Col - 1 : 0;
+    std::cerr << Colors::BRIGHT_BLACK << "  "
+              << std::string(LineNumStr.length(), ' ') << " | " << Colors::RESET
+              << std::string(CaretOffset, ' ') << Colors::BOLD << HeaderColor
+              << "^ Here!" << Colors::RESET << "\n";
   }
 }
-
 
 void resetLexer() {
   LastChar = ' ';
@@ -167,7 +176,8 @@ int gettok() {
       NumStr += LastChar;
       LastChar = SourceFile.get();
       CurCol++;
-    } while (isdigit(LastChar) || (LastChar == '.' && SourceFile.peek() != '.'));
+    } while (isdigit(LastChar) ||
+             (LastChar == '.' && SourceFile.peek() != '.'));
 
     bool IsFloat = NumStr.find('.') != std::string::npos;
     if (IsFloat) {

@@ -83,6 +83,7 @@ class CFG {
 private:
   std::string FunctionName; // Name of the function this CFG represents
   TurfType ReturnType;      // Return type of the function
+  SourceLocation FuncLoc;
   std::vector<std::unique_ptr<TurfBasicBlock>> Blocks; // All blocks (owned)
   TurfBasicBlock *EntryBlock; // First block (entry point)
   TurfBasicBlock *ExitBlock;  // Virtual exit block (all returns jump here)
