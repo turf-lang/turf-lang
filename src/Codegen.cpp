@@ -283,7 +283,9 @@ Value *VarDeclExprAST::codegen() {
   }
 
   if (Keywords.find(Name) != Keywords.end()) {
-    SyntaxError(Loc, "Cannot use keyword '" + Name + "' as a variable name. Keyword is reserved.").raise();
+    SyntaxError(Loc, "Cannot use keyword '" + Name +
+                         "' as a variable name. Keyword is reserved.")
+        .raise();
     return nullptr;
   }
 
@@ -340,7 +342,7 @@ Value *VariableExprAST::codegen() {
   if (GlobalSymbolTable) {
     Sym = GlobalSymbolTable->LookupSymbol(Name);
   }
-  
+
   if (Sym) {
     AllocaInst *A = Sym->Alloca;
     return Builder->CreateLoad(A->getAllocatedType(), A, Name.c_str());
@@ -373,7 +375,9 @@ Value *AssignmentExprAST::codegen() {
     return nullptr;
 
   if (Keywords.find(Name) != Keywords.end()) {
-    SyntaxError(Loc, "Cannot assign to keyword '" + Name + "'. Keyword is reserved.").raise();
+    SyntaxError(Loc,
+                "Cannot assign to keyword '" + Name + "'. Keyword is reserved.")
+        .raise();
     return nullptr;
   }
 
@@ -423,9 +427,22 @@ Value *IfExprAST::codegen() {
   if (!ThenV)
     return nullptr;
 
-  // Only branch to merge if block doesn't already have a terminator (e.g., return)
+  // Check if the then-branch terminated (break/continue/return).
+  // After such terminators, codegen leaves us in a dead block with no
+  // predecessors. Detect this: a block different from the original ThenBB
+  // that has no predecessors is dead, it means the branch truly terminated.
+  bool ThenTerminated = Builder->GetInsertBlock()->getTerminator() != nullptr ||
+                        (Builder->GetInsertBlock() != ThenBB &&
+                         llvm::pred_empty(Builder->GetInsertBlock()));
+
+  // Only branch to merge if block doesn't already have a terminator (e.g.,
+  // return)
   if (!Builder->GetInsertBlock()->getTerminator()) {
-    Builder->CreateBr(MergeBB);
+    // Builder->CreateBr(MergeBB);
+
+    if (!ThenTerminated) {
+      Builder->CreateBr(MergeBB);
+    }
   }
   ThenBB = Builder->GetInsertBlock();
 
@@ -436,9 +453,18 @@ Value *IfExprAST::codegen() {
   if (!ElseV)
     return nullptr;
 
-  // Only branch to merge if block doesn't already have a terminator (e.g., return)
+  bool ElseTerminated = Builder->GetInsertBlock()->getTerminator() != nullptr ||
+                        (Builder->GetInsertBlock() != ElseBB &&
+                         llvm::pred_empty(Builder->GetInsertBlock()));
+
+  // Only branch to merge if block doesn't already have a terminator (e.g.,
+  // return)
   if (!Builder->GetInsertBlock()->getTerminator()) {
-    Builder->CreateBr(MergeBB);
+    // Builder->CreateBr(MergeBB);
+
+    if (!ElseTerminated) {
+      Builder->CreateBr(MergeBB);
+    }
   }
   ElseBB = Builder->GetInsertBlock();
 
@@ -446,21 +472,38 @@ Value *IfExprAST::codegen() {
   Builder->SetInsertPoint(MergeBB);
 
   // Check if both branches terminated - if so, the merge block is unreachable
-  bool ThenTerminated = ThenBB->getTerminator() != nullptr;
-  bool ElseTerminated = ElseBB->getTerminator() != nullptr;
-  
+  // bool ThenTerminated = ThenBB->getTerminator() != nullptr;
+  // bool ElseTerminated = ElseBB->getTerminator() != nullptr;
+
   if (ThenTerminated && ElseTerminated) {
     // Both branches terminated - merge block is unreachable
     // Add an unreachable instruction to properly terminate this dead block
     Builder->CreateUnreachable();
     // Return a dummy value (this code won't be executed)
-    TurfType ResultType = getCommonType(
-      getTurfTypeFromLLVM(ThenV->getType()),
-      getTurfTypeFromLLVM(ElseV->getType())
-    );
+    TurfType ResultType = getCommonType(getTurfTypeFromLLVM(ThenV->getType()),
+                                        getTurfTypeFromLLVM(ElseV->getType()));
     return Constant::getNullValue(getLLVMType(ResultType));
   }
 
+  // If only one branch terminated, the merge block is still reachable
+  // from the non-terminating branch. No PHI needed, just return the
+  // value from the non-terminating branch directly.
+  if (ThenTerminated) {
+    // Only else flows into merge. Erase the dead then block if empty.
+    if (ThenBB != MergeBB && llvm::pred_empty(ThenBB) && ThenBB->empty()) {
+      ThenBB->eraseFromParent();
+    }
+    return ElseV;
+  }
+  if (ElseTerminated) {
+    // Only then flows into merge. Erase the dead else block if empty.
+    if (ElseBB != MergeBB && llvm::pred_empty(ElseBB) && ElseBB->empty()) {
+      ElseBB->eraseFromParent();
+    }
+    return ThenV;
+  }
+
+  // Normal case: both branches flow into merge, create PHI node
   TurfType ThenType = getTurfTypeFromLLVM(ThenV->getType());
   TurfType ElseType = getTurfTypeFromLLVM(ElseV->getType());
   TurfType MergeType = getCommonType(ThenType, ElseType);
@@ -507,17 +550,17 @@ Value *BlockExprAST::codegen() {
   if (GlobalSymbolTable) {
     GlobalSymbolTable->EnterScope();
   }
-  
+
   Value *LastVal = nullptr;
   for (auto &Expr : Expressions) {
     LastVal = Expr->codegen();
   }
-  
+
   // Exit scope
   if (GlobalSymbolTable) {
     GlobalSymbolTable->ExitScope();
   }
-  
+
   return LastVal;
 }
 
@@ -546,12 +589,12 @@ Value *CastExprAST::codegen() {
     Type *I8Ptr = PointerType::get(Type::getInt8Ty(*TheContext), 0);
     if (!StrtollF) {
       Type *I8PtrPtr = PointerType::get(I8Ptr, 0);
-      FunctionType *FT = FunctionType::get(
-          Type::getInt64Ty(*TheContext),
-          {I8Ptr, I8PtrPtr, Type::getInt32Ty(*TheContext)},
-          /*isVarArg=*/false);
-      StrtollF = Function::Create(FT, Function::ExternalLinkage,
-                                  "strtoll", TheModule.get());
+      FunctionType *FT =
+          FunctionType::get(Type::getInt64Ty(*TheContext),
+                            {I8Ptr, I8PtrPtr, Type::getInt32Ty(*TheContext)},
+                            /*isVarArg=*/false);
+      StrtollF = Function::Create(FT, Function::ExternalLinkage, "strtoll",
+                                  TheModule.get());
     }
 
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
@@ -560,12 +603,14 @@ Value *CastExprAST::codegen() {
     AllocaInst *EndPtrAlloca = TmpB.CreateAlloca(I8Ptr, 0, "endptr");
 
     Value *Base = ConstantInt::get(Type::getInt32Ty(*TheContext), 10);
-    Value *Res = Builder->CreateCall(StrtollF, {Val, EndPtrAlloca, Base}, "strtoll_res");
+    Value *Res =
+        Builder->CreateCall(StrtollF, {Val, EndPtrAlloca, Base}, "strtoll_res");
 
     Value *EndPtrVal = Builder->CreateLoad(I8Ptr, EndPtrAlloca, "endptr_val");
     Value *IsSame = Builder->CreateICmpEQ(EndPtrVal, Val, "is_same_ptr");
 
-    BasicBlock *ErrorBB = BasicBlock::Create(*TheContext, "cast_error", TheFunction);
+    BasicBlock *ErrorBB =
+        BasicBlock::Create(*TheContext, "cast_error", TheFunction);
     BasicBlock *ContBB = BasicBlock::Create(*TheContext, "cast_cont");
 
     Builder->CreateCondBr(IsSame, ErrorBB, ContBB);
@@ -574,18 +619,24 @@ Value *CastExprAST::codegen() {
 
     Function *PutsF = TheModule->getFunction("puts");
     if (!PutsF) {
-      FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext), {I8Ptr}, false);
-      PutsF = Function::Create(FT, Function::ExternalLinkage, "puts", TheModule.get());
+      FunctionType *FT =
+          FunctionType::get(Type::getInt32Ty(*TheContext), {I8Ptr}, false);
+      PutsF = Function::Create(FT, Function::ExternalLinkage, "puts",
+                               TheModule.get());
     }
-    Value *ErrMsg = Builder->CreateGlobalStringPtr("Runtime Error: Invalid string to int conversion.", "errmsg");
+    Value *ErrMsg = Builder->CreateGlobalStringPtr(
+        "Runtime Error: Invalid string to int conversion.", "errmsg");
     Builder->CreateCall(PutsF, {ErrMsg});
 
     Function *ExitF = TheModule->getFunction("exit");
     if (!ExitF) {
-      FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext), {Type::getInt32Ty(*TheContext)}, false);
-      ExitF = Function::Create(FT, Function::ExternalLinkage, "exit", TheModule.get());
+      FunctionType *FT = FunctionType::get(
+          Type::getVoidTy(*TheContext), {Type::getInt32Ty(*TheContext)}, false);
+      ExitF = Function::Create(FT, Function::ExternalLinkage, "exit",
+                               TheModule.get());
     }
-    Builder->CreateCall(ExitF, {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
+    Builder->CreateCall(ExitF,
+                        {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
     Builder->CreateUnreachable();
 
     TheFunction->insert(TheFunction->end(), ContBB);
@@ -598,14 +649,13 @@ Value *CastExprAST::codegen() {
   if (SrcType == TURF_STRING && DestType == TURF_DOUBLE) {
     Function *StrtodF = TheModule->getFunction("strtod");
     if (!StrtodF) {
-      Type *I8Ptr    = PointerType::get(Type::getInt8Ty(*TheContext), 0);
+      Type *I8Ptr = PointerType::get(Type::getInt8Ty(*TheContext), 0);
       Type *I8PtrPtr = PointerType::get(I8Ptr, 0);
-      FunctionType *FT = FunctionType::get(
-          Type::getDoubleTy(*TheContext),
-          {I8Ptr, I8PtrPtr},
-          /*isVarArg=*/false);
-      StrtodF = Function::Create(FT, Function::ExternalLinkage,
-                                 "strtod", TheModule.get());
+      FunctionType *FT =
+          FunctionType::get(Type::getDoubleTy(*TheContext), {I8Ptr, I8PtrPtr},
+                            /*isVarArg=*/false);
+      StrtodF = Function::Create(FT, Function::ExternalLinkage, "strtod",
+                                 TheModule.get());
     }
     Value *NullPtr = ConstantPointerNull::get(
         PointerType::get(PointerType::get(Type::getInt8Ty(*TheContext), 0), 0));
@@ -613,16 +663,17 @@ Value *CastExprAST::codegen() {
   }
 
   // Everything else is unsupported
-  const char *SrcName = (SrcType == TURF_INT)    ? "int"
-                       : (SrcType == TURF_DOUBLE) ? "double"
-                       : (SrcType == TURF_BOOL)   ? "bool"
-                       : (SrcType == TURF_STRING)  ? "string"
+  const char *SrcName = (SrcType == TURF_INT)      ? "int"
+                        : (SrcType == TURF_DOUBLE) ? "double"
+                        : (SrcType == TURF_BOOL)   ? "bool"
+                        : (SrcType == TURF_STRING) ? "string"
                                                    : "unknown";
-  const char *DstName = (DestType == TURF_INT)    ? "int"
-                       : (DestType == TURF_DOUBLE) ? "double"
-                                                   : "unknown";
+  const char *DstName = (DestType == TURF_INT)      ? "int"
+                        : (DestType == TURF_DOUBLE) ? "double"
+                                                    : "unknown";
   SyntaxError(Loc, std::string("Cannot explicitly cast '") + SrcName +
-                       "' to '" + DstName + "'").raise();
+                       "' to '" + DstName + "'")
+      .raise();
   return nullptr;
 }
 
@@ -874,9 +925,10 @@ Value *FuncDefExprAST::codegen() {
     for (const auto &P : Params)
       ParamTypes.push_back(getLLVMType(P.Type));
 
-    FunctionType *FT =
-        FunctionType::get(getLLVMType(ReturnType), ParamTypes, /*isVarArg=*/false);
-    TheFunc = Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
+    FunctionType *FT = FunctionType::get(getLLVMType(ReturnType), ParamTypes,
+                                         /*isVarArg=*/false);
+    TheFunc =
+        Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
 
     // Name the arguments
     unsigned Idx = 0;
@@ -899,17 +951,17 @@ Value *FuncDefExprAST::codegen() {
   BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunc);
 
   // Save caller context
-  auto SavedNamedValues      = NamedValues;
-  auto SavedReturnType       = CurrentFuncReturnType;
-  auto SavedFunction         = CurrentFunction;
-  auto *SavedInsertBlock     = Builder->GetInsertBlock();
-  auto  SavedInsertPoint     = Builder->GetInsertPoint();
+  auto SavedNamedValues = NamedValues;
+  auto SavedReturnType = CurrentFuncReturnType;
+  auto SavedFunction = CurrentFunction;
+  auto *SavedInsertBlock = Builder->GetInsertBlock();
+  auto SavedInsertPoint = Builder->GetInsertPoint();
 
   // Switch to the new function
   Builder->SetInsertPoint(BB);
   NamedValues.clear();
   CurrentFuncReturnType = ReturnType;
-  CurrentFunction       = TheFunc;
+  CurrentFunction = TheFunc;
 
   // Enter a new scope for the function body
   if (GlobalSymbolTable) {
@@ -923,14 +975,16 @@ Value *FuncDefExprAST::codegen() {
       if (P.Name == Arg.getName())
         ParamTurfType = P.Type;
 
-    AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunc, std::string(Arg.getName()), ParamTurfType);
+    AllocaInst *Alloca = CreateEntryBlockAlloca(
+        TheFunc, std::string(Arg.getName()), ParamTurfType);
     Builder->CreateStore(&Arg, Alloca);
     NamedValues[std::string(Arg.getName())] = {Alloca, ParamTurfType};
-    
+
     // Add parameter to symbol table
     if (GlobalSymbolTable) {
       SourceLocation ParamLoc = Loc; // Use function declaration location
-      GlobalSymbolTable->DeclareSymbol(std::string(Arg.getName()), ParamTurfType, ParamLoc, Alloca);
+      GlobalSymbolTable->DeclareSymbol(std::string(Arg.getName()),
+                                       ParamTurfType, ParamLoc, Alloca);
     }
   }
 
@@ -941,10 +995,11 @@ Value *FuncDefExprAST::codegen() {
   if (Body) {
     CFGBuilder Builder;
     auto FuncCFG = Builder.buildCFG(Name, ReturnType, Body.get());
-    
-    // Run flow analysis and report diagnostics (will raise error for missing returns in non-void)
+
+    // Run flow analysis and report diagnostics (will raise error for missing
+    // returns in non-void)
     FuncCFG->reportFlowDiagnostics();
-    
+
     // Store CFG for later use (optional)
     GlobalCFGs.push_back(std::move(FuncCFG));
   }
@@ -975,9 +1030,9 @@ Value *FuncDefExprAST::codegen() {
   }
 
   // Restore caller context
-  NamedValues            = SavedNamedValues;
-  CurrentFuncReturnType  = SavedReturnType;
-  CurrentFunction        = SavedFunction;
+  NamedValues = SavedNamedValues;
+  CurrentFuncReturnType = SavedReturnType;
+  CurrentFunction = SavedFunction;
   if (SavedInsertBlock)
     Builder->SetInsertPoint(SavedInsertBlock, SavedInsertPoint);
 
@@ -1000,7 +1055,8 @@ Value *ReturnExprAST::codegen() {
   if (!Val) {
     // empty return;
     if (CurrentFuncReturnType != TURF_VOID) {
-      SyntaxError(Loc, "'return;' is only valid inside a void function").raise();
+      SyntaxError(Loc, "'return;' is only valid inside a void function")
+          .raise();
       return nullptr;
     }
     Builder->CreateRetVoid();
@@ -1038,7 +1094,8 @@ Value *FuncCallExprAST::codegen() {
   if (CalleeF->arg_size() != Args.size()) {
     SyntaxError(Loc, "Wrong number of arguments to '" + Name + "': expected " +
                          std::to_string(CalleeF->arg_size()) + ", got " +
-                         std::to_string(Args.size())).raise();
+                         std::to_string(Args.size()))
+        .raise();
     return nullptr;
   }
 
