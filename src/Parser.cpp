@@ -149,7 +149,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
         Op = '%';
 
       auto LHSVar = std::make_unique<VariableExprAST>(VarLoc, IdName);
-      RHS = std::make_unique<BinaryExprAST>(Op, std::move(LHSVar),
+      RHS = std::make_unique<BinaryExprAST>(VarLoc, Op, std::move(LHSVar),
                                             std::move(RHS));
     }
 
@@ -165,7 +165,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
     char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
     auto LHSVar = std::make_unique<VariableExprAST>(VarLoc, IdName);
     auto OneNum = std::make_unique<NumberExprAST>(1LL);
-    auto RHS = std::make_unique<BinaryExprAST>(Op, std::move(LHSVar),
+    auto RHS = std::make_unique<BinaryExprAST>(VarLoc, Op, std::move(LHSVar),
                                                std::move(OneNum));
 
     return std::make_unique<AssignmentExprAST>(VarLoc, IdName, std::move(RHS));
@@ -435,6 +435,7 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
     if (TokPrec < ExprPrec)
       return LHS;
 
+    SourceLocation OpLoc = CurLoc;
     int BinOp = CurTok;
     getNextToken(); // consume binop
 
@@ -456,8 +457,8 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
     }
 
     // Merge LHS and RHS into a new node
-    LHS =
-        std::make_unique<BinaryExprAST>(BinOp, std::move(LHS), std::move(RHS));
+    LHS = std::make_unique<BinaryExprAST>(CurLoc, BinOp, std::move(LHS),
+                                          std::move(RHS));
   }
 }
 
@@ -495,7 +496,7 @@ std::unique_ptr<ExprAST> ParseUnary() {
     char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
     auto LHSVar = std::make_unique<VariableExprAST>(Loc, IdName);
     auto OneNum = std::make_unique<NumberExprAST>(1LL);
-    auto RHS = std::make_unique<BinaryExprAST>(Op, std::move(LHSVar),
+    auto RHS = std::make_unique<BinaryExprAST>(CurLoc, Op, std::move(LHSVar),
                                                std::move(OneNum));
 
     return std::make_unique<AssignmentExprAST>(Loc, IdName, std::move(RHS));
@@ -614,7 +615,8 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
   if (!Body)
     return nullptr;
 
-  return std::make_unique<WhileExprAST>(std::move(Cond), std::move(Body));
+  return std::make_unique<WhileExprAST>(KeywordLoc, std::move(Cond),
+                                        std::move(Body));
 }
 
 // ParseForExpr - parses:

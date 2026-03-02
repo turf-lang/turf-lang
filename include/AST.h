@@ -38,14 +38,16 @@ public:
 // and the Right side (B).
 class BinaryExprAST : public ExprAST {
   int Op; // The operator, like '+', '-', etc.
+  SourceLocation Loc;
   std::unique_ptr<ExprAST> LHS;
   std::unique_ptr<ExprAST> RHS;
 
 public:
-  BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
+  BinaryExprAST(SourceLocation Loc, char Op, std::unique_ptr<ExprAST> LHS,
                 std::unique_ptr<ExprAST> RHS)
-      : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+      : Loc(Loc), Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 
+  const SourceLocation &getLoc() const { return Loc; }
   llvm::Value *codegen() override;
 };
 
@@ -86,7 +88,8 @@ class IfExprAST : public ExprAST {
 public:
   IfExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Cond,
             std::unique_ptr<ExprAST> Then, std::unique_ptr<ExprAST> Else)
-      : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
+      : Loc(Loc), Cond(std::move(Cond)), Then(std::move(Then)),
+        Else(std::move(Else)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   ExprAST *getThen() const { return Then.get(); }
@@ -135,12 +138,15 @@ public:
 };
 
 class WhileExprAST : public ExprAST {
+  SourceLocation Loc;
   std::unique_ptr<ExprAST> Cond, Body;
 
 public:
-  WhileExprAST(std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Body)
-      : Cond(std::move(Cond)), Body(std::move(Body)) {}
+  WhileExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Cond,
+               std::unique_ptr<ExprAST> Body)
+      : Loc(Loc), Cond(std::move(Cond)), Body(std::move(Body)) {}
 
+  const SourceLocation &getLoc() const { return Loc; }
   ExprAST *getBody() const { return Body.get(); }
 
   llvm::Value *codegen() override;
