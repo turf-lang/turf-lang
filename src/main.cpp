@@ -1,9 +1,11 @@
 #include "Builtins.h"
 #include "Codegen.h"
 #include "Lexer.h"
+#include "Lint.h"
 #include "Parser.h"
 #include "SymbolTable.h"
 #include "Types.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/MC/TargetRegistry.h"
@@ -12,7 +14,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
-#include "llvm/Config/llvm-config.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 #include <cstdlib>
@@ -65,8 +66,8 @@ static int emitObjectFile(Module &M, const std::string &ObjFilename) {
 
   Triple TargetTriple(sys::getDefaultTargetTriple());
 
-  // LLVM 20+ changed setTargetTriple to accept Triple; older versions take StringRef.
-  // arch is so much better :((
+  // LLVM 20+ changed setTargetTriple to accept Triple; older versions take
+  // StringRef. arch is so much better :((
 #if LLVM_VERSION_MAJOR >= 20
   M.setTargetTriple(TargetTriple);
 #else
@@ -153,8 +154,8 @@ int main(int argc, char **argv) {
     SourceLines.push_back(Line);
   }
 
-  RegisterBuiltins();   // Populate builtin registry + inject keywords into Lexer
-  InitializeModule();   // Initialize LLVM Context, Module, Builder
+  RegisterBuiltins(); // Populate builtin registry + inject keywords into Lexer
+  InitializeModule(); // Initialize LLVM Context, Module, Builder
   InitializeSymbolTable(); // Initialize semantic symbol table
   InitializePrecedence();
 
@@ -197,8 +198,10 @@ int main(int argc, char **argv) {
           // Parse and codegen prototype-only (body is parsed but we only
           // want to register the LLVM Function* in the module)
           auto AST = ParseExpression();
-          if (AST)
+          if (AST) {
+            LintExpression(AST.get()); // Lint function definitions
             AST->codegen(); // creates prototype + body the first time
+          }
         } else {
           getNextToken(); // skip non-fn tokens
         }
@@ -216,7 +219,8 @@ int main(int argc, char **argv) {
   Builder->SetInsertPoint(Entry);
 
   // pre-pass 1 ends
-  // Reset the lexer's internal state so that it starts from the beginning of the file
+  // Reset the lexer's internal state so that it starts from the beginning of
+  // the file
   resetLexer();
 
   // Bootstrap the lexer for the main pass
@@ -243,6 +247,7 @@ int main(int argc, char **argv) {
     auto AST = ParseExpression();
 
     if (AST) {
+      LintExpression(AST.get()); // Lint top-level statements before codegen
       AST->codegen();
     } else {
       // Error Recovery: Skip token and try again

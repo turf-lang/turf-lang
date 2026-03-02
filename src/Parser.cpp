@@ -1,8 +1,10 @@
 #include "Parser.h"
 #include "AST.h"
 #include "Builtins.h"
+#include "Codegen.h"
 #include "Errors.h"
 #include "Lexer.h"
+#include "SymbolTable.h"
 #include <map>
 #include <memory>
 
@@ -295,13 +297,20 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
     std::string IdName = IdentifierStr;
     bool CouldBeKeywordTypo = false;
 
-    // Calculate distance to keywords only if its length is > 2 or the matched
-    // keyword length is similar
-    if (IdName.length() >= 2) {
+    // [CRITICAL BUG FIX]
+    // Only consider keyword typos if this identifier is NOT already
+    // declared as a variable. Otherwise legitimate variable names like
+    // 'flag' get mistaken for keywords like 'float'.
+    bool IsKnownVariable = false;
+    if (GlobalSymbolTable) {
+      IsKnownVariable = (GlobalSymbolTable->LookupSymbol(IdName) != nullptr);
+    } else {
+      IsKnownVariable = (NamedValues.find(IdName) != NamedValues.end());
+    }
+
+    if (!IsKnownVariable && IdName.length() >= 2) {
       for (const auto &pair : Keywords) {
         int dist = getLevenshteinDistance(IdName, pair.first);
-        // Distance 1 is always good. Distance 2 is good only for longer words
-        // to avoid 'x' -> 'if'
         if (dist <= 1 ||
             (dist == 2 && IdName.length() > 3 && pair.first.length() > 3)) {
           CouldBeKeywordTypo = true;

@@ -5,6 +5,7 @@
 #include "CFG.h"
 #include "Errors.h"
 #include "Lexer.h"
+#include "Lint.h"
 #include "SymbolTable.h"
 #include "Types.h"
 #include "llvm/IR/CFG.h"
@@ -991,6 +992,9 @@ Value *FuncDefExprAST::codegen() {
                                        ParamTurfType, ParamLoc, Alloca);
     }
   }
+
+  // Lint the function body before codegen
+  LintExpression(Body.get());
 
   // Codegen the body
   Body->codegen();
