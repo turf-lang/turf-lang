@@ -670,6 +670,9 @@ Value *CastExprAST::codegen() {
                                                    : "unknown";
   const char *DstName = (DestType == TURF_INT)      ? "int"
                         : (DestType == TURF_DOUBLE) ? "double"
+                        : (DestType == TURF_BOOL)   ? "bool"
+                        : (DestType == TURF_STRING) ? "string"
+                        : (DestType == TURF_VOID)   ? "void"
                                                     : "unknown";
   TypeError(Loc, std::string("Cannot explicitly cast '") + SrcName + "' to '" +
                      DstName + "'")
