@@ -4,9 +4,9 @@
 // automatically, so no other file needs to change.
 
 #include "Builtins.h"
-#include "Codegen.h"  // TheModule, Builder, TheContext
-#include "Errors.h"   // SyntaxError
-#include "Lexer.h"    // Keywords, SourceLocation
+#include "Codegen.h" // TheModule, Builder, TheContext
+#include "Errors.h"  // SyntaxError
+#include "Lexer.h"   // Keywords, SourceLocation
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Type.h"
@@ -56,8 +56,8 @@ void RegisterBuiltins() {
          }
 
          if (Ty->isIntegerTy(1)) {
-           Value *Zext =
-               Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), "booltoint");
+           Value *Zext = Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext),
+                                             "booltoint");
            Value *Fmt = Builder->CreateGlobalStringPtr("%d", "printstrbool");
            return Builder->CreateCall(PrintfFunc, {Fmt, Zext}, "printcall");
          }
@@ -67,7 +67,7 @@ void RegisterBuiltins() {
            return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
          }
 
-         SyntaxError(Loc, "Unsupported type for print").raise();
+         TypeError(Loc, "Unsupported type for print").raise();
          return nullptr;
        }});
 
@@ -91,8 +91,8 @@ void RegisterBuiltins() {
          }
 
          if (Ty->isIntegerTy(1)) {
-           Value *Zext =
-               Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), "booltoint");
+           Value *Zext = Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext),
+                                             "booltoint");
            Value *Fmt = Builder->CreateGlobalStringPtr("%d\n", "printstrbool");
            return Builder->CreateCall(PrintfFunc, {Fmt, Zext}, "printcall");
          }
@@ -124,22 +124,24 @@ void RegisterBuiltins() {
 
          Function *ScanfFunc = TheModule->getFunction("scanf");
          if (!ScanfFunc) {
-           FunctionType *FT = FunctionType::get(
-               Type::getInt32Ty(*TheContext),
-               {PointerType::getUnqual(*TheContext)}, true);
-           ScanfFunc = Function::Create(FT, Function::ExternalLinkage,
-                                        "scanf", TheModule.get());
+           FunctionType *FT =
+               FunctionType::get(Type::getInt32Ty(*TheContext),
+                                 {PointerType::getUnqual(*TheContext)}, true);
+           ScanfFunc = Function::Create(FT, Function::ExternalLinkage, "scanf",
+                                        TheModule.get());
          }
 
          Function *GetcharFunc = TheModule->getFunction("getchar");
          if (!GetcharFunc) {
-           FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext), false);
+           FunctionType *FT =
+               FunctionType::get(Type::getInt32Ty(*TheContext), false);
            GetcharFunc = Function::Create(FT, Function::ExternalLinkage,
                                           "getchar", TheModule.get());
          }
 
          // calloc(4096, 1)
-         Value *NumItems = ConstantInt::get(Type::getInt64Ty(*TheContext), 4096);
+         Value *NumItems =
+             ConstantInt::get(Type::getInt64Ty(*TheContext), 4096);
          Value *Size = ConstantInt::get(Type::getInt64Ty(*TheContext), 1);
          Value *Buf = Builder->CreateCall(CallocFunc, {NumItems, Size}, "buf");
 

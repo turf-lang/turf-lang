@@ -263,7 +263,7 @@ Value *BinaryExprAST::codegen() {
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
   }
   default:
-    SyntaxError(CurLoc, "Error: invalid binary operator");
+    SemanticError(CurLoc, "Error: invalid binary operator");
     return nullptr;
   }
 }
@@ -278,13 +278,13 @@ AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
 
 Value *VarDeclExprAST::codegen() {
   if (Type == TURF_VOID) {
-    SyntaxError(Loc, "Variables of type 'void' are not allowed").raise();
+    TypeError(Loc, "Variables of type 'void' are not allowed").raise();
     return nullptr;
   }
 
   if (Keywords.find(Name) != Keywords.end()) {
-    SyntaxError(Loc, "Cannot use keyword '" + Name +
-                         "' as a variable name. Keyword is reserved.")
+    SemanticError(Loc, "Cannot use keyword '" + Name +
+                           "' as a variable name. Keyword is reserved.")
         .raise();
     return nullptr;
   }
@@ -375,8 +375,8 @@ Value *AssignmentExprAST::codegen() {
     return nullptr;
 
   if (Keywords.find(Name) != Keywords.end()) {
-    SyntaxError(Loc,
-                "Cannot assign to keyword '" + Name + "'. Keyword is reserved.")
+    SemanticError(Loc, "Cannot assign to keyword '" + Name +
+                           "'. Keyword is reserved.")
         .raise();
     return nullptr;
   }
@@ -384,7 +384,7 @@ Value *AssignmentExprAST::codegen() {
   // Look up the variable
   auto Iter = NamedValues.find(Name);
   if (Iter == NamedValues.end()) {
-    SyntaxError(Loc, "Variable must be declared with a type before use")
+    SemanticError(Loc, "Variable must be declared with a type before use")
         .raise();
     return nullptr;
   }
@@ -537,10 +537,10 @@ Value *UnaryExprAST::codegen() {
       return Builder->CreateFNeg(OperandV);
     if (OperandType == TURF_INT)
       return Builder->CreateNeg(OperandV);
-    SyntaxError(CurLoc, "Unknown unary operand type").raise();
+    TypeError(CurLoc, "Unknown unary operand type").raise();
     return nullptr;
   default:
-    SyntaxError(CurLoc, "Unknown unary operator");
+    SemanticError(CurLoc, "Unknown unary operator");
     return nullptr;
   }
 }
@@ -671,8 +671,8 @@ Value *CastExprAST::codegen() {
   const char *DstName = (DestType == TURF_INT)      ? "int"
                         : (DestType == TURF_DOUBLE) ? "double"
                                                     : "unknown";
-  SyntaxError(Loc, std::string("Cannot explicitly cast '") + SrcName +
-                       "' to '" + DstName + "'")
+  TypeError(Loc, std::string("Cannot explicitly cast '") + SrcName + "' to '" +
+                     DstName + "'")
       .raise();
   return nullptr;
 }
@@ -680,7 +680,7 @@ Value *CastExprAST::codegen() {
 Value *BuiltinCallExprAST::codegen() {
   const BuiltinDef *Def = FindBuiltin(Name);
   if (!Def) {
-    SyntaxError(CurLoc, "Unknown builtin function: '" + Name + "'").raise();
+    SemanticError(CurLoc, "Unknown builtin function: '" + Name + "'").raise();
     return nullptr;
   }
 
@@ -879,7 +879,7 @@ Value *ForExprAST::codegen() {
 
 Value *BreakExprAST::codegen() {
   if (LoopBlocks.empty()) {
-    SyntaxError(Loc, "'break' used outside of a loop").raise();
+    ControlFlowError(Loc, "'break' used outside of a loop").raise();
     return nullptr;
   }
 
@@ -937,7 +937,8 @@ Value *FuncDefExprAST::codegen() {
   } else {
     // If the function already has a body, this is a duplicate definition
     if (!TheFunc->empty()) {
-      SyntaxError(Loc, "Duplicate function definition: '" + Name + "'").raise();
+      SemanticError(Loc, "Duplicate function definition: '" + Name + "'")
+          .raise();
       return nullptr;
     }
   }
@@ -1043,7 +1044,7 @@ Value *FuncDefExprAST::codegen() {
 // ReturnExprAST::codegen
 Value *ReturnExprAST::codegen() {
   if (CurrentFunction == nullptr) {
-    SyntaxError(Loc, "'return' used outside of a function").raise();
+    ControlFlowError(Loc, "'return' used outside of a function").raise();
     return nullptr;
   }
 
@@ -1055,15 +1056,14 @@ Value *ReturnExprAST::codegen() {
   if (!Val) {
     // empty return;
     if (CurrentFuncReturnType != TURF_VOID) {
-      SyntaxError(Loc, "'return;' is only valid inside a void function")
-          .raise();
+      TypeError(Loc, "'return;' is only valid inside a void function").raise();
       return nullptr;
     }
     Builder->CreateRetVoid();
   } else {
     // return <expr>;
     if (CurrentFuncReturnType == TURF_VOID) {
-      SyntaxError(Loc, "void function cannot return a value").raise();
+      TypeError(Loc, "void function cannot return a value").raise();
       return nullptr;
     }
     Value *RetVal = Val->codegen();
@@ -1087,14 +1087,15 @@ Value *ReturnExprAST::codegen() {
 Value *FuncCallExprAST::codegen() {
   Function *CalleeF = TheModule->getFunction(Name);
   if (!CalleeF) {
-    SyntaxError(Loc, "Unknown function: '" + Name + "'").raise();
+    SemanticError(Loc, "Unknown function: '" + Name + "'").raise();
     return nullptr;
   }
 
   if (CalleeF->arg_size() != Args.size()) {
-    SyntaxError(Loc, "Wrong number of arguments to '" + Name + "': expected " +
-                         std::to_string(CalleeF->arg_size()) + ", got " +
-                         std::to_string(Args.size()))
+    SemanticError(Loc, "Wrong number of arguments to '" + Name +
+                           "': expected " +
+                           std::to_string(CalleeF->arg_size()) + ", got " +
+                           std::to_string(Args.size()))
         .raise();
     return nullptr;
   }
