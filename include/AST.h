@@ -18,8 +18,8 @@ public:
 
 // Number Node (Leaf)
 class NumberExprAST : public ExprAST {
-  double Val;         // Actual value, like "5", "5.0", etc.
-  long long IntVal;   // Exact integer value when IsInteger is true
+  double Val;       // Actual value, like "5", "5.0", etc.
+  long long IntVal; // Exact integer value when IsInteger is true
   bool IsInteger = false;
 
 public:
@@ -80,15 +80,17 @@ public:
 
 // If-Expr AST, represents if-else branch
 class IfExprAST : public ExprAST {
+  SourceLocation Loc;
   std::unique_ptr<ExprAST> Cond, Then, Else;
 
 public:
-  IfExprAST(std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Then,
-            std::unique_ptr<ExprAST> Else)
+  IfExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Cond,
+            std::unique_ptr<ExprAST> Then, std::unique_ptr<ExprAST> Else)
       : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
 
-  ExprAST* getThen() const { return Then.get(); }
-  ExprAST* getElse() const { return Else.get(); }
+  const SourceLocation &getLoc() const { return Loc; }
+  ExprAST *getThen() const { return Then.get(); }
+  ExprAST *getElse() const { return Else.get(); }
 
   llvm::Value *codegen() override;
 };
@@ -112,7 +114,9 @@ public:
   BlockExprAST(std::vector<std::unique_ptr<ExprAST>> Expressions)
       : Expressions(std::move(Expressions)) {}
 
-  const std::vector<std::unique_ptr<ExprAST>>& getExpressions() const { return Expressions; }
+  const std::vector<std::unique_ptr<ExprAST>> &getExpressions() const {
+    return Expressions;
+  }
 
   llvm::Value *codegen() override;
 };
@@ -130,7 +134,6 @@ public:
   llvm::Value *codegen() override;
 };
 
-
 class WhileExprAST : public ExprAST {
   std::unique_ptr<ExprAST> Cond, Body;
 
@@ -138,7 +141,7 @@ public:
   WhileExprAST(std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Body)
       : Cond(std::move(Cond)), Body(std::move(Body)) {}
 
-  ExprAST* getBody() const { return Body.get(); }
+  ExprAST *getBody() const { return Body.get(); }
 
   llvm::Value *codegen() override;
 };
@@ -218,6 +221,7 @@ class CastExprAST : public ExprAST {
   TurfType DestType;
   std::unique_ptr<ExprAST> Operand;
   SourceLocation Loc;
+
 public:
   CastExprAST(SourceLocation Loc, TurfType DestType,
               std::unique_ptr<ExprAST> Operand)
@@ -254,8 +258,7 @@ class FuncDefExprAST : public ExprAST {
 
 public:
   FuncDefExprAST(SourceLocation Loc, std::string Name, TurfType ReturnType,
-                 std::vector<ParamDecl> Params,
-                 std::unique_ptr<ExprAST> Body)
+                 std::vector<ParamDecl> Params, std::unique_ptr<ExprAST> Body)
       : Loc(Loc), Name(std::move(Name)), ReturnType(ReturnType),
         Params(std::move(Params)), Body(std::move(Body)) {}
 
