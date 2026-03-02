@@ -4,9 +4,9 @@
 #include "Lexer.h"
 #include "Types.h"
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
-#include <set>
 
 // Forward declarations
 class ExprAST;
@@ -16,11 +16,11 @@ using BlockID = size_t;
 
 // Terminator type for a basic block
 enum class TerminatorKind {
-  None,        // No explicit terminator (fallthrough)
-  Return,      // return statement
-  Break,       // break statement
-  Continue,    // continue statement
-  Branch,      // Conditional branch (if)
+  None,         // No explicit terminator (fallthrough)
+  Return,       // return statement
+  Break,        // break statement
+  Continue,     // continue statement
+  Branch,       // Conditional branch (if)
   Unconditional // Unconditional jump (end of then/else, loop body)
 };
 
@@ -31,14 +31,14 @@ enum class TerminatorKind {
 // - No branches except at the end
 class TurfBasicBlock {
 private:
-  BlockID ID;                                  // Unique identifier
-  std::string Name;                            // Human-readable name (e.g., "entry", "if.then")
-  std::vector<ExprAST*> Statements;            // Statements in this block (non-owning)
-  std::vector<TurfBasicBlock*> Predecessors;   // Blocks that can jump here
-  std::vector<TurfBasicBlock*> Successors;     // Blocks this can jump to
-  TerminatorKind Terminator;                   // How this block ends
-  SourceLocation TerminatorLoc;                // Location of terminator statement
-  bool IsReachable;                            // Whether this block is reachable from entry
+  BlockID ID;       // Unique identifier
+  std::string Name; // Human-readable name (e.g., "entry", "if.then")
+  std::vector<ExprAST *> Statements; // Statements in this block (non-owning)
+  std::vector<TurfBasicBlock *> Predecessors; // Blocks that can jump here
+  std::vector<TurfBasicBlock *> Successors;   // Blocks this can jump to
+  TerminatorKind Terminator;                  // How this block ends
+  SourceLocation TerminatorLoc; // Location of terminator statement
+  bool IsReachable;             // Whether this block is reachable from entry
 
 public:
   TurfBasicBlock(BlockID ID, std::string Name)
@@ -48,9 +48,13 @@ public:
   // Accessors
   BlockID getID() const { return ID; }
   const std::string &getName() const { return Name; }
-  const std::vector<ExprAST*> &getStatements() const { return Statements; }
-  const std::vector<TurfBasicBlock*> &getPredecessors() const { return Predecessors; }
-  const std::vector<TurfBasicBlock*> &getSuccessors() const { return Successors; }
+  const std::vector<ExprAST *> &getStatements() const { return Statements; }
+  const std::vector<TurfBasicBlock *> &getPredecessors() const {
+    return Predecessors;
+  }
+  const std::vector<TurfBasicBlock *> &getSuccessors() const {
+    return Successors;
+  }
   TerminatorKind getTerminator() const { return Terminator; }
   const SourceLocation &getTerminatorLoc() const { return TerminatorLoc; }
   bool isReachable() const { return IsReachable; }
@@ -77,12 +81,12 @@ public:
 // Represents the control flow graph for a function
 class CFG {
 private:
-  std::string FunctionName;                        // Name of the function this CFG represents
-  TurfType ReturnType;                             // Return type of the function
+  std::string FunctionName; // Name of the function this CFG represents
+  TurfType ReturnType;      // Return type of the function
   std::vector<std::unique_ptr<TurfBasicBlock>> Blocks; // All blocks (owned)
-  TurfBasicBlock *EntryBlock;                      // First block (entry point)
-  TurfBasicBlock *ExitBlock;                       // Virtual exit block (all returns jump here)
-  BlockID NextID;                                  // Next available block ID
+  TurfBasicBlock *EntryBlock; // First block (entry point)
+  TurfBasicBlock *ExitBlock;  // Virtual exit block (all returns jump here)
+  BlockID NextID;             // Next available block ID
 
 public:
   explicit CFG(std::string FunctionName, TurfType ReturnType = TURF_VOID)
@@ -94,7 +98,9 @@ public:
   TurfType getReturnType() const { return ReturnType; }
   TurfBasicBlock *getEntryBlock() const { return EntryBlock; }
   TurfBasicBlock *getExitBlock() const { return ExitBlock; }
-  const std::vector<std::unique_ptr<TurfBasicBlock>> &getBlocks() const { return Blocks; }
+  const std::vector<std::unique_ptr<TurfBasicBlock>> &getBlocks() const {
+    return Blocks;
+  }
 
   // Block creation
   TurfBasicBlock *createBlock(std::string Name);
@@ -107,34 +113,38 @@ public:
   void addEdge(TurfBasicBlock *From, TurfBasicBlock *To);
 
   // Analysis passes
-  void computeReachability();              // Mark reachable blocks from entry
-  std::vector<TurfBasicBlock*> getUnreachableBlocks() const;  // Get unreachable blocks
-  bool allPathsReturn() const;             // Check if all paths end in return
-  std::vector<TurfBasicBlock*> getDeadBranches() const;  // Get dead conditional branches
+  void computeReachability(); // Mark reachable blocks from entry
+  std::vector<TurfBasicBlock *>
+  getUnreachableBlocks() const; // Get unreachable blocks
+  bool allPathsReturn() const;  // Check if all paths end in return
+  std::vector<TurfBasicBlock *>
+  getDeadBranches() const; // Get dead conditional branches
 
   // Diagnostics
   void reportFlowDiagnostics() const;
 
   // Utility
-  void print() const;  // Debug print CFG structure
+  void print() const; // Debug print CFG structure
 };
 
 // Builder for constructing CFGs from AST
 class CFGBuilder {
 private:
-  CFG *CurrentCFG;                          // CFG being built
-  TurfBasicBlock *CurrentBlock;             // Current insertion point
-  TurfBasicBlock *LoopContinueTarget;       // Target for 'continue' (innermost loop header)
-  TurfBasicBlock *LoopBreakTarget;          // Target for 'break' (innermost loop exit)
-  SourceLocation LastTerminatorLoc;         // Location of last terminator encountered
+  CFG *CurrentCFG;              // CFG being built
+  TurfBasicBlock *CurrentBlock; // Current insertion point
+  TurfBasicBlock
+      *LoopContinueTarget; // Target for 'continue' (innermost loop header)
+  TurfBasicBlock *LoopBreakTarget;  // Target for 'break' (innermost loop exit)
+  SourceLocation LastTerminatorLoc; // Location of last terminator encountered
 
 public:
-  CFGBuilder() : CurrentCFG(nullptr), CurrentBlock(nullptr),
-                 LoopContinueTarget(nullptr), LoopBreakTarget(nullptr),
-                 LastTerminatorLoc{0, 0} {}
+  CFGBuilder()
+      : CurrentCFG(nullptr), CurrentBlock(nullptr), LoopContinueTarget(nullptr),
+        LoopBreakTarget(nullptr), LastTerminatorLoc{0, 0} {}
 
   // Build CFG for a function
-  std::unique_ptr<CFG> buildCFG(const std::string &FunctionName, TurfType ReturnType, ExprAST *Body);
+  std::unique_ptr<CFG> buildCFG(const std::string &FunctionName,
+                                TurfType ReturnType, ExprAST *Body);
 
 private:
   // Visit methods for different AST nodes
@@ -145,6 +155,7 @@ private:
   void visitReturn(ExprAST *E);
   void visitBreak(ExprAST *E);
   void visitContinue(ExprAST *E);
+  void visitFor(ExprAST *E);
 
   // Utility methods
   TurfBasicBlock *createBlock(std::string Name);

@@ -1,9 +1,9 @@
 #include "CFG.h"
 #include "AST.h"
 #include "Errors.h"
+#include <algorithm>
 #include <iostream>
 #include <queue>
-#include <algorithm>
 
 // Global CFG storage
 std::vector<std::unique_ptr<CFG>> GlobalCFGs;
@@ -36,7 +36,7 @@ void CFG::computeReachability() {
     return;
 
   // BFS from entry block
-  std::queue<TurfBasicBlock*> Worklist;
+  std::queue<TurfBasicBlock *> Worklist;
   Worklist.push(EntryBlock);
   EntryBlock->setReachable(true);
 
@@ -53,8 +53,8 @@ void CFG::computeReachability() {
   }
 }
 
-std::vector<TurfBasicBlock*> CFG::getUnreachableBlocks() const {
-  std::vector<TurfBasicBlock*> Unreachable;
+std::vector<TurfBasicBlock *> CFG::getUnreachableBlocks() const {
+  std::vector<TurfBasicBlock *> Unreachable;
   for (auto &BB : Blocks) {
     // Skip the virtual exit block
     if (BB.get() == ExitBlock)
@@ -71,9 +71,11 @@ bool CFG::allPathsReturn() const {
     return false;
 
   // Check if the exit block has any incoming edges from non-return terminators
-  // A proper return means all paths that reach exit have explicit return statements
+  // A proper return means all paths that reach exit have explicit return
+  // statements
   for (TurfBasicBlock *Pred : ExitBlock->getPredecessors()) {
-    if (Pred->isReachable() && Pred->getTerminator() != TerminatorKind::Return) {
+    if (Pred->isReachable() &&
+        Pred->getTerminator() != TerminatorKind::Return) {
       // Found a path to exit that doesn't end with explicit return
       return false;
     }
@@ -82,9 +84,9 @@ bool CFG::allPathsReturn() const {
   return true;
 }
 
-std::vector<TurfBasicBlock*> CFG::getDeadBranches() const {
-  std::vector<TurfBasicBlock*> Dead;
-  
+std::vector<TurfBasicBlock *> CFG::getDeadBranches() const {
+  std::vector<TurfBasicBlock *> Dead;
+
   for (auto &BB : Blocks) {
     if (!BB->isReachable() && BB.get() != ExitBlock) {
       Dead.push_back(BB.get());
@@ -100,7 +102,7 @@ void CFG::reportFlowDiagnostics() const {
   for (TurfBasicBlock *BB : Unreachable) {
     if (!BB->getStatements().empty()) {
       // Report on first statement in unreachable block
-      std::cerr << "Warning: Unreachable code in block '" << BB->getName() 
+      std::cerr << "Warning: Unreachable code in block '" << BB->getName()
                 << "' of function '" << FunctionName << "'\n";
     }
   }
@@ -115,7 +117,7 @@ void CFG::reportFlowDiagnostics() const {
   for (TurfBasicBlock *BB : Dead) {
     if (BB->getTerminator() == TerminatorKind::Branch) {
       SourceLocation Loc = BB->getTerminatorLoc();
-      std::cerr << "Warning: Dead branch in function '" << FunctionName 
+      std::cerr << "Warning: Dead branch in function '" << FunctionName
                 << "' at line " << Loc.Line << "\n";
     }
   }
@@ -123,13 +125,16 @@ void CFG::reportFlowDiagnostics() const {
 
 void CFG::print() const {
   std::cout << "CFG for function '" << FunctionName << "':\n";
-  std::cout << "  Entry: " << (EntryBlock ? EntryBlock->getName() : "none") << "\n";
-  std::cout << "  Exit: " << (ExitBlock ? ExitBlock->getName() : "none") << "\n";
+  std::cout << "  Entry: " << (EntryBlock ? EntryBlock->getName() : "none")
+            << "\n";
+  std::cout << "  Exit: " << (ExitBlock ? ExitBlock->getName() : "none")
+            << "\n";
   std::cout << "  Blocks:\n";
 
   for (auto &BB : Blocks) {
     std::cout << "    BB" << BB->getID() << " (" << BB->getName() << ")";
-    std::cout << " [" << (BB->isReachable() ? "reachable" : "unreachable") << "]";
+    std::cout << " [" << (BB->isReachable() ? "reachable" : "unreachable")
+              << "]";
     std::cout << " - " << BB->getStatements().size() << " statements\n";
 
     if (!BB->getPredecessors().empty()) {
@@ -150,12 +155,24 @@ void CFG::print() const {
 
     const char *TermStr = "none";
     switch (BB->getTerminator()) {
-      case TerminatorKind::Return: TermStr = "return"; break;
-      case TerminatorKind::Break: TermStr = "break"; break;
-      case TerminatorKind::Continue: TermStr = "continue"; break;
-      case TerminatorKind::Branch: TermStr = "branch"; break;
-      case TerminatorKind::Unconditional: TermStr = "jump"; break;
-      case TerminatorKind::None: TermStr = "fallthrough"; break;
+    case TerminatorKind::Return:
+      TermStr = "return";
+      break;
+    case TerminatorKind::Break:
+      TermStr = "break";
+      break;
+    case TerminatorKind::Continue:
+      TermStr = "continue";
+      break;
+    case TerminatorKind::Branch:
+      TermStr = "branch";
+      break;
+    case TerminatorKind::Unconditional:
+      TermStr = "jump";
+      break;
+    case TerminatorKind::None:
+      TermStr = "fallthrough";
+      break;
     }
     std::cout << "      Terminator: " << TermStr << "\n";
   }
@@ -166,7 +183,8 @@ void CFG::print() const {
 // CFGBuilder Implementation
 // ============================================================================
 
-std::unique_ptr<CFG> CFGBuilder::buildCFG(const std::string &FunctionName, TurfType ReturnType, ExprAST *Body) {
+std::unique_ptr<CFG> CFGBuilder::buildCFG(const std::string &FunctionName,
+                                          TurfType ReturnType, ExprAST *Body) {
   auto CFGPtr = std::make_unique<CFG>(FunctionName, ReturnType);
   CurrentCFG = CFGPtr.get();
 
@@ -211,22 +229,25 @@ void CFGBuilder::visitExpr(ExprAST *E) {
   // If so, statements after it are unreachable - report error immediately
   if (!CurrentBlock || CurrentBlock->hasExplicitTerminator()) {
     // Report the error using the location of the last terminator we encountered
-    StatementAfterTerminatorError(LastTerminatorLoc, "return/break/continue").raise();
+    StatementAfterTerminatorError(LastTerminatorLoc, "return/break/continue")
+        .raise();
     return;
   }
 
   // Determine expression type and dispatch
-  if (dynamic_cast<BlockExprAST*>(E)) {
+  if (dynamic_cast<BlockExprAST *>(E)) {
     visitBlock(E);
-  } else if (dynamic_cast<IfExprAST*>(E)) {
+  } else if (dynamic_cast<IfExprAST *>(E)) {
     visitIf(E);
-  } else if (dynamic_cast<WhileExprAST*>(E)) {
+  } else if (dynamic_cast<WhileExprAST *>(E)) {
     visitWhile(E);
-  } else if (dynamic_cast<ReturnExprAST*>(E)) {
+  } else if (dynamic_cast<ForExprAST *>(E)) {
+    visitFor(E);
+  } else if (dynamic_cast<ReturnExprAST *>(E)) {
     visitReturn(E);
-  } else if (dynamic_cast<BreakExprAST*>(E)) {
+  } else if (dynamic_cast<BreakExprAST *>(E)) {
     visitBreak(E);
-  } else if (dynamic_cast<ContinueExprAST*>(E)) {
+  } else if (dynamic_cast<ContinueExprAST *>(E)) {
     visitContinue(E);
   } else {
     // Regular statement - add to current block
@@ -235,19 +256,20 @@ void CFGBuilder::visitExpr(ExprAST *E) {
 }
 
 void CFGBuilder::visitBlock(ExprAST *E) {
-  auto *Block = dynamic_cast<BlockExprAST*>(E);
+  auto *Block = dynamic_cast<BlockExprAST *>(E);
   if (!Block)
     return;
 
   // Visit each statement in the block sequentially
   for (const auto &Expr : Block->getExpressions()) {
     visitExpr(Expr.get());
-    // Continue processing all statements - visitExpr will handle unreachable code
+    // Continue processing all statements - visitExpr will handle unreachable
+    // code
   }
 }
 
 void CFGBuilder::visitIf(ExprAST *E) {
-  auto *If = dynamic_cast<IfExprAST*>(E);
+  auto *If = dynamic_cast<IfExprAST *>(E);
   if (!If)
     return;
 
@@ -294,12 +316,12 @@ void CFGBuilder::visitIf(ExprAST *E) {
 }
 
 void CFGBuilder::visitWhile(ExprAST *E) {
-  auto *While = dynamic_cast<WhileExprAST*>(E);
+  auto *While = dynamic_cast<WhileExprAST *>(E);
   if (!While)
     return;
 
   TurfBasicBlock *WhileEntry = CurrentBlock;
-  
+
   // Create blocks
   TurfBasicBlock *CondBB = createBlock("while.cond");
   TurfBasicBlock *BodyBB = createBlock("while.body");
@@ -338,24 +360,74 @@ void CFGBuilder::visitWhile(ExprAST *E) {
   setInsertPoint(ExitBB);
 }
 
+void CFGBuilder::visitFor(ExprAST *E) {
+  auto *For = dynamic_cast<ForExprAST *>(E);
+  if (!For)
+    return;
+
+  TurfBasicBlock *ForEntry = CurrentBlock;
+
+  // Create blocks
+  TurfBasicBlock *CondBB = createBlock("for.cond");
+  TurfBasicBlock *BodyBB = createBlock("for.body");
+  TurfBasicBlock *StepBB = createBlock("for.step");
+  TurfBasicBlock *ExitBB = createBlock("for.end");
+
+  // Entry jumps to condition
+  CurrentCFG->addEdge(ForEntry, CondBB);
+  ForEntry->setTerminator(TerminatorKind::Unconditional, SourceLocation{});
+
+  // Condition branches to body or exit
+  CurrentCFG->addEdge(CondBB, BodyBB);
+  CurrentCFG->addEdge(CondBB, ExitBB);
+  CondBB->setTerminator(TerminatorKind::Branch, SourceLocation{});
+
+  // Save loop targets for break/continue
+  TurfBasicBlock *SavedBreak = LoopBreakTarget;
+  TurfBasicBlock *SavedContinue = LoopContinueTarget;
+  LoopBreakTarget = ExitBB;
+  LoopContinueTarget = StepBB; // continue in for-loop goes to step, not cond
+
+  // Build body
+  setInsertPoint(BodyBB);
+  if (For->getBody()) {
+    visitExpr(For->getBody());
+  }
+  // Fall through to step if no explicit terminator
+  if (CurrentBlock && !CurrentBlock->hasExplicitTerminator()) {
+    CurrentCFG->addEdge(CurrentBlock, StepBB);
+  }
+
+  // Step block loops back to condition
+  CurrentCFG->addEdge(StepBB, CondBB);
+  StepBB->setTerminator(TerminatorKind::Unconditional, SourceLocation{});
+
+  // Restore loop targets
+  LoopBreakTarget = SavedBreak;
+  LoopContinueTarget = SavedContinue;
+
+  // Continue from exit
+  setInsertPoint(ExitBB);
+}
+
 void CFGBuilder::visitReturn(ExprAST *E) {
-  auto *Ret = dynamic_cast<ReturnExprAST*>(E);
+  auto *Ret = dynamic_cast<ReturnExprAST *>(E);
   if (!Ret || !CurrentBlock)
     return;
 
   CurrentBlock->addStatement(Ret);
   LastTerminatorLoc = Ret->getLoc();
   CurrentBlock->setTerminator(TerminatorKind::Return, LastTerminatorLoc);
-  
+
   // Link to exit block
   CurrentCFG->addEdge(CurrentBlock, CurrentCFG->getExitBlock());
-  
+
   // No further statements in this block
   CurrentBlock = nullptr;
 }
 
 void CFGBuilder::visitBreak(ExprAST *E) {
-  auto *Brk = dynamic_cast<BreakExprAST*>(E);
+  auto *Brk = dynamic_cast<BreakExprAST *>(E);
   if (!Brk || !CurrentBlock)
     return;
 
@@ -368,13 +440,13 @@ void CFGBuilder::visitBreak(ExprAST *E) {
   LastTerminatorLoc = Brk->getLoc();
   CurrentBlock->setTerminator(TerminatorKind::Break, LastTerminatorLoc);
   CurrentCFG->addEdge(CurrentBlock, LoopBreakTarget);
-  
+
   // No further statements in this block
   CurrentBlock = nullptr;
 }
 
 void CFGBuilder::visitContinue(ExprAST *E) {
-  auto *Cont = dynamic_cast<ContinueExprAST*>(E);
+  auto *Cont = dynamic_cast<ContinueExprAST *>(E);
   if (!Cont || !CurrentBlock)
     return;
 
@@ -387,7 +459,7 @@ void CFGBuilder::visitContinue(ExprAST *E) {
   LastTerminatorLoc = Cont->getLoc();
   CurrentBlock->setTerminator(TerminatorKind::Continue, LastTerminatorLoc);
   CurrentCFG->addEdge(CurrentBlock, LoopContinueTarget);
-  
+
   // No further statements in this block
   CurrentBlock = nullptr;
 }

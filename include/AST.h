@@ -165,6 +165,7 @@ public:
       : Loc(Loc), VarName(std::move(VarName)), Start(std::move(Start)),
         End(std::move(End)), Step(std::move(Step)), Body(std::move(Body)) {}
 
+  ExprAST *getBody() const { return Body.get(); }
   llvm::Value *codegen() override;
 };
 
