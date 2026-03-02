@@ -269,15 +269,18 @@ static void LintIf(const IfExprAST *If) {
   ExprAST *Then = If->getThen();
   ExprAST *Else = If->getElse();
 
-  // Empty then or else branch
+  // Empty then branch
   if (IsEffectivelyEmpty(Then)) {
     EmptyBranchWarning(If->getLoc(), "then").warn();
   }
-  if (IsEffectivelyEmpty(Else)) {
+
+  // Empty else branch - only warn if an else branch actually exists.
+  // A missing else (nullptr) is intentional, not an empty block.
+  if (Else && IsEffectivelyEmpty(Else)) {
     EmptyBranchWarning(If->getLoc(), "else").warn();
   }
 
-  // Identical then/else branches
+  // Identical then/else branches (only possible when else exists)
   if (Then && Else && !IsEffectivelyEmpty(Then) && !IsEffectivelyEmpty(Else)) {
     std::string ThenFP = Fingerprint(Then);
     std::string ElseFP = Fingerprint(Else);
