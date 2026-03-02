@@ -319,7 +319,7 @@ Value *VarDeclExprAST::codegen() {
   if (!Init)
     return nullptr;
 
-  Init = CastToType(Init, Type, "initcast");
+  Init = CastToType(Init, Type, "initcast", Loc);
 
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
   AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Name, Type);
@@ -392,7 +392,7 @@ Value *AssignmentExprAST::codegen() {
   AllocaInst *Alloca = Iter->second.Alloca;
   TurfType VarType = Iter->second.Type;
 
-  Value *CastVal = CastToType(Val, VarType, "assigncast");
+  Value *CastVal = CastToType(Val, VarType, "assigncast", Loc);
 
   // Generate the Store instruction
   Builder->CreateStore(CastVal, Alloca);
@@ -1069,7 +1069,7 @@ Value *ReturnExprAST::codegen() {
     Value *RetVal = Val->codegen();
     if (!RetVal)
       return nullptr;
-    RetVal = CastToType(RetVal, CurrentFuncReturnType, "retcast");
+    RetVal = CastToType(RetVal, CurrentFuncReturnType, "retcast", Loc);
     Builder->CreateRet(RetVal);
   }
 
@@ -1106,7 +1106,7 @@ Value *FuncCallExprAST::codegen() {
     if (!V)
       return nullptr;
     TurfType ExpectedType = getTurfTypeFromLLVM(Arg.getType());
-    V = CastToType(V, ExpectedType, "argcast");
+    V = CastToType(V, ExpectedType, "argcast", Loc);
     ArgVals.push_back(V);
   }
 
