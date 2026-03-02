@@ -413,6 +413,35 @@ Value *IfExprAST::codegen() {
   // Get the current function so we can insert blocks into it
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
+  // If-without-else (statement form)
+  if (!Else) {
+    BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
+    BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "ifcont");
+
+    // If condition is true go to ThenBB, otherwise skip to MergeBB
+    Builder->CreateCondBr(CondV, ThenBB, MergeBB);
+
+    // Emit then block
+    Builder->SetInsertPoint(ThenBB);
+
+    Value *ThenV = Then->codegen();
+    if (!ThenV)
+      return nullptr;
+
+    // Branch to merge if the then-block didn't already terminate
+    if (!Builder->GetInsertBlock()->getTerminator()) {
+      Builder->CreateBr(MergeBB);
+    }
+
+    // Emit merge block
+    TheFunction->insert(TheFunction->end(), MergeBB);
+    Builder->SetInsertPoint(MergeBB);
+
+    // If-without-else is a statement — return a dummy null value
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+  }
+
+  // If-with-else (original logic, unchanged)
   // Create blocks for 'then', 'else', and 'merge'
   BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
   BasicBlock *ElseBB = BasicBlock::Create(*TheContext, "else");
@@ -421,7 +450,6 @@ Value *IfExprAST::codegen() {
   // Create the Conditional Branch
   // "If CondV is true, go to ThenBB, otherwise go to ElseBB"
   Builder->CreateCondBr(CondV, ThenBB, ElseBB);
-
   Builder->SetInsertPoint(ThenBB);
 
   Value *ThenV = Then->codegen();
@@ -429,18 +457,11 @@ Value *IfExprAST::codegen() {
     return nullptr;
 
   // Check if the then-branch terminated (break/continue/return).
-  // After such terminators, codegen leaves us in a dead block with no
-  // predecessors. Detect this: a block different from the original ThenBB
-  // that has no predecessors is dead, it means the branch truly terminated.
   bool ThenTerminated = Builder->GetInsertBlock()->getTerminator() != nullptr ||
                         (Builder->GetInsertBlock() != ThenBB &&
                          llvm::pred_empty(Builder->GetInsertBlock()));
 
-  // Only branch to merge if block doesn't already have a terminator (e.g.,
-  // return)
   if (!Builder->GetInsertBlock()->getTerminator()) {
-    // Builder->CreateBr(MergeBB);
-
     if (!ThenTerminated) {
       Builder->CreateBr(MergeBB);
     }
@@ -458,11 +479,7 @@ Value *IfExprAST::codegen() {
                         (Builder->GetInsertBlock() != ElseBB &&
                          llvm::pred_empty(Builder->GetInsertBlock()));
 
-  // Only branch to merge if block doesn't already have a terminator (e.g.,
-  // return)
   if (!Builder->GetInsertBlock()->getTerminator()) {
-    // Builder->CreateBr(MergeBB);
-
     if (!ElseTerminated) {
       Builder->CreateBr(MergeBB);
     }
@@ -472,32 +489,20 @@ Value *IfExprAST::codegen() {
   TheFunction->insert(TheFunction->end(), MergeBB);
   Builder->SetInsertPoint(MergeBB);
 
-  // Check if both branches terminated - if so, the merge block is unreachable
-  // bool ThenTerminated = ThenBB->getTerminator() != nullptr;
-  // bool ElseTerminated = ElseBB->getTerminator() != nullptr;
-
   if (ThenTerminated && ElseTerminated) {
-    // Both branches terminated - merge block is unreachable
-    // Add an unreachable instruction to properly terminate this dead block
     Builder->CreateUnreachable();
-    // Return a dummy value (this code won't be executed)
     TurfType ResultType = getCommonType(getTurfTypeFromLLVM(ThenV->getType()),
                                         getTurfTypeFromLLVM(ElseV->getType()));
     return Constant::getNullValue(getLLVMType(ResultType));
   }
 
-  // If only one branch terminated, the merge block is still reachable
-  // from the non-terminating branch. No PHI needed, just return the
-  // value from the non-terminating branch directly.
   if (ThenTerminated) {
-    // Only else flows into merge. Erase the dead then block if empty.
     if (ThenBB != MergeBB && llvm::pred_empty(ThenBB) && ThenBB->empty()) {
       ThenBB->eraseFromParent();
     }
     return ElseV;
   }
   if (ElseTerminated) {
-    // Only then flows into merge. Erase the dead else block if empty.
     if (ElseBB != MergeBB && llvm::pred_empty(ElseBB) && ElseBB->empty()) {
       ElseBB->eraseFromParent();
     }

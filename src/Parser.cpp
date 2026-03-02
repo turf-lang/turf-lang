@@ -235,10 +235,16 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
   std::unique_ptr<ExprAST> Then;
   std::unique_ptr<ExprAST> Else;
 
+  // Track whether the then-branch used block syntax (curly braces).
+  // Block-form: if cond { ... } : else is optional
+  // Ternary-form: if cond then expr else expr : else is mandatory
+  bool IsBlockForm = false;
+
   if (CurTok == TOK_THEN) {
     getNextToken();
     Then = ParseExpression();
   } else if (CurTok == '{') {
+    IsBlockForm = true;
     Then = ParseBlock();
   } else {
     // Check if the current token is a typo for 'then'
@@ -255,7 +261,29 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
   if (!Then)
     return nullptr;
 
-  if (CurTok != TOK_ELSE) {
+  // Handle the else branch (or its absence)
+  if (CurTok == TOK_ELSE) {
+    // else keyword present : parse the else branch normally
+    getNextToken();
+
+    if (CurTok == '{') {
+      Else = ParseBlock();
+    } else {
+      Else = ParseExpression();
+    }
+    if (!Else)
+      return nullptr;
+  } else if (IsBlockForm) {
+    // Block-form if: else is optional.
+    if (CurTok == TOK_IDENTIFIER) {
+      if (getLevenshteinDistance(IdentifierStr, "else") <= 2) {
+        KeywordError(CurLoc, IdentifierStr).raise();
+        return nullptr;
+      }
+    }
+    // No else branch : Else stays nullptr.
+  } else {
+    // Ternary-form if: else is mandatory.
     if (CurTok == TOK_IDENTIFIER) {
       if (getLevenshteinDistance(IdentifierStr, "else") <= 2) {
         KeywordError(CurLoc, IdentifierStr).raise();
@@ -265,16 +293,6 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     LogErrorAt(CurLoc, "expected 'else'");
     return nullptr;
   }
-  getNextToken();
-
-  if (CurTok == '{') {
-    Else = ParseBlock();
-  } else {
-    Else = ParseExpression();
-  }
-
-  if (!Else)
-    return nullptr;
 
   return std::make_unique<IfExprAST>(KeywordLoc, std::move(Cond),
                                      std::move(Then), std::move(Else));
