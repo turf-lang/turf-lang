@@ -86,15 +86,15 @@ static TurfType getCommonType(TurfType A, TurfType B) {
   return getTypeRank(A) >= getTypeRank(B) ? A : B;
 }
 
-static Value *CastToType(Value *Val, TurfType DestType,
-                         const std::string &Name) {
+static Value *CastToType(Value *Val, TurfType DestType, const std::string &Name,
+                         SourceLocation Loc = {0, 0}) {
   TurfType SrcType = getTurfTypeFromLLVM(Val->getType());
   if (SrcType == DestType)
     return Val;
 
   // Strings cannot be cast to/from other types
   if (SrcType == TURF_STRING || DestType == TURF_STRING) {
-    SyntaxError(CurLoc, "Cannot cast between string and non-string types")
+    TypeError(CurLoc, "Cannot cast between string and non-string types")
         .raise();
     return Val;
   }
