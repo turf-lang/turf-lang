@@ -1,0 +1,30 @@
+name: Turf Test Suites
+
+on:
+  push:
+    branches: [ "master", "dev"]
+  pull_request:
+    branches: [ "master", "dev"]
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install LLVM
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y llvm clang
+    
+    - name: Ensure correct file permissions
+      run: |
+        chmod +x scripts/update_compiler.sh
+        chmod +x scripts/test_runner.sh
+        
+    - name: Build Turf Compiler
+      run: ./scripts/update_compiler.sh
+      
+    - name: Run Test Suites
+      run: ./scripts/test_runner.sh
