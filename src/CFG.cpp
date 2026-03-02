@@ -279,7 +279,7 @@ void CFGBuilder::visitIf(ExprAST *E) {
 
   // Entry branches to then
   CurrentCFG->addEdge(IfEntry, ThenBB);
-  IfEntry->setTerminator(TerminatorKind::Branch, SourceLocation{});
+  IfEntry->setTerminator(TerminatorKind::Branch, If->getLoc());
 
   // Build then branch
   setInsertPoint(ThenBB);
@@ -329,12 +329,12 @@ void CFGBuilder::visitWhile(ExprAST *E) {
 
   // Entry jumps to condition
   CurrentCFG->addEdge(WhileEntry, CondBB);
-  WhileEntry->setTerminator(TerminatorKind::Unconditional, SourceLocation{});
+  WhileEntry->setTerminator(TerminatorKind::Unconditional, While->getLoc());
 
   // Condition branches to body or exit
   CurrentCFG->addEdge(CondBB, BodyBB);
   CurrentCFG->addEdge(CondBB, ExitBB);
-  CondBB->setTerminator(TerminatorKind::Branch, SourceLocation{});
+  CondBB->setTerminator(TerminatorKind::Branch, While->getLoc());
 
   // Save loop targets for break/continue
   TurfBasicBlock *SavedBreak = LoopBreakTarget;
