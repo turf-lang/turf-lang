@@ -1,7 +1,5 @@
-// Simple test showing line numbers
 fn int test() {
     return 5
-    print("unreachable")
 }
 
 test()
