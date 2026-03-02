@@ -562,6 +562,12 @@ Value *BlockExprAST::codegen() {
     GlobalSymbolTable->ExitScope();
   }
 
+  // An empty block is valid - it just produces no meaningful value.
+  // Return a dummy zero so callers (e.g. IfExprAST::codegen) don't
+  // mistake it for a codegen failure and bail out mid-IR-construction.
+  if (!LastVal)
+    LastVal = Constant::getNullValue(Type::getInt64Ty(*TheContext));
+
   return LastVal;
 }
 
