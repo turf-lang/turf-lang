@@ -12,6 +12,7 @@ enum BuiltinToken {
   TOK_BUILTIN_PRINT = -100,
   TOK_BUILTIN_PRINTLINE = -101,
   TOK_BUILTIN_INPUT = -102,
+  TOK_BUILTIN_LENGTHOF = -103,
 };
 
 // BuiltinDef

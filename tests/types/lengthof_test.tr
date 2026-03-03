@@ -1,0 +1,24 @@
+// Basic string literal
+int a = lengthof("hello")
+printline(a)
+
+// Empty string must return 0
+int b = lengthof("")
+printline(b)
+
+// Three-character string
+int c = lengthof("abc")
+printline(c)
+
+// Stored in a variable first
+string s = "Turf"
+int d = lengthof(s)
+printline(d)
+
+// Used directly in an expression
+int e = lengthof("hi") + lengthof("!")
+printline(e)
+
+// Longer string
+int f = lengthof("Hello, World!")
+printline(f)
