@@ -1,0 +1,10 @@
+fn void do_something(int x) {
+    if x > 0 {
+        printline(x)
+    } else {
+        printline(0)
+    }
+}
+
+do_something(42)
+do_something(-1)

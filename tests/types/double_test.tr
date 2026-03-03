@@ -1,0 +1,23 @@
+double a = 3.14
+printline(a)
+
+double b = 2.718
+printline(b)
+
+double c = a + b
+printline(c)
+
+double d = 10.0 - 4.5
+printline(d)
+
+double e = 3.0 * 2.5
+printline(e)
+
+double f = 10.0 / 3.0
+printline(f)
+
+double g = -1.5
+printline(g)
+
+double h = 0.0
+printline(h)

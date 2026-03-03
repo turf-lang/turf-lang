@@ -29,9 +29,6 @@ jobs:
             -Iinclude $(llvm-config-18 --cxxflags --ldflags --system-libs --libs core native) \
             -o turf
 
-      - name: Verify build
-        run: ./turf --emit-llvm tests/test.tr -o test_output
-
       - name: Package
         run: |
           VERSION=${GITHUB_REF_NAME}

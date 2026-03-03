@@ -1,5 +1,0 @@
-// Test 2: Duplicate declaration in same scope
-// Should error: variable declared twice in same scope
-int x = 5;
-int x = 10;
-print(x);

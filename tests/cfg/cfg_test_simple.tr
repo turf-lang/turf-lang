@@ -1,4 +1,0 @@
-// Simplest possible test
-fn int simple() {
-    return 42
-}

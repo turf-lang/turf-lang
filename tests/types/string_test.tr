@@ -1,0 +1,20 @@
+string a = "Hello"
+printline(a)
+
+string b = "World"
+printline(b)
+
+string c = "Line1\nLine2"
+print(c)
+
+string d = "Tab\there"
+printline(d)
+
+string e = "Quote: \"hello\""
+printline(e)
+
+string f = "Backslash: \\"
+printline(f)
+
+string g = ""
+printline(g)

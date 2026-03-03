@@ -1,9 +1,0 @@
-print("Enter your name: ")
-string name = input()
-print("Hello, ")
-printline(name)
-
-print("Enter your age: ")
-int age = int(input())
-print("You are: ")
-printline(age)

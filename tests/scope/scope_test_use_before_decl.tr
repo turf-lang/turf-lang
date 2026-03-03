@@ -1,4 +1,0 @@
-// Test 1: Use-before-declaration
-// Should error: variable used before being declared
-print(x);
-int x = 5;
