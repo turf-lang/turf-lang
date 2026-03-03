@@ -46,24 +46,24 @@ void RegisterBuiltins() {
          Type *Ty = Val->getType();
 
          if (Ty->isDoubleTy()) {
-           Value *Fmt = Builder->CreateGlobalStringPtr("%g", "printstrdbl");
+           Value *Fmt = Builder->CreateGlobalString("%g", "printstrdbl");
            return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
          }
 
          if (Ty->isIntegerTy(64)) {
-           Value *Fmt = Builder->CreateGlobalStringPtr("%lld", "printstrint");
+           Value *Fmt = Builder->CreateGlobalString("%lld", "printstrint");
            return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
          }
 
          if (Ty->isIntegerTy(1)) {
            Value *Zext = Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext),
                                              "booltoint");
-           Value *Fmt = Builder->CreateGlobalStringPtr("%d", "printstrbool");
+           Value *Fmt = Builder->CreateGlobalString("%d", "printstrbool");
            return Builder->CreateCall(PrintfFunc, {Fmt, Zext}, "printcall");
          }
 
          if (Ty->isPointerTy()) {
-           Value *Fmt = Builder->CreateGlobalStringPtr("%s", "printstrstr");
+           Value *Fmt = Builder->CreateGlobalString("%s", "printstrstr");
            return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
          }
 
@@ -81,24 +81,24 @@ void RegisterBuiltins() {
          Type *Ty = Val->getType();
 
          if (Ty->isDoubleTy()) {
-           Value *Fmt = Builder->CreateGlobalStringPtr("%g\n", "printstrdbl");
+           Value *Fmt = Builder->CreateGlobalString("%g\n", "printstrdbl");
            return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
          }
 
          if (Ty->isIntegerTy(64)) {
-           Value *Fmt = Builder->CreateGlobalStringPtr("%lld\n", "printstrint");
+           Value *Fmt = Builder->CreateGlobalString("%lld\n", "printstrint");
            return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
          }
 
          if (Ty->isIntegerTy(1)) {
            Value *Zext = Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext),
                                              "booltoint");
-           Value *Fmt = Builder->CreateGlobalStringPtr("%d\n", "printstrbool");
+           Value *Fmt = Builder->CreateGlobalString("%d\n", "printstrbool");
            return Builder->CreateCall(PrintfFunc, {Fmt, Zext}, "printcall");
          }
 
          if (Ty->isPointerTy()) {
-           Value *Fmt = Builder->CreateGlobalStringPtr("%s\n", "printstrstr");
+           Value *Fmt = Builder->CreateGlobalString("%s\n", "printstrstr");
            return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
          }
 
@@ -146,7 +146,7 @@ void RegisterBuiltins() {
          Value *Buf = Builder->CreateCall(CallocFunc, {NumItems, Size}, "buf");
 
          // scanf("%4095[^\n]", Buf)
-         Value *Fmt = Builder->CreateGlobalStringPtr("%4095[^\n]", "scanfmt");
+         Value *Fmt = Builder->CreateGlobalString("%4095[^\n]", "scanfmt");
          Builder->CreateCall(ScanfFunc, {Fmt, Buf});
 
          // getchar()
@@ -165,10 +165,10 @@ void RegisterBuiltins() {
 
          // Enforce string (pointer) type
          if (!Ty->isPointerTy()) {
-           const char *TypeName = Ty->isDoubleTy()       ? "double"
-                                  : Ty->isIntegerTy(64)  ? "int"
-                                  : Ty->isIntegerTy(1)   ? "bool"
-                                                         : "unknown";
+           const char *TypeName = Ty->isDoubleTy()      ? "double"
+                                  : Ty->isIntegerTy(64) ? "int"
+                                  : Ty->isIntegerTy(1)  ? "bool"
+                                                        : "unknown";
            LengthofTypeError(Loc, TypeName).raise();
            return nullptr;
          }
@@ -177,10 +177,10 @@ void RegisterBuiltins() {
          //   i64 strlen(i8*)
          Function *StrlenF = TheModule->getFunction("strlen");
          if (!StrlenF) {
-           FunctionType *FT = FunctionType::get(
-               Type::getInt64Ty(*TheContext),
-               {PointerType::getUnqual(*TheContext)},
-               /*isVarArg=*/false);
+           FunctionType *FT =
+               FunctionType::get(Type::getInt64Ty(*TheContext),
+                                 {PointerType::getUnqual(*TheContext)},
+                                 /*isVarArg=*/false);
            StrlenF = Function::Create(FT, Function::ExternalLinkage, "strlen",
                                       TheModule.get());
          }
