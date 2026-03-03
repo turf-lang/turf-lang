@@ -1,0 +1,2 @@
+int a = lengthof(1122)
+printline(a)

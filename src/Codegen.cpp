@@ -46,7 +46,7 @@ Type *getLLVMType(TurfType Type) {
   case TURF_BOOL:
     return llvm::Type::getInt1Ty(*TheContext);
   case TURF_STRING:
-    return llvm::PointerType::get(llvm::Type::getInt8Ty(*TheContext), 0);
+    return llvm::PointerType::get(*TheContext, 0);
   case TURF_VOID:
     return llvm::Type::getVoidTy(*TheContext);
   default:
@@ -143,7 +143,7 @@ Value *BoolExprAST::codegen() {
 
 Value *StringExprAST::codegen() {
   // Create a global string constant
-  return Builder->CreateGlobalStringPtr(Val, "str");
+  return Builder->CreateGlobalString(Val, "str");
 }
 
 // Turns any expression into IR operation
@@ -598,9 +598,9 @@ Value *CastExprAST::codegen() {
   if (SrcType == TURF_STRING && DestType == TURF_INT) {
     // Declare strtoll if not already in the module
     Function *StrtollF = TheModule->getFunction("strtoll");
-    Type *I8Ptr = PointerType::get(Type::getInt8Ty(*TheContext), 0);
+    Type *I8Ptr = PointerType::get(*TheContext, 0);
     if (!StrtollF) {
-      Type *I8PtrPtr = PointerType::get(I8Ptr, 0);
+      Type *I8PtrPtr = PointerType::get(I8Ptr->getContext(), 0);
       FunctionType *FT =
           FunctionType::get(Type::getInt64Ty(*TheContext),
                             {I8Ptr, I8PtrPtr, Type::getInt32Ty(*TheContext)},
@@ -636,7 +636,7 @@ Value *CastExprAST::codegen() {
       PutsF = Function::Create(FT, Function::ExternalLinkage, "puts",
                                TheModule.get());
     }
-    Value *ErrMsg = Builder->CreateGlobalStringPtr(
+    Value *ErrMsg = Builder->CreateGlobalString(
         "Runtime Error: Invalid string to int conversion.", "errmsg");
     Builder->CreateCall(PutsF, {ErrMsg});
 
@@ -661,8 +661,8 @@ Value *CastExprAST::codegen() {
   if (SrcType == TURF_STRING && DestType == TURF_DOUBLE) {
     Function *StrtodF = TheModule->getFunction("strtod");
     if (!StrtodF) {
-      Type *I8Ptr = PointerType::get(Type::getInt8Ty(*TheContext), 0);
-      Type *I8PtrPtr = PointerType::get(I8Ptr, 0);
+      Type *I8Ptr = PointerType::get(*TheContext, 0);
+      Type *I8PtrPtr = PointerType::get(I8Ptr->getContext(), 0);
       FunctionType *FT =
           FunctionType::get(Type::getDoubleTy(*TheContext), {I8Ptr, I8PtrPtr},
                             /*isVarArg=*/false);
@@ -670,8 +670,76 @@ Value *CastExprAST::codegen() {
                                  TheModule.get());
     }
     Value *NullPtr = ConstantPointerNull::get(
-        PointerType::get(PointerType::get(Type::getInt8Ty(*TheContext), 0), 0));
+        PointerType::get(PointerType::get(*TheContext, 0)->getContext(), 0));
     return Builder->CreateCall(StrtodF, {Val, NullPtr}, "strtod_res");
+  }
+
+  // int → string : snprintf(buf, 32, "%lld", val)
+  if (SrcType == TURF_INT && DestType == TURF_STRING) {
+    Function *SnprintfF = TheModule->getFunction("snprintf");
+    if (!SnprintfF) {
+      Type *I8Ptr = PointerType::get(*TheContext, 0);
+      FunctionType *FT =
+          FunctionType::get(Type::getInt32Ty(*TheContext),
+                            {I8Ptr, Type::getInt64Ty(*TheContext), I8Ptr},
+                            /*isVarArg=*/true);
+      SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
+                                   TheModule.get());
+    }
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                     TheFunction->getEntryBlock().begin());
+    Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
+    AllocaInst *Buf = TmpB.CreateAlloca(Type::getInt8Ty(*TheContext), BufSize,
+                                        "int_to_str_buf");
+
+    Value *Fmt = Builder->CreateGlobalString("%lld", "intfmt");
+    Builder->CreateCall(SnprintfF, {Buf, BufSize, Fmt, Val}, "snprintf_int");
+    return Buf;
+  }
+
+  // double → string : snprintf(buf, 32, "%g", val)
+  if (SrcType == TURF_DOUBLE && DestType == TURF_STRING) {
+    Function *SnprintfF = TheModule->getFunction("snprintf");
+    if (!SnprintfF) {
+      Type *I8Ptr = PointerType::get(*TheContext, 0);
+      FunctionType *FT =
+          FunctionType::get(Type::getInt32Ty(*TheContext),
+                            {I8Ptr, Type::getInt64Ty(*TheContext), I8Ptr},
+                            /*isVarArg=*/true);
+      SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
+                                   TheModule.get());
+    }
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                     TheFunction->getEntryBlock().begin());
+    Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
+    AllocaInst *Buf = TmpB.CreateAlloca(Type::getInt8Ty(*TheContext), BufSize,
+                                        "dbl_to_str_buf");
+
+    Value *Fmt = Builder->CreateGlobalString("%g", "dblfmt");
+    Builder->CreateCall(SnprintfF, {Buf, BufSize, Fmt, Val}, "snprintf_dbl");
+    return Buf;
+  }
+
+  // bool → string : select(val, "true", "false")
+  if (SrcType == TURF_BOOL && DestType == TURF_STRING) {
+    Value *TrueStr = Builder->CreateGlobalString("true", "str_true");
+    Value *FalseStr = Builder->CreateGlobalString("false", "str_false");
+    return Builder->CreateSelect(Val, TrueStr, FalseStr, "bool_to_str");
+  }
+
+  // Unsupported → string
+  if (DestType == TURF_STRING) {
+    const char *SrcName = (SrcType == TURF_INT)      ? "int"
+                          : (SrcType == TURF_DOUBLE) ? "double"
+                          : (SrcType == TURF_BOOL)   ? "bool"
+                          : (SrcType == TURF_STRING) ? "string"
+                                                     : "void";
+    StringConversionError(Loc, SrcName).raise();
+    return nullptr;
   }
 
   // Everything else is unsupported
