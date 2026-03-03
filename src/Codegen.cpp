@@ -674,6 +674,76 @@ Value *CastExprAST::codegen() {
     return Builder->CreateCall(StrtodF, {Val, NullPtr}, "strtod_res");
   }
 
+  // int → string : snprintf(buf, 32, "%lld", val)
+  if (SrcType == TURF_INT && DestType == TURF_STRING) {
+    Function *SnprintfF = TheModule->getFunction("snprintf");
+    if (!SnprintfF) {
+      Type *I8Ptr = PointerType::get(Type::getInt8Ty(*TheContext), 0);
+      FunctionType *FT =
+          FunctionType::get(Type::getInt32Ty(*TheContext),
+                            {I8Ptr, Type::getInt64Ty(*TheContext), I8Ptr},
+                            /*isVarArg=*/true);
+      SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
+                                   TheModule.get());
+    }
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                     TheFunction->getEntryBlock().begin());
+    Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
+    AllocaInst *Buf = TmpB.CreateAlloca(Type::getInt8Ty(*TheContext), BufSize,
+                                        "int_to_str_buf");
+
+    Value *Fmt = Builder->CreateGlobalStringPtr("%lld", "intfmt");
+    Builder->CreateCall(SnprintfF,
+                        {Buf, BufSize, Fmt, Val}, "snprintf_int");
+    return Buf;
+  }
+
+  // double → string : snprintf(buf, 32, "%g", val)
+  if (SrcType == TURF_DOUBLE && DestType == TURF_STRING) {
+    Function *SnprintfF = TheModule->getFunction("snprintf");
+    if (!SnprintfF) {
+      Type *I8Ptr = PointerType::get(Type::getInt8Ty(*TheContext), 0);
+      FunctionType *FT =
+          FunctionType::get(Type::getInt32Ty(*TheContext),
+                            {I8Ptr, Type::getInt64Ty(*TheContext), I8Ptr},
+                            /*isVarArg=*/true);
+      SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
+                                   TheModule.get());
+    }
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                     TheFunction->getEntryBlock().begin());
+    Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
+    AllocaInst *Buf = TmpB.CreateAlloca(Type::getInt8Ty(*TheContext), BufSize,
+                                        "dbl_to_str_buf");
+
+    Value *Fmt = Builder->CreateGlobalStringPtr("%g", "dblfmt");
+    Builder->CreateCall(SnprintfF,
+                        {Buf, BufSize, Fmt, Val}, "snprintf_dbl");
+    return Buf;
+  }
+
+  // bool → string : select(val, "true", "false")
+  if (SrcType == TURF_BOOL && DestType == TURF_STRING) {
+    Value *TrueStr  = Builder->CreateGlobalStringPtr("true",  "str_true");
+    Value *FalseStr = Builder->CreateGlobalStringPtr("false", "str_false");
+    return Builder->CreateSelect(Val, TrueStr, FalseStr, "bool_to_str");
+  }
+
+  // Unsupported → string
+  if (DestType == TURF_STRING) {
+    const char *SrcName = (SrcType == TURF_INT)      ? "int"
+                          : (SrcType == TURF_DOUBLE) ? "double"
+                          : (SrcType == TURF_BOOL)   ? "bool"
+                          : (SrcType == TURF_STRING) ? "string"
+                                                     : "void";
+    StringConversionError(Loc, SrcName).raise();
+    return nullptr;
+  }
+
   // Everything else is unsupported
   const char *SrcName = (SrcType == TURF_INT)      ? "int"
                         : (SrcType == TURF_DOUBLE) ? "double"
