@@ -155,6 +155,39 @@ void RegisterBuiltins() {
          return Buf;
        }});
 
+  // lengthof(string) -> int
+  // Returns the number of characters (bytes) in a string.
+  Builtins.push_back(
+      {"lengthof", TOK_BUILTIN_LENGTHOF, /*ArgCount=*/1,
+       [](std::vector<Value *> &Args, SourceLocation Loc) -> Value * {
+         Value *Val = Args[0];
+         Type *Ty = Val->getType();
+
+         // Enforce string (pointer) type
+         if (!Ty->isPointerTy()) {
+           const char *TypeName = Ty->isDoubleTy()       ? "double"
+                                  : Ty->isIntegerTy(64)  ? "int"
+                                  : Ty->isIntegerTy(1)   ? "bool"
+                                                         : "unknown";
+           LengthofTypeError(Loc, TypeName).raise();
+           return nullptr;
+         }
+
+         // Declare strlen if not already in the module:
+         //   i64 strlen(i8*)
+         Function *StrlenF = TheModule->getFunction("strlen");
+         if (!StrlenF) {
+           FunctionType *FT = FunctionType::get(
+               Type::getInt64Ty(*TheContext),
+               {PointerType::getUnqual(*TheContext)},
+               /*isVarArg=*/false);
+           StrlenF = Function::Create(FT, Function::ExternalLinkage, "strlen",
+                                      TheModule.get());
+         }
+
+         return Builder->CreateCall(StrlenF, {Val}, "lengthof");
+       }});
+
   // Register each builtin's name into the Lexer keyword table
   // This is what makes the Lexer emit the right token when it sees "print",
   // "println", etc. No change to Lexer.cpp is ever needed for new builtins.
