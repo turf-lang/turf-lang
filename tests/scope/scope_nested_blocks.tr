@@ -1,0 +1,19 @@
+int x = 1
+printline(x)
+
+if x > 0 {
+    int y = 2
+    printline(y)
+
+    if y > 0 {
+        int z = 3
+        printline(z)
+    } else {
+        printline(0)
+    }
+    printline(y)
+} else {
+    printline(0)
+}
+
+printline(x)

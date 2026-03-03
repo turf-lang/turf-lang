@@ -1,0 +1,25 @@
+int a = 10
+int b = 20
+int c = a + b
+printline(c)
+
+int d = 100 - 30
+printline(d)
+
+int e = 7 * 8
+printline(e)
+
+int f = 100 / 4
+printline(f)
+
+int g = 17 % 5
+printline(g)
+
+int h = -42
+printline(h)
+
+int i = 0
+printline(i)
+
+int j = 1000000
+printline(j)

@@ -1,0 +1,41 @@
+bool a = true
+printline(a)
+
+bool b = false
+printline(b)
+
+bool c = true && true
+printline(c)
+
+bool d = true && false
+printline(d)
+
+bool e = false && false
+printline(e)
+
+bool f = true || false
+printline(f)
+
+bool g = false || false
+printline(g)
+
+bool h = false || true
+printline(h)
+
+bool i = 5 > 3
+printline(i)
+
+bool j = 3 > 5
+printline(j)
+
+bool k = 5 == 5
+printline(k)
+
+bool l = 5 != 3
+printline(l)
+
+bool m = 5 >= 5
+printline(m)
+
+bool n = 5 <= 5
+printline(n)

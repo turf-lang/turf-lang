@@ -1,0 +1,28 @@
+int a = 10
+int b = 20
+
+int max_val = if a > b then a else b
+printline(max_val)
+
+int c = 5
+if c > 0 {
+    printline("positive")
+} else {
+    printline("non-positive")
+}
+
+int d = 15
+if d > 20 {
+    printline("big")
+} else {
+    if d > 10 {
+        printline("medium")
+    } else {
+        printline("small")
+    }
+}
+
+int e = 7
+if e > 5 {
+    printline("above five")
+}

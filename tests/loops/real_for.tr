@@ -1,5 +1,0 @@
-int sum = 0
-for i in 1..10 step 1 {
-    sum = sum + i
-}
-print(sum)

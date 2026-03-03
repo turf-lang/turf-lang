@@ -1,0 +1,29 @@
+int a = 5 + 3
+printline(a)
+
+int b = 10 - 7
+printline(b)
+
+int c = 6 * 7
+printline(c)
+
+int d = 100 / 4
+printline(d)
+
+int e = 17 % 5
+printline(e)
+
+double f = 2.0 ^ 3.0
+printline(f)
+
+int g = -10
+printline(g)
+
+int h = 2 + 3 * 4
+printline(h)
+
+int i = (2 + 3) * 4
+printline(i)
+
+double j = 5 + 2.5
+printline(j)

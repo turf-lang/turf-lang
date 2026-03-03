@@ -1,0 +1,23 @@
+print(42)
+printline(0)
+
+print(3.14)
+printline(0.0)
+
+print(true)
+printline(false)
+
+print("Hello ")
+printline("World")
+
+int a = 100
+printline(a)
+
+double b = 2.5
+printline(b)
+
+bool c = true
+printline(c)
+
+string d = "Turf"
+printline(d)

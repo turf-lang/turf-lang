@@ -1,0 +1,20 @@
+double a = double(42)
+printline(a)
+
+int b = int(3.75)
+printline(b)
+
+int c = int("100")
+printline(c)
+
+double d = double("2.718")
+printline(d)
+
+int e = int(1.9) + int(2.1)
+printline(e)
+
+double f = double(int(9.9))
+printline(f)
+
+int g = int(double(7))
+printline(g)

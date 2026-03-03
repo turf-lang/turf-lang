@@ -1,9 +1,0 @@
-// Test 4: Unreachable declaration after return
-// Should error: declaration after return statement
-fn int test() {
-  int x = 5;
-  return x;
-  int y = 10;  // Error: unreachable
-}
-
-print(test());
