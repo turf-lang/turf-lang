@@ -58,6 +58,22 @@ public:
                       Colors::RESET) {}
 };
 
+// String Conversion Error : Unsupported type passed to string(...)
+class StringConversionError : public TurfError {
+public:
+  StringConversionError(SourceLocation Loc, const std::string &SrcTypeName)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED + "Oops! I can't convert '" + Colors::CYAN +
+                SrcTypeName + Colors::BRIGHT_RED + "' to a string!\n" +
+                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
+                "Hint: Only these conversions are supported:\n" +
+                "    string(int)    - turns a whole number into text\n" +
+                "    string(double) - turns a decimal number into text\n" +
+                "    string(bool)   - gives you \"true\" or \"false\"" +
+                Colors::RESET) {}
+};
+
 // Control Flow Misuse : break/continue/return in wrong context
 class ControlFlowError : public TurfError {
 public:

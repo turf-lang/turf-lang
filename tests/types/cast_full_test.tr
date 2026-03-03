@@ -18,3 +18,36 @@ printline(f)
 
 int g = int(double(7))
 printline(g)
+
+// string(int) conversions
+string s1 = string(42)
+printline(s1)
+
+string s2 = string(-7)
+printline(s2)
+
+string s3 = string(0)
+printline(s3)
+
+// string(double) conversions
+string s4 = string(3.14)
+printline(s4)
+
+string s5 = string(0.0)
+printline(s5)
+
+// string(bool) conversions
+string s6 = string(true)
+printline(s6)
+
+string s7 = string(false)
+printline(s7)
+
+// string(int(double)) - chaining casts
+string s8 = string(int(9.9))
+printline(s8)
+
+// string(variable)
+int x = 10
+string s9 = string(x)
+printline(s9)

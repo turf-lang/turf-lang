@@ -390,10 +390,13 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   }
 
   case TOK_TYPE_INT:
-  case TOK_TYPE_DOUBLE: {
-    // if the next token is '(' this is a cast call, e.g. int(x)
+  case TOK_TYPE_DOUBLE:
+  case TOK_TYPE_STRING: {
+    // if the next token is '(' this is a cast call, e.g. int(x) or string(x)
     // otherwise it is a variable declaration, e.g. int x = ...
-    TurfType DestType = (CurTok == TOK_TYPE_INT) ? TURF_INT : TURF_DOUBLE;
+    TurfType DestType = (CurTok == TOK_TYPE_INT)    ? TURF_INT
+                        : (CurTok == TOK_TYPE_DOUBLE) ? TURF_DOUBLE
+                                                      : TURF_STRING;
     SourceLocation TypeLoc = CurLoc;
     getNextToken(); // consume the type keyword
     if (CurTok == '(')
@@ -402,7 +405,6 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   }
 
   case TOK_TYPE_BOOL:
-  case TOK_TYPE_STRING:
     return ParseVarDecl();
 
   case TOK_TYPE_VOID:
