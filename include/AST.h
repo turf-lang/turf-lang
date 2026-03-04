@@ -87,6 +87,13 @@ public:
   llvm::Value *codegen() override;
 };
 
+// A single condition + body pair (used for if and each elseif)
+struct CondBranch {
+  SourceLocation Loc; // location of 'if' or 'elseif' keyword
+  std::unique_ptr<ExprAST> Cond;
+  std::unique_ptr<ExprAST> Body;
+};
+
 // If-Expr AST, represents if-else branch
 class IfExprAST : public ExprAST {
   // The first entry is the 'if' branch.
@@ -307,13 +314,6 @@ public:
       : Loc(Loc), Name(std::move(Name)), Args(std::move(Args)) {}
 
   llvm::Value *codegen() override;
-};
-
-// A single condition + body pair (used for if and each elseif)
-struct CondBranch {
-  SourceLocation Loc; // location of 'if' or 'elseif' keyword
-  std::unique_ptr<ExprAST> Cond;
-  std::unique_ptr<ExprAST> Body;
 };
 
 #endif

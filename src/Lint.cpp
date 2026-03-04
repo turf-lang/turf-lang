@@ -70,14 +70,12 @@ static bool ContainsLoopExit(const ExprAST *E) {
   }
 
   if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
-    std::string S = "if{";
     for (const auto &B : If->getBranches()) {
-      S += "cond:" + Fingerprint(B.Cond.get()) + "body:" + Fingerprint(B.Body.get()) + ";";
+      if (ContainsLoopExit(B.Body.get()))
+        return true;
     }
-    if (If->getElseBody())
-      S += "else:" + Fingerprint(If->getElseBody());
-    S += "}";
-    return S;
+    if (ContainsLoopExit(If->getElseBody()))
+      return true;
   }
 
   if (auto *W = dynamic_cast<const WhileExprAST *>(E)) {
