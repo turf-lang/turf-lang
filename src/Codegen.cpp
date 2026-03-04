@@ -61,6 +61,8 @@ static TurfType getTurfTypeFromLLVM(Type *Ty) {
     return TURF_INT;
   if (Ty->isIntegerTy(32))
     return TURF_INT;
+  if (Ty->isIntegerTy(32))
+    return TURF_INT;
   if (Ty->isIntegerTy(1))
     return TURF_BOOL;
   if (Ty->isPointerTy())
@@ -143,12 +145,10 @@ static Value *CastToType(Value *Val, TurfType DestType, const std::string &Name,
 // Numeric types (int, double, bool) are mutually compatible.
 // String is only compatible with string. Void is never compatible.
 static bool isTypeCompatible(TurfType From, TurfType To) {
-  if (From == To)
-    return true;
-  if (From == TURF_VOID || To == TURF_VOID)
-    return false;
-  if (From == TURF_STRING || To == TURF_STRING)
-    return false;
+
+  if (From == To) return true;
+  if (From == TURF_VOID || To == TURF_VOID) return false;
+  if (From == TURF_STRING || To == TURF_STRING) return false;
   // Remaining: int, double, bool — all mutually convertible
   return true;
 }
