@@ -17,6 +17,10 @@ static int LastChar = ' ';
 std::vector<DiagnosticEngine::Diag> DiagnosticEngine::Diagnostics;
 std::set<int>                       DiagnosticEngine::ErrorLines;
 
+// setjmp/longjmp recovery buffers
+jmp_buf g_recoverJmp;
+bool    g_recoverActive = false;
+
 std::ifstream SourceFile;
 double NumVal;
 long long IntVal;

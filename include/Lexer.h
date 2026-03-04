@@ -1,6 +1,7 @@
 #ifndef LEXER_H
 #define LEXER_H
 
+#include <csetjmp>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -25,10 +26,11 @@ extern SourceLocation CurLoc;
 // Mutable so RegisterBuiltins() can insert builtin names at startup.
 extern std::map<std::string, int> Keywords;
 
-// RecoverableError
-// Thrown by TurfError::raise() so compilation can continue after a bad
-// statement. The main loop catches this and advances to the next statement.
-struct RecoverableError {};
+// RecoverableError : setjmp/longjmp based (LLVM disables C++ exceptions)
+// The main loop calls setjmp(g_recoverJmp) before each statement.
+// raise() calls longjmp(g_recoverJmp, 1) to unwind back to that point.
+extern jmp_buf g_recoverJmp;
+extern bool    g_recoverActive; // true only while inside a setjmp guard
 
 // DiagnosticEngine
 // Collects errors and warnings, guaranteeing at most one primary error per
