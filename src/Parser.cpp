@@ -398,6 +398,7 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
     // if the next token is '(' this is a cast call, e.g. int(x) or string(x)
     // otherwise it is a variable declaration, e.g. int x = ...
     TurfType DestType = (CurTok == TOK_TYPE_INT)      ? TURF_INT
+
                         : (CurTok == TOK_TYPE_DOUBLE) ? TURF_DOUBLE
                                                       : TURF_STRING;
     SourceLocation TypeLoc = CurLoc;
