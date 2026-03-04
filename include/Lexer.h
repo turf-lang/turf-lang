@@ -4,6 +4,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,45 @@ extern std::vector<std::string> SourceLines;
 extern SourceLocation CurLoc;
 // Mutable so RegisterBuiltins() can insert builtin names at startup.
 extern std::map<std::string, int> Keywords;
+
+// RecoverableError
+// Thrown by TurfError::raise() so compilation can continue after a bad
+// statement. The main loop catches this and advances to the next statement.
+struct RecoverableError {};
+
+// DiagnosticEngine
+// Collects errors and warnings, guaranteeing at most one primary error per
+// source line (cascading / secondary diagnostics on the same line are
+// silently dropped). Call flushAll() after the main loop to print everything.
+class DiagnosticEngine {
+public:
+  struct Diag {
+    SourceLocation Loc;
+    std::string   Msg;
+    bool          IsWarning;
+  };
+
+  // Record a diagnostic. Errors on a line that already has an error are
+  // dropped. Warnings on a line that has an error are also dropped.
+  static void add(SourceLocation Loc, const std::string &Msg,
+                  bool IsWarning = false);
+
+  // True if any error (not just warning) has been recorded.
+  static bool hasErrors();
+
+  // True if an error already exists for the given source line.
+  static bool hasErrorAt(int Line);
+
+  // Print all collected diagnostics (sorted by line) then clear them.
+  static void flushAll();
+
+  // Discard everything (used between passes if needed).
+  static void reset();
+
+private:
+  static std::vector<Diag> Diagnostics;
+  static std::set<int>     ErrorLines; // lines that already have an error
+};
 
 enum Token {
   TOK_EOF = -1,

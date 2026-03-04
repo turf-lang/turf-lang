@@ -197,10 +197,16 @@ int main(int argc, char **argv) {
         if (CurTok == TOK_FN) {
           // Parse and codegen prototype-only (body is parsed but we only
           // want to register the LLVM Function* in the module)
-          auto AST = ParseExpression();
-          if (AST) {
-            LintExpression(AST.get()); // Lint function definitions
-            AST->codegen(); // creates prototype + body the first time
+          try {
+            auto AST = ParseExpression();
+            if (AST) {
+              LintExpression(AST.get()); // Lint function definitions
+              AST->codegen(); // creates prototype + body the first time
+            }
+          } catch (const RecoverableError &) {
+            // Skip to next fn or EOF on pre-pass error
+            while (CurTok != TOK_FN && CurTok != TOK_EOF)
+              getNextToken();
           }
         } else {
           getNextToken(); // skip non-fn tokens
@@ -239,21 +245,48 @@ int main(int argc, char **argv) {
     // fn definitions were already fully processed in the pre-pass.
     // Parse and discard them here to keep the token stream in sync.
     if (CurTok == TOK_FN) {
-      ParseExpression(); // parse and drop; body was already codegen'd
+      try {
+        ParseExpression(); // parse and drop; body was already codegen'd
+      } catch (const RecoverableError &) {
+        while (CurTok != TOK_FN && CurTok != ';' && CurTok != TOK_EOF)
+          getNextToken();
+      }
       continue;
     }
 
-    // Parse the next expression
-    auto AST = ParseExpression();
-
-    if (AST) {
-      LintExpression(AST.get()); // Lint top-level statements before codegen
-      AST->codegen();
-    } else {
-      // Error Recovery: Skip token and try again
-      getNextToken();
+    // Parse the next expression — wrap in try/catch so a bad statement
+    // records its diagnostic and we continue to the next one.
+    try {
+      auto AST = ParseExpression();
+      if (AST) {
+        LintExpression(AST.get()); // Lint top-level statements before codegen
+        AST->codegen();
+      } else {
+        // Parser returned nullptr without throwing (e.g. LogErrorAt path).
+        // Advance past the offending token and keep going.
+        getNextToken();
+      }
+    } catch (const RecoverableError &) {
+      // A TurfError::raise() unwound to here.  The diagnostic is already
+      // recorded in DiagnosticEngine.  Skip to the next statement boundary.
+      while (CurTok != ';' && CurTok != TOK_EOF &&
+             CurTok != TOK_FN && CurTok != TOK_TYPE_INT &&
+             CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
+             CurTok != TOK_TYPE_STRING && CurTok != TOK_IF &&
+             CurTok != TOK_WHILE && CurTok != TOK_FOR &&
+             CurTok != TOK_RETURN) {
+        getNextToken();
+      }
     }
   }
+
+  // -------------------------------------------------------------------------
+  // Flush all collected diagnostics (sorted by line).  If any errors were
+  // recorded, stop here — do not attempt further IR generation or linking.
+  // -------------------------------------------------------------------------
+  DiagnosticEngine::flushAll();
+  if (DiagnosticEngine::hasErrors())
+    return 1;
 
   // Only after the loop ends (EOF), we add the return statement.
   Builder->CreateRet(ConstantInt::get(*TheContext, APInt(32, 0)));

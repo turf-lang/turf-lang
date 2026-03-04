@@ -1,0 +1,6 @@
+// same_line_error.tr
+// Demonstrates one-error-per-line guarantee.
+// Expected: only ONE error for line 4 (badA is the root cause;
+// the follow-on failure from badB on the same expression is suppressed).
+
+int x = badA + badB

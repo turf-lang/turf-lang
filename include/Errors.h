@@ -26,10 +26,12 @@ public:
 
   virtual ~TurfError() = default;
 
-  // The main function to display the error and exit
+  // Record the error in the diagnostic engine (deferred/sorted print) and
+  // throw RecoverableError so the main loop can skip to the next statement
+  // instead of calling exit(1) immediately.
   void raise() const {
-    LogErrorAt(Loc, Message);
-    std::exit(1); // All errors currently stop compilation
+    DiagnosticEngine::add(Loc, Message, /*IsWarning=*/false);
+    throw RecoverableError{};
   }
 };
 
