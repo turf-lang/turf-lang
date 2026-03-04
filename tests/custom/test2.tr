@@ -1,0 +1,2 @@
+int i = printline("hello")
+printline(i)

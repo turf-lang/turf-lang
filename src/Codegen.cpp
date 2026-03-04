@@ -59,6 +59,8 @@ static TurfType getTurfTypeFromLLVM(Type *Ty) {
     return TURF_DOUBLE;
   if (Ty->isIntegerTy(64))
     return TURF_INT;
+  if (Ty->isIntegerTy(32))
+    return TURF_INT;
   if (Ty->isIntegerTy(1))
     return TURF_BOOL;
   if (Ty->isPointerTy())
@@ -89,7 +91,16 @@ static TurfType getCommonType(TurfType A, TurfType B) {
 
 static Value *CastToType(Value *Val, TurfType DestType, const std::string &Name,
                          SourceLocation Loc = {0, 0}) {
-  TurfType SrcType = getTurfTypeFromLLVM(Val->getType());
+  Type *ValTy = Val->getType();
+
+  // Normalize foreign integer widths (e.g. i32 from printf) to i64
+  // before doing any TurfType-level comparison.
+  if (ValTy->isIntegerTy(32)) {
+    Val = Builder->CreateSExt(Val, Type::getInt64Ty(*TheContext), "i32toi64");
+    ValTy = Val->getType();
+  }
+
+  TurfType SrcType = getTurfTypeFromLLVM(ValTy);
   if (SrcType == DestType)
     return Val;
 
@@ -132,6 +143,7 @@ static Value *CastToType(Value *Val, TurfType DestType, const std::string &Name,
 // Numeric types (int, double, bool) are mutually compatible.
 // String is only compatible with string. Void is never compatible.
 static bool isTypeCompatible(TurfType From, TurfType To) {
+
   if (From == To) return true;
   if (From == TURF_VOID || To == TURF_VOID) return false;
   if (From == TURF_STRING || To == TURF_STRING) return false;
@@ -462,6 +474,10 @@ Value *IfExprAST::codegen() {
   // Get the current function so we can insert blocks into it
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
+  // Determine if this is block-form (statement) or ternary-form (expression).
+  // Block-form: both branches are BlockExprAST nodes.
+  bool IsBlockForm = dynamic_cast<BlockExprAST *>(Then.get()) != nullptr;
+
   // If-without-else (statement form)
   if (!Else) {
     BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
@@ -490,7 +506,34 @@ Value *IfExprAST::codegen() {
     return Constant::getNullValue(Type::getInt64Ty(*TheContext));
   }
 
-  // If-with-else (original logic, unchanged)
+  if (IsBlockForm) {
+    BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
+    BasicBlock *ElseBB = BasicBlock::Create(*TheContext, "else");
+    BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "ifcont");
+
+    // BLOCK-FORM if/else: treat as statement, no PHI node needed.
+    Builder->CreateCondBr(CondV, ThenBB, ElseBB);
+
+    // Emit then block
+    Builder->SetInsertPoint(ThenBB);
+    Then->codegen();
+    if (!Builder->GetInsertBlock()->getTerminator())
+      Builder->CreateBr(MergeBB);
+
+    // Emit else block
+    TheFunction->insert(TheFunction->end(), ElseBB);
+    Builder->SetInsertPoint(ElseBB);
+    Else->codegen();
+    if (!Builder->GetInsertBlock()->getTerminator())
+      Builder->CreateBr(MergeBB);
+
+    // Merge : no PHI, just a dummy return value
+    TheFunction->insert(TheFunction->end(), MergeBB);
+    Builder->SetInsertPoint(MergeBB);
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+  }
+
+  // If-with-else
   // Create blocks for 'then', 'else', and 'merge'
   BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
   BasicBlock *ElseBB = BasicBlock::Create(*TheContext, "else");

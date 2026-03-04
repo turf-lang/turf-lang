@@ -261,9 +261,12 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
   if (!Then)
     return nullptr;
 
+  SourceLocation ElseLoc = {0, 0}; // default: no else
+
   // Handle the else branch (or its absence)
   if (CurTok == TOK_ELSE) {
     // else keyword present : parse the else branch normally
+    ElseLoc = CurLoc;
     getNextToken();
 
     if (CurTok == '{') {
@@ -294,7 +297,7 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     return nullptr;
   }
 
-  return std::make_unique<IfExprAST>(KeywordLoc, std::move(Cond),
+  return std::make_unique<IfExprAST>(KeywordLoc, ElseLoc, std::move(Cond),
                                      std::move(Then), std::move(Else));
 }
 
