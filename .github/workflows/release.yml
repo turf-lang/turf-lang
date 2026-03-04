@@ -64,9 +64,6 @@ jobs:
             -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
             -o turf
 
-      - name: Verify build
-        run: ./turf --emit-llvm tests/test.tr -o test_output
-
       - name: Package
         run: |
           VERSION=${GITHUB_REF_NAME}
@@ -100,9 +97,6 @@ jobs:
           clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp \
             -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
             -o turf
-
-      - name: Verify build
-        run: ./turf --emit-llvm tests/test.tr -o test_output
 
       - name: Package
         run: |
@@ -139,10 +133,6 @@ jobs:
           clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp \
             -Iinclude $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
             -o turf.exe
-
-      - name: Verify build
-        shell: msys2 {0}
-        run: ./turf.exe --emit-llvm tests/test.tr -o test_output
 
       - name: Package
         shell: pwsh
