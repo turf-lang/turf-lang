@@ -1,0 +1,46 @@
+// More complex typeof() expression tests
+
+// Int expressions
+int a = 5
+int b = 10
+print(typeof(a + b))
+printline(" - addition")
+
+print(typeof(a * b))
+printline(" - multiplication")
+
+print(typeof(a - b))
+printline(" - subtraction")
+
+// Double expressions
+double x = 2.5
+double y = 3.5
+print(typeof(x + y))
+printline(" - double addition")
+
+print(typeof(x / y))
+printline(" - double division")
+
+// Mixed type expressions (should promote to double)
+print(typeof(a + x))
+printline(" - int + double")
+
+print(typeof(5 + 2.5))
+printline(" - literal int + double")
+
+// Boolean expressions
+print(typeof(a > b))
+printline(" - comparison")
+
+print(typeof(a == b))
+printline(" - equality")
+
+print(typeof(true && false))
+printline(" - logical AND")
+
+print(typeof(true || false))
+printline(" - logical OR")
+
+// Nested typeof (typeof returns string)
+print(typeof(typeof(42)))
+printline(" - typeof of typeof")

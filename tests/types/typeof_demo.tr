@@ -1,0 +1,57 @@
+// Practical demo of typeof() usage
+
+// Example 1: Dynamic type inspection for debugging
+printline("=== Type Inspection Demo ===")
+int x = 42
+double pi = 3.14159
+bool flag = true
+string name = "Turf"
+
+print("x is of type: ")
+printline(typeof(x))
+
+print("pi is of type: ")
+printline(typeof(pi))
+
+print("flag is of type: ")
+printline(typeof(flag))
+
+print("name is of type: ")
+printline(typeof(name))
+
+// Example 2: Understanding expression type promotion
+printline("")
+printline("=== Type Promotion Demo ===")
+
+int a = 5
+double b = 2.5
+
+print("a + b has type: ")
+printline(typeof(a + b))
+
+print("This shows that int + double promotes to: ")
+printline(typeof(10 + 3.5))
+
+// Example 3: Verifying comparison results
+printline("")
+printline("=== Comparison Result Types ===")
+
+print("Type of (5 > 3): ")
+printline(typeof(5 > 3))
+
+print("Type of (a == 10): ")
+printline(typeof(a == 10))
+
+print("Type of (true && false): ")
+printline(typeof(true && false))
+
+// Example 4: Checking builtin function return types
+printline("")
+printline("=== Builtin Function Return Types ===")
+
+string msg = "Hello, World!"
+print("lengthof(msg) returns: ")
+printline(typeof(lengthof(msg)))
+
+print("typeof(msg) returns: ")
+printline(typeof(typeof(msg)))
