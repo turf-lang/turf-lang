@@ -71,46 +71,30 @@ class StringConversionError : public TurfError {
 public:
   StringConversionError(SourceLocation Loc, const std::string &SrcTypeName)
       : TurfError(
-            Loc, Colors::BRIGHT_RED + "Oops! I can't convert '" + Colors::CYAN +
-                     SrcTypeName + Colors::BRIGHT_RED + "' to a string!\n" +
-                     Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                     "Hint: Only these conversions are supported:\n" +
-                     "    string(int)    - turns a whole number into text\n" +
-                     "    string(double) - turns a decimal number into text\n" +
-                     "    string(bool)   - gives you \"true\" or \"false\"" +
-                     Colors::RESET) {}
+            Loc,
+            Colors::BRIGHT_RED + "Oops! I can't convert '" + Colors::CYAN +
+                SrcTypeName + Colors::BRIGHT_RED + "' to a string!\n" +
+                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
+                "Hint: Only these conversions are supported:\n" +
+                "    string(int)    - turns a whole number into text\n" +
+                "    string(double) - turns a decimal number into text\n" +
+                "    string(bool)   - gives you \"true\" or \"false\"" +
+                Colors::RESET) {}
 };
 
 // lengthof() Argument Type Error : non-string passed to lengthof
 class LengthofTypeError : public TurfError {
 public:
   LengthofTypeError(SourceLocation Loc, const std::string &GotTypeName)
-      : TurfError(Loc,
-                  Colors::BRIGHT_RED +
-                      "Oops! 'lengthof' only works with strings, but you gave "
-                      "it a '" +
-                      Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
-                      Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                      "Hint: 'lengthof' counts the characters in a string.\n" +
-                      "    Correct usage:  lengthof(\"hello\")  →  5\n" +
-                      "    Correct usage:  int n = lengthof(myStringVar)" +
-                      Colors::RESET) {}
-};
-
-// lengthof() Argument Type Error : non-string passed to lengthof
-class LengthofTypeError : public TurfError {
-public:
-  LengthofTypeError(SourceLocation Loc, const std::string &GotTypeName)
-      : TurfError(Loc,
-                  Colors::BRIGHT_RED +
-                      "Oops! 'lengthof' only works with strings, but you gave "
-                      "it a '" +
-                      Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
-                      Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                      "Hint: 'lengthof' counts the characters in a string.\n" +
-                      "    Correct usage:  lengthof(\"hello\")  →  5\n" +
-                      "    Correct usage:  int n = lengthof(myStringVar)" +
-                      Colors::RESET) {}
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED + "Oops! 'lengthof' only works with strings, but you gave it a '" +
+                Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
+                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
+                "Hint: 'lengthof' counts the characters in a string.\n" +
+                "    Correct usage:  lengthof(\"hello\")  →  5\n" +
+                "    Correct usage:  int n = lengthof(myStringVar)" +
+                Colors::RESET) {}
 };
 
 // Control Flow Misuse : break/continue/return in wrong context
@@ -564,7 +548,8 @@ class ArgumentTypeError : public TurfError {
 public:
   ArgumentTypeError(SourceLocation Loc, const std::string &FuncName,
                     const std::string &ParamName, unsigned ArgIndex,
-                    const std::string &ExpectedType, const std::string &GotType)
+                    const std::string &ExpectedType,
+                    const std::string &GotType)
       : TurfError(
             Loc,
             Colors::BRIGHT_RED + "Type mismatch in call to '" + Colors::CYAN +
@@ -584,16 +569,17 @@ public:
   ReturnTypeMismatchError(SourceLocation Loc, const std::string &FuncName,
                           const std::string &ExpectedType,
                           const std::string &GotType)
-      : TurfError(Loc, Colors::BRIGHT_RED + "Wrong return type in '" +
-                           Colors::CYAN + FuncName + Colors::BRIGHT_RED +
-                           "'!\n" + Colors::RESET + "  The function returns '" +
-                           Colors::CYAN + ExpectedType + Colors::RESET +
-                           "', but you're trying to return '" + Colors::CYAN +
-                           GotType + Colors::RESET + "'.\n  " +
-                           Colors::BRIGHT_GREEN +
-                           "Hint: Use an explicit cast like " + ExpectedType +
-                           "(value), or change the function's return type." +
-                           Colors::RESET) {}
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED + "Wrong return type in '" + Colors::CYAN +
+                FuncName + Colors::BRIGHT_RED + "'!\n" + Colors::RESET +
+                "  The function returns '" + Colors::CYAN + ExpectedType +
+                Colors::RESET + "', but you're trying to return '" +
+                Colors::CYAN + GotType + Colors::RESET + "'.\n  " +
+                Colors::BRIGHT_GREEN +
+                "Hint: Use an explicit cast like " + ExpectedType +
+                "(value), or change the function's return type." +
+                Colors::RESET) {}
 };
 
 // Using the result of a void function as a value
@@ -603,7 +589,8 @@ public:
       : TurfError(
             Loc,
             Colors::BRIGHT_RED + "Oops! You can't use a void value here!\n" +
-                Colors::RESET + "  " + Context + "\n  " + Colors::BRIGHT_GREEN +
+                Colors::RESET + "  " + Context + "\n  " +
+                Colors::BRIGHT_GREEN +
                 "Hint: A void function doesn't produce a value. You can "
                 "call it as a statement, but not use its result in an "
                 "expression or assignment." +
