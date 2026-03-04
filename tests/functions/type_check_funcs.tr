@@ -1,0 +1,30 @@
+fn int add(int a, int b) {
+    return a + b
+}
+
+fn double toDouble(double x) {
+    return x
+}
+
+fn void greet() {
+    printline("hello")
+}
+
+// Passing int where double expected (implicit widening) - should work
+double result = toDouble(42)
+printline(result)
+
+// Returning int from int function - should work
+int sum = add(3, 7)
+printline(sum)
+
+// Passing double where int expected (implicit narrowing) - should work
+int narrow = add(3, 2)
+printline(narrow)
+
+// Calling void function as a statement - should work
+greet()
+
+// Using bool-to-int implicit conversion - should work
+int boolResult = add(1, true)
+printline(boolResult)
