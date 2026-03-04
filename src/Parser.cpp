@@ -213,11 +213,10 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
   getNextToken(); // eat ')'
   return V;
 }
-
 std::unique_ptr<ExprAST> ParseIfExpr() {
   SourceLocation KeywordLoc = CurLoc;
   std::string IdName = IdentifierStr;
-  getNextToken(); // Eating the if expression
+  getNextToken(); // eat 'if'
 
   if (CurTok == TOK_ASSIGN) {
     getNextToken();
@@ -233,11 +232,6 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     return nullptr;
 
   std::unique_ptr<ExprAST> Then;
-  std::unique_ptr<ExprAST> Else;
-
-  // Track whether the then-branch used block syntax (curly braces).
-  // Block-form: if cond { ... } : else is optional
-  // Ternary-form: if cond then expr else expr : else is mandatory
   bool IsBlockForm = false;
 
   if (CurTok == TOK_THEN) {
@@ -247,7 +241,6 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     IsBlockForm = true;
     Then = ParseBlock();
   } else {
-    // Check if the current token is a typo for 'then'
     if (CurTok == TOK_IDENTIFIER) {
       if (getLevenshteinDistance(IdentifierStr, "then") <= 2) {
         KeywordError(CurLoc, IdentifierStr).raise();
@@ -261,44 +254,78 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
   if (!Then)
     return nullptr;
 
-  SourceLocation ElseLoc = {0, 0}; // default: no else
-
-  // Handle the else branch (or its absence)
-  if (CurTok == TOK_ELSE) {
-    // else keyword present : parse the else branch normally
-    ElseLoc = CurLoc;
-    getNextToken();
-
-    if (CurTok == '{') {
-      Else = ParseBlock();
-    } else {
-      Else = ParseExpression();
+  if (!IsBlockForm) {
+    if (CurTok == TOK_IDENTIFIER) {
+      if (getLevenshteinDistance(IdentifierStr, "else") <= 2) {
+        KeywordError(CurLoc, IdentifierStr).raise();
+        return nullptr;
+      }
     }
+    if (CurTok != TOK_ELSE) {
+      LogErrorAt(CurLoc, "expected 'else'");
+      return nullptr;
+    }
+
+    SourceLocation ElseLoc = CurLoc;
+    getNextToken(); // eat 'else'
+
+    auto Else = ParseExpression();
     if (!Else)
       return nullptr;
-  } else if (IsBlockForm) {
-    // Block-form if: else is optional.
-    if (CurTok == TOK_IDENTIFIER) {
-      if (getLevenshteinDistance(IdentifierStr, "else") <= 2) {
-        KeywordError(CurLoc, IdentifierStr).raise();
-        return nullptr;
-      }
-    }
-    // No else branch : Else stays nullptr.
-  } else {
-    // Ternary-form if: else is mandatory.
-    if (CurTok == TOK_IDENTIFIER) {
-      if (getLevenshteinDistance(IdentifierStr, "else") <= 2) {
-        KeywordError(CurLoc, IdentifierStr).raise();
-        return nullptr;
-      }
-    }
-    LogErrorAt(CurLoc, "expected 'else'");
-    return nullptr;
+
+    std::vector<CondBranch> Branches;
+    Branches.push_back({KeywordLoc, std::move(Cond), std::move(Then)});
+    return std::make_unique<IfExprAST>(std::move(Branches), std::move(Else),
+                                       ElseLoc);
   }
 
-  return std::make_unique<IfExprAST>(KeywordLoc, ElseLoc, std::move(Cond),
-                                     std::move(Then), std::move(Else));
+  std::vector<CondBranch> Branches;
+  Branches.push_back({KeywordLoc, std::move(Cond), std::move(Then)});
+  while (CurTok == TOK_ELSEIF) {
+    SourceLocation ElseifLoc = CurLoc;
+    getNextToken(); // eat 'elseif'
+
+    auto ElseifCond = ParseExpression();
+    if (!ElseifCond)
+      return nullptr;
+
+    if (CurTok != '{') {
+      LogErrorAt(CurLoc, "Expected '{' after elseif condition");
+      return nullptr;
+    }
+    auto ElseifBody = ParseBlock();
+    if (!ElseifBody)
+      return nullptr;
+
+    Branches.push_back({ElseifLoc, std::move(ElseifCond), std::move(ElseifBody)});
+  }
+
+  std::unique_ptr<ExprAST> ElseBody = nullptr;
+  SourceLocation ElseLoc = {0, 0};
+
+  if (CurTok == TOK_ELSE) {
+    ElseLoc = CurLoc;
+    getNextToken(); // eat 'else'
+
+    if (CurTok == '{') {
+      ElseBody = ParseBlock();
+    } else {
+      ElseBody = ParseExpression();
+    }
+    if (!ElseBody)
+      return nullptr;
+  } else {
+    if (CurTok == TOK_IDENTIFIER) {
+      if (getLevenshteinDistance(IdentifierStr, "else") <= 2 ||
+          getLevenshteinDistance(IdentifierStr, "elseif") <= 2) {
+        KeywordError(CurLoc, IdentifierStr).raise();
+        return nullptr;
+      }
+    }
+  }
+
+  return std::make_unique<IfExprAST>(std::move(Branches), std::move(ElseBody),
+                                     ElseLoc);
 }
 
 // "Primary" means the basic building blocks: numbers or parentheses.

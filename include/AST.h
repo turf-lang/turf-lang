@@ -87,23 +87,40 @@ public:
   llvm::Value *codegen() override;
 };
 
+// A single condition + body pair (used for if and each elseif)
+struct CondBranch {
+  SourceLocation Loc; // location of 'if' or 'elseif' keyword
+  std::unique_ptr<ExprAST> Cond;
+  std::unique_ptr<ExprAST> Body;
+};
+
 // If-Expr AST, represents if-else branch
 class IfExprAST : public ExprAST {
-  SourceLocation Loc;
+  // The first entry is the 'if' branch.
+  // Subsequent entries are 'elseif' branches.
+  std::vector<CondBranch> Branches;
+
+  // Optional final 'else' body (nullptr if absent).
+  std::unique_ptr<ExprAST> ElseBody;
   SourceLocation ElseLoc;
-  std::unique_ptr<ExprAST> Cond, Then, Else;
 
 public:
-  IfExprAST(SourceLocation Loc, SourceLocation ElseLoc,
-            std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Then,
-            std::unique_ptr<ExprAST> Else)
-      : Loc(Loc), ElseLoc(ElseLoc), Cond(std::move(Cond)),
-        Then(std::move(Then)), Else(std::move(Else)) {}
+  IfExprAST(std::vector<CondBranch> Branches,
+            std::unique_ptr<ExprAST> ElseBody,
+            SourceLocation ElseLoc = {0, 0})
+      : Branches(std::move(Branches)), ElseBody(std::move(ElseBody)),
+        ElseLoc(ElseLoc) {}
 
-  const SourceLocation &getLoc() const { return Loc; }
+  // Primary location is the 'if' keyword
+  const SourceLocation &getLoc() const { return Branches.front().Loc; }
   const SourceLocation &getElseLoc() const { return ElseLoc; }
-  ExprAST *getThen() const { return Then.get(); }
-  ExprAST *getElse() const { return Else.get(); }
+
+  const std::vector<CondBranch> &getBranches() const { return Branches; }
+  ExprAST *getElseBody() const { return ElseBody.get(); }
+
+  // Convenience: backward-compatible accessors for single if/else
+  ExprAST *getThen() const { return Branches.front().Body.get(); }
+  ExprAST *getElse() const { return ElseBody.get(); }
 
   llvm::Value *codegen() override;
 };

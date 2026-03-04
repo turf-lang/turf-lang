@@ -470,144 +470,80 @@ Value *AssignmentExprAST::codegen() {
 }
 
 Value *IfExprAST::codegen() {
-  Value *CondV = Cond->codegen();
-  if (!CondV)
-    return nullptr;
-
-  // Convert condition to a boolean
-  CondV = CastToType(CondV, TURF_BOOL, "ifcond");
-
-  // Get the current function so we can insert blocks into it
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
-  // Determine if this is block-form (statement) or ternary-form (expression).
-  // Block-form: both branches are BlockExprAST nodes.
-  bool IsBlockForm = dynamic_cast<BlockExprAST *>(Then.get()) != nullptr;
+  bool IsBlockForm = dynamic_cast<BlockExprAST *>(Branches.front().Body.get()) != nullptr;
+  bool HasElse = (ElseBody != nullptr);
 
-  // If-without-else (statement form)
-  if (!Else) {
-    BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
+  // Block-form if/elseif/else: statement, no PHI node needed.
+  if (IsBlockForm) {
     BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "ifcont");
 
-    // If condition is true go to ThenBB, otherwise skip to MergeBB
-    Builder->CreateCondBr(CondV, ThenBB, MergeBB);
+    for (size_t i = 0; i < Branches.size(); ++i) {
+      Value *CondV = Branches[i].Cond->codegen();
+      if (!CondV) return nullptr;
+      CondV = CastToType(CondV, TURF_BOOL, "ifcond");
 
-    // Emit then block
-    Builder->SetInsertPoint(ThenBB);
+      BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
+      BasicBlock *NextBB = BasicBlock::Create(*TheContext, "else");
 
-    Value *ThenV = Then->codegen();
-    if (!ThenV)
-      return nullptr;
+      Builder->CreateCondBr(CondV, ThenBB, NextBB);
 
-    // Branch to merge if the then-block didn't already terminate
-    if (!Builder->GetInsertBlock()->getTerminator()) {
+      // Emit then body
+      Builder->SetInsertPoint(ThenBB);
+      Branches[i].Body->codegen();
+      if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(MergeBB);
+
+      // NextBB becomes the insert point for the next condition or the else/merge
+      TheFunction->insert(TheFunction->end(), NextBB);
+      Builder->SetInsertPoint(NextBB);
+    }
+
+    // We're now in the final "else" block
+    if (HasElse) {
+      ElseBody->codegen();
+      if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(MergeBB);
+    } else {
+      // No else: just branch to merge
       Builder->CreateBr(MergeBB);
     }
 
-    // Emit merge block
-    TheFunction->insert(TheFunction->end(), MergeBB);
-    Builder->SetInsertPoint(MergeBB);
-
-    // If-without-else is a statement — return a dummy null value
-    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
-  }
-
-  if (IsBlockForm) {
-    BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
-    BasicBlock *ElseBB = BasicBlock::Create(*TheContext, "else");
-    BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "ifcont");
-
-    // BLOCK-FORM if/else: treat as statement, no PHI node needed.
-    Builder->CreateCondBr(CondV, ThenBB, ElseBB);
-
-    // Emit then block
-    Builder->SetInsertPoint(ThenBB);
-    Then->codegen();
-    if (!Builder->GetInsertBlock()->getTerminator())
-      Builder->CreateBr(MergeBB);
-
-    // Emit else block
-    TheFunction->insert(TheFunction->end(), ElseBB);
-    Builder->SetInsertPoint(ElseBB);
-    Else->codegen();
-    if (!Builder->GetInsertBlock()->getTerminator())
-      Builder->CreateBr(MergeBB);
-
-    // Merge : no PHI, just a dummy return value
     TheFunction->insert(TheFunction->end(), MergeBB);
     Builder->SetInsertPoint(MergeBB);
     return Constant::getNullValue(Type::getInt64Ty(*TheContext));
   }
 
-  // If-with-else
-  // Create blocks for 'then', 'else', and 'merge'
+  // Ternary form: if cond then expr else expr
+  Value *CondV = Branches[0].Cond->codegen();
+  if (!CondV) return nullptr;
+  CondV = CastToType(CondV, TURF_BOOL, "ifcond");
+
   BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
   BasicBlock *ElseBB = BasicBlock::Create(*TheContext, "else");
   BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "ifcont");
 
-  // Create the Conditional Branch
-  // "If CondV is true, go to ThenBB, otherwise go to ElseBB"
   Builder->CreateCondBr(CondV, ThenBB, ElseBB);
   Builder->SetInsertPoint(ThenBB);
-
-  Value *ThenV = Then->codegen();
-  if (!ThenV)
-    return nullptr;
-
-  // Check if the then-branch terminated (break/continue/return).
-  bool ThenTerminated = Builder->GetInsertBlock()->getTerminator() != nullptr ||
-                        (Builder->GetInsertBlock() != ThenBB &&
-                         llvm::pred_empty(Builder->GetInsertBlock()));
-
-  if (!Builder->GetInsertBlock()->getTerminator()) {
-    if (!ThenTerminated) {
-      Builder->CreateBr(MergeBB);
-    }
-  }
+  
+  Value *ThenV = Branches[0].Body->codegen();
+  if (!ThenV) return nullptr;
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateBr(MergeBB);
   ThenBB = Builder->GetInsertBlock();
 
   TheFunction->insert(TheFunction->end(), ElseBB);
   Builder->SetInsertPoint(ElseBB);
-
-  Value *ElseV = Else->codegen();
-  if (!ElseV)
-    return nullptr;
-
-  bool ElseTerminated = Builder->GetInsertBlock()->getTerminator() != nullptr ||
-                        (Builder->GetInsertBlock() != ElseBB &&
-                         llvm::pred_empty(Builder->GetInsertBlock()));
-
-  if (!Builder->GetInsertBlock()->getTerminator()) {
-    if (!ElseTerminated) {
-      Builder->CreateBr(MergeBB);
-    }
-  }
+  Value *ElseV = ElseBody->codegen();
+  if (!ElseV) return nullptr;
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateBr(MergeBB);
   ElseBB = Builder->GetInsertBlock();
 
   TheFunction->insert(TheFunction->end(), MergeBB);
   Builder->SetInsertPoint(MergeBB);
 
-  if (ThenTerminated && ElseTerminated) {
-    Builder->CreateUnreachable();
-    TurfType ResultType = getCommonType(getTurfTypeFromLLVM(ThenV->getType()),
-                                        getTurfTypeFromLLVM(ElseV->getType()));
-    return Constant::getNullValue(getLLVMType(ResultType));
-  }
-
-  if (ThenTerminated) {
-    if (ThenBB != MergeBB && llvm::pred_empty(ThenBB) && ThenBB->empty()) {
-      ThenBB->eraseFromParent();
-    }
-    return ElseV;
-  }
-  if (ElseTerminated) {
-    if (ElseBB != MergeBB && llvm::pred_empty(ElseBB) && ElseBB->empty()) {
-      ElseBB->eraseFromParent();
-    }
-    return ThenV;
-  }
-
-  // Normal case: both branches flow into merge, create PHI node
   TurfType ThenType = getTurfTypeFromLLVM(ThenV->getType());
   TurfType ElseType = getTurfTypeFromLLVM(ElseV->getType());
   TurfType MergeType = getCommonType(ThenType, ElseType);
@@ -615,12 +551,9 @@ Value *IfExprAST::codegen() {
   ThenV = CastToType(ThenV, MergeType, "thencast");
   ElseV = CastToType(ElseV, MergeType, "elsecast");
 
-  // The PHI Node
   PHINode *PN = Builder->CreatePHI(ThenV->getType(), 2, "iftmp");
-
   PN->addIncoming(ThenV, ThenBB);
   PN->addIncoming(ElseV, ElseBB);
-
   return PN;
 }
 
