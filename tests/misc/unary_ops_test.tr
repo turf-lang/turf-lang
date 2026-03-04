@@ -1,0 +1,9 @@
+int a = -5
+int b = -a
+double c = -3.14
+double d = -c
+
+printline(a)
+printline(b)
+printline(c)
+printline(d)

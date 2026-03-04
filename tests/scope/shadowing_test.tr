@@ -1,0 +1,16 @@
+// int x = 10
+// printline(x)
+// 
+// if x > 5 {
+//     int x = 20
+//     printline(x)
+//     
+//     if x > 15 {
+//         int x = 30
+//         printline(x)
+//     } else {}
+//     
+//     printline(x)
+// } else {}
+// 
+// printline(x)
