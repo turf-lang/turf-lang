@@ -1,0 +1,15 @@
+int total = 0
+for i in 1..5 step i += 1 {
+    int j = 0
+    while j < 5 {
+        j = j + 1
+        if j == 3 {
+            continue
+        } else {}
+        if i == 4 {
+            break
+        } else {}
+        total = total + (i * j)
+    }
+}
+printline(total)
