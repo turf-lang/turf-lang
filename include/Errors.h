@@ -101,15 +101,16 @@ public:
 class LengthofTypeError : public TurfError {
 public:
   LengthofTypeError(SourceLocation Loc, const std::string &GotTypeName)
-      : TurfError(
-            Loc,
-            Colors::BRIGHT_RED + "Oops! 'lengthof' only works with strings, but you gave it a '" +
-                Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
-                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                "Hint: 'lengthof' counts the characters in a string.\n" +
-                "    Correct usage:  lengthof(\"hello\")  →  5\n" +
-                "    Correct usage:  int n = lengthof(myStringVar)" +
-                Colors::RESET) {}
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED +
+                      "Oops! 'lengthof' only works with strings, but you gave "
+                      "it a '" +
+                      Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
+                      Colors::RESET + "  " + Colors::BRIGHT_GREEN +
+                      "Hint: 'lengthof' counts the characters in a string.\n" +
+                      "    Correct usage:  lengthof(\"hello\")  →  5\n" +
+                      "    Correct usage:  int n = lengthof(myStringVar)" +
+                      Colors::RESET) {}
 };
 
 // Control Flow Misuse : break/continue/return in wrong context
