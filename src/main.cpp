@@ -195,13 +195,21 @@ int main(int argc, char **argv) {
           continue;
         }
         if (CurTok == TOK_FN) {
-          // Parse and codegen prototype-only (body is parsed but we only
-          // want to register the LLVM Function* in the module)
-          auto AST = ParseExpression();
-          if (AST) {
-            LintExpression(AST.get()); // Lint function definitions
-            AST->codegen(); // creates prototype + body the first time
+          // Parse and codegen prototype-only. Guard with setjmp so a bad
+          // fn body doesn't kill the whole pre-pass.
+          g_recoverActive = true;
+          if (setjmp(g_recoverJmp) == 0) {
+            auto AST = ParseExpression();
+            if (AST) {
+              LintExpression(AST.get());
+              AST->codegen();
+            }
+          } else {
+            // longjmp landed here : skip to next fn or EOF
+            while (CurTok != TOK_FN && CurTok != TOK_EOF)
+              getNextToken();
           }
+          g_recoverActive = false;
         } else {
           getNextToken(); // skip non-fn tokens
         }
@@ -239,21 +247,49 @@ int main(int argc, char **argv) {
     // fn definitions were already fully processed in the pre-pass.
     // Parse and discard them here to keep the token stream in sync.
     if (CurTok == TOK_FN) {
-      ParseExpression(); // parse and drop; body was already codegen'd
+      g_recoverActive = true;
+      if (setjmp(g_recoverJmp) == 0) {
+        ParseExpression(); // parse and drop; body was already codegen'd
+      } else {
+        while (CurTok != TOK_FN && CurTok != ';' && CurTok != TOK_EOF)
+          getNextToken();
+      }
+      g_recoverActive = false;
       continue;
     }
 
-    // Parse the next expression
-    auto AST = ParseExpression();
-
-    if (AST) {
-      LintExpression(AST.get()); // Lint top-level statements before codegen
-      AST->codegen();
+    // Parse the next expression. Guard with setjmp so a bad statement
+    // records its diagnostic and we continue to the next one.
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      auto AST = ParseExpression();
+      if (AST) {
+        LintExpression(AST.get()); // Lint top-level statements before codegen
+        AST->codegen();
+      } else {
+        // Parser returned nullptr without longjmp (rare fallback).
+        getNextToken();
+      }
     } else {
-      // Error Recovery: Skip token and try again
-      getNextToken();
+      // longjmp landed here : diagnostic already in DiagnosticEngine.
+      // Skip to the next statement boundary.
+      while (CurTok != ';' && CurTok != TOK_EOF &&
+             CurTok != TOK_FN && CurTok != TOK_TYPE_INT &&
+             CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
+             CurTok != TOK_TYPE_STRING && CurTok != TOK_IF &&
+             CurTok != TOK_WHILE && CurTok != TOK_FOR &&
+             CurTok != TOK_RETURN) {
+        getNextToken();
+      }
     }
+    g_recoverActive = false;
   }
+
+  // Flush all collected diagnostics (sorted by line).  If any errors were
+  // recorded, stop here : do not attempt further IR generation or linking.
+  DiagnosticEngine::flushAll();
+  if (DiagnosticEngine::hasErrors())
+    return 1;
 
   // Only after the loop ends (EOF), we add the return statement.
   Builder->CreateRet(ConstantInt::get(*TheContext, APInt(32, 0)));

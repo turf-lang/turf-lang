@@ -1,6 +1,7 @@
 #include "Lexer.h"
 #include "Colors.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <iostream>
@@ -11,6 +12,14 @@ SourceLocation CurLoc = {1, 0};
 int CurLine = 1;
 int CurCol = 0;
 static int LastChar = ' ';
+
+// DiagnosticEngine : static storage
+std::vector<DiagnosticEngine::Diag> DiagnosticEngine::Diagnostics;
+std::set<int>                       DiagnosticEngine::ErrorLines;
+
+// setjmp/longjmp recovery buffers
+jmp_buf g_recoverJmp;
+bool    g_recoverActive = false;
 
 std::ifstream SourceFile;
 double NumVal;
@@ -42,34 +51,84 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
 
-void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
-  // Use a bold red header for the location
-  bool isWarning = Msg.find("Warning:") != std::string::npos ||
-                   Msg.find("warning:") != std::string::npos;
+// Internal helper: physically print one diagnostic to stderr.
+static void printDiag(const DiagnosticEngine::Diag &D) {
+  bool isWarning = D.IsWarning ||
+                   D.Msg.find("Warning:") != std::string::npos ||
+                   D.Msg.find("warning:") != std::string::npos;
   std::string HeaderColor =
       isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
   std::string HeaderText = isWarning ? "Warning" : "Oops! Something went wrong";
 
   std::cerr << Colors::BOLD << HeaderColor << HeaderText << " at line "
-            << Loc.Line << ", column " << Loc.Col << ":" << Colors::RESET
-            << "\n\n"
-            << "  " << Msg << "\n\n";
+            << D.Loc.Line << ", column " << D.Loc.Col << ":"
+            << Colors::RESET << "\n\n"
+            << "  " << D.Msg << "\n\n";
 
-  if (Loc.Line > 0 && Loc.Line <= SourceLines.size()) {
-    std::string LineContent = SourceLines[Loc.Line - 1];
+  if (D.Loc.Line > 0 &&
+      D.Loc.Line <= static_cast<int>(SourceLines.size())) {
+    const std::string &LineContent = SourceLines[D.Loc.Line - 1];
 
-    // Dim color for the line number pipe
-    std::cerr << Colors::BRIGHT_BLACK << "  " << Loc.Line << " | "
+    std::cerr << Colors::BRIGHT_BLACK << "  " << D.Loc.Line << " | "
               << Colors::RESET << LineContent << "\n";
 
-    // Calculate indentation for the caret, make the caret bold and red/yellow
-    std::string LineNumStr = std::to_string(Loc.Line);
-    int CaretOffset = (Loc.Col > 0) ? Loc.Col - 1 : 0;
+    std::string LineNumStr = std::to_string(D.Loc.Line);
+    int CaretOffset = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
     std::cerr << Colors::BRIGHT_BLACK << "  "
-              << std::string(LineNumStr.length(), ' ') << " | " << Colors::RESET
-              << std::string(CaretOffset, ' ') << Colors::BOLD << HeaderColor
-              << "^ Here!" << Colors::RESET << "\n";
+              << std::string(LineNumStr.length(), ' ') << " | "
+              << Colors::RESET << std::string(CaretOffset, ' ')
+              << Colors::BOLD << HeaderColor << "^ Here!"
+              << Colors::RESET << "\n\n";
   }
+}
+
+// DiagnosticEngine : method implementations
+void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
+                           bool IsWarning) {
+  // If there is already an error on this line, suppress everything else
+  // (both additional errors and warnings) to avoid cascading noise.
+  if (ErrorLines.count(Loc.Line))
+    return;
+
+  Diagnostics.push_back({Loc, Msg, IsWarning});
+
+  if (!IsWarning)
+    ErrorLines.insert(Loc.Line);
+}
+
+bool DiagnosticEngine::hasErrors() {
+  return !ErrorLines.empty();
+}
+
+bool DiagnosticEngine::hasErrorAt(int Line) {
+  return ErrorLines.count(Line) != 0;
+}
+
+void DiagnosticEngine::flushAll() {
+  // Sort by line, then column
+  std::sort(Diagnostics.begin(), Diagnostics.end(),
+            [](const Diag &A, const Diag &B) {
+              return A.Loc.Line < B.Loc.Line ||
+                     (A.Loc.Line == B.Loc.Line && A.Loc.Col < B.Loc.Col);
+            });
+
+  for (const auto &D : Diagnostics)
+    printDiag(D);
+
+  Diagnostics.clear();
+}
+
+void DiagnosticEngine::reset() {
+  Diagnostics.clear();
+  ErrorLines.clear();
+}
+
+// LogErrorAt : now defers to DiagnosticEngine so diagnostics are collected
+// and de-duplicated.  Warnings emitted from lint still use this path.
+void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
+  bool isWarning = Msg.find("Warning:") != std::string::npos ||
+                   Msg.find("warning:") != std::string::npos;
+  DiagnosticEngine::add(Loc, Msg, isWarning);
 }
 
 void resetLexer() {
@@ -80,7 +139,6 @@ void resetLexer() {
 }
 
 int gettok() {
-
   while (isspace(LastChar)) {
     // Handle newlines to track line numbers
     if (LastChar == '\n') {
