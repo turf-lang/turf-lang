@@ -1,0 +1,11 @@
+int x = 9
+
+if (x > 10) {
+    printline("big")
+} elseif (x > 5) {
+    printline("medium")
+} elseif (x > 0) {
+    printline("small")
+} else {
+    printline("non-positive")
+}
