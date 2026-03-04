@@ -90,15 +90,18 @@ public:
 // If-Expr AST, represents if-else branch
 class IfExprAST : public ExprAST {
   SourceLocation Loc;
+  SourceLocation ElseLoc;
   std::unique_ptr<ExprAST> Cond, Then, Else;
 
 public:
-  IfExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Cond,
-            std::unique_ptr<ExprAST> Then, std::unique_ptr<ExprAST> Else)
-      : Loc(Loc), Cond(std::move(Cond)), Then(std::move(Then)),
-        Else(std::move(Else)) {}
+  IfExprAST(SourceLocation Loc, SourceLocation ElseLoc,
+            std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Then,
+            std::unique_ptr<ExprAST> Else)
+      : Loc(Loc), ElseLoc(ElseLoc), Cond(std::move(Cond)),
+        Then(std::move(Then)), Else(std::move(Else)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
+  const SourceLocation &getElseLoc() const { return ElseLoc; }
   ExprAST *getThen() const { return Then.get(); }
   ExprAST *getElse() const { return Else.get(); }
 
