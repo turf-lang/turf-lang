@@ -70,10 +70,14 @@ static bool ContainsLoopExit(const ExprAST *E) {
   }
 
   if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
-    if (ContainsLoopExit(If->getThen()))
-      return true;
-    if (ContainsLoopExit(If->getElse()))
-      return true;
+    std::string S = "if{";
+    for (const auto &B : If->getBranches()) {
+      S += "cond:" + Fingerprint(B.Cond.get()) + "body:" + Fingerprint(B.Body.get()) + ";";
+    }
+    if (If->getElseBody())
+      S += "else:" + Fingerprint(If->getElseBody());
+    S += "}";
+    return S;
   }
 
   if (auto *W = dynamic_cast<const WhileExprAST *>(E)) {
@@ -261,35 +265,36 @@ static void LintWhile(const WhileExprAST *While) {
   LintExpression(const_cast<ExprAST *>(While->getBody()));
 }
 
-// Check: empty branches, identical branches
 static void LintIf(const IfExprAST *If) {
-  if (!If)
-    return;
+  if (!If) return;
 
-  ExprAST *Then = If->getThen();
-  ExprAST *Else = If->getElse();
+  const auto &Branches = If->getBranches();
 
-  // Empty then branch
-  if (IsEffectivelyEmpty(Then)) {
-    EmptyBranchWarning(If->getLoc(), "then").warn();
+  for (size_t i = 0; i < Branches.size(); ++i) {
+    // Empty then/elseif body
+    if (IsEffectivelyEmpty(Branches[i].Body.get())) {
+      std::string Kind = (i == 0) ? "then" : "elseif";
+      EmptyBranchWarning(Branches[i].Loc, Kind).warn();
+    }
+    // Recurse into branch body
+    LintExpression(Branches[i].Body.get());
   }
 
-  // Empty else branch - only warn if an else branch actually exists.
-  // A missing else (nullptr) is intentional, not an empty block.
+  // Empty else body
+  ExprAST *Else = If->getElseBody();
   if (Else && IsEffectivelyEmpty(Else)) {
     EmptyBranchWarning(If->getElseLoc(), "else").warn();
   }
 
-  // Identical then/else branches (only possible when else exists)
-  if (Then && Else && !IsEffectivelyEmpty(Then) && !IsEffectivelyEmpty(Else)) {
-    std::string ThenFP = Fingerprint(Then);
+  // Identical branches (only for simple if/else, not chains)
+  if (Branches.size() == 1 && Else &&
+      !IsEffectivelyEmpty(Branches[0].Body.get()) &&
+      !IsEffectivelyEmpty(Else)) {
+    std::string ThenFP = Fingerprint(Branches[0].Body.get());
     std::string ElseFP = Fingerprint(Else);
-    if (ThenFP == ElseFP && ThenFP != "<complex>") {
+    if (ThenFP == ElseFP && ThenFP != "")
       IdenticalBranchesWarning(If->getLoc()).warn();
-    }
   }
 
-  // Recurse into branches
-  LintExpression(Then);
   LintExpression(Else);
 }
