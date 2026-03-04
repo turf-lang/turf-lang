@@ -116,7 +116,6 @@ void DiagnosticEngine::flushAll() {
     printDiag(D);
 
   Diagnostics.clear();
-  ErrorLines.clear();
 }
 
 void DiagnosticEngine::reset() {
