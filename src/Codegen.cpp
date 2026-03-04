@@ -128,6 +128,17 @@ static Value *CastToType(Value *Val, TurfType DestType, const std::string &Name,
   return Val;
 }
 
+// Check whether two TurfTypes are implicitly compatible.
+// Numeric types (int, double, bool) are mutually compatible.
+// String is only compatible with string. Void is never compatible.
+static bool isTypeCompatible(TurfType From, TurfType To) {
+  if (From == To) return true;
+  if (From == TURF_VOID || To == TURF_VOID) return false;
+  if (From == TURF_STRING || To == TURF_STRING) return false;
+  // Remaining: int, double, bool — all mutually convertible
+  return true;
+}
+
 // Turns a number to LLVM Number constant
 Value *NumberExprAST::codegen() {
   if (isInteger())
@@ -154,6 +165,18 @@ Value *BinaryExprAST::codegen() {
 
   if (!L || !R)
     return nullptr;
+
+  // Detect void operands (e.g. using a void function call in an expression)
+  if (L->getType()->isVoidTy()) {
+    VoidValueError(Loc, "The left side of this expression is a void function call.")
+        .raise();
+    return nullptr;
+  }
+  if (R->getType()->isVoidTy()) {
+    VoidValueError(Loc, "The right side of this expression is a void function call.")
+        .raise();
+    return nullptr;
+  }
 
   TurfType LTy = getTurfTypeFromLLVM(L->getType());
   TurfType RTy = getTurfTypeFromLLVM(R->getType());
@@ -320,6 +343,24 @@ Value *VarDeclExprAST::codegen() {
   if (!Init)
     return nullptr;
 
+  // Detect void value (e.g. int x = voidFunc())
+  if (Init->getType()->isVoidTy()) {
+    VoidValueError(Loc, "You're trying to store the result of a void function in '" +
+                            Name + "'.")
+        .raise();
+    return nullptr;
+  }
+
+  // Check type compatibility before implicit cast
+  TurfType InitType = getTurfTypeFromLLVM(Init->getType());
+  if (!isTypeCompatible(InitType, Type)) {
+    TypeError(Loc, std::string("Cannot initialize '") + turfTypeName(Type) +
+                       "' variable '" + Name + "' with a value of type '" +
+                       turfTypeName(InitType) + "'")
+        .raise();
+    return nullptr;
+  }
+
   Init = CastToType(Init, Type, "initcast", Loc);
 
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
@@ -374,6 +415,14 @@ Value *AssignmentExprAST::codegen() {
   Value *Val = RHS->codegen();
   if (!Val)
     return nullptr;
+
+  // Detect void value (e.g. x = voidFunc())
+  if (Val->getType()->isVoidTy()) {
+    VoidValueError(Loc, "You're trying to assign the result of a void function to '" +
+                            Name + "'.")
+        .raise();
+    return nullptr;
+  }
 
   if (Keywords.find(Name) != Keywords.end()) {
     SemanticError(Loc, "Cannot assign to keyword '" + Name +
@@ -1155,6 +1204,24 @@ Value *ReturnExprAST::codegen() {
     Value *RetVal = Val->codegen();
     if (!RetVal)
       return nullptr;
+
+    // Check for void return value (e.g. return voidFunc())
+    if (RetVal->getType()->isVoidTy()) {
+      VoidValueError(Loc, "You're trying to return the result of a void function.")
+          .raise();
+      return nullptr;
+    }
+
+    // Check type compatibility before implicit cast
+    TurfType ActualType = getTurfTypeFromLLVM(RetVal->getType());
+    if (!isTypeCompatible(ActualType, CurrentFuncReturnType)) {
+      ReturnTypeMismatchError(Loc, CurrentFunction->getName().str(),
+                              turfTypeName(CurrentFuncReturnType),
+                              turfTypeName(ActualType))
+          .raise();
+      return nullptr;
+    }
+
     RetVal = CastToType(RetVal, CurrentFuncReturnType, "retcast", Loc);
     Builder->CreateRet(RetVal);
   }
@@ -1189,12 +1256,32 @@ Value *FuncCallExprAST::codegen() {
   std::vector<Value *> ArgVals;
   unsigned Idx = 0;
   for (auto &Arg : CalleeF->args()) {
-    Value *V = Args[Idx++]->codegen();
+    Value *V = Args[Idx]->codegen();
     if (!V)
       return nullptr;
+
     TurfType ExpectedType = getTurfTypeFromLLVM(Arg.getType());
+
+    // Check for void argument (e.g. passing a void function result)
+    if (V->getType()->isVoidTy()) {
+      VoidValueError(Loc, "Argument " + std::to_string(Idx + 1) +
+                              " to '" + Name + "' is a void function call.")
+          .raise();
+      return nullptr;
+    }
+
+    TurfType ActualType = getTurfTypeFromLLVM(V->getType());
+    if (!isTypeCompatible(ActualType, ExpectedType)) {
+      ArgumentTypeError(Loc, Name, std::string(Arg.getName()),
+                        Idx + 1, turfTypeName(ExpectedType),
+                        turfTypeName(ActualType))
+          .raise();
+      return nullptr;
+    }
+
     V = CastToType(V, ExpectedType, "argcast", Loc);
     ArgVals.push_back(V);
+    Idx++;
   }
 
   // void functions must not be given a name (LLVM requirement)
