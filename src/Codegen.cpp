@@ -61,6 +61,8 @@ static TurfType getTurfTypeFromLLVM(Type *Ty) {
     return TURF_INT;
   if (Ty->isIntegerTy(32))
     return TURF_INT;
+  if (Ty->isIntegerTy(32))
+    return TURF_INT;
   if (Ty->isIntegerTy(1))
     return TURF_BOOL;
   if (Ty->isPointerTy())
@@ -180,12 +182,14 @@ Value *BinaryExprAST::codegen() {
 
   // Detect void operands (e.g. using a void function call in an expression)
   if (L->getType()->isVoidTy()) {
-    VoidValueError(Loc, "The left side of this expression is a void function call.")
+    VoidValueError(Loc,
+                   "The left side of this expression is a void function call.")
         .raise();
     return nullptr;
   }
   if (R->getType()->isVoidTy()) {
-    VoidValueError(Loc, "The right side of this expression is a void function call.")
+    VoidValueError(Loc,
+                   "The right side of this expression is a void function call.")
         .raise();
     return nullptr;
   }
@@ -357,8 +361,9 @@ Value *VarDeclExprAST::codegen() {
 
   // Detect void value (e.g. int x = voidFunc())
   if (Init->getType()->isVoidTy()) {
-    VoidValueError(Loc, "You're trying to store the result of a void function in '" +
-                            Name + "'.")
+    VoidValueError(Loc,
+                   "You're trying to store the result of a void function in '" +
+                       Name + "'.")
         .raise();
     return nullptr;
   }
@@ -430,8 +435,9 @@ Value *AssignmentExprAST::codegen() {
 
   // Detect void value (e.g. x = voidFunc())
   if (Val->getType()->isVoidTy()) {
-    VoidValueError(Loc, "You're trying to assign the result of a void function to '" +
-                            Name + "'.")
+    VoidValueError(
+        Loc, "You're trying to assign the result of a void function to '" +
+                 Name + "'.")
         .raise();
     return nullptr;
   }
@@ -1250,7 +1256,8 @@ Value *ReturnExprAST::codegen() {
 
     // Check for void return value (e.g. return voidFunc())
     if (RetVal->getType()->isVoidTy()) {
-      VoidValueError(Loc, "You're trying to return the result of a void function.")
+      VoidValueError(Loc,
+                     "You're trying to return the result of a void function.")
           .raise();
       return nullptr;
     }
@@ -1307,17 +1314,16 @@ Value *FuncCallExprAST::codegen() {
 
     // Check for void argument (e.g. passing a void function result)
     if (V->getType()->isVoidTy()) {
-      VoidValueError(Loc, "Argument " + std::to_string(Idx + 1) +
-                              " to '" + Name + "' is a void function call.")
+      VoidValueError(Loc, "Argument " + std::to_string(Idx + 1) + " to '" +
+                              Name + "' is a void function call.")
           .raise();
       return nullptr;
     }
 
     TurfType ActualType = getTurfTypeFromLLVM(V->getType());
     if (!isTypeCompatible(ActualType, ExpectedType)) {
-      ArgumentTypeError(Loc, Name, std::string(Arg.getName()),
-                        Idx + 1, turfTypeName(ExpectedType),
-                        turfTypeName(ActualType))
+      ArgumentTypeError(Loc, Name, std::string(Arg.getName()), Idx + 1,
+                        turfTypeName(ExpectedType), turfTypeName(ActualType))
           .raise();
       return nullptr;
     }

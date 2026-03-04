@@ -1,0 +1,49 @@
+// Test typeof() built-in function with variables
+int x = 10
+print(typeof(x))
+printline(" should be int")
+
+double y = 3.14
+print(typeof(y))
+printline(" should be double")
+
+bool flag = true
+print(typeof(flag))
+printline(" should be bool")
+
+string s = "hello"
+print(typeof(s))
+printline(" should be string")
+
+// Test typeof() with literals
+print(typeof(42))
+printline(" should be int")
+
+print(typeof(3.14159))
+printline(" should be double")
+
+print(typeof(false))
+printline(" should be bool")
+
+print(typeof("test string"))
+printline(" should be string")
+
+// Test typeof() with expressions
+print(typeof(5 + 2))
+printline(" should be int")
+
+print(typeof(3.0 + 2.0))
+printline(" should be double")
+
+print(typeof(10 > 5))
+printline(" should be bool")
+
+print(typeof(x + 20))
+printline(" should be int")
+
+print(typeof(y * 2.0))
+printline(" should be double")
+
+// Test typeof() with lengthof builtin function result
+print(typeof(lengthof("test")))
+printline(" should be int")

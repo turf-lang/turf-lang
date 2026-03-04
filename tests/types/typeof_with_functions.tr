@@ -1,0 +1,39 @@
+// Test typeof() with user-defined functions
+
+fn int add(int a, int b) {
+  return a + b
+}
+
+fn double multiply(double x, double y) {
+  return x * y
+}
+
+fn bool isPositive(int n) {
+  return n > 0
+}
+
+fn string greet() {
+  return "Hello"
+}
+
+// Test typeof() on function call results
+printline("=== Function Return Type Tests ===")
+
+print("typeof(add(5, 3)): ")
+printline(typeof(add(5, 3)))
+
+print("typeof(multiply(2.5, 3.0)): ")
+printline(typeof(multiply(2.5, 3.0)))
+
+print("typeof(isPositive(10)): ")
+printline(typeof(isPositive(10)))
+
+print("typeof(greet()): ")
+printline(typeof(greet()))
+
+// Test typeof() with function call in expression
+print("typeof(add(1, 2) + 10): ")
+printline(typeof(add(1, 2) + 10))
+
+print("typeof(multiply(2.0, 3.0) * 1.5): ")
+printline(typeof(multiply(2.0, 3.0) * 1.5))
