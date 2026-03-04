@@ -7,6 +7,7 @@
 #include "Colors.h"
 #include "Lexer.h"
 #include "llvm/IR/Instructions.h"
+#include <cstdlib>
 #include <iostream>
 #include <map>
 #include <string>
@@ -26,10 +27,17 @@ public:
 
   virtual ~TurfError() = default;
 
-  // The main function to display the error and exit
+  // Record the error in the diagnostic engine (deferred/sorted print) and
+  // longjmp back to the main loop's setjmp guard so compilation continues.
+  // If no recovery point is active (e.g. during initialisation), exit(1).
   void raise() const {
-    LogErrorAt(Loc, Message);
-    std::exit(1); // All errors currently stop compilation
+    DiagnosticEngine::add(Loc, Message, /*IsWarning=*/false);
+    if (g_recoverActive)
+      longjmp(g_recoverJmp, 1);
+    else {
+      DiagnosticEngine::flushAll();
+      std::exit(1);
+    }
   }
 };
 
