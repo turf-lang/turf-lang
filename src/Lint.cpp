@@ -277,7 +277,7 @@ static void LintIf(const IfExprAST *If) {
   // Empty else branch - only warn if an else branch actually exists.
   // A missing else (nullptr) is intentional, not an empty block.
   if (Else && IsEffectivelyEmpty(Else)) {
-    EmptyBranchWarning(If->getLoc(), "else").warn();
+    EmptyBranchWarning(If->getElseLoc(), "else").warn();
   }
 
   // Identical then/else branches (only possible when else exists)
