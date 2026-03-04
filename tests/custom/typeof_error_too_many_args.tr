@@ -1,0 +1,2 @@
+// Error test: typeof() with too many arguments (should fail at parse time)
+print(typeof(5, 10))

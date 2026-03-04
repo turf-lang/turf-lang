@@ -1,0 +1,2 @@
+// Error test: typeof() with no arguments (should fail at parse time)
+print(typeof())

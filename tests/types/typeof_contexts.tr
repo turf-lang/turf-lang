@@ -1,0 +1,40 @@
+// Test typeof() in various contexts
+
+// Test 1: typeof() inside loops
+printline("=== typeof() in loop context ===")
+for i in 1..4 step i += 1 {
+  print("typeof(i): ")
+  printline(typeof(i))
+}
+
+// Test 2: typeof() with loop expressions
+int sum = 0
+for j in 1..6 step j += 1 {
+  sum = sum + j
+}
+print("typeof(sum after loop): ")
+printline(typeof(sum))
+
+// Test 3: typeof() with while loop variable
+int counter = 0
+while counter < 3 {
+  print("typeof(counter): ")
+  printline(typeof(counter))
+  counter = counter + 1
+}
+
+// Test 4: typeof() with complex assignment chains
+int x = 10
+int y = x + 20
+int z = y * 2
+print("typeof(z from chain): ")
+printline(typeof(z))
+
+// Test 5: typeof() in conditional branches
+printline("")
+printline("=== typeof() in conditionals ===")
+int check = 5
+if check > 0 {
+  print("Branch typeof(check): ")
+  printline(typeof(check))
+}

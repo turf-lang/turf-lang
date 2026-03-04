@@ -188,6 +188,34 @@ void RegisterBuiltins() {
          return Builder->CreateCall(StrlenF, {Val}, "lengthof");
        }});
 
+  // typeof(expression) -> string
+  // Returns the static type name of the expression as a string.
+  Builtins.push_back(
+      {"typeof", TOK_BUILTIN_TYPEOF, /*ArgCount=*/1,
+       [](std::vector<Value *> &Args, SourceLocation Loc) -> Value * {
+         Value *Val = Args[0];
+         Type *Ty = Val->getType();
+
+         // Determine the Turf type from LLVM type
+         const char *TypeName = nullptr;
+         if (Ty->isDoubleTy()) {
+           TypeName = "double";
+         } else if (Ty->isIntegerTy(64)) {
+           TypeName = "int";
+         } else if (Ty->isIntegerTy(1)) {
+           TypeName = "bool";
+         } else if (Ty->isPointerTy()) {
+           TypeName = "string";
+         } else if (Ty->isVoidTy()) {
+           TypeName = "void";
+         } else {
+           TypeName = "unknown";
+         }
+
+         // Create a global constant string with the type name
+         return Builder->CreateGlobalString(TypeName, "typename");
+       }});
+
   // Register each builtin's name into the Lexer keyword table
   // This is what makes the Lexer emit the right token when it sees "print",
   // "println", etc. No change to Lexer.cpp is ever needed for new builtins.

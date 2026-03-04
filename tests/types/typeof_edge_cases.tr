@@ -1,0 +1,57 @@
+// Edge case tests for typeof()
+
+// Test 1: typeof() with cast expressions
+printline("=== Cast Expression Tests ===")
+print("typeof(int(3.14)): ")
+printline(typeof(int(3.14)))
+
+print("typeof(double(42)): ")
+printline(typeof(double(42)))
+
+print("typeof(string(123)): ")
+printline(typeof(string(123)))
+
+print("typeof(int(\"456\")): ")
+printline(typeof(int("456")))
+
+// Test 2: typeof() with conditional expressions
+printline("")
+printline("=== Conditional Expression Tests ===")
+int x = 5
+print("typeof(if x > 3 { 10 } else { 20 }): ")
+printline(typeof(if x > 3 { 10 } else { 20 }))
+
+print("typeof(if true { 1.5 } else { 2.5 }): ")
+printline(typeof(if true { 1.5 } else { 2.5 }))
+
+print("typeof(if false { true } else { false }): ")
+printline(typeof(if false { true } else { false }))
+
+// Test 3: typeof() with complex nested expressions
+printline("")
+printline("=== Complex Nested Expressions ===")
+int a = 10
+int b = 20
+double c = 3.5
+
+print("typeof((a + b) * 2): ")
+printline(typeof((a + b) * 2))
+
+print("typeof((a + c) * 2.0): ")
+printline(typeof((a + c) * 2.0))
+
+print("typeof(a > b && b > 5): ")
+printline(typeof(a > b && b > 5))
+
+// Test 4: typeof() with string concatenation (if supported)
+printline("")
+printline("=== String Operations ===")
+string msg = "Hello"
+print("typeof(lengthof(msg) + 5): ")
+printline(typeof(lengthof(msg) + 5))
+
+// Test 5: typeof() on the result of typeof()
+printline("")
+printline("=== Recursive typeof() ===")
+print("typeof(typeof(typeof(42))): ")
+printline(typeof(typeof(typeof(42))))
