@@ -128,6 +128,63 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
 
   getNextToken();
 
+  // Array element access: arr[index] or arr[index] = value
+  if (CurTok == '[') {
+    getNextToken();
+    auto Index = ParseExpression();
+    if (!Index)
+      return nullptr;
+    if (CurTok != ']') {
+      LogErrorAt(CurLoc, "Expected ']' after array index");
+      return nullptr;
+    }
+    getNextToken();
+
+    // Check for assignment to array element: arr[i] = expr
+    if (CurTok == TOK_ASSIGN || CurTok == TOK_PLUS_ASSIGN ||
+        CurTok == TOK_MINUS_ASSIGN || CurTok == TOK_MUL_ASSIGN ||
+        CurTok == TOK_DIV_ASSIGN || CurTok == TOK_MOD_ASSIGN) {
+      int AssignOp = CurTok;
+      getNextToken();
+      auto RHS = ParseExpression();
+      if (!RHS)
+        return nullptr;
+
+      if (AssignOp != TOK_ASSIGN) {
+        char Op = '+';
+        if (AssignOp == TOK_MINUS_ASSIGN)
+          Op = '-';
+        else if (AssignOp == TOK_MUL_ASSIGN)
+          Op = '*';
+        else if (AssignOp == TOK_DIV_ASSIGN)
+          Op = '/';
+        else if (AssignOp == TOK_MOD_ASSIGN)
+          Op = '%';
+        LogErrorAt(VarLoc, "Compound assignment operators are not supported on "
+                           "array elements. Use arr[i] = arr[i] + value instead.");
+        return nullptr;
+      }
+
+      return std::make_unique<ArrayAssignExprAST>(VarLoc, IdName,
+                                                  std::move(Index),
+                                                  std::move(RHS));
+    }
+
+    return std::make_unique<ArrayAccessExprAST>(VarLoc, IdName,
+                                                std::move(Index));
+  }
+
+  // Array .length property: arr.length
+  if (CurTok == '.') {
+    getNextToken();
+    if (CurTok != TOK_IDENTIFIER || IdentifierStr != "length") {
+      LogErrorAt(CurLoc, "Expected 'length' after '.'");
+      return nullptr;
+    }
+    getNextToken();
+    return std::make_unique<ArrayLengthExprAST>(VarLoc, IdName);
+  }
+
   if (CurTok == TOK_ASSIGN || CurTok == TOK_PLUS_ASSIGN ||
       CurTok == TOK_MINUS_ASSIGN || CurTok == TOK_MUL_ASSIGN ||
       CurTok == TOK_DIV_ASSIGN || CurTok == TOK_MOD_ASSIGN) {
@@ -734,9 +791,76 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 }
 
 // ParseVarDeclBody - called after the type keyword has already been consumed.
-// CurTok must already be the identifier (variable name) when this is called.
+// CurTok must already be the identifier (variable name) OR '[' for arrays.
 std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
                                           TurfType Type) {
+  // Check for array syntax: int[5] name  or  int[5] name = [1, 2, 3]
+  if (CurTok == '[') {
+    getNextToken();
+
+    if (CurTok != TOK_INT_LITERAL) {
+      LogErrorAt(CurLoc, "Array size must be an integer literal");
+      return nullptr;
+    }
+
+    int ArraySize = static_cast<int>(IntVal);
+    if (ArraySize <= 0) {
+      LogErrorAt(CurLoc, "Array size must be a positive integer");
+      return nullptr;
+    }
+    getNextToken();
+
+    if (CurTok != ']') {
+      LogErrorAt(CurLoc, "Expected ']' after array size");
+      return nullptr;
+    }
+    getNextToken();
+
+    bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
+                     Keywords.at(IdentifierStr) == CurTok;
+    if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
+      LogErrorAt(CurLoc, "Expected identifier after array type");
+      return nullptr;
+    }
+
+    std::string Name = IdentifierStr;
+    SourceLocation NameLoc = CurLoc;
+    getNextToken();
+
+    // Optional initializer: int[3] primes = [2, 3, 5]
+    std::vector<std::unique_ptr<ExprAST>> InitList;
+    if (CurTok == TOK_ASSIGN) {
+      getNextToken();
+
+      if (CurTok != '[') {
+        LogErrorAt(CurLoc, "Expected '[' for array initializer");
+        return nullptr;
+      }
+      getNextToken();
+
+      while (CurTok != ']' && CurTok != TOK_EOF) {
+        auto Elem = ParseExpression();
+        if (!Elem)
+          return nullptr;
+        InitList.push_back(std::move(Elem));
+        if (CurTok == ',')
+          getNextToken();
+        else if (CurTok != ']')
+          break;
+      }
+
+      if (CurTok != ']') {
+        LogErrorAt(CurLoc, "Expected ']' at end of array initializer");
+        return nullptr;
+      }
+      getNextToken();
+    }
+
+    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, Type, ArraySize,
+                                              std::move(InitList));
+  }
+
+  // Standard variable declaration: int x = ...
   bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
                    Keywords.at(IdentifierStr) == CurTok;
   if (CurTok != TOK_IDENTIFIER && !IsKeyword) {

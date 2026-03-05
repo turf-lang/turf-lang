@@ -1,0 +1,9 @@
+int[5] squares
+
+for i in 0..5 step i += 1 {
+    squares[i] = i * i
+}
+
+for j in 0..5 step j += 1 {
+    printline(squares[j])
+}

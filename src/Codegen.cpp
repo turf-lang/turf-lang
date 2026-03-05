@@ -1272,3 +1272,318 @@ Value *FuncCallExprAST::codegen() {
 
   return Builder->CreateCall(CalleeF, ArgVals, "calltmp");
 }
+
+// Array Codegen
+Value *ArrayDeclExprAST::codegen() {
+  if (ElementType == TURF_VOID) {
+    TypeError(Loc, "Arrays of type 'void' are not allowed").raise();
+    return nullptr;
+  }
+
+  if (Keywords.find(Name) != Keywords.end()) {
+    SemanticError(Loc, "Cannot use keyword '" + Name +
+                           "' as a variable name. Keyword is reserved.")
+        .raise();
+    return nullptr;
+  }
+
+  // Check for unreachable declaration
+  if (GlobalSymbolTable && GlobalSymbolTable->CurrentScopeHasEarlyExit()) {
+    UnreachableCodeError(Loc, "declaration").raise();
+    return nullptr;
+  }
+
+  // Check for duplicate declaration in current scope
+  if (GlobalSymbolTable && GlobalSymbolTable->IsSymbolInCurrentScope(Name)) {
+    Symbol *Prev = GlobalSymbolTable->LookupSymbolInCurrentScope(Name);
+    if (Prev) {
+      DuplicateDeclarationError(Loc, Name, Prev->DeclLoc).raise();
+    }
+    return nullptr;
+  }
+
+  // Check for shadowing
+  if (GlobalSymbolTable) {
+    Symbol *Shadowed = GlobalSymbolTable->FindShadowedSymbol(Name);
+    if (Shadowed) {
+      ShadowingWarning(Loc, Name, Shadowed->DeclLoc).warn();
+    }
+  }
+
+  // Validate initializer list size if present
+  if (!InitList.empty() && static_cast<int>(InitList.size()) != Size) {
+    ArraySizeMismatchError(Loc, Name, Size, static_cast<int>(InitList.size()))
+        .raise();
+    return nullptr;
+  }
+
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+  Type *ElemTy = getLLVMType(ElementType);
+  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, Size);
+
+  IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                   TheFunction->getEntryBlock().begin());
+  AllocaInst *Alloca = TmpB.CreateAlloca(ArrTy, nullptr, Name);
+
+  // Zero-initialize the entire array (memset to 0)
+  // Get total size in bytes
+  auto &DL = TheModule->getDataLayout();
+  uint64_t TotalBytes = DL.getTypeAllocSize(ArrTy);
+  Builder->CreateMemSet(
+      Alloca,
+      ConstantInt::get(Type::getInt8Ty(*TheContext), 0),
+      ConstantInt::get(Type::getInt64Ty(*TheContext), TotalBytes),
+      Alloca->getAlign());
+
+  // If we have an initializer list, store each element
+  if (!InitList.empty()) {
+    for (int i = 0; i < static_cast<int>(InitList.size()); ++i) {
+      Value *ElemVal = InitList[i]->codegen();
+      if (!ElemVal)
+        return nullptr;
+
+      // Detect void value
+      if (ElemVal->getType()->isVoidTy()) {
+        VoidValueError(Loc,
+                       "Element " + std::to_string(i) + " of array '" +
+                           Name + "' is a void function call.")
+            .raise();
+        return nullptr;
+      }
+
+      // Type check: element must be compatible with declared element type
+      TurfType ElemTurfType = getTurfTypeFromLLVM(ElemVal->getType());
+      if (!isTypeCompatible(ElemTurfType, ElementType)) {
+        ArrayTypeMismatchError(Loc, Name, turfTypeName(ElementType),
+                               turfTypeName(ElemTurfType))
+            .raise();
+        return nullptr;
+      }
+
+      ElemVal = CastToType(ElemVal, ElementType, "arrayinit", Loc);
+
+      // GEP into array[i] and store
+      Value *Indices[] = {
+          ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
+          ConstantInt::get(Type::getInt64Ty(*TheContext), i)};
+      Value *ElemPtr = Builder->CreateInBoundsGEP(ArrTy, Alloca, Indices,
+                                                   "arrelem");
+      Builder->CreateStore(ElemVal, ElemPtr);
+    }
+  }
+
+  // Register in symbol table
+  TurfType ArrType = getArrayType(ElementType);
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->DeclareSymbol(Name, ArrType, Loc, Alloca, Size);
+  }
+
+  NamedValues[Name] = {Alloca, ArrType, Size};
+
+  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+}
+
+// Helper function to emit runtime bounds check
+static void EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
+                                   const std::string &ArrayName,
+                                   SourceLocation Loc) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+  // Check: index < 0 || index >= size
+  Value *SizeVal =
+      ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize);
+  Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+
+  Value *TooSmall = Builder->CreateICmpSLT(IndexVal, Zero, "idx_neg");
+  Value *TooBig = Builder->CreateICmpSGE(IndexVal, SizeVal, "idx_toobig");
+  Value *OutOfBounds = Builder->CreateOr(TooSmall, TooBig, "oob");
+
+  BasicBlock *OobBB =
+      BasicBlock::Create(*TheContext, "arr_oob", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "arr_ok");
+
+  Builder->CreateCondBr(OutOfBounds, OobBB, ContBB);
+
+  // Out-of-bounds block: print error and exit
+  Builder->SetInsertPoint(OobBB);
+
+  // Declare puts if not already
+  Type *I8Ptr = PointerType::get(*TheContext, 0);
+  Function *PutsF = TheModule->getFunction("puts");
+  if (!PutsF) {
+    FunctionType *FT =
+        FunctionType::get(Type::getInt32Ty(*TheContext), {I8Ptr}, false);
+    PutsF = Function::Create(FT, Function::ExternalLinkage, "puts",
+                             TheModule.get());
+  }
+  Value *ErrMsg = Builder->CreateGlobalString(
+      "Runtime Error: Array index out of bounds for '" + ArrayName + "'.",
+      "arr_oob_msg");
+  Builder->CreateCall(PutsF, {ErrMsg});
+
+  // Declare exit if not already
+  Function *ExitF = TheModule->getFunction("exit");
+  if (!ExitF) {
+    FunctionType *FT = FunctionType::get(
+        Type::getVoidTy(*TheContext), {Type::getInt32Ty(*TheContext)}, false);
+    ExitF = Function::Create(FT, Function::ExternalLinkage, "exit",
+                             TheModule.get());
+  }
+  Builder->CreateCall(ExitF,
+                      {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
+  Builder->CreateUnreachable();
+
+  // Continue block
+  TheFunction->insert(TheFunction->end(), ContBB);
+  Builder->SetInsertPoint(ContBB);
+}
+
+Value *ArrayAccessExprAST::codegen() {
+  // Look up the array variable
+  VarInfo *VI = nullptr;
+  auto Iter = NamedValues.find(Name);
+  if (Iter != NamedValues.end()) {
+    VI = &Iter->second;
+  }
+
+  if (!VI || !isArrayType(VI->Type)) {
+    SemanticError(Loc, "'" + Name + "' is not an array").raise();
+    return nullptr;
+  }
+
+  int ArraySize = VI->ArraySize;
+  TurfType ElemType = getArrayElementType(VI->Type);
+
+  // Evaluate the index
+  Value *IndexVal = Index->codegen();
+  if (!IndexVal)
+    return nullptr;
+
+  // Index must be integer
+  TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
+  if (IdxType == TURF_STRING) {
+    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
+    return nullptr;
+  }
+  IndexVal = CastToType(IndexVal, TURF_INT, "arridx", Loc);
+
+  // Compile-time bounds check for constant indices
+  if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
+    long long Idx = CI->getSExtValue();
+    if (Idx < 0 || Idx >= ArraySize) {
+      ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
+      return nullptr;
+    }
+  } else {
+    // Runtime bounds check
+    EmitRuntimeBoundsCheck(IndexVal, ArraySize, Name, Loc);
+  }
+
+  // GEP + load
+  Type *ElemTy = getLLVMType(ElemType);
+  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
+  Value *Indices[] = {
+      ConstantInt::get(Type::getInt64Ty(*TheContext), 0), IndexVal};
+  Value *ElemPtr =
+      Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, Indices, "arrelem");
+
+  return Builder->CreateLoad(ElemTy, ElemPtr, Name + "_elem");
+}
+
+Value *ArrayAssignExprAST::codegen() {
+  // Look up the array variable
+  VarInfo *VI = nullptr;
+  auto Iter = NamedValues.find(Name);
+  if (Iter != NamedValues.end()) {
+    VI = &Iter->second;
+  }
+
+  if (!VI || !isArrayType(VI->Type)) {
+    SemanticError(Loc, "'" + Name + "' is not an array").raise();
+    return nullptr;
+  }
+
+  int ArraySize = VI->ArraySize;
+  TurfType ElemType = getArrayElementType(VI->Type);
+
+  // Evaluate the index
+  Value *IndexVal = Index->codegen();
+  if (!IndexVal)
+    return nullptr;
+
+  // Index must be integer
+  TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
+  if (IdxType == TURF_STRING) {
+    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
+    return nullptr;
+  }
+  IndexVal = CastToType(IndexVal, TURF_INT, "arridx", Loc);
+
+  // Compile-time bounds check for constant indices
+  if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
+    long long Idx = CI->getSExtValue();
+    if (Idx < 0 || Idx >= ArraySize) {
+      ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
+      return nullptr;
+    }
+  } else {
+    // Runtime bounds check
+    EmitRuntimeBoundsCheck(IndexVal, ArraySize, Name, Loc);
+  }
+
+  // Evaluate the RHS value
+  Value *RHSVal = RHS->codegen();
+  if (!RHSVal)
+    return nullptr;
+
+  // Detect void RHS
+  if (RHSVal->getType()->isVoidTy()) {
+    VoidValueError(Loc, "You're trying to store a void value in array '" +
+                            Name + "'.")
+        .raise();
+    return nullptr;
+  }
+
+  // Type check
+  TurfType RHSType = getTurfTypeFromLLVM(RHSVal->getType());
+  if (!isTypeCompatible(RHSType, ElemType)) {
+    ArrayTypeMismatchError(Loc, Name, turfTypeName(ElemType),
+                           turfTypeName(RHSType))
+        .raise();
+    return nullptr;
+  }
+
+  RHSVal = CastToType(RHSVal, ElemType, "arrstore", Loc);
+
+  // GEP + store
+  Type *ElemTy = getLLVMType(ElemType);
+  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
+  Value *Indices[] = {
+      ConstantInt::get(Type::getInt64Ty(*TheContext), 0), IndexVal};
+  Value *ElemPtr =
+      Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, Indices, "arrelem");
+
+  Builder->CreateStore(RHSVal, ElemPtr);
+  return RHSVal;
+}
+
+Value *ArrayLengthExprAST::codegen() {
+  // Look up the array variable
+  VarInfo *VI = nullptr;
+  auto Iter = NamedValues.find(Name);
+  if (Iter != NamedValues.end()) {
+    VI = &Iter->second;
+  }
+
+  if (!VI || !isArrayType(VI->Type)) {
+    SemanticError(Loc, "'" + Name +
+                           "' is not an array. '.length' can only be used on arrays.")
+        .raise();
+    return nullptr;
+  }
+
+  // Return the compile-time constant size
+  return ConstantInt::get(Type::getInt64Ty(*TheContext), VI->ArraySize);
+}
+
