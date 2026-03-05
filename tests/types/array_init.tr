@@ -1,0 +1,14 @@
+int[3] primes = [2, 3, 5]
+printline(primes[0])
+printline(primes[1])
+printline(primes[2])
+
+double[4] vals = [1.5, 2.5, 3.5, 4.5]
+printline(vals[0])
+printline(vals[1])
+printline(vals[2])
+printline(vals[3])
+
+bool[2] flags = [true, false]
+printline(flags[0])
+printline(flags[1])
