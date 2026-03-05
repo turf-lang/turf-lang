@@ -316,4 +316,78 @@ public:
   llvm::Value *codegen() override;
 };
 
+// Array declaration: int[5] arr   or   int[3] arr = [1, 2, 3]
+class ArrayDeclExprAST : public ExprAST {
+  std::string Name;
+  TurfType ElementType;  // e.g. TURF_INT
+  int Size;              // compile-time constant size
+  std::vector<std::unique_ptr<ExprAST>> InitList; // optional initializer
+  SourceLocation Loc;
+
+public:
+  ArrayDeclExprAST(SourceLocation Loc, std::string Name, TurfType ElementType,
+                   int Size, std::vector<std::unique_ptr<ExprAST>> InitList)
+      : Loc(Loc), Name(std::move(Name)), ElementType(ElementType), Size(Size),
+        InitList(std::move(InitList)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
+  TurfType getElementType() const { return ElementType; }
+  int getSize() const { return Size; }
+
+  llvm::Value *codegen() override;
+};
+
+// Array element access: arr[index]
+class ArrayAccessExprAST : public ExprAST {
+  std::string Name;
+  std::unique_ptr<ExprAST> Index;
+  SourceLocation Loc;
+
+public:
+  ArrayAccessExprAST(SourceLocation Loc, std::string Name,
+                     std::unique_ptr<ExprAST> Index)
+      : Loc(Loc), Name(std::move(Name)), Index(std::move(Index)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
+
+  llvm::Value *codegen() override;
+};
+
+// Array element assignment: arr[index] = value
+class ArrayAssignExprAST : public ExprAST {
+  std::string Name;
+  std::unique_ptr<ExprAST> Index;
+  std::unique_ptr<ExprAST> RHS;
+  SourceLocation Loc;
+
+public:
+  ArrayAssignExprAST(SourceLocation Loc, std::string Name,
+                     std::unique_ptr<ExprAST> Index,
+                     std::unique_ptr<ExprAST> RHS)
+      : Loc(Loc), Name(std::move(Name)), Index(std::move(Index)),
+        RHS(std::move(RHS)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
+
+  llvm::Value *codegen() override;
+};
+
+// Array length: arr.length
+class ArrayLengthExprAST : public ExprAST {
+  std::string Name;
+  SourceLocation Loc;
+
+public:
+  ArrayLengthExprAST(SourceLocation Loc, std::string Name)
+      : Loc(Loc), Name(std::move(Name)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
+
+  llvm::Value *codegen() override;
+};
+
 #endif

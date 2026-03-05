@@ -228,8 +228,8 @@ int gettok() {
     return TOK_RANGE;
   }
 
-  // Numbers: [0-9.]+
-  if (isdigit(LastChar) || LastChar == '.') {
+  // Numbers: [0-9.]+ (a leading '.' only starts a number if followed by a digit)
+  if (isdigit(LastChar) || (LastChar == '.' && isdigit(SourceFile.peek()))) {
     std::string NumStr;
     do {
       NumStr += LastChar;
