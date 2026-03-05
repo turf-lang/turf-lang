@@ -1533,7 +1533,7 @@ Value *ArrayAssignExprAST::codegen() {
   }
 
   // Evaluate the RHS value
-  Value *RHSVal = this->Value->codegen();
+  Value *RHSVal = RHS->codegen();
   if (!RHSVal)
     return nullptr;
 

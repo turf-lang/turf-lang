@@ -359,15 +359,15 @@ public:
 class ArrayAssignExprAST : public ExprAST {
   std::string Name;
   std::unique_ptr<ExprAST> Index;
-  std::unique_ptr<ExprAST> Value;
+  std::unique_ptr<ExprAST> RHS;
   SourceLocation Loc;
 
 public:
   ArrayAssignExprAST(SourceLocation Loc, std::string Name,
                      std::unique_ptr<ExprAST> Index,
-                     std::unique_ptr<ExprAST> Value)
+                     std::unique_ptr<ExprAST> RHS)
       : Loc(Loc), Name(std::move(Name)), Index(std::move(Index)),
-        Value(std::move(Value)) {}
+        RHS(std::move(RHS)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
