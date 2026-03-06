@@ -316,38 +316,44 @@ public:
   llvm::Value *codegen() override;
 };
 
-// Array declaration: int[5] arr   or   int[3] arr = [1, 2, 3]
+// Array declaration: int[5] arr   or   int[3][4] arr = [[1, 2], [3, 4]]
 class ArrayDeclExprAST : public ExprAST {
   std::string Name;
   TurfType ElementType;  // e.g. TURF_INT
-  int Size;              // compile-time constant size
+  std::vector<int> Dimensions; // compile-time constant dimensions
   std::vector<std::unique_ptr<ExprAST>> InitList; // optional initializer
   SourceLocation Loc;
 
 public:
   ArrayDeclExprAST(SourceLocation Loc, std::string Name, TurfType ElementType,
-                   int Size, std::vector<std::unique_ptr<ExprAST>> InitList)
-      : Loc(Loc), Name(std::move(Name)), ElementType(ElementType), Size(Size),
+                   std::vector<int> Dimensions, std::vector<std::unique_ptr<ExprAST>> InitList)
+      : Loc(Loc), Name(std::move(Name)), ElementType(ElementType), Dimensions(std::move(Dimensions)),
         InitList(std::move(InitList)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
   TurfType getElementType() const { return ElementType; }
-  int getSize() const { return Size; }
+  const std::vector<int> &getDimensions() const { return Dimensions; }
+  int getTotalSize() const {
+    if (Dimensions.empty()) return 0;
+    int size = 1;
+    for (int dim : Dimensions) size *= dim;
+    return size;
+  }
 
   llvm::Value *codegen() override;
 };
 
-// Array element access: arr[index]
+// Array element access: arr[i][j]
 class ArrayAccessExprAST : public ExprAST {
   std::string Name;
-  std::unique_ptr<ExprAST> Index;
+  std::vector<std::unique_ptr<ExprAST>> Indices;
   SourceLocation Loc;
 
 public:
   ArrayAccessExprAST(SourceLocation Loc, std::string Name,
-                     std::unique_ptr<ExprAST> Index)
-      : Loc(Loc), Name(std::move(Name)), Index(std::move(Index)) {}
+                     std::vector<std::unique_ptr<ExprAST>> Indices)
+      : Loc(Loc), Name(std::move(Name)), Indices(std::move(Indices)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
@@ -355,18 +361,18 @@ public:
   llvm::Value *codegen() override;
 };
 
-// Array element assignment: arr[index] = value
+// Array element assignment: arr[i][j] = value
 class ArrayAssignExprAST : public ExprAST {
   std::string Name;
-  std::unique_ptr<ExprAST> Index;
+  std::vector<std::unique_ptr<ExprAST>> Indices;
   std::unique_ptr<ExprAST> RHS;
   SourceLocation Loc;
 
 public:
   ArrayAssignExprAST(SourceLocation Loc, std::string Name,
-                     std::unique_ptr<ExprAST> Index,
+                     std::vector<std::unique_ptr<ExprAST>> Indices,
                      std::unique_ptr<ExprAST> RHS)
-      : Loc(Loc), Name(std::move(Name)), Index(std::move(Index)),
+      : Loc(Loc), Name(std::move(Name)), Indices(std::move(Indices)),
         RHS(std::move(RHS)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
@@ -378,11 +384,12 @@ public:
 // Array length: arr.length
 class ArrayLengthExprAST : public ExprAST {
   std::string Name;
+  int DimIndex; // 0 for first dim, etc. -1 for total size
   SourceLocation Loc;
 
 public:
-  ArrayLengthExprAST(SourceLocation Loc, std::string Name)
-      : Loc(Loc), Name(std::move(Name)) {}
+  ArrayLengthExprAST(SourceLocation Loc, std::string Name, int DimIndex = 0)
+      : Loc(Loc), Name(std::move(Name)), DimIndex(DimIndex) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }

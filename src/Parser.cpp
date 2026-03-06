@@ -128,19 +128,23 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
 
   getNextToken();
 
-  // Array element access: arr[index] or arr[index] = value
+  // Array element access: arr[i][j]
   if (CurTok == '[') {
-    getNextToken();
-    auto Index = ParseExpression();
-    if (!Index)
-      return nullptr;
-    if (CurTok != ']') {
-      LogErrorAt(CurLoc, "Expected ']' after array index");
-      return nullptr;
+    std::vector<std::unique_ptr<ExprAST>> Indices;
+    while (CurTok == '[') {
+      getNextToken();
+      auto Index = ParseExpression();
+      if (!Index)
+        return nullptr;
+      if (CurTok != ']') {
+        LogErrorAt(CurLoc, "Expected ']' after array index");
+        return nullptr;
+      }
+      getNextToken();
+      Indices.push_back(std::move(Index));
     }
-    getNextToken();
 
-    // Check for assignment to array element: arr[i] = expr
+    // Check for assignment to array element: arr[i][j] = expr
     if (CurTok == TOK_ASSIGN || CurTok == TOK_PLUS_ASSIGN ||
         CurTok == TOK_MINUS_ASSIGN || CurTok == TOK_MUL_ASSIGN ||
         CurTok == TOK_DIV_ASSIGN || CurTok == TOK_MOD_ASSIGN) {
@@ -151,27 +155,18 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
         return nullptr;
 
       if (AssignOp != TOK_ASSIGN) {
-        char Op = '+';
-        if (AssignOp == TOK_MINUS_ASSIGN)
-          Op = '-';
-        else if (AssignOp == TOK_MUL_ASSIGN)
-          Op = '*';
-        else if (AssignOp == TOK_DIV_ASSIGN)
-          Op = '/';
-        else if (AssignOp == TOK_MOD_ASSIGN)
-          Op = '%';
         LogErrorAt(VarLoc, "Compound assignment operators are not supported on "
                            "array elements. Use arr[i] = arr[i] + value instead.");
         return nullptr;
       }
 
       return std::make_unique<ArrayAssignExprAST>(VarLoc, IdName,
-                                                  std::move(Index),
+                                                  std::move(Indices),
                                                   std::move(RHS));
     }
 
     return std::make_unique<ArrayAccessExprAST>(VarLoc, IdName,
-                                                std::move(Index));
+                                                std::move(Indices));
   }
 
   // Array .length property: arr.length
@@ -182,7 +177,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
       return nullptr;
     }
     getNextToken();
-    return std::make_unique<ArrayLengthExprAST>(VarLoc, IdName);
+    return std::make_unique<ArrayLengthExprAST>(VarLoc, IdName, -1);
   }
 
   if (CurTok == TOK_ASSIGN || CurTok == TOK_PLUS_ASSIGN ||
@@ -794,27 +789,31 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 // CurTok must already be the identifier (variable name) OR '[' for arrays.
 std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
                                           TurfType Type) {
-  // Check for array syntax: int[5] name  or  int[5] name = [1, 2, 3]
+  // Check for array syntax: int[5] name  or  int[3][4] name = [[1, 2], [3, 4]]
   if (CurTok == '[') {
-    getNextToken();
+    std::vector<int> Dimensions;
+    while (CurTok == '[') {
+      getNextToken();
 
-    if (CurTok != TOK_INT_LITERAL) {
-      LogErrorAt(CurLoc, "Array size must be an integer literal");
-      return nullptr;
-    }
+      if (CurTok != TOK_INT_LITERAL) {
+        LogErrorAt(CurLoc, "Array size must be an integer literal");
+        return nullptr;
+      }
 
-    int ArraySize = static_cast<int>(IntVal);
-    if (ArraySize <= 0) {
-      LogErrorAt(CurLoc, "Array size must be a positive integer");
-      return nullptr;
-    }
-    getNextToken();
+      int ArraySize = static_cast<int>(IntVal);
+      if (ArraySize <= 0) {
+        LogErrorAt(CurLoc, "Array size must be a positive integer");
+        return nullptr;
+      }
+      getNextToken();
 
-    if (CurTok != ']') {
-      LogErrorAt(CurLoc, "Expected ']' after array size");
-      return nullptr;
+      if (CurTok != ']') {
+        LogErrorAt(CurLoc, "Expected ']' after array size");
+        return nullptr;
+      }
+      getNextToken();
+      Dimensions.push_back(ArraySize);
     }
-    getNextToken();
 
     bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
                      Keywords.at(IdentifierStr) == CurTok;
@@ -827,36 +826,47 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
     SourceLocation NameLoc = CurLoc;
     getNextToken();
 
-    // Optional initializer: int[3] primes = [2, 3, 5]
+    // Optional initializer: int[2][2] primes = [[2, 3], [5, 7]]
     std::vector<std::unique_ptr<ExprAST>> InitList;
     if (CurTok == TOK_ASSIGN) {
       getNextToken();
 
-      if (CurTok != '[') {
-        LogErrorAt(CurLoc, "Expected '[' for array initializer");
+      std::function<bool(std::vector<std::unique_ptr<ExprAST>> &)> ParseNestedArrayInit = [&](std::vector<std::unique_ptr<ExprAST>> &List) -> bool {
+        if (CurTok != '[') {
+          LogErrorAt(CurLoc, "Expected '[' for array initializer");
+          return false;
+        }
+        getNextToken();
+
+        while (CurTok != ']' && CurTok != TOK_EOF) {
+          if (CurTok == '[') {
+            if (!ParseNestedArrayInit(List)) return false;
+          } else {
+            auto Elem = ParseExpression();
+            if (!Elem) return false;
+            List.push_back(std::move(Elem));
+          }
+
+          if (CurTok == ',')
+            getNextToken();
+          else if (CurTok != ']')
+            break;
+        }
+
+        if (CurTok != ']') {
+          LogErrorAt(CurLoc, "Expected ']' at end of array initializer");
+          return false;
+        }
+        getNextToken();
+        return true;
+      };
+
+      if (!ParseNestedArrayInit(InitList)) {
         return nullptr;
       }
-      getNextToken();
-
-      while (CurTok != ']' && CurTok != TOK_EOF) {
-        auto Elem = ParseExpression();
-        if (!Elem)
-          return nullptr;
-        InitList.push_back(std::move(Elem));
-        if (CurTok == ',')
-          getNextToken();
-        else if (CurTok != ']')
-          break;
-      }
-
-      if (CurTok != ']') {
-        LogErrorAt(CurLoc, "Expected ']' at end of array initializer");
-        return nullptr;
-      }
-      getNextToken();
     }
 
-    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, Type, ArraySize,
+    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, Type, std::move(Dimensions),
                                               std::move(InitList));
   }
 

@@ -605,11 +605,12 @@ public:
       : TurfError(
             Loc,
             Colors::BRIGHT_RED + "Array index out of bounds!\n" +
-                Colors::RESET + "  You tried to access '" + Colors::CYAN +
-                ArrayName + "[" + std::to_string(Index) + "]" +
-                Colors::RESET + "', but the array only has " +
+                Colors::RESET + "  You tried to access index " + Colors::CYAN +
+                std::to_string(Index) + Colors::RESET + " in '" +
+                Colors::CYAN + ArrayName + Colors::RESET +
+                "', but that dimension only has " +
                 Colors::CYAN + std::to_string(ArraySize) + Colors::RESET +
-                " elements (indices 0 to " +
+                " elements (valid indices: 0 to " +
                 std::to_string(ArraySize - 1) + ").\n  " +
                 Colors::BRIGHT_GREEN +
                 "Hint: Array indices start at 0 and go up to size - 1." +
@@ -620,18 +621,18 @@ public:
 class ArraySizeMismatchError : public TurfError {
 public:
   ArraySizeMismatchError(SourceLocation Loc, const std::string &ArrayName,
-                         int DeclaredSize, int InitSize)
+                         int DeclaredTotalSize, int InitSize)
       : TurfError(
             Loc,
             Colors::BRIGHT_RED + "Array size mismatch!\n" + Colors::RESET +
                 "  '" + Colors::CYAN + ArrayName + Colors::RESET +
-                "' was declared with size " + Colors::CYAN +
-                std::to_string(DeclaredSize) + Colors::RESET +
-                ", but you gave " + Colors::CYAN +
+                "' was declared with a total of " + Colors::CYAN +
+                std::to_string(DeclaredTotalSize) + Colors::RESET +
+                " elements, but you gave " + Colors::CYAN +
                 std::to_string(InitSize) + Colors::RESET +
                 " initial values.\n  " + Colors::BRIGHT_GREEN +
-                "Hint: The number of values in [...] must match the "
-                "declared array size." +
+                "Hint: The total number of values in your initializer must match the "
+                "total declared array size." +
                 Colors::RESET) {}
 };
 

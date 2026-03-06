@@ -1,0 +1,13 @@
+int[3][4] matrix;
+
+for i in 0..matrix.length step i += 1 {
+    for j in 0..matrix[i].length step j += 1 {
+        matrix[i][j] = i * 10 + j;
+    }
+}
+
+for i in 0..matrix.length step i += 1 {
+    for j in 0..matrix[i].length step j += 1 {
+        print(string(matrix[i][j]));
+    }
+}

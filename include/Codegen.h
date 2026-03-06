@@ -9,6 +9,7 @@
 #include "llvm/IR/Module.h"
 #include <map>
 #include <memory>
+#include <vector>
 
 // Common LLVM tools to be used everywhere.
 extern std::unique_ptr<llvm::LLVMContext> TheContext;
@@ -18,7 +19,7 @@ extern std::unique_ptr<llvm::Module> TheModule;
 struct VarInfo {
   llvm::AllocaInst *Alloca;
   TurfType Type;
-  int ArraySize = 0; // >0 for array variables
+  std::vector<int> ArrayDims; // empty = scalar, {5} = 1D, {3,4} = 2D, etc.
 };
 
 // Symbol Table: Maps variables to their memory locations (AllocaInst)

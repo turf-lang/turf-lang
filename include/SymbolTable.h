@@ -20,12 +20,12 @@ struct Symbol {
   SourceLocation DeclLoc;         // Where it was declared
   llvm::AllocaInst *Alloca;       // LLVM memory location
   size_t ScopeLevel;              // Nesting depth (0 = global, 1 = first block, etc.)
-  int ArraySize = 0;              // >0 for array variables
+  std::vector<int> ArrayDims;     // empty = scalar, {5} = 1D, {3,4} = 2D, etc.
   
   Symbol(SymbolID ID, std::string Name, TurfType Type, SourceLocation DeclLoc,
-         llvm::AllocaInst *Alloca, size_t ScopeLevel, int ArraySize = 0)
+         llvm::AllocaInst *Alloca, size_t ScopeLevel, std::vector<int> ArrayDims = {})
       : ID(ID), Name(std::move(Name)), Type(Type), DeclLoc(DeclLoc),
-        Alloca(Alloca), ScopeLevel(ScopeLevel), ArraySize(ArraySize) {}
+        Alloca(Alloca), ScopeLevel(ScopeLevel), ArrayDims(std::move(ArrayDims)) {}
 };
 
 // Represents a lexical scope (block, function body, etc.)
@@ -60,7 +60,7 @@ public:
                          SourceLocation DeclLoc, llvm::AllocaInst *Alloca);
   SymbolID DeclareSymbol(const std::string &Name, TurfType Type,
                          SourceLocation DeclLoc, llvm::AllocaInst *Alloca,
-                         int ArraySize);
+                         std::vector<int> ArrayDims);
   
   // Symbol lookup
   Symbol *LookupSymbol(const std::string &Name);

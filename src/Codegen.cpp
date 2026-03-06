@@ -1311,8 +1311,9 @@ Value *ArrayDeclExprAST::codegen() {
   }
 
   // Validate initializer list size if present
-  if (!InitList.empty() && static_cast<int>(InitList.size()) != Size) {
-    ArraySizeMismatchError(Loc, Name, Size, static_cast<int>(InitList.size()))
+  int TotalSize = getTotalSize();
+  if (!InitList.empty() && static_cast<int>(InitList.size()) != TotalSize) {
+    ArraySizeMismatchError(Loc, Name, TotalSize, static_cast<int>(InitList.size()))
         .raise();
     return nullptr;
   }
@@ -1320,14 +1321,16 @@ Value *ArrayDeclExprAST::codegen() {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
   Type *ElemTy = getLLVMType(ElementType);
-  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, Size);
+  Type *ArrTy = ElemTy;
+  for (auto it = Dimensions.rbegin(); it != Dimensions.rend(); ++it) {
+    ArrTy = llvm::ArrayType::get(ArrTy, *it);
+  }
 
   IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                    TheFunction->getEntryBlock().begin());
   AllocaInst *Alloca = TmpB.CreateAlloca(ArrTy, nullptr, Name);
 
   // Zero-initialize the entire array (memset to 0)
-  // Get total size in bytes
   auto &DL = TheModule->getDataLayout();
   uint64_t TotalBytes = DL.getTypeAllocSize(ArrTy);
   Builder->CreateMemSet(
@@ -1363,12 +1366,17 @@ Value *ArrayDeclExprAST::codegen() {
 
       ElemVal = CastToType(ElemVal, ElementType, "arrayinit", Loc);
 
-      // GEP into array[i] and store
-      Value *Indices[] = {
-          ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
-          ConstantInt::get(Type::getInt64Ty(*TheContext), i)};
-      Value *ElemPtr = Builder->CreateInBoundsGEP(ArrTy, Alloca, Indices,
-                                                   "arrelem");
+      // Map flat index `i` back to {dim0, dim1, ...} for GEP
+      std::vector<Value *> GEPIndices(Dimensions.size() + 1);
+      GEPIndices[0] = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+      int temp = i;
+      for (int d = Dimensions.size() - 1; d >= 0; --d) {
+        int idx = temp % Dimensions[d];
+        temp /= Dimensions[d];
+        GEPIndices[d + 1] = ConstantInt::get(Type::getInt64Ty(*TheContext), idx);
+      }
+
+      Value *ElemPtr = Builder->CreateInBoundsGEP(ArrTy, Alloca, GEPIndices, "arrelem");
       Builder->CreateStore(ElemVal, ElemPtr);
     }
   }
@@ -1376,10 +1384,10 @@ Value *ArrayDeclExprAST::codegen() {
   // Register in symbol table
   TurfType ArrType = getArrayType(ElementType);
   if (GlobalSymbolTable) {
-    GlobalSymbolTable->DeclareSymbol(Name, ArrType, Loc, Alloca, Size);
+    GlobalSymbolTable->DeclareSymbol(Name, ArrType, Loc, Alloca, Dimensions);
   }
 
-  NamedValues[Name] = {Alloca, ArrType, Size};
+  NamedValues[Name] = {Alloca, ArrType, Dimensions};
 
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }
@@ -1452,42 +1460,55 @@ Value *ArrayAccessExprAST::codegen() {
     return nullptr;
   }
 
-  int ArraySize = VI->ArraySize;
   TurfType ElemType = getArrayElementType(VI->Type);
 
-  // Evaluate the index
-  Value *IndexVal = Index->codegen();
-  if (!IndexVal)
-    return nullptr;
-
-  // Index must be integer
-  TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
-  if (IdxType == TURF_STRING) {
-    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
+  if (Indices.size() != VI->ArrayDims.size()) {
+    SemanticError(Loc, "'" + Name + "' is a " + std::to_string(VI->ArrayDims.size()) + 
+                       "D array, but " + std::to_string(Indices.size()) + " indices were provided.").raise();
     return nullptr;
   }
-  IndexVal = CastToType(IndexVal, TURF_INT, "arridx", Loc);
 
-  // Compile-time bounds check for constant indices
-  if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
-    long long Idx = CI->getSExtValue();
-    if (Idx < 0 || Idx >= ArraySize) {
-      ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
+  std::vector<Value *> GEPIndices;
+  GEPIndices.push_back(ConstantInt::get(Type::getInt64Ty(*TheContext), 0));
+
+  for (size_t d = 0; d < Indices.size(); ++d) {
+    Value *IndexVal = Indices[d]->codegen();
+    if (!IndexVal) return nullptr;
+
+    // Index must be integer
+    TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
+    if (IdxType == TURF_STRING) {
+      ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
       return nullptr;
     }
-  } else {
-    // Runtime bounds check
-    EmitRuntimeBoundsCheck(IndexVal, ArraySize, Name, Loc);
+    IndexVal = CastToType(IndexVal, TURF_INT, "arridx", Loc);
+
+    int ArraySize = VI->ArrayDims[d];
+
+    // Compile-time bounds check for constant indices
+    if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
+      long long Idx = CI->getSExtValue();
+      if (Idx < 0 || Idx >= ArraySize) {
+        ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
+        return nullptr;
+      }
+    } else {
+      // Runtime bounds check
+      std::string DimName = Name + " (dim " + std::to_string(d) + ")";
+      EmitRuntimeBoundsCheck(IndexVal, ArraySize, DimName, Loc);
+    }
+    
+    GEPIndices.push_back(IndexVal);
   }
 
-  // GEP + load
+  // Build the LLVM nested array type for the GEP
   Type *ElemTy = getLLVMType(ElemType);
-  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
-  Value *Indices[] = {
-      ConstantInt::get(Type::getInt64Ty(*TheContext), 0), IndexVal};
-  Value *ElemPtr =
-      Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, Indices, "arrelem");
+  Type *ArrTy = ElemTy;
+  for (auto it = VI->ArrayDims.rbegin(); it != VI->ArrayDims.rend(); ++it) {
+    ArrTy = llvm::ArrayType::get(ArrTy, *it);
+  }
 
+  Value *ElemPtr = Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, GEPIndices, "arrelem");
   return Builder->CreateLoad(ElemTy, ElemPtr, Name + "_elem");
 }
 
@@ -1504,32 +1525,45 @@ Value *ArrayAssignExprAST::codegen() {
     return nullptr;
   }
 
-  int ArraySize = VI->ArraySize;
   TurfType ElemType = getArrayElementType(VI->Type);
 
-  // Evaluate the index
-  Value *IndexVal = Index->codegen();
-  if (!IndexVal)
-    return nullptr;
-
-  // Index must be integer
-  TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
-  if (IdxType == TURF_STRING) {
-    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
+  if (Indices.size() != VI->ArrayDims.size()) {
+    SemanticError(Loc, "'" + Name + "' is a " + std::to_string(VI->ArrayDims.size()) + 
+                       "D array, but " + std::to_string(Indices.size()) + " indices were provided.").raise();
     return nullptr;
   }
-  IndexVal = CastToType(IndexVal, TURF_INT, "arridx", Loc);
 
-  // Compile-time bounds check for constant indices
-  if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
-    long long Idx = CI->getSExtValue();
-    if (Idx < 0 || Idx >= ArraySize) {
-      ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
+  std::vector<Value *> GEPIndices;
+  GEPIndices.push_back(ConstantInt::get(Type::getInt64Ty(*TheContext), 0));
+
+  for (size_t d = 0; d < Indices.size(); ++d) {
+    Value *IndexVal = Indices[d]->codegen();
+    if (!IndexVal) return nullptr;
+
+    // Index must be integer
+    TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
+    if (IdxType == TURF_STRING) {
+      ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
       return nullptr;
     }
-  } else {
-    // Runtime bounds check
-    EmitRuntimeBoundsCheck(IndexVal, ArraySize, Name, Loc);
+    IndexVal = CastToType(IndexVal, TURF_INT, "arridx", Loc);
+
+    int ArraySize = VI->ArrayDims[d];
+
+    // Compile-time bounds check for constant indices
+    if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
+      long long Idx = CI->getSExtValue();
+      if (Idx < 0 || Idx >= ArraySize) {
+        ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
+        return nullptr;
+      }
+    } else {
+      // Runtime bounds check
+      std::string DimName = Name + " (dim " + std::to_string(d) + ")";
+      EmitRuntimeBoundsCheck(IndexVal, ArraySize, DimName, Loc);
+    }
+    
+    GEPIndices.push_back(IndexVal);
   }
 
   // Evaluate the RHS value
@@ -1556,15 +1590,16 @@ Value *ArrayAssignExprAST::codegen() {
 
   RHSVal = CastToType(RHSVal, ElemType, "arrstore", Loc);
 
-  // GEP + store
+  // Build the LLVM nested array type for the GEP
   Type *ElemTy = getLLVMType(ElemType);
-  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
-  Value *Indices[] = {
-      ConstantInt::get(Type::getInt64Ty(*TheContext), 0), IndexVal};
-  Value *ElemPtr =
-      Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, Indices, "arrelem");
+  Type *ArrTy = ElemTy;
+  for (auto it = VI->ArrayDims.rbegin(); it != VI->ArrayDims.rend(); ++it) {
+    ArrTy = llvm::ArrayType::get(ArrTy, *it);
+  }
 
+  Value *ElemPtr = Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, GEPIndices, "arrelem");
   Builder->CreateStore(RHSVal, ElemPtr);
+  
   return RHSVal;
 }
 
@@ -1583,7 +1618,18 @@ Value *ArrayLengthExprAST::codegen() {
     return nullptr;
   }
 
+  int ResultSize = 1;
+  if (VI->ArrayDims.empty()) {
+    ResultSize = 0;
+  } else if (DimIndex == -1) {
+    for (int dim : VI->ArrayDims) ResultSize *= dim;
+  } else if (DimIndex >= 0 && DimIndex < static_cast<int>(VI->ArrayDims.size())) {
+    ResultSize = VI->ArrayDims[DimIndex];
+  } else {
+    ResultSize = 0;
+  }
+
   // Return the compile-time constant size
-  return ConstantInt::get(Type::getInt64Ty(*TheContext), VI->ArraySize);
+  return ConstantInt::get(Type::getInt64Ty(*TheContext), ResultSize);
 }
 
