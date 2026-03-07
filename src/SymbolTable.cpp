@@ -1,10 +1,16 @@
 #include "SymbolTable.h"
+#include "Trie.h"
 #include <algorithm>
 
 std::unique_ptr<SymbolTable> GlobalSymbolTable;
 
 void InitializeSymbolTable() {
   GlobalSymbolTable = std::make_unique<SymbolTable>();
+  
+  // Initialize suggestion engine if not already done
+  if (!GlobalSuggestionEngine) {
+    InitializeSuggestionEngine();
+  }
 }
 
 void SymbolTable::EnterScope() {
@@ -19,6 +25,11 @@ void SymbolTable::ExitScope() {
   const Scope &CurrentScope = ScopeStack.back();
   for (const auto &pair : CurrentScope.Symbols) {
     AllSymbols.erase(pair.second);
+    
+    // Remove from suggestion engine
+    if (GlobalSuggestionEngine) {
+      GlobalSuggestionEngine->RemoveVariable(pair.first);
+    }
   }
   
   ScopeStack.pop_back();
@@ -34,6 +45,11 @@ SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfType Type,
   size_t Level = GetCurrentLevel();
   
   // Add to current scope
+  // Add to suggestion engine
+  if (GlobalSuggestionEngine) {
+    GlobalSuggestionEngine->AddVariable(Name, Level);
+  }
+  
   ScopeStack.back().Symbols[Name] = ID;
   
   // Add to all symbols map

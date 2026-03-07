@@ -6,6 +6,8 @@
 #include "Codegen.h"
 #include "Colors.h"
 #include "Lexer.h"
+#include "SymbolTable.h"
+#include "Trie.h"
 #include "llvm/IR/Instructions.h"
 #include <cstdlib>
 #include <iostream>
@@ -128,9 +130,16 @@ public:
                            Colors::RESET) {
 
     std::vector<std::string> Candidates;
-    for (const auto &pair : Keywords) {
-      if (getLevenshteinDistance(Name, pair.first) <= 2) {
-        Candidates.push_back(pair.first);
+    
+    // Use Trie-based suggestion engine if available
+    if (GlobalSuggestionEngine) {
+      Candidates = GlobalSuggestionEngine->GetKeywordSuggestions(Name, 2);
+    } else {
+      // Fallback to old method
+      for (const auto &pair : Keywords) {
+        if (getLevenshteinDistance(Name, pair.first) <= 2) {
+          Candidates.push_back(pair.first);
+        }
       }
     }
 
@@ -179,29 +188,39 @@ public:
     if (Name.length() > 2) {
       std::vector<std::string> Candidates;
 
-      // Check variables in symbol table
-      for (const auto &pair : SymbolTable) {
-        const std::string &KnownVar = pair.first;
-        if (KnownVar == Name)
-          continue;
+      // Try Trie-based suggestion first (scope-aware)
+      if (GlobalSuggestionEngine && GlobalSymbolTable) {
+        size_t CurrentScope = GlobalSymbolTable->GetCurrentLevel();
+        Candidates = GlobalSuggestionEngine->GetVariableSuggestions(
+            Name, CurrentScope, 2);
+        foundCandidate = !Candidates.empty();
+      } else {
+        // Fallback to old method
+        // Check variables in symbol table
+        for (const auto &pair : SymbolTable) {
+          const std::string &KnownVar = pair.first;
+          if (KnownVar == Name)
+            continue;
 
-        if (getLevenshteinDistance(Name, KnownVar) <= 2) {
-          Candidates.push_back(KnownVar);
+          if (getLevenshteinDistance(Name, KnownVar) <= 2) {
+            Candidates.push_back(KnownVar);
+          }
         }
+
+        // Check built-in functions
+        for (const auto &builtin : Builtins) {
+          if (builtin.Name == Name)
+            continue;
+
+          if (getLevenshteinDistance(Name, builtin.Name) <= 2) {
+            Candidates.push_back(builtin.Name);
+          }
+        }
+        
+        foundCandidate = !Candidates.empty();
       }
 
-      // Check built-in functions
-      for (const auto &builtin : Builtins) {
-        if (builtin.Name == Name)
-          continue;
-
-        if (getLevenshteinDistance(Name, builtin.Name) <= 2) {
-          Candidates.push_back(builtin.Name);
-        }
-      }
-
-      if (!Candidates.empty()) {
-        foundCandidate = true;
+      if (foundCandidate) {
         Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
         for (size_t i = 0; i < Candidates.size(); ++i) {
           Message += Colors::BRIGHT_YELLOW + "'" + Candidates[i] + "'" +
@@ -238,28 +257,38 @@ public:
     if (Name.length() > 2) {
       std::vector<std::string> Candidates;
 
-      // Check variables in the current scope chain
-      for (const auto &KnownVar : KnownNames) {
-        if (KnownVar == Name)
-          continue;
+      // Try Trie-based suggestion first (scope-aware)
+      if (GlobalSuggestionEngine && GlobalSymbolTable) {
+        size_t CurrentScope = GlobalSymbolTable->GetCurrentLevel();
+        Candidates = GlobalSuggestionEngine->GetVariableSuggestions(
+            Name, CurrentScope, 2);
+        foundCandidate = !Candidates.empty();
+      } else {
+        // Fallback to old method
+        // Check variables in the current scope chain
+        for (const auto &KnownVar : KnownNames) {
+          if (KnownVar == Name)
+            continue;
 
-        if (getLevenshteinDistance(Name, KnownVar) <= 2) {
-          Candidates.push_back(KnownVar);
+          if (getLevenshteinDistance(Name, KnownVar) <= 2) {
+            Candidates.push_back(KnownVar);
+          }
         }
+
+        // Check built-in functions
+        for (const auto &builtin : Builtins) {
+          if (builtin.Name == Name)
+            continue;
+
+          if (getLevenshteinDistance(Name, builtin.Name) <= 2) {
+            Candidates.push_back(builtin.Name);
+          }
+        }
+        
+        foundCandidate = !Candidates.empty();
       }
 
-      // Check built-in functions
-      for (const auto &builtin : Builtins) {
-        if (builtin.Name == Name)
-          continue;
-
-        if (getLevenshteinDistance(Name, builtin.Name) <= 2) {
-          Candidates.push_back(builtin.Name);
-        }
-      }
-
-      if (!Candidates.empty()) {
-        foundCandidate = true;
+      if (foundCandidate) {
         Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
         for (size_t i = 0; i < Candidates.size(); ++i) {
           Message += Colors::BRIGHT_YELLOW + "'" + Candidates[i] + "'" +
