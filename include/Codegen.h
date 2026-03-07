@@ -18,6 +18,7 @@ extern std::unique_ptr<llvm::Module> TheModule;
 struct VarInfo {
   llvm::AllocaInst *Alloca;
   TurfType Type;
+  int ArraySize = 0; // >0 for array variables
 };
 
 // Symbol Table: Maps variables to their memory locations (AllocaInst)

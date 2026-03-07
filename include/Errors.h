@@ -626,4 +626,76 @@ public:
                 Colors::RESET) {}
 };
 
+// Array index out of bounds (compile-time constant check)
+class ArrayBoundsError : public TurfError {
+public:
+  ArrayBoundsError(SourceLocation Loc, const std::string &ArrayName,
+                   long long Index, int ArraySize)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED + "Array index out of bounds!\n" +
+                Colors::RESET + "  You tried to access '" + Colors::CYAN +
+                ArrayName + "[" + std::to_string(Index) + "]" +
+                Colors::RESET + "', but the array only has " +
+                Colors::CYAN + std::to_string(ArraySize) + Colors::RESET +
+                " elements (indices 0 to " +
+                std::to_string(ArraySize - 1) + ").\n  " +
+                Colors::BRIGHT_GREEN +
+                "Hint: Array indices start at 0 and go up to size - 1." +
+                Colors::RESET) {}
+};
+
+// Array initializer size mismatch
+class ArraySizeMismatchError : public TurfError {
+public:
+  ArraySizeMismatchError(SourceLocation Loc, const std::string &ArrayName,
+                         int DeclaredSize, int InitSize)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED + "Array size mismatch!\n" + Colors::RESET +
+                "  '" + Colors::CYAN + ArrayName + Colors::RESET +
+                "' was declared with size " + Colors::CYAN +
+                std::to_string(DeclaredSize) + Colors::RESET +
+                ", but you gave " + Colors::CYAN +
+                std::to_string(InitSize) + Colors::RESET +
+                " initial values.\n  " + Colors::BRIGHT_GREEN +
+                "Hint: The number of values in [...] must match the "
+                "declared array size." +
+                Colors::RESET) {}
+};
+
+// Non-integer array index
+class ArrayNonIntegerIndexError : public TurfError {
+public:
+  ArrayNonIntegerIndexError(SourceLocation Loc, const std::string &GotType)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED + "Array index must be an integer!\n" +
+                Colors::RESET + "  You used a value of type '" +
+                Colors::CYAN + GotType + Colors::RESET +
+                "' as an array index.\n  " + Colors::BRIGHT_GREEN +
+                "Hint: Use an 'int' value to index into an array, "
+                "like arr[0] or arr[i] where i is an int." +
+                Colors::RESET) {}
+};
+
+// Array element type mismatch
+class ArrayTypeMismatchError : public TurfError {
+public:
+  ArrayTypeMismatchError(SourceLocation Loc, const std::string &ArrayName,
+                         const std::string &ExpectedType,
+                         const std::string &GotType)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED + "Array element type mismatch!\n" +
+                Colors::RESET + "  Array '" + Colors::CYAN + ArrayName +
+                Colors::RESET + "' holds '" + Colors::CYAN + ExpectedType +
+                Colors::RESET + "' values, but you tried to store a '" +
+                Colors::CYAN + GotType + Colors::RESET + "'.\n  " +
+                Colors::BRIGHT_GREEN +
+                "Hint: All elements in the array must match the declared "
+                "element type." +
+                Colors::RESET) {}
+};
+
 #endif

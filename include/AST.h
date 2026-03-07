@@ -87,23 +87,40 @@ public:
   llvm::Value *codegen() override;
 };
 
+// A single condition + body pair (used for if and each elseif)
+struct CondBranch {
+  SourceLocation Loc; // location of 'if' or 'elseif' keyword
+  std::unique_ptr<ExprAST> Cond;
+  std::unique_ptr<ExprAST> Body;
+};
+
 // If-Expr AST, represents if-else branch
 class IfExprAST : public ExprAST {
-  SourceLocation Loc;
+  // The first entry is the 'if' branch.
+  // Subsequent entries are 'elseif' branches.
+  std::vector<CondBranch> Branches;
+
+  // Optional final 'else' body (nullptr if absent).
+  std::unique_ptr<ExprAST> ElseBody;
   SourceLocation ElseLoc;
-  std::unique_ptr<ExprAST> Cond, Then, Else;
 
 public:
-  IfExprAST(SourceLocation Loc, SourceLocation ElseLoc,
-            std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Then,
-            std::unique_ptr<ExprAST> Else)
-      : Loc(Loc), ElseLoc(ElseLoc), Cond(std::move(Cond)),
-        Then(std::move(Then)), Else(std::move(Else)) {}
+  IfExprAST(std::vector<CondBranch> Branches,
+            std::unique_ptr<ExprAST> ElseBody,
+            SourceLocation ElseLoc = {0, 0})
+      : Branches(std::move(Branches)), ElseBody(std::move(ElseBody)),
+        ElseLoc(ElseLoc) {}
 
-  const SourceLocation &getLoc() const { return Loc; }
+  // Primary location is the 'if' keyword
+  const SourceLocation &getLoc() const { return Branches.front().Loc; }
   const SourceLocation &getElseLoc() const { return ElseLoc; }
-  ExprAST *getThen() const { return Then.get(); }
-  ExprAST *getElse() const { return Else.get(); }
+
+  const std::vector<CondBranch> &getBranches() const { return Branches; }
+  ExprAST *getElseBody() const { return ElseBody.get(); }
+
+  // Convenience: backward-compatible accessors for single if/else
+  ExprAST *getThen() const { return Branches.front().Body.get(); }
+  ExprAST *getElse() const { return ElseBody.get(); }
 
   llvm::Value *codegen() override;
 };
@@ -295,6 +312,80 @@ public:
   FuncCallExprAST(SourceLocation Loc, std::string Name,
                   std::vector<std::unique_ptr<ExprAST>> Args)
       : Loc(Loc), Name(std::move(Name)), Args(std::move(Args)) {}
+
+  llvm::Value *codegen() override;
+};
+
+// Array declaration: int[5] arr   or   int[3] arr = [1, 2, 3]
+class ArrayDeclExprAST : public ExprAST {
+  std::string Name;
+  TurfType ElementType;  // e.g. TURF_INT
+  int Size;              // compile-time constant size
+  std::vector<std::unique_ptr<ExprAST>> InitList; // optional initializer
+  SourceLocation Loc;
+
+public:
+  ArrayDeclExprAST(SourceLocation Loc, std::string Name, TurfType ElementType,
+                   int Size, std::vector<std::unique_ptr<ExprAST>> InitList)
+      : Loc(Loc), Name(std::move(Name)), ElementType(ElementType), Size(Size),
+        InitList(std::move(InitList)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
+  TurfType getElementType() const { return ElementType; }
+  int getSize() const { return Size; }
+
+  llvm::Value *codegen() override;
+};
+
+// Array element access: arr[index]
+class ArrayAccessExprAST : public ExprAST {
+  std::string Name;
+  std::unique_ptr<ExprAST> Index;
+  SourceLocation Loc;
+
+public:
+  ArrayAccessExprAST(SourceLocation Loc, std::string Name,
+                     std::unique_ptr<ExprAST> Index)
+      : Loc(Loc), Name(std::move(Name)), Index(std::move(Index)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
+
+  llvm::Value *codegen() override;
+};
+
+// Array element assignment: arr[index] = value
+class ArrayAssignExprAST : public ExprAST {
+  std::string Name;
+  std::unique_ptr<ExprAST> Index;
+  std::unique_ptr<ExprAST> RHS;
+  SourceLocation Loc;
+
+public:
+  ArrayAssignExprAST(SourceLocation Loc, std::string Name,
+                     std::unique_ptr<ExprAST> Index,
+                     std::unique_ptr<ExprAST> RHS)
+      : Loc(Loc), Name(std::move(Name)), Index(std::move(Index)),
+        RHS(std::move(RHS)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
+
+  llvm::Value *codegen() override;
+};
+
+// Array length: arr.length
+class ArrayLengthExprAST : public ExprAST {
+  std::string Name;
+  SourceLocation Loc;
+
+public:
+  ArrayLengthExprAST(SourceLocation Loc, std::string Name)
+      : Loc(Loc), Name(std::move(Name)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
 
   llvm::Value *codegen() override;
 };

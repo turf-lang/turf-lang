@@ -270,45 +270,57 @@ void CFGBuilder::visitBlock(ExprAST *E) {
 
 void CFGBuilder::visitIf(ExprAST *E) {
   auto *If = dynamic_cast<IfExprAST *>(E);
-  if (!If)
-    return;
+  if (!If) return;
 
   TurfBasicBlock *IfEntry = CurrentBlock;
-  TurfBasicBlock *ThenBB = createBlock("if.then");
   TurfBasicBlock *MergeBB = createBlock("if.end");
 
-  // Entry branches to then
-  CurrentCFG->addEdge(IfEntry, ThenBB);
-  IfEntry->setTerminator(TerminatorKind::Branch, If->getLoc());
+  const auto &Branches = If->getBranches();
+  bool AllTerminate = true;
 
-  // Build then branch
-  setInsertPoint(ThenBB);
-  if (If->getThen()) {
-    visitExpr(If->getThen());
-  }
-  bool ThenTerminates = !CurrentBlock;
-  if (!ThenTerminates) {
-    CurrentCFG->addEdge(CurrentBlock, MergeBB);
+  TurfBasicBlock *CurrentCondBlock = IfEntry;
+
+  for (size_t i = 0; i < Branches.size(); ++i) {
+    TurfBasicBlock *ThenBB = createBlock(i == 0 ? "if.then" : "elseif.then");
+    TurfBasicBlock *NextBB = (i + 1 < Branches.size())
+                                 ? createBlock("elseif.cond")
+                                 : (If->getElseBody() ? createBlock("if.else")
+                                                      : MergeBB);
+
+    CurrentCFG->addEdge(CurrentCondBlock, ThenBB);
+    CurrentCFG->addEdge(CurrentCondBlock, NextBB);
+    CurrentCondBlock->setTerminator(TerminatorKind::Branch, Branches[i].Loc);
+
+    // Build then/elseif body
+    setInsertPoint(ThenBB);
+    visitExpr(Branches[i].Body.get());
+    if (CurrentBlock && !CurrentBlock->hasExplicitTerminator()) {
+      CurrentCFG->addEdge(CurrentBlock, MergeBB);
+    } else {
+      // This branch terminates (return/break/continue)
+    }
+
+    bool BranchTerminates = !CurrentBlock || CurrentBlock->hasExplicitTerminator();
+    if (!BranchTerminates) AllTerminate = false;
+
+    CurrentCondBlock = NextBB;
   }
 
-  // Build else branch (only if it exists)
-  bool ElseTerminates = false;
-  if (If->getElse()) {
-    TurfBasicBlock *ElseBB = createBlock("if.else");
-    CurrentCFG->addEdge(IfEntry, ElseBB);
-    setInsertPoint(ElseBB);
-    visitExpr(If->getElse());
-    ElseTerminates = !CurrentBlock;
+  // Handle else
+  if (If->getElseBody()) {
+    setInsertPoint(CurrentCondBlock); // This is the else block
+    visitExpr(If->getElseBody());
+    bool ElseTerminates = !CurrentBlock || CurrentBlock->hasExplicitTerminator();
     if (!ElseTerminates) {
       CurrentCFG->addEdge(CurrentBlock, MergeBB);
+      AllTerminate = false;
     }
   } else {
-    // No else: if condition is false, fall through to merge
-    CurrentCFG->addEdge(IfEntry, MergeBB);
+    // No else: the last NextBB is already MergeBB
+    AllTerminate = false; // no else means the "fall-through" path exists
   }
 
-  // Continue from merge point only if at least one branch doesn't terminate
-  if (ThenTerminates && ElseTerminates) {
+  if (AllTerminate) {
     setInsertPoint(nullptr);
   } else {
     setInsertPoint(MergeBB);

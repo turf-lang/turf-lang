@@ -46,7 +46,8 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"continue", TOK_CONTINUE},
                                        {"for", TOK_FOR},
                                        {"in", TOK_IN},
-                                       {"step", TOK_STEP}};
+                                       {"step", TOK_STEP},
+                                       {"elseif", TOK_ELSEIF}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
@@ -227,8 +228,8 @@ int gettok() {
     return TOK_RANGE;
   }
 
-  // Numbers: [0-9.]+
-  if (isdigit(LastChar) || LastChar == '.') {
+  // Numbers: [0-9.]+ (a leading '.' only starts a number if followed by a digit)
+  if (isdigit(LastChar) || (LastChar == '.' && isdigit(SourceFile.peek()))) {
     std::string NumStr;
     do {
       NumStr += LastChar;

@@ -61,6 +61,8 @@ static TurfType getTurfTypeFromLLVM(Type *Ty) {
     return TURF_INT;
   if (Ty->isIntegerTy(32))
     return TURF_INT;
+  if (Ty->isIntegerTy(32))
+    return TURF_INT;
   if (Ty->isIntegerTy(1))
     return TURF_BOOL;
   if (Ty->isPointerTy())
@@ -143,12 +145,10 @@ static Value *CastToType(Value *Val, TurfType DestType, const std::string &Name,
 // Numeric types (int, double, bool) are mutually compatible.
 // String is only compatible with string. Void is never compatible.
 static bool isTypeCompatible(TurfType From, TurfType To) {
-  if (From == To)
-    return true;
-  if (From == TURF_VOID || To == TURF_VOID)
-    return false;
-  if (From == TURF_STRING || To == TURF_STRING)
-    return false;
+
+  if (From == To) return true;
+  if (From == TURF_VOID || To == TURF_VOID) return false;
+  if (From == TURF_STRING || To == TURF_STRING) return false;
   // Remaining: int, double, bool — all mutually convertible
   return true;
 }
@@ -470,144 +470,80 @@ Value *AssignmentExprAST::codegen() {
 }
 
 Value *IfExprAST::codegen() {
-  Value *CondV = Cond->codegen();
-  if (!CondV)
-    return nullptr;
-
-  // Convert condition to a boolean
-  CondV = CastToType(CondV, TURF_BOOL, "ifcond");
-
-  // Get the current function so we can insert blocks into it
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
-  // Determine if this is block-form (statement) or ternary-form (expression).
-  // Block-form: both branches are BlockExprAST nodes.
-  bool IsBlockForm = dynamic_cast<BlockExprAST *>(Then.get()) != nullptr;
+  bool IsBlockForm = dynamic_cast<BlockExprAST *>(Branches.front().Body.get()) != nullptr;
+  bool HasElse = (ElseBody != nullptr);
 
-  // If-without-else (statement form)
-  if (!Else) {
-    BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
+  // Block-form if/elseif/else: statement, no PHI node needed.
+  if (IsBlockForm) {
     BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "ifcont");
 
-    // If condition is true go to ThenBB, otherwise skip to MergeBB
-    Builder->CreateCondBr(CondV, ThenBB, MergeBB);
+    for (size_t i = 0; i < Branches.size(); ++i) {
+      Value *CondV = Branches[i].Cond->codegen();
+      if (!CondV) return nullptr;
+      CondV = CastToType(CondV, TURF_BOOL, "ifcond");
 
-    // Emit then block
-    Builder->SetInsertPoint(ThenBB);
+      BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
+      BasicBlock *NextBB = BasicBlock::Create(*TheContext, "else");
 
-    Value *ThenV = Then->codegen();
-    if (!ThenV)
-      return nullptr;
+      Builder->CreateCondBr(CondV, ThenBB, NextBB);
 
-    // Branch to merge if the then-block didn't already terminate
-    if (!Builder->GetInsertBlock()->getTerminator()) {
+      // Emit then body
+      Builder->SetInsertPoint(ThenBB);
+      Branches[i].Body->codegen();
+      if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(MergeBB);
+
+      // NextBB becomes the insert point for the next condition or the else/merge
+      TheFunction->insert(TheFunction->end(), NextBB);
+      Builder->SetInsertPoint(NextBB);
+    }
+
+    // We're now in the final "else" block
+    if (HasElse) {
+      ElseBody->codegen();
+      if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(MergeBB);
+    } else {
+      // No else: just branch to merge
       Builder->CreateBr(MergeBB);
     }
 
-    // Emit merge block
-    TheFunction->insert(TheFunction->end(), MergeBB);
-    Builder->SetInsertPoint(MergeBB);
-
-    // If-without-else is a statement — return a dummy null value
-    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
-  }
-
-  if (IsBlockForm) {
-    BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
-    BasicBlock *ElseBB = BasicBlock::Create(*TheContext, "else");
-    BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "ifcont");
-
-    // BLOCK-FORM if/else: treat as statement, no PHI node needed.
-    Builder->CreateCondBr(CondV, ThenBB, ElseBB);
-
-    // Emit then block
-    Builder->SetInsertPoint(ThenBB);
-    Then->codegen();
-    if (!Builder->GetInsertBlock()->getTerminator())
-      Builder->CreateBr(MergeBB);
-
-    // Emit else block
-    TheFunction->insert(TheFunction->end(), ElseBB);
-    Builder->SetInsertPoint(ElseBB);
-    Else->codegen();
-    if (!Builder->GetInsertBlock()->getTerminator())
-      Builder->CreateBr(MergeBB);
-
-    // Merge : no PHI, just a dummy return value
     TheFunction->insert(TheFunction->end(), MergeBB);
     Builder->SetInsertPoint(MergeBB);
     return Constant::getNullValue(Type::getInt64Ty(*TheContext));
   }
 
-  // If-with-else
-  // Create blocks for 'then', 'else', and 'merge'
+  // Ternary form: if cond then expr else expr
+  Value *CondV = Branches[0].Cond->codegen();
+  if (!CondV) return nullptr;
+  CondV = CastToType(CondV, TURF_BOOL, "ifcond");
+
   BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
   BasicBlock *ElseBB = BasicBlock::Create(*TheContext, "else");
   BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "ifcont");
 
-  // Create the Conditional Branch
-  // "If CondV is true, go to ThenBB, otherwise go to ElseBB"
   Builder->CreateCondBr(CondV, ThenBB, ElseBB);
   Builder->SetInsertPoint(ThenBB);
-
-  Value *ThenV = Then->codegen();
-  if (!ThenV)
-    return nullptr;
-
-  // Check if the then-branch terminated (break/continue/return).
-  bool ThenTerminated = Builder->GetInsertBlock()->getTerminator() != nullptr ||
-                        (Builder->GetInsertBlock() != ThenBB &&
-                         llvm::pred_empty(Builder->GetInsertBlock()));
-
-  if (!Builder->GetInsertBlock()->getTerminator()) {
-    if (!ThenTerminated) {
-      Builder->CreateBr(MergeBB);
-    }
-  }
+  
+  Value *ThenV = Branches[0].Body->codegen();
+  if (!ThenV) return nullptr;
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateBr(MergeBB);
   ThenBB = Builder->GetInsertBlock();
 
   TheFunction->insert(TheFunction->end(), ElseBB);
   Builder->SetInsertPoint(ElseBB);
-
-  Value *ElseV = Else->codegen();
-  if (!ElseV)
-    return nullptr;
-
-  bool ElseTerminated = Builder->GetInsertBlock()->getTerminator() != nullptr ||
-                        (Builder->GetInsertBlock() != ElseBB &&
-                         llvm::pred_empty(Builder->GetInsertBlock()));
-
-  if (!Builder->GetInsertBlock()->getTerminator()) {
-    if (!ElseTerminated) {
-      Builder->CreateBr(MergeBB);
-    }
-  }
+  Value *ElseV = ElseBody->codegen();
+  if (!ElseV) return nullptr;
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateBr(MergeBB);
   ElseBB = Builder->GetInsertBlock();
 
   TheFunction->insert(TheFunction->end(), MergeBB);
   Builder->SetInsertPoint(MergeBB);
 
-  if (ThenTerminated && ElseTerminated) {
-    Builder->CreateUnreachable();
-    TurfType ResultType = getCommonType(getTurfTypeFromLLVM(ThenV->getType()),
-                                        getTurfTypeFromLLVM(ElseV->getType()));
-    return Constant::getNullValue(getLLVMType(ResultType));
-  }
-
-  if (ThenTerminated) {
-    if (ThenBB != MergeBB && llvm::pred_empty(ThenBB) && ThenBB->empty()) {
-      ThenBB->eraseFromParent();
-    }
-    return ElseV;
-  }
-  if (ElseTerminated) {
-    if (ElseBB != MergeBB && llvm::pred_empty(ElseBB) && ElseBB->empty()) {
-      ElseBB->eraseFromParent();
-    }
-    return ThenV;
-  }
-
-  // Normal case: both branches flow into merge, create PHI node
   TurfType ThenType = getTurfTypeFromLLVM(ThenV->getType());
   TurfType ElseType = getTurfTypeFromLLVM(ElseV->getType());
   TurfType MergeType = getCommonType(ThenType, ElseType);
@@ -615,12 +551,9 @@ Value *IfExprAST::codegen() {
   ThenV = CastToType(ThenV, MergeType, "thencast");
   ElseV = CastToType(ElseV, MergeType, "elsecast");
 
-  // The PHI Node
   PHINode *PN = Builder->CreatePHI(ThenV->getType(), 2, "iftmp");
-
   PN->addIncoming(ThenV, ThenBB);
   PN->addIncoming(ElseV, ElseBB);
-
   return PN;
 }
 
@@ -1339,3 +1272,318 @@ Value *FuncCallExprAST::codegen() {
 
   return Builder->CreateCall(CalleeF, ArgVals, "calltmp");
 }
+
+// Array Codegen
+Value *ArrayDeclExprAST::codegen() {
+  if (ElementType == TURF_VOID) {
+    TypeError(Loc, "Arrays of type 'void' are not allowed").raise();
+    return nullptr;
+  }
+
+  if (Keywords.find(Name) != Keywords.end()) {
+    SemanticError(Loc, "Cannot use keyword '" + Name +
+                           "' as a variable name. Keyword is reserved.")
+        .raise();
+    return nullptr;
+  }
+
+  // Check for unreachable declaration
+  if (GlobalSymbolTable && GlobalSymbolTable->CurrentScopeHasEarlyExit()) {
+    UnreachableCodeError(Loc, "declaration").raise();
+    return nullptr;
+  }
+
+  // Check for duplicate declaration in current scope
+  if (GlobalSymbolTable && GlobalSymbolTable->IsSymbolInCurrentScope(Name)) {
+    Symbol *Prev = GlobalSymbolTable->LookupSymbolInCurrentScope(Name);
+    if (Prev) {
+      DuplicateDeclarationError(Loc, Name, Prev->DeclLoc).raise();
+    }
+    return nullptr;
+  }
+
+  // Check for shadowing
+  if (GlobalSymbolTable) {
+    Symbol *Shadowed = GlobalSymbolTable->FindShadowedSymbol(Name);
+    if (Shadowed) {
+      ShadowingWarning(Loc, Name, Shadowed->DeclLoc).warn();
+    }
+  }
+
+  // Validate initializer list size if present
+  if (!InitList.empty() && static_cast<int>(InitList.size()) != Size) {
+    ArraySizeMismatchError(Loc, Name, Size, static_cast<int>(InitList.size()))
+        .raise();
+    return nullptr;
+  }
+
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+  Type *ElemTy = getLLVMType(ElementType);
+  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, Size);
+
+  IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                   TheFunction->getEntryBlock().begin());
+  AllocaInst *Alloca = TmpB.CreateAlloca(ArrTy, nullptr, Name);
+
+  // Zero-initialize the entire array (memset to 0)
+  // Get total size in bytes
+  auto &DL = TheModule->getDataLayout();
+  uint64_t TotalBytes = DL.getTypeAllocSize(ArrTy);
+  Builder->CreateMemSet(
+      Alloca,
+      ConstantInt::get(Type::getInt8Ty(*TheContext), 0),
+      ConstantInt::get(Type::getInt64Ty(*TheContext), TotalBytes),
+      Alloca->getAlign());
+
+  // If we have an initializer list, store each element
+  if (!InitList.empty()) {
+    for (int i = 0; i < static_cast<int>(InitList.size()); ++i) {
+      Value *ElemVal = InitList[i]->codegen();
+      if (!ElemVal)
+        return nullptr;
+
+      // Detect void value
+      if (ElemVal->getType()->isVoidTy()) {
+        VoidValueError(Loc,
+                       "Element " + std::to_string(i) + " of array '" +
+                           Name + "' is a void function call.")
+            .raise();
+        return nullptr;
+      }
+
+      // Type check: element must be compatible with declared element type
+      TurfType ElemTurfType = getTurfTypeFromLLVM(ElemVal->getType());
+      if (!isTypeCompatible(ElemTurfType, ElementType)) {
+        ArrayTypeMismatchError(Loc, Name, turfTypeName(ElementType),
+                               turfTypeName(ElemTurfType))
+            .raise();
+        return nullptr;
+      }
+
+      ElemVal = CastToType(ElemVal, ElementType, "arrayinit", Loc);
+
+      // GEP into array[i] and store
+      Value *Indices[] = {
+          ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
+          ConstantInt::get(Type::getInt64Ty(*TheContext), i)};
+      Value *ElemPtr = Builder->CreateInBoundsGEP(ArrTy, Alloca, Indices,
+                                                   "arrelem");
+      Builder->CreateStore(ElemVal, ElemPtr);
+    }
+  }
+
+  // Register in symbol table
+  TurfType ArrType = getArrayType(ElementType);
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->DeclareSymbol(Name, ArrType, Loc, Alloca, Size);
+  }
+
+  NamedValues[Name] = {Alloca, ArrType, Size};
+
+  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+}
+
+// Helper function to emit runtime bounds check
+static void EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
+                                   const std::string &ArrayName,
+                                   SourceLocation Loc) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+  // Check: index < 0 || index >= size
+  Value *SizeVal =
+      ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize);
+  Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+
+  Value *TooSmall = Builder->CreateICmpSLT(IndexVal, Zero, "idx_neg");
+  Value *TooBig = Builder->CreateICmpSGE(IndexVal, SizeVal, "idx_toobig");
+  Value *OutOfBounds = Builder->CreateOr(TooSmall, TooBig, "oob");
+
+  BasicBlock *OobBB =
+      BasicBlock::Create(*TheContext, "arr_oob", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "arr_ok");
+
+  Builder->CreateCondBr(OutOfBounds, OobBB, ContBB);
+
+  // Out-of-bounds block: print error and exit
+  Builder->SetInsertPoint(OobBB);
+
+  // Declare puts if not already
+  Type *I8Ptr = PointerType::get(*TheContext, 0);
+  Function *PutsF = TheModule->getFunction("puts");
+  if (!PutsF) {
+    FunctionType *FT =
+        FunctionType::get(Type::getInt32Ty(*TheContext), {I8Ptr}, false);
+    PutsF = Function::Create(FT, Function::ExternalLinkage, "puts",
+                             TheModule.get());
+  }
+  Value *ErrMsg = Builder->CreateGlobalString(
+      "Runtime Error: Array index out of bounds for '" + ArrayName + "'.",
+      "arr_oob_msg");
+  Builder->CreateCall(PutsF, {ErrMsg});
+
+  // Declare exit if not already
+  Function *ExitF = TheModule->getFunction("exit");
+  if (!ExitF) {
+    FunctionType *FT = FunctionType::get(
+        Type::getVoidTy(*TheContext), {Type::getInt32Ty(*TheContext)}, false);
+    ExitF = Function::Create(FT, Function::ExternalLinkage, "exit",
+                             TheModule.get());
+  }
+  Builder->CreateCall(ExitF,
+                      {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
+  Builder->CreateUnreachable();
+
+  // Continue block
+  TheFunction->insert(TheFunction->end(), ContBB);
+  Builder->SetInsertPoint(ContBB);
+}
+
+Value *ArrayAccessExprAST::codegen() {
+  // Look up the array variable
+  VarInfo *VI = nullptr;
+  auto Iter = NamedValues.find(Name);
+  if (Iter != NamedValues.end()) {
+    VI = &Iter->second;
+  }
+
+  if (!VI || !isArrayType(VI->Type)) {
+    SemanticError(Loc, "'" + Name + "' is not an array").raise();
+    return nullptr;
+  }
+
+  int ArraySize = VI->ArraySize;
+  TurfType ElemType = getArrayElementType(VI->Type);
+
+  // Evaluate the index
+  Value *IndexVal = Index->codegen();
+  if (!IndexVal)
+    return nullptr;
+
+  // Index must be integer
+  TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
+  if (IdxType == TURF_STRING) {
+    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
+    return nullptr;
+  }
+  IndexVal = CastToType(IndexVal, TURF_INT, "arridx", Loc);
+
+  // Compile-time bounds check for constant indices
+  if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
+    long long Idx = CI->getSExtValue();
+    if (Idx < 0 || Idx >= ArraySize) {
+      ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
+      return nullptr;
+    }
+  } else {
+    // Runtime bounds check
+    EmitRuntimeBoundsCheck(IndexVal, ArraySize, Name, Loc);
+  }
+
+  // GEP + load
+  Type *ElemTy = getLLVMType(ElemType);
+  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
+  Value *Indices[] = {
+      ConstantInt::get(Type::getInt64Ty(*TheContext), 0), IndexVal};
+  Value *ElemPtr =
+      Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, Indices, "arrelem");
+
+  return Builder->CreateLoad(ElemTy, ElemPtr, Name + "_elem");
+}
+
+Value *ArrayAssignExprAST::codegen() {
+  // Look up the array variable
+  VarInfo *VI = nullptr;
+  auto Iter = NamedValues.find(Name);
+  if (Iter != NamedValues.end()) {
+    VI = &Iter->second;
+  }
+
+  if (!VI || !isArrayType(VI->Type)) {
+    SemanticError(Loc, "'" + Name + "' is not an array").raise();
+    return nullptr;
+  }
+
+  int ArraySize = VI->ArraySize;
+  TurfType ElemType = getArrayElementType(VI->Type);
+
+  // Evaluate the index
+  Value *IndexVal = Index->codegen();
+  if (!IndexVal)
+    return nullptr;
+
+  // Index must be integer
+  TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
+  if (IdxType == TURF_STRING) {
+    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
+    return nullptr;
+  }
+  IndexVal = CastToType(IndexVal, TURF_INT, "arridx", Loc);
+
+  // Compile-time bounds check for constant indices
+  if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
+    long long Idx = CI->getSExtValue();
+    if (Idx < 0 || Idx >= ArraySize) {
+      ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
+      return nullptr;
+    }
+  } else {
+    // Runtime bounds check
+    EmitRuntimeBoundsCheck(IndexVal, ArraySize, Name, Loc);
+  }
+
+  // Evaluate the RHS value
+  Value *RHSVal = RHS->codegen();
+  if (!RHSVal)
+    return nullptr;
+
+  // Detect void RHS
+  if (RHSVal->getType()->isVoidTy()) {
+    VoidValueError(Loc, "You're trying to store a void value in array '" +
+                            Name + "'.")
+        .raise();
+    return nullptr;
+  }
+
+  // Type check
+  TurfType RHSType = getTurfTypeFromLLVM(RHSVal->getType());
+  if (!isTypeCompatible(RHSType, ElemType)) {
+    ArrayTypeMismatchError(Loc, Name, turfTypeName(ElemType),
+                           turfTypeName(RHSType))
+        .raise();
+    return nullptr;
+  }
+
+  RHSVal = CastToType(RHSVal, ElemType, "arrstore", Loc);
+
+  // GEP + store
+  Type *ElemTy = getLLVMType(ElemType);
+  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
+  Value *Indices[] = {
+      ConstantInt::get(Type::getInt64Ty(*TheContext), 0), IndexVal};
+  Value *ElemPtr =
+      Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, Indices, "arrelem");
+
+  Builder->CreateStore(RHSVal, ElemPtr);
+  return RHSVal;
+}
+
+Value *ArrayLengthExprAST::codegen() {
+  // Look up the array variable
+  VarInfo *VI = nullptr;
+  auto Iter = NamedValues.find(Name);
+  if (Iter != NamedValues.end()) {
+    VI = &Iter->second;
+  }
+
+  if (!VI || !isArrayType(VI->Type)) {
+    SemanticError(Loc, "'" + Name +
+                           "' is not an array. '.length' can only be used on arrays.")
+        .raise();
+    return nullptr;
+  }
+
+  // Return the compile-time constant size
+  return ConstantInt::get(Type::getInt64Ty(*TheContext), VI->ArraySize);
+}
+
