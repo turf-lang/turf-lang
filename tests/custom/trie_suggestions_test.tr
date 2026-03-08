@@ -1,0 +1,12 @@
+int myVariable = 42;
+int result = myVariabl;
+
+pirnt("Hello");
+
+int counter = 0;
+int countr = 1;
+
+int length = lengthf("test");
+
+int abc = 1;
+int xyz_should_not_suggest_abc = abcdefghijkl;

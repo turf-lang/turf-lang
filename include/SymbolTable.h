@@ -2,6 +2,7 @@
 #define SYMBOL_TABLE_H
 
 #include "Lexer.h"
+#include "Trie.h"
 #include "Types.h"
 #include "llvm/IR/Instructions.h"
 #include <map>

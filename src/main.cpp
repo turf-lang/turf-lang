@@ -4,6 +4,7 @@
 #include "Lint.h"
 #include "Parser.h"
 #include "SymbolTable.h"
+#include "Trie.h"
 #include "Types.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/LegacyPassManager.h"
