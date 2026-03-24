@@ -3,6 +3,7 @@
 #include <SLMEngine.h>
 #include <algorithm>
 #include <regex>
+#include <cstdlib>
 
 // Strip ANSI escape codes (e.g. \033[91m) so the SLM sees clean text
 static std::string stripAnsiCodes(const std::string &input) {
@@ -98,11 +99,13 @@ static float extractJsonFieldNumber(const std::string& json, const std::string& 
         endPos++;
     }
     
-    try {
-        return std::stof(json.substr(pos, endPos - pos));
-    } catch (...) {
+    std::string numStr = json.substr(pos, endPos - pos);
+    char* endptr;
+    float val = std::strtof(numStr.c_str(), &endptr);
+    if (endptr == numStr.c_str()) {
         return 0.0f;
     }
+    return val;
 }
 
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
