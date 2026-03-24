@@ -32,6 +32,7 @@ public:
 
   // Generates the suggestion based on the prompt.
   std::string generateSuggestion(const std::string &prompt);
+  void release();
 };
 
 } // namespace SLM

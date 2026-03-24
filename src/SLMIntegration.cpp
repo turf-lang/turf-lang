@@ -56,16 +56,33 @@ std::string fetchSuggestion(const std::string &errorMessage, int errorLine) {
 
   // 2. Format specifically for Phi-3-Mini Instruct
   std::string prompt =
+      "<|system|>\n"
+      "You are a Turf compiler assistant. Turf is a statically-typed language "
+      "with this syntax:\n"
+      "- Types: int, double, bool, string\n"
+      "- Declarations: int x = 5 | double pi = 3.14 | bool flag = true | "
+      "string s = \"hi\"\n"
+      "- Casting: int(\"42\") | double(10) | string(x)\n"
+      "- Operators: + - * / % ^ | += -= *= /= %= | ++ -- | && || | < > == != "
+      "<= >=\n"
+      "- Control flow: if/else | while { } | break | continue\n"
+      "- If expression: int max = if a > b then a else b\n"
+      "- Builtins: print() | printline() | input() | typeof() | lengthof() | "
+      "string() | int() | double()\n"
+
+      "- Functions: fn name(type param) -> type { ... } | return val\n"
+      "- Arrays: int arr[5] = {1,2,3,4,5}\n"
+      "- Comments: // ...\n"
+      "<|end|>\n"
       "<|user|>\n"
-      "You are an expert compiler assistant for a C-like programming "
-      "language.\n"
-      "Analyze this compilation error and provide a ONE sentence fix.\n\n"
-      "Error: " +
+      "Compiler error: " +
       cleanError +
-      "\n\n"
-      "Code Context:\n" +
+      "\n"
+      "Code:\n" +
       codeContext +
-      "\n<|end|>\n"
+      "\n"
+      "Give ONE sentence fix.\n"
+      "<|end|>\n"
       "<|assistant|>\n";
 
   // 3. Run Inference

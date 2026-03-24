@@ -65,8 +65,9 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
   // Tokenize the prompt
   int n_ctx = llama_n_ctx(ctx);
   std::vector<llama_token> tokens(n_ctx);
-  int n_tokens = llama_tokenize(llama_get_model(ctx), prompt.c_str(),
-                                prompt.size(), tokens.data(), n_ctx,
+  const llama_vocab *vocab_tok = llama_model_get_vocab(llama_get_model(ctx));
+  int n_tokens = llama_tokenize(vocab_tok, prompt.c_str(), prompt.size(),
+                                tokens.data(), n_ctx,
                                 /*add_special=*/true, /*parse_special=*/false);
 
   if (n_tokens < 0) {
@@ -125,7 +126,7 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
   }
 
   llama_sampler_free(sampler);
-  llama_kv_self_clear(ctx);
+  llama_memory_clear(llama_get_memory(ctx), false);
 
   dup2(saved_stderr, STDERR_FILENO);
   close(saved_stderr);
@@ -135,6 +136,18 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
   if (start == std::string::npos)
     return "";
   return result.substr(start, end - start + 1);
+}
+
+void SLMEngine::release() {
+  if (ctx) {
+    llama_free(ctx);
+    ctx = nullptr;
+  }
+  if (model) {
+    llama_model_free(model);
+    model = nullptr;
+  }
+  llama_backend_free();
 }
 
 } // namespace SLM
