@@ -2,6 +2,14 @@
 #include "Lexer.h" // Required to access the global SourceLines vector
 #include <SLMEngine.h>
 #include <algorithm>
+#include <regex>
+
+// Strip ANSI escape codes (e.g. \033[91m) so the SLM sees clean text
+static std::string stripAnsiCodes(const std::string &input) {
+  // Matches ESC[ followed by any number of params and a final letter
+  static const std::regex ansiPattern("\033\\[[0-9;]*m");
+  return std::regex_replace(input, ansiPattern, "");
+}
 
 namespace SLM {
 
@@ -35,6 +43,9 @@ std::string getCodeContext(int errorLine, int contextSize) {
 std::string fetchSuggestion(const std::string &errorMessage, int errorLine) {
   std::string codeContext = getCodeContext(errorLine, 10);
 
+  // Strip ANSI color codes so the SLM gets clean, readable text
+  std::string cleanError = stripAnsiCodes(errorMessage);
+
   // 1. Lazy Load the model (Only happens if an error actually occurred)
   // TODO: Later, pass the path via a compiler flag or env var (e.g.,
   // TURF_SLM_PATH)
@@ -50,7 +61,7 @@ std::string fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "language.\n"
       "Analyze this compilation error and provide a ONE sentence fix.\n\n"
       "Error: " +
-      errorMessage +
+      cleanError +
       "\n\n"
       "Code Context:\n" +
       codeContext +

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <iostream>
 #include <unistd.h>
+#include <vector>
 
 namespace SLM {
 SLMEngine::SLMEngine() {}
@@ -10,7 +11,7 @@ SLMEngine::~SLMEngine() {
   if (ctx)
     llama_free(ctx);
   if (model)
-    llama_free_model(model);
+    llama_model_free(model);
   llama_backend_free();
 }
 SLMEngine &SLMEngine::getInstance() {
@@ -30,7 +31,7 @@ bool SLMEngine::initialize(const std::string &modelPath) {
   llama_model_params model_params = llama_model_default_params();
 
   model_params.use_mmap = true;
-  model = llama_load_model_from_file(modelPath.c_str(), model_params);
+  model = llama_model_load_from_file(modelPath.c_str(), model_params);
 
   if (!model) {
     // Restore stderr before printing our own error
@@ -44,7 +45,7 @@ bool SLMEngine::initialize(const std::string &modelPath) {
   llama_context_params ctx_params = llama_context_default_params();
   ctx_params.n_ctx = 2048;
 
-  ctx = llama_new_context_with_model(model, ctx_params);
+  ctx = llama_init_from_model(model, ctx_params);
 
   // Restore stderr
   dup2(saved_stderr, STDERR_FILENO);
@@ -106,7 +107,7 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
   }
 
   llama_sampler_free(sampler);
-  llama_kv_cache_clear(ctx);
+  llama_kv_self_clear(ctx);
 
   dup2(saved_stderr, STDERR_FILENO);
   close(saved_stderr);
@@ -116,4 +117,6 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
   if (start == std::string::npos)
     return "";
   return result.substr(start, end - start + 1);
+}
+
 } // namespace SLM
