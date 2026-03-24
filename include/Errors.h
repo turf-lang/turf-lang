@@ -35,7 +35,7 @@ public:
 
     if (!suggestion.empty()) {
       extendedMessage += "\n\n" + Colors::BRIGHT_MAGENTA +
-                         "✨ AI Suggestion: " + suggestion + Colors::RESET;
+                         "AI Suggestion: " + suggestion + Colors::RESET;
     }
 
     DiagnosticEngine::add(Loc, extendedMessage, /*IsWarning=*/false);
@@ -53,7 +53,7 @@ public:
     std::string suggestion = SLM::fetchSuggestion(Message, Loc.Line);
     if (!suggestion.empty()) {
       extendedMessage += "\n\n" + Colors::BRIGHT_MAGENTA +
-                         "✨ AI Suggestion: " + suggestion + Colors::RESET;
+                         "AI Suggestion: " + suggestion + Colors::RESET;
     }
 
     LogErrorAt(Loc, extendedMessage);

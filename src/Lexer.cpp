@@ -1,5 +1,6 @@
 #include "Lexer.h"
 #include "Colors.h"
+#include "SLMIntegration.h"
 
 #include <algorithm>
 #include <cctype>
@@ -15,11 +16,11 @@ static int LastChar = ' ';
 
 // DiagnosticEngine : static storage
 std::vector<DiagnosticEngine::Diag> DiagnosticEngine::Diagnostics;
-std::set<int>                       DiagnosticEngine::ErrorLines;
+std::set<int> DiagnosticEngine::ErrorLines;
 
 // setjmp/longjmp recovery buffers
 jmp_buf g_recoverJmp;
-bool    g_recoverActive = false;
+bool g_recoverActive = false;
 
 std::ifstream SourceFile;
 double NumVal;
@@ -54,20 +55,18 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
 
 // Internal helper: physically print one diagnostic to stderr.
 static void printDiag(const DiagnosticEngine::Diag &D) {
-  bool isWarning = D.IsWarning ||
-                   D.Msg.find("Warning:") != std::string::npos ||
+  bool isWarning = D.IsWarning || D.Msg.find("Warning:") != std::string::npos ||
                    D.Msg.find("warning:") != std::string::npos;
   std::string HeaderColor =
       isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
   std::string HeaderText = isWarning ? "Warning" : "Oops! Something went wrong";
 
   std::cerr << Colors::BOLD << HeaderColor << HeaderText << " at line "
-            << D.Loc.Line << ", column " << D.Loc.Col << ":"
-            << Colors::RESET << "\n\n"
+            << D.Loc.Line << ", column " << D.Loc.Col << ":" << Colors::RESET
+            << "\n\n"
             << "  " << D.Msg << "\n\n";
 
-  if (D.Loc.Line > 0 &&
-      D.Loc.Line <= static_cast<int>(SourceLines.size())) {
+  if (D.Loc.Line > 0 && D.Loc.Line <= static_cast<int>(SourceLines.size())) {
     const std::string &LineContent = SourceLines[D.Loc.Line - 1];
 
     std::cerr << Colors::BRIGHT_BLACK << "  " << D.Loc.Line << " | "
@@ -76,10 +75,9 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
     std::string LineNumStr = std::to_string(D.Loc.Line);
     int CaretOffset = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
     std::cerr << Colors::BRIGHT_BLACK << "  "
-              << std::string(LineNumStr.length(), ' ') << " | "
-              << Colors::RESET << std::string(CaretOffset, ' ')
-              << Colors::BOLD << HeaderColor << "^ Here!"
-              << Colors::RESET << "\n\n";
+              << std::string(LineNumStr.length(), ' ') << " | " << Colors::RESET
+              << std::string(CaretOffset, ' ') << Colors::BOLD << HeaderColor
+              << "^ Here!" << Colors::RESET << "\n\n";
   }
 }
 
@@ -91,15 +89,21 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   if (ErrorLines.count(Loc.Line))
     return;
 
-  Diagnostics.push_back({Loc, Msg, IsWarning});
+  // Diagnostics.push_back({Loc, Msg, IsWarning});
+  std::string extendedMessage = Msg;
+  std::string suggestion = SLM::fetchSuggestion(Msg, Loc.Line);
+  if (!suggestion.empty()) {
+    extendedMessage += "\n\n  " + Colors::BRIGHT_MAGENTA +
+                       "AI Suggestion: " + suggestion + Colors::RESET;
+  }
+
+  Diagnostics.push_back({Loc, extendedMessage, IsWarning});
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);
 }
 
-bool DiagnosticEngine::hasErrors() {
-  return !ErrorLines.empty();
-}
+bool DiagnosticEngine::hasErrors() { return !ErrorLines.empty(); }
 
 bool DiagnosticEngine::hasErrorAt(int Line) {
   return ErrorLines.count(Line) != 0;
@@ -228,7 +232,8 @@ int gettok() {
     return TOK_RANGE;
   }
 
-  // Numbers: [0-9.]+ (a leading '.' only starts a number if followed by a digit)
+  // Numbers: [0-9.]+ (a leading '.' only starts a number if followed by a
+  // digit)
   if (isdigit(LastChar) || (LastChar == '.' && isdigit(SourceFile.peek()))) {
     std::string NumStr;
     do {
