@@ -31,7 +31,7 @@ public:
 
   void raise() const {
     std::string extendedMessage = Message;
-    std::string suggestion = SLM::fetchSuggestion(Message, Loc.Line);
+    SLM::AISuggestion ai_response = SLM::fetchSuggestion(Message, Loc.Line);
 
     if (!suggestion.empty()) {
       extendedMessage += "\n\n" + Colors::BRIGHT_MAGENTA +
@@ -54,6 +54,27 @@ public:
     if (!suggestion.empty()) {
       extendedMessage += "\n\n" + Colors::BRIGHT_MAGENTA +
                          "AI Suggestion: " + suggestion + Colors::RESET;
+    SLM::AISuggestion ai_response = SLM::fetchSuggestion(Message, Loc.Line);
+
+    if (ai_response.valid) {
+      if (ai_response.confidence < 0.7f || ai_response.fix_mode == "NONE") {
+        extendedMessage += "\n\n" + Colors::BRIGHT_MAGENTA +
+                           "AI Suggestion skipped (low confidence or NONE) " +
+                           "[" + ai_response.fix_mode + "]" + 
+                           Colors::RESET;
+      } else {
+        extendedMessage += "\n\n" + Colors::BRIGHT_MAGENTA +
+                           "AI Suggestion: " + ai_response.suggested_comment;
+        
+        if (ai_response.fix_mode == "MODIFY" && ai_response.confidence >= 0.85f && !ai_response.code_patch.empty()) {
+            extendedMessage += "\n" + Colors::BRIGHT_GREEN + 
+                               "Patch:\n" + ai_response.code_patch + Colors::BRIGHT_MAGENTA;
+        }
+        if (!ai_response.warning.empty()) {
+            extendedMessage += "\nWarning: " + ai_response.warning;
+        }
+        extendedMessage += Colors::RESET;
+      }
     }
 
     LogErrorAt(Loc, extendedMessage);
