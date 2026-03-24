@@ -98,8 +98,26 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
 
     char buf[256];
     int n = llama_token_to_piece(vocab, token, buf, sizeof(buf), 0, false);
-    if (n > 0)
+    if (n > 0) {
       result += std::string(buf, n);
+      
+      // Check for common stop sequences the model might hallucinate
+      size_t pos_end = result.find("<|end|>");
+      size_t pos_user = result.find("<|user|>");
+      size_t pos_system = result.find("<|system|>");
+      size_t pos_assistant = result.find("<|assistant|>");
+      
+      size_t stop_pos = std::string::npos;
+      if (pos_end != std::string::npos) stop_pos = std::min(stop_pos, pos_end);
+      if (pos_user != std::string::npos) stop_pos = std::min(stop_pos, pos_user);
+      if (pos_system != std::string::npos) stop_pos = std::min(stop_pos, pos_system);
+      if (pos_assistant != std::string::npos) stop_pos = std::min(stop_pos, pos_assistant);
+      
+      if (stop_pos != std::string::npos) {
+        result = result.substr(0, stop_pos);
+        break;
+      }
+    }
 
     llama_batch next = llama_batch_get_one(&token, 1);
     if (llama_decode(ctx, next) != 0)
