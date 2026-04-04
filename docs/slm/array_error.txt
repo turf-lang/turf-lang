@@ -1,0 +1,40 @@
+TURF ARRAYS:
+
+DECLARATION:
+  type name[size] = {val1, val2, ...}
+  int arr[5] = {1, 2, 3, 4, 5}
+  double vals[3] = {1.0, 2.5, 3.7}
+  string names[2] = {"Alice", "Bob"}
+  bool flags[3] = {true, false, true}
+
+ARRAY RULES:
+- Size must be a positive integer literal.
+- Number of initializer values must EXACTLY match the declared size.
+- All elements must match the declared element type.
+
+INDEXING:
+- Zero-based: first element is arr[0], last is arr[size-1].
+- Index must be an int (or an expression that evaluates to int).
+- Accessing an index outside 0..size-1 is an out-of-bounds error.
+
+READING AN ELEMENT:
+  int x = arr[0]        // first element
+  int y = arr[4]        // last element of a size-5 array
+
+WRITING AN ELEMENT:
+  arr[2] = 99
+
+CORRECT EXAMPLES:
+  int nums[3] = {10, 20, 30}
+  int first = nums[0]           // 10
+  nums[1] = 25                  // nums is now {10, 25, 30}
+  int i = 2
+  int val = nums[i]             // 30
+
+INCORRECT EXAMPLES:
+  int arr[3] = {1, 2, 3, 4}    // ERROR: 4 values but size is 3
+  int arr[3] = {1, 2}          // ERROR: 2 values but size is 3
+  int x = arr[5]               // ERROR: index 5 out of bounds (valid: 0-2)
+  int y = arr[-1]              // ERROR: negative index out of bounds
+  int z = arr[1.5]             // ERROR: index must be int, not double
+  string names[2] = {"A", 42}  // ERROR: element type mismatch (string vs int)

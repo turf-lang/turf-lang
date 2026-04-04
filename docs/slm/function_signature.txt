@@ -1,0 +1,58 @@
+TURF FUNCTIONS:
+
+DECLARATION SYNTAX:
+  fn name(type param1, type param2) -> returnType {
+    // body
+    return value
+  }
+
+VOID FUNCTIONS (no return value):
+  fn greet(string name) -> void {
+    printline("Hello " + name)
+  }
+
+CALLING FUNCTIONS:
+  int result = add(3, 5)
+  greet("Alice")
+
+RETURN RULES:
+- Non-void functions MUST return a value on every code path.
+- The return value type must match the declared return type exactly.
+- Void functions must NOT return a value (just use 'return' alone or omit it).
+
+VOID VALUE MISUSE:
+- You CANNOT use the result of a void function.
+- You cannot assign void to a variable or use it in an expression.
+
+CORRECT EXAMPLES:
+  fn add(int a, int b) -> int {
+    return a + b
+  }
+  int sum = add(3, 5)    // OK
+
+  fn sayHi() -> void {
+    printline("hi")
+  }
+  sayHi()                 // OK: called as a statement
+
+INCORRECT EXAMPLES:
+  fn sayHi() -> void {
+    printline("hi")
+  }
+  int x = sayHi()        // ERROR: cannot use void value
+
+  fn bad() -> int {
+    printline("oops")
+    // ERROR: missing return statement
+  }
+
+  fn wrong(int x) -> int {
+    return "hello"        // ERROR: string returned, int expected
+  }
+
+PARAMETER TYPE RULES:
+- Arguments must match parameter types exactly.
+- fn add(int a, int b) -> int
+  add(1, 2)              // OK
+  add(1, 2.5)            // ERROR: arg 2 expects int, got double
+  add(1, int(2.5))       // OK: explicit cast

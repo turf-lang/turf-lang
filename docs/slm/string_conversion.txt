@@ -1,0 +1,47 @@
+TURF STRING OPERATIONS:
+
+STRING TYPE:
+- Declared with: string s = "hello"
+- String literals use double quotes: "text"
+- Escape sequences: \n (newline), \t (tab), \\ (backslash), \" (double quote)
+
+STRING CONCATENATION:
+- Use + to concatenate two strings: "hello" + " world"
+- Both operands MUST be strings. To concatenate with a number, use string():
+    string result = "value: " + string(42)
+
+BUILTIN: string()
+- Converts other types to string:
+    string(42)      -> "42"
+    string(3.14)    -> "3.14"
+    string(true)    -> "true"
+    string(false)   -> "false"
+- Cannot convert arrays or void to string.
+
+BUILTIN: lengthof()
+- Returns the length of a string as an int:
+    int n = lengthof("hello")    // n = 5
+- Only accepts string arguments. Passing int, double, or bool is an error.
+
+BUILTIN: int()
+- Can parse a string to int: int("42") -> 42
+
+BUILTIN: double()
+- Can convert int to double: double(5) -> 5.0
+
+CORRECT EXAMPLES:
+  string greeting = "Hello, " + "world"
+  string msg = "Score: " + string(100)
+  int len = lengthof("test")        // len = 4
+  int x = int("42")                 // x = 42
+
+INCORRECT EXAMPLES:
+  string s = "value: " + 42        // ERROR: cannot concat string + int
+  // Fix:
+  string s = "value: " + string(42)
+
+  int n = lengthof(42)             // ERROR: lengthof only works with strings
+  // Fix:
+  int n = lengthof("42")
+
+  string s = string(myArray)       // ERROR: cannot convert array to string

@@ -1,0 +1,41 @@
+TURF VARIABLE DECLARATIONS:
+
+SYNTAX:
+  type name = value
+
+SUPPORTED TYPES:
+  int x = 5
+  double pi = 3.14
+  bool flag = true
+  string msg = "hello"
+
+DUPLICATE DECLARATION:
+- You CANNOT declare a variable with the same name twice in the same scope.
+- To change a variable's value, use assignment WITHOUT the type keyword.
+
+CORRECT:
+  int x = 5
+  x = 10              // OK: reassignment, no type keyword
+
+INCORRECT:
+  int x = 5
+  int x = 10          // ERROR: 'x' is already declared in this scope
+  // Fix: just assign without the type:
+  x = 10
+
+SHADOWING:
+- An inner block CAN declare a variable with the same name as an outer one.
+- This "shadows" the outer variable — the inner one takes priority.
+- This is allowed but produces a warning.
+
+EXAMPLE:
+  int x = 5
+  if true {
+    int x = 10        // WARNING: shadows outer 'x'
+    printline(string(x))  // prints 10
+  }
+  printline(string(x))    // prints 5 (outer x is unchanged)
+
+BEST PRACTICE:
+- Avoid shadowing — use a different name for the inner variable.
+- If you want to modify the outer variable, just assign to it without redeclaring.

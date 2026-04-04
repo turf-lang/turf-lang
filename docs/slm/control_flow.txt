@@ -1,0 +1,76 @@
+TURF CONTROL FLOW:
+
+IF / ELSE:
+  if condition {
+    // body
+  } else {
+    // body
+  }
+  - Braces {} are required.
+  - 'else' is optional.
+
+IF EXPRESSION (ternary-style):
+  int max = if a > b then a else b
+  - Must have both 'then' and 'else' branches.
+  - Both branches must return the same type.
+
+ELSEIF:
+  if x > 10 {
+    printline("big")
+  } elseif x > 5 {
+    printline("medium")
+  } else {
+    printline("small")
+  }
+
+WHILE LOOP:
+  while condition {
+    // body
+  }
+  - Turf does NOT have C-style 'for' loops. Use 'while' instead.
+
+BREAK / CONTINUE:
+  - 'break' exits the innermost loop immediately.
+  - 'continue' skips to the next iteration.
+  - Both MUST be inside a while loop. Using them outside a loop is an error.
+
+RETURN:
+  - 'return value' exits a function and gives back a value.
+  - Must be inside a function body (fn ... { }).
+  - Every code path in a non-void function must end with a return.
+
+UNREACHABLE CODE:
+  - Code after 'return', 'break', or 'continue' will never execute.
+  - This is an error in Turf.
+
+CORRECT EXAMPLES:
+  fn abs(int x) -> int {
+    if x < 0 {
+      return -x
+    } else {
+      return x
+    }
+  }
+
+  int i = 0
+  while i < 10 {
+    if i == 5 {
+      break
+    }
+    i++
+  }
+
+INCORRECT EXAMPLES:
+  fn bad(int x) -> int {
+    if x > 0 {
+      return x
+    }
+    // ERROR: missing return when x <= 0
+  }
+
+  break              // ERROR: break outside a loop
+
+  fn also_bad() -> int {
+    return 5
+    int x = 10       // ERROR: unreachable code after return
+  }

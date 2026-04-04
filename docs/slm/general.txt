@@ -1,0 +1,24 @@
+TURF LANGUAGE REFERENCE (condensed):
+
+TYPES: int, double, bool, string
+DECLARATIONS: int x = 5 | double pi = 3.14 | bool flag = true | string s = "hi"
+TYPE CASTING: int("42") | double(10) | string(x)
+TYPE RULES: Implicit promotion bool->int->double in expressions only. No implicit cast in assignments.
+OPERATORS: + - * / % ^ | += -= *= /= %= | ++ -- | && || | < > == != <= >=
+CONTROL FLOW: if/else/elseif | while { } | break | continue
+IF EXPRESSION: int max = if a > b then a else b
+FUNCTIONS: fn name(type param) -> type { return val }
+ARRAYS: int arr[5] = {1,2,3,4,5}
+BUILTINS: print(), printline(), input(), typeof(), lengthof(), string(), int(), double()
+STRINGS: support \n \t \\ \" escape sequences
+
+COMMON MISTAKES:
+- Assigning double to int without explicit cast: use int(x)
+- Using undeclared variables
+- Function return type mismatches
+- Mixing string concatenation with non-string types without string()
+- Using C-style for loops (Turf only has while)
+- break/continue outside a loop
+- Missing return in non-void functions
+- Array index out of bounds
+- Declaring the same variable twice in one scope

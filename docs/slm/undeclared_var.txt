@@ -1,0 +1,32 @@
+TURF VARIABLE DECLARATIONS:
+- Every variable must be declared with a type before use.
+- Syntax: type name = value
+
+DECLARATION EXAMPLES:
+  int x = 5
+  double pi = 3.14
+  bool flag = true
+  string msg = "hello"
+
+SCOPE RULES:
+- Variables are visible from their declaration to the end of the enclosing block {}.
+- Inner blocks can access variables from outer blocks.
+- A variable must be declared BEFORE it is used on any line.
+
+CORRECT USAGE:
+  int x = 10
+  int y = x + 5        // OK: x is declared above
+
+INCORRECT USAGE:
+  int y = x + 5        // ERROR: x is not declared yet
+  int x = 10
+
+  printline(foo)        // ERROR: foo was never declared
+  // Fix: declare it first
+  string foo = "bar"
+  printline(foo)
+
+COMMON MISTAKES:
+- Misspelling a variable name (e.g. 'coutn' instead of 'count')
+- Using a variable from a different scope that has ended
+- Forgetting to declare a variable before using it in an expression

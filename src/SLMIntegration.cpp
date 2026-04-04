@@ -1,14 +1,29 @@
 #include "SLMIntegration.h"
+#include "ErrorCategory.h"
 #include "Lexer.h"
 #include <SLMEngine.h>
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <regex>
+#include <sstream>
 
 static std::string stripAnsiCodes(const std::string &input) {
   static const std::regex ansiPattern("\033\\[[0-9;]*m");
   return std::regex_replace(input, ansiPattern, "");
+}
+
+// Reads an external documentation file into a string.
+// Returns empty string on failure (file missing, unreadable, etc.).
+static std::string loadDocFile(const std::string &path) {
+  std::ifstream file(path);
+  if (!file.is_open())
+    return "";
+
+  std::ostringstream ss;
+  ss << file.rdbuf();
+  return ss.str();
 }
 
 namespace SLM {
@@ -134,67 +149,70 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     return suggestion;
   }
 
+  // 1. Classify the error deterministically
+  ErrorCategory category = classifyError(cleanError);
+  std::string categoryName = getCategoryName(category);
+  std::string docPath = getCategoryDocPath(category);
+
+  std::cerr << "[SLM] Error category: " << categoryName
+            << " | Doc: " << docPath << "\n";
+
+  // 2. Load the targeted documentation for this error category
+  std::string docContent = loadDocFile(docPath);
+  if (docContent.empty()) {
+    // Fallback: try the general doc if the specific one is missing
+    docContent = loadDocFile("docs/slm/general.txt");
+  }
+  if (docContent.empty()) {
+    // Hard fallback: inline minimal reference
+    docContent =
+        "Turf is a statically-typed language with types: int, double, bool, "
+        "string.\n"
+        "Declarations: type name = value. Explicit casts: int(), double(), "
+        "string().\n"
+        "Control flow: if/else, while, break, continue, return.\n"
+        "Functions: fn name(type param) -> type { return val }\n";
+  }
+
+  // 3. Build a focused prompt with only the relevant documentation
   std::string prompt =
       "<|im_start|>system\n"
-
-      "You are a VERY conservative expert compiler assistant for Turf, a "
-      "statically-typed C-like language.\n"
+      "You are a conservative compiler assistant for Turf-Lang.\n"
+      "Error category: " +
+      categoryName +
+      "\n\n" + docContent +
       "\n"
-      "TURF LANGUAGE REFERENCE:\n"
-      "- Types: int, double, bool, string\n"
-
-      "- Declarations: int x = 5 | double pi = 3.14 | bool flag = true | "
-      "string s = \"hi\"\n"
-      "- Type casting: int(\"42\") | double(10) | string(x)\n"
-      "- Type rules: Implicit promotion bool->int->double in expressions only. "
-      "No implicit cast in assignments.\n"
-      "- Operators: + - * / % ^ | += -= *= /= %= | ++ -- | && || | < > == != "
-      "<= >=\n"
-      "- Control flow: if/else | while { } | break | continue\n"
-      "- If expression: int max = if a > b then a else b\n"
-      "- Functions: fn name(type param) -> type { return val }\n"
-      "- Arrays: int arr[5] = {1,2,3,4,5}\n"
-
-      "- Builtins: print(), printline(), input(), typeof(), lengthof(), "
-      "string(), int(), double()\n"
-      "- Strings: support \\n \\t \\\\ \\\" escape sequences\n"
-      "\n"
-      "STRICT ADHERENCE RULES:\n"
-      "1. Follow Turf-Lang ownership/borrowing and type rules exactly.\n"
+      "RULES:\n"
+      "1. Follow Turf-Lang type and ownership rules exactly.\n"
       "2. If code_patch is provided, it must contain NO comments.\n"
-      "3. Respond ONLY in the following valid JSON format without markdown "
-      "code blocks:\n"
+      "3. Respond ONLY in valid JSON without markdown code blocks:\n"
       "{\n"
       "  \"confidence\": 0.9,\n"
       "  \"explanation\": \"One sentence root cause and fix\",\n"
       "  \"fix_mode\": \"MODIFY\",\n"
-
       "  \"suggested_comment\": \"Teaching text\",\n"
       "  \"code_patch\": \"Exact code replacement\",\n"
-
       "  \"warning\": \"Any caveats\"\n"
       "}\n"
       "<|im_end|>\n"
       "<|im_start|>user\n"
-      "Analyze this compilation error and provide a fix.\n\n"
       "Error: " +
       cleanError +
       "\n"
       "Code:\n" +
       codeContext +
-      "\n\n"
-      "What is the fix? Return ONLY valid JSON.\n"
+      "\n"
+      "Return ONLY valid JSON.\n"
       "<|im_end|>\n"
-
       "<|im_start|>assistant\n";
 
-  std::string rawResponse = SLMEngine::getInstance().generateSuggestion(prompt);
+  std::string rawResponse =
+      SLMEngine::getInstance().generateSuggestion(prompt);
 
   std::cerr << "\n--- SLM RAW RESPONSE DEBUG ---\n"
             << rawResponse << "\n------------------------------\n";
 
   if (rawResponse.empty()) {
-
     return suggestion;
   }
 
@@ -210,7 +228,6 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     suggestion.fix_mode = extractJsonFieldString(jsonStr, "fix_mode");
     suggestion.suggested_comment =
         extractJsonFieldString(jsonStr, "suggested_comment");
-
     suggestion.code_patch = extractJsonFieldString(jsonStr, "code_patch");
     suggestion.warning = extractJsonFieldString(jsonStr, "warning");
 

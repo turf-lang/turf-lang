@@ -1,0 +1,46 @@
+TURF SYNTAX RULES:
+
+KEYWORDS (complete list):
+  if, then, else, elseif, while, fn, return, break, continue,
+  int, double, float, bool, string, void, true, false,
+  for, in, step
+
+STATEMENT STRUCTURE:
+- Statements do NOT end with semicolons.
+- Blocks use curly braces: { }
+- Each statement is on its own line.
+
+VARIABLE DECLARATION:
+  type name = value
+  int x = 5
+  string msg = "hi"
+
+FUNCTION DECLARATION:
+  fn name(type param1, type param2) -> returnType {
+    // body
+    return value
+  }
+
+COMMON SYNTAX MISTAKES:
+- Adding a semicolon at the end of a line (Turf doesn't use them)
+- Misspelling a keyword (e.g. 'wile' instead of 'while', 'retrun' instead of 'return')
+- Missing curly braces around if/while bodies
+- Using C-style 'for(int i=0; i<n; i++)' — Turf uses 'while' loops
+- Forgetting the arrow '->' before function return type
+- Missing closing brace '}'
+- Missing closing quote '"' in a string literal
+
+CORRECT EXAMPLES:
+  int x = 5
+  if x > 3 {
+    printline("big")
+  }
+
+  fn greet(string name) -> void {
+    printline("Hello " + name)
+  }
+
+INCORRECT EXAMPLES:
+  int x = 5;          // ERROR: no semicolons in Turf
+  wile x > 0 { }     // ERROR: misspelled 'while'
+  fn add(int a, int b) int { }  // ERROR: missing '->'

@@ -43,12 +43,10 @@ bool SLMEngine::initialize(const std::string &modelPath) {
   }
 
   llama_context_params ctx_params = llama_context_default_params();
-  // ctx_params.n_ctx = 2048;
-  ctx_params.n_ctx = 1024;
-  ctx_params.n_batch = 1024;
+  ctx_params.n_ctx = 4096;
+  ctx_params.n_batch = 4096;
   ctx_params.type_k = GGML_TYPE_Q8_0;
   ctx_params.type_v = GGML_TYPE_Q8_0;
-  // ctx_params.flash_attn = true;
 
   ctx = llama_init_from_model(model, ctx_params);
 
@@ -97,7 +95,7 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
 
   std::string result;
   const llama_vocab *vocab = llama_model_get_vocab(llama_get_model(ctx));
-  for (int i = 0; i < 128; i++) {
+  for (int i = 0; i < 256; i++) {
     llama_token token = llama_sampler_sample(sampler, ctx, -1);
     if (llama_vocab_is_eog(vocab, token))
       break;
@@ -107,21 +105,18 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
     if (n > 0) {
       result += std::string(buf, n);
 
-      // Check for common stop sequences the model might hallucinate
-      size_t pos_end = result.find("<|end|>");
-      size_t pos_user = result.find("<|user|>");
-      size_t pos_system = result.find("<|system|>");
-      size_t pos_assistant = result.find("<|assistant|>");
+      // Check for Qwen2.5 ChatML stop sequences
+      const std::string STOP_IM_END = "<|im_end|>";
+      const std::string STOP_IM_START = "<|im_start|>";
+
+      size_t pos_im_end = result.find(STOP_IM_END);
+      size_t pos_im_start = result.find(STOP_IM_START);
 
       size_t stop_pos = std::string::npos;
-      if (pos_end != std::string::npos)
-        stop_pos = std::min(stop_pos, pos_end);
-      if (pos_user != std::string::npos)
-        stop_pos = std::min(stop_pos, pos_user);
-      if (pos_system != std::string::npos)
-        stop_pos = std::min(stop_pos, pos_system);
-      if (pos_assistant != std::string::npos)
-        stop_pos = std::min(stop_pos, pos_assistant);
+      if (pos_im_end != std::string::npos)
+        stop_pos = std::min(stop_pos, pos_im_end);
+      if (pos_im_start != std::string::npos)
+        stop_pos = std::min(stop_pos, pos_im_start);
 
       if (stop_pos != std::string::npos) {
         result = result.substr(0, stop_pos);

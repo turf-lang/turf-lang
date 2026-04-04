@@ -1,0 +1,49 @@
+TURF TYPE SYSTEM:
+- Primitive types: int, double, bool, string
+- Variable declarations require an explicit type:
+    int x = 5
+    double pi = 3.14
+    bool flag = true
+    string name = "hello"
+
+TYPE CASTING (explicit):
+- int("42")     converts string to int
+- int(3.14)     truncates double to int
+- double(10)    converts int to double
+- string(42)    converts int to string
+- string(3.14)  converts double to string
+- string(true)  converts bool to string ("true" or "false")
+
+IMPLICIT PROMOTION RULES:
+- bool -> int -> double promotion happens ONLY inside expressions.
+- Assignments require EXACT type match or explicit cast.
+- You CANNOT assign a double to an int variable without int().
+- You CANNOT assign an int to a string variable without string().
+
+FUNCTION PARAMETER/RETURN TYPES:
+- Parameters must match exactly: fn add(int a, int b) -> int
+- Return value must match declared return type.
+- Use explicit cast if types differ: return int(someDouble)
+
+CORRECT EXAMPLES:
+  int x = 5
+  double y = 3.14
+  int z = int(3.14)
+  double w = double(x)
+  string s = string(42)
+  int a = x + 5
+  double b = x + y
+
+INCORRECT EXAMPLES:
+  int x = 3.14         // ERROR: cannot assign double to int without int()
+  string s = 42        // ERROR: cannot assign int to string without string()
+  int n = "hello"      // ERROR: cannot assign string to int
+
+FUNCTION EXAMPLE:
+  fn add(int a, int b) -> int {
+    return a + b
+  }
+  // Calling with wrong types:
+  add(1, 2.5)          // ERROR: argument 2 expects int, got double
+  // Fix:
+  add(1, int(2.5))     // OK
