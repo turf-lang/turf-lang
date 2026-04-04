@@ -182,9 +182,11 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   }
 
   // 5. Build a focused prompt with only the relevant documentation.
-  //    KEY FIX: The confidence example no longer uses a specific number
-  //    (was 0.9 before, which the model would parrot). Instead we instruct
-  //    the model to assess confidence independently.
+  //    KEY FIX: The JSON template uses a concrete example value (0.85) rather
+  //    than a placeholder like <float>.  Small models (1.5B) latch onto the
+  //    first concrete number they see; an abstract placeholder caused the
+  //    model to always output 0.0.  The confidence guidance also lists high
+  //    values first to bias the model upward for clear errors.
   std::string prompt =
       "<|im_start|>system\n"
       "You are a conservative compiler assistant for Turf-Lang.\n"
@@ -195,18 +197,13 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "RULES:\n"
       "1. Follow Turf-Lang type and ownership rules exactly.\n"
       "2. If code_patch is provided, it must contain NO comments.\n"
-      "3. Set confidence to reflect how certain you are about the fix:\n"
-      "   0.0 = completely guessing, 1.0 = absolutely certain.\n"
-      "   Assess independently; do NOT default to any particular value.\n"
-      "4. Respond ONLY in valid JSON without markdown code blocks:\n"
-      "{\n"
-      "  \"confidence\": <float between 0.0 and 1.0>,\n"
-      "  \"explanation\": \"One sentence root cause and fix\",\n"
-      "  \"fix_mode\": \"MODIFY or NONE\",\n"
-      "  \"suggested_comment\": \"Teaching text for the user\",\n"
-      "  \"code_patch\": \"Exact corrected line of code\",\n"
-      "  \"warning\": \"Any caveats or empty string\"\n"
-      "}\n"
+      "3. Set confidence as a float from 0.0 to 1.0:\n"
+      "   - 1.0 = absolutely certain the fix is correct.\n"
+      "   - 0.8 = high confidence, straightforward fix.\n"
+      "   - 0.5 = moderate confidence, some ambiguity.\n"
+      "   - 0.2 = low confidence, mostly guessing.\n"
+      "   For clear, obvious errors give at least 0.8.\n"
+      "4. Respond ONLY in valid JSON without markdown code blocks.\n"
       "<|im_end|>\n"
       "<|im_start|>user\n"
       "Error: " +
@@ -215,7 +212,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "Code:\n" +
       codeContext +
       "\n"
-      "Return ONLY valid JSON.\n"
+      "Respond with ONLY this JSON (no markdown, no extra text):\n"
+      "{\"confidence\": 0.85, \"explanation\": \"...\", \"fix_mode\": \"MODIFY\", "
+      "\"suggested_comment\": \"...\", \"code_patch\": \"...\", \"warning\": \"\"}\n"
       "<|im_end|>\n"
       "<|im_start|>assistant\n";
 
