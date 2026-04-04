@@ -20,15 +20,15 @@ enum class ErrorCategory {
   GENERAL
 };
 
-// Extract a keyword/construct name from the error message to enable
-// construct-specific documentation lookup. Returns empty string if none found.
-inline std::string extractContextKeyword(const std::string &msg) {
+// Extract a keyword/construct name from the error message or code context
+// to enable construct-specific documentation lookup. Returns empty string if none found.
+inline std::string extractContextKeyword(const std::string &msg, const std::string &codeContext = "") {
   // Check for builtin function names mentioned in the error message
   // Order: longer/more-specific names first to avoid partial matches.
   static const char *builtinNames[] = {
       "printline", "lengthof", "typeof", "print", "input"};
   for (const char *name : builtinNames) {
-    if (msg.find(name) != std::string::npos)
+    if (msg.find(name) != std::string::npos || codeContext.find(name) != std::string::npos)
       return name;
   }
 
@@ -36,7 +36,7 @@ inline std::string extractContextKeyword(const std::string &msg) {
   static const char *controlKeywords[] = {"elseif", "while", "for", "if",
                                           "return", "break", "continue"};
   for (const char *kw : controlKeywords) {
-    if (msg.find(kw) != std::string::npos)
+    if (msg.find(kw) != std::string::npos || codeContext.find(kw) != std::string::npos)
       return kw;
   }
 

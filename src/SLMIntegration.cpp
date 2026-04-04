@@ -151,7 +151,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
 
   // 1. Extract a keyword/construct hint from the error message for
   //    precise classification and targeted doc loading.
-  std::string contextKeyword = extractContextKeyword(cleanError);
+  std::string contextKeyword = extractContextKeyword(cleanError, codeContext);
 
   // 2. Classify the error deterministically (keyword-aware)
   ErrorCategory category = classifyError(cleanError, contextKeyword);
