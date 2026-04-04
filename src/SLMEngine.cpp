@@ -71,7 +71,7 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
   const llama_vocab *vocab_tok = llama_model_get_vocab(llama_get_model(ctx));
   int n_tokens = llama_tokenize(vocab_tok, prompt.c_str(), prompt.size(),
                                 tokens.data(), n_ctx,
-                                /*add_special=*/true, /*parse_special=*/false);
+                                /*add_special=*/true, /*parse_special=*/true);
 
   if (n_tokens < 0) {
     dup2(saved_stderr, STDERR_FILENO);
