@@ -43,7 +43,8 @@ bool SLMEngine::initialize(const std::string &modelPath) {
   }
 
   llama_context_params ctx_params = llama_context_default_params();
-  ctx_params.n_ctx = 4096;
+  // ctx_params.n_ctx = 4096;
+  ctx_params.n_ctx = 8192;
   ctx_params.n_batch = 4096;
   ctx_params.type_k = GGML_TYPE_Q8_0;
   ctx_params.type_v = GGML_TYPE_Q8_0;
