@@ -32,6 +32,10 @@ extern std::map<std::string, int> Keywords;
 extern jmp_buf g_recoverJmp;
 extern bool    g_recoverActive; // true only while inside a setjmp guard
 
+// When true, the SLM is loaded and AI suggestions are generated for errors.
+// Controlled by the --smart CLI flag. Default is off for deterministic output.
+extern bool    g_AIEnabled;
+
 // DiagnosticEngine
 // Collects errors and warnings, guaranteeing at most one primary error per
 // source line (cascading / secondary diagnostics on the same line are

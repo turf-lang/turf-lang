@@ -16,12 +16,51 @@ enum class ErrorCategory {
   ARRAY_ERROR,
   DECLARATION,
   FUNCTION_SIGNATURE,
+  BUILTIN_FUNCTION, // Errors specific to a builtin function (lengthof, typeof, etc.)
   GENERAL
 };
 
+// Extract a keyword/construct name from the error message to enable
+// construct-specific documentation lookup. Returns empty string if none found.
+inline std::string extractContextKeyword(const std::string &msg) {
+  // Check for builtin function names mentioned in the error message
+  // Order: longer/more-specific names first to avoid partial matches.
+  static const char *builtinNames[] = {
+      "printline", "lengthof", "typeof", "print", "input"};
+  for (const char *name : builtinNames) {
+    if (msg.find(name) != std::string::npos)
+      return name;
+  }
+
+  // Check for control-flow construct keywords
+  static const char *controlKeywords[] = {"elseif", "while", "for", "if",
+                                          "return", "break", "continue"};
+  for (const char *kw : controlKeywords) {
+    if (msg.find(kw) != std::string::npos)
+      return kw;
+  }
+
+  return "";
+}
+
 // Deterministic classifier: pattern-matches the (ANSI-stripped) error message
 // to determine which language construct caused the error.
-inline ErrorCategory classifyError(const std::string &msg) {
+// The optional `contextKeyword` (extracted from the error message or code
+// context) allows more precise classification when the error message itself
+// is generic (e.g. "unknown token when expecting an expression").
+inline ErrorCategory classifyError(const std::string &msg,
+                                   const std::string &contextKeyword = "") {
+  // ── Keyword-based sub-classification (highest priority) ──────────────
+  // If we know which construct triggered the error, use that directly.
+  if (!contextKeyword.empty()) {
+    if (contextKeyword == "lengthof" || contextKeyword == "typeof")
+      return ErrorCategory::BUILTIN_FUNCTION;
+    if (contextKeyword == "printline" || contextKeyword == "print" ||
+        contextKeyword == "input")
+      return ErrorCategory::BUILTIN_FUNCTION;
+  }
+
+  // ── Pattern-based classification ─────────────────────────────────────
   // Order matters: more specific patterns first.
 
   // Array errors
@@ -50,7 +89,8 @@ inline ErrorCategory classifyError(const std::string &msg) {
 
   // String conversion / lengthof
   if (msg.find("can't convert") != std::string::npos ||
-      msg.find("lengthof only works") != std::string::npos)
+      msg.find("lengthof only works") != std::string::npos ||
+      msg.find("lengthof") != std::string::npos)
     return ErrorCategory::STRING_CONVERSION;
 
   // Arithmetic
@@ -60,7 +100,9 @@ inline ErrorCategory classifyError(const std::string &msg) {
 
   // Syntax / keyword
   if (msg.find("tiny mistake") != std::string::npos ||
-      msg.find("don't know the word") != std::string::npos)
+      msg.find("don't know the word") != std::string::npos ||
+      msg.find("Expected '") != std::string::npos ||
+      msg.find("unknown token") != std::string::npos)
     return ErrorCategory::SYNTAX_ERROR;
 
   // Declaration issues
@@ -87,14 +129,29 @@ inline const char *getCategoryName(ErrorCategory cat) {
   case ErrorCategory::ARRAY_ERROR:        return "ARRAY_ERROR";
   case ErrorCategory::DECLARATION:        return "DECLARATION";
   case ErrorCategory::FUNCTION_SIGNATURE: return "FUNCTION_SIGNATURE";
+  case ErrorCategory::BUILTIN_FUNCTION:   return "BUILTIN_FUNCTION";
   case ErrorCategory::GENERAL:            return "GENERAL";
   }
   return "GENERAL";
 }
 
 // Returns the path to the external documentation file for a given category.
-// Paths are relative to CWD (same convention as the model path).
-inline std::string getCategoryDocPath(ErrorCategory cat) {
+// When a contextKeyword is provided and a construct-specific doc exists, use
+// that instead of the generic category doc (e.g. "lengthof" → builtin_lengthof.txt).
+inline std::string getCategoryDocPath(ErrorCategory cat,
+                                      const std::string &contextKeyword = "") {
+  // ── Construct-specific docs (highest priority) ───────────────────────
+  if (!contextKeyword.empty()) {
+    static const std::unordered_map<std::string, std::string> constructDocs = {
+        {"lengthof", "docs/slm/builtin_lengthof.txt"},
+        {"typeof",   "docs/slm/builtin_typeof.txt"},
+    };
+    auto it = constructDocs.find(contextKeyword);
+    if (it != constructDocs.end())
+      return it->second;
+  }
+
+  // ── Category-level docs ──────────────────────────────────────────────
   static const std::unordered_map<ErrorCategory, std::string> paths = {
       {ErrorCategory::TYPE_MISMATCH,      "docs/slm/type_mismatch.txt"},
       {ErrorCategory::UNDECLARED_VAR,     "docs/slm/undeclared_var.txt"},
@@ -105,6 +162,7 @@ inline std::string getCategoryDocPath(ErrorCategory cat) {
       {ErrorCategory::ARRAY_ERROR,        "docs/slm/array_error.txt"},
       {ErrorCategory::DECLARATION,        "docs/slm/declaration.txt"},
       {ErrorCategory::FUNCTION_SIGNATURE, "docs/slm/function_signature.txt"},
+      {ErrorCategory::BUILTIN_FUNCTION,   "docs/slm/general.txt"}, // fallback for unlisted builtins
       {ErrorCategory::GENERAL,            "docs/slm/general.txt"},
   };
 

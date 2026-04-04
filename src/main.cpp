@@ -27,6 +27,7 @@ struct CompilerOptions {
   std::string InputFile;
   std::string OutputName = "program"; // default output binary name
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
+  bool AIEnabled = false;             // --smart: enable SLM AI suggestions
 };
 
 static CompilerOptions parseArgs(int argc, char **argv) {
@@ -37,6 +38,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
 
     if (arg == "--emit-llvm") {
       opts.EmitLLVM = true;
+    } else if (arg == "--smart") {
+      opts.AIEnabled = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg[0] == '-') {
@@ -48,7 +51,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   }
 
   if (opts.InputFile.empty()) {
-    std::cerr << "Usage: turf <filename.tr> [-o output] [--emit-llvm]\n";
+    std::cerr << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart]\n";
     std::exit(1);
   }
 
@@ -140,6 +143,9 @@ static int linkObject(const std::string &ObjFile,
 // main
 int main(int argc, char **argv) {
   auto opts = parseArgs(argc, argv);
+
+  // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
+  g_AIEnabled = opts.AIEnabled;
 
   SourceFile.open(opts.InputFile);
   if (!SourceFile.is_open()) {

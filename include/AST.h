@@ -155,11 +155,14 @@ public:
 class BuiltinCallExprAST : public ExprAST {
   std::string Name;
   std::vector<std::unique_ptr<ExprAST>> Args;
+  SourceLocation Loc;
 
 public:
-  BuiltinCallExprAST(std::string Name,
+  BuiltinCallExprAST(SourceLocation Loc, std::string Name,
                      std::vector<std::unique_ptr<ExprAST>> Args)
-      : Name(std::move(Name)), Args(std::move(Args)) {}
+      : Loc(Loc), Name(std::move(Name)), Args(std::move(Args)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
 
   llvm::Value *codegen() override;
 };

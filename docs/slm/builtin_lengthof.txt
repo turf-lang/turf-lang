@@ -1,0 +1,34 @@
+TURF BUILTIN: lengthof()
+
+SIGNATURE:
+  int lengthof(string s)
+
+PURPOSE:
+  Returns the number of characters (bytes) in a string as an integer.
+
+ACCEPTED TYPES:
+  - string ONLY. No other type is accepted.
+
+RETURN TYPE:
+  - int (always)
+
+CORRECT USAGE:
+  int n = lengthof("hello")         // n = 5
+  int n = lengthof(myStringVar)     // works if myStringVar is a string
+  string s = "test"
+  int len = lengthof(s)             // len = 4
+
+COMMON MISTAKES:
+  int n = lengthof(42)              // ERROR: int is not a string
+  int n = lengthof(3.14)            // ERROR: double is not a string
+  int n = lengthof(true)            // ERROR: bool is not a string
+
+HOW TO FIX:
+  - If you have an int/double/bool, convert it to a string first:
+      int n = lengthof(string(42))    // n = 2 ("42" has 2 characters)
+  - Or pass a string literal directly:
+      int n = lengthof("1122")        // n = 4
+
+TYPE RULES:
+  - Turf is statically typed. lengthof() checks the type at compile time.
+  - There is no implicit conversion to string. You must use string() explicitly.

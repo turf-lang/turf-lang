@@ -22,6 +22,9 @@ std::set<int> DiagnosticEngine::ErrorLines;
 jmp_buf g_recoverJmp;
 bool g_recoverActive = false;
 
+// AI/SLM flag: only true when --smart is passed on the CLI.
+bool g_AIEnabled = false;
+
 std::ifstream SourceFile;
 double NumVal;
 long long IntVal;
@@ -89,31 +92,39 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   if (ErrorLines.count(Loc.Line))
     return;
 
-  // Diagnostics.push_back({Loc, Msg, IsWarning});
-  std::string extendedMessage = Msg;
-  SLM::AISuggestion ai_response = SLM::fetchSuggestion(Msg, Loc.Line);
+  std::string finalMessage = Msg;
 
-  if (ai_response.valid) {
-    if (ai_response.confidence < 0.7f || ai_response.fix_mode == "NONE") {
-      extendedMessage += "\n\n  " + Colors::BRIGHT_MAGENTA +
-                         "AI Suggestion skipped (low confidence or NONE) [" +
-                         ai_response.fix_mode + "]" + Colors::RESET;
-    } else {
-      extendedMessage += "\n\n  " + Colors::BRIGHT_MAGENTA +
-                         "AI Suggestion: " + ai_response.suggested_comment;
-      
-      if (ai_response.fix_mode == "MODIFY" && ai_response.confidence >= 0.85f && !ai_response.code_patch.empty()) {
-          extendedMessage += "\n  " + Colors::BRIGHT_GREEN + 
-                             "Patch:\n  " + ai_response.code_patch + Colors::BRIGHT_MAGENTA;
+  // Only invoke the SLM when the user explicitly opted in via --smart.
+  // This keeps the default compilation path fully deterministic with
+  // zero model-loading overhead.
+  if (g_AIEnabled) {
+    SLM::AISuggestion ai = SLM::fetchSuggestion(Msg, Loc.Line);
+
+    if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
+      // ── High-confidence AI suggestion: REPLACE the compiler message ──
+      finalMessage = Colors::BRIGHT_MAGENTA + "AI Suggestion: " +
+                     ai.suggested_comment + Colors::RESET;
+
+      if (!ai.explanation.empty()) {
+        finalMessage += "\n  " + Colors::BRIGHT_CYAN +
+                        "Explanation: " + ai.explanation + Colors::RESET;
       }
-      if (!ai_response.warning.empty()) {
-          extendedMessage += "\n  Warning: " + ai_response.warning;
+
+      if (ai.fix_mode == "MODIFY" && !ai.code_patch.empty()) {
+        finalMessage += "\n  " + Colors::BRIGHT_GREEN +
+                        "Suggested fix:\n  " + ai.code_patch + Colors::RESET;
       }
-      extendedMessage += Colors::RESET;
+
+      if (!ai.warning.empty()) {
+        finalMessage += "\n  " + Colors::BRIGHT_YELLOW +
+                        "Note: " + ai.warning + Colors::RESET;
+      }
     }
+    // else: confidence < 0.8 or fix_mode == NONE → silent fallback.
+    // finalMessage stays as the original compiler Msg.
   }
 
-  Diagnostics.push_back({Loc, extendedMessage, IsWarning});
+  Diagnostics.push_back({Loc, finalMessage, IsWarning});
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);

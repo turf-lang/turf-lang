@@ -22,6 +22,21 @@ std::string getCodeContext(int errorLine, int contextSize = 10);
 // context. Returns an empty AISuggestion if the SLM fails or times out.
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine);
 
+// TODO(future): Self-running verification of AI-suggested code patches.
+// Before presenting a suggested fix to the user, this function should:
+// 1. Take the original source code and the suggested patch.
+// 2. Substitute the patched line(s) into the source.
+// 3. Run the modified source through a lightweight compilation pass.
+// 4. Return true only if the patched code compiles without errors.
+// If verification fails, the AI suggestion should be silently discarded
+// and the default compiler error message shown instead.
+//
+// Current status: stub — always returns true. The infrastructure for
+// invoking a child compile pass needs to be designed first.
+bool verifySuggestion(const AISuggestion &suggestion,
+                      const std::string &originalSource,
+                      int errorLine);
+
 } // namespace SLM
 
 #endif // SLM_INTEGRATION_H

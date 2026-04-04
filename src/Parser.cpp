@@ -669,6 +669,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
 std::unique_ptr<ExprAST> ParseBuiltinCall() {
   const BuiltinDef *Def = FindBuiltinByToken(CurTok);
   std::string Name = Def->Name;
+  SourceLocation CallLoc = CurLoc; // Capture location BEFORE consuming token
   getNextToken(); // consume the builtin keyword
 
   if (CurTok != '(') {
@@ -700,7 +701,7 @@ std::unique_ptr<ExprAST> ParseBuiltinCall() {
   }
   getNextToken(); // eat ')'
 
-  return std::make_unique<BuiltinCallExprAST>(Name, std::move(Args));
+  return std::make_unique<BuiltinCallExprAST>(CallLoc, Name, std::move(Args));
 }
 
 std::unique_ptr<ExprAST> ParseWhileExpr() {

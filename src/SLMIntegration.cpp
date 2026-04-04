@@ -10,7 +10,7 @@
 #include <sstream>
 
 static std::string stripAnsiCodes(const std::string &input) {
-  static const std::regex ansiPattern("\033\\[[0-9;]*m");
+  static const std::regex ansiPattern("\\033\\[[0-9;]*m");
   return std::regex_replace(input, ansiPattern, "");
 }
 
@@ -149,15 +149,22 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     return suggestion;
   }
 
-  // 1. Classify the error deterministically
-  ErrorCategory category = classifyError(cleanError);
+  // 1. Extract a keyword/construct hint from the error message for
+  //    precise classification and targeted doc loading.
+  std::string contextKeyword = extractContextKeyword(cleanError);
+
+  // 2. Classify the error deterministically (keyword-aware)
+  ErrorCategory category = classifyError(cleanError, contextKeyword);
   std::string categoryName = getCategoryName(category);
-  std::string docPath = getCategoryDocPath(category);
+
+  // 3. Get the most specific documentation available
+  std::string docPath = getCategoryDocPath(category, contextKeyword);
 
   std::cerr << "[SLM] Error category: " << categoryName
+            << " | Keyword: " << (contextKeyword.empty() ? "(none)" : contextKeyword)
             << " | Doc: " << docPath << "\n";
 
-  // 2. Load the targeted documentation for this error category
+  // 4. Load the targeted documentation for this error category
   std::string docContent = loadDocFile(docPath);
   if (docContent.empty()) {
     // Fallback: try the general doc if the specific one is missing
@@ -174,7 +181,10 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
         "Functions: fn name(type param) -> type { return val }\n";
   }
 
-  // 3. Build a focused prompt with only the relevant documentation
+  // 5. Build a focused prompt with only the relevant documentation.
+  //    KEY FIX: The confidence example no longer uses a specific number
+  //    (was 0.9 before, which the model would parrot). Instead we instruct
+  //    the model to assess confidence independently.
   std::string prompt =
       "<|im_start|>system\n"
       "You are a conservative compiler assistant for Turf-Lang.\n"
@@ -185,14 +195,17 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "RULES:\n"
       "1. Follow Turf-Lang type and ownership rules exactly.\n"
       "2. If code_patch is provided, it must contain NO comments.\n"
-      "3. Respond ONLY in valid JSON without markdown code blocks:\n"
+      "3. Set confidence to reflect how certain you are about the fix:\n"
+      "   0.0 = completely guessing, 1.0 = absolutely certain.\n"
+      "   Assess independently; do NOT default to any particular value.\n"
+      "4. Respond ONLY in valid JSON without markdown code blocks:\n"
       "{\n"
-      "  \"confidence\": 0.9,\n"
+      "  \"confidence\": <float between 0.0 and 1.0>,\n"
       "  \"explanation\": \"One sentence root cause and fix\",\n"
-      "  \"fix_mode\": \"MODIFY\",\n"
-      "  \"suggested_comment\": \"Teaching text\",\n"
-      "  \"code_patch\": \"Exact code replacement\",\n"
-      "  \"warning\": \"Any caveats\"\n"
+      "  \"fix_mode\": \"MODIFY or NONE\",\n"
+      "  \"suggested_comment\": \"Teaching text for the user\",\n"
+      "  \"code_patch\": \"Exact corrected line of code\",\n"
+      "  \"warning\": \"Any caveats or empty string\"\n"
       "}\n"
       "<|im_end|>\n"
       "<|im_start|>user\n"
@@ -241,6 +254,42 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   }
 
   return suggestion;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// TODO(future): Self-running verification of AI-suggested code patches.
+//
+// The idea is to verify that an AI-suggested fix actually compiles by
+// running the patched source through a lightweight compilation pass before
+// presenting it to the user. This eliminates false-positive suggestions.
+//
+// Implementation steps (not yet done):
+// 1. Take the original SourceLines and the AI's code_patch.
+// 2. Create a modified copy of the source with the patch applied at
+//    the error line.
+// 3. Invoke a "verify-only" compilation of the modified source (parse +
+//    type-check, no codegen/linking needed).
+// 4. If the verification pass produces zero errors, the suggestion is
+//    valid and can be shown to the user.
+// 5. If the verification fails, discard the AI suggestion silently and
+//    fall back to the default compiler error message.
+//
+// Challenges:
+// - The compiler currently reads from a file; need a way to feed a
+//   string-based source (or a temporary file) to the pipeline.
+// - Must avoid infinite recursion: the verification pass should NOT
+//   itself invoke the SLM.
+// - Performance: verification should be fast (skip codegen/linking).
+// ────────────────────────────────────────────────────────────────────────────
+bool verifySuggestion(const AISuggestion &suggestion,
+                      const std::string &originalSource, int errorLine) {
+  // Stub: always returns true.
+  // When implemented, this will run the patched code through a verify-only
+  // compilation pass and return false if any errors are produced.
+  (void)suggestion;
+  (void)originalSource;
+  (void)errorLine;
+  return true;
 }
 
 } // namespace SLM
