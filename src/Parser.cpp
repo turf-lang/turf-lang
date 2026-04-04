@@ -299,7 +299,7 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     Then = ParseBlock();
   } else {
     if (CurTok == TOK_IDENTIFIER) {
-      if (getLevenshteinDistance(IdentifierStr, "then") <= 2) {
+      if (getDamerauLevenshteinDistance(IdentifierStr, "then") <= std::max(1, (int)IdentifierStr.length() / 3)) {
         KeywordError(CurLoc, IdentifierStr).raise();
         return nullptr;
       }
@@ -313,7 +313,7 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
 
   if (!IsBlockForm) {
     if (CurTok == TOK_IDENTIFIER) {
-      if (getLevenshteinDistance(IdentifierStr, "else") <= 2) {
+      if (getDamerauLevenshteinDistance(IdentifierStr, "else") <= std::max(1, (int)IdentifierStr.length() / 3)) {
         KeywordError(CurLoc, IdentifierStr).raise();
         return nullptr;
       }
@@ -373,8 +373,9 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
       return nullptr;
   } else {
     if (CurTok == TOK_IDENTIFIER) {
-      if (getLevenshteinDistance(IdentifierStr, "else") <= 2 ||
-          getLevenshteinDistance(IdentifierStr, "elseif") <= 2) {
+      int thresh = std::max(1, (int)IdentifierStr.length() / 3);
+      if (getDamerauLevenshteinDistance(IdentifierStr, "else") <= thresh ||
+          getDamerauLevenshteinDistance(IdentifierStr, "elseif") <= thresh) {
         KeywordError(CurLoc, IdentifierStr).raise();
         return nullptr;
       }
@@ -415,9 +416,9 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
 
     if (!IsKnownVariable && IdName.length() >= 2) {
       for (const auto &pair : Keywords) {
-        int dist = getLevenshteinDistance(IdName, pair.first);
-        if (dist <= 1 ||
-            (dist == 2 && IdName.length() > 3 && pair.first.length() > 3)) {
+        int dist = getDamerauLevenshteinDistance(IdName, pair.first);
+        int thresh = std::max(1, (int)IdName.length() / 3);
+        if (dist <= thresh) {
           CouldBeKeywordTypo = true;
           break;
         }

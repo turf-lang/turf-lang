@@ -40,9 +40,7 @@ public:
     }
   }
 
-  void warn() const {
-    LogErrorAt(Loc, Message);
-  }
+  void warn() const { LogErrorAt(Loc, Message); }
 };
 
 // Syntax Error : Parser issues
@@ -133,7 +131,8 @@ public:
 
     std::vector<std::string> Candidates;
     for (const auto &pair : Keywords) {
-      if (getLevenshteinDistance(Name, pair.first) <= 2) {
+      int threshold = std::max(1, (int)Name.length() / 3);
+      if (getDamerauLevenshteinDistance(Name, pair.first) <= threshold) {
         Candidates.push_back(pair.first);
       }
     }
@@ -189,7 +188,8 @@ public:
         if (KnownVar == Name)
           continue;
 
-        if (getLevenshteinDistance(Name, KnownVar) <= 2) {
+        int threshold = std::max(1, (int)Name.length() / 3);
+        if (getDamerauLevenshteinDistance(Name, KnownVar) <= threshold) {
           Candidates.push_back(KnownVar);
         }
       }
@@ -199,7 +199,8 @@ public:
         if (builtin.Name == Name)
           continue;
 
-        if (getLevenshteinDistance(Name, builtin.Name) <= 2) {
+        int threshold = std::max(1, (int)Name.length() / 3);
+        if (getDamerauLevenshteinDistance(Name, builtin.Name) <= threshold) {
           Candidates.push_back(builtin.Name);
         }
       }
@@ -248,7 +249,8 @@ public:
         if (KnownVar == Name)
           continue;
 
-        if (getLevenshteinDistance(Name, KnownVar) <= 2) {
+        int threshold = std::max(1, (int)Name.length() / 3);
+        if (getDamerauLevenshteinDistance(Name, KnownVar) <= threshold) {
           Candidates.push_back(KnownVar);
         }
       }
@@ -257,7 +259,8 @@ public:
       for (const auto &builtin : Builtins) {
         if (builtin.Name == Name)
           continue;
-        if (getLevenshteinDistance(Name, builtin.Name) <= 2) {
+        int threshold = std::max(1, (int)Name.length() / 3);
+        if (getDamerauLevenshteinDistance(Name, builtin.Name) <= threshold) {
           Candidates.push_back(builtin.Name);
         }
       }

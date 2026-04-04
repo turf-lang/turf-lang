@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include "SLMEngine.h"
 
 using namespace llvm;
 
@@ -142,6 +143,10 @@ static int linkObject(const std::string &ObjFile,
 
 // main
 int main(int argc, char **argv) {
+  struct SLMCleanup {
+    ~SLMCleanup() { SLM::SLMEngine::getInstance().release(); }
+  } cleanup;
+
   auto opts = parseArgs(argc, argv);
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.

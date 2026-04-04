@@ -160,8 +160,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   // 3. Get the most specific documentation available
   std::string docPath = getCategoryDocPath(category, contextKeyword);
 
-  std::cerr << "[SLM] Error category: " << categoryName
-            << " | Keyword: " << (contextKeyword.empty() ? "(none)" : contextKeyword)
+  std::cerr << "[SLM] Error category: " << categoryName << " | Keyword: "
+            << (contextKeyword.empty() ? "(none)" : contextKeyword)
             << " | Doc: " << docPath << "\n";
 
   // 4. Load the targeted documentation for this error category
@@ -191,8 +191,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "<|im_start|>system\n"
       "You are a conservative compiler assistant for Turf-Lang.\n"
       "Error category: " +
-      categoryName +
-      "\n\n" + docContent +
+      categoryName + "\n\n" + docContent +
       "\n"
       "RULES:\n"
       "1. Follow Turf-Lang type and ownership rules exactly.\n"
@@ -213,13 +212,16 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       codeContext +
       "\n"
       "Respond with ONLY this JSON (no markdown, no extra text):\n"
-      "{\"confidence\": 0.85, \"explanation\": \"...\", \"fix_mode\": \"MODIFY\", "
-      "\"suggested_comment\": \"...\", \"code_patch\": \"...\", \"warning\": \"\"}\n"
+      "{\"confidence\": 0.85, \"explanation\": \"...\", \"fix_mode\": "
+      "\"MODIFY\", "
+      "\"suggested_comment\": \"...\", \"code_patch\": \"...\", \"warning\": "
+      "\"\"}\n"
       "<|im_end|>\n"
       "<|im_start|>assistant\n";
 
-  std::string rawResponse =
-      SLMEngine::getInstance().generateSuggestion(prompt);
+  std::string rawResponse = SLMEngine::getInstance().generateSuggestion(prompt);
+
+  std::cerr << "Clean Error: " << cleanError << "\n";
 
   std::cerr << "\n--- SLM RAW RESPONSE DEBUG ---\n"
             << rawResponse << "\n------------------------------\n";
