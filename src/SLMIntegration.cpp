@@ -118,14 +118,14 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   // 1. Lazy Load the model (Only happens if an error actually occurred)
   // TODO: Later, pass the path via a compiler flag or env var (e.g.,
   // TURF_SLM_PATH)
-  const std::string modelPath = "models/Phi-3-mini-4k-instruct-Q4_K_M.gguf";
+  const std::string modelPath = "models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
   if (!SLMEngine::getInstance().initialize(modelPath)) {
     return suggestion; // Fallback gracefully if model missing
   }
 
-  // 2. Format specifically for Phi-3-Mini Instruct
+  // 2. Format specifically for Qwen2.5-Coder Instruct
   std::string prompt =
-    "<|system|>\n"
+    "<|im_start|>system\n"
     "You are a VERY conservative expert compiler assistant for Turf, a statically-typed C-like language.\n"
     "\n"
     "TURF LANGUAGE REFERENCE:\n"
@@ -162,14 +162,15 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     "- Function return type mismatches\n"
     "- Mixing string concatenation with non-string types without string()\n"
     "- Using C-style for loops (Turf only has while)\n"
-    "<|end|>\n"
-    "<|user|>\n"
+    "- Ensure returning JSON format only. Do not provide markdown tags like ```json or prefix texts.\n"
+    "<|im_end|>\n"
+    "<|im_start|>user\n"
     "Analyze this compilation error and provide a fix.\n\n"
     "Error: " + cleanError + "\n"
     "Code:\n" + codeContext + "\n\n"
-    "What is the fix?\n"
-    "<|end|>\n"
-    "<|assistant|>\n";
+    "What is the fix? Remember to return strictly valid JSON.\n"
+    "<|im_end|>\n"
+    "<|im_start|>assistant\n";
 
   // 3. Run Inference
   std::string rawResponse = SLMEngine::getInstance().generateSuggestion(prompt);
