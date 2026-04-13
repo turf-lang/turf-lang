@@ -17,8 +17,14 @@ COMMON MISTAKES:
 - Using undeclared variables
 - Function return type mismatches
 - Mixing string concatenation with non-string types without string()
-- Using C-style for loops (Turf only has while)
+- Using C-style for loops (Turf uses: for i in 0..n step 1 { })
 - break/continue outside a loop
 - Missing return in non-void functions
 - Array index out of bounds
 - Declaring the same variable twice in one scope
+
+COMMON ANTI-PATTERNS (DO NOT USE):
+- 'println': Not in Turf. Use 'printline' for newlines.
+- 'printf': Not in Turf. Use 'print' for formatted output.
+- 'var' or 'let': Not in Turf. Always use explicit types: 'int x = 5'.
+- 'for (int i=0; i<n; i++)': C-style loops are not supported.

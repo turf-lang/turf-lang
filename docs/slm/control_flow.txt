@@ -17,7 +17,7 @@ IF EXPRESSION (ternary-style):
 ELSEIF:
   if x > 10 {
     printline("big")
-  } elseif x > 5 {
+  } else if x > 5 {
     printline("medium")
   } else {
     printline("small")
@@ -27,7 +27,16 @@ WHILE LOOP:
   while condition {
     // body
   }
-  - Turf does NOT have C-style 'for' loops. Use 'while' instead.
+  - Braces {} are required.
+
+FOR LOOP:
+  for <ident> in <start>..<end> step <expr> {
+    // body
+  }
+  - <ident>: The loop variable (automatically created).
+  - <start>..<end>: The range (inclusive start, exclusive end).
+  - 'step' is required.
+  - Braces {} are required.
 
 BREAK / CONTINUE:
   - 'break' exits the innermost loop immediately.
@@ -44,7 +53,7 @@ UNREACHABLE CODE:
   - This is an error in Turf.
 
 CORRECT EXAMPLES:
-  fn abs(int x) -> int {
+  fn int abs(int x) {
     if x < 0 {
       return -x
     } else {
@@ -61,7 +70,7 @@ CORRECT EXAMPLES:
   }
 
 INCORRECT EXAMPLES:
-  fn bad(int x) -> int {
+  fn int bad(int x) {
     if x > 0 {
       return x
     }
@@ -70,7 +79,15 @@ INCORRECT EXAMPLES:
 
   break              // ERROR: break outside a loop
 
-  fn also_bad() -> int {
+  fn int also_bad() {
     return 5
     int x = 10       // ERROR: unreachable code after return
+  }
+   
+   fn also_bad() -> int {
+    return 5     // ERROR: not allowed, invalid syntax
+  }
+
+  int fn bad() { // ERROR: Wrong function signature
+    return 0;
   }
