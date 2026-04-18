@@ -28,5 +28,6 @@ INCORRECT USAGE:
 
 COMMON MISTAKES:
 - Misspelling a variable name (e.g. 'coutn' instead of 'count')
+- Misspelling a builtin function (e.g. 'praintln' instead of 'print' or 'printline', 'length' instead of 'lengthof')
 - Using a variable from a different scope that has ended
 - Forgetting to declare a variable before using it in an expression
