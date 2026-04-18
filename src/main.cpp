@@ -3,6 +3,7 @@
 #include "Lexer.h"
 #include "Lint.h"
 #include "Parser.h"
+#include "SLMEngine.h"
 #include "SymbolTable.h"
 #include "Types.h"
 #include "llvm/Config/llvm-config.h"
@@ -19,7 +20,6 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
-#include "SLMEngine.h"
 
 using namespace llvm;
 
@@ -52,7 +52,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   }
 
   if (opts.InputFile.empty()) {
-    std::cerr << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart]\n";
+    std::cerr
+        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart]\n";
     std::exit(1);
   }
 
@@ -284,11 +285,10 @@ int main(int argc, char **argv) {
     } else {
       // longjmp landed here : diagnostic already in DiagnosticEngine.
       // Skip to the next statement boundary.
-      while (CurTok != ';' && CurTok != TOK_EOF &&
-             CurTok != TOK_FN && CurTok != TOK_TYPE_INT &&
-             CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
-             CurTok != TOK_TYPE_STRING && CurTok != TOK_IF &&
-             CurTok != TOK_WHILE && CurTok != TOK_FOR &&
+      while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
+             CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
+             CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING &&
+             CurTok != TOK_IF && CurTok != TOK_WHILE && CurTok != TOK_FOR &&
              CurTok != TOK_RETURN) {
         getNextToken();
       }

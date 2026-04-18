@@ -19,9 +19,9 @@ jobs:
       run: |
         wget https://apt.llvm.org/llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh 20
-        sudo apt-get install -y llvm-20-dev cmake
-        echo "/usr/lib/llvm-20/bin" >> $GITHUB_PATH
+        sudo ./llvm.sh 22
+        sudo apt-get install -y llvm-22-dev cmake
+        echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
     
     - name: Ensure correct file permissions
       run: |
