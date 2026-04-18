@@ -104,44 +104,49 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   // zero model-loading overhead.
   if (g_AIEnabled) {
     if (g_slmFiredThisPass) {
-      // The SLM already handled the root error for this compilation pass.
-      // Any subsequent errors are likely cascading side-effects of that
-      // first failure (ghost errors that would disappear once the root
-      // cause is fixed). Presenting AI suggestions on them would be
-      // misleading and waste inference time.
+      // Cascade: the original compiler message is the primary diagnostic.
+      // The Smart Assist note is advisory only — rendered entirely in dim gray
+      // (BRIGHT_BLACK) so it does not visually compete with the error above.
       finalMessage +=
-          "\n\n  " + Colors::BRIGHT_YELLOW +
-          "[Smart Assist] This error may be a cascading effect of the one "
-          "reported above." +
-          Colors::RESET + "\n  " + Colors::BRIGHT_CYAN +
-          "Fix the first issue and run --smart again for a fresh analysis." +
+          "\n\n  " + Colors::BRIGHT_BLACK +
+          "[Smart Assist]  This error may be a cascading effect of the one "
+          "reported above. Fix the first issue and run --smart again for a "
+          "fresh analysis." +
           Colors::RESET;
     } else {
       SLM::AISuggestion ai = SLM::fetchSuggestion(Msg, Loc.Line);
 
       if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
-        // ── High-confidence AI suggestion: REPLACE the compiler message ──
+        // ── High-confidence: AI suggestion leads as the primary diagnostic. ──
+        // The original compiler message is demoted to a subordinate reference
+        // below the AI block, clearly separated by a dim [Compiler] label.
         g_slmFiredThisPass = true;
-        finalMessage = Colors::BRIGHT_MAGENTA + "AI Suggestion: " +
-                       ai.suggested_comment + Colors::RESET;
+        finalMessage = Colors::BOLD + Colors::BRIGHT_CYAN +
+                       "[AI Suggestion]" + Colors::RESET + "  " +
+                       ai.suggested_comment;
 
         if (!ai.explanation.empty()) {
-          finalMessage += "\n  " + Colors::BRIGHT_CYAN +
-                          "Explanation: " + ai.explanation + Colors::RESET;
+          finalMessage += "\n  " + Colors::CYAN +
+                          "Explanation: " + Colors::RESET + ai.explanation;
         }
 
         if (ai.fix_mode == "MODIFY" && !ai.code_patch.empty()) {
-          finalMessage += "\n  " + Colors::BRIGHT_GREEN +
-                          "Suggested fix:\n  " + ai.code_patch + Colors::RESET;
+          finalMessage += "\n  " + Colors::BRIGHT_GREEN + "Suggested fix:" +
+                          Colors::RESET + "\n    " + Colors::BRIGHT_GREEN +
+                          ai.code_patch + Colors::RESET;
         }
 
         if (!ai.warning.empty()) {
-          finalMessage += "\n  " + Colors::BRIGHT_YELLOW +
-                          "Note: " + ai.warning + Colors::RESET;
+          finalMessage += "\n  " + Colors::YELLOW +
+                          "Note: " + Colors::RESET + ai.warning;
         }
+
+        // Append original compiler message below as a subordinate reference.
+        finalMessage += "\n\n  " + Colors::BRIGHT_BLACK + "[Compiler]" +
+                        Colors::RESET + "  " + Msg;
       }
-      // else: confidence < 0.8 or fix_mode == NONE → silent fallback.
-      // finalMessage stays as the original compiler Msg.
+      // else: confidence < 0.8 or fix_mode == NONE → original message only.
+      // finalMessage stays as the unmodified compiler Msg, no AI output.
     }
   }
 
