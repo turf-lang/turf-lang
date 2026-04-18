@@ -1,47 +1,42 @@
-TURF STRING OPERATIONS:
+TURF STRING CONVERSION:
 
-STRING TYPE:
-- Declared with: string s = "hello"
-- String literals use double quotes: "text"
-- Escape sequences: \n (newline), \t (tab), \\ (backslash), \" (double quote)
+TYPE CASTING SYNTAX:
+  string(value)    // convert to string
+  int(value)       // convert to int
+  double(value)    // convert to double
 
-STRING CONCATENATION:
-- Use + to concatenate two strings: "hello" + " world"
-- Both operands MUST be strings. To concatenate with a number, use string():
-    string result = "value: " + string(42)
+SUPPORTED CONVERSIONS TO STRING (string()):
+  string(42)       // int to string  → "42"
+  string(3.14)     // double to string → "3.14"
+  string(true)     // bool to string → "true" or "false"
+  // string(string) is a no-op (returns the same string)
 
-BUILTIN: string()
-- Converts other types to string:
-    string(42)      -> "42"
-    string(3.14)    -> "3.14"
-    string(true)    -> "true"
-    string(false)   -> "false"
-- Cannot convert arrays or void to string.
+SUPPORTED CONVERSIONS FROM STRING:
+  int("42")        // string to int — calls strtoll at runtime
+  double("3.14")   // string to double — calls strtod at runtime
+  // NOTE: if the string is not a valid number, the program will exit at runtime.
 
-BUILTIN: lengthof()
-- Returns the length of a string as an int:
-    int n = lengthof("hello")    // n = 5
-- Only accepts string arguments. Passing int, double, or bool is an error.
+WHAT IS NOT SUPPORTED:
+  string + 5       // ERROR: cannot add string and int. Use string(5) to convert.
+  string(arr)      // ERROR: arrays cannot be converted to strings.
+  int(str) + str   // ERROR: cannot mix int and string in arithmetic.
 
-BUILTIN: int()
-- Can parse a string to int: int("42") -> 42
+LENGTHOF VS STRING LENGTH:
+  - Use lengthof(str) to get the character count of a string.
+  - lengthof accepts ONLY strings. Not int, double, or bool.
 
-BUILTIN: double()
-- Can convert int to double: double(5) -> 5.0
+PRINT AND PRINTLINE:
+  If you want to print a number and a string together, call them separately:
+    printline("Score: ")
+    printline(42)
+  Or cast the number first and concatenate manually (not natively supported).
 
 CORRECT EXAMPLES:
-  string greeting = "Hello, " + "world"
-  string msg = "Score: " + string(100)
-  int len = lengthof("test")        // len = 4
-  int x = int("42")                 // x = 42
+  string s = string(100)      // "100"
+  int n = int("99")           // 99
+  int len = lengthof("hello") // 5
 
-INCORRECT EXAMPLES:
-  string s = "value: " + 42        // ERROR: cannot concat string + int
-  // Fix:
-  string s = "value: " + string(42)
-
-  int n = lengthof(42)             // ERROR: lengthof only works with strings
-  // Fix:
-  int n = lengthof("42")
-
-  string s = string(myArray)       // ERROR: cannot convert array to string
+COMMON MISTAKES:
+- Trying to concatenate strings and numbers with +.
+- Using single quotes '' instead of double quotes "" for string literals.
+- Using toString() or str() — these functions do not exist in Turf.

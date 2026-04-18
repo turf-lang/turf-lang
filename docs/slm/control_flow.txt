@@ -1,93 +1,100 @@
 TURF CONTROL FLOW:
 
-IF / ELSE:
-  if condition {
-    // body
-  } else {
-    // body
-  }
-  - Braces {} are required.
-  - 'else' is optional.
+NOTE ON SEMICOLONS:
+- Semicolons are optional in Turf-Lang. Both `x = 5` and `x = 5;` are valid.
 
-IF EXPRESSION (ternary-style):
-  int max = if a > b then a else b
-  - Must have both 'then' and 'else' branches.
-  - Both branches must return the same type.
+IF STATEMENT - SINGLE-LINE (ternary form):
+  Syntax: if <condition> then <expr> else <expr>
+  The condition can optionally be wrapped in parentheses.
 
-ELSEIF:
-  if x > 10 {
-    printline("big")
-  } else if x > 5 {
-    printline("medium")
-  } else {
-    printline("small")
-  }
+  CORRECT EXAMPLES:
+    if x > 0 then x = 1 else x = 0
+    if (x > 0) then x = 1 else x = 0    // parentheses around condition are optional
+
+  RULES:
+  - `then` keyword is mandatory in the single-line form.
+  - `else` branch is mandatory in the single-line form.
+  - `elseif` is NOT supported in the single-line form.
+
+IF STATEMENT - BLOCK FORM:
+  Syntax: if <condition> { <body> } elseif <condition> { <body> } else { <body> }
+  The condition can optionally be wrapped in parentheses.
+
+  CORRECT EXAMPLES:
+    if x > 0 {
+        printline(x)
+    } elseif x < 0 {
+        printline(-x)
+    } else {
+        printline(0)
+    }
+
+    if (score >= 90) {    // parentheses around condition are optional
+        printline("A")
+    }
+
+  RULES:
+  - `elseif` is one keyword (no space). `else if` (with space) is a parse error.
+  - `else` branch is optional in block form.
+  - `then` keyword must NOT be used in block form; use `{` instead.
 
 WHILE LOOP:
-  while condition {
-    // body
-  }
-  - Braces {} are required.
+  Syntax: while <condition> { <body> }
+
+  CORRECT EXAMPLES:
+    while x < 10 {
+        x++
+    }
+
+    while (running) {    // parentheses around condition are optional
+        x += 1
+    }
+
+BREAK AND CONTINUE:
+  - `break` exits the innermost loop immediately.
+  - `continue` skips to the step/condition of the innermost loop.
+  - Both are parse errors if used outside a loop body.
+
+  CORRECT EXAMPLES:
+    while true {
+        if x > 5 { break }
+        x++
+    }
 
 FOR LOOP:
-  for <ident> in <start>..<end> step <expr> {
-    // body
-  }
-  - <ident>: The loop variable (automatically created).
-  - <start>..<end>: The range (inclusive start, exclusive end).
-  - 'step' is required.
-  - Braces {} are required.
+  Syntax: for <var> in <start> .. <end> step <step_expr> { <body> }
 
-BREAK / CONTINUE:
-  - 'break' exits the innermost loop immediately.
-  - 'continue' skips to the next iteration.
-  - Both MUST be inside a while loop. Using them outside a loop is an error.
+  IMPORTANT: The `step` clause is an arbitrary ASSIGNMENT EXPRESSION executed
+  after each iteration. It is NOT a numeric increment value.
+  The loop variable `<var>` is automatically declared as int or double
+  based on the type of <start>.
 
-RETURN:
-  - 'return value' exits a function and gives back a value.
-  - Must be inside a function body (fn ... { }).
-  - Every code path in a non-void function must end with a return.
+  The `step_expr` is evaluated after the body on every iteration.
+  It should mutate the loop variable (e.g. i += 1, i *= 2).
 
-UNREACHABLE CODE:
-  - Code after 'return', 'break', or 'continue' will never execute.
-  - This is an error in Turf.
-
-CORRECT EXAMPLES:
-  fn int abs(int x) {
-    if x < 0 {
-      return -x
-    } else {
-      return x
+  CORRECT EXAMPLES:
+    for i in 0 .. 10 step i += 1 {
+        printline(i)
     }
-  }
 
-  int i = 0
-  while i < 10 {
-    if i == 5 {
-      break
+    for i in 10 .. 0 step i -= 1 {
+        printline(i)
     }
-    i++
-  }
 
-INCORRECT EXAMPLES:
-  fn int bad(int x) {
-    if x > 0 {
-      return x
+    int factor = 2
+    for i in 1 .. 100 step i *= factor {
+        printline(i)
     }
-    // ERROR: missing return when x <= 0
-  }
 
-  break              // ERROR: break outside a loop
+  INCORRECT EXAMPLES:
+    for i in 0 .. 10 step 1 { ... }      // ERROR: step must be an expression that modifies i
+    for i in 0 to 10 step i += 1 { ... } // ERROR: use '..' not 'to'
+    for (int i = 0; i < 10; i++) { }     // ERROR: C-style for loops do not exist in Turf
+    for i in 0..10 { ... }               // ERROR: 'step' clause is required
 
-  fn int also_bad() {
-    return 5
-    int x = 10       // ERROR: unreachable code after return
-  }
-   
-   fn also_bad() -> int {
-    return 5     // ERROR: not allowed, invalid syntax
-  }
-
-  int fn bad() { // ERROR: Wrong function signature
-    return 0;
-  }
+COMMON MISTAKES:
+- Using `else if` (with space) instead of `elseif`.
+- Using `then` in block form (only valid in single-line form).
+- Forgetting the `step` clause in a `for` loop.
+- Using `step 1` (a literal) instead of an assignment expression like `i += 1`.
+- Using `do { } while` or C-style `for(;;)` — these do not exist in Turf.

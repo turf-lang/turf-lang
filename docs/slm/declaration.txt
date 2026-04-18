@@ -1,41 +1,51 @@
-TURF VARIABLE DECLARATIONS:
+TURF VARIABLE DECLARATION:
 
 SYNTAX:
   type name = value
 
-SUPPORTED TYPES:
-  int x = 5
-  double pi = 3.14
-  bool flag = true
-  string msg = "hello"
+  CORRECT EXAMPLES:
+    int x = 5
+    double pi = 3.14
+    bool flag = true
+    string greeting = "hello"
 
-DUPLICATE DECLARATION:
-- You CANNOT declare a variable with the same name twice in the same scope.
-- To change a variable's value, use assignment WITHOUT the type keyword.
+  RULES:
+  - Type keyword is required on first use. No `var` or `let`.
+  - Initialization value is required at declaration time. `int x` alone is an error.
+  - Valid type keywords: int, double (or float), bool, string
+  - void may NOT be used as a variable type.
 
-CORRECT:
-  int x = 5
-  x = 10              // OK: reassignment, no type keyword
+REASSIGNMENT (after first declaration):
+  Do NOT repeat the type keyword when reassigning.
 
-INCORRECT:
-  int x = 5
-  int x = 10          // ERROR: 'x' is already declared in this scope
-  // Fix: just assign without the type:
-  x = 10
+  CORRECT:
+    int count = 0
+    count = 10        // correct reassignment — no type keyword
 
-SHADOWING:
-- An inner block CAN declare a variable with the same name as an outer one.
-- This "shadows" the outer variable — the inner one takes priority.
-- This is allowed but produces a warning.
+  INCORRECT:
+    int count = 0
+    int count = 10    // ERROR: variable 'count' already declared in this scope
 
-EXAMPLE:
-  int x = 5
-  if true {
-    int x = 10        // WARNING: shadows outer 'x'
-    printline(string(x))  // prints 10
-  }
-  printline(string(x))    // prints 5 (outer x is unchanged)
+SHADOWING (warning, not error):
+  Declaring a variable with the same name in a nested scope produces a warning.
+  The inner variable hides the outer one inside the nested block.
 
-BEST PRACTICE:
-- Avoid shadowing — use a different name for the inner variable.
-- If you want to modify the outer variable, just assign to it without redeclaring.
+  Example:
+    int x = 1
+    if true {
+        int x = 99    // Warning: shadows outer 'x'
+        printline(x)  // prints 99
+    }
+    printline(x)      // prints 1 (outer x unaffected)
+
+KEYWORD NAMES:
+  You cannot use a reserved keyword as a variable name.
+  Reserved: if, then, else, elseif, while, for, in, step, fn,
+            return, break, continue, int, double, float, bool,
+            string, void, true, false, print, printline, input,
+            lengthof, typeof
+
+COMMON MISTAKES:
+- Forgetting the initial value: `int x` alone will not compile.
+- Using `var`, `let`, `const`, or `auto` — these do not exist in Turf.
+- Redeclaring with a type keyword when you only meant to reassign.

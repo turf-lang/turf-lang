@@ -1,40 +1,47 @@
-TURF ARRAYS:
+TURF ARRAY ERRORS:
 
-DECLARATION:
-  type name[size] = {val1, val2, ...}
-  int arr[5] = {1, 2, 3, 4, 5}
-  double vals[3] = {1.0, 2.5, 3.7}
-  string names[2] = {"Alice", "Bob"}
-  bool flags[3] = {true, false, true}
+ARRAY DECLARATION SYNTAX:
+  type[SIZE] name               // uninitialized
+  type[SIZE] name = [v1, v2, v3]  // initialized
 
-ARRAY RULES:
-- Size must be a positive integer literal.
-- Number of initializer values must EXACTLY match the declared size.
-- All elements must match the declared element type.
+  CORRECT EXAMPLES:
+    int[5] nums
+    int[3] primes = [2, 3, 5]
+    double[4] vals = [1.0, 2.0, 3.0, 4.0]
 
-INDEXING:
-- Zero-based: first element is arr[0], last is arr[size-1].
-- Index must be an int (or an expression that evaluates to int).
-- Accessing an index outside 0..size-1 is an out-of-bounds error.
+  RULES:
+  - SIZE must be a positive integer LITERAL at compile time.
+  - The number of values in the initializer list must exactly match SIZE.
+  - Only int, double, bool, and string element types are supported.
 
-READING AN ELEMENT:
-  int x = arr[0]        // first element
-  int y = arr[4]        // last element of a size-5 array
+ELEMENT ACCESS:
+  name[index]                   // read
+  name[index] = value           // write
 
-WRITING AN ELEMENT:
-  arr[2] = 99
+  CORRECT EXAMPLES:
+    int first = primes[0]
+    primes[0] = 7
 
-CORRECT EXAMPLES:
-  int nums[3] = {10, 20, 30}
-  int first = nums[0]           // 10
-  nums[1] = 25                  // nums is now {10, 25, 30}
-  int i = 2
-  int val = nums[i]             // 30
+  RULES:
+  - Indices are zero-based: valid range is 0 to SIZE-1.
+  - Index must be of type int.
+  - Accessing out of bounds is a compile-time error if the index is a literal.
 
-INCORRECT EXAMPLES:
-  int arr[3] = {1, 2, 3, 4}    // ERROR: 4 values but size is 3
-  int arr[3] = {1, 2}          // ERROR: 2 values but size is 3
-  int x = arr[5]               // ERROR: index 5 out of bounds (valid: 0-2)
-  int y = arr[-1]              // ERROR: negative index out of bounds
-  int z = arr[1.5]             // ERROR: index must be int, not double
-  string names[2] = {"A", 42}  // ERROR: element type mismatch (string vs int)
+COMPOUND ASSIGNMENT ON ARRAY ELEMENTS (NOT SUPPORTED):
+  arr[0] += 5   // PARSE ERROR — the parser explicitly rejects this.
+  // FIX:
+  arr[0] = arr[0] + 5
+
+ARRAY LENGTH:
+  int len = arr.length          // .length is a property, not a function call
+
+  INCORRECT:
+    int len = len(arr)          // ERROR: len() does not exist
+    int len = lengthof(arr)     // ERROR: lengthof() only works on strings
+
+COMMON MISTAKES:
+- Using () instead of [] for array declaration: `int(5) arr` is wrong.
+- Using compound assignment operators (+=, -=) on array elements.
+- Confusing arr.length (for arrays) with lengthof() (for strings).
+- Providing wrong number of initializers vs declared size.
+- Using a non-integer or negative index.

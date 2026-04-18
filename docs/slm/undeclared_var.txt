@@ -1,33 +1,46 @@
-TURF VARIABLE DECLARATIONS:
-- Every variable must be declared with a type before use.
-- Syntax: type name = value
+TURF UNDECLARED VARIABLE OR IDENTIFIER:
 
-DECLARATION EXAMPLES:
-  int x = 5
-  double pi = 3.14
-  bool flag = true
-  string msg = "hello"
+CAUSE:
+  The compiler cannot find a variable, function, or name that is referenced.
+  This happens when:
+  1. The variable was never declared.
+  2. The variable was declared in a different (inner) scope that has ended.
+  3. The name is a typo of a known variable or builtin.
+  4. A builtin function name was misspelled (e.g. `print` instead of `print`).
+
+DECLARATION SYNTAX:
+  type name = value
+
+  CORRECT:
+    int count = 0
+    count = count + 1             // count is visible here
+
+  INCORRECT:
+    if true {
+        int x = 5
+    }
+    printline(x)                  // ERROR: x is out of scope here
 
 SCOPE RULES:
-- Variables are visible from their declaration to the end of the enclosing block {}.
-- Inner blocks can access variables from outer blocks.
-- A variable must be declared BEFORE it is used on any line.
+  - Variables declared inside { } are only visible inside that block.
+  - For loop variables are only visible inside the loop body.
+  - Top-level variables are visible everywhere after declaration.
+
+BUILTIN FUNCTION NAMES (exact spelling required):
+  print      printline      input      lengthof      typeof
 
 CORRECT USAGE:
-  int x = 10
-  int y = x + 5        // OK: x is declared above
+  int x = 5
+  printline(x)
 
 INCORRECT USAGE:
-  int y = x + 5        // ERROR: x is not declared yet
-  int x = 10
-
-  printline(foo)        // ERROR: foo was never declared
-  // Fix: declare it first
-  string foo = "bar"
-  printline(foo)
+  printline(y)                    // ERROR: y was never declared
+  praintline("hi")                // ERROR: typo — should be 'printline'
+  length("hi")                    // ERROR: no such function — use lengthof("hi")
 
 COMMON MISTAKES:
-- Misspelling a variable name (e.g. 'coutn' instead of 'count')
-- Misspelling a builtin function (e.g. 'praintln' instead of 'print' or 'printline', 'length' instead of 'lengthof')
-- Using a variable from a different scope that has ended
-- Forgetting to declare a variable before using it in an expression
+- Typos in variable names (e.g. `coutn` instead of `count`).
+- Typos in builtin function names (e.g. `printLine`, `print_line`, `println`).
+- Using a loop variable outside the loop body.
+- Forgetting to declare a variable before using it.
+- Using a variable from a nested block after the block has closed.
