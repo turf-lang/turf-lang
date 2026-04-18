@@ -20,23 +20,27 @@ enum class ErrorCategory {
   GENERAL
 };
 
-// Extract a keyword/construct name from the error message or code context
-// to enable construct-specific documentation lookup. Returns empty string if none found.
-inline std::string extractContextKeyword(const std::string &msg, const std::string &codeContext = "") {
-  // Check for builtin function names mentioned in the error message
+// Extract a keyword/construct name from the error message ONLY.
+// Scanning codeContext for keyword hints is intentionally NOT done here:
+// the code context window (10 lines) often contains unrelated builtins
+// (e.g. a printline() call near a for-loop error), which would poison
+// the classification and serve the wrong documentation to the SLM.
+// Returns empty string if no recognized keyword is found in the message.
+inline std::string extractContextKeyword(const std::string &msg, const std::string & /*codeContext*/ = "") {
+  // Check for builtin function names mentioned in the error message itself.
   // Order: longer/more-specific names first to avoid partial matches.
   static const char *builtinNames[] = {
       "printline", "lengthof", "typeof", "print", "input"};
   for (const char *name : builtinNames) {
-    if (msg.find(name) != std::string::npos || codeContext.find(name) != std::string::npos)
+    if (msg.find(name) != std::string::npos)
       return name;
   }
 
-  // Check for control-flow construct keywords
+  // Check for control-flow construct keywords in the error message.
   static const char *controlKeywords[] = {"elseif", "while", "for", "if",
                                           "return", "break", "continue"};
   for (const char *kw : controlKeywords) {
-    if (msg.find(kw) != std::string::npos || codeContext.find(kw) != std::string::npos)
+    if (msg.find(kw) != std::string::npos)
       return kw;
   }
 
@@ -113,6 +117,29 @@ inline ErrorCategory classifyError(const std::string &msg,
   // Void value misuse
   if (msg.find("void value") != std::string::npos)
     return ErrorCategory::FUNCTION_SIGNATURE;
+
+  // Unknown / misspelled function name.
+  // SemanticError wraps these as "Oops! Something doesn't add up: Unknown function: 'x'"
+  // so we match the inner text. Must be checked here, after SYNTAX_ERROR, because
+  // SemanticError does NOT produce "Expected '" or "tiny mistake".
+  if (msg.find("Unknown function") != std::string::npos ||
+      msg.find("Unknown builtin function") != std::string::npos)
+    return ErrorCategory::BUILTIN_FUNCTION;
+
+  // For-loop structural errors -- all produced by ParseForExpr in Parser.cpp via
+  // LogErrorAt (no SyntaxError class wrapper), so they don't match "Expected '" above.
+  if (msg.find("for loop range") != std::string::npos ||
+      msg.find("Expected 'in' after loop variable") != std::string::npos ||
+      msg.find("Expected 'step' after range") != std::string::npos ||
+      msg.find("Expected '{' after step expression") != std::string::npos ||
+      msg.find("Expected identifier after 'for'") != std::string::npos)
+    return ErrorCategory::CONTROL_FLOW;
+
+  // While / if structural errors produced via LogErrorAt (no SyntaxError wrapper)
+  if (msg.find("Expected '{' after while condition") != std::string::npos ||
+      msg.find("Expected 'then' or '{'") != std::string::npos ||
+      msg.find("Expected '{' after elseif condition") != std::string::npos)
+    return ErrorCategory::CONTROL_FLOW;
 
   return ErrorCategory::GENERAL;
 }

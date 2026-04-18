@@ -139,23 +139,32 @@ static float extractJsonFieldNumber(const std::string &json,
 }
 
 static ErrorCategory classifyErrorWithSLM(const std::string &errorMessage, const std::string &codeContext) {
-  std::string prompt =
-      "<|im_start|>system\n"
-      "You are an expert compiler error classifier for Turf-Lang.\n"
-      "Categorize the following error into EXACTLY ONE of these categories:\n"
+  // Load the category reference file so the SLM knows what each category means.
+  std::string categoryDoc = loadDocFile("docs/slm/error_categories.txt");
+
+  std::string categoryList =
       "TYPE_MISMATCH, UNDECLARED_VARIABLE, CONTROL_FLOW, SYNTAX_ERROR, ARITHMETIC, "
       "STRING_CONVERSION, ARRAY_ERROR, DECLARATION, FUNCTION_SIGNATURE, "
-      "BUILTIN_FUNCTION, GENERAL.\n"
-      "Respond with ONLY the exact category name. No explanation, no quotes, no markdown.\n"
+      "BUILTIN_FUNCTION, GENERAL";
+
+  std::string systemContent =
+      "You are an expert compiler error classifier for Turf-Lang.\n"
+      "Categorize the following error into EXACTLY ONE of these categories:\n" +
+      categoryList + "\n\n";
+
+  if (!categoryDoc.empty()) {
+    systemContent += "Category descriptions:\n" + categoryDoc + "\n\n";
+  }
+
+  systemContent += "Respond with ONLY the exact category name. No explanation, no quotes, no markdown.\n";
+
+  std::string prompt =
+      "<|im_start|>system\n" + systemContent +
       "<|im_end|>\n"
       "<|im_start|>user\n"
-      "Error: " +
-      errorMessage +
-      "\n"
-      "Code Context:\n" +
-      codeContext +
-      "\n"
-      "<|im_end|>\n"
+      "Error: " + errorMessage +
+      "\nCode Context:\n" + codeContext +
+      "\n<|im_end|>\n"
       "<|im_start|>assistant\n";
 
   std::string response = SLMEngine::getInstance().generateSuggestion(prompt);
