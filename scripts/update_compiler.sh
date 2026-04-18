@@ -27,7 +27,7 @@ clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.c
     external/llama.cpp/build/ggml/src/libggml-base.a \
     external/llama.cpp/build/ggml/src/libggml-cpu.a \
     `llvm-config --cxxflags --ldflags --system-libs --libs core native` \
-    -lpthread -lm \
+    -lpthread -lm -fopenmp \
     -o turf
 
 echo -e "${GREEN}[2 / 2]${RESET} ${BOLD}Verifying build...${RESET}"
