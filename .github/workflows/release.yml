@@ -40,7 +40,7 @@ jobs:
             external/llama.cpp/build/ggml/src/libggml-base.a \
             external/llama.cpp/build/ggml/src/libggml-cpu.a \
             $(llvm-config-22 --cxxflags --ldflags --system-libs --libs core native) \
-            -o turf
+            -fopenmp -o turf
 
       - name: Package
         run: |
@@ -88,7 +88,7 @@ jobs:
             external/llama.cpp/build/ggml/src/libggml-base.a \
             external/llama.cpp/build/ggml/src/libggml-cpu.a \
             $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
-            -o turf
+            -fopenmp -o turf
 
       - name: Package
         run: |
@@ -135,7 +135,7 @@ jobs:
             external/llama.cpp/build/ggml/src/libggml-base.a \
             external/llama.cpp/build/ggml/src/libggml-cpu.a \
             $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
-            -o turf
+            -fopenmp -o turf
 
       - name: Package
         run: |
@@ -185,7 +185,7 @@ jobs:
             external/llama.cpp/build/ggml/src/libggml-base.a \
             external/llama.cpp/build/ggml/src/libggml-cpu.a \
             $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
-            -o turf.exe
+            -fopenmp -o turf.exe
 
       - name: Package
         shell: pwsh
