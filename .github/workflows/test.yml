@@ -17,8 +17,11 @@ jobs:
     
     - name: Install LLVM
       run: |
-        sudo apt-get update
-        sudo apt-get install -y llvm clang
+        wget https://apt.llvm.org/llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh 20
+        sudo apt-get install -y llvm-20-dev cmake
+        echo "/usr/lib/llvm-20/bin" >> $GITHUB_PATH
     
     - name: Ensure correct file permissions
       run: |
