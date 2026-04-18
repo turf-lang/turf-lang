@@ -203,6 +203,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "   - 0.2 = low confidence, mostly guessing.\n"
       "   For clear, obvious errors give at least 0.8.\n"
       "4. Respond ONLY in valid JSON without markdown code blocks.\n"
+      "5. Keep explanation, suggested_comment, and warning EXTREMELY brief (1-2 sentences max).\n"
       "<|im_end|>\n"
       "<|im_start|>user\n"
       "Error: " +

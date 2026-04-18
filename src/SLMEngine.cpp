@@ -97,7 +97,7 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
 
   std::string result;
   const llama_vocab *vocab = llama_model_get_vocab(llama_get_model(ctx));
-  for (int i = 0; i < 256; i++) {
+  for (int i = 0; i < 512; i++) {
     llama_token token = llama_sampler_sample(sampler, ctx, -1);
     if (llama_vocab_is_eog(vocab, token))
       break;
