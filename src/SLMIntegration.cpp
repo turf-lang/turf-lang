@@ -180,6 +180,53 @@ static ErrorCategory classifyErrorWithSLM(const std::string &errorMessage, const
   return ErrorCategory::GENERAL;
 }
 
+// Deterministic confidence scoring.
+// Rather than asking the LLM to guess a probability (which small models anchor
+// to example values in the prompt), we compute a score from measurable signals:
+//
+//   +0.4  Error category resolved by hardcoded rules (no SLM fallback needed)
+//   +0.2  fix_mode == MODIFY  (the model believes a patch is applicable)
+//   +0.2  code_patch is non-empty
+//   +0.1  code_patch is a single line (no embedded newlines or bare braces)
+//   +0.1  code_patch contains the error keyword — patch is on-topic
+//
+// Maximum score: 1.0  |  Minimum: 0.0
+static float computeConfidence(const AISuggestion &s,
+                               ErrorCategory category,
+                               bool deterministic,
+                               const std::string &contextKeyword) {
+  float score = 0.0f;
+
+  // +0.4 if the category was resolved by deterministic rules (not SLM fallback)
+  if (deterministic && category != ErrorCategory::GENERAL)
+    score += 0.4f;
+
+  // +0.2 if the model decided a concrete patch is applicable
+  if (s.fix_mode == "MODIFY")
+    score += 0.2f;
+
+  // +0.2 if a non-empty patch was actually produced
+  if (!s.code_patch.empty())
+    score += 0.2f;
+
+  // +0.1 if the patch is a single, clean line (no embedded newlines or lone braces)
+  if (!s.code_patch.empty()) {
+    bool hasNewline    = s.code_patch.find('\n') != std::string::npos;
+    bool isBareBrace   = (s.code_patch == "{" || s.code_patch == "}");
+    if (!hasNewline && !isBareBrace)
+      score += 0.1f;
+  }
+
+  // +0.1 if the patch mentions the relevant keyword (patch is on-topic)
+  if (!contextKeyword.empty() && !s.code_patch.empty() &&
+      s.code_patch.find(contextKeyword) != std::string::npos)
+    score += 0.1f;
+
+  // Clamp to [0, 1]
+  if (score > 1.0f) score = 1.0f;
+  return score;
+}
+
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   AISuggestion suggestion;
   std::string codeContext = getCodeContext(errorLine, 10);
@@ -195,9 +242,12 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   //    precise classification and targeted doc loading.
   std::string contextKeyword = extractContextKeyword(cleanError, codeContext);
 
-  // 2. Classify the error deterministically (keyword-aware)
+  // 2. Classify the error deterministically (keyword-aware).
+  //    Track whether the category was resolved without SLM — used later in
+  //    the deterministic confidence formula.
   ErrorCategory category = classifyError(cleanError, contextKeyword);
-  if (category == ErrorCategory::GENERAL) {
+  bool categoryWasDeterministic = (category != ErrorCategory::GENERAL);
+  if (!categoryWasDeterministic) {
     std::cerr << "[SLM Classifier] Hardcoded rules yielded GENERAL. Consulting SLM...\n";
     category = classifyErrorWithSLM(cleanError, codeContext);
   }
@@ -234,6 +284,10 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   //    Instead, describe the schema and let the model reason about the values.
   //    Likewise, code_patch must be constrained to Turf-Lang syntax only to
   //    prevent the model from falling back to its C/Java training data.
+  // NOTE: confidence is intentionally NOT part of the JSON the model is asked
+  // to produce. Small models "anchor" to example values in the prompt and copy
+  // them verbatim, making any LLM-emitted probability meaningless. Instead we
+  // compute confidence deterministically after parsing (see computeConfidence).
   std::string prompt =
       "<|im_start|>system\n"
       "You are a conservative compiler assistant for Turf-Lang.\n"
@@ -252,11 +306,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "   Use MODIFY when you have a concrete single-line patch.\n"
       "   Use NONE when the issue requires multi-line restructuring or you are\n"
       "   not confident enough to suggest a specific change.\n"
-      "5. Set confidence as a float you determine based on certainty:\n"
-      "   1.0 = absolutely certain | 0.8 = high | 0.5 = moderate | 0.2 = low.\n"
-      "   Do NOT copy a fixed number; reason about the actual error complexity.\n"
-      "6. Respond ONLY in valid JSON without markdown code blocks.\n"
-      "7. Keep explanation, suggested_comment, and warning to 1-2 sentences max.\n"
+      "5. Respond ONLY in valid JSON without markdown code blocks.\n"
+      "6. Keep explanation, suggested_comment, and warning to 1-2 sentences max.\n"
       "<|im_end|>\n"
       "<|im_start|>user\n"
       "Error: " +
@@ -266,7 +317,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       codeContext +
       "\n"
       "Respond with ONLY this JSON object — fill every field yourself:\n"
-      "{\"confidence\": <float>, \"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
+      "{\"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
       "\"suggested_comment\": <string>, \"code_patch\": <string>, \"warning\": <string>}\n"
       "<|im_end|>\n"
       "<|im_start|>assistant\n";
@@ -289,7 +340,6 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     std::string jsonStr =
         rawResponse.substr(startJson, endJson - startJson + 1);
 
-    suggestion.confidence = extractJsonFieldNumber(jsonStr, "confidence");
     suggestion.explanation = extractJsonFieldString(jsonStr, "explanation");
     suggestion.fix_mode = extractJsonFieldString(jsonStr, "fix_mode");
     suggestion.suggested_comment =
@@ -297,7 +347,15 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     suggestion.code_patch = extractJsonFieldString(jsonStr, "code_patch");
     suggestion.warning = extractJsonFieldString(jsonStr, "warning");
 
-    std::cerr << "Parsed Confidence: " << suggestion.confidence << "\n";
+    // Compute confidence deterministically from measurable output signals.
+    // The LLM is no longer asked to self-report a probability.
+    suggestion.confidence = computeConfidence(
+        suggestion, category, categoryWasDeterministic, contextKeyword);
+
+    std::cerr << "Computed Confidence (deterministic): " << suggestion.confidence << "\n";
+    std::cerr << "  category_deterministic=" << categoryWasDeterministic
+              << " fix_mode=" << suggestion.fix_mode
+              << " patch_empty=" << suggestion.code_patch.empty() << "\n";
     std::cerr << "Parsed Fix Mode: " << suggestion.fix_mode << "\n";
 
     if (suggestion.fix_mode.empty()) {
