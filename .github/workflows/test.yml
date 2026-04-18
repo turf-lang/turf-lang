@@ -12,6 +12,8 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: recursive
     
     - name: Install LLVM
       run: |
@@ -22,6 +24,12 @@ jobs:
       run: |
         chmod +x scripts/update_compiler.sh
         chmod +x scripts/test_runner.sh
+        
+    - name: Build llama.cpp
+      run: |
+        cd external/llama.cpp
+        cmake -B build
+        cmake --build build --config Release -j $(nproc)
         
     - name: Build Turf Compiler
       run: ./scripts/update_compiler.sh
