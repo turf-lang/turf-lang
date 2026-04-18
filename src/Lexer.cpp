@@ -65,28 +65,37 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
 static void printDiag(const DiagnosticEngine::Diag &D) {
   bool isWarning = D.IsWarning || D.Msg.find("Warning:") != std::string::npos ||
                    D.Msg.find("warning:") != std::string::npos;
-  std::string HeaderColor =
-      isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
-  std::string HeaderText = isWarning ? "Warning" : "Oops! Something went wrong";
 
-  std::cerr << Colors::BOLD << HeaderColor << HeaderText << " at line "
-            << D.Loc.Line << ", column " << D.Loc.Col << ":" << Colors::RESET
-            << "\n\n"
-            << "  " << D.Msg << "\n\n";
+  const std::string &AccentColor = isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
+  const char *TypeLabel           = isWarning ? "warning" : "error";
 
+  // ── error/warning  at line X, col Y
+  std::cerr << Colors::BOLD << AccentColor << "\u2500\u2500 " << TypeLabel << " "
+            << Colors::RESET << Colors::BRIGHT_BLACK
+            << "at line " << D.Loc.Line << ", col " << D.Loc.Col
+            << Colors::RESET << "\n\n";
+
+  // Message body — embedded ANSI codes from error classes render intact.
+  std::cerr << "  " << D.Msg << "\n";
+
+  // Code snippet with │ gutter.
   if (D.Loc.Line > 0 && D.Loc.Line <= static_cast<int>(SourceLines.size())) {
     const std::string &LineContent = SourceLines[D.Loc.Line - 1];
+    std::string LineNumStr         = std::to_string(D.Loc.Line);
+    int CaretOffset                = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
 
-    std::cerr << Colors::BRIGHT_BLACK << "  " << D.Loc.Line << " | "
-              << Colors::RESET << LineContent << "\n";
-
-    std::string LineNumStr = std::to_string(D.Loc.Line);
-    int CaretOffset = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
-    std::cerr << Colors::BRIGHT_BLACK << "  "
-              << std::string(LineNumStr.length(), ' ') << " | " << Colors::RESET
-              << std::string(CaretOffset, ' ') << Colors::BOLD << HeaderColor
-              << "^ Here!" << Colors::RESET << "\n\n";
+    std::cerr << "\n"
+              << Colors::BRIGHT_BLACK << "  " << LineNumStr << " \u2502 "
+              << Colors::RESET << LineContent << "\n"
+              << Colors::BRIGHT_BLACK << "  "
+              << std::string(LineNumStr.length(), ' ') << " \u2502 "
+              << Colors::RESET
+              << std::string(CaretOffset, ' ')
+              << Colors::BOLD << AccentColor << "^ Here!" << Colors::RESET
+              << "\n";
   }
+
+  std::cerr << "\n";
 }
 
 // DiagnosticEngine : method implementations
@@ -141,9 +150,8 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                           "Note: " + Colors::RESET + ai.warning;
         }
 
-        // Append original compiler message below as a subordinate reference.
-        finalMessage += "\n\n  " + Colors::BRIGHT_BLACK + "[Compiler]" +
-                        Colors::RESET + "  " + Msg;
+        // High confidence: the AI suggestion is the complete diagnostic output.
+        // The original compiler message is not shown to avoid cluttering output.
       }
       // else: confidence < 0.8 or fix_mode == NONE → original message only.
       // finalMessage stays as the unmodified compiler Msg, no AI output.
