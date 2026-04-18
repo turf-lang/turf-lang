@@ -228,11 +228,12 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   }
 
   // 5. Build a focused prompt with only the relevant documentation.
-  //    KEY FIX: The JSON template uses a concrete example value (0.85) rather
-  //    than a placeholder like <float>.  Small models (1.5B) latch onto the
-  //    first concrete number they see; an abstract placeholder caused the
-  //    model to always output 0.0.  The confidence guidance also lists high
-  //    values first to bias the model upward for clear errors.
+  //    IMPORTANT: Do NOT pre-fill confidence or fix_mode in the JSON template.
+  //    Small models latch onto literal values in the template and copy them
+  //    verbatim (template anchoring), making the confidence gate useless.
+  //    Instead, describe the schema and let the model reason about the values.
+  //    Likewise, code_patch must be constrained to Turf-Lang syntax only to
+  //    prevent the model from falling back to its C/Java training data.
   std::string prompt =
       "<|im_start|>system\n"
       "You are a conservative compiler assistant for Turf-Lang.\n"
@@ -241,15 +242,21 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "\n"
       "RULES:\n"
       "1. Follow Turf-Lang type and ownership rules exactly.\n"
-      "2. If code_patch is provided, it must contain NO comments.\n"
-      "3. Set confidence as a float from 0.0 to 1.0:\n"
-      "   - 1.0 = absolutely certain the fix is correct.\n"
-      "   - 0.8 = high confidence, straightforward fix.\n"
-      "   - 0.5 = moderate confidence, some ambiguity.\n"
-      "   - 0.2 = low confidence, mostly guessing.\n"
-      "   For clear, obvious errors give at least 0.8.\n"
-      "4. Respond ONLY in valid JSON without markdown code blocks.\n"
-      "5. Keep explanation, suggested_comment, and warning EXTREMELY brief (1-2 sentences max).\n"
+      "2. code_patch must be a SINGLE LINE of valid Turf-Lang syntax ONLY.\n"
+      "   Do NOT use C, Java, Python, or any other language syntax.\n"
+      "   Do NOT include multiple statements, semicolons, or braces unless\n"
+      "   they are required by Turf-Lang syntax for that construct.\n"
+      "3. If you cannot produce a valid Turf-Lang patch, set fix_mode to NONE\n"
+      "   and leave code_patch empty.\n"
+      "4. Set fix_mode to one of: MODIFY, NONE.\n"
+      "   Use MODIFY when you have a concrete single-line patch.\n"
+      "   Use NONE when the issue requires multi-line restructuring or you are\n"
+      "   not confident enough to suggest a specific change.\n"
+      "5. Set confidence as a float you determine based on certainty:\n"
+      "   1.0 = absolutely certain | 0.8 = high | 0.5 = moderate | 0.2 = low.\n"
+      "   Do NOT copy a fixed number; reason about the actual error complexity.\n"
+      "6. Respond ONLY in valid JSON without markdown code blocks.\n"
+      "7. Keep explanation, suggested_comment, and warning to 1-2 sentences max.\n"
       "<|im_end|>\n"
       "<|im_start|>user\n"
       "Error: " +
@@ -258,11 +265,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "Code:\n" +
       codeContext +
       "\n"
-      "Respond with ONLY this JSON (no markdown, no extra text):\n"
-      "{\"confidence\": 0.85, \"explanation\": \"...\", \"fix_mode\": "
-      "\"MODIFY\", "
-      "\"suggested_comment\": \"...\", \"code_patch\": \"...\", \"warning\": "
-      "\"\"}\n"
+      "Respond with ONLY this JSON object — fill every field yourself:\n"
+      "{\"confidence\": <float>, \"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
+      "\"suggested_comment\": <string>, \"code_patch\": <string>, \"warning\": <string>}\n"
       "<|im_end|>\n"
       "<|im_start|>assistant\n";
 
