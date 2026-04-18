@@ -138,6 +138,39 @@ static float extractJsonFieldNumber(const std::string &json,
   return val;
 }
 
+static ErrorCategory classifyErrorWithSLM(const std::string &errorMessage, const std::string &codeContext) {
+  std::string prompt =
+      "<|im_start|>system\n"
+      "You are an expert compiler error classifier for Turf-Lang.\n"
+      "Categorize the following error into EXACTLY ONE of these categories:\n"
+      "TYPE_MISMATCH, UNDECLARED_VARIABLE, CONTROL_FLOW, SYNTAX_ERROR, ARITHMETIC, "
+      "STRING_CONVERSION, ARRAY_ERROR, DECLARATION, FUNCTION_SIGNATURE, "
+      "BUILTIN_FUNCTION, GENERAL.\n"
+      "Respond with ONLY the exact category name. No explanation, no quotes, no markdown.\n"
+      "<|im_end|>\n"
+      "<|im_start|>user\n"
+      "Error: " +
+      errorMessage +
+      "\n"
+      "Code Context:\n" +
+      codeContext +
+      "\n"
+      "<|im_end|>\n"
+      "<|im_start|>assistant\n";
+
+  std::string response = SLMEngine::getInstance().generateSuggestion(prompt);
+
+  size_t start = response.find_first_not_of(" \t\r\n\"'");
+  size_t end = response.find_last_not_of(" \t\r\n\"'");
+  if (start != std::string::npos && end != std::string::npos) {
+    std::string categoryStr = response.substr(start, end - start + 1);
+    std::cerr << "[SLM Classifier] AI classification: " << categoryStr << "\n";
+    return categoryFromString(categoryStr);
+  }
+
+  return ErrorCategory::GENERAL;
+}
+
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   AISuggestion suggestion;
   std::string codeContext = getCodeContext(errorLine, 10);
@@ -155,6 +188,10 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
 
   // 2. Classify the error deterministically (keyword-aware)
   ErrorCategory category = classifyError(cleanError, contextKeyword);
+  if (category == ErrorCategory::GENERAL) {
+    std::cerr << "[SLM Classifier] Hardcoded rules yielded GENERAL. Consulting SLM...\n";
+    category = classifyErrorWithSLM(cleanError, codeContext);
+  }
   std::string categoryName = getCategoryName(category);
 
   // 3. Get the most specific documentation available

@@ -117,6 +117,20 @@ inline ErrorCategory classifyError(const std::string &msg,
   return ErrorCategory::GENERAL;
 }
 
+inline ErrorCategory categoryFromString(const std::string &str) {
+  if (str == "TYPE_MISMATCH") return ErrorCategory::TYPE_MISMATCH;
+  if (str == "UNDECLARED_VARIABLE") return ErrorCategory::UNDECLARED_VAR;
+  if (str == "CONTROL_FLOW") return ErrorCategory::CONTROL_FLOW;
+  if (str == "SYNTAX_ERROR") return ErrorCategory::SYNTAX_ERROR;
+  if (str == "ARITHMETIC") return ErrorCategory::ARITHMETIC;
+  if (str == "STRING_CONVERSION") return ErrorCategory::STRING_CONVERSION;
+  if (str == "ARRAY_ERROR") return ErrorCategory::ARRAY_ERROR;
+  if (str == "DECLARATION") return ErrorCategory::DECLARATION;
+  if (str == "FUNCTION_SIGNATURE") return ErrorCategory::FUNCTION_SIGNATURE;
+  if (str == "BUILTIN_FUNCTION") return ErrorCategory::BUILTIN_FUNCTION;
+  return ErrorCategory::GENERAL;
+}
+
 // Human-readable category name (also used in the prompt).
 inline const char *getCategoryName(ErrorCategory cat) {
   switch (cat) {
