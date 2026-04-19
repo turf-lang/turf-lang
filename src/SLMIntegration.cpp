@@ -3,7 +3,9 @@
 #include "Lexer.h"
 #include <SLMEngine.h>
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <regex>
@@ -49,6 +51,233 @@ std::string getCodeContext(int errorLine, int contextSize) {
   context += "\n";
 
   return context;
+}
+
+// Returns the context size (± lines) appropriate for the given error category.
+// Tighter windows keep the model focused on the broken statement;
+// broader windows let it trace type declarations and scope origins.
+static int contextSizeForCategory(ErrorCategory cat) {
+  switch (cat) {
+    // ── Tight (±3): error is self-contained on a single statement ──────
+    case ErrorCategory::SYNTAX_ERROR:
+    case ErrorCategory::BUILTIN_FUNCTION:
+    case ErrorCategory::ARITHMETIC:
+    case ErrorCategory::STRING_CONVERSION:
+    case ErrorCategory::CONTROL_FLOW:
+      return 3;
+
+    // ── Broad (±8): need to trace type origin or scope declarations ────
+    case ErrorCategory::TYPE_MISMATCH:
+    case ErrorCategory::ARRAY_ERROR:
+    case ErrorCategory::GENERAL:
+      return 8;
+
+    // ── Medium (±5): call site + nearby declaration usually sufficient ─
+    case ErrorCategory::FUNCTION_SIGNATURE:
+    case ErrorCategory::DECLARATION:
+    case ErrorCategory::UNDECLARED_VAR:
+      return 5;
+  }
+  return 5; // unreachable, but satisfies -Wreturn-type
+}
+
+// Builds the standard context window then appends one or more "pinned" lines
+// that are outside the window but directly relevant to the error (e.g. the
+// site where a function was declared). Pinned lines are shown with a '*'
+// prefix so the model knows they are a deliberate anchor, not part of the
+// surrounding range.
+// Lines that already fall within the [errorLine ± contextSize] window are
+// silently skipped to avoid duplication.
+static std::string getCodeContextWithPinnedLines(
+    int errorLine, int contextSize,
+    const std::vector<int> &pinnedLines) {
+  std::string context = getCodeContext(errorLine, contextSize);
+
+  if (pinnedLines.empty() || SourceLines.empty())
+    return context;
+
+  // Compute the window boundaries to avoid pinning lines already visible.
+  int windowStart = std::max(1, errorLine - contextSize);
+  int windowEnd   = std::min(static_cast<int>(SourceLines.size()),
+                             errorLine + contextSize);
+
+  bool headerAdded = false;
+  for (int lineNo : pinnedLines) {
+    if (lineNo < 1 || lineNo > static_cast<int>(SourceLines.size()))
+      continue;
+    // Skip lines already inside the normal context window.
+    if (lineNo >= windowStart && lineNo <= windowEnd)
+      continue;
+    if (!headerAdded) {
+      context += "Relevant definition(s)\n";
+      headerAdded = true;
+    }
+    context += "*  " + std::to_string(lineNo) + " | " +
+               SourceLines[lineNo - 1] + "\n";
+  }
+  if (headerAdded)
+    context += "\n";
+  return context;
+}
+
+// Scans SourceLines for the definition of a function whose name appears in
+// the error message or in the error line itself. Returns the 1-based line
+// number of the matching `fn <name>(` header, or -1 if not found.
+// This is a pure text scan — no AST required — so it is fully self-contained
+// inside SLMIntegration.cpp with no symbol-table dependency.
+static int findFunctionSignatureLine(const std::string &errorMsg,
+                                     int errorLine) {
+  if (SourceLines.empty())
+    return -1;
+
+  // Collect candidate function names from the error message.
+  // Common patterns:
+  //   "Unknown function: 'foo'"        -> extract "foo"
+  //   "void value from 'foo'"          -> extract "foo"
+  //   "Wrong argument count for 'foo'" -> extract "foo"
+  std::vector<std::string> candidates;
+
+  auto extractQuoted = [&](const std::string &src) {
+    size_t p = src.find('\'');
+    while (p != std::string::npos) {
+      size_t q = src.find('\'', p + 1);
+      if (q != std::string::npos) {
+        candidates.push_back(src.substr(p + 1, q - p - 1));
+        p = src.find('\'', q + 1);
+      } else {
+        break;
+      }
+    }
+  };
+
+  extractQuoted(errorMsg);
+
+  // Also scan the error line itself for identifiers followed by '('
+  if (errorLine >= 1 && errorLine <= static_cast<int>(SourceLines.size())) {
+    const std::string &src = SourceLines[errorLine - 1];
+    for (size_t i = 0; i < src.size(); ) {
+      if (std::isalpha(static_cast<unsigned char>(src[i]))) {
+        size_t j = i;
+        while (j < src.size() &&
+               (std::isalnum(static_cast<unsigned char>(src[j])) ||
+                src[j] == '_'))
+          ++j;
+        // Check whether the identifier is immediately followed by '('
+        size_t k = j;
+        while (k < src.size() && src[k] == ' ') ++k;
+        if (k < src.size() && src[k] == '(')
+          candidates.push_back(src.substr(i, j - i));
+        i = j;
+      } else {
+        ++i;
+      }
+    }
+  }
+
+  if (candidates.empty())
+    return -1;
+
+  // Scan every source line for `fn <candidate>(`
+  for (int ln = 1; ln <= static_cast<int>(SourceLines.size()); ++ln) {
+    const std::string &line = SourceLines[ln - 1];
+    size_t fnPos = line.find("fn ");
+    if (fnPos == std::string::npos)
+      continue;
+
+    for (const auto &name : candidates) {
+      if (name.empty())
+        continue;
+      size_t namePos = line.find(name, fnPos + 3);
+      if (namePos == std::string::npos)
+        continue;
+      // Confirm the identifier is followed (after optional whitespace) by '('
+      size_t after = namePos + name.size();
+      while (after < line.size() && line[after] == ' ') ++after;
+      if (after < line.size() && line[after] == '(') {
+        std::cerr << "[SLM 3b] Found fn '" << name << "' at line " << ln
+                  << " (pinning to context)\n";
+        return ln;
+      }
+    }
+  }
+
+  return -1;
+}
+
+// Scans SourceLines for a variable declaration matching the variable name
+// extracted from an UNDECLARED_VAR error message. Returns the 1-based line
+// number of the most recent `type <varName> =` pattern, or -1 if not found.
+// Searches backwards from errorLine-1 so the nearest prior declaration wins.
+//
+// Recognised declaration patterns (Turf-Lang syntax):
+//   int x = ...   |   double x = ...   |   bool x = ...   |   string x = ...
+// Also matches function parameter declarations: fn foo(int x, ...)
+static int findVariableDeclarationLine(const std::string &errorMsg,
+                                       int errorLine) {
+  if (SourceLines.empty())
+    return -1;
+
+  // Extract the variable name from single-quoted text in the error message.
+  // UseBeforeDeclarationError:  "...use 'x' before..."
+  // ReferenceError:             "...anything named 'x'..."
+  std::string varName;
+  size_t q1 = errorMsg.find('\'');
+  if (q1 != std::string::npos) {
+    size_t q2 = errorMsg.find('\'', q1 + 1);
+    if (q2 != std::string::npos && q2 > q1 + 1)
+      varName = errorMsg.substr(q1 + 1, q2 - q1 - 1);
+  }
+
+  if (varName.empty())
+    return -1;
+
+  // Turf type keywords that precede a variable name in a declaration.
+  static const char *typeKeywords[] = {"int", "double", "float", "bool",
+                                       "string"};
+
+  // Scan backwards from just before the error line to find the closest match.
+  int lastLine = std::min(errorLine - 1, static_cast<int>(SourceLines.size()));
+  for (int ln = lastLine; ln >= 1; --ln) {
+    const std::string &line = SourceLines[ln - 1];
+
+    // Look for `<typeKeyword> <varName>` in the line.
+    for (const char *kw : typeKeywords) {
+      size_t kwLen = std::strlen(kw);
+      size_t pos = 0;
+      while ((pos = line.find(kw, pos)) != std::string::npos) {
+        // The type keyword must be preceded by whitespace/start-of-line
+        // and followed by whitespace (not part of a longer identifier).
+        bool kwStart = (pos == 0 ||
+                        !std::isalnum(static_cast<unsigned char>(line[pos - 1])));
+        size_t afterKw = pos + kwLen;
+        bool kwEnd = (afterKw < line.size() && line[afterKw] == ' ');
+
+        if (kwStart && kwEnd) {
+          // Skip whitespace after the type keyword.
+          size_t nameStart = afterKw;
+          while (nameStart < line.size() && line[nameStart] == ' ')
+            ++nameStart;
+
+          // Check if the identifier at this position matches varName.
+          if (nameStart + varName.size() <= line.size() &&
+              line.compare(nameStart, varName.size(), varName) == 0) {
+            // Make sure the match is a whole identifier (not a prefix).
+            size_t afterName = nameStart + varName.size();
+            if (afterName >= line.size() ||
+                (!std::isalnum(static_cast<unsigned char>(line[afterName])) &&
+                 line[afterName] != '_')) {
+              std::cerr << "[SLM 3a] Found declaration of '" << varName
+                        << "' at line " << ln << " (pinning to context)\n";
+              return ln;
+            }
+          }
+        }
+        pos = afterKw; // advance past this occurrence
+      }
+    }
+  }
+
+  return -1;
 }
 
 static std::string extractJsonFieldString(const std::string &json,
@@ -229,8 +458,17 @@ static float computeConfidence(const AISuggestion &s,
 
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   AISuggestion suggestion;
-  std::string codeContext = getCodeContext(errorLine, 10);
   std::string cleanError = stripAnsiCodes(errorMessage);
+
+  // ── Step 0: extract keyword hint early so classification can use it ──
+  // (classifyError only uses cleanError; codeContext not needed for this step)
+  std::string contextKeyword = extractContextKeyword(cleanError);
+
+  // ── Step 1: classify first (deterministic, no context window required) ─
+  // We classify before building the context so we can size the window to fit
+  // the category rather than always using the generic ±10 default.
+  ErrorCategory category = classifyError(cleanError, contextKeyword);
+  bool categoryWasDeterministic = (category != ErrorCategory::GENERAL);
 
   const std::string modelPath =
       "models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
@@ -238,26 +476,61 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     return suggestion;
   }
 
-  // 1. Extract a keyword/construct hint from the error message for
-  //    precise classification and targeted doc loading.
-  std::string contextKeyword = extractContextKeyword(cleanError, codeContext);
-
-  // 2. Classify the error deterministically (keyword-aware).
-  //    Track whether the category was resolved without SLM — used later in
-  //    the deterministic confidence formula.
-  ErrorCategory category = classifyError(cleanError, contextKeyword);
-  bool categoryWasDeterministic = (category != ErrorCategory::GENERAL);
+  // ── Step 2: SLM fallback classification (if deterministic rules failed) ─
+  // Only invoke the model when the pattern-matcher returned GENERAL.
+  // We pass a small preliminary context (±3) just for the classifier;
+  // the real context for the suggestion prompt is built after this.
   if (!categoryWasDeterministic) {
     std::cerr << "[SLM Classifier] Hardcoded rules yielded GENERAL. Consulting SLM...\n";
-    category = classifyErrorWithSLM(cleanError, codeContext);
+    std::string classifierContext = getCodeContext(errorLine, 3);
+    category = classifyErrorWithSLM(cleanError, classifierContext);
   }
+
+  // ── Step 3: dynamic context window ───────────────────────────────────
+  // Now that we know the category, size the context window appropriately.
+  int contextSize = contextSizeForCategory(category);
+  std::cerr << "[SLM] Context window: ±" << contextSize
+            << " lines (category: " << getCategoryName(category) << ")\n";
+
+  std::string codeContext;
+
+  // ── Smart context: pin relevant definitions outside the window ──────
+  //
+  // 3b: For FUNCTION_SIGNATURE errors, locate the `fn <name>(` definition
+  //     in SourceLines and pin it to the context.
+  // 3a: For UNDECLARED_VAR errors, locate the nearest prior declaration
+  //     of the undeclared variable (e.g. `int x = ...` in an outer scope
+  //     that has since been exited) and pin it.
+  //
+  // getCodeContextWithPinnedLines automatically skips pinned lines that
+  // already fall inside the ±contextSize window, so there is no duplication
+  // risk.  If no relevant line is found, we fall through to plain context.
+  if (category == ErrorCategory::FUNCTION_SIGNATURE) {
+    int sigLine = findFunctionSignatureLine(cleanError, errorLine);
+    if (sigLine > 0) {
+      codeContext = getCodeContextWithPinnedLines(errorLine, contextSize, {sigLine});
+    } else {
+      codeContext = getCodeContext(errorLine, contextSize);
+    }
+  } else if (category == ErrorCategory::UNDECLARED_VAR) {
+    int declLine = findVariableDeclarationLine(cleanError, errorLine);
+    if (declLine > 0) {
+      codeContext = getCodeContextWithPinnedLines(errorLine, contextSize, {declLine});
+    } else {
+      codeContext = getCodeContext(errorLine, contextSize);
+    }
+  } else {
+    codeContext = getCodeContext(errorLine, contextSize);
+  }
+
   std::string categoryName = getCategoryName(category);
 
   // 3. Get the most specific documentation available
   std::string docPath = getCategoryDocPath(category, contextKeyword);
 
-  std::cerr << "[SLM] Error category: " << categoryName << " | Keyword: "
-            << (contextKeyword.empty() ? "(none)" : contextKeyword)
+  std::cerr << "[SLM] Error category: " << categoryName
+            << " | Keyword: " << (contextKeyword.empty() ? "(none)" : contextKeyword)
+            << " | Context: ±" << contextSize
             << " | Doc: " << docPath << "\n";
 
   // 4. Load the targeted documentation for this error category
