@@ -22,10 +22,17 @@ CORRECT USAGE:
   int n2 = lengthof("world")      // n2 = 5
   int n3 = lengthof(input())      // valid: input() returns a string
 
-INCORRECT USAGE:
+INCORRECT USAGE & TYPE CASTING:
+  // If you accidentally pass an int, double, or bool, cast it to a string using string(value).
   int n = lengthof(42)            // ERROR: argument is int, not string
+  // FIX: Cast the integer to a string first
+  int n = lengthof(string(42))    // CORRECT
+
   int n = lengthof(3.14)          // ERROR: argument is double, not string
+  // FIX: int n = lengthof(string(3.14))
+
   int n = lengthof(true)          // ERROR: argument is bool, not string
+  // FIX: int n = lengthof(string(true))
 
 ARRAYS vs STRINGS:
   - For ARRAYS, use the .length property:    int n = arr.length
