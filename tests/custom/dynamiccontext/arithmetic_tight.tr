@@ -1,0 +1,9 @@
+// ERROR TEST — ARITHMETIC (tight context ±3)
+// Category: ARITHMETIC
+// Expects: Error about unsupported arithmetic operation.
+// e.g. adding boolean to integer.
+
+int a = 5
+bool b = true
+int c = a + b
+printline(c)
