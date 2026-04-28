@@ -296,3 +296,80 @@ static void LintIf(const IfExprAST *If) {
 
   LintExpression(Else);
 }
+
+// ============================================================================
+// Semantic Pruning: Only lint nodes that have changed (by node ID)
+// ============================================================================
+// Internal recursive helper for semantic pruning
+static void LintChangedNodesOnlyInternal(ExprAST *E,
+                                          const std::set<uint64_t> &ChangedNodeIDs) {
+  if (!E) return;
+  
+  // Only lint this node if it's in the changed set
+  // (or if ChangedNodeIDs is empty, lint everything)
+  uint64_t NodeID = E->getNodeID();
+  bool ShouldLintThisNode = ChangedNodeIDs.empty() || ChangedNodeIDs.count(NodeID) > 0;
+  
+  if (ShouldLintThisNode) {
+    // Run normal lint checks on this node
+    if (auto *Bin = dynamic_cast<BinaryExprAST *>(E))
+      LintBinaryExpr(Bin);
+
+    if (auto *Assign = dynamic_cast<AssignmentExprAST *>(E))
+      LintAssignment(Assign);
+
+    if (auto *While = dynamic_cast<WhileExprAST *>(E))
+      LintWhile(While);
+
+    if (auto *If = dynamic_cast<IfExprAST *>(E))
+      LintIf(If);
+  }
+
+  // Recurse into block children regardless (they might have changed nodes)
+  if (auto *Blk = dynamic_cast<BlockExprAST *>(E)) {
+    for (const auto &Child : Blk->getExpressions()) {
+      LintChangedNodesOnlyInternal(Child.get(), ChangedNodeIDs);
+    }
+    return;
+  }
+
+  // Recurse into binary expression children
+  if (auto *Bin = dynamic_cast<BinaryExprAST *>(E)) {
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Bin->getLHS()), ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Bin->getRHS()), ChangedNodeIDs);
+    return;
+  }
+
+  // Recurse into if expression children
+  if (auto *If = dynamic_cast<IfExprAST *>(E)) {
+    const auto &Branches = If->getBranches();
+    for (const auto &Branch : Branches) {
+      LintChangedNodesOnlyInternal(Branch.Cond.get(), ChangedNodeIDs);
+      LintChangedNodesOnlyInternal(Branch.Body.get(), ChangedNodeIDs);
+    }
+    LintChangedNodesOnlyInternal(If->getElseBody(), ChangedNodeIDs);
+    return;
+  }
+
+  // Recurse into while loop children
+  if (auto *While = dynamic_cast<WhileExprAST *>(E)) {
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(While->getCond()), ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(While->getBody(), ChangedNodeIDs);
+    return;
+  }
+
+  // Recurse into for loop children
+  if (auto *For = dynamic_cast<ForExprAST *>(E)) {
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getStart()), ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getEnd()), ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getStep()), ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(For->getBody(), ChangedNodeIDs);
+    return;
+  }
+}
+
+// Public API: Semantic pruning for incremental validation
+void LintChangedNodesOnly(ExprAST *E, const std::set<uint64_t> &ChangedNodeIDs) {
+  if (!E) return;
+  LintChangedNodesOnlyInternal(E, ChangedNodeIDs);
+}

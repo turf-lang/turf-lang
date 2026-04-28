@@ -65,6 +65,77 @@ static std::filesystem::path writeTempSourceFile(
   return tempPath;
 }
 
+// Parse-only pass: Parses without linting (for incremental validation)
+// Allows semantic pruning to selectively lint only changed nodes
+static bool runParseOnlyPass(const std::filesystem::path &sourcePath,
+                             const std::vector<std::string> &sourceLines,
+                             std::unique_ptr<ExprAST> &parsedASTOut) {
+  const std::string savedSourceFilename = SourceFilename;
+  auto savedSourceLines = SourceLines;
+  SourceFile.close();
+  SourceFile.open(sourcePath.string());
+  if (!SourceFile.is_open()) {
+    SourceLines = savedSourceLines;
+    return false;
+  }
+
+  SourceFilename = sourcePath.string();
+  SourceLines = sourceLines;
+  resetLexer();
+  DiagnosticEngine::clearDiagnostics();
+  ClearParsedTopLevelASTs();
+
+  bool success = true;
+  bool savedAIEnabled = g_AIEnabled;
+  g_AIEnabled = false;
+
+  int jumpResult = setjmp(g_recoverJmp);
+  if (jumpResult == 0) {
+    g_recoverActive = true;
+    getNextToken();
+
+    while (CurTok != TOK_EOF) {
+      if (CurTok == ';') {
+        getNextToken();
+        continue;
+      }
+
+      auto AST = ParseExpression();
+      if (!AST) {
+        success = false;
+        break;
+      }
+
+      RecordParsedTopLevelAST(AST.get());
+      // NOTE: No linting here - will be done selectively via LintChangedNodesOnly
+
+      if (CurTok == ';') {
+        getNextToken();
+      }
+    }
+  } else {
+    success = false;
+  }
+
+  g_recoverActive = false;
+  g_AIEnabled = savedAIEnabled;
+
+  // Build the program AST from the cached top-level expressions
+  parsedASTOut = BuildProgramASTFromCache();
+
+  SourceFile.close();
+  SourceFilename = savedSourceFilename;
+  SourceLines = savedSourceLines;
+
+  // Restore the real source file and lexer state
+  if (!SourceFilename.empty()) {
+    SourceFile.open(SourceFilename);
+    resetLexer();
+  }
+
+  return success;
+}
+
 static bool runParseAndLintPass(const std::filesystem::path &sourcePath,
                                 const std::vector<std::string> &sourceLines,
                                 std::unique_ptr<ExprAST> &parsedASTOut) {
@@ -379,9 +450,9 @@ bool Sandbox::validateIncremental() {
     logDebug("Using incremental validation for single-line expression edit");
     
     // For a simple expression change, we can:
-    // 1. Skip re-parsing the entire file
-    // 2. Just check the edit doesn't introduce new syntax errors at that line
-    // 3. Run lint on the modified line only
+    // 1. Parse only (skip full lint pass initially)
+    // 2. Compute changed nodes
+    // 3. Lint only changed nodes (semantic pruning)
     
     // Save global state
     auto savedSourceLines = SourceLines;
@@ -391,26 +462,34 @@ bool Sandbox::validateIncremental() {
     SourceLines = Snapshot.SourceCode;
     DiagnosticEngine::clearDiagnostics();
     
-    // Write temp file and validate via real parser (more reliable than regex checks)
-    // This is still faster than the full validate() because we parse only one line
+    // Write temp file and do parse-only pass
     std::filesystem::path tempPath = writeTempSourceFile(Snapshot.SourceCode);
-    bool validationSucceeded = runParseAndLintPass(tempPath, Snapshot.SourceCode,
-                             Snapshot.AST);
+    bool validationSucceeded = runParseOnlyPass(tempPath, Snapshot.SourceCode,
+                                                 Snapshot.AST);
     
     std::error_code ignored;
     std::filesystem::remove(tempPath, ignored);
     
     Snapshot.Diagnostics = DiagnosticEngine::getDiagnostics();
     
+    // If parsing succeeded, compute changed nodes and selectively lint them
+    if (validationSucceeded && Snapshot.AST) {
+      computeChangedNodes();
+      
+      // Semantic pruning: only lint changed nodes
+      logDebug("Semantic pruning: linting only " +
+               std::to_string(ChangedNodeIDs.size()) + " changed nodes");
+      LintChangedNodesOnly(Snapshot.AST.get(), ChangedNodeIDs);
+      
+      // Update diagnostics after selective linting
+      Snapshot.Diagnostics = DiagnosticEngine::getDiagnostics();
+    }
+    
     // Restore global state
     SourceLines = savedSourceLines;
     DiagnosticEngine::clearDiagnostics();
     for (const auto &diag : savedDiagnostics) {
       DiagnosticEngine::add(diag.Loc, diag.Msg, diag.IsWarning);
-    }
-    
-    if (validationSucceeded) {
-      computeChangedNodes();
     }
 
     IsValid = validationSucceeded;
