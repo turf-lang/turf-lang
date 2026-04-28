@@ -158,6 +158,7 @@ int main(int argc, char **argv) {
     std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
     return 1;
   }
+  SourceFilename = opts.InputFile;
 
   // Read file into memory for error printing
   std::ifstream File(opts.InputFile);
@@ -184,6 +185,7 @@ int main(int argc, char **argv) {
 
   BasicBlock *Entry = BasicBlock::Create(*TheContext, "entry", TheFunction);
   Builder->SetInsertPoint(Entry);
+  ClearParsedTopLevelASTs();
 
   // Pre-pass: hoist 'fn' function prototypes so that forward calls work.
   // We perform a second full parse of the file, i.e. only processing
@@ -213,6 +215,7 @@ int main(int argc, char **argv) {
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
             if (AST) {
+              RecordParsedTopLevelAST(AST.get());
               LintExpression(AST.get());
               AST->codegen();
             }
@@ -276,6 +279,7 @@ int main(int argc, char **argv) {
     if (setjmp(g_recoverJmp) == 0) {
       auto AST = ParseExpression();
       if (AST) {
+        RecordParsedTopLevelAST(AST.get());
         LintExpression(AST.get()); // Lint top-level statements before codegen
         AST->codegen();
       } else {

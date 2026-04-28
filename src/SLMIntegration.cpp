@@ -1,6 +1,8 @@
 #include "SLMIntegration.h"
+#include "Colors.h"
 #include "ErrorCategory.h"
 #include "Lexer.h"
+#include "Sandbox.h"
 #include <SLMEngine.h>
 #include <algorithm>
 #include <cctype>
@@ -641,39 +643,65 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// TODO(future): Self-running verification of AI-suggested code patches.
-//
-// The idea is to verify that an AI-suggested fix actually compiles by
-// running the patched source through a lightweight compilation pass before
-// presenting it to the user. This eliminates false-positive suggestions.
-//
-// Implementation steps (not yet done):
-// 1. Take the original SourceLines and the AI's code_patch.
-// 2. Create a modified copy of the source with the patch applied at
-//    the error line.
-// 3. Invoke a "verify-only" compilation of the modified source (parse +
-//    type-check, no codegen/linking needed).
-// 4. If the verification pass produces zero errors, the suggestion is
-//    valid and can be shown to the user.
-// 5. If the verification fails, discard the AI suggestion silently and
-//    fall back to the default compiler error message.
-//
-// Challenges:
-// - The compiler currently reads from a file; need a way to feed a
-//   string-based source (or a temporary file) to the pipeline.
-// - Must avoid infinite recursion: the verification pass should NOT
-//   itself invoke the SLM.
-// - Performance: verification should be fast (skip codegen/linking).
+// Sandbox-Based Suggestion Validation
 // ────────────────────────────────────────────────────────────────────────────
+
 bool verifySuggestion(const AISuggestion &suggestion,
                       const std::string &originalSource, int errorLine) {
-  // Stub: always returns true.
-  // When implemented, this will run the patched code through a verify-only
-  // compilation pass and return false if any errors are produced.
-  (void)suggestion;
-  (void)originalSource;
-  (void)errorLine;
-  return true;
+  // Create a sandbox from the current compiler state
+  auto sandbox = CreateSandbox();
+  if (!sandbox) {
+    std::cerr << Colors::BRIGHT_BLACK << "[Verify] Failed to create sandbox"
+              << Colors::RESET << "\n";
+    return false;
+  }
+  
+  // Apply and validate the fix using the sandbox
+  return ApplyAndValidateFix(*sandbox, errorLine, suggestion.code_patch, suggestion);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// High-Level Auto-Fix API
+// ────────────────────────────────────────────────────────────────────────────
+
+// Wrapper that gets SLM suggestion, validates it in a sandbox, and applies it if valid.
+// Returns an enhanced AISuggestion with validation results.
+AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
+                                        int errorLine) {
+  // First, get the SLM suggestion
+  AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine);
+  
+  if (!suggestion.valid) {
+    return suggestion;
+  }
+  
+  // Skip validation for NONE fixes (no patch to apply)
+  if (suggestion.fix_mode == "NONE") {
+    std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] Fix mode is NONE, skipping validation"
+              << Colors::RESET << "\n";
+    return suggestion;
+  }
+  
+  // Verify the suggestion in a sandbox
+  std::string originalSourceConcat;
+  for (const auto &line : SourceLines) {
+    originalSourceConcat += line + "\n";
+  }
+  
+  bool isValid = verifySuggestion(suggestion, originalSourceConcat, errorLine);
+  
+  if (isValid) {
+    suggestion.valid = true;
+    std::cerr << Colors::BRIGHT_GREEN << "[Sandbox] ✓ Suggestion validated and applied"
+              << Colors::RESET << "\n";
+  } else {
+    suggestion.valid = false;
+    suggestion.fix_mode = "NONE"; // Downgrade to no fix on validation failure
+    std::cerr << Colors::BRIGHT_YELLOW << "[Sandbox] ✗ Suggestion validation failed"
+              << Colors::RESET << "\n";
+  }
+  
+  return suggestion;
 }
 
 } // namespace SLM

@@ -13,6 +13,7 @@ struct AISuggestion {
     std::string code_patch;
     std::string warning;
     bool valid = false;
+    bool sandbox_validated = false;      // Whether sandbox validation passed
 };
 
 // Extracts +/- `contextSize` lines around the given error line.
@@ -21,6 +22,17 @@ std::string getCodeContext(int errorLine, int contextSize = 10);
 // Fetches a suggestion from the SLM based on the error message and source
 // context. Returns an empty AISuggestion if the SLM fails or times out.
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine);
+
+// Validate and apply an SLM suggestion in a sandbox environment.
+// This function:
+// 1. Gets an SLM suggestion
+// 2. Creates a sandbox environment
+// 3. Applies the fix in the sandbox
+// 4. Re-validates compilation in the sandbox
+// 5. Commits if valid (confidence >= 0.9), rejects if invalid
+// Returns the suggestion with sandbox_validated set appropriately.
+AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
+                                        int errorLine);
 
 // TODO(future): Self-running verification of AI-suggested code patches.
 // Before presenting a suggested fix to the user, this function should:

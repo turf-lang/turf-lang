@@ -9,6 +9,7 @@
 #include <map>
 
 std::vector<std::string> SourceLines;
+std::string SourceFilename;
 SourceLocation CurLoc = {1, 0};
 int CurLine = 1;
 int CurCol = 0;
@@ -123,7 +124,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           "fresh analysis." +
           Colors::RESET;
     } else {
-      SLM::AISuggestion ai = SLM::fetchSuggestion(Msg, Loc.Line);
+      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line);
 
       if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
         // ── High-confidence: AI suggestion leads as the primary diagnostic. ──
