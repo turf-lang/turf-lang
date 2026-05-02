@@ -1,6 +1,8 @@
 #include "SLMIntegration.h"
+#include "Colors.h"
 #include "ErrorCategory.h"
 #include "Lexer.h"
+#include "Sandbox.h"
 #include <SLMEngine.h>
 #include <algorithm>
 #include <cctype>
@@ -434,21 +436,23 @@ static float computeConfidence(const AISuggestion &s,
   if (s.fix_mode == "MODIFY")
     score += 0.2f;
 
-  // +0.2 if a non-empty patch was actually produced
-  if (!s.code_patch.empty())
+  // +0.2 if a non-empty replacement_line was actually produced
+  // (replacement_line is the exact code; code_patch is just a prose description)
+  const std::string &patchCode = s.replacement_line.empty() ? s.code_patch : s.replacement_line;
+  if (!patchCode.empty())
     score += 0.2f;
 
-  // +0.1 if the patch is a single, clean line (no embedded newlines or lone braces)
-  if (!s.code_patch.empty()) {
-    bool hasNewline    = s.code_patch.find('\n') != std::string::npos;
-    bool isBareBrace   = (s.code_patch == "{" || s.code_patch == "}");
+  // +0.1 if the replacement is a single, clean line (no embedded newlines or lone braces)
+  if (!patchCode.empty()) {
+    bool hasNewline  = patchCode.find('\n') != std::string::npos;
+    bool isBareBrace = (patchCode == "{" || patchCode == "}");
     if (!hasNewline && !isBareBrace)
       score += 0.1f;
   }
 
-  // +0.1 if the patch mentions the relevant keyword (patch is on-topic)
-  if (!contextKeyword.empty() && !s.code_patch.empty() &&
-      s.code_patch.find(contextKeyword) != std::string::npos)
+  // +0.1 if the replacement line mentions the relevant keyword (patch is on-topic)
+  if (!contextKeyword.empty() && !patchCode.empty() &&
+      patchCode.find(contextKeyword) != std::string::npos)
     score += 0.1f;
 
   // Clamp to [0, 1]
@@ -591,7 +595,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "\n"
       "Respond with ONLY this JSON object — fill every field yourself:\n"
       "{\"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
-      "\"suggested_comment\": <string>, \"code_patch\": <string>, \"warning\": <string>}\n"
+      "\"suggested_comment\": <string>, \"code_patch\": <human-readable description of what changed>, "
+      "\"replacement_line\": <THE EXACT SINGLE LINE of valid Turf-Lang code that replaces the erroneous line — no explanation, no prose, just the raw code>, "
+      "\"warning\": <string>}\n"
       "<|im_end|>\n"
       "<|im_start|>assistant\n";
 
@@ -618,6 +624,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     suggestion.suggested_comment =
         extractJsonFieldString(jsonStr, "suggested_comment");
     suggestion.code_patch = extractJsonFieldString(jsonStr, "code_patch");
+    suggestion.replacement_line = extractJsonFieldString(jsonStr, "replacement_line");
     suggestion.warning = extractJsonFieldString(jsonStr, "warning");
 
     // Compute confidence deterministically from measurable output signals.
@@ -641,39 +648,69 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// TODO(future): Self-running verification of AI-suggested code patches.
-//
-// The idea is to verify that an AI-suggested fix actually compiles by
-// running the patched source through a lightweight compilation pass before
-// presenting it to the user. This eliminates false-positive suggestions.
-//
-// Implementation steps (not yet done):
-// 1. Take the original SourceLines and the AI's code_patch.
-// 2. Create a modified copy of the source with the patch applied at
-//    the error line.
-// 3. Invoke a "verify-only" compilation of the modified source (parse +
-//    type-check, no codegen/linking needed).
-// 4. If the verification pass produces zero errors, the suggestion is
-//    valid and can be shown to the user.
-// 5. If the verification fails, discard the AI suggestion silently and
-//    fall back to the default compiler error message.
-//
-// Challenges:
-// - The compiler currently reads from a file; need a way to feed a
-//   string-based source (or a temporary file) to the pipeline.
-// - Must avoid infinite recursion: the verification pass should NOT
-//   itself invoke the SLM.
-// - Performance: verification should be fast (skip codegen/linking).
+// Sandbox-Based Suggestion Validation
 // ────────────────────────────────────────────────────────────────────────────
+
 bool verifySuggestion(const AISuggestion &suggestion,
                       const std::string &originalSource, int errorLine) {
-  // Stub: always returns true.
-  // When implemented, this will run the patched code through a verify-only
-  // compilation pass and return false if any errors are produced.
-  (void)suggestion;
-  (void)originalSource;
-  (void)errorLine;
-  return true;
+  // Create a sandbox from the current compiler state
+  auto sandbox = CreateSandbox();
+  if (!sandbox) {
+    std::cerr << Colors::BRIGHT_BLACK << "[Verify] Failed to create sandbox"
+              << Colors::RESET << "\n";
+    return false;
+  }
+  
+  // Use replacement_line (exact Turf-Lang code) for sandbox validation.
+  // code_patch is a human-readable description and must NOT be fed to the parser.
+  const std::string &fixLine = suggestion.replacement_line.empty()
+                                   ? suggestion.code_patch
+                                   : suggestion.replacement_line;
+  return ApplyAndValidateFix(*sandbox, errorLine, fixLine, suggestion);
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// High-Level Auto-Fix API
+// ────────────────────────────────────────────────────────────────────────────
+
+// Wrapper that gets SLM suggestion, validates it in a sandbox, and applies it if valid.
+// Returns an enhanced AISuggestion with validation results.
+AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
+                                        int errorLine) {
+  // First, get the SLM suggestion
+  AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine);
+  
+  if (!suggestion.valid) {
+    return suggestion;
+  }
+  
+  // Skip validation for NONE fixes (no patch to apply)
+  if (suggestion.fix_mode == "NONE") {
+    std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] Fix mode is NONE, skipping validation"
+              << Colors::RESET << "\n";
+    return suggestion;
+  }
+  
+  // Verify the suggestion in a sandbox
+  std::string originalSourceConcat;
+  for (const auto &line : SourceLines) {
+    originalSourceConcat += line + "\n";
+  }
+  
+  bool isValid = verifySuggestion(suggestion, originalSourceConcat, errorLine);
+  
+  if (isValid) {
+    suggestion.valid = true;
+    std::cerr << Colors::BRIGHT_GREEN << "[Sandbox] ✓ Suggestion validated"
+              << Colors::RESET << "\n";
+  } else {
+    suggestion.valid = false;
+    suggestion.fix_mode = "NONE"; // Downgrade to no fix on validation failure
+    std::cerr << Colors::BRIGHT_YELLOW << "[Sandbox] ✗ Suggestion validation failed"
+              << Colors::RESET << "\n";
+  }
+  
+  return suggestion;
 }
 
 } // namespace SLM

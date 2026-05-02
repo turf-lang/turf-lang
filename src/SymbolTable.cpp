@@ -3,6 +3,20 @@
 
 std::unique_ptr<SymbolTable> GlobalSymbolTable;
 
+SymbolTable::SymbolTable(const SymbolTable &Other)
+    : ScopeStack(Other.ScopeStack), AllSymbols(Other.AllSymbols),
+      NextID(Other.NextID) {}
+
+SymbolTable &SymbolTable::operator=(const SymbolTable &Other) {
+  if (this == &Other)
+    return *this;
+
+  ScopeStack = Other.ScopeStack;
+  AllSymbols = Other.AllSymbols;
+  NextID = Other.NextID;
+  return *this;
+}
+
 void InitializeSymbolTable() {
   GlobalSymbolTable = std::make_unique<SymbolTable>();
 }

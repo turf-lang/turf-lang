@@ -298,8 +298,8 @@ Value *BinaryExprAST::codegen() {
     CastBoth(TURF_DOUBLE);
 
     Function *PowFunc = Intrinsic::getOrInsertDeclaration(
-        TheModule.get(), Intrinsic::pow,
-        {Type::getDoubleTy(*TheContext)});
+      TheModule.get(), Intrinsic::pow,
+      {Type::getDoubleTy(*TheContext)});
 
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
   }

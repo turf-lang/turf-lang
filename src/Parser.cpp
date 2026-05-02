@@ -7,10 +7,12 @@
 #include "SymbolTable.h"
 #include <map>
 #include <memory>
+#include <vector>
 
 // Current state of the Parser
 int CurTok; // The current token the parser is looking at
 static std::map<int, int> BinopPrecedence; // Precedence table: '*' > '+'
+static std::vector<std::unique_ptr<ExprAST>> ParsedTopLevelASTs;
 
 // Reads the next token from the Lexer and updates CurTok
 int getNextToken() { return CurTok = gettok(); }
@@ -44,6 +46,20 @@ void InitializePrecedence() {
 
   // Exponentiation
   BinopPrecedence['^'] = 60;
+}
+
+void ClearParsedTopLevelASTs() {
+  ParsedTopLevelASTs.clear();
+}
+
+void RecordParsedTopLevelAST(const ExprAST *AST) {
+  if (AST) {
+    ParsedTopLevelASTs.push_back(CloneExprAST(AST));
+  }
+}
+
+std::unique_ptr<ExprAST> BuildProgramASTFromCache() {
+  return std::make_unique<BlockExprAST>(CloneExprList(ParsedTopLevelASTs));
 }
 
 // Returns the priority of the current operator. If it's not an operator (like a
