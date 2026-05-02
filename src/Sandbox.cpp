@@ -598,11 +598,13 @@ bool ApplyAndValidateFix(Sandbox &sandbox, int lineNumber,
     return false;
   }
   
-  // All checks passed: commit the fix
-  sandbox.commitToMain();
-  
+  // Validation passed. Do NOT call commitToMain() here:
+  // ::SourceLines must stay unchanged so that DiagnosticEngine::flushAll()
+  // renders the *original* erroneous line under the caret, not the fixed one.
+  // The sandbox has confirmed the suggestion is correct; it is presented to
+  // the user as an AI hint, not silently applied to the source.
   std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] "
-            << Colors::BRIGHT_GREEN << "✓ Fix validated and committed"
+            << Colors::BRIGHT_GREEN << "✓ Fix validated"
             << Colors::RESET << "\n";
   
   return true;
