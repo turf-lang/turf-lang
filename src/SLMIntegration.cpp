@@ -436,21 +436,23 @@ static float computeConfidence(const AISuggestion &s,
   if (s.fix_mode == "MODIFY")
     score += 0.2f;
 
-  // +0.2 if a non-empty patch was actually produced
-  if (!s.code_patch.empty())
+  // +0.2 if a non-empty replacement_line was actually produced
+  // (replacement_line is the exact code; code_patch is just a prose description)
+  const std::string &patchCode = s.replacement_line.empty() ? s.code_patch : s.replacement_line;
+  if (!patchCode.empty())
     score += 0.2f;
 
-  // +0.1 if the patch is a single, clean line (no embedded newlines or lone braces)
-  if (!s.code_patch.empty()) {
-    bool hasNewline    = s.code_patch.find('\n') != std::string::npos;
-    bool isBareBrace   = (s.code_patch == "{" || s.code_patch == "}");
+  // +0.1 if the replacement is a single, clean line (no embedded newlines or lone braces)
+  if (!patchCode.empty()) {
+    bool hasNewline  = patchCode.find('\n') != std::string::npos;
+    bool isBareBrace = (patchCode == "{" || patchCode == "}");
     if (!hasNewline && !isBareBrace)
       score += 0.1f;
   }
 
-  // +0.1 if the patch mentions the relevant keyword (patch is on-topic)
-  if (!contextKeyword.empty() && !s.code_patch.empty() &&
-      s.code_patch.find(contextKeyword) != std::string::npos)
+  // +0.1 if the replacement line mentions the relevant keyword (patch is on-topic)
+  if (!contextKeyword.empty() && !patchCode.empty() &&
+      patchCode.find(contextKeyword) != std::string::npos)
     score += 0.1f;
 
   // Clamp to [0, 1]
@@ -593,7 +595,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "\n"
       "Respond with ONLY this JSON object — fill every field yourself:\n"
       "{\"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
-      "\"suggested_comment\": <string>, \"code_patch\": <string>, \"warning\": <string>}\n"
+      "\"suggested_comment\": <string>, \"code_patch\": <human-readable description of what changed>, "
+      "\"replacement_line\": <THE EXACT SINGLE LINE of valid Turf-Lang code that replaces the erroneous line — no explanation, no prose, just the raw code>, "
+      "\"warning\": <string>}\n"
       "<|im_end|>\n"
       "<|im_start|>assistant\n";
 
@@ -620,6 +624,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     suggestion.suggested_comment =
         extractJsonFieldString(jsonStr, "suggested_comment");
     suggestion.code_patch = extractJsonFieldString(jsonStr, "code_patch");
+    suggestion.replacement_line = extractJsonFieldString(jsonStr, "replacement_line");
     suggestion.warning = extractJsonFieldString(jsonStr, "warning");
 
     // Compute confidence deterministically from measurable output signals.
@@ -656,8 +661,12 @@ bool verifySuggestion(const AISuggestion &suggestion,
     return false;
   }
   
-  // Apply and validate the fix using the sandbox
-  return ApplyAndValidateFix(*sandbox, errorLine, suggestion.code_patch, suggestion);
+  // Use replacement_line (exact Turf-Lang code) for sandbox validation.
+  // code_patch is a human-readable description and must NOT be fed to the parser.
+  const std::string &fixLine = suggestion.replacement_line.empty()
+                                   ? suggestion.code_patch
+                                   : suggestion.replacement_line;
+  return ApplyAndValidateFix(*sandbox, errorLine, fixLine, suggestion);
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -692,7 +701,7 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
   
   if (isValid) {
     suggestion.valid = true;
-    std::cerr << Colors::BRIGHT_GREEN << "[Sandbox] ✓ Suggestion validated and applied"
+    std::cerr << Colors::BRIGHT_GREEN << "[Sandbox] ✓ Suggestion validated"
               << Colors::RESET << "\n";
   } else {
     suggestion.valid = false;

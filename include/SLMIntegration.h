@@ -10,7 +10,8 @@ struct AISuggestion {
     std::string explanation;
     std::string fix_mode = "NONE";
     std::string suggested_comment;
-    std::string code_patch;
+    std::string code_patch;        // Human-readable description of the patch
+    std::string replacement_line;  // Exact Turf-Lang source line to substitute
     std::string warning;
     bool valid = false;
     bool sandbox_validated = false;      // Whether sandbox validation passed
