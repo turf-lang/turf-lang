@@ -1,0 +1,42 @@
+TURF STRING CONVERSION:
+
+TYPE CASTING SYNTAX:
+  string(value)    // convert to string
+  int(value)       // convert to int
+  double(value)    // convert to double
+
+SUPPORTED CONVERSIONS TO STRING (string()):
+  string(42)       // int to string  → "42"
+  string(3.14)     // double to string → "3.14"
+  string(true)     // bool to string → "true" or "false"
+  // string(string) is a no-op (returns the same string)
+
+SUPPORTED CONVERSIONS FROM STRING:
+  int("42")        // string to int — calls strtoll at runtime
+  double("3.14")   // string to double — calls strtod at runtime
+  // NOTE: if the string is not a valid number, the program will exit at runtime.
+
+WHAT IS NOT SUPPORTED:
+  string + 5       // ERROR: cannot add string and int. Use string(5) to convert.
+  string(arr)      // ERROR: arrays cannot be converted to strings.
+  int(str) + str   // ERROR: cannot mix int and string in arithmetic.
+
+LENGTHOF VS STRING LENGTH:
+  - Use lengthof(str) to get the character count of a string.
+  - lengthof accepts ONLY strings. Not int, double, or bool.
+
+PRINT AND PRINTLINE:
+  If you want to print a number and a string together, call them separately:
+    printline("Score: ")
+    printline(42)
+  Or cast the number first and concatenate manually (not natively supported).
+
+CORRECT EXAMPLES:
+  string s = string(100)      // "100"
+  int n = int("99")           // 99
+  int len = lengthof("hello") // 5
+
+COMMON MISTAKES:
+- Trying to concatenate strings and numbers with +.
+- Using single quotes '' instead of double quotes "" for string literals.
+- Using toString() or str() — these functions do not exist in Turf.

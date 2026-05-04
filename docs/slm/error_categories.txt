@@ -1,0 +1,83 @@
+TURF-LANG ERROR CATEGORIES REFERENCE
+
+Use this file to classify a compiler error into exactly one category.
+Choose the most specific category that matches, or GENERAL if none fit.
+
+---
+
+TYPE_MISMATCH
+  A value of one type is assigned or passed where a different type is expected.
+  Examples:
+    - Assigning a double to an int variable without int()
+    - Assigning a string to an int or double variable
+    - Mixing incompatible types in an arithmetic expression
+
+UNDECLARED_VARIABLE
+  A variable name is used but was never declared in scope.
+  Examples:
+    - Using a variable before declaring it with a type keyword
+    - Using a variable outside the block where it was declared
+    - Misspelling a variable name so it doesn't match any known variable
+
+CONTROL_FLOW
+  An error in the structure of if/else, while, for, break, or continue.
+  Examples:
+    - Missing '..' or 'step' in a for loop
+    - Using 'break' or 'continue' outside a loop
+    - Missing 'then' or '{' after an if condition
+    - Missing '{' after step expression in a for loop
+    - Using 'else if' (with space) instead of 'elseif'
+    - Function that doesn't return on all code paths (MissingReturnError)
+
+SYNTAX_ERROR
+  A general structural or token-level parse error.
+  Examples:
+    - Unexpected token when starting an expression
+    - Misspelled keyword recognized by the compiler (KeywordError)
+    - Unterminated string literal
+    - Missing closing parenthesis or bracket
+
+ARITHMETIC
+  An operator is used with incompatible numeric types or a math error occurs.
+  Examples:
+    - Division or modulo by zero literal
+    - Using an unsupported operator on non-numeric types
+
+STRING_CONVERSION
+  An illegal type conversion involving strings.
+  Examples:
+    - Trying to add a string and a number using +
+    - Passing a non-string to lengthof()
+    - Casting an unsupported type to string
+
+ARRAY_ERROR
+  An error during array declaration, access, or initialization.
+  Examples:
+    - Array index out of bounds (compile-time literal check)
+    - Array size mismatch with the initializer list
+    - Using a non-integer index
+    - Array element type mismatch
+
+DECLARATION
+  A variable is declared a second time in the same scope.
+  Examples:
+    - Using a type keyword on a variable that already exists in scope
+    - Shadowing a variable from an outer scope (this is a warning)
+
+FUNCTION_SIGNATURE
+  An error in a function definition, call, parameters, or return type.
+  Examples:
+    - Wrong number of arguments in a function call
+    - Return type of function doesn't match declared return type
+    - Using a void function result as a value in an expression
+
+BUILTIN_FUNCTION
+  An error specific to a builtin function (print, printline, input, lengthof, typeof).
+  Also covers misspelled or unknown function names.
+  Examples:
+    - Calling a function that doesn't exist: 'praintln', 'println', 'length'
+    - Passing wrong number of args to a builtin
+    - Unknown function name (not declared by user, not a builtin)
+
+GENERAL
+  Use this ONLY when none of the above categories apply.

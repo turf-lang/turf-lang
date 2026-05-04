@@ -1,0 +1,51 @@
+TURF VARIABLE DECLARATION:
+
+SYNTAX:
+  type name = value
+
+  CORRECT EXAMPLES:
+    int x = 5
+    double pi = 3.14
+    bool flag = true
+    string greeting = "hello"
+
+  RULES:
+  - Type keyword is required on first use. No `var` or `let`.
+  - Initialization value is required at declaration time. `int x` alone is an error.
+  - Valid type keywords: int, double (or float), bool, string
+  - void may NOT be used as a variable type.
+
+REASSIGNMENT (after first declaration):
+  Do NOT repeat the type keyword when reassigning.
+
+  CORRECT:
+    int count = 0
+    count = 10        // correct reassignment — no type keyword
+
+  INCORRECT:
+    int count = 0
+    int count = 10    // ERROR: variable 'count' already declared in this scope
+
+SHADOWING (warning, not error):
+  Declaring a variable with the same name in a nested scope produces a warning.
+  The inner variable hides the outer one inside the nested block.
+
+  Example:
+    int x = 1
+    if true {
+        int x = 99    // Warning: shadows outer 'x'
+        printline(x)  // prints 99
+    }
+    printline(x)      // prints 1 (outer x unaffected)
+
+KEYWORD NAMES:
+  You cannot use a reserved keyword as a variable name.
+  Reserved: if, then, else, elseif, while, for, in, step, fn,
+            return, break, continue, int, double, float, bool,
+            string, void, true, false, print, printline, input,
+            lengthof, typeof
+
+COMMON MISTAKES:
+- Forgetting the initial value: `int x` alone will not compile.
+- Using `var`, `let`, `const`, or `auto` — these do not exist in Turf.
+- Redeclaring with a type keyword when you only meant to reassign.

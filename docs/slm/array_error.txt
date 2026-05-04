@@ -1,0 +1,47 @@
+TURF ARRAY ERRORS:
+
+ARRAY DECLARATION SYNTAX:
+  type[SIZE] name               // uninitialized
+  type[SIZE] name = [v1, v2, v3]  // initialized
+
+  CORRECT EXAMPLES:
+    int[5] nums
+    int[3] primes = [2, 3, 5]
+    double[4] vals = [1.0, 2.0, 3.0, 4.0]
+
+  RULES:
+  - SIZE must be a positive integer LITERAL at compile time.
+  - The number of values in the initializer list must exactly match SIZE.
+  - Only int, double, bool, and string element types are supported.
+
+ELEMENT ACCESS:
+  name[index]                   // read
+  name[index] = value           // write
+
+  CORRECT EXAMPLES:
+    int first = primes[0]
+    primes[0] = 7
+
+  RULES:
+  - Indices are zero-based: valid range is 0 to SIZE-1.
+  - Index must be of type int.
+  - Accessing out of bounds is a compile-time error if the index is a literal.
+
+COMPOUND ASSIGNMENT ON ARRAY ELEMENTS (NOT SUPPORTED):
+  arr[0] += 5   // PARSE ERROR — the parser explicitly rejects this.
+  // FIX:
+  arr[0] = arr[0] + 5
+
+ARRAY LENGTH:
+  int len = arr.length          // .length is a property, not a function call
+
+  INCORRECT:
+    int len = len(arr)          // ERROR: len() does not exist
+    int len = lengthof(arr)     // ERROR: lengthof() only works on strings
+
+COMMON MISTAKES:
+- Using () instead of [] for array declaration: `int(5) arr` is wrong.
+- Using compound assignment operators (+=, -=) on array elements.
+- Confusing arr.length (for arrays) with lengthof() (for strings).
+- Providing wrong number of initializers vs declared size.
+- Using a non-integer or negative index.

@@ -1,0 +1,8 @@
+// ERROR TEST — BUILTIN_FUNCTION (tight context ±3)
+// Category: BUILTIN_FUNCTION
+// Expects: Error — lengthof() requires a string argument, not an int.
+// The SLM should get a very tight ±3 context around this one line.
+
+int count = 5
+int bad = lengthof(count)
+printline(bad)

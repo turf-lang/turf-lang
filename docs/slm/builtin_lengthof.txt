@@ -1,0 +1,45 @@
+TURF BUILTIN: lengthof()
+
+SIGNATURE:
+  int lengthof(string expr)
+
+PURPOSE:
+  Returns the number of bytes (characters) in a string.
+  This calls the C standard library strlen() under the hood.
+
+ARGUMENT COUNT:
+  - Exactly 1 argument required.
+
+ACCEPTED TYPES:
+  - ONLY string. Passing int, double, or bool is a compile-time error.
+
+RETURN TYPE:
+  - int (always)
+
+CORRECT USAGE:
+  string msg = "hello"
+  int n = lengthof(msg)           // n = 5
+  int n2 = lengthof("world")      // n2 = 5
+  int n3 = lengthof(input())      // valid: input() returns a string
+
+INCORRECT USAGE & TYPE CASTING:
+  // If you accidentally pass an int, double, or bool, cast it to a string using string(value).
+  int n = lengthof(42)            // ERROR: argument is int, not string
+  // FIX: Cast the integer to a string first
+  int n = lengthof(string(42))    // CORRECT
+
+  int n = lengthof(3.14)          // ERROR: argument is double, not string
+  // FIX: int n = lengthof(string(3.14))
+
+  int n = lengthof(true)          // ERROR: argument is bool, not string
+  // FIX: int n = lengthof(string(true))
+
+ARRAYS vs STRINGS:
+  - For ARRAYS, use the .length property:    int n = arr.length
+  - For STRINGS, use lengthof():             int n = lengthof(str)
+  - DO NOT use lengthof() on arrays — it will be a type error.
+
+COMMON MISTAKES:
+- Calling lengthof on an array: use arr.length instead.
+- Hallucinating len() or size() — these do not exist in Turf.
+- Passing a non-string value.

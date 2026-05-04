@@ -3,6 +3,7 @@
 #include "Lexer.h"
 #include "Lint.h"
 #include "Parser.h"
+#include "SLMEngine.h"
 #include "SymbolTable.h"
 #include "Types.h"
 #include "llvm/Config/llvm-config.h"
@@ -27,6 +28,7 @@ struct CompilerOptions {
   std::string InputFile;
   std::string OutputName = "program"; // default output binary name
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
+  bool AIEnabled = false;             // --smart: enable SLM AI suggestions
 };
 
 static CompilerOptions parseArgs(int argc, char **argv) {
@@ -37,6 +39,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
 
     if (arg == "--emit-llvm") {
       opts.EmitLLVM = true;
+    } else if (arg == "--smart") {
+      opts.AIEnabled = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg[0] == '-') {
@@ -48,7 +52,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   }
 
   if (opts.InputFile.empty()) {
-    std::cerr << "Usage: turf <filename.tr> [-o output] [--emit-llvm]\n";
+    std::cerr
+        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart]\n";
     std::exit(1);
   }
 
@@ -139,13 +144,21 @@ static int linkObject(const std::string &ObjFile,
 
 // main
 int main(int argc, char **argv) {
+  struct SLMCleanup {
+    ~SLMCleanup() { SLM::SLMEngine::getInstance().release(); }
+  } cleanup;
+
   auto opts = parseArgs(argc, argv);
+
+  // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
+  g_AIEnabled = opts.AIEnabled;
 
   SourceFile.open(opts.InputFile);
   if (!SourceFile.is_open()) {
     std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
     return 1;
   }
+  SourceFilename = opts.InputFile;
 
   // Read file into memory for error printing
   std::ifstream File(opts.InputFile);
@@ -172,6 +185,7 @@ int main(int argc, char **argv) {
 
   BasicBlock *Entry = BasicBlock::Create(*TheContext, "entry", TheFunction);
   Builder->SetInsertPoint(Entry);
+  ClearParsedTopLevelASTs();
 
   // Pre-pass: hoist 'fn' function prototypes so that forward calls work.
   // We perform a second full parse of the file, i.e. only processing
@@ -201,6 +215,7 @@ int main(int argc, char **argv) {
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
             if (AST) {
+              RecordParsedTopLevelAST(AST.get());
               LintExpression(AST.get());
               AST->codegen();
             }
@@ -264,6 +279,7 @@ int main(int argc, char **argv) {
     if (setjmp(g_recoverJmp) == 0) {
       auto AST = ParseExpression();
       if (AST) {
+        RecordParsedTopLevelAST(AST.get());
         LintExpression(AST.get()); // Lint top-level statements before codegen
         AST->codegen();
       } else {
@@ -273,11 +289,10 @@ int main(int argc, char **argv) {
     } else {
       // longjmp landed here : diagnostic already in DiagnosticEngine.
       // Skip to the next statement boundary.
-      while (CurTok != ';' && CurTok != TOK_EOF &&
-             CurTok != TOK_FN && CurTok != TOK_TYPE_INT &&
-             CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
-             CurTok != TOK_TYPE_STRING && CurTok != TOK_IF &&
-             CurTok != TOK_WHILE && CurTok != TOK_FOR &&
+      while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
+             CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
+             CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING &&
+             CurTok != TOK_IF && CurTok != TOK_WHILE && CurTok != TOK_FOR &&
              CurTok != TOK_RETURN) {
         getNextToken();
       }

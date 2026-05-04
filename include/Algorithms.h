@@ -7,5 +7,6 @@
 // Supports insertions, deletions, substitutions, and adjacent transpositions.
 // Used for ranking identifier/keyword typo suggestions.
 int getLevenshteinDistance(const std::string &s1, const std::string &s2);
+int getDamerauLevenshteinDistance(const std::string &s1, const std::string &s2);
 
 #endif

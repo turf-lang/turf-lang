@@ -1,0 +1,20 @@
+// ERROR TEST — UNDECLARED_VAR (medium context ±5, testing 3a pinning)
+// Category: UNDECLARED_VAR
+// Expects: Error about using 'counter' before declaration.
+// Tests the 3a pinning: counter is declared but in an exited scope.
+
+if true {
+    int counter = 0
+    printline(counter)
+}
+
+// ... padding so declaration is out of +/-5 window ...
+printline("padding")
+printline("padding")
+printline("padding")
+printline("padding")
+printline("padding")
+printline("padding")
+printline("padding")
+
+printline(counter) // counter is out of scope here

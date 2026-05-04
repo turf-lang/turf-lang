@@ -1,0 +1,40 @@
+TURF ARITHMETIC:
+
+OPERATORS:
+  +   addition
+  -   subtraction
+  *   multiplication
+  /   division
+  %   modulo (remainder)
+  ^   power (exponentiation)
+
+COMPOUND ASSIGNMENT:
+  +=  x += 5    is  x = x + 5
+  -=  x -= 3    is  x = x - 3
+  *=  x *= 2    is  x = x * 2
+  /=  x /= 4    is  x = x / 4
+  %=  x %= 3    is  x = x % 3
+
+INCREMENT/DECREMENT:
+  x++   is  x = x + 1
+  x--   is  x = x - 1
+
+TYPE PROMOTION IN EXPRESSIONS:
+- bool -> int -> double (automatic in expressions only)
+- If one operand is double and the other is int, result is double.
+- If one operand is bool, it is treated as int (true=1, false=0).
+
+DIVISION RULES:
+- int / int = int (truncated, e.g. 7/2 = 3)
+- Dividing by zero is undefined behavior and will crash at runtime.
+- Modulo by zero is also undefined.
+
+CORRECT EXAMPLES:
+  int x = 10 / 3       // Result: 3 (integer division)
+  double y = 10.0 / 3  // Result: 3.333...
+  int z = 10 % 3       // Result: 1
+
+INCORRECT EXAMPLES:
+  int x = 10 / 0       // ERROR: division by zero
+  int y = 10 % 0       // ERROR: modulo by zero
+  string s = "hi" + 5  // ERROR: cannot add string and int, use string(5)

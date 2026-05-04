@@ -49,6 +49,9 @@ public:
     // Start with global scope
     EnterScope();
   }
+
+  SymbolTable(const SymbolTable &Other);
+  SymbolTable &operator=(const SymbolTable &Other);
   
   // Scope management
   void EnterScope();

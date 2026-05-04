@@ -1,0 +1,46 @@
+TURF UNDECLARED VARIABLE OR IDENTIFIER:
+
+CAUSE:
+  The compiler cannot find a variable, function, or name that is referenced.
+  This happens when:
+  1. The variable was never declared.
+  2. The variable was declared in a different (inner) scope that has ended.
+  3. The name is a typo of a known variable or builtin.
+  4. A builtin function name was misspelled (e.g. `print` instead of `print`).
+
+DECLARATION SYNTAX:
+  type name = value
+
+  CORRECT:
+    int count = 0
+    count = count + 1             // count is visible here
+
+  INCORRECT:
+    if true {
+        int x = 5
+    }
+    printline(x)                  // ERROR: x is out of scope here
+
+SCOPE RULES:
+  - Variables declared inside { } are only visible inside that block.
+  - For loop variables are only visible inside the loop body.
+  - Top-level variables are visible everywhere after declaration.
+
+BUILTIN FUNCTION NAMES (exact spelling required):
+  print      printline      input      lengthof      typeof
+
+CORRECT USAGE:
+  int x = 5
+  printline(x)
+
+INCORRECT USAGE:
+  printline(y)                    // ERROR: y was never declared
+  praintline("hi")                // ERROR: typo — should be 'printline'
+  length("hi")                    // ERROR: no such function — use lengthof("hi")
+
+COMMON MISTAKES:
+- Typos in variable names (e.g. `coutn` instead of `count`).
+- Typos in builtin function names (e.g. `printLine`, `print_line`, `println`).
+- Using a loop variable outside the loop body.
+- Forgetting to declare a variable before using it.
+- Using a variable from a nested block after the block has closed.

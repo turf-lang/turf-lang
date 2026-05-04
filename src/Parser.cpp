@@ -7,10 +7,12 @@
 #include "SymbolTable.h"
 #include <map>
 #include <memory>
+#include <vector>
 
 // Current state of the Parser
 int CurTok; // The current token the parser is looking at
 static std::map<int, int> BinopPrecedence; // Precedence table: '*' > '+'
+static std::vector<std::unique_ptr<ExprAST>> ParsedTopLevelASTs;
 
 // Reads the next token from the Lexer and updates CurTok
 int getNextToken() { return CurTok = gettok(); }
@@ -44,6 +46,20 @@ void InitializePrecedence() {
 
   // Exponentiation
   BinopPrecedence['^'] = 60;
+}
+
+void ClearParsedTopLevelASTs() {
+  ParsedTopLevelASTs.clear();
+}
+
+void RecordParsedTopLevelAST(const ExprAST *AST) {
+  if (AST) {
+    ParsedTopLevelASTs.push_back(CloneExprAST(AST));
+  }
+}
+
+std::unique_ptr<ExprAST> BuildProgramASTFromCache() {
+  return std::make_unique<BlockExprAST>(CloneExprList(ParsedTopLevelASTs));
 }
 
 // Returns the priority of the current operator. If it's not an operator (like a
@@ -135,7 +151,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
     if (!Index)
       return nullptr;
     if (CurTok != ']') {
-      LogErrorAt(CurLoc, "Expected ']' after array index");
+      LogErrorAt(CurLoc, "Expected ']' to close the array index — did you forget to close the '[' before the index?");
       return nullptr;
     }
     getNextToken();
@@ -178,7 +194,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
   if (CurTok == '.') {
     getNextToken();
     if (CurTok != TOK_IDENTIFIER || IdentifierStr != "length") {
-      LogErrorAt(CurLoc, "Expected 'length' after '.'");
+      LogErrorAt(CurLoc, "Expected 'length' after '.' — the only supported property is '.length' (e.g. arr.length)");
       return nullptr;
     }
     getNextToken();
@@ -245,7 +261,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
         break;
     }
     if (CurTok != ')') {
-      LogErrorAt(CurLoc, "Expected ')' in function call");
+      LogErrorAt(CurLoc, "Expected ')' to close the function call — check for a missing ')' or an extra argument");
       return nullptr;
     }
     getNextToken();
@@ -264,7 +280,7 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
     return nullptr;
 
   if (CurTok != ')') {
-    SyntaxError(CurLoc, "Expected ')'").raise();
+    SyntaxError(CurLoc, "Missing closing ')' — every '(' must have a matching ')'").raise();
     return nullptr;
   }
   getNextToken(); // eat ')'
@@ -299,12 +315,13 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     Then = ParseBlock();
   } else {
     if (CurTok == TOK_IDENTIFIER) {
-      if (getLevenshteinDistance(IdentifierStr, "then") <= 2) {
+      if (getDamerauLevenshteinDistance(IdentifierStr, "then") <= std::max(1, (int)IdentifierStr.length() / 3)) {
         KeywordError(CurLoc, IdentifierStr).raise();
         return nullptr;
       }
     }
-    LogErrorAt(CurLoc, "Expected 'then' or '{' after if condition");
+    LogErrorAt(KeywordLoc, "Expected 'then' or '{' after the if-condition."
+               "\n  Hint: Use 'if cond then expr else expr' or 'if cond { ... }'.");
     return nullptr;
   }
 
@@ -313,7 +330,7 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
 
   if (!IsBlockForm) {
     if (CurTok == TOK_IDENTIFIER) {
-      if (getLevenshteinDistance(IdentifierStr, "else") <= 2) {
+      if (getDamerauLevenshteinDistance(IdentifierStr, "else") <= std::max(1, (int)IdentifierStr.length() / 3)) {
         KeywordError(CurLoc, IdentifierStr).raise();
         return nullptr;
       }
@@ -347,7 +364,8 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
       return nullptr;
 
     if (CurTok != '{') {
-      LogErrorAt(CurLoc, "Expected '{' after elseif condition");
+      LogErrorAt(ElseifLoc, "Expected '{' to open the elseif-block body."
+                 "\n  Hint: 'elseif' blocks must always use braces: elseif condition { ... }");
       return nullptr;
     }
     auto ElseifBody = ParseBlock();
@@ -373,8 +391,9 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
       return nullptr;
   } else {
     if (CurTok == TOK_IDENTIFIER) {
-      if (getLevenshteinDistance(IdentifierStr, "else") <= 2 ||
-          getLevenshteinDistance(IdentifierStr, "elseif") <= 2) {
+      int thresh = std::max(1, (int)IdentifierStr.length() / 3);
+      if (getDamerauLevenshteinDistance(IdentifierStr, "else") <= thresh ||
+          getDamerauLevenshteinDistance(IdentifierStr, "elseif") <= thresh) {
         KeywordError(CurLoc, IdentifierStr).raise();
         return nullptr;
       }
@@ -394,7 +413,8 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
     if (FindBuiltinByToken(CurTok))
       return ParseBuiltinCall();
 
-    LogErrorAt(CurLoc, "unknown token when expecting an expression");
+    LogErrorAt(CurLoc, "Unexpected token — expected a value, variable name, or expression here."
+               "\n  Hint: Check for stray characters, a missing operator, or an incomplete statement.");
     return nullptr;
 
   case TOK_IDENTIFIER: {
@@ -415,9 +435,9 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
 
     if (!IsKnownVariable && IdName.length() >= 2) {
       for (const auto &pair : Keywords) {
-        int dist = getLevenshteinDistance(IdName, pair.first);
-        if (dist <= 1 ||
-            (dist == 2 && IdName.length() > 3 && pair.first.length() > 3)) {
+        int dist = getDamerauLevenshteinDistance(IdName, pair.first);
+        int thresh = std::max(1, (int)IdName.length() / 3);
+        if (dist <= thresh) {
           CouldBeKeywordTypo = true;
           break;
         }
@@ -472,7 +492,8 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
       return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName,
                                                  std::move(RHS));
     }
-    LogErrorAt(KeywordLoc, "unknown token when expecting an expression");
+    LogErrorAt(KeywordLoc, "Unexpected '" + IdName + "' keyword here — expected a value or expression."
+               "\n  Hint: '" + IdName + "' is a control-flow keyword; it can't appear standalone in an expression.");
     return nullptr;
   }
 
@@ -634,10 +655,11 @@ std::unique_ptr<ExprAST> ParseUnary() {
 
 std::unique_ptr<ExprAST> ParseBlock() {
   if (CurTok != '{') {
-    LogErrorAt(CurLoc, "Expected '{'");
+    LogErrorAt(CurLoc, "Expected '{' to open a block");
     return nullptr;
   }
 
+  SourceLocation OpenBraceLoc = CurLoc;
   getNextToken();
   std::vector<std::unique_ptr<ExprAST>> Exprs;
 
@@ -654,7 +676,8 @@ std::unique_ptr<ExprAST> ParseBlock() {
   }
 
   if (CurTok != '}') {
-    LogErrorAt(CurLoc, "Expected '}'");
+    LogErrorAt(OpenBraceLoc, "Missing closing '}' — every '{' must have a matching '}'."
+               "\n  Hint: Check that all your blocks are properly closed.");
     return nullptr;
   }
   getNextToken();
@@ -669,13 +692,27 @@ std::unique_ptr<ExprAST> ParseBlock() {
 std::unique_ptr<ExprAST> ParseBuiltinCall() {
   const BuiltinDef *Def = FindBuiltinByToken(CurTok);
   std::string Name = Def->Name;
+  SourceLocation CallLoc = CurLoc; // Capture location BEFORE consuming token
   getNextToken(); // consume the builtin keyword
 
   if (CurTok != '(') {
-    LogErrorAt(CurLoc, "Expected '(' after '" + Name + "'");
+    LogErrorAt(CallLoc, "Expected '(' after '" + Name + "' — builtins must be called with parentheses");
     return nullptr;
   }
   getNextToken(); // eat '('
+
+  // ── Zero-argument guard ──────────────────────────────────────────────────
+  // Fires before the loop so the silent ParseExpression() path is never hit.
+  // Without this, a call like typeof() would reach ParsePrimary()'s default
+  // branch and emit the inscrutable "unknown token when expecting an expression".
+  if (Def->ArgCount > 0 && CurTok == ')') {
+    std::string argWord = (Def->ArgCount == 1) ? "argument" : "arguments";
+    LogErrorAt(CallLoc,
+      "'" + Name + "' requires exactly " + std::to_string(Def->ArgCount) +
+      " " + argWord + ", but 0 were given." +
+      "\n  Hint: Pass an expression inside the parentheses, e.g. " + Name + "(expr)");
+    return nullptr;
+  }
 
   std::vector<std::unique_ptr<ExprAST>> Args;
   for (int i = 0; i < Def->ArgCount; ++i) {
@@ -694,13 +731,26 @@ std::unique_ptr<ExprAST> ParseBuiltinCall() {
     }
   }
 
+  // ── Too-many-arguments guard ─────────────────────────────────────────────
+  // After consuming all expected arguments, if we see ',' the user passed
+  // more than the function accepts.
+  if (CurTok == ',') {
+    std::string argWord = (Def->ArgCount == 1) ? "argument" : "arguments";
+    LogErrorAt(CurLoc,
+      "'" + Name + "' takes exactly " + std::to_string(Def->ArgCount) +
+      " " + argWord + ", but more were given." +
+      "\n  Hint: Remove the extra argument(s) — only " +
+      std::to_string(Def->ArgCount) + " " + argWord + " allowed.");
+    return nullptr;
+  }
+
   if (CurTok != ')') {
-    LogErrorAt(CurLoc, "Expected ')' after argument to '" + Name + "'");
+    LogErrorAt(CurLoc, "Expected ')' to close the call to '" + Name + "'");
     return nullptr;
   }
   getNextToken(); // eat ')'
 
-  return std::make_unique<BuiltinCallExprAST>(Name, std::move(Args));
+  return std::make_unique<BuiltinCallExprAST>(CallLoc, Name, std::move(Args));
 }
 
 std::unique_ptr<ExprAST> ParseWhileExpr() {
@@ -723,7 +773,8 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
   }
 
   if (CurTok != '{') {
-    LogErrorAt(CurLoc, "Expected '{' after while condition");
+    LogErrorAt(KeywordLoc, "Expected '{' to open the while-loop body."
+               "\n  Hint: while loops must use braces: while condition { ... }");
     return nullptr;
   }
 
@@ -742,14 +793,16 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   getNextToken();
 
   if (CurTok != TOK_IDENTIFIER) {
-    LogErrorAt(CurLoc, "Expected identifier after 'for'");
+    LogErrorAt(CurLoc, "Expected a loop variable name after 'for'."
+               "\n  Hint: Correct syntax: for i in 0..10 step i++ { }");
     return nullptr;
   }
   std::string VarName = IdentifierStr;
   getNextToken();
 
   if (CurTok != TOK_IN) {
-    LogErrorAt(CurLoc, "Expected 'in' after loop variable");
+    LogErrorAt(ForLoc, "Expected 'in' after the loop variable in a for-loop."
+               "\n  Hint: Correct syntax: for " + VarName + " in 0..10 step " + VarName + "++ { }");
     return nullptr;
   }
   getNextToken();
@@ -758,7 +811,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   if (!Start)
     return nullptr;
   if (CurTok != TOK_RANGE) {
-    LogErrorAt(CurLoc, "Expected '..' in for loop range");
+    LogErrorAt(ForLoc, "Expected '..' between the start and end values of the range."
+               "\n  Hint: Correct syntax: for " + VarName + " in 0..10 step " + VarName + "++ { }");
     return nullptr;
   }
   getNextToken();
@@ -767,7 +821,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   if (!End)
     return nullptr;
   if (CurTok != TOK_STEP) {
-    LogErrorAt(CurLoc, "Expected 'step' after range");
+    LogErrorAt(ForLoc, "Expected 'step' after the range end value."
+               "\n  Hint: Correct syntax: for " + VarName + " in 0..10 step " + VarName + "++ { }");
     return nullptr;
   }
   getNextToken();
@@ -777,7 +832,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
     return nullptr;
 
   if (CurTok != '{') {
-    LogErrorAt(CurLoc, "Expected '{' after step expression");
+    LogErrorAt(ForLoc, "Expected '{' to open the for-loop body."
+               "\n  Hint: Correct syntax: for " + VarName + " in 0..10 step " + VarName + "++ { }");
     return nullptr;
   }
 
@@ -799,19 +855,19 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
     getNextToken();
 
     if (CurTok != TOK_INT_LITERAL) {
-      LogErrorAt(CurLoc, "Array size must be an integer literal");
+      LogErrorAt(CurLoc, "Array size must be a positive integer literal, e.g. int[5] arr");
       return nullptr;
     }
 
     int ArraySize = static_cast<int>(IntVal);
     if (ArraySize <= 0) {
-      LogErrorAt(CurLoc, "Array size must be a positive integer");
+      LogErrorAt(CurLoc, "Array size must be a positive integer (greater than 0)");
       return nullptr;
     }
     getNextToken();
 
     if (CurTok != ']') {
-      LogErrorAt(CurLoc, "Expected ']' after array size");
+      LogErrorAt(CurLoc, "Expected ']' to close the array size — e.g. int[5] arr");
       return nullptr;
     }
     getNextToken();
@@ -819,7 +875,7 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
     bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
                      Keywords.at(IdentifierStr) == CurTok;
     if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
-      LogErrorAt(CurLoc, "Expected identifier after array type");
+      LogErrorAt(CurLoc, "Expected a variable name after the array type, e.g. int[5] arr");
       return nullptr;
     }
 
@@ -833,7 +889,7 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
       getNextToken();
 
       if (CurTok != '[') {
-        LogErrorAt(CurLoc, "Expected '[' for array initializer");
+        LogErrorAt(CurLoc, "Expected '[' to begin the array initializer — e.g. int[3] arr = [1, 2, 3]");
         return nullptr;
       }
       getNextToken();
@@ -850,7 +906,7 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
       }
 
       if (CurTok != ']') {
-        LogErrorAt(CurLoc, "Expected ']' at end of array initializer");
+        LogErrorAt(CurLoc, "Expected ']' to close the array initializer — check for a missing ']' or a stray element");
         return nullptr;
       }
       getNextToken();
@@ -864,7 +920,8 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
   bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
                    Keywords.at(IdentifierStr) == CurTok;
   if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
-    LogErrorAt(CurLoc, "Expected identifier after type");
+    LogErrorAt(CurLoc, "Expected a variable name after the type keyword."
+               "\n  Hint: Variable declarations look like: int x = 5");
     return nullptr;
   }
 
@@ -873,7 +930,8 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
   getNextToken();
 
   if (CurTok != TOK_ASSIGN) {
-    LogErrorAt(CurLoc, "Expected '=' after variable name");
+    LogErrorAt(NameLoc, "Expected '=' after variable name '" + Name + "'."
+               "\n  Hint: Variables must be initialised: int " + Name + " = <value>");
     return nullptr;
   }
 
@@ -920,21 +978,24 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   if (CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
       CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING &&
       CurTok != TOK_TYPE_VOID) {
-    LogErrorAt(CurLoc, "Expected return type after 'fn'");
+    LogErrorAt(FnLoc, "Expected a return type after 'fn' (int, double, bool, string, or void)."
+               "\n  Hint: Function syntax: fn int myFunc(int x) { return x }");
     return nullptr;
   }
   TurfType RetType = TokenToTurfType(CurTok);
   getNextToken();
 
   if (CurTok != TOK_IDENTIFIER) {
-    LogErrorAt(CurLoc, "Expected function name after return type");
+    LogErrorAt(FnLoc, "Expected a function name after the return type."
+               "\n  Hint: Function syntax: fn int myFunc(int x) { return x }");
     return nullptr;
   }
   std::string FuncName = IdentifierStr;
   getNextToken();
 
   if (CurTok != '(') {
-    LogErrorAt(CurLoc, "Expected '(' after function name");
+    LogErrorAt(FnLoc, "Expected '(' after function name '" + FuncName + "'."
+               "\n  Hint: Function syntax: fn int " + FuncName + "(int x) { return x }");
     return nullptr;
   }
   getNextToken();
@@ -944,14 +1005,16 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
     // Parse each parameter: <type> <name>
     if (CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
         CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING) {
-      LogErrorAt(CurLoc, "Expected parameter type in function parameter list");
+      LogErrorAt(CurLoc, "Expected a parameter type (int, double, bool, string) in the parameter list of '" + FuncName + "'."
+                 "\n  Hint: Each parameter must have a type: fn int " + FuncName + "(int x, string y) { ... }");
       return nullptr;
     }
     TurfType ParamType = TokenToTurfType(CurTok);
     getNextToken();
 
     if (CurTok != TOK_IDENTIFIER) {
-      LogErrorAt(CurLoc, "Expected parameter name after type");
+      LogErrorAt(CurLoc, "Expected a parameter name after the type in '" + FuncName + "'."
+                 "\n  Hint: Each parameter needs both a type and a name: fn int " + FuncName + "(int x) { ... }");
       return nullptr;
     }
     std::string ParamName = IdentifierStr;
@@ -966,14 +1029,16 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   }
 
   if (CurTok != ')') {
-    LogErrorAt(CurLoc, "Expected ')' after parameter list");
+    LogErrorAt(FnLoc, "Expected ')' to close the parameter list of '" + FuncName + "'."
+               "\n  Hint: Check for a missing ')' or a malformed parameter.");
     return nullptr;
   }
   getNextToken();
 
   // Parse body block
   if (CurTok != '{') {
-    LogErrorAt(CurLoc, "Expected '{' for function body");
+    LogErrorAt(FnLoc, "Expected '{' to open the body of function '" + FuncName + "'."
+               "\n  Hint: Function syntax: fn int " + FuncName + "(...) { ... }");
     return nullptr;
   }
   auto Body = ParseBlock();

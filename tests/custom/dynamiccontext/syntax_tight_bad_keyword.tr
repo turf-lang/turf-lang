@@ -1,0 +1,10 @@
+// ERROR TEST — SYNTAX_ERROR (tight context ±3)
+// Category: SYNTAX_ERROR
+// Expects: Error about an unexpected token / unknown keyword
+// "iff" is not a keyword — the SLM gets just 3 lines of context.
+
+int score = 95
+
+iff score > 90 {
+    printline("A grade")
+}

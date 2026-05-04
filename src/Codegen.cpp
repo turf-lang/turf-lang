@@ -297,8 +297,9 @@ Value *BinaryExprAST::codegen() {
     // Ensure both operands are double
     CastBoth(TURF_DOUBLE);
 
-    Function *PowFunc = Intrinsic::getDeclaration(
-        TheModule.get(), Intrinsic::pow, Type::getDoubleTy(*TheContext));
+    Function *PowFunc = Intrinsic::getOrInsertDeclaration(
+      TheModule.get(), Intrinsic::pow,
+      {Type::getDoubleTy(*TheContext)});
 
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
   }
@@ -794,7 +795,7 @@ Value *CastExprAST::codegen() {
 Value *BuiltinCallExprAST::codegen() {
   const BuiltinDef *Def = FindBuiltin(Name);
   if (!Def) {
-    SemanticError(CurLoc, "Unknown builtin function: '" + Name + "'").raise();
+    SemanticError(Loc, "Unknown builtin function: '" + Name + "'").raise();
     return nullptr;
   }
 
@@ -808,7 +809,9 @@ Value *BuiltinCallExprAST::codegen() {
   }
 
   // Dispatch to the lambda defined in Builtins.cpp
-  return Def->Codegen(ArgVals, CurLoc);
+  // Use stored Loc (captured at parse time) instead of CurLoc (which has
+  // already advanced past this call by codegen time).
+  return Def->Codegen(ArgVals, Loc);
 }
 
 Value *WhileExprAST::codegen() {

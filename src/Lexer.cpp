@@ -1,5 +1,6 @@
 #include "Lexer.h"
 #include "Colors.h"
+#include "SLMIntegration.h"
 
 #include <algorithm>
 #include <cctype>
@@ -8,6 +9,7 @@
 #include <map>
 
 std::vector<std::string> SourceLines;
+std::string SourceFilename;
 SourceLocation CurLoc = {1, 0};
 int CurLine = 1;
 int CurCol = 0;
@@ -15,11 +17,19 @@ static int LastChar = ' ';
 
 // DiagnosticEngine : static storage
 std::vector<DiagnosticEngine::Diag> DiagnosticEngine::Diagnostics;
-std::set<int>                       DiagnosticEngine::ErrorLines;
+std::set<int> DiagnosticEngine::ErrorLines;
 
 // setjmp/longjmp recovery buffers
 jmp_buf g_recoverJmp;
-bool    g_recoverActive = false;
+bool g_recoverActive = false;
+
+// AI/SLM flag: only true when --smart is passed on the CLI.
+bool g_AIEnabled = false;
+
+// Set to true after the SLM handles the first error in a --smart pass.
+// Any further errors are suppressed from SLM analysis because they are
+// likely cascading side-effects of the first failure (ghost errors).
+static bool g_slmFiredThisPass = false;
 
 std::ifstream SourceFile;
 double NumVal;
@@ -54,33 +64,39 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
 
 // Internal helper: physically print one diagnostic to stderr.
 static void printDiag(const DiagnosticEngine::Diag &D) {
-  bool isWarning = D.IsWarning ||
-                   D.Msg.find("Warning:") != std::string::npos ||
+  bool isWarning = D.IsWarning || D.Msg.find("Warning:") != std::string::npos ||
                    D.Msg.find("warning:") != std::string::npos;
-  std::string HeaderColor =
-      isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
-  std::string HeaderText = isWarning ? "Warning" : "Oops! Something went wrong";
 
-  std::cerr << Colors::BOLD << HeaderColor << HeaderText << " at line "
-            << D.Loc.Line << ", column " << D.Loc.Col << ":"
-            << Colors::RESET << "\n\n"
-            << "  " << D.Msg << "\n\n";
+  const std::string &AccentColor = isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
+  const char *TypeLabel           = isWarning ? "warning" : "error";
 
-  if (D.Loc.Line > 0 &&
-      D.Loc.Line <= static_cast<int>(SourceLines.size())) {
+  // ── error/warning  at line X, col Y
+  std::cerr << Colors::BOLD << AccentColor << "\u2500\u2500 " << TypeLabel << " "
+            << Colors::RESET << Colors::BRIGHT_BLACK
+            << "at line " << D.Loc.Line << ", col " << D.Loc.Col
+            << Colors::RESET << "\n\n";
+
+  // Message body — embedded ANSI codes from error classes render intact.
+  std::cerr << "  " << D.Msg << "\n";
+
+  // Code snippet with │ gutter.
+  if (D.Loc.Line > 0 && D.Loc.Line <= static_cast<int>(SourceLines.size())) {
     const std::string &LineContent = SourceLines[D.Loc.Line - 1];
+    std::string LineNumStr         = std::to_string(D.Loc.Line);
+    int CaretOffset                = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
 
-    std::cerr << Colors::BRIGHT_BLACK << "  " << D.Loc.Line << " | "
-              << Colors::RESET << LineContent << "\n";
-
-    std::string LineNumStr = std::to_string(D.Loc.Line);
-    int CaretOffset = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
-    std::cerr << Colors::BRIGHT_BLACK << "  "
-              << std::string(LineNumStr.length(), ' ') << " | "
-              << Colors::RESET << std::string(CaretOffset, ' ')
-              << Colors::BOLD << HeaderColor << "^ Here!"
-              << Colors::RESET << "\n\n";
+    std::cerr << "\n"
+              << Colors::BRIGHT_BLACK << "  " << LineNumStr << " \u2502 "
+              << Colors::RESET << LineContent << "\n"
+              << Colors::BRIGHT_BLACK << "  "
+              << std::string(LineNumStr.length(), ' ') << " \u2502 "
+              << Colors::RESET
+              << std::string(CaretOffset, ' ')
+              << Colors::BOLD << AccentColor << "^ Here!" << Colors::RESET
+              << "\n";
   }
+
+  std::cerr << "\n";
 }
 
 // DiagnosticEngine : method implementations
@@ -91,15 +107,65 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   if (ErrorLines.count(Loc.Line))
     return;
 
-  Diagnostics.push_back({Loc, Msg, IsWarning});
+  std::string finalMessage = Msg;
+
+  // Only invoke the SLM when the user explicitly opted in via --smart.
+  // This keeps the default compilation path fully deterministic with
+  // zero model-loading overhead.
+  if (g_AIEnabled) {
+    if (g_slmFiredThisPass) {
+      // Cascade: the original compiler message is the primary diagnostic.
+      // The Smart Assist note is advisory only — rendered entirely in dim gray
+      // (BRIGHT_BLACK) so it does not visually compete with the error above.
+      finalMessage +=
+          "\n\n  " + Colors::BRIGHT_BLACK +
+          "[Smart Assist]  This error may be a cascading effect of the one "
+          "reported above. Fix the first issue and run --smart again for a "
+          "fresh analysis." +
+          Colors::RESET;
+    } else {
+      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line);
+
+      if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
+        // ── High-confidence: AI suggestion leads as the primary diagnostic. ──
+        // The original compiler message is demoted to a subordinate reference
+        // below the AI block, clearly separated by a dim [Compiler] label.
+        g_slmFiredThisPass = true;
+        finalMessage = Colors::BOLD + Colors::BRIGHT_CYAN +
+                       "[AI Suggestion]" + Colors::RESET + "  " +
+                       ai.suggested_comment;
+
+        if (!ai.explanation.empty()) {
+          finalMessage += "\n  " + Colors::CYAN +
+                          "Explanation: " + Colors::RESET + ai.explanation;
+        }
+
+        if (ai.fix_mode == "MODIFY" && !ai.code_patch.empty()) {
+          finalMessage += "\n  " + Colors::BRIGHT_GREEN + "Suggested fix:" +
+                          Colors::RESET + "\n    " + Colors::BRIGHT_GREEN +
+                          ai.code_patch + Colors::RESET;
+        }
+
+        if (!ai.warning.empty()) {
+          finalMessage += "\n  " + Colors::YELLOW +
+                          "Note: " + Colors::RESET + ai.warning;
+        }
+
+        // High confidence: the AI suggestion is the complete diagnostic output.
+        // The original compiler message is not shown to avoid cluttering output.
+      }
+      // else: confidence < 0.8 or fix_mode == NONE → original message only.
+      // finalMessage stays as the unmodified compiler Msg, no AI output.
+    }
+  }
+
+  Diagnostics.push_back({Loc, finalMessage, IsWarning});
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);
 }
 
-bool DiagnosticEngine::hasErrors() {
-  return !ErrorLines.empty();
-}
+bool DiagnosticEngine::hasErrors() { return !ErrorLines.empty(); }
 
 bool DiagnosticEngine::hasErrorAt(int Line) {
   return ErrorLines.count(Line) != 0;
@@ -122,6 +188,7 @@ void DiagnosticEngine::flushAll() {
 void DiagnosticEngine::reset() {
   Diagnostics.clear();
   ErrorLines.clear();
+  g_slmFiredThisPass = false; // Reset cascade guard for the next compilation pass
 }
 
 // LogErrorAt : now defers to DiagnosticEngine so diagnostics are collected
@@ -228,7 +295,8 @@ int gettok() {
     return TOK_RANGE;
   }
 
-  // Numbers: [0-9.]+ (a leading '.' only starts a number if followed by a digit)
+  // Numbers: [0-9.]+ (a leading '.' only starts a number if followed by a
+  // digit)
   if (isdigit(LastChar) || (LastChar == '.' && isdigit(SourceFile.peek()))) {
     std::string NumStr;
     do {
