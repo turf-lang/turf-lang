@@ -544,6 +544,52 @@ public:
   }
 };
 
+// list<T> declaration: list<int> nums
+class ListDeclExprAST : public ExprAST {
+  std::string Name;
+  TurfType ElementType; // e.g. TURF_INT
+  SourceLocation Loc;
+
+public:
+  ListDeclExprAST(SourceLocation Loc, std::string Name, TurfType ElementType)
+      : Loc(Loc), Name(std::move(Name)), ElementType(ElementType) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
+  TurfType getElementType() const { return ElementType; }
+
+  llvm::Value *codegen() override;
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<ListDeclExprAST>(Loc, Name, ElementType);
+  }
+};
+
+// list method call: nums.push(val)  /  nums.pop()  /  nums.length
+class ListMethodCallExprAST : public ExprAST {
+  std::string ListName;   // variable name
+  std::string Method;     // "push", "pop", or "length"
+  std::unique_ptr<ExprAST> Arg; // non-null only for push
+  SourceLocation Loc;
+
+public:
+  ListMethodCallExprAST(SourceLocation Loc, std::string ListName,
+                        std::string Method,
+                        std::unique_ptr<ExprAST> Arg = nullptr)
+      : Loc(Loc), ListName(std::move(ListName)), Method(std::move(Method)),
+        Arg(std::move(Arg)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getListName() const { return ListName; }
+  const std::string &getMethod() const { return Method; }
+  const ExprAST *getArg() const { return Arg.get(); }
+
+  llvm::Value *codegen() override;
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<ListMethodCallExprAST>(Loc, ListName, Method,
+                                                   CloneExprAST(Arg.get()));
+  }
+};
+
 inline std::unique_ptr<ExprAST> CloneExprAST(const ExprAST *Node) {
   return Node ? Node->clone() : nullptr;
 }
@@ -925,8 +971,34 @@ inline std::set<uint64_t> CollectChangedNodeIDsInternal(
     }
     return ChangedIDs;
   }
-  
-  // Fallback: if we reach here, we don't recognize the node type
+
+  // ============================================================================
+  // ListDeclExprAST: Compare name and element type
+  // ============================================================================
+  if (auto *OrigList = dynamic_cast<const ListDeclExprAST*>(OriginalAST)) {
+    auto *ModList = dynamic_cast<const ListDeclExprAST*>(ModifiedAST);
+    if (OrigList->getName() != ModList->getName() ||
+        OrigList->getElementType() != ModList->getElementType()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    return ChangedIDs;
+  }
+
+  // ============================================================================
+  // ListMethodCallExprAST: Compare list name, method, and argument
+  // ============================================================================
+  if (auto *OrigMeth = dynamic_cast<const ListMethodCallExprAST*>(OriginalAST)) {
+    auto *ModMeth = dynamic_cast<const ListMethodCallExprAST*>(ModifiedAST);
+    if (OrigMeth->getListName() != ModMeth->getListName() ||
+        OrigMeth->getMethod() != ModMeth->getMethod()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    CollectChangedNodeIDsInternal(OrigMeth->getArg(), ModMeth->getArg(), ChangedIDs);
+    return ChangedIDs;
+  }
+
   // Mark both as changed to be safe
   ChangedIDs.insert(OriginalAST->getNodeID());
   ChangedIDs.insert(ModifiedAST->getNodeID());

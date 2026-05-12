@@ -1,0 +1,30 @@
+// Test list inside a for loop
+list<int> squares
+for i in 0..5 step i++ {
+    squares.push(i * i)
+}
+printline(squares.length)
+printline(squares[0])
+printline(squares[4])
+
+// Test list as function argument
+fn void printList(list<int> lst) {
+    int i = 0
+    while i < lst.length {
+        printline(lst[i])
+        i++
+    }
+}
+
+list<int> evens
+evens.push(2)
+evens.push(4)
+evens.push(6)
+printList(evens)
+
+// Test list<string>
+list<string> words
+words.push("hello")
+words.push("world")
+printline(words[0])
+printline(words.length)

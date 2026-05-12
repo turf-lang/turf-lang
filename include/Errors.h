@@ -670,4 +670,68 @@ public:
                      Colors::RESET) {}
 };
 
+// ── List Errors ───────────────────────────────────────────────────────────────
+
+// Missing generic type parameter: list bad  (instead of list<int> bad)
+class ListGenericMissingError : public TurfError {
+public:
+  ListGenericMissingError(SourceLocation Loc)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED +
+                      "List declaration is missing a type parameter!\n" +
+                      Colors::RESET +
+                      "  You must specify the element type inside angle brackets.\n  " +
+                      Colors::BRIGHT_GREEN +
+                      "Hint: Use list<int>, list<double>, list<bool>, or list<string>." +
+                      Colors::RESET) {}
+};
+
+// Wrong element type pushed into list: push(3.14) into list<int>
+class ListTypeMismatchError : public TurfError {
+public:
+  ListTypeMismatchError(SourceLocation Loc, const std::string &ListName,
+                        const std::string &ExpectedElem,
+                        const std::string &GotType)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED + "Type mismatch on list '" + Colors::CYAN +
+                ListName + Colors::BRIGHT_RED + "'!\n" + Colors::RESET +
+                "  This is a list<" + Colors::CYAN + ExpectedElem +
+                Colors::RESET + ">, but you tried to push a '" + Colors::CYAN +
+                GotType + Colors::RESET + "' value.\n  " + Colors::BRIGHT_GREEN +
+                "Hint: Push only '" + ExpectedElem +
+                "' values. No implicit coercion is allowed for list operations." +
+                Colors::RESET) {}
+};
+
+// Method called on non-list variable
+class ListNonListOperationError : public TurfError {
+public:
+  ListNonListOperationError(SourceLocation Loc, const std::string &VarName,
+                            const std::string &Method)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED + "'" + Colors::CYAN + VarName +
+                Colors::BRIGHT_RED + "' is not a list!\n" + Colors::RESET +
+                "  You called '" + Colors::CYAN + Method + Colors::RESET +
+                "' on it, but that method only works on list<T> variables.\n  " +
+                Colors::BRIGHT_GREEN +
+                "Hint: Declare it with list<int>, list<string>, etc. to use " +
+                Method + "." + Colors::RESET) {}
+};
+
+// pop() on an empty list (runtime guard emitted as IR)
+class ListEmptyPopError : public TurfError {
+public:
+  ListEmptyPopError(SourceLocation Loc, const std::string &ListName)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED +
+                "Calling pop() on an empty list '" + Colors::CYAN + ListName +
+                Colors::BRIGHT_RED + "' will crash at runtime!\n" +
+                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
+                "Hint: Check list.length > 0 before calling pop()." +
+                Colors::RESET) {}
+};
+
 #endif
