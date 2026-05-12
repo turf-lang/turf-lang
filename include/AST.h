@@ -326,6 +326,7 @@ public:
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
   TurfType getType() const { return Type; }
+  const ExprAST *getInitializer() const { return InitVal.get(); }
 
   llvm::Value *codegen() override;
   std::unique_ptr<ExprAST> clone() const override {
@@ -561,6 +562,112 @@ CloneExprList(const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
 // ────────────────────────────────────────────────────────────────────────────
 // AST Diffing Implementation: Per-node-type structural comparison
 // ────────────────────────────────────────────────────────────────────────────
+// Full-tree traversal helper used when diffing is impossible and we need to
+// treat the entire AST as changed.
+inline void CollectAllNodeIDsInternal(const ExprAST *Node,
+                                      std::set<uint64_t> &NodeIDs);
+
+inline void CollectAllNodeIDsInternal(const ExprAST *Node,
+                                      std::set<uint64_t> &NodeIDs) {
+  if (!Node) return;
+
+  NodeIDs.insert(Node->getNodeID());
+
+  if (auto *Bin = dynamic_cast<const BinaryExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Bin->getLHS(), NodeIDs);
+    CollectAllNodeIDsInternal(Bin->getRHS(), NodeIDs);
+    return;
+  }
+
+  if (auto *Unary = dynamic_cast<const UnaryExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Unary->getOperand(), NodeIDs);
+    return;
+  }
+
+  if (auto *Assign = dynamic_cast<const AssignmentExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Assign->getRHS(), NodeIDs);
+    return;
+  }
+
+  if (auto *Decl = dynamic_cast<const VarDeclExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Decl->getInitializer(), NodeIDs);
+    return;
+  }
+
+  if (auto *Cast = dynamic_cast<const CastExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Cast->getOperand(), NodeIDs);
+    return;
+  }
+
+  if (auto *Block = dynamic_cast<const BlockExprAST *>(Node)) {
+    for (const auto &Expr : Block->getExpressions())
+      CollectAllNodeIDsInternal(Expr.get(), NodeIDs);
+    return;
+  }
+
+  if (auto *If = dynamic_cast<const IfExprAST *>(Node)) {
+    for (const auto &Branch : If->getBranches()) {
+      CollectAllNodeIDsInternal(Branch.Cond.get(), NodeIDs);
+      CollectAllNodeIDsInternal(Branch.Body.get(), NodeIDs);
+    }
+    CollectAllNodeIDsInternal(If->getElseBody(), NodeIDs);
+    return;
+  }
+
+  if (auto *While = dynamic_cast<const WhileExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(While->getCond(), NodeIDs);
+    CollectAllNodeIDsInternal(While->getBody(), NodeIDs);
+    return;
+  }
+
+  if (auto *For = dynamic_cast<const ForExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(For->getStart(), NodeIDs);
+    CollectAllNodeIDsInternal(For->getEnd(), NodeIDs);
+    CollectAllNodeIDsInternal(For->getStep(), NodeIDs);
+    CollectAllNodeIDsInternal(For->getBody(), NodeIDs);
+    return;
+  }
+
+  if (auto *Call = dynamic_cast<const BuiltinCallExprAST *>(Node)) {
+    for (const auto &Arg : Call->getArgs())
+      CollectAllNodeIDsInternal(Arg.get(), NodeIDs);
+    return;
+  }
+
+  if (auto *Call = dynamic_cast<const FuncCallExprAST *>(Node)) {
+    for (const auto &Arg : Call->getArgs())
+      CollectAllNodeIDsInternal(Arg.get(), NodeIDs);
+    return;
+  }
+
+  if (auto *Func = dynamic_cast<const FuncDefExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Func->getBody(), NodeIDs);
+    return;
+  }
+
+  if (auto *Ret = dynamic_cast<const ReturnExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Ret->getVal(), NodeIDs);
+    return;
+  }
+
+  if (auto *Arr = dynamic_cast<const ArrayDeclExprAST *>(Node)) {
+    for (const auto &Init : Arr->getInitList())
+      CollectAllNodeIDsInternal(Init.get(), NodeIDs);
+    return;
+  }
+
+  if (auto *Access = dynamic_cast<const ArrayAccessExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Access->getIndex(), NodeIDs);
+    return;
+  }
+
+  if (auto *Assign = dynamic_cast<const ArrayAssignExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Assign->getIndex(), NodeIDs);
+    CollectAllNodeIDsInternal(Assign->getRHS(), NodeIDs);
+    return;
+  }
+}
+
 // Forward declaration for recursive diffing
 inline std::set<uint64_t> CollectChangedNodeIDsInternal(
     const ExprAST *OriginalAST, const ExprAST *ModifiedAST,

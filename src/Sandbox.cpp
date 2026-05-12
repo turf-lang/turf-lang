@@ -32,15 +32,15 @@ void Sandbox::computeChangedNodes() {
   // Reset changed nodes tracking
   ChangedNodeIDs.clear();
   
-  // If we don't have both original and modified ASTs, mark everything as changed
+  // If we don't have both original and modified ASTs, mark the entire
+  // available tree as changed so selective linting still covers every node.
   if (!OriginalSnapshot.AST || !Snapshot.AST) {
-    if (OriginalSnapshot.AST) {
-      ChangedNodeIDs.insert(OriginalSnapshot.AST->getNodeID());
-    }
     if (Snapshot.AST) {
-      ChangedNodeIDs.insert(Snapshot.AST->getNodeID());
+      CollectAllNodeIDsInternal(Snapshot.AST.get(), ChangedNodeIDs);
+    } else if (OriginalSnapshot.AST) {
+      CollectAllNodeIDsInternal(OriginalSnapshot.AST.get(), ChangedNodeIDs);
     }
-    logDebug("AST diffing: no AST available, marked all nodes as changed");
+    logDebug("AST diffing: missing baseline AST, marked the full tree as changed");
     return;
   }
   
@@ -479,7 +479,9 @@ bool Sandbox::validateIncremental() {
       // Semantic pruning: only lint changed nodes
       logDebug("Semantic pruning: linting only " +
                std::to_string(ChangedNodeIDs.size()) + " changed nodes");
+      logDebug("Semantic pruning: begin LintChangedNodesOnly pass");
       LintChangedNodesOnly(Snapshot.AST.get(), ChangedNodeIDs);
+      logDebug("Semantic pruning: finished LintChangedNodesOnly pass");
       
       // Update diagnostics after selective linting
       Snapshot.Diagnostics = DiagnosticEngine::getDiagnostics();
