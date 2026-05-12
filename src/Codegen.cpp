@@ -26,6 +26,15 @@ llvm::Function *CurrentFunction = nullptr;
 
 std::vector<std::pair<llvm::BasicBlock *, llvm::BasicBlock *>> LoopBlocks;
 
+// Tracks full param types (incl. list<T> element types) for user-defined functions.
+static std::map<std::string, std::vector<TurfType>> FuncListParamTypes;
+
+// Forward declarations for list helpers (defined after Array Codegen)
+static llvm::StructType *GetListStructType();
+static llvm::Function *GetOrDeclareMalloc();
+static llvm::Function *GetOrDeclareRealloc();
+static void EmitListBoundsCheck(llvm::Value *, llvm::Value *, const std::string &, SourceLocation);
+
 void InitializeModule() {
   // Holds types and constants
   TheContext = std::make_unique<LLVMContext>();
@@ -49,6 +58,12 @@ Type *getLLVMType(TurfType Type) {
     return llvm::PointerType::get(*TheContext, 0);
   case TURF_VOID:
     return llvm::Type::getVoidTy(*TheContext);
+  // list<T> is a heap-allocated struct, stored as an opaque pointer
+  case TURF_INT_LIST:
+  case TURF_DOUBLE_LIST:
+  case TURF_BOOL_LIST:
+  case TURF_STRING_LIST:
+    return llvm::PointerType::get(*TheContext, 0);
   default:
     return llvm::Type::getDoubleTy(*TheContext);
   }
@@ -1065,6 +1080,11 @@ Value *FuncDefExprAST::codegen() {
   // Since we always parse the body in ParseFuncDef, Body is never null here.
   // (Reserve this hook for a future separate pre-pass.)
 
+  // Store full param types (including list element types) for call-site checking
+  FuncListParamTypes[Name] = {};
+  for (const auto &P : Params)
+    FuncListParamTypes[Name].push_back(P.Type);
+
   // Fill in the function body
   BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunc);
 
@@ -1241,14 +1261,24 @@ Value *FuncCallExprAST::codegen() {
 
   std::vector<Value *> ArgVals;
   unsigned Idx = 0;
+
+  // Look up full param type info (needed for list<T> params)
+  auto ParamTypeIt = FuncListParamTypes.find(Name);
+
   for (auto &Arg : CalleeF->args()) {
     Value *V = Args[Idx]->codegen();
     if (!V)
       return nullptr;
 
-    TurfType ExpectedType = getTurfTypeFromLLVM(Arg.getType());
+    // Determine declared TurfType for this param
+    TurfType DeclaredType = TURF_VOID;
+    if (ParamTypeIt != FuncListParamTypes.end() &&
+        Idx < ParamTypeIt->second.size())
+      DeclaredType = ParamTypeIt->second[Idx];
+    else
+      DeclaredType = getTurfTypeFromLLVM(Arg.getType());
 
-    // Check for void argument (e.g. passing a void function result)
+    // Check for void argument
     if (V->getType()->isVoidTy()) {
       VoidValueError(Loc, "Argument " + std::to_string(Idx + 1) + " to '" +
                               Name + "' is a void function call.")
@@ -1256,15 +1286,35 @@ Value *FuncCallExprAST::codegen() {
       return nullptr;
     }
 
-    TurfType ActualType = getTurfTypeFromLLVM(V->getType());
-    if (!isTypeCompatible(ActualType, ExpectedType)) {
-      ArgumentTypeError(Loc, Name, std::string(Arg.getName()), Idx + 1,
-                        turfTypeName(ExpectedType), turfTypeName(ActualType))
-          .raise();
-      return nullptr;
+    // For list params: verify the caller is passing a list of the right element type
+    if (isListType(DeclaredType)) {
+      // Look up actual type of the passed variable from NamedValues
+      TurfType ActualType = TURF_VOID;
+      // Try to find the variable's TurfType
+      if (auto *VE = dynamic_cast<VariableExprAST *>(Args[Idx].get())) {
+        auto It = NamedValues.find(VE->getName());
+        if (It != NamedValues.end())
+          ActualType = It->second.Type;
+      }
+      if (ActualType != DeclaredType && ActualType != TURF_VOID) {
+        ArgumentTypeError(Loc, Name, std::string(Arg.getName()), Idx + 1,
+                          turfTypeName(DeclaredType), turfTypeName(ActualType))
+            .raise();
+        return nullptr;
+      }
+    } else {
+      // Standard scalar type checking
+      TurfType ExpectedType = getTurfTypeFromLLVM(Arg.getType());
+      TurfType ActualType   = getTurfTypeFromLLVM(V->getType());
+      if (!isTypeCompatible(ActualType, ExpectedType)) {
+        ArgumentTypeError(Loc, Name, std::string(Arg.getName()), Idx + 1,
+                          turfTypeName(ExpectedType), turfTypeName(ActualType))
+            .raise();
+        return nullptr;
+      }
+      V = CastToType(V, ExpectedType, "argcast", Loc);
     }
 
-    V = CastToType(V, ExpectedType, "argcast", Loc);
     ArgVals.push_back(V);
     Idx++;
   }
@@ -1274,6 +1324,80 @@ Value *FuncCallExprAST::codegen() {
     return Builder->CreateCall(CalleeF, ArgVals);
 
   return Builder->CreateCall(CalleeF, ArgVals, "calltmp");
+}
+
+// Returns (or creates) the named LLVM struct { ptr, i64, i64 } used by all lists.
+// Fields: data (ptr to element buffer), len (i64), cap (i64).
+static llvm::StructType *GetListStructType() {
+  llvm::StructType *ST =
+      llvm::StructType::getTypeByName(*TheContext, "TurfListStruct");
+  if (!ST) {
+    ST = llvm::StructType::create(*TheContext, "TurfListStruct");
+    ST->setBody({llvm::PointerType::get(*TheContext, 0),   // data
+                 llvm::Type::getInt64Ty(*TheContext),       // len
+                 llvm::Type::getInt64Ty(*TheContext)});     // cap
+  }
+  return ST;
+}
+
+// Ensure malloc / realloc / free are declared in the module.
+static llvm::Function *GetOrDeclareMalloc() {
+  if (auto *F = TheModule->getFunction("malloc"))
+    return F;
+  auto *FT = llvm::FunctionType::get(
+      llvm::PointerType::get(*TheContext, 0),
+      {llvm::Type::getInt64Ty(*TheContext)}, false);
+  return llvm::Function::Create(FT, llvm::Function::ExternalLinkage, "malloc",
+                                TheModule.get());
+}
+static llvm::Function *GetOrDeclareRealloc() {
+  if (auto *F = TheModule->getFunction("realloc"))
+    return F;
+  auto *FT = llvm::FunctionType::get(
+      llvm::PointerType::get(*TheContext, 0),
+      {llvm::PointerType::get(*TheContext, 0),
+       llvm::Type::getInt64Ty(*TheContext)},
+      false);
+  return llvm::Function::Create(FT, llvm::Function::ExternalLinkage, "realloc",
+                                TheModule.get());
+}
+
+// Helper: emit a runtime bounds check for list access.
+static void EmitListBoundsCheck(Value *IndexVal, Value *LenVal,
+                                const std::string &ListName,
+                                SourceLocation Loc) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+  Value *TooSmall = Builder->CreateICmpSLT(IndexVal, Zero, "idx_neg");
+  Value *TooBig   = Builder->CreateICmpSGE(IndexVal, LenVal, "idx_big");
+  Value *OOB      = Builder->CreateOr(TooSmall, TooBig, "oob");
+
+  BasicBlock *OobBB  = BasicBlock::Create(*TheContext, "list_oob", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "list_ok");
+  Builder->CreateCondBr(OOB, OobBB, ContBB);
+
+  Builder->SetInsertPoint(OobBB);
+  Type *I8Ptr = PointerType::get(*TheContext, 0);
+  Function *PutsF = TheModule->getFunction("puts");
+  if (!PutsF) {
+    auto *FT = FunctionType::get(Type::getInt32Ty(*TheContext), {I8Ptr}, false);
+    PutsF = Function::Create(FT, Function::ExternalLinkage, "puts", TheModule.get());
+  }
+  Value *Msg = Builder->CreateGlobalString(
+      "Runtime Error: List index out of bounds for '" + ListName + "'.",
+      "list_oob_msg");
+  Builder->CreateCall(PutsF, {Msg});
+  Function *ExitF = TheModule->getFunction("exit");
+  if (!ExitF) {
+    auto *FT = FunctionType::get(Type::getVoidTy(*TheContext),
+                                 {Type::getInt32Ty(*TheContext)}, false);
+    ExitF = Function::Create(FT, Function::ExternalLinkage, "exit", TheModule.get());
+  }
+  Builder->CreateCall(ExitF, {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
+  Builder->CreateUnreachable();
+
+  TheFunction->insert(TheFunction->end(), ContBB);
+  Builder->SetInsertPoint(ContBB);
 }
 
 // Array Codegen
@@ -1443,11 +1567,36 @@ static void EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
 }
 
 Value *ArrayAccessExprAST::codegen() {
-  // Look up the array variable
   VarInfo *VI = nullptr;
   auto Iter = NamedValues.find(Name);
-  if (Iter != NamedValues.end()) {
+  if (Iter != NamedValues.end())
     VI = &Iter->second;
+
+  // Delegate list[i] to list-specific path
+  if (VI && isListType(VI->Type)) {
+    StructType *LST   = GetListStructType();
+    Type *PtrTy       = PointerType::get(*TheContext, 0);
+    TurfType ElemType = getListElementType(VI->Type);
+    Type *ElemTy      = getLLVMType(ElemType);
+
+    Value *ListPtr = Builder->CreateLoad(PtrTy, VI->Alloca, "listptr");
+    Value *LenPtr  = Builder->CreateStructGEP(LST, ListPtr, 1, "lenptr");
+    Value *Len     = Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "len");
+
+    Value *IndexVal = Index->codegen();
+    if (!IndexVal) return nullptr;
+    TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
+    if (IdxType == TURF_STRING) {
+      ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
+      return nullptr;
+    }
+    IndexVal = CastToType(IndexVal, TURF_INT, "listidx", Loc);
+    EmitListBoundsCheck(IndexVal, Len, Name, Loc);
+
+    Value *DataPtr  = Builder->CreateStructGEP(LST, ListPtr, 0, "dataptr");
+    Value *DataBuf  = Builder->CreateLoad(PtrTy, DataPtr, "databuf");
+    Value *ElemPtr  = Builder->CreateGEP(ElemTy, DataBuf, IndexVal, "listelem");
+    return Builder->CreateLoad(ElemTy, ElemPtr, Name + "_elem");
   }
 
   if (!VI || !isArrayType(VI->Type)) {
@@ -1495,11 +1644,39 @@ Value *ArrayAccessExprAST::codegen() {
 }
 
 Value *ArrayAssignExprAST::codegen() {
-  // Look up the array variable
   VarInfo *VI = nullptr;
   auto Iter = NamedValues.find(Name);
-  if (Iter != NamedValues.end()) {
+  if (Iter != NamedValues.end())
     VI = &Iter->second;
+
+  // Delegate list[i] = val to list-specific path
+  if (VI && isListType(VI->Type)) {
+    StructType *LST   = GetListStructType();
+    Type *PtrTy       = PointerType::get(*TheContext, 0);
+    TurfType ElemType = getListElementType(VI->Type);
+    Type *ElemTy      = getLLVMType(ElemType);
+
+    Value *ListPtr = Builder->CreateLoad(PtrTy, VI->Alloca, "listptr");
+    Value *LenPtr  = Builder->CreateStructGEP(LST, ListPtr, 1, "lenptr");
+    Value *Len     = Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "len");
+
+    Value *IndexVal = Index->codegen();
+    if (!IndexVal) return nullptr;
+    IndexVal = CastToType(IndexVal, TURF_INT, "listidx", Loc);
+    EmitListBoundsCheck(IndexVal, Len, Name, Loc);
+
+    Value *RHSVal = RHS->codegen();
+    if (!RHSVal) return nullptr;
+    TurfType RHSType = getTurfTypeFromLLVM(RHSVal->getType());
+    if (RHSType != ElemType) {
+      ListTypeMismatchError(Loc, Name, turfTypeName(ElemType), turfTypeName(RHSType)).raise();
+      return nullptr;
+    }
+    Value *DataPtr = Builder->CreateStructGEP(LST, ListPtr, 0, "dataptr");
+    Value *DataBuf = Builder->CreateLoad(PtrTy, DataPtr, "databuf");
+    Value *ElemPtr = Builder->CreateGEP(ElemTy, DataBuf, IndexVal, "listelem");
+    Builder->CreateStore(RHSVal, ElemPtr);
+    return RHSVal;
   }
 
   if (!VI || !isArrayType(VI->Type)) {
@@ -1572,11 +1749,18 @@ Value *ArrayAssignExprAST::codegen() {
 }
 
 Value *ArrayLengthExprAST::codegen() {
-  // Look up the array variable
   VarInfo *VI = nullptr;
   auto Iter = NamedValues.find(Name);
-  if (Iter != NamedValues.end()) {
+  if (Iter != NamedValues.end())
     VI = &Iter->second;
+
+  // list.length: load len field from heap struct
+  if (VI && isListType(VI->Type)) {
+    StructType *LST = GetListStructType();
+    Type *PtrTy     = PointerType::get(*TheContext, 0);
+    Value *ListPtr  = Builder->CreateLoad(PtrTy, VI->Alloca, "listptr");
+    Value *LenPtr   = Builder->CreateStructGEP(LST, ListPtr, 1, "lenptr");
+    return Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "listlen");
   }
 
   if (!VI || !isArrayType(VI->Type)) {
@@ -1586,7 +1770,161 @@ Value *ArrayLengthExprAST::codegen() {
     return nullptr;
   }
 
-  // Return the compile-time constant size
   return ConstantInt::get(Type::getInt64Ty(*TheContext), VI->ArraySize);
 }
 
+
+// ── List Codegen ──────────────────────────────────────────────────────────────
+
+Value *ListDeclExprAST::codegen() {
+  if (Keywords.find(Name) != Keywords.end()) {
+    SemanticError(Loc, "Cannot use keyword '" + Name + "' as a variable name.").raise();
+    return nullptr;
+  }
+  if (GlobalSymbolTable && GlobalSymbolTable->CurrentScopeHasEarlyExit()) {
+    UnreachableCodeError(Loc, "declaration").raise();
+    return nullptr;
+  }
+  if (GlobalSymbolTable && GlobalSymbolTable->IsSymbolInCurrentScope(Name)) {
+    Symbol *Prev = GlobalSymbolTable->LookupSymbolInCurrentScope(Name);
+    if (Prev) DuplicateDeclarationError(Loc, Name, Prev->DeclLoc).raise();
+    return nullptr;
+  }
+  if (GlobalSymbolTable) {
+    Symbol *Shadowed = GlobalSymbolTable->FindShadowedSymbol(Name);
+    if (Shadowed) ShadowingWarning(Loc, Name, Shadowed->DeclLoc).warn();
+  }
+
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                   TheFunction->getEntryBlock().begin());
+  Type *PtrTy = PointerType::get(*TheContext, 0);
+  AllocaInst *Alloca = TmpB.CreateAlloca(PtrTy, nullptr, Name);
+
+  // malloc(24) for the TurfListStruct {ptr, i64, i64}
+  Function *MallocF = GetOrDeclareMalloc();
+  Value *StructSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 24);
+  Value *RawPtr = Builder->CreateCall(MallocF, {StructSize}, "listalloc");
+
+  StructType *LST = GetListStructType();
+  Value *NullData = ConstantPointerNull::get(PointerType::get(*TheContext, 0));
+  Value *Zero64 = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+  Builder->CreateStore(NullData, Builder->CreateStructGEP(LST, RawPtr, 0, "initdata"));
+  Builder->CreateStore(Zero64,   Builder->CreateStructGEP(LST, RawPtr, 1, "initlen"));
+  Builder->CreateStore(Zero64,   Builder->CreateStructGEP(LST, RawPtr, 2, "initcap"));
+  Builder->CreateStore(RawPtr, Alloca);
+
+  TurfType ListTy = getListType(ElementType);
+  if (GlobalSymbolTable)
+    GlobalSymbolTable->DeclareSymbol(Name, ListTy, Loc, Alloca);
+  NamedValues[Name] = {Alloca, ListTy};
+  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+}
+
+Value *ListMethodCallExprAST::codegen() {
+  auto Iter = NamedValues.find(ListName);
+  if (Iter == NamedValues.end() || !isListType(Iter->second.Type)) {
+    ListNonListOperationError(Loc, ListName, Method).raise();
+    return nullptr;
+  }
+
+  VarInfo &VI = Iter->second;
+  TurfType ElemType = getListElementType(VI.Type);
+  Type *ElemTy  = getLLVMType(ElemType);
+  Type *PtrTy   = PointerType::get(*TheContext, 0);
+  StructType *LST = GetListStructType();
+
+  Value *ListPtr = Builder->CreateLoad(PtrTy, VI.Alloca, "listptr");
+  Value *LenPtr  = Builder->CreateStructGEP(LST, ListPtr, 1, "lenptr");
+  Value *CapPtr  = Builder->CreateStructGEP(LST, ListPtr, 2, "capptr");
+  Value *DataPtr = Builder->CreateStructGEP(LST, ListPtr, 0, "dataptr");
+
+  if (Method == "length") {
+    return Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "listlen");
+  }
+
+  if (Method == "push") {
+    Value *PushVal = Arg->codegen();
+    if (!PushVal) return nullptr;
+    TurfType GotType = getTurfTypeFromLLVM(PushVal->getType());
+    if (GotType != ElemType) {
+      ListTypeMismatchError(Loc, ListName, turfTypeName(ElemType), turfTypeName(GotType)).raise();
+      return nullptr;
+    }
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    Value *Len = Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "len");
+    Value *Cap = Builder->CreateLoad(Type::getInt64Ty(*TheContext), CapPtr, "cap");
+
+    Value *NeedsGrow = Builder->CreateICmpEQ(Len, Cap, "needsgrow");
+    BasicBlock *GrowBB  = BasicBlock::Create(*TheContext, "list_grow", TheFunction);
+    BasicBlock *StoreBB = BasicBlock::Create(*TheContext, "list_store");
+    Builder->CreateCondBr(NeedsGrow, GrowBB, StoreBB);
+
+    Builder->SetInsertPoint(GrowBB);
+    Value *Cap2 = Builder->CreateMul(Cap, ConstantInt::get(Type::getInt64Ty(*TheContext), 2), "cap2");
+    Value *IsZero = Builder->CreateICmpEQ(Cap, ConstantInt::get(Type::getInt64Ty(*TheContext), 0));
+    Value *NewCap = Builder->CreateSelect(IsZero,
+                        ConstantInt::get(Type::getInt64Ty(*TheContext), 8), Cap2, "newcap");
+    uint64_t ElemSize = TheModule->getDataLayout().getTypeAllocSize(ElemTy);
+    Value *NewBytes = Builder->CreateMul(NewCap,
+                          ConstantInt::get(Type::getInt64Ty(*TheContext), ElemSize), "newbytes");
+    Value *OldData = Builder->CreateLoad(PtrTy, DataPtr, "olddata");
+    Value *NewData = Builder->CreateCall(GetOrDeclareRealloc(), {OldData, NewBytes}, "newdata");
+    Builder->CreateStore(NewData, DataPtr);
+    Builder->CreateStore(NewCap, CapPtr);
+    Builder->CreateBr(StoreBB);
+
+    TheFunction->insert(TheFunction->end(), StoreBB);
+    Builder->SetInsertPoint(StoreBB);
+    Value *Len2  = Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "len2");
+    Value *Data2 = Builder->CreateLoad(PtrTy, DataPtr, "data2");
+    Value *Slot  = Builder->CreateGEP(ElemTy, Data2, Len2, "pushslot");
+    Builder->CreateStore(PushVal, Slot);
+    Value *Len2Inc = Builder->CreateAdd(Len2,
+                         ConstantInt::get(Type::getInt64Ty(*TheContext), 1), "leninc");
+    Builder->CreateStore(Len2Inc, LenPtr);
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+  }
+
+  if (Method == "pop") {
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    Value *Len = Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "len");
+    Value *Zero64 = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+    Value *IsEmpty = Builder->CreateICmpEQ(Len, Zero64, "isempty");
+
+    BasicBlock *EmptyBB = BasicBlock::Create(*TheContext, "pop_empty", TheFunction);
+    BasicBlock *PopBB   = BasicBlock::Create(*TheContext, "pop_ok");
+    Builder->CreateCondBr(IsEmpty, EmptyBB, PopBB);
+
+    Builder->SetInsertPoint(EmptyBB);
+    Type *I8P = PointerType::get(*TheContext, 0);
+    Function *PutsF = TheModule->getFunction("puts");
+    if (!PutsF) {
+      auto *FT = FunctionType::get(Type::getInt32Ty(*TheContext), {I8P}, false);
+      PutsF = Function::Create(FT, Function::ExternalLinkage, "puts", TheModule.get());
+    }
+    Value *Msg = Builder->CreateGlobalString(
+        "Runtime Error: pop() on empty list '" + ListName + "'.", "pop_err");
+    Builder->CreateCall(PutsF, {Msg});
+    Function *ExitF = TheModule->getFunction("exit");
+    if (!ExitF) {
+      auto *FT = FunctionType::get(Type::getVoidTy(*TheContext),
+                                   {Type::getInt32Ty(*TheContext)}, false);
+      ExitF = Function::Create(FT, Function::ExternalLinkage, "exit", TheModule.get());
+    }
+    Builder->CreateCall(ExitF, {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
+    Builder->CreateUnreachable();
+
+    TheFunction->insert(TheFunction->end(), PopBB);
+    Builder->SetInsertPoint(PopBB);
+    Value *NewLen = Builder->CreateSub(Len,
+                        ConstantInt::get(Type::getInt64Ty(*TheContext), 1), "poplen");
+    Builder->CreateStore(NewLen, LenPtr);
+    Value *Data   = Builder->CreateLoad(PtrTy, DataPtr, "popdata");
+    Value *Slot   = Builder->CreateGEP(ElemTy, Data, NewLen, "popslot");
+    return Builder->CreateLoad(ElemTy, Slot, "popval");
+  }
+
+  SemanticError(Loc, "Unknown list method '" + Method + "'").raise();
+  return nullptr;
+}

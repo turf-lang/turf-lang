@@ -86,6 +86,7 @@ std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 std::unique_ptr<ExprAST> ParseFuncDef();
 std::unique_ptr<ExprAST> ParseReturnExpr();
+std::unique_ptr<ExprAST> ParseListDecl();
 
 static TurfType TokenToTurfType(int Tok) {
   switch (Tok) {
@@ -137,13 +138,10 @@ std::unique_ptr<ExprAST> ParseStringExpr() {
   return Result;
 }
 
-// Called when CurTok is an Assignment or Reference
-static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
-  std::string IdName = IdentifierStr;
-  SourceLocation VarLoc = CurLoc;
-
-  getNextToken();
-
+// The actual body — takes an already-consumed identifier name and location.
+std::unique_ptr<ExprAST>
+ParseIdentifierExprFrom(const std::string &IdName, SourceLocation VarLoc) {
+  // CurTok is already the token AFTER IdName (caller consumed it)
   // Array element access: arr[index] or arr[index] = value
   if (CurTok == '[') {
     getNextToken();
@@ -190,15 +188,66 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
                                                 std::move(Index));
   }
 
-  // Array .length property: arr.length
+  // Dot-method dispatch: arr.length  /  list.push(v)  /  list.pop()  /  list.length
   if (CurTok == '.') {
-    getNextToken();
-    if (CurTok != TOK_IDENTIFIER || IdentifierStr != "length") {
-      LogErrorAt(CurLoc, "Expected 'length' after '.' — the only supported property is '.length' (e.g. arr.length)");
+    getNextToken(); // eat '.'
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc, "Expected a method name after '.' (e.g. push, pop, length)");
       return nullptr;
     }
-    getNextToken();
-    return std::make_unique<ArrayLengthExprAST>(VarLoc, IdName);
+    std::string MethodName = IdentifierStr;
+    SourceLocation MethodLoc = CurLoc;
+    getNextToken(); // eat method name
+
+    // push(val)
+    if (MethodName == "push") {
+      if (CurTok != '(') {
+        LogErrorAt(MethodLoc, "Expected '(' after 'push' — e.g. nums.push(value)");
+        return nullptr;
+      }
+      getNextToken(); // eat '('
+      auto Arg = ParseExpression();
+      if (!Arg)
+        return nullptr;
+      if (CurTok != ')') {
+        LogErrorAt(CurLoc, "Expected ')' to close push() call");
+        return nullptr;
+      }
+      getNextToken(); // eat ')'
+      return std::make_unique<ListMethodCallExprAST>(VarLoc, IdName, "push",
+                                                     std::move(Arg));
+    }
+
+    // pop()
+    if (MethodName == "pop") {
+      if (CurTok != '(') {
+        LogErrorAt(MethodLoc, "Expected '(' after 'pop' — e.g. nums.pop()");
+        return nullptr;
+      }
+      getNextToken(); // eat '('
+      if (CurTok != ')') {
+        LogErrorAt(CurLoc, "pop() takes no arguments");
+        return nullptr;
+      }
+      getNextToken(); // eat ')'
+      return std::make_unique<ListMethodCallExprAST>(VarLoc, IdName, "pop");
+    }
+
+    // length  (for both arrays and lists — codegen differentiates)
+    if (MethodName == "length") {
+      // Check if it's a list variable — emit ListMethodCallExprAST;
+      // otherwise fall through to ArrayLengthExprAST (handled in codegen).
+      auto NVIter = NamedValues.find(IdName);
+      if (NVIter != NamedValues.end() && isListType(NVIter->second.Type)) {
+        return std::make_unique<ListMethodCallExprAST>(VarLoc, IdName, "length");
+      }
+      // Array or unknown (let codegen decide/error)
+      return std::make_unique<ArrayLengthExprAST>(VarLoc, IdName);
+    }
+
+    LogErrorAt(MethodLoc,
+               "Unknown method '" + MethodName + "'. Supported methods: push, pop, length.");
+    return nullptr;
   }
 
   if (CurTok == TOK_ASSIGN || CurTok == TOK_PLUS_ASSIGN ||
@@ -418,41 +467,45 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
     return nullptr;
 
   case TOK_IDENTIFIER: {
-    // Check for keyword typos before standard identifier parsing
+    // Snapshot the identifier, then advance so CurTok reflects what follows.
     std::string IdName = IdentifierStr;
+    SourceLocation IdLoc = CurLoc;
+    getNextToken(); // consume the identifier; CurTok now = next token
     bool CouldBeKeywordTypo = false;
 
-    // [CRITICAL BUG FIX]
-    // Only consider keyword typos if this identifier is NOT already
-    // declared as a variable. Otherwise legitimate variable names like
-    // 'flag' get mistaken for keywords like 'float'.
+    // Only flag a typo if this name is NOT already a known variable.
     bool IsKnownVariable = false;
-    if (GlobalSymbolTable) {
+    if (GlobalSymbolTable)
       IsKnownVariable = (GlobalSymbolTable->LookupSymbol(IdName) != nullptr);
-    } else {
+    if (!IsKnownVariable)
       IsKnownVariable = (NamedValues.find(IdName) != NamedValues.end());
-    }
 
     if (!IsKnownVariable && IdName.length() >= 2) {
       for (const auto &pair : Keywords) {
         int dist = getDamerauLevenshteinDistance(IdName, pair.first);
         int thresh = std::max(1, (int)IdName.length() / 3);
-        if (dist <= thresh) {
-          CouldBeKeywordTypo = true;
-          break;
-        }
+        if (dist <= thresh) { CouldBeKeywordTypo = true; break; }
       }
     }
 
     if (CouldBeKeywordTypo) {
-      if (CurTok != TOK_ASSIGN) {
-        KeywordError(CurLoc, IdName).raise();
+      // Allow: assignment, dot-access, subscript, function call
+      if (CurTok != TOK_ASSIGN && CurTok != '.' && CurTok != '[' && CurTok != '(') {
+        KeywordError(IdLoc, IdName).raise();
         return nullptr;
       }
     }
 
-    // Hand off to existing logic
-    return ParseIdentifierExpr();
+    // Hand off to ParseIdentifierExpr with the already-consumed name.
+    // We restore IdentifierStr so ParseIdentifierExpr can use it.
+    // Note: ParseIdentifierExpr starts by reading IdentifierStr then calling
+    // getNextToken(). Since we already consumed the token, we pass the name
+    // and the already-advanced CurTok by calling the body directly.
+    //
+    // Simplest: just re-enter ParseIdentifierExpr but it will re-consume
+    // IdentifierStr which is now stale. Instead, we duplicate the essential
+    // logic here using IdName and the already-advanced CurTok.
+    return ParseIdentifierExprFrom(IdName, IdLoc);
   }
 
   case TOK_NUMBER:
@@ -511,6 +564,9 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
       return ParseCastExpr(DestType, TypeLoc);
     return ParseVarDeclBody(TypeLoc, DestType);
   }
+
+  case TOK_TYPE_LIST:
+    return ParseListDecl();
 
   case TOK_TYPE_BOOL:
     return ParseVarDecl();
@@ -1003,6 +1059,45 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   std::vector<ParamDecl> Params;
   while (CurTok != ')' && CurTok != TOK_EOF) {
     // Parse each parameter: <type> <name>
+    // Parse each parameter: <type> <name>  (supports list<T> params too)
+    if (CurTok == TOK_TYPE_LIST) {
+      // list<ElemType> paramName
+      SourceLocation ListParamLoc = CurLoc;
+      getNextToken(); // eat 'list'
+      if (CurTok != '<') {
+        LogErrorAt(ListParamLoc, "Expected '<' after 'list' in parameter type."
+                   "\n  Hint: e.g. fn void foo(list<int> nums) { ... }");
+        return nullptr;
+      }
+      getNextToken(); // eat '<'
+      if (CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
+          CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING) {
+        LogErrorAt(CurLoc, "Expected an element type inside list<...>."
+                   "\n  Hint: Use list<int>, list<double>, list<bool>, or list<string>.");
+        return nullptr;
+      }
+      TurfType ElemType = TokenToTurfType(CurTok);
+      getNextToken(); // eat element type
+      if (CurTok != '>') {
+        LogErrorAt(CurLoc, "Expected '>' to close list<...> in parameter type.");
+        return nullptr;
+      }
+      getNextToken(); // eat '>'
+      if (CurTok != TOK_IDENTIFIER) {
+        LogErrorAt(CurLoc, "Expected a parameter name after list<T>."
+                   "\n  Hint: e.g. fn void foo(list<int> nums) { ... }");
+        return nullptr;
+      }
+      std::string ParamName = IdentifierStr;
+      getNextToken();
+      Params.push_back({getListType(ElemType), ParamName});
+      if (CurTok == ',')
+        getNextToken();
+      else if (CurTok != ')')
+        break;
+      continue;
+    }
+
     if (CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
         CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING) {
       LogErrorAt(CurLoc, "Expected a parameter type (int, double, bool, string) in the parameter list of '" + FuncName + "'."
@@ -1062,4 +1157,48 @@ std::unique_ptr<ExprAST> ParseReturnExpr() {
   if (!Val)
     return nullptr;
   return std::make_unique<ReturnExprAST>(RetLoc, std::move(Val));
+}
+
+// ParseListDecl - called when CurTok == TOK_TYPE_LIST.
+// Parses: list<int> name
+std::unique_ptr<ExprAST> ParseListDecl() {
+  SourceLocation ListLoc = CurLoc;
+  getNextToken(); // eat 'list'
+
+  if (CurTok != '<') {
+    ListGenericMissingError(ListLoc).raise();
+    return nullptr;
+  }
+  getNextToken(); // eat '<'
+
+  if (CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
+      CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING) {
+    LogErrorAt(CurLoc, "Expected an element type inside list<...>."
+               "\n  Hint: Use list<int>, list<double>, list<bool>, or list<string>.");
+    return nullptr;
+  }
+  TurfType ElemType = TokenToTurfType(CurTok);
+  getNextToken(); // eat element type
+
+  if (CurTok != '>') {
+    LogErrorAt(CurLoc, "Expected '>' to close list<...>."
+               "\n  Hint: e.g. list<int> nums");
+    return nullptr;
+  }
+  getNextToken(); // eat '>'
+
+  // Allow keyword-named variables (e.g. 'list' might shadow, but allow identifier)
+  bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
+                   Keywords.at(IdentifierStr) == CurTok;
+  if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
+    LogErrorAt(CurLoc, "Expected a variable name after list<T>."
+               "\n  Hint: e.g. list<int> nums");
+    return nullptr;
+  }
+
+  std::string Name = IdentifierStr;
+  SourceLocation NameLoc = CurLoc;
+  getNextToken(); // eat variable name
+
+  return std::make_unique<ListDeclExprAST>(NameLoc, Name, ElemType);
 }

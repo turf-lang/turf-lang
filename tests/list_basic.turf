@@ -1,0 +1,12 @@
+list<int> nums
+nums.push(10)
+nums.push(20)
+nums.push(30)
+printline(nums.length)
+int x = nums[0]
+printline(x)
+int y = nums[2]
+printline(y)
+int popped = nums.pop()
+printline(popped)
+printline(nums.length)
