@@ -1,0 +1,43 @@
+int[4] arr = [10, 20, 30, 40]
+
+int idx = 0
+while idx < 4 {
+  printline(arr[idx])
+  idx = idx + 1
+}
+
+int[3] computed
+for i in 0..3 step i++ {
+  computed[i] = arr[i] * 2
+}
+
+int j = 0
+while j < 3 {
+  printline(computed[j])
+  j = j + 1
+}
+
+int[3] copy
+int k = 0
+while k < 3 {
+  copy[k] = computed[k] + 1
+  k = k + 1
+}
+
+int m = 0
+while m < 3 {
+  printline(copy[m])
+  m = m + 1
+}
+
+string[2] names
+names[0] = "hello"
+names[1] = "world"
+printline(names[0])
+printline(names[1])
+
+bool[2] flags
+flags[0] = true
+flags[1] = false
+printline(flags[0])
+printline(flags[1])

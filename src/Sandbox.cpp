@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <regex>
+#include <set>
 #include <sstream>
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -506,14 +507,30 @@ bool Sandbox::validateIncremental() {
 }
 
 bool Sandbox::isOriginalErrorResolved(int errorLine) const {
-  // Check if there are any diagnostics at the error line in the sandbox
+  // Build a set of lines that had errors before the fix (original state)
+  std::set<int> originalErrorLines;
+  for (const auto &diag : OriginalSnapshot.Diagnostics) {
+    if (!diag.IsWarning) {
+      originalErrorLines.insert(diag.Loc.Line);
+    }
+  }
+
+  // Check that the original error at errorLine is no longer present
   for (const auto &diag : Snapshot.Diagnostics) {
-    if (diag.Loc.Line == errorLine) {
-      // The error is still present
+    if (diag.Loc.Line == errorLine && !diag.IsWarning) {
       return false;
     }
   }
-  // Error has been resolved (or there are no diagnostics at this line)
+
+  // Check that no NEW error lines were introduced by the fix.
+  // A new error line is one that has an error now but did not before the fix.
+  for (const auto &diag : Snapshot.Diagnostics) {
+    if (!diag.IsWarning &&
+        originalErrorLines.find(diag.Loc.Line) == originalErrorLines.end()) {
+      return false;
+    }
+  }
+
   return true;
 }
 
