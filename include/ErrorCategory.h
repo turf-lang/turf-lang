@@ -30,7 +30,7 @@ inline std::string extractContextKeyword(const std::string &msg, const std::stri
   // Check for builtin function names mentioned in the error message itself.
   // Order: longer/more-specific names first to avoid partial matches.
   static const char *builtinNames[] = {
-      "printline", "lengthof", "typeof", "print", "input"};
+      "printline", "lengthof", "typeof", "print", "input", "abs", "power"};
   for (const char *name : builtinNames) {
     if (msg.find(name) != std::string::npos)
       return name;
@@ -91,10 +91,12 @@ inline ErrorCategory classifyError(const std::string &msg,
       msg.find("impossible to reach") != std::string::npos)
     return ErrorCategory::CONTROL_FLOW;
 
-  // String conversion / lengthof
+  // String conversion / lengthof / builtin arg types
   if (msg.find("can't convert") != std::string::npos ||
       msg.find("lengthof only works") != std::string::npos ||
-      msg.find("lengthof") != std::string::npos)
+      msg.find("lengthof") != std::string::npos ||
+      msg.find("'abs' only works") != std::string::npos ||
+      msg.find("'power' only works") != std::string::npos)
     return ErrorCategory::STRING_CONVERSION;
 
   // Arithmetic

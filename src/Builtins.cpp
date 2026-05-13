@@ -9,6 +9,7 @@
 #include "Lexer.h"   // Keywords, SourceLocation
 
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Type.h"
 
 using namespace llvm;
@@ -188,35 +189,118 @@ void RegisterBuiltins() {
          return Builder->CreateCall(StrlenF, {Val}, "lengthof");
        }});
 
-  // typeof(expression) -> string
-  // Returns the static type name of the expression as a string.
-  Builtins.push_back(
-      {"typeof", TOK_BUILTIN_TYPEOF, /*ArgCount=*/1,
-       [](std::vector<Value *> &Args, SourceLocation Loc) -> Value * {
-         Value *Val = Args[0];
-         Type *Ty = Val->getType();
+   // typeof(expression) -> string
+   // Returns the static type name of the expression as a string.
+   Builtins.push_back(
+       {"typeof", TOK_BUILTIN_TYPEOF, /*ArgCount=*/1,
+        [](std::vector<Value *> &Args, SourceLocation Loc) -> Value * {
+          Value *Val = Args[0];
+          Type *Ty = Val->getType();
+ 
+          // Determine the Turf type from LLVM type
+          const char *TypeName = nullptr;
+          if (Ty->isDoubleTy()) {
+            TypeName = "double";
+          } else if (Ty->isIntegerTy(64)) {
+            TypeName = "int";
+          } else if (Ty->isIntegerTy(1)) {
+            TypeName = "bool";
+          } else if (Ty->isPointerTy()) {
+            TypeName = "string";
+          } else if (Ty->isVoidTy()) {
+            TypeName = "void";
+          } else {
+            TypeName = "unknown";
+          }
+ 
+          // Create a global constant string with the type name
+          return Builder->CreateGlobalString(TypeName, "typename");
+        }});
 
-         // Determine the Turf type from LLVM type
-         const char *TypeName = nullptr;
-         if (Ty->isDoubleTy()) {
-           TypeName = "double";
-         } else if (Ty->isIntegerTy(64)) {
-           TypeName = "int";
-         } else if (Ty->isIntegerTy(1)) {
-           TypeName = "bool";
-         } else if (Ty->isPointerTy()) {
-           TypeName = "string";
-         } else if (Ty->isVoidTy()) {
-           TypeName = "void";
-         } else {
-           TypeName = "unknown";
-         }
+   // abs(expr)
+   // Returns the absolute value. Only int and double supported.
+   Builtins.push_back(
+       {"abs", TOK_BUILTIN_ABS, /*ArgCount=*/1,
+        [](std::vector<Value *> &Args, SourceLocation Loc) -> Value * {
+          Value *Val = Args[0];
+          Type *Ty = Val->getType();
 
-         // Create a global constant string with the type name
-         return Builder->CreateGlobalString(TypeName, "typename");
-       }});
+          if (Ty->isDoubleTy()) {
+            Function *FAbsFunc = Intrinsic::getOrInsertDeclaration(
+                TheModule.get(), Intrinsic::fabs,
+                {Type::getDoubleTy(*TheContext)});
+            return Builder->CreateCall(FAbsFunc, {Val}, "abs");
+          }
 
-  // Register each builtin's name into the Lexer keyword table
+          if (Ty->isIntegerTy(64)) {
+            Value *Zero =
+                ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+            Value *Neg = Builder->CreateNeg(Val, "absneg");
+            Value *Cmp = Builder->CreateICmpSLT(Val, Zero, "abscmp");
+            return Builder->CreateSelect(Cmp, Neg, Val, "abs");
+          }
+
+          const char *TypeName = Ty->isIntegerTy(1) ? "bool"
+                                : Ty->isPointerTy()  ? "string"
+                                                     : "unknown";
+          AbsArgTypeError(Loc, TypeName).raise();
+          return nullptr;
+        }});
+
+   // power(base, exponent)
+   // Returns base raised to exponent.
+   // Deterministic rule: if either operand is double, result is double.
+   // Only int,int returns int.
+   Builtins.push_back(
+       {"power", TOK_BUILTIN_POWER, /*ArgCount=*/2,
+        [](std::vector<Value *> &Args, SourceLocation Loc) -> Value * {
+          Value *A = Args[0];
+          Value *B = Args[1];
+          Type *ATy = A->getType();
+          Type *BTy = B->getType();
+
+          bool AIsDouble = ATy->isDoubleTy();
+          bool BIsDouble = BTy->isDoubleTy();
+          bool AIsInt = ATy->isIntegerTy(64);
+          bool BIsInt = BTy->isIntegerTy(64);
+
+          if (!(AIsDouble || AIsInt) || !(BIsDouble || BIsInt)) {
+            const char *AName = AIsDouble   ? "double"
+                                : AIsInt    ? "int"
+                                : ATy->isIntegerTy(1) ? "bool"
+                                : ATy->isPointerTy()  ? "string"
+                                                      : "unknown";
+            const char *BName = BIsDouble   ? "double"
+                                : BIsInt    ? "int"
+                                : BTy->isIntegerTy(1) ? "bool"
+                                : BTy->isPointerTy()  ? "string"
+                                                      : "unknown";
+            PowerArgTypeError(Loc, AName, BName).raise();
+            return nullptr;
+          }
+
+          if (!AIsDouble)
+            A = Builder->CreateSIToFP(A, Type::getDoubleTy(*TheContext),
+                                      "powcast1");
+          if (!BIsDouble)
+            B = Builder->CreateSIToFP(B, Type::getDoubleTy(*TheContext),
+                                      "powcast2");
+
+          Function *PowFunc = Intrinsic::getOrInsertDeclaration(
+              TheModule.get(), Intrinsic::pow,
+              {Type::getDoubleTy(*TheContext)});
+          Value *Result =
+              Builder->CreateCall(PowFunc, {A, B}, "powtmp");
+
+          if (AIsInt && BIsInt)
+            return Builder->CreateFPToSI(Result,
+                                         Type::getInt64Ty(*TheContext),
+                                         "powint");
+
+          return Result;
+        }});
+
+   // Register each builtin's name into the Lexer keyword table
   // This is what makes the Lexer emit the right token when it sees "print",
   // "println", etc. No change to Lexer.cpp is ever needed for new builtins.
   for (const auto &B : Builtins)

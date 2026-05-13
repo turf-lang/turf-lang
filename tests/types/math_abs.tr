@@ -1,0 +1,26 @@
+int a = abs(5)
+printline(a)
+
+int b = abs(-10)
+printline(b)
+
+double c = abs(-3.2)
+printline(c)
+
+int d = abs(0)
+printline(d)
+
+double e = abs(3.14)
+printline(e)
+
+int f = abs(1 + 2 * 3)
+printline(f)
+
+int g = abs(-100) + abs(-50)
+printline(g)
+
+double h = abs(-2.5) + abs(-1.5)
+printline(h)
+
+int i = abs(power(-3, 2))
+printline(i)

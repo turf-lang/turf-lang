@@ -99,6 +99,47 @@ public:
                       Colors::RESET) {}
 };
 
+// abs() Argument Type Error : non-int/double passed to abs
+class AbsArgTypeError : public TurfError {
+public:
+  AbsArgTypeError(SourceLocation Loc, const std::string &GotTypeName)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED +
+                      "Oops! 'abs' only works with int or double, but you gave "
+                      "it a '" +
+                      Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
+                      Colors::RESET + "  " + Colors::BRIGHT_GREEN +
+                      "Valid uses:\n" +
+                      "    abs(int)    → int\n" +
+                      "    abs(double) → double\n" +
+                      Colors::RESET + "  " + Colors::BRIGHT_GREEN +
+                      "Hint: abs gives the absolute (positive) value of a number." +
+                      Colors::RESET) {}
+};
+
+// power() Argument Type Error : non-int/double passed to power
+class PowerArgTypeError : public TurfError {
+public:
+  PowerArgTypeError(SourceLocation Loc, const std::string &GotType1,
+                    const std::string &GotType2)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED +
+                "Oops! 'power' only works with int or double, but you gave it "
+                "'" +
+                Colors::CYAN + GotType1 + Colors::BRIGHT_RED + "' and '" +
+                Colors::CYAN + GotType2 + Colors::BRIGHT_RED + "'.\n" +
+                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
+                "Valid overloads:\n" +
+                "    power(int, int)       → int\n" +
+                "    power(int, double)    → double\n" +
+                "    power(double, int)    → double\n" +
+                "    power(double, double) → double\n" +
+                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
+                "Hint: power raises the first number to the power of the second." +
+                Colors::RESET) {}
+};
+
 // Control Flow Misuse : break/continue/return in wrong context
 class ControlFlowError : public TurfError {
 public:
