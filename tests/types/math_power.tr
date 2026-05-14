@@ -1,0 +1,29 @@
+int a = power(2, 3)
+printline(a)
+
+int b = power(5, 0)
+printline(b)
+
+int c = power(3, 1)
+printline(c)
+
+double d = power(2, 3.0)
+printline(d)
+
+double e = power(2.0, 3)
+printline(e)
+
+double f = power(2.0, 3.0)
+printline(f)
+
+int g = power(10, 2)
+printline(g)
+
+double h = power(3, 2.0)
+printline(h)
+
+int i = power(-2, 3)
+printline(i)
+
+int j = power(-2, 4)
+printline(j)

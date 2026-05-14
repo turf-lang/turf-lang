@@ -14,6 +14,8 @@ enum BuiltinToken {
   TOK_BUILTIN_INPUT = -102,
   TOK_BUILTIN_LENGTHOF = -103,
   TOK_BUILTIN_TYPEOF = -104,
+  TOK_BUILTIN_ABS = -105,
+  TOK_BUILTIN_POWER = -106,
 };
 
 // BuiltinDef
