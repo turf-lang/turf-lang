@@ -326,6 +326,7 @@ public:
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
   TurfType getType() const { return Type; }
+  const ExprAST *getInitializer() const { return InitVal.get(); }
 
   llvm::Value *codegen() override;
   std::unique_ptr<ExprAST> clone() const override {
@@ -544,52 +545,6 @@ public:
   }
 };
 
-// list<T> declaration: list<int> nums
-class ListDeclExprAST : public ExprAST {
-  std::string Name;
-  TurfType ElementType; // e.g. TURF_INT
-  SourceLocation Loc;
-
-public:
-  ListDeclExprAST(SourceLocation Loc, std::string Name, TurfType ElementType)
-      : Loc(Loc), Name(std::move(Name)), ElementType(ElementType) {}
-
-  const SourceLocation &getLoc() const { return Loc; }
-  const std::string &getName() const { return Name; }
-  TurfType getElementType() const { return ElementType; }
-
-  llvm::Value *codegen() override;
-  std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ListDeclExprAST>(Loc, Name, ElementType);
-  }
-};
-
-// list method call: nums.push(val)  /  nums.pop()  /  nums.length
-class ListMethodCallExprAST : public ExprAST {
-  std::string ListName;   // variable name
-  std::string Method;     // "push", "pop", or "length"
-  std::unique_ptr<ExprAST> Arg; // non-null only for push
-  SourceLocation Loc;
-
-public:
-  ListMethodCallExprAST(SourceLocation Loc, std::string ListName,
-                        std::string Method,
-                        std::unique_ptr<ExprAST> Arg = nullptr)
-      : Loc(Loc), ListName(std::move(ListName)), Method(std::move(Method)),
-        Arg(std::move(Arg)) {}
-
-  const SourceLocation &getLoc() const { return Loc; }
-  const std::string &getListName() const { return ListName; }
-  const std::string &getMethod() const { return Method; }
-  const ExprAST *getArg() const { return Arg.get(); }
-
-  llvm::Value *codegen() override;
-  std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ListMethodCallExprAST>(Loc, ListName, Method,
-                                                   CloneExprAST(Arg.get()));
-  }
-};
-
 inline std::unique_ptr<ExprAST> CloneExprAST(const ExprAST *Node) {
   return Node ? Node->clone() : nullptr;
 }
@@ -607,6 +562,112 @@ CloneExprList(const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
 // ────────────────────────────────────────────────────────────────────────────
 // AST Diffing Implementation: Per-node-type structural comparison
 // ────────────────────────────────────────────────────────────────────────────
+// Full-tree traversal helper used when diffing is impossible and we need to
+// treat the entire AST as changed.
+inline void CollectAllNodeIDsInternal(const ExprAST *Node,
+                                      std::set<uint64_t> &NodeIDs);
+
+inline void CollectAllNodeIDsInternal(const ExprAST *Node,
+                                      std::set<uint64_t> &NodeIDs) {
+  if (!Node) return;
+
+  NodeIDs.insert(Node->getNodeID());
+
+  if (auto *Bin = dynamic_cast<const BinaryExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Bin->getLHS(), NodeIDs);
+    CollectAllNodeIDsInternal(Bin->getRHS(), NodeIDs);
+    return;
+  }
+
+  if (auto *Unary = dynamic_cast<const UnaryExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Unary->getOperand(), NodeIDs);
+    return;
+  }
+
+  if (auto *Assign = dynamic_cast<const AssignmentExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Assign->getRHS(), NodeIDs);
+    return;
+  }
+
+  if (auto *Decl = dynamic_cast<const VarDeclExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Decl->getInitializer(), NodeIDs);
+    return;
+  }
+
+  if (auto *Cast = dynamic_cast<const CastExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Cast->getOperand(), NodeIDs);
+    return;
+  }
+
+  if (auto *Block = dynamic_cast<const BlockExprAST *>(Node)) {
+    for (const auto &Expr : Block->getExpressions())
+      CollectAllNodeIDsInternal(Expr.get(), NodeIDs);
+    return;
+  }
+
+  if (auto *If = dynamic_cast<const IfExprAST *>(Node)) {
+    for (const auto &Branch : If->getBranches()) {
+      CollectAllNodeIDsInternal(Branch.Cond.get(), NodeIDs);
+      CollectAllNodeIDsInternal(Branch.Body.get(), NodeIDs);
+    }
+    CollectAllNodeIDsInternal(If->getElseBody(), NodeIDs);
+    return;
+  }
+
+  if (auto *While = dynamic_cast<const WhileExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(While->getCond(), NodeIDs);
+    CollectAllNodeIDsInternal(While->getBody(), NodeIDs);
+    return;
+  }
+
+  if (auto *For = dynamic_cast<const ForExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(For->getStart(), NodeIDs);
+    CollectAllNodeIDsInternal(For->getEnd(), NodeIDs);
+    CollectAllNodeIDsInternal(For->getStep(), NodeIDs);
+    CollectAllNodeIDsInternal(For->getBody(), NodeIDs);
+    return;
+  }
+
+  if (auto *Call = dynamic_cast<const BuiltinCallExprAST *>(Node)) {
+    for (const auto &Arg : Call->getArgs())
+      CollectAllNodeIDsInternal(Arg.get(), NodeIDs);
+    return;
+  }
+
+  if (auto *Call = dynamic_cast<const FuncCallExprAST *>(Node)) {
+    for (const auto &Arg : Call->getArgs())
+      CollectAllNodeIDsInternal(Arg.get(), NodeIDs);
+    return;
+  }
+
+  if (auto *Func = dynamic_cast<const FuncDefExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Func->getBody(), NodeIDs);
+    return;
+  }
+
+  if (auto *Ret = dynamic_cast<const ReturnExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Ret->getVal(), NodeIDs);
+    return;
+  }
+
+  if (auto *Arr = dynamic_cast<const ArrayDeclExprAST *>(Node)) {
+    for (const auto &Init : Arr->getInitList())
+      CollectAllNodeIDsInternal(Init.get(), NodeIDs);
+    return;
+  }
+
+  if (auto *Access = dynamic_cast<const ArrayAccessExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Access->getIndex(), NodeIDs);
+    return;
+  }
+
+  if (auto *Assign = dynamic_cast<const ArrayAssignExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Assign->getIndex(), NodeIDs);
+    CollectAllNodeIDsInternal(Assign->getRHS(), NodeIDs);
+    return;
+  }
+}
+
 // Forward declaration for recursive diffing
 inline std::set<uint64_t> CollectChangedNodeIDsInternal(
     const ExprAST *OriginalAST, const ExprAST *ModifiedAST,
@@ -971,34 +1032,8 @@ inline std::set<uint64_t> CollectChangedNodeIDsInternal(
     }
     return ChangedIDs;
   }
-
-  // ============================================================================
-  // ListDeclExprAST: Compare name and element type
-  // ============================================================================
-  if (auto *OrigList = dynamic_cast<const ListDeclExprAST*>(OriginalAST)) {
-    auto *ModList = dynamic_cast<const ListDeclExprAST*>(ModifiedAST);
-    if (OrigList->getName() != ModList->getName() ||
-        OrigList->getElementType() != ModList->getElementType()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
-    return ChangedIDs;
-  }
-
-  // ============================================================================
-  // ListMethodCallExprAST: Compare list name, method, and argument
-  // ============================================================================
-  if (auto *OrigMeth = dynamic_cast<const ListMethodCallExprAST*>(OriginalAST)) {
-    auto *ModMeth = dynamic_cast<const ListMethodCallExprAST*>(ModifiedAST);
-    if (OrigMeth->getListName() != ModMeth->getListName() ||
-        OrigMeth->getMethod() != ModMeth->getMethod()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
-    CollectChangedNodeIDsInternal(OrigMeth->getArg(), ModMeth->getArg(), ChangedIDs);
-    return ChangedIDs;
-  }
-
+  
+  // Fallback: if we reach here, we don't recognize the node type
   // Mark both as changed to be safe
   ChangedIDs.insert(OriginalAST->getNodeID());
   ChangedIDs.insert(ModifiedAST->getNodeID());
