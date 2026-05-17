@@ -226,9 +226,9 @@ void RegisterBuiltins() {
           Type *Ty = Val->getType();
 
           if (Ty->isDoubleTy()) {
-            Function *FAbsFunc = Intrinsic::getOrInsertDeclaration(
-                TheModule.get(), Intrinsic::fabs,
-                {Type::getDoubleTy(*TheContext)});
+            Function *FAbsFunc = Intrinsic::getDeclaration(
+              TheModule.get(), Intrinsic::fabs,
+              {Type::getDoubleTy(*TheContext)});
             return Builder->CreateCall(FAbsFunc, {Val}, "abs");
           }
 
@@ -286,7 +286,7 @@ void RegisterBuiltins() {
             B = Builder->CreateSIToFP(B, Type::getDoubleTy(*TheContext),
                                       "powcast2");
 
-          Function *PowFunc = Intrinsic::getOrInsertDeclaration(
+            Function *PowFunc = Intrinsic::getDeclaration(
               TheModule.get(), Intrinsic::pow,
               {Type::getDoubleTy(*TheContext)});
           Value *Result =

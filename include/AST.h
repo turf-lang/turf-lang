@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <typeinfo>
 
 // Base Expressions Class: Everything, "5", "5 + 10", etc. are expressions
 class ExprAST {
@@ -326,6 +327,7 @@ public:
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
   TurfType getType() const { return Type; }
+  const ExprAST *getInitializer() const { return InitVal.get(); }
 
   llvm::Value *codegen() override;
   std::unique_ptr<ExprAST> clone() const override {
@@ -602,6 +604,126 @@ CloneExprList(const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
     Result.push_back(CloneExprAST(Node.get()));
   }
   return Result;
+}
+
+// Collect every node ID reachable from a tree. Used as a fallback when the
+// baseline AST is missing so incremental validation still sees the whole tree.
+inline void CollectAllNodeIDsInternal(const ExprAST *Node,
+                                      std::set<uint64_t> &NodeIDs) {
+  if (!Node)
+    return;
+
+  NodeIDs.insert(Node->getNodeID());
+
+  if (const auto *Binary = dynamic_cast<const BinaryExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Binary->getLHS(), NodeIDs);
+    CollectAllNodeIDsInternal(Binary->getRHS(), NodeIDs);
+    return;
+  }
+
+  if (const auto *Unary = dynamic_cast<const UnaryExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Unary->getOperand(), NodeIDs);
+    return;
+  }
+
+  if (const auto *Assign = dynamic_cast<const AssignmentExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Assign->getRHS(), NodeIDs);
+    return;
+  }
+
+  if (const auto *Decl = dynamic_cast<const VarDeclExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Decl->getInitializer(), NodeIDs);
+    return;
+  }
+
+  if (const auto *Cast = dynamic_cast<const CastExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Cast->getOperand(), NodeIDs);
+    return;
+  }
+
+  if (const auto *Block = dynamic_cast<const BlockExprAST *>(Node)) {
+    for (const auto &Child : Block->getExpressions())
+      CollectAllNodeIDsInternal(Child.get(), NodeIDs);
+    return;
+  }
+
+  if (const auto *IfNode = dynamic_cast<const IfExprAST *>(Node)) {
+    for (const auto &Branch : IfNode->getBranches()) {
+      CollectAllNodeIDsInternal(Branch.Cond.get(), NodeIDs);
+      CollectAllNodeIDsInternal(Branch.Body.get(), NodeIDs);
+    }
+    CollectAllNodeIDsInternal(IfNode->getElseBody(), NodeIDs);
+    return;
+  }
+
+  if (const auto *While = dynamic_cast<const WhileExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(While->getCond(), NodeIDs);
+    CollectAllNodeIDsInternal(While->getBody(), NodeIDs);
+    return;
+  }
+
+  if (const auto *For = dynamic_cast<const ForExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(For->getStart(), NodeIDs);
+    CollectAllNodeIDsInternal(For->getEnd(), NodeIDs);
+    CollectAllNodeIDsInternal(For->getStep(), NodeIDs);
+    CollectAllNodeIDsInternal(For->getBody(), NodeIDs);
+    return;
+  }
+
+  if (const auto *Builtin = dynamic_cast<const BuiltinCallExprAST *>(Node)) {
+    for (const auto &Arg : Builtin->getArgs())
+      CollectAllNodeIDsInternal(Arg.get(), NodeIDs);
+    return;
+  }
+
+  if (const auto *FuncCall = dynamic_cast<const FuncCallExprAST *>(Node)) {
+    for (const auto &Arg : FuncCall->getArgs())
+      CollectAllNodeIDsInternal(Arg.get(), NodeIDs);
+    return;
+  }
+
+  if (const auto *FuncDef = dynamic_cast<const FuncDefExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(FuncDef->getBody(), NodeIDs);
+    return;
+  }
+
+  if (const auto *ReturnNode = dynamic_cast<const ReturnExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(ReturnNode->getVal(), NodeIDs);
+    return;
+  }
+
+  if (const auto *ArrayDecl = dynamic_cast<const ArrayDeclExprAST *>(Node)) {
+    for (const auto &Init : ArrayDecl->getInitList())
+      CollectAllNodeIDsInternal(Init.get(), NodeIDs);
+    return;
+  }
+
+  if (const auto *ArrayAccess = dynamic_cast<const ArrayAccessExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(ArrayAccess->getIndex(), NodeIDs);
+    return;
+  }
+
+  if (const auto *ArrayAssign = dynamic_cast<const ArrayAssignExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(ArrayAssign->getIndex(), NodeIDs);
+    CollectAllNodeIDsInternal(ArrayAssign->getRHS(), NodeIDs);
+    return;
+  }
+
+  if (const auto *ListMethod = dynamic_cast<const ListMethodCallExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(ListMethod->getArg(), NodeIDs);
+    return;
+  }
+
+  if (dynamic_cast<const ArrayLengthExprAST *>(Node) ||
+      dynamic_cast<const ListDeclExprAST *>(Node) ||
+      dynamic_cast<const BreakExprAST *>(Node) ||
+      dynamic_cast<const ContinueExprAST *>(Node) ||
+      dynamic_cast<const NumberExprAST *>(Node) ||
+      dynamic_cast<const BoolExprAST *>(Node) ||
+      dynamic_cast<const StringExprAST *>(Node) ||
+      dynamic_cast<const VariableExprAST *>(Node)) {
+    return;
+  }
 }
 
 // ────────────────────────────────────────────────────────────────────────────

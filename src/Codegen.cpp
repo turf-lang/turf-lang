@@ -312,7 +312,7 @@ Value *BinaryExprAST::codegen() {
     // Ensure both operands are double
     CastBoth(TURF_DOUBLE);
 
-    Function *PowFunc = Intrinsic::getOrInsertDeclaration(
+    Function *PowFunc = Intrinsic::getDeclaration(
       TheModule.get(), Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
 

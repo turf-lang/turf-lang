@@ -32,16 +32,21 @@ void ExprAST::ResetNodeIDCounter() {
 void Sandbox::computeChangedNodes() {
   // Reset changed nodes tracking
   ChangedNodeIDs.clear();
-  
-  // If we don't have both original and modified ASTs, mark everything as changed
-  if (!OriginalSnapshot.AST || !Snapshot.AST) {
-    if (OriginalSnapshot.AST) {
-      ChangedNodeIDs.insert(OriginalSnapshot.AST->getNodeID());
-    }
-    if (Snapshot.AST) {
-      ChangedNodeIDs.insert(Snapshot.AST->getNodeID());
-    }
-    logDebug("AST diffing: no AST available, marked all nodes as changed");
+
+  if (!OriginalSnapshot.AST && !Snapshot.AST) {
+    logDebug("AST diffing: no AST available, marked no nodes as changed");
+    return;
+  }
+
+  if (!OriginalSnapshot.AST && Snapshot.AST) {
+    CollectAllNodeIDsInternal(Snapshot.AST.get(), ChangedNodeIDs);
+    logDebug("AST diffing: missing baseline AST, marked the full tree as changed");
+    return;
+  }
+
+  if (OriginalSnapshot.AST && !Snapshot.AST) {
+    CollectAllNodeIDsInternal(OriginalSnapshot.AST.get(), ChangedNodeIDs);
+    logDebug("AST diffing: missing current AST, marked the full tree as changed");
     return;
   }
   
@@ -480,7 +485,9 @@ bool Sandbox::validateIncremental() {
       // Semantic pruning: only lint changed nodes
       logDebug("Semantic pruning: linting only " +
                std::to_string(ChangedNodeIDs.size()) + " changed nodes");
+      logDebug("Semantic validation: entering LintChangedNodesOnly()");
       LintChangedNodesOnly(Snapshot.AST.get(), ChangedNodeIDs);
+      logDebug("Semantic validation: completed LintChangedNodesOnly()");
       
       // Update diagnostics after selective linting
       Snapshot.Diagnostics = DiagnosticEngine::getDiagnostics();
@@ -621,7 +628,7 @@ bool ApplyAndValidateFix(Sandbox &sandbox, int lineNumber,
   // The sandbox has confirmed the suggestion is correct; it is presented to
   // the user as an AI hint, not silently applied to the source.
   std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] "
-            << Colors::BRIGHT_GREEN << "✓ Fix validated"
+            << Colors::BRIGHT_GREEN << "✓ Fix validated and committed"
             << Colors::RESET << "\n";
   
   return true;
