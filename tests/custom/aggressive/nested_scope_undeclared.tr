@@ -1,0 +1,6 @@
+int flag = 1
+if flag > 0 {
+    printline(missing_outer)
+} else {
+    printline(missing_else)
+}
