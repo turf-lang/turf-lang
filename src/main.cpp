@@ -209,6 +209,13 @@ int main(int argc, char **argv) {
           continue;
         }
         if (CurTok == TOK_FN) {
+          // Save scope depth so we can restore it if codegen aborts via longjmp.
+          // Without this, a function that references an unknown variable causes
+          // EnterScope() to be called but ExitScope() to be skipped (longjmp
+          // bypasses all destructors and normal returns), leaving the scope
+          // stack dirty and the global scope's HasEarlyExit flag stale.
+          size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
+
           // Parse and codegen prototype-only. Guard with setjmp so a bad
           // fn body doesn't kill the whole pre-pass.
           g_recoverActive = true;
@@ -220,7 +227,15 @@ int main(int argc, char **argv) {
               AST->codegen();
             }
           } else {
-            // longjmp landed here : skip to next fn or EOF
+            // longjmp landed here: diagnostic already recorded.
+            // Unwind any scopes that were opened during the partial compile,
+            // then clear any stale early-exit flag so subsequent top-level
+            // declarations are not falsely flagged as unreachable.
+            if (GlobalSymbolTable) {
+              GlobalSymbolTable->ResetToDepth(SavedDepth);
+              GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+            }
+            // Skip to next fn or EOF
             while (CurTok != TOK_FN && CurTok != TOK_EOF)
               getNextToken();
           }

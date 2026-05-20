@@ -1,0 +1,89 @@
+// DSA Problem 1: Merge Sort
+// Sorts a list of integers using merge sort (O(n log n))
+// Uses list<int> for dynamic sub-arrays
+
+fn void merge(list<int> arr, int left, int mid, int right) {
+    int n1 = mid - left + 1
+    int n2 = right - mid
+
+    list<int> L
+    list<int> R
+
+    int a = 0
+    while a < n1 {
+        L.push(arr[left + a])
+        a++
+    }
+
+    int b = 0
+    while b < n2 {
+        R.push(arr[mid + 1 + b])
+        b++
+    }
+
+    int i = 0
+    int j = 0
+    int k = left
+
+    while i < n1 && j < n2 {
+        if L[i] <= R[j] {
+            arr[k] = L[i]
+            i++
+        } else {
+            arr[k] = R[j]
+            j++
+        }
+        k++
+    }
+
+    while i < n1 {
+        arr[k] = L[i]
+        i++
+        k++
+    }
+
+    while j < n2 {
+        arr[k] = R[j]
+        j++
+        k++
+    }
+}
+
+fn void mergeSort(list<int> arr, int left, int right) {
+    if left < right {
+        int mid = (left + right) / 2
+        mergeSort(arr, left, mid)
+        mergeSort(arr, mid + 1, right)
+        merge(arr, left, mid, right)
+    }
+}
+
+// --- Main ---
+list<int> data
+data.push(64)
+data.push(34)
+data.push(25)
+data.push(12)
+data.push(22)
+data.push(11)
+data.push(90)
+
+printline("Before sort:")
+int p = 0
+while p < data.length {
+    print(data[p])
+    print(" ")
+    p++
+}
+printline("")
+
+mergeSort(data, 0, data.length - 1)
+
+printline("After merge sort:")
+int q = 0
+while q < data.length {
+    print(data[q])
+    print(" ")
+    q++
+}
+printline("")

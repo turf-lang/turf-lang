@@ -1,0 +1,40 @@
+// DSA Problem 3: Fibonacci via Dynamic Programming (bottom-up)
+// Computes the nth Fibonacci number using a DP table (list<int>)
+// F(0)=0, F(1)=1, F(n)=F(n-1)+F(n-2)
+
+fn int fibonacci(int n) {
+    if n <= 0 {
+        return 0
+    }
+    if n == 1 {
+        return 1
+    }
+
+    list<int> dp
+    dp.push(0)
+    dp.push(1)
+
+    int i = 2
+    while i <= n {
+        int next = dp[i - 1] + dp[i - 2]
+        dp.push(next)
+        i++
+    }
+    return dp[n]
+}
+
+// --- Main ---
+printline("Fibonacci sequence (F(0) to F(15)):")
+int k = 0
+while k <= 15 {
+    print("F(")
+    print(k)
+    print(") = ")
+    printline(fibonacci(k))
+    k++
+}
+
+// Verify: F(20) = 6765
+int f20 = fibonacci(20)
+printline("F(20) =")
+printline(f20)

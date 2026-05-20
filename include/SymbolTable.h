@@ -78,6 +78,11 @@ public:
   // Control flow tracking
   void MarkEarlyExit();
   bool CurrentScopeHasEarlyExit() const;
+  // Recovery helpers: called by the pre-pass setjmp handler to undo orphaned
+  // scope state left behind when a function's codegen aborts via longjmp.
+  void ResetEarlyExitForCurrentScope();
+  void ResetToDepth(size_t TargetDepth);
+  size_t GetDepth() const { return ScopeStack.size(); }
 };
 
 // Global symbol table instance

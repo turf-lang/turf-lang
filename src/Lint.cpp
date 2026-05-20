@@ -43,9 +43,19 @@ static std::string Fingerprint(const ExprAST *E) {
            Fingerprint(Bin->getLHS()) + "," + Fingerprint(Bin->getRHS()) + ")";
   }
 
-  // For complex nodes, return a unique tag that won't match anything else.
-  // This prevents false positives at the cost of missing some patterns.
-  return "<complex>";
+  // For complex nodes that we don't know how to fingerprint structurally,
+  // return a string that is unique to THIS specific node instance (via its
+  // pointer address).  Two different complex nodes will therefore never
+  // compare equal, which prevents false-positive "identical branches"
+  // warnings when both branches happen to contain unrecognised statement
+  // types (e.g. array-element assignments, increment expressions, list
+  // method calls, etc.).
+  //
+  // The old behaviour was to return the shared sentinel "<complex>" for
+  // every unrecognised node, which made ANY two branches that both
+  // contained at least one complex statement appear identical to the
+  // checker — a clear false positive.
+  return "<unique@" + std::to_string(reinterpret_cast<uintptr_t>(E)) + ">";
 }
 
 // Helper: check if an AST subtree contains break/continue/return
