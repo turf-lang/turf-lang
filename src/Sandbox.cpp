@@ -309,7 +309,7 @@ Sandbox::EditKind Sandbox::classifyEditKind(const std::string &lineText) {
 }
 
 bool Sandbox::parseDeclarationLine(const std::string &lineText, std::string &name,
-                                   TurfType &type, bool &isArray, int &arraySize) {
+                                   TurfTypePtr &type, bool &isArray, int &arraySize) {
   static const std::regex scalarPattern(
       R"(^\s*(int|double|float|bool|string)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(=|;|$))");
   static const std::regex arrayPattern(
@@ -322,12 +322,14 @@ bool Sandbox::parseDeclarationLine(const std::string &lineText, std::string &nam
     name = match[3];
     arraySize = std::stoi(sizeText);
     isArray = true;
-    if (typeName == "int") type = TURF_INT_ARRAY;
-    else if (typeName == "double" || typeName == "float") type = TURF_DOUBLE_ARRAY;
-    else if (typeName == "bool") type = TURF_BOOL_ARRAY;
-    else if (typeName == "string") type = TURF_STRING_ARRAY;
-    else type = TURF_VOID;
-    return type != TURF_VOID;
+    TurfTypePtr ElemType;
+    if      (typeName == "int")                    ElemType = TurfInt();
+    else if (typeName == "double" || typeName == "float") ElemType = TurfDouble();
+    else if (typeName == "bool")                   ElemType = TurfBool();
+    else if (typeName == "string")                 ElemType = TurfString();
+    else return false;
+    type = makeArrayType(ElemType, arraySize);
+    return true;
   }
 
   if (!std::regex_search(lineText, match, scalarPattern))
@@ -337,12 +339,12 @@ bool Sandbox::parseDeclarationLine(const std::string &lineText, std::string &nam
   name = match[2];
   isArray = false;
   arraySize = 0;
-  if (typeName == "int") type = TURF_INT;
-  else if (typeName == "double" || typeName == "float") type = TURF_DOUBLE;
-  else if (typeName == "bool") type = TURF_BOOL;
-  else if (typeName == "string") type = TURF_STRING;
-  else type = TURF_VOID;
-  return type != TURF_VOID;
+  if      (typeName == "int")                    type = TurfInt();
+  else if (typeName == "double" || typeName == "float") type = TurfDouble();
+  else if (typeName == "bool")                   type = TurfBool();
+  else if (typeName == "string")                 type = TurfString();
+  else return false;
+  return true;
 }
 
 bool Sandbox::isLocalizedEdit(EditKind kind) {
@@ -374,7 +376,7 @@ void Sandbox::updateSymbolTableForEdit(int lineNumber, const std::string &newLin
     return;
 
   std::string name;
-  TurfType type = TURF_VOID;
+  TurfTypePtr type;
   bool isArray = false;
   int arraySize = 0;
   if (!parseDeclarationLine(newLine, name, type, isArray, arraySize))
@@ -383,8 +385,7 @@ void Sandbox::updateSymbolTableForEdit(int lineNumber, const std::string &newLin
   SourceLocation declLoc{lineNumber, 1};
 
   if (isArray) {
-    Snapshot.SymbolTableCopy->DeclareSymbol(name, type, declLoc, nullptr,
-                                            arraySize);
+    Snapshot.SymbolTableCopy->DeclareSymbol(name, type, declLoc, nullptr, arraySize);
   } else {
     Snapshot.SymbolTableCopy->DeclareSymbol(name, type, declLoc, nullptr);
   }

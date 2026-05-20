@@ -16,15 +16,15 @@ using SymbolID = size_t;
 struct Symbol {
   SymbolID ID;                    // Unique stable identifier
   std::string Name;               // Variable name
-  TurfType Type;                  // Variable type
+  TurfTypePtr Type;               // Variable type (dynamic — works for list<T>, etc.)
   SourceLocation DeclLoc;         // Where it was declared
   llvm::AllocaInst *Alloca;       // LLVM memory location
   size_t ScopeLevel;              // Nesting depth (0 = global, 1 = first block, etc.)
   int ArraySize = 0;              // >0 for array variables
   
-  Symbol(SymbolID ID, std::string Name, TurfType Type, SourceLocation DeclLoc,
+  Symbol(SymbolID ID, std::string Name, TurfTypePtr Type, SourceLocation DeclLoc,
          llvm::AllocaInst *Alloca, size_t ScopeLevel, int ArraySize = 0)
-      : ID(ID), Name(std::move(Name)), Type(Type), DeclLoc(DeclLoc),
+      : ID(ID), Name(std::move(Name)), Type(std::move(Type)), DeclLoc(DeclLoc),
         Alloca(Alloca), ScopeLevel(ScopeLevel), ArraySize(ArraySize) {}
 };
 
@@ -59,9 +59,9 @@ public:
   size_t GetCurrentLevel() const { return ScopeStack.size() - 1; }
   
   // Symbol declaration
-  SymbolID DeclareSymbol(const std::string &Name, TurfType Type,
+  SymbolID DeclareSymbol(const std::string &Name, TurfTypePtr Type,
                          SourceLocation DeclLoc, llvm::AllocaInst *Alloca);
-  SymbolID DeclareSymbol(const std::string &Name, TurfType Type,
+  SymbolID DeclareSymbol(const std::string &Name, TurfTypePtr Type,
                          SourceLocation DeclLoc, llvm::AllocaInst *Alloca,
                          int ArraySize);
   

@@ -17,8 +17,8 @@ extern std::unique_ptr<llvm::Module> TheModule;
 
 struct VarInfo {
   llvm::AllocaInst *Alloca;
-  TurfType Type;
-  int ArraySize = 0; // >0 for array variables
+  TurfTypePtr Type;       // Dynamic type — works for int, list<Player>, etc.
+  int ArraySize = 0;      // >0 for fixed-size array variables
 };
 
 // Symbol Table: Maps variables to their memory locations (AllocaInst)
@@ -29,12 +29,12 @@ void InitializeModule();
 // Helper function to create an alloca instruction
 llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
                                          const std::string &VarName,
-                                         TurfType Type);
-// Map a TurfType to the corresponding LLVM Type
-llvm::Type *getLLVMType(TurfType Type);
+                                         const TurfType *Type);
+// Map a TurfType to the corresponding LLVM Type (Monomorphizing)
+llvm::Type *getLLVMType(const TurfType *Type);
 
 // Current function context (nullptr at top level)
-extern TurfType CurrentFuncReturnType;
+extern TurfTypePtr CurrentFuncReturnType;
 extern llvm::Function *CurrentFunction;
 
 #endif

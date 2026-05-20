@@ -38,7 +38,7 @@ void SymbolTable::ExitScope() {
   ScopeStack.pop_back();
 }
 
-SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfType Type,
+SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfTypePtr Type,
                                     SourceLocation DeclLoc,
                                     llvm::AllocaInst *Alloca) {
   if (ScopeStack.empty())
@@ -51,12 +51,12 @@ SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfType Type,
   ScopeStack.back().Symbols[Name] = ID;
   
   // Add to all symbols map
-  AllSymbols.emplace(ID, Symbol(ID, Name, Type, DeclLoc, Alloca, Level));
+  AllSymbols.emplace(ID, Symbol(ID, Name, std::move(Type), DeclLoc, Alloca, Level));
   
   return ID;
 }
 
-SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfType Type,
+SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfTypePtr Type,
                                     SourceLocation DeclLoc,
                                     llvm::AllocaInst *Alloca,
                                     int ArraySize) {
@@ -70,7 +70,7 @@ SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfType Type,
   ScopeStack.back().Symbols[Name] = ID;
   
   // Add to all symbols map
-  AllSymbols.emplace(ID, Symbol(ID, Name, Type, DeclLoc, Alloca, Level, ArraySize));
+  AllSymbols.emplace(ID, Symbol(ID, Name, std::move(Type), DeclLoc, Alloca, Level, ArraySize));
   
   return ID;
 }

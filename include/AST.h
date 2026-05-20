@@ -314,19 +314,20 @@ public:
 
 class VarDeclExprAST : public ExprAST {
   std::string Name;
-  TurfType Type;
+  TurfTypePtr Type;
   std::unique_ptr<ExprAST> InitVal;
   SourceLocation Loc;
 
 public:
-  VarDeclExprAST(SourceLocation Loc, std::string Name, TurfType Type,
+  VarDeclExprAST(SourceLocation Loc, std::string Name, TurfTypePtr Type,
                  std::unique_ptr<ExprAST> InitVal)
-      : Name(std::move(Name)), Type(Type), InitVal(std::move(InitVal)),
+      : Name(std::move(Name)), Type(std::move(Type)), InitVal(std::move(InitVal)),
         Loc(Loc) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
-  TurfType getType() const { return Type; }
+  const TurfType *getType() const { return Type.get(); }
+  TurfTypePtr getTypePtr() const { return Type; }
   const ExprAST *getInitializer() const { return InitVal.get(); }
 
   llvm::Value *codegen() override;
@@ -334,6 +335,8 @@ public:
     return std::make_unique<VarDeclExprAST>(Loc, Name, Type,
                                             CloneExprAST(InitVal.get()));
   }
+  // Kept private access for codegen
+  const ExprAST *getInitVal() const { return InitVal.get(); }
 };
 
 class BoolExprAST : public ExprAST {
@@ -363,16 +366,17 @@ public:
 
 // Explicit type conversion: int(expr) / double(expr)
 class CastExprAST : public ExprAST {
-  TurfType DestType;
+  TurfTypePtr DestType;
   std::unique_ptr<ExprAST> Operand;
   SourceLocation Loc;
 
 public:
-  CastExprAST(SourceLocation Loc, TurfType DestType,
+  CastExprAST(SourceLocation Loc, TurfTypePtr DestType,
               std::unique_ptr<ExprAST> Operand)
-      : DestType(DestType), Operand(std::move(Operand)), Loc(Loc) {}
+      : DestType(std::move(DestType)), Operand(std::move(Operand)), Loc(Loc) {}
   
-  TurfType getDestType() const { return DestType; }
+  const TurfType *getDestType() const { return DestType.get(); }
+  TurfTypePtr getDestTypePtr() const { return DestType; }
   const ExprAST *getOperand() const { return Operand.get(); }
   
   llvm::Value *codegen() override;
@@ -380,11 +384,13 @@ public:
     return std::make_unique<CastExprAST>(Loc, DestType,
                                          CloneExprAST(Operand.get()));
   }
+  // Kept for codegen access
+  const SourceLocation &getLoc() const { return Loc; }
 };
 
 // A single function parameter descriptor.
 struct ParamDecl {
-  TurfType Type;
+  TurfTypePtr Type;
   std::string Name;
 };
 
@@ -409,19 +415,21 @@ public:
 // fn RetType Name(params...) { body }
 class FuncDefExprAST : public ExprAST {
   std::string Name;
-  TurfType ReturnType;
+  TurfTypePtr ReturnType;
   std::vector<ParamDecl> Params;
   std::unique_ptr<ExprAST> Body;
   SourceLocation Loc;
 
 public:
-  FuncDefExprAST(SourceLocation Loc, std::string Name, TurfType ReturnType,
+  FuncDefExprAST(SourceLocation Loc, std::string Name, TurfTypePtr ReturnType,
                  std::vector<ParamDecl> Params, std::unique_ptr<ExprAST> Body)
-      : Loc(Loc), Name(std::move(Name)), ReturnType(ReturnType),
+      : Loc(Loc), Name(std::move(Name)), ReturnType(std::move(ReturnType)),
         Params(std::move(Params)), Body(std::move(Body)) {}
 
   const std::string &getName() const { return Name; }
-  TurfType getReturnType() const { return ReturnType; }
+  const TurfType *getReturnType() const { return ReturnType.get(); }
+  TurfTypePtr getReturnTypePtr() const { return ReturnType; }
+  ExprAST *getBodyMut() const { return Body.get(); }
   const ExprAST *getBody() const { return Body.get(); }
   const std::vector<ParamDecl> &getParams() const { return Params; }
 
@@ -455,20 +463,21 @@ public:
 // Array declaration: int[5] arr   or   int[3] arr = [1, 2, 3]
 class ArrayDeclExprAST : public ExprAST {
   std::string Name;
-  TurfType ElementType;  // e.g. TURF_INT
-  int Size;              // compile-time constant size
+  TurfTypePtr ElementType;  // e.g. TurfInt()
+  int Size;                 // compile-time constant size
   std::vector<std::unique_ptr<ExprAST>> InitList; // optional initializer
   SourceLocation Loc;
 
 public:
-  ArrayDeclExprAST(SourceLocation Loc, std::string Name, TurfType ElementType,
+  ArrayDeclExprAST(SourceLocation Loc, std::string Name, TurfTypePtr ElementType,
                    int Size, std::vector<std::unique_ptr<ExprAST>> InitList)
-      : Loc(Loc), Name(std::move(Name)), ElementType(ElementType), Size(Size),
+      : Loc(Loc), Name(std::move(Name)), ElementType(std::move(ElementType)), Size(Size),
         InitList(std::move(InitList)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
-  TurfType getElementType() const { return ElementType; }
+  const TurfType *getElementType() const { return ElementType.get(); }
+  TurfTypePtr getElementTypePtr() const { return ElementType; }
   int getSize() const { return Size; }
   const std::vector<std::unique_ptr<ExprAST>> &getInitList() const { return InitList; }
 
@@ -546,27 +555,9 @@ public:
   }
 };
 
-// list<T> declaration: list<int> nums
-class ListDeclExprAST : public ExprAST {
-  std::string Name;
-  TurfType ElementType; // e.g. TURF_INT
-  SourceLocation Loc;
-
-public:
-  ListDeclExprAST(SourceLocation Loc, std::string Name, TurfType ElementType)
-      : Loc(Loc), Name(std::move(Name)), ElementType(ElementType) {}
-
-  const SourceLocation &getLoc() const { return Loc; }
-  const std::string &getName() const { return Name; }
-  TurfType getElementType() const { return ElementType; }
-
-  llvm::Value *codegen() override;
-  std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ListDeclExprAST>(Loc, Name, ElementType);
-  }
-};
-
 // list method call: nums.push(val)  /  nums.pop()  /  nums.length
+// Note: list<T> *declaration* is now a plain VarDeclExprAST with a
+// GenericType("list", [elemType]) — no separate ListDeclExprAST needed.
 class ListMethodCallExprAST : public ExprAST {
   std::string ListName;   // variable name
   std::string Method;     // "push", "pop", or "length"
@@ -715,7 +706,6 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
   }
 
   if (dynamic_cast<const ArrayLengthExprAST *>(Node) ||
-      dynamic_cast<const ListDeclExprAST *>(Node) ||
       dynamic_cast<const BreakExprAST *>(Node) ||
       dynamic_cast<const ContinueExprAST *>(Node) ||
       dynamic_cast<const NumberExprAST *>(Node) ||
@@ -1095,17 +1085,8 @@ inline std::set<uint64_t> CollectChangedNodeIDsInternal(
   }
 
   // ============================================================================
-  // ListDeclExprAST: Compare name and element type
+  // list<T> declarations are now VarDeclExprAST; compare as VarDeclExprAST below.
   // ============================================================================
-  if (auto *OrigList = dynamic_cast<const ListDeclExprAST*>(OriginalAST)) {
-    auto *ModList = dynamic_cast<const ListDeclExprAST*>(ModifiedAST);
-    if (OrigList->getName() != ModList->getName() ||
-        OrigList->getElementType() != ModList->getElementType()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
-    return ChangedIDs;
-  }
 
   // ============================================================================
   // ListMethodCallExprAST: Compare list name, method, and argument

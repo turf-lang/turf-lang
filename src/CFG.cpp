@@ -108,7 +108,7 @@ void CFG::reportFlowDiagnostics() const {
   }
 
   // Report missing return paths - ERROR for non-void functions, ignore for void
-  if (ReturnType != TURF_VOID && !allPathsReturn()) {
+  if (!ReturnType->isVoid() && !allPathsReturn()) {
     MissingReturnError(FuncLoc, FunctionName).raise();
   }
 
@@ -184,8 +184,8 @@ void CFG::print() const {
 // ============================================================================
 
 std::unique_ptr<CFG> CFGBuilder::buildCFG(const std::string &FunctionName,
-                                          TurfType ReturnType, ExprAST *Body) {
-  auto CFGPtr = std::make_unique<CFG>(FunctionName, ReturnType);
+                                          TurfTypePtr ReturnType, ExprAST *Body) {
+  auto CFGPtr = std::make_unique<CFG>(FunctionName, std::move(ReturnType));
   CurrentCFG = CFGPtr.get();
 
   // Create entry and exit blocks
