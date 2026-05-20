@@ -21,13 +21,16 @@ std::unique_ptr<Module> TheModule;
 std::map<std::string, VarInfo> NamedValues;
 
 // Current enclosing function context (nullptr at top level)
-TurfType CurrentFuncReturnType = TURF_VOID;
+TurfTypePtr CurrentFuncReturnType = TurfVoid();
 llvm::Function *CurrentFunction = nullptr;
 
 std::vector<std::pair<llvm::BasicBlock *, llvm::BasicBlock *>> LoopBlocks;
 
-// Tracks full param types (incl. list<T> element types) for user-defined functions.
-static std::map<std::string, std::vector<TurfType>> FuncListParamTypes;
+// Tracks full param types for user-defined functions.
+static std::map<std::string, std::vector<TurfTypePtr>> FuncParamTypes;
+
+// Type cache for Monomorphization: maps type name -> LLVM type
+static std::map<std::string, llvm::Type *> LLVMTypeCache;
 
 // Forward declarations for list helpers (defined after Array Codegen)
 static llvm::StructType *GetListStructType();
@@ -46,125 +49,112 @@ void InitializeModule() {
   Builder = std::make_unique<IRBuilder<>>(*TheContext);
 }
 
-Type *getLLVMType(TurfType Type) {
-  switch (Type) {
-  case TURF_INT:
-    return llvm::Type::getInt64Ty(*TheContext);
-  case TURF_DOUBLE:
-    return llvm::Type::getDoubleTy(*TheContext);
-  case TURF_BOOL:
-    return llvm::Type::getInt1Ty(*TheContext);
-  case TURF_STRING:
-    return llvm::PointerType::get(*TheContext, 0);
-  case TURF_VOID:
-    return llvm::Type::getVoidTy(*TheContext);
-  // list<T> is a heap-allocated struct, stored as an opaque pointer
-  case TURF_INT_LIST:
-  case TURF_DOUBLE_LIST:
-  case TURF_BOOL_LIST:
-  case TURF_STRING_LIST:
-    return llvm::PointerType::get(*TheContext, 0);
-  default:
-    return llvm::Type::getDoubleTy(*TheContext);
-  }
+// Monomorphizing getLLVMType: maps a TurfType* to the corresponding llvm::Type*.
+// For generics (list<T>), creates a unique LLVM struct per instantiation and caches it.
+llvm::Type *getLLVMType(const TurfType *T) {
+  if (!T) return llvm::Type::getDoubleTy(*TheContext);
+  std::string Key = T->getName();
+
+  auto It = LLVMTypeCache.find(Key);
+  if (It != LLVMTypeCache.end())
+    return It->second;
+
+  // Primitive named types
+  if (T->isNamed("int"))    return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
+  if (T->isNamed("double")) return LLVMTypeCache[Key] = llvm::Type::getDoubleTy(*TheContext);
+  if (T->isNamed("bool"))   return LLVMTypeCache[Key] = llvm::Type::getInt1Ty(*TheContext);
+  if (T->isNamed("string")) return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+  if (T->isNamed("void"))   return LLVMTypeCache[Key] = llvm::Type::getVoidTy(*TheContext);
+
+  // list<T> — heap-allocated struct, stored as opaque pointer in NamedValues.
+  // The actual struct layout is created once per element type in GetListStructType.
+  if (isListType(T))
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+
+  // Array types — the alloca is created per-site; return opaque pointer here.
+  if (isArrayType(T))
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+
+  // Unknown / future types
+  return LLVMTypeCache[Key] = llvm::Type::getDoubleTy(*TheContext);
 }
 
-static TurfType getTurfTypeFromLLVM(Type *Ty) {
-  if (Ty->isDoubleTy())
-    return TURF_DOUBLE;
-  if (Ty->isIntegerTy(64))
-    return TURF_INT;
-  if (Ty->isIntegerTy(32))
-    return TURF_INT;
-  if (Ty->isIntegerTy(32))
-    return TURF_INT;
-  if (Ty->isIntegerTy(1))
-    return TURF_BOOL;
-  if (Ty->isPointerTy())
-    return TURF_STRING;
-  if (Ty->isVoidTy())
-    return TURF_VOID;
-  return TURF_DOUBLE;
+// Recover a TurfTypePtr from an LLVM Value type.
+// Pointers are ambiguous (could be string or list), so callers that need
+// precise list-vs-string info should use NamedValues directly.
+static TurfTypePtr getTurfTypeFromLLVM(llvm::Type *Ty) {
+  if (Ty->isDoubleTy())     return TurfDouble();
+  if (Ty->isIntegerTy(64))  return TurfInt();
+  if (Ty->isIntegerTy(32))  return TurfInt();
+  if (Ty->isIntegerTy(1))   return TurfBool();
+  if (Ty->isPointerTy())    return TurfString(); // conservative; callers may refine
+  if (Ty->isVoidTy())       return TurfVoid();
+  return TurfDouble();
 }
 
-static int getTypeRank(TurfType T) {
-  switch (T) {
-  case TURF_DOUBLE:
-    return 3;
-  case TURF_INT:
-    return 2;
-  case TURF_BOOL:
-    return 1;
-  case TURF_STRING:
-    return 4; // Highest rank, but not castable
-  default:
-    return 0;
-  }
+static int getTypeRank(const TurfType *T) {
+  if (!T) return 0;
+  if (T->isNamed("double")) return 3;
+  if (T->isNamed("int"))    return 2;
+  if (T->isNamed("bool"))   return 1;
+  if (T->isNamed("string")) return 4;
+  return 0;
 }
 
-static TurfType getCommonType(TurfType A, TurfType B) {
-  return getTypeRank(A) >= getTypeRank(B) ? A : B;
+static TurfTypePtr getCommonType(TurfTypePtr A, TurfTypePtr B) {
+  return getTypeRank(A.get()) >= getTypeRank(B.get()) ? A : B;
 }
 
-static Value *CastToType(Value *Val, TurfType DestType, const std::string &Name,
+static Value *CastToType(Value *Val, TurfTypePtr DestType, const std::string &Name,
                          SourceLocation Loc = {0, 0}) {
   Type *ValTy = Val->getType();
 
   // Normalize foreign integer widths (e.g. i32 from printf) to i64
-  // before doing any TurfType-level comparison.
   if (ValTy->isIntegerTy(32)) {
     Val = Builder->CreateSExt(Val, Type::getInt64Ty(*TheContext), "i32toi64");
     ValTy = Val->getType();
   }
 
-  TurfType SrcType = getTurfTypeFromLLVM(ValTy);
-  if (SrcType == DestType)
+  TurfTypePtr SrcType = getTurfTypeFromLLVM(ValTy);
+  if (SrcType->getName() == DestType->getName())
     return Val;
 
-  // Strings cannot be cast to/from other types
-  if (SrcType == TURF_STRING || DestType == TURF_STRING) {
-    TypeError(CurLoc, "Cannot cast between string and non-string types")
-        .raise();
+  // Strings cannot be cast to/from other types implicitly
+  if (SrcType->isNamed("string") || DestType->isNamed("string")) {
+    TypeError(CurLoc, "Cannot cast between string and non-string types").raise();
     return Val;
   }
 
-  switch (DestType) {
-  case TURF_DOUBLE:
-    if (SrcType == TURF_INT)
+  if (DestType->isNamed("double")) {
+    if (SrcType->isNamed("int"))
       return Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext), Name);
-    if (SrcType == TURF_BOOL)
+    if (SrcType->isNamed("bool"))
       return Builder->CreateUIToFP(Val, Type::getDoubleTy(*TheContext), Name);
-    break;
-  case TURF_INT:
-    if (SrcType == TURF_DOUBLE)
+  }
+  if (DestType->isNamed("int")) {
+    if (SrcType->isNamed("double"))
       return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), Name);
-    if (SrcType == TURF_BOOL)
+    if (SrcType->isNamed("bool"))
       return Builder->CreateZExt(Val, Type::getInt64Ty(*TheContext), Name);
-    break;
-  case TURF_BOOL:
-    if (SrcType == TURF_DOUBLE)
-      return Builder->CreateFCmpONE(
-          Val, ConstantFP::get(*TheContext, APFloat(0.0)), Name);
-    if (SrcType == TURF_INT)
-      return Builder->CreateICmpNE(
-          Val, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), Name);
-    break;
-  default:
-    break;
+  }
+  if (DestType->isNamed("bool")) {
+    if (SrcType->isNamed("double"))
+      return Builder->CreateFCmpONE(Val, ConstantFP::get(*TheContext, APFloat(0.0)), Name);
+    if (SrcType->isNamed("int"))
+      return Builder->CreateICmpNE(Val, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), Name);
   }
 
   return Val;
 }
 
-// Check whether two TurfTypes are implicitly compatible.
-// Numeric types (int, double, bool) are mutually compatible.
-// String is only compatible with string. Void is never compatible.
-static bool isTypeCompatible(TurfType From, TurfType To) {
-
-  if (From == To) return true;
-  if (From == TURF_VOID || To == TURF_VOID) return false;
-  if (From == TURF_STRING || To == TURF_STRING) return false;
-  // Remaining: int, double, bool — all mutually convertible
+// Check whether two types are implicitly compatible.
+// Numerics (int, double, bool) are mutually compatible; string and void are not.
+static bool isTypeCompatible(const TurfType *From, const TurfType *To) {
+  if (!From || !To) return false;
+  if (From->getName() == To->getName()) return true;
+  if (From->isVoid() || To->isVoid()) return false;
+  if (From->isNamed("string") || To->isNamed("string")) return false;
+  // Remaining numerics: int, double, bool — all mutually convertible
   return true;
 }
 
@@ -209,16 +199,16 @@ Value *BinaryExprAST::codegen() {
     return nullptr;
   }
 
-  TurfType LTy = getTurfTypeFromLLVM(L->getType());
-  TurfType RTy = getTurfTypeFromLLVM(R->getType());
+  TurfTypePtr LTy = getTurfTypeFromLLVM(L->getType());
+  TurfTypePtr RTy = getTurfTypeFromLLVM(R->getType());
 
-  auto CastBoth = [&](TurfType Target) {
+  auto CastBoth = [&](TurfTypePtr Target) {
     L = CastToType(L, Target, "lhscast");
     R = CastToType(R, Target, "rhscast");
   };
 
-  TurfType CommonType = getCommonType(LTy, RTy);
-  TurfType NumericType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
+  TurfTypePtr CommonType = getCommonType(LTy, RTy);
+  TurfTypePtr NumericType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
 
   // Create the instruction based on the operator
   switch (Op) {
@@ -226,96 +216,91 @@ Value *BinaryExprAST::codegen() {
     // Arithmetic
   case '+':
     CastBoth(NumericType);
-    return NumericType == TURF_DOUBLE ? Builder->CreateFAdd(L, R, "addtmp")
-                                      : Builder->CreateAdd(L, R, "addtmp");
+    return NumericType->isNamed("double") ? Builder->CreateFAdd(L, R, "addtmp")
+                                          : Builder->CreateAdd(L, R, "addtmp");
 
   case '-':
     CastBoth(NumericType);
-    return NumericType == TURF_DOUBLE ? Builder->CreateFSub(L, R, "subtmp")
-                                      : Builder->CreateSub(L, R, "subtmp");
+    return NumericType->isNamed("double") ? Builder->CreateFSub(L, R, "subtmp")
+                                          : Builder->CreateSub(L, R, "subtmp");
 
   case '*':
     CastBoth(NumericType);
-    return NumericType == TURF_DOUBLE ? Builder->CreateFMul(L, R, "multmp")
-                                      : Builder->CreateMul(L, R, "multmp");
+    return NumericType->isNamed("double") ? Builder->CreateFMul(L, R, "multmp")
+                                          : Builder->CreateMul(L, R, "multmp");
 
   case '/':
     CastBoth(NumericType);
-    return NumericType == TURF_DOUBLE ? Builder->CreateFDiv(L, R, "divtmp")
-                                      : Builder->CreateSDiv(L, R, "divtmp");
+    return NumericType->isNamed("double") ? Builder->CreateFDiv(L, R, "divtmp")
+                                          : Builder->CreateSDiv(L, R, "divtmp");
 
   case '%':
     CastBoth(NumericType);
-    return NumericType == TURF_DOUBLE ? Builder->CreateFRem(L, R, "modtmp")
-                                      : Builder->CreateSRem(L, R, "modtmp");
+    return NumericType->isNamed("double") ? Builder->CreateFRem(L, R, "modtmp")
+                                          : Builder->CreateSRem(L, R, "modtmp");
 
   // Comparison
   case '<': {
-    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
+    TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
-    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpOLT(L, R, "cmptmp")
-                                  : Builder->CreateICmpSLT(L, R, "cmptmp");
+    return CmpType->isNamed("double") ? Builder->CreateFCmpOLT(L, R, "cmptmp")
+                                      : Builder->CreateICmpSLT(L, R, "cmptmp");
   }
 
   case '>': {
-    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
+    TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
-    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpOGT(L, R, "cmptmp")
-                                  : Builder->CreateICmpSGT(L, R, "cmptmp");
+    return CmpType->isNamed("double") ? Builder->CreateFCmpOGT(L, R, "cmptmp")
+                                      : Builder->CreateICmpSGT(L, R, "cmptmp");
   }
 
   case TOK_EQ: {
-    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
+    TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
-    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpOEQ(L, R, "cmptmp")
-                                  : Builder->CreateICmpEQ(L, R, "cmptmp");
+    return CmpType->isNamed("double") ? Builder->CreateFCmpOEQ(L, R, "cmptmp")
+                                      : Builder->CreateICmpEQ(L, R, "cmptmp");
   }
 
   case TOK_NEQ: {
-    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
+    TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
-    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpONE(L, R, "cmptmp")
-                                  : Builder->CreateICmpNE(L, R, "cmptmp");
+    return CmpType->isNamed("double") ? Builder->CreateFCmpONE(L, R, "cmptmp")
+                                      : Builder->CreateICmpNE(L, R, "cmptmp");
   }
 
   case TOK_GEQ: {
-    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
+    TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
-    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpOGE(L, R, "cmptmp")
-                                  : Builder->CreateICmpSGE(L, R, "cmptmp");
+    return CmpType->isNamed("double") ? Builder->CreateFCmpOGE(L, R, "cmptmp")
+                                      : Builder->CreateICmpSGE(L, R, "cmptmp");
   }
 
   case TOK_LEQ: {
-    TurfType CmpType = (CommonType == TURF_BOOL) ? TURF_INT : CommonType;
+    TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
-    return CmpType == TURF_DOUBLE ? Builder->CreateFCmpOLE(L, R, "cmptmp")
-                                  : Builder->CreateICmpSLE(L, R, "cmptmp");
+    return CmpType->isNamed("double") ? Builder->CreateFCmpOLE(L, R, "cmptmp")
+                                      : Builder->CreateICmpSLE(L, R, "cmptmp");
   }
 
   // Logical operators
   case TOK_AND: {
-    // Cast both operands to bool
-    L = CastToType(L, TURF_BOOL, "lhstobool");
-    R = CastToType(R, TURF_BOOL, "rhstobool");
+    L = CastToType(L, TurfBool(), "lhstobool");
+    R = CastToType(R, TurfBool(), "rhstobool");
     return Builder->CreateAnd(L, R, "andtmp");
   }
 
   case TOK_OR: {
-    // Cast both operands to bool
-    L = CastToType(L, TURF_BOOL, "lhstobool");
-    R = CastToType(R, TURF_BOOL, "rhstobool");
+    L = CastToType(L, TurfBool(), "lhstobool");
+    R = CastToType(R, TurfBool(), "rhstobool");
     return Builder->CreateOr(L, R, "ortmp");
   }
 
   // Power
   case '^': {
-    // Ensure both operands are double
-    CastBoth(TURF_DOUBLE);
-
-    Function *PowFunc = Intrinsic::getDeclaration(
-      TheModule.get(), Intrinsic::pow,
+    CastBoth(TurfDouble());
+    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
+      TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
-
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
   }
   default:
@@ -326,14 +311,15 @@ Value *BinaryExprAST::codegen() {
 
 // This creates an alloca instruction in the entry block of a function
 AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
-                                   const std::string &VarName, TurfType Type) {
+                                   const std::string &VarName,
+                                   const TurfType *Type) {
   IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                    TheFunction->getEntryBlock().begin());
   return TmpB.CreateAlloca(getLLVMType(Type), 0, VarName.c_str());
 }
 
 Value *VarDeclExprAST::codegen() {
-  if (Type == TURF_VOID) {
+  if (Type->isVoid()) {
     TypeError(Loc, "Variables of type 'void' are not allowed").raise();
     return nullptr;
   }
@@ -366,10 +352,39 @@ Value *VarDeclExprAST::codegen() {
   if (GlobalSymbolTable) {
     Symbol *Shadowed = GlobalSymbolTable->FindShadowedSymbol(Name);
     if (Shadowed) {
-      // Emit warning but continue compilation
       ShadowingWarning(Loc, Name, Shadowed->DeclLoc).warn();
     }
   }
+
+  // ── List<T> fast-path ─────────────────────────────────────────────────────
+  // list<T> variables need heap allocation, not a scalar store.
+  // The parser sets InitVal to a dummy 0LL — ignore it and do the real init.
+  if (isListType(Type.get())) {
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                     TheFunction->getEntryBlock().begin());
+    AllocaInst *Alloca = TmpB.CreateAlloca(
+        llvm::PointerType::get(*TheContext, 0), nullptr, Name);
+
+    // malloc(24) for TurfListStruct {ptr, i64, i64}
+    Function *MallocF = GetOrDeclareMalloc();
+    Value *StructSize = ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), 24);
+    Value *RawPtr = Builder->CreateCall(MallocF, {StructSize}, "listalloc");
+
+    StructType *LST = GetListStructType();
+    Value *NullData = ConstantPointerNull::get(llvm::PointerType::get(*TheContext, 0));
+    Value *Zero64   = ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), 0);
+    Builder->CreateStore(NullData, Builder->CreateStructGEP(LST, RawPtr, 0, "initdata"));
+    Builder->CreateStore(Zero64,   Builder->CreateStructGEP(LST, RawPtr, 1, "initlen"));
+    Builder->CreateStore(Zero64,   Builder->CreateStructGEP(LST, RawPtr, 2, "initcap"));
+    Builder->CreateStore(RawPtr, Alloca);
+
+    if (GlobalSymbolTable)
+      GlobalSymbolTable->DeclareSymbol(Name, Type, Loc, Alloca);
+    NamedValues[Name] = {Alloca, Type};
+    return Constant::getNullValue(llvm::Type::getInt64Ty(*TheContext));
+  }
+  // ── End list fast-path ────────────────────────────────────────────────────
 
   Value *Init = InitVal->codegen();
   if (!Init)
@@ -385,11 +400,11 @@ Value *VarDeclExprAST::codegen() {
   }
 
   // Check type compatibility before implicit cast
-  TurfType InitType = getTurfTypeFromLLVM(Init->getType());
-  if (!isTypeCompatible(InitType, Type)) {
-    TypeError(Loc, std::string("Cannot initialize '") + turfTypeName(Type) +
+  TurfTypePtr InitType = getTurfTypeFromLLVM(Init->getType());
+  if (!isTypeCompatible(InitType.get(), Type.get())) {
+    TypeError(Loc, std::string("Cannot initialize '") + Type->getName() +
                        "' variable '" + Name + "' with a value of type '" +
-                       turfTypeName(InitType) + "'")
+                       InitType->getName() + "'")
         .raise();
     return nullptr;
   }
@@ -397,7 +412,7 @@ Value *VarDeclExprAST::codegen() {
   Init = CastToType(Init, Type, "initcast", Loc);
 
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
-  AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Name, Type);
+  AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Name, Type.get());
 
   Builder->CreateStore(Init, Alloca);
 
@@ -474,7 +489,7 @@ Value *AssignmentExprAST::codegen() {
   }
 
   AllocaInst *Alloca = Iter->second.Alloca;
-  TurfType VarType = Iter->second.Type;
+  TurfTypePtr VarType = Iter->second.Type;
 
   Value *CastVal = CastToType(Val, VarType, "assigncast", Loc);
 
@@ -498,7 +513,7 @@ Value *IfExprAST::codegen() {
     for (size_t i = 0; i < Branches.size(); ++i) {
       Value *CondV = Branches[i].Cond->codegen();
       if (!CondV) return nullptr;
-      CondV = CastToType(CondV, TURF_BOOL, "ifcond");
+      CondV = CastToType(CondV, TurfBool(), "ifcond");
 
       BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
       BasicBlock *NextBB = BasicBlock::Create(*TheContext, "else");
@@ -534,7 +549,7 @@ Value *IfExprAST::codegen() {
   // Ternary form: if cond then expr else expr
   Value *CondV = Branches[0].Cond->codegen();
   if (!CondV) return nullptr;
-  CondV = CastToType(CondV, TURF_BOOL, "ifcond");
+  CondV = CastToType(CondV, TurfBool(), "ifcond");
 
   BasicBlock *ThenBB = BasicBlock::Create(*TheContext, "then", TheFunction);
   BasicBlock *ElseBB = BasicBlock::Create(*TheContext, "else");
@@ -560,9 +575,9 @@ Value *IfExprAST::codegen() {
   TheFunction->insert(TheFunction->end(), MergeBB);
   Builder->SetInsertPoint(MergeBB);
 
-  TurfType ThenType = getTurfTypeFromLLVM(ThenV->getType());
-  TurfType ElseType = getTurfTypeFromLLVM(ElseV->getType());
-  TurfType MergeType = getCommonType(ThenType, ElseType);
+  TurfTypePtr ThenType = getTurfTypeFromLLVM(ThenV->getType());
+  TurfTypePtr ElseType = getTurfTypeFromLLVM(ElseV->getType());
+  TurfTypePtr MergeType = getCommonType(ThenType, ElseType);
 
   ThenV = CastToType(ThenV, MergeType, "thencast");
   ElseV = CastToType(ElseV, MergeType, "elsecast");
@@ -578,17 +593,17 @@ Value *UnaryExprAST::codegen() {
   if (!OperandV)
     return nullptr;
 
-  TurfType OperandType = getTurfTypeFromLLVM(OperandV->getType());
-  if (OperandType == TURF_BOOL)
-    OperandV = CastToType(OperandV, TURF_INT, "boolneg");
+  TurfTypePtr OperandType = getTurfTypeFromLLVM(OperandV->getType());
+  if (OperandType->isNamed("bool"))
+    OperandV = CastToType(OperandV, TurfInt(), "boolneg");
 
   OperandType = getTurfTypeFromLLVM(OperandV->getType());
 
   switch (Opcode) {
   case '-':
-    if (OperandType == TURF_DOUBLE)
+    if (OperandType->isNamed("double"))
       return Builder->CreateFNeg(OperandV);
-    if (OperandType == TURF_INT)
+    if (OperandType->isNamed("int"))
       return Builder->CreateNeg(OperandV);
     TypeError(CurLoc, "Unknown unary operand type").raise();
     return nullptr;
@@ -628,22 +643,23 @@ Value *CastExprAST::codegen() {
   if (!Val)
     return nullptr;
 
-  TurfType SrcType = getTurfTypeFromLLVM(Val->getType());
+  TurfTypePtr SrcType = getTurfTypeFromLLVM(Val->getType());
+  const std::string SrcName = SrcType->getName();
+  const std::string DstName = DestType->getName();
 
   // Identity - no-op
-  if (SrcType == DestType)
+  if (SrcName == DstName)
     return Val;
 
   // numeric → numeric
-  if (SrcType == TURF_INT && DestType == TURF_DOUBLE)
+  if (SrcName == "int" && DstName == "double")
     return Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext), "itod");
 
-  if (SrcType == TURF_DOUBLE && DestType == TURF_INT)
+  if (SrcName == "double" && DstName == "int")
     return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), "dtoi");
 
   // string → int  : call strtoll(str, &endptr, 10)
-  if (SrcType == TURF_STRING && DestType == TURF_INT) {
-    // Declare strtoll if not already in the module
+  if (SrcName == "string" && DstName == "int") {
     Function *StrtollF = TheModule->getFunction("strtoll");
     Type *I8Ptr = PointerType::get(*TheContext, 0);
     if (!StrtollF) {
@@ -705,105 +721,69 @@ Value *CastExprAST::codegen() {
   }
 
   // string → double : call strtod(str, nullptr)
-  if (SrcType == TURF_STRING && DestType == TURF_DOUBLE) {
+  if (SrcName == "string" && DstName == "double") {
     Function *StrtodF = TheModule->getFunction("strtod");
     if (!StrtodF) {
       Type *I8Ptr = PointerType::get(*TheContext, 0);
       Type *I8PtrPtr = PointerType::get(I8Ptr->getContext(), 0);
-      FunctionType *FT =
-          FunctionType::get(Type::getDoubleTy(*TheContext), {I8Ptr, I8PtrPtr},
-                            /*isVarArg=*/false);
-      StrtodF = Function::Create(FT, Function::ExternalLinkage, "strtod",
-                                 TheModule.get());
+      FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), {I8Ptr, I8PtrPtr}, /*isVarArg=*/false);
+      StrtodF = Function::Create(FT, Function::ExternalLinkage, "strtod", TheModule.get());
     }
-    Value *NullPtr = ConstantPointerNull::get(
-        PointerType::get(PointerType::get(*TheContext, 0)->getContext(), 0));
+    Value *NullPtr = ConstantPointerNull::get(PointerType::get(PointerType::get(*TheContext, 0)->getContext(), 0));
     return Builder->CreateCall(StrtodF, {Val, NullPtr}, "strtod_res");
   }
 
   // int → string : snprintf(buf, 32, "%lld", val)
-  if (SrcType == TURF_INT && DestType == TURF_STRING) {
+  if (SrcName == "int" && DstName == "string") {
     Function *SnprintfF = TheModule->getFunction("snprintf");
     if (!SnprintfF) {
       Type *I8Ptr = PointerType::get(*TheContext, 0);
-      FunctionType *FT =
-          FunctionType::get(Type::getInt32Ty(*TheContext),
-                            {I8Ptr, Type::getInt64Ty(*TheContext), I8Ptr},
-                            /*isVarArg=*/true);
-      SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
-                                   TheModule.get());
+      FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext),
+                              {I8Ptr, Type::getInt64Ty(*TheContext), I8Ptr}, /*isVarArg=*/true);
+      SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf", TheModule.get());
     }
-
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-                     TheFunction->getEntryBlock().begin());
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
     Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
-    AllocaInst *Buf = TmpB.CreateAlloca(Type::getInt8Ty(*TheContext), BufSize,
-                                        "int_to_str_buf");
-
+    AllocaInst *Buf = TmpB.CreateAlloca(Type::getInt8Ty(*TheContext), BufSize, "int_to_str_buf");
     Value *Fmt = Builder->CreateGlobalString("%lld", "intfmt");
     Builder->CreateCall(SnprintfF, {Buf, BufSize, Fmt, Val}, "snprintf_int");
     return Buf;
   }
 
   // double → string : snprintf(buf, 32, "%g", val)
-  if (SrcType == TURF_DOUBLE && DestType == TURF_STRING) {
+  if (SrcName == "double" && DstName == "string") {
     Function *SnprintfF = TheModule->getFunction("snprintf");
     if (!SnprintfF) {
       Type *I8Ptr = PointerType::get(*TheContext, 0);
-      FunctionType *FT =
-          FunctionType::get(Type::getInt32Ty(*TheContext),
-                            {I8Ptr, Type::getInt64Ty(*TheContext), I8Ptr},
-                            /*isVarArg=*/true);
-      SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
-                                   TheModule.get());
+      FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext),
+                              {I8Ptr, Type::getInt64Ty(*TheContext), I8Ptr}, /*isVarArg=*/true);
+      SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf", TheModule.get());
     }
-
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-                     TheFunction->getEntryBlock().begin());
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
     Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
-    AllocaInst *Buf = TmpB.CreateAlloca(Type::getInt8Ty(*TheContext), BufSize,
-                                        "dbl_to_str_buf");
-
+    AllocaInst *Buf = TmpB.CreateAlloca(Type::getInt8Ty(*TheContext), BufSize, "dbl_to_str_buf");
     Value *Fmt = Builder->CreateGlobalString("%g", "dblfmt");
     Builder->CreateCall(SnprintfF, {Buf, BufSize, Fmt, Val}, "snprintf_dbl");
     return Buf;
   }
 
   // bool → string : select(val, "true", "false")
-  if (SrcType == TURF_BOOL && DestType == TURF_STRING) {
+  if (SrcName == "bool" && DstName == "string") {
     Value *TrueStr = Builder->CreateGlobalString("true", "str_true");
     Value *FalseStr = Builder->CreateGlobalString("false", "str_false");
     return Builder->CreateSelect(Val, TrueStr, FalseStr, "bool_to_str");
   }
 
   // Unsupported → string
-  if (DestType == TURF_STRING) {
-    const char *SrcName = (SrcType == TURF_INT)      ? "int"
-                          : (SrcType == TURF_DOUBLE) ? "double"
-                          : (SrcType == TURF_BOOL)   ? "bool"
-                          : (SrcType == TURF_STRING) ? "string"
-                                                     : "void";
-    StringConversionError(Loc, SrcName).raise();
+  if (DstName == "string") {
+    StringConversionError(Loc, SrcName.c_str()).raise();
     return nullptr;
   }
 
   // Everything else is unsupported
-  const char *SrcName = (SrcType == TURF_INT)      ? "int"
-                        : (SrcType == TURF_DOUBLE) ? "double"
-                        : (SrcType == TURF_BOOL)   ? "bool"
-                        : (SrcType == TURF_STRING) ? "string"
-                                                   : "unknown";
-  const char *DstName = (DestType == TURF_INT)      ? "int"
-                        : (DestType == TURF_DOUBLE) ? "double"
-                        : (DestType == TURF_BOOL)   ? "bool"
-                        : (DestType == TURF_STRING) ? "string"
-                        : (DestType == TURF_VOID)   ? "void"
-                                                    : "unknown";
-  TypeError(Loc, std::string("Cannot explicitly cast '") + SrcName + "' to '" +
-                     DstName + "'")
-      .raise();
+  TypeError(Loc, std::string("Cannot explicitly cast '") + SrcName + "' to '" + DstName + "'").raise();
   return nullptr;
 }
 
@@ -844,7 +824,7 @@ Value *WhileExprAST::codegen() {
   if (!CondV)
     return nullptr;
 
-  CondV = CastToType(CondV, TURF_BOOL, "loopcond");
+  CondV = CastToType(CondV, TurfBool(), "loopcond");
 
   // Conditional Branch: if true -> Body, else -> After
   Builder->CreateCondBr(CondV, LoopBodyBB, AfterBB);
@@ -885,13 +865,11 @@ Value *ForExprAST::codegen() {
     return nullptr;
 
   // Determine the loop variable type from the start value
-  TurfType VarType = TURF_INT;
-  if (StartV->getType()->isDoubleTy())
-    VarType = TURF_DOUBLE;
+  TurfTypePtr VarType = StartV->getType()->isDoubleTy() ? TurfDouble() : TurfInt();
 
   StartV = CastToType(StartV, VarType, "forstart");
 
-  AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, VarName, VarType);
+  AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, VarName, VarType.get());
   Builder->CreateStore(StartV, Alloca);
 
   // Register loop variable in symbol table and NamedValues
@@ -917,13 +895,12 @@ Value *ForExprAST::codegen() {
 
   // Store end value so it doesn't get re-evaluated each iteration
   AllocaInst *EndAlloca =
-      CreateEntryBlockAlloca(TheFunction, VarName + ".end", VarType);
+      CreateEntryBlockAlloca(TheFunction, VarName + ".end", VarType.get());
   Builder->CreateStore(EndV, EndAlloca);
 
   //  3. Determine loop direction: start < end → ascending, else descending
-  // Compare start vs end to pick the right comparison operator.
   Value *Ascending;
-  if (VarType == TURF_INT) {
+  if (VarType->isNamed("int")) {
     Ascending = Builder->CreateICmpSLT(StartV, EndV, "ascending");
   } else {
     Ascending = Builder->CreateFCmpOLT(StartV, EndV, "ascending");
@@ -931,7 +908,7 @@ Value *ForExprAST::codegen() {
 
   // Store direction flag
   AllocaInst *AscAlloca =
-      CreateEntryBlockAlloca(TheFunction, VarName + ".asc", TURF_BOOL);
+      CreateEntryBlockAlloca(TheFunction, VarName + ".asc", TurfBool().get());
   Builder->CreateStore(Ascending, AscAlloca);
 
   //  4. Create basic blocks
@@ -945,15 +922,15 @@ Value *ForExprAST::codegen() {
 
   //  5. Loop condition
   Builder->SetInsertPoint(LoopCondBB);
-  Value *CurVar = Builder->CreateLoad(getLLVMType(VarType), Alloca, VarName);
+  Value *CurVar = Builder->CreateLoad(getLLVMType(VarType.get()), Alloca, VarName);
   Value *EndVal =
-      Builder->CreateLoad(getLLVMType(VarType), EndAlloca, VarName + ".end");
+      Builder->CreateLoad(getLLVMType(VarType.get()), EndAlloca, VarName + ".end");
   Value *AscFlag =
       Builder->CreateLoad(Type::getInt1Ty(*TheContext), AscAlloca, "asc");
 
   // If ascending: cond = (i < end), else: cond = (i > end)
   Value *CondAsc, *CondDesc;
-  if (VarType == TURF_INT) {
+  if (VarType->isNamed("int")) {
     CondAsc = Builder->CreateICmpSLT(CurVar, EndVal, "lt");
     CondDesc = Builder->CreateICmpSGT(CurVar, EndVal, "gt");
   } else {
@@ -1055,9 +1032,9 @@ Value *FuncDefExprAST::codegen() {
     // Build the LLVM FunctionType
     std::vector<Type *> ParamTypes;
     for (const auto &P : Params)
-      ParamTypes.push_back(getLLVMType(P.Type));
+      ParamTypes.push_back(getLLVMType(P.Type.get()));
 
-    FunctionType *FT = FunctionType::get(getLLVMType(ReturnType), ParamTypes,
+    FunctionType *FT = FunctionType::get(getLLVMType(ReturnType.get()), ParamTypes,
                                          /*isVarArg=*/false);
     TheFunc =
         Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
@@ -1080,10 +1057,10 @@ Value *FuncDefExprAST::codegen() {
   // Since we always parse the body in ParseFuncDef, Body is never null here.
   // (Reserve this hook for a future separate pre-pass.)
 
-  // Store full param types (including list element types) for call-site checking
-  FuncListParamTypes[Name] = {};
+  // Store full param types for call-site checking
+  FuncParamTypes[Name] = {};
   for (const auto &P : Params)
-    FuncListParamTypes[Name].push_back(P.Type);
+    FuncParamTypes[Name].push_back(P.Type);
 
   // Fill in the function body
   BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunc);
@@ -1108,19 +1085,19 @@ Value *FuncDefExprAST::codegen() {
 
   // Alloca each parameter and add to NamedValues and GlobalSymbolTable
   for (auto &Arg : TheFunc->args()) {
-    TurfType ParamTurfType = TURF_INT;
+    TurfTypePtr ParamTurfType = TurfInt(); // fallback
     for (const auto &P : Params)
       if (P.Name == Arg.getName())
         ParamTurfType = P.Type;
 
     AllocaInst *Alloca = CreateEntryBlockAlloca(
-        TheFunc, std::string(Arg.getName()), ParamTurfType);
+        TheFunc, std::string(Arg.getName()), ParamTurfType.get());
     Builder->CreateStore(&Arg, Alloca);
     NamedValues[std::string(Arg.getName())] = {Alloca, ParamTurfType};
 
     // Add parameter to symbol table
     if (GlobalSymbolTable) {
-      SourceLocation ParamLoc = Loc; // Use function declaration location
+      SourceLocation ParamLoc = Loc;
       GlobalSymbolTable->DeclareSymbol(std::string(Arg.getName()),
                                        ParamTurfType, ParamLoc, Alloca);
     }
@@ -1155,11 +1132,11 @@ Value *FuncDefExprAST::codegen() {
     if (IsDead) {
       // Dead block left behind by a return statement — erase it cleanly.
       CurBB->eraseFromParent();
-    } else if (ReturnType == TURF_VOID) {
+    } else if (ReturnType->isVoid()) {
       Builder->CreateRetVoid();
     } else {
       // CFG already reported the error, but we still need to generate valid IR
-      Builder->CreateRet(Constant::getNullValue(getLLVMType(ReturnType)));
+      Builder->CreateRet(Constant::getNullValue(getLLVMType(ReturnType.get())));
     }
   }
 
@@ -1195,14 +1172,14 @@ Value *ReturnExprAST::codegen() {
 
   if (!Val) {
     // empty return;
-    if (CurrentFuncReturnType != TURF_VOID) {
+    if (!CurrentFuncReturnType->isVoid()) {
       TypeError(Loc, "'return;' is only valid inside a void function").raise();
       return nullptr;
     }
     Builder->CreateRetVoid();
   } else {
     // return <expr>;
-    if (CurrentFuncReturnType == TURF_VOID) {
+    if (CurrentFuncReturnType->isVoid()) {
       TypeError(Loc, "void function cannot return a value").raise();
       return nullptr;
     }
@@ -1212,18 +1189,16 @@ Value *ReturnExprAST::codegen() {
 
     // Check for void return value (e.g. return voidFunc())
     if (RetVal->getType()->isVoidTy()) {
-      VoidValueError(Loc,
-                     "You're trying to return the result of a void function.")
-          .raise();
+      VoidValueError(Loc, "You're trying to return the result of a void function.").raise();
       return nullptr;
     }
 
     // Check type compatibility before implicit cast
-    TurfType ActualType = getTurfTypeFromLLVM(RetVal->getType());
-    if (!isTypeCompatible(ActualType, CurrentFuncReturnType)) {
+    TurfTypePtr ActualType = getTurfTypeFromLLVM(RetVal->getType());
+    if (!isTypeCompatible(ActualType.get(), CurrentFuncReturnType.get())) {
       ReturnTypeMismatchError(Loc, CurrentFunction->getName().str(),
-                              turfTypeName(CurrentFuncReturnType),
-                              turfTypeName(ActualType))
+                              turfTypeName(CurrentFuncReturnType.get()),
+                              turfTypeName(ActualType.get()))
           .raise();
       return nullptr;
     }
@@ -1263,17 +1238,16 @@ Value *FuncCallExprAST::codegen() {
   unsigned Idx = 0;
 
   // Look up full param type info (needed for list<T> params)
-  auto ParamTypeIt = FuncListParamTypes.find(Name);
+  auto ParamTypeIt = FuncParamTypes.find(Name);
 
   for (auto &Arg : CalleeF->args()) {
     Value *V = Args[Idx]->codegen();
     if (!V)
       return nullptr;
 
-    // Determine declared TurfType for this param
-    TurfType DeclaredType = TURF_VOID;
-    if (ParamTypeIt != FuncListParamTypes.end() &&
-        Idx < ParamTypeIt->second.size())
+    // Determine declared TurfTypePtr for this param
+    TurfTypePtr DeclaredType;
+    if (ParamTypeIt != FuncParamTypes.end() && Idx < ParamTypeIt->second.size())
       DeclaredType = ParamTypeIt->second[Idx];
     else
       DeclaredType = getTurfTypeFromLLVM(Arg.getType());
@@ -1287,28 +1261,28 @@ Value *FuncCallExprAST::codegen() {
     }
 
     // For list params: verify the caller is passing a list of the right element type
-    if (isListType(DeclaredType)) {
-      // Look up actual type of the passed variable from NamedValues
-      TurfType ActualType = TURF_VOID;
-      // Try to find the variable's TurfType
+    if (isListType(DeclaredType.get())) {
+      TurfTypePtr ActualType;
       if (auto *VE = dynamic_cast<VariableExprAST *>(Args[Idx].get())) {
         auto It = NamedValues.find(VE->getName());
         if (It != NamedValues.end())
           ActualType = It->second.Type;
       }
-      if (ActualType != DeclaredType && ActualType != TURF_VOID) {
+      if (ActualType && ActualType->getName() != DeclaredType->getName()) {
         ArgumentTypeError(Loc, Name, std::string(Arg.getName()), Idx + 1,
-                          turfTypeName(DeclaredType), turfTypeName(ActualType))
+                          turfTypeName(DeclaredType.get()),
+                          turfTypeName(ActualType.get()))
             .raise();
         return nullptr;
       }
     } else {
       // Standard scalar type checking
-      TurfType ExpectedType = getTurfTypeFromLLVM(Arg.getType());
-      TurfType ActualType   = getTurfTypeFromLLVM(V->getType());
-      if (!isTypeCompatible(ActualType, ExpectedType)) {
+      TurfTypePtr ExpectedType = getTurfTypeFromLLVM(Arg.getType());
+      TurfTypePtr ActualType   = getTurfTypeFromLLVM(V->getType());
+      if (!isTypeCompatible(ActualType.get(), ExpectedType.get())) {
         ArgumentTypeError(Loc, Name, std::string(Arg.getName()), Idx + 1,
-                          turfTypeName(ExpectedType), turfTypeName(ActualType))
+                          turfTypeName(ExpectedType.get()),
+                          turfTypeName(ActualType.get()))
             .raise();
         return nullptr;
       }
@@ -1402,7 +1376,7 @@ static void EmitListBoundsCheck(Value *IndexVal, Value *LenVal,
 
 // Array Codegen
 Value *ArrayDeclExprAST::codegen() {
-  if (ElementType == TURF_VOID) {
+  if (ElementType->isVoid()) {
     TypeError(Loc, "Arrays of type 'void' are not allowed").raise();
     return nullptr;
   }
@@ -1446,7 +1420,7 @@ Value *ArrayDeclExprAST::codegen() {
 
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
-  Type *ElemTy = getLLVMType(ElementType);
+  Type *ElemTy = getLLVMType(ElementType.get());
   llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, Size);
 
   IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
@@ -1480,10 +1454,10 @@ Value *ArrayDeclExprAST::codegen() {
       }
 
       // Type check: element must be compatible with declared element type
-      TurfType ElemTurfType = getTurfTypeFromLLVM(ElemVal->getType());
-      if (!isTypeCompatible(ElemTurfType, ElementType)) {
-        ArrayTypeMismatchError(Loc, Name, turfTypeName(ElementType),
-                               turfTypeName(ElemTurfType))
+      TurfTypePtr ElemTurfType = getTurfTypeFromLLVM(ElemVal->getType());
+      if (!isTypeCompatible(ElemTurfType.get(), ElementType.get())) {
+        ArrayTypeMismatchError(Loc, Name, turfTypeName(ElementType.get()),
+                               turfTypeName(ElemTurfType.get()))
             .raise();
         return nullptr;
       }
@@ -1500,8 +1474,8 @@ Value *ArrayDeclExprAST::codegen() {
     }
   }
 
-  // Register in symbol table
-  TurfType ArrType = getArrayType(ElementType);
+  // Register in symbol table — use makeArrayType for the array type
+  TurfTypePtr ArrType = makeArrayType(ElementType, Size);
   if (GlobalSymbolTable) {
     GlobalSymbolTable->DeclareSymbol(Name, ArrType, Loc, Alloca, Size);
   }
@@ -1573,11 +1547,11 @@ Value *ArrayAccessExprAST::codegen() {
     VI = &Iter->second;
 
   // Delegate list[i] to list-specific path
-  if (VI && isListType(VI->Type)) {
-    StructType *LST   = GetListStructType();
-    Type *PtrTy       = PointerType::get(*TheContext, 0);
-    TurfType ElemType = getListElementType(VI->Type);
-    Type *ElemTy      = getLLVMType(ElemType);
+  if (VI && isListType(VI->Type.get())) {
+    StructType *LST      = GetListStructType();
+    Type *PtrTy          = PointerType::get(*TheContext, 0);
+    const TurfType *ElemT = getListElementType(VI->Type.get());
+    Type *ElemTy         = getLLVMType(ElemT);
 
     Value *ListPtr = Builder->CreateLoad(PtrTy, VI->Alloca, "listptr");
     Value *LenPtr  = Builder->CreateStructGEP(LST, ListPtr, 1, "lenptr");
@@ -1585,12 +1559,12 @@ Value *ArrayAccessExprAST::codegen() {
 
     Value *IndexVal = Index->codegen();
     if (!IndexVal) return nullptr;
-    TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
-    if (IdxType == TURF_STRING) {
-      ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
+    TurfTypePtr IdxType = getTurfTypeFromLLVM(IndexVal->getType());
+    if (IdxType->isNamed("string")) {
+      ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType.get())).raise();
       return nullptr;
     }
-    IndexVal = CastToType(IndexVal, TURF_INT, "listidx", Loc);
+    IndexVal = CastToType(IndexVal, TurfInt(), "listidx", Loc);
     EmitListBoundsCheck(IndexVal, Len, Name, Loc);
 
     Value *DataPtr  = Builder->CreateStructGEP(LST, ListPtr, 0, "dataptr");
@@ -1599,13 +1573,13 @@ Value *ArrayAccessExprAST::codegen() {
     return Builder->CreateLoad(ElemTy, ElemPtr, Name + "_elem");
   }
 
-  if (!VI || !isArrayType(VI->Type)) {
+  if (!VI || !isArrayType(VI->Type.get())) {
     SemanticError(Loc, "'" + Name + "' is not an array").raise();
     return nullptr;
   }
 
   int ArraySize = VI->ArraySize;
-  TurfType ElemType = getArrayElementType(VI->Type);
+  const TurfType *ElemType = getArrayElementType(VI->Type.get());
 
   // Evaluate the index
   Value *IndexVal = Index->codegen();
@@ -1613,12 +1587,12 @@ Value *ArrayAccessExprAST::codegen() {
     return nullptr;
 
   // Index must be integer
-  TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
-  if (IdxType == TURF_STRING) {
-    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
+  TurfTypePtr IdxType = getTurfTypeFromLLVM(IndexVal->getType());
+  if (IdxType->isNamed("string")) {
+    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType.get())).raise();
     return nullptr;
   }
-  IndexVal = CastToType(IndexVal, TURF_INT, "arridx", Loc);
+  IndexVal = CastToType(IndexVal, TurfInt(), "arridx", Loc);
 
   // Compile-time bounds check for constant indices
   if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
@@ -1650,11 +1624,11 @@ Value *ArrayAssignExprAST::codegen() {
     VI = &Iter->second;
 
   // Delegate list[i] = val to list-specific path
-  if (VI && isListType(VI->Type)) {
-    StructType *LST   = GetListStructType();
-    Type *PtrTy       = PointerType::get(*TheContext, 0);
-    TurfType ElemType = getListElementType(VI->Type);
-    Type *ElemTy      = getLLVMType(ElemType);
+  if (VI && isListType(VI->Type.get())) {
+    StructType *LST      = GetListStructType();
+    Type *PtrTy          = PointerType::get(*TheContext, 0);
+    const TurfType *ElemT = getListElementType(VI->Type.get());
+    Type *ElemTy         = getLLVMType(ElemT);
 
     Value *ListPtr = Builder->CreateLoad(PtrTy, VI->Alloca, "listptr");
     Value *LenPtr  = Builder->CreateStructGEP(LST, ListPtr, 1, "lenptr");
@@ -1662,14 +1636,14 @@ Value *ArrayAssignExprAST::codegen() {
 
     Value *IndexVal = Index->codegen();
     if (!IndexVal) return nullptr;
-    IndexVal = CastToType(IndexVal, TURF_INT, "listidx", Loc);
+    IndexVal = CastToType(IndexVal, TurfInt(), "listidx", Loc);
     EmitListBoundsCheck(IndexVal, Len, Name, Loc);
 
     Value *RHSVal = RHS->codegen();
     if (!RHSVal) return nullptr;
-    TurfType RHSType = getTurfTypeFromLLVM(RHSVal->getType());
-    if (RHSType != ElemType) {
-      ListTypeMismatchError(Loc, Name, turfTypeName(ElemType), turfTypeName(RHSType)).raise();
+    TurfTypePtr RHSType = getTurfTypeFromLLVM(RHSVal->getType());
+    if (RHSType->getName() != ElemT->getName()) {
+      ListTypeMismatchError(Loc, Name, turfTypeName(ElemT), turfTypeName(RHSType.get())).raise();
       return nullptr;
     }
     Value *DataPtr = Builder->CreateStructGEP(LST, ListPtr, 0, "dataptr");
@@ -1679,13 +1653,13 @@ Value *ArrayAssignExprAST::codegen() {
     return RHSVal;
   }
 
-  if (!VI || !isArrayType(VI->Type)) {
+  if (!VI || !isArrayType(VI->Type.get())) {
     SemanticError(Loc, "'" + Name + "' is not an array").raise();
     return nullptr;
   }
 
   int ArraySize = VI->ArraySize;
-  TurfType ElemType = getArrayElementType(VI->Type);
+  const TurfType *ElemType = getArrayElementType(VI->Type.get());
 
   // Evaluate the index
   Value *IndexVal = Index->codegen();
@@ -1693,12 +1667,12 @@ Value *ArrayAssignExprAST::codegen() {
     return nullptr;
 
   // Index must be integer
-  TurfType IdxType = getTurfTypeFromLLVM(IndexVal->getType());
-  if (IdxType == TURF_STRING) {
-    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType)).raise();
+  TurfTypePtr IdxType = getTurfTypeFromLLVM(IndexVal->getType());
+  if (IdxType->isNamed("string")) {
+    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType.get())).raise();
     return nullptr;
   }
-  IndexVal = CastToType(IndexVal, TURF_INT, "arridx", Loc);
+  IndexVal = CastToType(IndexVal, TurfInt(), "arridx", Loc);
 
   // Compile-time bounds check for constant indices
   if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
@@ -1726,15 +1700,17 @@ Value *ArrayAssignExprAST::codegen() {
   }
 
   // Type check
-  TurfType RHSType = getTurfTypeFromLLVM(RHSVal->getType());
-  if (!isTypeCompatible(RHSType, ElemType)) {
+  TurfTypePtr RHSType = getTurfTypeFromLLVM(RHSVal->getType());
+  if (!isTypeCompatible(RHSType.get(), ElemType)) {
     ArrayTypeMismatchError(Loc, Name, turfTypeName(ElemType),
-                           turfTypeName(RHSType))
+                           turfTypeName(RHSType.get()))
         .raise();
     return nullptr;
   }
 
-  RHSVal = CastToType(RHSVal, ElemType, "arrstore", Loc);
+  // Cast RHS to the element type before storing
+  TurfTypePtr ElemTypePtr = getTurfTypeFromLLVM(getLLVMType(ElemType));
+  RHSVal = CastToType(RHSVal, ElemTypePtr, "arrstore", Loc);
 
   // GEP + store
   Type *ElemTy = getLLVMType(ElemType);
@@ -1755,7 +1731,7 @@ Value *ArrayLengthExprAST::codegen() {
     VI = &Iter->second;
 
   // list.length: load len field from heap struct
-  if (VI && isListType(VI->Type)) {
+  if (VI && isListType(VI->Type.get())) {
     StructType *LST = GetListStructType();
     Type *PtrTy     = PointerType::get(*TheContext, 0);
     Value *ListPtr  = Builder->CreateLoad(PtrTy, VI->Alloca, "listptr");
@@ -1763,7 +1739,7 @@ Value *ArrayLengthExprAST::codegen() {
     return Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "listlen");
   }
 
-  if (!VI || !isArrayType(VI->Type)) {
+  if (!VI || !isArrayType(VI->Type.get())) {
     SemanticError(Loc, "'" + Name +
                            "' is not an array. '.length' can only be used on arrays.")
         .raise();
@@ -1774,62 +1750,20 @@ Value *ArrayLengthExprAST::codegen() {
 }
 
 
-// ── List Codegen ──────────────────────────────────────────────────────────────
 
-Value *ListDeclExprAST::codegen() {
-  if (Keywords.find(Name) != Keywords.end()) {
-    SemanticError(Loc, "Cannot use keyword '" + Name + "' as a variable name.").raise();
-    return nullptr;
-  }
-  if (GlobalSymbolTable && GlobalSymbolTable->CurrentScopeHasEarlyExit()) {
-    UnreachableCodeError(Loc, "declaration").raise();
-    return nullptr;
-  }
-  if (GlobalSymbolTable && GlobalSymbolTable->IsSymbolInCurrentScope(Name)) {
-    Symbol *Prev = GlobalSymbolTable->LookupSymbolInCurrentScope(Name);
-    if (Prev) DuplicateDeclarationError(Loc, Name, Prev->DeclLoc).raise();
-    return nullptr;
-  }
-  if (GlobalSymbolTable) {
-    Symbol *Shadowed = GlobalSymbolTable->FindShadowedSymbol(Name);
-    if (Shadowed) ShadowingWarning(Loc, Name, Shadowed->DeclLoc).warn();
-  }
-
-  Function *TheFunction = Builder->GetInsertBlock()->getParent();
-  IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-                   TheFunction->getEntryBlock().begin());
-  Type *PtrTy = PointerType::get(*TheContext, 0);
-  AllocaInst *Alloca = TmpB.CreateAlloca(PtrTy, nullptr, Name);
-
-  // malloc(24) for the TurfListStruct {ptr, i64, i64}
-  Function *MallocF = GetOrDeclareMalloc();
-  Value *StructSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 24);
-  Value *RawPtr = Builder->CreateCall(MallocF, {StructSize}, "listalloc");
-
-  StructType *LST = GetListStructType();
-  Value *NullData = ConstantPointerNull::get(PointerType::get(*TheContext, 0));
-  Value *Zero64 = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
-  Builder->CreateStore(NullData, Builder->CreateStructGEP(LST, RawPtr, 0, "initdata"));
-  Builder->CreateStore(Zero64,   Builder->CreateStructGEP(LST, RawPtr, 1, "initlen"));
-  Builder->CreateStore(Zero64,   Builder->CreateStructGEP(LST, RawPtr, 2, "initcap"));
-  Builder->CreateStore(RawPtr, Alloca);
-
-  TurfType ListTy = getListType(ElementType);
-  if (GlobalSymbolTable)
-    GlobalSymbolTable->DeclareSymbol(Name, ListTy, Loc, Alloca);
-  NamedValues[Name] = {Alloca, ListTy};
-  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
-}
+// NOTE: ListDeclExprAST has been removed. List declarations are now
+// represented as VarDeclExprAST with a GenericType("list", [elemType]).
+// The VarDeclExprAST::codegen handles list initialization via the type system.
 
 Value *ListMethodCallExprAST::codegen() {
   auto Iter = NamedValues.find(ListName);
-  if (Iter == NamedValues.end() || !isListType(Iter->second.Type)) {
+  if (Iter == NamedValues.end() || !isListType(Iter->second.Type.get())) {
     ListNonListOperationError(Loc, ListName, Method).raise();
     return nullptr;
   }
 
   VarInfo &VI = Iter->second;
-  TurfType ElemType = getListElementType(VI.Type);
+  const TurfType *ElemType = getListElementType(VI.Type.get());
   Type *ElemTy  = getLLVMType(ElemType);
   Type *PtrTy   = PointerType::get(*TheContext, 0);
   StructType *LST = GetListStructType();
@@ -1846,9 +1780,9 @@ Value *ListMethodCallExprAST::codegen() {
   if (Method == "push") {
     Value *PushVal = Arg->codegen();
     if (!PushVal) return nullptr;
-    TurfType GotType = getTurfTypeFromLLVM(PushVal->getType());
-    if (GotType != ElemType) {
-      ListTypeMismatchError(Loc, ListName, turfTypeName(ElemType), turfTypeName(GotType)).raise();
+    TurfTypePtr GotType = getTurfTypeFromLLVM(PushVal->getType());
+    if (GotType->getName() != ElemType->getName()) {
+      ListTypeMismatchError(Loc, ListName, turfTypeName(ElemType), turfTypeName(GotType.get())).raise();
       return nullptr;
     }
     Function *TheFunction = Builder->GetInsertBlock()->getParent();

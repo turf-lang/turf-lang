@@ -36,9 +36,23 @@ void SymbolTable::ExitScope() {
   }
   
   ScopeStack.pop_back();
+
+  // Explicitly do NOT propagate HasEarlyExit into the parent scope.
+  // A `return` inside a function body (or an `if`-branch inside a function)
+  // marks the function's scope with HasEarlyExit=true.  When ExitScope()
+  // pops that function scope, the outer (global/caller) scope must remain
+  // unaffected.  Without this guarantee, any top-level declaration that
+  // appears after a function definition containing a `return` statement would
+  // be falsely flagged as unreachable code.
+  //
+  // The parent's HasEarlyExit is intentionally left as-is (not touched here)
+  // because it may legitimately be true if the *parent* scope itself already
+  // contains an early exit (e.g. a top-level `return` — which is illegal, but
+  // that is caught elsewhere).
 }
 
-SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfType Type,
+
+SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfTypePtr Type,
                                     SourceLocation DeclLoc,
                                     llvm::AllocaInst *Alloca) {
   if (ScopeStack.empty())
@@ -51,12 +65,12 @@ SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfType Type,
   ScopeStack.back().Symbols[Name] = ID;
   
   // Add to all symbols map
-  AllSymbols.emplace(ID, Symbol(ID, Name, Type, DeclLoc, Alloca, Level));
+  AllSymbols.emplace(ID, Symbol(ID, Name, std::move(Type), DeclLoc, Alloca, Level));
   
   return ID;
 }
 
-SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfType Type,
+SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfTypePtr Type,
                                     SourceLocation DeclLoc,
                                     llvm::AllocaInst *Alloca,
                                     int ArraySize) {
@@ -70,7 +84,7 @@ SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfType Type,
   ScopeStack.back().Symbols[Name] = ID;
   
   // Add to all symbols map
-  AllSymbols.emplace(ID, Symbol(ID, Name, Type, DeclLoc, Alloca, Level, ArraySize));
+  AllSymbols.emplace(ID, Symbol(ID, Name, std::move(Type), DeclLoc, Alloca, Level, ArraySize));
   
   return ID;
 }
@@ -160,4 +174,27 @@ bool SymbolTable::CurrentScopeHasEarlyExit() const {
   if (ScopeStack.empty())
     return false;
   return ScopeStack.back().HasEarlyExit;
+}
+
+void SymbolTable::ResetEarlyExitForCurrentScope() {
+  // Clear the HasEarlyExit flag on the innermost scope.
+  // Called by the pre-pass setjmp recovery handler to clean up any stale
+  // early-exit state that was set by a `return` inside a function whose
+  // compilation was aborted via longjmp (and therefore never reached the
+  // matching ExitScope() call).  Without this, the global scope can
+  // inherit HasEarlyExit=true and falsely flag subsequent top-level
+  // declarations as unreachable.
+  if (!ScopeStack.empty()) {
+    ScopeStack.back().HasEarlyExit = false;
+  }
+}
+
+void SymbolTable::ResetToDepth(size_t TargetDepth) {
+  // Unwind the scope stack to TargetDepth by calling ExitScope() for each
+  // extra scope that was pushed but never popped (e.g. because longjmp
+  // fired mid-function and skipped the normal ExitScope() call at the end
+  // of FuncDefExprAST::codegen).
+  while (ScopeStack.size() > TargetDepth) {
+    ExitScope();
+  }
 }

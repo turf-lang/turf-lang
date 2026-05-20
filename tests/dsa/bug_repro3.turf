@@ -1,0 +1,19 @@
+// Reproducer: function defined BEFORE top-level variables (original stack file structure)
+// In the original failing file, the structure was:
+//   fn push(...) { ... return ... }   <- function defined first
+//   fn pop(...) { ... return ... }
+//   int[100] stack_data               <- then top-level vars
+//   int stack_top = -1
+// The key is: top-level vars AFTER the functions.
+
+fn int double_it(int n) {
+    if n == 0 {
+        return 0
+    }
+    return n * 2
+}
+
+// These come AFTER the function. Do they get flagged as unreachable?
+int[100] arr
+int idx = -1
+printline(double_it(5))

@@ -80,31 +80,73 @@ std::unique_ptr<ExprAST> ParseWhileExpr();
 std::unique_ptr<ExprAST> ParseForExpr();
 std::unique_ptr<ExprAST> ParseVarDecl();
 std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
-                                          TurfType Type);
-std::unique_ptr<ExprAST> ParseCastExpr(TurfType DestType, SourceLocation Loc);
+                                          TurfTypePtr Type);
+std::unique_ptr<ExprAST> ParseCastExpr(TurfTypePtr DestType, SourceLocation Loc);
 std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 std::unique_ptr<ExprAST> ParseFuncDef();
 std::unique_ptr<ExprAST> ParseReturnExpr();
-std::unique_ptr<ExprAST> ParseListDecl();
+// NOTE: ParseListDecl removed — list<T> declarations go through ParseVarDeclBody
+//       via the unified ParseType() path, same as int/double/bool/string.
 
-static TurfType TokenToTurfType(int Tok) {
-  switch (Tok) {
-  case TOK_TYPE_INT:
-    return TURF_INT;
-  case TOK_TYPE_DOUBLE:
-    return TURF_DOUBLE;
-  case TOK_TYPE_BOOL:
-    return TURF_BOOL;
-  case TOK_TYPE_STRING:
-    return TURF_STRING;
-  case TOK_TYPE_VOID:
-    return TURF_VOID;
-  default:
-    SyntaxError(CurLoc, "Unknown type").raise();
-    return TURF_VOID;
+// ParseType: recursively parse a type expression from the token stream.
+// Handles primitives, void, and generics like list<int> or list<list<double>>.
+// Returns nullptr on failure.
+static TurfTypePtr ParseType() {
+  if (CurTok != TOK_IDENTIFIER && CurTok != TOK_TYPE_INT &&
+      CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
+      CurTok != TOK_TYPE_STRING && CurTok != TOK_TYPE_VOID &&
+      CurTok != TOK_TYPE_LIST) {
+    SyntaxError(CurLoc, "Expected a type name").raise();
+    return nullptr;
   }
+
+  std::string BaseName;
+  if      (CurTok == TOK_TYPE_INT)    BaseName = "int";
+  else if (CurTok == TOK_TYPE_DOUBLE) BaseName = "double";
+  else if (CurTok == TOK_TYPE_BOOL)   BaseName = "bool";
+  else if (CurTok == TOK_TYPE_STRING) BaseName = "string";
+  else if (CurTok == TOK_TYPE_VOID)   BaseName = "void";
+  else if (CurTok == TOK_TYPE_LIST)   BaseName = "list";
+  else                                BaseName = IdentifierStr; // user-defined
+
+  getNextToken(); // consume the type name
+
+  // Check for generic parameter: BaseName<T1, T2, ...>
+  if (CurTok == '<') {
+    getNextToken(); // consume '<'
+    std::vector<TurfTypePtr> TypeArgs;
+    while (true) {
+      TurfTypePtr Arg = ParseType();
+      if (!Arg) return nullptr;
+      TypeArgs.push_back(std::move(Arg));
+      if (CurTok == '>') {
+        getNextToken(); // consume '>'
+        break;
+      }
+      if (CurTok != ',') {
+        SyntaxError(CurLoc, "Expected '>' or ',' in generic type").raise();
+        return nullptr;
+      }
+      getNextToken(); // consume ','
+    }
+    return std::make_shared<GenericType>(BaseName, std::move(TypeArgs));
+  }
+
+  // Primitive / named type
+  if (BaseName == "int")    return TurfInt();
+  if (BaseName == "double") return TurfDouble();
+  if (BaseName == "bool")   return TurfBool();
+  if (BaseName == "string") return TurfString();
+  if (BaseName == "void")   return TurfVoid();
+  // "list" without <T> is an error — give a helpful message
+  if (BaseName == "list") {
+    SyntaxError(CurLoc, "Expected '<' after 'list' — e.g. list<int>").raise();
+    return nullptr;
+  }
+  return std::make_shared<NamedType>(BaseName); // user-defined struct etc.
 }
+
 
 // Called when CurTok is a Number.
 static std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger) {
@@ -235,13 +277,9 @@ ParseIdentifierExprFrom(const std::string &IdName, SourceLocation VarLoc) {
 
     // length  (for both arrays and lists — codegen differentiates)
     if (MethodName == "length") {
-      // Check if it's a list variable — emit ListMethodCallExprAST;
-      // otherwise fall through to ArrayLengthExprAST (handled in codegen).
-      auto NVIter = NamedValues.find(IdName);
-      if (NVIter != NamedValues.end() && isListType(NVIter->second.Type)) {
-        return std::make_unique<ListMethodCallExprAST>(VarLoc, IdName, "length");
-      }
-      // Array or unknown (let codegen decide/error)
+      // Emit ArrayLengthExprAST for both arrays and lists.
+      // ArrayLengthExprAST::codegen already handles the list case by checking
+      // isListType on the VarInfo — no parser-time symbol table lookup needed.
       return std::make_unique<ArrayLengthExprAST>(VarLoc, IdName);
     }
 
@@ -552,24 +590,19 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
 
   case TOK_TYPE_INT:
   case TOK_TYPE_DOUBLE:
-  case TOK_TYPE_STRING: {
-    // if the next token is '(' this is a cast call, e.g. int(x) or string(x)
-    // otherwise it is a variable declaration, e.g. int x = ...
-    TurfType DestType = (CurTok == TOK_TYPE_INT)      ? TURF_INT
-                        : (CurTok == TOK_TYPE_DOUBLE) ? TURF_DOUBLE
-                                                      : TURF_STRING;
+  case TOK_TYPE_STRING:
+  case TOK_TYPE_BOOL:
+  case TOK_TYPE_LIST: {
+    // ParseType() handles all type keywords uniformly, including list<T>.
+    // If the next token is '(' it is a cast: int(x), double(x), string(x).
+    // Otherwise it is a variable (or array) declaration.
     SourceLocation TypeLoc = CurLoc;
-    getNextToken(); // consume the type keyword
+    TurfTypePtr DestType = ParseType(); // consumes the type keyword(s)
+    if (!DestType) return nullptr;
     if (CurTok == '(')
       return ParseCastExpr(DestType, TypeLoc);
     return ParseVarDeclBody(TypeLoc, DestType);
   }
-
-  case TOK_TYPE_LIST:
-    return ParseListDecl();
-
-  case TOK_TYPE_BOOL:
-    return ParseVarDecl();
 
   case TOK_TYPE_VOID:
     SyntaxError(CurLoc, "'void' may only be used as a function return type")
@@ -905,7 +938,7 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 // ParseVarDeclBody - called after the type keyword has already been consumed.
 // CurTok must already be the identifier (variable name) OR '[' for arrays.
 std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
-                                          TurfType Type) {
+                                          TurfTypePtr Type) {
   // Check for array syntax: int[5] name  or  int[5] name = [1, 2, 3]
   if (CurTok == '[') {
     getNextToken();
@@ -985,6 +1018,13 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
   SourceLocation NameLoc = CurLoc;
   getNextToken();
 
+  // list<T> declarations need no initializer — codegen zero-inits via malloc.
+  // e.g. `list<int> nums` is valid without `= ...`
+  if (isListType(Type.get())) {
+    auto Init = std::make_unique<NumberExprAST>(0LL); // dummy, ignored by codegen
+    return std::make_unique<VarDeclExprAST>(NameLoc, Name, Type, std::move(Init));
+  }
+
   if (CurTok != TOK_ASSIGN) {
     LogErrorAt(NameLoc, "Expected '=' after variable name '" + Name + "'."
                "\n  Hint: Variables must be initialised: int " + Name + " = <value>");
@@ -1002,14 +1042,14 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
 // ParseVarDecl - original entry point (type token is still in CurTok).
 std::unique_ptr<ExprAST> ParseVarDecl() {
   SourceLocation TypeLoc = CurLoc;
-  TurfType Type = TokenToTurfType(CurTok);
-  getNextToken(); // consume the type keyword
+  TurfTypePtr Type = ParseType(); // consumes the type token
+  if (!Type) return nullptr;
   return ParseVarDeclBody(TypeLoc, Type);
 }
 
 // ParseCastExpr - called after the type keyword has been consumed and
 // CurTok == '('. Parses int(expr) or double(expr).
-std::unique_ptr<ExprAST> ParseCastExpr(TurfType DestType, SourceLocation Loc) {
+std::unique_ptr<ExprAST> ParseCastExpr(TurfTypePtr DestType, SourceLocation Loc) {
   getNextToken(); // eat '('
 
   auto Operand = ParseExpression();
@@ -1031,15 +1071,9 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   SourceLocation FnLoc = CurLoc;
   getNextToken();
 
-  if (CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
-      CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING &&
-      CurTok != TOK_TYPE_VOID) {
-    LogErrorAt(FnLoc, "Expected a return type after 'fn' (int, double, bool, string, or void)."
-               "\n  Hint: Function syntax: fn int myFunc(int x) { return x }");
-    return nullptr;
-  }
-  TurfType RetType = TokenToTurfType(CurTok);
-  getNextToken();
+  // Parse return type using ParseType() to support generics in the future
+  TurfTypePtr RetType = ParseType(); // consumes the return type token
+  if (!RetType) return nullptr;
 
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(FnLoc, "Expected a function name after the return type."
@@ -1060,52 +1094,13 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   while (CurTok != ')' && CurTok != TOK_EOF) {
     // Parse each parameter: <type> <name>
     // Parse each parameter: <type> <name>  (supports list<T> params too)
-    if (CurTok == TOK_TYPE_LIST) {
-      // list<ElemType> paramName
-      SourceLocation ListParamLoc = CurLoc;
-      getNextToken(); // eat 'list'
-      if (CurTok != '<') {
-        LogErrorAt(ListParamLoc, "Expected '<' after 'list' in parameter type."
-                   "\n  Hint: e.g. fn void foo(list<int> nums) { ... }");
-        return nullptr;
-      }
-      getNextToken(); // eat '<'
-      if (CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
-          CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING) {
-        LogErrorAt(CurLoc, "Expected an element type inside list<...>."
-                   "\n  Hint: Use list<int>, list<double>, list<bool>, or list<string>.");
-        return nullptr;
-      }
-      TurfType ElemType = TokenToTurfType(CurTok);
-      getNextToken(); // eat element type
-      if (CurTok != '>') {
-        LogErrorAt(CurLoc, "Expected '>' to close list<...> in parameter type.");
-        return nullptr;
-      }
-      getNextToken(); // eat '>'
-      if (CurTok != TOK_IDENTIFIER) {
-        LogErrorAt(CurLoc, "Expected a parameter name after list<T>."
-                   "\n  Hint: e.g. fn void foo(list<int> nums) { ... }");
-        return nullptr;
-      }
-      std::string ParamName = IdentifierStr;
-      getNextToken();
-      Params.push_back({getListType(ElemType), ParamName});
-      if (CurTok == ',')
-        getNextToken();
-      else if (CurTok != ')')
-        break;
-      continue;
-    }
-
-    if (CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
-        CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING) {
-      LogErrorAt(CurLoc, "Expected a parameter type (int, double, bool, string) in the parameter list of '" + FuncName + "'."
+    // All parameter types (including list<T>) are parsed uniformly by ParseType()
+    TurfTypePtr ParamType = ParseType();
+    if (!ParamType) {
+      LogErrorAt(CurLoc, "Expected a parameter type (int, double, bool, string, list<T>) in the parameter list of '" + FuncName + "'."
                  "\n  Hint: Each parameter must have a type: fn int " + FuncName + "(int x, string y) { ... }");
       return nullptr;
     }
-    TurfType ParamType = TokenToTurfType(CurTok);
-    getNextToken();
 
     if (CurTok != TOK_IDENTIFIER) {
       LogErrorAt(CurLoc, "Expected a parameter name after the type in '" + FuncName + "'."
@@ -1159,46 +1154,7 @@ std::unique_ptr<ExprAST> ParseReturnExpr() {
   return std::make_unique<ReturnExprAST>(RetLoc, std::move(Val));
 }
 
-// ParseListDecl - called when CurTok == TOK_TYPE_LIST.
-// Parses: list<int> name
-std::unique_ptr<ExprAST> ParseListDecl() {
-  SourceLocation ListLoc = CurLoc;
-  getNextToken(); // eat 'list'
+// ParseListDecl is now replaced by the unified type dispatch in ParsePrimary.
+// list<T> declarations go through ParseVarDeclBody with a GenericType from ParseType().
+// This function is kept as a named reference point but is no longer called.
 
-  if (CurTok != '<') {
-    ListGenericMissingError(ListLoc).raise();
-    return nullptr;
-  }
-  getNextToken(); // eat '<'
-
-  if (CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
-      CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING) {
-    LogErrorAt(CurLoc, "Expected an element type inside list<...>."
-               "\n  Hint: Use list<int>, list<double>, list<bool>, or list<string>.");
-    return nullptr;
-  }
-  TurfType ElemType = TokenToTurfType(CurTok);
-  getNextToken(); // eat element type
-
-  if (CurTok != '>') {
-    LogErrorAt(CurLoc, "Expected '>' to close list<...>."
-               "\n  Hint: e.g. list<int> nums");
-    return nullptr;
-  }
-  getNextToken(); // eat '>'
-
-  // Allow keyword-named variables (e.g. 'list' might shadow, but allow identifier)
-  bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
-                   Keywords.at(IdentifierStr) == CurTok;
-  if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
-    LogErrorAt(CurLoc, "Expected a variable name after list<T>."
-               "\n  Hint: e.g. list<int> nums");
-    return nullptr;
-  }
-
-  std::string Name = IdentifierStr;
-  SourceLocation NameLoc = CurLoc;
-  getNextToken(); // eat variable name
-
-  return std::make_unique<ListDeclExprAST>(NameLoc, Name, ElemType);
-}

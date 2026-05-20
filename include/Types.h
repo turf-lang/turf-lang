@@ -1,93 +1,123 @@
 #ifndef TYPES_H
 #define TYPES_H
 
-enum TurfType {
-  TURF_VOID,
-  TURF_DOUBLE,
-  TURF_INT,
-  TURF_BOOL,
-  TURF_STRING,
-  TURF_INT_ARRAY,
-  TURF_DOUBLE_ARRAY,
-  TURF_BOOL_ARRAY,
-  TURF_STRING_ARRAY,
-  // Dynamically-sized generic list<T>
-  TURF_INT_LIST,
-  TURF_DOUBLE_LIST,
-  TURF_BOOL_LIST,
-  TURF_STRING_LIST
+#include <memory>
+#include <string>
+#include <vector>
+
+// ────────────────────────────────────────────────────────────────────────────
+// Forward declarations
+// ────────────────────────────────────────────────────────────────────────────
+class TurfType;
+using TurfTypePtr = std::shared_ptr<TurfType>;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Base class — all types are TurfType subclasses
+// ────────────────────────────────────────────────────────────────────────────
+class TurfType {
+public:
+  virtual ~TurfType() = default;
+  virtual std::string getName() const = 0;
+
+  // Convenience predicates — override in subclasses as needed
+  virtual bool isNamed(const std::string &N) const { return false; }
+  virtual bool isGeneric() const { return false; }
+  virtual bool isArray() const { return false; }
+  virtual bool isVoid() const { return false; }
+
+  // Structural equivalence: two types are equivalent if they have the same name
+  virtual bool isEquivalent(const TurfType *Other) const {
+    return Other && getName() == Other->getName();
+  }
 };
 
-inline bool isArrayType(TurfType T) {
-  return T == TURF_INT_ARRAY || T == TURF_DOUBLE_ARRAY ||
-         T == TURF_BOOL_ARRAY || T == TURF_STRING_ARRAY;
-}
+// ────────────────────────────────────────────────────────────────────────────
+// NamedType — int, double, bool, string, void, and future user-defined types
+// ────────────────────────────────────────────────────────────────────────────
+class NamedType : public TurfType {
+  std::string Name;
 
-inline TurfType getArrayElementType(TurfType T) {
-  switch (T) {
-  case TURF_INT_ARRAY:    return TURF_INT;
-  case TURF_DOUBLE_ARRAY: return TURF_DOUBLE;
-  case TURF_BOOL_ARRAY:   return TURF_BOOL;
-  case TURF_STRING_ARRAY: return TURF_STRING;
-  default:                return T;
+public:
+  explicit NamedType(std::string N) : Name(std::move(N)) {}
+  std::string getName() const override { return Name; }
+  bool isNamed(const std::string &N) const override { return Name == N; }
+  bool isVoid() const override { return Name == "void"; }
+};
+
+// ────────────────────────────────────────────────────────────────────────────
+// ArrayType — int[], double[], bool[], string[]
+// ────────────────────────────────────────────────────────────────────────────
+class ArrayType : public TurfType {
+  TurfTypePtr ElementType;
+  int Size; // -1 for unknown/dynamic, >0 for fixed compile-time size
+
+public:
+  ArrayType(TurfTypePtr Elem, int Sz = -1)
+      : ElementType(std::move(Elem)), Size(Sz) {}
+  std::string getName() const override { return ElementType->getName() + "[]"; }
+  bool isArray() const override { return true; }
+  const TurfType *getElementType() const { return ElementType.get(); }
+  TurfTypePtr getElementTypePtr() const { return ElementType; }
+  int getSize() const { return Size; }
+};
+
+// ────────────────────────────────────────────────────────────────────────────
+// GenericType — list<int>, list<string>, future map<K,V>, etc.
+// This is the core of Monomorphization: the element type is a full TurfType,
+// so list<Player> works as soon as Player is a registered type.
+// ────────────────────────────────────────────────────────────────────────────
+class GenericType : public TurfType {
+  std::string BaseName;          // "list", "map", etc.
+  std::vector<TurfTypePtr> TypeArgs; // [int], [string, int], etc.
+
+public:
+  GenericType(std::string Base, std::vector<TurfTypePtr> Args)
+      : BaseName(std::move(Base)), TypeArgs(std::move(Args)) {}
+
+  std::string getName() const override {
+    std::string S = BaseName + "<";
+    for (size_t i = 0; i < TypeArgs.size(); ++i) {
+      if (i)
+        S += ", ";
+      S += TypeArgs[i]->getName();
+    }
+    return S + ">";
   }
-}
 
-inline TurfType getArrayType(TurfType ElemT) {
-  switch (ElemT) {
-  case TURF_INT:    return TURF_INT_ARRAY;
-  case TURF_DOUBLE: return TURF_DOUBLE_ARRAY;
-  case TURF_BOOL:   return TURF_BOOL_ARRAY;
-  case TURF_STRING: return TURF_STRING_ARRAY;
-  default:          return TURF_VOID;
-  }
-}
+  bool isGeneric() const override { return true; }
+  const std::string &getBaseName() const { return BaseName; }
+  const std::vector<TurfTypePtr> &getTypeArgs() const { return TypeArgs; }
+  const TurfType *getTypeArg(size_t I) const { return TypeArgs[I].get(); }
+  TurfTypePtr getTypeArgPtr(size_t I) const { return TypeArgs[I]; }
+};
 
-// ── List helpers ──────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// Singleton accessors for built-in primitive types
+// Defined in src/Types.cpp so callers never construct NamedType directly.
+// ────────────────────────────────────────────────────────────────────────────
+TurfTypePtr TurfInt();
+TurfTypePtr TurfDouble();
+TurfTypePtr TurfBool();
+TurfTypePtr TurfString();
+TurfTypePtr TurfVoid();
 
-inline bool isListType(TurfType T) {
-  return T == TURF_INT_LIST || T == TURF_DOUBLE_LIST ||
-         T == TURF_BOOL_LIST || T == TURF_STRING_LIST;
-}
+// ────────────────────────────────────────────────────────────────────────────
+// Helper predicates (defined in src/Types.cpp)
+// ────────────────────────────────────────────────────────────────────────────
+bool isListType(const TurfType *T);  // GenericType with BaseName "list"
+bool isArrayType(const TurfType *T); // ArrayType
 
-inline TurfType getListElementType(TurfType T) {
-  switch (T) {
-  case TURF_INT_LIST:    return TURF_INT;
-  case TURF_DOUBLE_LIST: return TURF_DOUBLE;
-  case TURF_BOOL_LIST:   return TURF_BOOL;
-  case TURF_STRING_LIST: return TURF_STRING;
-  default:               return T;
-  }
-}
+const TurfType *getListElementType(const TurfType *T);  // inner T of list<T>
+const TurfType *getArrayElementType(const TurfType *T); // inner T of T[]
 
-inline TurfType getListType(TurfType ElemT) {
-  switch (ElemT) {
-  case TURF_INT:    return TURF_INT_LIST;
-  case TURF_DOUBLE: return TURF_DOUBLE_LIST;
-  case TURF_BOOL:   return TURF_BOOL_LIST;
-  case TURF_STRING: return TURF_STRING_LIST;
-  default:          return TURF_VOID;
-  }
-}
+TurfTypePtr makeListType(TurfTypePtr ElemType);
+TurfTypePtr makeArrayType(TurfTypePtr ElemType, int Size = -1);
 
-// Human-readable name for a TurfType (used in diagnostics)
-inline const char *turfTypeName(TurfType T) {
-  switch (T) {
-  case TURF_INT:          return "int";
-  case TURF_DOUBLE:       return "double";
-  case TURF_BOOL:         return "bool";
-  case TURF_STRING:       return "string";
-  case TURF_VOID:         return "void";
-  case TURF_INT_ARRAY:    return "int[]";
-  case TURF_DOUBLE_ARRAY: return "double[]";
-  case TURF_BOOL_ARRAY:   return "bool[]";
-  case TURF_STRING_ARRAY: return "string[]";
-  case TURF_INT_LIST:     return "list<int>";
-  case TURF_DOUBLE_LIST:  return "list<double>";
-  case TURF_BOOL_LIST:    return "list<bool>";
-  case TURF_STRING_LIST:  return "list<string>";
-  }
-  return "unknown";
+// ────────────────────────────────────────────────────────────────────────────
+// Human-readable diagnostic name
+// ────────────────────────────────────────────────────────────────────────────
+inline std::string turfTypeName(const TurfType *T) {
+  return T ? T->getName() : "unknown";
 }
 
 #endif

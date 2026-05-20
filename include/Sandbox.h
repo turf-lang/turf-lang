@@ -130,7 +130,7 @@ private:
 
   // Extract declaration metadata from a single-line declaration.
   static bool parseDeclarationLine(const std::string &lineText, std::string &name,
-                                   TurfType &type, bool &isArray, int &arraySize);
+                                   TurfTypePtr &type, bool &isArray, int &arraySize);
 
   // Update the cloned symbol table for a localized line edit.
   void updateSymbolTableForEdit(int lineNumber, const std::string &newLine,

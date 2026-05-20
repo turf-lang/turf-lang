@@ -82,7 +82,7 @@ public:
 class CFG {
 private:
   std::string FunctionName; // Name of the function this CFG represents
-  TurfType ReturnType;      // Return type of the function
+  TurfTypePtr ReturnType;   // Return type of the function
   SourceLocation FuncLoc;
   std::vector<std::unique_ptr<TurfBasicBlock>> Blocks; // All blocks (owned)
   TurfBasicBlock *EntryBlock; // First block (entry point)
@@ -90,13 +90,14 @@ private:
   BlockID NextID;             // Next available block ID
 
 public:
-  explicit CFG(std::string FunctionName, TurfType ReturnType = TURF_VOID)
-      : FunctionName(std::move(FunctionName)), ReturnType(ReturnType),
+  explicit CFG(std::string FunctionName, TurfTypePtr ReturnType = TurfVoid())
+      : FunctionName(std::move(FunctionName)), ReturnType(std::move(ReturnType)),
         EntryBlock(nullptr), ExitBlock(nullptr), NextID(0) {}
 
   // Accessors
   const std::string &getFunctionName() const { return FunctionName; }
-  TurfType getReturnType() const { return ReturnType; }
+  const TurfType *getReturnType() const { return ReturnType.get(); }
+  TurfTypePtr getReturnTypePtr() const { return ReturnType; }
   TurfBasicBlock *getEntryBlock() const { return EntryBlock; }
   TurfBasicBlock *getExitBlock() const { return ExitBlock; }
   const std::vector<std::unique_ptr<TurfBasicBlock>> &getBlocks() const {
@@ -145,7 +146,7 @@ public:
 
   // Build CFG for a function
   std::unique_ptr<CFG> buildCFG(const std::string &FunctionName,
-                                TurfType ReturnType, ExprAST *Body);
+                                TurfTypePtr ReturnType, ExprAST *Body);
 
 private:
   // Visit methods for different AST nodes
