@@ -385,7 +385,7 @@ void Sandbox::updateSymbolTableForEdit(int lineNumber, const std::string &newLin
   SourceLocation declLoc{lineNumber, 1};
 
   if (isArray) {
-    Snapshot.SymbolTableCopy->DeclareSymbol(name, type, declLoc, nullptr, arraySize);
+    Snapshot.SymbolTableCopy->DeclareSymbol(name, type, declLoc, nullptr);
   } else {
     Snapshot.SymbolTableCopy->DeclareSymbol(name, type, declLoc, nullptr);
   }

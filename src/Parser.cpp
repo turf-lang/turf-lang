@@ -90,7 +90,8 @@ std::unique_ptr<ExprAST> ParseReturnExpr();
 //       via the unified ParseType() path, same as int/double/bool/string.
 
 // ParseType: recursively parse a type expression from the token stream.
-// Handles primitives, void, and generics like list<int> or list<list<double>>.
+// Handles primitives, void, generics like list<int>, and arrays like int[5].
+// Trailing [N] brackets are consumed here, making array types fully first-class.
 // Returns nullptr on failure.
 static TurfTypePtr ParseType() {
   if (CurTok != TOK_IDENTIFIER && CurTok != TOK_TYPE_INT &&
@@ -130,21 +131,65 @@ static TurfTypePtr ParseType() {
       }
       getNextToken(); // consume ','
     }
-    return std::make_shared<GenericType>(BaseName, std::move(TypeArgs));
+    // Arrays of generics are rare but allowed: parse trailing [N]
+    TurfTypePtr GenBase = std::make_shared<GenericType>(BaseName, std::move(TypeArgs));
+    while (CurTok == '[') {
+      getNextToken();
+      int Size = -1;
+      if (CurTok == TOK_INT_LITERAL) {
+        Size = static_cast<int>(IntVal);
+        if (Size <= 0) {
+          SyntaxError(CurLoc, "Array size must be positive").raise();
+          return nullptr;
+        }
+        getNextToken();
+      }
+      if (CurTok != ']') {
+        SyntaxError(CurLoc, "Expected ']' to close array size").raise();
+        return nullptr;
+      }
+      getNextToken();
+      GenBase = makeArrayType(GenBase, Size);
+    }
+    return GenBase;
   }
 
   // Primitive / named type
-  if (BaseName == "int")    return TurfInt();
-  if (BaseName == "double") return TurfDouble();
-  if (BaseName == "bool")   return TurfBool();
-  if (BaseName == "string") return TurfString();
-  if (BaseName == "void")   return TurfVoid();
-  // "list" without <T> is an error — give a helpful message
-  if (BaseName == "list") {
+  TurfTypePtr Base;
+  if      (BaseName == "int")    Base = TurfInt();
+  else if (BaseName == "double") Base = TurfDouble();
+  else if (BaseName == "bool")   Base = TurfBool();
+  else if (BaseName == "string") Base = TurfString();
+  else if (BaseName == "void")   Base = TurfVoid();
+  else if (BaseName == "list") {
+    // "list" without <T> is an error — give a helpful message
     SyntaxError(CurLoc, "Expected '<' after 'list' — e.g. list<int>").raise();
     return nullptr;
   }
-  return std::make_shared<NamedType>(BaseName); // user-defined struct etc.
+  else Base = std::make_shared<NamedType>(BaseName); // user-defined struct etc.
+
+  // Recursively consume trailing array dimensions: int[5] or int[5][10]
+  // Size may be omitted (int[]) to indicate a pointer-parameter (size = -1).
+  while (CurTok == '[') {
+    getNextToken(); // eat '['
+    int Size = -1;
+    if (CurTok == TOK_INT_LITERAL) {
+      Size = static_cast<int>(IntVal);
+      if (Size <= 0) {
+        SyntaxError(CurLoc, "Array size must be a positive integer (greater than 0)").raise();
+        return nullptr;
+      }
+      getNextToken(); // eat the literal
+    }
+    if (CurTok != ']') {
+      SyntaxError(CurLoc, "Expected ']' to close array size — e.g. int[5] arr").raise();
+      return nullptr;
+    }
+    getNextToken(); // eat ']'
+    Base = makeArrayType(Base, Size);
+  }
+
+  return Base;
 }
 
 
@@ -936,30 +981,15 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 }
 
 // ParseVarDeclBody - called after the type keyword has already been consumed.
-// CurTok must already be the identifier (variable name) OR '[' for arrays.
+// ParseType() now produces ArrayType for array types (e.g. int[5]), so we
+// simply check isArrayType() here instead of intercepting '[' ourselves.
 std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
                                           TurfTypePtr Type) {
-  // Check for array syntax: int[5] name  or  int[5] name = [1, 2, 3]
-  if (CurTok == '[') {
-    getNextToken();
-
-    if (CurTok != TOK_INT_LITERAL) {
-      LogErrorAt(CurLoc, "Array size must be a positive integer literal, e.g. int[5] arr");
-      return nullptr;
-    }
-
-    int ArraySize = static_cast<int>(IntVal);
-    if (ArraySize <= 0) {
-      LogErrorAt(CurLoc, "Array size must be a positive integer (greater than 0)");
-      return nullptr;
-    }
-    getNextToken();
-
-    if (CurTok != ']') {
-      LogErrorAt(CurLoc, "Expected ']' to close the array size — e.g. int[5] arr");
-      return nullptr;
-    }
-    getNextToken();
+  // If ParseType() already consumed [N] and built an ArrayType, handle it here.
+  if (isArrayType(Type.get())) {
+    const auto *AT = dynamic_cast<const ::ArrayType *>(Type.get());
+    int ArraySize = AT ? AT->getSize() : -1;
+    TurfTypePtr ElemType = AT ? AT->getElementTypePtr() : Type;
 
     bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
                      Keywords.at(IdentifierStr) == CurTok;
@@ -1001,7 +1031,7 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
       getNextToken();
     }
 
-    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, Type, ArraySize,
+    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize,
                                               std::move(InitList));
   }
 

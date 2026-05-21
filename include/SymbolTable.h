@@ -16,16 +16,16 @@ using SymbolID = size_t;
 struct Symbol {
   SymbolID ID;                    // Unique stable identifier
   std::string Name;               // Variable name
-  TurfTypePtr Type;               // Variable type (dynamic — works for list<T>, etc.)
+  TurfTypePtr Type;               // Variable type (dynamic — works for list<T>, int[5], etc.)
   SourceLocation DeclLoc;         // Where it was declared
   llvm::AllocaInst *Alloca;       // LLVM memory location
   size_t ScopeLevel;              // Nesting depth (0 = global, 1 = first block, etc.)
-  int ArraySize = 0;              // >0 for array variables
+  // Array size is encoded inside Type (ArrayType::getSize()) — no separate field needed.
   
   Symbol(SymbolID ID, std::string Name, TurfTypePtr Type, SourceLocation DeclLoc,
-         llvm::AllocaInst *Alloca, size_t ScopeLevel, int ArraySize = 0)
+         llvm::AllocaInst *Alloca, size_t ScopeLevel)
       : ID(ID), Name(std::move(Name)), Type(std::move(Type)), DeclLoc(DeclLoc),
-        Alloca(Alloca), ScopeLevel(ScopeLevel), ArraySize(ArraySize) {}
+        Alloca(Alloca), ScopeLevel(ScopeLevel) {}
 };
 
 // Represents a lexical scope (block, function body, etc.)
@@ -61,9 +61,6 @@ public:
   // Symbol declaration
   SymbolID DeclareSymbol(const std::string &Name, TurfTypePtr Type,
                          SourceLocation DeclLoc, llvm::AllocaInst *Alloca);
-  SymbolID DeclareSymbol(const std::string &Name, TurfTypePtr Type,
-                         SourceLocation DeclLoc, llvm::AllocaInst *Alloca,
-                         int ArraySize);
   
   // Symbol lookup
   Symbol *LookupSymbol(const std::string &Name);

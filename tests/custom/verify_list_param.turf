@@ -1,0 +1,30 @@
+// This test verifies that we can pass list<T> as a function parameter,
+// proving that list<T> is fully integrated into the type system and not hardcoded.
+
+fn int sum_list(list<int> data) {
+    int total = 0
+    for i in 0..data.length step i++ {
+        total = total + data[i]
+    }
+    return total
+}
+
+fn void add_elements(list<int> data) {
+    data.push(100)
+    data.push(200)
+}
+
+list<int> my_list
+my_list.push(10)
+my_list.push(20)
+my_list.push(30)
+
+int initial_sum = sum_list(my_list)
+print(initial_sum) // Expected: 60 (10 + 20 + 30)
+
+// Since lists are passed by reference, pushing elements inside the function
+// modifies the original list.
+add_elements(my_list)
+
+int new_sum = sum_list(my_list)
+print(new_sum) // Expected: 360 (60 + 100 + 200)

@@ -70,24 +70,6 @@ SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfTypePtr Type,
   return ID;
 }
 
-SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfTypePtr Type,
-                                    SourceLocation DeclLoc,
-                                    llvm::AllocaInst *Alloca,
-                                    int ArraySize) {
-  if (ScopeStack.empty())
-    EnterScope();
-  
-  SymbolID ID = NextID++;
-  size_t Level = GetCurrentLevel();
-  
-  // Add to current scope
-  ScopeStack.back().Symbols[Name] = ID;
-  
-  // Add to all symbols map
-  AllSymbols.emplace(ID, Symbol(ID, Name, std::move(Type), DeclLoc, Alloca, Level, ArraySize));
-  
-  return ID;
-}
 
 Symbol *SymbolTable::LookupSymbol(const std::string &Name) {
   // Search from innermost to outermost scope

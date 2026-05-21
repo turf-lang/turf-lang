@@ -1093,13 +1093,26 @@ Value *FuncDefExprAST::codegen() {
     AllocaInst *Alloca = CreateEntryBlockAlloca(
         TheFunc, std::string(Arg.getName()), ParamTurfType.get());
     Builder->CreateStore(&Arg, Alloca);
-    NamedValues[std::string(Arg.getName())] = {Alloca, ParamTurfType};
+
+    // For array parameters, normalise the registered type to size=-1 so that
+    // ArrayAccessExprAST uses the pointer-load GEP path (not the two-index
+    // alloca-GEP path that assumes the alloca IS the array).
+    TurfTypePtr RegisteredType = ParamTurfType;
+    if (isArrayType(ParamTurfType.get())) {
+      const TurfType *ElemT = getArrayElementType(ParamTurfType.get());
+      // Rebuild the type with the element type shared_ptr
+      RegisteredType = makeArrayType(
+          dynamic_cast<const ::ArrayType *>(ParamTurfType.get())->getElementTypePtr(),
+          -1); // -1 = pointer parameter
+    }
+
+    NamedValues[std::string(Arg.getName())] = {Alloca, RegisteredType};
 
     // Add parameter to symbol table
     if (GlobalSymbolTable) {
       SourceLocation ParamLoc = Loc;
       GlobalSymbolTable->DeclareSymbol(std::string(Arg.getName()),
-                                       ParamTurfType, ParamLoc, Alloca);
+                                       RegisteredType, ParamLoc, Alloca);
     }
   }
 
@@ -1272,6 +1285,37 @@ Value *FuncCallExprAST::codegen() {
         ArgumentTypeError(Loc, Name, std::string(Arg.getName()), Idx + 1,
                           turfTypeName(DeclaredType.get()),
                           turfTypeName(ActualType.get()))
+            .raise();
+        return nullptr;
+      }
+    } else if (isArrayType(DeclaredType.get())) {
+      // Array params: the function expects a pointer to the array data.
+      // We must pass the raw AllocaInst of the caller's array, not a loaded
+      // value. Also verify the caller is actually passing an array variable
+      // with a compatible element type.
+      if (auto *VE = dynamic_cast<VariableExprAST *>(Args[Idx].get())) {
+        auto It = NamedValues.find(VE->getName());
+        if (It == NamedValues.end() || !isArrayType(It->second.Type.get())) {
+          SemanticError(Loc, "Argument " + std::to_string(Idx + 1) + " to '" +
+                                 Name + "' must be an array variable").raise();
+          return nullptr;
+        }
+        // Element-type check
+        const TurfType *ExpElem = getArrayElementType(DeclaredType.get());
+        const TurfType *ActElem = getArrayElementType(It->second.Type.get());
+        if (ExpElem && ActElem &&
+            ExpElem->getName() != ActElem->getName()) {
+          ArgumentTypeError(Loc, Name, std::string(Arg.getName()), Idx + 1,
+                            turfTypeName(DeclaredType.get()),
+                            turfTypeName(It->second.Type.get()))
+              .raise();
+          return nullptr;
+        }
+        // Pass the alloca pointer directly (array passed by reference)
+        V = It->second.Alloca;
+      } else {
+        SemanticError(Loc, "Argument " + std::to_string(Idx + 1) + " to '" +
+                               Name + "': arrays must be passed as a variable name")
             .raise();
         return nullptr;
       }
@@ -1474,13 +1518,13 @@ Value *ArrayDeclExprAST::codegen() {
     }
   }
 
-  // Register in symbol table — use makeArrayType for the array type
+  // Register in symbol table — array type already carries the size
   TurfTypePtr ArrType = makeArrayType(ElementType, Size);
   if (GlobalSymbolTable) {
-    GlobalSymbolTable->DeclareSymbol(Name, ArrType, Loc, Alloca, Size);
+    GlobalSymbolTable->DeclareSymbol(Name, ArrType, Loc, Alloca);
   }
 
-  NamedValues[Name] = {Alloca, ArrType, Size};
+  NamedValues[Name] = {Alloca, ArrType};
 
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }
@@ -1578,7 +1622,7 @@ Value *ArrayAccessExprAST::codegen() {
     return nullptr;
   }
 
-  int ArraySize = VI->ArraySize;
+  int ArraySize = dynamic_cast<const ::ArrayType *>(VI->Type.get())->getSize();
   const TurfType *ElemType = getArrayElementType(VI->Type.get());
 
   // Evaluate the index
@@ -1594,26 +1638,39 @@ Value *ArrayAccessExprAST::codegen() {
   }
   IndexVal = CastToType(IndexVal, TurfInt(), "arridx", Loc);
 
-  // Compile-time bounds check for constant indices
-  if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
-    long long Idx = CI->getSExtValue();
-    if (Idx < 0 || Idx >= ArraySize) {
-      ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
-      return nullptr;
+  // Compile-time / runtime bounds checks — only for local arrays (size known).
+  // For pointer parameters (ArraySize == -1) the callee doesn't know the size.
+  if (ArraySize > 0) {
+    if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
+      long long Idx = CI->getSExtValue();
+      if (Idx < 0 || Idx >= ArraySize) {
+        ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
+        return nullptr;
+      }
+    } else {
+      EmitRuntimeBoundsCheck(IndexVal, ArraySize, Name, Loc);
     }
-  } else {
-    // Runtime bounds check
-    EmitRuntimeBoundsCheck(IndexVal, ArraySize, Name, Loc);
   }
 
   // GEP + load
+  // Two cases:
+  //  A) Local array (ArraySize > 0): VI->Alloca IS the [N x T] alloca.
+  //     Use two-index GEP [0, idx] into the llvm::ArrayType.
+  //  B) Pointer parameter (ArraySize == -1): VI->Alloca holds a ptr-to-element.
+  //     Load the pointer, then single-index GEP into the pointed buffer.
   Type *ElemTy = getLLVMType(ElemType);
-  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
-  Value *Indices[] = {
-      ConstantInt::get(Type::getInt64Ty(*TheContext), 0), IndexVal};
-  Value *ElemPtr =
-      Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, Indices, "arrelem");
-
+  Value *ElemPtr;
+  if (ArraySize > 0) {
+    llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
+    Value *Indices[] = {
+        ConstantInt::get(Type::getInt64Ty(*TheContext), 0), IndexVal};
+    ElemPtr = Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, Indices, "arrelem");
+  } else {
+    // Parameter: alloca stores a pointer to the array's first element.
+    Type *PtrTy = PointerType::get(*TheContext, 0);
+    Value *ArrPtr = Builder->CreateLoad(PtrTy, VI->Alloca, "arrptr");
+    ElemPtr = Builder->CreateGEP(ElemTy, ArrPtr, IndexVal, "arrelem");
+  }
   return Builder->CreateLoad(ElemTy, ElemPtr, Name + "_elem");
 }
 
@@ -1658,7 +1715,7 @@ Value *ArrayAssignExprAST::codegen() {
     return nullptr;
   }
 
-  int ArraySize = VI->ArraySize;
+  int ArraySize = dynamic_cast<const ::ArrayType *>(VI->Type.get())->getSize();
   const TurfType *ElemType = getArrayElementType(VI->Type.get());
 
   // Evaluate the index
@@ -1674,16 +1731,17 @@ Value *ArrayAssignExprAST::codegen() {
   }
   IndexVal = CastToType(IndexVal, TurfInt(), "arridx", Loc);
 
-  // Compile-time bounds check for constant indices
-  if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
-    long long Idx = CI->getSExtValue();
-    if (Idx < 0 || Idx >= ArraySize) {
-      ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
-      return nullptr;
+  // Compile-time bounds check for constant indices (local arrays only)
+  if (ArraySize > 0) {
+    if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
+      long long Idx = CI->getSExtValue();
+      if (Idx < 0 || Idx >= ArraySize) {
+        ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
+        return nullptr;
+      }
+    } else {
+      EmitRuntimeBoundsCheck(IndexVal, ArraySize, Name, Loc);
     }
-  } else {
-    // Runtime bounds check
-    EmitRuntimeBoundsCheck(IndexVal, ArraySize, Name, Loc);
   }
 
   // Evaluate the RHS value
@@ -1694,8 +1752,8 @@ Value *ArrayAssignExprAST::codegen() {
   // Detect void RHS
   if (RHSVal->getType()->isVoidTy()) {
     VoidValueError(Loc, "You're trying to store a void value in array '" +
-                            Name + "'.")
-        .raise();
+                            Name + "'.").
+        raise();
     return nullptr;
   }
 
@@ -1713,16 +1771,26 @@ Value *ArrayAssignExprAST::codegen() {
   RHSVal = CastToType(RHSVal, ElemTypePtr, "arrstore", Loc);
 
   // GEP + store
+  // Two cases (same as ArrayAccessExprAST):
+  //  A) Local array (ArraySize > 0): two-index GEP into [N x T] alloca.
+  //  B) Pointer parameter (ArraySize == -1): load pointer, single-index GEP.
   Type *ElemTy = getLLVMType(ElemType);
-  llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
-  Value *Indices[] = {
-      ConstantInt::get(Type::getInt64Ty(*TheContext), 0), IndexVal};
-  Value *ElemPtr =
-      Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, Indices, "arrelem");
+  Value *ElemPtr;
+  if (ArraySize > 0) {
+    llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
+    Value *Indices[] = {
+        ConstantInt::get(Type::getInt64Ty(*TheContext), 0), IndexVal};
+    ElemPtr = Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, Indices, "arrelem");
+  } else {
+    Type *PtrTy = PointerType::get(*TheContext, 0);
+    Value *ArrPtr = Builder->CreateLoad(PtrTy, VI->Alloca, "arrptr");
+    ElemPtr = Builder->CreateGEP(ElemTy, ArrPtr, IndexVal, "arrelem");
+  }
 
   Builder->CreateStore(RHSVal, ElemPtr);
   return RHSVal;
 }
+
 
 Value *ArrayLengthExprAST::codegen() {
   VarInfo *VI = nullptr;
@@ -1746,7 +1814,8 @@ Value *ArrayLengthExprAST::codegen() {
     return nullptr;
   }
 
-  return ConstantInt::get(Type::getInt64Ty(*TheContext), VI->ArraySize);
+  return ConstantInt::get(Type::getInt64Ty(*TheContext),
+                          dynamic_cast<const ::ArrayType *>(VI->Type.get())->getSize());
 }
 
 
