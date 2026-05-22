@@ -306,36 +306,32 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       std::string MethodName = IdentifierStr;
       SourceLocation MethodLoc = CurLoc;
       getNextToken();
-      if (MethodName == "push") {
-        if (CurTok != '(') {
-          LogErrorAt(MethodLoc, "Expected '(' after 'push'");
-          return nullptr;
-        }
-        getNextToken();
-        auto Arg = ParseExpression();
-        if (!Arg) return nullptr;
+      if (CurTok == '(') {
+        getNextToken(); // eat '('
+        std::vector<std::unique_ptr<ExprAST>> Args;
         if (CurTok != ')') {
-          LogErrorAt(CurLoc, "Expected ')' to close push() call");
-          return nullptr;
+          while (true) {
+            if (auto Arg = ParseExpression()) {
+              Args.push_back(std::move(Arg));
+            } else {
+              return nullptr;
+            }
+            if (CurTok == ')') break;
+            if (CurTok != ',') {
+              LogErrorAt(CurLoc, "Expected ')' or ',' in argument list");
+              return nullptr;
+            }
+            getNextToken();
+          }
         }
-        getNextToken();
-        Base = std::make_unique<ListMethodCallExprAST>(Loc, std::move(Base), "push", std::move(Arg));
-      } else if (MethodName == "pop") {
-        if (CurTok != '(') {
-          LogErrorAt(MethodLoc, "Expected '(' after 'pop'");
-          return nullptr;
-        }
-        getNextToken();
-        if (CurTok != ')') {
-          LogErrorAt(CurLoc, "pop() takes no arguments");
-          return nullptr;
-        }
-        getNextToken();
-        Base = std::make_unique<ListMethodCallExprAST>(Loc, std::move(Base), "pop");
-      } else if (MethodName == "length") {
-        Base = std::make_unique<ListMethodCallExprAST>(Loc, std::move(Base), "length");
+        getNextToken(); // eat ')'
+        Base = std::make_unique<MethodCallExprAST>(Loc, std::move(Base), MethodName, std::move(Args));
       } else {
-        Base = std::make_unique<FieldAccessExprAST>(Loc, std::move(Base), MethodName);
+        if (MethodName == "length") {
+          Base = std::make_unique<MethodCallExprAST>(Loc, std::move(Base), "length", std::vector<std::unique_ptr<ExprAST>>{});
+        } else {
+          Base = std::make_unique<FieldAccessExprAST>(Loc, std::move(Base), MethodName);
+        }
       }
     } else if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
       int OpType = CurTok;
@@ -498,6 +494,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                "\n  Hint: Check for stray characters, a missing operator, or an incomplete statement.");
     return nullptr;
 
+  case TOK_SELF:
   case TOK_IDENTIFIER: {
     // If this identifier is a known type, parse it as a type declaration or cast.
     if (GlobalSymbolTable && GlobalSymbolTable->LookupType(IdentifierStr)) {
@@ -541,7 +538,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     if (!IsKnownVariable)
       IsKnownVariable = (NamedValues.find(IdName) != NamedValues.end());
 
-    if (!IsKnownVariable && IdName.length() >= 2) {
+    // Do not flag a keyword typo if the token was actually TOK_SELF.
+    if (!IsKnownVariable && IdName != "self" && IdName.length() >= 2) {
       for (const auto &pair : Keywords) {
         int dist = getDamerauLevenshteinDistance(IdName, pair.first);
         int thresh = std::max(1, (int)IdName.length() / 3);
@@ -1168,6 +1166,18 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   }
   std::string FuncName = IdentifierStr;
   getNextToken();
+  std::string StructName = "";
+
+  if (CurTok == '.') {
+    StructName = FuncName;
+    getNextToken(); // eat '.'
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc, "Expected method name after '.'");
+      return nullptr;
+    }
+    FuncName = StructName + "." + IdentifierStr;
+    getNextToken();
+  }
 
   if (CurTok != '(') {
     LogErrorAt(FnLoc, "Expected '(' after function name '" + FuncName + "'."
@@ -1177,6 +1187,17 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   getNextToken();
 
   std::vector<ParamDecl> Params;
+  if (!StructName.empty()) {
+    TurfTypePtr StructType = nullptr;
+    if (GlobalSymbolTable) {
+      StructType = GlobalSymbolTable->LookupType(StructName);
+    }
+    if (!StructType) {
+      LogErrorAt(FnLoc, "Unknown struct type '" + StructName + "' in method declaration");
+      return nullptr;
+    }
+    Params.push_back({std::make_shared<TurfPointerType>(StructType), "self"});
+  }
   while (CurTok != ')' && CurTok != TOK_EOF) {
     // Parse each parameter: <type> <name>
     // Parse each parameter: <type> <name>  (supports list<T> params too)

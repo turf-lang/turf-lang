@@ -62,6 +62,18 @@ public:
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// TurfPointerType — For pass-by-reference semantics (e.g. self)
+// ────────────────────────────────────────────────────────────────────────────
+class TurfPointerType : public TurfType {
+  TurfTypePtr Pointee;
+
+public:
+  explicit TurfPointerType(TurfTypePtr Pointee) : Pointee(std::move(Pointee)) {}
+  std::string getName() const override { return Pointee->getName() + "*"; }
+  TurfTypePtr getPointee() const { return Pointee; }
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 // GenericType — list<int>, list<string>, future map<K,V>, etc.
 // This is the core of Monomorphization: the element type is a full TurfType,
 // so list<Player> works as soon as Player is a registered type.

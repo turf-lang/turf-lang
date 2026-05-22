@@ -212,7 +212,7 @@ int main(int argc, char **argv) {
           getNextToken();
           continue;
         }
-        if (CurTok == TOK_FN) {
+        if (CurTok == TOK_FN || CurTok == TOK_STRUCT) {
           // Save scope depth so we can restore it if codegen aborts via longjmp.
           // Without this, a function that references an unknown variable causes
           // EnterScope() to be called but ExitScope() to be skipped (longjmp
@@ -239,8 +239,8 @@ int main(int argc, char **argv) {
               GlobalSymbolTable->ResetToDepth(SavedDepth);
               GlobalSymbolTable->ResetEarlyExitForCurrentScope();
             }
-            // Skip to next fn or EOF
-            while (CurTok != TOK_FN && CurTok != TOK_EOF)
+            // Skip to next fn, struct or EOF
+            while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_EOF)
               getNextToken();
           }
           g_recoverActive = false;
@@ -292,7 +292,7 @@ int main(int argc, char **argv) {
     // fn definitions were already fully codegenned in the pre-pass.
     // Parse them here to keep the token stream in sync and to lint them,
     // but do NOT push them into TopLevelASTs (that would re-codegen them).
-    if (CurTok == TOK_FN) {
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();
@@ -301,7 +301,7 @@ int main(int argc, char **argv) {
           FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
         }
       } else {
-        while (CurTok != TOK_FN && CurTok != ';' && CurTok != TOK_EOF)
+        while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != ';' && CurTok != TOK_EOF)
           getNextToken();
       }
       g_recoverActive = false;
@@ -319,7 +319,7 @@ int main(int argc, char **argv) {
       }
     } else {
       // longjmp landed here: skip to next statement boundary.
-      while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
+      while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN && CurTok != TOK_STRUCT &&
              CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
              CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING &&
              CurTok != TOK_IF && CurTok != TOK_WHILE && CurTok != TOK_FOR &&

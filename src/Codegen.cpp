@@ -76,6 +76,10 @@ llvm::Type *getLLVMType(const TurfType *T) {
   if (isArrayType(T))
     return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
 
+  // PointerType — lowers to ptr
+  if (dynamic_cast<const TurfPointerType*>(T))
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+
   // User-defined Structs - they should be in the cache if declared, but if we call this 
   // before codegen of StructDecl, it might be missing. We shouldn't generate it here 
   // because we need the fields. So if it's a TurfStructType and not in cache, we're in trouble.
@@ -172,13 +176,22 @@ static const TurfType *getExprType(const ExprAST *E) {
     if (BaseTy && isArrayType(BaseTy)) return getArrayElementType(BaseTy);
     if (BaseTy && isListType(BaseTy)) return getListElementType(BaseTy);
   }
-  if (auto *ListCall = dynamic_cast<const ListMethodCallExprAST*>(E)) {
-    if (ListCall->getMethod() == "pop") {
-      const TurfType *BaseTy = getExprType(ListCall->getBase());
+  if (auto *MethodCall = dynamic_cast<const MethodCallExprAST*>(E)) {
+    const TurfType *BaseTy = getExprType(MethodCall->getBase());
+    if (auto *PtrTy = dynamic_cast<const TurfPointerType*>(BaseTy)) BaseTy = PtrTy->getPointee().get();
+
+    if (MethodCall->getMethod() == "pop") {
       if (BaseTy && isListType(BaseTy)) return getListElementType(BaseTy);
     }
-    if (ListCall->getMethod() == "push") {
-      return getExprType(ListCall->getBase());
+    if (MethodCall->getMethod() == "push") {
+      return BaseTy;
+    }
+    if (BaseTy && dynamic_cast<const TurfStructType*>(BaseTy)) {
+      std::string MangledName = BaseTy->getName() + "." + MethodCall->getMethod();
+      auto It = FuncReturnTypes.find(MangledName);
+      if (It != FuncReturnTypes.end()) {
+        return It->second.get();
+      }
     }
   }
   if (auto *StructInit = dynamic_cast<const StructInitExprAST*>(E)) {
@@ -190,6 +203,8 @@ static const TurfType *getExprType(const ExprAST *E) {
   }
   if (auto *FieldAccess = dynamic_cast<const FieldAccessExprAST*>(E)) {
     const TurfType *BaseTy = getExprType(FieldAccess->getBase());
+    if (auto *PtrTy = dynamic_cast<const TurfPointerType*>(BaseTy)) BaseTy = PtrTy->getPointee().get();
+
     if (auto *STy = dynamic_cast<const TurfStructType*>(BaseTy)) {
       // Return a raw pointer of the underlying TurfTypePtr to match return signature.
       // But we can't easily get the raw pointer from TurfTypePtr without storing it or retrieving it.
@@ -1973,8 +1988,10 @@ Value *ArrayLengthExprAST::codegen() {
 // represented as VarDeclExprAST with a GenericType("list", [elemType]).
 // The VarDeclExprAST::codegen handles list initialization via the type system.
 
-Value *ListMethodCallExprAST::codegen() {
+Value *MethodCallExprAST::codegen() {
   const TurfType *BaseTy = getExprType(Base.get());
+  if (auto *PtrTy = dynamic_cast<const TurfPointerType*>(BaseTy)) BaseTy = PtrTy->getPointee().get();
+
   if (!BaseTy) {
     SemanticError(Loc, "Could not determine type of method call base").raise();
     return nullptr;
@@ -1994,6 +2011,44 @@ Value *ListMethodCallExprAST::codegen() {
     }
     SemanticError(Loc, "'.length' can only be used on arrays or lists").raise();
     return nullptr;
+  }
+
+  if (auto *StructTy = dynamic_cast<const TurfStructType*>(BaseTy)) {
+    std::string MangledName = StructTy->getName() + "." + Method;
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      SemanticError(Loc, "Method '" + Method + "' not found on struct '" + StructTy->getName() + "'").raise();
+      return nullptr;
+    }
+    if (CalleeF->arg_size() != Args.size() + 1) {
+      SemanticError(Loc, "Wrong number of arguments to method '" + Method +
+                             "': expected " + std::to_string(CalleeF->arg_size() - 1) + ", got " +
+                             std::to_string(Args.size())).raise();
+      return nullptr;
+    }
+    
+    std::vector<Value *> ArgVals;
+    Value *SelfVal = Base->codegenLValue();
+    if (!SelfVal) {
+      // If Base is an rvalue (like User(10)), we need a temporary alloca to pass by reference
+      Value *Val = Base->codegen();
+      if (!Val) return nullptr;
+      SelfVal = Builder->CreateAlloca(Val->getType(), nullptr, "tmp.self");
+      Builder->CreateStore(Val, SelfVal);
+    } else if (dynamic_cast<const TurfPointerType*>(getExprType(Base.get()))) {
+      SelfVal = Builder->CreateLoad(llvm::PointerType::get(*TheContext, 0), SelfVal, "deref");
+    }
+    if (!SelfVal) return nullptr;
+    ArgVals.push_back(SelfVal);
+    
+    unsigned Idx = 0;
+    for (auto ArgIt = std::next(CalleeF->arg_begin()); ArgIt != CalleeF->arg_end(); ++ArgIt, ++Idx) {
+      Value *V = Args[Idx]->codegen();
+      if (!V) return nullptr;
+      ArgVals.push_back(V);
+    }
+    
+    return Builder->CreateCall(CalleeF, ArgVals, "methodcalltmp");
   }
 
   if (!isListType(BaseTy)) {
@@ -2018,9 +2073,13 @@ Value *ListMethodCallExprAST::codegen() {
   }
 
   if (Method == "push") {
-    Value *PushVal = Arg->codegen();
+    if (Args.empty() || !Args[0]) {
+      LogErrorAt(Loc, "push() requires one argument");
+      return nullptr;
+    }
+    Value *PushVal = Args[0]->codegen();
     if (!PushVal) return nullptr;
-    const TurfType *GotType = getExprType(Arg.get());
+    const TurfType *GotType = getExprType(Args[0].get());
     std::string GotTypeName = GotType ? GotType->getName() : getTurfTypeFromLLVM(PushVal->getType())->getName();
     if (GotTypeName != ElemType->getName()) {
       ListTypeMismatchError(Loc, "list", turfTypeName(ElemType), GotTypeName).raise();
@@ -2178,6 +2237,12 @@ Value *FieldAccessExprAST::codegenLValue() {
   if (!BaseLVal) return nullptr;
 
   const TurfType *BaseType = getExprType(Base.get());
+  
+  if (auto *PtrTy = dynamic_cast<const TurfPointerType*>(BaseType)) {
+    BaseType = PtrTy->getPointee().get();
+    BaseLVal = Builder->CreateLoad(llvm::PointerType::get(*TheContext, 0), BaseLVal, "deref");
+  }
+
   auto *SType = dynamic_cast<const TurfStructType*>(BaseType);
   if (!SType) {
     LogErrorAt(Loc, "Cannot access field on non-struct type");
@@ -2201,6 +2266,10 @@ Value *FieldAccessExprAST::codegen() {
   if (!Ptr) return nullptr;
 
   const TurfType *BaseType = getExprType(Base.get());
+  if (auto *PtrTy = dynamic_cast<const TurfPointerType*>(BaseType)) {
+    BaseType = PtrTy->getPointee().get();
+  }
+
   auto *SType = dynamic_cast<const TurfStructType*>(BaseType);
   TurfTypePtr FieldType = SType->getFieldType(FieldName);
 

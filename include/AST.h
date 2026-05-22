@@ -622,28 +622,28 @@ public:
 // list method call: nums.push(val)  /  nums.pop()  /  nums.length
 // Note: list<T> *declaration* is now a plain VarDeclExprAST with a
 // GenericType("list", [elemType]) — no separate ListDeclExprAST needed.
-class ListMethodCallExprAST : public ExprAST {
+class MethodCallExprAST : public ExprAST {
   std::unique_ptr<ExprAST> Base;
-  std::string Method;     // "push", "pop", or "length"
-  std::unique_ptr<ExprAST> Arg; // non-null only for push
+  std::string Method;
+  std::vector<std::unique_ptr<ExprAST>> Args;
   SourceLocation Loc;
 
 public:
-  ListMethodCallExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Base,
-                        std::string Method,
-                        std::unique_ptr<ExprAST> Arg = nullptr)
+  MethodCallExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Base,
+                    std::string Method,
+                    std::vector<std::unique_ptr<ExprAST>> Args = {})
       : Base(std::move(Base)), Method(std::move(Method)),
-        Arg(std::move(Arg)), Loc(Loc) {}
+        Args(std::move(Args)), Loc(Loc) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const ExprAST *getBase() const { return Base.get(); }
   const std::string &getMethod() const { return Method; }
-  const ExprAST *getArg() const { return Arg.get(); }
+  const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
 
   llvm::Value *codegen() override;
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ListMethodCallExprAST>(Loc, CloneExprAST(Base.get()), Method,
-                                                   CloneExprAST(Arg.get()));
+    return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()), Method,
+                                               CloneExprList(Args));
   }
 };
 
@@ -767,9 +767,11 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
-  if (const auto *ListMethod = dynamic_cast<const ListMethodCallExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(ListMethod->getBase(), NodeIDs);
-    CollectAllNodeIDsInternal(ListMethod->getArg(), NodeIDs);
+  if (const auto *MethodCall = dynamic_cast<const MethodCallExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(MethodCall->getBase(), NodeIDs);
+    for (const auto &A : MethodCall->getArgs()) {
+      if (A) CollectAllNodeIDsInternal(A.get(), NodeIDs);
+    }
     return;
   }
 
@@ -826,6 +828,25 @@ inline std::set<uint64_t> CollectChangedNodeIDsInternal(
     return ChangedIDs;
   }
   
+  // ============================================================================
+  // MethodCallExprAST: Compare method, diff base and arguments
+  // ============================================================================
+  if (auto *OrigMeth = dynamic_cast<const MethodCallExprAST*>(OriginalAST)) {
+    auto *ModMeth = dynamic_cast<const MethodCallExprAST*>(ModifiedAST);
+    
+    if (OrigMeth->getMethod() != ModMeth->getMethod() ||
+        OrigMeth->getArgs().size() != ModMeth->getArgs().size()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    
+    CollectChangedNodeIDsInternal(OrigMeth->getBase(), ModMeth->getBase(), ChangedIDs);
+    for (size_t i = 0; i < OrigMeth->getArgs().size(); ++i) {
+      CollectChangedNodeIDsInternal(OrigMeth->getArgs()[i].get(), ModMeth->getArgs()[i].get(), ChangedIDs);
+    }
+    return ChangedIDs;
+  }
+
   // ============================================================================
   // NumberExprAST: Compare numeric values
   // ============================================================================
@@ -1162,19 +1183,7 @@ inline std::set<uint64_t> CollectChangedNodeIDsInternal(
   // list<T> declarations are now VarDeclExprAST; compare as VarDeclExprAST below.
   // ============================================================================
 
-  // ============================================================================
-  // ListMethodCallExprAST: Compare method, diff base and argument
-  // ============================================================================
-  if (auto *OrigMeth = dynamic_cast<const ListMethodCallExprAST*>(OriginalAST)) {
-    auto *ModMeth = dynamic_cast<const ListMethodCallExprAST*>(ModifiedAST);
-    if (OrigMeth->getMethod() != ModMeth->getMethod()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
-    CollectChangedNodeIDsInternal(OrigMeth->getBase(), ModMeth->getBase(), ChangedIDs);
-    CollectChangedNodeIDsInternal(OrigMeth->getArg(), ModMeth->getArg(), ChangedIDs);
-    return ChangedIDs;
-  }
+
 
   // Mark both as changed to be safe
   ChangedIDs.insert(OriginalAST->getNodeID());

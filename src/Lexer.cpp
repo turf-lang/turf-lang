@@ -59,7 +59,8 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"step", TOK_STEP},
                                        {"elseif", TOK_ELSEIF},
                                        {"list", TOK_TYPE_LIST},
-                                       {"struct", TOK_STRUCT}};
+                                       {"struct", TOK_STRUCT},
+                                       {"self", TOK_SELF}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
