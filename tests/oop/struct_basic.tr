@@ -1,0 +1,10 @@
+struct User {
+  int age,
+  string name
+}
+
+User u = User(10, "Alice");
+print(u.age);
+print(u.name);
+u.age = 25;
+print(u.age);

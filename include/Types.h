@@ -92,6 +92,39 @@ public:
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// StructType — user-defined structs
+// ────────────────────────────────────────────────────────────────────────────
+struct StructField {
+  std::string Name;
+  TurfTypePtr Type;
+};
+
+class TurfStructType : public TurfType {
+  std::string Name;
+  std::vector<StructField> Fields;
+
+public:
+  TurfStructType(std::string Name, std::vector<StructField> Fields)
+      : Name(std::move(Name)), Fields(std::move(Fields)) {}
+
+  std::string getName() const override { return Name; }
+  const std::vector<StructField> &getFields() const { return Fields; }
+  
+  int getFieldIndex(const std::string &FieldName) const {
+    for (size_t i = 0; i < Fields.size(); ++i) {
+      if (Fields[i].Name == FieldName) return static_cast<int>(i);
+    }
+    return -1;
+  }
+  
+  TurfTypePtr getFieldType(const std::string &FieldName) const {
+    int idx = getFieldIndex(FieldName);
+    return idx >= 0 ? Fields[idx].Type : nullptr;
+  }
+};
+
+
+// ────────────────────────────────────────────────────────────────────────────
 // Singleton accessors for built-in primitive types
 // Defined in src/Types.cpp so callers never construct NamedType directly.
 // ────────────────────────────────────────────────────────────────────────────

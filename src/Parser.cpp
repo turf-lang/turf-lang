@@ -92,6 +92,7 @@ std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 std::unique_ptr<ExprAST> ParseFuncDef();
 std::unique_ptr<ExprAST> ParseReturnExpr();
+std::unique_ptr<ExprAST> ParseStructDecl();
 // NOTE: ParseListDecl removed — list<T> declarations go through ParseVarDeclBody
 //       via the unified ParseType() path, same as int/double/bool/string.
 
@@ -176,7 +177,18 @@ static TurfTypePtr ParseType() {
     SyntaxError(CurLoc, "Expected '<' after 'list' — e.g. list<int>").raise();
     return nullptr;
   }
-  else Base = std::make_shared<NamedType>(BaseName); // user-defined struct etc.
+  else {
+    if (GlobalSymbolTable) {
+      if (auto T = GlobalSymbolTable->LookupType(BaseName)) {
+        Base = T;
+      } else {
+        SyntaxError(CurLoc, "Unknown type '" + BaseName + "'").raise();
+        return nullptr;
+      }
+    } else {
+      Base = std::make_shared<NamedType>(BaseName);
+    }
+  }
 
   // Recursively consume trailing array dimensions: int[5] or int[5][10]
   // Size may be omitted (int[]) to indicate a pointer-parameter (size = -1).
@@ -269,7 +281,21 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
         return nullptr;
       }
       getNextToken();
-      Base = std::make_unique<FuncCallExprAST>(Loc, std::move(Base), std::move(Args));
+      
+      bool IsStructInit = false;
+      if (auto *Var = dynamic_cast<VariableExprAST*>(Base.get())) {
+        if (GlobalSymbolTable) {
+          if (auto T = GlobalSymbolTable->LookupType(Var->getName())) {
+            if (dynamic_cast<TurfStructType*>(T.get())) {
+              IsStructInit = true;
+              Base = std::make_unique<StructInitExprAST>(Loc, Var->getName(), std::move(Args));
+            }
+          }
+        }
+      }
+      if (!IsStructInit) {
+        Base = std::make_unique<FuncCallExprAST>(Loc, std::move(Base), std::move(Args));
+      }
     } else if (CurTok == '.') {
       SourceLocation Loc = CurLoc;
       getNextToken();
@@ -309,8 +335,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       } else if (MethodName == "length") {
         Base = std::make_unique<ListMethodCallExprAST>(Loc, std::move(Base), "length");
       } else {
-        LogErrorAt(MethodLoc, "Unknown method '" + MethodName + "'. Supported methods: push, pop, length.");
-        return nullptr;
+        Base = std::make_unique<FieldAccessExprAST>(Loc, std::move(Base), MethodName);
       }
     } else if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
       int OpType = CurTok;
@@ -474,6 +499,35 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     return nullptr;
 
   case TOK_IDENTIFIER: {
+    // If this identifier is a known type, parse it as a type declaration or cast.
+    if (GlobalSymbolTable && GlobalSymbolTable->LookupType(IdentifierStr)) {
+      SourceLocation TypeLoc = CurLoc;
+      TurfTypePtr DestType = ParseType(); // consumes the identifier
+      if (!DestType) return nullptr;
+      if (CurTok == '(') {
+        if (dynamic_cast<TurfStructType*>(DestType.get())) {
+          getNextToken(); // eat '('
+          std::vector<std::unique_ptr<ExprAST>> Args;
+          while (CurTok != ')' && CurTok != TOK_EOF) {
+            auto Arg = ParseExpression();
+            if (!Arg) return nullptr;
+            Args.push_back(std::move(Arg));
+            if (CurTok == ',') getNextToken();
+            else if (CurTok != ')') break;
+          }
+          if (CurTok != ')') {
+            LogErrorAt(CurLoc, "Expected ')' to close struct initialization");
+            return nullptr;
+          }
+          getNextToken(); // eat ')'
+          return std::make_unique<StructInitExprAST>(TypeLoc, DestType->getName(), std::move(Args));
+        } else {
+          return ParseCastExpr(DestType, TypeLoc);
+        }
+      }
+      return ParseVarDeclBody(TypeLoc, DestType);
+    }
+
     // Snapshot the identifier, then advance so CurTok reflects what follows.
     std::string IdName = IdentifierStr;
     SourceLocation IdLoc = CurLoc;
@@ -573,6 +627,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
   case TOK_FN:
     return ParseFuncDef();
+
+  case TOK_STRUCT:
+    return ParseStructDecl();
 
   case TOK_RETURN:
     return ParseReturnExpr();
@@ -1038,6 +1095,60 @@ std::unique_ptr<ExprAST> ParseCastExpr(TurfTypePtr DestType, SourceLocation Loc)
   getNextToken(); // eat ')'
 
   return std::make_unique<CastExprAST>(Loc, DestType, std::move(Operand));
+}
+
+// ParseStructDecl - called when CurTok == TOK_STRUCT.
+std::unique_ptr<ExprAST> ParseStructDecl() {
+  SourceLocation Loc = CurLoc;
+  getNextToken(); // eat 'struct'
+  if (CurTok != TOK_IDENTIFIER) {
+    LogErrorAt(CurLoc, "Expected identifier after 'struct'");
+    return nullptr;
+  }
+  std::string Name = IdentifierStr;
+  getNextToken();
+
+  if (CurTok != '{') {
+    LogErrorAt(CurLoc, "Expected '{' after struct name");
+    return nullptr;
+  }
+  getNextToken(); // eat '{'
+
+  std::vector<StructField> Fields;
+  while (CurTok != '}' && CurTok != TOK_EOF) {
+    TurfTypePtr FieldType = ParseType();
+    if (!FieldType) return nullptr;
+
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc, "Expected field name after type in struct definition");
+      return nullptr;
+    }
+    std::string FieldName = IdentifierStr;
+    getNextToken();
+
+    Fields.push_back({FieldName, std::move(FieldType)});
+
+    if (CurTok == ',') {
+      getNextToken();
+    } else if (CurTok != '}') {
+      LogErrorAt(CurLoc, "Expected ',' or '}' after field definition");
+      return nullptr;
+    }
+  }
+
+  if (CurTok != '}') {
+    LogErrorAt(CurLoc, "Expected '}' to close struct definition");
+    return nullptr;
+  }
+  getNextToken(); // eat '}'
+
+  // Register the struct type
+  auto SType = std::make_shared<TurfStructType>(Name, Fields);
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->RegisterType(Name, SType);
+  }
+
+  return std::make_unique<StructDeclExprAST>(Loc, Name, Fields);
 }
 
 // ParseFuncDef - called when CurTok == TOK_FN.

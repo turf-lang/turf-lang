@@ -76,6 +76,15 @@ llvm::Type *getLLVMType(const TurfType *T) {
   if (isArrayType(T))
     return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
 
+  // User-defined Structs - they should be in the cache if declared, but if we call this 
+  // before codegen of StructDecl, it might be missing. We shouldn't generate it here 
+  // because we need the fields. So if it's a TurfStructType and not in cache, we're in trouble.
+  if (auto *ST = dynamic_cast<const TurfStructType*>(T)) {
+    // If we reach here, StructDecl codegen hasn't happened or it failed.
+    // We'll return an opaque struct to avoid crashing.
+    return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, Key);
+  }
+
   // Unknown / future types
   return LLVMTypeCache[Key] = llvm::Type::getDoubleTy(*TheContext);
 }
@@ -170,6 +179,22 @@ static const TurfType *getExprType(const ExprAST *E) {
     }
     if (ListCall->getMethod() == "push") {
       return getExprType(ListCall->getBase());
+    }
+  }
+  if (auto *StructInit = dynamic_cast<const StructInitExprAST*>(E)) {
+    if (GlobalSymbolTable) {
+      if (auto T = GlobalSymbolTable->LookupType(StructInit->getName())) {
+        return T.get();
+      }
+    }
+  }
+  if (auto *FieldAccess = dynamic_cast<const FieldAccessExprAST*>(E)) {
+    const TurfType *BaseTy = getExprType(FieldAccess->getBase());
+    if (auto *STy = dynamic_cast<const TurfStructType*>(BaseTy)) {
+      // Return a raw pointer of the underlying TurfTypePtr to match return signature.
+      // But we can't easily get the raw pointer from TurfTypePtr without storing it or retrieving it.
+      // Actually we can:
+      return STy->getFieldType(FieldAccess->getFieldName()).get();
     }
   }
   return nullptr;
@@ -2077,4 +2102,107 @@ Value *ListMethodCallExprAST::codegen() {
 
   SemanticError(Loc, "Unknown list method '" + Method + "'").raise();
   return nullptr;
+}
+
+Value *StructDeclExprAST::codegen() {
+  std::vector<Type *> LLVMFieldTypes;
+  for (const auto &Field : Fields) {
+    Type *LLVMType = getLLVMType(Field.Type.get());
+    if (!LLVMType) {
+      LogErrorAt(Loc, "Unknown type for field '" + Field.Name + "'");
+      return nullptr;
+    }
+    LLVMFieldTypes.push_back(LLVMType);
+  }
+
+  StructType *ST = StructType::create(*TheContext, LLVMFieldTypes, Name);
+  if (!ST) {
+    LogErrorAt(Loc, "Failed to create LLVM StructType for '" + Name + "'");
+    return nullptr;
+  }
+  
+  LLVMTypeCache[Name] = ST;
+  
+  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+}
+
+Value *StructInitExprAST::codegen() {
+  TurfTypePtr T;
+  if (GlobalSymbolTable) T = GlobalSymbolTable->LookupType(Name);
+  auto *SType = dynamic_cast<TurfStructType*>(T.get());
+  if (!SType) {
+    LogErrorAt(Loc, "Unknown struct type '" + Name + "'");
+    return nullptr;
+  }
+
+  if (Args.size() != SType->getFields().size()) {
+    LogErrorAt(Loc, "Struct '" + Name + "' expects " + std::to_string(SType->getFields().size()) + " arguments, but got " + std::to_string(Args.size()));
+    return nullptr;
+  }
+
+  Type *LLVMTy = getLLVMType(T.get());
+  StructType *LLVMStructType = dyn_cast<StructType>(LLVMTy);
+  if (!LLVMStructType) {
+    LogErrorAt(Loc, "LLVM StructType '" + Name + "' not found");
+    return nullptr;
+  }
+
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
+  AllocaInst *Alloca = TmpB.CreateAlloca(LLVMStructType, nullptr, Name + "_init");
+
+  for (size_t i = 0; i < Args.size(); ++i) {
+    Value *ArgVal = Args[i]->codegen();
+    if (!ArgVal) return nullptr;
+
+    TurfTypePtr FieldType = SType->getFields()[i].Type;
+    TurfTypePtr ArgTurfType = getTurfTypeFromLLVM(ArgVal->getType());
+    ArgTurfType = RefineLLVMType(ArgTurfType, FieldType, ArgVal->getType());
+
+    if (!isTypeCompatible(ArgTurfType.get(), FieldType.get())) {
+      TypeError(Loc, "Type mismatch in struct initialization for field '" + SType->getFields()[i].Name + "'").raise();
+      return nullptr;
+    }
+    
+    ArgVal = CastToType(ArgVal, FieldType, "fieldcast", Loc);
+
+    Value *FieldPtr = Builder->CreateStructGEP(LLVMStructType, Alloca, i, "fieldptr");
+    Builder->CreateStore(ArgVal, FieldPtr);
+  }
+
+  return Builder->CreateLoad(LLVMStructType, Alloca, "structval");
+}
+
+Value *FieldAccessExprAST::codegenLValue() {
+  Value *BaseLVal = Base->codegenLValue();
+  if (!BaseLVal) return nullptr;
+
+  const TurfType *BaseType = getExprType(Base.get());
+  auto *SType = dynamic_cast<const TurfStructType*>(BaseType);
+  if (!SType) {
+    LogErrorAt(Loc, "Cannot access field on non-struct type");
+    return nullptr;
+  }
+
+  int FieldIdx = SType->getFieldIndex(FieldName);
+  if (FieldIdx < 0) {
+    LogErrorAt(Loc, "Struct '" + SType->getName() + "' has no field named '" + FieldName + "'");
+    return nullptr;
+  }
+
+  Type *LLVMTy = getLLVMType(BaseType);
+  StructType *LLVMStructType = dyn_cast<StructType>(LLVMTy);
+  
+  return Builder->CreateStructGEP(LLVMStructType, BaseLVal, FieldIdx, "fieldptr");
+}
+
+Value *FieldAccessExprAST::codegen() {
+  Value *Ptr = codegenLValue();
+  if (!Ptr) return nullptr;
+
+  const TurfType *BaseType = getExprType(Base.get());
+  auto *SType = dynamic_cast<const TurfStructType*>(BaseType);
+  TurfTypePtr FieldType = SType->getFieldType(FieldName);
+
+  return Builder->CreateLoad(getLLVMType(FieldType.get()), Ptr, FieldName.c_str());
 }

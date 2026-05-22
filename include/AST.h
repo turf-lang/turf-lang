@@ -490,6 +490,67 @@ public:
   }
 };
 
+// struct StructName { type field1, type field2 }
+class StructDeclExprAST : public ExprAST {
+  std::string Name;
+  std::vector<StructField> Fields;
+  SourceLocation Loc;
+
+public:
+  StructDeclExprAST(SourceLocation Loc, std::string Name, std::vector<StructField> Fields)
+      : Loc(Loc), Name(std::move(Name)), Fields(std::move(Fields)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
+  const std::vector<StructField> &getFields() const { return Fields; }
+
+  llvm::Value *codegen() override;
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<StructDeclExprAST>(Loc, Name, Fields);
+  }
+};
+
+// StructName(val1, val2)
+class StructInitExprAST : public ExprAST {
+  std::string Name;
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  SourceLocation Loc;
+
+public:
+  StructInitExprAST(SourceLocation Loc, std::string Name, std::vector<std::unique_ptr<ExprAST>> Args)
+      : Loc(Loc), Name(std::move(Name)), Args(std::move(Args)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
+  const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
+
+  llvm::Value *codegen() override;
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<StructInitExprAST>(Loc, Name, CloneExprList(Args));
+  }
+};
+
+// Base.Field
+class FieldAccessExprAST : public ExprAST {
+  std::unique_ptr<ExprAST> Base;
+  std::string FieldName;
+  SourceLocation Loc;
+
+public:
+  FieldAccessExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Base, std::string FieldName)
+      : Loc(Loc), Base(std::move(Base)), FieldName(std::move(FieldName)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const ExprAST *getBase() const { return Base.get(); }
+  const std::string &getFieldName() const { return FieldName; }
+
+  llvm::Value *codegen() override;
+  llvm::Value *codegenLValue() override;
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<FieldAccessExprAST>(Loc, CloneExprAST(Base.get()), FieldName);
+  }
+};
+
 // Array element access: arr[index]
 class ArrayAccessExprAST : public ExprAST {
   std::unique_ptr<ExprAST> Base;
@@ -709,6 +770,21 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
   if (const auto *ListMethod = dynamic_cast<const ListMethodCallExprAST *>(Node)) {
     CollectAllNodeIDsInternal(ListMethod->getBase(), NodeIDs);
     CollectAllNodeIDsInternal(ListMethod->getArg(), NodeIDs);
+    return;
+  }
+
+  if (const auto *StructDecl = dynamic_cast<const StructDeclExprAST *>(Node)) {
+    return; // No sub-expressions
+  }
+
+  if (const auto *StructInit = dynamic_cast<const StructInitExprAST *>(Node)) {
+    for (const auto &Arg : StructInit->getArgs())
+      CollectAllNodeIDsInternal(Arg.get(), NodeIDs);
+    return;
+  }
+
+  if (const auto *FieldAccess = dynamic_cast<const FieldAccessExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(FieldAccess->getBase(), NodeIDs);
     return;
   }
 

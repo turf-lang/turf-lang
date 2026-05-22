@@ -108,6 +108,33 @@ Symbol *SymbolTable::GetSymbolByID(SymbolID ID) {
   return nullptr;
 }
 
+void SymbolTable::RegisterType(const std::string &Name, TurfTypePtr Type) {
+  if (ScopeStack.empty())
+    EnterScope();
+  ScopeStack.back().Types[Name] = std::move(Type);
+}
+
+TurfTypePtr SymbolTable::LookupType(const std::string &Name) const {
+  for (auto It = ScopeStack.rbegin(); It != ScopeStack.rend(); ++It) {
+    auto TypeIt = It->Types.find(Name);
+    if (TypeIt != It->Types.end()) {
+      return TypeIt->second;
+    }
+  }
+  return nullptr;
+}
+
+TurfTypePtr SymbolTable::LookupTypeInCurrentScope(const std::string &Name) const {
+  if (ScopeStack.empty())
+    return nullptr;
+  const Scope &CurrentScope = ScopeStack.back();
+  auto It = CurrentScope.Types.find(Name);
+  if (It != CurrentScope.Types.end()) {
+    return It->second;
+  }
+  return nullptr;
+}
+
 bool SymbolTable::IsSymbolInCurrentScope(const std::string &Name) const {
   if (ScopeStack.empty())
     return false;

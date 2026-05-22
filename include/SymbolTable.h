@@ -32,6 +32,7 @@ struct Symbol {
 struct Scope {
   size_t Level;                              // Nesting depth
   std::map<std::string, SymbolID> Symbols;   // Name -> SymbolID mapping for this scope
+  std::map<std::string, TurfTypePtr> Types;  // Name -> Type mapping for this scope
   bool HasEarlyExit = false;                 // True if scope contains return/break
   
   explicit Scope(size_t Level) : Level(Level) {}
@@ -66,6 +67,11 @@ public:
   Symbol *LookupSymbol(const std::string &Name);
   Symbol *LookupSymbolInCurrentScope(const std::string &Name);
   Symbol *GetSymbolByID(SymbolID ID);
+
+  // Type registry
+  void RegisterType(const std::string &Name, TurfTypePtr Type);
+  TurfTypePtr LookupType(const std::string &Name) const;
+  TurfTypePtr LookupTypeInCurrentScope(const std::string &Name) const;
   
   // Diagnostics helpers
   bool IsSymbolInCurrentScope(const std::string &Name) const;
