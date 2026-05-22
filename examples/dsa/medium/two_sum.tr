@@ -1,0 +1,19 @@
+// Two Sum
+fn list<int> two_sum(list<int> nums, int target) {
+    list<int> res
+    for i in 0..nums.length step i += 1 {
+        for j in i + 1..nums.length step j += 1 {
+            if (nums[i] + nums[j] == target) {
+                res.push(i)
+                res.push(j)
+                return res
+            }
+        }
+    }
+    return res
+}
+list<int> nums
+nums.push(2) nums.push(7) nums.push(11) nums.push(15)
+list<int> res = two_sum(nums, 9)
+printline(res[0])
+printline(res[1])

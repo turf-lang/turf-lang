@@ -1,0 +1,25 @@
+// First Missing Positive
+fn int first_missing(list<int> nums) {
+    int n = nums.length
+    for i in 0..n step i += 1 {
+        while (1) {
+            if (nums[i] <= 0) { break }
+            if (nums[i] > n) { break }
+            int correct_idx = nums[i] - 1
+            if (nums[i] == nums[correct_idx]) { break }
+            
+            // Swap
+            int temp = nums[i]
+            nums[i] = nums[correct_idx]
+            nums[correct_idx] = temp
+        }
+    }
+    for i in 0..n step i += 1 {
+        if (nums[i] != i + 1) { return i + 1 }
+    }
+    return n + 1
+}
+
+list<int> nums
+nums.push(3) nums.push(4) nums.push(-1) nums.push(1)
+printline(first_missing(nums)) // 2

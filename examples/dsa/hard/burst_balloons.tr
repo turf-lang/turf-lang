@@ -1,0 +1,30 @@
+// Burst Balloons
+fn int max_coins(list<int> nums) {
+    list<int> vals
+    vals.push(1)
+    for i in 0..nums.length step i += 1 { vals.push(nums[i]) }
+    vals.push(1)
+    
+    int n = vals.length
+    list<int> dp
+    int total = n * n
+    for i in 0..total step i += 1 { dp.push(0) }
+    
+    for lng in 2..n step lng += 1 {
+        for left in 0..n - lng step left += 1 {
+            int right = left + lng
+            for i in left + 1..right step i += 1 {
+                int coins = vals[left] * vals[i] * vals[right]
+                coins = coins + dp[left * n + i] + dp[i * n + right]
+                if (coins > dp[left * n + right]) {
+                    dp[left * n + right] = coins
+                }
+            }
+        }
+    }
+    return dp[0 * n + (n - 1)]
+}
+
+list<int> nums
+nums.push(3) nums.push(1) nums.push(5) nums.push(8)
+printline(max_coins(nums)) // 167

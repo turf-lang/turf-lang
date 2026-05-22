@@ -1,0 +1,22 @@
+// Simulated Binary Tree
+fn int create_tree_node(int v, list<int> tree_val, list<int> tree_left, list<int> tree_right) {
+    tree_val.push(v)
+    tree_left.push(-1)
+    tree_right.push(-1)
+    return tree_val.length - 1
+}
+
+fn void inorder(int root, list<int> tree_val, list<int> tree_left, list<int> tree_right) {
+    if (root == -1) { return }
+    inorder(tree_left[root], tree_val, tree_left, tree_right)
+    printline(tree_val[root])
+    inorder(tree_right[root], tree_val, tree_left, tree_right)
+}
+
+list<int> tree_val
+list<int> tree_left
+list<int> tree_right
+int root = create_tree_node(10, tree_val, tree_left, tree_right)
+tree_left[root] = create_tree_node(5, tree_val, tree_left, tree_right)
+tree_right[root] = create_tree_node(15, tree_val, tree_left, tree_right)
+inorder(root, tree_val, tree_left, tree_right)

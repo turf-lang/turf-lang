@@ -1,0 +1,31 @@
+// Sliding Window Maximum
+fn list<int> max_sliding_window(list<int> nums, int k) {
+    list<int> res
+    list<int> deque
+    int head = 0 // logical start of deque
+    
+    for i in 0..nums.length step i += 1 {
+        // remove indices out of window
+        while (head < deque.length) {
+            if (deque[head] < i - k + 1) { head = head + 1 } else { break }
+        }
+        // remove indices with smaller values
+        while (deque.length > head) {
+            if (nums[deque[deque.length - 1]] < nums[i]) {
+                int dummy = deque.pop()
+            } else { break }
+        }
+        deque.push(i)
+        
+        if (i >= k - 1) {
+            res.push(nums[deque[head]])
+        }
+    }
+    return res
+}
+
+list<int> nums
+nums.push(1) nums.push(3) nums.push(-1) nums.push(-3) nums.push(5) nums.push(3) nums.push(6) nums.push(7)
+list<int> res = max_sliding_window(nums, 3)
+for i in 0..res.length step i += 1 { printline(res[i]) }
+// 3, 3, 5, 5, 6, 7
