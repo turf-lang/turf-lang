@@ -1,0 +1,9 @@
+// Phase 2: L-Value vs R-Value, L-Value recursion
+list<list<int>> nested
+list<int> inner
+inner.push(42)
+nested.push(inner)
+
+// Assigning deeply nested dynamically evaluated L-Value
+nested[0][0] = 100 
+printline(nested[0][0])

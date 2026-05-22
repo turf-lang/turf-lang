@@ -15,6 +15,10 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/GVN.h"
+#include "llvm/Transforms/Utils.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 #include <cstdlib>
@@ -264,22 +268,38 @@ int main(int argc, char **argv) {
   // Bootstrap the lexer for the main pass
   getNextToken();
 
-  // Main Loop
+  // ── Phase Separation: Parse All ──────────────────────────────────────────
+  // Fully parse every top-level statement into an in-memory AST list BEFORE
+  // calling codegen on any of them. This prevents orphaned LLVM BasicBlocks
+  // and corrupted module state that previously occurred when a semantic error
+  // (e.g. type mismatch) triggered a longjmp mid-codegen.
+  //
+  // fn definitions are kept in a SEPARATE list (FnASTs) because they were
+  // already fully codegenned in the pre-pass. We parse them here purely to
+  // sync the token stream and run the lint pass — not to codegen them again.
+  std::vector<std::unique_ptr<ExprAST>> TopLevelASTs; // non-fn: lint + codegen
+  std::vector<std::unique_ptr<ExprAST>> FnASTs;       // fn:     lint only
+
   while (true) {
     if (CurTok == TOK_EOF)
-      break; // Stop if end of file
+      break;
 
     if (CurTok == ';') {
-      getNextToken(); // Skip semicolons
+      getNextToken();
       continue;
     }
 
-    // fn definitions were already fully processed in the pre-pass.
-    // Parse and discard them here to keep the token stream in sync.
+    // fn definitions were already fully codegenned in the pre-pass.
+    // Parse them here to keep the token stream in sync and to lint them,
+    // but do NOT push them into TopLevelASTs (that would re-codegen them).
     if (CurTok == TOK_FN) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
-        ParseExpression(); // parse and drop; body was already codegen'd
+        auto AST = ParseExpression();
+        if (AST) {
+          RecordParsedTopLevelAST(AST.get());
+          FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
+        }
       } else {
         while (CurTok != TOK_FN && CurTok != ';' && CurTok != TOK_EOF)
           getNextToken();
@@ -288,22 +308,17 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    // Parse the next expression. Guard with setjmp so a bad statement
-    // records its diagnostic and we continue to the next one.
     g_recoverActive = true;
     if (setjmp(g_recoverJmp) == 0) {
       auto AST = ParseExpression();
       if (AST) {
         RecordParsedTopLevelAST(AST.get());
-        LintExpression(AST.get()); // Lint top-level statements before codegen
-        AST->codegen();
+        TopLevelASTs.push_back(std::move(AST));
       } else {
-        // Parser returned nullptr without longjmp (rare fallback).
         getNextToken();
       }
     } else {
-      // longjmp landed here : diagnostic already in DiagnosticEngine.
-      // Skip to the next statement boundary.
+      // longjmp landed here: skip to next statement boundary.
       while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
              CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
              CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING &&
@@ -315,16 +330,61 @@ int main(int argc, char **argv) {
     g_recoverActive = false;
   }
 
+  // ── Phase Separation: Lint All ────────────────────────────────────────────
+  // Lint fn definitions first (body-only checks), then top-level statements.
+  for (auto &AST : FnASTs)
+    LintExpression(AST.get());
+  for (auto &AST : TopLevelASTs)
+    LintExpression(AST.get());
+
+  // ── Phase Separation: Codegen All ────────────────────────────────────────
+  // Only non-fn top-level statements need codegen here. fn bodies were already
+  // compiled in the pre-pass; codegenning them again would duplicate them.
+  for (auto &AST : TopLevelASTs) {
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      AST->codegen();
+    } else {
+      if (GlobalSymbolTable) {
+        GlobalSymbolTable->ResetToDepth(1);
+        GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+      }
+    }
+    g_recoverActive = false;
+  }
+
   // Flush all collected diagnostics (sorted by line).  If any errors were
-  // recorded, stop here : do not attempt further IR generation or linking.
+  // recorded, stop here: do not attempt further IR generation or linking.
   DiagnosticEngine::flushAll();
   if (DiagnosticEngine::hasErrors())
     return 1;
 
-  // Only after the loop ends (EOF), we add the return statement.
+  // Only after all codegens are done, add the return statement to main.
   Builder->CreateRet(ConstantInt::get(*TheContext, APInt(32, 0)));
-  // Verify and Print
+  // Verify the generated IR
   verifyFunction(*TheFunction);
+
+  // ── Phase 5: LLVM Optimization Passes ─────────────────────────────────────
+  // Run LLVM's standard optimization pipeline over every function in the
+  // module. This turns our Alloca/Load/Store pattern into register-based SSA
+  // (mem2reg), folds constants, eliminates dead code, and simplifies the CFG,
+  // reaching near-C-level performance without any extra compiler work.
+  {
+    legacy::FunctionPassManager FPM(TheModule.get());
+    // Promote memory to registers (eliminates alloca/load/store overhead)
+    FPM.add(createPromoteMemoryToRegisterPass());
+    // Fold redundant instructions (x + 0 => x, etc.)
+    FPM.add(createInstructionCombiningPass());
+    // Reassociate expressions for better constant folding
+    FPM.add(createReassociatePass());
+    // Eliminate common sub-expressions
+    FPM.add(createGVNPass());
+    // Simplify the control-flow graph (remove unreachable blocks, etc.)
+    FPM.add(createCFGSimplificationPass());
+    FPM.doInitialization();
+    for (auto &F : *TheModule)
+      FPM.run(F);
+  }
 
   // Output stage: either emit LLVM IR text or compile to native binary
   if (opts.EmitLLVM) {

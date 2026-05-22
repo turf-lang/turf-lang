@@ -1,0 +1,42 @@
+// Reverse Nodes in k-Group
+fn int create_node(int v, list<int> val, list<int> next) {
+    val.push(v)
+    next.push(-1)
+    return val.length - 1
+}
+
+fn int reverse_k_group(int head, int k, list<int> val, list<int> next) {
+    int curr = head
+    int count = 0
+    while (curr != -1) {
+        if (count == k) { break }
+        curr = next[curr]
+        count = count + 1
+    }
+    if (count == k) {
+        curr = reverse_k_group(curr, k, val, next)
+        while (count > 0) {
+            int tmp = next[head]
+            next[head] = curr
+            curr = head
+            head = tmp
+            count = count - 1
+        }
+        head = curr
+    }
+    return head
+}
+
+list<int> val
+list<int> next
+int h = create_node(1, val, next)
+next[h] = create_node(2, val, next)
+next[next[h]] = create_node(3, val, next)
+next[next[next[h]]] = create_node(4, val, next)
+next[next[next[next[h]]]] = create_node(5, val, next)
+
+int res = reverse_k_group(h, 2, val, next)
+while (res != -1) {
+    printline(val[res])
+    res = next[res]
+}

@@ -16,6 +16,7 @@ public:
   virtual ~ExprAST() = default;
 
   virtual llvm::Value *codegen() = 0;
+  virtual llvm::Value *codegenLValue() { return nullptr; }
   virtual std::unique_ptr<ExprAST> clone() const = 0;
 
   // Node ID tracking for AST diffing
@@ -96,22 +97,22 @@ public:
 
 // Assignment Node, represents things like "x = 5 + 2"
 class AssignmentExprAST : public ExprAST {
-  std::string Name;
+  std::unique_ptr<ExprAST> LHS;
   SourceLocation Loc;
   std::unique_ptr<ExprAST> RHS;
 
 public:
-  AssignmentExprAST(SourceLocation Loc, std::string Name,
+  AssignmentExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> LHS,
                     std::unique_ptr<ExprAST> RHS)
-      : Name(std::move(Name)), Loc(Loc), RHS(std::move(RHS)) {}
+      : LHS(std::move(LHS)), Loc(Loc), RHS(std::move(RHS)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
-  const std::string &getName() const { return Name; }
+  const ExprAST *getLHS() const { return LHS.get(); }
   const ExprAST *getRHS() const { return RHS.get(); }
 
   llvm::Value *codegen() override;
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<AssignmentExprAST>(Loc, Name,
+    return std::make_unique<AssignmentExprAST>(Loc, CloneExprAST(LHS.get()),
                                                CloneExprAST(RHS.get()));
   }
 };
@@ -128,6 +129,7 @@ public:
   const std::string &getName() const { return Name; }
 
   llvm::Value *codegen() override;
+  llvm::Value *codegenLValue() override;
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<VariableExprAST>(Loc, Name);
   }
@@ -442,21 +444,21 @@ public:
 
 // Call to a user-defined function: name(arg1, arg2, ...)
 class FuncCallExprAST : public ExprAST {
-  std::string Name;
+  std::unique_ptr<ExprAST> Callee;
   std::vector<std::unique_ptr<ExprAST>> Args;
   SourceLocation Loc;
 
 public:
-  FuncCallExprAST(SourceLocation Loc, std::string Name,
+  FuncCallExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Callee,
                   std::vector<std::unique_ptr<ExprAST>> Args)
-      : Loc(Loc), Name(std::move(Name)), Args(std::move(Args)) {}
+      : Callee(std::move(Callee)), Args(std::move(Args)), Loc(Loc) {}
 
-  const std::string &getName() const { return Name; }
+  const ExprAST *getCallee() const { return Callee.get(); }
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
 
   llvm::Value *codegen() override;
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<FuncCallExprAST>(Loc, Name, CloneExprList(Args));
+    return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()), CloneExprList(Args));
   }
 };
 
@@ -490,22 +492,23 @@ public:
 
 // Array element access: arr[index]
 class ArrayAccessExprAST : public ExprAST {
-  std::string Name;
+  std::unique_ptr<ExprAST> Base;
   std::unique_ptr<ExprAST> Index;
   SourceLocation Loc;
 
 public:
-  ArrayAccessExprAST(SourceLocation Loc, std::string Name,
+  ArrayAccessExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Base,
                      std::unique_ptr<ExprAST> Index)
-      : Loc(Loc), Name(std::move(Name)), Index(std::move(Index)) {}
+      : Base(std::move(Base)), Index(std::move(Index)), Loc(Loc) {}
 
   const SourceLocation &getLoc() const { return Loc; }
-  const std::string &getName() const { return Name; }
+  const ExprAST *getBase() const { return Base.get(); }
   const ExprAST *getIndex() const { return Index.get(); }
 
   llvm::Value *codegen() override;
+  llvm::Value *codegenLValue() override;
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ArrayAccessExprAST>(Loc, Name,
+    return std::make_unique<ArrayAccessExprAST>(Loc, CloneExprAST(Base.get()),
                                                 CloneExprAST(Index.get()));
   }
 };
@@ -559,26 +562,26 @@ public:
 // Note: list<T> *declaration* is now a plain VarDeclExprAST with a
 // GenericType("list", [elemType]) — no separate ListDeclExprAST needed.
 class ListMethodCallExprAST : public ExprAST {
-  std::string ListName;   // variable name
+  std::unique_ptr<ExprAST> Base;
   std::string Method;     // "push", "pop", or "length"
   std::unique_ptr<ExprAST> Arg; // non-null only for push
   SourceLocation Loc;
 
 public:
-  ListMethodCallExprAST(SourceLocation Loc, std::string ListName,
+  ListMethodCallExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Base,
                         std::string Method,
                         std::unique_ptr<ExprAST> Arg = nullptr)
-      : Loc(Loc), ListName(std::move(ListName)), Method(std::move(Method)),
-        Arg(std::move(Arg)) {}
+      : Base(std::move(Base)), Method(std::move(Method)),
+        Arg(std::move(Arg)), Loc(Loc) {}
 
   const SourceLocation &getLoc() const { return Loc; }
-  const std::string &getListName() const { return ListName; }
+  const ExprAST *getBase() const { return Base.get(); }
   const std::string &getMethod() const { return Method; }
   const ExprAST *getArg() const { return Arg.get(); }
 
   llvm::Value *codegen() override;
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ListMethodCallExprAST>(Loc, ListName, Method,
+    return std::make_unique<ListMethodCallExprAST>(Loc, CloneExprAST(Base.get()), Method,
                                                    CloneExprAST(Arg.get()));
   }
 };
@@ -618,6 +621,7 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
   }
 
   if (const auto *Assign = dynamic_cast<const AssignmentExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Assign->getLHS(), NodeIDs);
     CollectAllNodeIDsInternal(Assign->getRHS(), NodeIDs);
     return;
   }
@@ -668,6 +672,7 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
   }
 
   if (const auto *FuncCall = dynamic_cast<const FuncCallExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(FuncCall->getCallee(), NodeIDs);
     for (const auto &Arg : FuncCall->getArgs())
       CollectAllNodeIDsInternal(Arg.get(), NodeIDs);
     return;
@@ -690,6 +695,7 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
   }
 
   if (const auto *ArrayAccess = dynamic_cast<const ArrayAccessExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(ArrayAccess->getBase(), NodeIDs);
     CollectAllNodeIDsInternal(ArrayAccess->getIndex(), NodeIDs);
     return;
   }
@@ -701,6 +707,7 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
   }
 
   if (const auto *ListMethod = dynamic_cast<const ListMethodCallExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(ListMethod->getBase(), NodeIDs);
     CollectAllNodeIDsInternal(ListMethod->getArg(), NodeIDs);
     return;
   }
@@ -826,14 +833,11 @@ inline std::set<uint64_t> CollectChangedNodeIDsInternal(
   }
   
   // ============================================================================
-  // AssignmentExprAST: Compare variable name and recursively diff RHS
+  // AssignmentExprAST: Recursively diff LHS and RHS
   // ============================================================================
   if (auto *OrigAssign = dynamic_cast<const AssignmentExprAST*>(OriginalAST)) {
     auto *ModAssign = dynamic_cast<const AssignmentExprAST*>(ModifiedAST);
-    if (OrigAssign->getName() != ModAssign->getName()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
+    CollectChangedNodeIDsInternal(OrigAssign->getLHS(), ModAssign->getLHS(), ChangedIDs);
     CollectChangedNodeIDsInternal(OrigAssign->getRHS(), ModAssign->getRHS(), ChangedIDs);
     return ChangedIDs;
   }
@@ -965,14 +969,11 @@ inline std::set<uint64_t> CollectChangedNodeIDsInternal(
   }
   
   // ============================================================================
-  // FuncCallExprAST: Compare name and recursively diff arguments
+  // FuncCallExprAST: Recursively diff callee and arguments
   // ============================================================================
   if (auto *OrigCall = dynamic_cast<const FuncCallExprAST*>(OriginalAST)) {
     auto *ModCall = dynamic_cast<const FuncCallExprAST*>(ModifiedAST);
-    if (OrigCall->getName() != ModCall->getName()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
+    CollectChangedNodeIDsInternal(OrigCall->getCallee(), ModCall->getCallee(), ChangedIDs);
     
     const auto &OrigArgs = OrigCall->getArgs();
     const auto &ModArgs = ModCall->getArgs();
@@ -1046,14 +1047,11 @@ inline std::set<uint64_t> CollectChangedNodeIDsInternal(
   }
   
   // ============================================================================
-  // ArrayAccessExprAST: Compare name and recursively diff index
+  // ArrayAccessExprAST: Recursively diff base and index
   // ============================================================================
   if (auto *OrigAccess = dynamic_cast<const ArrayAccessExprAST*>(OriginalAST)) {
     auto *ModAccess = dynamic_cast<const ArrayAccessExprAST*>(ModifiedAST);
-    if (OrigAccess->getName() != ModAccess->getName()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
+    CollectChangedNodeIDsInternal(OrigAccess->getBase(), ModAccess->getBase(), ChangedIDs);
     CollectChangedNodeIDsInternal(OrigAccess->getIndex(), ModAccess->getIndex(), ChangedIDs);
     return ChangedIDs;
   }
@@ -1089,15 +1087,15 @@ inline std::set<uint64_t> CollectChangedNodeIDsInternal(
   // ============================================================================
 
   // ============================================================================
-  // ListMethodCallExprAST: Compare list name, method, and argument
+  // ListMethodCallExprAST: Compare method, diff base and argument
   // ============================================================================
   if (auto *OrigMeth = dynamic_cast<const ListMethodCallExprAST*>(OriginalAST)) {
     auto *ModMeth = dynamic_cast<const ListMethodCallExprAST*>(ModifiedAST);
-    if (OrigMeth->getListName() != ModMeth->getListName() ||
-        OrigMeth->getMethod() != ModMeth->getMethod()) {
+    if (OrigMeth->getMethod() != ModMeth->getMethod()) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
     }
+    CollectChangedNodeIDsInternal(OrigMeth->getBase(), ModMeth->getBase(), ChangedIDs);
     CollectChangedNodeIDsInternal(OrigMeth->getArg(), ModMeth->getArg(), ChangedIDs);
     return ChangedIDs;
   }

@@ -1,0 +1,27 @@
+// Longest Valid Parentheses
+// '(' = 0, ')' = 1
+fn int longest_valid(list<int> s) {
+    list<int> stack
+    stack.push(-1)
+    int max_len = 0
+    
+    for i in 0..s.length step i += 1 {
+        if (s[i] == 0) {
+            stack.push(i)
+        } else {
+            int dummy = stack.pop()
+            if (stack.length == 0) {
+                stack.push(i)
+            } else {
+                int len = i - stack[stack.length - 1]
+                if (len > max_len) { max_len = len }
+            }
+        }
+    }
+    return max_len
+}
+
+list<int> s
+// ")()())" -> 1, 0, 1, 0, 1, 1
+s.push(1) s.push(0) s.push(1) s.push(0) s.push(1) s.push(1)
+printline(longest_valid(s)) // 4

@@ -1,0 +1,12 @@
+list<list<int>> nested
+list<int> inner
+list<int> inner2
+inner.push(5)
+inner2.push(10)
+inner2.push(12)
+nested.push(inner)
+nested.push(inner2)
+printline(nested[0][0])
+printline(nested[1][0])
+printline(nested[1][1])
+printline(nested[0][0] + nested[1][1])

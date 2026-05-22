@@ -242,12 +242,14 @@ static void LintAssignment(const AssignmentExprAST *Assign) {
   if (!Assign)
     return;
 
-  const std::string &Name = Assign->getName();
+  const ExprAST *LHS = Assign->getLHS();
   const ExprAST *RHS = Assign->getRHS();
 
-  if (auto *Var = dynamic_cast<const VariableExprAST *>(RHS)) {
-    if (Var->getName() == Name) {
-      SelfAssignmentWarning(Assign->getLoc(), Name).warn();
+  if (auto *LVar = dynamic_cast<const VariableExprAST *>(LHS)) {
+    if (auto *RVar = dynamic_cast<const VariableExprAST *>(RHS)) {
+      if (LVar->getName() == RVar->getName()) {
+        SelfAssignmentWarning(Assign->getLoc(), LVar->getName()).warn();
+      }
     }
   }
 }
@@ -347,6 +349,13 @@ static void LintChangedNodesOnlyInternal(ExprAST *E,
   if (auto *Bin = dynamic_cast<BinaryExprAST *>(E)) {
     LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Bin->getLHS()), ChangedNodeIDs);
     LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Bin->getRHS()), ChangedNodeIDs);
+    return;
+  }
+
+  // Recurse into assignment children
+  if (auto *Assign = dynamic_cast<AssignmentExprAST *>(E)) {
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Assign->getLHS()), ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Assign->getRHS()), ChangedNodeIDs);
     return;
   }
 

@@ -1,0 +1,22 @@
+// House Robber
+fn int rob(list<int> nums) {
+    if (nums.length == 0) { return 0 }
+    if (nums.length == 1) { return nums[0] }
+    
+    list<int> dp
+    dp.push(nums[0])
+    int mx = nums[0]
+    if (nums[1] > nums[0]) { mx = nums[1] }
+    dp.push(mx)
+    
+    for i in 2..nums.length step i += 1 {
+        int v = dp[i - 2] + nums[i]
+        if (dp[i - 1] > v) { v = dp[i - 1] }
+        dp.push(v)
+    }
+    return dp[nums.length - 1]
+}
+
+list<int> nums
+nums.push(2) nums.push(7) nums.push(9) nums.push(3) nums.push(1)
+printline(rob(nums)) // 12

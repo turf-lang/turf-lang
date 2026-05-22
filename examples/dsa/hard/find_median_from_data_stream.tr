@@ -1,0 +1,30 @@
+// Find Median from Data Stream using a simple sorted array (insertion sort style per add)
+fn void add_num(int num, list<int> stream) {
+    stream.push(num)
+    int i = stream.length - 1
+    while (i > 0) {
+        if (stream[i] < stream[i - 1]) {
+            int tmp = stream[i]
+            stream[i] = stream[i - 1]
+            stream[i - 1] = tmp
+            i = i - 1
+        } else { break }
+    }
+}
+
+fn double find_median(list<int> stream) {
+    int n = stream.length
+    if (n == 0) { return 0.0 }
+    if (n % 2 == 1) {
+        return stream[n / 2] / 1.0
+    } else {
+        return (stream[n / 2 - 1] + stream[n / 2]) / 2.0
+    }
+}
+
+list<int> stream
+add_num(1, stream)
+add_num(2, stream)
+printline(find_median(stream)) // 1.5
+add_num(3, stream)
+printline(find_median(stream)) // 2

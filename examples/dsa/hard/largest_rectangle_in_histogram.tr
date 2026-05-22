@@ -1,0 +1,39 @@
+// Largest Rectangle in Histogram
+fn int largest_rectangle(list<int> heights) {
+    list<int> stack
+    int max_area = 0
+    int i = 0
+    while (i < heights.length) {
+        if (stack.length == 0) {
+            stack.push(i)
+            i = i + 1
+        } elseif (heights[stack[stack.length - 1]] <= heights[i]) {
+            stack.push(i)
+            i = i + 1
+        } else {
+            int top = stack.pop()
+            int area = 0
+            if (stack.length == 0) {
+                area = heights[top] * i
+            } else {
+                area = heights[top] * (i - stack[stack.length - 1] - 1)
+            }
+            if (area > max_area) { max_area = area }
+        }
+    }
+    while (stack.length > 0) {
+        int top = stack.pop()
+        int area = 0
+        if (stack.length == 0) {
+            area = heights[top] * i
+        } else {
+            area = heights[top] * (i - stack[stack.length - 1] - 1)
+        }
+        if (area > max_area) { max_area = area }
+    }
+    return max_area
+}
+
+list<int> h
+h.push(2) h.push(1) h.push(5) h.push(6) h.push(2) h.push(3)
+printline(largest_rectangle(h)) // 10

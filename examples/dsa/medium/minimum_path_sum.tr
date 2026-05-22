@@ -1,0 +1,27 @@
+// Minimum Path Sum
+fn int min_path(list<int> grid, int m, int n) {
+    list<int> dp
+    int total = m * n
+    for i in 0..total step i += 1 { dp.push(0) }
+    
+    dp[0] = grid[0]
+    for i in 1..m step i += 1 { dp[i * n] = dp[(i - 1) * n] + grid[i * n] }
+    for j in 1..n step j += 1 { dp[j] = dp[j - 1] + grid[j] }
+    
+    for i in 1..m step i += 1 {
+        for j in 1..n step j += 1 {
+            int top = dp[(i - 1) * n + j]
+            int left = dp[i * n + j - 1]
+            int min_val = top
+            if (left < top) { min_val = left }
+            dp[i * n + j] = min_val + grid[i * n + j]
+        }
+    }
+    return dp[m * n - 1]
+}
+
+list<int> grid
+grid.push(1) grid.push(3) grid.push(1)
+grid.push(1) grid.push(5) grid.push(1)
+grid.push(4) grid.push(2) grid.push(1)
+printline(min_path(grid, 3, 3)) // 7

@@ -1,0 +1,9 @@
+fn list<int> get_data() {
+    list<int> temp
+    temp.push(99)
+    return temp
+}
+
+list<int> arr = get_data()
+arr[0] = 100
+printline(arr[0])

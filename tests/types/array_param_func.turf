@@ -1,0 +1,23 @@
+// array_param_func.turf
+// Verifies that array types are first-class in ParseType(), allowing them
+// to appear in function signatures (the original hardcoding bug).
+
+fn int sum_array(int[5] data) {
+    int total = 0
+    for i in 0..5 step i++ {
+        total = total + data[i]
+    }
+    return total
+}
+
+fn int get_first(int[10] arr) {
+    return arr[0]
+}
+
+int[5] nums = [10, 20, 30, 40, 50]
+int result = sum_array(nums)
+print(result)       // Expected: 150
+
+int[10] big = [99, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+int first = get_first(big)
+print(first)        // Expected: 99

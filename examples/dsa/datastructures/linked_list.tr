@@ -1,0 +1,28 @@
+// Simulated Singly Linked List
+fn int create_node(int v, list<int> ll_vals, list<int> ll_nexts) {
+    ll_vals.push(v)
+    ll_nexts.push(-1)
+    return ll_vals.length - 1
+}
+
+fn int insert_front(int head, int v, list<int> ll_vals, list<int> ll_nexts) {
+    int new_node = create_node(v, ll_vals, ll_nexts)
+    ll_nexts[new_node] = head
+    return new_node
+}
+
+fn void print_list(int head, list<int> ll_vals, list<int> ll_nexts) {
+    int curr = head
+    while (curr != -1) {
+        printline(ll_vals[curr])
+        curr = ll_nexts[curr]
+    }
+}
+
+list<int> ll_vals
+list<int> ll_nexts
+int head = -1
+head = insert_front(head, 30, ll_vals, ll_nexts)
+head = insert_front(head, 20, ll_vals, ll_nexts)
+head = insert_front(head, 10, ll_vals, ll_nexts)
+print_list(head, ll_vals, ll_nexts)

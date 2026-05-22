@@ -1,0 +1,13 @@
+// Turflang Capability Edge Case: Nested Generics & LLVM Opaque Pointers
+list<list<int>> matrix
+list<int> row
+row.push(5)
+
+// This seemingly perfect syntax WILL CRASH the compiler with a Type Mismatch.
+// Why? Turflang translates all reference types (strings, lists, arrays) into LLVM opaque pointers.
+// In Codegen.cpp, `getTurfTypeFromLLVM` sees a pointer and conservatively assumes it's a "string".
+// When matrix.push(row) occurs, it checks the type of `row`. It gets "string" instead of "list<int>".
+// This proves a profound architectural limitation in the current AST-LLVM translation layer!
+
+matrix.push(row)
+printline(matrix[0][0])

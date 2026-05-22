@@ -1,0 +1,13 @@
+// A simple compute loop to demonstrate optimization.
+// We will compile this and emit LLVM IR to show that the variables
+// are placed in CPU registers instead of stack memory (no 'alloca' instructions).
+
+fn int compute_sum(int max) {
+    int sum = 0
+    for i in 1..max step i++ {
+        sum = sum + i
+    }
+    return sum
+}
+
+print(compute_sum(1000)) // Expected: 500500
