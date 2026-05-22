@@ -1,0 +1,7 @@
+// Test Massive List Reallocation
+list<int> l
+for i in 0..1000000 step i += 1 {
+    l.push(i)
+}
+printline(l.length) // Should print 1000000
+printline(l[999999]) // Should print 999999

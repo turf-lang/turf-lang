@@ -1,0 +1,11 @@
+// Phase 5: Type-System and Semantic Polish
+fn list<list<int>> get_matrix() {
+    list<list<int>> matrix
+    list<int> row
+    row.push(10)
+    matrix.push(row)
+    return matrix
+}
+
+list<list<int>> mat = get_matrix()
+printline(mat[0][0])

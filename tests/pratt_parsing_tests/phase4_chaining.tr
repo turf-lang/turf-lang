@@ -1,0 +1,4 @@
+// Phase 4: Chained Method Calls
+list<int> arr
+arr.push(1).push(2)
+printline(arr[1])

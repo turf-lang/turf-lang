@@ -1,0 +1,2 @@
+list<int> inner
+printline(typeof(inner))
