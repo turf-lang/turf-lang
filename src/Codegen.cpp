@@ -2194,15 +2194,43 @@ Value *StructInitExprAST::codegen() {
     return nullptr;
   }
 
-  if (Args.size() != SType->getFields().size()) {
-    LogErrorAt(Loc, "Struct '" + Name + "' expects " + std::to_string(SType->getFields().size()) + " arguments, but got " + std::to_string(Args.size()));
-    return nullptr;
-  }
-
   Type *LLVMTy = getLLVMType(T.get());
   StructType *LLVMStructType = dyn_cast<StructType>(LLVMTy);
   if (!LLVMStructType) {
     LogErrorAt(Loc, "LLVM StructType '" + Name + "' not found");
+    return nullptr;
+  }
+
+  Function *InitF = TheModule->getFunction(Name + ".init");
+  if (InitF) {
+    if (InitF->arg_size() != Args.size() + 1) {
+      LogErrorAt(Loc, "Constructor for '" + Name + "' expects " + 
+                      std::to_string(InitF->arg_size() - 1) + 
+                      " arguments, but got " + std::to_string(Args.size()));
+      return nullptr;
+    }
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
+    AllocaInst *Alloca = TmpB.CreateAlloca(LLVMStructType, nullptr, Name + "_init");
+
+    std::vector<Value *> ArgVals;
+    ArgVals.push_back(Alloca); // Implicit self pointer
+
+    unsigned Idx = 0;
+    for (auto ArgIt = std::next(InitF->arg_begin()); ArgIt != InitF->arg_end(); ++ArgIt, ++Idx) {
+      Value *V = Args[Idx]->codegen();
+      if (!V) return nullptr;
+      ArgVals.push_back(V);
+    }
+
+    Builder->CreateCall(InitF, ArgVals);
+    return Builder->CreateLoad(LLVMStructType, Alloca, "structval");
+  }
+
+  // Fallback to default struct initialization
+  if (Args.size() != SType->getFields().size()) {
+    LogErrorAt(Loc, "Struct '" + Name + "' expects " + std::to_string(SType->getFields().size()) + " arguments, but got " + std::to_string(Args.size()));
     return nullptr;
   }
 
