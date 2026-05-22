@@ -20,6 +20,12 @@ int getNextToken() { return CurTok = gettok(); }
 void InitializePrecedence() {
   // Assignment
   BinopPrecedence['='] = 10;
+  BinopPrecedence[TOK_ASSIGN] = 10;
+  BinopPrecedence[TOK_PLUS_ASSIGN] = 10;
+  BinopPrecedence[TOK_MINUS_ASSIGN] = 10;
+  BinopPrecedence[TOK_MUL_ASSIGN] = 10;
+  BinopPrecedence[TOK_DIV_ASSIGN] = 10;
+  BinopPrecedence[TOK_MOD_ASSIGN] = 10;
 
   // Logical
   BinopPrecedence[TOK_OR] = 15;  // ||
@@ -133,6 +139,7 @@ static TurfTypePtr ParseType() {
     }
     // Arrays of generics are rare but allowed: parse trailing [N]
     TurfTypePtr GenBase = std::make_shared<GenericType>(BaseName, std::move(TypeArgs));
+    std::vector<int> GenArraySizes;
     while (CurTok == '[') {
       getNextToken();
       int Size = -1;
@@ -149,7 +156,10 @@ static TurfTypePtr ParseType() {
         return nullptr;
       }
       getNextToken();
-      GenBase = makeArrayType(GenBase, Size);
+      GenArraySizes.push_back(Size);
+    }
+    for (auto it = GenArraySizes.rbegin(); it != GenArraySizes.rend(); ++it) {
+      GenBase = makeArrayType(GenBase, *it);
     }
     return GenBase;
   }
@@ -170,6 +180,7 @@ static TurfTypePtr ParseType() {
 
   // Recursively consume trailing array dimensions: int[5] or int[5][10]
   // Size may be omitted (int[]) to indicate a pointer-parameter (size = -1).
+  std::vector<int> ArraySizes;
   while (CurTok == '[') {
     getNextToken(); // eat '['
     int Size = -1;
@@ -186,7 +197,10 @@ static TurfTypePtr ParseType() {
       return nullptr;
     }
     getNextToken(); // eat ']'
-    Base = makeArrayType(Base, Size);
+    ArraySizes.push_back(Size);
+  }
+  for (auto it = ArraySizes.rbegin(); it != ArraySizes.rend(); ++it) {
+    Base = makeArrayType(Base, *it);
   }
 
   return Base;
@@ -212,7 +226,8 @@ std::unique_ptr<ExprAST> ParseBoolExpr() {
     auto RHS = ParseExpression();
     if (!RHS)
       return nullptr;
-    return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName,
+    auto LHSVar = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
+    return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHSVar),
                                                std::move(RHS));
   }
 
@@ -225,183 +240,91 @@ std::unique_ptr<ExprAST> ParseStringExpr() {
   return Result;
 }
 
-// The actual body — takes an already-consumed identifier name and location.
-std::unique_ptr<ExprAST>
-ParseIdentifierExprFrom(const std::string &IdName, SourceLocation VarLoc) {
-  // CurTok is already the token AFTER IdName (caller consumed it)
-  // Array element access: arr[index] or arr[index] = value
-  if (CurTok == '[') {
-    getNextToken();
-    auto Index = ParseExpression();
-    if (!Index)
-      return nullptr;
-    if (CurTok != ']') {
-      LogErrorAt(CurLoc, "Expected ']' to close the array index — did you forget to close the '[' before the index?");
-      return nullptr;
-    }
-    getNextToken();
-
-    // Check for assignment to array element: arr[i] = expr
-    if (CurTok == TOK_ASSIGN || CurTok == TOK_PLUS_ASSIGN ||
-        CurTok == TOK_MINUS_ASSIGN || CurTok == TOK_MUL_ASSIGN ||
-        CurTok == TOK_DIV_ASSIGN || CurTok == TOK_MOD_ASSIGN) {
-      int AssignOp = CurTok;
+std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
+  while (true) {
+    if (CurTok == '[') {
+      SourceLocation Loc = CurLoc;
       getNextToken();
-      auto RHS = ParseExpression();
-      if (!RHS)
-        return nullptr;
-
-      if (AssignOp != TOK_ASSIGN) {
-        char Op = '+';
-        if (AssignOp == TOK_MINUS_ASSIGN)
-          Op = '-';
-        else if (AssignOp == TOK_MUL_ASSIGN)
-          Op = '*';
-        else if (AssignOp == TOK_DIV_ASSIGN)
-          Op = '/';
-        else if (AssignOp == TOK_MOD_ASSIGN)
-          Op = '%';
-        LogErrorAt(VarLoc, "Compound assignment operators are not supported on "
-                           "array elements. Use arr[i] = arr[i] + value instead.");
+      auto Index = ParseExpression();
+      if (!Index) return nullptr;
+      if (CurTok != ']') {
+        LogErrorAt(CurLoc, "Expected ']' to close the array index");
         return nullptr;
       }
-
-      return std::make_unique<ArrayAssignExprAST>(VarLoc, IdName,
-                                                  std::move(Index),
-                                                  std::move(RHS));
-    }
-
-    return std::make_unique<ArrayAccessExprAST>(VarLoc, IdName,
-                                                std::move(Index));
-  }
-
-  // Dot-method dispatch: arr.length  /  list.push(v)  /  list.pop()  /  list.length
-  if (CurTok == '.') {
-    getNextToken(); // eat '.'
-    if (CurTok != TOK_IDENTIFIER) {
-      LogErrorAt(CurLoc, "Expected a method name after '.' (e.g. push, pop, length)");
-      return nullptr;
-    }
-    std::string MethodName = IdentifierStr;
-    SourceLocation MethodLoc = CurLoc;
-    getNextToken(); // eat method name
-
-    // push(val)
-    if (MethodName == "push") {
-      if (CurTok != '(') {
-        LogErrorAt(MethodLoc, "Expected '(' after 'push' — e.g. nums.push(value)");
-        return nullptr;
+      getNextToken();
+      Base = std::make_unique<ArrayAccessExprAST>(Loc, std::move(Base), std::move(Index));
+    } else if (CurTok == '(') {
+      SourceLocation Loc = CurLoc;
+      getNextToken();
+      std::vector<std::unique_ptr<ExprAST>> Args;
+      while (CurTok != ')' && CurTok != TOK_EOF) {
+        auto Arg = ParseExpression();
+        if (!Arg) return nullptr;
+        Args.push_back(std::move(Arg));
+        if (CurTok == ',') getNextToken();
+        else if (CurTok != ')') break;
       }
-      getNextToken(); // eat '('
-      auto Arg = ParseExpression();
-      if (!Arg)
-        return nullptr;
       if (CurTok != ')') {
-        LogErrorAt(CurLoc, "Expected ')' to close push() call");
+        LogErrorAt(CurLoc, "Expected ')' to close the function call");
         return nullptr;
       }
-      getNextToken(); // eat ')'
-      return std::make_unique<ListMethodCallExprAST>(VarLoc, IdName, "push",
-                                                     std::move(Arg));
-    }
-
-    // pop()
-    if (MethodName == "pop") {
-      if (CurTok != '(') {
-        LogErrorAt(MethodLoc, "Expected '(' after 'pop' — e.g. nums.pop()");
+      getNextToken();
+      Base = std::make_unique<FuncCallExprAST>(Loc, std::move(Base), std::move(Args));
+    } else if (CurTok == '.') {
+      SourceLocation Loc = CurLoc;
+      getNextToken();
+      if (CurTok != TOK_IDENTIFIER) {
+        LogErrorAt(CurLoc, "Expected a method name after '.'");
         return nullptr;
       }
-      getNextToken(); // eat '('
-      if (CurTok != ')') {
-        LogErrorAt(CurLoc, "pop() takes no arguments");
-        return nullptr;
-      }
-      getNextToken(); // eat ')'
-      return std::make_unique<ListMethodCallExprAST>(VarLoc, IdName, "pop");
-    }
-
-    // length  (for both arrays and lists — codegen differentiates)
-    if (MethodName == "length") {
-      // Emit ArrayLengthExprAST for both arrays and lists.
-      // ArrayLengthExprAST::codegen already handles the list case by checking
-      // isListType on the VarInfo — no parser-time symbol table lookup needed.
-      return std::make_unique<ArrayLengthExprAST>(VarLoc, IdName);
-    }
-
-    LogErrorAt(MethodLoc,
-               "Unknown method '" + MethodName + "'. Supported methods: push, pop, length.");
-    return nullptr;
-  }
-
-  if (CurTok == TOK_ASSIGN || CurTok == TOK_PLUS_ASSIGN ||
-      CurTok == TOK_MINUS_ASSIGN || CurTok == TOK_MUL_ASSIGN ||
-      CurTok == TOK_DIV_ASSIGN || CurTok == TOK_MOD_ASSIGN) {
-    int AssignOp = CurTok;
-    getNextToken();
-
-    auto RHS = ParseExpression();
-    if (!RHS) {
-      return nullptr;
-    }
-
-    if (AssignOp != TOK_ASSIGN) {
-      char Op = '+';
-      if (AssignOp == TOK_MINUS_ASSIGN)
-        Op = '-';
-      else if (AssignOp == TOK_MUL_ASSIGN)
-        Op = '*';
-      else if (AssignOp == TOK_DIV_ASSIGN)
-        Op = '/';
-      else if (AssignOp == TOK_MOD_ASSIGN)
-        Op = '%';
-
-      auto LHSVar = std::make_unique<VariableExprAST>(VarLoc, IdName);
-      RHS = std::make_unique<BinaryExprAST>(VarLoc, Op, std::move(LHSVar),
-                                            std::move(RHS));
-    }
-
-    // Variable Assignmnent
-    return std::make_unique<AssignmentExprAST>(VarLoc, IdName, std::move(RHS));
-  }
-
-  // Handle Postfix ++ and --
-  if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
-    int OpType = CurTok;
-    getNextToken();
-
-    char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
-    auto LHSVar = std::make_unique<VariableExprAST>(VarLoc, IdName);
-    auto OneNum = std::make_unique<NumberExprAST>(1LL);
-    auto RHS = std::make_unique<BinaryExprAST>(VarLoc, Op, std::move(LHSVar),
-                                               std::move(OneNum));
-
-    return std::make_unique<AssignmentExprAST>(VarLoc, IdName, std::move(RHS));
-  }
-
-  // User-defined function call: name(...)
-  if (CurTok == '(') {
-    getNextToken();
-    std::vector<std::unique_ptr<ExprAST>> Args;
-    while (CurTok != ')' && CurTok != TOK_EOF) {
-      auto Arg = ParseExpression();
-      if (!Arg)
-        return nullptr;
-      Args.push_back(std::move(Arg));
-      if (CurTok == ',')
+      std::string MethodName = IdentifierStr;
+      SourceLocation MethodLoc = CurLoc;
+      getNextToken();
+      if (MethodName == "push") {
+        if (CurTok != '(') {
+          LogErrorAt(MethodLoc, "Expected '(' after 'push'");
+          return nullptr;
+        }
         getNextToken();
-      else if (CurTok != ')')
-        break;
+        auto Arg = ParseExpression();
+        if (!Arg) return nullptr;
+        if (CurTok != ')') {
+          LogErrorAt(CurLoc, "Expected ')' to close push() call");
+          return nullptr;
+        }
+        getNextToken();
+        Base = std::make_unique<ListMethodCallExprAST>(Loc, std::move(Base), "push", std::move(Arg));
+      } else if (MethodName == "pop") {
+        if (CurTok != '(') {
+          LogErrorAt(MethodLoc, "Expected '(' after 'pop'");
+          return nullptr;
+        }
+        getNextToken();
+        if (CurTok != ')') {
+          LogErrorAt(CurLoc, "pop() takes no arguments");
+          return nullptr;
+        }
+        getNextToken();
+        Base = std::make_unique<ListMethodCallExprAST>(Loc, std::move(Base), "pop");
+      } else if (MethodName == "length") {
+        Base = std::make_unique<ListMethodCallExprAST>(Loc, std::move(Base), "length");
+      } else {
+        LogErrorAt(MethodLoc, "Unknown method '" + MethodName + "'. Supported methods: push, pop, length.");
+        return nullptr;
+      }
+    } else if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
+      int OpType = CurTok;
+      SourceLocation OpLoc = CurLoc;
+      getNextToken();
+      char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
+      auto OneNum = std::make_unique<NumberExprAST>(1LL);
+      auto RHS = std::make_unique<BinaryExprAST>(OpLoc, Op, CloneExprAST(Base.get()), std::move(OneNum));
+      Base = std::make_unique<AssignmentExprAST>(OpLoc, std::move(Base), std::move(RHS));
+    } else {
+      break;
     }
-    if (CurTok != ')') {
-      LogErrorAt(CurLoc, "Expected ')' to close the function call — check for a missing ')' or an extra argument");
-      return nullptr;
-    }
-    getNextToken();
-    return std::make_unique<FuncCallExprAST>(VarLoc, IdName, std::move(Args));
   }
-
-  // Variable Reference
-  return std::make_unique<VariableExprAST>(VarLoc, IdName);
+  return Base;
 }
 
 // Parse Parentheses
@@ -428,7 +351,8 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     auto RHS = ParseExpression();
     if (!RHS)
       return nullptr;
-    return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName,
+    auto LHSVar = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
+    return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHSVar),
                                                std::move(RHS));
   }
 
@@ -537,7 +461,7 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
 }
 
 // "Primary" means the basic building blocks: numbers or parentheses.
-static std::unique_ptr<ExprAST> ParsePrimary() {
+static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   switch (CurTok) {
   default:
     // Check if the current token belongs to a registered builtin (e.g. print).
@@ -579,16 +503,8 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
       }
     }
 
-    // Hand off to ParseIdentifierExpr with the already-consumed name.
-    // We restore IdentifierStr so ParseIdentifierExpr can use it.
-    // Note: ParseIdentifierExpr starts by reading IdentifierStr then calling
-    // getNextToken(). Since we already consumed the token, we pass the name
-    // and the already-advanced CurTok by calling the body directly.
-    //
-    // Simplest: just re-enter ParseIdentifierExpr but it will re-consume
-    // IdentifierStr which is now stale. Instead, we duplicate the essential
-    // logic here using IdName and the already-advanced CurTok.
-    return ParseIdentifierExprFrom(IdName, IdLoc);
+    auto Base = std::make_unique<VariableExprAST>(IdLoc, IdName);
+    return Base;
   }
 
   case TOK_NUMBER:
@@ -625,7 +541,8 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
       auto RHS = ParseExpression();
       if (!RHS)
         return nullptr;
-      return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName,
+      auto LHS = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
+      return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHS),
                                                  std::move(RHS));
     }
     LogErrorAt(KeywordLoc, "Unexpected '" + IdName + "' keyword here — expected a value or expression."
@@ -668,7 +585,8 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
       auto RHS = ParseExpression();
       if (!RHS)
         return nullptr;
-      return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName,
+      auto LHS = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
+      return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHS),
                                                  std::move(RHS));
     }
     return std::make_unique<BreakExprAST>(KeywordLoc);
@@ -683,12 +601,19 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
       auto RHS = ParseExpression();
       if (!RHS)
         return nullptr;
-      return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName,
+      auto LHS = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
+      return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHS),
                                                  std::move(RHS));
     }
     return std::make_unique<ContinueExprAST>(KeywordLoc);
   }
   }
+}
+
+static std::unique_ptr<ExprAST> ParsePrimary() {
+  auto Base = ParsePrimaryBase();
+  if (!Base) return nullptr;
+  return ParsePostfixExpression(std::move(Base));
 }
 
 // This function handles the "Right Hand Side" of an expression.
@@ -716,20 +641,33 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
       return nullptr;
 
     // LOOKAHEAD: Is the *next* operator even stronger?
-    // Example: "a + b * c"
-    // We are at "+". We parsed "b". Next op is "*". Since "*" is stronger than
-    // "+", we let "*" steal "b" as its LHS.
     int NextPrec = GetTokPrecedence();
-    if (TokPrec < NextPrec) {
+    bool isRightAssociative = (BinOp == TOK_ASSIGN || BinOp == TOK_PLUS_ASSIGN || 
+                               BinOp == TOK_MINUS_ASSIGN || BinOp == TOK_MUL_ASSIGN || 
+                               BinOp == TOK_DIV_ASSIGN || BinOp == TOK_MOD_ASSIGN);
+    if (TokPrec < NextPrec || (isRightAssociative && TokPrec == NextPrec)) {
       // Recursively parse the high-priority part first
-      RHS = ParseBinOpRHS(TokPrec + 1, std::move(RHS));
+      RHS = ParseBinOpRHS(isRightAssociative ? TokPrec : TokPrec + 1, std::move(RHS));
       if (!RHS)
         return nullptr;
     }
 
     // Merge LHS and RHS into a new node
-    LHS = std::make_unique<BinaryExprAST>(CurLoc, BinOp, std::move(LHS),
-                                          std::move(RHS));
+    if (BinOp == TOK_ASSIGN) {
+      LHS = std::make_unique<AssignmentExprAST>(OpLoc, std::move(LHS), std::move(RHS));
+    } else if (BinOp == TOK_PLUS_ASSIGN || BinOp == TOK_MINUS_ASSIGN ||
+               BinOp == TOK_MUL_ASSIGN || BinOp == TOK_DIV_ASSIGN || BinOp == TOK_MOD_ASSIGN) {
+      char Op = '+';
+      if (BinOp == TOK_MINUS_ASSIGN) Op = '-';
+      else if (BinOp == TOK_MUL_ASSIGN) Op = '*';
+      else if (BinOp == TOK_DIV_ASSIGN) Op = '/';
+      else if (BinOp == TOK_MOD_ASSIGN) Op = '%';
+      
+      auto ExpandedRHS = std::make_unique<BinaryExprAST>(OpLoc, Op, CloneExprAST(LHS.get()), std::move(RHS));
+      LHS = std::make_unique<AssignmentExprAST>(OpLoc, std::move(LHS), std::move(ExpandedRHS));
+    } else {
+      LHS = std::make_unique<BinaryExprAST>(OpLoc, BinOp, std::move(LHS), std::move(RHS));
+    }
   }
 }
 
@@ -765,12 +703,13 @@ std::unique_ptr<ExprAST> ParseUnary() {
     getNextToken();
 
     char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
-    auto LHSVar = std::make_unique<VariableExprAST>(Loc, IdName);
+    auto LHSVarBin = std::make_unique<VariableExprAST>(Loc, IdName);
     auto OneNum = std::make_unique<NumberExprAST>(1LL);
-    auto RHS = std::make_unique<BinaryExprAST>(CurLoc, Op, std::move(LHSVar),
+    auto RHS = std::make_unique<BinaryExprAST>(CurLoc, Op, std::move(LHSVarBin),
                                                std::move(OneNum));
 
-    return std::make_unique<AssignmentExprAST>(Loc, IdName, std::move(RHS));
+    auto LHSVarAssign = std::make_unique<VariableExprAST>(Loc, IdName);
+    return std::make_unique<AssignmentExprAST>(Loc, std::move(LHSVarAssign), std::move(RHS));
   }
 
   // If the current token is not an operator that handles unary (like '-'),
@@ -897,7 +836,8 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
     auto RHS = ParseExpression();
     if (!RHS)
       return nullptr;
-    return std::make_unique<AssignmentExprAST>(KeywordLoc, IdName,
+    auto LHS = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
+    return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHS),
                                                std::move(RHS));
   }
 
@@ -1048,10 +988,15 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
   SourceLocation NameLoc = CurLoc;
   getNextToken();
 
-  // list<T> declarations need no initializer — codegen zero-inits via malloc.
-  // e.g. `list<int> nums` is valid without `= ...`
   if (isListType(Type.get())) {
-    auto Init = std::make_unique<NumberExprAST>(0LL); // dummy, ignored by codegen
+    std::unique_ptr<ExprAST> Init;
+    if (CurTok == TOK_ASSIGN) {
+      getNextToken(); // consume '='
+      Init = ParseExpression();
+      if (!Init) return nullptr;
+    } else {
+      Init = std::make_unique<NumberExprAST>(0LL); // dummy, ignored by codegen
+    }
     return std::make_unique<VarDeclExprAST>(NameLoc, Name, Type, std::move(Init));
   }
 

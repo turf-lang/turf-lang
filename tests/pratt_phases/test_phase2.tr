@@ -1,0 +1,5 @@
+// Phase 2: L-Value vs R-Value code generation
+list<int> l
+l.push(10)
+l[0] = 100
+printline(l[0])
