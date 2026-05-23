@@ -128,15 +128,18 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     return Builder->CreateCall(FreeFunc, {Args[0]}, "");
   }
 
-  if (IntrinsicName == "llvm.pow.f64") {
-    Function *PowF = TheModule->getFunction("llvm.pow.f64");
-    if (!PowF) {
-      FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), {Type::getDoubleTy(*TheContext), Type::getDoubleTy(*TheContext)}, false);
-      PowF = Function::Create(FT, Function::ExternalLinkage, "llvm.pow.f64", TheModule.get());
+  if (IntrinsicName.find("llvm.") == 0) {
+    Function *LLVMFunc = TheModule->getFunction(IntrinsicName);
+    if (!LLVMFunc) {
+      std::vector<Type *> ParamTypes;
+      for (Value *Arg : Args) {
+        ParamTypes.push_back(Arg->getType());
+      }
+      FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), ParamTypes, false);
+      LLVMFunc = Function::Create(FT, Function::ExternalLinkage, IntrinsicName, TheModule.get());
     }
-    return Builder->CreateCall(PowF, {Args[0], Args[1]}, "powcall");
+    return Builder->CreateCall(LLVMFunc, Args, "llvm_call");
   }
-
   if (IntrinsicName == "power") {
     Value *A = Args[0];
     Value *B = Args[1];
@@ -168,68 +171,6 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     }
   }
   
-  if (IntrinsicName == "llvm.fabs.f64") {
-    Function *AbsF = TheModule->getFunction("llvm.fabs.f64");
-    if (!AbsF) {
-      FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), {Type::getDoubleTy(*TheContext)}, false);
-      AbsF = Function::Create(FT, Function::ExternalLinkage, "llvm.fabs.f64", TheModule.get());
-    }
-    return Builder->CreateCall(AbsF, {Args[0]}, "abscall");
-  }
-
-  if (IntrinsicName == "llvm.sqrt.f64") {
-    Function *SqrtF = TheModule->getFunction("llvm.sqrt.f64");
-    if (!SqrtF) {
-      FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), {Type::getDoubleTy(*TheContext)}, false);
-      SqrtF = Function::Create(FT, Function::ExternalLinkage, "llvm.sqrt.f64", TheModule.get());
-    }
-    return Builder->CreateCall(SqrtF, {Args[0]}, "sqrtcall");
-  }
-
-  if (IntrinsicName == "llvm.sin.f64") {
-    Function *SinF = TheModule->getFunction("llvm.sin.f64");
-    if (!SinF) {
-      FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), {Type::getDoubleTy(*TheContext)}, false);
-      SinF = Function::Create(FT, Function::ExternalLinkage, "llvm.sin.f64", TheModule.get());
-    }
-    return Builder->CreateCall(SinF, {Args[0]}, "sincall");
-  }
-
-  if (IntrinsicName == "llvm.cos.f64") {
-    Function *CosF = TheModule->getFunction("llvm.cos.f64");
-    if (!CosF) {
-      FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), {Type::getDoubleTy(*TheContext)}, false);
-      CosF = Function::Create(FT, Function::ExternalLinkage, "llvm.cos.f64", TheModule.get());
-    }
-    return Builder->CreateCall(CosF, {Args[0]}, "coscall");
-  }
-  
-  if (IntrinsicName == "llvm.floor.f64") {
-    Function *FloorF = TheModule->getFunction("llvm.floor.f64");
-    if (!FloorF) {
-      FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), {Type::getDoubleTy(*TheContext)}, false);
-      FloorF = Function::Create(FT, Function::ExternalLinkage, "llvm.floor.f64", TheModule.get());
-    }
-    return Builder->CreateCall(FloorF, {Args[0]}, "floorcall");
-  }
-
-  if (IntrinsicName == "llvm.ceil.f64") {
-    Function *CeilF = TheModule->getFunction("llvm.ceil.f64");
-    if (!CeilF) {
-      FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), {Type::getDoubleTy(*TheContext)}, false);
-      CeilF = Function::Create(FT, Function::ExternalLinkage, "llvm.ceil.f64", TheModule.get());
-    }
-    return Builder->CreateCall(CeilF, {Args[0]}, "ceilcall");
-  }
-
-  if (IntrinsicName == "llvm.round.f64") {
-    Function *RoundF = TheModule->getFunction("llvm.round.f64");
-    if (!RoundF) {
-      FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), {Type::getDoubleTy(*TheContext)}, false);
-      RoundF = Function::Create(FT, Function::ExternalLinkage, "llvm.round.f64", TheModule.get());
-    }
-    return Builder->CreateCall(RoundF, {Args[0]}, "roundcall");
-  }
 
   if (IntrinsicName == "lengthof") {
     Value *Val = Args[0];

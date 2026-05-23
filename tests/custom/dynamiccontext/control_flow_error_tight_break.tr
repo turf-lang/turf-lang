@@ -1,0 +1,7 @@
+// ERROR TEST — CONTROL_FLOW (tight context ±3)
+// Category: CONTROL_FLOW
+// Expects: Error about a break or continue statement outside of a loop.
+
+if true {
+    break
+}
