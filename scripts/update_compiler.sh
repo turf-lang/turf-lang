@@ -62,7 +62,8 @@ fi
 OPENMP_FLAGS=()
 if [ "$(uname)" = "Darwin" ]; then
     OPENMP_FLAGS+=("-fopenmp")
-elif ldconfig -p 2>/dev/null | grep -qE 'libomp\.so|libgomp\.so'; then
+elif ldconfig -p 2>/dev/null | grep -qE 'lib(omp|gomp)(\.so|-)'; then
+    # Found libomp (LLVM) or libgomp (GCC) — safe to link OpenMP
     OPENMP_FLAGS+=("-fopenmp")
 fi
 
