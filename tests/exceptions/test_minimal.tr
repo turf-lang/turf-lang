@@ -1,0 +1,7 @@
+fn int main() {
+  try {
+    int x = 10 / 0;
+  } onError(err) {
+  }
+  return 0;
+}

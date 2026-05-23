@@ -1,0 +1,16 @@
+struct User {
+    int age,
+    string name
+}
+
+list<User> users
+
+users.push(User(25, "Alice"))
+users.push(User(30, "Bob"))
+users.push(User(35, "Charlie"))
+
+printline(users.length())
+printline(users[0].name)
+printline(users[0].age)
+printline(users[1].name)
+printline(users[1].age)

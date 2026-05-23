@@ -52,11 +52,24 @@ void SymbolTable::ExitScope() {
 }
 
 
+void SymbolTable::EnterModule(const std::string &ModuleName) {
+  ModuleStack.push_back(CurrentModule);
+  CurrentModule = ModuleName;
+}
+
+void SymbolTable::ExitModule() {
+  if (ModuleStack.empty())
+    return;
+  CurrentModule = ModuleStack.back();
+  ModuleStack.pop_back();
+}
+
 SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfTypePtr Type,
                                     SourceLocation DeclLoc,
                                     llvm::AllocaInst *Alloca) {
   if (ScopeStack.empty())
     EnterScope();
+
   
   SymbolID ID = NextID++;
   size_t Level = GetCurrentLevel();

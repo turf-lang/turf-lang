@@ -1,0 +1,21 @@
+@intrinsic("printline")
+fn void printline(string s)
+
+fn void might_fail(int x) {
+  if x < 0 {
+    raise "Negative value not allowed";
+  }
+  printline("Success");
+}
+
+fn int main() {
+  try {
+    might_fail(5);
+    might_fail(-1);
+    printline("This should not be printed");
+  } onError(err) {
+    printline("Caught error:");
+    printline(err);
+  }
+  return 0;
+}

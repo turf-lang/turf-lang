@@ -154,6 +154,8 @@ int main(int argc, char **argv) {
 
   auto opts = parseArgs(argc, argv);
 
+
+
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
 
@@ -171,25 +173,10 @@ int main(int argc, char **argv) {
     SourceLines.push_back(Line);
   }
 
-  RegisterBuiltins(); // Populate builtin registry + inject keywords into Lexer
+  // Builtin registry removed
   InitializeModule(); // Initialize LLVM Context, Module, Builder
   InitializeSymbolTable(); // Initialize semantic symbol table
   InitializePrecedence();
-
-  // Setup the main function wrapper to hold all the code
-  FunctionType *PrintfType =
-      FunctionType::get(Type::getInt32Ty(*TheContext),
-                        {PointerType::getUnqual(*TheContext)}, true);
-  Function *PrintfFunc = Function::Create(PrintfType, Function::ExternalLinkage,
-                                          "printf", TheModule.get());
-
-  FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext), false);
-  Function *TheFunction =
-      Function::Create(FT, Function::ExternalLinkage, "main", TheModule.get());
-
-  BasicBlock *Entry = BasicBlock::Create(*TheContext, "entry", TheFunction);
-  Builder->SetInsertPoint(Entry);
-  ClearParsedTopLevelASTs();
 
   // Pre-pass: hoist 'fn' function prototypes so that forward calls work.
   // We perform a second full parse of the file, i.e. only processing
@@ -207,12 +194,18 @@ int main(int argc, char **argv) {
       CurTok = 0;
       getNextToken();
 
+      // Auto-import prelude
+      if (auto PreludeAST = ParseFile("lib/std/prelude.tr")) {
+        RecordParsedTopLevelAST(PreludeAST.get());
+        PreludeAST->codegen();
+      }
+
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') {
           getNextToken();
           continue;
         }
-        if (CurTok == TOK_FN || CurTok == TOK_STRUCT) {
+        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_IMPORT || CurTok == TOK_AT) {
           // Save scope depth so we can restore it if codegen aborts via longjmp.
           // Without this, a function that references an unknown variable causes
           // EnterScope() to be called but ExitScope() to be skipped (longjmp
@@ -240,7 +233,7 @@ int main(int argc, char **argv) {
               GlobalSymbolTable->ResetEarlyExitForCurrentScope();
             }
             // Skip to next fn, struct or EOF
-            while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_EOF)
+            while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_IMPORT && CurTok != TOK_AT && CurTok != TOK_EOF)
               getNextToken();
           }
           g_recoverActive = false;
@@ -258,7 +251,7 @@ int main(int argc, char **argv) {
   }
 
   // Main pass: re-enter the entry block and codegen everything.
-  Builder->SetInsertPoint(Entry);
+  // Builder->SetInsertPoint(Entry);
 
   // pre-pass 1 ends
   // Reset the lexer's internal state so that it starts from the beginning of
@@ -292,7 +285,7 @@ int main(int argc, char **argv) {
     // fn definitions were already fully codegenned in the pre-pass.
     // Parse them here to keep the token stream in sync and to lint them,
     // but do NOT push them into TopLevelASTs (that would re-codegen them).
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT) {
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();
@@ -301,7 +294,7 @@ int main(int argc, char **argv) {
           FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
         }
       } else {
-        while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != ';' && CurTok != TOK_EOF)
+        while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_AT && CurTok != ';' && CurTok != TOK_EOF)
           getNextToken();
       }
       g_recoverActive = false;
@@ -312,6 +305,13 @@ int main(int argc, char **argv) {
     if (setjmp(g_recoverJmp) == 0) {
       auto AST = ParseExpression();
       if (AST) {
+        if (!dynamic_cast<FuncDefExprAST*>(AST.get()) &&
+            !dynamic_cast<StructDeclExprAST*>(AST.get()) &&
+            !dynamic_cast<ModuleImportExprAST*>(AST.get())) {
+          std::cerr << "Error: Statements are not allowed outside of a function. Please define 'fn int main()' and move this code inside.\n";
+          DiagnosticEngine::flushAll();
+          exit(1);
+        }
         RecordParsedTopLevelAST(AST.get());
         TopLevelASTs.push_back(std::move(AST));
       } else {
@@ -359,10 +359,15 @@ int main(int argc, char **argv) {
   if (DiagnosticEngine::hasErrors())
     return 1;
 
-  // Only after all codegens are done, add the return statement to main.
-  Builder->CreateRet(ConstantInt::get(*TheContext, APInt(32, 0)));
+  // Verify that an explicit 'main' function was defined in the primary module
+  Function *MainFunc = TheModule->getFunction("main");
+  if (!MainFunc || MainFunc->empty()) {
+    std::cerr << "Error: No entry point found. Please define 'fn int main()' in your file.\n";
+    return 1;
+  }
+
   // Verify the generated IR
-  verifyFunction(*TheFunction);
+  verifyFunction(*MainFunc);
 
   // ── Phase 5: LLVM Optimization Passes ─────────────────────────────────────
   // Run LLVM's standard optimization pipeline over every function in the

@@ -44,6 +44,8 @@ private:
   std::vector<Scope> ScopeStack;             // Stack of active scopes
   std::map<SymbolID, Symbol> AllSymbols;     // All symbols by ID
   SymbolID NextID = 1;                       // Next available symbol ID
+  std::string CurrentModule;                 // Current module namespace
+  std::vector<std::string> ModuleStack;      // Stack of active modules
   
 public:
   SymbolTable() {
@@ -58,6 +60,12 @@ public:
   void EnterScope();
   void ExitScope();
   size_t GetCurrentLevel() const { return ScopeStack.size() - 1; }
+  
+  // Module management
+  void EnterModule(const std::string &ModuleName);
+  void ExitModule();
+  std::string GetCurrentModule() const { return CurrentModule; }
+  bool IsInModule() const { return !CurrentModule.empty(); }
   
   // Symbol declaration
   SymbolID DeclareSymbol(const std::string &Name, TurfTypePtr Type,

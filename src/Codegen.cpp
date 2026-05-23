@@ -120,10 +120,26 @@ static TurfTypePtr getCommonType(TurfTypePtr A, TurfTypePtr B) {
 }
 
 static TurfTypePtr RefineLLVMType(TurfTypePtr Deduced, TurfTypePtr Expected, llvm::Type *LLVMTy) {
-  if (LLVMTy->isPointerTy() && Expected && (isListType(Expected.get()) || isArrayType(Expected.get()))) {
+  if (LLVMTy->isPointerTy() && Expected && (isListType(Expected.get()) || isArrayType(Expected.get()) || dynamic_cast<const TurfPointerType*>(Expected.get()) || Expected->isNamed("void*"))) {
     return Expected;
   }
   return Deduced;
+}
+
+// Check whether two types are implicitly compatible.
+// Numerics (int, double, bool) are mutually compatible; string and void are not.
+static bool isTypeCompatible(const TurfType *From, const TurfType *To) {
+  if (!From || !To) return false;
+  if (From->getName() == To->getName()) return true;
+
+  // Auto-coerce void* to/from any pointer
+  if (From->getName() == "void*" && dynamic_cast<const TurfPointerType*>(To)) return true;
+  if (To->getName() == "void*" && dynamic_cast<const TurfPointerType*>(From)) return true;
+
+  if (From->isVoid() || To->isVoid()) return false;
+  if (From->isNamed("string") || To->isNamed("string")) return false;
+  // Remaining numerics: int, double, bool — all mutually convertible
+  return true;
 }
 
 static const TurfType *getExprType(const ExprAST *E) {
@@ -153,9 +169,38 @@ static const TurfType *getExprType(const ExprAST *E) {
   }
   if (auto *FuncCall = dynamic_cast<const FuncCallExprAST*>(E)) {
     if (auto *VarCallee = dynamic_cast<const VariableExprAST*>(FuncCall->getCallee())) {
-      auto It = FuncReturnTypes.find(VarCallee->getName());
-      if (It != FuncReturnTypes.end()) {
-        return It->second.get();
+      std::string CalleeName = VarCallee->getName();
+      
+      if (CalleeName == "typeof") return TurfString().get();
+      if (CalleeName == "lengthof") return TurfInt().get();
+      if (CalleeName == "malloc" || CalleeName == "realloc") return std::make_shared<TurfPointerType>(TurfVoid()).get();
+      if (CalleeName == "free") return TurfVoid().get();
+      
+      std::string MangledName = (CalleeName == "main") ? CalleeName : "turf_" + CalleeName;
+      std::vector<const TurfType*> ArgTypes;
+      for (const auto &Arg : FuncCall->getArgs()) {
+        const TurfType *T = getExprType(Arg.get());
+        if (!T) return nullptr;
+        ArgTypes.push_back(T);
+        if (CalleeName != "main") MangledName += "_" + T->getMangledName();
+      }
+      auto It = FuncReturnTypes.find(MangledName);
+      if (It != FuncReturnTypes.end()) return It->second.get();
+      
+      for (const auto &[Name, ParamTypes] : FuncParamTypes) {
+        std::string Prefix = "turf_" + CalleeName;
+        if (Name == Prefix || (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+          if (ParamTypes.size() == ArgTypes.size()) {
+            bool Compatible = true;
+            for (size_t i = 0; i < ArgTypes.size(); ++i) {
+              if (!isTypeCompatible(ArgTypes[i], ParamTypes[i].get())) {
+                Compatible = false;
+                break;
+              }
+            }
+            if (Compatible) return FuncReturnTypes[Name].get();
+          }
+        }
       }
     }
     return nullptr;
@@ -187,10 +232,32 @@ static const TurfType *getExprType(const ExprAST *E) {
       return BaseTy;
     }
     if (BaseTy && dynamic_cast<const TurfStructType*>(BaseTy)) {
-      std::string MangledName = BaseTy->getName() + "." + MethodCall->getMethod();
+      std::string MethodName = BaseTy->getName() + "." + MethodCall->getMethod();
+      std::string MangledName = "turf_" + MethodName + "_" + BaseTy->getName() + "_ptr";
+      std::vector<const TurfType*> ArgTypes;
+      for (const auto &Arg : MethodCall->getArgs()) {
+        const TurfType *T = getExprType(Arg.get());
+        if (!T) return nullptr;
+        ArgTypes.push_back(T);
+        MangledName += "_" + T->getMangledName();
+      }
       auto It = FuncReturnTypes.find(MangledName);
-      if (It != FuncReturnTypes.end()) {
-        return It->second.get();
+      if (It != FuncReturnTypes.end()) return It->second.get();
+      
+      for (const auto &[Name, ParamTypes] : FuncParamTypes) {
+        std::string Prefix = "turf_" + MethodName;
+        if (Name == Prefix || (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+          if (ParamTypes.size() == ArgTypes.size() + 1) {
+            bool Compatible = true;
+            for (size_t i = 0; i < ArgTypes.size(); ++i) {
+              if (!isTypeCompatible(ArgTypes[i], ParamTypes[i + 1].get())) {
+                Compatible = false;
+                break;
+              }
+            }
+            if (Compatible) return FuncReturnTypes[Name].get();
+          }
+        }
       }
     }
   }
@@ -230,6 +297,12 @@ static Value *CastToType(Value *Val, TurfTypePtr DestType, const std::string &Na
   if (SrcType->getName() == DestType->getName())
     return Val;
 
+  // Auto-coerce void* to/from any pointer
+  if (SrcType->getName() == "void*" && dynamic_cast<const TurfPointerType*>(DestType.get()))
+    return Val;
+  if (DestType->getName() == "void*" && dynamic_cast<const TurfPointerType*>(SrcType.get()))
+    return Val;
+
   // Strings cannot be cast to/from other types implicitly
   if (SrcType->isNamed("string") || DestType->isNamed("string")) {
     TypeError(CurLoc, "Cannot cast between string and non-string types").raise();
@@ -256,17 +329,6 @@ static Value *CastToType(Value *Val, TurfTypePtr DestType, const std::string &Na
   }
 
   return Val;
-}
-
-// Check whether two types are implicitly compatible.
-// Numerics (int, double, bool) are mutually compatible; string and void are not.
-static bool isTypeCompatible(const TurfType *From, const TurfType *To) {
-  if (!From || !To) return false;
-  if (From->getName() == To->getName()) return true;
-  if (From->isVoid() || To->isVoid()) return false;
-  if (From->isNamed("string") || To->isNamed("string")) return false;
-  // Remaining numerics: int, double, bool — all mutually convertible
-  return true;
 }
 
 // Turns a number to LLVM Number constant
@@ -340,15 +402,65 @@ Value *BinaryExprAST::codegen() {
     return NumericType->isNamed("double") ? Builder->CreateFMul(L, R, "multmp")
                                           : Builder->CreateMul(L, R, "multmp");
 
-  case '/':
+  case '/': {
     CastBoth(NumericType);
+    
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    BasicBlock *DivZeroBB = BasicBlock::Create(*TheContext, "divzero", TheFunction);
+    BasicBlock *DivContBB = BasicBlock::Create(*TheContext, "divcont", TheFunction);
+    
+    Value *IsZero;
+    if (NumericType->isNamed("double")) {
+      IsZero = Builder->CreateFCmpOEQ(R, ConstantFP::get(*TheContext, APFloat(0.0)), "iszero");
+    } else {
+      IsZero = Builder->CreateICmpEQ(R, ConstantInt::get(*TheContext, APInt(32, 0)), "iszero");
+    }
+    
+    Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
+    
+    Builder->SetInsertPoint(DivZeroBB);
+    std::vector<std::unique_ptr<ExprAST>> Args;
+    Args.push_back(std::make_unique<StringExprAST>("Division by zero"));
+    auto ExInit = std::make_unique<StructInitExprAST>(Loc, "ArithmeticException", std::move(Args));
+    auto RaiseEx = std::make_unique<RaiseExprAST>(Loc, std::move(ExInit));
+    RaiseEx->codegen();
+    if (!Builder->GetInsertBlock()->getTerminator()) Builder->CreateUnreachable();
+    
+    Builder->SetInsertPoint(DivContBB);
+    
     return NumericType->isNamed("double") ? Builder->CreateFDiv(L, R, "divtmp")
                                           : Builder->CreateSDiv(L, R, "divtmp");
+  }
 
-  case '%':
+  case '%': {
     CastBoth(NumericType);
+    
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    BasicBlock *DivZeroBB = BasicBlock::Create(*TheContext, "divzero", TheFunction);
+    BasicBlock *DivContBB = BasicBlock::Create(*TheContext, "divcont", TheFunction);
+    
+    Value *IsZero;
+    if (NumericType->isNamed("double")) {
+      IsZero = Builder->CreateFCmpOEQ(R, ConstantFP::get(*TheContext, APFloat(0.0)), "iszero");
+    } else {
+      IsZero = Builder->CreateICmpEQ(R, ConstantInt::get(*TheContext, APInt(32, 0)), "iszero");
+    }
+    
+    Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
+    
+    Builder->SetInsertPoint(DivZeroBB);
+    std::vector<std::unique_ptr<ExprAST>> Args;
+    Args.push_back(std::make_unique<StringExprAST>("Modulo by zero"));
+    auto ExInit = std::make_unique<StructInitExprAST>(Loc, "ArithmeticException", std::move(Args));
+    auto RaiseEx = std::make_unique<RaiseExprAST>(Loc, std::move(ExInit));
+    RaiseEx->codegen();
+    if (!Builder->GetInsertBlock()->getTerminator()) Builder->CreateUnreachable();
+    
+    Builder->SetInsertPoint(DivContBB);
+    
     return NumericType->isNamed("double") ? Builder->CreateFRem(L, R, "modtmp")
                                           : Builder->CreateSRem(L, R, "modtmp");
+  }
 
   // Comparison
   case '<': {
@@ -785,6 +897,13 @@ Value *BlockExprAST::codegen() {
   return LastVal;
 }
 
+Value *SizeOfExprAST::codegen() {
+  llvm::Type *LLVMTy = getLLVMType(TypeArg.get());
+  if (!LLVMTy) return nullptr;
+  uint64_t AllocSize = TheModule->getDataLayout().getTypeAllocSize(LLVMTy);
+  return ConstantInt::get(Type::getInt64Ty(*TheContext), AllocSize);
+}
+
 Value *CastExprAST::codegen() {
   Value *Val = Operand->codegen();
   if (!Val)
@@ -934,27 +1053,7 @@ Value *CastExprAST::codegen() {
   return nullptr;
 }
 
-Value *BuiltinCallExprAST::codegen() {
-  const BuiltinDef *Def = FindBuiltin(Name);
-  if (!Def) {
-    SemanticError(Loc, "Unknown builtin function: '" + Name + "'").raise();
-    return nullptr;
-  }
 
-  // Evaluate every argument expression first
-  std::vector<Value *> ArgVals;
-  for (auto &Arg : Args) {
-    Value *V = Arg->codegen();
-    if (!V)
-      return nullptr;
-    ArgVals.push_back(V);
-  }
-
-  // Dispatch to the lambda defined in Builtins.cpp
-  // Use stored Loc (captured at parse time) instead of CurLoc (which has
-  // already advanced past this call by codegen time).
-  return Def->Codegen(ArgVals, Loc);
-}
 
 Value *WhileExprAST::codegen() {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
@@ -1172,15 +1271,29 @@ Value *ContinueExprAST::codegen() {
 // Calling codegen() twice is what makes forward calls work: main.cpp's
 // pre-pass creates prototypes, then the normal loop fills bodies.
 Value *FuncDefExprAST::codegen() {
+  std::string MangledName = Name;
+  std::string Prefix = "";
+  if (GlobalSymbolTable && GlobalSymbolTable->IsInModule()) {
+    Prefix = GlobalSymbolTable->GetCurrentModule() + "_";
+    MangledName = Prefix + Name;
+  }
+  
+  if (Name != "main") {
+    MangledName = "turf_" + Prefix + Name;
+    for (const auto &P : Params) {
+      MangledName += "_" + P.Type->getMangledName();
+    }
+  }
+
   // Build/look up the LLVM prototype
-  Function *TheFunc = TheModule->getFunction(Name);
+  Function *TheFunc = TheModule->getFunction(MangledName);
 
   if (!TheFunc) {
     // Save param types and return type
     std::vector<TurfTypePtr> PTypes;
     for (const auto &P : Params) PTypes.push_back(P.Type);
-    FuncParamTypes[Name] = PTypes;
-    FuncReturnTypes[Name] = ReturnType;
+    FuncParamTypes[MangledName] = PTypes;
+    FuncReturnTypes[MangledName] = ReturnType;
 
     // Build the LLVM FunctionType
     std::vector<Type *> ParamTypes;
@@ -1189,8 +1302,9 @@ Value *FuncDefExprAST::codegen() {
 
     FunctionType *FT = FunctionType::get(getLLVMType(ReturnType.get()), ParamTypes,
                                          /*isVarArg=*/false);
+    auto Linkage = (Name == "main") ? Function::ExternalLinkage : Function::InternalLinkage;
     TheFunc =
-        Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
+        Function::Create(FT, Linkage, MangledName, TheModule.get());
 
     // Name the arguments
     unsigned Idx = 0;
@@ -1211,9 +1325,9 @@ Value *FuncDefExprAST::codegen() {
   // (Reserve this hook for a future separate pre-pass.)
 
   // Store full param types for call-site checking
-  FuncParamTypes[Name] = {};
+  FuncParamTypes[MangledName] = {};
   for (const auto &P : Params)
-    FuncParamTypes[Name].push_back(P.Type);
+    FuncParamTypes[MangledName].push_back(P.Type);
 
   // Fill in the function body
   BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunc);
@@ -1230,6 +1344,35 @@ Value *FuncDefExprAST::codegen() {
   NamedValues.clear();
   CurrentFuncReturnType = ReturnType;
   CurrentFunction = TheFunc;
+
+  if (!IntrinsicName.empty()) {
+    std::vector<Value *> ArgVals;
+    for (auto &Arg : TheFunc->args()) {
+      ArgVals.push_back(&Arg);
+    }
+    Value *IntrinsicRet = CodegenIntrinsic(IntrinsicName, ArgVals, Loc);
+    if (!IntrinsicRet) {
+      // CodegenIntrinsic will raise its own error
+      TheFunc->eraseFromParent();
+      return nullptr;
+    }
+    if (ReturnType->isVoid()) {
+      Builder->CreateRetVoid();
+    } else {
+      Builder->CreateRet(IntrinsicRet);
+    }
+
+    // Restore caller context
+    NamedValues = SavedNamedValues;
+    CurrentFuncReturnType = SavedReturnType;
+    CurrentFunction = SavedFunction;
+    if (SavedInsertBlock) {
+      Builder->SetInsertPoint(SavedInsertBlock, SavedInsertPoint);
+    } else {
+      Builder->ClearInsertionPoint();
+    }
+    return TheFunc;
+  }
 
   // Enter a new scope for the function body
   if (GlobalSymbolTable) {
@@ -1391,16 +1534,74 @@ Value *FuncCallExprAST::codegen() {
     SemanticError(Loc, "First-class functions are not supported yet.").raise();
     return nullptr;
   }
-  std::string Name = Var->getName();
+  std::string CalleeName = Var->getName();
 
-  Function *CalleeF = TheModule->getFunction(Name);
+  if (CalleeName == "typeof" || CalleeName == "lengthof" || 
+      CalleeName == "malloc" || CalleeName == "realloc" || CalleeName == "free") {
+    std::vector<Value *> ArgVals;
+    for (auto &Arg : Args) {
+      Value *V = Arg->codegen();
+      if (!V) return nullptr;
+      ArgVals.push_back(V);
+    }
+    return CodegenIntrinsic(CalleeName, ArgVals, Loc);
+  }
+
+  std::vector<Value *> EvaluatedArgs;
+  std::vector<TurfTypePtr> ArgTypes;
+  for (auto &Arg : Args) {
+    Value *V = Arg->codegen();
+    if (!V) return nullptr;
+    EvaluatedArgs.push_back(V);
+
+    TurfTypePtr ActTy;
+    if (auto *VE = dynamic_cast<VariableExprAST *>(Arg.get())) {
+      auto It = NamedValues.find(VE->getName());
+      if (It != NamedValues.end()) ActTy = It->second.Type;
+    }
+    if (!ActTy) ActTy = getTurfTypeFromLLVM(V->getType());
+    ArgTypes.push_back(ActTy);
+  }
+
+  std::string MangledName = CalleeName;
+  if (CalleeName != "main") {
+    MangledName = "turf_" + CalleeName;
+    for (const auto &T : ArgTypes) {
+      MangledName += "_" + T->getMangledName();
+    }
+  }
+
+  Function *CalleeF = TheModule->getFunction(MangledName);
+  if (!CalleeF && CalleeName != "main") {
+    // Fallback: search for a compatible overload using implicit casting
+    for (const auto &[Name, ParamTypes] : FuncParamTypes) {
+      std::string Prefix = "turf_" + CalleeName;
+      if (Name == Prefix || (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+        if (ParamTypes.size() == ArgTypes.size()) {
+          bool Compatible = true;
+          for (size_t i = 0; i < ArgTypes.size(); ++i) {
+            if (!isTypeCompatible(ArgTypes[i].get(), ParamTypes[i].get())) {
+              Compatible = false;
+              break;
+            }
+          }
+          if (Compatible) {
+            CalleeF = TheModule->getFunction(Name);
+            MangledName = Name;
+            break;
+          }
+        }
+      }
+    }
+  }
+
   if (!CalleeF) {
-    SemanticError(Loc, "Unknown function: '" + Name + "'").raise();
+    SemanticError(Loc, "Unknown function: '" + CalleeName + "'").raise();
     return nullptr;
   }
 
   if (CalleeF->arg_size() != Args.size()) {
-    SemanticError(Loc, "Wrong number of arguments to '" + Name +
+    SemanticError(Loc, "Wrong number of arguments to '" + CalleeName +
                            "': expected " +
                            std::to_string(CalleeF->arg_size()) + ", got " +
                            std::to_string(Args.size()))
@@ -1412,12 +1613,10 @@ Value *FuncCallExprAST::codegen() {
   unsigned Idx = 0;
 
   // Look up full param type info (needed for list<T> params)
-  auto ParamTypeIt = FuncParamTypes.find(Name);
+  auto ParamTypeIt = FuncParamTypes.find(MangledName);
 
   for (auto &Arg : CalleeF->args()) {
-    Value *V = Args[Idx]->codegen();
-    if (!V)
-      return nullptr;
+    Value *V = EvaluatedArgs[Idx];
 
     // Determine declared TurfTypePtr for this param
     TurfTypePtr DeclaredType;
@@ -1429,7 +1628,7 @@ Value *FuncCallExprAST::codegen() {
     // Check for void argument
     if (V->getType()->isVoidTy()) {
       VoidValueError(Loc, "Argument " + std::to_string(Idx + 1) + " to '" +
-                              Name + "' is a void function call.")
+                              CalleeName + "' is a void function call.")
           .raise();
       return nullptr;
     }
@@ -1443,7 +1642,7 @@ Value *FuncCallExprAST::codegen() {
           ActualType = It->second.Type;
       }
       if (ActualType && ActualType->getName() != DeclaredType->getName()) {
-        ArgumentTypeError(Loc, Name, std::string(Arg.getName()), Idx + 1,
+        ArgumentTypeError(Loc, CalleeName, std::string(Arg.getName()), Idx + 1,
                           turfTypeName(DeclaredType.get()),
                           turfTypeName(ActualType.get()))
             .raise();
@@ -1458,7 +1657,7 @@ Value *FuncCallExprAST::codegen() {
         auto It = NamedValues.find(VE->getName());
         if (It == NamedValues.end() || !isArrayType(It->second.Type.get())) {
           SemanticError(Loc, "Argument " + std::to_string(Idx + 1) + " to '" +
-                                 Name + "' must be an array variable").raise();
+                                 CalleeName + "' must be an array variable").raise();
           return nullptr;
         }
         // Element-type check
@@ -1466,7 +1665,7 @@ Value *FuncCallExprAST::codegen() {
         const TurfType *ActElem = getArrayElementType(It->second.Type.get());
         if (ExpElem && ActElem &&
             ExpElem->getName() != ActElem->getName()) {
-          ArgumentTypeError(Loc, Name, std::string(Arg.getName()), Idx + 1,
+          ArgumentTypeError(Loc, CalleeName, std::string(Arg.getName()), Idx + 1,
                             turfTypeName(DeclaredType.get()),
                             turfTypeName(It->second.Type.get()))
               .raise();
@@ -1476,7 +1675,7 @@ Value *FuncCallExprAST::codegen() {
         V = It->second.Alloca;
       } else {
         SemanticError(Loc, "Argument " + std::to_string(Idx + 1) + " to '" +
-                               Name + "': arrays must be passed as a variable name")
+                               CalleeName + "': arrays must be passed as a variable name")
             .raise();
         return nullptr;
       }
@@ -1485,7 +1684,7 @@ Value *FuncCallExprAST::codegen() {
       TurfTypePtr ExpectedType = getTurfTypeFromLLVM(Arg.getType());
       TurfTypePtr ActualType   = getTurfTypeFromLLVM(V->getType());
       if (!isTypeCompatible(ActualType.get(), ExpectedType.get())) {
-        ArgumentTypeError(Loc, Name, std::string(Arg.getName()), Idx + 1,
+        ArgumentTypeError(Loc, CalleeName, std::string(Arg.getName()), Idx + 1,
                           turfTypeName(ExpectedType.get()),
                           turfTypeName(ActualType.get()))
             .raise();
@@ -1556,24 +1755,13 @@ static void EmitListBoundsCheck(Value *IndexVal, Value *LenVal,
   Builder->CreateCondBr(OOB, OobBB, ContBB);
 
   Builder->SetInsertPoint(OobBB);
-  Type *I8Ptr = PointerType::get(*TheContext, 0);
-  Function *PutsF = TheModule->getFunction("puts");
-  if (!PutsF) {
-    auto *FT = FunctionType::get(Type::getInt32Ty(*TheContext), {I8Ptr}, false);
-    PutsF = Function::Create(FT, Function::ExternalLinkage, "puts", TheModule.get());
-  }
-  Value *Msg = Builder->CreateGlobalString(
-      "Runtime Error: List index out of bounds for '" + ListName + "'.",
-      "list_oob_msg");
-  Builder->CreateCall(PutsF, {Msg});
-  Function *ExitF = TheModule->getFunction("exit");
-  if (!ExitF) {
-    auto *FT = FunctionType::get(Type::getVoidTy(*TheContext),
-                                 {Type::getInt32Ty(*TheContext)}, false);
-    ExitF = Function::Create(FT, Function::ExternalLinkage, "exit", TheModule.get());
-  }
-  Builder->CreateCall(ExitF, {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
-  Builder->CreateUnreachable();
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  Args.push_back(std::make_unique<StringExprAST>("List index out of bounds for '" + ListName + "'"));
+  auto ExInit = std::make_unique<StructInitExprAST>(Loc, "OutOfBoundsException", std::move(Args));
+  auto RaiseEx = std::make_unique<RaiseExprAST>(Loc, std::move(ExInit));
+  RaiseEx->codegen();
+
+  if (!Builder->GetInsertBlock()->getTerminator()) Builder->CreateUnreachable();
 
   TheFunction->insert(TheFunction->end(), ContBB);
   Builder->SetInsertPoint(ContBB);
@@ -1711,34 +1899,16 @@ static void EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
 
   Builder->CreateCondBr(OutOfBounds, OobBB, ContBB);
 
-  // Out-of-bounds block: print error and exit
+  // Out-of-bounds block: raise exception
   Builder->SetInsertPoint(OobBB);
 
-  // Declare puts if not already
-  Type *I8Ptr = PointerType::get(*TheContext, 0);
-  Function *PutsF = TheModule->getFunction("puts");
-  if (!PutsF) {
-    FunctionType *FT =
-        FunctionType::get(Type::getInt32Ty(*TheContext), {I8Ptr}, false);
-    PutsF = Function::Create(FT, Function::ExternalLinkage, "puts",
-                             TheModule.get());
-  }
-  Value *ErrMsg = Builder->CreateGlobalString(
-      "Runtime Error: Array index out of bounds for '" + ArrayName + "'.",
-      "arr_oob_msg");
-  Builder->CreateCall(PutsF, {ErrMsg});
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  Args.push_back(std::make_unique<StringExprAST>("Array index out of bounds for '" + ArrayName + "'"));
+  auto ExInit = std::make_unique<StructInitExprAST>(Loc, "OutOfBoundsException", std::move(Args));
+  auto RaiseEx = std::make_unique<RaiseExprAST>(Loc, std::move(ExInit));
+  RaiseEx->codegen();
 
-  // Declare exit if not already
-  Function *ExitF = TheModule->getFunction("exit");
-  if (!ExitF) {
-    FunctionType *FT = FunctionType::get(
-        Type::getVoidTy(*TheContext), {Type::getInt32Ty(*TheContext)}, false);
-    ExitF = Function::Create(FT, Function::ExternalLinkage, "exit",
-                             TheModule.get());
-  }
-  Builder->CreateCall(ExitF,
-                      {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
-  Builder->CreateUnreachable();
+  if (!Builder->GetInsertBlock()->getTerminator()) Builder->CreateUnreachable();
 
   // Continue block
   TheFunction->insert(TheFunction->end(), ContBB);
@@ -1777,8 +1947,20 @@ Value *ArrayAccessExprAST::codegenLValue() {
     return Builder->CreateGEP(ElemTy, DataBuf, IndexVal, "listelemptr");
   }
   
+  if (auto *PtrTyTurf = dynamic_cast<const TurfPointerType*>(BaseTy)) {
+    Value *PtrVal = Base->codegen();
+    if (!PtrVal) return nullptr;
+    
+    Value *IndexVal = Index->codegen();
+    if (!IndexVal) return nullptr;
+    IndexVal = CastToType(IndexVal, TurfInt(), "ptridx", Loc);
+    
+    Type *ElemTy = getLLVMType(PtrTyTurf->getPointee().get());
+    return Builder->CreateGEP(ElemTy, PtrVal, IndexVal, "ptrelemptr");
+  }
+  
   if (!isArrayType(BaseTy)) {
-    SemanticError(Loc, "Base is not an array").raise();
+    SemanticError(Loc, "Base is not an array, list, or pointer").raise();
     return nullptr;
   }
   
@@ -1825,7 +2007,10 @@ Value *ArrayAccessExprAST::codegen() {
   Value *Ptr = codegenLValue();
   if (!Ptr) return nullptr;
   const TurfType *BaseTy = getExprType(Base.get());
-  const TurfType *ElemTyT = isListType(BaseTy) ? getListElementType(BaseTy) : getArrayElementType(BaseTy);
+  const TurfType *ElemTyT = nullptr;
+  if (isListType(BaseTy)) ElemTyT = getListElementType(BaseTy);
+  else if (auto *PtrTy = dynamic_cast<const TurfPointerType*>(BaseTy)) ElemTyT = PtrTy->getPointee().get();
+  else ElemTyT = getArrayElementType(BaseTy);
   return Builder->CreateLoad(getLLVMType(ElemTyT), Ptr, "arrelem");
 }
 
@@ -1989,6 +2174,23 @@ Value *ArrayLengthExprAST::codegen() {
 // The VarDeclExprAST::codegen handles list initialization via the type system.
 
 Value *MethodCallExprAST::codegen() {
+  if (auto *Var = dynamic_cast<VariableExprAST*>(Base.get())) {
+    std::string ModuleName = Var->getName();
+    std::string PotentialMangledPrefix = "turf_" + ModuleName + "_" + Method;
+    bool IsModule = false;
+    for (const auto &Pair : FuncParamTypes) {
+      if (Pair.first == PotentialMangledPrefix || (Pair.first.size() > PotentialMangledPrefix.size() && Pair.first[PotentialMangledPrefix.size()] == '_')) {
+        IsModule = true;
+        break;
+      }
+    }
+    if (IsModule) {
+      // It's a module call! E.g. math.sqrt() -> math_sqrt()
+      auto ModCall = std::make_unique<FuncCallExprAST>(Loc, std::make_unique<VariableExprAST>(Loc, ModuleName + "_" + Method), std::move(Args));
+      return ModCall->codegen();
+    }
+  }
+
   const TurfType *BaseTy = getExprType(Base.get());
   if (auto *PtrTy = dynamic_cast<const TurfPointerType*>(BaseTy)) BaseTy = PtrTy->getPointee().get();
 
@@ -2014,8 +2216,51 @@ Value *MethodCallExprAST::codegen() {
   }
 
   if (auto *StructTy = dynamic_cast<const TurfStructType*>(BaseTy)) {
-    std::string MangledName = StructTy->getName() + "." + Method;
+    std::vector<Value *> EvaluatedArgs;
+    std::vector<TurfTypePtr> ArgTypes;
+    for (auto &Arg : Args) {
+      Value *V = Arg->codegen();
+      if (!V) return nullptr;
+      EvaluatedArgs.push_back(V);
+      
+      TurfTypePtr ActTy;
+      if (auto *VE = dynamic_cast<VariableExprAST *>(Arg.get())) {
+        auto It = NamedValues.find(VE->getName());
+        if (It != NamedValues.end()) ActTy = It->second.Type;
+      }
+      if (!ActTy) ActTy = getTurfTypeFromLLVM(V->getType());
+      ArgTypes.push_back(ActTy);
+    }
+
+    std::string MethodName = StructTy->getName() + "." + Method;
+    std::string MangledName = "turf_" + MethodName + "_" + StructTy->getName() + "_ptr";
+    for (const auto &T : ArgTypes) {
+      MangledName += "_" + T->getMangledName();
+    }
+
     Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      // Fallback overload resolution
+      for (const auto &[Name, ParamTypes] : FuncParamTypes) {
+        std::string Prefix = "turf_" + MethodName;
+        if (Name == Prefix || (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+          if (ParamTypes.size() == ArgTypes.size() + 1) { // +1 for self
+            bool Compatible = true;
+            for (size_t i = 0; i < ArgTypes.size(); ++i) {
+              if (!isTypeCompatible(ArgTypes[i].get(), ParamTypes[i + 1].get())) {
+                Compatible = false;
+                break;
+              }
+            }
+            if (Compatible) {
+              CalleeF = TheModule->getFunction(Name);
+              break;
+            }
+          }
+        }
+      }
+    }
+
     if (!CalleeF) {
       SemanticError(Loc, "Method '" + Method + "' not found on struct '" + StructTy->getName() + "'").raise();
       return nullptr;
@@ -2043,8 +2288,7 @@ Value *MethodCallExprAST::codegen() {
     
     unsigned Idx = 0;
     for (auto ArgIt = std::next(CalleeF->arg_begin()); ArgIt != CalleeF->arg_end(); ++ArgIt, ++Idx) {
-      Value *V = Args[Idx]->codegen();
-      if (!V) return nullptr;
+      Value *V = EvaluatedArgs[Idx];
       ArgVals.push_back(V);
     }
     
@@ -2201,7 +2445,50 @@ Value *StructInitExprAST::codegen() {
     return nullptr;
   }
 
-  Function *InitF = TheModule->getFunction(Name + ".init");
+  std::vector<Value *> EvaluatedArgs;
+  std::vector<TurfTypePtr> ArgTypes;
+  for (auto &Arg : Args) {
+    Value *V = Arg->codegen();
+    if (!V) return nullptr;
+    EvaluatedArgs.push_back(V);
+    
+    TurfTypePtr ActTy;
+    if (auto *VE = dynamic_cast<VariableExprAST *>(Arg.get())) {
+      auto It = NamedValues.find(VE->getName());
+      if (It != NamedValues.end()) ActTy = It->second.Type;
+    }
+    if (!ActTy) ActTy = getTurfTypeFromLLVM(V->getType());
+    ArgTypes.push_back(ActTy);
+  }
+
+  std::string InitName = Name + ".init";
+  std::string MangledName = "turf_" + InitName + "_" + Name + "_ptr";
+  for (const auto &T : ArgTypes) {
+    MangledName += "_" + T->getMangledName();
+  }
+
+  Function *InitF = TheModule->getFunction(MangledName);
+  if (!InitF) {
+    for (const auto &[FName, ParamTypes] : FuncParamTypes) {
+      std::string Prefix = "turf_" + InitName;
+      if (FName == Prefix || (FName.size() > Prefix.size() && FName[Prefix.size()] == '_')) {
+        if (ParamTypes.size() == ArgTypes.size() + 1) {
+          bool Compatible = true;
+          for (size_t i = 0; i < ArgTypes.size(); ++i) {
+            if (!isTypeCompatible(ArgTypes[i].get(), ParamTypes[i + 1].get())) {
+              Compatible = false;
+              break;
+            }
+          }
+          if (Compatible) {
+            InitF = TheModule->getFunction(FName);
+            break;
+          }
+        }
+      }
+    }
+  }
+
   if (InitF) {
     if (InitF->arg_size() != Args.size() + 1) {
       LogErrorAt(Loc, "Constructor for '" + Name + "' expects " + 
@@ -2219,8 +2506,7 @@ Value *StructInitExprAST::codegen() {
 
     unsigned Idx = 0;
     for (auto ArgIt = std::next(InitF->arg_begin()); ArgIt != InitF->arg_end(); ++ArgIt, ++Idx) {
-      Value *V = Args[Idx]->codegen();
-      if (!V) return nullptr;
+      Value *V = EvaluatedArgs[Idx];
       ArgVals.push_back(V);
     }
 
@@ -2239,8 +2525,7 @@ Value *StructInitExprAST::codegen() {
   AllocaInst *Alloca = TmpB.CreateAlloca(LLVMStructType, nullptr, Name + "_init");
 
   for (size_t i = 0; i < Args.size(); ++i) {
-    Value *ArgVal = Args[i]->codegen();
-    if (!ArgVal) return nullptr;
+    Value *ArgVal = EvaluatedArgs[i];
 
     TurfTypePtr FieldType = SType->getFields()[i].Type;
     TurfTypePtr ArgTurfType = getTurfTypeFromLLVM(ArgVal->getType());
@@ -2302,4 +2587,180 @@ Value *FieldAccessExprAST::codegen() {
   TurfTypePtr FieldType = SType->getFieldType(FieldName);
 
   return Builder->CreateLoad(getLLVMType(FieldType.get()), Ptr, FieldName.c_str());
+}
+Value *TryExprAST::codegen() {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  
+  // Global vars for exception state
+  auto *StackGV = TheModule->getNamedGlobal("turf_exception_stack");
+  if (!StackGV) {
+    auto *ArrayTy = llvm::ArrayType::get(llvm::ArrayType::get(Type::getInt64Ty(*TheContext), 32), 32);
+    StackGV = new GlobalVariable(*TheModule, ArrayTy, false, GlobalValue::InternalLinkage, Constant::getNullValue(ArrayTy), "turf_exception_stack");
+  }
+  auto *TopGV = TheModule->getNamedGlobal("turf_exception_top");
+  if (!TopGV) {
+    TopGV = new GlobalVariable(*TheModule, Type::getInt32Ty(*TheContext), false, GlobalValue::InternalLinkage, ConstantInt::get(Type::getInt32Ty(*TheContext), 0), "turf_exception_top");
+  }
+  auto *PayloadGV = TheModule->getNamedGlobal("turf_exception_payload");
+  if (!PayloadGV) {
+    PayloadGV = new GlobalVariable(*TheModule, PointerType::getUnqual(*TheContext), false, GlobalValue::InternalLinkage, ConstantPointerNull::get(PointerType::getUnqual(*TheContext)), "turf_exception_payload");
+  }
+
+  Function *SetJmpF = TheModule->getFunction("setjmp");
+  if (!SetJmpF) {
+    SetJmpF = Function::Create(FunctionType::get(Type::getInt32Ty(*TheContext), {PointerType::getUnqual(*TheContext)}, false), Function::ExternalLinkage, "setjmp", TheModule.get());
+  }
+
+  BasicBlock *TryBB = BasicBlock::Create(*TheContext, "try", TheFunction);
+  BasicBlock *CatchBB = BasicBlock::Create(*TheContext, "catch");
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "trycont");
+  
+  Value *Top = Builder->CreateLoad(Type::getInt32Ty(*TheContext), TopGV);
+  Value *NextTop = Builder->CreateAdd(Top, ConstantInt::get(Type::getInt32Ty(*TheContext), 1));
+  Builder->CreateStore(NextTop, TopGV);
+  
+  Value *FramePtr = Builder->CreateGEP(StackGV->getValueType(), StackGV, {ConstantInt::get(Type::getInt32Ty(*TheContext), 0), Top});
+  Value *JmpRes = Builder->CreateCall(SetJmpF, {FramePtr});
+  Value *Cmp = Builder->CreateICmpEQ(JmpRes, ConstantInt::get(Type::getInt32Ty(*TheContext), 0));
+  
+  Builder->CreateCondBr(Cmp, TryBB, CatchBB);
+  
+  // TRY BLOCK
+  Builder->SetInsertPoint(TryBB);
+  if (!TryBlock->codegen()) return nullptr;
+  Builder->CreateStore(Top, TopGV); 
+  if (!Builder->GetInsertBlock()->getTerminator()) Builder->CreateBr(ContBB);
+  
+  // CATCH BLOCK
+  TheFunction->insert(TheFunction->end(), CatchBB);
+  Builder->SetInsertPoint(CatchBB);
+  Builder->CreateStore(Top, TopGV);
+  
+  Value *PayloadPtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext), PayloadGV);
+  
+  TurfTypePtr ExType;
+  if (GlobalSymbolTable) {
+    ExType = GlobalSymbolTable->LookupType("Exception");
+  }
+  if (!ExType) {
+    ExType = TurfString(); // Fallback to string if Exception is not defined
+  }
+  
+  AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, PayloadName, ExType.get());
+  
+  Type *LLVMExTy = getLLVMType(ExType.get());
+  Value *LoadedStruct = Builder->CreateLoad(LLVMExTy, PayloadPtr);
+  Builder->CreateStore(LoadedStruct, Alloca);
+  
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->EnterScope();
+    GlobalSymbolTable->DeclareSymbol(PayloadName, ExType, Loc, Alloca);
+  }
+  
+  auto SavedNamedValues = NamedValues;
+  NamedValues[PayloadName] = {Alloca, ExType};
+  
+  if (!CatchBlock->codegen()) return nullptr;
+  
+  if (GlobalSymbolTable) GlobalSymbolTable->ExitScope();
+  NamedValues = SavedNamedValues;
+  
+  if (!Builder->GetInsertBlock()->getTerminator()) Builder->CreateBr(ContBB);
+  
+  // CONTINUE
+  TheFunction->insert(TheFunction->end(), ContBB);
+  Builder->SetInsertPoint(ContBB);
+  
+  return Constant::getNullValue(Type::getDoubleTy(*TheContext));
+}
+
+Value *RaiseExprAST::codegen() {
+  Value *PayloadVal = Payload->codegen();
+  if (!PayloadVal) return nullptr;
+  
+  if (!PayloadVal->getType()->isPointerTy()) {
+    // Allocate memory on the heap so it survives longjmp
+    Function *MallocF = TheModule->getFunction("malloc");
+    if (!MallocF) {
+      auto *FT = FunctionType::get(PointerType::getUnqual(*TheContext), {Type::getInt64Ty(*TheContext)}, false);
+      MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc", TheModule.get());
+    }
+    const DataLayout &DL = TheModule->getDataLayout();
+    uint64_t StructSize = DL.getTypeAllocSize(PayloadVal->getType());
+    Value *SizeVal = ConstantInt::get(Type::getInt64Ty(*TheContext), StructSize);
+    Value *MallocCall = Builder->CreateCall(MallocF, {SizeVal});
+    
+    // Store the struct value into the allocated memory
+    Builder->CreateStore(PayloadVal, MallocCall);
+    PayloadVal = MallocCall;
+  }
+
+
+  auto *PayloadGV = TheModule->getNamedGlobal("turf_exception_payload");
+  if (!PayloadGV) {
+    PayloadGV = new GlobalVariable(*TheModule, PointerType::getUnqual(*TheContext), false, GlobalValue::InternalLinkage, ConstantPointerNull::get(PointerType::getUnqual(*TheContext)), "turf_exception_payload");
+  }
+  Builder->CreateStore(PayloadVal, PayloadGV);
+  
+  auto *TopGV = TheModule->getNamedGlobal("turf_exception_top");
+  if (!TopGV) {
+    TopGV = new GlobalVariable(*TheModule, Type::getInt32Ty(*TheContext), false, GlobalValue::InternalLinkage, ConstantInt::get(Type::getInt32Ty(*TheContext), 0), "turf_exception_top");
+  }
+  
+  Function *LongJmpF = TheModule->getFunction("longjmp");
+  if (!LongJmpF) {
+    LongJmpF = Function::Create(FunctionType::get(Type::getVoidTy(*TheContext), {PointerType::getUnqual(*TheContext), Type::getInt32Ty(*TheContext)}, false), Function::ExternalLinkage, "longjmp", TheModule.get());
+  }
+  
+  Value *Top = Builder->CreateLoad(Type::getInt32Ty(*TheContext), TopGV);
+  Value *IsEmpty = Builder->CreateICmpEQ(Top, ConstantInt::get(Type::getInt32Ty(*TheContext), 0));
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  BasicBlock *CrashBB = BasicBlock::Create(*TheContext, "crash", TheFunction);
+  BasicBlock *JmpBB = BasicBlock::Create(*TheContext, "jmp");
+  
+  Builder->CreateCondBr(IsEmpty, CrashBB, JmpBB);
+  
+  Builder->SetInsertPoint(CrashBB);
+  Function *PutsF = TheModule->getFunction("puts");
+  if (!PutsF) {
+    PutsF = Function::Create(FunctionType::get(Type::getInt32Ty(*TheContext), {PointerType::getUnqual(*TheContext)}, false), Function::ExternalLinkage, "puts", TheModule.get());
+  }
+  Value *UncaughtMsgPrefix = Builder->CreateGlobalString("Runtime Error: Uncaught exception:", "uncaught_msg_prefix");
+  Builder->CreateCall(PutsF, {UncaughtMsgPrefix});
+  Value *MessagePtrPtr = Builder->CreateBitCast(PayloadVal, PointerType::getUnqual(*TheContext));
+  Value *MessagePtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext), MessagePtrPtr, "msg_ptr");
+  Builder->CreateCall(PutsF, {MessagePtr});
+  Function *ExitF = TheModule->getFunction("exit");
+  if (!ExitF) {
+    ExitF = Function::Create(FunctionType::get(Type::getVoidTy(*TheContext), {Type::getInt32Ty(*TheContext)}, false), Function::ExternalLinkage, "exit", TheModule.get());
+  }
+  Builder->CreateCall(ExitF, {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
+  Builder->CreateUnreachable();
+  
+  TheFunction->insert(TheFunction->end(), JmpBB);
+  Builder->SetInsertPoint(JmpBB);
+  Value *FrameIdx = Builder->CreateSub(Top, ConstantInt::get(Type::getInt32Ty(*TheContext), 1));
+  auto *StackGV = TheModule->getNamedGlobal("turf_exception_stack");
+  if (!StackGV) {
+    auto *ArrayTy = llvm::ArrayType::get(llvm::ArrayType::get(Type::getInt64Ty(*TheContext), 32), 32);
+    StackGV = new GlobalVariable(*TheModule, ArrayTy, false, GlobalValue::InternalLinkage, Constant::getNullValue(ArrayTy), "turf_exception_stack");
+  }
+  Value *FramePtr = Builder->CreateGEP(StackGV->getValueType(), StackGV, {ConstantInt::get(Type::getInt32Ty(*TheContext), 0), FrameIdx});
+  Builder->CreateCall(LongJmpF, {FramePtr, ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
+  Builder->CreateUnreachable();
+  
+  BasicBlock *DeadBB = BasicBlock::Create(*TheContext, "after_raise", TheFunction);
+  Builder->SetInsertPoint(DeadBB);
+  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+}
+
+Value *ModuleImportExprAST::codegen() {
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->EnterModule(ModuleName);
+  }
+  Value *Res = Body->codegen();
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->ExitModule();
+  }
+  return Res;
 }

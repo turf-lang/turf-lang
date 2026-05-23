@@ -1,0 +1,36 @@
+struct list_int {
+    int* data,
+    int len,
+    int capacity
+}
+
+fn void list_int.push(int val) {
+    if self.capacity == 0 {
+        self.capacity = 4;
+        self.data = malloc(sizeof(int) * self.capacity);
+    } elseif self.len == self.capacity {
+        self.capacity = self.capacity * 2;
+        self.data = realloc(self.data, sizeof(int) * self.capacity);
+    }
+    
+    self.data[self.len] = val;
+    self.len = self.len + 1;
+}
+
+fn int list_int.get(int index) {
+    if index < 0 { return 0; }
+    if index >= self.len { return 0; }
+    return self.data[index];
+}
+
+fn int list_int.pop() {
+    if self.len == 0 { return 0; }
+    self.len = self.len - 1;
+    return self.data[self.len];
+}
+
+fn void list_int.free_memory() {
+    free(self.data);
+    self.len = 0;
+    self.capacity = 0;
+}

@@ -1,0 +1,2 @@
+@intrinsic("llvm.sqrt.f64")
+fn double sqrt(double x)

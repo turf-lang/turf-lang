@@ -18,6 +18,7 @@ class TurfType {
 public:
   virtual ~TurfType() = default;
   virtual std::string getName() const = 0;
+  virtual std::string getMangledName() const { return getName(); }
 
   // Convenience predicates — override in subclasses as needed
   virtual bool isNamed(const std::string &N) const { return false; }
@@ -55,6 +56,7 @@ public:
   ArrayType(TurfTypePtr Elem, int Sz = -1)
       : ElementType(std::move(Elem)), Size(Sz) {}
   std::string getName() const override { return ElementType->getName() + "[]"; }
+  std::string getMangledName() const override { return ElementType->getMangledName() + "_arr"; }
   bool isArray() const override { return true; }
   const TurfType *getElementType() const { return ElementType.get(); }
   TurfTypePtr getElementTypePtr() const { return ElementType; }
@@ -70,6 +72,7 @@ class TurfPointerType : public TurfType {
 public:
   explicit TurfPointerType(TurfTypePtr Pointee) : Pointee(std::move(Pointee)) {}
   std::string getName() const override { return Pointee->getName() + "*"; }
+  std::string getMangledName() const override { return Pointee->getMangledName() + "_ptr"; }
   TurfTypePtr getPointee() const { return Pointee; }
 };
 
@@ -94,6 +97,14 @@ public:
       S += TypeArgs[i]->getName();
     }
     return S + ">";
+  }
+
+  std::string getMangledName() const override {
+    std::string S = BaseName;
+    for (const auto& Arg : TypeArgs) {
+      S += "_" + Arg->getMangledName();
+    }
+    return S;
   }
 
   bool isGeneric() const override { return true; }
