@@ -1,119 +1,168 @@
 # Turf-Lang Syntax Reference
 
-This reference is generated directly by validating the parsing rules, lexer tokens, and built-in function bindings found in the compiler source code (`Parser.cpp`, `Lexer.cpp`, `AST.h`, `Builtins.cpp`).
+This document serves as the comprehensive syntax reference for Turf-Lang, covering its data types, control structures, and standard library following its architectural overhaul.
 
 ## Table of Contents
-1. [Types](#types)
-2. [Literals](#literals)
-3. [Variables](#variables)
-4. [Arrays](#arrays)
-5. [Operators & Expressions](#operators--expressions)
-6. [Type Casting](#type-casting)
+1. [Hello World](#hello-world)
+2. [Types](#types)
+3. [Literals](#literals)
+4. [Variables & Arrays](#variables--arrays)
+5. [Structs](#structs)
+6. [Operators & Expressions](#operators--expressions)
 7. [Control Flow](#control-flow)
 8. [Functions](#functions)
-9. [Built-in Functions](#built-in-functions)
+9. [Error Handling](#error-handling)
+10. [Special Expressions](#special-expressions)
+11. [Standard Library (Built-ins)](#standard-library-built-ins)
+
+---
+
+## Hello World
+
+A simple Hello World program in Turf-Lang:
+
+```c
+fn int main() {
+    printline("Hello, World!");
+    return 0;
+}
+```
 
 ---
 
 ## Types
-Turf-Lang uses strong static typing. The supported types are:
-- `int` (64-bit integer)
-- `double` (64-bit float). The `float` keyword is also accepted as an alias.
-- `bool` (boolean)
-- `string` (string / byte pointer)
-- `void` (Allowed **only** as a function return type)
+
+Turf-Lang uses strong static typing. The type system supports primitives, arrays, generics, and user-defined structs.
+
+### Primitive Types
+- `int`: 64-bit signed integer
+- `double`: 64-bit floating-point number
+- `bool`: Boolean type (`true` or `false`)
+- `string`: String literal or byte pointer
+- `void`: Used only as a function return type to indicate no value is returned
+
+### Pointer Types
+You can create a pointer to any type by appending `*`:
+- `int*`, `double*`, `string*`, etc.
+
+### Arrays
+Arrays have a specific element type and optionally a compile-time fixed size.
+- `int[5]` represents an array of 5 integers.
+- Multi-dimensional arrays are supported (e.g., `int[5][10]`).
+
+### Generic Lists
+Turf-Lang provides a built-in generic list type.
+- `list<int>`, `list<string>`, `list<double>`, etc.
+
+---
 
 ## Literals
-- **Integers**: `42`, `-10`
-- **Doubles**: `3.14`, `-0.001`
-- **Booleans**: `true`, `false`
-- **Strings**: `"Hello, World\n"` (Supports escape sequences: `\n`, `\t`, `\\`, `\"`)
 
-## Variables
-Variables must be declared with their static type and require an initialization value at the time of declaration.
+- **Integer**: `42`, `-10`
+- **Double**: `3.14`, `-0.001`
+- **Boolean**: `true`, `false`
+- **String**: `"Hello, World\n"` (Escape sequences like `\n`, `\t`, `\\`, `\"` are supported)
+
+---
+
+## Variables & Arrays
+
+### Variable Declaration
+Variables must be declared with a type and must be initialized immediately.
 
 ```c
-// Correct Declarations
-int x = 5;
-double pi = 3.14;
-bool is_active = true;
-string greeting = "hello";
+int x = 10;
+double pi = 3.1415;
+bool flag = true;
+string name = "Turf";
 ```
 
-### Assignments
-Variables can be mutated using standard assignment operators:
+### Array Declaration
+Arrays can be initialized with an array literal.
+
 ```c
-x = 10;
-x += 5;
-x -= 2;
-x *= 3;
-x /= 2;
-x %= 4;
-
-// Increment / Decrement
-x++;
-x--;
-++x;
---x;
+int[3] arr = [1, 2, 3];
+```
+Array elements are accessed using zero-based index `[ ]`:
+```c
+int first = arr[0];
+arr[1] = 42;
 ```
 
-## Arrays
-Arrays in Turf-Lang have a fixed compile-time size and can be declared with or without an initializer list.
+### Lists
+Lists are declared using the `list<T>` generic type.
+
+```c
+list<int> numbers;
+```
+*(Note: standard list methods like `.length`, `.push()`, `.pop()` are accessible depending on the standard library implementation).*
+
+---
+
+## Structs
+
+You can define custom data structures using the `struct` keyword.
 
 ### Declaration
 ```c
-int[5] numbers;                     // Uninitialized array of size 5
-int[3] primes = [2, 3, 5];          // Initialized array of size 3
+struct Point {
+    int x
+    int y
+}
 ```
 
-### Access and Mutation
-Array elements are accessed using zero-based indexing.
+### Initialization
+To instantiate a struct, call it like a function with arguments matching the order of its fields:
 ```c
-numbers[0] = 42;                    // Standard assignment
-int first = primes[0];              // Accessing element
+Point p = Point(10, 20);
 ```
-*Note: Compound assignments (`arr[0] += 5`) are explicitly unsupported on array elements. You must use `arr[0] = arr[0] + 5`.*
 
-### Array Properties
-You can get the length of an array using the `.length` property.
+### Field Access
+Access struct fields using the `.` operator:
 ```c
-int l = primes.length;              // Evaluates to 3
+int x_coord = p.x;
+p.y = 30;
 ```
+
+---
 
 ## Operators & Expressions
 
 ### Arithmetic
-`+` (Add), `-` (Subtract), `*` (Multiply), `/` (Divide), `%` (Modulo), `^` (Exponentiation)
-*(Unary `-` is also supported for negation).*
+- `+` (Addition), `-` (Subtraction)
+- `*` (Multiplication), `/` (Division), `%` (Modulo)
+
+### Assignment & Compound Assignment
+- `=` (Assignment)
+- `+=`, `-=`, `*=`, `/=`, `%=` (Compound Assignment)
+
+### Increment / Decrement
+Both prefix and postfix operators are supported:
+- `++` (Increment)
+- `--` (Decrement)
 
 ### Relational
-`==` (Equal), `!=` (Not equal)
-`<` (Less than), `>` (Greater than)
-`<=` (Less than or equal), `>=` (Greater than or equal)
+- `==` (Equal), `!=` (Not equal)
+- `<` (Less than), `>` (Greater than)
+- `<=` (Less than or equal), `>=` (Greater than or equal)
 
 ### Logical
-`&&` (Logical AND), `||` (Logical OR)
-*Note: Logical NOT (`!`) is reserved in the lexer but not fully implemented as a unary operator in the parser.*
+- `&&` (Logical AND)
+- `||` (Logical OR)
 
-## Type Casting
-Explicit, function-style type casting is supported between base types:
-```c
-int(3.14)       // Casts double to int
-double(42)      // Casts int to double
-string(1)       // Casts bool/int to string
-```
+---
 
 ## Control Flow
 
-### If / Else
-Turf-Lang supports two forms of `if` statements.
+### If / Elseif / Else
+Turf-Lang supports both an expression-based single-line `if...then...else` and a block-based `if...elseif...else`.
 
-**Form 1: Expression / Single-line**
+**Expression Form:**
 ```c
 if x > 0 then x = 1 else x = 0;
 ```
 
-**Form 2: Block Form (with elseif)**
+**Block Form:**
 ```c
 if x > 0 {
     printline("Positive");
@@ -132,45 +181,118 @@ while x < 10 {
 ```
 
 ### For Loop
-A range-based for loop where `start`, `end`, and `step` can be *any expression*.
+Turf-Lang uses a range-based `for` loop with a customizable step expression.
 ```c
-int step_size = 2;
-for i in 0 .. (5 * 10) step (step_size + 1) {
+for i in 0 .. 10 step 1 {
     printline(i);
 }
 ```
 
 ### Break and Continue
-Used inside loop bodies to control execution flow.
+Control loop execution using `break` and `continue`.
 ```c
 while true {
-    if condition1 {
+    if should_skip {
         continue;
     }
-    if condition2 {
+    if should_stop {
         break;
     }
 }
 ```
 
+---
+
 ## Functions
-Functions are declared using the `fn` keyword, followed by the return type, name, explicitly typed parameters, and a block body.
+
+Functions are defined using the `fn` keyword, followed by the return type, function name, typed parameters, and a block body.
 
 ```c
 fn int add(int a, int b) {
     return a + b;
 }
 
-fn void do_nothing() {
+fn void greet() {
+    printline("Hello!");
     return;
 }
 ```
 
-## Built-in Functions
-Functions inherently registered in the language's global namespace:
+### Intrinsic Decorator
+To bind a function to an LLVM intrinsic or built-in, use the `@intrinsic("name")` decorator before the `fn` keyword.
+```c
+@intrinsic("print") fn void my_print(int val);
+```
 
-- **`print(expr)`**: Prints a single expression to standard output.
-- **`printline(expr)`**: Prints a single expression followed by a newline.
-- **`input()`**: Reads input from stdin and returns it as a `string`.
-- **`lengthof(string_ptr)`**: Evaluates the character length of a string. Returns an `int`. *(Note: This is strictly for strings; arrays use `.length`)*.
-- **`typeof(expr)`**: Returns a `string` representing the static type of the expression (e.g., `"int"`, `"double"`, `"bool"`).
+---
+
+## Error Handling
+
+Turf-Lang supports structured exception handling.
+
+### Raise
+Throw an exception payload using the `raise` keyword.
+```c
+raise "An error occurred";
+```
+
+### Try / OnError
+Catch exceptions using `try { ... } onError (err) { ... }`.
+```c
+try {
+    // Potentially failing code
+    raise 404;
+} onError (err) {
+    print("Caught error code: ");
+    printline(err);
+}
+```
+
+---
+
+## Special Expressions
+
+### Type Casting
+Convert values between compatible types using function-style casting:
+```c
+int(3.14)      // casts double to int (3)
+double(42)     // casts int to double (42.0)
+string(1)      // casts bool to string
+```
+
+### Sizeof
+Get the size of a specific type (useful for memory allocation).
+```c
+int ptr_size = sizeof(int*);
+```
+
+### Length property
+Retrieve the number of elements in an array or list using `.length`.
+```c
+int count = arr.length;
+```
+
+---
+
+## Standard Library (Built-ins)
+
+Turf-Lang comes with several built-in functions available globally:
+
+### I/O
+- `print(expr)`: Prints the evaluated expression to standard output.
+- `printline(expr)`: Prints the evaluated expression followed by a newline.
+- `input()`: Reads a line of text from standard input and returns it as a `string`.
+
+### Math
+- `power(a, b)`: Returns `a` raised to the power of `b`. Handles both `int` and `double`.
+- `abs(val)`: Returns the absolute value of `val`.
+
+### Memory Management
+*(Requires using `int*` or other pointer types)*
+- `malloc(size)`: Allocates `size` bytes of memory and returns a pointer.
+- `realloc(ptr, size)`: Reallocates `ptr` to a new `size`.
+- `free(ptr)`: Frees the previously allocated memory.
+
+### Utilities
+- `lengthof(str)`: Returns the string length of `str`. *(Note: For arrays and lists, use the `.length` property instead).*
+- `typeof(expr)`: Returns a `string` representing the static type of the evaluated expression (e.g., `"int"`, `"double"`, `"bool"`, `"string"`).
