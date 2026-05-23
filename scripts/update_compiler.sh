@@ -60,6 +60,7 @@ clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.c
         -Iexternal/llama.cpp/ggml/include \
         ${LDFLAGS[@]} \
         $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
+        -fopenmp \
         -lpthread -lm \
         ${FRAMEWORK_FLAGS[@]} \
         -o turf
