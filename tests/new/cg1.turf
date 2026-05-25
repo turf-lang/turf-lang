@@ -1,0 +1,5 @@
+fn int main() {
+  malloc(8)
+  free(0)
+  return 0
+}

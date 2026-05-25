@@ -127,9 +127,9 @@ public:
       : Loc(Loc), Name(Name) {}
 
   const std::string &getName() const { return Name; }
-
   llvm::Value *codegen() override;
   llvm::Value *codegenLValue() override;
+  const SourceLocation &getLoc() const { return Loc; }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<VariableExprAST>(Loc, Name);
   }
@@ -509,8 +509,8 @@ public:
   FuncCallExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Callee,
                   std::vector<std::unique_ptr<ExprAST>> Args)
       : Callee(std::move(Callee)), Args(std::move(Args)), Loc(Loc) {}
-
   const ExprAST *getCallee() const { return Callee.get(); }
+  const SourceLocation &getLoc() const { return Loc; }
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
 
   llvm::Value *codegen() override;
