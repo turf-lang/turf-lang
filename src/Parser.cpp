@@ -4,6 +4,7 @@
 #include "Codegen.h"
 #include "Errors.h"
 #include "Lexer.h"
+#include "SuggestionIndex.h"
 #include "SymbolTable.h"
 #include <map>
 #include <memory>
@@ -570,11 +571,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
     // Do not flag a keyword typo if the token was actually TOK_SELF.
     if (!IsKnownVariable && IdName != "self" && IdName.length() >= 2) {
-      for (const auto &pair : Keywords) {
-        int dist = getDamerauLevenshteinDistance(IdName, pair.first);
-        int thresh = std::max(1, (int)IdName.length() / 3);
-        if (dist <= thresh) { CouldBeKeywordTypo = true; break; }
-      }
+      CouldBeKeywordTypo = !SuggestionIndex::suggestKeywords(IdName, 1).empty();
     }
 
     if (CouldBeKeywordTypo) {
