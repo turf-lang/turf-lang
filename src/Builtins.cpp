@@ -1,3 +1,20 @@
+/**
+ * @file Builtins.cpp
+ * @brief Implementation of TurfLang intrinsic and built-in functions.
+ * @details Handles built-in operations like memory management (malloc, free),
+ *          input/output (print, input), mathematical operations, and direct
+ * LLVM IR mapping.
+ *
+ * @author a2ys
+ * @author AaravTandon24
+ * @author Karan
+ *
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ * @version 1.0.0
+ * @date 2026-05-25
+ */
+
 #include "Builtins.h"
 #include "Codegen.h" // TheModule, Builder, TheContext
 #include "Errors.h"  // SemanticError
@@ -54,6 +71,22 @@ static void ensure_builtins_registered() {
   RegisterBuiltin("typeof", {1, "Type of value"});
 }
 
+/**
+ * @brief Generates LLVM IR for a built-in intrinsic function.
+ *
+ * Takes the name of an intrinsic (e.g., "print", "malloc") and its arguments,
+ * then constructs the appropriate LLVM instructions or C standard library
+ * function calls.
+ *
+ * @param IntrinsicName The string name of the intrinsic function to generate.
+ * @param Args A vector of LLVM Values representing the arguments to the
+ * intrinsic.
+ * @param Loc The source location where the intrinsic is called, used for error
+ * reporting.
+ * @return llvm::Value* The resulting LLVM Value after evaluating the intrinsic,
+ * or nullptr on failure.
+ * @throws SemanticError if the intrinsic is unknown or arguments are invalid.
+ */
 llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
                               std::vector<llvm::Value *> &Args,
                               SourceLocation Loc) {
@@ -61,8 +94,11 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     Value *Val = Args[0];
     Function *PrintfFunc = TheModule->getFunction("printf");
     if (!PrintfFunc) {
-        FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext), {PointerType::getUnqual(*TheContext)}, true);
-        PrintfFunc = Function::Create(FT, Function::ExternalLinkage, "printf", TheModule.get());
+      FunctionType *FT =
+          FunctionType::get(Type::getInt32Ty(*TheContext),
+                            {PointerType::getUnqual(*TheContext)}, true);
+      PrintfFunc = Function::Create(FT, Function::ExternalLinkage, "printf",
+                                    TheModule.get());
     }
 
     Type *Ty = Val->getType();
@@ -73,7 +109,8 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
       Value *Fmt = Builder->CreateGlobalString("%lld", "printstrint");
       return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
     } else if (Ty->isIntegerTy(1)) {
-      Value *Zext = Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), "booltoint");
+      Value *Zext =
+          Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), "booltoint");
       Value *Fmt = Builder->CreateGlobalString("%d", "printstrbool");
       return Builder->CreateCall(PrintfFunc, {Fmt, Zext}, "printcall");
     } else if (Ty->isPointerTy()) {
@@ -88,8 +125,11 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     Value *Val = Args[0];
     Function *PrintfFunc = TheModule->getFunction("printf");
     if (!PrintfFunc) {
-        FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext), {PointerType::getUnqual(*TheContext)}, true);
-        PrintfFunc = Function::Create(FT, Function::ExternalLinkage, "printf", TheModule.get());
+      FunctionType *FT =
+          FunctionType::get(Type::getInt32Ty(*TheContext),
+                            {PointerType::getUnqual(*TheContext)}, true);
+      PrintfFunc = Function::Create(FT, Function::ExternalLinkage, "printf",
+                                    TheModule.get());
     }
 
     Type *Ty = Val->getType();
@@ -100,7 +140,8 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
       Value *Fmt = Builder->CreateGlobalString("%lld\n", "printstrint");
       return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
     } else if (Ty->isIntegerTy(1)) {
-      Value *Zext = Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), "booltoint");
+      Value *Zext =
+          Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), "booltoint");
       Value *Fmt = Builder->CreateGlobalString("%d\n", "printstrbool");
       return Builder->CreateCall(PrintfFunc, {Fmt, Zext}, "printcall");
     } else if (Ty->isPointerTy()) {
@@ -116,21 +157,27 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     if (!CallocFunc) {
       FunctionType *FT = FunctionType::get(
           PointerType::getUnqual(*TheContext),
-          {Type::getInt64Ty(*TheContext), Type::getInt64Ty(*TheContext)}, false);
-      CallocFunc = Function::Create(FT, Function::ExternalLinkage, "calloc", TheModule.get());
+          {Type::getInt64Ty(*TheContext), Type::getInt64Ty(*TheContext)},
+          false);
+      CallocFunc = Function::Create(FT, Function::ExternalLinkage, "calloc",
+                                    TheModule.get());
     }
 
     Function *ScanfFunc = TheModule->getFunction("scanf");
     if (!ScanfFunc) {
-      FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext),
-                                           {PointerType::getUnqual(*TheContext)}, true);
-      ScanfFunc = Function::Create(FT, Function::ExternalLinkage, "scanf", TheModule.get());
+      FunctionType *FT =
+          FunctionType::get(Type::getInt32Ty(*TheContext),
+                            {PointerType::getUnqual(*TheContext)}, true);
+      ScanfFunc = Function::Create(FT, Function::ExternalLinkage, "scanf",
+                                   TheModule.get());
     }
 
     Function *GetcharFunc = TheModule->getFunction("getchar");
     if (!GetcharFunc) {
-      FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext), false);
-      GetcharFunc = Function::Create(FT, Function::ExternalLinkage, "getchar", TheModule.get());
+      FunctionType *FT =
+          FunctionType::get(Type::getInt32Ty(*TheContext), false);
+      GetcharFunc = Function::Create(FT, Function::ExternalLinkage, "getchar",
+                                     TheModule.get());
     }
 
     Value *NumItems = ConstantInt::get(Type::getInt64Ty(*TheContext), 4096);
@@ -145,9 +192,11 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
   if (IntrinsicName == "malloc") {
     Function *MallocFunc = TheModule->getFunction("malloc");
     if (!MallocFunc) {
-      FunctionType *FT = FunctionType::get(PointerType::getUnqual(*TheContext),
-                                           {Type::getInt64Ty(*TheContext)}, false);
-      MallocFunc = Function::Create(FT, Function::ExternalLinkage, "malloc", TheModule.get());
+      FunctionType *FT =
+          FunctionType::get(PointerType::getUnqual(*TheContext),
+                            {Type::getInt64Ty(*TheContext)}, false);
+      MallocFunc = Function::Create(FT, Function::ExternalLinkage, "malloc",
+                                    TheModule.get());
     }
     return Builder->CreateCall(MallocFunc, {Args[0]}, "malloc_call");
   }
@@ -157,8 +206,10 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     if (!ReallocFunc) {
       FunctionType *FT = FunctionType::get(
           PointerType::getUnqual(*TheContext),
-          {PointerType::getUnqual(*TheContext), Type::getInt64Ty(*TheContext)}, false);
-      ReallocFunc = Function::Create(FT, Function::ExternalLinkage, "realloc", TheModule.get());
+          {PointerType::getUnqual(*TheContext), Type::getInt64Ty(*TheContext)},
+          false);
+      ReallocFunc = Function::Create(FT, Function::ExternalLinkage, "realloc",
+                                     TheModule.get());
     }
     return Builder->CreateCall(ReallocFunc, {Args[0], Args[1]}, "realloc_call");
   }
@@ -166,9 +217,11 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
   if (IntrinsicName == "free") {
     Function *FreeFunc = TheModule->getFunction("free");
     if (!FreeFunc) {
-      FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext),
-                                           {PointerType::getUnqual(*TheContext)}, false);
-      FreeFunc = Function::Create(FT, Function::ExternalLinkage, "free", TheModule.get());
+      FunctionType *FT =
+          FunctionType::get(Type::getVoidTy(*TheContext),
+                            {PointerType::getUnqual(*TheContext)}, false);
+      FreeFunc = Function::Create(FT, Function::ExternalLinkage, "free",
+                                  TheModule.get());
     }
     return Builder->CreateCall(FreeFunc, {Args[0]}, "");
   }
@@ -180,8 +233,10 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
       for (Value *Arg : Args) {
         ParamTypes.push_back(Arg->getType());
       }
-      FunctionType *FT = FunctionType::get(Type::getDoubleTy(*TheContext), ParamTypes, false);
-      LLVMFunc = Function::Create(FT, Function::ExternalLinkage, IntrinsicName, TheModule.get());
+      FunctionType *FT =
+          FunctionType::get(Type::getDoubleTy(*TheContext), ParamTypes, false);
+      LLVMFunc = Function::Create(FT, Function::ExternalLinkage, IntrinsicName,
+                                  TheModule.get());
     }
     return Builder->CreateCall(LLVMFunc, Args, "llvm_call");
   }
@@ -193,20 +248,26 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     bool AIsInt = A->getType()->isIntegerTy(64);
     bool BIsInt = B->getType()->isIntegerTy(64);
 
-    if (!AIsDouble) A = Builder->CreateSIToFP(A, Type::getDoubleTy(*TheContext), "powcast1");
-    if (!BIsDouble) B = Builder->CreateSIToFP(B, Type::getDoubleTy(*TheContext), "powcast2");
+    if (!AIsDouble)
+      A = Builder->CreateSIToFP(A, Type::getDoubleTy(*TheContext), "powcast1");
+    if (!BIsDouble)
+      B = Builder->CreateSIToFP(B, Type::getDoubleTy(*TheContext), "powcast2");
 
-    Function *PowFunc = llvm::Intrinsic::getDeclaration(TheModule.get(), llvm::Intrinsic::pow, {Type::getDoubleTy(*TheContext)});
+    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
+        TheModule.get(), llvm::Intrinsic::pow,
+        {Type::getDoubleTy(*TheContext)});
     Value *Result = Builder->CreateCall(PowFunc, {A, B}, "powtmp");
 
-    if (AIsInt && BIsInt) return Builder->CreateFPToSI(Result, Type::getInt64Ty(*TheContext), "powint");
+    if (AIsInt && BIsInt)
+      return Builder->CreateFPToSI(Result, Type::getInt64Ty(*TheContext),
+                                   "powint");
     return Result;
   }
 
   if (IntrinsicName == "abs") {
     Value *Val = Args[0];
     if (Val->getType()->isDoubleTy()) {
-      Function *FAbsFunc = llvm::Intrinsic::getDeclaration(TheModule.get(), llvm::Intrinsic::fabs, {Type::getDoubleTy(*TheContext)});
+      Function *FAbsFunc = llvm::Intrinsic::getOrInsertDeclaration(TheModule.get(), llvm::Intrinsic::fabs, {Type::getDoubleTy(*TheContext)});
       return Builder->CreateCall(FAbsFunc, {Val}, "abs");
     } else {
       Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
@@ -215,7 +276,6 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
       return Builder->CreateSelect(Cmp, Neg, Val, "abs");
     }
   }
-  
 
   if (IntrinsicName == "lengthof") {
     Value *Val = Args[0];
@@ -226,9 +286,11 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     }
     Function *StrlenF = TheModule->getFunction("strlen");
     if (!StrlenF) {
-      FunctionType *FT = FunctionType::get(Type::getInt64Ty(*TheContext),
-                                           {PointerType::getUnqual(*TheContext)}, false);
-      StrlenF = Function::Create(FT, Function::ExternalLinkage, "strlen", TheModule.get());
+      FunctionType *FT =
+          FunctionType::get(Type::getInt64Ty(*TheContext),
+                            {PointerType::getUnqual(*TheContext)}, false);
+      StrlenF = Function::Create(FT, Function::ExternalLinkage, "strlen",
+                                 TheModule.get());
     }
     return Builder->CreateCall(StrlenF, {Val}, "lengthof");
   }

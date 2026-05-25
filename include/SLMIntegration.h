@@ -6,15 +6,15 @@
 namespace SLM {
 
 struct AISuggestion {
-    float confidence = 0.0f;
-    std::string explanation;
-    std::string fix_mode = "NONE";
-    std::string suggested_comment;
-    std::string code_patch;        // Human-readable description of the patch
-    std::string replacement_line;  // Exact Turf-Lang source line to substitute
-    std::string warning;
-    bool valid = false;
-    bool sandbox_validated = false;      // Whether sandbox validation passed
+  float confidence = 0.0f;
+  std::string explanation;
+  std::string fix_mode = "NONE";
+  std::string suggested_comment;
+  std::string code_patch;       // Human-readable description of the patch
+  std::string replacement_line; // Exact Turf-Lang source line to substitute
+  std::string warning;
+  bool valid = false;
+  bool sandbox_validated = false; // Whether sandbox validation passed
 };
 
 // Extracts +/- `contextSize` lines around the given error line.
@@ -47,8 +47,7 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
 // Current status: stub — always returns true. The infrastructure for
 // invoking a child compile pass needs to be designed first.
 bool verifySuggestion(const AISuggestion &suggestion,
-                      const std::string &originalSource,
-                      int errorLine);
+                      const std::string &originalSource, int errorLine);
 
 } // namespace SLM
 

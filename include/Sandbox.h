@@ -3,20 +3,18 @@
 
 #include "AST.h"
 #include "Lexer.h"
+#include "SLMIntegration.h"
 #include "SymbolTable.h"
 #include "Types.h"
-#include "SLMIntegration.h"
 #include <memory>
 #include <string>
 #include <vector>
 
-// ────────────────────────────────────────────────────────────────────────────
 // Sandbox: A safe testing ground for SLM-driven auto-fixes
-// ────────────────────────────────────────────────────────────────────────────
 //
-// The Sandbox holds a deep copy of the compiler state (source, AST, symbol table)
-// and allows speculative fixes to be validated without affecting the main
-// compiler environment.
+// The Sandbox holds a deep copy of the compiler state (source, AST, symbol
+// table) and allows speculative fixes to be validated without affecting the
+// main compiler environment.
 //
 // Workflow:
 // 1. Create a Sandbox from the current main compiler state
@@ -42,7 +40,7 @@ public:
     std::unique_ptr<ExprAST> AST;                 // Deep copy of AST root
     std::unique_ptr<SymbolTable> SymbolTableCopy; // Deep copy of symbol table
     std::vector<DiagnosticEngine::Diag> Diagnostics; // Captured diagnostics
-    
+
     CompilerStateSnapshot() = default;
     CompilerStateSnapshot(const CompilerStateSnapshot &) = delete;
     CompilerStateSnapshot &operator=(const CompilerStateSnapshot &) = delete;
@@ -60,11 +58,11 @@ public:
   Sandbox(Sandbox &&) = default;
   Sandbox &operator=(Sandbox &&) = default;
 
-  // ── Fix Application ──────────────────────────────────────────────────────
+  // Fix Application
   // Apply a single-line fix at the given line number
   bool applyFix(int lineNumber, const std::string &newLine);
 
-  // ── Validation ───────────────────────────────────────────────────────────
+  // Validation
   // Re-validate the entire sandbox source (parse + semantic check)
   // Returns true if validation succeeds (no new errors introduced)
   // All diagnostics during validation are captured and accessible via
@@ -73,10 +71,11 @@ public:
 
   // Incremental semantic validation: Only re-check changed nodes
   // (more efficient than full re-parse for small edits)
-  // Returns true if validation succeeds with no semantic errors on changed nodes
+  // Returns true if validation succeeds with no semantic errors on changed
+  // nodes
   bool validateIncremental();
 
-  // ── State Inspection ──────────────────────────────────────────────────────
+  // State Inspection
   // Get a reference to the modified source code
   const std::vector<std::string> &getModifiedSource() const {
     return Snapshot.SourceCode;
@@ -95,12 +94,12 @@ public:
   // Check if the original error at errorLine is still present after fix
   bool isOriginalErrorResolved(int errorLine) const;
 
-  // ── Incremental Validation Support ───────────────────────────────────────
+  // Incremental Validation Support
   // Get the set of node IDs that changed during this fix
   // Used for incremental semantic validation (only re-check changed nodes)
   const std::set<uint64_t> &getChangedNodeIDs() const { return ChangedNodeIDs; }
 
-  // ── Commit/Reject ───────────────────────────────────────────────────────
+  // Commit/Reject
   // Commit the sandbox changes back to the main compiler state
   // Should only be called after a successful validate()
   void commitToMain();
@@ -108,29 +107,30 @@ public:
   // Discard all sandbox changes (implicit on destruction if not committed)
   void reject();
 
-  // ── Diagnostics Helpers ──────────────────────────────────────────────────
+  // Diagnostics Helpers
   // Log a debug message about sandbox operations
   void logDebug(const std::string &msg) const;
 
 private:
   // Deep copy the provided source into our snapshot
-  static std::vector<std::string> cloneSource(
-      const std::vector<std::string> &source);
+  static std::vector<std::string>
+  cloneSource(const std::vector<std::string> &source);
 
   // Deep copy the AST (stub for now; full implementation requires
   // per-node clone methods on all ExprAST subclasses)
   static std::unique_ptr<ExprAST> cloneAST(const ExprAST *original);
 
   // Deep copy the symbol table
-  static std::unique_ptr<SymbolTable> cloneSymbolTable(
-      const SymbolTable *original);
+  static std::unique_ptr<SymbolTable>
+  cloneSymbolTable(const SymbolTable *original);
 
   // Classify the edited line so we know whether a localized update is safe.
   static EditKind classifyEditKind(const std::string &lineText);
 
   // Extract declaration metadata from a single-line declaration.
-  static bool parseDeclarationLine(const std::string &lineText, std::string &name,
-                                   TurfTypePtr &type, bool &isArray, int &arraySize);
+  static bool parseDeclarationLine(const std::string &lineText,
+                                   std::string &name, TurfTypePtr &type,
+                                   bool &isArray, int &arraySize);
 
   // Update the cloned symbol table for a localized line edit.
   void updateSymbolTableForEdit(int lineNumber, const std::string &newLine,
@@ -162,14 +162,13 @@ private:
   int LastEditedLine = 0;
   std::string LastEditedLineText;
   bool LocalizedValidationOnly = false;
-  std::set<uint64_t> ChangedNodeIDs;     // Nodes that changed during fix (for incremental validation)
-  bool IsValid = false;                  // Last validation result
-  bool IsCommitted = false;              // Whether changes have been committed to main state
+  std::set<uint64_t> ChangedNodeIDs; // Nodes that changed during fix (for
+                                     // incremental validation)
+  bool IsValid = false;              // Last validation result
+  bool IsCommitted = false; // Whether changes have been committed to main state
 };
 
-// ────────────────────────────────────────────────────────────────────────────
 // Global Sandbox Management
-// ────────────────────────────────────────────────────────────────────────────
 
 // Create a sandbox from the current main compiler state
 std::unique_ptr<Sandbox> CreateSandbox();

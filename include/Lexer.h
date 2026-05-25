@@ -30,11 +30,11 @@ extern std::map<std::string, int> Keywords;
 // The main loop calls setjmp(g_recoverJmp) before each statement.
 // raise() calls longjmp(g_recoverJmp, 1) to unwind back to that point.
 extern jmp_buf g_recoverJmp;
-extern bool    g_recoverActive; // true only while inside a setjmp guard
+extern bool g_recoverActive; // true only while inside a setjmp guard
 
 // When true, the SLM is loaded and AI suggestions are generated for errors.
 // Controlled by the --smart CLI flag. Default is off for deterministic output.
-extern bool    g_AIEnabled;
+extern bool g_AIEnabled;
 extern std::string SourceFilename;
 
 // DiagnosticEngine
@@ -45,8 +45,8 @@ class DiagnosticEngine {
 public:
   struct Diag {
     SourceLocation Loc;
-    std::string   Msg;
-    bool          IsWarning;
+    std::string Msg;
+    bool IsWarning;
   };
 
   // Record a diagnostic. Errors on a line that already has an error are
@@ -68,12 +68,15 @@ public:
 
   // Public accessors for diagnostics (used by sandbox validation)
   static const std::vector<Diag> &getDiagnostics() { return Diagnostics; }
-  static void clearDiagnostics() { Diagnostics.clear(); ErrorLines.clear(); }
+  static void clearDiagnostics() {
+    Diagnostics.clear();
+    ErrorLines.clear();
+  }
   static size_t getDiagnosticCount() { return Diagnostics.size(); }
 
 private:
   static std::vector<Diag> Diagnostics;
-  static std::set<int>     ErrorLines; // lines that already have an error
+  static std::set<int> ErrorLines; // lines that already have an error
 };
 
 enum Token {
@@ -98,8 +101,8 @@ enum Token {
   TOK_TYPE_STRING = -19,
   TOK_AND = -20,
   TOK_OR = -21,
-  TOK_CONV_INT = -22,   // for int(...)
-  TOK_CONV_DOUBLE = -23,   // for double(...)
+  TOK_CONV_INT = -22,    // for int(...)
+  TOK_CONV_DOUBLE = -23, // for double(...)
   TOK_TYPE_VOID = -24,
   TOK_RETURN = -25,
   TOK_FN = -26,
@@ -125,7 +128,8 @@ enum Token {
   TOK_AT = -46,
   TOK_TRY = -47,
   TOK_ONERROR = -48,
-  TOK_RAISE = -49
+  TOK_RAISE = -49,
+  TOK_LOOP = -50
 };
 
 int gettok();

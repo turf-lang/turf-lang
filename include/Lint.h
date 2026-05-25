@@ -3,8 +3,8 @@
 
 #include "AST.h"
 #include "Lexer.h"
-#include <set>
 #include <cstdint>
+#include <set>
 
 // Run all heuristic lint checks on a single AST node (and its children).
 // Emits warnings to stderr; never halts compilation.

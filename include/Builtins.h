@@ -9,7 +9,8 @@
 
 // CodegenIntrinsic
 // Invoked by FuncDefExprAST when an @intrinsic decorator is present.
-// It maps the intrinsic name string (e.g. "pow", "malloc") to LLVM IR generation.
+// It maps the intrinsic name string (e.g. "pow", "malloc") to LLVM IR
+// generation.
 llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
                               std::vector<llvm::Value *> &Args,
                               SourceLocation Loc);

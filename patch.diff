@@ -1,9 +1,0 @@
---- src/main.cpp
-+++ src/main.cpp
-@@ -308,6 +308,7 @@
-             !dynamic_cast<StructDeclExprAST*>(AST.get()) &&
-             !dynamic_cast<ModuleImportExprAST*>(AST.get())) {
-+          std::cerr << "Found type: " << typeid(*AST).name() << "\n";
-           std::cerr << "Error: Statements are not allowed outside of a function. Please define 'fn int main()' and move this code inside.\n";
-           exit(1);
-         }

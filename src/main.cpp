@@ -1,3 +1,20 @@
+/**
+ * @file main.cpp
+ * @brief TurfLang Compiler entry point.
+ * @details Parses command-line arguments, orchestrates the lexing, parsing,
+ *          and code generation passes, and writes the compiled binary or IR
+ * output.
+ *
+ * @author a2ys
+ * @author AaravTandon24
+ * @author Karan
+ *
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ * @version 1.0.0
+ * @date 2026-05-25
+ */
+
 #include "Builtins.h"
 #include "Codegen.h"
 #include "Lexer.h"
@@ -17,12 +34,12 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
 #include "llvm/Transforms/Utils.h"
-#include "llvm/TargetParser/Host.h"
-#include "llvm/TargetParser/Triple.h"
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -149,14 +166,19 @@ static int linkObject(const std::string &ObjFile,
 }
 
 // main
+/**
+ * @brief The compiler entry point.
+ *
+ * @param argc The number of command-line arguments.
+ * @param argv An array of command-line argument strings.
+ * @return int Exit code (0 on success, non-zero on compilation failure).
+ */
 int main(int argc, char **argv) {
   struct SLMCleanup {
     ~SLMCleanup() { SLM::SLMEngine::getInstance().release(); }
   } cleanup;
 
   auto opts = parseArgs(argc, argv);
-
-
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
@@ -209,13 +231,16 @@ int main(int argc, char **argv) {
           getNextToken();
           continue;
         }
-        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_IMPORT || CurTok == TOK_AT) {
-          // Save scope depth so we can restore it if codegen aborts via longjmp.
-          // Without this, a function that references an unknown variable causes
-          // EnterScope() to be called but ExitScope() to be skipped (longjmp
-          // bypasses all destructors and normal returns), leaving the scope
-          // stack dirty and the global scope's HasEarlyExit flag stale.
-          size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
+        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_IMPORT ||
+            CurTok == TOK_AT) {
+          // Save scope depth so we can restore it if codegen aborts via
+          // longjmp. Without this, a function that references an unknown
+          // variable causes EnterScope() to be called but ExitScope() to be
+          // skipped (longjmp bypasses all destructors and normal returns),
+          // leaving the scope stack dirty and the global scope's HasEarlyExit
+          // flag stale.
+          size_t SavedDepth =
+              GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
 
           // Parse and codegen prototype-only. Guard with setjmp so a bad
           // fn body doesn't kill the whole pre-pass.
@@ -237,7 +262,9 @@ int main(int argc, char **argv) {
               GlobalSymbolTable->ResetEarlyExitForCurrentScope();
             }
             // Skip to next fn, struct or EOF
-            while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_IMPORT && CurTok != TOK_AT && CurTok != TOK_EOF)
+            while (CurTok != TOK_FN && CurTok != TOK_STRUCT &&
+                   CurTok != TOK_IMPORT && CurTok != TOK_AT &&
+                   CurTok != TOK_EOF)
               getNextToken();
           }
           g_recoverActive = false;
@@ -265,7 +292,7 @@ int main(int argc, char **argv) {
   // Bootstrap the lexer for the main pass
   getNextToken();
 
-  // ── Phase Separation: Parse All ──────────────────────────────────────────
+  // Phase Separation: Parse All
   // Fully parse every top-level statement into an in-memory AST list BEFORE
   // calling codegen on any of them. This prevents orphaned LLVM BasicBlocks
   // and corrupted module state that previously occurred when a semantic error
@@ -298,7 +325,8 @@ int main(int argc, char **argv) {
           FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
         }
       } else {
-        while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_AT && CurTok != ';' && CurTok != TOK_EOF)
+        while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_AT &&
+               CurTok != ';' && CurTok != TOK_EOF)
           getNextToken();
       }
       g_recoverActive = false;
@@ -309,10 +337,12 @@ int main(int argc, char **argv) {
     if (setjmp(g_recoverJmp) == 0) {
       auto AST = ParseExpression();
       if (AST) {
-        if (!dynamic_cast<FuncDefExprAST*>(AST.get()) &&
-            !dynamic_cast<StructDeclExprAST*>(AST.get()) &&
-            !dynamic_cast<ModuleImportExprAST*>(AST.get())) {
-          std::cerr << "Error: Statements are not allowed outside of a function. Please define 'fn int main()' and move this code inside.\n";
+        if (!dynamic_cast<FuncDefExprAST *>(AST.get()) &&
+            !dynamic_cast<StructDeclExprAST *>(AST.get()) &&
+            !dynamic_cast<ModuleImportExprAST *>(AST.get())) {
+          std::cerr
+              << "Error: Statements are not allowed outside of a function. "
+                 "Please define 'fn int main()' and move this code inside.\n";
           DiagnosticEngine::flushAll();
           exit(1);
         }
@@ -323,25 +353,25 @@ int main(int argc, char **argv) {
       }
     } else {
       // longjmp landed here: skip to next statement boundary.
-      while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN && CurTok != TOK_STRUCT &&
-             CurTok != TOK_TYPE_INT && CurTok != TOK_TYPE_DOUBLE &&
-             CurTok != TOK_TYPE_BOOL && CurTok != TOK_TYPE_STRING &&
-             CurTok != TOK_IF && CurTok != TOK_WHILE && CurTok != TOK_FOR &&
-             CurTok != TOK_RETURN) {
+      while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
+             CurTok != TOK_STRUCT && CurTok != TOK_TYPE_INT &&
+             CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
+             CurTok != TOK_TYPE_STRING && CurTok != TOK_IF &&
+             CurTok != TOK_WHILE && CurTok != TOK_FOR && CurTok != TOK_RETURN) {
         getNextToken();
       }
     }
     g_recoverActive = false;
   }
 
-  // ── Phase Separation: Lint All ────────────────────────────────────────────
+  // Phase Separation: Lint All
   // Lint fn definitions first (body-only checks), then top-level statements.
   for (auto &AST : FnASTs)
     LintExpression(AST.get());
   for (auto &AST : TopLevelASTs)
     LintExpression(AST.get());
 
-  // ── Phase Separation: Codegen All ────────────────────────────────────────
+  // Phase Separation: Codegen All
   // Only non-fn top-level statements need codegen here. fn bodies were already
   // compiled in the pre-pass; codegenning them again would duplicate them.
   for (auto &AST : TopLevelASTs) {
@@ -371,14 +401,15 @@ int main(int argc, char **argv) {
   // Verify that an explicit 'main' function was defined in the primary module
   Function *MainFunc = TheModule->getFunction("main");
   if (!MainFunc || MainFunc->empty()) {
-    std::cerr << "Error: No entry point found. Please define 'fn int main()' in your file.\n";
+    std::cerr << "Error: No entry point found. Please define 'fn int main()' "
+                 "in your file.\n";
     return 1;
   }
 
   // Verify the generated IR
   verifyFunction(*MainFunc);
 
-  // ── Phase 5: LLVM Optimization Passes ─────────────────────────────────────
+  // Phase 5: LLVM Optimization Passes
   // Run LLVM's standard optimization pipeline over every function in the
   // module. This turns our Alloca/Load/Store pattern into register-based SSA
   // (mem2reg), folds constants, eliminates dead code, and simplifies the CFG,

@@ -91,8 +91,9 @@ private:
 
 public:
   explicit CFG(std::string FunctionName, TurfTypePtr ReturnType = TurfVoid())
-      : FunctionName(std::move(FunctionName)), ReturnType(std::move(ReturnType)),
-        EntryBlock(nullptr), ExitBlock(nullptr), NextID(0) {}
+      : FunctionName(std::move(FunctionName)),
+        ReturnType(std::move(ReturnType)), EntryBlock(nullptr),
+        ExitBlock(nullptr), NextID(0) {}
 
   // Accessors
   const std::string &getFunctionName() const { return FunctionName; }

@@ -1,3 +1,20 @@
+/**
+ * @file Algorithms.cpp
+ * @brief Algorithmic utilities for string distance calculation.
+ * @details Implements optimal string alignment algorithms, including
+ * Damerau-Levenshtein Distance. These functions are useful for finding closest
+ * matching strings such as correcting typos in variable names or keywords.
+ *
+ * @author a2ys
+ * @author AaravTandon24
+ * @author Karan
+ *
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ * @version 1.0.0
+ * @date 2026-05-25
+ */
+
 #include <algorithm>
 #include <string>
 #include <unordered_map>
@@ -5,9 +22,21 @@
 
 using namespace std;
 
-// DP implementation of Damerau-Levenshtein Distance (Optimal String Alignment)
-// Supports insertions, deletions, substitutions, and transpositions.
-// Transpositions improve detection of common typos like "pritn" -> "print".
+/**
+ * @brief Computes the Optimal String Alignment (restricted Damerau-Levenshtein)
+ * Distance.
+ *
+ * DP implementation supporting insertions, deletions, substitutions, and
+ * adjacent transpositions. Transpositions improve detection of common typos
+ * like "pritn" -> "print". Note that this does not handle multiple
+ * transpositions of the same substring optimally, but it is generally
+ * sufficient for simple typo correction.
+ *
+ * @param s1 The first string to compare.
+ * @param s2 The second string to compare.
+ * @return int The minimum number of edit operations required to transform s1
+ * into s2.
+ */
 int getLevenshteinDistance(const string &s1, const string &s2) {
   size_t m = s1.length();
   size_t n = s2.length();
@@ -45,6 +74,18 @@ int getLevenshteinDistance(const string &s1, const string &s2) {
   return dp[m][n];
 }
 
+/**
+ * @brief Computes the true Damerau-Levenshtein Distance between two strings.
+ *
+ * This algorithm calculates the distance allowing for insertions, deletions,
+ * substitutions, and transpositions of two adjacent characters. Unlike the
+ * restricted version, this correctly computes the edit distance when multiple
+ * transpositions might be required.
+ *
+ * @param s1 The first string to compare.
+ * @param s2 The second string to compare.
+ * @return int The true Damerau-Levenshtein distance between s1 and s2.
+ */
 int getDamerauLevenshteinDistance(const string &s1, const string &s2) {
   size_t m = s1.length(), n = s2.length();
   if (m == 0)

@@ -1,3 +1,21 @@
+/**
+ * @file Lexer.cpp
+ * @brief Tokenization and lexical analysis for TurfLang.
+ * @details Reads the source file character by character and groups them into
+ *          meaningful tokens (identifiers, literals, operators, etc.). Also
+ *          provides the DiagnosticEngine for error reporting and SLM
+ * integration.
+ *
+ * @author a2ys
+ * @author AaravTandon24
+ * @author Karan
+ *
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ * @version 1.0.0
+ * @date 2026-05-25
+ */
+
 #include "Lexer.h"
 #include "Colors.h"
 #include "SLMIntegration.h"
@@ -26,9 +44,8 @@ bool g_recoverActive = false;
 // AI/SLM flag: only true when --smart is passed on the CLI.
 bool g_AIEnabled = false;
 
-// Set to true after the SLM handles the first error in a --smart pass.
-// Any further errors are suppressed from SLM analysis because they are
-// likely cascading side-effects of the first failure (ghost errors).
+// Tracks if the SLM has generated a diagnostic this pass to suppress
+// analysis of subsequent cascading errors.
 static bool g_slmFiredThisPass = false;
 
 std::ifstream SourceFile;
@@ -76,14 +93,14 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   bool isWarning = D.IsWarning || D.Msg.find("Warning:") != std::string::npos ||
                    D.Msg.find("warning:") != std::string::npos;
 
-  const std::string &AccentColor = isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
-  const char *TypeLabel           = isWarning ? "warning" : "error";
+  const std::string &AccentColor =
+      isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
+  const char *TypeLabel = isWarning ? "warning" : "error";
 
-  // ── error/warning  at line X, col Y
-  std::cerr << Colors::BOLD << AccentColor << "\u2500\u2500 " << TypeLabel << " "
-            << Colors::RESET << Colors::BRIGHT_BLACK
-            << "at line " << D.Loc.Line << ", col " << D.Loc.Col
-            << Colors::RESET << "\n\n";
+  // error/warning at line X, col Y
+  std::cerr << Colors::BOLD << AccentColor << "\u2500\u2500 " << TypeLabel
+            << " " << Colors::RESET << Colors::BRIGHT_BLACK << "at line "
+            << D.Loc.Line << ", col " << D.Loc.Col << Colors::RESET << "\n\n";
 
   // Message body — embedded ANSI codes from error classes render intact.
   std::cerr << "  " << D.Msg << "\n";
@@ -91,18 +108,16 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   // Code snippet with │ gutter.
   if (D.Loc.Line > 0 && D.Loc.Line <= static_cast<int>(SourceLines.size())) {
     const std::string &LineContent = SourceLines[D.Loc.Line - 1];
-    std::string LineNumStr         = std::to_string(D.Loc.Line);
-    int CaretOffset                = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
+    std::string LineNumStr = std::to_string(D.Loc.Line);
+    int CaretOffset = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
 
     std::cerr << "\n"
               << Colors::BRIGHT_BLACK << "  " << LineNumStr << " \u2502 "
               << Colors::RESET << LineContent << "\n"
               << Colors::BRIGHT_BLACK << "  "
               << std::string(LineNumStr.length(), ' ') << " \u2502 "
-              << Colors::RESET
-              << std::string(CaretOffset, ' ')
-              << Colors::BOLD << AccentColor << "^ Here!" << Colors::RESET
-              << "\n";
+              << Colors::RESET << std::string(CaretOffset, ' ') << Colors::BOLD
+              << AccentColor << "^ Here!" << Colors::RESET << "\n";
   }
 
   std::cerr << "\n";
@@ -118,14 +133,10 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
 
   std::string finalMessage = Msg;
 
-  // Only invoke the SLM when the user explicitly opted in via --smart.
-  // This keeps the default compilation path fully deterministic with
-  // zero model-loading overhead.
+  // Conditionally invoke SLM analysis based on CLI configuration.
   if (g_AIEnabled) {
     if (g_slmFiredThisPass) {
-      // Cascade: the original compiler message is the primary diagnostic.
-      // The Smart Assist note is advisory only — rendered entirely in dim gray
-      // (BRIGHT_BLACK) so it does not visually compete with the error above.
+      // Append advisory AI note for cascading errors.
       finalMessage +=
           "\n\n  " + Colors::BRIGHT_BLACK +
           "[Smart Assist]  This error may be a cascading effect of the one "
@@ -136,13 +147,10 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
       SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line);
 
       if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
-        // ── High-confidence: AI suggestion leads as the primary diagnostic. ──
-        // The original compiler message is demoted to a subordinate reference
-        // below the AI block, clearly separated by a dim [Compiler] label.
+        // Replace compiler message with high-confidence AI suggestion.
         g_slmFiredThisPass = true;
-        finalMessage = Colors::BOLD + Colors::BRIGHT_CYAN +
-                       "[AI Suggestion]" + Colors::RESET + "  " +
-                       ai.suggested_comment;
+        finalMessage = Colors::BOLD + Colors::BRIGHT_CYAN + "[AI Suggestion]" +
+                       Colors::RESET + "  " + ai.suggested_comment;
 
         if (!ai.explanation.empty()) {
           finalMessage += "\n  " + Colors::CYAN +
@@ -150,21 +158,16 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
         }
 
         if (ai.fix_mode == "MODIFY" && !ai.code_patch.empty()) {
-          finalMessage += "\n  " + Colors::BRIGHT_GREEN + "Suggested fix:" +
-                          Colors::RESET + "\n    " + Colors::BRIGHT_GREEN +
-                          ai.code_patch + Colors::RESET;
+          finalMessage += "\n  " + Colors::BRIGHT_GREEN +
+                          "Suggested fix:" + Colors::RESET + "\n    " +
+                          Colors::BRIGHT_GREEN + ai.code_patch + Colors::RESET;
         }
 
         if (!ai.warning.empty()) {
-          finalMessage += "\n  " + Colors::YELLOW +
-                          "Note: " + Colors::RESET + ai.warning;
+          finalMessage +=
+              "\n  " + Colors::YELLOW + "Note: " + Colors::RESET + ai.warning;
         }
-
-        // High confidence: the AI suggestion is the complete diagnostic output.
-        // The original compiler message is not shown to avoid cluttering output.
       }
-      // else: confidence < 0.8 or fix_mode == NONE → original message only.
-      // finalMessage stays as the unmodified compiler Msg, no AI output.
     }
   }
 
@@ -197,11 +200,11 @@ void DiagnosticEngine::flushAll() {
 void DiagnosticEngine::reset() {
   Diagnostics.clear();
   ErrorLines.clear();
-  g_slmFiredThisPass = false; // Reset cascade guard for the next compilation pass
+  g_slmFiredThisPass =
+      false; // Reset cascade guard for the next compilation pass
 }
 
-// LogErrorAt : now defers to DiagnosticEngine so diagnostics are collected
-// and de-duplicated.  Warnings emitted from lint still use this path.
+// Emits and collects a generic diagnostic message at the given source location.
 void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
   bool isWarning = Msg.find("Warning:") != std::string::npos ||
                    Msg.find("warning:") != std::string::npos;
@@ -215,6 +218,15 @@ void resetLexer() {
   CurLoc = {1, 0};
 }
 
+/**
+ * @brief Retrieves the next token from the standard input or source file.
+ *
+ * Scans characters sequentially, skipping whitespace, identifying keywords,
+ * operators, numeric literals, and strings. Updates CurLoc for diagnostics.
+ *
+ * @return int The token type identifier (e.g., TOK_IDENTIFIER, TOK_NUMBER, or
+ * ASCII value).
+ */
 int gettok() {
   while (isspace(LastChar)) {
     // Handle newlines to track line numbers

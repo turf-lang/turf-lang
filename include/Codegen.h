@@ -17,8 +17,9 @@ extern std::unique_ptr<llvm::Module> TheModule;
 
 struct VarInfo {
   llvm::AllocaInst *Alloca;
-  TurfTypePtr Type;       // Dynamic type — works for int, list<Player>, int[5], etc.
-  // Array size is encoded inside Type (ArrayType::getSize()) — no separate field needed.
+  TurfTypePtr Type; // Dynamic type — works for int, list<Player>, int[5], etc.
+  // Array size is encoded inside Type (ArrayType::getSize()) — no separate
+  // field needed.
 };
 
 // Symbol Table: Maps variables to their memory locations (AllocaInst)
