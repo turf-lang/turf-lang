@@ -337,8 +337,17 @@ static const TurfType *getExprType(const ExprAST *E) {
 
       for (const auto &[Name, ParamTypes] : FuncParamTypes) {
         std::string Prefix = "turf_" + MethodName;
-        if (Name == Prefix ||
-            (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+        std::string Suffix = "_" + MethodName;
+        bool Match = false;
+        if (Name == Prefix || (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+          Match = true;
+        } else {
+          size_t Pos = Name.find(Suffix);
+          if (Pos != std::string::npos && (Pos + Suffix.size() == Name.size() || Name[Pos + Suffix.size()] == '_')) {
+            Match = true;
+          }
+        }
+        if (Match) {
           if (ParamTypes.size() == ArgTypes.size() + 1) {
             bool Compatible = true;
             for (size_t i = 0; i < ArgTypes.size(); ++i) {
@@ -517,7 +526,7 @@ Value *BinaryExprAST::codegen() {
           R, ConstantFP::get(*TheContext, APFloat(0.0)), "iszero");
     } else {
       IsZero = Builder->CreateICmpEQ(
-          R, ConstantInt::get(*TheContext, APInt(32, 0)), "iszero");
+          R, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), "iszero");
     }
 
     Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
@@ -553,7 +562,7 @@ Value *BinaryExprAST::codegen() {
           R, ConstantFP::get(*TheContext, APFloat(0.0)), "iszero");
     } else {
       IsZero = Builder->CreateICmpEQ(
-          R, ConstantInt::get(*TheContext, APInt(32, 0)), "iszero");
+          R, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), "iszero");
     }
 
     Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
@@ -2491,8 +2500,17 @@ Value *MethodCallExprAST::codegen() {
       // Fallback overload resolution
       for (const auto &[Name, ParamTypes] : FuncParamTypes) {
         std::string Prefix = "turf_" + MethodName;
-        if (Name == Prefix ||
-            (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+        std::string Suffix = "_" + MethodName;
+        bool Match = false;
+        if (Name == Prefix || (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+          Match = true;
+        } else {
+          size_t Pos = Name.find(Suffix);
+          if (Pos != std::string::npos && (Pos + Suffix.size() == Name.size() || Name[Pos + Suffix.size()] == '_')) {
+            Match = true;
+          }
+        }
+        if (Match) {
           if (ParamTypes.size() == ArgTypes.size() + 1) { // +1 for self
             bool Compatible = true;
             for (size_t i = 0; i < ArgTypes.size(); ++i) {
@@ -2754,8 +2772,17 @@ Value *StructInitExprAST::codegen() {
   if (!InitF) {
     for (const auto &[FName, ParamTypes] : FuncParamTypes) {
       std::string Prefix = "turf_" + InitName;
-      if (FName == Prefix ||
-          (FName.size() > Prefix.size() && FName[Prefix.size()] == '_')) {
+      std::string Suffix = "_" + InitName;
+      bool Match = false;
+      if (FName == Prefix || (FName.size() > Prefix.size() && FName[Prefix.size()] == '_')) {
+        Match = true;
+      } else {
+        size_t Pos = FName.find(Suffix);
+        if (Pos != std::string::npos && (Pos + Suffix.size() == FName.size() || FName[Pos + Suffix.size()] == '_')) {
+          Match = true;
+        }
+      }
+      if (Match) {
         if (ParamTypes.size() == ArgTypes.size() + 1) {
           bool Compatible = true;
           for (size_t i = 0; i < ArgTypes.size(); ++i) {
