@@ -32,6 +32,7 @@ struct Symbol {
 struct Scope {
   size_t Level;                              // Nesting depth
   std::map<std::string, SymbolID> Symbols;   // Name -> SymbolID mapping for this scope
+  std::map<std::string, TurfTypePtr> Types;  // Name -> Type mapping for this scope
   bool HasEarlyExit = false;                 // True if scope contains return/break
   
   explicit Scope(size_t Level) : Level(Level) {}
@@ -43,6 +44,8 @@ private:
   std::vector<Scope> ScopeStack;             // Stack of active scopes
   std::map<SymbolID, Symbol> AllSymbols;     // All symbols by ID
   SymbolID NextID = 1;                       // Next available symbol ID
+  std::string CurrentModule;                 // Current module namespace
+  std::vector<std::string> ModuleStack;      // Stack of active modules
   
 public:
   SymbolTable() {
@@ -58,6 +61,12 @@ public:
   void ExitScope();
   size_t GetCurrentLevel() const { return ScopeStack.size() - 1; }
   
+  // Module management
+  void EnterModule(const std::string &ModuleName);
+  void ExitModule();
+  std::string GetCurrentModule() const { return CurrentModule; }
+  bool IsInModule() const { return !CurrentModule.empty(); }
+  
   // Symbol declaration
   SymbolID DeclareSymbol(const std::string &Name, TurfTypePtr Type,
                          SourceLocation DeclLoc, llvm::AllocaInst *Alloca);
@@ -66,6 +75,11 @@ public:
   Symbol *LookupSymbol(const std::string &Name);
   Symbol *LookupSymbolInCurrentScope(const std::string &Name);
   Symbol *GetSymbolByID(SymbolID ID);
+
+  // Type registry
+  void RegisterType(const std::string &Name, TurfTypePtr Type);
+  TurfTypePtr LookupType(const std::string &Name) const;
+  TurfTypePtr LookupTypeInCurrentScope(const std::string &Name) const;
   
   // Diagnostics helpers
   bool IsSymbolInCurrentScope(const std::string &Name) const;

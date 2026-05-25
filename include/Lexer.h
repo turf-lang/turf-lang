@@ -117,11 +117,21 @@ enum Token {
   TOK_STEP = -38,
   TOK_RANGE = -39,
   TOK_ELSEIF = -40,
-  TOK_TYPE_LIST = -41
+  TOK_TYPE_LIST = -41,
+  TOK_STRUCT = -42,
+  TOK_SELF = -43,
+  TOK_SIZEOF = -44,
+  TOK_IMPORT = -45,
+  TOK_AT = -46,
+  TOK_TRY = -47,
+  TOK_ONERROR = -48,
+  TOK_RAISE = -49
 };
 
 int gettok();
 void resetLexer();
 void LogErrorAt(SourceLocation Loc, const std::string &Msg);
+int GetLastChar();
+void SetLastChar(int c);
 
 #endif

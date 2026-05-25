@@ -1,0 +1,12 @@
+// ERROR TEST — SYNTAX_ERROR (tight context ±3)
+// Category: SYNTAX_ERROR
+// Expects: Error about missing closing brace on the if block
+// The SLM should see only 3 lines around the error, which is enough to
+// spot the structural problem.
+
+int x = 10
+
+if x > 5 {
+    printline("x is big")
+
+printline("done")

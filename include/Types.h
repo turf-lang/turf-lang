@@ -18,6 +18,7 @@ class TurfType {
 public:
   virtual ~TurfType() = default;
   virtual std::string getName() const = 0;
+  virtual std::string getMangledName() const { return getName(); }
 
   // Convenience predicates — override in subclasses as needed
   virtual bool isNamed(const std::string &N) const { return false; }
@@ -55,10 +56,24 @@ public:
   ArrayType(TurfTypePtr Elem, int Sz = -1)
       : ElementType(std::move(Elem)), Size(Sz) {}
   std::string getName() const override { return ElementType->getName() + "[]"; }
+  std::string getMangledName() const override { return ElementType->getMangledName() + "_arr"; }
   bool isArray() const override { return true; }
   const TurfType *getElementType() const { return ElementType.get(); }
   TurfTypePtr getElementTypePtr() const { return ElementType; }
   int getSize() const { return Size; }
+};
+
+// ────────────────────────────────────────────────────────────────────────────
+// TurfPointerType — For pass-by-reference semantics (e.g. self)
+// ────────────────────────────────────────────────────────────────────────────
+class TurfPointerType : public TurfType {
+  TurfTypePtr Pointee;
+
+public:
+  explicit TurfPointerType(TurfTypePtr Pointee) : Pointee(std::move(Pointee)) {}
+  std::string getName() const override { return Pointee->getName() + "*"; }
+  std::string getMangledName() const override { return Pointee->getMangledName() + "_ptr"; }
+  TurfTypePtr getPointee() const { return Pointee; }
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -84,12 +99,53 @@ public:
     return S + ">";
   }
 
+  std::string getMangledName() const override {
+    std::string S = BaseName;
+    for (const auto& Arg : TypeArgs) {
+      S += "_" + Arg->getMangledName();
+    }
+    return S;
+  }
+
   bool isGeneric() const override { return true; }
   const std::string &getBaseName() const { return BaseName; }
   const std::vector<TurfTypePtr> &getTypeArgs() const { return TypeArgs; }
   const TurfType *getTypeArg(size_t I) const { return TypeArgs[I].get(); }
   TurfTypePtr getTypeArgPtr(size_t I) const { return TypeArgs[I]; }
 };
+
+// ────────────────────────────────────────────────────────────────────────────
+// StructType — user-defined structs
+// ────────────────────────────────────────────────────────────────────────────
+struct StructField {
+  std::string Name;
+  TurfTypePtr Type;
+};
+
+class TurfStructType : public TurfType {
+  std::string Name;
+  std::vector<StructField> Fields;
+
+public:
+  TurfStructType(std::string Name, std::vector<StructField> Fields)
+      : Name(std::move(Name)), Fields(std::move(Fields)) {}
+
+  std::string getName() const override { return Name; }
+  const std::vector<StructField> &getFields() const { return Fields; }
+  
+  int getFieldIndex(const std::string &FieldName) const {
+    for (size_t i = 0; i < Fields.size(); ++i) {
+      if (Fields[i].Name == FieldName) return static_cast<int>(i);
+    }
+    return -1;
+  }
+  
+  TurfTypePtr getFieldType(const std::string &FieldName) const {
+    int idx = getFieldIndex(FieldName);
+    return idx >= 0 ? Fields[idx].Type : nullptr;
+  }
+};
+
 
 // ────────────────────────────────────────────────────────────────────────────
 // Singleton accessors for built-in primitive types

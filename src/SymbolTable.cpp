@@ -52,11 +52,24 @@ void SymbolTable::ExitScope() {
 }
 
 
+void SymbolTable::EnterModule(const std::string &ModuleName) {
+  ModuleStack.push_back(CurrentModule);
+  CurrentModule = ModuleName;
+}
+
+void SymbolTable::ExitModule() {
+  if (ModuleStack.empty())
+    return;
+  CurrentModule = ModuleStack.back();
+  ModuleStack.pop_back();
+}
+
 SymbolID SymbolTable::DeclareSymbol(const std::string &Name, TurfTypePtr Type,
                                     SourceLocation DeclLoc,
                                     llvm::AllocaInst *Alloca) {
   if (ScopeStack.empty())
     EnterScope();
+
   
   SymbolID ID = NextID++;
   size_t Level = GetCurrentLevel();
@@ -104,6 +117,33 @@ Symbol *SymbolTable::GetSymbolByID(SymbolID ID) {
   auto It = AllSymbols.find(ID);
   if (It != AllSymbols.end()) {
     return &It->second;
+  }
+  return nullptr;
+}
+
+void SymbolTable::RegisterType(const std::string &Name, TurfTypePtr Type) {
+  if (ScopeStack.empty())
+    EnterScope();
+  ScopeStack.back().Types[Name] = std::move(Type);
+}
+
+TurfTypePtr SymbolTable::LookupType(const std::string &Name) const {
+  for (auto It = ScopeStack.rbegin(); It != ScopeStack.rend(); ++It) {
+    auto TypeIt = It->Types.find(Name);
+    if (TypeIt != It->Types.end()) {
+      return TypeIt->second;
+    }
+  }
+  return nullptr;
+}
+
+TurfTypePtr SymbolTable::LookupTypeInCurrentScope(const std::string &Name) const {
+  if (ScopeStack.empty())
+    return nullptr;
+  const Scope &CurrentScope = ScopeStack.back();
+  auto It = CurrentScope.Types.find(Name);
+  if (It != CurrentScope.Types.end()) {
+    return It->second;
   }
   return nullptr;
 }

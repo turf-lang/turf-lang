@@ -1,0 +1,40 @@
+// std/math.tr
+
+@intrinsic("power")
+fn int power(int base, int exp)
+
+@intrinsic("power")
+fn double power(double base, int exp)
+
+@intrinsic("power")
+fn double power(int base, double exp)
+
+@intrinsic("power")
+fn double power(double base, double exp)
+
+@intrinsic("abs")
+fn int abs(int val)
+
+@intrinsic("abs")
+fn double abs(double val)
+
+@intrinsic("llvm.pow.f64")
+fn double pow(double base, double exp)
+
+@intrinsic("llvm.sqrt.f64")
+fn double sqrt(double val)
+
+@intrinsic("llvm.sin.f64")
+fn double sin(double val)
+
+@intrinsic("llvm.cos.f64")
+fn double cos(double val)
+
+@intrinsic("llvm.floor.f64")
+fn double floor(double val)
+
+@intrinsic("llvm.ceil.f64")
+fn double ceil(double val)
+
+@intrinsic("llvm.round.f64")
+fn double round(double val)

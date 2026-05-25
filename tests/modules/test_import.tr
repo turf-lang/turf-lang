@@ -1,0 +1,14 @@
+import math;
+
+@intrinsic("printline")
+fn void printline(string s)
+
+fn int main() {
+  double val = math.sqrt(16.0);
+  if val == 4.0 {
+    printline("OK");
+  } else {
+    printline("FAIL");
+  }
+  return 0;
+}

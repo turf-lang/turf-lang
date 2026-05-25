@@ -1,0 +1,21 @@
+// ERROR TEST — FUNCTION_SIGNATURE (medium context ±5, testing 3b pinning)
+// Category: FUNCTION_SIGNATURE
+// Expects: Error about wrong number of arguments or type mismatch.
+// The SLM should see the call site AND the pinned declaration of the function.
+
+fn int multiply(int x, int y) {
+    return x * y
+}
+
+// ... some padding lines so multiply is out of the +/-5 window
+printline("padding")
+printline("padding")
+printline("padding")
+printline("padding")
+printline("padding")
+printline("padding")
+printline("padding")
+printline("padding")
+
+int res = multiply(5) // missing argument
+printline(res)

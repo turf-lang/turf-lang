@@ -1,0 +1,13 @@
+struct User {
+  int age,
+  string name
+}
+
+fn void User.init(int starting_age) {
+  self.age = starting_age;
+  self.name = "Unknown User";
+}
+
+User u = User(10);
+print(u.age);
+print(u.name);

@@ -203,29 +203,12 @@ public:
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
 
-    std::vector<std::string> Candidates;
-    for (const auto &B : Builtins) {
-      int threshold = std::max(1, (int)Name.length() / 3);
-      if (getDamerauLevenshteinDistance(Name, B.Name) <= threshold) {
-        Candidates.push_back(B.Name);
-      }
-    }
 
-    if (!Candidates.empty()) {
-      Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
-      for (size_t i = 0; i < Candidates.size(); ++i) {
-        Message += Colors::BRIGHT_YELLOW + "'" + Candidates[i] + "'" +
-                   Colors::BRIGHT_GREEN;
-        if (i != Candidates.size() - 1)
-          Message += ", ";
-      }
-      Message += "?" + Colors::RESET;
-    } else {
-      Message += "\n  " + Colors::BRIGHT_GREEN +
-                 "Hint: Double-check the spelling against the built-in "
-                 "functions like 'printline' or 'lengthof'." +
-                 Colors::RESET;
-    }
+
+    Message += "\n  " + Colors::BRIGHT_GREEN +
+               "Hint: Double-check the spelling against the built-in "
+               "functions like 'printline' or 'lengthof'." +
+               Colors::RESET;
   }
 };
 
@@ -266,17 +249,6 @@ public:
         int threshold = std::max(1, (int)Name.length() / 3);
         if (getDamerauLevenshteinDistance(Name, KnownVar) <= threshold) {
           Candidates.push_back(KnownVar);
-        }
-      }
-
-      // Check built-in functions
-      for (const auto &builtin : Builtins) {
-        if (builtin.Name == Name)
-          continue;
-
-        int threshold = std::max(1, (int)Name.length() / 3);
-        if (getDamerauLevenshteinDistance(Name, builtin.Name) <= threshold) {
-          Candidates.push_back(builtin.Name);
         }
       }
 
@@ -330,15 +302,7 @@ public:
         }
       }
 
-      // Check built-in functions
-      for (const auto &builtin : Builtins) {
-        if (builtin.Name == Name)
-          continue;
-        int threshold = std::max(1, (int)Name.length() / 3);
-        if (getDamerauLevenshteinDistance(Name, builtin.Name) <= threshold) {
-          Candidates.push_back(builtin.Name);
-        }
-      }
+
 
       if (!Candidates.empty()) {
         foundCandidate = true;

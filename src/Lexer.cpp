@@ -37,7 +37,8 @@ long long IntVal;
 bool BoolVal;
 std::string IdentifierStr;
 std::string StringVal;
-
+int GetLastChar() { return LastChar; }
+void SetLastChar(int c) { LastChar = c; }
 std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"then", TOK_THEN},
                                        {"else", TOK_ELSE},
@@ -58,7 +59,14 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"in", TOK_IN},
                                        {"step", TOK_STEP},
                                        {"elseif", TOK_ELSEIF},
-                                       {"list", TOK_TYPE_LIST}};
+                                       {"list", TOK_TYPE_LIST},
+                                       {"struct", TOK_STRUCT},
+                                       {"self", TOK_SELF},
+                                       {"sizeof", TOK_SIZEOF},
+                                       {"import", TOK_IMPORT},
+                                       {"try", TOK_TRY},
+                                       {"onError", TOK_ONERROR},
+                                       {"raise", TOK_RAISE}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
@@ -475,6 +483,12 @@ int gettok() {
       CurCol++;
       return TOK_DIV_ASSIGN;
     }
+  }
+
+  if (LastChar == '@') {
+    LastChar = SourceFile.get();
+    CurCol++;
+    return TOK_AT;
   }
 
   if (LastChar == EOF)

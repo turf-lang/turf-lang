@@ -1,0 +1,15 @@
+struct User {
+    int age,
+    string name
+}
+
+User[5] users
+
+users[0] = User(25, "Alice")
+users[1] = User(30, "Bob")
+users[2] = User(35, "Charlie")
+
+printline(users[0].name)
+printline(users[0].age)
+printline(users[1].name)
+printline(users[1].age)
