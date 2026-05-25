@@ -54,12 +54,26 @@ if [ "$(uname)" = "Darwin" ]; then
     FRAMEWORK_FLAGS+=("-framework" "Accelerate")
 fi
 
+# Add -fopenmp only when the OpenMP runtime is actually available.
+# On macOS, brew-installed LLVM bundles libomp so it is always safe.
+# On Linux, only add the flag when ldconfig can see libomp or libgomp;
+# this avoids "cannot find -lomp" on CI runners where llama.cpp was
+# built with -DGGML_OPENMP=OFF.
+OPENMP_FLAGS=()
+if [ "$(uname)" = "Darwin" ]; then
+    OPENMP_FLAGS+=("-fopenmp")
+elif ldconfig -p 2>/dev/null | grep -qE 'lib(omp|gomp)(\.so|-)'; then
+    # Found libomp (LLVM) or libgomp (GCC) — safe to link OpenMP
+    OPENMP_FLAGS+=("-fopenmp")
+fi
+
 clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp \
         -Iinclude \
         -Iexternal/llama.cpp/include \
         -Iexternal/llama.cpp/ggml/include \
         ${LDFLAGS[@]} \
         $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
+        ${OPENMP_FLAGS[@]} \
         -lpthread -lm \
         ${FRAMEWORK_FLAGS[@]} \
         -o turf

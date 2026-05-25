@@ -2,7 +2,7 @@ name: Turf Test Suites
 
 on:
   push:
-    branches: ["master", "dev"]
+    branches: ["master", "dev", "puang/build-script"]
   pull_request:
     branches: ["master", "dev"]
 
@@ -20,7 +20,7 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 22
-          sudo apt-get install -y llvm-22-dev cmake
+          sudo apt-get install -y llvm-22-dev cmake libomp-22-dev
           echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
 
       - name: Ensure correct file permissions
@@ -31,8 +31,13 @@ jobs:
       - name: Build llama.cpp
         run: |
           cd external/llama.cpp
-          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF
+          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_OPENMP=OFF
           cmake --build build --config Release -j $(nproc)
+
+      - name: Configure OpenMP
+        run: |
+          echo "LIBRARY_PATH=/usr/lib/llvm-22/lib:$LIBRARY_PATH" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/usr/lib/llvm-22/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Build Turf Compiler
         run: ./scripts/update_compiler.sh
