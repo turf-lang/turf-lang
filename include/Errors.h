@@ -663,6 +663,36 @@ public:
                      Colors::RESET) {}
 };
 
+// Use-after-free error
+class UseAfterFreeError : public TurfError {
+public:
+  UseAfterFreeError(SourceLocation Loc, const std::string &Name)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Oops! You're using memory from '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' after it was freed." + Colors::RESET) {
+    Message += "\n  " + Colors::BRIGHT_GREEN + "Hint: Don't use memory after calling free(). Consider setting the pointer to null after freeing." + Colors::RESET;
+  }
+};
+
+// Double free error
+class DoubleFreeError : public TurfError {
+public:
+  DoubleFreeError(SourceLocation Loc, const std::string &Name)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Double free detected for '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "'." + Colors::RESET) {
+    Message += "\n  " + Colors::BRIGHT_GREEN + "Hint: Avoid calling free() on the same pointer more than once." + Colors::RESET;
+  }
+};
+
+// Use-before-assignment error
+class DefiniteAssignmentError : public TurfError {
+public:
+  DefiniteAssignmentError(SourceLocation Loc, const std::string &Name)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Oops! You're using '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' before it has a value." + Colors::RESET) {
+    Message += "\n  " + Colors::BRIGHT_GREEN + "Hint: Make sure every path assigns to '" + Name + "' before you use it." + Colors::RESET;
+  }
+};
+
 // ── List Errors ───────────────────────────────────────────────────────────────
 
 // Missing generic type parameter: list bad  (instead of list<int> bad)

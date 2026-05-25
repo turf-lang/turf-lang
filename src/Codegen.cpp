@@ -4,10 +4,13 @@
 #include "Builtins.h"
 #include "CFG.h"
 #include "Errors.h"
+#include "Analysis.h"
+#include "AliasAnalysis.h"
 #include "Lexer.h"
-#include "SuggestionIndex.h"
+#include "ValueRange.h"
 #include "Lint.h"
 #include "SymbolTable.h"
+#include "CallGraph.h"
 #include "Types.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Verifier.h"
@@ -633,7 +636,10 @@ Value *VarDeclExprAST::codegen() {
     }
 
     if (GlobalSymbolTable)
-      GlobalSymbolTable->DeclareSymbol(Name, Type, Loc, Alloca);
+        {
+          SymbolID id = GlobalSymbolTable->DeclareSymbol(Name, Type, Loc, Alloca);
+          std::cerr << "[Codegen] Declared symbol '" << Name << "' id=" << id << "\n";
+        }
     NamedValues[Name] = {Alloca, Type};
     return RetVal;
   }
@@ -1381,6 +1387,7 @@ Value *FuncDefExprAST::codegen() {
   }
 
   // Alloca each parameter and add to NamedValues and GlobalSymbolTable
+  std::vector<SymbolID> ParamIDs;
   for (auto &Arg : TheFunc->args()) {
     TurfTypePtr ParamTurfType = TurfInt(); // fallback
     for (const auto &P : Params)
@@ -1408,8 +1415,9 @@ Value *FuncDefExprAST::codegen() {
     // Add parameter to symbol table
     if (GlobalSymbolTable) {
       SourceLocation ParamLoc = Loc;
-      GlobalSymbolTable->DeclareSymbol(std::string(Arg.getName()),
+      SymbolID id = GlobalSymbolTable->DeclareSymbol(std::string(Arg.getName()),
                                        RegisteredType, ParamLoc, Alloca);
+      ParamIDs.push_back(id);
     }
   }
 
@@ -1417,19 +1425,68 @@ Value *FuncDefExprAST::codegen() {
   LintExpression(Body.get());
 
   // Codegen the body
+  std::cerr << "[Codegen] About to codegen body for function: " << Name << "\n";
+  // Debug: inspect top-level expressions in the body
+  if (auto Bl = dynamic_cast<BlockExprAST*>(Body.get())) {
+    std::cerr << "[Codegen] Body has " << Bl->getExpressions().size() << " expressions\n";
+    for (const auto &E : Bl->getExpressions()) {
+      std::cerr << "[Codegen] Expr type: " << typeid(*E.get()).name() << "\n";
+    }
+  }
+
   Body->codegen();
+
+  // Collect call edges from the AST for this function (safer than scanning CFGs)
+  if (Body) {
+    std::function<void(const ExprAST*)> scanCalls = [&](const ExprAST *N) {
+      if (!N) return;
+      if (auto FC = dynamic_cast<const FuncCallExprAST*>(N)) {
+        if (auto CalleeVar = dynamic_cast<const VariableExprAST*>(FC->getCallee())) {
+          std::string callee = CalleeVar->getName();
+          AddCallEdge(Name, callee);
+        }
+      }
+      if (auto B = dynamic_cast<const BinaryExprAST*>(N)) { scanCalls(B->getLHS()); scanCalls(B->getRHS()); }
+      else if (auto U = dynamic_cast<const UnaryExprAST*>(N)) scanCalls(U->getOperand());
+      else if (auto As = dynamic_cast<const AssignmentExprAST*>(N)) { scanCalls(As->getLHS()); scanCalls(As->getRHS()); }
+      else if (auto Vd = dynamic_cast<const VarDeclExprAST*>(N)) scanCalls(Vd->getInitializer());
+      else if (auto Bl = dynamic_cast<const BlockExprAST*>(N)) for (const auto &e : Bl->getExpressions()) scanCalls(e.get());
+      else if (auto If = dynamic_cast<const IfExprAST*>(N)) { for (const auto &Br : If->getBranches()) { scanCalls(Br.Cond.get()); scanCalls(Br.Body.get()); } scanCalls(If->getElse()); }
+    };
+    scanCalls(Body.get());
+  }
 
   // Build and analyze CFG for flow diagnostics
   if (Body) {
     CFGBuilder CFGBuilder;
     auto FuncCFG = CFGBuilder.buildCFG(Name, ReturnType, Body.get());
 
+    // Store CFG for later use (push before analyses so it survives raises)
+    GlobalCFGs.push_back(std::move(FuncCFG));
+    std::cerr << "[Codegen] GlobalCFGs now contains " << GlobalCFGs.size() << " items\n";
+
     // Run flow analysis and report diagnostics (will raise error for missing
     // returns in non-void)
-    FuncCFG->reportFlowDiagnostics();
+    CFG *CfgPtr = GlobalCFGs.back().get();
+    CfgPtr->reportFlowDiagnostics();
 
-    // Store CFG for later use (optional)
-    GlobalCFGs.push_back(std::move(FuncCFG));
+    // Run definite-assignment analysis (parameters are considered assigned)
+    DefiniteAssignmentPass DAP;
+    DAP.runOnCFG(*CfgPtr, ParamIDs);
+
+    // Run value-range (constant) propagation
+    ValueRangePass VRP;
+    VRP.runOnCFG(*CfgPtr, ParamIDs);
+
+    // Run alias/lifetime analysis (detect use-after-free, double-free)
+    if (GlobalSymbolTable) {
+      auto names = GlobalSymbolTable->GetAllVisibleNames();
+      std::cerr << "[Codegen] Visible names before AliasAnalysis: ";
+      for (auto &n : names) std::cerr << n << ",";
+      std::cerr << "\n";
+    }
+    AliasAnalysisPass AAP;
+    AAP.runOnCFG(*CfgPtr, ParamIDs);
   }
 
   // Emit a return if the block has no terminator yet.

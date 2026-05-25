@@ -16,7 +16,7 @@ fi
 echo -e "${GREEN}[1 / 2]${RESET} ${BOLD}Updating the Turf Compiler...${RESET}"
 # echo -e "        ${BLUE}Sources:${RESET} src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp"
 
-echo -e "        ${BLUE}Sources:${RESET} src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp"
+echo -e "        ${BLUE}Sources:${RESET} src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Analysis.cpp src/AliasAnalysis.cpp src/ValueRange.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp"
 
 # Build flags and libraries (allow optional files for newer llama builds)
 LDFLAGS=(
@@ -57,7 +57,7 @@ fi
 # Disable OpenMP flags for compatibility in this environment.
 OPENMP_FLAGS=()
 
-clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp \
+clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Analysis.cpp src/AliasAnalysis.cpp src/ValueRange.cpp src/CallGraph.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp \
         -Iinclude \
         -Iexternal/llama.cpp/include \
         -Iexternal/llama.cpp/ggml/include \

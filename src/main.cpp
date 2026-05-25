@@ -3,11 +3,13 @@
 #include "Lexer.h"
 #include "Lint.h"
 #include "Parser.h"
+#include "CFG.h"
 #include "SLMEngine.h"
 #include "SymbolTable.h"
 #include "Types.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "CallGraph.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/FileSystem.h"
@@ -175,6 +177,8 @@ int main(int argc, char **argv) {
 
   // Builtin registry removed
   InitializeModule(); // Initialize LLVM Context, Module, Builder
+  // Clear any previous call graph state
+  ClearCallGraph();
   InitializeSymbolTable(); // Initialize semantic symbol table
   InitializePrecedence();
 
@@ -352,6 +356,11 @@ int main(int argc, char **argv) {
     }
     g_recoverActive = false;
   }
+
+  // Build cross-function call graph and print summary (run before flushing diagnostics)
+  std::cerr << "[Main] GlobalCFGs size before CallGraph: " << GlobalCFGs.size() << "\n";
+  CallGraphPass CGP;
+  CGP.runGlobal();
 
   // Flush all collected diagnostics (sorted by line).  If any errors were
   // recorded, stop here: do not attempt further IR generation or linking.
