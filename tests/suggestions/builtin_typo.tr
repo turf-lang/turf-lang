@@ -1,0 +1,5 @@
+// Misspelled builtin should suggest 'print'
+fn int main() {
+	pritn("hello")
+	return 0
+}

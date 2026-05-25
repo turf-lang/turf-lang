@@ -9,6 +9,51 @@
 
 using namespace llvm;
 
+// Runtime registry for builtins
+#include <algorithm>
+#include <map>
+#include <mutex>
+#include <unordered_map>
+
+static std::unordered_map<std::string, BuiltinInfo> g_builtins;
+static std::once_flag g_builtins_init_flag;
+
+static void ensure_builtins_registered();
+
+void RegisterBuiltin(const std::string &Name, const BuiltinInfo &Info) {
+  g_builtins[Name] = Info;
+}
+
+const BuiltinInfo *LookupBuiltin(const std::string &Name) {
+  auto It = g_builtins.find(Name);
+  if (It == g_builtins.end()) return nullptr;
+  return &It->second;
+}
+
+std::vector<std::string> GetBuiltinNames() {
+  std::call_once(g_builtins_init_flag, ensure_builtins_registered);
+  std::vector<std::string> Names;
+  Names.reserve(g_builtins.size());
+  for (const auto &P : g_builtins) Names.push_back(P.first);
+  std::sort(Names.begin(), Names.end());
+  return Names;
+}
+
+static void ensure_builtins_registered() {
+  // Register the canonical builtin names used by the compiler. Keep the
+  // Arity information when known; -1 means variadic/unknown.
+  RegisterBuiltin("print", {1, "Print a value"});
+  RegisterBuiltin("printline", {1, "Print a value with newline"});
+  RegisterBuiltin("input", {0, "Read a line from stdin"});
+  RegisterBuiltin("malloc", {1, "Allocate memory"});
+  RegisterBuiltin("realloc", {2, "Reallocate memory"});
+  RegisterBuiltin("free", {1, "Free memory"});
+  RegisterBuiltin("power", {2, "Power operation"});
+  RegisterBuiltin("abs", {1, "Absolute value"});
+  RegisterBuiltin("lengthof", {1, "Length of string"});
+  RegisterBuiltin("typeof", {1, "Type of value"});
+}
+
 llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
                               std::vector<llvm::Value *> &Args,
                               SourceLocation Loc) {
@@ -151,7 +196,7 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     if (!AIsDouble) A = Builder->CreateSIToFP(A, Type::getDoubleTy(*TheContext), "powcast1");
     if (!BIsDouble) B = Builder->CreateSIToFP(B, Type::getDoubleTy(*TheContext), "powcast2");
 
-    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(TheModule.get(), llvm::Intrinsic::pow, {Type::getDoubleTy(*TheContext)});
+    Function *PowFunc = llvm::Intrinsic::getDeclaration(TheModule.get(), llvm::Intrinsic::pow, {Type::getDoubleTy(*TheContext)});
     Value *Result = Builder->CreateCall(PowFunc, {A, B}, "powtmp");
 
     if (AIsInt && BIsInt) return Builder->CreateFPToSI(Result, Type::getInt64Ty(*TheContext), "powint");
@@ -161,7 +206,7 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
   if (IntrinsicName == "abs") {
     Value *Val = Args[0];
     if (Val->getType()->isDoubleTy()) {
-      Function *FAbsFunc = llvm::Intrinsic::getOrInsertDeclaration(TheModule.get(), llvm::Intrinsic::fabs, {Type::getDoubleTy(*TheContext)});
+      Function *FAbsFunc = llvm::Intrinsic::getDeclaration(TheModule.get(), llvm::Intrinsic::fabs, {Type::getDoubleTy(*TheContext)});
       return Builder->CreateCall(FAbsFunc, {Val}, "abs");
     } else {
       Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
@@ -211,3 +256,5 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
   SemanticError(Loc, "Unknown intrinsic: " + IntrinsicName).raise();
   return nullptr;
 }
+
+

@@ -1,0 +1,5 @@
+// Transposition of multi-word builtin 'printline' -> 'prnitline'
+fn int main() {
+    prnitline("hey")
+    return 0
+}

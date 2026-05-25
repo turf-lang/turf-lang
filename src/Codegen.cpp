@@ -5,6 +5,7 @@
 #include "CFG.h"
 #include "Errors.h"
 #include "Lexer.h"
+#include "SuggestionIndex.h"
 #include "Lint.h"
 #include "SymbolTable.h"
 #include "Types.h"
@@ -521,7 +522,7 @@ Value *BinaryExprAST::codegen() {
   // Power
   case '^': {
     CastBoth(TurfDouble());
-    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
+    Function *PowFunc = llvm::Intrinsic::getDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
@@ -1596,7 +1597,7 @@ Value *FuncCallExprAST::codegen() {
   }
 
   if (!CalleeF) {
-    SemanticError(Loc, "Unknown function: '" + CalleeName + "'").raise();
+    LookupError(Loc, CalleeName, SuggestionIndex::suggestBuiltins(CalleeName)).raise();
     return nullptr;
   }
 

@@ -1,5 +1,6 @@
 #include "SymbolTable.h"
 #include <algorithm>
+#include <unordered_set>
 
 std::unique_ptr<SymbolTable> GlobalSymbolTable;
 
@@ -175,11 +176,16 @@ Symbol *SymbolTable::FindShadowedSymbol(const std::string &Name) const {
 
 std::vector<std::string> SymbolTable::GetAllVisibleNames() const {
   std::vector<std::string> Names;
-  
-  // Collect all visible names (from all scopes)
-  for (const auto &Scope : ScopeStack) {
-    for (const auto &pair : Scope.Symbols) {
-      Names.push_back(pair.first);
+
+  std::unordered_set<std::string> Seen;
+
+  // Collect visible names from innermost to outermost scope so shadowed
+  // identifiers do not leak into typo suggestions.
+  for (auto It = ScopeStack.rbegin(); It != ScopeStack.rend(); ++It) {
+    for (const auto &pair : It->Symbols) {
+      if (Seen.insert(pair.first).second) {
+        Names.push_back(pair.first);
+      }
     }
   }
   

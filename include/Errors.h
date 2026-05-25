@@ -6,6 +6,7 @@
 #include "Codegen.h"
 #include "Colors.h"
 #include "Lexer.h"
+#include "SuggestionIndex.h"
 #include "SLMIntegration.h"
 #include "llvm/IR/Instructions.h"
 #include <cstdlib>
@@ -170,13 +171,7 @@ public:
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
 
-    std::vector<std::string> Candidates;
-    for (const auto &pair : Keywords) {
-      int threshold = std::max(1, (int)Name.length() / 3);
-      if (getDamerauLevenshteinDistance(Name, pair.first) <= threshold) {
-        Candidates.push_back(pair.first);
-      }
-    }
+    std::vector<std::string> Candidates = SuggestionIndex::suggestKeywords(Name);
 
     if (!Candidates.empty()) {
       Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
@@ -198,17 +193,27 @@ public:
 // Lookup Error : Typo/Unknown function name
 class LookupError : public TurfError {
 public:
-  LookupError(SourceLocation Loc, const std::string &Name)
+  LookupError(SourceLocation Loc, const std::string &Name,
+              const std::vector<std::string> &Suggestions)
       : TurfError(Loc, Colors::BRIGHT_RED + "Oops! I can't find a function named '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
 
-
-
-    Message += "\n  " + Colors::BRIGHT_GREEN +
-               "Hint: Double-check the spelling against the built-in "
-               "functions like 'printline' or 'lengthof'." +
-               Colors::RESET;
+    if (!Suggestions.empty()) {
+      Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
+      for (size_t i = 0; i < Suggestions.size(); ++i) {
+        Message += Colors::BRIGHT_YELLOW + "'" + Suggestions[i] + "'" +
+                   Colors::BRIGHT_GREEN;
+        if (i != Suggestions.size() - 1)
+          Message += ", ";
+      }
+      Message += "?" + Colors::RESET;
+    } else {
+      Message += "\n  " + Colors::BRIGHT_GREEN +
+                 "Hint: Double-check the spelling against the built-in "
+                 "functions like 'printline' or 'lengthof'." +
+                 Colors::RESET;
+    }
   }
 };
 
@@ -238,19 +243,14 @@ public:
     bool foundCandidate = false;
 
     if (Name.length() > 2) {
-      std::vector<std::string> Candidates;
-
-      // Check variables in symbol table
+      std::vector<std::string> CandidateNames;
+      CandidateNames.reserve(SymbolTable.size());
       for (const auto &pair : SymbolTable) {
-        const std::string &KnownVar = pair.first;
-        if (KnownVar == Name)
-          continue;
-
-        int threshold = std::max(1, (int)Name.length() / 3);
-        if (getDamerauLevenshteinDistance(Name, KnownVar) <= threshold) {
-          Candidates.push_back(KnownVar);
-        }
+        CandidateNames.push_back(pair.first);
       }
+
+      std::vector<std::string> Candidates =
+          SuggestionIndex::suggestVisible(Name, CandidateNames);
 
       if (!Candidates.empty()) {
         foundCandidate = true;
@@ -289,20 +289,8 @@ public:
     bool foundCandidate = false;
 
     if (Name.length() > 2) {
-      std::vector<std::string> Candidates;
-
-      // Check variables in the current scope chain
-      for (const auto &KnownVar : KnownNames) {
-        if (KnownVar == Name)
-          continue;
-
-        int threshold = std::max(1, (int)Name.length() / 3);
-        if (getDamerauLevenshteinDistance(Name, KnownVar) <= threshold) {
-          Candidates.push_back(KnownVar);
-        }
-      }
-
-
+      std::vector<std::string> Candidates =
+          SuggestionIndex::suggestVisible(Name, KnownNames);
 
       if (!Candidates.empty()) {
         foundCandidate = true;
