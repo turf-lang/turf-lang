@@ -103,17 +103,21 @@ endif()
 add_executable(turf
   src/main.cpp
   src/Algorithms.cpp
+  src/AliasAnalysis.cpp
+  src/Analysis.cpp
   src/Builtins.cpp
   src/CFG.cpp
+  src/CallGraph.cpp
   src/Codegen.cpp
   src/Lexer.cpp
   src/Lint.cpp
-  src/Parser.cpp        # NOTE: was "Paerser.cpp" (typo) in original CMakeLists
+  src/Parser.cpp
   src/Sandbox.cpp
   src/SLMEngine.cpp
   src/SLMIntegration.cpp
   src/SymbolTable.cpp
   src/Types.cpp
+  src/ValueRange.cpp
 )
 
 target_include_directories(turf PRIVATE

@@ -466,22 +466,24 @@ public:
   }
 };
 
-// fn RetType Name(params...) { body }
+// fn RetType Name<T>(params...) { body }
 class FuncDefExprAST : public ExprAST {
   std::string Name;
   TurfTypePtr ReturnType;
   std::vector<ParamDecl> Params;
   std::unique_ptr<ExprAST> Body;
   std::string IntrinsicName;
+  std::vector<std::string> TypeParams;
   SourceLocation Loc;
 
 public:
   FuncDefExprAST(SourceLocation Loc, std::string Name, TurfTypePtr ReturnType,
                  std::vector<ParamDecl> Params, std::unique_ptr<ExprAST> Body,
-                 std::string IntrinsicName = "")
+                 std::string IntrinsicName = "",
+                 std::vector<std::string> TypeParams = {})
       : Loc(Loc), Name(std::move(Name)), ReturnType(std::move(ReturnType)),
         Params(std::move(Params)), Body(std::move(Body)),
-        IntrinsicName(std::move(IntrinsicName)) {}
+        IntrinsicName(std::move(IntrinsicName)), TypeParams(std::move(TypeParams)) {}
 
   const std::string &getName() const { return Name; }
   const TurfType *getReturnType() const { return ReturnType.get(); }
@@ -489,13 +491,14 @@ public:
   ExprAST *getBodyMut() const { return Body.get(); }
   const ExprAST *getBody() const { return Body.get(); }
   const std::vector<ParamDecl> &getParams() const { return Params; }
+  const std::vector<std::string> &getTypeParams() const { return TypeParams; }
 
   const std::string &getIntrinsicName() const { return IntrinsicName; }
 
   llvm::Value *codegen() override;
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncDefExprAST>(
-        Loc, Name, ReturnType, Params, CloneExprAST(Body.get()), IntrinsicName);
+        Loc, Name, ReturnType, Params, CloneExprAST(Body.get()), IntrinsicName, TypeParams);
   }
 };
 
@@ -551,24 +554,27 @@ public:
   }
 };
 
-// struct StructName { type field1, type field2 }
+// struct StructName<T> { type field1, type field2 }
 class StructDeclExprAST : public ExprAST {
   std::string Name;
   std::vector<StructField> Fields;
+  std::vector<std::string> TypeParams;
   SourceLocation Loc;
 
 public:
   StructDeclExprAST(SourceLocation Loc, std::string Name,
-                    std::vector<StructField> Fields)
-      : Loc(Loc), Name(std::move(Name)), Fields(std::move(Fields)) {}
+                    std::vector<StructField> Fields,
+                    std::vector<std::string> TypeParams = {})
+      : Loc(Loc), Name(std::move(Name)), Fields(std::move(Fields)), TypeParams(std::move(TypeParams)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
   const std::vector<StructField> &getFields() const { return Fields; }
+  const std::vector<std::string> &getTypeParams() const { return TypeParams; }
 
   llvm::Value *codegen() override;
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<StructDeclExprAST>(Loc, Name, Fields);
+    return std::make_unique<StructDeclExprAST>(Loc, Name, Fields, TypeParams);
   }
 };
 

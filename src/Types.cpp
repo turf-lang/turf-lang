@@ -44,30 +44,13 @@ TurfTypePtr TurfVoid() {
 
 // Helper predicates
 
-bool isListType(const TurfType *T) {
-  auto *G = dynamic_cast<const GenericType *>(T);
-  return G && G->getBaseName() == "list";
-}
-
 bool isArrayType(const TurfType *T) {
   return dynamic_cast<const ArrayType *>(T) != nullptr;
-}
-
-const TurfType *getListElementType(const TurfType *T) {
-  auto *G = dynamic_cast<const GenericType *>(T);
-  return G ? G->getTypeArg(0) : nullptr;
 }
 
 const TurfType *getArrayElementType(const TurfType *T) {
   auto *A = dynamic_cast<const ArrayType *>(T);
   return A ? A->getElementType() : nullptr;
-}
-
-// Factory helpers
-
-TurfTypePtr makeListType(TurfTypePtr ElemType) {
-  std::vector<TurfTypePtr> Args = {std::move(ElemType)};
-  return std::make_shared<GenericType>("list", std::move(Args));
 }
 
 /**

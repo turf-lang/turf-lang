@@ -1,0 +1,16 @@
+import queue
+
+fn int main() {
+  Queue<int> q = Queue<int>()
+  q.enqueue(10)
+  q.enqueue(20)
+  q.enqueue(30)
+
+  io.printline(q.length())
+  io.printline(q.peek())
+  io.printline(q.dequeue())
+  io.printline(q.dequeue())
+  io.printline(q.dequeue())
+
+  return 0
+}

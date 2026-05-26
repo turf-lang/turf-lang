@@ -32,6 +32,7 @@
 #include "Types.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Verifier.h"
+#include <algorithm>
 #include <iostream>
 
 using namespace llvm;
@@ -56,7 +57,6 @@ static std::map<std::string, TurfTypePtr> FuncReturnTypes;
 static std::map<std::string, llvm::Type *> LLVMTypeCache;
 
 // Forward declarations for list helpers (defined after Array Codegen)
-static llvm::StructType *GetListStructType();
 static llvm::Function *GetOrDeclareMalloc();
 static llvm::Function *GetOrDeclareRealloc();
 static void EmitListBoundsCheck(llvm::Value *, llvm::Value *,
@@ -109,12 +109,6 @@ llvm::Type *getLLVMType(const TurfType *T) {
   if (T->isNamed("void"))
     return LLVMTypeCache[Key] = llvm::Type::getVoidTy(*TheContext);
 
-  // list<T> — heap-allocated struct, stored as opaque pointer in NamedValues.
-  // The actual struct layout is created once per element type in
-  // GetListStructType.
-  if (isListType(T))
-    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
-
   // Array types — the alloca is created per-site; return opaque pointer here.
   if (isArrayType(T))
     return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
@@ -129,6 +123,22 @@ llvm::Type *getLLVMType(const TurfType *T) {
     // If we reach here, StructDecl codegen hasn't happened or it failed.
     // We'll return an opaque struct to avoid crashing.
     return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, Key);
+  }
+
+  // Type Erasure: Generic Type Parameters are compiled as void* 
+  if (dynamic_cast<const TurfGenericParamType *>(T)) {
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+  }
+
+  // GenericType instantiations (e.g. List<int>) — look up the base struct.
+  // The base struct (e.g. "List") was registered in LLVMTypeCache by
+  // StructDeclExprAST::codegen(). Use that layout for the generic instance.
+  if (auto *GT = dynamic_cast<const GenericType *>(T)) {
+    auto BaseIt = LLVMTypeCache.find(GT->getBaseName());
+    if (BaseIt != LLVMTypeCache.end())
+      return LLVMTypeCache[Key] = BaseIt->second;
+    // Base struct not yet seen — create a forward-declared opaque type
+    return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, GT->getBaseName());
   }
 
   // Unknown / future types
@@ -175,7 +185,7 @@ static TurfTypePtr getCommonType(TurfTypePtr A, TurfTypePtr B) {
 static TurfTypePtr RefineLLVMType(TurfTypePtr Deduced, TurfTypePtr Expected,
                                   llvm::Type *LLVMTy) {
   if (LLVMTy->isPointerTy() && Expected &&
-      (isListType(Expected.get()) || isArrayType(Expected.get()) ||
+      (isArrayType(Expected.get()) ||
        dynamic_cast<const TurfPointerType *>(Expected.get()) ||
        Expected->isNamed("void*"))) {
     return Expected;
@@ -190,6 +200,11 @@ static bool isTypeCompatible(const TurfType *From, const TurfType *To) {
   if (!From || !To)
     return false;
   if (From->getName() == To->getName())
+    return true;
+
+  // Type Erasure: Generic Type Parameters are compatible with any type
+  if (dynamic_cast<const TurfGenericParamType *>(From) ||
+      dynamic_cast<const TurfGenericParamType *>(To))
     return true;
 
   // Auto-coerce void* to/from any pointer
@@ -303,17 +318,62 @@ static const TurfType *getExprType(const ExprAST *E) {
     const TurfType *BaseTy = getExprType(ArrAcc->getBase());
     if (BaseTy && isArrayType(BaseTy))
       return getArrayElementType(BaseTy);
-    if (BaseTy && isListType(BaseTy))
-      return getListElementType(BaseTy);
   }
   if (auto *MethodCall = dynamic_cast<const MethodCallExprAST *>(E)) {
     const TurfType *BaseTy = getExprType(MethodCall->getBase());
+
+    if (!BaseTy) {
+      // Could be a module call (e.g. mem.malloc)
+      if (auto *VarBase = dynamic_cast<const VariableExprAST *>(MethodCall->getBase())) {
+        std::string CalleeName = VarBase->getName() + "_" + MethodCall->getMethod();
+        std::string MangledName = "turf_" + CalleeName;
+        std::vector<const TurfType *> ArgTypes;
+        for (const auto &Arg : MethodCall->getArgs()) {
+          const TurfType *T = getExprType(Arg.get());
+          if (!T) {
+            return nullptr;
+          }
+          ArgTypes.push_back(T);
+          MangledName += "_" + T->getMangledName();
+        }
+        auto It = FuncReturnTypes.find(MangledName);
+        if (It != FuncReturnTypes.end()) {
+          return It->second.get();
+        }
+          
+        for (const auto &[Name, ParamTypes] : FuncParamTypes) {
+          std::string Prefix = "turf_" + CalleeName;
+          if (Name == Prefix ||
+              (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+            if (ParamTypes.size() == ArgTypes.size()) {
+              bool Compatible = true;
+              for (size_t i = 0; i < ArgTypes.size(); ++i) {
+                if (!isTypeCompatible(ArgTypes[i], ParamTypes[i].get())) {
+                  Compatible = false;
+                  break;
+                }
+              }
+              if (Compatible)
+                return FuncReturnTypes[Name].get();
+            }
+          }
+        }
+      }
+      return nullptr;
+    }
+
     if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy))
       BaseTy = PtrTy->getPointee().get();
 
-    if (MethodCall->getMethod() == "pop") {
-      if (BaseTy && isListType(BaseTy))
-        return getListElementType(BaseTy);
+    if (MethodCall->getMethod() == "pop" || MethodCall->getMethod() == "peek" ||
+        MethodCall->getMethod() == "dequeue") {
+      // For a concrete generic instantiation like List<int>, return the
+      // first type argument as the element type so callers know how to
+      // un-erase the returned void* back to the concrete type.
+      if (auto *GenTy = dynamic_cast<const GenericType *>(BaseTy)) {
+        if (!GenTy->getTypeArgs().empty())
+          return GenTy->getTypeArg(0);
+      }
     }
     if (MethodCall->getMethod() == "push") {
       return BaseTy;
@@ -407,6 +467,35 @@ static Value *CastToType(Value *Val, TurfTypePtr DestType,
   if (DestType->getName() == "void*" &&
       dynamic_cast<const TurfPointerType *>(SrcType.get()))
     return Val;
+
+  // Type Erasure: cast to generic parameter (stored as void*)
+  if (dynamic_cast<const TurfGenericParamType *>(DestType.get())) {
+    Type *VoidPtrTy = PointerType::get(*TheContext, 0);
+    if (ValTy->isPointerTy())
+      return Val; // already a pointer
+    if (ValTy->isDoubleTy())
+      Val = Builder->CreateBitCast(Val, Type::getInt64Ty(*TheContext), "dbl_to_i64");
+    if (Val->getType()->isIntegerTy())
+      return Builder->CreateIntToPtr(Val, VoidPtrTy, "erased_ptr");
+    return Builder->CreateBitCast(Val, VoidPtrTy, "erased_ptr");
+  }
+
+  // Type Erasure: cast from generic parameter (void*) back to actual type
+  if (dynamic_cast<const TurfGenericParamType *>(SrcType.get())) {
+    if (DestType->isNamed("int") || DestType->isNamed("bool")) {
+      Value *IntVal = Builder->CreatePtrToInt(Val, Type::getInt64Ty(*TheContext), "unerased_int");
+      if (DestType->isNamed("bool"))
+        return Builder->CreateICmpNE(IntVal, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), "unerased_bool");
+      return IntVal;
+    }
+    if (DestType->isNamed("double")) {
+      Value *IntVal = Builder->CreatePtrToInt(Val, Type::getInt64Ty(*TheContext), "unerased_int");
+      return Builder->CreateBitCast(IntVal, Type::getDoubleTy(*TheContext), "unerased_dbl");
+    }
+    if (dynamic_cast<const TurfPointerType*>(DestType.get()) || DestType->isNamed("string")) {
+      return Val; // already pointer
+    }
+  }
 
   // Strings cannot be cast to/from other types implicitly
   if (SrcType->isNamed("string") || DestType->isNamed("string")) {
@@ -642,7 +731,7 @@ Value *BinaryExprAST::codegen() {
   // Power
   case '^': {
     CastBoth(TurfDouble());
-    Function *PowFunc = llvm::Intrinsic::getDeclaration(
+    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
@@ -700,71 +789,7 @@ Value *VarDeclExprAST::codegen() {
     }
   }
 
-  // Heap allocation fast-path for list<T>.
-  // Overrides the dummy scalar zero-initialization set by the parser.
-  if (isListType(Type.get())) {
-    Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-                     TheFunction->getEntryBlock().begin());
-    AllocaInst *Alloca = TmpB.CreateAlloca(
-        llvm::PointerType::get(*TheContext, 0), nullptr, Name);
 
-    bool IsDummy = false;
-    if (auto *Num = dynamic_cast<NumberExprAST *>(InitVal.get())) {
-      if (Num->isInteger() && Num->getIntVal() == 0) {
-        IsDummy = true;
-      }
-    }
-
-    Value *RetVal = nullptr;
-
-    if (IsDummy) {
-      // malloc(24) for TurfListStruct {ptr, i64, i64}
-      Function *MallocF = GetOrDeclareMalloc();
-      Value *StructSize =
-          ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), 24);
-      Value *RawPtr = Builder->CreateCall(MallocF, {StructSize}, "listalloc");
-
-      StructType *LST = GetListStructType();
-      Value *NullData =
-          ConstantPointerNull::get(llvm::PointerType::get(*TheContext, 0));
-      Value *Zero64 = ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), 0);
-      Builder->CreateStore(
-          NullData, Builder->CreateStructGEP(LST, RawPtr, 0, "initdata"));
-      Builder->CreateStore(Zero64,
-                           Builder->CreateStructGEP(LST, RawPtr, 1, "initlen"));
-      Builder->CreateStore(Zero64,
-                           Builder->CreateStructGEP(LST, RawPtr, 2, "initcap"));
-      Builder->CreateStore(RawPtr, Alloca);
-      RetVal = Constant::getNullValue(llvm::Type::getInt64Ty(*TheContext));
-    } else {
-      Value *Init = InitVal->codegen();
-      if (!Init)
-        return nullptr;
-
-      TurfTypePtr InitType = getTurfTypeFromLLVM(Init->getType());
-      InitType = RefineLLVMType(InitType, Type, Init->getType());
-      if (!isTypeCompatible(InitType.get(), Type.get())) {
-        TypeError(Loc, std::string("Cannot initialize '") + Type->getName() +
-                           "' variable '" + Name + "' with a value of type '" +
-                           InitType->getName() + "'")
-            .raise();
-        return nullptr;
-      }
-
-      Init = CastToType(Init, Type, "initcast", Loc);
-      Builder->CreateStore(Init, Alloca);
-      RetVal = Init;
-    }
-
-    if (GlobalSymbolTable)
-        {
-          SymbolID id = GlobalSymbolTable->DeclareSymbol(Name, Type, Loc, Alloca);
-          std::cerr << "[Codegen] Declared symbol '" << Name << "' id=" << id << "\n";
-        }
-    NamedValues[Name] = {Alloca, Type};
-    return RetVal;
-  }
 
   Value *Init = InitVal->codegen();
   if (!Init)
@@ -1048,12 +1073,27 @@ Value *SizeOfExprAST::codegen() {
 }
 
 Value *CastExprAST::codegen() {
+  const TurfType *ExprTy = getExprType(Operand.get());
+  
   Value *Val = Operand->codegen();
   if (!Val)
     return nullptr;
-
-  TurfTypePtr SrcType = getTurfTypeFromLLVM(Val->getType());
-  const std::string SrcName = SrcType->getName();
+    
+  TurfTypePtr SrcType;
+  if (ExprTy) {
+    // We only need the type info, so we can clone it or cast it if needed
+    // But since CastExprAST only uses dynamic_cast and getName, we can just use a trick
+    // to keep it compatible with TurfTypePtr.
+    if (auto *Ptr = dynamic_cast<const TurfPointerType*>(ExprTy))
+      SrcType = std::make_shared<TurfPointerType>(Ptr->getPointee());
+    else if (ExprTy->isNamed("void*"))
+      SrcType = std::make_shared<TurfPointerType>(TurfVoid());
+    else
+      SrcType = getTurfTypeFromLLVM(Val->getType());
+  } else {
+    SrcType = getTurfTypeFromLLVM(Val->getType());
+  }
+  const std::string SrcName = ExprTy ? ExprTy->getName() : SrcType->getName();
   const std::string DstName = DestType->getName();
 
   // Identity - no-op
@@ -1201,6 +1241,16 @@ Value *CastExprAST::codegen() {
   if (DstName == "string") {
     StringConversionError(Loc, SrcName.c_str()).raise();
     return nullptr;
+  }
+
+  // int -> pointer : inttoptr
+  if (SrcName == "int" && dynamic_cast<const TurfPointerType*>(DestType.get())) {
+    return Builder->CreateIntToPtr(Val, getLLVMType(DestType.get()), "inttoptr");
+  }
+
+  // pointer -> pointer : bitcast
+  if ((ExprTy && dynamic_cast<const TurfPointerType*>(ExprTy)) && dynamic_cast<const TurfPointerType*>(DestType.get())) {
+    return Builder->CreateBitCast(Val, getLLVMType(DestType.get()), "ptrcast");
   }
 
   // Everything else is unsupported
@@ -1579,15 +1629,6 @@ Value *FuncDefExprAST::codegen() {
   LintExpression(Body.get());
 
   // Codegen the body
-  std::cerr << "[Codegen] About to codegen body for function: " << Name << "\n";
-  // Debug: inspect top-level expressions in the body
-  if (auto Bl = dynamic_cast<BlockExprAST*>(Body.get())) {
-    std::cerr << "[Codegen] Body has " << Bl->getExpressions().size() << " expressions\n";
-    for (const auto &E : Bl->getExpressions()) {
-      std::cerr << "[Codegen] Expr type: " << typeid(*E.get()).name() << "\n";
-    }
-  }
-
   Body->codegen();
 
   // Collect call edges from the AST for this function (safer than scanning CFGs)
@@ -1617,7 +1658,6 @@ Value *FuncDefExprAST::codegen() {
 
     // Store CFG for later use (push before analyses so it survives raises)
     GlobalCFGs.push_back(std::move(FuncCFG));
-    std::cerr << "[Codegen] GlobalCFGs now contains " << GlobalCFGs.size() << " items\n";
 
     // Run flow analysis and report diagnostics (will raise error for missing
     // returns in non-void)
@@ -1633,12 +1673,6 @@ Value *FuncDefExprAST::codegen() {
     VRP.runOnCFG(*CfgPtr, ParamIDs);
 
     // Run alias/lifetime analysis (detect use-after-free, double-free)
-    if (GlobalSymbolTable) {
-      auto names = GlobalSymbolTable->GetAllVisibleNames();
-      std::cerr << "[Codegen] Visible names before AliasAnalysis: ";
-      for (auto &n : names) std::cerr << n << ",";
-      std::cerr << "\n";
-    }
     AliasAnalysisPass AAP;
     AAP.runOnCFG(*CfgPtr, ParamIDs);
   }
@@ -1773,13 +1807,35 @@ Value *FuncCallExprAST::codegen() {
     EvaluatedArgs.push_back(V);
 
     TurfTypePtr ActTy;
-    if (auto *VE = dynamic_cast<VariableExprAST *>(Arg.get())) {
-      auto It = NamedValues.find(VE->getName());
-      if (It != NamedValues.end())
-        ActTy = It->second.Type;
-    }
-    if (!ActTy)
+    if (const TurfType *ExprTy = getExprType(Arg.get())) {
+      if (auto *Ptr = dynamic_cast<const TurfPointerType*>(ExprTy)) {
+        // Under type erasure, T* pointers become void* at the LLVM level.
+        // If the pointee is a generic type parameter, treat this as void*.
+        const TurfType *Pointee = Ptr->getPointee().get();
+        if (dynamic_cast<const TurfGenericParamType*>(Pointee))
+          ActTy = std::make_shared<TurfPointerType>(TurfVoid());
+        else
+          ActTy = std::make_shared<TurfPointerType>(Ptr->getPointee());
+      }
+      else if (ExprTy->isNamed("void*"))
+        ActTy = std::make_shared<TurfPointerType>(TurfVoid());
+      else if (ExprTy->isNamed("int"))
+        ActTy = TurfInt();
+      else if (ExprTy->isNamed("double"))
+        ActTy = TurfDouble();
+      else if (ExprTy->isNamed("bool"))
+        ActTy = TurfBool();
+      else if (ExprTy->isNamed("string"))
+        ActTy = TurfString();
+      else if (auto *GT = dynamic_cast<const GenericType*>(ExprTy))
+        ActTy = std::make_shared<GenericType>(GT->getBaseName(), GT->getTypeArgs());
+      else if (auto *ST = dynamic_cast<const TurfStructType*>(ExprTy))
+        ActTy = std::make_shared<TurfStructType>(ST->getName(), ST->getFields());
+      else
+        ActTy = getTurfTypeFromLLVM(V->getType());
+    } else {
       ActTy = getTurfTypeFromLLVM(V->getType());
+    }
     ArgTypes.push_back(ActTy);
   }
 
@@ -1833,7 +1889,7 @@ Value *FuncCallExprAST::codegen() {
   std::vector<Value *> ArgVals;
   unsigned Idx = 0;
 
-  // Look up full param type info (needed for list<T> params)
+  // Look up full param type info (needed for generic struct params)
   auto ParamTypeIt = FuncParamTypes.find(MangledName);
 
   for (auto &Arg : CalleeF->args()) {
@@ -1854,27 +1910,11 @@ Value *FuncCallExprAST::codegen() {
       return nullptr;
     }
 
-    // For list params: verify the caller is passing a list of the right element
-    // type
-    if (isListType(DeclaredType.get())) {
-      TurfTypePtr ActualType;
-      if (auto *VE = dynamic_cast<VariableExprAST *>(Args[Idx].get())) {
-        auto It = NamedValues.find(VE->getName());
-        if (It != NamedValues.end())
-          ActualType = It->second.Type;
-      }
-      if (ActualType && ActualType->getName() != DeclaredType->getName()) {
-        ArgumentTypeError(Loc, CalleeName, std::string(Arg.getName()), Idx + 1,
-                          turfTypeName(DeclaredType.get()),
-                          turfTypeName(ActualType.get()))
-            .raise();
-        return nullptr;
-      }
-    } else if (isArrayType(DeclaredType.get())) {
-      // Array params: the function expects a pointer to the array data.
-      // We must pass the raw AllocaInst of the caller's array, not a loaded
-      // value. Also verify the caller is actually passing an array variable
-      // with a compatible element type.
+    // Array params: the function expects a pointer to the array data.
+    // We must pass the raw AllocaInst of the caller's array, not a loaded
+    // value. Also verify the caller is actually passing an array variable
+    // with a compatible element type.
+    if (isArrayType(DeclaredType.get())) {
       if (auto *VE = dynamic_cast<VariableExprAST *>(Args[Idx].get())) {
         auto It = NamedValues.find(VE->getName());
         if (It == NamedValues.end() || !isArrayType(It->second.Type.get())) {
@@ -1906,6 +1946,22 @@ Value *FuncCallExprAST::codegen() {
       // Standard scalar type checking
       TurfTypePtr ExpectedType = getTurfTypeFromLLVM(Arg.getType());
       TurfTypePtr ActualType = getTurfTypeFromLLVM(V->getType());
+
+      // Type-erasure un-erase: if the value is a pointer (erased generic T)
+      // and the expected type is numeric, convert via PtrToInt/bitcast.
+      if (V->getType()->isPointerTy() &&
+          (ExpectedType->isNamed("int") || ExpectedType->isNamed("bool") ||
+           ExpectedType->isNamed("double"))) {
+        Value *IntVal = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext), "unerase_arg");
+        if (ExpectedType->isNamed("bool"))
+          V = Builder->CreateICmpNE(IntVal, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), "unerase_bool");
+        else if (ExpectedType->isNamed("double"))
+          V = Builder->CreateBitCast(IntVal, Type::getDoubleTy(*TheContext), "unerase_dbl");
+        else
+          V = IntVal;
+        ActualType = ExpectedType;
+      }
+
       if (!isTypeCompatible(ActualType.get(), ExpectedType.get())) {
         ArgumentTypeError(Loc, CalleeName, std::string(Arg.getName()), Idx + 1,
                           turfTypeName(ExpectedType.get()),
@@ -1927,19 +1983,7 @@ Value *FuncCallExprAST::codegen() {
   return Builder->CreateCall(CalleeF, ArgVals, "calltmp");
 }
 
-// Returns (or creates) the named LLVM struct { ptr, i64, i64 } used by all
-// lists. Fields: data (ptr to element buffer), len (i64), cap (i64).
-static llvm::StructType *GetListStructType() {
-  llvm::StructType *ST =
-      llvm::StructType::getTypeByName(*TheContext, "TurfListStruct");
-  if (!ST) {
-    ST = llvm::StructType::create(*TheContext, "TurfListStruct");
-    ST->setBody({llvm::PointerType::get(*TheContext, 0), // data
-                 llvm::Type::getInt64Ty(*TheContext),    // len
-                 llvm::Type::getInt64Ty(*TheContext)});  // cap
-  }
-  return ST;
-}
+
 
 // Ensure malloc / realloc / free are declared in the module.
 static llvm::Function *GetOrDeclareMalloc() {
@@ -2145,34 +2189,6 @@ Value *ArrayAccessExprAST::codegenLValue() {
     return nullptr;
   }
 
-  if (isListType(BaseTy)) {
-    Value *ListPtr = Base->codegen();
-    if (!ListPtr)
-      return nullptr;
-    StructType *LST = GetListStructType();
-    Type *PtrTy = PointerType::get(*TheContext, 0);
-    Type *ElemTy = getLLVMType(getListElementType(BaseTy));
-
-    Value *LenPtr = Builder->CreateStructGEP(LST, ListPtr, 1, "lenptr");
-    Value *Len =
-        Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "len");
-
-    Value *IndexVal = Index->codegen();
-    if (!IndexVal)
-      return nullptr;
-    TurfTypePtr IdxType = getTurfTypeFromLLVM(IndexVal->getType());
-    if (IdxType->isNamed("string")) {
-      ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType.get())).raise();
-      return nullptr;
-    }
-    IndexVal = CastToType(IndexVal, TurfInt(), "listidx", Loc);
-    EmitListBoundsCheck(IndexVal, Len, "list", Loc);
-
-    Value *DataPtr = Builder->CreateStructGEP(LST, ListPtr, 0, "dataptr");
-    Value *DataBuf = Builder->CreateLoad(PtrTy, DataPtr, "databuf");
-    return Builder->CreateGEP(ElemTy, DataBuf, IndexVal, "listelemptr");
-  }
-
   if (auto *PtrTyTurf = dynamic_cast<const TurfPointerType *>(BaseTy)) {
     Value *PtrVal = Base->codegen();
     if (!PtrVal)
@@ -2188,7 +2204,7 @@ Value *ArrayAccessExprAST::codegenLValue() {
   }
 
   if (!isArrayType(BaseTy)) {
-    SemanticError(Loc, "Base is not an array, list, or pointer").raise();
+    SemanticError(Loc, "Base is not an array or pointer").raise();
     return nullptr;
   }
 
@@ -2240,9 +2256,7 @@ Value *ArrayAccessExprAST::codegen() {
     return nullptr;
   const TurfType *BaseTy = getExprType(Base.get());
   const TurfType *ElemTyT = nullptr;
-  if (isListType(BaseTy))
-    ElemTyT = getListElementType(BaseTy);
-  else if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy))
+  if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy))
     ElemTyT = PtrTy->getPointee().get();
   else
     ElemTyT = getArrayElementType(BaseTy);
@@ -2255,42 +2269,7 @@ Value *ArrayAssignExprAST::codegen() {
   if (Iter != NamedValues.end())
     VI = &Iter->second;
 
-  // Delegate list[i] = val to list-specific path
-  if (VI && isListType(VI->Type.get())) {
-    StructType *LST = GetListStructType();
-    Type *PtrTy = PointerType::get(*TheContext, 0);
-    const TurfType *ElemT = getListElementType(VI->Type.get());
-    Type *ElemTy = getLLVMType(ElemT);
 
-    Value *ListPtr = Builder->CreateLoad(PtrTy, VI->Alloca, "listptr");
-    Value *LenPtr = Builder->CreateStructGEP(LST, ListPtr, 1, "lenptr");
-    Value *Len =
-        Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "len");
-
-    Value *IndexVal = Index->codegen();
-    if (!IndexVal)
-      return nullptr;
-    IndexVal = CastToType(IndexVal, TurfInt(), "listidx", Loc);
-    EmitListBoundsCheck(IndexVal, Len, Name, Loc);
-
-    Value *RHSVal = RHS->codegen();
-    if (!RHSVal)
-      return nullptr;
-    const TurfType *ExprT = getExprType(RHS.get());
-    std::string GotTypeName =
-        ExprT ? ExprT->getName()
-              : getTurfTypeFromLLVM(RHSVal->getType())->getName();
-    if (GotTypeName != ElemT->getName()) {
-      ListTypeMismatchError(Loc, Name, turfTypeName(ElemT), GotTypeName)
-          .raise();
-      return nullptr;
-    }
-    Value *DataPtr = Builder->CreateStructGEP(LST, ListPtr, 0, "dataptr");
-    Value *DataBuf = Builder->CreateLoad(PtrTy, DataPtr, "databuf");
-    Value *ElemPtr = Builder->CreateGEP(ElemTy, DataBuf, IndexVal, "listelem");
-    Builder->CreateStore(RHSVal, ElemPtr);
-    return RHSVal;
-  }
 
   if (!VI || !isArrayType(VI->Type.get())) {
     SemanticError(Loc, "'" + Name + "' is not an array").raise();
@@ -2391,15 +2370,7 @@ Value *ArrayLengthExprAST::codegen() {
   if (Iter != NamedValues.end())
     VI = &Iter->second;
 
-  // list.length: load len field from heap struct
-  if (VI && isListType(VI->Type.get())) {
-    StructType *LST = GetListStructType();
-    Type *PtrTy = PointerType::get(*TheContext, 0);
-    Value *ListPtr = Builder->CreateLoad(PtrTy, VI->Alloca, "listptr");
-    Value *LenPtr = Builder->CreateStructGEP(LST, ListPtr, 1, "lenptr");
-    return Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr,
-                               "listlen");
-  }
+
 
   if (!VI || !isArrayType(VI->Type.get())) {
     SemanticError(
@@ -2426,7 +2397,8 @@ Value *MethodCallExprAST::codegen() {
     for (const auto &Pair : FuncParamTypes) {
       if (Pair.first == PotentialMangledPrefix ||
           (Pair.first.size() > PotentialMangledPrefix.size() &&
-           Pair.first[PotentialMangledPrefix.size()] == '_')) {
+           Pair.first[PotentialMangledPrefix.size()] == '_' &&
+           Pair.first.substr(0, PotentialMangledPrefix.size()) == PotentialMangledPrefix)) {
         IsModule = true;
         break;
       }
@@ -2455,20 +2427,17 @@ Value *MethodCallExprAST::codegen() {
       int ArraySize = dynamic_cast<const ::ArrayType *>(BaseTy)->getSize();
       return ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize);
     }
-    if (isListType(BaseTy)) {
-      Value *ListPtr = Base->codegen();
-      if (!ListPtr)
-        return nullptr;
-      StructType *LST = GetListStructType();
-      Value *LenPtr = Builder->CreateStructGEP(LST, ListPtr, 1, "lenptr");
-      return Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr,
-                                 "listlen");
-    }
-    SemanticError(Loc, "'.length' can only be used on arrays or lists").raise();
-    return nullptr;
+    // For non-array types (e.g. list<T>), fall through to struct method dispatch.
   }
 
+  std::string StructNameStr;
   if (auto *StructTy = dynamic_cast<const TurfStructType *>(BaseTy)) {
+    StructNameStr = StructTy->getName();
+  } else if (auto *GenTy = dynamic_cast<const GenericType *>(BaseTy)) {
+    StructNameStr = GenTy->getBaseName();
+  }
+
+  if (!StructNameStr.empty()) {
     std::vector<Value *> EvaluatedArgs;
     std::vector<TurfTypePtr> ArgTypes;
     for (auto &Arg : Args) {
@@ -2488,34 +2457,57 @@ Value *MethodCallExprAST::codegen() {
       ArgTypes.push_back(ActTy);
     }
 
-    std::string MethodName = StructTy->getName() + "." + Method;
+    // Build the primary mangled name: turf_<StructName>.<Method>_<StructName>_ptr
+    // Also try the module-qualified name: turf_<module>_<StructName>.<Method>_...
+    // (Methods in .tr library files are registered with the module prefix.)
+    std::string MethodName = StructNameStr + "." + Method;
     std::string MangledName =
-        "turf_" + MethodName + "_" + StructTy->getName() + "_ptr";
+        "turf_" + MethodName + "_" + StructNameStr + "_ptr";
+    // For GenericType, also build a module-qualified candidate.
+    std::string ModuleMethodName;
+    if (auto *GenTy = dynamic_cast<const GenericType*>(BaseTy)) {
+      // The module name is typically the lowercase base name (e.g. "list")
+      std::string ModName = GenTy->getBaseName();
+      // lowercase it
+      std::transform(ModName.begin(), ModName.end(), ModName.begin(), ::tolower);
+      ModuleMethodName = "turf_" + ModName + "_" + MethodName;
+    }
     for (const auto &T : ArgTypes) {
       MangledName += "_" + T->getMangledName();
     }
 
     Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF && !ModuleMethodName.empty()) {
+      // Try exact module-qualified lookup first (most common for list/stack/queue)
+      CalleeF = TheModule->getFunction(ModuleMethodName);
+    }
     if (!CalleeF) {
       // Fallback overload resolution
       for (const auto &[Name, ParamTypes] : FuncParamTypes) {
+        // Check both bare and module-qualified method name prefixes
         std::string Prefix = "turf_" + MethodName;
-        std::string Suffix = "_" + MethodName;
+        std::string ModPrefix = ModuleMethodName;
         bool Match = false;
-        if (Name == Prefix || (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+        auto matchesPrefix = [&](const std::string &P) {
+          return Name == P ||
+                 (Name.size() > P.size() && Name[P.size()] == '_' &&
+                  Name.substr(0, P.size()) == P);
+        };
+        if (matchesPrefix(Prefix) || (!ModPrefix.empty() && matchesPrefix(ModPrefix)))
           Match = true;
-        } else {
+        if (!Match) {
+          std::string Suffix = "_" + MethodName;
           size_t Pos = Name.find(Suffix);
-          if (Pos != std::string::npos && (Pos + Suffix.size() == Name.size() || Name[Pos + Suffix.size()] == '_')) {
+          if (Pos != std::string::npos &&
+              (Pos + Suffix.size() == Name.size() ||
+               Name[Pos + Suffix.size()] == '_'))
             Match = true;
-          }
         }
         if (Match) {
           if (ParamTypes.size() == ArgTypes.size() + 1) { // +1 for self
             bool Compatible = true;
             for (size_t i = 0; i < ArgTypes.size(); ++i) {
-              if (!isTypeCompatible(ArgTypes[i].get(),
-                                    ParamTypes[i + 1].get())) {
+              if (!isTypeCompatible(ArgTypes[i].get(), ParamTypes[i + 1].get())) {
                 Compatible = false;
                 break;
               }
@@ -2531,7 +2523,7 @@ Value *MethodCallExprAST::codegen() {
 
     if (!CalleeF) {
       SemanticError(Loc, "Method '" + Method + "' not found on struct '" +
-                             StructTy->getName() + "'")
+                             StructNameStr + "'")
           .raise();
       return nullptr;
     }
@@ -2566,141 +2558,26 @@ Value *MethodCallExprAST::codegen() {
     for (auto ArgIt = std::next(CalleeF->arg_begin());
          ArgIt != CalleeF->arg_end(); ++ArgIt, ++Idx) {
       Value *V = EvaluatedArgs[Idx];
+      Type *ExpectedTy = ArgIt->getType();
+      if (V->getType() != ExpectedTy) {
+        if (ExpectedTy->isPointerTy() && V->getType()->isIntegerTy())
+          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_ptr");
+        else if (ExpectedTy->isIntegerTy() && V->getType()->isPointerTy())
+          V = Builder->CreatePtrToInt(V, ExpectedTy, "argcast_int");
+        else if (ExpectedTy->isDoubleTy() && V->getType()->isPointerTy()) {
+          V = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext));
+          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_dbl");
+        }
+        else
+          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_bit");
+      }
       ArgVals.push_back(V);
     }
 
     return Builder->CreateCall(CalleeF, ArgVals, "methodcalltmp");
   }
 
-  if (!isListType(BaseTy)) {
-    ListNonListOperationError(Loc, "expression", Method).raise();
-    return nullptr;
-  }
-
-  const TurfType *ElemType = getListElementType(BaseTy);
-  Type *ElemTy = getLLVMType(ElemType);
-  Type *PtrTy = PointerType::get(*TheContext, 0);
-  StructType *LST = GetListStructType();
-
-  Value *ListPtr = Base->codegen();
-  if (!ListPtr)
-    return nullptr;
-
-  Value *LenPtr = Builder->CreateStructGEP(LST, ListPtr, 1, "lenptr");
-  Value *CapPtr = Builder->CreateStructGEP(LST, ListPtr, 2, "capptr");
-  Value *DataPtr = Builder->CreateStructGEP(LST, ListPtr, 0, "dataptr");
-
-  if (Method == "length") {
-    return Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr,
-                               "listlen");
-  }
-
-  if (Method == "push") {
-    if (Args.empty() || !Args[0]) {
-      LogErrorAt(Loc, "push() requires one argument");
-      return nullptr;
-    }
-    Value *PushVal = Args[0]->codegen();
-    if (!PushVal)
-      return nullptr;
-    const TurfType *GotType = getExprType(Args[0].get());
-    std::string GotTypeName =
-        GotType ? GotType->getName()
-                : getTurfTypeFromLLVM(PushVal->getType())->getName();
-    if (GotTypeName != ElemType->getName()) {
-      ListTypeMismatchError(Loc, "list", turfTypeName(ElemType), GotTypeName)
-          .raise();
-      return nullptr;
-    }
-    Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    Value *Len =
-        Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "len");
-    Value *Cap =
-        Builder->CreateLoad(Type::getInt64Ty(*TheContext), CapPtr, "cap");
-
-    Value *NeedsGrow = Builder->CreateICmpEQ(Len, Cap, "needsgrow");
-    BasicBlock *GrowBB =
-        BasicBlock::Create(*TheContext, "list_grow", TheFunction);
-    BasicBlock *StoreBB = BasicBlock::Create(*TheContext, "list_store");
-    Builder->CreateCondBr(NeedsGrow, GrowBB, StoreBB);
-
-    Builder->SetInsertPoint(GrowBB);
-    Value *Cap2 = Builder->CreateMul(
-        Cap, ConstantInt::get(Type::getInt64Ty(*TheContext), 2), "cap2");
-    Value *IsZero = Builder->CreateICmpEQ(
-        Cap, ConstantInt::get(Type::getInt64Ty(*TheContext), 0));
-    Value *NewCap = Builder->CreateSelect(
-        IsZero, ConstantInt::get(Type::getInt64Ty(*TheContext), 8), Cap2,
-        "newcap");
-    uint64_t ElemSize = TheModule->getDataLayout().getTypeAllocSize(ElemTy);
-    Value *NewBytes = Builder->CreateMul(
-        NewCap, ConstantInt::get(Type::getInt64Ty(*TheContext), ElemSize),
-        "newbytes");
-    Value *OldData = Builder->CreateLoad(PtrTy, DataPtr, "olddata");
-    Value *NewData = Builder->CreateCall(GetOrDeclareRealloc(),
-                                         {OldData, NewBytes}, "newdata");
-    Builder->CreateStore(NewData, DataPtr);
-    Builder->CreateStore(NewCap, CapPtr);
-    Builder->CreateBr(StoreBB);
-
-    TheFunction->insert(TheFunction->end(), StoreBB);
-    Builder->SetInsertPoint(StoreBB);
-    Value *Len2 =
-        Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "len2");
-    Value *Data2 = Builder->CreateLoad(PtrTy, DataPtr, "data2");
-    Value *Slot = Builder->CreateGEP(ElemTy, Data2, Len2, "pushslot");
-    Builder->CreateStore(PushVal, Slot);
-    Value *Len2Inc = Builder->CreateAdd(
-        Len2, ConstantInt::get(Type::getInt64Ty(*TheContext), 1), "leninc");
-    Builder->CreateStore(Len2Inc, LenPtr);
-    return ListPtr;
-  }
-
-  if (Method == "pop") {
-    Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    Value *Len =
-        Builder->CreateLoad(Type::getInt64Ty(*TheContext), LenPtr, "len");
-    Value *Zero64 = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
-    Value *IsEmpty = Builder->CreateICmpEQ(Len, Zero64, "isempty");
-
-    BasicBlock *EmptyBB =
-        BasicBlock::Create(*TheContext, "pop_empty", TheFunction);
-    BasicBlock *PopBB = BasicBlock::Create(*TheContext, "pop_ok");
-    Builder->CreateCondBr(IsEmpty, EmptyBB, PopBB);
-
-    Builder->SetInsertPoint(EmptyBB);
-    Type *I8P = PointerType::get(*TheContext, 0);
-    Function *PutsF = TheModule->getFunction("puts");
-    if (!PutsF) {
-      auto *FT = FunctionType::get(Type::getInt32Ty(*TheContext), {I8P}, false);
-      PutsF = Function::Create(FT, Function::ExternalLinkage, "puts",
-                               TheModule.get());
-    }
-    Value *Msg = Builder->CreateGlobalString(
-        "Runtime Error: pop() on empty list.", "pop_err");
-    Builder->CreateCall(PutsF, {Msg});
-    Function *ExitF = TheModule->getFunction("exit");
-    if (!ExitF) {
-      auto *FT = FunctionType::get(Type::getVoidTy(*TheContext),
-                                   {Type::getInt32Ty(*TheContext)}, false);
-      ExitF = Function::Create(FT, Function::ExternalLinkage, "exit",
-                               TheModule.get());
-    }
-    Builder->CreateCall(ExitF,
-                        {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
-    Builder->CreateUnreachable();
-
-    TheFunction->insert(TheFunction->end(), PopBB);
-    Builder->SetInsertPoint(PopBB);
-    Value *NewLen = Builder->CreateSub(
-        Len, ConstantInt::get(Type::getInt64Ty(*TheContext), 1), "poplen");
-    Builder->CreateStore(NewLen, LenPtr);
-    Value *Data = Builder->CreateLoad(PtrTy, DataPtr, "popdata");
-    Value *Slot = Builder->CreateGEP(ElemTy, Data, NewLen, "popslot");
-    return Builder->CreateLoad(ElemTy, Slot, "popval");
-  }
-
-  SemanticError(Loc, "Unknown list method '" + Method + "'").raise();
+  SemanticError(Loc, "Type does not support method calls").raise();
   return nullptr;
 }
 
@@ -2774,7 +2651,9 @@ Value *StructInitExprAST::codegen() {
       std::string Prefix = "turf_" + InitName;
       std::string Suffix = "_" + InitName;
       bool Match = false;
-      if (FName == Prefix || (FName.size() > Prefix.size() && FName[Prefix.size()] == '_')) {
+      if (FName == Prefix ||
+          (FName.size() > Prefix.size() && FName[Prefix.size()] == '_' &&
+           FName.substr(0, Prefix.size()) == Prefix)) {
         Match = true;
       } else {
         size_t Pos = FName.find(Suffix);
@@ -2821,6 +2700,19 @@ Value *StructInitExprAST::codegen() {
     for (auto ArgIt = std::next(InitF->arg_begin()); ArgIt != InitF->arg_end();
          ++ArgIt, ++Idx) {
       Value *V = EvaluatedArgs[Idx];
+      Type *ExpectedTy = ArgIt->getType();
+      if (V->getType() != ExpectedTy) {
+        if (ExpectedTy->isPointerTy() && V->getType()->isIntegerTy())
+          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_ptr");
+        else if (ExpectedTy->isIntegerTy() && V->getType()->isPointerTy())
+          V = Builder->CreatePtrToInt(V, ExpectedTy, "argcast_int");
+        else if (ExpectedTy->isDoubleTy() && V->getType()->isPointerTy()) {
+          V = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext));
+          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_dbl");
+        }
+        else
+          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_bit");
+      }
       ArgVals.push_back(V);
     }
 
@@ -2829,6 +2721,25 @@ Value *StructInitExprAST::codegen() {
   }
 
   // Fallback to default struct initialization
+  if (Args.size() == 0) {
+    // Zero-arg construction: allocate and zero-initialize all fields.
+    // This gives sensible defaults (null pointers, 0 integers).
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                     TheFunction->getEntryBlock().begin());
+    AllocaInst *Alloca =
+        TmpB.CreateAlloca(LLVMStructType, nullptr, Name + "_init");
+
+    auto &DL = TheModule->getDataLayout();
+    uint64_t TotalBytes = DL.getTypeAllocSize(LLVMStructType);
+    Builder->CreateMemSet(
+        Alloca, ConstantInt::get(Type::getInt8Ty(*TheContext), 0),
+        ConstantInt::get(Type::getInt64Ty(*TheContext), TotalBytes),
+        Alloca->getAlign());
+
+    return Builder->CreateLoad(LLVMStructType, Alloca, "structval");
+  }
+
   if (Args.size() != SType->getFields().size()) {
     LogErrorAt(Loc, "Struct '" + Name + "' expects " +
                         std::to_string(SType->getFields().size()) +

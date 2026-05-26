@@ -120,7 +120,6 @@ enum Token {
   TOK_STEP = -38,
   TOK_RANGE = -39,
   TOK_ELSEIF = -40,
-  TOK_TYPE_LIST = -41,
   TOK_STRUCT = -42,
   TOK_SELF = -43,
   TOK_SIZEOF = -44,

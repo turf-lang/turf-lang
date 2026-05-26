@@ -130,8 +130,7 @@ std::unique_ptr<ExprAST> ParseRaiseExpr();
 static TurfTypePtr ParseType() {
   if (CurTok != TOK_IDENTIFIER && CurTok != TOK_TYPE_INT &&
       CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
-      CurTok != TOK_TYPE_STRING && CurTok != TOK_TYPE_VOID &&
-      CurTok != TOK_TYPE_LIST) {
+      CurTok != TOK_TYPE_STRING && CurTok != TOK_TYPE_VOID) {
     SyntaxError(CurLoc, "Expected a type name").raise();
     return nullptr;
   }
@@ -147,8 +146,6 @@ static TurfTypePtr ParseType() {
     BaseName = "string";
   else if (CurTok == TOK_TYPE_VOID)
     BaseName = "void";
-  else if (CurTok == TOK_TYPE_LIST)
-    BaseName = "list";
   else
     BaseName = IdentifierStr; // user-defined
 
@@ -217,7 +214,7 @@ static TurfTypePtr ParseType() {
     Base = TurfString();
   else if (BaseName == "void")
     Base = TurfVoid();
-  else if (BaseName == "list") {
+  else if (BaseName == "List") {
     // "list" without <T> is an error — give a helpful message
     SyntaxError(CurLoc, "Expected '<' after 'list' — e.g. list<int>").raise();
     return nullptr;
@@ -594,7 +591,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       if (!DestType)
         return nullptr;
       if (CurTok == '(') {
-        if (dynamic_cast<TurfStructType *>(DestType.get())) {
+        if (dynamic_cast<TurfStructType *>(DestType.get()) || dynamic_cast<GenericType *>(DestType.get())) {
           getNextToken(); // eat '('
           std::vector<std::unique_ptr<ExprAST>> Args;
           while (CurTok != ')' && CurTok != TOK_EOF) {
@@ -612,8 +609,12 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
             return nullptr;
           }
           getNextToken(); // eat ')'
+          std::string StructName = DestType->getName();
+          if (auto GT = dynamic_cast<GenericType *>(DestType.get())) {
+            StructName = GT->getBaseName();
+          }
           return std::make_unique<StructInitExprAST>(
-              TypeLoc, DestType->getName(), std::move(Args));
+              TypeLoc, StructName, std::move(Args));
         } else {
           return ParseCastExpr(DestType, TypeLoc);
         }
@@ -703,8 +704,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_TYPE_INT:
   case TOK_TYPE_DOUBLE:
   case TOK_TYPE_STRING:
-  case TOK_TYPE_BOOL:
-  case TOK_TYPE_LIST: {
+  case TOK_TYPE_BOOL: {
     // ParseType() handles all type keywords uniformly, including list<T>.
     // If the next token is '(' it is a cast: int(x), double(x), string(x).
     // Otherwise it is a variable (or array) declaration.
@@ -712,8 +712,35 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     TurfTypePtr DestType = ParseType(); // consumes the type keyword(s)
     if (!DestType)
       return nullptr;
-    if (CurTok == '(')
-      return ParseCastExpr(DestType, TypeLoc);
+    if (CurTok == '(') {
+      if (dynamic_cast<TurfStructType *>(DestType.get()) || dynamic_cast<GenericType *>(DestType.get())) {
+        getNextToken(); // eat '('
+        std::vector<std::unique_ptr<ExprAST>> Args;
+        while (CurTok != ')' && CurTok != TOK_EOF) {
+          auto Arg = ParseExpression();
+          if (!Arg)
+            return nullptr;
+          Args.push_back(std::move(Arg));
+          if (CurTok == ',')
+            getNextToken();
+          else if (CurTok != ')')
+            break;
+        }
+        if (CurTok != ')') {
+          LogErrorAt(CurLoc, "Expected ')' to close struct initialization");
+          return nullptr;
+        }
+        getNextToken(); // eat ')'
+        std::string StructName = DestType->getName();
+        if (auto GT = dynamic_cast<GenericType *>(DestType.get())) {
+          StructName = GT->getBaseName();
+        }
+        return std::make_unique<StructInitExprAST>(
+            TypeLoc, StructName, std::move(Args));
+      } else {
+        return ParseCastExpr(DestType, TypeLoc);
+      }
+    }
     return ParseVarDeclBody(TypeLoc, DestType);
   }
 
@@ -1209,20 +1236,6 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
   SourceLocation NameLoc = CurLoc;
   getNextToken();
 
-  if (isListType(Type.get())) {
-    std::unique_ptr<ExprAST> Init;
-    if (CurTok == TOK_ASSIGN) {
-      getNextToken(); // consume '='
-      Init = ParseExpression();
-      if (!Init)
-        return nullptr;
-    } else {
-      Init = std::make_unique<NumberExprAST>(0LL); // dummy, ignored by codegen
-    }
-    return std::make_unique<VarDeclExprAST>(NameLoc, Name, Type,
-                                            std::move(Init));
-  }
-
   if (CurTok != TOK_ASSIGN) {
     LogErrorAt(NameLoc, "Expected '=' after variable name '" + Name +
                             "'."
@@ -1278,6 +1291,33 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   std::string Name = IdentifierStr;
   getNextToken();
 
+  std::vector<std::string> TypeParams;
+  if (CurTok == '<') {
+    getNextToken(); // eat '<'
+    while (CurTok == TOK_IDENTIFIER) {
+      TypeParams.push_back(IdentifierStr);
+      getNextToken();
+      if (CurTok == ',') {
+        getNextToken();
+      } else {
+        break;
+      }
+    }
+    if (CurTok != '>') {
+      LogErrorAt(CurLoc, "Expected '>' after generic type parameters");
+      return nullptr;
+    }
+    getNextToken(); // eat '>'
+  }
+
+  // Push scope to allow ParseType to resolve generic parameters
+  if (GlobalSymbolTable && !TypeParams.empty()) {
+    GlobalSymbolTable->EnterScope();
+    for (const auto &TP : TypeParams) {
+      GlobalSymbolTable->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
+    }
+  }
+
   if (CurTok != '{') {
     LogErrorAt(CurLoc, "Expected '{' after struct name");
     return nullptr;
@@ -1313,13 +1353,17 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   }
   getNextToken(); // eat '}'
 
-  // Register the struct type
+  if (GlobalSymbolTable && !TypeParams.empty()) {
+    GlobalSymbolTable->ExitScope();
+  }
+
+  // Register the struct type. For generics, fields will use TurfGenericParamType which compiles to void*
   auto SType = std::make_shared<TurfStructType>(Name, Fields);
   if (GlobalSymbolTable) {
     GlobalSymbolTable->RegisterType(Name, SType);
   }
 
-  return std::make_unique<StructDeclExprAST>(Loc, Name, Fields);
+  return std::make_unique<StructDeclExprAST>(Loc, Name, Fields, TypeParams);
 }
 
 // ParseFuncDef - called when CurTok == TOK_FN.
@@ -1327,6 +1371,33 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
 std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
   SourceLocation FnLoc = CurLoc;
   getNextToken();
+
+  std::vector<std::string> TypeParams;
+  if (CurTok == '<') {
+    getNextToken(); // eat '<'
+    while (CurTok == TOK_IDENTIFIER) {
+      TypeParams.push_back(IdentifierStr);
+      getNextToken();
+      if (CurTok == ',') {
+        getNextToken();
+      } else {
+        break;
+      }
+    }
+    if (CurTok != '>') {
+      LogErrorAt(CurLoc, "Expected '>' after generic type parameters");
+      return nullptr;
+    }
+    getNextToken(); // eat '>'
+  }
+
+  // Push scope to allow ParseType to resolve generic parameters
+  if (GlobalSymbolTable && !TypeParams.empty()) {
+    GlobalSymbolTable->EnterScope();
+    for (const auto &TP : TypeParams) {
+      GlobalSymbolTable->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
+    }
+  }
 
   // Parse return type using ParseType() to support generics in the future
   TurfTypePtr RetType = ParseType(); // consumes the return type token
@@ -1336,7 +1407,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(FnLoc,
                "Expected a function name after the return type."
-               "\n  Hint: Function syntax: fn int myFunc(int x) { return x }");
+               "\n  Hint: Function syntax: fn<T> int myFunc(int x) { return x }");
     return nullptr;
   }
   std::string FuncName = IdentifierStr;
@@ -1425,23 +1496,29 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
 
   // Intrinsic functions have no body
   if (!IntrinsicName.empty()) {
+    if (GlobalSymbolTable && !TypeParams.empty()) {
+      GlobalSymbolTable->ExitScope();
+    }
     return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
-                                            nullptr, IntrinsicName);
+                                            nullptr, IntrinsicName, TypeParams);
   }
 
   // Parse body block
   if (CurTok != '{') {
-    LogErrorAt(FnLoc, "Expected '{' to open the body of function '" + FuncName +
-                          "'."
-                          "\n  Hint: Function syntax: fn int " +
-                          FuncName + "(...) { ... }");
+    LogErrorAt(FnLoc, "Expected '{' to begin function body for '" + FuncName +
+                          "'.");
     return nullptr;
   }
   auto Body = ParseBlock();
   if (!Body)
     return nullptr;
+
+  if (GlobalSymbolTable && !TypeParams.empty()) {
+    GlobalSymbolTable->ExitScope();
+  }
+
   return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
-                                          std::move(Body), IntrinsicName);
+                                          std::move(Body), "", TypeParams);
 }
 
 std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
@@ -1461,6 +1538,10 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
   auto SavedLastChar = GetLastChar();
   auto SavedCurTok = CurTok;
   auto SavedCurLoc = CurLoc;
+  extern int CurLine;
+  extern int CurCol;
+  auto SavedCurLine = CurLine;
+  auto SavedCurCol = CurCol;
   auto SavedFilename = SourceFilename;
   auto SavedNumVal = NumVal;
   auto SavedIntVal = IntVal;
@@ -1471,6 +1552,8 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
   // Set new lexer state
   SourceFile = std::move(ImportFile);
   SourceFilename = Path;
+  CurLine = 1;
+  CurCol = 0;
   CurLoc = {1, 1};
   SetLastChar(' ');
   getNextToken();
@@ -1498,6 +1581,8 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
   SetLastChar(SavedLastChar);
   CurTok = SavedCurTok;
   CurLoc = SavedCurLoc;
+  CurLine = SavedCurLine;
+  CurCol = SavedCurCol;
   SourceFilename = SavedFilename;
   NumVal = SavedNumVal;
   IntVal = SavedIntVal;
@@ -1511,11 +1596,13 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
 std::unique_ptr<ExprAST> ParseImport() {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat import
-  if (CurTok != TOK_IDENTIFIER) {
+  std::string ModuleName;
+  if (CurTok == TOK_IDENTIFIER) {
+    ModuleName = IdentifierStr;
+  } else {
     LogErrorAt(CurLoc, "Expected module name after 'import'");
     return nullptr;
   }
-  std::string ModuleName = IdentifierStr;
   getNextToken();
 
   std::string Path = "lib/std/" + ModuleName + ".tr";

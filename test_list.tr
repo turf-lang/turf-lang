@@ -1,0 +1,15 @@
+import list
+
+fn int main() {
+  List<int> l = List<int>()
+  l.push(10)
+  l.push(20)
+  l.push(30)
+
+  io.printline(l.length())
+  io.printline(l.pop())
+  io.printline(l.pop())
+  io.printline(l.pop())
+
+  return 0
+}

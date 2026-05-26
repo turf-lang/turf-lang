@@ -70,6 +70,15 @@ public:
   TurfTypePtr getPointee() const { return Pointee; }
 };
 
+// TurfGenericParamType — For generic type parameters like 'T'
+class TurfGenericParamType : public TurfType {
+  std::string Name;
+
+public:
+  explicit TurfGenericParamType(std::string N) : Name(std::move(N)) {}
+  std::string getName() const override { return Name; }
+};
+
 // GenericType — list<int>, list<string>, future map<K,V>, etc.
 // This is the core of Monomorphization: the element type is a full TurfType,
 // so list<Player> works as soon as Player is a registered type.
@@ -146,13 +155,10 @@ TurfTypePtr TurfString();
 TurfTypePtr TurfVoid();
 
 // Helper predicates (defined in src/Types.cpp)
-bool isListType(const TurfType *T);  // GenericType with BaseName "list"
 bool isArrayType(const TurfType *T); // ArrayType
 
-const TurfType *getListElementType(const TurfType *T);  // inner T of list<T>
 const TurfType *getArrayElementType(const TurfType *T); // inner T of T[]
 
-TurfTypePtr makeListType(TurfTypePtr ElemType);
 TurfTypePtr makeArrayType(TurfTypePtr ElemType, int Size = -1);
 
 // Human-readable diagnostic name

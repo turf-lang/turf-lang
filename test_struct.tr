@@ -1,0 +1,18 @@
+struct User {
+  int id,
+  string name
+}
+
+fn int main() {
+  User user = User(1, "hello")
+  io.printline(user.id)
+  io.printline(user.name)
+  
+  user.id = 2
+  user.name = "world"
+  
+  io.printline(user.id)
+  io.printline(user.name)
+  
+  return 0
+}
