@@ -1878,7 +1878,10 @@ Value *FuncCallExprAST::codegen() {
         ActTy = std::make_shared<GenericType>(GT->getBaseName(), GT->getTypeArgs());
       else if (auto *ST = dynamic_cast<const TurfStructType*>(ExprTy))
         ActTy = std::make_shared<TurfStructType>(ST->getName(), ST->getFields());
-      else
+      else if (isArrayType(ExprTy)) {
+        const auto *ArrTy = dynamic_cast<const ::ArrayType *>(ExprTy);
+        ActTy = makeArrayType(ArrTy->getElementTypePtr(), ArrTy->getSize());
+      } else
         ActTy = getTurfTypeFromLLVM(V->getType());
     } else {
       ActTy = getTurfTypeFromLLVM(V->getType());

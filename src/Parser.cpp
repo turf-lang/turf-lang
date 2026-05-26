@@ -23,6 +23,7 @@
 #include "Lexer.h"
 #include "SuggestionIndex.h"
 #include "SymbolTable.h"
+#include "llvm/Support/Path.h"
 #include <map>
 #include <memory>
 #include <unordered_set>
@@ -1605,13 +1606,16 @@ std::unique_ptr<ExprAST> ParseImport() {
   }
   getNextToken();
 
-  std::string Path = "lib/std/" + ModuleName + ".tr";
-  auto Block = ParseFile(Path);
+  llvm::SmallString<128> StdlibPath(CompilerExecutablePath);
+  llvm::sys::path::remove_filename(StdlibPath);
+  llvm::sys::path::append(StdlibPath, "..", "lib", "std", ModuleName + ".tr");
+
+  auto Block = ParseFile(StdlibPath.str().str());
   if (!Block) {
-    Path = ModuleName + ".tr";
-    Block = ParseFile(Path);
+    std::string CwdPath = ModuleName + ".tr";
+    Block = ParseFile(CwdPath);
     if (!Block) {
-      LogErrorAt(Loc, "Could not find module '" + ModuleName + "'");
+      ModuleNotFoundError(Loc, ModuleName).raise();
       return nullptr;
     }
   }

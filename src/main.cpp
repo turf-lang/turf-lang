@@ -46,6 +46,8 @@
 
 using namespace llvm;
 
+std::string CompilerExecutablePath;
+
 // CLI helpers
 struct CompilerOptions {
   std::string InputFile;
@@ -174,6 +176,8 @@ static int linkObject(const std::string &ObjFile,
  * @return int Exit code (0 on success, non-zero on compilation failure).
  */
 int main(int argc, char **argv) {
+  CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)main);
+
   struct SLMCleanup {
     ~SLMCleanup() { SLM::SLMEngine::getInstance().release(); }
   } cleanup;

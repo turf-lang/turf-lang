@@ -756,6 +756,19 @@ public:
                            Colors::RESET) {}
 };
 
+// Phase 3: Module search error
+class ModuleNotFoundError : public TurfError {
+public:
+  ModuleNotFoundError(SourceLocation Loc, const std::string &ModuleName)
+      : TurfError(Loc, Colors::BRIGHT_RED + "Could not find module '" +
+                           Colors::CYAN + ModuleName + Colors::BRIGHT_RED +
+                           "'.\n" + Colors::RESET + "  " +
+                           Colors::BRIGHT_GREEN +
+                           "Hint: Make sure the file '" + ModuleName + ".tr' exists in the standard library or your current directory." +
+                           Colors::RESET) {}
+};
+
+
 // Phase 2: Module-scoped method lookup error
 // Raised when a user types e.g. io.pritn() — wrong function name in a known
 // module. Suggestions are sourced from that module's function registry.

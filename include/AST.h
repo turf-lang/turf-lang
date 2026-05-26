@@ -10,6 +10,8 @@
 #include <typeinfo>
 #include <vector>
 
+extern std::string CompilerExecutablePath;
+
 // Base Expressions Class: Everything, "5", "5 + 10", etc. are expressions
 class ExprAST {
 public:
