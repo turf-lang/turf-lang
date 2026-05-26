@@ -1,5 +1,20 @@
 // Misspelled builtin should suggest 'print'
+// SMART ERROR FIX REQUIRED
+// > ./turf tests/suggestions/builtin_typo.tr
+// [Main] GlobalCFGs size before CallGraph: 0
+// [CallGraph] Functions: 0
+// ── error at line 4, col 3
+// 
+//   Oops! Something doesn't add up:
+//   Could not determine type of method call base
+// 
+//   4 │   io.pritn("hello")
+//     │   ^ Here!
+
+// SHOULD HAVE SUGGESTED THE EXISTING TOKEN IO.PRINT()
+// MUST BE A CHANGE IN THE FINDING SYMBOLS IN THE SYMBOL TABLE
+
 fn int main() {
-	pritn("hello")
+	io.pritn("hello")
 	return 0
 }

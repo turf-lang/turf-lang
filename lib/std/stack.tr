@@ -1,6 +1,6 @@
-// std/stack.tr
 // Stack<T> — LIFO (Last In, First Out) collection.
 // Usage: Stack<int> s = Stack<int>()  s.push(1)  s.pop()  s.peek()  s.length()
+
 import mem
 
 struct Stack<T> {

@@ -1,4 +1,10 @@
 // Phase 4: Chained Method Calls
-list<int> arr
-arr.push(1).push(2)
-printline(arr[1])
+// Will shortly implement all functions to acheive this.
+
+fn int main() {
+    list<int> arr
+    arr.push(1).push(2)
+    printline(arr[1])
+
+    return 0
+}

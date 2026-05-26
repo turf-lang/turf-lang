@@ -1,4 +1,7 @@
-// Phase 4: Multi-dimensional Arrays
-int[4][4] matrix
-matrix[1][3] = 44
-printline(matrix[1][3])
+fn int main() {
+    int[4][4][4] matrix
+    matrix[1][3][3] = 44
+    io.printline(matrix[1][3][3])
+
+    return 0
+}

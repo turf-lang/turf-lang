@@ -1,4 +1,3 @@
-// std/queue.tr
 // Queue<T> — FIFO (First In, First Out) collection.
 // Usage: Queue<int> q = Queue<int>()  q.enqueue(1)  q.dequeue()  q.peek()  q.length()
 //
@@ -7,6 +6,7 @@
 //   - dequeue reads from data[head] and advances head
 //   - when (head + len == cap): if head > 0 compact elements to front,
 //     otherwise double the capacity
+
 import mem
 
 struct Queue<T> {

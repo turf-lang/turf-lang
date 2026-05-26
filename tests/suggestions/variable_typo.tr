@@ -1,6 +1,8 @@
 // In-scope variable typo should suggest 'myvar'
+
 fn int main() {
 	int myvar = 5
-	print(myvvar)
+	io.printline(myvvar)
+	
 	return 0
 }

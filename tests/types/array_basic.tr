@@ -1,17 +1,21 @@
-int[5] numbers
-numbers[0] = 10
-numbers[1] = 20
-numbers[2] = 30
-numbers[3] = 40
-numbers[4] = 50
+fn int main() {
+    int[5] numbers
+    numbers[0] = 10
+    numbers[1] = 20
+    numbers[2] = 30
+    numbers[3] = 40
+    numbers[4] = 50
 
-printline(numbers[0])
-printline(numbers[1])
-printline(numbers[2])
-printline(numbers[3])
-printline(numbers[4])
+    io.printline(numbers[0])
+    io.printline(numbers[1])
+    io.printline(numbers[2])
+    io.printline(numbers[3])
+    io.printline(numbers[4])
 
-int[3] zeros
-printline(zeros[0])
-printline(zeros[1])
-printline(zeros[2])
+    int[3] zeros
+    io.printline(zeros[0])
+    io.printline(zeros[1])
+    io.printline(zeros[2])
+
+    return 0
+}

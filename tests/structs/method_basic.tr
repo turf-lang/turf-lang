@@ -11,8 +11,14 @@ fn void User.rename(string new_name) {
   self.name = new_name;
 }
 
-User u = User(10, "Alice");
-u.grow();
-print(u.age);
-u.rename("Bob");
-print(u.name);
+fn int main() {
+  User u = User(10, "Alice");
+  u.grow();
+
+  io.printline(u.age);
+  
+  u.rename("Bob");
+  io.printline(u.name);
+
+  return 0;
+}

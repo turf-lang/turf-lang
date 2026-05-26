@@ -1,14 +1,11 @@
-import math;
-
-@intrinsic("printline")
-fn void printline(string s)
+import math
 
 fn int main() {
   double val = math.sqrt(16.0);
   if val == 4.0 {
-    printline("OK");
+    io.printline("OK");
   } else {
-    printline("FAIL");
+    io.printline("FAIL");
   }
   return 0;
 }

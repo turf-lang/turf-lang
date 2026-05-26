@@ -6,5 +6,9 @@ fn int factorial(int n) {
     }
 }
 
-int result = factorial(5)
-printline(result)
+fn int main() {
+    int result = factorial(5)
+    io.printline(result)
+    
+    return 0
+}

@@ -1,28 +1,32 @@
-int a = 10
-int b = 20
+fn int main() {
+    int a = 10
+    int b = 20
 
-int max_val = if a > b then a else b
-printline(max_val)
+    int max_val = if a > b then a else b
+    io.printline(max_val)
 
-int c = 5
-if c > 0 {
-    printline("positive")
-} else {
-    printline("non-positive")
-}
-
-int d = 15
-if d > 20 {
-    printline("big")
-} else {
-    if d > 10 {
-        printline("medium")
+    int c = 5
+    if c > 0 {
+        io.printline("positive")
     } else {
-        printline("small")
+        io.printline("non-positive")
     }
-}
 
-int e = 7
-if e > 5 {
-    printline("above five")
+    int d = 15
+    if d > 20 {
+        io.printline("big")
+    } else {
+        if d > 10 {
+            io.printline("medium")
+        } else {
+            io.printline("small")
+        }
+    }
+
+    int e = 7
+    if e > 5 {
+        io.printline("above five")
+    }
+
+    return 0
 }

@@ -1,2 +1,0 @@
-int[3] arr = [1, 2, 3]
-printline(arr[missing_index])

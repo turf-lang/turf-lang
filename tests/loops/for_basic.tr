@@ -1,7 +1,11 @@
-int sum = 0
+fn int main() {
+    int sum = 0
 
-for i in 1..10 step i += 1 {
-    sum = sum + i
+    for i in 1..10 step i += 1 {
+        sum = sum + i
+    }
+
+    io.printline(sum)
+
+    return 0
 }
-
-printline(sum)

@@ -1,0 +1,13 @@
+fn void test_local() {
+  struct Point { int x, int y }
+  Point p = Point(1, 2);
+
+  io.print(p.x);
+  io.print(p.y);
+}
+
+fn int main() {
+  test_local();
+
+  return 0;
+}

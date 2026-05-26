@@ -10,4 +10,8 @@ fn int compute_sum(int max) {
     return sum
 }
 
-print(compute_sum(1000)) // Expected: 500500
+fn int main() {
+    io.print(compute_sum(1000)) // Expected: 499500
+
+    return 0
+}

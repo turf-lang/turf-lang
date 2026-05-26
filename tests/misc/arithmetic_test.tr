@@ -1,29 +1,33 @@
-int a = 5 + 3
-printline(a)
+fn int main() {
+    int a = 5 + 3
+    io.printline(a)
 
-int b = 10 - 7
-printline(b)
+    int b = 10 - 7
+    io.printline(b)
 
-int c = 6 * 7
-printline(c)
+    int c = 6 * 7
+    io.printline(c)
 
-int d = 100 / 4
-printline(d)
+    int d = 100 / 4
+    io.printline(d)
 
-int e = 17 % 5
-printline(e)
+    int e = 17 % 5
+    io.printline(e)
 
-double f = 2.0 ^ 3.0
-printline(f)
+    double f = 2.0 ^ 3.0
+    io.printline(f)
 
-int g = -10
-printline(g)
+    int g = -10
+    io.printline(g)
 
-int h = 2 + 3 * 4
-printline(h)
+    int h = 2 + 3 * 4
+    io.printline(h)
 
-int i = (2 + 3) * 4
-printline(i)
+    int i = (2 + 3) * 4
+    io.printline(i)
 
-double j = 5 + 2.5
-printline(j)
+    double j = 5 + 2.5
+    io.printline(j)
+
+    return 0
+}

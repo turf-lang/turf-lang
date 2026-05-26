@@ -1,11 +1,15 @@
-int x = 9
+fn int main() {
+    int x = 9
 
-if (x > 10) {
-    printline("big")
-} elseif (x > 5) {
-    printline("medium")
-} elseif (x > 0) {
-    printline("small")
-} else {
-    printline("non-positive")
+    if (x > 10) {
+        io.printline("big")
+    } elseif (x > 5) {
+        io.printline("medium")
+    } elseif (x > 0) {
+        io.printline("small")
+    } else {
+        io.printline("non-positive")
+    }
+
+    return 0
 }

@@ -2,5 +2,6 @@ fn int main() {
 	int* p = malloc(16)
 	free(p)
 	free(p)
+
 	return 0
 }

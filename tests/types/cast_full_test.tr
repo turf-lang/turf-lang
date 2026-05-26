@@ -1,53 +1,57 @@
-double a = double(42)
-printline(a)
+fn int main() {
+    double a = double(42)
+    io.printline(a)
 
-int b = int(3.75)
-printline(b)
+    int b = int(3.75)
+    io.printline(b) // Removes the decimal part.
 
-int c = int("100")
-printline(c)
+    int c = int("100")
+    io.printline(c)
 
-double d = double("2.718")
-printline(d)
+    double d = double("2.718")
+    io.printline(d)
 
-int e = int(1.9) + int(2.1)
-printline(e)
+    int e = int(1.9) + int(2.1)
+    io.printline(e)
 
-double f = double(int(9.9))
-printline(f)
+    double f = double(int(9.9))
+    io.printline(f)
 
-int g = int(double(7))
-printline(g)
+    int g = int(double(7))
+    io.printline(g)
 
-// string(int) conversions
-string s1 = string(42)
-printline(s1)
+    // string(int) conversions
+    string s1 = string(42)
+    io.printline(s1)
 
-string s2 = string(-7)
-printline(s2)
+    string s2 = string(-7)
+    io.printline(s2)
 
-string s3 = string(0)
-printline(s3)
+    string s3 = string(0)
+    io.printline(s3)
 
-// string(double) conversions
-string s4 = string(3.14)
-printline(s4)
+    // string(double) conversions
+    string s4 = string(3.14)
+    io.printline(s4)
 
-string s5 = string(0.0)
-printline(s5)
+    string s5 = string(0.0)
+    io.printline(s5)
 
-// string(bool) conversions
-string s6 = string(true)
-printline(s6)
+    // string(bool) conversions
+    string s6 = string(true) // Takes the parameter and directly converts to its string value
+    io.printline(s6)
 
-string s7 = string(false)
-printline(s7)
+    string s7 = string(false)
+    io.printline(s7)
 
-// string(int(double)) - chaining casts
-string s8 = string(int(9.9))
-printline(s8)
+    // string(int(double)) - chaining casts
+    string s8 = string(int(9.9))
+    io.printline(s8)
 
-// string(variable)
-int x = 10
-string s9 = string(x)
-printline(s9)
+    // string(variable)
+    int x = 10
+    string s9 = string(x)
+    io.printline(s9)
+
+    return 0
+}
