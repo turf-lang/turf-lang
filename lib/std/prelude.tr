@@ -1,13 +1,1 @@
 import io
-
-struct Exception {
-  string message
-}
-
-struct ArithmeticException {
-  string message
-}
-
-struct OutOfBoundsException {
-  string message
-}

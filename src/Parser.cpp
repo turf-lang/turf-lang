@@ -23,6 +23,7 @@
 #include "Lexer.h"
 #include "SuggestionIndex.h"
 #include "SymbolTable.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Path.h"
 #include <map>
 #include <memory>

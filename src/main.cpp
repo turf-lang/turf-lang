@@ -43,6 +43,8 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/Path.h"
 
 using namespace llvm;
 
@@ -224,8 +226,12 @@ int main(int argc, char **argv) {
       CurTok = 0;
       getNextToken();
 
-      // Auto-import prelude
-      if (auto PreludeAST = ParseFile("lib/std/prelude.tr")) {
+      // Auto-import prelude using relative path from compiler
+      llvm::SmallString<128> PreludePath(CompilerExecutablePath);
+      llvm::sys::path::remove_filename(PreludePath);
+      llvm::sys::path::append(PreludePath, "..", "lib", "std", "prelude.tr");
+
+      if (auto PreludeAST = ParseFile(PreludePath.str().str())) {
         RecordParsedTopLevelAST(PreludeAST.get());
         PreludeAST->codegen();
       }
