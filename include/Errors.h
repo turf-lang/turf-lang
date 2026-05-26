@@ -756,4 +756,57 @@ public:
                            Colors::RESET) {}
 };
 
+// Phase 2: Module-scoped method lookup error
+// Raised when a user types e.g. io.pritn() — wrong function name in a known
+// module. Suggestions are sourced from that module's function registry.
+class ModuleMethodNotFoundError : public TurfError {
+public:
+  ModuleMethodNotFoundError(SourceLocation Loc,
+                            const std::string &ModuleName,
+                            const std::string &MethodName,
+                            const std::vector<std::string> &Suggestions)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Oops! Module '" + Colors::CYAN +
+                      ModuleName + Colors::BRIGHT_RED +
+                      "' has no function named '" + Colors::CYAN + MethodName +
+                      Colors::BRIGHT_RED + "'." + Colors::RESET) {
+    if (!Suggestions.empty()) {
+      Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
+      for (size_t i = 0; i < Suggestions.size(); ++i) {
+        Message += Colors::BRIGHT_YELLOW + "'" + Suggestions[i] + "'" +
+                   Colors::BRIGHT_GREEN;
+        if (i != Suggestions.size() - 1)
+          Message += ", ";
+      }
+      Message += "?" + Colors::RESET;
+    } else {
+      Message += "\n  " + Colors::BRIGHT_GREEN +
+                 "Hint: Double-check the function name. Use '" + ModuleName +
+                 ".<function>()' to call a function from this module." +
+                 Colors::RESET;
+    }
+  }
+};
+
+// Phase 2: Module-scoped argument type mismatch error
+// Raised when the function name is found in a module but no overload matches
+// the given argument types (e.g. math.abs(true) — no abs(bool) overload).
+class ModuleArityOrTypeError : public TurfError {
+public:
+  ModuleArityOrTypeError(SourceLocation Loc,
+                         const std::string &ModuleName,
+                         const std::string &MethodName,
+                         const std::string &Detail)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "No matching overload of '" +
+                      Colors::CYAN + ModuleName + "." + MethodName +
+                      Colors::BRIGHT_RED + "' for the arguments you gave.\n" +
+                      Colors::RESET + "  " + Detail + "\n  " +
+                      Colors::BRIGHT_GREEN +
+                      "Hint: Check the argument types and count. Use the " +
+                      "correct overload, e.g. 'math.abs(int)' or "
+                      "'math.abs(double)'." +
+                      Colors::RESET) {}
+};
+
 #endif

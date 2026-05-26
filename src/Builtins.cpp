@@ -35,6 +35,32 @@ using namespace llvm;
 static std::unordered_map<std::string, BuiltinInfo> g_builtins;
 static std::once_flag g_builtins_init_flag;
 
+// Arity table: maps intrinsic name -> expected number of arguments.
+// -1 means variadic/unchecked. Used by CodegenIntrinsic to catch arity
+// mismatches before any Args[n] access happens.
+
+// Might need to remove LLVM handled intrinsics like sqrt, sin, cos cuz their arity might have been handled by LLVM itself, need ot check later.
+static const std::unordered_map<std::string, int> IntrinsicArity = {
+    {"print",     1},
+    {"printline", 1},
+    {"input",     0},
+    {"malloc",    1},
+    {"realloc",   2},
+    {"free",      1},
+    {"typeof",    1},
+    {"lengthof",  1},
+    {"abs",       1},
+    {"sqrt",      1},
+    {"sin",       1},
+    {"cos",       1},
+    {"tan",       1},
+    {"floor",     1},
+    {"ceil",      1},
+    {"round",     1},
+    {"power",     2},
+    {"pow",       2},
+};
+
 static void ensure_builtins_registered();
 
 void RegisterBuiltin(const std::string &Name, const BuiltinInfo &Info) {
@@ -90,6 +116,24 @@ static void ensure_builtins_registered() {
 llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
                               std::vector<llvm::Value *> &Args,
                               SourceLocation Loc) {
+  // --- Arity guard (Phase 1 fix) ---
+  // Check before ANY Args[n] access to prevent out-of-bounds crashes.
+  {
+    auto ArityIt = IntrinsicArity.find(IntrinsicName);
+    if (ArityIt != IntrinsicArity.end() && ArityIt->second >= 0) {
+      int Expected = ArityIt->second;
+      if ((int)Args.size() != Expected) {
+        SemanticError(Loc,
+                      "'" + IntrinsicName + "' requires exactly " +
+                          std::to_string(Expected) + " argument" +
+                          (Expected == 1 ? "" : "s") + ", but got " +
+                          std::to_string(Args.size()))
+            .raise();
+        return nullptr;
+      }
+    }
+  }
+
   if (IntrinsicName == "print") {
     Value *Val = Args[0];
     Function *PrintfFunc = TheModule->getFunction("printf");
@@ -241,12 +285,31 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     return Builder->CreateCall(LLVMFunc, Args, "llvm_call");
   }
   if (IntrinsicName == "power") {
+    // Arity is already verified above. Type-check each argument.
     Value *A = Args[0];
     Value *B = Args[1];
     bool AIsDouble = A->getType()->isDoubleTy();
     bool BIsDouble = B->getType()->isDoubleTy();
-    bool AIsInt = A->getType()->isIntegerTy(64);
-    bool BIsInt = B->getType()->isIntegerTy(64);
+    bool AIsInt    = A->getType()->isIntegerTy(64);
+    bool BIsInt    = B->getType()->isIntegerTy(64);
+
+    // Phase 1 fix: reject non-numeric types (bool, string/ptr, etc.)
+    if (!AIsDouble && !AIsInt) {
+      SemanticError(Loc,
+                    "'power' first argument must be int or double, not '" +
+                        std::string(A->getType()->isIntegerTy(1) ? "bool" : "non-numeric") +
+                        "'")
+          .raise();
+      return nullptr;
+    }
+    if (!BIsDouble && !BIsInt) {
+      SemanticError(Loc,
+                    "'power' second argument must be int or double, not '" +
+                        std::string(B->getType()->isIntegerTy(1) ? "bool" : "non-numeric") +
+                        "'")
+          .raise();
+      return nullptr;
+    }
 
     if (!AIsDouble)
       A = Builder->CreateSIToFP(A, Type::getDoubleTy(*TheContext), "powcast1");
@@ -265,15 +328,30 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
   }
 
   if (IntrinsicName == "abs") {
+    // Arity is already verified above.
     Value *Val = Args[0];
     if (Val->getType()->isDoubleTy()) {
-      Function *FAbsFunc = llvm::Intrinsic::getOrInsertDeclaration(TheModule.get(), llvm::Intrinsic::fabs, {Type::getDoubleTy(*TheContext)});
+      Function *FAbsFunc = llvm::Intrinsic::getOrInsertDeclaration(
+          TheModule.get(), llvm::Intrinsic::fabs,
+          {Type::getDoubleTy(*TheContext)});
       return Builder->CreateCall(FAbsFunc, {Val}, "abs");
-    } else {
+    } else if (Val->getType()->isIntegerTy(64)) {
+      // Phase 1 fix: explicit int-only path — no catch-all else.
       Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
-      Value *Neg = Builder->CreateNeg(Val, "absneg");
-      Value *Cmp = Builder->CreateICmpSLT(Val, Zero, "abscmp");
+      Value *Neg  = Builder->CreateNeg(Val, "absneg");
+      Value *Cmp  = Builder->CreateICmpSLT(Val, Zero, "abscmp");
       return Builder->CreateSelect(Cmp, Neg, Val, "abs");
+    } else {
+      // Phase 1 fix: reject bool, string (ptr), or any other type.
+      std::string TypeDesc = Val->getType()->isIntegerTy(1)
+                                 ? "bool"
+                                 : (Val->getType()->isPointerTy() ? "string/pointer"
+                                                                  : "non-numeric");
+      SemanticError(Loc,
+                    "'abs' requires an int or double argument, not '" +
+                        TypeDesc + "'")
+          .raise();
+      return nullptr;
     }
   }
 
@@ -296,6 +374,12 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
   }
 
   if (IntrinsicName == "typeof") {
+    // Arity is already verified above (exactly 1 arg).
+    // Defensive check retained as belt-and-suspenders.
+    if (Args.empty()) {
+      SemanticError(Loc, "'typeof' requires exactly 1 argument").raise();
+      return nullptr;
+    }
     Value *Val = Args[0];
     Type *Ty = Val->getType();
     const char *TypeName = nullptr;

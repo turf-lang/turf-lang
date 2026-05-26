@@ -34,6 +34,7 @@
 #include "llvm/IR/Verifier.h"
 #include <algorithm>
 #include <iostream>
+#include <unordered_map>
 
 using namespace llvm;
 
@@ -1539,6 +1540,29 @@ Value *FuncDefExprAST::codegen() {
   for (const auto &P : Params)
     FuncParamTypes[MangledName].push_back(P.Type);
 
+  // Phase 2: also register this function in the SymbolTable's module registry.
+  // This populates the hashmap used by MethodCallExprAST to do namespace-aware
+  // overload resolution without string-prefix scanning.
+  if (GlobalSymbolTable && Name != "main") {
+    FunctionSymbol FSym;
+    FSym.BaseName    = Name; // user-visible name, e.g. "printline"
+    FSym.MangledName = MangledName; // e.g. "turf_io_printline_int"
+    FSym.Arity       = static_cast<int>(Params.size());
+    FSym.ReturnType  = ReturnType;
+    FSym.IsIntrinsic = !IntrinsicName.empty();
+    for (const auto &P : Params)
+      FSym.ParamTypes.push_back(P.Type);
+
+    // Determine which module this function belongs to.
+    // IsInModule() is true when we're currently inside a ModuleImportExprAST
+    // codegen block (i.e. compiling a library like io.tr or math.tr).
+    std::string ModuleName =
+        (GlobalSymbolTable->IsInModule())
+            ? GlobalSymbolTable->GetCurrentModule()
+            : "main";
+    GlobalSymbolTable->RegisterModuleFunction(ModuleName, FSym);
+  }
+
   // Fill in the function body
   BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunc);
 
@@ -1788,6 +1812,29 @@ Value *FuncCallExprAST::codegen() {
   if (CalleeName == "typeof" || CalleeName == "lengthof" ||
       CalleeName == "malloc" || CalleeName == "realloc" ||
       CalleeName == "free") {
+    // Phase 1 fix: validate arity before codegen-ing arguments so we don't
+    // crash on Args[0] when the user writes typeof() or typeof(a, b).
+    // The canonical arity: typeof=1, lengthof=1, malloc=1, realloc=2, free=1.
+    static const std::unordered_map<std::string, int> EarlyArityMap = {
+        {"typeof",    1},
+        {"lengthof",  1},
+        {"malloc",    1},
+        {"realloc",   2},
+        {"free",      1},
+    };
+    auto ArityIt = EarlyArityMap.find(CalleeName);
+    if (ArityIt != EarlyArityMap.end()) {
+      int Expected = ArityIt->second;
+      if ((int)Args.size() != Expected) {
+        SemanticError(Loc,
+                      "'" + CalleeName + "' requires exactly " +
+                          std::to_string(Expected) + " argument" +
+                          (Expected == 1 ? "" : "s") + ", but got " +
+                          std::to_string(Args.size()))
+            .raise();
+        return nullptr;
+      }
+    }
     std::vector<Value *> ArgVals;
     for (auto &Arg : Args) {
       Value *V = Arg->codegen();
@@ -2392,19 +2439,149 @@ Value *ArrayLengthExprAST::codegen() {
 Value *MethodCallExprAST::codegen() {
   if (auto *Var = dynamic_cast<VariableExprAST *>(Base.get())) {
     std::string ModuleName = Var->getName();
-    std::string PotentialMangledPrefix = "turf_" + ModuleName + "_" + Method;
-    bool IsModule = false;
-    for (const auto &Pair : FuncParamTypes) {
-      if (Pair.first == PotentialMangledPrefix ||
-          (Pair.first.size() > PotentialMangledPrefix.size() &&
-           Pair.first[PotentialMangledPrefix.size()] == '_' &&
-           Pair.first.substr(0, PotentialMangledPrefix.size()) == PotentialMangledPrefix)) {
-        IsModule = true;
-        break;
+
+    // --- Phase 2: namespace-aware module detection ---
+    // HasModule() is an O(1) hashmap check — no string-prefix scanning over
+    // FuncParamTypes.  It returns true only for modules that have at least one
+    // registered function (i.e. imported std-lib or user-imported files).
+    bool IsModule = GlobalSymbolTable && GlobalSymbolTable->HasModule(ModuleName);
+
+    // Legacy fallback: if the SymbolTable doesn't know about this module yet
+    // (e.g. function defined before any import completes), fall back to the
+    // old prefix scan.  This keeps backward compatibility during the transition.
+    if (!IsModule) {
+      std::string PotentialMangledPrefix = "turf_" + ModuleName + "_" + Method;
+      for (const auto &Pair : FuncParamTypes) {
+        if (Pair.first == PotentialMangledPrefix ||
+            (Pair.first.size() > PotentialMangledPrefix.size() &&
+             Pair.first[PotentialMangledPrefix.size()] == '_' &&
+             Pair.first.substr(0, PotentialMangledPrefix.size()) ==
+                 PotentialMangledPrefix)) {
+          IsModule = true;
+          break;
+        }
       }
     }
+
     if (IsModule) {
-      // It's a module call! E.g. math.sqrt() -> math_sqrt()
+      // Phase 2 path: resolve through the SymbolTable module registry first.
+      if (GlobalSymbolTable && GlobalSymbolTable->HasModule(ModuleName)) {
+        // Collect argument types for overload resolution.
+        // We use getExprType() to determine each arg's TurfType without
+        // generating any IR yet.  The type name is all that the module overload
+        // resolver needs for exact-match and coercion passes.
+        std::vector<Value *> EvaluatedArgs;
+        std::vector<TurfTypePtr> ArgTypes;
+        for (auto &Arg : Args) {
+          const TurfType *ExprTy = getExprType(Arg.get());
+          TurfTypePtr ActTy;
+          if (ExprTy) {
+            // Reconstruct a shared TurfTypePtr from the raw pointer.
+            // For primitives use the singleton accessors; for generics/
+            // structs/arrays clone via the type name-based factories.
+            if (ExprTy->isNamed("int"))         ActTy = TurfInt();
+            else if (ExprTy->isNamed("double")) ActTy = TurfDouble();
+            else if (ExprTy->isNamed("bool"))   ActTy = TurfBool();
+            else if (ExprTy->isNamed("string")) ActTy = TurfString();
+            else if (ExprTy->isVoid())          ActTy = TurfVoid();
+            else if (isArrayType(ExprTy)) {
+              const auto *ArrTy = dynamic_cast<const ::ArrayType *>(ExprTy);
+              ActTy = makeArrayType(ArrTy->getElementTypePtr(), ArrTy->getSize());
+            } else if (auto *Ptr = dynamic_cast<const TurfPointerType *>(ExprTy))
+              ActTy = std::make_shared<TurfPointerType>(Ptr->getPointee());
+            else if (auto *GT = dynamic_cast<const GenericType *>(ExprTy))
+              ActTy = std::make_shared<GenericType>(GT->getBaseName(),
+                                                    GT->getTypeArgs());
+            else if (auto *ST = dynamic_cast<const TurfStructType *>(ExprTy))
+              ActTy = std::make_shared<TurfStructType>(ST->getName(),
+                                                       ST->getFields());
+            else
+              ActTy = TurfString(); // conservative fallback for unknown types
+          }
+          // nullptr ArgType is tolerated: typesCompatible() returns false for
+          // nullptr, so the overload resolver will reject it safely.
+          ArgTypes.push_back(ActTy);
+        }
+
+        // Resolve overload using the module registry
+        const FunctionSymbol *Resolved =
+            GlobalSymbolTable->resolveModuleFunction(ModuleName, Method, ArgTypes);
+
+        if (!Resolved) {
+          // Check if the function name even exists in this module
+          // (name not found → typo; name found but no overload → type mismatch)
+          std::vector<std::string> ModFuncs =
+              GlobalSymbolTable->GetModuleFunctionNames(ModuleName);
+          bool NameExists = false;
+          for (const auto &fn : ModFuncs)
+            if (fn == Method) { NameExists = true; break; }
+
+          if (!NameExists) {
+            // Typo: suggest similar names from this module
+            std::vector<std::string> Suggestions =
+                SuggestionIndex::suggestVisible(Method, ModFuncs, 3);
+            ModuleMethodNotFoundError(Loc, ModuleName, Method, Suggestions)
+                .raise();
+          } else {
+            // Name found but types don't match any overload
+            // Build a helpful detail string listing accepted arities
+            std::string Detail = "No '" + Method +
+                "' overload in module '" + ModuleName +
+                "' accepts these argument types or count.";
+            ModuleArityOrTypeError(Loc, ModuleName, Method, Detail).raise();
+          }
+          return nullptr;
+        }
+
+        // Overload resolved — now actually codegen the arguments
+        for (auto &Arg : Args) {
+          Value *V = Arg->codegen();
+          if (!V) return nullptr;
+          EvaluatedArgs.push_back(V);
+        }
+
+        // Look up the LLVM function by mangled name (already compiled by the
+        // prototype pre-pass when the module was imported)
+        llvm::Function *CalleeF =
+            TheModule->getFunction(Resolved->MangledName);
+        if (!CalleeF) {
+          SemanticError(Loc, "Internal error: LLVM function '" +
+                                 Resolved->MangledName +
+                                 "' not found after successful overload resolution")
+              .raise();
+          return nullptr;
+        }
+
+        // Cast arguments to the expected LLVM types (same logic as the
+        // normal FuncCallExprAST argument marshalling)
+        std::vector<Value *> ArgVals;
+        unsigned Idx = 0;
+        for (auto &FArg : CalleeF->args()) {
+          Value *V = EvaluatedArgs[Idx++];
+          llvm::Type *ExpTy = FArg.getType();
+          if (V->getType() != ExpTy) {
+            if (ExpTy->isDoubleTy() && V->getType()->isIntegerTy(64))
+              V = Builder->CreateSIToFP(V, ExpTy, "argcast");
+            else if (ExpTy->isDoubleTy() && V->getType()->isIntegerTy(1))
+              V = Builder->CreateUIToFP(V, ExpTy, "argcast");
+            else if (ExpTy->isIntegerTy(64) && V->getType()->isDoubleTy())
+              V = Builder->CreateFPToSI(V, ExpTy, "argcast");
+            else if (ExpTy->isIntegerTy(64) && V->getType()->isIntegerTy(1))
+              V = Builder->CreateZExt(V, ExpTy, "argcast");
+            else if (ExpTy->isIntegerTy(1) && V->getType()->isIntegerTy(64))
+              V = Builder->CreateICmpNE(
+                      V, ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
+                      "argcast");
+            // pointer <-> integer / pointer passthrough handled by LLVM
+          }
+          ArgVals.push_back(V);
+        }
+
+        return Builder->CreateCall(CalleeF, ArgVals, "modcalltmp");
+      }
+
+      // Legacy path: module not in SymbolTable yet (shouldn't happen in normal
+      // flow, but keep as safety net). Re-dispatch as FuncCallExprAST.
       auto ModCall = std::make_unique<FuncCallExprAST>(
           Loc,
           std::make_unique<VariableExprAST>(Loc, ModuleName + "_" + Method),
