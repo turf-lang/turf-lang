@@ -147,6 +147,8 @@ static void LintAssignment(const AssignmentExprAST *Assign);
 static void LintWhile(const WhileExprAST *While);
 static void LintIf(const IfExprAST *If);
 
+static void LintFor(const ForExprAST *For);
+
 // Main entry point
 /**
  * @brief Recursively lints an AST expression or statement.
@@ -161,17 +163,33 @@ void LintExpression(ExprAST *E) {
   if (!E)
     return;
 
-  if (auto *Bin = dynamic_cast<BinaryExprAST *>(E))
+  if (auto *Bin = dynamic_cast<BinaryExprAST *>(E)) {
     LintBinaryExpr(Bin);
+    LintExpression(const_cast<ExprAST*>(Bin->getLHS()));
+    LintExpression(const_cast<ExprAST*>(Bin->getRHS()));
+  }
 
-  if (auto *Assign = dynamic_cast<AssignmentExprAST *>(E))
+  if (auto *Assign = dynamic_cast<AssignmentExprAST *>(E)) {
     LintAssignment(Assign);
+    LintExpression(const_cast<ExprAST*>(Assign->getLHS()));
+    LintExpression(const_cast<ExprAST*>(Assign->getRHS()));
+  }
 
-  if (auto *While = dynamic_cast<WhileExprAST *>(E))
+  if (auto *While = dynamic_cast<WhileExprAST *>(E)) {
     LintWhile(While);
+  }
 
-  if (auto *If = dynamic_cast<IfExprAST *>(E))
+  if (auto *For = dynamic_cast<ForExprAST *>(E)) {
+    LintFor(For);
+  }
+
+  if (auto *If = dynamic_cast<IfExprAST *>(E)) {
     LintIf(If);
+  }
+
+  if (auto *Ret = dynamic_cast<ReturnExprAST *>(E)) {
+    LintExpression(const_cast<ExprAST*>(Ret->getVal()));
+  }
 
   // Recurse into block children
   if (auto *Blk = dynamic_cast<BlockExprAST *>(E)) {
@@ -272,7 +290,6 @@ static void LintAssignment(const AssignmentExprAST *Assign) {
   }
 }
 
-// Check: infinite loop (while(true) without break/continue/return)
 static void LintWhile(const WhileExprAST *While) {
   if (!While)
     return;
@@ -289,8 +306,19 @@ static void LintWhile(const WhileExprAST *While) {
     }
   }
 
+  LintExpression(const_cast<ExprAST *>(While->getCond()));
   // Recurse into body
   LintExpression(const_cast<ExprAST *>(While->getBody()));
+}
+
+static void LintFor(const ForExprAST *For) {
+  if (!For)
+    return;
+
+  LintExpression(const_cast<ExprAST *>(For->getStart()));
+  LintExpression(const_cast<ExprAST *>(For->getEnd()));
+  LintExpression(const_cast<ExprAST *>(For->getStep()));
+  LintExpression(const_cast<ExprAST *>(For->getBody()));
 }
 
 static void LintIf(const IfExprAST *If) {
