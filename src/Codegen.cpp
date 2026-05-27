@@ -902,15 +902,15 @@ Value *VariableExprAST::codegen() {
   }
 
   // Use-before-declaration error
-  std::vector<std::string> VisibleNames;
+  RankedSuggestions Suggestions;
   if (GlobalSymbolTable) {
-    VisibleNames = GlobalSymbolTable->GetAllVisibleNames();
+    Suggestions = GlobalSymbolTable->GetRankedSuggestions(Name);
   } else {
-    for (const auto &pair : NamedValues) {
-      VisibleNames.push_back(pair.first);
-    }
+    std::vector<std::string> VisibleNames;
+    for (const auto &pair : NamedValues) VisibleNames.push_back(pair.first);
+    Suggestions.Local = SuggestionIndex::suggestVisible(Name, VisibleNames);
   }
-  UseBeforeDeclarationError(Loc, Name, VisibleNames).raise();
+  UseBeforeDeclarationError(Loc, Name, Suggestions).raise();
   return nullptr;
 }
 
@@ -925,13 +925,15 @@ Value *VariableExprAST::codegenLValue() {
   if (Iter != NamedValues.end())
     return Iter->second.Alloca;
 
-  std::vector<std::string> VisibleNames;
-  if (GlobalSymbolTable)
-    VisibleNames = GlobalSymbolTable->GetAllVisibleNames();
-  else
-    for (const auto &pair : NamedValues)
-      VisibleNames.push_back(pair.first);
-  UseBeforeDeclarationError(Loc, Name, VisibleNames).raise();
+  RankedSuggestions Suggestions;
+  if (GlobalSymbolTable) {
+    Suggestions = GlobalSymbolTable->GetRankedSuggestions(Name);
+  } else {
+    std::vector<std::string> VisibleNames;
+    for (const auto &pair : NamedValues) VisibleNames.push_back(pair.first);
+    Suggestions.Local = SuggestionIndex::suggestVisible(Name, VisibleNames);
+  }
+  UseBeforeDeclarationError(Loc, Name, Suggestions).raise();
   return nullptr;
 }
 
@@ -1998,7 +2000,13 @@ Value *FuncCallExprAST::codegen() {
   }
 
   if (!CalleeF) {
-    LookupError(Loc, CalleeName, SuggestionIndex::suggestBuiltins(CalleeName)).raise();
+    RankedSuggestions Suggestions;
+    if (GlobalSymbolTable) {
+      Suggestions = GlobalSymbolTable->GetRankedSuggestions(CalleeName);
+    } else {
+      Suggestions.Local = SuggestionIndex::suggestBuiltins(CalleeName);
+    }
+    LookupError(Loc, CalleeName, Suggestions).raise();
     return nullptr;
   }
 
@@ -2595,11 +2603,11 @@ Value *MethodCallExprAST::codegen() {
             if (fn == Method) { NameExists = true; break; }
 
           if (!NameExists) {
-            // Typo: suggest similar names from this module
-            std::vector<std::string> Suggestions =
-                SuggestionIndex::suggestVisible(Method, ModFuncs, 3);
-            ModuleMethodNotFoundError(Loc, ModuleName, Method, Suggestions)
-                .raise();
+            RankedSuggestions Suggestions;
+            if (GlobalSymbolTable) {
+              Suggestions = GlobalSymbolTable->GetRankedSuggestions(Method);
+            }
+            ModuleMethodNotFoundError(Loc, ModuleName, Method, Suggestions).raise();
           } else {
             // Name found but types don't match any overload
             // Build a helpful detail string listing accepted arities
@@ -2673,6 +2681,16 @@ Value *MethodCallExprAST::codegen() {
     BaseTy = PtrTy->getPointee().get();
 
   if (!BaseTy) {
+    std::cerr << "Base typeid: " << typeid(*Base.get()).name() << std::endl;
+    if (auto *Var = dynamic_cast<VariableExprAST *>(Base.get())) {
+      RankedSuggestions Suggestions;
+      if (GlobalSymbolTable) {
+        Suggestions = GlobalSymbolTable->GetRankedSuggestions(Method);
+      }
+      std::string FullName = Var->getName() + "." + Method;
+      LookupError(Loc, FullName, Suggestions).raise();
+      return nullptr;
+    }
     SemanticError(Loc, "Could not determine type of method call base").raise();
     return nullptr;
   }

@@ -17,6 +17,7 @@
 
 #include "SymbolTable.h"
 #include "Types.h"
+#include "SuggestionIndex.h"
 #include <algorithm>
 #include <unordered_set>
 
@@ -390,4 +391,36 @@ std::vector<std::string> SymbolTable::GetModuleFunctionNames(
   if (it == Modules.end())
     return {};
   return it->second->getFunctionNames();
+}
+
+RankedSuggestions SymbolTable::GetRankedSuggestions(const std::string &Name) const {
+  RankedSuggestions Result;
+
+  // 1. Gather all local visible names (variables, current scope functions)
+  std::vector<std::string> VisibleNames = GetAllVisibleNames();
+  
+  // Also include functions from the "main" module (current file's functions)
+  std::vector<std::string> MainFuncs = GetModuleFunctionNames("main");
+  for (const auto &MF : MainFuncs) {
+    if (std::find(VisibleNames.begin(), VisibleNames.end(), MF) == VisibleNames.end()) {
+      VisibleNames.push_back(MF);
+    }
+  }
+
+  Result.Local = SuggestionIndex::suggestVisible(Name, VisibleNames);
+
+  // 2. Gather from imported modules (skip "main")
+  for (const auto &pair : Modules) {
+    if (pair.first == "main") continue;
+    // Only check if it's actually an imported module (has functions)
+    if (pair.second->Functions.empty()) continue;
+
+    std::vector<std::string> ModFuncs = pair.second->getFunctionNames();
+    std::vector<std::string> ModMatches = SuggestionIndex::suggestVisible(Name, ModFuncs);
+    if (!ModMatches.empty()) {
+      Result.Module[pair.first] = ModMatches;
+    }
+  }
+
+  return Result;
 }

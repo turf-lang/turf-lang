@@ -208,8 +208,17 @@ public:
    * @brief Return all base function names registered under a module.
    * Used to build Levenshtein-distance suggestions for typos like io.pritn().
    */
+  /**
+   * @brief Return all base function names registered under a module.
+   * Used to build Levenshtein-distance suggestions for typos like io.pritn().
+   */
   std::vector<std::string> GetModuleFunctionNames(
       const std::string &moduleName) const;
+
+  /**
+   * @brief Get ranked suggestions across current scope and imported modules.
+   */
+  RankedSuggestions GetRankedSuggestions(const std::string &Name) const;
 };
 
 // Global symbol table instance

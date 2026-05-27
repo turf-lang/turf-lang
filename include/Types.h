@@ -1,6 +1,7 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -153,7 +154,17 @@ public:
   }
 };
 
-// Singleton accessors for built-in primitive types
+// Singleton accessors
+struct RankedSuggestions {
+  std::vector<std::string> Local;
+  std::map<std::string, std::vector<std::string>> Module;
+
+  bool empty() const {
+    return Local.empty() && Module.empty();
+  }
+};
+
+// Represents different primitive types in TurfLang
 // Defined in src/Types.cpp so callers never construct NamedType directly.
 TurfTypePtr TurfInt();
 TurfTypePtr TurfDouble();

@@ -42,6 +42,36 @@ public:
   }
 
   void warn() const { LogErrorAt(Loc, Message); }
+
+  static std::string formatRankedSuggestions(const RankedSuggestions &Suggestions) {
+    std::string result = "";
+    bool hasLocal = !Suggestions.Local.empty();
+    bool hasModule = !Suggestions.Module.empty();
+
+    if (hasLocal) {
+      result += "\n  " + Colors::BRIGHT_GREEN + "It may be from the current file: ";
+      for (size_t i = 0; i < Suggestions.Local.size(); ++i) {
+        result += Colors::BRIGHT_YELLOW + "'" + Suggestions.Local[i] + "'" + Colors::BRIGHT_GREEN;
+        if (i != Suggestions.Local.size() - 1) result += ", ";
+      }
+    }
+    
+    if (hasModule) {
+      result += "\n  " + Colors::BRIGHT_GREEN + "Or, could be one of these from the imported files:";
+      for (const auto &pair : Suggestions.Module) {
+        result += "\n    - In module '" + Colors::BRIGHT_CYAN + pair.first + Colors::BRIGHT_GREEN + "': ";
+        for (size_t i = 0; i < pair.second.size(); ++i) {
+          result += Colors::BRIGHT_YELLOW + "'" + pair.second[i] + "'" + Colors::BRIGHT_GREEN;
+          if (i != pair.second.size() - 1) result += ", ";
+        }
+      }
+    }
+    
+    if (hasLocal || hasModule) {
+      result += Colors::RESET;
+    }
+    return result;
+  }
 };
 
 // Syntax Error : Parser issues
@@ -193,20 +223,14 @@ public:
 class LookupError : public TurfError {
 public:
   LookupError(SourceLocation Loc, const std::string &Name,
-              const std::vector<std::string> &Suggestions)
+              const RankedSuggestions &Suggestions)
       : TurfError(Loc, Colors::BRIGHT_RED + "Oops! I can't find a function named '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
 
-    if (!Suggestions.empty()) {
-      Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
-      for (size_t i = 0; i < Suggestions.size(); ++i) {
-        Message += Colors::BRIGHT_YELLOW + "'" + Suggestions[i] + "'" +
-                   Colors::BRIGHT_GREEN;
-        if (i != Suggestions.size() - 1)
-          Message += ", ";
-      }
-      Message += "?" + Colors::RESET;
+    std::string formatted = formatRankedSuggestions(Suggestions);
+    if (!formatted.empty()) {
+      Message += formatted;
     } else {
       Message += "\n  " + Colors::BRIGHT_GREEN +
                  "Hint: Double-check the spelling against the built-in "
@@ -233,39 +257,16 @@ public:
 class ReferenceError : public TurfError {
 public:
   ReferenceError(SourceLocation Loc, const std::string &Name,
-                 const std::map<std::string, VarInfo> &SymbolTable)
+                 const RankedSuggestions &Suggestions)
       : TurfError(Loc, "") {
 
     Message = Colors::BRIGHT_RED + "I can't find anything named '" +
               Colors::CYAN + Name + Colors::BRIGHT_RED + "'." + Colors::RESET;
 
-    bool foundCandidate = false;
-
-    if (Name.length() > 2) {
-      std::vector<std::string> CandidateNames;
-      CandidateNames.reserve(SymbolTable.size());
-      for (const auto &pair : SymbolTable) {
-        CandidateNames.push_back(pair.first);
-      }
-
-      std::vector<std::string> Candidates =
-          SuggestionIndex::suggestVisible(Name, CandidateNames);
-
-      if (!Candidates.empty()) {
-        foundCandidate = true;
-        Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
-        for (size_t i = 0; i < Candidates.size(); ++i) {
-
-          Message += Colors::BRIGHT_YELLOW + "'" + Candidates[i] + "'" +
-                     Colors::BRIGHT_GREEN;
-          if (i != Candidates.size() - 1)
-            Message += ", ";
-        }
-        Message += "?" + Colors::RESET;
-      }
-    }
-
-    if (!foundCandidate) {
+    std::string formatted = formatRankedSuggestions(Suggestions);
+    if (!formatted.empty()) {
+      Message += formatted;
+    } else {
       Message += "\n  " + Colors::BRIGHT_GREEN +
                  "Hint: Did you forget to create this variable? You have to "
                  "create it before you can use it, like this: `int " +
@@ -278,34 +279,17 @@ public:
 class UseBeforeDeclarationError : public TurfError {
 public:
   UseBeforeDeclarationError(SourceLocation UseLoc, const std::string &Name,
-                            const std::vector<std::string> &KnownNames)
+                            const RankedSuggestions &Suggestions)
       : TurfError(UseLoc, "") {
 
     Message = Colors::BRIGHT_RED + "Hold on! You're trying to use '" +
               Colors::CYAN + Name + Colors::BRIGHT_RED +
               "' before telling me what it is." + Colors::RESET;
 
-    bool foundCandidate = false;
-
-    if (Name.length() > 2) {
-      std::vector<std::string> Candidates =
-          SuggestionIndex::suggestVisible(Name, KnownNames);
-
-      if (!Candidates.empty()) {
-        foundCandidate = true;
-        Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
-
-        for (size_t i = 0; i < Candidates.size(); ++i) {
-          Message += Colors::BRIGHT_YELLOW + "'" + Candidates[i] + "'" +
-                     Colors::BRIGHT_GREEN;
-          if (i != Candidates.size() - 1)
-            Message += ", ";
-        }
-        Message += "?" + Colors::RESET;
-      }
-    }
-
-    if (!foundCandidate) {
+    std::string formatted = formatRankedSuggestions(Suggestions);
+    if (!formatted.empty()) {
+      Message += formatted;
+    } else {
       Message += "\n  " + Colors::BRIGHT_GREEN +
                  "Hint: Did you forget to create this variable? You have to "
                  "create it before you can use it, like this: `int " +
@@ -777,25 +761,18 @@ public:
   ModuleMethodNotFoundError(SourceLocation Loc,
                             const std::string &ModuleName,
                             const std::string &MethodName,
-                            const std::vector<std::string> &Suggestions)
+                            const RankedSuggestions &Suggestions)
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Oops! Module '" + Colors::CYAN +
                       ModuleName + Colors::BRIGHT_RED +
                       "' has no function named '" + Colors::CYAN + MethodName +
                       Colors::BRIGHT_RED + "'." + Colors::RESET) {
     if (!Suggestions.empty()) {
-      Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
-      for (size_t i = 0; i < Suggestions.size(); ++i) {
-        Message += Colors::BRIGHT_YELLOW + "'" + Suggestions[i] + "'" +
-                   Colors::BRIGHT_GREEN;
-        if (i != Suggestions.size() - 1)
-          Message += ", ";
-      }
-      Message += "?" + Colors::RESET;
+      Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean:\n" + Colors::RESET;
+      Message += formatRankedSuggestions(Suggestions);
     } else {
       Message += "\n  " + Colors::BRIGHT_GREEN +
-                 "Hint: Double-check the function name. Use '" + ModuleName +
-                 ".<function>()' to call a function from this module." +
+                 "Double-check your spelling, or maybe you need to define it?" +
                  Colors::RESET;
     }
   }
