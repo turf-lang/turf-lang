@@ -795,6 +795,44 @@ AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
   return TmpB.CreateAlloca(getLLVMType(Type), 0, VarName.c_str());
 }
 
+static llvm::Constant *GetDefaultValue(const TurfType *T) {
+  if (!T)
+    return llvm::ConstantFP::get(llvm::Type::getDoubleTy(*TheContext), 0.0);
+
+  if (T->isNamed("int"))
+    return llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), 0);
+  if (T->isNamed("double"))
+    return llvm::ConstantFP::get(llvm::Type::getDoubleTy(*TheContext), 0.0);
+  if (T->isNamed("bool"))
+    return llvm::ConstantInt::get(llvm::Type::getInt1Ty(*TheContext), 0);
+  if (T->isNamed("string"))
+    return Builder->CreateGlobalStringPtr("");
+
+  if (isArrayType(T) || dynamic_cast<const TurfPointerType *>(T) || dynamic_cast<const TurfGenericParamType *>(T)) {
+    return llvm::ConstantPointerNull::get(llvm::PointerType::get(*TheContext, 0));
+  }
+
+  if (auto *ST = dynamic_cast<const TurfStructType *>(T)) {
+    llvm::Type *LLVMTy = getLLVMType(T);
+    auto *StructTy = llvm::dyn_cast<llvm::StructType>(LLVMTy);
+    if (!StructTy)
+      return llvm::UndefValue::get(LLVMTy);
+
+    std::vector<llvm::Constant *> FieldVals;
+    for (const auto &Field : ST->getFields()) {
+      FieldVals.push_back(GetDefaultValue(Field.Type.get()));
+    }
+    return llvm::ConstantStruct::get(StructTy, FieldVals);
+  }
+
+  if (auto *GT = dynamic_cast<const GenericType *>(T)) {
+    llvm::Type *LLVMTy = getLLVMType(T);
+    return llvm::Constant::getNullValue(LLVMTy);
+  }
+
+  return llvm::Constant::getNullValue(getLLVMType(T));
+}
+
 Value *VarDeclExprAST::codegen() {
   if (Type->isVoid()) {
     TypeError(Loc, "Variables of type 'void' are not allowed").raise();
@@ -833,37 +871,40 @@ Value *VarDeclExprAST::codegen() {
     }
   }
 
+  Value *Init = nullptr;
+  if (InitVal) {
+    Init = InitVal->codegen();
+    if (!Init)
+      return nullptr;
 
+    // Detect void value (e.g. int x = voidFunc())
+    if (Init->getType()->isVoidTy()) {
+      VoidValueError(Loc,
+                     "You're trying to store the result of a void function in '" +
+                         Name + "'.")
+          .raise();
+      return nullptr;
+    }
 
-  Value *Init = InitVal->codegen();
-  if (!Init)
-    return nullptr;
-
-  // Detect void value (e.g. int x = voidFunc())
-  if (Init->getType()->isVoidTy()) {
-    VoidValueError(Loc,
-                   "You're trying to store the result of a void function in '" +
-                       Name + "'.")
-        .raise();
-    return nullptr;
-  }
-
-  // Check type compatibility before implicit cast
-  TurfTypePtr InitLLVMType = getTurfTypeFromLLVM(Init->getType());
-  InitLLVMType = RefineLLVMType(InitLLVMType, Type, Init->getType());
-  
-  const TurfType *CheckType = InitLLVMType.get();
-  if (const TurfType *ExprTy = getExprType(InitVal.get())) {
-    CheckType = ExprTy;
-  }
-  
-  if (!isTypeCompatible(CheckType, Type.get())) {
-    TypeError(Loc, std::string("Cannot initialize '") + Type->getName() +
-                       "' variable '" + Name + "' with a value of type '" +
-                       CheckType->getName() + "'")
-        .raise();
-    return nullptr;
-  }
+    // Check type compatibility before implicit cast
+    TurfTypePtr InitLLVMType = getTurfTypeFromLLVM(Init->getType());
+    InitLLVMType = RefineLLVMType(InitLLVMType, Type, Init->getType());
+    
+    const TurfType *CheckType = InitLLVMType.get();
+    if (const TurfType *ExprTy = getExprType(InitVal.get())) {
+      CheckType = ExprTy;
+    }
+    
+      if (!isTypeCompatible(CheckType, Type.get())) {
+        TypeError(Loc, std::string("Cannot initialize '") + Type->getName() +
+                           "' variable '" + Name + "' with a value of type '" +
+                           CheckType->getName() + "'")
+            .raise();
+        return nullptr;
+      }
+    } else {
+      Init = GetDefaultValue(Type.get());
+    }
 
   Init = CastToType(Init, Type, "initcast", Loc);
 
@@ -2995,20 +3036,14 @@ Value *StructInitExprAST::codegen() {
 
   // Fallback to default struct initialization
   if (Args.size() == 0) {
-    // Zero-arg construction: allocate and zero-initialize all fields.
-    // This gives sensible defaults (null pointers, 0 integers).
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
     IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                      TheFunction->getEntryBlock().begin());
     AllocaInst *Alloca =
         TmpB.CreateAlloca(LLVMStructType, nullptr, Name + "_init");
 
-    auto &DL = TheModule->getDataLayout();
-    uint64_t TotalBytes = DL.getTypeAllocSize(LLVMStructType);
-    Builder->CreateMemSet(
-        Alloca, ConstantInt::get(Type::getInt8Ty(*TheContext), 0),
-        ConstantInt::get(Type::getInt64Ty(*TheContext), TotalBytes),
-        Alloca->getAlign());
+    llvm::Constant *DefaultVal = GetDefaultValue(T.get());
+    Builder->CreateStore(DefaultVal, Alloca);
 
     return Builder->CreateLoad(LLVMStructType, Alloca, "structval");
   }

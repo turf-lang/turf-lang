@@ -1247,18 +1247,13 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
   SourceLocation NameLoc = CurLoc;
   getNextToken();
 
-  if (CurTok != TOK_ASSIGN) {
-    LogErrorAt(NameLoc, "Expected '=' after variable name '" + Name +
-                            "'."
-                            "\n  Hint: Variables must be initialised: int " +
-                            Name + " = <value>");
-    return nullptr;
+  std::unique_ptr<ExprAST> Init = nullptr;
+  if (CurTok == TOK_ASSIGN) {
+    getNextToken();
+    Init = ParseExpression();
+    if (!Init)
+      return nullptr;
   }
-
-  getNextToken();
-  auto Init = ParseExpression();
-  if (!Init)
-    return nullptr;
 
   return std::make_unique<VarDeclExprAST>(NameLoc, Name, Type, std::move(Init));
 }
