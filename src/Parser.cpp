@@ -302,6 +302,12 @@ std::unique_ptr<ExprAST> ParseStringExpr() {
   return Result;
 }
 
+std::unique_ptr<ExprAST> ParseNullExpr() {
+  auto Result = std::make_unique<NullExprAST>(CurLoc);
+  getNextToken();
+  return Result;
+}
+
 std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
   while (true) {
     if (CurTok == '[') {
@@ -666,6 +672,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
   case TOK_STRING_LITERAL:
     return ParseStringExpr();
+    
+  case TOK_NULL:
+    return ParseNullExpr();
 
   case '(':
     return ParseParenExpr();

@@ -39,6 +39,13 @@ public:
   bool isVoid() const override { return Name == "void"; }
 };
 
+// TurfNullType — null literal
+class TurfNullType : public TurfType {
+public:
+  std::string getName() const override { return "null"; }
+  bool isNamed(const std::string &N) const override { return N == "null"; }
+};
+
 // ArrayType — int[], double[], bool[], string[]
 class ArrayType : public TurfType {
   TurfTypePtr ElementType;
@@ -153,6 +160,7 @@ TurfTypePtr TurfDouble();
 TurfTypePtr TurfBool();
 TurfTypePtr TurfString();
 TurfTypePtr TurfVoid();
+TurfTypePtr TurfNull();
 
 // Helper predicates (defined in src/Types.cpp)
 bool isArrayType(const TurfType *T); // ArrayType

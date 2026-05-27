@@ -208,6 +208,15 @@ static bool isTypeCompatible(const TurfType *From, const TurfType *To) {
       dynamic_cast<const TurfGenericParamType *>(To))
     return true;
 
+  // null is compatible with any reference type (string, pointer)
+  if (From->getName() == "null") {
+    if (To->isNamed("string") || dynamic_cast<const TurfPointerType *>(To) ||
+        To->isNamed("void*")) {
+      return true;
+    }
+    return false;
+  }
+
   // Auto-coerce void* to/from any pointer
   if (From->getName() == "void*" && dynamic_cast<const TurfPointerType *>(To))
     return true;
@@ -235,6 +244,9 @@ static const TurfType *getExprType(const ExprAST *E) {
   }
   if (auto *Str = dynamic_cast<const StringExprAST *>(E)) {
     return TurfString().get();
+  }
+  if (auto *NullE = dynamic_cast<const NullExprAST *>(E)) {
+    return TurfNull().get();
   }
   if (auto *Bin = dynamic_cast<const BinaryExprAST *>(E)) {
     char Op = Bin->getOp();
@@ -450,6 +462,13 @@ static Value *CastToType(Value *Val, TurfTypePtr DestType,
                          const std::string &Name, SourceLocation Loc = {0, 0}) {
   Type *ValTy = Val->getType();
 
+  if (isa<ConstantPointerNull>(Val)) {
+    if (DestType->isNamed("string") || dynamic_cast<const TurfPointerType *>(DestType.get()) ||
+        DestType->isNamed("void*")) {
+      return Builder->CreateBitCast(Val, getLLVMType(DestType.get()), Name);
+    }
+  }
+
   // Normalize foreign integer widths (e.g. i32 from printf) to i64
   if (ValTy->isIntegerTy(32)) {
     Val = Builder->CreateSExt(Val, Type::getInt64Ty(*TheContext), "i32toi64");
@@ -500,7 +519,7 @@ static Value *CastToType(Value *Val, TurfTypePtr DestType,
 
   // Strings cannot be cast to/from other types implicitly
   if (SrcType->isNamed("string") || DestType->isNamed("string")) {
-    TypeError(CurLoc, "Cannot cast between string and non-string types")
+    TypeError(CurLoc, "Cannot cast between string and non-string types. SrcType: " + SrcType->getName() + ", DestType: " + DestType->getName() + ", Context Name: " + Name)
         .raise();
     return Val;
   }
@@ -547,6 +566,11 @@ Value *StringExprAST::codegen() {
   return Builder->CreateGlobalString(Val, "str");
 }
 
+Value *NullExprAST::codegen() {
+  // A null pointer of type i8*
+  return ConstantPointerNull::get(PointerType::getUnqual(*TheContext));
+}
+
 // Turns any expression into IR operation
 Value *BinaryExprAST::codegen() {
   // Generate codes for the Left side and Right side
@@ -572,6 +596,25 @@ Value *BinaryExprAST::codegen() {
 
   TurfTypePtr LTy = getTurfTypeFromLLVM(L->getType());
   TurfTypePtr RTy = getTurfTypeFromLLVM(R->getType());
+
+  if (isa<ConstantPointerNull>(L) || isa<ConstantPointerNull>(R)) {
+    if (Op == TOK_EQ || Op == TOK_NEQ) {
+      if (isa<ConstantPointerNull>(L) && !R->getType()->isPointerTy()) {
+        TypeError(Loc, "Cannot compare null with a non-reference type").raise();
+        return nullptr;
+      }
+      if (isa<ConstantPointerNull>(R) && !L->getType()->isPointerTy()) {
+        TypeError(Loc, "Cannot compare null with a non-reference type").raise();
+        return nullptr;
+      }
+      if (isa<ConstantPointerNull>(L)) L = Builder->CreateBitCast(L, R->getType(), "lhscast");
+      if (isa<ConstantPointerNull>(R)) R = Builder->CreateBitCast(R, L->getType(), "rhscast");
+      return Op == TOK_EQ ? Builder->CreateICmpEQ(L, R, "cmptmp") : Builder->CreateICmpNE(L, R, "cmptmp");
+    } else {
+      TypeError(Loc, "Invalid operation with null").raise();
+      return nullptr;
+    }
+  }
 
   auto CastBoth = [&](TurfTypePtr Target) {
     L = CastToType(L, Target, "lhscast");
@@ -806,12 +849,18 @@ Value *VarDeclExprAST::codegen() {
   }
 
   // Check type compatibility before implicit cast
-  TurfTypePtr InitType = getTurfTypeFromLLVM(Init->getType());
-  InitType = RefineLLVMType(InitType, Type, Init->getType());
-  if (!isTypeCompatible(InitType.get(), Type.get())) {
+  TurfTypePtr InitLLVMType = getTurfTypeFromLLVM(Init->getType());
+  InitLLVMType = RefineLLVMType(InitLLVMType, Type, Init->getType());
+  
+  const TurfType *CheckType = InitLLVMType.get();
+  if (const TurfType *ExprTy = getExprType(InitVal.get())) {
+    CheckType = ExprTy;
+  }
+  
+  if (!isTypeCompatible(CheckType, Type.get())) {
     TypeError(Loc, std::string("Cannot initialize '") + Type->getName() +
                        "' variable '" + Name + "' with a value of type '" +
-                       InitType->getName() + "'")
+                       CheckType->getName() + "'")
         .raise();
     return nullptr;
   }
@@ -1835,6 +1884,7 @@ Value *FuncCallExprAST::codegen() {
         return nullptr;
       }
     }
+
     std::vector<Value *> ArgVals;
     for (auto &Arg : Args) {
       Value *V = Arg->codegen();
@@ -1842,6 +1892,31 @@ Value *FuncCallExprAST::codegen() {
         return nullptr;
       ArgVals.push_back(V);
     }
+    
+    // Phase 4 Note 14: typeof should return the compile-time type of the expression,
+    // avoiding the loss of generic type information in LLVM IR.
+    if (CalleeName == "typeof") {
+      std::string TypeNameStr = "unknown";
+      if (const TurfType *ExprTy = getExprType(Args[0].get())) {
+        TypeNameStr = turfTypeName(ExprTy);
+      } else {
+        // Fallback to LLVM type if AST type resolution failed
+        Type *Ty = ArgVals[0]->getType();
+        if (Ty->isDoubleTy()) {
+          TypeNameStr = "double";
+        } else if (Ty->isIntegerTy(64)) {
+          TypeNameStr = "int";
+        } else if (Ty->isIntegerTy(1)) {
+          TypeNameStr = "bool";
+        } else if (Ty->isPointerTy()) {
+          TypeNameStr = "string";
+        } else if (Ty->isVoidTy()) {
+          TypeNameStr = "void";
+        }
+      }
+      return Builder->CreateGlobalString(TypeNameStr, "typename");
+    }
+
     return CodegenIntrinsic(CalleeName, ArgVals, Loc);
   }
 

@@ -68,6 +68,7 @@ void RegisterBuiltin(const std::string &Name, const BuiltinInfo &Info) {
 }
 
 const BuiltinInfo *LookupBuiltin(const std::string &Name) {
+  std::call_once(g_builtins_init_flag, ensure_builtins_registered);
   auto It = g_builtins.find(Name);
   if (It == g_builtins.end()) return nullptr;
   return &It->second;

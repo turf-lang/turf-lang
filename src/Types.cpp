@@ -41,6 +41,10 @@ TurfTypePtr TurfVoid() {
   static TurfTypePtr T = std::make_shared<NamedType>("void");
   return T;
 }
+TurfTypePtr TurfNull() {
+  static TurfTypePtr T = std::make_shared<TurfNullType>();
+  return T;
+}
 
 // Helper predicates
 

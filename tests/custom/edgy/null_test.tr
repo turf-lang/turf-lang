@@ -1,0 +1,9 @@
+fn int main() {
+    string s = null
+
+    if (s == null) {
+        io.printline("String is null")
+    }
+
+    return 0
+}

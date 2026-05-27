@@ -82,7 +82,8 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"import", TOK_IMPORT},
                                        {"try", TOK_TRY},
                                        {"onError", TOK_ONERROR},
-                                       {"raise", TOK_RAISE}};
+                                       {"raise", TOK_RAISE},
+                                       {"null", TOK_NULL}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.

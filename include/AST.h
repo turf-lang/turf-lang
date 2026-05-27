@@ -375,6 +375,19 @@ public:
   }
 };
 
+class NullExprAST : public ExprAST {
+  SourceLocation Loc;
+
+public:
+  NullExprAST(SourceLocation Loc) : Loc(Loc) {}
+  const SourceLocation &getLoc() const { return Loc; }
+
+  llvm::Value *codegen() override;
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<NullExprAST>(Loc);
+  }
+};
+
 // Explicit type conversion: int(expr) / double(expr)
 class CastExprAST : public ExprAST {
   TurfTypePtr DestType;

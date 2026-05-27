@@ -128,7 +128,8 @@ enum Token {
   TOK_TRY = -47,
   TOK_ONERROR = -48,
   TOK_RAISE = -49,
-  TOK_LOOP = -50
+  TOK_LOOP = -50,
+  TOK_NULL = -51
 };
 
 int gettok();
