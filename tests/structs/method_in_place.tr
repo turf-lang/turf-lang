@@ -1,0 +1,22 @@
+struct User {
+  int age,
+  string name
+}
+
+fn void User.grow() {
+  self.age = self.age + 1;
+}
+
+fn void User.rename(string new_name) {
+  self.name = new_name;
+}
+
+fn int main() {
+  User u = User(10, "Alice");
+  u.grow();
+  io.printline(u.age);
+  u.rename("Bob");
+  io.printline(u.name);
+
+  return 0;
+}

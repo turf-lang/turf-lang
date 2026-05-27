@@ -16,24 +16,28 @@ fn string greet() {
   return "Hello"
 }
 
-// Test typeof() on function call results
-printline("=== Function Return Type Tests ===")
+fn int main() {
+  // Test typeof() on function call results
+  io.printline("=== Function Return Type Tests ===")
 
-print("typeof(add(5, 3)): ")
-printline(typeof(add(5, 3)))
+  io.print("typeof(add(5, 3)): ")
+  io.printline(typeof(add(5, 3)))
 
-print("typeof(multiply(2.5, 3.0)): ")
-printline(typeof(multiply(2.5, 3.0)))
+  io.print("typeof(multiply(2.5, 3.0)): ")
+  io.printline(typeof(multiply(2.5, 3.0)))
 
-print("typeof(isPositive(10)): ")
-printline(typeof(isPositive(10)))
+  io.print("typeof(isPositive(10)): ")
+  io.printline(typeof(isPositive(10)))
 
-print("typeof(greet()): ")
-printline(typeof(greet()))
+  io.print("typeof(greet()): ")
+  io.printline(typeof(greet()))
 
-// Test typeof() with function call in expression
-print("typeof(add(1, 2) + 10): ")
-printline(typeof(add(1, 2) + 10))
+  // Test typeof() with function call in expression
+  io.print("typeof(add(1, 2) + 10): ")
+  io.printline(typeof(add(1, 2) + 10))
 
-print("typeof(multiply(2.0, 3.0) * 1.5): ")
-printline(typeof(multiply(2.0, 3.0) * 1.5))
+  io.print("typeof(multiply(2.0, 3.0) * 1.5): ")
+  io.printline(typeof(multiply(2.0, 3.0) * 1.5))
+
+  return 0
+}

@@ -1,3 +1,20 @@
+/**
+ * @file CFG.cpp
+ * @brief Control Flow Graph construction and analysis.
+ * @details Implements TurfBasicBlock, CFG, and CFGBuilder to model the control
+ * flow of TurfLang programs. Provides reachability analysis, dead code
+ * detection, and return path validation.
+ *
+ * @author a2ys
+ * @author AaravTandon24
+ * @author Karan
+ *
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ * @version 1.0.0
+ * @date 2026-05-25
+ */
+
 #include "CFG.h"
 #include "AST.h"
 #include "Errors.h"
@@ -8,10 +25,12 @@
 // Global CFG storage
 std::vector<std::unique_ptr<CFG>> GlobalCFGs;
 
-// ============================================================================
-// CFG Implementation
-// ============================================================================
-
+/**
+ * @brief Creates a new basic block within the CFG.
+ *
+ * @param Name The debugging name of the basic block (e.g., "entry", "if.then").
+ * @return TurfBasicBlock* A pointer to the newly created basic block.
+ */
 TurfBasicBlock *CFG::createBlock(std::string Name) {
   auto BB = std::make_unique<TurfBasicBlock>(NextID++, std::move(Name));
   TurfBasicBlock *Ptr = BB.get();
@@ -179,12 +198,20 @@ void CFG::print() const {
   std::cout << "\n";
 }
 
-// ============================================================================
-// CFGBuilder Implementation
-// ============================================================================
-
+/**
+ * @brief Constructs a Control Flow Graph from an Abstract Syntax Tree.
+ *
+ * Visits the function body AST recursively to build a graph of basic blocks
+ * connected by control flow edges (branches, loops, returns).
+ *
+ * @param FunctionName The name of the function being analyzed.
+ * @param ReturnType The declared return type of the function.
+ * @param Body The root AST node of the function body.
+ * @return std::unique_ptr<CFG> The completed Control Flow Graph.
+ */
 std::unique_ptr<CFG> CFGBuilder::buildCFG(const std::string &FunctionName,
-                                          TurfTypePtr ReturnType, ExprAST *Body) {
+                                          TurfTypePtr ReturnType,
+                                          ExprAST *Body) {
   auto CFGPtr = std::make_unique<CFG>(FunctionName, std::move(ReturnType));
   CurrentCFG = CFGPtr.get();
 
@@ -270,7 +297,8 @@ void CFGBuilder::visitBlock(ExprAST *E) {
 
 void CFGBuilder::visitIf(ExprAST *E) {
   auto *If = dynamic_cast<IfExprAST *>(E);
-  if (!If) return;
+  if (!If)
+    return;
 
   TurfBasicBlock *IfEntry = CurrentBlock;
   TurfBasicBlock *MergeBB = createBlock("if.end");
@@ -282,10 +310,10 @@ void CFGBuilder::visitIf(ExprAST *E) {
 
   for (size_t i = 0; i < Branches.size(); ++i) {
     TurfBasicBlock *ThenBB = createBlock(i == 0 ? "if.then" : "elseif.then");
-    TurfBasicBlock *NextBB = (i + 1 < Branches.size())
-                                 ? createBlock("elseif.cond")
-                                 : (If->getElseBody() ? createBlock("if.else")
-                                                      : MergeBB);
+    TurfBasicBlock *NextBB =
+        (i + 1 < Branches.size())
+            ? createBlock("elseif.cond")
+            : (If->getElseBody() ? createBlock("if.else") : MergeBB);
 
     CurrentCFG->addEdge(CurrentCondBlock, ThenBB);
     CurrentCFG->addEdge(CurrentCondBlock, NextBB);
@@ -300,8 +328,10 @@ void CFGBuilder::visitIf(ExprAST *E) {
       // This branch terminates (return/break/continue)
     }
 
-    bool BranchTerminates = !CurrentBlock || CurrentBlock->hasExplicitTerminator();
-    if (!BranchTerminates) AllTerminate = false;
+    bool BranchTerminates =
+        !CurrentBlock || CurrentBlock->hasExplicitTerminator();
+    if (!BranchTerminates)
+      AllTerminate = false;
 
     CurrentCondBlock = NextBB;
   }
@@ -310,7 +340,8 @@ void CFGBuilder::visitIf(ExprAST *E) {
   if (If->getElseBody()) {
     setInsertPoint(CurrentCondBlock); // This is the else block
     visitExpr(If->getElseBody());
-    bool ElseTerminates = !CurrentBlock || CurrentBlock->hasExplicitTerminator();
+    bool ElseTerminates =
+        !CurrentBlock || CurrentBlock->hasExplicitTerminator();
     if (!ElseTerminates) {
       CurrentCFG->addEdge(CurrentBlock, MergeBB);
       AllTerminate = false;

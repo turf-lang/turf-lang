@@ -32,24 +32,24 @@ TEST_FILES=$(find "$TEST_DIR" -type f -name "*.tr" | grep -v "$TEST_DIR/custom/"
 
 for test_file in $TEST_FILES; do
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
-    
+
     # Extract suite name (e.g. cfg, io, loops)
     SUITE=$(basename $(dirname "$test_file"))
     FILE_NAME=$(basename "$test_file")
-    
+
     echo -n -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... "
-    
+
     # 1. Compile the test
     COMPILE_OUTPUT=$("$COMPILER" "$test_file" -o "$PROGRAM" 2>&1)
     COMPILE_STATUS=$?
-    
+
     if [ $COMPILE_STATUS -ne 0 ]; then
         echo -e "${RED}COMPILE FAILED${RESET}"
         FAILED=$((FAILED + 1))
         FAILED_TESTS+=("$test_file (Compile Error):\n$COMPILE_OUTPUT")
         continue
     fi
-    
+
     # 2. Run the compiled program
     if [ ! -f "$PROGRAM" ]; then
         echo -e "${RED}NO EXECUTABLE PRODUCED${RESET}"
@@ -57,7 +57,7 @@ for test_file in $TEST_FILES; do
         FAILED_TESTS+=("$test_file (No executable)")
         continue
     fi
-    
+
     # Special handling for I/O tests that expect input
     if [[ "$SUITE" == "io" ]]; then
         # Pipe dummy values (e.g., name and age) to avoid blocking
@@ -93,7 +93,7 @@ for test_file in $TEST_FILES; do
         echo -e "${GREEN}PASS${RESET}"
         PASSED=$((PASSED + 1))
     fi
-    
+
     # Cleanup compiled program
     rm -f "$PROGRAM"
 done

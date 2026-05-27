@@ -1,2 +1,8 @@
-list<int> inner
-printline(typeof(inner))
+import list
+
+fn int main() {
+    List<int> inner = List<int>()
+    io.printline(typeof(inner))
+
+    return 0
+}

@@ -1,0 +1,18 @@
+fn int main() {
+    int a = 10;
+    int b = 20;
+
+    if a > b {
+        io.printline(a);
+    } else {
+        io.printline(b);
+    }
+
+    int i = 0;
+    while i < 5 {
+        io.printline(i);
+        i = i + 1;
+    }
+
+    return 0;
+}

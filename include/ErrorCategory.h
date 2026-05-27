@@ -16,7 +16,8 @@ enum class ErrorCategory {
   ARRAY_ERROR,
   DECLARATION,
   FUNCTION_SIGNATURE,
-  BUILTIN_FUNCTION, // Errors specific to a builtin function (lengthof, typeof, etc.)
+  BUILTIN_FUNCTION, // Errors specific to a builtin function (lengthof, typeof,
+                    // etc.)
   GENERAL
 };
 
@@ -26,7 +27,9 @@ enum class ErrorCategory {
 // (e.g. a printline() call near a for-loop error), which would poison
 // the classification and serve the wrong documentation to the SLM.
 // Returns empty string if no recognized keyword is found in the message.
-inline std::string extractContextKeyword(const std::string &msg, const std::string & /*codeContext*/ = "") {
+inline std::string
+extractContextKeyword(const std::string &msg,
+                      const std::string & /*codeContext*/ = "") {
   // Check for builtin function names mentioned in the error message itself.
   // Order: longer/more-specific names first to avoid partial matches.
   static const char *builtinNames[] = {
@@ -37,7 +40,7 @@ inline std::string extractContextKeyword(const std::string &msg, const std::stri
   }
 
   // Check for control-flow construct keywords in the error message.
-  static const char *controlKeywords[] = {"elseif", "while", "for", "if",
+  static const char *controlKeywords[] = {"elseif", "while", "for",     "if",
                                           "return", "break", "continue"};
   for (const char *kw : controlKeywords) {
     if (msg.find(kw) != std::string::npos)
@@ -54,7 +57,7 @@ inline std::string extractContextKeyword(const std::string &msg, const std::stri
 // is generic (e.g. "unknown token when expecting an expression").
 inline ErrorCategory classifyError(const std::string &msg,
                                    const std::string &contextKeyword = "") {
-  // ── Keyword-based sub-classification (highest priority) ──────────────
+  // Keyword-based sub-classification (highest priority)
   // If we know which construct triggered the error, use that directly.
   if (!contextKeyword.empty()) {
     if (contextKeyword == "lengthof" || contextKeyword == "typeof")
@@ -64,7 +67,7 @@ inline ErrorCategory classifyError(const std::string &msg,
       return ErrorCategory::BUILTIN_FUNCTION;
   }
 
-  // ── Pattern-based classification ─────────────────────────────────────
+  // Pattern-based classification
   // Order matters: more specific patterns first.
 
   // Array errors
@@ -121,15 +124,17 @@ inline ErrorCategory classifyError(const std::string &msg,
     return ErrorCategory::FUNCTION_SIGNATURE;
 
   // Unknown / misspelled function name.
-  // SemanticError wraps these as "Oops! Something doesn't add up: Unknown function: 'x'"
-  // so we match the inner text. Must be checked here, after SYNTAX_ERROR, because
-  // SemanticError does NOT produce "Expected '" or "tiny mistake".
+  // SemanticError wraps these as "Oops! Something doesn't add up: Unknown
+  // function: 'x'" so we match the inner text. Must be checked here, after
+  // SYNTAX_ERROR, because SemanticError does NOT produce "Expected '" or "tiny
+  // mistake".
   if (msg.find("Unknown function") != std::string::npos ||
       msg.find("Unknown builtin function") != std::string::npos)
     return ErrorCategory::BUILTIN_FUNCTION;
 
-  // For-loop structural errors -- all produced by ParseForExpr in Parser.cpp via
-  // LogErrorAt (no SyntaxError class wrapper), so they don't match "Expected '" above.
+  // For-loop structural errors -- all produced by ParseForExpr in Parser.cpp
+  // via LogErrorAt (no SyntaxError class wrapper), so they don't match
+  // "Expected '" above.
   if (msg.find("for loop range") != std::string::npos ||
       msg.find("Expected 'in' after loop variable") != std::string::npos ||
       msg.find("Expected 'step' after range") != std::string::npos ||
@@ -137,7 +142,8 @@ inline ErrorCategory classifyError(const std::string &msg,
       msg.find("Expected identifier after 'for'") != std::string::npos)
     return ErrorCategory::CONTROL_FLOW;
 
-  // While / if structural errors produced via LogErrorAt (no SyntaxError wrapper)
+  // While / if structural errors produced via LogErrorAt (no SyntaxError
+  // wrapper)
   if (msg.find("Expected '{' after while condition") != std::string::npos ||
       msg.find("Expected 'then' or '{'") != std::string::npos ||
       msg.find("Expected '{' after elseif condition") != std::string::npos)
@@ -147,66 +153,89 @@ inline ErrorCategory classifyError(const std::string &msg,
 }
 
 inline ErrorCategory categoryFromString(const std::string &str) {
-  if (str == "TYPE_MISMATCH") return ErrorCategory::TYPE_MISMATCH;
-  if (str == "UNDECLARED_VARIABLE") return ErrorCategory::UNDECLARED_VAR;
-  if (str == "CONTROL_FLOW") return ErrorCategory::CONTROL_FLOW;
-  if (str == "SYNTAX_ERROR") return ErrorCategory::SYNTAX_ERROR;
-  if (str == "ARITHMETIC") return ErrorCategory::ARITHMETIC;
-  if (str == "STRING_CONVERSION") return ErrorCategory::STRING_CONVERSION;
-  if (str == "ARRAY_ERROR") return ErrorCategory::ARRAY_ERROR;
-  if (str == "DECLARATION") return ErrorCategory::DECLARATION;
-  if (str == "FUNCTION_SIGNATURE") return ErrorCategory::FUNCTION_SIGNATURE;
-  if (str == "BUILTIN_FUNCTION") return ErrorCategory::BUILTIN_FUNCTION;
+  if (str == "TYPE_MISMATCH")
+    return ErrorCategory::TYPE_MISMATCH;
+  if (str == "UNDECLARED_VARIABLE")
+    return ErrorCategory::UNDECLARED_VAR;
+  if (str == "CONTROL_FLOW")
+    return ErrorCategory::CONTROL_FLOW;
+  if (str == "SYNTAX_ERROR")
+    return ErrorCategory::SYNTAX_ERROR;
+  if (str == "ARITHMETIC")
+    return ErrorCategory::ARITHMETIC;
+  if (str == "STRING_CONVERSION")
+    return ErrorCategory::STRING_CONVERSION;
+  if (str == "ARRAY_ERROR")
+    return ErrorCategory::ARRAY_ERROR;
+  if (str == "DECLARATION")
+    return ErrorCategory::DECLARATION;
+  if (str == "FUNCTION_SIGNATURE")
+    return ErrorCategory::FUNCTION_SIGNATURE;
+  if (str == "BUILTIN_FUNCTION")
+    return ErrorCategory::BUILTIN_FUNCTION;
   return ErrorCategory::GENERAL;
 }
 
 // Human-readable category name (also used in the prompt).
 inline const char *getCategoryName(ErrorCategory cat) {
   switch (cat) {
-  case ErrorCategory::TYPE_MISMATCH:      return "TYPE_MISMATCH";
-  case ErrorCategory::UNDECLARED_VAR:     return "UNDECLARED_VARIABLE";
-  case ErrorCategory::CONTROL_FLOW:       return "CONTROL_FLOW";
-  case ErrorCategory::SYNTAX_ERROR:       return "SYNTAX_ERROR";
-  case ErrorCategory::ARITHMETIC:         return "ARITHMETIC";
-  case ErrorCategory::STRING_CONVERSION:  return "STRING_CONVERSION";
-  case ErrorCategory::ARRAY_ERROR:        return "ARRAY_ERROR";
-  case ErrorCategory::DECLARATION:        return "DECLARATION";
-  case ErrorCategory::FUNCTION_SIGNATURE: return "FUNCTION_SIGNATURE";
-  case ErrorCategory::BUILTIN_FUNCTION:   return "BUILTIN_FUNCTION";
-  case ErrorCategory::GENERAL:            return "GENERAL";
+  case ErrorCategory::TYPE_MISMATCH:
+    return "TYPE_MISMATCH";
+  case ErrorCategory::UNDECLARED_VAR:
+    return "UNDECLARED_VARIABLE";
+  case ErrorCategory::CONTROL_FLOW:
+    return "CONTROL_FLOW";
+  case ErrorCategory::SYNTAX_ERROR:
+    return "SYNTAX_ERROR";
+  case ErrorCategory::ARITHMETIC:
+    return "ARITHMETIC";
+  case ErrorCategory::STRING_CONVERSION:
+    return "STRING_CONVERSION";
+  case ErrorCategory::ARRAY_ERROR:
+    return "ARRAY_ERROR";
+  case ErrorCategory::DECLARATION:
+    return "DECLARATION";
+  case ErrorCategory::FUNCTION_SIGNATURE:
+    return "FUNCTION_SIGNATURE";
+  case ErrorCategory::BUILTIN_FUNCTION:
+    return "BUILTIN_FUNCTION";
+  case ErrorCategory::GENERAL:
+    return "GENERAL";
   }
   return "GENERAL";
 }
 
 // Returns the path to the external documentation file for a given category.
 // When a contextKeyword is provided and a construct-specific doc exists, use
-// that instead of the generic category doc (e.g. "lengthof" → builtin_lengthof.txt).
+// that instead of the generic category doc (e.g. "lengthof" →
+// builtin_lengthof.txt).
 inline std::string getCategoryDocPath(ErrorCategory cat,
                                       const std::string &contextKeyword = "") {
-  // ── Construct-specific docs (highest priority) ───────────────────────
+  // Construct-specific docs (highest priority)
   if (!contextKeyword.empty()) {
     static const std::unordered_map<std::string, std::string> constructDocs = {
         {"lengthof", "docs/slm/builtin_lengthof.txt"},
-        {"typeof",   "docs/slm/builtin_typeof.txt"},
+        {"typeof", "docs/slm/builtin_typeof.txt"},
     };
     auto it = constructDocs.find(contextKeyword);
     if (it != constructDocs.end())
       return it->second;
   }
 
-  // ── Category-level docs ──────────────────────────────────────────────
+  // Category-level docs
   static const std::unordered_map<ErrorCategory, std::string> paths = {
-      {ErrorCategory::TYPE_MISMATCH,      "docs/slm/type_mismatch.txt"},
-      {ErrorCategory::UNDECLARED_VAR,     "docs/slm/undeclared_var.txt"},
-      {ErrorCategory::CONTROL_FLOW,       "docs/slm/control_flow.txt"},
-      {ErrorCategory::SYNTAX_ERROR,       "docs/slm/syntax_error.txt"},
-      {ErrorCategory::ARITHMETIC,         "docs/slm/arithmetic.txt"},
-      {ErrorCategory::STRING_CONVERSION,  "docs/slm/string_conversion.txt"},
-      {ErrorCategory::ARRAY_ERROR,        "docs/slm/array_error.txt"},
-      {ErrorCategory::DECLARATION,        "docs/slm/declaration.txt"},
+      {ErrorCategory::TYPE_MISMATCH, "docs/slm/type_mismatch.txt"},
+      {ErrorCategory::UNDECLARED_VAR, "docs/slm/undeclared_var.txt"},
+      {ErrorCategory::CONTROL_FLOW, "docs/slm/control_flow.txt"},
+      {ErrorCategory::SYNTAX_ERROR, "docs/slm/syntax_error.txt"},
+      {ErrorCategory::ARITHMETIC, "docs/slm/arithmetic.txt"},
+      {ErrorCategory::STRING_CONVERSION, "docs/slm/string_conversion.txt"},
+      {ErrorCategory::ARRAY_ERROR, "docs/slm/array_error.txt"},
+      {ErrorCategory::DECLARATION, "docs/slm/declaration.txt"},
       {ErrorCategory::FUNCTION_SIGNATURE, "docs/slm/function_signature.txt"},
-      {ErrorCategory::BUILTIN_FUNCTION,   "docs/slm/general.txt"}, // fallback for unlisted builtins
-      {ErrorCategory::GENERAL,            "docs/slm/general.txt"},
+      {ErrorCategory::BUILTIN_FUNCTION,
+       "docs/slm/general.txt"}, // fallback for unlisted builtins
+      {ErrorCategory::GENERAL, "docs/slm/general.txt"},
   };
 
   auto it = paths.find(cat);

@@ -1,6 +1,7 @@
 // Long name transposition should be suggested
+
 fn int main() {
     int identifier_longname = 42
-    print(idenfier_longname)
+    io.printline(idenfier_longname)
     return 0
 }

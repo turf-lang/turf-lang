@@ -1,41 +1,45 @@
-bool a = true
-printline(a)
+fn int main() {
+    bool a = true
+    io.printline(a)
 
-bool b = false
-printline(b)
+    bool b = false
+    io.printline(b)
 
-bool c = true && true
-printline(c)
+    bool c = true && true
+    io.printline(c)
 
-bool d = true && false
-printline(d)
+    bool d = true && false
+    io.printline(d)
 
-bool e = false && false
-printline(e)
+    bool e = false && false
+    io.printline(e)
 
-bool f = true || false
-printline(f)
+    bool f = true || false
+    io.printline(f)
 
-bool g = false || false
-printline(g)
+    bool g = false || false
+    io.printline(g)
 
-bool h = false || true
-printline(h)
+    bool h = false || true
+    io.printline(h)
 
-bool i = 5 > 3
-printline(i)
+    bool i = 5 > 3
+    io.printline(i)
 
-bool j = 3 > 5
-printline(j)
+    bool j = 3 > 5
+    io.printline(j)
 
-bool k = 5 == 5
-printline(k)
+    bool k = 5 == 5
+    io.printline(k)
 
-bool l = 5 != 3
-printline(l)
+    bool l = 5 != 3
+    io.printline(l)
 
-bool m = 5 >= 5
-printline(m)
+    bool m = 5 >= 5
+    io.printline(m)
 
-bool n = 5 <= 5
-printline(n)
+    bool n = 5 <= 5
+    io.printline(n)
+
+    return 0
+}

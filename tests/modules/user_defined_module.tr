@@ -1,0 +1,5 @@
+// WILL BE MADE POSSIBLE SOON
+
+fn void greet() {
+    io.printline("Hello, World!")
+}

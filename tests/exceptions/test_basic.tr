@@ -1,21 +1,27 @@
-@intrinsic("printline")
-fn void printline(string s)
+// Should run perfectly, causes segmentation fault
+// > ./turf tests/exceptions/test_basic.tr
+// [AliasAnalysis] running on function: might_fail
+// [AliasAnalysis] running on function: main
+// [Main] GlobalCFGs size before CallGraph: 2
+// [CallGraph] Functions: 0
+// zsh: segmentation fault 
 
 fn void might_fail(int x) {
   if x < 0 {
     raise "Negative value not allowed";
   }
-  printline("Success");
+  io.printline("Success");
 }
 
 fn int main() {
   try {
     might_fail(5);
     might_fail(-1);
-    printline("This should not be printed");
+    io.printline("This should not be printed");
   } onError(err) {
-    printline("Caught error:");
-    printline(err);
+    io.printline("Caught error:");
+    io.printline(err);
   }
+
   return 0;
 }

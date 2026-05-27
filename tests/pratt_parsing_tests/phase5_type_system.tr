@@ -1,4 +1,6 @@
 // Phase 5: Type-System and Semantic Polish
+// Will shortly implement all functions to acheive this.
+
 fn list<list<int>> get_matrix() {
     list<list<int>> matrix
     list<int> row
@@ -7,5 +9,9 @@ fn list<list<int>> get_matrix() {
     return matrix
 }
 
-list<list<int>> mat = get_matrix()
-printline(mat[0][0])
+fn int main() {
+    list<list<int>> mat = get_matrix()
+    printline(mat[0][0])
+
+    return 0
+}

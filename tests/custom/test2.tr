@@ -1,2 +1,7 @@
-int i = printline("hello")
-printline(i)
+fn int main() {
+    // Perfectly described printline as void unlike integer due to printline return i64 previously during codegen phase.
+    int i = io.printline("hello")
+    io.printline(i)
+
+    return 0
+}

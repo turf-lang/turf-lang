@@ -13,6 +13,7 @@ void InitializePrecedence();
 std::unique_ptr<ExprAST> ParseFile(const std::string &Path);
 std::unique_ptr<ExprAST> ParseExpression();
 std::unique_ptr<ExprAST> Parse();
+bool RequiresSemicolon(const ExprAST* AST);
 
 // Top-level AST capture for sandbox diffing
 void ClearParsedTopLevelASTs();

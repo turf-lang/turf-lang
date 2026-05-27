@@ -15,12 +15,16 @@ fn int get_sum(int[5] arr) {
     return sum
 }
 
-int[5] numbers = [1, 2, 3, 4, 5]
+fn int main() {
+    int[5] numbers = [1, 2, 3, 4, 5]
 
-print(numbers[4])      // Expected: 5
+    io.printline(numbers[4])      // Expected: 5
 
-// Mutate the array inside a function (pass-by-reference)
-double_elements(numbers)
+    // Mutate the array inside a function (pass-by-reference)
+    double_elements(numbers)
 
-print(numbers[4])      // Expected: 10
-print(get_sum(numbers)) // Expected: 30 (2 + 4 + 6 + 8 + 10)
+    io.printline(numbers[4])      // Expected: 10
+    io.printline(get_sum(numbers)) // Expected: 30 (2 + 4 + 6 + 8 + 10)
+
+    return 0
+}

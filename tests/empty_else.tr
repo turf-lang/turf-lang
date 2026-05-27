@@ -1,0 +1,21 @@
+fn int main() {
+    int i = 0;
+    while (i < 5) {
+        if (i == 2) {
+            io.printline("Two!");
+        } else {
+            // empty
+        }
+        i = i + 1;
+    }
+
+    for j in 0..5 step j = j + 1 {
+        if (j == 2) {
+            io.printline("Two!");
+        } else {
+            // empty
+        }
+    }
+
+    return 0;
+}

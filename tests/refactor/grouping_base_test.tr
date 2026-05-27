@@ -1,8 +1,10 @@
-int[3] arr = [10, 20, 30]
+fn int main() {
+    int[3] arr = [10, 20, 30]
 
-printline((arr)[1])
+    printline((arr)[1])
 
-// Use an if statement so the parser doesn't confuse '(' with a postfix call on the previous expression
-if true then (arr)[1] = 99 else (arr)[1] = 0
+    // Use an if statement so the parser doesn't confuse '(' with a postfix call on the previous expression
+    if true then (arr)[1] = 99 else (arr)[1] = 0
 
-printline((arr)[1])
+    printline((arr)[1])
+}

@@ -1,5 +1,3 @@
-// std/io.tr
-
 @intrinsic("input")
 fn string input()
 

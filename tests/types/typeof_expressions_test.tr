@@ -1,46 +1,50 @@
 // More complex typeof() expression tests
 
-// Int expressions
-int a = 5
-int b = 10
-print(typeof(a + b))
-printline(" - addition")
+fn int main() {
+    // Int expressions
+    int a = 5
+    int b = 10
+    io.print(typeof(a + b))
+    io.printline(" - addition")
 
-print(typeof(a * b))
-printline(" - multiplication")
+    io.print(typeof(a * b))
+    io.printline(" - multiplication")
 
-print(typeof(a - b))
-printline(" - subtraction")
+    io.print(typeof(a - b))
+    io.printline(" - subtraction")
 
-// Double expressions
-double x = 2.5
-double y = 3.5
-print(typeof(x + y))
-printline(" - double addition")
+    // Double expressions
+    double x = 2.5
+    double y = 3.5
+    io.print(typeof(x + y))
+    io.printline(" - double addition")
 
-print(typeof(x / y))
-printline(" - double division")
+    io.print(typeof(x / y))
+    io.printline(" - double division")
 
-// Mixed type expressions (should promote to double)
-print(typeof(a + x))
-printline(" - int + double")
+    // Mixed type expressions (should promote to double)
+    io.print(typeof(a + x))
+    io.printline(" - int + double")
 
-print(typeof(5 + 2.5))
-printline(" - literal int + double")
+    io.print(typeof(5 + 2.5))
+    io.printline(" - literal int + double")
 
-// Boolean expressions
-print(typeof(a > b))
-printline(" - comparison")
+    // Boolean expressions
+    io.print(typeof(a > b))
+    io.printline(" - comparison")
 
-print(typeof(a == b))
-printline(" - equality")
+    io.print(typeof(a == b))
+    io.printline(" - equality")
 
-print(typeof(true && false))
-printline(" - logical AND")
+    io.print(typeof(true && false))
+    io.printline(" - logical AND")
 
-print(typeof(true || false))
-printline(" - logical OR")
+    io.print(typeof(true || false))
+    io.printline(" - logical OR")
 
-// Nested typeof (typeof returns string)
-print(typeof(typeof(42)))
-printline(" - typeof of typeof")
+    // Nested typeof (typeof returns string)
+    io.print(typeof(typeof(42)))
+    io.printline(" - typeof of typeof")
+
+    return 0
+}

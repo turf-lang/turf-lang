@@ -1,17 +1,1 @@
-// std/prelude.tr
-
-import math
-import io
-import mem
-
-struct Exception {
-  string message
-}
-
-struct ArithmeticException {
-  string message
-}
-
-struct OutOfBoundsException {
-  string message
-}
+import io;

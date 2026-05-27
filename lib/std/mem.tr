@@ -1,5 +1,3 @@
-// std/mem.tr
-
 @intrinsic("malloc")
 fn void* malloc(int size)
 

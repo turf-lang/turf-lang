@@ -1,0 +1,27 @@
+struct User {
+    int age,
+    string name
+}
+
+fn int User.incrementAge() {
+    self.age = self.age + 1
+    return self.age
+}
+
+fn void User.setAge(int newAge) {
+    self.age = newAge
+}
+
+fn int main() {
+    User u = User(10, "Alice")
+    io.printline(u.age)
+    io.printline(u.name)
+
+    u.incrementAge()
+    io.printline(u.age)
+
+    u.setAge(25)
+    io.printline(u.age)
+
+    return 0
+}

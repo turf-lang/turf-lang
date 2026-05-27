@@ -1,1 +1,7 @@
-printline(abs(1, 2))
+import math
+
+fn int main() {
+    io.printline(math.abs(1, 2))
+
+    return 0
+}

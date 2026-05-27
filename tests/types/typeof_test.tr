@@ -1,49 +1,53 @@
 // Test typeof() built-in function with variables
-int x = 10
-print(typeof(x))
-printline(" should be int")
+fn int main() {
+    int x = 10
+    io.print(typeof(x))
+    io.printline(" should be int")
 
-double y = 3.14
-print(typeof(y))
-printline(" should be double")
+    double y = 3.14
+    io.print(typeof(y))
+    io.printline(" should be double")
 
-bool flag = true
-print(typeof(flag))
-printline(" should be bool")
+    bool flag = true
+    io.print(typeof(flag))
+    io.printline(" should be bool")
 
-string s = "hello"
-print(typeof(s))
-printline(" should be string")
+    string s = "hello"
+    io.print(typeof(s))
+    io.printline(" should be string")
 
-// Test typeof() with literals
-print(typeof(42))
-printline(" should be int")
+    // Test typeof() with literals
+    io.print(typeof(42))
+    io.printline(" should be int")
 
-print(typeof(3.14159))
-printline(" should be double")
+    io.print(typeof(3.14159))
+    io.printline(" should be double")
 
-print(typeof(false))
-printline(" should be bool")
+    io.print(typeof(false))
+    io.printline(" should be bool")
 
-print(typeof("test string"))
-printline(" should be string")
+    io.print(typeof("test string"))
+    io.printline(" should be string")
 
-// Test typeof() with expressions
-print(typeof(5 + 2))
-printline(" should be int")
+    // Test typeof() with expressions
+    io.print(typeof(5 + 2))
+    io.printline(" should be int")
 
-print(typeof(3.0 + 2.0))
-printline(" should be double")
+    io.print(typeof(3.0 + 2.0))
+    io.printline(" should be double")
 
-print(typeof(10 > 5))
-printline(" should be bool")
+    io.print(typeof(10 > 5))
+    io.printline(" should be bool")
 
-print(typeof(x + 20))
-printline(" should be int")
+    io.print(typeof(x + 20))
+    io.printline(" should be int")
 
-print(typeof(y * 2.0))
-printline(" should be double")
+    io.print(typeof(y * 2.0))
+    io.printline(" should be double")
 
-// Test typeof() with lengthof builtin function result
-print(typeof(lengthof("test")))
-printline(" should be int")
+    // Test typeof() with lengthof builtin function result
+    io.print(typeof(lengthof("test")))
+    io.printline(" should be int")
+
+    return 0
+}

@@ -1,16 +1,20 @@
-int x = 10
-printline(x)
+fn int main() {
+    int x = 10
+    io.printline(x)
 
-if x > 5 {
-int x = 20
-printline(x)
+    if x > 5 {
+        int x = 20
+        io.printline(x)
 
-if x > 15 {
-int x = 30
-printline(x)
-} else {}
+        if x > 15 {
+            int x = 30
+            io.printline(x)
+        } else {}
 
-printline(x)
-} else {}
+        io.printline(x)
+    } else {}
 
-printline(x)
+    io.printline(x)
+
+    return 0;
+}

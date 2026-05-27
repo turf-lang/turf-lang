@@ -1,5 +1,7 @@
 // Transposition of multi-word builtin 'printline' -> 'prnitline'
+
 fn int main() {
-    prnitline("hey")
+    io.prnitline("hey")
+    
     return 0
 }

@@ -1,20 +1,24 @@
-string a = "Hello"
-printline(a)
+fn int main() {
+    string a = "Hello"
+    io.printline(a)
 
-string b = "World"
-printline(b)
+    string b = "World"
+    io.printline(b)
 
-string c = "Line1\nLine2"
-print(c)
+    string c = "Line1\nLine2"
+    io.print(c)
 
-string d = "Tab\there"
-printline(d)
+    string d = "Tab\there"
+    io.printline(d)
 
-string e = "Quote: \"hello\""
-printline(e)
+    string e = "Quote: \"hello\""
+    io.printline(e)
 
-string f = "Backslash: \\"
-printline(f)
+    string f = "Backslash: \\"
+    io.printline(f)
 
-string g = ""
-printline(g)
+    string g = ""
+    io.printline(g)
+
+    return 0
+}

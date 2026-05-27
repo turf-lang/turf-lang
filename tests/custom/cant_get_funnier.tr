@@ -1,0 +1,10 @@
+// Funniest file ever 🥀💔
+
+import math
+
+fn int main() {
+    math.abs(true)
+    io.printline(42)
+
+    return 0
+}

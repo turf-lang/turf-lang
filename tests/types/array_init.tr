@@ -1,14 +1,18 @@
-int[3] primes = [2, 3, 5]
-printline(primes[0])
-printline(primes[1])
-printline(primes[2])
+fn int main() {
+    int[3] primes = [2, 3, 5]
+    io.printline(primes[0])
+    io.printline(primes[1])
+    io.printline(primes[2])
 
-double[4] vals = [1.5, 2.5, 3.5, 4.5]
-printline(vals[0])
-printline(vals[1])
-printline(vals[2])
-printline(vals[3])
+    double[4] vals = [1.5, 2.5, 3.5, 4.5]
+    io.printline(vals[0])
+    io.printline(vals[1])
+    io.printline(vals[2])
+    io.printline(vals[3])
 
-bool[2] flags = [true, false]
-printline(flags[0])
-printline(flags[1])
+    bool[2] flags = [true, false]
+    io.printline(flags[0])
+    io.printline(flags[1])
+
+    return 0
+}

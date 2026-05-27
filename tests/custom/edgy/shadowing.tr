@@ -1,8 +1,12 @@
-int x = 10
-if (x > 5) {
-    int x = 20
-    if (x > 10) {
-        int x = 30
-        printline(x)
+fn int main() {
+    int x = 10
+    if (x > 5) {
+        int x = 20
+        if (x > 10) {
+            int x = 30
+            io.printline(x) // Perfectly prints 30 with appropriate warnings
+        }
     }
+    
+    return 0
 }

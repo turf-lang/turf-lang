@@ -1,6 +1,0 @@
-// Phase 3: Multi-dimensional arrays
-int[2][3] arr
-arr[0][0] = 1
-arr[1][2] = 2
-printline(arr[0][0])
-printline(arr[1][2])

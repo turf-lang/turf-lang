@@ -1,19 +1,23 @@
-int x = 1
-printline(x)
+fn int main() {
+    int x = 1
+    io.printline(x)
 
-if x > 0 {
-    int y = 2
-    printline(y)
+    if x > 0 {
+        int y = 2
+        io.printline(y)
 
-    if y > 0 {
-        int z = 3
-        printline(z)
+        if y > 0 {
+            int z = 3
+            io.printline(z)
+        } else {
+            io.printline(0)
+        }
+        io.printline(y)
     } else {
-        printline(0)
+        io.printline(0)
     }
-    printline(y)
-} else {
-    printline(0)
-}
 
-printline(x)
+    io.printline(x)
+
+    return 0
+}
