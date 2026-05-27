@@ -978,6 +978,18 @@ std::unique_ptr<ExprAST> ParseUnary() {
   return nullptr;
 }
 
+bool RequiresSemicolon(const ExprAST* AST) {
+  if (!AST) return false;
+  if (dynamic_cast<const IfExprAST*>(AST)) return false;
+  if (dynamic_cast<const WhileExprAST*>(AST)) return false;
+  if (dynamic_cast<const ForExprAST*>(AST)) return false;
+  if (dynamic_cast<const FuncDefExprAST*>(AST)) return false;
+  if (dynamic_cast<const StructDeclExprAST*>(AST)) return false;
+  if (dynamic_cast<const BlockExprAST*>(AST)) return false;
+  if (dynamic_cast<const TryExprAST*>(AST)) return false;
+  return true;
+}
+
 std::unique_ptr<ExprAST> ParseBlock() {
   if (CurTok != '{') {
     LogErrorAt(CurLoc, "Expected '{' to open a block");
@@ -997,6 +1009,15 @@ std::unique_ptr<ExprAST> ParseBlock() {
     auto Expr = ParseExpression();
     if (!Expr)
       return nullptr;
+    
+    if (RequiresSemicolon(Expr.get())) {
+      if (CurTok != ';') {
+        LogErrorAt(CurLoc, "Expected ';' after statement");
+        return nullptr;
+      }
+      getNextToken(); // eat ';'
+    }
+    
     Exprs.push_back(std::move(Expr));
   }
 
@@ -1576,6 +1597,13 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
     }
     auto Expr = ParseExpression();
     if (Expr) {
+      if (RequiresSemicolon(Expr.get())) {
+        if (CurTok != ';') {
+          LogErrorAt(CurLoc, "Expected ';' after statement");
+          return nullptr;
+        }
+        getNextToken(); // eat ';'
+      }
       Exprs.push_back(std::move(Expr));
     } else {
       getNextToken(); // skip for error recovery

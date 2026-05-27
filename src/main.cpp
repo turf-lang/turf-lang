@@ -258,6 +258,13 @@ int main(int argc, char **argv) {
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
             if (AST) {
+              if (RequiresSemicolon(AST.get())) {
+                if (CurTok != ';') {
+                  LogErrorAt(CurLoc, "Expected ';' after statement");
+                } else {
+                  getNextToken(); // eat ';'
+                }
+              }
               RecordParsedTopLevelAST(AST.get());
               LintExpression(AST.get());
               AST->codegen();
@@ -347,6 +354,13 @@ int main(int argc, char **argv) {
     if (setjmp(g_recoverJmp) == 0) {
       auto AST = ParseExpression();
       if (AST) {
+        if (RequiresSemicolon(AST.get())) {
+          if (CurTok != ';') {
+            LogErrorAt(CurLoc, "Expected ';' after statement");
+          } else {
+            getNextToken(); // eat ';'
+          }
+        }
         if (!dynamic_cast<FuncDefExprAST *>(AST.get()) &&
             !dynamic_cast<StructDeclExprAST *>(AST.get()) &&
             !dynamic_cast<ModuleImportExprAST *>(AST.get())) {
