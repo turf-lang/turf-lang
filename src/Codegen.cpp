@@ -625,6 +625,25 @@ Value *BinaryExprAST::codegen() {
   TurfTypePtr NumericType =
       CommonType->isNamed("bool") ? TurfInt() : CommonType;
 
+  // Validate type compatibility before proceeding to prevent LLVM IR crashes
+  auto IsNumeric = [](const TurfType *T) {
+    if (!T) return false;
+    return T->isNamed("int") || T->isNamed("double") || T->isNamed("bool");
+  };
+
+  if (Op == TOK_EQ || Op == TOK_NEQ) {
+    if (!isTypeCompatible(LTy.get(), RTy.get())) {
+      TypeError(Loc, "Cannot compare incompatible types").raise();
+      return nullptr;
+    }
+  } else {
+    // Arithmetic and relational operations require numeric types
+    if (!IsNumeric(LTy.get()) || !IsNumeric(RTy.get())) {
+      TypeError(Loc, "Invalid operation on non-numeric types").raise();
+      return nullptr;
+    }
+  }
+
   // Create the instruction based on the operator
   switch (Op) {
 
