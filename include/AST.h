@@ -1,6 +1,7 @@
 #ifndef AST_H
 #define AST_H
 
+#include "ASTVisitor.h"
 #include "Lexer.h"
 #include "Types.h"
 #include "llvm/IR/Value.h"
@@ -20,6 +21,9 @@ public:
   virtual llvm::Value *codegen() = 0;
   virtual llvm::Value *codegenLValue() { return nullptr; }
   virtual std::unique_ptr<ExprAST> clone() const = 0;
+
+  // Visitor pattern: dispatch to the correct visit* method on the visitor.
+  virtual void accept(ASTVisitor &V) = 0;
 
   // Node ID tracking for AST diffing
   static void ResetNodeIDCounter();
@@ -63,6 +67,7 @@ public:
   double getDoubleVal() const { return Val; }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitNumber(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return IsInteger ? std::make_unique<NumberExprAST>(IntVal)
                      : std::make_unique<NumberExprAST>(Val);
@@ -88,6 +93,7 @@ public:
   const ExprAST *getRHS() const { return RHS.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitBinary(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<BinaryExprAST>(Loc, static_cast<char>(Op),
                                            CloneExprAST(LHS.get()),
@@ -111,6 +117,7 @@ public:
   const ExprAST *getRHS() const { return RHS.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitAssignment(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<AssignmentExprAST>(Loc, CloneExprAST(LHS.get()),
                                                CloneExprAST(RHS.get()));
@@ -129,6 +136,7 @@ public:
   const std::string &getName() const { return Name; }
   llvm::Value *codegen() override;
   llvm::Value *codegenLValue() override;
+  void accept(ASTVisitor &V) override { V.visitVariable(*this); }
   const SourceLocation &getLoc() const { return Loc; }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<VariableExprAST>(Loc, Name);
@@ -170,6 +178,7 @@ public:
   ExprAST *getElse() const { return ElseBody.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitIf(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     std::vector<CondBranch> ClonedBranches;
     ClonedBranches.reserve(Branches.size());
@@ -194,6 +203,7 @@ public:
   const ExprAST *getOperand() const { return Operand.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitUnary(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<UnaryExprAST>(static_cast<char>(Opcode),
                                           CloneExprAST(Operand.get()));
@@ -213,6 +223,7 @@ public:
   }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitBlock(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<BlockExprAST>(CloneExprList(Expressions));
   }
@@ -230,6 +241,7 @@ public:
   const ExprAST *getBody() const { return Body.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitModuleImport(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ModuleImportExprAST>(ModuleName,
                                                  CloneExprAST(Body.get()));
@@ -248,6 +260,7 @@ public:
   TurfTypePtr getTypeArg() const { return TypeArg; }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitSizeOf(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<SizeOfExprAST>(Loc, TypeArg);
   }
@@ -267,6 +280,7 @@ public:
   const ExprAST *getCond() const { return Cond.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitWhile(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<WhileExprAST>(Loc, CloneExprAST(Cond.get()),
                                           CloneExprAST(Body.get()));
@@ -292,6 +306,7 @@ public:
   const ExprAST *getStep() const { return Step.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitFor(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ForExprAST>(
         Loc, VarName, CloneExprAST(Start.get()), CloneExprAST(End.get()),
@@ -306,6 +321,7 @@ public:
   BreakExprAST(SourceLocation Loc) : Loc(Loc) {}
   const SourceLocation &getLoc() const { return Loc; }
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitBreak(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<BreakExprAST>(Loc);
   }
@@ -318,6 +334,7 @@ public:
   ContinueExprAST(SourceLocation Loc) : Loc(Loc) {}
   const SourceLocation &getLoc() const { return Loc; }
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitContinue(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ContinueExprAST>(Loc);
   }
@@ -342,6 +359,7 @@ public:
   const ExprAST *getInitializer() const { return InitVal.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitVarDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<VarDeclExprAST>(Loc, Name, Type,
                                             CloneExprAST(InitVal.get()));
@@ -358,6 +376,7 @@ public:
   bool getVal() const { return Val; }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitBool(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<BoolExprAST>(Val);
   }
@@ -370,6 +389,7 @@ public:
   StringExprAST(std::string Val) : Val(std::move(Val)) {}
   const std::string &getValue() const { return Val; }
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitString(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<StringExprAST>(Val);
   }
@@ -383,6 +403,7 @@ public:
   const SourceLocation &getLoc() const { return Loc; }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitNull(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<NullExprAST>(Loc);
   }
@@ -404,6 +425,7 @@ public:
   const ExprAST *getOperand() const { return Operand.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitCast(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<CastExprAST>(Loc, DestType,
                                          CloneExprAST(Operand.get()));
@@ -431,6 +453,7 @@ public:
   const ExprAST *getVal() const { return Val.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitReturn(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ReturnExprAST>(Loc, CloneExprAST(Val.get()));
   }
@@ -449,6 +472,7 @@ public:
   const ExprAST *getPayload() const { return Payload.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitRaise(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<RaiseExprAST>(Loc, CloneExprAST(Payload.get()));
   }
@@ -474,6 +498,7 @@ public:
   const ExprAST *getCatchBlock() const { return CatchBlock.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitTry(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<TryExprAST>(Loc, CloneExprAST(TryBlock.get()),
                                         PayloadName,
@@ -511,6 +536,7 @@ public:
   const std::string &getIntrinsicName() const { return IntrinsicName; }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitFuncDef(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncDefExprAST>(
         Loc, Name, ReturnType, Params, CloneExprAST(Body.get()), IntrinsicName, TypeParams);
@@ -532,6 +558,7 @@ public:
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitFuncCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
                                              CloneExprList(Args));
@@ -563,6 +590,7 @@ public:
   }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitArrayDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ArrayDeclExprAST>(Loc, Name, ElementType, Size,
                                               CloneExprList(InitList));
@@ -588,6 +616,7 @@ public:
   const std::vector<std::string> &getTypeParams() const { return TypeParams; }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitStructDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<StructDeclExprAST>(Loc, Name, Fields, TypeParams);
   }
@@ -609,6 +638,7 @@ public:
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitStructInit(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<StructInitExprAST>(Loc, Name, CloneExprList(Args));
   }
@@ -631,6 +661,7 @@ public:
 
   llvm::Value *codegen() override;
   llvm::Value *codegenLValue() override;
+  void accept(ASTVisitor &V) override { V.visitFieldAccess(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FieldAccessExprAST>(Loc, CloneExprAST(Base.get()),
                                                 FieldName);
@@ -654,6 +685,7 @@ public:
 
   llvm::Value *codegen() override;
   llvm::Value *codegenLValue() override;
+  void accept(ASTVisitor &V) override { V.visitArrayAccess(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ArrayAccessExprAST>(Loc, CloneExprAST(Base.get()),
                                                 CloneExprAST(Index.get()));
@@ -680,6 +712,7 @@ public:
   const ExprAST *getRHS() const { return RHS.get(); }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitArrayAssign(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ArrayAssignExprAST>(
         Loc, Name, CloneExprAST(Index.get()), CloneExprAST(RHS.get()));
@@ -699,6 +732,7 @@ public:
   const std::string &getName() const { return Name; }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitArrayLength(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ArrayLengthExprAST>(Loc, Name);
   }
@@ -726,6 +760,7 @@ public:
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
 
   llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitMethodCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()),
                                                Method, CloneExprList(Args));
