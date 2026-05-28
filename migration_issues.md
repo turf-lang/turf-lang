@@ -53,7 +53,7 @@ Currently, types are heavily coupled with LLVM `Type*`. We need an abstract fron
 Implement `class Resolver : public ASTVisitor`.
 - Walk `VarDecl` nodes: Add variables to the current `SymbolTable` scope.
 - Walk `Block` nodes (`{...}`): Call `symTable.enterScope()` and `symTable.exitScope()`.
-- Walk `VarExpr` nodes: Look up the variable in the `SymbolTable`. If it doesn't exist, throw an "Unknown Variable" error.
+- Walk `VarExpr` nodes: Look up the variable in the `SymbolTable`. If it doesn't exist, throw an "Unknown Variable" error. (Our Damereau-Levenshtein Errors)
 
 ### [Issue #5] Modify AST Nodes to Store Resolved `Symbol` Pointers
 **Assignee:** [A] | **Labels:** `architecture`, `refactor` | **Depends on:** #4

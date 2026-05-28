@@ -115,10 +115,20 @@ add_executable(turf
   src/Sandbox.cpp
   src/SLMEngine.cpp
   src/SLMIntegration.cpp
+  src/ResolverSymbolTable.cpp
   src/SymbolTable.cpp
   src/Types.cpp
   src/ValueRange.cpp
 )
+
+# ─── Standalone unit test: ResolverSymbolTable (no LLVM required) ─────────────
+add_executable(test_resolver_symbol_table
+  tests/test_resolver_symbol_table.cpp
+  src/ResolverSymbolTable.cpp
+  src/Types.cpp
+)
+target_include_directories(test_resolver_symbol_table PRIVATE include)
+target_compile_options(test_resolver_symbol_table PRIVATE -Wall -Wextra -std=c++20)
 
 target_include_directories(turf PRIVATE
   include

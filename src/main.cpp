@@ -24,6 +24,7 @@
 #include "SLMEngine.h"
 #include "SymbolTable.h"
 #include "Types.h"
+#include "ASTPrinter.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "CallGraph.h"
@@ -56,6 +57,7 @@ struct CompilerOptions {
   std::string OutputName = "program"; // default output binary name
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
+  bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
 };
 
 static CompilerOptions parseArgs(int argc, char **argv) {
@@ -68,6 +70,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.EmitLLVM = true;
     } else if (arg == "--smart") {
       opts.AIEnabled = true;
+    } else if (arg == "--dump-ast") {
+      opts.DumpAST = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg[0] == '-') {
@@ -80,7 +84,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
 
   if (opts.InputFile.empty()) {
     std::cerr
-        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart]\n";
+        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] [--dump-ast]\n";
     std::exit(1);
   }
 
@@ -394,6 +398,21 @@ int main(int argc, char **argv) {
     LintExpression(AST.get());
   for (auto &AST : TopLevelASTs)
     LintExpression(AST.get());
+
+  // --dump-ast: run the ASTPrinter visitor over every top-level node.
+  // This is the Issue #1 acceptance-criteria demo: a concrete ASTVisitor
+  // subclass successfully traverses and prints the entire parsed AST tree.
+  if (opts.DumpAST) {
+    ASTPrinter Printer;
+    std::cout << "\n=== AST Dump (via ASTPrinter visitor) ===\n\n";
+    std::cout << "--- Functions & Structs ---\n";
+    for (auto &AST : FnASTs)
+      Printer.print(AST.get());
+    std::cout << "--- Top-Level Statements ---\n";
+    for (auto &AST : TopLevelASTs)
+      Printer.print(AST.get());
+    std::cout << "\n=== End AST Dump ===\n\n";
+  }
 
   // Phase Separation: Codegen All
   // Only non-fn top-level statements need codegen here. fn bodies were already
