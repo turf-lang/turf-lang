@@ -1,31 +1,31 @@
 fn int add(int a, int b) {
-    return a + b
+    return a + b;
 }
 
 fn bool isPositive(int n) {
     if n > 0 {
-        return true
+        return true;
     } else {
-        return false
+        return false;
     }
 }
 
 fn int main() {
-    int x = 10
-    int y = 20
-    int result = add(x, y)
+    int x = 10;
+    int y = 20;
+    int result = add(x, y);
 
-    bool pos = isPositive(result)
+    bool pos = isPositive(result);
 
-    int i = 0
+    int i = 0;
     while i < 3 {
-        int tmp = i * 2
-        i = i + 1
+        int tmp = i * 2;
+        i = i + 1;
     }
 
-    for k in 0..5 {
-        int sq = k * k
+    for k in 0..5 step k += 1 {
+        int sq = k * k;
     }
 
-    return 0
+    return 0;
 }
