@@ -130,6 +130,14 @@ add_executable(test_resolver_symbol_table
 target_include_directories(test_resolver_symbol_table PRIVATE include)
 target_compile_options(test_resolver_symbol_table PRIVATE -Wall -Wextra -std=c++20)
 
+# ─── Standalone unit test: Type Hierarchy — Issue #3 (no LLVM required) ───────
+add_executable(test_type_hierarchy
+  tests/test_type_hierarchy.cpp
+  src/Types.cpp
+)
+target_include_directories(test_type_hierarchy PRIVATE include)
+target_compile_options(test_type_hierarchy PRIVATE -Wall -Wextra -std=c++20)
+
 target_include_directories(turf PRIVATE
   include
   external/llama.cpp/include
