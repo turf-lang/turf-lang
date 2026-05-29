@@ -116,6 +116,7 @@ add_executable(turf
   src/SLMEngine.cpp
   src/SLMIntegration.cpp
   src/ResolverSymbolTable.cpp
+  src/Resolver.cpp
   src/SymbolTable.cpp
   src/Types.cpp
   src/ValueRange.cpp

@@ -21,6 +21,7 @@
 #include "Lint.h"
 #include "Parser.h"
 #include "CFG.h"
+#include "Resolver.h"
 #include "SLMEngine.h"
 #include "SymbolTable.h"
 #include "Types.h"
@@ -58,6 +59,8 @@ struct CompilerOptions {
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
+  bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
+  bool DumpResolverSymbols = false;   // --dump-resolver-symbols: print symbol table after resolution
 };
 
 static CompilerOptions parseArgs(int argc, char **argv) {
@@ -72,6 +75,11 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.AIEnabled = true;
     } else if (arg == "--dump-ast") {
       opts.DumpAST = true;
+    } else if (arg == "--resolve") {
+      opts.RunResolver = true;
+    } else if (arg == "--dump-resolver-symbols") {
+      opts.RunResolver = true;
+      opts.DumpResolverSymbols = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg[0] == '-') {
@@ -84,7 +92,12 @@ static CompilerOptions parseArgs(int argc, char **argv) {
 
   if (opts.InputFile.empty()) {
     std::cerr
-        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] [--dump-ast]\n";
+        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] [--dump-ast] [--resolve] [--dump-resolver-symbols]\n";
+    std::exit(1);
+  }
+
+  if (opts.InputFile.size() < 3 || opts.InputFile.substr(opts.InputFile.size() - 3) != ".tr") {
+    std::cerr << "Error: Input file must have a '.tr' extension (got: " << opts.InputFile << ").\n";
     std::exit(1);
   }
 
@@ -412,6 +425,50 @@ int main(int argc, char **argv) {
     for (auto &AST : TopLevelASTs)
       Printer.print(AST.get());
     std::cout << "\n=== End AST Dump ===\n\n";
+  }
+
+  // --resolve: Run the Resolver pass in shadow mode (Issue #4).
+  // The Resolver performs name resolution over the fully-parsed AST and emits
+  // rich "Unknown Variable" / "Duplicate Declaration" errors if it finds
+  // problems.  This runs BEFORE Codegen so that resolver errors are reported
+  // with accurate source locations and Damerau-Levenshtein suggestions.
+  //
+  // Shadow mode: if no resolver error is found, Codegen still runs normally
+  // (the resolver output is not yet fed to Codegen — that is Issue #5+).
+  if (opts.RunResolver) {
+    std::cerr << "\n[Resolver] Running name-resolution pass (Issue #4 — shadow mode)...\n";
+    Resolver R;
+    bool ResolverClean = true;
+
+    // Use the same recovery mechanism as the rest of the compiler so that a
+    // resolver error doesn't crash the process — it is reported and we can
+    // decide whether to continue.
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      R.resolveAll(FnASTs);
+      R.resolveAll(TopLevelASTs);
+    } else {
+      // A diagnostic was raised and longjmp'd here.  The DiagnosticEngine
+      // already has the error buffered; we just note that resolution failed.
+      ResolverClean = false;
+    }
+    g_recoverActive = false;
+
+    if (ResolverClean) {
+      std::cerr << "[Resolver] ✓  All names resolved successfully. "
+                   "Scope depth on exit: "
+                << R.symbolTable().currentDepth() << "\n";
+                
+      if (opts.DumpResolverSymbols) {
+        R.symbolTable().dump(std::cerr);
+      }
+    } else {
+      std::cerr << "[Resolver] ✗  Name resolution failed (see error above).\n";
+      // Flush diagnostics and abort — a resolver error means Codegen would
+      // crash or produce wrong IR anyway.
+      DiagnosticEngine::flushAll();
+      return 1;
+    }
   }
 
   // Phase Separation: Codegen All

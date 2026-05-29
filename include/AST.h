@@ -287,6 +287,8 @@ public:
   }
 };
 // For-loop: for <var> in <start>..<end> step <step_expr> { body }
+// Note: ForExprAST desugars to init + while(cond) { body; step } during Codegen.
+// The AST node is kept for clean visitor dispatch and future TypeChecker support.
 class ForExprAST : public ExprAST {
   std::string VarName;
   SourceLocation Loc;
@@ -299,6 +301,7 @@ public:
       : Loc(Loc), VarName(std::move(VarName)), Start(std::move(Start)),
         End(std::move(End)), Step(std::move(Step)), Body(std::move(Body)) {}
 
+  const SourceLocation &getLoc() const { return Loc; }  ///< Location of the 'for' keyword.
   const std::string &getVarName() const { return VarName; }
   ExprAST *getBody() const { return Body.get(); }
   const ExprAST *getStart() const { return Start.get(); }

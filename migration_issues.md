@@ -59,9 +59,10 @@ Implement `class Resolver : public ASTVisitor`.
 **Assignee:** [A] | **Labels:** `architecture`, `refactor` | **Depends on:** #4
 **Description:**
 Currently, Codegen does string lookups to find functions/variables.
-- Add `std::shared_ptr<Symbol> ResolvedSymbol;` to relevant AST nodes.
+- Add `std::shared_ptr<Symbol> ResolvedSymbol;` to relevant AST nodes (e.g. `VariableExprAST`, `VarDeclExprAST`).
 - Update the `Resolver` to attach the found symbol to the AST node during its traversal.
 - **Risk:** AST nodes will become slightly fatter, but this eliminates O(N) string lookups in Codegen.
+- **Critical Caveat (Clone Semantics):** The Sandbox (`Sandbox.cpp`) and AST diffing machinery clone trees heavily. A shallow copy of `ResolvedSymbol` will point to a stale scope. *Decision:* Ensure `clone()` nulls out the `ResolvedSymbol` pointer, meaning cloned ASTs must be re-resolved before TypeChecking/Codegen.
 
 ### [Issue #6] Migrate Module & Function Resolution to `Resolver`
 **Assignee:** [B] | **Labels:** `resolver`, `modules` | **Depends on:** #4, #5
@@ -69,6 +70,7 @@ Currently, Codegen does string lookups to find functions/variables.
 Stop global string-prefix guessing for modules (e.g., `turf_io_printline`).
 - When `import io` is parsed, the Resolver creates an `io` Module in the Symbol Table.
 - When `io.printline` is called, the Resolver validates it against the `io` Module and attaches the exact mangled LLVM name to the AST node.
+- **Note:** The `ResolverSymbolTable` will also need functionality similar to `GetRankedSuggestions()` from the legacy table to ensure error messages don't degrade.
 - **Acceptance Criteria:** Cross-namespace bugs (Note 12) are impossible because the Resolver strictly checks module boundaries.
 
 ---
@@ -81,8 +83,9 @@ Stop global string-prefix guessing for modules (e.g., `turf_io_printline`).
 **Description:**
 Implement `class TypeChecker : public ASTVisitor`.
 - This runs *after* the `Resolver`.
-- Visit binary operations (`+`, `-`) and assign a `ResolvedType` to the AST node.
+- Walk the AST and infer types bottom-up. Visit binary operations (`+`, `-`) and assign a `ResolvedType` to the AST node.
 - Throw Type Mismatch errors here (e.g., `string + int` -> Note 9).
+- **Prerequisite:** Ensure `ForExprAST` loop variables are properly typed in the Resolver (e.g., inferring `int` from the range) before this pass runs.
 
 ### [Issue #8] Implement Intrinsic Arity & Overload Resolution in `TypeChecker`
 **Assignee:** [C] | **Labels:** `type-system`, `builtins` | **Depends on:** #6, #7
@@ -90,6 +93,7 @@ Implement `class TypeChecker : public ASTVisitor`.
 Intrinsic functions (`math.abs`, `typeof`) currently crash LLVM if arguments are missing (Note 10, Note 13).
 - Implement arity checking in the TypeChecker. Check `args.size()` against the `FunctionSymbol`.
 - Resolve the correct function overload based on argument types.
+- **Note:** Make sure the validation logic *moves* to the TypeChecker rather than just getting deleted, as `Builtins.cpp` is still needed for the suggestion index.
 - **Acceptance Criteria:** `typeof()` with 0 or 2 arguments throws a clean compiler error instead of an LLVM assertion.
 
 ---
@@ -114,13 +118,15 @@ Intrinsic functions (`math.abs`, `typeof`) currently crash LLVM if arguments are
 **Assignee:** [A, B, C] | **Labels:** `integration`, `milestone` | **Depends on:** All above
 **Description:**
 - Wire up `main.cpp` to run the passes sequentially: `Parser -> Resolver -> TypeChecker -> Codegen`.
-- Delete dead legacy code from the old monolith.
+- Delete dead legacy code from the old monolith. (Recommendation: Keep the legacy `SymbolTable.cpp` as a read-only reference for at least one release before deleting).
 - Final benchmarking and integration tests.
 
 ---
 
 ## 🚦 Suggested Implementation Order & Blockers
 1. **Phase 1 (Non-breaking):** Merge #1, #2, #3. (These are isolated classes and won't affect the current compiler).
-2. **Phase 2 (Shadow Mode):** Merge #4, #5, #7. Run the Resolver and TypeChecker, but *ignore their output*. Let Codegen continue doing its old monolithic logic. This allows testing the new passes against real code without breaking compilation.
-3. **Phase 3 (The Cutover):** Merge #6, #8, #9, #10. Hook the AST outputs to Codegen and delete the legacy logic. This is the danger zone.
-4. **Phase 4:** #11 (Cleanup).
+2. **Phase 2 (Shadow Mode):** Merge #4, then add `--resolve` flag in `main.cpp`. 
+3. **Phase 2b (Shadow Mode):** Merge #5 (attach ResolvedSymbol, nulled on clone) and #7 (TypeChecker expression type inference in shadow mode). This allows testing passes against real code without breaking compilation.
+4. **Phase 3a (First Cutover):** Merge #6 (module/function Resolver) and #8 (TypeChecker arity live checks).
+5. **Phase 3b (Codegen Detox):** Merge #9 (strip name resolution from Codegen) and #10 (strip type checks from Codegen). Splitting Phase 3 into 3a and 3b significantly reduces regression risk.
+6. **Phase 4:** #11 (Cleanup).

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <unordered_set>
 
 // ─── Local helpers ────────────────────────────────────────────────────────────
 
@@ -149,6 +150,19 @@ bool ResolverSymbolTable::isDeclaredInCurrentScope(
   return ScopeStack_.back()->has(Name);
 }
 
+std::vector<std::string> ResolverSymbolTable::getAllVisibleNames() const {
+  std::vector<std::string> Names;
+  std::unordered_set<std::string> Seen;
+  // Walk from innermost (back) to outermost (front) — innermost shadows outer.
+  for (auto It = ScopeStack_.rbegin(); It != ScopeStack_.rend(); ++It) {
+    for (const auto &Pair : (*It)->Symbols) {
+      if (Seen.insert(Pair.first).second)
+        Names.push_back(Pair.first);
+    }
+  }
+  return Names;
+}
+
 void ResolverSymbolTable::registerModuleFunction(
     const std::string &ModuleName, const ResolverFunctionSymbol &Sym) {
 
@@ -186,8 +200,52 @@ std::vector<std::string> ResolverSymbolTable::getModuleFunctionNames(
   return It->second->getFunctionNames();
 }
 
-const ResolverModule *ResolverSymbolTable::getModule(
-    const std::string &ModuleName) const {
+const ResolverModule *
+ResolverSymbolTable::getModule(const std::string &ModuleName) const {
   auto It = Modules_.find(ModuleName);
   return It != Modules_.end() ? It->second.get() : nullptr;
+}
+
+void ResolverSymbolTable::dump(std::ostream &OS) const {
+  OS << "\n=== Resolver Symbol Table Dump ===\n";
+  
+  // Dump Scopes
+  OS << "--- Scopes (Depth: " << Depth_ << ") ---\n";
+  for (int i = ScopeStack_.size() - 1; i >= 0; --i) {
+    const auto &Scope = ScopeStack_[i];
+    OS << "Scope Level " << Scope->Depth << ":\n";
+    if (Scope->Symbols.empty()) {
+      OS << "  (empty)\n";
+    } else {
+      for (const auto &Pair : Scope->Symbols) {
+        const auto &Sym = Pair.second;
+        OS << "  Var: " << Sym->Name << " : " 
+           << (Sym->Type ? Sym->Type->getName() : "unknown")
+           << " [Loc: " << Sym->DeclLoc.Line << ":" << Sym->DeclLoc.Col << "]\n";
+      }
+    }
+  }
+
+  // Dump Modules
+  OS << "\n--- Modules ---\n";
+  if (Modules_.empty()) {
+    OS << "  (no modules registered)\n";
+  } else {
+    for (const auto &ModPair : Modules_) {
+      const auto &Mod = ModPair.second;
+      OS << "Module: " << Mod->Name << "\n";
+      for (const auto &FuncPair : Mod->Functions) {
+        for (const auto &Overload : FuncPair.second) {
+          OS << "  Fn: " << Overload.BaseName << "(";
+          for (size_t i = 0; i < Overload.ParamTypes.size(); ++i) {
+            OS << (Overload.ParamTypes[i] ? Overload.ParamTypes[i]->getName() : "unknown");
+            if (i < Overload.ParamTypes.size() - 1) OS << ", ";
+          }
+          OS << ") -> " << (Overload.ReturnType ? Overload.ReturnType->getName() : "void")
+             << " [Mangled: " << Overload.MangledName << "]\n";
+        }
+      }
+    }
+  }
+  OS << "==================================\n\n";
 }

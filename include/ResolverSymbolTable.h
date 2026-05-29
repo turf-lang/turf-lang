@@ -222,6 +222,16 @@ public:
    */
   bool isDeclaredInCurrentScope(const std::string &Name) const;
 
+  /**
+   * @brief Collect every variable name visible from the current scope.
+   *
+   * Walks the scope stack from innermost to outermost and deduplicates names
+   * so that a shadowed outer variable is only listed once.  The result is
+   * suitable as the candidate list passed to SuggestionIndex::suggestVisible
+   * when emitting an "Unknown Variable" diagnostic.
+   */
+  std::vector<std::string> getAllVisibleNames() const;
+
   // ── Module / function registry ───────────────────────────────────────────────
 
   /**
@@ -257,6 +267,11 @@ public:
    * Returns nullptr if not registered.
    */
   const ResolverModule *getModule(const std::string &ModuleName) const;
+
+  /**
+   * @brief Dumps the contents of the symbol table (all scopes and modules) to the output stream.
+   */
+  void dump(std::ostream &OS) const;
 
 private:
   // Stack of scope objects.  We own them via unique_ptr; the parent pointer

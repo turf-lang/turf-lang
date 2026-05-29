@@ -1422,7 +1422,9 @@ Value *WhileExprAST::codegen() {
 Value *ForExprAST::codegen() {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
-  //  1. Init: declare loop variable with start value
+  //  1. Init: declare loop variable with start value.
+  //     Evaluate start/end in the outer scope first — they cannot reference
+  //     the loop variable (it doesn't exist yet).
   Value *StartV = Start->codegen();
   if (!StartV)
     return nullptr;
@@ -1437,8 +1439,16 @@ Value *ForExprAST::codegen() {
       CreateEntryBlockAlloca(TheFunction, VarName, VarType.get());
   Builder->CreateStore(StartV, Alloca);
 
-  // Register loop variable in symbol table and NamedValues
-  // Save old binding so we can restore it after the loop
+  // Push a new scope in GlobalSymbolTable so the loop variable doesn't leak
+  // out into the surrounding scope after the loop ends.
+  // Previously, DeclareSymbol was called without EnterScope, causing the loop
+  // variable to persist in the caller's scope — now fixed.
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->EnterScope();
+  }
+
+  // Register loop variable in symbol table and NamedValues.
+  // Save old NamedValues binding for backward-compatible restore after loop.
   auto OldBinding = NamedValues.find(VarName);
   VarInfo SavedBinding;
   bool HadOldBinding = false;
@@ -1454,8 +1464,10 @@ Value *ForExprAST::codegen() {
 
   //  2. Evaluate end value
   Value *EndV = End->codegen();
-  if (!EndV)
+  if (!EndV) {
+    if (GlobalSymbolTable) GlobalSymbolTable->ExitScope();
     return nullptr;
+  }
   EndV = CastToType(EndV, VarType, "forend");
 
   // Store end value so it doesn't get re-evaluated each iteration
@@ -1516,6 +1528,7 @@ Value *ForExprAST::codegen() {
 
   if (!Body->codegen()) {
     LoopBlocks.pop_back();
+    if (GlobalSymbolTable) GlobalSymbolTable->ExitScope();
     return nullptr;
   }
 
@@ -1530,8 +1543,10 @@ Value *ForExprAST::codegen() {
   TheFunction->insert(TheFunction->end(), LoopStepBB);
   Builder->SetInsertPoint(LoopStepBB);
 
-  if (!Step->codegen())
+  if (!Step->codegen()) {
+    if (GlobalSymbolTable) GlobalSymbolTable->ExitScope();
     return nullptr;
+  }
 
   // Branch back to condition
   if (!Builder->GetInsertBlock()->getTerminator()) {
@@ -1542,7 +1557,12 @@ Value *ForExprAST::codegen() {
   TheFunction->insert(TheFunction->end(), AfterBB);
   Builder->SetInsertPoint(AfterBB);
 
-  // Restore old binding
+  // Exit the for-loop scope — loop variable is no longer visible.
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->ExitScope();
+  }
+
+  // Restore old NamedValues binding for backward-compatibility.
   if (HadOldBinding) {
     NamedValues[VarName] = SavedBinding;
   } else {
