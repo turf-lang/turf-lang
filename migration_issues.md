@@ -39,7 +39,7 @@ Implement the dictionaries that will eventually track our state.
 **Assignee:** [C] | **Labels:** `type-system` | **Depends on:** None
 **Description:**
 Currently, types are heavily coupled with LLVM `Type*`. We need an abstract frontend representation.
-- Create a polymorphic `class Type` (e.g., `IntType`, `StringType`, `ListType`).
+- Create a polymorphic `class Type` (e.g., `IntType`, `StringType`, `GenericType`).
 - **Acceptance Criteria:** The compiler frontend can represent a `List<int>` natively without asking LLVM what a pointer is.
 
 ---

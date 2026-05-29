@@ -13,16 +13,6 @@
  *    predicates (isInt(), isDouble(), …) to work correctly throughout the
  *    compiler without any string comparisons.
  *
- *  - Three new list-type helpers are provided:
- *      isListType()        — true for ListType or GenericType("list",…)
- *      getListElementType()— extract T from list<T>
- *      makeListType()      — construct a list<T> without LLVM
- *
- * Acceptance criterion (Issue #3):
- *   makeListType(TurfInt())->getName() == "list<int>"   ✓
- *   makeListType(TurfInt())->isList()  == true           ✓
- *   No LLVM header is included in this translation unit. ✓
- *
  * @author a2ys
  * @author AaravTandon24
  * @author Karan
@@ -96,54 +86,4 @@ TurfTypePtr makeArrayType(TurfTypePtr ElemType, int Size) {
   return std::make_shared<ArrayType>(std::move(ElemType), Size);
 }
 
-// ─── List helpers ─────────────────────────────────────────────────────────────
 
-/**
- * @brief True if @p T is a `ListType` or a legacy `GenericType` whose base
- * name is "list".
- *
- * The dual check allows code that was written before the ListType subclass
- * existed (and used GenericType("list", …) directly) to keep working.
- */
-bool isListType(const TurfType *T) {
-  if (!T) return false;
-  // Fast path: dedicated subclass
-  if (dynamic_cast<const ListType *>(T)) return true;
-  // Legacy path: GenericType with base "list"
-  if (auto *G = dynamic_cast<const GenericType *>(T))
-    return G->getBaseName() == "list";
-  return false;
-}
-
-/**
- * @brief Return the element type of a list, or nullptr if @p T is not a list.
- */
-const TurfType *getListElementType(const TurfType *T) {
-  if (!T) return nullptr;
-  // Dedicated ListType — use its own accessor
-  if (auto *L = dynamic_cast<const ListType *>(T))
-    return L->getElementType();
-  // Legacy GenericType("list", …)
-  if (auto *G = dynamic_cast<const GenericType *>(T))
-    if (G->getBaseName() == "list" && !G->getTypeArgs().empty())
-      return G->getTypeArg(0);
-  return nullptr;
-}
-
-/**
- * @brief Construct a `list<ElemType>` frontend type.
- *
- * Returns a `ListType` which:
- *   - Reports isList()  == true
- *   - Reports isGeneric() == true (via base class)
- *   - getName()  == "list<T>"
- *   - getMangledName() == "list_T"
- *
- * No LLVM headers are required.
- *
- * @param ElemType The element type (must not be null).
- * @return A shared_ptr<ListType>.
- */
-TurfTypePtr makeListType(TurfTypePtr ElemType) {
-  return std::make_shared<ListType>(std::move(ElemType));
-}
