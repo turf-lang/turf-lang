@@ -36,6 +36,28 @@ static bool typesCompatible(const TurfType *From, const TurfType *To) {
 
 // ─── ResolverModule ───────────────────────────────────────────────────────────
 
+void ResolverModule::registerFunction(const ResolverFunctionSymbol &Sym) {
+  auto &Overloads = Functions[Sym.BaseName];
+  // Dedup by arity + param type names (MangledName no longer exists).
+  auto ParamTypes = Sym.paramTypes();
+  for (const auto &Existing : Overloads) {
+    if (Existing.arity() != Sym.arity())
+      continue;
+    auto ExistingTypes = Existing.paramTypes();
+    bool Same = true;
+    for (int i = 0; i < Sym.arity(); ++i) {
+      if (!ExistingTypes[i] || !ParamTypes[i] ||
+          ExistingTypes[i]->getName() != ParamTypes[i]->getName()) {
+        Same = false;
+        break;
+      }
+    }
+    if (Same)
+      return; // already registered
+  }
+  Overloads.push_back(Sym);
+}
+
 const ResolverFunctionSymbol *ResolverModule::lookupFunction(
     const std::string &BaseName,
     const std::vector<TurfTypePtr> &ArgTypes) const {
@@ -52,10 +74,11 @@ const ResolverFunctionSymbol *ResolverModule::lookupFunction(
     if (Sym.arity() != Arity)
       continue;
     bool Exact = true;
+    auto PT = Sym.paramTypes();
     for (int i = 0; i < Arity; ++i) {
-      if (!ArgTypes[i] || !Sym.ParamTypes[i])
+      if (!ArgTypes[i] || !PT[i])
         continue;
-      if (ArgTypes[i]->getName() != Sym.ParamTypes[i]->getName()) {
+      if (ArgTypes[i]->getName() != PT[i]->getName()) {
         Exact = false;
         break;
       }
@@ -69,8 +92,9 @@ const ResolverFunctionSymbol *ResolverModule::lookupFunction(
     if (Sym.arity() != Arity)
       continue;
     bool Compatible = true;
+    auto PT = Sym.paramTypes();
     for (int i = 0; i < Arity; ++i) {
-      if (!typesCompatible(ArgTypes[i].get(), Sym.ParamTypes[i].get())) {
+      if (!typesCompatible(ArgTypes[i].get(), PT[i].get())) {
         Compatible = false;
         break;
       }
@@ -94,10 +118,10 @@ std::vector<std::string> ResolverModule::getFunctionNames() const {
 // ─── ResolverSymbolTable ──────────────────────────────────────────────────────
 
 ResolverSymbolTable::ResolverSymbolTable() {
-  // Start with global scope
+  // Start with global scope (depth 0)
   ScopeStack_.push_back(std::make_unique<ResolverScope>(0, nullptr));
-  // Register implicit "main" module for user-defined functions
-  Modules_["main"] = std::make_unique<ResolverModule>("main");
+  // NOTE: No implicit "main" module. Current-file functions use the
+  // separate CurrentFileFunctions_ registry, not Modules_.
 }
 
 void ResolverSymbolTable::enterScope() {
@@ -206,12 +230,87 @@ ResolverSymbolTable::getModule(const std::string &ModuleName) const {
   return It != Modules_.end() ? It->second.get() : nullptr;
 }
 
+// ─── Current-file function registry ──────────────────────────────────────────
+
+void ResolverSymbolTable::registerCurrentFileFunction(
+    const ResolverFunctionSymbol &Sym) {
+  auto &Overloads = CurrentFileFunctions_[Sym.BaseName];
+  // Dedup by arity + param type names.
+  auto ParamTypes = Sym.paramTypes();
+  for (const auto &Existing : Overloads) {
+    if (Existing.arity() != Sym.arity())
+      continue;
+    auto ExistingTypes = Existing.paramTypes();
+    bool Same = true;
+    for (int i = 0; i < Sym.arity(); ++i) {
+      if (!ExistingTypes[i] || !ParamTypes[i] ||
+          ExistingTypes[i]->getName() != ParamTypes[i]->getName()) {
+        Same = false;
+        break;
+      }
+    }
+    if (Same)
+      return;
+  }
+  Overloads.push_back(Sym);
+}
+
+std::vector<const ResolverFunctionSymbol *>
+ResolverSymbolTable::lookupCurrentFileFunctions(
+    const std::string &Name) const {
+  std::vector<const ResolverFunctionSymbol *> Result;
+  auto It = CurrentFileFunctions_.find(Name);
+  if (It == CurrentFileFunctions_.end())
+    return Result;
+  for (const auto &Sym : It->second)
+    Result.push_back(&Sym);
+  return Result;
+}
+
+std::vector<std::string>
+ResolverSymbolTable::getAllCurrentFileFunctionNames() const {
+  std::vector<std::string> Names;
+  Names.reserve(CurrentFileFunctions_.size());
+  for (const auto &Pair : CurrentFileFunctions_)
+    Names.push_back(Pair.first);
+  std::sort(Names.begin(), Names.end());
+  return Names;
+}
+
+// ─── Two-tier diagnostic helpers ─────────────────────────────────────────────
+
+std::vector<ResolverSymbolTable::ModuleFunctionMatch>
+ResolverSymbolTable::findInModules(const std::string &Name) const {
+  std::vector<ModuleFunctionMatch> Matches;
+  for (const auto &ModPair : Modules_) {
+    auto It = ModPair.second->Functions.find(Name);
+    if (It == ModPair.second->Functions.end())
+      continue;
+    for (const auto &Sym : It->second)
+      Matches.push_back({ModPair.first, &Sym});
+  }
+  return Matches;
+}
+
+std::vector<std::string>
+ResolverSymbolTable::getAllModuleFunctionNames() const {
+  std::unordered_set<std::string> Seen;
+  std::vector<std::string> Names;
+  for (const auto &ModPair : Modules_)
+    for (const auto &FuncPair : ModPair.second->Functions)
+      if (Seen.insert(FuncPair.first).second)
+        Names.push_back(FuncPair.first);
+  std::sort(Names.begin(), Names.end());
+  return Names;
+}
+
+
 void ResolverSymbolTable::dump(std::ostream &OS) const {
   OS << "\n=== Resolver Symbol Table Dump ===\n";
-  
-  // Dump Scopes
-  OS << "--- Scopes (Depth: " << Depth_ << ") ---\n";
-  for (int i = ScopeStack_.size() - 1; i >= 0; --i) {
+
+  // Scopes
+  OS << "--- Variable Scopes (depth: " << Depth_ << ") ---\n";
+  for (int i = static_cast<int>(ScopeStack_.size()) - 1; i >= 0; --i) {
     const auto &Scope = ScopeStack_[i];
     OS << "Scope Level " << Scope->Depth << ":\n";
     if (Scope->Symbols.empty()) {
@@ -219,30 +318,41 @@ void ResolverSymbolTable::dump(std::ostream &OS) const {
     } else {
       for (const auto &Pair : Scope->Symbols) {
         const auto &Sym = Pair.second;
-        OS << "  Var: " << Sym->Name << " : " 
+        OS << "  Var: " << Sym->Name << " : "
            << (Sym->Type ? Sym->Type->getName() : "unknown")
            << " [Loc: " << Sym->DeclLoc.Line << ":" << Sym->DeclLoc.Col << "]\n";
       }
     }
   }
 
-  // Dump Modules
-  OS << "\n--- Modules ---\n";
+  // Current-file functions (Tier 1)
+  OS << "\n--- Current-File Functions (Tier 1) ---\n";
+  if (CurrentFileFunctions_.empty()) {
+    OS << "  (none registered yet — Issue #6 will populate this)\n";
+  } else {
+    for (const auto &Pair : CurrentFileFunctions_) {
+      for (const auto &Sym : Pair.second) {
+        OS << "  fn " << Sym.signature()
+           << " [Loc: " << Sym.DeclLoc.Line << ":" << Sym.DeclLoc.Col << "]\n";
+      }
+    }
+  }
+
+  // Imported module functions (Tier 2)
+  OS << "\n--- Imported Module Functions (Tier 2) ---\n";
   if (Modules_.empty()) {
-    OS << "  (no modules registered)\n";
+    OS << "  (no modules imported)\n";
   } else {
     for (const auto &ModPair : Modules_) {
       const auto &Mod = ModPair.second;
-      OS << "Module: " << Mod->Name << "\n";
-      for (const auto &FuncPair : Mod->Functions) {
-        for (const auto &Overload : FuncPair.second) {
-          OS << "  Fn: " << Overload.BaseName << "(";
-          for (size_t i = 0; i < Overload.ParamTypes.size(); ++i) {
-            OS << (Overload.ParamTypes[i] ? Overload.ParamTypes[i]->getName() : "unknown");
-            if (i < Overload.ParamTypes.size() - 1) OS << ", ";
+      OS << "Module '" << Mod->Name << "':\n";
+      if (Mod->Functions.empty()) {
+        OS << "  (empty)\n";
+      } else {
+        for (const auto &FuncPair : Mod->Functions) {
+          for (const auto &Sym : FuncPair.second) {
+            OS << "  fn " << Sym.signature() << "\n";
           }
-          OS << ") -> " << (Overload.ReturnType ? Overload.ReturnType->getName() : "void")
-             << " [Mangled: " << Overload.MangledName << "]\n";
         }
       }
     }

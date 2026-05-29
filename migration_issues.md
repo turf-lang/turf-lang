@@ -64,14 +64,89 @@ Currently, Codegen does string lookups to find functions/variables.
 - **Risk:** AST nodes will become slightly fatter, but this eliminates O(N) string lookups in Codegen.
 - **Critical Caveat (Clone Semantics):** The Sandbox (`Sandbox.cpp`) and AST diffing machinery clone trees heavily. A shallow copy of `ResolvedSymbol` will point to a stale scope. *Decision:* Ensure `clone()` nulls out the `ResolvedSymbol` pointer, meaning cloned ASTs must be re-resolved before TypeChecking/Codegen.
 
-### [Issue #6] Migrate Module & Function Resolution to `Resolver`
-**Assignee:** [B] | **Labels:** `resolver`, `modules` | **Depends on:** #4, #5
+### [Issue #6] Migrate Function Resolution to `Resolver`
+**Assignee:** [B] | **Labels:** `resolver`, `functions` | **Depends on:** #4, #5
 **Description:**
-Stop global string-prefix guessing for modules (e.g., `turf_io_printline`).
-- When `import io` is parsed, the Resolver creates an `io` Module in the Symbol Table.
-- When `io.printline` is called, the Resolver validates it against the `io` Module and attaches the exact mangled LLVM name to the AST node.
-- **Note:** The `ResolverSymbolTable` will also need functionality similar to `GetRankedSuggestions()` from the legacy table to ensure error messages don't degrade.
-- **Acceptance Criteria:** Cross-namespace bugs (Note 12) are impossible because the Resolver strictly checks module boundaries.
+Wire `FuncDefExprAST` and `FuncCallExprAST` into the Resolver so that all function-level name resolution moves out of Codegen.
+
+**Infrastructure already in place (completed as Issue #2 gap-fill):**
+- `FunctionParam { string Name; TurfTypePtr Type; }` — parameter with name + type for rich diagnostics.
+- `ResolverFunctionSymbol` — has `BaseName`, `SourceModule` (`""` = current file, `"io"` = imported), `Params`, `ReturnType`, `DeclLoc`, `IsIntrinsic`. **No `MangledName` — Codegen derives that on demand** (see "Late Mangling" below).
+- `ResolverSymbolTable::registerCurrentFileFunction()` / `lookupCurrentFileFunctions()` / `getAllCurrentFileFunctionNames()` — Tier-1 registry (current file).
+- `ResolverSymbolTable::findInModules()` / `getAllModuleFunctionNames()` — Tier-2 search (imported modules).
+
+**Step 1 — AST node additions (same pattern as Issue #5):**
+Add to `FuncDefExprAST`:
+```cpp
+std::shared_ptr<ResolverFunctionSymbol> ResolvedDef; // null until Resolver runs; nulled by clone()
+```
+Add to `FuncCallExprAST`:
+```cpp
+// All overloads matching the call name — TypeChecker (Issue #8) narrows to one.
+std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedCandidates;
+```
+
+**Step 2 — `visitFuncDef` in `Resolver.cpp`:**
+```
+1. If FunctionNestingDepth_ > 0:
+     emit NestedFunctionError (new Diagnostic kind) — nested fns are not allowed.
+     return.
+2. Increment FunctionNestingDepth_.
+3. enterScope() for the function body.
+4. Register each parameter as a variable via declareVariable().
+5. Build a ResolverFunctionSymbol:
+     BaseName     = Node.getName()
+     SourceModule = ""  (current file)
+     Params       = [{param.Name, param.Type} for each param]
+     ReturnType   = Node.getReturnType()
+     DeclLoc      = {Node.getLoc().Line, Node.getLoc().Col}
+6. Call SymTable_.registerCurrentFileFunction(sym).
+7. Attach sym to Node.ResolvedDef.
+8. Recurse into body.
+9. exitScope(), decrement FunctionNestingDepth_.
+```
+Note: `FunctionNestingDepth_` is a new `int` field on `Resolver`, initialised to 0.
+
+**Step 3 — `visitFuncCall` in `Resolver.cpp`:**
+```
+1. Recurse into arguments first (so arg expressions are resolved).
+2. Extract the callee name (from the VariableExprAST inside the call, or the method base).
+3. Tier-1 search: SymTable_.lookupCurrentFileFunctions(name)
+4. Tier-2 search: SymTable_.findInModules(name)
+5. If both empty → emit two-tier UnknownFunctionError:
+
+     Error: Unknown function 'pritn'
+       Current file:   print(int x)      — line 12
+       From io module: io.printline(str)  — try 'io.printline(x)'
+
+   Suggestions are Damerau-Levenshtein ranked using:
+     getAllCurrentFileFunctionNames()  → Tier-1 candidates
+     getAllModuleFunctionNames()        → Tier-2 candidates
+6. Otherwise: populate Node.ResolvedCandidates with all matching shared_ptrs.
+   TypeChecker (Issue #8) will narrow to one based on argument types.
+```
+
+**Step 4 — `visitModuleImport` in `Resolver.cpp`:**
+When `import io` is parsed, read the module's function manifest and call
+`SymTable_.registerModuleFunction("io", sym)` for each exported function.
+This populates the Tier-2 registry so it is searchable at call sites.
+
+**Late Mangling — contract with Codegen (Issue #9):**
+`ResolverFunctionSymbol` deliberately has **no `MangledName` field**.
+Codegen derives the LLVM symbol name on demand using a deterministic rule:
+```
+mangle("",   "foo",       [int, double]) → "foo"      (user-defined, no prefix)
+mangle("io", "printline", [int])         → "turf_io_printline_int"
+```
+The exact mangling algorithm is specified in Issue #9. For now, Codegen
+continues to use its existing string-lookup approach; Issue #9 will switch
+it to read from `ResolvedCandidates` (narrowed by TypeChecker) and call the mangle function.
+
+**Acceptance Criteria:**
+- `turf myfile.tr --resolve` correctly reports "Unknown function" with two-tier suggestions.
+- Nested function definitions emit a clear error instead of silently compiling.
+- `turf myfile.tr --dump-resolver-symbols` shows both Tier-1 and Tier-2 function registries.
+- No regression on existing programs (shadow mode — Codegen still runs normally).
 
 ---
 
