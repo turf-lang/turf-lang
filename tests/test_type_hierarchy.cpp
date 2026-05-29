@@ -12,14 +12,9 @@
  *  5. getMangledName() returns a valid linker-safe mangled name.
  *  6. isNamed() backward-compat predicate still works.
  *  7. GenericType represents map<string,int> correctly.
- *  8. ListType represents list<int> with isList() == true and no LLVM.
- *  9. makeListType(TurfInt()) satisfies the Issue #3 acceptance criterion:
- *       frontend can represent List<int> without asking LLVM anything.
  * 10. ArrayType stores element type and optional fixed size.
  * 11. TurfPointerType wraps its pointee.
  * 12. TurfStructType field lookup works.
- * 13. isListType() helper accepts both ListType and legacy GenericType("list").
- * 14. getListElementType() extracts T from list<T>.
  * 15. TurfGenericParamType (open type parameter) round-trips correctly.
  * 16. isEquivalent() structural equality check.
  * 17. turfTypeName() handles null gracefully.
@@ -252,10 +247,6 @@ TEST(test_array_type_element_accessor) {
   EXPECT_EQ(A->getSize(), 5);
 }
 
-TEST(test_array_type_not_list) {
-  auto ArrTy = makeArrayType(TurfInt());
-  EXPECT_FALSE(isListType(ArrTy.get()));
-}
 
 // ─── Test: TurfPointerType ───────────────────────────────────────────────────
 
@@ -277,14 +268,25 @@ TEST(test_generic_param_type) {
   EXPECT_EQ(T->getName(), std::string("T"));
 }
 
-// ─── Test: GenericType (map<K,V>) ────────────────────────────────────────────
+// ─── Test: GenericType (list<T>, map<K,V>) ────────────────────────────────────
+
+TEST(test_generic_type_list) {
+  auto ListTy = std::make_shared<GenericType>(
+      "list", std::vector<TurfTypePtr>{TurfInt()});
+
+  EXPECT_TRUE(ListTy->isGeneric());
+  EXPECT_EQ(ListTy->getName(), std::string("list<int>"));
+  EXPECT_EQ(ListTy->getMangledName(), std::string("list_int"));
+  EXPECT_EQ(ListTy->getBaseName(), std::string("list"));
+  EXPECT_EQ(ListTy->getTypeArgs().size(), 1u);
+  EXPECT_TRUE(ListTy->getTypeArg(0)->isInt());
+}
 
 TEST(test_generic_type_map) {
   auto MapTy = std::make_shared<GenericType>(
       "map", std::vector<TurfTypePtr>{TurfString(), TurfInt()});
 
   EXPECT_TRUE(MapTy->isGeneric());
-  EXPECT_FALSE(MapTy->isList());
   EXPECT_EQ(MapTy->getName(), std::string("map<string, int>"));
   EXPECT_EQ(MapTy->getMangledName(), std::string("map_string_int"));
   EXPECT_EQ(MapTy->getBaseName(), std::string("map"));
@@ -293,94 +295,6 @@ TEST(test_generic_type_map) {
   EXPECT_TRUE(MapTy->getTypeArg(1)->isInt());
 }
 
-// ─── Test: ListType — Issue #3 acceptance criterion ─────────────────────────
-
-/**
- * Issue #3 acceptance criterion:
- *   "The compiler frontend can represent a List<int> natively without asking
- *    LLVM what a pointer is."
- *
- * This test constructs a List<int> type using only frontend APIs and verifies
- * every relevant property.  No LLVM initialisation is performed.
- */
-TEST(test_list_type_int_acceptance_criterion) {
-  TurfTypePtr ListOfInt = makeListType(TurfInt());
-
-  // ── Kind predicates ──────────────────────────────────────────────────────
-  EXPECT_TRUE (ListOfInt->isList());
-  EXPECT_TRUE (ListOfInt->isGeneric()); // ListType derives from GenericType
-  EXPECT_FALSE(ListOfInt->isArray());
-  EXPECT_FALSE(ListOfInt->isInt());
-  EXPECT_FALSE(ListOfInt->isString());
-
-  // ── Name / mangling ──────────────────────────────────────────────────────
-  EXPECT_EQ(ListOfInt->getName(),        std::string("list<int>"));
-  EXPECT_EQ(ListOfInt->getMangledName(), std::string("list_int"));
-
-  // ── Element type access ──────────────────────────────────────────────────
-  auto *L = dynamic_cast<const ListType*>(ListOfInt.get());
-  EXPECT_TRUE(L != nullptr);
-  EXPECT_TRUE(L->getElementType()->isInt());
-  EXPECT_TRUE(L->getElementTypePtr()->isInt());
-
-  // ── Helper functions ─────────────────────────────────────────────────────
-  EXPECT_TRUE(isListType(ListOfInt.get()));
-  const TurfType *Elem = getListElementType(ListOfInt.get());
-  EXPECT_TRUE(Elem != nullptr && Elem->isInt());
-}
-
-TEST(test_list_type_string) {
-  TurfTypePtr ListOfStr = makeListType(TurfString());
-  EXPECT_TRUE(ListOfStr->isList());
-  EXPECT_EQ(ListOfStr->getName(),        std::string("list<string>"));
-  EXPECT_EQ(ListOfStr->getMangledName(), std::string("list_string"));
-  EXPECT_TRUE(getListElementType(ListOfStr.get())->isString());
-}
-
-TEST(test_list_type_nested) {
-  // list<list<int>>
-  TurfTypePtr Inner = makeListType(TurfInt());
-  TurfTypePtr Outer = makeListType(Inner);
-
-  EXPECT_TRUE(Outer->isList());
-  EXPECT_EQ(Outer->getName(), std::string("list<list<int>>"));
-  EXPECT_EQ(Outer->getMangledName(), std::string("list_list_int"));
-
-  const TurfType *InnerElem = getListElementType(Outer.get());
-  EXPECT_TRUE(InnerElem != nullptr);
-  EXPECT_TRUE(InnerElem->isList());
-  EXPECT_TRUE(getListElementType(InnerElem)->isInt());
-}
-
-TEST(test_list_type_struct_element) {
-  // list<Player>
-  auto PlayerType = std::make_shared<TurfStructType>(
-      "Player", std::vector<StructField>{{"name", TurfString()}, {"score", TurfInt()}});
-  TurfTypePtr ListOfPlayers = makeListType(PlayerType);
-
-  EXPECT_TRUE(ListOfPlayers->isList());
-  EXPECT_EQ(ListOfPlayers->getName(), std::string("list<Player>"));
-  EXPECT_EQ(getListElementType(ListOfPlayers.get())->getName(), std::string("Player"));
-}
-
-// ─── Test: isListType with legacy GenericType ────────────────────────────────
-
-TEST(test_is_list_type_legacy_generic) {
-  // Pre-migration code might have created GenericType("list", …) directly.
-  // isListType() must still recognise these.
-  auto Legacy = std::make_shared<GenericType>(
-      "list", std::vector<TurfTypePtr>{TurfDouble()});
-
-  EXPECT_TRUE(isListType(Legacy.get()));
-  const TurfType *Elem = getListElementType(Legacy.get());
-  EXPECT_TRUE(Elem != nullptr && Elem->isDouble());
-}
-
-TEST(test_is_list_type_false_for_non_list) {
-  EXPECT_FALSE(isListType(TurfInt().get()));
-  EXPECT_FALSE(isListType(makeArrayType(TurfInt()).get()));
-  EXPECT_FALSE(isListType(nullptr));
-}
 
 // ─── Test: TurfStructType ────────────────────────────────────────────────────
 
@@ -418,14 +332,6 @@ TEST(test_is_equivalent_null) {
   EXPECT_FALSE(TurfInt()->isEquivalent(nullptr));
 }
 
-TEST(test_is_equivalent_list_types) {
-  auto L1 = makeListType(TurfInt());
-  auto L2 = makeListType(TurfInt());
-  auto L3 = makeListType(TurfString());
-
-  EXPECT_TRUE(L1->isEquivalent(L2.get()));  // same name "list<int>"
-  EXPECT_FALSE(L1->isEquivalent(L3.get())); // "list<int>" vs "list<string>"
-}
 
 // ─── Test: turfTypeName ──────────────────────────────────────────────────────
 
@@ -437,10 +343,6 @@ TEST(test_turf_type_name_int) {
   EXPECT_EQ(turfTypeName(TurfInt().get()), std::string("int"));
 }
 
-TEST(test_turf_type_name_list) {
-  auto L = makeListType(TurfInt());
-  EXPECT_EQ(turfTypeName(L.get()), std::string("list<int>"));
-}
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -480,7 +382,6 @@ int main() {
   std::cout << "\n[ArrayType]\n";
   RUN(test_array_type_int);
   RUN(test_array_type_element_accessor);
-  RUN(test_array_type_not_list);
 
   std::cout << "\n[TurfPointerType]\n";
   RUN(test_pointer_type);
@@ -490,16 +391,7 @@ int main() {
 
   std::cout << "\n[GenericType]\n";
   RUN(test_generic_type_map);
-
-  std::cout << "\n[ListType — Issue #3 acceptance criterion]\n";
-  RUN(test_list_type_int_acceptance_criterion);
-  RUN(test_list_type_string);
-  RUN(test_list_type_nested);
-  RUN(test_list_type_struct_element);
-
-  std::cout << "\n[isListType helpers]\n";
-  RUN(test_is_list_type_legacy_generic);
-  RUN(test_is_list_type_false_for_non_list);
+  RUN(test_generic_type_list);
 
   std::cout << "\n[TurfStructType]\n";
   RUN(test_struct_type_fields);
@@ -508,12 +400,10 @@ int main() {
   RUN(test_is_equivalent_same_type);
   RUN(test_is_equivalent_different_types);
   RUN(test_is_equivalent_null);
-  RUN(test_is_equivalent_list_types);
 
   std::cout << "\n[turfTypeName]\n";
   RUN(test_turf_type_name_null);
   RUN(test_turf_type_name_int);
-  RUN(test_turf_type_name_list);
 
   std::cout << "\n=== Results: " << TestsPassed << " passed, "
             << TestsFailed << " failed ===\n";

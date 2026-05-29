@@ -21,13 +21,7 @@
  *   ├─ TurfPointerType        — T*   (pass-by-reference / self)
  *   ├─ TurfGenericParamType   — open generic parameter (e.g. T in fn<T>)
  *   ├─ GenericType            — closed generic instantiation (e.g. map<K,V>)
- *   │    └─ ListType          — list<T>  (first-class specialisation)
  *   └─ TurfStructType         — user-defined aggregate type
- *
- * Acceptance criterion (Issue #3):
- *   The frontend can represent `List<int>` via
- *       makeListType(TurfInt())
- *   and that representation carries no LLVM dependency whatsoever.
  *
  * @author a2ys
  * @author AaravTandon24
@@ -88,9 +82,6 @@ public:
 
   /// True if this type is a `GenericType` (closed instantiation like list<int>).
   virtual bool isGeneric() const { return false; }
-
-  /// True if this type is a `ListType` specifically.
-  virtual bool isList() const { return false; }
 
   /// True if this type is an `ArrayType` (fixed/dynamic array T[]).
   virtual bool isArray() const { return false; }
@@ -299,9 +290,6 @@ public:
  * This is the core of monomorphization: the type arguments are full
  * TurfTypePtr values, so `list<Player>` works as soon as `Player` is a
  * registered type.
- *
- * For `list<T>` specifically, prefer the derived `ListType` class which
- * provides the dedicated `isList()` predicate and a cleaner API.
  */
 class GenericType : public TurfType {
 protected:
@@ -334,36 +322,6 @@ public:
   const std::vector<TurfTypePtr> &getTypeArgs()  const { return TypeArgs; }
   const TurfType           *getTypeArg(size_t I)    const { return TypeArgs[I].get(); }
   TurfTypePtr               getTypeArgPtr(size_t I) const { return TypeArgs[I]; }
-};
-
-// ─── ListType ─────────────────────────────────────────────────────────────────
-
-/**
- * @brief First-class representation of `list<T>`.
- *
- * Derives from GenericType so it is still returned by code that pattern-matches
- * on `dynamic_cast<const GenericType*>`, but also provides:
- *  - `isList()` → true
- *  - `getElementType()` / `getElementTypePtr()` convenience accessors
- *
- * This satisfies the Issue #3 acceptance criterion:
- *   makeListType(TurfInt()) produces a type the frontend can inspect and
- *   describe as `List<int>` without ever consulting LLVM.
- */
-class ListType : public GenericType {
-public:
-  /**
-   * @brief Construct a `list<ElemType>`.
-   * @param ElemType The element type (e.g. TurfInt(), TurfString(), …).
-   */
-  explicit ListType(TurfTypePtr ElemType)
-      : GenericType("list", {std::move(ElemType)}) {}
-
-  bool isList() const override { return true; }
-
-  /// The element type without going through the TypeArgs array.
-  const TurfType *getElementType()    const { return TypeArgs[0].get(); }
-  TurfTypePtr    getElementTypePtr()  const { return TypeArgs[0]; }
 };
 
 // ─── TurfStructType ───────────────────────────────────────────────────────────
@@ -442,34 +400,6 @@ TurfTypePtr TurfNull();
 bool        isArrayType(const TurfType *T);
 const TurfType *getArrayElementType(const TurfType *T);
 TurfTypePtr makeArrayType(TurfTypePtr ElemType, int Size = -1);
-
-// ─── List helper functions ────────────────────────────────────────────────────
-
-/**
- * @brief True when @p T is a `ListType` or a `GenericType` with base "list".
- *
- * Accepts both the new ListType subclass and any legacy GenericType("list", …)
- * that may have been constructed before the migration.
- */
-bool isListType(const TurfType *T);
-
-/**
- * @brief Return the element type of a list type, or nullptr if @p T is not a
- * list.
- */
-const TurfType *getListElementType(const TurfType *T);
-
-/**
- * @brief Construct a `list<ElemType>` frontend type.
- *
- * This is the canonical way to create a List<T> without any LLVM involvement:
- *
- *   TurfTypePtr listOfInt = makeListType(TurfInt());
- *   // listOfInt->getName()        == "list<int>"
- *   // listOfInt->isList()         == true
- *   // listOfInt->getElementType() == TurfInt().get()
- */
-TurfTypePtr makeListType(TurfTypePtr ElemType);
 
 // ─── Diagnostic helper ────────────────────────────────────────────────────────
 
