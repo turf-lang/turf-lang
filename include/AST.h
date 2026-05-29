@@ -3,6 +3,7 @@
 
 #include "ASTVisitor.h"
 #include "Lexer.h"
+#include "ResolverSymbolTable.h" // VariableSymbol — LLVM-free, safe to include here
 #include "Types.h"
 #include "llvm/IR/Value.h"
 #include <memory>
@@ -138,8 +139,17 @@ public:
   llvm::Value *codegenLValue() override;
   void accept(ASTVisitor &V) override { V.visitVariable(*this); }
   const SourceLocation &getLoc() const { return Loc; }
+
+  /// Populated by the Resolver after a successful lookupVariable().
+  /// clone() returns a fresh node, so this is nullptr in cloned trees —
+  /// cloned ASTs must be re-resolved before TypeChecking/Codegen.
+  std::shared_ptr<VariableSymbol> ResolvedSymbol;
+  const VariableSymbol *getResolvedSymbol() const { return ResolvedSymbol.get(); }
+
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<VariableExprAST>(Loc, Name);
+    // Note: ResolvedSymbol is intentionally NOT copied — cloned ASTs are stale
+    // until re-resolved. The default-constructed field is nullptr. ✓
   }
 };
 
@@ -308,12 +318,18 @@ public:
   const ExprAST *getEnd() const { return End.get(); }
   const ExprAST *getStep() const { return Step.get(); }
 
+  /// Populated by the Resolver after successfully declaring the induction variable.
+  /// Nulled by clone() semantics (fresh node, default nullptr). Cloned ASTs must be re-resolved.
+  std::shared_ptr<VariableSymbol> ResolvedLoopVar;
+  const VariableSymbol *getResolvedLoopVar() const { return ResolvedLoopVar.get(); }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFor(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ForExprAST>(
         Loc, VarName, CloneExprAST(Start.get()), CloneExprAST(End.get()),
         CloneExprAST(Step.get()), CloneExprAST(Body.get()));
+    // Note: ResolvedLoopVar intentionally NOT copied. ✓
   }
 };
 
@@ -361,11 +377,17 @@ public:
   TurfTypePtr getTypePtr() const { return Type; }
   const ExprAST *getInitializer() const { return InitVal.get(); }
 
+  /// Populated by the Resolver after a successful declareVariable().
+  /// Nulled by clone() semantics (fresh node, default nullptr). Cloned ASTs must be re-resolved.
+  std::shared_ptr<VariableSymbol> ResolvedSymbol;
+  const VariableSymbol *getResolvedSymbol() const { return ResolvedSymbol.get(); }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitVarDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<VarDeclExprAST>(Loc, Name, Type,
                                             CloneExprAST(InitVal.get()));
+    // Note: ResolvedSymbol intentionally NOT copied. ✓
   }
   // Kept private access for codegen
   const ExprAST *getInitVal() const { return InitVal.get(); }
@@ -592,11 +614,17 @@ public:
     return InitList;
   }
 
+  /// Populated by the Resolver after a successful declareVariable().
+  /// Nulled by clone() semantics (fresh node, default nullptr). Cloned ASTs must be re-resolved.
+  std::shared_ptr<VariableSymbol> ResolvedSymbol;
+  const VariableSymbol *getResolvedSymbol() const { return ResolvedSymbol.get(); }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitArrayDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ArrayDeclExprAST>(Loc, Name, ElementType, Size,
                                               CloneExprList(InitList));
+    // Note: ResolvedSymbol intentionally NOT copied. ✓
   }
 };
 

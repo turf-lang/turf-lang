@@ -69,13 +69,17 @@ public:
   // ── Variables ───────────────────────────────────────────────────────────────
   void visitVariable(VariableExprAST &N) override {
     printIndent(Depth_);
-    std::cout << "VariableExpr(" << N.getName() << ")\n";
+    std::cout << "VariableExpr(" << N.getName() << ")";
+    printResolvedBadge(N.ResolvedSymbol.get());
+    std::cout << "\n";
   }
 
   void visitVarDecl(VarDeclExprAST &N) override {
     printIndent(Depth_);
     std::cout << "VarDecl(" << N.getName() << " : "
-              << (N.getType() ? N.getType()->getName() : "?") << ")\n";
+              << (N.getType() ? N.getType()->getName() : "?") << ")";
+    printResolvedBadge(N.ResolvedSymbol.get());
+    std::cout << "\n";
     if (N.getInitializer()) {
       descend();
       print(const_cast<ExprAST *>(N.getInitializer()), Depth_);
@@ -162,7 +166,9 @@ public:
 
   void visitFor(ForExprAST &N) override {
     printIndent(Depth_);
-    std::cout << "ForExpr(var=" << N.getVarName() << ")\n";
+    std::cout << "ForExpr(var=" << N.getVarName() << ")";
+    printResolvedBadge(N.ResolvedLoopVar.get());
+    std::cout << "\n";
     descend();
     print(const_cast<ExprAST *>(N.getStart()), Depth_);
     print(const_cast<ExprAST *>(N.getEnd()), Depth_);
@@ -285,7 +291,9 @@ public:
     printIndent(Depth_);
     std::cout << "ArrayDecl(" << N.getName() << "["
               << (N.getElementType() ? N.getElementType()->getName() : "?")
-              << "], size=" << N.getSize() << ")\n";
+              << "], size=" << N.getSize() << ")";
+    printResolvedBadge(N.ResolvedSymbol.get());
+    std::cout << "\n";
     if (!N.getInitList().empty()) {
       descend();
       for (const auto &Init : N.getInitList())
@@ -344,6 +352,22 @@ private:
 
   void descend() { ++Depth_; }
   void ascend() { --Depth_; }
+
+  /// Print a coloured resolution badge after a node label (no trailing newline).
+  /// Green  [resolved ✓ name @ line:col]  when the symbol is attached.
+  /// Red    [NOT resolved ✗]              when the pointer is null (pre-resolver or cloned tree).
+  static void printResolvedBadge(const VariableSymbol *Sym) {
+    if (Sym) {
+      // ANSI green
+      std::cout << "  \033[32m[resolved \u2713  '" << Sym->Name
+                << "' @ " << Sym->DeclLoc.Line << ":" << Sym->DeclLoc.Col
+                << ", type=" << (Sym->Type ? Sym->Type->getName() : "?")
+                << ", depth=" << Sym->ScopeDepth << "]\033[0m";
+    } else {
+      // ANSI red
+      std::cout << "  \033[31m[NOT resolved \u2717]\033[0m";
+    }
+  }
 };
 
 #endif // AST_PRINTER_H

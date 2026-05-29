@@ -51,9 +51,11 @@ void Resolver::visitVarDecl(VarDeclExprAST &Node) {
   // 2. Register in the current scope.
   //    declareVariable() throws std::runtime_error on re-declaration in the
   //    same scope; we catch it and re-raise as a proper compiler diagnostic.
+  //    On success it returns the shared_ptr we attach to the AST node (#5).
   try {
     ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
-    SymTable_.declareVariable(Node.getName(), Node.getTypePtr(), Loc);
+    Node.ResolvedSymbol =
+        SymTable_.declareVariable(Node.getName(), Node.getTypePtr(), Loc);
   } catch (const std::runtime_error &) {
     // The name is already in the current scope — emit a rich diagnostic.
     // Look up the previous declaration for the "declared at line N" note.
@@ -80,8 +82,13 @@ void Resolver::visitBlock(BlockExprAST &Node) {
 
 // Walk Variable (VarExpr) nodes: look up; emit ReferenceError on miss.
 void Resolver::visitVariable(VariableExprAST &Node) {
-  if (SymTable_.lookupVariable(Node.getName()))
-    return; // Found — all good.
+  auto Sym = SymTable_.lookupVariable(Node.getName());
+  if (Sym) {
+    // Issue #5: attach the resolved symbol to the AST node so future passes
+    // (TypeChecker, Codegen) can read it directly without a second lookup.
+    Node.ResolvedSymbol = Sym;
+    return;
+  }
 
   // Build Damerau-Levenshtein suggestions from every name currently in scope.
   std::vector<std::string> VisibleNames = SymTable_.getAllVisibleNames();
@@ -145,9 +152,11 @@ void Resolver::visitFor(ForExprAST &Node) {
   // Register the induction variable as int — mirrors Codegen's type inference.
   // If the start expression is a double literal the TypeChecker (Issue #7)
   // will refine this, but int is the right default for range-based loops.
+  // Capture the returned symbol and attach it to the AST node (Issue #5).
   try {
     ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
-    SymTable_.declareVariable(Node.getVarName(), TurfInt(), Loc);
+    Node.ResolvedLoopVar =
+        SymTable_.declareVariable(Node.getVarName(), TurfInt(), Loc);
   } catch (const std::runtime_error &) {
     auto Prev = SymTable_.lookupVariable(Node.getVarName());
     SourceLocation ErrLoc = Node.getLoc();
@@ -249,9 +258,11 @@ void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {
     visitChild(Init.get());
 
   // Register the array variable in the current scope.
+  // Capture the returned symbol and attach it to the AST node (Issue #5).
   try {
     ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
-    SymTable_.declareVariable(Node.getName(), Node.getElementTypePtr(), Loc);
+    Node.ResolvedSymbol =
+        SymTable_.declareVariable(Node.getName(), Node.getElementTypePtr(), Loc);
   } catch (const std::runtime_error &) {
     auto Prev = SymTable_.lookupVariable(Node.getName());
     if (Prev) {

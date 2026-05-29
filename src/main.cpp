@@ -61,6 +61,7 @@ struct CompilerOptions {
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
   bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
   bool DumpResolverSymbols = false;   // --dump-resolver-symbols: print symbol table after resolution
+  bool DumpResolved = false;          // --dump-resolved: run Resolver then print annotated AST (Issue #5)
 };
 
 static CompilerOptions parseArgs(int argc, char **argv) {
@@ -80,6 +81,11 @@ static CompilerOptions parseArgs(int argc, char **argv) {
     } else if (arg == "--dump-resolver-symbols") {
       opts.RunResolver = true;
       opts.DumpResolverSymbols = true;
+    } else if (arg == "--dump-resolved") {
+      // Implies --resolve: run the Resolver, then print the annotated AST
+      // showing which nodes have a green ResolvedSymbol badge (Issue #5 demo).
+      opts.RunResolver = true;
+      opts.DumpResolved = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg[0] == '-') {
@@ -92,7 +98,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
 
   if (opts.InputFile.empty()) {
     std::cerr
-        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] [--dump-ast] [--resolve] [--dump-resolver-symbols]\n";
+        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] [--dump-ast] [--resolve] [--dump-resolver-symbols] [--dump-resolved]\n";
     std::exit(1);
   }
 
@@ -455,12 +461,31 @@ int main(int argc, char **argv) {
     g_recoverActive = false;
 
     if (ResolverClean) {
-      std::cerr << "[Resolver] ✓  All names resolved successfully. "
+      std::cerr << "[Resolver] \u2713  All names resolved successfully. "
                    "Scope depth on exit: "
                 << R.symbolTable().currentDepth() << "\n";
                 
       if (opts.DumpResolverSymbols) {
         R.symbolTable().dump(std::cerr);
+      }
+
+      // --dump-resolved: print the AST now that ResolvedSymbol pointers are
+      // populated.  Nodes carrying a VariableSymbol show a green badge;
+      // nodes without one (pre-resolver / cloned) show red. (Issue #5 demo)
+      if (opts.DumpResolved) {
+        ASTPrinter Printer;
+        std::cout << "\n";
+        std::cout << "\033[1m=== Resolved AST Dump (Issue #5) ===\033[0m\n";
+        std::cout << "  \033[32m[resolved \u2713]\033[0m = Resolver attached a VariableSymbol pointer\n";
+        std::cout << "  \033[31m[NOT resolved \u2717]\033[0m = pointer is null (structural node or leaf)\n";
+        std::cout << "\n";
+        std::cout << "\033[1m--- Functions ---\033[0m\n";
+        for (auto &AST : FnASTs)
+          Printer.print(AST.get());
+        std::cout << "\n\033[1m--- Top-Level Statements ---\033[0m\n";
+        for (auto &AST : TopLevelASTs)
+          Printer.print(AST.get());
+        std::cout << "\n\033[1m=== End Resolved AST Dump ===\033[0m\n\n";
       }
     } else {
       std::cerr << "[Resolver] ✗  Name resolution failed (see error above).\n";
