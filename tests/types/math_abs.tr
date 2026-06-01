@@ -1,26 +1,32 @@
-int a = abs(5)
-printline(a)
+import math
 
-int b = abs(-10)
-printline(b)
+fn int main() {
+    int a = math.abs(5)
+    io.printline(a)
 
-double c = abs(-3.2)
-printline(c)
+    int b = math.abs(-10)
+    io.printline(b)
 
-int d = abs(0)
-printline(d)
+    double c = math.abs(-3.2)
+    io.printline(c)
 
-double e = abs(3.14)
-printline(e)
+    int d = math.abs(0)
+    io.printline(d)
 
-int f = abs(1 + 2 * 3)
-printline(f)
+    double e = math.abs(3.14)
+    io.printline(e)
 
-int g = abs(-100) + abs(-50)
-printline(g)
+    int f = math.abs(1 + 2 * 3)
+    io.printline(f)
 
-double h = abs(-2.5) + abs(-1.5)
-printline(h)
+    int g = math.abs(-100) + math.abs(-50)
+    io.printline(g)
 
-int i = abs(power(-3, 2))
-printline(i)
+    double h = math.abs(-2.5) + math.abs(-1.5)
+    io.printline(h)
+
+    int i = math.abs(math.power(-3, 2))
+    io.printline(i)
+
+    return 0
+}

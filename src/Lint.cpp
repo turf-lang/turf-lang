@@ -1,3 +1,20 @@
+/**
+ * @file Lint.cpp
+ * @brief Static analysis and code linting checks.
+ * @details Traverses the AST to find redundant operations, dead branches,
+ *          infinite loops, self-assignments, and semantic warnings prior
+ *          to code generation.
+ *
+ * @author a2ys
+ * @author AaravTandon24
+ * @author Karan
+ *
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ * @version 1.0.0
+ * @date 2026-05-25
+ */
+
 #include "Lint.h"
 #include "AST.h"
 #include "Errors.h"
@@ -43,18 +60,10 @@ static std::string Fingerprint(const ExprAST *E) {
            Fingerprint(Bin->getLHS()) + "," + Fingerprint(Bin->getRHS()) + ")";
   }
 
-  // For complex nodes that we don't know how to fingerprint structurally,
-  // return a string that is unique to THIS specific node instance (via its
-  // pointer address).  Two different complex nodes will therefore never
-  // compare equal, which prevents false-positive "identical branches"
-  // warnings when both branches happen to contain unrecognised statement
-  // types (e.g. array-element assignments, increment expressions, list
-  // method calls, etc.).
-  //
-  // The old behaviour was to return the shared sentinel "<complex>" for
-  // every unrecognised node, which made ANY two branches that both
-  // contained at least one complex statement appear identical to the
-  // checker — a clear false positive.
+  // For unsupported complex nodes, return a unique instance-based fingerprint
+  // using the pointer address. This prevents false-positive "identical
+  // branches" warnings when both branches contain structurally different
+  // complex statements.
   return "<unique@" + std::to_string(reinterpret_cast<uintptr_t>(E)) + ">";
 }
 
@@ -138,22 +147,49 @@ static void LintAssignment(const AssignmentExprAST *Assign);
 static void LintWhile(const WhileExprAST *While);
 static void LintIf(const IfExprAST *If);
 
+static void LintFor(const ForExprAST *For);
+
 // Main entry point
+/**
+ * @brief Recursively lints an AST expression or statement.
+ *
+ * Evaluates the node and its children for potential semantic warnings
+ * (e.g., redundant comparisons, infinite loops, empty branches). Warnings
+ * are emitted via the DiagnosticEngine.
+ *
+ * @param E The AST node to check.
+ */
 void LintExpression(ExprAST *E) {
   if (!E)
     return;
 
-  if (auto *Bin = dynamic_cast<BinaryExprAST *>(E))
+  if (auto *Bin = dynamic_cast<BinaryExprAST *>(E)) {
     LintBinaryExpr(Bin);
+    LintExpression(const_cast<ExprAST*>(Bin->getLHS()));
+    LintExpression(const_cast<ExprAST*>(Bin->getRHS()));
+  }
 
-  if (auto *Assign = dynamic_cast<AssignmentExprAST *>(E))
+  if (auto *Assign = dynamic_cast<AssignmentExprAST *>(E)) {
     LintAssignment(Assign);
+    LintExpression(const_cast<ExprAST*>(Assign->getLHS()));
+    LintExpression(const_cast<ExprAST*>(Assign->getRHS()));
+  }
 
-  if (auto *While = dynamic_cast<WhileExprAST *>(E))
+  if (auto *While = dynamic_cast<WhileExprAST *>(E)) {
     LintWhile(While);
+  }
 
-  if (auto *If = dynamic_cast<IfExprAST *>(E))
+  if (auto *For = dynamic_cast<ForExprAST *>(E)) {
+    LintFor(For);
+  }
+
+  if (auto *If = dynamic_cast<IfExprAST *>(E)) {
     LintIf(If);
+  }
+
+  if (auto *Ret = dynamic_cast<ReturnExprAST *>(E)) {
+    LintExpression(const_cast<ExprAST*>(Ret->getVal()));
+  }
 
   // Recurse into block children
   if (auto *Blk = dynamic_cast<BlockExprAST *>(E)) {
@@ -254,7 +290,6 @@ static void LintAssignment(const AssignmentExprAST *Assign) {
   }
 }
 
-// Check: infinite loop (while(true) without break/continue/return)
 static void LintWhile(const WhileExprAST *While) {
   if (!While)
     return;
@@ -271,12 +306,24 @@ static void LintWhile(const WhileExprAST *While) {
     }
   }
 
+  LintExpression(const_cast<ExprAST *>(While->getCond()));
   // Recurse into body
   LintExpression(const_cast<ExprAST *>(While->getBody()));
 }
 
+static void LintFor(const ForExprAST *For) {
+  if (!For)
+    return;
+
+  LintExpression(const_cast<ExprAST *>(For->getStart()));
+  LintExpression(const_cast<ExprAST *>(For->getEnd()));
+  LintExpression(const_cast<ExprAST *>(For->getStep()));
+  LintExpression(const_cast<ExprAST *>(For->getBody()));
+}
+
 static void LintIf(const IfExprAST *If) {
-  if (!If) return;
+  if (!If)
+    return;
 
   const auto &Branches = If->getBranches();
 
@@ -309,19 +356,20 @@ static void LintIf(const IfExprAST *If) {
   LintExpression(Else);
 }
 
-// ============================================================================
 // Semantic Pruning: Only lint nodes that have changed (by node ID)
-// ============================================================================
 // Internal recursive helper for semantic pruning
-static void LintChangedNodesOnlyInternal(ExprAST *E,
-                                          const std::set<uint64_t> &ChangedNodeIDs) {
-  if (!E) return;
-  
+static void
+LintChangedNodesOnlyInternal(ExprAST *E,
+                             const std::set<uint64_t> &ChangedNodeIDs) {
+  if (!E)
+    return;
+
   // Only lint this node if it's in the changed set
   // (or if ChangedNodeIDs is empty, lint everything)
   uint64_t NodeID = E->getNodeID();
-  bool ShouldLintThisNode = ChangedNodeIDs.empty() || ChangedNodeIDs.count(NodeID) > 0;
-  
+  bool ShouldLintThisNode =
+      ChangedNodeIDs.empty() || ChangedNodeIDs.count(NodeID) > 0;
+
   if (ShouldLintThisNode) {
     // Run normal lint checks on this node
     if (auto *Bin = dynamic_cast<BinaryExprAST *>(E))
@@ -347,15 +395,19 @@ static void LintChangedNodesOnlyInternal(ExprAST *E,
 
   // Recurse into binary expression children
   if (auto *Bin = dynamic_cast<BinaryExprAST *>(E)) {
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Bin->getLHS()), ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Bin->getRHS()), ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Bin->getLHS()),
+                                 ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Bin->getRHS()),
+                                 ChangedNodeIDs);
     return;
   }
 
   // Recurse into assignment children
   if (auto *Assign = dynamic_cast<AssignmentExprAST *>(E)) {
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Assign->getLHS()), ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Assign->getRHS()), ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Assign->getLHS()),
+                                 ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Assign->getRHS()),
+                                 ChangedNodeIDs);
     return;
   }
 
@@ -372,23 +424,29 @@ static void LintChangedNodesOnlyInternal(ExprAST *E,
 
   // Recurse into while loop children
   if (auto *While = dynamic_cast<WhileExprAST *>(E)) {
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(While->getCond()), ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(While->getCond()),
+                                 ChangedNodeIDs);
     LintChangedNodesOnlyInternal(While->getBody(), ChangedNodeIDs);
     return;
   }
 
   // Recurse into for loop children
   if (auto *For = dynamic_cast<ForExprAST *>(E)) {
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getStart()), ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getEnd()), ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getStep()), ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getStart()),
+                                 ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getEnd()),
+                                 ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getStep()),
+                                 ChangedNodeIDs);
     LintChangedNodesOnlyInternal(For->getBody(), ChangedNodeIDs);
     return;
   }
 }
 
 // Public API: Semantic pruning for incremental validation
-void LintChangedNodesOnly(ExprAST *E, const std::set<uint64_t> &ChangedNodeIDs) {
-  if (!E) return;
+void LintChangedNodesOnly(ExprAST *E,
+                          const std::set<uint64_t> &ChangedNodeIDs) {
+  if (!E)
+    return;
   LintChangedNodesOnlyInternal(E, ChangedNodeIDs);
 }

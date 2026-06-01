@@ -1,23 +1,27 @@
-print(42)
-printline(0)
+fn int main() {
+    io.print(42)
+    io.printline(0)
 
-print(3.14)
-printline(0.0)
+    io.print(3.14)
+    io.printline(0.0) // double gets converted to int when its value is zero (not sure about the reason)
 
-print(true)
-printline(false)
+    io.print(true)
+    io.printline(false)
 
-print("Hello ")
-printline("World")
+    io.print("Hello ")
+    io.printline("World")
 
-int a = 100
-printline(a)
+    int a = 100
+    io.printline(a)
 
-double b = 2.5
-printline(b)
+    double b = 2.5
+    io.printline(b)
 
-bool c = true
-printline(c)
+    bool c = true
+    io.printline(c)
 
-string d = "Turf"
-printline(d)
+    string d = "Turf"
+    io.printline(d)
+
+    return 0
+}

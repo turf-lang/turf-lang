@@ -1,29 +1,35 @@
-int a = power(2, 3)
-printline(a)
+import math
 
-int b = power(5, 0)
-printline(b)
+fn int main() {
+    int a = math.power(2, 3)
+    io.printline(a)
 
-int c = power(3, 1)
-printline(c)
+    int b = math.power(5, 0)
+    io.printline(b)
 
-double d = power(2, 3.0)
-printline(d)
+    int c = math.power(3, 1)
+    io.printline(c)
 
-double e = power(2.0, 3)
-printline(e)
+    double d = math.power(2, 3.0)
+    io.printline(d)
 
-double f = power(2.0, 3.0)
-printline(f)
+    double e = math.power(2.0, 3)
+    io.printline(e)
 
-int g = power(10, 2)
-printline(g)
+    double f = math.power(2.0, 3.0)
+    io.printline(f)
 
-double h = power(3, 2.0)
-printline(h)
+    int g = math.power(10, 2)
+    io.printline(g)
 
-int i = power(-2, 3)
-printline(i)
+    double h = math.power(3, 2.0)
+    io.printline(h)
 
-int j = power(-2, 4)
-printline(j)
+    int i = math.power(-2, 3)
+    io.printline(i)
+
+    int j = math.power(-2, 4)
+    io.printline(j)
+
+    return 0
+}

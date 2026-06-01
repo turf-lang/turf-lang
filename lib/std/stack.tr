@@ -1,0 +1,55 @@
+// Stack<T> — LIFO (Last In, First Out) collection.
+// Usage: Stack<int> s = Stack<int>()  s.push(1)  s.pop()  s.peek()  s.length()
+
+import mem
+
+struct Stack<T> {
+  T* data,
+  int len,
+  int cap
+}
+
+fn<T> void Stack.push(T item) {
+  if (self.len == self.cap) {
+    if (self.cap == 0) {
+      self.cap = 8
+    } else {
+      self.cap = self.cap * 2
+    }
+
+    // Type Erasure: all T are 64-bit values (int, double, pointers)
+    int byteSize = self.cap * 8
+
+    if (self.data == T*(0)) {
+      self.data = T*(mem.malloc(byteSize))
+    } else {
+      self.data = T*(mem.realloc(self.data, byteSize))
+    }
+  }
+
+  self.data[self.len] = item
+  self.len = self.len + 1
+}
+
+fn<T> T Stack.pop() {
+  if (self.len == 0) {
+    // Trap: pop on empty stack (null deref to signal error)
+    mem.free(T*(0))
+  }
+
+  self.len = self.len - 1
+  return self.data[self.len]
+}
+
+fn<T> T Stack.peek() {
+  if (self.len == 0) {
+    // Trap: peek on empty stack
+    mem.free(T*(0))
+  }
+
+  return self.data[self.len - 1]
+}
+
+fn<T> int Stack.length() {
+  return self.len
+}

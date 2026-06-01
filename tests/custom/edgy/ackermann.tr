@@ -10,5 +10,9 @@ fn int ackermann(int m, int n) {
     return ackermann(m - 1, ackermann(m, n - 1))
 }
 
-// ackermann(3, 4) is 125, it tests recursion heavily
-printline(ackermann(3, 4))
+fn int main() {
+    // ackermann(3, 4) is 125, it tests recursion heavily
+    io.printline(ackermann(3, 4))
+
+    return 0
+}

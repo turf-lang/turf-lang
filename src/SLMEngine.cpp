@@ -1,3 +1,20 @@
+/**
+ * @file SLMEngine.cpp
+ * @brief Llama.cpp backend interface for the Small Language Model.
+ * @details Manages the lifecycle, loading, and inference of the quantized
+ *          GGML model used for smart diagnostics. Provides a singleton engine
+ *          instance for low-overhead tokenization and text generation.
+ *
+ * @author a2ys
+ * @author AaravTandon24
+ * @author Karan
+ *
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ * @version 1.0.0
+ * @date 2026-05-25
+ */
+
 #include "SLMEngine.h"
 #include "llama.h"
 #include <cstdio>
@@ -59,6 +76,16 @@ bool SLMEngine::initialize(const std::string &modelPath) {
   return ctx != nullptr;
 }
 
+/**
+ * @brief Generates an AI suggestion based on the provided prompt.
+ *
+ * Tokenizes the input, runs inference using greedy sampling, and stops
+ * generation upon encountering ChatML stop tokens. Suppresses underlying
+ * backend logs to maintain compiler output cleanliness.
+ *
+ * @param prompt The formatted ChatML prompt containing the error context.
+ * @return std::string The raw generated response from the model.
+ */
 std::string SLMEngine::generateSuggestion(const std::string &prompt) {
   if (!ctx)
     return "";

@@ -42,6 +42,36 @@ public:
   }
 
   void warn() const { LogErrorAt(Loc, Message); }
+
+  static std::string formatRankedSuggestions(const RankedSuggestions &Suggestions) {
+    std::string result = "";
+    bool hasLocal = !Suggestions.Local.empty();
+    bool hasModule = !Suggestions.Module.empty();
+
+    if (hasLocal) {
+      result += "\n  " + Colors::BRIGHT_GREEN + "It may be from the current file: ";
+      for (size_t i = 0; i < Suggestions.Local.size(); ++i) {
+        result += Colors::BRIGHT_YELLOW + "'" + Suggestions.Local[i] + "'" + Colors::BRIGHT_GREEN;
+        if (i != Suggestions.Local.size() - 1) result += ", ";
+      }
+    }
+    
+    if (hasModule) {
+      result += "\n  " + Colors::BRIGHT_GREEN + "Or, could be one of these from the imported files:";
+      for (const auto &pair : Suggestions.Module) {
+        result += "\n    - In module '" + Colors::BRIGHT_CYAN + pair.first + Colors::BRIGHT_GREEN + "': ";
+        for (size_t i = 0; i < pair.second.size(); ++i) {
+          result += Colors::BRIGHT_YELLOW + "'" + pair.second[i] + "'" + Colors::BRIGHT_GREEN;
+          if (i != pair.second.size() - 1) result += ", ";
+        }
+      }
+    }
+    
+    if (hasLocal || hasModule) {
+      result += Colors::RESET;
+    }
+    return result;
+  }
 };
 
 // Syntax Error : Parser issues
@@ -104,18 +134,17 @@ public:
 class AbsArgTypeError : public TurfError {
 public:
   AbsArgTypeError(SourceLocation Loc, const std::string &GotTypeName)
-      : TurfError(Loc,
-                  Colors::BRIGHT_RED +
-                      "Oops! 'abs' only works with int or double, but you gave "
-                      "it a '" +
-                      Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
-                      Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                      "Valid uses:\n" +
-                      "    abs(int)    → int\n" +
-                      "    abs(double) → double\n" +
-                      Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                      "Hint: abs gives the absolute (positive) value of a number." +
-                      Colors::RESET) {}
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED +
+                "Oops! 'abs' only works with int or double, but you gave "
+                "it a '" +
+                Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
+                Colors::RESET + "  " + Colors::BRIGHT_GREEN + "Valid uses:\n" +
+                "    abs(int)    → int\n" + "    abs(double) → double\n" +
+                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
+                "Hint: abs gives the absolute (positive) value of a number." +
+                Colors::RESET) {}
 };
 
 // power() Argument Type Error : non-int/double passed to power
@@ -131,13 +160,13 @@ public:
                 Colors::CYAN + GotType1 + Colors::BRIGHT_RED + "' and '" +
                 Colors::CYAN + GotType2 + Colors::BRIGHT_RED + "'.\n" +
                 Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                "Valid overloads:\n" +
-                "    power(int, int)       → int\n" +
+                "Valid overloads:\n" + "    power(int, int)       → int\n" +
                 "    power(int, double)    → double\n" +
                 "    power(double, int)    → double\n" +
-                "    power(double, double) → double\n" +
-                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                "Hint: power raises the first number to the power of the second." +
+                "    power(double, double) → double\n" + Colors::RESET + "  " +
+                Colors::BRIGHT_GREEN +
+                "Hint: power raises the first number to the power of the "
+                "second." +
                 Colors::RESET) {}
 };
 
@@ -194,20 +223,14 @@ public:
 class LookupError : public TurfError {
 public:
   LookupError(SourceLocation Loc, const std::string &Name,
-              const std::vector<std::string> &Suggestions)
+              const RankedSuggestions &Suggestions)
       : TurfError(Loc, Colors::BRIGHT_RED + "Oops! I can't find a function named '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
 
-    if (!Suggestions.empty()) {
-      Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
-      for (size_t i = 0; i < Suggestions.size(); ++i) {
-        Message += Colors::BRIGHT_YELLOW + "'" + Suggestions[i] + "'" +
-                   Colors::BRIGHT_GREEN;
-        if (i != Suggestions.size() - 1)
-          Message += ", ";
-      }
-      Message += "?" + Colors::RESET;
+    std::string formatted = formatRankedSuggestions(Suggestions);
+    if (!formatted.empty()) {
+      Message += formatted;
     } else {
       Message += "\n  " + Colors::BRIGHT_GREEN +
                  "Hint: Double-check the spelling against the built-in "
@@ -234,39 +257,16 @@ public:
 class ReferenceError : public TurfError {
 public:
   ReferenceError(SourceLocation Loc, const std::string &Name,
-                 const std::map<std::string, VarInfo> &SymbolTable)
+                 const RankedSuggestions &Suggestions)
       : TurfError(Loc, "") {
 
     Message = Colors::BRIGHT_RED + "I can't find anything named '" +
               Colors::CYAN + Name + Colors::BRIGHT_RED + "'." + Colors::RESET;
 
-    bool foundCandidate = false;
-
-    if (Name.length() > 2) {
-      std::vector<std::string> CandidateNames;
-      CandidateNames.reserve(SymbolTable.size());
-      for (const auto &pair : SymbolTable) {
-        CandidateNames.push_back(pair.first);
-      }
-
-      std::vector<std::string> Candidates =
-          SuggestionIndex::suggestVisible(Name, CandidateNames);
-
-      if (!Candidates.empty()) {
-        foundCandidate = true;
-        Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
-        for (size_t i = 0; i < Candidates.size(); ++i) {
-
-          Message += Colors::BRIGHT_YELLOW + "'" + Candidates[i] + "'" +
-                     Colors::BRIGHT_GREEN;
-          if (i != Candidates.size() - 1)
-            Message += ", ";
-        }
-        Message += "?" + Colors::RESET;
-      }
-    }
-
-    if (!foundCandidate) {
+    std::string formatted = formatRankedSuggestions(Suggestions);
+    if (!formatted.empty()) {
+      Message += formatted;
+    } else {
       Message += "\n  " + Colors::BRIGHT_GREEN +
                  "Hint: Did you forget to create this variable? You have to "
                  "create it before you can use it, like this: `int " +
@@ -279,34 +279,17 @@ public:
 class UseBeforeDeclarationError : public TurfError {
 public:
   UseBeforeDeclarationError(SourceLocation UseLoc, const std::string &Name,
-                            const std::vector<std::string> &KnownNames)
+                            const RankedSuggestions &Suggestions)
       : TurfError(UseLoc, "") {
 
     Message = Colors::BRIGHT_RED + "Hold on! You're trying to use '" +
               Colors::CYAN + Name + Colors::BRIGHT_RED +
               "' before telling me what it is." + Colors::RESET;
 
-    bool foundCandidate = false;
-
-    if (Name.length() > 2) {
-      std::vector<std::string> Candidates =
-          SuggestionIndex::suggestVisible(Name, KnownNames);
-
-      if (!Candidates.empty()) {
-        foundCandidate = true;
-        Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
-
-        for (size_t i = 0; i < Candidates.size(); ++i) {
-          Message += Colors::BRIGHT_YELLOW + "'" + Candidates[i] + "'" +
-                     Colors::BRIGHT_GREEN;
-          if (i != Candidates.size() - 1)
-            Message += ", ";
-        }
-        Message += "?" + Colors::RESET;
-      }
-    }
-
-    if (!foundCandidate) {
+    std::string formatted = formatRankedSuggestions(Suggestions);
+    if (!formatted.empty()) {
+      Message += formatted;
+    } else {
       Message += "\n  " + Colors::BRIGHT_GREEN +
                  "Hint: Did you forget to create this variable? You have to "
                  "create it before you can use it, like this: `int " +
@@ -693,20 +676,25 @@ public:
   }
 };
 
+<<<<<<< HEAD
 // ── List Errors ───────────────────────────────────────────────────────────────
+=======
+// List Errors
+>>>>>>> cd238bc8a595fbbdf71b8e4d89e3e35a6855434d
 
 // Missing generic type parameter: list bad  (instead of list<int> bad)
 class ListGenericMissingError : public TurfError {
 public:
   ListGenericMissingError(SourceLocation Loc)
-      : TurfError(Loc,
-                  Colors::BRIGHT_RED +
-                      "List declaration is missing a type parameter!\n" +
-                      Colors::RESET +
-                      "  You must specify the element type inside angle brackets.\n  " +
-                      Colors::BRIGHT_GREEN +
-                      "Hint: Use list<int>, list<double>, list<bool>, or list<string>." +
-                      Colors::RESET) {}
+      : TurfError(Loc, Colors::BRIGHT_RED +
+                           "List declaration is missing a type parameter!\n" +
+                           Colors::RESET +
+                           "  You must specify the element type inside angle "
+                           "brackets.\n  " +
+                           Colors::BRIGHT_GREEN +
+                           "Hint: Use list<int>, list<double>, list<bool>, or "
+                           "list<string>." +
+                           Colors::RESET) {}
 };
 
 // Wrong element type pushed into list: push(3.14) into list<int>
@@ -716,15 +704,15 @@ public:
                         const std::string &ExpectedElem,
                         const std::string &GotType)
       : TurfError(
-            Loc,
-            Colors::BRIGHT_RED + "Type mismatch on list '" + Colors::CYAN +
-                ListName + Colors::BRIGHT_RED + "'!\n" + Colors::RESET +
-                "  This is a list<" + Colors::CYAN + ExpectedElem +
-                Colors::RESET + ">, but you tried to push a '" + Colors::CYAN +
-                GotType + Colors::RESET + "' value.\n  " + Colors::BRIGHT_GREEN +
-                "Hint: Push only '" + ExpectedElem +
-                "' values. No implicit coercion is allowed for list operations." +
-                Colors::RESET) {}
+            Loc, Colors::BRIGHT_RED + "Type mismatch on list '" + Colors::CYAN +
+                     ListName + Colors::BRIGHT_RED + "'!\n" + Colors::RESET +
+                     "  This is a list<" + Colors::CYAN + ExpectedElem +
+                     Colors::RESET + ">, but you tried to push a '" +
+                     Colors::CYAN + GotType + Colors::RESET + "' value.\n  " +
+                     Colors::BRIGHT_GREEN + "Hint: Push only '" + ExpectedElem +
+                     "' values. No implicit coercion is allowed for list "
+                     "operations." +
+                     Colors::RESET) {}
 };
 
 // Method called on non-list variable
@@ -737,7 +725,8 @@ public:
             Colors::BRIGHT_RED + "'" + Colors::CYAN + VarName +
                 Colors::BRIGHT_RED + "' is not a list!\n" + Colors::RESET +
                 "  You called '" + Colors::CYAN + Method + Colors::RESET +
-                "' on it, but that method only works on list<T> variables.\n  " +
+                "' on it, but that method only works on list<T> variables.\n "
+                " " +
                 Colors::BRIGHT_GREEN +
                 "Hint: Declare it with list<int>, list<string>, etc. to use " +
                 Method + "." + Colors::RESET) {}
@@ -747,14 +736,71 @@ public:
 class ListEmptyPopError : public TurfError {
 public:
   ListEmptyPopError(SourceLocation Loc, const std::string &ListName)
-      : TurfError(
-            Loc,
-            Colors::BRIGHT_RED +
-                "Calling pop() on an empty list '" + Colors::CYAN + ListName +
-                Colors::BRIGHT_RED + "' will crash at runtime!\n" +
-                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                "Hint: Check list.length > 0 before calling pop()." +
-                Colors::RESET) {}
+      : TurfError(Loc, Colors::BRIGHT_RED + "Calling pop() on an empty list '" +
+                           Colors::CYAN + ListName + Colors::BRIGHT_RED +
+                           "' will crash at runtime!\n" + Colors::RESET + "  " +
+                           Colors::BRIGHT_GREEN +
+                           "Hint: Check list.length > 0 before calling pop()." +
+                           Colors::RESET) {}
+};
+
+// Phase 3: Module search error
+class ModuleNotFoundError : public TurfError {
+public:
+  ModuleNotFoundError(SourceLocation Loc, const std::string &ModuleName)
+      : TurfError(Loc, Colors::BRIGHT_RED + "Could not find module '" +
+                           Colors::CYAN + ModuleName + Colors::BRIGHT_RED +
+                           "'.\n" + Colors::RESET + "  " +
+                           Colors::BRIGHT_GREEN +
+                           "Hint: Make sure the file '" + ModuleName + ".tr' exists in the standard library or your current directory." +
+                           Colors::RESET) {}
+};
+
+
+// Phase 2: Module-scoped method lookup error
+// Raised when a user types e.g. io.pritn() — wrong function name in a known
+// module. Suggestions are sourced from that module's function registry.
+class ModuleMethodNotFoundError : public TurfError {
+public:
+  ModuleMethodNotFoundError(SourceLocation Loc,
+                            const std::string &ModuleName,
+                            const std::string &MethodName,
+                            const RankedSuggestions &Suggestions)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Oops! Module '" + Colors::CYAN +
+                      ModuleName + Colors::BRIGHT_RED +
+                      "' has no function named '" + Colors::CYAN + MethodName +
+                      Colors::BRIGHT_RED + "'." + Colors::RESET) {
+    if (!Suggestions.empty()) {
+      Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean:\n" + Colors::RESET;
+      Message += formatRankedSuggestions(Suggestions);
+    } else {
+      Message += "\n  " + Colors::BRIGHT_GREEN +
+                 "Double-check your spelling, or maybe you need to define it?" +
+                 Colors::RESET;
+    }
+  }
+};
+
+// Phase 2: Module-scoped argument type mismatch error
+// Raised when the function name is found in a module but no overload matches
+// the given argument types (e.g. math.abs(true) — no abs(bool) overload).
+class ModuleArityOrTypeError : public TurfError {
+public:
+  ModuleArityOrTypeError(SourceLocation Loc,
+                         const std::string &ModuleName,
+                         const std::string &MethodName,
+                         const std::string &Detail)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "No matching overload of '" +
+                      Colors::CYAN + ModuleName + "." + MethodName +
+                      Colors::BRIGHT_RED + "' for the arguments you gave.\n" +
+                      Colors::RESET + "  " + Detail + "\n  " +
+                      Colors::BRIGHT_GREEN +
+                      "Hint: Check the argument types and count. Use the " +
+                      "correct overload, e.g. 'math.abs(int)' or "
+                      "'math.abs(double)'." +
+                      Colors::RESET) {}
 };
 
 #endif

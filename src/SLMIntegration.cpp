@@ -1,3 +1,20 @@
+/**
+ * @file SLMIntegration.cpp
+ * @brief Integration logic for the Small Language Model.
+ * @details Bridges the compiler diagnostics system with the SLM backend.
+ *          Handles prompt construction, error classification, dynamic
+ *          context gathering, and JSON response parsing for AI suggestions.
+ *
+ * @author a2ys
+ * @author AaravTandon24
+ * @author Karan
+ *
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ * @version 1.0.0
+ * @date 2026-05-25
+ */
+
 #include "SLMIntegration.h"
 #include "Colors.h"
 #include "ErrorCategory.h"
@@ -60,25 +77,25 @@ std::string getCodeContext(int errorLine, int contextSize) {
 // broader windows let it trace type declarations and scope origins.
 static int contextSizeForCategory(ErrorCategory cat) {
   switch (cat) {
-    // ── Tight (±3): error is self-contained on a single statement ──────
-    case ErrorCategory::SYNTAX_ERROR:
-    case ErrorCategory::BUILTIN_FUNCTION:
-    case ErrorCategory::ARITHMETIC:
-    case ErrorCategory::STRING_CONVERSION:
-    case ErrorCategory::CONTROL_FLOW:
-      return 3;
+  // Tight (±3): error is self-contained on a single statement
+  case ErrorCategory::SYNTAX_ERROR:
+  case ErrorCategory::BUILTIN_FUNCTION:
+  case ErrorCategory::ARITHMETIC:
+  case ErrorCategory::STRING_CONVERSION:
+  case ErrorCategory::CONTROL_FLOW:
+    return 3;
 
-    // ── Broad (±8): need to trace type origin or scope declarations ────
-    case ErrorCategory::TYPE_MISMATCH:
-    case ErrorCategory::ARRAY_ERROR:
-    case ErrorCategory::GENERAL:
-      return 8;
+  // Broad (±8): need to trace type origin or scope declarations
+  case ErrorCategory::TYPE_MISMATCH:
+  case ErrorCategory::ARRAY_ERROR:
+  case ErrorCategory::GENERAL:
+    return 8;
 
-    // ── Medium (±5): call site + nearby declaration usually sufficient ─
-    case ErrorCategory::FUNCTION_SIGNATURE:
-    case ErrorCategory::DECLARATION:
-    case ErrorCategory::UNDECLARED_VAR:
-      return 5;
+  // Medium (±5): call site + nearby declaration usually sufficient ─
+  case ErrorCategory::FUNCTION_SIGNATURE:
+  case ErrorCategory::DECLARATION:
+  case ErrorCategory::UNDECLARED_VAR:
+    return 5;
   }
   return 5; // unreachable, but satisfies -Wreturn-type
 }
@@ -90,9 +107,9 @@ static int contextSizeForCategory(ErrorCategory cat) {
 // surrounding range.
 // Lines that already fall within the [errorLine ± contextSize] window are
 // silently skipped to avoid duplication.
-static std::string getCodeContextWithPinnedLines(
-    int errorLine, int contextSize,
-    const std::vector<int> &pinnedLines) {
+static std::string
+getCodeContextWithPinnedLines(int errorLine, int contextSize,
+                              const std::vector<int> &pinnedLines) {
   std::string context = getCodeContext(errorLine, contextSize);
 
   if (pinnedLines.empty() || SourceLines.empty())
@@ -100,8 +117,8 @@ static std::string getCodeContextWithPinnedLines(
 
   // Compute the window boundaries to avoid pinning lines already visible.
   int windowStart = std::max(1, errorLine - contextSize);
-  int windowEnd   = std::min(static_cast<int>(SourceLines.size()),
-                             errorLine + contextSize);
+  int windowEnd =
+      std::min(static_cast<int>(SourceLines.size()), errorLine + contextSize);
 
   bool headerAdded = false;
   for (int lineNo : pinnedLines) {
@@ -114,8 +131,8 @@ static std::string getCodeContextWithPinnedLines(
       context += "Relevant definition(s)\n";
       headerAdded = true;
     }
-    context += "*  " + std::to_string(lineNo) + " | " +
-               SourceLines[lineNo - 1] + "\n";
+    context +=
+        "*  " + std::to_string(lineNo) + " | " + SourceLines[lineNo - 1] + "\n";
   }
   if (headerAdded)
     context += "\n";
@@ -157,16 +174,17 @@ static int findFunctionSignatureLine(const std::string &errorMsg,
   // Also scan the error line itself for identifiers followed by '('
   if (errorLine >= 1 && errorLine <= static_cast<int>(SourceLines.size())) {
     const std::string &src = SourceLines[errorLine - 1];
-    for (size_t i = 0; i < src.size(); ) {
+    for (size_t i = 0; i < src.size();) {
       if (std::isalpha(static_cast<unsigned char>(src[i]))) {
         size_t j = i;
-        while (j < src.size() &&
-               (std::isalnum(static_cast<unsigned char>(src[j])) ||
-                src[j] == '_'))
+        while (
+            j < src.size() &&
+            (std::isalnum(static_cast<unsigned char>(src[j])) || src[j] == '_'))
           ++j;
         // Check whether the identifier is immediately followed by '('
         size_t k = j;
-        while (k < src.size() && src[k] == ' ') ++k;
+        while (k < src.size() && src[k] == ' ')
+          ++k;
         if (k < src.size() && src[k] == '(')
           candidates.push_back(src.substr(i, j - i));
         i = j;
@@ -194,7 +212,8 @@ static int findFunctionSignatureLine(const std::string &errorMsg,
         continue;
       // Confirm the identifier is followed (after optional whitespace) by '('
       size_t after = namePos + name.size();
-      while (after < line.size() && line[after] == ' ') ++after;
+      while (after < line.size() && line[after] == ' ')
+        ++after;
       if (after < line.size() && line[after] == '(') {
         std::cerr << "[SLM 3b] Found fn '" << name << "' at line " << ln
                   << " (pinning to context)\n";
@@ -249,8 +268,9 @@ static int findVariableDeclarationLine(const std::string &errorMsg,
       while ((pos = line.find(kw, pos)) != std::string::npos) {
         // The type keyword must be preceded by whitespace/start-of-line
         // and followed by whitespace (not part of a longer identifier).
-        bool kwStart = (pos == 0 ||
-                        !std::isalnum(static_cast<unsigned char>(line[pos - 1])));
+        bool kwStart =
+            (pos == 0 ||
+             !std::isalnum(static_cast<unsigned char>(line[pos - 1])));
         size_t afterKw = pos + kwLen;
         bool kwEnd = (afterKw < line.size() && line[afterKw] == ' ');
 
@@ -369,12 +389,14 @@ static float extractJsonFieldNumber(const std::string &json,
   return val;
 }
 
-static ErrorCategory classifyErrorWithSLM(const std::string &errorMessage, const std::string &codeContext) {
+static ErrorCategory classifyErrorWithSLM(const std::string &errorMessage,
+                                          const std::string &codeContext) {
   // Load the category reference file so the SLM knows what each category means.
   std::string categoryDoc = loadDocFile("docs/slm/error_categories.txt");
 
   std::string categoryList =
-      "TYPE_MISMATCH, UNDECLARED_VARIABLE, CONTROL_FLOW, SYNTAX_ERROR, ARITHMETIC, "
+      "TYPE_MISMATCH, UNDECLARED_VARIABLE, CONTROL_FLOW, SYNTAX_ERROR, "
+      "ARITHMETIC, "
       "STRING_CONVERSION, ARRAY_ERROR, DECLARATION, FUNCTION_SIGNATURE, "
       "BUILTIN_FUNCTION, GENERAL";
 
@@ -387,16 +409,16 @@ static ErrorCategory classifyErrorWithSLM(const std::string &errorMessage, const
     systemContent += "Category descriptions:\n" + categoryDoc + "\n\n";
   }
 
-  systemContent += "Respond with ONLY the exact category name. No explanation, no quotes, no markdown.\n";
+  systemContent += "Respond with ONLY the exact category name. No explanation, "
+                   "no quotes, no markdown.\n";
 
-  std::string prompt =
-      "<|im_start|>system\n" + systemContent +
-      "<|im_end|>\n"
-      "<|im_start|>user\n"
-      "Error: " + errorMessage +
-      "\nCode Context:\n" + codeContext +
-      "\n<|im_end|>\n"
-      "<|im_start|>assistant\n";
+  std::string prompt = "<|im_start|>system\n" + systemContent +
+                       "<|im_end|>\n"
+                       "<|im_start|>user\n"
+                       "Error: " +
+                       errorMessage + "\nCode Context:\n" + codeContext +
+                       "\n<|im_end|>\n"
+                       "<|im_start|>assistant\n";
 
   std::string response = SLMEngine::getInstance().generateSuggestion(prompt);
 
@@ -422,8 +444,7 @@ static ErrorCategory classifyErrorWithSLM(const std::string &errorMessage, const
 //   +0.1  code_patch contains the error keyword — patch is on-topic
 //
 // Maximum score: 1.0  |  Minimum: 0.0
-static float computeConfidence(const AISuggestion &s,
-                               ErrorCategory category,
+static float computeConfidence(const AISuggestion &s, ErrorCategory category,
                                bool deterministic,
                                const std::string &contextKeyword) {
   float score = 0.0f;
@@ -437,38 +458,54 @@ static float computeConfidence(const AISuggestion &s,
     score += 0.2f;
 
   // +0.2 if a non-empty replacement_line was actually produced
-  // (replacement_line is the exact code; code_patch is just a prose description)
-  const std::string &patchCode = s.replacement_line.empty() ? s.code_patch : s.replacement_line;
+  // (replacement_line is the exact code; code_patch is just a prose
+  // description)
+  const std::string &patchCode =
+      s.replacement_line.empty() ? s.code_patch : s.replacement_line;
   if (!patchCode.empty())
     score += 0.2f;
 
-  // +0.1 if the replacement is a single, clean line (no embedded newlines or lone braces)
+  // +0.1 if the replacement is a single, clean line (no embedded newlines or
+  // lone braces)
   if (!patchCode.empty()) {
-    bool hasNewline  = patchCode.find('\n') != std::string::npos;
+    bool hasNewline = patchCode.find('\n') != std::string::npos;
     bool isBareBrace = (patchCode == "{" || patchCode == "}");
     if (!hasNewline && !isBareBrace)
       score += 0.1f;
   }
 
-  // +0.1 if the replacement line mentions the relevant keyword (patch is on-topic)
+  // +0.1 if the replacement line mentions the relevant keyword (patch is
+  // on-topic)
   if (!contextKeyword.empty() && !patchCode.empty() &&
       patchCode.find(contextKeyword) != std::string::npos)
     score += 0.1f;
 
   // Clamp to [0, 1]
-  if (score > 1.0f) score = 1.0f;
+  if (score > 1.0f)
+    score = 1.0f;
   return score;
 }
 
+/**
+ * @brief Fetches and parses an AI suggestion for a given compilation error.
+ *
+ * Extracts relevant code context, categorizes the error, queries the SLM,
+ * and parses the JSON response into a structured AISuggestion.
+ *
+ * @param errorMessage The raw compiler error message.
+ * @param errorLine The 1-based source line where the error occurred.
+ * @return AISuggestion A structured AI response containing an explanation and
+ * patch.
+ */
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   AISuggestion suggestion;
   std::string cleanError = stripAnsiCodes(errorMessage);
 
-  // ── Step 0: extract keyword hint early so classification can use it ──
+  // Step 0: extract keyword hint early so classification can use it
   // (classifyError only uses cleanError; codeContext not needed for this step)
   std::string contextKeyword = extractContextKeyword(cleanError);
 
-  // ── Step 1: classify first (deterministic, no context window required) ─
+  // Step 1: classify first (deterministic, no context window required) ─
   // We classify before building the context so we can size the window to fit
   // the category rather than always using the generic ±10 default.
   ErrorCategory category = classifyError(cleanError, contextKeyword);
@@ -480,17 +517,18 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     return suggestion;
   }
 
-  // ── Step 2: SLM fallback classification (if deterministic rules failed) ─
+  // Step 2: SLM fallback classification (if deterministic rules failed) ─
   // Only invoke the model when the pattern-matcher returned GENERAL.
   // We pass a small preliminary context (±3) just for the classifier;
   // the real context for the suggestion prompt is built after this.
   if (!categoryWasDeterministic) {
-    std::cerr << "[SLM Classifier] Hardcoded rules yielded GENERAL. Consulting SLM...\n";
+    std::cerr << "[SLM Classifier] Hardcoded rules yielded GENERAL. Consulting "
+                 "SLM...\n";
     std::string classifierContext = getCodeContext(errorLine, 3);
     category = classifyErrorWithSLM(cleanError, classifierContext);
   }
 
-  // ── Step 3: dynamic context window ───────────────────────────────────
+  // Step 3: dynamic context window
   // Now that we know the category, size the context window appropriately.
   int contextSize = contextSizeForCategory(category);
   std::cerr << "[SLM] Context window: ±" << contextSize
@@ -498,7 +536,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
 
   std::string codeContext;
 
-  // ── Smart context: pin relevant definitions outside the window ──────
+  // Smart context: pin relevant definitions outside the window
   //
   // 3b: For FUNCTION_SIGNATURE errors, locate the `fn <name>(` definition
   //     in SourceLines and pin it to the context.
@@ -512,14 +550,16 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   if (category == ErrorCategory::FUNCTION_SIGNATURE) {
     int sigLine = findFunctionSignatureLine(cleanError, errorLine);
     if (sigLine > 0) {
-      codeContext = getCodeContextWithPinnedLines(errorLine, contextSize, {sigLine});
+      codeContext =
+          getCodeContextWithPinnedLines(errorLine, contextSize, {sigLine});
     } else {
       codeContext = getCodeContext(errorLine, contextSize);
     }
   } else if (category == ErrorCategory::UNDECLARED_VAR) {
     int declLine = findVariableDeclarationLine(cleanError, errorLine);
     if (declLine > 0) {
-      codeContext = getCodeContextWithPinnedLines(errorLine, contextSize, {declLine});
+      codeContext =
+          getCodeContextWithPinnedLines(errorLine, contextSize, {declLine});
     } else {
       codeContext = getCodeContext(errorLine, contextSize);
     }
@@ -532,10 +572,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   // 3. Get the most specific documentation available
   std::string docPath = getCategoryDocPath(category, contextKeyword);
 
-  std::cerr << "[SLM] Error category: " << categoryName
-            << " | Keyword: " << (contextKeyword.empty() ? "(none)" : contextKeyword)
-            << " | Context: ±" << contextSize
-            << " | Doc: " << docPath << "\n";
+  std::cerr << "[SLM] Error category: " << categoryName << " | Keyword: "
+            << (contextKeyword.empty() ? "(none)" : contextKeyword)
+            << " | Context: ±" << contextSize << " | Doc: " << docPath << "\n";
 
   // 4. Load the targeted documentation for this error category
   std::string docContent = loadDocFile(docPath);
@@ -581,10 +620,12 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "   and leave code_patch empty.\n"
       "4. Set fix_mode to one of: MODIFY, NONE.\n"
       "   Use MODIFY when you have a concrete single-line patch.\n"
-      "   Use NONE when the issue requires multi-line restructuring or you are\n"
+      "   Use NONE when the issue requires multi-line restructuring or you "
+      "are\n"
       "   not confident enough to suggest a specific change.\n"
       "5. Respond ONLY in valid JSON without markdown code blocks.\n"
-      "6. Keep explanation, suggested_comment, and warning to 1-2 sentences max.\n"
+      "6. Keep explanation, suggested_comment, and warning to 1-2 sentences "
+      "max.\n"
       "<|im_end|>\n"
       "<|im_start|>user\n"
       "Error: " +
@@ -595,8 +636,11 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "\n"
       "Respond with ONLY this JSON object — fill every field yourself:\n"
       "{\"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
-      "\"suggested_comment\": <string>, \"code_patch\": <human-readable description of what changed>, "
-      "\"replacement_line\": <THE EXACT SINGLE LINE of valid Turf-Lang code that replaces the erroneous line — no explanation, no prose, just the raw code>, "
+      "\"suggested_comment\": <string>, \"code_patch\": <human-readable "
+      "description of what changed>, "
+      "\"replacement_line\": <THE EXACT SINGLE LINE of valid Turf-Lang code "
+      "that replaces the erroneous line — no explanation, no prose, just the "
+      "raw code>, "
       "\"warning\": <string>}\n"
       "<|im_end|>\n"
       "<|im_start|>assistant\n";
@@ -624,7 +668,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     suggestion.suggested_comment =
         extractJsonFieldString(jsonStr, "suggested_comment");
     suggestion.code_patch = extractJsonFieldString(jsonStr, "code_patch");
-    suggestion.replacement_line = extractJsonFieldString(jsonStr, "replacement_line");
+    suggestion.replacement_line =
+        extractJsonFieldString(jsonStr, "replacement_line");
     suggestion.warning = extractJsonFieldString(jsonStr, "warning");
 
     // Compute confidence deterministically from measurable output signals.
@@ -632,7 +677,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
     suggestion.confidence = computeConfidence(
         suggestion, category, categoryWasDeterministic, contextKeyword);
 
-    std::cerr << "Computed Confidence (deterministic): " << suggestion.confidence << "\n";
+    std::cerr << "Computed Confidence (deterministic): "
+              << suggestion.confidence << "\n";
     std::cerr << "  category_deterministic=" << categoryWasDeterministic
               << " fix_mode=" << suggestion.fix_mode
               << " patch_empty=" << suggestion.code_patch.empty() << "\n";
@@ -647,9 +693,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
   return suggestion;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // Sandbox-Based Suggestion Validation
-// ────────────────────────────────────────────────────────────────────────────
 
 bool verifySuggestion(const AISuggestion &suggestion,
                       const std::string &originalSource, int errorLine) {
@@ -660,45 +704,45 @@ bool verifySuggestion(const AISuggestion &suggestion,
               << Colors::RESET << "\n";
     return false;
   }
-  
+
   // Use replacement_line (exact Turf-Lang code) for sandbox validation.
-  // code_patch is a human-readable description and must NOT be fed to the parser.
+  // code_patch is a human-readable description and must NOT be fed to the
+  // parser.
   const std::string &fixLine = suggestion.replacement_line.empty()
                                    ? suggestion.code_patch
                                    : suggestion.replacement_line;
   return ApplyAndValidateFix(*sandbox, errorLine, fixLine, suggestion);
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // High-Level Auto-Fix API
-// ────────────────────────────────────────────────────────────────────────────
 
-// Wrapper that gets SLM suggestion, validates it in a sandbox, and applies it if valid.
-// Returns an enhanced AISuggestion with validation results.
+// Wrapper that gets SLM suggestion, validates it in a sandbox, and applies it
+// if valid. Returns an enhanced AISuggestion with validation results.
 AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
                                         int errorLine) {
   // First, get the SLM suggestion
   AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine);
-  
+
   if (!suggestion.valid) {
     return suggestion;
   }
-  
+
   // Skip validation for NONE fixes (no patch to apply)
   if (suggestion.fix_mode == "NONE") {
-    std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] Fix mode is NONE, skipping validation"
+    std::cerr << Colors::BRIGHT_BLACK
+              << "[Sandbox] Fix mode is NONE, skipping validation"
               << Colors::RESET << "\n";
     return suggestion;
   }
-  
+
   // Verify the suggestion in a sandbox
   std::string originalSourceConcat;
   for (const auto &line : SourceLines) {
     originalSourceConcat += line + "\n";
   }
-  
+
   bool isValid = verifySuggestion(suggestion, originalSourceConcat, errorLine);
-  
+
   if (isValid) {
     suggestion.valid = true;
     std::cerr << Colors::BRIGHT_GREEN << "[Sandbox] ✓ Suggestion validated"
@@ -706,10 +750,11 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
   } else {
     suggestion.valid = false;
     suggestion.fix_mode = "NONE"; // Downgrade to no fix on validation failure
-    std::cerr << Colors::BRIGHT_YELLOW << "[Sandbox] ✗ Suggestion validation failed"
-              << Colors::RESET << "\n";
+    std::cerr << Colors::BRIGHT_YELLOW
+              << "[Sandbox] ✗ Suggestion validation failed" << Colors::RESET
+              << "\n";
   }
-  
+
   return suggestion;
 }
 

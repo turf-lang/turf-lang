@@ -1,5 +1,0 @@
-list<int> arr;
-arr.push(10);
-arr.push(20);
-printline(arr.length());
-printline(arr[0]);

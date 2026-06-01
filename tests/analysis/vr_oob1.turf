@@ -1,5 +1,9 @@
 fn int main() {
   int[3] a = [1, 2, 3]
   int x = a[5]
+<<<<<<< HEAD
+=======
+  
+>>>>>>> cd238bc8a595fbbdf71b8e4d89e3e35a6855434d
   return 0
 }

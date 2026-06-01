@@ -1,0 +1,9 @@
+// WILL BE MADE POSSIBLE SOON
+
+import user_defined_module
+
+fn int main() {
+    user_defined_module.greet()
+
+    return 0
+}

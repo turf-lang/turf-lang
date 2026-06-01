@@ -1,4 +1,9 @@
 fn int main() {
+<<<<<<< HEAD
   int x;
+=======
+  int x = 0;
+
+>>>>>>> cd238bc8a595fbbdf71b8e4d89e3e35a6855434d
   return x;
 }

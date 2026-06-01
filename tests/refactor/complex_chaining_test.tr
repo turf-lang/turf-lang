@@ -3,19 +3,21 @@ fn int get_index() {
 }
 
 fn void dummy_func(int val) {
-    printline(val)
+    io.printline(val)
 }
 
-int[5] arr = [10, 20, 30, 40, 50]
+fn int main() {
+    int[5] arr = [10, 20, 30, 40, 50]
 
-// 1. Deep grouping (testing that postfix operators can attach to arbitrarily nested bases)
-printline(((((arr))))[1])
+    // 1. Deep grouping (testing that postfix operators can attach to arbitrarily nested bases)
+    io.printline(((((arr))))[1])
 
     // 2. Using a function call as an index (testing expression evaluation in postfix arguments)
-    printline(arr[get_index()])
+    io.printline(arr[get_index()])
 
     // 3. Function call using a grouped base (testing postfix function calls)
     // We use an 'if' block to prevent the parser from attaching the '(' to the previous expression
+    // INTERESTING!
     if true {
         (dummy_func)(100)
     } else {
@@ -33,6 +35,9 @@ printline(((((arr))))[1])
         i = i + 1
     }
 
-    printline(arr[0])
-    printline(arr[1])
-printline(arr[2])
+    io.printline(arr[0])
+    io.printline(arr[1])
+    io.printline(arr[2])
+
+    return 0
+}

@@ -1,5 +1,3 @@
-// std/math.tr
-
 @intrinsic("power")
 fn int power(int base, int exp)
 

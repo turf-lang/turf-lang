@@ -2,5 +2,9 @@ fn int main() {
   int[3] a = [1, 2, 3]
   int idx = 5
   int y = a[idx]
+<<<<<<< HEAD
+=======
+  
+>>>>>>> cd238bc8a595fbbdf71b8e4d89e3e35a6855434d
   return 0
 }

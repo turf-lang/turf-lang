@@ -1,6 +1,8 @@
 // Short name typo should NOT produce suggestions (length <= 2)
+
 fn int main() {
     int a = 1
-    print(b)
+    io.printline(b)
+    
     return 0
 }

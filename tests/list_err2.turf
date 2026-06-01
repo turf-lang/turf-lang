@@ -1,2 +1,0 @@
-list<int> nums
-nums.push(3.14)

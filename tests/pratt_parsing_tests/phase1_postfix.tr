@@ -1,9 +1,13 @@
 // Phase 1: Postfix Parsing on any evaluated expression
+// Will shortly implement all functions to acheive this.
+
 fn list<int> get_data() {
     list<int> temp
     temp.push(99)
     return temp
 }
 
-int val = get_data()[0]
-printline(val)
+fn int main() {
+    int val = get_data()[0]
+    printline(val)
+}

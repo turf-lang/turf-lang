@@ -85,6 +85,7 @@ void DefiniteAssignmentPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &Ini
   std::unordered_map<const TurfBasicBlock *, size_t> index;
   for (size_t i = 0; i < N; ++i) index[Blocks[i].get()] = i;
 
+<<<<<<< HEAD
   std::vector<AssignSet> IN(N), OUT(N);
 
   // Initialize OUT[entry] with parameters
@@ -97,16 +98,82 @@ void DefiniteAssignmentPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &Ini
   // Worklist algorithm
   std::queue<size_t> work;
   for (size_t i = 0; i < N; ++i) work.push(i);
+=======
+  // Collect all symbols visible in the current function scope.
+  // Used to initialise non-entry IN sets to the "universal" set so the
+  // intersection is correct from the very first worklist iteration.
+  AssignSet AllSymbols;
+  if (GlobalSymbolTable) {
+    for (const auto &Name : GlobalSymbolTable->GetAllVisibleNames()) {
+      Symbol *S = GlobalSymbolTable->LookupSymbol(Name);
+      if (S) AllSymbols.insert(S->ID);
+    }
+  }
+
+  // Also include the parameters themselves (they may not be in the visible
+  // names if the table has been modified).
+  for (auto id : InitialAssigned) AllSymbols.insert(id);
+
+  std::vector<AssignSet> IN(N), OUT(N);
+
+  // Entry block: IN = params, OUT will be computed by transfer.
+  TurfBasicBlock *Entry = Cfg.getEntryBlock();
+  size_t entryIdx = 0;
+  if (Entry) {
+    entryIdx = index[Entry];
+    for (auto id : InitialAssigned) {
+      IN[entryIdx].insert(id);
+    }
+  }
+
+  // All other blocks: initialise IN to the universal set so that intersection
+  // starts from "everything" and gets tightened by the dataflow.
+  for (size_t i = 0; i < N; ++i) {
+    if (i != entryIdx) IN[i] = AllSymbols;
+  }
+
+  // ── Phase 1: Compute fixed-point dataflow (NO error reporting) ──────────
+  // Transfer function: OUT[b] = IN[b] ∪ Defs(b)
+  // Meet function:     IN[b]  = ∩ OUT[p] for all predecessors p
+  auto computeOUT = [&](size_t b) -> AssignSet {
+    AssignSet cur = IN[b];
+    for (ExprAST *Stmt : Blocks[b]->getStatements()) {
+      collectReadsAndDefs(Stmt, cur,
+        [](SourceLocation, const std::string &) { /* no-op during propagation */ },
+        [&](SourceLocation, const std::string &Name) {
+          if (!GlobalSymbolTable) return;
+          Symbol *S = GlobalSymbolTable->LookupSymbol(Name);
+          if (!S) return;
+          cur.insert(S->ID);
+        });
+    }
+    return cur;
+  };
+
+  std::queue<size_t> work;
+  for (size_t i = 0; i < N; ++i) {
+    OUT[i] = computeOUT(i);
+    work.push(i);
+  }
+>>>>>>> cd238bc8a595fbbdf71b8e4d89e3e35a6855434d
 
   while (!work.empty()) {
     size_t b = work.front(); work.pop();
     TurfBasicBlock *BB = Blocks[b].get();
 
+<<<<<<< HEAD
     // IN = intersection of predecessor OUTs (for entry, use OUT[entry])
     AssignSet newIN;
     const auto &Preds = BB->getPredecessors();
     if (Preds.empty()) {
       // entry block: IN = OUT[entry] (already contains params)
+=======
+    // Compute new IN via meet (intersection) of predecessor OUTs
+    AssignSet newIN;
+    const auto &Preds = BB->getPredecessors();
+    if (Preds.empty()) {
+      // Entry block: IN is always the parameter set (never shrinks)
+>>>>>>> cd238bc8a595fbbdf71b8e4d89e3e35a6855434d
       newIN = IN[b];
     } else {
       bool first = true;
@@ -114,12 +181,16 @@ void DefiniteAssignmentPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &Ini
         size_t pi = index[P];
         if (first) { newIN = OUT[pi]; first = false; }
         else {
+<<<<<<< HEAD
           // intersection
+=======
+>>>>>>> cd238bc8a595fbbdf71b8e4d89e3e35a6855434d
           AssignSet tmp;
           for (auto s : newIN) if (OUT[pi].count(s)) tmp.insert(s);
           newIN.swap(tmp);
         }
       }
+<<<<<<< HEAD
     }
 
     if (newIN != IN[b]) {
@@ -158,3 +229,45 @@ void DefiniteAssignmentPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &Ini
     }
   }
 }
+=======
+      // Ensure parameters are always in IN (they are always defined on entry)
+      for (auto id : InitialAssigned) newIN.insert(id);
+    }
+
+    if (newIN != IN[b]) {
+      IN[b] = newIN;
+      AssignSet newOUT = computeOUT(b);
+      if (newOUT != OUT[b]) {
+        OUT[b] = std::move(newOUT);
+        for (auto *S : BB->getSuccessors()) {
+          work.push(index[S]);
+        }
+      }
+    }
+  }
+
+  // ── Phase 2: Report errors using the fixed-point IN sets ─────────────────
+  for (size_t b = 0; b < N; ++b) {
+    AssignSet cur = IN[b];
+    for (ExprAST *Stmt : Blocks[b]->getStatements()) {
+      collectReadsAndDefs(Stmt, cur,
+        [&](SourceLocation Loc, const std::string &Name) {
+          if (!GlobalSymbolTable) return;
+          Symbol *S = GlobalSymbolTable->LookupSymbol(Name);
+          if (!S) return;
+          if (!cur.count(S->ID)) {
+            DefiniteAssignmentError err(Loc, Name);
+            err.raise();
+          }
+        },
+        [&](SourceLocation, const std::string &Name) {
+          if (!GlobalSymbolTable) return;
+          Symbol *S = GlobalSymbolTable->LookupSymbol(Name);
+          if (!S) return;
+          cur.insert(S->ID);
+        });
+    }
+  }
+}
+
+>>>>>>> cd238bc8a595fbbdf71b8e4d89e3e35a6855434d

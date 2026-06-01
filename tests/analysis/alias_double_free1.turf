@@ -2,5 +2,9 @@ fn int main() {
 	int* p = malloc(16)
 	free(p)
 	free(p)
+<<<<<<< HEAD
+=======
+
+>>>>>>> cd238bc8a595fbbdf71b8e4d89e3e35a6855434d
 	return 0
 }

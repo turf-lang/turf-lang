@@ -1,44 +1,73 @@
+/**
+ * @file Types.cpp
+ * @brief TurfLang frontend type system — Issue #3 implementation.
+ *
+ * @details
+ * Implements the factory singletons and helper functions declared in Types.h.
+ *
+ * Key changes vs. the previous version
+ * ─────────────────────────────────────
+ *  - TurfInt(), TurfDouble(), TurfBool(), TurfString(), TurfVoid() now return
+ *    instances of the dedicated subclasses (IntType, DoubleType, …) instead of
+ *    generic NamedType instances.  This enables dynamic_cast and the typed
+ *    predicates (isInt(), isDouble(), …) to work correctly throughout the
+ *    compiler without any string comparisons.
+ *
+ * @author a2ys
+ * @author AaravTandon24
+ * @author Karan
+ *
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ * @version 2.0.0
+ * @date 2026-05-29
+ */
+
 #include "Types.h"
 
-// ── Singleton primitive types ──────────────────────────────────────────────
-// Each returns a stable shared_ptr to the same object for the lifetime of
-// the process. Using local static is thread-safe in C++11 and later.
+// ─── Primitive singleton accessors ────────────────────────────────────────────
+//
+// Each function returns a stable shared_ptr whose lifetime is the process.
+// Local-static initialisation is thread-safe in C++11+.
+//
+// IMPORTANT: The objects are now instances of the dedicated subclasses so that
+//   dynamic_cast<const IntType*>(TurfInt().get()) != nullptr   // true
+//   TurfInt()->isInt()                                         // true
 
 TurfTypePtr TurfInt() {
-  static TurfTypePtr T = std::make_shared<NamedType>("int");
+  static TurfTypePtr T = std::make_shared<IntType>();
   return T;
 }
+
 TurfTypePtr TurfDouble() {
-  static TurfTypePtr T = std::make_shared<NamedType>("double");
+  static TurfTypePtr T = std::make_shared<DoubleType>();
   return T;
 }
+
 TurfTypePtr TurfBool() {
-  static TurfTypePtr T = std::make_shared<NamedType>("bool");
+  static TurfTypePtr T = std::make_shared<BoolType>();
   return T;
 }
+
 TurfTypePtr TurfString() {
-  static TurfTypePtr T = std::make_shared<NamedType>("string");
+  static TurfTypePtr T = std::make_shared<StringType>();
   return T;
 }
+
 TurfTypePtr TurfVoid() {
-  static TurfTypePtr T = std::make_shared<NamedType>("void");
+  static TurfTypePtr T = std::make_shared<VoidType>();
   return T;
 }
 
-// ── Helper predicates ──────────────────────────────────────────────────────
-
-bool isListType(const TurfType *T) {
-  auto *G = dynamic_cast<const GenericType *>(T);
-  return G && G->getBaseName() == "list";
+TurfTypePtr TurfNull() {
+  static TurfTypePtr T = std::make_shared<TurfNullType>();
+  return T;
 }
+
+// ─── Array helpers ────────────────────────────────────────────────────────────
 
 bool isArrayType(const TurfType *T) {
   return dynamic_cast<const ArrayType *>(T) != nullptr;
-}
-
-const TurfType *getListElementType(const TurfType *T) {
-  auto *G = dynamic_cast<const GenericType *>(T);
-  return G ? G->getTypeArg(0) : nullptr;
 }
 
 const TurfType *getArrayElementType(const TurfType *T) {
@@ -46,13 +75,15 @@ const TurfType *getArrayElementType(const TurfType *T) {
   return A ? A->getElementType() : nullptr;
 }
 
-// ── Factory helpers ────────────────────────────────────────────────────────
-
-TurfTypePtr makeListType(TurfTypePtr ElemType) {
-  std::vector<TurfTypePtr> Args = {std::move(ElemType)};
-  return std::make_shared<GenericType>("list", std::move(Args));
-}
-
+/**
+ * @brief Constructs a frontend representation of an ArrayType.
+ *
+ * @param ElemType The type of the elements contained in the array.
+ * @param Size     The fixed size of the array (-1 if unspecified/dynamic).
+ * @return TurfTypePtr A shared pointer to the newly created ArrayType.
+ */
 TurfTypePtr makeArrayType(TurfTypePtr ElemType, int Size) {
   return std::make_shared<ArrayType>(std::move(ElemType), Size);
 }
+
+
