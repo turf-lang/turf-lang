@@ -156,8 +156,23 @@ public:
 
 private:
   ResolverSymbolTable SymTable_;
+  int FunctionNestingDepth_ = 0;
+  std::vector<std::string> ModuleStack_;
 
   // ── Internal helpers ───────────────────────────────────────────────────────
+
+  std::string currentModuleName() const {
+    return ModuleStack_.empty() ? std::string() : ModuleStack_.back();
+  }
+
+  ResolverFunctionSymbol buildFunctionSymbol(const FuncDefExprAST &Node,
+                                             const std::string &ModuleName) const;
+
+  void predeclareFunctions(const ExprAST *Node);
+  void predeclareFunctions(const std::vector<std::unique_ptr<ExprAST>> &Nodes);
+  void predeclareModuleBody(const ExprAST *Body, const std::string &ModuleName);
+  void registerFunctionSignature(const FuncDefExprAST &Node,
+                                 const std::string &ModuleName);
 
   /// Dispatch to @p Node if non-null (no-op otherwise).
   void visitChild(ExprAST *Node) {
