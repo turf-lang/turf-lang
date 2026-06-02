@@ -551,6 +551,7 @@ public:
         IntrinsicName(std::move(IntrinsicName)), TypeParams(std::move(TypeParams)) {}
 
   const std::string &getName() const { return Name; }
+  const SourceLocation &getLoc() const { return Loc; }
   const TurfType *getReturnType() const { return ReturnType.get(); }
   TurfTypePtr getReturnTypePtr() const { return ReturnType; }
   ExprAST *getBodyMut() const { return Body.get(); }
@@ -560,11 +561,20 @@ public:
 
   const std::string &getIntrinsicName() const { return IntrinsicName; }
 
+  /// Populated by the Resolver after registering the function symbol.
+  /// clone() returns a fresh node, so this is nullptr in cloned trees.
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedDef;
+  const ResolverFunctionSymbol *getResolvedDef() const {
+    return ResolvedDef.get();
+  }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncDef(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncDefExprAST>(
         Loc, Name, ReturnType, Params, CloneExprAST(Body.get()), IntrinsicName, TypeParams);
+    // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
+    // until re-resolved. The default-constructed field is nullptr.
   }
 };
 
@@ -582,11 +592,21 @@ public:
   const SourceLocation &getLoc() const { return Loc; }
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
 
+  /// All overloads matching the call name.  TypeChecker narrows this to one.
+  /// clone() returns a fresh node, so this is empty in cloned trees.
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedCandidates;
+  const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &
+  getResolvedCandidates() const {
+    return ResolvedCandidates;
+  }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
                                              CloneExprList(Args));
+    // Note: ResolvedCandidates is intentionally NOT copied — cloned ASTs are
+    // stale until re-resolved.
   }
 };
 

@@ -25,6 +25,8 @@
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
 #include "Types.h"           // RankedSuggestions
 
+#include <memory>
+
 // ─── Public entry points ──────────────────────────────────────────────────────
 
 void Resolver::resolve(ExprAST *Node) {
@@ -34,8 +36,74 @@ void Resolver::resolve(ExprAST *Node) {
 
 void Resolver::resolveAll(
     const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
+  predeclareFunctions(Nodes);
   for (const auto &Node : Nodes)
     resolve(Node.get());
+}
+
+ResolverFunctionSymbol
+Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
+                              const std::string &ModuleName) const {
+  ResolverFunctionSymbol Sym;
+  Sym.BaseName = Node.getName();
+  Sym.SourceModule = ModuleName;
+  Sym.Params.reserve(Node.getParams().size());
+  for (const auto &Param : Node.getParams()) {
+    Sym.Params.push_back({Param.Name, Param.Type});
+  }
+  Sym.ReturnType = Node.getReturnTypePtr();
+  ResolverSourceLocation DeclLoc;
+  DeclLoc.Line = Node.getLoc().Line;
+  DeclLoc.Col = Node.getLoc().Col;
+  Sym.DeclLoc = DeclLoc;
+  Sym.IsIntrinsic = !Node.getIntrinsicName().empty();
+  return Sym;
+}
+
+void Resolver::registerFunctionSignature(const FuncDefExprAST &Node,
+                                         const std::string &ModuleName) {
+  auto Sym = buildFunctionSymbol(Node, ModuleName);
+  if (ModuleName.empty()) {
+    SymTable_.registerCurrentFileFunction(Sym);
+  } else {
+    SymTable_.registerModuleFunction(ModuleName, Sym);
+  }
+}
+
+void Resolver::predeclareFunctions(
+    const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
+  for (const auto &Node : Nodes) {
+    predeclareFunctions(Node.get());
+  }
+}
+
+void Resolver::predeclareModuleBody(const ExprAST *Body,
+                                    const std::string &ModuleName) {
+  const auto *Block = dynamic_cast<const BlockExprAST *>(Body);
+  if (!Block)
+    return;
+
+  for (const auto &Expr : Block->getExpressions()) {
+    if (const auto *Func = dynamic_cast<const FuncDefExprAST *>(Expr.get())) {
+      registerFunctionSignature(*Func, ModuleName);
+    } else if (const auto *Import = dynamic_cast<const ModuleImportExprAST *>(Expr.get())) {
+      predeclareModuleBody(Import->getBody(), Import->getModuleName());
+    }
+  }
+}
+
+void Resolver::predeclareFunctions(const ExprAST *Node) {
+  if (!Node)
+    return;
+
+  if (auto *Func = dynamic_cast<const FuncDefExprAST *>(Node)) {
+    registerFunctionSignature(*Func, currentModuleName());
+    return;
+  }
+
+  if (auto *Import = dynamic_cast<const ModuleImportExprAST *>(Node)) {
+    predeclareModuleBody(Import->getBody(), Import->getModuleName());
+  }
 }
 
 // ─── Core Issue #4 visitors ───────────────────────────────────────────────────
@@ -206,6 +274,13 @@ void Resolver::visitTry(TryExprAST &Node) {
 }
 
 void Resolver::visitFuncDef(FuncDefExprAST &Node) {
+  if (FunctionNestingDepth_ > 0) {
+    NestedFunctionError(Node.getLoc(), Node.getName()).raise();
+    return;
+  }
+
+  ++FunctionNestingDepth_;
+
   // Each function body gets its own scope; parameters are visible inside it.
   SymTable_.enterScope();
 
@@ -219,22 +294,68 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
     }
   }
 
+  auto Sym = std::make_shared<ResolverFunctionSymbol>(
+      buildFunctionSymbol(Node, currentModuleName()));
+  Node.ResolvedDef = Sym;
+
+  registerFunctionSignature(Node, currentModuleName());
+
   visitChild(Node.getBody());
 
   SymTable_.exitScope();
+  --FunctionNestingDepth_;
 }
 
 void Resolver::visitFuncCall(FuncCallExprAST &Node) {
-  // The callee of a direct function call is a VariableExprAST whose name is
-  // the function name — it lives in the function namespace, NOT the variable
-  // scope.  Resolving function names against the variable table would produce
-  // false "Unknown Variable" errors for every call like add(x, y).
-  // Function-name resolution is deferred to Issue #6 (module/function resolver).
-  //
-  // We do still recurse into all argument expressions, because those ARE
-  // variable references that need to be in scope.
+  // Resolve argument expressions first so any nested variable lookups happen
+  // before we inspect the callee.
   for (const auto &Arg : Node.getArgs())
     visitChild(Arg.get());
+
+  Node.ResolvedCandidates.clear();
+
+  const auto *VarCallee = dynamic_cast<const VariableExprAST *>(Node.getCallee());
+  if (!VarCallee) {
+    visitChild(Node.getCallee());
+    return;
+  }
+
+  const std::string &CalleeName = VarCallee->getName();
+
+  auto CurrentFileMatches = SymTable_.lookupCurrentFileFunctions(CalleeName);
+  auto ModuleMatches = SymTable_.findInModules(CalleeName);
+
+  if (CurrentFileMatches.empty() && ModuleMatches.empty()) {
+    RankedSuggestions Suggestions;
+
+    auto CurrentNames = SuggestionIndex::suggestVisible(
+        CalleeName, SymTable_.getAllCurrentFileFunctionNames());
+    for (const auto &SuggestedName : CurrentNames) {
+      for (const auto *Sym : SymTable_.lookupCurrentFileFunctions(SuggestedName)) {
+        Suggestions.Local.push_back(Sym->signature());
+      }
+    }
+
+    auto ModuleNames = SuggestionIndex::suggestVisible(
+        CalleeName, SymTable_.getAllModuleFunctionNames());
+    for (const auto &SuggestedName : ModuleNames) {
+      for (const auto &Match : SymTable_.findInModules(SuggestedName)) {
+        Suggestions.Module[Match.ModuleName].push_back(Match.Symbol->signature());
+      }
+    }
+
+    UnknownFunctionError(Node.getLoc(), CalleeName, Suggestions).raise();
+    return;
+  }
+
+  for (const auto *Sym : CurrentFileMatches) {
+    Node.ResolvedCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*Sym));
+  }
+  for (const auto &Match : ModuleMatches) {
+    Node.ResolvedCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*Match.Symbol));
+  }
 }
 
 void Resolver::visitMethodCall(MethodCallExprAST &Node) {
@@ -291,6 +412,7 @@ void Resolver::visitArrayAssign(ArrayAssignExprAST &Node) {
 }
 
 void Resolver::visitModuleImport(ModuleImportExprAST &Node) {
-  // Recurse into the body (the parsed module namespace contents).
+  ModuleStack_.push_back(Node.getModuleName());
   visitChild(Node.getBody());
+  ModuleStack_.pop_back();
 }

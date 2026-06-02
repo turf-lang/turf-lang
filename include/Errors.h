@@ -241,6 +241,36 @@ public:
 };
 
 // Arithmetic Error : Math issues
+
+class UnknownFunctionError : public TurfError {
+public:
+  UnknownFunctionError(SourceLocation Loc, const std::string &Name,
+                       const RankedSuggestions &Suggestions)
+      : TurfError(Loc, Colors::BRIGHT_RED + "Error: Unknown function '" +
+                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
+                           Colors::RESET) {
+    std::string formatted = formatRankedSuggestions(Suggestions);
+    if (!formatted.empty()) {
+      Message += formatted;
+    } else {
+      Message += "\n  " + Colors::BRIGHT_GREEN +
+                 "Hint: Double-check the spelling or import the module that "
+                 "defines it." +
+                 Colors::RESET;
+    }
+  }
+};
+
+class NestedFunctionError : public TurfError {
+public:
+  NestedFunctionError(SourceLocation Loc, const std::string &Name)
+      : TurfError(Loc, Colors::BRIGHT_RED +
+                           "Nested function definitions are not allowed: '" +
+                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
+                           Colors::RESET + "\n  " + Colors::BRIGHT_GREEN +
+                           "Hint: Move the function to the top level of the "
+                           "file or module." + Colors::RESET) {}
+};
 class ArithmeticError : public TurfError {
 public:
   ArithmeticError(SourceLocation Loc, const std::string &Msg)
