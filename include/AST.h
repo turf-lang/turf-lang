@@ -146,6 +146,11 @@ public:
   std::shared_ptr<VariableSymbol> ResolvedSymbol;
   const VariableSymbol *getResolvedSymbol() const { return ResolvedSymbol.get(); }
 
+  /// Populated by the Resolver when this node is the base of a module-qualified
+  /// method call (e.g. `io` in `io.printline(...)`).  Empty for ordinary
+  /// variables.  NOT copied by clone() — default std::string is "". ✓
+  std::string ResolvedModuleName;
+
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<VariableExprAST>(Loc, Name);
     // Note: ResolvedSymbol is intentionally NOT copied — cloned ASTs are stale

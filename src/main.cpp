@@ -22,6 +22,7 @@
 #include "Parser.h"
 #include "CFG.h"
 #include "Resolver.h"
+#include "TypeChecker.h"
 #include "SLMEngine.h"
 #include "SymbolTable.h"
 #include "Types.h"
@@ -62,6 +63,8 @@ struct CompilerOptions {
   bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
   bool DumpResolverSymbols = false;   // --dump-resolver-symbols: print symbol table after resolution
   bool DumpResolved = false;          // --dump-resolved: run Resolver then print annotated AST (Issue #5)
+  bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
+  bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
 };
 
 static CompilerOptions parseArgs(int argc, char **argv) {
@@ -86,6 +89,16 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       // showing which nodes have a green ResolvedSymbol badge (Issue #5 demo).
       opts.RunResolver = true;
       opts.DumpResolved = true;
+    } else if (arg == "--typecheck") {
+      // Implies --resolve: TypeChecker requires a resolved symbol table.
+      opts.RunResolver = true;
+      opts.RunTypeChecker = true;
+    } else if (arg == "--dump-typechecked") {
+      // Implies --resolve + --typecheck: run both passes, then print the
+      // type-annotated AST showing each node's inferred TurfType (Issue #7).
+      opts.RunResolver = true;
+      opts.RunTypeChecker = true;
+      opts.DumpTypechecked = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg[0] == '-') {
@@ -98,7 +111,9 @@ static CompilerOptions parseArgs(int argc, char **argv) {
 
   if (opts.InputFile.empty()) {
     std::cerr
-        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] [--dump-ast] [--resolve] [--dump-resolver-symbols] [--dump-resolved]\n";
+        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] "
+           "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
+           "[--dump-resolved] [--typecheck] [--dump-typechecked]\n";
     std::exit(1);
   }
 
@@ -237,6 +252,11 @@ int main(int argc, char **argv) {
   // We perform a second full parse of the file, i.e. only processing
   // FuncDefExprAST nodes, which registers the LLVM prototype on first
   // codegen call (before the body exists).
+  // PreludeAST is kept alive so the Resolver can walk it later and register
+  // the `io` module (and any other prelude imports) in its module registry
+  // before it processes user code.
+  std::unique_ptr<ExprAST> PreludeAST;
+
   {
     std::ifstream PrePassFile(opts.InputFile);
     if (PrePassFile.is_open()) {
@@ -254,9 +274,10 @@ int main(int argc, char **argv) {
       llvm::sys::path::remove_filename(PreludePath);
       llvm::sys::path::append(PreludePath, "..", "lib", "std", "prelude.tr");
 
-      if (auto PreludeAST = ParseFile(PreludePath.str().str())) {
-        RecordParsedTopLevelAST(PreludeAST.get());
-        PreludeAST->codegen();
+      if (auto Parsed = ParseFile(PreludePath.str().str())) {
+        RecordParsedTopLevelAST(Parsed.get());
+        Parsed->codegen();
+        PreludeAST = std::move(Parsed); // keep alive for Resolver
       }
 
       while (CurTok != TOK_EOF) {
@@ -353,10 +374,13 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    // fn definitions were already fully codegenned in the pre-pass.
-    // Parse them here to keep the token stream in sync and to lint them,
-    // but do NOT push them into TopLevelASTs (that would re-codegen them).
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT) {
+    // fn definitions and import statements were already fully codegenned in
+    // the pre-pass.  Parse them here to keep the token stream in sync and to
+    // lint/resolve them, but do NOT push them into TopLevelASTs (that would
+    // re-codegen them).  TOK_IMPORT is included here because `import` nodes
+    // are top-level declarations handled by the pre-pass, exactly like `fn`.
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT ||
+        CurTok == TOK_IMPORT) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();
@@ -451,6 +475,12 @@ int main(int argc, char **argv) {
     // decide whether to continue.
     g_recoverActive = true;
     if (setjmp(g_recoverJmp) == 0) {
+      // Resolve the prelude first so that module imports (e.g. `import io`)
+      // are registered in the Resolver's module registry before any user
+      // code is walked.  Without this, `io.printline(...)` in user code
+      // triggers a spurious ReferenceError because hasModule("io") is false.
+      if (PreludeAST)
+        R.resolve(PreludeAST.get());
       R.resolveAll(FnASTs);
       R.resolveAll(TopLevelASTs);
     } else {
@@ -491,6 +521,82 @@ int main(int argc, char **argv) {
       std::cerr << "[Resolver] ✗  Name resolution failed (see error above).\n";
       // Flush diagnostics and abort — a resolver error means Codegen would
       // crash or produce wrong IR anyway.
+      DiagnosticEngine::flushAll();
+      return 1;
+    }
+  }
+
+  // --typecheck / --dump-typechecked: Run the TypeChecker pass in shadow mode
+  // (Issue #7).  This pass requires a resolved symbol table, so it only runs
+  // when the Resolver has already succeeded (opts.RunResolver is implicitly
+  // set by both --typecheck and --dump-typechecked).
+  //
+  // Shadow mode: Codegen still runs its own type logic. The TypeChecker merely
+  // validates and infers types — its output will replace Codegen type logic in
+  // Issues #9 and #10.
+  if (opts.RunTypeChecker) {
+    // Reconstruct a Resolver to obtain a fresh symbol table for the TypeChecker.
+    // (In future Issue #9+ the same Resolver instance will be threaded through.)
+    //
+    // For now we re-resolve in-place: the AST nodes already carry their
+    // ResolvedSymbol pointers from the Resolver block above, so the TypeChecker
+    // can read them directly.  We just need the ResolverSymbolTable reference.
+    //
+    // Design note: The TypeChecker is constructed with the Resolver's symbol
+    // table (RST) so that visitVariable() can look up declared types without
+    // re-running the entire Resolver pass.
+    std::cerr << "\n[TypeChecker] Running type-inference pass (Issue #7 — shadow mode)...\n";
+
+    // We re-use the last Resolver that was built in the --resolve block above.
+    // Because RunTypeChecker implies RunResolver, the Resolver block already ran
+    // and ResolverClean was asserted (we'd have returned 1 otherwise).
+    // Reconstruct a local Resolver to get a populated symbol table.
+    Resolver TCResolver;
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      if (PreludeAST)
+        TCResolver.resolve(PreludeAST.get());
+      TCResolver.resolveAll(FnASTs);
+      TCResolver.resolveAll(TopLevelASTs);
+    }
+    g_recoverActive = false;
+
+    TypeChecker TC(TCResolver.symbolTable());
+    bool TCClean = true;
+
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      if (PreludeAST)
+        TC.check(PreludeAST.get());
+      TC.checkAll(FnASTs);
+      TC.checkAll(TopLevelASTs);
+    } else {
+      TCClean = false;
+    }
+    g_recoverActive = false;
+
+    if (TCClean) {
+      std::cerr << "[TypeChecker] \u2713  Type inference completed without errors.\n";
+
+      if (opts.DumpTypechecked) {
+        ASTPrinter Printer;
+        Printer.setTypeChecker(&TC);
+        std::cout << "\n";
+        std::cout << "\033[1m=== Type-Checked AST Dump (Issue #7) ===\033[0m\n";
+        std::cout << "  \033[32m[resolved \u2713]\033[0m = symbol resolved\n";
+        std::cout << "  \033[36m[module: X \u2713]\033[0m = module qualifier\n";
+        std::cout << "  \033[35m[: type]\033[0m = TypeChecker inferred type\n";
+        std::cout << "\n";
+        std::cout << "\033[1m--- Functions ---\033[0m\n";
+        for (auto &AST : FnASTs)
+          Printer.print(AST.get());
+        std::cout << "\n\033[1m--- Top-Level Statements ---\033[0m\n";
+        for (auto &AST : TopLevelASTs)
+          Printer.print(AST.get());
+        std::cout << "\n\033[1m=== End Type-Checked AST Dump ===\033[0m\n\n";
+      }
+    } else {
+      std::cerr << "[TypeChecker] \u2717  Type checking failed (see error above).\n";
       DiagnosticEngine::flushAll();
       return 1;
     }

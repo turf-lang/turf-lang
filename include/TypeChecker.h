@@ -124,6 +124,25 @@ public:
     ErrorHandler_ = std::move(Handler);
   }
 
+  // ── Entry points ──────────────────────────────────────────────────────────
+
+  /**
+   * @brief Type-check a single top-level expression / statement.
+   *
+   * Accepts any ExprAST node and dispatches via the visitor pattern.
+   * Mirrors Resolver::resolve() so main.cpp can call both uniformly.
+   */
+  void check(ExprAST *Node);
+
+  /**
+   * @brief Type-check an entire program (list of top-level nodes).
+   *
+   * Convenience wrapper that iterates over a vector of unique_ptr<ExprAST>
+   * and calls check() on each one in order.
+   * Mirrors Resolver::resolveAll().
+   */
+  void checkAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes);
+
   // ── Type query ────────────────────────────────────────────────────────────
 
   /**

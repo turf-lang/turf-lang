@@ -58,6 +58,16 @@ TypeChecker::TypeChecker(const ResolverSymbolTable &RST)
 TypeChecker::TypeChecker(const ResolverSymbolTable &RST, ErrorHandler Handler)
     : RST_(RST), ErrorHandler_(std::move(Handler)) {}
 
+void TypeChecker::checkAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
+  for (const auto &Node : Nodes)
+    check(Node.get());
+}
+
+void TypeChecker::check(ExprAST *Node) {
+  if (Node)
+    Node->accept(*this);
+}
+
 // ─── Type query helpers ───────────────────────────────────────────────────────
 
 TurfTypePtr TypeChecker::getType(const ExprAST *Node) const {
@@ -202,22 +212,34 @@ void TypeChecker::visitNull(NullExprAST &Node) {
 void TypeChecker::visitVariable(VariableExprAST &Node) {
   const std::string &Name = Node.getName();
 
-  // 1. Check loop variable environment first (for-loop induction variables)
+  // 1. Check loop variable environment first (for-loop induction variables).
+  //    These are not tracked by the Resolver's scope stack but are registered
+  //    directly by visitFor() into LoopVarTypes_.
   auto LoopIt = LoopVarTypes_.find(Name);
   if (LoopIt != LoopVarTypes_.end()) {
     setType(&Node, LoopIt->second);
     return;
   }
 
-  // 2. Look up in the Resolver's symbol table
-  auto Sym = RST_.lookupVariable(Name);
-  if (Sym && Sym->Type) {
-    setType(&Node, Sym->Type);
+  // 2. Read the type from the ResolvedSymbol pointer that the Resolver already
+  //    attached to this node (Issue #5).  This is the primary lookup path:
+  //    the ResolverSymbolTable scope stack is empty after resolveAll() exits,
+  //    so RST_.lookupVariable() would always return nullptr at this point.
+  if (Node.ResolvedSymbol && Node.ResolvedSymbol->Type) {
+    setType(&Node, Node.ResolvedSymbol->Type);
     return;
   }
 
-  // 3. Unknown variable — Resolver should have caught this, but be safe
-  setType(&Node, nullptr); // unknown type; no new error (Resolver handles it)
+  // 3. Module qualifier (e.g. `io` in `io.printline(...)`).
+  //    Module names have no variable type — leave the type as null (unknown).
+  if (!Node.ResolvedModuleName.empty()) {
+    setType(&Node, nullptr);
+    return;
+  }
+
+  // 4. Unknown variable — Resolver should have caught this already.
+  //    Be permissive: insert nullptr so we don't emit a cascade error.
+  setType(&Node, nullptr);
 }
 
 void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {

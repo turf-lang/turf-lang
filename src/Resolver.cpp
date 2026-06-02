@@ -359,7 +359,25 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
 }
 
 void Resolver::visitMethodCall(MethodCallExprAST &Node) {
-  visitChild(Node.getBase());
+  // If the base is a plain identifier that names a known imported module
+  // (e.g. `io` in `io.printline(...)`), skip variable-resolution on it.
+  // Module names live in the module registry, not the variable scope stack,
+  // so calling visitVariable("io") would always produce a spurious
+  // ReferenceError.  The module import visitor already populated the Tier-2
+  // registry; nothing more needs to be done for the base in this case.
+  //
+  // We do, however, mark the base node with its resolved module name so
+  // that the ASTPrinter can show a proper badge (Issue #5 completeness).
+  auto *BaseVar = dynamic_cast<VariableExprAST *>(
+      const_cast<ExprAST *>(Node.getBase()));
+  if (BaseVar && SymTable_.hasModule(BaseVar->getName())) {
+    // Base is a module qualifier — annotate it and skip variable resolution.
+    BaseVar->ResolvedModuleName = BaseVar->getName();
+  } else {
+    // Base is either a complex expression or a plain variable — resolve normally.
+    visitChild(Node.getBase());
+  }
+  // Always resolve argument expressions regardless.
   for (const auto &Arg : Node.getArgs())
     visitChild(Arg.get());
 }

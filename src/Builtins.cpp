@@ -317,7 +317,7 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     if (!BIsDouble)
       B = Builder->CreateSIToFP(B, Type::getDoubleTy(*TheContext), "powcast2");
 
-    Function *PowFunc = llvm::Intrinsic::getDeclaration(
+    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
     Value *Result = Builder->CreateCall(PowFunc, {A, B}, "powtmp");
@@ -332,7 +332,7 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     // Arity is already verified above.
     Value *Val = Args[0];
     if (Val->getType()->isDoubleTy()) {
-        Function *FAbsFunc = llvm::Intrinsic::getDeclaration(
+        Function *FAbsFunc = llvm::Intrinsic::getOrInsertDeclaration(
           TheModule.get(), llvm::Intrinsic::fabs,
           {Type::getDoubleTy(*TheContext)});
       return Builder->CreateCall(FAbsFunc, {Val}, "abs");

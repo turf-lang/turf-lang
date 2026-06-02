@@ -164,12 +164,86 @@ Implement `class TypeChecker : public ASTVisitor`.
 
 ### [Issue #8] Implement Intrinsic Arity & Overload Resolution in `TypeChecker`
 **Assignee:** [C] | **Labels:** `type-system`, `builtins` | **Depends on:** #6, #7
-**Description:**
-Intrinsic functions (`math.abs`, `typeof`) currently crash LLVM if arguments are missing (Note 10, Note 13).
-- Implement arity checking in the TypeChecker. Check `args.size()` against the `FunctionSymbol`.
-- Resolve the correct function overload based on argument types.
-- **Note:** Make sure the validation logic *moves* to the TypeChecker rather than just getting deleted, as `Builtins.cpp` is still needed for the suggestion index.
-- **Acceptance Criteria:** `typeof()` with 0 or 2 arguments throws a clean compiler error instead of an LLVM assertion.
+
+**Background & Current State:**
+The arity crash for `typeof()` / `power(x)` etc. is **already patched in Codegen** as a Phase 1 bandaid:
+- `FuncCallExprAST::codegen()` has a hardcoded `EarlyArityMap` (Codegen.cpp ~line 1949).
+- `CodegenIntrinsic()` has a hardcoded `IntrinsicArity` table (Builtins.cpp lines 43–62).
+These are duplications of truth that belong in the TypeChecker. This issue *moves* that logic forward
+into the proper pass, so that Codegen can eventually trust the TypeChecker and delete its own guards
+(Issue #10).
+
+**What to implement:**
+
+**Step 1 — Add a narrowed-target field to `FuncCallExprAST` and `MethodCallExprAST` (AST.h):**
+```cpp
+// On FuncCallExprAST  — TypeChecker writes this after narrowing ResolvedCandidates to 1.
+std::shared_ptr<ResolverFunctionSymbol> ResolvedCallTarget; // null until TypeChecker runs
+
+// On MethodCallExprAST — same, for module-qualified calls like io.printline(...)
+std::shared_ptr<ResolverFunctionSymbol> ResolvedCallTarget;
+```
+Both must be nulled by `clone()` (same clone-semantics contract as `ResolvedSymbol`).
+
+**Step 2 — Fill in `TypeChecker::visitFuncCall` (TypeChecker.cpp):**
+Replace the current stub `setType(&Node, nullptr)` with:
+```
+1. Visit all argument expressions first (bottom-up), collect their inferred types.
+2. Special-case pure intrinsics that have no ResolvedCandidates entry:
+     - typeof(x)   → always TurfString(); arity must be 1.
+     - lengthof(x) → always TurfInt();    arity must be 1.
+     Use LookupBuiltin(calleeName)->Arity (from Builtins.h) for the arity check.
+     If arity wrong → reportError with a clear "expects N argument(s), got M" message.
+3. For user-defined / Resolver-registered calls, read Node.ResolvedCandidates:
+     a. Filter to candidates where Params.size() == Args.size().
+        If none → arity error ("'foo' called with N args; known overloads: ...").
+     b. Among arity-matching candidates, filter by type compatibility
+        (isTypeCompatible per parameter, same logic as Codegen's fallback loop).
+        If none → overload error ("no overload of 'foo' matches argument types (int, string)").
+        If exactly one → set Node.ResolvedCallTarget = that candidate.
+        If multiple → pick the most specific (fewest implicit casts); set ResolvedCallTarget.
+4. setType(&Node, Node.ResolvedCallTarget->ReturnType) if a target was found.
+   Otherwise setType(&Node, nullptr) and HadError_ = true.
+```
+
+**Step 3 — Fill in `TypeChecker::visitMethodCall` (TypeChecker.cpp):**
+Replace the current stub with:
+```
+1. Visit argument expressions bottom-up, collect types.
+2. Detect the module base: if Base is a VariableExprAST with non-empty ResolvedModuleName,
+   this is a module-qualified call (e.g. io.printline, math.abs).
+3. Look up candidates: RST_.findInModules(methodName, moduleName).
+   (ResolverSymbolTable already has this from Issue #6 Step 4.)
+4. Apply the same arity → type-match → narrowing logic as visitFuncCall Step 3.
+5. Set Node.ResolvedCallTarget and setType accordingly.
+```
+
+**Step 4 — Add type-badge support for the new fields in `ASTPrinter.h`:**
+- `visitFuncCall`: show `[→ returnType ✓]` in green when `ResolvedCallTarget` is set,
+  or keep the existing `[unresolved]` yellow badge when null.
+- `visitMethodCall`: same badge pattern.
+- This makes `--dump-typechecked` show inferred return types for all calls.
+
+**Data sources to use (do NOT re-duplicate):**
+- `LookupBuiltin(name)->Arity` from `Builtins.h` — canonical arity for bare intrinsics.
+- `GetBuiltinNames()` from `Builtins.h` — untouched; still used for suggestion index.
+- `RST_.findInModules(name, module)` — module-qualified candidate lookup.
+- `Node.ResolvedCandidates` — Resolver-populated overload set for user-defined functions.
+
+**What this unlocks in downstream issues:**
+- **Issue #9:** Codegen's `EarlyArityMap` (Codegen.cpp ~line 1949) can be deleted once TypeChecker
+  catches arity before Codegen runs.
+- **Issue #10:** `CodegenIntrinsic`'s `IntrinsicArity` guard (Builtins.cpp lines 122–136) and the
+  type checks inside `abs`/`power` in Codegen can be deleted. Codegen reads `ResolvedCallTarget`
+  directly and trusts its types blindly.
+
+**Acceptance Criteria:**
+- `typeof()` and `typeof(a, b)` produce a TypeChecker-level error (not Codegen SemanticError).
+  Verify with `--typecheck`: `[TypeChecker] ✗` appears *before* Codegen runs.
+- `power(1)` (wrong arity) produces a TypeChecker arity error.
+- `abs("hello")` produces a TypeChecker type-mismatch error (string is not numeric).
+- `--dump-typechecked` shows `[→ string ✓]` on `typeof(x)` calls and `[→ int ✓]` on `lengthof(x)`.
+- All existing programs compile without regression (shadow mode — Codegen still runs in parallel).
 
 ---
 
