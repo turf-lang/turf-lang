@@ -152,6 +152,7 @@ add_executable(test_type_checker
   tests/test_type_checker.cpp
   tests/ast_stubs.cpp
   tests/codegen_stubs.cpp
+  tests/builtins_stubs.cpp
   src/TypeChecker.cpp
   src/ResolverSymbolTable.cpp
   src/Types.cpp

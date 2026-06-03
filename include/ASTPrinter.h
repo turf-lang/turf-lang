@@ -262,6 +262,8 @@ public:
     printIndent(Depth_);
     std::cout << "FuncCall(args=" << N.getArgs().size() << ")";
     printFuncCandidatesBadge(N.ResolvedCandidates);
+    printCallTargetBadge(N.ResolvedCallTarget.get());
+    printTypeBadge(&N);
     std::cout << "\n";
     descend();
     print(const_cast<ExprAST *>(N.getCallee()), Depth_);
@@ -273,7 +275,10 @@ public:
   void visitMethodCall(MethodCallExprAST &N) override {
     printIndent(Depth_);
     std::cout << "MethodCall(." << N.getMethod()
-              << ", args=" << N.getArgs().size() << ")\n";
+              << ", args=" << N.getArgs().size() << ")";
+    printCallTargetBadge(N.ResolvedCallTarget.get());
+    printTypeBadge(&N);
+    std::cout << "\n";
     descend();
     print(const_cast<ExprAST *>(N.getBase()), Depth_);
     for (const auto &Arg : N.getArgs())
@@ -428,6 +433,19 @@ private:
       std::cout << "  \033[33m[unresolved]\033[0m";
     }
   }
+
+  /// Print a badge showing the TypeChecker-resolved call target (return type).
+  /// Green  [→ returnType ✓]  — TypeChecker narrowed to one overload.
+  /// (no badge)               — TypeChecker hasn't run yet or target is null.
+  static void printCallTargetBadge(const ResolverFunctionSymbol *Target) {
+    if (Target) {
+      const std::string RetName =
+          Target->ReturnType ? Target->ReturnType->getName() : "void";
+      std::cout << "  \033[32m[\u2192 " << RetName << " \u2713]\033[0m";
+    }
+    // No badge if null — the candidates badge already shows [unresolved].
+  }
+
   /// Print a magenta [: type] badge when the TypeChecker has an inferred type
   /// for this node.  No-op when TC_ is null (--dump-ast / --dump-resolved).
   void printTypeBadge(const ExprAST *Node) const {

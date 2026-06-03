@@ -259,6 +259,11 @@ private:
   /// string — string + string is valid; mixed is not).
   static bool areArithCompatible(const TurfType *A, const TurfType *B);
 
+  /// True if @p ArgTy is compatible with @p ParamTy for overload resolution.
+  /// Accepts: exact type name match, or numeric promotion (int↔double↔bool).
+  /// Unknown types (nullptr) are treated as compatible to avoid cascade errors.
+  static bool isTypeCompatible(const TurfType *ParamTy, const TurfType *ArgTy);
+
   // ── State ─────────────────────────────────────────────────────────────────
 
   /// Reference to the symbol table filled by the Resolver.

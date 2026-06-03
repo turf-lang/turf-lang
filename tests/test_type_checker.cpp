@@ -652,11 +652,185 @@ TEST(test_double_minus_int_is_double) {
   Bin->accept(TC);
   EXPECT_TRUE(TC.getType(Bin.get())->isDouble());
 }
+// ─── Issue #136 Tests: Intrinsic Arity & Overload Resolution ─────────────────
+// Helper: build a FuncCallExprAST with a VariableExprAST callee.
+// The Args list is a move-only vector, so we pass it by value.
+static std::unique_ptr<FuncCallExprAST>
+makeCall(const std::string &Name,
+         std::vector<std::unique_ptr<ExprAST>> Args,
+         int line = 1) {
+  auto Callee = std::make_unique<VariableExprAST>(loc(line, 1), Name);
+  return std::make_unique<FuncCallExprAST>(loc(line, 1), std::move(Callee),
+                                           std::move(Args));
+}
+
+// ─── Test 38: typeof() — 0 args → TypeChecker arity error ────────────────────
+
+TEST(test_typeof_zero_args_throws_arity_error) {
+  ResolverSymbolTable RST = makeEmptyRST();
+  TypeChecker TC(RST, ThrowingHandler);
+
+  // typeof() with 0 arguments
+  auto Call = makeCall("typeof", {});
+  EXPECT_THROWS(Call->accept(TC));
+}
+
+// ─── Test 39: typeof(a, b) — 2 args → TypeChecker arity error ────────────────
+
+TEST(test_typeof_two_args_throws_arity_error) {
+  ResolverSymbolTable RST = makeEmptyRST();
+  TypeChecker TC(RST, ThrowingHandler);
+
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  Args.push_back(std::make_unique<NumberExprAST>(static_cast<long long>(1)));
+  Args.push_back(std::make_unique<NumberExprAST>(static_cast<long long>(2)));
+  auto Call = makeCall("typeof", std::move(Args));
+  EXPECT_THROWS(Call->accept(TC));
+}
+
+// ─── Test 40: typeof(x) — 1 arg → inferred type is string ───────────────────
+
+TEST(test_typeof_one_arg_infers_string) {
+  ResolverSymbolTable RST = makeEmptyRST();
+  TypeChecker TC(RST, ThrowingHandler);
+
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  Args.push_back(std::make_unique<NumberExprAST>(static_cast<long long>(42)));
+  auto Call = makeCall("typeof", std::move(Args));
+  Call->accept(TC);
+  EXPECT_TRUE(TC.hasType(Call.get()));
+  EXPECT_TRUE(TC.getType(Call.get())->isString());
+}
+
+// ─── Test 41: lengthof(x) — 1 string arg → inferred type is int ──────────────
+
+TEST(test_lengthof_string_arg_infers_int) {
+  ResolverSymbolTable RST = makeEmptyRST();
+  TypeChecker TC(RST, ThrowingHandler);
+
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  Args.push_back(std::make_unique<StringExprAST>("hello"));
+  auto Call = makeCall("lengthof", std::move(Args));
+  Call->accept(TC);
+  EXPECT_TRUE(TC.hasType(Call.get()));
+  EXPECT_TRUE(TC.getType(Call.get())->isInt());
+}
+
+// ─── Test 42: power(1) — wrong arity → TypeChecker arity error ───────────────
+
+TEST(test_power_wrong_arity_throws) {
+  ResolverSymbolTable RST = makeEmptyRST();
+  TypeChecker TC(RST, ThrowingHandler);
+
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  Args.push_back(std::make_unique<NumberExprAST>(static_cast<long long>(1)));
+  auto Call = makeCall("power", std::move(Args));
+  EXPECT_THROWS(Call->accept(TC));
+}
+
+// ─── Test 43: abs("hello") — type mismatch → TypeChecker error ────────────────
+
+TEST(test_abs_string_arg_throws_type_error) {
+  ResolverSymbolTable RST = makeEmptyRST();
+  TypeChecker TC(RST, ThrowingHandler);
+
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  Args.push_back(std::make_unique<StringExprAST>("hello"));
+  auto Call = makeCall("abs", std::move(Args));
+  EXPECT_THROWS(Call->accept(TC));
+}
+
+// ─── Test 44: abs(42) — int arg → inferred type is int ───────────────────────
+
+TEST(test_abs_int_arg_infers_int) {
+  ResolverSymbolTable RST = makeEmptyRST();
+  TypeChecker TC(RST, ThrowingHandler);
+
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  Args.push_back(std::make_unique<NumberExprAST>(static_cast<long long>(-5)));
+  auto Call = makeCall("abs", std::move(Args));
+  Call->accept(TC);
+  EXPECT_TRUE(TC.hasType(Call.get()));
+  EXPECT_TRUE(TC.getType(Call.get())->isInt());
+}
+
+// ─── Test 45: User-defined overload — arity mismatch → TypeChecker error ──────
+//
+// Simulates calling `foo(1, 2)` when foo is only declared as `foo(int x)`.
+
+TEST(test_user_defined_arity_mismatch_throws) {
+  ResolverSymbolTable RST = makeEmptyRST();
+  TypeChecker TC(RST, ThrowingHandler);
+
+  // Build a FuncCallExprAST with 2 args but a candidate of arity 1.
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  Args.push_back(std::make_unique<NumberExprAST>(static_cast<long long>(1)));
+  Args.push_back(std::make_unique<NumberExprAST>(static_cast<long long>(2)));
+  auto Call = makeCall("foo", std::move(Args));
+
+  // Populate ResolvedCandidates with a single arity-1 symbol.
+  auto Sym = std::make_shared<ResolverFunctionSymbol>();
+  Sym->BaseName = "foo";
+  Sym->ReturnType = TurfInt();
+  Sym->Params.push_back({"x", TurfInt()});
+  Call->ResolvedCandidates.push_back(Sym);
+
+  EXPECT_THROWS(Call->accept(TC));
+}
+
+// ─── Test 46: User-defined overload — type mismatch → TypeChecker error ───────
+//
+// Simulates calling `bar("hello")` when bar is declared as `bar(int x)`.
+
+TEST(test_user_defined_type_mismatch_throws) {
+  ResolverSymbolTable RST = makeEmptyRST();
+  TypeChecker TC(RST, ThrowingHandler);
+
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  Args.push_back(std::make_unique<StringExprAST>("hello"));
+  auto Call = makeCall("bar", std::move(Args));
+
+  // Candidate: bar(int x) -> void
+  auto Sym = std::make_shared<ResolverFunctionSymbol>();
+  Sym->BaseName = "bar";
+  Sym->ReturnType = TurfVoid();
+  Sym->Params.push_back({"x", TurfInt()});
+  Call->ResolvedCandidates.push_back(Sym);
+
+  EXPECT_THROWS(Call->accept(TC));
+}
+
+// ─── Test 47: User-defined overload — exact match → ResolvedCallTarget set ────
+
+TEST(test_user_defined_exact_match_resolves_target) {
+  ResolverSymbolTable RST = makeEmptyRST();
+  TypeChecker TC(RST, ThrowingHandler);
+
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  Args.push_back(std::make_unique<NumberExprAST>(static_cast<long long>(5)));
+  auto Call = makeCall("compute", std::move(Args));
+  auto *CallPtr = Call.get();
+
+  // Candidate: compute(int x) -> double
+  auto Sym = std::make_shared<ResolverFunctionSymbol>();
+  Sym->BaseName = "compute";
+  Sym->ReturnType = TurfDouble();
+  Sym->Params.push_back({"x", TurfInt()});
+  Call->ResolvedCandidates.push_back(Sym);
+
+  Call->accept(TC);
+
+  // ResolvedCallTarget must be set
+  EXPECT_TRUE(CallPtr->ResolvedCallTarget != nullptr);
+  // Inferred return type must be double
+  EXPECT_TRUE(TC.hasType(CallPtr));
+  EXPECT_TRUE(TC.getType(CallPtr)->isDouble());
+}
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 int main() {
-  std::cout << "=== TurfLang TypeChecker Unit Tests (Issue #135) ===\n\n";
+  std::cout << "=== TurfLang TypeChecker Unit Tests (Issue #135 / #136) ===\n\n";
 
   std::cout << "[Literal type inference]\n";
   RUN(test_integer_literal_infers_int);
@@ -681,7 +855,7 @@ int main() {
   RUN(test_int_plus_string_throws_type_error);
   RUN(test_string_minus_string_throws_type_error);
 
-  std::cout << "\n[Comparison operators → bool]\n";
+  std::cout << "\n[Comparison operators -> bool]\n";
   RUN(test_int_lt_int_is_bool);
   RUN(test_double_gt_double_is_bool);
   RUN(test_eq_comparison_same_type_is_bool);
@@ -703,7 +877,7 @@ int main() {
   RUN(test_block_type_is_last_expression);
   RUN(test_empty_block_is_void);
 
-  std::cout << "\n[For loop variable inference — Issue #135 prerequisite]\n";
+  std::cout << "\n[For loop variable inference -- Issue #135 prerequisite]\n";
   RUN(test_for_loop_var_typed_as_int_integer_range);
   RUN(test_for_loop_var_typed_as_double_double_range);
 
@@ -724,6 +898,18 @@ int main() {
   std::cout << "\n[Function return type checking]\n";
   RUN(test_return_type_matches_func_return_type);
   RUN(test_return_type_mismatch_throws);
+
+  std::cout << "\n[Issue #136: Intrinsic arity & overload resolution]\n";
+  RUN(test_typeof_zero_args_throws_arity_error);
+  RUN(test_typeof_two_args_throws_arity_error);
+  RUN(test_typeof_one_arg_infers_string);
+  RUN(test_lengthof_string_arg_infers_int);
+  RUN(test_power_wrong_arity_throws);
+  RUN(test_abs_string_arg_throws_type_error);
+  RUN(test_abs_int_arg_infers_int);
+  RUN(test_user_defined_arity_mismatch_throws);
+  RUN(test_user_defined_type_mismatch_throws);
+  RUN(test_user_defined_exact_match_resolves_target);
 
   std::cout << "\n=== Results: " << TestsPassed << " passed, " << TestsFailed
             << " failed ===\n";
