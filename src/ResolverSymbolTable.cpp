@@ -9,6 +9,7 @@
 #include "ResolverSymbolTable.h"
 
 #include <algorithm>
+#include <ostream>
 #include <stdexcept>
 #include <unordered_set>
 

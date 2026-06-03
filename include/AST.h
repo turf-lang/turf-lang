@@ -605,13 +605,25 @@ public:
     return ResolvedCandidates;
   }
 
+  /// The single overload selected by TypeChecker::visitFuncCall() after
+  /// narrowing ResolvedCandidates to one match (arity + type compatible).
+  /// For bare intrinsics (typeof, lengthof, …) without a ResolvedCandidates
+  /// entry this field is left null — the TypeChecker still sets the node's
+  /// type directly.
+  /// clone() returns a fresh node, so this is null in cloned trees — same
+  /// clone-semantics contract as ResolvedSymbol. ✓
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedCallTarget;
+  const ResolverFunctionSymbol *getResolvedCallTarget() const {
+    return ResolvedCallTarget.get();
+  }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
                                              CloneExprList(Args));
-    // Note: ResolvedCandidates is intentionally NOT copied — cloned ASTs are
-    // stale until re-resolved.
+    // Note: ResolvedCandidates and ResolvedCallTarget are intentionally NOT
+    // copied — cloned ASTs are stale until re-resolved. ✓
   }
 };
 
@@ -815,11 +827,21 @@ public:
   const std::string &getMethod() const { return Method; }
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
 
+  /// The single overload selected by TypeChecker::visitMethodCall() after
+  /// narrowing module-qualified candidates (e.g. io.printline).
+  /// null until TypeChecker runs; also null in cloned trees (not copied). ✓
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedCallTarget;
+  const ResolverFunctionSymbol *getResolvedCallTarget() const {
+    return ResolvedCallTarget.get();
+  }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitMethodCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()),
                                                Method, CloneExprList(Args));
+    // Note: ResolvedCallTarget intentionally NOT copied — cloned ASTs are
+    // stale until re-resolved. ✓
   }
 };
 
