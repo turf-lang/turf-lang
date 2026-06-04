@@ -1943,29 +1943,8 @@ Value *FuncCallExprAST::codegen() {
   if (CalleeName == "typeof" || CalleeName == "lengthof" ||
       CalleeName == "malloc" || CalleeName == "realloc" ||
       CalleeName == "free") {
-    // Phase 1 fix: validate arity before codegen-ing arguments so we don't
-    // crash on Args[0] when the user writes typeof() or typeof(a, b).
-    // The canonical arity: typeof=1, lengthof=1, malloc=1, realloc=2, free=1.
-    static const std::unordered_map<std::string, int> EarlyArityMap = {
-        {"typeof",    1},
-        {"lengthof",  1},
-        {"malloc",    1},
-        {"realloc",   2},
-        {"free",      1},
-    };
-    auto ArityIt = EarlyArityMap.find(CalleeName);
-    if (ArityIt != EarlyArityMap.end()) {
-      int Expected = ArityIt->second;
-      if ((int)Args.size() != Expected) {
-        SemanticError(Loc,
-                      "'" + CalleeName + "' requires exactly " +
-                          std::to_string(Expected) + " argument" +
-                          (Expected == 1 ? "" : "s") + ", but got " +
-                          std::to_string(Args.size()))
-            .raise();
-        return nullptr;
-      }
-    }
+    // (Issue #10) Arity is guaranteed by the TypeChecker before Codegen runs.
+    // Arguments are codegen-d unconditionally and forwarded to CodegenIntrinsic.
 
     std::vector<Value *> ArgVals;
     for (auto &Arg : Args) {
@@ -2001,6 +1980,7 @@ Value *FuncCallExprAST::codegen() {
 
     return CodegenIntrinsic(CalleeName, ArgVals, Loc);
   }
+
 
   std::vector<Value *> EvaluatedArgs;
   std::vector<TurfTypePtr> ArgTypes;
