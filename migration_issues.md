@@ -257,7 +257,7 @@ Replace the current stub with:
 - Delete the `if (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')` fallback overload resolution loops in Codegen.
 - Codegen must exclusively use `Node.ResolvedCallTarget->mangledName()` for function/method calls and `Node.ResolvedSymbol->MangledName` for variables.
 - Delete the `LookupError` emission from Codegen; if a target wasn't found, the TypeChecker would have aborted the pipeline.
-- **Risk:** High chance of breaking existing code if the Resolver missed an edge case. Run full test suite.
+- **Risk:** High chance of breaking existing code if the Resolver missed an edge case. Run prog.tr.
 
 ### [Issue #10] Strip Semantic Error Throwing from Codegen
 **Assignee:** [C] | **Labels:** `codegen`, `cleanup` | **Depends on:** #7, #8

@@ -1,5 +1,10 @@
+fn int add(int a, int b) {
+    return a + b;
+}
+
 fn int main() {
-    io.printline("Hello");
+    io.printline(add(5 + 6));
+    io.printline(add(5 + 6, add(3, 4)))
 
     return 0;
 }
