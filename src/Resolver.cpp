@@ -20,12 +20,14 @@
 #include "Resolver.h"
 
 #include "AST.h"
+#include "Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
 #include "Errors.h"          // ReferenceError, DuplicateDeclarationError
 #include "ResolverSymbolTable.h"
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
 #include "Types.h"           // RankedSuggestions
 
 #include <memory>
+#include <unordered_set>
 
 // ─── Public entry points ──────────────────────────────────────────────────────
 
@@ -326,6 +328,32 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
   auto ModuleMatches = SymTable_.findInModules(CalleeName);
 
   if (CurrentFileMatches.empty() && ModuleMatches.empty()) {
+    // Before emitting an error, check whether the callee is a true language-level
+    // bare intrinsic — one that is callable WITHOUT a module qualifier AND has no
+    // module home in the standard library.
+    //
+    // As of now there are exactly two such intrinsics:
+    //   - typeof(x)   — compile-time type name, no module
+    //   - lengthof(x) — string length, no module
+    //
+    // Everything else comes from lib/std:
+    //   - print / printline / input  → io.tr   (call as io.printline(...))
+    //   - malloc / realloc / free    → mem.tr   (call as mem.malloc(...))
+    //   - abs / power / sqrt / …     → math.tr  (call as math.abs(...))
+    //
+    // Those stdlib functions are found by findInModules() above (when their
+    // module is imported), so they never reach this branch.  Do NOT add them
+    // here — they should produce a proper "did you mean io.printline?" error
+    // when called without a qualifier.
+    static const std::unordered_set<std::string> BareIntrinsics = {
+        "typeof",
+        "lengthof",
+    };
+    if (BareIntrinsics.count(CalleeName)) {
+      // True bare intrinsic — skip error, TypeChecker validates arity/types.
+      return;
+    }
+
     RankedSuggestions Suggestions;
 
     auto CurrentNames = SuggestionIndex::suggestVisible(

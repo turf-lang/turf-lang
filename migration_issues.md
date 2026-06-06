@@ -250,25 +250,31 @@ Replace the current stub with:
 ## 📌 Epic 4: Codegen Detox & Stabilization (Ripping out the monolith)
 *Making Codegen "dumb" again.*
 
-### [Issue #9] Strip Name Resolution from Codegen
-**Assignee:** [A] | **Labels:** `codegen`, `cleanup` | **Depends on:** #5, #6
+### [Issue #9] Strip Name Resolution & Arity Checks from Codegen
+**Assignee:** [A] | **Labels:** `codegen`, `cleanup` | **Depends on:** #5, #6, #8
 **Description:**
-- Delete all `if (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')` fallback loops.
-- Codegen must exclusively use the `ResolvedSymbol->MangledName` provided by the AST.
+- Delete the `EarlyArityMap` from `FuncCallExprAST::codegen()` (Codegen.cpp ~line 1949).
+- Delete the `if (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')` fallback overload resolution loops in Codegen.
+- Codegen must exclusively use `Node.ResolvedCallTarget->mangledName()` for function/method calls and `Node.ResolvedSymbol->MangledName` for variables.
+- Delete the `LookupError` emission from Codegen; if a target wasn't found, the TypeChecker would have aborted the pipeline.
 - **Risk:** High chance of breaking existing code if the Resolver missed an edge case. Run full test suite.
 
 ### [Issue #10] Strip Semantic Error Throwing from Codegen
 **Assignee:** [C] | **Labels:** `codegen`, `cleanup` | **Depends on:** #7, #8
 **Description:**
-- Delete all type checks inside LLVM generation (e.g., checking if `BIsDouble` or `BIsInt` inside `math.power` codegen).
-- Remove error-throwing logic from Codegen entirely. Codegen should use raw `llvm::Value*` blindly, trusting the TypeChecker.
+- Delete all type checks inside LLVM generation (e.g., checking if `BIsDouble` or `BIsInt` inside `power`/`abs` codegen).
+- Delete the `IntrinsicArity` guard inside `CodegenIntrinsic` (Builtins.cpp lines 122–136) as TypeChecker handles it now.
+- Remove error-throwing logic from Codegen entirely (`SemanticError`, `TypeError`, `VoidValueError`, `ArgumentTypeError`, etc.).
+- Codegen should blindly trust the TypeChecker's inferred types (`Node.ResolvedCallTarget->ReturnType`, etc.) and directly generate the corresponding LLVM IR.
 
 ### [Issue #11] Pipeline Integration & Monolith Teardown
 **Assignee:** [A, B, C] | **Labels:** `integration`, `milestone` | **Depends on:** All above
 **Description:**
-- Wire up `main.cpp` to run the passes sequentially: `Parser -> Resolver -> TypeChecker -> Codegen`.
-- Delete dead legacy code from the old monolith. (Recommendation: Keep the legacy `SymbolTable.cpp` as a read-only reference for at least one release before deleting).
-- Final benchmarking and integration tests.
+- Turn off "shadow mode". The pipeline in `main.cpp` must strictly be: `Parser -> Resolver -> TypeChecker -> Codegen`.
+- Codegen should only execute if `TypeChecker` succeeds.
+- Remove legacy `SymbolTable.cpp` and `GlobalSymbolTable` references from Codegen.
+- The single source of truth for scope and types should now reside in the AST nodes themselves, populated by the previous passes.
+- Final benchmarking and integration tests to ensure the compiler is stable.
 
 ---
 
