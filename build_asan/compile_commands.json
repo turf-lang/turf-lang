@@ -1,0 +1,200 @@
+[
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/main.cpp.o -c /mnt/c/Coding/turf_lang/src/main.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/main.cpp",
+  "output": "CMakeFiles/turf.dir/src/main.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/Algorithms.cpp.o -c /mnt/c/Coding/turf_lang/src/Algorithms.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Algorithms.cpp",
+  "output": "CMakeFiles/turf.dir/src/Algorithms.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/AliasAnalysis.cpp.o -c /mnt/c/Coding/turf_lang/src/AliasAnalysis.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/AliasAnalysis.cpp",
+  "output": "CMakeFiles/turf.dir/src/AliasAnalysis.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/Analysis.cpp.o -c /mnt/c/Coding/turf_lang/src/Analysis.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Analysis.cpp",
+  "output": "CMakeFiles/turf.dir/src/Analysis.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/Builtins.cpp.o -c /mnt/c/Coding/turf_lang/src/Builtins.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Builtins.cpp",
+  "output": "CMakeFiles/turf.dir/src/Builtins.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/CFG.cpp.o -c /mnt/c/Coding/turf_lang/src/CFG.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/CFG.cpp",
+  "output": "CMakeFiles/turf.dir/src/CFG.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/CallGraph.cpp.o -c /mnt/c/Coding/turf_lang/src/CallGraph.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/CallGraph.cpp",
+  "output": "CMakeFiles/turf.dir/src/CallGraph.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/Codegen.cpp.o -c /mnt/c/Coding/turf_lang/src/Codegen.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Codegen.cpp",
+  "output": "CMakeFiles/turf.dir/src/Codegen.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/Lexer.cpp.o -c /mnt/c/Coding/turf_lang/src/Lexer.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Lexer.cpp",
+  "output": "CMakeFiles/turf.dir/src/Lexer.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/Lint.cpp.o -c /mnt/c/Coding/turf_lang/src/Lint.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Lint.cpp",
+  "output": "CMakeFiles/turf.dir/src/Lint.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/Parser.cpp.o -c /mnt/c/Coding/turf_lang/src/Parser.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Parser.cpp",
+  "output": "CMakeFiles/turf.dir/src/Parser.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/Sandbox.cpp.o -c /mnt/c/Coding/turf_lang/src/Sandbox.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Sandbox.cpp",
+  "output": "CMakeFiles/turf.dir/src/Sandbox.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/SLMEngine.cpp.o -c /mnt/c/Coding/turf_lang/src/SLMEngine.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/SLMEngine.cpp",
+  "output": "CMakeFiles/turf.dir/src/SLMEngine.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/SLMIntegration.cpp.o -c /mnt/c/Coding/turf_lang/src/SLMIntegration.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/SLMIntegration.cpp",
+  "output": "CMakeFiles/turf.dir/src/SLMIntegration.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/ResolverSymbolTable.cpp.o -c /mnt/c/Coding/turf_lang/src/ResolverSymbolTable.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/ResolverSymbolTable.cpp",
+  "output": "CMakeFiles/turf.dir/src/ResolverSymbolTable.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/Resolver.cpp.o -c /mnt/c/Coding/turf_lang/src/Resolver.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Resolver.cpp",
+  "output": "CMakeFiles/turf.dir/src/Resolver.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/SymbolTable.cpp.o -c /mnt/c/Coding/turf_lang/src/SymbolTable.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/SymbolTable.cpp",
+  "output": "CMakeFiles/turf.dir/src/SymbolTable.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/TypeChecker.cpp.o -c /mnt/c/Coding/turf_lang/src/TypeChecker.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/TypeChecker.cpp",
+  "output": "CMakeFiles/turf.dir/src/TypeChecker.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/Types.cpp.o -c /mnt/c/Coding/turf_lang/src/Types.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Types.cpp",
+  "output": "CMakeFiles/turf.dir/src/Types.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/include -I/mnt/c/Coding/turf_lang/external/llama.cpp/ggml/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -Wpedantic -g -O0 -fopenmp -o CMakeFiles/turf.dir/src/ValueRange.cpp.o -c /mnt/c/Coding/turf_lang/src/ValueRange.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/ValueRange.cpp",
+  "output": "CMakeFiles/turf.dir/src/ValueRange.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++  -I/mnt/c/Coding/turf_lang/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_resolver_symbol_table.dir/tests/test_resolver_symbol_table.cpp.o -c /mnt/c/Coding/turf_lang/tests/test_resolver_symbol_table.cpp",
+  "file": "/mnt/c/Coding/turf_lang/tests/test_resolver_symbol_table.cpp",
+  "output": "CMakeFiles/test_resolver_symbol_table.dir/tests/test_resolver_symbol_table.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++  -I/mnt/c/Coding/turf_lang/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_resolver_symbol_table.dir/src/ResolverSymbolTable.cpp.o -c /mnt/c/Coding/turf_lang/src/ResolverSymbolTable.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/ResolverSymbolTable.cpp",
+  "output": "CMakeFiles/test_resolver_symbol_table.dir/src/ResolverSymbolTable.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++  -I/mnt/c/Coding/turf_lang/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_resolver_symbol_table.dir/src/Types.cpp.o -c /mnt/c/Coding/turf_lang/src/Types.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Types.cpp",
+  "output": "CMakeFiles/test_resolver_symbol_table.dir/src/Types.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++  -I/mnt/c/Coding/turf_lang/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_type_hierarchy.dir/tests/test_type_hierarchy.cpp.o -c /mnt/c/Coding/turf_lang/tests/test_type_hierarchy.cpp",
+  "file": "/mnt/c/Coding/turf_lang/tests/test_type_hierarchy.cpp",
+  "output": "CMakeFiles/test_type_hierarchy.dir/tests/test_type_hierarchy.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++  -I/mnt/c/Coding/turf_lang/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_type_hierarchy.dir/src/Types.cpp.o -c /mnt/c/Coding/turf_lang/src/Types.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Types.cpp",
+  "output": "CMakeFiles/test_type_hierarchy.dir/src/Types.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -DTYPECHECKER_NO_ERRORS -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_type_checker.dir/tests/test_type_checker.cpp.o -c /mnt/c/Coding/turf_lang/tests/test_type_checker.cpp",
+  "file": "/mnt/c/Coding/turf_lang/tests/test_type_checker.cpp",
+  "output": "CMakeFiles/test_type_checker.dir/tests/test_type_checker.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -DTYPECHECKER_NO_ERRORS -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_type_checker.dir/tests/ast_stubs.cpp.o -c /mnt/c/Coding/turf_lang/tests/ast_stubs.cpp",
+  "file": "/mnt/c/Coding/turf_lang/tests/ast_stubs.cpp",
+  "output": "CMakeFiles/test_type_checker.dir/tests/ast_stubs.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -DTYPECHECKER_NO_ERRORS -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_type_checker.dir/tests/codegen_stubs.cpp.o -c /mnt/c/Coding/turf_lang/tests/codegen_stubs.cpp",
+  "file": "/mnt/c/Coding/turf_lang/tests/codegen_stubs.cpp",
+  "output": "CMakeFiles/test_type_checker.dir/tests/codegen_stubs.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -DTYPECHECKER_NO_ERRORS -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_type_checker.dir/tests/builtins_stubs.cpp.o -c /mnt/c/Coding/turf_lang/tests/builtins_stubs.cpp",
+  "file": "/mnt/c/Coding/turf_lang/tests/builtins_stubs.cpp",
+  "output": "CMakeFiles/test_type_checker.dir/tests/builtins_stubs.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -DTYPECHECKER_NO_ERRORS -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_type_checker.dir/src/TypeChecker.cpp.o -c /mnt/c/Coding/turf_lang/src/TypeChecker.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/TypeChecker.cpp",
+  "output": "CMakeFiles/test_type_checker.dir/src/TypeChecker.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -DTYPECHECKER_NO_ERRORS -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_type_checker.dir/src/ResolverSymbolTable.cpp.o -c /mnt/c/Coding/turf_lang/src/ResolverSymbolTable.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/ResolverSymbolTable.cpp",
+  "output": "CMakeFiles/test_type_checker.dir/src/ResolverSymbolTable.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -DTYPECHECKER_NO_ERRORS -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_type_checker.dir/src/Types.cpp.o -c /mnt/c/Coding/turf_lang/src/Types.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Types.cpp",
+  "output": "CMakeFiles/test_type_checker.dir/src/Types.cpp.o"
+},
+{
+  "directory": "/mnt/c/Coding/turf_lang/build_asan",
+  "command": "/usr/bin/c++ -DTYPECHECKER_NO_ERRORS -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -I/mnt/c/Coding/turf_lang/include -I/usr/lib/llvm-18/include -fsanitize=address -fno-omit-frame-pointer -g -std=gnu++20 -Wall -Wextra -std=c++20 -o CMakeFiles/test_type_checker.dir/src/Lexer.cpp.o -c /mnt/c/Coding/turf_lang/src/Lexer.cpp",
+  "file": "/mnt/c/Coding/turf_lang/src/Lexer.cpp",
+  "output": "CMakeFiles/test_type_checker.dir/src/Lexer.cpp.o"
+}
+]
