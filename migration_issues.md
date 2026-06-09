@@ -263,7 +263,9 @@ Replace the current stub with:
 **Assignee:** [C] | **Labels:** `codegen`, `cleanup` | **Depends on:** #7, #8
 **Description:**
 - Delete all type checks inside LLVM generation (e.g., checking if `BIsDouble` or `BIsInt` inside `power`/`abs` codegen).
-- Delete the `IntrinsicArity` guard inside `CodegenIntrinsic` (Builtins.cpp lines 122–136) as TypeChecker handles it now.
+- Strip fallback module method overload resolution loops from `MethodCallExprAST::codegen()` (Codegen.cpp lines 2550-2598). It must exclusively use `Node.ResolvedCallTarget->mangledName()`, mirroring what was done for `FuncCallExprAST` in Issue #9.
+- Remove dead code in `TypeChecker::visitFuncCall` that tries to typecheck `abs`, `power`, `print`, etc. as intrinsics (they are now standard library functions and `LookupBuiltin` returns null for them).
+- *Note: The `IntrinsicArity` map was already stripped of stdlib functions in Issue #9. You only need to delete the remaining guard for `typeof`/`lengthof` in `CodegenIntrinsic` if TypeChecker takes full responsibility.*
 - Remove error-throwing logic from Codegen entirely (`SemanticError`, `TypeError`, `VoidValueError`, `ArgumentTypeError`, etc.).
 - Codegen should blindly trust the TypeChecker's inferred types (`Node.ResolvedCallTarget->ReturnType`, etc.) and directly generate the corresponding LLVM IR.
 
