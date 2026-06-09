@@ -150,6 +150,21 @@ struct ResolverFunctionSymbol {
     for (const auto &P : Params) T.push_back(P.Type);
     return T;
   }
+
+  /// Derive the LLVM-level mangled name for this overload.
+  /// Mirrors the mangling performed by FuncDefExprAST::codegen():
+  ///   module="io",  base="printline", params=[int] → "turf_io_printline_int"
+  ///   module="",    base="add",       params=[int,int] → "turf_add_int_int"
+  ///   module="",    base="main",      params=[] → "main"
+  std::string mangledName() const {
+    if (BaseName == "main") return "main";
+    std::string S = "turf_";
+    if (!SourceModule.empty()) S += SourceModule + "_";
+    S += BaseName;
+    for (const auto &P : Params)
+      if (P.Type) S += "_" + P.Type->getMangledName();
+    return S;
+  }
 };
 
 // ─── ResolverModule ──────────────────────────────────────────────────────────

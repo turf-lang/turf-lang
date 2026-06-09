@@ -794,7 +794,7 @@ Value *BinaryExprAST::codegen() {
   // Power
   case '^': {
     CastBoth(TurfDouble());
-    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
+    Function *PowFunc = llvm::Intrinsic::getDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
@@ -943,10 +943,10 @@ Value *VarDeclExprAST::codegen() {
 }
 
 Value *VariableExprAST::codegen() {
-  // Look up the variable in the symbol table
+  // Use the mangled name resolved by Resolver/TypeChecker (Issue #5)
   Symbol *Sym = nullptr;
-  if (GlobalSymbolTable) {
-    Sym = GlobalSymbolTable->LookupSymbol(Name);
+  if (GlobalSymbolTable && ResolvedSymbol) {
+    Sym = GlobalSymbolTable->LookupSymbol(ResolvedSymbol->Name);
   }
 
   if (Sym) {
@@ -976,8 +976,8 @@ Value *VariableExprAST::codegen() {
 
 Value *VariableExprAST::codegenLValue() {
   Symbol *Sym = nullptr;
-  if (GlobalSymbolTable)
-    Sym = GlobalSymbolTable->LookupSymbol(Name);
+  if (GlobalSymbolTable && ResolvedSymbol)
+    Sym = GlobalSymbolTable->LookupSymbol(ResolvedSymbol->Name);
   if (Sym)
     return Sym->Alloca;
 
@@ -1943,29 +1943,7 @@ Value *FuncCallExprAST::codegen() {
   if (CalleeName == "typeof" || CalleeName == "lengthof" ||
       CalleeName == "malloc" || CalleeName == "realloc" ||
       CalleeName == "free") {
-    // Phase 1 fix: validate arity before codegen-ing arguments so we don't
-    // crash on Args[0] when the user writes typeof() or typeof(a, b).
-    // The canonical arity: typeof=1, lengthof=1, malloc=1, realloc=2, free=1.
-    static const std::unordered_map<std::string, int> EarlyArityMap = {
-        {"typeof",    1},
-        {"lengthof",  1},
-        {"malloc",    1},
-        {"realloc",   2},
-        {"free",      1},
-    };
-    auto ArityIt = EarlyArityMap.find(CalleeName);
-    if (ArityIt != EarlyArityMap.end()) {
-      int Expected = ArityIt->second;
-      if ((int)Args.size() != Expected) {
-        SemanticError(Loc,
-                      "'" + CalleeName + "' requires exactly " +
-                          std::to_string(Expected) + " argument" +
-                          (Expected == 1 ? "" : "s") + ", but got " +
-                          std::to_string(Args.size()))
-            .raise();
-        return nullptr;
-      }
-    }
+
 
     std::vector<Value *> ArgVals;
     for (auto &Arg : Args) {
@@ -2003,90 +1981,20 @@ Value *FuncCallExprAST::codegen() {
   }
 
   std::vector<Value *> EvaluatedArgs;
-  std::vector<TurfTypePtr> ArgTypes;
   for (auto &Arg : Args) {
     Value *V = Arg->codegen();
     if (!V)
       return nullptr;
     EvaluatedArgs.push_back(V);
-
-    TurfTypePtr ActTy;
-    if (const TurfType *ExprTy = getExprType(Arg.get())) {
-      if (auto *Ptr = dynamic_cast<const TurfPointerType*>(ExprTy)) {
-        // Under type erasure, T* pointers become void* at the LLVM level.
-        // If the pointee is a generic type parameter, treat this as void*.
-        const TurfType *Pointee = Ptr->getPointee().get();
-        if (dynamic_cast<const TurfGenericParamType*>(Pointee))
-          ActTy = std::make_shared<TurfPointerType>(TurfVoid());
-        else
-          ActTy = std::make_shared<TurfPointerType>(Ptr->getPointee());
-      }
-      else if (ExprTy->isNamed("void*"))
-        ActTy = std::make_shared<TurfPointerType>(TurfVoid());
-      else if (ExprTy->isNamed("int"))
-        ActTy = TurfInt();
-      else if (ExprTy->isNamed("double"))
-        ActTy = TurfDouble();
-      else if (ExprTy->isNamed("bool"))
-        ActTy = TurfBool();
-      else if (ExprTy->isNamed("string"))
-        ActTy = TurfString();
-      else if (auto *GT = dynamic_cast<const GenericType*>(ExprTy))
-        ActTy = std::make_shared<GenericType>(GT->getBaseName(), GT->getTypeArgs());
-      else if (auto *ST = dynamic_cast<const TurfStructType*>(ExprTy))
-        ActTy = std::make_shared<TurfStructType>(ST->getName(), ST->getFields());
-      else if (isArrayType(ExprTy)) {
-        const auto *ArrTy = dynamic_cast<const ::ArrayType *>(ExprTy);
-        ActTy = makeArrayType(ArrTy->getElementTypePtr(), ArrTy->getSize());
-      } else
-        ActTy = getTurfTypeFromLLVM(V->getType());
-    } else {
-      ActTy = getTurfTypeFromLLVM(V->getType());
-    }
-    ArgTypes.push_back(ActTy);
   }
 
   std::string MangledName = CalleeName;
   if (CalleeName != "main") {
-    MangledName = "turf_" + CalleeName;
-    for (const auto &T : ArgTypes) {
-      MangledName += "_" + T->getMangledName();
-    }
+    MangledName = ResolvedCallTarget->mangledName();
   }
 
   Function *CalleeF = TheModule->getFunction(MangledName);
-  if (!CalleeF && CalleeName != "main") {
-    // Fallback: search for a compatible overload using implicit casting
-    for (const auto &[Name, ParamTypes] : FuncParamTypes) {
-      std::string Prefix = "turf_" + CalleeName;
-      if (Name == Prefix ||
-          (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
-        if (ParamTypes.size() == ArgTypes.size()) {
-          bool Compatible = true;
-          for (size_t i = 0; i < ArgTypes.size(); ++i) {
-            if (!isTypeCompatible(ArgTypes[i].get(), ParamTypes[i].get())) {
-              Compatible = false;
-              break;
-            }
-          }
-          if (Compatible) {
-            CalleeF = TheModule->getFunction(Name);
-            MangledName = Name;
-            break;
-          }
-        }
-      }
-    }
-  }
-
   if (!CalleeF) {
-    RankedSuggestions Suggestions;
-    if (GlobalSymbolTable) {
-      Suggestions = GlobalSymbolTable->GetRankedSuggestions(CalleeName);
-    } else {
-      Suggestions.Local = SuggestionIndex::suggestBuiltins(CalleeName);
-    }
-    LookupError(Loc, CalleeName, Suggestions).raise();
     return nullptr;
   }
 
@@ -2612,22 +2520,7 @@ Value *MethodCallExprAST::codegen() {
     // registered function (i.e. imported std-lib or user-imported files).
     bool IsModule = GlobalSymbolTable && GlobalSymbolTable->HasModule(ModuleName);
 
-    // Legacy fallback: if the SymbolTable doesn't know about this module yet
-    // (e.g. function defined before any import completes), fall back to the
-    // old prefix scan.  This keeps backward compatibility during the transition.
-    if (!IsModule) {
-      std::string PotentialMangledPrefix = "turf_" + ModuleName + "_" + Method;
-      for (const auto &Pair : FuncParamTypes) {
-        if (Pair.first == PotentialMangledPrefix ||
-            (Pair.first.size() > PotentialMangledPrefix.size() &&
-             Pair.first[PotentialMangledPrefix.size()] == '_' &&
-             Pair.first.substr(0, PotentialMangledPrefix.size()) ==
-                 PotentialMangledPrefix)) {
-          IsModule = true;
-          break;
-        }
-      }
-    }
+
 
     if (IsModule) {
       // Phase 2 path: resolve through the SymbolTable module registry first.
@@ -2792,92 +2685,24 @@ Value *MethodCallExprAST::codegen() {
 
   if (!StructNameStr.empty()) {
     std::vector<Value *> EvaluatedArgs;
-    std::vector<TurfTypePtr> ArgTypes;
     for (auto &Arg : Args) {
       Value *V = Arg->codegen();
       if (!V)
         return nullptr;
       EvaluatedArgs.push_back(V);
-
-      TurfTypePtr ActTy;
-      if (auto *VE = dynamic_cast<VariableExprAST *>(Arg.get())) {
-        auto It = NamedValues.find(VE->getName());
-        if (It != NamedValues.end())
-          ActTy = It->second.Type;
-      }
-      if (!ActTy)
-        ActTy = getTurfTypeFromLLVM(V->getType());
-      ArgTypes.push_back(ActTy);
     }
 
-    // Build the primary mangled name: turf_<StructName>.<Method>_<StructName>_ptr
-    // Also try the module-qualified name: turf_<module>_<StructName>.<Method>_...
-    // (Methods in .tr library files are registered with the module prefix.)
-    std::string MethodName = StructNameStr + "." + Method;
-    std::string MangledName =
-        "turf_" + MethodName + "_" + StructNameStr + "_ptr";
-    // For GenericType, also build a module-qualified candidate.
-    std::string ModuleMethodName;
-    if (auto *GenTy = dynamic_cast<const GenericType*>(BaseTy)) {
-      // The module name is typically the lowercase base name (e.g. "list")
-      std::string ModName = GenTy->getBaseName();
-      // lowercase it
-      std::transform(ModName.begin(), ModName.end(), ModName.begin(), ::tolower);
-      ModuleMethodName = "turf_" + ModName + "_" + MethodName;
-    }
-    for (const auto &T : ArgTypes) {
-      MangledName += "_" + T->getMangledName();
+    std::string MangledName;
+    if (ResolvedCallTarget) {
+      MangledName = ResolvedCallTarget->mangledName();
     }
 
-    Function *CalleeF = TheModule->getFunction(MangledName);
-    if (!CalleeF && !ModuleMethodName.empty()) {
-      // Try exact module-qualified lookup first (most common for list/stack/queue)
-      CalleeF = TheModule->getFunction(ModuleMethodName);
-    }
-    if (!CalleeF) {
-      // Fallback overload resolution
-      for (const auto &[Name, ParamTypes] : FuncParamTypes) {
-        // Check both bare and module-qualified method name prefixes
-        std::string Prefix = "turf_" + MethodName;
-        std::string ModPrefix = ModuleMethodName;
-        bool Match = false;
-        auto matchesPrefix = [&](const std::string &P) {
-          return Name == P ||
-                 (Name.size() > P.size() && Name[P.size()] == '_' &&
-                  Name.substr(0, P.size()) == P);
-        };
-        if (matchesPrefix(Prefix) || (!ModPrefix.empty() && matchesPrefix(ModPrefix)))
-          Match = true;
-        if (!Match) {
-          std::string Suffix = "_" + MethodName;
-          size_t Pos = Name.find(Suffix);
-          if (Pos != std::string::npos &&
-              (Pos + Suffix.size() == Name.size() ||
-               Name[Pos + Suffix.size()] == '_'))
-            Match = true;
-        }
-        if (Match) {
-          if (ParamTypes.size() == ArgTypes.size() + 1) { // +1 for self
-            bool Compatible = true;
-            for (size_t i = 0; i < ArgTypes.size(); ++i) {
-              if (!isTypeCompatible(ArgTypes[i].get(), ParamTypes[i + 1].get())) {
-                Compatible = false;
-                break;
-              }
-            }
-            if (Compatible) {
-              CalleeF = TheModule->getFunction(Name);
-              break;
-            }
-          }
-        }
-      }
+    Function *CalleeF = nullptr;
+    if (!MangledName.empty()) {
+      CalleeF = TheModule->getFunction(MangledName);
     }
 
     if (!CalleeF) {
-      SemanticError(Loc, "Method '" + Method + "' not found on struct '" +
-                             StructNameStr + "'")
-          .raise();
       return nullptr;
     }
     if (CalleeF->arg_size() != Args.size() + 1) {
