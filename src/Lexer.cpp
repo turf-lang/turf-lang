@@ -40,6 +40,7 @@ std::set<int> DiagnosticEngine::ErrorLines;
 // setjmp/longjmp recovery buffers
 jmp_buf g_recoverJmp;
 bool g_recoverActive = false;
+bool g_protoOnlyPass = false; // set by pre-pass 3a to stop after prototype
 
 // AI/SLM flag: only true when --smart is passed on the CLI.
 bool g_AIEnabled = false;

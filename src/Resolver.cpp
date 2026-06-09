@@ -376,13 +376,60 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     return;
   }
 
+  // ── Arity check ───────────────────────────────────────────────────────────
+  // The symbol table already knows every overload's arity.  Before handing
+  // the candidates to the TypeChecker, verify that at least one overload
+  // accepts the number of arguments supplied at this call site.
+  //
+  // This is the authoritative arity check — no hardcoded maps anywhere.
+  // WrongArityError fires here; Codegen never sees an arity mismatch.
+  const int ArgCount = static_cast<int>(Node.getArgs().size());
+  std::vector<std::string> AllSignatures;
+
+  for (const auto *Sym : CurrentFileMatches)
+    AllSignatures.push_back(Sym->signature());
+  for (const auto &Match : ModuleMatches)
+    AllSignatures.push_back(Match.Symbol->signature());
+
+  bool AnyArityMatch = false;
   for (const auto *Sym : CurrentFileMatches) {
-    Node.ResolvedCandidates.push_back(
-        std::make_shared<ResolverFunctionSymbol>(*Sym));
+    if (Sym->arity() == ArgCount) { AnyArityMatch = true; break; }
+  }
+  if (!AnyArityMatch) {
+    for (const auto &Match : ModuleMatches) {
+      if (Match.Symbol->arity() == ArgCount) { AnyArityMatch = true; break; }
+    }
+  }
+
+  if (!AnyArityMatch) {
+    WrongArityError(Node.getLoc(), CalleeName, ArgCount, AllSignatures).raise();
+    return;
+  }
+
+  // Populate ResolvedCandidates with only the arity-matching overloads.
+  // TypeChecker::visitFuncCall then narrows further by type compatibility.
+  for (const auto *Sym : CurrentFileMatches) {
+    if (Sym->arity() == ArgCount)
+      Node.ResolvedCandidates.push_back(
+          std::make_shared<ResolverFunctionSymbol>(*Sym));
   }
   for (const auto &Match : ModuleMatches) {
-    Node.ResolvedCandidates.push_back(
-        std::make_shared<ResolverFunctionSymbol>(*Match.Symbol));
+    if (Match.Symbol->arity() == ArgCount)
+      Node.ResolvedCandidates.push_back(
+          std::make_shared<ResolverFunctionSymbol>(*Match.Symbol));
+  }
+
+  // ── Set ResolvedCallTarget when unambiguous ───────────────────────────────
+  // If exactly one overload matches the arity, the Resolver can commit to it
+  // immediately.  Codegen reads ResolvedCallTarget blindly (Issue #9) — this
+  // ensures it's always set for the common single-overload case, even when
+  // the TypeChecker hasn't run.
+  //
+  // Multiple arity-matching candidates means the function has type-overloads
+  // (e.g. add(int,int) and add(double,double)).  In that case TypeChecker
+  // narrows to one via type compatibility and sets ResolvedCallTarget itself.
+  if (Node.ResolvedCandidates.size() == 1) {
+    Node.ResolvedCallTarget = Node.ResolvedCandidates[0];
   }
 }
 
@@ -408,6 +455,42 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
   // Always resolve argument expressions regardless.
   for (const auto &Arg : Node.getArgs())
     visitChild(Arg.get());
+
+  // ── Module method arity check ─────────────────────────────────────────────
+  // If the base is a known module, look up the method in the module registry
+  // and verify that at least one overload accepts the supplied argument count.
+  // This mirrors the arity check in visitFuncCall — all done from symbol table
+  // data, no hardcoded maps.
+  if (BaseVar && SymTable_.hasModule(BaseVar->getName())) {
+    const std::string &ModuleName = BaseVar->getName();
+    const std::string &MethodName = Node.getMethod();
+    const int ArgCount = static_cast<int>(Node.getArgs().size());
+
+    // Look up all overloads of this method in the module.
+    auto ModuleMatches = SymTable_.findInModules(MethodName);
+    // Filter to those belonging to this specific module.
+    std::vector<const ResolverFunctionSymbol *> MethodOverloads;
+    for (const auto &Match : ModuleMatches) {
+      if (Match.ModuleName == ModuleName)
+        MethodOverloads.push_back(Match.Symbol);
+    }
+
+    if (!MethodOverloads.empty()) {
+      // Method name exists in this module — check arity.
+      bool AnyArityMatch = false;
+      std::vector<std::string> AllSigs;
+      for (const auto *Sym : MethodOverloads) {
+        AllSigs.push_back(ModuleName + "." + Sym->signature());
+        if (Sym->arity() == ArgCount) AnyArityMatch = true;
+      }
+      if (!AnyArityMatch) {
+        WrongArityError(Node.getLoc(),
+                        ModuleName + "." + MethodName,
+                        ArgCount, AllSigs).raise();
+        return;
+      }
+    }
+  }
 }
 
 void Resolver::visitFieldAccess(FieldAccessExprAST &Node) {

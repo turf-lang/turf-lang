@@ -35,30 +35,18 @@ using namespace llvm;
 static std::unordered_map<std::string, BuiltinInfo> g_builtins;
 static std::once_flag g_builtins_init_flag;
 
-// Arity table: maps intrinsic name -> expected number of arguments.
-// -1 means variadic/unchecked. Used by CodegenIntrinsic to catch arity
-// mismatches before any Args[n] access happens.
-
-// Might need to remove LLVM handled intrinsics like sqrt, sin, cos cuz their arity might have been handled by LLVM itself, need ot check later.
+// Arity table for bare language-level intrinsics only.
+// These are the only two functions that are callable WITHOUT a module qualifier
+// and have no home in lib/std:
+//   - typeof(x)   — compile-time type name string
+//   - lengthof(x) — byte-length of a string
+//
+// Everything else (print, printline, malloc, abs, power, sqrt, …) lives in
+// lib/std and is resolved by the Resolver's module registry.  Do NOT add those
+// here — adding them here would duplicate arity enforcement and cause confusion.
 static const std::unordered_map<std::string, int> IntrinsicArity = {
-    {"print",     1},
-    {"printline", 1},
-    {"input",     0},
-    {"malloc",    1},
-    {"realloc",   2},
-    {"free",      1},
-    {"typeof",    1},
-    {"lengthof",  1},
-    {"abs",       1},
-    {"sqrt",      1},
-    {"sin",       1},
-    {"cos",       1},
-    {"tan",       1},
-    {"floor",     1},
-    {"ceil",      1},
-    {"round",     1},
-    {"power",     2},
-    {"pow",       2},
+    {"typeof",   1},
+    {"lengthof", 1},
 };
 
 static void ensure_builtins_registered();
@@ -84,18 +72,16 @@ std::vector<std::string> GetBuiltinNames() {
 }
 
 static void ensure_builtins_registered() {
-  // Register the canonical builtin names used by the compiler. Keep the
-  // Arity information when known; -1 means variadic/unknown.
-  RegisterBuiltin("print", {1, "Print a value"});
-  RegisterBuiltin("printline", {1, "Print a value with newline"});
-  RegisterBuiltin("input", {0, "Read a line from stdin"});
-  RegisterBuiltin("malloc", {1, "Allocate memory"});
-  RegisterBuiltin("realloc", {2, "Reallocate memory"});
-  RegisterBuiltin("free", {1, "Free memory"});
-  RegisterBuiltin("power", {2, "Power operation"});
-  RegisterBuiltin("abs", {1, "Absolute value"});
-  RegisterBuiltin("lengthof", {1, "Length of string"});
-  RegisterBuiltin("typeof", {1, "Type of value"});
+  // Only register the two true bare language-level intrinsics that are
+  // callable without a module qualifier.  These are the only names that
+  // appear in g_builtins for suggestion quality (suggestBuiltins()) and
+  // for the IntrinsicArity guard in CodegenIntrinsic().
+  //
+  // stdlib functions (print, printline, input, malloc, abs, power, sqrt, …)
+  // live in lib/std modules and are resolved via the Resolver's module
+  // registry — they must NOT be listed here.
+  RegisterBuiltin("typeof",   {1, "Compile-time type name of an expression"});
+  RegisterBuiltin("lengthof", {1, "Byte-length of a string"});
 }
 
 /**
@@ -317,7 +303,7 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     if (!BIsDouble)
       B = Builder->CreateSIToFP(B, Type::getDoubleTy(*TheContext), "powcast2");
 
-    Function *PowFunc = llvm::Intrinsic::getDeclaration(
+    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
     Value *Result = Builder->CreateCall(PowFunc, {A, B}, "powtmp");
@@ -332,7 +318,7 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     // Arity is already verified above.
     Value *Val = Args[0];
     if (Val->getType()->isDoubleTy()) {
-        Function *FAbsFunc = llvm::Intrinsic::getDeclaration(
+        Function *FAbsFunc = llvm::Intrinsic::getOrInsertDeclaration(
           TheModule.get(), llvm::Intrinsic::fabs,
           {Type::getDoubleTy(*TheContext)});
       return Builder->CreateCall(FAbsFunc, {Val}, "abs");

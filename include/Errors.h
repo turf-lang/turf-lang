@@ -261,6 +261,30 @@ public:
   }
 };
 
+/// Emitted when the function name is known but the argument count is wrong.
+/// Shows every valid overload signature so the user knows what they can write.
+class WrongArityError : public TurfError {
+public:
+  WrongArityError(SourceLocation Loc, const std::string &Name,
+                  int Got, const std::vector<std::string> &KnownSignatures)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "'" + Colors::CYAN + Name +
+                      Colors::BRIGHT_RED + "' was called with " +
+                      std::to_string(Got) + " argument" +
+                      (Got == 1 ? "" : "s") +
+                      ", but no overload accepts that many." +
+                      Colors::RESET) {
+    if (!KnownSignatures.empty()) {
+      Message += "\n  " + Colors::BRIGHT_GREEN + "Known overloads:" +
+                 Colors::RESET;
+      for (const auto &Sig : KnownSignatures)
+        Message += "\n    " + Colors::CYAN + Sig + Colors::RESET;
+    }
+    Message += "\n  " + Colors::BRIGHT_GREEN +
+               "Hint: Check the number of arguments." + Colors::RESET;
+  }
+};
+
 class NestedFunctionError : public TurfError {
 public:
   NestedFunctionError(SourceLocation Loc, const std::string &Name)

@@ -794,7 +794,7 @@ Value *BinaryExprAST::codegen() {
   // Power
   case '^': {
     CastBoth(TurfDouble());
-    Function *PowFunc = llvm::Intrinsic::getDeclaration(
+    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
@@ -1661,10 +1661,11 @@ Value *FuncDefExprAST::codegen() {
     }
   }
 
-  // If this is a prototype-only call (pre-pass), stop here
-  // The Body will be nullptr only when called from the proto-hoisting pre-pass.
-  // Since we always parse the body in ParseFuncDef, Body is never null here.
-  // (Reserve this hook for a future separate pre-pass.)
+  // If this is a prototype-only pass (pre-pass sub-pass 3a), stop here.
+  // The body will be compiled in sub-pass 3b once all prototypes exist.
+  if (g_protoOnlyPass) {
+    return TheFunc;
+  }
 
   // Store full param types for call-site checking
   FuncParamTypes[MangledName] = {};
@@ -1988,21 +1989,24 @@ Value *FuncCallExprAST::codegen() {
     EvaluatedArgs.push_back(V);
   }
 
-  std::string MangledName = CalleeName;
-  if (CalleeName != "main") {
-    MangledName = ResolvedCallTarget->mangledName();
-  }
+  // ── Issue #9: Codegen trusts the Resolver ────────────────────────────────
+  // ResolvedCallTarget was set by Resolver::visitFuncCall (mandatory pass).
+  // Codegen reads the pre-computed mangled name blindly — no scanning, no
+  // FuncParamTypes lookups, no arity checks.  Those are the Resolver's job.
+  //
+  // typeof / lengthof are handled above (language-level bare intrinsics that
+  // never pass through the Resolver's function registry).
+  std::string MangledName = (CalleeName == "main")
+      ? "main"
+      : ResolvedCallTarget->mangledName();
 
   Function *CalleeF = TheModule->getFunction(MangledName);
   if (!CalleeF) {
-    return nullptr;
-  }
-
-  if (CalleeF->arg_size() != Args.size()) {
-    SemanticError(Loc, "Wrong number of arguments to '" + CalleeName +
-                           "': expected " +
-                           std::to_string(CalleeF->arg_size()) + ", got " +
-                           std::to_string(Args.size()))
+    // This path should be unreachable if the Resolver ran correctly.
+    // If hit, it's an internal compiler bug — not a user error.
+    SemanticError(Loc, "Internal error: LLVM function '" + MangledName +
+                           "' not found after successful name resolution. "
+                           "This is a compiler bug.")
         .raise();
     return nullptr;
   }
