@@ -479,15 +479,29 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
       // Method name exists in this module — check arity.
       bool AnyArityMatch = false;
       std::vector<std::string> AllSigs;
+      std::vector<const ResolverFunctionSymbol *> ArityMatches;
       for (const auto *Sym : MethodOverloads) {
         AllSigs.push_back(ModuleName + "." + Sym->signature());
-        if (Sym->arity() == ArgCount) AnyArityMatch = true;
+        if (Sym->arity() == ArgCount) {
+          AnyArityMatch = true;
+          ArityMatches.push_back(Sym);
+        }
       }
       if (!AnyArityMatch) {
         WrongArityError(Node.getLoc(),
                         ModuleName + "." + MethodName,
                         ArgCount, AllSigs).raise();
         return;
+      }
+
+      // ── Set ResolvedCallTarget for the unambiguous case ──────────────────
+      // When exactly one overload matches the arity, set it directly so that
+      // Codegen can read mangledName() in the pre-pass before TypeChecker runs.
+      // TypeChecker handles the multi-overload narrowing via type compatibility.
+      if (ArityMatches.size() == 1) {
+        Node.ResolvedCallTarget = std::shared_ptr<ResolverFunctionSymbol>(
+            const_cast<ResolverFunctionSymbol *>(ArityMatches[0]),
+            [](ResolverFunctionSymbol *) { /* RST owns this */ });
       }
     }
   }

@@ -314,12 +314,12 @@ int main(int argc, char **argv) {
         }
       }
 
-      // ── Pre-pass sub-pass 2: Resolve ──────────────────────────────────────
+      // ── Pre-pass sub-pass 2a: Resolve ─────────────────────────────────────
       // Run the Resolver over everything parsed so far (prelude + user fns).
-      // This populates ResolvedCandidates on every FuncCallExprAST so that
-      // sub-pass 3 (codegen) can read ResolvedCallTarget blindly.
+      // This populates ResolvedCandidates on every FuncCallExprAST and sets
+      // ResolvedCallTarget for unambiguous single-overload calls.
+      Resolver PreR;
       {
-        Resolver PreR;
         bool PreResolverClean = true;
         g_recoverActive = true;
         if (setjmp(g_recoverJmp) == 0) {
@@ -334,6 +334,23 @@ int main(int argc, char **argv) {
           DiagnosticEngine::flushAll();
           return 1;
         }
+      }
+
+      // ── Pre-pass sub-pass 2b: TypeCheck ───────────────────────────────────
+      // Run the TypeChecker over the pre-pass ASTs to narrow overloaded calls
+      // (e.g. io.printline has 4 overloads; TypeChecker picks the right one
+      // and sets ResolvedCallTarget so sub-pass 3b codegen reads it blindly).
+      {
+        TypeChecker PreTC(PreR.symbolTable());
+        g_recoverActive = true;
+        if (setjmp(g_recoverJmp) == 0) {
+          if (PreludeAST)
+            PreTC.check(PreludeAST.get());
+          PreTC.checkAll(PrePassASTs);
+        }
+        // Errors in the pre-pass TC are informational only here — the main-pass
+        // TC will re-check and report them with full diagnostics.
+        g_recoverActive = false;
       }
 
       // ── Pre-pass sub-pass 3a: Emit all LLVM function prototypes ────────────
@@ -555,21 +572,22 @@ int main(int argc, char **argv) {
   }
 
 
-  // --typecheck / --dump-typechecked: Run the TypeChecker pass in shadow mode
-  // (Issue #7).  This pass requires a resolved symbol table, so it only runs
-  // when the Resolver has already succeeded (opts.RunResolver is implicitly
-  // set by both --typecheck and --dump-typechecked).
+
+  // ── TypeChecker pass (mandatory, Issue #11) ──────────────────────────────
+  // The TypeChecker runs unconditionally on every compilation, immediately
+  // after the Resolver.  It infers and validates types on every AST node,
+  // populating type annotations that Codegen reads blindly.
   //
-  // Shadow mode: Codegen still runs its own type logic. The TypeChecker merely
-  // validates and infers types.
-  if (opts.RunTypeChecker) {
-    // The Resolver already ran above (mandatory pass) and populated the AST.
-    // Reuse R's symbol table directly — no second Resolver needed.
-    std::cerr << "\n[TypeChecker] Running type-inference pass (Issue #7 — shadow mode)...\n";
-
-    TypeChecker TC(R.symbolTable());
+  // If the TypeChecker finds any errors, compilation aborts here — Codegen
+  // must never run on a type-incorrect AST.
+  //
+  // Pipeline: Parser → Resolver → TypeChecker → Codegen
+  //
+  // --typecheck and --dump-typechecked still control the debug banner and the
+  // annotated-AST dump, but the TC pass itself is not optional.
+  TypeChecker TC(R.symbolTable());
+  {
     bool TCClean = true;
-
     g_recoverActive = true;
     if (setjmp(g_recoverJmp) == 0) {
       if (PreludeAST)
@@ -581,28 +599,34 @@ int main(int argc, char **argv) {
     }
     g_recoverActive = false;
 
-    if (TCClean) {
-      std::cerr << "[TypeChecker] \u2713  Type inference completed without errors.\n";
+    if (opts.RunTypeChecker) {
+      if (TCClean)
+        std::cerr << "\n[TypeChecker] Running type-inference pass (Issue #7)...\n"
+                  << "[TypeChecker] \u2713  Type inference completed without errors.\n";
+      else
+        std::cerr << "\n[TypeChecker] Running type-inference pass (Issue #7)...\n"
+                  << "[TypeChecker] \u2717  Type checking failed (see error above).\n";
+    }
 
-      if (opts.DumpTypechecked) {
-        ASTPrinter Printer;
-        Printer.setTypeChecker(&TC);
-        std::cout << "\n";
-        std::cout << "\033[1m=== Type-Checked AST Dump (Issue #7) ===\033[0m\n";
-        std::cout << "  \033[32m[resolved \u2713]\033[0m = symbol resolved\n";
-        std::cout << "  \033[36m[module: X \u2713]\033[0m = module qualifier\n";
-        std::cout << "  \033[35m[: type]\033[0m = TypeChecker inferred type\n";
-        std::cout << "\n";
-        std::cout << "\033[1m--- Functions ---\033[0m\n";
-        for (auto &AST : FnASTs)
-          Printer.print(AST.get());
-        std::cout << "\n\033[1m--- Top-Level Statements ---\033[0m\n";
-        for (auto &AST : TopLevelASTs)
-          Printer.print(AST.get());
-        std::cout << "\n\033[1m=== End Type-Checked AST Dump ===\033[0m\n\n";
-      }
-    } else {
-      std::cerr << "[TypeChecker] \u2717  Type checking failed (see error above).\n";
+    if (opts.DumpTypechecked && TCClean) {
+      ASTPrinter Printer;
+      Printer.setTypeChecker(&TC);
+      std::cout << "\n";
+      std::cout << "\033[1m=== Type-Checked AST Dump (Issue #7) ===\033[0m\n";
+      std::cout << "  \033[32m[resolved \u2713]\033[0m = symbol resolved\n";
+      std::cout << "  \033[36m[module: X \u2713]\033[0m = module qualifier\n";
+      std::cout << "  \033[35m[: type]\033[0m = TypeChecker inferred type\n";
+      std::cout << "\n";
+      std::cout << "\033[1m--- Functions ---\033[0m\n";
+      for (auto &AST : FnASTs)
+        Printer.print(AST.get());
+      std::cout << "\n\033[1m--- Top-Level Statements ---\033[0m\n";
+      for (auto &AST : TopLevelASTs)
+        Printer.print(AST.get());
+      std::cout << "\n\033[1m=== End Type-Checked AST Dump ===\033[0m\n\n";
+    }
+
+    if (!TCClean) {
       DiagnosticEngine::flushAll();
       return 1;
     }

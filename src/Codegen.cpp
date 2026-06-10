@@ -580,38 +580,17 @@ Value *BinaryExprAST::codegen() {
   if (!L || !R)
     return nullptr;
 
-  // Detect void operands (e.g. using a void function call in an expression)
-  if (L->getType()->isVoidTy()) {
-    VoidValueError(Loc,
-                   "The left side of this expression is a void function call.")
-        .raise();
-    return nullptr;
-  }
-  if (R->getType()->isVoidTy()) {
-    VoidValueError(Loc,
-                   "The right side of this expression is a void function call.")
-        .raise();
-    return nullptr;
-  }
-
+  // Type validation (void checks, compatibility, etc.) is handled by the TypeChecker.
   TurfTypePtr LTy = getTurfTypeFromLLVM(L->getType());
   TurfTypePtr RTy = getTurfTypeFromLLVM(R->getType());
 
   if (isa<ConstantPointerNull>(L) || isa<ConstantPointerNull>(R)) {
     if (Op == TOK_EQ || Op == TOK_NEQ) {
-      if (isa<ConstantPointerNull>(L) && !R->getType()->isPointerTy()) {
-        TypeError(Loc, "Cannot compare null with a non-reference type").raise();
-        return nullptr;
-      }
-      if (isa<ConstantPointerNull>(R) && !L->getType()->isPointerTy()) {
-        TypeError(Loc, "Cannot compare null with a non-reference type").raise();
-        return nullptr;
-      }
       if (isa<ConstantPointerNull>(L)) L = Builder->CreateBitCast(L, R->getType(), "lhscast");
       if (isa<ConstantPointerNull>(R)) R = Builder->CreateBitCast(R, L->getType(), "rhscast");
       return Op == TOK_EQ ? Builder->CreateICmpEQ(L, R, "cmptmp") : Builder->CreateICmpNE(L, R, "cmptmp");
     } else {
-      TypeError(Loc, "Invalid operation with null").raise();
+      llvm::report_fatal_error("Internal error: Invalid operation with null (caught by TypeChecker)");
       return nullptr;
     }
   }
@@ -625,24 +604,7 @@ Value *BinaryExprAST::codegen() {
   TurfTypePtr NumericType =
       CommonType->isNamed("bool") ? TurfInt() : CommonType;
 
-  // Validate type compatibility before proceeding to prevent LLVM IR crashes
-  auto IsNumeric = [](const TurfType *T) {
-    if (!T) return false;
-    return T->isNamed("int") || T->isNamed("double") || T->isNamed("bool");
-  };
-
-  if (Op == TOK_EQ || Op == TOK_NEQ) {
-    if (!isTypeCompatible(LTy.get(), RTy.get())) {
-      TypeError(Loc, "Cannot compare incompatible types").raise();
-      return nullptr;
-    }
-  } else {
-    // Arithmetic and relational operations require numeric types
-    if (!IsNumeric(LTy.get()) || !IsNumeric(RTy.get())) {
-      TypeError(Loc, "Invalid operation on non-numeric types").raise();
-      return nullptr;
-    }
-  }
+  // TypeChecker has already verified operator compatibility.
 
   // Create the instruction based on the operator
   switch (Op) {
@@ -853,17 +815,9 @@ static llvm::Constant *GetDefaultValue(const TurfType *T) {
 }
 
 Value *VarDeclExprAST::codegen() {
-  if (Type->isVoid()) {
-    TypeError(Loc, "Variables of type 'void' are not allowed").raise();
-    return nullptr;
-  }
+  // Validation (void type, keywords, duplicates, etc.) is handled by the
+  // Resolver and TypeChecker passes before Codegen.
 
-  if (Keywords.find(Name) != Keywords.end()) {
-    SemanticError(Loc, "Cannot use keyword '" + Name +
-                           "' as a variable name. Keyword is reserved.")
-        .raise();
-    return nullptr;
-  }
 
   // Check for unreachable declaration
   if (GlobalSymbolTable && GlobalSymbolTable->CurrentScopeHasEarlyExit()) {
@@ -896,31 +850,8 @@ Value *VarDeclExprAST::codegen() {
     if (!Init)
       return nullptr;
 
-    // Detect void value (e.g. int x = voidFunc())
-    if (Init->getType()->isVoidTy()) {
-      VoidValueError(Loc,
-                     "You're trying to store the result of a void function in '" +
-                         Name + "'.")
-          .raise();
-      return nullptr;
-    }
+    // Initialization type checks are handled by the TypeChecker.
 
-    // Check type compatibility before implicit cast
-    TurfTypePtr InitLLVMType = getTurfTypeFromLLVM(Init->getType());
-    InitLLVMType = RefineLLVMType(InitLLVMType, Type, Init->getType());
-    
-    const TurfType *CheckType = InitLLVMType.get();
-    if (const TurfType *ExprTy = getExprType(InitVal.get())) {
-      CheckType = ExprTy;
-    }
-    
-      if (!isTypeCompatible(CheckType, Type.get())) {
-        TypeError(Loc, std::string("Cannot initialize '") + Type->getName() +
-                           "' variable '" + Name + "' with a value of type '" +
-                           CheckType->getName() + "'")
-            .raise();
-        return nullptr;
-      }
     } else {
       Init = GetDefaultValue(Type.get());
     }
@@ -1003,13 +934,7 @@ Value *AssignmentExprAST::codegen() {
   if (!Val)
     return nullptr;
 
-  // Detect void value (e.g. x = voidFunc())
-  if (Val->getType()->isVoidTy()) {
-    VoidValueError(Loc,
-                   "You're trying to assign the result of a void function.")
-        .raise();
-    return nullptr;
-  }
+    // Void value check is handled by TypeChecker.
 
   // We check LHS type by performing a dummy load through codegen
   Value *LHSVal = LHS->codegen();
@@ -1143,10 +1068,10 @@ Value *UnaryExprAST::codegen() {
       return Builder->CreateFNeg(OperandV);
     if (OperandType->isNamed("int"))
       return Builder->CreateNeg(OperandV);
-    TypeError(CurLoc, "Unknown unary operand type").raise();
+    llvm::report_fatal_error("Internal error: Unknown unary operand type");
     return nullptr;
   default:
-    SemanticError(CurLoc, "Unknown unary operator");
+    llvm::report_fatal_error("Internal error: Unknown unary operator");
     return nullptr;
   }
 }
@@ -1882,42 +1807,15 @@ Value *ReturnExprAST::codegen() {
   }
 
   if (!Val) {
-    // empty return;
-    if (!CurrentFuncReturnType->isVoid()) {
-      TypeError(Loc, "'return;' is only valid inside a void function").raise();
-      return nullptr;
-    }
+    // empty return; TypeChecker has verified this is a void function.
     Builder->CreateRetVoid();
   } else {
-    // return <expr>;
-    if (CurrentFuncReturnType->isVoid()) {
-      TypeError(Loc, "void function cannot return a value").raise();
-      return nullptr;
-    }
+    // return <expr>; TypeChecker has verified the expression type.
     Value *RetVal = Val->codegen();
     if (!RetVal)
       return nullptr;
 
-    // Check for void return value (e.g. return voidFunc())
-    if (RetVal->getType()->isVoidTy()) {
-      VoidValueError(Loc,
-                     "You're trying to return the result of a void function.")
-          .raise();
-      return nullptr;
-    }
-
-    // Check type compatibility before implicit cast
-    TurfTypePtr ActualType = getTurfTypeFromLLVM(RetVal->getType());
-    ActualType =
-        RefineLLVMType(ActualType, CurrentFuncReturnType, RetVal->getType());
-
-    if (!isTypeCompatible(ActualType.get(), CurrentFuncReturnType.get())) {
-      ReturnTypeMismatchError(Loc, CurrentFunction->getName().str(),
-                              turfTypeName(CurrentFuncReturnType.get()),
-                              turfTypeName(ActualType.get()))
-          .raise();
-      return nullptr;
-    }
+    // Type validation and compatibility are handled by the TypeChecker.
 
     RetVal = CastToType(RetVal, CurrentFuncReturnType, "retcast", Loc);
     Builder->CreateRet(RetVal);
@@ -1936,7 +1834,7 @@ Value *ReturnExprAST::codegen() {
 Value *FuncCallExprAST::codegen() {
   auto *Var = dynamic_cast<VariableExprAST *>(Callee.get());
   if (!Var) {
-    SemanticError(Loc, "First-class functions are not supported yet.").raise();
+    llvm::report_fatal_error("Internal error: First-class functions are not supported yet.");
     return nullptr;
   }
   std::string CalleeName = Var->getName();
@@ -2027,50 +1925,24 @@ Value *FuncCallExprAST::codegen() {
     else
       DeclaredType = getTurfTypeFromLLVM(Arg.getType());
 
-    // Check for void argument
-    if (V->getType()->isVoidTy()) {
-      VoidValueError(Loc, "Argument " + std::to_string(Idx + 1) + " to '" +
-                              CalleeName + "' is a void function call.")
-          .raise();
-      return nullptr;
-    }
-
     // Array params: the function expects a pointer to the array data.
     // We must pass the raw AllocaInst of the caller's array, not a loaded
-    // value. Also verify the caller is actually passing an array variable
-    // with a compatible element type.
+    // value. TypeChecker has already verified the caller is passing an array
+    // variable with a compatible element type.
     if (isArrayType(DeclaredType.get())) {
       if (auto *VE = dynamic_cast<VariableExprAST *>(Args[Idx].get())) {
         auto It = NamedValues.find(VE->getName());
-        if (It == NamedValues.end() || !isArrayType(It->second.Type.get())) {
-          SemanticError(Loc, "Argument " + std::to_string(Idx + 1) + " to '" +
-                                 CalleeName + "' must be an array variable")
-              .raise();
-          return nullptr;
-        }
-        // Element-type check
-        const TurfType *ExpElem = getArrayElementType(DeclaredType.get());
-        const TurfType *ActElem = getArrayElementType(It->second.Type.get());
-        if (ExpElem && ActElem && ExpElem->getName() != ActElem->getName()) {
-          ArgumentTypeError(Loc, CalleeName, std::string(Arg.getName()),
-                            Idx + 1, turfTypeName(DeclaredType.get()),
-                            turfTypeName(It->second.Type.get()))
-              .raise();
-          return nullptr;
-        }
-        // Pass the alloca pointer directly (array passed by reference)
+        assert(It != NamedValues.end() && "Array argument not found in NamedValues");
         V = It->second.Alloca;
       } else {
-        SemanticError(Loc, "Argument " + std::to_string(Idx + 1) + " to '" +
-                               CalleeName +
-                               "': arrays must be passed as a variable name")
-            .raise();
+        llvm::report_fatal_error(
+            "Internal error: array argument must be a variable. "
+            "This should have been caught by the TypeChecker.");
         return nullptr;
       }
     } else {
-      // Standard scalar type checking
+      // Standard scalar type casting
       TurfTypePtr ExpectedType = getTurfTypeFromLLVM(Arg.getType());
-      TurfTypePtr ActualType = getTurfTypeFromLLVM(V->getType());
 
       // Type-erasure un-erase: if the value is a pointer (erased generic T)
       // and the expected type is numeric, convert via PtrToInt/bitcast.
@@ -2084,16 +1956,8 @@ Value *FuncCallExprAST::codegen() {
           V = Builder->CreateBitCast(IntVal, Type::getDoubleTy(*TheContext), "unerase_dbl");
         else
           V = IntVal;
-        ActualType = ExpectedType;
       }
 
-      if (!isTypeCompatible(ActualType.get(), ExpectedType.get())) {
-        ArgumentTypeError(Loc, CalleeName, std::string(Arg.getName()), Idx + 1,
-                          turfTypeName(ExpectedType.get()),
-                          turfTypeName(ActualType.get()))
-            .raise();
-        return nullptr;
-      }
       V = CastToType(V, ExpectedType, "argcast", Loc);
     }
 
@@ -2163,47 +2027,9 @@ static void EmitListBoundsCheck(Value *IndexVal, Value *LenVal,
 
 // Array Codegen
 Value *ArrayDeclExprAST::codegen() {
-  if (ElementType->isVoid()) {
-    TypeError(Loc, "Arrays of type 'void' are not allowed").raise();
-    return nullptr;
-  }
+  // Validation (void type, keywords, duplicates, bounds, etc.) is handled by the
+  // Resolver and TypeChecker passes before Codegen.
 
-  if (Keywords.find(Name) != Keywords.end()) {
-    SemanticError(Loc, "Cannot use keyword '" + Name +
-                           "' as a variable name. Keyword is reserved.")
-        .raise();
-    return nullptr;
-  }
-
-  // Check for unreachable declaration
-  if (GlobalSymbolTable && GlobalSymbolTable->CurrentScopeHasEarlyExit()) {
-    UnreachableCodeError(Loc, "declaration").raise();
-    return nullptr;
-  }
-
-  // Check for duplicate declaration in current scope
-  if (GlobalSymbolTable && GlobalSymbolTable->IsSymbolInCurrentScope(Name)) {
-    Symbol *Prev = GlobalSymbolTable->LookupSymbolInCurrentScope(Name);
-    if (Prev) {
-      DuplicateDeclarationError(Loc, Name, Prev->DeclLoc).raise();
-    }
-    return nullptr;
-  }
-
-  // Check for shadowing
-  if (GlobalSymbolTable) {
-    Symbol *Shadowed = GlobalSymbolTable->FindShadowedSymbol(Name);
-    if (Shadowed) {
-      ShadowingWarning(Loc, Name, Shadowed->DeclLoc).warn();
-    }
-  }
-
-  // Validate initializer list size if present
-  if (!InitList.empty() && static_cast<int>(InitList.size()) != Size) {
-    ArraySizeMismatchError(Loc, Name, Size, static_cast<int>(InitList.size()))
-        .raise();
-    return nullptr;
-  }
 
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
@@ -2230,22 +2056,7 @@ Value *ArrayDeclExprAST::codegen() {
       if (!ElemVal)
         return nullptr;
 
-      // Detect void value
-      if (ElemVal->getType()->isVoidTy()) {
-        VoidValueError(Loc, "Element " + std::to_string(i) + " of array '" +
-                                Name + "' is a void function call.")
-            .raise();
-        return nullptr;
-      }
-
-      // Type check: element must be compatible with declared element type
-      TurfTypePtr ElemTurfType = getTurfTypeFromLLVM(ElemVal->getType());
-      if (!isTypeCompatible(ElemTurfType.get(), ElementType.get())) {
-        ArrayTypeMismatchError(Loc, Name, turfTypeName(ElementType.get()),
-                               turfTypeName(ElemTurfType.get()))
-            .raise();
-        return nullptr;
-      }
+      // Element type compatibility and void checks are handled by the TypeChecker.
 
       ElemVal = CastToType(ElemVal, ElementType, "arrayinit", Loc);
 
@@ -2310,7 +2121,7 @@ static void EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
 Value *ArrayAccessExprAST::codegenLValue() {
   const TurfType *BaseTy = getExprType(Base.get());
   if (!BaseTy) {
-    SemanticError(Loc, "Could not determine type of array/list base").raise();
+    llvm::report_fatal_error("Internal error: Could not determine type of array/list base");
     return nullptr;
   }
 
@@ -2329,7 +2140,7 @@ Value *ArrayAccessExprAST::codegenLValue() {
   }
 
   if (!isArrayType(BaseTy)) {
-    SemanticError(Loc, "Base is not an array or pointer").raise();
+    llvm::report_fatal_error("Internal error: Base is not an array or pointer");
     return nullptr;
   }
 
@@ -2343,11 +2154,7 @@ Value *ArrayAccessExprAST::codegenLValue() {
   Value *IndexVal = Index->codegen();
   if (!IndexVal)
     return nullptr;
-  TurfTypePtr IdxType = getTurfTypeFromLLVM(IndexVal->getType());
-  if (IdxType->isNamed("string")) {
-    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType.get())).raise();
-    return nullptr;
-  }
+  // Index type check is handled by TypeChecker.
   IndexVal = CastToType(IndexVal, TurfInt(), "arridx", Loc);
 
   if (ArraySize > 0) {
@@ -2397,7 +2204,7 @@ Value *ArrayAssignExprAST::codegen() {
 
 
   if (!VI || !isArrayType(VI->Type.get())) {
-    SemanticError(Loc, "'" + Name + "' is not an array").raise();
+    llvm::report_fatal_error(llvm::StringRef("Internal error: '" + Name + "' is not an array"));
     return nullptr;
   }
 
@@ -2410,11 +2217,7 @@ Value *ArrayAssignExprAST::codegen() {
     return nullptr;
 
   // Index must be integer
-  TurfTypePtr IdxType = getTurfTypeFromLLVM(IndexVal->getType());
-  if (IdxType->isNamed("string")) {
-    ArrayNonIntegerIndexError(Loc, turfTypeName(IdxType.get())).raise();
-    return nullptr;
-  }
+  // Index type check is handled by TypeChecker.
   IndexVal = CastToType(IndexVal, TurfInt(), "arridx", Loc);
 
   // Compile-time bounds check for constant indices (local arrays only)
@@ -2435,34 +2238,7 @@ Value *ArrayAssignExprAST::codegen() {
   if (!RHSVal)
     return nullptr;
 
-  // Detect void RHS
-  if (RHSVal->getType()->isVoidTy()) {
-    VoidValueError(Loc, "You're trying to store a void value in array '" +
-                            Name + "'.")
-        .raise();
-    return nullptr;
-  }
-
-  // Type check
-  const TurfType *ExprT = getExprType(RHS.get());
-  std::string GotTypeName =
-      ExprT ? ExprT->getName()
-            : getTurfTypeFromLLVM(RHSVal->getType())->getName();
-
-  // Temporary TurfTypePtr for isTypeCompatible check if we had to fallback to
-  // LLVM type
-  TurfTypePtr FallbackType;
-  const TurfType *CheckType = ExprT;
-  if (!CheckType) {
-    FallbackType = getTurfTypeFromLLVM(RHSVal->getType());
-    CheckType = FallbackType.get();
-  }
-
-  if (!isTypeCompatible(CheckType, ElemType)) {
-    ArrayTypeMismatchError(Loc, Name, turfTypeName(ElemType), GotTypeName)
-        .raise();
-    return nullptr;
-  }
+  // RHS void check and type compatibility are handled by TypeChecker.
 
   // Cast RHS to the element type before storing
   TurfTypePtr ElemTypePtr = getTurfTypeFromLLVM(getLLVMType(ElemType));
@@ -2498,10 +2274,8 @@ Value *ArrayLengthExprAST::codegen() {
 
 
   if (!VI || !isArrayType(VI->Type.get())) {
-    SemanticError(
-        Loc,
-        "'" + Name + "' is not an array. '.length' can only be used on arrays.")
-        .raise();
+    llvm::report_fatal_error(
+        llvm::StringRef("Internal error: '" + Name + "' is not an array. '.length' can only be used on arrays."));
     return nullptr;
   }
 
@@ -2516,159 +2290,75 @@ Value *ArrayLengthExprAST::codegen() {
 
 Value *MethodCallExprAST::codegen() {
   if (auto *Var = dynamic_cast<VariableExprAST *>(Base.get())) {
-    std::string ModuleName = Var->getName();
+    const std::string &ModuleName = Var->getName();
 
-    // --- Phase 2: namespace-aware module detection ---
-    // HasModule() is an O(1) hashmap check — no string-prefix scanning over
-    // FuncParamTypes.  It returns true only for modules that have at least one
-    // registered function (i.e. imported std-lib or user-imported files).
+    // Module method call — Resolver + TypeChecker have already validated name,
+    // arity, and types.  Codegen blindly reads ResolvedCallTarget.
     bool IsModule = GlobalSymbolTable && GlobalSymbolTable->HasModule(ModuleName);
-
-
-
     if (IsModule) {
-      // Phase 2 path: resolve through the SymbolTable module registry first.
-      if (GlobalSymbolTable && GlobalSymbolTable->HasModule(ModuleName)) {
-        // Collect argument types for overload resolution.
-        // We use getExprType() to determine each arg's TurfType without
-        // generating any IR yet.  The type name is all that the module overload
-        // resolver needs for exact-match and coercion passes.
-        std::vector<Value *> EvaluatedArgs;
-        std::vector<TurfTypePtr> ArgTypes;
-        for (auto &Arg : Args) {
-          const TurfType *ExprTy = getExprType(Arg.get());
-          TurfTypePtr ActTy;
-          if (ExprTy) {
-            // Reconstruct a shared TurfTypePtr from the raw pointer.
-            // For primitives use the singleton accessors; for generics/
-            // structs/arrays clone via the type name-based factories.
-            if (ExprTy->isNamed("int"))         ActTy = TurfInt();
-            else if (ExprTy->isNamed("double")) ActTy = TurfDouble();
-            else if (ExprTy->isNamed("bool"))   ActTy = TurfBool();
-            else if (ExprTy->isNamed("string")) ActTy = TurfString();
-            else if (ExprTy->isVoid())          ActTy = TurfVoid();
-            else if (isArrayType(ExprTy)) {
-              const auto *ArrTy = dynamic_cast<const ::ArrayType *>(ExprTy);
-              ActTy = makeArrayType(ArrTy->getElementTypePtr(), ArrTy->getSize());
-            } else if (auto *Ptr = dynamic_cast<const TurfPointerType *>(ExprTy))
-              ActTy = std::make_shared<TurfPointerType>(Ptr->getPointee());
-            else if (auto *GT = dynamic_cast<const GenericType *>(ExprTy))
-              ActTy = std::make_shared<GenericType>(GT->getBaseName(),
-                                                    GT->getTypeArgs());
-            else if (auto *ST = dynamic_cast<const TurfStructType *>(ExprTy))
-              ActTy = std::make_shared<TurfStructType>(ST->getName(),
-                                                       ST->getFields());
-            else
-              ActTy = TurfString(); // conservative fallback for unknown types
-          }
-          // nullptr ArgType is tolerated: typesCompatible() returns false for
-          // nullptr, so the overload resolver will reject it safely.
-          ArgTypes.push_back(ActTy);
-        }
-
-        // Resolve overload using the module registry
-        const FunctionSymbol *Resolved =
-            GlobalSymbolTable->resolveModuleFunction(ModuleName, Method, ArgTypes);
-
-        if (!Resolved) {
-          // Check if the function name even exists in this module
-          // (name not found → typo; name found but no overload → type mismatch)
-          std::vector<std::string> ModFuncs =
-              GlobalSymbolTable->GetModuleFunctionNames(ModuleName);
-          bool NameExists = false;
-          for (const auto &fn : ModFuncs)
-            if (fn == Method) { NameExists = true; break; }
-
-          if (!NameExists) {
-            RankedSuggestions Suggestions;
-            if (GlobalSymbolTable) {
-              Suggestions = GlobalSymbolTable->GetRankedSuggestions(Method);
-            }
-            ModuleMethodNotFoundError(Loc, ModuleName, Method, Suggestions).raise();
-          } else {
-            // Name found but types don't match any overload
-            // Build a helpful detail string listing accepted arities
-            std::string Detail = "No '" + Method +
-                "' overload in module '" + ModuleName +
-                "' accepts these argument types or count.";
-            ModuleArityOrTypeError(Loc, ModuleName, Method, Detail).raise();
-          }
-          return nullptr;
-        }
-
-        // Overload resolved — now actually codegen the arguments
-        for (auto &Arg : Args) {
-          Value *V = Arg->codegen();
-          if (!V) return nullptr;
-          EvaluatedArgs.push_back(V);
-        }
-
-        // Look up the LLVM function by mangled name (already compiled by the
-        // prototype pre-pass when the module was imported)
-        llvm::Function *CalleeF =
-            TheModule->getFunction(Resolved->MangledName);
-        if (!CalleeF) {
-          SemanticError(Loc, "Internal error: LLVM function '" +
-                                 Resolved->MangledName +
-                                 "' not found after successful overload resolution")
-              .raise();
-          return nullptr;
-        }
-
-        // Cast arguments to the expected LLVM types (same logic as the
-        // normal FuncCallExprAST argument marshalling)
-        std::vector<Value *> ArgVals;
-        unsigned Idx = 0;
-        for (auto &FArg : CalleeF->args()) {
-          Value *V = EvaluatedArgs[Idx++];
-          llvm::Type *ExpTy = FArg.getType();
-          if (V->getType() != ExpTy) {
-            if (ExpTy->isDoubleTy() && V->getType()->isIntegerTy(64))
-              V = Builder->CreateSIToFP(V, ExpTy, "argcast");
-            else if (ExpTy->isDoubleTy() && V->getType()->isIntegerTy(1))
-              V = Builder->CreateUIToFP(V, ExpTy, "argcast");
-            else if (ExpTy->isIntegerTy(64) && V->getType()->isDoubleTy())
-              V = Builder->CreateFPToSI(V, ExpTy, "argcast");
-            else if (ExpTy->isIntegerTy(64) && V->getType()->isIntegerTy(1))
-              V = Builder->CreateZExt(V, ExpTy, "argcast");
-            else if (ExpTy->isIntegerTy(1) && V->getType()->isIntegerTy(64))
-              V = Builder->CreateICmpNE(
-                      V, ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
-                      "argcast");
-            // pointer <-> integer / pointer passthrough handled by LLVM
-          }
-          ArgVals.push_back(V);
-        }
-
-        return Builder->CreateCall(CalleeF, ArgVals, "modcalltmp");
+      // Codegen all arguments.
+      std::vector<Value *> ArgVals;
+      for (auto &Arg : Args) {
+        Value *V = Arg->codegen();
+        if (!V) return nullptr;
+        ArgVals.push_back(V);
       }
 
-      // Legacy path: module not in SymbolTable yet (shouldn't happen in normal
-      // flow, but keep as safety net). Re-dispatch as FuncCallExprAST.
-      auto ModCall = std::make_unique<FuncCallExprAST>(
-          Loc,
-          std::make_unique<VariableExprAST>(Loc, ModuleName + "_" + Method),
-          std::move(Args));
-      return ModCall->codegen();
+      // ResolvedCallTarget is guaranteed set by the Resolver/TypeChecker.
+      assert(ResolvedCallTarget &&
+             "MethodCallExprAST: ResolvedCallTarget is null — TypeChecker bug");
+      std::string MangledName = ResolvedCallTarget->mangledName();
+
+      llvm::Function *CalleeF = TheModule->getFunction(MangledName);
+      // If the function isn't in the LLVM module, that's a compiler bug —
+      // the prototype pre-pass should have emitted it.
+      if (!CalleeF) {
+        llvm::report_fatal_error(
+            llvm::StringRef("Internal error: LLVM function '" + MangledName +
+            "' not found after successful type-checking. This is a compiler bug."));
+        return nullptr;
+      }
+
+      // Cast arguments to match callee signature (numeric promotions only).
+      std::vector<Value *> CastVals;
+      unsigned Idx = 0;
+      for (auto &FArg : CalleeF->args()) {
+        Value *V = ArgVals[Idx++];
+        llvm::Type *ExpTy = FArg.getType();
+        if (V->getType() != ExpTy) {
+          if (ExpTy->isDoubleTy() && V->getType()->isIntegerTy(64))
+            V = Builder->CreateSIToFP(V, ExpTy, "argcast");
+          else if (ExpTy->isDoubleTy() && V->getType()->isIntegerTy(1))
+            V = Builder->CreateUIToFP(V, ExpTy, "argcast");
+          else if (ExpTy->isIntegerTy(64) && V->getType()->isDoubleTy())
+            V = Builder->CreateFPToSI(V, ExpTy, "argcast");
+          else if (ExpTy->isIntegerTy(64) && V->getType()->isIntegerTy(1))
+            V = Builder->CreateZExt(V, ExpTy, "argcast");
+          else if (ExpTy->isIntegerTy(1) && V->getType()->isIntegerTy(64))
+            V = Builder->CreateICmpNE(
+                    V, ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
+                    "argcast");
+          // pointer <-> integer / pointer passthrough handled by LLVM
+        }
+        CastVals.push_back(V);
+      }
+
+      return Builder->CreateCall(CalleeF, CastVals, "modcalltmp");
     }
   }
 
+  // ── Struct / pointer method call ─────────────────────────────────────────
+  // Base is a struct instance or pointer-to-struct.  ResolvedCallTarget is set
+  // by the TypeChecker.  We just emit the call.
   const TurfType *BaseTy = getExprType(Base.get());
   if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy))
     BaseTy = PtrTy->getPointee().get();
 
   if (!BaseTy) {
-    std::cerr << "Base typeid: " << typeid(*Base.get()).name() << std::endl;
-    if (auto *Var = dynamic_cast<VariableExprAST *>(Base.get())) {
-      RankedSuggestions Suggestions;
-      if (GlobalSymbolTable) {
-        Suggestions = GlobalSymbolTable->GetRankedSuggestions(Method);
-      }
-      std::string FullName = Var->getName() + "." + Method;
-      LookupError(Loc, FullName, Suggestions).raise();
-      return nullptr;
-    }
-    SemanticError(Loc, "Could not determine type of method call base").raise();
+    // TypeChecker should have caught this — reaching here is a compiler bug.
+    llvm::report_fatal_error(
+        "Internal error: could not determine type of method call base. "
+        "This is a compiler bug.");
     return nullptr;
   }
 
@@ -2709,14 +2399,10 @@ Value *MethodCallExprAST::codegen() {
     if (!CalleeF) {
       return nullptr;
     }
-    if (CalleeF->arg_size() != Args.size() + 1) {
-      SemanticError(Loc, "Wrong number of arguments to method '" + Method +
-                             "': expected " +
-                             std::to_string(CalleeF->arg_size() - 1) +
-                             ", got " + std::to_string(Args.size()))
-          .raise();
-      return nullptr;
-    }
+
+    // Arity is guaranteed by the TypeChecker — if it's wrong here, it's a bug.
+    assert(CalleeF->arg_size() == Args.size() + 1 &&
+           "Struct method arity mismatch after TypeChecker — compiler bug");
 
     std::vector<Value *> ArgVals;
     Value *SelfVal = Base->codegenLValue();
@@ -2759,7 +2445,9 @@ Value *MethodCallExprAST::codegen() {
     return Builder->CreateCall(CalleeF, ArgVals, "methodcalltmp");
   }
 
-  SemanticError(Loc, "Type does not support method calls").raise();
+  // TypeChecker should have rejected a method call on an unsupported type.
+  llvm::report_fatal_error(
+      "Internal error: method call on unsupported type. This is a compiler bug.");
   return nullptr;
 }
 
@@ -2936,12 +2624,7 @@ Value *StructInitExprAST::codegen() {
     TurfTypePtr ArgTurfType = getTurfTypeFromLLVM(ArgVal->getType());
     ArgTurfType = RefineLLVMType(ArgTurfType, FieldType, ArgVal->getType());
 
-    if (!isTypeCompatible(ArgTurfType.get(), FieldType.get())) {
-      TypeError(Loc, "Type mismatch in struct initialization for field '" +
-                         SType->getFields()[i].Name + "'")
-          .raise();
-      return nullptr;
-    }
+    // Type mismatch validation is handled by the TypeChecker.
 
     ArgVal = CastToType(ArgVal, FieldType, "fieldcast", Loc);
 

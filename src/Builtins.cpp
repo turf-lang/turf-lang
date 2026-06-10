@@ -98,28 +98,12 @@ static void ensure_builtins_registered() {
  * reporting.
  * @return llvm::Value* The resulting LLVM Value after evaluating the intrinsic,
  * or nullptr on failure.
- * @throws SemanticError if the intrinsic is unknown or arguments are invalid.
+ * @note Arity and type validation are the TypeChecker's responsibility.
+ *       By the time this is called, all arguments are guaranteed correct.
  */
 llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
                               std::vector<llvm::Value *> &Args,
                               SourceLocation Loc) {
-  // --- Arity guard (Phase 1 fix) ---
-  // Check before ANY Args[n] access to prevent out-of-bounds crashes.
-  {
-    auto ArityIt = IntrinsicArity.find(IntrinsicName);
-    if (ArityIt != IntrinsicArity.end() && ArityIt->second >= 0) {
-      int Expected = ArityIt->second;
-      if ((int)Args.size() != Expected) {
-        SemanticError(Loc,
-                      "'" + IntrinsicName + "' requires exactly " +
-                          std::to_string(Expected) + " argument" +
-                          (Expected == 1 ? "" : "s") + ", but got " +
-                          std::to_string(Args.size()))
-            .raise();
-        return nullptr;
-      }
-    }
-  }
 
   if (IntrinsicName == "print") {
     Value *Val = Args[0];
