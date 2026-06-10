@@ -9,10 +9,17 @@
  * modules) but stores only the information the Resolver and TypeChecker need:
  *
  *   VariableSymbol   — name + type + declaration source location + scope depth
- *   FunctionSymbol   — base name, arity, parameter types, return type
- *   ResolverModule   — namespace-isolated map of function overloads
+ *   FunctionParam    — a single parameter (name + type) for diagnostic formatting
+ *   FunctionSymbol   — base name, arity, parameter names+types, return type,
+ *                      source module, and declaration location.
+ *                      NOTE: No mangled name — Codegen derives it on demand from
+ *                      SourceModule + BaseName + ParamTypes.  This keeps the
+ *                      Resolver's error messages in the user's namespace, never
+ *                      the LLVM namespace.
+ *   ResolverModule   — namespace-isolated map of function overloads (imported)
  *   ResolverScope    — flat name→VariableSymbol map + parent pointer
- *   ResolverSymbolTable — hierarchical scope manager + loaded modules
+ *   ResolverSymbolTable — hierarchical scope manager + loaded modules +
+ *                         current-file function registry (two-tier diagnostics)
  *
  * Design constraints:
  *  - No llvm::AllocaInst, no llvm::Type, no LLVM headers of any kind.
@@ -67,25 +74,97 @@ struct VariableSymbol {
         ScopeDepth(ScopeDepth) {}
 };
 
-// ─── FunctionSymbol ──────────────────────────────────────────────────────────
+// ─── FunctionParam ───────────────────────────────────────────────────────────
 
 /**
- * @brief Represents an overloadable function registered in a module or scope.
+ * @brief A single function parameter, carrying both name and type.
  *
- * Stores both the user-visible base name (e.g. "printline") and the fully
- * mangled LLVM function name that will be used by Codegen (e.g.
- * "turf_io_printline_int").  The ParamTypes vector enables arity and overload
- * checking in the TypeChecker pass.
+ * Storing the name enables rich diagnostic messages:
+ *   print(int x)   — rather than just   print(int)
+ *
+ * The TypeChecker and Codegen use ParamTypes extracted from this for overload
+ * resolution and LLVM type mapping respectively.
+ */
+struct FunctionParam {
+  std::string Name; ///< e.g. "x"
+  TurfTypePtr Type; ///< e.g. TurfInt()
+};
+
+// ─── ResolverFunctionSymbol ──────────────────────────────────────────────────
+
+/**
+ * @brief Represents one overload of a function visible to the Resolver.
+ *
+ * Design decisions driven by the two-tier diagnostic system:
+ *
+ *  - NO MangledName field.  The LLVM symbol name is derived by Codegen on
+ *    demand via a deterministic mangling function:
+ *        mangle("io", "printline", [int])  → "turf_io_printline_int"
+ *        mangle("",   "foo",       [int])  → "foo"
+ *    Removing it from the Resolver keeps all error messages in the user's
+ *    namespace, never in LLVM's.
+ *
+ *  - SourceModule: empty = defined in the current file;
+ *                  non-empty = name of the imported module ("io", "math", …).
+ *    This drives the two-tier error format:
+ *
+ *        Error: Unknown function 'pritn'
+ *          Current file:   print(int x)     — line 12
+ *          From io module: io.printline(str) — try 'io.printline(x)'
+ *
+ *  - DeclLoc: source location of the fn keyword, used for "defined at …" notes.
+ *
+ *  - IsIntrinsic: marks compiler-synthesised builtins that never have a Turf
+ *    source location.
  */
 struct ResolverFunctionSymbol {
-  std::string              BaseName;    ///< e.g. "printline"
-  std::string              MangledName; ///< e.g. "turf_io_printline_int"
-  std::vector<TurfTypePtr> ParamTypes;
+  std::string              BaseName;     ///< User-visible name, e.g. "printline"
+  std::string              SourceModule; ///< "" = current file, "io" = imported
+  std::vector<FunctionParam> Params;     ///< Ordered parameters (name + type)
   TurfTypePtr              ReturnType;
+  ResolverSourceLocation   DeclLoc;      ///< Location of the fn definition
   bool                     IsIntrinsic = false;
 
-  /// Convenience: cached arity (always == ParamTypes.size())
-  int arity() const { return static_cast<int>(ParamTypes.size()); }
+  /// Arity of this overload.
+  int arity() const { return static_cast<int>(Params.size()); }
+
+  /// Format a human-readable signature for diagnostics:
+  ///   "print(int x, string y) -> void"
+  std::string signature() const {
+    std::string S = BaseName + "(";
+    for (size_t i = 0; i < Params.size(); ++i) {
+      if (i) S += ", ";
+      S += (Params[i].Type ? Params[i].Type->getName() : "?");
+      if (!Params[i].Name.empty()) { S += " "; S += Params[i].Name; }
+    }
+    S += ") -> ";
+    S += (ReturnType ? ReturnType->getName() : "void");
+    return S;
+  }
+
+  /// Extract just the parameter types — used by overload resolution logic
+  /// and by ResolverModule::lookupFunction.
+  std::vector<TurfTypePtr> paramTypes() const {
+    std::vector<TurfTypePtr> T;
+    T.reserve(Params.size());
+    for (const auto &P : Params) T.push_back(P.Type);
+    return T;
+  }
+
+  /// Derive the LLVM-level mangled name for this overload.
+  /// Mirrors the mangling performed by FuncDefExprAST::codegen():
+  ///   module="io",  base="printline", params=[int] → "turf_io_printline_int"
+  ///   module="",    base="add",       params=[int,int] → "turf_add_int_int"
+  ///   module="",    base="main",      params=[] → "main"
+  std::string mangledName() const {
+    if (BaseName == "main") return "main";
+    std::string S = "turf_";
+    if (!SourceModule.empty()) S += SourceModule + "_";
+    S += BaseName;
+    for (const auto &P : Params)
+      if (P.Type) S += "_" + P.Type->getMangledName();
+    return S;
+  }
 };
 
 // ─── ResolverModule ──────────────────────────────────────────────────────────
@@ -98,7 +177,7 @@ struct ResolverFunctionSymbol {
  */
 class ResolverModule {
 public:
-  std::string Name; ///< e.g. "io", "math", "main"
+  std::string Name; ///< e.g. "io", "math"
 
   /// base name → list of overloads
   std::unordered_map<std::string, std::vector<ResolverFunctionSymbol>>
@@ -108,15 +187,10 @@ public:
 
   /**
    * @brief Register a function overload.
-   * Duplicate mangled names are silently ignored (prototype re-entry).
+   * Duplicate registrations (same BaseName + arity + param types) are
+   * silently ignored to handle prototype re-entry during the pre-pass.
    */
-  void registerFunction(const ResolverFunctionSymbol &Sym) {
-    auto &Overloads = Functions[Sym.BaseName];
-    for (const auto &Existing : Overloads)
-      if (Existing.MangledName == Sym.MangledName)
-        return;
-    Overloads.push_back(Sym);
-  }
+  void registerFunction(const ResolverFunctionSymbol &Sym);
 
   /**
    * @brief Look up a function overload by base name and argument types.
@@ -222,11 +296,23 @@ public:
    */
   bool isDeclaredInCurrentScope(const std::string &Name) const;
 
-  // ── Module / function registry ───────────────────────────────────────────────
+  /**
+   * @brief Collect every variable name visible from the current scope.
+   *
+   * Walks the scope stack from innermost to outermost and deduplicates names
+   * so that a shadowed outer variable is only listed once.  The result is
+   * suitable as the candidate list passed to SuggestionIndex::suggestVisible
+   * when emitting an "Unknown Variable" diagnostic.
+   */
+  std::vector<std::string> getAllVisibleNames() const;
+
+  // ── Module / imported function registry ─────────────────────────────────────
 
   /**
-   * @brief Register a function symbol under the given module namespace.
+   * @brief Register a function symbol under the given imported module namespace.
    * The module is created automatically if it doesn't exist yet.
+   * Use this for `import io` declarations — not for functions defined in the
+   * current file (use registerCurrentFileFunction for those).
    */
   void registerModuleFunction(const std::string &ModuleName,
                                const ResolverFunctionSymbol &Sym);
@@ -258,13 +344,82 @@ public:
    */
   const ResolverModule *getModule(const std::string &ModuleName) const;
 
+  // ── Current-file function registry ──────────────────────────────────────────
+  // These track `fn` definitions in the file being compiled, separately from
+  // imported module functions.  This separation powers the two-tier diagnostic:
+  //
+  //   Error: Unknown function 'pritn'
+  //     Current file:   print(int x)      — line 12
+  //     From io module: io.printline(str)  — try 'io.printline(x)'
+  //
+  // Issue #6 wires visitFuncDef to call registerCurrentFileFunction.
+
+  /**
+   * @brief Register a top-level fn definition from the current source file.
+   * Duplicate registrations (same signature) are silently ignored.
+   * Emits no error on overloads — that is the TypeChecker's job.
+   */
+  void registerCurrentFileFunction(const ResolverFunctionSymbol &Sym);
+
+  /**
+   * @brief Return all overloads of @p Name defined in the current file.
+   * Returns an empty vector if the name is not defined here.
+   */
+  std::vector<const ResolverFunctionSymbol *>
+  lookupCurrentFileFunctions(const std::string &Name) const;
+
+  /**
+   * @brief Return all function names defined in the current file.
+   * Used as the Tier-1 candidate list for Damerau-Levenshtein suggestions
+   * when an unknown function name is encountered.
+   */
+  std::vector<std::string> getAllCurrentFileFunctionNames() const;
+
+  // ── Two-tier diagnostic helpers ──────────────────────────────────────────────
+
+  /**
+   * @brief Search every loaded module for overloads matching @p Name.
+   *
+   * Returns a list of (module_name, symbol_ptr) pairs so the diagnostic
+   * can format:  "From io: io.printline(str)  — try 'io.printline(x)'"
+   *
+   * This is Tier-2 in the error hierarchy — checked after the current-file
+   * registry fails.
+   */
+  struct ModuleFunctionMatch {
+    std::string ModuleName;
+    const ResolverFunctionSymbol *Symbol;
+  };
+  std::vector<ModuleFunctionMatch>
+  findInModules(const std::string &Name) const;
+
+  /**
+   * @brief Collect every function name visible across ALL modules.
+   * Used to compute Damerau-Levenshtein suggestions spanning both tiers:
+   * the Resolver can rank and present them grouped by source.
+   */
+  std::vector<std::string> getAllModuleFunctionNames() const;
+
+  /**
+   * @brief Dumps the contents of the symbol table (all scopes and modules) to the output stream.
+   */
+  void dump(std::ostream &OS) const;
+
 private:
   // Stack of scope objects.  We own them via unique_ptr; the parent pointer
   // inside ResolverScope is a raw (non-owning) back-reference.
   std::vector<std::unique_ptr<ResolverScope>> ScopeStack_;
   size_t Depth_ = 0;
 
+  /// Imported module registries (one per 'import X' statement).
   std::unordered_map<std::string, std::unique_ptr<ResolverModule>> Modules_;
+
+  /// Top-level fn definitions from the current source file.
+  /// Keyed by bare function name; value is the list of overloads.
+  /// Separate from Modules_ so the two-tier error system can distinguish
+  /// "this file" from "imported modules" without string-matching module names.
+  std::unordered_map<std::string, std::vector<ResolverFunctionSymbol>>
+      CurrentFileFunctions_;
 };
 
 #endif // RESOLVER_SYMBOL_TABLE_H

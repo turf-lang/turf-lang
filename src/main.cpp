@@ -21,6 +21,8 @@
 #include "Lint.h"
 #include "Parser.h"
 #include "CFG.h"
+#include "Resolver.h"
+#include "TypeChecker.h"
 #include "SLMEngine.h"
 #include "SymbolTable.h"
 #include "Types.h"
@@ -58,6 +60,11 @@ struct CompilerOptions {
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
+  bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
+  bool DumpResolverSymbols = false;   // --dump-resolver-symbols: print symbol table after resolution
+  bool DumpResolved = false;          // --dump-resolved: run Resolver then print annotated AST (Issue #5)
+  bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
+  bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
 };
 
 static CompilerOptions parseArgs(int argc, char **argv) {
@@ -72,6 +79,26 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.AIEnabled = true;
     } else if (arg == "--dump-ast") {
       opts.DumpAST = true;
+    } else if (arg == "--resolve") {
+      opts.RunResolver = true;
+    } else if (arg == "--dump-resolver-symbols") {
+      opts.RunResolver = true;
+      opts.DumpResolverSymbols = true;
+    } else if (arg == "--dump-resolved") {
+      // Implies --resolve: run the Resolver, then print the annotated AST
+      // showing which nodes have a green ResolvedSymbol badge (Issue #5 demo).
+      opts.RunResolver = true;
+      opts.DumpResolved = true;
+    } else if (arg == "--typecheck") {
+      // Implies --resolve: TypeChecker requires a resolved symbol table.
+      opts.RunResolver = true;
+      opts.RunTypeChecker = true;
+    } else if (arg == "--dump-typechecked") {
+      // Implies --resolve + --typecheck: run both passes, then print the
+      // type-annotated AST showing each node's inferred TurfType (Issue #7).
+      opts.RunResolver = true;
+      opts.RunTypeChecker = true;
+      opts.DumpTypechecked = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg[0] == '-') {
@@ -84,7 +111,14 @@ static CompilerOptions parseArgs(int argc, char **argv) {
 
   if (opts.InputFile.empty()) {
     std::cerr
-        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] [--dump-ast]\n";
+        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] "
+           "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
+           "[--dump-resolved] [--typecheck] [--dump-typechecked]\n";
+    std::exit(1);
+  }
+
+  if (opts.InputFile.size() < 3 || opts.InputFile.substr(opts.InputFile.size() - 3) != ".tr") {
+    std::cerr << "Error: Input file must have a '.tr' extension (got: " << opts.InputFile << ").\n";
     std::exit(1);
   }
 
@@ -218,9 +252,13 @@ int main(int argc, char **argv) {
   // We perform a second full parse of the file, i.e. only processing
   // FuncDefExprAST nodes, which registers the LLVM prototype on first
   // codegen call (before the body exists).
+  // PreludeAST is kept alive so the Resolver can walk it later and register
+  // the `io` module (and any other prelude imports) in its module registry
+  // before it processes user code.
+  std::unique_ptr<ExprAST> PreludeAST;
+
   {
-    std::ifstream PrePassFile(opts.InputFile);
-    if (PrePassFile.is_open()) {
+    if (true) {
       // Swap the global SourceFile for the pre-pass stream
       SourceFile.close();
       SourceFile.open(opts.InputFile);
@@ -235,54 +273,36 @@ int main(int argc, char **argv) {
       llvm::sys::path::remove_filename(PreludePath);
       llvm::sys::path::append(PreludePath, "..", "lib", "std", "prelude.tr");
 
-      if (auto PreludeAST = ParseFile(PreludePath.str().str())) {
-        RecordParsedTopLevelAST(PreludeAST.get());
-        PreludeAST->codegen();
+      if (auto Parsed = ParseFile(PreludePath.str().str())) {
+        RecordParsedTopLevelAST(Parsed.get());
+        Parsed->codegen();
+        PreludeAST = std::move(Parsed); // keep alive for Resolver
       }
 
+      // ── Pre-pass sub-pass 1: Parse ALL top-level declarations ─────────────
+      // We collect every fn/struct/import node BEFORE codegenning any body.
+      // This is required so the Resolver can pre-declare all functions before
+      // we attempt to codegen any call sites (Issue #9: Codegen reads
+      // ResolvedCallTarget blindly, so Resolver must run first).
+      std::vector<std::unique_ptr<ExprAST>> PrePassASTs;
+
       while (CurTok != TOK_EOF) {
-        if (CurTok == ';') {
-          getNextToken();
-          continue;
-        }
+        if (CurTok == ';') { getNextToken(); continue; }
         if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_IMPORT ||
             CurTok == TOK_AT) {
-          // Save scope depth so we can restore it if codegen aborts via
-          // longjmp. Without this, a function that references an unknown
-          // variable causes EnterScope() to be called but ExitScope() to be
-          // skipped (longjmp bypasses all destructors and normal returns),
-          // leaving the scope stack dirty and the global scope's HasEarlyExit
-          // flag stale.
-          size_t SavedDepth =
-              GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
-
-          // Parse and codegen prototype-only. Guard with setjmp so a bad
-          // fn body doesn't kill the whole pre-pass.
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
             if (AST) {
               if (RequiresSemicolon(AST.get())) {
-                if (CurTok != ';') {
-                  LogErrorAt(CurLoc, "Expected ';' after statement");
-                } else {
-                  getNextToken(); // eat ';'
-                }
+                if (CurTok != ';') LogErrorAt(CurLoc, "Expected ';' after statement");
+                else getNextToken();
               }
               RecordParsedTopLevelAST(AST.get());
               LintExpression(AST.get());
-              AST->codegen();
+              PrePassASTs.push_back(std::move(AST));
             }
           } else {
-            // longjmp landed here: diagnostic already recorded.
-            // Unwind any scopes that were opened during the partial compile,
-            // then clear any stale early-exit flag so subsequent top-level
-            // declarations are not falsely flagged as unreachable.
-            if (GlobalSymbolTable) {
-              GlobalSymbolTable->ResetToDepth(SavedDepth);
-              GlobalSymbolTable->ResetEarlyExitForCurrentScope();
-            }
-            // Skip to next fn, struct or EOF
             while (CurTok != TOK_FN && CurTok != TOK_STRUCT &&
                    CurTok != TOK_IMPORT && CurTok != TOK_AT &&
                    CurTok != TOK_EOF)
@@ -290,8 +310,82 @@ int main(int argc, char **argv) {
           }
           g_recoverActive = false;
         } else {
-          getNextToken(); // skip non-fn tokens
+          getNextToken();
         }
+      }
+
+      // ── Pre-pass sub-pass 2a: Resolve ─────────────────────────────────────
+      // Run the Resolver over everything parsed so far (prelude + user fns).
+      // This populates ResolvedCandidates on every FuncCallExprAST and sets
+      // ResolvedCallTarget for unambiguous single-overload calls.
+      Resolver PreR;
+      {
+        bool PreResolverClean = true;
+        g_recoverActive = true;
+        if (setjmp(g_recoverJmp) == 0) {
+          if (PreludeAST)
+            PreR.resolve(PreludeAST.get());
+          PreR.resolveAll(PrePassASTs);
+        } else {
+          PreResolverClean = false;
+        }
+        g_recoverActive = false;
+        if (!PreResolverClean) {
+          DiagnosticEngine::flushAll();
+          return 1;
+        }
+      }
+
+      // ── Pre-pass sub-pass 2b: TypeCheck ───────────────────────────────────
+      // Run the TypeChecker over the pre-pass ASTs to narrow overloaded calls
+      // (e.g. io.printline has 4 overloads; TypeChecker picks the right one
+      // and sets ResolvedCallTarget so sub-pass 3b codegen reads it blindly).
+      {
+        TypeChecker PreTC(PreR.symbolTable());
+        g_recoverActive = true;
+        if (setjmp(g_recoverJmp) == 0) {
+          if (PreludeAST)
+            PreTC.check(PreludeAST.get());
+          PreTC.checkAll(PrePassASTs);
+        }
+        // Errors in the pre-pass TC are informational only here — the main-pass
+        // TC will re-check and report them with full diagnostics.
+        g_recoverActive = false;
+      }
+
+      // ── Pre-pass sub-pass 3a: Emit all LLVM function prototypes ────────────
+      // Before compiling any body, declare every function in LLVM so that
+      // forward calls (main calling helper() defined later) work correctly.
+      // FuncDefExprAST::codegen() creates the prototype on the first call when
+      // TheModule->getFunction(mangledName) returns null.
+      // We set a global flag to stop after prototype creation.
+      g_protoOnlyPass = true;
+      for (auto &AST : PrePassASTs) {
+        if (dynamic_cast<FuncDefExprAST *>(AST.get()) ||
+            dynamic_cast<ModuleImportExprAST *>(AST.get())) {
+          g_recoverActive = true;
+          if (setjmp(g_recoverJmp) == 0) {
+            AST->codegen();
+          }
+          g_recoverActive = false;
+        }
+      }
+      g_protoOnlyPass = false;
+
+      // ── Pre-pass sub-pass 3b: Full codegen (bodies) ───────────────────────
+      // All prototypes exist now — codegen each function body safely.
+      for (auto &AST : PrePassASTs) {
+        size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
+        g_recoverActive = true;
+        if (setjmp(g_recoverJmp) == 0) {
+          AST->codegen();
+        } else {
+          if (GlobalSymbolTable) {
+            GlobalSymbolTable->ResetToDepth(SavedDepth);
+            GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+          }
+        }
+        g_recoverActive = false;
       }
 
       // Re-open for the main pass
@@ -301,6 +395,7 @@ int main(int argc, char **argv) {
       CurTok = 0;
     }
   }
+
 
   // Main pass: re-enter the entry block and codegen everything.
   // Builder->SetInsertPoint(Entry);
@@ -334,10 +429,13 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    // fn definitions were already fully codegenned in the pre-pass.
-    // Parse them here to keep the token stream in sync and to lint them,
-    // but do NOT push them into TopLevelASTs (that would re-codegen them).
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT) {
+    // fn definitions and import statements were already fully codegenned in
+    // the pre-pass.  Parse them here to keep the token stream in sync and to
+    // lint/resolve them, but do NOT push them into TopLevelASTs (that would
+    // re-codegen them).  TOK_IMPORT is included here because `import` nodes
+    // are top-level declarations handled by the pre-pass, exactly like `fn`.
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT ||
+        CurTok == TOK_IMPORT) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();
@@ -412,6 +510,126 @@ int main(int argc, char **argv) {
     for (auto &AST : TopLevelASTs)
       Printer.print(AST.get());
     std::cout << "\n=== End AST Dump ===\n\n";
+  }
+
+  // ── Resolver pass (mandatory, Issue #9) ─────────────────────────────────
+  // The Resolver runs unconditionally on every compilation.  It annotates the
+  // AST with resolved symbols, candidate overloads, and arity-checked call
+  // targets so that Codegen can read them blindly without re-doing any name
+  // lookup or arity checking.
+  //
+  // If resolution fails the process aborts here — Codegen must never run on
+  // an unresolved AST.
+  Resolver R;
+  {
+    bool ResolverClean = true;
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      // Resolve the prelude first so that module imports (e.g. `import io`)
+      // are registered in the Resolver's module registry before any user
+      // code is walked.
+      if (PreludeAST)
+        R.resolve(PreludeAST.get());
+      R.resolveAll(FnASTs);
+      R.resolveAll(TopLevelASTs);
+    } else {
+      ResolverClean = false;
+    }
+    g_recoverActive = false;
+
+    if (!ResolverClean) {
+      DiagnosticEngine::flushAll();
+      return 1;
+    }
+  }
+
+  // --resolve: verbose output for presentation / debugging.
+  // The Resolver already ran above; this block just prints its results.
+  if (opts.RunResolver) {
+    std::cerr << "\n[Resolver] Running name-resolution pass (Issue #4)...\n";
+    std::cerr << "[Resolver] \u2713  All names resolved successfully. "
+                 "Scope depth on exit: "
+              << R.symbolTable().currentDepth() << "\n";
+
+    if (opts.DumpResolverSymbols)
+      R.symbolTable().dump(std::cerr);
+
+    if (opts.DumpResolved) {
+      ASTPrinter Printer;
+      std::cout << "\n";
+      std::cout << "\033[1m=== Resolved AST Dump (Issue #5) ===\033[0m\n";
+      std::cout << "  \033[32m[resolved \u2713]\033[0m = Resolver attached a VariableSymbol pointer\n";
+      std::cout << "  \033[31m[NOT resolved \u2717]\033[0m = pointer is null (structural node or leaf)\n";
+      std::cout << "\n";
+      std::cout << "\033[1m--- Functions ---\033[0m\n";
+      for (auto &AST : FnASTs)
+        Printer.print(AST.get());
+      std::cout << "\n\033[1m--- Top-Level Statements ---\033[0m\n";
+      for (auto &AST : TopLevelASTs)
+        Printer.print(AST.get());
+      std::cout << "\n\033[1m=== End Resolved AST Dump ===\033[0m\n\n";
+    }
+  }
+
+
+
+  // ── TypeChecker pass (mandatory, Issue #11) ──────────────────────────────
+  // The TypeChecker runs unconditionally on every compilation, immediately
+  // after the Resolver.  It infers and validates types on every AST node,
+  // populating type annotations that Codegen reads blindly.
+  //
+  // If the TypeChecker finds any errors, compilation aborts here — Codegen
+  // must never run on a type-incorrect AST.
+  //
+  // Pipeline: Parser → Resolver → TypeChecker → Codegen
+  //
+  // --typecheck and --dump-typechecked still control the debug banner and the
+  // annotated-AST dump, but the TC pass itself is not optional.
+  TypeChecker TC(R.symbolTable());
+  {
+    bool TCClean = true;
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      if (PreludeAST)
+        TC.check(PreludeAST.get());
+      TC.checkAll(FnASTs);
+      TC.checkAll(TopLevelASTs);
+    } else {
+      TCClean = false;
+    }
+    g_recoverActive = false;
+
+    if (opts.RunTypeChecker) {
+      if (TCClean)
+        std::cerr << "\n[TypeChecker] Running type-inference pass (Issue #7)...\n"
+                  << "[TypeChecker] \u2713  Type inference completed without errors.\n";
+      else
+        std::cerr << "\n[TypeChecker] Running type-inference pass (Issue #7)...\n"
+                  << "[TypeChecker] \u2717  Type checking failed (see error above).\n";
+    }
+
+    if (opts.DumpTypechecked && TCClean) {
+      ASTPrinter Printer;
+      Printer.setTypeChecker(&TC);
+      std::cout << "\n";
+      std::cout << "\033[1m=== Type-Checked AST Dump (Issue #7) ===\033[0m\n";
+      std::cout << "  \033[32m[resolved \u2713]\033[0m = symbol resolved\n";
+      std::cout << "  \033[36m[module: X \u2713]\033[0m = module qualifier\n";
+      std::cout << "  \033[35m[: type]\033[0m = TypeChecker inferred type\n";
+      std::cout << "\n";
+      std::cout << "\033[1m--- Functions ---\033[0m\n";
+      for (auto &AST : FnASTs)
+        Printer.print(AST.get());
+      std::cout << "\n\033[1m--- Top-Level Statements ---\033[0m\n";
+      for (auto &AST : TopLevelASTs)
+        Printer.print(AST.get());
+      std::cout << "\n\033[1m=== End Type-Checked AST Dump ===\033[0m\n\n";
+    }
+
+    if (!TCClean) {
+      DiagnosticEngine::flushAll();
+      return 1;
+    }
   }
 
   // Phase Separation: Codegen All

@@ -1,0 +1,23 @@
+// resolver_demo_fail.tr
+// This file should FAIL the Resolver with an "Unknown Variable" error.
+// 'ghost' is never declared — the Resolver should catch it and suggest
+// the closest match ('x') via Damerau-Levenshtein distance.
+//
+// Run with:  turf tests/resolver_demo_fail.tr --resolve
+//
+// Expected output (roughly):
+//   [Resolver] Running name-resolution pass (Issue #4 — shadow mode)...
+//   error: I can't find anything named 'ghost'.
+//     It may be from the current file: 'x', 'y', ...
+//   [Resolver] ✗  Name resolution failed (see error above).
+
+fn int main() {
+    int x = 42;
+    int y = x + 1;
+
+    // 'ghost' is not declared anywhere — Resolver must raise ReferenceError
+    // with Damerau-Levenshtein suggestions pulled from visible names {x, y}.
+    int z = ghost + y;
+
+    return 0;
+}

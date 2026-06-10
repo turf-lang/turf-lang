@@ -31,6 +31,7 @@ extern std::map<std::string, int> Keywords;
 // raise() calls longjmp(g_recoverJmp, 1) to unwind back to that point.
 extern jmp_buf g_recoverJmp;
 extern bool g_recoverActive; // true only while inside a setjmp guard
+extern bool g_protoOnlyPass; // true during sub-pass 3a: emit prototypes only
 
 // When true, the SLM is loaded and AI suggestions are generated for errors.
 // Controlled by the --smart CLI flag. Default is off for deterministic output.

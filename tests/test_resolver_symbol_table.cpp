@@ -187,8 +187,8 @@ TEST(test_module_registration_and_lookup) {
 
   ResolverFunctionSymbol PrintInt;
   PrintInt.BaseName    = "printline";
-  PrintInt.MangledName = "turf_io_printline_int";
-  PrintInt.ParamTypes  = {TurfInt()};
+  PrintInt.SourceModule = "io";
+  PrintInt.Params      = {{"x", TurfInt()}};
   PrintInt.ReturnType  = TurfVoid();
 
   RST.registerModuleFunction("io", PrintInt);
@@ -196,7 +196,8 @@ TEST(test_module_registration_and_lookup) {
 
   auto *Resolved = RST.resolveModuleFunction("io", "printline", {TurfInt()});
   EXPECT_TRUE(Resolved != nullptr);
-  EXPECT_EQ(Resolved->MangledName, std::string("turf_io_printline_int"));
+  EXPECT_EQ(Resolved->BaseName, std::string("printline"));
+  EXPECT_EQ(Resolved->SourceModule, std::string("io"));
 }
 
 TEST(test_overload_resolution_exact_match) {
@@ -204,14 +205,14 @@ TEST(test_overload_resolution_exact_match) {
 
   ResolverFunctionSymbol AbsInt;
   AbsInt.BaseName    = "abs";
-  AbsInt.MangledName = "turf_math_abs_int";
-  AbsInt.ParamTypes  = {TurfInt()};
+  AbsInt.SourceModule = "math";
+  AbsInt.Params      = {{"x", TurfInt()}};
   AbsInt.ReturnType  = TurfInt();
 
   ResolverFunctionSymbol AbsDouble;
   AbsDouble.BaseName    = "abs";
-  AbsDouble.MangledName = "turf_math_abs_double";
-  AbsDouble.ParamTypes  = {TurfDouble()};
+  AbsDouble.SourceModule = "math";
+  AbsDouble.Params      = {{"x", TurfDouble()}};
   AbsDouble.ReturnType  = TurfDouble();
 
   RST.registerModuleFunction("math", AbsInt);
@@ -220,12 +221,12 @@ TEST(test_overload_resolution_exact_match) {
   // Exact match: int arg → int overload
   auto *R1 = RST.resolveModuleFunction("math", "abs", {TurfInt()});
   EXPECT_TRUE(R1 != nullptr);
-  EXPECT_EQ(R1->MangledName, std::string("turf_math_abs_int"));
+  EXPECT_EQ(R1->ReturnType->getName(), std::string("int"));
 
   // Exact match: double arg → double overload
   auto *R2 = RST.resolveModuleFunction("math", "abs", {TurfDouble()});
   EXPECT_TRUE(R2 != nullptr);
-  EXPECT_EQ(R2->MangledName, std::string("turf_math_abs_double"));
+  EXPECT_EQ(R2->ReturnType->getName(), std::string("double"));
 }
 
 TEST(test_overload_resolution_no_match_returns_null) {
@@ -233,8 +234,8 @@ TEST(test_overload_resolution_no_match_returns_null) {
 
   ResolverFunctionSymbol Fn;
   Fn.BaseName    = "concat";
-  Fn.MangledName = "turf_string_concat";
-  Fn.ParamTypes  = {TurfString(), TurfString()};
+  Fn.SourceModule = "strings";
+  Fn.Params      = {{"a", TurfString()}, {"b", TurfString()}};
   Fn.ReturnType  = TurfString();
 
   RST.registerModuleFunction("strings", Fn);
@@ -254,8 +255,8 @@ TEST(test_cross_module_isolation) {
 
   ResolverFunctionSymbol IoFn;
   IoFn.BaseName    = "read";
-  IoFn.MangledName = "turf_io_read";
-  IoFn.ParamTypes  = {};
+  IoFn.SourceModule = "io";
+  IoFn.Params      = {};
   IoFn.ReturnType  = TurfString();
 
   RST.registerModuleFunction("io", IoFn);
@@ -281,8 +282,8 @@ TEST(test_get_module_function_names) {
   for (const std::string &Name : {"sqrt", "abs", "pow"}) {
     ResolverFunctionSymbol Sym;
     Sym.BaseName    = Name;
-    Sym.MangledName = "turf_math_" + Name;
-    Sym.ParamTypes  = {TurfDouble()};
+    Sym.SourceModule = "math";
+    Sym.Params      = {{"x", TurfDouble()}};
     Sym.ReturnType  = TurfDouble();
     RST.registerModuleFunction("math", Sym);
   }
@@ -295,13 +296,13 @@ TEST(test_get_module_function_names) {
   EXPECT_EQ(Names[2], std::string("sqrt"));
 }
 
-TEST(test_duplicate_mangled_name_ignored) {
+TEST(test_duplicate_signature_ignored) {
   ResolverSymbolTable RST;
 
   ResolverFunctionSymbol Sym;
   Sym.BaseName    = "print";
-  Sym.MangledName = "turf_io_print_int";
-  Sym.ParamTypes  = {TurfInt()};
+  Sym.SourceModule = "io";
+  Sym.Params      = {{"x", TurfInt()}};
   Sym.ReturnType  = TurfVoid();
 
   RST.registerModuleFunction("io", Sym);
@@ -309,6 +310,76 @@ TEST(test_duplicate_mangled_name_ignored) {
 
   auto Names = RST.getModuleFunctionNames("io");
   EXPECT_EQ(Names.size(), 1u); // only one "print"
+}
+
+// ─── Two-tier registry tests ──────────────────────────────────────────────────
+
+TEST(test_current_file_function_registration) {
+  ResolverSymbolTable RST;
+
+  ResolverFunctionSymbol MyFn;
+  MyFn.BaseName    = "compute";
+  MyFn.SourceModule = ""; // current file
+  MyFn.Params      = {{"a", TurfInt()}, {"b", TurfInt()}};
+  MyFn.ReturnType  = TurfInt();
+  MyFn.DeclLoc     = {10, 1};
+
+  RST.registerCurrentFileFunction(MyFn);
+
+  auto Results = RST.lookupCurrentFileFunctions("compute");
+  EXPECT_EQ(Results.size(), 1u);
+  EXPECT_EQ(Results[0]->BaseName, std::string("compute"));
+  EXPECT_EQ(Results[0]->SourceModule, std::string(""));
+  EXPECT_EQ(Results[0]->DeclLoc.Line, 10);
+}
+
+TEST(test_current_file_functions_not_in_module_tier) {
+  ResolverSymbolTable RST;
+
+  ResolverFunctionSymbol MyFn;
+  MyFn.BaseName    = "localFn";
+  MyFn.SourceModule = "";
+  MyFn.Params      = {};
+  MyFn.ReturnType  = TurfVoid();
+  RST.registerCurrentFileFunction(MyFn);
+
+  // Must NOT appear when searching module tier
+  auto ModuleMatches = RST.findInModules("localFn");
+  EXPECT_EQ(ModuleMatches.size(), 0u);
+}
+
+TEST(test_two_tier_find_in_modules) {
+  ResolverSymbolTable RST;
+
+  // Register in two different modules under the same base name
+  ResolverFunctionSymbol IoRead;
+  IoRead.BaseName    = "read";
+  IoRead.SourceModule = "io";
+  IoRead.Params      = {};
+  IoRead.ReturnType  = TurfString();
+  RST.registerModuleFunction("io", IoRead);
+
+  ResolverFunctionSymbol FsRead;
+  FsRead.BaseName    = "read";
+  FsRead.SourceModule = "fs";
+  FsRead.Params      = {{"path", TurfString()}};
+  FsRead.ReturnType  = TurfString();
+  RST.registerModuleFunction("fs", FsRead);
+
+  // findInModules should return entries from BOTH modules
+  auto Matches = RST.findInModules("read");
+  EXPECT_EQ(Matches.size(), 2u);
+}
+
+TEST(test_signature_formatting) {
+  ResolverFunctionSymbol Sym;
+  Sym.BaseName   = "print";
+  Sym.Params     = {{"x", TurfInt()}, {"sep", TurfString()}};
+  Sym.ReturnType = TurfVoid();
+
+  // signature() should produce "print(int x, string sep) -> void"
+  auto Sig = Sym.signature();
+  EXPECT_EQ(Sig, std::string("print(int x, string sep) -> void"));
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -330,7 +401,12 @@ int main() {
   RUN(test_cross_module_isolation);
   RUN(test_unknown_module_returns_null);
   RUN(test_get_module_function_names);
-  RUN(test_duplicate_mangled_name_ignored);
+  RUN(test_duplicate_signature_ignored);
+  // Two-tier tests
+  RUN(test_current_file_function_registration);
+  RUN(test_current_file_functions_not_in_module_tier);
+  RUN(test_two_tier_find_in_modules);
+  RUN(test_signature_formatting);
 
   std::cout << "\n=== Results: " << TestsPassed << " passed, "
             << TestsFailed << " failed ===\n";

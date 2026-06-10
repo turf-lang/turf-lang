@@ -116,7 +116,9 @@ add_executable(turf
   src/SLMEngine.cpp
   src/SLMIntegration.cpp
   src/ResolverSymbolTable.cpp
+  src/Resolver.cpp
   src/SymbolTable.cpp
+  src/TypeChecker.cpp
   src/Types.cpp
   src/ValueRange.cpp
 )
@@ -137,6 +139,35 @@ add_executable(test_type_hierarchy
 )
 target_include_directories(test_type_hierarchy PRIVATE include)
 target_compile_options(test_type_hierarchy PRIVATE -Wall -Wextra -std=c++20)
+
+# ─── Standalone unit test: TypeChecker — Issue #7/#135 ───────────────────────
+# The test builds real AST nodes (NumberExprAST etc.) which requires AST.h
+# (→ llvm/IR/Value.h), so we include LLVM headers and link LLVM.
+# TYPECHECKER_NO_ERRORS suppresses Errors.h so we can install a custom
+# throwing error handler without pulling in the full Codegen/LLVM IR chain.
+# Lexer.cpp provides globals (SourceFilename, g_recoverJmp, etc.) referenced
+# by AST.h.  ast_stubs.cpp provides ExprAST::NextNodeID / ResetNodeIDCounter
+# (normally in Sandbox.cpp, which we cannot link here).
+add_executable(test_type_checker
+  tests/test_type_checker.cpp
+  tests/ast_stubs.cpp
+  tests/codegen_stubs.cpp
+  tests/builtins_stubs.cpp
+  src/TypeChecker.cpp
+  src/ResolverSymbolTable.cpp
+  src/Types.cpp
+  src/Lexer.cpp
+)
+target_include_directories(test_type_checker PRIVATE
+  include
+  ${LLVM_INCLUDE_DIRS}
+)
+target_compile_definitions(test_type_checker PRIVATE
+  TYPECHECKER_NO_ERRORS
+  ${LLVM_DEFINITIONS}
+)
+target_compile_options(test_type_checker PRIVATE -Wall -Wextra -std=c++20)
+target_link_libraries(test_type_checker PRIVATE LLVM)
 
 target_include_directories(turf PRIVATE
   include

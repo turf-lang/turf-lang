@@ -1,0 +1,8 @@
+import math
+
+fn int main() {
+    io.printline("Works"); // prints Works
+    io.printline(math.abs(-10)); // prints 10
+
+    return 0;
+}

@@ -1,0 +1,48 @@
+// resolver_demo_pass.tr
+// This file should pass the Resolver with NO errors.
+// Every variable is declared before it is used, scopes are correctly entered
+// and exited, and the for-loop induction variable is properly scoped.
+//
+// Run with:  turf tests/resolver_demo_pass.tr --resolve
+//
+// Expected output:
+//   [Resolver] Running name-resolution pass (Issue #4 — shadow mode)...
+//   [Resolver] ✓  All names resolved successfully. Scope depth on exit: 0
+
+fn int add(int a, int b) {
+    return a + b;
+}
+
+fn int clamp(int val, int lo, int hi) {
+    if val < lo {
+        return lo;
+    } else if val > hi {
+        return hi;
+    } else {
+        return val;
+    }
+}
+
+fn int main() {
+    // Basic declarations and uses — resolver must see x and y before sum
+    int x = 10;
+    int y = 20;
+    int sum = add(x, y);
+
+    // Nested if-scope: 'tmp' is only visible inside the if body
+    if sum > 0 {
+        int tmp = sum * 2;
+        int inner = tmp + 1;
+    }
+    // 'tmp' and 'inner' are gone here — resolver correctly doesn't see them
+
+    // Loop variable scoping: 'i' lives only inside the for body
+    for i in 0..5 step i += 1 {
+        int sq = i * i;
+    }
+
+    // All names still visible: x, y, sum, clamped
+    int clamped = clamp(sum, 0, 100);
+
+    return 0;
+}

@@ -3,6 +3,7 @@
 
 #include "ASTVisitor.h"
 #include "Lexer.h"
+#include "ResolverSymbolTable.h" // VariableSymbol — LLVM-free, safe to include here
 #include "Types.h"
 #include "llvm/IR/Value.h"
 #include <memory>
@@ -138,8 +139,22 @@ public:
   llvm::Value *codegenLValue() override;
   void accept(ASTVisitor &V) override { V.visitVariable(*this); }
   const SourceLocation &getLoc() const { return Loc; }
+
+  /// Populated by the Resolver after a successful lookupVariable().
+  /// clone() returns a fresh node, so this is nullptr in cloned trees —
+  /// cloned ASTs must be re-resolved before TypeChecking/Codegen.
+  std::shared_ptr<VariableSymbol> ResolvedSymbol;
+  const VariableSymbol *getResolvedSymbol() const { return ResolvedSymbol.get(); }
+
+  /// Populated by the Resolver when this node is the base of a module-qualified
+  /// method call (e.g. `io` in `io.printline(...)`).  Empty for ordinary
+  /// variables.  NOT copied by clone() — default std::string is "". ✓
+  std::string ResolvedModuleName;
+
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<VariableExprAST>(Loc, Name);
+    // Note: ResolvedSymbol is intentionally NOT copied — cloned ASTs are stale
+    // until re-resolved. The default-constructed field is nullptr. ✓
   }
 };
 
@@ -287,6 +302,8 @@ public:
   }
 };
 // For-loop: for <var> in <start>..<end> step <step_expr> { body }
+// Note: ForExprAST desugars to init + while(cond) { body; step } during Codegen.
+// The AST node is kept for clean visitor dispatch and future TypeChecker support.
 class ForExprAST : public ExprAST {
   std::string VarName;
   SourceLocation Loc;
@@ -299,11 +316,17 @@ public:
       : Loc(Loc), VarName(std::move(VarName)), Start(std::move(Start)),
         End(std::move(End)), Step(std::move(Step)), Body(std::move(Body)) {}
 
+  const SourceLocation &getLoc() const { return Loc; }  ///< Location of the 'for' keyword.
   const std::string &getVarName() const { return VarName; }
   ExprAST *getBody() const { return Body.get(); }
   const ExprAST *getStart() const { return Start.get(); }
   const ExprAST *getEnd() const { return End.get(); }
   const ExprAST *getStep() const { return Step.get(); }
+
+  /// Populated by the Resolver after successfully declaring the induction variable.
+  /// Nulled by clone() semantics (fresh node, default nullptr). Cloned ASTs must be re-resolved.
+  std::shared_ptr<VariableSymbol> ResolvedLoopVar;
+  const VariableSymbol *getResolvedLoopVar() const { return ResolvedLoopVar.get(); }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFor(*this); }
@@ -311,6 +334,7 @@ public:
     return std::make_unique<ForExprAST>(
         Loc, VarName, CloneExprAST(Start.get()), CloneExprAST(End.get()),
         CloneExprAST(Step.get()), CloneExprAST(Body.get()));
+    // Note: ResolvedLoopVar intentionally NOT copied. ✓
   }
 };
 
@@ -358,11 +382,17 @@ public:
   TurfTypePtr getTypePtr() const { return Type; }
   const ExprAST *getInitializer() const { return InitVal.get(); }
 
+  /// Populated by the Resolver after a successful declareVariable().
+  /// Nulled by clone() semantics (fresh node, default nullptr). Cloned ASTs must be re-resolved.
+  std::shared_ptr<VariableSymbol> ResolvedSymbol;
+  const VariableSymbol *getResolvedSymbol() const { return ResolvedSymbol.get(); }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitVarDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<VarDeclExprAST>(Loc, Name, Type,
                                             CloneExprAST(InitVal.get()));
+    // Note: ResolvedSymbol intentionally NOT copied. ✓
   }
   // Kept private access for codegen
   const ExprAST *getInitVal() const { return InitVal.get(); }
@@ -526,6 +556,7 @@ public:
         IntrinsicName(std::move(IntrinsicName)), TypeParams(std::move(TypeParams)) {}
 
   const std::string &getName() const { return Name; }
+  const SourceLocation &getLoc() const { return Loc; }
   const TurfType *getReturnType() const { return ReturnType.get(); }
   TurfTypePtr getReturnTypePtr() const { return ReturnType; }
   ExprAST *getBodyMut() const { return Body.get(); }
@@ -535,11 +566,20 @@ public:
 
   const std::string &getIntrinsicName() const { return IntrinsicName; }
 
+  /// Populated by the Resolver after registering the function symbol.
+  /// clone() returns a fresh node, so this is nullptr in cloned trees.
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedDef;
+  const ResolverFunctionSymbol *getResolvedDef() const {
+    return ResolvedDef.get();
+  }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncDef(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncDefExprAST>(
         Loc, Name, ReturnType, Params, CloneExprAST(Body.get()), IntrinsicName, TypeParams);
+    // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
+    // until re-resolved. The default-constructed field is nullptr.
   }
 };
 
@@ -557,11 +597,33 @@ public:
   const SourceLocation &getLoc() const { return Loc; }
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
 
+  /// All overloads matching the call name.  TypeChecker narrows this to one.
+  /// clone() returns a fresh node, so this is empty in cloned trees.
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedCandidates;
+  const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &
+  getResolvedCandidates() const {
+    return ResolvedCandidates;
+  }
+
+  /// The single overload selected by TypeChecker::visitFuncCall() after
+  /// narrowing ResolvedCandidates to one match (arity + type compatible).
+  /// For bare intrinsics (typeof, lengthof, …) without a ResolvedCandidates
+  /// entry this field is left null — the TypeChecker still sets the node's
+  /// type directly.
+  /// clone() returns a fresh node, so this is null in cloned trees — same
+  /// clone-semantics contract as ResolvedSymbol. ✓
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedCallTarget;
+  const ResolverFunctionSymbol *getResolvedCallTarget() const {
+    return ResolvedCallTarget.get();
+  }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
                                              CloneExprList(Args));
+    // Note: ResolvedCandidates and ResolvedCallTarget are intentionally NOT
+    // copied — cloned ASTs are stale until re-resolved. ✓
   }
 };
 
@@ -589,11 +651,17 @@ public:
     return InitList;
   }
 
+  /// Populated by the Resolver after a successful declareVariable().
+  /// Nulled by clone() semantics (fresh node, default nullptr). Cloned ASTs must be re-resolved.
+  std::shared_ptr<VariableSymbol> ResolvedSymbol;
+  const VariableSymbol *getResolvedSymbol() const { return ResolvedSymbol.get(); }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitArrayDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ArrayDeclExprAST>(Loc, Name, ElementType, Size,
                                               CloneExprList(InitList));
+    // Note: ResolvedSymbol intentionally NOT copied. ✓
   }
 };
 
@@ -759,11 +827,21 @@ public:
   const std::string &getMethod() const { return Method; }
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
 
+  /// The single overload selected by TypeChecker::visitMethodCall() after
+  /// narrowing module-qualified candidates (e.g. io.printline).
+  /// null until TypeChecker runs; also null in cloned trees (not copied). ✓
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedCallTarget;
+  const ResolverFunctionSymbol *getResolvedCallTarget() const {
+    return ResolvedCallTarget.get();
+  }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitMethodCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()),
                                                Method, CloneExprList(Args));
+    // Note: ResolvedCallTarget intentionally NOT copied — cloned ASTs are
+    // stale until re-resolved. ✓
   }
 };
 
