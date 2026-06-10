@@ -17,11 +17,11 @@ This document outlines the exact path to `v1.0.0`. Every item here is derived fr
 ## 2. Phase 1: Finish the Migration (Codegen Detox)
 *Before adding features, the internal architecture must be clean. Epic 3 is complete. Epic 4 remains.*
 
-- [ ] **Issue #9: Strip Fallback Overload Loops**
+- [x] **Issue #9: Strip Fallback Overload Loops**
   - **Implementation**: Remove the `if (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')` fallback loops in `Codegen.cpp`. Codegen must strictly use `Node.ResolvedCallTarget->mangledName()`.
-- [ ] **Issue #10: Strip Semantic Checks from Codegen**
+- [x] **Issue #10: Strip Semantic Checks from Codegen**
   - **Implementation**: Remove all type guards (e.g., `isIntegerTy`, `isDoubleTy`) from intrinsic handlers like `abs`, `power`, and `print`. The `TypeChecker` pass handles this; Codegen must blindly trust `Node.ResolvedCallTarget->ReturnType`.
-- [ ] **Issue #11: Clean Pipeline**
+- [x] **Issue #11: Clean Pipeline**
   - **Implementation**: Turn off "shadow mode" in `main.cpp`. Enforce the strict sequence: `Parser -> Resolver -> TypeChecker -> Codegen`. Remove legacy `GlobalSymbolTable` references from Codegen.
 
 ---
