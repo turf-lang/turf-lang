@@ -503,6 +503,23 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
             const_cast<ResolverFunctionSymbol *>(ArityMatches[0]),
             [](ResolverFunctionSymbol *) { /* RST owns this */ });
       }
+    } else {
+      // Method does not exist in this module.
+      RankedSuggestions Suggestions;
+      std::vector<std::string> ModuleNames = SuggestionIndex::suggestVisible(
+          MethodName, SymTable_.getModuleFunctionNames(ModuleName));
+      
+      for (const auto &SuggestedName : ModuleNames) {
+        auto Matches = SymTable_.findInModules(SuggestedName);
+        for (const auto &Match : Matches) {
+          if (Match.ModuleName == ModuleName) {
+            Suggestions.Module[ModuleName].push_back(Match.Symbol->signature());
+          }
+        }
+      }
+      
+      UnknownFunctionError(Node.getLoc(), ModuleName + "." + MethodName, Suggestions).raise();
+      return;
     }
   }
 }
