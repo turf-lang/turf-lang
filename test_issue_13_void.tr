@@ -1,9 +1,8 @@
 // This file currently DOES NOT COMPILE under the old syntax.
-// Once Issue #13 is complete, void functions will omit the return type entirely.
+// Once Issue #13 is complete, void functions will explicitly return void.
 
-fn greet(name: string) {
-    // Note: io.print is not built yet, but the syntax is the focus here.
-    // print(name);
+fn greet(name: string): void {
+    io.print(name);
 }
 
 fn main(): int {
