@@ -853,4 +853,17 @@ public:
                       Colors::RESET) {}
 };
 
+class ImmutableAssignmentError : public TurfError {
+public:
+  ImmutableAssignmentError(SourceLocation Loc, const std::string &VarName)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Oops! You can't change the value of '" +
+                      Colors::CYAN + VarName + Colors::BRIGHT_RED +
+                      "' because it's immutable.\n" + Colors::RESET + "  " +
+                      Colors::BRIGHT_GREEN +
+                      "Hint: If you need to change its value later, declare it "
+                      "with 'mutable' instead of 'immutable'." +
+                      Colors::RESET) {}
+};
+
 #endif

@@ -35,6 +35,7 @@
 #include "Builtins.h"
 
 #include <cassert>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -396,6 +397,33 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   // The assignment expression type is the RHS type
   TurfTypePtr RhsTy = getType(Node.getRHS());
   setType(&Node, RhsTy);
+
+  const VariableExprAST *LHSVar = nullptr;
+  const ExprAST *Base = Node.getLHS();
+  
+  // Drill down through any array/field accesses to find the root variable
+  while (Base) {
+    if (auto *Var = dynamic_cast<const VariableExprAST *>(Base)) {
+      LHSVar = Var;
+      break;
+    } else if (auto *ArrAccess = dynamic_cast<const ArrayAccessExprAST *>(Base)) {
+      Base = ArrAccess->getBase();
+    } else if (auto *FieldAccess = dynamic_cast<const FieldAccessExprAST *>(Base)) {
+      Base = FieldAccess->getBase();
+    } else {
+      break;
+    }
+  }
+
+  if (LHSVar) {
+    if (LHSVar->ResolvedSymbol && LHSVar->ResolvedSymbol->IsImmutable) {
+#ifndef TYPECHECKER_NO_ERRORS
+      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName()).raise();
+#else
+      throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
+#endif
+    }
+  }
 }
 
 void TypeChecker::visitCast(CastExprAST &Node) {
@@ -855,13 +883,20 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
     setType(&Node, nullptr);
   }
 }
-
 void TypeChecker::visitArrayAssign(ArrayAssignExprAST &Node) {
   if (Node.getIndex())
     const_cast<ExprAST *>(Node.getIndex())->accept(*this);
   if (Node.getRHS())
     const_cast<ExprAST *>(Node.getRHS())->accept(*this);
   setType(&Node, TurfVoid());
+
+  if (Node.ResolvedSymbol && Node.ResolvedSymbol->IsImmutable) {
+#ifndef TYPECHECKER_NO_ERRORS
+    ImmutableAssignmentError(Node.getLoc(), Node.getName()).raise();
+#else
+    throw std::runtime_error("ImmutableAssignmentError: " + Node.getName());
+#endif
+  }
 }
 
 void TypeChecker::visitArrayLength(ArrayLengthExprAST &Node) {

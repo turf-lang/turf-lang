@@ -125,7 +125,7 @@ void Resolver::visitVarDecl(VarDeclExprAST &Node) {
   try {
     ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
     Node.ResolvedSymbol =
-        SymTable_.declareVariable(Node.getName(), Node.getTypePtr(), Loc);
+        SymTable_.declareVariable(Node.getName(), Node.getTypePtr(), Loc, Node.isImmutable());
   } catch (const std::runtime_error &) {
     // The name is already in the current scope — emit a rich diagnostic.
     // Look up the previous declaration for the "declared at line N" note.
@@ -348,6 +348,8 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     static const std::unordered_set<std::string> BareIntrinsics = {
         "typeof",
         "lengthof",
+        "assert",
+        "fail",
     };
     if (BareIntrinsics.count(CalleeName)) {
       // True bare intrinsic — skip error, TypeChecker validates arity/types.
@@ -543,7 +545,7 @@ void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {
   try {
     ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
     Node.ResolvedSymbol =
-        SymTable_.declareVariable(Node.getName(), Node.getElementTypePtr(), Loc);
+        SymTable_.declareVariable(Node.getName(), Node.getElementTypePtr(), Loc, Node.isImmutable());
   } catch (const std::runtime_error &) {
     auto Prev = SymTable_.lookupVariable(Node.getName());
     if (Prev) {
@@ -560,13 +562,15 @@ void Resolver::visitArrayAccess(ArrayAccessExprAST &Node) {
 
 void Resolver::visitArrayAssign(ArrayAssignExprAST &Node) {
   // The array being assigned to must already be in scope.
-  if (!SymTable_.lookupVariable(Node.getName())) {
+  auto Sym = SymTable_.lookupVariable(Node.getName());
+  if (!Sym) {
     std::vector<std::string> VisibleNames = SymTable_.getAllVisibleNames();
     RankedSuggestions Suggestions;
     Suggestions.Local =
         SuggestionIndex::suggestVisible(Node.getName(), VisibleNames);
     ReferenceError(Node.getLoc(), Node.getName(), Suggestions).raise();
   }
+  Node.ResolvedSymbol = Sym;
   visitChild(Node.getIndex());
   visitChild(Node.getRHS());
 }

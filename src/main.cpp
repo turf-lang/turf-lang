@@ -480,9 +480,8 @@ int main(int argc, char **argv) {
     } else {
       // longjmp landed here: skip to next statement boundary.
       while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
-             CurTok != TOK_STRUCT && CurTok != TOK_TYPE_INT &&
-             CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
-             CurTok != TOK_TYPE_STRING && CurTok != TOK_IF &&
+             CurTok != TOK_STRUCT && CurTok != TOK_MUTABLE &&
+             CurTok != TOK_IMMUTABLE && CurTok != TOK_IF &&
              CurTok != TOK_WHILE && CurTok != TOK_FOR && CurTok != TOK_RETURN) {
         getNextToken();
       }

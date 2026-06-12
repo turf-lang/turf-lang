@@ -1,0 +1,11 @@
+// This file currently DOES NOT COMPILE under the old syntax.
+// Once Issue #13 is complete, void functions will explicitly return void.
+
+fn greet(name: string): void {
+    io.print(name);
+}
+
+fn main(): int {
+    greet("Turf Developer!");
+    return 0;
+}

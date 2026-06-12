@@ -125,6 +125,8 @@ public:
   }
 };
 
+
+
 // Variable Node, represents variable name like "x", "y", etc.
 class VariableExprAST : public ExprAST {
   std::string Name;
@@ -369,18 +371,20 @@ class VarDeclExprAST : public ExprAST {
   TurfTypePtr Type;
   std::unique_ptr<ExprAST> InitVal;
   SourceLocation Loc;
+  bool IsImmutable;
 
 public:
   VarDeclExprAST(SourceLocation Loc, std::string Name, TurfTypePtr Type,
-                 std::unique_ptr<ExprAST> InitVal)
+                 std::unique_ptr<ExprAST> InitVal, bool IsImmutable)
       : Name(std::move(Name)), Type(std::move(Type)),
-        InitVal(std::move(InitVal)), Loc(Loc) {}
+        InitVal(std::move(InitVal)), Loc(Loc), IsImmutable(IsImmutable) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
   const TurfType *getType() const { return Type.get(); }
   TurfTypePtr getTypePtr() const { return Type; }
   const ExprAST *getInitializer() const { return InitVal.get(); }
+  bool isImmutable() const { return IsImmutable; }
 
   /// Populated by the Resolver after a successful declareVariable().
   /// Nulled by clone() semantics (fresh node, default nullptr). Cloned ASTs must be re-resolved.
@@ -391,7 +395,7 @@ public:
   void accept(ASTVisitor &V) override { V.visitVarDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<VarDeclExprAST>(Loc, Name, Type,
-                                            CloneExprAST(InitVal.get()));
+                                            CloneExprAST(InitVal.get()), IsImmutable);
     // Note: ResolvedSymbol intentionally NOT copied. ✓
   }
   // Kept private access for codegen
@@ -634,13 +638,14 @@ class ArrayDeclExprAST : public ExprAST {
   int Size;                                       // compile-time constant size
   std::vector<std::unique_ptr<ExprAST>> InitList; // optional initializer
   SourceLocation Loc;
+  bool IsImmutable;
 
 public:
   ArrayDeclExprAST(SourceLocation Loc, std::string Name,
                    TurfTypePtr ElementType, int Size,
-                   std::vector<std::unique_ptr<ExprAST>> InitList)
+                   std::vector<std::unique_ptr<ExprAST>> InitList, bool IsImmutable)
       : Loc(Loc), Name(std::move(Name)), ElementType(std::move(ElementType)),
-        Size(Size), InitList(std::move(InitList)) {}
+        Size(Size), InitList(std::move(InitList)), IsImmutable(IsImmutable) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
@@ -650,6 +655,7 @@ public:
   const std::vector<std::unique_ptr<ExprAST>> &getInitList() const {
     return InitList;
   }
+  bool isImmutable() const { return IsImmutable; }
 
   /// Populated by the Resolver after a successful declareVariable().
   /// Nulled by clone() semantics (fresh node, default nullptr). Cloned ASTs must be re-resolved.
@@ -660,7 +666,7 @@ public:
   void accept(ASTVisitor &V) override { V.visitArrayDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ArrayDeclExprAST>(Loc, Name, ElementType, Size,
-                                              CloneExprList(InitList));
+                                              CloneExprList(InitList), IsImmutable);
     // Note: ResolvedSymbol intentionally NOT copied. ✓
   }
 };
@@ -778,6 +784,8 @@ public:
   const std::string &getName() const { return Name; }
   const ExprAST *getIndex() const { return Index.get(); }
   const ExprAST *getRHS() const { return RHS.get(); }
+
+  std::shared_ptr<VariableSymbol> ResolvedSymbol;
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitArrayAssign(*this); }
