@@ -510,7 +510,7 @@ TEST(test_var_decl_type_propagates) {
 
   auto Init = std::make_unique<NumberExprAST>(static_cast<long long>(99));
   auto Decl = std::make_unique<VarDeclExprAST>(loc(), "x", TurfInt(),
-                                                std::move(Init));
+                                                std::move(Init), false);
   Decl->accept(TC);
   EXPECT_TRUE(TC.hasType(Decl.get()));
   EXPECT_TRUE(TC.getType(Decl.get())->isInt());
@@ -524,7 +524,7 @@ TEST(test_var_decl_type_mismatch_throws) {
 
   auto Init = std::make_unique<StringExprAST>("oops");
   auto Decl = std::make_unique<VarDeclExprAST>(loc(), "x", TurfInt(),
-                                                std::move(Init));
+                                                std::move(Init), false);
   EXPECT_THROWS(Decl->accept(TC));
 }
 

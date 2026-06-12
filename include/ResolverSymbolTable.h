@@ -66,12 +66,13 @@ struct VariableSymbol {
   TurfTypePtr            Type;        ///< Frontend type (no LLVM involvement)
   ResolverSourceLocation DeclLoc;
   size_t                 ScopeDepth; ///< 0 = global, 1 = first block, …
+  bool                   IsImmutable = false;
 
   VariableSymbol() = default;
   VariableSymbol(std::string Name, TurfTypePtr Type,
-                 ResolverSourceLocation DeclLoc, size_t ScopeDepth)
+                 ResolverSourceLocation DeclLoc, size_t ScopeDepth, bool IsImmutable = false)
       : Name(std::move(Name)), Type(std::move(Type)), DeclLoc(DeclLoc),
-        ScopeDepth(ScopeDepth) {}
+        ScopeDepth(ScopeDepth), IsImmutable(IsImmutable) {}
 };
 
 // ─── FunctionParam ───────────────────────────────────────────────────────────
@@ -283,7 +284,7 @@ public:
    */
   std::shared_ptr<VariableSymbol> declareVariable(
       const std::string &Name, TurfTypePtr Type,
-      ResolverSourceLocation Loc = {});
+      ResolverSourceLocation Loc = {}, bool IsImmutable = false);
 
   /**
    * @brief Look up a variable by name, searching from the innermost scope out.

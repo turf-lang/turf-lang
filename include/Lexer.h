@@ -130,7 +130,10 @@ enum Token {
   TOK_ONERROR = -48,
   TOK_RAISE = -49,
   TOK_LOOP = -50,
-  TOK_NULL = -51
+  TOK_NULL = -51,
+  TOK_MUTABLE = -65,
+  TOK_IMMUTABLE = -66,
+  TOK_COLON = -67
 };
 
 int gettok();

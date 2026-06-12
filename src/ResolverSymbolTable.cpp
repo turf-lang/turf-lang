@@ -139,7 +139,7 @@ void ResolverSymbolTable::exitScope() {
 }
 
 std::shared_ptr<VariableSymbol> ResolverSymbolTable::declareVariable(
-    const std::string &Name, TurfTypePtr Type, ResolverSourceLocation Loc) {
+    const std::string &Name, TurfTypePtr Type, ResolverSourceLocation Loc, bool IsImmutable) {
 
   if (ScopeStack_.empty())
     enterScope();
@@ -151,7 +151,7 @@ std::shared_ptr<VariableSymbol> ResolverSymbolTable::declareVariable(
                              "' is already declared in the current scope");
   }
 
-  auto Sym = std::make_shared<VariableSymbol>(Name, std::move(Type), Loc, Depth_);
+  auto Sym = std::make_shared<VariableSymbol>(Name, std::move(Type), Loc, Depth_, IsImmutable);
   Current.Symbols[Name] = Sym;
   return Sym;
 }

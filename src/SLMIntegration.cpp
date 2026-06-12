@@ -254,7 +254,8 @@ static int findVariableDeclarationLine(const std::string &errorMsg,
 
   // Turf type keywords that precede a variable name in a declaration.
   static const char *typeKeywords[] = {"int", "double", "float", "bool",
-                                       "string"};
+                                       "string", "mutable", "mut",
+                                       "immutable", "immut"};
 
   // Scan backwards from just before the error line to find the closest match.
   int lastLine = std::min(errorLine - 1, static_cast<int>(SourceLines.size()));
