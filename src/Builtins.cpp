@@ -47,6 +47,8 @@ static std::once_flag g_builtins_init_flag;
 static const std::unordered_map<std::string, int> IntrinsicArity = {
     {"typeof",   1},
     {"lengthof", 1},
+    {"assert",  -1},
+    {"fail",     1},
 };
 
 static void ensure_builtins_registered();
@@ -82,6 +84,8 @@ static void ensure_builtins_registered() {
   // registry — they must NOT be listed here.
   RegisterBuiltin("typeof",   {1, "Compile-time type name of an expression"});
   RegisterBuiltin("lengthof", {1, "Byte-length of a string"});
+  RegisterBuiltin("assert",   {-1, "Asserts a condition at runtime"});
+  RegisterBuiltin("fail",     {1, "Aborts execution with a message"});
 }
 
 /**
@@ -370,8 +374,83 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     return Builder->CreateGlobalString(TypeName, "typename");
   }
 
+  if (IntrinsicName == "fail") {
+    // Arg 0: message string
+    Value *MsgVal = Args[0];
+
+    // Get or declare fprintf
+    Function *FPrintFFunc = TheModule->getFunction("fprintf");
+    if (!FPrintFFunc) {
+      FunctionType *FT =
+          FunctionType::get(Type::getInt32Ty(*TheContext),
+                            {PointerType::getUnqual(*TheContext), PointerType::getUnqual(*TheContext)}, true);
+      FPrintFFunc = Function::Create(FT, Function::ExternalLinkage, "fprintf",
+                                     TheModule.get());
+    }
+
+    // Get or declare abort
+    Function *AbortFunc = TheModule->getFunction("abort");
+    if (!AbortFunc) {
+      FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext), false);
+      AbortFunc = Function::Create(FT, Function::ExternalLinkage, "abort", TheModule.get());
+    }
+
+    // Get stderr
+    GlobalVariable *StderrGV = TheModule->getNamedGlobal("stderr");
+    if (!StderrGV) {
+      StderrGV = new GlobalVariable(*TheModule, PointerType::getUnqual(*TheContext), false,
+                                    GlobalValue::ExternalLinkage, nullptr, "stderr");
+    }
+    Value *StderrVal = Builder->CreateLoad(PointerType::getUnqual(*TheContext), StderrGV, "stderr_val");
+
+    // Print message to stderr and abort
+    Value *Fmt = Builder->CreateGlobalString("%s\n", "failfmt");
+    Builder->CreateCall(FPrintFFunc, {StderrVal, Fmt, MsgVal});
+    Builder->CreateCall(AbortFunc, {});
+    Builder->CreateUnreachable();
+
+    // fail doesn't return, but we need to return something to satisfy the type signature
+    // Any value will do since it's unreachable, we'll return a dummy integer
+    return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+  }
+
+  if (IntrinsicName == "assert") {
+    // Arg 0: condition (bool)
+    // Arg 1 (optional): message string
+    Value *Cond = Args[0];
+    
+    // We check if it's already a boolean (i1), though TypeChecker enforces this
+    if (!Cond->getType()->isIntegerTy(1)) {
+        SemanticError(Loc, "'assert' condition must be a boolean").raise();
+        return nullptr;
+    }
+
+    Value *MsgVal;
+    if (Args.size() > 1) {
+      MsgVal = Args[1];
+    } else {
+      MsgVal = Builder->CreateGlobalString("Oops! An assertion failed here.\nHint: Assertions are checks that make sure your code is running exactly as you expect. This one didn't pass.", "default_assert_msg");
+    }
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    BasicBlock *FailBB = BasicBlock::Create(*TheContext, "assert.fail", TheFunction);
+    BasicBlock *PassBB = BasicBlock::Create(*TheContext, "assert.pass", TheFunction);
+
+    Builder->CreateCondBr(Cond, PassBB, FailBB);
+
+    // Fail block
+    Builder->SetInsertPoint(FailBB);
+    std::vector<llvm::Value *> FailArgs = {MsgVal};
+    CodegenIntrinsic("fail", FailArgs, Loc);
+    // CodegenIntrinsic for fail already creates unreachable
+
+    // Pass block
+    Builder->SetInsertPoint(PassBB);
+
+    return ConstantInt::get(Type::getInt64Ty(*TheContext), 1);
+  }
+
   SemanticError(Loc, "Unknown intrinsic: " + IntrinsicName).raise();
   return nullptr;
 }
-
 

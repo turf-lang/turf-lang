@@ -1,0 +1,12 @@
+// This file currently DOES NOT COMPILE under the old syntax.
+// Once Issue #13 is complete, void functions will omit the return type entirely.
+
+fn greet(name: string) {
+    // Note: io.print is not built yet, but the syntax is the focus here.
+    // print(name);
+}
+
+fn main(): int {
+    greet("Turf Developer!");
+    return 0;
+}

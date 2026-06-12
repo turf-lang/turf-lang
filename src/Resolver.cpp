@@ -348,6 +348,8 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     static const std::unordered_set<std::string> BareIntrinsics = {
         "typeof",
         "lengthof",
+        "assert",
+        "fail",
     };
     if (BareIntrinsics.count(CalleeName)) {
       // True bare intrinsic — skip error, TypeChecker validates arity/types.

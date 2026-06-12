@@ -1840,6 +1840,7 @@ Value *FuncCallExprAST::codegen() {
   std::string CalleeName = Var->getName();
 
   if (CalleeName == "typeof" || CalleeName == "lengthof" ||
+      CalleeName == "assert" || CalleeName == "fail" ||
       CalleeName == "malloc" || CalleeName == "realloc" ||
       CalleeName == "free") {
 
