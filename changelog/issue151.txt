@@ -14,3 +14,60 @@ Function Signature Syntax Overhaul
 - Simpler recursive-descent parser logic.
 - Avoids parsing type expressions ahead of function names, enabling more straightforward compiler implementation.
 - Standardizes parameter type declarations (`name: type`) to match modern language design patterns.
+
+4. Reference & Usage Examples (Source of Truth):
+
+a) Standard Function
+Syntax:
+  fn <name>(<paramName>: <type>, ...): <returnType> {
+      <body>
+  }
+Example:
+  fn add(a: int, b: int): int {
+      return a + b;
+  }
+
+  fn greet(name: string): void {
+      io.printline(name);
+  }
+
+b) Generic Function
+Syntax:
+  fn<<TypeParams>> <name>(<paramName>: <type>, ...): <returnType> {
+      <body>
+  }
+Example:
+  fn<T> identity(val: T): T {
+      return val;
+  }
+
+c) Struct-Bound Function (Method)
+Syntax:
+  fn <StructName>.<methodName>(<paramName>: <type>, ...): <returnType> {
+      <body>
+  }
+Note: The compiler automatically prepends a pointer to the struct instance named `self` (type: `StructName*`) as the first parameter.
+Example:
+  struct Point {
+      x: int,
+      y: int
+  }
+
+  fn Point.translate(dx: int, dy: int): void {
+      self.x = self.x + dx;
+      self.y = self.y + dy;
+  }
+
+d) Generic Struct-Bound Function (Generic Method)
+Syntax:
+  fn<<TypeParams>> <StructName>.<methodName>(<paramName>: <type>, ...): <returnType> {
+      <body>
+  }
+Example:
+  fn<T> List.push(item: T): void {
+      if self.len == self.cap {
+          // resizing logic...
+      }
+      self.data[self.len] = item;
+      self.len = self.len + 1;
+  }
