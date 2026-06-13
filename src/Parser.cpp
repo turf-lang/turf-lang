@@ -1389,7 +1389,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
 // Parses: fn <rettype> <name>(<type> <param>, ...) { body }
 std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
   SourceLocation FnLoc = CurLoc;
-  getNextToken();
+  getNextToken(); // consume TOK_FN
 
   std::vector<std::string> TypeParams;
   if (CurTok == '<') {
@@ -1418,15 +1418,9 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
     }
   }
 
-  // Parse return type using ParseType() to support generics in the future
-  TurfTypePtr RetType = ParseType(); // consumes the return type token
-  if (!RetType)
-    return nullptr;
-
+  // Expect TOK_IDENTIFIER → save as FuncName
   if (CurTok != TOK_IDENTIFIER) {
-    LogErrorAt(FnLoc,
-               "Expected a function name after the return type."
-               "\n  Hint: Function syntax: fn<T> int myFunc(int x) { return x }");
+    LogErrorAt(FnLoc, "Expected a function name after 'fn'.");
     return nullptr;
   }
   std::string FuncName = IdentifierStr;
@@ -1444,14 +1438,12 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
     getNextToken();
   }
 
+  // Expect '('
   if (CurTok != '(') {
-    LogErrorAt(FnLoc, "Expected '(' after function name '" + FuncName +
-                          "'."
-                          "\n  Hint: Function syntax: fn int " +
-                          FuncName + "(int x) { return x }");
+    LogErrorAt(FnLoc, "Expected '(' after function name '" + FuncName + "'.");
     return nullptr;
   }
-  getNextToken();
+  getNextToken(); // eat '('
 
   std::vector<ParamDecl> Params;
   if (!StructName.empty()) {
@@ -1466,34 +1458,34 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
     }
     Params.push_back({std::make_shared<TurfPointerType>(StructType), "self"});
   }
-  while (CurTok != ')' && CurTok != TOK_EOF) {
-    // Parse each parameter: <type> <name>
-    // Parse each parameter: <type> <name>  (supports list<T> params too)
-    // All parameter types (including list<T>) are parsed uniformly by
-    // ParseType()
-    TurfTypePtr ParamType = ParseType();
-    if (!ParamType) {
-      LogErrorAt(CurLoc,
-                 "Expected a parameter type (int, double, bool, string, "
-                 "list<T>) in the parameter list of '" +
-                     FuncName +
-                     "'."
-                     "\n  Hint: Each parameter must have a type: fn int " +
-                     FuncName + "(int x, string y) { ... }");
-      return nullptr;
-    }
 
+  // Parse parameter list: each param is: Identifier TOK_COLON ParseType()
+  // Params separated by ','
+  while (CurTok != ')' && CurTok != TOK_EOF) {
     if (CurTok != TOK_IDENTIFIER) {
-      LogErrorAt(
-          CurLoc,
-          "Expected a parameter name after the type in '" + FuncName +
-              "'."
-              "\n  Hint: Each parameter needs both a type and a name: fn int " +
-              FuncName + "(int x) { ... }");
+      LogErrorAt(CurLoc,
+                 "Expected a parameter name in the parameter list of '" +
+                     FuncName + "'.");
       return nullptr;
     }
     std::string ParamName = IdentifierStr;
-    getNextToken();
+    getNextToken(); // consume parameter name
+
+    if (CurTok != TOK_COLON) {
+      LogErrorAt(CurLoc,
+                 "Expected ':' after parameter name '" + ParamName + "' in '" +
+                     FuncName + "'.");
+      return nullptr;
+    }
+    getNextToken(); // consume ':'
+
+    TurfTypePtr ParamType = ParseType();
+    if (!ParamType) {
+      LogErrorAt(CurLoc,
+                 "Expected a parameter type after ':' in the parameter list of '" +
+                     FuncName + "'.");
+      return nullptr;
+    }
 
     Params.push_back({ParamType, ParamName});
 
@@ -1503,18 +1495,32 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
       break;
   }
 
+  // Expect ')'
   if (CurTok != ')') {
     LogErrorAt(
         FnLoc,
-        "Expected ')' to close the parameter list of '" + FuncName +
-            "'."
-            "\n  Hint: Check for a missing ')' or a malformed parameter.");
+        "Expected ')' to close the parameter list of '" + FuncName + "'.");
     return nullptr;
   }
-  getNextToken();
+  getNextToken(); // eat ')'
 
-  // Intrinsic functions have no body
-  if (!IntrinsicName.empty()) {
+  // Expect TOK_COLON
+  if (CurTok != TOK_COLON) {
+    LogErrorAt(CurLoc, "Expected ':' followed by return type after parameter list.");
+    return nullptr;
+  }
+  getNextToken(); // eat ':'
+
+  // Call ParseType() → save as ReturnType
+  TurfTypePtr RetType = ParseType();
+  if (!RetType) {
+    LogErrorAt(CurLoc, "Expected return type.");
+    return nullptr;
+  }
+
+  // If CurTok == ';': external declaration (forward decl)
+  if (CurTok == ';') {
+    getNextToken(); // eat ';'
     if (GlobalSymbolTable && !TypeParams.empty()) {
       GlobalSymbolTable->ExitScope();
     }
@@ -1522,10 +1528,18 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
                                             nullptr, IntrinsicName, TypeParams);
   }
 
-  // Parse body block
+  // If we are @intrinsic, we might not have a body or semicolon
+  if (!IntrinsicName.empty() && CurTok != '{') {
+    if (GlobalSymbolTable && !TypeParams.empty()) {
+      GlobalSymbolTable->ExitScope();
+    }
+    return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
+                                            nullptr, IntrinsicName, TypeParams);
+  }
+
+  // Expect '{' to open function body
   if (CurTok != '{') {
-    LogErrorAt(FnLoc, "Expected '{' to begin function body for '" + FuncName +
-                          "'.");
+    LogErrorAt(FnLoc, "Expected '{' to begin function body for '" + FuncName + "'.");
     return nullptr;
   }
   auto Body = ParseBlock();

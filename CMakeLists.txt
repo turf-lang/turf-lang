@@ -60,6 +60,11 @@ set(LLAMA_STATIC_LIBS
   "${LLAMA_BUILD_DIR}/ggml/src/libggml-cpu.a"
 )
 
+set(LIBGGML_METAL "${LLAMA_BUILD_DIR}/ggml/src/ggml-metal/libggml-metal.a")
+if(EXISTS "${LIBGGML_METAL}")
+  list(APPEND LLAMA_STATIC_LIBS "${LIBGGML_METAL}")
+endif()
+
 # Optional: ggml-blas (present in older builds)
 set(LIBGGML_BLAS "${LLAMA_BUILD_DIR}/ggml/src/ggml-blas/libggml-blas.a")
 if(EXISTS "${LIBGGML_BLAS}")
@@ -97,6 +102,10 @@ set(PLATFORM_LIBS "")
 if(APPLE)
   find_library(ACCELERATE_FRAMEWORK Accelerate REQUIRED)
   list(APPEND PLATFORM_LIBS ${ACCELERATE_FRAMEWORK})
+  find_library(METAL_FRAMEWORK Metal REQUIRED)
+  find_library(METALKIT_FRAMEWORK MetalKit REQUIRED)
+  find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
+  list(APPEND PLATFORM_LIBS ${METAL_FRAMEWORK} ${METALKIT_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
 endif()
 
 # ─── Executable ──────────────────────────────────────────────────────────────
