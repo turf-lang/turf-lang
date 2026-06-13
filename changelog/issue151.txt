@@ -1,0 +1,16 @@
+Function Signature Syntax Overhaul
+
+1. Changes Made:
+- Modified the parser in `src/Parser.cpp` (`ParseFuncDef`) to handle function signatures in the new format: `fn name(arg: type): returnType`.
+- Consumed `TOK_FN`, parsed type parameters (e.g. `fn<T>`), parsed function name (and struct prefix `StructName.FuncName` if present), parsed parameter list with parameter names followed by a colon and the type, parsed trailing colon `:` for return type, and finally parsed the return type via `ParseType()`.
+- Allowed trailing semicolons for external / forward declarations (specifically for `@intrinsic`).
+- Fixed macOS linking issues in `CMakeLists.txt` by adding Metal, MetalKit, and Foundation frameworks under `APPLE` target and including `libggml-metal.a` static library if present, ensuring the compiler links successfully on macOS.
+
+2. Why the Change was Made:
+- The old signature format `fn returnType name(type arg)` required parsing an arbitrarily complex return type first before seeing the function name.
+- The new signature format `fn name(arg: type): returnType` makes the parser LL(1) at the function level. As soon as the parser sees `fn`, it immediately parses the function name and parameters, and then simply parses the return type.
+
+3. How it Helps/Changed:
+- Simpler recursive-descent parser logic.
+- Avoids parsing type expressions ahead of function names, enabling more straightforward compiler implementation.
+- Standardizes parameter type declarations (`name: type`) to match modern language design patterns.
