@@ -221,24 +221,6 @@ public:
     }
   }
 
-  void visitRaise(RaiseExprAST &N) override {
-    printIndent(Depth_);
-    std::cout << "RaiseExpr\n";
-    if (N.getPayload()) {
-      descend();
-      print(const_cast<ExprAST *>(N.getPayload()), Depth_);
-      ascend();
-    }
-  }
-
-  void visitTry(TryExprAST &N) override {
-    printIndent(Depth_);
-    std::cout << "TryExpr(payload=" << N.getPayloadName() << ")\n";
-    descend();
-    print(const_cast<ExprAST *>(N.getTryBlock()), Depth_);
-    print(const_cast<ExprAST *>(N.getCatchBlock()), Depth_);
-    ascend();
-  }
 
   // ── Functions ───────────────────────────────────────────────────────────────
   void visitFuncDef(FuncDefExprAST &N) override {

@@ -120,8 +120,6 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path);
 std::unique_ptr<ExprAST> ParseImport();
 std::unique_ptr<ExprAST> ParseReturnExpr();
 std::unique_ptr<ExprAST> ParseStructDecl();
-std::unique_ptr<ExprAST> ParseTryExpr();
-std::unique_ptr<ExprAST> ParseRaiseExpr();
 // NOTE: ParseListDecl removed — list<T> declarations go through
 // ParseVarDeclBody
 //       via the unified ParseType() path, same as int/double/bool/string.
@@ -717,11 +715,6 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_STRUCT:
     return ParseStructDecl();
 
-  case TOK_TRY:
-    return ParseTryExpr();
-
-  case TOK_RAISE:
-    return ParseRaiseExpr();
 
   case TOK_RETURN:
     return ParseReturnExpr();
@@ -903,7 +896,7 @@ bool RequiresSemicolon(const ExprAST* AST) {
   if (dynamic_cast<const FuncDefExprAST*>(AST)) return false;
   if (dynamic_cast<const StructDeclExprAST*>(AST)) return false;
   if (dynamic_cast<const BlockExprAST*>(AST)) return false;
-  if (dynamic_cast<const TryExprAST*>(AST)) return false;
+
   return true;
 }
 
@@ -993,68 +986,6 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
                                         std::move(Body));
 }
 
-std::unique_ptr<ExprAST> ParseTryExpr() {
-  SourceLocation TryLoc = CurLoc;
-  getNextToken(); // eat 'try'
-
-  if (CurTok != '{') {
-    LogErrorAt(TryLoc, "Expected '{' to open the try-block body.");
-    return nullptr;
-  }
-
-  auto TryBlock = ParseBlock();
-  if (!TryBlock)
-    return nullptr;
-
-  if (CurTok != TOK_ONERROR) {
-    LogErrorAt(CurLoc, "Expected 'onError' after try-block");
-    return nullptr;
-  }
-  getNextToken(); // eat 'onError'
-
-  if (CurTok != '(') {
-    LogErrorAt(CurLoc,
-               "Expected '(' after onError to specify exception variable");
-    return nullptr;
-  }
-  getNextToken();
-
-  if (CurTok != TOK_IDENTIFIER) {
-    LogErrorAt(CurLoc, "Expected variable name for exception payload");
-    return nullptr;
-  }
-  std::string PayloadName = IdentifierStr;
-  getNextToken();
-
-  if (CurTok != ')') {
-    LogErrorAt(CurLoc, "Expected ')' after exception variable");
-    return nullptr;
-  }
-  getNextToken();
-
-  if (CurTok != '{') {
-    LogErrorAt(CurLoc, "Expected '{' to open the onError-block body.");
-    return nullptr;
-  }
-
-  auto CatchBlock = ParseBlock();
-  if (!CatchBlock)
-    return nullptr;
-
-  return std::make_unique<TryExprAST>(TryLoc, std::move(TryBlock), PayloadName,
-                                      std::move(CatchBlock));
-}
-
-std::unique_ptr<ExprAST> ParseRaiseExpr() {
-  SourceLocation RaiseLoc = CurLoc;
-  getNextToken(); // eat 'raise'
-
-  auto Payload = ParseExpression();
-  if (!Payload)
-    return nullptr;
-
-  return std::make_unique<RaiseExprAST>(RaiseLoc, std::move(Payload));
-}
 
 // ParseForExpr - parses:
 //   for <ident> in <start>..<end> step <step_expr> { body }
@@ -1561,8 +1492,10 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
   }
 
   std::ifstream ImportFile(Path);
-  if (!ImportFile.is_open())
+  if (!ImportFile.is_open()) {
+    std::cout << "DEBUG ParseFile: Failed to open path: " << Path << "\n";
     return nullptr;
+  }
 
   ImportedFiles.insert(Path);
 
@@ -1650,6 +1583,7 @@ std::unique_ptr<ExprAST> ParseImport() {
   llvm::sys::path::append(StdlibPath, "..", "lib", "std", ModuleName + ".tr");
 
   auto Block = ParseFile(StdlibPath.str().str());
+  std::cout << "DEBUG ParseImport Module: " << ModuleName << ", StdlibPath: " << StdlibPath.str().str() << ", Block resolved: " << (Block != nullptr) << "\n";
   if (!Block) {
     std::string CwdPath = ModuleName + ".tr";
     Block = ParseFile(CwdPath);

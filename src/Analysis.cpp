@@ -66,11 +66,6 @@ static void collectReadsAndDefs(const ExprAST *E, AssignSet &Current,
       // nothing
     } else if (auto Num = dynamic_cast<const NumberExprAST *>(N)) {
       // nothing
-    } else if (auto Try = dynamic_cast<const TryExprAST *>(N)) {
-      visit(Try->getTryBlock());
-      visit(Try->getCatchBlock());
-    } else {
-      // Fallback: no-op for nodes we don't explicitly handle
     }
   };
 

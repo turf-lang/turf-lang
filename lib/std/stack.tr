@@ -9,47 +9,47 @@ struct Stack<T> {
   int cap
 }
 
-fn<T> void Stack.push(T item) {
+fn<T> Stack.push(item: T): void {
   if (self.len == self.cap) {
     if (self.cap == 0) {
-      self.cap = 8
+      self.cap = 8;
     } else {
-      self.cap = self.cap * 2
+      self.cap = self.cap * 2;
     }
 
     // Type Erasure: all T are 64-bit values (int, double, pointers)
-    int byteSize = self.cap * 8
+    immutable byteSize: int = self.cap * 8;
 
     if (self.data == T*(0)) {
-      self.data = T*(mem.malloc(byteSize))
+      self.data = T*(mem.malloc(byteSize));
     } else {
-      self.data = T*(mem.realloc(self.data, byteSize))
+      self.data = T*(mem.realloc(self.data, byteSize));
     }
   }
 
-  self.data[self.len] = item
-  self.len = self.len + 1
+  self.data[self.len] = item;
+  self.len = self.len + 1;
 }
 
-fn<T> T Stack.pop() {
+fn<T> Stack.pop(): T {
   if (self.len == 0) {
     // Trap: pop on empty stack (null deref to signal error)
-    mem.free(T*(0))
+    mem.free(T*(0));
   }
 
-  self.len = self.len - 1
-  return self.data[self.len]
+  self.len = self.len - 1;
+  return self.data[self.len];
 }
 
-fn<T> T Stack.peek() {
+fn<T> Stack.peek(): T {
   if (self.len == 0) {
     // Trap: peek on empty stack
-    mem.free(T*(0))
+    mem.free(T*(0));
   }
 
-  return self.data[self.len - 1]
+  return self.data[self.len - 1];
 }
 
-fn<T> int Stack.length() {
-  return self.len
+fn<T> Stack.length(): int {
+  return self.len;
 }

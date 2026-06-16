@@ -217,6 +217,7 @@ static int linkObject(const std::string &ObjFile,
  */
 int main(int argc, char **argv) {
   CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)main);
+  std::cout << "DEBUG CompilerExecutablePath: " << CompilerExecutablePath << "\n";
 
   struct SLMCleanup {
     ~SLMCleanup() { SLM::SLMEngine::getInstance().release(); }

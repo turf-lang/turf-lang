@@ -6,13 +6,13 @@ struct List<T> {
   int cap
 }
 
-fn void List<T>.init() {
+fn<T> List.init(): void {
   self.len = 0;
   self.cap = 4;
   self.data = malloc(sizeof(T) * self.cap) as T*;
 }
 
-fn void List<T>.push(T val) {
+fn<T> List.push(val: T): void {
   if self.len == self.cap {
     self.cap = self.cap * 2;
     self.data = realloc(self.data as void*, sizeof(T) * self.cap) as T*;
@@ -21,71 +21,71 @@ fn void List<T>.push(T val) {
   self.len = self.len + 1;
 }
 
-fn T List<T>.get(int i) {
+fn<T> List.get(i: int): T {
   if i < 0 or i >= self.len {
-    raise OutOfBoundsException("List index out of bounds");
+    fail("List index out of bounds");
   }
   return self.data[i];
 }
 
-fn void List<T>.set(int i, T val) {
+fn<T> List.set(i: int, val: T): void {
   if i < 0 or i >= self.len {
-    raise OutOfBoundsException("List index out of bounds");
+    fail("List index out of bounds");
   }
   self.data[i] = val;
 }
 
-fn int List<T>.length() {
+fn<T> List.length(): int {
   return self.len;
 }
 
 struct Stack<T> {
-  List<T> items
+  items: List<T>
 }
 
-fn void Stack<T>.init() {
+fn<T> Stack.init(): void {
   self.items = List<T>();
 }
 
-fn void Stack<T>.push(T val) {
+fn<T> Stack.push(val: T): void {
   self.items.push(val);
 }
 
-fn T Stack<T>.pop() {
+fn<T> Stack.pop(): T {
   if self.items.length() == 0 {
-    raise OutOfBoundsException("Stack is empty");
+    fail("Stack is empty");
   }
   self.items.len = self.items.len - 1;
   return self.items.data[self.items.len];
 }
 
-fn int Stack<T>.length() {
+fn<T> Stack.length(): int {
   return self.items.length();
 }
 
 struct Queue<T> {
-  List<T> items,
-  int head
+  items: List<T>,
+  head: int
 }
 
-fn void Queue<T>.init() {
+fn<T> Queue.init(): void {
   self.items = List<T>();
   self.head = 0;
 }
 
-fn void Queue<T>.enqueue(T val) {
+fn<T> Queue.enqueue(val: T): void {
   self.items.push(val);
 }
 
-fn T Queue<T>.dequeue() {
+fn<T> Queue.dequeue(): T {
   if self.head >= self.items.length() {
-    raise OutOfBoundsException("Queue is empty");
+    fail("Queue is empty");
   }
-  T val = self.items.get(self.head);
+  immutable val: T = self.items.get(self.head);
   self.head = self.head + 1;
   return val;
 }
 
-fn int Queue<T>.length() {
+fn<T> Queue.length(): int {
   return self.items.length() - self.head;
 }

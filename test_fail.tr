@@ -1,4 +1,4 @@
-fn int main() {
+fn main(): int {
     // We hit an unrecoverable state!
     fail("A critical error occurred. Aborting!");
     

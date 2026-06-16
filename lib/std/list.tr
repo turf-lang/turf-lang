@@ -6,39 +6,39 @@ struct List<T> {
   int cap
 }
 
-fn<T> void List.push(T item) {
+fn<T> List.push(item: T): void {
   if (self.len == self.cap) {
     if (self.cap == 0) {
-      self.cap = 8
+      self.cap = 8;
     } else {
-      self.cap = self.cap * 2
+      self.cap = self.cap * 2;
     }
     
     // In Type Erasure, all T are 64 bits (pointers, int, double)
-    int byteSize = self.cap * 8 
+    immutable byteSize: int = self.cap * 8;
     
     if (self.data == T*(0)) {
-      self.data = T*(mem.malloc(byteSize))
+      self.data = T*(mem.malloc(byteSize));
     } else {
-      self.data = T*(mem.realloc(self.data, byteSize))
+      self.data = T*(mem.realloc(self.data, byteSize));
     }
   }
   
-  self.data[self.len] = item
-  self.len = self.len + 1
+  self.data[self.len] = item;
+  self.len = self.len + 1;
 }
 
-fn<T> T List.pop() {
+fn<T> List.pop(): T {
   if (self.len == 0) {
     // Basic trap if pop on empty list
     // Ideally we would throw an exception
-    mem.free(T*(0))
+    mem.free(T*(0));
   }
   
-  self.len = self.len - 1
-  return self.data[self.len]
+  self.len = self.len - 1;
+  return self.data[self.len];
 }
 
-fn<T> int List.length() {
-  return self.len
+fn<T> List.length(): int {
+  return self.len;
 }

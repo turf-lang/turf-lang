@@ -40,8 +40,7 @@ class ForExprAST;
 class BreakExprAST;
 class ContinueExprAST;
 class ReturnExprAST;
-class RaiseExprAST;
-class TryExprAST;
+
 class FuncDefExprAST;
 class FuncCallExprAST;
 class MethodCallExprAST;
@@ -104,8 +103,7 @@ public:
   virtual void visitBreak(BreakExprAST &Node) {}
   virtual void visitContinue(ContinueExprAST &Node) {}
   virtual void visitReturn(ReturnExprAST &Node) {}
-  virtual void visitRaise(RaiseExprAST &Node) {}
-  virtual void visitTry(TryExprAST &Node) {}
+
 
   // ── Functions & Calls ─────────────────────────────────────────────────────
   virtual void visitFuncDef(FuncDefExprAST &Node) {}

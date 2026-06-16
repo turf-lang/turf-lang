@@ -35,8 +35,7 @@ llvm::Value *ForExprAST::codegen()      { return nullptr; }
 llvm::Value *BreakExprAST::codegen()    { return nullptr; }
 llvm::Value *ContinueExprAST::codegen() { return nullptr; }
 llvm::Value *ReturnExprAST::codegen()   { return nullptr; }
-llvm::Value *RaiseExprAST::codegen()    { return nullptr; }
-llvm::Value *TryExprAST::codegen()      { return nullptr; }
+
 llvm::Value *FuncDefExprAST::codegen()  { return nullptr; }
 llvm::Value *FuncCallExprAST::codegen() { return nullptr; }
 llvm::Value *MethodCallExprAST::codegen(){ return nullptr; }
