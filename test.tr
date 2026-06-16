@@ -1,0 +1,5 @@
+fn int main() {
+    io.printlin("JELLO");
+
+    return 0;
+}

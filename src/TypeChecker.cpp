@@ -35,6 +35,7 @@
 #include "Builtins.h"
 
 #include <cassert>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -396,6 +397,33 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   // The assignment expression type is the RHS type
   TurfTypePtr RhsTy = getType(Node.getRHS());
   setType(&Node, RhsTy);
+
+  const VariableExprAST *LHSVar = nullptr;
+  const ExprAST *Base = Node.getLHS();
+  
+  // Drill down through any array/field accesses to find the root variable
+  while (Base) {
+    if (auto *Var = dynamic_cast<const VariableExprAST *>(Base)) {
+      LHSVar = Var;
+      break;
+    } else if (auto *ArrAccess = dynamic_cast<const ArrayAccessExprAST *>(Base)) {
+      Base = ArrAccess->getBase();
+    } else if (auto *FieldAccess = dynamic_cast<const FieldAccessExprAST *>(Base)) {
+      Base = FieldAccess->getBase();
+    } else {
+      break;
+    }
+  }
+
+  if (LHSVar) {
+    if (LHSVar->ResolvedSymbol && LHSVar->ResolvedSymbol->IsImmutable) {
+#ifndef TYPECHECKER_NO_ERRORS
+      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName()).raise();
+#else
+      throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
+#endif
+    }
+  }
 }
 
 void TypeChecker::visitCast(CastExprAST &Node) {
@@ -550,10 +578,12 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     CalleeName = VE->getName();
   }
 
-  // ── Intrinsic / builtin path ──────────────────────────────────────────────
-  // Pure intrinsics (typeof, lengthof, abs, power, …) have no
-  // ResolvedCandidates entry — they are not registered as user functions.
-  // We look them up via Builtins.h and handle them specially.
+  // ── Bare language intrinsic path ─────────────────────────────────────────
+  // Only 'typeof' and 'lengthof' are true bare intrinsics (callable without a
+  // module qualifier and not registered as user functions).
+  // Everything else that used to live here (abs, power, print, input, malloc…)
+  // now lives in lib/std and is resolved via the Resolver's module registry.
+  // LookupBuiltin() returns null for all stdlib functions since Issue #9.
   if (Node.ResolvedCandidates.empty() && !CalleeName.empty()) {
     const BuiltinInfo *BI = LookupBuiltin(CalleeName);
     if (BI) {
@@ -591,74 +621,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         return;
       }
 
-      // ── abs(x) → int or double (same as arg type) ────────────────────────
-      if (CalleeName == "abs") {
-        if (ArgCount == 1) {
-          const TurfType *ArgTy = ArgTypes[0].get();
-          if (ArgTy && !ArgTy->isNumeric()) {
-            reportError(Node.getLoc(),
-                        "'abs' requires an int or double argument, got '" +
-                            ArgTy->getName() + "'.");
-            setType(&Node, nullptr);
-            return;
-          }
-          // Return type matches arg type (int→int, double→double, bool→int)
-          if (ArgTy && ArgTy->isDouble())
-            setType(&Node, TurfDouble());
-          else
-            setType(&Node, TurfInt());
-          return;
-        }
-      }
-
-      // ── power(base, exp) → int or double ─────────────────────────────────
-      if (CalleeName == "power" || CalleeName == "pow") {
-        if (ArgCount == 2) {
-          const TurfType *ATy = ArgTypes[0].get();
-          const TurfType *BTy = ArgTypes[1].get();
-          if (ATy && !ATy->isNumeric()) {
-            reportError(Node.getLoc(),
-                        "'" + CalleeName +
-                            "' first argument must be int or double, got '" +
-                            ATy->getName() + "'.");
-            setType(&Node, nullptr);
-            return;
-          }
-          if (BTy && !BTy->isNumeric()) {
-            reportError(Node.getLoc(),
-                        "'" + CalleeName +
-                            "' second argument must be int or double, got '" +
-                            BTy->getName() + "'.");
-            setType(&Node, nullptr);
-            return;
-          }
-          // int^int → int; anything involving double → double
-          if ((ATy && ATy->isDouble()) || (BTy && BTy->isDouble()))
-            setType(&Node, TurfDouble());
-          else
-            setType(&Node, TurfInt());
-          return;
-        }
-      }
-
-      // Other known builtins (print, printline, input, malloc, …): we've done
-      // the arity check above; return void for statements that produce no value.
-      if (CalleeName == "print" || CalleeName == "printline" ||
-          CalleeName == "free") {
-        setType(&Node, TurfVoid());
-        return;
-      }
-
-      // input() → string
-      if (CalleeName == "input") {
-        setType(&Node, TurfString());
-        return;
-      }
-
-      // malloc/realloc → we can't express the pointer type cleanly yet;
-      // leave as null (unknown) so downstream doesn't crash.
-      setType(&Node, nullptr);
-      return;
+      // Any other name that hits LookupBuiltin() is unexpected — fall through.
     }
   }
 
@@ -861,12 +824,13 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       }
     }
 
-    // Note: ResolvedCallTarget on MethodCallExprAST is left null for
-    // module-qualified calls because ResolverSymbolTable stores
-    // ResolverFunctionSymbols by value (not as shared_ptr), so we cannot
-    // form an owning shared_ptr without copying the object.  The type is
-    // still correctly propagated to the node via setType() below.
-    // (For future work: RST could expose shared_ptr overloads.)
+    // Set ResolvedCallTarget so Codegen can read mangledName() directly
+    // without any overload resolution.  We use a shared_ptr with a no-op
+    // deleter because the symbol is owned by the ResolverSymbolTable; we
+    // just need an owning handle that Codegen can call ->mangledName() on.
+    Node.ResolvedCallTarget = std::shared_ptr<ResolverFunctionSymbol>(
+        const_cast<ResolverFunctionSymbol *>(Best),
+        [](ResolverFunctionSymbol *) { /* RST owns this */ });
     setType(&Node, Best->ReturnType);
     return;
   }
@@ -919,13 +883,20 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
     setType(&Node, nullptr);
   }
 }
-
 void TypeChecker::visitArrayAssign(ArrayAssignExprAST &Node) {
   if (Node.getIndex())
     const_cast<ExprAST *>(Node.getIndex())->accept(*this);
   if (Node.getRHS())
     const_cast<ExprAST *>(Node.getRHS())->accept(*this);
   setType(&Node, TurfVoid());
+
+  if (Node.ResolvedSymbol && Node.ResolvedSymbol->IsImmutable) {
+#ifndef TYPECHECKER_NO_ERRORS
+    ImmutableAssignmentError(Node.getLoc(), Node.getName()).raise();
+#else
+    throw std::runtime_error("ImmutableAssignmentError: " + Node.getName());
+#endif
+  }
 }
 
 void TypeChecker::visitArrayLength(ArrayLengthExprAST &Node) {

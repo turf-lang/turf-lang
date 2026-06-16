@@ -40,6 +40,7 @@ std::set<int> DiagnosticEngine::ErrorLines;
 // setjmp/longjmp recovery buffers
 jmp_buf g_recoverJmp;
 bool g_recoverActive = false;
+bool g_protoOnlyPass = false; // set by pre-pass 3a to stop after prototype
 
 // AI/SLM flag: only true when --smart is passed on the CLI.
 bool g_AIEnabled = false;
@@ -83,7 +84,11 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"try", TOK_TRY},
                                        {"onError", TOK_ONERROR},
                                        {"raise", TOK_RAISE},
-                                       {"null", TOK_NULL}};
+                                       {"null", TOK_NULL},
+                                       {"mutable", TOK_MUTABLE},
+                                       {"mut", TOK_MUTABLE},
+                                       {"immutable", TOK_IMMUTABLE},
+                                       {"immut", TOK_IMMUTABLE}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
@@ -348,6 +353,19 @@ int gettok() {
     }
 
     return TOK_ASSIGN;
+  }
+
+  if (LastChar == ':') {
+    LastChar = SourceFile.get();
+    CurCol++;
+
+    if (LastChar == ':') {
+      LastChar = SourceFile.get();
+      CurCol++;
+      return ':'; // Placeholder for future scope resolution
+    }
+
+    return TOK_COLON;
   }
 
   if (LastChar == '!') {

@@ -1,0 +1,6 @@
+fn int main() {
+    // We hit an unrecoverable state!
+    fail("A critical error occurred. Aborting!");
+    
+    return 0;
+}

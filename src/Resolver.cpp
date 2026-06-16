@@ -125,7 +125,7 @@ void Resolver::visitVarDecl(VarDeclExprAST &Node) {
   try {
     ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
     Node.ResolvedSymbol =
-        SymTable_.declareVariable(Node.getName(), Node.getTypePtr(), Loc);
+        SymTable_.declareVariable(Node.getName(), Node.getTypePtr(), Loc, Node.isImmutable());
   } catch (const std::runtime_error &) {
     // The name is already in the current scope — emit a rich diagnostic.
     // Look up the previous declaration for the "declared at line N" note.
@@ -348,6 +348,8 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     static const std::unordered_set<std::string> BareIntrinsics = {
         "typeof",
         "lengthof",
+        "assert",
+        "fail",
     };
     if (BareIntrinsics.count(CalleeName)) {
       // True bare intrinsic — skip error, TypeChecker validates arity/types.
@@ -376,13 +378,60 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     return;
   }
 
+  // ── Arity check ───────────────────────────────────────────────────────────
+  // The symbol table already knows every overload's arity.  Before handing
+  // the candidates to the TypeChecker, verify that at least one overload
+  // accepts the number of arguments supplied at this call site.
+  //
+  // This is the authoritative arity check — no hardcoded maps anywhere.
+  // WrongArityError fires here; Codegen never sees an arity mismatch.
+  const int ArgCount = static_cast<int>(Node.getArgs().size());
+  std::vector<std::string> AllSignatures;
+
+  for (const auto *Sym : CurrentFileMatches)
+    AllSignatures.push_back(Sym->signature());
+  for (const auto &Match : ModuleMatches)
+    AllSignatures.push_back(Match.Symbol->signature());
+
+  bool AnyArityMatch = false;
   for (const auto *Sym : CurrentFileMatches) {
-    Node.ResolvedCandidates.push_back(
-        std::make_shared<ResolverFunctionSymbol>(*Sym));
+    if (Sym->arity() == ArgCount) { AnyArityMatch = true; break; }
+  }
+  if (!AnyArityMatch) {
+    for (const auto &Match : ModuleMatches) {
+      if (Match.Symbol->arity() == ArgCount) { AnyArityMatch = true; break; }
+    }
+  }
+
+  if (!AnyArityMatch) {
+    WrongArityError(Node.getLoc(), CalleeName, ArgCount, AllSignatures).raise();
+    return;
+  }
+
+  // Populate ResolvedCandidates with only the arity-matching overloads.
+  // TypeChecker::visitFuncCall then narrows further by type compatibility.
+  for (const auto *Sym : CurrentFileMatches) {
+    if (Sym->arity() == ArgCount)
+      Node.ResolvedCandidates.push_back(
+          std::make_shared<ResolverFunctionSymbol>(*Sym));
   }
   for (const auto &Match : ModuleMatches) {
-    Node.ResolvedCandidates.push_back(
-        std::make_shared<ResolverFunctionSymbol>(*Match.Symbol));
+    if (Match.Symbol->arity() == ArgCount)
+      Node.ResolvedCandidates.push_back(
+          std::make_shared<ResolverFunctionSymbol>(*Match.Symbol));
+  }
+
+  // ── Set ResolvedCallTarget when unambiguous ───────────────────────────────
+  // If exactly one overload matches the arity, the Resolver can commit to it
+  // immediately.  Codegen reads ResolvedCallTarget blindly (Issue #9) — this
+  // ensures it's always set for the common single-overload case, even when
+  // the TypeChecker hasn't run.
+  //
+  // Multiple arity-matching candidates means the function has type-overloads
+  // (e.g. add(int,int) and add(double,double)).  In that case TypeChecker
+  // narrows to one via type compatibility and sets ResolvedCallTarget itself.
+  if (Node.ResolvedCandidates.size() == 1) {
+    Node.ResolvedCallTarget = Node.ResolvedCandidates[0];
   }
 }
 
@@ -408,6 +457,73 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
   // Always resolve argument expressions regardless.
   for (const auto &Arg : Node.getArgs())
     visitChild(Arg.get());
+
+  // ── Module method arity check ─────────────────────────────────────────────
+  // If the base is a known module, look up the method in the module registry
+  // and verify that at least one overload accepts the supplied argument count.
+  // This mirrors the arity check in visitFuncCall — all done from symbol table
+  // data, no hardcoded maps.
+  if (BaseVar && SymTable_.hasModule(BaseVar->getName())) {
+    const std::string &ModuleName = BaseVar->getName();
+    const std::string &MethodName = Node.getMethod();
+    const int ArgCount = static_cast<int>(Node.getArgs().size());
+
+    // Look up all overloads of this method in the module.
+    auto ModuleMatches = SymTable_.findInModules(MethodName);
+    // Filter to those belonging to this specific module.
+    std::vector<const ResolverFunctionSymbol *> MethodOverloads;
+    for (const auto &Match : ModuleMatches) {
+      if (Match.ModuleName == ModuleName)
+        MethodOverloads.push_back(Match.Symbol);
+    }
+
+    if (!MethodOverloads.empty()) {
+      // Method name exists in this module — check arity.
+      bool AnyArityMatch = false;
+      std::vector<std::string> AllSigs;
+      std::vector<const ResolverFunctionSymbol *> ArityMatches;
+      for (const auto *Sym : MethodOverloads) {
+        AllSigs.push_back(ModuleName + "." + Sym->signature());
+        if (Sym->arity() == ArgCount) {
+          AnyArityMatch = true;
+          ArityMatches.push_back(Sym);
+        }
+      }
+      if (!AnyArityMatch) {
+        WrongArityError(Node.getLoc(),
+                        ModuleName + "." + MethodName,
+                        ArgCount, AllSigs).raise();
+        return;
+      }
+
+      // ── Set ResolvedCallTarget for the unambiguous case ──────────────────
+      // When exactly one overload matches the arity, set it directly so that
+      // Codegen can read mangledName() in the pre-pass before TypeChecker runs.
+      // TypeChecker handles the multi-overload narrowing via type compatibility.
+      if (ArityMatches.size() == 1) {
+        Node.ResolvedCallTarget = std::shared_ptr<ResolverFunctionSymbol>(
+            const_cast<ResolverFunctionSymbol *>(ArityMatches[0]),
+            [](ResolverFunctionSymbol *) { /* RST owns this */ });
+      }
+    } else {
+      // Method does not exist in this module.
+      RankedSuggestions Suggestions;
+      std::vector<std::string> ModuleNames = SuggestionIndex::suggestVisible(
+          MethodName, SymTable_.getModuleFunctionNames(ModuleName));
+      
+      for (const auto &SuggestedName : ModuleNames) {
+        auto Matches = SymTable_.findInModules(SuggestedName);
+        for (const auto &Match : Matches) {
+          if (Match.ModuleName == ModuleName) {
+            Suggestions.Module[ModuleName].push_back(Match.Symbol->signature());
+          }
+        }
+      }
+      
+      UnknownFunctionError(Node.getLoc(), ModuleName + "." + MethodName, Suggestions).raise();
+      return;
+    }
+  }
 }
 
 void Resolver::visitFieldAccess(FieldAccessExprAST &Node) {
@@ -429,7 +545,7 @@ void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {
   try {
     ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
     Node.ResolvedSymbol =
-        SymTable_.declareVariable(Node.getName(), Node.getElementTypePtr(), Loc);
+        SymTable_.declareVariable(Node.getName(), Node.getElementTypePtr(), Loc, Node.isImmutable());
   } catch (const std::runtime_error &) {
     auto Prev = SymTable_.lookupVariable(Node.getName());
     if (Prev) {
@@ -446,13 +562,15 @@ void Resolver::visitArrayAccess(ArrayAccessExprAST &Node) {
 
 void Resolver::visitArrayAssign(ArrayAssignExprAST &Node) {
   // The array being assigned to must already be in scope.
-  if (!SymTable_.lookupVariable(Node.getName())) {
+  auto Sym = SymTable_.lookupVariable(Node.getName());
+  if (!Sym) {
     std::vector<std::string> VisibleNames = SymTable_.getAllVisibleNames();
     RankedSuggestions Suggestions;
     Suggestions.Local =
         SuggestionIndex::suggestVisible(Node.getName(), VisibleNames);
     ReferenceError(Node.getLoc(), Node.getName(), Suggestions).raise();
   }
+  Node.ResolvedSymbol = Sym;
   visitChild(Node.getIndex());
   visitChild(Node.getRHS());
 }

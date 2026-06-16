@@ -35,30 +35,20 @@ using namespace llvm;
 static std::unordered_map<std::string, BuiltinInfo> g_builtins;
 static std::once_flag g_builtins_init_flag;
 
-// Arity table: maps intrinsic name -> expected number of arguments.
-// -1 means variadic/unchecked. Used by CodegenIntrinsic to catch arity
-// mismatches before any Args[n] access happens.
-
-// Might need to remove LLVM handled intrinsics like sqrt, sin, cos cuz their arity might have been handled by LLVM itself, need ot check later.
+// Arity table for bare language-level intrinsics only.
+// These are the only two functions that are callable WITHOUT a module qualifier
+// and have no home in lib/std:
+//   - typeof(x)   — compile-time type name string
+//   - lengthof(x) — byte-length of a string
+//
+// Everything else (print, printline, malloc, abs, power, sqrt, …) lives in
+// lib/std and is resolved by the Resolver's module registry.  Do NOT add those
+// here — adding them here would duplicate arity enforcement and cause confusion.
 static const std::unordered_map<std::string, int> IntrinsicArity = {
-    {"print",     1},
-    {"printline", 1},
-    {"input",     0},
-    {"malloc",    1},
-    {"realloc",   2},
-    {"free",      1},
-    {"typeof",    1},
-    {"lengthof",  1},
-    {"abs",       1},
-    {"sqrt",      1},
-    {"sin",       1},
-    {"cos",       1},
-    {"tan",       1},
-    {"floor",     1},
-    {"ceil",      1},
-    {"round",     1},
-    {"power",     2},
-    {"pow",       2},
+    {"typeof",   1},
+    {"lengthof", 1},
+    {"assert",  -1},
+    {"fail",     1},
 };
 
 static void ensure_builtins_registered();
@@ -84,18 +74,18 @@ std::vector<std::string> GetBuiltinNames() {
 }
 
 static void ensure_builtins_registered() {
-  // Register the canonical builtin names used by the compiler. Keep the
-  // Arity information when known; -1 means variadic/unknown.
-  RegisterBuiltin("print", {1, "Print a value"});
-  RegisterBuiltin("printline", {1, "Print a value with newline"});
-  RegisterBuiltin("input", {0, "Read a line from stdin"});
-  RegisterBuiltin("malloc", {1, "Allocate memory"});
-  RegisterBuiltin("realloc", {2, "Reallocate memory"});
-  RegisterBuiltin("free", {1, "Free memory"});
-  RegisterBuiltin("power", {2, "Power operation"});
-  RegisterBuiltin("abs", {1, "Absolute value"});
-  RegisterBuiltin("lengthof", {1, "Length of string"});
-  RegisterBuiltin("typeof", {1, "Type of value"});
+  // Only register the two true bare language-level intrinsics that are
+  // callable without a module qualifier.  These are the only names that
+  // appear in g_builtins for suggestion quality (suggestBuiltins()) and
+  // for the IntrinsicArity guard in CodegenIntrinsic().
+  //
+  // stdlib functions (print, printline, input, malloc, abs, power, sqrt, …)
+  // live in lib/std modules and are resolved via the Resolver's module
+  // registry — they must NOT be listed here.
+  RegisterBuiltin("typeof",   {1, "Compile-time type name of an expression"});
+  RegisterBuiltin("lengthof", {1, "Byte-length of a string"});
+  RegisterBuiltin("assert",   {-1, "Asserts a condition at runtime"});
+  RegisterBuiltin("fail",     {1, "Aborts execution with a message"});
 }
 
 /**
@@ -112,28 +102,12 @@ static void ensure_builtins_registered() {
  * reporting.
  * @return llvm::Value* The resulting LLVM Value after evaluating the intrinsic,
  * or nullptr on failure.
- * @throws SemanticError if the intrinsic is unknown or arguments are invalid.
+ * @note Arity and type validation are the TypeChecker's responsibility.
+ *       By the time this is called, all arguments are guaranteed correct.
  */
 llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
                               std::vector<llvm::Value *> &Args,
                               SourceLocation Loc) {
-  // --- Arity guard (Phase 1 fix) ---
-  // Check before ANY Args[n] access to prevent out-of-bounds crashes.
-  {
-    auto ArityIt = IntrinsicArity.find(IntrinsicName);
-    if (ArityIt != IntrinsicArity.end() && ArityIt->second >= 0) {
-      int Expected = ArityIt->second;
-      if ((int)Args.size() != Expected) {
-        SemanticError(Loc,
-                      "'" + IntrinsicName + "' requires exactly " +
-                          std::to_string(Expected) + " argument" +
-                          (Expected == 1 ? "" : "s") + ", but got " +
-                          std::to_string(Args.size()))
-            .raise();
-        return nullptr;
-      }
-    }
-  }
 
   if (IntrinsicName == "print") {
     Value *Val = Args[0];
@@ -317,7 +291,7 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     if (!BIsDouble)
       B = Builder->CreateSIToFP(B, Type::getDoubleTy(*TheContext), "powcast2");
 
-    Function *PowFunc = llvm::Intrinsic::getDeclaration(
+    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
     Value *Result = Builder->CreateCall(PowFunc, {A, B}, "powtmp");
@@ -332,7 +306,7 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     // Arity is already verified above.
     Value *Val = Args[0];
     if (Val->getType()->isDoubleTy()) {
-        Function *FAbsFunc = llvm::Intrinsic::getDeclaration(
+        Function *FAbsFunc = llvm::Intrinsic::getOrInsertDeclaration(
           TheModule.get(), llvm::Intrinsic::fabs,
           {Type::getDoubleTy(*TheContext)});
       return Builder->CreateCall(FAbsFunc, {Val}, "abs");
@@ -400,8 +374,83 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     return Builder->CreateGlobalString(TypeName, "typename");
   }
 
+  if (IntrinsicName == "fail") {
+    // Arg 0: message string
+    Value *MsgVal = Args[0];
+
+    // Get or declare fprintf
+    Function *FPrintFFunc = TheModule->getFunction("fprintf");
+    if (!FPrintFFunc) {
+      FunctionType *FT =
+          FunctionType::get(Type::getInt32Ty(*TheContext),
+                            {PointerType::getUnqual(*TheContext), PointerType::getUnqual(*TheContext)}, true);
+      FPrintFFunc = Function::Create(FT, Function::ExternalLinkage, "fprintf",
+                                     TheModule.get());
+    }
+
+    // Get or declare abort
+    Function *AbortFunc = TheModule->getFunction("abort");
+    if (!AbortFunc) {
+      FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext), false);
+      AbortFunc = Function::Create(FT, Function::ExternalLinkage, "abort", TheModule.get());
+    }
+
+    // Get stderr
+    GlobalVariable *StderrGV = TheModule->getNamedGlobal("stderr");
+    if (!StderrGV) {
+      StderrGV = new GlobalVariable(*TheModule, PointerType::getUnqual(*TheContext), false,
+                                    GlobalValue::ExternalLinkage, nullptr, "stderr");
+    }
+    Value *StderrVal = Builder->CreateLoad(PointerType::getUnqual(*TheContext), StderrGV, "stderr_val");
+
+    // Print message to stderr and abort
+    Value *Fmt = Builder->CreateGlobalString("%s\n", "failfmt");
+    Builder->CreateCall(FPrintFFunc, {StderrVal, Fmt, MsgVal});
+    Builder->CreateCall(AbortFunc, {});
+    Builder->CreateUnreachable();
+
+    // fail doesn't return, but we need to return something to satisfy the type signature
+    // Any value will do since it's unreachable, we'll return a dummy integer
+    return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+  }
+
+  if (IntrinsicName == "assert") {
+    // Arg 0: condition (bool)
+    // Arg 1 (optional): message string
+    Value *Cond = Args[0];
+    
+    // We check if it's already a boolean (i1), though TypeChecker enforces this
+    if (!Cond->getType()->isIntegerTy(1)) {
+        SemanticError(Loc, "'assert' condition must be a boolean").raise();
+        return nullptr;
+    }
+
+    Value *MsgVal;
+    if (Args.size() > 1) {
+      MsgVal = Args[1];
+    } else {
+      MsgVal = Builder->CreateGlobalString("Oops! An assertion failed here.\nHint: Assertions are checks that make sure your code is running exactly as you expect. This one didn't pass.", "default_assert_msg");
+    }
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    BasicBlock *FailBB = BasicBlock::Create(*TheContext, "assert.fail", TheFunction);
+    BasicBlock *PassBB = BasicBlock::Create(*TheContext, "assert.pass", TheFunction);
+
+    Builder->CreateCondBr(Cond, PassBB, FailBB);
+
+    // Fail block
+    Builder->SetInsertPoint(FailBB);
+    std::vector<llvm::Value *> FailArgs = {MsgVal};
+    CodegenIntrinsic("fail", FailArgs, Loc);
+    // CodegenIntrinsic for fail already creates unreachable
+
+    // Pass block
+    Builder->SetInsertPoint(PassBB);
+
+    return ConstantInt::get(Type::getInt64Ty(*TheContext), 1);
+  }
+
   SemanticError(Loc, "Unknown intrinsic: " + IntrinsicName).raise();
   return nullptr;
 }
-
 
