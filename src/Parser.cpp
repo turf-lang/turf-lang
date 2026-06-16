@@ -332,23 +332,10 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
         return nullptr;
       }
       getNextToken();
-
-      bool IsStructInit = false;
-      if (auto *Var = dynamic_cast<VariableExprAST *>(Base.get())) {
-        if (GlobalSymbolTable) {
-          if (auto T = GlobalSymbolTable->LookupType(Var->getName())) {
-            if (dynamic_cast<TurfStructType *>(T.get())) {
-              IsStructInit = true;
-              Base = std::make_unique<StructInitExprAST>(Loc, Var->getName(),
-                                                         std::move(Args));
-            }
-          }
-        }
-      }
-      if (!IsStructInit) {
-        Base = std::make_unique<FuncCallExprAST>(Loc, std::move(Base),
-                                                 std::move(Args));
-      }
+      // Struct initialization now uses brace syntax: Point { x: 10, y: 20 }
+      // Positional Point(10, 20) is no longer valid; treat as a regular call.
+      Base = std::make_unique<FuncCallExprAST>(Loc, std::move(Base),
+                                               std::move(Args));
     } else if (CurTok == '.') {
       SourceLocation Loc = CurLoc;
       getNextToken();
@@ -585,6 +572,47 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     std::string IdName = IdentifierStr;
     SourceLocation IdLoc = CurLoc;
     getNextToken(); // consume the identifier; CurTok now = next token
+
+    // ── Struct brace-init: Identifier '{' field: expr, ... '}' ──────────────
+    // Checked before the keyword-typo guard so `Point { ... }` is never
+    // mistaken for a typo.
+    if (CurTok == '{') {
+      getNextToken(); // eat '{'
+      std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields;
+      while (CurTok != '}' && CurTok != TOK_EOF) {
+        if (CurTok != TOK_IDENTIFIER) {
+          LogErrorAt(CurLoc, "Expected field name in struct initializer");
+          return nullptr;
+        }
+        std::string FieldName = IdentifierStr;
+        getNextToken(); // eat field name
+        if (CurTok != TOK_COLON) {
+          LogErrorAt(CurLoc,
+                     "Expected ':' after field name '" + FieldName +
+                         "' in struct initializer");
+          return nullptr;
+        }
+        getNextToken(); // eat ':'
+        auto Val = ParseExpression();
+        if (!Val)
+          return nullptr;
+        NamedFields.emplace_back(FieldName, std::move(Val));
+        if (CurTok == ',')
+          getNextToken(); // eat ','
+        else if (CurTok != '}')
+          break;
+      }
+      if (CurTok != '}') {
+        LogErrorAt(CurLoc,
+                   "Expected '}' to close struct initializer for '" + IdName +
+                       "'");
+        return nullptr;
+      }
+      getNextToken(); // eat '}'
+      return std::make_unique<StructInitExprAST>(IdLoc, IdName,
+                                                 std::move(NamedFields));
+    }
+
     bool CouldBeKeywordTypo = false;
 
     // Only flag a typo if this name is NOT already a known variable.
@@ -1276,16 +1304,25 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
 
   std::vector<StructField> Fields;
   while (CurTok != '}' && CurTok != TOK_EOF) {
-    TurfTypePtr FieldType = ParseType();
-    if (!FieldType)
-      return nullptr;
-
+    // New syntax: name: type
     if (CurTok != TOK_IDENTIFIER) {
-      LogErrorAt(CurLoc, "Expected field name after type in struct definition");
+      LogErrorAt(CurLoc, "Expected field name in struct definition");
       return nullptr;
     }
     std::string FieldName = IdentifierStr;
-    getNextToken();
+    getNextToken(); // eat field name
+
+    if (CurTok != TOK_COLON) {
+      LogErrorAt(CurLoc,
+                 "Expected ':' after field name '" + FieldName +
+                     "' in struct definition (syntax: name: type)");
+      return nullptr;
+    }
+    getNextToken(); // eat ':'
+
+    TurfTypePtr FieldType = ParseType();
+    if (!FieldType)
+      return nullptr;
 
     Fields.push_back({FieldName, std::move(FieldType)});
 
