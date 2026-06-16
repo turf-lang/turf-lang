@@ -1,26 +1,26 @@
 @intrinsic("input")
-fn string input()
+fn input(): string
 
 @intrinsic("print")
-fn void print(int val)
+fn print(val: int): void
 
 @intrinsic("print")
-fn void print(double val)
+fn print(val: double): void
 
 @intrinsic("print")
-fn void print(bool val)
+fn print(val: bool): void
 
 @intrinsic("print")
-fn void print(string val)
+fn print(val: string): void
 
 @intrinsic("printline")
-fn void printline(int val)
+fn printline(val: int): void
 
 @intrinsic("printline")
-fn void printline(double val)
+fn printline(val: double): void
 
 @intrinsic("printline")
-fn void printline(bool val)
+fn printline(val: bool): void
 
 @intrinsic("printline")
-fn void printline(string val)
+fn printline(val: string): void

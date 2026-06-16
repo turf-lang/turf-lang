@@ -130,8 +130,6 @@ public:
   void visitBreak(BreakExprAST &Node) override { (void)Node; }
   void visitContinue(ContinueExprAST &Node) override { (void)Node; }
   void visitReturn(ReturnExprAST &Node) override;
-  void visitRaise(RaiseExprAST &Node) override;
-  void visitTry(TryExprAST &Node) override;
 
   void visitFuncDef(FuncDefExprAST &Node) override;
   void visitFuncCall(FuncCallExprAST &Node) override;

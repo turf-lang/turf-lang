@@ -252,29 +252,6 @@ void Resolver::visitReturn(ReturnExprAST &Node) {
   visitChild(Node.getVal());
 }
 
-void Resolver::visitRaise(RaiseExprAST &Node) {
-  visitChild(Node.getPayload());
-}
-
-void Resolver::visitTry(TryExprAST &Node) {
-  // Try block
-  visitChild(Node.getTryBlock());
-
-  // The error-payload variable is scoped to the catch block.
-  SymTable_.enterScope();
-  if (!Node.getPayloadName().empty()) {
-    try {
-      ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
-      SymTable_.declareVariable(Node.getPayloadName(), nullptr, Loc);
-    } catch (const std::runtime_error &) {
-      // Ignore duplicate (e.g. nested try with the same payload name is rare
-      // but permitted by shadowing rules).
-    }
-  }
-  visitChild(Node.getCatchBlock());
-  SymTable_.exitScope();
-}
-
 void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   if (FunctionNestingDepth_ > 0) {
     NestedFunctionError(Node.getLoc(), Node.getName()).raise();

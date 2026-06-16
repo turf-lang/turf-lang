@@ -531,20 +531,6 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
   setType(&Node, RetTy ? RetTy : TurfVoid());
 }
 
-void TypeChecker::visitRaise(RaiseExprAST &Node) {
-  if (Node.getPayload())
-    const_cast<ExprAST *>(Node.getPayload())->accept(*this);
-  setType(&Node, TurfVoid());
-}
-
-void TypeChecker::visitTry(TryExprAST &Node) {
-  if (Node.getTryBlock())
-    const_cast<ExprAST *>(Node.getTryBlock())->accept(*this);
-  if (Node.getCatchBlock())
-    const_cast<ExprAST *>(Node.getCatchBlock())->accept(*this);
-  setType(&Node, TurfVoid());
-}
-
 // ─── Functions & calls ────────────────────────────────────────────────────────
 
 void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {

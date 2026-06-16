@@ -70,7 +70,7 @@ std::vector<std::string> GetBuiltinNames() {
 // ─── CodegenIntrinsic stub (never called in unit tests) ──────────────────────
 
 llvm::Value *CodegenIntrinsic(const std::string & /*IntrinsicName*/,
-                               std::vector<llvm::Value *> & /*Args*/,
+                               const std::vector<llvm::Value *> & /*Args*/,
                                SourceLocation /*Loc*/) {
   // This function is never called from the TypeChecker; it exists only so the
   // linker is satisfied (Builtins.h declares it).

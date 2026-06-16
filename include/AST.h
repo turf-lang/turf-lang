@@ -493,52 +493,6 @@ public:
   }
 };
 
-// raise expr
-class RaiseExprAST : public ExprAST {
-  std::unique_ptr<ExprAST> Payload;
-  SourceLocation Loc;
-
-public:
-  RaiseExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Payload)
-      : Loc(Loc), Payload(std::move(Payload)) {}
-
-  const SourceLocation &getLoc() const { return Loc; }
-  const ExprAST *getPayload() const { return Payload.get(); }
-
-  llvm::Value *codegen() override;
-  void accept(ASTVisitor &V) override { V.visitRaise(*this); }
-  std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<RaiseExprAST>(Loc, CloneExprAST(Payload.get()));
-  }
-};
-
-// try { ... } onError (err) { ... }
-class TryExprAST : public ExprAST {
-  std::unique_ptr<ExprAST> TryBlock;
-  std::string PayloadName;
-  std::unique_ptr<ExprAST> CatchBlock;
-  SourceLocation Loc;
-
-public:
-  TryExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> TryBlock,
-             std::string PayloadName, std::unique_ptr<ExprAST> CatchBlock)
-      : Loc(Loc), TryBlock(std::move(TryBlock)),
-        PayloadName(std::move(PayloadName)), CatchBlock(std::move(CatchBlock)) {
-  }
-
-  const SourceLocation &getLoc() const { return Loc; }
-  const ExprAST *getTryBlock() const { return TryBlock.get(); }
-  const std::string &getPayloadName() const { return PayloadName; }
-  const ExprAST *getCatchBlock() const { return CatchBlock.get(); }
-
-  llvm::Value *codegen() override;
-  void accept(ASTVisitor &V) override { V.visitTry(*this); }
-  std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<TryExprAST>(Loc, CloneExprAST(TryBlock.get()),
-                                        PayloadName,
-                                        CloneExprAST(CatchBlock.get()));
-  }
-};
 
 // fn RetType Name<T>(params...) { body }
 class FuncDefExprAST : public ExprAST {
@@ -955,16 +909,6 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
-  if (const auto *TryNode = dynamic_cast<const TryExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(TryNode->getTryBlock(), NodeIDs);
-    CollectAllNodeIDsInternal(TryNode->getCatchBlock(), NodeIDs);
-    return;
-  }
-
-  if (const auto *RaiseNode = dynamic_cast<const RaiseExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(RaiseNode->getPayload(), NodeIDs);
-    return;
-  }
 
   if (const auto *ArrayDecl = dynamic_cast<const ArrayDeclExprAST *>(Node)) {
     for (const auto &Init : ArrayDecl->getInitList())
@@ -1297,27 +1241,6 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
     return ChangedIDs;
   }
 
-  // TryExprAST: Recursively diff try/catch blocks
-  if (auto *OrigTry = dynamic_cast<const TryExprAST *>(OriginalAST)) {
-    auto *ModTry = dynamic_cast<const TryExprAST *>(ModifiedAST);
-    if (OrigTry->getPayloadName() != ModTry->getPayloadName()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
-    CollectChangedNodeIDsInternal(OrigTry->getTryBlock(), ModTry->getTryBlock(),
-                                  ChangedIDs);
-    CollectChangedNodeIDsInternal(OrigTry->getCatchBlock(),
-                                  ModTry->getCatchBlock(), ChangedIDs);
-    return ChangedIDs;
-  }
-
-  // RaiseExprAST: Recursively diff payload
-  if (auto *OrigRaise = dynamic_cast<const RaiseExprAST *>(OriginalAST)) {
-    auto *ModRaise = dynamic_cast<const RaiseExprAST *>(ModifiedAST);
-    CollectChangedNodeIDsInternal(OrigRaise->getPayload(),
-                                  ModRaise->getPayload(), ChangedIDs);
-    return ChangedIDs;
-  }
 
   // BreakExprAST / ContinueExprAST: No children, no state to compare
   if (dynamic_cast<const BreakExprAST *>(OriginalAST) ||

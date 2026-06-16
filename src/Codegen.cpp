@@ -646,12 +646,7 @@ Value *BinaryExprAST::codegen() {
     Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
 
     Builder->SetInsertPoint(DivZeroBB);
-    std::vector<std::unique_ptr<ExprAST>> Args;
-    Args.push_back(std::make_unique<StringExprAST>("Division by zero"));
-    auto ExInit = std::make_unique<StructInitExprAST>(
-        Loc, "ArithmeticException", std::move(Args));
-    auto RaiseEx = std::make_unique<RaiseExprAST>(Loc, std::move(ExInit));
-    RaiseEx->codegen();
+    CodegenIntrinsic("fail", {Builder->CreateGlobalString("Division by zero")}, Loc);
     if (!Builder->GetInsertBlock()->getTerminator())
       Builder->CreateUnreachable();
 
@@ -682,12 +677,7 @@ Value *BinaryExprAST::codegen() {
     Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
 
     Builder->SetInsertPoint(DivZeroBB);
-    std::vector<std::unique_ptr<ExprAST>> Args;
-    Args.push_back(std::make_unique<StringExprAST>("Modulo by zero"));
-    auto ExInit = std::make_unique<StructInitExprAST>(
-        Loc, "ArithmeticException", std::move(Args));
-    auto RaiseEx = std::make_unique<RaiseExprAST>(Loc, std::move(ExInit));
-    RaiseEx->codegen();
+    CodegenIntrinsic("fail", {Builder->CreateGlobalString("Modulo by zero")}, Loc);
     if (!Builder->GetInsertBlock()->getTerminator())
       Builder->CreateUnreachable();
 
@@ -756,7 +746,7 @@ Value *BinaryExprAST::codegen() {
   // Power
   case '^': {
     CastBoth(TurfDouble());
-    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
+    Function *PowFunc = llvm::Intrinsic::getDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
@@ -2011,13 +2001,8 @@ static void EmitListBoundsCheck(Value *IndexVal, Value *LenVal,
   Builder->CreateCondBr(OOB, OobBB, ContBB);
 
   Builder->SetInsertPoint(OobBB);
-  std::vector<std::unique_ptr<ExprAST>> Args;
-  Args.push_back(std::make_unique<StringExprAST>(
-      "List index out of bounds for '" + ListName + "'"));
-  auto ExInit = std::make_unique<StructInitExprAST>(Loc, "OutOfBoundsException",
-                                                    std::move(Args));
-  auto RaiseEx = std::make_unique<RaiseExprAST>(Loc, std::move(ExInit));
-  RaiseEx->codegen();
+  CodegenIntrinsic("fail", {Builder->CreateGlobalString(
+      "List index out of bounds for '" + ListName + "'")}, Loc);
 
   if (!Builder->GetInsertBlock()->getTerminator())
     Builder->CreateUnreachable();
@@ -2100,16 +2085,10 @@ static void EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
 
   Builder->CreateCondBr(OutOfBounds, OobBB, ContBB);
 
-  // Out-of-bounds block: raise exception
+  // Out-of-bounds block: call fail()
   Builder->SetInsertPoint(OobBB);
-
-  std::vector<std::unique_ptr<ExprAST>> Args;
-  Args.push_back(std::make_unique<StringExprAST>(
-      "Array index out of bounds for '" + ArrayName + "'"));
-  auto ExInit = std::make_unique<StructInitExprAST>(Loc, "OutOfBoundsException",
-                                                    std::move(Args));
-  auto RaiseEx = std::make_unique<RaiseExprAST>(Loc, std::move(ExInit));
-  RaiseEx->codegen();
+  CodegenIntrinsic("fail", {Builder->CreateGlobalString(
+      "Array index out of bounds for '" + ArrayName + "'")}, Loc);
 
   if (!Builder->GetInsertBlock()->getTerminator())
     Builder->CreateUnreachable();
@@ -2685,231 +2664,6 @@ Value *FieldAccessExprAST::codegen() {
 
   return Builder->CreateLoad(getLLVMType(FieldType.get()), Ptr,
                              FieldName.c_str());
-}
-Value *TryExprAST::codegen() {
-  Function *TheFunction = Builder->GetInsertBlock()->getParent();
-
-  // Global vars for exception state
-  auto *StackGV = TheModule->getNamedGlobal("turf_exception_stack");
-  if (!StackGV) {
-    auto *ArrayTy = llvm::ArrayType::get(
-        llvm::ArrayType::get(Type::getInt64Ty(*TheContext), 32), 32);
-    StackGV = new GlobalVariable(
-        *TheModule, ArrayTy, false, GlobalValue::InternalLinkage,
-        Constant::getNullValue(ArrayTy), "turf_exception_stack");
-  }
-  auto *TopGV = TheModule->getNamedGlobal("turf_exception_top");
-  if (!TopGV) {
-    TopGV =
-        new GlobalVariable(*TheModule, Type::getInt32Ty(*TheContext), false,
-                           GlobalValue::InternalLinkage,
-                           ConstantInt::get(Type::getInt32Ty(*TheContext), 0),
-                           "turf_exception_top");
-  }
-  auto *PayloadGV = TheModule->getNamedGlobal("turf_exception_payload");
-  if (!PayloadGV) {
-    PayloadGV = new GlobalVariable(
-        *TheModule, PointerType::getUnqual(*TheContext), false,
-        GlobalValue::InternalLinkage,
-        ConstantPointerNull::get(PointerType::getUnqual(*TheContext)),
-        "turf_exception_payload");
-  }
-
-  Function *SetJmpF = TheModule->getFunction("setjmp");
-  if (!SetJmpF) {
-    SetJmpF = Function::Create(
-        FunctionType::get(Type::getInt32Ty(*TheContext),
-                          {PointerType::getUnqual(*TheContext)}, false),
-        Function::ExternalLinkage, "setjmp", TheModule.get());
-  }
-
-  BasicBlock *TryBB = BasicBlock::Create(*TheContext, "try", TheFunction);
-  BasicBlock *CatchBB = BasicBlock::Create(*TheContext, "catch");
-  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "trycont");
-
-  Value *Top = Builder->CreateLoad(Type::getInt32Ty(*TheContext), TopGV);
-  Value *NextTop = Builder->CreateAdd(
-      Top, ConstantInt::get(Type::getInt32Ty(*TheContext), 1));
-  Builder->CreateStore(NextTop, TopGV);
-
-  Value *FramePtr = Builder->CreateGEP(
-      StackGV->getValueType(), StackGV,
-      {ConstantInt::get(Type::getInt32Ty(*TheContext), 0), Top});
-  Value *JmpRes = Builder->CreateCall(SetJmpF, {FramePtr});
-  Value *Cmp = Builder->CreateICmpEQ(
-      JmpRes, ConstantInt::get(Type::getInt32Ty(*TheContext), 0));
-
-  Builder->CreateCondBr(Cmp, TryBB, CatchBB);
-
-  // TRY BLOCK
-  Builder->SetInsertPoint(TryBB);
-  if (!TryBlock->codegen())
-    return nullptr;
-  Builder->CreateStore(Top, TopGV);
-  if (!Builder->GetInsertBlock()->getTerminator())
-    Builder->CreateBr(ContBB);
-
-  // CATCH BLOCK
-  TheFunction->insert(TheFunction->end(), CatchBB);
-  Builder->SetInsertPoint(CatchBB);
-  Builder->CreateStore(Top, TopGV);
-
-  Value *PayloadPtr =
-      Builder->CreateLoad(PointerType::getUnqual(*TheContext), PayloadGV);
-
-  TurfTypePtr ExType;
-  if (GlobalSymbolTable) {
-    ExType = GlobalSymbolTable->LookupType("Exception");
-  }
-  if (!ExType) {
-    ExType = TurfString(); // Fallback to string if Exception is not defined
-  }
-
-  AllocaInst *Alloca =
-      CreateEntryBlockAlloca(TheFunction, PayloadName, ExType.get());
-
-  Type *LLVMExTy = getLLVMType(ExType.get());
-  Value *LoadedStruct = Builder->CreateLoad(LLVMExTy, PayloadPtr);
-  Builder->CreateStore(LoadedStruct, Alloca);
-
-  if (GlobalSymbolTable) {
-    GlobalSymbolTable->EnterScope();
-    GlobalSymbolTable->DeclareSymbol(PayloadName, ExType, Loc, Alloca);
-  }
-
-  auto SavedNamedValues = NamedValues;
-  NamedValues[PayloadName] = {Alloca, ExType};
-
-  if (!CatchBlock->codegen())
-    return nullptr;
-
-  if (GlobalSymbolTable)
-    GlobalSymbolTable->ExitScope();
-  NamedValues = SavedNamedValues;
-
-  if (!Builder->GetInsertBlock()->getTerminator())
-    Builder->CreateBr(ContBB);
-
-  // CONTINUE
-  TheFunction->insert(TheFunction->end(), ContBB);
-  Builder->SetInsertPoint(ContBB);
-
-  return Constant::getNullValue(Type::getDoubleTy(*TheContext));
-}
-
-Value *RaiseExprAST::codegen() {
-  Value *PayloadVal = Payload->codegen();
-  if (!PayloadVal)
-    return nullptr;
-
-  if (!PayloadVal->getType()->isPointerTy()) {
-    // Allocate memory on the heap so it survives longjmp
-    Function *MallocF = TheModule->getFunction("malloc");
-    if (!MallocF) {
-      auto *FT = FunctionType::get(PointerType::getUnqual(*TheContext),
-                                   {Type::getInt64Ty(*TheContext)}, false);
-      MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
-                                 TheModule.get());
-    }
-    const DataLayout &DL = TheModule->getDataLayout();
-    uint64_t StructSize = DL.getTypeAllocSize(PayloadVal->getType());
-    Value *SizeVal =
-        ConstantInt::get(Type::getInt64Ty(*TheContext), StructSize);
-    Value *MallocCall = Builder->CreateCall(MallocF, {SizeVal});
-
-    // Store the struct value into the allocated memory
-    Builder->CreateStore(PayloadVal, MallocCall);
-    PayloadVal = MallocCall;
-  }
-
-  auto *PayloadGV = TheModule->getNamedGlobal("turf_exception_payload");
-  if (!PayloadGV) {
-    PayloadGV = new GlobalVariable(
-        *TheModule, PointerType::getUnqual(*TheContext), false,
-        GlobalValue::InternalLinkage,
-        ConstantPointerNull::get(PointerType::getUnqual(*TheContext)),
-        "turf_exception_payload");
-  }
-  Builder->CreateStore(PayloadVal, PayloadGV);
-
-  auto *TopGV = TheModule->getNamedGlobal("turf_exception_top");
-  if (!TopGV) {
-    TopGV =
-        new GlobalVariable(*TheModule, Type::getInt32Ty(*TheContext), false,
-                           GlobalValue::InternalLinkage,
-                           ConstantInt::get(Type::getInt32Ty(*TheContext), 0),
-                           "turf_exception_top");
-  }
-
-  Function *LongJmpF = TheModule->getFunction("longjmp");
-  if (!LongJmpF) {
-    LongJmpF =
-        Function::Create(FunctionType::get(Type::getVoidTy(*TheContext),
-                                           {PointerType::getUnqual(*TheContext),
-                                            Type::getInt32Ty(*TheContext)},
-                                           false),
-                         Function::ExternalLinkage, "longjmp", TheModule.get());
-  }
-
-  Value *Top = Builder->CreateLoad(Type::getInt32Ty(*TheContext), TopGV);
-  Value *IsEmpty = Builder->CreateICmpEQ(
-      Top, ConstantInt::get(Type::getInt32Ty(*TheContext), 0));
-  Function *TheFunction = Builder->GetInsertBlock()->getParent();
-  BasicBlock *CrashBB = BasicBlock::Create(*TheContext, "crash", TheFunction);
-  BasicBlock *JmpBB = BasicBlock::Create(*TheContext, "jmp");
-
-  Builder->CreateCondBr(IsEmpty, CrashBB, JmpBB);
-
-  Builder->SetInsertPoint(CrashBB);
-  Function *PutsF = TheModule->getFunction("puts");
-  if (!PutsF) {
-    PutsF = Function::Create(
-        FunctionType::get(Type::getInt32Ty(*TheContext),
-                          {PointerType::getUnqual(*TheContext)}, false),
-        Function::ExternalLinkage, "puts", TheModule.get());
-  }
-  Value *UncaughtMsgPrefix = Builder->CreateGlobalString(
-      "Runtime Error: Uncaught exception:", "uncaught_msg_prefix");
-  Builder->CreateCall(PutsF, {UncaughtMsgPrefix});
-  Value *MessagePtrPtr =
-      Builder->CreateBitCast(PayloadVal, PointerType::getUnqual(*TheContext));
-  Value *MessagePtr = Builder->CreateLoad(PointerType::getUnqual(*TheContext),
-                                          MessagePtrPtr, "msg_ptr");
-  Builder->CreateCall(PutsF, {MessagePtr});
-  Function *ExitF = TheModule->getFunction("exit");
-  if (!ExitF) {
-    ExitF = Function::Create(
-        FunctionType::get(Type::getVoidTy(*TheContext),
-                          {Type::getInt32Ty(*TheContext)}, false),
-        Function::ExternalLinkage, "exit", TheModule.get());
-  }
-  Builder->CreateCall(ExitF,
-                      {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
-  Builder->CreateUnreachable();
-
-  TheFunction->insert(TheFunction->end(), JmpBB);
-  Builder->SetInsertPoint(JmpBB);
-  Value *FrameIdx = Builder->CreateSub(
-      Top, ConstantInt::get(Type::getInt32Ty(*TheContext), 1));
-  auto *StackGV = TheModule->getNamedGlobal("turf_exception_stack");
-  if (!StackGV) {
-    auto *ArrayTy = llvm::ArrayType::get(
-        llvm::ArrayType::get(Type::getInt64Ty(*TheContext), 32), 32);
-    StackGV = new GlobalVariable(
-        *TheModule, ArrayTy, false, GlobalValue::InternalLinkage,
-        Constant::getNullValue(ArrayTy), "turf_exception_stack");
-  }
-  Value *FramePtr = Builder->CreateGEP(
-      StackGV->getValueType(), StackGV,
-      {ConstantInt::get(Type::getInt32Ty(*TheContext), 0), FrameIdx});
-  Builder->CreateCall(
-      LongJmpF, {FramePtr, ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
-  Builder->CreateUnreachable();
-
-  BasicBlock *DeadBB =
-      BasicBlock::Create(*TheContext, "after_raise", TheFunction);
-  Builder->SetInsertPoint(DeadBB);
-  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }
 
 Value *ModuleImportExprAST::codegen() {

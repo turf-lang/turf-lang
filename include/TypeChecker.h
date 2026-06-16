@@ -183,8 +183,6 @@ public:
   void visitBreak(BreakExprAST &Node) override;
   void visitContinue(ContinueExprAST &Node) override;
   void visitReturn(ReturnExprAST &Node) override;
-  void visitRaise(RaiseExprAST &Node) override;
-  void visitTry(TryExprAST &Node) override;
 
   // ── Functions & calls ─────────────────────────────────────────────────────
   void visitFuncDef(FuncDefExprAST &Node) override;

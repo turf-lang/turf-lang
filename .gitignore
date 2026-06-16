@@ -1,5 +1,6 @@
 # Build artifacts
 build/
+build_asan/
 bin/
 out/
 *.o
@@ -46,4 +47,7 @@ program
 
 # Models
 models/
+
+# Compilation database
+compile_commands.json
 

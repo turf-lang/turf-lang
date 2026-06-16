@@ -12,7 +12,7 @@
 // It maps the intrinsic name string (e.g. "pow", "malloc") to LLVM IR
 // generation.
 llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
-                              std::vector<llvm::Value *> &Args,
+                              const std::vector<llvm::Value *> &Args,
                               SourceLocation Loc);
 
 // Metadata for a builtin function. Keep minimal for now; extend as needed.
