@@ -383,6 +383,7 @@ public:
   const std::string &getName() const { return Name; }
   const TurfType *getType() const { return Type.get(); }
   TurfTypePtr getTypePtr() const { return Type; }
+  void setTypePtr(TurfTypePtr NewType) { Type = std::move(NewType); }
   const ExprAST *getInitializer() const { return InitVal.get(); }
   bool isImmutable() const { return IsImmutable; }
 
@@ -650,25 +651,34 @@ public:
   }
 };
 
-// StructName(val1, val2)
+// StructName { field: val, ... }
 class StructInitExprAST : public ExprAST {
   std::string Name;
-  std::vector<std::unique_ptr<ExprAST>> Args;
+  std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields;
   SourceLocation Loc;
 
 public:
-  StructInitExprAST(SourceLocation Loc, std::string Name,
-                    std::vector<std::unique_ptr<ExprAST>> Args)
-      : Loc(Loc), Name(std::move(Name)), Args(std::move(Args)) {}
+  StructInitExprAST(
+      SourceLocation Loc, std::string Name,
+      std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields)
+      : Loc(Loc), Name(std::move(Name)), NamedFields(std::move(NamedFields)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
-  const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
+  const std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> &
+  getNamedFields() const {
+    return NamedFields;
+  }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitStructInit(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<StructInitExprAST>(Loc, Name, CloneExprList(Args));
+    std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> ClonedFields;
+    ClonedFields.reserve(NamedFields.size());
+    for (const auto &[FieldName, Val] : NamedFields)
+      ClonedFields.emplace_back(FieldName, CloneExprAST(Val.get()));
+    return std::make_unique<StructInitExprAST>(Loc, Name,
+                                               std::move(ClonedFields));
   }
 };
 
@@ -944,8 +954,8 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
   }
 
   if (const auto *StructInit = dynamic_cast<const StructInitExprAST *>(Node)) {
-    for (const auto &Arg : StructInit->getArgs())
-      CollectAllNodeIDsInternal(Arg.get(), NodeIDs);
+    for (const auto &[FieldName, Val] : StructInit->getNamedFields())
+      CollectAllNodeIDsInternal(Val.get(), NodeIDs);
     return;
   }
 

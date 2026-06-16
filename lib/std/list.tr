@@ -1,9 +1,9 @@
 import mem
 
 struct List<T> {
-  T* data,
-  int len,
-  int cap
+  data: T*,
+  len: int,
+  cap: int
 }
 
 fn<T> List.push(item: T): void {

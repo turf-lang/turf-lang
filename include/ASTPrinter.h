@@ -285,10 +285,15 @@ public:
   void visitStructInit(StructInitExprAST &N) override {
     printIndent(Depth_);
     std::cout << "StructInit(" << N.getName()
-              << ", args=" << N.getArgs().size() << ")\n";
+              << ", fields=" << N.getNamedFields().size() << ")\n";
     descend();
-    for (const auto &Arg : N.getArgs())
-      print(Arg.get(), Depth_);
+    for (const auto &[FieldName, Val] : N.getNamedFields()) {
+      printIndent(Depth_);
+      std::cout << "Field(" << FieldName << "):\n";
+      descend();
+      print(Val.get(), Depth_);
+      ascend();
+    }
     ascend();
   }
 

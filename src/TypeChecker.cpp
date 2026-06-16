@@ -19,6 +19,14 @@
 // It drags in LLVM headers, but TypeChecker itself does not use any LLVM API.
 #include "AST.h"
 
+// SymbolTable.h is included for GlobalSymbolTable, used in visitStructInit
+// to look up struct type definitions for named-field validation.
+// Not available in the unit-test binary (TYPECHECKER_NO_ERRORS mode) since it
+// pulls in the LLVM-dependent SymbolTable implementation.
+#ifndef TYPECHECKER_NO_ERRORS
+#include "SymbolTable.h"
+#endif
+
 // Errors.h is conditionally included only in production builds (not in the
 // standalone unit-test binary).  The TYPECHECKER_NO_ERRORS macro lets the
 // test target suppress this dependency so it can link without LLVM.
@@ -288,8 +296,23 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
     const_cast<ExprAST *>(Node.getInitializer())->accept(*this);
   }
 
-  // The declared type is authoritative; just record it.
   TurfTypePtr DeclTy = Node.getTypePtr();
+
+#ifndef TYPECHECKER_NO_ERRORS
+  // Resolve NamedType -> TurfStructType
+  if (auto *NT = dynamic_cast<const NamedType *>(DeclTy.get())) {
+    if (GlobalSymbolTable) {
+      if (auto StructTy = GlobalSymbolTable->LookupType(NT->getName())) {
+        DeclTy = StructTy;
+        Node.setTypePtr(StructTy);
+        if (Node.ResolvedSymbol) {
+          Node.ResolvedSymbol->Type = StructTy;
+        }
+      }
+    }
+  }
+#endif
+
   setType(&Node, DeclTy);
 
   // Optional: validate that the initializer type is compatible
@@ -840,9 +863,57 @@ void TypeChecker::visitStructDecl(StructDeclExprAST &Node) {
 }
 
 void TypeChecker::visitStructInit(StructInitExprAST &Node) {
-  for (const auto &Arg : Node.getArgs())
-    Arg->accept(*this);
-  // Result type is the struct name; for now mark as NamedType.
+  // Visit each value expression for type annotation regardless of validation.
+  for (const auto &[FieldName, Val] : Node.getNamedFields())
+    Val->accept(*this);
+
+#ifndef TYPECHECKER_NO_ERRORS
+  // Look up the struct definition so we can validate the named fields.
+  // GlobalSymbolTable is only available in the full build (not unit tests).
+  TurfTypePtr StructTPtr;
+  if (GlobalSymbolTable)
+    StructTPtr = GlobalSymbolTable->LookupType(Node.getName());
+  const TurfStructType *SType =
+      StructTPtr ? dynamic_cast<const TurfStructType *>(StructTPtr.get())
+                 : nullptr;
+
+  if (SType) {
+    const auto &DeclFields = SType->getFields();
+
+    // 1. Check for unknown fields (fields provided that don't exist in the struct).
+    for (const auto &[FieldName, Val] : Node.getNamedFields()) {
+      bool Found = false;
+      for (const auto &DeclF : DeclFields) {
+        if (DeclF.Name == FieldName) {
+          Found = true;
+          break;
+        }
+      }
+      if (!Found) {
+        reportError(Node.getLoc(), "Unknown field '" + FieldName +
+                                       "' in struct '" + Node.getName() + "'");
+      }
+    }
+
+    // 2. Check for missing fields (declared fields not provided by the caller).
+    for (const auto &DeclF : DeclFields) {
+      bool Provided = false;
+      for (const auto &[FieldName, Val] : Node.getNamedFields()) {
+        if (FieldName == DeclF.Name) {
+          Provided = true;
+          break;
+        }
+      }
+      if (!Provided) {
+        reportError(Node.getLoc(), "Missing field '" + DeclF.Name +
+                                       "' in initialization of '" +
+                                       Node.getName() + "'");
+      }
+    }
+  }
+#endif
+
+  // Result type is the struct name.
   setType(&Node, std::make_shared<NamedType>(Node.getName()));
 }
 

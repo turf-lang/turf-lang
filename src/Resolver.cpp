@@ -508,8 +508,8 @@ void Resolver::visitFieldAccess(FieldAccessExprAST &Node) {
 }
 
 void Resolver::visitStructInit(StructInitExprAST &Node) {
-  for (const auto &Arg : Node.getArgs())
-    visitChild(Arg.get());
+  for (const auto &[FieldName, Val] : Node.getNamedFields())
+    visitChild(Val.get());
 }
 
 void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {
