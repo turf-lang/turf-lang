@@ -40,6 +40,9 @@ static std::vector<std::unique_ptr<ExprAST>> ParsedTopLevelASTs;
 int getNextToken() { return CurTok = gettok(); }
 
 void InitializePrecedence() {
+  // Cast
+  BinopPrecedence[TOK_TO] = 5;
+
   // Assignment
   BinopPrecedence['='] = 10;
   BinopPrecedence[TOK_ASSIGN] = 10;
@@ -111,8 +114,6 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
 std::unique_ptr<ExprAST> ParseVarDecl();
 std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
                                           TurfTypePtr Type);
-std::unique_ptr<ExprAST> ParseCastExpr(TurfTypePtr DestType,
-                                       SourceLocation Loc);
 std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName);
@@ -778,6 +779,14 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
     int BinOp = CurTok;
     getNextToken(); // consume binop
 
+    if (BinOp == TOK_TO) {
+      auto CastType = ParseType();
+      if (!CastType)
+        return nullptr;
+      LHS = std::make_unique<CastExprAST>(OpLoc, CastType, std::move(LHS));
+      continue;
+    }
+
     // Parse the primary expression after the binary operator
     auto RHS = ParseUnary();
     if (!RHS)
@@ -1209,25 +1218,6 @@ std::unique_ptr<ExprAST> ParseVarDecl() {
   if (!Type)
     return nullptr;
   return ParseVarDeclBody(TypeLoc, Type);
-}
-
-// ParseCastExpr - called after the type keyword has been consumed and
-// CurTok == '('. Parses int(expr) or double(expr).
-std::unique_ptr<ExprAST> ParseCastExpr(TurfTypePtr DestType,
-                                       SourceLocation Loc) {
-  getNextToken(); // eat '('
-
-  auto Operand = ParseExpression();
-  if (!Operand)
-    return nullptr;
-
-  if (CurTok != ')') {
-    LogErrorAt(CurLoc, "Expected ')' after cast expression");
-    return nullptr;
-  }
-  getNextToken(); // eat ')'
-
-  return std::make_unique<CastExprAST>(Loc, DestType, std::move(Operand));
 }
 
 // ParseStructDecl - called when CurTok == TOK_STRUCT.
