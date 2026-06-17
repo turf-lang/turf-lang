@@ -1,15 +1,17 @@
+// Test: basic constructor/factory function replacement
 struct User {
-  int age,
-  string name
+  age: int,
+  name: string
 }
 
-fn void User.init(int starting_age) {
-  self.age = starting_age;
-  self.name = "Unknown User";
+// Replaces the old User.init
+fn create_user(starting_age: int): User {
+  return User { age: starting_age, name: "Unknown User" };
 }
 
-fn int main() {
-  User u = User(10);
+fn main(): int {
+  // Use the factory function
+  mutable u: User = create_user(10);
   io.printline(u.age);
   io.printline(u.name);
 

@@ -1,0 +1,56 @@
+Struct Syntax Overhaul: Named Fields and Initialization
+
+1. Changes Made:
+- Modified the parser in `src/Parser.cpp` (`ParseStructDecl`) to handle struct fields in the new `name: type` format (replacing the old `type name` syntax).
+- Replaced positional struct initialization with named-field brace initialization (e.g., `Point { x: 10, y: 20 }`) via updates to `ParsePrimaryBase` and the removal of positional init logic from `ParsePostfixExpression`.
+- Updated `StructInitExprAST` in `include/AST.h` to store `NamedFields` (a vector of pairs containing the string name and expression AST) rather than an array of positional arguments.
+- Implemented robust struct validation in `TypeChecker::visitStructInit` to verify all required fields are provided and no unknown fields exist.
+- Centralized the resolution of placeholder `NamedType` structs into concrete `TurfStructType` objects within `TypeChecker::visitVarDecl`.
+- Cleaned up `Codegen.cpp` to correctly map the named fields back to their underlying memory layout order for LLVM `CreateStructGEP` generation, and removed workaround type resolution steps from Codegen's field access pipeline.
+- Updated `lib/std/list.tr` to the new `name: type` struct format.
+
+2. Why the Change was Made:
+- The old positional struct initialization (`Point(10, 20)`) required developers to memorize the exact order of struct fields, which was error-prone and brittle when structs were modified.
+- The new `name: type` struct declaration format directly aligns with the modern syntax decisions made for variable declarations and function signatures (Issue #151).
+- Pushing type validation (like missing or extra fields) up into the TypeChecker ensures that the Codegen step remains purely focused on LLVM IR generation ("dumb codegen").
+
+3. How it Helps/Changed:
+- Massively improves code readability and safety when instantiating structs.
+- Field order no longer matters during instantiation. The Codegen pass automatically handles reordering fields to match the correct memory layout.
+- Provides immediate, developer-friendly TypeChecker errors when attempting to compile an incomplete or malformed struct initialization.
+
+4. Reference & Usage Examples (Source of Truth):
+
+a) Struct Declaration
+Syntax:
+  struct <StructName> {
+      <fieldName>: <type>,
+      ...
+  }
+Example:
+  struct Point {
+      x: int,
+      y: int
+  }
+
+b) Struct Initialization
+Syntax:
+  <StructName> { <fieldName>: <value>, ... }
+Example:
+  // Order does not matter during initialization
+  mutable p: Point = Point { x: 10, y: 20 };
+  mutable q: Point = Point { y: 20, x: 10 };
+
+c) Catching Missing Fields
+Example:
+  mutable p: Point = Point { x: 10 };
+Output:
+  Type mismatch!
+  Missing field 'y' in initialization of 'Point'
+
+d) Catching Unknown Fields
+Example:
+  mutable p: Point = Point { x: 10, y: 20, z: 5 };
+Output:
+  Type mismatch!
+  Unknown field 'z' in struct 'Point'

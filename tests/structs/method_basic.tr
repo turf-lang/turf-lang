@@ -1,20 +1,23 @@
+// Test: basic struct methods
 struct User {
-  int age,
-  string name
+  age: int,
+  name: string
 }
 
-fn void User.grow() {
+// Method modifying struct fields
+fn User.grow(): void {
   self.age = self.age + 1;
 }
 
-fn void User.rename(string new_name) {
+// Method taking arguments
+fn User.rename(new_name: string): void {
   self.name = new_name;
 }
 
-fn int main() {
-  User u = User(10, "Alice");
+fn main(): int {
+  mutable u: User = User { age: 10, name: "Alice" };
+  
   u.grow();
-
   io.printline(u.age);
   
   u.rename("Bob");

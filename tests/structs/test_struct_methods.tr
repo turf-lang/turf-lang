@@ -1,27 +1,29 @@
+// Test: struct methods with returns and arguments
 struct User {
-    int age,
-    string name
+  age: int,
+  name: string
 }
 
-fn int User.incrementAge() {
-    self.age = self.age + 1
-    return self.age
+fn User.incrementAge(): int {
+  self.age = self.age + 1;
+  return self.age;
 }
 
-fn void User.setAge(int newAge) {
-    self.age = newAge
+fn User.setAge(newAge: int): void {
+  self.age = newAge;
 }
 
-fn int main() {
-    User u = User(10, "Alice")
-    io.printline(u.age)
-    io.printline(u.name)
+fn main(): int {
+  mutable u: User = User { age: 10, name: "Alice" };
+  
+  io.printline(u.age);
+  io.printline(u.name);
 
-    u.incrementAge()
-    io.printline(u.age)
+  u.incrementAge();
+  io.printline(u.age);
 
-    u.setAge(25)
-    io.printline(u.age)
+  u.setAge(25);
+  io.printline(u.age);
 
-    return 0
+  return 0;
 }
