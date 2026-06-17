@@ -207,7 +207,8 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
 
   // Equality (== / !=): same type, or both numeric
   if (Op == static_cast<int>('e') || Op == static_cast<int>('n') ||
-      Op == static_cast<int>('=') || Op == static_cast<int>('!')) {
+      Op == static_cast<int>('=') || Op == static_cast<int>('!') ||
+      Op == -9 || Op == -10) {
     // Same type or both numeric is fine
     if (LhsTy->getName() == RhsTy->getName())
       return TurfBool();
