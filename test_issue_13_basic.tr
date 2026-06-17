@@ -7,6 +7,8 @@ fn add(a: int, b: int): int {
 
 fn main(): int {
     mutable result: int = add(5, 10);
-    assert(result == 15);
+    io.printline(result);
+    assert(result == 13);
+    io.printline(assert(result == 15));
     return 0;
 }

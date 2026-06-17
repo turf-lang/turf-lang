@@ -2470,16 +2470,37 @@ Value *StructInitExprAST::codegen() {
     return nullptr;
   }
 
+  // Reorder NamedFields to match the struct definition's field order.
+  // TypeChecker already validated completeness and no unknown fields.
+  const auto &DeclFields = SType->getFields();
   std::vector<Value *> EvaluatedArgs;
   std::vector<TurfTypePtr> ArgTypes;
-  for (auto &Arg : Args) {
-    Value *V = Arg->codegen();
+  EvaluatedArgs.reserve(DeclFields.size());
+  ArgTypes.reserve(DeclFields.size());
+
+  for (const auto &DeclF : DeclFields) {
+    // Find the matching named field supplied by the caller.
+    const ExprAST *MatchedExpr = nullptr;
+    for (const auto &[FieldName, Val] : NamedFields) {
+      if (FieldName == DeclF.Name) {
+        MatchedExpr = Val.get();
+        break;
+      }
+    }
+    if (!MatchedExpr) {
+      // TypeChecker should have caught this — treat as internal error.
+      LogErrorAt(Loc, "Internal error: missing field '" + DeclF.Name +
+                          "' in codegen for struct '" + Name + "'");
+      return nullptr;
+    }
+
+    Value *V = const_cast<ExprAST *>(MatchedExpr)->codegen();
     if (!V)
       return nullptr;
     EvaluatedArgs.push_back(V);
 
     TurfTypePtr ActTy;
-    if (auto *VE = dynamic_cast<VariableExprAST *>(Arg.get())) {
+    if (auto *VE = dynamic_cast<const VariableExprAST *>(MatchedExpr)) {
       auto It = NamedValues.find(VE->getName());
       if (It != NamedValues.end())
         ActTy = It->second.Type;
@@ -2489,10 +2510,11 @@ Value *StructInitExprAST::codegen() {
     ArgTypes.push_back(ActTy);
   }
 
+  // Try to find a user-defined constructor function (init method).
   std::string InitName = Name + ".init";
   std::string MangledName = "turf_" + InitName + "_" + Name + "_ptr";
-  for (const auto &T : ArgTypes) {
-    MangledName += "_" + T->getMangledName();
+  for (const auto &AT : ArgTypes) {
+    MangledName += "_" + AT->getMangledName();
   }
 
   Function *InitF = TheModule->getFunction(MangledName);
@@ -2507,7 +2529,9 @@ Value *StructInitExprAST::codegen() {
         Match = true;
       } else {
         size_t Pos = FName.find(Suffix);
-        if (Pos != std::string::npos && (Pos + Suffix.size() == FName.size() || FName[Pos + Suffix.size()] == '_')) {
+        if (Pos != std::string::npos &&
+            (Pos + Suffix.size() == FName.size() ||
+             FName[Pos + Suffix.size()] == '_')) {
           Match = true;
         }
       }
@@ -2530,10 +2554,11 @@ Value *StructInitExprAST::codegen() {
   }
 
   if (InitF) {
-    if (InitF->arg_size() != Args.size() + 1) {
+    if (InitF->arg_size() != EvaluatedArgs.size() + 1) {
       LogErrorAt(Loc, "Constructor for '" + Name + "' expects " +
                           std::to_string(InitF->arg_size() - 1) +
-                          " arguments, but got " + std::to_string(Args.size()));
+                          " arguments, but got " +
+                          std::to_string(EvaluatedArgs.size()));
       return nullptr;
     }
 
@@ -2559,8 +2584,7 @@ Value *StructInitExprAST::codegen() {
         else if (ExpectedTy->isDoubleTy() && V->getType()->isPointerTy()) {
           V = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext));
           V = Builder->CreateBitCast(V, ExpectedTy, "argcast_dbl");
-        }
-        else
+        } else
           V = Builder->CreateBitCast(V, ExpectedTy, "argcast_bit");
       }
       ArgVals.push_back(V);
@@ -2570,8 +2594,8 @@ Value *StructInitExprAST::codegen() {
     return Builder->CreateLoad(LLVMStructType, Alloca, "structval");
   }
 
-  // Fallback to default struct initialization
-  if (Args.size() == 0) {
+  // Fallback to default struct initialization (no user constructor).
+  if (EvaluatedArgs.empty()) {
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
     IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                      TheFunction->getEntryBlock().begin());
@@ -2584,23 +2608,17 @@ Value *StructInitExprAST::codegen() {
     return Builder->CreateLoad(LLVMStructType, Alloca, "structval");
   }
 
-  if (Args.size() != SType->getFields().size()) {
-    LogErrorAt(Loc, "Struct '" + Name + "' expects " +
-                        std::to_string(SType->getFields().size()) +
-                        " arguments, but got " + std::to_string(Args.size()));
-    return nullptr;
-  }
-
+  // Direct field-by-field initialization using definition order.
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
   IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
                    TheFunction->getEntryBlock().begin());
   AllocaInst *Alloca =
       TmpB.CreateAlloca(LLVMStructType, nullptr, Name + "_init");
 
-  for (size_t i = 0; i < Args.size(); ++i) {
+  for (size_t i = 0; i < EvaluatedArgs.size(); ++i) {
     Value *ArgVal = EvaluatedArgs[i];
 
-    TurfTypePtr FieldType = SType->getFields()[i].Type;
+    TurfTypePtr FieldType = DeclFields[i].Type;
     TurfTypePtr ArgTurfType = getTurfTypeFromLLVM(ArgVal->getType());
     ArgTurfType = RefineLLVMType(ArgTurfType, FieldType, ArgVal->getType());
 
@@ -2628,6 +2646,7 @@ Value *FieldAccessExprAST::codegenLValue() {
     BaseLVal = Builder->CreateLoad(llvm::PointerType::get(*TheContext, 0),
                                    BaseLVal, "deref");
   }
+
 
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
   if (!SType) {
@@ -2659,7 +2678,12 @@ Value *FieldAccessExprAST::codegen() {
     BaseType = PtrTy->getPointee().get();
   }
 
+
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
+  if (!SType) {
+    LogErrorAt(Loc, "Cannot load field on non-struct type");
+    return nullptr;
+  }
   TurfTypePtr FieldType = SType->getFieldType(FieldName);
 
   return Builder->CreateLoad(getLLVMType(FieldType.get()), Ptr,
