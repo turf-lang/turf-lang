@@ -42,6 +42,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // ─── Source location (same layout as Lexer.h's SourceLocation) ───────────────
@@ -401,6 +402,31 @@ public:
    */
   std::vector<std::string> getAllModuleFunctionNames() const;
 
+  // ── Struct name registry ─────────────────────────────────────────────────
+  // Tracks struct names declared in the current file so the Resolver can
+  // validate NamedType references in Pass 2 without asking the TypeChecker.
+  // Populated during Pass 1 (hoistTopLevel); queried during visitStructDecl
+  // and any future pass that needs to distinguish struct names from unknowns.
+
+  /**
+   * @brief Register a struct name hoisted from a top-level StructDeclExprAST.
+   * Duplicate registrations are silently ignored.
+   */
+  void registerStruct(const std::string &Name);
+
+  /**
+   * @brief True if @p Name was registered as a struct in the current file.
+   * Used by the Resolver to validate NamedType field references.
+   */
+  bool isKnownStruct(const std::string &Name) const;
+
+  /**
+   * @brief Return all registered struct names (sorted).
+   * Used as the candidate list for Damerau-Levenshtein suggestions when an
+   * unknown named type is encountered in a struct field declaration.
+   */
+  std::vector<std::string> getAllStructNames() const;
+
   /**
    * @brief Dumps the contents of the symbol table (all scopes and modules) to the output stream.
    */
@@ -421,6 +447,11 @@ private:
   /// "this file" from "imported modules" without string-matching module names.
   std::unordered_map<std::string, std::vector<ResolverFunctionSymbol>>
       CurrentFileFunctions_;
+
+  /// Struct names declared in the current file (hoisted in Pass 1).
+  /// Queried in Pass 2 to validate NamedType field references without
+  /// involving the TypeChecker or LLVM.
+  std::unordered_set<std::string> RegisteredStructs_;
 };
 
 #endif // RESOLVER_SYMBOL_TABLE_H

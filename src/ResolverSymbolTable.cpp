@@ -305,9 +305,36 @@ ResolverSymbolTable::getAllModuleFunctionNames() const {
   return Names;
 }
 
+// ─── Struct name registry ────────────────────────────────────────────────────────────
+
+void ResolverSymbolTable::registerStruct(const std::string &Name) {
+  RegisteredStructs_.insert(Name);
+}
+
+bool ResolverSymbolTable::isKnownStruct(const std::string &Name) const {
+  return RegisteredStructs_.count(Name) > 0;
+}
+
+std::vector<std::string> ResolverSymbolTable::getAllStructNames() const {
+  std::vector<std::string> Names(RegisteredStructs_.begin(),
+                                  RegisteredStructs_.end());
+  std::sort(Names.begin(), Names.end());
+  return Names;
+}
+
 
 void ResolverSymbolTable::dump(std::ostream &OS) const {
   OS << "\n=== Resolver Symbol Table Dump ===\n";
+
+  // Registered struct names (hoisted in Pass 1)
+  OS << "--- Registered Struct Names (Pass 1 Hoist) ---\n";
+  if (RegisteredStructs_.empty()) {
+    OS << "  (none)\n";
+  } else {
+    auto Names = getAllStructNames(); // sorted
+    for (const auto &N : Names)
+      OS << "  struct " << N << "\n";
+  }
 
   // Scopes
   OS << "--- Variable Scopes (depth: " << Depth_ << ") ---\n";
@@ -329,7 +356,7 @@ void ResolverSymbolTable::dump(std::ostream &OS) const {
   // Current-file functions (Tier 1)
   OS << "\n--- Current-File Functions (Tier 1) ---\n";
   if (CurrentFileFunctions_.empty()) {
-    OS << "  (none registered yet — Issue #6 will populate this)\n";
+    OS << "  (none registered yet)\n";
   } else {
     for (const auto &Pair : CurrentFileFunctions_) {
       for (const auto &Sym : Pair.second) {
