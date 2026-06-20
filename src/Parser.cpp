@@ -905,17 +905,7 @@ std::unique_ptr<ExprAST> ParseUnary() {
   return nullptr;
 }
 
-bool RequiresSemicolon(const ExprAST* AST) {
-  if (!AST) return false;
-  if (dynamic_cast<const IfExprAST*>(AST)) return false;
-  if (dynamic_cast<const WhileExprAST*>(AST)) return false;
-  if (dynamic_cast<const ForExprAST*>(AST)) return false;
-  if (dynamic_cast<const FuncDefExprAST*>(AST)) return false;
-  if (dynamic_cast<const StructDeclExprAST*>(AST)) return false;
-  if (dynamic_cast<const BlockExprAST*>(AST)) return false;
 
-  return true;
-}
 
 std::unique_ptr<ExprAST> ParseBlock() {
   if (CurTok != '{') {
@@ -933,26 +923,31 @@ std::unique_ptr<ExprAST> ParseBlock() {
       continue;
     }
 
-    std::unique_ptr<ExprAST> Expr;
-    if (CurTok == TOK_MUTABLE) {
-      Expr = ParseLetStatement(false);
-    } else if (CurTok == TOK_IMMUTABLE) {
-      Expr = ParseLetStatement(true);
-    } else {
-      Expr = ParseExpression();
+    if (CurTok == TOK_MUTABLE || CurTok == TOK_IMMUTABLE) {
+      auto Expr = ParseLetStatement(CurTok == TOK_IMMUTABLE);
+      if (!Expr) return nullptr;
+      Exprs.push_back(std::move(Expr));
+      continue;
     }
-
-    if (!Expr)
-      return nullptr;
-    
-    if (RequiresSemicolon(Expr.get())) {
-      if (CurTok != ';') {
-        LogErrorAt(CurLoc, "Expected ';' after statement");
+    if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
+        CurTok == TOK_FN || CurTok == TOK_STRUCT) {
+      auto Expr = ParseExpression();
+      if (!Expr) return nullptr;
+      if (CurTok == ';') {
+        LogErrorAt(CurLoc, "Unexpected ';'");
         return nullptr;
       }
-      getNextToken(); // eat ';'
+      Exprs.push_back(std::move(Expr));
+      continue;
     }
-    
+
+    auto Expr = ParseExpression();
+    if (!Expr) return nullptr;
+    if (CurTok != ';') {
+      LogErrorAt(CurLoc, "Expected ';' after statement.");
+      return nullptr;
+    }
+    getNextToken(); // eat ';'
     Exprs.push_back(std::move(Expr));
   }
 
@@ -1126,13 +1121,22 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
       }
     }
     getNextToken(); // eat ']'
+    if (CurTok != ';') {
+      LogErrorAt(CurLoc, "Expected ';' after statement.");
+      return nullptr;
+    }
+    getNextToken(); // eat ';'
     return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::move(InitList), IsImmutable);
   }
 
   auto Init = ParseExpression();
   if (!Init) return nullptr;
 
-  // We do NOT consume ';' here because ParseBlock currently expects Exprs to not consume their own ';' unless they don't require one.
+  if (CurTok != ';') {
+    LogErrorAt(CurLoc, "Expected ';' after statement.");
+    return nullptr;
+  }
+  getNextToken(); // eat ';'
   return std::make_unique<VarDeclExprAST>(Loc, Name, Type, std::move(Init), IsImmutable);
 }
 
@@ -1542,15 +1546,44 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
       getNextToken();
       continue;
     }
-    auto Expr = ParseExpression();
-    if (Expr) {
-      if (RequiresSemicolon(Expr.get())) {
+
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT) {
+      auto Expr = ParseExpression();
+      if (Expr) {
+        if (CurTok == ';') {
+          LogErrorAt(CurLoc, "Unexpected ';'");
+          return nullptr;
+        }
+        Exprs.push_back(std::move(Expr));
+      } else {
+        getNextToken(); // skip for error recovery
+      }
+      continue;
+    }
+
+    if (CurTok == TOK_IMPORT) {
+      auto Expr = ParseExpression();
+      if (Expr) {
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, "Expected ';' after statement");
+          LogErrorAt(CurLoc, "Expected ';' after statement.");
           return nullptr;
         }
         getNextToken(); // eat ';'
+        Exprs.push_back(std::move(Expr));
+      } else {
+        getNextToken(); // skip for error recovery
       }
+      continue;
+    }
+
+    // Everything else: must end with ';'
+    auto Expr = ParseExpression();
+    if (Expr) {
+      if (CurTok != ';') {
+        LogErrorAt(CurLoc, "Expected ';' after statement.");
+        return nullptr;
+      }
+      getNextToken(); // eat ';'
       Exprs.push_back(std::move(Expr));
     } else {
       getNextToken(); // skip for error recovery

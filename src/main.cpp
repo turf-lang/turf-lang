@@ -289,15 +289,34 @@ int main(int argc, char **argv) {
 
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') { getNextToken(); continue; }
-        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_IMPORT ||
-            CurTok == TOK_AT) {
+        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
             if (AST) {
-              if (RequiresSemicolon(AST.get())) {
-                if (CurTok != ';') LogErrorAt(CurLoc, "Expected ';' after statement");
-                else getNextToken();
+              if (CurTok == ';') {
+                LogErrorAt(CurLoc, "Unexpected ';'");
+              }
+              RecordParsedTopLevelAST(AST.get());
+              LintExpression(AST.get());
+              PrePassASTs.push_back(std::move(AST));
+            }
+          } else {
+            while (CurTok != TOK_FN && CurTok != TOK_STRUCT &&
+                   CurTok != TOK_IMPORT && CurTok != TOK_AT &&
+                   CurTok != TOK_EOF)
+              getNextToken();
+          }
+          g_recoverActive = false;
+        } else if (CurTok == TOK_IMPORT) {
+          g_recoverActive = true;
+          if (setjmp(g_recoverJmp) == 0) {
+            auto AST = ParseExpression();
+            if (AST) {
+              if (CurTok != ';') {
+                LogErrorAt(CurLoc, "Expected ';' after statement");
+              } else {
+                getNextToken(); // eat ';'
               }
               RecordParsedTopLevelAST(AST.get());
               LintExpression(AST.get());
@@ -435,12 +454,36 @@ int main(int argc, char **argv) {
     // lint/resolve them, but do NOT push them into TopLevelASTs (that would
     // re-codegen them).  TOK_IMPORT is included here because `import` nodes
     // are top-level declarations handled by the pre-pass, exactly like `fn`.
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT ||
-        CurTok == TOK_IMPORT) {
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();
         if (AST) {
+          if (CurTok == ';') {
+            LogErrorAt(CurLoc, "Unexpected ';'");
+          }
+          RecordParsedTopLevelAST(AST.get());
+          FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
+        }
+      } else {
+        while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_AT &&
+               CurTok != ';' && CurTok != TOK_EOF)
+          getNextToken();
+      }
+      g_recoverActive = false;
+      continue;
+    }
+
+    if (CurTok == TOK_IMPORT) {
+      g_recoverActive = true;
+      if (setjmp(g_recoverJmp) == 0) {
+        auto AST = ParseExpression();
+        if (AST) {
+          if (CurTok != ';') {
+            LogErrorAt(CurLoc, "Expected ';' after statement");
+          } else {
+            getNextToken(); // eat ';'
+          }
           RecordParsedTopLevelAST(AST.get());
           FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
         }
@@ -457,12 +500,10 @@ int main(int argc, char **argv) {
     if (setjmp(g_recoverJmp) == 0) {
       auto AST = ParseExpression();
       if (AST) {
-        if (RequiresSemicolon(AST.get())) {
-          if (CurTok != ';') {
-            LogErrorAt(CurLoc, "Expected ';' after statement");
-          } else {
-            getNextToken(); // eat ';'
-          }
+        if (CurTok != ';') {
+          LogErrorAt(CurLoc, "Expected ';' after statement");
+        } else {
+          getNextToken(); // eat ';'
         }
         if (!dynamic_cast<FuncDefExprAST *>(AST.get()) &&
             !dynamic_cast<StructDeclExprAST *>(AST.get()) &&

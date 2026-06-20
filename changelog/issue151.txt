@@ -70,4 +70,4 @@ Example:
       }
       self.data[self.len] = item;
       self.len = self.len + 1;
-  }
+}
