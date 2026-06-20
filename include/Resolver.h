@@ -2,34 +2,42 @@
  * @file Resolver.h
  * @brief The Resolver pass: name resolution before type checking or codegen.
  *
- * Issue #4 of the monolith → multi-pass migration.
+ * Issue #18 — Two-Pass Resolver for Forward Declarations.
  *
- * Implements `class Resolver : public ASTVisitor`.  A single call to
- * `Resolver::resolve(root)` walks the entire AST and enforces that:
+ * Implements `class Resolver : public ASTVisitor`. A single call to
+ * `Resolver::resolveAll(nodes)` walks the AST in two distinct passes:
  *
- *  1. Every variable is declared before it is used (visitVariable).
- *  2. Block boundaries introduce a new lexical scope (visitBlock).
- *  3. VarDecl nodes register their name in the current scope (visitVarDecl).
+ *  **Pass 1 — Hoisting** (`hoistTopLevel`):
+ *    Walk only top-level AST nodes (no recursion into bodies).
+ *    For each `StructDeclExprAST`: call `SymTable_.registerStruct(Name)`.
+ *    For each `FuncDefExprAST`: call `SymTable_.registerCurrentFileFunction(sym)`
+ *      — only the signature (name, params, returnType), NOT the body.
+ *    For each `ModuleImportExprAST`: register all functions in the module.
+ *
+ *  **Pass 2 — Full Resolution** (existing visitor behavior):
+ *    Walk the entire AST, resolve all variable references, function calls,
+ *    and type annotations. Because Pass 1 already registered all structs and
+ *    functions, forward references resolve correctly.
+ *
+ * This two-pass design is why the compiler no longer needs
+ * `GlobalSymbolTable->LookupType()` in `ParseType()`: the parser creates a
+ * `NamedType("MyStruct")` placeholder, and the Resolver's Pass 2 validates
+ * it by looking up the name that was registered in Pass 1.
  *
  * Error handling strategy:
  *  - `visitVarDecl` — raises DuplicateDeclarationError if the same name is
- *    re-declared in the *same* scope.  Shadowing an outer scope is allowed
- *    (outer-scope duplicate check is done via lookupVariable, not
- *    isDeclaredInCurrentScope).
+ *    re-declared in the *same* scope. Shadowing an outer scope is allowed.
  *  - `visitVariable` — raises ReferenceError (with Damerau-Levenshtein
  *    suggestions) if the variable name is not found in any enclosing scope.
- *
- * The pass runs in "shadow mode" for now (Issue #4 acceptance criterion):
- * Codegen still performs its own symbol lookups.  The Resolver merely
- * validates and pre-populates the ResolverSymbolTable so that Issues #5+
- * can attach resolved symbols to AST nodes.
+ *  - `visitStructDecl` — validates that all NamedType field references
+ *    (including pointer-to-named-type fields) refer to structs registered in
+ *    Pass 1. Primitive types and void are always allowed. Type-level
+ *    validation (field types, initialization) is the TypeChecker's job.
  *
  * Design notes:
  *  - The Resolver owns its ResolverSymbolTable instance.
  *  - All child dispatch is done via `child->accept(*this)` so that every
  *    node type is recursed automatically without duplicating traversal code.
- *  - Only the three visit methods listed in Issue #4 contain logic; all
- *    other nodes are dispatched to children and nothing else.
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -136,7 +144,7 @@ public:
   void visitMethodCall(MethodCallExprAST &Node) override;
 
   void visitFieldAccess(FieldAccessExprAST &Node) override;
-  void visitStructDecl(StructDeclExprAST &Node) override { (void)Node; }
+  void visitStructDecl(StructDeclExprAST &Node) override;
   void visitStructInit(StructInitExprAST &Node) override;
 
   void visitArrayDecl(ArrayDeclExprAST &Node) override;
@@ -166,9 +174,23 @@ private:
   ResolverFunctionSymbol buildFunctionSymbol(const FuncDefExprAST &Node,
                                              const std::string &ModuleName) const;
 
-  void predeclareFunctions(const ExprAST *Node);
-  void predeclareFunctions(const std::vector<std::unique_ptr<ExprAST>> &Nodes);
-  void predeclareModuleBody(const ExprAST *Body, const std::string &ModuleName);
+  // ── Pass 1: Hoisting ───────────────────────────────────────────────────────
+  // Walk only the top-level list, registering struct names and function
+  // signatures.  No bodies are visited in this pass.
+
+  /// Hoist a single top-level node (struct name or function signature).
+  void hoistTopLevel(const ExprAST *Node);
+
+  /// Hoist an entire list of top-level nodes (convenience overload for
+  /// resolveAll).
+  void hoistTopLevel(const std::vector<std::unique_ptr<ExprAST>> &Nodes);
+
+  /// Register all function signatures found inside an imported module body.
+  /// Called by hoistTopLevel when it encounters a ModuleImportExprAST.
+  void hoistModuleBody(const ExprAST *Body, const std::string &ModuleName);
+
+  /// Register one function's signature (name, params, return type) in
+  /// SymTable_ under the given module namespace ("\'" = current file).
   void registerFunctionSignature(const FuncDefExprAST &Node,
                                  const std::string &ModuleName);
 
