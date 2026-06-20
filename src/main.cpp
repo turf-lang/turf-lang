@@ -228,8 +228,8 @@ int main(int argc, char **argv) {
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
 
-  SourceFile.open(opts.InputFile);
-  if (!SourceFile.is_open()) {
+  SourceFile->open(opts.InputFile);
+  if (!SourceFile->is_open()) {
     std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
     return 1;
   }
@@ -261,8 +261,8 @@ int main(int argc, char **argv) {
   {
     if (true) {
       // Swap the global SourceFile for the pre-pass stream
-      SourceFile.close();
-      SourceFile.open(opts.InputFile);
+      SourceFile->close();
+      SourceFile->open(opts.InputFile);
       CurLoc = {1, 0};
 
       // Reset the lexer token stream
@@ -390,8 +390,8 @@ int main(int argc, char **argv) {
       }
 
       // Re-open for the main pass
-      SourceFile.close();
-      SourceFile.open(opts.InputFile);
+      SourceFile->close();
+      SourceFile->open(opts.InputFile);
       CurLoc = {1, 0};
       CurTok = 0;
     }

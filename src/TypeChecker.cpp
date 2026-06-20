@@ -480,7 +480,41 @@ void TypeChecker::visitIf(IfExprAST &Node) {
   }
   if (Node.getElseBody())
     Node.getElseBody()->accept(*this);
-  setType(&Node, TurfVoid());
+
+  bool IsTernary = false;
+  if (Node.getBranches().size() == 1 && Node.getElseBody()) {
+    bool BodyIsBlock = dynamic_cast<BlockExprAST*>(Node.getThen()) != nullptr;
+    bool ElseIsBlock = dynamic_cast<BlockExprAST*>(Node.getElse()) != nullptr;
+    if (!BodyIsBlock && !ElseIsBlock) {
+      IsTernary = true;
+    }
+  }
+
+  if (IsTernary) {
+    TurfTypePtr ThenTy = getType(Node.getThen());
+    TurfTypePtr ElseTy = getType(Node.getElse());
+    if (ThenTy && ElseTy) {
+      if (ThenTy->getName() == ElseTy->getName()) {
+        setType(&Node, ThenTy);
+      } else if (ThenTy->isNumeric() && ElseTy->isNumeric()) {
+        if (ThenTy->isDouble() || ElseTy->isDouble()) {
+          setType(&Node, TurfDouble());
+        } else {
+          setType(&Node, TurfInt());
+        }
+      } else {
+        reportError(Node.getLoc(),
+                    "Type mismatch in ternary expression: 'then' type '" +
+                        ThenTy->getName() + "' and 'else' type '" +
+                        ElseTy->getName() + "' are incompatible.");
+        setType(&Node, TurfVoid());
+      }
+    } else {
+      setType(&Node, TurfVoid());
+    }
+  } else {
+    setType(&Node, TurfVoid());
+  }
 }
 
 void TypeChecker::visitWhile(WhileExprAST &Node) {

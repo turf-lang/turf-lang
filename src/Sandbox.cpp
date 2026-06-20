@@ -92,9 +92,9 @@ static bool runParseOnlyPass(const std::filesystem::path &sourcePath,
                              std::unique_ptr<ExprAST> &parsedASTOut) {
   const std::string savedSourceFilename = SourceFilename;
   auto savedSourceLines = SourceLines;
-  SourceFile.close();
-  SourceFile.open(sourcePath.string());
-  if (!SourceFile.is_open()) {
+  SourceFile->close();
+  SourceFile->open(sourcePath.string());
+  if (!SourceFile->is_open()) {
     SourceLines = savedSourceLines;
     return false;
   }
@@ -144,13 +144,13 @@ static bool runParseOnlyPass(const std::filesystem::path &sourcePath,
   // Build the program AST from the cached top-level expressions
   parsedASTOut = BuildProgramASTFromCache();
 
-  SourceFile.close();
+  SourceFile->close();
   SourceFilename = savedSourceFilename;
   SourceLines = savedSourceLines;
 
   // Restore the real source file and lexer state
   if (!SourceFilename.empty()) {
-    SourceFile.open(SourceFilename);
+    SourceFile->open(SourceFilename);
     resetLexer();
   }
 
@@ -162,9 +162,9 @@ static bool runParseAndLintPass(const std::filesystem::path &sourcePath,
                                 std::unique_ptr<ExprAST> &parsedASTOut) {
   const std::string savedSourceFilename = SourceFilename;
   auto savedSourceLines = SourceLines;
-  SourceFile.close();
-  SourceFile.open(sourcePath.string());
-  if (!SourceFile.is_open()) {
+  SourceFile->close();
+  SourceFile->open(sourcePath.string());
+  if (!SourceFile->is_open()) {
     SourceLines = savedSourceLines;
     return false;
   }
@@ -216,9 +216,9 @@ static bool runParseAndLintPass(const std::filesystem::path &sourcePath,
     parsedASTOut.reset();
   }
 
-  SourceFile.close();
+  SourceFile->close();
   if (!savedSourceFilename.empty()) {
-    SourceFile.open(savedSourceFilename);
+    SourceFile->open(savedSourceFilename);
   }
   SourceFilename = savedSourceFilename;
   SourceLines = savedSourceLines;
