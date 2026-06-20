@@ -1,12 +1,17 @@
 /**
  * @file Resolver.cpp
- * @brief Implementation of the Resolver name-resolution pass (Issue #4).
+ * @brief Implementation of the Resolver name-resolution pass (Issue #18).
  *
- * Each visitXxx override below either:
- *   (a) performs semantic work specific to Issue #4 (VarDecl, Variable, Block),
- *       or
- *   (b) recurses into child nodes so that the three semantic handlers are
- *       reachable regardless of where they sit in the AST.
+ * Two-pass architecture:
+ *   Pass 1 — hoistTopLevel(): walk top-level nodes, register struct names
+ *             and function signatures so forward references are visible.
+ *   Pass 2 — full visitor traversal: resolve variables, calls, type names.
+ *
+ * Each visitXxx override either:
+ *   (a) performs semantic work (VarDecl, Variable, Block, FuncDef,
+ *       FuncCall, MethodCall, StructDecl — now with name validation), or
+ *   (b) recurses into child nodes so the semantic handlers are reachable
+ *       regardless of where they sit in the AST.
  *
  * This file *does* depend on Errors.h (and therefore on LLVM headers via the
  * transitive include chain), because it raises ReferenceError /
@@ -38,7 +43,20 @@ void Resolver::resolve(ExprAST *Node) {
 
 void Resolver::resolveAll(
     const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
-  predeclareFunctions(Nodes);
+  // ─────────────────────────────────────────────────────────────────────────
+  // Pass 1 — Hoisting
+  // Walk only top-level nodes (no body recursion).
+  // Register every struct name and function signature so that Pass 2
+  // can resolve forward references (foo calling bar defined below, or
+  // a struct field using a type declared later in the file).
+  // ─────────────────────────────────────────────────────────────────────────
+  hoistTopLevel(Nodes);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Pass 2 — Full Resolution
+  // Walk the entire AST (all bodies). Forward references resolve correctly
+  // because Pass 1 has already registered all struct names and signatures.
+  // ─────────────────────────────────────────────────────────────────────────
   for (const auto &Node : Nodes)
     resolve(Node.get());
 }
@@ -72,15 +90,41 @@ void Resolver::registerFunctionSignature(const FuncDefExprAST &Node,
   }
 }
 
-void Resolver::predeclareFunctions(
+// ─── Pass 1: Hoisting ─────────────────────────────────────────────────────────────────
+
+void Resolver::hoistTopLevel(
     const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
-  for (const auto &Node : Nodes) {
-    predeclareFunctions(Node.get());
-  }
+  for (const auto &Node : Nodes)
+    hoistTopLevel(Node.get());
 }
 
-void Resolver::predeclareModuleBody(const ExprAST *Body,
-                                    const std::string &ModuleName) {
+void Resolver::hoistTopLevel(const ExprAST *Node) {
+  if (!Node)
+    return;
+
+  // Hoist struct declarations: register the name so NamedType("MyStruct")
+  // references in other struct fields or function signatures resolve in Pass 2.
+  if (const auto *Struct = dynamic_cast<const StructDeclExprAST *>(Node)) {
+    SymTable_.registerStruct(Struct->getName());
+    return;
+  }
+
+  // Hoist function definitions: register the signature (NOT the body).
+  if (const auto *Func = dynamic_cast<const FuncDefExprAST *>(Node)) {
+    registerFunctionSignature(*Func, currentModuleName());
+    return;
+  }
+
+  // Hoist imported modules: recurse into the module body to find its fns.
+  if (const auto *Import = dynamic_cast<const ModuleImportExprAST *>(Node)) {
+    hoistModuleBody(Import->getBody(), Import->getModuleName());
+  }
+  // All other top-level nodes (e.g. standalone expressions, variable decls)
+  // are not declarations and have nothing to hoist.
+}
+
+void Resolver::hoistModuleBody(const ExprAST *Body,
+                               const std::string &ModuleName) {
   const auto *Block = dynamic_cast<const BlockExprAST *>(Body);
   if (!Block)
     return;
@@ -88,25 +132,14 @@ void Resolver::predeclareModuleBody(const ExprAST *Body,
   for (const auto &Expr : Block->getExpressions()) {
     if (const auto *Func = dynamic_cast<const FuncDefExprAST *>(Expr.get())) {
       registerFunctionSignature(*Func, ModuleName);
-    } else if (const auto *Import = dynamic_cast<const ModuleImportExprAST *>(Expr.get())) {
-      predeclareModuleBody(Import->getBody(), Import->getModuleName());
+    } else if (const auto *Import =
+                   dynamic_cast<const ModuleImportExprAST *>(Expr.get())) {
+      // Nested module imports (unusual but possible)
+      hoistModuleBody(Import->getBody(), Import->getModuleName());
     }
   }
 }
 
-void Resolver::predeclareFunctions(const ExprAST *Node) {
-  if (!Node)
-    return;
-
-  if (auto *Func = dynamic_cast<const FuncDefExprAST *>(Node)) {
-    registerFunctionSignature(*Func, currentModuleName());
-    return;
-  }
-
-  if (auto *Import = dynamic_cast<const ModuleImportExprAST *>(Node)) {
-    predeclareModuleBody(Import->getBody(), Import->getModuleName());
-  }
-}
 
 // ─── Core Issue #4 visitors ───────────────────────────────────────────────────
 
@@ -505,6 +538,46 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
 
 void Resolver::visitFieldAccess(FieldAccessExprAST &Node) {
   visitChild(Node.getBase());
+}
+
+void Resolver::visitStructDecl(StructDeclExprAST &Node) {
+  // Pass 1 (hoistTopLevel) already registered this struct's name.
+  // In Pass 2 (here) we perform lightweight name-only validation of field
+  // types: any NamedType reference (including Node* pointer-to-named-type)
+  // must refer to either a known primitive or a struct registered in Pass 1.
+  //
+  // Type-level validation (field types, initialization correctness) is the
+  // TypeChecker's responsibility — the Resolver only checks names.
+
+  // The set of names that are always valid without being a declared struct.
+  static const std::unordered_set<std::string> KnownPrimitives = {
+      "int", "double", "bool", "string", "void", "null"};
+
+  for (const auto &Field : Node.getFields()) {
+    const TurfType *FT = Field.Type.get();
+    if (!FT)
+      continue;
+
+    // Unwrap one level of pointer (e.g. Node* → check "Node")
+    const TurfType *BaseType = FT;
+    if (const auto *PT = dynamic_cast<const TurfPointerType *>(FT))
+      BaseType = PT->getPointee().get();
+
+    // Only validate NamedType references — primitives have their own classes
+    // (IntType, DoubleType, etc.) and never reach here as NamedType.
+    if (const auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
+      const std::string &TypeName = NT->getName();
+      if (!KnownPrimitives.count(TypeName) &&
+          !SymTable_.isKnownStruct(TypeName)) {
+        // Unknown named type in a struct field — emit an error with
+        // Damerau-Levenshtein suggestions from the registered struct names.
+        RankedSuggestions Suggestions;
+        Suggestions.Local = SuggestionIndex::suggestVisible(
+            TypeName, SymTable_.getAllStructNames());
+        UnknownTypeError(Node.getLoc(), TypeName, Suggestions).raise();
+      }
+    }
+  }
 }
 
 void Resolver::visitStructInit(StructInitExprAST &Node) {
