@@ -261,6 +261,28 @@ public:
   }
 };
 
+/// Emitted by the Resolver's Pass 2 when a struct field's NamedType reference
+/// does not match any struct registered in Pass 1.
+class UnknownTypeError : public TurfError {
+public:
+  UnknownTypeError(SourceLocation Loc, const std::string &TypeName,
+                   const RankedSuggestions &Suggestions)
+      : TurfError(Loc, Colors::BRIGHT_RED + "Error: Unknown type '" +
+                           Colors::CYAN + TypeName + Colors::BRIGHT_RED + "'." +
+                           Colors::RESET) {
+    std::string formatted = formatRankedSuggestions(Suggestions);
+    if (!formatted.empty()) {
+      Message += formatted;
+    } else {
+      Message += "\n  " + Colors::BRIGHT_GREEN +
+                 "Hint: Make sure the struct '" + TypeName +
+                 "' is declared before it is used, or check the spelling." +
+                 Colors::RESET;
+    }
+  }
+};
+
+
 /// Emitted when the function name is known but the argument count is wrong.
 /// Shows every valid overload signature so the user knows what they can write.
 class WrongArityError : public TurfError {
