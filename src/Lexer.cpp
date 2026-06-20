@@ -49,7 +49,8 @@ bool g_AIEnabled = false;
 // analysis of subsequent cascading errors.
 static bool g_slmFiredThisPass = false;
 
-std::ifstream SourceFile;
+std::ifstream GlobalSourceFile;
+std::ifstream *SourceFile = &GlobalSourceFile;
 double NumVal;
 long long IntVal;
 bool BoolVal;
@@ -58,7 +59,6 @@ std::string StringVal;
 int GetLastChar() { return LastChar; }
 void SetLastChar(int c) { LastChar = c; }
 std::map<std::string, int> Keywords = {{"if", TOK_IF},
-                                       {"then", TOK_THEN},
                                        {"else", TOK_ELSE},
                                        {"while", TOK_WHILE},
                                        {"int", TOK_TYPE_INT},
@@ -87,7 +87,9 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"mut", TOK_MUTABLE},
                                        {"immutable", TOK_IMMUTABLE},
                                        {"immut", TOK_IMMUTABLE},
-                                       {"to", TOK_TO}};
+                                       {"to", TOK_TO},
+                                       {"give", TOK_GIVE},
+                                       {"otherwise", TOK_OTHERWISE}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
@@ -239,7 +241,7 @@ int gettok() {
       CurCol = 0;
     }
 
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
 
     // Increment column for every character read
     if (LastChar != EOF) {
@@ -254,7 +256,7 @@ int gettok() {
   if (isalpha(LastChar)) {
     IdentifierStr = LastChar;
 
-    while (isalnum(LastChar = SourceFile.get()) || LastChar == '_') {
+    while (isalnum(LastChar = SourceFile->get()) || LastChar == '_') {
       IdentifierStr += LastChar;
       CurCol++;
     }
@@ -273,13 +275,13 @@ int gettok() {
   // String literals: "..."
   if (LastChar == '"') {
     StringVal = "";
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     while (LastChar != '"' && LastChar != EOF) {
       if (LastChar == '\\') {
         // Handle escape sequences
-        LastChar = SourceFile.get();
+        LastChar = SourceFile->get();
         CurCol++;
         if (LastChar == 'n') {
           StringVal += '\n';
@@ -295,7 +297,7 @@ int gettok() {
       } else {
         StringVal += LastChar;
       }
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
     }
 
@@ -305,31 +307,31 @@ int gettok() {
     }
 
     // Consume closing "
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     return TOK_STRING_LITERAL;
   }
 
   // Range operator: .. (must come before number handler so start..end works)
-  if (LastChar == '.' && SourceFile.peek() == '.') {
-    LastChar = SourceFile.get();
+  if (LastChar == '.' && SourceFile->peek() == '.') {
+    LastChar = SourceFile->get();
     CurCol++;
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
     return TOK_RANGE;
   }
 
   // Numbers: [0-9.]+ (a leading '.' only starts a number if followed by a
   // digit)
-  if (isdigit(LastChar) || (LastChar == '.' && isdigit(SourceFile.peek()))) {
+  if (isdigit(LastChar) || (LastChar == '.' && isdigit(SourceFile->peek()))) {
     std::string NumStr;
     do {
       NumStr += LastChar;
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
     } while (isdigit(LastChar) ||
-             (LastChar == '.' && SourceFile.peek() != '.'));
+             (LastChar == '.' && SourceFile->peek() != '.'));
 
     bool IsFloat = NumStr.find('.') != std::string::npos;
     if (IsFloat) {
@@ -342,11 +344,11 @@ int gettok() {
   }
 
   if (LastChar == '=') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     if (LastChar == '=') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_EQ;
     }
@@ -355,11 +357,11 @@ int gettok() {
   }
 
   if (LastChar == ':') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     if (LastChar == ':') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return ':'; // Placeholder for future scope resolution
     }
@@ -368,11 +370,11 @@ int gettok() {
   }
 
   if (LastChar == '!') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     if (LastChar == '=') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_NEQ;
     }
@@ -381,11 +383,11 @@ int gettok() {
   }
 
   if (LastChar == '>') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     if (LastChar == '=') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_GEQ;
     }
@@ -394,11 +396,11 @@ int gettok() {
   }
 
   if (LastChar == '<') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     if (LastChar == '=') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_LEQ;
     }
@@ -407,11 +409,11 @@ int gettok() {
   }
 
   if (LastChar == '&') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     if (LastChar == '&') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_AND;
     }
@@ -420,11 +422,11 @@ int gettok() {
   }
 
   if (LastChar == '|') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     if (LastChar == '|') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_OR;
     }
@@ -433,17 +435,17 @@ int gettok() {
   }
 
   if (LastChar == '+') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     if (LastChar == '+') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_PLUS_PLUS;
     }
 
     if (LastChar == '=') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_PLUS_ASSIGN;
     }
@@ -452,17 +454,17 @@ int gettok() {
   }
 
   if (LastChar == '-') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     if (LastChar == '-') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_MINUS_MINUS;
     }
 
     if (LastChar == '=') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_MINUS_ASSIGN;
     }
@@ -471,11 +473,11 @@ int gettok() {
   }
 
   if (LastChar == '*') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     if (LastChar == '=') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_MUL_ASSIGN;
     }
@@ -484,11 +486,11 @@ int gettok() {
   }
 
   if (LastChar == '%') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
 
     if (LastChar == '=') {
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_MOD_ASSIGN;
     }
@@ -497,25 +499,25 @@ int gettok() {
   }
 
   if (LastChar == '/') {
-    if (SourceFile.peek() == '/') {
+    if (SourceFile->peek() == '/') {
       do {
-        LastChar = SourceFile.get();
+        LastChar = SourceFile->get();
         CurCol++;
       } while (LastChar != EOF && LastChar != '\n' && LastChar != '\r');
 
       if (LastChar != EOF)
         return gettok();
-    } else if (SourceFile.peek() == '=') {
-      LastChar = SourceFile.get();
+    } else if (SourceFile->peek() == '=') {
+      LastChar = SourceFile->get();
       CurCol++;
-      LastChar = SourceFile.get();
+      LastChar = SourceFile->get();
       CurCol++;
       return TOK_DIV_ASSIGN;
     }
   }
 
   if (LastChar == '@') {
-    LastChar = SourceFile.get();
+    LastChar = SourceFile->get();
     CurCol++;
     return TOK_AT;
   }
@@ -525,8 +527,9 @@ int gettok() {
 
   // Handle ASCII characters
   int ThisChar = LastChar;
-  LastChar = SourceFile.get();
+  LastChar = SourceFile->get();
   CurCol++;
 
   return ThisChar;
 }
+

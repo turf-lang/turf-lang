@@ -431,58 +431,14 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
   if (!Cond)
     return nullptr;
 
-  std::unique_ptr<ExprAST> Then;
-  bool IsBlockForm = false;
-
-  if (CurTok == TOK_THEN) {
-    getNextToken();
-    Then = ParseExpression();
-  } else if (CurTok == '{') {
-    IsBlockForm = true;
-    Then = ParseBlock();
-  } else {
-    if (CurTok == TOK_IDENTIFIER) {
-      if (getDamerauLevenshteinDistance(IdentifierStr, "then") <=
-          std::max(1, (int)IdentifierStr.length() / 3)) {
-        KeywordError(CurLoc, IdentifierStr).raise();
-        return nullptr;
-      }
-    }
-    LogErrorAt(
-        KeywordLoc,
-        "Expected 'then' or '{' after the if-condition."
-        "\n  Hint: Use 'if cond then expr else expr' or 'if cond { ... }'.");
+  if (CurTok != '{') {
+    LogErrorAt(CurLoc, "Expected '{' after if-condition. Use '? ... otherwise ...' for single-expression ternary.");
     return nullptr;
   }
 
+  auto Then = ParseBlock();
   if (!Then)
     return nullptr;
-
-  if (!IsBlockForm) {
-    if (CurTok == TOK_IDENTIFIER) {
-      if (getDamerauLevenshteinDistance(IdentifierStr, "else") <=
-          std::max(1, (int)IdentifierStr.length() / 3)) {
-        KeywordError(CurLoc, IdentifierStr).raise();
-        return nullptr;
-      }
-    }
-    if (CurTok != TOK_ELSE) {
-      LogErrorAt(CurLoc, "expected 'else'");
-      return nullptr;
-    }
-
-    SourceLocation ElseLoc = CurLoc;
-    getNextToken(); // eat 'else'
-
-    auto Else = ParseExpression();
-    if (!Else)
-      return nullptr;
-
-    std::vector<CondBranch> Branches;
-    Branches.push_back({KeywordLoc, std::move(Cond), std::move(Then)});
-    return std::make_unique<IfExprAST>(std::move(Branches), std::move(Else),
-                                       ElseLoc);
-  }
 
   std::vector<CondBranch> Branches;
   Branches.push_back({KeywordLoc, std::move(Cond), std::move(Then)});
@@ -668,7 +624,6 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_FOR:
     return ParseForExpr();
 
-  case TOK_THEN:
   case TOK_ELSE: {
     SourceLocation KeywordLoc = CurLoc;
     std::string IdName = IdentifierStr;
@@ -875,7 +830,32 @@ std::unique_ptr<ExprAST> ParseExpression() {
   if (!LHS)
     return nullptr;
 
-  return ParseBinOpRHS(0, std::move(LHS));
+  LHS = ParseBinOpRHS(0, std::move(LHS));
+  if (!LHS)
+    return nullptr;
+
+  if (CurTok == TOK_GIVE) {
+    SourceLocation OpLoc = CurLoc;
+    getNextToken(); // consume 'give'
+    auto ThenExpr = ParseExpression();
+    if (!ThenExpr)
+      return nullptr;
+    if (CurTok != TOK_OTHERWISE) {
+      LogErrorAt(CurLoc, "Expected 'otherwise' after 'give' expression in ternary");
+      return nullptr;
+    }
+    SourceLocation ElseLoc = CurLoc;
+    getNextToken(); // consume 'otherwise'
+    auto ElseExpr = ParseExpression();
+    if (!ElseExpr)
+      return nullptr;
+
+    std::vector<CondBranch> Branches;
+    Branches.push_back({OpLoc, std::move(LHS), std::move(ThenExpr)});
+    return std::make_unique<IfExprAST>(std::move(Branches), std::move(ElseExpr), ElseLoc);
+  }
+
+  return LHS;
 }
 
 // Parse API
@@ -1377,6 +1357,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
   }
 
   // Expect TOK_IDENTIFIER → save as FuncName
+  std::cout << "DEBUG ParseFuncDef: CurTok=" << CurTok << ", IdentifierStr=\"" << IdentifierStr << "\"" << std::endl;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(FnLoc, "Expected a function name after 'fn'.");
     return nullptr;
@@ -1527,7 +1508,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
   ImportedFiles.insert(Path);
 
   // Save current lexer state
-  auto SavedSourceFile = std::move(SourceFile);
+  std::ifstream* SavedSourceFile = SourceFile;
   auto SavedLastChar = GetLastChar();
   auto SavedCurTok = CurTok;
   auto SavedCurLoc = CurLoc;
@@ -1543,7 +1524,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
   auto SavedStringVal = StringVal;
 
   // Set new lexer state
-  SourceFile = std::move(ImportFile);
+  SourceFile = &ImportFile;
   SourceFilename = Path;
   CurLine = 1;
   CurCol = 0;
@@ -1577,7 +1558,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
   }
 
   // Restore lexer state
-  SourceFile = std::move(SavedSourceFile);
+  SourceFile = SavedSourceFile;
   SetLastChar(SavedLastChar);
   CurTok = SavedCurTok;
   CurLoc = SavedCurLoc;

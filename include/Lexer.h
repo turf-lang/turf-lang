@@ -14,7 +14,7 @@ struct SourceLocation {
   int Col;
 };
 
-extern std::ifstream SourceFile;
+extern std::ifstream *SourceFile;
 extern double NumVal;
 extern long long IntVal;
 extern bool BoolVal;
@@ -85,7 +85,6 @@ enum Token {
   TOK_NUMBER = -2,
   TOK_IDENTIFIER = -3, // Variable
   TOK_ASSIGN = -4,
-  TOK_THEN = -5,
   TOK_ELSE = -6,
   TOK_IF = -7,
   TOK_WHILE = -8,
@@ -131,7 +130,9 @@ enum Token {
   TOK_MUTABLE = -65,
   TOK_IMMUTABLE = -66,
   TOK_COLON = -67,
-  TOK_TO = -68
+  TOK_TO = -68,
+  TOK_GIVE = -69,
+  TOK_OTHERWISE = -70
 };
 
 int gettok();

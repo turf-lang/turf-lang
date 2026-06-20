@@ -396,10 +396,14 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     }
 
     // Get stderr
-    GlobalVariable *StderrGV = TheModule->getNamedGlobal("stderr");
+    std::string StderrSymbol = "stderr";
+#ifdef __APPLE__
+    StderrSymbol = "__stderrp";
+#endif
+    GlobalVariable *StderrGV = TheModule->getNamedGlobal(StderrSymbol);
     if (!StderrGV) {
       StderrGV = new GlobalVariable(*TheModule, PointerType::getUnqual(*TheContext), false,
-                                    GlobalValue::ExternalLinkage, nullptr, "stderr");
+                                    GlobalValue::ExternalLinkage, nullptr, StderrSymbol);
     }
     Value *StderrVal = Builder->CreateLoad(PointerType::getUnqual(*TheContext), StderrGV, "stderr_val");
 
