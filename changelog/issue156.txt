@@ -1,0 +1,88 @@
+Two-Pass Resolver: Struct and Function Hoisting for Forward Declarations
+
+1. Changes Made:
+- Replaced `predeclareFunctions()` / `predeclareModuleBody()` in `src/Resolver.cpp` with the
+  unified `hoistTopLevel()` / `hoistModuleBody()`, which now handles struct declarations,
+  function signatures, and module imports in a single Pass 1 sweep.
+- Updated `Resolver::resolveAll()` in `src/Resolver.cpp` to explicitly perform two sequential
+  passes: Pass 1 (hoistTopLevel — no body recursion, declarations only) followed by Pass 2
+  (full visitor traversal of all bodies).
+- Added `registerStruct(name)`, `isKnownStruct(name)`, and `getAllStructNames()` to
+  `include/ResolverSymbolTable.h` and `src/ResolverSymbolTable.cpp`, backed by a private
+  `std::unordered_set<std::string> RegisteredStructs_` member.
+- Upgraded `Resolver::visitStructDecl()` in `src/Resolver.cpp` from a no-op to an active
+  Pass 2 visitor: validates that all NamedType field references (including pointer-to-named-type
+  fields, e.g. `Node*`) refer to either known primitives or structs registered in Pass 1.
+  Type-level validation is left entirely to the TypeChecker.
+- Added `UnknownTypeError` to `include/Errors.h`: a Resolver-level diagnostic fired when a
+  struct field references an unknown named type, with Damerau-Levenshtein suggestions from
+  the struct name registry.
+- Updated `ResolverSymbolTable::dump()` to print the registered struct names section first,
+  providing immediate confirmation of Pass 1 hoisting results when using
+  `--dump-resolver-symbols`.
+- Updated the docstring in `include/Resolver.h` to document the two-pass contract.
+- Added `test_forward_decl.tr`: demonstrates a function calling another function defined
+  below it in the same file (the primary forward-declaration acceptance test).
+- Added `test_linked_list.tr`: demonstrates a self-referential struct (`Node` with a
+  `Node*` field) and linked-list operations. The Resolver accepts it cleanly; full codegen
+  is deferred to Phase 3 (LLVM self-referential struct backend fix).
+
+2. Why the Change was Made:
+- The Resolver was the single remaining bottleneck preventing functions and structs from being
+  used before they are textually defined. This is standard behavior expected of any modern
+  compiled language.
+- The pre-existing `predeclareFunctions()` only hoisted function signatures, leaving structs
+  completely invisible until the exact line they appeared. A `NamedType("Node")` in a field
+  would cause a spurious "unknown type" error if `Node` was declared further down the file.
+- Struct field type validation was previously a gap: no pass checked whether a named type
+  in a struct field actually existed. The Resolver is the right place for this lightweight
+  name-level check (not the TypeChecker, which handles type compatibility).
+
+3. How it Helps/Changed:
+- Forward function calls and forward struct references now work naturally: declaration order
+  in a Turflang source file no longer matters for top-level declarations.
+- Self-referential structs (e.g. linked list nodes with a pointer to their own type) are
+  accepted by the Resolver, unblocking the Phase 3 LLVM backend work.
+- The symbol table dump (`--dump-resolver-symbols`) now clearly shows which struct names
+  were hoisted in Pass 1, making the two-pass behavior easy to observe and debug.
+- `UnknownTypeError` gives the user a clear diagnostic with spelling suggestions when a
+  struct field references a type name that doesn't exist.
+
+4. Reference & Usage Examples (Source of Truth):
+
+a) Forward Function Declaration
+Functions may call other functions defined anywhere in the same file:
+```turflang
+fn foo(): int {
+    return bar();        // bar is defined below — valid
+}
+
+fn bar(): int {
+    return 42;
+}
+
+fn main(): int {
+    io.printline(foo()); // prints: 42
+    return 0;
+}
+```
+
+b) Self-Referential Struct
+A struct may contain a pointer to its own type:
+```turflang
+struct Node {
+    val: int,
+    next: Node*          // self-reference via pointer — Resolver accepts this
+}
+```
+
+c) --dump-resolver-symbols output after Pass 1
+Running `./turf myfile.tr --dump-resolver-symbols` now shows:
+```
+=== Resolver Symbol Table Dump ===
+--- Registered Struct Names (Pass 1 Hoist) ---
+  struct Node
+--- Current-File Functions (Tier 1) ---
+  fn main() -> int [Loc: 24:1]
+  fn foo() -> int [Loc: 14:1]
+```
