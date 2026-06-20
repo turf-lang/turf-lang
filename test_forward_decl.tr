@@ -1,0 +1,28 @@
+// test_forward_decl.tr — Issue #18: Two-Pass Resolver forward declaration test.
+//
+// Demonstrates that a function can call another function defined BELOW it
+// in the source file. This is the primary acceptance criterion for Issue #18.
+//
+// Pass 1 (hoistTopLevel) registers both foo() and bar() before Pass 2 runs.
+// When Pass 2 resolves foo()'s body, bar() is already in the function registry.
+//
+// Run:   ./turf test_forward_decl.tr
+// Expect output: 42
+
+import io;
+
+fn foo(): int {
+    // bar() is defined below — without Pass 1 hoisting this would have been
+    // an "Unknown function 'bar'" error in older single-pass Resolver builds.
+    return bar();
+}
+
+fn bar(): int {
+    return 42;
+}
+
+fn main(): int {
+    mutable result: int = foo();
+    io.printline(result);
+    return 0;
+}
