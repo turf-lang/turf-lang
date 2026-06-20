@@ -3,10 +3,15 @@ fn main(): int {
     mutable i: int = n to int;
     mutable s: string = i to string;
 
+    io.printline(n);
+    io.printline(i);
+    io.printline(s);
+
     assert(i == 3);
     assert(s to int == 3);
     
     mutable d: double = i to int to double;
+    io.printline(d);
     assert(d == 3.0);
 
     io.printline("Cast tests passed successfully!");

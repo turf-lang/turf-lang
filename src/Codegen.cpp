@@ -746,7 +746,7 @@ Value *BinaryExprAST::codegen() {
   // Power
   case '^': {
     CastBoth(TurfDouble());
-    Function *PowFunc = llvm::Intrinsic::getDeclaration(
+    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
