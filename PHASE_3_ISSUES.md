@@ -20,7 +20,7 @@ do {
     io.printline("iterating");
 } while (x > 0);
 
-// compare (switch — no fall-through, ever)
+// compare (switch — no body fall-through, multi-value matching supported)
 compare (x) {
     matches (1):
         io.printline("one");
@@ -32,6 +32,15 @@ compare (x) {
 
     other:
         io.printline("something else");
+}
+
+// compare — multi-value arm (stacked matches, shared body)
+compare (x) {
+    matches (1):
+    matches (2):
+    matches (3):
+        io.printline("one, two, or three");
+    done
 }
 
 // enum
@@ -610,9 +619,10 @@ Standard: enter scope for body, resolve body, resolve condition. TypeChecker: co
 
 ### Description
 
-Add a `compare`/`matches`/`done` switch statement. **No fall-through, ever.** The `other` arm is optional and must be last if present. The `done` keyword explicitly closes each `matches` arm (analogous to an implicit `break`).
+Add a `compare`/`matches`/`done` switch statement. No **body** fall-through — each arm's body is fully isolated. However, **multi-value matching** is supported by stacking `matches` arms before a shared body and a single `done`. The `other` arm is optional and must be last if present.
 
 ```turflang
+// Single-value arm
 compare (x) {
     matches (1):
         io.printline("one");
@@ -620,6 +630,18 @@ compare (x) {
 
     matches (2):
         io.printline("two");
+    done
+
+    other:
+        io.printline("something else");
+}
+
+// Multi-value arm — stacked matches, one shared body
+compare (x) {
+    matches (1):
+    matches (2):
+    matches (3):
+        io.printline("one, two, or three");
     done
 
     other:
@@ -678,14 +700,20 @@ Expect ')'
 Expect '{'
 Loop:
   if CurTok == TOK_MATCHES:
-      consume 'matches'
-      expect '('
-      ArmValue = ParseExpression()
-      expect ')'
-      expect ':'
+      // Collect one or more stacked 'matches (val):' headers
+      Values = []
+      while CurTok == TOK_MATCHES:
+          consume 'matches'
+          expect '('
+          Values.push_back(ParseExpression())
+          expect ')'
+          expect ':'
+      // Now parse the shared body (no body between stacked headers)
       parse body statements until TOK_DONE
       consume TOK_DONE
-      Arms.push_back({ArmValue, Body})
+      // Each value in Values maps to the same body block
+      for each V in Values:
+          Arms.push_back({V, Body})
   elif CurTok == TOK_OTHER:
       consume 'other'
       expect ':'
@@ -732,8 +760,10 @@ Subject and all `matches` arm values must be the same type (`int` or `enum`). `s
 
 ### Acceptance Criteria
 
-- The example in the description compiles and runs correctly.
+- The single-value example in the description compiles and runs correctly.
+- Multi-value stacked arms (`matches (1): matches (2): body done`) compile correctly — both values jump to the same body block.
 - Missing `done` after an arm body emits `Expected 'done' after matches arm body`.
+- A `matches` arm with a body statement between two stacked headers emits a parse error.
 - `other` appearing before a `matches` arm emits `'other' must be the last arm in compare`.
 - Two `other` arms emit `Duplicate 'other' arm in compare`.
 - `compare (x) { }` (no arms) is valid (no-op) — or emit a warning via `TurfWarning`.
