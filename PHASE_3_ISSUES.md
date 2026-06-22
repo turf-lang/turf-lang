@@ -1,7 +1,7 @@
 # Phase 3 — GitHub Issues: The Language Backbone
 
 > All issues in this document depend on **Phase 2 (Issues #12–#20)** being fully merged first.
-> Issues #171 and #172 are Phase 2 tail items — diagnostic infrastructure that Phase 3 depends on.
+> Issues #173 and #174 are Phase 2 tail items — diagnostic infrastructure that Phase 3 depends on.
 > They must be completed before Phase 3 proper begins.
 > The ordering within Phase 3 is strict — see **Execution Order** at the bottom.
 
@@ -105,7 +105,7 @@ match divide(10, 0) {
 
 ---
 
-## Issue #171 — `TurfWarning`: Non-Interrupting Diagnostic Class
+## Issue #173 — `TurfWarning`: Non-Interrupting Diagnostic Class
 
 **Labels:** `diagnostics`, `infrastructure`, `phase-2-tail`
 **Depends on:** #17 (Phase 2 complete)
@@ -113,7 +113,7 @@ match divide(10, 0) {
 
 ### Description
 
-Every CFG analysis pass (Issues #183, #184) emits **warnings**, not errors. Currently, every diagnostic goes through `TurfError::raise()` which calls `longjmp` and halts the compilation pass. A warning must never do this — it must register the message and return normally so analysis continues.
+Every CFG analysis pass (Issues #185, #186) emits **warnings**, not errors. Currently, every diagnostic goes through `TurfError::raise()` which calls `longjmp` and halts the compilation pass. A warning must never do this — it must register the message and return normally so analysis continues.
 
 Add a `TurfWarning` class alongside `TurfError` in `Errors.h`.
 
@@ -147,10 +147,10 @@ public:
 
 ---
 
-## Issue #172 — Decouple Hints from `TurfError`
+## Issue #174 — Decouple Hints from `TurfError`
 
 **Labels:** `diagnostics`, `infrastructure`, `dx`, `phase-2-tail`
-**Depends on:** #171
+**Depends on:** #173
 **Files:** `include/Errors.h`, `src/SLMIntegration.cpp`
 
 ### Description
@@ -211,10 +211,10 @@ For every class in `Errors.h`, extract the `"Hint: ..."` suffix out of the `Mess
 
 ---
 
-## Issue #173 — `extern fn` FFI
+## Issue #175 — `extern fn` FFI
 
 **Labels:** `lexer`, `parser`, `ast`, `codegen`, `phase-3`
-**Depends on:** #171, #172 (Phase 2 tail complete)
+**Depends on:** #173, #174 (Phase 2 tail complete)
 **Files:** `include/Lexer.h`, `src/Lexer.cpp`, `include/AST.h`, `src/Parser.cpp`, `src/Resolver.cpp`, `src/TypeChecker.cpp`, `src/Codegen.cpp`
 
 ### Description
@@ -314,10 +314,10 @@ return F;
 
 ---
 
-## Issue #174 — Self-Referential Structs (LLVM Backend)
+## Issue #176 — Self-Referential Structs (LLVM Backend)
 
 **Labels:** `codegen`, `ast`, `phase-3`
-**Depends on:** #173 (malloc needed in linked-list test code)
+**Depends on:** #175 (malloc needed in linked-list test code)
 **Files:** `src/Codegen.cpp`
 
 ### Description
@@ -363,10 +363,10 @@ Also verify the `getLLVMType()` fallback path at `Codegen.cpp` (the opaque struc
 
 ---
 
-## Issue #175 — `null` Type Enforcement (TypeChecker)
+## Issue #177 — `null` Type Enforcement (TypeChecker)
 
 **Labels:** `typechecker`, `phase-3`
-**Depends on:** #174
+**Depends on:** #176
 **Files:** `src/TypeChecker.cpp`, `include/Errors.h`
 
 ### Description
@@ -407,15 +407,15 @@ public:
 
 - `mutable x: int = null;` emits `NullAssignmentError`.
 - `mutable p: Node* = null;` compiles correctly.
-- `mutable p: Node*;` (default init from #176) initializes `p` to `null` implicitly.
+- `mutable p: Node*;` (default init from #178) initializes `p` to `null` implicitly.
 - `mutable s: string = null;` emits `NullAssignmentError`.
 
 ---
 
-## Issue #176 — Default Variable Initialization
+## Issue #178 — Default Variable Initialization
 
 **Labels:** `parser`, `phase-3`
-**Depends on:** #175
+**Depends on:** #177
 **Files:** `src/Parser.cpp`
 
 ### Description
@@ -464,10 +464,10 @@ ParseLetStatement:
 
 ---
 
-## Issue #177 — Logical NOT `!` Operator
+## Issue #179 — Logical NOT `!` Operator
 
 **Labels:** `parser`, `lexer`, `phase-3`
-**Depends on:** #176
+**Depends on:** #178
 **Files:** `src/Lexer.cpp`, `src/Parser.cpp`, `src/Codegen.cpp`
 
 ### Description
@@ -519,10 +519,10 @@ This reuses the existing `!=` codegen path — no new Codegen required.
 
 ---
 
-## Issue #178 — `do { } while(cond)` Statement
+## Issue #180 — `do { } while(cond)` Statement
 
 **Labels:** `parser`, `lexer`, `ast`, `codegen`, `phase-3`
-**Depends on:** #177
+**Depends on:** #179
 **Files:** `include/Lexer.h`, `src/Lexer.cpp`, `include/AST.h`, `src/Parser.cpp`, `src/Resolver.cpp`, `src/TypeChecker.cpp`, `src/Codegen.cpp`
 
 ### Description
@@ -611,10 +611,10 @@ Standard: enter scope for body, resolve body, resolve condition. TypeChecker: co
 
 ---
 
-## Issue #179 — `compare` Statement (Switch)
+## Issue #181 — `compare` Statement (Switch)
 
 **Labels:** `parser`, `lexer`, `ast`, `codegen`, `phase-3`
-**Depends on:** #178
+**Depends on:** #180
 **Files:** `include/Lexer.h`, `src/Lexer.cpp`, `include/AST.h`, `src/Parser.cpp`, `src/Resolver.cpp`, `src/TypeChecker.cpp`, `src/Codegen.cpp`
 
 ### Description
@@ -770,10 +770,10 @@ Subject and all `matches` arm values must be the same type (`int` or `enum`). `s
 
 ---
 
-## Issue #180 — Bitwise Operators (`&`, `|`, `~`, `^`, `<<`, `>>`)
+## Issue #182 — Bitwise Operators (`&`, `|`, `~`, `^`, `<<`, `>>`)
 
 **Labels:** `lexer`, `parser`, `codegen`, `phase-3`
-**Depends on:** #179
+**Depends on:** #181
 **Files:** `include/Lexer.h`, `src/Lexer.cpp`, `src/Parser.cpp`, `src/Codegen.cpp`
 
 ### Description
@@ -811,7 +811,7 @@ BinopPrecedence[TOK_LSHIFT] = 20;   // shift — above additive
 BinopPrecedence[TOK_RSHIFT] = 20;
 ```
 
-Add `'~'` to `ParseUnary()` (same pattern as `!` in #177):
+Add `'~'` to `ParseUnary()` (same pattern as `!` in #179):
 
 ```cpp
 if (CurTok == '~') {
@@ -847,10 +847,10 @@ TypeChecker: all bitwise operands must be `int`. Applying them to `double` or `b
 
 ---
 
-## Issue #181 — String Operations (`+`, `==`, `s[i]`)
+## Issue #183 — String Operations (`+`, `==`, `s[i]`)
 
 **Labels:** `codegen`, `typechecker`, `phase-3`
-**Depends on:** #180
+**Depends on:** #182
 **Files:** `src/Codegen.cpp`, `src/TypeChecker.cpp`
 
 ### Description
@@ -919,10 +919,10 @@ return Builder->CreateZExt(Char, IntegerType::get(TheContext, 64), "charext");
 
 ---
 
-## Issue #182 — `enum` Declaration
+## Issue #184 — `enum` Declaration
 
 **Labels:** `parser`, `lexer`, `ast`, `codegen`, `typechecker`, `phase-3`
-**Depends on:** #181
+**Depends on:** #183
 **Files:** `include/Lexer.h`, `src/Lexer.cpp`, `include/AST.h`, `src/Parser.cpp`, `src/Resolver.cpp`, `src/TypeChecker.cpp`, `src/Codegen.cpp`
 
 ### Description
@@ -1013,10 +1013,10 @@ for (size_t i = 0; i < Variants_.size(); ++i) {
 
 ---
 
-## Issue #183 — CFG Phase 1: Cyclomatic Complexity & Infinite Loop Detection
+## Issue #185 — CFG Phase 1: Cyclomatic Complexity & Infinite Loop Detection
 
 **Labels:** `cfg`, `static-analysis`, `phase-3`
-**Depends on:** #171 (`TurfWarning` must exist), #182
+**Depends on:** #173 (`TurfWarning` must exist), #184
 **Files:** `include/CFG.h`, `src/CFG.cpp`
 
 ### Description
@@ -1089,10 +1089,10 @@ if (CFG.hasUnbreakableLoop()) {
 
 ---
 
-## Issue #184 — CFG Phase 2: Liveness Pass & Infinite Recursion Detection
+## Issue #186 — CFG Phase 2: Liveness Pass & Infinite Recursion Detection
 
 **Labels:** `cfg`, `static-analysis`, `phase-3`
-**Depends on:** #183
+**Depends on:** #185
 **Files:** `include/CFG.h`, `src/CFG.cpp`, `src/CallGraph.cpp` (existing)
 
 ### Description
@@ -1174,10 +1174,10 @@ This is a **fatal error** (uses `raise()`) because infinite recursion guarantees
 
 ---
 
-## Issue #185 — First-Class Functions
+## Issue #187 — First-Class Functions
 
 **Labels:** `typechecker`, `ast`, `codegen`, `phase-3`
-**Depends on:** #184
+**Depends on:** #186
 **Files:** `include/Types.h`, `src/Parser.cpp`, `src/TypeChecker.cpp`, `src/Codegen.cpp`
 
 ### Description
@@ -1248,10 +1248,10 @@ This means `fn(int): int` is a valid type expression in any type-annotation posi
 
 ---
 
-## Issue #186 — `!T` Error Unions (`catch`, `?`, `error.XYZ`)
+## Issue #188 — `!T` Error Unions (`catch`, `?`, `error.XYZ`)
 
 **Labels:** `parser`, `lexer`, `ast`, `typechecker`, `codegen`, `resolver`, `phase-3`
-**Depends on:** #185 (all other Phase 3 items must be complete first)
+**Depends on:** #187 (all other Phase 3 items must be complete first)
 **Files:** `include/Lexer.h`, `src/Lexer.cpp`, `include/AST.h`, `include/Types.h`, `src/Parser.cpp`, `src/Resolver.cpp`, `src/TypeChecker.cpp`, `src/Codegen.cpp`, `include/Errors.h`, `lib/std/*.tr`
 
 ### Description
@@ -1435,28 +1435,28 @@ Update `lib/std/io.tr` function return types that can fail to return `!void` or 
 This order minimizes breakage and respects all dependency chains:
 
 ```
-#171 (TurfWarning)                — Phase 2 tail, do first — needed for CFG warnings
-#172 (hint decoupling)            — Phase 2 tail, do second — needed before adding new errors
+#173 (TurfWarning)                — Phase 2 tail, do first — needed for CFG warnings
+#174 (hint decoupling)            — Phase 2 tail, do second — needed before adding new errors
 
 ── Phase 3 proper ──
 
-#173 (extern fn FFI)              — Group A, do first — unlocks malloc in test code
-#174 (self-referential structs)   — Group A — depends on #173
-#175 (null enforcement)           — Group A — depends on #174
+#175 (extern fn FFI)              — Group A, do first — unlocks malloc in test code
+#176 (self-referential structs)   — Group A — depends on #175
+#177 (null enforcement)           — Group A — depends on #176
 
-#176 (default initialization)     — Group B — depends on #175
-#177 (logical NOT !)              — Group B — depends on #176
-#178 (do/while)                   — Group B — depends on #177
-#179 (compare/matches)            — Group B — depends on #178
-#180 (bitwise operators)          — Group B — depends on #179
-#181 (string operations)          — Group B — depends on #180
-#182 (enum)                       — Group B — depends on #181
+#178 (default initialization)     — Group B — depends on #177
+#179 (logical NOT !)              — Group B — depends on #178
+#180 (do/while)                   — Group B — depends on #179
+#181 (compare/matches)            — Group B — depends on #180
+#182 (bitwise operators)          — Group B — depends on #181
+#183 (string operations)          — Group B — depends on #182
+#184 (enum)                       — Group B — depends on #183
 
-#183 (CFG Phase 1)                — Group C — depends on #171, #182
-#184 (CFG Phase 2)                — Group C — depends on #183
+#185 (CFG Phase 1)                — Group C — depends on #173, #184
+#186 (CFG Phase 2)                — Group C — depends on #185
 
-#185 (first-class functions)      — Group D — depends on #184
-#186 (!T error unions)            — Group E — LAST. depends on ALL above.
+#187 (first-class functions)      — Group D — depends on #186
+#188 (!T error unions)            — Group E — LAST. depends on ALL above.
 ```
 
-**Why `!T` is last:** It touches the most files and introduces the most new concepts. Every other Phase 3 item produces a clean, stable compiler state that `!T` can be built on top of. The Resolver, TypeChecker, and Codegen are at their most stable after #185.
+**Why `!T` is last:** It touches the most files and introduces the most new concepts. Every other Phase 3 item produces a clean, stable compiler state that `!T` can be built on top of. The Resolver, TypeChecker, and Codegen are at their most stable after #187.
