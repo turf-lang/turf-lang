@@ -1,0 +1,16 @@
+// Test: Issue #173 - TurfWarning
+// Verifies that a variable shadowing warning in a loop context does NOT halt
+// compilation. The program must still produce output.
+// The inner 'y' shadows the outer 'y', triggering ShadowingWarning.
+// Expected: warning emitted, binary runs, prints "inner"
+
+import io;
+
+fn main(): int {
+    mutable y: int = 1;
+    if (y > 0) {
+        mutable y: int = 2;
+        io.printline("inner");
+    }
+    return 0;
+}

@@ -1,0 +1,13 @@
+// Test: Issue #173 - TurfWarning
+// Verifies that a self-assignment warning (x = x) does NOT halt compilation
+// and that the binary still runs successfully.
+// Expected: warning emitted, binary runs, prints "42"
+
+import io;
+
+fn main(): int {
+    mutable x: int = 42;
+    x = x;
+    io.printline(x);
+    return 0;
+}
