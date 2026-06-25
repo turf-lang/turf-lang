@@ -74,6 +74,27 @@ public:
   }
 };
 
+// Warning Base Class
+// Unlike TurfError::raise(), TurfWarning::emit() NEVER interrupts compilation.
+// It registers a yellow "Warning:" entry with the DiagnosticEngine and
+// returns normally so that every subsequent analysis pass continues.
+class TurfWarning {
+protected:
+  SourceLocation Loc;
+  std::string Message;
+
+public:
+  TurfWarning(SourceLocation Loc, const std::string &Msg)
+      : Loc(Loc), Message(Msg) {}
+
+  virtual ~TurfWarning() = default;
+
+  // NEVER interrupts compilation flow — always returns normally.
+  void emit() const {
+    DiagnosticEngine::add(Loc, Message, /*IsWarning=*/true);
+  }
+};
+
 // Syntax Error : Parser issues
 class SyntaxError : public TurfError {
 public:
