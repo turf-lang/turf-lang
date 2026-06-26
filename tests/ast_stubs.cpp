@@ -32,7 +32,7 @@ std::string CompilerExecutablePath;
 // ── SLM stubs (normally in SLMIntegration.cpp) ──────────────────────────────
 namespace SLM {
 std::string getCodeContext(int, int) { return {}; }
-AISuggestion fetchSuggestion(const std::string &, int) { return {}; }
-AISuggestion validateAndApplySuggestion(const std::string &, int) { return {}; }
+AISuggestion fetchSuggestion(const std::string &, int, const std::string &) { return {}; }
+AISuggestion validateAndApplySuggestion(const std::string &, int, const std::string &) { return {}; }
 bool verifySuggestion(const AISuggestion &, const std::string &, int) { return false; }
 } // namespace SLM
