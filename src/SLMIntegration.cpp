@@ -303,6 +303,26 @@ static int findVariableDeclarationLine(const std::string &errorMsg,
   return -1;
 }
 
+static std::string escapeJsonString(const std::string &src) {
+  std::string result;
+  for (char c : src) {
+    if (c == '\\') {
+      result += "\\\\";
+    } else if (c == '"') {
+      result += "\\\"";
+    } else if (c == '\n') {
+      result += "\\n";
+    } else if (c == '\r') {
+      result += "\\r";
+    } else if (c == '\t') {
+      result += "\\t";
+    } else {
+      result += c;
+    }
+  }
+  return result;
+}
+
 static std::string extractJsonFieldString(const std::string &json,
                                           const std::string &field) {
   std::string key = "\"" + field + "\":";
@@ -498,7 +518,7 @@ static float computeConfidence(const AISuggestion &s, ErrorCategory category,
  * @return AISuggestion A structured AI response containing an explanation and
  * patch.
  */
-AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
+AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, const std::string &hint) {
   AISuggestion suggestion;
   std::string cleanError = stripAnsiCodes(errorMessage);
 
@@ -629,12 +649,11 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine) {
       "max.\n"
       "<|im_end|>\n"
       "<|im_start|>user\n"
-      "Error: " +
-      cleanError +
-      "\n"
-      "Code:\n" +
-      codeContext +
-      "\n"
+      "{\n"
+      "  \"error\": \"" + escapeJsonString(cleanError) + "\",\n"
+      "  \"hint\": \"" + escapeJsonString(hint) + "\",\n"
+      "  \"code\": \"" + escapeJsonString(codeContext) + "\"\n"
+      "}\n"
       "Respond with ONLY this JSON object — fill every field yourself:\n"
       "{\"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
       "\"suggested_comment\": <string>, \"code_patch\": <human-readable "
@@ -720,9 +739,9 @@ bool verifySuggestion(const AISuggestion &suggestion,
 // Wrapper that gets SLM suggestion, validates it in a sandbox, and applies it
 // if valid. Returns an enhanced AISuggestion with validation results.
 AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
-                                        int errorLine) {
+                                        int errorLine, const std::string &hint) {
   // First, get the SLM suggestion
-  AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine);
+  AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine, hint);
 
   if (!suggestion.valid) {
     return suggestion;

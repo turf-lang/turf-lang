@@ -1,0 +1,33 @@
+Decouple Hints from TurfError
+
+1. Changes Made:
+- Updated the base class `TurfError` in `include/Errors.h` to accept a third constructor parameter `Hint` and store it in a `Hint_` field.
+- Updated `TurfWarning` in `include/Errors.h` to accept a `Hint` parameter and store it in `Hint_`.
+- Migrated all warning subclasses (e.g. `ShadowingWarning`, `SelfAssignmentWarning`, `UnreachableBlockWarning`, etc.) to inherit from `TurfWarning` instead of `TurfError`, and migrated their dynamic/static hint construction to use the warning class's hint field.
+- Migrated all error subclasses in `include/Errors.h` (e.g. `SyntaxError`, `TypeError`, `ArrayBoundsError`, etc.) to extract the `"Hint: ..."` substring from the main message block and pass it as the new decoupled `Hint` parameter.
+- Updated `DiagnosticEngine::add()` in `include/Lexer.h` and `src/Lexer.cpp` to accept the new optional `Hint` parameter, store it in the `Diag` struct, and defined a backward-compatible overload for calls without hints.
+- Updated `printDiag` in `src/Lexer.cpp` to render hints on their own visually distinct line under the message body, color-coded with `Colors::BRIGHT_GREEN` and prefixed with `"Hint: "`.
+- Updated `SLM::fetchSuggestion()` and `SLM::validateAndApplySuggestion()` in `include/SLMIntegration.h` and `src/SLMIntegration.cpp` to accept the hint.
+- Formatted the user input in the SLM suggestion query prompt as a JSON string, providing separate, structured `"error"`, `"hint"`, and `"code"` context fields.
+- Updated the testing stubs in `tests/ast_stubs.cpp` to match the new SLM function signatures.
+
+2. Why the Change was Made:
+- Combining hints directly into the message body string made it impossible to render them separately (e.g., in collapsible IDE components or structured interfaces).
+- Programmatic suppression, formatting, or testing of hints was difficult without regex parsing.
+- Passing hints as a separate structured JSON field to the SLM gives the LLM clearer context for code analysis and validation.
+- Separating warning diagnostics out of TurfError avoids accidental halts or aborts during CFG warning passes.
+
+3. How it Helps/Changed:
+- Cleaner diagnostics layout where hints are visually separated from the error message.
+- Better structured context is supplied to the compiler's LLM assistant.
+- Standardized warning subclasses to use `TurfWarning` for non-interrupting diagnostics.
+
+4. Example Diagnostic Output Format:
+── error at line 6, col 6
+
+  Oops! You can't change the value of 'y' because it's immutable.
+
+  Hint: If you need to change its value later, declare it with 'mutable' instead of 'immutable'.
+
+  6 │     y = 30; // Should fail with ImmutableAssignmentError
+    │      ^ Here!

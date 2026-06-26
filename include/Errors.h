@@ -23,15 +23,20 @@ class TurfError {
 protected:
   SourceLocation Loc;
   std::string Message;
+  std::string Hint_;
 
 public:
-  TurfError(SourceLocation Loc, const std::string &Msg)
-      : Loc(Loc), Message(Msg) {}
+  TurfError(SourceLocation Loc, const std::string &Msg,
+            const std::string &Hint = "")
+      : Loc(Loc), Message(Msg), Hint_(Hint) {}
 
   virtual ~TurfError() = default;
 
+  const std::string &getHint() const { return Hint_; }
+  const std::string &getMessage() const { return Message; }
+
   void raise() const {
-    DiagnosticEngine::add(Loc, Message, /*IsWarning=*/false);
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/false);
 
     if (g_recoverActive)
       longjmp(g_recoverJmp, 1);
@@ -41,7 +46,9 @@ public:
     }
   }
 
-  void warn() const { LogErrorAt(Loc, Message); }
+  void warn() const {
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true);
+  }
 
   static std::string formatRankedSuggestions(const RankedSuggestions &Suggestions) {
     std::string result = "";
@@ -82,17 +89,24 @@ class TurfWarning {
 protected:
   SourceLocation Loc;
   std::string Message;
+  std::string Hint_;
 
 public:
-  TurfWarning(SourceLocation Loc, const std::string &Msg)
-      : Loc(Loc), Message(Msg) {}
+  TurfWarning(SourceLocation Loc, const std::string &Msg,
+              const std::string &Hint = "")
+      : Loc(Loc), Message(Msg), Hint_(Hint) {}
 
   virtual ~TurfWarning() = default;
 
+  const std::string &getHint() const { return Hint_; }
+  const std::string &getMessage() const { return Message; }
+
   // NEVER interrupts compilation flow — always returns normally.
   void emit() const {
-    DiagnosticEngine::add(Loc, Message, /*IsWarning=*/true);
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true);
   }
+
+  void warn() const { emit(); }
 };
 
 // Syntax Error : Parser issues
@@ -101,11 +115,9 @@ public:
   SyntaxError(SourceLocation Loc, const std::string &Msg)
       : TurfError(Loc, Colors::BRIGHT_RED +
                            "Oops! There's a tiny mistake here:\n" +
-                           Colors::RESET + "  " + Msg + "\n  " +
-                           Colors::BRIGHT_GREEN +
-                           "Hint: Check your spelling, punctuation like ';' or "
-                           "'}', and make sure everything is closed properly." +
-                           Colors::RESET) {}
+                           Colors::RESET + "  " + Msg,
+                  "Check your spelling, punctuation like ';' or "
+                  "'}', and make sure everything is closed properly.") {}
 };
 
 // Type Error : Errors generated due to incompatible types
@@ -114,10 +126,9 @@ public:
   TypeError(SourceLocation Loc, const std::string &Msg)
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Type mismatch!\n" + Colors::RESET +
-                      "  " + Msg + "\n  " + Colors::BRIGHT_GREEN +
-                      "Hint: Check that you're not mixing incompatible types "
-                      "(like assigning a string to an int variable)." +
-                      Colors::RESET) {}
+                      "  " + Msg,
+                  "Check that you're not mixing incompatible types "
+                  "(like assigning a string to an int variable).") {}
 };
 
 // String Conversion Error : Unsupported type passed to string(...)
@@ -127,12 +138,11 @@ public:
       : TurfError(
             Loc, Colors::BRIGHT_RED + "Oops! I can't convert '" + Colors::CYAN +
                      SrcTypeName + Colors::BRIGHT_RED + "' to a string!\n" +
-                     Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                     "Hint: Only these conversions are supported:\n" +
-                     "    string(int)    - turns a whole number into text\n" +
-                     "    string(double) - turns a decimal number into text\n" +
-                     "    string(bool)   - gives you \"true\" or \"false\"" +
-                     Colors::RESET) {}
+                     Colors::RESET,
+            "Only these conversions are supported:\n"
+            "    string(int)    - turns a whole number into text\n"
+            "    string(double) - turns a decimal number into text\n"
+            "    string(bool)   - gives you \"true\" or \"false\"") {}
 };
 
 // lengthof() Argument Type Error : non-string passed to lengthof
@@ -144,11 +154,10 @@ public:
                       "Oops! 'lengthof' only works with strings, but you gave "
                       "it a '" +
                       Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
-                      Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                      "Hint: 'lengthof' counts the characters in a string.\n" +
-                      "    Correct usage:  lengthof(\"hello\")  →  5\n" +
-                      "    Correct usage:  int n = lengthof(myStringVar)" +
-                      Colors::RESET) {}
+                      Colors::RESET,
+                  "'lengthof' counts the characters in a string.\n"
+                  "    Correct usage:  lengthof(\"hello\")  →  5\n"
+                  "    Correct usage:  int n = lengthof(myStringVar)") {}
 };
 
 // abs() Argument Type Error : non-int/double passed to abs
@@ -162,10 +171,9 @@ public:
                 "it a '" +
                 Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
                 Colors::RESET + "  " + Colors::BRIGHT_GREEN + "Valid uses:\n" +
-                "    abs(int)    → int\n" + "    abs(double) → double\n" +
-                Colors::RESET + "  " + Colors::BRIGHT_GREEN +
-                "Hint: abs gives the absolute (positive) value of a number." +
-                Colors::RESET) {}
+                "    abs(int)    → int\n" + "    abs(double) → double" +
+                Colors::RESET,
+            "abs gives the absolute (positive) value of a number.") {}
 };
 
 // power() Argument Type Error : non-int/double passed to power
@@ -184,11 +192,8 @@ public:
                 "Valid overloads:\n" + "    power(int, int)       → int\n" +
                 "    power(int, double)    → double\n" +
                 "    power(double, int)    → double\n" +
-                "    power(double, double) → double\n" + Colors::RESET + "  " +
-                Colors::BRIGHT_GREEN +
-                "Hint: power raises the first number to the power of the "
-                "second." +
-                Colors::RESET) {}
+                "    power(double, double) → double" + Colors::RESET,
+            "power raises the first number to the power of the second.") {}
 };
 
 // Control Flow Misuse : break/continue/return in wrong context
@@ -198,10 +203,9 @@ public:
       : TurfError(
             Loc,
             Colors::BRIGHT_RED + "Control flow error!\n" + Colors::RESET +
-                "  " + Msg + "\n  " + Colors::BRIGHT_GREEN +
-                "Hint: Make sure 'break' and 'continue' are inside a loop, "
-                "and 'return' is inside a function." +
-                Colors::RESET) {}
+                "  " + Msg,
+            "Make sure 'break' and 'continue' are inside a loop, "
+            "and 'return' is inside a function.") {}
 };
 
 // Semantic Error : General semantic violations
@@ -224,18 +228,17 @@ public:
     std::vector<std::string> Candidates = SuggestionIndex::suggestKeywords(Name);
 
     if (!Candidates.empty()) {
-      Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean: ";
+      std::string sug = "Did you mean: ";
       for (size_t i = 0; i < Candidates.size(); ++i) {
-        Message += Colors::BRIGHT_YELLOW + "'" + Candidates[i] + "'" +
+        sug += Colors::BRIGHT_YELLOW + "'" + Candidates[i] + "'" +
                    Colors::BRIGHT_GREEN;
         if (i != Candidates.size() - 1)
-          Message += ", ";
+          sug += ", ";
       }
-      Message += "?" + Colors::RESET;
+      sug += "?";
+      Hint_ = sug;
     } else {
-      Message += "\n  " + Colors::BRIGHT_GREEN +
-                 "Hint: Check if you spelled the keyword correctly." +
-                 Colors::RESET;
+      Hint_ = "Check if you spelled the keyword correctly.";
     }
   }
 };
@@ -251,12 +254,14 @@ public:
 
     std::string formatted = formatRankedSuggestions(Suggestions);
     if (!formatted.empty()) {
-      Message += formatted;
+      if (formatted.rfind("\n  ", 0) == 0) {
+        Hint_ = formatted.substr(3);
+      } else {
+        Hint_ = formatted;
+      }
     } else {
-      Message += "\n  " + Colors::BRIGHT_GREEN +
-                 "Hint: Double-check the spelling against the built-in "
-                 "functions like 'printline' or 'lengthof'." +
-                 Colors::RESET;
+      Hint_ = "Double-check the spelling against the built-in "
+              "functions like 'printline' or 'lengthof'.";
     }
   }
 };
@@ -272,12 +277,14 @@ public:
                            Colors::RESET) {
     std::string formatted = formatRankedSuggestions(Suggestions);
     if (!formatted.empty()) {
-      Message += formatted;
+      if (formatted.rfind("\n  ", 0) == 0) {
+        Hint_ = formatted.substr(3);
+      } else {
+        Hint_ = formatted;
+      }
     } else {
-      Message += "\n  " + Colors::BRIGHT_GREEN +
-                 "Hint: Double-check the spelling or import the module that "
-                 "defines it." +
-                 Colors::RESET;
+      Hint_ = "Double-check the spelling or import the module that "
+              "defines it.";
     }
   }
 };
@@ -293,12 +300,14 @@ public:
                            Colors::RESET) {
     std::string formatted = formatRankedSuggestions(Suggestions);
     if (!formatted.empty()) {
-      Message += formatted;
+      if (formatted.rfind("\n  ", 0) == 0) {
+        Hint_ = formatted.substr(3);
+      } else {
+        Hint_ = formatted;
+      }
     } else {
-      Message += "\n  " + Colors::BRIGHT_GREEN +
-                 "Hint: Make sure the struct '" + TypeName +
-                 "' is declared before it is used, or check the spelling." +
-                 Colors::RESET;
+      Hint_ = "Make sure the struct '" + TypeName +
+              "' is declared before it is used, or check the spelling.";
     }
   }
 };
@@ -323,8 +332,7 @@ public:
       for (const auto &Sig : KnownSignatures)
         Message += "\n    " + Colors::CYAN + Sig + Colors::RESET;
     }
-    Message += "\n  " + Colors::BRIGHT_GREEN +
-               "Hint: Check the number of arguments." + Colors::RESET;
+    Hint_ = "Check the number of arguments.";
   }
 };
 
@@ -333,21 +341,18 @@ public:
   NestedFunctionError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc, Colors::BRIGHT_RED +
                            "Nested function definitions are not allowed: '" +
-                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
-                           Colors::RESET + "\n  " + Colors::BRIGHT_GREEN +
-                           "Hint: Move the function to the top level of the "
-                           "file or module." + Colors::RESET) {}
+                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'.",
+                  "Move the function to the top level of the "
+                  "file or module.") {}
 };
 class ArithmeticError : public TurfError {
 public:
   ArithmeticError(SourceLocation Loc, const std::string &Msg)
       : TurfError(
             Loc,
-            Colors::BRIGHT_RED + "Math trouble! " + Colors::RESET + Msg +
-                "\n  " + Colors::BRIGHT_GREEN +
-                "Hint: Are you trying to divide by zero? Or combining things "
-                "that can't be added together like a number and a word?" +
-                Colors::RESET) {}
+            Colors::BRIGHT_RED + "Math trouble! " + Colors::RESET + Msg,
+            "Are you trying to divide by zero? Or combining things "
+            "that can't be added together like a number and a word?") {}
 };
 
 // Reference Error : Variable lookup issues
@@ -355,19 +360,20 @@ class ReferenceError : public TurfError {
 public:
   ReferenceError(SourceLocation Loc, const std::string &Name,
                  const RankedSuggestions &Suggestions)
-      : TurfError(Loc, "") {
-
-    Message = Colors::BRIGHT_RED + "I can't find anything named '" +
-              Colors::CYAN + Name + Colors::BRIGHT_RED + "'." + Colors::RESET;
+      : TurfError(Loc, Colors::BRIGHT_RED + "I can't find anything named '" +
+                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'.") {
 
     std::string formatted = formatRankedSuggestions(Suggestions);
     if (!formatted.empty()) {
-      Message += formatted;
+      if (formatted.rfind("\n  ", 0) == 0) {
+        Hint_ = formatted.substr(3);
+      } else {
+        Hint_ = formatted;
+      }
     } else {
-      Message += "\n  " + Colors::BRIGHT_GREEN +
-                 "Hint: Did you forget to create this variable? You have to "
-                 "create it before you can use it, like this: `int " +
-                 Name + " = 5;`" + Colors::RESET;
+      Hint_ = "Did you forget to create this variable? You have to "
+              "create it before you can use it, like this: `int " +
+              Name + " = 5;`";
     }
   }
 };
@@ -377,20 +383,21 @@ class UseBeforeDeclarationError : public TurfError {
 public:
   UseBeforeDeclarationError(SourceLocation UseLoc, const std::string &Name,
                             const RankedSuggestions &Suggestions)
-      : TurfError(UseLoc, "") {
-
-    Message = Colors::BRIGHT_RED + "Hold on! You're trying to use '" +
-              Colors::CYAN + Name + Colors::BRIGHT_RED +
-              "' before telling me what it is." + Colors::RESET;
+      : TurfError(UseLoc, Colors::BRIGHT_RED + "Hold on! You're trying to use '" +
+                           Colors::CYAN + Name + Colors::BRIGHT_RED +
+                           "' before telling me what it is.") {
 
     std::string formatted = formatRankedSuggestions(Suggestions);
     if (!formatted.empty()) {
-      Message += formatted;
+      if (formatted.rfind("\n  ", 0) == 0) {
+        Hint_ = formatted.substr(3);
+      } else {
+        Hint_ = formatted;
+      }
     } else {
-      Message += "\n  " + Colors::BRIGHT_GREEN +
-                 "Hint: Did you forget to create this variable? You have to "
-                 "create it before you can use it, like this: `int " +
-                 Name + " = 5;`" + Colors::RESET;
+      Hint_ = "Did you forget to create this variable? You have to "
+              "create it before you can use it, like this: `int " +
+              Name + " = 5;`";
     }
   }
 };
@@ -402,38 +409,32 @@ public:
       : TurfError(NewLoc,
                   Colors::BRIGHT_RED +
                       "Wait a minute! You already created a variable named '" +
-                      Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
-                      Colors::RESET) {
+                      Colors::CYAN + Name + Colors::BRIGHT_RED + "'.") {
     Message += "\n  " + Colors::BRIGHT_BLUE +
                "Note: You first created it at line " +
                std::to_string(PrevLoc.Line) + ", column " +
                std::to_string(PrevLoc.Col) + Colors::RESET;
-    Message += "\n  " + Colors::BRIGHT_GREEN +
-               "Hint: If you want to change its value, just do `" + Name +
-               " = new_value;` without the type (like 'int' or 'string'). If "
-               "you want a new variable, give it a different name!" +
-               Colors::RESET;
+    Hint_ = "If you want to change its value, just do `" + Name +
+            " = new_value;` without the type (like 'int' or 'string'). If "
+            "you want a new variable, give it a different name!";
   }
 };
 
-class ShadowingWarning : public TurfError {
+class ShadowingWarning : public TurfWarning {
 public:
   ShadowingWarning(SourceLocation NewLoc, const std::string &Name,
                    SourceLocation PrevLoc)
-      : TurfError(NewLoc, Colors::BRIGHT_YELLOW +
-                              "Just so you know, you're creating a new '" +
-                              Colors::CYAN + Name + Colors::BRIGHT_YELLOW +
-                              "' that hides an older one!" + Colors::RESET) {
-    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
-              "Warning: " + Colors::RESET + Message;
+      : TurfWarning(NewLoc,
+                    Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                        Colors::BRIGHT_YELLOW + "Just so you know, you're creating a new '" +
+                        Colors::CYAN + Name + Colors::BRIGHT_YELLOW +
+                        "' that hides an older one!" + Colors::RESET,
+                    "It's better to give this new variable a different name "
+                    "to avoid confusion later.") {
     Message += "\n  " + Colors::BRIGHT_BLUE +
                "Note: The older one is at line " +
                std::to_string(PrevLoc.Line) + ", column " +
                std::to_string(PrevLoc.Col) + Colors::RESET;
-    Message += "\n  " + Colors::BRIGHT_GREEN +
-               "Hint: It's better to give this new variable a different name "
-               "to avoid confusion later." +
-               Colors::RESET;
   }
 };
 
@@ -443,11 +444,9 @@ public:
                        const std::string &Terminator = "return")
       : TurfError(Loc, Colors::BRIGHT_RED + "This " + What +
                            " will never happen because you used '" +
-                           Terminator + "' before it!" + Colors::RESET +
-                           "\n  " + Colors::BRIGHT_GREEN +
-                           "Hint: Move this code before the '" + Terminator +
-                           "' statement if you want it to run." +
-                           Colors::RESET) {}
+                           Terminator + "' before it!" + Colors::RESET,
+                  "Move this code before the '" + Terminator +
+                  "' statement if you want it to run.") {}
 };
 
 // Control Flow Errors
@@ -455,46 +454,38 @@ class MissingReturnError : public TurfError {
 public:
   MissingReturnError(SourceLocation Loc, const std::string &FunctionName)
       : TurfError(
-
             Loc,
             Colors::BRIGHT_RED + "The function '" + Colors::CYAN +
                 FunctionName + Colors::BRIGHT_RED +
                 "' promises to give back a result, but sometimes it doesn't!" +
-                Colors::RESET + "\n  " + Colors::BRIGHT_GREEN +
-                "Hint: Make sure every path in your function (like inside 'if' "
-                "and 'else') has a 'return' statement." +
-                Colors::RESET) {}
+                Colors::RESET,
+            "Make sure every path in your function (like inside 'if' "
+            "and 'else') has a 'return' statement.") {}
 };
 
-class UnreachableBlockWarning : public TurfError {
+class UnreachableBlockWarning : public TurfWarning {
 public:
   UnreachableBlockWarning(SourceLocation Loc, const std::string &FunctionName,
                           const std::string &BlockName)
-      : TurfError(Loc, Colors::BRIGHT_YELLOW + "The code in '" + BlockName +
-                           "' inside '" + FunctionName +
-                           "' can never be reached!" + Colors::RESET) {
-    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
-              "Warning: " + Colors::RESET + Message + "\n  " +
-              Colors::BRIGHT_GREEN +
-              "Hint: Check your 'if' conditions. Are they impossible to be "
-              "true, or did you 'return' before this block?" +
-              Colors::RESET;
-  }
+      : TurfWarning(Loc,
+                    Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                        Colors::BRIGHT_YELLOW + "The code in '" + BlockName +
+                        "' inside '" + FunctionName +
+                        "' can never be reached!" + Colors::RESET,
+                    "Check your 'if' conditions. Are they impossible to be "
+                    "true, or did you 'return' before this block?") {}
 };
 
-class DeadBranchWarning : public TurfError {
+class DeadBranchWarning : public TurfWarning {
 public:
   DeadBranchWarning(SourceLocation Loc, const std::string &FunctionName)
-      : TurfError(Loc, Colors::BRIGHT_YELLOW + "There's a part of '" +
-                           FunctionName + "' that will never be executed!" +
-                           Colors::RESET) {
-    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
-              "Warning: " + Colors::RESET + Message + "\n  " +
-              Colors::BRIGHT_GREEN +
-              "Hint: Check if you have code after a 'return', 'break', or "
-              "'continue' that can't be reached." +
-              Colors::RESET;
-  }
+      : TurfWarning(Loc,
+                    Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                        Colors::BRIGHT_YELLOW + "There's a part of '" +
+                        FunctionName + "' that will never be executed!" +
+                        Colors::RESET,
+                    "Check if you have code after a 'return', 'break', or "
+                    "'continue' that can't be reached.") {}
 };
 
 class StatementAfterTerminatorError : public TurfError {
@@ -503,126 +494,105 @@ public:
                                 const std::string &Terminator)
       : TurfError(Loc, Colors::BRIGHT_RED + "This code comes after a " +
                            Terminator + ", so it's impossible to reach it!" +
-                           Colors::RESET + "\n  " + Colors::BRIGHT_GREEN +
-                           "Hint: Delete this code or move it before the '" +
-                           Terminator + "' statement." + Colors::RESET) {}
+                           Colors::RESET,
+                  "Delete this code or move it before the '" +
+                  Terminator + "' statement.") {}
 };
 
 // Lint Warnings - Reviewer-style heuristic pattern warnings
 // Redundant comparison: x == true, x != false, etc.
-class RedundantComparisonWarning : public TurfError {
+class RedundantComparisonWarning : public TurfWarning {
 public:
   RedundantComparisonWarning(SourceLocation Loc, const std::string &Expr,
                              const std::string &Simplified)
-      : TurfError(Loc, "") {
-    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
-              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW +
-              "This comparison is redundant!" + Colors::RESET + "\n  " +
-              Colors::BRIGHT_CYAN + Expr + Colors::RESET +
-              " is the same as just writing " + Colors::BRIGHT_CYAN +
-              Simplified + Colors::RESET + "." + "\n  " + Colors::BRIGHT_GREEN +
-              "Hint: You can simplify this by removing the comparison "
-              "entirely." +
-              Colors::RESET;
-  }
+      : TurfWarning(Loc,
+                    Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                        Colors::BRIGHT_YELLOW + "This comparison is redundant!" + Colors::RESET + "\n  " +
+                        Colors::BRIGHT_CYAN + Expr + Colors::RESET +
+                        " is the same as just writing " + Colors::BRIGHT_CYAN +
+                        Simplified + Colors::RESET + ".",
+                    "You can simplify this by removing the comparison "
+                    "entirely.") {}
 };
 
 // Self-assignment: x = x
-class SelfAssignmentWarning : public TurfError {
+class SelfAssignmentWarning : public TurfWarning {
 public:
   SelfAssignmentWarning(SourceLocation Loc, const std::string &Name)
-      : TurfError(Loc, "") {
-    Message =
-        Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
-        Colors::BRIGHT_YELLOW + "You're assigning '" + Colors::CYAN + Name +
-        Colors::BRIGHT_YELLOW + "' to itself — this doesn't do anything!" +
-        Colors::RESET + "\n  " + Colors::BRIGHT_GREEN +
-        "Hint: Did you mean to assign a different value, or is this "
-        "left over from an edit?" +
-        Colors::RESET;
-  }
+      : TurfWarning(Loc,
+                    Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                        Colors::BRIGHT_YELLOW + "You're assigning '" + Colors::CYAN + Name +
+                        Colors::BRIGHT_YELLOW + "' to itself — this doesn't do anything!" +
+                        Colors::RESET,
+                    "Did you mean to assign a different value, or is this "
+                    "left over from an edit?") {}
 };
 
 // Infinite loop: while(true) with no break/continue/return in the body
-class SuspiciousInfiniteLoopWarning : public TurfError {
+class SuspiciousInfiniteLoopWarning : public TurfWarning {
 public:
-  SuspiciousInfiniteLoopWarning(SourceLocation Loc) : TurfError(Loc, "") {
-    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
-              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW +
-              "This looks like an infinite loop!" + Colors::RESET +
-              " The condition is always true and the body has no " +
-              Colors::CYAN + "'break'" + Colors::BRIGHT_YELLOW + ", " +
-              Colors::CYAN + "'continue'" + Colors::BRIGHT_YELLOW + ", or " +
-              Colors::CYAN + "'return'" + Colors::BRIGHT_YELLOW + "." +
-              Colors::RESET + "\n  " + Colors::BRIGHT_GREEN +
-              "Hint: If this is intentional, consider adding a comment. "
-              "Otherwise, add a 'break' or a proper exit condition." +
-              Colors::RESET;
-  }
+  SuspiciousInfiniteLoopWarning(SourceLocation Loc)
+      : TurfWarning(Loc,
+                    Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                        Colors::BRIGHT_YELLOW + "This looks like an infinite loop!" + Colors::RESET +
+                        " The condition is always true and the body has no " +
+                        Colors::CYAN + "'break'" + Colors::BRIGHT_YELLOW + ", " +
+                        Colors::CYAN + "'continue'" + Colors::BRIGHT_YELLOW + ", or " +
+                        Colors::CYAN + "'return'" + Colors::BRIGHT_YELLOW + ".",
+                    "If this is intentional, consider adding a comment. "
+                    "Otherwise, add a 'break' or a proper exit condition.") {}
 };
 
 // Empty block in if/else branch
-class EmptyBranchWarning : public TurfError {
+class EmptyBranchWarning : public TurfWarning {
 public:
   EmptyBranchWarning(SourceLocation Loc, const std::string &BranchKind)
-      : TurfError(Loc, "") {
-    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
-              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW + "The '" +
-              Colors::CYAN + BranchKind + Colors::BRIGHT_YELLOW +
-              "' branch is empty — it doesn't do anything!" + Colors::RESET +
-              "\n  " + Colors::BRIGHT_GREEN +
-              "Hint: If you haven't written the code yet, add a comment "
-              "like '// TODO'. Otherwise, you may be able to simplify this "
-              "'if' statement." +
-              Colors::RESET;
-  }
+      : TurfWarning(Loc,
+                    Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                        Colors::BRIGHT_YELLOW + "The '" + Colors::CYAN + BranchKind +
+                        Colors::BRIGHT_YELLOW + "' branch is empty — it doesn't do anything!" +
+                        Colors::RESET,
+                    "If you haven't written the code yet, add a comment "
+                    "like '// TODO'. Otherwise, you may be able to simplify this "
+                    "'if' statement.") {}
 };
 
 // Self-comparison: x == x, x != x, x < x, etc.
-class SelfComparisonWarning : public TurfError {
+class SelfComparisonWarning : public TurfWarning {
 public:
   SelfComparisonWarning(SourceLocation Loc, const std::string &Name,
                         const std::string &Result)
-      : TurfError(Loc, "") {
-    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
-              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW +
-              "You're comparing '" + Colors::CYAN + Name +
-              Colors::BRIGHT_YELLOW + "' with itself!" + Colors::RESET +
-              " This is always " + Colors::BRIGHT_CYAN + Result +
-              Colors::RESET + "." + "\n  " + Colors::BRIGHT_GREEN +
-              "Hint: Did you mean to compare with a different variable?" +
-              Colors::RESET;
-  }
+      : TurfWarning(Loc,
+                    Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                        Colors::BRIGHT_YELLOW + "You're comparing '" + Colors::CYAN + Name +
+                        Colors::BRIGHT_YELLOW + "' with itself!" + Colors::RESET +
+                        " This is always " + Colors::BRIGHT_CYAN + Result +
+                        Colors::RESET + ".",
+                    "Did you mean to compare with a different variable?") {}
 };
 
 // Division / modulo by zero literal
-class DivisionByZeroLiteralWarning : public TurfError {
+class DivisionByZeroLiteralWarning : public TurfWarning {
 public:
   DivisionByZeroLiteralWarning(SourceLocation Loc, const std::string &Op)
-      : TurfError(Loc, "") {
-    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
-              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW +
-              "You're using '" + Colors::CYAN + Op + Colors::BRIGHT_YELLOW +
-              "' with zero — this will crash at runtime!" + Colors::RESET +
-              "\n  " + Colors::BRIGHT_GREEN +
-              "Hint: Check the right-hand side. Division or modulo by zero "
-              "is undefined behavior." +
-              Colors::RESET;
-  }
+      : TurfWarning(Loc,
+                    Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                        Colors::BRIGHT_YELLOW + "You're using '" + Colors::CYAN + Op + Colors::BRIGHT_YELLOW +
+                        "' with zero — this will crash at runtime!" + Colors::RESET,
+                    "Check the right-hand side. Division or modulo by zero "
+                    "is undefined behavior.") {}
 };
 
 // Identical if/else branches
-class IdenticalBranchesWarning : public TurfError {
+class IdenticalBranchesWarning : public TurfWarning {
 public:
-  IdenticalBranchesWarning(SourceLocation Loc) : TurfError(Loc, "") {
-    Message = Colors::BOLD + Colors::BRIGHT_YELLOW +
-              "Warning: " + Colors::RESET + Colors::BRIGHT_YELLOW +
-              "Both branches of this 'if' do the same thing!" + Colors::RESET +
-              "\n  " + Colors::BRIGHT_GREEN +
-              "Hint: The 'if'/'else' can be removed — just keep the body. "
-              "Or did you forget to change one of the branches?" +
-              Colors::RESET;
-  }
+  IdenticalBranchesWarning(SourceLocation Loc)
+      : TurfWarning(Loc,
+                    Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                        Colors::BRIGHT_YELLOW + "Both branches of this 'if' do the same thing!" +
+                        Colors::RESET,
+                    "The 'if'/'else' can be removed — just keep the body. "
+                    "Or did you forget to change one of the branches?") {}
 };
 
 // Argument type mismatch in function call
@@ -638,10 +608,9 @@ public:
                 "  Parameter '" + Colors::CYAN + ParamName + Colors::RESET +
                 "' (argument " + std::to_string(ArgIndex) + ") expects '" +
                 Colors::CYAN + ExpectedType + Colors::RESET + "', but got '" +
-                Colors::CYAN + GotType + Colors::RESET + "'.\n  " +
-                Colors::BRIGHT_GREEN +
-                "Hint: You might need an explicit cast like " + ExpectedType +
-                "(value), or pass a different value." + Colors::RESET) {}
+                Colors::CYAN + GotType + Colors::RESET + "'.",
+            "You might need an explicit cast like " + ExpectedType +
+                "(value), or pass a different value.") {}
 };
 
 // Return type mismatch
@@ -655,11 +624,9 @@ public:
                            "'!\n" + Colors::RESET + "  The function returns '" +
                            Colors::CYAN + ExpectedType + Colors::RESET +
                            "', but you're trying to return '" + Colors::CYAN +
-                           GotType + Colors::RESET + "'.\n  " +
-                           Colors::BRIGHT_GREEN +
-                           "Hint: Use an explicit cast like " + ExpectedType +
-                           "(value), or change the function's return type." +
-                           Colors::RESET) {}
+                           GotType + Colors::RESET + "'.",
+                  "Use an explicit cast like " + ExpectedType +
+                  "(value), or change the function's return type.") {}
 };
 
 // Using the result of a void function as a value
@@ -669,11 +636,10 @@ public:
       : TurfError(
             Loc,
             Colors::BRIGHT_RED + "Oops! You can't use a void value here!\n" +
-                Colors::RESET + "  " + Context + "\n  " + Colors::BRIGHT_GREEN +
-                "Hint: A void function doesn't produce a value. You can "
-                "call it as a statement, but not use its result in an "
-                "expression or assignment." +
-                Colors::RESET) {}
+                Colors::RESET + "  " + Context,
+            "A void function doesn't produce a value. You can "
+            "call it as a statement, but not use its result in an "
+            "expression or assignment.") {}
 };
 
 // Array index out of bounds (compile-time constant check)
@@ -688,10 +654,8 @@ public:
                       Colors::RESET + "', but the array only has " +
                       Colors::CYAN + std::to_string(ArraySize) + Colors::RESET +
                       " elements (indices 0 to " +
-                      std::to_string(ArraySize - 1) + ").\n  " +
-                      Colors::BRIGHT_GREEN +
-                      "Hint: Array indices start at 0 and go up to size - 1." +
-                      Colors::RESET) {}
+                      std::to_string(ArraySize - 1) + ").",
+                  "Array indices start at 0 and go up to size - 1.") {}
 };
 
 // Array initializer size mismatch
@@ -705,10 +669,9 @@ public:
                            Colors::CYAN + std::to_string(DeclaredSize) +
                            Colors::RESET + ", but you gave " + Colors::CYAN +
                            std::to_string(InitSize) + Colors::RESET +
-                           " initial values.\n  " + Colors::BRIGHT_GREEN +
-                           "Hint: The number of values in [...] must match the "
-                           "declared array size." +
-                           Colors::RESET) {}
+                           " initial values.",
+                  "The number of values in [...] must match the "
+                  "declared array size.") {}
 };
 
 // Non-integer array index
@@ -719,10 +682,9 @@ public:
                            "Array index must be an integer!\n" + Colors::RESET +
                            "  You used a value of type '" + Colors::CYAN +
                            GotType + Colors::RESET +
-                           "' as an array index.\n  " + Colors::BRIGHT_GREEN +
-                           "Hint: Use an 'int' value to index into an array, "
-                           "like arr[0] or arr[i] where i is an int." +
-                           Colors::RESET) {}
+                           "' as an array index.",
+                  "Use an 'int' value to index into an array, "
+                  "like arr[0] or arr[i] where i is an int.") {}
 };
 
 // Array element type mismatch
@@ -736,11 +698,9 @@ public:
                      Colors::RESET + "  Array '" + Colors::CYAN + ArrayName +
                      Colors::RESET + "' holds '" + Colors::CYAN + ExpectedType +
                      Colors::RESET + "' values, but you tried to store a '" +
-                     Colors::CYAN + GotType + Colors::RESET + "'.\n  " +
-                     Colors::BRIGHT_GREEN +
-                     "Hint: All elements in the array must match the declared "
-                     "element type." +
-                     Colors::RESET) {}
+                     Colors::CYAN + GotType + Colors::RESET + "'.",
+            "All elements in the array must match the declared "
+            "element type.") {}
 };
 
 // Use-after-free error
@@ -748,9 +708,8 @@ class UseAfterFreeError : public TurfError {
 public:
   UseAfterFreeError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Oops! You're using memory from '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' after it was freed." + Colors::RESET) {
-    Message += "\n  " + Colors::BRIGHT_GREEN + "Hint: Don't use memory after calling free(). Consider setting the pointer to null after freeing." + Colors::RESET;
-  }
+                  Colors::BRIGHT_RED + "Oops! You're using memory from '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' after it was freed." + Colors::RESET,
+                  "Don't use memory after calling free(). Consider setting the pointer to null after freeing.") {}
 };
 
 // Double free error
@@ -758,9 +717,8 @@ class DoubleFreeError : public TurfError {
 public:
   DoubleFreeError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Double free detected for '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "'." + Colors::RESET) {
-    Message += "\n  " + Colors::BRIGHT_GREEN + "Hint: Avoid calling free() on the same pointer more than once." + Colors::RESET;
-  }
+                  Colors::BRIGHT_RED + "Double free detected for '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "'." + Colors::RESET,
+                  "Avoid calling free() on the same pointer more than once.") {}
 };
 
 // Use-before-assignment error
@@ -768,9 +726,8 @@ class DefiniteAssignmentError : public TurfError {
 public:
   DefiniteAssignmentError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Oops! You're using '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' before it has a value." + Colors::RESET) {
-    Message += "\n  " + Colors::BRIGHT_GREEN + "Hint: Make sure every path assigns to '" + Name + "' before you use it." + Colors::RESET;
-  }
+                  Colors::BRIGHT_RED + "Oops! You're using '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' before it has a value." + Colors::RESET,
+                  "Make sure every path assigns to '" + Name + "' before you use it.") {}
 };
 
 // List Errors
@@ -783,11 +740,9 @@ public:
                            "List declaration is missing a type parameter!\n" +
                            Colors::RESET +
                            "  You must specify the element type inside angle "
-                           "brackets.\n  " +
-                           Colors::BRIGHT_GREEN +
-                           "Hint: Use list<int>, list<double>, list<bool>, or "
-                           "list<string>." +
-                           Colors::RESET) {}
+                           "brackets.",
+                  "Use list<int>, list<double>, list<bool>, or "
+                  "list<string>.") {}
 };
 
 // Wrong element type pushed into list: push(3.14) into list<int>
@@ -801,11 +756,10 @@ public:
                      ListName + Colors::BRIGHT_RED + "'!\n" + Colors::RESET +
                      "  This is a list<" + Colors::CYAN + ExpectedElem +
                      Colors::RESET + ">, but you tried to push a '" +
-                     Colors::CYAN + GotType + Colors::RESET + "' value.\n  " +
-                     Colors::BRIGHT_GREEN + "Hint: Push only '" + ExpectedElem +
-                     "' values. No implicit coercion is allowed for list "
-                     "operations." +
-                     Colors::RESET) {}
+                     Colors::CYAN + GotType + Colors::RESET + "' value.",
+            "Push only '" + ExpectedElem +
+            "' values. No implicit coercion is allowed for list "
+            "operations.") {}
 };
 
 // Method called on non-list variable
@@ -818,11 +772,9 @@ public:
             Colors::BRIGHT_RED + "'" + Colors::CYAN + VarName +
                 Colors::BRIGHT_RED + "' is not a list!\n" + Colors::RESET +
                 "  You called '" + Colors::CYAN + Method + Colors::RESET +
-                "' on it, but that method only works on list<T> variables.\n "
-                " " +
-                Colors::BRIGHT_GREEN +
-                "Hint: Declare it with list<int>, list<string>, etc. to use " +
-                Method + "." + Colors::RESET) {}
+                "' on it, but that method only works on list<T> variables.",
+            "Declare it with list<int>, list<string>, etc. to use " +
+            Method + ".") {}
 };
 
 // pop() on an empty list (runtime guard emitted as IR)
@@ -831,10 +783,8 @@ public:
   ListEmptyPopError(SourceLocation Loc, const std::string &ListName)
       : TurfError(Loc, Colors::BRIGHT_RED + "Calling pop() on an empty list '" +
                            Colors::CYAN + ListName + Colors::BRIGHT_RED +
-                           "' will crash at runtime!\n" + Colors::RESET + "  " +
-                           Colors::BRIGHT_GREEN +
-                           "Hint: Check list.length > 0 before calling pop()." +
-                           Colors::RESET) {}
+                           "' will crash at runtime!\n" + Colors::RESET,
+                  "Check list.length > 0 before calling pop().") {}
 };
 
 // Phase 3: Module search error
@@ -843,10 +793,8 @@ public:
   ModuleNotFoundError(SourceLocation Loc, const std::string &ModuleName)
       : TurfError(Loc, Colors::BRIGHT_RED + "Could not find module '" +
                            Colors::CYAN + ModuleName + Colors::BRIGHT_RED +
-                           "'.\n" + Colors::RESET + "  " +
-                           Colors::BRIGHT_GREEN +
-                           "Hint: Make sure the file '" + ModuleName + ".tr' exists in the standard library or your current directory." +
-                           Colors::RESET) {}
+                           "'.\n" + Colors::RESET,
+                  "Make sure the file '" + ModuleName + ".tr' exists in the standard library or your current directory.") {}
 };
 
 
@@ -865,12 +813,14 @@ public:
                       "' has no function named '" + Colors::CYAN + MethodName +
                       Colors::BRIGHT_RED + "'." + Colors::RESET) {
     if (!Suggestions.empty()) {
-      Message += "\n  " + Colors::BRIGHT_GREEN + "Did you mean:\n" + Colors::RESET;
-      Message += formatRankedSuggestions(Suggestions);
+      std::string formatted = formatRankedSuggestions(Suggestions);
+      if (formatted.rfind("\n  ", 0) == 0) {
+        Hint_ = "Did you mean:\n" + formatted.substr(3);
+      } else {
+        Hint_ = "Did you mean:\n" + formatted;
+      }
     } else {
-      Message += "\n  " + Colors::BRIGHT_GREEN +
-                 "Double-check your spelling, or maybe you need to define it?" +
-                 Colors::RESET;
+      Hint_ = "Double-check your spelling, or maybe you need to define it?";
     }
   }
 };
@@ -888,12 +838,10 @@ public:
                   Colors::BRIGHT_RED + "No matching overload of '" +
                       Colors::CYAN + ModuleName + "." + MethodName +
                       Colors::BRIGHT_RED + "' for the arguments you gave.\n" +
-                      Colors::RESET + "  " + Detail + "\n  " +
-                      Colors::BRIGHT_GREEN +
-                      "Hint: Check the argument types and count. Use the " +
-                      "correct overload, e.g. 'math.abs(int)' or "
-                      "'math.abs(double)'." +
-                      Colors::RESET) {}
+                      Colors::RESET + "  " + Detail,
+                  "Hint: Check the argument types and count. Use the "
+                  "correct overload, e.g. 'math.abs(int)' or "
+                  "'math.abs(double)'.") {}
 };
 
 class ImmutableAssignmentError : public TurfError {
@@ -902,11 +850,9 @@ public:
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Oops! You can't change the value of '" +
                       Colors::CYAN + VarName + Colors::BRIGHT_RED +
-                      "' because it's immutable.\n" + Colors::RESET + "  " +
-                      Colors::BRIGHT_GREEN +
-                      "Hint: If you need to change its value later, declare it "
-                      "with 'mutable' instead of 'immutable'." +
-                      Colors::RESET) {}
+                      "' because it's immutable.\n" + Colors::RESET,
+                  "If you need to change its value later, declare it "
+                  "with 'mutable' instead of 'immutable'.") {}
 };
 
 #endif

@@ -47,11 +47,15 @@ public:
   struct Diag {
     SourceLocation Loc;
     std::string Msg;
+    std::string Hint;
     bool IsWarning;
   };
 
   // Record a diagnostic. Errors on a line that already has an error are
   // dropped. Warnings on a line that has an error are also dropped.
+  static void add(SourceLocation Loc, const std::string &Msg,
+                  const std::string &Hint, bool IsWarning = false);
+
   static void add(SourceLocation Loc, const std::string &Msg,
                   bool IsWarning = false);
 

@@ -2,7 +2,7 @@
 
 # Configuration
 TEST_DIR="tests"
-COMPILER="./turf"
+COMPILER="./build/turf"
 PROGRAM="./program"
 
 # Colors for output

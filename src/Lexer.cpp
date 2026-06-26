@@ -111,6 +111,10 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   // Message body — embedded ANSI codes from error classes render intact.
   std::cerr << "  " << D.Msg << "\n";
 
+  if (!D.Hint.empty()) {
+    std::cerr << "\n  " << Colors::BRIGHT_GREEN << "Hint: " << D.Hint << Colors::RESET << "\n";
+  }
+
   // Code snippet with │ gutter.
   if (D.Loc.Line > 0 && D.Loc.Line <= static_cast<int>(SourceLines.size())) {
     const std::string &LineContent = SourceLines[D.Loc.Line - 1];
@@ -131,7 +135,7 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
 
 // DiagnosticEngine : method implementations
 void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
-                           bool IsWarning) {
+                           const std::string &Hint, bool IsWarning) {
   // If there is already an error on this line, suppress everything else
   // (both additional errors and warnings) to avoid cascading noise.
   if (ErrorLines.count(Loc.Line))
@@ -150,7 +154,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           "fresh analysis." +
           Colors::RESET;
     } else {
-      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line);
+      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint);
 
       if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
         // Replace compiler message with high-confidence AI suggestion.
@@ -177,10 +181,15 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
     }
   }
 
-  Diagnostics.push_back({Loc, finalMessage, IsWarning});
+  Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning});
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);
+}
+
+void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
+                           bool IsWarning) {
+  add(Loc, Msg, "", IsWarning);
 }
 
 bool DiagnosticEngine::hasErrors() { return !ErrorLines.empty(); }
