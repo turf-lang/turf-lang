@@ -1,0 +1,37 @@
+// FFI + ptr showcase — Issue #175 hardening
+// Demonstrates that extern fn malloc/free/memset work correctly
+// with the new ptr type system.
+
+// Declare C library functions using extern fn.
+// No import needed — these link against libc directly.
+extern fn malloc(size: int): ptr;
+extern fn free(p: ptr): void;
+extern fn memset(p: ptr, c: int, n: int): ptr;
+extern fn strlen(s: string): int;
+extern fn puts(s: string): int;
+extern fn atoi(s: string): int;
+
+fn main(): int {
+    // 1. Allocate raw memory — ptr is returned and assigned cleanly
+    mutable buf: ptr = malloc(128);
+
+    // 2. Zero the buffer — pass ptr, receive ptr back
+    mutable zeroed: ptr = memset(buf, 0, 128);
+
+    // 3. Free the memory
+    free(buf);
+
+    // 4. strlen on a string literal
+    mutable n: int = strlen("hello, turf!");
+    io.printline(n);          // expect: 12
+
+    // 5. atoi — parse an int from a string
+    mutable x: int = atoi("9001");
+    io.printline(x);          // expect: 9001
+
+    // 6. puts — C's own print, returns int (chars written)
+    mutable written: int = puts("ptr works!");  // expect: ptr works! (on stdout)
+    io.printline(written);    // expect: 11 (10 chars + newline)
+
+    return 0;
+}

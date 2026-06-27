@@ -162,7 +162,7 @@ static TurfTypePtr getTurfTypeFromLLVM(llvm::Type *Ty) {
   if (Ty->isIntegerTy(1))
     return TurfBool();
   if (Ty->isPointerTy())
-    return TurfString(); // conservative; callers may refine
+    return TurfPtr(); // All LLVM pointers map to ptr; callers refine via RefineLLVMType
   if (Ty->isVoidTy())
     return TurfVoid();
   return TurfDouble();
@@ -188,18 +188,33 @@ static TurfTypePtr getCommonType(TurfTypePtr A, TurfTypePtr B) {
 
 static TurfTypePtr RefineLLVMType(TurfTypePtr Deduced, TurfTypePtr Expected,
                                   llvm::Type *LLVMTy) {
+  // When the LLVM type is a pointer and the expected type is any pointer-like
+  // Turf type, trust the expected type (it has more info than the raw LLVM type).
   if (LLVMTy->isPointerTy() && Expected &&
       (isArrayType(Expected.get()) ||
        dynamic_cast<const TurfPointerType *>(Expected.get()) ||
+       dynamic_cast<const OpaquePointerType *>(Expected.get()) ||
+       Expected->isNamed("string") ||
        Expected->isNamed("void*"))) {
     return Expected;
   }
   return Deduced;
 }
 
+// Returns true when T is any pointer-like Turf type:
+// string, ptr (OpaquePointerType), T* (TurfPointerType), void*.
+// All of these share the same LLVM representation (opaque pointer).
+static bool isPointerLike(const TurfType *T) {
+  if (!T) return false;
+  return T->isNamed("string") || T->isNamed("ptr") || T->isNamed("void*") ||
+         dynamic_cast<const OpaquePointerType *>(T) ||
+         dynamic_cast<const TurfPointerType *>(T);
+}
+
 // Check whether two types are implicitly compatible.
 // Numerics (int, double, bool) are mutually compatible; string and void are
-// not.
+// not. All pointer-like types (string, ptr, T*, void*) are mutually compatible
+// since they share the same LLVM representation.
 static bool isTypeCompatible(const TurfType *From, const TurfType *To) {
   if (!From || !To)
     return false;
@@ -211,20 +226,16 @@ static bool isTypeCompatible(const TurfType *From, const TurfType *To) {
       dynamic_cast<const TurfGenericParamType *>(To))
     return true;
 
+  // All pointer-like types are mutually compatible (same LLVM ptr representation)
+  if (isPointerLike(From) && isPointerLike(To))
+    return true;
+
   // null is compatible with any reference type (string, pointer)
   if (From->getName() == "null") {
-    if (To->isNamed("string") || dynamic_cast<const TurfPointerType *>(To) ||
-        To->isNamed("void*")) {
+    if (isPointerLike(To))
       return true;
-    }
     return false;
   }
-
-  // Auto-coerce void* to/from any pointer
-  if (From->getName() == "void*" && dynamic_cast<const TurfPointerType *>(To))
-    return true;
-  if (To->getName() == "void*" && dynamic_cast<const TurfPointerType *>(From))
-    return true;
 
   if (From->isVoid() || To->isVoid())
     return false;
@@ -277,10 +288,6 @@ static const TurfType *getExprType(const ExprAST *E) {
         return TurfString().get();
       if (CalleeName == "lengthof")
         return TurfInt().get();
-      if (CalleeName == "malloc" || CalleeName == "realloc")
-        return std::make_shared<TurfPointerType>(TurfVoid()).get();
-      if (CalleeName == "free")
-        return TurfVoid().get();
 
       std::string MangledName =
           (CalleeName == "main") ? CalleeName : "turf_" + CalleeName;
@@ -293,9 +300,15 @@ static const TurfType *getExprType(const ExprAST *E) {
         if (CalleeName != "main")
           MangledName += "_" + T->getMangledName();
       }
+      // Check FuncReturnTypes for user-declared extern fn first.
+      // This covers both normal turf functions and extern fn declarations.
       auto It = FuncReturnTypes.find(MangledName);
       if (It != FuncReturnTypes.end())
         return It->second.get();
+      // Also check by raw CalleeName (extern fns register under their C name)
+      auto ItRaw = FuncReturnTypes.find(CalleeName);
+      if (ItRaw != FuncReturnTypes.end())
+        return ItRaw->second.get();
 
       for (const auto &[Name, ParamTypes] : FuncParamTypes) {
         std::string Prefix = "turf_" + CalleeName;
@@ -314,6 +327,11 @@ static const TurfType *getExprType(const ExprAST *E) {
           }
         }
       }
+      // Fallback for intrinsic path: malloc/realloc return ptr, free returns void
+      if (CalleeName == "malloc" || CalleeName == "realloc")
+        return TurfPtr().get();
+      if (CalleeName == "free")
+        return TurfVoid().get();
     }
     return nullptr;
   }
@@ -466,8 +484,7 @@ static Value *CastToType(Value *Val, TurfTypePtr DestType,
   Type *ValTy = Val->getType();
 
   if (isa<ConstantPointerNull>(Val)) {
-    if (DestType->isNamed("string") || dynamic_cast<const TurfPointerType *>(DestType.get()) ||
-        DestType->isNamed("void*")) {
+    if (isPointerLike(DestType.get())) {
       return Builder->CreateBitCast(Val, getLLVMType(DestType.get()), Name);
     }
   }
@@ -515,14 +532,19 @@ static Value *CastToType(Value *Val, TurfTypePtr DestType,
       Value *IntVal = Builder->CreatePtrToInt(Val, Type::getInt64Ty(*TheContext), "unerased_int");
       return Builder->CreateBitCast(IntVal, Type::getDoubleTy(*TheContext), "unerased_dbl");
     }
-    if (dynamic_cast<const TurfPointerType*>(DestType.get()) || DestType->isNamed("string")) {
+    if (isPointerLike(DestType.get())) {
       return Val; // already pointer
     }
   }
 
-  // Strings cannot be cast to/from other types implicitly
+  // All pointer-like types (string, ptr, T*, void*) share the same LLVM
+  // representation. Casts between them are always no-ops at the IR level.
+  if (isPointerLike(SrcType.get()) && isPointerLike(DestType.get()))
+    return Val;
+
+  // Strings cannot be cast to/from non-pointer types implicitly
   if (SrcType->isNamed("string") || DestType->isNamed("string")) {
-    TypeError(CurLoc, "Cannot cast between string and non-string types. SrcType: " + SrcType->getName() + ", DestType: " + DestType->getName() + ", Context Name: " + Name)
+    TypeError(CurLoc, "Cannot cast between string and non-pointer types. SrcType: " + SrcType->getName() + ", DestType: " + DestType->getName() + ", Context Name: " + Name)
         .raise();
     return Val;
   }
@@ -1886,10 +1908,18 @@ Value *FuncCallExprAST::codegen() {
   }
   std::string CalleeName = Var->getName();
 
-  if (CalleeName == "typeof" || CalleeName == "lengthof" ||
-      CalleeName == "assert" || CalleeName == "fail" ||
-      CalleeName == "malloc" || CalleeName == "realloc" ||
-      CalleeName == "free") {
+  // For malloc/realloc/free: if the user declared an extern fn with that name,
+  // let it flow through the normal symbol-table path below. Only use the
+  // builtin path when no user declaration exists.
+  bool UserDeclaredExtern = (CalleeName == "malloc" || CalleeName == "realloc" ||
+                              CalleeName == "free") &&
+                             TheModule->getFunction(CalleeName) != nullptr;
+
+  if (!UserDeclaredExtern &&
+      (CalleeName == "typeof" || CalleeName == "lengthof" ||
+       CalleeName == "assert" || CalleeName == "fail" ||
+       CalleeName == "malloc" || CalleeName == "realloc" ||
+       CalleeName == "free")) {
 
 
     std::vector<Value *> ArgVals;
