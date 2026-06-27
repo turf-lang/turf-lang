@@ -1343,6 +1343,24 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   SourceLocation ExternLoc = CurLoc;
   getNextToken(); // eat 'extern'
 
+  // Optional: 'from "libname"' annotation — specifies which library to link.
+  // Syntax: extern from "ssl" fn SSL_new(ctx: ptr): ptr;
+  // The library name is passed to the linker as -lssl.
+  std::string LibName;
+  if (CurTok == TOK_IDENTIFIER && IdentifierStr == "from") {
+    getNextToken(); // eat 'from'
+    if (CurTok != TOK_STRING_LITERAL) {
+      LogErrorAt(CurLoc,
+                 "Expected a library name string after 'from' "
+                 "(e.g. extern from \"ssl\" fn SSL_new(ctx: ptr): ptr;).");
+      // Panic-mode recovery: skip to ';' or EOF so the next statement parses.
+      while (CurTok != ';' && CurTok != TOK_EOF) getNextToken();
+      return nullptr;
+    }
+    LibName = StringVal;
+    getNextToken(); // eat the library name string
+  }
+
   // Expect 'fn'
   if (CurTok != TOK_FN) {
     LogErrorAt(ExternLoc,
@@ -1459,7 +1477,8 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   return std::make_unique<ExternFuncDeclExprAST>(ExternLoc, Name,
                                                  std::move(Params),
                                                  std::move(RetType),
-                                                 IsVarArg);
+                                                 IsVarArg,
+                                                 std::move(LibName));
 }
 
 // ParseFuncDef - called when CurTok == TOK_FN.

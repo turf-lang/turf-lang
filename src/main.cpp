@@ -48,6 +48,8 @@
 #include <iostream>
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Path.h"
+#include <set>
+#include <vector>
 
 using namespace llvm;
 
@@ -65,6 +67,7 @@ struct CompilerOptions {
   bool DumpResolved = false;          // --dump-resolved: run Resolver then print annotated AST (Issue #5)
   bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
   bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
+  std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
 };
 
 static CompilerOptions parseArgs(int argc, char **argv) {
@@ -101,6 +104,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.DumpTypechecked = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
+    } else if (arg == "--link" && i + 1 < argc) {
+      opts.LinkLibs.push_back(argv[++i]);
     } else if (arg[0] == '-') {
       std::cerr << "Unknown option: " << arg << "\n";
       std::exit(1);
@@ -113,7 +118,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
     std::cerr
         << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] "
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
-           "[--dump-resolved] [--typecheck] [--dump-typechecked]\n";
+           "[--dump-resolved] [--typecheck] [--dump-typechecked] "
+           "[--link <libname>]\n";
     std::exit(1);
   }
 
@@ -185,17 +191,28 @@ static int emitObjectFile(Module &M, const std::string &ObjFilename) {
   return 0;
 }
 
+// g_RequiredLibs is populated by ExternFuncDeclExprAST::codegen() for every
+// 'extern from "libname" fn' declaration encountered during code generation.
+extern std::set<std::string> g_RequiredLibs;
+
 // Invoke system linker
 static int linkObject(const std::string &ObjFile,
-                      const std::string &OutputName) {
-  std::string Cmd;
+                      const std::string &OutputName,
+                      const std::vector<std::string> &ExtraLibs) {
+  // Build -l flags from both sources:
+  //   1. Libraries declared via 'extern from "libname" fn' in source code
+  //   2. Libraries passed via --link on the command line
+  std::string LibFlags;
+  // Merge both sets (deduplicate via a set)
+  std::set<std::string> AllLibs(g_RequiredLibs);
+  for (const auto &L : ExtraLibs) AllLibs.insert(L);
+  for (const auto &L : AllLibs) LibFlags += " -l" + L;
 
+  std::string Cmd;
 #ifdef _WIN32
-  // On Windows, try gcc (MinGW) first
-  Cmd = "gcc \"" + ObjFile + "\" -o \"" + OutputName + ".exe\" -lm";
+  Cmd = "gcc \"" + ObjFile + "\" -o \"" + OutputName + ".exe\" -lm" + LibFlags;
 #else
-  // On Unix, use cc (always available on dev machines).
-  Cmd = "cc \"" + ObjFile + "\" -o \"" + OutputName + "\" -lm";
+  Cmd = "cc \"" + ObjFile + "\" -o \"" + OutputName + "\" -lm" + LibFlags;
 #endif
 
   int Ret = std::system(Cmd.c_str());
@@ -760,7 +777,7 @@ int main(int argc, char **argv) {
 
     std::cout << "Compiled to " << ObjFile << "\n";
 
-    if (linkObject(ObjFile, opts.OutputName) != 0)
+    if (linkObject(ObjFile, opts.OutputName, opts.LinkLibs) != 0)
       return 1;
 
     // Clean up intermediate object file

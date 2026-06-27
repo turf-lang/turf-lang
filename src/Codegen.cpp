@@ -34,6 +34,7 @@
 #include "llvm/IR/Verifier.h"
 #include <algorithm>
 #include <iostream>
+#include <set>
 #include <unordered_map>
 
 using namespace llvm;
@@ -53,6 +54,10 @@ std::vector<std::pair<llvm::BasicBlock *, llvm::BasicBlock *>> LoopBlocks;
 // Tracks full param types for user-defined functions.
 static std::map<std::string, std::vector<TurfTypePtr>> FuncParamTypes;
 static std::map<std::string, TurfTypePtr> FuncReturnTypes;
+
+// Set of library names collected from 'extern from "libname" fn' declarations.
+// Populated during codegen; consumed by main.cpp::linkObject().
+std::set<std::string> g_RequiredLibs;
 
 // Type cache for Monomorphization: maps type name -> LLVM type
 static std::map<std::string, llvm::Type *> LLVMTypeCache;
@@ -1860,9 +1865,14 @@ Value *ExternFuncDeclExprAST::codegen() {
     GlobalSymbolTable->RegisterModuleFunction("main", FSym);
   }
 
-  // Extern declarations are statements; they do not produce a runtime value.
-  return nullptr;
+  // If this extern fn specifies a library (extern from "ssl" fn ...),
+  // record it so the linker can append -lssl automatically.
+  if (!LibName_.empty())
+    g_RequiredLibs.insert(LibName_);
+
+  return F;
 }
+
 
 // ReturnExprAST::codegen
 Value *ReturnExprAST::codegen() {
