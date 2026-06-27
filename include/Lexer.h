@@ -138,7 +138,8 @@ enum Token {
   TOK_GIVE = -69,
   TOK_OTHERWISE = -70,
   TOK_EXTERN = -71,   ///< `extern` keyword — FFI function declaration
-  TOK_PTR = -72       ///< `ptr`    keyword — opaque pointer type (Phase 3 FFI)
+  TOK_PTR    = -72,   ///< `ptr`    keyword — opaque pointer type (Phase 3 FFI)
+  TOK_ELLIPSIS = -73  ///< `...`   token   — variadic marker in extern fn params
 };
 
 int gettok();

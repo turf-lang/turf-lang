@@ -1369,8 +1369,18 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   getNextToken(); // eat '('
 
   // Parse parameter list: each param is: Identifier TOK_COLON ParseType()
+  // Optionally terminated by '...' (variadic marker) as the final item.
   std::vector<std::pair<std::string, TurfTypePtr>> Params;
+  bool IsVarArg = false;
+
   while (CurTok != ')' && CurTok != TOK_EOF) {
+    // Check for '...' variadic marker — must be last in the list
+    if (CurTok == TOK_ELLIPSIS) {
+      IsVarArg = true;
+      getNextToken(); // eat '...'
+      break;          // nothing after '...' except ')'
+    }
+
     if (CurTok != TOK_IDENTIFIER) {
       LogErrorAt(CurLoc,
                  "Expected a parameter name in extern function '" + Name + "'.");
@@ -1393,10 +1403,17 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
 
     Params.emplace_back(ParamName, std::move(ParamType));
 
-    if (CurTok == ',')
+    if (CurTok == ',') {
       getNextToken(); // eat ','
-    else if (CurTok != ')')
+      // Allow '...' immediately after comma: printf(fmt: string, ...)
+      if (CurTok == TOK_ELLIPSIS) {
+        IsVarArg = true;
+        getNextToken(); // eat '...'
+        break;
+      }
+    } else if (CurTok != ')') {
       break;
+    }
   }
 
   if (CurTok != ')') {
@@ -1441,7 +1458,8 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
 
   return std::make_unique<ExternFuncDeclExprAST>(ExternLoc, Name,
                                                  std::move(Params),
-                                                 std::move(RetType));
+                                                 std::move(RetType),
+                                                 IsVarArg);
 }
 
 // ParseFuncDef - called when CurTok == TOK_FN.

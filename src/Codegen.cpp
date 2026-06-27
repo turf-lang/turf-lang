@@ -1830,7 +1830,7 @@ Value *ExternFuncDeclExprAST::codegen() {
   // Build the LLVM function type.
   Type *RetLLVMType = getLLVMType(ReturnType_.get());
   FunctionType *FT =
-      FunctionType::get(RetLLVMType, ParamLLVMTypes, /*isVarArg=*/false);
+      FunctionType::get(RetLLVMType, ParamLLVMTypes, /*isVarArg=*/IsVarArg_);
 
   // Create with ExternalLinkage — no body block is created.
   Function *F =
@@ -1854,6 +1854,7 @@ Value *ExternFuncDeclExprAST::codegen() {
     FSym.Arity       = static_cast<int>(Params_.size());
     FSym.ReturnType  = ReturnType_;
     FSym.IsIntrinsic = false;
+    FSym.IsVarArg    = IsVarArg_;  // propagate variadic flag to the symbol
     for (const auto &[PName, PType] : Params_)
       FSym.ParamTypes.push_back(PType);
     GlobalSymbolTable->RegisterModuleFunction("main", FSym);
@@ -2057,6 +2058,13 @@ Value *FuncCallExprAST::codegen() {
 
     ArgVals.push_back(V);
     Idx++;
+  }
+
+  // For variadic functions, append any extra arguments beyond the declared
+  // parameter count. These are passed raw per the C vararg ABI — no casting.
+  if (CalleeF->isVarArg()) {
+    for (size_t i = Idx; i < EvaluatedArgs.size(); ++i)
+      ArgVals.push_back(EvaluatedArgs[i]);
   }
 
   // void functions must not be given a name (LLVM requirement)

@@ -324,12 +324,19 @@ int gettok() {
     return TOK_STRING_LITERAL;
   }
 
-  // Range operator: .. (must come before number handler so start..end works)
+  // Ellipsis '...' (variadic marker in extern fn) must be checked before '..'
+  // (range operator) so three dots aren't consumed as range + stray dot.
   if (LastChar == '.' && SourceFile->peek() == '.') {
-    LastChar = SourceFile->get();
-    CurCol++;
-    LastChar = SourceFile->get();
-    CurCol++;
+    // Peek at the character after the second dot
+    int second = SourceFile->get(); CurCol++;
+    int third  = SourceFile->peek();
+    if (third == '.') {
+      SourceFile->get(); CurCol++; // consume third dot
+      LastChar = SourceFile->get(); CurCol++;
+      return TOK_ELLIPSIS;
+    }
+    // Only two dots — range operator
+    LastChar = SourceFile->get(); CurCol++;
     return TOK_RANGE;
   }
 

@@ -126,9 +126,13 @@ struct ResolverFunctionSymbol {
   TurfTypePtr              ReturnType;
   ResolverSourceLocation   DeclLoc;      ///< Location of the fn definition
   bool                     IsIntrinsic = false;
+  bool                     IsVarArg    = false; ///< true for variadic extern fn (e.g. printf)
 
   /// Arity of this overload.
+  /// For variadic functions, this is the number of *named* (declared) params.
+  /// Callers should use isVarArg() to determine if extra args are accepted.
   int arity() const { return static_cast<int>(Params.size()); }
+  bool isVarArg() const { return IsVarArg; }
 
   /// Format a human-readable signature for diagnostics:
   ///   "print(int x, string y) -> void"

@@ -594,25 +594,33 @@ class ExternFuncDeclExprAST : public ExprAST {
   std::vector<std::pair<std::string, TurfTypePtr>> Params_;
   TurfTypePtr ReturnType_;
   SourceLocation Loc_;
+  bool IsVarArg_;        ///< true when the declaration ends with '...'
+  std::string LibName_;  ///< non-empty when 'extern from "lib" fn' syntax used
 
 public:
   ExternFuncDeclExprAST(
       SourceLocation Loc, std::string Name,
       std::vector<std::pair<std::string, TurfTypePtr>> Params,
-      TurfTypePtr ReturnType)
+      TurfTypePtr ReturnType,
+      bool IsVarArg = false,
+      std::string LibName = "")
       : Name_(std::move(Name)), Params_(std::move(Params)),
-        ReturnType_(std::move(ReturnType)), Loc_(Loc) {}
+        ReturnType_(std::move(ReturnType)), Loc_(Loc),
+        IsVarArg_(IsVarArg), LibName_(std::move(LibName)) {}
 
-  const std::string &getName() const { return Name_; }
-  const auto &getParams() const { return Params_; }
-  TurfTypePtr getReturnType() const { return ReturnType_; }
-  const SourceLocation &getLoc() const { return Loc_; }
+  const std::string &getName()     const { return Name_; }
+  const auto        &getParams()   const { return Params_; }
+  TurfTypePtr        getReturnType()const { return ReturnType_; }
+  const SourceLocation &getLoc()   const { return Loc_; }
+  bool               isVarArg()    const { return IsVarArg_; }
+  const std::string &getLibName()  const { return LibName_; }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitExternFuncDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ExternFuncDeclExprAST>(Loc_, Name_, Params_,
-                                                   ReturnType_);
+                                                   ReturnType_, IsVarArg_,
+                                                   LibName_);
   }
 };
 

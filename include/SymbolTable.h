@@ -60,6 +60,7 @@ struct FunctionSymbol {
   std::vector<TurfTypePtr> ParamTypes;
   TurfTypePtr ReturnType;
   bool IsIntrinsic = false;
+  bool IsVarArg    = false; ///< true for variadic extern fn (e.g. printf)
   int Arity = 0; ///< Number of formal parameters (cached for quick checks)
 };
 

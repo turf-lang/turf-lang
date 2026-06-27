@@ -124,6 +124,7 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
     Sym.SourceModule = ""; // extern fns are in the global (file) namespace
     Sym.ReturnType = Extern->getReturnType();
     Sym.IsIntrinsic = false;
+    Sym.IsVarArg    = Extern->isVarArg(); // propagate '...' to arity check
     for (const auto &[PName, PType] : Extern->getParams())
       Sym.Params.push_back({PName, PType});
     SymTable_.registerCurrentFileFunction(Sym);
@@ -420,11 +421,15 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
 
   bool AnyArityMatch = false;
   for (const auto *Sym : CurrentFileMatches) {
-    if (Sym->arity() == ArgCount) { AnyArityMatch = true; break; }
+    // Vararg functions accept any number of args >= their declared param count
+    if (Sym->arity() == ArgCount || (Sym->isVarArg() && ArgCount >= Sym->arity()))
+    { AnyArityMatch = true; break; }
   }
   if (!AnyArityMatch) {
     for (const auto &Match : ModuleMatches) {
-      if (Match.Symbol->arity() == ArgCount) { AnyArityMatch = true; break; }
+      if (Match.Symbol->arity() == ArgCount ||
+          (Match.Symbol->isVarArg() && ArgCount >= Match.Symbol->arity()))
+      { AnyArityMatch = true; break; }
     }
   }
 
@@ -436,12 +441,13 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
   // Populate ResolvedCandidates with only the arity-matching overloads.
   // TypeChecker::visitFuncCall then narrows further by type compatibility.
   for (const auto *Sym : CurrentFileMatches) {
-    if (Sym->arity() == ArgCount)
+    if (Sym->arity() == ArgCount || (Sym->isVarArg() && ArgCount >= Sym->arity()))
       Node.ResolvedCandidates.push_back(
           std::make_shared<ResolverFunctionSymbol>(*Sym));
   }
   for (const auto &Match : ModuleMatches) {
-    if (Match.Symbol->arity() == ArgCount)
+    if (Match.Symbol->arity() == ArgCount ||
+        (Match.Symbol->isVarArg() && ArgCount >= Match.Symbol->arity()))
       Node.ResolvedCandidates.push_back(
           std::make_shared<ResolverFunctionSymbol>(*Match.Symbol));
   }

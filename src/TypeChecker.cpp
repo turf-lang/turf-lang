@@ -672,9 +672,11 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
   // ── User-defined / Resolver-registered call path ──────────────────────────
   if (!Node.ResolvedCandidates.empty()) {
     // Step a: filter to candidates whose arity matches.
+    // Vararg functions accept any ArgCount >= their declared param count.
     std::vector<std::shared_ptr<ResolverFunctionSymbol>> ArityMatches;
     for (const auto &Cand : Node.ResolvedCandidates) {
-      if (Cand && Cand->arity() == ArgCount)
+      if (Cand && (Cand->arity() == ArgCount ||
+                   (Cand->isVarArg() && ArgCount >= Cand->arity())))
         ArityMatches.push_back(Cand);
     }
 
@@ -697,10 +699,13 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     }
 
     // Step b: filter arity-matching candidates by type compatibility.
+    // For vararg functions, only check the declared (named) params.
+    // Extra args beyond Cand->arity() are passed raw per C ABI.
     std::vector<std::shared_ptr<ResolverFunctionSymbol>> TypeMatches;
     for (const auto &Cand : ArityMatches) {
       bool AllOk = true;
-      for (int i = 0; i < ArgCount; ++i) {
+      int CheckCount = std::min(ArgCount, Cand->arity());
+      for (int i = 0; i < CheckCount; ++i) {
         const TurfType *ParamTy = Cand->Params[i].Type.get();
         const TurfType *ArgTy   = ArgTypes[i].get();
         if (!isTypeCompatible(ParamTy, ArgTy)) {
@@ -735,7 +740,8 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       // Prefer an exact-match candidate over a numeric-promotion one.
       for (const auto &Cand : TypeMatches) {
         bool ExactAll = true;
-        for (int i = 0; i < ArgCount; ++i) {
+        int CheckCount = std::min(ArgCount, Cand->arity());
+        for (int i = 0; i < CheckCount; ++i) {
           const TurfType *P = Cand->Params[i].Type.get();
           const TurfType *A = ArgTypes[i].get();
           if (P && A && P->getName() != A->getName()) {
