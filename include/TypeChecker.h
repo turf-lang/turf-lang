@@ -204,6 +204,9 @@ public:
   void visitModuleImport(ModuleImportExprAST &Node) override;
   void visitSizeOf(SizeOfExprAST &Node) override;
 
+  // ── FFI ───────────────────────────────────────────────────────────────────
+  void visitExternFuncDecl(ExternFuncDeclExprAST &Node) override;
+
 private:
   // ── Internal helpers ──────────────────────────────────────────────────────
 

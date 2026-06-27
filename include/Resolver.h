@@ -155,6 +155,9 @@ public:
   void visitModuleImport(ModuleImportExprAST &Node) override;
   void visitSizeOf(SizeOfExprAST &Node) override { (void)Node; }
 
+  // ── FFI ────────────────────────────────────────────────────────────────────
+  void visitExternFuncDecl(ExternFuncDeclExprAST &Node) override;
+
   // ── Accessors ──────────────────────────────────────────────────────────────
 
   /// Read-only access to the symbol table (e.g. for unit tests).

@@ -16,6 +16,7 @@
  *   ├─ StringType             — the `string` primitive
  *   ├─ VoidType               — the `void` return type
  *   ├─ TurfNullType           — the `null` literal type
+ *   ├─ OpaquePointerType      — the `ptr` FFI opaque pointer (i8* in LLVM IR)
  *   ├─ NamedType              — user-defined struct names and legacy fallback
  *   ├─ ArrayType              — T[]  /  T[N]
  *   ├─ TurfPointerType        — T*   (pass-by-reference / self)
@@ -183,6 +184,25 @@ public:
   std::string getName() const override { return "null"; }
   bool isNull() const override { return true; }
   bool isNamed(const std::string &N) const override { return N == "null"; }
+};
+
+// ─── OpaquePointerType (ptr) ────────────────────────────────────────────────────────
+
+/**
+ * @brief Opaque (untyped) pointer — Phase 3 FFI `ptr` keyword.
+ *
+ * Used to represent the return/parameter type of C functions that work with
+ * untyped memory (e.g. malloc, free, dlopen).  Maps to i8* in LLVM IR
+ * (represented as an opaque pointer in LLVM’s pointer-typed IR).
+ *
+ * Users cast a `ptr` value to a concrete pointer type using the existing `to`
+ * operator.  Phase 4 will introduce `unsafe_ptr<T>` and remove this type.
+ */
+class OpaquePointerType : public TurfType {
+public:
+  std::string getName() const override { return "ptr"; }
+  bool isPointer() const override { return true; }
+  bool isNamed(const std::string &N) const override { return N == "ptr"; }
 };
 
 // ─── NamedType (legacy + user-defined struct names) ──────────────────────────
@@ -393,6 +413,8 @@ TurfTypePtr TurfBool();
 TurfTypePtr TurfString();
 TurfTypePtr TurfVoid();
 TurfTypePtr TurfNull();
+/// Opaque pointer singleton — the `ptr` FFI type (i8* in LLVM IR).
+TurfTypePtr TurfPtr();
 /** @} */
 
 // ─── Array helper functions ───────────────────────────────────────────────────

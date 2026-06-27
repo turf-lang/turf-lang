@@ -121,6 +121,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path);
 std::unique_ptr<ExprAST> ParseImport();
 std::unique_ptr<ExprAST> ParseReturnExpr();
 std::unique_ptr<ExprAST> ParseStructDecl();
+std::unique_ptr<ExprAST> ParseExternDecl();
 // NOTE: ParseListDecl removed — list<T> declarations go through
 // ParseVarDeclBody
 //       via the unified ParseType() path, same as int/double/bool/string.
@@ -132,7 +133,8 @@ std::unique_ptr<ExprAST> ParseStructDecl();
 static TurfTypePtr ParseType() {
   if (CurTok != TOK_IDENTIFIER && CurTok != TOK_TYPE_INT &&
       CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
-      CurTok != TOK_TYPE_STRING && CurTok != TOK_TYPE_VOID) {
+      CurTok != TOK_TYPE_STRING && CurTok != TOK_TYPE_VOID &&
+      CurTok != TOK_PTR) {
     SyntaxError(CurLoc, "Expected a type name").raise();
     return nullptr;
   }
@@ -148,6 +150,11 @@ static TurfTypePtr ParseType() {
     BaseName = "string";
   else if (CurTok == TOK_TYPE_VOID)
     BaseName = "void";
+  else if (CurTok == TOK_PTR) {
+    // `ptr` is a terminal type — no generics, no arrays (for now)
+    getNextToken(); // consume 'ptr'
+    return TurfPtr();
+  }
   else
     BaseName = IdentifierStr; // user-defined
 
@@ -698,6 +705,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
   case TOK_STRUCT:
     return ParseStructDecl();
+
+  case TOK_EXTERN:
+    return ParseExternDecl();
 
 
   case TOK_RETURN:
@@ -1327,6 +1337,113 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   return std::make_unique<StructDeclExprAST>(Loc, Name, Fields, TypeParams);
 }
 
+// ParseExternDecl - called when CurTok == TOK_EXTERN.
+// Parses: extern fn Name(paramName: paramType, ...): ReturnType;
+std::unique_ptr<ExprAST> ParseExternDecl() {
+  SourceLocation ExternLoc = CurLoc;
+  getNextToken(); // eat 'extern'
+
+  // Expect 'fn'
+  if (CurTok != TOK_FN) {
+    LogErrorAt(ExternLoc,
+               "Expected 'fn' after 'extern' — e.g. extern fn malloc(size: int): ptr;");
+    return nullptr;
+  }
+  getNextToken(); // eat 'fn'
+
+  // Expect function name
+  if (CurTok != TOK_IDENTIFIER) {
+    LogErrorAt(CurLoc, "Expected a function name after 'extern fn'.");
+    return nullptr;
+  }
+  std::string Name = IdentifierStr;
+  SourceLocation NameLoc = CurLoc;
+  getNextToken(); // eat name
+
+  // Expect '('
+  if (CurTok != '(') {
+    LogErrorAt(NameLoc,
+               "Expected '(' after extern function name '" + Name + "'.");
+    return nullptr;
+  }
+  getNextToken(); // eat '('
+
+  // Parse parameter list: each param is: Identifier TOK_COLON ParseType()
+  std::vector<std::pair<std::string, TurfTypePtr>> Params;
+  while (CurTok != ')' && CurTok != TOK_EOF) {
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc,
+                 "Expected a parameter name in extern function '" + Name + "'.");
+      return nullptr;
+    }
+    std::string ParamName = IdentifierStr;
+    getNextToken(); // eat param name
+
+    if (CurTok != TOK_COLON) {
+      LogErrorAt(CurLoc,
+                 "Expected ':' after parameter name '" + ParamName +
+                     "' in extern function '" + Name + "'.");
+      return nullptr;
+    }
+    getNextToken(); // eat ':'
+
+    TurfTypePtr ParamType = ParseType();
+    if (!ParamType)
+      return nullptr;
+
+    Params.emplace_back(ParamName, std::move(ParamType));
+
+    if (CurTok == ',')
+      getNextToken(); // eat ','
+    else if (CurTok != ')')
+      break;
+  }
+
+  if (CurTok != ')') {
+    LogErrorAt(ExternLoc,
+               "Expected ')' to close parameter list of extern function '" +
+                   Name + "'.");
+    return nullptr;
+  }
+  getNextToken(); // eat ')'
+
+  // Expect ':'
+  if (CurTok != TOK_COLON) {
+    LogErrorAt(CurLoc,
+               "Expected ':' followed by return type after parameter list of "
+               "extern function '" + Name + "'.");
+    return nullptr;
+  }
+  getNextToken(); // eat ':'
+
+  TurfTypePtr RetType = ParseType();
+  if (!RetType) {
+    LogErrorAt(CurLoc,
+               "Expected return type after ':' in extern function '" + Name +
+                   "'.");
+    return nullptr;
+  }
+
+  // extern functions must NOT have a body
+  if (CurTok == '{') {
+    LogErrorAt(ExternLoc,
+               "extern function declarations cannot have a body.");
+    return nullptr;
+  }
+
+  // Expect ';'
+  if (CurTok != ';') {
+    LogErrorAt(CurLoc,
+               "Expected ';' after extern function declaration '" + Name + "'.");
+    return nullptr;
+  }
+  getNextToken(); // eat ';'
+
+  return std::make_unique<ExternFuncDeclExprAST>(ExternLoc, Name,
+                                                 std::move(Params),
+                                                 std::move(RetType));
+}
+
 // ParseFuncDef - called when CurTok == TOK_FN.
 // Parses: fn <rettype> <name>(<type> <param>, ...) { body }
 std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
@@ -1361,7 +1478,6 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
   }
 
   // Expect TOK_IDENTIFIER → save as FuncName
-  std::cout << "DEBUG ParseFuncDef: CurTok=" << CurTok << ", IdentifierStr=\"" << IdentifierStr << "\"" << std::endl;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(FnLoc, "Expected a function name after 'fn'.");
     return nullptr;
@@ -1547,7 +1663,8 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
       continue;
     }
 
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT) {
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT ||
+        CurTok == TOK_EXTERN) {
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok == ';') {

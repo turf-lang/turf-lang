@@ -586,6 +586,37 @@ public:
   }
 };
 
+// extern fn Name(param: type, ...): ReturnType;
+// Declares a C external function visible to this compilation unit.
+// No function body is generated — only an LLVM ExternalLinkage prototype.
+class ExternFuncDeclExprAST : public ExprAST {
+  std::string Name_;
+  std::vector<std::pair<std::string, TurfTypePtr>> Params_;
+  TurfTypePtr ReturnType_;
+  SourceLocation Loc_;
+
+public:
+  ExternFuncDeclExprAST(
+      SourceLocation Loc, std::string Name,
+      std::vector<std::pair<std::string, TurfTypePtr>> Params,
+      TurfTypePtr ReturnType)
+      : Name_(std::move(Name)), Params_(std::move(Params)),
+        ReturnType_(std::move(ReturnType)), Loc_(Loc) {}
+
+  const std::string &getName() const { return Name_; }
+  const auto &getParams() const { return Params_; }
+  TurfTypePtr getReturnType() const { return ReturnType_; }
+  const SourceLocation &getLoc() const { return Loc_; }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitExternFuncDecl(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<ExternFuncDeclExprAST>(Loc_, Name_, Params_,
+                                                   ReturnType_);
+  }
+};
+
+
 // Array declaration: int[5] arr   or   int[3] arr = [1, 2, 3]
 class ArrayDeclExprAST : public ExprAST {
   std::string Name;

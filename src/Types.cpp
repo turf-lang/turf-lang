@@ -64,6 +64,11 @@ TurfTypePtr TurfNull() {
   return T;
 }
 
+TurfTypePtr TurfPtr() {
+  static TurfTypePtr T = std::make_shared<OpaquePointerType>();
+  return T;
+}
+
 // ─── Array helpers ────────────────────────────────────────────────────────────
 
 bool isArrayType(const TurfType *T) {

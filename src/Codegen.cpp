@@ -109,6 +109,9 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
   if (T->isNamed("void"))
     return LLVMTypeCache[Key] = llvm::Type::getVoidTy(*TheContext);
+  // `ptr` — opaque pointer (i8* in LLVM IR)
+  if (T->isNamed("ptr") || dynamic_cast<const OpaquePointerType *>(T))
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
 
   // Array types — the alloca is created per-site; return opaque pointer here.
   if (isArrayType(T))
@@ -1784,6 +1787,60 @@ Value *FuncDefExprAST::codegen() {
   return nullptr;
 }
 
+// ExternFuncDeclExprAST::codegen
+// Emits an LLVM ExternalLinkage prototype (no body block).
+// Mirrors what `declare i64 @strlen(ptr)` looks like in LLVM IR.
+Value *ExternFuncDeclExprAST::codegen() {
+  // If a declaration with this name already exists in the module (e.g. because
+  // the user declared it twice, or a builtin already emitted it), reuse it.
+  if (Function *Existing = TheModule->getFunction(Name_)) {
+    return Existing;
+  }
+
+  // Build the LLVM parameter type list.
+  std::vector<Type *> ParamLLVMTypes;
+  std::vector<TurfTypePtr> ParamTurfTypes;
+  for (const auto &[PName, PType] : Params_) {
+    ParamLLVMTypes.push_back(getLLVMType(PType.get()));
+    ParamTurfTypes.push_back(PType);
+  }
+
+  // Build the LLVM function type.
+  Type *RetLLVMType = getLLVMType(ReturnType_.get());
+  FunctionType *FT =
+      FunctionType::get(RetLLVMType, ParamLLVMTypes, /*isVarArg=*/false);
+
+  // Create with ExternalLinkage — no body block is created.
+  Function *F =
+      Function::Create(FT, Function::ExternalLinkage, Name_, TheModule.get());
+
+  // Name the parameters for IR readability.
+  unsigned Idx = 0;
+  for (auto &Arg : F->args())
+    Arg.setName(Params_[Idx++].first);
+
+  // Register in the type caches so call sites can look up param/return types.
+  FuncParamTypes[Name_] = ParamTurfTypes;
+  FuncReturnTypes[Name_] = ReturnType_;
+
+  // Register in the GlobalSymbolTable so FuncCallExprAST can find this
+  // function by its user-visible name (without mangling).
+  if (GlobalSymbolTable) {
+    FunctionSymbol FSym;
+    FSym.BaseName    = Name_;
+    FSym.MangledName = Name_; // extern fns use their C name directly
+    FSym.Arity       = static_cast<int>(Params_.size());
+    FSym.ReturnType  = ReturnType_;
+    FSym.IsIntrinsic = false;
+    for (const auto &[PName, PType] : Params_)
+      FSym.ParamTypes.push_back(PType);
+    GlobalSymbolTable->RegisterModuleFunction("main", FSym);
+  }
+
+  // Extern declarations are statements; they do not produce a runtime value.
+  return nullptr;
+}
+
 // ReturnExprAST::codegen
 Value *ReturnExprAST::codegen() {
   if (CurrentFunction == nullptr) {
@@ -1885,11 +1942,24 @@ Value *FuncCallExprAST::codegen() {
   //
   // typeof / lengthof are handled above (language-level bare intrinsics that
   // never pass through the Resolver's function registry).
-  std::string MangledName = (CalleeName == "main")
-      ? "main"
-      : ResolvedCallTarget->mangledName();
+  std::string MangledName;
+  if (CalleeName == "main") {
+    MangledName = "main";
+  } else if (ResolvedCallTarget) {
+    MangledName = ResolvedCallTarget->mangledName();
+  } else {
+    // ResolvedCallTarget is null: this can happen for extern fns whose
+    // raw C name is used directly.  Fall back to the user-visible name.
+    MangledName = CalleeName;
+  }
 
   Function *CalleeF = TheModule->getFunction(MangledName);
+  if (!CalleeF) {
+    // Fallback: extern fn declarations register under the raw C name, not the
+    // mangled name (e.g. `strlen`, not `turf_strlen_string`).  Try the user-
+    // visible callee name before declaring an internal compiler error.
+    CalleeF = TheModule->getFunction(CalleeName);
+  }
   if (!CalleeF) {
     // This path should be unreachable if the Resolver ran correctly.
     // If hit, it's an internal compiler bug — not a user error.
@@ -1903,8 +1973,11 @@ Value *FuncCallExprAST::codegen() {
   std::vector<Value *> ArgVals;
   unsigned Idx = 0;
 
-  // Look up full param type info (needed for generic struct params)
+  // Look up full param type info (needed for generic struct params).
+  // Try mangled name first; fall back to raw callee name for extern fns.
   auto ParamTypeIt = FuncParamTypes.find(MangledName);
+  if (ParamTypeIt == FuncParamTypes.end())
+    ParamTypeIt = FuncParamTypes.find(CalleeName);
 
   for (auto &Arg : CalleeF->args()) {
     Value *V = EvaluatedArgs[Idx];

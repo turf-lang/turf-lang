@@ -115,6 +115,21 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
     return;
   }
 
+  // Hoist extern function declarations: register the signature in the
+  // current-file function registry with an IsExtern flag so forward-calling
+  // code can resolve the name.  No body exists, so no body recursion.
+  if (const auto *Extern = dynamic_cast<const ExternFuncDeclExprAST *>(Node)) {
+    ResolverFunctionSymbol Sym;
+    Sym.BaseName = Extern->getName();
+    Sym.SourceModule = ""; // extern fns are in the global (file) namespace
+    Sym.ReturnType = Extern->getReturnType();
+    Sym.IsIntrinsic = false;
+    for (const auto &[PName, PType] : Extern->getParams())
+      Sym.Params.push_back({PName, PType});
+    SymTable_.registerCurrentFileFunction(Sym);
+    return;
+  }
+
   // Hoist imported modules: recurse into the module body to find its fns.
   if (const auto *Import = dynamic_cast<const ModuleImportExprAST *>(Node)) {
     hoistModuleBody(Import->getBody(), Import->getModuleName());
@@ -629,4 +644,11 @@ void Resolver::visitModuleImport(ModuleImportExprAST &Node) {
   ModuleStack_.push_back(Node.getModuleName());
   visitChild(Node.getBody());
   ModuleStack_.pop_back();
+}
+
+// ExternFuncDeclExprAST: hoistTopLevel already registered the symbol in Pass 1.
+// Nothing left to resolve in Pass 2 (no body, no variable references).
+void Resolver::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
+  // No-op: the signature was registered in hoistTopLevel().
+  (void)Node;
 }

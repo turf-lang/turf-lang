@@ -53,6 +53,7 @@ class StructDeclExprAST;
 class StructInitExprAST;
 class ModuleImportExprAST;
 class SizeOfExprAST;
+class ExternFuncDeclExprAST;
 
 // ─── ASTVisitor base class ────────────────────────────────────────────────────
 
@@ -124,6 +125,9 @@ public:
   // ── Modules & misc ────────────────────────────────────────────────────────
   virtual void visitModuleImport(ModuleImportExprAST &Node) {}
   virtual void visitSizeOf(SizeOfExprAST &Node) {}
+
+  // ── FFI ────────────────────────────────────────────────────────────────────
+  virtual void visitExternFuncDecl(ExternFuncDeclExprAST &Node) {}
 };
 
 #endif // AST_VISITOR_H

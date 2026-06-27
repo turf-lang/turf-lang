@@ -89,7 +89,9 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"immut", TOK_IMMUTABLE},
                                        {"to", TOK_TO},
                                        {"give", TOK_GIVE},
-                                       {"otherwise", TOK_OTHERWISE}};
+                                       {"otherwise", TOK_OTHERWISE},
+                                       {"extern", TOK_EXTERN},
+                                       {"ptr", TOK_PTR}};
 
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.

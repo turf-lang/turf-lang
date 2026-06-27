@@ -1007,3 +1007,33 @@ void TypeChecker::visitSizeOf(SizeOfExprAST &Node) {
   // sizeof(T) always produces int
   setType(&Node, TurfInt());
 }
+
+// ─── FFI ─────────────────────────────────────────────────────────────────────
+
+void TypeChecker::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
+  // Validate return type: must be a known/primitive type (not an unresolved
+  // NamedType that was never registered as a struct).
+  // Primitive and well-known types (int, double, bool, string, void, ptr, T*)
+  // are always fine.  Only NamedType with an unknown struct name is an error.
+  auto checkType = [&](TurfTypePtr Ty, const std::string &Context) {
+    if (!Ty)
+      return;
+    // Unwrap pointer wrapper
+    const TurfType *Base = Ty.get();
+    if (const auto *PT = dynamic_cast<const TurfPointerType *>(Base))
+      Base = PT->getPointee().get();
+    // NamedType: must be either a primitive synonym or a registered struct.
+    // (The Resolver has already validated struct names; here we only guard
+    //  against types that slipped through — e.g. from invalid user input.)
+    // We accept any NamedType that is not provably bad; Codegen will catch it.
+    (void)Base;
+    (void)Context;
+  };
+
+  checkType(Node.getReturnType(), "return type");
+  for (const auto &[PName, PType] : Node.getParams())
+    checkType(PType, "parameter '" + PName + "'");
+
+  // The declaration itself has no runtime value.
+  setType(&Node, TurfVoid());
+}

@@ -289,7 +289,8 @@ int main(int argc, char **argv) {
 
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') { getNextToken(); continue; }
-        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT) {
+        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT ||
+            CurTok == TOK_EXTERN) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
@@ -304,7 +305,7 @@ int main(int argc, char **argv) {
           } else {
             while (CurTok != TOK_FN && CurTok != TOK_STRUCT &&
                    CurTok != TOK_IMPORT && CurTok != TOK_AT &&
-                   CurTok != TOK_EOF)
+                   CurTok != TOK_EXTERN && CurTok != TOK_EOF)
               getNextToken();
           }
           g_recoverActive = false;
@@ -382,6 +383,7 @@ int main(int argc, char **argv) {
       g_protoOnlyPass = true;
       for (auto &AST : PrePassASTs) {
         if (dynamic_cast<FuncDefExprAST *>(AST.get()) ||
+            dynamic_cast<ExternFuncDeclExprAST *>(AST.get()) ||
             dynamic_cast<ModuleImportExprAST *>(AST.get())) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
@@ -449,12 +451,14 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    // fn definitions and import statements were already fully codegenned in
     // the pre-pass.  Parse them here to keep the token stream in sync and to
     // lint/resolve them, but do NOT push them into TopLevelASTs (that would
     // re-codegen them).  TOK_IMPORT is included here because `import` nodes
     // are top-level declarations handled by the pre-pass, exactly like `fn`.
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT) {
+    // TOK_EXTERN is included because extern fn declarations are also emitted
+    // in the pre-pass.
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT ||
+        CurTok == TOK_EXTERN) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();
@@ -467,7 +471,7 @@ int main(int argc, char **argv) {
         }
       } else {
         while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_AT &&
-               CurTok != ';' && CurTok != TOK_EOF)
+               CurTok != TOK_EXTERN && CurTok != ';' && CurTok != TOK_EOF)
           getNextToken();
       }
       g_recoverActive = false;
@@ -507,7 +511,8 @@ int main(int argc, char **argv) {
         }
         if (!dynamic_cast<FuncDefExprAST *>(AST.get()) &&
             !dynamic_cast<StructDeclExprAST *>(AST.get()) &&
-            !dynamic_cast<ModuleImportExprAST *>(AST.get())) {
+            !dynamic_cast<ModuleImportExprAST *>(AST.get()) &&
+            !dynamic_cast<ExternFuncDeclExprAST *>(AST.get())) {
           std::cerr
               << "Error: Statements are not allowed outside of a function. "
                  "Please define 'fn int main()' and move this code inside.\n";

@@ -136,7 +136,9 @@ enum Token {
   TOK_COLON = -67,
   TOK_TO = -68,
   TOK_GIVE = -69,
-  TOK_OTHERWISE = -70
+  TOK_OTHERWISE = -70,
+  TOK_EXTERN = -71,   ///< `extern` keyword — FFI function declaration
+  TOK_PTR = -72       ///< `ptr`    keyword — opaque pointer type (Phase 3 FFI)
 };
 
 int gettok();
