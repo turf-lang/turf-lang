@@ -199,3 +199,34 @@ The power of the C FFI is that **Turflang doesn't have to reinvent the wheel**.
 By building clean Turflang `struct`s and attaching methods to them, you trap all the ugly pointers, manual memory management, and `unsafe` blocks inside the standard library files (`lib/std/*.tr`). 
 
 The end-user writing Turflang only ever sees safe, native types, garbage-collected (or RAII) memory, and highly readable syntax.
+
+---
+
+## 4. Known Compiler Limitations Encountered (Phase 3)
+
+During the development of the FFI real-world showcase (`tests/ffi_realworld.tr`), several language and parser limitations were identified. These document current edge cases that should be addressed in future compiler phases to improve developer ergonomics.
+
+### The Identifier Lexing Bug (The "Two-Letter" Bug)
+- **Issue:** Using standard C-style variable names like `fp`, `fd`, `wfile`, `t0`, `t1`, and `shell` causes the parser to fail when these variables are used in an expression position.
+- **Root Cause:** A lexer/parser edge case where identifiers sharing prefixes with keywords (e.g., `fn`, `while`, `to`) confuse the token stream, resulting in errors like `Hmm, I don't know the word 'fp'. Hint: Did you mean: 'fn'?`.
+- **Workaround:** Renamed variables to unambiguous names (`whandle`, `clk1`, `sockval`, etc.).
+
+### Passing `null` to `ptr` Arguments
+- **Issue:** Calling a C function with a null pointer (e.g., `time(null)`) is rejected by the TypeChecker.
+- **Root Cause:** While `ptr` variables can be assigned `null`, the TypeChecker's function argument matching does not currently allow `null` to be passed implicitly as a `ptr` parameter.
+- **Workaround:** Allocate a dummy pointer using `malloc`, pass it, and immediately `free` it.
+
+### Implicit `string` to `ptr` Casting in Function Calls
+- **Issue:** Passing a Turflang `string` literal to a C function expecting a `ptr` buffer (e.g., `fwrite(msg, ...)` where `msg` is a `string`) fails type checking.
+- **Root Cause:** Even though `string` and `ptr` are identical at the LLVM IR level (opaque pointers), the TypeChecker's strict argument-matching loop for function calls does not implicitly cast a `string` argument to a `ptr` parameter.
+- **Workaround:** Change the `extern fn` declaration in Turflang so the specific argument is explicitly typed as a `string` (e.g., `extern fn fwrite(buf: string, ...)`). The C linker accepts this perfectly.
+
+### Local `extern fn` Declarations
+- **Issue:** Declaring an `extern fn` locally inside a function block to limit scope fails with a syntax error.
+- **Root Cause:** The parser only expects `extern fn` declarations at the top level of the file (handled by `hoistTopLevel` in the Resolver) and does not know how to parse them as statements inside a block.
+- **Workaround:** Move all `extern fn` declarations to the global scope at the top of the file.
+
+### `for` Loop Syntax Strictness
+- **Issue:** Writing a busy-wait loop using `for i in 0..1000000 { ... }` causes a parser error.
+- **Root Cause:** Turflang's `for` loop syntax strictly requires an explicit `step` clause and does not default to `step 1`.
+- **Workaround:** Must explicitly declare the step (e.g., `step 1`) or use a `while` loop equivalent.
