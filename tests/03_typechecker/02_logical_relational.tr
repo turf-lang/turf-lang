@@ -1,0 +1,19 @@
+import io;
+
+fn main(): int {
+    mut a: bool = true && false;
+    mut b: bool = true || false;
+    mut c: bool = 5 > 3 && 2 < 4;
+    mut d: bool = 5 >= 5 || 3 <= 2;
+    mut e: bool = 5 == 5;
+    mut f: bool = 5 != 3;
+
+    assert(a == false, "");
+    assert(b == true, "");
+    assert(c == true, "");
+    assert(d == true, "");
+    assert(e == true, "");
+    assert(f == true, "");
+
+    return 0;
+}

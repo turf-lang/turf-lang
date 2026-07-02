@@ -1,0 +1,8 @@
+import io;
+import math;
+
+fn main(): int {
+    io.printline(math.abs(1, 2));
+
+    return 0;
+}

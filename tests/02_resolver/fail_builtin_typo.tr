@@ -1,0 +1,8 @@
+import io;
+
+fn main(): int {
+    // Misspelled builtin should trigger typo correction / SLM suggestion
+    io.pritn("Testing builtin typo");
+
+    return 0;
+}

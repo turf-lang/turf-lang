@@ -1,0 +1,10 @@
+fn main(): int {
+    mut x: int = 10;
+    
+    // Testing tight parser error handling on a slightly misspelled keyword
+    iff x > 5 {
+        x = 0;
+    }
+    
+    return 0;
+}

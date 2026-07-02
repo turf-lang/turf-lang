@@ -1,0 +1,13 @@
+fn main(): int {
+    mut i: int = 0;
+    mut sum: int = 0;
+
+    while i < 5 {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    assert(sum == 10, "");
+
+    return 0;
+}

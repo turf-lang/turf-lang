@@ -1,8 +1,0 @@
-import list
-
-fn int main() {
-    List<int> inner = List<int>()
-    io.printline(typeof(inner))
-
-    return 0
-}

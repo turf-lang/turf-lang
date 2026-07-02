@@ -1,6 +1,0 @@
-fn int main() {
-  int[3] a = [1, 2, 3]
-  int x = a[5]
-  
-  return 0
-}

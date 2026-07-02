@@ -1,9 +1,0 @@
-fn main(): int {
-    assert(1 + 1 == 2);
-    assert(10 > 5, "Math still works");
-    
-    // This assertion will fail and abort the program
-    assert(false, "This assert should fail!");
-    
-    return 0;
-}

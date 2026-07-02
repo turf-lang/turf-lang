@@ -1,0 +1,16 @@
+struct User {
+  age: int,
+  name: string
+}
+
+fn main(): int {
+  mut u: User = User { age: 10, name: "Alice" };
+  
+  assert(u.age == 10, "");
+    // Verify basic int property
+
+  u.age = 25;
+  assert(u.age == 25, "");
+
+  return 0;
+}

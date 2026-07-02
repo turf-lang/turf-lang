@@ -1,0 +1,48 @@
+import io;
+
+extern fn strlen(s: string): int;
+
+fn main(): int {
+    mut arr: int[4] = [10, 20, 30, 40];
+
+    assert(arr[0] == 10, "");
+    assert(arr[1] == 20, "");
+    assert(arr[2] == 30, "");
+    assert(arr[3] == 40, "");
+
+    mut computed: int[3] = [0, 0, 0];
+    for i in 0..3 step i += 1 {
+        computed[i] = arr[i] * 2;
+    }
+
+    assert(computed[0] == 20, "");
+    assert(computed[1] == 40, "");
+    assert(computed[2] == 60, "");
+
+    mut copy: int[3] = [0, 0, 0];
+    mut k: int = 0;
+    while k < 3 {
+        copy[k] = computed[k] + 1;
+        k = k + 1;
+    }
+
+    assert(copy[0] == 21, "");
+    assert(copy[1] == 41, "");
+    assert(copy[2] == 61, "");
+
+    mut names: string[2] = ["", ""];
+    names[0] = "hello";
+    names[1] = "world";
+    
+    // Assert string lengths to verify string arrays work properly
+    assert(strlen(names[0]) == 5, "");
+    assert(strlen(names[1]) == 5, "");
+    
+    mut flags: bool[2] = [false, false];
+    flags[0] = true;
+    flags[1] = false;
+    assert(flags[0], "");
+    assert(flags[1] == false, "");
+
+    return 0;
+}

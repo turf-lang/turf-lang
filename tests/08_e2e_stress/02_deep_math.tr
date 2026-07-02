@@ -1,0 +1,9 @@
+fn main(): int {
+    // Extremely Deep Mathematical Tree
+    mut a: int = 1;
+    mut res: int = a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a;
+    
+    assert(res == 22, "");
+
+    return 0;
+}

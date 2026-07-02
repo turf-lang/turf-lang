@@ -1,0 +1,8 @@
+import io;
+extern fn strlen(s: string): int;
+struct User { age: int, name: string }
+fn main(): int {
+    mut u: User = User { age: 25, name: "Alice" };
+    // assert(strlen(u.name) == 5, "");
+    return 0;
+}

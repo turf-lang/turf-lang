@@ -1,7 +1,0 @@
-import math;
-
-fn int main() {
-    io.printline("Works");
-    io.printline(math.abs(-10));
-    return 0;
-}

@@ -1,6 +1,0 @@
-fn int main() {
-    int a = lengthof(1122)
-    io.printline(a)
-
-    return 0
-}

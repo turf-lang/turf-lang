@@ -1,0 +1,16 @@
+struct Node {
+    val: int
+}
+
+fn Node.get_self(): Node {
+    return self;
+}
+
+fn main(): int {
+    mut n: Node = Node { val: 42 };
+    
+    // Test chaining method calls on a returned struct instance
+    assert(n.get_self().get_self().val == 42, "");
+
+    return 0;
+}

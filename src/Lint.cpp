@@ -191,6 +191,10 @@ void LintExpression(ExprAST *E) {
     LintExpression(const_cast<ExprAST*>(Ret->getVal()));
   }
 
+  if (auto *FD = dynamic_cast<FuncDefExprAST *>(E)) {
+    LintExpression(FD->getBodyMut());
+  }
+
   // Recurse into block children
   if (auto *Blk = dynamic_cast<BlockExprAST *>(E)) {
     for (const auto &Child : Blk->getExpressions()) {
@@ -333,7 +337,8 @@ static void LintIf(const IfExprAST *If) {
       std::string Kind = (i == 0) ? "then" : "elseif";
       EmptyBranchWarning(Branches[i].Loc, Kind).warn();
     }
-    // Recurse into branch body
+    // Recurse into branch condition and body
+    LintExpression(const_cast<ExprAST*>(Branches[i].Cond.get()));
     LintExpression(Branches[i].Body.get());
   }
 

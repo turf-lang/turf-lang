@@ -1,0 +1,12 @@
+struct Builder {
+    val: int
+}
+
+fn main(): int {
+    mut b: Builder = Builder { val: 0 };
+    
+    // Test Pratt Parser's ability to chain method calls
+    b.push(1).push(2);
+    
+    return 0;
+}

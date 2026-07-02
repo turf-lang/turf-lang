@@ -1,7 +1,0 @@
-fn int main() {
-    immutable arr: int[2] = [1, 2];
-    
-    arr[0] = 10; // Should fail with ImmutableAssignmentError
-    
-    return 0;
-}

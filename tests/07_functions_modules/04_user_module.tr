@@ -1,0 +1,6 @@
+import user_defined_module;
+
+fn main(): int {
+    user_defined_module.greet();
+    return 0;
+}

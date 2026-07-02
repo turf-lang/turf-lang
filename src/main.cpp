@@ -442,6 +442,7 @@ int main(int argc, char **argv) {
   // pre-pass 1 ends
   // Reset the lexer's internal state so that it starts from the beginning of
   // the file
+  ClearParsedTopLevelASTs();
   resetLexer();
 
   // Bootstrap the lexer for the main pass

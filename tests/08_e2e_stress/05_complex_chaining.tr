@@ -1,0 +1,41 @@
+fn get_index(): int {
+    return 2;
+}
+
+fn dummy_func(val: int): void {
+    io.printline(val);
+}
+
+fn main(): int {
+    mut arr: int[5] = [10, 20, 30, 40, 50];
+
+    // 1. Deep grouping
+    assert(((((arr))))[1] == 20, "");
+
+    // 2. Using a function call as an index
+    assert(arr[get_index()] == 30, "");
+
+    // 3. Function call using a grouped base
+    if true {
+        (dummy_func)(100);
+    } else {
+        (dummy_func)(0);
+    }
+
+    // 4. Complex L-Value expression inside a loop
+    mut i: int = 0;
+    while i < 3 {
+        if true {
+            ((arr))[i] = ((arr))[i] * 2;
+        } else {
+            ((arr))[i] = 0;
+        }
+        i = i + 1;
+    }
+
+    assert(arr[0] == 20, "");
+    assert(arr[1] == 40, "");
+    assert(arr[2] == 60, "");
+
+    return 0;
+}

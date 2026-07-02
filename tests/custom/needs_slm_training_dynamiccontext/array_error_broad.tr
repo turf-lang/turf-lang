@@ -1,9 +1,0 @@
-// ERROR TEST — ARRAY_ERROR (broad context ±8)
-// Category: ARRAY_ERROR
-// Expects: Error concerning arrays operations (size mismatch, dimension, etc.)
-
-int[3] myarray = [1, 2, 3]
-
-// array indexing error or assignment error
-myarray = 5
-printline(myarray[0])

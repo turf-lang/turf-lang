@@ -1,0 +1,12 @@
+import io;
+import math;
+
+fn main(): int {
+    // True is cast to 1 due to type conversion constraints in the old version.
+    // In the new TypeChecker, `bool` and `int` are mutually compatible.
+    // if they are mutually compatible, this will actually NOT fail
+    // this is not the intended action
+    io.printline(math.power(true, 2));
+
+    return 0;
+}

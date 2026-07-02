@@ -1,0 +1,62 @@
+import io;
+
+extern fn malloc(size: int): ptr;
+extern fn free(p: ptr): void;
+extern fn memset(p: ptr, c: int, n: int): ptr;
+extern fn memcpy(dst: ptr, src: ptr, n: int): ptr;
+extern fn strlen(s: string): int;
+extern fn puts(s: string): int;
+
+fn zero_buffer(buf: ptr, size: int): void {
+    memset(buf, 0, size);
+}
+
+fn make_buffer(size: int): ptr {
+    mut p: ptr = malloc(size);
+    memset(p, 0, size);
+    return p;
+}
+
+fn release(p: ptr): void {
+    free(p);
+}
+
+fn main(): int {
+    // 1. Basic alloc/free
+    mut a: ptr = malloc(64);
+    free(a);
+
+    // 2. ptr returned from a Turflang function
+    mut b: ptr = make_buffer(32);
+    release(b);
+
+    // 3. Turflang fn that takes ptr parameter
+    mut c: ptr = malloc(16);
+    zero_buffer(c, 16);
+    free(c);
+
+    // 4. Multiple independent ptr variables
+    mut d: ptr = malloc(8);
+    mut e: ptr = malloc(8);
+    mut f: ptr = memset(d, 1, 8);
+    mut g: ptr = memcpy(e, d, 8);
+    free(d);
+    free(e);
+
+    // 5. null assigned to ptr (Commented out because Issue #13)
+    // mut h: ptr = null;
+
+    // 6. ptr from one extern as arg to another (chain)
+    mut src: ptr = malloc(64);
+    mut dst: ptr = malloc(64);
+    memset(src, 7, 64);
+    memcpy(dst, src, 64);
+    free(src);
+    free(dst);
+
+    // 7. string-to-ptr implicit (extern fn accepting string works as ptr)
+    mut len: int = strlen("verify");
+    assert(len == 6, "");
+
+    return 0;
+}

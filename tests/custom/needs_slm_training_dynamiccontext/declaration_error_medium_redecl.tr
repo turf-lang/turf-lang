@@ -1,9 +1,0 @@
-// ERROR TEST — DECLARATION (medium context ±5)
-// Category: DECLARATION
-// Expects: Error about variable redeclaration in the same scope.
-
-int value = 100
-printline(value)
-
-int value = 200
-printline(value)

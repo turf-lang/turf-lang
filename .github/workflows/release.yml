@@ -25,29 +25,17 @@ jobs:
           sudo apt-get install -y llvm-22-dev cmake libomp-dev
           echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
 
-      - name: Build llama.cpp
-        run: |
-          cd external/llama.cpp
-          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF
-          cmake --build build --config Release --parallel
-
       - name: Build Turf
         run: |
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp \
-            -Iinclude -Iexternal/llama.cpp/include -Iexternal/llama.cpp/ggml/include \
-            external/llama.cpp/build/src/libllama.a \
-            external/llama.cpp/build/ggml/src/libggml.a \
-            external/llama.cpp/build/ggml/src/libggml-base.a \
-            external/llama.cpp/build/ggml/src/libggml-cpu.a \
-            $(llvm-config-22 --cxxflags --ldflags --system-libs --libs core native) \
-            -fopenmp -lpthread -lm -o turf
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
 
       - name: Package
         run: |
           VERSION=${GITHUB_REF_NAME}
           DIR="turf-${VERSION}-linux-x86_64"
           mkdir -p "${DIR}/scripts"
-          cp turf "${DIR}/"
+          cp build/turf "${DIR}/"
           cp scripts/compile_and_run.sh "${DIR}/scripts/"
           cp README.md "${DIR}/"
           tar -czf "${DIR}.tar.gz" "${DIR}"
@@ -73,29 +61,17 @@ jobs:
           pacman -Syu --noconfirm
           pacman -S --noconfirm base-devel llvm clang cmake
 
-      - name: Build llama.cpp
-        run: |
-          cd external/llama.cpp
-          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF
-          cmake --build build --config Release --parallel
-
       - name: Build Turf
         run: |
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp \
-            -Iinclude -Iexternal/llama.cpp/include -Iexternal/llama.cpp/ggml/include \
-            external/llama.cpp/build/src/libllama.a \
-            external/llama.cpp/build/ggml/src/libggml.a \
-            external/llama.cpp/build/ggml/src/libggml-base.a \
-            external/llama.cpp/build/ggml/src/libggml-cpu.a \
-            $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
-            -fopenmp -lpthread -lm -o turf
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
 
       - name: Package
         run: |
           VERSION=${GITHUB_REF_NAME}
           DIR="turf-${VERSION}-linux-arch-x86_64"
           mkdir -p "${DIR}/scripts"
-          cp turf "${DIR}/"
+          cp build/turf "${DIR}/"
           cp scripts/compile_and_run.sh "${DIR}/scripts/"
           cp README.md "${DIR}/"
           tar -czf "${DIR}.tar.gz" "${DIR}"
@@ -119,30 +95,18 @@ jobs:
           brew install llvm cmake
           echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
 
-      - name: Build llama.cpp
-        run: |
-          cd external/llama.cpp
-          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF
-          cmake --build build --config Release --parallel
-
       - name: Build Turf
         run: |
           export PATH="$(brew --prefix llvm)/bin:$PATH"
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp \
-            -Iinclude -Iexternal/llama.cpp/include -Iexternal/llama.cpp/ggml/include \
-            external/llama.cpp/build/src/libllama.a \
-            external/llama.cpp/build/ggml/src/libggml.a \
-            external/llama.cpp/build/ggml/src/libggml-base.a \
-            external/llama.cpp/build/ggml/src/libggml-cpu.a \
-            $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
-            -fopenmp -o turf
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
 
       - name: Package
         run: |
           VERSION=${GITHUB_REF_NAME}
           DIR="turf-${VERSION}-macos-arm64"
           mkdir -p "${DIR}/scripts"
-          cp turf "${DIR}/"
+          cp build/turf "${DIR}/"
           cp scripts/compile_and_run.sh "${DIR}/scripts/"
           cp README.md "${DIR}/"
           tar -czf "${DIR}.tar.gz" "${DIR}"
@@ -168,24 +132,11 @@ jobs:
           update: true
           install: mingw-w64-x86_64-llvm mingw-w64-x86_64-clang mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
 
-      - name: Build llama.cpp
-        shell: msys2 {0}
-        run: |
-          cd external/llama.cpp
-          cmake -B build -G Ninja -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF
-          cmake --build build --config Release --parallel
-
       - name: Build Turf
         shell: msys2 {0}
         run: |
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp \
-            -Iinclude -Iexternal/llama.cpp/include -Iexternal/llama.cpp/ggml/include \
-            external/llama.cpp/build/src/libllama.a \
-            external/llama.cpp/build/ggml/src/libggml.a \
-            external/llama.cpp/build/ggml/src/libggml-base.a \
-            external/llama.cpp/build/ggml/src/libggml-cpu.a \
-            $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
-            -fopenmp -o turf.exe
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
 
       - name: Package
         shell: pwsh
@@ -193,7 +144,7 @@ jobs:
           $version = $env:GITHUB_REF_NAME
           $dir = "turf-${version}-windows-x86_64"
           New-Item -ItemType Directory -Force "$dir\scripts" | Out-Null
-          Copy-Item turf.exe "$dir\"
+          Copy-Item build\turf.exe "$dir\"
           Copy-Item scripts\compile_and_run.sh "$dir\scripts\"
           Copy-Item README.md "$dir\"
           7z a "${dir}.zip" "$dir"

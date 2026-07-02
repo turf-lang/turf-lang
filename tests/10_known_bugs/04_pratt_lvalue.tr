@@ -1,0 +1,18 @@
+struct Inner {
+    val: int
+}
+
+struct Outer {
+    inner: Inner
+}
+
+fn main(): int {
+    mut o: Outer = Outer { inner: Inner { val: 42 } };
+
+    // Assigning deeply nested dynamically evaluated L-Value
+    o.inner.val = 100;
+    
+    assert(o.inner.val == 100, "L-value chained struct assignment failed");
+
+    return 0;
+}
