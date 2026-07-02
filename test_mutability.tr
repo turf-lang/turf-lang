@@ -1,9 +1,0 @@
-fn int main() {
-    mutable x: int = 5;
-    immutable y: int = 10;
-    
-    x = 20; // Should succeed
-    y = 30; // Should fail with ImmutableAssignmentError
-    
-    return 0;
-}

@@ -1,0 +1,16 @@
+fn get_array(): int[3] {
+    mut arr: int[3] = [10, 20, 30];
+    return arr;
+}
+
+fn main(): int {
+    // 1. Assign to local variable
+    mut a: int[3] = get_array();
+    assert(a[0] == 10, "");
+
+    // 2. Direct inline indexing
+    // This tests if postfix parsing allows function calls followed by array indices
+    assert(get_array()[1] * get_array()[2] == 600, "");
+
+    return 0;
+}

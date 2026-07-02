@@ -1,8 +1,0 @@
-fn int main() {
-    // Extremely Deep Mathematical Tree
-    int a = 1
-    int res = a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a + a * a - a / a + a * a * a + a / a * a + a - a + a * a * a / a - a * a + a
-    io.printline(res)
-
-    return 0
-}

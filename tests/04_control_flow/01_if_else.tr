@@ -1,0 +1,40 @@
+import io;
+
+fn main(): int {
+    mut a: int = 10;
+    mut b: int = 20;
+
+    mut max_val: int = a > b give a otherwise b;
+    assert(max_val == 20, "");
+
+    mut c: int = 5;
+    mut c_result: int = 0;
+    if c > 0 {
+        c_result = 1;
+    } else {
+        c_result = -1;
+    }
+    assert(c_result == 1, "");
+
+    mut d: int = 15;
+    mut d_result: int = 0;
+    if d > 20 {
+        d_result = 3;
+    } else {
+        if d > 10 {
+            d_result = 2;
+        } else {
+            d_result = 1;
+        }
+    }
+    assert(d_result == 2, "");
+
+    mut e: int = 7;
+    mut e_result: int = 0;
+    if e > 5 {
+        e_result = 1;
+    }
+    assert(e_result == 1, "");
+
+    return 0;
+}

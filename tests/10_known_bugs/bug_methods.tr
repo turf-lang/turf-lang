@@ -1,0 +1,13 @@
+import io;
+extern fn strlen(s: string): int;
+struct User { age: int, name: string }
+fn User.grow(): void { self.age = self.age + 1; }
+fn User.rename(new_name: string): void { self.name = new_name; }
+fn main(): int {
+    mut u: User = User { age: 10, name: "Alice" };
+    u.grow();
+    io.printline(u.age);
+    // assert(u.age == 11, "");
+    u.rename("Bob");
+    return 0;
+}

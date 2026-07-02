@@ -1,0 +1,24 @@
+fn main(): int {
+    mut x: int = 10;
+    assert(x == 10, "Outer x should be 10");
+
+    if (x > 5) {
+        mut x: int = 20; // Shadow outer x
+        assert(x == 20, "x should be shadowed to 20");
+
+        if (x > 15) {
+            mut x: int = 30; // Shadow middle x
+            assert(x == 30, "x should be shadowed to 30");
+        } else {
+            assert(false, "Unreachable");
+        }
+
+        assert(x == 20, "x should revert to 20 after innermost block");
+    } else {
+        assert(false, "Unreachable");
+    }
+
+    assert(x == 10, "x should revert to 10 after middle block");
+
+    return 0;
+}

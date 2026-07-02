@@ -1,0 +1,13 @@
+import list;
+
+fn main(): int {
+    mut l: List<int> = List<int>();
+    for i in 0..10 step i = i + 1 {
+        l.push(i);
+    }
+
+    mut len: int = l.length();
+    assert(len == 10, "");
+
+    return 0;
+}

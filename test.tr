@@ -1,4 +1,0 @@
-fn main(): int {
-    io.printline("JELLO");
-    return 0;
-}

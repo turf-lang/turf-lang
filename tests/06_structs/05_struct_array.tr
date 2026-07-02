@@ -1,0 +1,36 @@
+import io;
+
+extern fn strlen(s: string): int;
+
+struct User {
+    age: int,
+    name: string
+}
+
+fn main(): int {
+    mut users: User[5] = [
+        User { age: 0, name: "" },
+        User { age: 0, name: "" },
+        User { age: 0, name: "" },
+        User { age: 0, name: "" },
+        User { age: 0, name: "" }
+    ];
+
+    users[0] = User { age: 25, name: "Alice" };
+    users[1] = User { age: 30, name: "Bob" };
+    users[2] = User { age: 35, name: "Charlie" };
+
+    mut u0: User = users[0];
+    assert(u0.age == 25, "");
+    assert(strlen(u0.name) == 5, "");
+    
+    mut u1: User = users[1];
+    assert(u1.age == 30, "");
+    assert(strlen(u1.name) == 3, "");
+    
+    mut u2: User = users[2];
+    assert(u2.age == 35, "");
+    assert(strlen(u2.name) == 7, "");
+
+    return 0;
+}

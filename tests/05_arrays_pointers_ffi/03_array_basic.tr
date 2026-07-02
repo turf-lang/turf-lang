@@ -1,0 +1,25 @@
+fn main(): int {
+    mut numbers: int[5] = [0, 0, 0, 0, 0];
+    numbers[0] = 10;
+    numbers[1] = 20;
+    numbers[2] = 30;
+    numbers[3] = 40;
+    numbers[4] = 50;
+
+    assert(numbers[0] == 10, "");
+    assert(numbers[1] == 20, "");
+    assert(numbers[2] == 30, "");
+    assert(numbers[3] == 40, "");
+    assert(numbers[4] == 50, "");
+
+    mut zeros: int[3] = [0, 0, 0];
+    assert(zeros[0] == 0, "");
+    assert(zeros[1] == 0, "");
+    assert(zeros[2] == 0, "");
+
+    mut arr: int[2] = [1, 2];
+    assert(arr[0] == 1, "");
+    assert(arr[1] == 2, "");
+
+    return 0;
+}

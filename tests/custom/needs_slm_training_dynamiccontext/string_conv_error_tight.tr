@@ -1,7 +1,0 @@
-// ERROR TEST — STRING_CONVERSION (tight context ±3)
-// Category: STRING_CONVERSION
-// Expects: Error about invalid string conversion type.
-// string(expr) expects an int, double, or bool
-
-string s = string("already string")
-printline(s)

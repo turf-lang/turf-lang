@@ -1,0 +1,19 @@
+fn main(): int {
+    mut total: int = 0;
+    for i in 1..5 step i += 1 {
+        mut j: int = 0;
+        while j < 5 {
+            j = j + 1;
+            if j == 3 {
+                continue;
+            } else {}
+            if i == 4 {
+                break;
+            } else {}
+            total = total + (i * j);
+        }
+    }
+    assert(total == 72, "");
+
+    return 0;
+}

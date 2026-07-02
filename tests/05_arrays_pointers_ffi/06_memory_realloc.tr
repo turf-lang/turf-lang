@@ -1,0 +1,24 @@
+import io;
+
+extern fn malloc(size: int): int*;
+extern fn realloc(p: int*, size: int): int*;
+extern fn free(p: int*): void;
+
+fn main(): int {
+    mut p: int* = malloc(sizeof(int) * 5);
+    p[0] = 10;
+    p[1] = 20;
+    p[2] = 30;
+ 
+    assert(p[0] == 10, "");
+    assert(p[1] == 20, "");
+    assert(p[2] == 30, "");
+ 
+    p = realloc(p, sizeof(int) * 10);
+    p[5] = 50;
+ 
+    assert(p[5] == 50, "");
+    free(p);
+
+    return 0;
+}

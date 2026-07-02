@@ -1,0 +1,16 @@
+fn test_local(): void {
+  struct Point { 
+    x: int, 
+    y: int 
+  }
+  
+  mut p: Point = Point { x: 1, y: 2 };
+
+  assert(p.x == 1, "");
+  assert(p.y == 2, "");
+}
+
+fn main(): int {
+  test_local();
+  return 0;
+}
