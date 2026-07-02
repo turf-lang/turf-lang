@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-cd "$(dirname "$0")" || exit 1
+cd "$(dirname "$0")/.." || exit 1
 
 BOLD="\033[1m"
 GREEN="\033[0;32m"

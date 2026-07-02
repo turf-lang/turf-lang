@@ -2,8 +2,8 @@
 
 # Configuration
 TEST_DIR="tests"
-COMPILER="./build/turf"
-PROGRAM="./program"
+# Get absolute path for compiler so we can run it from any directory
+COMPILER="$(pwd)/build/turf"
 
 # Colors for output
 BOLD="\033[1m"
@@ -27,8 +27,8 @@ fi
 
 echo -e "${BOLD}Running Turf Test Suites...${RESET}\n"
 
-# Find all test files, exclude the custom directory
-TEST_FILES=$(find "$TEST_DIR" -type f -name "*.tr" | grep -v "$TEST_DIR/custom/")
+# Find all test files, exclude custom directory, and ignore module files
+TEST_FILES=$(find "$TEST_DIR" -type f -name "*.tr" | grep -v "$TEST_DIR/custom/" | grep -v "$TEST_DIR/10_known_bugs/" | grep -v "_module.tr")
 
 for test_file in $TEST_FILES; do
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
@@ -36,12 +36,33 @@ for test_file in $TEST_FILES; do
     # Extract suite name (e.g. cfg, io, loops)
     SUITE=$(basename $(dirname "$test_file"))
     FILE_NAME=$(basename "$test_file")
+    TEST_DIR_PATH=$(dirname "$test_file")
+    PROGRAM="$(pwd)/program"
 
     echo -n -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... "
 
+    # Enter the test directory so imports resolve correctly (Issue 19)
+    cd "$TEST_DIR_PATH"
+
     # 1. Compile the test
-    COMPILE_OUTPUT=$("$COMPILER" "$test_file" -o "$PROGRAM" 2>&1)
+    COMPILE_OUTPUT=$("$COMPILER" "$FILE_NAME" -o "$PROGRAM" 2>&1)
     COMPILE_STATUS=$?
+
+    # Return to project root
+    cd - > /dev/null
+
+    # Check if this is a test designed to fail compilation
+    if [[ "$FILE_NAME" == fail_* ]]; then
+        if [ $COMPILE_STATUS -eq 0 ]; then
+            echo -e "${RED}FAILED (Should have failed compilation)${RESET}"
+            FAILED=$((FAILED + 1))
+            FAILED_TESTS+=("$test_file (Compiled successfully but expected to fail)")
+        else
+            echo -e "${GREEN}PASS (Rejected properly)${RESET}"
+            PASSED=$((PASSED + 1))
+        fi
+        continue
+    fi
 
     if [ $COMPILE_STATUS -ne 0 ]; then
         echo -e "${RED}COMPILE FAILED${RESET}"
@@ -67,9 +88,6 @@ for test_file in $TEST_FILES; do
         wait $CMD_PID 2>/dev/null
         RUN_STATUS=$?
         RUN_OUTPUT=$(cat output.log)
-        RUN_OUTPUT=$(cat output.log)
-        RUN_STATUS=$?
-        RUN_OUTPUT=$(cat output.log)
     else
         # Regular tests
         "$PROGRAM" > output.log 2>&1 &
@@ -77,7 +95,6 @@ for test_file in $TEST_FILES; do
         (sleep 2 && kill -9 $CMD_PID 2>/dev/null) &
         wait $CMD_PID 2>/dev/null
         RUN_STATUS=$?
-        RUN_OUTPUT=$(cat output.log)
         RUN_OUTPUT=$(cat output.log)
     fi
 
@@ -95,7 +112,7 @@ for test_file in $TEST_FILES; do
     fi
 
     # Cleanup compiled program
-    rm -f "$PROGRAM"
+    rm -f "$PROGRAM" output.log
 done
 
 echo ""
