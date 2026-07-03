@@ -17,6 +17,7 @@
 
 #include "Parser.h"
 #include "AST.h"
+#include "Algorithms.h"
 #include "Builtins.h"
 #include "Codegen.h"
 #include "Errors.h"
@@ -35,6 +36,15 @@ static std::unordered_set<std::string> ImportedFiles;
 int CurTok; // The current token the parser is looking at
 static std::map<int, int> BinopPrecedence; // Precedence table: '*' > '+'
 static std::vector<std::unique_ptr<ExprAST>> ParsedTopLevelASTs;
+
+// Issue #1 fix: When parsing an if/while/for condition, we must NOT allow
+// struct-brace-init syntax (Identifier '{' ...) because '{' is ambiguous
+// with the block opener. This mirrors Rust's grammar restriction.
+static bool g_AllowStructInit = true;
+struct NoStructInitGuard {
+  NoStructInitGuard() { g_AllowStructInit = false; }
+  ~NoStructInitGuard() { g_AllowStructInit = true; }
+};
 
 // Reads the next token from the Lexer and updates CurTok
 int getNextToken() { return CurTok = gettok(); }
@@ -434,12 +444,16 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
                                                std::move(RHS));
   }
 
-  auto Cond = ParseExpression();
+  std::unique_ptr<ExprAST> Cond;
+  {
+    NoStructInitGuard Guard;
+    Cond = ParseExpression();
+  }
   if (!Cond)
     return nullptr;
 
   if (CurTok != '{') {
-    LogErrorAt(CurLoc, "Expected '{' after if-condition. Use '? ... otherwise ...' for single-expression ternary.");
+    LogErrorAt(CurLoc, "Expected '{' after if-condition. Use 'give ... otherwise ...' for single-expression ternary.");
     return nullptr;
   }
 
@@ -540,7 +554,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // ── Struct brace-init: Identifier '{' field: expr, ... '}' ──────────────
     // Checked before the keyword-typo guard so `Point { ... }` is never
     // mistaken for a typo.
-    if (CurTok == '{') {
+    if (g_AllowStructInit && CurTok == '{') {
       getNextToken(); // eat '{'
       std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields;
       while (CurTok != '}' && CurTok != TOK_EOF) {
@@ -618,6 +632,31 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     
   case TOK_NULL:
     return ParseNullExpr();
+
+  case '[': {
+    SourceLocation Loc = CurLoc;
+    getNextToken(); // eat '['
+    std::vector<std::unique_ptr<ExprAST>> Elements;
+    while (CurTok != ']' && CurTok != TOK_EOF) {
+      if (auto Val = ParseExpression()) {
+        Elements.push_back(std::move(Val));
+      } else {
+        return nullptr;
+      }
+      if (CurTok == ',') {
+        getNextToken(); // eat ','
+      } else if (CurTok != ']') {
+        LogErrorAt(CurLoc, "Expected ',' or ']' in array literal");
+        return nullptr;
+      }
+    }
+    if (CurTok != ']') {
+      LogErrorAt(CurLoc, "Expected ']' to close array literal");
+      return nullptr;
+    }
+    getNextToken(); // eat ']'
+    return std::make_unique<ArrayLiteralExprAST>(Loc, std::move(Elements));
+  }
 
   case '(':
     return ParseParenExpr();
@@ -951,10 +990,29 @@ std::unique_ptr<ExprAST> ParseBlock() {
       continue;
     }
 
+    std::string PossibleKeyword = "";
+    if (CurTok == TOK_IDENTIFIER) {
+      PossibleKeyword = IdentifierStr;
+    }
+
     auto Expr = ParseExpression();
     if (!Expr) return nullptr;
     if (CurTok != ';') {
-      LogErrorAt(CurLoc, "Expected ';' after statement.");
+      std::string Hint = "";
+      if (!PossibleKeyword.empty()) {
+        static const std::vector<std::string> Keywords = {
+            "if", "while", "for", "mutable", "immutable", "mut", "immut", 
+            "return", "compare", "do", "fn", "struct"};
+        for (const auto &KW : Keywords) {
+          int MaxDist = KW.length() <= 3 ? 1 : 2;
+          if (getDamerauLevenshteinDistance(PossibleKeyword, KW) <= MaxDist) {
+            Hint = "\n  Hint: Did you mean '" + KW + "' instead of '" +
+                   PossibleKeyword + "'?";
+            break;
+          }
+        }
+      }
+      LogErrorAt(CurLoc, "Expected ';' after statement." + Hint);
       return nullptr;
     }
     getNextToken(); // eat ';'
@@ -987,7 +1045,11 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
                                                std::move(RHS));
   }
 
-  auto Cond = ParseExpression();
+  std::unique_ptr<ExprAST> Cond;
+  {
+    NoStructInitGuard Guard;
+    Cond = ParseExpression();
+  }
   if (!Cond) {
     return nullptr;
   }
@@ -1031,7 +1093,13 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   }
   getNextToken();
 
-  auto Start = ParseExpression();
+  // Suppress struct-init inside for range/step expressions to avoid
+  // ambiguity between a trailing identifier and the block opener '{'
+  std::unique_ptr<ExprAST> Start, End, Step;
+  {
+    NoStructInitGuard Guard;
+    Start = ParseExpression();
+  }
   if (!Start)
     return nullptr;
   if (CurTok != TOK_RANGE) {
@@ -1043,7 +1111,10 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   }
   getNextToken();
 
-  auto End = ParseExpression();
+  {
+    NoStructInitGuard Guard;
+    End = ParseExpression();
+  }
   if (!End)
     return nullptr;
   if (CurTok != TOK_STEP) {
@@ -1054,7 +1125,10 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   }
   getNextToken();
 
-  auto Step = ParseExpression();
+  {
+    NoStructInitGuard Guard;
+    Step = ParseExpression();
+  }
   if (!Step)
     return nullptr;
 
@@ -1108,35 +1182,38 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
     TurfTypePtr ElemType = AT ? AT->getElementTypePtr() : Type;
 
     std::vector<std::unique_ptr<ExprAST>> InitList;
-    if (CurTok != '[') {
-      LogErrorAt(CurLoc, "Expected '[' to begin the array initializer");
-      return nullptr;
-    }
-    getNextToken(); // eat '['
+    std::unique_ptr<ExprAST> InitExpr = nullptr;
+    if (CurTok == '[') {
+      getNextToken(); // eat '['
 
-    if (CurTok != ']') {
-      while (true) {
-        auto Expr = ParseExpression();
-        if (!Expr)
-          return nullptr;
-        InitList.push_back(std::move(Expr));
+      if (CurTok != ']') {
+        while (true) {
+          auto Expr = ParseExpression();
+          if (!Expr)
+            return nullptr;
+          InitList.push_back(std::move(Expr));
 
-        if (CurTok == ']')
-          break;
-        if (CurTok != ',') {
-          LogErrorAt(CurLoc, "Expected ',' or ']' in array initializer list");
-          return nullptr;
+          if (CurTok == ']')
+            break;
+          if (CurTok != ',') {
+            LogErrorAt(CurLoc, "Expected ',' or ']' in array initializer list");
+            return nullptr;
+          }
+          getNextToken(); // eat ','
         }
-        getNextToken(); // eat ','
       }
+      getNextToken(); // eat ']'
+    } else {
+      InitExpr = ParseExpression();
+      if (!InitExpr)
+        return nullptr;
     }
-    getNextToken(); // eat ']'
     if (CurTok != ';') {
       LogErrorAt(CurLoc, "Expected ';' after statement.");
       return nullptr;
     }
     getNextToken(); // eat ';'
-    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::move(InitList), IsImmutable);
+    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::move(InitList), std::move(InitExpr), IsImmutable);
   }
 
   auto Init = ParseExpression();
@@ -1176,37 +1253,16 @@ std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
 
     // Optional initializer: int[3] primes = [2, 3, 5]
     std::vector<std::unique_ptr<ExprAST>> InitList;
+    std::unique_ptr<ExprAST> InitExpr = nullptr;
     if (CurTok == TOK_ASSIGN) {
       getNextToken();
-
-      if (CurTok != '[') {
-        LogErrorAt(CurLoc, "Expected '[' to begin the array initializer — e.g. "
-                           "int[3] arr = [1, 2, 3]");
+      InitExpr = ParseExpression();
+      if (!InitExpr)
         return nullptr;
-      }
-      getNextToken();
-
-      while (CurTok != ']' && CurTok != TOK_EOF) {
-        auto Elem = ParseExpression();
-        if (!Elem)
-          return nullptr;
-        InitList.push_back(std::move(Elem));
-        if (CurTok == ',')
-          getNextToken();
-        else if (CurTok != ']')
-          break;
-      }
-
-      if (CurTok != ']') {
-        LogErrorAt(CurLoc, "Expected ']' to close the array initializer — "
-                           "check for a missing ']' or a stray element");
-        return nullptr;
-      }
-      getNextToken();
     }
 
     return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType,
-                                              ArraySize, std::move(InitList), false);
+                                              ArraySize, std::move(InitList), std::move(InitExpr), false);
   }
 
   // Standard variable declaration: int x = ...
@@ -1777,8 +1833,21 @@ std::unique_ptr<ExprAST> ParseImport() {
   llvm::sys::path::remove_filename(StdlibPath);
   llvm::sys::path::append(StdlibPath, "..", "lib", "std", ModuleName + ".tr");
 
+  // Search order:
+  //   1. Compiler stdlib (<binary>/../lib/std/<module>.tr)
+  //   2. Same directory as the source file being compiled
+  //   3. Current working directory
   auto Block = ParseFile(StdlibPath.str().str());
-  std::cout << "DEBUG ParseImport Module: " << ModuleName << ", StdlibPath: " << StdlibPath.str().str() << ", Block resolved: " << (Block != nullptr) << "\n";
+  if (!Block) {
+    // Issue #19 fix: resolve relative to the source file's directory so that
+    // `turf path/to/file.tr` can find sibling modules without a cd first.
+    if (!SourceFilename.empty()) {
+      llvm::SmallString<256> SrcRelPath(SourceFilename);
+      llvm::sys::path::remove_filename(SrcRelPath);
+      llvm::sys::path::append(SrcRelPath, ModuleName + ".tr");
+      Block = ParseFile(SrcRelPath.str().str());
+    }
+  }
   if (!Block) {
     std::string CwdPath = ModuleName + ".tr";
     Block = ParseFile(CwdPath);
@@ -1790,6 +1859,7 @@ std::unique_ptr<ExprAST> ParseImport() {
 
   return std::make_unique<ModuleImportExprAST>(ModuleName, std::move(Block));
 }
+
 
 // ParseReturnExpr - called when CurTok == TOK_RETURN.
 // Parses: return;   or   return <expr>;

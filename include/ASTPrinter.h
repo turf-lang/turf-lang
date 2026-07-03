@@ -318,7 +318,23 @@ public:
       for (const auto &Init : N.getInitList())
         print(Init.get(), Depth_);
       ascend();
+    } else if (N.getInitExpr()) {
+      descend();
+      print(N.getInitExpr().get(), Depth_);
+      ascend();
     }
+  }
+
+  void visitArrayLiteral(ArrayLiteralExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "ArrayLiteral(size=" << N.getElements().size() << ")";
+    printTypeBadge(&N);
+    std::cout << "\n";
+    descend();
+    for (const auto &E : N.getElements()) {
+      print(const_cast<ExprAST *>(E.get()), Depth_);
+    }
+    ascend();
   }
 
   void visitArrayAccess(ArrayAccessExprAST &N) override {

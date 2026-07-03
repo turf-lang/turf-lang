@@ -249,7 +249,7 @@ public:
     return ElementType->getName() + "[]";
   }
   std::string getMangledName() const override {
-    return ElementType->getMangledName() + "_arr";
+    return ElementType->getMangledName() + "_arr_" + std::to_string(Size);
   }
 
   bool isArray() const override { return true; }

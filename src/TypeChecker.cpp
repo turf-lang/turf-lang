@@ -133,14 +133,23 @@ bool TypeChecker::isTypeCompatible(const TurfType *ParamTy,
   if (!ParamTy || !ArgTy)
     return true;
 
-  // Exact match (covers int→int, string→string, etc.)
+  // Exact match (covers int→int, string→string, bool→bool, etc.)
   if (ParamTy->getName() == ArgTy->getName())
     return true;
 
-  // Numeric promotion: int, double, and bool are mutually compatible for
-  // overload matching (Codegen handles the actual conversion).
-  if (ParamTy->isNumeric() && ArgTy->isNumeric())
+  // Issue #10 fix: bool is a distinct type — it must NOT be treated as numeric
+  // for overload matching. Only int <-> double promotion is allowed.
+  if (ParamTy->isBool() || ArgTy->isBool())
+    return false;
+
+  // Numeric promotion: allow widening (int -> double), but reject narrowing (double -> int).
+  // (Codegen handles the actual widening conversion).
+  if (ParamTy->isNumeric() && ArgTy->isNumeric()) {
+    if (ParamTy->getName() == "int" && ArgTy->getName() == "double") {
+      return false; // Narrowing conversion requires explicit cast
+    }
     return true;
+  }
 
   return false;
 }
@@ -418,8 +427,18 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   if (Node.getRHS())
     const_cast<ExprAST *>(Node.getRHS())->accept(*this);
 
-  // The assignment expression type is the RHS type
+  TurfTypePtr LhsTy = getType(Node.getLHS());
   TurfTypePtr RhsTy = getType(Node.getRHS());
+
+  if (LhsTy && RhsTy) {
+    if (!isTypeCompatible(LhsTy.get(), RhsTy.get())) {
+      reportError(Node.getLoc(),
+                  "Cannot assign value of type '" + RhsTy->getName() +
+                      "' to variable of type '" + LhsTy->getName() + "'.");
+    }
+  }
+
+  // The assignment expression type is the RHS type
   setType(&Node, RhsTy);
 
   const VariableExprAST *LHSVar = nullptr;
@@ -885,8 +904,54 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
     return;
   }
 
-  // Non-module method call (e.g. list.push()) — not yet fully modelled in
-  // the Resolver, so be permissive.
+  // ── Struct method call (e.g. u.grow(), a.inc()) ──────────────────────────
+  // The base is a variable whose type is a struct. Struct methods are
+  // registered in the Resolver's CurrentFileFunctions_ with BaseName
+  // "StructName.methodName" (e.g. "User.grow").
+  {
+    TurfTypePtr BaseTy = getType(Node.getBase());
+    bool IsStaticMethod = false;
+    if (auto *Var = dynamic_cast<const VariableExprAST *>(Node.getBase())) {
+      if (Var->IsStructName && GlobalSymbolTable) {
+        IsStaticMethod = true;
+        BaseTy = GlobalSymbolTable->LookupType(Var->getName());
+      }
+    }
+
+    // Unwrap pointer-to-struct (self inside methods)
+    if (BaseTy && !IsStaticMethod) {
+      if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy.get()))
+        BaseTy = PtrTy->getPointee();
+    }
+    // Resolve NamedType to TurfStructType
+    if (BaseTy) {
+      if (auto *NT = dynamic_cast<const NamedType *>(BaseTy.get())) {
+        if (GlobalSymbolTable)
+          BaseTy = GlobalSymbolTable->LookupType(NT->getName());
+      }
+    }
+    if (BaseTy) {
+      if (auto *STy = dynamic_cast<const TurfStructType *>(BaseTy.get())) {
+        const std::string &StructName = STy->getName();
+        // Struct methods are stored in CurrentFileFunctions_ as "User.grow"
+        auto Candidates = RST_.lookupCurrentFileFunctions(StructName + "." + MethodName);
+        // Arity: struct methods have `self` as first param, user args = arity - 1 (unless static)
+        int ExpectedArity = IsStaticMethod ? ArgCount : (ArgCount + 1);
+        std::vector<const ResolverFunctionSymbol *> ArityMatches;
+        for (const auto *C : Candidates)
+          if (C->arity() == ExpectedArity) ArityMatches.push_back(C);
+        if (!ArityMatches.empty()) {
+          const ResolverFunctionSymbol *Best = ArityMatches[0];
+          Node.ResolvedCallTarget = std::shared_ptr<ResolverFunctionSymbol>(
+              const_cast<ResolverFunctionSymbol *>(Best),
+              [](ResolverFunctionSymbol *) {});
+          setType(&Node, Best->ReturnType);
+          return;
+        }
+      }
+    }
+  }
+  // Non-module, non-struct method call — be permissive.
   setType(&Node, nullptr);
 }
 
@@ -895,7 +960,44 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
 void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   if (Node.getBase())
     const_cast<ExprAST *>(Node.getBase())->accept(*this);
-  // Field type resolution requires a struct registry (future issue).
+
+#ifndef TYPECHECKER_NO_ERRORS
+  // Resolve the base type and look up the field.
+  // GlobalSymbolTable is only available in the full build (not unit tests).
+  TurfTypePtr BaseTy = getType(Node.getBase());
+
+  // Unwrap pointer-to-struct (e.g. self in method bodies)
+  if (BaseTy) {
+    if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy.get()))
+      BaseTy = PtrTy->getPointee();
+  }
+
+  // Resolve NamedType to TurfStructType via symbol table
+  if (BaseTy) {
+    if (auto *NT = dynamic_cast<const NamedType *>(BaseTy.get())) {
+      if (GlobalSymbolTable)
+        BaseTy = GlobalSymbolTable->LookupType(NT->getName());
+    }
+  }
+
+  if (BaseTy) {
+    if (auto *STy = dynamic_cast<const TurfStructType *>(BaseTy.get())) {
+      TurfTypePtr FieldTy = STy->getFieldType(Node.getFieldName());
+      // Resolve NamedType field types so chained access (a.b.c) propagates
+      if (FieldTy) {
+        if (auto *NT = dynamic_cast<const NamedType *>(FieldTy.get())) {
+          if (GlobalSymbolTable) {
+            if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+              FieldTy = R;
+          }
+        }
+      }
+      setType(&Node, FieldTy);
+      return;
+    }
+  }
+#endif
+  // Field type unknown or TypeChecker running without struct registry.
   setType(&Node, nullptr);
 }
 
@@ -963,7 +1065,32 @@ void TypeChecker::visitStructInit(StructInitExprAST &Node) {
 void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
   for (const auto &Init : Node.getInitList())
     Init->accept(*this);
+  if (Node.getInitExpr())
+    Node.getInitExpr()->accept(*this);
   setType(&Node, makeArrayType(Node.getElementTypePtr(), Node.getSize()));
+}
+
+void TypeChecker::visitArrayLiteral(ArrayLiteralExprAST &Node) {
+  if (Node.getElements().empty()) {
+    TypeError(Node.getLoc(), "Cannot infer type of empty array literal").raise();
+    return;
+  }
+
+  for (const auto &Elem : Node.getElements()) {
+    const_cast<ExprAST *>(Elem.get())->accept(*this);
+  }
+
+  TurfTypePtr ElemType = getType(Node.getElements()[0].get());
+  for (size_t i = 1; i < Node.getElements().size(); ++i) {
+    TurfTypePtr ElemIType = getType(Node.getElements()[i].get());
+    if (ElemIType->getName() != ElemType->getName()) {
+      TypeError(Node.getLoc(), "Array literal type mismatch: expected " + ElemType->getName() + ", got " + ElemIType->getName()).raise();
+    }
+  }
+
+  auto ArrTy = makeArrayType(ElemType, Node.getElements().size());
+  Node.CachedType = ArrTy;
+  setType(&Node, ArrTy);
 }
 
 void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
@@ -976,11 +1103,29 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
   TurfTypePtr BaseTy = getType(Node.getBase());
   if (BaseTy && BaseTy->isArray()) {
     const auto *ArrTy = dynamic_cast<const ArrayType *>(BaseTy.get());
-    setType(&Node, ArrTy ? ArrTy->getElementTypePtr() : nullptr);
+    TurfTypePtr ElemTy = ArrTy ? ArrTy->getElementTypePtr() : nullptr;
+
+#ifndef TYPECHECKER_NO_ERRORS
+    // Issue #17 fix: if the element type is a NamedType (e.g. "User"), resolve
+    // it to the actual TurfStructType via the symbol table. Without this,
+    // arr[0].field fails because the type never becomes a struct.
+    // GlobalSymbolTable is only available in the full build (not unit tests).
+    if (ElemTy) {
+      if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy.get())) {
+        if (GlobalSymbolTable) {
+          if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+            ElemTy = Resolved;
+        }
+      }
+    }
+#endif
+
+    setType(&Node, ElemTy);
   } else {
     setType(&Node, nullptr);
   }
 }
+
 void TypeChecker::visitArrayAssign(ArrayAssignExprAST &Node) {
   if (Node.getIndex())
     const_cast<ExprAST *>(Node.getIndex())->accept(*this);
