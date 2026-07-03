@@ -23,6 +23,7 @@
  */
 
 #include "Resolver.h"
+#include "SymbolTable.h"
 
 #include "AST.h"
 #include "Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
@@ -400,6 +401,12 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       }
     }
 
+    // Issue #8 fix: also search intrinsic/builtin names (assert, fail, typeof,
+    // lengthof) so typos like `asert()` produce a proper suggestion.
+    auto BuiltinMatches = SuggestionIndex::suggestBuiltins(CalleeName);
+    for (const auto &B : BuiltinMatches)
+      Suggestions.Local.push_back(B + "(...)");
+
     UnknownFunctionError(Node.getLoc(), CalleeName, Suggestions).raise();
     return;
   }
@@ -478,11 +485,19 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
   // that the ASTPrinter can show a proper badge (Issue #5 completeness).
   auto *BaseVar = dynamic_cast<VariableExprAST *>(
       const_cast<ExprAST *>(Node.getBase()));
-  if (BaseVar && SymTable_.hasModule(BaseVar->getName())) {
-    // Base is a module qualifier — annotate it and skip variable resolution.
-    BaseVar->ResolvedModuleName = BaseVar->getName();
+  if (BaseVar) {
+    if (SymTable_.hasModule(BaseVar->getName())) {
+      // Base is a module qualifier — annotate it and skip variable resolution.
+      BaseVar->ResolvedModuleName = BaseVar->getName();
+    } else if (GlobalSymbolTable && GlobalSymbolTable->LookupType(BaseVar->getName())) {
+      // Base is a struct type name (static method call)
+      BaseVar->IsStructName = true;
+    } else {
+      // Base is a plain variable — resolve normally.
+      visitChild(Node.getBase());
+    }
   } else {
-    // Base is either a complex expression or a plain variable — resolve normally.
+    // Base is a complex expression — resolve normally.
     visitChild(Node.getBase());
   }
   // Always resolve argument expressions regardless.
@@ -610,13 +625,15 @@ void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {
   // Resolve the initializer list expressions.
   for (const auto &Init : Node.getInitList())
     visitChild(Init.get());
+  if (Node.getInitExpr())
+    visitChild(Node.getInitExpr().get());
 
   // Register the array variable in the current scope.
   // Capture the returned symbol and attach it to the AST node (Issue #5).
   try {
     ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
     Node.ResolvedSymbol =
-        SymTable_.declareVariable(Node.getName(), Node.getElementTypePtr(), Loc, Node.isImmutable());
+        SymTable_.declareVariable(Node.getName(), makeArrayType(Node.getElementTypePtr(), Node.getSize()), Loc, Node.isImmutable());
   } catch (const std::runtime_error &) {
     auto Prev = SymTable_.lookupVariable(Node.getName());
     if (Prev) {
@@ -626,6 +643,11 @@ void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {
   }
 }
 
+void Resolver::visitArrayLiteral(ArrayLiteralExprAST &Node) {
+  for (const auto &Elem : Node.getElements()) {
+    visitChild(Elem.get());
+  }
+}
 void Resolver::visitArrayAccess(ArrayAccessExprAST &Node) {
   visitChild(Node.getBase());
   visitChild(Node.getIndex());

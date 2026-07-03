@@ -1,34 +1,55 @@
 name: Turf Test Suites
-
 on:
   push:
     branches: ["master", "dev"]
   pull_request:
     branches: ["master", "dev"]
-
+  workflow_dispatch:
 jobs:
   build_and_test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/lib/llvm-22
+            /usr/include/llvm-22
+            /usr/include/llvm-c-22
+          key: llvm-22-${{ runner.os }}-v1
+
       - name: Install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 22
           sudo apt-get install -y llvm-22-dev cmake libomp-22-dev
-          echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
+      - run: echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
 
       - name: Ensure correct file permissions
         run: |
           chmod +x scripts/cmake_build.sh
           chmod +x scripts/test_runner.sh
 
+      - name: Get llama.cpp commit hash
+        id: llama-sha
+        run: echo "sha=$(git -C external/llama.cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache llama.cpp build
+        id: cache-llama
+        uses: actions/cache@v4
+        with:
+          path: external/llama.cpp/build
+          key: llama-build-${{ runner.os }}-${{ steps.llama-sha.outputs.sha }}
+
       - name: Build llama.cpp
+        if: steps.cache-llama.outputs.cache-hit != 'true'
         run: |
           cd external/llama.cpp
           cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_OPENMP=OFF
@@ -39,8 +60,23 @@ jobs:
           echo "LIBRARY_PATH=/usr/lib/llvm-22/lib:$LIBRARY_PATH" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/usr/lib/llvm-22/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
+      - name: Install ccache
+        run: sudo apt-get install -y ccache
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.ref }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ github.ref }}-
+            ccache-${{ runner.os }}-
+
       - name: Build Turf Compiler
-        run: ./scripts/cmake_build.sh --release
+        run: |
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          ./scripts/cmake_build.sh --release
 
       - name: Run Test Suites
         run: ./scripts/test_runner.sh

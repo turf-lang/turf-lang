@@ -6,8 +6,9 @@ fn User.rename(new_name: string): void { self.name = new_name; }
 fn main(): int {
     mut u: User = User { age: 10, name: "Alice" };
     u.grow();
-    io.printline(u.age);
-    // assert(u.age == 11, "");
+    
+    assert(u.age == 11, "");
+    
     u.rename("Bob");
     return 0;
 }

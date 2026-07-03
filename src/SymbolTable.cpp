@@ -281,17 +281,24 @@ static bool typesCompatible(const TurfType *From, const TurfType *To) {
   if (dynamic_cast<const TurfGenericParamType *>(From) ||
       dynamic_cast<const TurfGenericParamType *>(To))
     return true;
-  // void* <-> any pointer
-  if (From->getName() == "void*" && dynamic_cast<const TurfPointerType *>(To))
+  // Issue #15 fix: `ptr` (OpaquePointerType) coercible to/from any typed pointer.
+  // The old code checked "void*" but the compiler names this type "ptr".
+  auto isOpaquePtr = [](const TurfType *T) {
+    return T->isNamed("ptr") || T->isNamed("void*");
+  };
+  if (isOpaquePtr(From) && To->isPointer())
     return true;
-  if (To->getName() == "void*" && dynamic_cast<const TurfPointerType *>(From))
+  if (isOpaquePtr(To) && From->isPointer())
     return true;
   // void and string are never coercible
   if (From->isVoid() || To->isVoid())
     return false;
   if (From->isNamed("string") || To->isNamed("string"))
     return false;
-  // Remaining numerics (int, double, bool) are mutually coercible
+  // Issue #10 fix: bool is a distinct type -- must NOT silently coerce to int/double.
+  if (From->isNamed("bool") || To->isNamed("bool"))
+    return false;
+  // Remaining numerics (int <-> double) are mutually coercible
   return true;
 }
 

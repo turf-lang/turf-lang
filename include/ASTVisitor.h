@@ -46,6 +46,7 @@ class FuncCallExprAST;
 class MethodCallExprAST;
 class FieldAccessExprAST;
 class ArrayDeclExprAST;
+class ArrayLiteralExprAST;
 class ArrayAccessExprAST;
 class ArrayAssignExprAST;
 class ArrayLengthExprAST;
@@ -118,6 +119,7 @@ public:
 
   // ── Arrays ────────────────────────────────────────────────────────────────
   virtual void visitArrayDecl(ArrayDeclExprAST &Node) {}
+  virtual void visitArrayLiteral(ArrayLiteralExprAST &Node) {}
   virtual void visitArrayAccess(ArrayAccessExprAST &Node) {}
   virtual void visitArrayAssign(ArrayAssignExprAST &Node) {}
   virtual void visitArrayLength(ArrayLengthExprAST &Node) {}

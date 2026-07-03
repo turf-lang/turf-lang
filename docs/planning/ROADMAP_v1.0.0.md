@@ -150,6 +150,9 @@ mutable nums: list<int> = list<int> {};
 mutable names: list<string> = list<string> {};
 ```
 
+- [ ] **Struct Pointers & `self` Returns 🔴**
+  - **Implementation**: Bridge the value vs pointer gap for structs. Allow `malloc` (`ptr`) to be safely cast to structural pointers, and allow struct methods to return `self` by reference (`*self` / `&self`). Resolves Issues #22 and #23.
+
 - [ ] **Module Search Path & Circular Import Guard 🔴**
   - **Implementation**: Search `<compiler_bin_dir>/lib/std/` first, then `./`. `std::set<std::string> ActiveImports` during parsing; error on duplicate import.
 

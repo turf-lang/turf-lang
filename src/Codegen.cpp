@@ -97,7 +97,7 @@ void InitializeModule() {
 llvm::Type *getLLVMType(const TurfType *T) {
   if (!T)
     return llvm::Type::getDoubleTy(*TheContext);
-  std::string Key = T->getName();
+  std::string Key = T->getMangledName();
 
   auto It = LLVMTypeCache.find(Key);
   if (It != LLVMTypeCache.end())
@@ -118,9 +118,13 @@ llvm::Type *getLLVMType(const TurfType *T) {
   if (T->isNamed("ptr") || dynamic_cast<const OpaquePointerType *>(T))
     return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
 
-  // Array types — the alloca is created per-site; return opaque pointer here.
-  if (isArrayType(T))
+  // Array types — return ArrayType for fixed size, opaque pointer for unsized.
+  if (isArrayType(T)) {
+    const auto *AT = dynamic_cast<const ::ArrayType *>(T);
+    if (AT && AT->getSize() > 0)
+      return LLVMTypeCache[Key] = llvm::ArrayType::get(getLLVMType(AT->getElementTypePtr().get()), AT->getSize());
     return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+  }
 
   // PointerType — lowers to ptr
   if (dynamic_cast<const TurfPointerType *>(T))
@@ -148,6 +152,18 @@ llvm::Type *getLLVMType(const TurfType *T) {
       return LLVMTypeCache[Key] = BaseIt->second;
     // Base struct not yet seen — create a forward-declared opaque type
     return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, GT->getBaseName());
+  }
+
+  // NamedType — may refer to a user-defined struct registered in LLVMTypeCache.
+  // This covers function return types like `fn get_matrix(): Matrix` where the
+  // AST node is NamedType("Matrix"), not TurfStructType("Matrix").
+  if (dynamic_cast<const NamedType *>(T)) {
+    auto CacheIt = LLVMTypeCache.find(Key);
+    if (CacheIt != LLVMTypeCache.end())
+      return CacheIt->second;
+    // Not yet registered — create a forward-declared opaque struct so the
+    // function type can be built; StructDeclExprAST::codegen will fill it in.
+    return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, Key);
   }
 
   // Unknown / future types
@@ -246,9 +262,14 @@ static bool isTypeCompatible(const TurfType *From, const TurfType *To) {
     return false;
   if (From->isNamed("string") || To->isNamed("string"))
     return false;
-  // Remaining numerics: int, double, bool — all mutually convertible
+  // Issue #10 fix: bool is a distinct type -- must NOT silently coerce to
+  // int or double. Only int<->double promotion is allowed.
+  if (From->isNamed("bool") || To->isNamed("bool"))
+    return false;
+  // Remaining numerics: int <-> double are mutually coercible
   return true;
 }
+
 
 static const TurfType *getExprType(const ExprAST *E) {
   if (!E)
@@ -355,8 +376,18 @@ static const TurfType *getExprType(const ExprAST *E) {
   }
   if (auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(E)) {
     const TurfType *BaseTy = getExprType(ArrAcc->getBase());
-    if (BaseTy && isArrayType(BaseTy))
-      return getArrayElementType(BaseTy);
+    if (BaseTy && isArrayType(BaseTy)) {
+      const TurfType *ElemTy = getArrayElementType(BaseTy);
+      // Issue #17 fix: resolve NamedType element types (e.g. struct User)
+      // to TurfStructType so that arr[0].field codegen works correctly.
+      if (ElemTy && GlobalSymbolTable) {
+        if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy)) {
+          if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+            return Resolved.get();
+        }
+      }
+      return ElemTy;
+    }
   }
   if (auto *MethodCall = dynamic_cast<const MethodCallExprAST *>(E)) {
     const TurfType *BaseTy = getExprType(MethodCall->getBase());
@@ -471,26 +502,50 @@ static const TurfType *getExprType(const ExprAST *E) {
   }
   if (auto *FieldAccess = dynamic_cast<const FieldAccessExprAST *>(E)) {
     const TurfType *BaseTy = getExprType(FieldAccess->getBase());
+    if (!BaseTy) return nullptr;
     if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy))
       BaseTy = PtrTy->getPointee().get();
-
-    if (auto *STy = dynamic_cast<const TurfStructType *>(BaseTy)) {
-      // Return a raw pointer of the underlying TurfTypePtr to match return
-      // signature. But we can't easily get the raw pointer from TurfTypePtr
-      // without storing it or retrieving it. Actually we can:
-      return STy->getFieldType(FieldAccess->getFieldName()).get();
+    // Resolve NamedType base (e.g. field type from a parent struct field)
+    if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
+      if (GlobalSymbolTable) {
+        if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+          BaseTy = R.get();
+      }
     }
+    if (auto *STy = dynamic_cast<const TurfStructType *>(BaseTy)) {
+      TurfTypePtr FieldTy = STy->getFieldType(FieldAccess->getFieldName());
+      if (!FieldTy) return nullptr;
+      // Resolve NamedType field types so chained access (a.b.c) works correctly.
+      if (auto *NT = dynamic_cast<const NamedType *>(FieldTy.get())) {
+        if (GlobalSymbolTable) {
+          if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+            return R.get();
+        }
+      }
+      return FieldTy.get();
+    }
+  }
+  if (auto *ArrLit = dynamic_cast<const ArrayLiteralExprAST *>(E)) {
+    return ArrLit->CachedType.get();
   }
   return nullptr;
 }
 
+static Value *CastToType(Value *Val, const TurfType *DestType,
+                         const std::string &Name, SourceLocation Loc = {0, 0});
+
 static Value *CastToType(Value *Val, TurfTypePtr DestType,
                          const std::string &Name, SourceLocation Loc = {0, 0}) {
+  return CastToType(Val, DestType.get(), Name, Loc);
+}
+
+static Value *CastToType(Value *Val, const TurfType *DestType,
+                         const std::string &Name, SourceLocation Loc) {
   Type *ValTy = Val->getType();
 
   if (isa<ConstantPointerNull>(Val)) {
-    if (isPointerLike(DestType.get())) {
-      return Builder->CreateBitCast(Val, getLLVMType(DestType.get()), Name);
+    if (isPointerLike(DestType)) {
+      return Builder->CreateBitCast(Val, getLLVMType(DestType), Name);
     }
   }
 
@@ -501,20 +556,20 @@ static Value *CastToType(Value *Val, TurfTypePtr DestType,
   }
 
   TurfTypePtr SrcType = getTurfTypeFromLLVM(ValTy);
-  SrcType = RefineLLVMType(SrcType, DestType, ValTy);
+  SrcType = RefineLLVMType(SrcType, TurfTypePtr(const_cast<TurfType*>(DestType), [](TurfType*){}), ValTy);
   if (SrcType->getName() == DestType->getName())
     return Val;
 
   // Auto-coerce void* to/from any pointer
   if (SrcType->getName() == "void*" &&
-      dynamic_cast<const TurfPointerType *>(DestType.get()))
+      dynamic_cast<const TurfPointerType *>(DestType))
     return Val;
   if (DestType->getName() == "void*" &&
       dynamic_cast<const TurfPointerType *>(SrcType.get()))
     return Val;
 
   // Type Erasure: cast to generic parameter (stored as void*)
-  if (dynamic_cast<const TurfGenericParamType *>(DestType.get())) {
+  if (dynamic_cast<const TurfGenericParamType *>(DestType)) {
     Type *VoidPtrTy = PointerType::get(*TheContext, 0);
     if (ValTy->isPointerTy())
       return Val; // already a pointer
@@ -537,15 +592,24 @@ static Value *CastToType(Value *Val, TurfTypePtr DestType,
       Value *IntVal = Builder->CreatePtrToInt(Val, Type::getInt64Ty(*TheContext), "unerased_int");
       return Builder->CreateBitCast(IntVal, Type::getDoubleTy(*TheContext), "unerased_dbl");
     }
-    if (isPointerLike(DestType.get())) {
+    if (isPointerLike(DestType)) {
       return Val; // already pointer
     }
   }
 
   // All pointer-like types (string, ptr, T*, void*) share the same LLVM
   // representation. Casts between them are always no-ops at the IR level.
-  if (isPointerLike(SrcType.get()) && isPointerLike(DestType.get()))
+  if (isPointerLike(SrcType.get()) && isPointerLike(DestType))
     return Val;
+
+  // Struct-to-struct: if DestType is a struct (NamedType or TurfStructType) and
+  // the LLVM types already match (e.g. inner struct init), pass through without
+  // casting. Without this, CastToType would hit the string-error guard below.
+  if (ValTy->isStructTy()) {
+    if (dynamic_cast<const TurfStructType *>(DestType) ||
+        dynamic_cast<const NamedType *>(DestType))
+      return Val;
+  }
 
   // Strings cannot be cast to/from non-pointer types implicitly
   if (SrcType->isNamed("string") || DestType->isNamed("string")) {
@@ -603,6 +667,66 @@ Value *NullExprAST::codegen() {
 
 // Turns any expression into IR operation
 Value *BinaryExprAST::codegen() {
+  // ── Short-circuit && / || ───────────────────────────────────────────────
+  // These operators must NOT evaluate both sides eagerly.
+  // We emit a branch: LHS first, then conditionally evaluate RHS.
+  if (Op == TOK_AND) {
+    Function *TheFunc = Builder->GetInsertBlock()->getParent();
+    BasicBlock *RHSBlock  = BasicBlock::Create(*TheContext, "and.rhs",  TheFunc);
+    BasicBlock *MergeBlock = BasicBlock::Create(*TheContext, "and.merge", TheFunc);
+
+    Value *L = LHS->codegen();
+    if (!L) return nullptr;
+    L = CastToType(L, TurfBool(), "lhstobool");
+
+    BasicBlock *LHSEnd = Builder->GetInsertBlock();
+    Builder->CreateCondBr(L, RHSBlock, MergeBlock);
+
+    // RHS block — only reached when LHS is true
+    Builder->SetInsertPoint(RHSBlock);
+    Value *R = RHS->codegen();
+    if (!R) return nullptr;
+    R = CastToType(R, TurfBool(), "rhstobool");
+    BasicBlock *RHSEnd = Builder->GetInsertBlock();
+    Builder->CreateBr(MergeBlock);
+
+    // Merge — phi to pick the right bool value
+    Builder->SetInsertPoint(MergeBlock);
+    PHINode *Phi = Builder->CreatePHI(Type::getInt1Ty(*TheContext), 2, "andtmp");
+    Phi->addIncoming(ConstantInt::getFalse(*TheContext), LHSEnd);
+    Phi->addIncoming(R, RHSEnd);
+    return Phi;
+  }
+
+  if (Op == TOK_OR) {
+    Function *TheFunc = Builder->GetInsertBlock()->getParent();
+    BasicBlock *RHSBlock  = BasicBlock::Create(*TheContext, "or.rhs",  TheFunc);
+    BasicBlock *MergeBlock = BasicBlock::Create(*TheContext, "or.merge", TheFunc);
+
+    Value *L = LHS->codegen();
+    if (!L) return nullptr;
+    L = CastToType(L, TurfBool(), "lhstobool");
+
+    BasicBlock *LHSEnd = Builder->GetInsertBlock();
+    Builder->CreateCondBr(L, MergeBlock, RHSBlock);
+
+    // RHS block — only reached when LHS is false
+    Builder->SetInsertPoint(RHSBlock);
+    Value *R = RHS->codegen();
+    if (!R) return nullptr;
+    R = CastToType(R, TurfBool(), "rhstobool");
+    BasicBlock *RHSEnd = Builder->GetInsertBlock();
+    Builder->CreateBr(MergeBlock);
+
+    // Merge — phi to pick the right bool value
+    Builder->SetInsertPoint(MergeBlock);
+    PHINode *Phi = Builder->CreatePHI(Type::getInt1Ty(*TheContext), 2, "ortmp");
+    Phi->addIncoming(ConstantInt::getTrue(*TheContext), LHSEnd);
+    Phi->addIncoming(R, RHSEnd);
+    return Phi;
+  }
+  // ───────────────────────────────────────────────────────────────────────
+
   // Generate codes for the Left side and Right side
   Value *L = LHS->codegen();
   Value *R = RHS->codegen();
@@ -870,11 +994,28 @@ Value *VarDeclExprAST::codegen() {
     if (!Init)
       return nullptr;
 
-    // Initialization type checks are handled by the TypeChecker.
-
-    } else {
-      Init = GetDefaultValue(Type.get());
+    // ── Struct-init shortcut ───────────────────────────────────────────────
+    // StructInitExprAST already allocated a fresh alloca, filled it
+    // field-by-field, and returned a load of that alloca.  If we create
+    // ANOTHER alloca and store the loaded struct value into it, LLVM's SROA
+    // pass promotes each alloca independently and loses the alias between
+    // `u`'s alloca and the pointer passed to `self` inside a method.
+    // Fix: detect the load-from-structinit-alloca and reuse it directly.
+    if (dynamic_cast<const StructInitExprAST *>(InitVal.get())) {
+      if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(Init)) {
+        if (auto *SrcAlloca = llvm::dyn_cast<AllocaInst>(LI->getPointerOperand())) {
+          SrcAlloca->setName(Name);
+          if (GlobalSymbolTable)
+            GlobalSymbolTable->DeclareSymbol(Name, Type, Loc, SrcAlloca);
+          NamedValues[Name] = {SrcAlloca, Type};
+          return Init;
+        }
+      }
     }
+    // ──────────────────────────────────────────────────────────────────────
+  } else {
+    Init = GetDefaultValue(Type.get());
+  }
 
   Init = CastToType(Init, Type, "initcast", Loc);
 
@@ -1702,18 +1843,7 @@ Value *FuncDefExprAST::codegen() {
         TheFunc, std::string(Arg.getName()), ParamTurfType.get());
     Builder->CreateStore(&Arg, Alloca);
 
-    // For array parameters, normalise the registered type to size=-1 so that
-    // ArrayAccessExprAST uses the pointer-load GEP path (not the two-index
-    // alloca-GEP path that assumes the alloca IS the array).
     TurfTypePtr RegisteredType = ParamTurfType;
-    if (isArrayType(ParamTurfType.get())) {
-      const TurfType *ElemT = getArrayElementType(ParamTurfType.get());
-      // Rebuild the type with the element type shared_ptr
-      RegisteredType =
-          makeArrayType(dynamic_cast<const ::ArrayType *>(ParamTurfType.get())
-                            ->getElementTypePtr(),
-                        -1); // -1 = pointer parameter
-    }
 
     NamedValues[std::string(Arg.getName())] = {Alloca, RegisteredType};
 
@@ -2030,20 +2160,25 @@ Value *FuncCallExprAST::codegen() {
     else
       DeclaredType = getTurfTypeFromLLVM(Arg.getType());
 
-    // Array params: the function expects a pointer to the array data.
+    // Unsized array params: the function expects a pointer to the array data.
     // We must pass the raw AllocaInst of the caller's array, not a loaded
     // value. TypeChecker has already verified the caller is passing an array
     // variable with a compatible element type.
+    // Note: Fixed-size arrays (Size > 0) are passed by value, so V remains the
+    // evaluated argument (the loaded array value).
     if (isArrayType(DeclaredType.get())) {
-      if (auto *VE = dynamic_cast<VariableExprAST *>(Args[Idx].get())) {
-        auto It = NamedValues.find(VE->getName());
-        assert(It != NamedValues.end() && "Array argument not found in NamedValues");
-        V = It->second.Alloca;
-      } else {
-        llvm::report_fatal_error(
-            "Internal error: array argument must be a variable. "
-            "This should have been caught by the TypeChecker.");
-        return nullptr;
+      const auto *ArrTy = dynamic_cast<const ::ArrayType *>(DeclaredType.get());
+      if (ArrTy && ArrTy->getSize() == -1) {
+        if (auto *VE = dynamic_cast<VariableExprAST *>(Args[Idx].get())) {
+          auto It = NamedValues.find(VE->getName());
+          assert(It != NamedValues.end() && "Array argument not found in NamedValues");
+          V = It->second.Alloca;
+        } else {
+          llvm::report_fatal_error(
+              "Internal error: array argument must be a variable. "
+              "This should have been caught by the TypeChecker.");
+          return nullptr;
+        }
       }
     } else {
       // Standard scalar type casting
@@ -2157,7 +2292,16 @@ Value *ArrayDeclExprAST::codegen() {
       Alloca->getAlign());
 
   // If we have an initializer list, store each element
-  if (!InitList.empty()) {
+  if (InitExpr) {
+    Value *RHSVal = InitExpr->codegen();
+    if (!RHSVal)
+      return nullptr;
+    // Cast to the array type to ensure it's exact (though the TypeChecker
+    // should have already validated this).
+    TurfTypePtr ArrType = makeArrayType(ElementType, Size);
+    RHSVal = CastToType(RHSVal, ArrType, "arrayinit", Loc);
+    Builder->CreateStore(RHSVal, Alloca);
+  } else if (!InitList.empty()) {
     for (int i = 0; i < static_cast<int>(InitList.size()); ++i) {
       Value *ElemVal = InitList[i]->codegen();
       if (!ElemVal)
@@ -2185,6 +2329,30 @@ Value *ArrayDeclExprAST::codegen() {
   NamedValues[Name] = {Alloca, ArrType};
 
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+}
+
+Value *ArrayLiteralExprAST::codegen() {
+  if (Elements.empty()) {
+    llvm::report_fatal_error("Internal error: empty array literal codegen");
+    return nullptr;
+  }
+
+  const TurfType *ElemType = getExprType(Elements[0].get());
+  Type *LLVMElemTy = getLLVMType(ElemType);
+  llvm::ArrayType *ArrTy = llvm::ArrayType::get(LLVMElemTy, Elements.size());
+
+  Value *ArrVal = llvm::UndefValue::get(ArrTy);
+
+  for (size_t i = 0; i < Elements.size(); ++i) {
+    Value *ElemVal = Elements[i]->codegen();
+    if (!ElemVal)
+      return nullptr;
+    
+    ElemVal = CastToType(ElemVal, ElemType, "arrlitelem", Loc);
+    ArrVal = Builder->CreateInsertValue(ArrVal, ElemVal, i, "arrlitinsert");
+  }
+
+  return ArrVal;
 }
 
 // Helper function to emit runtime bounds check
@@ -2284,16 +2452,65 @@ Value *ArrayAccessExprAST::codegenLValue() {
 }
 
 Value *ArrayAccessExprAST::codegen() {
+  // First try to codegen the base as an L-value (e.g., a variable or another pointer-like access).
   Value *Ptr = codegenLValue();
-  if (!Ptr)
+  if (Ptr) {
+    const TurfType *BaseTy = getExprType(Base.get());
+    const TurfType *ElemTyT = nullptr;
+    if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy))
+      ElemTyT = PtrTy->getPointee().get();
+    else
+      ElemTyT = getArrayElementType(BaseTy);
+    return Builder->CreateLoad(getLLVMType(ElemTyT), Ptr, "arrelem");
+  }
+
+  // If the base cannot be treated as an L-value (e.g., it is an R-value array returned from a function call),
+  // we codegen it as an R-value.
+  Value *BaseVal = Base->codegen();
+  if (!BaseVal)
     return nullptr;
+
   const TurfType *BaseTy = getExprType(Base.get());
-  const TurfType *ElemTyT = nullptr;
-  if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy))
-    ElemTyT = PtrTy->getPointee().get();
-  else
-    ElemTyT = getArrayElementType(BaseTy);
-  return Builder->CreateLoad(getLLVMType(ElemTyT), Ptr, "arrelem");
+  if (!isArrayType(BaseTy)) {
+    llvm::report_fatal_error("Internal error: Base is not an array");
+    return nullptr;
+  }
+
+  int ArraySize = dynamic_cast<const ::ArrayType *>(BaseTy)->getSize();
+  const TurfType *ElemType = getArrayElementType(BaseTy);
+
+  Value *IndexVal = Index->codegen();
+  if (!IndexVal)
+    return nullptr;
+
+  IndexVal = CastToType(IndexVal, TurfInt(), "arridx", Loc);
+
+  if (ArraySize > 0) {
+    if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
+      long long Idx = CI->getSExtValue();
+      if (Idx < 0 || Idx >= ArraySize) {
+        ArrayBoundsError(Loc, "array", Idx, ArraySize).raise();
+        return nullptr;
+      }
+      return Builder->CreateExtractValue(BaseVal, CI->getZExtValue(), "arrextract");
+    } else {
+      // Dynamic index on an R-value array. We must dump it into an alloca to GEP into it.
+      Function *TheFunction = Builder->GetInsertBlock()->getParent();
+      AllocaInst *TempAlloca = CreateEntryBlockAlloca(TheFunction, "tmparr", BaseTy);
+      Builder->CreateStore(BaseVal, TempAlloca);
+
+      EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
+
+      Type *ElemTy = getLLVMType(ElemType);
+      llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
+      Value *Indices[] = {ConstantInt::get(Type::getInt64Ty(*TheContext), 0), IndexVal};
+      Value *ElemPtr = Builder->CreateInBoundsGEP(ArrTy, TempAlloca, Indices, "arrelemptr");
+      return Builder->CreateLoad(ElemTy, ElemPtr, "arrelem");
+    }
+  }
+
+  llvm::report_fatal_error("Internal error: Could not codegen ArrayAccessExprAST");
+  return nullptr;
 }
 
 Value *ArrayAssignExprAST::codegen() {
@@ -2405,9 +2622,14 @@ Value *MethodCallExprAST::codegen() {
         ArgVals.push_back(V);
       }
 
-      // ResolvedCallTarget is guaranteed set by the Resolver/TypeChecker.
-      assert(ResolvedCallTarget &&
-             "MethodCallExprAST: ResolvedCallTarget is null — TypeChecker bug");
+      // ResolvedCallTarget is set by the TypeChecker during overload resolution.
+      // If it's null the TypeChecker already emitted a type-mismatch error; just
+      // propagate nullptr so Codegen can bail out cleanly.
+      if (!ResolvedCallTarget) {
+        LogErrorAt(Loc, "No matching overload found for '" + ModuleName + "." +
+                            Method + "' (see type-mismatch error above)");
+        return nullptr;
+      }
       std::string MangledName = ResolvedCallTarget->mangledName();
 
       llvm::Function *CalleeF = TheModule->getFunction(MangledName);
@@ -2501,31 +2723,39 @@ Value *MethodCallExprAST::codegen() {
       return nullptr;
     }
 
+    bool IsStaticMethod = false;
+    if (auto *Var = dynamic_cast<const VariableExprAST*>(Base.get())) {
+      IsStaticMethod = Var->IsStructName;
+    }
+
     // Arity is guaranteed by the TypeChecker — if it's wrong here, it's a bug.
-    assert(CalleeF->arg_size() == Args.size() + 1 &&
+    int ExpectedArity = IsStaticMethod ? Args.size() : (Args.size() + 1);
+    assert(CalleeF->arg_size() == ExpectedArity &&
            "Struct method arity mismatch after TypeChecker — compiler bug");
 
     std::vector<Value *> ArgVals;
-    Value *SelfVal = Base->codegenLValue();
-    if (!SelfVal) {
-      // If Base is an rvalue (like User(10)), we need a temporary alloca to
-      // pass by reference
-      Value *Val = Base->codegen();
-      if (!Val)
+    if (!IsStaticMethod) {
+      Value *SelfVal = Base->codegenLValue();
+      if (!SelfVal) {
+        // If Base is an rvalue (like User(10)), we need a temporary alloca to
+        // pass by reference
+        Value *Val = Base->codegen();
+        if (!Val)
+          return nullptr;
+        SelfVal = Builder->CreateAlloca(Val->getType(), nullptr, "tmp.self");
+        Builder->CreateStore(Val, SelfVal);
+      } else if (dynamic_cast<const TurfPointerType *>(getExprType(Base.get()))) {
+        SelfVal = Builder->CreateLoad(llvm::PointerType::get(*TheContext, 0),
+                                      SelfVal, "deref");
+      }
+      if (!SelfVal)
         return nullptr;
-      SelfVal = Builder->CreateAlloca(Val->getType(), nullptr, "tmp.self");
-      Builder->CreateStore(Val, SelfVal);
-    } else if (dynamic_cast<const TurfPointerType *>(getExprType(Base.get()))) {
-      SelfVal = Builder->CreateLoad(llvm::PointerType::get(*TheContext, 0),
-                                    SelfVal, "deref");
+      ArgVals.push_back(SelfVal);
     }
-    if (!SelfVal)
-      return nullptr;
-    ArgVals.push_back(SelfVal);
 
     unsigned Idx = 0;
-    for (auto ArgIt = std::next(CalleeF->arg_begin());
-         ArgIt != CalleeF->arg_end(); ++ArgIt, ++Idx) {
+    auto ArgIt = IsStaticMethod ? CalleeF->arg_begin() : std::next(CalleeF->arg_begin());
+    for (; ArgIt != CalleeF->arg_end(); ++ArgIt, ++Idx) {
       Value *V = EvaluatedArgs[Idx];
       Type *ExpectedTy = ArgIt->getType();
       if (V->getType() != ExpectedTy) {
@@ -2563,10 +2793,26 @@ Value *StructDeclExprAST::codegen() {
     LLVMFieldTypes.push_back(LLVMType);
   }
 
-  StructType *ST = StructType::create(*TheContext, LLVMFieldTypes, Name);
+  // If an opaque struct with this name already exists in the cache (created by
+  // getLLVMType when a NamedType("Matrix") was resolved before this decl ran),
+  // set its body rather than creating a second struct (which LLVM would name
+  // "Matrix.0", causing a type mismatch at call sites).
+  StructType *ST = nullptr;
+  auto CacheIt = LLVMTypeCache.find(Name);
+  if (CacheIt != LLVMTypeCache.end()) {
+    if (auto *Existing = dyn_cast<StructType>(CacheIt->second)) {
+      if (Existing->isOpaque()) {
+        Existing->setBody(LLVMFieldTypes);
+        ST = Existing;
+      }
+    }
+  }
   if (!ST) {
-    LogErrorAt(Loc, "Failed to create LLVM StructType for '" + Name + "'");
-    return nullptr;
+    ST = StructType::create(*TheContext, LLVMFieldTypes, Name);
+    if (!ST) {
+      LogErrorAt(Loc, "Failed to create LLVM StructType for '" + Name + "'");
+      return nullptr;
+    }
   }
 
   LLVMTypeCache[Name] = ST;
@@ -2767,8 +3013,13 @@ Value *FieldAccessExprAST::codegenLValue() {
     BaseLVal = Builder->CreateLoad(llvm::PointerType::get(*TheContext, 0),
                                    BaseLVal, "deref");
   }
-
-
+  // Resolve NamedType base to TurfStructType for chained field access.
+  if (auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
+    if (GlobalSymbolTable) {
+      if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+        BaseType = R.get();
+    }
+  }
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
   if (!SType) {
     LogErrorAt(Loc, "Cannot access field on non-struct type");
