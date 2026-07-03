@@ -5,12 +5,17 @@ fn get_array(): int[3] {
 
 fn main(): int {
     // 1. Assign to local variable
-    mut a: int[3] = get_array();
-    assert(a[0] == 10, "");
+    mut local_arr: int[3] = get_array();
+    assert(local_arr[0] == 10, "");
+    assert(local_arr[1] == 20, "");
+    assert(local_arr[2] == 30, "");
+
 
     // 2. Direct inline indexing
     // This tests if postfix parsing allows function calls followed by array indices
     assert(get_array()[1] * get_array()[2] == 600, "");
+
+    io.printline(get_array()[1] * get_array()[2]);
 
     return 0;
 }

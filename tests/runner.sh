@@ -18,15 +18,22 @@ FAIL_COUNT=0
 
 # Recursively find all .tr files
 while IFS= read -r test_file; do
-    echo -n "Running $test_file ... "
+    basename_test=$(basename "$test_file")
+
+    # Skip library/module files (lib_*.tr) — they have no main() and are
+    # imported by other tests, not run as standalone executables.
+    if [[ "$basename_test" == lib_* ]]; then
+        echo -e "${YELLOW}[SKIP] (Library module, no main)${NC}"
+        continue
+    fi
 
     # 1. Compile the file
+    echo -n "Running $test_file ... "
     out_binary="${test_file%.tr}.out"
     compile_output=$(../build/turf "$test_file" -o "$out_binary" 2>&1)
     compile_status=$?
 
     # Check if this is a negative test (file name starts with 'fail_')
-    basename_test=$(basename "$test_file")
     if [[ "$basename_test" == fail_* ]]; then
         if [ $compile_status -ne 0 ]; then
             echo -e "${GREEN}[PASS] (Failed as expected)${NC}"

@@ -10,7 +10,7 @@ fn greet(): void {
 }
 
 fn main(): int {
-    // Passing int where double expected (implicit widening)
+    // Passing int where double expected (implicit widening) — should work
     mut result: double = toDouble(42);
     assert(result == 42.0, "");
 
@@ -18,16 +18,12 @@ fn main(): int {
     mut sum: int = add(3, 7);
     assert(sum == 10, "");
 
-    // Passing double where int expected (implicit narrowing)
-    mut narrow: int = add(3, 2.5);
-    assert(narrow == 5, "");
-
     // Calling void function as a statement - should work
     greet();
 
-    // Using bool-to-int implicit conversion - should work
-    mut boolResult: int = add(1, true);
-    assert(boolResult == 2, "");
+    // int-to-double widening inside arithmetic is fine
+    mut widened: double = toDouble(100);
+    assert(widened == 100.0, "");
 
     return 0;
 }

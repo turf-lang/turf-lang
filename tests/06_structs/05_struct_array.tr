@@ -20,17 +20,15 @@ fn main(): int {
     users[1] = User { age: 30, name: "Bob" };
     users[2] = User { age: 35, name: "Charlie" };
 
-    mut u0: User = users[0];
-    assert(u0.age == 25, "");
-    assert(strlen(u0.name) == 5, "");
-    
-    mut u1: User = users[1];
-    assert(u1.age == 30, "");
-    assert(strlen(u1.name) == 3, "");
-    
-    mut u2: User = users[2];
-    assert(u2.age == 35, "");
-    assert(strlen(u2.name) == 7, "");
+    // Issue #17 fix: direct field access on array elements now works
+    assert(users[0].age == 25, "");
+    assert(strlen(users[0].name) == 5, "");
+
+    assert(users[1].age == 30, "");
+    assert(strlen(users[1].name) == 3, "");
+
+    assert(users[2].age == 35, "");
+    assert(strlen(users[2].name) == 7, "");
 
     return 0;
 }
