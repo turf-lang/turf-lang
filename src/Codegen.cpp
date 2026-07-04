@@ -2451,7 +2451,14 @@ Value *ArrayAccessExprAST::codegenLValue() {
     if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
       long long Idx = CI->getSExtValue();
       if (Idx < 0 || Idx >= ArraySize) {
-        ArrayBoundsError(Loc, "array", Idx, ArraySize).raise();
+        ArrayBoundsError Err(Loc, "array", Idx, ArraySize);
+        if (auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base.get())) {
+          if (GlobalSymbolTable) {
+            if (Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName()))
+              Err.withRelated(S->DeclLoc, "array declared here");
+          }
+        }
+        Err.raise();
         return nullptr;
       }
     } else {
@@ -2510,7 +2517,14 @@ Value *ArrayAccessExprAST::codegen() {
     if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
       long long Idx = CI->getSExtValue();
       if (Idx < 0 || Idx >= ArraySize) {
-        ArrayBoundsError(Loc, "array", Idx, ArraySize).raise();
+        ArrayBoundsError Err(Loc, "array", Idx, ArraySize);
+        if (auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base.get())) {
+          if (GlobalSymbolTable) {
+            if (Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName()))
+              Err.withRelated(S->DeclLoc, "array declared here");
+          }
+        }
+        Err.raise();
         return nullptr;
       }
       return Builder->CreateExtractValue(BaseVal, CI->getZExtValue(), "arrextract");

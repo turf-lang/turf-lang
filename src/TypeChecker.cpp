@@ -54,13 +54,18 @@ namespace {
 
 #ifndef TYPECHECKER_NO_ERRORS
 /// Default error handler: uses the real TypeError class from Errors.h.
-void productionErrorHandler(SourceLocation Loc, const std::string &Msg) {
-  TypeError(Loc, Msg).raise();
+void productionErrorHandler(SourceLocation Loc, const std::string &Msg,
+                            const std::vector<RelatedLocation> &Related) {
+  TypeError Err(Loc, Msg);
+  for (const auto &R : Related)
+    Err.withRelated(R.Loc, R.Description);
+  Err.raise();
 }
 #else
 /// Stub used when TYPECHECKER_NO_ERRORS is defined (unit-test builds).
 /// Throws std::runtime_error so tests can catch it with EXPECT_THROWS.
-void unitTestErrorHandler(SourceLocation, const std::string &Msg) {
+void unitTestErrorHandler(SourceLocation, const std::string &Msg,
+                          const std::vector<RelatedLocation> &) {
   throw std::runtime_error("TypeError: " + Msg);
 }
 #endif
@@ -80,6 +85,13 @@ const VariableExprAST *findRootVariable(const ExprAST *Base) {
     }
   }
   return nullptr;
+}
+
+// Convert from the resolver's location type (no Lexer.h dependency) to the
+// diagnostic engine's location type. Same layout — explicit conversion only
+// because the types are intentionally kept separate.
+static SourceLocation toSourceLocation(ResolverSourceLocation R) {
+  return {R.Line, R.Col};
 }
 
 } // namespace
@@ -118,10 +130,11 @@ void TypeChecker::setType(const ExprAST *Node, TurfTypePtr Ty) {
   NodeTypes_[Node] = std::move(Ty);
 }
 
-void TypeChecker::reportError(SourceLocation Loc, const std::string &Msg) {
+void TypeChecker::reportError(SourceLocation Loc, const std::string &Msg,
+                              const std::vector<RelatedLocation> &Related) {
   HadError_ = true;
   if (ErrorHandler_)
-    ErrorHandler_(Loc, Msg);
+    ErrorHandler_(Loc, Msg, Related);
 }
 
 // ─── Static type predicate helpers ───────────────────────────────────────────
@@ -405,7 +418,6 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
 }
 
 void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
-  // Visit both sides
   if (Node.getLHS())
     const_cast<ExprAST *>(Node.getLHS())->accept(*this);
   if (Node.getRHS())
@@ -413,19 +425,24 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
 
   TurfTypePtr LhsTy = getType(Node.getLHS());
   TurfTypePtr RhsTy = getType(Node.getRHS());
+  const VariableExprAST *LHSVar = findRootVariable(Node.getLHS());
 
   if (LhsTy && RhsTy) {
     if (!typesCompatible(RhsTy.get(), LhsTy.get())) {
+      std::vector<RelatedLocation> Related;
+      if (LHSVar && LHSVar->ResolvedSymbol) {
+        Related.push_back({toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
+                           "declared here"});
+      }
       reportError(Node.getLoc(),
                   "Cannot assign value of type '" + RhsTy->getName() +
-                      "' to variable of type '" + LhsTy->getName() + "'.");
+                      "' to variable of type '" + LhsTy->getName() + "'.",
+                  Related);
     }
   }
 
   // The assignment expression type is the RHS type
   setType(&Node, RhsTy);
-
-  const VariableExprAST *LHSVar = findRootVariable(Node.getLHS());
 
   if (LHSVar) {
     if (LHSVar->ResolvedSymbol && LHSVar->ResolvedSymbol->IsImmutable) {
@@ -451,9 +468,15 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
   if (LhsTy && RhsTy) {
     if (inferArithmeticType(Node.getLoc(), Node.getOpcode(), LhsTy.get(), RhsTy.get(), ResultTy)) {
       if (!typesCompatible(ResultTy.get(), LhsTy.get())) {
+        const VariableExprAST *LHSVar_early = findRootVariable(Node.getLHS());
+        std::vector<RelatedLocation> Related;
+        if (LHSVar_early && LHSVar_early->ResolvedSymbol)
+          Related.push_back({toSourceLocation(LHSVar_early->ResolvedSymbol->DeclLoc),
+                             "declared here"});
         reportError(Node.getLoc(),
                     "Cannot assign value of type '" + ResultTy->getName() +
-                        "' to variable of type '" + LhsTy->getName() + "'.");
+                        "' to variable of type '" + LhsTy->getName() + "'.",
+                    Related);
       }
     }
   }
@@ -730,17 +753,21 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     if (ArityMatches.empty()) {
       // Build a human-readable list of known overloads for the error message.
       std::string Overloads;
+      std::vector<RelatedLocation> Related;
       for (const auto &Cand : Node.ResolvedCandidates) {
         if (Cand) {
           if (!Overloads.empty()) Overloads += ", ";
           Overloads += Cand->signature();
+          Related.push_back({toSourceLocation(Cand->DeclLoc),
+                             "overload: " + Cand->signature()});
         }
       }
       reportError(Node.getLoc(),
                   "'" + CalleeName + "' called with " +
                       std::to_string(ArgCount) + " argument" +
                       (ArgCount == 1 ? "" : "s") +
-                      "; known overloads: " + Overloads + ".");
+                      "; known overloads: " + Overloads + ".",
+                  Related);
       setType(&Node, nullptr);
       return;
     }
@@ -767,13 +794,19 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     if (TypeMatches.empty()) {
       // Build argument-type string for the error.
       std::string ArgTypeStr;
+      std::vector<RelatedLocation> Related;
       for (int i = 0; i < ArgCount; ++i) {
         if (i) ArgTypeStr += ", ";
         ArgTypeStr += (ArgTypes[i] ? ArgTypes[i]->getName() : "unknown");
       }
+      for (const auto &Cand : ArityMatches)
+        if (Cand)
+          Related.push_back({toSourceLocation(Cand->DeclLoc),
+                             "candidate: " + Cand->signature()});
       reportError(Node.getLoc(),
                   "No overload of '" + CalleeName +
-                      "' matches argument types (" + ArgTypeStr + ").");
+                      "' matches argument types (" + ArgTypeStr + ").",
+                  Related);
       setType(&Node, nullptr);
       return;
     }
@@ -862,15 +895,19 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
 
     if (ArityMatches.empty()) {
       std::string Overloads;
+      std::vector<RelatedLocation> Related;
       for (const auto *Cand : Candidates) {
         if (!Overloads.empty()) Overloads += ", ";
         Overloads += ModuleName + "." + Cand->signature();
+        Related.push_back({toSourceLocation(Cand->DeclLoc),
+                           "overload: " + ModuleName + "." + Cand->signature()});
       }
       reportError(Node.getLoc(),
                   "'" + ModuleName + "." + MethodName + "' called with " +
                       std::to_string(ArgCount) + " argument" +
                       (ArgCount == 1 ? "" : "s") +
-                      "; known overloads: " + Overloads + ".");
+                      "; known overloads: " + Overloads + ".",
+                  Related);
       setType(&Node, nullptr);
       return;
     }
@@ -893,13 +930,18 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
 
     if (TypeMatches.empty()) {
       std::string ArgTypeStr;
+      std::vector<RelatedLocation> Related;
       for (int i = 0; i < ArgCount; ++i) {
         if (i) ArgTypeStr += ", ";
         ArgTypeStr += (ArgTypes[i] ? ArgTypes[i]->getName() : "unknown");
       }
+      for (const auto *Cand : ArityMatches)
+        Related.push_back({toSourceLocation(Cand->DeclLoc),
+                           "candidate: " + ModuleName + "." + Cand->signature()});
       reportError(Node.getLoc(),
                   "No overload of '" + ModuleName + "." + MethodName +
-                      "' matches argument types (" + ArgTypeStr + ").");
+                      "' matches argument types (" + ArgTypeStr + ").",
+                  Related);
       setType(&Node, nullptr);
       return;
     }

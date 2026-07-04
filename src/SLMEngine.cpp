@@ -111,7 +111,8 @@ bool SLMEngine::initialize(const std::string &modelPath) {
  * @param prompt The formatted ChatML prompt containing the error context.
  * @return std::string The raw generated response from the model.
  */
-std::string SLMEngine::generateSuggestion(const std::string &prompt,
+std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
+                                          const std::string &userPrompt,
                                           const std::string &grammarStr) {
   if (!ctx)
     return "";
@@ -122,40 +123,69 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt,
     freopen("/dev/null", "w", stderr);
   }
 
-  // Tokenize the prompt
   int n_ctx = llama_n_ctx(ctx);
-  std::vector<llama_token> tokens(n_ctx);
   const llama_vocab *vocab_tok = llama_model_get_vocab(llama_get_model(ctx));
-  int n_tokens = llama_tokenize(vocab_tok, prompt.c_str(), prompt.size(),
-                                tokens.data(), n_ctx,
-                                /*add_special=*/true, /*parse_special=*/true);
 
-  if (n_tokens < 0) {
+  // ── 1. Evaluate System Prompt (Cached) ──
+  if (systemPrompt != CurrentCachedSystemPrompt || CachedSystemTokens.empty()) {
+    llama_memory_clear(llama_get_memory(ctx), false);
+    
+    std::vector<llama_token> sysTokens(n_ctx);
+    int n_sys = llama_tokenize(vocab_tok, systemPrompt.c_str(), systemPrompt.size(),
+                               sysTokens.data(), n_ctx,
+                               /*add_special=*/true, /*parse_special=*/true);
+    
+    if (n_sys > 0) {
+      sysTokens.resize(n_sys);
+      llama_batch sysBatch = llama_batch_get_one(sysTokens.data(), n_sys);
+      if (llama_decode(ctx, sysBatch) == 0) {
+        CachedSystemTokens.clear();
+        for (int tok : sysTokens) CachedSystemTokens.push_back(tok);
+        CurrentCachedSystemPrompt = systemPrompt;
+      } else {
+        CachedSystemTokens.clear();
+        CurrentCachedSystemPrompt.clear();
+      }
+    }
+  }
+
+  // ── 2. Evaluate User Prompt ──
+  std::vector<llama_token> userTokens(n_ctx);
+  int n_user = llama_tokenize(vocab_tok, userPrompt.c_str(), userPrompt.size(),
+                              userTokens.data(), n_ctx,
+                              /*add_special=*/false, /*parse_special=*/true);
+
+  if (n_user <= 0) {
     if (saved_stderr != -1) {
       dup2(saved_stderr, STDERR_FILENO);
       close(saved_stderr);
     }
     return "";
   }
+  userTokens.resize(n_user);
 
-  // Token-budget guard: ensure there is room for at least 512 generation
-  // tokens after the prompt. Silent truncation by llama_decode corrupts the
-  // middle of the prompt in a way that's very hard to diagnose externally.
+  int total_tokens = CachedSystemTokens.size() + n_user;
+
+  // Token-budget guard
   static constexpr int GEN_BUDGET = 512;
-  if (n_tokens > n_ctx - GEN_BUDGET) {
+  if (total_tokens > n_ctx - GEN_BUDGET) {
     if (saved_stderr != -1) {
       dup2(saved_stderr, STDERR_FILENO);
       close(saved_stderr);
     }
-    std::cerr << "Compiler Warning: SLM prompt too large (" << n_tokens
+    std::cerr << "Compiler Warning: SLM prompt too large (" << total_tokens
               << " tokens, ctx=" << n_ctx
               << "). Skipping suggestion to avoid truncation.\n";
     return "";
   }
-  tokens.resize(n_tokens);
 
-  llama_batch batch = llama_batch_get_one(tokens.data(), n_tokens);
-  if (llama_decode(ctx, batch) != 0) {
+  // Manually construct the user batch with the correct starting position offset
+  llama_batch userBatch = llama_batch_get_one(userTokens.data(), n_user);
+  for (int i = 0; i < n_user; i++) {
+    userBatch.pos[i] = CachedSystemTokens.size() + i;
+  }
+
+  if (llama_decode(ctx, userBatch) != 0) {
     if (saved_stderr != -1) {
       dup2(saved_stderr, STDERR_FILENO);
       close(saved_stderr);
@@ -240,13 +270,18 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt,
       }
     }
 
+    // For generating subsequent tokens, the position must continue incrementing
     llama_batch next = llama_batch_get_one(&token, 1);
+    next.pos[0] = CachedSystemTokens.size() + n_user + i;
     if (llama_decode(ctx, next) != 0)
       break;
   }
 
   llama_sampler_free(sampler);
-  llama_memory_clear(llama_get_memory(ctx), false);
+  
+  // Clear only the user prompt and generated tokens from the KV cache,
+  // retaining the cached system prompt prefix.
+  llama_memory_seq_rm(llama_get_memory(ctx), -1, CachedSystemTokens.size(), -1);
 
   if (saved_stderr != -1) {
     dup2(saved_stderr, STDERR_FILENO);

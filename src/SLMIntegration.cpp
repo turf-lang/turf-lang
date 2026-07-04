@@ -142,156 +142,6 @@ getCodeContextWithPinnedLines(int errorLine, int contextSize,
   return context;
 }
 
-// Scans SourceLines for the definition of a function whose name appears in
-// the error message or in the error line itself. Returns the 1-based line
-// number of the matching `fn <name>(` header, or -1 if not found.
-// This is a pure text scan — no AST required — so it is fully self-contained
-// inside SLMIntegration.cpp with no symbol-table dependency.
-static int findFunctionSignatureLine(const std::string &errorMsg,
-                                     int errorLine) {
-  if (SourceLines.empty())
-    return -1;
-
-  // Collect candidate function names from the error message.
-  // Common patterns:
-  //   "Unknown function: 'foo'"        -> extract "foo"
-  //   "void value from 'foo'"          -> extract "foo"
-  //   "Wrong argument count for 'foo'" -> extract "foo"
-  std::vector<std::string> candidates;
-
-  auto extractQuoted = [&](const std::string &src) {
-    size_t p = src.find('\'');
-    while (p != std::string::npos) {
-      size_t q = src.find('\'', p + 1);
-      if (q != std::string::npos) {
-        candidates.push_back(src.substr(p + 1, q - p - 1));
-        p = src.find('\'', q + 1);
-      } else {
-        break;
-      }
-    }
-  };
-
-  extractQuoted(errorMsg);
-
-  // Also scan the error line itself for identifiers followed by '('
-  if (errorLine >= 1 && errorLine <= static_cast<int>(SourceLines.size())) {
-    const std::string &src = SourceLines[errorLine - 1];
-    for (size_t i = 0; i < src.size();) {
-      if (std::isalpha(static_cast<unsigned char>(src[i]))) {
-        size_t j = i;
-        while (
-            j < src.size() &&
-            (std::isalnum(static_cast<unsigned char>(src[j])) || src[j] == '_'))
-          ++j;
-        // Check whether the identifier is immediately followed by '('
-        size_t k = j;
-        while (k < src.size() && src[k] == ' ')
-          ++k;
-        if (k < src.size() && src[k] == '(')
-          candidates.push_back(src.substr(i, j - i));
-        i = j;
-      } else {
-        ++i;
-      }
-    }
-  }
-
-  if (candidates.empty())
-    return -1;
-
-  // Scan every source line for `fn <candidate>(`
-  for (int ln = 1; ln <= static_cast<int>(SourceLines.size()); ++ln) {
-    const std::string &line = SourceLines[ln - 1];
-    size_t fnPos = line.find("fn ");
-    if (fnPos == std::string::npos)
-      continue;
-
-    for (const auto &name : candidates) {
-      if (name.empty())
-        continue;
-      size_t namePos = line.find(name, fnPos + 3);
-      if (namePos == std::string::npos)
-        continue;
-      // Confirm the identifier is followed (after optional whitespace) by '('
-      size_t after = namePos + name.size();
-      while (after < line.size() && line[after] == ' ')
-        ++after;
-      if (after < line.size() && line[after] == '(') {
-        if (std::getenv("TURF_SLM_DEBUG")) {
-          std::cerr << "[SLM 3b] Found fn '" << name << "' at line " << ln
-                    << " (pinning to context)\n";
-        }
-        return ln;
-      }
-    }
-  }
-
-  return -1;
-}
-
-// Scans SourceLines for a variable declaration matching the variable name
-// extracted from an UNDECLARED_VAR error message. Returns the 1-based line
-// number of the nearest prior declaration in the same function scope, or -1.
-// Uses Turf-Lang syntax: `mut name : type` or `immut name : type`.
-// Stops the backward scan at the nearest `fn ` line to avoid crossing into
-// an unrelated function's scope.
-static int findVariableDeclarationLine(const std::string &errorMsg,
-                                       int errorLine) {
-  if (SourceLines.empty())
-    return -1;
-
-  // Extract the variable name from single-quoted text in the error message.
-  std::string varName;
-  size_t q1 = errorMsg.find('\'');
-  if (q1 != std::string::npos) {
-    size_t q2 = errorMsg.find('\'', q1 + 1);
-    if (q2 != std::string::npos && q2 > q1 + 1)
-      varName = errorMsg.substr(q1 + 1, q2 - q1 - 1);
-  }
-
-  if (varName.empty())
-    return -1;
-
-  // Scan backwards from just before the error line.
-  // Stop at the nearest enclosing `fn ` line to avoid crossing scope.
-  int lastLine = std::min(errorLine - 1, static_cast<int>(SourceLines.size()));
-  for (int ln = lastLine; ln >= 1; --ln) {
-    const std::string &line = SourceLines[ln - 1];
-
-    // Function boundary: stop scanning if we've crossed into another fn scope.
-    if (line.find("fn ") != std::string::npos)
-      break;
-
-    // Turf-Lang declaration syntax: `mut <varName> :` or `immut <varName> :`
-    for (const char *prefix : {"mut ", "immut "}) {
-      size_t pfxLen = std::strlen(prefix);
-      size_t pos = line.find(prefix);
-      if (pos == std::string::npos)
-        continue;
-      size_t nameStart = pos + pfxLen;
-      // Skip extra whitespace after keyword
-      while (nameStart < line.size() && line[nameStart] == ' ')
-        ++nameStart;
-      // Check varName match
-      if (nameStart + varName.size() <= line.size() &&
-          line.compare(nameStart, varName.size(), varName) == 0) {
-        size_t afterName = nameStart + varName.size();
-        // Whole-word check: must be followed by whitespace or ':'
-        if (afterName >= line.size() ||
-            line[afterName] == ' ' || line[afterName] == ':') {
-          if (std::getenv("TURF_SLM_DEBUG")) {
-            std::cerr << "[SLM 3a] Found declaration of '" << varName
-                      << "' at line " << ln << " (pinning to context)\n";
-          }
-          return ln;
-        }
-      }
-    }
-  }
-
-  return -1;
-}
 
 static std::string escapeJsonString(const std::string &src) {
   std::string result;
@@ -366,53 +216,6 @@ static std::string extractJsonFieldString(const std::string &json,
   return result;
 }
 
-
-static ErrorCategory classifyErrorWithSLM(const std::string &errorMessage,
-                                          const std::string &codeContext) {
-  // Load the category reference file so the SLM knows what each category means.
-  std::string categoryDoc = loadDocFile("docs/slm/error_categories.txt");
-
-  std::string categoryList =
-      "TYPE_MISMATCH, UNDECLARED_VARIABLE, CONTROL_FLOW, SYNTAX_ERROR, "
-      "ARITHMETIC, "
-      "STRING_CONVERSION, ARRAY_ERROR, DECLARATION, FUNCTION_SIGNATURE, "
-      "BUILTIN_FUNCTION, GENERAL";
-
-  std::string systemContent =
-      "You are an expert compiler error classifier for Turf-Lang.\n"
-      "Categorize the following error into EXACTLY ONE of these categories:\n" +
-      categoryList + "\n\n";
-
-  if (!categoryDoc.empty()) {
-    systemContent += "Category descriptions:\n" + categoryDoc + "\n\n";
-  }
-
-  systemContent += "Respond with ONLY the exact category name. No explanation, "
-                   "no quotes, no markdown.\n";
-
-  std::string prompt = "<|im_start|>system\n" + systemContent +
-                       "<|im_end|>\n"
-                       "<|im_start|>user\n"
-                       "Error: " +
-                       errorMessage + "\nCode Context:\n" + codeContext +
-                       "\n<|im_end|>\n"
-                       "<|im_start|>assistant\n";
-
-  std::string response = SLMEngine::getInstance().generateSuggestion(prompt);
-
-  size_t start = response.find_first_not_of(" \t\r\n\"'");
-  size_t end = response.find_last_not_of(" \t\r\n\"'");
-  if (start != std::string::npos && end != std::string::npos) {
-    std::string categoryStr = response.substr(start, end - start + 1);
-    if (std::getenv("TURF_SLM_DEBUG")) {
-      std::cerr << "[SLM Classifier] AI classification: " << categoryStr << "\n";
-    }
-    return categoryFromString(categoryStr);
-  }
-
-  return ErrorCategory::GENERAL;
-}
-
 // Deterministic confidence scoring.
 // Rather than asking the LLM to guess a probability (which small models anchor
 // to example values in the prompt), we compute a score from measurable signals:
@@ -477,7 +280,9 @@ static float computeConfidence(const AISuggestion &s, ErrorCategory category,
  * @return AISuggestion A structured AI response containing an explanation and
  * patch.
  */
-AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, const std::string &hint) {
+AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
+                             const std::string &hint,
+                             const std::vector<RelatedLocation> &related) {
   AISuggestion suggestion;
   std::string cleanError = stripAnsiCodes(errorMessage);
 
@@ -537,45 +342,22 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
 
   // Smart context: pin relevant definitions outside the window
   //
-  // 3b: For FUNCTION_SIGNATURE errors, locate the `fn <name>(` definition
-  //     in SourceLines and pin it to the context.
-  // 3a: For UNDECLARED_VAR errors, locate the nearest prior declaration
-  //     of the undeclared variable (e.g. `int x = ...` in an outer scope
-  //     that has since been exited) and pin it.
-  //
-  // getCodeContextWithPinnedLines automatically skips pinned lines that
-  // already fall inside the ±contextSize window, so there is no duplication
-  // risk.  If no relevant line is found, we fall through to plain context.
-  if (category == ErrorCategory::FUNCTION_SIGNATURE) {
-    int sigLine = findFunctionSignatureLine(cleanError, errorLine);
-    if (sigLine > 0) {
-      codeContext =
-          getCodeContextWithPinnedLines(errorLine, contextSize, {sigLine});
-    } else {
-      codeContext = getCodeContext(errorLine, contextSize);
-    }
-  } else if (category == ErrorCategory::UNDECLARED_VAR) {
-    int declLine = findVariableDeclarationLine(cleanError, errorLine);
-    if (declLine > 0) {
-      codeContext =
-          getCodeContextWithPinnedLines(errorLine, contextSize, {declLine});
-    } else {
-      codeContext = getCodeContext(errorLine, contextSize);
-    }
-  } else if (category == ErrorCategory::TYPE_MISMATCH ||
-             category == ErrorCategory::ARRAY_ERROR) {
-    // For type mismatches and array errors, try to pin the declaration of the
-    // variable involved — the model needs to see where the type was declared
-    // to understand the conflict, which may be far outside the ±window.
-    int declLine = findVariableDeclarationLine(cleanError, errorLine);
-    if (declLine > 0) {
-      codeContext =
-          getCodeContextWithPinnedLines(errorLine, contextSize, {declLine});
-    } else {
-      codeContext = getCodeContext(errorLine, contextSize);
-    }
-  } else {
-    codeContext = getCodeContext(errorLine, contextSize);
+  // Pinning is now data-driven: RelatedLocations are populated by the
+  // compiler's own Resolver/TypeChecker at the exact point each error fires,
+  // carrying structurally correct locations from real symbol-table entries.
+  // Zero category branching, zero hardcoded syntax, zero scanner functions.
+  // If `related` is empty (error classes that don't yet populate it), this
+  // naturally falls back to plain sliding-window context — same as before.
+  std::vector<int> pinnedLines;
+  for (const auto &rel : related)
+    pinnedLines.push_back(rel.Loc.Line);
+
+  codeContext = pinnedLines.empty()
+      ? getCodeContext(errorLine, contextSize)
+      : getCodeContextWithPinnedLines(errorLine, contextSize, pinnedLines);
+
+  if (std::getenv("TURF_SLM_DEBUG")) {
+    std::cerr << "--- PINNED CONTEXT ---\n" << codeContext << "\n----------------------\n";
   }
 
   std::string categoryName = getCategoryName(category);
@@ -617,7 +399,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
   // to produce. Small models "anchor" to example values in the prompt and copy
   // them verbatim, making any LLM-emitted probability meaningless. Instead we
   // compute confidence deterministically after parsing (see computeConfidence).
-  std::string prompt =
+  std::string systemPrompt =
       "<|im_start|>system\n"
       "You are a conservative compiler assistant for Turf-Lang.\n"
       "Error category: " +
@@ -639,7 +421,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
       "5. Respond ONLY in valid JSON without markdown code blocks.\n"
       "6. Keep explanation, suggested_comment, and warning to 1-2 sentences "
       "max.\n"
-      "<|im_end|>\n"
+      "<|im_end|>\n";
+
+  std::string userPrompt =
       "<|im_start|>user\n"
       "{\n"
       "  \"error\": \"" + escapeJsonString(cleanError) + "\",\n"
@@ -662,7 +446,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
       "<|im_start|>assistant\n";
 
   std::string rawResponse =
-      SLMEngine::getInstance().generateSuggestion(prompt, grammarStr);
+      SLMEngine::getInstance().generateSuggestion(systemPrompt, userPrompt, grammarStr);
 
   if (std::getenv("TURF_SLM_DEBUG")) {
     std::cerr << "Clean Error: " << cleanError << "\n";
@@ -760,9 +544,10 @@ bool verifySuggestion(const AISuggestion &suggestion, int errorLine) {
 // Wrapper that gets SLM suggestion, validates it in a sandbox, and applies it
 // if valid. Returns an enhanced AISuggestion with validation results.
 AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
-                                        int errorLine, const std::string &hint) {
+                                        int errorLine, const std::string &hint,
+                                        const std::vector<RelatedLocation> &related) {
   // First, get the SLM suggestion
-  AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine, hint);
+  AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine, hint, related);
 
   if (!suggestion.valid) {
     return suggestion;

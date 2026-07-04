@@ -22,6 +22,7 @@ protected:
   SourceLocation Loc;
   std::string Message;
   std::string Hint_;
+  std::vector<RelatedLocation> RelatedLocations_; // structural context for SLM
 
 public:
   TurfError(SourceLocation Loc, const std::string &Msg,
@@ -33,8 +34,18 @@ public:
   const std::string &getHint() const { return Hint_; }
   const std::string &getMessage() const { return Message; }
 
+  const std::vector<RelatedLocation> &getRelatedLocations() const {
+    return RelatedLocations_;
+  }
+
+  // Chainable: TurfError(loc, msg).withRelated(declLoc, "declared here").raise();
+  TurfError &withRelated(SourceLocation RelLoc, const std::string &Desc) {
+    RelatedLocations_.push_back({RelLoc, Desc});
+    return *this;
+  }
+
   void raise() const {
-    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/false);
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/false, RelatedLocations_);
 
     if (g_recoverActive)
       longjmp(g_recoverJmp, 1);
@@ -45,7 +56,7 @@ public:
   }
 
   void warn() const {
-    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true);
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true, RelatedLocations_);
   }
 
   static std::string formatRankedSuggestions(const RankedSuggestions &Suggestions) {
@@ -99,6 +110,7 @@ protected:
   SourceLocation Loc;
   std::string Message;
   std::string Hint_;
+  std::vector<RelatedLocation> RelatedLocations_; // structural context for SLM
 
 public:
   TurfWarning(SourceLocation Loc, const std::string &Msg,
@@ -110,9 +122,18 @@ public:
   const std::string &getHint() const { return Hint_; }
   const std::string &getMessage() const { return Message; }
 
+  const std::vector<RelatedLocation> &getRelatedLocations() const {
+    return RelatedLocations_;
+  }
+
+  TurfWarning &withRelated(SourceLocation RelLoc, const std::string &Desc) {
+    RelatedLocations_.push_back({RelLoc, Desc});
+    return *this;
+  }
+
   // NEVER interrupts compilation flow — always returns normally.
   void emit() const {
-    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true);
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true, RelatedLocations_);
   }
 
   void warn() const { emit(); }
@@ -383,6 +404,7 @@ public:
     Hint_ = "If you want to change its value, just do `" + Name +
             " = new_value;` without the type (like 'int' or 'string'). If "
             "you want a new variable, give it a different name!";
+    RelatedLocations_.push_back({PrevLoc, "first declared here"});
   }
 };
 
@@ -401,6 +423,7 @@ public:
                "Note: The older one is at line " +
                std::to_string(PrevLoc.Line) + ", column " +
                std::to_string(PrevLoc.Col) + Colors::RESET;
+    RelatedLocations_.push_back({PrevLoc, "originally declared here"});
   }
 };
 

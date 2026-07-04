@@ -56,6 +56,7 @@
 #define TYPE_CHECKER_H
 
 #include "ASTVisitor.h"
+#include "Lexer.h" // for SourceLocation, RelatedLocation
 #include "ResolverSymbolTable.h"
 #include "Types.h"
 
@@ -94,7 +95,8 @@ public:
   // After the callback returns the TypeChecker inserts an 'unknown' type for
   // the offending node and continues so that further errors can still be found.
   using ErrorHandler =
-      std::function<void(SourceLocation, const std::string &)>;
+      std::function<void(SourceLocation, const std::string &,
+                         const std::vector<RelatedLocation> &)>;
 
   // ── Constructors ──────────────────────────────────────────────────────────
 
@@ -214,7 +216,8 @@ private:
   void setType(const ExprAST *Node, TurfTypePtr Ty);
 
   /// Fire the error handler with the given location and message.
-  void reportError(SourceLocation Loc, const std::string &Msg);
+  void reportError(SourceLocation Loc, const std::string &Msg,
+                   const std::vector<RelatedLocation> &Related = {});
 
   /**
    * @brief Infer the result type of a binary arithmetic/string operation.

@@ -62,6 +62,10 @@ void Resolver::resolveAll(
     resolve(Node.get());
 }
 
+static SourceLocation toSourceLocation(ResolverSourceLocation R) {
+  return {R.Line, R.Col};
+}
+
 ResolverFunctionSymbol
 Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
                               const std::string &ModuleName) const {
@@ -471,7 +475,12 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
   }
 
   if (!AnyArityMatch) {
-    WrongArityError(Node.getLoc(), CalleeName, ArgCount, AllSignatures).raise();
+    auto Err = WrongArityError(Node.getLoc(), CalleeName, ArgCount, AllSignatures);
+    for (const auto *Sym : CurrentFileMatches)
+      Err.withRelated(toSourceLocation(Sym->DeclLoc), "candidate");
+    for (const auto &Match : ModuleMatches)
+      Err.withRelated(toSourceLocation(Match.Symbol->DeclLoc), "candidate");
+    Err.raise();
     return;
   }
 
@@ -566,9 +575,12 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
         }
       }
       if (!AnyArityMatch) {
-        WrongArityError(Node.getLoc(),
+        auto Err = WrongArityError(Node.getLoc(),
                         ModuleName + "." + MethodName,
-                        ArgCount, AllSigs).raise();
+                        ArgCount, AllSigs);
+        for (const auto *Cand : MethodOverloads)
+          Err.withRelated(toSourceLocation(Cand->DeclLoc), "candidate");
+        Err.raise();
         return;
       }
 

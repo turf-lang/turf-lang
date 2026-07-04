@@ -141,7 +141,8 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
 
 // DiagnosticEngine : method implementations
 void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
-                           const std::string &Hint, bool IsWarning) {
+                           const std::string &Hint, bool IsWarning,
+                           const std::vector<RelatedLocation> &Related) {
   // If there is already an error on this line, suppress everything else
   // (both additional errors and warnings) to avoid cascading noise.
   if (ErrorLines.count(Loc.Line))
@@ -160,7 +161,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           "fresh analysis." +
           Colors::RESET;
     } else {
-      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint);
+      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint, Related);
 
       if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
         // Replace compiler message with high-confidence AI suggestion.
@@ -187,15 +188,16 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
     }
   }
 
-  Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning});
+  Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning, Related});
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);
 }
 
 void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
-                           bool IsWarning) {
-  add(Loc, Msg, "", IsWarning);
+                           bool IsWarning,
+                           const std::vector<RelatedLocation> &Related) {
+  add(Loc, Msg, "", IsWarning, Related);
 }
 
 bool DiagnosticEngine::hasErrors() { return !ErrorLines.empty(); }

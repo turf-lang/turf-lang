@@ -14,6 +14,16 @@ struct SourceLocation {
   int Col;
 };
 
+// Carries the location of a contextually relevant secondary site alongside
+// a diagnostic — e.g. "declared here", "previous definition", "overload: …".
+// Populated at the exact point each error is raised, using real symbol-table
+// data, so the SLM layer receives structurally correct locations with zero
+// text-scanning or hardcoded syntax assumptions.
+struct RelatedLocation {
+  SourceLocation Loc;
+  std::string Description; // e.g. "declared here", "overload: fn foo(int)"
+};
+
 extern std::ifstream *SourceFile;
 extern double NumVal;
 extern long long IntVal;
@@ -51,15 +61,18 @@ public:
     std::string Msg;
     std::string Hint;
     bool IsWarning;
+    std::vector<RelatedLocation> RelatedLocations; // structural context for SLM
   };
 
   // Record a diagnostic. Errors on a line that already has an error are
   // dropped. Warnings on a line that has an error are also dropped.
   static void add(SourceLocation Loc, const std::string &Msg,
-                  const std::string &Hint, bool IsWarning = false);
+                  const std::string &Hint, bool IsWarning = false,
+                  const std::vector<RelatedLocation> &Related = {});
 
   static void add(SourceLocation Loc, const std::string &Msg,
-                  bool IsWarning = false);
+                  bool IsWarning = false,
+                  const std::vector<RelatedLocation> &Related = {});
 
   // True if any error (not just warning) has been recorded.
   static bool hasErrors();
