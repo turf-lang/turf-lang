@@ -10,66 +10,153 @@
 
 using AssignSet = std::unordered_set<SymbolID>;
 
-static void collectReadsAndDefs(const ExprAST *E, AssignSet &Current,
-                                const std::function<void(SourceLocation,const std::string&)> &onRead,
-                                const std::function<void(SourceLocation,const std::string&)> &onDef) {
-  if (!E) return;
+namespace {
 
-  // Lambdas for recursion
-  std::function<void(const ExprAST *)> visit = [&](const ExprAST *N) {
-    if (!N) return;
-    // Handle node kinds via RTTI
-    if (auto V = dynamic_cast<const VariableExprAST *>(N)) {
-      onRead(V->getLoc(), V->getName());
-    } else if (auto A = dynamic_cast<const AssignmentExprAST *>(N)) {
-      // Visit RHS first (reads), then LHS becomes assigned
-      visit(A->getRHS());
-      // LHS may be a variable or more complex; if variable, mark def
-      if (auto L = dynamic_cast<const VariableExprAST *>(A->getLHS())) {
-        onDef(A->getLoc(), L->getName());
-      } else {
-        visit(A->getLHS());
-      }
-    } else if (auto Vd = dynamic_cast<const VarDeclExprAST *>(N)) {
-      // initializer reads then def
-      visit(Vd->getInitializer());
-      onDef(Vd->getLoc(), Vd->getName());
-    } else if (auto B = dynamic_cast<const BinaryExprAST *>(N)) {
-      visit(B->getLHS());
-      visit(B->getRHS());
-    } else if (auto U = dynamic_cast<const UnaryExprAST *>(N)) {
-      visit(U->getOperand());
-    } else if (auto If = dynamic_cast<const IfExprAST *>(N)) {
-      for (const auto &Branch : If->getBranches()) {
-        visit(Branch.Cond.get());
-        visit(Branch.Body.get());
-      }
-      visit(If->getElse());
-    } else if (auto Bl = dynamic_cast<const BlockExprAST *>(N)) {
-      for (const auto &E2 : Bl->getExpressions())
-        visit(E2.get());
-    } else if (auto R = dynamic_cast<const ReturnExprAST *>(N)) {
-      visit(R->getVal());
-    } else if (auto W = dynamic_cast<const WhileExprAST *>(N)) {
-      visit(W->getCond());
-      visit(W->getBody());
-    } else if (auto F = dynamic_cast<const ForExprAST *>(N)) {
-      visit(F->getStart());
-      visit(F->getEnd());
-      visit(F->getStep());
-      visit(F->getBody());
-    } else if (auto C = dynamic_cast<const CastExprAST *>(N)) {
-      visit(C->getOperand());
-    } else if (auto S = dynamic_cast<const SizeOfExprAST *>(N)) {
-      // nothing
-    } else if (auto Str = dynamic_cast<const StringExprAST *>(N)) {
-      // nothing
-    } else if (auto Num = dynamic_cast<const NumberExprAST *>(N)) {
-      // nothing
+class AnalysisVisitor : public ASTVisitor {
+  const std::function<void(SourceLocation, const std::string &)> &onRead;
+  const std::function<void(SourceLocation, const std::string &)> &onDef;
+
+  void visitChild(const ExprAST *Node) {
+    if (Node)
+      const_cast<ExprAST *>(Node)->accept(*this);
+  }
+
+public:
+  AnalysisVisitor(
+      const std::function<void(SourceLocation, const std::string &)> &onRead,
+      const std::function<void(SourceLocation, const std::string &)> &onDef)
+      : onRead(onRead), onDef(onDef) {}
+
+  void visitVariable(VariableExprAST &Node) override {
+    onRead(Node.getLoc(), Node.getName());
+  }
+
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    visitChild(Node.getInitializer());
+    if (Node.getInitializer())
+      onDef(Node.getLoc(), Node.getName());
+  }
+
+  void visitAssignment(AssignmentExprAST &Node) override {
+    visitChild(Node.getRHS());
+    if (auto *L = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {
+      onDef(Node.getLoc(), L->getName());
+    } else {
+      visitChild(Node.getLHS());
     }
-  };
+  }
 
-  visit(E);
+  void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override {
+    visitChild(Node.getRHS());
+    if (auto *L = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {
+      onRead(Node.getLoc(), L->getName());
+      onDef(Node.getLoc(), L->getName());
+    } else {
+      visitChild(Node.getLHS());
+    }
+  }
+
+  void visitPostfixExpr(PostfixExprAST &Node) override {
+    if (auto *L = dynamic_cast<const VariableExprAST *>(Node.getOperand())) {
+      onRead(Node.getLoc(), L->getName());
+      onDef(Node.getLoc(), L->getName());
+    } else {
+      visitChild(Node.getOperand());
+    }
+  }
+
+  void visitBinary(BinaryExprAST &Node) override {
+    visitChild(Node.getLHS());
+    visitChild(Node.getRHS());
+  }
+
+  void visitUnary(UnaryExprAST &Node) override {
+    visitChild(Node.getOperand());
+  }
+
+  void visitCast(CastExprAST &Node) override { visitChild(Node.getOperand()); }
+
+  void visitBlock(BlockExprAST &Node) override {
+    for (const auto &E : Node.getExpressions())
+      visitChild(E.get());
+  }
+
+  void visitIf(IfExprAST &Node) override {
+    for (const auto &Branch : Node.getBranches()) {
+      visitChild(Branch.Cond.get());
+      visitChild(Branch.Body.get());
+    }
+    visitChild(Node.getElse());
+  }
+
+  void visitWhile(WhileExprAST &Node) override {
+    visitChild(Node.getCond());
+    visitChild(Node.getBody());
+  }
+
+  void visitFor(ForExprAST &Node) override {
+    visitChild(Node.getStart());
+    visitChild(Node.getEnd());
+    visitChild(Node.getStep());
+    visitChild(Node.getBody());
+  }
+
+  void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
+
+  void visitFuncCall(FuncCallExprAST &Node) override {
+    for (const auto &Arg : Node.getArgs())
+      visitChild(Arg.get());
+  }
+
+  void visitMethodCall(MethodCallExprAST &Node) override {
+    visitChild(Node.getBase());
+    for (const auto &Arg : Node.getArgs())
+      visitChild(Arg.get());
+  }
+
+  void visitFieldAccess(FieldAccessExprAST &Node) override {
+    visitChild(Node.getBase());
+  }
+
+  void visitArrayAccess(ArrayAccessExprAST &Node) override {
+    visitChild(Node.getBase());
+    visitChild(Node.getIndex());
+  }
+
+  void visitArrayAssign(ArrayAssignExprAST &Node) override {
+    visitChild(Node.getIndex());
+    visitChild(Node.getRHS());
+  }
+
+  void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
+    for (const auto &Elem : Node.getElements())
+      visitChild(Elem.get());
+  }
+
+  void visitArrayDecl(ArrayDeclExprAST &Node) override {
+    for (const auto &Init : Node.getInitList())
+      visitChild(Init.get());
+    if (Node.getInitExpr())
+      visitChild(Node.getInitExpr().get());
+    onDef(Node.getLoc(), Node.getName());
+  }
+
+  void visitStructInit(StructInitExprAST &Node) override {
+    for (const auto &Field : Node.getNamedFields())
+      visitChild(Field.second.get());
+  }
+};
+
+} // namespace
+
+static void collectReadsAndDefs(
+    const ExprAST *E, AssignSet &Current,
+    const std::function<void(SourceLocation, const std::string &)> &onRead,
+    const std::function<void(SourceLocation, const std::string &)> &onDef) {
+  if (!E)
+    return;
+  AnalysisVisitor Visitor(onRead, onDef);
+  const_cast<ExprAST *>(E)->accept(Visitor);
 }
 
 void DefiniteAssignmentPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialAssigned) {

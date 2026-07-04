@@ -173,6 +173,8 @@ public:
   void visitBinary(BinaryExprAST &Node) override;
   void visitUnary(UnaryExprAST &Node) override;
   void visitAssignment(AssignmentExprAST &Node) override;
+  void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override;
+  void visitPostfixExpr(PostfixExprAST &Node) override;
   void visitCast(CastExprAST &Node) override;
 
   // ── Control flow ──────────────────────────────────────────────────────────

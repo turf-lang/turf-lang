@@ -24,6 +24,7 @@
 
 // Global CFG storage
 std::vector<std::unique_ptr<CFG>> GlobalCFGs;
+void ClearGlobalCFGs() { GlobalCFGs.clear(); }
 
 /**
  * @brief Creates a new basic block within the CFG.
@@ -475,7 +476,7 @@ void CFGBuilder::visitBreak(ExprAST *E) {
     return;
 
   if (!LoopBreakTarget) {
-    std::cerr << "Error: 'break' outside of loop\n";
+    ControlFlowError(Brk->getLoc(), "'break' used outside of a loop.").raise();
     return;
   }
 
@@ -494,7 +495,7 @@ void CFGBuilder::visitContinue(ExprAST *E) {
     return;
 
   if (!LoopContinueTarget) {
-    std::cerr << "Error: 'continue' outside of loop\n";
+    ControlFlowError(Cont->getLoc(), "'continue' used outside of a loop.").raise();
     return;
   }
 

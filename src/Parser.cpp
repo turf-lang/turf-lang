@@ -398,11 +398,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       SourceLocation OpLoc = CurLoc;
       getNextToken();
       char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
-      auto OneNum = std::make_unique<NumberExprAST>(1LL);
-      auto RHS = std::make_unique<BinaryExprAST>(
-          OpLoc, Op, CloneExprAST(Base.get()), std::move(OneNum));
-      Base = std::make_unique<AssignmentExprAST>(OpLoc, std::move(Base),
-                                                 std::move(RHS));
+      Base = std::make_unique<PostfixExprAST>(OpLoc, Op, std::move(Base));
     } else {
       break;
     }
@@ -812,10 +808,8 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
       else if (BinOp == TOK_MOD_ASSIGN)
         Op = '%';
 
-      auto ExpandedRHS = std::make_unique<BinaryExprAST>(
-          OpLoc, Op, CloneExprAST(LHS.get()), std::move(RHS));
-      LHS = std::make_unique<AssignmentExprAST>(OpLoc, std::move(LHS),
-                                                std::move(ExpandedRHS));
+      LHS = std::make_unique<CompoundAssignmentExprAST>(OpLoc, Op, std::move(LHS),
+                                                        std::move(RHS));
     } else {
       LHS = std::make_unique<BinaryExprAST>(OpLoc, BinOp, std::move(LHS),
                                             std::move(RHS));

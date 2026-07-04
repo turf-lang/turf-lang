@@ -10,7 +10,7 @@
 using AllocSiteID = size_t;
 
 void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialAssigned) {
-  std::cerr << "[AliasAnalysis] running on function: " << Cfg.getFunctionName() << "\n";
+
   const auto &Blocks = Cfg.getBlocks();
   size_t N = Blocks.size();
   if (N == 0) return;
@@ -79,44 +79,59 @@ void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialA
     auto curFreed = Freed[b];
 
     for (ExprAST *Stmt : BB->getStatements()) {
-      // Detect assignment of malloc: x = malloc(n)
+      // Detect assignment of malloc: x = malloc(n) or alias: p = q
       if (auto A = dynamic_cast<AssignmentExprAST *>(Stmt)) {
-        // RHS is func call?
-        if (auto RHS = dynamic_cast<const FuncCallExprAST *>(A->getRHS())) {
-          if (auto CalleeVar = dynamic_cast<const VariableExprAST *>(RHS->getCallee())) {
-            std::string cname = CalleeVar->getName();
-            if (cname == "malloc" || cname == "realloc") {
-              // allocate new site
-              AllocSiteID aid = NextAllocID++;
-              // LHS variable
-              if (auto L = dynamic_cast<const VariableExprAST *>(A->getLHS())) {
-                std::string name = getVarName(L);
-                if (!name.empty()) {
-                  cur[name] = aid;
-                  std::cerr << "[AliasAnalysis] allocated site " << aid << " for var '" << name << "'\n";
+        if (auto L = dynamic_cast<const VariableExprAST *>(A->getLHS())) {
+          std::string lhsName = getVarName(L);
+          if (!lhsName.empty()) {
+            bool handled = false;
+            if (auto RHS = dynamic_cast<const FuncCallExprAST *>(A->getRHS())) {
+              if (auto CalleeVar = dynamic_cast<const VariableExprAST *>(RHS->getCallee())) {
+                std::string cname = CalleeVar->getName();
+                if (cname == "malloc" || cname == "realloc") {
+                  AllocSiteID aid = NextAllocID++;
+                  cur[lhsName] = aid;
+                  handled = true;
                 }
               }
-              continue;
+            } else if (auto RHSVar = dynamic_cast<const VariableExprAST *>(A->getRHS())) {
+              std::string rhsName = getVarName(RHSVar);
+              if (!rhsName.empty() && cur.count(rhsName)) {
+                cur[lhsName] = cur.at(rhsName);
+              } else {
+                cur.erase(lhsName);
+              }
+              handled = true;
             }
+            if (handled) continue;
           }
         }
       }
 
-      // VarDecl with initializer = malloc()
+      // VarDecl with initializer = malloc() or alias: mut p: ptr<int> = q;
       if (auto Vd = dynamic_cast<VarDeclExprAST *>(Stmt)) {
-        if (auto Init = dynamic_cast<const FuncCallExprAST *>(Vd->getInitializer())) {
-          if (auto CalleeVar = dynamic_cast<const VariableExprAST *>(Init->getCallee())) {
-            std::string cname = CalleeVar->getName();
-            if (cname == "malloc" || cname == "realloc") {
-              std::string name = Vd->getName();
-                if (!name.empty()) {
-                  AllocSiteID aid = NextAllocID++;
-                  cur[name] = aid;
-                  std::cerr << "[AliasAnalysis] allocated site " << aid << " for var '" << name << "' (decl)\n";
-                }
-              continue;
+        std::string name = Vd->getName();
+        if (!name.empty()) {
+          bool handled = false;
+          if (auto Init = dynamic_cast<const FuncCallExprAST *>(Vd->getInitializer())) {
+            if (auto CalleeVar = dynamic_cast<const VariableExprAST *>(Init->getCallee())) {
+              std::string cname = CalleeVar->getName();
+              if (cname == "malloc" || cname == "realloc") {
+                AllocSiteID aid = NextAllocID++;
+                cur[name] = aid;
+                handled = true;
+              }
             }
+          } else if (auto InitVar = dynamic_cast<const VariableExprAST *>(Vd->getInitializer())) {
+            std::string rhsName = getVarName(InitVar);
+            if (!rhsName.empty() && cur.count(rhsName)) {
+              cur[name] = cur.at(rhsName);
+            } else {
+              cur.erase(name);
+            }
+            handled = true;
           }
+          if (handled) continue;
         }
       }
 
@@ -134,11 +149,11 @@ void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialA
                   if (it != cur.end() && it->second.has_value()) {
                     AllocSiteID aid = *(it->second);
                     if (curFreed.count(aid)) {
-                      std::cerr << "[AliasAnalysis] double-free candidate for var '" << name << "'\n";
+
                       DoubleFreeError err(FC->getLoc(), name);
                       err.raise();
                     } else {
-                      std::cerr << "[AliasAnalysis] freeing alloc site " << aid << " from var '" << name << "'\n";
+
                       curFreed.insert(aid);
                       // Keep mapping so later accesses can detect use-after-free
                     }
@@ -160,7 +175,7 @@ void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialA
             if (it != cur.end() && it->second.has_value()) {
               AllocSiteID aid = *(it->second);
               if (curFreed.count(aid)) {
-                std::cerr << "[AliasAnalysis] use-after-free detected for var '" << name << "'\n";
+
                 UseAfterFreeError err(AA->getLoc(), name);
                 err.raise();
               }

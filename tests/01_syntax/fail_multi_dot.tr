@@ -1,0 +1,4 @@
+fn main(): int {
+    float x = 3.14.15;
+    return 0;
+}

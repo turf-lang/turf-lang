@@ -144,6 +144,23 @@ public:
     ascend();
   }
 
+  void visitCompoundAssignment(CompoundAssignmentExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "CompoundAssignmentExpr(op:'" << (char)N.getOpcode() << "')\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getLHS()), Depth_);
+    print(const_cast<ExprAST *>(N.getRHS()), Depth_);
+    ascend();
+  }
+
+  void visitPostfixExpr(PostfixExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "PostfixExpr(op:'" << (char)N.getOpcode() << "')\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getOperand()), Depth_);
+    ascend();
+  }
+
   // ── Control flow ────────────────────────────────────────────────────────────
   void visitBlock(BlockExprAST &N) override {
     printIndent(Depth_);

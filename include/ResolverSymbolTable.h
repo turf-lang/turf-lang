@@ -275,6 +275,9 @@ public:
   /// Pop the current scope.  Variables declared in it become invisible.
   void exitScope();
 
+  /// Reset the scope stack to the specified depth. Used during error recovery.
+  void resetToDepth(size_t TargetDepth);
+
   /// Current nesting depth (0 = global).
   size_t currentDepth() const { return Depth_; }
 

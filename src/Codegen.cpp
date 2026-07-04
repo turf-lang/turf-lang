@@ -376,17 +376,25 @@ static const TurfType *getExprType(const ExprAST *E) {
   }
   if (auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(E)) {
     const TurfType *BaseTy = getExprType(ArrAcc->getBase());
-    if (BaseTy && isArrayType(BaseTy)) {
-      const TurfType *ElemTy = getArrayElementType(BaseTy);
-      // Issue #17 fix: resolve NamedType element types (e.g. struct User)
-      // to TurfStructType so that arr[0].field codegen works correctly.
-      if (ElemTy && GlobalSymbolTable) {
-        if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy)) {
-          if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
-            return Resolved.get();
-        }
+    if (BaseTy) {
+      const TurfType *ElemTy = nullptr;
+      if (isArrayType(BaseTy)) {
+        ElemTy = getArrayElementType(BaseTy);
+      } else if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy)) {
+        ElemTy = PtrTy->getPointee().get();
       }
-      return ElemTy;
+      
+      if (ElemTy) {
+        // Issue #17 fix: resolve NamedType element types (e.g. struct User)
+        // to TurfStructType so that arr[0].field codegen works correctly.
+        if (GlobalSymbolTable) {
+          if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy)) {
+            if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+              return Resolved.get();
+          }
+        }
+        return ElemTy;
+      }
     }
   }
   if (auto *MethodCall = dynamic_cast<const MethodCallExprAST *>(E)) {
@@ -1097,11 +1105,11 @@ Value *AssignmentExprAST::codegen() {
 
     // Void value check is handled by TypeChecker.
 
-  // We check LHS type by performing a dummy load through codegen
-  Value *LHSVal = LHS->codegen();
-  if (!LHSVal)
+  // Determine the LHS type without evaluating it (avoid double-evaluation side effects)
+  const TurfType *LHSTy = getExprType(LHS.get());
+  if (!LHSTy)
     return nullptr;
-  TurfTypePtr VarType = getTurfTypeFromLLVM(LHSVal->getType());
+  TurfTypePtr VarType = getTurfTypeFromLLVM(getLLVMType(LHSTy));
 
   TurfTypePtr RHSType = getTurfTypeFromLLVM(Val->getType());
   RHSType = RefineLLVMType(RHSType, VarType, Val->getType());
@@ -1116,6 +1124,117 @@ Value *AssignmentExprAST::codegen() {
 
   // Assignment expressions usually return the value assigned (allows x = y = 5)
   return CastVal;
+}
+
+Value *CompoundAssignmentExprAST::codegen() {
+  Value *Val = RHS->codegen();
+  if (!Val) return nullptr;
+
+  Value *Ptr = LHS->codegenLValue();
+  if (!Ptr) return nullptr;
+
+  const TurfType *LHSTy = getExprType(LHS.get());
+  if (!LHSTy) {
+    llvm::report_fatal_error("Internal error: Unknown LHS type for CompoundAssignment");
+    return nullptr;
+  }
+
+  Type *LLVMTy = getLLVMType(LHSTy);
+  Value *LHSVal = Builder->CreateLoad(LLVMTy, Ptr, "compassign.load");
+
+  TurfTypePtr VarType = getTurfTypeFromLLVM(LLVMTy);
+  Value *CastRHS = CastToType(Val, VarType, "compassign.cast", Loc);
+
+  Value *Result = nullptr;
+  bool isDouble = LHSTy->isNamed("double");
+
+  switch (Opcode) {
+  case '+':
+    Result = isDouble ? Builder->CreateFAdd(LHSVal, CastRHS, "addtmp")
+                      : Builder->CreateAdd(LHSVal, CastRHS, "addtmp");
+    break;
+  case '-':
+    Result = isDouble ? Builder->CreateFSub(LHSVal, CastRHS, "subtmp")
+                      : Builder->CreateSub(LHSVal, CastRHS, "subtmp");
+    break;
+  case '*':
+    Result = isDouble ? Builder->CreateFMul(LHSVal, CastRHS, "multmp")
+                      : Builder->CreateMul(LHSVal, CastRHS, "multmp");
+    break;
+  case '/': {
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    BasicBlock *DivZeroBB = BasicBlock::Create(*TheContext, "divzero", TheFunction);
+    BasicBlock *DivContBB = BasicBlock::Create(*TheContext, "divcont", TheFunction);
+
+    Value *IsZero = isDouble
+                        ? Builder->CreateFCmpOEQ(CastRHS, ConstantFP::get(*TheContext, APFloat(0.0)))
+                        : Builder->CreateICmpEQ(CastRHS, ConstantInt::get(Type::getInt64Ty(*TheContext), 0));
+
+    Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
+
+    Builder->SetInsertPoint(DivZeroBB);
+    llvm::report_fatal_error("Division by zero in compound assignment");
+
+    Builder->SetInsertPoint(DivContBB);
+    Result = isDouble ? Builder->CreateFDiv(LHSVal, CastRHS, "divtmp")
+                      : Builder->CreateSDiv(LHSVal, CastRHS, "divtmp");
+    break;
+  }
+  case '%': {
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    BasicBlock *DivZeroBB = BasicBlock::Create(*TheContext, "modzero", TheFunction);
+    BasicBlock *DivContBB = BasicBlock::Create(*TheContext, "modcont", TheFunction);
+
+    Value *IsZero = isDouble
+                        ? Builder->CreateFCmpOEQ(CastRHS, ConstantFP::get(*TheContext, APFloat(0.0)))
+                        : Builder->CreateICmpEQ(CastRHS, ConstantInt::get(Type::getInt64Ty(*TheContext), 0));
+
+    Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
+
+    Builder->SetInsertPoint(DivZeroBB);
+    llvm::report_fatal_error("Modulo by zero in compound assignment");
+
+    Builder->SetInsertPoint(DivContBB);
+    Result = isDouble ? Builder->CreateFRem(LHSVal, CastRHS, "modtmp")
+                      : Builder->CreateSRem(LHSVal, CastRHS, "modtmp");
+    break;
+  }
+  default:
+    llvm::report_fatal_error("Unknown compound assignment operator");
+  }
+
+  Builder->CreateStore(Result, Ptr);
+  return Result; // Compound assignment returns the new value
+}
+
+Value *PostfixExprAST::codegen() {
+  Value *Ptr = Operand->codegenLValue();
+  if (!Ptr) return nullptr;
+
+  const TurfType *OpTy = getExprType(Operand.get());
+  if (!OpTy) {
+    llvm::report_fatal_error("Internal error: Unknown operand type for PostfixExpr");
+    return nullptr;
+  }
+
+  Type *LLVMTy = getLLVMType(OpTy);
+  Value *OldVal = Builder->CreateLoad(LLVMTy, Ptr, "postfix.load");
+
+  bool isDouble = OpTy->isNamed("double");
+  Value *One = isDouble ? static_cast<Value *>(ConstantFP::get(*TheContext, APFloat(1.0)))
+                        : static_cast<Value *>(ConstantInt::get(*TheContext, APInt(64, 1, true)));
+
+  Value *NewVal = nullptr;
+  if (Opcode == '+') {
+    NewVal = isDouble ? Builder->CreateFAdd(OldVal, One, "inctmp")
+                      : Builder->CreateAdd(OldVal, One, "inctmp");
+  } else {
+    NewVal = isDouble ? Builder->CreateFSub(OldVal, One, "dectmp")
+                      : Builder->CreateSub(OldVal, One, "dectmp");
+  }
+
+  Builder->CreateStore(NewVal, Ptr);
+  return OldVal; // Postfix returns the old value
 }
 
 Value *IfExprAST::codegen() {

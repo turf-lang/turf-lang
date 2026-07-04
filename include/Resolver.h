@@ -88,6 +88,19 @@ public:
    */
   void resolveAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes);
 
+  /**
+   * @brief Reset internal scope tracking after a longjmp recovery.
+   *
+   * Must be called before resuming resolution on subsequent top-level nodes
+   * if a previous node raised an error caught by `setjmp`.
+   * Warning: Do not loop-with-recovery over multiple top-level nodes without
+   * resetting scope depth and FunctionNestingDepth_ between iterations.
+   */
+  void resetForRecovery() {
+    FunctionNestingDepth_ = 0;
+    SymTable_.resetToDepth(0);
+  }
+
   // ── ASTVisitor overrides ───────────────────────────────────────────────────
 
   // ── Variables & Declarations ──────────────────────────────────────────────
@@ -130,6 +143,8 @@ public:
   void visitBinary(BinaryExprAST &Node) override;
   void visitUnary(UnaryExprAST &Node) override;
   void visitAssignment(AssignmentExprAST &Node) override;
+  void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override;
+  void visitPostfixExpr(PostfixExprAST &Node) override;
   void visitCast(CastExprAST &Node) override;
 
   void visitIf(IfExprAST &Node) override;

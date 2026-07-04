@@ -125,7 +125,54 @@ public:
   }
 };
 
+// Compound Assignment Node, represents things like "x += 5"
+class CompoundAssignmentExprAST : public ExprAST {
+  SourceLocation Loc;
+  int Opcode;
+  std::unique_ptr<ExprAST> LHS;
+  std::unique_ptr<ExprAST> RHS;
 
+public:
+  CompoundAssignmentExprAST(SourceLocation Loc, int Opcode,
+                            std::unique_ptr<ExprAST> LHS,
+                            std::unique_ptr<ExprAST> RHS)
+      : Loc(Loc), Opcode(Opcode), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  int getOpcode() const { return Opcode; }
+  const ExprAST *getLHS() const { return LHS.get(); }
+  const ExprAST *getRHS() const { return RHS.get(); }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitCompoundAssignment(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<CompoundAssignmentExprAST>(
+        Loc, Opcode, CloneExprAST(LHS.get()), CloneExprAST(RHS.get()));
+  }
+};
+
+// Postfix Node, represents things like "x++" or "x--"
+class PostfixExprAST : public ExprAST {
+  SourceLocation Loc;
+  int Opcode;
+  std::unique_ptr<ExprAST> Operand;
+
+public:
+  PostfixExprAST(SourceLocation Loc, int Opcode,
+                 std::unique_ptr<ExprAST> Operand)
+      : Loc(Loc), Opcode(Opcode), Operand(std::move(Operand)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  int getOpcode() const { return Opcode; }
+  const ExprAST *getOperand() const { return Operand.get(); }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitPostfixExpr(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<PostfixExprAST>(Loc, Opcode,
+                                            CloneExprAST(Operand.get()));
+  }
+};
 
 // Variable Node, represents variable name like "x", "y", etc.
 class VariableExprAST : public ExprAST {
@@ -927,6 +974,19 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
+  if (const auto *CompoundAssign =
+          dynamic_cast<const CompoundAssignmentExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(CompoundAssign->getLHS(), NodeIDs);
+    CollectAllNodeIDsInternal(CompoundAssign->getRHS(), NodeIDs);
+    return;
+  }
+
+  if (const auto *Postfix = dynamic_cast<const PostfixExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Postfix->getOperand(), NodeIDs);
+    return;
+  }
+
+
   if (const auto *Decl = dynamic_cast<const VarDeclExprAST *>(Node)) {
     CollectAllNodeIDsInternal(Decl->getInitializer(), NodeIDs);
     return;
@@ -1140,6 +1200,32 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
     }
+    return ChangedIDs;
+  }
+
+  if (auto *OrigComp =
+          dynamic_cast<const CompoundAssignmentExprAST *>(OriginalAST)) {
+    auto *ModComp =
+        dynamic_cast<const CompoundAssignmentExprAST *>(ModifiedAST);
+    if (OrigComp->getOpcode() != ModComp->getOpcode()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    CollectChangedNodeIDsInternal(OrigComp->getLHS(), ModComp->getLHS(),
+                                  ChangedIDs);
+    CollectChangedNodeIDsInternal(OrigComp->getRHS(), ModComp->getRHS(),
+                                  ChangedIDs);
+    return ChangedIDs;
+  }
+
+  if (auto *OrigPost = dynamic_cast<const PostfixExprAST *>(OriginalAST)) {
+    auto *ModPost = dynamic_cast<const PostfixExprAST *>(ModifiedAST);
+    if (OrigPost->getOpcode() != ModPost->getOpcode()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    CollectChangedNodeIDsInternal(OrigPost->getOperand(), ModPost->getOperand(),
+                                  ChangedIDs);
     return ChangedIDs;
   }
 

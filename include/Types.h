@@ -423,6 +423,17 @@ bool        isArrayType(const TurfType *T);
 const TurfType *getArrayElementType(const TurfType *T);
 TurfTypePtr makeArrayType(TurfTypePtr ElemType, int Size = -1);
 
+// ─── Type coercion helper ───────────────────────────────────────────────────
+
+/**
+ * @brief Helper: check if two Turf type names are implicitly compatible.
+ *
+ * Numerics (int, double, bool) are mutually coercible; string and void are
+ * not compatible with anything else. Opaque pointers (ptr) can coerce to/from
+ * any typed pointer.
+ */
+bool typesCompatible(const TurfType *From, const TurfType *To);
+
 // ─── Diagnostic helper ────────────────────────────────────────────────────────
 
 /// Human-readable diagnostic name for a type (handles null gracefully).

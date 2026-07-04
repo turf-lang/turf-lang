@@ -234,7 +234,7 @@ static int linkObject(const std::string &ObjFile,
  */
 int main(int argc, char **argv) {
   CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)main);
-  std::cout << "DEBUG CompilerExecutablePath: " << CompilerExecutablePath << "\n";
+
 
   struct SLMCleanup {
     ~SLMCleanup() { SLM::SLMEngine::getInstance().release(); }
@@ -263,6 +263,7 @@ int main(int argc, char **argv) {
   InitializeModule(); // Initialize LLVM Context, Module, Builder
   // Clear any previous call graph state
   ClearCallGraph();
+  ClearGlobalCFGs();
   InitializeSymbolTable(); // Initialize semantic symbol table
   InitializePrecedence();
 
@@ -275,10 +276,8 @@ int main(int argc, char **argv) {
   // before it processes user code.
   std::unique_ptr<ExprAST> PreludeAST;
 
-  {
-    if (true) {
-      // Swap the global SourceFile for the pre-pass stream
-      SourceFile->close();
+  // Swap the global SourceFile for the pre-pass stream
+  SourceFile->close();
       SourceFile->open(opts.InputFile);
       CurLoc = {1, 0};
 
@@ -427,13 +426,11 @@ int main(int argc, char **argv) {
         g_recoverActive = false;
       }
 
-      // Re-open for the main pass
-      SourceFile->close();
-      SourceFile->open(opts.InputFile);
-      CurLoc = {1, 0};
-      CurTok = 0;
-    }
-  }
+  // Re-open for the main pass
+  SourceFile->close();
+  SourceFile->open(opts.InputFile);
+  CurLoc = {1, 0};
+  CurTok = 0;
 
 
   // Main pass: re-enter the entry block and codegen everything.
@@ -699,13 +696,14 @@ int main(int argc, char **argv) {
   // Phase Separation: Codegen All
   // Only non-fn top-level statements need codegen here. fn bodies were already
   // compiled in the pre-pass; codegenning them again would duplicate them.
+  size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
   for (auto &AST : TopLevelASTs) {
     g_recoverActive = true;
     if (setjmp(g_recoverJmp) == 0) {
       AST->codegen();
     } else {
       if (GlobalSymbolTable) {
-        GlobalSymbolTable->ResetToDepth(1);
+        GlobalSymbolTable->ResetToDepth(SavedDepth);
         GlobalSymbolTable->ResetEarlyExitForCurrentScope();
       }
     }
@@ -713,7 +711,6 @@ int main(int argc, char **argv) {
   }
 
   // Build cross-function call graph and print summary (run before flushing diagnostics)
-  std::cerr << "[Main] GlobalCFGs size before CallGraph: " << GlobalCFGs.size() << "\n";
   CallGraphPass CGP;
   CGP.runGlobal();
 

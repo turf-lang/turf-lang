@@ -91,4 +91,33 @@ TurfTypePtr makeArrayType(TurfTypePtr ElemType, int Size) {
   return std::make_shared<ArrayType>(std::move(ElemType), Size);
 }
 
+// ─── Type coercion helper ───────────────────────────────────────────────────
 
+bool typesCompatible(const TurfType *From, const TurfType *To) {
+  if (!From || !To)
+    return false;
+  if (From->getName() == To->getName())
+    return true;
+  // Generic type parameters match anything (type-erasure)
+  if (dynamic_cast<const TurfGenericParamType *>(From) ||
+      dynamic_cast<const TurfGenericParamType *>(To))
+    return true;
+  // Issue #15 fix: `ptr` (OpaquePointerType) coercible to/from any typed pointer.
+  auto isOpaquePtr = [](const TurfType *T) {
+    return T->isNamed("ptr") || T->isNamed("void*");
+  };
+  if (isOpaquePtr(From) && To->isPointer())
+    return true;
+  if (isOpaquePtr(To) && From->isPointer())
+    return true;
+  // void and string are never coercible
+  if (From->isVoid() || To->isVoid())
+    return false;
+  if (From->isNamed("string") || To->isNamed("string"))
+    return false;
+  // Issue #10 fix: bool is a distinct type -- must NOT silently coerce to int/double.
+  if (From->isNamed("bool") || To->isNamed("bool"))
+    return false;
+  // Remaining numerics (int <-> double) are mutually coercible
+  return true;
+}

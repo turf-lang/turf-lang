@@ -31,6 +31,8 @@ class VariableExprAST;
 class BinaryExprAST;
 class UnaryExprAST;
 class AssignmentExprAST;
+class CompoundAssignmentExprAST;
+class PostfixExprAST;
 class VarDeclExprAST;
 class CastExprAST;
 class BlockExprAST;
@@ -95,6 +97,8 @@ public:
   virtual void visitBinary(BinaryExprAST &Node) {}
   virtual void visitUnary(UnaryExprAST &Node) {}
   virtual void visitAssignment(AssignmentExprAST &Node) {}
+  virtual void visitCompoundAssignment(CompoundAssignmentExprAST &Node) {}
+  virtual void visitPostfixExpr(PostfixExprAST &Node) {}
   virtual void visitCast(CastExprAST &Node) {}
 
   // ── Control flow ──────────────────────────────────────────────────────────

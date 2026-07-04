@@ -60,11 +60,27 @@ void productionErrorHandler(SourceLocation Loc, const std::string &Msg) {
 #else
 /// Stub used when TYPECHECKER_NO_ERRORS is defined (unit-test builds).
 /// Throws std::runtime_error so tests can catch it with EXPECT_THROWS.
-void productionErrorHandler(SourceLocation Loc, const std::string &Msg) {
-  (void)Loc;
-  throw std::runtime_error("TypeChecker error: " + Msg);
+void unitTestErrorHandler(SourceLocation, const std::string &Msg) {
+  throw std::runtime_error("TypeError: " + Msg);
 }
 #endif
+
+const VariableExprAST *findRootVariable(const ExprAST *Base) {
+  while (Base) {
+    if (auto *Var = dynamic_cast<const VariableExprAST *>(Base)) {
+      return Var;
+    } else if (auto *ArrAccess =
+                   dynamic_cast<const ArrayAccessExprAST *>(Base)) {
+      Base = ArrAccess->getBase();
+    } else if (auto *FieldAccess =
+                   dynamic_cast<const FieldAccessExprAST *>(Base)) {
+      Base = FieldAccess->getBase();
+    } else {
+      break;
+    }
+  }
+  return nullptr;
+}
 
 } // namespace
 
@@ -441,22 +457,69 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   // The assignment expression type is the RHS type
   setType(&Node, RhsTy);
 
-  const VariableExprAST *LHSVar = nullptr;
-  const ExprAST *Base = Node.getLHS();
-  
-  // Drill down through any array/field accesses to find the root variable
-  while (Base) {
-    if (auto *Var = dynamic_cast<const VariableExprAST *>(Base)) {
-      LHSVar = Var;
-      break;
-    } else if (auto *ArrAccess = dynamic_cast<const ArrayAccessExprAST *>(Base)) {
-      Base = ArrAccess->getBase();
-    } else if (auto *FieldAccess = dynamic_cast<const FieldAccessExprAST *>(Base)) {
-      Base = FieldAccess->getBase();
-    } else {
-      break;
+  const VariableExprAST *LHSVar = findRootVariable(Node.getLHS());
+
+  if (LHSVar) {
+    if (LHSVar->ResolvedSymbol && LHSVar->ResolvedSymbol->IsImmutable) {
+#ifndef TYPECHECKER_NO_ERRORS
+      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName()).raise();
+#else
+      throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
+#endif
     }
   }
+}
+
+void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
+  if (Node.getLHS())
+    const_cast<ExprAST *>(Node.getLHS())->accept(*this);
+  if (Node.getRHS())
+    const_cast<ExprAST *>(Node.getRHS())->accept(*this);
+
+  TurfTypePtr LhsTy = getType(Node.getLHS());
+  TurfTypePtr RhsTy = getType(Node.getRHS());
+  TurfTypePtr ResultTy;
+
+  if (LhsTy && RhsTy) {
+    if (inferArithmeticType(Node.getLoc(), Node.getOpcode(), LhsTy.get(), RhsTy.get(), ResultTy)) {
+      if (!isTypeCompatible(LhsTy.get(), ResultTy.get())) {
+        reportError(Node.getLoc(),
+                    "Cannot assign value of type '" + ResultTy->getName() +
+                        "' to variable of type '" + LhsTy->getName() + "'.");
+      }
+    }
+  }
+
+  setType(&Node, LhsTy);
+
+  const VariableExprAST *LHSVar = findRootVariable(Node.getLHS());
+
+  if (LHSVar) {
+    if (LHSVar->ResolvedSymbol && LHSVar->ResolvedSymbol->IsImmutable) {
+#ifndef TYPECHECKER_NO_ERRORS
+      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName()).raise();
+#else
+      throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
+#endif
+    }
+  }
+}
+
+void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
+  if (Node.getOperand())
+    const_cast<ExprAST *>(Node.getOperand())->accept(*this);
+
+  TurfTypePtr OpTy = getType(Node.getOperand());
+
+  if (OpTy && !OpTy->isNumeric()) {
+    reportError(Node.getLoc(),
+                "Postfix operator requires a numeric operand, got '" +
+                    OpTy->getName() + "'.");
+  }
+
+  setType(&Node, OpTy);
+
+  const VariableExprAST *LHSVar = findRootVariable(Node.getOperand());
 
   if (LHSVar) {
     if (LHSVar->ResolvedSymbol && LHSVar->ResolvedSymbol->IsImmutable) {
@@ -897,9 +960,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
     // without any overload resolution.  We use a shared_ptr with a no-op
     // deleter because the symbol is owned by the ResolverSymbolTable; we
     // just need an owning handle that Codegen can call ->mangledName() on.
-    Node.ResolvedCallTarget = std::shared_ptr<ResolverFunctionSymbol>(
-        const_cast<ResolverFunctionSymbol *>(Best),
-        [](ResolverFunctionSymbol *) { /* RST owns this */ });
+    Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
     setType(&Node, Best->ReturnType);
     return;
   }
@@ -942,9 +1003,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           if (C->arity() == ExpectedArity) ArityMatches.push_back(C);
         if (!ArityMatches.empty()) {
           const ResolverFunctionSymbol *Best = ArityMatches[0];
-          Node.ResolvedCallTarget = std::shared_ptr<ResolverFunctionSymbol>(
-              const_cast<ResolverFunctionSymbol *>(Best),
-              [](ResolverFunctionSymbol *) {});
+          Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
           setType(&Node, Best->ReturnType);
           return;
         }
@@ -1081,10 +1140,15 @@ void TypeChecker::visitArrayLiteral(ArrayLiteralExprAST &Node) {
   }
 
   TurfTypePtr ElemType = getType(Node.getElements()[0].get());
+  if (!ElemType) {
+    setType(&Node, nullptr);
+    return;
+  }
   for (size_t i = 1; i < Node.getElements().size(); ++i) {
     TurfTypePtr ElemIType = getType(Node.getElements()[i].get());
-    if (ElemIType->getName() != ElemType->getName()) {
-      TypeError(Node.getLoc(), "Array literal type mismatch: expected " + ElemType->getName() + ", got " + ElemIType->getName()).raise();
+    if (!ElemIType || ElemIType->getName() != ElemType->getName()) {
+      std::string gotName = ElemIType ? ElemIType->getName() : "unknown";
+      TypeError(Node.getLoc(), "Array literal type mismatch: expected " + ElemType->getName() + ", got " + gotName).raise();
     }
   }
 

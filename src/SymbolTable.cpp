@@ -26,7 +26,11 @@ std::unique_ptr<SymbolTable> GlobalSymbolTable;
 SymbolTable::SymbolTable(const SymbolTable &Other)
     : ScopeStack(Other.ScopeStack), AllSymbols(Other.AllSymbols),
       NextID(Other.NextID), CurrentModule(Other.CurrentModule),
-      ModuleStack(Other.ModuleStack), Modules(Other.Modules) {}
+      ModuleStack(Other.ModuleStack) {
+  for (const auto &pair : Other.Modules) {
+    Modules[pair.first] = std::make_shared<TurfModule>(*pair.second);
+  }
+}
 
 SymbolTable &SymbolTable::operator=(const SymbolTable &Other) {
   if (this == &Other)
@@ -37,7 +41,10 @@ SymbolTable &SymbolTable::operator=(const SymbolTable &Other) {
   NextID = Other.NextID;
   CurrentModule = Other.CurrentModule;
   ModuleStack = Other.ModuleStack;
-  Modules = Other.Modules;
+  Modules.clear();
+  for (const auto &pair : Other.Modules) {
+    Modules[pair.first] = std::make_shared<TurfModule>(*pair.second);
+  }
   return *this;
 }
 
@@ -262,45 +269,6 @@ void SymbolTable::ResetToDepth(size_t TargetDepth) {
 // ---------------------------------------------------------------------------
 // Phase 2: TurfModule implementation
 // ---------------------------------------------------------------------------
-
-/**
- * @brief Local helper: check if two Turf type names are implicitly compatible.
- *
- * Mirrors the logic of isTypeCompatible() in Codegen.cpp but is
- * intentionally dependency-free so SymbolTable.cpp does not need Codegen.h.
- *
- * Numerics (int, double, bool) are mutually coercible; string and void are
- * not compatible with anything else.
- */
-static bool typesCompatible(const TurfType *From, const TurfType *To) {
-  if (!From || !To)
-    return false;
-  if (From->getName() == To->getName())
-    return true;
-  // Generic type parameters match anything (type-erasure)
-  if (dynamic_cast<const TurfGenericParamType *>(From) ||
-      dynamic_cast<const TurfGenericParamType *>(To))
-    return true;
-  // Issue #15 fix: `ptr` (OpaquePointerType) coercible to/from any typed pointer.
-  // The old code checked "void*" but the compiler names this type "ptr".
-  auto isOpaquePtr = [](const TurfType *T) {
-    return T->isNamed("ptr") || T->isNamed("void*");
-  };
-  if (isOpaquePtr(From) && To->isPointer())
-    return true;
-  if (isOpaquePtr(To) && From->isPointer())
-    return true;
-  // void and string are never coercible
-  if (From->isVoid() || To->isVoid())
-    return false;
-  if (From->isNamed("string") || To->isNamed("string"))
-    return false;
-  // Issue #10 fix: bool is a distinct type -- must NOT silently coerce to int/double.
-  if (From->isNamed("bool") || To->isNamed("bool"))
-    return false;
-  // Remaining numerics (int <-> double) are mutually coercible
-  return true;
-}
 
 const FunctionSymbol *TurfModule::lookupFunction(
     const std::string &baseName,
