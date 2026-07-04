@@ -111,7 +111,8 @@ bool SLMEngine::initialize(const std::string &modelPath) {
  * @param prompt The formatted ChatML prompt containing the error context.
  * @return std::string The raw generated response from the model.
  */
-std::string SLMEngine::generateSuggestion(const std::string &prompt) {
+std::string SLMEngine::generateSuggestion(const std::string &prompt,
+                                          const std::string &grammarStr) {
   if (!ctx)
     return "";
 
@@ -164,6 +165,25 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
 
   llama_sampler *sampler =
       llama_sampler_chain_init(llama_sampler_chain_default_params());
+
+  // Grammar-constrained sampling: when a GBNF grammar string is provided,
+  // add it first in the chain so it masks out any token that would violate
+  // the grammar — making malformed JSON structurally unproduceable.
+  // The grammar sampler is skipped for free-text calls (e.g. classifier).
+  if (!grammarStr.empty()) {
+    const llama_vocab *vocab_g = llama_model_get_vocab(llama_get_model(ctx));
+    llama_sampler *grammar =
+        llama_sampler_init_grammar(vocab_g, grammarStr.c_str(), "root");
+    if (grammar) {
+      llama_sampler_chain_add(sampler, grammar);
+    } else {
+      // nullptr means the grammar string failed to parse (not just missing file).
+      // The file-missing case produces an empty grammarStr and never reaches here.
+      std::cerr << "Compiler Warning: GBNF grammar failed to parse; "
+                   "falling back to unconstrained output.\n";
+    }
+  }
+
   // Repetition penalty: prevents the 1.5B model from looping/repeating tokens
   // under greedy decoding — a known failure mode for small models.
   // last_n=64 tokens window, repeat_penalty=1.1, freq/presence penalties off.

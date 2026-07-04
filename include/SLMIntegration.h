@@ -13,6 +13,7 @@ struct AISuggestion {
   std::string code_patch;       // Human-readable description of the patch
   std::string replacement_line; // Exact Turf-Lang source line to substitute
   std::string warning;
+  std::string self_reported_category; // Model's own assessment of error category
   bool valid = false;
   bool sandbox_validated = false; // Whether sandbox validation passed
 };

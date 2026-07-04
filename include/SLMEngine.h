@@ -32,7 +32,11 @@ public:
   bool initialize(const std::string &modelPath);
 
   // Generates the suggestion based on the prompt.
-  std::string generateSuggestion(const std::string &prompt);
+  // If grammarStr is non-empty, grammar-constrained sampling is applied —
+  // the model can only emit tokens that conform to the GBNF grammar.
+  // Pass an empty string for free-text responses (e.g. the classifier call).
+  std::string generateSuggestion(const std::string &prompt,
+                                 const std::string &grammarStr = "");
   void release();
 };
 

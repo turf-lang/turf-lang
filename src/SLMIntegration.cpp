@@ -499,21 +499,34 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
     return suggestion;
   }
 
-  // Step 2: SLM fallback classification (if deterministic rules failed) ─
-  // Only invoke the model when the pattern-matcher returned GENERAL.
-  // We pass a small preliminary context (±3) just for the classifier;
-  // the real context for the suggestion prompt is built after this.
-  if (!categoryWasDeterministic) {
-    if (std::getenv("TURF_SLM_DEBUG")) {
-      std::cerr << "[SLM Classifier] Hardcoded rules yielded GENERAL. Consulting "
-                   "SLM...\n";
-    }
-    std::string classifierContext = getCodeContext(errorLine, 3);
-    category = classifyErrorWithSLM(cleanError, classifierContext);
+  // Resolve the GBNF grammar file (same binary-relative pattern as model path).
+  // If the file is missing or the grammar fails to parse inside llama.cpp,
+  // generateSuggestion degrades gracefully to unconstrained output.
+  llvm::SmallString<128> GrammarPath(CompilerExecutablePath);
+  llvm::sys::path::remove_filename(GrammarPath);
+  llvm::sys::path::append(GrammarPath, "..", "grammars",
+                          "slm_suggestion.gbnf");
+  std::string grammarStr = loadDocFile(GrammarPath.str().str());
+  if (std::getenv("TURF_SLM_DEBUG")) {
+    std::cerr << "[SLM] Grammar: "
+              << (grammarStr.empty() ? "not loaded (unconstrained output)"
+                                     : "loaded (constrained JSON output)")
+              << "\n";
   }
 
+  // Step 2: REMOVED — classification is now merged into the main response.
+  // When the deterministic classifier yields GENERAL, we proceed with GENERAL
+  // for context-sizing, pinning, and doc-loading (all have sensible GENERAL
+  // defaults). The main call's self-reported "category" field then corrects
+  // the bookkeeping (confidence scoring) for that slice — but cannot
+  // retroactively change what the model was already shown in the prompt.
+  // This eliminates the second model call in exchange for less
+  // category-tailored context on GENERAL-class errors.
+
   // Step 3: dynamic context window
-  // Now that we know the category, size the context window appropriately.
+  // Size the context window based on the deterministic category.
+  // If deterministic classification failed, GENERAL gives ±8 lines (broadest
+  // window), which is already the most generous fallback we have.
   int contextSize = contextSizeForCategory(category);
   if (std::getenv("TURF_SLM_DEBUG")) {
     std::cerr << "[SLM] Context window: ±" << contextSize
@@ -640,11 +653,16 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
       "\"replacement_line\": <THE EXACT SINGLE LINE of valid Turf-Lang code "
       "that replaces the erroneous line — no explanation, no prose, just the "
       "raw code>, "
-      "\"warning\": <string>}\n"
+      "\"warning\": <string>, "
+      "\"category\": <one of: TYPE_MISMATCH, UNDECLARED_VARIABLE, "
+      "CONTROL_FLOW, SYNTAX_ERROR, ARITHMETIC, STRING_CONVERSION, "
+      "ARRAY_ERROR, DECLARATION, FUNCTION_SIGNATURE, BUILTIN_FUNCTION, "
+      "GENERAL>}\n"
       "<|im_end|>\n"
       "<|im_start|>assistant\n";
 
-  std::string rawResponse = SLMEngine::getInstance().generateSuggestion(prompt);
+  std::string rawResponse =
+      SLMEngine::getInstance().generateSuggestion(prompt, grammarStr);
 
   if (std::getenv("TURF_SLM_DEBUG")) {
     std::cerr << "Clean Error: " << cleanError << "\n";
@@ -671,6 +689,27 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
     suggestion.replacement_line =
         extractJsonFieldString(jsonStr, "replacement_line");
     suggestion.warning = extractJsonFieldString(jsonStr, "warning");
+    suggestion.self_reported_category =
+        extractJsonFieldString(jsonStr, "category");
+
+    // B3-2: If the deterministic classifier returned GENERAL (i.e. it couldn't
+    // identify the category), try using the model's self-reported category
+    // from the main response before falling back to a second model call.
+    // The GBNF grammar constrains "category" to the exact enum strings, so
+    // categoryFromString will map it correctly.
+    if (!categoryWasDeterministic && !suggestion.self_reported_category.empty()) {
+      ErrorCategory selfCat = categoryFromString(suggestion.self_reported_category);
+      if (selfCat != ErrorCategory::GENERAL) {
+        // Model gave us a specific category — accept it, no second call needed.
+        category = selfCat;
+        categoryWasDeterministic = true; // treat as deterministic for confidence
+        if (std::getenv("TURF_SLM_DEBUG")) {
+          std::cerr << "[SLM] Used self-reported category: "
+                    << suggestion.self_reported_category
+                    << " (eliminated second model call)\n";
+        }
+      }
+    }
 
     // Compute confidence deterministically from measurable output signals.
     // The LLM is no longer asked to self-report a probability.
