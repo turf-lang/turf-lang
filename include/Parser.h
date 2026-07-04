@@ -3,7 +3,6 @@
 
 #include "AST.h"
 #include <memory>
-#include <vector>
 
 // Expose all variables and functions to other files
 extern int CurTok;

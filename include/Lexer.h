@@ -23,6 +23,8 @@ extern std::string StringVal;
 
 extern std::vector<std::string> SourceLines;
 extern SourceLocation CurLoc;
+extern int CurLine;
+extern int CurCol;
 // Mutable so RegisterBuiltins() can insert builtin names at startup.
 extern std::map<std::string, int> Keywords;
 
@@ -139,7 +141,8 @@ enum Token {
   TOK_OTHERWISE = -70,
   TOK_EXTERN = -71,   ///< `extern` keyword — FFI function declaration
   TOK_PTR    = -72,   ///< `ptr`    keyword — opaque pointer type (Phase 3 FFI)
-  TOK_ELLIPSIS = -73  ///< `...`   token   — variadic marker in extern fn params
+  TOK_ELLIPSIS = -73, ///< `...`   token   — variadic marker in extern fn params
+  TOK_SCOPE  = -74    ///< `::`    token   — scope resolution
 };
 
 int gettok();
