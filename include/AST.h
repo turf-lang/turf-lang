@@ -1026,9 +1026,6 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
-  if (const auto *StructDecl = dynamic_cast<const StructDeclExprAST *>(Node)) {
-    return; // No sub-expressions
-  }
 
   if (const auto *StructInit = dynamic_cast<const StructInitExprAST *>(Node)) {
     for (const auto &[FieldName, Val] : StructInit->getNamedFields())
@@ -1049,6 +1046,7 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
       dynamic_cast<const BoolExprAST *>(Node) ||
       dynamic_cast<const StringExprAST *>(Node) ||
       dynamic_cast<const VariableExprAST *>(Node) ||
+      dynamic_cast<const StructDeclExprAST *>(Node) ||
       dynamic_cast<const SizeOfExprAST *>(Node)) {
     return;
   }
@@ -1148,12 +1146,9 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
   // BinaryExprAST: Compare operator and recursively diff children
   if (auto *OrigBin = dynamic_cast<const BinaryExprAST *>(OriginalAST)) {
     auto *ModBin = dynamic_cast<const BinaryExprAST *>(ModifiedAST);
-    bool nodeChanged = false;
-
     if (OrigBin->getOp() != ModBin->getOp()) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
-      nodeChanged = true;
     }
 
     // Recursively diff children
@@ -1202,7 +1197,7 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
   // CastExprAST: Compare destination type and recursively diff operand
   if (auto *OrigCast = dynamic_cast<const CastExprAST *>(OriginalAST)) {
     auto *ModCast = dynamic_cast<const CastExprAST *>(ModifiedAST);
-    if (OrigCast->getDestType() != ModCast->getDestType()) {
+    if (!OrigCast->getDestType()->isEquivalent(ModCast->getDestType())) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
     }
@@ -1433,6 +1428,32 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
       for (size_t i = 0; i < OrigElems.size(); ++i) {
         CollectChangedNodeIDsInternal(OrigElems[i].get(), ModElems[i].get(), ChangedIDs);
       }
+    }
+    return ChangedIDs;
+  }
+
+  // StructDeclExprAST
+  if (auto *OrigStructDecl = dynamic_cast<const StructDeclExprAST *>(OriginalAST)) {
+    auto *ModStructDecl = dynamic_cast<const StructDeclExprAST *>(ModifiedAST);
+    bool structChanged = false;
+    if (OrigStructDecl->getName() != ModStructDecl->getName() ||
+        OrigStructDecl->getTypeParams() != ModStructDecl->getTypeParams() ||
+        OrigStructDecl->getFields().size() != ModStructDecl->getFields().size()) {
+      structChanged = true;
+    } else {
+      const auto &OrigFields = OrigStructDecl->getFields();
+      const auto &ModFields = ModStructDecl->getFields();
+      for (size_t i = 0; i < OrigFields.size(); ++i) {
+        if (OrigFields[i].Name != ModFields[i].Name ||
+            !OrigFields[i].Type->isEquivalent(ModFields[i].Type.get())) {
+          structChanged = true;
+          break;
+        }
+      }
+    }
+    if (structChanged) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
     }
     return ChangedIDs;
   }
