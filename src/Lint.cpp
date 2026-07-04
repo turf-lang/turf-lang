@@ -201,6 +201,15 @@ void LintExpression(ExprAST *E) {
       LintExpression(Child.get());
     }
   }
+
+  if (auto *CAssign = dynamic_cast<CompoundAssignmentExprAST *>(E)) {
+    LintExpression(const_cast<ExprAST*>(CAssign->getLHS()));
+    LintExpression(const_cast<ExprAST*>(CAssign->getRHS()));
+  }
+
+  if (auto *Post = dynamic_cast<PostfixExprAST *>(E)) {
+    LintExpression(const_cast<ExprAST*>(Post->getOperand()));
+  }
 }
 
 // Check: redundant boolean comparison, self-comparison, division by zero
@@ -240,7 +249,7 @@ static void LintBinaryExpr(const BinaryExprAST *Bin) {
     std::string RFP = Fingerprint(RHS);
 
     // Only flag for variable references and literals, not complex expressions
-    if (LFP == RFP && LFP != "<complex>" && LFP != "<null>") {
+    if (LFP == RFP && LFP != "<null>") {
       // Don't double-report if we already flagged a redundant bool comparison
       bool AlreadyFlagged =
           (Op == TOK_EQ || Op == TOK_NEQ) &&
@@ -262,6 +271,10 @@ static void LintBinaryExpr(const BinaryExprAST *Bin) {
           readableName = LFP.substr(4);
         else if (LFP.substr(0, 4) == "dbl:")
           readableName = LFP.substr(4);
+        else if (LFP.substr(0, 4) == "str:")
+          readableName = LFP.substr(4);
+        else if (LFP.substr(0, 5) == "bool:")
+          readableName = LFP.substr(5);
 
         SelfComparisonWarning(Bin->getLoc(), readableName, result).warn();
       }
@@ -444,6 +457,22 @@ LintChangedNodesOnlyInternal(ExprAST *E,
     LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getStep()),
                                  ChangedNodeIDs);
     LintChangedNodesOnlyInternal(For->getBody(), ChangedNodeIDs);
+    return;
+  }
+
+  // Recurse into compound assignment children
+  if (auto *CAssign = dynamic_cast<CompoundAssignmentExprAST *>(E)) {
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(CAssign->getLHS()),
+                                 ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(CAssign->getRHS()),
+                                 ChangedNodeIDs);
+    return;
+  }
+
+  // Recurse into postfix expression operand
+  if (auto *Post = dynamic_cast<PostfixExprAST *>(E)) {
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Post->getOperand()),
+                                 ChangedNodeIDs);
     return;
   }
 }

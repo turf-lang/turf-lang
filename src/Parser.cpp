@@ -105,6 +105,12 @@ void ClearParsedTopLevelASTs() {
   ImportedFiles.clear();
 }
 
+std::vector<std::unique_ptr<ExprAST>> SwapParsedTopLevelASTs(std::vector<std::unique_ptr<ExprAST>> New) {
+  std::vector<std::unique_ptr<ExprAST>> Old = std::move(ParsedTopLevelASTs);
+  ParsedTopLevelASTs = std::move(New);
+  return Old;
+}
+
 void RecordParsedTopLevelAST(const ExprAST *AST) {
   if (AST) {
     ParsedTopLevelASTs.push_back(CloneExprAST(AST));

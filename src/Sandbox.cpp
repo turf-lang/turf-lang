@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -103,11 +104,14 @@ static bool runParseOnlyPass(const std::filesystem::path &sourcePath,
   SourceLines = sourceLines;
   resetLexer();
   DiagnosticEngine::clearDiagnostics();
-  ClearParsedTopLevelASTs();
+  auto savedASTs = SwapParsedTopLevelASTs({});
 
   bool success = true;
   bool savedAIEnabled = g_AIEnabled;
   g_AIEnabled = false;
+
+  jmp_buf savedJmpBuf;
+  std::memcpy(savedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
 
   int jumpResult = setjmp(g_recoverJmp);
   if (jumpResult == 0) {
@@ -147,6 +151,8 @@ static bool runParseOnlyPass(const std::filesystem::path &sourcePath,
   SourceFile->close();
   SourceFilename = savedSourceFilename;
   SourceLines = savedSourceLines;
+  SwapParsedTopLevelASTs(std::move(savedASTs));
+  std::memcpy(g_recoverJmp, savedJmpBuf, sizeof(jmp_buf));
 
   // Restore the real source file and lexer state
   if (!SourceFilename.empty()) {
@@ -173,11 +179,14 @@ static bool runParseAndLintPass(const std::filesystem::path &sourcePath,
   SourceLines = sourceLines;
   resetLexer();
   DiagnosticEngine::clearDiagnostics();
-  ClearParsedTopLevelASTs();
+  auto savedASTs = SwapParsedTopLevelASTs({});
 
   bool success = true;
   bool savedAIEnabled = g_AIEnabled;
   g_AIEnabled = false;
+
+  jmp_buf savedJmpBuf;
+  std::memcpy(savedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
 
   int jumpResult = setjmp(g_recoverJmp);
   if (jumpResult == 0) {
@@ -222,6 +231,8 @@ static bool runParseAndLintPass(const std::filesystem::path &sourcePath,
   }
   SourceFilename = savedSourceFilename;
   SourceLines = savedSourceLines;
+  SwapParsedTopLevelASTs(std::move(savedASTs));
+  std::memcpy(g_recoverJmp, savedJmpBuf, sizeof(jmp_buf));
   resetLexer();
 
   return success && DiagnosticEngine::getDiagnosticCount() == 0;
@@ -315,13 +326,15 @@ Sandbox::EditKind Sandbox::classifyEditKind(const std::string &lineText) {
     return EditKind::BLOCK_STRUCTURE;
   if (trimmed.find("fn ") == 0)
     return EditKind::FUNCTION_DEFINITION;
-  if (trimmed.find("[") != std::string::npos &&
-      trimmed.find("]") != std::string::npos)
+  
+  static const std::regex arrayPattern(
+      R"(^\s*(?:mut|immut)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(int|double|float|bool|string)\s*\[\s*(\d+)\s*\]\s*(=|;|$))");
+  if (std::regex_search(trimmed, arrayPattern))
     return EditKind::ARRAY_DECLARATION;
 
-  static const std::regex declPattern(
-      R"(^\s*(int|double|float|bool|string)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(=|;|$))");
-  if (std::regex_search(trimmed, declPattern))
+  static const std::regex scalarPattern(
+      R"(^\s*(?:mut|immut)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(int|double|float|bool|string)\s*(=|;|$))");
+  if (std::regex_search(trimmed, scalarPattern))
     return EditKind::VARIABLE_DECLARATION;
 
   return EditKind::EXPRESSION;
@@ -330,16 +343,16 @@ Sandbox::EditKind Sandbox::classifyEditKind(const std::string &lineText) {
 bool Sandbox::parseDeclarationLine(const std::string &lineText,
                                    std::string &name, TurfTypePtr &type,
                                    bool &isArray, int &arraySize) {
-  static const std::regex scalarPattern(
-      R"(^\s*(int|double|float|bool|string)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(=|;|$))");
   static const std::regex arrayPattern(
-      R"(^\s*(int|double|float|bool|string)\s*\[\s*(\d+)\s*\]\s*([A-Za-z_][A-Za-z0-9_]*)\s*(=|;|$))");
+      R"(^\s*(?:mut|immut)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(int|double|float|bool|string)\s*\[\s*(\d+)\s*\]\s*(=|;|$))");
+  static const std::regex scalarPattern(
+      R"(^\s*(?:mut|immut)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(int|double|float|bool|string)\s*(=|;|$))");
 
   std::smatch match;
   if (std::regex_search(lineText, match, arrayPattern)) {
-    std::string typeName = match[1];
-    std::string sizeText = match[2];
-    name = match[3];
+    name = match[1];
+    std::string typeName = match[2];
+    std::string sizeText = match[3];
     arraySize = std::stoi(sizeText);
     isArray = true;
     TurfTypePtr ElemType;
@@ -360,8 +373,8 @@ bool Sandbox::parseDeclarationLine(const std::string &lineText,
   if (!std::regex_search(lineText, match, scalarPattern))
     return false;
 
-  std::string typeName = match[1];
-  name = match[2];
+  name = match[1];
+  std::string typeName = match[2];
   isArray = false;
   arraySize = 0;
   if (typeName == "int")
@@ -417,8 +430,8 @@ void Sandbox::updateSymbolTableForEdit(int lineNumber,
 
   SourceLocation declLoc{lineNumber, 1};
 
-  if (isArray) {
-    Snapshot.SymbolTableCopy->DeclareSymbol(name, type, declLoc, nullptr);
+  if (Symbol *S = Snapshot.SymbolTableCopy->LookupSymbol(name)) {
+    S->Type = type;
   } else {
     Snapshot.SymbolTableCopy->DeclareSymbol(name, type, declLoc, nullptr);
   }
@@ -462,11 +475,8 @@ bool Sandbox::validate() {
 
   // Restore global state
   SourceLines = savedSourceLines;
-  // Restore diagnostics by clearing and re-adding saved ones
-  DiagnosticEngine::clearDiagnostics();
-  for (const auto &diag : savedDiagnostics) {
-    DiagnosticEngine::add(diag.Loc, diag.Msg, diag.IsWarning);
-  }
+  // Restore diagnostics without re-triggering SLM augmentation
+  DiagnosticEngine::restoreDiagnostics(savedDiagnostics);
 
   IsValid = validationSucceeded;
 
@@ -532,10 +542,7 @@ bool Sandbox::validateIncremental() {
 
     // Restore global state
     SourceLines = savedSourceLines;
-    DiagnosticEngine::clearDiagnostics();
-    for (const auto &diag : savedDiagnostics) {
-      DiagnosticEngine::add(diag.Loc, diag.Msg, diag.IsWarning);
-    }
+    DiagnosticEngine::restoreDiagnostics(savedDiagnostics);
 
     IsValid = validationSucceeded;
 
@@ -580,6 +587,10 @@ bool Sandbox::isOriginalErrorResolved(int errorLine) const {
 }
 
 void Sandbox::commitToMain() {
+  // NOTE: This method is currently incomplete and unused (dormant).
+  // Do not rely on it as a working commit path until these TODOs are resolved,
+  // as it will desync SourceLines from the global AST and symbol table.
+  
   // Copy the modified source back to the global SourceLines
   ::SourceLines = Snapshot.SourceCode;
 

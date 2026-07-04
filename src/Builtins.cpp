@@ -35,21 +35,7 @@ using namespace llvm;
 static std::unordered_map<std::string, BuiltinInfo> g_builtins;
 static std::once_flag g_builtins_init_flag;
 
-// Arity table for bare language-level intrinsics only.
-// These are the only two functions that are callable WITHOUT a module qualifier
-// and have no home in lib/std:
-//   - typeof(x)   — compile-time type name string
-//   - lengthof(x) — byte-length of a string
-//
-// Everything else (print, printline, malloc, abs, power, sqrt, …) lives in
-// lib/std and is resolved by the Resolver's module registry.  Do NOT add those
-// here — adding them here would duplicate arity enforcement and cause confusion.
-static const std::unordered_map<std::string, int> IntrinsicArity = {
-    {"typeof",   1},
-    {"lengthof", 1},
-    {"assert",  -1},
-    {"fail",     1},
-};
+
 
 static void ensure_builtins_registered();
 

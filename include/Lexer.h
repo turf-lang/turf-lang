@@ -73,6 +73,9 @@ public:
   // Discard everything (used between passes if needed).
   static void reset();
 
+  // Restore a saved list of diagnostics without triggering SLM evaluation.
+  static void restoreDiagnostics(const std::vector<Diag> &Saved);
+
   // Public accessors for diagnostics (used by sandbox validation)
   static const std::vector<Diag> &getDiagnostics() { return Diagnostics; }
   static void clearDiagnostics() {

@@ -225,6 +225,16 @@ void DiagnosticEngine::reset() {
       false; // Reset cascade guard for the next compilation pass
 }
 
+void DiagnosticEngine::restoreDiagnostics(const std::vector<Diag> &Saved) {
+  Diagnostics = Saved;
+  ErrorLines.clear();
+  for (const auto &D : Diagnostics) {
+    if (!D.IsWarning) {
+      ErrorLines.insert(D.Loc.Line);
+    }
+  }
+}
+
 // Emits and collects a generic diagnostic message at the given source location.
 void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
   DiagnosticEngine::add(Loc, Msg, isMessageWarning(Msg));

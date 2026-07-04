@@ -48,8 +48,7 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
 //
 // Current status: stub — always returns true. The infrastructure for
 // invoking a child compile pass needs to be designed first.
-bool verifySuggestion(const AISuggestion &suggestion,
-                      const std::string &originalSource, int errorLine);
+bool verifySuggestion(const AISuggestion &suggestion, int errorLine);
 
 } // namespace SLM
 

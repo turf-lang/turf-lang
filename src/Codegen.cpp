@@ -227,44 +227,6 @@ static bool isPointerLike(const TurfType *T) {
          dynamic_cast<const TurfPointerType *>(T);
 }
 
-// Check whether two types are implicitly compatible.
-// Numerics (int, double, bool) are mutually compatible; string and void are
-// not. All pointer-like types (string, ptr, T*, void*) are mutually compatible
-// since they share the same LLVM representation.
-static bool isTypeCompatible(const TurfType *From, const TurfType *To) {
-  if (!From || !To)
-    return false;
-  if (From->getName() == To->getName())
-    return true;
-
-  // Type Erasure: Generic Type Parameters are compatible with any type
-  if (dynamic_cast<const TurfGenericParamType *>(From) ||
-      dynamic_cast<const TurfGenericParamType *>(To))
-    return true;
-
-  // All pointer-like types are mutually compatible (same LLVM ptr representation)
-  if (isPointerLike(From) && isPointerLike(To))
-    return true;
-
-  // null is compatible with any reference type (string, pointer)
-  if (From->getName() == "null") {
-    if (isPointerLike(To))
-      return true;
-    return false;
-  }
-
-  if (From->isVoid() || To->isVoid())
-    return false;
-  if (From->isNamed("string") || To->isNamed("string"))
-    return false;
-  // Issue #10 fix: bool is a distinct type -- must NOT silently coerce to
-  // int or double. Only int<->double promotion is allowed.
-  if (From->isNamed("bool") || To->isNamed("bool"))
-    return false;
-  // Remaining numerics: int <-> double are mutually coercible
-  return true;
-}
-
 
 static const TurfType *getExprType(const ExprAST *E) {
   if (!E)
@@ -339,7 +301,7 @@ static const TurfType *getExprType(const ExprAST *E) {
           if (ParamTypes.size() == ArgTypes.size()) {
             bool Compatible = true;
             for (size_t i = 0; i < ArgTypes.size(); ++i) {
-              if (!isTypeCompatible(ArgTypes[i], ParamTypes[i].get())) {
+              if (!typesCompatible(ArgTypes[i], ParamTypes[i].get())) {
                 Compatible = false;
                 break;
               }
@@ -422,7 +384,7 @@ static const TurfType *getExprType(const ExprAST *E) {
             if (ParamTypes.size() == ArgTypes.size()) {
               bool Compatible = true;
               for (size_t i = 0; i < ArgTypes.size(); ++i) {
-                if (!isTypeCompatible(ArgTypes[i], ParamTypes[i].get())) {
+                if (!typesCompatible(ArgTypes[i], ParamTypes[i].get())) {
                   Compatible = false;
                   break;
                 }
@@ -486,7 +448,7 @@ static const TurfType *getExprType(const ExprAST *E) {
           if (ParamTypes.size() == ArgTypes.size() + 1) {
             bool Compatible = true;
             for (size_t i = 0; i < ArgTypes.size(); ++i) {
-              if (!isTypeCompatible(ArgTypes[i], ParamTypes[i + 1].get())) {
+              if (!typesCompatible(ArgTypes[i], ParamTypes[i + 1].get())) {
                 Compatible = false;
                 break;
               }
@@ -2879,7 +2841,7 @@ Value *StructInitExprAST::codegen() {
         if (ParamTypes.size() == ArgTypes.size() + 1) {
           bool Compatible = true;
           for (size_t i = 0; i < ArgTypes.size(); ++i) {
-            if (!isTypeCompatible(ArgTypes[i].get(), ParamTypes[i + 1].get())) {
+            if (!typesCompatible(ArgTypes[i].get(), ParamTypes[i + 1].get())) {
               Compatible = false;
               break;
             }

@@ -13,6 +13,7 @@ class SLMEngine {
 private:
   llama_model *model = nullptr;
   llama_context *ctx = nullptr;
+  bool backendInitialized = false;
 
   // Private constructor for Singleton / Lazy Load
   SLMEngine();

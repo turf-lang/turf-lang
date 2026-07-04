@@ -96,13 +96,29 @@ TurfTypePtr makeArrayType(TurfTypePtr ElemType, int Size) {
 bool typesCompatible(const TurfType *From, const TurfType *To) {
   if (!From || !To)
     return false;
+
+  // Exact match
   if (From->getName() == To->getName())
     return true;
-  // Generic type parameters match anything (type-erasure)
+
+  // Type Erasure: Generic Type Parameters are compatible with anything
   if (dynamic_cast<const TurfGenericParamType *>(From) ||
       dynamic_cast<const TurfGenericParamType *>(To))
     return true;
-  // Issue #15 fix: `ptr` (OpaquePointerType) coercible to/from any typed pointer.
+
+  // Rule 1: null is only compatible with pointer-like types (string, ptr,
+  // void*, T*). It must NEVER be compatible with plain numerics or bool.
+  auto isPointerLikeStrict = [](const TurfType *T) {
+    return T->isString() || T->isPointer() ||
+           T->isNamed("ptr") || T->isNamed("void*");
+  };
+  if (From->isNull())
+    return isPointerLikeStrict(To);
+  if (To->isNull())
+    return isPointerLikeStrict(From);
+
+  // Rule 2: ptr / void* mutually coercible with typed pointers (T*) only.
+  // Deliberately NOT extended to `string` — string and T* remain distinct.
   auto isOpaquePtr = [](const TurfType *T) {
     return T->isNamed("ptr") || T->isNamed("void*");
   };
@@ -110,14 +126,31 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
     return true;
   if (isOpaquePtr(To) && From->isPointer())
     return true;
-  // void and string are never coercible
+
+  // void and string are never compatible with anything else past this point
   if (From->isVoid() || To->isVoid())
     return false;
-  if (From->isNamed("string") || To->isNamed("string"))
+  if (From->isString() || To->isString())
     return false;
-  // Issue #10 fix: bool is a distinct type -- must NOT silently coerce to int/double.
-  if (From->isNamed("bool") || To->isNamed("bool"))
+
+  // Rule 4: bool is strictly isolated — never coerces to/from numerics.
+  if (From->isBool() || To->isBool())
     return false;
-  // Remaining numerics (int <-> double) are mutually coercible
-  return true;
+
+  // Rule 3: numeric widening/narrowing.
+  // int -> double (widening): allowed.
+  // double -> int (narrowing): rejected, requires explicit cast.
+  if (From->isNumeric() && To->isNumeric()) {
+    if (From->isInt() && To->isDouble())
+      return true;
+    if (From->isDouble() && To->isInt())
+      return false;
+    // Same-kind numerics not already caught by the exact-name check above
+    // (shouldn't normally be reached, but keep as a safe explicit case).
+    return false;
+  }
+
+  // Anything else (e.g. struct-to-struct name mismatch, pointer-to-struct,
+  // etc.) is not implicitly compatible.
+  return false;
 }

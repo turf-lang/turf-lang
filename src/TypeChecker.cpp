@@ -142,34 +142,6 @@ bool TypeChecker::areArithCompatible(const TurfType *A, const TurfType *B) {
 
 // ─── Overload-resolution type compatibility ───────────────────────────────────
 
-bool TypeChecker::isTypeCompatible(const TurfType *ParamTy,
-                                   const TurfType *ArgTy) {
-  // Unknown types on either side — be permissive so we don't cascade errors
-  // when the Resolver couldn't annotate an arg or a param.
-  if (!ParamTy || !ArgTy)
-    return true;
-
-  // Exact match (covers int→int, string→string, bool→bool, etc.)
-  if (ParamTy->getName() == ArgTy->getName())
-    return true;
-
-  // Issue #10 fix: bool is a distinct type — it must NOT be treated as numeric
-  // for overload matching. Only int <-> double promotion is allowed.
-  if (ParamTy->isBool() || ArgTy->isBool())
-    return false;
-
-  // Numeric promotion: allow widening (int -> double), but reject narrowing (double -> int).
-  // (Codegen handles the actual widening conversion).
-  if (ParamTy->isNumeric() && ArgTy->isNumeric()) {
-    if (ParamTy->getName() == "int" && ArgTy->getName() == "double") {
-      return false; // Narrowing conversion requires explicit cast
-    }
-    return true;
-  }
-
-  return false;
-}
-
 // ─── Binary type inference ────────────────────────────────────────────────────
 
 bool TypeChecker::inferArithmeticType(SourceLocation Loc, int Op,
@@ -345,12 +317,8 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   if (Node.getInitializer() && DeclTy) {
     TurfTypePtr InitTy = getType(Node.getInitializer());
     if (InitTy) {
-      // Mismatch check: allow numeric promotion (int→double), but not
-      // string↔numeric
-      bool ok = DeclTy->isEquivalent(InitTy.get()) ||
-                (DeclTy->isNumeric() && InitTy->isNumeric()) ||
-                DeclTy->isNull() || InitTy->isNull();
-      if (!ok) {
+      // Mismatch check: use unified typesCompatible logic
+      if (!typesCompatible(InitTy.get(), DeclTy.get())) {
         reportError(Node.getLoc(),
                     "Cannot initialise '" + DeclTy->getName() +
                         "' variable '" + Node.getName() + "' with value of type '" +
@@ -447,7 +415,7 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   TurfTypePtr RhsTy = getType(Node.getRHS());
 
   if (LhsTy && RhsTy) {
-    if (!isTypeCompatible(LhsTy.get(), RhsTy.get())) {
+    if (!typesCompatible(RhsTy.get(), LhsTy.get())) {
       reportError(Node.getLoc(),
                   "Cannot assign value of type '" + RhsTy->getName() +
                       "' to variable of type '" + LhsTy->getName() + "'.");
@@ -482,7 +450,7 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
 
   if (LhsTy && RhsTy) {
     if (inferArithmeticType(Node.getLoc(), Node.getOpcode(), LhsTy.get(), RhsTy.get(), ResultTy)) {
-      if (!isTypeCompatible(LhsTy.get(), ResultTy.get())) {
+      if (!typesCompatible(ResultTy.get(), LhsTy.get())) {
         reportError(Node.getLoc(),
                     "Cannot assign value of type '" + ResultTy->getName() +
                         "' to variable of type '" + LhsTy->getName() + "'.");
@@ -656,10 +624,7 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
   if (!ReturnTypeStack_.empty() && ReturnTypeStack_.back()) {
     const TurfType *Declared = ReturnTypeStack_.back().get();
     if (RetTy) {
-      bool ok = Declared->isEquivalent(RetTy.get()) ||
-                (Declared->isNumeric() && RetTy->isNumeric()) ||
-                Declared->isVoid();
-      if (!ok) {
+      if (!typesCompatible(RetTy.get(), Declared)) {
         reportError(Node.getLoc(),
                     "Return type mismatch: function declares '" +
                         Declared->getName() + "' but returns '" +
@@ -790,7 +755,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       for (int i = 0; i < CheckCount; ++i) {
         const TurfType *ParamTy = Cand->Params[i].Type.get();
         const TurfType *ArgTy   = ArgTypes[i].get();
-        if (!isTypeCompatible(ParamTy, ArgTy)) {
+        if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy)) {
           AllOk = false;
           break;
         }
@@ -917,7 +882,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       for (int i = 0; i < ArgCount; ++i) {
         const TurfType *ParamTy = Cand->Params[i].Type.get();
         const TurfType *ArgTy   = ArgTypes[i].get();
-        if (!isTypeCompatible(ParamTy, ArgTy)) {
+        if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy)) {
           AllOk = false;
           break;
         }

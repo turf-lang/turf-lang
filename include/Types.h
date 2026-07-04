@@ -37,6 +37,7 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#include <cassert>
 #include <map>
 #include <memory>
 #include <string>
@@ -254,6 +255,13 @@ public:
 
   bool isArray() const override { return true; }
 
+  bool isEquivalent(const TurfType *Other) const override {
+    auto *OtherArr = dynamic_cast<const ArrayType *>(Other);
+    if (!OtherArr) return false;
+    return Size == OtherArr->Size &&
+           ElementType->isEquivalent(OtherArr->ElementType.get());
+  }
+
   const TurfType *getElementType() const { return ElementType.get(); }
   TurfTypePtr    getElementTypePtr() const { return ElementType; }
   int            getSize() const { return Size; }
@@ -340,8 +348,14 @@ public:
 
   const std::string        &getBaseName()  const { return BaseName; }
   const std::vector<TurfTypePtr> &getTypeArgs()  const { return TypeArgs; }
-  const TurfType           *getTypeArg(size_t I)    const { return TypeArgs[I].get(); }
-  TurfTypePtr               getTypeArgPtr(size_t I) const { return TypeArgs[I]; }
+  const TurfType           *getTypeArg(size_t I)    const {
+    assert(I < TypeArgs.size() && "GenericType type argument out of bounds");
+    return TypeArgs[I].get();
+  }
+  TurfTypePtr               getTypeArgPtr(size_t I) const {
+    assert(I < TypeArgs.size() && "GenericType type argument out of bounds");
+    return TypeArgs[I];
+  }
 };
 
 // ─── TurfStructType ───────────────────────────────────────────────────────────

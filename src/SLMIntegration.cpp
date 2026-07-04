@@ -21,6 +21,9 @@
 #include "Lexer.h"
 #include "Sandbox.h"
 #include <SLMEngine.h>
+#include "AST.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/Path.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -215,8 +218,10 @@ static int findFunctionSignatureLine(const std::string &errorMsg,
       while (after < line.size() && line[after] == ' ')
         ++after;
       if (after < line.size() && line[after] == '(') {
-        std::cerr << "[SLM 3b] Found fn '" << name << "' at line " << ln
-                  << " (pinning to context)\n";
+        if (std::getenv("TURF_SLM_DEBUG")) {
+          std::cerr << "[SLM 3b] Found fn '" << name << "' at line " << ln
+                    << " (pinning to context)\n";
+        }
         return ln;
       }
     }
@@ -289,8 +294,10 @@ static int findVariableDeclarationLine(const std::string &errorMsg,
             if (afterName >= line.size() ||
                 (!std::isalnum(static_cast<unsigned char>(line[afterName])) &&
                  line[afterName] != '_')) {
-              std::cerr << "[SLM 3a] Found declaration of '" << varName
-                        << "' at line " << ln << " (pinning to context)\n";
+              if (std::getenv("TURF_SLM_DEBUG")) {
+                std::cerr << "[SLM 3a] Found declaration of '" << varName
+                          << "' at line " << ln << " (pinning to context)\n";
+              }
               return ln;
             }
           }
@@ -359,13 +366,13 @@ static std::string extractJsonFieldString(const std::string &json,
     if (escapePos + 1 < result.length()) {
       char nextChar = result[escapePos + 1];
       if (nextChar == 'n') {
-        result.replace(escapePos, 2, "\n");
+        result.replace(escapePos, 2, "\n"); escapePos += 1;
       } else if (nextChar == 't') {
-        result.replace(escapePos, 2, "\t");
+        result.replace(escapePos, 2, "\t"); escapePos += 1;
       } else if (nextChar == '"') {
-        result.replace(escapePos, 2, "\"");
+        result.replace(escapePos, 2, "\""); escapePos += 1;
       } else if (nextChar == '\\') {
-        result.replace(escapePos, 2, "\\");
+        result.replace(escapePos, 2, "\\"); escapePos += 1;
       } else {
         escapePos++;
       }
@@ -376,39 +383,6 @@ static std::string extractJsonFieldString(const std::string &json,
   return result;
 }
 
-static float extractJsonFieldNumber(const std::string &json,
-                                    const std::string &field) {
-  std::string key = "\"" + field + "\":";
-  size_t pos = json.find(key);
-  if (pos == std::string::npos)
-    return 0.0f;
-
-  pos += key.length();
-
-  while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' ||
-                                 json[pos] == '\n' || json[pos] == '\r')) {
-    pos++;
-  }
-  if (pos >= json.length())
-    return 0.0f;
-
-  size_t endPos = pos;
-
-  while (endPos < json.length() &&
-         (std::isdigit(json[endPos]) || json[endPos] == '.' ||
-          json[endPos] == '-')) {
-    endPos++;
-  }
-
-  std::string numStr = json.substr(pos, endPos - pos);
-  char *endptr;
-
-  float val = std::strtof(numStr.c_str(), &endptr);
-  if (endptr == numStr.c_str()) {
-    return 0.0f;
-  }
-  return val;
-}
 
 static ErrorCategory classifyErrorWithSLM(const std::string &errorMessage,
                                           const std::string &codeContext) {
@@ -447,7 +421,9 @@ static ErrorCategory classifyErrorWithSLM(const std::string &errorMessage,
   size_t end = response.find_last_not_of(" \t\r\n\"'");
   if (start != std::string::npos && end != std::string::npos) {
     std::string categoryStr = response.substr(start, end - start + 1);
-    std::cerr << "[SLM Classifier] AI classification: " << categoryStr << "\n";
+    if (std::getenv("TURF_SLM_DEBUG")) {
+      std::cerr << "[SLM Classifier] AI classification: " << categoryStr << "\n";
+    }
     return categoryFromString(categoryStr);
   }
 
@@ -532,9 +508,11 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
   ErrorCategory category = classifyError(cleanError, contextKeyword);
   bool categoryWasDeterministic = (category != ErrorCategory::GENERAL);
 
-  const std::string modelPath =
-      "models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
-  if (!SLMEngine::getInstance().initialize(modelPath)) {
+  llvm::SmallString<128> ModelPath(CompilerExecutablePath);
+  llvm::sys::path::remove_filename(ModelPath);
+  llvm::sys::path::append(ModelPath, "..", "models",
+                          "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf");
+  if (!SLMEngine::getInstance().initialize(ModelPath.str().str())) {
     return suggestion;
   }
 
@@ -543,8 +521,10 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
   // We pass a small preliminary context (±3) just for the classifier;
   // the real context for the suggestion prompt is built after this.
   if (!categoryWasDeterministic) {
-    std::cerr << "[SLM Classifier] Hardcoded rules yielded GENERAL. Consulting "
-                 "SLM...\n";
+    if (std::getenv("TURF_SLM_DEBUG")) {
+      std::cerr << "[SLM Classifier] Hardcoded rules yielded GENERAL. Consulting "
+                   "SLM...\n";
+    }
     std::string classifierContext = getCodeContext(errorLine, 3);
     category = classifyErrorWithSLM(cleanError, classifierContext);
   }
@@ -552,8 +532,10 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
   // Step 3: dynamic context window
   // Now that we know the category, size the context window appropriately.
   int contextSize = contextSizeForCategory(category);
-  std::cerr << "[SLM] Context window: ±" << contextSize
-            << " lines (category: " << getCategoryName(category) << ")\n";
+  if (std::getenv("TURF_SLM_DEBUG")) {
+    std::cerr << "[SLM] Context window: ±" << contextSize
+              << " lines (category: " << getCategoryName(category) << ")\n";
+  }
 
   std::string codeContext;
 
@@ -593,9 +575,11 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
   // 3. Get the most specific documentation available
   std::string docPath = getCategoryDocPath(category, contextKeyword);
 
-  std::cerr << "[SLM] Error category: " << categoryName << " | Keyword: "
-            << (contextKeyword.empty() ? "(none)" : contextKeyword)
-            << " | Context: ±" << contextSize << " | Doc: " << docPath << "\n";
+  if (std::getenv("TURF_SLM_DEBUG")) {
+    std::cerr << "[SLM] Error category: " << categoryName << " | Keyword: "
+              << (contextKeyword.empty() ? "(none)" : contextKeyword)
+              << " | Context: ±" << contextSize << " | Doc: " << docPath << "\n";
+  }
 
   // 4. Load the targeted documentation for this error category
   std::string docContent = loadDocFile(docPath);
@@ -667,10 +651,11 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
 
   std::string rawResponse = SLMEngine::getInstance().generateSuggestion(prompt);
 
-  std::cerr << "Clean Error: " << cleanError << "\n";
-
-  std::cerr << "\n--- SLM RAW RESPONSE DEBUG ---\n"
-            << rawResponse << "\n------------------------------\n";
+  if (std::getenv("TURF_SLM_DEBUG")) {
+    std::cerr << "Clean Error: " << cleanError << "\n";
+    std::cerr << "\n--- SLM RAW RESPONSE DEBUG ---\n"
+              << rawResponse << "\n------------------------------\n";
+  }
 
   if (rawResponse.empty()) {
     return suggestion;
@@ -697,12 +682,14 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
     suggestion.confidence = computeConfidence(
         suggestion, category, categoryWasDeterministic, contextKeyword);
 
-    std::cerr << "Computed Confidence (deterministic): "
-              << suggestion.confidence << "\n";
-    std::cerr << "  category_deterministic=" << categoryWasDeterministic
-              << " fix_mode=" << suggestion.fix_mode
-              << " patch_empty=" << suggestion.code_patch.empty() << "\n";
-    std::cerr << "Parsed Fix Mode: " << suggestion.fix_mode << "\n";
+    if (std::getenv("TURF_SLM_DEBUG")) {
+      std::cerr << "Computed Confidence (deterministic): "
+                << suggestion.confidence << "\n";
+      std::cerr << "  category_deterministic=" << categoryWasDeterministic
+                << " fix_mode=" << suggestion.fix_mode
+                << " patch_empty=" << suggestion.code_patch.empty() << "\n";
+      std::cerr << "Parsed Fix Mode: " << suggestion.fix_mode << "\n";
+    }
 
     if (suggestion.fix_mode.empty()) {
       suggestion.fix_mode = "NONE";
@@ -715,8 +702,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
 
 // Sandbox-Based Suggestion Validation
 
-bool verifySuggestion(const AISuggestion &suggestion,
-                      const std::string &originalSource, int errorLine) {
+bool verifySuggestion(const AISuggestion &suggestion, int errorLine) {
   // Create a sandbox from the current compiler state
   auto sandbox = CreateSandbox();
   if (!sandbox) {
@@ -727,10 +713,11 @@ bool verifySuggestion(const AISuggestion &suggestion,
 
   // Use replacement_line (exact Turf-Lang code) for sandbox validation.
   // code_patch is a human-readable description and must NOT be fed to the
-  // parser.
-  const std::string &fixLine = suggestion.replacement_line.empty()
-                                   ? suggestion.code_patch
-                                   : suggestion.replacement_line;
+  // parser. If replacement_line is empty, there is no valid code to validate.
+  if (suggestion.replacement_line.empty()) {
+    return false; // no valid code to validate; code_patch is prose-only
+  }
+  const std::string &fixLine = suggestion.replacement_line;
   return ApplyAndValidateFix(*sandbox, errorLine, fixLine, suggestion);
 }
 
@@ -756,12 +743,7 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
   }
 
   // Verify the suggestion in a sandbox
-  std::string originalSourceConcat;
-  for (const auto &line : SourceLines) {
-    originalSourceConcat += line + "\n";
-  }
-
-  bool isValid = verifySuggestion(suggestion, originalSourceConcat, errorLine);
+  bool isValid = verifySuggestion(suggestion, errorLine);
 
   if (isValid) {
     suggestion.valid = true;
