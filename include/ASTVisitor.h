@@ -50,8 +50,6 @@ class FieldAccessExprAST;
 class ArrayDeclExprAST;
 class ArrayLiteralExprAST;
 class ArrayAccessExprAST;
-class ArrayAssignExprAST;
-class ArrayLengthExprAST;
 class StructDeclExprAST;
 class StructInitExprAST;
 class ModuleImportExprAST;
@@ -125,9 +123,6 @@ public:
   virtual void visitArrayDecl(ArrayDeclExprAST &Node) {}
   virtual void visitArrayLiteral(ArrayLiteralExprAST &Node) {}
   virtual void visitArrayAccess(ArrayAccessExprAST &Node) {}
-  virtual void visitArrayAssign(ArrayAssignExprAST &Node) {}
-  virtual void visitArrayLength(ArrayLengthExprAST &Node) {}
-
   // ── Modules & misc ────────────────────────────────────────────────────────
   virtual void visitModuleImport(ModuleImportExprAST &Node) {}
   virtual void visitSizeOf(SizeOfExprAST &Node) {}

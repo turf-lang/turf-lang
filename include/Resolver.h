@@ -165,9 +165,6 @@ public:
   void visitArrayDecl(ArrayDeclExprAST &Node) override;
   void visitArrayLiteral(ArrayLiteralExprAST &Node) override;
   void visitArrayAccess(ArrayAccessExprAST &Node) override;
-  void visitArrayAssign(ArrayAssignExprAST &Node) override;
-  void visitArrayLength(ArrayLengthExprAST &Node) override { (void)Node; }
-
   void visitModuleImport(ModuleImportExprAST &Node) override;
   void visitSizeOf(SizeOfExprAST &Node) override { (void)Node; }
 

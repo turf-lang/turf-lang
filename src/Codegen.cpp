@@ -63,11 +63,6 @@ std::set<std::string> g_RequiredLibs;
 static std::map<std::string, llvm::Type *> LLVMTypeCache;
 
 // Forward declarations for list helpers (defined after Array Codegen)
-static llvm::Function *GetOrDeclareMalloc();
-static llvm::Function *GetOrDeclareRealloc();
-static void EmitListBoundsCheck(llvm::Value *, llvm::Value *,
-                                const std::string &, SourceLocation);
-
 /**
  * @brief Initializes the core LLVM context, module, and instruction builder.
  *
@@ -339,7 +334,8 @@ static const TurfType *getExprType(const ExprAST *E) {
       for (const auto &[Name, ParamTypes] : FuncParamTypes) {
         std::string Prefix = "turf_" + CalleeName;
         if (Name == Prefix ||
-            (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+            (Name.size() > Prefix.size() && Name[Prefix.size()] == '_' &&
+             Name.compare(0, Prefix.size(), Prefix) == 0)) {
           if (ParamTypes.size() == ArgTypes.size()) {
             bool Compatible = true;
             for (size_t i = 0; i < ArgTypes.size(); ++i) {
@@ -365,14 +361,13 @@ static const TurfType *getExprType(const ExprAST *E) {
     return Cast->getDestType();
   }
   if (auto *Var = dynamic_cast<const VariableExprAST *>(E)) {
+    if (Var->ResolvedSymbol)
+      return Var->ResolvedSymbol->Type.get();
     if (GlobalSymbolTable) {
       Symbol *Sym = GlobalSymbolTable->LookupSymbol(Var->getName());
       if (Sym)
         return Sym->Type.get();
     }
-    auto It = NamedValues.find(Var->getName());
-    if (It != NamedValues.end())
-      return It->second.Type.get();
   }
   if (auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(E)) {
     const TurfType *BaseTy = getExprType(ArrAcc->getBase());
@@ -422,7 +417,8 @@ static const TurfType *getExprType(const ExprAST *E) {
         for (const auto &[Name, ParamTypes] : FuncParamTypes) {
           std::string Prefix = "turf_" + CalleeName;
           if (Name == Prefix ||
-              (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+              (Name.size() > Prefix.size() && Name[Prefix.size()] == '_' &&
+               Name.compare(0, Prefix.size(), Prefix) == 0)) {
             if (ParamTypes.size() == ArgTypes.size()) {
               bool Compatible = true;
               for (size_t i = 0; i < ArgTypes.size(); ++i) {
@@ -477,7 +473,8 @@ static const TurfType *getExprType(const ExprAST *E) {
         std::string Prefix = "turf_" + MethodName;
         std::string Suffix = "_" + MethodName;
         bool Match = false;
-        if (Name == Prefix || (Name.size() > Prefix.size() && Name[Prefix.size()] == '_')) {
+        if (Name == Prefix || (Name.size() > Prefix.size() && Name[Prefix.size()] == '_' &&
+                               Name.compare(0, Prefix.size(), Prefix) == 0)) {
           Match = true;
         } else {
           size_t Pos = Name.find(Suffix);
@@ -1173,7 +1170,9 @@ Value *CompoundAssignmentExprAST::codegen() {
     Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
 
     Builder->SetInsertPoint(DivZeroBB);
-    llvm::report_fatal_error("Division by zero in compound assignment");
+    CodegenIntrinsic("fail", {Builder->CreateGlobalString("Division by zero in compound assignment")}, Loc);
+    if (!Builder->GetInsertBlock()->getTerminator())
+      Builder->CreateUnreachable();
 
     Builder->SetInsertPoint(DivContBB);
     Result = isDouble ? Builder->CreateFDiv(LHSVal, CastRHS, "divtmp")
@@ -1192,7 +1191,9 @@ Value *CompoundAssignmentExprAST::codegen() {
     Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
 
     Builder->SetInsertPoint(DivZeroBB);
-    llvm::report_fatal_error("Modulo by zero in compound assignment");
+    CodegenIntrinsic("fail", {Builder->CreateGlobalString("Modulo by zero in compound assignment")}, Loc);
+    if (!Builder->GetInsertBlock()->getTerminator())
+      Builder->CreateUnreachable();
 
     Builder->SetInsertPoint(DivContBB);
     Result = isDouble ? Builder->CreateFRem(LHSVal, CastRHS, "modtmp")
@@ -1458,27 +1459,10 @@ Value *CastExprAST::codegen() {
 
     Builder->SetInsertPoint(ErrorBB);
 
-    Function *PutsF = TheModule->getFunction("puts");
-    if (!PutsF) {
-      FunctionType *FT =
-          FunctionType::get(Type::getInt32Ty(*TheContext), {I8Ptr}, false);
-      PutsF = Function::Create(FT, Function::ExternalLinkage, "puts",
-                               TheModule.get());
-    }
-    Value *ErrMsg = Builder->CreateGlobalString(
-        "Runtime Error: Invalid string to int conversion.", "errmsg");
-    Builder->CreateCall(PutsF, {ErrMsg});
-
-    Function *ExitF = TheModule->getFunction("exit");
-    if (!ExitF) {
-      FunctionType *FT = FunctionType::get(
-          Type::getVoidTy(*TheContext), {Type::getInt32Ty(*TheContext)}, false);
-      ExitF = Function::Create(FT, Function::ExternalLinkage, "exit",
-                               TheModule.get());
-    }
-    Builder->CreateCall(ExitF,
-                        {ConstantInt::get(Type::getInt32Ty(*TheContext), 1)});
-    Builder->CreateUnreachable();
+    CodegenIntrinsic("fail", {Builder->CreateGlobalString(
+        "Runtime Error: Invalid string to int conversion.")}, Loc);
+    if (!Builder->GetInsertBlock()->getTerminator())
+      Builder->CreateUnreachable();
 
     TheFunction->insert(TheFunction->end(), ContBB);
     Builder->SetInsertPoint(ContBB);
@@ -1795,7 +1779,7 @@ Value *BreakExprAST::codegen() {
 
 Value *ContinueExprAST::codegen() {
   if (LoopBlocks.empty()) {
-    SyntaxError(Loc, "'continue' used outside of a loop").raise();
+    ControlFlowError(Loc, "'continue' used outside of a loop").raise();
     return nullptr;
   }
 
@@ -2289,9 +2273,8 @@ Value *FuncCallExprAST::codegen() {
       const auto *ArrTy = dynamic_cast<const ::ArrayType *>(DeclaredType.get());
       if (ArrTy && ArrTy->getSize() == -1) {
         if (auto *VE = dynamic_cast<VariableExprAST *>(Args[Idx].get())) {
-          auto It = NamedValues.find(VE->getName());
-          assert(It != NamedValues.end() && "Array argument not found in NamedValues");
-          V = It->second.Alloca;
+          V = VE->codegenLValue();
+          assert(V && "Array argument LValue generation failed");
         } else {
           llvm::report_fatal_error(
               "Internal error: array argument must be a variable. "
@@ -2341,50 +2324,7 @@ Value *FuncCallExprAST::codegen() {
 
 
 // Ensure malloc / realloc / free are declared in the module.
-static llvm::Function *GetOrDeclareMalloc() {
-  if (auto *F = TheModule->getFunction("malloc"))
-    return F;
-  auto *FT =
-      llvm::FunctionType::get(llvm::PointerType::get(*TheContext, 0),
-                              {llvm::Type::getInt64Ty(*TheContext)}, false);
-  return llvm::Function::Create(FT, llvm::Function::ExternalLinkage, "malloc",
-                                TheModule.get());
-}
-static llvm::Function *GetOrDeclareRealloc() {
-  if (auto *F = TheModule->getFunction("realloc"))
-    return F;
-  auto *FT = llvm::FunctionType::get(llvm::PointerType::get(*TheContext, 0),
-                                     {llvm::PointerType::get(*TheContext, 0),
-                                      llvm::Type::getInt64Ty(*TheContext)},
-                                     false);
-  return llvm::Function::Create(FT, llvm::Function::ExternalLinkage, "realloc",
-                                TheModule.get());
-}
 
-// Helper: emit a runtime bounds check for list access.
-static void EmitListBoundsCheck(Value *IndexVal, Value *LenVal,
-                                const std::string &ListName,
-                                SourceLocation Loc) {
-  Function *TheFunction = Builder->GetInsertBlock()->getParent();
-  Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
-  Value *TooSmall = Builder->CreateICmpSLT(IndexVal, Zero, "idx_neg");
-  Value *TooBig = Builder->CreateICmpSGE(IndexVal, LenVal, "idx_big");
-  Value *OOB = Builder->CreateOr(TooSmall, TooBig, "oob");
-
-  BasicBlock *OobBB = BasicBlock::Create(*TheContext, "list_oob", TheFunction);
-  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "list_ok");
-  Builder->CreateCondBr(OOB, OobBB, ContBB);
-
-  Builder->SetInsertPoint(OobBB);
-  CodegenIntrinsic("fail", {Builder->CreateGlobalString(
-      "List index out of bounds for '" + ListName + "'")}, Loc);
-
-  if (!Builder->GetInsertBlock()->getTerminator())
-    Builder->CreateUnreachable();
-
-  TheFunction->insert(TheFunction->end(), ContBB);
-  Builder->SetInsertPoint(ContBB);
-}
 
 // Array Codegen
 Value *ArrayDeclExprAST::codegen() {
@@ -2630,95 +2570,6 @@ Value *ArrayAccessExprAST::codegen() {
 
   llvm::report_fatal_error("Internal error: Could not codegen ArrayAccessExprAST");
   return nullptr;
-}
-
-Value *ArrayAssignExprAST::codegen() {
-  VarInfo *VI = nullptr;
-  auto Iter = NamedValues.find(Name);
-  if (Iter != NamedValues.end())
-    VI = &Iter->second;
-
-
-
-  if (!VI || !isArrayType(VI->Type.get())) {
-    llvm::report_fatal_error(llvm::StringRef("Internal error: '" + Name + "' is not an array"));
-    return nullptr;
-  }
-
-  int ArraySize = dynamic_cast<const ::ArrayType *>(VI->Type.get())->getSize();
-  const TurfType *ElemType = getArrayElementType(VI->Type.get());
-
-  // Evaluate the index
-  Value *IndexVal = Index->codegen();
-  if (!IndexVal)
-    return nullptr;
-
-  // Index must be integer
-  // Index type check is handled by TypeChecker.
-  IndexVal = CastToType(IndexVal, TurfInt(), "arridx", Loc);
-
-  // Compile-time bounds check for constant indices (local arrays only)
-  if (ArraySize > 0) {
-    if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
-      long long Idx = CI->getSExtValue();
-      if (Idx < 0 || Idx >= ArraySize) {
-        ArrayBoundsError(Loc, Name, Idx, ArraySize).raise();
-        return nullptr;
-      }
-    } else {
-      EmitRuntimeBoundsCheck(IndexVal, ArraySize, Name, Loc);
-    }
-  }
-
-  // Evaluate the RHS value
-  Value *RHSVal = RHS->codegen();
-  if (!RHSVal)
-    return nullptr;
-
-  // RHS void check and type compatibility are handled by TypeChecker.
-
-  // Cast RHS to the element type before storing
-  TurfTypePtr ElemTypePtr = getTurfTypeFromLLVM(getLLVMType(ElemType));
-  RHSVal = CastToType(RHSVal, ElemTypePtr, "arrstore", Loc);
-
-  // GEP + store
-  // Two cases (same as ArrayAccessExprAST):
-  //  A) Local array (ArraySize > 0): two-index GEP into [N x T] alloca.
-  //  B) Pointer parameter (ArraySize == -1): load pointer, single-index GEP.
-  Type *ElemTy = getLLVMType(ElemType);
-  Value *ElemPtr;
-  if (ArraySize > 0) {
-    llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);
-    Value *Indices[] = {ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
-                        IndexVal};
-    ElemPtr = Builder->CreateInBoundsGEP(ArrTy, VI->Alloca, Indices, "arrelem");
-  } else {
-    Type *PtrTy = PointerType::get(*TheContext, 0);
-    Value *ArrPtr = Builder->CreateLoad(PtrTy, VI->Alloca, "arrptr");
-    ElemPtr = Builder->CreateGEP(ElemTy, ArrPtr, IndexVal, "arrelem");
-  }
-
-  Builder->CreateStore(RHSVal, ElemPtr);
-  return RHSVal;
-}
-
-Value *ArrayLengthExprAST::codegen() {
-  VarInfo *VI = nullptr;
-  auto Iter = NamedValues.find(Name);
-  if (Iter != NamedValues.end())
-    VI = &Iter->second;
-
-
-
-  if (!VI || !isArrayType(VI->Type.get())) {
-    llvm::report_fatal_error(
-        llvm::StringRef("Internal error: '" + Name + "' is not an array. '.length' can only be used on arrays."));
-    return nullptr;
-  }
-
-  return ConstantInt::get(
-      Type::getInt64Ty(*TheContext),
-      dynamic_cast<const ::ArrayType *>(VI->Type.get())->getSize());
 }
 
 // NOTE: ListDeclExprAST has been removed. List declarations are now
@@ -2987,9 +2838,12 @@ Value *StructInitExprAST::codegen() {
 
     TurfTypePtr ActTy;
     if (auto *VE = dynamic_cast<const VariableExprAST *>(MatchedExpr)) {
-      auto It = NamedValues.find(VE->getName());
-      if (It != NamedValues.end())
-        ActTy = It->second.Type;
+      if (VE->ResolvedSymbol)
+        ActTy = VE->ResolvedSymbol->Type;
+      else if (GlobalSymbolTable) {
+        Symbol *Sym = GlobalSymbolTable->LookupSymbol(VE->getName());
+        if (Sym) ActTy = Sym->Type;
+      }
     }
     if (!ActTy)
       ActTy = getTurfTypeFromLLVM(V->getType());

@@ -139,10 +139,10 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialAssi
             for (const auto &Arg : F->getArgs()) checkAccesses(Arg.get());
             checkAccesses(F->getCallee());
           } else if (auto ArrA = dynamic_cast<const ArrayAccessExprAST *>(N)) {
-            checkAccesses(ArrA->getBase()); checkAccesses(ArrA->getIndex());
-          } else if (auto ArrAs = dynamic_cast<const ArrayAssignExprAST *>(N)) {
-            checkAccesses(ArrAs->getIndex()); checkAccesses(ArrAs->getRHS());
-          } else if (auto R = dynamic_cast<const ReturnExprAST *>(N)) checkAccesses(R->getVal());
+            checkAccesses(ArrA->getBase()); checkAccesses(ArrA->getIndex()); 
+          } else if (auto R = dynamic_cast<const ReturnExprAST *>(N)) {
+            checkAccesses(R->getVal());
+          }
         };
         checkAccesses(Stmt);
 

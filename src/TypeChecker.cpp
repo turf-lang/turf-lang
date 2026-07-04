@@ -1190,26 +1190,6 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
   }
 }
 
-void TypeChecker::visitArrayAssign(ArrayAssignExprAST &Node) {
-  if (Node.getIndex())
-    const_cast<ExprAST *>(Node.getIndex())->accept(*this);
-  if (Node.getRHS())
-    const_cast<ExprAST *>(Node.getRHS())->accept(*this);
-  setType(&Node, TurfVoid());
-
-  if (Node.ResolvedSymbol && Node.ResolvedSymbol->IsImmutable) {
-#ifndef TYPECHECKER_NO_ERRORS
-    ImmutableAssignmentError(Node.getLoc(), Node.getName()).raise();
-#else
-    throw std::runtime_error("ImmutableAssignmentError: " + Node.getName());
-#endif
-  }
-}
-
-void TypeChecker::visitArrayLength(ArrayLengthExprAST &Node) {
-  setType(&Node, TurfInt());
-}
-
 // ─── Modules & misc ───────────────────────────────────────────────────────────
 
 void TypeChecker::visitModuleImport(ModuleImportExprAST &Node) {

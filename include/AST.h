@@ -847,54 +847,6 @@ public:
   }
 };
 
-// Array element assignment: arr[index] = value
-class ArrayAssignExprAST : public ExprAST {
-  std::string Name;
-  std::unique_ptr<ExprAST> Index;
-  std::unique_ptr<ExprAST> RHS;
-  SourceLocation Loc;
-
-public:
-  ArrayAssignExprAST(SourceLocation Loc, std::string Name,
-                     std::unique_ptr<ExprAST> Index,
-                     std::unique_ptr<ExprAST> RHS)
-      : Loc(Loc), Name(std::move(Name)), Index(std::move(Index)),
-        RHS(std::move(RHS)) {}
-
-  const SourceLocation &getLoc() const { return Loc; }
-  const std::string &getName() const { return Name; }
-  const ExprAST *getIndex() const { return Index.get(); }
-  const ExprAST *getRHS() const { return RHS.get(); }
-
-  std::shared_ptr<VariableSymbol> ResolvedSymbol;
-
-  llvm::Value *codegen() override;
-  void accept(ASTVisitor &V) override { V.visitArrayAssign(*this); }
-  std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ArrayAssignExprAST>(
-        Loc, Name, CloneExprAST(Index.get()), CloneExprAST(RHS.get()));
-  }
-};
-
-// Array length: arr.length
-class ArrayLengthExprAST : public ExprAST {
-  std::string Name;
-  SourceLocation Loc;
-
-public:
-  ArrayLengthExprAST(SourceLocation Loc, std::string Name)
-      : Loc(Loc), Name(std::move(Name)) {}
-
-  const SourceLocation &getLoc() const { return Loc; }
-  const std::string &getName() const { return Name; }
-
-  llvm::Value *codegen() override;
-  void accept(ASTVisitor &V) override { V.visitArrayLength(*this); }
-  std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ArrayLengthExprAST>(Loc, Name);
-  }
-};
-
 // list method call: nums.push(val)  /  nums.pop()  /  nums.length
 // Note: list<T> *declaration* is now a plain VarDeclExprAST with a
 // GenericType("list", [elemType]) — no separate ListDeclExprAST needed.
@@ -1064,12 +1016,7 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
-  if (const auto *ArrayAssign =
-          dynamic_cast<const ArrayAssignExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(ArrayAssign->getIndex(), NodeIDs);
-    CollectAllNodeIDsInternal(ArrayAssign->getRHS(), NodeIDs);
-    return;
-  }
+
 
   if (const auto *MethodCall = dynamic_cast<const MethodCallExprAST *>(Node)) {
     CollectAllNodeIDsInternal(MethodCall->getBase(), NodeIDs);
@@ -1099,8 +1046,7 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
-  if (dynamic_cast<const ArrayLengthExprAST *>(Node) ||
-      dynamic_cast<const BreakExprAST *>(Node) ||
+  if (dynamic_cast<const BreakExprAST *>(Node) ||
       dynamic_cast<const ContinueExprAST *>(Node) ||
       dynamic_cast<const NumberExprAST *>(Node) ||
       dynamic_cast<const BoolExprAST *>(Node) ||
@@ -1466,30 +1412,7 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
     return ChangedIDs;
   }
 
-  // ArrayAssignExprAST: Compare name and recursively diff index and RHS
-  if (auto *OrigAssign =
-          dynamic_cast<const ArrayAssignExprAST *>(OriginalAST)) {
-    auto *ModAssign = dynamic_cast<const ArrayAssignExprAST *>(ModifiedAST);
-    if (OrigAssign->getName() != ModAssign->getName()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
-    CollectChangedNodeIDsInternal(OrigAssign->getIndex(), ModAssign->getIndex(),
-                                  ChangedIDs);
-    CollectChangedNodeIDsInternal(OrigAssign->getRHS(), ModAssign->getRHS(),
-                                  ChangedIDs);
-    return ChangedIDs;
-  }
 
-  // ArrayLengthExprAST: Compare name
-  if (auto *OrigLen = dynamic_cast<const ArrayLengthExprAST *>(OriginalAST)) {
-    auto *ModLen = dynamic_cast<const ArrayLengthExprAST *>(ModifiedAST);
-    if (OrigLen->getName() != ModLen->getName()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
-    return ChangedIDs;
-  }
 
   // SizeOfExprAST: Compare type
   if (auto *OrigSizeOf = dynamic_cast<const SizeOfExprAST *>(OriginalAST)) {

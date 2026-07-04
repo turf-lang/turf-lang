@@ -122,12 +122,6 @@ public:
     visitChild(Node.getBase());
     visitChild(Node.getIndex());
   }
-
-  void visitArrayAssign(ArrayAssignExprAST &Node) override {
-    visitChild(Node.getIndex());
-    visitChild(Node.getRHS());
-  }
-
   void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
     for (const auto &Elem : Node.getElements())
       visitChild(Elem.get());

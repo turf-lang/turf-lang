@@ -683,21 +683,6 @@ void Resolver::visitArrayAccess(ArrayAccessExprAST &Node) {
   visitChild(Node.getIndex());
 }
 
-void Resolver::visitArrayAssign(ArrayAssignExprAST &Node) {
-  // The array being assigned to must already be in scope.
-  auto Sym = SymTable_.lookupVariable(Node.getName());
-  if (!Sym) {
-    std::vector<std::string> VisibleNames = SymTable_.getAllVisibleNames();
-    RankedSuggestions Suggestions;
-    Suggestions.Local =
-        SuggestionIndex::suggestVisible(Node.getName(), VisibleNames);
-    ReferenceError(Node.getLoc(), Node.getName(), Suggestions).raise();
-  }
-  Node.ResolvedSymbol = Sym;
-  visitChild(Node.getIndex());
-  visitChild(Node.getRHS());
-}
-
 void Resolver::visitModuleImport(ModuleImportExprAST &Node) {
   ModuleStack_.push_back(Node.getModuleName());
   visitChild(Node.getBody());
