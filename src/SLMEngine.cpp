@@ -19,6 +19,7 @@
 #include "llama.h"
 #include <cstdio>
 #include <iostream>
+#include <string_view>
 #include <unistd.h>
 #include <vector>
 
@@ -135,6 +136,21 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
     }
     return "";
   }
+
+  // Token-budget guard: ensure there is room for at least 512 generation
+  // tokens after the prompt. Silent truncation by llama_decode corrupts the
+  // middle of the prompt in a way that's very hard to diagnose externally.
+  static constexpr int GEN_BUDGET = 512;
+  if (n_tokens > n_ctx - GEN_BUDGET) {
+    if (saved_stderr != -1) {
+      dup2(saved_stderr, STDERR_FILENO);
+      close(saved_stderr);
+    }
+    std::cerr << "Compiler Warning: SLM prompt too large (" << n_tokens
+              << " tokens, ctx=" << n_ctx
+              << "). Skipping suggestion to avoid truncation.\n";
+    return "";
+  }
   tokens.resize(n_tokens);
 
   llama_batch batch = llama_batch_get_one(tokens.data(), n_tokens);
@@ -148,11 +164,24 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
 
   llama_sampler *sampler =
       llama_sampler_chain_init(llama_sampler_chain_default_params());
-  llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.2f));
-
+  // Repetition penalty: prevents the 1.5B model from looping/repeating tokens
+  // under greedy decoding — a known failure mode for small models.
+  // last_n=64 tokens window, repeat_penalty=1.1, freq/presence penalties off.
+  llama_sampler_chain_add(
+      sampler, llama_sampler_init_penalties(64, 1.1f, 0.0f, 0.0f));
+  // Greedy decoding: pick the highest-probability token deterministically.
+  // Note: a temperature sampler is intentionally NOT chained before greedy —
+  // temperature only reshapes the distribution and has zero effect on argmax.
   llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
 
   std::string result;
+  // Longest stop token is "<|im_start|>" (13 chars). Keep a trailing window
+  // of that length so we can detect stop sequences without re-scanning the
+  // entire result string from position 0 on every token (O(n) → O(1)).
+  static constexpr size_t STOP_WINDOW = 20; // slightly more than 13 for safety
+  const std::string STOP_IM_END = "<|im_end|>";
+  const std::string STOP_IM_START = "<|im_start|>";
+
   const llama_vocab *vocab = llama_model_get_vocab(llama_get_model(ctx));
   for (int i = 0; i < 512; i++) {
     llama_token token = llama_sampler_sample(sampler, ctx, -1);
@@ -164,12 +193,20 @@ std::string SLMEngine::generateSuggestion(const std::string &prompt) {
     if (n > 0) {
       result += std::string(buf, n);
 
-      // Check for Qwen2.5 ChatML stop sequences
-      const std::string STOP_IM_END = "<|im_end|>";
-      const std::string STOP_IM_START = "<|im_start|>";
+      // Only search the trailing window — avoids re-scanning the whole string.
+      size_t windowStart =
+          result.size() > STOP_WINDOW ? result.size() - STOP_WINDOW : 0;
+      std::string_view tail(result.data() + windowStart,
+                            result.size() - windowStart);
 
-      size_t pos_im_end = result.find(STOP_IM_END);
-      size_t pos_im_start = result.find(STOP_IM_START);
+      auto findInTail = [&](const std::string &stop) -> size_t {
+        size_t p = tail.find(stop);
+        return p == std::string_view::npos ? std::string::npos
+                                          : windowStart + p;
+      };
+
+      size_t pos_im_end = findInTail(STOP_IM_END);
+      size_t pos_im_start = findInTail(STOP_IM_START);
 
       size_t stop_pos = std::string::npos;
       if (pos_im_end != std::string::npos)

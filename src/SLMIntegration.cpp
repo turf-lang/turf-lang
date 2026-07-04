@@ -232,20 +232,16 @@ static int findFunctionSignatureLine(const std::string &errorMsg,
 
 // Scans SourceLines for a variable declaration matching the variable name
 // extracted from an UNDECLARED_VAR error message. Returns the 1-based line
-// number of the most recent `type <varName> =` pattern, or -1 if not found.
-// Searches backwards from errorLine-1 so the nearest prior declaration wins.
-//
-// Recognised declaration patterns (Turf-Lang syntax):
-//   int x = ...   |   double x = ...   |   bool x = ...   |   string x = ...
-// Also matches function parameter declarations: fn foo(int x, ...)
+// number of the nearest prior declaration in the same function scope, or -1.
+// Uses Turf-Lang syntax: `mut name : type` or `immut name : type`.
+// Stops the backward scan at the nearest `fn ` line to avoid crossing into
+// an unrelated function's scope.
 static int findVariableDeclarationLine(const std::string &errorMsg,
                                        int errorLine) {
   if (SourceLines.empty())
     return -1;
 
   // Extract the variable name from single-quoted text in the error message.
-  // UseBeforeDeclarationError:  "...use 'x' before..."
-  // ReferenceError:             "...anything named 'x'..."
   std::string varName;
   size_t q1 = errorMsg.find('\'');
   if (q1 != std::string::npos) {
@@ -257,52 +253,39 @@ static int findVariableDeclarationLine(const std::string &errorMsg,
   if (varName.empty())
     return -1;
 
-  // Turf type keywords that precede a variable name in a declaration.
-  static const char *typeKeywords[] = {"int", "double", "float", "bool",
-                                       "string", "mutable", "mut",
-                                       "immutable", "immut"};
-
-  // Scan backwards from just before the error line to find the closest match.
+  // Scan backwards from just before the error line.
+  // Stop at the nearest enclosing `fn ` line to avoid crossing scope.
   int lastLine = std::min(errorLine - 1, static_cast<int>(SourceLines.size()));
   for (int ln = lastLine; ln >= 1; --ln) {
     const std::string &line = SourceLines[ln - 1];
 
-    // Look for `<typeKeyword> <varName>` in the line.
-    for (const char *kw : typeKeywords) {
-      size_t kwLen = std::strlen(kw);
-      size_t pos = 0;
-      while ((pos = line.find(kw, pos)) != std::string::npos) {
-        // The type keyword must be preceded by whitespace/start-of-line
-        // and followed by whitespace (not part of a longer identifier).
-        bool kwStart =
-            (pos == 0 ||
-             !std::isalnum(static_cast<unsigned char>(line[pos - 1])));
-        size_t afterKw = pos + kwLen;
-        bool kwEnd = (afterKw < line.size() && line[afterKw] == ' ');
+    // Function boundary: stop scanning if we've crossed into another fn scope.
+    if (line.find("fn ") != std::string::npos)
+      break;
 
-        if (kwStart && kwEnd) {
-          // Skip whitespace after the type keyword.
-          size_t nameStart = afterKw;
-          while (nameStart < line.size() && line[nameStart] == ' ')
-            ++nameStart;
-
-          // Check if the identifier at this position matches varName.
-          if (nameStart + varName.size() <= line.size() &&
-              line.compare(nameStart, varName.size(), varName) == 0) {
-            // Make sure the match is a whole identifier (not a prefix).
-            size_t afterName = nameStart + varName.size();
-            if (afterName >= line.size() ||
-                (!std::isalnum(static_cast<unsigned char>(line[afterName])) &&
-                 line[afterName] != '_')) {
-              if (std::getenv("TURF_SLM_DEBUG")) {
-                std::cerr << "[SLM 3a] Found declaration of '" << varName
-                          << "' at line " << ln << " (pinning to context)\n";
-              }
-              return ln;
-            }
+    // Turf-Lang declaration syntax: `mut <varName> :` or `immut <varName> :`
+    for (const char *prefix : {"mut ", "immut "}) {
+      size_t pfxLen = std::strlen(prefix);
+      size_t pos = line.find(prefix);
+      if (pos == std::string::npos)
+        continue;
+      size_t nameStart = pos + pfxLen;
+      // Skip extra whitespace after keyword
+      while (nameStart < line.size() && line[nameStart] == ' ')
+        ++nameStart;
+      // Check varName match
+      if (nameStart + varName.size() <= line.size() &&
+          line.compare(nameStart, varName.size(), varName) == 0) {
+        size_t afterName = nameStart + varName.size();
+        // Whole-word check: must be followed by whitespace or ':'
+        if (afterName >= line.size() ||
+            line[afterName] == ' ' || line[afterName] == ':') {
+          if (std::getenv("TURF_SLM_DEBUG")) {
+            std::cerr << "[SLM 3a] Found declaration of '" << varName
+                      << "' at line " << ln << " (pinning to context)\n";
           }
+          return ln;
         }
-        pos = afterKw; // advance past this occurrence
       }
     }
   }
@@ -559,6 +542,18 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
       codeContext = getCodeContext(errorLine, contextSize);
     }
   } else if (category == ErrorCategory::UNDECLARED_VAR) {
+    int declLine = findVariableDeclarationLine(cleanError, errorLine);
+    if (declLine > 0) {
+      codeContext =
+          getCodeContextWithPinnedLines(errorLine, contextSize, {declLine});
+    } else {
+      codeContext = getCodeContext(errorLine, contextSize);
+    }
+  } else if (category == ErrorCategory::TYPE_MISMATCH ||
+             category == ErrorCategory::ARRAY_ERROR) {
+    // For type mismatches and array errors, try to pin the declaration of the
+    // variable involved — the model needs to see where the type was declared
+    // to understand the conflict, which may be far outside the ±window.
     int declLine = findVariableDeclarationLine(cleanError, errorLine);
     if (declLine > 0) {
       codeContext =
