@@ -216,20 +216,27 @@ static std::string extractJsonFieldString(const std::string &json,
   return result;
 }
 
-// Deterministic confidence scoring.
-// Rather than asking the LLM to guess a probability (which small models anchor
-// to example values in the prompt), we compute a score from measurable signals:
+// Computes a structural prior for confidence from shallow, pre-sandbox signals.
+// This is NOT the final confidence — sandbox validation hasn't run yet.
+// The score is meant to estimate plausibility; finalizeConfidence() then
+// incorporates the strongest signal (empirical sandbox pass/fail) to produce
+// the true confidence used by the display gate.
 //
-//   +0.4  Error category resolved by hardcoded rules (no SLM fallback needed)
-//   +0.2  fix_mode == MODIFY  (the model believes a patch is applicable)
-//   +0.2  code_patch is non-empty
-//   +0.1  code_patch is a single line (no embedded newlines or bare braces)
-//   +0.1  code_patch contains the error keyword — patch is on-topic
+//   +0.4  Error category resolved by hardcoded rules (not SLM fallback)
+//   +0.2  fix_mode == MODIFY
+//   +0.2  replacement_line is non-empty (actual code, not prose)
+//   +0.1  replacement_line is a single clean line (no newlines or bare braces)
+//   +0.1  replacement_line contains the error keyword on a word boundary
+//
+// Note: If replacement_line is empty, patchCode is NOT used as a fallback —
+// code_patch is prose, and scoring prose as code produces misleading results
+// since verifySuggestion() refuses to validate it anyway.
 //
 // Maximum score: 1.0  |  Minimum: 0.0
-static float computeConfidence(const AISuggestion &s, ErrorCategory category,
-                               bool deterministic,
-                               const std::string &contextKeyword) {
+static float computeStructuralPrior(const AISuggestion &s, ErrorCategory category,
+                                    bool deterministic,
+                                    const std::string &contextKeyword,
+                                    int errorLine) {
   float score = 0.0f;
 
   // +0.4 if the category was resolved by deterministic rules (not SLM fallback)
@@ -240,33 +247,87 @@ static float computeConfidence(const AISuggestion &s, ErrorCategory category,
   if (s.fix_mode == "MODIFY")
     score += 0.2f;
 
-  // +0.2 if a non-empty replacement_line was actually produced
-  // (replacement_line is the exact code; code_patch is just a prose
-  // description)
-  const std::string &patchCode =
-      s.replacement_line.empty() ? s.code_patch : s.replacement_line;
-  if (!patchCode.empty())
+  // Only score replacement_line — code_patch is human-readable prose, not
+  // parseable code. If replacement_line is empty, all code-quality checks
+  // are skipped entirely (verifySuggestion would reject it regardless).
+  const std::string &patchCode = s.replacement_line;
+
+  if (!patchCode.empty()) {
+    // Hard-reject: the model echoed back the original broken line unchanged.
+    // This is a known small-model failure mode. An identical replacement is
+    // actively harmful — it passes every other check while fixing nothing.
+    std::string originalLine =
+        (errorLine >= 1 && errorLine <= static_cast<int>(SourceLines.size()))
+            ? SourceLines[errorLine - 1]
+            : "";
+    // Trim leading/trailing whitespace for comparison
+    auto trim = [](const std::string &s) {
+      size_t l = s.find_first_not_of(" \t\r\n");
+      size_t r = s.find_last_not_of(" \t\r\n");
+      return (l == std::string::npos) ? std::string{} : s.substr(l, r - l + 1);
+    };
+    if (!originalLine.empty() && trim(patchCode) == trim(originalLine)) {
+      // Hard override — this score can never clear the gate.
+      return 0.0f;
+    }
+
+    // +0.2 if a non-empty replacement_line was produced
     score += 0.2f;
 
-  // +0.1 if the replacement is a single, clean line (no embedded newlines or
-  // lone braces)
-  if (!patchCode.empty()) {
+    // +0.1 if it is a single, clean line (no embedded newlines or lone braces)
     bool hasNewline = patchCode.find('\n') != std::string::npos;
     bool isBareBrace = (patchCode == "{" || patchCode == "}");
     if (!hasNewline && !isBareBrace)
       score += 0.1f;
-  }
 
-  // +0.1 if the replacement line mentions the relevant keyword (patch is
-  // on-topic)
-  if (!contextKeyword.empty() && !patchCode.empty() &&
-      patchCode.find(contextKeyword) != std::string::npos)
-    score += 0.1f;
+    // +0.1 if the replacement contains the keyword at a word boundary.
+    // Raw substring matching is avoided because short identifiers (e.g. i, n)
+    // appear inside unrelated tokens, making the signal nearly unconditional.
+    if (!contextKeyword.empty()) {
+      size_t kwPos = 0;
+      while ((kwPos = patchCode.find(contextKeyword, kwPos)) != std::string::npos) {
+        // Check that the characters immediately surrounding the match are not
+        // alphanumeric or underscore (i.e. it is a word boundary).
+        bool leftOk = (kwPos == 0) ||
+                      (!std::isalnum(static_cast<unsigned char>(patchCode[kwPos - 1])) &&
+                       patchCode[kwPos - 1] != '_');
+        bool rightOk =
+            (kwPos + contextKeyword.size() >= patchCode.size()) ||
+            (!std::isalnum(static_cast<unsigned char>(
+                 patchCode[kwPos + contextKeyword.size()])) &&
+             patchCode[kwPos + contextKeyword.size()] != '_');
+        if (leftOk && rightOk) {
+          score += 0.1f;
+          break; // only count once
+        }
+        kwPos += contextKeyword.size();
+      }
+    }
+  }
 
   // Clamp to [0, 1]
   if (score > 1.0f)
     score = 1.0f;
   return score;
+}
+
+// Incorporates the strongest available signal — sandbox empirical validation —
+// into the structural prior to produce the final confidence score.
+//
+// If sandbox validation passed, the fix has been proven correct by the actual
+// compiler. The structural prior can only nudge the score for logging/ranking;
+// it can no longer veto a proven-correct fix.
+//
+// If sandbox did not validate (NONE mode, or sandbox rejected the fix), the
+// structural prior is all we have. It is capped below the display gate (0.8)
+// so that an unvalidated fix never auto-applies.
+static float finalizeConfidence(float structuralPrior, bool sandboxValidated) {
+  if (sandboxValidated) {
+    // Proven-correct: clamp to at least 0.9, no longer blockable by the prior.
+    return std::max(0.9f, structuralPrior);
+  }
+  // Not validated: cap well below the gate so it can never auto-apply.
+  return std::min(structuralPrior, 0.5f);
 }
 
 /**
@@ -495,17 +556,20 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       }
     }
 
-    // Compute confidence deterministically from measurable output signals.
-    // The LLM is no longer asked to self-report a probability.
-    suggestion.confidence = computeConfidence(
-        suggestion, category, categoryWasDeterministic, contextKeyword);
+    // Compute the structural prior from shallow, pre-sandbox signals.
+    // This is NOT finalized here — sandbox validation hasn't run yet.
+    // finalizeConfidence() in validateAndApplySuggestion() incorporates the
+    // empirical sandbox result to produce the true, gate-relevant score.
+    suggestion.confidence = computeStructuralPrior(
+        suggestion, category, categoryWasDeterministic, contextKeyword,
+        errorLine);
 
     if (std::getenv("TURF_SLM_DEBUG")) {
-      std::cerr << "Computed Confidence (deterministic): "
+      std::cerr << "Structural Prior (pre-sandbox): "
                 << suggestion.confidence << "\n";
       std::cerr << "  category_deterministic=" << categoryWasDeterministic
                 << " fix_mode=" << suggestion.fix_mode
-                << " patch_empty=" << suggestion.code_patch.empty() << "\n";
+                << " replacement_line_empty=" << suggestion.replacement_line.empty() << "\n";
       std::cerr << "Parsed Fix Mode: " << suggestion.fix_mode << "\n";
     }
 
@@ -564,16 +628,30 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
   // Verify the suggestion in a sandbox
   bool isValid = verifySuggestion(suggestion, errorLine);
 
+  // Finalize confidence NOW — after sandbox validation.
+  // The structural prior (computed before sandbox ran) is only a prior;
+  // the sandbox result is the strongest possible signal (empirical proof).
+  // A proven-correct fix is clamped to >= 0.9; an unvalidated fix is capped
+  // at <= 0.5, making it impossible for a pre-validation guess to veto a
+  // validated fix, or to promote an unvalidated one past the display gate.
+  suggestion.confidence = finalizeConfidence(suggestion.confidence, isValid);
+
   if (isValid) {
     suggestion.valid = true;
     std::cerr << Colors::BRIGHT_GREEN << "[Sandbox] ✓ Suggestion validated"
               << Colors::RESET << "\n";
+    if (std::getenv("TURF_SLM_DEBUG")) {
+      std::cerr << "Final Confidence (post-sandbox): " << suggestion.confidence << "\n";
+    }
   } else {
     suggestion.valid = false;
     suggestion.fix_mode = "NONE"; // Downgrade to no fix on validation failure
     std::cerr << Colors::BRIGHT_YELLOW
               << "[Sandbox] ✗ Suggestion validation failed" << Colors::RESET
               << "\n";
+    if (std::getenv("TURF_SLM_DEBUG")) {
+      std::cerr << "Final Confidence (post-sandbox, capped): " << suggestion.confidence << "\n";
+    }
   }
 
   return suggestion;
