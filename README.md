@@ -1,132 +1,375 @@
 # Turf
 
-Turf is an experimental programming language and compiler written in C++. The goal is simple: fast compilation with helpful, human-friendly error messages. Instead of plain errors, Turf explains what went wrong and suggests fixes.
+Turf is a statically-typed, LLVM-backed programming language. It compiles directly to native binaries, supports structs, generics, pointers, and native FFI, and ships with an integrated compiler-diagnostics system built around a locally-run language model.
 
-Turf has matured beyond its early phases and is now a fully programmable language. It has been packaged into a standalone cross-platform compiler that handles parsing, code generation, and producing the binary seamlessly.
+Current version: **v0.7.0**, pre-1.0, actively developed.
+
+## Table of Contents
+
+1. [Why Turf](#why-turf)
+2. [Installation](#installation)
+3. [Quick Start](#quick-start)
+4. [Language Tour](#language-tour)
+5. [Examples](#examples)
+6. [Building from Source](#building-from-source)
+7. [Roadmap](#roadmap)
+
+## Why Turf
+
+Turf's compiler pipeline is a standard deterministic front-to-back: lexer → parser → resolver → type checker → codegen, LLVM backend. Nothing about the compilation itself is probabilistic. What Turf adds on top is a diagnostics layer that treats the compiler's own internal state as the
+source of truth for AI-assisted suggestions, rather than pattern-matching against formatted error strings — and every part of that pipeline exists specifically to close off the ways this class of feature usually goes wrong.
+
+### The diagnostic pipeline, precisely
+
+When a diagnostic fires with `--smart` or `--online` enabled, this is what actually happens, in order:
+
+1. **The error itself carries structural context, not just a message.**
+  Every diagnostic class that has something meaningful to point to (a variable's declaration site on a type mismatch, every candidate overload on an arity mismatch, the array's declaration on an out-of-bounds access, the prior declaration on a duplicate) attaches a `RelatedLocation` — `{SourceLocation, Description}` — at the exact point in the Resolver/TypeChecker/Codegen where that information is already known, because real symbol-table resolution already happened there. This is threaded through `TurfError`/`TurfWarning` via a chainable `.withRelated(loc, "declared here")`, into `DiagnosticEngine::add()`, and stored on the diagnostic itself. Nothing is recovered later by regex over an error string or by re-scanning source text for a keyword — the data is real from the moment the compiler pass produces it.
+
+2. **Context is built from that data, not from guessing.**
+  The old approach (used by an earlier iteration of this feature) scanned raw source lines for patterns like `fn name(` or a declaration keyword to guess where something relevant might be. That approach is gone. Context assembly now just reads the `RelatedLocation` list off the diagnostic and pins those exact lines into the model's prompt, labeled with why each one matters. The size of the surrounding sliding window (how many lines before/after the error line itself) is sized per error category — tighter for self-contained errors like a syntax mistake, wider for errors like a type mismatch where the relevant declaration may be far away in the file.
+
+3. **Category classification is resolved deterministically first.**
+  A rule-based classifier (not the model) assigns each error to a category before any model call happens. Only when that fails to produce a specific category does the category get folded into the same model call that produces the fix — via a `category` field in the same JSON response, rather than spending a second, separate model invocation on classification alone.
+
+4. **The model's output is grammar-constrained at the token level.**
+  A GBNF grammar is loaded into the sampler chain via `llama.cpp`'s grammar-masking sampler, fixing the JSON schema exactly: six required fields in a fixed order, `fix_mode` restricted to the literal tokens `MODIFY` or `NONE`, the `category` field restricted to the exact set of category names the compiler understands. This isn't a validation step run after the fact — it's enforced during sampling, so it is not merely unlikely for the model to emit a malformed response, it is not sampleable in the first place.
+  The sampler chain also applies a repetition penalty ahead of greedy decoding, specifically to counter the tendency of small models to loop under purely deterministic sampling.
+
+5. **Confidence is computed, never asked for.**
+  The model is never prompted to self-report a probability — small models anchor to whatever example values appear nearby in the prompt and echo them back regardless of actual certainty, making a self-reported number meaningless. Instead, confidence is computed after parsing from measurable properties of the actual response: whether the category was resolved deterministically, whether `fix_mode` is `MODIFY`, whether a concrete single-line replacement was actually produced, whether that replacement is clean single-line syntax rather than something structurally suspicious, and whether it's actually on-topic for the symbol involved.
+
+6. **The suggested fix is never trusted — it's tested.**
+  Before anything is shown to you, the fix is applied to an isolated snapshot of the compiler state — a real sandboxed copy of the source, symbol table, and AST, not the live one — and speculatively re-parsed and re-validated. Only a fix that demonstrably resolves the original error, without introducing new ones, is surfaced. Anything else is silently discarded and you see the compiler's own original diagnostic, unmodified.
+
+### `--smart` vs. `--online`
+
+Both flags run this exact same pipeline, on error only — no cost, no model inference, nothing happens on a clean compile. The difference is purely which model answers:
+
+- **`--smart`** runs entirely locally via a small quantized model loaded through `llama.cpp` — no network call, no external dependency.
+- **`--online`** routes the identical pipeline (same structural context, same grammar constraints, same sandbox validation) to a larger model hosted online instead, for cases on more complex programs where the extra capability of a bigger model is worth the round-trip and where `--smart`'s local model may not have enough capacity to produce a fix with real confidence.
+
+```bash
+turf my_program.tr --smart -o my_program
+turf my_program.tr --online -o my_program
+```
 
 ## Installation
 
-You don't need to build from source to start using Turf. You can download the pre-compiled binaries for your OS and architecture directly from the release assets:
+No package-manager distribution yet. Build from source (see [Building from Source](#building-from-source)), or use a pre-built binary from the [Releases page](../../releases) if one exists for your platform — CI currently builds for Linux (x86_64, Arch x86_64), macOS (Apple Silicon
+and Intel), and Windows (x86_64).
 
-- **macOS (Apple Silicon / ARM64):**
-  Download `turf-v0.4.0-macos-arm64.tar.gz` and extract it:
+## Quick Start
 
-  ```bash
-  tar -xzf turf-v0.4.0-macos-arm64.tar.gz
-  ```
-
-- **Linux (x86_64):**
-  Download `turf-v0.4.0-linux-x86_64.tar.gz` and extract it:
-
-  ```bash
-  tar -xzf turf-v0.4.0-linux-x86_64.tar.gz
-  ```
-
-- **Linux (Arch x86_64):**
-  Download `turf-v0.4.0-linux-arch-x86_64.tar.gz` and extract it:
-
-  ```bash
-  tar -xzf turf-v0.4.0-linux-arch-x86_64.tar.gz
-  ```
-
-- **Windows (x86_64):**
-  Download `turf-v0.4.0-windows-x86_64.zip` and extract it using your file explorer or terminal.
-
-Once extracted, you can compile and run Turf programs directly:
-
-```bash
-# Compile the Turf source code into an executable
-./turf example.tr -o program
-
-# Run the generated executable
-./program
+```
+// hello.tr
+fn main(): int {
+    io.printline("Hello, Turf!");
+    return 0;
+}
 ```
 
-## Features
-
-- **Type System:** Built-in types `int`, `double`, `bool`, and `string` with implicit type promotion (bool → int → double) during operations.
-- **Typed Variable Declarations:** Variables can be declared with explicit types (`int x = 5`, `double pi = 3.14`, `bool flag = true`, `string name = "Turf"`).
-- **String Support:** First-class string type with string literals (`"hello"`). Supports escape sequences (`\n`, `\t`, `\\`, `\"`).
-- **Type Casting:** Explicit type casting allows conversions like `int("100")` or `double(42)`.
-- **Variables:** Support for variable assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`), and increment/decrement operators (`++`, `--`).
-- **Math:** Full support for arithmetic operators (`+`, `-`, `*`, `/`, `%`, `^`) with operator precedence, including exponentiation.
-- **Logical Operators:** Evaluate complex conditions with `&&` (AND) and `||` (OR).
-- **Unary Operators:** Support for unary negation (`-x`).
-- **Comparison Operators:** Full set of comparison operators (`<`, `>`, `==`, `!=`, `<=`, `>=`).
-- **Control Flow:** `if`/`else` expressions and `while` loops with block syntax (`{ ... }`), including `break` and `continue` statements.
-- **Block Expressions:** Group multiple expressions using `{ ... }` syntax.
-- **Comments:** Single-line comments using `//` syntax.
-- **Print:** Built-in `print()` function for output (supports int, double, bool, and string types).
-- **Memory Management:** Automatic stack allocation using LLVM `alloca`, `store`, and `load`.
-- **LLVM Backend:** Compiles source code directly to a native executable via LLVM.
-- **Smart Compiler (Phase 1):** Support for smart compiler error enhancements, where it suggests you what changes to make (using Damerau-Levenshtein distance for variable name and keyword suggestions, including transposition typo detection).
-
-## Build from Source (Manual)
-
-If you'd like to build the Turf compiler from source, ensure you have LLVM and a modern C++ compiler (like `clang++`) installed.
-
-You can then use the included build scripts for quick setup and testing:
-
 ```bash
-# Compile the compiler itself
-./scripts/update_compiler.sh
-
-# Compile a Turf file and run the executable
-./scripts/compile_and_run.sh tests/test.tr
+turf hello.tr -o hello
+./hello
 ```
 
-## Example Code
+I/O lives in the standard library's `io` module and is called qualified — `io.printline`, not a bare global.
 
-A taste of what's possible with Turf right now:
+## Language Tour
 
-```turf
-// Typed variable declarations
-int width = 10
-int height = 5
-double pi = 3.14
-string greeting = "Hello, Turf!"
+### Variable declarations
 
-// Variables are mutable
-int area = width * height
-width = 20
-int new_area = width * height
+Every declaration is explicitly typed and explicitly `mut` or `immut`:
 
-// Complex expressions with proper precedence
-int result = (width + height) * 2
+```
+mut x: int = 10;
+immut pi: double = 3.14159;
+mut flag: bool = true;
+mut name: string = "Turf";
+```
 
-// Exponentiation and modulo
-double squared = 3.0 ^ 2.0
-int rem = 17 % 5
+### Casting
 
-// Boolean values and logical operators
-bool flag = true
-bool check = result > height && flag == true || width < 5
+Explicit conversions use the `to` operator:
 
-// Type casting
-int parsed_int = int("42")
-double cast_val = double(10)
+```
+mut a: double = 42 to double;
+mut b: int = 3.75 to int;      // truncates: 3
+mut c: int = "100" to int;     // parses the string
+mut s: string = 42 to string;
+```
 
-// Control flow with if/else
-int max = if width > height then width else height
+### Control flow
 
-// While loops with break/continue
-int counter = 0
-int sum = 0
-while counter < 5 {
-  counter++
-  if counter == 3 {
-    continue
-  } else {}
-  sum += counter
+Block form:
+
+```
+if x > 0 {
+    io.printline("positive");
+} elseif x < 0 {
+    io.printline("negative");
+} else {
+    io.printline("zero");
+}
+```
+
+Ternary (expression) form uses `give` / `otherwise`:
+
+```
+mut max: int = a > b give a otherwise b;
+```
+
+Loops:
+
+```
+while i < 10 {
+    i = i + 1;
+    if i % 2 == 0 { continue; }
 }
 
-// Built-in print supports int, double, bool, and string ranges
-print(greeting)
-print(result)
-printline(flag)
+for j in 1..10 step j += 1 {
+    if j % 2 == 0 { continue; }
+    sum = sum + j;
+}
 ```
 
-## Status
+### Structs
 
-**Active Development.** The compiler is fully capable of taking code to native executables. It currently supports typed variables (`int`, `double`, `bool`, `string`), arithmetic, exponentiation, modulo, logical short-circuiting, type casting, control flow (`if`/`else`, `while`, `break`, `continue`), comparison operators, booleans, single-line comments, and output via `print()` and `printline()`.
+Fields are `name: Type`, comma-separated. Instances are constructed with brace syntax and named fields:
 
+```
+struct User {
+    age: int,
+    name: string
+}
+
+mut u: User = User { age: 10, name: "Alice" };
+u.age = 25;
+```
+
+Methods are declared as `StructName.methodName(...)`. `self` is implicit — it's not a declared parameter, but it's available inside the method body:
+
+```
+fn User.grow(): void {
+    self.age = self.age + 1;
+}
+
+fn User.rename(new_name: string): void {
+    self.name = new_name;
+}
+```
+
+### Arrays
+
+Fixed-size, typed, and index directly — including arrays of structs, with field access chaining through the index:
+
+```
+mut users: User[5] = [
+    User { age: 0, name: "" },
+    User { age: 0, name: "" },
+    User { age: 0, name: "" },
+    User { age: 0, name: "" },
+    User { age: 0, name: "" }
+];
+
+users[0] = User { age: 25, name: "Alice" };
+assert(users[0].age == 25, "");
+```
+
+### Generics
+
+Turf uses real generics (`Name<T1, T2>`) rather than a single hardcoded collection type baked into the language.
+
+### FFI
+
+```
+extern fn malloc(size: int): ptr;
+extern fn free(p: ptr): void;
+extern fn strlen(s: string): int;
+extern from "m" fn sqrt(x: double): double;   // links -lm automatically
+
+fn main(): int {
+    mut buf: ptr = malloc(64);
+    free(buf);
+    return 0;
+}
+```
+
+### Assertions
+
+```
+assert(condition, "message shown on failure");
+```
+
+## Examples
+
+**Structs and methods:**
+
+```
+extern fn strlen(s: string): int;
+
+struct User { age: int, name: string }
+
+fn User.grow(): void { self.age = self.age + 1; }
+fn User.rename(new_name: string): void { self.name = new_name; }
+
+fn main(): int {
+    mut u: User = User { age: 10, name: "Alice" };
+    u.grow();
+    assert(u.age == 11, "");
+
+    u.rename("Bob");
+    return 0;
+}
+```
+
+**Arrays of structs:**
+
+```
+extern fn strlen(s: string): int;
+
+struct User {
+    age: int,
+    name: string
+}
+
+fn main(): int {
+    mut users: User[5] = [
+        User { age: 0, name: "" },
+        User { age: 0, name: "" },
+        User { age: 0, name: "" },
+        User { age: 0, name: "" },
+        User { age: 0, name: "" }
+    ];
+
+    users[0] = User { age: 25, name: "Alice" };
+    users[1] = User { age: 30, name: "Bob" };
+    users[2] = User { age: 35, name: "Charlie" };
+
+    assert(users[0].age == 25, "");
+    assert(strlen(users[0].name) == 5, "");
+
+    assert(users[1].age == 30, "");
+    assert(strlen(users[1].name) == 3, "");
+
+    assert(users[2].age == 35, "");
+    assert(strlen(users[2].name) == 7, "");
+
+    return 0;
+}
+```
+
+**Casting and type conversion:**
+
+```
+fn main(): int {
+    mut a: double = 42 to double;
+    assert(a > 41.9 && a < 42.1, "");
+
+    mut b: int = 3.75 to int;
+    assert(b == 3, ""); // truncates the decimal part
+
+    mut c: int = "100" to int;
+    assert(c == 100, "");
+
+    mut x: int = 10;
+    mut s9: string = x to string;
+
+    return 0;
+}
+```
+
+**Loops, `break`, `continue`, range-`for`:**
+
+```
+fn main(): int {
+    mut i: int = 0;
+    mut sum: int = 0;
+
+    while i < 10 {
+        i = i + 1;
+        if i % 2 == 0 {
+            continue;
+        }
+        sum = sum + i;
+    }
+    assert(sum == 25, "");
+
+    mut for_sum: int = 0;
+    for j in 1..10 step j += 1 {
+        if j % 2 == 0 {
+            continue;
+        }
+        for_sum = for_sum + j;
+    }
+    assert(for_sum == 25, "");
+
+    return 0;
+}
+```
+
+**FFI — pointers and memory:**
+
+```
+extern fn malloc(size: int): ptr;
+extern fn free(p: ptr): void;
+extern fn memset(p: ptr, c: int, n: int): ptr;
+extern fn memcpy(dst: ptr, src: ptr, n: int): ptr;
+extern fn strlen(s: string): int;
+
+fn make_buffer(size: int): ptr {
+    mut p: ptr = malloc(size);
+    memset(p, 0, size);
+    return p;
+}
+
+fn main(): int {
+    mut b: ptr = make_buffer(32);
+    free(b);
+
+    mut len: int = strlen("verify");
+    assert(len == 6, "");
+
+    return 0;
+}
+```
+
+A larger FFI showcase (file I/O, `libm`, environment variables, sockets, variadic `printf` via `extern fn printf(fmt: string, ...): int;`, and linking against arbitrary system libraries via `extern from "libname" fn`) lives in the test suite alongside the rest of the examples above.
+
+## Building from Source
+
+### Requirements
+
+- **LLVM 22** (via `LLVMConfig.cmake`)
+- **CMake 3.20+**
+- **C++20** compiler (Clang recommended)
+- `llama.cpp` (vendored as a submodule under `external/llama.cpp`; built   automatically as a static library on first configure if not already built)
+
+### Build
+
+```bash
+git clone --recursive <this-repo>
+cd turf
+chmod +x scripts/cmake_build.sh
+./scripts/cmake_build.sh --release
+```
+
+`cmake_build.sh` detects available CPU cores and builds in parallel; the resulting binary is placed at `build/turf`. On first run, if `llama.cpp`'s static libraries aren't already built, CMake builds them automatically before building Turf itself — this can take a while the first time.
+
+### Compile and run a file directly
+
+```bash
+./scripts/compile_and_run.sh path/to/file.tr
+```
+
+Compiles, runs, and cleans up the produced binary.
+
+## Roadmap
+
+Turf is pre-1.0. In progress:
+
+- `turf-cli`: a standalone package manager (written in Go) for Turf projects
+  and dependencies — currently a working showcase, not yet linked into the
+  main `turf` binary's workflow.
+- Continued standard library growth.
