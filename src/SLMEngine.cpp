@@ -179,11 +179,16 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
     return "";
   }
 
-  // Manually construct the user batch with the correct starting position offset
+  // Manually construct the user batch with the correct starting position offset.
+  // llama_batch_get_one() returns pos=nullptr — writing through a nullptr is UB
+  // (and the crash the bug report describes). We allocate a positions buffer and
+  // point the batch's pos field at it before passing it to llama_decode.
   llama_batch userBatch = llama_batch_get_one(userTokens.data(), n_user);
+  std::vector<llama_pos> userPositions(n_user);
   for (int i = 0; i < n_user; i++) {
-    userBatch.pos[i] = CachedSystemTokens.size() + i;
+    userPositions[i] = static_cast<llama_pos>(CachedSystemTokens.size()) + i;
   }
+  userBatch.pos = userPositions.data();
 
   if (llama_decode(ctx, userBatch) != 0) {
     if (saved_stderr != -1) {
@@ -270,9 +275,13 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
       }
     }
 
-    // For generating subsequent tokens, the position must continue incrementing
+    // For generating subsequent tokens, the position must continue incrementing.
+    // llama_batch_get_one() returns pos=nullptr, so we must point it at a valid
+    // stack variable before calling llama_decode.
+    llama_pos nextPos =
+        static_cast<llama_pos>(CachedSystemTokens.size()) + n_user + i;
     llama_batch next = llama_batch_get_one(&token, 1);
-    next.pos[0] = CachedSystemTokens.size() + n_user + i;
+    next.pos = &nextPos;
     if (llama_decode(ctx, next) != 0)
       break;
   }
