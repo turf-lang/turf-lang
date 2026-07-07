@@ -1,0 +1,91 @@
+// Test: Linked list demonstration using self-referential struct Node.
+//
+// This test exercises the working subset of Turf's linked-list capabilities:
+//
+//   - Stack-allocated Node instances with val: int, next: Node* fields
+//   - Direct field reads (n.val, n.next)
+//   - Read-only struct methods via self (Node.get, Node.is_tail)
+//   - Node* fields initialized to null (structural pointer marker)
+//   - Multi-node value computation via helper functions
+//
+// Known limitations (each has a corresponding fail_*.tr):
+//   fail_01 — Mutating self.val in a method doesn't persist to caller scope
+//             (struct methods receive self by value, not by pointer, in codegen)
+//   fail_02 — fn(p: Node*) field access: p.val gives "Cannot access field on
+//             non-struct type" (NamedType not resolved in FieldAccessExprAST::codegen)
+//   fail_03 — No address-of operator (&): cannot chain nodes via next: Node*
+
+struct Node {
+    val: int,
+    next: Node*
+}
+
+// Read-only method: return the node's val via self
+fn Node.get(): int {
+    return self.val;
+}
+
+// Read-only method: true if next pointer is null (structural tail check)
+fn Node.is_tail(): bool {
+    return self.next == null;
+}
+
+// Helper: fold sum over explicit values extracted from nodes
+fn sum2(a: int, b: int): int {
+    return a + b;
+}
+
+// Helper: maximum of two ints (ternary avoids >= + { parser ambiguity)
+fn max2(a: int, b: int): int {
+    mut r: int = a > b give a otherwise b;
+    return r;
+}
+
+fn main(): int {
+    // ── Construction ─────────────────────────────────────────────────────────
+    // Three stack-allocated nodes.  next: Node* is null because the
+    // address-of operator doesn't exist yet.
+    mut n1: Node = Node { val: 10, next: null };
+    mut n2: Node = Node { val: 20, next: null };
+    mut n3: Node = Node { val: 30, next: null };
+
+    // ── Field reads ───────────────────────────────────────────────────────────
+    assert(n1.val == 10, "n1.val should be 10");
+    assert(n2.val == 20, "n2.val should be 20");
+    assert(n3.val == 30, "n3.val should be 30");
+
+    // ── is_tail: every node's next is null ───────────────────────────────────
+    assert(n1.is_tail() == true, "n1 should be a tail");
+    assert(n2.is_tail() == true, "n2 should be a tail");
+    assert(n3.is_tail() == true, "n3 should be a tail");
+
+    // ── get(): read-only accessor ─────────────────────────────────────────────
+    assert(n1.get() == 10, "n1.get() should be 10");
+    assert(n2.get() == 20, "n2.get() should be 20");
+    assert(n3.get() == 30, "n3.get() should be 30");
+
+    // ── Direct field mutation ─────────────────────────────────────────────────
+    // Unlike method-based mutation (see fail_01), direct field assignment works.
+    n1.val = 5;
+    assert(n1.val == 5, "n1.val should be 5 after direct assignment");
+    n1.val = 10;   // restore
+
+    // ── Summation (list reduce) ───────────────────────────────────────────────
+    // Equivalent to summing over [n1.val=10, n2.val=20, n3.val=30]
+    mut total: int = sum2(sum2(n1.val, n2.val), n3.val);
+    assert(total == 60, "sum of [10, 20, 30] should be 60");
+
+    // ── Max across nodes ──────────────────────────────────────────────────────
+    mut biggest: int = max2(max2(n1.val, n2.val), n3.val);
+    assert(biggest == 30, "max of [10, 20, 30] should be 30");
+
+    // ── Conceptual "prepend": replace head value ──────────────────────────────
+    n1.val = 0;
+    mut new_total: int = sum2(sum2(n1.val, n2.val), n3.val);
+    assert(new_total == 50, "sum after head mutation should be 50");
+
+    // ── Null sentinel on the next pointer field ───────────────────────────────
+    assert(n3.next == null, "n3.next should be null (no address-of yet)");
+
+    return 0;
+}

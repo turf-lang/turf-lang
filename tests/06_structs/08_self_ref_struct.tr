@@ -1,0 +1,21 @@
+// Test: Self-Referential Structs (issue #176)
+// Validates that struct Node { val: int, next: Node* } compiles to valid
+// LLVM IR without infinite recursion or segfault during codegen.
+// Expected LLVM IR: %Node = type { i64, ptr }
+
+struct Node {
+    val: int,
+    next: Node*
+}
+
+fn main(): int {
+    // Allocate a simple Node on the stack and verify field access.
+    mut a: Node = Node { val: 42, next: null };
+    assert(a.val == 42, "Node.val should be 42");
+
+    // Create a second node and chain it.
+    mut b: Node = Node { val: 7, next: null };
+    assert(b.val == 7, "Node.val should be 7");
+
+    return 0;
+}

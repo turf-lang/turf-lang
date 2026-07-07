@@ -1,0 +1,62 @@
+// FAILING TEST — fail_03: No address-of operator → cannot chain Node* pointers
+//
+// Expected behavior (should work in the future):
+//   Given three stack-allocated Nodes, we should be able to link them:
+//
+//     n1.next = &n2;    // n1 → n2
+//     n2.next = &n3;    // n2 → n3
+//
+//   And then traverse the chain by following .next pointers:
+//
+//     fn sum_list(head: Node*): int { ... }
+//
+// Actual behavior (current compiler):
+//   There is no address-of operator (&) in Turf's syntax or codegen.
+//   Attempting `n1.next = &n2` is a parse error. Without it, typed pointer
+//   fields (next: Node*) can only hold null — they cannot point to stack
+//   objects.  This makes building any real pointer-chained linked list
+//   impossible until & is implemented.
+//
+// Root cause:
+//   The Lexer has no TOK_AMP for unary &.  The Parser's parsePrimary() /
+//   parseUnary() does not handle an address-of production.  No codegen path
+//   for "take the address of a named variable's alloca" exists.
+//
+// Fix needed (multiple files):
+//   1. Lexer.cpp  — add TOK_AMP (or reuse '&' as unary prefix)
+//   2. Parser.cpp — add `case '&': return parseAddressOf();`
+//   3. AST.h      — add AddressOfExprAST node
+//   4. Codegen.cpp — generate `NamedValues[name]` (the alloca pointer) as
+//                    the address-of result
+//   5. TypeChecker / Resolver — infer type as TurfPointerType(pointee)
+
+struct Node {
+    val: int,
+    next: Node*
+}
+
+fn main(): int {
+    mut n1: Node = Node { val: 1, next: null };
+    mut n2: Node = Node { val: 2, next: null };
+    mut n3: Node = Node { val: 3, next: null };
+
+    // BUG: no address-of operator — these lines are parse errors today.
+    // Uncomment to reproduce:
+    //
+    //   n2.next = &n3;
+    //   n1.next = &n2;
+    //
+    // Without chaining, we cannot traverse and must manually sum fields,
+    // which defeats the purpose of the linked list abstraction.
+
+    // The test below always passes (null pointers), demonstrating the problem:
+    // there's no way to assert that n1.next == &n2 because & doesn't exist.
+    assert(n1.next == null, "n1.next is still null — address-of is unimplemented");
+    assert(n2.next == null, "n2.next is still null — address-of is unimplemented");
+
+    // BUG: what we WANT to assert after implementing &:
+    //   assert(n1.next != null, "n1 should point to n2");
+    //   assert(n2.next != null, "n2 should point to n3");
+
+    return 0;
+}

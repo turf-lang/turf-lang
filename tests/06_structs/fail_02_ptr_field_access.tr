@@ -1,0 +1,50 @@
+// FAILING TEST — fail_02: Field access through a typed pointer parameter
+//
+// Expected behavior (should work in the future):
+//   A function accepting (p: Node*) should be able to read p.val and p.next,
+//   just like C's -> operator (auto-deref on typed pointer field access).
+//
+// Actual behavior (current compiler):
+//   The compiler emits: "Cannot access field on non-struct type"
+//   at the line `return p.val;`
+//
+// Root cause (FieldAccessExprAST::codegen, Codegen.cpp ~line 3008):
+//   After unwrapping TurfPointerType to get the pointee type, the code does:
+//
+//     auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
+//
+//   But when p: Node*, the pointee type is NamedType("Node") — not
+//   TurfStructType("Node"). The cast fails and returns null, triggering the
+//   error. The fix (already present in codegenLValue and getExprType) is to
+//   resolve NamedType → TurfStructType via GlobalSymbolTable->LookupType()
+//   before the dynamic_cast check in FieldAccessExprAST::codegen().
+//
+// Fix needed (Codegen.cpp FieldAccessExprAST::codegen, ~line 3014-3020):
+//   After the TurfPointerType unwrap, add the same NamedType resolution
+//   block that already exists in codegenLValue() and getExprType():
+//
+//     if (auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
+//       if (GlobalSymbolTable)
+//         if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+//           BaseType = R.get();
+//     }
+
+struct Node {
+    val: int,
+    next: Node*
+}
+
+// BUG: accessing p.val when p: Node* emits "Cannot access field on non-struct type"
+fn get_val(p: Node*): int {
+    return p.val;
+}
+
+fn main(): int {
+    mut n: Node = Node { val: 99, next: null };
+
+    // BUG: this call never reaches codegen — the error fires during type-checking
+    // or during codegen of get_val's body.
+    assert(get_val(n) == 99, "FAIL: cannot read field through typed pointer param");
+
+    return 0;
+}

@@ -2729,6 +2729,43 @@ Value *MethodCallExprAST::codegen() {
 }
 
 Value *StructDeclExprAST::codegen() {
+  // ── Fix for issue #176: Two-step struct creation ──────────────────────────
+  // Step 1: Create (or reuse) an opaque StructType and register it in
+  // LLVMTypeCache *before* evaluating any field types.  This ensures that a
+  // self-referential field like `next: Node*` can call getLLVMType("Node")
+  // and find the opaque stub in the cache rather than triggering infinite
+  // recursion or creating a duplicate struct (which LLVM would rename to
+  // "Node.0", breaking all previously-built call/alloca sites).
+  StructType *ST = nullptr;
+  auto CacheIt = LLVMTypeCache.find(Name);
+  if (CacheIt != LLVMTypeCache.end()) {
+    // An opaque forward-declaration was already inserted (e.g., because a
+    // NamedType("Node") appeared in another struct or function signature
+    // before this decl ran).  Reuse it so the single LLVM type identity is
+    // preserved everywhere it was referenced.
+    if (auto *Existing = dyn_cast<StructType>(CacheIt->second)) {
+      if (Existing->isOpaque())
+        ST = Existing;
+    }
+  }
+  if (!ST) {
+    // Brand-new opaque struct — no body yet.
+    ST = StructType::create(*TheContext, Name);
+    if (!ST) {
+      LogErrorAt(Loc, "Failed to create LLVM StructType for '" + Name + "'");
+      return nullptr;
+    }
+  }
+
+  // Register immediately so that any recursive getLLVMType call (e.g., for a
+  // Node* field) finds the opaque stub instead of recursing back here.
+  LLVMTypeCache[Name] = ST;
+
+  // Step 2: Evaluate all field LLVM types now that the stub is in the cache.
+  // Self-referential pointer fields (TurfPointerType) lower to opaque ptr
+  // unconditionally, so they never need to re-enter this codegen path.
+  // Direct struct-valued fields (unusual but possible for non-recursive types)
+  // will find the opaque stub above and use it.
   std::vector<Type *> LLVMFieldTypes;
   for (const auto &Field : Fields) {
     Type *LLVMType = getLLVMType(Field.Type.get());
@@ -2739,29 +2776,8 @@ Value *StructDeclExprAST::codegen() {
     LLVMFieldTypes.push_back(LLVMType);
   }
 
-  // If an opaque struct with this name already exists in the cache (created by
-  // getLLVMType when a NamedType("Matrix") was resolved before this decl ran),
-  // set its body rather than creating a second struct (which LLVM would name
-  // "Matrix.0", causing a type mismatch at call sites).
-  StructType *ST = nullptr;
-  auto CacheIt = LLVMTypeCache.find(Name);
-  if (CacheIt != LLVMTypeCache.end()) {
-    if (auto *Existing = dyn_cast<StructType>(CacheIt->second)) {
-      if (Existing->isOpaque()) {
-        Existing->setBody(LLVMFieldTypes);
-        ST = Existing;
-      }
-    }
-  }
-  if (!ST) {
-    ST = StructType::create(*TheContext, LLVMFieldTypes, Name);
-    if (!ST) {
-      LogErrorAt(Loc, "Failed to create LLVM StructType for '" + Name + "'");
-      return nullptr;
-    }
-  }
-
-  LLVMTypeCache[Name] = ST;
+  // Step 3: Fill in the body now that all field types are resolved.
+  ST->setBody(LLVMFieldTypes);
 
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }
