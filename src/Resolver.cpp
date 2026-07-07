@@ -62,6 +62,10 @@ void Resolver::resolveAll(
     resolve(Node.get());
 }
 
+static SourceLocation toSourceLocation(ResolverSourceLocation R) {
+  return {R.Line, R.Col};
+}
+
 ResolverFunctionSymbol
 Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
                               const std::string &ModuleName) const {
@@ -149,6 +153,20 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
   for (const auto &Expr : Block->getExpressions()) {
     if (const auto *Func = dynamic_cast<const FuncDefExprAST *>(Expr.get())) {
       registerFunctionSignature(*Func, ModuleName);
+    } else if (const auto *Extern =
+                   dynamic_cast<const ExternFuncDeclExprAST *>(Expr.get())) {
+      ResolverFunctionSymbol Sym;
+      Sym.BaseName = Extern->getName();
+      Sym.SourceModule = ModuleName;
+      Sym.ReturnType = Extern->getReturnType();
+      Sym.IsIntrinsic = false;
+      Sym.IsVarArg = Extern->isVarArg();
+      for (const auto &[PName, PType] : Extern->getParams())
+        Sym.Params.push_back({PName, PType});
+      SymTable_.registerModuleFunction(ModuleName, Sym);
+    } else if (const auto *Struct =
+                   dynamic_cast<const StructDeclExprAST *>(Expr.get())) {
+      SymTable_.registerStruct(Struct->getName());
     } else if (const auto *Import =
                    dynamic_cast<const ModuleImportExprAST *>(Expr.get())) {
       // Nested module imports (unusual but possible)
@@ -240,6 +258,16 @@ void Resolver::visitCast(CastExprAST &Node) {
   visitChild(Node.getOperand());
 }
 
+void Resolver::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
+  visitChild(Node.getRHS());
+  visitChild(Node.getLHS());
+}
+
+void Resolver::visitPostfixExpr(PostfixExprAST &Node) {
+  visitChild(Node.getOperand());
+}
+
+
 void Resolver::visitIf(IfExprAST &Node) {
   for (const auto &Branch : Node.getBranches()) {
     visitChild(Branch.Cond.get());
@@ -318,8 +346,14 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
       // Parameters have no source location in the AST right now; use {0,0}.
       SymTable_.declareVariable(Param.Name, Param.Type, {});
     } catch (const std::runtime_error &) {
-      // Duplicate parameter name — let it through; Parser should have caught
-      // this already, but be defensive.
+      auto Prev = SymTable_.lookupVariable(Param.Name);
+      SourceLocation ErrLoc = Node.getLoc();
+      if (Prev) {
+        SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
+        DuplicateDeclarationError(ErrLoc, Param.Name, PrevLoc).raise();
+      } else {
+        SyntaxError(ErrLoc, "Duplicate declaration of '" + Param.Name + "'").raise();
+      }
     }
   }
 
@@ -441,7 +475,12 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
   }
 
   if (!AnyArityMatch) {
-    WrongArityError(Node.getLoc(), CalleeName, ArgCount, AllSignatures).raise();
+    auto Err = WrongArityError(Node.getLoc(), CalleeName, ArgCount, AllSignatures);
+    for (const auto *Sym : CurrentFileMatches)
+      Err.withRelated(toSourceLocation(Sym->DeclLoc), "candidate");
+    for (const auto &Match : ModuleMatches)
+      Err.withRelated(toSourceLocation(Match.Symbol->DeclLoc), "candidate");
+    Err.raise();
     return;
   }
 
@@ -489,7 +528,7 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
     if (SymTable_.hasModule(BaseVar->getName())) {
       // Base is a module qualifier — annotate it and skip variable resolution.
       BaseVar->ResolvedModuleName = BaseVar->getName();
-    } else if (GlobalSymbolTable && GlobalSymbolTable->LookupType(BaseVar->getName())) {
+    } else if (SymTable_.isKnownStruct(BaseVar->getName())) {
       // Base is a struct type name (static method call)
       BaseVar->IsStructName = true;
     } else {
@@ -536,9 +575,12 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
         }
       }
       if (!AnyArityMatch) {
-        WrongArityError(Node.getLoc(),
+        auto Err = WrongArityError(Node.getLoc(),
                         ModuleName + "." + MethodName,
-                        ArgCount, AllSigs).raise();
+                        ArgCount, AllSigs);
+        for (const auto *Cand : MethodOverloads)
+          Err.withRelated(toSourceLocation(Cand->DeclLoc), "candidate");
+        Err.raise();
         return;
       }
 
@@ -547,9 +589,7 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
       // Codegen can read mangledName() in the pre-pass before TypeChecker runs.
       // TypeChecker handles the multi-overload narrowing via type compatibility.
       if (ArityMatches.size() == 1) {
-        Node.ResolvedCallTarget = std::shared_ptr<ResolverFunctionSymbol>(
-            const_cast<ResolverFunctionSymbol *>(ArityMatches[0]),
-            [](ResolverFunctionSymbol *) { /* RST owns this */ });
+        Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*ArityMatches[0]);
       }
     } else {
       // Method does not exist in this module.
@@ -639,6 +679,8 @@ void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {
     if (Prev) {
       SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
       DuplicateDeclarationError(Node.getLoc(), Node.getName(), PrevLoc).raise();
+    } else {
+      SyntaxError(Node.getLoc(), "Duplicate declaration of '" + Node.getName() + "'").raise();
     }
   }
 }
@@ -651,21 +693,6 @@ void Resolver::visitArrayLiteral(ArrayLiteralExprAST &Node) {
 void Resolver::visitArrayAccess(ArrayAccessExprAST &Node) {
   visitChild(Node.getBase());
   visitChild(Node.getIndex());
-}
-
-void Resolver::visitArrayAssign(ArrayAssignExprAST &Node) {
-  // The array being assigned to must already be in scope.
-  auto Sym = SymTable_.lookupVariable(Node.getName());
-  if (!Sym) {
-    std::vector<std::string> VisibleNames = SymTable_.getAllVisibleNames();
-    RankedSuggestions Suggestions;
-    Suggestions.Local =
-        SuggestionIndex::suggestVisible(Node.getName(), VisibleNames);
-    ReferenceError(Node.getLoc(), Node.getName(), Suggestions).raise();
-  }
-  Node.ResolvedSymbol = Sym;
-  visitChild(Node.getIndex());
-  visitChild(Node.getRHS());
 }
 
 void Resolver::visitModuleImport(ModuleImportExprAST &Node) {

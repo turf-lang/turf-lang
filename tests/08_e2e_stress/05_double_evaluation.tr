@@ -1,0 +1,38 @@
+import io;
+
+extern fn malloc(size: int): int*;
+extern fn free(p: int*): void;
+
+fn get_index(counter: int*): int {
+    counter[0] = counter[0] + 1;
+    return 0;
+}
+
+fn main(): int {
+    mut arr: int[3] = [10, 20, 30];
+    mut counter: int* = malloc(sizeof(int));
+    counter[0] = 0;
+
+    // Regular assignment should evaluate LHS once
+    arr[get_index(counter)] = 50;
+    assert(counter[0] == 1, "Counter should be 1 after normal assignment");
+
+    // Compound assignment should evaluate LHS once
+    arr[get_index(counter)] += 20;
+    assert(counter[0] == 2, "Counter should be 2 after compound assignment");
+    assert(arr[0] == 70, "arr[0] should be 70");
+
+    // Postfix should evaluate LHS once
+    arr[get_index(counter)]++;
+    assert(counter[0] == 3, "Counter should be 3 after postfix increment");
+    assert(arr[0] == 71, "arr[0] should be 71");
+    
+    // Postfix decrement
+    arr[get_index(counter)]--;
+    assert(counter[0] == 4, "Counter should be 4 after postfix decrement");
+    assert(arr[0] == 70, "arr[0] should be 70");
+
+    free(counter);
+
+    return 0;
+}

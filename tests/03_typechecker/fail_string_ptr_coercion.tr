@@ -1,0 +1,7 @@
+fn main(): int {
+    // string should not implicitly coerce to T*
+    mut ptr: ptr = null;
+    mut s: string = "hello";
+    ptr = s;
+    return 0;
+}

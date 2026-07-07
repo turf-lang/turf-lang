@@ -14,6 +14,16 @@ struct SourceLocation {
   int Col;
 };
 
+// Carries the location of a contextually relevant secondary site alongside
+// a diagnostic — e.g. "declared here", "previous definition", "overload: …".
+// Populated at the exact point each error is raised, using real symbol-table
+// data, so the SLM layer receives structurally correct locations with zero
+// text-scanning or hardcoded syntax assumptions.
+struct RelatedLocation {
+  SourceLocation Loc;
+  std::string Description; // e.g. "declared here", "overload: fn foo(int)"
+};
+
 extern std::ifstream *SourceFile;
 extern double NumVal;
 extern long long IntVal;
@@ -23,6 +33,8 @@ extern std::string StringVal;
 
 extern std::vector<std::string> SourceLines;
 extern SourceLocation CurLoc;
+extern int CurLine;
+extern int CurCol;
 // Mutable so RegisterBuiltins() can insert builtin names at startup.
 extern std::map<std::string, int> Keywords;
 
@@ -49,15 +61,18 @@ public:
     std::string Msg;
     std::string Hint;
     bool IsWarning;
+    std::vector<RelatedLocation> RelatedLocations; // structural context for SLM
   };
 
   // Record a diagnostic. Errors on a line that already has an error are
   // dropped. Warnings on a line that has an error are also dropped.
   static void add(SourceLocation Loc, const std::string &Msg,
-                  const std::string &Hint, bool IsWarning = false);
+                  const std::string &Hint, bool IsWarning = false,
+                  const std::vector<RelatedLocation> &Related = {});
 
   static void add(SourceLocation Loc, const std::string &Msg,
-                  bool IsWarning = false);
+                  bool IsWarning = false,
+                  const std::vector<RelatedLocation> &Related = {});
 
   // True if any error (not just warning) has been recorded.
   static bool hasErrors();
@@ -70,6 +85,9 @@ public:
 
   // Discard everything (used between passes if needed).
   static void reset();
+
+  // Restore a saved list of diagnostics without triggering SLM evaluation.
+  static void restoreDiagnostics(const std::vector<Diag> &Saved);
 
   // Public accessors for diagnostics (used by sandbox validation)
   static const std::vector<Diag> &getDiagnostics() { return Diagnostics; }
@@ -139,7 +157,8 @@ enum Token {
   TOK_OTHERWISE = -70,
   TOK_EXTERN = -71,   ///< `extern` keyword — FFI function declaration
   TOK_PTR    = -72,   ///< `ptr`    keyword — opaque pointer type (Phase 3 FFI)
-  TOK_ELLIPSIS = -73  ///< `...`   token   — variadic marker in extern fn params
+  TOK_ELLIPSIS = -73, ///< `...`   token   — variadic marker in extern fn params
+  TOK_SCOPE  = -74    ///< `::`    token   — scope resolution
 };
 
 int gettok();

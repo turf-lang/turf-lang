@@ -139,10 +139,27 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialAssi
             for (const auto &Arg : F->getArgs()) checkAccesses(Arg.get());
             checkAccesses(F->getCallee());
           } else if (auto ArrA = dynamic_cast<const ArrayAccessExprAST *>(N)) {
-            checkAccesses(ArrA->getBase()); checkAccesses(ArrA->getIndex());
-          } else if (auto ArrAs = dynamic_cast<const ArrayAssignExprAST *>(N)) {
-            checkAccesses(ArrAs->getIndex()); checkAccesses(ArrAs->getRHS());
-          } else if (auto R = dynamic_cast<const ReturnExprAST *>(N)) checkAccesses(R->getVal());
+            checkAccesses(ArrA->getBase()); checkAccesses(ArrA->getIndex()); 
+          } else if (auto R = dynamic_cast<const ReturnExprAST *>(N)) {
+            checkAccesses(R->getVal());
+          } else if (auto CA = dynamic_cast<const CompoundAssignmentExprAST *>(N)) {
+            checkAccesses(CA->getLHS()); checkAccesses(CA->getRHS());
+          } else if (auto P = dynamic_cast<const PostfixExprAST *>(N)) {
+            checkAccesses(P->getOperand());
+          } else if (auto M = dynamic_cast<const MethodCallExprAST *>(N)) {
+            checkAccesses(M->getBase()); for (const auto &Arg : M->getArgs()) checkAccesses(Arg.get());
+          } else if (auto SI = dynamic_cast<const StructInitExprAST *>(N)) {
+            for (const auto &F : SI->getNamedFields()) checkAccesses(F.second.get());
+          } else if (auto FA = dynamic_cast<const FieldAccessExprAST *>(N)) {
+            checkAccesses(FA->getBase());
+          } else if (auto AL = dynamic_cast<const ArrayLiteralExprAST *>(N)) {
+            for (const auto &E2 : AL->getElements()) checkAccesses(E2.get());
+          } else if (auto AD = dynamic_cast<const ArrayDeclExprAST *>(N)) {
+            for (const auto &E2 : AD->getInitList()) checkAccesses(E2.get());
+            if (AD->getInitExpr()) checkAccesses(AD->getInitExpr().get());
+          } else if (auto C = dynamic_cast<const CastExprAST *>(N)) {
+            checkAccesses(C->getOperand());
+          }
         };
         checkAccesses(Stmt);
 

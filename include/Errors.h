@@ -3,12 +3,10 @@
 
 #include "Algorithms.h"
 #include "Builtins.h"
-#include "Codegen.h"
 #include "Colors.h"
 #include "Lexer.h"
 #include "SuggestionIndex.h"
 #include "SLMIntegration.h"
-#include "llvm/IR/Instructions.h"
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -24,6 +22,7 @@ protected:
   SourceLocation Loc;
   std::string Message;
   std::string Hint_;
+  std::vector<RelatedLocation> RelatedLocations_; // structural context for SLM
 
 public:
   TurfError(SourceLocation Loc, const std::string &Msg,
@@ -35,8 +34,18 @@ public:
   const std::string &getHint() const { return Hint_; }
   const std::string &getMessage() const { return Message; }
 
+  const std::vector<RelatedLocation> &getRelatedLocations() const {
+    return RelatedLocations_;
+  }
+
+  // Chainable: TurfError(loc, msg).withRelated(declLoc, "declared here").raise();
+  TurfError &withRelated(SourceLocation RelLoc, const std::string &Desc) {
+    RelatedLocations_.push_back({RelLoc, Desc});
+    return *this;
+  }
+
   void raise() const {
-    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/false);
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/false, RelatedLocations_);
 
     if (g_recoverActive)
       longjmp(g_recoverJmp, 1);
@@ -47,7 +56,7 @@ public:
   }
 
   void warn() const {
-    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true);
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true, RelatedLocations_);
   }
 
   static std::string formatRankedSuggestions(const RankedSuggestions &Suggestions) {
@@ -79,6 +88,17 @@ public:
     }
     return result;
   }
+
+  static std::string suggestionsOrFallback(const RankedSuggestions &Suggestions, const std::string &Fallback, const std::string &Prefix = "") {
+    std::string formatted = formatRankedSuggestions(Suggestions);
+    if (!formatted.empty()) {
+      if (formatted.rfind("\n  ", 0) == 0) {
+        return Prefix + formatted.substr(3);
+      }
+      return Prefix + formatted;
+    }
+    return Fallback;
+  }
 };
 
 // Warning Base Class
@@ -90,6 +110,7 @@ protected:
   SourceLocation Loc;
   std::string Message;
   std::string Hint_;
+  std::vector<RelatedLocation> RelatedLocations_; // structural context for SLM
 
 public:
   TurfWarning(SourceLocation Loc, const std::string &Msg,
@@ -101,9 +122,18 @@ public:
   const std::string &getHint() const { return Hint_; }
   const std::string &getMessage() const { return Message; }
 
+  const std::vector<RelatedLocation> &getRelatedLocations() const {
+    return RelatedLocations_;
+  }
+
+  TurfWarning &withRelated(SourceLocation RelLoc, const std::string &Desc) {
+    RelatedLocations_.push_back({RelLoc, Desc});
+    return *this;
+  }
+
   // NEVER interrupts compilation flow — always returns normally.
   void emit() const {
-    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true);
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true, RelatedLocations_);
   }
 
   void warn() const { emit(); }
@@ -251,18 +281,9 @@ public:
       : TurfError(Loc, Colors::BRIGHT_RED + "Oops! I can't find a function named '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
-
-    std::string formatted = formatRankedSuggestions(Suggestions);
-    if (!formatted.empty()) {
-      if (formatted.rfind("\n  ", 0) == 0) {
-        Hint_ = formatted.substr(3);
-      } else {
-        Hint_ = formatted;
-      }
-    } else {
-      Hint_ = "Double-check the spelling against the built-in "
-              "functions like 'printline' or 'lengthof'.";
-    }
+    Hint_ = suggestionsOrFallback(Suggestions,
+      "Double-check the spelling against the built-in "
+      "functions like 'printline' or 'lengthof'.");
   }
 };
 
@@ -275,17 +296,9 @@ public:
       : TurfError(Loc, Colors::BRIGHT_RED + "Error: Unknown function '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
-    std::string formatted = formatRankedSuggestions(Suggestions);
-    if (!formatted.empty()) {
-      if (formatted.rfind("\n  ", 0) == 0) {
-        Hint_ = formatted.substr(3);
-      } else {
-        Hint_ = formatted;
-      }
-    } else {
-      Hint_ = "Double-check the spelling or import the module that "
-              "defines it.";
-    }
+    Hint_ = suggestionsOrFallback(Suggestions,
+      "Double-check the spelling or import the module that "
+      "defines it.");
   }
 };
 
@@ -298,17 +311,9 @@ public:
       : TurfError(Loc, Colors::BRIGHT_RED + "Error: Unknown type '" +
                            Colors::CYAN + TypeName + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
-    std::string formatted = formatRankedSuggestions(Suggestions);
-    if (!formatted.empty()) {
-      if (formatted.rfind("\n  ", 0) == 0) {
-        Hint_ = formatted.substr(3);
-      } else {
-        Hint_ = formatted;
-      }
-    } else {
-      Hint_ = "Make sure the struct '" + TypeName +
-              "' is declared before it is used, or check the spelling.";
-    }
+    Hint_ = suggestionsOrFallback(Suggestions,
+      "Make sure the struct '" + TypeName +
+      "' is declared before it is used, or check the spelling.");
   }
 };
 
@@ -362,19 +367,10 @@ public:
                  const RankedSuggestions &Suggestions)
       : TurfError(Loc, Colors::BRIGHT_RED + "I can't find anything named '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'.") {
-
-    std::string formatted = formatRankedSuggestions(Suggestions);
-    if (!formatted.empty()) {
-      if (formatted.rfind("\n  ", 0) == 0) {
-        Hint_ = formatted.substr(3);
-      } else {
-        Hint_ = formatted;
-      }
-    } else {
-      Hint_ = "Did you forget to create this variable? You have to "
-              "create it before you can use it, like this: `int " +
-              Name + " = 5;`";
-    }
+    Hint_ = suggestionsOrFallback(Suggestions,
+      "Did you forget to create this variable? You have to "
+      "create it before you can use it, like this: `int " +
+      Name + " = 5;`");
   }
 };
 
@@ -386,19 +382,10 @@ public:
       : TurfError(UseLoc, Colors::BRIGHT_RED + "Hold on! You're trying to use '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED +
                            "' before telling me what it is.") {
-
-    std::string formatted = formatRankedSuggestions(Suggestions);
-    if (!formatted.empty()) {
-      if (formatted.rfind("\n  ", 0) == 0) {
-        Hint_ = formatted.substr(3);
-      } else {
-        Hint_ = formatted;
-      }
-    } else {
-      Hint_ = "Did you forget to create this variable? You have to "
-              "create it before you can use it, like this: `int " +
-              Name + " = 5;`";
-    }
+    Hint_ = suggestionsOrFallback(Suggestions,
+      "Did you forget to create this variable? You have to "
+      "create it before you can use it, like this: `int " +
+      Name + " = 5;`");
   }
 };
 
@@ -417,6 +404,7 @@ public:
     Hint_ = "If you want to change its value, just do `" + Name +
             " = new_value;` without the type (like 'int' or 'string'). If "
             "you want a new variable, give it a different name!";
+    RelatedLocations_.push_back({PrevLoc, "first declared here"});
   }
 };
 
@@ -435,6 +423,7 @@ public:
                "Note: The older one is at line " +
                std::to_string(PrevLoc.Line) + ", column " +
                std::to_string(PrevLoc.Col) + Colors::RESET;
+    RelatedLocations_.push_back({PrevLoc, "originally declared here"});
   }
 };
 
@@ -812,16 +801,9 @@ public:
                       ModuleName + Colors::BRIGHT_RED +
                       "' has no function named '" + Colors::CYAN + MethodName +
                       Colors::BRIGHT_RED + "'." + Colors::RESET) {
-    if (!Suggestions.empty()) {
-      std::string formatted = formatRankedSuggestions(Suggestions);
-      if (formatted.rfind("\n  ", 0) == 0) {
-        Hint_ = "Did you mean:\n" + formatted.substr(3);
-      } else {
-        Hint_ = "Did you mean:\n" + formatted;
-      }
-    } else {
-      Hint_ = "Double-check your spelling, or maybe you need to define it?";
-    }
+    Hint_ = suggestionsOrFallback(Suggestions,
+      "Double-check your spelling, or maybe you need to define it?",
+      "Did you mean:\n");
   }
 };
 

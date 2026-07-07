@@ -91,4 +91,66 @@ TurfTypePtr makeArrayType(TurfTypePtr ElemType, int Size) {
   return std::make_shared<ArrayType>(std::move(ElemType), Size);
 }
 
+// ─── Type coercion helper ───────────────────────────────────────────────────
 
+bool typesCompatible(const TurfType *From, const TurfType *To) {
+  if (!From || !To)
+    return false;
+
+  // Exact match
+  if (From->getName() == To->getName())
+    return true;
+
+  // Type Erasure: Generic Type Parameters are compatible with anything
+  if (dynamic_cast<const TurfGenericParamType *>(From) ||
+      dynamic_cast<const TurfGenericParamType *>(To))
+    return true;
+
+  // Rule 1: null is only compatible with pointer-like types (string, ptr,
+  // void*, T*). It must NEVER be compatible with plain numerics or bool.
+  auto isPointerLikeStrict = [](const TurfType *T) {
+    return T->isString() || T->isPointer() ||
+           T->isNamed("ptr") || T->isNamed("void*");
+  };
+  if (From->isNull())
+    return isPointerLikeStrict(To);
+  if (To->isNull())
+    return isPointerLikeStrict(From);
+
+  // Rule 2: ptr / void* mutually coercible with typed pointers (T*) only.
+  // Deliberately NOT extended to `string` — string and T* remain distinct.
+  auto isOpaquePtr = [](const TurfType *T) {
+    return T->isNamed("ptr") || T->isNamed("void*");
+  };
+  if (isOpaquePtr(From) && To->isPointer())
+    return true;
+  if (isOpaquePtr(To) && From->isPointer())
+    return true;
+
+  // void and string are never compatible with anything else past this point
+  if (From->isVoid() || To->isVoid())
+    return false;
+  if (From->isString() || To->isString())
+    return false;
+
+  // Rule 4: bool is strictly isolated — never coerces to/from numerics.
+  if (From->isBool() || To->isBool())
+    return false;
+
+  // Rule 3: numeric widening/narrowing.
+  // int -> double (widening): allowed.
+  // double -> int (narrowing): rejected, requires explicit cast.
+  if (From->isNumeric() && To->isNumeric()) {
+    if (From->isInt() && To->isDouble())
+      return true;
+    if (From->isDouble() && To->isInt())
+      return false;
+    // Same-kind numerics not already caught by the exact-name check above
+    // (shouldn't normally be reached, but keep as a safe explicit case).
+    return false;
+  }
+
+  // Anything else (e.g. struct-to-struct name mismatch, pointer-to-struct,
+  // etc.) is not implicitly compatible.
+  return false;
+}

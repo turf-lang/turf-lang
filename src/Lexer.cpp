@@ -96,10 +96,14 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
 // Note: builtin function names (e.g. "print") are inserted here by
 // RegisterBuiltins() at startup. See src/Builtins.cpp.
 
+static bool isMessageWarning(const std::string &Msg) {
+  return Msg.find("Warning:") != std::string::npos ||
+         Msg.find("warning:") != std::string::npos;
+}
+
 // Internal helper: physically print one diagnostic to stderr.
 static void printDiag(const DiagnosticEngine::Diag &D) {
-  bool isWarning = D.IsWarning || D.Msg.find("Warning:") != std::string::npos ||
-                   D.Msg.find("warning:") != std::string::npos;
+  bool isWarning = D.IsWarning || isMessageWarning(D.Msg);
 
   const std::string &AccentColor =
       isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
@@ -137,7 +141,8 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
 
 // DiagnosticEngine : method implementations
 void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
-                           const std::string &Hint, bool IsWarning) {
+                           const std::string &Hint, bool IsWarning,
+                           const std::vector<RelatedLocation> &Related) {
   // If there is already an error on this line, suppress everything else
   // (both additional errors and warnings) to avoid cascading noise.
   if (ErrorLines.count(Loc.Line))
@@ -156,7 +161,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           "fresh analysis." +
           Colors::RESET;
     } else {
-      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint);
+      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint, Related);
 
       if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
         // Replace compiler message with high-confidence AI suggestion.
@@ -183,15 +188,16 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
     }
   }
 
-  Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning});
+  Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning, Related});
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);
 }
 
 void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
-                           bool IsWarning) {
-  add(Loc, Msg, "", IsWarning);
+                           bool IsWarning,
+                           const std::vector<RelatedLocation> &Related) {
+  add(Loc, Msg, "", IsWarning, Related);
 }
 
 bool DiagnosticEngine::hasErrors() { return !ErrorLines.empty(); }
@@ -221,11 +227,19 @@ void DiagnosticEngine::reset() {
       false; // Reset cascade guard for the next compilation pass
 }
 
+void DiagnosticEngine::restoreDiagnostics(const std::vector<Diag> &Saved) {
+  Diagnostics = Saved;
+  ErrorLines.clear();
+  for (const auto &D : Diagnostics) {
+    if (!D.IsWarning) {
+      ErrorLines.insert(D.Loc.Line);
+    }
+  }
+}
+
 // Emits and collects a generic diagnostic message at the given source location.
 void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
-  bool isWarning = Msg.find("Warning:") != std::string::npos ||
-                   Msg.find("warning:") != std::string::npos;
-  DiagnosticEngine::add(Loc, Msg, isWarning);
+  DiagnosticEngine::add(Loc, Msg, isMessageWarning(Msg));
 }
 
 void resetLexer() {
@@ -266,9 +280,12 @@ int gettok() {
   // Identifiers of the types: id = [a-zA-Z][a-zA-Z0-9_]*
   if (isalpha(LastChar)) {
     IdentifierStr = LastChar;
+    LastChar = SourceFile->get();
+    CurCol++;
 
-    while (isalnum(LastChar = SourceFile->get()) || LastChar == '_') {
+    while (isalnum(LastChar) || LastChar == '_') {
       IdentifierStr += LastChar;
+      LastChar = SourceFile->get();
       CurCol++;
     }
 
@@ -328,7 +345,7 @@ int gettok() {
   // (range operator) so three dots aren't consumed as range + stray dot.
   if (LastChar == '.' && SourceFile->peek() == '.') {
     // Peek at the character after the second dot
-    int second = SourceFile->get(); CurCol++;
+    SourceFile->get(); CurCol++;
     int third  = SourceFile->peek();
     if (third == '.') {
       SourceFile->get(); CurCol++; // consume third dot
@@ -344,12 +361,14 @@ int gettok() {
   // digit)
   if (isdigit(LastChar) || (LastChar == '.' && isdigit(SourceFile->peek()))) {
     std::string NumStr;
+    bool SeenDot = false;
     do {
+      if (LastChar == '.') SeenDot = true;
       NumStr += LastChar;
       LastChar = SourceFile->get();
       CurCol++;
     } while (isdigit(LastChar) ||
-             (LastChar == '.' && SourceFile->peek() != '.'));
+             (!SeenDot && LastChar == '.' && SourceFile->peek() != '.'));
 
     bool IsFloat = NumStr.find('.') != std::string::npos;
     if (IsFloat) {
@@ -381,7 +400,7 @@ int gettok() {
     if (LastChar == ':') {
       LastChar = SourceFile->get();
       CurCol++;
-      return ':'; // Placeholder for future scope resolution
+      return TOK_SCOPE;
     }
 
     return TOK_COLON;

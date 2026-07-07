@@ -1,0 +1,6 @@
+fn main(): int {
+    if true {
+        continue;
+    }
+    return 0;
+}

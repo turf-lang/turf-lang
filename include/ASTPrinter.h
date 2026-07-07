@@ -144,6 +144,23 @@ public:
     ascend();
   }
 
+  void visitCompoundAssignment(CompoundAssignmentExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "CompoundAssignmentExpr(op:'" << (char)N.getOpcode() << "')\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getLHS()), Depth_);
+    print(const_cast<ExprAST *>(N.getRHS()), Depth_);
+    ascend();
+  }
+
+  void visitPostfixExpr(PostfixExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "PostfixExpr(op:'" << (char)N.getOpcode() << "')\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getOperand()), Depth_);
+    ascend();
+  }
+
   // ── Control flow ────────────────────────────────────────────────────────────
   void visitBlock(BlockExprAST &N) override {
     printIndent(Depth_);
@@ -345,21 +362,6 @@ public:
     print(const_cast<ExprAST *>(N.getIndex()), Depth_);
     ascend();
   }
-
-  void visitArrayAssign(ArrayAssignExprAST &N) override {
-    printIndent(Depth_);
-    std::cout << "ArrayAssign(" << N.getName() << ")\n";
-    descend();
-    print(const_cast<ExprAST *>(N.getIndex()), Depth_);
-    print(const_cast<ExprAST *>(N.getRHS()), Depth_);
-    ascend();
-  }
-
-  void visitArrayLength(ArrayLengthExprAST &N) override {
-    printIndent(Depth_);
-    std::cout << "ArrayLength(" << N.getName() << ")\n";
-  }
-
   // ── Modules & misc ───────────────────────────────────────────────────────────
   void visitModuleImport(ModuleImportExprAST &N) override {
     printIndent(Depth_);

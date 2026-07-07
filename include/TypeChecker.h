@@ -56,6 +56,7 @@
 #define TYPE_CHECKER_H
 
 #include "ASTVisitor.h"
+#include "Lexer.h" // for SourceLocation, RelatedLocation
 #include "ResolverSymbolTable.h"
 #include "Types.h"
 
@@ -94,7 +95,8 @@ public:
   // After the callback returns the TypeChecker inserts an 'unknown' type for
   // the offending node and continues so that further errors can still be found.
   using ErrorHandler =
-      std::function<void(SourceLocation, const std::string &)>;
+      std::function<void(SourceLocation, const std::string &,
+                         const std::vector<RelatedLocation> &)>;
 
   // ── Constructors ──────────────────────────────────────────────────────────
 
@@ -173,6 +175,8 @@ public:
   void visitBinary(BinaryExprAST &Node) override;
   void visitUnary(UnaryExprAST &Node) override;
   void visitAssignment(AssignmentExprAST &Node) override;
+  void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override;
+  void visitPostfixExpr(PostfixExprAST &Node) override;
   void visitCast(CastExprAST &Node) override;
 
   // ── Control flow ──────────────────────────────────────────────────────────
@@ -198,9 +202,6 @@ public:
   void visitArrayDecl(ArrayDeclExprAST &Node) override;
   void visitArrayLiteral(ArrayLiteralExprAST &Node) override;
   void visitArrayAccess(ArrayAccessExprAST &Node) override;
-  void visitArrayAssign(ArrayAssignExprAST &Node) override;
-  void visitArrayLength(ArrayLengthExprAST &Node) override;
-
   // ── Modules & misc ────────────────────────────────────────────────────────
   void visitModuleImport(ModuleImportExprAST &Node) override;
   void visitSizeOf(SizeOfExprAST &Node) override;
@@ -215,7 +216,8 @@ private:
   void setType(const ExprAST *Node, TurfTypePtr Ty);
 
   /// Fire the error handler with the given location and message.
-  void reportError(SourceLocation Loc, const std::string &Msg);
+  void reportError(SourceLocation Loc, const std::string &Msg,
+                   const std::vector<RelatedLocation> &Related = {});
 
   /**
    * @brief Infer the result type of a binary arithmetic/string operation.
@@ -260,11 +262,6 @@ private:
   /// True if two types are compatible for arithmetic (both numeric or both
   /// string — string + string is valid; mixed is not).
   static bool areArithCompatible(const TurfType *A, const TurfType *B);
-
-  /// True if @p ArgTy is compatible with @p ParamTy for overload resolution.
-  /// Accepts: exact type name match, or numeric promotion (int↔double↔bool).
-  /// Unknown types (nullptr) are treated as compatible to avoid cascade errors.
-  static bool isTypeCompatible(const TurfType *ParamTy, const TurfType *ArgTy);
 
   // ── State ─────────────────────────────────────────────────────────────────
 

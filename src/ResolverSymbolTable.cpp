@@ -13,27 +13,6 @@
 #include <stdexcept>
 #include <unordered_set>
 
-// ─── Local helpers ────────────────────────────────────────────────────────────
-
-/// Check if two Turf type names are implicitly compatible for overload
-/// resolution.  Mirrors the logic in SymbolTable.cpp without depending on it.
-static bool typesCompatible(const TurfType *From, const TurfType *To) {
-  if (!From || !To)
-    return false;
-  if (From->getName() == To->getName())
-    return true;
-  // Generic type parameters match anything (type erasure)
-  if (dynamic_cast<const TurfGenericParamType *>(From) ||
-      dynamic_cast<const TurfGenericParamType *>(To))
-    return true;
-  // void and string are not numeric-coercible
-  if (From->isVoid() || To->isVoid())
-    return false;
-  if (From->isNamed("string") || To->isNamed("string"))
-    return false;
-  // Remaining numerics (int, double, bool) are mutually coercible
-  return true;
-}
 
 // ─── ResolverModule ───────────────────────────────────────────────────────────
 
@@ -136,6 +115,12 @@ void ResolverSymbolTable::exitScope() {
     return; // Never pop the global scope
   ScopeStack_.pop_back();
   --Depth_;
+}
+
+void ResolverSymbolTable::resetToDepth(size_t TargetDepth) {
+  while (Depth_ > TargetDepth && ScopeStack_.size() > 1) {
+    exitScope();
+  }
 }
 
 std::shared_ptr<VariableSymbol> ResolverSymbolTable::declareVariable(

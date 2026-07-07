@@ -1,0 +1,5 @@
+fn main(): int {
+    // double should not implicitly narrow to int
+    mut x: int = 3.14;
+    return 0;
+}

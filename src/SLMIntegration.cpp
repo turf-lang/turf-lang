@@ -21,6 +21,9 @@
 #include "Lexer.h"
 #include "Sandbox.h"
 #include <SLMEngine.h>
+#include "AST.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/Path.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -139,169 +142,6 @@ getCodeContextWithPinnedLines(int errorLine, int contextSize,
   return context;
 }
 
-// Scans SourceLines for the definition of a function whose name appears in
-// the error message or in the error line itself. Returns the 1-based line
-// number of the matching `fn <name>(` header, or -1 if not found.
-// This is a pure text scan — no AST required — so it is fully self-contained
-// inside SLMIntegration.cpp with no symbol-table dependency.
-static int findFunctionSignatureLine(const std::string &errorMsg,
-                                     int errorLine) {
-  if (SourceLines.empty())
-    return -1;
-
-  // Collect candidate function names from the error message.
-  // Common patterns:
-  //   "Unknown function: 'foo'"        -> extract "foo"
-  //   "void value from 'foo'"          -> extract "foo"
-  //   "Wrong argument count for 'foo'" -> extract "foo"
-  std::vector<std::string> candidates;
-
-  auto extractQuoted = [&](const std::string &src) {
-    size_t p = src.find('\'');
-    while (p != std::string::npos) {
-      size_t q = src.find('\'', p + 1);
-      if (q != std::string::npos) {
-        candidates.push_back(src.substr(p + 1, q - p - 1));
-        p = src.find('\'', q + 1);
-      } else {
-        break;
-      }
-    }
-  };
-
-  extractQuoted(errorMsg);
-
-  // Also scan the error line itself for identifiers followed by '('
-  if (errorLine >= 1 && errorLine <= static_cast<int>(SourceLines.size())) {
-    const std::string &src = SourceLines[errorLine - 1];
-    for (size_t i = 0; i < src.size();) {
-      if (std::isalpha(static_cast<unsigned char>(src[i]))) {
-        size_t j = i;
-        while (
-            j < src.size() &&
-            (std::isalnum(static_cast<unsigned char>(src[j])) || src[j] == '_'))
-          ++j;
-        // Check whether the identifier is immediately followed by '('
-        size_t k = j;
-        while (k < src.size() && src[k] == ' ')
-          ++k;
-        if (k < src.size() && src[k] == '(')
-          candidates.push_back(src.substr(i, j - i));
-        i = j;
-      } else {
-        ++i;
-      }
-    }
-  }
-
-  if (candidates.empty())
-    return -1;
-
-  // Scan every source line for `fn <candidate>(`
-  for (int ln = 1; ln <= static_cast<int>(SourceLines.size()); ++ln) {
-    const std::string &line = SourceLines[ln - 1];
-    size_t fnPos = line.find("fn ");
-    if (fnPos == std::string::npos)
-      continue;
-
-    for (const auto &name : candidates) {
-      if (name.empty())
-        continue;
-      size_t namePos = line.find(name, fnPos + 3);
-      if (namePos == std::string::npos)
-        continue;
-      // Confirm the identifier is followed (after optional whitespace) by '('
-      size_t after = namePos + name.size();
-      while (after < line.size() && line[after] == ' ')
-        ++after;
-      if (after < line.size() && line[after] == '(') {
-        std::cerr << "[SLM 3b] Found fn '" << name << "' at line " << ln
-                  << " (pinning to context)\n";
-        return ln;
-      }
-    }
-  }
-
-  return -1;
-}
-
-// Scans SourceLines for a variable declaration matching the variable name
-// extracted from an UNDECLARED_VAR error message. Returns the 1-based line
-// number of the most recent `type <varName> =` pattern, or -1 if not found.
-// Searches backwards from errorLine-1 so the nearest prior declaration wins.
-//
-// Recognised declaration patterns (Turf-Lang syntax):
-//   int x = ...   |   double x = ...   |   bool x = ...   |   string x = ...
-// Also matches function parameter declarations: fn foo(int x, ...)
-static int findVariableDeclarationLine(const std::string &errorMsg,
-                                       int errorLine) {
-  if (SourceLines.empty())
-    return -1;
-
-  // Extract the variable name from single-quoted text in the error message.
-  // UseBeforeDeclarationError:  "...use 'x' before..."
-  // ReferenceError:             "...anything named 'x'..."
-  std::string varName;
-  size_t q1 = errorMsg.find('\'');
-  if (q1 != std::string::npos) {
-    size_t q2 = errorMsg.find('\'', q1 + 1);
-    if (q2 != std::string::npos && q2 > q1 + 1)
-      varName = errorMsg.substr(q1 + 1, q2 - q1 - 1);
-  }
-
-  if (varName.empty())
-    return -1;
-
-  // Turf type keywords that precede a variable name in a declaration.
-  static const char *typeKeywords[] = {"int", "double", "float", "bool",
-                                       "string", "mutable", "mut",
-                                       "immutable", "immut"};
-
-  // Scan backwards from just before the error line to find the closest match.
-  int lastLine = std::min(errorLine - 1, static_cast<int>(SourceLines.size()));
-  for (int ln = lastLine; ln >= 1; --ln) {
-    const std::string &line = SourceLines[ln - 1];
-
-    // Look for `<typeKeyword> <varName>` in the line.
-    for (const char *kw : typeKeywords) {
-      size_t kwLen = std::strlen(kw);
-      size_t pos = 0;
-      while ((pos = line.find(kw, pos)) != std::string::npos) {
-        // The type keyword must be preceded by whitespace/start-of-line
-        // and followed by whitespace (not part of a longer identifier).
-        bool kwStart =
-            (pos == 0 ||
-             !std::isalnum(static_cast<unsigned char>(line[pos - 1])));
-        size_t afterKw = pos + kwLen;
-        bool kwEnd = (afterKw < line.size() && line[afterKw] == ' ');
-
-        if (kwStart && kwEnd) {
-          // Skip whitespace after the type keyword.
-          size_t nameStart = afterKw;
-          while (nameStart < line.size() && line[nameStart] == ' ')
-            ++nameStart;
-
-          // Check if the identifier at this position matches varName.
-          if (nameStart + varName.size() <= line.size() &&
-              line.compare(nameStart, varName.size(), varName) == 0) {
-            // Make sure the match is a whole identifier (not a prefix).
-            size_t afterName = nameStart + varName.size();
-            if (afterName >= line.size() ||
-                (!std::isalnum(static_cast<unsigned char>(line[afterName])) &&
-                 line[afterName] != '_')) {
-              std::cerr << "[SLM 3a] Found declaration of '" << varName
-                        << "' at line " << ln << " (pinning to context)\n";
-              return ln;
-            }
-          }
-        }
-        pos = afterKw; // advance past this occurrence
-      }
-    }
-  }
-
-  return -1;
-}
 
 static std::string escapeJsonString(const std::string &src) {
   std::string result;
@@ -359,13 +199,13 @@ static std::string extractJsonFieldString(const std::string &json,
     if (escapePos + 1 < result.length()) {
       char nextChar = result[escapePos + 1];
       if (nextChar == 'n') {
-        result.replace(escapePos, 2, "\n");
+        result.replace(escapePos, 2, "\n"); escapePos += 1;
       } else if (nextChar == 't') {
-        result.replace(escapePos, 2, "\t");
+        result.replace(escapePos, 2, "\t"); escapePos += 1;
       } else if (nextChar == '"') {
-        result.replace(escapePos, 2, "\"");
+        result.replace(escapePos, 2, "\""); escapePos += 1;
       } else if (nextChar == '\\') {
-        result.replace(escapePos, 2, "\\");
+        result.replace(escapePos, 2, "\\"); escapePos += 1;
       } else {
         escapePos++;
       }
@@ -376,98 +216,27 @@ static std::string extractJsonFieldString(const std::string &json,
   return result;
 }
 
-static float extractJsonFieldNumber(const std::string &json,
-                                    const std::string &field) {
-  std::string key = "\"" + field + "\":";
-  size_t pos = json.find(key);
-  if (pos == std::string::npos)
-    return 0.0f;
-
-  pos += key.length();
-
-  while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' ||
-                                 json[pos] == '\n' || json[pos] == '\r')) {
-    pos++;
-  }
-  if (pos >= json.length())
-    return 0.0f;
-
-  size_t endPos = pos;
-
-  while (endPos < json.length() &&
-         (std::isdigit(json[endPos]) || json[endPos] == '.' ||
-          json[endPos] == '-')) {
-    endPos++;
-  }
-
-  std::string numStr = json.substr(pos, endPos - pos);
-  char *endptr;
-
-  float val = std::strtof(numStr.c_str(), &endptr);
-  if (endptr == numStr.c_str()) {
-    return 0.0f;
-  }
-  return val;
-}
-
-static ErrorCategory classifyErrorWithSLM(const std::string &errorMessage,
-                                          const std::string &codeContext) {
-  // Load the category reference file so the SLM knows what each category means.
-  std::string categoryDoc = loadDocFile("docs/slm/error_categories.txt");
-
-  std::string categoryList =
-      "TYPE_MISMATCH, UNDECLARED_VARIABLE, CONTROL_FLOW, SYNTAX_ERROR, "
-      "ARITHMETIC, "
-      "STRING_CONVERSION, ARRAY_ERROR, DECLARATION, FUNCTION_SIGNATURE, "
-      "BUILTIN_FUNCTION, GENERAL";
-
-  std::string systemContent =
-      "You are an expert compiler error classifier for Turf-Lang.\n"
-      "Categorize the following error into EXACTLY ONE of these categories:\n" +
-      categoryList + "\n\n";
-
-  if (!categoryDoc.empty()) {
-    systemContent += "Category descriptions:\n" + categoryDoc + "\n\n";
-  }
-
-  systemContent += "Respond with ONLY the exact category name. No explanation, "
-                   "no quotes, no markdown.\n";
-
-  std::string prompt = "<|im_start|>system\n" + systemContent +
-                       "<|im_end|>\n"
-                       "<|im_start|>user\n"
-                       "Error: " +
-                       errorMessage + "\nCode Context:\n" + codeContext +
-                       "\n<|im_end|>\n"
-                       "<|im_start|>assistant\n";
-
-  std::string response = SLMEngine::getInstance().generateSuggestion(prompt);
-
-  size_t start = response.find_first_not_of(" \t\r\n\"'");
-  size_t end = response.find_last_not_of(" \t\r\n\"'");
-  if (start != std::string::npos && end != std::string::npos) {
-    std::string categoryStr = response.substr(start, end - start + 1);
-    std::cerr << "[SLM Classifier] AI classification: " << categoryStr << "\n";
-    return categoryFromString(categoryStr);
-  }
-
-  return ErrorCategory::GENERAL;
-}
-
-// Deterministic confidence scoring.
-// Rather than asking the LLM to guess a probability (which small models anchor
-// to example values in the prompt), we compute a score from measurable signals:
+// Computes a structural prior for confidence from shallow, pre-sandbox signals.
+// This is NOT the final confidence — sandbox validation hasn't run yet.
+// The score is meant to estimate plausibility; finalizeConfidence() then
+// incorporates the strongest signal (empirical sandbox pass/fail) to produce
+// the true confidence used by the display gate.
 //
-//   +0.4  Error category resolved by hardcoded rules (no SLM fallback needed)
-//   +0.2  fix_mode == MODIFY  (the model believes a patch is applicable)
-//   +0.2  code_patch is non-empty
-//   +0.1  code_patch is a single line (no embedded newlines or bare braces)
-//   +0.1  code_patch contains the error keyword — patch is on-topic
+//   +0.4  Error category resolved by hardcoded rules (not SLM fallback)
+//   +0.2  fix_mode == MODIFY
+//   +0.2  replacement_line is non-empty (actual code, not prose)
+//   +0.1  replacement_line is a single clean line (no newlines or bare braces)
+//   +0.1  replacement_line contains the error keyword on a word boundary
+//
+// Note: If replacement_line is empty, patchCode is NOT used as a fallback —
+// code_patch is prose, and scoring prose as code produces misleading results
+// since verifySuggestion() refuses to validate it anyway.
 //
 // Maximum score: 1.0  |  Minimum: 0.0
-static float computeConfidence(const AISuggestion &s, ErrorCategory category,
-                               bool deterministic,
-                               const std::string &contextKeyword) {
+static float computeStructuralPrior(const AISuggestion &s, ErrorCategory category,
+                                    bool deterministic,
+                                    const std::string &contextKeyword,
+                                    int errorLine) {
   float score = 0.0f;
 
   // +0.4 if the category was resolved by deterministic rules (not SLM fallback)
@@ -478,33 +247,87 @@ static float computeConfidence(const AISuggestion &s, ErrorCategory category,
   if (s.fix_mode == "MODIFY")
     score += 0.2f;
 
-  // +0.2 if a non-empty replacement_line was actually produced
-  // (replacement_line is the exact code; code_patch is just a prose
-  // description)
-  const std::string &patchCode =
-      s.replacement_line.empty() ? s.code_patch : s.replacement_line;
-  if (!patchCode.empty())
+  // Only score replacement_line — code_patch is human-readable prose, not
+  // parseable code. If replacement_line is empty, all code-quality checks
+  // are skipped entirely (verifySuggestion would reject it regardless).
+  const std::string &patchCode = s.replacement_line;
+
+  if (!patchCode.empty()) {
+    // Hard-reject: the model echoed back the original broken line unchanged.
+    // This is a known small-model failure mode. An identical replacement is
+    // actively harmful — it passes every other check while fixing nothing.
+    std::string originalLine =
+        (errorLine >= 1 && errorLine <= static_cast<int>(SourceLines.size()))
+            ? SourceLines[errorLine - 1]
+            : "";
+    // Trim leading/trailing whitespace for comparison
+    auto trim = [](const std::string &s) {
+      size_t l = s.find_first_not_of(" \t\r\n");
+      size_t r = s.find_last_not_of(" \t\r\n");
+      return (l == std::string::npos) ? std::string{} : s.substr(l, r - l + 1);
+    };
+    if (!originalLine.empty() && trim(patchCode) == trim(originalLine)) {
+      // Hard override — this score can never clear the gate.
+      return 0.0f;
+    }
+
+    // +0.2 if a non-empty replacement_line was produced
     score += 0.2f;
 
-  // +0.1 if the replacement is a single, clean line (no embedded newlines or
-  // lone braces)
-  if (!patchCode.empty()) {
+    // +0.1 if it is a single, clean line (no embedded newlines or lone braces)
     bool hasNewline = patchCode.find('\n') != std::string::npos;
     bool isBareBrace = (patchCode == "{" || patchCode == "}");
     if (!hasNewline && !isBareBrace)
       score += 0.1f;
-  }
 
-  // +0.1 if the replacement line mentions the relevant keyword (patch is
-  // on-topic)
-  if (!contextKeyword.empty() && !patchCode.empty() &&
-      patchCode.find(contextKeyword) != std::string::npos)
-    score += 0.1f;
+    // +0.1 if the replacement contains the keyword at a word boundary.
+    // Raw substring matching is avoided because short identifiers (e.g. i, n)
+    // appear inside unrelated tokens, making the signal nearly unconditional.
+    if (!contextKeyword.empty()) {
+      size_t kwPos = 0;
+      while ((kwPos = patchCode.find(contextKeyword, kwPos)) != std::string::npos) {
+        // Check that the characters immediately surrounding the match are not
+        // alphanumeric or underscore (i.e. it is a word boundary).
+        bool leftOk = (kwPos == 0) ||
+                      (!std::isalnum(static_cast<unsigned char>(patchCode[kwPos - 1])) &&
+                       patchCode[kwPos - 1] != '_');
+        bool rightOk =
+            (kwPos + contextKeyword.size() >= patchCode.size()) ||
+            (!std::isalnum(static_cast<unsigned char>(
+                 patchCode[kwPos + contextKeyword.size()])) &&
+             patchCode[kwPos + contextKeyword.size()] != '_');
+        if (leftOk && rightOk) {
+          score += 0.1f;
+          break; // only count once
+        }
+        kwPos += contextKeyword.size();
+      }
+    }
+  }
 
   // Clamp to [0, 1]
   if (score > 1.0f)
     score = 1.0f;
   return score;
+}
+
+// Incorporates the strongest available signal — sandbox empirical validation —
+// into the structural prior to produce the final confidence score.
+//
+// If sandbox validation passed, the fix has been proven correct by the actual
+// compiler. The structural prior can only nudge the score for logging/ranking;
+// it can no longer veto a proven-correct fix.
+//
+// If sandbox did not validate (NONE mode, or sandbox rejected the fix), the
+// structural prior is all we have. It is capped below the display gate (0.8)
+// so that an unvalidated fix never auto-applies.
+static float finalizeConfidence(float structuralPrior, bool sandboxValidated) {
+  if (sandboxValidated) {
+    // Proven-correct: clamp to at least 0.9, no longer blockable by the prior.
+    return std::max(0.9f, structuralPrior);
+  }
+  // Not validated: cap well below the gate so it can never auto-apply.
+  return std::min(structuralPrior, 0.5f);
 }
 
 /**
@@ -518,7 +341,9 @@ static float computeConfidence(const AISuggestion &s, ErrorCategory category,
  * @return AISuggestion A structured AI response containing an explanation and
  * patch.
  */
-AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, const std::string &hint) {
+AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
+                             const std::string &hint,
+                             const std::vector<RelatedLocation> &related) {
   AISuggestion suggestion;
   std::string cleanError = stripAnsiCodes(errorMessage);
 
@@ -532,60 +357,68 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
   ErrorCategory category = classifyError(cleanError, contextKeyword);
   bool categoryWasDeterministic = (category != ErrorCategory::GENERAL);
 
-  const std::string modelPath =
-      "models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
-  if (!SLMEngine::getInstance().initialize(modelPath)) {
+  llvm::SmallString<128> ModelPath(CompilerExecutablePath);
+  llvm::sys::path::remove_filename(ModelPath);
+  llvm::sys::path::append(ModelPath, "..", "models",
+                          "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf");
+  if (!SLMEngine::getInstance().initialize(ModelPath.str().str())) {
     return suggestion;
   }
 
-  // Step 2: SLM fallback classification (if deterministic rules failed) ─
-  // Only invoke the model when the pattern-matcher returned GENERAL.
-  // We pass a small preliminary context (±3) just for the classifier;
-  // the real context for the suggestion prompt is built after this.
-  if (!categoryWasDeterministic) {
-    std::cerr << "[SLM Classifier] Hardcoded rules yielded GENERAL. Consulting "
-                 "SLM...\n";
-    std::string classifierContext = getCodeContext(errorLine, 3);
-    category = classifyErrorWithSLM(cleanError, classifierContext);
+  // Resolve the GBNF grammar file (same binary-relative pattern as model path).
+  // If the file is missing or the grammar fails to parse inside llama.cpp,
+  // generateSuggestion degrades gracefully to unconstrained output.
+  llvm::SmallString<128> GrammarPath(CompilerExecutablePath);
+  llvm::sys::path::remove_filename(GrammarPath);
+  llvm::sys::path::append(GrammarPath, "..", "grammars",
+                          "slm_suggestion.gbnf");
+  std::string grammarStr = loadDocFile(GrammarPath.str().str());
+  if (std::getenv("TURF_SLM_DEBUG")) {
+    std::cerr << "[SLM] Grammar: "
+              << (grammarStr.empty() ? "not loaded (unconstrained output)"
+                                     : "loaded (constrained JSON output)")
+              << "\n";
   }
 
+  // Step 2: REMOVED — classification is now merged into the main response.
+  // When the deterministic classifier yields GENERAL, we proceed with GENERAL
+  // for context-sizing, pinning, and doc-loading (all have sensible GENERAL
+  // defaults). The main call's self-reported "category" field then corrects
+  // the bookkeeping (confidence scoring) for that slice — but cannot
+  // retroactively change what the model was already shown in the prompt.
+  // This eliminates the second model call in exchange for less
+  // category-tailored context on GENERAL-class errors.
+
   // Step 3: dynamic context window
-  // Now that we know the category, size the context window appropriately.
+  // Size the context window based on the deterministic category.
+  // If deterministic classification failed, GENERAL gives ±8 lines (broadest
+  // window), which is already the most generous fallback we have.
   int contextSize = contextSizeForCategory(category);
-  std::cerr << "[SLM] Context window: ±" << contextSize
-            << " lines (category: " << getCategoryName(category) << ")\n";
+  if (std::getenv("TURF_SLM_DEBUG")) {
+    std::cerr << "[SLM] Context window: ±" << contextSize
+              << " lines (category: " << getCategoryName(category) << ")\n";
+  }
 
   std::string codeContext;
 
   // Smart context: pin relevant definitions outside the window
   //
-  // 3b: For FUNCTION_SIGNATURE errors, locate the `fn <name>(` definition
-  //     in SourceLines and pin it to the context.
-  // 3a: For UNDECLARED_VAR errors, locate the nearest prior declaration
-  //     of the undeclared variable (e.g. `int x = ...` in an outer scope
-  //     that has since been exited) and pin it.
-  //
-  // getCodeContextWithPinnedLines automatically skips pinned lines that
-  // already fall inside the ±contextSize window, so there is no duplication
-  // risk.  If no relevant line is found, we fall through to plain context.
-  if (category == ErrorCategory::FUNCTION_SIGNATURE) {
-    int sigLine = findFunctionSignatureLine(cleanError, errorLine);
-    if (sigLine > 0) {
-      codeContext =
-          getCodeContextWithPinnedLines(errorLine, contextSize, {sigLine});
-    } else {
-      codeContext = getCodeContext(errorLine, contextSize);
-    }
-  } else if (category == ErrorCategory::UNDECLARED_VAR) {
-    int declLine = findVariableDeclarationLine(cleanError, errorLine);
-    if (declLine > 0) {
-      codeContext =
-          getCodeContextWithPinnedLines(errorLine, contextSize, {declLine});
-    } else {
-      codeContext = getCodeContext(errorLine, contextSize);
-    }
-  } else {
-    codeContext = getCodeContext(errorLine, contextSize);
+  // Pinning is now data-driven: RelatedLocations are populated by the
+  // compiler's own Resolver/TypeChecker at the exact point each error fires,
+  // carrying structurally correct locations from real symbol-table entries.
+  // Zero category branching, zero hardcoded syntax, zero scanner functions.
+  // If `related` is empty (error classes that don't yet populate it), this
+  // naturally falls back to plain sliding-window context — same as before.
+  std::vector<int> pinnedLines;
+  for (const auto &rel : related)
+    pinnedLines.push_back(rel.Loc.Line);
+
+  codeContext = pinnedLines.empty()
+      ? getCodeContext(errorLine, contextSize)
+      : getCodeContextWithPinnedLines(errorLine, contextSize, pinnedLines);
+
+  if (std::getenv("TURF_SLM_DEBUG")) {
+    std::cerr << "--- PINNED CONTEXT ---\n" << codeContext << "\n----------------------\n";
   }
 
   std::string categoryName = getCategoryName(category);
@@ -593,9 +426,11 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
   // 3. Get the most specific documentation available
   std::string docPath = getCategoryDocPath(category, contextKeyword);
 
-  std::cerr << "[SLM] Error category: " << categoryName << " | Keyword: "
-            << (contextKeyword.empty() ? "(none)" : contextKeyword)
-            << " | Context: ±" << contextSize << " | Doc: " << docPath << "\n";
+  if (std::getenv("TURF_SLM_DEBUG")) {
+    std::cerr << "[SLM] Error category: " << categoryName << " | Keyword: "
+              << (contextKeyword.empty() ? "(none)" : contextKeyword)
+              << " | Context: ±" << contextSize << " | Doc: " << docPath << "\n";
+  }
 
   // 4. Load the targeted documentation for this error category
   std::string docContent = loadDocFile(docPath);
@@ -625,7 +460,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
   // to produce. Small models "anchor" to example values in the prompt and copy
   // them verbatim, making any LLM-emitted probability meaningless. Instead we
   // compute confidence deterministically after parsing (see computeConfidence).
-  std::string prompt =
+  std::string systemPrompt =
       "<|im_start|>system\n"
       "You are a conservative compiler assistant for Turf-Lang.\n"
       "Error category: " +
@@ -647,7 +482,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
       "5. Respond ONLY in valid JSON without markdown code blocks.\n"
       "6. Keep explanation, suggested_comment, and warning to 1-2 sentences "
       "max.\n"
-      "<|im_end|>\n"
+      "<|im_end|>\n";
+
+  std::string userPrompt =
       "<|im_start|>user\n"
       "{\n"
       "  \"error\": \"" + escapeJsonString(cleanError) + "\",\n"
@@ -661,16 +498,22 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
       "\"replacement_line\": <THE EXACT SINGLE LINE of valid Turf-Lang code "
       "that replaces the erroneous line — no explanation, no prose, just the "
       "raw code>, "
-      "\"warning\": <string>}\n"
+      "\"warning\": <string>, "
+      "\"category\": <one of: TYPE_MISMATCH, UNDECLARED_VARIABLE, "
+      "CONTROL_FLOW, SYNTAX_ERROR, ARITHMETIC, STRING_CONVERSION, "
+      "ARRAY_ERROR, DECLARATION, FUNCTION_SIGNATURE, BUILTIN_FUNCTION, "
+      "GENERAL>}\n"
       "<|im_end|>\n"
       "<|im_start|>assistant\n";
 
-  std::string rawResponse = SLMEngine::getInstance().generateSuggestion(prompt);
+  std::string rawResponse =
+      SLMEngine::getInstance().generateSuggestion(systemPrompt, userPrompt, grammarStr);
 
-  std::cerr << "Clean Error: " << cleanError << "\n";
-
-  std::cerr << "\n--- SLM RAW RESPONSE DEBUG ---\n"
-            << rawResponse << "\n------------------------------\n";
+  if (std::getenv("TURF_SLM_DEBUG")) {
+    std::cerr << "Clean Error: " << cleanError << "\n";
+    std::cerr << "\n--- SLM RAW RESPONSE DEBUG ---\n"
+              << rawResponse << "\n------------------------------\n";
+  }
 
   if (rawResponse.empty()) {
     return suggestion;
@@ -691,18 +534,44 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
     suggestion.replacement_line =
         extractJsonFieldString(jsonStr, "replacement_line");
     suggestion.warning = extractJsonFieldString(jsonStr, "warning");
+    suggestion.self_reported_category =
+        extractJsonFieldString(jsonStr, "category");
 
-    // Compute confidence deterministically from measurable output signals.
-    // The LLM is no longer asked to self-report a probability.
-    suggestion.confidence = computeConfidence(
-        suggestion, category, categoryWasDeterministic, contextKeyword);
+    // B3-2: If the deterministic classifier returned GENERAL (i.e. it couldn't
+    // identify the category), try using the model's self-reported category
+    // from the main response before falling back to a second model call.
+    // The GBNF grammar constrains "category" to the exact enum strings, so
+    // categoryFromString will map it correctly.
+    if (!categoryWasDeterministic && !suggestion.self_reported_category.empty()) {
+      ErrorCategory selfCat = categoryFromString(suggestion.self_reported_category);
+      if (selfCat != ErrorCategory::GENERAL) {
+        // Model gave us a specific category — accept it, no second call needed.
+        category = selfCat;
+        categoryWasDeterministic = true; // treat as deterministic for confidence
+        if (std::getenv("TURF_SLM_DEBUG")) {
+          std::cerr << "[SLM] Used self-reported category: "
+                    << suggestion.self_reported_category
+                    << " (eliminated second model call)\n";
+        }
+      }
+    }
 
-    std::cerr << "Computed Confidence (deterministic): "
-              << suggestion.confidence << "\n";
-    std::cerr << "  category_deterministic=" << categoryWasDeterministic
-              << " fix_mode=" << suggestion.fix_mode
-              << " patch_empty=" << suggestion.code_patch.empty() << "\n";
-    std::cerr << "Parsed Fix Mode: " << suggestion.fix_mode << "\n";
+    // Compute the structural prior from shallow, pre-sandbox signals.
+    // This is NOT finalized here — sandbox validation hasn't run yet.
+    // finalizeConfidence() in validateAndApplySuggestion() incorporates the
+    // empirical sandbox result to produce the true, gate-relevant score.
+    suggestion.confidence = computeStructuralPrior(
+        suggestion, category, categoryWasDeterministic, contextKeyword,
+        errorLine);
+
+    if (std::getenv("TURF_SLM_DEBUG")) {
+      std::cerr << "Structural Prior (pre-sandbox): "
+                << suggestion.confidence << "\n";
+      std::cerr << "  category_deterministic=" << categoryWasDeterministic
+                << " fix_mode=" << suggestion.fix_mode
+                << " replacement_line_empty=" << suggestion.replacement_line.empty() << "\n";
+      std::cerr << "Parsed Fix Mode: " << suggestion.fix_mode << "\n";
+    }
 
     if (suggestion.fix_mode.empty()) {
       suggestion.fix_mode = "NONE";
@@ -715,8 +584,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine, con
 
 // Sandbox-Based Suggestion Validation
 
-bool verifySuggestion(const AISuggestion &suggestion,
-                      const std::string &originalSource, int errorLine) {
+bool verifySuggestion(const AISuggestion &suggestion, int errorLine) {
   // Create a sandbox from the current compiler state
   auto sandbox = CreateSandbox();
   if (!sandbox) {
@@ -727,10 +595,11 @@ bool verifySuggestion(const AISuggestion &suggestion,
 
   // Use replacement_line (exact Turf-Lang code) for sandbox validation.
   // code_patch is a human-readable description and must NOT be fed to the
-  // parser.
-  const std::string &fixLine = suggestion.replacement_line.empty()
-                                   ? suggestion.code_patch
-                                   : suggestion.replacement_line;
+  // parser. If replacement_line is empty, there is no valid code to validate.
+  if (suggestion.replacement_line.empty()) {
+    return false; // no valid code to validate; code_patch is prose-only
+  }
+  const std::string &fixLine = suggestion.replacement_line;
   return ApplyAndValidateFix(*sandbox, errorLine, fixLine, suggestion);
 }
 
@@ -739,9 +608,10 @@ bool verifySuggestion(const AISuggestion &suggestion,
 // Wrapper that gets SLM suggestion, validates it in a sandbox, and applies it
 // if valid. Returns an enhanced AISuggestion with validation results.
 AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
-                                        int errorLine, const std::string &hint) {
+                                        int errorLine, const std::string &hint,
+                                        const std::vector<RelatedLocation> &related) {
   // First, get the SLM suggestion
-  AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine, hint);
+  AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine, hint, related);
 
   if (!suggestion.valid) {
     return suggestion;
@@ -756,23 +626,32 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
   }
 
   // Verify the suggestion in a sandbox
-  std::string originalSourceConcat;
-  for (const auto &line : SourceLines) {
-    originalSourceConcat += line + "\n";
-  }
+  bool isValid = verifySuggestion(suggestion, errorLine);
 
-  bool isValid = verifySuggestion(suggestion, originalSourceConcat, errorLine);
+  // Finalize confidence NOW — after sandbox validation.
+  // The structural prior (computed before sandbox ran) is only a prior;
+  // the sandbox result is the strongest possible signal (empirical proof).
+  // A proven-correct fix is clamped to >= 0.9; an unvalidated fix is capped
+  // at <= 0.5, making it impossible for a pre-validation guess to veto a
+  // validated fix, or to promote an unvalidated one past the display gate.
+  suggestion.confidence = finalizeConfidence(suggestion.confidence, isValid);
 
   if (isValid) {
     suggestion.valid = true;
     std::cerr << Colors::BRIGHT_GREEN << "[Sandbox] ✓ Suggestion validated"
               << Colors::RESET << "\n";
+    if (std::getenv("TURF_SLM_DEBUG")) {
+      std::cerr << "Final Confidence (post-sandbox): " << suggestion.confidence << "\n";
+    }
   } else {
     suggestion.valid = false;
     suggestion.fix_mode = "NONE"; // Downgrade to no fix on validation failure
     std::cerr << Colors::BRIGHT_YELLOW
               << "[Sandbox] ✗ Suggestion validation failed" << Colors::RESET
               << "\n";
+    if (std::getenv("TURF_SLM_DEBUG")) {
+      std::cerr << "Final Confidence (post-sandbox, capped): " << suggestion.confidence << "\n";
+    }
   }
 
   return suggestion;

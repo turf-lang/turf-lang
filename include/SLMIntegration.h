@@ -1,7 +1,9 @@
 #ifndef SLM_INTEGRATION_H
 #define SLM_INTEGRATION_H
 
+#include "Lexer.h" // for RelatedLocation
 #include <string>
+#include <vector>
 
 namespace SLM {
 
@@ -13,6 +15,7 @@ struct AISuggestion {
   std::string code_patch;       // Human-readable description of the patch
   std::string replacement_line; // Exact Turf-Lang source line to substitute
   std::string warning;
+  std::string self_reported_category; // Model's own assessment of error category
   bool valid = false;
   bool sandbox_validated = false; // Whether sandbox validation passed
 };
@@ -23,19 +26,17 @@ std::string getCodeContext(int errorLine, int contextSize = 10);
 // Fetches a suggestion from the SLM based on the error message, source
 // context, and optional hint. Returns an empty AISuggestion if the SLM fails or times out.
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
-                             const std::string &hint = "");
+                             const std::string &hint = "",
+                             const std::vector<RelatedLocation> &related = {});
 
-// Validate and apply an SLM suggestion in a sandbox environment.
-// This function:
-// 1. Gets an SLM suggestion
-// 2. Creates a sandbox environment
-// 3. Applies the fix in the sandbox
-// 4. Re-validates compilation in the sandbox
-// 5. Commits if valid (confidence >= 0.9), rejects if invalid
-// Returns the suggestion with sandbox_validated set appropriately.
+// ── End-to-End Helper ────────────────────────────────────────────────────────
+// 1. Calls fetchSuggestion() to query the SLM.
+// 2. Extracts the resulting patch, comment, explanation, and fix strategy.
+// 3. Performs basic validation (e.g. ensuring syntax isn't obviously broken).
 AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
                                         int errorLine,
-                                        const std::string &hint = "");
+                                        const std::string &hint = "",
+                                        const std::vector<RelatedLocation> &related = {});
 
 // TODO(future): Self-running verification of AI-suggested code patches.
 // Before presenting a suggested fix to the user, this function should:
@@ -48,8 +49,7 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
 //
 // Current status: stub — always returns true. The infrastructure for
 // invoking a child compile pass needs to be designed first.
-bool verifySuggestion(const AISuggestion &suggestion,
-                      const std::string &originalSource, int errorLine);
+bool verifySuggestion(const AISuggestion &suggestion, int errorLine);
 
 } // namespace SLM
 

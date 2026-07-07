@@ -42,8 +42,19 @@ static std::vector<std::unique_ptr<ExprAST>> ParsedTopLevelASTs;
 // with the block opener. This mirrors Rust's grammar restriction.
 static bool g_AllowStructInit = true;
 struct NoStructInitGuard {
-  NoStructInitGuard() { g_AllowStructInit = false; }
-  ~NoStructInitGuard() { g_AllowStructInit = true; }
+  bool Previous;
+  NoStructInitGuard() : Previous(g_AllowStructInit) { g_AllowStructInit = false; }
+  ~NoStructInitGuard() { g_AllowStructInit = Previous; }
+};
+
+struct SymbolScopeGuard {
+  bool Active;
+  SymbolScopeGuard(bool ShouldEnter) : Active(ShouldEnter) {
+    if (Active && GlobalSymbolTable) GlobalSymbolTable->EnterScope();
+  }
+  ~SymbolScopeGuard() {
+    if (Active && GlobalSymbolTable) GlobalSymbolTable->ExitScope();
+  }
 };
 
 // Reads the next token from the Lexer and updates CurTok
@@ -94,6 +105,12 @@ void ClearParsedTopLevelASTs() {
   ImportedFiles.clear();
 }
 
+std::vector<std::unique_ptr<ExprAST>> SwapParsedTopLevelASTs(std::vector<std::unique_ptr<ExprAST>> New) {
+  std::vector<std::unique_ptr<ExprAST>> Old = std::move(ParsedTopLevelASTs);
+  ParsedTopLevelASTs = std::move(New);
+  return Old;
+}
+
 void RecordParsedTopLevelAST(const ExprAST *AST) {
   if (AST) {
     ParsedTopLevelASTs.push_back(CloneExprAST(AST));
@@ -107,11 +124,10 @@ std::unique_ptr<ExprAST> BuildProgramASTFromCache() {
 // Returns the priority of the current operator. If it's not an operator (like a
 // number), returns -1.
 static int GetTokPrecedence() {
-  int TokPrec = BinopPrecedence[CurTok];
-  if (TokPrec <= 0)
+  auto It = BinopPrecedence.find(CurTok);
+  if (It == BinopPrecedence.end() || It->second <= 0)
     return -1;
-
-  return TokPrec;
+  return It->second;
 }
 
 std::unique_ptr<ExprAST> ParseExpression();
@@ -286,21 +302,8 @@ static std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger) {
 }
 
 std::unique_ptr<ExprAST> ParseBoolExpr() {
-  SourceLocation KeywordLoc = CurLoc;
-  std::string IdName = IdentifierStr;
   bool SavedBoolVal = BoolVal;
   getNextToken();
-
-  if (CurTok == TOK_ASSIGN) {
-    getNextToken();
-    auto RHS = ParseExpression();
-    if (!RHS)
-      return nullptr;
-    auto LHSVar = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
-    return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHSVar),
-                                               std::move(RHS));
-  }
-
   return std::make_unique<BoolExprAST>(SavedBoolVal);
 }
 
@@ -401,11 +404,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       SourceLocation OpLoc = CurLoc;
       getNextToken();
       char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
-      auto OneNum = std::make_unique<NumberExprAST>(1LL);
-      auto RHS = std::make_unique<BinaryExprAST>(
-          OpLoc, Op, CloneExprAST(Base.get()), std::move(OneNum));
-      Base = std::make_unique<AssignmentExprAST>(OpLoc, std::move(Base),
-                                                 std::move(RHS));
+      Base = std::make_unique<PostfixExprAST>(OpLoc, Op, std::move(Base));
     } else {
       break;
     }
@@ -431,18 +430,7 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
 }
 std::unique_ptr<ExprAST> ParseIfExpr() {
   SourceLocation KeywordLoc = CurLoc;
-  std::string IdName = IdentifierStr;
   getNextToken(); // eat 'if'
-
-  if (CurTok == TOK_ASSIGN) {
-    getNextToken();
-    auto RHS = ParseExpression();
-    if (!RHS)
-      return nullptr;
-    auto LHSVar = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
-    return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHSVar),
-                                               std::move(RHS));
-  }
 
   std::unique_ptr<ExprAST> Cond;
   {
@@ -674,15 +662,6 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     SourceLocation KeywordLoc = CurLoc;
     std::string IdName = IdentifierStr;
     getNextToken();
-    if (CurTok == TOK_ASSIGN) {
-      getNextToken();
-      auto RHS = ParseExpression();
-      if (!RHS)
-        return nullptr;
-      auto LHS = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
-      return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHS),
-                                                 std::move(RHS));
-    }
     LogErrorAt(KeywordLoc,
                "Unexpected '" + IdName +
                    "' keyword here — expected a value or expression."
@@ -753,33 +732,13 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     return ParseReturnExpr();
   case TOK_BREAK: {
     SourceLocation KeywordLoc = CurLoc;
-    std::string IdName = IdentifierStr;
     getNextToken();
-    if (CurTok == TOK_ASSIGN) {
-      getNextToken();
-      auto RHS = ParseExpression();
-      if (!RHS)
-        return nullptr;
-      auto LHS = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
-      return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHS),
-                                                 std::move(RHS));
-    }
     return std::make_unique<BreakExprAST>(KeywordLoc);
   }
 
   case TOK_CONTINUE: {
     SourceLocation KeywordLoc = CurLoc;
-    std::string IdName = IdentifierStr;
     getNextToken();
-    if (CurTok == TOK_ASSIGN) {
-      getNextToken();
-      auto RHS = ParseExpression();
-      if (!RHS)
-        return nullptr;
-      auto LHS = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
-      return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHS),
-                                                 std::move(RHS));
-    }
     return std::make_unique<ContinueExprAST>(KeywordLoc);
   }
   }
@@ -855,10 +814,8 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
       else if (BinOp == TOK_MOD_ASSIGN)
         Op = '%';
 
-      auto ExpandedRHS = std::make_unique<BinaryExprAST>(
-          OpLoc, Op, CloneExprAST(LHS.get()), std::move(RHS));
-      LHS = std::make_unique<AssignmentExprAST>(OpLoc, std::move(LHS),
-                                                std::move(ExpandedRHS));
+      LHS = std::make_unique<CompoundAssignmentExprAST>(OpLoc, Op, std::move(LHS),
+                                                        std::move(RHS));
     } else {
       LHS = std::make_unique<BinaryExprAST>(OpLoc, BinOp, std::move(LHS),
                                             std::move(RHS));
@@ -1032,18 +989,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
 
 std::unique_ptr<ExprAST> ParseWhileExpr() {
   SourceLocation KeywordLoc = CurLoc;
-  std::string IdName = IdentifierStr;
   getNextToken();
-
-  if (CurTok == TOK_ASSIGN) {
-    getNextToken();
-    auto RHS = ParseExpression();
-    if (!RHS)
-      return nullptr;
-    auto LHS = std::make_unique<VariableExprAST>(KeywordLoc, IdName);
-    return std::make_unique<AssignmentExprAST>(KeywordLoc, std::move(LHS),
-                                               std::move(RHS));
-  }
 
   std::unique_ptr<ExprAST> Cond;
   {
@@ -1329,8 +1275,8 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   }
 
   // Push scope to allow ParseType to resolve generic parameters
+  SymbolScopeGuard Guard(!TypeParams.empty());
   if (GlobalSymbolTable && !TypeParams.empty()) {
-    GlobalSymbolTable->EnterScope();
     for (const auto &TP : TypeParams) {
       GlobalSymbolTable->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
     }
@@ -1380,9 +1326,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   }
   getNextToken(); // eat '}'
 
-  if (GlobalSymbolTable && !TypeParams.empty()) {
-    GlobalSymbolTable->ExitScope();
-  }
+
 
   // Register the struct type. For generics, fields will use TurfGenericParamType which compiles to void*
   auto SType = std::make_shared<TurfStructType>(Name, Fields);
@@ -1563,8 +1507,8 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
   }
 
   // Push scope to allow ParseType to resolve generic parameters
+  SymbolScopeGuard Guard(!TypeParams.empty());
   if (GlobalSymbolTable && !TypeParams.empty()) {
-    GlobalSymbolTable->EnterScope();
     for (const auto &TP : TypeParams) {
       GlobalSymbolTable->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
     }
@@ -1673,18 +1617,12 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
   // If CurTok == ';': external declaration (forward decl)
   if (CurTok == ';') {
     getNextToken(); // eat ';'
-    if (GlobalSymbolTable && !TypeParams.empty()) {
-      GlobalSymbolTable->ExitScope();
-    }
     return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
                                             nullptr, IntrinsicName, TypeParams);
   }
 
   // If we are @intrinsic, we might not have a body or semicolon
   if (!IntrinsicName.empty() && CurTok != '{') {
-    if (GlobalSymbolTable && !TypeParams.empty()) {
-      GlobalSymbolTable->ExitScope();
-    }
     return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
                                             nullptr, IntrinsicName, TypeParams);
   }
@@ -1698,9 +1636,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
   if (!Body)
     return nullptr;
 
-  if (GlobalSymbolTable && !TypeParams.empty()) {
-    GlobalSymbolTable->ExitScope();
-  }
+
 
   return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
                                           std::move(Body), "", TypeParams);
@@ -1714,27 +1650,48 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
 
   std::ifstream ImportFile(Path);
   if (!ImportFile.is_open()) {
-    std::cout << "DEBUG ParseFile: Failed to open path: " << Path << "\n";
     return nullptr;
   }
 
   ImportedFiles.insert(Path);
 
   // Save current lexer state
-  std::ifstream* SavedSourceFile = SourceFile;
-  auto SavedLastChar = GetLastChar();
-  auto SavedCurTok = CurTok;
-  auto SavedCurLoc = CurLoc;
-  extern int CurLine;
-  extern int CurCol;
-  auto SavedCurLine = CurLine;
-  auto SavedCurCol = CurCol;
-  auto SavedFilename = SourceFilename;
-  auto SavedNumVal = NumVal;
-  auto SavedIntVal = IntVal;
-  auto SavedBoolVal = BoolVal;
-  auto SavedIdentifierStr = IdentifierStr;
-  auto SavedStringVal = StringVal;
+  struct LexerStateGuard {
+    std::ifstream *SavedSourceFile;
+    int SavedLastChar, SavedCurTok, SavedCurLine, SavedCurCol;
+    SourceLocation SavedCurLoc;
+    std::string SavedFilename, SavedIdentifierStr, SavedStringVal;
+    double SavedNumVal; long long SavedIntVal; bool SavedBoolVal;
+
+    LexerStateGuard() {
+      SavedSourceFile = SourceFile;
+      SavedLastChar = GetLastChar();
+      SavedCurTok = CurTok;
+      SavedCurLoc = CurLoc;
+      SavedCurLine = CurLine;
+      SavedCurCol = CurCol;
+      SavedFilename = SourceFilename;
+      SavedNumVal = NumVal;
+      SavedIntVal = IntVal;
+      SavedBoolVal = BoolVal;
+      SavedIdentifierStr = IdentifierStr;
+      SavedStringVal = StringVal;
+    }
+    ~LexerStateGuard() {
+      SourceFile = SavedSourceFile;
+      SetLastChar(SavedLastChar);
+      CurTok = SavedCurTok;
+      CurLoc = SavedCurLoc;
+      CurLine = SavedCurLine;
+      CurCol = SavedCurCol;
+      SourceFilename = SavedFilename;
+      NumVal = SavedNumVal;
+      IntVal = SavedIntVal;
+      BoolVal = SavedBoolVal;
+      IdentifierStr = SavedIdentifierStr;
+      StringVal = SavedStringVal;
+    }
+  } LGuard;
 
   // Set new lexer state
   SourceFile = &ImportFile;
@@ -1799,20 +1756,6 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
       getNextToken(); // skip for error recovery
     }
   }
-
-  // Restore lexer state
-  SourceFile = SavedSourceFile;
-  SetLastChar(SavedLastChar);
-  CurTok = SavedCurTok;
-  CurLoc = SavedCurLoc;
-  CurLine = SavedCurLine;
-  CurCol = SavedCurCol;
-  SourceFilename = SavedFilename;
-  NumVal = SavedNumVal;
-  IntVal = SavedIntVal;
-  BoolVal = SavedBoolVal;
-  IdentifierStr = SavedIdentifierStr;
-  StringVal = SavedStringVal;
 
   return std::make_unique<BlockExprAST>(std::move(Exprs));
 }

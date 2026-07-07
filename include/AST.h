@@ -125,7 +125,54 @@ public:
   }
 };
 
+// Compound Assignment Node, represents things like "x += 5"
+class CompoundAssignmentExprAST : public ExprAST {
+  SourceLocation Loc;
+  int Opcode;
+  std::unique_ptr<ExprAST> LHS;
+  std::unique_ptr<ExprAST> RHS;
 
+public:
+  CompoundAssignmentExprAST(SourceLocation Loc, int Opcode,
+                            std::unique_ptr<ExprAST> LHS,
+                            std::unique_ptr<ExprAST> RHS)
+      : Loc(Loc), Opcode(Opcode), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  int getOpcode() const { return Opcode; }
+  const ExprAST *getLHS() const { return LHS.get(); }
+  const ExprAST *getRHS() const { return RHS.get(); }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitCompoundAssignment(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<CompoundAssignmentExprAST>(
+        Loc, Opcode, CloneExprAST(LHS.get()), CloneExprAST(RHS.get()));
+  }
+};
+
+// Postfix Node, represents things like "x++" or "x--"
+class PostfixExprAST : public ExprAST {
+  SourceLocation Loc;
+  int Opcode;
+  std::unique_ptr<ExprAST> Operand;
+
+public:
+  PostfixExprAST(SourceLocation Loc, int Opcode,
+                 std::unique_ptr<ExprAST> Operand)
+      : Loc(Loc), Opcode(Opcode), Operand(std::move(Operand)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  int getOpcode() const { return Opcode; }
+  const ExprAST *getOperand() const { return Operand.get(); }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitPostfixExpr(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<PostfixExprAST>(Loc, Opcode,
+                                            CloneExprAST(Operand.get()));
+  }
+};
 
 // Variable Node, represents variable name like "x", "y", etc.
 class VariableExprAST : public ExprAST {
@@ -800,54 +847,6 @@ public:
   }
 };
 
-// Array element assignment: arr[index] = value
-class ArrayAssignExprAST : public ExprAST {
-  std::string Name;
-  std::unique_ptr<ExprAST> Index;
-  std::unique_ptr<ExprAST> RHS;
-  SourceLocation Loc;
-
-public:
-  ArrayAssignExprAST(SourceLocation Loc, std::string Name,
-                     std::unique_ptr<ExprAST> Index,
-                     std::unique_ptr<ExprAST> RHS)
-      : Loc(Loc), Name(std::move(Name)), Index(std::move(Index)),
-        RHS(std::move(RHS)) {}
-
-  const SourceLocation &getLoc() const { return Loc; }
-  const std::string &getName() const { return Name; }
-  const ExprAST *getIndex() const { return Index.get(); }
-  const ExprAST *getRHS() const { return RHS.get(); }
-
-  std::shared_ptr<VariableSymbol> ResolvedSymbol;
-
-  llvm::Value *codegen() override;
-  void accept(ASTVisitor &V) override { V.visitArrayAssign(*this); }
-  std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ArrayAssignExprAST>(
-        Loc, Name, CloneExprAST(Index.get()), CloneExprAST(RHS.get()));
-  }
-};
-
-// Array length: arr.length
-class ArrayLengthExprAST : public ExprAST {
-  std::string Name;
-  SourceLocation Loc;
-
-public:
-  ArrayLengthExprAST(SourceLocation Loc, std::string Name)
-      : Loc(Loc), Name(std::move(Name)) {}
-
-  const SourceLocation &getLoc() const { return Loc; }
-  const std::string &getName() const { return Name; }
-
-  llvm::Value *codegen() override;
-  void accept(ASTVisitor &V) override { V.visitArrayLength(*this); }
-  std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ArrayLengthExprAST>(Loc, Name);
-  }
-};
-
 // list method call: nums.push(val)  /  nums.pop()  /  nums.length
 // Note: list<T> *declaration* is now a plain VarDeclExprAST with a
 // GenericType("list", [elemType]) — no separate ListDeclExprAST needed.
@@ -927,6 +926,19 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
+  if (const auto *CompoundAssign =
+          dynamic_cast<const CompoundAssignmentExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(CompoundAssign->getLHS(), NodeIDs);
+    CollectAllNodeIDsInternal(CompoundAssign->getRHS(), NodeIDs);
+    return;
+  }
+
+  if (const auto *Postfix = dynamic_cast<const PostfixExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(Postfix->getOperand(), NodeIDs);
+    return;
+  }
+
+
   if (const auto *Decl = dynamic_cast<const VarDeclExprAST *>(Node)) {
     CollectAllNodeIDsInternal(Decl->getInitializer(), NodeIDs);
     return;
@@ -993,6 +1005,7 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
   if (const auto *ArrayDecl = dynamic_cast<const ArrayDeclExprAST *>(Node)) {
     for (const auto &Init : ArrayDecl->getInitList())
       CollectAllNodeIDsInternal(Init.get(), NodeIDs);
+    CollectAllNodeIDsInternal(ArrayDecl->getInitExpr().get(), NodeIDs);
     return;
   }
 
@@ -1003,12 +1016,7 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
-  if (const auto *ArrayAssign =
-          dynamic_cast<const ArrayAssignExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(ArrayAssign->getIndex(), NodeIDs);
-    CollectAllNodeIDsInternal(ArrayAssign->getRHS(), NodeIDs);
-    return;
-  }
+
 
   if (const auto *MethodCall = dynamic_cast<const MethodCallExprAST *>(Node)) {
     CollectAllNodeIDsInternal(MethodCall->getBase(), NodeIDs);
@@ -1019,9 +1027,12 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
-  if (const auto *StructDecl = dynamic_cast<const StructDeclExprAST *>(Node)) {
-    return; // No sub-expressions
+  if (const auto *ArrayLit = dynamic_cast<const ArrayLiteralExprAST *>(Node)) {
+    for (const auto &Elem : ArrayLit->getElements())
+      CollectAllNodeIDsInternal(Elem.get(), NodeIDs);
+    return;
   }
+
 
   if (const auto *StructInit = dynamic_cast<const StructInitExprAST *>(Node)) {
     for (const auto &[FieldName, Val] : StructInit->getNamedFields())
@@ -1035,13 +1046,13 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
-  if (dynamic_cast<const ArrayLengthExprAST *>(Node) ||
-      dynamic_cast<const BreakExprAST *>(Node) ||
+  if (dynamic_cast<const BreakExprAST *>(Node) ||
       dynamic_cast<const ContinueExprAST *>(Node) ||
       dynamic_cast<const NumberExprAST *>(Node) ||
       dynamic_cast<const BoolExprAST *>(Node) ||
       dynamic_cast<const StringExprAST *>(Node) ||
       dynamic_cast<const VariableExprAST *>(Node) ||
+      dynamic_cast<const StructDeclExprAST *>(Node) ||
       dynamic_cast<const SizeOfExprAST *>(Node)) {
     return;
   }
@@ -1138,15 +1149,38 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
     return ChangedIDs;
   }
 
+  if (auto *OrigComp =
+          dynamic_cast<const CompoundAssignmentExprAST *>(OriginalAST)) {
+    auto *ModComp =
+        dynamic_cast<const CompoundAssignmentExprAST *>(ModifiedAST);
+    if (OrigComp->getOpcode() != ModComp->getOpcode()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    CollectChangedNodeIDsInternal(OrigComp->getLHS(), ModComp->getLHS(),
+                                  ChangedIDs);
+    CollectChangedNodeIDsInternal(OrigComp->getRHS(), ModComp->getRHS(),
+                                  ChangedIDs);
+    return ChangedIDs;
+  }
+
+  if (auto *OrigPost = dynamic_cast<const PostfixExprAST *>(OriginalAST)) {
+    auto *ModPost = dynamic_cast<const PostfixExprAST *>(ModifiedAST);
+    if (OrigPost->getOpcode() != ModPost->getOpcode()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    CollectChangedNodeIDsInternal(OrigPost->getOperand(), ModPost->getOperand(),
+                                  ChangedIDs);
+    return ChangedIDs;
+  }
+
   // BinaryExprAST: Compare operator and recursively diff children
   if (auto *OrigBin = dynamic_cast<const BinaryExprAST *>(OriginalAST)) {
     auto *ModBin = dynamic_cast<const BinaryExprAST *>(ModifiedAST);
-    bool nodeChanged = false;
-
     if (OrigBin->getOp() != ModBin->getOp()) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
-      nodeChanged = true;
     }
 
     // Recursively diff children
@@ -1183,20 +1217,19 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
   if (auto *OrigDecl = dynamic_cast<const VarDeclExprAST *>(OriginalAST)) {
     auto *ModDecl = dynamic_cast<const VarDeclExprAST *>(ModifiedAST);
     if (OrigDecl->getName() != ModDecl->getName() ||
-        OrigDecl->getType() != ModDecl->getType()) {
+        !OrigDecl->getType()->isEquivalent(ModDecl->getType())) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
     }
-    // The initializer might be different
-    // Can't directly access it, so traverse as children
-    // This is handled implicitly by the type check above
+    CollectChangedNodeIDsInternal(OrigDecl->getInitializer(),
+                                  ModDecl->getInitializer(), ChangedIDs);
     return ChangedIDs;
   }
 
   // CastExprAST: Compare destination type and recursively diff operand
   if (auto *OrigCast = dynamic_cast<const CastExprAST *>(OriginalAST)) {
     auto *ModCast = dynamic_cast<const CastExprAST *>(ModifiedAST);
-    if (OrigCast->getDestType() != ModCast->getDestType()) {
+    if (!OrigCast->getDestType()->isEquivalent(ModCast->getDestType())) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
     }
@@ -1302,12 +1335,25 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
   // FuncDefExprAST: Compare signature and recursively diff body
   if (auto *OrigFunc = dynamic_cast<const FuncDefExprAST *>(OriginalAST)) {
     auto *ModFunc = dynamic_cast<const FuncDefExprAST *>(ModifiedAST);
+    bool signatureChanged = false;
     if (OrigFunc->getName() != ModFunc->getName() ||
-        OrigFunc->getReturnType() != ModFunc->getReturnType()) {
+        !OrigFunc->getReturnType()->isEquivalent(ModFunc->getReturnType())) {
+      signatureChanged = true;
+    } else if (OrigFunc->getParams().size() != ModFunc->getParams().size()) {
+      signatureChanged = true;
+    } else {
+      for (size_t i = 0; i < OrigFunc->getParams().size(); ++i) {
+        if (OrigFunc->getParams()[i].Name != ModFunc->getParams()[i].Name ||
+            !OrigFunc->getParams()[i].Type->isEquivalent(ModFunc->getParams()[i].Type.get())) {
+          signatureChanged = true;
+          break;
+        }
+      }
+    }
+    if (signatureChanged) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
     }
-    // Note: Parameter comparison would require getParams() accessor
     CollectChangedNodeIDsInternal(OrigFunc->getBody(), ModFunc->getBody(),
                                   ChangedIDs);
     return ChangedIDs;
@@ -1334,7 +1380,7 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
   if (auto *OrigArr = dynamic_cast<const ArrayDeclExprAST *>(OriginalAST)) {
     auto *ModArr = dynamic_cast<const ArrayDeclExprAST *>(ModifiedAST);
     if (OrigArr->getName() != ModArr->getName() ||
-        OrigArr->getElementType() != ModArr->getElementType() ||
+        !OrigArr->getElementType()->isEquivalent(ModArr->getElementType()) ||
         OrigArr->getSize() != ModArr->getSize()) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
@@ -1351,6 +1397,7 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
                                       ChangedIDs);
       }
     }
+    CollectChangedNodeIDsInternal(OrigArr->getInitExpr().get(), ModArr->getInitExpr().get(), ChangedIDs);
     return ChangedIDs;
   }
 
@@ -1365,36 +1412,125 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
     return ChangedIDs;
   }
 
-  // ArrayAssignExprAST: Compare name and recursively diff index and RHS
-  if (auto *OrigAssign =
-          dynamic_cast<const ArrayAssignExprAST *>(OriginalAST)) {
-    auto *ModAssign = dynamic_cast<const ArrayAssignExprAST *>(ModifiedAST);
-    if (OrigAssign->getName() != ModAssign->getName()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
-    CollectChangedNodeIDsInternal(OrigAssign->getIndex(), ModAssign->getIndex(),
-                                  ChangedIDs);
-    CollectChangedNodeIDsInternal(OrigAssign->getRHS(), ModAssign->getRHS(),
-                                  ChangedIDs);
-    return ChangedIDs;
-  }
 
-  // ArrayLengthExprAST: Compare name
-  if (auto *OrigLen = dynamic_cast<const ArrayLengthExprAST *>(OriginalAST)) {
-    auto *ModLen = dynamic_cast<const ArrayLengthExprAST *>(ModifiedAST);
-    if (OrigLen->getName() != ModLen->getName()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
-    return ChangedIDs;
-  }
 
   // SizeOfExprAST: Compare type
   if (auto *OrigSizeOf = dynamic_cast<const SizeOfExprAST *>(OriginalAST)) {
     auto *ModSizeOf = dynamic_cast<const SizeOfExprAST *>(ModifiedAST);
     if (!OrigSizeOf->getTypeArg()->isEquivalent(
             ModSizeOf->getTypeArg().get())) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    return ChangedIDs;
+  }
+
+  // ArrayLiteralExprAST
+  if (auto *OrigArrLit = dynamic_cast<const ArrayLiteralExprAST *>(OriginalAST)) {
+    auto *ModArrLit = dynamic_cast<const ArrayLiteralExprAST *>(ModifiedAST);
+    const auto &OrigElems = OrigArrLit->getElements();
+    const auto &ModElems = ModArrLit->getElements();
+    if (OrigElems.size() != ModElems.size()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    } else {
+      for (size_t i = 0; i < OrigElems.size(); ++i) {
+        CollectChangedNodeIDsInternal(OrigElems[i].get(), ModElems[i].get(), ChangedIDs);
+      }
+    }
+    return ChangedIDs;
+  }
+
+  // StructDeclExprAST
+  if (auto *OrigStructDecl = dynamic_cast<const StructDeclExprAST *>(OriginalAST)) {
+    auto *ModStructDecl = dynamic_cast<const StructDeclExprAST *>(ModifiedAST);
+    bool structChanged = false;
+    if (OrigStructDecl->getName() != ModStructDecl->getName() ||
+        OrigStructDecl->getTypeParams() != ModStructDecl->getTypeParams() ||
+        OrigStructDecl->getFields().size() != ModStructDecl->getFields().size()) {
+      structChanged = true;
+    } else {
+      const auto &OrigFields = OrigStructDecl->getFields();
+      const auto &ModFields = ModStructDecl->getFields();
+      for (size_t i = 0; i < OrigFields.size(); ++i) {
+        if (OrigFields[i].Name != ModFields[i].Name ||
+            !OrigFields[i].Type->isEquivalent(ModFields[i].Type.get())) {
+          structChanged = true;
+          break;
+        }
+      }
+    }
+    if (structChanged) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    return ChangedIDs;
+  }
+
+  // StructInitExprAST
+  if (auto *OrigStructInit = dynamic_cast<const StructInitExprAST *>(OriginalAST)) {
+    auto *ModStructInit = dynamic_cast<const StructInitExprAST *>(ModifiedAST);
+    if (OrigStructInit->getName() != ModStructInit->getName() ||
+        OrigStructInit->getNamedFields().size() != ModStructInit->getNamedFields().size()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    } else {
+      const auto &OrigFields = OrigStructInit->getNamedFields();
+      const auto &ModFields = ModStructInit->getNamedFields();
+      for (size_t i = 0; i < OrigFields.size(); ++i) {
+        if (OrigFields[i].first != ModFields[i].first) {
+          ChangedIDs.insert(OriginalAST->getNodeID());
+          ChangedIDs.insert(ModifiedAST->getNodeID());
+        }
+        CollectChangedNodeIDsInternal(OrigFields[i].second.get(), ModFields[i].second.get(), ChangedIDs);
+      }
+    }
+    return ChangedIDs;
+  }
+
+  // FieldAccessExprAST
+  if (auto *OrigFieldAccess = dynamic_cast<const FieldAccessExprAST *>(OriginalAST)) {
+    auto *ModFieldAccess = dynamic_cast<const FieldAccessExprAST *>(ModifiedAST);
+    if (OrigFieldAccess->getFieldName() != ModFieldAccess->getFieldName()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    CollectChangedNodeIDsInternal(OrigFieldAccess->getBase(), ModFieldAccess->getBase(), ChangedIDs);
+    return ChangedIDs;
+  }
+
+  // ModuleImportExprAST
+  if (auto *OrigImport = dynamic_cast<const ModuleImportExprAST *>(OriginalAST)) {
+    auto *ModImport = dynamic_cast<const ModuleImportExprAST *>(ModifiedAST);
+    if (OrigImport->getModuleName() != ModImport->getModuleName()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    CollectChangedNodeIDsInternal(OrigImport->getBody(), ModImport->getBody(), ChangedIDs);
+    return ChangedIDs;
+  }
+
+  // ExternFuncDeclExprAST
+  if (auto *OrigExtern = dynamic_cast<const ExternFuncDeclExprAST *>(OriginalAST)) {
+    auto *ModExtern = dynamic_cast<const ExternFuncDeclExprAST *>(ModifiedAST);
+    bool signatureChanged = false;
+    if (OrigExtern->getName() != ModExtern->getName() ||
+        OrigExtern->isVarArg() != ModExtern->isVarArg() ||
+        OrigExtern->getLibName() != ModExtern->getLibName() ||
+        !OrigExtern->getReturnType()->isEquivalent(ModExtern->getReturnType().get())) {
+        signatureChanged = true;
+    } else if (OrigExtern->getParams().size() != ModExtern->getParams().size()) {
+        signatureChanged = true;
+    } else {
+        for (size_t i = 0; i < OrigExtern->getParams().size(); ++i) {
+            if (OrigExtern->getParams()[i].first != ModExtern->getParams()[i].first ||
+                !OrigExtern->getParams()[i].second->isEquivalent(ModExtern->getParams()[i].second.get())) {
+                signatureChanged = true;
+                break;
+            }
+        }
+    }
+    if (signatureChanged) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
     }

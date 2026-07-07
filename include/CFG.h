@@ -168,5 +168,6 @@ private:
 
 // Global CFG storage (for diagnostics during compilation)
 extern std::vector<std::unique_ptr<CFG>> GlobalCFGs;
+void ClearGlobalCFGs();
 
 #endif

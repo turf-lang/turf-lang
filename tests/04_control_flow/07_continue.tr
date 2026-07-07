@@ -6,7 +6,7 @@ fn main(): int {
         i = i + 1;
         if i % 2 == 0 {
             continue;
-        } else {}
+        }
         sum = sum + i;
     }
     assert(sum == 25, "");
@@ -15,7 +15,7 @@ fn main(): int {
     for j in 1..10 step j += 1 {
         if j % 2 == 0 {
             continue;
-        } else {}
+        }
         for_sum = for_sum + j;
     }
     assert(for_sum == 25, "");
