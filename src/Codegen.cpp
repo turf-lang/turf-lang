@@ -495,6 +495,32 @@ static const TurfType *getExprType(const ExprAST *E) {
   if (auto *ArrLit = dynamic_cast<const ArrayLiteralExprAST *>(E)) {
     return ArrLit->CachedType.get();
   }
+  // Address-of: &expr produces a pointer to the operand's type.
+  // We cache one TurfPointerType per call site inside a static map keyed by
+  // the pointee's mangled name so the returned pointer stays valid for the
+  // caller's lifetime without leaking.
+  if (auto *AddrOf = dynamic_cast<const AddressOfExprAST *>(E)) {
+    const TurfType *InnerTy = getExprType(AddrOf->getOperand());
+    if (!InnerTy) return nullptr;
+    static std::map<std::string, TurfTypePtr> AddrOfTypeCache;
+    std::string Key = InnerTy->getMangledName();
+    auto It = AddrOfTypeCache.find(Key);
+    if (It == AddrOfTypeCache.end()) {
+      // Build a TurfPointerType wrapping a shared_ptr to a copy of InnerTy.
+      // We cannot hold a bare pointer because InnerTy may be a temporary.
+      TurfTypePtr InnerCopy;
+      // Attempt cheap reconstruction from known primitive names first.
+      if (InnerTy->isNamed("int"))    InnerCopy = TurfInt();
+      else if (InnerTy->isNamed("double")) InnerCopy = TurfDouble();
+      else if (InnerTy->isNamed("bool"))   InnerCopy = TurfBool();
+      else {
+        // For structs / named types, wrap the raw pointer with a no-op deleter.
+        InnerCopy = TurfTypePtr(const_cast<TurfType*>(InnerTy), [](TurfType*){});
+      }
+      AddrOfTypeCache[Key] = std::make_shared<TurfPointerType>(std::move(InnerCopy));
+    }
+    return AddrOfTypeCache[Key].get();
+  }
   return nullptr;
 }
 
@@ -1319,6 +1345,19 @@ Value *UnaryExprAST::codegen() {
   }
 }
 
+// Address-of: &expr — returns the lvalue address (alloca ptr) of the operand.
+// The operand must be addressable (variable, field, or array element).
+Value *AddressOfExprAST::codegen() {
+  Value *LVal = Operand->codegenLValue();
+  if (!LVal) {
+    LogErrorAt(Loc, "Cannot take the address of a non-addressable expression."
+                    "\n  Hint: Only variables, struct fields, and array elements"
+                    " are addressable.");
+    return nullptr;
+  }
+  return LVal;
+}
+
 Value *BlockExprAST::codegen() {
   // Enter new scope
   if (GlobalSymbolTable) {
@@ -1512,7 +1551,10 @@ Value *CastExprAST::codegen() {
   }
 
   // pointer -> pointer : bitcast
-  if ((ExprTy && dynamic_cast<const TurfPointerType*>(ExprTy)) && dynamic_cast<const TurfPointerType*>(DestType.get())) {
+  bool isSrcPtr = (ExprTy && dynamic_cast<const TurfPointerType*>(ExprTy)) || SrcName == "ptr";
+  bool isDstPtr = dynamic_cast<const TurfPointerType*>(DestType.get()) || DstName == "ptr";
+  
+  if (isSrcPtr && isDstPtr) {
     return Builder->CreateBitCast(Val, getLLVMType(DestType.get()), "ptrcast");
   }
 
@@ -2640,6 +2682,14 @@ Value *MethodCallExprAST::codegen() {
   }
 
   std::string StructNameStr;
+  // Resolve NamedType → TurfStructType, same as FieldAccessExprAST::codegen().
+  // Without this, `expr.method()` where expr has type NamedType("T") will not
+  // find the struct name and falls through to the fatal error below.
+  if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
+    if (GlobalSymbolTable)
+      if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+        BaseTy = R.get();
+  }
   if (auto *StructTy = dynamic_cast<const TurfStructType *>(BaseTy)) {
     StructNameStr = StructTy->getName();
   } else if (auto *GenTy = dynamic_cast<const GenericType *>(BaseTy)) {
@@ -2723,12 +2773,50 @@ Value *MethodCallExprAST::codegen() {
   }
 
   // TypeChecker should have rejected a method call on an unsupported type.
+  std::cerr << "BaseTy: " << (BaseTy ? BaseTy->getName() : "null") << "\n";
   llvm::report_fatal_error(
       "Internal error: method call on unsupported type. This is a compiler bug.");
   return nullptr;
 }
 
 Value *StructDeclExprAST::codegen() {
+  // ── Fix for issue #176: Two-step struct creation ──────────────────────────
+  // Step 1: Create (or reuse) an opaque StructType and register it in
+  // LLVMTypeCache *before* evaluating any field types.  This ensures that a
+  // self-referential field like `next: Node*` can call getLLVMType("Node")
+  // and find the opaque stub in the cache rather than triggering infinite
+  // recursion or creating a duplicate struct (which LLVM would rename to
+  // "Node.0", breaking all previously-built call/alloca sites).
+  StructType *ST = nullptr;
+  auto CacheIt = LLVMTypeCache.find(Name);
+  if (CacheIt != LLVMTypeCache.end()) {
+    // An opaque forward-declaration was already inserted (e.g., because a
+    // NamedType("Node") appeared in another struct or function signature
+    // before this decl ran).  Reuse it so the single LLVM type identity is
+    // preserved everywhere it was referenced.
+    if (auto *Existing = dyn_cast<StructType>(CacheIt->second)) {
+      if (Existing->isOpaque())
+        ST = Existing;
+    }
+  }
+  if (!ST) {
+    // Brand-new opaque struct — no body yet.
+    ST = StructType::create(*TheContext, Name);
+    if (!ST) {
+      LogErrorAt(Loc, "Failed to create LLVM StructType for '" + Name + "'");
+      return nullptr;
+    }
+  }
+
+  // Register immediately so that any recursive getLLVMType call (e.g., for a
+  // Node* field) finds the opaque stub instead of recursing back here.
+  LLVMTypeCache[Name] = ST;
+
+  // Step 2: Evaluate all field LLVM types now that the stub is in the cache.
+  // Self-referential pointer fields (TurfPointerType) lower to opaque ptr
+  // unconditionally, so they never need to re-enter this codegen path.
+  // Direct struct-valued fields (unusual but possible for non-recursive types)
+  // will find the opaque stub above and use it.
   std::vector<Type *> LLVMFieldTypes;
   for (const auto &Field : Fields) {
     Type *LLVMType = getLLVMType(Field.Type.get());
@@ -2739,29 +2827,8 @@ Value *StructDeclExprAST::codegen() {
     LLVMFieldTypes.push_back(LLVMType);
   }
 
-  // If an opaque struct with this name already exists in the cache (created by
-  // getLLVMType when a NamedType("Matrix") was resolved before this decl ran),
-  // set its body rather than creating a second struct (which LLVM would name
-  // "Matrix.0", causing a type mismatch at call sites).
-  StructType *ST = nullptr;
-  auto CacheIt = LLVMTypeCache.find(Name);
-  if (CacheIt != LLVMTypeCache.end()) {
-    if (auto *Existing = dyn_cast<StructType>(CacheIt->second)) {
-      if (Existing->isOpaque()) {
-        Existing->setBody(LLVMFieldTypes);
-        ST = Existing;
-      }
-    }
-  }
-  if (!ST) {
-    ST = StructType::create(*TheContext, LLVMFieldTypes, Name);
-    if (!ST) {
-      LogErrorAt(Loc, "Failed to create LLVM StructType for '" + Name + "'");
-      return nullptr;
-    }
-  }
-
-  LLVMTypeCache[Name] = ST;
+  // Step 3: Fill in the body now that all field types are resolved.
+  ST->setBody(LLVMFieldTypes);
 
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }
@@ -2999,6 +3066,14 @@ Value *FieldAccessExprAST::codegen() {
     BaseType = PtrTy->getPointee().get();
   }
 
+  // Resolve NamedType base to TurfStructType, mirroring what codegenLValue()
+  // already does. Without this, `p: Node*` has pointee NamedType("Node") —
+  // not TurfStructType — and the cast below would fail.
+  if (auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
+    if (GlobalSymbolTable)
+      if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+        BaseType = R.get();
+  }
 
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
   if (!SType) {

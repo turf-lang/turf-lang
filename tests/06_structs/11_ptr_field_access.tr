@@ -1,0 +1,25 @@
+struct Node {
+    val: int,
+    next: Node*
+}
+
+fn get_val(p: Node*): int {
+    return p.val;
+}
+
+fn get_next_val(p: Node*): int {
+    return p.val;
+}
+
+fn main(): int {
+    mut n: Node = Node { val: 99, next: null };
+    mut m: Node = Node { val: 42, next: null };
+
+    assert(get_val(&n) == 99, "FAIL: cannot read field through typed pointer param");
+    assert(get_val(&m) == 42, "FAIL: second ptr param read");
+
+    n.next = &m;
+    assert(get_next_val(n.next) == 42, "FAIL: chained pointer field read");
+
+    return 0;
+}

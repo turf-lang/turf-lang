@@ -1,0 +1,23 @@
+extern fn malloc(size: int): ptr;
+extern fn free(p: ptr): void;
+
+struct Node {
+    val: int,
+    next: Node*
+}
+
+fn main(): int {
+    // Allocate exactly enough bytes for a Node using sizeof
+    mut p: Node* = malloc(sizeof(Node)) to Node*;
+    
+    // Test writing to heap-allocated memory
+    p.val = 42;
+    p.next = null;
+    
+    // Test reading
+    assert(p.val == 42, "FAIL: heap struct val read");
+    
+    // Cleanup
+    free(p to ptr);
+    return 0;
+}

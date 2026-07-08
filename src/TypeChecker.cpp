@@ -224,6 +224,13 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
       return TurfBool();
     if (LhsTy->isNumeric() && RhsTy->isNumeric())
       return TurfBool();
+    
+    // Allow comparing pointers to null
+    bool isLhsPtrOrNull = dynamic_cast<const TurfPointerType*>(LhsTy) || dynamic_cast<const TurfNullType*>(LhsTy);
+    bool isRhsPtrOrNull = dynamic_cast<const TurfPointerType*>(RhsTy) || dynamic_cast<const TurfNullType*>(RhsTy);
+    if (isLhsPtrOrNull && isRhsPtrOrNull)
+      return TurfBool();
+
     reportError(Loc, "Cannot compare '" + LhsTy->getName() + "' with '" +
                          RhsTy->getName() + "'.");
     return TurfBool(); // continue with bool to limit cascade errors
@@ -415,6 +422,20 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
 
   // Unknown unary op: propagate operand type
   setType(&Node, OperandTy);
+}
+
+void TypeChecker::visitAddressOf(AddressOfExprAST &Node) {
+  // Recurse into the operand so its type is inferred first.
+  if (Node.getOperand())
+    const_cast<ExprAST *>(Node.getOperand())->accept(*this);
+
+  TurfTypePtr OperandTy = getType(Node.getOperand());
+  if (!OperandTy) {
+    setType(&Node, nullptr);
+    return;
+  }
+  // &expr produces a TurfPointerType wrapping the operand's type.
+  setType(&Node, std::make_shared<TurfPointerType>(OperandTy));
 }
 
 void TypeChecker::visitAssignment(AssignmentExprAST &Node) {

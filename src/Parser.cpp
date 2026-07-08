@@ -455,7 +455,11 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     SourceLocation ElseifLoc = CurLoc;
     getNextToken(); // eat 'elseif'
 
-    auto ElseifCond = ParseExpression();
+    std::unique_ptr<ExprAST> ElseifCond;
+    {
+      NoStructInitGuard Guard;
+      ElseifCond = ParseExpression();
+    }
     if (!ElseifCond)
       return nullptr;
 
@@ -897,6 +901,18 @@ std::unique_ptr<ExprAST> ParseUnary() {
                                                std::move(RHS));
   }
 
+  // Address-of: &expr — takes the address of an lvalue.
+  // The lexer already returns '&' as ASCII for a single ampersand;
+  // '&&' is tokenised as TOK_AND and never reaches here.
+  if (CurTok == '&') {
+    SourceLocation Loc = CurLoc;
+    getNextToken(); // eat '&'
+    auto Operand = ParseUnary();
+    if (!Operand)
+      return nullptr;
+    return std::make_unique<AddressOfExprAST>(Loc, std::move(Operand));
+  }
+
   // If the current token is not an operator that handles unary (like '-'),
   // then it must be a primary expression.
   if (CurTok != '-')
@@ -910,6 +926,7 @@ std::unique_ptr<ExprAST> ParseUnary() {
 
   return nullptr;
 }
+
 
 
 

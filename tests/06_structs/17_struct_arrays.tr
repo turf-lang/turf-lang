@@ -1,0 +1,26 @@
+struct Point {
+    x: int,
+    y: int
+}
+
+struct Polygon {
+    points: Point[3]
+}
+
+fn main(): int {
+    // Test array of structs
+    mut grid: Point[2] = [Point { x: 0, y: 0 }, Point { x: 0, y: 0 }];
+    grid[0] = Point { x: 1, y: 2 };
+    grid[1] = Point { x: 3, y: 4 };
+
+    assert(grid[0].x == 1, "FAIL: array of structs read index 0");
+    assert(grid[1].y == 4, "FAIL: array of structs read index 1");
+
+    // Test struct containing array (using array literal in struct init)
+    mut poly: Polygon = Polygon { points: [ Point {x: 10, y: 11}, Point {x: 20, y: 21}, Point {x: 30, y: 31} ] };
+    
+    assert(poly.points[0].x == 10, "FAIL: struct of arrays read [0].x");
+    assert(poly.points[2].y == 31, "FAIL: struct of arrays read [2].y");
+
+    return 0;
+}

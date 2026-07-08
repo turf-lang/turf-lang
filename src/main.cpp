@@ -58,7 +58,7 @@ std::string CompilerExecutablePath;
 // CLI helpers
 struct CompilerOptions {
   std::string InputFile;
-  std::string OutputName = "program"; // default output binary name
+  std::string OutputName;             // default derived from input later
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
@@ -126,6 +126,15 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   if (opts.InputFile.size() < 3 || opts.InputFile.substr(opts.InputFile.size() - 3) != ".tr") {
     std::cerr << "Error: Input file must have a '.tr' extension (got: " << opts.InputFile << ").\n";
     std::exit(1);
+  }
+
+  if (opts.OutputName.empty()) {
+    size_t lastSlash = opts.InputFile.find_last_of("/\\");
+    std::string base = (lastSlash == std::string::npos) ? opts.InputFile : opts.InputFile.substr(lastSlash + 1);
+    opts.OutputName = base.substr(0, base.size() - 3);
+    if (opts.OutputName.empty()) {
+      opts.OutputName = "program"; // fallback
+    }
   }
 
   return opts;

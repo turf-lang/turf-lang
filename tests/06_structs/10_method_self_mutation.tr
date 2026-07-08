@@ -1,0 +1,23 @@
+struct Node {
+    val: int,
+    next: Node*
+}
+
+fn Node.scale(factor: int): void {
+    self.val = self.val * factor;
+}
+
+fn Node.add(delta: int): void {
+    self.val = self.val + delta;
+}
+
+fn main(): int {
+    mut n: Node = Node { val: 20, next: null };
+    n.scale(3);
+    assert(n.val == 60, "FAIL: self.val mutation not visible after scale()");
+
+    n.add(10);
+    assert(n.val == 70, "FAIL: self.val mutation not visible after add()");
+
+    return 0;
+}
