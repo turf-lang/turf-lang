@@ -272,9 +272,33 @@ public:
     return std::make_unique<UnaryExprAST>(static_cast<char>(Opcode),
                                           CloneExprAST(Operand.get()));
   }
+}; // UnaryExprAST
+
+// Address-of expression: &expr — evaluates to a pointer to the operand's
+// storage location. The operand must be an lvalue (named variable or field).
+class AddressOfExprAST : public ExprAST {
+  SourceLocation Loc;
+  std::unique_ptr<ExprAST> Operand;
+
+public:
+  AddressOfExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Operand)
+      : Loc(Loc), Operand(std::move(Operand)) {}
+
+  SourceLocation getLoc() const { return Loc; }
+  const ExprAST *getOperand() const { return Operand.get(); }
+
+  llvm::Value *codegen() override;
+  // &expr is never itself an lvalue.
+  llvm::Value *codegenLValue() override { return nullptr; }
+  // Dispatch to the dedicated visitAddressOf hook so the TypeChecker and
+  // Resolver can handle &expr as distinct from plain unary negation.
+  void accept(ASTVisitor &V) override { V.visitAddressOf(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<AddressOfExprAST>(Loc, CloneExprAST(Operand.get()));
+  }
 };
 
-// Block Expression, represents { expr1; expr2; ... }
+
 class BlockExprAST : public ExprAST {
   std::vector<std::unique_ptr<ExprAST>> Expressions;
 

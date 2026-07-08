@@ -248,6 +248,11 @@ void Resolver::visitUnary(UnaryExprAST &Node) {
   visitChild(Node.getOperand());
 }
 
+void Resolver::visitAddressOf(AddressOfExprAST &Node) {
+  // Recurse so the operand variable is resolved before codegen reads it.
+  visitChild(Node.getOperand());
+}
+
 void Resolver::visitAssignment(AssignmentExprAST &Node) {
   // Check RHS first, then LHS (which may be a variable that must exist).
   visitChild(Node.getRHS());

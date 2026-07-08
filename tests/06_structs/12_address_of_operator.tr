@@ -1,0 +1,29 @@
+struct Node {
+    val: int,
+    next: Node*
+}
+
+fn get_val(p: Node*): int {
+    return p.val;
+}
+
+fn main(): int {
+    mut n1: Node = Node { val: 1, next: null };
+    mut n2: Node = Node { val: 2, next: null };
+    mut n3: Node = Node { val: 3, next: null };
+
+    // Chain: n1 → n2 → n3
+    n2.next = &n3;
+    n1.next = &n2;
+
+    // Traverse: read fields through pointer parameters
+    assert(get_val(&n1) == 1, "FAIL: n1.val should be 1");
+    assert(get_val(&n2) == 2, "FAIL: n2.val should be 2");
+    assert(get_val(&n3) == 3, "FAIL: n3.val should be 3");
+
+    // Follow .next chain to read n2's value through n1.next
+    assert(get_val(n1.next) == 2, "FAIL: n1.next.val should be 2");
+    assert(get_val(n2.next) == 3, "FAIL: n2.next.val should be 3");
+
+    return 0;
+}

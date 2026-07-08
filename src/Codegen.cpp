@@ -495,6 +495,32 @@ static const TurfType *getExprType(const ExprAST *E) {
   if (auto *ArrLit = dynamic_cast<const ArrayLiteralExprAST *>(E)) {
     return ArrLit->CachedType.get();
   }
+  // Address-of: &expr produces a pointer to the operand's type.
+  // We cache one TurfPointerType per call site inside a static map keyed by
+  // the pointee's mangled name so the returned pointer stays valid for the
+  // caller's lifetime without leaking.
+  if (auto *AddrOf = dynamic_cast<const AddressOfExprAST *>(E)) {
+    const TurfType *InnerTy = getExprType(AddrOf->getOperand());
+    if (!InnerTy) return nullptr;
+    static std::map<std::string, TurfTypePtr> AddrOfTypeCache;
+    std::string Key = InnerTy->getMangledName();
+    auto It = AddrOfTypeCache.find(Key);
+    if (It == AddrOfTypeCache.end()) {
+      // Build a TurfPointerType wrapping a shared_ptr to a copy of InnerTy.
+      // We cannot hold a bare pointer because InnerTy may be a temporary.
+      TurfTypePtr InnerCopy;
+      // Attempt cheap reconstruction from known primitive names first.
+      if (InnerTy->isNamed("int"))    InnerCopy = TurfInt();
+      else if (InnerTy->isNamed("double")) InnerCopy = TurfDouble();
+      else if (InnerTy->isNamed("bool"))   InnerCopy = TurfBool();
+      else {
+        // For structs / named types, wrap the raw pointer with a no-op deleter.
+        InnerCopy = TurfTypePtr(const_cast<TurfType*>(InnerTy), [](TurfType*){});
+      }
+      AddrOfTypeCache[Key] = std::make_shared<TurfPointerType>(std::move(InnerCopy));
+    }
+    return AddrOfTypeCache[Key].get();
+  }
   return nullptr;
 }
 
@@ -1317,6 +1343,19 @@ Value *UnaryExprAST::codegen() {
     llvm::report_fatal_error("Internal error: Unknown unary operator");
     return nullptr;
   }
+}
+
+// Address-of: &expr — returns the lvalue address (alloca ptr) of the operand.
+// The operand must be addressable (variable, field, or array element).
+Value *AddressOfExprAST::codegen() {
+  Value *LVal = Operand->codegenLValue();
+  if (!LVal) {
+    LogErrorAt(Loc, "Cannot take the address of a non-addressable expression."
+                    "\n  Hint: Only variables, struct fields, and array elements"
+                    " are addressable.");
+    return nullptr;
+  }
+  return LVal;
 }
 
 Value *BlockExprAST::codegen() {
@@ -2640,6 +2679,14 @@ Value *MethodCallExprAST::codegen() {
   }
 
   std::string StructNameStr;
+  // Resolve NamedType → TurfStructType, same as FieldAccessExprAST::codegen().
+  // Without this, `expr.method()` where expr has type NamedType("T") will not
+  // find the struct name and falls through to the fatal error below.
+  if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
+    if (GlobalSymbolTable)
+      if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+        BaseTy = R.get();
+  }
   if (auto *StructTy = dynamic_cast<const TurfStructType *>(BaseTy)) {
     StructNameStr = StructTy->getName();
   } else if (auto *GenTy = dynamic_cast<const GenericType *>(BaseTy)) {
@@ -2723,6 +2770,7 @@ Value *MethodCallExprAST::codegen() {
   }
 
   // TypeChecker should have rejected a method call on an unsupported type.
+  std::cerr << "BaseTy: " << (BaseTy ? BaseTy->getName() : "null") << "\n";
   llvm::report_fatal_error(
       "Internal error: method call on unsupported type. This is a compiler bug.");
   return nullptr;
@@ -3015,6 +3063,14 @@ Value *FieldAccessExprAST::codegen() {
     BaseType = PtrTy->getPointee().get();
   }
 
+  // Resolve NamedType base to TurfStructType, mirroring what codegenLValue()
+  // already does. Without this, `p: Node*` has pointee NamedType("Node") —
+  // not TurfStructType — and the cast below would fail.
+  if (auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
+    if (GlobalSymbolTable)
+      if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+        BaseType = R.get();
+  }
 
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
   if (!SType) {

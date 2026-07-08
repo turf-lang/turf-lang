@@ -1,0 +1,66 @@
+// Test: Stress test for structs and self-referential structures
+//
+// This test exercises deep nesting, chaining field access through pointers,
+// and passing structs by value vs pointer in complex nested arrangements.
+
+struct Point {
+    x: int,
+    y: int
+}
+
+struct Rect {
+    top_left: Point,
+    bottom_right: Point
+}
+
+// A tree-like self-referential struct that also holds a pointer to another struct
+struct GraphNode {
+    id: int,
+    left: GraphNode*,
+    right: GraphNode*,
+    data: Rect*
+}
+
+fn area(r: Rect): int {
+    mut width: int = r.bottom_right.x - r.top_left.x;
+    mut height: int = r.bottom_right.y - r.top_left.y;
+    return width * height;
+}
+
+// Recursive function to sum all IDs in the graph
+fn sum_graph(node: GraphNode*): int {
+    if node == null {
+        return 0;
+    }
+    return node.id + sum_graph(node.left) + sum_graph(node.right);
+}
+
+fn main(): int {
+    mut p1: Point = Point { x: 0, y: 0 };
+    mut p2: Point = Point { x: 10, y: 5 };
+    mut r: Rect = Rect { top_left: p1, bottom_right: p2 };
+    
+    assert(area(r) == 50, "FAIL: Rect area calculation");
+
+    mut root: GraphNode = GraphNode { id: 100, left: null, right: null, data: &r };
+    mut left: GraphNode = GraphNode { id: 50, left: null, right: null, data: null };
+    mut right: GraphNode = GraphNode { id: 150, left: null, right: null, data: null };
+    
+    root.left = &left;
+    root.right = &right;
+    
+    // Test recursive structure traversal
+    assert(sum_graph(&root) == 300, "FAIL: Graph tree sum");
+    
+    // Test deep field access through a mix of direct fields and pointer fields
+    // root (GraphNode) -> data (Rect*) -> bottom_right (Point) -> x (int)
+    assert(root.data.bottom_right.x == 10, "FAIL: Deep nested field access x");
+    assert(root.data.bottom_right.y == 5, "FAIL: Deep nested field access y");
+
+    // Modify deep field and verify
+    root.data.bottom_right.x = 20;
+    assert(r.bottom_right.x == 20, "FAIL: Mutation through pointer didn't persist");
+    assert(area(r) == 100, "FAIL: Area didn't update after deep mutation");
+
+    return 0;
+}

@@ -55,6 +55,8 @@ class StructInitExprAST;
 class ModuleImportExprAST;
 class SizeOfExprAST;
 class ExternFuncDeclExprAST;
+class AddressOfExprAST;
+
 
 // ─── ASTVisitor base class ────────────────────────────────────────────────────
 
@@ -94,6 +96,7 @@ public:
   // ── Expressions ───────────────────────────────────────────────────────────
   virtual void visitBinary(BinaryExprAST &Node) {}
   virtual void visitUnary(UnaryExprAST &Node) {}
+  virtual void visitAddressOf(AddressOfExprAST &Node) {}
   virtual void visitAssignment(AssignmentExprAST &Node) {}
   virtual void visitCompoundAssignment(CompoundAssignmentExprAST &Node) {}
   virtual void visitPostfixExpr(PostfixExprAST &Node) {}

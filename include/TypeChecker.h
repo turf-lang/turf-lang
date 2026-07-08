@@ -174,6 +174,7 @@ public:
   // ── Expressions ───────────────────────────────────────────────────────────
   void visitBinary(BinaryExprAST &Node) override;
   void visitUnary(UnaryExprAST &Node) override;
+  void visitAddressOf(AddressOfExprAST &Node) override;
   void visitAssignment(AssignmentExprAST &Node) override;
   void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override;
   void visitPostfixExpr(PostfixExprAST &Node) override;
