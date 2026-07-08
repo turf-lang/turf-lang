@@ -1551,7 +1551,10 @@ Value *CastExprAST::codegen() {
   }
 
   // pointer -> pointer : bitcast
-  if ((ExprTy && dynamic_cast<const TurfPointerType*>(ExprTy)) && dynamic_cast<const TurfPointerType*>(DestType.get())) {
+  bool isSrcPtr = (ExprTy && dynamic_cast<const TurfPointerType*>(ExprTy)) || SrcName == "ptr";
+  bool isDstPtr = dynamic_cast<const TurfPointerType*>(DestType.get()) || DstName == "ptr";
+  
+  if (isSrcPtr && isDstPtr) {
     return Builder->CreateBitCast(Val, getLLVMType(DestType.get()), "ptrcast");
   }
 

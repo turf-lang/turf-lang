@@ -1,0 +1,15 @@
+struct Point {
+    x: int,
+    y: int
+}
+
+fn make_point(a: int, b: int): Point {
+    return Point { x: a, y: b };
+}
+
+fn main(): int {
+    // Chaining field access directly off the r-value returned by a function
+    assert(make_point(10, 20).x == 10, "FAIL: chained r-value field access x");
+    assert(make_point(10, 20).y == 20, "FAIL: chained r-value field access y");
+    return 0;
+}
