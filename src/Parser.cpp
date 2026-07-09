@@ -137,6 +137,9 @@ std::unique_ptr<ExprAST> ParseBlock();
 std::unique_ptr<ExprAST> ParseWhileExpr();
 std::unique_ptr<ExprAST> ParseForExpr();
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
+std::unique_ptr<ExprAST> ParseVarDecl();
+std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
+                                          TurfTypePtr Type);
 std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName);
@@ -145,6 +148,9 @@ std::unique_ptr<ExprAST> ParseImport();
 std::unique_ptr<ExprAST> ParseReturnExpr();
 std::unique_ptr<ExprAST> ParseStructDecl();
 std::unique_ptr<ExprAST> ParseExternDecl();
+// NOTE: ParseListDecl removed — list<T> declarations go through
+// ParseVarDeclBody
+//       via the unified ParseType() path, same as int/double/bool/string.
 
 // ParseType: recursively parse a type expression from the token stream.
 // Handles primitives, void, generics like list<int>, and arrays like int[5].
@@ -243,7 +249,11 @@ static TurfTypePtr ParseType() {
     Base = TurfString();
   else if (BaseName == "void")
     Base = TurfVoid();
-  else {
+  else if (BaseName == "List") {
+    // "list" without <T> is an error — give a helpful message
+    SyntaxError(CurLoc, "Expected '<' after 'list' — e.g. list<int>").raise();
+    return nullptr;
+  } else {
     Base = std::make_shared<NamedType>(BaseName);
   }
 
@@ -1123,62 +1133,133 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   TurfTypePtr Type = ParseType();
   if (!Type) return nullptr;
 
-  std::unique_ptr<ExprAST> InitExpr = nullptr;
-  std::vector<std::unique_ptr<ExprAST>> InitList;
+  if (CurTok != TOK_ASSIGN) {
+    LogErrorAt(CurLoc, "Expected '=' after variable type.");
+    return nullptr;
+  }
+  getNextToken();
 
-  if (CurTok == TOK_ASSIGN) {
-    getNextToken();
+  if (isArrayType(Type.get())) {
+    const auto *AT = dynamic_cast<const ::ArrayType *>(Type.get());
+    int ArraySize = AT ? AT->getSize() : -1;
+    TurfTypePtr ElemType = AT ? AT->getElementTypePtr() : Type;
 
-    if (isArrayType(Type.get())) {
-      if (CurTok == '[') {
-        getNextToken(); // eat '['
+    std::vector<std::unique_ptr<ExprAST>> InitList;
+    std::unique_ptr<ExprAST> InitExpr = nullptr;
+    if (CurTok == '[') {
+      getNextToken(); // eat '['
 
-        if (CurTok != ']') {
-          while (true) {
-            auto Expr = ParseExpression();
-            if (!Expr)
-              return nullptr;
-            InitList.push_back(std::move(Expr));
+      if (CurTok != ']') {
+        while (true) {
+          auto Expr = ParseExpression();
+          if (!Expr)
+            return nullptr;
+          InitList.push_back(std::move(Expr));
 
-            if (CurTok == ']')
-              break;
-            if (CurTok != ',') {
-              LogErrorAt(CurLoc, "Expected ',' or ']' in array initializer list");
-              return nullptr;
-            }
-            getNextToken(); // eat ','
+          if (CurTok == ']')
+            break;
+          if (CurTok != ',') {
+            LogErrorAt(CurLoc, "Expected ',' or ']' in array initializer list");
+            return nullptr;
           }
+          getNextToken(); // eat ','
         }
-        getNextToken(); // eat ']'
-      } else {
-        InitExpr = ParseExpression();
-        if (!InitExpr)
-          return nullptr;
       }
+      getNextToken(); // eat ']'
     } else {
       InitExpr = ParseExpression();
       if (!InitExpr)
         return nullptr;
     }
+    if (CurTok != ';') {
+      LogErrorAt(CurLoc, "Expected ';' after statement.");
+      return nullptr;
+    }
+    getNextToken(); // eat ';'
+    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::move(InitList), std::move(InitExpr), IsImmutable);
   }
+
+  auto Init = ParseExpression();
+  if (!Init) return nullptr;
 
   if (CurTok != ';') {
     LogErrorAt(CurLoc, "Expected ';' after statement.");
     return nullptr;
   }
   getNextToken(); // eat ';'
+  return std::make_unique<VarDeclExprAST>(Loc, Name, Type, std::move(Init), IsImmutable);
+}
 
+// ParseVarDeclBody - called after the type keyword has already been consumed.
+// ParseType() now produces ArrayType for array types (e.g. int[5]), so we
+// simply check isArrayType() here instead of intercepting '[' ourselves.
+std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
+                                          TurfTypePtr Type) {
+  // If ParseType() already consumed [N] and built an ArrayType, handle it here.
   if (isArrayType(Type.get())) {
     const auto *AT = dynamic_cast<const ::ArrayType *>(Type.get());
     int ArraySize = AT ? AT->getSize() : -1;
     TurfTypePtr ElemType = AT ? AT->getElementTypePtr() : Type;
-    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::move(InitList), std::move(InitExpr), IsImmutable);
+
+    bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
+                     Keywords.at(IdentifierStr) == CurTok;
+    if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
+      LogErrorAt(
+          CurLoc,
+          "Expected a variable name after the array type, e.g. int[5] arr");
+      return nullptr;
+    }
+
+    std::string Name = IdentifierStr;
+    SourceLocation NameLoc = CurLoc;
+    getNextToken();
+
+    // Optional initializer: int[3] primes = [2, 3, 5]
+    std::vector<std::unique_ptr<ExprAST>> InitList;
+    std::unique_ptr<ExprAST> InitExpr = nullptr;
+    if (CurTok == TOK_ASSIGN) {
+      getNextToken();
+      InitExpr = ParseExpression();
+      if (!InitExpr)
+        return nullptr;
+    }
+
+    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType,
+                                              ArraySize, std::move(InitList), std::move(InitExpr), false);
   }
 
-  return std::make_unique<VarDeclExprAST>(Loc, Name, Type, std::move(InitExpr), IsImmutable);
+  // Standard variable declaration: int x = ...
+  bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
+                   Keywords.at(IdentifierStr) == CurTok;
+  if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
+    LogErrorAt(CurLoc, "Expected a variable name after the type keyword."
+                       "\n  Hint: Variable declarations look like: int x = 5");
+    return nullptr;
+  }
+
+  std::string Name = IdentifierStr;
+  SourceLocation NameLoc = CurLoc;
+  getNextToken();
+
+  std::unique_ptr<ExprAST> Init = nullptr;
+  if (CurTok == TOK_ASSIGN) {
+    getNextToken();
+    Init = ParseExpression();
+    if (!Init)
+      return nullptr;
+  }
+
+  return std::make_unique<VarDeclExprAST>(NameLoc, Name, Type, std::move(Init), false);
 }
 
-
+// ParseVarDecl - original entry point (type token is still in CurTok).
+std::unique_ptr<ExprAST> ParseVarDecl() {
+  SourceLocation TypeLoc = CurLoc;
+  TurfTypePtr Type = ParseType(); // consumes the type token
+  if (!Type)
+    return nullptr;
+  return ParseVarDeclBody(TypeLoc, Type);
+}
 
 // ParseStructDecl - called when CurTok == TOK_STRUCT.
 std::unique_ptr<ExprAST> ParseStructDecl() {
@@ -1755,4 +1836,7 @@ std::unique_ptr<ExprAST> ParseReturnExpr() {
   return std::make_unique<ReturnExprAST>(RetLoc, std::move(Val));
 }
 
-
+// ParseListDecl is now replaced by the unified type dispatch in ParsePrimary.
+// list<T> declarations go through ParseVarDeclBody with a GenericType from
+// ParseType(). This function is kept as a named reference point but is no
+// longer called.
