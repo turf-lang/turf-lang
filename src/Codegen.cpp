@@ -899,9 +899,15 @@ Value *BinaryExprAST::codegen() {
   // Power
   case '^': {
     CastBoth(TurfDouble());
+#if LLVM_VERSION_MAJOR >= 19
+    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
+      TheModule.get(), llvm::Intrinsic::pow,
+      {Type::getDoubleTy(*TheContext)});
+#else
     Function *PowFunc = llvm::Intrinsic::getDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
+#endif
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
   }
   default:
