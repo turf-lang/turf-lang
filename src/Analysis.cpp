@@ -139,6 +139,10 @@ public:
     for (const auto &Field : Node.getNamedFields())
       visitChild(Field.second.get());
   }
+
+  void visitDefaultInit(DefaultInitExprAST &Node) override {
+    (void)Node;
+  }
 };
 
 } // namespace

@@ -56,6 +56,7 @@ class ModuleImportExprAST;
 class SizeOfExprAST;
 class ExternFuncDeclExprAST;
 class AddressOfExprAST;
+class DefaultInitExprAST;
 
 
 // ─── ASTVisitor base class ────────────────────────────────────────────────────
@@ -88,6 +89,7 @@ public:
   virtual void visitBool(BoolExprAST &Node) {}
   virtual void visitString(StringExprAST &Node) {}
   virtual void visitNull(NullExprAST &Node) {}
+  virtual void visitDefaultInit(DefaultInitExprAST &Node) {}
 
   // ── Variables & Declarations ──────────────────────────────────────────────
   virtual void visitVariable(VariableExprAST &Node) {}

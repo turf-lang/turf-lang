@@ -80,6 +80,13 @@ public:
     std::cout << "\n";
   }
 
+  void visitDefaultInit(DefaultInitExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "DefaultInit(" << (N.getTypePtr() ? N.getTypePtr()->getName() : "?") << ")";
+    printTypeBadge(&N);
+    std::cout << "\n";
+  }
+
   // ── Variables ───────────────────────────────────────────────────────────────
   void visitVariable(VariableExprAST &N) override {
     printIndent(Depth_);

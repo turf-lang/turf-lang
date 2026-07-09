@@ -8,22 +8,24 @@ struct Point {
 }
 
 fn main(): int {
-    mut a: int = 0;
-    mut b: double = 0.0;
-    mut c: bool = false;
-    mut d: string = "";
+    mut a: int;
+    mut b: double;
+    mut c: bool;
+    mut d: string;
+    mut ptr_val: int*;
 
-    assert(a == 0, "");
-    assert(b == 0.0, ""); 
-    assert(c == false, "");
-    assert(d == "", "");
+    assert(a == 0, "int default init");
+    assert(b == 0.0, "double default init"); 
+    assert(c == false, "bool default init");
+    assert(d == "", "string default init");
+    assert(ptr_val == null, "pointer default init");
 
-    mut p: Point = Point { x: 0, y: 0, name: "", z: 0.0 };
+    mut p: Point;
 
-    assert(p.x == 0, "");
-    assert(p.y == 0, "");
-    assert(p.name == "", "");
-    assert(p.z == 0.0, "");
+    assert(p.x == 0, "struct field default init x");
+    assert(p.y == 0, "struct field default init y");
+    assert(p.name == "", "struct field default init name");
+    assert(p.z == 0.0, "struct field default init z");
 
     return 0;
 }

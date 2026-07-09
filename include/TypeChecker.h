@@ -166,6 +166,7 @@ public:
   void visitBool(BoolExprAST &Node) override;
   void visitString(StringExprAST &Node) override;
   void visitNull(NullExprAST &Node) override;
+  void visitDefaultInit(DefaultInitExprAST &Node) override;
 
   // ── Variables & declarations ──────────────────────────────────────────────
   void visitVariable(VariableExprAST &Node) override;

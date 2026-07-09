@@ -658,6 +658,12 @@ Value *NullExprAST::codegen() {
   return ConstantPointerNull::get(PointerType::getUnqual(*TheContext));
 }
 
+static llvm::Constant *GetDefaultValue(const TurfType *T);
+
+Value *DefaultInitExprAST::codegen() {
+  return GetDefaultValue(Type.get());
+}
+
 // Turns any expression into IR operation
 Value *BinaryExprAST::codegen() {
   // ── Short-circuit && / || ───────────────────────────────────────────────
@@ -893,7 +899,7 @@ Value *BinaryExprAST::codegen() {
   // Power
   case '^': {
     CastBoth(TurfDouble());
-    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
+    Function *PowFunc = llvm::Intrinsic::getDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
