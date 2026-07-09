@@ -899,7 +899,7 @@ Value *BinaryExprAST::codegen() {
   // Power
   case '^': {
     CastBoth(TurfDouble());
-    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
+    Function *PowFunc = llvm::Intrinsic::getDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
@@ -2873,29 +2873,29 @@ Value *StructInitExprAST::codegen() {
         break;
       }
     }
-    if (!MatchedExpr) {
-      // TypeChecker should have caught this — treat as internal error.
-      LogErrorAt(Loc, "Internal error: missing field '" + DeclF.Name +
-                          "' in codegen for struct '" + Name + "'");
-      return nullptr;
+    Value *V = nullptr;
+    if (MatchedExpr) {
+      V = const_cast<ExprAST *>(MatchedExpr)->codegen();
+      if (!V)
+        return nullptr;
+    } else {
+      V = GetDefaultValue(DeclF.Type.get());
     }
-
-    Value *V = const_cast<ExprAST *>(MatchedExpr)->codegen();
-    if (!V)
-      return nullptr;
     EvaluatedArgs.push_back(V);
 
-    TurfTypePtr ActTy;
-    if (auto *VE = dynamic_cast<const VariableExprAST *>(MatchedExpr)) {
-      if (VE->ResolvedSymbol)
-        ActTy = VE->ResolvedSymbol->Type;
-      else if (GlobalSymbolTable) {
-        Symbol *Sym = GlobalSymbolTable->LookupSymbol(VE->getName());
-        if (Sym) ActTy = Sym->Type;
+    TurfTypePtr ActTy = DeclF.Type;
+    if (MatchedExpr) {
+      if (auto *VE = dynamic_cast<const VariableExprAST *>(MatchedExpr)) {
+        if (VE->ResolvedSymbol)
+          ActTy = VE->ResolvedSymbol->Type;
+        else if (GlobalSymbolTable) {
+          Symbol *Sym = GlobalSymbolTable->LookupSymbol(VE->getName());
+          if (Sym) ActTy = Sym->Type;
+        }
       }
+      if (!ActTy)
+        ActTy = getTurfTypeFromLLVM(V->getType());
     }
-    if (!ActTy)
-      ActTy = getTurfTypeFromLLVM(V->getType());
     ArgTypes.push_back(ActTy);
   }
 

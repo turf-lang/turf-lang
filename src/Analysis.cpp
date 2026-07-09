@@ -2,19 +2,28 @@
 #include "Errors.h"
 #include "AST.h"
 #include "SymbolTable.h"
+#include "ResolverSymbolTable.h"
 
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
 
-using AssignSet = std::unordered_set<SymbolID>;
+// Use raw VariableSymbol* as the definiteness key.
+// VariableSymbol objects are owned by shared_ptrs attached to AST nodes and
+// survive the entire compilation of a function — unlike SymbolID from
+// GlobalSymbolTable which is erased when a lexical scope exits.
+using AssignSet = std::unordered_set<const VariableSymbol *>;
 
 namespace {
 
+// ─── AnalysisVisitor ─────────────────────────────────────────────────────────
+// Walks an expression and fires onRead/onDef callbacks with the VariableSymbol*
+// that the Resolver attached to each variable reference / declaration.
+
 class AnalysisVisitor : public ASTVisitor {
-  const std::function<void(SourceLocation, const std::string &)> &onRead;
-  const std::function<void(SourceLocation, const std::string &)> &onDef;
+  const std::function<void(SourceLocation, const VariableSymbol *)> &onRead;
+  const std::function<void(SourceLocation, const VariableSymbol *)> &onDef;
 
   void visitChild(const ExprAST *Node) {
     if (Node)
@@ -23,24 +32,29 @@ class AnalysisVisitor : public ASTVisitor {
 
 public:
   AnalysisVisitor(
-      const std::function<void(SourceLocation, const std::string &)> &onRead,
-      const std::function<void(SourceLocation, const std::string &)> &onDef)
+      const std::function<void(SourceLocation, const VariableSymbol *)> &onRead,
+      const std::function<void(SourceLocation, const VariableSymbol *)> &onDef)
       : onRead(onRead), onDef(onDef) {}
 
   void visitVariable(VariableExprAST &Node) override {
-    onRead(Node.getLoc(), Node.getName());
+    if (Node.ResolvedSymbol)
+      onRead(Node.getLoc(), Node.ResolvedSymbol.get());
   }
 
   void visitVarDecl(VarDeclExprAST &Node) override {
     visitChild(Node.getInitializer());
-    if (Node.getInitializer())
-      onDef(Node.getLoc(), Node.getName());
+    // Only mark as "defined" when there is an explicit initializer.
+    // Primitive locals declared without an initializer (e.g. `mut x: int;`)
+    // are intentionally left out so the DAP catches reads before assignment.
+    if (Node.getInitializer() && Node.ResolvedSymbol)
+      onDef(Node.getLoc(), Node.ResolvedSymbol.get());
   }
 
   void visitAssignment(AssignmentExprAST &Node) override {
     visitChild(Node.getRHS());
     if (auto *L = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {
-      onDef(Node.getLoc(), L->getName());
+      if (L->ResolvedSymbol)
+        onDef(Node.getLoc(), L->ResolvedSymbol.get());
     } else {
       visitChild(Node.getLHS());
     }
@@ -49,8 +63,10 @@ public:
   void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override {
     visitChild(Node.getRHS());
     if (auto *L = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {
-      onRead(Node.getLoc(), L->getName());
-      onDef(Node.getLoc(), L->getName());
+      if (L->ResolvedSymbol) {
+        onRead(Node.getLoc(), L->ResolvedSymbol.get());
+        onDef(Node.getLoc(),  L->ResolvedSymbol.get());
+      }
     } else {
       visitChild(Node.getLHS());
     }
@@ -58,8 +74,10 @@ public:
 
   void visitPostfixExpr(PostfixExprAST &Node) override {
     if (auto *L = dynamic_cast<const VariableExprAST *>(Node.getOperand())) {
-      onRead(Node.getLoc(), L->getName());
-      onDef(Node.getLoc(), L->getName());
+      if (L->ResolvedSymbol) {
+        onRead(Node.getLoc(), L->ResolvedSymbol.get());
+        onDef(Node.getLoc(),  L->ResolvedSymbol.get());
+      }
     } else {
       visitChild(Node.getOperand());
     }
@@ -122,6 +140,7 @@ public:
     visitChild(Node.getBase());
     visitChild(Node.getIndex());
   }
+
   void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
     for (const auto &Elem : Node.getElements())
       visitChild(Elem.get());
@@ -132,7 +151,9 @@ public:
       visitChild(Init.get());
     if (Node.getInitExpr())
       visitChild(Node.getInitExpr().get());
-    onDef(Node.getLoc(), Node.getName());
+    // Arrays always get storage allocated — treat as defined immediately.
+    if (Node.ResolvedSymbol)
+      onDef(Node.getLoc(), Node.ResolvedSymbol.get());
   }
 
   void visitStructInit(StructInitExprAST &Node) override {
@@ -145,19 +166,78 @@ public:
   }
 };
 
+// ─── BodyDeclCollector ────────────────────────────────────────────────────────
+// A simple visitor that collects ALL locally-declared VariableSymbol* — both
+// those with and without an explicit initializer. This set is used to
+// distinguish local variables (which must be assigned before use) from function
+// parameters (which are always defined when the function is called).
+
+class BodyDeclCollector : public ASTVisitor {
+  void visitChild(const ExprAST *Node) {
+    if (Node)
+      const_cast<ExprAST *>(Node)->accept(*this);
+  }
+
+public:
+  AssignSet LocalDecls; // All locally-declared symbols (with or without init)
+
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    if (Node.ResolvedSymbol)
+      LocalDecls.insert(Node.ResolvedSymbol.get());
+    visitChild(Node.getInitializer());
+  }
+
+  void visitArrayDecl(ArrayDeclExprAST &Node) override {
+    if (Node.ResolvedSymbol)
+      LocalDecls.insert(Node.ResolvedSymbol.get());
+    for (const auto &I : Node.getInitList()) visitChild(I.get());
+    if (Node.getInitExpr()) visitChild(Node.getInitExpr().get());
+  }
+
+  // Recurse into compound statements
+  void visitBlock(BlockExprAST &Node) override {
+    for (const auto &E : Node.getExpressions()) visitChild(E.get());
+  }
+  void visitIf(IfExprAST &Node) override {
+    for (const auto &Br : Node.getBranches()) {
+      visitChild(Br.Cond.get()); visitChild(Br.Body.get());
+    }
+    visitChild(Node.getElse());
+  }
+  void visitWhile(WhileExprAST &Node) override {
+    visitChild(Node.getCond()); visitChild(Node.getBody());
+  }
+  void visitFor(ForExprAST &Node) override {
+    visitChild(Node.getStart()); visitChild(Node.getEnd());
+    visitChild(Node.getStep()); visitChild(Node.getBody());
+  }
+  void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
+  void visitAssignment(AssignmentExprAST &Node) override {
+    visitChild(Node.getLHS()); visitChild(Node.getRHS());
+  }
+  void visitBinary(BinaryExprAST &Node) override {
+    visitChild(Node.getLHS()); visitChild(Node.getRHS());
+  }
+};
+
 } // namespace
 
+// ─── collectReadsAndDefs ─────────────────────────────────────────────────────
+
 static void collectReadsAndDefs(
-    const ExprAST *E, AssignSet &Current,
-    const std::function<void(SourceLocation, const std::string &)> &onRead,
-    const std::function<void(SourceLocation, const std::string &)> &onDef) {
-  if (!E)
-    return;
+    const ExprAST *E,
+    const std::function<void(SourceLocation, const VariableSymbol *)> &onRead,
+    const std::function<void(SourceLocation, const VariableSymbol *)> &onDef) {
+  if (!E) return;
+  AssignSet dummy;
   AnalysisVisitor Visitor(onRead, onDef);
   const_cast<ExprAST *>(E)->accept(Visitor);
 }
 
-void DefiniteAssignmentPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialAssigned) {
+// ─── DefiniteAssignmentPass ──────────────────────────────────────────────────
+
+void DefiniteAssignmentPass::runOnCFG(CFG &Cfg,
+                                      const std::vector<SymbolID> &/*InitialAssigned*/) {
   const auto &Blocks = Cfg.getBlocks();
   size_t N = Blocks.size();
   if (N == 0) return;
@@ -165,121 +245,94 @@ void DefiniteAssignmentPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &Ini
   std::unordered_map<const TurfBasicBlock *, size_t> index;
   for (size_t i = 0; i < N; ++i) index[Blocks[i].get()] = i;
 
-  // Collect all symbols visible in the current function scope.
-  // Used to initialise non-entry IN sets to the "universal" set so the
-  // intersection is correct from the very first worklist iteration.
-  AssignSet AllSymbols;
-  if (GlobalSymbolTable) {
-    for (const auto &Name : GlobalSymbolTable->GetAllVisibleNames()) {
-      Symbol *S = GlobalSymbolTable->LookupSymbol(Name);
-      if (S) AllSymbols.insert(S->ID);
+  // ── Step 0: Collect all locally-declared symbols (the "body" set) ─────────
+  // These are symbols introduced by VarDeclExprAST or ArrayDeclExprAST in the
+  // function body. Function parameters are NOT in this set — they are always
+  // considered pre-initialized and must never be flagged.
+  AssignSet AllBodyDeclared;
+  for (size_t b = 0; b < N; ++b) {
+    for (ExprAST *Stmt : Blocks[b]->getStatements()) {
+      BodyDeclCollector Coll;
+      if (Stmt) const_cast<ExprAST *>(static_cast<const ExprAST *>(Stmt))->accept(Coll);
+      for (const VariableSymbol *Sym : Coll.LocalDecls)
+        AllBodyDeclared.insert(Sym);
     }
   }
 
-  // Also include the parameters themselves (they may not be in the visible
-  // names if the table has been modified).
-  for (auto id : InitialAssigned) AllSymbols.insert(id);
+  // ── Step 1: Dataflow (no error reporting) ─────────────────────────────────
+  // Transfer : OUT[b] = IN[b] ∪ Defs(b)
+  // Meet     : IN[b]  = ∩ OUT[pred] for all predecessors p
+  // Entry IN starts empty; all other blocks start at the universal set.
 
-  std::vector<AssignSet> IN(N), OUT(N);
-
-  // Entry block: IN = params, OUT will be computed by transfer.
   TurfBasicBlock *Entry = Cfg.getEntryBlock();
   size_t entryIdx = 0;
-  if (Entry) {
-    entryIdx = index[Entry];
-    for (auto id : InitialAssigned) {
-      IN[entryIdx].insert(id);
-    }
-  }
+  if (Entry) entryIdx = index[Entry];
 
-  // All other blocks: initialise IN to the universal set so that intersection
-  // starts from "everything" and gets tightened by the dataflow.
-  for (size_t i = 0; i < N; ++i) {
-    if (i != entryIdx) IN[i] = AllSymbols;
-  }
+  std::vector<AssignSet> IN(N), OUT(N);
+  // Non-entry blocks: init to "all locals" (universal set for intersection)
+  for (size_t i = 0; i < N; ++i)
+    if (i != entryIdx) IN[i] = AllBodyDeclared;
 
-  // ── Phase 1: Compute fixed-point dataflow (NO error reporting) ──────────
-  // Transfer function: OUT[b] = IN[b] ∪ Defs(b)
-  // Meet function:     IN[b]  = ∩ OUT[p] for all predecessors p
   auto computeOUT = [&](size_t b) -> AssignSet {
     AssignSet cur = IN[b];
     for (ExprAST *Stmt : Blocks[b]->getStatements()) {
-      collectReadsAndDefs(Stmt, cur,
-        [](SourceLocation, const std::string &) { /* no-op during propagation */ },
-        [&](SourceLocation, const std::string &Name) {
-          if (!GlobalSymbolTable) return;
-          Symbol *S = GlobalSymbolTable->LookupSymbol(Name);
-          if (!S) return;
-          cur.insert(S->ID);
-        });
+      collectReadsAndDefs(Stmt,
+        [](SourceLocation, const VariableSymbol *) { /* no-op */ },
+        [&](SourceLocation, const VariableSymbol *Sym) { cur.insert(Sym); });
     }
     return cur;
   };
 
-  std::queue<size_t> work;
-  for (size_t i = 0; i < N; ++i) {
-    OUT[i] = computeOUT(i);
-    work.push(i);
-  }
+  for (size_t i = 0; i < N; ++i) OUT[i] = computeOUT(i);
 
-  while (!work.empty()) {
-    size_t b = work.front(); work.pop();
-    TurfBasicBlock *BB = Blocks[b].get();
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t b = 0; b < N; ++b) {
+      if (b == entryIdx) continue;
 
-    // Compute new IN via meet (intersection) of predecessor OUTs
-    AssignSet newIN;
-    const auto &Preds = BB->getPredecessors();
-    if (Preds.empty()) {
-      // Entry block: IN is always the parameter set (never shrinks)
-      newIN = IN[b];
-    } else {
-      bool first = true;
-      for (auto *P : Preds) {
-        size_t pi = index[P];
-        if (first) { newIN = OUT[pi]; first = false; }
-        else {
-          AssignSet tmp;
-          for (auto s : newIN) if (OUT[pi].count(s)) tmp.insert(s);
-          newIN.swap(tmp);
+      // Meet: intersect OUT of all predecessors.
+      AssignSet newIN = AllBodyDeclared;
+      bool hasPred = false;
+      for (size_t p = 0; p < N; ++p) {
+        bool isPred = false;
+        for (const auto *succ : Blocks[p]->getSuccessors()) {
+          if (index.count(succ) && index.at(succ) == b) { isPred = true; break; }
         }
+        if (!isPred) continue;
+        hasPred = true;
+        AssignSet intersected;
+        for (const VariableSymbol *sym : newIN)
+          if (OUT[p].count(sym)) intersected.insert(sym);
+        newIN = std::move(intersected);
       }
-      // Ensure parameters are always in IN (they are always defined on entry)
-      for (auto id : InitialAssigned) newIN.insert(id);
-    }
+      if (!hasPred) continue;
 
-    if (newIN != IN[b]) {
-      IN[b] = newIN;
-      AssignSet newOUT = computeOUT(b);
-      if (newOUT != OUT[b]) {
-        OUT[b] = std::move(newOUT);
-        for (auto *S : BB->getSuccessors()) {
-          work.push(index[S]);
-        }
+      if (newIN != IN[b]) {
+        IN[b]  = newIN;
+        OUT[b] = computeOUT(b);
+        changed = true;
       }
     }
   }
 
-  // ── Phase 2: Report errors using the fixed-point IN sets ─────────────────
+  // ── Step 2: Report errors using fixed-point IN sets ───────────────────────
+  // Only flag a read as "uninitialized" if the symbol was locally DECLARED
+  // (i.e. it is in AllBodyDeclared) but NOT yet in the current assigned set.
+  // Reads of function parameters (not in AllBodyDeclared) are always fine.
   for (size_t b = 0; b < N; ++b) {
     AssignSet cur = IN[b];
     for (ExprAST *Stmt : Blocks[b]->getStatements()) {
-      collectReadsAndDefs(Stmt, cur,
-        [&](SourceLocation Loc, const std::string &Name) {
-          if (!GlobalSymbolTable) return;
-          Symbol *S = GlobalSymbolTable->LookupSymbol(Name);
-          if (!S) return;
-          if (!cur.count(S->ID)) {
-            DefiniteAssignmentError err(Loc, Name);
+      collectReadsAndDefs(Stmt,
+        [&](SourceLocation Loc, const VariableSymbol *Sym) {
+          if (AllBodyDeclared.count(Sym) && !cur.count(Sym)) {
+            DefiniteAssignmentError err(Loc, Sym->Name);
             err.raise();
           }
         },
-        [&](SourceLocation, const std::string &Name) {
-          if (!GlobalSymbolTable) return;
-          Symbol *S = GlobalSymbolTable->LookupSymbol(Name);
-          if (!S) return;
-          cur.insert(S->ID);
+        [&](SourceLocation, const VariableSymbol *Sym) {
+          cur.insert(Sym);
         });
     }
   }
 }
-

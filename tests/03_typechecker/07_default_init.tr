@@ -8,24 +8,25 @@ struct Point {
 }
 
 fn main(): int {
-    mut a: int;
-    mut b: double;
-    mut c: bool;
-    mut d: string;
-    mut ptr_val: int*;
+    // 1. Local primitive variables must be explicitly assigned before use.
+    //    Declare then assign — this is valid.
+    mut x: int;
+    x = 42;
+    assert(x == 42, "assign after empty declaration");
 
-    assert(a == 0, "int default init");
-    assert(b == 0.0, "double default init"); 
-    assert(c == false, "bool default init");
-    assert(d == "", "string default init");
-    assert(ptr_val == null, "pointer default init");
-
+    // 2. Struct variables declared without "= value" are default-initialized.
     mut p: Point;
-
     assert(p.x == 0, "struct field default init x");
     assert(p.y == 0, "struct field default init y");
     assert(p.name == "", "struct field default init name");
     assert(p.z == 0.0, "struct field default init z");
+
+    // 3. Struct literal with partial fields — missing fields are default-initialized.
+    mut p2: Point = Point{x: 5};
+    assert(p2.x == 5, "explicit field init");
+    assert(p2.y == 0, "missing field y default init");
+    assert(p2.name == "", "missing field name default init");
+    assert(p2.z == 0.0, "missing field z default init");
 
     return 0;
 }

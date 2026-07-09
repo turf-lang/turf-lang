@@ -137,6 +137,18 @@ Symbol *SymbolTable::LookupSymbol(const std::string &Name) {
   return nullptr;
 }
 
+Symbol *SymbolTable::LookupSymbolAnyScope(const std::string &Name) {
+  Symbol *Best = nullptr;
+  for (auto &Pair : AllSymbols) {
+    if (Pair.second.Name == Name) {
+      if (!Best || Pair.second.ScopeLevel > Best->ScopeLevel) {
+        Best = &Pair.second;
+      }
+    }
+  }
+  return Best;
+}
+
 Symbol *SymbolTable::LookupSymbolInCurrentScope(const std::string &Name) {
   if (ScopeStack.empty())
     return nullptr;
@@ -397,5 +409,13 @@ RankedSuggestions SymbolTable::GetRankedSuggestions(const std::string &Name) con
     }
   }
 
+  return Result;
+}
+
+std::vector<SymbolID> SymbolTable::GetSymbolIDs() const {
+  std::vector<SymbolID> Result;
+  for (const auto &Pair : AllSymbols) {
+    Result.push_back(Pair.first);
+  }
   return Result;
 }

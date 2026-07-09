@@ -1163,7 +1163,11 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
       return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::vector<std::unique_ptr<ExprAST>>(), nullptr, IsImmutable);
     }
 
-    std::unique_ptr<ExprAST> Init = SynthesizeDefault(Loc, Type);
+    std::unique_ptr<ExprAST> Init = nullptr;
+    if (!Type->isInt() && !Type->isDouble() && !Type->isBool() && !Type->isString() &&
+        !Type->isPointer() && !Type->isNamed("ptr") && !Type->isNamed("void*") && !Type->isNull()) {
+      Init = SynthesizeDefault(Loc, Type);
+    }
     if (CurTok != ';') {
       LogErrorAt(CurLoc, "Expected ';' after variable declaration.");
       return nullptr;
