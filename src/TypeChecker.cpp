@@ -226,8 +226,8 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
       return TurfBool();
     
     // Allow comparing pointers to null
-    bool isLhsPtrOrNull = dynamic_cast<const TurfPointerType*>(LhsTy) || dynamic_cast<const TurfNullType*>(LhsTy);
-    bool isRhsPtrOrNull = dynamic_cast<const TurfPointerType*>(RhsTy) || dynamic_cast<const TurfNullType*>(RhsTy);
+    bool isLhsPtrOrNull = LhsTy->isPointer() || LhsTy->isNull() || LhsTy->isNamed("ptr") || LhsTy->isNamed("void*");
+    bool isRhsPtrOrNull = RhsTy->isPointer() || RhsTy->isNull() || RhsTy->isNamed("ptr") || RhsTy->isNamed("void*");
     if (isLhsPtrOrNull && isRhsPtrOrNull)
       return TurfBool();
 
@@ -337,6 +337,15 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   if (Node.getInitializer() && DeclTy) {
     TurfTypePtr InitTy = getType(Node.getInitializer());
     if (InitTy) {
+      if (InitTy->isNull()) {
+        if (!DeclTy->isPointer() && !DeclTy->isNamed("ptr") && !DeclTy->isNamed("void*")) {
+#ifndef TYPECHECKER_NO_ERRORS
+          NullAssignmentError(Node.getLoc(), Node.getName(), DeclTy->getName()).raise();
+#else
+          throw std::runtime_error("NullAssignmentError: " + Node.getName());
+#endif
+        }
+      }
       // Mismatch check: use unified typesCompatible logic
       if (!typesCompatible(InitTy.get(), DeclTy.get())) {
         reportError(Node.getLoc(),
@@ -449,6 +458,16 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   const VariableExprAST *LHSVar = findRootVariable(Node.getLHS());
 
   if (LhsTy && RhsTy) {
+    if (RhsTy->isNull()) {
+      if (!LhsTy->isPointer() && !LhsTy->isNamed("ptr") && !LhsTy->isNamed("void*")) {
+        std::string VarName = LHSVar ? LHSVar->getName() : "";
+#ifndef TYPECHECKER_NO_ERRORS
+        NullAssignmentError(Node.getLoc(), VarName, LhsTy->getName()).raise();
+#else
+        throw std::runtime_error("NullAssignmentError: " + VarName);
+#endif
+      }
+    }
     if (!typesCompatible(RhsTy.get(), LhsTy.get())) {
       std::vector<RelatedLocation> Related;
       if (LHSVar && LHSVar->ResolvedSymbol) {

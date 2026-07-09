@@ -1,0 +1,30 @@
+null Type Enforcement (TypeChecker)
+
+1. Changes Made:
+- Defined `NullAssignmentError` class in `include/Errors.h` to report illegal assignments/initializations of `null` to/with primitive variables.
+- Updated `typesCompatible` in `src/Types.cpp` (specifically the `isPointerLikeStrict` helper) to exclude `string`. This enforces that `null` is not compatible with `string` or other primitive types (`int`, `double`, `bool`).
+- Updated `TypeChecker::visitVarDecl` in `src/TypeChecker.cpp` to validate variable initializers. If the initializer has type `NullType` and the declared type is not a pointer type (i.e. `T*` or `ptr`), `NullAssignmentError` is raised.
+- Updated `TypeChecker::visitAssignment` in `src/TypeChecker.cpp` to validate assignments. If the RHS expression has type `NullType` and the LHS target is not a pointer type, `NullAssignmentError` is raised.
+- Updated `TypeChecker::inferRelationalType` in `src/TypeChecker.cpp` to correctly validate pointer comparisons to null for opaque pointers `ptr` and generic pointers `void*`, in addition to typed pointers `T*`.
+- Uncommented a null assignment to `ptr` test in `tests/05_arrays_pointers_ffi/02_ffi_ptr_verify.tr`.
+- Added multiple new unit, negative, and E2E stress tests verifying both valid and invalid `null` scenarios.
+
+2. Why the Change was Made:
+- Previously, `null` was a codegen-level literal that lowered directly to an LLVM null pointer without any frontend type verification.
+- This allowed code like `mutable x: int = null;` or `mutable s: string = null;` to compile silently, leading to undefined behavior at runtime.
+- Proper pointer diagnostics and safety contracts are essential features for Phase 3 and Phase 4 roadmap milestones.
+
+3. How it Helps/Changed:
+- The TypeChecker now correctly enforces that `null` can only be assigned to or initialized with pointer types (`T*` or `ptr`).
+- Attempting to assign `null` to a primitive type (`int`, `double`, `bool`, or `string`) now reliably triggers a compile-time diagnostic instead of succeeding with undefined behavior.
+- Allows symmetric relational comparisons (e.g. `p == null`, `null == ptr`) for all pointers in the compiler frontend.
+
+4. Example Diagnostic Output Format:
+── error at line 3, col 5
+
+  Cannot assign 'null' to variable 's' of type 'string'.
+
+  Hint: 'null' is only valid for pointer types. If you want a zero value, use the default initializer (declare without '= null').
+
+  3 │     mut s: string = null;
+    │      ^ Here!

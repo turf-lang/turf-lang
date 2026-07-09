@@ -1,0 +1,4 @@
+fn main(): int {
+    mut s: string = null;
+    return 0;
+}
