@@ -1,0 +1,38 @@
+struct Node {
+    val: int,
+    next: Node*
+}
+
+fn getNullNode(): Node* {
+    return null;
+}
+
+fn processNode(n: Node*): bool {
+    if n == null {
+        return true;
+    }
+    return false;
+}
+
+fn main(): int {
+    // 1. Assign null to pointer type T*
+    mut p: Node* = null;
+    assert(p == null, "p should be null");
+
+    // 2. Assign null to ptr
+    mut raw: ptr = null;
+    assert(raw == null, "raw should be null");
+
+    // 3. Pass null as argument expecting pointer
+    mut is_null: bool = processNode(null);
+    assert(is_null == true, "passed null should be detected");
+
+    // 4. Return null from function expecting pointer
+    mut ret: Node* = getNullNode();
+    assert(ret == null, "ret should be null");
+
+    // 5. Compare ptr and void* to null
+    assert(null == raw, "null comparison is symmetric");
+
+    return 0;
+}

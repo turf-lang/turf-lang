@@ -44,7 +44,7 @@ fn main(): int {
     free(e);
 
     // 5. null assigned to ptr (Commented out because Issue #13)
-    // mut h: ptr = null;
+    mut h: ptr = null;
 
     // 6. ptr from one extern as arg to another (chain)
     mut src: ptr = malloc(64);

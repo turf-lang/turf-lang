@@ -106,10 +106,10 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
       dynamic_cast<const TurfGenericParamType *>(To))
     return true;
 
-  // Rule 1: null is only compatible with pointer-like types (string, ptr,
-  // void*, T*). It must NEVER be compatible with plain numerics or bool.
+  // Rule 1: null is only compatible with pointer-like types (ptr,
+  // void*, T*). It must NEVER be compatible with plain numerics, bool, or string.
   auto isPointerLikeStrict = [](const TurfType *T) {
-    return T->isString() || T->isPointer() ||
+    return T->isPointer() ||
            T->isNamed("ptr") || T->isNamed("void*");
   };
   if (From->isNull())

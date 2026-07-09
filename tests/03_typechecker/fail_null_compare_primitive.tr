@@ -1,0 +1,7 @@
+fn main(): int {
+    mut x: int = 42;
+    if x == null {
+        return 1;
+    }
+    return 0;
+}

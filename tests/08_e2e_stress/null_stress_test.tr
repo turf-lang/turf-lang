@@ -1,0 +1,80 @@
+struct Data {
+    id: int,
+    name: string
+}
+
+struct Node {
+    val: int,
+    data: Data*,
+    left: Node*,
+    right: Node*
+}
+
+fn createNode(val: int, data: Data*, left: Node*, right: Node*): Node {
+    return Node {
+        val: val,
+        data: data,
+        left: left,
+        right: right
+    };
+}
+
+fn findVal(node: Node*, target: int): bool {
+    if node == null {
+        return false;
+    }
+    if node.val == target {
+        return true;
+    }
+    mut found_left: bool = findVal(node.left, target);
+    if found_left {
+        return true;
+    }
+    return findVal(node.right, target);
+}
+
+fn main(): int {
+    mut d1: Data = Data { id: 1, name: "Data 1" };
+    mut d2: Data = Data { id: 2, name: "Data 2" };
+
+    // Initialize root, left, right nodes with valid pointers and null pointers
+    mut l_node: Node = createNode(5, &d1, null, null);
+    mut r_node: Node = createNode(15, &d2, null, null);
+    mut root: Node = createNode(10, null, &l_node, &r_node);
+
+    // Verify properties
+    assert(root.data == null, "root data should be null");
+    assert(root.left != null, "root left should not be null");
+    assert(root.right != null, "root right should not be null");
+
+    // Traverse and find values using the recursive function which checks against null
+    mut found_10: bool = findVal(&root, 10);
+    mut found_5: bool = findVal(&root, 5);
+    mut found_15: bool = findVal(&root, 15);
+    mut found_100: bool = findVal(&root, 100);
+
+    assert(found_10 == true, "should find 10");
+    assert(found_5 == true, "should find 5");
+    assert(found_15 == true, "should find 15");
+    assert(found_100 == false, "should not find 100");
+
+    // Re-assign pointers to null and check behavior
+    mut p_node: Node* = &root;
+    p_node = null;
+    assert(p_node == null, "p_node should be successfully assigned to null");
+
+    // Chain pointers in multiple levels
+    mut current: Node* = &root;
+    mut count: int = 0;
+    while current != null {
+        count = count + 1;
+        if count == 1 {
+            current = current.left;
+        } else {
+            current = null;
+        }
+    }
+    assert(count == 2, "should iterate twice");
+
+    return 0;
+}

@@ -1,0 +1,4 @@
+fn main(): int {
+    mut d: double = null;
+    return 0;
+}

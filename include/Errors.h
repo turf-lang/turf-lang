@@ -837,4 +837,18 @@ public:
                   "with 'mutable' instead of 'immutable'.") {}
 };
 
+class NullAssignmentError : public TurfError {
+public:
+  NullAssignmentError(SourceLocation Loc, const std::string &VarName,
+                      const std::string &TypeName)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Cannot assign 'null' to variable '" +
+                      Colors::CYAN + VarName + Colors::BRIGHT_RED +
+                      "' of type '" + Colors::CYAN + TypeName +
+                      Colors::BRIGHT_RED + "'." + Colors::RESET,
+                  "Hint: 'null' is only valid for pointer types. "
+                  "If you want a zero value, use the default initializer "
+                  "(declare without '= null').") {}
+};
+
 #endif
