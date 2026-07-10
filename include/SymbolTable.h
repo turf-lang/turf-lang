@@ -152,6 +152,7 @@ public:
 
   // Symbol lookup
   Symbol *LookupSymbol(const std::string &Name);
+  Symbol *LookupSymbolAnyScope(const std::string &Name);
   Symbol *LookupSymbolInCurrentScope(const std::string &Name);
   Symbol *GetSymbolByID(SymbolID ID);
 
@@ -164,6 +165,7 @@ public:
   bool IsSymbolInCurrentScope(const std::string &Name) const;
   Symbol *FindShadowedSymbol(const std::string &Name) const;
   std::vector<std::string> GetAllVisibleNames() const;
+  std::vector<SymbolID> GetSymbolIDs() const;
 
   // Control flow tracking
   void MarkEarlyExit();

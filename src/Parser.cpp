@@ -1111,6 +1111,22 @@ std::unique_ptr<ExprAST> ParseForExpr() {
                                       std::move(Body));
 }
 
+static std::unique_ptr<ExprAST> SynthesizeDefault(SourceLocation Loc, TurfTypePtr Type) {
+  if (Type->isInt()) {
+    return std::make_unique<NumberExprAST>(0LL);
+  } else if (Type->isDouble()) {
+    return std::make_unique<NumberExprAST>(0.0);
+  } else if (Type->isBool()) {
+    return std::make_unique<BoolExprAST>(false);
+  } else if (Type->isString()) {
+    return std::make_unique<StringExprAST>("");
+  } else if (Type->isPointer() || Type->isNamed("ptr") || Type->isNamed("void*")) {
+    return std::make_unique<NullExprAST>(Loc);
+  } else {
+    return std::make_unique<DefaultInitExprAST>(Loc, Type);
+  }
+}
+
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat mutable or immutable
@@ -1134,10 +1150,32 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   if (!Type) return nullptr;
 
   if (CurTok != TOK_ASSIGN) {
-    LogErrorAt(CurLoc, "Expected '=' after variable type.");
-    return nullptr;
+    if (isArrayType(Type.get())) {
+      const auto *AT = dynamic_cast<const ::ArrayType *>(Type.get());
+      int ArraySize = AT ? AT->getSize() : -1;
+      TurfTypePtr ElemType = AT ? AT->getElementTypePtr() : Type;
+
+      if (CurTok != ';') {
+        LogErrorAt(CurLoc, "Expected ';' after array declaration.");
+        return nullptr;
+      }
+      getNextToken(); // eat ';'
+      return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::vector<std::unique_ptr<ExprAST>>(), nullptr, IsImmutable);
+    }
+
+    std::unique_ptr<ExprAST> Init = nullptr;
+    if (!Type->isInt() && !Type->isDouble() && !Type->isBool() && !Type->isString() &&
+        !Type->isPointer() && !Type->isNamed("ptr") && !Type->isNamed("void*") && !Type->isNull()) {
+      Init = SynthesizeDefault(Loc, Type);
+    }
+    if (CurTok != ';') {
+      LogErrorAt(CurLoc, "Expected ';' after variable declaration.");
+      return nullptr;
+    }
+    getNextToken(); // eat ';'
+    return std::make_unique<VarDeclExprAST>(Loc, Name, Type, std::move(Init), IsImmutable, false);
   }
-  getNextToken();
+  getNextToken(); // eat '='
 
   if (isArrayType(Type.get())) {
     const auto *AT = dynamic_cast<const ::ArrayType *>(Type.get());
@@ -1187,7 +1225,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
     return nullptr;
   }
   getNextToken(); // eat ';'
-  return std::make_unique<VarDeclExprAST>(Loc, Name, Type, std::move(Init), IsImmutable);
+  return std::make_unique<VarDeclExprAST>(Loc, Name, Type, std::move(Init), IsImmutable, true);
 }
 
 // ParseVarDeclBody - called after the type keyword has already been consumed.

@@ -1,0 +1,12 @@
+// Test: multiple mut primitives — each must be separately initialized before use
+import io;
+
+fn main(): int {
+    mut a: int;
+    mut b: int;
+    a = 10;
+    b = 20;
+    mut c: int = a + b;
+    assert(c == 30, "a + b = 30");
+    return 0;
+}

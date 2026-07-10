@@ -1,0 +1,22 @@
+// Test: mut primitive declared, then explicitly assigned, then used — must pass
+import io;
+
+fn main(): int {
+    mut x: int;
+    x = 42;
+    assert(x == 42, "mut int: assign then use");
+
+    mut d: double;
+    d = 3.14;
+    assert(d == 3.14, "mut double: assign then use");
+
+    mut b: bool;
+    b = true;
+    assert(b == true, "mut bool: assign then use");
+
+    mut s: string;
+    s = "hello";
+    assert(s == "hello", "mut string: assign then use");
+
+    return 0;
+}

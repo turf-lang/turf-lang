@@ -443,12 +443,14 @@ class VarDeclExprAST : public ExprAST {
   std::unique_ptr<ExprAST> InitVal;
   SourceLocation Loc;
   bool IsImmutable;
+  bool HasExplicitInit = true;
 
 public:
   VarDeclExprAST(SourceLocation Loc, std::string Name, TurfTypePtr Type,
-                 std::unique_ptr<ExprAST> InitVal, bool IsImmutable)
+                 std::unique_ptr<ExprAST> InitVal, bool IsImmutable, bool HasExplicitInit = true)
       : Name(std::move(Name)), Type(std::move(Type)),
-        InitVal(std::move(InitVal)), Loc(Loc), IsImmutable(IsImmutable) {}
+        InitVal(std::move(InitVal)), Loc(Loc), IsImmutable(IsImmutable),
+        HasExplicitInit(HasExplicitInit) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
@@ -457,6 +459,7 @@ public:
   void setTypePtr(TurfTypePtr NewType) { Type = std::move(NewType); }
   const ExprAST *getInitializer() const { return InitVal.get(); }
   bool isImmutable() const { return IsImmutable; }
+  bool hasExplicitInit() const { return HasExplicitInit; }
 
   /// Populated by the Resolver after a successful declareVariable().
   /// Nulled by clone() semantics (fresh node, default nullptr). Cloned ASTs must be re-resolved.
@@ -467,7 +470,7 @@ public:
   void accept(ASTVisitor &V) override { V.visitVarDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<VarDeclExprAST>(Loc, Name, Type,
-                                            CloneExprAST(InitVal.get()), IsImmutable);
+                                            CloneExprAST(InitVal.get()), IsImmutable, HasExplicitInit);
     // Note: ResolvedSymbol intentionally NOT copied. ✓
   }
   // Kept private access for codegen
@@ -512,6 +515,25 @@ public:
   void accept(ASTVisitor &V) override { V.visitNull(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<NullExprAST>(Loc);
+  }
+};
+
+class DefaultInitExprAST : public ExprAST {
+  SourceLocation Loc;
+  TurfTypePtr Type;
+
+public:
+  DefaultInitExprAST(SourceLocation Loc, TurfTypePtr Type)
+      : Loc(Loc), Type(std::move(Type)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  TurfTypePtr getTypePtr() const { return Type; }
+  void setTypePtr(TurfTypePtr NewType) { Type = std::move(NewType); }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitDefaultInit(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<DefaultInitExprAST>(Loc, Type);
   }
 };
 

@@ -658,6 +658,12 @@ Value *NullExprAST::codegen() {
   return ConstantPointerNull::get(PointerType::getUnqual(*TheContext));
 }
 
+static llvm::Constant *GetDefaultValue(const TurfType *T);
+
+Value *DefaultInitExprAST::codegen() {
+  return GetDefaultValue(Type.get());
+}
+
 // Turns any expression into IR operation
 Value *BinaryExprAST::codegen() {
   // ── Short-circuit && / || ───────────────────────────────────────────────
@@ -893,9 +899,15 @@ Value *BinaryExprAST::codegen() {
   // Power
   case '^': {
     CastBoth(TurfDouble());
+#if LLVM_VERSION_MAJOR >= 19
     Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
       TheModule.get(), llvm::Intrinsic::pow,
       {Type::getDoubleTy(*TheContext)});
+#else
+    Function *PowFunc = llvm::Intrinsic::getDeclaration(
+      TheModule.get(), llvm::Intrinsic::pow,
+      {Type::getDoubleTy(*TheContext)});
+#endif
     return Builder->CreateCall(PowFunc, {L, R}, "powtmp");
   }
   default:
@@ -2867,29 +2879,29 @@ Value *StructInitExprAST::codegen() {
         break;
       }
     }
-    if (!MatchedExpr) {
-      // TypeChecker should have caught this — treat as internal error.
-      LogErrorAt(Loc, "Internal error: missing field '" + DeclF.Name +
-                          "' in codegen for struct '" + Name + "'");
-      return nullptr;
+    Value *V = nullptr;
+    if (MatchedExpr) {
+      V = const_cast<ExprAST *>(MatchedExpr)->codegen();
+      if (!V)
+        return nullptr;
+    } else {
+      V = GetDefaultValue(DeclF.Type.get());
     }
-
-    Value *V = const_cast<ExprAST *>(MatchedExpr)->codegen();
-    if (!V)
-      return nullptr;
     EvaluatedArgs.push_back(V);
 
-    TurfTypePtr ActTy;
-    if (auto *VE = dynamic_cast<const VariableExprAST *>(MatchedExpr)) {
-      if (VE->ResolvedSymbol)
-        ActTy = VE->ResolvedSymbol->Type;
-      else if (GlobalSymbolTable) {
-        Symbol *Sym = GlobalSymbolTable->LookupSymbol(VE->getName());
-        if (Sym) ActTy = Sym->Type;
+    TurfTypePtr ActTy = DeclF.Type;
+    if (MatchedExpr) {
+      if (auto *VE = dynamic_cast<const VariableExprAST *>(MatchedExpr)) {
+        if (VE->ResolvedSymbol)
+          ActTy = VE->ResolvedSymbol->Type;
+        else if (GlobalSymbolTable) {
+          Symbol *Sym = GlobalSymbolTable->LookupSymbol(VE->getName());
+          if (Sym) ActTy = Sym->Type;
+        }
       }
+      if (!ActTy)
+        ActTy = getTurfTypeFromLLVM(V->getType());
     }
-    if (!ActTy)
-      ActTy = getTurfTypeFromLLVM(V->getType());
     ArgTypes.push_back(ActTy);
   }
 

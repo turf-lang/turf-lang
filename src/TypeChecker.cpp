@@ -264,6 +264,21 @@ void TypeChecker::visitNull(NullExprAST &Node) {
   setType(&Node, TurfNull());
 }
 
+void TypeChecker::visitDefaultInit(DefaultInitExprAST &Node) {
+  auto DeclTy = Node.getTypePtr();
+#ifndef TYPECHECKER_NO_ERRORS
+  if (auto *NT = dynamic_cast<const NamedType *>(DeclTy.get())) {
+    if (GlobalSymbolTable) {
+      if (auto StructTy = GlobalSymbolTable->LookupType(NT->getName())) {
+        DeclTy = StructTy;
+        Node.setTypePtr(StructTy);
+      }
+    }
+  }
+#endif
+  setType(&Node, DeclTy);
+}
+
 // ─── Variables & declarations ─────────────────────────────────────────────────
 
 void TypeChecker::visitVariable(VariableExprAST &Node) {
@@ -309,6 +324,10 @@ void TypeChecker::visitVariable(VariableExprAST &Node) {
 }
 
 void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
+  if (Node.isImmutable() && !Node.hasExplicitInit()) {
+    reportError(Node.getLoc(), "Immutable variable '" + Node.getName() + "' requires an explicit initializer.");
+  }
+
   // Visit the initializer first (bottom-up)
   if (Node.getInitializer()) {
     const_cast<ExprAST *>(Node.getInitializer())->accept(*this);
@@ -1144,21 +1163,7 @@ void TypeChecker::visitStructInit(StructInitExprAST &Node) {
       }
     }
 
-    // 2. Check for missing fields (declared fields not provided by the caller).
-    for (const auto &DeclF : DeclFields) {
-      bool Provided = false;
-      for (const auto &[FieldName, Val] : Node.getNamedFields()) {
-        if (FieldName == DeclF.Name) {
-          Provided = true;
-          break;
-        }
-      }
-      if (!Provided) {
-        reportError(Node.getLoc(), "Missing field '" + DeclF.Name +
-                                       "' in initialization of '" +
-                                       Node.getName() + "'");
-      }
-    }
+    // 2. Missing fields are allowed and default-initialized under the hood.
   }
 #endif
 
