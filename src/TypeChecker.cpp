@@ -718,6 +718,53 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
   setType(&Node, RetTy ? RetTy : TurfVoid());
 }
 
+// ─── Compare / Matches / Done ─────────────────────────────────────────────────
+
+void TypeChecker::visitCompare(CompareExprAST &Node) {
+  // 1. Type-check the subject expression
+  check(Node.getSubjectMut());
+  TurfTypePtr SubjectTy = getType(Node.getSubject());
+
+  // Determine if the subject is a string (selects strcmp chain in codegen)
+  bool IsStringSubject = SubjectTy && SubjectTy->isNamed("string");
+  Node.SubjectIsString = IsStringSubject;
+
+  // Collect the name for error reporting
+  std::string SubjectTypeName =
+      SubjectTy ? SubjectTy->getName() : "<unknown>";
+
+  // 2. Type-check each arm's patterns and body
+  for (auto &Arm : Node.getArmsMut()) {
+    for (auto &PatExpr : Arm.Values) {
+      check(PatExpr.get());
+      TurfTypePtr PatTy = getType(PatExpr.get());
+
+      // Enforce subject-pattern type compatibility
+      if (SubjectTy && PatTy) {
+        if (!typesCompatible(SubjectTy.get(), PatTy.get())) {
+#ifndef TYPECHECKER_NO_ERRORS
+          CompareTypeError(Arm.Loc, SubjectTypeName, PatTy->getName()).raise();
+#else
+          throw std::runtime_error("TypeError: compare subject type '" +
+                                   SubjectTypeName + "' != pattern type '" +
+                                   PatTy->getName() + "'");
+#endif
+        }
+      }
+    }
+
+    // Type-check arm body
+    check(Arm.Body.get());
+  }
+
+  // 3. Type-check the 'otherwise' body if present
+  if (Node.getOtherBodyMut())
+    check(Node.getOtherBodyMut());
+
+  // 4. Empty compare{} warning was already emitted by the Parser
+  setType(&Node, TurfVoid());
+}
+
 // ─── Functions & calls ────────────────────────────────────────────────────────
 
 void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {

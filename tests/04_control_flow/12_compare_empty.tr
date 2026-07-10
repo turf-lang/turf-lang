@@ -1,0 +1,8 @@
+import io;
+
+fn main(): int {
+    mut x: int = 5;
+    // Empty compare — should compile with a warning, be a no-op
+    compare x {}
+    return 0;
+}

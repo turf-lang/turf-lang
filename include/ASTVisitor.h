@@ -57,6 +57,7 @@ class SizeOfExprAST;
 class ExternFuncDeclExprAST;
 class AddressOfExprAST;
 class DefaultInitExprAST;
+class CompareExprAST;
 
 
 // ─── ASTVisitor base class ────────────────────────────────────────────────────
@@ -112,6 +113,7 @@ public:
   virtual void visitBreak(BreakExprAST &Node) {}
   virtual void visitContinue(ContinueExprAST &Node) {}
   virtual void visitReturn(ReturnExprAST &Node) {}
+  virtual void visitCompare(CompareExprAST &Node) {}
 
 
   // ── Functions & Calls ─────────────────────────────────────────────────────

@@ -335,6 +335,28 @@ void Resolver::visitReturn(ReturnExprAST &Node) {
   visitChild(Node.getVal());
 }
 
+void Resolver::visitCompare(CompareExprAST &Node) {
+  // Resolve the compare subject
+  visitChild(Node.getSubjectMut());
+
+  // Resolve each arm: patterns then body (in its own scope)
+  for (auto &Arm : Node.getArmsMut()) {
+    for (auto &Val : Arm.Values)
+      visitChild(Val.get());
+    // Each arm body gets its own scope so declarations don't leak between arms
+    SymTable_.enterScope();
+    visitChild(Arm.Body.get());
+    SymTable_.exitScope();
+  }
+
+  // Resolve the otherwise body if present
+  if (Node.getOtherBodyMut()) {
+    SymTable_.enterScope();
+    visitChild(Node.getOtherBodyMut());
+    SymTable_.exitScope();
+  }
+}
+
 void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   if (FunctionNestingDepth_ > 0) {
     NestedFunctionError(Node.getLoc(), Node.getName()).raise();

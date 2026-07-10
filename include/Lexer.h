@@ -158,7 +158,10 @@ enum Token {
   TOK_EXTERN = -71,   ///< `extern` keyword — FFI function declaration
   TOK_PTR    = -72,   ///< `ptr`    keyword — opaque pointer type (Phase 3 FFI)
   TOK_ELLIPSIS = -73, ///< `...`   token   — variadic marker in extern fn params
-  TOK_SCOPE  = -74    ///< `::`    token   — scope resolution
+  TOK_SCOPE  = -74,   ///< `::`    token   — scope resolution
+  TOK_COMPARE  = -75, ///< `compare`  keyword — switch-like compare statement
+  TOK_MATCHES  = -76, ///< `matches`  keyword — arm pattern in compare
+  TOK_DONE     = -77  ///< `done`     keyword — terminates a matches arm body
 };
 
 int gettok();
