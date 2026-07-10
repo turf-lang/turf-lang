@@ -1,0 +1,36 @@
+Logical NOT ! Operator
+
+1. Changes Made:
+- Extended `ParseUnary()` in `src/Parser.cpp` to parse standalone `!` operator expressions.
+- Implemented AST desugaring from `!x` to `x != true` (a `BinaryExprAST` with `TOK_NEQ` operator and `BoolExprAST(true)` right-hand side).
+- Created a new test suite file `tests/03_typechecker/09_logical_not.tr` verifying standalone negations, conditional checks, double negations (`!!x`), and binary inequality compatibility (`!=`).
+
+2. Why the Change was Made:
+- Previously, the `!` character was only recognized by the Lexer as part of `!=` comparisons, failing to parse as a standalone operator.
+- Logical negation is a fundamental boolean primitive required to write idiomatic conditional branching (e.g. `if !done { ... }`).
+- Desugaring `!x` to `x != true` during the parsing stage allows us to fully reuse the existing typechecking, name-resolution, and LLVM codegen pipeline for `!=`, maintaining high compilation speed and clean compiler code without introducing extra AST node subclasses or LLVM IR generator cases.
+
+3. How it Helps/Changed:
+- Unary logical NOT operator `!` is now fully supported as a prefix operator in Turflang.
+- Compiles `!true` to `false` and `!false` to `true`.
+- Allows `if !flag` checks to evaluate correctly.
+- Supports double negation (`!!x` parses correctly to `!(!x)`).
+- The binary inequality operator `!=` is unaffected and continues to function exactly as before.
+
+4. Usage Examples (Source of Truth):
+
+```turflang
+// Logical NOT evaluation
+assert(!true == false, "");
+assert(!false == true, "");
+
+// Branching on negated conditionals
+mutable done: bool = false;
+if !done {
+    io.printline("still running");
+}
+
+// Double negation
+mutable active: bool = true;
+assert(!!active == true, "");
+```

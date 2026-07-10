@@ -56,10 +56,10 @@ mutable r: int = x > 0 give x otherwise -x;  // ternary: give...otherwise
 
 *Two small issues appended after Phase 2 completes. They are infrastructure that Phase 3 actively depends on — CFG warnings require `TurfWarning`, and the growing error taxonomy requires structured hints. See `PHASE_3_ISSUES.md` Issues #173 and #174.*
 
-- [ ] **#173: `TurfWarning` — Non-Interrupting Diagnostic Class 🔴**
+- [x] **#173: `TurfWarning` — Non-Interrupting Diagnostic Class 🔴**
   - **Implementation**: Add `class TurfWarning` to `Errors.h`. Unlike `TurfError::raise()`, `TurfWarning::emit()` calls `DiagnosticEngine::add(Loc, Msg, /*IsWarning=*/true)` and returns normally — no `longjmp`. Every CFG analysis warning uses this class.
 
-- [ ] **#174: Decouple Hints from `TurfError` 🔴**
+- [x] **#174: Decouple Hints from `TurfError` 🔴**
   - **Implementation**: Change `TurfError` constructor to accept a separate `Hint` string: `TurfError(Loc, Msg, Hint)`. `DiagnosticEngine` renders them separately. Migrate all existing error classes in `Errors.h`. Allows the SLM integration to pass the hint string directly to the model as distinct context.
 
 ---
@@ -104,13 +104,13 @@ fn apply(f: fn(int): int, x: int): int { return f(x); }
 ```
 
 **Group A — Infrastructure (do first):**
-- [ ] **#175: `extern fn` FFI 🔴**
+- [x] **#175: `extern fn` FFI 🔴**
 - [ ] **#176: Self-Referential Structs (LLVM Backend) 🔴**
-- [ ] **#177: `null` Type Enforcement (TypeChecker) 🔴**
+- [x] **#177: `null` Type Enforcement (TypeChecker) 🔴**
 
 **Group B — Language Features:**
-- [ ] **#178: Default Variable Initialization 🔴**
-- [ ] **#179: Logical NOT `!` Operator 🔴**
+- [x] **#178: Default Variable Initialization 🔴**
+- [x] **#179: Logical NOT `!` Operator 🔴**
 - [ ] **#180: `do { } while(cond)` Statement 🔴**
 - [ ] **#181: `compare` Statement (Switch) 🔴**
 - [ ] **#182: Bitwise Operators (`&`, `|`, `~`, `^`, `<<`, `>>`) 🔴**
