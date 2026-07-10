@@ -1777,6 +1777,197 @@ Value *ForExprAST::codegen() {
   return Constant::getNullValue(Type::getDoubleTy(*TheContext));
 }
 
+// ─── CompareExprAST::codegen ─────────────────────────────────────────────────
+//
+// Two code-generation paths:
+//
+//  Integer / enum subjects  (SubjectIsString == false)
+//  ─────────────────────────
+//  Uses LLVM SwitchInst.  Each arm adds one or more case constants; the
+//  backend promotes this to a jump table when the value range is dense enough.
+//  The default target is either the 'otherwise' body block or the merge block.
+//
+//  String subjects  (SubjectIsString == true)
+//  ────────────────────────────────────────────
+//  Falls back to a strcmp chain (SwitchInst only works for integers).
+//  For each arm we call strcmp(subject, pattern) == 0.  Multiple patterns in
+//  one stacked arm are OR-ed: if any pattern matches we jump to the body.
+//
+//  Both paths guarantee no fall-through: every body always branches to MergeBB.
+//
+Value *CompareExprAST::codegen() {
+  // Codegen the subject exactly once
+  Value *SubjectV = Subject->codegen();
+  if (!SubjectV)
+    return nullptr;
+
+  if (Arms.empty() && !OtherBody) {
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+  }
+
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "compare.end");
+
+  // ─── String subject: strcmp chain ────────────────────────────────────────
+  if (SubjectIsString) {
+    // Look up (or declare) strcmp
+    FunctionType *StrcmpTy = FunctionType::get(
+        Type::getInt32Ty(*TheContext),
+        {PointerType::get(*TheContext, 0), PointerType::get(*TheContext, 0)},
+        /*isVarArg=*/false);
+    FunctionCallee StrcmpFn =
+        TheModule->getOrInsertFunction("strcmp", StrcmpTy);
+
+    // Build: otherwise body block (or merge if absent)
+    BasicBlock *DefaultBB = OtherBody
+                                ? BasicBlock::Create(*TheContext, "compare.otherwise")
+                                : MergeBB;
+
+    for (size_t i = 0; i < Arms.size(); ++i) {
+      const MatchesArm &Arm = Arms[i];
+      BasicBlock *ArmBodyBB =
+          BasicBlock::Create(*TheContext, "compare.arm." + std::to_string(i), TheFunction);
+      BasicBlock *NoMatchBB =
+          BasicBlock::Create(*TheContext, "compare.nomatch." + std::to_string(i));
+
+      // For each pattern in this arm: strcmp(subj, pat) == 0 → jump to body
+      BasicBlock *CheckBB = Builder->GetInsertBlock();
+      (void)CheckBB;
+      Value *AnyMatch = ConstantInt::getFalse(*TheContext);
+
+      for (size_t j = 0; j < Arm.Values.size(); ++j) {
+        Value *PatV = Arm.Values[j]->codegen();
+        if (!PatV)
+          return nullptr;
+        Value *Cmp = Builder->CreateCall(
+            StrcmpFn, {SubjectV, PatV}, "strcmp.res." + std::to_string(j));
+        Value *IsZero = Builder->CreateICmpEQ(
+            Cmp, ConstantInt::get(Type::getInt32Ty(*TheContext), 0),
+            "strcmp.eq." + std::to_string(j));
+
+        if (j == 0) {
+          AnyMatch = IsZero;
+        } else {
+          // Emit short-circuit OR:
+          //   if AnyMatch already true → don't evaluate more strcmp
+          //   For simplicity we use a phi-free OR here (non-short-circuit)
+          //   This is correct because patterns are literals with no side effects.
+          AnyMatch = Builder->CreateOr(AnyMatch, IsZero, "or.pat");
+        }
+      }
+
+      Builder->CreateCondBr(AnyMatch, ArmBodyBB, NoMatchBB);
+
+      // Arm body
+      Builder->SetInsertPoint(ArmBodyBB);
+      if (!Arm.Body->codegen())
+        return nullptr;
+      if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(MergeBB);
+
+      // Next arm or default
+      TheFunction->insert(TheFunction->end(), NoMatchBB);
+      Builder->SetInsertPoint(NoMatchBB);
+    }
+
+    // Fall through to otherwise or merge
+    if (OtherBody) {
+      // The last NoMatchBB needs to branch to DefaultBB
+      if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(DefaultBB);
+
+      TheFunction->insert(TheFunction->end(), DefaultBB);
+      Builder->SetInsertPoint(DefaultBB);
+      if (!OtherBody->codegen())
+        return nullptr;
+      if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(MergeBB);
+    } else {
+      // No otherwise: current block (NoMatchBB or original) branches to merge
+      if (!Builder->GetInsertBlock()->getTerminator())
+        Builder->CreateBr(MergeBB);
+    }
+
+    TheFunction->insert(TheFunction->end(), MergeBB);
+    Builder->SetInsertPoint(MergeBB);
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+  }
+
+  // ─── Integer / enum subject: SwitchInst ──────────────────────────────────
+  //
+  // Cast subject to i64 (the natural integer type in TurfLang) so SwitchInst
+  // cases are always the same width regardless of whether the subject was
+  // declared as bool or a named enum.
+  Value *IntSubjectV = CastToType(SubjectV, TurfInt(), "switch.subj");
+
+  // Default block: either the 'otherwise' body or the merge block.
+  BasicBlock *DefaultBB = OtherBody
+                              ? BasicBlock::Create(*TheContext, "compare.otherwise")
+                              : MergeBB;
+
+  SwitchInst *SI = Builder->CreateSwitch(IntSubjectV, DefaultBB,
+                                         static_cast<unsigned>(Arms.size()));
+
+  // One basic block per arm (shared by all stacked patterns in that arm).
+  for (size_t i = 0; i < Arms.size(); ++i) {
+    const MatchesArm &Arm = Arms[i];
+    BasicBlock *ArmBodyBB =
+        BasicBlock::Create(*TheContext, "compare.arm." + std::to_string(i),
+                           TheFunction);
+
+    // Add all pattern constants as cases targeting this block.
+    for (const auto &PatExpr : Arm.Values) {
+      // Constant-fold the pattern.  Patterns must be integer literals or
+      // constant-foldable expressions (TypeChecker already enforced int type).
+      Value *PatV = PatExpr->codegen();
+      if (!PatV)
+        return nullptr;
+
+      auto *PatConst = dyn_cast<ConstantInt>(PatV);
+      if (!PatConst) {
+        // Cast to i64 so the switch width matches
+        PatV = CastToType(PatV, TurfInt(), "patcast");
+        PatConst = dyn_cast<ConstantInt>(PatV);
+      }
+      if (!PatConst) {
+        SemanticError(Arm.Loc,
+                      "matches pattern must be a compile-time integer constant.")
+            .raise();
+        return nullptr;
+      }
+      // Normalise to i64 width
+      APInt CaseVal = PatConst->getValue().sextOrTrunc(64);
+      SI->addCase(
+          llvm::cast<ConstantInt>(
+              ConstantInt::get(Type::getInt64Ty(*TheContext), CaseVal)),
+          ArmBodyBB);
+    }
+
+    // Emit arm body
+    Builder->SetInsertPoint(ArmBodyBB);
+    if (!Arm.Body->codegen())
+      return nullptr;
+    // Guarantee no fall-through: always branch to merge
+    if (!Builder->GetInsertBlock()->getTerminator())
+      Builder->CreateBr(MergeBB);
+  }
+
+  // Emit otherwise body (the switch's default target)
+  if (OtherBody) {
+    TheFunction->insert(TheFunction->end(), DefaultBB);
+    Builder->SetInsertPoint(DefaultBB);
+    if (!OtherBody->codegen())
+      return nullptr;
+    if (!Builder->GetInsertBlock()->getTerminator())
+      Builder->CreateBr(MergeBB);
+  }
+
+  TheFunction->insert(TheFunction->end(), MergeBB);
+  Builder->SetInsertPoint(MergeBB);
+
+  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+}
+
 Value *BreakExprAST::codegen() {
   if (LoopBlocks.empty()) {
     ControlFlowError(Loc, "'break' used outside of a loop").raise();
