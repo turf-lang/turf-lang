@@ -247,6 +247,44 @@ public:
                            "  " + Msg) {}
 };
 
+// Compare Statement Structural Error : parse-time violations in compare blocks
+class CompareError : public TurfError {
+public:
+  CompareError(SourceLocation Loc, const std::string &Msg)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "compare error!\n" + Colors::RESET +
+                      "  " + Msg,
+                  "Check the structure of your compare statement: matches "
+                  "arms need 'done', and 'otherwise' must be the last arm.") {}
+};
+
+// Compare Type Error : subject and pattern type mismatch in compare
+class CompareTypeError : public TurfError {
+public:
+  CompareTypeError(SourceLocation Loc, const std::string &SubjectType,
+                   const std::string &PatternType)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Type mismatch in compare!\n" +
+                      Colors::RESET +
+                      "  Subject has type '" + Colors::CYAN + SubjectType +
+                      Colors::RESET + "' but a matches arm has type '" +
+                      Colors::CYAN + PatternType + Colors::RESET + "'.",
+                  "All matches arm values must have the same type as the "
+                  "compare subject (int or string).") {}
+};
+
+// Compare Warning : emitted for empty compare {} blocks (no arms, no otherwise)
+class CompareWarning : public TurfWarning {
+public:
+  CompareWarning(SourceLocation Loc)
+      : TurfWarning(Loc,
+                    Colors::BRIGHT_YELLOW +
+                        "Warning: Empty compare statement has no arms and no "
+                        "'otherwise' — this is a no-op." +
+                        Colors::RESET,
+                    "Add at least one 'matches' arm or an 'otherwise' arm.") {}
+};
+
 // Keyword Error : Misspelled keywords
 class KeywordError : public TurfError {
 public:

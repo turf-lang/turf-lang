@@ -437,6 +437,67 @@ public:
   }
 };
 
+// ── Compare / Matches / Done ─────────────────────────────────────────────────
+// A single arm in a compare statement.
+// 'Values' holds all the stacked patterns:
+//   matches (1):
+//   matches (2):
+//     body
+//   done
+// → one MatchesArm with Values = {1, 2} and the shared body.
+struct MatchesArm {
+  SourceLocation Loc;                           ///< location of the first 'matches'
+  std::vector<std::unique_ptr<ExprAST>> Values; ///< one entry per stacked matches
+  std::unique_ptr<ExprAST> Body;                ///< shared arm body (BlockExprAST)
+};
+
+/// compare (subject) { matches val: ... done  otherwise: ... }
+class CompareExprAST : public ExprAST {
+  SourceLocation Loc;
+  std::unique_ptr<ExprAST> Subject;
+  std::vector<MatchesArm> Arms;
+  std::unique_ptr<ExprAST> OtherBody;  ///< nullptr if no 'otherwise'
+  SourceLocation OtherLoc;
+
+public:
+  /// Set by TypeChecker when the subject is a string — selects strcmp chain codegen.
+  bool SubjectIsString = false;
+
+  CompareExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Subject,
+                 std::vector<MatchesArm> Arms,
+                 std::unique_ptr<ExprAST> OtherBody,
+                 SourceLocation OtherLoc)
+      : Loc(Loc), Subject(std::move(Subject)), Arms(std::move(Arms)),
+        OtherBody(std::move(OtherBody)), OtherLoc(OtherLoc) {}
+
+  const SourceLocation &getLoc()       const { return Loc; }
+  const SourceLocation &getOtherLoc()  const { return OtherLoc; }
+  const ExprAST        *getSubject()   const { return Subject.get(); }
+        ExprAST        *getSubjectMut()      { return Subject.get(); }
+  const std::vector<MatchesArm> &getArms() const { return Arms; }
+        std::vector<MatchesArm> &getArmsMut()    { return Arms; }
+  const ExprAST *getOtherBody()        const { return OtherBody.get(); }
+        ExprAST *getOtherBodyMut()           { return OtherBody.get(); }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitCompare(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    std::vector<MatchesArm> ClonedArms;
+    ClonedArms.reserve(Arms.size());
+    for (const auto &Arm : Arms) {
+      MatchesArm CA;
+      CA.Loc = Arm.Loc;
+      for (const auto &V : Arm.Values)
+        CA.Values.push_back(CloneExprAST(V.get()));
+      CA.Body = CloneExprAST(Arm.Body.get());
+      ClonedArms.push_back(std::move(CA));
+    }
+    return std::make_unique<CompareExprAST>(
+        Loc, CloneExprAST(Subject.get()), std::move(ClonedArms),
+        CloneExprAST(OtherBody.get()), OtherLoc);
+  }
+};
+
 class VarDeclExprAST : public ExprAST {
   std::string Name;
   TurfTypePtr Type;

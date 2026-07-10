@@ -148,6 +148,7 @@ std::unique_ptr<ExprAST> ParseImport();
 std::unique_ptr<ExprAST> ParseReturnExpr();
 std::unique_ptr<ExprAST> ParseStructDecl();
 std::unique_ptr<ExprAST> ParseExternDecl();
+std::unique_ptr<ExprAST> ParseCompareExpr();
 // NOTE: ParseListDecl removed — list<T> declarations go through
 // ParseVarDeclBody
 //       via the unified ParseType() path, same as int/double/bool/string.
@@ -662,6 +663,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_FOR:
     return ParseForExpr();
 
+  case TOK_COMPARE:
+    return ParseCompareExpr();
+
   case TOK_ELSE: {
     SourceLocation KeywordLoc = CurLoc;
     std::string IdName = IdentifierStr;
@@ -967,7 +971,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
       continue;
     }
     if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
-        CurTok == TOK_FN || CurTok == TOK_STRUCT) {
+        CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_COMPARE) {
       auto Expr = ParseExpression();
       if (!Expr) return nullptr;
       if (CurTok == ';') {
@@ -1123,6 +1127,267 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   return std::make_unique<ForExprAST>(ForLoc, VarName, std::move(Start),
                                       std::move(End), std::move(Step),
                                       std::move(Body));
+}
+
+// ParseCompareExpr — parses:
+//   compare [( ] subject [ )] {
+//       matches [( ] val [ )] :
+//       matches [( ] val [ )] :     ← stacking (all share one body + done)
+//           body statements
+//       done
+//
+//       otherwise:
+//           body statements
+//   }
+//
+// Rules enforced here (parse-time errors):
+//   • Missing 'done' after arm body → error
+//   • Body statements between stacked matches headers → error
+//   • 'otherwise' before any remaining matches arm → error
+//   • Duplicate 'otherwise' → error
+//   • Empty compare{} → CompareWarning (not an error)
+std::unique_ptr<ExprAST> ParseCompareExpr() {
+  SourceLocation CompareLoc = CurLoc;
+  getNextToken(); // eat 'compare'
+
+  // ── Parse subject ────────────────────────────────────────────────────────
+  // Optional parentheses around the subject (like if/while).
+  bool HasParen = (CurTok == '(');
+  if (HasParen)
+    getNextToken(); // eat '('
+
+  std::unique_ptr<ExprAST> Subject;
+  {
+    NoStructInitGuard Guard;
+    Subject = ParseExpression();
+  }
+  if (!Subject)
+    return nullptr;
+
+  if (HasParen) {
+    if (CurTok != ')') {
+      LogErrorAt(CurLoc, "Expected ')' to close the compare subject");
+      return nullptr;
+    }
+    getNextToken(); // eat ')'
+  }
+
+  // ── Opening brace ────────────────────────────────────────────────────────
+  if (CurTok != '{') {
+    LogErrorAt(CompareLoc, "Expected '{' to open the compare block.");
+    return nullptr;
+  }
+  getNextToken(); // eat '{'
+
+  // ── Arm parsing loop ──────────────────────────────────────────────────────
+  std::vector<MatchesArm> Arms;
+  std::unique_ptr<ExprAST> OtherBody = nullptr;
+  SourceLocation OtherLoc = {0, 0};
+  bool HasOther = false;
+
+  while (CurTok != '}' && CurTok != TOK_EOF) {
+    // Skip stray semicolons between arms
+    if (CurTok == ';') {
+      getNextToken();
+      continue;
+    }
+
+    // ── 'otherwise' arm (optional, must be last) ─────────────────────────
+    if (CurTok == TOK_OTHERWISE) {
+      if (HasOther) {
+        CompareError(CurLoc, "Duplicate 'otherwise' arm in compare.").raise();
+        return nullptr;
+      }
+      HasOther = true;
+      OtherLoc = CurLoc;
+      getNextToken(); // eat 'otherwise'
+
+      if (CurTok != TOK_COLON) {
+        LogErrorAt(CurLoc, "Expected ':' after 'otherwise'.");
+        return nullptr;
+      }
+      getNextToken(); // eat ':'
+
+      // Parse the body of the otherwise arm as a sequence of statements
+      // terminated by '}' (the closing brace of the compare block).
+      std::vector<std::unique_ptr<ExprAST>> OtherStmts;
+      while (CurTok != '}' && CurTok != TOK_EOF) {
+        if (CurTok == ';') { getNextToken(); continue; }
+        if (CurTok == TOK_MUTABLE || CurTok == TOK_IMMUTABLE) {
+          auto E = ParseLetStatement(CurTok == TOK_IMMUTABLE);
+          if (!E) return nullptr;
+          OtherStmts.push_back(std::move(E));
+          continue;
+        }
+        if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
+            CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_COMPARE) {
+          auto E = ParseExpression();
+          if (!E) return nullptr;
+          OtherStmts.push_back(std::move(E));
+          continue;
+        }
+        auto E = ParseExpression();
+        if (!E) return nullptr;
+        if (CurTok != ';') {
+          LogErrorAt(CurLoc, "Expected ';' after statement in 'otherwise' arm.");
+          return nullptr;
+        }
+        getNextToken(); // eat ';'
+        OtherStmts.push_back(std::move(E));
+      }
+      OtherBody = std::make_unique<BlockExprAST>(std::move(OtherStmts));
+
+      // After 'otherwise', only '}' is valid (it must be the last arm)
+      if (CurTok != '}') {
+        // There's something after otherwise — likely another matches arm
+        CompareError(CurLoc,
+                     "'otherwise' must be the last arm in compare.")
+            .raise();
+        return nullptr;
+      }
+      break; // 'otherwise' consumed; exit arm loop
+    }
+
+    // ── 'matches' arm ────────────────────────────────────────────────────
+    if (CurTok != TOK_MATCHES) {
+      // Unexpected token inside compare block — could be a keyword typo
+      LogErrorAt(CurLoc,
+                 "Expected 'matches' or 'otherwise' inside compare block.");
+      return nullptr;
+    }
+
+    if (HasOther) {
+      CompareError(CurLoc,
+                   "'otherwise' must be the last arm in compare.")
+          .raise();
+      return nullptr;
+    }
+
+    SourceLocation ArmLoc = CurLoc;
+    std::vector<std::unique_ptr<ExprAST>> Patterns;
+
+    // Collect all stacked 'matches val:' headers
+    while (CurTok == TOK_MATCHES) {
+      getNextToken(); // eat 'matches'
+
+      // Optional parens around the pattern value
+      bool PatternParen = (CurTok == '(');
+      if (PatternParen)
+        getNextToken(); // eat '('
+
+      auto Val = ParseExpression();
+      if (!Val) return nullptr;
+
+      if (PatternParen) {
+        if (CurTok != ')') {
+          LogErrorAt(CurLoc, "Expected ')' to close matches pattern.");
+          return nullptr;
+        }
+        getNextToken(); // eat ')'
+      }
+
+      if (CurTok != TOK_COLON) {
+        LogErrorAt(CurLoc, "Expected ':' after matches pattern.");
+        return nullptr;
+      }
+      getNextToken(); // eat ':'
+
+      Patterns.push_back(std::move(Val));
+
+      // If the very next non-semicolon token is not another 'matches' or 'done'
+      // or 'otherwise' or '}', the user has put a body statement between
+      // stacked headers — that is an error.
+      while (CurTok == ';') getNextToken(); // skip stray semicolons
+
+      if (CurTok != TOK_MATCHES && CurTok != TOK_DONE &&
+          CurTok != TOK_OTHERWISE && CurTok != '}') {
+        // Body appears before all matches headers are consumed — error only
+        // when there are additional matches after the current one i.e. the
+        // outer while would re-enter. We detect this by checking the next token.
+        // Actually: if CurTok != TOK_MATCHES here, we're about to parse the
+        // body, so this is fine (we just exit the inner while). No error.
+        break; // exit inner while — next is body
+      }
+
+      if (CurTok == TOK_DONE || CurTok == TOK_OTHERWISE || CurTok == '}') {
+        // Header has no body — error: missing body / done
+        CompareError(ArmLoc,
+                     "Expected 'done' after matches arm body — "
+                     "arm has no body.")
+            .raise();
+        return nullptr;
+      }
+      // CurTok == TOK_MATCHES → continue stacking
+    }
+
+    // ── Parse arm body statements until 'done' ────────────────────────────
+    std::vector<std::unique_ptr<ExprAST>> ArmStmts;
+    bool GotDone = false;
+    while (CurTok != TOK_DONE && CurTok != '}' && CurTok != TOK_EOF) {
+      if (CurTok == ';') { getNextToken(); continue; }
+      // Detect premature start of next arm (missing done)
+      if (CurTok == TOK_MATCHES || CurTok == TOK_OTHERWISE) {
+        CompareError(CurLoc,
+                     "Expected 'done' after matches arm body.")
+            .raise();
+        return nullptr;
+      }
+      if (CurTok == TOK_MUTABLE || CurTok == TOK_IMMUTABLE) {
+        auto E = ParseLetStatement(CurTok == TOK_IMMUTABLE);
+        if (!E) return nullptr;
+        ArmStmts.push_back(std::move(E));
+        continue;
+      }
+      if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
+          CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_COMPARE) {
+        auto E = ParseExpression();
+        if (!E) return nullptr;
+        ArmStmts.push_back(std::move(E));
+        continue;
+      }
+      auto E = ParseExpression();
+      if (!E) return nullptr;
+      if (CurTok != ';') {
+        LogErrorAt(CurLoc, "Expected ';' after statement in matches arm body.");
+        return nullptr;
+      }
+      getNextToken(); // eat ';'
+      ArmStmts.push_back(std::move(E));
+    }
+
+    if (CurTok == TOK_DONE) {
+      GotDone = true;
+      getNextToken(); // eat 'done'
+    } else {
+      // Reached '}' or EOF without 'done'
+      CompareError(ArmLoc, "Expected 'done' after matches arm body.").raise();
+      return nullptr;
+    }
+    (void)GotDone;
+
+    MatchesArm Arm;
+    Arm.Loc = ArmLoc;
+    Arm.Values = std::move(Patterns);
+    Arm.Body = std::make_unique<BlockExprAST>(std::move(ArmStmts));
+    Arms.push_back(std::move(Arm));
+  }
+
+  // ── Closing brace ────────────────────────────────────────────────────────
+  if (CurTok != '}') {
+    LogErrorAt(CompareLoc,
+               "Missing closing '}' for compare block.");
+    return nullptr;
+  }
+  getNextToken(); // eat '}'
+
+  // Warn on empty compare{}
+  if (Arms.empty() && !OtherBody) {
+    CompareWarning(CompareLoc).emit();
+  }
+
+  return std::make_unique<CompareExprAST>(
+      CompareLoc, std::move(Subject), std::move(Arms), std::move(OtherBody),
+      OtherLoc);
 }
 
 static std::unique_ptr<ExprAST> SynthesizeDefault(SourceLocation Loc, TurfTypePtr Type) {
