@@ -877,6 +877,20 @@ std::unique_ptr<ExprAST> Parse() {
 }
 
 std::unique_ptr<ExprAST> ParseUnary() {
+  if (CurTok == '!') {
+    SourceLocation Loc = CurLoc;
+    getNextToken(); // consume '!'
+    auto Operand = ParseUnary();
+    if (!Operand)
+      return nullptr;
+    // Desugar: !x -> x != true
+    return std::make_unique<BinaryExprAST>(
+        Loc, TOK_NEQ,
+        std::move(Operand),
+        std::make_unique<BoolExprAST>(true)
+    );
+  }
+
   if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
     int OpType = CurTok;
     SourceLocation Loc = CurLoc;
