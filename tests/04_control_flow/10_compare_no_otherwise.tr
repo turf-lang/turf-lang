@@ -1,0 +1,28 @@
+import io;
+
+fn main(): int {
+    mut x: int = 3;
+    mut result: int = 0;
+
+    compare x {
+        matches 1:
+            result = 1;
+        done
+        matches 3:
+            result = 3;
+        done
+    }
+    assert(result == 3, "compare no-otherwise: x=3 should hit arm 3");
+
+    mut y: int = 99;
+    mut result2: int = -1;
+    compare y {
+        matches 1:
+            result2 = 1;
+        done
+    }
+    // y=99 doesn't match anything, result2 stays -1
+    assert(result2 == -1, "compare no-otherwise: no match should be a no-op");
+
+    return 0;
+}
