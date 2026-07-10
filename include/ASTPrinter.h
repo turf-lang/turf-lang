@@ -245,6 +245,39 @@ public:
     }
   }
 
+  void visitCompare(CompareExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "CompareExpr(" << N.getArms().size() << " arms"
+              << (N.getOtherBody() ? ", otherwise" : "") << ")\n";
+    descend();
+    printIndent(Depth_);
+    std::cout << "Subject:\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getSubject()), Depth_);
+    ascend();
+    for (size_t i = 0; i < N.getArms().size(); ++i) {
+      const auto &Arm = N.getArms()[i];
+      printIndent(Depth_);
+      std::cout << "Arm[" << i << "] (" << Arm.Values.size() << " pattern(s)):\n";
+      descend();
+      for (const auto &V : Arm.Values)
+        print(const_cast<ExprAST *>(V.get()), Depth_);
+      printIndent(Depth_);
+      std::cout << "Body:\n";
+      descend();
+      print(Arm.Body.get(), Depth_);
+      ascend();
+      ascend();
+    }
+    if (N.getOtherBody()) {
+      printIndent(Depth_);
+      std::cout << "Otherwise:\n";
+      descend();
+      print(const_cast<ExprAST *>(N.getOtherBody()), Depth_);
+      ascend();
+    }
+    ascend();
+  }
 
   // ── Functions ───────────────────────────────────────────────────────────────
   void visitFuncDef(FuncDefExprAST &N) override {
