@@ -1,0 +1,26 @@
+// Test: 3-level deep struct nesting — all fields default-initialized recursively
+import io;
+
+struct Inner {
+    val: int,
+    flag: bool
+}
+
+struct Middle {
+    score: double,
+    inner: Inner
+}
+
+struct Outer {
+    label: string,
+    mid: Middle
+}
+
+fn main(): int {
+    mut o: Outer;
+    assert(o.label == "", "Outer.label default empty string");
+    assert(o.mid.score == 0.0, "Outer.mid.score default 0.0");
+    assert(o.mid.inner.val == 0, "Outer.mid.inner.val default 0");
+    assert(o.mid.inner.flag == false, "Outer.mid.inner.flag default false");
+    return 0;
+}

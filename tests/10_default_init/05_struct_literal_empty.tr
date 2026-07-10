@@ -1,0 +1,16 @@
+// Test: struct literal with all fields missing defaults to zero
+import io;
+
+struct Config {
+    retries: int,
+    timeout: int,
+    verbose: bool
+}
+
+fn main(): int {
+    mut cfg: Config = Config{};
+    assert(cfg.retries == 0, "Config{} retries default 0");
+    assert(cfg.timeout == 0, "Config{} timeout default 0");
+    assert(cfg.verbose == false, "Config{} verbose default false");
+    return 0;
+}

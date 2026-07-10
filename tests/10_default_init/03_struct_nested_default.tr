@@ -1,0 +1,20 @@
+// Test: nested struct default initialization (Player contains Vec2)
+import io;
+
+struct Vec2 {
+    x: double,
+    y: double
+}
+
+struct Player {
+    health: int,
+    position: Vec2
+}
+
+fn main(): int {
+    mut p: Player;
+    assert(p.health == 0, "Player.health default 0");
+    assert(p.position.x == 0.0, "Player.position.x default 0.0");
+    assert(p.position.y == 0.0, "Player.position.y default 0.0");
+    return 0;
+}

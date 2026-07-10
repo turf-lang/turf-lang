@@ -1,0 +1,22 @@
+// Test: struct literal with partial fields — missing ones default to zero
+import io;
+
+struct Point {
+    x: int,
+    y: int,
+    z: int
+}
+
+fn main(): int {
+    mut p: Point = Point{x: 5};
+    assert(p.x == 5, "explicit x=5");
+    assert(p.y == 0, "missing y defaults to 0");
+    assert(p.z == 0, "missing z defaults to 0");
+
+    mut q: Point = Point{y: 7, z: 3};
+    assert(q.x == 0, "missing x defaults to 0");
+    assert(q.y == 7, "explicit y=7");
+    assert(q.z == 3, "explicit z=3");
+
+    return 0;
+}

@@ -1,0 +1,8 @@
+// Test: mut bool used before assignment — must fail
+fn main(): int {
+    mut flag: bool;
+    if flag {
+        return 1;
+    }
+    return 0;
+}

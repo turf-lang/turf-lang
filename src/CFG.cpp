@@ -316,6 +316,11 @@ void CFGBuilder::visitIf(ExprAST *E) {
             ? createBlock("elseif.cond")
             : (If->getElseBody() ? createBlock("if.else") : MergeBB);
 
+    // Add the condition expression as a statement so the DAP can detect
+    // reads of uninitialized variables used as if/elseif conditions.
+    if (Branches[i].Cond)
+      CurrentCondBlock->addStatement(Branches[i].Cond.get());
+
     CurrentCFG->addEdge(CurrentCondBlock, ThenBB);
     CurrentCFG->addEdge(CurrentCondBlock, NextBB);
     CurrentCondBlock->setTerminator(TerminatorKind::Branch, Branches[i].Loc);
@@ -376,6 +381,10 @@ void CFGBuilder::visitWhile(ExprAST *E) {
   WhileEntry->setTerminator(TerminatorKind::Unconditional, While->getLoc());
 
   // Condition branches to body or exit
+  // Add the condition expression as a statement so the DAP can detect reads
+  // of uninitialized variables used as while-loop conditions.
+  if (While->getCond())
+    CondBB->addStatement(const_cast<ExprAST *>(While->getCond()));
   CurrentCFG->addEdge(CondBB, BodyBB);
   CurrentCFG->addEdge(CondBB, ExitBB);
   CondBB->setTerminator(TerminatorKind::Branch, While->getLoc());
@@ -422,6 +431,12 @@ void CFGBuilder::visitFor(ExprAST *E) {
   ForEntry->setTerminator(TerminatorKind::Unconditional, SourceLocation{});
 
   // Condition branches to body or exit
+  // Add start/end expressions as statements in for.cond so the DAP can detect
+  // reads of uninitialized range variables.
+  if (For->getStart())
+    CondBB->addStatement(const_cast<ExprAST *>(For->getStart()));
+  if (For->getEnd())
+    CondBB->addStatement(const_cast<ExprAST *>(For->getEnd()));
   CurrentCFG->addEdge(CondBB, BodyBB);
   CurrentCFG->addEdge(CondBB, ExitBB);
   CondBB->setTerminator(TerminatorKind::Branch, SourceLocation{});
