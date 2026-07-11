@@ -246,9 +246,18 @@ static const TurfType *getExprType(const ExprAST *E) {
     return TurfNull().get();
   }
   if (auto *Bin = dynamic_cast<const BinaryExprAST *>(E)) {
-    char Op = Bin->getOp();
-    if (Op == '<' || Op == '>' || Op == '!' || Op == '=')
+    int Op = Bin->getOp();
+    if (Op == '<' || Op == '>' || Op == '!' || Op == '=' ||
+        Op == TOK_EQ || Op == TOK_NEQ || Op == TOK_LEQ || Op == TOK_GEQ ||
+        Op == TOK_AND || Op == TOK_OR)
       return TurfBool().get();
+    // Bitwise operators return int
+    if (Op == '&' || Op == '|' || Op == '^' ||
+        Op == TOK_LSHIFT || Op == TOK_RSHIFT)
+      return TurfInt().get();
+    // Exponentiation returns double
+    if (Op == TOK_POWER)
+      return TurfDouble().get();
     const TurfType *LType = getExprType(Bin->getLHS());
     const TurfType *RType = getExprType(Bin->getRHS());
     if (!LType)
@@ -896,8 +905,29 @@ Value *BinaryExprAST::codegen() {
     return Builder->CreateOr(L, R, "ortmp");
   }
 
-  // Power
-  case '^': {
+  // Bitwise XOR (^ is now XOR, not power)
+  case '^':
+    // Bitwise XOR — both operands must be int (TypeChecker verified)
+    return Builder->CreateXor(L, R, "xortmp");
+
+  // Bitwise AND
+  case '&':
+    return Builder->CreateAnd(L, R, "bitandtmp");
+
+  // Bitwise OR
+  case '|':
+    return Builder->CreateOr(L, R, "bitormp");
+
+  // Bitwise left shift
+  case TOK_LSHIFT:
+    return Builder->CreateShl(L, R, "lshifttmp");
+
+  // Bitwise right shift (arithmetic, preserves sign)
+  case TOK_RSHIFT:
+    return Builder->CreateAShr(L, R, "rshifttmp");
+
+  // Exponentiation: ** (replaces the old ^ operator)
+  case TOK_POWER: {
     CastBoth(TurfDouble());
 #if LLVM_VERSION_MAJOR >= 19
     Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
@@ -1351,6 +1381,12 @@ Value *UnaryExprAST::codegen() {
       return Builder->CreateNeg(OperandV);
     llvm::report_fatal_error("Internal error: Unknown unary operand type");
     return nullptr;
+  case '~':
+    // Bitwise NOT: ~x == x XOR -1 (all bits set)
+    if (!OperandType->isNamed("int")) {
+      return ConstantInt::get(*TheContext, APInt(64, 0, true));
+    }
+    return Builder->CreateNot(OperandV, "bitnottmp");
   default:
     llvm::report_fatal_error("Internal error: Unknown unary operator");
     return nullptr;

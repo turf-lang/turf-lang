@@ -1,0 +1,32 @@
+// Test: Bitwise left shift operator
+// 1 << 4 == 16
+
+fn main(): int {
+    mut a: int = 1 << 4;
+    assert(a == 16, "1 << 4 should equal 16");
+
+    // Additional left shift tests
+    mut b: int = 1 << 0;
+    assert(b == 1, "1 << 0 should equal 1");
+
+    mut c: int = 1 << 1;
+    assert(c == 2, "1 << 1 should equal 2");
+
+    mut d: int = 1 << 8;
+    assert(d == 256, "1 << 8 should equal 256");
+
+    mut e: int = 5 << 2;    // 0b101 << 2 = 0b10100 = 20
+    assert(e == 20, "5 << 2 should equal 20");
+
+    mut f: int = 3 << 3;    // 3 * 8 = 24
+    assert(f == 24, "3 << 3 should equal 24");
+
+    // Left shift by larger amounts
+    mut g: int = 1 << 10;
+    assert(g == 1024, "1 << 10 should equal 1024");
+
+    mut h: int = 1 << 16;
+    assert(h == 65536, "1 << 16 should equal 65536");
+
+    return 0;
+}

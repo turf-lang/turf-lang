@@ -1,0 +1,34 @@
+Bitwise Operators and Exponentiation
+
+1. Changes Made:
+- Added `TOK_POWER` (**), `TOK_LSHIFT` (<<), and `TOK_RSHIFT` (>>) tokens in `include/Lexer.h`.
+- Updated `gettok()` in `src/Lexer.cpp` to recognize and tokenize `**`, `<<`, and `>>` operators.
+- Repurposed `^` as bitwise XOR and `~` as bitwise NOT in `src/Parser.cpp`.
+- Set operators precedence in `InitializePrecedence()` in `src/Parser.cpp` to follow `<<` and `>>` (38) > `&` (37) > `^` (35) > `|` (33), and configured `**` (60) as exponentiation.
+- Updated `ParseUnary()` in `src/Parser.cpp` to support unary bitwise NOT (`~`).
+- Updated `TypeChecker::visitBinary()` and `TypeChecker::visitUnary()` in `src/TypeChecker.cpp` to enforce that bitwise operators (`&`, `|`, `^`, `<<`, `>>`, `~`) require `int` operands and produce an `int` result.
+- Updated `TypeChecker::visitBinary()` in `src/TypeChecker.cpp` to allow numeric operands for `**` exponentiation and infer `double` result.
+- Implemented bitwise operation IR generation in `BinaryExprAST::codegen()` (`&`, `|`, `^`, `<<`, `>>`) and `UnaryExprAST::codegen()` (`~`) in `src/Codegen.cpp`.
+- Mapped `TOK_POWER` (`**`) to the LLVM pow intrinsic in `src/Codegen.cpp`.
+- Fixed `getExprType()` in `src/Codegen.cpp` to return `int` for bitwise operations and `double` for exponentiation.
+- Added comprehensive unit, positive, and negative tests under `tests/11_bitwise_ops/`.
+
+2. Why the Change was Made:
+- The Turf language was missing support for basic bitwise operations (`&`, `|`, `^`, `<<`, `>>`, `~`) which are essential for low-level systems programming.
+- Repurposing `^` as XOR and introducing `**` as exponentiation aligns the language syntax with standard modern conventions (e.g. Python, JS).
+
+3. How it Helps/Changed:
+- Integers can now be shifted, masked, inverted, and XORed using standard operators.
+- The TypeChecker successfully validates types on all bitwise and exponentiation operations, preventing incompatible types (e.g., float, double, string) from performing bitwise calculations.
+- Compiler crashes (core dumps) are prevented by replacing abort calls with dummy fallback values in codegen for invalid code.
+
+4. Example Diagnostic Output Format (for type mismatch on bitwise AND):
+── error at line 7, col 20
+
+  Type mismatch!
+  Bitwise operator requires integer operands, but left operand is 'double'.
+
+  Hint: Check that you're not mixing incompatible types (like assigning a string to an int variable).
+
+  7 │     mut c: int = a & b;  // TypeError: bitwise operator requires integer operands
+    │                    ^ Here!

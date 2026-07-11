@@ -87,6 +87,19 @@ void InitializePrecedence() {
   BinopPrecedence[TOK_LEQ] = 30;
   BinopPrecedence[TOK_GEQ] = 30;
 
+  // Bitwise OR
+  BinopPrecedence['|'] = 33;
+
+  // Bitwise XOR
+  BinopPrecedence['^'] = 35;
+
+  // Bitwise AND
+  BinopPrecedence['&'] = 37;
+
+  // Bitwise shifts
+  BinopPrecedence[TOK_LSHIFT] = 38;
+  BinopPrecedence[TOK_RSHIFT] = 38;
+
   // Additive
   BinopPrecedence['+'] = 40;
   BinopPrecedence['-'] = 40;
@@ -96,8 +109,8 @@ void InitializePrecedence() {
   BinopPrecedence['/'] = 50;
   BinopPrecedence['%'] = 50;
 
-  // Exponentiation
-  BinopPrecedence['^'] = 60;
+  // Exponentiation (formerly ^, now **)
+  BinopPrecedence[TOK_POWER] = 60;
 }
 
 void ClearParsedTopLevelASTs() {
@@ -895,6 +908,14 @@ std::unique_ptr<ExprAST> ParseUnary() {
     );
   }
 
+  // Bitwise NOT: ~expr
+  if (CurTok == '~') {
+    getNextToken(); // consume '~'
+    auto Operand = ParseUnary();
+    if (!Operand)
+      return nullptr;
+    return std::make_unique<UnaryExprAST>('~', std::move(Operand));
+  }
   if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
     int OpType = CurTok;
     SourceLocation Loc = CurLoc;

@@ -1,0 +1,32 @@
+// Test: Bitwise right shift operator
+// 256 >> 2 == 64
+
+fn main(): int {
+    mut a: int = 256 >> 2;
+    assert(a == 64, "256 >> 2 should equal 64");
+
+    // Additional right shift tests
+    mut b: int = 16 >> 4;
+    assert(b == 1, "16 >> 4 should equal 1");
+
+    mut c: int = 8 >> 1;
+    assert(c == 4, "8 >> 1 should equal 4");
+
+    mut d: int = 8 >> 0;
+    assert(d == 8, "8 >> 0 should equal 8");
+
+    mut e: int = 1024 >> 10;
+    assert(e == 1, "1024 >> 10 should equal 1");
+
+    mut f: int = 100 >> 2;  // 100 / 4 = 25
+    assert(f == 25, "100 >> 2 should equal 25");
+
+    // Arithmetic right shift preserves sign for negative numbers
+    mut g: int = -8 >> 1;   // -8 >> 1 = -4 (arithmetic shift)
+    assert(g == -4, "-8 >> 1 should equal -4 (arithmetic right shift)");
+
+    mut h: int = -1 >> 1;   // -1 >> 1 = -1 (arithmetic shift, sign extended)
+    assert(h == -1, "-1 >> 1 should equal -1 (arithmetic right shift)");
+
+    return 0;
+}

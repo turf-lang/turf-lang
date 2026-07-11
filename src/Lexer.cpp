@@ -432,6 +432,12 @@ int gettok() {
       return TOK_GEQ;
     }
 
+    if (LastChar == '>') {
+      LastChar = SourceFile->get();
+      CurCol++;
+      return TOK_RSHIFT;
+    }
+
     return '>';
   }
 
@@ -443,6 +449,12 @@ int gettok() {
       LastChar = SourceFile->get();
       CurCol++;
       return TOK_LEQ;
+    }
+
+    if (LastChar == '<') {
+      LastChar = SourceFile->get();
+      CurCol++;
+      return TOK_LSHIFT;
     }
 
     return '<';
@@ -520,6 +532,12 @@ int gettok() {
       LastChar = SourceFile->get();
       CurCol++;
       return TOK_MUL_ASSIGN;
+    }
+
+    if (LastChar == '*') {
+      LastChar = SourceFile->get();
+      CurCol++;
+      return TOK_POWER;
     }
 
     return '*';

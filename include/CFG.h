@@ -59,7 +59,7 @@ public:
   const SourceLocation &getTerminatorLoc() const { return TerminatorLoc; }
   bool isReachable() const { return IsReachable; }
   bool isEmpty() const { return Statements.empty(); }
-
+  
   // Mutators
   void addStatement(ExprAST *Stmt) { Statements.push_back(Stmt); }
   void addPredecessor(TurfBasicBlock *BB) { Predecessors.push_back(BB); }
@@ -91,9 +91,8 @@ private:
 
 public:
   explicit CFG(std::string FunctionName, TurfTypePtr ReturnType = TurfVoid())
-      : FunctionName(std::move(FunctionName)),
-        ReturnType(std::move(ReturnType)), EntryBlock(nullptr),
-        ExitBlock(nullptr), NextID(0) {}
+      : FunctionName(std::move(FunctionName)), ReturnType(std::move(ReturnType)),
+        EntryBlock(nullptr), ExitBlock(nullptr), NextID(0) {}
 
   // Accessors
   const std::string &getFunctionName() const { return FunctionName; }

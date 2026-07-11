@@ -1,0 +1,35 @@
+// Test: Operator precedence for bitwise operators
+// Verify: shifts > bitwise AND > bitwise XOR > bitwise OR
+// Also verify bitwise has lower precedence than arithmetic
+
+fn main(): int {
+    // Shifts bind tighter than & (shift evaluated first)
+    // 1 << 2 & 15 == (1 << 2) & 15 == 4 & 15 == 4
+    mut a: int = 1 << 2 & 15;
+    assert(a == 4, "1 << 2 & 15 should equal 4 (shift before AND)");
+
+    // & binds tighter than ^ 
+    // 3 ^ 5 & 6 == 3 ^ (5 & 6) == 3 ^ 4 == 7
+    mut b: int = 3 ^ 5 & 6;
+    assert(b == 7, "3 ^ 5 & 6 should equal 7 (AND before XOR)");
+
+    // ^ binds tighter than |
+    // 3 | 5 ^ 6 == 3 | (5 ^ 6) == 3 | 3 == 3
+    mut c: int = 3 | 5 ^ 6;
+    assert(c == 3, "3 | 5 ^ 6 should equal 3 (XOR before OR)");
+
+    // Arithmetic binds tighter than bitwise
+    // 1 + 2 & 3 == (1 + 2) & 3 == 3 & 3 == 3
+    mut d: int = 1 + 2 & 3;
+    assert(d == 3, "1 + 2 & 3 should equal 3 (add before AND)");
+
+    // Full precedence chain with parens for clarity
+    mut e: int = (1 | (2 ^ (3 & 7)));  // 3 & 7 = 3, 2 ^ 3 = 1, 1 | 1 = 1
+    assert(e == 1, "(1 | (2 ^ (3 & 7))) should equal 1");
+
+    // Combined with arithmetic
+    mut f: int = 2 * 4 | 1;   // (2*4) | 1 = 8 | 1 = 9
+    assert(f == 9, "2 * 4 | 1 should equal 9");
+
+    return 0;
+}

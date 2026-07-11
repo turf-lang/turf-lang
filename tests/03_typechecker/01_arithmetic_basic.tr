@@ -17,7 +17,7 @@ fn main(): int {
     mut e: int = 17 % 5;
     assert(e == 2, "");
 
-    mut f: double = 2.0 ^ 3.0;
+    mut f: double = 2.0 ** 3.0;
     assert(f == 8.0, "");
 
     // Unary negation
