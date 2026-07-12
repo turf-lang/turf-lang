@@ -1,0 +1,31 @@
+// Test: Bitwise XOR operator  
+// 5 ^ 3 == 6  (0b101 ^ 0b011 = 0b110)
+
+fn main(): int {
+    mut a: int = 5 ^ 3;
+    assert(a == 6, "5 ^ 3 should equal 6 (XOR, not power)");
+
+    // Additional XOR tests
+    mut b: int = 15 ^ 9;    // 1111 ^ 1001 = 0110 = 6
+    assert(b == 6, "15 ^ 9 should equal 6");
+
+    mut c: int = 255 ^ 255; // same values XOR = 0
+    assert(c == 0, "255 ^ 255 should equal 0");
+
+    mut d: int = 0 ^ 42;
+    assert(d == 42, "0 ^ 42 should equal 42");
+
+    // XOR self-inverse: a ^ b ^ b == a
+    mut e: int = 100 ^ 37;
+    mut f: int = e ^ 37;
+    assert(f == 100, "XOR self-inverse: (100 ^ 37) ^ 37 should equal 100");
+
+    // XOR as simple swap: a ^ b ^ a == b
+    mut x: int = 42;
+    mut y: int = 99;
+    mut tmp: int = x ^ y;
+    assert((tmp ^ x) == y, "XOR swap: (x ^ y) ^ x should equal y");
+    assert((tmp ^ y) == x, "XOR swap: (x ^ y) ^ y should equal x");
+
+    return 0;
+}

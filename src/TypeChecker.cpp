@@ -407,9 +407,53 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
            op == -20 /*AND*/ || op == -21 /*OR*/;
   };
 
+  // Bitwise binary operators: &, |, ^, <<, >> — require integer operands.
+  auto isBitwise = [](int op) -> bool {
+    return op == '&' || op == '|' || op == '^' ||
+           op == -79 /*TOK_LSHIFT*/ || op == -80 /*TOK_RSHIFT*/;
+  };
+
+  if (isBitwise(Op)) {
+    bool lhsOk = !LhsTy || LhsTy->isNamed("int");
+    bool rhsOk = !RhsTy || RhsTy->isNamed("int");
+
+    if (!lhsOk) {
+      reportError(Node.getLoc(),
+                  "Bitwise operator requires integer operands, but left operand is '" +
+                      LhsTy->getName() + "'.");
+    }
+    if (!rhsOk) {
+      reportError(Node.getLoc(),
+                  "Bitwise operator requires integer operands, but right operand is '" +
+                      RhsTy->getName() + "'.");
+    }
+    setType(&Node, TurfInt());
+    return;
+  }
+
   if (isRelational(Op)) {
     TurfTypePtr Result = inferRelationalType(Node.getLoc(), Op, LhsTy, RhsTy);
     setType(&Node, Result ? Result : TurfBool());
+    return;
+  }
+
+  // Exponentiation: ** (TOK_POWER = -78) — numeric operands, promotes to double
+  if (Op == -78 /*TOK_POWER*/) {
+    if (LhsTy && !LhsTy->isNumeric()) {
+      reportError(Node.getLoc(),
+                  "Exponentiation operator '**' requires numeric operands, but left operand is '" +
+                      LhsTy->getName() + "'.");
+      setType(&Node, nullptr);
+      return;
+    }
+    if (RhsTy && !RhsTy->isNumeric()) {
+      reportError(Node.getLoc(),
+                  "Exponentiation operator '**' requires numeric operands, but right operand is '" +
+                      RhsTy->getName() + "'.");
+      setType(&Node, nullptr);
+      return;
+    }
+    setType(&Node, TurfDouble());
     return;
   }
 
@@ -445,6 +489,19 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
   if (Op == '!') {
     // Logical not: always produces bool
     setType(&Node, TurfBool());
+    return;
+  }
+
+  if (Op == '~') {
+    // Bitwise NOT: operand must be int
+    if (OperandTy && !OperandTy->isNamed("int")) {
+      reportError({0, 0},
+                  "Unary '~' (bitwise NOT) requires an integer operand, got '" +
+                      OperandTy->getName() + "'.");
+      setType(&Node, nullptr);
+      return;
+    }
+    setType(&Node, TurfInt());
     return;
   }
 

@@ -161,7 +161,10 @@ enum Token {
   TOK_SCOPE  = -74,   ///< `::`    token   — scope resolution
   TOK_COMPARE  = -75, ///< `compare`  keyword — switch-like compare statement
   TOK_MATCHES  = -76, ///< `matches`  keyword — arm pattern in compare
-  TOK_DONE     = -77  ///< `done`     keyword — terminates a matches arm body
+  TOK_DONE     = -77, ///< `done`     keyword — terminates a matches arm body
+  TOK_POWER    = -78, ///< `**`       token   — exponentiation operator
+  TOK_LSHIFT   = -79, ///< `<<`       token   — bitwise left shift
+  TOK_RSHIFT   = -80  ///< `>>`       token   — bitwise right shift
 };
 
 int gettok();

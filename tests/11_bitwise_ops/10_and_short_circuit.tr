@@ -1,0 +1,54 @@
+// Test: Short-circuit evaluation for && (and) operator
+// The right-hand side should NOT be evaluated if left is false
+
+import io;
+
+fn main(): int {
+    // Counter to track RHS evaluation
+    mut calls: int = 0;
+
+    // For && (and): if LHS is false, RHS must NOT be evaluated
+    // We simulate this by checking a variable that would only change if RHS runs
+
+    // Test 1: false && anything == false (short-circuit, RHS skipped)
+    mut x: int = 0;
+    mut result1: bool = false && (x == 0);
+    assert(result1 == false, "false && ... should be false");
+
+    // Test 2: true && true == true (both sides evaluated)
+    mut result2: bool = true && true;
+    assert(result2 == true, "true && true should be true");
+
+    // Test 3: true && false == false
+    mut result3: bool = true && false;
+    assert(result3 == false, "true && false should be false");
+
+    // Test 4: false && false == false
+    mut result4: bool = false && false;
+    assert(result4 == false, "false && false should be false");
+
+    // Test 5: Short-circuit with side-effecting condition
+    // If && short-circuits, "a == 0" block won't execute
+    mut a: int = 5;
+    mut cond_a: bool = (a > 10) && (a == 5);  // LHS is false -> short-circuit
+    assert(cond_a == false, "Short-circuit: (a > 10) && (a == 5) should be false");
+
+    // Test 6: Chained && short-circuit
+    mut b: int = 3;
+    mut cond_b: bool = true && (b == 3) && (b < 10);
+    assert(cond_b == true, "true && (b == 3) && (b < 10) should be true");
+
+    // Test 7: && with complex expressions
+    mut c: int = 42;
+    mut d: int = 0;
+    mut cond_c: bool = (d == 0) && (c > 0);  // both true
+    assert(cond_c == true, "(d == 0) && (c > 0) should be true");
+
+    // Test 8: && short-circuits — second operand not evaluated if first is false
+    mut e: int = 0;
+    // If short-circuit didn't work, dividing by e would crash
+    mut cond_e: bool = (e != 0) && (100 / e > 5);
+    assert(cond_e == false, "Short-circuit prevents div by zero: (e != 0) && (100/e > 5)");
+
+    return 0;
+}
