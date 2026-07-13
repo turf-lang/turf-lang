@@ -1,0 +1,31 @@
+// Test: Structs containing string fields, string concatenation of struct fields, and character indexing
+import io;
+
+struct Book {
+    title: string,
+    author: string,
+    year: int
+}
+
+fn format_book(b: Book*): string {
+    return b.title + " by " + b.author + " (" + (b.year to string) + ")";
+}
+
+fn main(): int {
+    mut b: Book = Book { title: "The Turf Programming Language", author: "Ada Lovelace", year: 2026 };
+
+    // Concatenate struct string fields with integer field
+    mut formatted: string = format_book(&b);
+    assert(formatted == "The Turf Programming Language by Ada Lovelace (2026)", "Struct formatting failed");
+
+    // Check equality on struct fields
+    assert(b.author == "Ada Lovelace", "Author equality failed");
+    assert(b.title != "C++", "Title inequality failed");
+
+    // Check character access on struct string field
+    mut initial: int = b.author[0];
+    assert(initial == 65, "Author first initial should be 65 ('A')");
+
+    io.printline("11_struct_string_fields passed!");
+    return 0;
+}
