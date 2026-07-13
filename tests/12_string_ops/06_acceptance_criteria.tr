@@ -1,0 +1,22 @@
+// Test: Acceptance criteria for Issue #183
+// "Hello, " + "world" compiles and produces "Hello, world" at runtime.
+// name == "world" compiles and evaluates correctly.
+// "hello"[1] produces 101 ('e' in ASCII).
+import io;
+
+fn main(): int {
+    // AC1: Concatenation
+    mut ac1: string = "Hello, " + "world";
+    assert(ac1 == "Hello, world", "AC1 failed: concatenation");
+
+    // AC2: Equality
+    mut name: string = "world";
+    assert(name == "world", "AC2 failed: equality");
+
+    // AC3: Character access
+    mut char_e: int = "hello"[1];
+    assert(char_e == 101, "AC3 failed: character access");
+
+    io.printline("All Issue #183 acceptance criteria passed!");
+    return 0;
+}
