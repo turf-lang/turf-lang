@@ -178,7 +178,7 @@ bool TypeChecker::inferArithmeticType(SourceLocation Loc, int Op,
                 "Cannot apply operator '" + std::string(1, static_cast<char>(Op)) +
                     "' to types '" + LhsTy->getName() + "' and '" +
                     RhsTy->getName() +
-                    "'. String concatenation only supports '+'.");
+                    "'. Hint: To concatenate a non-string, convert it first with `<expr> to string`.");
     ResultOut = nullptr;
     return false;
   }
@@ -1341,6 +1341,8 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
 #endif
 
     setType(&Node, ElemTy);
+  } else if (BaseTy && BaseTy->isString()) {
+    setType(&Node, TurfInt());
   } else {
     setType(&Node, nullptr);
   }

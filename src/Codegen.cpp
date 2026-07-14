@@ -332,8 +332,11 @@ static const TurfType *getExprType(const ExprAST *E) {
     return Cast->getDestType();
   }
   if (auto *Var = dynamic_cast<const VariableExprAST *>(E)) {
-    if (Var->ResolvedSymbol)
+    if (Var->ResolvedSymbol && Var->ResolvedSymbol->Type)
       return Var->ResolvedSymbol->Type.get();
+    auto It = NamedValues.find(Var->getName());
+    if (It != NamedValues.end() && It->second.Type)
+      return It->second.Type.get();
     if (GlobalSymbolTable) {
       Symbol *Sym = GlobalSymbolTable->LookupSymbol(Var->getName());
       if (Sym)
@@ -343,6 +346,8 @@ static const TurfType *getExprType(const ExprAST *E) {
   if (auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(E)) {
     const TurfType *BaseTy = getExprType(ArrAcc->getBase());
     if (BaseTy) {
+      if (BaseTy->isString())
+        return TurfInt().get();
       const TurfType *ElemTy = nullptr;
       if (isArrayType(BaseTy)) {
         ElemTy = getArrayElementType(BaseTy);
@@ -674,6 +679,67 @@ Value *DefaultInitExprAST::codegen() {
 }
 
 // Turns any expression into IR operation
+static Value *EmitStringConcat(Value *L, Value *R) {
+  Function *StrlenF = TheModule->getFunction("strlen");
+  if (!StrlenF) {
+    FunctionType *FT =
+        FunctionType::get(Type::getInt64Ty(*TheContext),
+                          {PointerType::getUnqual(*TheContext)}, false);
+    StrlenF = Function::Create(FT, Function::ExternalLinkage, "strlen",
+                               TheModule.get());
+  }
+  Function *StrcpyF = TheModule->getFunction("strcpy");
+  if (!StrcpyF) {
+    FunctionType *FT =
+        FunctionType::get(PointerType::getUnqual(*TheContext),
+                          {PointerType::getUnqual(*TheContext),
+                           PointerType::getUnqual(*TheContext)}, false);
+    StrcpyF = Function::Create(FT, Function::ExternalLinkage, "strcpy",
+                               TheModule.get());
+  }
+  Function *StrcatF = TheModule->getFunction("strcat");
+  if (!StrcatF) {
+    FunctionType *FT =
+        FunctionType::get(PointerType::getUnqual(*TheContext),
+                          {PointerType::getUnqual(*TheContext),
+                           PointerType::getUnqual(*TheContext)}, false);
+    StrcatF = Function::Create(FT, Function::ExternalLinkage, "strcat",
+                               TheModule.get());
+  }
+  Function *MallocF = TheModule->getFunction("malloc");
+  if (!MallocF) {
+    FunctionType *FT =
+        FunctionType::get(PointerType::getUnqual(*TheContext),
+                          {Type::getInt64Ty(*TheContext)}, false);
+    MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
+                               TheModule.get());
+  }
+
+  Value *LenL = Builder->CreateCall(StrlenF, {L}, "lenL");
+  Value *LenR = Builder->CreateCall(StrlenF, {R}, "lenR");
+  Value *SumLen = Builder->CreateAdd(LenL, LenR, "sumlen");
+  Value *TotalLen = Builder->CreateAdd(
+      SumLen, ConstantInt::get(Type::getInt64Ty(*TheContext), 1), "totallen");
+
+  Value *Buf = Builder->CreateCall(MallocF, {TotalLen}, "strbuf");
+  Builder->CreateCall(StrcpyF, {Buf, L});
+  Builder->CreateCall(StrcatF, {Buf, R});
+  return Buf;
+}
+
+static Value *EmitStrcmp(Value *L, Value *R) {
+  Function *StrcmpF = TheModule->getFunction("strcmp");
+  if (!StrcmpF) {
+    FunctionType *FT =
+        FunctionType::get(Type::getInt32Ty(*TheContext),
+                          {PointerType::getUnqual(*TheContext),
+                           PointerType::getUnqual(*TheContext)}, false);
+    StrcmpF = Function::Create(FT, Function::ExternalLinkage, "strcmp",
+                               TheModule.get());
+  }
+  return Builder->CreateCall(StrcmpF, {L, R}, "strcmptmp");
+}
+
 Value *BinaryExprAST::codegen() {
   // ── Short-circuit && / || ───────────────────────────────────────────────
   // These operators must NOT evaluate both sides eagerly.
@@ -741,6 +807,18 @@ Value *BinaryExprAST::codegen() {
 
   if (!L || !R)
     return nullptr;
+
+  const TurfType *LHSTyAST = getExprType(LHS.get());
+  const TurfType *RHSTyAST = getExprType(RHS.get());
+
+  if (Op == '+') {
+    if ((LHSTyAST && LHSTyAST->isString()) || (RHSTyAST && RHSTyAST->isString())) {
+      if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString()) {
+        return EmitStringConcat(L, R);
+      }
+      return nullptr;
+    }
+  }
 
   // Type validation (void checks, compatibility, etc.) is handled by the TypeChecker.
   TurfTypePtr LTy = getTurfTypeFromLLVM(L->getType());
@@ -865,6 +943,11 @@ Value *BinaryExprAST::codegen() {
   }
 
   case TOK_EQ: {
+    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString()) {
+      Value *Cmp = EmitStrcmp(L, R);
+      Value *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
+      return Builder->CreateICmpEQ(Cmp, Zero, "streq");
+    }
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     return CmpType->isNamed("double") ? Builder->CreateFCmpOEQ(L, R, "cmptmp")
@@ -872,6 +955,11 @@ Value *BinaryExprAST::codegen() {
   }
 
   case TOK_NEQ: {
+    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString()) {
+      Value *Cmp = EmitStrcmp(L, R);
+      Value *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
+      return Builder->CreateICmpNE(Cmp, Zero, "strne");
+    }
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     return CmpType->isNamed("double") ? Builder->CreateFCmpONE(L, R, "cmptmp")
@@ -2696,6 +2784,20 @@ Value *ArrayAccessExprAST::codegenLValue() {
     return nullptr;
   }
 
+  if (BaseTy->isString()) {
+    Value *StrVal = Base->codegen();
+    if (!StrVal)
+      return nullptr;
+
+    Value *IndexVal = Index->codegen();
+    if (!IndexVal)
+      return nullptr;
+    IndexVal = CastToType(IndexVal, TurfInt(), "stridx", Loc);
+
+    return Builder->CreateGEP(Type::getInt8Ty(*TheContext), StrVal, IndexVal,
+                              "charptr");
+  }
+
   if (auto *PtrTyTurf = dynamic_cast<const TurfPointerType *>(BaseTy)) {
     Value *PtrVal = Base->codegen();
     if (!PtrVal)
@@ -2761,10 +2863,29 @@ Value *ArrayAccessExprAST::codegenLValue() {
 }
 
 Value *ArrayAccessExprAST::codegen() {
+  const TurfType *BaseTy = getExprType(Base.get());
+  if (BaseTy && BaseTy->isString()) {
+    Value *StrVal = Base->codegen();
+    if (!StrVal)
+      return nullptr;
+
+    Value *IndexVal = Index->codegen();
+    if (!IndexVal)
+      return nullptr;
+    IndexVal = CastToType(IndexVal, TurfInt(), "stridx", Loc);
+
+    Value *CharPtr = Builder->CreateGEP(Type::getInt8Ty(*TheContext), StrVal,
+                                        IndexVal, "charptr");
+    Value *CharVal = Builder->CreateLoad(Type::getInt8Ty(*TheContext), CharPtr,
+                                         "charval");
+    return Builder->CreateZExt(CharVal, Type::getInt64Ty(*TheContext),
+                               "charint");
+  }
+
   // First try to codegen the base as an L-value (e.g., a variable or another pointer-like access).
   Value *Ptr = codegenLValue();
   if (Ptr) {
-    const TurfType *BaseTy = getExprType(Base.get());
+    BaseTy = getExprType(Base.get());
     const TurfType *ElemTyT = nullptr;
     if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy))
       ElemTyT = PtrTy->getPointee().get();
@@ -2779,7 +2900,7 @@ Value *ArrayAccessExprAST::codegen() {
   if (!BaseVal)
     return nullptr;
 
-  const TurfType *BaseTy = getExprType(Base.get());
+  BaseTy = getExprType(Base.get());
   if (!isArrayType(BaseTy)) {
     llvm::report_fatal_error("Internal error: Base is not an array");
     return nullptr;

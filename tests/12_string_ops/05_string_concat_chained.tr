@@ -1,0 +1,10 @@
+// Test: Chained string concatenation
+import io;
+
+fn main(): int {
+    mut result: string = "foo" + "-" + "bar" + "-" + "baz";
+    assert(result == "foo-bar-baz", "Chained concatenation failed");
+
+    io.printline(result);
+    return 0;
+}
