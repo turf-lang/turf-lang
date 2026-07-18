@@ -194,139 +194,23 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     return Buf;
   }
 
-  if (IntrinsicName == "malloc") {
-    Function *MallocFunc = TheModule->getFunction("malloc");
-    if (!MallocFunc) {
-      FunctionType *FT =
-          FunctionType::get(PointerType::getUnqual(*TheContext),
-                            {Type::getInt64Ty(*TheContext)}, false);
-      MallocFunc = Function::Create(FT, Function::ExternalLinkage, "malloc",
-                                    TheModule.get());
-    }
-    return Builder->CreateCall(MallocFunc, {Args[0]}, "malloc_call");
-  }
+  // ── Removed: "malloc", "realloc", "free" ─────────────────────────────────
+  // These were previously @intrinsic stubs, but are now declared as extern fn
+  // in lib/std/mem.tr and resolved by the linker against libc. The compiler
+  // no longer needs to know about them here.
+  // Codegen.cpp still uses TheModule->getFunction("malloc") internally for
+  // EmitStringConcat and CastExprAST (int/double → string) — those are
+  // compiler-emitted IR, not user-facing stdlib calls, and correctly remain.
 
-  if (IntrinsicName == "realloc") {
-    Function *ReallocFunc = TheModule->getFunction("realloc");
-    if (!ReallocFunc) {
-      FunctionType *FT = FunctionType::get(
-          PointerType::getUnqual(*TheContext),
-          {PointerType::getUnqual(*TheContext), Type::getInt64Ty(*TheContext)},
-          false);
-      ReallocFunc = Function::Create(FT, Function::ExternalLinkage, "realloc",
-                                     TheModule.get());
-    }
-    return Builder->CreateCall(ReallocFunc, {Args[0], Args[1]}, "realloc_call");
-  }
-
-  if (IntrinsicName == "free") {
-    Function *FreeFunc = TheModule->getFunction("free");
-    if (!FreeFunc) {
-      FunctionType *FT =
-          FunctionType::get(Type::getVoidTy(*TheContext),
-                            {PointerType::getUnqual(*TheContext)}, false);
-      FreeFunc = Function::Create(FT, Function::ExternalLinkage, "free",
-                                  TheModule.get());
-    }
-    return Builder->CreateCall(FreeFunc, {Args[0]}, "");
-  }
-
-  if (IntrinsicName.find("llvm.") == 0) {
-    Function *LLVMFunc = TheModule->getFunction(IntrinsicName);
-    if (!LLVMFunc) {
-      std::vector<Type *> ParamTypes;
-      for (Value *Arg : Args) {
-        ParamTypes.push_back(Arg->getType());
-      }
-      FunctionType *FT =
-          FunctionType::get(Type::getDoubleTy(*TheContext), ParamTypes, false);
-      LLVMFunc = Function::Create(FT, Function::ExternalLinkage, IntrinsicName,
-                                  TheModule.get());
-    }
-    return Builder->CreateCall(LLVMFunc, Args, "llvm_call");
-  }
-  if (IntrinsicName == "power") {
-    // Arity is already verified above. Type-check each argument.
-    Value *A = Args[0];
-    Value *B = Args[1];
-    bool AIsDouble = A->getType()->isDoubleTy();
-    bool BIsDouble = B->getType()->isDoubleTy();
-    bool AIsInt    = A->getType()->isIntegerTy(64);
-    bool BIsInt    = B->getType()->isIntegerTy(64);
-
-    // Phase 1 fix: reject non-numeric types (bool, string/ptr, etc.)
-    if (!AIsDouble && !AIsInt) {
-      SemanticError(Loc,
-                    "'power' first argument must be int or double, not '" +
-                        std::string(A->getType()->isIntegerTy(1) ? "bool" : "non-numeric") +
-                        "'")
-          .raise();
-      return nullptr;
-    }
-    if (!BIsDouble && !BIsInt) {
-      SemanticError(Loc,
-                    "'power' second argument must be int or double, not '" +
-                        std::string(B->getType()->isIntegerTy(1) ? "bool" : "non-numeric") +
-                        "'")
-          .raise();
-      return nullptr;
-    }
-
-    if (!AIsDouble)
-      A = Builder->CreateSIToFP(A, Type::getDoubleTy(*TheContext), "powcast1");
-    if (!BIsDouble)
-      B = Builder->CreateSIToFP(B, Type::getDoubleTy(*TheContext), "powcast2");
-
-#if LLVM_VERSION_MAJOR >= 19
-    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
-      TheModule.get(), llvm::Intrinsic::pow,
-      {Type::getDoubleTy(*TheContext)});
-#else
-    Function *PowFunc = llvm::Intrinsic::getDeclaration(
-      TheModule.get(), llvm::Intrinsic::pow,
-      {Type::getDoubleTy(*TheContext)});
-#endif
-    Value *Result = Builder->CreateCall(PowFunc, {A, B}, "powtmp");
-
-    if (AIsInt && BIsInt)
-      return Builder->CreateFPToSI(Result, Type::getInt64Ty(*TheContext),
-                                   "powint");
-    return Result;
-  }
-
-  if (IntrinsicName == "abs") {
-    // Arity is already verified above.
-    Value *Val = Args[0];
-    if (Val->getType()->isDoubleTy()) {
-#if LLVM_VERSION_MAJOR >= 19
-        Function *FAbsFunc = llvm::Intrinsic::getOrInsertDeclaration(
-          TheModule.get(), llvm::Intrinsic::fabs,
-          {Type::getDoubleTy(*TheContext)});
-#else
-        Function *FAbsFunc = llvm::Intrinsic::getDeclaration(
-          TheModule.get(), llvm::Intrinsic::fabs,
-          {Type::getDoubleTy(*TheContext)});
-#endif
-      return Builder->CreateCall(FAbsFunc, {Val}, "abs");
-    } else if (Val->getType()->isIntegerTy(64)) {
-      // Phase 1 fix: explicit int-only path — no catch-all else.
-      Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
-      Value *Neg  = Builder->CreateNeg(Val, "absneg");
-      Value *Cmp  = Builder->CreateICmpSLT(Val, Zero, "abscmp");
-      return Builder->CreateSelect(Cmp, Neg, Val, "abs");
-    } else {
-      // Phase 1 fix: reject bool, string (ptr), or any other type.
-      std::string TypeDesc = Val->getType()->isIntegerTy(1)
-                                 ? "bool"
-                                 : (Val->getType()->isPointerTy() ? "string/pointer"
-                                                                  : "non-numeric");
-      SemanticError(Loc,
-                    "'abs' requires an int or double argument, not '" +
-                        TypeDesc + "'")
-          .raise();
-      return nullptr;
-    }
-  }
+  // ── Removed: "llvm.*" ────────────────────────────────────────────────────
+  // LLVM intrinsic math functions (llvm.sqrt.f64, llvm.pow.f64, etc.) were
+  // previously forwarded here. They are now replaced by extern fn declarations
+  // in lib/std/math.tr that link against libm (e.g. sqrt, pow from <math.h>).
+  // ── Removed: "power", "abs" ───────────────────────────────────────────────
+  // Both are now implemented in Turf in lib/std/math.tr.
+  // math.power() delegates to extern fn pow (libm).
+  // math.abs()   delegates to extern fn fabs for doubles; Turf conditional for int.
+  // No compiler C++ needed.
 
   if (IntrinsicName == "lengthof") {
     Value *Val = Args[0];

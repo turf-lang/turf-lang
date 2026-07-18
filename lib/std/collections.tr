@@ -1,5 +1,7 @@
 // std/collections.tr
 
+import mem;
+
 struct List<T> {
   T* data,
   int len,
@@ -9,13 +11,13 @@ struct List<T> {
 fn<T> List.init(): void {
   self.len = 0;
   self.cap = 4;
-  self.data = malloc(sizeof(T) * self.cap) as T*;
+  self.data = mem.alloc(sizeof(T) * self.cap) as T*;
 }
 
 fn<T> List.push(val: T): void {
   if self.len == self.cap {
     self.cap = self.cap * 2;
-    self.data = realloc(self.data as void*, sizeof(T) * self.cap) as T*;
+    self.data = mem.grow(self.data as void*, sizeof(T) * self.cap) as T*;
   }
   self.data[self.len] = val;
   self.len = self.len + 1;

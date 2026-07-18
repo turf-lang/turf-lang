@@ -1,38 +1,113 @@
-@intrinsic("power")
-fn power(base: int, exp: int): int
+// ─── math.tr ─────────────────────────────────────────────────────────────────
+// Mathematical functions for TurfLang.
+//
+// Design:
+//   - All C math functions are declared via `extern fn` (FFI), not @intrinsic.
+//   - Functions that require libm are declared with `extern from "m"` so the
+//     compiler automatically appends -lm to the linker flags.
+//   - Turf-level wrappers implement overloaded variants and add new functions
+//     (min, max, clamp, tan, log, etc.) that were previously unavailable.
+//
+// Usage:
+//   import math;
+//   mut x: double = math.sqrt(2.0);
+//   mut n: int    = math.abs(-5);
 
-@intrinsic("power")
-fn power(base: double, exp: int): double
+// ─── libm bindings ────────────────────────────────────────────────────────────
 
-@intrinsic("power")
-fn power(base: int, exp: double): double
+extern from "m" fn pow(base: double, exp: double): double;
+extern from "m" fn sqrt(val: double): double;
+extern from "m" fn sin(val: double): double;
+extern from "m" fn cos(val: double): double;
+extern from "m" fn tan(val: double): double;
+extern from "m" fn floor(val: double): double;
+extern from "m" fn ceil(val: double): double;
+extern from "m" fn round(val: double): double;
+extern from "m" fn fabs(val: double): double;
+extern from "m" fn log(val: double): double;
+extern from "m" fn log2(val: double): double;
+extern from "m" fn log10(val: double): double;
+extern from "m" fn exp(val: double): double;
 
-@intrinsic("power")
-fn power(base: double, exp: double): double
+// ─── abs ─────────────────────────────────────────────────────────────────────
 
-@intrinsic("abs")
-fn abs(val: int): int
+fn abs(val: double): double {
+    return fabs(val);
+}
 
-@intrinsic("abs")
-fn abs(val: double): double
+fn abs(val: int): int {
+    if val < 0 {
+        return 0 - val;
+    }
+    return val;
+}
 
-@intrinsic("llvm.pow.f64")
-fn pow(base: double, exp: double): double
+// ─── power (four overloads, mirrors previous @intrinsic behaviour) ────────────
 
-@intrinsic("llvm.sqrt.f64")
-fn sqrt(val: double): double
+fn power(base: double, exp: double): double {
+    return pow(base, exp);
+}
 
-@intrinsic("llvm.sin.f64")
-fn sin(val: double): double
+fn power(base: int, exp: int): int {
+    return pow(base to double, exp to double) to int;
+}
 
-@intrinsic("llvm.cos.f64")
-fn cos(val: double): double
+fn power(base: int, exp: double): double {
+    return pow(base to double, exp);
+}
 
-@intrinsic("llvm.floor.f64")
-fn floor(val: double): double
+fn power(base: double, exp: int): double {
+    return pow(base, exp to double);
+}
 
-@intrinsic("llvm.ceil.f64")
-fn ceil(val: double): double
+// ─── min / max ────────────────────────────────────────────────────────────────
 
-@intrinsic("llvm.round.f64")
-fn round(val: double): double
+fn min(a: int, b: int): int {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+fn min(a: double, b: double): double {
+    if a < b {
+        return a;
+    }
+    return b;
+}
+
+fn max(a: int, b: int): int {
+    if a > b {
+        return a;
+    }
+    return b;
+}
+
+fn max(a: double, b: double): double {
+    if a > b {
+        return a;
+    }
+    return b;
+}
+
+// ─── clamp ────────────────────────────────────────────────────────────────────
+
+fn clamp(val: int, lo: int, hi: int): int {
+    if val < lo {
+        return lo;
+    }
+    if val > hi {
+        return hi;
+    }
+    return val;
+}
+
+fn clamp(val: double, lo: double, hi: double): double {
+    if val < lo {
+        return lo;
+    }
+    if val > hi {
+        return hi;
+    }
+    return val;
+}

@@ -1,8 +1,70 @@
-@intrinsic("malloc")
-fn malloc(size: int): void*
+// ─── mem.tr ──────────────────────────────────────────────────────────────────
+// Low-level memory management for TurfLang.
+//
+// Design:
+//   - All C allocator ABI functions are declared via `extern fn` (FFI), not
+//     @intrinsic. This keeps the compiler free of hardcoded knowledge of these
+//     functions. The linker resolves them against libc at link time.
+//   - Turf-level helpers (alloc, grow, dup, zero) are implemented in Turf on
+//     top of the C layer and provide checked, fail-fast variants of the raw
+//     allocator calls.
+//
+// Usage:
+//   import mem;
+//   mut buf: void* = mem.alloc(1024);
+//   mem.free(buf);
 
-@intrinsic("realloc")
-fn realloc(ptr: void*, size: int): void*
+// ─── C allocator bindings ─────────────────────────────────────────────────────
 
-@intrinsic("free")
-fn free(ptr: void*): void
+extern fn malloc(size: int): void*;
+extern fn calloc(count: int, size: int): void*;
+extern fn realloc(ptr: void*, new_size: int): void*;
+extern fn free(ptr: void*): void;
+
+// ─── Memory primitive bindings ────────────────────────────────────────────────
+
+extern fn memcpy(dst: void*, src: void*, n: int): void*;
+extern fn memmove(dst: void*, src: void*, n: int): void*;
+extern fn memset(ptr: void*, val: int, n: int): void*;
+extern fn memcmp(a: void*, b: void*, n: int): int;
+
+// ─── Turf-level safe helpers ──────────────────────────────────────────────────
+
+// alloc: allocate `size` bytes. Aborts on OOM.
+fn alloc(size: int): void* {
+    mut result: void* = malloc(size);
+    if result == null {
+        fail("mem.alloc: out of memory");
+    }
+    return result;
+}
+
+// alloc_zeroed: allocate `count * elem_size` zero-initialised bytes. Aborts on OOM.
+fn alloc_zeroed(count: int, elem_size: int): void* {
+    mut result: void* = calloc(count, elem_size);
+    if result == null {
+        fail("mem.alloc_zeroed: out of memory");
+    }
+    return result;
+}
+
+// grow: reallocate `ptr` to `new_size` bytes. Aborts on OOM.
+fn grow(ptr: void*, new_size: int): void* {
+    mut result: void* = realloc(ptr, new_size);
+    if result == null {
+        fail("mem.grow: out of memory");
+    }
+    return result;
+}
+
+// dup: copy `n` bytes from `src` into a fresh heap buffer. Aborts on OOM.
+fn dup(src: void*, n: int): void* {
+    mut dst: void* = alloc(n);
+    memcpy(dst, src, n);
+    return dst;
+}
+
+// zero: write `n` zero bytes starting at `ptr`.
+fn zero(ptr: void*, n: int): void {
+    memset(ptr, 0, n);
+}
