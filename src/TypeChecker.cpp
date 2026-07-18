@@ -226,8 +226,8 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
       return TurfBool();
     
     // Allow comparing pointers to null
-    bool isLhsPtrOrNull = LhsTy->isPointer() || LhsTy->isNull() || LhsTy->isNamed("ptr") || LhsTy->isNamed("void*");
-    bool isRhsPtrOrNull = RhsTy->isPointer() || RhsTy->isNull() || RhsTy->isNamed("ptr") || RhsTy->isNamed("void*");
+    bool isLhsPtrOrNull = LhsTy->isPointer() || LhsTy->isNull() || LhsTy->isNamed("ptr") || LhsTy->isNamed("void*") || LhsTy->isString();
+    bool isRhsPtrOrNull = RhsTy->isPointer() || RhsTy->isNull() || RhsTy->isNamed("ptr") || RhsTy->isNamed("void*") || RhsTy->isString();
     if (isLhsPtrOrNull && isRhsPtrOrNull)
       return TurfBool();
 
@@ -236,7 +236,11 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
     return TurfBool(); // continue with bool to limit cascade errors
   }
 
-  // Ordering operators (< > <= >=): both must be numeric
+  // Ordering operators (< > <= >=): both must be numeric OR both must be string.
+  // String ordering is byte-by-byte via strcmp (Decision D2 \u2014 no locale, no Unicode).
+  if (LhsTy->isString() && RhsTy->isString())
+    return TurfBool();
+
   if (LhsTy->isNumeric() && RhsTy->isNumeric())
     return TurfBool();
 

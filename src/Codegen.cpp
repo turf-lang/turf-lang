@@ -721,6 +721,9 @@ static Value *EmitStringConcat(Value *L, Value *R) {
   Value *TotalLen = Builder->CreateAdd(
       SumLen, ConstantInt::get(Type::getInt64Ty(*TheContext), 1), "totallen");
 
+  // TURF-MEMLEAK: This malloc is intentionally not freed — Turf has no GC yet.
+  // Every string concatenation allocates a fresh buffer on the heap and leaks it.
+  // Future work: replace with an arena allocator or Boehm GC sweep.
   Value *Buf = Builder->CreateCall(MallocF, {TotalLen}, "strbuf");
   Builder->CreateCall(StrcpyF, {Buf, L});
   Builder->CreateCall(StrcatF, {Buf, R});
@@ -738,6 +741,21 @@ static Value *EmitStrcmp(Value *L, Value *R) {
                                TheModule.get());
   }
   return Builder->CreateCall(StrcmpF, {L, R}, "strcmptmp");
+}
+
+// EmitStrcmpRelational — emit a boolean comparison of two strings using strcmp.
+// strcmp returns <0, 0, >0. We compare the result to 0 using the requested op.
+// Called from BinaryExprAST::codegen() when both operands are string type.
+static Value *EmitStrcmpRelational(Value *L, Value *R, int Op) {
+  Value *Cmp  = EmitStrcmp(L, R);
+  Value *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
+  switch (Op) {
+    case '<':     return Builder->CreateICmpSLT(Cmp, Zero, "strlt");
+    case '>':     return Builder->CreateICmpSGT(Cmp, Zero, "strgt");
+    case TOK_LEQ: return Builder->CreateICmpSLE(Cmp, Zero, "strle");
+    case TOK_GEQ: return Builder->CreateICmpSGE(Cmp, Zero, "strge");
+    default:      llvm_unreachable("EmitStrcmpRelational: invalid op");
+  }
 }
 
 Value *BinaryExprAST::codegen() {
@@ -929,6 +947,9 @@ Value *BinaryExprAST::codegen() {
 
   // Comparison
   case '<': {
+    // String ordering: byte-by-byte via strcmp (see EmitStrcmpRelational).
+    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString())
+      return EmitStrcmpRelational(L, R, '<');
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     return CmpType->isNamed("double") ? Builder->CreateFCmpOLT(L, R, "cmptmp")
@@ -936,6 +957,9 @@ Value *BinaryExprAST::codegen() {
   }
 
   case '>': {
+    // String ordering: byte-by-byte via strcmp.
+    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString())
+      return EmitStrcmpRelational(L, R, '>');
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     return CmpType->isNamed("double") ? Builder->CreateFCmpOGT(L, R, "cmptmp")
@@ -967,6 +991,9 @@ Value *BinaryExprAST::codegen() {
   }
 
   case TOK_GEQ: {
+    // String ordering: byte-by-byte via strcmp.
+    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString())
+      return EmitStrcmpRelational(L, R, TOK_GEQ);
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     return CmpType->isNamed("double") ? Builder->CreateFCmpOGE(L, R, "cmptmp")
@@ -974,6 +1001,9 @@ Value *BinaryExprAST::codegen() {
   }
 
   case TOK_LEQ: {
+    // String ordering: byte-by-byte via strcmp.
+    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString())
+      return EmitStrcmpRelational(L, R, TOK_LEQ);
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     return CmpType->isNamed("double") ? Builder->CreateFCmpOLE(L, R, "cmptmp")
@@ -1624,7 +1654,15 @@ Value *CastExprAST::codegen() {
     return Builder->CreateCall(StrtodF, {Val, NullPtr}, "strtod_res");
   }
 
-  // int → string : snprintf(buf, 32, "%lld", val)
+  // int → string : snprintf into a heap-allocated buffer.
+  //
+  // BUG FIX (was: TmpB.CreateAlloca):
+  //   The previous implementation used alloca which places the buffer on the
+  //   current function's stack frame. When this value is returned from a
+  //   function (e.g. `fn make_label(n: int): string { return n to string; }`)
+  //   the caller receives a pointer into a dead stack frame — silent UB.
+  //   We now use malloc(32) so the buffer lives on the heap and survives the
+  //   function return. The caller is responsible for freeing (no GC yet).
   if (SrcName == "int" && DstName == "string") {
     Function *SnprintfF = TheModule->getFunction("snprintf");
     if (!SnprintfF) {
@@ -1635,18 +1673,26 @@ Value *CastExprAST::codegen() {
       SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
                                    TheModule.get());
     }
-    Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-                     TheFunction->getEntryBlock().begin());
+    Function *MallocF = TheModule->getFunction("malloc");
+    if (!MallocF) {
+      FunctionType *FT =
+          FunctionType::get(PointerType::get(*TheContext, 0),
+                            {Type::getInt64Ty(*TheContext)}, false);
+      MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
+                                 TheModule.get());
+    }
     Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
-    AllocaInst *Buf = TmpB.CreateAlloca(Type::getInt8Ty(*TheContext), BufSize,
-                                        "int_to_str_buf");
+    Value *Buf = Builder->CreateCall(MallocF, {BufSize}, "int_to_str_buf");
     Value *Fmt = Builder->CreateGlobalString("%lld", "intfmt");
     Builder->CreateCall(SnprintfF, {Buf, BufSize, Fmt, Val}, "snprintf_int");
     return Buf;
   }
 
-  // double → string : snprintf(buf, 32, "%g", val)
+  // double → string : snprintf into a heap-allocated buffer.
+  //
+  // BUG FIX (was: TmpB.CreateAlloca):
+  //   Same root cause as int → string above. Stack alloca returns dangling
+  //   pointer when the result escapes the function. Fixed with malloc(32).
   if (SrcName == "double" && DstName == "string") {
     Function *SnprintfF = TheModule->getFunction("snprintf");
     if (!SnprintfF) {
@@ -1657,12 +1703,16 @@ Value *CastExprAST::codegen() {
       SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
                                    TheModule.get());
     }
-    Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-                     TheFunction->getEntryBlock().begin());
+    Function *MallocF = TheModule->getFunction("malloc");
+    if (!MallocF) {
+      FunctionType *FT =
+          FunctionType::get(PointerType::get(*TheContext, 0),
+                            {Type::getInt64Ty(*TheContext)}, false);
+      MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
+                                 TheModule.get());
+    }
     Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
-    AllocaInst *Buf = TmpB.CreateAlloca(Type::getInt8Ty(*TheContext), BufSize,
-                                        "dbl_to_str_buf");
+    Value *Buf = Builder->CreateCall(MallocF, {BufSize}, "dbl_to_str_buf");
     Value *Fmt = Builder->CreateGlobalString("%g", "dblfmt");
     Builder->CreateCall(SnprintfF, {Buf, BufSize, Fmt, Val}, "snprintf_dbl");
     return Buf;
@@ -1675,11 +1725,7 @@ Value *CastExprAST::codegen() {
     return Builder->CreateSelect(Val, TrueStr, FalseStr, "bool_to_str");
   }
 
-  // Unsupported → string
-  if (DstName == "string") {
-    StringConversionError(Loc, SrcName.c_str()).raise();
-    return nullptr;
-  }
+    // (moved unsupported string cast down)
 
   // int -> pointer : inttoptr
   if (SrcName == "int" && dynamic_cast<const TurfPointerType*>(DestType.get())) {
@@ -1687,11 +1733,17 @@ Value *CastExprAST::codegen() {
   }
 
   // pointer -> pointer : bitcast
-  bool isSrcPtr = (ExprTy && dynamic_cast<const TurfPointerType*>(ExprTy)) || SrcName == "ptr";
-  bool isDstPtr = dynamic_cast<const TurfPointerType*>(DestType.get()) || DstName == "ptr";
+  bool isSrcPtr = (ExprTy && dynamic_cast<const TurfPointerType*>(ExprTy)) || SrcName == "ptr" || SrcName == "string";
+  bool isDstPtr = dynamic_cast<const TurfPointerType*>(DestType.get()) || DstName == "ptr" || DstName == "string";
   
   if (isSrcPtr && isDstPtr) {
     return Builder->CreateBitCast(Val, getLLVMType(DestType.get()), "ptrcast");
+  }
+
+  // Unsupported → string
+  if (DstName == "string") {
+    StringConversionError(Loc, SrcName.c_str()).raise();
+    return nullptr;
   }
 
   // Everything else is unsupported
