@@ -92,22 +92,22 @@ fn max(a: double, b: double): double {
 
 // ─── clamp ────────────────────────────────────────────────────────────────────
 
-fn clamp(val: int, lo: int, hi: int): int {
-    if val < lo {
-        return lo;
+fn clamp(val: int, min_val: int, max_val: int): int {
+    if val < min_val {
+        return min_val;
     }
-    if val > hi {
-        return hi;
+    if val > max_val {
+        return max_val;
     }
     return val;
 }
 
-fn clamp(val: double, lo: double, hi: double): double {
-    if val < lo {
-        return lo;
+fn clamp(val: double, min_val: double, max_val: double): double {
+    if val < min_val {
+        return min_val;
     }
-    if val > hi {
-        return hi;
+    if val > max_val {
+        return max_val;
     }
     return val;
 }

@@ -78,8 +78,8 @@
     "src/main.cpp": "f5a7f541a4d16f924f4702148fe68298a32cb6c319bf779ed69a9d6c68d12675",
     "tests/runner.sh": "6ba1490cd39dc8198df51df044e8bc2d48a651e58fcfdb5df807ea5cbecad962"
   },
-  "indexed_at_commit": "3c142eb96f4d9cd4c2a05cd129bdf73f4fc43a22",
-  "indexed_at_timestamp": "2026-07-18T05:27:13.302048669+00:00",
+  "indexed_at_commit": "39ea6bed65cc23c69ef828f0e8e640b477c013bf",
+  "indexed_at_timestamp": "2026-07-18T05:51:25.607994011+00:00",
   "schema_version": 3,
   "stats": {
     "total_edges": 1506,
