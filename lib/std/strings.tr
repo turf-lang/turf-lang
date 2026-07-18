@@ -1,0 +1,248 @@
+// ─── strings.tr ──────────────────────────────────────────────────────────────
+// String utility library for TurfLang.
+//
+// Design:
+//   - All C functions are declared via `extern fn` (FFI), not @intrinsic.
+//   - malloc is declared directly here to avoid inter-stdlib import issues.
+//   - High-level functions are implemented in Turf on top of the C bindings.
+//   - String ordering uses byte-by-byte strcmp (Decision D2). Unicode-aware
+//     sorting belongs in a future `unicode` module.
+//   - `strings.length(s)` is the preferred way to get string length. The bare
+//     `lengthof(s)` intrinsic is deprecated (kept for backward compatibility).
+//
+// Usage:
+//   import strings;
+//   if strings.contains("hello world", "world") { ... }
+//   mut upper: string = strings.to_upper("hello");
+
+// ─── C bindings ───────────────────────────────────────────────────────────────
+
+extern fn malloc(size: int): void*;
+extern fn strlen(s: string): int;
+extern fn strstr(haystack: string, needle: string): string;
+extern fn strncpy(dst: string, src: string, n: int): string;
+extern fn toupper(c: int): int;
+extern fn tolower(c: int): int;
+
+// ─── length ───────────────────────────────────────────────────────────────────
+
+// length: returns the byte-length of string `s`.
+// Preferred over the deprecated `lengthof(s)` intrinsic.
+fn length(s: string): int {
+    return strlen(s);
+}
+
+// ─── contains ─────────────────────────────────────────────────────────────────
+
+// contains: returns true if `needle` occurs anywhere in `s`.
+fn contains(s: string, needle: string): bool {
+    mut result: string = strstr(s, needle);
+    return result != null;
+}
+
+// ─── index_of ─────────────────────────────────────────────────────────────────
+
+// index_of: returns the byte offset of the first occurrence of `needle` in `s`,
+// or -1 if not found. Returns -1 if needle is not found.
+fn index_of(s: string, needle: string): int {
+    mut found: string = strstr(s, needle);
+    if found == null {
+        return 0 - 1;
+    }
+    // Walk s to find where needle starts
+    mut i: int = 0;
+    mut n: int = strlen(s);
+    mut nlen: int = strlen(needle);
+    while i <= n - nlen {
+        mut is_match: bool = true;
+        mut j: int = 0;
+        while j < nlen {
+            if s[i + j] != needle[j] {
+                is_match = false;
+            }
+            j = j + 1;
+        }
+        if is_match {
+            return i;
+        }
+        i = i + 1;
+    }
+    return 0 - 1;
+}
+
+// ─── starts_with ──────────────────────────────────────────────────────────────
+
+// starts_with: returns true if `s` begins with `prefix`.
+fn starts_with(s: string, prefix: string): bool {
+    mut plen: int = strlen(prefix);
+    mut slen: int = strlen(s);
+    if plen > slen {
+        return false;
+    }
+    mut i: int = 0;
+    while i < plen {
+        if s[i] != prefix[i] {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// ─── ends_with ────────────────────────────────────────────────────────────────
+
+// ends_with: returns true if `s` ends with `suffix`.
+fn ends_with(s: string, suffix: string): bool {
+    mut slen: int = strlen(s);
+    mut suflen: int = strlen(suffix);
+    if suflen > slen {
+        return false;
+    }
+    mut offset: int = slen - suflen;
+    mut i: int = 0;
+    while i < suflen {
+        if s[offset + i] != suffix[i] {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+// ─── repeat ───────────────────────────────────────────────────────────────────
+
+// repeat: returns a string consisting of `n` copies of `s` concatenated.
+fn repeat(s: string, n: int): string {
+    mut result: string = "";
+    mut i: int = 0;
+    while i < n {
+        result = result + s;
+        i = i + 1;
+    }
+    return result;
+}
+
+// ─── count_char ───────────────────────────────────────────────────────────────
+
+// count_char: returns the number of times the character with code `ch` appears in `s`.
+fn count_char(s: string, ch: int): int {
+    mut count: int = 0;
+    mut i: int = 0;
+    mut n: int = strlen(s);
+    while i < n {
+        if s[i] == ch {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    return count;
+}
+
+// ─── substring ────────────────────────────────────────────────────────────────
+
+// substring: returns the slice of `s` from byte index `start` (inclusive) to
+// `end` (exclusive). Aborts if the range is out of bounds.
+fn substring(s: string, start: int, end: int): string {
+    mut n: int = strlen(s);
+    if start < 0 || end < start || end > n {
+        fail("strings.substring: index out of bounds");
+    }
+    mut len: int = end - start;
+    // Allocate len+1 bytes (for null terminator)
+    mut buf: string = malloc(len + 1) to string;
+    mut i: int = 0;
+    while i < len {
+        buf[i] = s[start + i];
+        i = i + 1;
+    }
+    buf[len] = 0;
+    return buf;
+}
+
+// ─── replace ──────────────────────────────────────────────────────────────────
+
+// replace: returns a copy of `s` with every non-overlapping occurrence of `old`
+// replaced by `new_str`.
+fn replace(s: string, old: string, new_str: string): string {
+    mut result: string = "";
+    mut oldlen: int = strlen(old);
+    if oldlen == 0 {
+        return s;
+    }
+    mut slen: int = strlen(s);
+    mut i: int = 0;
+    while i < slen {
+        mut is_match: bool = true;
+        if i + oldlen > slen {
+            is_match = false;
+        }
+        if is_match {
+            mut j: int = 0;
+            while j < oldlen {
+                if s[i + j] != old[j] {
+                    is_match = false;
+                }
+                j = j + 1;
+            }
+        }
+        if is_match {
+            result = result + new_str;
+            i = i + oldlen;
+        } else {
+            // Append single character as a 2-byte heap buffer
+            mut chbuf: string = malloc(2) to string;
+            chbuf[0] = s[i];
+            chbuf[1] = 0;
+            result = result + chbuf;
+            i = i + 1;
+        }
+    }
+    return result;
+}
+
+// ─── to_upper ─────────────────────────────────────────────────────────────────
+
+// to_upper: returns a copy of `s` with all ASCII lowercase letters uppercased.
+fn to_upper(s: string): string {
+    mut n: int = strlen(s);
+    mut buf: string = malloc(n + 1) to string;
+    mut i: int = 0;
+    while i < n {
+        buf[i] = toupper(s[i]);
+        i = i + 1;
+    }
+    buf[n] = 0;
+    return buf;
+}
+
+// ─── to_lower ─────────────────────────────────────────────────────────────────
+
+// to_lower: returns a copy of `s` with all ASCII uppercase letters lowercased.
+fn to_lower(s: string): string {
+    mut n: int = strlen(s);
+    mut buf: string = malloc(n + 1) to string;
+    mut i: int = 0;
+    while i < n {
+        buf[i] = tolower(s[i]);
+        i = i + 1;
+    }
+    buf[n] = 0;
+    return buf;
+}
+
+// ─── trim ─────────────────────────────────────────────────────────────────────
+
+// trim: returns `s` with leading and trailing ASCII whitespace removed.
+// Whitespace: space (32), tab (9), newline (10), carriage return (13).
+fn trim(s: string): string {
+    mut n: int = strlen(s);
+    mut start_idx: int = 0;
+    mut end_idx: int = n;
+    while start_idx < n && (s[start_idx] == 32 || s[start_idx] == 9 || s[start_idx] == 10 || s[start_idx] == 13) {
+        start_idx = start_idx + 1;
+    }
+    while end_idx > start_idx && (s[end_idx - 1] == 32 || s[end_idx - 1] == 9 || s[end_idx - 1] == 10 || s[end_idx - 1] == 13) {
+        end_idx = end_idx - 1;
+    }
+    return substring(s, start_idx, end_idx);
+}

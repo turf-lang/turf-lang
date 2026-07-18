@@ -1,0 +1,34 @@
+// tests/13_string_stdlib/10_str_trim.tr
+// Tests strings.trim — removes leading and trailing ASCII whitespace.
+// Covers: all-whitespace, no-whitespace, leading only, trailing only, mixed.
+
+import io;
+import strings;
+
+fn main(): int {
+    // Basic trim
+    assert(strings.trim("  hello  ") == "hello",     "trim: spaces both sides");
+    assert(strings.trim("hello") == "hello",          "trim: no whitespace (identity)");
+
+    // Leading only
+    assert(strings.trim("   hello") == "hello",       "trim: leading spaces");
+
+    // Trailing only
+    assert(strings.trim("hello   ") == "hello",       "trim: trailing spaces");
+
+    // Tabs and newlines
+    assert(strings.trim("\thello\t") == "hello",      "trim: tabs");
+
+    // All whitespace — should produce empty string
+    mut all_space: string = strings.trim("     ");
+    assert(all_space == "", "trim: all-whitespace string -> empty");
+
+    // Empty string stays empty
+    assert(strings.trim("") == "", "trim: empty string -> empty");
+
+    // Interior whitespace is preserved
+    assert(strings.trim("  hello world  ") == "hello world", "trim: interior space preserved");
+
+    io.printline("10 PASS: strings.trim");
+    return 0;
+}

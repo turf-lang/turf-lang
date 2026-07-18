@@ -1,0 +1,20 @@
+// tests/13_string_stdlib/05_str_index_of.tr
+// Tests strings.index_of — byte offset of first occurrence, -1 if not found.
+
+import io;
+import strings;
+
+fn main(): int {
+    assert(strings.index_of("hello world", "world") == 6,  "index_of: world at 6");
+    assert(strings.index_of("hello world", "hello") == 0,  "index_of: hello at 0");
+    assert(strings.index_of("abcdef", "def") == 3,         "index_of: def at 3");
+    assert(strings.index_of("abcdef", "a") == 0,           "index_of: a at 0");
+    assert(strings.index_of("abcdef", "f") == 5,           "index_of: f at 5");
+
+    // Not found returns -1
+    assert(strings.index_of("hello world", "xyz") == 0 - 1, "index_of: xyz not found");
+    assert(strings.index_of("", "a") == 0 - 1,              "index_of: empty string");
+
+    io.printline("05 PASS: strings.index_of");
+    return 0;
+}

@@ -1,0 +1,15 @@
+// tests/13_string_stdlib/fail_string_substr_oob.tr
+// NEGATIVE TEST — must abort at runtime with a descriptive error.
+// str.substring with an out-of-bounds end index must call fail().
+//
+// Expected: Runtime abort with "str.substring: index out of bounds".
+
+import io;
+import str;
+
+fn main(): int {
+    // "hi" has length 2; asking for [5, 10] is out of bounds.
+    mut s: string = str.substring("hi", 5, 10);
+    io.printline(s);
+    return 0;
+}

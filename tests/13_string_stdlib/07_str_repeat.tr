@@ -1,0 +1,27 @@
+// tests/13_string_stdlib/07_str_repeat.tr
+// Tests strings.repeat. Also exercises the string + operator heavily (50 iterations).
+
+import io;
+import strings;
+
+fn main(): int {
+    mut r2: string = strings.repeat("ab", 2);
+    assert(r2 == "abab", "repeat ab x2");
+
+    mut r1: string = strings.repeat("x", 1);
+    assert(r1 == "x", "repeat x x1");
+
+    mut r0: string = strings.repeat("hello", 0);
+    assert(r0 == "", "repeat hello x0 = empty");
+
+    // Length stress: 50 copies of "ab" = 100 chars
+    mut r50: string = strings.repeat("ab", 50);
+    assert(lengthof(r50) == 100, "repeat ab x50: length must be 100");
+
+    // Verify it starts and ends correctly
+    assert(strings.starts_with(r50, "ab"), "repeat ab x50: starts with ab");
+    assert(strings.ends_with(r50, "ab"),   "repeat ab x50: ends with ab");
+
+    io.printline("07 PASS: strings.repeat");
+    return 0;
+}

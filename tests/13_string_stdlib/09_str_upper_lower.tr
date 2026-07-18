@@ -1,0 +1,29 @@
+// tests/13_string_stdlib/09_str_upper_lower.tr
+// Tests strings.to_upper and strings.to_lower, including round-trip: to_lower(to_upper(s)) == s
+// for purely alphabetic strings.
+
+import io;
+import strings;
+
+fn main(): int {
+    // to_upper
+    assert(strings.to_upper("hello") == "HELLO",    "to_upper: hello -> HELLO");
+    assert(strings.to_upper("HELLO") == "HELLO",    "to_upper: HELLO -> HELLO (idempotent)");
+    assert(strings.to_upper("Hello World") == "HELLO WORLD", "to_upper: mixed case");
+
+    // to_lower
+    assert(strings.to_lower("HELLO") == "hello",    "to_lower: HELLO -> hello");
+    assert(strings.to_lower("hello") == "hello",    "to_lower: hello -> hello (idempotent)");
+    assert(strings.to_lower("Hello World") == "hello world", "to_lower: mixed case");
+
+    // Round-trip: to_lower(to_upper(s)) == s for alphabetic-only strings
+    mut alpha: string = "abcdefghijklmnopqrstuvwxyz";
+    assert(strings.to_lower(strings.to_upper(alpha)) == alpha, "round-trip: to_lower(to_upper(alphabet)) == alphabet");
+
+    // Non-alpha chars pass through unchanged
+    assert(strings.to_upper("hello123!") == "HELLO123!", "to_upper: digits and punct unchanged");
+    assert(strings.to_lower("HELLO123!") == "hello123!", "to_lower: digits and punct unchanged");
+
+    io.printline("09 PASS: strings.to_upper / strings.to_lower");
+    return 0;
+}

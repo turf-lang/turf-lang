@@ -1,0 +1,48 @@
+// tests/13_string_stdlib/14_dsa_run_length_encode.tr
+// DSA: Run-Length Encoding (RLE). Consecutive identical characters are replaced
+// by <count><char>. Example: "aaabbc" -> "3a2b1c".
+// Exercises: char access, strings.length, int to string (Bug 1 regression), concat.
+
+import io;
+import strings;
+
+fn rle_encode(s: string): string {
+    mut n: int = strings.length(s);
+    if n == 0 {
+        return "";
+    }
+    mut result: string = "";
+    mut count: int = 1;
+    mut i: int = 1;
+    while i < n {
+        if s[i] == s[i - 1] {
+            count = count + 1;
+        } else {
+            // Append count and previous character
+            // int to string here tests Bug 1 fix (malloc instead of alloca)
+            mut ch_str: string = "";
+            ch_str[0] = s[i - 1];
+            result = result + (count to string) + ch_str;
+            count = 1;
+        }
+        i = i + 1;
+    }
+    // Append the last run
+    mut last_ch: string = "";
+    last_ch[0] = s[n - 1];
+    result = result + (count to string) + last_ch;
+    return result;
+}
+
+fn main(): int {
+    assert(rle_encode("aaabbc") == "3a2b1c",       "aaabbc -> 3a2b1c");
+    assert(rle_encode("abcd") == "1a1b1c1d",       "abcd -> 1a1b1c1d (no runs)");
+    assert(rle_encode("aaaa") == "4a",             "aaaa -> 4a (single run)");
+    assert(rle_encode("a") == "1a",                "a -> 1a (single char)");
+    assert(rle_encode("") == "",                   "empty -> empty");
+    assert(rle_encode("aabbcc") == "2a2b2c",       "aabbcc -> 2a2b2c");
+    assert(rle_encode("aaabbbccc") == "3a3b3c",    "aaabbbccc -> 3a3b3c");
+
+    io.printline("14 PASS: DSA run-length encoding");
+    return 0;
+}

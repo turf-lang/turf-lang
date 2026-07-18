@@ -1,0 +1,33 @@
+// tests/13_string_stdlib/02_double_to_string_return.tr
+// Regression test for the dangling-pointer bug in `double to string` cast.
+// Same root cause as test 01 — alloca buffer escaped function scope.
+// Fixed: uses malloc(32) for snprintf destination.
+
+import io;
+
+fn make_label(x: double): string {
+    return x to string;
+}
+
+fn main(): int {
+    mut a: string = make_label(3.14);
+    assert(a == "3.14", "double 3.14 to string failed");
+
+    mut b: string = make_label(0.0 - 2.71828);
+    assert(b == "-2.71828", "double -2.71828 to string failed");
+
+    mut c: string = make_label(0.0);
+    assert(c == "0", "double 0.0 to string failed");
+
+    // 100.5 is clean, easy to verify
+    mut d: string = make_label(100.5);
+    assert(d == "100.5", "double 100.5 to string failed");
+
+    // Verify round-trip: string -> double -> string is stable
+    mut e: double = "3.14" to double;
+    mut f: string = e to string;
+    assert(f == "3.14", "round-trip string->double->string failed");
+
+    io.printline("02 PASS: double to string return");
+    return 0;
+}

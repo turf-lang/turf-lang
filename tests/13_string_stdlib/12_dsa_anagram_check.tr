@@ -1,0 +1,56 @@
+// tests/13_string_stdlib/12_dsa_anagram_check.tr
+// DSA: Anagram detection using a character frequency count array.
+// Two strings are anagrams if they contain the same characters with the same
+// frequency (ignoring order).
+// Exercises: char access s[i], int array, strings.length, loops.
+
+import io;
+import strings;
+
+fn is_anagram(a: string, b: string): bool {
+    mut na: int = strings.length(a);
+    mut nb: int = strings.length(b);
+    if na != nb {
+        return false;
+    }
+    // freq[c] counts occurrences of character c (ASCII 0-127)
+    mut freq: int[128] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    mut i: int = 0;
+    while i < na {
+        freq[a[i]] = freq[a[i]] + 1;
+        freq[b[i]] = freq[b[i]] - 1;
+        i = i + 1;
+    }
+    // All counts must be zero for an anagram
+    mut j: int = 0;
+    while j < 128 {
+        if freq[j] != 0 {
+            return false;
+        }
+        j = j + 1;
+    }
+    return true;
+}
+
+fn main(): int {
+    assert(is_anagram("listen", "silent"),       "listen / silent are anagrams");
+    assert(is_anagram("anagram", "nagaram"),     "anagram / nagaram are anagrams");
+    assert(is_anagram("rat", "tar"),             "rat / tar are anagrams");
+    assert(is_anagram("abc", "bca"),             "abc / bca are anagrams");
+    assert(is_anagram("", ""),                   "empty / empty are anagrams");
+    assert(is_anagram("a", "a"),                 "a / a are anagrams");
+
+    assert(is_anagram("hello", "world") == false,  "hello / world are NOT anagrams");
+    assert(is_anagram("abc", "ab") == false,       "different lengths are NOT anagrams");
+    assert(is_anagram("aab", "abb") == false,      "aab / abb are NOT anagrams");
+
+    io.printline("12 PASS: DSA anagram check");
+    return 0;
+}
