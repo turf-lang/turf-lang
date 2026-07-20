@@ -1,0 +1,17 @@
+// Test: Enum equality and inequality operators
+enum Color { Red, Green, Blue }
+
+fn main(): int {
+    immut c1: Color = Color::Red;
+    immut c2: Color = Color::Red;
+    immut c3: Color = Color::Blue;
+
+    assert(c1 == c2, "Red == Red");
+    assert(c1 != c3, "Red != Blue");
+    assert(c2 != c3, "Red != Blue");
+
+    immut g: Color = Color::Green;
+    assert(g == Color::Green, "Green == Green");
+    assert(g != Color::Red, "Green != Red");
+    return 0;
+}

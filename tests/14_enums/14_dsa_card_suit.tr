@@ -1,0 +1,38 @@
+// Test: DSA — Card suit combinatorics
+// Count all (suit, rank) pairs where suit is not Hearts and rank >= 10
+enum Suit { Hearts, Diamonds, Clubs, Spades }
+enum Rank { Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten, Jack, Queen, King, Ace }
+
+fn main(): int {
+    immut suit_count: int = Suit::COUNT;
+    immut rank_count: int = Rank::COUNT;
+
+    assert(suit_count == 4, "4 suits");
+    assert(rank_count == 13, "13 ranks");
+
+    // Count pairs where suit != Hearts and rank >= 10 (Ten=8,Jack=9,Queen=10,King=11,Ace=12)
+    mut valid_pairs: int = 0;
+    mut si: int = 0;
+    while si < suit_count {
+        immut s: Suit = si to Suit;
+        if s != Suit::Hearts {
+            mut ri: int = 0;
+            while ri < rank_count {
+                if ri >= 8 {
+                    valid_pairs = valid_pairs + 1;
+                }
+                ri = ri + 1;
+            }
+        }
+        si = si + 1;
+    }
+    // 3 suits * 5 high ranks = 15
+    assert(valid_pairs == 15, "15 valid high-rank non-hearts pairs");
+
+    // Verify round-trips for face cards
+    assert((Rank::Jack  to string) == "Jack",  "Jack -> string");
+    assert((Rank::Queen to string) == "Queen", "Queen -> string");
+    assert((Rank::King  to string) == "King",  "King -> string");
+    assert((Rank::Ace   to string) == "Ace",   "Ace -> string");
+    return 0;
+}

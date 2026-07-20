@@ -1,0 +1,38 @@
+// Test: Nested structs with enum fields
+enum Level { Junior, Mid, Senior, Principal }
+
+struct Employee {
+    name: string,
+    level: Level
+}
+
+struct Team {
+    lead: Employee,
+    size: int
+}
+
+fn level_pay(lv: Level): int {
+    compare lv {
+        matches Level::Junior:    return 60000;  done
+        matches Level::Mid:       return 90000;  done
+        matches Level::Senior:    return 120000; done
+        matches Level::Principal: return 160000; done
+    }
+    return 0;
+}
+
+fn main(): int {
+    immut lead: Employee = Employee { name: "Alice", level: Level::Senior };
+    immut team: Team = Team { lead: lead, size: 5 };
+
+    assert(team.lead.level == Level::Senior, "Team lead is Senior");
+    assert((team.lead.level to int) == 2, "Senior ordinal == 2");
+    assert((team.lead.level to string) == "Senior", "Senior -> string");
+    assert(level_pay(team.lead.level) == 120000, "Senior pays 120k");
+
+    // Upgrade lead
+    immut upgraded: Employee = Employee { name: "Alice", level: Level::Principal };
+    assert(upgraded.level != team.lead.level, "Upgraded != original");
+    assert(level_pay(upgraded.level) == 160000, "Principal pays 160k");
+    return 0;
+}

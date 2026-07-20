@@ -1,0 +1,29 @@
+// Test: Enum-to-int and int-to-enum casting
+enum Weekday { Mon, Tue, Wed, Thu, Fri, Sat, Sun }
+
+fn main(): int {
+    // Enum -> int: each variant returns its ordinal
+    assert((Weekday::Mon to int) == 0, "Mon == 0");
+    assert((Weekday::Tue to int) == 1, "Tue == 1");
+    assert((Weekday::Wed to int) == 2, "Wed == 2");
+    assert((Weekday::Thu to int) == 3, "Thu == 3");
+    assert((Weekday::Fri to int) == 4, "Fri == 4");
+    assert((Weekday::Sat to int) == 5, "Sat == 5");
+    assert((Weekday::Sun to int) == 6, "Sun == 6");
+
+    // int -> enum: cast integer back and compare
+    immut mon: Weekday = 0 to Weekday;
+    immut fri: Weekday = 4 to Weekday;
+    immut sun: Weekday = 6 to Weekday;
+
+    assert(mon == Weekday::Mon, "0 to Weekday == Mon");
+    assert(fri == Weekday::Fri, "4 to Weekday == Fri");
+    assert(sun == Weekday::Sun, "6 to Weekday == Sun");
+
+    // Round-trip: enum -> int -> enum
+    immut w: Weekday = Weekday::Wed;
+    immut wInt: int = w to int;
+    immut wBack: Weekday = wInt to Weekday;
+    assert(wBack == Weekday::Wed, "Round-trip Wed -> 2 -> Wed");
+    return 0;
+}

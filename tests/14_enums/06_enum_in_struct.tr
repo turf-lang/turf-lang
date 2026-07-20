@@ -1,0 +1,24 @@
+// Test: Struct with an enum field
+enum Role { Admin, User, Guest }
+
+struct Account {
+    id: int,
+    role: Role
+}
+
+fn is_admin(acc: Account): bool {
+    return acc.role == Role::Admin;
+}
+
+fn main(): int {
+    immut admin: Account = Account { id: 1, role: Role::Admin };
+    immut guest: Account = Account { id: 2, role: Role::Guest };
+
+    assert(is_admin(admin) == true, "Account 1 is admin");
+    assert(is_admin(guest) == false, "Account 2 is not admin");
+
+    assert((admin.role to int) == 0, "Admin role value == 0");
+    assert((guest.role to int) == 2, "Guest role value == 2");
+    assert(admin.role != guest.role, "Admin != Guest");
+    return 0;
+}

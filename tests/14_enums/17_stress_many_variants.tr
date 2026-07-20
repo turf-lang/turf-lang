@@ -1,0 +1,31 @@
+// Test: Stress — large enum with many variants; loop all via cast, verify to string
+enum Month {
+    January, February, March, April, May, June,
+    July, August, September, October, November, December
+}
+
+fn main(): int {
+    assert(Month::COUNT == 12, "12 months");
+
+    immut names: string[12] = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ];
+
+    mut i: int = 0;
+    while i < 12 {
+        immut m: Month = i to Month;
+        assert((m to string) == names[i], "Month name matches");
+        assert((m to int) == i, "Month ordinal matches");
+        i = i + 1;
+    }
+
+    // String round-trips for a few key months
+    immut jan: Month = "January" to Month;
+    immut dec: Month = "December" to Month;
+    assert(jan == Month::January, "Jan from string");
+    assert(dec == Month::December, "Dec from string");
+    assert((jan to int) == 0, "Jan ordinal 0");
+    assert((dec to int) == 11, "Dec ordinal 11");
+    return 0;
+}

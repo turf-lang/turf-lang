@@ -1,0 +1,12 @@
+// Test (fail): Ordering operators on enum values should be a type error
+// Cannot use <, >, <=, >= on enums — cast to int first
+enum Direction { North, East, South, West }
+
+fn main(): int {
+    immut d1: Direction = Direction::North;
+    immut d2: Direction = Direction::South;
+    if d1 < d2 {
+        return 1;
+    }
+    return 0;
+}
