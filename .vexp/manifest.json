@@ -4,7 +4,6 @@
     ".github/copilot-instructions.md": "e2a3e65cb129bd8d649b5901e120f415bc17341dc1285e3da0c39b2fe7c932c7",
     "AGENTS.md": "278a2e5df9166cd053026bd5f150665a6bbf2987a3545c9194582b69d07e5edc",
     "README.md": "d2e1ef20fd59c68b76d814e5c5f0bca0a25607e90ab24eb7fd0c4ef370ce8be0",
-    "ROADMAP_strings_enums_stdlib.md": "1fb6cdc4f629fb2ade23c412793a33c4e72b1f87719433aef9cbba80a5ac4a32",
     "docs/detailed/arrays_and_lists.md": "a8fc5b0097526760df89d6d7f25b8843fca7985d5faad5e4f73b66088e8d48db",
     "docs/detailed/compiler_tools_and_diagnostics.md": "0d527d8a60ddbb738cd00434d9c4f8611593ae31e76d1814f146f0e3ee49f60a",
     "docs/detailed/control_flow_and_errors.md": "ece09df2d60d27483efe856c225c410871c03147a4b9d182abcd48379db8bdda",
@@ -78,13 +77,13 @@
     "src/main.cpp": "8feec6533e494b4b4a06de29ddf9a9f775f2cb64000d07286e0948e70622bc71",
     "tests/runner.sh": "6ba1490cd39dc8198df51df044e8bc2d48a651e58fcfdb5df807ea5cbecad962"
   },
-  "indexed_at_commit": "9aec7b783982c2f611d9555b34c31ccf6e8d9c96",
-  "indexed_at_timestamp": "2026-07-20T04:49:53.433389375+00:00",
+  "indexed_at_commit": "4fbb69f03b220b334982962fcd893ddc885961dc",
+  "indexed_at_timestamp": "2026-07-20T04:50:57.505723630+00:00",
   "schema_version": 3,
   "stats": {
-    "total_edges": 1117,
-    "total_files": 77,
-    "total_nodes": 1102
+    "total_edges": 1074,
+    "total_files": 76,
+    "total_nodes": 1058
   },
   "vexp_version": "2.2.2"
 }
