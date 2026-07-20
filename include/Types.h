@@ -97,6 +97,9 @@ public:
   /// True if this type is a `TurfGenericParamType` (open type parameter).
   virtual bool isGenericParam() const { return false; }
 
+  /// True if this type is an `TurfEnumType`.
+  virtual bool isEnum() const { return false; }
+
   // ── Legacy predicate (backward-compatible) ───────────────────────────────
 
   /**
@@ -396,6 +399,34 @@ public:
     int idx = getFieldIndex(FieldName);
     return idx >= 0 ? Fields[idx].Type : nullptr;
   }
+};
+
+// ─── TurfEnumType ────────────────────────────────────────────────────────────
+
+class TurfEnumType : public TurfType {
+    std::string                   Name_;
+    std::vector<std::string>      Variants_;
+    std::map<std::string, int>    VariantValues_;
+    std::shared_ptr<TurfType>     UnderlyingType_;
+
+public:
+    TurfEnumType(std::string Name,
+                 std::vector<std::string> Variants,
+                 std::shared_ptr<TurfType> UnderlyingType);
+
+    std::string getName() const override { return Name_; }
+    bool isEnum() const override { return true; }
+
+    const TurfType*  getUnderlyingType()    const { return UnderlyingType_.get(); }
+    TurfTypePtr      getUnderlyingTypePtr() const { return UnderlyingType_; }
+    int  getVariantValue(const std::string& V) const;
+    bool hasVariant(const std::string& V)      const;
+    const std::vector<std::string>& getVariants() const { return Variants_; }
+    int numVariants() const { return static_cast<int>(Variants_.size()); }
+
+    std::string getMangledName() const override {
+        return Name_ + "_enum_" + UnderlyingType_->getMangledName();
+    }
 };
 
 // ─── RankedSuggestions (used by SymbolTable diagnostics) ─────────────────────

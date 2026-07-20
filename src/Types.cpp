@@ -133,6 +133,10 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   if (From->isString() || To->isString())
     return false;
 
+  // Enums are strictly typed and do not coerce implicitly to ints or other enums
+  if (From->isEnum() || To->isEnum())
+    return false;
+
   // Rule 4: bool is strictly isolated — never coerces to/from numerics.
   if (From->isBool() || To->isBool())
     return false;
@@ -153,4 +157,28 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   // Anything else (e.g. struct-to-struct name mismatch, pointer-to-struct,
   // etc.) is not implicitly compatible.
   return false;
+}
+
+// ─── TurfEnumType ────────────────────────────────────────────────────────────
+
+TurfEnumType::TurfEnumType(std::string Name,
+                           std::vector<std::string> Variants,
+                           std::shared_ptr<TurfType> UnderlyingType)
+    : Name_(std::move(Name)), Variants_(std::move(Variants)),
+      UnderlyingType_(UnderlyingType ? std::move(UnderlyingType) : TurfInt()) {
+    for (size_t i = 0; i < Variants_.size(); ++i) {
+        VariantValues_[Variants_[i]] = static_cast<int>(i);
+    }
+}
+
+int TurfEnumType::getVariantValue(const std::string& V) const {
+    auto it = VariantValues_.find(V);
+    if (it != VariantValues_.end()) {
+        return it->second;
+    }
+    return -1;
+}
+
+bool TurfEnumType::hasVariant(const std::string& V) const {
+    return VariantValues_.find(V) != VariantValues_.end();
 }
