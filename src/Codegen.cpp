@@ -149,10 +149,21 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, GT->getBaseName());
   }
 
-  // NamedType — may refer to a user-defined struct registered in LLVMTypeCache.
-  // This covers function return types like `fn get_matrix(): Matrix` where the
-  // AST node is NamedType("Matrix"), not TurfStructType("Matrix").
+  // User-defined enums — always stored as their underlying integer type (i64).
+  if (dynamic_cast<const TurfEnumType *>(T)) {
+    return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
+  }
+
+  // NamedType — may refer to a user-defined struct OR an enum registered in
+  // GlobalSymbolTable. Check GlobalSymbolTable first so enums resolve to i64.
   if (dynamic_cast<const NamedType *>(T)) {
+    // Try to resolve through GlobalSymbolTable first
+    if (GlobalSymbolTable) {
+      if (auto Registered = GlobalSymbolTable->LookupType(T->getName())) {
+        if (dynamic_cast<const TurfEnumType *>(Registered.get()))
+          return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
+      }
+    }
     auto CacheIt = LLVMTypeCache.find(Key);
     if (CacheIt != LLVMTypeCache.end())
       return CacheIt->second;
@@ -534,6 +545,13 @@ static const TurfType *getExprType(const ExprAST *E) {
       AddrOfTypeCache[Key] = std::make_shared<TurfPointerType>(std::move(InnerCopy));
     }
     return AddrOfTypeCache[Key].get();
+  }
+  // EnumAccess: Direction::North → the type is Direction (TurfEnumType)
+  if (auto *EA = dynamic_cast<const EnumAccessExprAST *>(E)) {
+    if (GlobalSymbolTable) {
+      if (auto Registered = GlobalSymbolTable->LookupType(EA->getEnumName()))
+        return Registered.get();
+    }
   }
   return nullptr;
 }
@@ -1573,13 +1591,26 @@ Value *CastExprAST::codegen() {
       SrcType = std::make_shared<TurfPointerType>(Ptr->getPointee());
     else if (ExprTy->isNamed("void*"))
       SrcType = std::make_shared<TurfPointerType>(TurfVoid());
+    else if (ExprTy->isEnum()) {
+      // Preserve the enum type pointer directly so isEnum() checks work below.
+      SrcType = GlobalSymbolTable->LookupType(ExprTy->getName());
+      if (!SrcType) SrcType = getTurfTypeFromLLVM(Val->getType());
+    }
     else
       SrcType = getTurfTypeFromLLVM(Val->getType());
   } else {
     SrcType = getTurfTypeFromLLVM(Val->getType());
   }
   const std::string SrcName = ExprTy ? ExprTy->getName() : SrcType->getName();
-  const std::string DstName = DestType->getName();
+
+  // Resolve DestType: NamedType may point to a registered enum/struct — look it
+  // up at codegen time so isEnum() and isStruct() return the correct value.
+  TurfTypePtr ResolvedDest = DestType;
+  if (dynamic_cast<const NamedType *>(DestType.get()) && GlobalSymbolTable) {
+    if (auto Registered = GlobalSymbolTable->LookupType(DestType->getName()))
+      ResolvedDest = Registered;
+  }
+  const std::string DstName = ResolvedDest->getName();
 
   // Identity - no-op
   if (SrcName == DstName)
@@ -1591,6 +1622,31 @@ Value *CastExprAST::codegen() {
 
   if (SrcName == "double" && DstName == "int")
     return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), "dtoi");
+
+  // Resolve both SrcType and DestType through GlobalSymbolTable so that
+  // enum types (stored as NamedType at parse time) are correctly identified.
+  // All primitive type names ("int", "double", etc.) return null from
+  // LookupType and are handled by the existing branches.
+  TurfTypePtr SrcEnum, DstEnum;
+  if (GlobalSymbolTable) {
+    if (auto R = GlobalSymbolTable->LookupType(SrcName))
+      if (dynamic_cast<const TurfEnumType *>(R.get())) SrcEnum = R;
+    if (auto R = GlobalSymbolTable->LookupType(DstName))
+      if (dynamic_cast<const TurfEnumType *>(R.get())) DstEnum = R;
+  }
+
+  // enum → int : enums are stored as i64 — just zero-extend
+  if (SrcEnum && DstName == "int")
+    return Builder->CreateIntCast(Val, Type::getInt64Ty(*TheContext), false, "enum_to_int");
+
+  // int → enum : reinterpret the integer as the enum's underlying type
+  if (SrcName == "int" && DstEnum) {
+    const TurfEnumType *ET = dynamic_cast<const TurfEnumType *>(DstEnum.get());
+    if (ET) {
+      llvm::Type *LLVMTy = getLLVMType(ET->getUnderlyingType());
+      return Builder->CreateIntCast(Val, LLVMTy, false, "int_to_enum");
+    }
+  }
 
   // string → int  : call strtoll(str, &endptr, 10)
   if (SrcName == "string" && DstName == "int") {
@@ -1723,6 +1779,129 @@ Value *CastExprAST::codegen() {
     Value *TrueStr = Builder->CreateGlobalString("true", "str_true");
     Value *FalseStr = Builder->CreateGlobalString("false", "str_false");
     return Builder->CreateSelect(Val, TrueStr, FalseStr, "bool_to_str");
+  }
+
+  // enum -> string : switch on the integer value, each case returns the name
+  // IR layout:
+  //   [current block]: switch val, default=defaultBB, [case i -> caseBB_i]
+  //   defaultBB:  store "<unknown enum>", br mergeBB
+  //   caseBB_0:   store "North",   br mergeBB
+  //   caseBB_1:   store "East",    br mergeBB
+  //   ...
+  //   mergeBB:    phi [str from each case]
+  if (SrcEnum && DstName == "string") {
+    const TurfEnumType *ET = dynamic_cast<const TurfEnumType *>(SrcEnum.get());
+    if (!ET) return nullptr;
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    llvm::Type *UnderlyingLLVMTy = getLLVMType(ET->getUnderlyingType());
+
+    // Destination blocks
+    BasicBlock *DefaultBB = BasicBlock::Create(*TheContext, "enum_str_def", TheFunction);
+    BasicBlock *MergeBB   = BasicBlock::Create(*TheContext, "enum_str_merge", TheFunction);
+
+    // Emit switch in current block
+    SwitchInst *SI = Builder->CreateSwitch(Val, DefaultBB, ET->numVariants());
+
+    // Default block: unknown enum value
+    Builder->SetInsertPoint(DefaultBB);
+    Value *UnknownStr = Builder->CreateGlobalString("<unknown enum>", "str_unk");
+    Builder->CreateBr(MergeBB);
+
+    // PHI in merge block — add default incoming first
+    Builder->SetInsertPoint(MergeBB);
+    PHINode *PN = Builder->CreatePHI(PointerType::getUnqual(*TheContext),
+                                     ET->numVariants() + 1, "enum_str_phi");
+    PN->addIncoming(UnknownStr, DefaultBB);
+
+    // Per-variant case blocks
+    for (const auto& V : ET->getVariants()) {
+      BasicBlock *CaseBB = BasicBlock::Create(*TheContext, "enum_case_" + V, TheFunction);
+      ConstantInt *CaseVal = cast<ConstantInt>(
+          ConstantInt::get(UnderlyingLLVMTy, ET->getVariantValue(V)));
+      SI->addCase(CaseVal, CaseBB);
+
+      Builder->SetInsertPoint(CaseBB);
+      Value *VariantStr = Builder->CreateGlobalString(V, "str_" + V);
+      Builder->CreateBr(MergeBB);
+      PN->addIncoming(VariantStr, CaseBB);
+    }
+
+    Builder->SetInsertPoint(MergeBB);
+    return PN;
+  }
+
+  // string -> enum : strcmp chain starting from the current block
+  // IR layout:
+  //   [current block]:  cmp "North", condBr matchBB_0, nextBB_0
+  //   matchBB_0:        br mergeBB  (value = 0)
+  //   nextBB_0:         cmp "East",  condBr matchBB_1, nextBB_1
+  //   ...
+  //   nextBB_last:      br failBB
+  //   failBB:           call fail()
+  //   mergeBB:          phi [values from each match]
+  if (SrcName == "string" && DstEnum) {
+    const TurfEnumType *ET = dynamic_cast<const TurfEnumType *>(DstEnum.get());
+    if (!ET) return nullptr;
+
+    Function *StrcmpF = TheModule->getFunction("strcmp");
+    if (!StrcmpF) {
+      Type *I8Ptr = PointerType::get(*TheContext, 0);
+      FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext),
+                                           {I8Ptr, I8Ptr}, false);
+      StrcmpF = Function::Create(FT, Function::ExternalLinkage, "strcmp",
+                                 TheModule.get());
+    }
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    llvm::Type *UnderlyingLLVMTy = getLLVMType(ET->getUnderlyingType());
+
+    // KEY: save the entry block BEFORE moving the insert point anywhere.
+    BasicBlock *EntryBB = Builder->GetInsertBlock();
+
+    // Create terminal blocks (appended to function, filled below)
+    BasicBlock *FailBB  = BasicBlock::Create(*TheContext, "enum_parse_fail",  TheFunction);
+    BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "enum_parse_merge", TheFunction);
+
+    // Build PHI in MergeBB
+    Builder->SetInsertPoint(MergeBB);
+    PHINode *PN = Builder->CreatePHI(UnderlyingLLVMTy, ET->numVariants(), "enum_parse_phi");
+
+    // Build fail block
+    Builder->SetInsertPoint(FailBB);
+    CodegenIntrinsic("fail", {Builder->CreateGlobalString(
+        "Runtime Error: Invalid string to enum conversion.")}, Loc);
+    if (!Builder->GetInsertBlock()->getTerminator())
+      Builder->CreateUnreachable();
+
+    // Build the strcmp chain directly from EntryBB (saved before any SetInsertPoint calls)
+    BasicBlock *CurrentBB = EntryBB;
+    for (const auto& V : ET->getVariants()) {
+      BasicBlock *MatchBB = BasicBlock::Create(*TheContext, "enum_parse_match_" + V, TheFunction, FailBB);
+      BasicBlock *NextBB  = BasicBlock::Create(*TheContext, "enum_parse_next_"  + V, TheFunction, FailBB);
+
+      Builder->SetInsertPoint(CurrentBB);
+      Value *VariantStr = Builder->CreateGlobalString(V, "cmpstr_" + V);
+      Value *CmpRes  = Builder->CreateCall(StrcmpF, {Val, VariantStr}, "strcmp_" + V);
+      Value *IsMatch = Builder->CreateICmpEQ(
+          CmpRes, ConstantInt::get(Type::getInt32Ty(*TheContext), 0), "match_" + V);
+      Builder->CreateCondBr(IsMatch, MatchBB, NextBB);
+
+      Builder->SetInsertPoint(MatchBB);
+      ConstantInt *CaseVal = cast<ConstantInt>(
+          ConstantInt::get(UnderlyingLLVMTy, ET->getVariantValue(V)));
+      Builder->CreateBr(MergeBB);
+      PN->addIncoming(CaseVal, MatchBB);
+
+      CurrentBB = NextBB;
+    }
+
+    // Last "next" block falls to fail
+    Builder->SetInsertPoint(CurrentBB);
+    Builder->CreateBr(FailBB);
+
+    Builder->SetInsertPoint(MergeBB);
+    return PN;
   }
 
     // (moved unsupported string cast down)
@@ -3189,6 +3368,61 @@ Value *MethodCallExprAST::codegen() {
   llvm::report_fatal_error(
       "Internal error: method call on unsupported type. This is a compiler bug.");
   return nullptr;
+}
+
+Value *EnumDeclExprAST::codegen() {
+  return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+}
+
+Value *EnumAccessExprAST::codegen() {
+  auto EnumTy = GlobalSymbolTable->LookupType(EnumName);
+  auto *ET = dynamic_cast<const TurfEnumType *>(EnumTy.get());
+  if (!ET) {
+    LogErrorAt(Loc, "Internal error: enum type not found in codegen");
+    return nullptr;
+  }
+  
+  if (Variant == "COUNT") {
+    return ConstantInt::get(Type::getInt64Ty(*TheContext), ET->numVariants());
+  }
+  
+  if (Variant == "VALUES") {
+    llvm::Type *UnderlyingLLVMTy = getLLVMType(ET->getUnderlyingType());
+    std::vector<Constant*> ArrayVals;
+    for (const auto& V : ET->getVariants()) {
+      ArrayVals.push_back(ConstantInt::get(UnderlyingLLVMTy, ET->getVariantValue(V)));
+    }
+    llvm::ArrayType *ArrTy = llvm::ArrayType::get(UnderlyingLLVMTy, ArrayVals.size());
+    Constant *ArrConst = ConstantArray::get(ArrTy, ArrayVals);
+    GlobalVariable *GV = new GlobalVariable(*TheModule, ArrTy, true,
+                                            GlobalValue::PrivateLinkage, ArrConst, EnumName + ".values");
+    Constant *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
+    Constant *Indices[] = {Zero, Zero};
+    return ConstantExpr::getInBoundsGetElementPtr(ArrTy, GV, Indices);
+  }
+  
+  if (Variant == "NAMES") {
+    std::vector<Constant*> ArrayVals;
+    llvm::Type *StringTy = llvm::PointerType::getUnqual(*TheContext);
+    for (const auto& V : ET->getVariants()) {
+      Constant *StrConstant = llvm::ConstantDataArray::getString(*TheContext, V, true);
+      GlobalVariable *StrGV = new GlobalVariable(*TheModule, StrConstant->getType(), true,
+                                                 GlobalValue::PrivateLinkage, StrConstant, ".str");
+      Constant *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
+      Constant *Indices[] = {Zero, Zero};
+      ArrayVals.push_back(ConstantExpr::getInBoundsGetElementPtr(StrConstant->getType(), StrGV, Indices));
+    }
+    llvm::ArrayType *ArrTy = llvm::ArrayType::get(StringTy, ArrayVals.size());
+    Constant *ArrConst = ConstantArray::get(ArrTy, ArrayVals);
+    GlobalVariable *GV = new GlobalVariable(*TheModule, ArrTy, true,
+                                            GlobalValue::PrivateLinkage, ArrConst, EnumName + ".names");
+    Constant *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
+    Constant *Indices[] = {Zero, Zero};
+    return ConstantExpr::getInBoundsGetElementPtr(ArrTy, GV, Indices);
+  }
+
+  llvm::Type *LLVMTy = getLLVMType(ET->getUnderlyingType());
+  return ConstantInt::get(LLVMTy, ET->getVariantValue(Variant));
 }
 
 Value *StructDeclExprAST::codegen() {
