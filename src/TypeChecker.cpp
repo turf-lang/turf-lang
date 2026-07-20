@@ -241,6 +241,13 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
   if (LhsTy->isString() && RhsTy->isString())
     return TurfBool();
 
+  if (LhsTy->isEnum() || RhsTy->isEnum()) {
+    std::string EnumName = LhsTy->isEnum() ? LhsTy->getName() : RhsTy->getName();
+    reportError(Loc, "Cannot use ordering operators on enum type '" + EnumName + 
+                     "'. Cast to int first: (a to int) < (b to int)");
+    return TurfBool();
+  }
+
   if (LhsTy->isNumeric() && RhsTy->isNumeric())
     return TurfBool();
 
@@ -822,7 +829,38 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
   if (Node.getOtherBodyMut())
     check(Node.getOtherBodyMut());
 
-  // 4. Empty compare{} warning was already emitted by the Parser
+  // 4. Exhaustiveness gate for Enums
+  bool IsEnum = SubjectTy && SubjectTy->isEnum();
+  Node.SubjectIsEnum = IsEnum;
+
+  const TurfEnumType* ET = IsEnum
+      ? dynamic_cast<const TurfEnumType*>(SubjectTy.get()) : nullptr;
+
+  if (ET && !Node.getOtherBody()) {
+      std::set<std::string> CoveredVariants;
+      for (auto &Arm : Node.getArms()) {
+          for (auto &PatExpr : Arm.Values) {
+              if (auto* EA = dynamic_cast<EnumAccessExprAST*>(PatExpr.get()))
+                  CoveredVariants.insert(EA->getVariant());
+          }
+      }
+
+      std::vector<std::string> Missing;
+      for (const auto& V : ET->getVariants())
+          if (!CoveredVariants.count(V))
+              Missing.push_back(V);
+
+      if (!Missing.empty()) {
+          std::string Msg = "Non-exhaustive enum comparison on '" + ET->getName()
+                          + "'.\nMissing variants:";
+          for (const auto& M : Missing)
+              Msg += "\n    " + ET->getName() + "::" + M;
+          Msg += "\nHint: Add 'otherwise:' to handle remaining variants.";
+          reportError(Node.getLoc(), Msg);
+      }
+  }
+
+  // 5. Empty compare{} warning was already emitted by the Parser
   setType(&Node, TurfVoid());
 }
 
@@ -1232,6 +1270,25 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
 #endif
   // Field type unknown or TypeChecker running without struct registry.
   setType(&Node, nullptr);
+}
+
+void TypeChecker::visitEnumDecl(EnumDeclExprAST &Node) {
+  setType(&Node, TurfVoid());
+}
+
+void TypeChecker::visitEnumAccess(EnumAccessExprAST &Node) {
+  auto ET = GlobalSymbolTable ? GlobalSymbolTable->LookupType(Node.getEnumName()) : nullptr;
+  if (!ET) return; // Should not happen, Resolver catches this
+
+  if (Node.getVariant() == "COUNT") {
+    setType(&Node, TurfInt());
+  } else if (Node.getVariant() == "VALUES") {
+    setType(&Node, std::make_shared<TurfPointerType>(ET));
+  } else if (Node.getVariant() == "NAMES") {
+    setType(&Node, std::make_shared<TurfPointerType>(TurfString()));
+  } else {
+    setType(&Node, ET);
+  }
 }
 
 void TypeChecker::visitStructDecl(StructDeclExprAST &Node) {
