@@ -314,8 +314,8 @@ int main(int argc, char **argv) {
 
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') { getNextToken(); continue; }
-        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT ||
-            CurTok == TOK_EXTERN) {
+        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+            CurTok == TOK_AT || CurTok == TOK_EXTERN) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
@@ -328,7 +328,7 @@ int main(int argc, char **argv) {
               PrePassASTs.push_back(std::move(AST));
             }
           } else {
-            while (CurTok != TOK_FN && CurTok != TOK_STRUCT &&
+            while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_ENUM &&
                    CurTok != TOK_IMPORT && CurTok != TOK_AT &&
                    CurTok != TOK_EXTERN && CurTok != TOK_EOF)
               getNextToken();
@@ -408,6 +408,7 @@ int main(int argc, char **argv) {
       g_protoOnlyPass = true;
       for (auto &AST : PrePassASTs) {
         if (dynamic_cast<FuncDefExprAST *>(AST.get()) ||
+            dynamic_cast<EnumDeclExprAST *>(AST.get()) ||
             dynamic_cast<ExternFuncDeclExprAST *>(AST.get()) ||
             dynamic_cast<ModuleImportExprAST *>(AST.get())) {
           g_recoverActive = true;
@@ -481,8 +482,8 @@ int main(int argc, char **argv) {
     // are top-level declarations handled by the pre-pass, exactly like `fn`.
     // TOK_EXTERN is included because extern fn declarations are also emitted
     // in the pre-pass.
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT ||
-        CurTok == TOK_EXTERN) {
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+        CurTok == TOK_AT || CurTok == TOK_EXTERN) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();
@@ -494,8 +495,8 @@ int main(int argc, char **argv) {
           FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
         }
       } else {
-        while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_AT &&
-               CurTok != TOK_EXTERN && CurTok != ';' && CurTok != TOK_EOF)
+        while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_ENUM &&
+               CurTok != TOK_AT && CurTok != TOK_EXTERN && CurTok != ';' && CurTok != TOK_EOF)
           getNextToken();
       }
       g_recoverActive = false;
@@ -535,6 +536,7 @@ int main(int argc, char **argv) {
         }
         if (!dynamic_cast<FuncDefExprAST *>(AST.get()) &&
             !dynamic_cast<StructDeclExprAST *>(AST.get()) &&
+            !dynamic_cast<EnumDeclExprAST *>(AST.get()) &&
             !dynamic_cast<ModuleImportExprAST *>(AST.get()) &&
             !dynamic_cast<ExternFuncDeclExprAST *>(AST.get())) {
           std::cerr

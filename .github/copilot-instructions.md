@@ -1,4 +1,4 @@
-## vexp context tools <!-- vexp v2.1.4 -->
+## vexp context tools <!-- vexp v2.2.2 -->
 
 **MANDATORY: use `run_pipeline` - do NOT grep, glob, or read files manually.**
 vexp returns pre-indexed, graph-ranked context in a single call.
@@ -10,10 +10,16 @@ vexp returns pre-indexed, graph-ranked context in a single call.
 
 ### Available MCP tools
 - `run_pipeline` - **PRIMARY TOOL**. Runs capsule + impact + memory in 1 call.
-  Auto-detects intent. Includes file content. Example: `run_pipeline({ "task": "fix auth bug" })`
+  Auto-detects intent. Includes file content. Example: `run_pipeline({ "task": "fix JWT expiry in AuthService.validateToken" })`
 - `get_skeleton` - compact file structure
 - `index_status` - indexing status
 - `expand_vexp_ref` - expand V-REF placeholders in v2 output
+
+### Query shape (do this)
+- Anchor the task on real identifiers (ClassName, functionName) or file paths:
+  `run_pipeline({ "task": "fix JWT expiry in AuthService.validateToken" })`
+- A pure natural-language question ("why does login fail?") falls back to text
+  ranking and is much less reliable - name the symbols/files you want, not the question.
 
 ### Agentic search
 - Do NOT use built-in file search, grep, or codebase indexing - always call `run_pipeline` first
