@@ -81,6 +81,7 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"self", TOK_SELF},
                                        {"sizeof", TOK_SIZEOF},
                                        {"import", TOK_IMPORT},
+                                       {"enum", TOK_ENUM},
 
                                        {"null", TOK_NULL},
                                        {"mutable", TOK_MUTABLE},

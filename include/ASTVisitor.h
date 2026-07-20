@@ -50,6 +50,9 @@ class FieldAccessExprAST;
 class ArrayDeclExprAST;
 class ArrayLiteralExprAST;
 class ArrayAccessExprAST;
+class FieldAccessExprAST;
+class EnumDeclExprAST;
+class EnumAccessExprAST;
 class StructDeclExprAST;
 class StructInitExprAST;
 class ModuleImportExprAST;
@@ -123,6 +126,8 @@ public:
 
   // ── Structs & Field access ────────────────────────────────────────────────
   virtual void visitFieldAccess(FieldAccessExprAST &Node) {}
+  virtual void visitEnumDecl(EnumDeclExprAST &Node) {}
+  virtual void visitEnumAccess(EnumAccessExprAST &Node) {}
   virtual void visitStructDecl(StructDeclExprAST &Node) {}
   virtual void visitStructInit(StructInitExprAST &Node) {}
 

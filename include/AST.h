@@ -462,6 +462,7 @@ class CompareExprAST : public ExprAST {
 public:
   /// Set by TypeChecker when the subject is a string — selects strcmp chain codegen.
   bool SubjectIsString = false;
+  bool SubjectIsEnum   = false;
 
   CompareExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Subject,
                  std::vector<MatchesArm> Arms,
@@ -776,6 +777,45 @@ public:
                                                    ReturnType_, IsVarArg_,
                                                    LibName_);
   }
+};
+
+class EnumDeclExprAST : public ExprAST {
+    std::string              Name;
+    std::vector<std::string> Variants;
+    TurfTypePtr              UnderlyingType;  // nullptr = TurfInt32 default
+    SourceLocation           Loc;
+public:
+    EnumDeclExprAST(SourceLocation Loc, std::string Name,
+                    std::vector<std::string> Variants,
+                    TurfTypePtr UnderlyingType = nullptr)
+        : Name(std::move(Name)), Variants(std::move(Variants)),
+          UnderlyingType(std::move(UnderlyingType)), Loc(Loc) {}
+    const std::string&              getName()     const { return Name; }
+    const std::vector<std::string>& getVariants() const { return Variants; }
+    const SourceLocation&           getLoc()      const { return Loc; }
+    TurfTypePtr                     getUnderlyingType() const { return UnderlyingType; }
+    llvm::Value* codegen() override;
+    void accept(ASTVisitor& V) override { V.visitEnumDecl(*this); }
+    std::unique_ptr<ExprAST> clone() const override {
+        return std::make_unique<EnumDeclExprAST>(Loc, Name, Variants, UnderlyingType);
+    }
+};
+
+class EnumAccessExprAST : public ExprAST {
+    std::string    EnumName;
+    std::string    Variant;
+    SourceLocation Loc;
+public:
+    EnumAccessExprAST(SourceLocation Loc, std::string EnumName, std::string Variant)
+        : EnumName(std::move(EnumName)), Variant(std::move(Variant)), Loc(Loc) {}
+    const std::string& getEnumName() const { return EnumName; }
+    const std::string& getVariant()  const { return Variant; }
+    const SourceLocation& getLoc()   const { return Loc; }
+    llvm::Value* codegen() override;
+    void accept(ASTVisitor& V) override { V.visitEnumAccess(*this); }
+    std::unique_ptr<ExprAST> clone() const override {
+        return std::make_unique<EnumAccessExprAST>(Loc, EnumName, Variant);
+    }
 };
 
 

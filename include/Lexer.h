@@ -163,6 +163,7 @@ enum Token {
   TOK_MATCHES  = -76, ///< `matches`  keyword — arm pattern in compare
   TOK_DONE     = -77, ///< `done`     keyword — terminates a matches arm body
   TOK_POWER    = -78, ///< `**`       token   — exponentiation operator
+  TOK_ENUM     = -81, ///< `enum`     token   — enum declaration
   TOK_LSHIFT   = -79, ///< `<<`       token   — bitwise left shift
   TOK_RSHIFT   = -80  ///< `>>`       token   — bitwise right shift
 };
