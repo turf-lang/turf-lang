@@ -151,6 +151,7 @@ std::unique_ptr<ExprAST> ParseWhileExpr();
 std::unique_ptr<ExprAST> ParseForExpr();
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
 std::unique_ptr<ExprAST> ParseVarDecl();
+std::unique_ptr<ExprAST> ParseEnumDecl();
 std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
                                           TurfTypePtr Type);
 std::unique_ptr<ExprAST> ParseBoolExpr();
@@ -597,6 +598,18 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                                                  std::move(NamedFields));
     }
 
+    // ── Enum access: EnumName::Variant ─────────────────────────────────────────
+    if (CurTok == TOK_SCOPE) {
+      getNextToken(); // eat '::'
+      if (CurTok != TOK_IDENTIFIER) {
+        LogErrorAt(CurLoc, "Expected variant name after '::'");
+        return nullptr;
+      }
+      std::string Variant = IdentifierStr;
+      getNextToken(); // eat variant name
+      return std::make_unique<EnumAccessExprAST>(IdLoc, IdName, Variant);
+    }
+
     bool CouldBeKeywordTypo = false;
 
     // Only flag a typo if this name is NOT already a known variable.
@@ -612,9 +625,12 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     }
 
     if (CouldBeKeywordTypo) {
-      // Allow: assignment, dot-access, subscript, function call
-      if (CurTok != TOK_ASSIGN && CurTok != '.' && CurTok != '[' &&
-          CurTok != '(') {
+      // Heuristic: If this is a keyword typo (like 'iff x'), the next token is
+      // usually an identifier, number, string, or brace — things that cannot
+      // directly follow a valid variable expression without an operator.
+      if (CurTok == TOK_IDENTIFIER || CurTok == TOK_NUMBER || 
+          CurTok == TOK_INT_LITERAL || CurTok == TOK_STRING_LITERAL || 
+          CurTok == '{') {
         KeywordError(IdLoc, IdName).raise();
         return nullptr;
       }
@@ -744,6 +760,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
   case TOK_STRUCT:
     return ParseStructDecl();
+
+  case TOK_ENUM:
+    return ParseEnumDecl();
 
   case TOK_EXTERN:
     return ParseExternDecl();
@@ -992,7 +1011,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
       continue;
     }
     if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
-        CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_COMPARE) {
+        CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_COMPARE) {
       auto Expr = ParseExpression();
       if (!Expr) return nullptr;
       if (CurTok == ';') {
@@ -1015,7 +1034,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
       if (!PossibleKeyword.empty()) {
         static const std::vector<std::string> Keywords = {
             "if", "while", "for", "mutable", "immutable", "mut", "immut", 
-            "return", "compare", "do", "fn", "struct"};
+            "return", "compare", "do", "fn", "struct", "enum"};
         for (const auto &KW : Keywords) {
           int MaxDist = KW.length() <= 3 ? 1 : 2;
           if (getDamerauLevenshteinDistance(PossibleKeyword, KW) <= MaxDist) {
@@ -1241,7 +1260,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
           continue;
         }
         if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
-            CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_COMPARE) {
+            CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_COMPARE) {
           auto E = ParseExpression();
           if (!E) return nullptr;
           OtherStmts.push_back(std::move(E));
@@ -1360,7 +1379,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         continue;
       }
       if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
-          CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_COMPARE) {
+          CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_COMPARE) {
         auto E = ParseExpression();
         if (!E) return nullptr;
         ArmStmts.push_back(std::move(E));
@@ -1690,6 +1709,58 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   }
 
   return std::make_unique<StructDeclExprAST>(Loc, Name, Fields, TypeParams);
+}
+
+// ParseEnumDecl - called when CurTok == TOK_ENUM.
+std::unique_ptr<ExprAST> ParseEnumDecl() {
+  SourceLocation Loc = CurLoc;
+  getNextToken(); // eat 'enum'
+  
+  if (CurTok != TOK_IDENTIFIER) {
+    LogErrorAt(CurLoc, "Expected identifier after 'enum'");
+    return nullptr;
+  }
+  std::string Name = IdentifierStr;
+  getNextToken();
+
+  if (CurTok != '{') {
+    LogErrorAt(CurLoc, "Expected '{' after enum name");
+    return nullptr;
+  }
+  getNextToken(); // eat '{'
+
+  std::vector<std::string> Variants;
+  while (CurTok != '}' && CurTok != TOK_EOF) {
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc, "Expected variant name in enum definition");
+      return nullptr;
+    }
+    Variants.push_back(IdentifierStr);
+    getNextToken(); // eat variant name
+
+    if (CurTok == ',') {
+      getNextToken();
+    } else if (CurTok != '}') {
+      LogErrorAt(CurLoc, "Expected ',' or '}' after variant name");
+      return nullptr;
+    }
+  }
+
+  if (CurTok != '}') {
+    LogErrorAt(CurLoc, "Expected '}' to close enum definition");
+    return nullptr;
+  }
+  getNextToken(); // eat '}'
+
+  // Register the enum type in GlobalSymbolTable so that codegen can look it up
+  // via GlobalSymbolTable->LookupType(Name), mirroring how struct types are
+  // registered during ParseStructDecl.
+  auto EType = std::make_shared<TurfEnumType>(Name, Variants, TurfInt());
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->RegisterType(Name, EType);
+  }
+
+  return std::make_unique<EnumDeclExprAST>(Loc, Name, Variants);
 }
 
 // ParseExternDecl - called when CurTok == TOK_EXTERN.
@@ -2068,7 +2139,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
       continue;
     }
 
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT ||
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_AT ||
         CurTok == TOK_EXTERN) {
       auto Expr = ParseExpression();
       if (Expr) {
