@@ -434,6 +434,13 @@ public:
    */
   std::vector<std::string> getAllStructNames() const;
 
+  // ── Enum registry ─────────────────────────────────────────────────────────
+
+  void registerEnumType(const std::string& Name, std::shared_ptr<TurfEnumType> ET);
+  std::shared_ptr<TurfEnumType> lookupEnumType(const std::string& Name) const;
+  bool isEnumName(const std::string& Name) const;
+  std::vector<std::string> getAllEnumNames() const;
+
   /**
    * @brief Dumps the contents of the symbol table (all scopes and modules) to the output stream.
    */
@@ -459,6 +466,9 @@ private:
   /// Queried in Pass 2 to validate NamedType field references without
   /// involving the TypeChecker or LLVM.
   std::unordered_set<std::string> RegisteredStructs_;
+
+  /// Enums declared in the current file.
+  std::unordered_map<std::string, std::shared_ptr<TurfEnumType>> RegisteredEnums_;
 };
 
 #endif // RESOLVER_SYMBOL_TABLE_H

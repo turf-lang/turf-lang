@@ -114,6 +114,13 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
     return;
   }
 
+  // Hoist enum declarations: register the name and variants.
+  if (const auto *Enum = dynamic_cast<const EnumDeclExprAST *>(Node)) {
+    auto ET = std::make_shared<TurfEnumType>(Enum->getName(), Enum->getVariants(), Enum->getUnderlyingType());
+    SymTable_.registerEnumType(Enum->getName(), ET);
+    return;
+  }
+
   // Hoist function definitions: register the signature (NOT the body).
   if (const auto *Func = dynamic_cast<const FuncDefExprAST *>(Node)) {
     registerFunctionSignature(*Func, currentModuleName());
@@ -643,6 +650,39 @@ void Resolver::visitFieldAccess(FieldAccessExprAST &Node) {
   visitChild(Node.getBase());
 }
 
+void Resolver::visitEnumDecl(EnumDeclExprAST &Node) {
+  // Pass 1 already hoisted the enum to the registry.
+}
+
+void Resolver::visitEnumAccess(EnumAccessExprAST &Node) {
+  std::string EnumName = Node.getEnumName();
+  std::string Variant = Node.getVariant();
+
+  if (!SymTable_.isEnumName(EnumName)) {
+    auto Sugg = SuggestionIndex::suggestVisible(EnumName, SymTable_.getAllEnumNames());
+    std::string Msg = "Use of undeclared enum '" + EnumName + "'.";
+    if (!Sugg.empty()) {
+      Msg += "\nDid you mean:\n";
+      for (const auto& s : Sugg) Msg += "    " + s + "\n";
+    }
+    LogErrorAt(Node.getLoc(), Msg);
+    return;
+  }
+
+  if (Variant != "COUNT" && Variant != "VALUES" && Variant != "NAMES") {
+    auto ET = SymTable_.lookupEnumType(EnumName);
+    if (ET && !ET->hasVariant(Variant)) {
+      std::string Msg = "Enum '" + EnumName + "' has no variant '" + Variant + "'.";
+      auto Sugg = SuggestionIndex::suggestVisible(Variant, ET->getVariants());
+      if (!Sugg.empty()) {
+        Msg += "\nDid you mean:\n";
+        for (const auto& s : Sugg) Msg += "    " + s + "\n";
+      }
+      LogErrorAt(Node.getLoc(), Msg);
+    }
+  }
+}
+
 void Resolver::visitStructDecl(StructDeclExprAST &Node) {
   // Pass 1 (hoistTopLevel) already registered this struct's name.
   // In Pass 2 (here) we perform lightweight name-only validation of field
@@ -671,7 +711,8 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
     if (const auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
       const std::string &TypeName = NT->getName();
       if (!KnownPrimitives.count(TypeName) &&
-          !SymTable_.isKnownStruct(TypeName)) {
+          !SymTable_.isKnownStruct(TypeName) &&
+          !SymTable_.isEnumName(TypeName)) {
         // Unknown named type in a struct field — emit an error with
         // Damerau-Levenshtein suggestions from the registered struct names.
         RankedSuggestions Suggestions;

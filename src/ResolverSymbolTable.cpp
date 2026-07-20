@@ -308,6 +308,34 @@ std::vector<std::string> ResolverSymbolTable::getAllStructNames() const {
 }
 
 
+// ─── Enum registry ──────────────────────────────────────────────────────────
+
+void ResolverSymbolTable::registerEnumType(const std::string& Name, std::shared_ptr<TurfEnumType> ET) {
+  RegisteredEnums_[Name] = std::move(ET);
+}
+
+std::shared_ptr<TurfEnumType> ResolverSymbolTable::lookupEnumType(const std::string& Name) const {
+  auto It = RegisteredEnums_.find(Name);
+  if (It != RegisteredEnums_.end()) {
+    return It->second;
+  }
+  return nullptr;
+}
+
+bool ResolverSymbolTable::isEnumName(const std::string& Name) const {
+  return RegisteredEnums_.count(Name) > 0;
+}
+
+std::vector<std::string> ResolverSymbolTable::getAllEnumNames() const {
+  std::vector<std::string> Names;
+  Names.reserve(RegisteredEnums_.size());
+  for (const auto& Pair : RegisteredEnums_) {
+    Names.push_back(Pair.first);
+  }
+  std::sort(Names.begin(), Names.end());
+  return Names;
+}
+
 void ResolverSymbolTable::dump(std::ostream &OS) const {
   OS << "\n=== Resolver Symbol Table Dump ===\n";
 
