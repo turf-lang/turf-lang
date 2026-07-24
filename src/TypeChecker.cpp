@@ -43,9 +43,12 @@
 #include "Builtins.h"
 
 #include <cassert>
+#include <functional>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 
 // ─── Default production error handler ────────────────────────────────────────
@@ -211,14 +214,43 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
   if (!LhsTy || !RhsTy)
     return TurfBool();
 
-  // Logical operators: allow any types (they coerce to bool)
-  if (Op == static_cast<int>('&') || Op == static_cast<int>('|'))
+  // Logical operators (&& / ||): both operands must be numeric (bool counts
+  // as numeric, which is what lets ordinary `cond1 && cond2` type-check).
+  //
+  // This used to check `Op == '&' || Op == '|'` -- the single-character
+  // BITWISE operator tokens (ASCII 38/124) -- instead of TOK_AND/TOK_OR (the
+  // actual && / || tokens, -20/-21). That check could never match: visitBinary()
+  // already routes bitwise '&'/'|' to a separate isBitwise() branch and
+  // returns before this function is ever called, so Op is never literally
+  // '&' or '|' here. The dead check meant a genuine && / || silently fell
+  // through everything below to the final "Cannot compare ... using ..."
+  // error path, which happened to still produce the right answer for the
+  // common bool && bool case (bool satisfies isNumeric()) but, for any
+  // actually-invalid use, formatted the operator into the message via
+  // `std::string(1, static_cast<char>(Op))` -- and -20/-21 cast to char are
+  // not printable ASCII, so the message showed a garbage character instead
+  // of "&&"/"||".
+  if (Op == -20 /*TOK_AND*/ || Op == -21 /*TOK_OR*/) {
+    if (LhsTy->isNumeric() && RhsTy->isNumeric())
+      return TurfBool();
+    reportError(Loc, "Cannot use '" + std::string(Op == -20 ? "&&" : "||") +
+                         "' with '" + LhsTy->getName() + "' and '" +
+                         RhsTy->getName() + "'.");
     return TurfBool();
+  }
 
-  // Equality (== / !=): same type, or both numeric
-  if (Op == static_cast<int>('e') || Op == static_cast<int>('n') ||
-      Op == static_cast<int>('=') || Op == static_cast<int>('!') ||
-      Op == -9 || Op == -10) {
+  // Equality (== / !=): same type, or both numeric.
+  //
+  // Only -9/-10 (TOK_EQ/TOK_NEQ, the real tokens for == and !=) actually
+  // reach here in practice -- the 'e'/'n'/'='/'!' character checks that used
+  // to sit alongside them were similarly dead: the lexer never emits a bare
+  // 'e' or 'n' token (those characters only ever appear inside identifiers),
+  // '=' alone is TOK_ASSIGN (a different token, not routed to this
+  // function), and a bare '!' is consumed entirely inside ParseUnary()
+  // (desugared into `operand != true`, never surviving as its own binary
+  // operator token). Removed rather than left in as a source of confusion
+  // about some alternate operator encoding that doesn't exist.
+  if (Op == -9 /*TOK_EQ*/ || Op == -10 /*TOK_NEQ*/) {
     // Same type or both numeric is fine
     if (LhsTy->getName() == RhsTy->getName())
       return TurfBool();
@@ -549,7 +581,13 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
       if (!LhsTy->isPointer() && !LhsTy->isNamed("ptr") && !LhsTy->isNamed("void*")) {
         std::string VarName = LHSVar ? LHSVar->getName() : "";
 #ifndef TYPECHECKER_NO_ERRORS
-        NullAssignmentError(Node.getLoc(), VarName, LhsTy->getName()).raise();
+        {
+          NullAssignmentError Err(Node.getLoc(), VarName, LhsTy->getName());
+          if (LHSVar && LHSVar->ResolvedSymbol)
+            Err.withRelated(toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
+                            "declared here");
+          Err.raise();
+        }
 #else
         throw std::runtime_error("NullAssignmentError: " + VarName);
 #endif
@@ -574,7 +612,10 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   if (LHSVar) {
     if (LHSVar->ResolvedSymbol && LHSVar->ResolvedSymbol->IsImmutable) {
 #ifndef TYPECHECKER_NO_ERRORS
-      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName()).raise();
+      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName())
+          .withRelated(toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
+                       "declared immutable here")
+          .raise();
 #else
       throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
 #endif
@@ -615,7 +656,10 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
   if (LHSVar) {
     if (LHSVar->ResolvedSymbol && LHSVar->ResolvedSymbol->IsImmutable) {
 #ifndef TYPECHECKER_NO_ERRORS
-      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName()).raise();
+      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName())
+          .withRelated(toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
+                       "declared immutable here")
+          .raise();
 #else
       throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
 #endif
@@ -642,7 +686,10 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
   if (LHSVar) {
     if (LHSVar->ResolvedSymbol && LHSVar->ResolvedSymbol->IsImmutable) {
 #ifndef TYPECHECKER_NO_ERRORS
-      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName()).raise();
+      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName())
+          .withRelated(toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
+                       "declared immutable here")
+          .raise();
 #else
       throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
 #endif
@@ -726,13 +773,12 @@ void TypeChecker::visitWhile(WhileExprAST &Node) {
 }
 
 void TypeChecker::visitFor(ForExprAST &Node) {
-  // Visit start / end / step expressions first so we know their types
+  // Visit start / end first so we know their types -- this determines the
+  // loop variable's inferred type below.
   if (Node.getStart())
     const_cast<ExprAST *>(Node.getStart())->accept(*this);
   if (Node.getEnd())
     const_cast<ExprAST *>(Node.getEnd())->accept(*this);
-  if (Node.getStep())
-    const_cast<ExprAST *>(Node.getStep())->accept(*this);
 
   // Infer loop variable type from the range bounds.
   // If both start and end are integers → int; if either is double → double.
@@ -743,8 +789,49 @@ void TypeChecker::visitFor(ForExprAST &Node) {
   if ((StartTy && StartTy->isDouble()) || (EndTy && EndTy->isDouble()))
     LoopVarTy = TurfDouble();
 
-  // Register the loop variable so visitVariable() finds it during body walk
+  // Register the loop variable BEFORE visiting Step, not after.
+  //
+  // This ordering is load-bearing, not cosmetic: Step almost always
+  // references the loop variable directly (`step x += 1`, `step x++`), and
+  // visitVariable() only returns the correctly-inferred type (int or double,
+  // just computed above) by checking LoopVarTypes_ FIRST -- if that lookup
+  // misses, it falls back to Node.ResolvedSymbol->Type, which is the
+  // Resolver's registration of the loop variable and is UNCONDITIONALLY
+  // TurfInt() regardless of the range's real type (Resolver::visitFor()
+  // doesn't do type inference; that's this pass's job). Visiting Step before
+  // this map was populated meant any double-ranged for-loop whose step
+  // touched the loop variable -- i.e. essentially every double-ranged for
+  // loop, since that's the entire point of a step clause -- failed with
+  // "Cannot assign value of type 'double' to variable of type 'int'".
+  // Confirmed via `for x in 0.0..3.0 step x += 1.0 { ... }` before this fix.
   LoopVarTypes_[Node.getVarName()] = LoopVarTy;
+
+  // Also commit the inferred type back onto the actual VariableSymbol the
+  // Resolver created for this loop variable (Node.ResolvedLoopVar) -- the
+  // same shared_ptr<VariableSymbol> instance every VariableExprAST reference
+  // to the loop variable gets via SymTable_.lookupVariable(), so mutating it
+  // here propagates everywhere, mirroring how visitVarDecl() already
+  // corrects Node.ResolvedSymbol->Type when resolving a NamedType to its
+  // real struct type.
+  //
+  // LoopVarTypes_ alone is NOT enough: it is TypeChecker-private bookkeeping
+  // that only affects visitVariable()'s type-CHECKING answer. Codegen's
+  // getExprType() has no knowledge of it and reads ResolvedSymbol->Type
+  // directly -- which, without this line, stays the Resolver's hardcoded
+  // TurfInt() forever. Confirmed as a real, severe consequence, not a
+  // theoretical one: `for x in 0.0..3.0 step x += 1.0 { ... }` used to
+  // compile (once the ordering fix above was applied) but then hang
+  // indefinitely at runtime, because CompoundAssignmentExprAST::codegen()
+  // trusted getExprType()'s wrong `int` answer for `x` and emitted a raw
+  // bitcast-to-i64-then-add-1-then-bitcast-back instead of CreateFAdd --
+  // incrementing the double's raw bit pattern by 1 (an ULP-scale change)
+  // instead of its value by 1.0, so the loop condition `x < 3.0` was for all
+  // practical purposes never going to become false.
+  if (Node.ResolvedLoopVar)
+    Node.ResolvedLoopVar->Type = LoopVarTy;
+
+  if (Node.getStep())
+    const_cast<ExprAST *>(Node.getStep())->accept(*this);
 
   // Visit body
   if (Node.getBody())
@@ -774,7 +861,31 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
   if (!ReturnTypeStack_.empty() && ReturnTypeStack_.back()) {
     const TurfType *Declared = ReturnTypeStack_.back().get();
     if (RetTy) {
-      if (!typesCompatible(RetTy.get(), Declared)) {
+      bool Compatible = typesCompatible(RetTy.get(), Declared);
+
+      // Special-case: a pointer-to-struct value whose pointee is exactly
+      // the declared (bare, by-value) struct return type -- most commonly
+      // `return self;` inside a struct method declared to return the
+      // struct type itself rather than a pointer. `self` is always typed
+      // as `StructName*` (see ParseFuncDef's implicit self-parameter
+      // construction), and this language has no explicit dereference
+      // operator, so without this, `fn Node.get(): Node { return self; }`
+      // could never be satisfied at all -- only `fn Node.get(): Node* {...}`
+      // worked, which is fine for method chaining but not for a method that
+      // genuinely wants to hand back a copy. Compared by name (rather than
+      // requiring both sides to already be resolved TurfStructType
+      // instances) since ParseType() always produces a bare NamedType for a
+      // struct name, never a TurfStructType, and Declared/the pointee here
+      // commonly still are NamedType at this point. Codegen's CastToType()
+      // performs the actual load (see its "Implicit dereference" comment).
+      if (!Compatible) {
+        if (const auto *PT = dynamic_cast<const TurfPointerType *>(RetTy.get())) {
+          if (PT->getPointee() && PT->getPointee()->getName() == Declared->getName())
+            Compatible = true;
+        }
+      }
+
+      if (!Compatible) {
         reportError(Node.getLoc(),
                     "Return type mismatch: function declares '" +
                         Declared->getName() + "' but returns '" +
@@ -793,6 +904,38 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
   check(Node.getSubjectMut());
   TurfTypePtr SubjectTy = getType(Node.getSubject());
 
+  // Resolve a NamedType subject to its real registered type (TurfEnumType,
+  // most importantly). getType() on a VariableExprAST returns whatever type
+  // the variable was DECLARED with -- for a local `mut`/`immut` variable,
+  // Resolver::visitVarDecl() already corrects a NamedType("Color") in that
+  // position to the real TurfEnumType, but a FUNCTION PARAMETER's type
+  // (`fn describe(d: Direction)`) is declared via a separate path
+  // (Resolver::visitFuncDef()'s `SymTable_.declareVariable(Param.Name,
+  // Param.Type, ...)`) that never applies the same correction -- ParseType()
+  // always parses a bare non-primitive type name as NamedType regardless.
+  // Without this, `SubjectTy->isEnum()` below is unconditionally false for
+  // ANY compare whose subject is a function parameter (an extremely common,
+  // idiomatic shape -- e.g. `fn describe(d: Direction): int { compare d {...} }`),
+  // which has two compounding effects: `ET` a few lines down is always
+  // nullptr, so the entire enum-exhaustiveness check silently never runs
+  // (confirmed: a compare over a 4-variant enum parameter covering only 2
+  // variants, with no `otherwise`, compiled with ZERO diagnostics -- a real,
+  // silent loss of the exhaustiveness guarantee for the single most common
+  // way to write a compare); and separately, Codegen's CFG builder reads the
+  // same (always-false) Node.SubjectIsEnum flag to know whether a `compare`
+  // with no `otherwise` still has a "no arm matched" fallthrough edge --
+  // getting this wrong made an exhaustive enum-parameter compare with a
+  // `return` in every arm look like it had a non-returning fallthrough path,
+  // producing a false "missing return" error for perfectly valid code.
+  if (SubjectTy) {
+    if (const auto *NT = dynamic_cast<const NamedType *>(SubjectTy.get())) {
+      if (GlobalSymbolTable) {
+        if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+          SubjectTy = Resolved;
+      }
+    }
+  }
+
   // Determine if the subject is a string (selects strcmp chain in codegen)
   bool IsStringSubject = SubjectTy && SubjectTy->isNamed("string");
   Node.SubjectIsString = IsStringSubject;
@@ -800,6 +943,24 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
   // Collect the name for error reporting
   std::string SubjectTypeName =
       SubjectTy ? SubjectTy->getName() : "<unknown>";
+
+  // Track which pattern values have already been covered by an earlier arm,
+  // to detect and reject duplicate/unreachable 'matches' patterns -- e.g.
+  // two arms both matching Color::Red, or two arms both matching the
+  // literal 5. Without this, a duplicate pattern compiled silently: for an
+  // enum/int subject, Codegen's SwitchInst-based path issued two
+  // SwitchInst::addCase() calls with the SAME case value pointing at two
+  // different blocks -- which arm actually ran was an artifact of LLVM's
+  // case-insertion order, not a guaranteed language semantic. For a string
+  // subject (strcmp chain), the first matching arm deterministically won,
+  // but the duplicate second arm was still silently dead code with no
+  // warning either way. Only patterns whose value is known at this point
+  // (an enum variant, or an integer/string literal) are checked -- this
+  // mirrors exactly the class of patterns Codegen's CompareExprAST::codegen()
+  // already requires to be compile-time constants for the int/enum switch
+  // path (see its "matches pattern must be a compile-time integer constant"
+  // error), so nothing checkable here is being skipped.
+  std::set<std::string> SeenPatternKeys;
 
   // 2. Type-check each arm's patterns and body
   for (auto &Arm : Node.getArmsMut()) {
@@ -818,6 +979,25 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
                                    PatTy->getName() + "'");
 #endif
         }
+      }
+
+      std::optional<std::string> PatternKey;
+      if (auto *EA = dynamic_cast<EnumAccessExprAST *>(PatExpr.get())) {
+        PatternKey = "enum:" + EA->getVariant();
+      } else if (auto *Num = dynamic_cast<NumberExprAST *>(PatExpr.get())) {
+        if (Num->isInteger())
+          PatternKey = "int:" + std::to_string(Num->getIntVal());
+      } else if (auto *Str = dynamic_cast<StringExprAST *>(PatExpr.get())) {
+        PatternKey = "str:" + Str->getValue();
+      }
+
+      if (PatternKey && !SeenPatternKeys.insert(*PatternKey).second) {
+        reportError(Arm.Loc,
+                    "Duplicate 'matches' pattern: this value is already "
+                    "handled by an earlier arm in this compare block, so "
+                    "this arm can never run.\nHint: Remove the duplicate "
+                    "arm, or combine it with the earlier one by stacking "
+                    "(`matches A:` then `matches B:` sharing one body).");
       }
     }
 
@@ -865,6 +1045,106 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
 }
 
 // ─── Functions & calls ────────────────────────────────────────────────────────
+
+/**
+ * @brief Walk a candidate's declared parameter type against the actual
+ *        argument type passed at a call site, recording any bare
+ *        TurfGenericParamType encountered into @p Subst (keyed by its name).
+ *
+ * Recurses through pointer/array wrapping on both sides in lockstep (T* vs
+ * concrete*, T[] vs concrete[]) so a generic parameter used underneath a
+ * wrapper still gets unified correctly. The first argument position that
+ * mentions a given generic parameter name wins; later positions mentioning
+ * the same name are not re-unified (good enough for this compiler's actual
+ * generic surface, where a type parameter typically appears in exactly one
+ * "shape" per signature — see Resolver::substituteTypeParams()'s doc
+ * comment for the parallel, opposite-direction transform this mirrors).
+ */
+static void collectGenericSubstitution(
+    const TurfTypePtr &ParamTy, const TurfTypePtr &ArgTy,
+    std::unordered_map<std::string, TurfTypePtr> &Subst) {
+  if (!ParamTy || !ArgTy)
+    return;
+
+  if (const auto *GP = dynamic_cast<const TurfGenericParamType *>(ParamTy.get())) {
+    Subst.emplace(GP->getName(), ArgTy);
+    return;
+  }
+  if (const auto *PPtr = dynamic_cast<const TurfPointerType *>(ParamTy.get())) {
+    if (const auto *APtr = dynamic_cast<const TurfPointerType *>(ArgTy.get()))
+      collectGenericSubstitution(PPtr->getPointee(), APtr->getPointee(), Subst);
+    return;
+  }
+  if (isArrayType(ParamTy.get()) && isArrayType(ArgTy.get())) {
+    const auto *PArr = dynamic_cast<const ArrayType *>(ParamTy.get());
+    const auto *AArr = dynamic_cast<const ArrayType *>(ArgTy.get());
+    if (PArr && AArr)
+      collectGenericSubstitution(PArr->getElementTypePtr(),
+                                 AArr->getElementTypePtr(), Subst);
+    return;
+  }
+  if (const auto *PGen = dynamic_cast<const GenericType *>(ParamTy.get())) {
+    if (const auto *AGen = dynamic_cast<const GenericType *>(ArgTy.get())) {
+      const auto &PArgs = PGen->getTypeArgs();
+      const auto &AArgs = AGen->getTypeArgs();
+      for (size_t i = 0; i < PArgs.size() && i < AArgs.size(); ++i)
+        collectGenericSubstitution(PArgs[i], AArgs[i], Subst);
+    }
+    return;
+  }
+}
+
+/**
+ * @brief Rewrite @p Ty, replacing any bare TurfGenericParamType occurrence
+ *        (recursively through pointer/array/generic wrapping) with its
+ *        concrete type from @p Subst, if one was recorded.
+ *
+ * This is what actually closes the call-site type-inference gap: without
+ * it, TypeChecker::getType() for a call to `fn<T> firstElem(arr: T[]): T`
+ * returned the callee's literal declared return type -- TurfGenericParamType
+ * ("T") itself -- regardless of what concrete type T was instantiated to at
+ * this call site, so `firstElem(intArray) == 10` failed type-checking with
+ * "Cannot compare 'T' with 'int'" even though the call was perfectly valid.
+ * A type parameter with no corresponding entry in Subst (never appeared in
+ * any parameter position, e.g. a return-only phantom type) is left as-is.
+ */
+static TurfTypePtr substituteReturnType(
+    const TurfTypePtr &Ty,
+    const std::unordered_map<std::string, TurfTypePtr> &Subst) {
+  if (!Ty || Subst.empty())
+    return Ty;
+
+  if (const auto *GP = dynamic_cast<const TurfGenericParamType *>(Ty.get())) {
+    auto It = Subst.find(GP->getName());
+    return It != Subst.end() ? It->second : Ty;
+  }
+  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty.get())) {
+    TurfTypePtr NewPointee = substituteReturnType(PT->getPointee(), Subst);
+    return NewPointee == PT->getPointee()
+              ? Ty
+              : std::make_shared<TurfPointerType>(NewPointee);
+  }
+  if (isArrayType(Ty.get())) {
+    const auto *AT = dynamic_cast<const ArrayType *>(Ty.get());
+    TurfTypePtr NewElem = substituteReturnType(AT->getElementTypePtr(), Subst);
+    return NewElem == AT->getElementTypePtr()
+              ? Ty
+              : makeArrayType(NewElem, AT->getSize());
+  }
+  if (const auto *GT = dynamic_cast<const GenericType *>(Ty.get())) {
+    std::vector<TurfTypePtr> NewArgs;
+    bool Changed = false;
+    for (const auto &Arg : GT->getTypeArgs()) {
+      TurfTypePtr NewArg = substituteReturnType(Arg, Subst);
+      Changed |= (NewArg != Arg);
+      NewArgs.push_back(std::move(NewArg));
+    }
+    return Changed ? std::make_shared<GenericType>(GT->getBaseName(),
+                                                    std::move(NewArgs))
+                   : Ty;
+  }
+  return Ty;
+}
 
 void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
   // Push the declared return type so visitReturn() can validate it
@@ -936,6 +1216,62 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
             return;
           }
         }
+        setType(&Node, TurfInt());
+        return;
+      }
+
+      // ── assert(cond, [msg]) → int, fail(msg) → int ──────────────────────
+      // Both are registered with BuiltinInfo::Arity == -1 ("variadic/
+      // unknown") because assert() genuinely accepts either 1 or 2 args
+      // (condition, optional message) -- not a single fixed count the
+      // generic arity check above can express. That means the generic
+      // check never rejects a wrong argument count for assert() (0 args,
+      // or 3+), and -- unlike typeof/lengthof -- neither of these two ever
+      // reached a `setType(&Node, ...); return;` here at all, so they fell
+      // through everything below and hit the final "Unknown call — be
+      // permissive" branch, which sets a null type.
+      //
+      // That was never just a type-annotation gap: CodegenIntrinsic's
+      // "assert"/"fail" handlers unconditionally read Args[0] (and
+      // Args[1] for assert's optional message) with no bounds check,
+      // trusting this exact arity validation to have already run. It
+      // normally has, by the time Codegen's main pass runs -- but
+      // main.cpp's pre-pass (sub-pass 2b) deliberately swallows TypeChecker
+      // errors ("informational only... main-pass TC will re-check") and
+      // then unconditionally proceeds to codegen the same AST anyway in
+      // sub-pass 3b. A call like `assert()` or `fail()` (0 args) hits that
+      // gap: the pre-pass TypeChecker's error is discarded, pre-pass
+      // codegen runs CodegenIntrinsic with an empty Args vector, and
+      // `Args[0]` is a real out-of-bounds vector access -- a compiler
+      // crash (SIGABRT) before the user ever sees a diagnostic, for input
+      // as simple as a bare `assert();`. Fixed on two fronts: this
+      // explicit arity check closes the TypeChecker-side gap (so the
+      // pre-pass's own TC invocation reports the SAME error, even if that
+      // particular report is discarded) and, as defense in depth,
+      // CodegenIntrinsic itself now bounds-checks Args before indexing
+      // (see src/Builtins.cpp) so any future gap of this shape degrades to
+      // a clean SemanticError instead of undefined behavior.
+      if (CalleeName == "assert") {
+        if (ArgCount != 1 && ArgCount != 2) {
+          reportError(Node.getLoc(),
+                      "'assert' expects 1 or 2 arguments (a condition, and "
+                      "an optional message), got " +
+                          std::to_string(ArgCount) + ".");
+          setType(&Node, nullptr);
+          return;
+        }
+        setType(&Node, TurfInt());
+        return;
+      }
+
+      // ── fail(msg) → int ───────────────────────────────────────────────────
+      // Arity (exactly 1) is already enforced by the generic check above
+      // (BuiltinInfo::Arity == 1). This branch only exists to give a valid
+      // call a real type -- CodegenIntrinsic's "fail" handler returns a
+      // dummy int(0) (its call site is unreachable; abort() is called
+      // first), so TurfInt() here matches actual codegen behavior instead
+      // of silently falling through to the "unknown call" branch below.
+      if (CalleeName == "fail") {
         setType(&Node, TurfInt());
         return;
       }
@@ -1039,7 +1375,19 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     }
 
     Node.ResolvedCallTarget = Best;
-    setType(&Node, Best->ReturnType);
+
+    // If Best's return type mentions one of its own generic type parameters
+    // (e.g. `fn<T> firstElem(arr: T[]): T`), report the CONCRETE type it was
+    // instantiated to at this call site instead of the literal declared
+    // TurfGenericParamType -- see collectGenericSubstitution()'s doc comment
+    // for the gap this closes. A no-op (empty substitution map) for the
+    // overwhelming majority of calls, which aren't generic at all.
+    std::unordered_map<std::string, TurfTypePtr> Subst;
+    int SubstCheckCount = std::min(ArgCount, Best->arity());
+    for (int i = 0; i < SubstCheckCount; ++i)
+      collectGenericSubstitution(Best->Params[i].Type, ArgTypes[i], Subst);
+
+    setType(&Node, substituteReturnType(Best->ReturnType, Subst));
     return;
   }
 
@@ -1203,11 +1551,52 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           BaseTy = GlobalSymbolTable->LookupType(NT->getName());
       }
     }
+    // Resolve GenericType (e.g. a `Box<int>`-typed variable) to its
+    // underlying TurfStructType via the base name -- mirrors the NamedType
+    // resolution just above. Without this, calling a method on a generic
+    // struct instance (`b.get()` where `b: Box<int>`) fell all the way
+    // through to "Non-module, non-struct method call — be permissive" at
+    // the bottom of this function, leaving Node.ResolvedCallTarget null.
+    // Codegen's MethodCallExprAST::codegen() then silently returned nullptr
+    // with NO diagnostic (MangledName stays empty, CalleeF stays null, and
+    // the struct-method-call branch just `return nullptr;`), which meant
+    // any variable declared from that call's result was never registered
+    // in Codegen's symbol table -- surfacing only as a confusing
+    // "you're trying to use 'p' before telling me what it is" error the
+    // next time that variable was actually referenced somewhere codegen
+    // could reach (e.g. inside assert()), nowhere near the real cause.
+    if (BaseTy) {
+      if (auto *GT = dynamic_cast<const GenericType *>(BaseTy.get())) {
+        if (GlobalSymbolTable)
+          BaseTy = GlobalSymbolTable->LookupType(GT->getBaseName());
+      }
+    }
     if (BaseTy) {
       if (auto *STy = dynamic_cast<const TurfStructType *>(BaseTy.get())) {
         const std::string &StructName = STy->getName();
-        // Struct methods are stored in CurrentFileFunctions_ as "User.grow"
+        // Struct methods declared in the SAME file are stored in
+        // CurrentFileFunctions_ as "User.grow".
         auto Candidates = RST_.lookupCurrentFileFunctions(StructName + "." + MethodName);
+        // Struct methods declared in an IMPORTED module (e.g. lib/std/list.tr's
+        // `fn<T> List.push(...)`, found via `import list;`) are hoisted into
+        // the MODULE registry instead (Resolver::hoistModuleBody() ->
+        // registerFunctionSignature() -> registerModuleFunction(), since the
+        // module name is non-empty there) -- lookupCurrentFileFunctions()
+        // alone can never find them, regardless of struct name/arity/
+        // anything else. Without this, EVERY method call on an instance of a
+        // struct declared in an imported module (not just generic ones --
+        // this is unrelated to the GenericType fix above) silently failed to
+        // resolve: Node.ResolvedCallTarget stayed null, and Codegen's
+        // MethodCallExprAST::codegen() then silently returned nullptr with
+        // no diagnostic. Confirmed via `--emit-llvm`: a whole sequence of
+        // `l.push(...)`/`l.pop()`/assert() calls on a `List<int>` imported
+        // from lib/std/list.tr vanished ENTIRELY from the generated
+        // `main()` body -- not a crash, not a compile error, just silently
+        // absent -- while an unconditional `io.printline("list ok")` after
+        // them still ran, making the whole test look like it passed.
+        for (const auto &Match : RST_.findInModules(StructName + "." + MethodName))
+          if (Match.Symbol)
+            Candidates.push_back(Match.Symbol);
         // Arity: struct methods have `self` as first param, user args = arity - 1 (unless static)
         int ExpectedArity = IsStaticMethod ? ArgCount : (ArgCount + 1);
         std::vector<const ResolverFunctionSymbol *> ArityMatches;
@@ -1216,6 +1605,67 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         if (!ArityMatches.empty()) {
           const ResolverFunctionSymbol *Best = ArityMatches[0];
           Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
+
+          // If the ORIGINAL (pre-struct-resolution) base type was a
+          // GenericType (e.g. `l: List<int>`, T=int), substitute that
+          // concrete type into the method's declared return type wherever
+          // it mentions the struct's own type parameter -- e.g.
+          // `fn<T> List.pop(): T` must report `int`, not the literal
+          // TurfGenericParamType("T"), the same call-site-inference gap
+          // fixed for free functions in visitFuncCall() (see
+          // collectGenericSubstitution()/substituteReturnType() above), but
+          // via a different substitution SOURCE: a struct method's `self`
+          // parameter is declared as a bare `StructName*` with no type
+          // arguments of its own (see ParseFuncDef's self-parameter
+          // construction), so there is nothing to unify against in
+          // Best->Params the way a free function's own parameter list would
+          // give us -- the concrete type argument only exists on the BASE
+          // EXPRESSION's type. Since TurfStructType doesn't record its own
+          // declared type-parameter NAMES, they're recovered here by
+          // scanning the struct's fields for NamedType occurrences that
+          // don't resolve to any known struct/enum (through pointer/array
+          // wrapping) in declaration order and pairing each distinct name
+          // found with GT's type args positionally.
+          //
+          // NamedType, not TurfGenericParamType: GlobalSymbolTable's
+          // registered TurfStructType for a generic struct is constructed
+          // once, at PARSE time (ParseStructDecl), directly from the
+          // as-parsed Fields -- it is a SEPARATE object from the
+          // StructDeclExprAST AST node that Resolver::visitStructDecl()
+          // later mutates in place (substituting NamedType("T") ->
+          // TurfGenericParamType("T")). That mutation updates the AST
+          // node's own copy only; nothing propagates it back into
+          // GlobalSymbolTable's already-constructed TurfStructType, so its
+          // fields are permanently stuck with the original NamedType("T").
+          // This is exact for every generic struct in this language's
+          // stdlib today (all single-type-parameter), though not fully
+          // general for a hypothetical multi-parameter struct whose fields
+          // don't happen to mention every parameter in declaration order.
+          if (auto *GT = dynamic_cast<const GenericType *>(getType(Node.getBase()).get())) {
+            std::unordered_map<std::string, TurfTypePtr> Subst;
+            const auto &TypeArgs = GT->getTypeArgs();
+            std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
+              if (!FTy || Subst.size() >= TypeArgs.size()) return;
+              if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
+                if (!Subst.count(GP->getName()))
+                  Subst.emplace(GP->getName(), TypeArgs[Subst.size()]);
+              } else if (auto *NT = dynamic_cast<const NamedType *>(FTy.get())) {
+                bool KnownElsewhere = GlobalSymbolTable &&
+                                     GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
+                if (!KnownElsewhere && !Subst.count(NT->getName()))
+                  Subst.emplace(NT->getName(), TypeArgs[Subst.size()]);
+              } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
+                Scan(PT->getPointee());
+              } else if (isArrayType(FTy.get())) {
+                Scan(dynamic_cast<const ArrayType *>(FTy.get())->getElementTypePtr());
+              }
+            };
+            for (const auto &F : STy->getFields())
+              Scan(F.Type);
+            setType(&Node, substituteReturnType(Best->ReturnType, Subst));
+            return;
+          }
+
           setType(&Node, Best->ReturnType);
           return;
         }
@@ -1248,6 +1698,18 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
     if (auto *NT = dynamic_cast<const NamedType *>(BaseTy.get())) {
       if (GlobalSymbolTable)
         BaseTy = GlobalSymbolTable->LookupType(NT->getName());
+    }
+  }
+  // Resolve GenericType (e.g. a `Box<int>`-typed variable) to its underlying
+  // TurfStructType via the base name -- mirrors the NamedType resolution
+  // just above, and the identical fix in visitMethodCall()'s struct-method
+  // path. Without this, TypeChecker::getType() for `b.val` (b: Box<int>)
+  // came back null, silently skipping any further type checking that
+  // depends on it (e.g. comparing `b.val` against another value).
+  if (BaseTy) {
+    if (auto *GT = dynamic_cast<const GenericType *>(BaseTy.get())) {
+      if (GlobalSymbolTable)
+        BaseTy = GlobalSymbolTable->LookupType(GT->getBaseName());
     }
   }
 
@@ -1313,18 +1775,38 @@ void TypeChecker::visitStructInit(StructInitExprAST &Node) {
   if (SType) {
     const auto &DeclFields = SType->getFields();
 
-    // 1. Check for unknown fields (fields provided that don't exist in the struct).
+    // 1. Check for unknown fields (fields provided that don't exist in the
+    //    struct) AND that each provided value's type is compatible with its
+    //    field's declared type.
+    //
+    //    The type check is not optional hardening: before it existed,
+    //    `User { age: "not a number" }` (age declared as int) compiled with
+    //    ZERO diagnostics. At runtime this stored the string literal's raw
+    //    pointer bit-pattern directly into the field's i64 storage slot --
+    //    silent type confusion producing garbage data (confirmed: printing
+    //    the resulting `age` field gave a nonsense value like
+    //    102697087172654, not even a crash to signal something was wrong).
     for (const auto &[FieldName, Val] : Node.getNamedFields()) {
-      bool Found = false;
+      const StructField *DeclField = nullptr;
       for (const auto &DeclF : DeclFields) {
         if (DeclF.Name == FieldName) {
-          Found = true;
+          DeclField = &DeclF;
           break;
         }
       }
-      if (!Found) {
+      if (!DeclField) {
         reportError(Node.getLoc(), "Unknown field '" + FieldName +
                                        "' in struct '" + Node.getName() + "'");
+        continue;
+      }
+
+      TurfTypePtr ValTy = getType(Val.get());
+      if (ValTy && DeclField->Type &&
+          !typesCompatible(ValTy.get(), DeclField->Type.get())) {
+        reportError(Node.getLoc(),
+                    "Field '" + FieldName + "' of struct '" + Node.getName() +
+                        "' expects type '" + DeclField->Type->getName() +
+                        "', but got '" + ValTy->getName() + "'.");
       }
     }
 
