@@ -1,6 +1,7 @@
 #ifndef LEXER_H
 #define LEXER_H
 
+#include "ErrorCategory.h" // SLM::ErrorCategory -- lightweight, no LLVM/AST deps
 #include <csetjmp>
 #include <fstream>
 #include <map>
@@ -35,7 +36,13 @@ extern std::vector<std::string> SourceLines;
 extern SourceLocation CurLoc;
 extern int CurLine;
 extern int CurCol;
-// Mutable so RegisterBuiltins() can insert builtin names at startup.
+// Reserved-word -> token-id table, consulted by gettok() after scanning any
+// identifier-shaped run of characters. Mutable (not const) purely because it
+// is a translation-unit-scope global initialized at static-init time in
+// Lexer.cpp; nothing outside Lexer.cpp writes to it at runtime. Note that
+// builtin/stdlib function names (print, malloc, abs, ...) are deliberately
+// NOT in this table -- they are ordinary identifiers resolved later by the
+// Resolver against lib/std/*.tr, not lexer-level keywords.
 extern std::map<std::string, int> Keywords;
 
 // RecoverableError : setjmp/longjmp based (LLVM disables C++ exceptions)
@@ -62,13 +69,20 @@ public:
     std::string Hint;
     bool IsWarning;
     std::vector<RelatedLocation> RelatedLocations; // structural context for SLM
+    // Ground-truth category, set by the raising TurfError subclass's own
+    // constructor (see Errors.h) -- NOT re-derived from message text. Stays
+    // GENERAL for diagnostics with no TurfError instance (the raw
+    // LogErrorAt() path), which the SLM layer falls back to classifyError()
+    // for, same as before this field existed.
+    SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL;
   };
 
   // Record a diagnostic. Errors on a line that already has an error are
   // dropped. Warnings on a line that has an error are also dropped.
   static void add(SourceLocation Loc, const std::string &Msg,
                   const std::string &Hint, bool IsWarning = false,
-                  const std::vector<RelatedLocation> &Related = {});
+                  const std::vector<RelatedLocation> &Related = {},
+                  SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL);
 
   static void add(SourceLocation Loc, const std::string &Msg,
                   bool IsWarning = false,

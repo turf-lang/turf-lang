@@ -98,6 +98,7 @@ static int contextSizeForCategory(ErrorCategory cat) {
   case ErrorCategory::FUNCTION_SIGNATURE:
   case ErrorCategory::DECLARATION:
   case ErrorCategory::UNDECLARED_VAR:
+  case ErrorCategory::MEMORY_ERROR:
     return 5;
   }
   return 5; // unreachable, but satisfies -Wreturn-type
@@ -343,7 +344,8 @@ static float finalizeConfidence(float structuralPrior, bool sandboxValidated) {
  */
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
                              const std::string &hint,
-                             const std::vector<RelatedLocation> &related) {
+                             const std::vector<RelatedLocation> &related,
+                             ErrorCategory category) {
   AISuggestion suggestion;
   std::string cleanError = stripAnsiCodes(errorMessage);
 
@@ -351,10 +353,21 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   // (classifyError only uses cleanError; codeContext not needed for this step)
   std::string contextKeyword = extractContextKeyword(cleanError);
 
-  // Step 1: classify first (deterministic, no context window required) ─
+  // Step 1: classify (deterministic, no context window required) ─
   // We classify before building the context so we can size the window to fit
   // the category rather than always using the generic ±10 default.
-  ErrorCategory category = classifyError(cleanError, contextKeyword);
+  //
+  // `category` (the parameter) is the GROUND-TRUTH category attached by the
+  // raising TurfError subclass's own constructor -- see Errors.h's
+  // Category_ field. When it's non-GENERAL, it IS the category: no guessing
+  // needed, the C++ type of the error already told us exactly what kind of
+  // problem this is. Only fall back to classifyError()'s text-pattern
+  // matching when the caller didn't have one to give us -- GENERAL is both
+  // the default parameter value and every untagged/genuinely-miscellaneous
+  // class's value, so this is a strict refinement pass: it can only turn a
+  // GENERAL into something more specific, never override a real answer.
+  if (category == ErrorCategory::GENERAL)
+    category = classifyError(cleanError, contextKeyword);
   bool categoryWasDeterministic = (category != ErrorCategory::GENERAL);
 
   llvm::SmallString<128> ModelPath(CompilerExecutablePath);
@@ -502,7 +515,7 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "\"category\": <one of: TYPE_MISMATCH, UNDECLARED_VARIABLE, "
       "CONTROL_FLOW, SYNTAX_ERROR, ARITHMETIC, STRING_CONVERSION, "
       "ARRAY_ERROR, DECLARATION, FUNCTION_SIGNATURE, BUILTIN_FUNCTION, "
-      "GENERAL>}\n"
+      "MEMORY_ERROR, GENERAL>}\n"
       "<|im_end|>\n"
       "<|im_start|>assistant\n";
 
@@ -609,9 +622,10 @@ bool verifySuggestion(const AISuggestion &suggestion, int errorLine) {
 // if valid. Returns an enhanced AISuggestion with validation results.
 AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
                                         int errorLine, const std::string &hint,
-                                        const std::vector<RelatedLocation> &related) {
+                                        const std::vector<RelatedLocation> &related,
+                                        ErrorCategory category) {
   // First, get the SLM suggestion
-  AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine, hint, related);
+  AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine, hint, related, category);
 
   if (!suggestion.valid) {
     return suggestion;

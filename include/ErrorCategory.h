@@ -18,6 +18,7 @@ enum class ErrorCategory {
   FUNCTION_SIGNATURE,
   BUILTIN_FUNCTION, // Errors specific to a builtin function (lengthof, typeof,
                     // etc.)
+  MEMORY_ERROR,     // Use-after-free, double-free (AliasAnalysisPass)
   GENERAL
 };
 
@@ -173,6 +174,8 @@ inline ErrorCategory categoryFromString(const std::string &str) {
     return ErrorCategory::FUNCTION_SIGNATURE;
   if (str == "BUILTIN_FUNCTION")
     return ErrorCategory::BUILTIN_FUNCTION;
+  if (str == "MEMORY_ERROR")
+    return ErrorCategory::MEMORY_ERROR;
   return ErrorCategory::GENERAL;
 }
 
@@ -199,6 +202,8 @@ inline const char *getCategoryName(ErrorCategory cat) {
     return "FUNCTION_SIGNATURE";
   case ErrorCategory::BUILTIN_FUNCTION:
     return "BUILTIN_FUNCTION";
+  case ErrorCategory::MEMORY_ERROR:
+    return "MEMORY_ERROR";
   case ErrorCategory::GENERAL:
     return "GENERAL";
   }
@@ -235,6 +240,10 @@ inline std::string getCategoryDocPath(ErrorCategory cat,
       {ErrorCategory::FUNCTION_SIGNATURE, "docs/slm/function_signature.txt"},
       {ErrorCategory::BUILTIN_FUNCTION,
        "docs/slm/general.txt"}, // fallback for unlisted builtins
+      // MEMORY_ERROR has no dedicated doc file yet -- documentation content
+      // is explicitly out of scope for this pass. Falls back to
+      // general.txt for now.
+      {ErrorCategory::MEMORY_ERROR, "docs/slm/general.txt"},
       {ErrorCategory::GENERAL, "docs/slm/general.txt"},
   };
 

@@ -639,16 +639,27 @@ std::unique_ptr<Sandbox> CreateSandbox() {
 bool ApplyAndValidateFix(Sandbox &sandbox, int lineNumber,
                          const std::string &fixedLine,
                          const SLM::AISuggestion &suggestion) {
-  // Check confidence gate: only proceed if confidence >= 0.9
-  const float CONFIDENCE_THRESHOLD = 0.9f;
-
-  if (suggestion.confidence < CONFIDENCE_THRESHOLD) {
-    std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] " << Colors::BRIGHT_YELLOW
-              << "Fix rejected: confidence " << suggestion.confidence
-              << " below threshold " << CONFIDENCE_THRESHOLD << Colors::RESET
-              << "\n";
-    return false;
-  }
+  // NOTE: there used to be a confidence gate here ("only proceed if
+  // suggestion.confidence >= 0.9") that ran BEFORE the sandbox validation
+  // below. That was backwards: at this point in the call chain
+  // (validateAndApplySuggestion -> verifySuggestion -> here),
+  // suggestion.confidence is still the PRE-sandbox structural prior computed
+  // by computeStructuralPrior() in SLMIntegration.cpp -- explicitly
+  // documented there as "NOT the final confidence... meant to estimate
+  // plausibility" before empirical proof exists. finalizeConfidence() (also
+  // in SLMIntegration.cpp) is the function that's supposed to incorporate
+  // the sandbox's verdict and can promote a modest structural prior to
+  // >= 0.9 once the fix is PROVEN correct -- but that promotion can never
+  // happen if the sandbox is never given a chance to run in the first
+  // place. Gating on confidence >= 0.9 here meant only fixes that ALREADY
+  // looked near-perfect on cheap structural heuristics alone (deterministic
+  // category + MODIFY + non-empty + single clean line, with no room for a
+  // missed keyword-match bonus) ever reached the sandbox at all -- silently
+  // discarding the sandbox's actual value proposition. The real,
+  // post-sandbox confidence gate that should decide what the user sees
+  // lives where it belongs: Lexer.cpp's DiagnosticEngine::add(), checking
+  // `ai.confidence >= 0.8f` AFTER validateAndApplySuggestion() has already
+  // run finalizeConfidence().
 
   // Check that fix_mode is MODIFY (not NONE)
   if (suggestion.fix_mode != "MODIFY") {

@@ -1,7 +1,8 @@
 #ifndef SLM_INTEGRATION_H
 #define SLM_INTEGRATION_H
 
-#include "Lexer.h" // for RelatedLocation
+#include "ErrorCategory.h" // for ErrorCategory
+#include "Lexer.h"         // for RelatedLocation
 #include <string>
 #include <vector>
 
@@ -25,9 +26,16 @@ std::string getCodeContext(int errorLine, int contextSize = 10);
 
 // Fetches a suggestion from the SLM based on the error message, source
 // context, and optional hint. Returns an empty AISuggestion if the SLM fails or times out.
+// `category`: ground-truth category from the raising TurfError subclass's own
+// C++ type (see Errors.h's Category_ field). When non-GENERAL, this is used
+// directly instead of re-deriving a category via classifyError()'s text
+// matching -- GENERAL (the default) preserves the old classifyError()
+// fallback behavior for callers that don't have a category (the raw
+// LogErrorAt() path has no TurfError instance to read one from).
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
                              const std::string &hint = "",
-                             const std::vector<RelatedLocation> &related = {});
+                             const std::vector<RelatedLocation> &related = {},
+                             ErrorCategory category = ErrorCategory::GENERAL);
 
 // ── End-to-End Helper ────────────────────────────────────────────────────────
 // 1. Calls fetchSuggestion() to query the SLM.
@@ -36,7 +44,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
 AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
                                         int errorLine,
                                         const std::string &hint = "",
-                                        const std::vector<RelatedLocation> &related = {});
+                                        const std::vector<RelatedLocation> &related = {},
+                                        ErrorCategory category = ErrorCategory::GENERAL);
 
 // TODO(future): Self-running verification of AI-suggested code patches.
 // Before presenting a suggested fix to the user, this function should:

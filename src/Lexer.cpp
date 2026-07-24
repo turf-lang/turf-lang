@@ -97,9 +97,15 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"matches", TOK_MATCHES},
                                        {"done", TOK_DONE}};
 
-// Note: builtin function names (e.g. "print") are inserted here by
-// RegisterBuiltins() at startup. See src/Builtins.cpp.
-
+/**
+ * @brief True if @p Msg looks like a warning rather than a hard error.
+ *
+ * Used as a fallback classifier for diagnostics that were logged through the
+ * untyped LogErrorAt() path (as opposed to a proper TurfError/TurfWarning
+ * subclass, which already knows its own severity). Matches on the literal
+ * "Warning:"/"warning:" substring that warning-producing call sites embed in
+ * their message text.
+ */
 static bool isMessageWarning(const std::string &Msg) {
   return Msg.find("Warning:") != std::string::npos ||
          Msg.find("warning:") != std::string::npos;
@@ -143,10 +149,48 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   std::cerr << "\n";
 }
 
-// DiagnosticEngine : method implementations
+/**
+ * @brief Record one diagnostic (error or warning) and, for errors only, run
+ *        the --smart/--online AI-suggestion pipeline against it.
+ *
+ * This is the single choke point every diagnostic in the compiler passes
+ * through -- TurfError::raise(), TurfWarning::emit(), and the raw
+ * LogErrorAt() helper all funnel here.
+ *
+ * Two independent things happen, in order:
+ *
+ *  1. Cascade suppression: if a *primary error* (IsWarning == false) has
+ *     already been recorded on this exact source line, everything else on
+ *     that line -- further errors AND warnings -- is dropped silently. This
+ *     keeps one bad statement from spamming five near-duplicate diagnostics.
+ *
+ *  2. AI augmentation (only reached for actual errors -- see below): when
+ *     --smart/--online is enabled (g_AIEnabled), the first error of the
+ *     current compilation pass is sent to SLM::validateAndApplySuggestion(),
+ *     and a high-confidence, sandbox-validated fix replaces the compiler's
+ *     own message. Every error *after* that first one in the same pass just
+ *     gets a short "this may be a cascading effect" note appended instead of
+ *     a second model call -- see g_slmFiredThisPass.
+ *
+ * IMPORTANT: step 2 is gated on `!IsWarning`. Warnings (shadowing, redundant
+ * comparisons, etc.) must never trigger a model call or carry the cascade
+ * note -- the documented --smart/--online contract is "on error only, zero
+ * cost on a clean compile," and a warning is not evidence of a preceding
+ * error worth explaining away. A prior version of this function omitted that
+ * check and ran full SLM inference (and attached a nonsensical "cascading
+ * effect of the error above" note) on ordinary warnings.
+ *
+ * @param Loc      Source location the diagnostic is anchored to.
+ * @param Msg      Fully-formatted (ANSI-colored) message body.
+ * @param Hint     Optional one-line remediation hint shown under the message.
+ * @param IsWarning  false = hard error (blocks compilation); true = warning.
+ * @param Related  Structural "declared here" / "candidate: ..." locations,
+ *                 threaded through to the SLM prompt as pinned context lines.
+ */
 void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                            const std::string &Hint, bool IsWarning,
-                           const std::vector<RelatedLocation> &Related) {
+                           const std::vector<RelatedLocation> &Related,
+                           SLM::ErrorCategory Category) {
   // If there is already an error on this line, suppress everything else
   // (both additional errors and warnings) to avoid cascading noise.
   if (ErrorLines.count(Loc.Line))
@@ -155,7 +199,9 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   std::string finalMessage = Msg;
 
   // Conditionally invoke SLM analysis based on CLI configuration.
-  if (g_AIEnabled) {
+  // Errors only -- see the "IMPORTANT" note in the function doc comment
+  // above for why warnings must never reach this block.
+  if (g_AIEnabled && !IsWarning) {
     if (g_slmFiredThisPass) {
       // Append advisory AI note for cascading errors.
       finalMessage +=
@@ -165,7 +211,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           "fresh analysis." +
           Colors::RESET;
     } else {
-      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint, Related);
+      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint, Related, Category);
 
       if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
         // Replace compiler message with high-confidence AI suggestion.
@@ -192,7 +238,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
     }
   }
 
-  Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning, Related});
+  Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning, Related, Category});
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);
@@ -305,12 +351,23 @@ int gettok() {
   }
 
   // String literals: "..."
+  //
+  // A Turf string literal must open and close on the same physical source
+  // line -- a raw newline byte inside the quotes is always a mistake (a
+  // forgotten closing '"'), never a way to write a multi-line string; that
+  // requires the \n escape instead. The scan loop below stops at '"', EOF,
+  // OR a raw '\n' for exactly that reason: without the '\n' stop condition,
+  // an unclosed string would silently swallow the rest of the file --
+  // including real code on later lines -- as string contents, and because
+  // CurLine is only ever incremented by the whitespace-skipping logic at the
+  // very top of gettok() (which this inner loop bypasses), every diagnostic
+  // for the remainder of the file would then report the wrong line number.
   if (LastChar == '"') {
     StringVal = "";
     LastChar = SourceFile->get();
     CurCol++;
 
-    while (LastChar != '"' && LastChar != EOF) {
+    while (LastChar != '"' && LastChar != EOF && LastChar != '\n') {
       if (LastChar == '\\') {
         // Handle escape sequences
         LastChar = SourceFile->get();
@@ -333,9 +390,41 @@ int gettok() {
       CurCol++;
     }
 
+    // Both the EOF and raw-newline paths below report the same underlying
+    // mistake ("you never closed this string") with the same remediation, so
+    // the hint text -- every diagnostic in Turf carries one; it's the main
+    // thing that makes an error actually actionable rather than just a
+    // location -- is written once here instead of duplicated per call site.
+    // Uses the "\n  Hint: ..." convention that every other raw LogErrorAt()
+    // call in the parser/lexer follows (TurfError subclasses in Errors.h use
+    // a structured Hint_ field instead; LogErrorAt has no such field, so the
+    // hint is appended directly into the message text).
+    static const char *const UnterminatedStringHint =
+        "\n  Hint: Add a closing '\"' before the end of the line -- Turf "
+        "string literals can't span multiple lines. Need an actual line "
+        "break inside the string? Use the \\n escape instead.";
+
     if (LastChar == EOF) {
-      LogErrorAt(CurLoc, "Unterminated string literal");
+      // Ran off the end of the file with no closing '"' anywhere -- there is
+      // truly nothing left to lex, so end the token stream here exactly as
+      // the pre-existing behavior did.
+      LogErrorAt(CurLoc, std::string("Unterminated string literal") +
+                             UnterminatedStringHint);
       return TOK_EOF;
+    }
+
+    if (LastChar == '\n') {
+      // Hit end-of-line before a closing '"'. Report it at the opening-quote
+      // location (CurLoc was snapshotted there at the top of gettok() and is
+      // untouched since) and return the partial token WITHOUT consuming the
+      // newline. Leaving '\n' in LastChar means the *next* gettok() call
+      // walks into it via the ordinary isspace()/whitespace-skip path at the
+      // top of this function, which correctly bumps CurLine and resets
+      // CurCol -- so lexing (and line tracking) of the rest of the file
+      // recovers cleanly instead of desyncing for every line that follows.
+      LogErrorAt(CurLoc, std::string("Unterminated string literal") +
+                             UnterminatedStringHint);
+      return TOK_STRING_LITERAL;
     }
 
     // Consume closing "

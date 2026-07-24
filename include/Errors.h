@@ -4,6 +4,7 @@
 #include "Algorithms.h"
 #include "Builtins.h"
 #include "Colors.h"
+#include "ErrorCategory.h"
 #include "Lexer.h"
 #include "SuggestionIndex.h"
 #include "SLMIntegration.h"
@@ -23,6 +24,19 @@ protected:
   std::string Message;
   std::string Hint_;
   std::vector<RelatedLocation> RelatedLocations_; // structural context for SLM
+  // Ground-truth error category, set by each subclass's own constructor body
+  // (e.g. `Category_ = SLM::ErrorCategory::TYPE_MISMATCH;`). This is the
+  // error's own C++ type telling the SLM layer what it is, directly --
+  // replacing the old approach of re-deriving a category by pattern-matching
+  // the final rendered message text (SLM::classifyError()), which silently
+  // drifted out of sync every time a message was reworded and left several
+  // real, commonly-hit error classes (ImmutableAssignmentError,
+  // NullAssignmentError, DefiniteAssignmentError, UseAfterFreeError,
+  // DoubleFreeError) permanently misclassified as GENERAL. classifyError()
+  // is NOT removed -- it remains the correct fallback for the raw,
+  // untyped LogErrorAt() path (parser-level errors with no TurfError
+  // instance at all) and for any subclass left untagged (default GENERAL).
+  SLM::ErrorCategory Category_ = SLM::ErrorCategory::GENERAL;
 
 public:
   TurfError(SourceLocation Loc, const std::string &Msg,
@@ -33,6 +47,7 @@ public:
 
   const std::string &getHint() const { return Hint_; }
   const std::string &getMessage() const { return Message; }
+  SLM::ErrorCategory getCategory() const { return Category_; }
 
   const std::vector<RelatedLocation> &getRelatedLocations() const {
     return RelatedLocations_;
@@ -45,7 +60,8 @@ public:
   }
 
   void raise() const {
-    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/false, RelatedLocations_);
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/false,
+                          RelatedLocations_, Category_);
 
     if (g_recoverActive)
       longjmp(g_recoverJmp, 1);
@@ -56,7 +72,8 @@ public:
   }
 
   void warn() const {
-    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true, RelatedLocations_);
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true,
+                          RelatedLocations_, Category_);
   }
 
   static std::string formatRankedSuggestions(const RankedSuggestions &Suggestions) {
@@ -111,6 +128,11 @@ protected:
   std::string Message;
   std::string Hint_;
   std::vector<RelatedLocation> RelatedLocations_; // structural context for SLM
+  // Mirrors TurfError::Category_ for class symmetry. Currently inert: the
+  // SLM layer is only ever invoked for errors (DiagnosticEngine::add()'s
+  // AI-augmentation block is gated on `!IsWarning`), so no warning's
+  // category is ever read. Kept for consistency and in case that changes.
+  SLM::ErrorCategory Category_ = SLM::ErrorCategory::GENERAL;
 
 public:
   TurfWarning(SourceLocation Loc, const std::string &Msg,
@@ -121,6 +143,7 @@ public:
 
   const std::string &getHint() const { return Hint_; }
   const std::string &getMessage() const { return Message; }
+  SLM::ErrorCategory getCategory() const { return Category_; }
 
   const std::vector<RelatedLocation> &getRelatedLocations() const {
     return RelatedLocations_;
@@ -133,7 +156,8 @@ public:
 
   // NEVER interrupts compilation flow — always returns normally.
   void emit() const {
-    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true, RelatedLocations_);
+    DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true,
+                          RelatedLocations_, Category_);
   }
 
   void warn() const { emit(); }
@@ -147,7 +171,9 @@ public:
                            "Oops! There's a tiny mistake here:\n" +
                            Colors::RESET + "  " + Msg,
                   "Check your spelling, punctuation like ';' or "
-                  "'}', and make sure everything is closed properly.") {}
+                  "'}', and make sure everything is closed properly.") {
+    Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
+  }
 };
 
 // Type Error : Errors generated due to incompatible types
@@ -158,7 +184,9 @@ public:
                   Colors::BRIGHT_RED + "Type mismatch!\n" + Colors::RESET +
                       "  " + Msg,
                   "Check that you're not mixing incompatible types "
-                  "(like assigning a string to an int variable).") {}
+                  "(like assigning a string to an int variable).") {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+  }
 };
 
 // String Conversion Error : Unsupported type passed to string(...)
@@ -172,7 +200,9 @@ public:
             "Only these conversions are supported:\n"
             "    string(int)    - turns a whole number into text\n"
             "    string(double) - turns a decimal number into text\n"
-            "    string(bool)   - gives you \"true\" or \"false\"") {}
+            "    string(bool)   - gives you \"true\" or \"false\"") {
+    Category_ = SLM::ErrorCategory::STRING_CONVERSION;
+  }
 };
 
 // lengthof() Argument Type Error : non-string passed to lengthof
@@ -187,7 +217,9 @@ public:
                       Colors::RESET,
                   "'lengthof' counts the characters in a string.\n"
                   "    Correct usage:  lengthof(\"hello\")  →  5\n"
-                  "    Correct usage:  int n = lengthof(myStringVar)") {}
+                  "    Correct usage:  int n = lengthof(myStringVar)") {
+    Category_ = SLM::ErrorCategory::BUILTIN_FUNCTION;
+  }
 };
 
 // abs() Argument Type Error : non-int/double passed to abs
@@ -203,7 +235,9 @@ public:
                 Colors::RESET + "  " + Colors::BRIGHT_GREEN + "Valid uses:\n" +
                 "    abs(int)    → int\n" + "    abs(double) → double" +
                 Colors::RESET,
-            "abs gives the absolute (positive) value of a number.") {}
+            "abs gives the absolute (positive) value of a number.") {
+    Category_ = SLM::ErrorCategory::BUILTIN_FUNCTION;
+  }
 };
 
 // power() Argument Type Error : non-int/double passed to power
@@ -223,7 +257,9 @@ public:
                 "    power(int, double)    → double\n" +
                 "    power(double, int)    → double\n" +
                 "    power(double, double) → double" + Colors::RESET,
-            "power raises the first number to the power of the second.") {}
+            "power raises the first number to the power of the second.") {
+    Category_ = SLM::ErrorCategory::BUILTIN_FUNCTION;
+  }
 };
 
 // Control Flow Misuse : break/continue/return in wrong context
@@ -235,7 +271,9 @@ public:
             Colors::BRIGHT_RED + "Control flow error!\n" + Colors::RESET +
                 "  " + Msg,
             "Make sure 'break' and 'continue' are inside a loop, "
-            "and 'return' is inside a function.") {}
+            "and 'return' is inside a function.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 // Semantic Error : General semantic violations
@@ -244,7 +282,11 @@ public:
   SemanticError(SourceLocation Loc, const std::string &Msg)
       : TurfError(Loc, Colors::BRIGHT_RED +
                            "Oops! Something doesn't add up:\n" + Colors::RESET +
-                           "  " + Msg) {}
+                           "  " + Msg) {
+    // Intentionally left as the default GENERAL: this class is a genuine
+    // catch-all for miscellaneous semantic violations that don't fit any
+    // other bucket, not an oversight.
+  }
 };
 
 // Compare Statement Structural Error : parse-time violations in compare blocks
@@ -255,7 +297,9 @@ public:
                   Colors::BRIGHT_RED + "compare error!\n" + Colors::RESET +
                       "  " + Msg,
                   "Check the structure of your compare statement: matches "
-                  "arms need 'done', and 'otherwise' must be the last arm.") {}
+                  "arms need 'done', and 'otherwise' must be the last arm.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 // Compare Type Error : subject and pattern type mismatch in compare
@@ -270,7 +314,9 @@ public:
                       Colors::RESET + "' but a matches arm has type '" +
                       Colors::CYAN + PatternType + Colors::RESET + "'.",
                   "All matches arm values must have the same type as the "
-                  "compare subject (int or string).") {}
+                  "compare subject (int or string).") {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+  }
 };
 
 // Compare Warning : emitted for empty compare {} blocks (no arms, no otherwise)
@@ -282,7 +328,9 @@ public:
                         "Warning: Empty compare statement has no arms and no "
                         "'otherwise' — this is a no-op." +
                         Colors::RESET,
-                    "Add at least one 'matches' arm or an 'otherwise' arm.") {}
+                    "Add at least one 'matches' arm or an 'otherwise' arm.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 // Keyword Error : Misspelled keywords
@@ -292,6 +340,7 @@ public:
       : TurfError(Loc, Colors::BRIGHT_RED + "Hmm, I don't know the word '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
+    Category_ = SLM::ErrorCategory::SYNTAX_ERROR;
 
     std::vector<std::string> Candidates = SuggestionIndex::suggestKeywords(Name);
 
@@ -319,6 +368,12 @@ public:
       : TurfError(Loc, Colors::BRIGHT_RED + "Oops! I can't find a function named '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
+    // UNDECLARED_VAR, not BUILTIN_FUNCTION: this is about an unresolved
+    // *name* (could be a typo'd user function), not a builtin's own
+    // argument-type rules -- matches the enum's own stated definition
+    // better than the old text-matcher's (accidental) BUILTIN_FUNCTION
+    // routing for "Unknown function" text.
+    Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check the spelling against the built-in "
       "functions like 'printline' or 'lengthof'.");
@@ -334,6 +389,7 @@ public:
       : TurfError(Loc, Colors::BRIGHT_RED + "Error: Unknown function '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
+    Category_ = SLM::ErrorCategory::UNDECLARED_VAR; // see LookupError's note above
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check the spelling or import the module that "
       "defines it.");
@@ -349,6 +405,7 @@ public:
       : TurfError(Loc, Colors::BRIGHT_RED + "Error: Unknown type '" +
                            Colors::CYAN + TypeName + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = suggestionsOrFallback(Suggestions,
       "Make sure the struct '" + TypeName +
       "' is declared before it is used, or check the spelling.");
@@ -369,6 +426,7 @@ public:
                       (Got == 1 ? "" : "s") +
                       ", but no overload accepts that many." +
                       Colors::RESET) {
+    Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
     if (!KnownSignatures.empty()) {
       Message += "\n  " + Colors::BRIGHT_GREEN + "Known overloads:" +
                  Colors::RESET;
@@ -386,7 +444,9 @@ public:
                            "Nested function definitions are not allowed: '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'.",
                   "Move the function to the top level of the "
-                  "file or module.") {}
+                  "file or module.") {
+    Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
+  }
 };
 class ArithmeticError : public TurfError {
 public:
@@ -395,7 +455,9 @@ public:
             Loc,
             Colors::BRIGHT_RED + "Math trouble! " + Colors::RESET + Msg,
             "Are you trying to divide by zero? Or combining things "
-            "that can't be added together like a number and a word?") {}
+            "that can't be added together like a number and a word?") {
+    Category_ = SLM::ErrorCategory::ARITHMETIC;
+  }
 };
 
 // Reference Error : Variable lookup issues
@@ -405,6 +467,7 @@ public:
                  const RankedSuggestions &Suggestions)
       : TurfError(Loc, Colors::BRIGHT_RED + "I can't find anything named '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'.") {
+    Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     Hint_ = suggestionsOrFallback(Suggestions,
       "Did you forget to create this variable? You have to "
       "create it before you can use it, like this: `int " +
@@ -420,6 +483,7 @@ public:
       : TurfError(UseLoc, Colors::BRIGHT_RED + "Hold on! You're trying to use '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED +
                            "' before telling me what it is.") {
+    Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     Hint_ = suggestionsOrFallback(Suggestions,
       "Did you forget to create this variable? You have to "
       "create it before you can use it, like this: `int " +
@@ -435,6 +499,7 @@ public:
                   Colors::BRIGHT_RED +
                       "Wait a minute! You already created a variable named '" +
                       Colors::CYAN + Name + Colors::BRIGHT_RED + "'.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
     Message += "\n  " + Colors::BRIGHT_BLUE +
                "Note: You first created it at line " +
                std::to_string(PrevLoc.Line) + ", column " +
@@ -457,6 +522,7 @@ public:
                         "' that hides an older one!" + Colors::RESET,
                     "It's better to give this new variable a different name "
                     "to avoid confusion later.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
     Message += "\n  " + Colors::BRIGHT_BLUE +
                "Note: The older one is at line " +
                std::to_string(PrevLoc.Line) + ", column " +
@@ -473,7 +539,9 @@ public:
                            " will never happen because you used '" +
                            Terminator + "' before it!" + Colors::RESET,
                   "Move this code before the '" + Terminator +
-                  "' statement if you want it to run.") {}
+                  "' statement if you want it to run.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 // Control Flow Errors
@@ -487,7 +555,9 @@ public:
                 "' promises to give back a result, but sometimes it doesn't!" +
                 Colors::RESET,
             "Make sure every path in your function (like inside 'if' "
-            "and 'else') has a 'return' statement.") {}
+            "and 'else') has a 'return' statement.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 class UnreachableBlockWarning : public TurfWarning {
@@ -500,7 +570,9 @@ public:
                         "' inside '" + FunctionName +
                         "' can never be reached!" + Colors::RESET,
                     "Check your 'if' conditions. Are they impossible to be "
-                    "true, or did you 'return' before this block?") {}
+                    "true, or did you 'return' before this block?") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 class DeadBranchWarning : public TurfWarning {
@@ -512,7 +584,9 @@ public:
                         FunctionName + "' that will never be executed!" +
                         Colors::RESET,
                     "Check if you have code after a 'return', 'break', or "
-                    "'continue' that can't be reached.") {}
+                    "'continue' that can't be reached.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 class StatementAfterTerminatorError : public TurfError {
@@ -523,7 +597,9 @@ public:
                            Terminator + ", so it's impossible to reach it!" +
                            Colors::RESET,
                   "Delete this code or move it before the '" +
-                  Terminator + "' statement.") {}
+                  Terminator + "' statement.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 // Lint Warnings - Reviewer-style heuristic pattern warnings
@@ -539,7 +615,9 @@ public:
                         " is the same as just writing " + Colors::BRIGHT_CYAN +
                         Simplified + Colors::RESET + ".",
                     "You can simplify this by removing the comparison "
-                    "entirely.") {}
+                    "entirely.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 // Self-assignment: x = x
@@ -552,7 +630,9 @@ public:
                         Colors::BRIGHT_YELLOW + "' to itself — this doesn't do anything!" +
                         Colors::RESET,
                     "Did you mean to assign a different value, or is this "
-                    "left over from an edit?") {}
+                    "left over from an edit?") {
+    Category_ = SLM::ErrorCategory::GENERAL;
+  }
 };
 
 // Infinite loop: while(true) with no break/continue/return in the body
@@ -567,7 +647,9 @@ public:
                         Colors::CYAN + "'continue'" + Colors::BRIGHT_YELLOW + ", or " +
                         Colors::CYAN + "'return'" + Colors::BRIGHT_YELLOW + ".",
                     "If this is intentional, consider adding a comment. "
-                    "Otherwise, add a 'break' or a proper exit condition.") {}
+                    "Otherwise, add a 'break' or a proper exit condition.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 // Empty block in if/else branch
@@ -581,7 +663,9 @@ public:
                         Colors::RESET,
                     "If you haven't written the code yet, add a comment "
                     "like '// TODO'. Otherwise, you may be able to simplify this "
-                    "'if' statement.") {}
+                    "'if' statement.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 // Self-comparison: x == x, x != x, x < x, etc.
@@ -595,7 +679,9 @@ public:
                         Colors::BRIGHT_YELLOW + "' with itself!" + Colors::RESET +
                         " This is always " + Colors::BRIGHT_CYAN + Result +
                         Colors::RESET + ".",
-                    "Did you mean to compare with a different variable?") {}
+                    "Did you mean to compare with a different variable?") {
+    Category_ = SLM::ErrorCategory::GENERAL;
+  }
 };
 
 // Division / modulo by zero literal
@@ -607,7 +693,9 @@ public:
                         Colors::BRIGHT_YELLOW + "You're using '" + Colors::CYAN + Op + Colors::BRIGHT_YELLOW +
                         "' with zero — this will crash at runtime!" + Colors::RESET,
                     "Check the right-hand side. Division or modulo by zero "
-                    "is undefined behavior.") {}
+                    "is undefined behavior.") {
+    Category_ = SLM::ErrorCategory::ARITHMETIC;
+  }
 };
 
 // Identical if/else branches
@@ -619,7 +707,9 @@ public:
                         Colors::BRIGHT_YELLOW + "Both branches of this 'if' do the same thing!" +
                         Colors::RESET,
                     "The 'if'/'else' can be removed — just keep the body. "
-                    "Or did you forget to change one of the branches?") {}
+                    "Or did you forget to change one of the branches?") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
 };
 
 // Argument type mismatch in function call
@@ -637,7 +727,9 @@ public:
                 Colors::CYAN + ExpectedType + Colors::RESET + "', but got '" +
                 Colors::CYAN + GotType + Colors::RESET + "'.",
             "You might need an explicit cast like " + ExpectedType +
-                "(value), or pass a different value.") {}
+                "(value), or pass a different value.") {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+  }
 };
 
 // Return type mismatch
@@ -653,7 +745,9 @@ public:
                            "', but you're trying to return '" + Colors::CYAN +
                            GotType + Colors::RESET + "'.",
                   "Use an explicit cast like " + ExpectedType +
-                  "(value), or change the function's return type.") {}
+                  "(value), or change the function's return type.") {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+  }
 };
 
 // Using the result of a void function as a value
@@ -666,7 +760,9 @@ public:
                 Colors::RESET + "  " + Context,
             "A void function doesn't produce a value. You can "
             "call it as a statement, but not use its result in an "
-            "expression or assignment.") {}
+            "expression or assignment.") {
+    Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
+  }
 };
 
 // Array index out of bounds (compile-time constant check)
@@ -682,7 +778,9 @@ public:
                       Colors::CYAN + std::to_string(ArraySize) + Colors::RESET +
                       " elements (indices 0 to " +
                       std::to_string(ArraySize - 1) + ").",
-                  "Array indices start at 0 and go up to size - 1.") {}
+                  "Array indices start at 0 and go up to size - 1.") {
+    Category_ = SLM::ErrorCategory::ARRAY_ERROR;
+  }
 };
 
 // Array initializer size mismatch
@@ -698,7 +796,9 @@ public:
                            std::to_string(InitSize) + Colors::RESET +
                            " initial values.",
                   "The number of values in [...] must match the "
-                  "declared array size.") {}
+                  "declared array size.") {
+    Category_ = SLM::ErrorCategory::ARRAY_ERROR;
+  }
 };
 
 // Non-integer array index
@@ -711,7 +811,9 @@ public:
                            GotType + Colors::RESET +
                            "' as an array index.",
                   "Use an 'int' value to index into an array, "
-                  "like arr[0] or arr[i] where i is an int.") {}
+                  "like arr[0] or arr[i] where i is an int.") {
+    Category_ = SLM::ErrorCategory::ARRAY_ERROR;
+  }
 };
 
 // Array element type mismatch
@@ -727,7 +829,9 @@ public:
                      Colors::RESET + "' values, but you tried to store a '" +
                      Colors::CYAN + GotType + Colors::RESET + "'.",
             "All elements in the array must match the declared "
-            "element type.") {}
+            "element type.") {
+    Category_ = SLM::ErrorCategory::ARRAY_ERROR;
+  }
 };
 
 // Use-after-free error
@@ -736,7 +840,9 @@ public:
   UseAfterFreeError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Oops! You're using memory from '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' after it was freed." + Colors::RESET,
-                  "Don't use memory after calling free(). Consider setting the pointer to null after freeing.") {}
+                  "Don't use memory after calling free(). Consider setting the pointer to null after freeing.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
 };
 
 // Double free error
@@ -745,7 +851,9 @@ public:
   DoubleFreeError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Double free detected for '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "'." + Colors::RESET,
-                  "Avoid calling free() on the same pointer more than once.") {}
+                  "Avoid calling free() on the same pointer more than once.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
 };
 
 // Use-before-assignment error
@@ -754,64 +862,9 @@ public:
   DefiniteAssignmentError(SourceLocation Loc, const std::string &Name)
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Oops! You're using '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' before it has a value." + Colors::RESET,
-                  "Make sure every path assigns to '" + Name + "' before you use it.") {}
-};
-
-// List Errors
-
-// Missing generic type parameter: list bad  (instead of list<int> bad)
-class ListGenericMissingError : public TurfError {
-public:
-  ListGenericMissingError(SourceLocation Loc)
-      : TurfError(Loc, Colors::BRIGHT_RED +
-                           "List declaration is missing a type parameter!\n" +
-                           Colors::RESET +
-                           "  You must specify the element type inside angle "
-                           "brackets.",
-                  "Use list<int>, list<double>, list<bool>, or "
-                  "list<string>.") {}
-};
-
-// Wrong element type pushed into list: push(3.14) into list<int>
-class ListTypeMismatchError : public TurfError {
-public:
-  ListTypeMismatchError(SourceLocation Loc, const std::string &ListName,
-                        const std::string &ExpectedElem,
-                        const std::string &GotType)
-      : TurfError(
-            Loc, Colors::BRIGHT_RED + "Type mismatch on list '" + Colors::CYAN +
-                     ListName + Colors::BRIGHT_RED + "'!\n" + Colors::RESET +
-                     "  This is a list<" + Colors::CYAN + ExpectedElem +
-                     Colors::RESET + ">, but you tried to push a '" +
-                     Colors::CYAN + GotType + Colors::RESET + "' value.",
-            "Push only '" + ExpectedElem +
-            "' values. No implicit coercion is allowed for list "
-            "operations.") {}
-};
-
-// Method called on non-list variable
-class ListNonListOperationError : public TurfError {
-public:
-  ListNonListOperationError(SourceLocation Loc, const std::string &VarName,
-                            const std::string &Method)
-      : TurfError(
-            Loc,
-            Colors::BRIGHT_RED + "'" + Colors::CYAN + VarName +
-                Colors::BRIGHT_RED + "' is not a list!\n" + Colors::RESET +
-                "  You called '" + Colors::CYAN + Method + Colors::RESET +
-                "' on it, but that method only works on list<T> variables.",
-            "Declare it with list<int>, list<string>, etc. to use " +
-            Method + ".") {}
-};
-
-// pop() on an empty list (runtime guard emitted as IR)
-class ListEmptyPopError : public TurfError {
-public:
-  ListEmptyPopError(SourceLocation Loc, const std::string &ListName)
-      : TurfError(Loc, Colors::BRIGHT_RED + "Calling pop() on an empty list '" +
-                           Colors::CYAN + ListName + Colors::BRIGHT_RED +
-                           "' will crash at runtime!\n" + Colors::RESET,
-                  "Check list.length > 0 before calling pop().") {}
+                  "Make sure every path assigns to '" + Name + "' before you use it.") {
+    Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
+  }
 };
 
 // Phase 3: Module search error
@@ -821,7 +874,9 @@ public:
       : TurfError(Loc, Colors::BRIGHT_RED + "Could not find module '" +
                            Colors::CYAN + ModuleName + Colors::BRIGHT_RED +
                            "'.\n" + Colors::RESET,
-                  "Make sure the file '" + ModuleName + ".tr' exists in the standard library or your current directory.") {}
+                  "Make sure the file '" + ModuleName + ".tr' exists in the standard library or your current directory.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
 };
 
 
@@ -839,6 +894,9 @@ public:
                       ModuleName + Colors::BRIGHT_RED +
                       "' has no function named '" + Colors::CYAN + MethodName +
                       Colors::BRIGHT_RED + "'." + Colors::RESET) {
+    // Left as the default GENERAL (a judgment call): could arguably be
+    // UNDECLARED_VAR, but the ranked suggestions already do the heavy
+    // lifting here, and classifyError()'s text match gets a fair shot too.
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check your spelling, or maybe you need to define it?",
       "Did you mean:\n");
@@ -861,7 +919,9 @@ public:
                       Colors::RESET + "  " + Detail,
                   "Hint: Check the argument types and count. Use the "
                   "correct overload, e.g. 'math.abs(int)' or "
-                  "'math.abs(double)'.") {}
+                  "'math.abs(double)'.") {
+    Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
+  }
 };
 
 class ImmutableAssignmentError : public TurfError {
@@ -872,7 +932,9 @@ public:
                       Colors::CYAN + VarName + Colors::BRIGHT_RED +
                       "' because it's immutable.\n" + Colors::RESET,
                   "If you need to change its value later, declare it "
-                  "with 'mutable' instead of 'immutable'.") {}
+                  "with 'mutable' instead of 'immutable'.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
 };
 
 class NullAssignmentError : public TurfError {
@@ -886,7 +948,9 @@ public:
                       Colors::BRIGHT_RED + "'." + Colors::RESET,
                   "Hint: 'null' is only valid for pointer types. "
                   "If you want a zero value, use the default initializer "
-                  "(declare without '= null').") {}
+                  "(declare without '= null').") {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+  }
 };
 
 #endif

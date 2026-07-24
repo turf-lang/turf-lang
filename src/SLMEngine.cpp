@@ -214,8 +214,29 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
     } else {
       // nullptr means the grammar string failed to parse (not just missing file).
       // The file-missing case produces an empty grammarStr and never reaches here.
-      std::cerr << "Compiler Warning: GBNF grammar failed to parse; "
-                   "falling back to unconstrained output.\n";
+      //
+      // IMPORTANT: write this via the saved (real) fd, not std::cerr/stderr --
+      // stderr is redirected to /dev/null for the entire duration of this
+      // function (see the freopen() above) to suppress llama.cpp's own
+      // verbose logging. A plain std::cerr write here would be silently
+      // swallowed along with it, which is exactly what happened to this
+      // warning for an unknown period: the bundled grammars/slm_suggestion.gbnf
+      // had a real GBNF syntax error (multi-line rule bodies need explicit
+      // parenthesization in this parser -- bare line-continuation isn't
+      // supported, unlike some other GBNF dialects) that made every grammar
+      // init silently fail, degrading every --smart call to fully
+      // unconstrained generation with zero visible indication -- the model
+      // emitted unquoted enum-like JSON values (e.g. `"fix_mode": MODIFY`
+      // instead of `"fix_mode": "MODIFY"`), which silently failed
+      // extractJsonFieldString()'s parsing and defaulted to fix_mode=NONE,
+      // which meant the sandbox-validation path (ApplyAndValidateFix) was
+      // never even reached. Writing straight to the saved fd means this
+      // class of regression is visible again even with logging suppressed.
+      if (saved_stderr != -1) {
+        dprintf(saved_stderr,
+                "Compiler Warning: GBNF grammar failed to parse; "
+                "falling back to unconstrained output.\n");
+      }
     }
   }
 
