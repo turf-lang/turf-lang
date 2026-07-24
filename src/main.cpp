@@ -50,6 +50,12 @@
 #include "llvm/Support/Path.h"
 #include <set>
 #include <vector>
+#ifdef _WIN32
+#include <process.h> // _spawnvp, _P_WAIT
+#else
+#include <sys/wait.h> // waitpid, WIFEXITED, WEXITSTATUS
+#include <unistd.h>   // fork, execvp
+#endif
 
 using namespace llvm;
 
@@ -205,32 +211,120 @@ static int emitObjectFile(Module &M, const std::string &ObjFilename) {
 extern std::set<std::string> g_RequiredLibs;
 
 // Invoke system linker
+//
+// Runs the linker directly via fork+exec (POSIX) / _spawnvp (Windows) with
+// an explicit argument array, NOT std::system() on a concatenated shell
+// command string. ObjFile and OutputName both ultimately derive from `-o`
+// and the input filename on the command line -- arbitrary, unescaped user
+// input. The previous std::system("cc \"" + ObjFile + "\" -o \"" +
+// OutputName + "\" ...") only quoted against spaces; a filename containing
+// a `"`, `` ` ``, `$(...)`, or `;` would break out of the quoting and run as
+// shell syntax (e.g. `turf prog.tr -o 'x"; rm -rf ~; echo "'`). Passing
+// argv entries directly to exec*/_spawnvp means the OS never re-parses them
+// through a shell, so no argument can ever be interpreted as shell syntax
+// regardless of its contents.
 static int linkObject(const std::string &ObjFile,
                       const std::string &OutputName,
                       const std::vector<std::string> &ExtraLibs) {
   // Build -l flags from both sources:
   //   1. Libraries declared via 'extern from "libname" fn' in source code
   //   2. Libraries passed via --link on the command line
-  std::string LibFlags;
-  // Merge both sets (deduplicate via a set)
   std::set<std::string> AllLibs(g_RequiredLibs);
   for (const auto &L : ExtraLibs) AllLibs.insert(L);
-  for (const auto &L : AllLibs) LibFlags += " -l" + L;
 
-  std::string Cmd;
 #ifdef _WIN32
-  Cmd = "gcc \"" + ObjFile + "\" -o \"" + OutputName + ".exe\" -lm" + LibFlags;
+  std::string FinalOutput = OutputName + ".exe";
+  std::vector<std::string> Args = {"gcc", ObjFile, "-o", FinalOutput, "-lm"};
 #else
-  Cmd = "cc \"" + ObjFile + "\" -o \"" + OutputName + "\" -lm" + LibFlags;
+  std::string FinalOutput = OutputName;
+  std::vector<std::string> Args = {"cc", ObjFile, "-o", FinalOutput, "-lm"};
 #endif
+  for (const auto &L : AllLibs) Args.push_back("-l" + L);
 
-  int Ret = std::system(Cmd.c_str());
+  // Human-readable form for error reporting only -- never passed to a shell.
+  std::string CmdForDisplay;
+  for (const auto &A : Args) CmdForDisplay += A + " ";
+
+#ifdef _WIN32
+  std::vector<const char *> Argv;
+  for (const auto &A : Args) Argv.push_back(A.c_str());
+  Argv.push_back(nullptr);
+  intptr_t Ret = _spawnvp(_P_WAIT, Argv[0], Argv.data());
   if (Ret != 0) {
     std::cerr << "Linking failed (exit code " << Ret << ")\n";
-    std::cerr << "Command was: " << Cmd << "\n";
+    std::cerr << "Command was: " << CmdForDisplay << "\n";
     return 1;
   }
+#else
+  std::vector<char *> Argv;
+  for (auto &A : Args) Argv.push_back(const_cast<char *>(A.c_str()));
+  Argv.push_back(nullptr);
+
+  pid_t Pid = fork();
+  if (Pid < 0) {
+    std::cerr << "Linking failed: fork() error\n";
+    return 1;
+  }
+  if (Pid == 0) {
+    execvp(Argv[0], Argv.data());
+    // execvp only returns on failure.
+    std::cerr << "Linking failed: could not exec '" << Argv[0] << "'\n";
+    _exit(127);
+  }
+  int Status = 0;
+  if (waitpid(Pid, &Status, 0) < 0) {
+    std::cerr << "Linking failed: waitpid() error\n";
+    return 1;
+  }
+  if (!WIFEXITED(Status) || WEXITSTATUS(Status) != 0) {
+    std::cerr << "Linking failed (exit code "
+              << (WIFEXITED(Status) ? WEXITSTATUS(Status) : -1) << ")\n";
+    std::cerr << "Command was: " << CmdForDisplay << "\n";
+    return 1;
+  }
+#endif
   return 0;
+}
+
+/**
+ * @brief Skip forward past a malformed top-level construct (a `fn`/`struct`/
+ *        `enum`/`extern`/`import` whose own parse just failed) until reaching
+ *        the next safe top-level boundary, tracking brace/paren/bracket
+ *        nesting depth so a `;` or boundary-looking token still buried
+ *        inside the malformed construct's own unconsumed body doesn't cause
+ *        premature resynchronization.
+ *
+ * All eight recovery loops in the parsing loops below (pre-pass and main
+ * pass, `fn`/`struct`/... branch and `import` branch, longjmp path and
+ * plain-nullptr-return path) used to do a flat, depth-blind scan: skip
+ * tokens one at a time until hitting ANY of a fixed set of boundary tokens
+ * (`fn`, `struct`, ..., `;`). That works fine when the failure happens
+ * genuinely at the top level, but a failure partway through a function
+ * BODY (e.g. a typo'd keyword like `iff` for `if`) leaves the token stream
+ * mid-way through that body, with its own already-open, not-yet-closed `{`
+ * that the naive scan has no way to know about -- it stops at the FIRST
+ * `;` or `fn`/`struct`/... it happens to see, which is very often still
+ * inside the malformed body, not a real top-level boundary. The leftover
+ * garbage after that point (the rest of the body, its closing `}`, etc.)
+ * then gets misread as new top-level content, producing a second,
+ * completely unrelated, confusing error stacked on top of the real one.
+ *
+ * Starts Depth at 1 (not 0) because the construct whose parse just failed
+ * always already consumed its own opening `{` before the failure occurred
+ * (that's why we're recovering from inside its body/fields at all) -- this
+ * function's job is to find where THAT brace closes, not to open a new one.
+ */
+static void SkipToNextTopLevelBoundary() {
+  int Depth = 1;
+  while (CurTok != TOK_EOF) {
+    if (CurTok == '{' || CurTok == '(' || CurTok == '[') {
+      Depth++;
+    } else if (CurTok == '}' || CurTok == ')' || CurTok == ']') {
+      if (Depth > 0) Depth--;
+    }
+    getNextToken();
+    if (Depth == 0) return; // just closed the malformed construct's own body
+  }
 }
 
 // main
@@ -324,14 +418,29 @@ int main(int argc, char **argv) {
                 LogErrorAt(CurLoc, "Unexpected ';'");
               }
               RecordParsedTopLevelAST(AST.get());
-              LintExpression(AST.get());
+              // NOTE: no LintExpression() call here (deliberately -- see the
+              // "Phase Separation: Lint All" comment near FnASTs' declaration
+              // for the full story). This AST is about to flow through
+              // Resolver -> TypeChecker -> full codegen (sub-pass 3b) in this
+              // same pre-pass, and FuncDefExprAST::codegen() already lints
+              // its own body once that's done. Linting here too used to
+              // triple-warn on every function: once here (before the AST was
+              // even resolved), once via that embedded codegen-time lint,
+              // and a third time later when the main pass re-parses the same
+              // source into a fresh (but structurally identical) AST and
+              // lints THAT via the FnASTs loop -- three near-identical
+              // warnings for one line of source. Found while adding a
+              // regression test for Lint.cpp's self-comparison wording fix.
               PrePassASTs.push_back(std::move(AST));
+            } else {
+              // ParseExpression() already reported a real error and
+              // returned nullptr NORMALLY (no longjmp) -- see
+              // SkipToNextTopLevelBoundary()'s doc comment for why a
+              // depth-aware skip is needed here instead of a flat scan.
+              SkipToNextTopLevelBoundary();
             }
           } else {
-            while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_ENUM &&
-                   CurTok != TOK_IMPORT && CurTok != TOK_AT &&
-                   CurTok != TOK_EXTERN && CurTok != TOK_EOF)
-              getNextToken();
+            SkipToNextTopLevelBoundary();
           }
           g_recoverActive = false;
         } else if (CurTok == TOK_IMPORT) {
@@ -345,14 +454,14 @@ int main(int argc, char **argv) {
                 getNextToken(); // eat ';'
               }
               RecordParsedTopLevelAST(AST.get());
-              LintExpression(AST.get());
+              // See the matching NOTE above (fn/struct/enum/@/extern branch):
+              // no LintExpression() call here either, for the same reason.
               PrePassASTs.push_back(std::move(AST));
+            } else {
+              SkipToNextTopLevelBoundary();
             }
           } else {
-            while (CurTok != TOK_FN && CurTok != TOK_STRUCT &&
-                   CurTok != TOK_IMPORT && CurTok != TOK_AT &&
-                   CurTok != TOK_EOF)
-              getNextToken();
+            SkipToNextTopLevelBoundary();
           }
           g_recoverActive = false;
         } else {
@@ -399,6 +508,43 @@ int main(int argc, char **argv) {
         g_recoverActive = false;
       }
 
+      // ── Pre-pass sub-pass 2c: Fully codegen all structs FIRST ──────────────
+      // Unlike functions, StructDeclExprAST::codegen() has no g_protoOnlyPass
+      // split -- one call does the whole job: create-or-reuse an opaque
+      // llvm::StructType stub, then immediately populate its body (field
+      // types) in place. That "immediately" is the problem this pass exists
+      // to fix. Structs used to only be codegen'd in sub-pass 3b below,
+      // interleaved with everything else in TEXTUAL file order -- so a
+      // struct field access GEP built while compiling a method that's
+      // declared BEFORE its owning struct (`fn User.grow()` above `struct
+      // User {...}`, a supported forward-reference -- see
+      // tests/06_structs/19_method_before_struct.tr) got built against the
+      // struct type while it was still opaque (zero fields). The opaque
+      // llvm::StructType* object identity is correctly preserved and later
+      // filled in via setBody() -- so by the time the module finishes,
+      // GlobalSymbolTable and LLVMTypeCache both point at a fully-populated
+      // struct -- but the GEP instruction itself was already permanently
+      // constructed while that type had no known fields, and its embedded
+      // "indexed type" information doesn't get retroactively fixed up by a
+      // later setBody() call on the same object. The result was IR that
+      // `verifyModule()` (see below) correctly rejects: "GEP is not of right
+      // type for indices!". This was completely invisible before that
+      // verification call was wired up correctly (see its own doc comment).
+      //
+      // Fix: give structs the same treatment functions already get for
+      // exactly this reason (forward calls) -- process ALL of them, fully,
+      // before ANY function prototype or body touches a struct type. Structs
+      // are excluded from both loops below since they're entirely done here.
+      for (auto &AST : PrePassASTs) {
+        if (dynamic_cast<StructDeclExprAST *>(AST.get())) {
+          g_recoverActive = true;
+          if (setjmp(g_recoverJmp) == 0) {
+            AST->codegen();
+          }
+          g_recoverActive = false;
+        }
+      }
+
       // ── Pre-pass sub-pass 3a: Emit all LLVM function prototypes ────────────
       // Before compiling any body, declare every function in LLVM so that
       // forward calls (main calling helper() defined later) work correctly.
@@ -422,7 +568,14 @@ int main(int argc, char **argv) {
 
       // ── Pre-pass sub-pass 3b: Full codegen (bodies) ───────────────────────
       // All prototypes exist now — codegen each function body safely.
+      // Structs are skipped: sub-pass 2c above already fully codegen'd them,
+      // and StructDeclExprAST::codegen() is NOT safe to call a second time
+      // (its opaque-stub reuse check keys on `isOpaque()`, which is false
+      // once setBody() has run -- a second call would create a second,
+      // distinct llvm::StructType and silently corrupt LLVMTypeCache).
       for (auto &AST : PrePassASTs) {
+        if (dynamic_cast<StructDeclExprAST *>(AST.get()))
+          continue;
         size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
         g_recoverActive = true;
         if (setjmp(g_recoverJmp) == 0) {
@@ -462,10 +615,14 @@ int main(int argc, char **argv) {
   // (e.g. type mismatch) triggered a longjmp mid-codegen.
   //
   // fn definitions are kept in a SEPARATE list (FnASTs) because they were
-  // already fully codegenned in the pre-pass. We parse them here purely to
-  // sync the token stream and run the lint pass — not to codegen them again.
+  // already fully codegenned -- and linted (see FuncDefExprAST::codegen()'s
+  // own LintExpression(Body.get()) call) -- in the pre-pass. We parse them
+  // here purely to sync the token stream, NOT to codegen or lint them again:
+  // this is a fresh re-parse producing structurally-identical-but-distinct
+  // AST nodes from the pre-pass's copy, so re-linting here would just repeat
+  // every warning a second time for the same source line.
   std::vector<std::unique_ptr<ExprAST>> TopLevelASTs; // non-fn: lint + codegen
-  std::vector<std::unique_ptr<ExprAST>> FnASTs;       // fn:     lint only
+  std::vector<std::unique_ptr<ExprAST>> FnASTs;       // fn:     kept for Resolver/TypeChecker re-validation only
 
   while (true) {
     if (CurTok == TOK_EOF)
@@ -493,11 +650,16 @@ int main(int argc, char **argv) {
           }
           RecordParsedTopLevelAST(AST.get());
           FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
+        } else {
+          // ParseExpression() already reported a real error (e.g. a typo'd
+          // keyword deep inside the function body, like `iff` for `if`) and
+          // returned nullptr NORMALLY -- see SkipToNextTopLevelBoundary()'s
+          // doc comment for why a depth-aware skip is needed here instead
+          // of a flat token scan.
+          SkipToNextTopLevelBoundary();
         }
       } else {
-        while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_ENUM &&
-               CurTok != TOK_AT && CurTok != TOK_EXTERN && CurTok != ';' && CurTok != TOK_EOF)
-          getNextToken();
+        SkipToNextTopLevelBoundary();
       }
       g_recoverActive = false;
       continue;
@@ -515,11 +677,11 @@ int main(int argc, char **argv) {
           }
           RecordParsedTopLevelAST(AST.get());
           FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
+        } else {
+          SkipToNextTopLevelBoundary();
         }
       } else {
-        while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_AT &&
-               CurTok != ';' && CurTok != TOK_EOF)
-          getNextToken();
+        SkipToNextTopLevelBoundary();
       }
       g_recoverActive = false;
       continue;
@@ -563,9 +725,13 @@ int main(int argc, char **argv) {
   }
 
   // Phase Separation: Lint All
-  // Lint fn definitions first (body-only checks), then top-level statements.
-  for (auto &AST : FnASTs)
-    LintExpression(AST.get());
+  // Only TopLevelASTs (non-fn statements) are linted here. FnASTs are
+  // deliberately skipped: they're a fresh re-parse of the same fn bodies
+  // the pre-pass already codegenned (and, via FuncDefExprAST::codegen()'s
+  // own embedded LintExpression(Body.get()) call, already linted) --
+  // linting them again here would just repeat every warning for the exact
+  // same source line a second time. See the FnASTs declaration's comment
+  // above for the full story.
   for (auto &AST : TopLevelASTs)
     LintExpression(AST.get());
 
@@ -739,8 +905,33 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // Verify the generated IR
-  verifyFunction(*MainFunc);
+  // Verify the generated IR for the WHOLE module (not just main -- a bug in
+  // any function's codegen can produce broken IR that crashes or misbehaves
+  // deep inside the optimizer/backend below with no indication of where the
+  // real problem is).
+  //
+  // This used to be `verifyFunction(*MainFunc);` with the return value
+  // discarded and no output stream passed -- verifyFunction() only prints a
+  // diagnostic if given a non-null raw_ostream*, and only actually means
+  // anything if the caller checks its bool return ("true" = broken). With
+  // neither done, this call was a complete no-op: it could never abort
+  // compilation and never printed anything, regardless of whether the
+  // generated IR was valid. A broken-IR bug in Codegen.cpp -- for any
+  // function, not just main -- would silently sail through this checkpoint
+  // and only surface later as a confusing LLVM optimizer/backend crash with
+  // no TurfLang-level context, rather than a clear internal-compiler-error
+  // message right here, before any of that runs.
+  {
+    std::string VerifyErrors;
+    raw_string_ostream VerifyOS(VerifyErrors);
+    if (verifyModule(*TheModule, &VerifyOS)) {
+      std::cerr << "Internal compiler error: generated LLVM IR is invalid.\n"
+                   "This is a compiler bug, not a mistake in your Turf code "
+                   "-- please report it.\n\n"
+                << VerifyErrors;
+      return 1;
+    }
+  }
 
   // Phase 5: LLVM Optimization Passes
   // Run LLVM's standard optimization pipeline over every function in the
