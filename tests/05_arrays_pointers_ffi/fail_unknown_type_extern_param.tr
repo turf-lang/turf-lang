@@ -1,0 +1,11 @@
+// Regression test: an unknown/misspelled struct type name used as an
+// extern fn parameter's type must be rejected. Before the fix,
+// Resolver::visitExternFuncDecl() was a complete no-op in Pass 2 -- extern
+// fn signatures were never validated at all. See Resolver.cpp's
+// validateNamedType().
+
+extern fn bogus(x: NoSuchStruct): void;
+
+fn main(): int {
+    return 0;
+}

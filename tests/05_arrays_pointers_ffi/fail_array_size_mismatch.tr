@@ -1,0 +1,18 @@
+// Regression test: assigning an array of one declared size into a variable
+// declared with a DIFFERENT concrete size must be a type error.
+//
+// Before the fix, ArrayType::getName() rendered every array as "T[]" with no
+// size, and typesCompatible()'s first check was a raw getName() string
+// comparison -- so int[5] and int[10] looked like "the same type" and this
+// assignment compiled with ZERO diagnostics. It was not just a missed type
+// error: Codegen's CastToType() has the identical getName()-equality fast
+// path, so the mismatch reached a raw LLVM `store` of an 80-byte array value
+// into a's 40-byte stack allocation -- a real stack buffer overflow,
+// reproduced and confirmed before this fix. See Types.cpp's typesCompatible().
+
+fn main(): int {
+    mut a: int[5] = [1, 2, 3, 4, 5];
+    mut b: int[10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    a = b;
+    return 0;
+}

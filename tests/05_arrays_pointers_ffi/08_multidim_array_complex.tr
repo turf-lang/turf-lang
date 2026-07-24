@@ -7,7 +7,7 @@ fn get_3d_array(): int[2][2][2] {
 
 fn main(): int {
     // 1. Array of arrays of arrays directly accessed
-    // assert(get_3d_array()[1][0][1] == 6, "3D array r-value inline indexing failed");
+    assert(get_3d_array()[1][0][1] == 6, "3D array r-value inline indexing failed");
     
     // 2. Multidimensional array assignment and reassignment
     mut arr: int[2][3] = [[1, 2, 3], [4, 5, 6]];

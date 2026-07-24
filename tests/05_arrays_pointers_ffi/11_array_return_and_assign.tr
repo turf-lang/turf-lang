@@ -1,0 +1,47 @@
+// Regression test (was DISCOVERED_ISSUES.md #3 and #21):
+//   #3 — TypeChecker was stripping array dimensions when registering
+//        variables, so a function declaring `int[3]` return actually
+//        recorded the returned variable as `int`.
+//   #21 — two related array limitations: returning an array from a function
+//        threw a spurious "Type mismatch" (return type reported as the
+//        stripped scalar type), and assigning an array variable directly
+//        from a function-call expression (`mut a: int[3] = get_array();`)
+//        was rejected by the parser, which only accepted bracket/brace
+//        array literals on the right-hand side of `=`.
+// Both re-verified fixed; this file covers a few variations (different
+// sizes, a 2D array, reassigning an already-declared array from a call).
+
+fn make3(): int[3] {
+    mut a: int[3] = [1, 2, 3];
+    return a;
+}
+
+fn make5(): int[5] {
+    return [10, 20, 30, 40, 50];
+}
+
+fn make2d(): int[2][2] {
+    return [[1, 2], [3, 4]];
+}
+
+fn main(): int {
+    // Assign directly from a function call (not a literal).
+    mut a: int[3] = make3();
+    assert(a[0] == 1, "");
+    assert(a[1] == 2, "");
+    assert(a[2] == 3, "");
+
+    mut b: int[5] = make5();
+    assert(b[4] == 50, "");
+
+    // Reassign an already-declared array variable from a function call.
+    b = make5();
+    assert(b[0] == 10, "");
+
+    // 2D array returned and assigned from a call.
+    mut c: int[2][2] = make2d();
+    assert(c[1][0] == 3, "");
+    assert(c[1][1] == 4, "");
+
+    return 0;
+}

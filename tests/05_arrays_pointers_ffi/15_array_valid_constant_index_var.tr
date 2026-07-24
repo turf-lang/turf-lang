@@ -1,0 +1,18 @@
+// Regression guard for ValueRangePass's constant-propagation fix (see
+// fail_array_oob_via_constant_propagation.tr): a variable holding a
+// provably in-bounds constant index must still compile and run correctly --
+// the fix must not turn valid accesses into false positives.
+
+fn main(): int {
+    mut arr: int[3] = [10, 20, 30];
+    mut i: int = 1;
+    assert(arr[i] == 20, "");
+
+    if true {
+        mut j: int = 2;
+        assert(arr[j] == 30, "");
+    }
+
+    io.printline("ok");
+    return 0;
+}

@@ -1,0 +1,22 @@
+// Regression test: a function parameter declared with the "unsized" array
+// spelling (int[], compile-time Size == -1) must accept an argument array of
+// any concrete length. This feature had ZERO test coverage anywhere in the
+// repository before this fix, despite the Parser and Codegen both having
+// dedicated code paths for it -- discovered and verified while confirming
+// that Types.cpp's typesCompatible() array-size fix (see
+// fail_array_size_mismatch.tr) does not also reject THIS legitimate case,
+// which relies on one side of the comparison being unsized.
+
+fn sumFive(arr: int[]): int {
+    return arr[0] + arr[1] + arr[2] + arr[3] + arr[4];
+}
+
+fn main(): int {
+    mut a: int[5] = [1, 2, 3, 4, 5];
+    assert(sumFive(a) == 15, "");
+
+    mut b: int[10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    assert(sumFive(b) == 15, "");
+
+    return 0;
+}
