@@ -26,8 +26,46 @@
 #include "ASTVisitor.h"
 #include "TypeChecker.h"
 
+#include <cctype>
 #include <iostream>
 #include <string>
+
+/**
+ * @brief Render a binary/unary operator token code as a human-readable
+ *        string, for debug-dump display only (parsing/codegen never go
+ *        through this — they switch on the raw token code directly).
+ *
+ * A single-character operator (`+`, `-`, `<`, `&`, ...) is genuinely a
+ * printable ASCII value and can be shown as-is. Every multi-character
+ * operator (`==`, `&&`, `**`, `++`, ...), however, is tokenized to a
+ * negative int constant (see Lexer.h's enum) that is NOT a printable
+ * character -- `static_cast<char>(Op)` on one of those produces garbage
+ * (typically the Unicode replacement character when printed). This used to
+ * be visible directly in `--dump-ast`/`--dump-resolved` output as
+ * `BinaryExpr(op='<63>')` for something as ordinary as `p == &n`, and (in a
+ * DIFFERENT copy of this exact same bug, already fixed elsewhere this
+ * session — see tests/03_typechecker/fail_logical_operator_non_numeric.tr)
+ * inside a real user-facing error message for `&&`/`||`.
+ */
+inline std::string OpToDisplayString(int Op) {
+  switch (Op) {
+    case TOK_EQ: return "==";
+    case TOK_NEQ: return "!=";
+    case TOK_LEQ: return "<=";
+    case TOK_GEQ: return ">=";
+    case TOK_AND: return "&&";
+    case TOK_OR: return "||";
+    case TOK_PLUS_PLUS: return "++";
+    case TOK_MINUS_MINUS: return "--";
+    case TOK_POWER: return "**";
+    case TOK_LSHIFT: return "<<";
+    case TOK_RSHIFT: return ">>";
+    default:
+      if (Op >= 0 && Op <= 127 && isprint(Op))
+        return std::string(1, static_cast<char>(Op));
+      return "op#" + std::to_string(Op);
+  }
+}
 
 class ASTPrinter : public ASTVisitor {
 public:
@@ -116,7 +154,7 @@ public:
   // ── Expressions ─────────────────────────────────────────────────────────────
   void visitBinary(BinaryExprAST &N) override {
     printIndent(Depth_);
-    std::cout << "BinaryExpr(op='" << static_cast<char>(N.getOp()) << "')";
+    std::cout << "BinaryExpr(op='" << OpToDisplayString(N.getOp()) << "')";
     printTypeBadge(&N);
     std::cout << "\n";
     descend();
@@ -127,7 +165,7 @@ public:
 
   void visitUnary(UnaryExprAST &N) override {
     printIndent(Depth_);
-    std::cout << "UnaryExpr(op='" << static_cast<char>(N.getOpcode()) << "')\n";
+    std::cout << "UnaryExpr(op='" << OpToDisplayString(N.getOpcode()) << "')\n";
     descend();
     print(const_cast<ExprAST *>(N.getOperand()), Depth_);
     ascend();
