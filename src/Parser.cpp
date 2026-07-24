@@ -150,10 +150,7 @@ std::unique_ptr<ExprAST> ParseBlock();
 std::unique_ptr<ExprAST> ParseWhileExpr();
 std::unique_ptr<ExprAST> ParseForExpr();
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
-std::unique_ptr<ExprAST> ParseVarDecl();
 std::unique_ptr<ExprAST> ParseEnumDecl();
-std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
-                                          TurfTypePtr Type);
 std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName);
@@ -163,9 +160,11 @@ std::unique_ptr<ExprAST> ParseReturnExpr();
 std::unique_ptr<ExprAST> ParseStructDecl();
 std::unique_ptr<ExprAST> ParseExternDecl();
 std::unique_ptr<ExprAST> ParseCompareExpr();
-// NOTE: ParseListDecl removed — list<T> declarations go through
-// ParseVarDeclBody
-//       via the unified ParseType() path, same as int/double/bool/string.
+// list<T> declarations have no dedicated parse function: ParseType() already
+// produces a GenericType("list", [elemType]) for any `Name<...>` spelling,
+// so `list<int> xs = ...;` flows through the exact same declaration path as
+// `int x = ...;` -- ParseLetStatement(), the only variable-declaration
+// entry point this parser actually calls.
 
 // ParseType: recursively parse a type expression from the token stream.
 // Handles primitives, void, generics like list<int>, and arrays like int[5].
@@ -306,6 +305,36 @@ static TurfTypePtr ParseType() {
   }
 
   return Base;
+}
+
+/**
+ * @brief True if @p T is bare 'void', or an array whose (possibly nested)
+ *        element type is bare 'void'.
+ *
+ * 'void' only has a valid meaning as a function's return type -- there is no
+ * LLVM representation for a void-typed local variable, struct field, array
+ * element, or parameter, and code further down the pipeline (definite-
+ * assignment analysis, GetDefaultValue(), LLVM struct-body construction, ...)
+ * assumes it never sees one there. Concretely, `mut x: void;` and
+ * `fn f(x: void): void {}` were both observed to hang the compiler
+ * indefinitely rather than fail cleanly -- this predicate exists so callers
+ * can catch the mistake at parse time instead, with a normal diagnostic.
+ *
+ * Deliberately does NOT match 'void*' (a TurfPointerType wrapping VoidType):
+ * TurfPointerType::isVoid() is never overridden and always returns false, so
+ * the FFI opaque-pointer idiom used throughout lib/std/mem.tr keeps working.
+ * Also does not match a function's return type -- callers must only invoke
+ * this on types parsed for a variable/field/parameter position, never on the
+ * return-type ParseType() call.
+ */
+static bool isDisallowedVoidType(const TurfType *T) {
+  if (!T)
+    return false;
+  if (T->isVoid())
+    return true;
+  if (isArrayType(T))
+    return isDisallowedVoidType(getArrayElementType(T));
+  return false;
 }
 
 // Called when CurTok is a Number.
@@ -1465,8 +1494,22 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   }
   getNextToken();
 
+  SourceLocation TypeLoc = CurLoc; // points at the type token itself, for a precise caret below
   TurfTypePtr Type = ParseType();
   if (!Type) return nullptr;
+
+  // 'void' has no meaning as a variable's type (see isDisallowedVoidType's
+  // doc comment for why this must be caught here rather than left to a
+  // later pass -- it isn't a style nit, it's a compiler hang).
+  if (isDisallowedVoidType(Type.get())) {
+    LogErrorAt(TypeLoc,
+               "'void' cannot be a variable's type."
+               "\n  Hint: 'void' only makes sense as a function's return "
+               "type, e.g. fn f(): void { ... }. Give '" +
+                   Name + "' a real type instead, like int, string, or a "
+                   "struct name.");
+    return nullptr;
+  }
 
   if (CurTok != TOK_ASSIGN) {
     if (isArrayType(Type.get())) {
@@ -1547,76 +1590,14 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   return std::make_unique<VarDeclExprAST>(Loc, Name, Type, std::move(Init), IsImmutable, true);
 }
 
-// ParseVarDeclBody - called after the type keyword has already been consumed.
-// ParseType() now produces ArrayType for array types (e.g. int[5]), so we
-// simply check isArrayType() here instead of intercepting '[' ourselves.
-std::unique_ptr<ExprAST> ParseVarDeclBody(SourceLocation TypeLoc,
-                                          TurfTypePtr Type) {
-  // If ParseType() already consumed [N] and built an ArrayType, handle it here.
-  if (isArrayType(Type.get())) {
-    const auto *AT = dynamic_cast<const ::ArrayType *>(Type.get());
-    int ArraySize = AT ? AT->getSize() : -1;
-    TurfTypePtr ElemType = AT ? AT->getElementTypePtr() : Type;
-
-    bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
-                     Keywords.at(IdentifierStr) == CurTok;
-    if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
-      LogErrorAt(
-          CurLoc,
-          "Expected a variable name after the array type, e.g. int[5] arr");
-      return nullptr;
-    }
-
-    std::string Name = IdentifierStr;
-    SourceLocation NameLoc = CurLoc;
-    getNextToken();
-
-    // Optional initializer: int[3] primes = [2, 3, 5]
-    std::vector<std::unique_ptr<ExprAST>> InitList;
-    std::unique_ptr<ExprAST> InitExpr = nullptr;
-    if (CurTok == TOK_ASSIGN) {
-      getNextToken();
-      InitExpr = ParseExpression();
-      if (!InitExpr)
-        return nullptr;
-    }
-
-    return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType,
-                                              ArraySize, std::move(InitList), std::move(InitExpr), false);
-  }
-
-  // Standard variable declaration: int x = ...
-  bool IsKeyword = Keywords.find(IdentifierStr) != Keywords.end() &&
-                   Keywords.at(IdentifierStr) == CurTok;
-  if (CurTok != TOK_IDENTIFIER && !IsKeyword) {
-    LogErrorAt(CurLoc, "Expected a variable name after the type keyword."
-                       "\n  Hint: Variable declarations look like: int x = 5");
-    return nullptr;
-  }
-
-  std::string Name = IdentifierStr;
-  SourceLocation NameLoc = CurLoc;
-  getNextToken();
-
-  std::unique_ptr<ExprAST> Init = nullptr;
-  if (CurTok == TOK_ASSIGN) {
-    getNextToken();
-    Init = ParseExpression();
-    if (!Init)
-      return nullptr;
-  }
-
-  return std::make_unique<VarDeclExprAST>(NameLoc, Name, Type, std::move(Init), false);
-}
-
-// ParseVarDecl - original entry point (type token is still in CurTok).
-std::unique_ptr<ExprAST> ParseVarDecl() {
-  SourceLocation TypeLoc = CurLoc;
-  TurfTypePtr Type = ParseType(); // consumes the type token
-  if (!Type)
-    return nullptr;
-  return ParseVarDeclBody(TypeLoc, Type);
-}
+// NOTE: ParseVarDecl()/ParseVarDeclBody() (a "bare `int x = 5;` with no
+// mutable/immutable keyword" declaration path) used to live here and have
+// since been removed: they had zero callers anywhere in the codebase --
+// ParsePrimaryBase()'s TOK_TYPE_INT/TOK_TYPE_DOUBLE/TOK_TYPE_STRING/
+// TOK_TYPE_BOOL cases (see above) already redirect that exact syntax to a
+// "Expected 'mutable' or 'immutable' to begin a declaration." error instead
+// of ever reaching these functions. ParseLetStatement() is the only variable-
+// declaration entry point actually reachable from the grammar.
 
 // ParseStructDecl - called when CurTok == TOK_STRUCT.
 std::unique_ptr<ExprAST> ParseStructDecl() {
@@ -1648,29 +1629,51 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
     getNextToken(); // eat '>'
   }
 
-  // Push scope to allow ParseType to resolve generic parameters
-  SymbolScopeGuard Guard(!TypeParams.empty());
-  if (GlobalSymbolTable && !TypeParams.empty()) {
-    for (const auto &TP : TypeParams) {
-      GlobalSymbolTable->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
-    }
-  }
-
-  if (CurTok != '{') {
-    LogErrorAt(CurLoc, "Expected '{' after struct name");
-    return nullptr;
-  }
-  getNextToken(); // eat '{'
-
+  // Push scope to allow ParseType to resolve generic parameters WHILE
+  // parsing the struct's own field list -- but only for that; the struct's
+  // own final registration below must happen in the OUTER (persistent)
+  // scope, once Guard has already popped this temporary one. See the
+  // comment at the registration call below for why.
   std::vector<StructField> Fields;
-  while (CurTok != '}' && CurTok != TOK_EOF) {
+  {
+    SymbolScopeGuard Guard(!TypeParams.empty());
+    if (GlobalSymbolTable && !TypeParams.empty()) {
+      for (const auto &TP : TypeParams) {
+        GlobalSymbolTable->RegisterType(TP, std::make_shared<TurfGenericParamType>(TP));
+      }
+    }
+
+    if (CurTok != '{') {
+      LogErrorAt(CurLoc, "Expected '{' after struct name");
+      return nullptr;
+    }
+    getNextToken(); // eat '{'
+
+    while (CurTok != '}' && CurTok != TOK_EOF) {
     // New syntax: name: type
     if (CurTok != TOK_IDENTIFIER) {
       LogErrorAt(CurLoc, "Expected field name in struct definition");
       return nullptr;
     }
     std::string FieldName = IdentifierStr;
+    SourceLocation FieldNameLoc = CurLoc;
     getNextToken(); // eat field name
+
+    // Reject a field name reused from earlier in this same struct. Without
+    // this, TurfStructType::getFieldIndex()'s linear search silently binds
+    // every access to the FIRST match, so the later duplicate's type is
+    // permanently unreachable -- a typo like accidentally repeating a field
+    // name previously compiled with zero diagnostics.
+    for (const auto &Existing : Fields) {
+      if (Existing.Name == FieldName) {
+        LogErrorAt(FieldNameLoc,
+                   "Struct '" + Name + "' already has a field named '" +
+                       FieldName + "'."
+                       "\n  Hint: Field names must be unique within a "
+                       "struct -- rename one of them.");
+        return nullptr;
+      }
+    }
 
     if (CurTok != TOK_COLON) {
       LogErrorAt(CurLoc,
@@ -1680,9 +1683,22 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
     }
     getNextToken(); // eat ':'
 
+    SourceLocation FieldTypeLoc = CurLoc;
     TurfTypePtr FieldType = ParseType();
     if (!FieldType)
       return nullptr;
+
+    // See isDisallowedVoidType()'s doc comment: 'void' as a field's type is
+    // not caught by anything downstream and silently produces a struct LLVM
+    // can't actually lay out correctly.
+    if (isDisallowedVoidType(FieldType.get())) {
+      LogErrorAt(FieldTypeLoc,
+                 "'void' cannot be a struct field's type."
+                 "\n  Hint: 'void' only makes sense as a function's return "
+                 "type. Give field '" +
+                     FieldName + "' a real type instead.");
+      return nullptr;
+    }
 
     Fields.push_back({FieldName, std::move(FieldType)});
 
@@ -1699,10 +1715,23 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
     return nullptr;
   }
   getNextToken(); // eat '}'
+  } // end of Guard's scope -- see the comment above its declaration.
 
-
-
-  // Register the struct type. For generics, fields will use TurfGenericParamType which compiles to void*
+  // Register the struct type in the OUTER (persistent) scope, now that
+  // Guard has already popped the temporary generic-type-parameter scope.
+  // For generics, fields use TurfGenericParamType which compiles to void*.
+  //
+  // This registration used to happen INSIDE Guard's scope (before it was
+  // moved out into its own block above) -- meaning it got POPPED along with
+  // the temporary generic-params scope the instant this function returned,
+  // so ANY generic struct's own name became permanently unlookupable via
+  // GlobalSymbolTable->LookupType() immediately after being parsed.
+  // Confirmed via `struct Box<T> { val: T* }` followed later by
+  // `Box { val: null }` in the same file: Codegen's
+  // StructInitExprAST::codegen() failed with "Unknown struct type 'Box'"
+  // even though the struct had just been declared. Non-generic structs
+  // (empty TypeParams, Guard's SymbolScopeGuard is a no-op) were never
+  // affected by this.
   auto SType = std::make_shared<TurfStructType>(Name, Fields);
   if (GlobalSymbolTable) {
     GlobalSymbolTable->RegisterType(Name, SType);
@@ -1841,9 +1870,24 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
     }
     getNextToken(); // eat ':'
 
+    SourceLocation ParamTypeLoc = CurLoc;
     TurfTypePtr ParamType = ParseType();
     if (!ParamType)
       return nullptr;
+
+    // See isDisallowedVoidType()'s doc comment above ParseType(). Note this
+    // does NOT reject 'void*' (TurfPointerType wrapping VoidType) -- that's
+    // the legitimate opaque-pointer idiom extern fns use constantly, e.g.
+    // lib/std/mem.tr's `extern fn free(ptr: void*): void;`.
+    if (isDisallowedVoidType(ParamType.get())) {
+      LogErrorAt(ParamTypeLoc,
+                 "'void' cannot be a parameter's type."
+                 "\n  Hint: 'void' only makes sense as a function's return "
+                 "type. Give parameter '" +
+                     ParamName + "' a real type instead (use 'void*' if you "
+                     "meant an opaque pointer).");
+      return nullptr;
+    }
 
     Params.emplace_back(ParamName, std::move(ParamType));
 
@@ -1969,16 +2013,44 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
 
   std::vector<ParamDecl> Params;
   if (!StructName.empty()) {
-    TurfTypePtr StructType = nullptr;
-    if (GlobalSymbolTable) {
-      StructType = GlobalSymbolTable->LookupType(StructName);
-    }
-    if (!StructType) {
-      LogErrorAt(FnLoc, "Unknown struct type '" + StructName +
-                            "' in method declaration");
-      return nullptr;
-    }
-    Params.push_back({std::make_shared<TurfPointerType>(StructType), "self"});
+    // Build 'self' as a pointer to a lazy NamedType(StructName) placeholder
+    // rather than eagerly resolving StructName via GlobalSymbolTable here.
+    //
+    // This intentionally mirrors how every OTHER struct-type reference in
+    // this parser works (see ParseType()'s `Base = std::make_shared<NamedType>(BaseName);`
+    // fallback for any non-primitive name) instead of special-casing this
+    // one spot to require the struct to already be registered.
+    //
+    // Why this matters: GlobalSymbolTable is populated by ParseStructDecl()
+    // as it is encountered during this single top-to-bottom parse -- there is
+    // no separate pre-pass that hoists struct names ahead of the parser the
+    // way the Resolver later hoists them ahead of name resolution. An eager
+    // lookup here previously meant `fn User.grow(): void { ... }` failed to
+    // even PARSE ("Unknown struct type 'User' in method declaration") if it
+    // appeared textually before `struct User { ... }` in the same file --
+    // contradicting the language's forward-declaration story (plain function
+    // calls, and struct fields referencing later-declared structs, both work
+    // fine) for no reason other than this one spot being stricter than it
+    // needs to be.
+    //
+    // This is safe: TypeChecker::visitFieldAccess/visitMethodCall and
+    // Codegen's FieldAccessExprAST/MethodCallExprAST already unwrap a
+    // TurfPointerType's pointee and, if it's a NamedType, resolve it via
+    // GlobalSymbolTable->LookupType() at every `self.field` / `self.method()`
+    // use site inside the method body -- that resolve-on-use path is exactly
+    // what runs for every other NamedType field/parameter already, so 'self'
+    // is not gaining or losing any capability here, just becoming consistent.
+    //
+    // Note this does mean a genuinely misspelled struct name in a method
+    // declaration (`fn Usre.grow()`) is no longer caught here either -- but
+    // that validation was never systematic to begin with (an ordinary
+    // function parameter of an unknown struct type, e.g. `fn f(x: NoSuch)`,
+    // already silently compiles with zero diagnostics today). Catching
+    // unknown NamedType names belongs in the Resolver, which already has the
+    // registered-struct-name machinery (isKnownStruct()) for exactly this,
+    // currently applied only to struct fields.
+    auto SelfPointee = std::make_shared<NamedType>(StructName);
+    Params.push_back({std::make_shared<TurfPointerType>(SelfPointee), "self"});
   }
 
   // Parse parameter list: each param is: Identifier TOK_COLON ParseType()
@@ -2001,11 +2073,24 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
     }
     getNextToken(); // consume ':'
 
+    SourceLocation ParamTypeLoc = CurLoc;
     TurfTypePtr ParamType = ParseType();
     if (!ParamType) {
       LogErrorAt(CurLoc,
                  "Expected a parameter type after ':' in the parameter list of '" +
                      FuncName + "'.");
+      return nullptr;
+    }
+
+    // See isDisallowedVoidType()'s doc comment above ParseType(): a
+    // void-typed parameter was observed to hang the compiler indefinitely
+    // rather than fail cleanly.
+    if (isDisallowedVoidType(ParamType.get())) {
+      LogErrorAt(ParamTypeLoc,
+                 "'void' cannot be a parameter's type."
+                 "\n  Hint: 'void' only makes sense as a function's return "
+                 "type. Give parameter '" +
+                     ParamName + "' a real type instead.");
       return nullptr;
     }
 
@@ -2149,7 +2234,27 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
         }
         Exprs.push_back(std::move(Expr));
       } else {
-        getNextToken(); // skip for error recovery
+        // A nested ParseExpression() call already reported a real error
+        // (via LogErrorAt) and returned nullptr -- bail out of this file
+        // immediately rather than "skip one token and keep trying" (this
+        // used to just call getNextToken() and continue the loop). Unlike
+        // the top-level program's own parse loop, which deliberately keeps
+        // going after an error to surface multiple problems in one compile,
+        // there is no equivalent multi-error-collection UX for an imported
+        // module -- and limping forward token-by-token through an already-
+        // malformed declaration is actively dangerous here: confirmed to
+        // eventually run the underlying ifstream's read position past EOF
+        // repeatedly, which crashes the ENTIRE compiler with an unhandled
+        // `std::__ios_failure` (not just this import failing cleanly) once
+        // enough repeated `.get()` calls on an already-exhausted stream
+        // trip libstdc++'s exception state. Reproduced via
+        // `extern fn f(ptr: void*): void;` inside an imported module --
+        // `ptr` collides with the `ptr` type keyword, which is itself a
+        // separate, real stdlib bug (lib/std/mem.tr's own extern
+        // declarations use `ptr` as a parameter name) -- but no single
+        // syntax error inside an imported module should ever be able to
+        // crash the compiler, regardless of what triggers it.
+        return nullptr;
       }
       continue;
     }
@@ -2164,7 +2269,8 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
         getNextToken(); // eat ';'
         Exprs.push_back(std::move(Expr));
       } else {
-        getNextToken(); // skip for error recovery
+        // See the comment on the identical change above.
+        return nullptr;
       }
       continue;
     }
@@ -2179,7 +2285,8 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
       getNextToken(); // eat ';'
       Exprs.push_back(std::move(Expr));
     } else {
-      getNextToken(); // skip for error recovery
+      // See the comment on the identical change above.
+      return nullptr;
     }
   }
 
@@ -2206,25 +2313,47 @@ std::unique_ptr<ExprAST> ParseImport() {
   //   1. Compiler stdlib (<binary>/../lib/std/<module>.tr)
   //   2. Same directory as the source file being compiled
   //   3. Current working directory
+  //
+  // A ParseFile() call can return nullptr for two very different reasons:
+  // the file simply doesn't exist at that path (fine, keep trying the next
+  // one), or the file DOES exist but has a genuine syntax error inside it
+  // (LogErrorAt already recorded a real diagnostic -- trying the NEXT
+  // fallback path at that point would be wrong: it can only ever produce a
+  // confusing, unrelated "module not found" error stacked on top of the
+  // real one, since the module WAS found, just broken). Distinguish the two
+  // by snapshotting the diagnostic count before each attempt and checking
+  // whether it grew.
+  size_t DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
   auto Block = ParseFile(StdlibPath.str().str());
-  if (!Block) {
+  bool FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
+  if (!Block && !FoundButBroken) {
     // Issue #19 fix: resolve relative to the source file's directory so that
     // `turf path/to/file.tr` can find sibling modules without a cd first.
     if (!SourceFilename.empty()) {
       llvm::SmallString<256> SrcRelPath(SourceFilename);
       llvm::sys::path::remove_filename(SrcRelPath);
       llvm::sys::path::append(SrcRelPath, ModuleName + ".tr");
+      DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
       Block = ParseFile(SrcRelPath.str().str());
+      FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
     }
   }
-  if (!Block) {
+  if (!Block && !FoundButBroken) {
     std::string CwdPath = ModuleName + ".tr";
+    DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
     Block = ParseFile(CwdPath);
-    if (!Block) {
+    FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
+    if (!Block && !FoundButBroken) {
       ModuleNotFoundError(Loc, ModuleName).raise();
       return nullptr;
     }
   }
+
+  // The module WAS found at some path but failed to parse -- a real
+  // diagnostic was already recorded there (see FoundButBroken's doc comment
+  // above); don't construct a ModuleImportExprAST wrapping a null Block.
+  if (!Block)
+    return nullptr;
 
   return std::make_unique<ModuleImportExprAST>(ModuleName, std::move(Block));
 }
@@ -2244,8 +2373,3 @@ std::unique_ptr<ExprAST> ParseReturnExpr() {
     return nullptr;
   return std::make_unique<ReturnExprAST>(RetLoc, std::move(Val));
 }
-
-// ParseListDecl is now replaced by the unified type dispatch in ParsePrimary.
-// list<T> declarations go through ParseVarDeclBody with a GenericType from
-// ParseType(). This function is kept as a named reference point but is no
-// longer called.
