@@ -1,0 +1,45 @@
+// Regression test (was DISCOVERED_ISSUES.md #22, "Methods Cannot Return
+// self"): a struct method CAN return self as a pointer (`: Node*`) and this
+// supports real method chaining -- `self.next.next` style traversal built
+// entirely from methods, not just direct field access.
+//
+// By-value self-return (`fn Node.get_self(): Node { return self; }`) is
+// still rejected ("function declares 'Node' but returns 'Node*'") since
+// there is no dereference operator to satisfy that signature -- that half
+// of the original issue remains a real, tracked gap (see
+// docs/planning/CODE_REVIEW_GAPS_2026-07.md gap #6). This file only covers
+// the by-pointer half, which already works and is the idiomatic way to do
+// method chaining in this language today.
+
+struct Counter {
+    val: int
+}
+
+// Mutates self and returns self by pointer, enabling chained calls.
+fn Counter.increment(): Counter* {
+    self.val = self.val + 1;
+    return self;
+}
+
+fn Counter.get(): int {
+    return self.val;
+}
+
+fn main(): int {
+    mut c: Counter = Counter { val: 0 };
+
+    // Single call returns a usable pointer.
+    mut p: Counter* = c.increment();
+    assert(p.val == 1, "");
+    assert(c.val == 1, "");
+
+    // Chained calls: increment().increment().increment()
+    c.increment().increment().increment();
+    assert(c.val == 4, "");
+
+    // Chained call ending in a read via .get()
+    assert(c.increment().get() == 5, "");
+    assert(c.val == 5, "");
+
+    return 0;
+}

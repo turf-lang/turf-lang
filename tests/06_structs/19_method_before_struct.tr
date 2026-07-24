@@ -1,0 +1,32 @@
+// Regression test: a struct method (`fn StructName.method()`) must parse and
+// compile correctly even when it is declared TEXTUALLY BEFORE its owning
+// struct's `struct` declaration in the same file.
+//
+// Before the fix, ParseFuncDef() eagerly resolved the struct name via
+// GlobalSymbolTable->LookupType() at parse time, which only succeeds if the
+// struct was already registered earlier in the same top-to-bottom parse --
+// so this exact ordering failed with "Unknown struct type 'User' in method
+// declaration" even though ordinary functions and struct fields have always
+// supported forward references. See ParseFuncDef()'s lazy `self` type.
+
+fn User.grow(): void {
+    self.age = self.age + 1;
+}
+
+fn User.rename(new_name: string): void {
+    self.name = new_name;
+}
+
+struct User {
+    age: int,
+    name: string
+}
+
+fn main(): int {
+    mut u: User = User { age: 10, name: "Alice" };
+    u.grow();
+    assert(u.age == 11, "");
+
+    u.rename("Bob");
+    return 0;
+}

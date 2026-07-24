@@ -1,0 +1,20 @@
+// Regression test: a struct initializer's field value must be type-checked
+// against that field's declared type. Before the fix,
+// TypeChecker::visitStructInit() only checked for UNKNOWN field names (a
+// typo'd field), never that a correctly-named field's VALUE actually
+// matched its declared type -- `User { age: "not a number", name: "Alice" }`
+// (age declared as int) compiled with ZERO diagnostics, and at runtime
+// stored the string literal's raw pointer bit-pattern directly into the
+// field's i64 storage slot: silent type confusion producing garbage data
+// (confirmed: printing the resulting `age` gave a nonsense value like
+// 102697087172654, not even a crash to signal something was wrong).
+
+struct User {
+    age: int,
+    name: string
+}
+
+fn main(): int {
+    mut u: User = User { age: "not a number", name: "Alice" };
+    return 0;
+}
