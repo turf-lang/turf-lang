@@ -1,0 +1,27 @@
+// Regression test: `&&`/`||` between non-numeric, incompatible operands
+// (here two different struct types) must be rejected with a real, readable
+// error message.
+//
+// This was already rejected before the fix, but via a confusing path:
+// TypeChecker::inferRelationalType()'s "logical operators" check tested for
+// the literal characters '&'/'|' (the BITWISE operator tokens) instead of
+// TOK_AND/TOK_OR (the real && / || tokens) -- a check that could never
+// actually match, since visitBinary() routes bitwise '&'/'|' to a separate
+// code path before this function is ever called. The dead check meant a
+// genuine && / || silently fell through to unrelated "ordering operator"
+// logic, which for a genuinely invalid case formatted the operator into the
+// error message via `std::string(1, static_cast<char>(Op))` -- and TOK_AND/
+// TOK_OR's values (-20/-21) are not printable ASCII when cast to char, so
+// the message contained a garbage character instead of "&&"/"||". This test
+// doesn't assert on the message text (the test runner only checks
+// compile-fail status), but it does exercise the fixed code path directly.
+
+struct A { x: int }
+struct B { y: int }
+
+fn main(): int {
+    mut a: A = A { x: 1 };
+    mut b: B = B { y: 2 };
+    mut result: bool = a && b;
+    return 0;
+}

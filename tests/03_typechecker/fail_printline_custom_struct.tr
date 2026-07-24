@@ -1,0 +1,12 @@
+// Regression test (was DISCOVERED_ISSUES.md #11): passing a custom struct
+// value directly to io.printline() (no matching overload exists) must be
+// rejected with a clean TypeChecker type-mismatch error, not crash the
+// compiler via the pre-pass codegen path (see fail_math_abs_string.tr for
+// the sibling issue #9, the same underlying architectural bypass).
+struct Point { x: int, y: int }
+
+fn main(): int {
+    mut p: Point = Point { x: 1, y: 2 };
+    io.printline(p);
+    return 0;
+}

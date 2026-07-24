@@ -1,0 +1,24 @@
+// Regression test: `assert()` with zero arguments must be a clean compile
+// error, not a compiler crash.
+//
+// Root cause: `assert` is registered in Builtins.cpp with BuiltinInfo::Arity
+// == -1 ("variadic/unknown") because it genuinely accepts either 1 or 2 args
+// (condition, optional message) -- not a single fixed count. That disabled
+// TypeChecker::visitFuncCall's generic single-arity check entirely, so a
+// 0-arg (or 3+-arg) call was never rejected here. CodegenIntrinsic's
+// "assert" handler unconditionally reads Args[0] with no bounds check,
+// trusting arity was already validated -- so `assert();` reached an
+// out-of-bounds std::vector access and crashed the compiler (SIGABRT), and
+// worse, did so via main.cpp's pre-pass codegen (sub-pass 3b), which runs
+// unconditionally even when the pre-pass's own TypeChecker instance already
+// flagged the same call as invalid (those errors are deliberately discarded
+// there -- "informational only... main-pass TC will re-check"). See
+// src/TypeChecker.cpp's visitFuncCall doc comment on the assert/fail
+// branches, and src/Builtins.cpp's defensive Args.size() checks, for the
+// full fix (an explicit 1-or-2 arity check plus bounds-checked codegen as
+// defense in depth).
+
+fn main(): int {
+    assert();
+    return 0;
+}

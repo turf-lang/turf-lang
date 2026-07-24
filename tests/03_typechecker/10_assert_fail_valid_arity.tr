@@ -1,0 +1,11 @@
+// Regression guard for the assert/fail arity fix (see fail_assert_no_args.tr,
+// fail_assert_too_many.tr, fail_fail_no_args.tr): both valid call shapes --
+// assert(cond) and assert(cond, msg) -- must still compile and run
+// correctly; the fix must not reject legitimate usage.
+
+fn main(): int {
+    assert(1 + 1 == 2);
+    assert(true, "should never fire");
+    io.printline("ok");
+    return 0;
+}
