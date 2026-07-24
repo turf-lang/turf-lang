@@ -1,0 +1,24 @@
+// Regression guard for Lint.cpp's self-comparison check wording fix.
+//
+// `x == x` / `x != x` are NOT unconditionally reflexive when x is a double
+// that could hold NaN: `x == x` is false and `x != x` is true for NaN --
+// `x != x` is in fact the standard idiom for isnan(x). Lint.cpp has no
+// type information, so it can't skip this warning for double variables
+// without losing its main value (catching copy-paste mistakes like
+// `a.val == a.val`). It still warns here (that's fine -- warnings never
+// block compilation), but the wording was changed from an unconditional
+// "this is always false" claim (which would have been actively wrong for
+// this exact case) to a hedged one. This test proves the underlying
+// semantics still work correctly regardless of what the lint says.
+
+import math;
+
+fn main(): int {
+    mut x: double = math.sqrt(0.0 - 1.0); // NaN: sqrt of a negative number
+
+    assert(x != x, "NaN must compare unequal to itself"); // triggers the (hedged) self-comparison warning
+    assert(!(x == x), "NaN must not compare equal to itself");
+
+    io.printline("ok");
+    return 0;
+}
