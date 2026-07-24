@@ -212,7 +212,31 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
   // math.abs()   delegates to extern fn fabs for doubles; Turf conditional for int.
   // No compiler C++ needed.
 
+  // Defensive Args.size() checks below (lengthof/fail/assert): these three,
+  // together with typeof above, are the only names reachable through the
+  // "bare intrinsic" path -- called with no module qualifier, arity/type
+  // validated by TypeChecker's ad-hoc BuiltinInfo registry rather than by
+  // real overload resolution against a fixed-arity FunctionSymbol (compare
+  // print/printline/input, which are only ever reached via a real,
+  // fully-typed `@intrinsic`-decorated Turf function in lib/std/io.tr, so
+  // Args here is already guaranteed correct by the normal call machinery).
+  // That ad-hoc registry isn't a reliable enough guarantee to skip
+  // bounds-checking on: main.cpp's pre-pass (sub-pass 2b) runs its own
+  // TypeChecker instance but deliberately discards its errors
+  // ("informational only... main-pass TC will re-check"), then sub-pass 3b
+  // unconditionally codegens the same AST anyway. A wrong-arity call like a
+  // bare `assert();` or `fail();` used to hit an unchecked Args[0] and
+  // crash the compiler (SIGABRT) via the pre-pass, before the user ever saw
+  // a diagnostic -- see TypeChecker.cpp's visitFuncCall doc comment on the
+  // assert/fail branches for the full story and the TypeChecker-side half
+  // of this fix (assert's arity was also never validated at all: it's
+  // registered with BuiltinInfo::Arity == -1 since it takes 1 or 2 args,
+  // which disabled the generic single-arity check entirely).
   if (IntrinsicName == "lengthof") {
+    if (Args.empty()) {
+      SemanticError(Loc, "'lengthof' requires exactly 1 argument").raise();
+      return nullptr;
+    }
     Value *Val = Args[0];
     Type *Ty = Val->getType();
     if (!Ty->isPointerTy()) {
@@ -257,6 +281,10 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
   }
 
   if (IntrinsicName == "fail") {
+    if (Args.empty()) {
+      SemanticError(Loc, "'fail' requires exactly 1 argument").raise();
+      return nullptr;
+    }
     // Arg 0: message string
     Value *MsgVal = Args[0];
 
@@ -301,6 +329,10 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
   }
 
   if (IntrinsicName == "assert") {
+    if (Args.empty()) {
+      SemanticError(Loc, "'assert' requires at least 1 argument (a condition)").raise();
+      return nullptr;
+    }
     // Arg 0: condition (bool)
     // Arg 1 (optional): message string
     Value *Cond = Args[0];
