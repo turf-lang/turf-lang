@@ -1,5 +1,23 @@
 # Discovered Issues during Test Migration
 
+> **STATUS (2026-07 review session): STALE / SUPERSEDED.** This file predates a
+> long series of Parser/Resolver/TypeChecker/Codegen fixes. Re-verified every
+> entry below against the current compiler during a full-codebase review pass;
+> results:
+> - **Fixed, confirmed working now:** #1, #2, #3, #4, #5, #6, #7, #8, #9, #10,
+>   #12, #14, #15, #16, #17, #18, #19, #20 (syntax now parses, and gap #2/#5
+>   in `CODE_REVIEW_GAPS_2026-07.md` closed the remaining generic-struct
+>   functional gap too), #21, #22 (both halves now — by-pointer self-return
+>   always worked, by-value self-return fixed as gap #6 there), #23.
+> - **Resolved differently than described, but no longer a bug:** #11
+>   (`io.printline(customStruct)` now gets a clean type-mismatch error instead
+>   of crashing — no auto-print fallback was added, but the crash is gone).
+> - **Not re-verified (large, separate feature, not a "bug" per se):** #13
+>   (FFI sockets/complex C struct layout).
+>
+> See `docs/planning/CODE_REVIEW_GAPS_2026-07.md` for the current, active gap
+> list — that is the file to work from going forward, not this one.
+
 ## 1. Parser Ambiguity: Struct Initialization in `if/while/for` Conditions
 **Description:**
 Because Turflang allows braceless block conditions (e.g., `if a > b {`), if the condition ends with an identifier (like `b`), the parser's `ParsePrimaryBase()` peeks at the next token (`{`) and greedily matches the struct initialization rule (`Identifier { field: val }`). This results in an `Expected ':' after field name` error when parsing the first statement of the block.

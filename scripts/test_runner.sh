@@ -57,6 +57,21 @@ for test_file in $TEST_FILES; do
             echo -e "${RED}FAILED (Should have failed compilation)${RESET}"
             FAILED=$((FAILED + 1))
             FAILED_TESTS+=("$test_file (Compiled successfully but expected to fail)")
+        elif [ $COMPILE_STATUS -ge 128 ]; then
+            # A shell exit status >= 128 means the compiler died from a
+            # signal (e.g. 134 = SIGABRT, 139 = SIGSEGV) rather than exiting
+            # cleanly via a reported diagnostic. A fail_*.tr test's whole
+            # point is "the compiler correctly REJECTS this input" -- a
+            # crash is not a rejection, it's a compiler bug that happens to
+            # also produce a non-zero exit code, and this branch used to
+            # silently count it as a pass. Added after a real crash (an
+            # unhandled iostream exception from a syntax error inside an
+            # imported module) was confirmed to satisfy the old
+            # `$COMPILE_STATUS -ne 0` check and would have masked a
+            # regression back to that crash forever.
+            echo -e "${RED}FAILED (Compiler crashed, signal $((COMPILE_STATUS - 128)), instead of rejecting cleanly)${RESET}"
+            FAILED=$((FAILED + 1))
+            FAILED_TESTS+=("$test_file (Compiler crashed with exit $COMPILE_STATUS instead of a clean diagnostic):\n$COMPILE_OUTPUT")
         else
             echo -e "${GREEN}PASS (Rejected properly)${RESET}"
             PASSED=$((PASSED + 1))
