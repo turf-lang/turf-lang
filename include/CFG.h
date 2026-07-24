@@ -90,9 +90,18 @@ private:
   BlockID NextID;             // Next available block ID
 
 public:
-  explicit CFG(std::string FunctionName, TurfTypePtr ReturnType = TurfVoid())
+  // FuncLoc defaults to {0, 0} (not left uninitialized): SourceLocation is a
+  // plain aggregate with no default member initializers, so before this
+  // explicit default, a CFG built via the single-arg constructor (still
+  // used by anything that doesn't pass a location) left FuncLoc containing
+  // whatever garbage happened to be on the stack. reportFlowDiagnostics()
+  // passes FuncLoc straight into MissingReturnError() with no validation --
+  // confirmed to print things like "at line 1986079736, col 30179" instead
+  // of the function's real declaration site.
+  explicit CFG(std::string FunctionName, TurfTypePtr ReturnType = TurfVoid(),
+              SourceLocation FuncLoc = {0, 0})
       : FunctionName(std::move(FunctionName)), ReturnType(std::move(ReturnType)),
-        EntryBlock(nullptr), ExitBlock(nullptr), NextID(0) {}
+        FuncLoc(FuncLoc), EntryBlock(nullptr), ExitBlock(nullptr), NextID(0) {}
 
   // Accessors
   const std::string &getFunctionName() const { return FunctionName; }
@@ -146,7 +155,8 @@ public:
 
   // Build CFG for a function
   std::unique_ptr<CFG> buildCFG(const std::string &FunctionName,
-                                TurfTypePtr ReturnType, ExprAST *Body);
+                                TurfTypePtr ReturnType, ExprAST *Body,
+                                SourceLocation FuncLoc = {0, 0});
 
 private:
   // Visit methods for different AST nodes
@@ -157,6 +167,7 @@ private:
   void visitReturn(ExprAST *E);
   void visitBreak(ExprAST *E);
   void visitContinue(ExprAST *E);
+  void visitCompare(ExprAST *E);
   void visitFor(ExprAST *E);
 
   // Utility methods

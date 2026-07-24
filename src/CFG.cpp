@@ -212,8 +212,9 @@ void CFG::print() const {
  */
 std::unique_ptr<CFG> CFGBuilder::buildCFG(const std::string &FunctionName,
                                           TurfTypePtr ReturnType,
-                                          ExprAST *Body) {
-  auto CFGPtr = std::make_unique<CFG>(FunctionName, std::move(ReturnType));
+                                          ExprAST *Body,
+                                          SourceLocation FuncLoc) {
+  auto CFGPtr = std::make_unique<CFG>(FunctionName, std::move(ReturnType), FuncLoc);
   CurrentCFG = CFGPtr.get();
 
   // Create entry and exit blocks
@@ -271,6 +272,8 @@ void CFGBuilder::visitExpr(ExprAST *E) {
     visitWhile(E);
   } else if (dynamic_cast<ForExprAST *>(E)) {
     visitFor(E);
+  } else if (dynamic_cast<CompareExprAST *>(E)) {
+    visitCompare(E);
   } else if (dynamic_cast<ReturnExprAST *>(E)) {
     visitReturn(E);
   } else if (dynamic_cast<BreakExprAST *>(E)) {
@@ -362,6 +365,128 @@ void CFGBuilder::visitIf(ExprAST *E) {
   } else {
     setInsertPoint(MergeBB);
   }
+}
+
+/**
+ * @brief Model a `compare { matches ...: ... done ... otherwise: ... }`
+ *        construct's control flow, mirroring visitIf()'s per-branch/merge
+ *        structure.
+ *
+ * Before this existed, CompareExprAST had no case in visitExpr()'s dispatch
+ * at all, so it fell into the generic "regular statement, add to current
+ * block" branch -- an opaque, non-terminating statement as far as the CFG
+ * was concerned, regardless of what was actually inside it. This produced a
+ * confirmed, reproducible FALSE "missing return" error for a function whose
+ * ENTIRE body is one exhaustive `compare` with a `return` in every arm and
+ * no trailing return statement.
+ *
+ * `compare` is NEVER treated as a hard CFG terminator by itself, even when
+ * every arm (and `otherwise`, if present) provably terminates -- i.e.
+ * `AllTerminate` is always false here, unlike visitIf()'s equivalent logic.
+ * Two earlier, more "precise" versions of this function were tried and both
+ * had to be walked back:
+ *   1. Treating a verified-exhaustive enum compare (`Cmp->SubjectIsEnum`,
+ *      which TypeChecker only sets once every variant is covered) as
+ *      unconditionally terminating when there's no `otherwise`.
+ *   2. Treating ANY compare where every arm AND an explicit `otherwise`
+ *      both terminate as unconditionally terminating.
+ * Both are logically sound reasoning, but BOTH broke a widely-used,
+ * clearly intentional idiom throughout this codebase's own test suite: a
+ * compare that already covers every case (via exhaustive enum matching or
+ * an explicit `otherwise`) with a `return` in every arm, immediately
+ * followed by a redundant "belt and suspenders" trailing `return` that's
+ * never actually reachable. Treating the compare as a hard terminator
+ * turned that trailing return into a hard "unreachable code" error --
+ * confirmed to break at least 7 existing tests each time. Since the
+ * codebase clearly prefers "always allow a trailing statement after
+ * compare" over precise unreachable-code detection for this construct,
+ * this stays maximally conservative: entering/exiting via break/continue/
+ * return *inside* an arm is still modeled correctly (so code INSIDE later
+ * arms, or after an if-with-break inside an arm, etc., is unaffected), but
+ * the compare's own arms/otherwise never influence whether code AFTER the
+ * whole compare block is considered reachable.
+ *
+ * `Cmp->SubjectIsEnum` DOES still matter for one thing: whether the "no
+ * arm matched" fallthrough EDGE itself is added when there's no explicit
+ * `otherwise` (see below). That edge doesn't affect reachability -- nothing
+ * downstream treats it specially for that purpose -- but it DOES feed into
+ * DefiniteAssignmentPass's dataflow, which computes "is X assigned here" as
+ * the intersection of "assigned at end" across every predecessor of a
+ * block. Adding that edge unconditionally (regardless of exhaustiveness)
+ * was also tried and reverted: a spurious edge representing "no arm ran at
+ * all" is a predecessor where nothing is assigned, which drags the
+ * intersection down to "unassigned" even when every real arm assigns the
+ * same variable -- producing a false "used before it has a value" error
+ * for a variable genuinely assigned on every reachable path through an
+ * exhaustive compare. So: the edge is omitted when `SubjectIsEnum` is true
+ * (TypeChecker already guarantees every variant is covered by some arm),
+ * added whenever it's false and there's no `otherwise`.
+ */
+void CFGBuilder::visitCompare(ExprAST *E) {
+  auto *Cmp = dynamic_cast<CompareExprAST *>(E);
+  if (!Cmp)
+    return;
+
+  TurfBasicBlock *CmpEntry = CurrentBlock;
+  TurfBasicBlock *MergeBB = createBlock("compare.end");
+
+  // Add the subject expression as a statement so the DAP can detect reads
+  // of uninitialized variables used as the compare subject.
+  if (Cmp->getSubject())
+    CmpEntry->addStatement(const_cast<ExprAST *>(Cmp->getSubject()));
+  CmpEntry->setTerminator(TerminatorKind::Branch, Cmp->getLoc());
+
+  for (const auto &Arm : Cmp->getArms()) {
+    TurfBasicBlock *ArmBB = createBlock("compare.arm");
+    CurrentCFG->addEdge(CmpEntry, ArmBB);
+
+    setInsertPoint(ArmBB);
+    visitExpr(Arm.Body.get());
+    if (CurrentBlock && !CurrentBlock->hasExplicitTerminator())
+      CurrentCFG->addEdge(CurrentBlock, MergeBB);
+  }
+
+  if (Cmp->getOtherBody()) {
+    TurfBasicBlock *OtherBB = createBlock("compare.otherwise");
+    CurrentCFG->addEdge(CmpEntry, OtherBB);
+
+    setInsertPoint(OtherBB);
+    visitExpr(Cmp->getOtherBodyMut());
+    if (CurrentBlock && !CurrentBlock->hasExplicitTerminator())
+      CurrentCFG->addEdge(CurrentBlock, MergeBB);
+  } else if (!Cmp->SubjectIsEnum) {
+    // No `otherwise`, and not a verified-exhaustive enum compare (the only
+    // other way TypeChecker allows omitting `otherwise` -- see its
+    // "Exhaustiveness gate for Enums"): the "nothing matched" fallthrough
+    // path is genuinely possible and reaches MergeBB directly without
+    // running any arm.
+    //
+    // Deliberately NOT added when SubjectIsEnum is true: doing so
+    // unconditionally (regardless of exhaustiveness) was tried and reverted
+    // -- it doesn't affect reachability/unreachable-code detection (see
+    // this function's doc comment, `setInsertPoint(MergeBB)` runs either
+    // way below), but it DOES corrupt DefiniteAssignmentPass's dataflow:
+    // that pass computes "is X assigned at this point" as the INTERSECTION
+    // of "assigned at end" across every predecessor block, and a spurious
+    // edge to MergeBB directly from CmpEntry -- with the compare's actual
+    // arms never having run at all -- is a predecessor where nothing is
+    // assigned. That drags the intersection down to
+    // "unassigned" even when every real arm assigns the same variable,
+    // producing a false "used before it has a value" error for a variable
+    // that's genuinely assigned on every reachable path through an
+    // exhaustive compare.
+    CurrentCFG->addEdge(CmpEntry, MergeBB);
+  }
+  // else: SubjectIsEnum && no otherwise -- no direct CmpEntry->MergeBB edge
+  // is added; MergeBB's only predecessors are the arms themselves (or none,
+  // if every arm terminates -- in which case MergeBB is simply unreachable,
+  // which is fine: see this function's doc comment for why unreachable
+  // trailing code is never flagged as an error for this construct anyway).
+
+  // See this function's doc comment: `compare` never counts as a hard
+  // terminator on its own, so execution always continues from MergeBB,
+  // regardless of whether every arm/otherwise happened to terminate.
+  setInsertPoint(MergeBB);
 }
 
 void CFGBuilder::visitWhile(ExprAST *E) {
