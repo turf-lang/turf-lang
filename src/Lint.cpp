@@ -263,6 +263,21 @@ static void LintBinaryExpr(const BinaryExprAST *Bin) {
         else
           result = "false";
 
+        // '==' and '!=' are NOT unconditionally reflexive: if the value is
+        // a double holding NaN, `x == x` is false and `x != x` is true --
+        // the opposite of the claim below -- and `x != x` is in fact the
+        // standard idiom for isnan(x). Lint.cpp has no type information
+        // (it runs structurally, before the TypeChecker's results are
+        // available here), so it can't tell whether `x` might be a double.
+        // Rather than silence the check for variables entirely (which
+        // would lose its main value: catching copy-paste mistakes like
+        // `a.val == a.val`), hedge the wording so it's never technically
+        // wrong. '<', '>', '<=', '>=' don't need this: every IEEE-754
+        // ordered comparison against NaN is false, so "always true/false"
+        // is correct for those regardless of type.
+        if (Op == TOK_EQ || Op == TOK_NEQ)
+          result += " (unless the value can be NaN)";
+
         // Extract a readable name from the fingerprint
         std::string readableName = LFP;
         if (LFP.substr(0, 4) == "var:")
