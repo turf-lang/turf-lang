@@ -1,0 +1,10 @@
+// Regression test: a string literal missing its closing quote must be
+// rejected with a clean "Unterminated string literal" diagnostic pointing at
+// the opening quote's line, not silently swallow the rest of the file
+// (including real code on later lines) as string content. See Lexer.cpp's
+// string-scanning loop, which now also stops at a raw '\n'.
+
+fn main(): int {
+    mut s: string = "oops, forgot the closing quote;
+    return 0;
+}

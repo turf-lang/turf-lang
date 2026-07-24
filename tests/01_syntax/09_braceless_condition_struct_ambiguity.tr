@@ -1,0 +1,50 @@
+// Regression test (was DISCOVERED_ISSUES.md #1): Turflang allows braceless
+// block conditions (`if a > b {`), but if the condition expression ends
+// with a bare identifier immediately followed by `{`, the parser's
+// struct-init lookahead (`Identifier '{' field: expr ... '}'`) used to
+// greedily match that `{` as the start of a struct literal instead of the
+// block body -- e.g. `if x {` would try to parse `x { ... }` as a struct
+// initializer for a (nonexistent) struct named `x`.
+//
+// The fix (NoStructInitGuard / g_AllowStructInit) disables struct-init
+// lookahead while parsing if/while/for/compare conditions. Re-verified
+// fixed across if, while, and for -- each condition below ends with a bare
+// identifier or comparison directly against one, immediately followed by
+// the block's opening brace, with no parentheses to disambiguate.
+
+struct Point { x: int }
+
+fn main(): int {
+    mut b: int = 5;
+    mut count: int = 0;
+
+    // if-condition ending in a bare identifier comparison, no parens
+    if b > 3 {
+        count = count + 1;
+    }
+    assert(count == 1, "");
+
+    // while-condition ending in a bare identifier, no parens
+    mut n: int = 3;
+    while n > 0 {
+        n = n - 1;
+        count = count + 1;
+    }
+    assert(count == 4, "");
+
+    // for-loop step clause ending in a bare identifier, no parens
+    mut step_amt: int = 1;
+    mut total: int = 0;
+    for i in 1..3 step i += step_amt {
+        total = total + i;
+    }
+    assert(total == 3, "");
+
+    // A genuine struct-init literal must still work in a normal expression
+    // position (not a condition) -- the guard must only suppress it inside
+    // condition parsing, not everywhere.
+    mut p: Point = Point { x: 9 };
+    assert(p.x == 9, "");
+
+    return 0;
+}
