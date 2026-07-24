@@ -1,5 +1,8 @@
 // Queue<T> — FIFO (First In, First Out) collection.
-// Usage: Queue<int> q = Queue<int>()  q.enqueue(1)  q.dequeue()  q.peek()  q.length()
+// Usage:
+//   import queue;
+//   mut q: Queue<int> = Queue { data: null, len: 0, cap: 0, head: 0 };
+//   q.enqueue(1)  q.dequeue()  q.peek()  q.length()
 //
 // Implementation: dynamic array with a head offset.
 //   - enqueue appends at data[head + len]
@@ -7,20 +10,20 @@
 //   - when (head + len == cap): if head > 0 compact elements to front,
 //     otherwise double the capacity
 
-import mem
+import mem;
 
 struct Queue<T> {
-  T* data,
-  int len,
-  int cap,
-  int head
+  data: T*,
+  len: int,
+  cap: int,
+  head: int
 }
 
 fn<T> Queue.enqueue(item: T): void {
   if (self.head + self.len == self.cap) {
     if (self.head > 0) {
       // Compact: shift live elements to the front of the buffer
-      mutable i: int = 0;
+      mut i: int = 0;
       while i < self.len {
         self.data[i] = self.data[self.head + i];
         i = i + 1;
@@ -30,10 +33,10 @@ fn<T> Queue.enqueue(item: T): void {
       // Buffer is full and already at front — grow it
       if (self.cap == 0) {
         self.cap = 8;
-        self.data = T*(mem.malloc(self.cap * 8));
+        self.data = mem.malloc(self.cap * 8) to T*;
       } else {
         self.cap = self.cap * 2;
-        self.data = T*(mem.realloc(self.data, self.cap * 8));
+        self.data = mem.realloc(self.data, self.cap * 8) to T*;
       }
     }
   }
@@ -44,8 +47,7 @@ fn<T> Queue.enqueue(item: T): void {
 
 fn<T> Queue.dequeue(): T {
   if (self.len == 0) {
-    // Trap: dequeue on empty queue
-    mem.free(T*(0));
+    fail("Queue.dequeue: dequeue on empty queue");
   }
 
   immutable item: T = self.data[self.head];
@@ -56,8 +58,7 @@ fn<T> Queue.dequeue(): T {
 
 fn<T> Queue.peek(): T {
   if (self.len == 0) {
-    // Trap: peek on empty queue
-    mem.free(T*(0));
+    fail("Queue.peek: peek on empty queue");
   }
 
   return self.data[self.head];

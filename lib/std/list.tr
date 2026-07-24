@@ -1,4 +1,13 @@
-import mem
+// list.tr — List<T>: a dynamically-growing array.
+// Usage:
+//   import list;
+//   mut l: List<int> = List { data: null, len: 0, cap: 0 };
+//   l.push(1);
+//   l.push(2);
+//   mut x: int = l.pop();   // 2
+//   mut n: int = l.length(); // 1
+
+import mem;
 
 struct List<T> {
   data: T*,
@@ -13,28 +22,26 @@ fn<T> List.push(item: T): void {
     } else {
       self.cap = self.cap * 2;
     }
-    
+
     // In Type Erasure, all T are 64 bits (pointers, int, double)
     immutable byteSize: int = self.cap * 8;
-    
-    if (self.data == T*(0)) {
-      self.data = T*(mem.malloc(byteSize));
+
+    if (self.data == null) {
+      self.data = mem.malloc(byteSize) to T*;
     } else {
-      self.data = T*(mem.realloc(self.data, byteSize));
+      self.data = mem.realloc(self.data, byteSize) to T*;
     }
   }
-  
+
   self.data[self.len] = item;
   self.len = self.len + 1;
 }
 
 fn<T> List.pop(): T {
   if (self.len == 0) {
-    // Basic trap if pop on empty list
-    // Ideally we would throw an exception
-    mem.free(T*(0));
+    fail("List.pop: pop on empty list");
   }
-  
+
   self.len = self.len - 1;
   return self.data[self.len];
 }

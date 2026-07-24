@@ -1,12 +1,15 @@
 // Stack<T> — LIFO (Last In, First Out) collection.
-// Usage: Stack<int> s = Stack<int>()  s.push(1)  s.pop()  s.peek()  s.length()
+// Usage:
+//   import stack;
+//   mut s: Stack<int> = Stack { data: null, len: 0, cap: 0 };
+//   s.push(1)  s.pop()  s.peek()  s.length()
 
-import mem
+import mem;
 
 struct Stack<T> {
-  T* data,
-  int len,
-  int cap
+  data: T*,
+  len: int,
+  cap: int
 }
 
 fn<T> Stack.push(item: T): void {
@@ -20,10 +23,10 @@ fn<T> Stack.push(item: T): void {
     // Type Erasure: all T are 64-bit values (int, double, pointers)
     immutable byteSize: int = self.cap * 8;
 
-    if (self.data == T*(0)) {
-      self.data = T*(mem.malloc(byteSize));
+    if (self.data == null) {
+      self.data = mem.malloc(byteSize) to T*;
     } else {
-      self.data = T*(mem.realloc(self.data, byteSize));
+      self.data = mem.realloc(self.data, byteSize) to T*;
     }
   }
 
@@ -33,8 +36,7 @@ fn<T> Stack.push(item: T): void {
 
 fn<T> Stack.pop(): T {
   if (self.len == 0) {
-    // Trap: pop on empty stack (null deref to signal error)
-    mem.free(T*(0));
+    fail("Stack.pop: pop on empty stack");
   }
 
   self.len = self.len - 1;
@@ -43,8 +45,7 @@ fn<T> Stack.pop(): T {
 
 fn<T> Stack.peek(): T {
   if (self.len == 0) {
-    // Trap: peek on empty stack
-    mem.free(T*(0));
+    fail("Stack.peek: peek on empty stack");
   }
 
   return self.data[self.len - 1];

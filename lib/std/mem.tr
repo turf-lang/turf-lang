@@ -13,19 +13,29 @@
 //   import mem;
 //   mut buf: void* = mem.alloc(1024);
 //   mem.free(buf);
+//
+// NOTE: parameters are named `p`, not `ptr` -- `ptr` is this language's own
+// reserved type keyword (the opaque-pointer type), so using it as a
+// parameter name fails to parse ("Expected a parameter name in extern
+// function '...'"). Discovered because that parse failure, when it happens
+// inside an imported module specifically, used to crash the whole compiler
+// with an unhandled C++ iostream exception instead of a clean diagnostic --
+// see ParseFile()'s error-recovery fix in src/Parser.cpp for the compiler-
+// side half of this fix; this file is the "don't actually trigger it"
+// stdlib-side half.
 
 // ─── C allocator bindings ─────────────────────────────────────────────────────
 
 extern fn malloc(size: int): void*;
 extern fn calloc(count: int, size: int): void*;
-extern fn realloc(ptr: void*, new_size: int): void*;
-extern fn free(ptr: void*): void;
+extern fn realloc(p: void*, new_size: int): void*;
+extern fn free(p: void*): void;
 
 // ─── Memory primitive bindings ────────────────────────────────────────────────
 
 extern fn memcpy(dst: void*, src: void*, n: int): void*;
 extern fn memmove(dst: void*, src: void*, n: int): void*;
-extern fn memset(ptr: void*, val: int, n: int): void*;
+extern fn memset(p: void*, val: int, n: int): void*;
 extern fn memcmp(a: void*, b: void*, n: int): int;
 
 // ─── Turf-level safe helpers ──────────────────────────────────────────────────
@@ -48,9 +58,9 @@ fn alloc_zeroed(count: int, elem_size: int): void* {
     return result;
 }
 
-// grow: reallocate `ptr` to `new_size` bytes. Aborts on OOM.
-fn grow(ptr: void*, new_size: int): void* {
-    mut result: void* = realloc(ptr, new_size);
+// grow: reallocate `p` to `new_size` bytes. Aborts on OOM.
+fn grow(p: void*, new_size: int): void* {
+    mut result: void* = realloc(p, new_size);
     if result == null {
         fail("mem.grow: out of memory");
     }
@@ -64,7 +74,7 @@ fn dup(src: void*, n: int): void* {
     return dst;
 }
 
-// zero: write `n` zero bytes starting at `ptr`.
-fn zero(ptr: void*, n: int): void {
-    memset(ptr, 0, n);
+// zero: write `n` zero bytes starting at `p`.
+fn zero(p: void*, n: int): void {
+    memset(p, 0, n);
 }
