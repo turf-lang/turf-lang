@@ -327,6 +327,8 @@ void DefiniteAssignmentPass::runOnCFG(CFG &Cfg,
         [&](SourceLocation Loc, const VariableSymbol *Sym) {
           if (AllBodyDeclared.count(Sym) && !cur.count(Sym)) {
             DefiniteAssignmentError err(Loc, Sym->Name);
+            err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col},
+                            "declared here");
             err.raise();
           }
         },
