@@ -676,7 +676,19 @@ public:
   ExprAST *getBodyMut() const { return Body.get(); }
   const ExprAST *getBody() const { return Body.get(); }
   const std::vector<ParamDecl> &getParams() const { return Params; }
+  /// Mutable access used only by Resolver::visitFuncDef() to rewrite a
+  /// parameter's NamedType("T") into a real TurfGenericParamType("T") when
+  /// "T" names one of this function's own TypeParams -- ParseType() has no
+  /// way to know that at parse time (see substituteTypeParams()'s doc
+  /// comment in Resolver.cpp). Codegen and TypeChecker read Params directly
+  /// from this same shared AST node, so mutating it here is what makes the
+  /// substitution visible to every later pass without each one having to
+  /// redo the same TypeParams lookup independently.
+  std::vector<ParamDecl> &getParamsMut() { return Params; }
   const std::vector<std::string> &getTypeParams() const { return TypeParams; }
+  /// Mutable return-type setter, used alongside getParamsMut() for the same
+  /// generic-parameter substitution.
+  void setReturnType(TurfTypePtr T) { ReturnType = std::move(T); }
 
   const std::string &getIntrinsicName() const { return IntrinsicName; }
 
@@ -881,6 +893,10 @@ public:
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
   const std::vector<StructField> &getFields() const { return Fields; }
+  /// Mutable access used only by Resolver::visitStructDecl() to rewrite a
+  /// field's NamedType("T") into a real TurfGenericParamType("T") -- see the
+  /// identical rationale on FuncDefExprAST::getParamsMut().
+  std::vector<StructField> &getFieldsMut() { return Fields; }
   const std::vector<std::string> &getTypeParams() const { return TypeParams; }
 
   llvm::Value *codegen() override;

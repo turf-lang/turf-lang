@@ -25,6 +25,8 @@
 #include "Resolver.h"
 #include "SymbolTable.h"
 
+#include <algorithm> // std::find
+
 #include "AST.h"
 #include "Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
 #include "Errors.h"          // ReferenceError, DuplicateDeclarationError
@@ -66,6 +68,71 @@ static SourceLocation toSourceLocation(ResolverSourceLocation R) {
   return {R.Line, R.Col};
 }
 
+/**
+ * @brief Rewrite a parsed type so any NamedType naming one of @p TypeParams
+ *        becomes a real TurfGenericParamType, recursively through pointer,
+ *        array, and generic-argument wrapping.
+ *
+ * ParseType() has no way to know at parse time that a bare identifier like
+ * `T` in `x: T` names the enclosing function's own generic type parameter
+ * rather than a struct -- it always emits a plain NamedType("T"). That
+ * ambiguity is harmless for name *validation* once validateNamedType() is
+ * told about the enclosing TypeParams list, but it is NOT what
+ * typesCompatible()'s type-erasure fast path (Types.cpp) checks for: that
+ * path dynamic_casts specifically for TurfGenericParamType. Left
+ * unsubstituted, a signature like `fn<T> identity(x: T): T` type-checked
+ * its own body fine, but calling it (e.g. `identity(42)`) failed overload
+ * resolution with "No overload of 'identity' matches argument types (int)",
+ * because typesCompatible(int, NamedType("T")) has no idea NamedType("T")
+ * is supposed to mean "any type". This substitution is applied once, when
+ * the signature is captured into ResolverFunctionSymbol (buildFunctionSymbol
+ * below), so every downstream consumer -- overload resolution here, and
+ * later TypeChecker/Codegen, which both trust ResolvedCandidates/
+ * ResolvedCallTarget rather than re-deriving the signature -- sees a real
+ * TurfGenericParamType and the existing type-erasure handling just works.
+ *
+ * Non-generic functions (empty TypeParams) and non-matching names return
+ * @p Ty unchanged (structurally, the same shared_ptr).
+ */
+static TurfTypePtr substituteTypeParams(const TurfTypePtr &Ty,
+                                        const std::vector<std::string> &TypeParams) {
+  if (!Ty || TypeParams.empty())
+    return Ty;
+
+  if (const auto *NT = dynamic_cast<const NamedType *>(Ty.get())) {
+    if (std::find(TypeParams.begin(), TypeParams.end(), NT->getName()) !=
+        TypeParams.end())
+      return std::make_shared<TurfGenericParamType>(NT->getName());
+    return Ty;
+  }
+  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty.get())) {
+    TurfTypePtr NewPointee = substituteTypeParams(PT->getPointee(), TypeParams);
+    return NewPointee == PT->getPointee()
+              ? Ty
+              : std::make_shared<TurfPointerType>(NewPointee);
+  }
+  if (const auto *AT = dynamic_cast<const ArrayType *>(Ty.get())) {
+    TurfTypePtr NewElem =
+        substituteTypeParams(AT->getElementTypePtr(), TypeParams);
+    return NewElem == AT->getElementTypePtr()
+              ? Ty
+              : makeArrayType(NewElem, AT->getSize());
+  }
+  if (const auto *GT = dynamic_cast<const GenericType *>(Ty.get())) {
+    std::vector<TurfTypePtr> NewArgs;
+    bool Changed = false;
+    for (const auto &Arg : GT->getTypeArgs()) {
+      TurfTypePtr NewArg = substituteTypeParams(Arg, TypeParams);
+      Changed |= (NewArg != Arg);
+      NewArgs.push_back(std::move(NewArg));
+    }
+    return Changed ? std::make_shared<GenericType>(GT->getBaseName(),
+                                                    std::move(NewArgs))
+                   : Ty;
+  }
+  return Ty;
+}
+
 ResolverFunctionSymbol
 Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
                               const std::string &ModuleName) const {
@@ -73,10 +140,12 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   Sym.BaseName = Node.getName();
   Sym.SourceModule = ModuleName;
   Sym.Params.reserve(Node.getParams().size());
+  const auto &TypeParams = Node.getTypeParams();
   for (const auto &Param : Node.getParams()) {
-    Sym.Params.push_back({Param.Name, Param.Type});
+    Sym.Params.push_back(
+        {Param.Name, substituteTypeParams(Param.Type, TypeParams)});
   }
-  Sym.ReturnType = Node.getReturnTypePtr();
+  Sym.ReturnType = substituteTypeParams(Node.getReturnTypePtr(), TypeParams);
   ResolverSourceLocation DeclLoc;
   DeclLoc.Line = Node.getLoc().Line;
   DeclLoc.Col = Node.getLoc().Col;
@@ -136,6 +205,7 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
     Sym.SourceModule = ""; // extern fns are in the global (file) namespace
     Sym.ReturnType = Extern->getReturnType();
     Sym.IsIntrinsic = false;
+    Sym.IsExtern    = true; // see IsExtern's doc comment in ResolverSymbolTable.h
     Sym.IsVarArg    = Extern->isVarArg(); // propagate '...' to arity check
     for (const auto &[PName, PType] : Extern->getParams())
       Sym.Params.push_back({PName, PType});
@@ -167,6 +237,7 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
       Sym.SourceModule = ModuleName;
       Sym.ReturnType = Extern->getReturnType();
       Sym.IsIntrinsic = false;
+      Sym.IsExtern = true; // see IsExtern's doc comment in ResolverSymbolTable.h
       Sym.IsVarArg = Extern->isVarArg();
       for (const auto &[PName, PType] : Extern->getParams())
         Sym.Params.push_back({PName, PType});
@@ -370,6 +441,46 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
     return;
   }
 
+  // Rewrite any parameter/return NamedType("T") that names one of this
+  // function's own TypeParams into a real TurfGenericParamType("T") --
+  // ParseType() always parses a bare identifier as NamedType regardless of
+  // whether it is a generic parameter (see substituteTypeParams()'s doc
+  // comment above). This mutates the shared AST node in place, BEFORE
+  // TypeChecker or Codegen ever look at Params/ReturnType, so both later
+  // passes see a real TurfGenericParamType uniformly -- Codegen in
+  // particular erases TurfGenericParamType to void* (getLLVMType()), but
+  // was previously building a bogus empty opaque LLVM struct named "T" for
+  // the un-substituted NamedType("T"), corrupting any function actually
+  // exercising a bare generic-typed parameter (confirmed via
+  // `fn<T> identity(x: T): T` crashing the LLVM backend with a malformed
+  // fptosi during instruction selection).
+  const auto &TypeParams = Node.getTypeParams();
+  if (!TypeParams.empty()) {
+    for (auto &Param : Node.getParamsMut())
+      Param.Type = substituteTypeParams(Param.Type, TypeParams);
+    Node.setReturnType(substituteTypeParams(Node.getReturnTypePtr(), TypeParams));
+  }
+
+  // Validate every parameter type and the return type name a real primitive
+  // or a struct/enum registered in Pass 1 -- see validateNamedType()'s doc
+  // comment for the gap this closes. This also validates the implicit
+  // `self` parameter of a struct method (ParseFuncDef builds it as
+  // TurfPointerType(NamedType(StructName))), so a genuinely misspelled
+  // struct name in a method declaration (`fn Usre.grow()`) is caught here --
+  // that specific check used to live in the Parser as an eager
+  // GlobalSymbolTable lookup, but had to be made lazy to support struct
+  // methods declared before their struct (see ParseFuncDef's comment); this
+  // is where that validation now correctly belongs instead. (By this point
+  // the substitution above has already turned any of this function's own
+  // TypeParams into TurfGenericParamType, so the TypeParams argument here is
+  // now mostly a defense-in-depth no-op for this call site -- but is kept
+  // since validateNamedType() is shared with visitStructDecl, where it is
+  // not.)
+  for (const auto &Param : Node.getParams())
+    validateNamedType(Param.Type, Node.getLoc(), Node.getTypeParams());
+  validateNamedType(Node.getReturnTypePtr(), Node.getLoc(),
+                    Node.getTypeParams());
+
   ++FunctionNestingDepth_;
 
   // Each function body gets its own scope; parameters are visible inside it.
@@ -556,17 +667,39 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
   //
   // We do, however, mark the base node with its resolved module name so
   // that the ASTPrinter can show a proper badge (Issue #5 completeness).
+  //
+  // IMPORTANT — variable shadowing: a locally-declared variable of the same
+  // spelling as a module ALWAYS takes priority over the module, exactly like
+  // ordinary lexical scoping everywhere else in the language. This is not a
+  // hypothetical: `io` is auto-imported into EVERY Turf program via
+  // lib/std/prelude.tr, so a variable literally named `io` used to always be
+  // misread as the io module — `mut io: Thing = ...; io.show();` raised
+  // "Unknown function 'io.show'" instead of calling Thing's struct method,
+  // because the module check ran before any check for an actual declared
+  // variable of that name. ExistingVar is looked up ONCE here and reused
+  // below (in the arity-check gate) so both places agree on the same
+  // variable-wins decision instead of independently re-deriving it.
   auto *BaseVar = dynamic_cast<VariableExprAST *>(
       const_cast<ExprAST *>(Node.getBase()));
+  std::shared_ptr<VariableSymbol> ExistingVar;
+  bool BaseIsModule = false;
   if (BaseVar) {
-    if (SymTable_.hasModule(BaseVar->getName())) {
+    ExistingVar = SymTable_.lookupVariable(BaseVar->getName());
+    BaseIsModule = !ExistingVar && SymTable_.hasModule(BaseVar->getName());
+
+    if (ExistingVar) {
+      // Base is a declared variable — resolve it directly (equivalent to
+      // what visitVariable() would do, without re-running its lookup).
+      BaseVar->ResolvedSymbol = ExistingVar;
+    } else if (BaseIsModule) {
       // Base is a module qualifier — annotate it and skip variable resolution.
       BaseVar->ResolvedModuleName = BaseVar->getName();
     } else if (SymTable_.isKnownStruct(BaseVar->getName())) {
       // Base is a struct type name (static method call)
       BaseVar->IsStructName = true;
     } else {
-      // Base is a plain variable — resolve normally.
+      // Base is neither a declared variable, a module, nor a struct name —
+      // resolve normally so visitVariable() raises the proper ReferenceError.
       visitChild(Node.getBase());
     }
   } else {
@@ -582,7 +715,12 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
   // and verify that at least one overload accepts the supplied argument count.
   // This mirrors the arity check in visitFuncCall — all done from symbol table
   // data, no hardcoded maps.
-  if (BaseVar && SymTable_.hasModule(BaseVar->getName())) {
+  //
+  // Uses BaseIsModule (computed above, variable-priority-aware) rather than
+  // re-checking SymTable_.hasModule() directly — otherwise a variable that
+  // shadows a module name would correctly resolve as a variable above, but
+  // still incorrectly trigger a module-only arity check down here.
+  if (BaseIsModule) {
     const std::string &ModuleName = BaseVar->getName();
     const std::string &MethodName = Node.getMethod();
     const int ArgCount = static_cast<int>(Node.getArgs().size());
@@ -683,45 +821,103 @@ void Resolver::visitEnumAccess(EnumAccessExprAST &Node) {
   }
 }
 
-void Resolver::visitStructDecl(StructDeclExprAST &Node) {
-  // Pass 1 (hoistTopLevel) already registered this struct's name.
-  // In Pass 2 (here) we perform lightweight name-only validation of field
-  // types: any NamedType reference (including Node* pointer-to-named-type)
-  // must refer to either a known primitive or a struct registered in Pass 1.
-  //
-  // Type-level validation (field types, initialization correctness) is the
-  // TypeChecker's responsibility — the Resolver only checks names.
+/**
+ * @brief Validate that @p Ty (once pointer- and array-unwrapped) either
+ *        names a known primitive or refers to a struct/enum registered in
+ *        Pass 1 hoisting.
+ *
+ * Before this helper existed, this exact validation lived ONLY inline inside
+ * visitStructDecl(), checking struct field types alone. That left a real gap:
+ * an unknown/misspelled struct name in a function parameter or return type
+ * compiled with ZERO diagnostics anywhere in the compiler --
+ * `fn f(x: NoSuchStruct): void {}` was confirmed to compile silently and
+ * produce a bogus empty opaque LLVM struct type for "NoSuchStruct". This
+ * helper is now shared by visitStructDecl, visitFuncDef, and
+ * visitExternFuncDecl so every type-reference position gets the same
+ * validation and the same Damerau-Levenshtein "did you mean?" suggestions.
+ *
+ * Unwrapping: one level of pointer (e.g. `Node*` -> check "Node", matching
+ * how `self` and other struct-pointer parameters are spelled) and any number
+ * of array dimensions (e.g. `User[5]` -> check "User"; the original
+ * struct-field-only version did not handle arrays at all).
+ *
+ * Type-level validation beyond "does this name exist" (field/parameter type
+ * correctness, initializer compatibility, etc.) remains the TypeChecker's
+ * responsibility -- the Resolver only checks names, consistent with its role
+ * as the naming/scoping pass that runs before type inference.
+ *
+ * @param Ty         The parsed type to validate. No-op if null.
+ * @param Loc        Source location to attach to any raised diagnostic.
+ * @param TypeParams Names declared by the enclosing `fn<...>`/`struct<...>`
+ *                   that are exempt from the "known struct/enum" check --
+ *                   see the header doc comment for why this is necessary
+ *                   (ParseType() always emits a plain NamedType for a bare
+ *                   identifier, even when that identifier is a generic type
+ *                   parameter rather than a struct name).
+ */
+void Resolver::validateNamedType(
+    const TurfTypePtr &Ty, SourceLocation Loc,
+    const std::vector<std::string> &TypeParams) const {
+  if (!Ty)
+    return;
 
   // The set of names that are always valid without being a declared struct.
   static const std::unordered_set<std::string> KnownPrimitives = {
-      "int", "double", "bool", "string", "void", "null"};
+      "int", "double", "bool", "string", "void", "null", "ptr", "void*"};
 
-  for (const auto &Field : Node.getFields()) {
-    const TurfType *FT = Field.Type.get();
-    if (!FT)
-      continue;
+  const TurfType *BaseType = Ty.get();
 
-    // Unwrap one level of pointer (e.g. Node* → check "Node")
-    const TurfType *BaseType = FT;
-    if (const auto *PT = dynamic_cast<const TurfPointerType *>(FT))
-      BaseType = PT->getPointee().get();
+  // Unwrap one level of pointer (e.g. Node* -> check "Node").
+  if (const auto *PT = dynamic_cast<const TurfPointerType *>(BaseType))
+    BaseType = PT->getPointee().get();
 
-    // Only validate NamedType references — primitives have their own classes
-    // (IntType, DoubleType, etc.) and never reach here as NamedType.
-    if (const auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
-      const std::string &TypeName = NT->getName();
-      if (!KnownPrimitives.count(TypeName) &&
-          !SymTable_.isKnownStruct(TypeName) &&
-          !SymTable_.isEnumName(TypeName)) {
-        // Unknown named type in a struct field — emit an error with
-        // Damerau-Levenshtein suggestions from the registered struct names.
-        RankedSuggestions Suggestions;
-        Suggestions.Local = SuggestionIndex::suggestVisible(
-            TypeName, SymTable_.getAllStructNames());
-        UnknownTypeError(Node.getLoc(), TypeName, Suggestions).raise();
-      }
+  // Unwrap any number of array dimensions (e.g. User[5][2] -> check "User").
+  while (isArrayType(BaseType))
+    BaseType = getArrayElementType(BaseType);
+
+  // Only validate NamedType references — primitives have their own classes
+  // (IntType, DoubleType, etc.) and never reach here as NamedType. A true
+  // TurfGenericParamType instance is a different class entirely and is
+  // correctly never matched here either -- but ParseType() never actually
+  // produces one for a type ANNOTATION (only GlobalSymbolTable's separate,
+  // Codegen-facing registration does), so the caller-supplied TypeParams
+  // list below is what actually exempts `T` in `fn<T> f(x: T)`.
+  if (const auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
+    const std::string &TypeName = NT->getName();
+    bool IsOwnTypeParam =
+        std::find(TypeParams.begin(), TypeParams.end(), TypeName) !=
+        TypeParams.end();
+    if (!IsOwnTypeParam && !KnownPrimitives.count(TypeName) &&
+        !SymTable_.isKnownStruct(TypeName) &&
+        !SymTable_.isEnumName(TypeName)) {
+      RankedSuggestions Suggestions;
+      Suggestions.Local =
+          SuggestionIndex::suggestVisible(TypeName, SymTable_.getAllStructNames());
+      UnknownTypeError(Loc, TypeName, Suggestions).raise();
     }
   }
+}
+
+void Resolver::visitStructDecl(StructDeclExprAST &Node) {
+  // Pass 1 (hoistTopLevel) already registered this struct's name.
+
+  // Rewrite any field NamedType("T") that names one of this struct's own
+  // TypeParams into a real TurfGenericParamType("T") -- same rationale and
+  // same mutate-the-shared-AST-node-in-place approach as visitFuncDef(); see
+  // substituteTypeParams()'s doc comment. Most generic struct fields in
+  // practice are pointers (e.g. `data: T*` in lib/std/list.tr), which were
+  // already unaffected by this gap because TurfPointerType lowers to an
+  // opaque pointer regardless of what it points to -- but a bare `val: T`
+  // field would hit the same "bogus opaque struct named T" bug fixed here.
+  const auto &TypeParams = Node.getTypeParams();
+  if (!TypeParams.empty()) {
+    for (auto &Field : Node.getFieldsMut())
+      Field.Type = substituteTypeParams(Field.Type, TypeParams);
+  }
+
+  // In Pass 2 (here) we validate every field's type via validateNamedType().
+  for (const auto &Field : Node.getFields())
+    validateNamedType(Field.Type, Node.getLoc(), Node.getTypeParams());
 }
 
 void Resolver::visitStructInit(StructInitExprAST &Node) {
@@ -770,8 +966,14 @@ void Resolver::visitModuleImport(ModuleImportExprAST &Node) {
 }
 
 // ExternFuncDeclExprAST: hoistTopLevel already registered the symbol in Pass 1.
-// Nothing left to resolve in Pass 2 (no body, no variable references).
+// The only work left for Pass 2 is validating that the parameter and return
+// type names are real -- see validateNamedType()'s doc comment. This used to
+// be a complete no-op, meaning an extern fn parameter or return type
+// referencing an unknown struct name was never checked anywhere in the
+// compiler; ordinary `fn` definitions had the same gap until visitFuncDef()
+// was updated alongside this.
 void Resolver::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
-  // No-op: the signature was registered in hoistTopLevel().
-  (void)Node;
+  for (const auto &[ParamName, ParamType] : Node.getParams())
+    validateNamedType(ParamType, Node.getLoc());
+  validateNamedType(Node.getReturnType(), Node.getLoc());
 }

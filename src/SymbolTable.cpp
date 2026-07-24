@@ -137,17 +137,12 @@ Symbol *SymbolTable::LookupSymbol(const std::string &Name) {
   return nullptr;
 }
 
-Symbol *SymbolTable::LookupSymbolAnyScope(const std::string &Name) {
-  Symbol *Best = nullptr;
-  for (auto &Pair : AllSymbols) {
-    if (Pair.second.Name == Name) {
-      if (!Best || Pair.second.ScopeLevel > Best->ScopeLevel) {
-        Best = &Pair.second;
-      }
-    }
-  }
-  return Best;
-}
+// NOTE: LookupSymbolAnyScope(Name) -- a scan of every currently-live symbol
+// across ALL active scopes, preferring the deepest ScopeLevel on a name
+// collision -- used to live here. Removed after confirming via repo-wide
+// grep it had zero callers; LookupSymbol() (innermost-to-outermost scope
+// walk, stopping at the first match) is what every real caller actually
+// uses.
 
 Symbol *SymbolTable::LookupSymbolInCurrentScope(const std::string &Name) {
   if (ScopeStack.empty())
@@ -164,13 +159,9 @@ Symbol *SymbolTable::LookupSymbolInCurrentScope(const std::string &Name) {
   return nullptr;
 }
 
-Symbol *SymbolTable::GetSymbolByID(SymbolID ID) {
-  auto It = AllSymbols.find(ID);
-  if (It != AllSymbols.end()) {
-    return &It->second;
-  }
-  return nullptr;
-}
+// NOTE: GetSymbolByID(ID) -- a direct SymbolID -> Symbol* lookup -- used to
+// live here. Removed after confirming via repo-wide grep it had zero
+// callers.
 
 void SymbolTable::RegisterType(const std::string &Name, TurfTypePtr Type) {
   if (ScopeStack.empty())
@@ -188,17 +179,10 @@ TurfTypePtr SymbolTable::LookupType(const std::string &Name) const {
   return nullptr;
 }
 
-TurfTypePtr
-SymbolTable::LookupTypeInCurrentScope(const std::string &Name) const {
-  if (ScopeStack.empty())
-    return nullptr;
-  const Scope &CurrentScope = ScopeStack.back();
-  auto It = CurrentScope.Types.find(Name);
-  if (It != CurrentScope.Types.end()) {
-    return It->second;
-  }
-  return nullptr;
-}
+// NOTE: LookupTypeInCurrentScope(Name) -- a type lookup restricted to just
+// the innermost scope -- used to live here. Removed after confirming via
+// repo-wide grep it had zero callers; LookupType() (innermost-to-outermost
+// walk) is what every real caller actually uses.
 
 bool SymbolTable::IsSymbolInCurrentScope(const std::string &Name) const {
   if (ScopeStack.empty())
@@ -282,50 +266,13 @@ void SymbolTable::ResetToDepth(size_t TargetDepth) {
 // Phase 2: TurfModule implementation
 // ---------------------------------------------------------------------------
 
-const FunctionSymbol *TurfModule::lookupFunction(
-    const std::string &baseName,
-    const std::vector<TurfTypePtr> &argTypes) const {
-
-  auto it = Functions.find(baseName);
-  if (it == Functions.end())
-    return nullptr;
-
-  const auto &overloads = it->second;
-
-  // Pass 1: exact arity + exact type name match (preferred overload)
-  for (const auto &sym : overloads) {
-    if ((int)argTypes.size() != sym.Arity)
-      continue;
-    bool exact = true;
-    for (size_t i = 0; i < argTypes.size(); ++i) {
-      if (!argTypes[i] || !sym.ParamTypes[i])
-        continue;
-      if (argTypes[i]->getName() != sym.ParamTypes[i]->getName()) {
-        exact = false;
-        break;
-      }
-    }
-    if (exact)
-      return &sym;
-  }
-
-  // Pass 2: arity match + implicit numeric coercion (fallback)
-  for (const auto &sym : overloads) {
-    if ((int)argTypes.size() != sym.Arity)
-      continue;
-    bool compatible = true;
-    for (size_t i = 0; i < argTypes.size(); ++i) {
-      if (!typesCompatible(argTypes[i].get(), sym.ParamTypes[i].get())) {
-        compatible = false;
-        break;
-      }
-    }
-    if (compatible)
-      return &sym;
-  }
-
-  return nullptr; // no matching overload found
-}
+// NOTE: TurfModule::lookupFunction(baseName, argTypes) -- an arity +
+// exact-type-match + numeric-coercion overload resolver for a single module
+// -- used to live here. Removed after confirming via repo-wide grep it had
+// zero callers (its only caller, SymbolTable::resolveModuleFunction, was
+// itself dead and removed alongside it -- see the NOTE at
+// RegisterModuleFunction's declaration in SymbolTable.h for what Codegen
+// actually uses instead).
 
 std::vector<std::string> TurfModule::getFunctionNames() const {
   std::vector<std::string> Names;
@@ -350,27 +297,12 @@ void SymbolTable::RegisterModuleFunction(const std::string &moduleName,
   it->second->registerFunction(sym);
 }
 
-const FunctionSymbol *SymbolTable::resolveModuleFunction(
-    const std::string &moduleName,
-    const std::string &funcName,
-    const std::vector<TurfTypePtr> &argTypes) const {
-
-  auto modIt = Modules.find(moduleName);
-  if (modIt == Modules.end())
-    return nullptr;
-
-  return modIt->second->lookupFunction(funcName, argTypes);
-}
-
-bool SymbolTable::HasModule(const std::string &moduleName) const {
-  auto it = Modules.find(moduleName);
-  if (it == Modules.end())
-    return false;
-  // A module is "real" only when it has at least one registered function.
-  // This prevents the auto-created "main" stub from triggering module dispatch
-  // before any user functions are compiled.
-  return !it->second->Functions.empty();
-}
+// NOTE: resolveModuleFunction(moduleName, funcName, argTypes) and
+// HasModule(moduleName) used to live here too. Both were removed after
+// confirming via repo-wide grep they had zero callers -- see the NOTE at
+// RegisterModuleFunction's declaration in SymbolTable.h for the full
+// explanation (HasModule() in particular was removed as a direct
+// consequence of fixing a real bug in MethodCallExprAST::codegen()).
 
 std::vector<std::string> SymbolTable::GetModuleFunctionNames(
     const std::string &moduleName) const {
@@ -412,10 +344,6 @@ RankedSuggestions SymbolTable::GetRankedSuggestions(const std::string &Name) con
   return Result;
 }
 
-std::vector<SymbolID> SymbolTable::GetSymbolIDs() const {
-  std::vector<SymbolID> Result;
-  for (const auto &Pair : AllSymbols) {
-    Result.push_back(Pair.first);
-  }
-  return Result;
-}
+// NOTE: GetSymbolIDs() -- returned every currently-live SymbolID across all
+// active scopes -- used to live here. Removed after confirming via
+// repo-wide grep it had zero callers.

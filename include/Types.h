@@ -249,8 +249,24 @@ public:
   ArrayType(TurfTypePtr Elem, int Sz = -1)
       : ElementType(std::move(Elem)), Size(Sz) {}
 
+  /**
+   * @brief Human-readable name: "T[N]" for a concrete size, "T[]" for the
+   *        unsized/"any length" spelling (Size == -1, used for array
+   *        function parameters).
+   *
+   * Deliberately includes the size for concrete arrays -- it used to always
+   * render as "T[]" regardless of Size, which made int[5] and int[10]
+   * display, and (before typesCompatible() was fixed to special-case arrays)
+   * COMPARE, as "the same type". Audited every getName()-equality call site
+   * in the codebase before making this change; every one either doesn't
+   * involve arrays, or only relies on same-size arrays continuing to compare
+   * equal (which they still do), so this is a strict improvement with no
+   * behavioral loss.
+   */
   std::string getName() const override {
-    return ElementType->getName() + "[]";
+    if (Size < 0)
+      return ElementType->getName() + "[]";
+    return ElementType->getName() + "[" + std::to_string(Size) + "]";
   }
   std::string getMangledName() const override {
     return ElementType->getMangledName() + "_arr_" + std::to_string(Size);

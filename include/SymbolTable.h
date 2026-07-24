@@ -92,19 +92,16 @@ public:
     overloads.push_back(sym);
   }
 
-  /**
-   * @brief Find the best matching overload for the given argument types.
-   *
-   * Matching rules (in priority order):
-   *  1. Arity match required.
-   *  2. Exact type match wins.
-   *  3. Numeric implicit coercion (int<->double<->bool) allowed as fallback.
-   *
-   * @return Pointer to the matching FunctionSymbol, or nullptr if no match.
-   */
-  const FunctionSymbol *lookupFunction(
-      const std::string &baseName,
-      const std::vector<TurfTypePtr> &argTypes) const;
+  // NOTE: this class used to also have a lookupFunction(baseName, argTypes)
+  // overload-resolution method (arity + exact-type-match + numeric-coercion
+  // fallback). Removed after confirming via repo-wide grep it had zero
+  // callers -- its only caller, SymbolTable::resolveModuleFunction, was
+  // itself dead and removed alongside it. Codegen no longer resolves
+  // overloads itself: it reads ResolvedCallTarget, set by the
+  // Resolver/TypeChecker passes, directly (see the many "Codegen trusts the
+  // Resolver" comments throughout Codegen.cpp). This mirrors the identical
+  // cleanup already done to ResolverModule::lookupFunction in
+  // ResolverSymbolTable.h/.cpp.
 
   /// Return all base function names registered in this module (for suggestions)
   std::vector<std::string> getFunctionNames() const;
@@ -151,21 +148,25 @@ public:
                          SourceLocation DeclLoc, llvm::AllocaInst *Alloca);
 
   // Symbol lookup
+  //
+  // NOTE: LookupSymbolAnyScope(Name), GetSymbolByID(ID), and
+  // LookupTypeInCurrentScope(Name) used to also live here. Removed after
+  // confirming via repo-wide grep that all three had zero callers anywhere.
   Symbol *LookupSymbol(const std::string &Name);
-  Symbol *LookupSymbolAnyScope(const std::string &Name);
   Symbol *LookupSymbolInCurrentScope(const std::string &Name);
-  Symbol *GetSymbolByID(SymbolID ID);
 
   // Type registry
   void RegisterType(const std::string &Name, TurfTypePtr Type);
   TurfTypePtr LookupType(const std::string &Name) const;
-  TurfTypePtr LookupTypeInCurrentScope(const std::string &Name) const;
 
   // Diagnostics helpers
+  //
+  // NOTE: GetSymbolIDs() used to also live here (returned every currently-
+  // live SymbolID across all active scopes). Removed after confirming via
+  // repo-wide grep it had zero callers.
   bool IsSymbolInCurrentScope(const std::string &Name) const;
   Symbol *FindShadowedSymbol(const std::string &Name) const;
   std::vector<std::string> GetAllVisibleNames() const;
-  std::vector<SymbolID> GetSymbolIDs() const;
 
   // Control flow tracking
   void MarkEarlyExit();
@@ -189,28 +190,25 @@ public:
   void RegisterModuleFunction(const std::string &moduleName,
                                const FunctionSymbol &sym);
 
-  /**
-   * @brief Resolve a module-qualified call (e.g. io.printline(42)).
-   *
-   * Only the named module is searched — cross-namespace lookup is explicitly
-   * forbidden.  Returns nullptr when no overload matches.
-   */
-  const FunctionSymbol *resolveModuleFunction(
-      const std::string &moduleName,
-      const std::string &funcName,
-      const std::vector<TurfTypePtr> &argTypes) const;
+  // NOTE: this class used to also have a resolveModuleFunction(moduleName,
+  // funcName, argTypes) method (a single-module overload resolver). Removed
+  // after confirming via repo-wide grep it had zero callers -- Codegen no
+  // longer resolves module calls itself, it reads ResolvedCallTarget (set by
+  // the Resolver/TypeChecker passes) directly.
+  //
+  // HasModule() used to be called from MethodCallExprAST::codegen() to
+  // distinguish a module-qualified call from a struct method call -- but
+  // that check derived "is this a module call" from the raw base-variable
+  // NAME, which doesn't know about local variables at all: a variable
+  // sharing a name with an imported module (concretely `io`, auto-imported
+  // into every program via prelude.tr) was misread as the module, producing
+  // an out-of-bounds std::vector crash once the Resolver started correctly
+  // treating such a variable as a variable. The fix (see
+  // MethodCallExprAST::codegen()) was to check Var->ResolvedModuleName
+  // instead -- the Resolver's own verdict, which already knows about
+  // variable shadowing -- which removed HasModule()'s only remaining caller;
+  // it was removed too, once confirmed via grep.
 
-  /**
-   * @brief Return true if a module with the given name has been registered.
-   * Used by MethodCallExprAST::codegen() to distinguish module calls from
-   * struct method calls without scanning FuncParamTypes.
-   */
-  bool HasModule(const std::string &moduleName) const;
-
-  /**
-   * @brief Return all base function names registered under a module.
-   * Used to build Levenshtein-distance suggestions for typos like io.pritn().
-   */
   /**
    * @brief Return all base function names registered under a module.
    * Used to build Levenshtein-distance suggestions for typos like io.pritn().

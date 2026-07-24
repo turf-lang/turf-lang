@@ -38,53 +38,14 @@ void ResolverModule::registerFunction(const ResolverFunctionSymbol &Sym) {
   Overloads.push_back(Sym);
 }
 
-const ResolverFunctionSymbol *ResolverModule::lookupFunction(
-    const std::string &BaseName,
-    const std::vector<TurfTypePtr> &ArgTypes) const {
-
-  auto It = Functions.find(BaseName);
-  if (It == Functions.end())
-    return nullptr;
-
-  const auto &Overloads = It->second;
-  const int Arity = static_cast<int>(ArgTypes.size());
-
-  // Pass 1: exact arity + exact type name match
-  for (const auto &Sym : Overloads) {
-    if (Sym.arity() != Arity)
-      continue;
-    bool Exact = true;
-    auto PT = Sym.paramTypes();
-    for (int i = 0; i < Arity; ++i) {
-      if (!ArgTypes[i] || !PT[i])
-        continue;
-      if (ArgTypes[i]->getName() != PT[i]->getName()) {
-        Exact = false;
-        break;
-      }
-    }
-    if (Exact)
-      return &Sym;
-  }
-
-  // Pass 2: arity match + implicit numeric coercion
-  for (const auto &Sym : Overloads) {
-    if (Sym.arity() != Arity)
-      continue;
-    bool Compatible = true;
-    auto PT = Sym.paramTypes();
-    for (int i = 0; i < Arity; ++i) {
-      if (!typesCompatible(ArgTypes[i].get(), PT[i].get())) {
-        Compatible = false;
-        break;
-      }
-    }
-    if (Compatible)
-      return &Sym;
-  }
-
-  return nullptr;
-}
+// NOTE: ResolverModule::lookupFunction(BaseName, ArgTypes) -- an arity +
+// exact-type-match + numeric-coercion overload resolver for a single module
+// -- used to live here. Removed after confirming via repo-wide grep it had
+// zero callers (its only caller, ResolverSymbolTable::resolveModuleFunction,
+// was itself dead and removed alongside it). See ResolverSymbolTable.h's
+// comment at the registerFunction() declaration for what the Resolver
+// actually uses instead (findInModules() + inline arity/type narrowing in
+// Resolver::visitFuncCall/visitMethodCall).
 
 std::vector<std::string> ResolverModule::getFunctionNames() const {
   std::vector<std::string> Names;
@@ -184,17 +145,6 @@ void ResolverSymbolTable::registerModuleFunction(
   It->second->registerFunction(Sym);
 }
 
-const ResolverFunctionSymbol *ResolverSymbolTable::resolveModuleFunction(
-    const std::string &ModuleName,
-    const std::string &FuncName,
-    const std::vector<TurfTypePtr> &ArgTypes) const {
-
-  auto It = Modules_.find(ModuleName);
-  if (It == Modules_.end())
-    return nullptr;
-  return It->second->lookupFunction(FuncName, ArgTypes);
-}
-
 bool ResolverSymbolTable::hasModule(const std::string &ModuleName) const {
   auto It = Modules_.find(ModuleName);
   if (It == Modules_.end())
@@ -208,12 +158,6 @@ std::vector<std::string> ResolverSymbolTable::getModuleFunctionNames(
   if (It == Modules_.end())
     return {};
   return It->second->getFunctionNames();
-}
-
-const ResolverModule *
-ResolverSymbolTable::getModule(const std::string &ModuleName) const {
-  auto It = Modules_.find(ModuleName);
-  return It != Modules_.end() ? It->second.get() : nullptr;
 }
 
 // ─── Current-file function registry ──────────────────────────────────────────

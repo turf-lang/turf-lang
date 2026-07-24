@@ -195,6 +195,41 @@ private:
   ResolverFunctionSymbol buildFunctionSymbol(const FuncDefExprAST &Node,
                                              const std::string &ModuleName) const;
 
+  /**
+   * @brief Validate that a type reference (field, parameter, or return type)
+   *        names either a known primitive, a struct/enum registered in
+   *        Pass 1, or one of the enclosing declaration's own generic type
+   *        parameters, raising UnknownTypeError otherwise.
+   *
+   * Shared by visitStructDecl (field types), visitFuncDef (parameter and
+   * return types), and visitExternFuncDecl (parameter and return types) so
+   * all four positions get identical, complete validation instead of only
+   * struct fields being checked — see the doc comment on the .cpp definition
+   * for the concrete gap this closes (an unknown struct name in a function
+   * signature previously compiled with zero diagnostics).
+   *
+   * @param Ty         The parsed type to validate. No-op if null.
+   * @param Loc        Source location to attach to any raised diagnostic.
+   * @param TypeParams Names declared in the enclosing `fn<...>`/`struct<...>`
+   *                   parameter list (e.g. {"T"} for `fn<T> identity(x: T)`).
+   *                   ParseType() has no way to know at parse time that a
+   *                   bare identifier like `T` names a generic parameter
+   *                   rather than a struct, so it always produces a plain
+   *                   NamedType("T") -- never a TurfGenericParamType -- for
+   *                   type ANNOTATIONS (as opposed to the GlobalSymbolTable
+   *                   registration ParseFuncDef/ParseStructDecl perform for
+   *                   Codegen's benefit, which is a separate, LLVM-aware
+   *                   table this LLVM-free pass does not consult). Without
+   *                   this exemption list, every generic function or struct
+   *                   using its own type parameter as a field/parameter/
+   *                   return type (e.g. `fn<T> identity(x: T): T`) is
+   *                   incorrectly rejected as "Unknown type 'T'". Defaults to
+   *                   empty for call sites with no type parameters of their
+   *                   own (currently visitExternFuncDecl).
+   */
+  void validateNamedType(const TurfTypePtr &Ty, SourceLocation Loc,
+                         const std::vector<std::string> &TypeParams = {}) const;
+
   // ── Pass 1: Hoisting ───────────────────────────────────────────────────────
   // Walk only the top-level list, registering struct names and function
   // signatures.  No bodies are visited in this pass.

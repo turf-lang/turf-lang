@@ -127,6 +127,14 @@ struct ResolverFunctionSymbol {
   ResolverSourceLocation   DeclLoc;      ///< Location of the fn definition
   bool                     IsIntrinsic = false;
   bool                     IsVarArg    = false; ///< true for variadic extern fn (e.g. printf)
+  /// True for an `extern fn` declaration (FFI binding to a real C symbol).
+  /// Codegen's ExternFuncDeclExprAST::codegen() always registers the LLVM
+  /// function under its raw declared name (Name_, e.g. "free") for linking
+  /// purposes -- it is NEVER given a Turf-mangled name the way a regular
+  /// `fn`/module function is. mangledName() below checks this flag so it
+  /// returns that same raw name instead of computing a Turf-mangled one
+  /// that was never actually registered anywhere.
+  bool                     IsExtern    = false;
 
   /// Arity of this overload.
   /// For variadic functions, this is the number of *named* (declared) params.
@@ -148,8 +156,7 @@ struct ResolverFunctionSymbol {
     return S;
   }
 
-  /// Extract just the parameter types — used by overload resolution logic
-  /// and by ResolverModule::lookupFunction.
+  /// Extract just the parameter types — used by overload resolution logic.
   std::vector<TurfTypePtr> paramTypes() const {
     std::vector<TurfTypePtr> T;
     T.reserve(Params.size());
@@ -162,8 +169,23 @@ struct ResolverFunctionSymbol {
   ///   module="io",  base="printline", params=[int] → "turf_io_printline_int"
   ///   module="",    base="add",       params=[int,int] → "turf_add_int_int"
   ///   module="",    base="main",      params=[] → "main"
+  ///
+  /// An extern fn is different: it is never Turf-mangled at all, in any
+  /// module or arity/type combination -- see IsExtern's doc comment above.
+  /// Before this check existed, a module-qualified call to a re-exported
+  /// extern (e.g. `mem.free(buf)`, where lib/std/mem.tr declares
+  /// `extern fn free(p: void*): void;` directly, with no Turf-level wrapper)
+  /// computed "turf_mem_free_void_ptr" here, which was never registered as
+  /// an LLVM function anywhere -- Codegen only ever created "free". A
+  /// direct (non-module-qualified) call to the same extern happened to keep
+  /// working regardless, purely because FuncCallExprAST::codegen() has a
+  /// fallback that retries the plain, unmangled callee name when the
+  /// mangled lookup misses; MethodCallExprAST::codegen()'s module-call path
+  /// has no equivalent fallback and hit a hard "Internal error: LLVM
+  /// function ... not found" instead.
   std::string mangledName() const {
     if (BaseName == "main") return "main";
+    if (IsExtern) return BaseName;
     std::string S = "turf_";
     if (!SourceModule.empty()) S += SourceModule + "_";
     S += BaseName;
@@ -198,19 +220,14 @@ public:
    */
   void registerFunction(const ResolverFunctionSymbol &Sym);
 
-  /**
-   * @brief Look up a function overload by base name and argument types.
-   *
-   * Resolution rules (priority order):
-   *  1. Arity match is required.
-   *  2. Exact type name match wins.
-   *  3. Numeric implicit coercion (int↔double↔bool) allowed as fallback.
-   *
-   * @return Pointer to the matching symbol, or nullptr on no match.
-   */
-  const ResolverFunctionSymbol *lookupFunction(
-      const std::string &BaseName,
-      const std::vector<TurfTypePtr> &ArgTypes) const;
+  // NOTE: this class used to also have a lookupFunction(BaseName, ArgTypes)
+  // overload-resolution method (arity + exact-type-match + numeric-coercion
+  // fallback, mirroring TurfModule::lookupFunction in SymbolTable.h). It was
+  // removed after confirming via repo-wide grep that it had zero callers:
+  // the Resolver's actual module-function lookup path is
+  // ResolverSymbolTable::findInModules() followed by the arity/type
+  // narrowing already inline in Resolver::visitFuncCall/visitMethodCall, not
+  // a per-module lookup here.
 
   /// Return all registered base names (for suggestion / diagnostics).
   std::vector<std::string> getFunctionNames() const;
@@ -326,15 +343,15 @@ public:
   void registerModuleFunction(const std::string &ModuleName,
                                const ResolverFunctionSymbol &Sym);
 
-  /**
-   * @brief Resolve a module-qualified call (e.g. io.printline(42)).
-   * Only the named module is searched.
-   * @return Pointer to the matching symbol, or nullptr.
-   */
-  const ResolverFunctionSymbol *resolveModuleFunction(
-      const std::string &ModuleName,
-      const std::string &FuncName,
-      const std::vector<TurfTypePtr> &ArgTypes) const;
+  // NOTE: this class used to also have resolveModuleFunction(ModuleName,
+  // FuncName, ArgTypes) and getModule(ModuleName) methods for looking up a
+  // single named module directly. Both were removed after confirming via
+  // repo-wide grep that they had zero callers anywhere -- module-qualified
+  // calls (e.g. `io.printline(42)`) are resolved via findInModules() (which
+  // searches ALL modules and lets the caller filter by name, used by
+  // Resolver::visitFuncCall/visitMethodCall for their two-tier "current file
+  // vs imported module" diagnostics) rather than a direct single-module
+  // lookup.
 
   /**
    * @brief True if a module with the given name has at least one function.
@@ -346,12 +363,6 @@ public:
    */
   std::vector<std::string> getModuleFunctionNames(
       const std::string &ModuleName) const;
-
-  /**
-   * @brief Retrieve the ResolverModule object for @p ModuleName.
-   * Returns nullptr if not registered.
-   */
-  const ResolverModule *getModule(const std::string &ModuleName) const;
 
   // ── Current-file function registry ──────────────────────────────────────────
   // These track `fn` definitions in the file being compiled, separately from
