@@ -1,0 +1,45 @@
+// Regression test: lib/std/list.tr (List<T>), imported and exercised
+// end-to-end.
+//
+// This whole file used to be untestable due to a chain of bugs discovered
+// this session while rewriting list.tr/stack.tr/queue.tr to use current
+// syntax (see CODE_REVIEW_GAPS_2026-07.md gap #5) -- most severe: calling a
+// method on an instance of a struct declared in an IMPORTED module
+// silently compiled to nothing at all. TypeChecker::visitMethodCall()'s
+// struct-method lookup only ever checked
+// ResolverSymbolTable::lookupCurrentFileFunctions(), never the module
+// registry a cross-file struct method is actually hoisted into
+// (registerModuleFunction(), via Resolver::hoistModuleBody()) --
+// Node.ResolvedCallTarget was silently left null, and Codegen's
+// MethodCallExprAST::codegen() then silently returned nullptr with no
+// diagnostic. Confirmed via `--emit-llvm`: an entire sequence of
+// `l.push(...)`/`l.pop()`/`assert(...)` calls vanished COMPLETELY from the
+// generated `main()` function body -- not a crash, not a compile error,
+// just silently absent, while an unconditional trailing io.printline still
+// ran and made the test look like it passed. Every test in this file was
+// re-verified via `--emit-llvm` (not just "exit code 0") after the fix,
+// specifically because of how convincingly that failure mode fakes success.
+
+import list;
+
+fn main(): int {
+    mut l: List<int> = List { data: null, len: 0, cap: 0 };
+    l.push(10);
+    l.push(20);
+    l.push(30);
+    assert(l.length() == 3, "");
+    assert(l.pop() == 30, "");
+    assert(l.pop() == 20, "");
+    assert(l.length() == 1, "");
+
+    // Force growth past the initial capacity (8) to exercise the realloc path.
+    mut i: int = 0;
+    while i < 20 {
+        l.push(i);
+        i = i + 1;
+    }
+    assert(l.length() == 21, "");
+
+    io.printline("list ok");
+    return 0;
+}

@@ -1,0 +1,12 @@
+// Regression test: an unknown/misspelled struct type name used as a
+// function's return type must be rejected. See fail_unknown_type_param.tr
+// and Resolver.cpp's validateNamedType() for the full explanation -- this is
+// the same gap, just the return-type position instead of the parameter
+// position.
+
+fn makeThing(): NoSuchStruct2 {
+}
+
+fn main(): int {
+    return 0;
+}

@@ -1,0 +1,21 @@
+// Regression test: lib/std/stack.tr (Stack<T>), imported and exercised
+// end-to-end. See 06_stdlib_list.tr's doc comment for the cross-module
+// struct-method-resolution bug this (and the whole rewrite) was blocked on.
+
+import stack;
+
+fn main(): int {
+    mut s: Stack<int> = Stack { data: null, len: 0, cap: 0 };
+    s.push(1);
+    s.push(2);
+    s.push(3);
+    assert(s.length() == 3, "");
+    assert(s.peek() == 3, "");
+    assert(s.pop() == 3, "");
+    assert(s.pop() == 2, "");
+    assert(s.length() == 1, "");
+    assert(s.peek() == 1, "");
+
+    io.printline("stack ok");
+    return 0;
+}
