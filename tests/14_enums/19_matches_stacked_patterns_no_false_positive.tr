@@ -1,0 +1,51 @@
+// Regression test (was CODE_REVIEW_GAPS_2026-07.md gap #4, passing
+// counterpart): the duplicate-pattern check added to
+// TypeChecker::visitCompare() must NOT false-positive on legitimate
+// "stacking" -- multiple DIFFERENT patterns sharing one arm body
+// (`matches A: matches B: body done`) is not a duplicate, since A and B
+// are distinct variants/values, each appearing exactly once across the
+// whole compare block.
+
+enum Color { Red, Green, Blue, Yellow }
+
+fn classify(c: Color): string {
+    mut name: string = "";
+    compare c {
+        matches Color::Red:
+        matches Color::Yellow:
+            name = "warm";
+        done
+        matches Color::Green:
+        matches Color::Blue:
+            name = "cool";
+        done
+    }
+    return name;
+}
+
+fn main(): int {
+    assert(classify(Color::Red) == "warm", "");
+    assert(classify(Color::Yellow) == "warm", "");
+    assert(classify(Color::Green) == "cool", "");
+    assert(classify(Color::Blue) == "cool", "");
+
+    // Distinct int literal patterns (not duplicates) must also still work.
+    mut x: int = 2;
+    mut result: int = 0;
+    compare x {
+        matches 1:
+            result = 10;
+        done
+        matches 2:
+            result = 20;
+        done
+        matches 3:
+            result = 30;
+        done
+        otherwise:
+            result = -1;
+    }
+    assert(result == 20, "");
+
+    return 0;
+}
