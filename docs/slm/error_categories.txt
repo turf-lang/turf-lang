@@ -6,28 +6,37 @@ Choose the most specific category that matches, or GENERAL if none fit.
 ---
 
 TYPE_MISMATCH
-  A value of one type is assigned or passed where a different type is expected.
+  A value of one type is used where a different, incompatible type is
+  expected.
   Examples:
-    - Assigning a double to an int variable without int()
+    - Assigning a double to an int variable without `... to int`
     - Assigning a string to an int or double variable
     - Mixing incompatible types in an arithmetic expression
+    - Comparing two struct instances with == / !=
+    - Casting an out-of-range integer literal to an enum type
+    - A struct method call whose argument TYPES don't match its parameters
+      (not just the argument count)
 
 UNDECLARED_VARIABLE
-  A variable name is used but was never declared in scope.
+  A name is used but was never declared (or isn't visible) in this scope.
   Examples:
-    - Using a variable before declaring it with a type keyword
-    - Using a variable outside the block where it was declared
-    - Misspelling a variable name so it doesn't match any known variable
+    - Using a variable before declaring it with `mut`/`immut`
+    - Using a variable outside the block (or loop) where it was declared
+    - Misspelling a variable, function, or struct-method name
+    - Calling a method that doesn't exist on a struct
 
 CONTROL_FLOW
-  An error in the structure of if/else, while, for, break, or continue.
+  An error in the structure of if/elseif/else, while, for, break, continue,
+  or compare/matches.
   Examples:
     - Missing '..' or 'step' in a for loop
     - Using 'break' or 'continue' outside a loop
-    - Missing 'then' or '{' after an if condition
-    - Missing '{' after step expression in a for loop
+    - Missing '{' after an if/elseif/else/while condition
     - Using 'else if' (with space) instead of 'elseif'
     - Function that doesn't return on all code paths (MissingReturnError)
+    - Non-exhaustive enum `compare` (missing a variant and no `otherwise:`)
+    - Duplicate or misplaced `otherwise:` arm in a `compare` block
+    - Duplicate `matches` pattern in a `compare` block
 
 SYNTAX_ERROR
   A general structural or token-level parse error.
@@ -35,20 +44,21 @@ SYNTAX_ERROR
     - Unexpected token when starting an expression
     - Misspelled keyword recognized by the compiler (KeywordError)
     - Unterminated string literal
-    - Missing closing parenthesis or bracket
+    - Missing closing parenthesis, bracket, or brace
+    - Missing ':' between a name and its type, or ';' after a statement
 
 ARITHMETIC
-  An operator is used with incompatible numeric types or a math error occurs.
+  An operator is used with incompatible numeric types.
   Examples:
-    - Division or modulo by zero literal
-    - Using an unsupported operator on non-numeric types
+    - Using an unsupported/nonexistent operator
+    - Applying an arithmetic operator to incompatible types
 
 STRING_CONVERSION
   An illegal type conversion involving strings.
   Examples:
-    - Trying to add a string and a number using +
+    - Trying to add a string and a number using + (without `to string` first)
     - Passing a non-string to lengthof()
-    - Casting an unsupported type to string
+    - Casting an unsupported type `to string`
 
 ARRAY_ERROR
   An error during array declaration, access, or initialization.
@@ -56,28 +66,50 @@ ARRAY_ERROR
     - Array index out of bounds (compile-time literal check)
     - Array size mismatch with the initializer list
     - Using a non-integer index
-    - Array element type mismatch
+    - Array element type mismatch against the declared element type
 
 DECLARATION
-  A variable is declared a second time in the same scope.
+  A name is declared a second time where it shouldn't be, or an unknown
+  type name is referenced.
   Examples:
-    - Using a type keyword on a variable that already exists in scope
-    - Shadowing a variable from an outer scope (this is a warning)
+    - Redeclaring a variable (with `mut`/`immut`) that already exists in
+      this exact scope
+    - Shadowing a variable from an outer scope (this is a WARNING, not an
+      error)
+    - Duplicate struct field name, duplicate enum variant name, or
+      duplicate function parameter name
+    - Two different modules (or a file and an imported module) declaring a
+      same-named struct or enum -- these share one flat namespace
+    - Referencing an unknown/misspelled type name in a variable
+      declaration, struct field, function signature, or generic type
+      argument (e.g. `List<NoSuchType>`)
+    - Reassigning an `immut` variable, directly or through a mutating
+      struct method
 
 FUNCTION_SIGNATURE
   An error in a function definition, call, parameters, or return type.
   Examples:
-    - Wrong number of arguments in a function call
-    - Return type of function doesn't match declared return type
-    - Using a void function result as a value in an expression
+    - Wrong number of arguments in a function or struct-method call
+    - Return type of a function doesn't match its declared return type
+    - Using a void function's result as a value in an expression
 
 BUILTIN_FUNCTION
-  An error specific to a builtin function (print, printline, input, lengthof, typeof).
-  Also covers misspelled or unknown function names.
+  An error specific to a builtin/intrinsic function (print, printline,
+  input, lengthof, typeof, sizeof, assert). Also covers misspelled or
+  unknown function names generally.
   Examples:
     - Calling a function that doesn't exist: 'praintln', 'println', 'length'
-    - Passing wrong number of args to a builtin
-    - Unknown function name (not declared by user, not a builtin)
+    - Passing the wrong number of args to a builtin
+    - Unknown function name (not declared by the user, not a builtin)
+
+MEMORY_ERROR
+  Manual memory management misuse (via `import mem;`).
+  Examples:
+    - Using a pointer after mem.free() was called on it (use-after-free)
+    - Calling mem.free() twice on the same pointer (double-free)
+  These are detected by dataflow analysis where the compiler can prove the
+  bug statically -- not every use-after-free/double-free is caught (e.g.
+  ones that depend on runtime-only conditions).
 
 GENERAL
   Use this ONLY when none of the above categories apply.

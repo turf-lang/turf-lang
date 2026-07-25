@@ -1,0 +1,96 @@
+TURF STRUCTS (AND GENERICS -- struct/function type parameters share this
+file since almost all real generic usage in this language is via a generic
+struct like List<T>):
+
+DECLARATION:
+    struct Point {
+        x: int,
+        y: int
+    }
+
+  Fields are comma-separated `name: Type` pairs, same shape as a function
+  parameter. `void` is not a valid field type.
+
+CONSTRUCTION (a struct literal -- field names required, any order):
+    mut p: Point = Point { x: 1, y: 2 };
+    immut origin: Point = Point { y: 0, x: 0 };   // order doesn't matter
+
+FIELD ACCESS (read and write, via '.'):
+    p.x;                // read
+    p.x = 5;             // write
+    mut o: Outer = Outer { i: Inner { v: 5 } };
+    o.i.v;               // nested field access chains fine
+
+  Passing a struct BY VALUE to a function parameter (`fn f(p: Point): void`)
+  is supported and copies the struct.
+
+METHODS: declared OUTSIDE the struct body, qualified by struct name.
+The implicit receiver is `self` (a pointer to the instance):
+    fn Point.sum(): int {
+        return self.x + self.y;
+    }
+    p.sum();              // called via '.', same syntax as a field access
+
+  A method can mutate self and return it (as a pointer) to support
+  chaining -- this is the idiomatic way to write a fluent/builder-style API:
+    fn Counter.increment(): Counter* {
+        self.val = self.val + 1;
+        return self;
+    }
+    c.increment().increment();   // chained calls both mutate the same c
+
+GENERICS: `struct Box<T> { val: T }`, instantiated as `Box<int>`,
+`Box<string>`, etc. A generic FUNCTION works the same way:
+    fn<T> identity(x: T): T {
+        return x;
+    }
+  Type arguments are ALWAYS INFERRED from the call's argument types -- there
+  is NO explicit instantiation syntax like `identity<int>(5)` (that's a
+  parse error: Turf-Lang has no `<...>` after a function name at a call
+  site, only in a type ANNOTATION like `List<int>`).
+
+NAMESPACE: struct and enum names live in ONE flat namespace shared by the
+current file and every imported module -- unlike functions, they are NOT
+namespaced per module. This is why `List<int>` works without a `list.`
+prefix. The tradeoff: two different modules (or a file and an imported
+module) declaring a same-named struct is a compile-time error:
+  "A struct named 'Point' is already declared." -- rename one of them.
+Field names must also be unique WITHIN one struct:
+  "Struct 'Point' already has a field named 'x'."
+
+STRUCT METHOD CALLS ARE FULLY CHECKED (name, argument count, AND argument
+types -- not just count):
+  p.nonexistentMethod();
+    // ERROR: "'Point' has no method named 'nonexistentMethod'."
+  l.push(1, 2, 3);   // push takes exactly 1 argument besides self
+    // ERROR: "'List.push' was called with 3 arguments, but no overload
+    //         accepts that many."
+  l.push("hello");   // l: List<int>
+    // ERROR: "No overload of 'List.push' matches argument types (string)."
+
+STRUCTS DO NOT SUPPORT == / != :
+  if (a == b) { }   // a, b: Point
+    // ERROR: "Cannot compare struct values with '=='." Compare the fields
+    // you actually care about instead: `a.x == b.x && a.y == b.y`.
+
+IMMUTABILITY APPLIES THROUGH METHODS TOO:
+  immut c: Counter = Counter { val: 0 };
+  c.increment();   // increment() assigns to self.val internally
+    // ERROR: "Oops! You can't change the value of 'c' because it's
+    //         immutable." -- the SAME error as a direct `c.val = 1;`
+    //         would give, even though this is a method call, not a
+    //         direct assignment. A genuinely READ-ONLY method (a getter
+    //         that never assigns to a field) is still fine to call on an
+    //         immutable variable.
+
+COMMON MISTAKES:
+- Forgetting a field name in a struct literal, or misspelling one.
+- Declaring a method INSIDE the struct body (methods always go outside,
+  qualified as `fn StructName.methodName(...)`).
+- Trying `identity<int>(5)`-style explicit generic instantiation -- type
+  arguments are always inferred, never written at a call site.
+- Comparing two struct instances with == instead of comparing fields.
+- Assuming a same-named struct from a different module is a distinct type
+  -- struct names are global, so this is always a compile error, never a
+  silent shadow.
+- Calling a mutating method on an `immut` struct variable.

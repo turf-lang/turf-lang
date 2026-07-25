@@ -1,51 +1,72 @@
 TURF VARIABLE DECLARATION:
 
 SYNTAX:
-  type name = value
+  mut name: Type = value;      // reassignable
+  immut name: Type = value;    // write-once
 
   CORRECT EXAMPLES:
-    int x = 5
-    double pi = 3.14
-    bool flag = true
-    string greeting = "hello"
+    mut x: int = 5;
+    immut pi: double = 3.14;
+    mut flag: bool = true;
+    immut greeting: string = "hello";
 
   RULES:
-  - Type keyword is required on first use. No `var` or `let`.
-  - Initialization value is required at declaration time. `int x` alone is an error.
-  - Valid type keywords: int, double (or float), bool, string
-  - void may NOT be used as a variable type.
+  - Every declaration must start with `mut` or `immut` -- there is no bare
+    `Type name = value` form, no `var`/`let`/`const`/`auto`.
+  - The type comes AFTER the name, separated by a colon (`name: Type`), not
+    before it.
+  - An initializer value is required at declaration time. `mut x: int;`
+    alone (no value) is a syntax error.
+  - Valid type keywords: int, double (or float), bool, string, ptr, or a
+    declared struct/enum name.
+  - void may NOT be used as a variable's type.
+  - A trailing semicolon is required.
 
 REASSIGNMENT (after first declaration):
-  Do NOT repeat the type keyword when reassigning.
+  Do NOT repeat `mut`/`immut` or the type when reassigning.
 
   CORRECT:
-    int count = 0
-    count = 10        // correct reassignment — no type keyword
+    mut count: int = 0;
+    count = 10;        // correct reassignment -- no 'mut', no type
 
   INCORRECT:
-    int count = 0
-    int count = 10    // ERROR: variable 'count' already declared in this scope
+    mut count: int = 0;
+    mut count: int = 10;    // ERROR: "Wait a minute! You already created a
+                             // variable named 'count'."
+
+  Reassigning an `immut` variable at all (`count = 10;` where count was
+  declared `immut`) is also an error: "Oops! You can't change the value of
+  'count' because it's immutable." This includes indirectly, through a
+  struct method that mutates one of its own fields (`immut c: Counter =
+  ...; c.increment();` is rejected the same way if increment() assigns to
+  `self.val`).
 
 SHADOWING (warning, not error):
-  Declaring a variable with the same name in a nested scope produces a warning.
-  The inner variable hides the outer one inside the nested block.
+  Declaring a variable with the same name in a NESTED scope produces a
+  warning, not an error. The inner variable hides the outer one only
+  inside that nested block.
 
   Example:
-    int x = 1
+    mut x: int = 1;
     if true {
-        int x = 99    // Warning: shadows outer 'x'
-        printline(x)  // prints 99
+        mut x: int = 99;    // Warning: shadows outer 'x'
+        io.printline(x to string);  // prints 99
     }
-    printline(x)      // prints 1 (outer x unaffected)
+    io.printline(x to string);      // prints 1 (outer x unaffected)
 
 KEYWORD NAMES:
   You cannot use a reserved keyword as a variable name.
-  Reserved: if, then, else, elseif, while, for, in, step, fn,
-            return, break, continue, int, double, float, bool,
-            string, void, true, false, print, printline, input,
-            lengthof, typeof
+  Reserved: if, elseif, else, while, for, in, step, fn, return, break,
+            continue, int, double, float, bool, string, void, ptr, true,
+            false, null, mut, mutable, immut, immutable, to, give,
+            otherwise, struct, enum, self, sizeof, import, extern,
+            compare, matches, done.
 
 COMMON MISTAKES:
-- Forgetting the initial value: `int x` alone will not compile.
-- Using `var`, `let`, `const`, or `auto` — these do not exist in Turf.
-- Redeclaring with a type keyword when you only meant to reassign.
+- Omitting `mut`/`immut` entirely, or putting the type before the name
+  instead of after the colon.
+- Forgetting the initial value: `mut x: int;` alone will not compile.
+- Using `var`, `let`, `const`, or `auto` -- these do not exist in Turf.
+- Redeclaring the same name with `mut`/`immut` again in the SAME scope when
+  you only meant to reassign it.
+- Trying to reassign an `immut` variable, directly or through a method.

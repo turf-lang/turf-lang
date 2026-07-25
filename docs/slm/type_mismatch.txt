@@ -1,49 +1,72 @@
 TURF TYPE SYSTEM:
-- Primitive types: int, double, bool, string
-- Variable declarations require an explicit type:
-    int x = 5
-    double pi = 3.14
-    bool flag = true
-    string name = "hello"
+- Primitive types: int, double, bool, string, ptr, plus declared
+  struct/enum names and array/pointer types built from them.
+- Every declaration requires an explicit type after the name:
+    mut x: int = 5;
+    immut pi: double = 3.14;
+    mut flag: bool = true;
+    immut name: string = "hello";
 
-TYPE CASTING (explicit):
-- int("42")     converts string to int
-- int(3.14)     truncates double to int
-- double(10)    converts int to double
-- string(42)    converts int to string
-- string(3.14)  converts double to string
-- string(true)  converts bool to string ("true" or "false")
+TYPE CASTING (explicit, POSTFIX -- `expr to Type`, never `Type(expr)`):
+- "42" to int      converts string to int
+- 3.14 to int       truncates double to int
+- 10 to double       converts int to double
+- 42 to string       converts int to string
+- 3.14 to string     converts double to string
+- true to string     converts bool to string ("true" or "false")
+- 2 to Color         converts int to an enum type (only if 2 is a valid
+                     variant index -- a literal out of range is a
+                     compile-time error)
 
 IMPLICIT PROMOTION RULES:
-- bool -> int -> double promotion happens ONLY inside expressions.
-- Assignments require EXACT type match or explicit cast.
-- You CANNOT assign a double to an int variable without int().
-- You CANNOT assign an int to a string variable without string().
+- bool -> int -> double promotion happens ONLY inside expressions
+  (e.g. `x + y` where one is int and one is double).
+- Declarations and assignments require an EXACT type match or an explicit
+  `to` cast -- promotion does NOT apply to `mut x: int = someDouble;`.
+- You CANNOT assign a double to an int variable without `someDouble to int`.
+- You CANNOT assign an int to a string variable without `someInt to string`.
 
 FUNCTION PARAMETER/RETURN TYPES:
-- Parameters must match exactly: fn add(int a, int b) -> int
-- Return value must match declared return type.
-- Use explicit cast if types differ: return int(someDouble)
+- Parameters must match exactly: `fn add(a: int, b: int): int`.
+- Return value must match the declared return type.
+- Use an explicit cast if types differ: `return someDouble to int;`
 
 CORRECT EXAMPLES:
-  int x = 5
-  double y = 3.14
-  int z = int(3.14)
-  double w = double(x)
-  string s = string(42)
-  int a = x + 5
-  double b = x + y
+  mut x: int = 5;
+  immut y: double = 3.14;
+  mut z: int = 3.14 to int;
+  mut w: double = x to double;
+  mut s: string = 42 to string;
+  mut a: int = x + 5;
+  mut b: double = x + y;
 
 INCORRECT EXAMPLES:
-  int x = 3.14         // ERROR: cannot assign double to int without int()
-  string s = 42        // ERROR: cannot assign int to string without string()
-  int n = "hello"      // ERROR: cannot assign string to int
+  mut x: int = 3.14;
+    // ERROR: "Type mismatch! Cannot initialise 'int' variable 'x' with
+    //         value of type 'double'."
+  mut s: string = 42;
+    // ERROR: Cannot initialise 'string' variable 's' with value of type 'int'.
+  mut n: int = "hello";
+    // ERROR: Cannot initialise 'int' variable 'n' with value of type 'string'.
 
 FUNCTION EXAMPLE:
-  fn add(int a, int b) -> int {
-    return a + b
+  fn add(a: int, b: int): int {
+      return a + b;
   }
-  // Calling with wrong types:
-  add(1, 2.5)          // ERROR: argument 2 expects int, got double
+  // Calling with wrong argument types is caught before Codegen ever runs:
+  add(1, 2.5);            // ERROR: no overload of 'add' matches argument types
   // Fix:
-  add(1, int(2.5))     // OK
+  add(1, 2.5 to int);      // OK
+
+STRUCT-METHOD ARGUMENT TYPES ARE ALSO CHECKED:
+  A struct method call's argument types are checked against its declared
+  parameters too, not just its argument COUNT -- e.g. calling a
+  `List<int>`'s `push(item: T)` with a string is rejected: "No overload of
+  'List.push' matches argument types (string)."
+
+STRUCTS DON'T SUPPORT == / != :
+  mut a: Point = Point { x: 1, y: 1 };
+  mut b: Point = Point { x: 1, y: 1 };
+  if (a == b) { }
+    // ERROR: "Cannot compare struct values with '=='." Compare individual
+    // fields instead: `a.x == b.x && a.y == b.y`.

@@ -473,28 +473,76 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   // to produce. Small models "anchor" to example values in the prompt and copy
   // them verbatim, making any LLM-emitted probability meaningless. Instead we
   // compute confidence deterministically after parsing (see computeConfidence).
+  // VOICE + GROUNDING preamble: added alongside the docs/slm/*.txt accuracy
+  // pass (see those files' own history for the "docs described a completely
+  // different, out-of-date version of Turf-Lang" bug this all follows from).
+  // Two distinct problems, addressed separately:
+  //
+  //  1. Tone: the deterministic (non-AI) diagnostics elsewhere in this
+  //     compiler all use a warm, direct, second-person voice ("Oops! You
+  //     can't...", "Wait a minute! You already..."), but the SLM's own
+  //     system prompt never said anything about VOICE at all -- only
+  //     mechanical output-format rules. The model's prose defaulted to
+  //     generic, textbook-flat phrasing that reads inconsistently next to
+  //     every other message a user sees from this compiler.
+  //
+  //  2. Grounding: now that docContent is verified-accurate (previously it
+  //     wasn't -- see the doc files), it's finally trustworthy enough to
+  //     tell the model to defer to it COMPLETELY over its own training
+  //     data, which is mostly C/Python/Java/etc. and actively misleading
+  //     for a language with genuinely unusual syntax choices (postfix `to`
+  //     casts, `mut`/`immut`, `give...otherwise` ternaries). Explicitly
+  //     permitting the model to say "I'm not sure" instead of guessing
+  //     matters because a wrong `replacement_line` only gets caught by
+  //     sandbox validation -- but a wrong, confidently-stated claim in
+  //     `explanation` is never validated at all; it just gets shown to the
+  //     user as fact.
   std::string systemPrompt =
       "<|im_start|>system\n"
-      "You are a conservative compiler assistant for Turf-Lang.\n"
+      "You are a friendly compiler assistant for Turf-Lang, writing in the "
+      "SAME voice as this compiler's own built-in error messages: warm, "
+      "direct, second-person ('you'), never robotic or condescending. For "
+      "tone only (do not copy these verbatim, they're for a different "
+      "error) -- \"Oops! You can't change the value of 'x' because it's "
+      "immutable.\" / \"Wait a minute! You already created a variable "
+      "named 'count'.\" Match that warmth while staying technically "
+      "precise.\n\n"
+      "GROUNDING -- read this before anything else: everything you know "
+      "about Turf-Lang syntax comes ONLY from the documentation and code "
+      "context below, NOT from C, Python, Java, Rust, or any other "
+      "language. Turf-Lang has several genuinely unusual choices (postfix "
+      "casts like `x to int`, `mut`/`immut` instead of a bare type "
+      "keyword, `give ... otherwise ...` for a ternary) that do not exist "
+      "in mainstream languages -- do not silently 'correct' these into "
+      "something more familiar. If a construct isn't shown in the "
+      "documentation below, don't invent it. If you are not sure whether "
+      "something is valid Turf-Lang, SAY SO in explanation rather than "
+      "guessing confidently -- an honest 'I'm not certain this is right' "
+      "is more useful than a fluent wrong answer, since only "
+      "replacement_line gets sandbox-validated before a user sees it; "
+      "explanation and suggested_comment do not.\n\n"
       "Error category: " +
       categoryName + "\n\n" + docContent +
       "\n"
       "RULES:\n"
-      "1. Follow Turf-Lang type and ownership rules exactly.\n"
+      "1. Follow Turf-Lang type and ownership rules exactly, as shown in "
+      "the documentation above -- not general programming intuition.\n"
       "2. code_patch must be a SINGLE LINE of valid Turf-Lang syntax ONLY.\n"
       "   Do NOT use C, Java, Python, or any other language syntax.\n"
       "   Do NOT include multiple statements, semicolons, or braces unless\n"
       "   they are required by Turf-Lang syntax for that construct.\n"
       "3. If you cannot produce a valid Turf-Lang patch, set fix_mode to NONE\n"
-      "   and leave code_patch empty.\n"
+      "   and leave code_patch empty. This is not a failure -- 'NONE' is\n"
+      "   the right answer whenever you're not sure, and is far better than\n"
+      "   a wrong patch.\n"
       "4. Set fix_mode to one of: MODIFY, NONE.\n"
       "   Use MODIFY when you have a concrete single-line patch.\n"
       "   Use NONE when the issue requires multi-line restructuring or you "
       "are\n"
       "   not confident enough to suggest a specific change.\n"
       "5. Respond ONLY in valid JSON without markdown code blocks.\n"
-      "6. Keep explanation, suggested_comment, and warning to 1-2 sentences "
-      "max.\n"
+      "6. Keep explanation, suggested_comment, and warning to 1-3 sentences "
+      "-- warm and human-sized, not a one-word reply, but never rambling.\n"
       "<|im_end|>\n";
 
   std::string userPrompt =

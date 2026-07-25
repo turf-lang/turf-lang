@@ -1,60 +1,83 @@
 TURF SYNTAX ERROR:
 
 NOTE ON SEMICOLONS:
-  Semicolons are OPTIONAL in Turf-Lang. Do not add or remove them as a fix.
+  Semicolons are REQUIRED after every statement. Missing one produces
+  "Expected ';' after statement."
 
 COMMON SYNTAX ERRORS:
 
 1. UNKNOWN TOKEN / UNEXPECTED EXPRESSION:
    Occurs when the parser sees a token it cannot handle as the start of
-   an expression. Often caused by a misspelled keyword or unsupported operator.
+   an expression. Often caused by a misspelled keyword or unsupported
+   operator/keyword that doesn't exist in this language.
 
    INCORRECT:
-     !! x                        // ERROR: logical NOT (!) is not implemented
      x and y                     // ERROR: use && not 'and'
      x or y                      // ERROR: use || not 'or'
-     x & y                       // ERROR: bitwise & does not exist — use &&
-     x | y                       // ERROR: bitwise | does not exist — use ||
-     x ** 2                      // ERROR: use ^ for exponentiation
+     x ^^ 2                      // ERROR: no such operator
+     let x = 5;                  // ERROR: no 'let' -- use 'mut x: int = 5;'
+
+   These DO exist and are valid (do not flag them as errors):
+     !x       // logical NOT (desugars to `x != true`)
+     x & y    // bitwise AND
+     x | y    // bitwise OR
+     x ^ y    // bitwise XOR
+     x ** y   // exponentiation (result is always double)
+     ~x       // bitwise NOT
 
 2. MISSING EXPECTED TOKEN:
    Occurs when the parser expects a specific token but finds something else.
 
-   INCORRECT (block-form if):
-     if x > 0 then { ... }       // ERROR: block form uses { } directly, not 'then'
-     if x > 0 { } elif { }       // ERROR: use 'elseif', not 'elif'
-
-   INCORRECT (function call):
-     print x                     // ERROR: must use parentheses: print(x)
-     printline x                 // ERROR: must use parentheses: printline(x)
+   INCORRECT:
+     if x > 0 then { }           // ERROR: there is no 'then' keyword at all;
+                                  // block form uses '{' directly
+     if x > 0 { } elif x < 0 { } // ERROR: use 'elseif' (one word), not 'elif'
+                                  // or 'else if' (two words)
+     mut x int = 5;              // ERROR: missing ':' between name and type
+     mut x: int 5;                // ERROR: missing '=' before the value
+     mut x: int = 5               // ERROR: missing terminating ';'
 
 3. KEYWORD TYPO:
-   The compiler detects near-matches to keywords and reports them.
-
-   Examples of typos detected:
-     whlie, fro, retrun, breka, cotninue, els, elsief
+   The compiler detects near-matches to declared names (variables,
+   functions, struct/enum names) via spelling-distance suggestions and
+   offers a "Did you mean...?" hint.
 
 4. UNTERMINATED STRING:
-   Occurs when a string is opened with " but not closed.
+   Occurs when a string is opened with " but never closed.
 
    INCORRECT:
-     string s = "hello           // ERROR: missing closing "
+     immut s: string = "hello           // ERROR: missing closing "
 
    CORRECT:
-     string s = "hello"
+     immut s: string = "hello";
 
 5. VOID AS VARIABLE TYPE:
-   `void` can ONLY be used as a function return type, NOT as a variable type.
+   `void` can ONLY be used as a function's return type, never as a
+   variable's declared type.
 
    INCORRECT:
-     void x = something()        // ERROR: void is not a variable type
+     mut x: void = something();    // ERROR: void is not a variable type
+
+6. WRONG DECLARATION ORDER:
+   The type comes AFTER the name (`name: Type`), and functions put the
+   return type AFTER the parameter list (`fn f(...): Type`) -- writing
+   either the C-style way around is a parse error, not silently accepted.
+
+   INCORRECT:
+     int x = 5;                   // ERROR: missing 'mut'/'immut', and the
+                                  // type is in the wrong position
+     fn int add(int a, int b) { } // ERROR: return type/param order is
+                                  // backwards for this language
 
 SUPPORTED OPERATORS (reference):
-  Arithmetic: + - * / % ^
-  Relational: == != < > <= >=
-  Logical:    && ||
-  Assign:     = += -= *= /= %=
-  Increment:  x++ x-- ++x --x
+  Arithmetic: +  -  *  /  %  **
+  Relational: ==  !=  <  >  <=  >=
+  Logical:    &&  ||  !
+  Bitwise:    ~  &  |  ^  <<  >>
+  Assign:     =  +=  -=  *=  /=  %=
+  Increment:  x++  x--  ++x  --x
+  Cast:       expr to Type
+  Scope:      :: (enum variant access)
 
-UNSUPPORTED (do not suggest):
-  ! (NOT), & | ^ (bitwise), ** (power, use ^)
+DO NOT SUGGEST REMOVING OR "FIXING" THESE -- they are all real, valid
+operators in this language: !, &, |, ^, **, ~, <<, >>.

@@ -1,47 +1,56 @@
 TURF ARRAY ERRORS:
 
 ARRAY DECLARATION SYNTAX:
-  type[SIZE] name               // uninitialized
-  type[SIZE] name = [v1, v2, v3]  // initialized
+  mut name: Type[SIZE];                 // uninitialized (arrays, unlike
+                                        // scalars, don't require an
+                                        // initializer at declaration time)
+  mut name: Type[SIZE] = [v1, v2, v3];  // initialized
+  immut name: Type[SIZE] = [v1, v2, v3];
 
   CORRECT EXAMPLES:
-    int[5] nums
-    int[3] primes = [2, 3, 5]
-    double[4] vals = [1.0, 2.0, 3.0, 4.0]
+    mut nums: int[5];
+    immut primes: int[3] = [2, 3, 5];
+    mut vals: double[4] = [1.0, 2.0, 3.0, 4.0];
 
   RULES:
   - SIZE must be a positive integer LITERAL at compile time.
-  - The number of values in the initializer list must exactly match SIZE.
-  - Only int, double, bool, and string element types are supported.
+  - If an initializer list is given, its length must exactly match SIZE,
+    and every element's type must match the declared element type (or be a
+    compatible numeric promotion) -- both are checked at compile time.
 
 ELEMENT ACCESS:
   name[index]                   // read
   name[index] = value           // write
+  name[index] += value          // compound assignment IS supported
 
   CORRECT EXAMPLES:
-    int first = primes[0]
-    primes[0] = 7
+    mut first: int = primes[0];
+    primes[0] = 7;
+    primes[0] += 1;
 
   RULES:
   - Indices are zero-based: valid range is 0 to SIZE-1.
   - Index must be of type int.
-  - Accessing out of bounds is a compile-time error if the index is a literal.
-
-COMPOUND ASSIGNMENT ON ARRAY ELEMENTS (NOT SUPPORTED):
-  arr[0] += 5   // PARSE ERROR — the parser explicitly rejects this.
-  // FIX:
-  arr[0] = arr[0] + 5
+  - Accessing out of bounds with a LITERAL index is a compile-time error:
+    "Array index out of bounds! You tried to access 'array[5]', but the
+    array only has 3 elements (indices 0 to 2)." A computed (non-literal)
+    out-of-bounds index is not caught at compile time.
 
 ARRAY LENGTH:
-  int len = arr.length          // .length is a property, not a function call
+  Both of these work and return the same value:
+    mut len: int = arr.length();   // method-call style (preferred)
+    mut len2: int = arr.length;    // bare property style also works
 
   INCORRECT:
-    int len = len(arr)          // ERROR: len() does not exist
-    int len = lengthof(arr)     // ERROR: lengthof() only works on strings
+    mut len: int = lengthof(arr);
+      // ERROR: lengthof() only works on strings, not arrays -- use
+      //        arr.length() instead.
 
 COMMON MISTAKES:
-- Using () instead of [] for array declaration: `int(5) arr` is wrong.
-- Using compound assignment operators (+=, -=) on array elements.
-- Confusing arr.length (for arrays) with lengthof() (for strings).
-- Providing wrong number of initializers vs declared size.
-- Using a non-integer or negative index.
+- Using () instead of [] for the array's declared size (`mut arr: int(5)`
+  is a syntax error -- it must be `int[5]`).
+- Forgetting `mut`/`immut` before the array's name.
+- Providing the wrong number of initializers vs. the declared size.
+- Providing an initializer of the wrong element type.
+- Confusing `.length()`/`.length` (arrays) with `lengthof()` (strings only).
+- Using a non-integer index.

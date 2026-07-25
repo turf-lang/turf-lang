@@ -3,44 +3,52 @@ TURF UNDECLARED VARIABLE OR IDENTIFIER:
 CAUSE:
   The compiler cannot find a variable, function, or name that is referenced.
   This happens when:
-  1. The variable was never declared.
-  2. The variable was declared in a different (inner) scope that has ended.
-  3. The name is a typo of a known variable or builtin.
-  4. A builtin function name was misspelled (e.g. `print` instead of `print`).
+  1. The name was never declared.
+  2. It was declared in a different (inner) scope that has since ended.
+  3. The name is a typo of a known variable, function, or builtin.
+  4. A module-qualified name is missing its module prefix, or vice versa.
 
 DECLARATION SYNTAX:
-  type name = value
+  mut name: Type = value;
+  immut name: Type = value;
 
   CORRECT:
-    int count = 0
-    count = count + 1             // count is visible here
+    mut count: int = 0;
+    count = count + 1;             // count is visible here
 
   INCORRECT:
     if true {
-        int x = 5
+        mut x: int = 5;
     }
-    printline(x)                  // ERROR: x is out of scope here
+    io.printline(x to string);      // ERROR: x is out of scope here --
+                                    // "I can't find anything named 'x'."
 
 SCOPE RULES:
   - Variables declared inside { } are only visible inside that block.
-  - For loop variables are only visible inside the loop body.
-  - Top-level variables are visible everywhere after declaration.
+  - A `for` loop's induction variable is only visible inside the loop body
+    -- it does not exist before or after the loop.
+  - Top-level (function-body) variables are visible everywhere after their
+    declaration, within that same function.
+  - Struct/enum names and function names live in a single flat/per-module
+    namespace visible throughout the file, independent of block scoping.
 
-BUILTIN FUNCTION NAMES (exact spelling required):
-  print      printline      input      lengthof      typeof
+BUILTIN / INTRINSIC NAMES (exact spelling required):
+  print   printline   input   lengthof   typeof   sizeof   assert
 
 CORRECT USAGE:
-  int x = 5
-  printline(x)
+  mut x: int = 5;
+  io.printline(x to string);
 
 INCORRECT USAGE:
-  printline(y)                    // ERROR: y was never declared
-  praintline("hi")                // ERROR: typo — should be 'printline'
-  length("hi")                    // ERROR: no such function — use lengthof("hi")
+  io.printline(y);                // ERROR: y was never declared
+  io.praintline("hi");            // ERROR: typo -- should be 'printline'
+  length("hi");                   // ERROR: no such function -- use lengthof("hi")
 
 COMMON MISTAKES:
 - Typos in variable names (e.g. `coutn` instead of `count`).
-- Typos in builtin function names (e.g. `printLine`, `print_line`, `println`).
-- Using a loop variable outside the loop body.
-- Forgetting to declare a variable before using it.
-- Using a variable from a nested block after the block has closed.
+- Typos in builtin/function names (e.g. `printLine`, `print_line`, `println`).
+- Using a `for` loop's induction variable outside the loop body.
+- Forgetting to declare a variable (with `mut`/`immut`) before using it.
+- Using a variable from a nested block after that block has closed.
+- Referencing a struct's own type-parameter name (`T` in `fn<T> f(x: T)`)
+  outside a generic function/struct where it's actually in scope.

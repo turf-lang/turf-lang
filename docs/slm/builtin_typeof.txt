@@ -1,41 +1,44 @@
 TURF BUILTIN: typeof()
 
 SIGNATURE:
-  string typeof(expression)
+  typeof(expression): string
 
 PURPOSE:
   Returns the compile-time type name of an expression as a string.
-  This is resolved at compile time, not runtime.
+  Resolved at compile time, not runtime.
 
 ARGUMENT COUNT:
   - Exactly 1 argument is required. No more, no less.
 
 ACCEPTED TYPES:
-  - Any expression of any type (int, double, bool, string, void).
+  - Any expression of any type: int, double, bool, string, a struct/enum
+    instance, a pointer, an array.
 
 RETURN TYPE:
-  - string (always). One of: "int", "double", "bool", "string", "void", "unknown"
+  - string (always). Examples: "int", "double", "bool", "string", "Point"
+    (a struct's own name), "Color" (an enum's own name).
 
 CORRECT USAGE:
-  print(typeof(5))              // prints "int"
-  print(typeof(3.14))           // prints "double"
-  print(typeof("hello"))        // prints "string"
-  print(typeof(true))           // prints "bool"
-  string t = typeof(myVar)      // stores the type name
+  io.printline(typeof(5));           // prints "int"
+  io.printline(typeof(3.14));        // prints "double"
+  io.printline(typeof("hello"));     // prints "string"
+  io.printline(typeof(true));        // prints "bool"
+  io.printline(typeof(myPoint));     // prints "Point" (the struct's name)
+  immut t: string = typeof(myVar);   // stores the type name
 
 COMMON MISTAKES:
-  print(typeof())               // ERROR: no argument provided (needs exactly 1)
-  print(typeof(5, 10))          // ERROR: too many arguments (needs exactly 1)
+  typeof()          // ERROR: no argument provided (needs exactly 1)
+  typeof(5, 10)      // ERROR: too many arguments (needs exactly 1)
 
 HOW TO FIX:
-  - Always pass exactly one argument to typeof():
-      print(typeof(5))          // correct: one argument
-  - If you want to check multiple types, call typeof() separately:
-      print(typeof(5))
-      print(typeof(10))
+  - Always pass exactly one argument to typeof().
+  - If you want to check multiple expressions, call typeof() separately
+    for each one.
 
 SYNTAX RULES:
-  - typeof must be followed by ( expression )
-  - The expression inside is evaluated for its type only, not its value.
-  - typeof() with no arguments is a parse error.
-  - typeof(a, b) with multiple arguments is a parse error.
+  - typeof must be followed by ( expression ).
+  - The expression inside is evaluated for its TYPE only, not its runtime
+    value -- it has no side effects even if the expression would normally
+    have some.
+  - typeof() with no arguments, or with more than one argument, is a
+    compile-time error.
