@@ -323,6 +323,20 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     Builder->CreateCall(AbortFunc, {});
     Builder->CreateUnreachable();
 
+    // Mirrors ReturnExprAST::codegen(): CreateUnreachable() is a terminator,
+    // so if fail() is not the last statement in its block, the next
+    // statement's codegen would try to add IR to an already-terminated
+    // block ("Terminator found in the middle of a basic block"). Give the
+    // builder a fresh dead block to keep emitting into; it's either erased
+    // as dead code (fail() was the function's last statement) or picked up
+    // as an unreachable predecessor-less block wired into the live CFG by
+    // whatever nested construct (if/while) owns this statement list.
+    if (CurrentFunction) {
+      BasicBlock *DeadBB =
+          BasicBlock::Create(*TheContext, "after_fail", CurrentFunction);
+      Builder->SetInsertPoint(DeadBB);
+    }
+
     // fail doesn't return, but we need to return something to satisfy the type signature
     // Any value will do since it's unreachable, we'll return a dummy integer
     return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
@@ -360,7 +374,15 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     Builder->SetInsertPoint(FailBB);
     std::vector<llvm::Value *> FailArgs = {MsgVal};
     CodegenIntrinsic("fail", FailArgs, Loc);
-    // CodegenIntrinsic for fail already creates unreachable
+    // CodegenIntrinsic for fail already creates unreachable, then repositions
+    // the builder to a fresh dead block of its own (so a bare `fail(...);`
+    // statement can be followed by more statements in the same source
+    // block). We abandon that dead block by repositioning to PassBB below,
+    // so -- same as every other internal fail() call site in Codegen.cpp --
+    // it must be given its own terminator or verifyFunction() rejects the
+    // orphaned, terminator-less block.
+    if (!Builder->GetInsertBlock()->getTerminator())
+      Builder->CreateUnreachable();
 
     // Pass block
     Builder->SetInsertPoint(PassBB);

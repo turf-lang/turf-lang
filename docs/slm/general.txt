@@ -299,14 +299,6 @@ TRUE INTRINSICS (never need an import; not declared in any .tr file):
 
   fail(message: string)
     Unconditionally aborts at runtime, printing `message` to stderr.
-    IMPORTANT: `fail(...)` as the LAST statement inside a block (e.g. the
-    only statement in an `if` body) is fine, but a bare top-level
-    `fail(...)` immediately followed by MORE statements in the same block
-    (like `fail("x"); return 0;`) currently crashes the compiler with
-    "Internal compiler error... Terminator found in the middle of a basic
-    block!" -- a real, known compiler bug, not something to "fix" by
-    suggesting different Turf code. If you see this exact crash, say so
-    plainly rather than inventing an explanation.
 
   sizeof(Type): int
     NOT a function call -- its own dedicated syntax (`sizeof(int)`,
