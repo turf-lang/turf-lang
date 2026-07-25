@@ -456,8 +456,33 @@ static const TurfType *getExprType(const ExprAST *E) {
           return GenTy->getTypeArg(0);
       }
     }
-    if (MethodCall->getMethod() == "push") {
-      return BaseTy;
+    // Resolve a GenericType base (e.g. List<int>) to its underlying
+    // TurfStructType, mirroring the NamedType unwrap just above -- without
+    // this, the general lookup just below (which only matches
+    // TurfStructType) never fired for ANY method call on a generic struct
+    // instance, including 'push'. That gap used to be papered over by a
+    // hardcoded `if (MethodName == "push") return BaseTy;` special case
+    // (removed) that assumed EVERY method literally named "push", on ANY
+    // struct, generic or not, returns its receiver's bare type -- which
+    // happens to not matter for List<T>.push (declared 'void', and its
+    // result is never used), but is flatly wrong for a user-defined struct
+    // whose OWN "push" method has a real, different declared return type.
+    // Confirmed via a `Builder.push(x: int): Builder*` fluent/chaining
+    // method (returns self by pointer, like the already-covered
+    // `Counter.increment(): Counter*` pattern): this hack made
+    // getExprType() report the chained call's type as bare `Builder`
+    // instead of `Builder*`, so MethodCallExprAST::codegen()'s self-pointer
+    // logic (which branches on "is Base's type actually a pointer") took
+    // the wrong path -- spilling the returned pointer into a fresh temp
+    // alloca and passing THAT ALLOCA'S ADDRESS as `self` instead of the
+    // pointer itself, an extra level of indirection. Only the FIRST call in
+    // `b.push(1).push(2)` ever mutated the real struct; the second silently
+    // wrote through to a throwaway temporary.
+    if (auto *GT = dynamic_cast<const GenericType *>(BaseTy)) {
+      if (GlobalSymbolTable) {
+        if (auto R = GlobalSymbolTable->LookupType(GT->getBaseName()))
+          BaseTy = R.get();
+      }
     }
     if (BaseTy && dynamic_cast<const TurfStructType *>(BaseTy)) {
       std::string MethodName =

@@ -136,6 +136,19 @@ struct ResolverFunctionSymbol {
   /// that was never actually registered anywhere.
   bool                     IsExtern    = false;
 
+  /// True if this is a struct instance method (Params[0].Name == "self")
+  /// whose body directly assigns to a `self.<field>` somewhere. Computed
+  /// once by Resolver::buildFunctionSymbol() via a conservative, non-
+  /// interprocedural scan (see MutatesSelfField() in Resolver.cpp).
+  /// TypeChecker::visitMethodCall() uses this to reject calling a mutating
+  /// method through an immutable variable -- e.g. `c.bump()` where
+  /// `bump()` does `self.val += 1` -- which direct field assignment
+  /// (`c.val = 5`) already correctly rejects, but method calls previously
+  /// bypassed entirely (ImmutableAssignmentError never even considered
+  /// them). Always false for static methods, free functions, and module
+  /// functions (none of which have a "self" to mutate).
+  bool                     MutatesSelf = false;
+
   /// Arity of this overload.
   /// For variadic functions, this is the number of *named* (declared) params.
   /// Callers should use isVarArg() to determine if extra args are accepted.
@@ -428,9 +441,22 @@ public:
 
   /**
    * @brief Register a struct name hoisted from a top-level StructDeclExprAST.
-   * Duplicate registrations are silently ignored.
+   *
+   * Struct (and enum) names live in ONE flat namespace shared by the current
+   * file and every transitively-imported module -- unlike functions, which
+   * are namespaced per-module (see ResolverModule / registerModuleFunction).
+   * That means two unrelated modules declaring a same-named struct silently
+   * collide here, and would previously go on to crash Codegen with a
+   * confusing "Internal compiler error" (LLVM refuses two distinct opaque
+   * struct types sharing one name, renames the second to "Name.1", and the
+   * GEP/return-type instructions already emitted against the frontend name
+   * end up pointing at the wrong LLVM type). Returns the ORIGINAL
+   * declaration's location if @p Name was already registered (so the caller
+   * can raise a clean DuplicateTypeNameError instead of reaching Codegen at
+   * all), or std::nullopt if this is a fresh registration.
    */
-  void registerStruct(const std::string &Name);
+  std::optional<ResolverSourceLocation>
+  registerStruct(const std::string &Name, ResolverSourceLocation Loc);
 
   /**
    * @brief True if @p Name was registered as a struct in the current file.
@@ -447,7 +473,13 @@ public:
 
   // ── Enum registry ─────────────────────────────────────────────────────────
 
-  void registerEnumType(const std::string& Name, std::shared_ptr<TurfEnumType> ET);
+  // Same flat, module-blind namespace concern as registerStruct() above
+  // applies to enums (they share the type namespace with structs at the
+  // Codegen/LLVM layer too). Returns the original declaration's location on
+  // a duplicate name, std::nullopt on a fresh registration.
+  std::optional<ResolverSourceLocation>
+  registerEnumType(const std::string& Name, ResolverSourceLocation Loc,
+                   std::shared_ptr<TurfEnumType> ET);
   std::shared_ptr<TurfEnumType> lookupEnumType(const std::string& Name) const;
   bool isEnumName(const std::string& Name) const;
   std::vector<std::string> getAllEnumNames() const;
@@ -473,13 +505,19 @@ private:
   std::unordered_map<std::string, std::vector<ResolverFunctionSymbol>>
       CurrentFileFunctions_;
 
-  /// Struct names declared in the current file (hoisted in Pass 1).
-  /// Queried in Pass 2 to validate NamedType field references without
-  /// involving the TypeChecker or LLVM.
-  std::unordered_set<std::string> RegisteredStructs_;
+  /// Struct names declared in the current file or any transitively-imported
+  /// module (hoisted in Pass 1), mapped to their declaration site so a
+  /// same-named second declaration can be reported with a "first declared
+  /// here" related location. Queried in Pass 2 to validate NamedType field
+  /// references without involving the TypeChecker or LLVM.
+  std::unordered_map<std::string, ResolverSourceLocation> RegisteredStructs_;
 
-  /// Enums declared in the current file.
+  /// Enums declared in the current file or any transitively-imported module.
   std::unordered_map<std::string, std::shared_ptr<TurfEnumType>> RegisteredEnums_;
+
+  /// Parallel to RegisteredEnums_, since TurfEnumType itself carries no
+  /// declaration location -- see registerEnumType()'s doc comment.
+  std::unordered_map<std::string, ResolverSourceLocation> EnumDeclLocs_;
 };
 
 #endif // RESOLVER_SYMBOL_TABLE_H

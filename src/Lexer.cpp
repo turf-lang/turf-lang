@@ -27,7 +27,16 @@
 #include <map>
 
 std::vector<std::string> SourceLines;
+std::map<std::string, std::vector<std::string>> AllSourceLines;
 std::string SourceFilename;
+// The ORIGINAL top-level file passed to the compiler, set once in main.cpp
+// and never touched again (unlike SourceFilename, which is repointed at
+// each imported module while it's being parsed, then restored). Used only
+// by printDiag() to decide whether to print an "in file: ..." note --
+// comparing against SourceFilename wouldn't work reliably since by the time
+// flushAll() runs (after every pass has completed) it's already back to
+// this same value for every diagnostic, imported-module ones included.
+std::string MainSourceFilename;
 SourceLocation CurLoc = {1, 0};
 int CurLine = 1;
 int CurCol = 0;
@@ -41,6 +50,17 @@ std::set<int> DiagnosticEngine::ErrorLines;
 jmp_buf g_recoverJmp;
 bool g_recoverActive = false;
 bool g_protoOnlyPass = false; // set by pre-pass 3a to stop after prototype
+
+// Running count of unclosed '{'/'('/'[' minus '}'/')'/']', tracked globally
+// by getNextToken() (see Parser.cpp) as it consumes each token -- i.e. the
+// current nesting depth relative to the top level (0), regardless of how
+// deeply nested inside if/while/compare/etc. the parser currently is.
+// Used by main.cpp's SkipToNextTopLevelBoundary() to recover correctly from
+// a parse failure at ANY nesting depth, not just one level deep -- see that
+// function's doc comment for why a naive "assume depth 1" recovery isn't
+// enough. Reset to 0 by resetLexer() so a fresh parse pass (pre-pass vs.
+// main pass, or a Sandbox.cpp re-parse) never inherits a stale value.
+int g_braceDepth = 0;
 
 // AI/SLM flag: only true when --smart is passed on the CLI.
 bool g_AIEnabled = false;
@@ -119,10 +139,17 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
       isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
   const char *TypeLabel = isWarning ? "warning" : "error";
 
-  // error/warning at line X, col Y
+  // error/warning at line X, col Y [in file: ...]
   std::cerr << Colors::BOLD << AccentColor << "\u2500\u2500 " << TypeLabel
             << " " << Colors::RESET << Colors::BRIGHT_BLACK << "at line "
-            << D.Loc.Line << ", col " << D.Loc.Col << Colors::RESET << "\n\n";
+            << D.Loc.Line << ", col " << D.Loc.Col;
+  // Only worth calling out when it's NOT the file the user actually
+  // compiled -- i.e. the diagnostic is about content inside an imported
+  // module, which is otherwise easy to mistake for a problem in your own
+  // file since nothing else in the output says otherwise.
+  if (!D.Filename.empty() && D.Filename != MainSourceFilename)
+    std::cerr << ", in file " << D.Filename;
+  std::cerr << Colors::RESET << "\n\n";
 
   // Message body — embedded ANSI codes from error classes render intact.
   std::cerr << "  " << D.Msg << "\n";
@@ -131,9 +158,16 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
     std::cerr << "\n  " << Colors::BRIGHT_GREEN << "Hint: " << D.Hint << Colors::RESET << "\n";
   }
 
-  // Code snippet with │ gutter.
-  if (D.Loc.Line > 0 && D.Loc.Line <= static_cast<int>(SourceLines.size())) {
-    const std::string &LineContent = SourceLines[D.Loc.Line - 1];
+  // Code snippet with │ gutter. Looked up from AllSourceLines (a persistent,
+  // cross-pass, per-file cache) via D.Filename, NOT the transient global
+  // SourceLines -- see AllSourceLines' doc comment in Lexer.h for why: by
+  // the time flushAll() runs, SourceLines reflects whatever file was parsed
+  // LAST (normally back to the main file), which is the wrong content for
+  // any diagnostic whose Loc originated inside an imported module.
+  auto FileLinesIt = AllSourceLines.find(D.Filename);
+  if (FileLinesIt != AllSourceLines.end() && D.Loc.Line > 0 &&
+      D.Loc.Line <= static_cast<int>(FileLinesIt->second.size())) {
+    const std::string &LineContent = FileLinesIt->second[D.Loc.Line - 1];
     std::string LineNumStr = std::to_string(D.Loc.Line);
     int CaretOffset = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
 
@@ -238,7 +272,16 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
     }
   }
 
-  Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning, Related, Category});
+  // Which file this diagnostic belongs to: Loc's own Filename if it has one
+  // (the normal case -- captured from CurLoc at parse time, see gettok()),
+  // else fall back to whatever file is currently active. AllSourceLines is a
+  // PERSISTENT cache (never overwritten/restored like SourceLines), so this
+  // resolves correctly even for diagnostics raised by a pass that runs after
+  // every file has already finished parsing (Resolver/TypeChecker/Codegen).
+  std::string Filename = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
+
+  Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning, Related, Category,
+                         Filename});
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);
@@ -297,6 +340,7 @@ void resetLexer() {
   CurLine = 1;
   CurCol = 0;
   CurLoc = {1, 0};
+  g_braceDepth = 0;
 }
 
 /**
@@ -324,8 +368,13 @@ int gettok() {
     }
   }
 
-  // Snapshot the location before parsing the token body
-  CurLoc = {CurLine, CurCol};
+  // Snapshot the location before parsing the token body. Stamping Filename
+  // here (rather than leaving SourceLocation's Filename field to default) is
+  // what lets every AST node's Loc -- captured from CurLoc at parse time --
+  // correctly remember which file it came from, even after later compiler
+  // passes (Resolver/TypeChecker/Codegen) have moved on to a different file
+  // and SourceFilename itself has changed. See AllSourceLines' doc comment.
+  CurLoc = {CurLine, CurCol, SourceFilename};
 
   // Identifiers of the types: id = [a-zA-Z][a-zA-Z0-9_]*
   if (isalpha(LastChar)) {

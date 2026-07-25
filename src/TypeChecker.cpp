@@ -32,6 +32,7 @@
 // test target suppress this dependency so it can link without LLVM.
 #ifndef TYPECHECKER_NO_ERRORS
 #include "Errors.h"
+#include "SuggestionIndex.h"
 #endif
 
 // Builtins.h provides LookupBuiltin() / BuiltinInfo for arity checking of
@@ -58,8 +59,9 @@ namespace {
 #ifndef TYPECHECKER_NO_ERRORS
 /// Default error handler: uses the real TypeError class from Errors.h.
 void productionErrorHandler(SourceLocation Loc, const std::string &Msg,
-                            const std::vector<RelatedLocation> &Related) {
-  TypeError Err(Loc, Msg);
+                            const std::vector<RelatedLocation> &Related,
+                            const std::string &CustomHint) {
+  TypeError Err(Loc, Msg, CustomHint);
   for (const auto &R : Related)
     Err.withRelated(R.Loc, R.Description);
   Err.raise();
@@ -68,7 +70,8 @@ void productionErrorHandler(SourceLocation Loc, const std::string &Msg,
 /// Stub used when TYPECHECKER_NO_ERRORS is defined (unit-test builds).
 /// Throws std::runtime_error so tests can catch it with EXPECT_THROWS.
 void unitTestErrorHandler(SourceLocation, const std::string &Msg,
-                          const std::vector<RelatedLocation> &) {
+                          const std::vector<RelatedLocation> &,
+                          const std::string &) {
   throw std::runtime_error("TypeError: " + Msg);
 }
 #endif
@@ -134,10 +137,11 @@ void TypeChecker::setType(const ExprAST *Node, TurfTypePtr Ty) {
 }
 
 void TypeChecker::reportError(SourceLocation Loc, const std::string &Msg,
-                              const std::vector<RelatedLocation> &Related) {
+                              const std::vector<RelatedLocation> &Related,
+                              const std::string &CustomHint) {
   HadError_ = true;
   if (ErrorHandler_)
-    ErrorHandler_(Loc, Msg, Related);
+    ErrorHandler_(Loc, Msg, Related, CustomHint);
 }
 
 // ─── Static type predicate helpers ───────────────────────────────────────────
@@ -178,10 +182,12 @@ bool TypeChecker::inferArithmeticType(SourceLocation Loc, int Op,
     }
     // Any other combination of string with non-string, or string OP non-'+':
     reportError(Loc,
-                "Cannot apply operator '" + std::string(1, static_cast<char>(Op)) +
+                "Cannot apply operator '" + OpToDisplayString(Op) +
                     "' to types '" + LhsTy->getName() + "' and '" +
-                    RhsTy->getName() +
-                    "'. Hint: To concatenate a non-string, convert it first with `<expr> to string`.");
+                    RhsTy->getName() + "'.",
+                {},
+                "To concatenate a non-string, convert it first with "
+                "`<expr> to string`.");
     ResultOut = nullptr;
     return false;
   }
@@ -200,9 +206,9 @@ bool TypeChecker::inferArithmeticType(SourceLocation Loc, int Op,
 
   // ── anything else is a mismatch ──────────────────────────────────────────
   reportError(Loc,
-              "Type mismatch: cannot apply '" +
-                  std::string(1, static_cast<char>(Op)) + "' to '" +
-                  LhsTy->getName() + "' and '" + RhsTy->getName() + "'.");
+              "Type mismatch: cannot apply '" + OpToDisplayString(Op) +
+                  "' to '" + LhsTy->getName() + "' and '" +
+                  RhsTy->getName() + "'.");
   ResultOut = nullptr;
   return false;
 }
@@ -251,6 +257,27 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
   // operator token). Removed rather than left in as a source of confusion
   // about some alternate operator encoding that doesn't exist.
   if (Op == -9 /*TOK_EQ*/ || Op == -10 /*TOK_NEQ*/) {
+    // Struct instances specifically -- reject BEFORE the "same name" check
+    // below, which would otherwise accept two same-struct-typed operands
+    // (both getName() == "Point") and hand back TurfBool() as if this were
+    // a real, meaningful comparison. Codegen has no struct-equality
+    // lowering at all -- it emits a raw FCmp/ICmp on the whole aggregate
+    // LLVM struct value, which is invalid IR for anything but a true
+    // scalar. Confirmed via two `Point{x:1}` instances compiled with `==`:
+    // "Internal compiler error: generated LLVM IR is invalid... Invalid
+    // operand types for FCmp instruction" -- a confusing ICE for what's
+    // actually just an unsupported (for now) language feature, not a
+    // compiler bug.
+    if (LhsTy->isStruct() || RhsTy->isStruct()) {
+      reportError(Loc,
+                  "Cannot compare struct values with '" +
+                      OpToDisplayString(Op) + "'.",
+                  {},
+                  "Structs don't support direct comparison yet -- compare "
+                  "the fields you care about individually instead (e.g. "
+                  "`a.x == b.x`).");
+      return TurfBool();
+    }
     // Same type or both numeric is fine
     if (LhsTy->getName() == RhsTy->getName())
       return TurfBool();
@@ -285,7 +312,7 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
 
   reportError(Loc, "Cannot compare '" + LhsTy->getName() + "' with '" +
                        RhsTy->getName() + "' using '" +
-                       std::string(1, static_cast<char>(Op)) + "'.");
+                       OpToDisplayString(Op) + "'.");
   return TurfBool(); // continue with bool
 }
 
@@ -519,7 +546,7 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
   if (Op == '-') {
     // Negation: operand must be numeric
     if (OperandTy && !OperandTy->isNumeric()) {
-      reportError({0, 0},
+      reportError(Node.getLoc(),
                   "Unary '-' requires a numeric operand, got '" +
                       OperandTy->getName() + "'.");
       setType(&Node, nullptr);
@@ -538,7 +565,7 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
   if (Op == '~') {
     // Bitwise NOT: operand must be int
     if (OperandTy && !OperandTy->isNamed("int")) {
-      reportError({0, 0},
+      reportError(Node.getLoc(),
                   "Unary '~' (bitwise NOT) requires an integer operand, got '" +
                       OperandTy->getName() + "'.");
       setType(&Node, nullptr);
@@ -701,6 +728,48 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   // Visit the operand
   if (Node.getOperand())
     const_cast<ExprAST *>(Node.getOperand())->accept(*this);
+
+  // A literal integer cast to an enum type was never checked against that
+  // enum's actual variant range -- `99 to Color` (Color only has 3
+  // variants) compiled and ran fine, producing a Color value with no
+  // corresponding variant name at all (`c to int` came back 99). This is
+  // deliberately narrow: only a compile-time-constant literal operand is
+  // checked, since that's the only case where "is this value valid" is
+  // even decidable here without runtime bounds checking (a genuinely
+  // variable-valued cast, e.g. `x to Color` where x is computed, can't be
+  // validated at compile time and is left alone, same as before).
+  // ParseType() always parses a bare identifier as NamedType, never
+  // resolving it to the real registered TurfEnumType (that resolution
+  // normally happens via GlobalSymbolTable elsewhere in the pipeline) --
+  // and Resolver::visitCast() doesn't touch DestType at all, so
+  // Node.getDestTypePtr() for `... to Color` is still NamedType("Color")
+  // by the time this runs, not TurfEnumType. Without resolving it here
+  // first, the dynamic_cast below could never match, silently defeating
+  // this whole check.
+  TurfTypePtr DestTy = Node.getDestTypePtr();
+  if (auto *NT = dynamic_cast<const NamedType *>(DestTy.get())) {
+    if (GlobalSymbolTable) {
+      if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+        DestTy = Resolved;
+    }
+  }
+  if (auto *ET = dynamic_cast<const TurfEnumType *>(DestTy.get())) {
+    if (auto *Lit = dynamic_cast<const NumberExprAST *>(Node.getOperand())) {
+      if (Lit->isInteger()) {
+        long long V = Lit->getIntVal();
+        if (V < 0 || V >= ET->numVariants()) {
+          reportError(Node.getLoc(),
+                      "Value " + std::to_string(V) + " is out of range for enum '" +
+                          ET->getName() + "' (valid range: 0 to " +
+                          std::to_string(ET->numVariants() - 1) + ").",
+                      {},
+                      "Use one of '" + ET->getName() +
+                          "'s declared variants instead of an arbitrary "
+                          "integer literal.");
+        }
+      }
+    }
+  }
 
   // Explicit cast always succeeds at the TypeChecker level; result is DestType.
   setType(&Node, Node.getDestTypePtr());
@@ -995,9 +1064,11 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
         reportError(Arm.Loc,
                     "Duplicate 'matches' pattern: this value is already "
                     "handled by an earlier arm in this compare block, so "
-                    "this arm can never run.\nHint: Remove the duplicate "
-                    "arm, or combine it with the earlier one by stacking "
-                    "(`matches A:` then `matches B:` sharing one body).");
+                    "this arm can never run.",
+                    {},
+                    "Remove the duplicate arm, or combine it with the "
+                    "earlier one by stacking (`matches A:` then "
+                    "`matches B:` sharing one body).");
       }
     }
 
@@ -1035,8 +1106,8 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
                           + "'.\nMissing variants:";
           for (const auto& M : Missing)
               Msg += "\n    " + ET->getName() + "::" + M;
-          Msg += "\nHint: Add 'otherwise:' to handle remaining variants.";
-          reportError(Node.getLoc(), Msg);
+          reportError(Node.getLoc(), Msg, {},
+                      "Add 'otherwise:' to handle remaining variants.");
       }
   }
 
@@ -1539,6 +1610,22 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       }
     }
 
+    // `arr.length()` on a fixed-size array (int[3], not a struct at all) is
+    // a builtin Codegen already special-cases (MethodCallExprAST::codegen(),
+    // `if (Method == "length") { if (isArrayType(BaseTy)) ... }`) -- there
+    // was never a TypeChecker-side check for it at all; it only ever worked
+    // by accident via the old "be permissive" fallback leaving
+    // ResolvedCallTarget null and Codegen's special-case bypassing it
+    // entirely. Once that fallback started raising a real error for
+    // non-struct method calls (see StructMethodNotFoundError's sibling
+    // check just below), this legitimate case needed its own explicit,
+    // correct handling instead of continuing to rely on silence.
+    if (BaseTy && isArrayType(BaseTy.get()) && MethodName == "length" &&
+        ArgCount == 0) {
+      setType(&Node, TurfInt());
+      return;
+    }
+
     // Unwrap pointer-to-struct (self inside methods)
     if (BaseTy && !IsStaticMethod) {
       if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy.get()))
@@ -1597,14 +1684,128 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         for (const auto &Match : RST_.findInModules(StructName + "." + MethodName))
           if (Match.Symbol)
             Candidates.push_back(Match.Symbol);
+        // Recover the struct's own generic-parameter substitution (e.g.
+        // `l: List<int>` => T=int) BEFORE picking a candidate, not just
+        // after, so it can be used to check ARGUMENT type compatibility
+        // too, not only the return type. See the (moved-down, unchanged)
+        // doc comment below Subst's use for the full story on why this
+        // scan-the-fields recovery technique is needed at all.
+        std::unordered_map<std::string, TurfTypePtr> Subst;
+        if (auto *GT = dynamic_cast<const GenericType *>(getType(Node.getBase()).get())) {
+          const auto &TypeArgs = GT->getTypeArgs();
+          std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
+            if (!FTy || Subst.size() >= TypeArgs.size()) return;
+            if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
+              if (!Subst.count(GP->getName()))
+                Subst.emplace(GP->getName(), TypeArgs[Subst.size()]);
+            } else if (auto *NT = dynamic_cast<const NamedType *>(FTy.get())) {
+              bool KnownElsewhere = GlobalSymbolTable &&
+                                   GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
+              if (!KnownElsewhere && !Subst.count(NT->getName()))
+                Subst.emplace(NT->getName(), TypeArgs[Subst.size()]);
+            } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
+              Scan(PT->getPointee());
+            } else if (isArrayType(FTy.get())) {
+              Scan(dynamic_cast<const ArrayType *>(FTy.get())->getElementTypePtr());
+            }
+          };
+          for (const auto &F : STy->getFields())
+            Scan(F.Type);
+        }
+
         // Arity: struct methods have `self` as first param, user args = arity - 1 (unless static)
         int ExpectedArity = IsStaticMethod ? ArgCount : (ArgCount + 1);
         std::vector<const ResolverFunctionSymbol *> ArityMatches;
         for (const auto *C : Candidates)
           if (C->arity() == ExpectedArity) ArityMatches.push_back(C);
-        if (!ArityMatches.empty()) {
-          const ResolverFunctionSymbol *Best = ArityMatches[0];
+
+        // Argument type compatibility -- previously MISSING entirely for
+        // struct methods (unlike the module-call path above, which already
+        // filters candidates by typesCompatible()). Concretely confirmed:
+        // `l.push("hello")` on a `List<int>` compiled clean and, at
+        // runtime, read the string's raw pointer bits back as an `int` on
+        // the next `pop()` -- a genuine type-safety hole, not just a
+        // missing diagnostic, because `push(item: T)`'s declared param type
+        // is the generic placeholder T (type-erased to a bare 64-bit slot
+        // at the struct-method level), which trivially "matched" any
+        // argument type with no check at all. Each candidate's param types
+        // are substituted through Subst (T -> int, from the base's own
+        // `List<int>` instantiation) before comparing, exactly mirroring
+        // how the return type is substituted below.
+        std::vector<const ResolverFunctionSymbol *> TypeMatches;
+        for (const auto *C : ArityMatches) {
+          bool AllOk = true;
+          int ParamOffset = IsStaticMethod ? 0 : 1; // skip 'self'
+          for (int i = 0; i < ArgCount; ++i) {
+            TurfTypePtr ParamTy = C->Params[i + ParamOffset].Type;
+            if (!Subst.empty())
+              ParamTy = substituteReturnType(ParamTy, Subst);
+            if (ParamTy && ArgTypes[i] && !typesCompatible(ArgTypes[i].get(), ParamTy.get())) {
+              AllOk = false;
+              break;
+            }
+          }
+          if (AllOk)
+            TypeMatches.push_back(C);
+        }
+
+        if (!ArityMatches.empty() && TypeMatches.empty()) {
+          // Method name and argument COUNT are both right, but no overload's
+          // parameter types accept what was actually passed -- e.g.
+          // List<int>.push("hello"). Distinct from "wrong number of
+          // arguments" (WrongArityError, used below when Candidates aren't
+          // even arity-compatible) and from "no method by this name"
+          // (StructMethodNotFoundError).
+          std::string ArgTypeStr;
+          std::vector<RelatedLocation> Related;
+          for (int i = 0; i < ArgCount; ++i) {
+            if (i) ArgTypeStr += ", ";
+            ArgTypeStr += (ArgTypes[i] ? ArgTypes[i]->getName() : "unknown");
+          }
+          for (const auto *Cand : ArityMatches)
+            Related.push_back({toSourceLocation(Cand->DeclLoc),
+                               "candidate: " + Cand->signature()});
+          reportError(Node.getLoc(),
+                      "No overload of '" + StructName + "." + MethodName +
+                          "' matches argument types (" + ArgTypeStr + ").",
+                      Related);
+          setType(&Node, nullptr);
+          return;
+        }
+
+        if (!TypeMatches.empty()) {
+          const ResolverFunctionSymbol *Best = TypeMatches[0];
           Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
+
+          // Calling a method that mutates self through an immutable
+          // variable was previously silently allowed -- direct field
+          // assignment (`c.val = 5;`) already correctly raises
+          // ImmutableAssignmentError, but `c.bump()` (where `bump()`
+          // internally does `self.val += 1`) bypassed it entirely, since
+          // this check simply didn't exist for method calls. See
+          // ResolverFunctionSymbol::MutatesSelf's doc comment in
+          // ResolverSymbolTable.h for how that's computed and why it's
+          // conservative in the direction of never producing a false
+          // positive here (a genuinely read-only method can never be
+          // wrongly rejected).
+          if (!IsStaticMethod && Best->MutatesSelf) {
+            if (auto *BaseVarForImmut =
+                    dynamic_cast<const VariableExprAST *>(Node.getBase())) {
+              if (BaseVarForImmut->ResolvedSymbol &&
+                  BaseVarForImmut->ResolvedSymbol->IsImmutable) {
+#ifndef TYPECHECKER_NO_ERRORS
+                ImmutableAssignmentError(Node.getLoc(), BaseVarForImmut->getName())
+                    .withRelated(
+                        toSourceLocation(BaseVarForImmut->ResolvedSymbol->DeclLoc),
+                        "declared immutable here")
+                    .raise();
+#else
+                throw std::runtime_error("ImmutableAssignmentError: " +
+                                         BaseVarForImmut->getName());
+#endif
+              }
+            }
+          }
 
           // If the ORIGINAL (pre-struct-resolution) base type was a
           // GenericType (e.g. `l: List<int>`, T=int), substitute that
@@ -1621,8 +1822,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // Best->Params the way a free function's own parameter list would
           // give us -- the concrete type argument only exists on the BASE
           // EXPRESSION's type. Since TurfStructType doesn't record its own
-          // declared type-parameter NAMES, they're recovered here by
-          // scanning the struct's fields for NamedType occurrences that
+          // declared type-parameter NAMES, they're recovered above (Subst)
+          // by scanning the struct's fields for NamedType occurrences that
           // don't resolve to any known struct/enum (through pointer/array
           // wrapping) in declaration order and pairing each distinct name
           // found with GT's type args positionally.
@@ -1641,27 +1842,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // stdlib today (all single-type-parameter), though not fully
           // general for a hypothetical multi-parameter struct whose fields
           // don't happen to mention every parameter in declaration order.
-          if (auto *GT = dynamic_cast<const GenericType *>(getType(Node.getBase()).get())) {
-            std::unordered_map<std::string, TurfTypePtr> Subst;
-            const auto &TypeArgs = GT->getTypeArgs();
-            std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
-              if (!FTy || Subst.size() >= TypeArgs.size()) return;
-              if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
-                if (!Subst.count(GP->getName()))
-                  Subst.emplace(GP->getName(), TypeArgs[Subst.size()]);
-              } else if (auto *NT = dynamic_cast<const NamedType *>(FTy.get())) {
-                bool KnownElsewhere = GlobalSymbolTable &&
-                                     GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
-                if (!KnownElsewhere && !Subst.count(NT->getName()))
-                  Subst.emplace(NT->getName(), TypeArgs[Subst.size()]);
-              } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
-                Scan(PT->getPointee());
-              } else if (isArrayType(FTy.get())) {
-                Scan(dynamic_cast<const ArrayType *>(FTy.get())->getElementTypePtr());
-              }
-            };
-            for (const auto &F : STy->getFields())
-              Scan(F.Type);
+          if (!Subst.empty()) {
             setType(&Node, substituteReturnType(Best->ReturnType, Subst));
             return;
           }
@@ -1669,10 +1850,84 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           setType(&Node, Best->ReturnType);
           return;
         }
+
+        // No overload matched. Distinguish "this method doesn't exist on
+        // this struct at all" from "it exists, but not with this many
+        // arguments" -- see StructMethodNotFoundError's doc comment in
+        // Errors.h for why this used to be silently permissive (both
+        // TypeChecker AND Codegen), letting a call like
+        // `l.nonexistentMethod(5)` vanish from the compiled program with
+        // zero diagnostic anywhere.
+        if (Candidates.empty()) {
+          RankedSuggestions Suggestions;
+          std::string Prefix = StructName + ".";
+          std::vector<std::string> AllNames = RST_.getAllCurrentFileFunctionNames();
+          std::vector<std::string> ModuleNames = RST_.getAllModuleFunctionNames();
+          AllNames.insert(AllNames.end(), ModuleNames.begin(), ModuleNames.end());
+          std::vector<std::string> BareMethodNames;
+          for (const auto &N : AllNames)
+            if (N.size() > Prefix.size() && N.compare(0, Prefix.size(), Prefix) == 0)
+              BareMethodNames.push_back(N.substr(Prefix.size()));
+          Suggestions.Local =
+              SuggestionIndex::suggestVisible(MethodName, BareMethodNames);
+          StructMethodNotFoundError(Node.getLoc(), StructName, MethodName,
+                                    Suggestions)
+              .raise();
+        } else {
+          // Unlike module functions (whose BaseName is the bare method
+          // name, with the module qualifier added by the import), a struct
+          // method's own BaseName is already "StructName.methodName" (see
+          // registerFunctionSignature() -- FuncDefExprAST::getName() for
+          // `fn<T> List.push(...)` IS "List.push"), so signature() already
+          // includes it. Prepending StructName again here previously
+          // produced "List.List.push(...)".
+          std::vector<std::string> KnownSigs;
+          std::vector<RelatedLocation> Related;
+          for (const auto *Cand : Candidates) {
+            KnownSigs.push_back(Cand->signature());
+            Related.push_back({toSourceLocation(Cand->DeclLoc),
+                               "candidate: " + Cand->signature()});
+          }
+          auto Err = WrongArityError(Node.getLoc(), StructName + "." + MethodName,
+                                     ArgCount, KnownSigs);
+          for (const auto &R : Related)
+            Err.withRelated(R.Loc, R.Description);
+          Err.raise();
+        }
+        setType(&Node, nullptr);
+        return;
       }
+      // BaseTy resolved to something real, but it's not a struct at all
+      // (e.g. `x.foo()` where x: int, or a string, or a pointer to a
+      // non-struct). Previously fell all the way through to Codegen's
+      // `MethodCallExprAST::codegen()`, which calls
+      // `llvm::report_fatal_error("Internal error: method call on
+      // unsupported type. This is a compiler bug.")` -- an abrupt process
+      // abort (SIGABRT) reachable from ordinary, plausible user code (a
+      // typo'd method call on a non-struct value), not an actual internal
+      // invariant violation. Confirmed via `x.foo()` on an int, a string,
+      // and an `int*`.
+      reportError(Node.getLoc(),
+                  "Cannot call method '" + MethodName + "' on type '" +
+                      BaseTy->getName() +
+                      "' -- only struct instances have methods.",
+                  {});
+      setType(&Node, nullptr);
+      return;
     }
   }
-  // Non-module, non-struct method call — be permissive.
+  // BaseTy itself is null here -- the base expression already failed to
+  // resolve/type-check on its own (e.g. an unknown variable), which raised
+  // its own diagnostic earlier in this same visit. DiagnosticEngine::add()'s
+  // one-error-per-line cascade suppression means calling reportError() again
+  // here is harmless (silently dropped) if that's what happened; it's a
+  // cheap safety net against ever reaching Codegen's fatal-error fallback
+  // with zero diagnostic printed at all, in case some future code path
+  // reaches here with a null BaseTy that ISN'T already covered elsewhere.
+  reportError(Node.getLoc(),
+              "Cannot determine the type of this method call's target -- "
+              "the expression before '." + MethodName + "' has no known type.",
+              {});
   setType(&Node, nullptr);
 }
 
@@ -1825,6 +2080,47 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
     Init->accept(*this);
   if (Node.getInitExpr())
     Node.getInitExpr()->accept(*this);
+
+  // Neither the init list's LENGTH nor its elements' TYPES were ever
+  // checked against the declared array type here -- unlike the sibling
+  // ArrayLiteralExprAST (visitArrayLiteral, just below), whose elements
+  // ARE cross-checked against each other, and struct-literal field init,
+  // whose values ARE checked against each field's declared type.
+  // `int[3] arr = [1, "two", 3]` compiled with zero diagnostic and was
+  // confirmed to be a genuine type-safety hole, not just a missing check:
+  // reading `arr[1] to string` back printed the string literal's raw
+  // pointer bits reinterpreted as an int. `int[3] arr = [1,2,3,4,5]` (5
+  // elements into a declared size-3 array) also compiled clean.
+  if (!Node.getInitList().empty()) {
+    if (Node.getInitList().size() != static_cast<size_t>(Node.getSize())) {
+      reportError(Node.getLoc(),
+                  "Array declared with size " + std::to_string(Node.getSize()) +
+                      " but initialized with " +
+                      std::to_string(Node.getInitList().size()) +
+                      " element" +
+                      (Node.getInitList().size() == 1 ? "" : "s") + ".",
+                  {},
+                  "Change the declared size to match the initializer list, "
+                  "or add/remove elements so the counts agree.");
+    }
+    // ExprAST has no base-class getLoc() (each concrete node declares its
+    // own, inconsistently), so this uses the array declaration's own
+    // location rather than each individual initializer's -- matching what
+    // visitArrayLiteral does just below for its own analogous mismatch.
+    TurfTypePtr DeclaredElemTy = Node.getElementTypePtr();
+    for (const auto &Init : Node.getInitList()) {
+      TurfTypePtr InitTy = getType(Init.get());
+      if (DeclaredElemTy && InitTy &&
+          !typesCompatible(InitTy.get(), DeclaredElemTy.get())) {
+        reportError(Node.getLoc(),
+                    "Cannot initialize an array of '" +
+                        DeclaredElemTy->getName() + "' with a value of type '" +
+                        InitTy->getName() + "'.",
+                    {});
+      }
+    }
+  }
+
   setType(&Node, makeArrayType(Node.getElementTypePtr(), Node.getSize()));
 }
 

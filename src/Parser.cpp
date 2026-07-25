@@ -57,8 +57,22 @@ struct SymbolScopeGuard {
   }
 };
 
-// Reads the next token from the Lexer and updates CurTok
-int getNextToken() { return CurTok = gettok(); }
+// Reads the next token from the Lexer and updates CurTok.
+//
+// Also maintains g_braceDepth (see Lexer.h/.cpp): consuming '{'/'('/'['
+// (i.e. CurTok is one of those RIGHT BEFORE we advance past it) increments
+// it, consuming '}'/')'/']' decrements it. This is the single choke point
+// every token advance in the entire parser goes through, which is exactly
+// why it's the right place for this: it gives SkipToNextTopLevelBoundary()
+// an always-accurate nesting depth with zero per-callsite bookkeeping,
+// regardless of how deeply a parse failure is nested.
+int getNextToken() {
+  if (CurTok == '{' || CurTok == '(' || CurTok == '[')
+    g_braceDepth++;
+  else if ((CurTok == '}' || CurTok == ')' || CurTok == ']') && g_braceDepth > 0)
+    g_braceDepth--;
+  return CurTok = gettok();
+}
 
 void InitializePrecedence() {
   // Cast
@@ -958,11 +972,12 @@ std::unique_ptr<ExprAST> ParseUnary() {
 
   // Bitwise NOT: ~expr
   if (CurTok == '~') {
+    SourceLocation Loc = CurLoc;
     getNextToken(); // consume '~'
     auto Operand = ParseUnary();
     if (!Operand)
       return nullptr;
-    return std::make_unique<UnaryExprAST>('~', std::move(Operand));
+    return std::make_unique<UnaryExprAST>(Loc, '~', std::move(Operand));
   }
   if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
     int OpType = CurTok;
@@ -1006,10 +1021,11 @@ std::unique_ptr<ExprAST> ParseUnary() {
     return ParsePrimary();
 
   int Opc = CurTok;
+  SourceLocation Loc = CurLoc;
   getNextToken();
 
   if (auto Operand = ParseUnary())
-    return std::make_unique<UnaryExprAST>(Opc, std::move(Operand));
+    return std::make_unique<UnaryExprAST>(Loc, Opc, std::move(Operand));
 
   return nullptr;
 }
@@ -1278,9 +1294,18 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       getNextToken(); // eat ':'
 
       // Parse the body of the otherwise arm as a sequence of statements
-      // terminated by '}' (the closing brace of the compare block).
+      // terminated by '}' (the closing brace of the compare block). Also
+      // terminate on TOK_OTHERWISE/TOK_MATCHES: those tokens can only validly
+      // appear here as the *next arm's* header (a duplicate 'otherwise', or a
+      // 'matches' arm wrongly placed after 'otherwise'), never as the start of
+      // a real statement. Without this check they used to fall through to
+      // ParseExpression() -> ParsePrimaryBase()'s generic "Unexpected token"
+      // fallback, masking the specific CompareError diagnostics below (which
+      // were unreachable dead code for this exact input shape) behind a vague
+      // message pointing at the wrong problem.
       std::vector<std::unique_ptr<ExprAST>> OtherStmts;
-      while (CurTok != '}' && CurTok != TOK_EOF) {
+      while (CurTok != '}' && CurTok != TOK_EOF &&
+             CurTok != TOK_OTHERWISE && CurTok != TOK_MATCHES) {
         if (CurTok == ';') { getNextToken(); continue; }
         if (CurTok == TOK_MUTABLE || CurTok == TOK_IMMUTABLE) {
           auto E = ParseLetStatement(CurTok == TOK_IMMUTABLE);
@@ -1306,7 +1331,14 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       }
       OtherBody = std::make_unique<BlockExprAST>(std::move(OtherStmts));
 
-      // After 'otherwise', only '}' is valid (it must be the last arm)
+      // After 'otherwise', only '}' is valid (it must be the last arm).
+      // Distinguish a duplicate 'otherwise' from a 'matches'/other arm placed
+      // after it -- both stop the body loop above on the same condition, but
+      // deserve their own specific message rather than collapsing to one.
+      if (CurTok == TOK_OTHERWISE) {
+        CompareError(CurLoc, "Duplicate 'otherwise' arm in compare.").raise();
+        return nullptr;
+      }
       if (CurTok != '}') {
         // There's something after otherwise — likely another matches arm
         CompareError(CurLoc,
@@ -1764,6 +1796,32 @@ std::unique_ptr<ExprAST> ParseEnumDecl() {
       LogErrorAt(CurLoc, "Expected variant name in enum definition");
       return nullptr;
     }
+
+    // Reject a variant name reused from earlier in this same enum. Mirrors
+    // the identical check ParseStructDecl already does for field names
+    // (see its own doc comment just above the equivalent loop there).
+    // Without this, a duplicate variant silently compiled: the underlying
+    // integer values are still assigned positionally (first "Red" = 0,
+    // second "Red" = 2 in `enum Color { Red, Green, Red }`), but every
+    // NAMED reference to "Red" (`Color::Red`, a `matches Color::Red:` arm,
+    // ...) always resolves to the LAST match, permanently orphaning the
+    // first one -- it becomes a real, distinct enum value with no name that
+    // can ever construct or match it again. Confirmed via
+    // `enum Color { Red, Green, Red }`: `Color::Red to int` returns 2, not
+    // 0, with zero diagnostic anywhere.
+    std::string VariantName = IdentifierStr;
+    SourceLocation VariantLoc = CurLoc;
+    for (const auto &Existing : Variants) {
+      if (Existing == VariantName) {
+        LogErrorAt(VariantLoc,
+                   "Enum '" + Name + "' already has a variant named '" +
+                       VariantName + "'."
+                       "\n  Hint: Variant names must be unique within an "
+                       "enum -- rename one of them.");
+        return nullptr;
+      }
+    }
+
     Variants.push_back(IdentifierStr);
     getNextToken(); // eat variant name
 
@@ -2063,6 +2121,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
       return nullptr;
     }
     std::string ParamName = IdentifierStr;
+    SourceLocation ParamNameLoc = CurLoc;
     getNextToken(); // consume parameter name
 
     if (CurTok != TOK_COLON) {
@@ -2094,7 +2153,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
       return nullptr;
     }
 
-    Params.push_back({ParamType, ParamName});
+    Params.push_back({ParamType, ParamName, ParamNameLoc});
 
     if (CurTok == ',')
       getNextToken();
@@ -2173,6 +2232,13 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
     SourceLocation SavedCurLoc;
     std::string SavedFilename, SavedIdentifierStr, SavedStringVal;
     double SavedNumVal; long long SavedIntVal; bool SavedBoolVal;
+    // SourceLines is what printDiag()'s caret snippet is snapshotted from
+    // (see DiagnosticEngine::add() in Lexer.cpp) -- without saving/restoring
+    // it here alongside SourceFilename, it never got populated for the
+    // imported file at all, so any diagnostic raised while parsing an import
+    // would snapshot the IMPORTING file's line text (whatever line happened
+    // to share the same line number) instead of the module's real line.
+    std::vector<std::string> SavedSourceLines;
 
     LexerStateGuard() {
       SavedSourceFile = SourceFile;
@@ -2187,6 +2253,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
       SavedBoolVal = BoolVal;
       SavedIdentifierStr = IdentifierStr;
       SavedStringVal = StringVal;
+      SavedSourceLines = SourceLines;
     }
     ~LexerStateGuard() {
       SourceFile = SavedSourceFile;
@@ -2201,6 +2268,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
       BoolVal = SavedBoolVal;
       IdentifierStr = SavedIdentifierStr;
       StringVal = SavedStringVal;
+      SourceLines = SavedSourceLines;
     }
   } LGuard;
 
@@ -2211,6 +2279,24 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
   CurCol = 0;
   CurLoc = {1, 1};
   SetLastChar(' ');
+
+  // Populate SourceLines for THIS file so any diagnostic raised while
+  // parsing it snapshots the module's own line text, not the importer's
+  // (see LexerStateGuard's doc comment above). Mirrors the read loop
+  // main.cpp uses to populate SourceLines for the top-level input file.
+  SourceLines.clear();
+  {
+    std::ifstream LineReader(Path);
+    std::string Line;
+    while (std::getline(LineReader, Line))
+      SourceLines.push_back(Line);
+  }
+  // Also seed the persistent cross-pass cache -- see AllSourceLines' doc
+  // comment in Lexer.h. Unlike SourceLines, this entry survives past the
+  // LexerStateGuard's restore below, so Resolver/TypeChecker/Codegen
+  // diagnostics about content inside THIS module can still find their line.
+  AllSourceLines[Path] = SourceLines;
+
   getNextToken();
 
   std::vector<std::unique_ptr<ExprAST>> Exprs;

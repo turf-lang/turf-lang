@@ -179,17 +179,31 @@ public:
 // Type Error : Errors generated due to incompatible types
 class TypeError : public TurfError {
 public:
-  TypeError(SourceLocation Loc, const std::string &Msg)
+  // CustomHint, when non-empty, replaces the generic default below instead
+  // of stacking alongside it. TypeChecker::reportError() is the single
+  // production path every TypeChecker diagnostic funnels through
+  // (TypeChecker.h's productionErrorHandler always constructs a TypeError
+  // regardless of what kind of semantic problem actually occurred -- a
+  // duplicate `matches` pattern, a non-exhaustive enum, an arity mismatch,
+  // and a genuine "int vs string" type clash all render as "Type
+  // mismatch!" with this same hint), so several call sites used to embed
+  // their own much more specific hint directly IN THE MESSAGE TEXT as the
+  // only way to say anything more useful -- producing a redundant,
+  // sometimes literally doubled ("Hint: ... \n\n Hint: ...") diagnostic.
+  TypeError(SourceLocation Loc, const std::string &Msg,
+           const std::string &CustomHint = "")
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Type mismatch!\n" + Colors::RESET +
                       "  " + Msg,
-                  "Check that you're not mixing incompatible types "
-                  "(like assigning a string to an int variable).") {
+                  CustomHint.empty()
+                      ? "Check that you're not mixing incompatible types "
+                        "(like assigning a string to an int variable)."
+                      : CustomHint) {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
   }
 };
 
-// String Conversion Error : Unsupported type passed to string(...)
+// String Conversion Error : Unsupported type cast with `... to string`
 class StringConversionError : public TurfError {
 public:
   StringConversionError(SourceLocation Loc, const std::string &SrcTypeName)
@@ -198,9 +212,9 @@ public:
                      SrcTypeName + Colors::BRIGHT_RED + "' to a string!\n" +
                      Colors::RESET,
             "Only these conversions are supported:\n"
-            "    string(int)    - turns a whole number into text\n"
-            "    string(double) - turns a decimal number into text\n"
-            "    string(bool)   - gives you \"true\" or \"false\"") {
+            "    intExpr to string    - turns a whole number into text\n"
+            "    doubleExpr to string - turns a decimal number into text\n"
+            "    boolExpr to string   - gives you \"true\" or \"false\"") {
     Category_ = SLM::ErrorCategory::STRING_CONVERSION;
   }
 };
@@ -396,6 +410,42 @@ public:
   }
 };
 
+/**
+ * @brief A struct instance method call (`x.method(...)`) names a method that
+ *        doesn't exist on that struct at all -- not "wrong argument count",
+ *        genuinely no method by that name.
+ *
+ * Before this class existed, TypeChecker::visitMethodCall()'s struct-method
+ * branch had a deliberate "be permissive" fallback for this exact case
+ * (Node.ResolvedCallTarget simply stayed null, with a comment saying so).
+ * That silence propagated all the way to Codegen: MethodCallExprAST::
+ * codegen()'s struct-method path does `if (!CalleeF) return nullptr;` with
+ * NO diagnostic of its own either. The net effect, confirmed via
+ * `l.nonexistentMethod(5)` on a `List<int>`: the compiler reports success,
+ * and the method call simply VANISHES from the compiled program -- no
+ * error, no warning, no runtime crash, just silently miscompiled code that
+ * looks like it worked. This is the struct-method counterpart of
+ * UnknownFunctionError (free functions) / the Resolver's module-method
+ * UnknownFunctionError usage (`module.method(...)`) -- both of those paths
+ * already raised a real error for the equivalent mistake; only the struct
+ * path was silently permissive.
+ */
+class StructMethodNotFoundError : public TurfError {
+public:
+  StructMethodNotFoundError(SourceLocation Loc, const std::string &StructName,
+                            const std::string &MethodName,
+                            const RankedSuggestions &Suggestions)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + StructName +
+                           Colors::BRIGHT_RED + "' has no method named '" +
+                           Colors::CYAN + MethodName + Colors::BRIGHT_RED +
+                           "'." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
+    Hint_ = suggestionsOrFallback(Suggestions,
+      "Double-check the spelling, or make sure the method is declared as "
+      "`fn<T> " + StructName + "." + MethodName + "(...)`.");
+  }
+};
+
 /// Emitted by the Resolver's Pass 2 when a struct field's NamedType reference
 /// does not match any struct registered in Pass 1.
 class UnknownTypeError : public TurfError {
@@ -470,8 +520,8 @@ public:
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     Hint_ = suggestionsOrFallback(Suggestions,
       "Did you forget to create this variable? You have to "
-      "create it before you can use it, like this: `int " +
-      Name + " = 5;`");
+      "create it before you can use it, like this: `mut " +
+      Name + ": int = 5;`");
   }
 };
 
@@ -486,8 +536,8 @@ public:
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     Hint_ = suggestionsOrFallback(Suggestions,
       "Did you forget to create this variable? You have to "
-      "create it before you can use it, like this: `int " +
-      Name + " = 5;`");
+      "create it before you can use it, like this: `mut " +
+      Name + ": int = 5;`");
   }
 };
 
@@ -507,6 +557,46 @@ public:
     Hint_ = "If you want to change its value, just do `" + Name +
             " = new_value;` without the type (like 'int' or 'string'). If "
             "you want a new variable, give it a different name!";
+    RelatedLocations_.push_back({PrevLoc, "first declared here"});
+  }
+};
+
+/**
+ * @brief A struct or enum name collides with one already declared -- either
+ *        in the same file, or in a DIFFERENT (possibly unrelated) module
+ *        pulled in transitively via 'import'.
+ *
+ * Unlike functions (which are namespaced per-module: `io.printline()` vs.
+ * `math.printline()` can coexist), struct and enum names share ONE flat
+ * namespace across the current file and every transitively-imported module
+ * -- this is also why `List<int>` works without a `list.` prefix in the
+ * first place (see list.tr). The tradeoff is that two unrelated modules
+ * declaring a same-named struct/enum silently collide: before this class
+ * existed, the collision went undetected all the way to Codegen, where
+ * LLVM's `StructType::create` refuses two distinct opaque types sharing one
+ * name and renames the second to "Name.1" -- producing a crash reported as
+ * "Internal compiler error: generated LLVM IR is invalid... this is a
+ * compiler bug, please report it," which is both alarming and wrong: it's a
+ * legitimate, avoidable naming collision, not a compiler bug. Confirmed via
+ * two modules each declaring `struct Point`, imported together.
+ */
+class DuplicateTypeNameError : public TurfError {
+public:
+  DuplicateTypeNameError(SourceLocation NewLoc, const std::string &Name,
+                         const std::string &Kind, SourceLocation PrevLoc)
+      : TurfError(NewLoc,
+                  Colors::BRIGHT_RED + "A " + Kind + " named '" +
+                      Colors::CYAN + Name + Colors::BRIGHT_RED +
+                      "' is already declared.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    Message += "\n  " + Colors::BRIGHT_BLUE +
+               "Note: struct/enum names are shared across your file and "
+               "every module you import (unlike functions, which are "
+               "namespaced per-module), so this name can only be used once." +
+               Colors::RESET;
+    Hint_ = "Rename one of the two '" + Name +
+            "' declarations, or rename the import (not yet supported) to "
+            "tell them apart.";
     RelatedLocations_.push_back({PrevLoc, "first declared here"});
   }
 };
@@ -648,6 +738,50 @@ public:
                         Colors::CYAN + "'return'" + Colors::BRIGHT_YELLOW + ".",
                     "If this is intentional, consider adding a comment. "
                     "Otherwise, add a 'break' or a proper exit condition.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
+/**
+ * @brief A `for` loop's induction variable is never modified by its `step`
+ *        clause or its body.
+ *
+ * `for i in start..end step <expr> { body }` desugars to
+ * `init; while (ascending ? i < end : i > end) { body; step }` (see
+ * ForExprAST::codegen()'s doc comment in Codegen.cpp) -- nothing re-checks
+ * `start`/`end` each iteration, and nothing forces `step` to actually touch
+ * `i`. If neither `step` nor `body` ever assigns to `i` (directly, via
+ * `+=`/`-=`/etc., or via `++`/`--`), `i`'s value is frozen at `start` for
+ * the entire loop, so the loop's fate was already decided before it began:
+ * either the `start`-vs-`end` comparison was true and it runs forever, or it
+ * was false and the body never executes even once. Concretely reproduced
+ * via `for i in 0..10 step j += 10 { }` (step touches an unrelated variable
+ * `j`, never `i`) -- `i` stays 0 forever, `0 < 10` stays true forever, and
+ * the loop never terminates at runtime.
+ *
+ * Deliberately conservative to avoid false positives: suppressed if `i`'s
+ * address is ever taken anywhere in `step`/`body` (some function could still
+ * be mutating it through a pointer, which this check can't trace) -- see
+ * MayModifyVariable()'s doc comment in Lint.cpp.
+ */
+class StuckForLoopVariableWarning : public TurfWarning {
+public:
+  StuckForLoopVariableWarning(SourceLocation Loc, const std::string &VarName,
+                              const std::string &Outcome)
+      : TurfWarning(
+            Loc,
+            Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " +
+                Colors::RESET + Colors::BRIGHT_YELLOW +
+                "The loop variable '" + Colors::CYAN + VarName +
+                Colors::BRIGHT_YELLOW +
+                "' is never changed by this loop's 'step' or its body, so " +
+                Outcome + Colors::RESET,
+            "Make sure 'step' (or something in the body) actually updates '" +
+                VarName +
+                "'. If a DIFFERENT variable is meant to control when the "
+                "loop ends, use 'while' instead of 'for' -- 'for' always "
+                "iterates its own induction variable, it doesn't watch "
+                "other variables for you.") {
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
@@ -917,7 +1051,7 @@ public:
                       Colors::CYAN + ModuleName + "." + MethodName +
                       Colors::BRIGHT_RED + "' for the arguments you gave.\n" +
                       Colors::RESET + "  " + Detail,
-                  "Hint: Check the argument types and count. Use the "
+                  "Check the argument types and count. Use the "
                   "correct overload, e.g. 'math.abs(int)' or "
                   "'math.abs(double)'.") {
     Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
@@ -946,7 +1080,7 @@ public:
                       Colors::CYAN + VarName + Colors::BRIGHT_RED +
                       "' of type '" + Colors::CYAN + TypeName +
                       Colors::BRIGHT_RED + "'." + Colors::RESET,
-                  "Hint: 'null' is only valid for pointer types. "
+                  "'null' is only valid for pointer types. "
                   "If you want a zero value, use the default initializer "
                   "(declare without '= null').") {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;

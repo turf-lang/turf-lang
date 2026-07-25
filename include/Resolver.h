@@ -185,6 +185,14 @@ private:
   ResolverSymbolTable SymTable_;
   int FunctionNestingDepth_ = 0;
   std::vector<std::string> ModuleStack_;
+  // The enclosing function's own `fn<...>` type parameter names, set for the
+  // duration of visitFuncDef()'s body traversal and cleared on exit (a plain
+  // member, not a stack, is safe since FunctionNestingDepth_ already forbids
+  // nested function definitions -- see NestedFunctionError). Consulted by
+  // visitVarDecl()'s validateNamedType() call so a bare generic type
+  // parameter used as a local variable's declared type (`fn<T> f() { mut x:
+  // T = ...; }`) isn't wrongly flagged as an unknown type.
+  std::vector<std::string> CurrentFuncTypeParams_;
 
   // ── Internal helpers ───────────────────────────────────────────────────────
 

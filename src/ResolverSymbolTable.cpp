@@ -236,8 +236,14 @@ ResolverSymbolTable::getAllModuleFunctionNames() const {
 
 // ─── Struct name registry ────────────────────────────────────────────────────────────
 
-void ResolverSymbolTable::registerStruct(const std::string &Name) {
-  RegisteredStructs_.insert(Name);
+std::optional<ResolverSourceLocation>
+ResolverSymbolTable::registerStruct(const std::string &Name,
+                                    ResolverSourceLocation Loc) {
+  auto It = RegisteredStructs_.find(Name);
+  if (It != RegisteredStructs_.end())
+    return It->second; // duplicate -- caller raises DuplicateTypeNameError
+  RegisteredStructs_.emplace(Name, Loc);
+  return std::nullopt;
 }
 
 bool ResolverSymbolTable::isKnownStruct(const std::string &Name) const {
@@ -245,8 +251,10 @@ bool ResolverSymbolTable::isKnownStruct(const std::string &Name) const {
 }
 
 std::vector<std::string> ResolverSymbolTable::getAllStructNames() const {
-  std::vector<std::string> Names(RegisteredStructs_.begin(),
-                                  RegisteredStructs_.end());
+  std::vector<std::string> Names;
+  Names.reserve(RegisteredStructs_.size());
+  for (const auto &Pair : RegisteredStructs_)
+    Names.push_back(Pair.first);
   std::sort(Names.begin(), Names.end());
   return Names;
 }
@@ -254,8 +262,16 @@ std::vector<std::string> ResolverSymbolTable::getAllStructNames() const {
 
 // ─── Enum registry ──────────────────────────────────────────────────────────
 
-void ResolverSymbolTable::registerEnumType(const std::string& Name, std::shared_ptr<TurfEnumType> ET) {
+std::optional<ResolverSourceLocation>
+ResolverSymbolTable::registerEnumType(const std::string &Name,
+                                      ResolverSourceLocation Loc,
+                                      std::shared_ptr<TurfEnumType> ET) {
+  auto LocIt = EnumDeclLocs_.find(Name);
+  if (LocIt != EnumDeclLocs_.end())
+    return LocIt->second; // duplicate -- caller raises DuplicateTypeNameError
+  EnumDeclLocs_.emplace(Name, Loc);
   RegisteredEnums_[Name] = std::move(ET);
+  return std::nullopt;
 }
 
 std::shared_ptr<TurfEnumType> ResolverSymbolTable::lookupEnumType(const std::string& Name) const {

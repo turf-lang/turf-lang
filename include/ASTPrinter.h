@@ -30,42 +30,9 @@
 #include <iostream>
 #include <string>
 
-/**
- * @brief Render a binary/unary operator token code as a human-readable
- *        string, for debug-dump display only (parsing/codegen never go
- *        through this — they switch on the raw token code directly).
- *
- * A single-character operator (`+`, `-`, `<`, `&`, ...) is genuinely a
- * printable ASCII value and can be shown as-is. Every multi-character
- * operator (`==`, `&&`, `**`, `++`, ...), however, is tokenized to a
- * negative int constant (see Lexer.h's enum) that is NOT a printable
- * character -- `static_cast<char>(Op)` on one of those produces garbage
- * (typically the Unicode replacement character when printed). This used to
- * be visible directly in `--dump-ast`/`--dump-resolved` output as
- * `BinaryExpr(op='<63>')` for something as ordinary as `p == &n`, and (in a
- * DIFFERENT copy of this exact same bug, already fixed elsewhere this
- * session — see tests/03_typechecker/fail_logical_operator_non_numeric.tr)
- * inside a real user-facing error message for `&&`/`||`.
- */
-inline std::string OpToDisplayString(int Op) {
-  switch (Op) {
-    case TOK_EQ: return "==";
-    case TOK_NEQ: return "!=";
-    case TOK_LEQ: return "<=";
-    case TOK_GEQ: return ">=";
-    case TOK_AND: return "&&";
-    case TOK_OR: return "||";
-    case TOK_PLUS_PLUS: return "++";
-    case TOK_MINUS_MINUS: return "--";
-    case TOK_POWER: return "**";
-    case TOK_LSHIFT: return "<<";
-    case TOK_RSHIFT: return ">>";
-    default:
-      if (Op >= 0 && Op <= 127 && isprint(Op))
-        return std::string(1, static_cast<char>(Op));
-      return "op#" + std::to_string(Op);
-  }
-}
+// OpToDisplayString() now lives in Lexer.h (promoted there once
+// TypeChecker.cpp needed the identical fix for its own diagnostics) --
+// transitively available here via AST.h's include of Lexer.h.
 
 class ASTPrinter : public ASTVisitor {
 public:

@@ -141,6 +141,110 @@ static bool IsZeroLiteral(const ExprAST *E) {
   return false;
 }
 
+/**
+ * @brief Conservatively determine whether @p E might assign a new value to
+ *        the variable named @p VarName, anywhere in its subtree.
+ *
+ * Used by LintFor()'s "loop variable never advances" check (see
+ * StuckForLoopVariableWarning's doc comment in Errors.h). This function MUST
+ * be conservative in the "return true" direction: a false negative (failing
+ * to notice a real modification, so the warning wrongly fires) is a
+ * correctness bug -- a false positive suppression (returning true when
+ * nothing actually modifies the variable) just silently skips the warning,
+ * which is safe. Concretely: taking the variable's address anywhere
+ * (`&i`) unconditionally returns true, since a function receiving that
+ * pointer could mutate it in a way this purely-structural check can't trace.
+ */
+static bool MayModifyVariable(const ExprAST *E, const std::string &VarName) {
+  if (!E)
+    return false;
+
+  auto IsTargetVar = [&](const ExprAST *Candidate) {
+    auto *V = dynamic_cast<const VariableExprAST *>(Candidate);
+    return V && V->getName() == VarName;
+  };
+
+  if (auto *Assign = dynamic_cast<const AssignmentExprAST *>(E)) {
+    if (IsTargetVar(Assign->getLHS()))
+      return true;
+    return MayModifyVariable(Assign->getLHS(), VarName) ||
+           MayModifyVariable(Assign->getRHS(), VarName);
+  }
+  if (auto *CAssign = dynamic_cast<const CompoundAssignmentExprAST *>(E)) {
+    if (IsTargetVar(CAssign->getLHS()))
+      return true;
+    return MayModifyVariable(CAssign->getLHS(), VarName) ||
+           MayModifyVariable(CAssign->getRHS(), VarName);
+  }
+  if (auto *Post = dynamic_cast<const PostfixExprAST *>(E)) {
+    if (IsTargetVar(Post->getOperand()))
+      return true;
+    return MayModifyVariable(Post->getOperand(), VarName);
+  }
+  if (auto *Addr = dynamic_cast<const AddressOfExprAST *>(E)) {
+    // See doc comment: unconditionally conservative once the address of ANY
+    // variable is taken inside the loop, not just VarName -- a pointer to
+    // some OTHER variable could, in principle, alias VarName's storage in
+    // ways this structural check has no way to rule out (e.g. passed to an
+    // extern/FFI function). Narrowing this to only IsTargetVar(Operand)
+    // would be more precise but riskier; erring conservative here is cheap
+    // since it only costs a missed warning, never a wrong one.
+    (void)Addr;
+    return true;
+  }
+  if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
+    for (const auto &Child : Blk->getExpressions())
+      if (MayModifyVariable(Child.get(), VarName))
+        return true;
+    return false;
+  }
+  if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
+    for (const auto &B : If->getBranches()) {
+      if (MayModifyVariable(B.Cond.get(), VarName) ||
+          MayModifyVariable(B.Body.get(), VarName))
+        return true;
+    }
+    return MayModifyVariable(If->getElseBody(), VarName);
+  }
+  if (auto *W = dynamic_cast<const WhileExprAST *>(E)) {
+    return MayModifyVariable(W->getCond(), VarName) ||
+           MayModifyVariable(W->getBody(), VarName);
+  }
+  if (auto *F = dynamic_cast<const ForExprAST *>(E)) {
+    // A nested for-loop reusing VarName as ITS OWN induction variable would
+    // shadow the outer one -- assignments inside it wouldn't actually touch
+    // the outer VarName. Not worth special-casing: treating it as "might
+    // modify" here is the conservative (safe) direction anyway.
+    return MayModifyVariable(F->getStart(), VarName) ||
+           MayModifyVariable(F->getEnd(), VarName) ||
+           MayModifyVariable(F->getStep(), VarName) ||
+           MayModifyVariable(F->getBody(), VarName);
+  }
+  if (auto *Ret = dynamic_cast<const ReturnExprAST *>(E))
+    return MayModifyVariable(Ret->getVal(), VarName);
+  if (auto *Call = dynamic_cast<const FuncCallExprAST *>(E)) {
+    for (const auto &Arg : Call->getArgs())
+      if (MayModifyVariable(Arg.get(), VarName))
+        return true;
+    return false;
+  }
+  if (auto *MCall = dynamic_cast<const MethodCallExprAST *>(E)) {
+    if (MayModifyVariable(MCall->getBase(), VarName))
+      return true;
+    for (const auto &Arg : MCall->getArgs())
+      if (MayModifyVariable(Arg.get(), VarName))
+        return true;
+    return false;
+  }
+  if (auto *Bin = dynamic_cast<const BinaryExprAST *>(E))
+    return MayModifyVariable(Bin->getLHS(), VarName) ||
+           MayModifyVariable(Bin->getRHS(), VarName);
+  if (auto *Un = dynamic_cast<const UnaryExprAST *>(E))
+    return MayModifyVariable(Un->getOperand(), VarName);
+
+  return false;
+}
+
 // Forward declarations
 static void LintBinaryExpr(const BinaryExprAST *Bin);
 static void LintAssignment(const AssignmentExprAST *Assign);
@@ -346,6 +450,50 @@ static void LintWhile(const WhileExprAST *While) {
 static void LintFor(const ForExprAST *For) {
   if (!For)
     return;
+
+  // Loop variable never advances: neither 'step' nor the body ever assigns
+  // to it. See StuckForLoopVariableWarning's doc comment in Errors.h for why
+  // this is deterministically knowable (not a general halting-problem
+  // question) and MayModifyVariable()'s doc comment above for the
+  // conservative-false-negative-only guarantee that keeps it false-positive
+  // free.
+  const std::string &VarName = For->getVarName();
+  bool Advances = MayModifyVariable(For->getStep(), VarName) ||
+                  MayModifyVariable(For->getBody(), VarName);
+
+  if (!Advances) {
+    // Try to say whether this specifically runs forever or never runs, by
+    // comparing literal start/end bounds -- purely a wording nicety; when
+    // start/end aren't both literals (the common case), fall back to the
+    // honest "one or the other, can't tell which" phrasing.
+    std::string Outcome =
+        "this loop's fate was already decided before it started -- it "
+        "either runs forever or never runs at all, depending on how '" +
+        VarName + "' compares to the end value.";
+
+    auto *StartLit = dynamic_cast<const NumberExprAST *>(For->getStart());
+    auto *EndLit = dynamic_cast<const NumberExprAST *>(For->getEnd());
+    if (StartLit && EndLit) {
+      double StartV = StartLit->isInteger()
+                          ? static_cast<double>(StartLit->getIntVal())
+                          : StartLit->getDoubleVal();
+      double EndV = EndLit->isInteger()
+                        ? static_cast<double>(EndLit->getIntVal())
+                        : EndLit->getDoubleVal();
+      if (StartV < EndV)
+        Outcome = "it will loop forever: '" + VarName +
+                  "' starts below the end value and never changes.";
+      else if (StartV > EndV)
+        Outcome = "it will loop forever: '" + VarName +
+                  "' starts above the end value and never changes "
+                  "(descending range).";
+      else
+        Outcome = "the body will never execute even once: '" + VarName +
+                  "' already equals the end value at the start.";
+    }
+
+    StuckForLoopVariableWarning(For->getLoc(), VarName, Outcome).warn();
+  }
 
   LintExpression(const_cast<ExprAST *>(For->getStart()));
   LintExpression(const_cast<ExprAST *>(For->getEnd()));

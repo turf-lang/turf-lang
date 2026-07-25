@@ -2,6 +2,7 @@
 #define LEXER_H
 
 #include "ErrorCategory.h" // SLM::ErrorCategory -- lightweight, no LLVM/AST deps
+#include <cctype>
 #include <csetjmp>
 #include <fstream>
 #include <map>
@@ -10,9 +11,18 @@
 #include <string>
 #include <vector>
 
+// Filename defaults to "" (rather than being mandatory) because SourceLocation
+// is constructed via 2-argument aggregate-init ({Line, Col}) at hundreds of
+// call sites across the codebase that predate this field -- those all still
+// compile and just get an empty Filename, meaning "attribute this location to
+// whatever file was being compiled/parsed when the diagnostic fired" (the
+// DiagnosticEngine::add()-time fallback -- see its doc comment). Locations
+// captured from CurLoc during lexing (the overwhelming majority of real AST
+// node locations) DO get a real Filename -- see gettok()'s CurLoc assignment.
 struct SourceLocation {
   int Line;
   int Col;
+  std::string Filename;
 };
 
 // Carries the location of a contextually relevant secondary site alongside
@@ -33,6 +43,18 @@ extern std::string IdentifierStr;
 extern std::string StringVal;
 
 extern std::vector<std::string> SourceLines;
+// Persistent, cross-pass cache of every file's source lines, keyed by the
+// exact path string used as SourceFilename while that file was being parsed
+// (main input file AND every imported module). Unlike SourceLines (which is
+// transient -- overwritten while parsing an import, then restored back to
+// the importer's content once that import finishes), this is never cleared
+// during a compile, so a diagnostic raised by a LATER pass (Resolver,
+// TypeChecker, Codegen -- all of which run after every file has already
+// finished parsing, at which point SourceLines has long since reverted to
+// the main file) can still recover the correct source line for a location
+// that originated inside an imported module. Indexed by DiagnosticEngine at
+// print time via each Diag's Filename field.
+extern std::map<std::string, std::vector<std::string>> AllSourceLines;
 extern SourceLocation CurLoc;
 extern int CurLine;
 extern int CurCol;
@@ -52,10 +74,19 @@ extern jmp_buf g_recoverJmp;
 extern bool g_recoverActive; // true only while inside a setjmp guard
 extern bool g_protoOnlyPass; // true during sub-pass 3a: emit prototypes only
 
+// Current '{'/'('/'[' nesting depth relative to the top level (0), tracked
+// globally by getNextToken() as each token is consumed. See its definition
+// in Lexer.cpp for the full story (SkipToNextTopLevelBoundary()'s parse-
+// error recovery in main.cpp is what actually consumes this).
+extern int g_braceDepth;
+
 // When true, the SLM is loaded and AI suggestions are generated for errors.
 // Controlled by the --smart CLI flag. Default is off for deterministic output.
 extern bool g_AIEnabled;
 extern std::string SourceFilename;
+// The original top-level file passed to the compiler -- see its definition
+// in Lexer.cpp for why this is distinct from SourceFilename.
+extern std::string MainSourceFilename;
 
 // DiagnosticEngine
 // Collects errors and warnings, guaranteeing at most one primary error per
@@ -75,6 +106,12 @@ public:
     // LogErrorAt() path), which the SLM layer falls back to classifyError()
     // for, same as before this field existed.
     SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL;
+    // Which file Loc's Line/Col are relative to -- defaulted at add()-time
+    // from Loc.Filename, falling back to the current SourceFilename if Loc
+    // never had one attached (e.g. a hand-built {0,0}-style location). Used
+    // to select the right entry out of AllSourceLines at print time, since
+    // Line numbers alone are ambiguous across files.
+    std::string Filename;
   };
 
   // Record a diagnostic. Errors on a line that already has an error are
@@ -187,5 +224,44 @@ void resetLexer();
 void LogErrorAt(SourceLocation Loc, const std::string &Msg);
 int GetLastChar();
 void SetLastChar(int c);
+
+/**
+ * @brief Render a binary/unary operator token code as a human-readable
+ *        string (e.g. for --dump-ast output and diagnostic messages).
+ *
+ * A single-character operator (`+`, `-`, `<`, `&`, ...) is genuinely a
+ * printable ASCII value and can be shown as-is. Every multi-character
+ * operator (`==`, `&&`, `**`, `++`, ...), however, tokenizes to a negative
+ * int constant (see the enum above) that is NOT a printable character --
+ * `static_cast<char>(Op)` on one of those produces garbage (typically the
+ * Unicode replacement character when printed). This has repeatedly shown up
+ * as a real bug at multiple independent call sites: `--dump-ast` output
+ * like `BinaryExpr(op='<63>')` for `p == &n`, and user-facing TypeChecker
+ * error messages naming the wrong (garbage) operator for `&&`/`||` and
+ * other multi-character operators. Originally lived in ASTPrinter.h (its
+ * first-found use site) before being promoted here once TypeChecker.cpp
+ * needed the identical fix for several of its own diagnostics -- this is
+ * the natural shared home since it only depends on the token constants
+ * already defined in this file.
+ */
+inline std::string OpToDisplayString(int Op) {
+  switch (Op) {
+    case TOK_EQ: return "==";
+    case TOK_NEQ: return "!=";
+    case TOK_LEQ: return "<=";
+    case TOK_GEQ: return ">=";
+    case TOK_AND: return "&&";
+    case TOK_OR: return "||";
+    case TOK_PLUS_PLUS: return "++";
+    case TOK_MINUS_MINUS: return "--";
+    case TOK_POWER: return "**";
+    case TOK_LSHIFT: return "<<";
+    case TOK_RSHIFT: return ">>";
+    default:
+      if (Op >= 0 && Op <= 127 && isprint(Op))
+        return std::string(1, static_cast<char>(Op));
+      return "op#" + std::to_string(Op);
+  }
+}
 
 #endif

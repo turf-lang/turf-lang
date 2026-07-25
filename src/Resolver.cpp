@@ -133,6 +133,65 @@ static TurfTypePtr substituteTypeParams(const TurfTypePtr &Ty,
   return Ty;
 }
 
+/**
+ * @brief Conservative, direct-only scan: does @p E ever assign to a
+ *        `self.<field>` anywhere in its subtree?
+ *
+ * Used to compute ResolverFunctionSymbol::MutatesSelf for a struct instance
+ * method, so TypeChecker::visitMethodCall() can reject calling it through an
+ * immutable variable -- see that field's doc comment in
+ * ResolverSymbolTable.h for the motivating bug (`c.bump()` silently mutating
+ * an `immut c` when `bump()` internally does `self.val += 1`).
+ *
+ * Deliberately NOT interprocedural (never looks inside a nested function/
+ * method call the body makes) and NOT alias-aware (passing `self` or
+ * `&self.field` to another function is not itself treated as a mutation).
+ * This is the opposite conservatism from Lint.cpp's MayModifyVariable(),
+ * which backs a WARNING and so errs toward over-flagging; this result gates
+ * a hard compile ERROR, so it errs toward under-flagging instead -- only
+ * provable, direct, in-body mutation counts, so a genuinely read-only
+ * method (e.g. a getter that happens to call a private helper) can never be
+ * wrongly rejected on an immutable variable. The cost is symmetrical to
+ * MayModifyVariable's: some real mutations that only happen through a
+ * nested call go undetected, same as before this check existed at all.
+ */
+static bool MutatesSelfField(const ExprAST *E) {
+  if (!E)
+    return false;
+
+  auto IsSelfFieldAccess = [](const ExprAST *Candidate) {
+    auto *FA = dynamic_cast<const FieldAccessExprAST *>(Candidate);
+    if (!FA)
+      return false;
+    auto *Base = dynamic_cast<const VariableExprAST *>(FA->getBase());
+    return Base && Base->getName() == "self";
+  };
+
+  if (auto *Assign = dynamic_cast<const AssignmentExprAST *>(E))
+    return IsSelfFieldAccess(Assign->getLHS());
+  if (auto *CAssign = dynamic_cast<const CompoundAssignmentExprAST *>(E))
+    return IsSelfFieldAccess(CAssign->getLHS());
+  if (auto *Post = dynamic_cast<const PostfixExprAST *>(E))
+    return IsSelfFieldAccess(Post->getOperand());
+  if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
+    for (const auto &Child : Blk->getExpressions())
+      if (MutatesSelfField(Child.get()))
+        return true;
+    return false;
+  }
+  if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
+    for (const auto &B : If->getBranches())
+      if (MutatesSelfField(B.Body.get()))
+        return true;
+    return MutatesSelfField(If->getElseBody());
+  }
+  if (auto *W = dynamic_cast<const WhileExprAST *>(E))
+    return MutatesSelfField(W->getBody());
+  if (auto *F = dynamic_cast<const ForExprAST *>(E))
+    return MutatesSelfField(F->getBody());
+  return false;
+}
+
 ResolverFunctionSymbol
 Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
                               const std::string &ModuleName) const {
@@ -151,6 +210,12 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   DeclLoc.Col = Node.getLoc().Col;
   Sym.DeclLoc = DeclLoc;
   Sym.IsIntrinsic = !Node.getIntrinsicName().empty();
+  // Only instance methods (Params[0] is the implicit "self" -- see
+  // ParseFuncDef's self-parameter construction) can mutate self at all;
+  // static methods and free/module functions leave MutatesSelf at its
+  // default false.
+  if (!Sym.Params.empty() && Sym.Params[0].Name == "self")
+    Sym.MutatesSelf = MutatesSelfField(Node.getBody());
   return Sym;
 }
 
@@ -179,14 +244,26 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
   // Hoist struct declarations: register the name so NamedType("MyStruct")
   // references in other struct fields or function signatures resolve in Pass 2.
   if (const auto *Struct = dynamic_cast<const StructDeclExprAST *>(Node)) {
-    SymTable_.registerStruct(Struct->getName());
+    SourceLocation Loc = Struct->getLoc();
+    if (auto PrevLoc = SymTable_.registerStruct(
+            Struct->getName(), {Loc.Line, Loc.Col})) {
+      DuplicateTypeNameError(Loc, Struct->getName(), "struct",
+                             {PrevLoc->Line, PrevLoc->Col})
+          .raise();
+    }
     return;
   }
 
   // Hoist enum declarations: register the name and variants.
   if (const auto *Enum = dynamic_cast<const EnumDeclExprAST *>(Node)) {
     auto ET = std::make_shared<TurfEnumType>(Enum->getName(), Enum->getVariants(), Enum->getUnderlyingType());
-    SymTable_.registerEnumType(Enum->getName(), ET);
+    SourceLocation Loc = Enum->getLoc();
+    if (auto PrevLoc = SymTable_.registerEnumType(
+            Enum->getName(), {Loc.Line, Loc.Col}, ET)) {
+      DuplicateTypeNameError(Loc, Enum->getName(), "enum",
+                             {PrevLoc->Line, PrevLoc->Col})
+          .raise();
+    }
     return;
   }
 
@@ -244,7 +321,31 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
       SymTable_.registerModuleFunction(ModuleName, Sym);
     } else if (const auto *Struct =
                    dynamic_cast<const StructDeclExprAST *>(Expr.get())) {
-      SymTable_.registerStruct(Struct->getName());
+      SourceLocation Loc = Struct->getLoc();
+      if (auto PrevLoc = SymTable_.registerStruct(
+              Struct->getName(), {Loc.Line, Loc.Col})) {
+        DuplicateTypeNameError(Loc, Struct->getName(), "struct",
+                               {PrevLoc->Line, PrevLoc->Col})
+            .raise();
+      }
+    } else if (const auto *Enum =
+                   dynamic_cast<const EnumDeclExprAST *>(Expr.get())) {
+      // Previously MISSING entirely: an enum declared inside an imported
+      // module's body was never hoisted at all (only structs/functions/
+      // externs were handled here), so it would silently fail to resolve
+      // anywhere it was referenced -- e.g. "I can't find anything named
+      // 'X'" for a perfectly real enum, just because it happened to live
+      // inside a module instead of the top-level file. No stdlib module
+      // declares an enum yet, so this had never been exercised.
+      auto ET = std::make_shared<TurfEnumType>(
+          Enum->getName(), Enum->getVariants(), Enum->getUnderlyingType());
+      SourceLocation Loc = Enum->getLoc();
+      if (auto PrevLoc = SymTable_.registerEnumType(
+              Enum->getName(), {Loc.Line, Loc.Col}, ET)) {
+        DuplicateTypeNameError(Loc, Enum->getName(), "enum",
+                               {PrevLoc->Line, PrevLoc->Col})
+            .raise();
+      }
     } else if (const auto *Import =
                    dynamic_cast<const ModuleImportExprAST *>(Expr.get())) {
       // Nested module imports (unusual but possible)
@@ -260,6 +361,17 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
 // see the variable being declared, matching Turf's semantics), then add the
 // name to the current scope.
 void Resolver::visitVarDecl(VarDeclExprAST &Node) {
+  // Validate the declared type name -- struct fields, function params, and
+  // return types already go through validateNamedType() (see its doc
+  // comment), but a plain variable declaration never did. Without this,
+  // `mut x: NoSuchStruct = 5;` compiled with no "unknown type" diagnostic at
+  // all -- it silently reached the TypeChecker's ordinary type-MISMATCH path
+  // instead ("Cannot initialise 'NoSuchStruct' variable 'x' with value of
+  // type 'int'"), which is real but misleading: it implies NoSuchStruct is
+  // a genuine type that just doesn't match int, not that the name itself
+  // was never declared anywhere.
+  validateNamedType(Node.getTypePtr(), Node.getLoc(), CurrentFuncTypeParams_);
+
   // 1. Resolve the initializer expression before registering the new name.
   //    This prevents `int x = x;` from passing the resolver.
   visitChild(Node.getInitializer());
@@ -488,11 +600,20 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
 
   for (const auto &Param : Node.getParams()) {
     try {
-      // Parameters have no source location in the AST right now; use {0,0}.
-      SymTable_.declareVariable(Param.Name, Param.Type, {});
+      // ParamDecl::Loc is now populated with the parameter name's real
+      // source location (see its doc comment in AST.h) -- previously
+      // hardcoded {0,0} here, which made a duplicate-parameter error's
+      // "declared here" note always say "line 0, column 0" for the FIRST
+      // occurrence, regardless of where it actually was.
+      ResolverSourceLocation ParamLoc{Param.Loc.Line, Param.Loc.Col};
+      SymTable_.declareVariable(Param.Name, Param.Type, ParamLoc);
     } catch (const std::runtime_error &) {
       auto Prev = SymTable_.lookupVariable(Param.Name);
-      SourceLocation ErrLoc = Node.getLoc();
+      // Point the error itself at the DUPLICATE parameter's own occurrence
+      // rather than the function's declaration -- was Node.getLoc() (the
+      // 'fn' keyword), which put the caret nowhere near either 'x' in
+      // `fn add(x: int, x: int)`.
+      SourceLocation ErrLoc = Param.Loc;
       if (Prev) {
         SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
         DuplicateDeclarationError(ErrLoc, Param.Name, PrevLoc).raise();
@@ -508,7 +629,10 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
 
   registerFunctionSignature(Node, currentModuleName());
 
+  // See CurrentFuncTypeParams_'s doc comment in Resolver.h.
+  CurrentFuncTypeParams_ = Node.getTypeParams();
   visitChild(Node.getBody());
+  CurrentFuncTypeParams_.clear();
 
   SymTable_.exitScope();
   --FunctionNestingDepth_;
@@ -875,6 +999,18 @@ void Resolver::validateNamedType(
   while (isArrayType(BaseType))
     BaseType = getArrayElementType(BaseType);
 
+  // Recurse into a generic type's own type arguments (e.g. List<NoSuchType>)
+  // -- this function never used to look inside GenericType at all, so an
+  // unknown type argument slipped through validation entirely and only
+  // surfaced later as a confusing, misattributed error far from the real
+  // cause (e.g. "No overload of 'List.push' matches argument types (int)",
+  // blaming the call's argument instead of the undeclared type argument).
+  if (const auto *GT = dynamic_cast<const GenericType *>(BaseType)) {
+    for (const auto &Arg : GT->getTypeArgs())
+      validateNamedType(Arg, Loc, TypeParams);
+    return;
+  }
+
   // Only validate NamedType references — primitives have their own classes
   // (IntType, DoubleType, etc.) and never reach here as NamedType. A true
   // TurfGenericParamType instance is a different class entirely and is
@@ -899,7 +1035,24 @@ void Resolver::validateNamedType(
 }
 
 void Resolver::visitStructDecl(StructDeclExprAST &Node) {
-  // Pass 1 (hoistTopLevel) already registered this struct's name.
+  // Pass 1 (hoistTopLevel) already registered this struct's name -- but ONLY
+  // for a struct declared at the TOP LEVEL of a file or an imported module's
+  // body. hoistTopLevel() never recurses into a FUNCTION BODY looking for
+  // nested declarations, so a struct declared LOCALLY inside a function
+  // (`fn f() { struct Point {...}; mut p: Point = ...; }` -- a supported,
+  // already-tested pattern, see tests/06_structs/02_struct_local.tr) is
+  // never hoisted at all. Pass 2 visits statements in textual order, so by
+  // the time THIS node is visited, it's still safe to register it here for
+  // the first time -- any later statement in the same or a nested scope
+  // that references the name will see it correctly. Guarded on
+  // isKnownStruct() so a top-level struct (already registered by Pass 1)
+  // is never re-registered here, which would otherwise raise a spurious
+  // DuplicateTypeNameError against itself on every single struct in the
+  // file.
+  if (!SymTable_.isKnownStruct(Node.getName())) {
+    SourceLocation Loc = Node.getLoc();
+    SymTable_.registerStruct(Node.getName(), {Loc.Line, Loc.Col});
+  }
 
   // Rewrite any field NamedType("T") that names one of this struct's own
   // TypeParams into a real TurfGenericParamType("T") -- same rationale and

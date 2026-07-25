@@ -89,14 +89,25 @@ class TypeChecker : public ASTVisitor {
 public:
   // ── Error callback type ───────────────────────────────────────────────────
   //
-  // Signature: (SourceLocation, error message string)
-  // The callback is expected to terminate the current compilation path (either
-  // via longjmp / std::exit in production, or by throwing in unit tests).
-  // After the callback returns the TypeChecker inserts an 'unknown' type for
-  // the offending node and continues so that further errors can still be found.
+  // Signature: (SourceLocation, error message string, related locations,
+  // custom hint). The callback is expected to terminate the current
+  // compilation path (either via longjmp / std::exit in production, or by
+  // throwing in unit tests). After the callback returns the TypeChecker
+  // inserts an 'unknown' type for the offending node and continues so that
+  // further errors can still be found.
+  //
+  // CustomHint: every reportError() call used to get the exact same
+  // generic TypeError hint ("Check that you're not mixing incompatible
+  // types...") no matter what the message actually said -- including
+  // call sites that already had a much more specific, situation-tailored
+  // hint EMBEDDED IN THE MESSAGE TEXT ITSELF (the only way to say anything
+  // more specific than the generic hint, before this parameter existed),
+  // producing a confusing, redundant double hint. When non-empty, this
+  // overrides the generic default instead of stacking alongside it.
   using ErrorHandler =
       std::function<void(SourceLocation, const std::string &,
-                         const std::vector<RelatedLocation> &)>;
+                         const std::vector<RelatedLocation> &,
+                         const std::string &)>;
 
   // ── Constructors ──────────────────────────────────────────────────────────
 
@@ -221,8 +232,11 @@ private:
   void setType(const ExprAST *Node, TurfTypePtr Ty);
 
   /// Fire the error handler with the given location and message.
+  /// CustomHint, when non-empty, overrides the default TypeError hint
+  /// instead of stacking alongside it -- see ErrorHandler's doc comment.
   void reportError(SourceLocation Loc, const std::string &Msg,
-                   const std::vector<RelatedLocation> &Related = {});
+                   const std::vector<RelatedLocation> &Related = {},
+                   const std::string &CustomHint = "");
 
   /**
    * @brief Infer the result type of a binary arithmetic/string operation.

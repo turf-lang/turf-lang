@@ -289,10 +289,9 @@ static int linkObject(const std::string &ObjFile,
 /**
  * @brief Skip forward past a malformed top-level construct (a `fn`/`struct`/
  *        `enum`/`extern`/`import` whose own parse just failed) until reaching
- *        the next safe top-level boundary, tracking brace/paren/bracket
- *        nesting depth so a `;` or boundary-looking token still buried
- *        inside the malformed construct's own unconsumed body doesn't cause
- *        premature resynchronization.
+ *        the next safe top-level boundary -- i.e. until g_braceDepth (see
+ *        Lexer.h/.cpp, maintained globally by getNextToken() as it consumes
+ *        each token) returns to 0.
  *
  * All eight recovery loops in the parsing loops below (pre-pass and main
  * pass, `fn`/`struct`/... branch and `import` branch, longjmp path and
@@ -309,22 +308,38 @@ static int linkObject(const std::string &ObjFile,
  * then gets misread as new top-level content, producing a second,
  * completely unrelated, confusing error stacked on top of the real one.
  *
- * Starts Depth at 1 (not 0) because the construct whose parse just failed
- * always already consumed its own opening `{` before the failure occurred
- * (that's why we're recovering from inside its body/fields at all) -- this
- * function's job is to find where THAT brace closes, not to open a new one.
+ * This function itself went through exactly that bug once already: the
+ * first version assumed the failure was always exactly ONE brace level
+ * deep (hardcoding "Depth = 1", i.e. only the failed construct's own `{`
+ * is open) -- true for a failure directly inside a function body, but not
+ * for one nested further, e.g. inside a `compare` block's `otherwise` arm
+ * within that body (two levels: the function's `{` AND the compare's `{`).
+ * A second stray `otherwise:` there produced a "duplicate/must be last"
+ * error from a totally different, unrelated code path than expected --
+ * the arm's own statement-parsing loop tried to parse the second
+ * `otherwise:` as the START OF A NEW STATEMENT (it has no way to know
+ * "otherwise" means "the compare block's next arm header, stop here"), hit
+ * ParsePrimaryBase()'s generic "unexpected token" fallback, and returned a
+ * soft (non-longjmp) nullptr failure -- which the OLD Depth=1 recovery then
+ * mis-resynchronized one brace level too shallow (stopping at the
+ * COMPARE block's closing `}`, not the function's), leaving `return 0; }`
+ * dangling as apparent new top-level content and producing a second,
+ * unrelated "Statements are not allowed outside of a function" error
+ * stacked on top of the real one -- the exact class of bug this function
+ * exists to prevent, just at a nesting depth the original fix didn't
+ * anticipate. g_braceDepth's global, always-accurate tracking (rather than
+ * a fixed assumption re-derived locally at each call site) fixes this for
+ * ANY nesting depth, not just one level.
  */
 static void SkipToNextTopLevelBoundary() {
-  int Depth = 1;
-  while (CurTok != TOK_EOF) {
-    if (CurTok == '{' || CurTok == '(' || CurTok == '[') {
-      Depth++;
-    } else if (CurTok == '}' || CurTok == ')' || CurTok == ']') {
-      if (Depth > 0) Depth--;
-    }
+  // Always make forward progress, even if g_braceDepth is already 0 (e.g. a
+  // failure that happened before any '{' was ever opened, such as a
+  // malformed function signature) -- otherwise a caller whose next parse
+  // attempt immediately fails on the same token would loop forever.
+  do {
+    if (CurTok == TOK_EOF) return;
     getNextToken();
-    if (Depth == 0) return; // just closed the malformed construct's own body
-  }
+  } while (g_braceDepth > 0);
 }
 
 // main
@@ -354,6 +369,7 @@ int main(int argc, char **argv) {
     return 1;
   }
   SourceFilename = opts.InputFile;
+  MainSourceFilename = opts.InputFile;
 
   // Read file into memory for error printing
   std::ifstream File(opts.InputFile);
@@ -361,6 +377,9 @@ int main(int argc, char **argv) {
   while (std::getline(File, Line)) {
     SourceLines.push_back(Line);
   }
+  // Also seed the persistent cross-pass cache -- see AllSourceLines' doc
+  // comment in Lexer.h for why this can't just be SourceLines alone.
+  AllSourceLines[SourceFilename] = SourceLines;
 
   // Builtin registry removed
   InitializeModule(); // Initialize LLVM Context, Module, Builder
@@ -495,6 +514,7 @@ int main(int argc, char **argv) {
       // Run the TypeChecker over the pre-pass ASTs to narrow overloaded calls
       // (e.g. io.printline has 4 overloads; TypeChecker picks the right one
       // and sets ResolvedCallTarget so sub-pass 3b codegen reads it blindly).
+      bool PreTCClean = true;
       {
         TypeChecker PreTC(PreR.symbolTable());
         g_recoverActive = true;
@@ -502,9 +522,27 @@ int main(int argc, char **argv) {
           if (PreludeAST)
             PreTC.check(PreludeAST.get());
           PreTC.checkAll(PrePassASTs);
+        } else {
+          PreTCClean = false;
         }
-        // Errors in the pre-pass TC are informational only here — the main-pass
-        // TC will re-check and report them with full diagnostics.
+        // Errors in the pre-pass TC are informational only in the sense that
+        // the main-pass TC (below, after the whole pre-pass finishes) is what
+        // actually PRINTS them with full diagnostics and is authoritative for
+        // whether compilation ultimately fails -- but PreTCClean still gates
+        // sub-pass 3b's body codegen just below. Without that gate, a type
+        // error the pre-pass TC correctly caught (e.g. `x.foo()` where
+        // x: int -- "cannot call methods on a non-struct type") used to be
+        // silently discarded here, and sub-pass 3b would codegen the same
+        // broken body anyway, reaching a Codegen-side
+        // `llvm::report_fatal_error()` ("this is a compiler bug") and
+        // aborting the whole process -- BEFORE the main-pass TC ever got a
+        // chance to run and print the real, correct diagnostic. The prior
+        // codegen (structs, sub-pass 2c) and prototypes (sub-pass 3a) stay
+        // ungated: they're structural/signature-level and don't execute
+        // arbitrary expression codegen, so they carry effectively none of
+        // this crash risk, and skipping them too would serve no purpose
+        // since the main-pass TC exits before anything downstream of them
+        // runs anyway once PreTCClean is false.
         g_recoverActive = false;
       }
 
@@ -573,20 +611,29 @@ int main(int argc, char **argv) {
       // (its opaque-stub reuse check keys on `isOpaque()`, which is false
       // once setBody() has run -- a second call would create a second,
       // distinct llvm::StructType and silently corrupt LLVMTypeCache).
-      for (auto &AST : PrePassASTs) {
-        if (dynamic_cast<StructDeclExprAST *>(AST.get()))
-          continue;
-        size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
-        g_recoverActive = true;
-        if (setjmp(g_recoverJmp) == 0) {
-          AST->codegen();
-        } else {
-          if (GlobalSymbolTable) {
-            GlobalSymbolTable->ResetToDepth(SavedDepth);
-            GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+      //
+      // Gated on PreTCClean: if the pre-pass TypeChecker (sub-pass 2b) found
+      // ANY error anywhere in the file, don't run body codegen at all here --
+      // see PreTCClean's doc comment above for why. The main-pass TC (after
+      // this whole pre-pass block) will re-find the same error and exit
+      // cleanly before its own codegen ever runs, so skipping this is always
+      // safe when !PreTCClean, never a missed compile.
+      if (PreTCClean) {
+        for (auto &AST : PrePassASTs) {
+          if (dynamic_cast<StructDeclExprAST *>(AST.get()))
+            continue;
+          size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
+          g_recoverActive = true;
+          if (setjmp(g_recoverJmp) == 0) {
+            AST->codegen();
+          } else {
+            if (GlobalSymbolTable) {
+              GlobalSymbolTable->ResetToDepth(SavedDepth);
+              GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+            }
           }
+          g_recoverActive = false;
         }
-        g_recoverActive = false;
       }
 
   // Re-open for the main pass

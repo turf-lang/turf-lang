@@ -256,20 +256,28 @@ public:
 };
 
 class UnaryExprAST : public ExprAST {
+  SourceLocation Loc;
   int Opcode;
   std::unique_ptr<ExprAST> Operand;
 
 public:
-  UnaryExprAST(char Opcode, std::unique_ptr<ExprAST> Operand)
-      : Opcode(Opcode), Operand(std::move(Operand)) {}
+  // Before this field existed, UnaryExprAST carried no source location at
+  // all, and TypeChecker::visitUnary()'s type-mismatch diagnostics for '-'
+  // and '~' had no location to report at all -- they hardcoded {0, 0}
+  // directly, producing "error at line 0, col 0" with no code snippet
+  // shown. Every construction site (Parser.cpp) now passes the operator
+  // token's real location explicitly.
+  UnaryExprAST(SourceLocation Loc, char Opcode, std::unique_ptr<ExprAST> Operand)
+      : Loc(Loc), Opcode(Opcode), Operand(std::move(Operand)) {}
 
+  const SourceLocation &getLoc() const { return Loc; }
   int getOpcode() const { return Opcode; }
   const ExprAST *getOperand() const { return Operand.get(); }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitUnary(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<UnaryExprAST>(static_cast<char>(Opcode),
+    return std::make_unique<UnaryExprAST>(Loc, static_cast<char>(Opcode),
                                           CloneExprAST(Operand.get()));
   }
 }; // UnaryExprAST
@@ -628,6 +636,15 @@ public:
 struct ParamDecl {
   TurfTypePtr Type;
   std::string Name;
+  // Location of the parameter's NAME token. Defaults to {0,0} (via
+  // SourceLocation's own default member values) for the handful of
+  // synthetic ParamDecls the Parser builds without a real source position
+  // (e.g. the implicit 'self' parameter) -- everywhere a parameter is
+  // parsed from real user source, this is now populated, fixing
+  // Resolver::visitFuncDef()'s duplicate-parameter-name diagnostic, which
+  // used to hardcode {0,0} here and always report "declared here at line 0,
+  // column 0" for the FIRST occurrence, regardless of where it actually was.
+  SourceLocation Loc;
 };
 
 // return expr;  or  return;

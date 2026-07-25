@@ -40,6 +40,39 @@ extractContextKeyword(const std::string &msg,
       return name;
   }
 
+  // Struct/enum construct keywords -- checked BEFORE controlKeywords below,
+  // not after. "for" (a controlKeyword) is a short, common substring that
+  // appears INSIDE unrelated phrases too -- concretely, "...out of range
+  // for enum 'Color'..." (the enum-cast-bounds error) contains "for" as
+  // part of "for enum", which used to match the controlKeywords loop FIRST
+  // and return "for", so this message never reached the enum check below
+  // at all. Struct/enum detection is more specific and more valuable here,
+  // so it takes priority.
+  //
+  // Both casings are checked because real messages use both ("Struct 'X'
+  // has no field..." vs. "...a struct named..."; "Enum 'X' already
+  // has..." vs. "...out of range for enum"). Routes to docs/slm/structs.txt
+  // / enums.txt via getCategoryDocPath()'s constructDocs map, the same
+  // mechanism already used for lengthof/typeof/print/input -- see that
+  // map's doc comment.
+  //
+  // "has no method named" is ALSO checked here even though it never
+  // contains the literal word "struct" -- StructMethodNotFoundError's
+  // message is just "'<StructName>' has no method named '<Method>'.".
+  // Confirmed unambiguous: the module-call equivalent
+  // (ModuleMethodNotFoundError) says "has no FUNCTION named" instead, so
+  // this phrase is never emitted for anything but a struct method lookup.
+  // Without this, arguably the single most common struct-related error
+  // (calling a method that doesn't exist) fell through to
+  // undeclared_var.txt instead of the much more targeted structs.txt.
+  if (msg.find("Struct") != std::string::npos ||
+      msg.find("struct") != std::string::npos ||
+      msg.find("has no method named") != std::string::npos)
+    return "struct";
+  if (msg.find("Enum") != std::string::npos ||
+      msg.find("enum") != std::string::npos)
+    return "enum";
+
   // Check for control-flow construct keywords in the error message.
   static const char *controlKeywords[] = {"elseif", "while", "for",     "if",
                                           "return", "break", "continue"};
@@ -221,6 +254,16 @@ inline std::string getCategoryDocPath(ErrorCategory cat,
     static const std::unordered_map<std::string, std::string> constructDocs = {
         {"lengthof", "docs/slm/builtin_lengthof.txt"},
         {"typeof", "docs/slm/builtin_typeof.txt"},
+        // structs.txt also covers generic structs/functions (fn<T>,
+        // struct<T>) -- there's no reliable standalone keyword for
+        // "generic" in actual error message text (confirmed: the word
+        // "generic" never appears in any raised diagnostic), so a separate
+        // constructKeyword trigger for it isn't derivable the same way
+        // struct/enum are. Almost all real generic usage in this language
+        // goes through a generic STRUCT (List<T>, Box<T>) anyway, so
+        // folding the content in here still reaches the relevant errors.
+        {"struct", "docs/slm/structs.txt"},
+        {"enum", "docs/slm/enums.txt"},
     };
     auto it = constructDocs.find(contextKeyword);
     if (it != constructDocs.end())
