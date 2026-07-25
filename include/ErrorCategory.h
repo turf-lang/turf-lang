@@ -31,10 +31,19 @@ enum class ErrorCategory {
 inline std::string
 extractContextKeyword(const std::string &msg,
                       const std::string & /*codeContext*/ = "") {
-  // Check for builtin function names mentioned in the error message itself.
-  // Order: longer/more-specific names first to avoid partial matches.
-  static const char *builtinNames[] = {
-      "printline", "lengthof", "typeof", "print", "input", "abs", "power"};
+  // Check for TRUE intrinsic names mentioned in the error message itself --
+  // typeof/lengthof/assert/fail/sizeof, the only names actually wired
+  // directly into the compiler (see general.txt's "TRUE INTRINSICS vs.
+  // STANDARD LIBRARY" section for the full explanation). This list
+  // previously also contained "printline"/"print"/"input" (ordinary
+  // stdlib functions declared in lib/std/io.tr -- not intrinsics, just
+  // auto-imported) and "abs"/"power" (used to be @intrinsic stubs, now
+  // pure-Turf/extern-fn stdlib in lib/std/math.tr, per Builtins.cpp's own
+  // comments) -- all five were wrongly routed to the BUILTIN_FUNCTION
+  // category below as a result. Order: longer/more-specific names first
+  // to avoid partial matches.
+  static const char *builtinNames[] = {"lengthof", "typeof", "assert",
+                                       "fail",      "sizeof"};
   for (const char *name : builtinNames) {
     if (msg.find(name) != std::string::npos)
       return name;
@@ -93,11 +102,16 @@ inline ErrorCategory classifyError(const std::string &msg,
                                    const std::string &contextKeyword = "") {
   // Keyword-based sub-classification (highest priority)
   // If we know which construct triggered the error, use that directly.
+  // Only TRUE intrinsics (see extractContextKeyword's doc comment) map to
+  // BUILTIN_FUNCTION -- printline/print/input used to be included here too,
+  // but they're ordinary lib/std/io.tr stdlib functions, not intrinsics;
+  // an error calling one of those now falls through to the generic
+  // pattern-based classification below, same as any other stdlib/user
+  // function.
   if (!contextKeyword.empty()) {
-    if (contextKeyword == "lengthof" || contextKeyword == "typeof")
-      return ErrorCategory::BUILTIN_FUNCTION;
-    if (contextKeyword == "printline" || contextKeyword == "print" ||
-        contextKeyword == "input")
+    if (contextKeyword == "lengthof" || contextKeyword == "typeof" ||
+        contextKeyword == "assert" || contextKeyword == "fail" ||
+        contextKeyword == "sizeof")
       return ErrorCategory::BUILTIN_FUNCTION;
   }
 

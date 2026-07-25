@@ -255,33 +255,64 @@ MODULES / IMPORTS:
     io.printline("hi");
     mem.malloc(64);
 
-  Several stdlib functions (print, printline, input, assert, lengthof,
-  typeof, sizeof) also work unqualified, without an explicit `io.`/module
-  prefix, since they're resolved through the module search path
-  automatically when there's no ambiguity.
+  `io` is auto-imported into every program (lib/std/prelude.tr does
+  `import io;` for you), so `io.printline`/`io.print`/`io.input` are also
+  reachable unqualified (`printline(...)`) without writing `import io;`
+  yourself -- but they are still ordinary STANDARD LIBRARY functions
+  declared in lib/std/io.tr, not a special no-import language feature.
+  Other modules (mem, math, list, ...) are NOT auto-imported and always
+  need their own explicit `import`.
 
 ---
 
-BUILTIN / INTRINSIC FUNCTIONS (no import needed):
+TRUE INTRINSICS vs. STANDARD LIBRARY -- this distinction matters and is
+easy to get backwards:
 
-  print(expr) / printline(expr)
-    Print expr (no newline / with newline). Accepts int, double, bool, string.
+  A handful of names really ARE wired directly into the compiler and never
+  require ANY import, because they aren't declared anywhere in Turf source
+  at all: typeof, lengthof, assert, fail, and sizeof (sizeof is actually
+  its own piece of syntax, not even a function call -- see below).
 
-  input()
-    Reads a line from stdin. Returns: string.
+  Everything else that might look "built-in" -- print, printline, input,
+  and every function in mem/math/list/strings/stack/queue -- is ordinary
+  Turf standard library code living in lib/std/*.tr, exactly as import-
+  able/inspectable as anything a user could write themselves. Some of
+  those (print, printline, input) happen to be implemented via an internal
+  `@intrinsic("name")` decorator on their `fn` declaration in io.tr, which
+  tells the compiler to generate native code for the call instead of
+  compiling a Turf-language body -- but that's purely an implementation
+  detail invisible from the language side; they're called and typed
+  exactly like any other stdlib function. Do NOT describe io/mem/math
+  functions as "intrinsics" or "builtins" -- they are standard library.
 
-  lengthof(str)
-    Number of characters in a STRING. Returns: int.
-    For arrays, use `.length()` (a method call) instead.
+TRUE INTRINSICS (never need an import; not declared in any .tr file):
 
-  typeof(expr)
-    Compile-time type name as a string, e.g. "int", "double", "Point".
+  typeof(expr): string
+    Compile-time type name, e.g. "int", "double", "Point".
 
-  sizeof(Type)
-    Size in bytes of a type (FFI/memory use).
+  lengthof(str: string): int
+    Number of characters in a STRING. For arrays, use `.length()` instead.
 
-  assert(condition, message)
-    Aborts at runtime with `message` if `condition` is false.
+  assert(condition: bool, message: string)
+    Aborts at runtime with `message` if `condition` is false. The message
+    is optional -- `assert(condition)` alone uses a default message.
+
+  fail(message: string)
+    Unconditionally aborts at runtime, printing `message` to stderr.
+    IMPORTANT: `fail(...)` as the LAST statement inside a block (e.g. the
+    only statement in an `if` body) is fine, but a bare top-level
+    `fail(...)` immediately followed by MORE statements in the same block
+    (like `fail("x"); return 0;`) currently crashes the compiler with
+    "Internal compiler error... Terminator found in the middle of a basic
+    block!" -- a real, known compiler bug, not something to "fix" by
+    suggesting different Turf code. If you see this exact crash, say so
+    plainly rather than inventing an explanation.
+
+  sizeof(Type): int
+    NOT a function call -- its own dedicated syntax (`sizeof(int)`,
+    `sizeof(SomeStruct)`), parsed directly, with no module or import
+    involved at all. Returns a type's size in bytes. Every type in this
+    language happens to be 8 bytes today (type erasure to a 64-bit slot).
 
 ---
 

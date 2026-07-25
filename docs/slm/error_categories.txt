@@ -94,13 +94,18 @@ FUNCTION_SIGNATURE
     - Using a void function's result as a value in an expression
 
 BUILTIN_FUNCTION
-  An error specific to a builtin/intrinsic function (print, printline,
-  input, lengthof, typeof, sizeof, assert). Also covers misspelled or
-  unknown function names generally.
+  An error specific to one of the FEW true compiler intrinsics -- typeof,
+  lengthof, assert, fail, sizeof. These never require an import and are
+  not declared in any .tr file. print/printline/input, and everything in
+  mem/math/list/strings/etc., are standard library code (lib/std/*.tr),
+  NOT intrinsics -- an error calling one of those belongs in whatever
+  category the error itself is about (UNDECLARED_VARIABLE for an unknown
+  name, FUNCTION_SIGNATURE for wrong arity, etc.), not here.
   Examples:
-    - Calling a function that doesn't exist: 'praintln', 'println', 'length'
-    - Passing the wrong number of args to a builtin
-    - Unknown function name (not declared by the user, not a builtin)
+    - Wrong number/type of arguments to typeof/lengthof/assert/fail
+    - Misspelling a true intrinsic name (rare, since 'lengthof' vs.
+      'praintln' would actually be an UNDECLARED_VARIABLE case -- printline
+      is stdlib, not an intrinsic)
 
 MEMORY_ERROR
   Manual memory management misuse (via `import mem;`).
