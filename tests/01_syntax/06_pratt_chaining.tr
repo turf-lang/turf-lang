@@ -2,11 +2,32 @@ struct Builder {
     val: int
 }
 
+// Mutates self and returns self by pointer -- see
+// tests/06_structs/23_self_pointer_chaining.tr for why this (rather than a
+// by-value `Builder` return) is the idiomatic way to support chaining.
+//
+// This method was MISSING entirely until this fix: the original test called
+// `b.push(1).push(2)` against a `Builder` struct that declared zero methods.
+// Before TypeChecker::visitMethodCall() gained a real "does this method
+// exist on this struct" check (see StructMethodNotFoundError in Errors.h),
+// an unresolved struct-method call was silently permissive all the way
+// through Codegen -- both calls just vanished from the compiled program
+// with no error, so this test "passed" without the Pratt parser's chaining
+// behavior ever actually being exercised semantically (only parsed, never
+// resolved or executed). Now that the compiler correctly rejects a call to
+// a genuinely nonexistent method, the test needs a REAL method to chain
+// against for its own claimed purpose to mean anything.
+fn Builder.push(x: int): Builder* {
+    self.val = self.val + x;
+    return self;
+}
+
 fn main(): int {
     mut b: Builder = Builder { val: 0 };
-    
+
     // Test Pratt Parser's ability to chain method calls
     b.push(1).push(2);
-    
+    assert(b.val == 3, "chained push(1).push(2) should leave val == 3");
+
     return 0;
 }

@@ -51,6 +51,53 @@ for test_file in $TEST_FILES; do
     # Return to project root
     cd - > /dev/null
 
+    # A handful of fail_*.tr tests aren't testing "the compiler rejects this
+    # input" at all -- they're testing that a stdlib guard (e.g.
+    # str.substring's bounds check) correctly calls fail() at RUNTIME on
+    # otherwise valid, compiling code. Those opt in via a
+    # `// RUNTIME_ABORT_EXPECTED` marker comment so they get the (compile
+    # must succeed, then runtime exit must be non-zero) contract instead of
+    # the default (compile must fail) one below. Without this, such a test
+    # can silently "pass" for the wrong reason forever if an unrelated bug
+    # (e.g. a typo'd import name) makes compilation fail before the actual
+    # behavior under test is ever reached -- confirmed to have happened to
+    # fail_string_substr_oob.tr, which was failing on "module 'str' not
+    # found" (the module is really named 'strings') instead of ever
+    # exercising the substring-OOB abort it claims to verify.
+    if [[ "$FILE_NAME" == fail_* ]] && grep -q "RUNTIME_ABORT_EXPECTED" "$test_file"; then
+        if [ $COMPILE_STATUS -ne 0 ]; then
+            echo -e "${RED}FAILED (Expected to compile successfully, but got a compile error)${RESET}"
+            FAILED=$((FAILED + 1))
+            FAILED_TESTS+=("$test_file (Unexpected compile error):\n$COMPILE_OUTPUT")
+            continue
+        fi
+        if [ ! -f "$PROGRAM" ]; then
+            echo -e "${RED}NO EXECUTABLE PRODUCED${RESET}"
+            FAILED=$((FAILED + 1))
+            FAILED_TESTS+=("$test_file (No executable)")
+            continue
+        fi
+        cd "$TEST_DIR_PATH"
+        "$PROGRAM" > output.log 2>&1 &
+        CMD_PID=$!
+        (sleep 2 && kill -9 $CMD_PID 2>/dev/null) &
+        wait $CMD_PID 2>/dev/null
+        RUN_STATUS=$?
+        RUN_OUTPUT=$(cat output.log)
+        cd - > /dev/null
+        rm -f "$PROGRAM" "$TEST_DIR_PATH/output.log"
+
+        if [ $RUN_STATUS -eq 0 ] || [ $RUN_STATUS -eq 137 ] || [ $RUN_STATUS -eq 143 ]; then
+            echo -e "${RED}FAILED (Expected a runtime abort, got exit $RUN_STATUS)${RESET}"
+            FAILED=$((FAILED + 1))
+            FAILED_TESTS+=("$test_file (Expected runtime abort, got exit $RUN_STATUS):\n$RUN_OUTPUT")
+        else
+            echo -e "${GREEN}PASS (Aborted at runtime as expected)${RESET}"
+            PASSED=$((PASSED + 1))
+        fi
+        continue
+    fi
+
     # Check if this is a test designed to fail compilation
     if [[ "$FILE_NAME" == fail_* ]]; then
         if [ $COMPILE_STATUS -eq 0 ]; then

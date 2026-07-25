@@ -1,0 +1,20 @@
+// Regression test: calling a method on a non-struct value (int, string,
+// pointer-to-non-struct) must be a clean compile error.
+//
+// Before this fix, TypeChecker::visitMethodCall()'s fallback ("be
+// permissive") left the call unresolved with zero diagnostic, and the pre-
+// pass's body codegen (src/main.cpp, sub-pass 3b) ran anyway regardless of
+// whether the pre-pass TypeChecker had found any errors -- reaching
+// Codegen's `llvm::report_fatal_error("Internal error: method call on
+// unsupported type. This is a compiler bug.")` and ABORTING THE WHOLE
+// COMPILER PROCESS (SIGABRT), before the main-pass TypeChecker (which
+// correctly gates its own codegen) ever got a chance to run and print a
+// real diagnostic. Fixed by (a) TypeChecker raising a real error for this
+// case, and (b) gating the pre-pass's body-codegen sub-pass on the
+// pre-pass TypeChecker actually being clean (see PreTCClean in main.cpp).
+
+fn main(): int {
+    mut x: int = 5;
+    x.foo();
+    return 0;
+}

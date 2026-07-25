@@ -1,0 +1,17 @@
+// Regression test: an unknown type used as a generic type ARGUMENT
+// (List<NoSuchType>) must be rejected with a clean "unknown type"
+// diagnostic pointing at the actual problem. Before this fix,
+// Resolver::validateNamedType() never recursed into GenericType's type
+// arguments at all, so `List<NoSuchType>` slipped through validation
+// entirely and only surfaced later as a confusing, misattributed error far
+// from the real cause ("No overload of 'List.push' matches argument types
+// (int)", blaming the call's argument instead of the undeclared type
+// argument).
+
+import list;
+
+fn main(): int {
+    mut l: List<NoSuchType> = List { data: null, len: 0, cap: 0 };
+    l.push(5);
+    return 0;
+}

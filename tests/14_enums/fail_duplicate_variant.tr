@@ -1,0 +1,14 @@
+// Regression test: an enum with a duplicate variant name must be rejected
+// at parse time, mirroring the identical check ParseStructDecl already has
+// for struct field names. Before this fix, this compiled silently: the
+// duplicate got a distinct underlying integer value (positional, so the
+// second 'Red' here would be 2, not 0), but every named reference to 'Red'
+// (Color::Red, `matches Color::Red:`, ...) always resolved to the LAST
+// match, permanently orphaning the first one with no way to construct or
+// match it by name ever again.
+
+enum Color { Red, Green, Red }
+
+fn main(): int {
+    return 0;
+}

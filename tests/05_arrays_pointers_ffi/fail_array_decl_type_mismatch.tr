@@ -1,0 +1,14 @@
+// Regression test: an array declaration's initializer list elements must
+// match the declared element type. Before this fix, TypeChecker::
+// visitArrayDecl() visited each initializer (so each got its own inferred
+// type) but never compared that type against the declared element type --
+// unlike the sibling ArrayLiteralExprAST path (visitArrayLiteral), which
+// DOES cross-check its elements. Confirmed as a genuine type-safety hole,
+// not just a missing diagnostic: `int[3] arr = [1, "two", 3]` compiled with
+// zero diagnostic, and reading `arr[1] to string` back printed the string
+// literal's raw pointer bits reinterpreted as an int.
+
+fn main(): int {
+    mut arr: int[3] = [1, "two", 3];
+    return 0;
+}

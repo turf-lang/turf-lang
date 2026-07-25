@@ -1,0 +1,15 @@
+// Regression test: casting an out-of-range integer LITERAL to an enum type
+// must be rejected at compile time. Before this fix,
+// TypeChecker::visitCast() never validated the destination type at all --
+// "Explicit cast always succeeds at the TypeChecker level" -- so `99 to
+// Color` (Color only has 3 variants) compiled and ran fine, producing a
+// Color value (99) with no corresponding variant name. Deliberately narrow:
+// only a compile-time-constant literal operand is checked, since a
+// variable-valued cast (`x to Color`) can't be validated this way.
+
+enum Color { Red, Green, Blue }
+
+fn main(): int {
+    immut c: Color = 99 to Color;
+    return 0;
+}
