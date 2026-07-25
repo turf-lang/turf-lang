@@ -326,8 +326,61 @@ static const TurfType *getExprType(const ExprAST *E) {
                 break;
               }
             }
-            if (Compatible)
-              return FuncReturnTypes[Name].get();
+            if (Compatible) {
+              // Same class of gap as the struct-method case just above:
+              // a generic FREE function is type-erased to ONE compiled
+              // version, registered here under its bare declared return
+              // type (e.g. TurfGenericParamType("T") for `fn<T>
+              // firstElem(arr: T[]): T`) -- returning it unsubstituted
+              // meant `firstElem(intArray) to string` failed with "I
+              // can't convert 'T' to a string!" even though
+              // TypeChecker's OWN (separate) inference already correctly
+              // resolves this call's type as int. Recover T -> int by
+              // unifying each DECLARED parameter type against the
+              // ACTUAL argument type at this call site (recursing
+              // through pointer/array wrapping, e.g. T[] vs int[] ->
+              // T=int), then substitute it into the declared return type.
+              std::unordered_map<std::string, TurfTypePtr> Subst;
+              std::function<void(const TurfTypePtr &, const TurfType *)> Unify =
+                  [&](const TurfTypePtr &ParamTy, const TurfType *ArgTy) {
+                    if (!ParamTy || !ArgTy) return;
+                    if (auto *GP = dynamic_cast<const TurfGenericParamType *>(ParamTy.get())) {
+                      if (!Subst.count(GP->getName())) {
+                        // Subst stores an owning TurfTypePtr; ArgTypes are
+                        // raw pointers into caches that outlive this call,
+                        // so wrap without taking ownership of a temporary.
+                        Subst.emplace(GP->getName(), TurfTypePtr(const_cast<TurfType *>(ArgTy), [](TurfType*){}));
+                      }
+                    } else if (auto *NT = dynamic_cast<const NamedType *>(ParamTy.get())) {
+                      bool KnownElsewhere = GlobalSymbolTable &&
+                                           GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
+                      if (!KnownElsewhere && !Subst.count(NT->getName()))
+                        Subst.emplace(NT->getName(), TurfTypePtr(const_cast<TurfType *>(ArgTy), [](TurfType*){}));
+                    } else if (auto *PPT = dynamic_cast<const TurfPointerType *>(ParamTy.get())) {
+                      if (auto *APT = dynamic_cast<const TurfPointerType *>(ArgTy))
+                        Unify(PPT->getPointee(), APT->getPointee().get());
+                    } else if (isArrayType(ParamTy.get()) && isArrayType(ArgTy)) {
+                      Unify(dynamic_cast<const ::ArrayType *>(ParamTy.get())->getElementTypePtr(),
+                            getArrayElementType(ArgTy));
+                    }
+                  };
+              for (size_t i = 0; i < ArgTypes.size(); ++i)
+                Unify(ParamTypes[i], ArgTypes[i]);
+
+              const TurfType *RetTy = FuncReturnTypes[Name].get();
+              if (!Subst.empty() && RetTy) {
+                if (auto *GP = dynamic_cast<const TurfGenericParamType *>(RetTy)) {
+                  auto It2 = Subst.find(GP->getName());
+                  if (It2 != Subst.end())
+                    return It2->second.get();
+                } else if (auto *NT = dynamic_cast<const NamedType *>(RetTy)) {
+                  auto It2 = Subst.find(NT->getName());
+                  if (It2 != Subst.end())
+                    return It2->second.get();
+                }
+              }
+              return RetTy;
+            }
           }
         }
       }
@@ -343,6 +396,20 @@ static const TurfType *getExprType(const ExprAST *E) {
     return Cast->getDestType();
   }
   if (auto *Var = dynamic_cast<const VariableExprAST *>(E)) {
+    // A bare struct TYPE NAME used as a static-method-call qualifier
+    // (`MathUtil` in `MathUtil.square(5)`, Var->IsStructName set by the
+    // Resolver) is not a real variable/symbol at all, so none of the three
+    // lookups below could ever find it -- this branch fell all the way
+    // through to `return nullptr;` at the end of the function, and the
+    // null propagated to a `report_fatal_error("could not determine type
+    // of method call base... this is a compiler bug")` further down in
+    // MethodCallExprAST::codegen(), crashing the WHOLE compiler process on
+    // ANY static struct method call, correctly-typed arguments or not.
+    // Confirmed: no test in the suite exercised this at all before now.
+    if (Var->IsStructName && GlobalSymbolTable) {
+      if (auto T = GlobalSymbolTable->LookupType(Var->getName()))
+        return T.get();
+    }
     if (Var->ResolvedSymbol && Var->ResolvedSymbol->Type)
       return Var->ResolvedSymbol->Type.get();
     auto It = NamedValues.find(Var->getName());
@@ -478,6 +545,15 @@ static const TurfType *getExprType(const ExprAST *E) {
     // pointer itself, an extra level of indirection. Only the FIRST call in
     // `b.push(1).push(2)` ever mutated the real struct; the second silently
     // wrote through to a throwaway temporary.
+    // Capture the ORIGINAL GenericType's type arguments (e.g. `int` for
+    // `Box<int>`) before BaseTy gets overwritten to the resolved
+    // TurfStructType just below -- needed for the substitution a few lines
+    // down. Copied into an owning vector so it stays valid regardless of
+    // what BaseTy is reassigned to.
+    std::vector<TurfTypePtr> GenericTypeArgs;
+    if (auto *GT0 = dynamic_cast<const GenericType *>(BaseTy))
+      GenericTypeArgs = GT0->getTypeArgs();
+
     if (auto *GT = dynamic_cast<const GenericType *>(BaseTy)) {
       if (GlobalSymbolTable) {
         if (auto R = GlobalSymbolTable->LookupType(GT->getBaseName()))
@@ -497,9 +573,73 @@ static const TurfType *getExprType(const ExprAST *E) {
         ArgTypes.push_back(T);
         MangledName += "_" + T->getMangledName();
       }
+
+      // Recover this struct's own type-parameter substitution (T -> int,
+      // from GenericTypeArgs captured above) by scanning its fields for a
+      // NamedType/TurfGenericParamType name that isn't a known struct/enum
+      // -- mirrors TypeChecker::visitMethodCall()'s identical Subst-
+      // building code exactly (see that function's doc comment for why
+      // GlobalSymbolTable's copy of a generic struct's fields is
+      // permanently stuck as NamedType, never rewritten to
+      // TurfGenericParamType).
+      //
+      // Without this, a method's FuncReturnTypes entry -- the function's
+      // own DECLARED return type, e.g. TurfGenericParamType("T") for
+      // `fn<T> Box.get(): T` -- was returned completely unsubstituted.
+      // This used to be silently papered over for exactly three method
+      // names (pop/peek/dequeue, handled above by a hardcoded special
+      // case using GenTy->getTypeArg(0) directly), but ANY OTHER
+      // generically-returning method fell through to here with zero
+      // substitution. Confirmed via `fn<T> Box.get(): T` on a `Box<int>`:
+      // `b.get() to string` failed with "I can't convert 'T' to a
+      // string!" even though TypeChecker had already correctly inferred
+      // `int` for the very same call -- Codegen's getExprType() is a
+      // completely separate, independent type-inference pass that never
+      // consults TypeChecker's results.
+      std::unordered_map<std::string, TurfTypePtr> Subst;
+      if (!GenericTypeArgs.empty()) {
+        if (auto *STy2 = dynamic_cast<const TurfStructType *>(BaseTy)) {
+          std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
+            if (!FTy || Subst.size() >= GenericTypeArgs.size()) return;
+            if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
+              if (!Subst.count(GP->getName()))
+                Subst.emplace(GP->getName(), GenericTypeArgs[Subst.size()]);
+            } else if (auto *NT = dynamic_cast<const NamedType *>(FTy.get())) {
+              bool KnownElsewhere = GlobalSymbolTable &&
+                                   GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
+              if (!KnownElsewhere && !Subst.count(NT->getName()))
+                Subst.emplace(NT->getName(), GenericTypeArgs[Subst.size()]);
+            } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
+              Scan(PT->getPointee());
+            } else if (isArrayType(FTy.get())) {
+              Scan(dynamic_cast<const ::ArrayType *>(FTy.get())->getElementTypePtr());
+            }
+          };
+          for (const auto &F : STy2->getFields())
+            Scan(F.Type);
+        }
+      }
+      // Substitute a TurfGenericParamType/NamedType return type through
+      // Subst -- a no-op for a non-generic struct (Subst stays empty) or a
+      // return type that doesn't mention any of this struct's parameters.
+      auto ApplySubst = [&](const TurfType *RetTy) -> const TurfType * {
+        if (Subst.empty() || !RetTy)
+          return RetTy;
+        if (auto *GP = dynamic_cast<const TurfGenericParamType *>(RetTy)) {
+          auto It2 = Subst.find(GP->getName());
+          if (It2 != Subst.end())
+            return It2->second.get();
+        } else if (auto *NT = dynamic_cast<const NamedType *>(RetTy)) {
+          auto It2 = Subst.find(NT->getName());
+          if (It2 != Subst.end())
+            return It2->second.get();
+        }
+        return RetTy;
+      };
+
       auto It = FuncReturnTypes.find(MangledName);
       if (It != FuncReturnTypes.end())
-        return It->second.get();
+        return ApplySubst(It->second.get());
 
       for (const auto &[Name, ParamTypes] : FuncParamTypes) {
         std::string Prefix = "turf_" + MethodName;
@@ -524,7 +664,7 @@ static const TurfType *getExprType(const ExprAST *E) {
               }
             }
             if (Compatible)
-              return FuncReturnTypes[Name].get();
+              return ApplySubst(FuncReturnTypes[Name].get());
           }
         }
       }

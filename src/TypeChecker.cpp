@@ -1189,6 +1189,22 @@ static TurfTypePtr substituteReturnType(
     auto It = Subst.find(GP->getName());
     return It != Subst.end() ? It->second : Ty;
   }
+  // A generic STRUCT's own field types are also matched here as NamedType,
+  // not TurfGenericParamType -- GlobalSymbolTable's registered TurfStructType
+  // for a generic struct is built once at PARSE time directly from the
+  // as-parsed Fields, a SEPARATE object from the StructDeclExprAST node that
+  // Resolver::visitStructDecl() mutates in place (NamedType("T") ->
+  // TurfGenericParamType("T")); that mutation never propagates back into
+  // GlobalSymbolTable's copy, so its fields stay NamedType("T") forever (see
+  // the identical note a few hundred lines below, in visitMethodCall's Subst-
+  // building code, which discovered this same fact for method return types).
+  // Subst's keys are always genuine type-parameter names, never a real
+  // struct/enum name (every Subst-building call site excludes names that
+  // resolve via GlobalSymbolTable), so matching NamedType here is safe.
+  if (const auto *NT = dynamic_cast<const NamedType *>(Ty.get())) {
+    auto It = Subst.find(NT->getName());
+    return It != Subst.end() ? It->second : Ty;
+  }
   if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty.get())) {
     TurfTypePtr NewPointee = substituteReturnType(PT->getPointee(), Subst);
     return NewPointee == PT->getPointee()
@@ -2030,6 +2046,42 @@ void TypeChecker::visitStructInit(StructInitExprAST &Node) {
   if (SType) {
     const auto &DeclFields = SType->getFields();
 
+    // Infer a Subst map (type-parameter name -> concrete type) for a
+    // generic struct FROM THIS LITERAL'S OWN field values, since the
+    // struct-literal syntax carries no explicit type arguments at all --
+    // `Box { val: 42 }`, not `Box<int> { val: 42 }`. Without this, a
+    // generic struct's bare (non-pointer) field -- `struct Box<T> { val: T
+    // }` -- always failed here: DeclField->Type stayed the raw, never-
+    // substituted NamedType("T") (see substituteReturnType()'s doc comment
+    // for why GlobalSymbolTable's copy of a generic struct's fields is
+    // permanently stuck as NamedType, not TurfGenericParamType), which is
+    // never "compatible" with a concrete type like int -- so `Box { val: 42
+    // }` was rejected outright: "Field 'val' of struct 'Box' expects type
+    // 'T', but got 'int'." list.tr/stack.tr/queue.tr never hit this because
+    // their own generic fields are all pointer-wrapped (`data: T*`), which
+    // sidesteps substitution entirely (a raw pointer type doesn't care what
+    // it points to at the LLVM level) -- Box's bare `val: T` is the first
+    // struct literal to actually exercise this path.
+    //
+    // First occurrence of each parameter name wins, mirroring the identical
+    // pattern in visitMethodCall's own Subst-building code.
+    std::unordered_map<std::string, TurfTypePtr> Subst;
+    for (const auto &DeclF : DeclFields) {
+      if (const auto *NT = dynamic_cast<const NamedType *>(DeclF.Type.get())) {
+        bool KnownElsewhere =
+            GlobalSymbolTable && GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
+        if (!KnownElsewhere && !Subst.count(NT->getName())) {
+          for (const auto &[FieldName, Val] : Node.getNamedFields()) {
+            if (FieldName == DeclF.Name) {
+              if (TurfTypePtr VTy = getType(Val.get()))
+                Subst.emplace(NT->getName(), VTy);
+              break;
+            }
+          }
+        }
+      }
+    }
+
     // 1. Check for unknown fields (fields provided that don't exist in the
     //    struct) AND that each provided value's type is compatible with its
     //    field's declared type.
@@ -2056,11 +2108,17 @@ void TypeChecker::visitStructInit(StructInitExprAST &Node) {
       }
 
       TurfTypePtr ValTy = getType(Val.get());
-      if (ValTy && DeclField->Type &&
-          !typesCompatible(ValTy.get(), DeclField->Type.get())) {
+      // Substitute the field's declared type through Subst before comparing
+      // -- a no-op (returns DeclField->Type unchanged) for a non-generic
+      // struct or a field that isn't type-parameter-shaped, since Subst is
+      // built from and only ever contains this struct's own type-parameter
+      // names.
+      TurfTypePtr ExpectedTy = substituteReturnType(DeclField->Type, Subst);
+      if (ValTy && ExpectedTy &&
+          !typesCompatible(ValTy.get(), ExpectedTy.get())) {
         reportError(Node.getLoc(),
                     "Field '" + FieldName + "' of struct '" + Node.getName() +
-                        "' expects type '" + DeclField->Type->getName() +
+                        "' expects type '" + ExpectedTy->getName() +
                         "', but got '" + ValTy->getName() + "'.");
       }
     }

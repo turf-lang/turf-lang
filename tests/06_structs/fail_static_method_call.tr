@@ -1,0 +1,34 @@
+// Regression test: calling a struct method via the bare struct TYPE NAME
+// (no instance) must be a clean compile error, not a crash.
+//
+// Before this fix, Codegen's getExprType() had no case at all for a bare
+// struct type name used as a static-call qualifier (Var->IsStructName,
+// set by the Resolver) -- none of its variable/symbol lookups could ever
+// find it, so it fell through to `return nullptr`, which propagated to a
+// `report_fatal_error("could not determine type of method call base...
+// this is a compiler bug")` in MethodCallExprAST::codegen(), crashing the
+// WHOLE COMPILER PROCESS. No test in the suite exercised this at all.
+//
+// The crash is now fixed (getExprType() correctly resolves the struct
+// type via GlobalSymbolTable), but this REVEALS a separate, deeper fact:
+// this language has no real "static method" feature today.
+// ParseFuncDef() unconditionally injects a `self` parameter into EVERY
+// `fn StructName.method(...)` declaration with no way to opt out, so a
+// static-style call (no instance) can never satisfy that required
+// parameter -- it always fails with a wrong-arity error, regardless of
+// what arguments are given. Calling the SAME method through a real
+// instance (`instance.method(...)`) works fine (see the companion
+// non-fail test using an instance instead).
+
+struct MathUtil {
+    dummy: int
+}
+
+fn MathUtil.square(x: int): int {
+    return x * x;
+}
+
+fn main(): int {
+    mut y: int = MathUtil.square(5);
+    return 0;
+}
