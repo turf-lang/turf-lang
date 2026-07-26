@@ -837,20 +837,72 @@ public:
     }
 };
 
-class EnumAccessExprAST : public ExprAST {
-    std::string    EnumName;
-    std::string    Variant;
+// What a `Left::Right` scope-access expression turns out to mean, decided
+// by the Resolver (the parser stays fully agnostic -- see ScopeAccessExprAST
+// below). Unresolved is the state every node starts in; a fresh clone()
+// resets back to it since a cloned tree is stale until re-resolved, same
+// convention as FuncDefExprAST::ResolvedDef.
+enum class ScopeAccessKind {
+    Unresolved,
+    EnumVariant,      // Color::Red
+    ModuleFunctionRef, // io::printline (as a call target)
+    ModuleTypeRef,     // list::List<int> (in type position)
+    // StaticMethodRef is deliberately not a case yet -- true static struct
+    // methods (StructName::method(...)) are a known, separate, deferred
+    // language feature (see the crash-fix + "no true static methods"
+    // finding this was built on top of). This enum's shape reserves the
+    // natural slot for it without disturbing anything else once that
+    // lands.
+};
+
+// `Left::Right` -- the general namespace-resolution operator. Originally
+// only ever meant an enum-variant reference (EnumName::Variant); now also
+// covers module-qualified function/type access (io::printline,
+// list::List<int>). Renamed from EnumAccessExprAST when this was
+// generalized: the class is otherwise unchanged in shape (still exactly
+// two names + a location), because the parser was ALREADY fully agnostic
+// about what `Identifier '::' Identifier` means -- it just records the two
+// names and lets the Resolver decide, so widening what the Resolver is
+// willing to decide is all a new kind of `::` usage needs.
+class ScopeAccessExprAST : public ExprAST {
+    std::string    LeftName;
+    std::string    RightName;
+    SourceLocation LeftLoc;
+    SourceLocation RightLoc;
     SourceLocation Loc;
 public:
-    EnumAccessExprAST(SourceLocation Loc, std::string EnumName, std::string Variant)
-        : EnumName(std::move(EnumName)), Variant(std::move(Variant)), Loc(Loc) {}
-    const std::string& getEnumName() const { return EnumName; }
-    const std::string& getVariant()  const { return Variant; }
+    // Set by the Resolver (visitScopeAccess / visitFuncCall for the call
+    // form) once it decides what this node actually refers to. A future
+    // LSP driving the same Resolver can read this post-resolution to know
+    // what kind of hover/go-to-definition target this is.
+    ScopeAccessKind ResolvedKind = ScopeAccessKind::Unresolved;
+
+    ScopeAccessExprAST(SourceLocation Loc, std::string LeftName,
+                       SourceLocation LeftLoc, std::string RightName,
+                       SourceLocation RightLoc)
+        : LeftName(std::move(LeftName)), RightName(std::move(RightName)),
+          LeftLoc(LeftLoc), RightLoc(RightLoc), Loc(Loc) {}
+    // Convenience overload for call sites that don't need distinct
+    // left/right locations (both default to the whole expression's Loc).
+    ScopeAccessExprAST(SourceLocation Loc, std::string LeftName, std::string RightName)
+        : ScopeAccessExprAST(Loc, std::move(LeftName), Loc, std::move(RightName), Loc) {}
+
+    const std::string& getLeftName()  const { return LeftName; }
+    const std::string& getRightName() const { return RightName; }
+    const SourceLocation& getLeftLoc()  const { return LeftLoc; }
+    const SourceLocation& getRightLoc() const { return RightLoc; }
     const SourceLocation& getLoc()   const { return Loc; }
+    // Pre-existing call sites written against the enum-only meaning of this
+    // node (TypeChecker's compare/matches exhaustiveness checks, Codegen's
+    // enum-variant codegen) keep working unchanged via these aliases.
+    const std::string& getEnumName() const { return LeftName; }
+    const std::string& getVariant()  const { return RightName; }
     llvm::Value* codegen() override;
-    void accept(ASTVisitor& V) override { V.visitEnumAccess(*this); }
+    void accept(ASTVisitor& V) override { V.visitScopeAccess(*this); }
     std::unique_ptr<ExprAST> clone() const override {
-        return std::make_unique<EnumAccessExprAST>(Loc, EnumName, Variant);
+        auto Cloned = std::make_unique<ScopeAccessExprAST>(Loc, LeftName, LeftLoc,
+                                                            RightName, RightLoc);
+        return Cloned;
     }
 };
 

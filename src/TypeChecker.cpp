@@ -1051,7 +1051,7 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
       }
 
       std::optional<std::string> PatternKey;
-      if (auto *EA = dynamic_cast<EnumAccessExprAST *>(PatExpr.get())) {
+      if (auto *EA = dynamic_cast<ScopeAccessExprAST *>(PatExpr.get())) {
         PatternKey = "enum:" + EA->getVariant();
       } else if (auto *Num = dynamic_cast<NumberExprAST *>(PatExpr.get())) {
         if (Num->isInteger())
@@ -1091,7 +1091,7 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
       std::set<std::string> CoveredVariants;
       for (auto &Arm : Node.getArms()) {
           for (auto &PatExpr : Arm.Values) {
-              if (auto* EA = dynamic_cast<EnumAccessExprAST*>(PatExpr.get()))
+              if (auto* EA = dynamic_cast<ScopeAccessExprAST*>(PatExpr.get()))
                   CoveredVariants.insert(EA->getVariant());
           }
       }
@@ -2009,15 +2009,26 @@ void TypeChecker::visitEnumDecl(EnumDeclExprAST &Node) {
   setType(&Node, TurfVoid());
 }
 
-void TypeChecker::visitEnumAccess(EnumAccessExprAST &Node) {
-  auto ET = GlobalSymbolTable ? GlobalSymbolTable->LookupType(Node.getEnumName()) : nullptr;
+void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
+  // A module-qualified call's callee (`io::printline` inside
+  // `io::printline(x)`) reaches here too -- visitFuncCall() visits every
+  // callee expression to give it SOME type annotation, but a module-
+  // function reference has no meaningful standalone type of its own; the
+  // CALL's type comes from ResolvedCandidates/ResolvedCallTarget instead
+  // (computed by visitFuncCall itself, independent of the callee node).
+  // Only the enum-variant meaning (Node.ResolvedKind set by the Resolver)
+  // has a real type to assign here.
+  if (Node.ResolvedKind != ScopeAccessKind::EnumVariant)
+    return;
+
+  auto ET = GlobalSymbolTable ? GlobalSymbolTable->LookupType(Node.getLeftName()) : nullptr;
   if (!ET) return; // Should not happen, Resolver catches this
 
-  if (Node.getVariant() == "COUNT") {
+  if (Node.getRightName() == "COUNT") {
     setType(&Node, TurfInt());
-  } else if (Node.getVariant() == "VALUES") {
+  } else if (Node.getRightName() == "VALUES") {
     setType(&Node, std::make_shared<TurfPointerType>(ET));
-  } else if (Node.getVariant() == "NAMES") {
+  } else if (Node.getRightName() == "NAMES") {
     setType(&Node, std::make_shared<TurfPointerType>(TurfString()));
   } else {
     setType(&Node, ET);

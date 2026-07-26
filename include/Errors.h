@@ -1061,6 +1061,28 @@ public:
   }
 };
 
+// Raised by Resolver::visitScopeAccess/visitFuncCall when the left-hand
+// name of a `Left::Right` expression isn't a known enum OR a known module
+// -- the two things `::` can currently name. Mirrors ModuleNotFoundError's
+// category choice (DECLARATION): this is fundamentally the same shape of
+// problem (an unresolved name), just for the newer, more general `::`
+// operator rather than specifically `import`.
+class UnknownScopeQualifierError : public TurfError {
+public:
+  UnknownScopeQualifierError(SourceLocation Loc, const std::string &LeftName,
+                             const RankedSuggestions &Suggestions)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + LeftName +
+                           Colors::BRIGHT_RED +
+                           "' isn't a known enum or module." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    Hint_ = suggestionsOrFallback(
+        Suggestions,
+        "'::' only works after an enum name (Color::Red) or an imported "
+        "module name (io::printline). Double-check the spelling, or make "
+        "sure you've imported the module.",
+        "Did you mean:\n");
+  }
+};
 
 // Phase 2: Module-scoped method lookup error
 // Raised when a user types e.g. io.pritn() — wrong function name in a known

@@ -1,0 +1,11 @@
+// Regression test: `EnumName::Variant(...)` -- calling an enum variant as
+// if it were a function -- must be a clean TypeError, not reach Codegen
+// (where a real function call site expects a callable target, not a
+// compile-time constant integer).
+
+enum Color { Red, Green, Blue }
+
+fn main(): int {
+    mut c: Color = Color::Red();
+    return 0;
+}

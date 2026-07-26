@@ -644,38 +644,85 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
   Node.ResolvedCandidates.clear();
 
   const auto *VarCallee = dynamic_cast<const VariableExprAST *>(Node.getCallee());
-  if (!VarCallee) {
+  // `Module::func(args)` -- a ScopeAccessExprAST callee explicitly naming
+  // its module, as opposed to VarCallee's bare/self-reference case below.
+  // Handled here, specially and narrowly, rather than via the generic
+  // visitScopeAccess() dispatch -- exactly mirroring how VarCallee is
+  // special-cased instead of going through visitVariable(). A ScopeAccessExprAST
+  // that ISN'T in call position (e.g. used as a bare value) never reaches
+  // this branch at all; it falls through to visitChild() below and is
+  // handled by visitScopeAccess() instead, which reports it as invalid
+  // (no first-class functions).
+  auto *ScopeCallee = dynamic_cast<ScopeAccessExprAST *>(
+      const_cast<ExprAST *>(Node.getCallee()));
+  if (!VarCallee && !ScopeCallee) {
     visitChild(Node.getCallee());
     return;
   }
 
-  const std::string &CalleeName = VarCallee->getName();
-
-  auto CurrentFileMatches = SymTable_.lookupCurrentFileFunctions(CalleeName);
-
-  // A bare (unqualified) call may only resolve to a function declared in the
-  // SAME module currently being walked -- i.e. genuine self-reference, like
-  // math.tr's abs() calling its own fabs() bare, or io.tr's print() calling
-  // its own printf() bare. It must NOT resolve to some OTHER transitively-
-  // imported module's function just because that module happens to be
-  // loaded somewhere in the program.
-  //
-  // This used to be an unconditional, unscoped SymTable_.findInModules(...)
-  // search across EVERY loaded module, with no check that the CURRENT file
-  // itself imported (let alone flat-imported) anything at all -- confirmed
-  // live: bare `printline("x");` compiled successfully with ZERO import
-  // statements anywhere in user code, because lib/std/prelude.tr always
-  // `import io;`-ed for every compile and this lookup didn't care who
-  // actually asked for that visibility. prelude.tr is gone now (see its
-  // removal), but the underlying promiscuous lookup was the real bug, not
-  // just prelude.tr's existence -- fixed here by scoping the search to
-  // currentModuleName() (empty = main file, which has no "self" module to
-  // search) instead of every module ever loaded.
+  std::string CalleeName;
+  std::vector<const ResolverFunctionSymbol *> CurrentFileMatches;
   std::vector<ResolverSymbolTable::ModuleFunctionMatch> ModuleMatches;
-  const std::string &SelfModule = currentModuleName();
-  if (!SelfModule.empty()) {
+
+  if (VarCallee) {
+    CalleeName = VarCallee->getName();
+    CurrentFileMatches = SymTable_.lookupCurrentFileFunctions(CalleeName);
+
+    // A bare (unqualified) call may only resolve to a function declared in
+    // the SAME module currently being walked -- i.e. genuine self-
+    // reference, like math.tr's abs() calling its own fabs() bare, or
+    // io.tr's print() calling its own printf() bare. It must NOT resolve
+    // to some OTHER transitively-imported module's function just because
+    // that module happens to be loaded somewhere in the program.
+    //
+    // This used to be an unconditional, unscoped SymTable_.findInModules(...)
+    // search across EVERY loaded module, with no check that the CURRENT
+    // file itself imported (let alone flat-imported) anything at all --
+    // confirmed live: bare `printline("x");` compiled successfully with
+    // ZERO import statements anywhere in user code, because
+    // lib/std/prelude.tr always `import io;`-ed for every compile and this
+    // lookup didn't care who actually asked for that visibility.
+    // prelude.tr is gone now (see its removal), but the underlying
+    // promiscuous lookup was the real bug, not just prelude.tr's existence
+    // -- fixed here by scoping the search to currentModuleName() (empty =
+    // main file, which has no "self" module to search) instead of every
+    // module ever loaded.
+    const std::string &SelfModule = currentModuleName();
+    if (!SelfModule.empty()) {
+      for (const auto &Match : SymTable_.findInModules(CalleeName))
+        if (Match.ModuleName == SelfModule)
+          ModuleMatches.push_back(Match);
+    }
+  } else {
+    // ScopeCallee: an explicit `Left::Right(args)` call.
+    CalleeName = ScopeCallee->getRightName();
+    const std::string &LeftName = ScopeCallee->getLeftName();
+
+    if (SymTable_.isEnumName(LeftName)) {
+      // e.g. `Color::Red(...)` -- a real enum, but variants aren't callable.
+      ScopeCallee->ResolvedKind = ScopeAccessKind::EnumVariant;
+      TypeError(Node.getLoc(), "'" + LeftName + "::" + CalleeName +
+                                   "' is an enum variant, not a function -- "
+                                   "it can't be called.")
+          .raise();
+      return;
+    }
+
+    if (!SymTable_.hasModule(LeftName)) {
+      RankedSuggestions QualifierSuggestions;
+      auto EnumSugg = SuggestionIndex::suggestVisible(LeftName, SymTable_.getAllEnumNames());
+      for (const auto &S : EnumSugg)
+        QualifierSuggestions.Local.push_back(S + "::" + CalleeName);
+      UnknownScopeQualifierError(Node.getLoc(), LeftName, QualifierSuggestions).raise();
+      return;
+    }
+
+    ScopeCallee->ResolvedKind = ScopeAccessKind::ModuleFunctionRef;
+    // Explicit qualification means the search is scoped to EXACTLY the
+    // named module -- no self-reference concept applies here, unlike the
+    // bare-call case above.
     for (const auto &Match : SymTable_.findInModules(CalleeName))
-      if (Match.ModuleName == SelfModule)
+      if (Match.ModuleName == LeftName)
         ModuleMatches.push_back(Match);
   }
 
@@ -952,33 +999,56 @@ void Resolver::visitEnumDecl(EnumDeclExprAST &Node) {
   // Pass 1 already hoisted the enum to the registry.
 }
 
-void Resolver::visitEnumAccess(EnumAccessExprAST &Node) {
-  std::string EnumName = Node.getEnumName();
-  std::string Variant = Node.getVariant();
+// Handles a `Left::Right` node reached as an ordinary expression -- i.e.
+// NOT as the direct callee of a FuncCallExprAST (that case is handled
+// specially and more narrowly by visitFuncCall itself, mirroring how a bare
+// VariableExprAST callee is special-cased there too, so this function never
+// even sees it). What's left for this function to disambiguate:
+//   - EnumName::Variant used as a value (e.g. `mut c: Color = Color::Red;`)
+//     -- the original, only-ever-supported meaning of this node.
+//   - Module::something referenced but NOT called -- this language has no
+//     first-class functions, so there is no valid non-call meaning of a
+//     module-qualified name; reported as a clean error instead of reaching
+//     Codegen and crashing (FuncCallExprAST::codegen() already has a
+//     "First-class functions are not supported yet" internal error for
+//     exactly this shape once it gets that far un-rejected).
+void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
+  const std::string &LeftName = Node.getLeftName();
+  const std::string &RightName = Node.getRightName();
 
-  if (!SymTable_.isEnumName(EnumName)) {
-    auto Sugg = SuggestionIndex::suggestVisible(EnumName, SymTable_.getAllEnumNames());
-    std::string Msg = "Use of undeclared enum '" + EnumName + "'.";
-    if (!Sugg.empty()) {
-      Msg += "\nDid you mean:\n";
-      for (const auto& s : Sugg) Msg += "    " + s + "\n";
+  if (SymTable_.isEnumName(LeftName)) {
+    Node.ResolvedKind = ScopeAccessKind::EnumVariant;
+    if (RightName != "COUNT" && RightName != "VALUES" && RightName != "NAMES") {
+      auto ET = SymTable_.lookupEnumType(LeftName);
+      if (ET && !ET->hasVariant(RightName)) {
+        std::string Msg = "Enum '" + LeftName + "' has no variant '" + RightName + "'.";
+        auto Sugg = SuggestionIndex::suggestVisible(RightName, ET->getVariants());
+        if (!Sugg.empty()) {
+          Msg += "\nDid you mean:\n";
+          for (const auto& s : Sugg) Msg += "    " + s + "\n";
+        }
+        LogErrorAt(Node.getLoc(), Msg);
+      }
     }
-    LogErrorAt(Node.getLoc(), Msg);
     return;
   }
 
-  if (Variant != "COUNT" && Variant != "VALUES" && Variant != "NAMES") {
-    auto ET = SymTable_.lookupEnumType(EnumName);
-    if (ET && !ET->hasVariant(Variant)) {
-      std::string Msg = "Enum '" + EnumName + "' has no variant '" + Variant + "'.";
-      auto Sugg = SuggestionIndex::suggestVisible(Variant, ET->getVariants());
-      if (!Sugg.empty()) {
-        Msg += "\nDid you mean:\n";
-        for (const auto& s : Sugg) Msg += "    " + s + "\n";
-      }
-      LogErrorAt(Node.getLoc(), Msg);
-    }
+  if (SymTable_.hasModule(LeftName)) {
+    // A module name IS real, but referencing `module::function` without
+    // calling it has no meaning in this language yet.
+    TypeError(Node.getLoc(), "'" + LeftName + "::" + RightName +
+                                 "' can't be used as a value -- functions "
+                                 "aren't first-class yet, only calls like '" +
+                                 LeftName + "::" + RightName + "(...)' work.")
+        .raise();
+    return;
   }
+
+  RankedSuggestions Suggestions;
+  auto EnumSugg = SuggestionIndex::suggestVisible(LeftName, SymTable_.getAllEnumNames());
+  for (const auto &S : EnumSugg)
+    Suggestions.Local.push_back(S + "::" + RightName);
+  UnknownScopeQualifierError(Node.getLoc(), LeftName, Suggestions).raise();
 }
 
 /**

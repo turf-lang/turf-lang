@@ -731,10 +731,14 @@ static const TurfType *getExprType(const ExprAST *E) {
     }
     return AddrOfTypeCache[Key].get();
   }
-  // EnumAccess: Direction::North → the type is Direction (TurfEnumType)
-  if (auto *EA = dynamic_cast<const EnumAccessExprAST *>(E)) {
+  // ScopeAccess as an enum variant: Direction::North → the type is Direction
+  // (TurfEnumType). A module-function-ref ScopeAccess (io::printline) falls
+  // through to nullptr below since "io" was never registered as a TYPE --
+  // it has no standalone type of its own, same as visitScopeAccess() in
+  // TypeChecker.cpp.
+  if (auto *EA = dynamic_cast<const ScopeAccessExprAST *>(E)) {
     if (GlobalSymbolTable) {
-      if (auto Registered = GlobalSymbolTable->LookupType(EA->getEnumName()))
+      if (auto Registered = GlobalSymbolTable->LookupType(EA->getLeftName()))
         return Registered.get();
     }
   }
@@ -2928,11 +2932,18 @@ Value *ReturnExprAST::codegen() {
 
 Value *FuncCallExprAST::codegen() {
   auto *Var = dynamic_cast<VariableExprAST *>(Callee.get());
-  if (!Var) {
+  auto *ScopeCallee = dynamic_cast<ScopeAccessExprAST *>(Callee.get());
+  if (!Var && !ScopeCallee) {
     llvm::report_fatal_error("Internal error: First-class functions are not supported yet.");
     return nullptr;
   }
-  std::string CalleeName = Var->getName();
+  // `Module::func(...)`: the Resolver already validated this and set
+  // ResolvedCallTarget exactly as it would for a bare call (see
+  // Resolver::visitFuncCall's ScopeCallee branch) -- CalleeName here only
+  // matters for the malloc/realloc/free/typeof/... bare-intrinsic checks
+  // below (which a qualified call can never match, since those are always
+  // spelled bare) and as ResolvedCallTarget's fallback if it's ever null.
+  std::string CalleeName = Var ? Var->getName() : ScopeCallee->getRightName();
 
   // For malloc/realloc/free: if the user declared an extern fn with that name,
   // let it flow through the normal symbol-table path below. Only use the
@@ -3672,19 +3683,26 @@ Value *EnumDeclExprAST::codegen() {
   return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
 }
 
-Value *EnumAccessExprAST::codegen() {
-  auto EnumTy = GlobalSymbolTable->LookupType(EnumName);
+// Only ever reached for the EnumVariant meaning of a ScopeAccessExprAST
+// (Color::Red used as a value) -- the Resolver (visitScopeAccess) already
+// rejects a module-function-ref used outside call position with a clean
+// TypeError before Codegen ever runs, and a module-function-ref IN call
+// position is handled entirely by FuncCallExprAST::codegen() instead
+// (which never calls Callee->codegen() at all -- a bare/qualified function
+// name has no "value" to compute, only a lookup).
+Value *ScopeAccessExprAST::codegen() {
+  auto EnumTy = GlobalSymbolTable->LookupType(LeftName);
   auto *ET = dynamic_cast<const TurfEnumType *>(EnumTy.get());
   if (!ET) {
     LogErrorAt(Loc, "Internal error: enum type not found in codegen");
     return nullptr;
   }
-  
-  if (Variant == "COUNT") {
+
+  if (RightName == "COUNT") {
     return ConstantInt::get(Type::getInt64Ty(*TheContext), ET->numVariants());
   }
-  
-  if (Variant == "VALUES") {
+
+  if (RightName == "VALUES") {
     llvm::Type *UnderlyingLLVMTy = getLLVMType(ET->getUnderlyingType());
     std::vector<Constant*> ArrayVals;
     for (const auto& V : ET->getVariants()) {
@@ -3693,13 +3711,13 @@ Value *EnumAccessExprAST::codegen() {
     llvm::ArrayType *ArrTy = llvm::ArrayType::get(UnderlyingLLVMTy, ArrayVals.size());
     Constant *ArrConst = ConstantArray::get(ArrTy, ArrayVals);
     GlobalVariable *GV = new GlobalVariable(*TheModule, ArrTy, true,
-                                            GlobalValue::PrivateLinkage, ArrConst, EnumName + ".values");
+                                            GlobalValue::PrivateLinkage, ArrConst, LeftName + ".values");
     Constant *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
     Constant *Indices[] = {Zero, Zero};
     return ConstantExpr::getInBoundsGetElementPtr(ArrTy, GV, Indices);
   }
-  
-  if (Variant == "NAMES") {
+
+  if (RightName == "NAMES") {
     std::vector<Constant*> ArrayVals;
     llvm::Type *StringTy = llvm::PointerType::getUnqual(*TheContext);
     for (const auto& V : ET->getVariants()) {
@@ -3713,14 +3731,14 @@ Value *EnumAccessExprAST::codegen() {
     llvm::ArrayType *ArrTy = llvm::ArrayType::get(StringTy, ArrayVals.size());
     Constant *ArrConst = ConstantArray::get(ArrTy, ArrayVals);
     GlobalVariable *GV = new GlobalVariable(*TheModule, ArrTy, true,
-                                            GlobalValue::PrivateLinkage, ArrConst, EnumName + ".names");
+                                            GlobalValue::PrivateLinkage, ArrConst, LeftName + ".names");
     Constant *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
     Constant *Indices[] = {Zero, Zero};
     return ConstantExpr::getInBoundsGetElementPtr(ArrTy, GV, Indices);
   }
 
   llvm::Type *LLVMTy = getLLVMType(ET->getUnderlyingType());
-  return ConstantInt::get(LLVMTy, ET->getVariantValue(Variant));
+  return ConstantInt::get(LLVMTy, ET->getVariantValue(RightName));
 }
 
 Value *StructDeclExprAST::codegen() {

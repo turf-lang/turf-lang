@@ -233,6 +233,32 @@ static TurfTypePtr ParseType() {
 
   getNextToken(); // consume the type name
 
+  // Module-qualified type: Module::TypeName<Args> (e.g. list::List<int>).
+  // BaseName parsed above was actually the module qualifier; re-bind it to
+  // the real type name that follows '::'.
+  //
+  // Deliberately NOT validated against GlobalSymbolTable here: module
+  // registration only happens at Codegen time (ModuleImportExprAST::
+  // codegen()'s EnterModule), which runs strictly after the ENTIRE program
+  // is parsed -- so at this point in ParseType(), nothing yet knows whether
+  // "list" names a real, imported module. The qualifier is accepted
+  // syntactically and otherwise ignored: struct/enum names are still one
+  // flat, module-blind namespace (see ResolverSymbolTable.h's doc comment
+  // on registerStruct()), so `list::List<int>` and bare `List<int>`
+  // resolve identically today. Real per-module type visibility (rejecting
+  // a qualifier that doesn't match where the type actually lives) is
+  // deferred to the on-demand import work, which is what actually
+  // introduces per-module type scoping in the first place.
+  if (CurTok == TOK_SCOPE) {
+    getNextToken(); // eat '::'
+    if (CurTok != TOK_IDENTIFIER) {
+      SyntaxError(CurLoc, "Expected a type name after '::'").raise();
+      return nullptr;
+    }
+    BaseName = IdentifierStr;
+    getNextToken();
+  }
+
   // Check for generic parameter: BaseName<T1, T2, ...>
   if (CurTok == '<') {
     getNextToken(); // consume '<'
@@ -660,16 +686,26 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                                                  std::move(NamedFields));
     }
 
-    // ── Enum access: EnumName::Variant ─────────────────────────────────────────
+    // ── Scope access: Left::Right ────────────────────────────────────────────
+    // Purely syntax-directed, exactly like before this was generalized: the
+    // parser doesn't know (and doesn't need to know) whether `IdName` names
+    // an enum, a module, or something else -- ScopeAccessKind disambiguation
+    // happens entirely in the Resolver (visitScopeAccess / visitFuncCall).
+    // Whatever follows this node syntactically (a postfix '(' for a call, a
+    // bare reference, etc.) is handled by the existing, unmodified postfix-
+    // expression machinery -- `Module::func(args)` already round-trips
+    // through it with zero new parsing logic needed here.
     if (CurTok == TOK_SCOPE) {
       getNextToken(); // eat '::'
       if (CurTok != TOK_IDENTIFIER) {
-        LogErrorAt(CurLoc, "Expected variant name after '::'");
+        LogErrorAt(CurLoc, "Expected a name after '::'");
         return nullptr;
       }
-      std::string Variant = IdentifierStr;
-      getNextToken(); // eat variant name
-      return std::make_unique<EnumAccessExprAST>(IdLoc, IdName, Variant);
+      std::string RightName = IdentifierStr;
+      SourceLocation RightLoc = CurLoc;
+      getNextToken(); // eat right-hand name
+      return std::make_unique<ScopeAccessExprAST>(IdLoc, IdName, IdLoc,
+                                                   RightName, RightLoc);
     }
 
     bool CouldBeKeywordTypo = false;

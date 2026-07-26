@@ -210,7 +210,7 @@ public:
   // ── Structs & field access ────────────────────────────────────────────────
   void visitFieldAccess(FieldAccessExprAST &Node) override;
   void visitEnumDecl(EnumDeclExprAST &Node) override;
-  void visitEnumAccess(EnumAccessExprAST &Node) override;
+  void visitScopeAccess(ScopeAccessExprAST &Node) override;
   void visitStructDecl(StructDeclExprAST &Node) override;
   void visitStructInit(StructInitExprAST &Node) override;
 

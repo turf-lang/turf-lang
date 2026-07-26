@@ -1,0 +1,35 @@
+// Regression test: `::` generalized beyond enum-variant access to also
+// cover module-qualified function calls (io::printline(...)) and, in type
+// position, module-qualified generic types (list::List<int>) -- this is
+// the actual feature ask: `.` stays reserved for instance-member access,
+// `::` becomes the general namespace-resolution operator.
+//
+// The parser needed ZERO new grammar for the call form: `Module::func(args)`
+// already round-trips through the existing postfix '('-call handler once
+// the underlying ScopeAccessExprAST node (renamed from EnumAccessExprAST)
+// carries a Resolver-set ScopeAccessKind instead of always meaning "enum
+// variant". Confirmed this exact construct used to reach Codegen and crash
+// with "Internal error: First-class functions are not supported yet." --
+// FuncCallExprAST::codegen() had no case for a ScopeAccessExprAST callee at
+// all, and the Resolver's old visitFuncCall never special-cased it either
+// (it fell through to a generic visitEnumAccess() call, which -- since
+// "io" was never registered as an enum -- should have errored, but the
+// pre-pass's blind codegen (sub-pass 3b) reached the broken construct
+// before the mandatory pass could reject it cleanly). Now genuinely
+// resolves and calls correctly instead.
+
+import io;
+import math;
+import list;
+
+fn main(): int {
+    io::printline("scope-qualified call works");
+    assert(math::abs(-7) == 7, "math::abs should work via ::");
+
+    mut l: list::List<int> = List { data: null, len: 0, cap: 0 };
+    l.push(10);
+    l.push(20);
+    assert(l.length() == 2, "list::List<int> in type position should work");
+
+    return 0;
+}
