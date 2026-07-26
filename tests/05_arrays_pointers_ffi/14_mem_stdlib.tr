@@ -9,6 +9,7 @@
 // the crash was never caught.
 
 import mem;
+import io;
 
 fn main(): int {
     // alloc / zero / free

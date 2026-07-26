@@ -167,7 +167,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
 std::unique_ptr<ExprAST> ParseEnumDecl();
 std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
-std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName);
+std::unique_ptr<ExprAST> ParseFuncDef();
 std::unique_ptr<ExprAST> ParseFile(const std::string &Path);
 std::unique_ptr<ExprAST> ParseImport();
 std::unique_ptr<ExprAST> ParseReturnExpr();
@@ -765,37 +765,17 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     return nullptr;
 
   case TOK_FN:
-    return ParseFuncDef("");
+    return ParseFuncDef();
 
   case TOK_AT: {
-    SourceLocation AtLoc = CurLoc;
-    getNextToken();
-    if (CurTok != TOK_IDENTIFIER || IdentifierStr != "intrinsic") {
-      LogErrorAt(AtLoc, "Expected 'intrinsic' after '@'");
-      return nullptr;
-    }
-    getNextToken();
-    if (CurTok != '(') {
-      LogErrorAt(CurLoc, "Expected '(' after @intrinsic");
-      return nullptr;
-    }
-    getNextToken();
-    if (CurTok != TOK_STRING_LITERAL) {
-      LogErrorAt(CurLoc, "Expected string literal for intrinsic name");
-      return nullptr;
-    }
-    std::string IntrinsicName = StringVal;
-    getNextToken();
-    if (CurTok != ')') {
-      LogErrorAt(CurLoc, "Expected ')' after intrinsic name");
-      return nullptr;
-    }
-    getNextToken(); // eat ')'
-    if (CurTok != TOK_FN) {
-      LogErrorAt(CurLoc, "Expected 'fn' after @intrinsic decorator");
-      return nullptr;
-    }
-    return ParseFuncDef(IntrinsicName);
+    // The @intrinsic("name") decorator (used to bind print/printline/input
+    // to compiler-native codegen) has been removed -- those functions are
+    // now ordinary Turf code delegating to `extern fn` FFI bindings, see
+    // lib/std/io.tr. No decorator syntax is currently supported at all.
+    LogErrorAt(CurLoc,
+               "'@' is not valid here.\n  Hint: Turf has no decorator syntax "
+               "right now.");
+    return nullptr;
   }
 
   case TOK_IMPORT:
@@ -2011,7 +1991,7 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
 
 // ParseFuncDef - called when CurTok == TOK_FN.
 // Parses: fn <rettype> <name>(<type> <param>, ...) { body }
-std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
+std::unique_ptr<ExprAST> ParseFuncDef() {
   SourceLocation FnLoc = CurLoc;
   getNextToken(); // consume TOK_FN
 
@@ -2188,13 +2168,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
   if (CurTok == ';') {
     getNextToken(); // eat ';'
     return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
-                                            nullptr, IntrinsicName, TypeParams);
-  }
-
-  // If we are @intrinsic, we might not have a body or semicolon
-  if (!IntrinsicName.empty() && CurTok != '{') {
-    return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
-                                            nullptr, IntrinsicName, TypeParams);
+                                            nullptr, TypeParams);
   }
 
   // Expect '{' to open function body
@@ -2209,7 +2183,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(std::string IntrinsicName) {
 
 
   return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
-                                          std::move(Body), "", TypeParams);
+                                          std::move(Body), TypeParams);
 }
 
 std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {

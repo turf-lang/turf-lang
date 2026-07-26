@@ -8,6 +8,8 @@
 // deliberately never treated as a hard CFG terminator on its own, even
 // when provably exhaustive.
 
+import io;
+
 enum Direction { North, East, South, West }
 
 fn describe(d: Direction): int {

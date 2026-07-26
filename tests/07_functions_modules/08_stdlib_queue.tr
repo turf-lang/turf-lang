@@ -4,6 +4,7 @@
 // resolution bug this (and the whole rewrite) was blocked on.
 
 import queue;
+import io;
 
 fn main(): int {
     mut q: Queue<int> = Queue { data: null, len: 0, cap: 0, head: 0 };

@@ -3,6 +3,7 @@
 // struct-method-resolution bug this (and the whole rewrite) was blocked on.
 
 import stack;
+import io;
 
 fn main(): int {
     mut s: Stack<int> = Stack { data: null, len: 0, cap: 0 };

@@ -21,6 +21,7 @@
 // specifically because of how convincingly that failure mode fakes success.
 
 import list;
+import io;
 
 fn main(): int {
     mut l: List<int> = List { data: null, len: 0, cap: 0 };

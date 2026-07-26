@@ -209,7 +209,6 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   DeclLoc.Line = Node.getLoc().Line;
   DeclLoc.Col = Node.getLoc().Col;
   Sym.DeclLoc = DeclLoc;
-  Sym.IsIntrinsic = !Node.getIntrinsicName().empty();
   // Only instance methods (Params[0] is the implicit "self" -- see
   // ParseFuncDef's self-parameter construction) can mutate self at all;
   // static methods and free/module functions leave MutatesSelf at its
@@ -281,7 +280,6 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
     Sym.BaseName = Extern->getName();
     Sym.SourceModule = ""; // extern fns are in the global (file) namespace
     Sym.ReturnType = Extern->getReturnType();
-    Sym.IsIntrinsic = false;
     Sym.IsExtern    = true; // see IsExtern's doc comment in ResolverSymbolTable.h
     Sym.IsVarArg    = Extern->isVarArg(); // propagate '...' to arity check
     for (const auto &[PName, PType] : Extern->getParams())
@@ -313,7 +311,6 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
       Sym.BaseName = Extern->getName();
       Sym.SourceModule = ModuleName;
       Sym.ReturnType = Extern->getReturnType();
-      Sym.IsIntrinsic = false;
       Sym.IsExtern = true; // see IsExtern's doc comment in ResolverSymbolTable.h
       Sym.IsVarArg = Extern->isVarArg();
       for (const auto &[PName, PType] : Extern->getParams())

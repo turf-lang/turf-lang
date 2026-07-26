@@ -1,8 +1,7 @@
 // Regression test: a local variable named the same as an imported module
-// (here `io`, which is auto-imported into EVERY Turf program via
-// lib/std/prelude.tr) must resolve as the variable, not the module, when
-// used as a method-call base -- ordinary lexical shadowing, same as
-// everywhere else in the language.
+// (here `io`, explicitly imported below) must resolve as the variable, not
+// the module, when used as a method-call base -- ordinary lexical
+// shadowing, same as everywhere else in the language.
 //
 // Before the fix this was worse than a wrong diagnostic: Resolver::
 // visitMethodCall() checked SymTable_.hasModule() before checking for an
@@ -15,6 +14,8 @@
 // ArgVals[Idx] against the wrong function's argument count) once the
 // Resolver started correctly treating `io` as a struct-typed variable.
 // Both fixes are required together for this file to pass.
+
+import io;
 
 struct Thing {
     val: int

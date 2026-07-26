@@ -95,104 +95,14 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
                               const std::vector<llvm::Value *> &Args,
                               SourceLocation Loc) {
 
-  if (IntrinsicName == "print") {
-    Value *Val = Args[0];
-    Function *PrintfFunc = TheModule->getFunction("printf");
-    if (!PrintfFunc) {
-      FunctionType *FT =
-          FunctionType::get(Type::getInt32Ty(*TheContext),
-                            {PointerType::getUnqual(*TheContext)}, true);
-      PrintfFunc = Function::Create(FT, Function::ExternalLinkage, "printf",
-                                    TheModule.get());
-    }
-
-    Type *Ty = Val->getType();
-    if (Ty->isDoubleTy()) {
-      Value *Fmt = Builder->CreateGlobalString("%g", "printstrdbl");
-      return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
-    } else if (Ty->isIntegerTy(64)) {
-      Value *Fmt = Builder->CreateGlobalString("%lld", "printstrint");
-      return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
-    } else if (Ty->isIntegerTy(1)) {
-      Value *Zext =
-          Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), "booltoint");
-      Value *Fmt = Builder->CreateGlobalString("%d", "printstrbool");
-      return Builder->CreateCall(PrintfFunc, {Fmt, Zext}, "printcall");
-    } else if (Ty->isPointerTy()) {
-      Value *Fmt = Builder->CreateGlobalString("%s", "printstrstr");
-      return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
-    }
-    SemanticError(Loc, "Unsupported type for print").raise();
-    return nullptr;
-  }
-
-  if (IntrinsicName == "printline") {
-    Value *Val = Args[0];
-    Function *PrintfFunc = TheModule->getFunction("printf");
-    if (!PrintfFunc) {
-      FunctionType *FT =
-          FunctionType::get(Type::getInt32Ty(*TheContext),
-                            {PointerType::getUnqual(*TheContext)}, true);
-      PrintfFunc = Function::Create(FT, Function::ExternalLinkage, "printf",
-                                    TheModule.get());
-    }
-
-    Type *Ty = Val->getType();
-    if (Ty->isDoubleTy()) {
-      Value *Fmt = Builder->CreateGlobalString("%g\n", "printstrdbl");
-      return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
-    } else if (Ty->isIntegerTy(64)) {
-      Value *Fmt = Builder->CreateGlobalString("%lld\n", "printstrint");
-      return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
-    } else if (Ty->isIntegerTy(1)) {
-      Value *Zext =
-          Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), "booltoint");
-      Value *Fmt = Builder->CreateGlobalString("%d\n", "printstrbool");
-      return Builder->CreateCall(PrintfFunc, {Fmt, Zext}, "printcall");
-    } else if (Ty->isPointerTy()) {
-      Value *Fmt = Builder->CreateGlobalString("%s\n", "printstrstr");
-      return Builder->CreateCall(PrintfFunc, {Fmt, Val}, "printcall");
-    }
-    SemanticError(Loc, "Unsupported type for printline").raise();
-    return nullptr;
-  }
-
-  if (IntrinsicName == "input") {
-    Function *CallocFunc = TheModule->getFunction("calloc");
-    if (!CallocFunc) {
-      FunctionType *FT = FunctionType::get(
-          PointerType::getUnqual(*TheContext),
-          {Type::getInt64Ty(*TheContext), Type::getInt64Ty(*TheContext)},
-          false);
-      CallocFunc = Function::Create(FT, Function::ExternalLinkage, "calloc",
-                                    TheModule.get());
-    }
-
-    Function *ScanfFunc = TheModule->getFunction("scanf");
-    if (!ScanfFunc) {
-      FunctionType *FT =
-          FunctionType::get(Type::getInt32Ty(*TheContext),
-                            {PointerType::getUnqual(*TheContext)}, true);
-      ScanfFunc = Function::Create(FT, Function::ExternalLinkage, "scanf",
-                                   TheModule.get());
-    }
-
-    Function *GetcharFunc = TheModule->getFunction("getchar");
-    if (!GetcharFunc) {
-      FunctionType *FT =
-          FunctionType::get(Type::getInt32Ty(*TheContext), false);
-      GetcharFunc = Function::Create(FT, Function::ExternalLinkage, "getchar",
-                                     TheModule.get());
-    }
-
-    Value *NumItems = ConstantInt::get(Type::getInt64Ty(*TheContext), 4096);
-    Value *Size = ConstantInt::get(Type::getInt64Ty(*TheContext), 1);
-    Value *Buf = Builder->CreateCall(CallocFunc, {NumItems, Size}, "buf");
-    Value *Fmt = Builder->CreateGlobalString("%4095[^\n]", "scanfmt");
-    Builder->CreateCall(ScanfFunc, {Fmt, Buf});
-    Builder->CreateCall(GetcharFunc, {});
-    return Buf;
-  }
+  // ── Removed: "print", "printline", "input" ────────────────────────────────
+  // These were the only three names ever reached via the @intrinsic("name")
+  // decorator, which has been removed from the compiler entirely (Parser.cpp
+  // no longer parses "@" as anything but a syntax error). print/printline/
+  // input are now ordinary Turf functions in lib/std/io.tr that delegate to
+  // `extern fn printf`/`scanf`/`getchar`/`calloc` FFI bindings -- no compiler
+  // C++ needed, mirroring how malloc/free (mem.tr) and abs/power (math.tr)
+  // were already handled below.
 
   // ── Removed: "malloc", "realloc", "free" ─────────────────────────────────
   // These were previously @intrinsic stubs, but are now declared as extern fn
@@ -217,9 +127,10 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
   // "bare intrinsic" path -- called with no module qualifier, arity/type
   // validated by TypeChecker's ad-hoc BuiltinInfo registry rather than by
   // real overload resolution against a fixed-arity FunctionSymbol (compare
-  // print/printline/input, which are only ever reached via a real,
-  // fully-typed `@intrinsic`-decorated Turf function in lib/std/io.tr, so
-  // Args here is already guaranteed correct by the normal call machinery).
+  // print/printline/input, which are ordinary Turf functions reached via
+  // real, fully-typed call sites in lib/std/io.tr, so Args there is already
+  // guaranteed correct by the normal call machinery -- this file no longer
+  // handles them at all, see the "Removed" note above).
   // That ad-hoc registry isn't a reliable enough guarantee to skip
   // bounds-checking on: main.cpp's pre-pass (sub-pass 2b) runs its own
   // TypeChecker instance but deliberately discards its errors

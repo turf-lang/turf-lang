@@ -59,7 +59,6 @@ struct FunctionSymbol {
   std::string MangledName; ///< e.g. "turf_io_printline_int"
   std::vector<TurfTypePtr> ParamTypes;
   TurfTypePtr ReturnType;
-  bool IsIntrinsic = false;
   bool IsVarArg    = false; ///< true for variadic extern fn (e.g. printf)
   int Arity = 0; ///< Number of formal parameters (cached for quick checks)
 };

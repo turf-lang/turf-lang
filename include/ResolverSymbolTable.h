@@ -115,9 +115,6 @@ struct FunctionParam {
  *          From io module: io.printline(str) — try 'io.printline(x)'
  *
  *  - DeclLoc: source location of the fn keyword, used for "defined at …" notes.
- *
- *  - IsIntrinsic: marks compiler-synthesised builtins that never have a Turf
- *    source location.
  */
 struct ResolverFunctionSymbol {
   std::string              BaseName;     ///< User-visible name, e.g. "printline"
@@ -125,7 +122,6 @@ struct ResolverFunctionSymbol {
   std::vector<FunctionParam> Params;     ///< Ordered parameters (name + type)
   TurfTypePtr              ReturnType;
   ResolverSourceLocation   DeclLoc;      ///< Location of the fn definition
-  bool                     IsIntrinsic = false;
   bool                     IsVarArg    = false; ///< true for variadic extern fn (e.g. printf)
   /// True for an `extern fn` declaration (FFI binding to a real C symbol).
   /// Codegen's ExternFuncDeclExprAST::codegen() always registers the LLVM

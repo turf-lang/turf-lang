@@ -14,6 +14,8 @@
 // even when every real arm assigns the same variable. Fixed by only adding
 // that edge when the compare is NOT provably exhaustive.
 
+import io;
+
 enum Color { Red, Green, Blue }
 
 fn main(): int {

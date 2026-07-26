@@ -12,6 +12,7 @@
 // semantics still work correctly regardless of what the lint says.
 
 import math;
+import io;
 
 fn main(): int {
     mut x: double = math.sqrt(0.0 - 1.0); // NaN: sqrt of a negative number

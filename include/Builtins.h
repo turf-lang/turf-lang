@@ -8,9 +8,13 @@
 #include <vector>
 
 // CodegenIntrinsic
-// Invoked by FuncDefExprAST when an @intrinsic decorator is present.
-// It maps the intrinsic name string (e.g. "pow", "malloc") to LLVM IR
-// generation.
+// Generates LLVM IR for a true bare compiler intrinsic (typeof/lengthof/
+// fail/assert -- see the BareIntrinsics set in Resolver::visitFuncCall) or
+// for a compiler-emitted runtime check that needs to invoke one of them
+// (e.g. a division-by-zero guard calling "fail" internally). Everything
+// that used to be a name-based stdlib intrinsic (print/printline/input,
+// malloc/free, abs/power, ...) is now ordinary Turf code in lib/std/*.tr
+// delegating to `extern fn` FFI bindings instead.
 llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
                               const std::vector<llvm::Value *> &Args,
                               SourceLocation Loc);

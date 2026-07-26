@@ -673,18 +673,16 @@ class FuncDefExprAST : public ExprAST {
   TurfTypePtr ReturnType;
   std::vector<ParamDecl> Params;
   std::unique_ptr<ExprAST> Body;
-  std::string IntrinsicName;
   std::vector<std::string> TypeParams;
   SourceLocation Loc;
 
 public:
   FuncDefExprAST(SourceLocation Loc, std::string Name, TurfTypePtr ReturnType,
                  std::vector<ParamDecl> Params, std::unique_ptr<ExprAST> Body,
-                 std::string IntrinsicName = "",
                  std::vector<std::string> TypeParams = {})
       : Loc(Loc), Name(std::move(Name)), ReturnType(std::move(ReturnType)),
         Params(std::move(Params)), Body(std::move(Body)),
-        IntrinsicName(std::move(IntrinsicName)), TypeParams(std::move(TypeParams)) {}
+        TypeParams(std::move(TypeParams)) {}
 
   const std::string &getName() const { return Name; }
   const SourceLocation &getLoc() const { return Loc; }
@@ -707,8 +705,6 @@ public:
   /// generic-parameter substitution.
   void setReturnType(TurfTypePtr T) { ReturnType = std::move(T); }
 
-  const std::string &getIntrinsicName() const { return IntrinsicName; }
-
   /// Populated by the Resolver after registering the function symbol.
   /// clone() returns a fresh node, so this is nullptr in cloned trees.
   std::shared_ptr<ResolverFunctionSymbol> ResolvedDef;
@@ -720,7 +716,7 @@ public:
   void accept(ASTVisitor &V) override { V.visitFuncDef(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncDefExprAST>(
-        Loc, Name, ReturnType, Params, CloneExprAST(Body.get()), IntrinsicName, TypeParams);
+        Loc, Name, ReturnType, Params, CloneExprAST(Body.get()), TypeParams);
     // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. The default-constructed field is nullptr.
   }

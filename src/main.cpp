@@ -393,10 +393,14 @@ int main(int argc, char **argv) {
   // We perform a second full parse of the file, i.e. only processing
   // FuncDefExprAST nodes, which registers the LLVM prototype on first
   // codegen call (before the body exists).
-  // PreludeAST is kept alive so the Resolver can walk it later and register
-  // the `io` module (and any other prelude imports) in its module registry
-  // before it processes user code.
-  std::unique_ptr<ExprAST> PreludeAST;
+  //
+  // There is deliberately no prelude auto-import here. lib/std/prelude.tr
+  // used to always `import io;` for every compile, which meant bare
+  // `printline(...)` (etc.) silently compiled with zero import statements
+  // anywhere in user code -- io's functions leaked into every program's
+  // module registry regardless of whether that program actually asked for
+  // them. Every module a program uses must now be imported explicitly by
+  // that program itself.
 
   // Swap the global SourceFile for the pre-pass stream
   SourceFile->close();
@@ -406,17 +410,6 @@ int main(int argc, char **argv) {
       // Reset the lexer token stream
       CurTok = 0;
       getNextToken();
-
-      // Auto-import prelude using relative path from compiler
-      llvm::SmallString<128> PreludePath(CompilerExecutablePath);
-      llvm::sys::path::remove_filename(PreludePath);
-      llvm::sys::path::append(PreludePath, "..", "lib", "std", "prelude.tr");
-
-      if (auto Parsed = ParseFile(PreludePath.str().str())) {
-        RecordParsedTopLevelAST(Parsed.get());
-        Parsed->codegen();
-        PreludeAST = std::move(Parsed); // keep alive for Resolver
-      }
 
       // ── Pre-pass sub-pass 1: Parse ALL top-level declarations ─────────────
       // We collect every fn/struct/import node BEFORE codegenning any body.
@@ -489,7 +482,8 @@ int main(int argc, char **argv) {
       }
 
       // ── Pre-pass sub-pass 2a: Resolve ─────────────────────────────────────
-      // Run the Resolver over everything parsed so far (prelude + user fns).
+      // Run the Resolver over everything parsed so far (user fns only -- no
+      // prelude to resolve first any more).
       // This populates ResolvedCandidates on every FuncCallExprAST and sets
       // ResolvedCallTarget for unambiguous single-overload calls.
       Resolver PreR;
@@ -497,8 +491,6 @@ int main(int argc, char **argv) {
         bool PreResolverClean = true;
         g_recoverActive = true;
         if (setjmp(g_recoverJmp) == 0) {
-          if (PreludeAST)
-            PreR.resolve(PreludeAST.get());
           PreR.resolveAll(PrePassASTs);
         } else {
           PreResolverClean = false;
@@ -519,8 +511,6 @@ int main(int argc, char **argv) {
         TypeChecker PreTC(PreR.symbolTable());
         g_recoverActive = true;
         if (setjmp(g_recoverJmp) == 0) {
-          if (PreludeAST)
-            PreTC.check(PreludeAST.get());
           PreTC.checkAll(PrePassASTs);
         } else {
           PreTCClean = false;
@@ -810,11 +800,6 @@ int main(int argc, char **argv) {
     bool ResolverClean = true;
     g_recoverActive = true;
     if (setjmp(g_recoverJmp) == 0) {
-      // Resolve the prelude first so that module imports (e.g. `import io`)
-      // are registered in the Resolver's module registry before any user
-      // code is walked.
-      if (PreludeAST)
-        R.resolve(PreludeAST.get());
       R.resolveAll(FnASTs);
       R.resolveAll(TopLevelASTs);
     } else {
@@ -875,8 +860,6 @@ int main(int argc, char **argv) {
     bool TCClean = true;
     g_recoverActive = true;
     if (setjmp(g_recoverJmp) == 0) {
-      if (PreludeAST)
-        TC.check(PreludeAST.get());
       TC.checkAll(FnASTs);
       TC.checkAll(TopLevelASTs);
     } else {

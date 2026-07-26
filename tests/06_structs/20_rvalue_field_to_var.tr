@@ -19,6 +19,8 @@
 // underlying codegen path (chained r-value field access) but via `assert()`
 // directly on the call result rather than through an intermediate variable.
 
+import io;
+
 struct Box {
     val: int
 }

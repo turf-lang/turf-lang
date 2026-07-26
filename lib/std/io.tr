@@ -1,26 +1,75 @@
-@intrinsic("input")
-fn input(): string
+// ─── io.tr ─────────────────────────────────────────────────────────────────
+// Console I/O for TurfLang.
+//
+// Design:
+//   - print/printline/input are ordinary Turf functions that delegate to
+//     libc via `extern fn` (FFI), exactly like math.tr/mem.tr -- no compiler
+//     C++ hardcodes their names or behavior. This replaces the previous
+//     @intrinsic("print"/"printline"/"input") mechanism, which has been
+//     removed from the compiler entirely (it had exactly these 9 signatures
+//     as its only consumer anywhere in the codebase).
+//   - print/printline dispatch per-type by overload (int/double/bool/string)
+//     rather than at runtime, mirroring the previous @intrinsic behavior's
+//     per-LLVM-type dispatch in Builtins.cpp.
+//
+// Usage:
+//   import io;
+//   io::printline("hello");
+//   mut name: string = io::input();
 
-@intrinsic("print")
-fn print(val: int): void
+// ─── libc bindings ────────────────────────────────────────────────────────
 
-@intrinsic("print")
-fn print(val: double): void
+extern fn printf(fmt: string, ...): int;
+extern fn scanf(fmt: string, ...): int;
+extern fn getchar(): int;
+extern fn calloc(count: int, size: int): void*;
 
-@intrinsic("print")
-fn print(val: bool): void
+// ─── print ────────────────────────────────────────────────────────────────
 
-@intrinsic("print")
-fn print(val: string): void
+fn print(val: int): void {
+    printf("%lld", val);
+}
 
-@intrinsic("printline")
-fn printline(val: int): void
+fn print(val: double): void {
+    printf("%g", val);
+}
 
-@intrinsic("printline")
-fn printline(val: double): void
+fn print(val: bool): void {
+    printf("%d", val);
+}
 
-@intrinsic("printline")
-fn printline(val: bool): void
+fn print(val: string): void {
+    printf("%s", val);
+}
 
-@intrinsic("printline")
-fn printline(val: string): void
+// ─── printline ────────────────────────────────────────────────────────────
+
+fn printline(val: int): void {
+    printf("%lld\n", val);
+}
+
+fn printline(val: double): void {
+    printf("%g\n", val);
+}
+
+fn printline(val: bool): void {
+    printf("%d\n", val);
+}
+
+fn printline(val: string): void {
+    printf("%s\n", val);
+}
+
+// ─── input ────────────────────────────────────────────────────────────────
+
+// Reads one line (up to 4095 chars) from stdin. Mirrors the old @intrinsic
+// implementation exactly: calloc a zeroed buffer, scanf a bracket-expression
+// that stops at '\n' (so the delimiter itself is left in the stream), then
+// getchar() to consume that leftover '\n' so it doesn't leak into the next
+// input() call.
+fn input(): string {
+    mut buf: void* = calloc(4096, 1);
+    scanf("%4095[^\n]", buf);
+    getchar();
+    return buf to string;
+}

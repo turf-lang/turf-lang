@@ -3,6 +3,8 @@
 // provably in-bounds constant index must still compile and run correctly --
 // the fix must not turn valid accesses into false positives.
 
+import io;
+
 fn main(): int {
     mut arr: int[3] = [10, 20, 30];
     mut i: int = 1;

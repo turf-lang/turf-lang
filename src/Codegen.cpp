@@ -2683,7 +2683,6 @@ Value *FuncDefExprAST::codegen() {
     FSym.MangledName = MangledName; // e.g. "turf_io_printline_int"
     FSym.Arity       = static_cast<int>(Params.size());
     FSym.ReturnType  = ReturnType;
-    FSym.IsIntrinsic = !IntrinsicName.empty();
     for (const auto &P : Params)
       FSym.ParamTypes.push_back(P.Type);
 
@@ -2712,35 +2711,6 @@ Value *FuncDefExprAST::codegen() {
   NamedValues.clear();
   CurrentFuncReturnType = ReturnType;
   CurrentFunction = TheFunc;
-
-  if (!IntrinsicName.empty()) {
-    std::vector<Value *> ArgVals;
-    for (auto &Arg : TheFunc->args()) {
-      ArgVals.push_back(&Arg);
-    }
-    Value *IntrinsicRet = CodegenIntrinsic(IntrinsicName, ArgVals, Loc);
-    if (!IntrinsicRet) {
-      // CodegenIntrinsic will raise its own error
-      TheFunc->eraseFromParent();
-      return nullptr;
-    }
-    if (ReturnType->isVoid()) {
-      Builder->CreateRetVoid();
-    } else {
-      Builder->CreateRet(IntrinsicRet);
-    }
-
-    // Restore caller context
-    NamedValues = SavedNamedValues;
-    CurrentFuncReturnType = SavedReturnType;
-    CurrentFunction = SavedFunction;
-    if (SavedInsertBlock) {
-      Builder->SetInsertPoint(SavedInsertBlock, SavedInsertPoint);
-    } else {
-      Builder->ClearInsertionPoint();
-    }
-    return TheFunc;
-  }
 
   // Enter a new scope for the function body
   if (GlobalSymbolTable) {
@@ -2904,7 +2874,6 @@ Value *ExternFuncDeclExprAST::codegen() {
     FSym.MangledName = Name_; // extern fns use their C name directly
     FSym.Arity       = static_cast<int>(Params_.size());
     FSym.ReturnType  = ReturnType_;
-    FSym.IsIntrinsic = false;
     FSym.IsVarArg    = IsVarArg_;  // propagate variadic flag to the symbol
     for (const auto &[PName, PType] : Params_)
       FSym.ParamTypes.push_back(PType);
