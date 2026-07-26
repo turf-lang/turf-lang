@@ -235,26 +235,20 @@ static TurfTypePtr ParseType() {
 
   // Module-qualified type: Module::TypeName<Args> (e.g. list::List<int>).
   // BaseName parsed above was actually the module qualifier; re-bind it to
-  // the real type name that follows '::'.
-  //
-  // Deliberately NOT validated against GlobalSymbolTable here: module
-  // registration only happens at Codegen time (ModuleImportExprAST::
-  // codegen()'s EnterModule), which runs strictly after the ENTIRE program
-  // is parsed -- so at this point in ParseType(), nothing yet knows whether
-  // "list" names a real, imported module. The qualifier is accepted
-  // syntactically and otherwise ignored: struct/enum names are still one
-  // flat, module-blind namespace (see ResolverSymbolTable.h's doc comment
-  // on registerStruct()), so `list::List<int>` and bare `List<int>`
-  // resolve identically today. Real per-module type visibility (rejecting
-  // a qualifier that doesn't match where the type actually lives) is
-  // deferred to the on-demand import work, which is what actually
-  // introduces per-module type scoping in the first place.
+  // the real type name that follows '::', and carry the qualifier forward
+  // into the NamedType/GenericType built below so the Resolver can
+  // actually validate it (Resolver::validateModuleQualifier(), called from
+  // validateNamedType()) once module registrations are known -- that can't
+  // happen here at parse time, since module registration runs at Codegen
+  // time, strictly after the entire program is parsed.
+  std::string ModuleQualifier;
   if (CurTok == TOK_SCOPE) {
     getNextToken(); // eat '::'
     if (CurTok != TOK_IDENTIFIER) {
       SyntaxError(CurLoc, "Expected a type name after '::'").raise();
       return nullptr;
     }
+    ModuleQualifier = BaseName;
     BaseName = IdentifierStr;
     getNextToken();
   }
@@ -280,7 +274,7 @@ static TurfTypePtr ParseType() {
     }
     // Arrays of generics are rare but allowed: parse trailing [N]
     TurfTypePtr GenBase =
-        std::make_shared<GenericType>(BaseName, std::move(TypeArgs));
+        std::make_shared<GenericType>(BaseName, std::move(TypeArgs), ModuleQualifier);
     while (CurTok == '*') {
       getNextToken();
       GenBase = std::make_shared<TurfPointerType>(GenBase);
@@ -327,7 +321,7 @@ static TurfTypePtr ParseType() {
     SyntaxError(CurLoc, "Expected '<' after 'list' — e.g. list<int>").raise();
     return nullptr;
   } else {
-    Base = std::make_shared<NamedType>(BaseName);
+    Base = std::make_shared<NamedType>(BaseName, ModuleQualifier);
   }
 
   while (CurTok == '*') {
@@ -609,6 +603,47 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
                                      ElseLoc);
 }
 
+// Parses the `field: expr, ...` body of a struct literal. The opening '{'
+// has already been consumed by the caller; this consumes up to and
+// including the closing '}'. Shared by both the bare form (Identifier
+// { ... }) and the qualified form (Module::StructName { ... }) so the two
+// don't duplicate this loop -- @p StructNameForError is only used to name
+// the struct in the "Expected '}'" diagnostic. Returns false (having
+// already raised an error) on failure.
+static bool ParseStructInitFieldsBody(
+    const std::string &StructNameForError,
+    std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> &NamedFields) {
+  while (CurTok != '}' && CurTok != TOK_EOF) {
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc, "Expected field name in struct initializer");
+      return false;
+    }
+    std::string FieldName = IdentifierStr;
+    getNextToken(); // eat field name
+    if (CurTok != TOK_COLON) {
+      LogErrorAt(CurLoc, "Expected ':' after field name '" + FieldName +
+                             "' in struct initializer");
+      return false;
+    }
+    getNextToken(); // eat ':'
+    auto Val = ParseExpression();
+    if (!Val)
+      return false;
+    NamedFields.emplace_back(FieldName, std::move(Val));
+    if (CurTok == ',')
+      getNextToken(); // eat ','
+    else if (CurTok != '}')
+      break;
+  }
+  if (CurTok != '}') {
+    LogErrorAt(CurLoc, "Expected '}' to close struct initializer for '" +
+                           StructNameForError + "'");
+    return false;
+  }
+  getNextToken(); // eat '}'
+  return true;
+}
+
 // "Primary" means the basic building blocks: numbers or parentheses.
 static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   switch (CurTok) {
@@ -652,36 +687,8 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     if (g_AllowStructInit && CurTok == '{') {
       getNextToken(); // eat '{'
       std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields;
-      while (CurTok != '}' && CurTok != TOK_EOF) {
-        if (CurTok != TOK_IDENTIFIER) {
-          LogErrorAt(CurLoc, "Expected field name in struct initializer");
-          return nullptr;
-        }
-        std::string FieldName = IdentifierStr;
-        getNextToken(); // eat field name
-        if (CurTok != TOK_COLON) {
-          LogErrorAt(CurLoc,
-                     "Expected ':' after field name '" + FieldName +
-                         "' in struct initializer");
-          return nullptr;
-        }
-        getNextToken(); // eat ':'
-        auto Val = ParseExpression();
-        if (!Val)
-          return nullptr;
-        NamedFields.emplace_back(FieldName, std::move(Val));
-        if (CurTok == ',')
-          getNextToken(); // eat ','
-        else if (CurTok != '}')
-          break;
-      }
-      if (CurTok != '}') {
-        LogErrorAt(CurLoc,
-                   "Expected '}' to close struct initializer for '" + IdName +
-                       "'");
+      if (!ParseStructInitFieldsBody(IdName, NamedFields))
         return nullptr;
-      }
-      getNextToken(); // eat '}'
       return std::make_unique<StructInitExprAST>(IdLoc, IdName,
                                                  std::move(NamedFields));
     }
@@ -704,6 +711,22 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       std::string RightName = IdentifierStr;
       SourceLocation RightLoc = CurLoc;
       getNextToken(); // eat right-hand name
+
+      // Qualified struct-literal construction: Module::StructName { ... }.
+      // Module ownership (is IdName a real module, and does it actually
+      // declare RightName) is validated later by the Resolver
+      // (visitStructInit -> validateModuleQualifier()) once module
+      // registrations are known -- not here, same reason ParseType()'s
+      // qualifier can't be validated at parse time either.
+      if (g_AllowStructInit && CurTok == '{') {
+        getNextToken(); // eat '{'
+        std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields;
+        if (!ParseStructInitFieldsBody(RightName, NamedFields))
+          return nullptr;
+        return std::make_unique<StructInitExprAST>(IdLoc, RightName,
+                                                   std::move(NamedFields), IdName);
+      }
+
       return std::make_unique<ScopeAccessExprAST>(IdLoc, IdName, IdLoc,
                                                    RightName, RightLoc);
     }

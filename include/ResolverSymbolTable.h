@@ -498,9 +498,17 @@ public:
    * declaration's location if @p Name was already registered (so the caller
    * can raise a clean DuplicateTypeNameError instead of reaching Codegen at
    * all), or std::nullopt if this is a fresh registration.
+   *
+   * @p ModuleName records WHICH module actually declares this type ("" for
+   * the main file) -- unlike the flat isKnownStruct()/getAllStructNames()
+   * registry (which intentionally answers only "does this name exist
+   * ANYWHERE"), this powers getTypeOwningModule(), used to validate an
+   * explicit `Module::TypeName` qualifier actually names the RIGHT module,
+   * not just A real one.
    */
   std::optional<ResolverSourceLocation>
-  registerStruct(const std::string &Name, ResolverSourceLocation Loc);
+  registerStruct(const std::string &Name, ResolverSourceLocation Loc,
+                 const std::string &ModuleName = "");
 
   /**
    * @brief True if @p Name was registered as a struct in the current file.
@@ -523,10 +531,20 @@ public:
   // a duplicate name, std::nullopt on a fresh registration.
   std::optional<ResolverSourceLocation>
   registerEnumType(const std::string& Name, ResolverSourceLocation Loc,
-                   std::shared_ptr<TurfEnumType> ET);
+                   std::shared_ptr<TurfEnumType> ET,
+                   const std::string &ModuleName = "");
   std::shared_ptr<TurfEnumType> lookupEnumType(const std::string& Name) const;
   bool isEnumName(const std::string& Name) const;
   std::vector<std::string> getAllEnumNames() const;
+
+  /**
+   * @brief Which module declares @p Name ("" for the main file, or if
+   * @p Name isn't a known struct/enum at all). Struct/enum names are
+   * globally unique once declared (see registerStruct()'s doc comment on
+   * the flat-namespace collision rule), so there is always exactly one
+   * owner to report.
+   */
+  std::string getTypeOwningModule(const std::string &Name) const;
 
   /**
    * @brief Dumps the contents of the symbol table (all scopes and modules) to the output stream.
@@ -568,6 +586,10 @@ private:
   /// Parallel to RegisteredEnums_, since TurfEnumType itself carries no
   /// declaration location -- see registerEnumType()'s doc comment.
   std::unordered_map<std::string, ResolverSourceLocation> EnumDeclLocs_;
+
+  /// Which module owns each struct/enum name ("" = main file). See
+  /// getTypeOwningModule()'s doc comment.
+  std::unordered_map<std::string, std::string> TypeOwningModule_;
 };
 
 #endif // RESOLVER_SYMBOL_TABLE_H

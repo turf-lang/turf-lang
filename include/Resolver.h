@@ -238,6 +238,20 @@ private:
   void validateNamedType(const TurfTypePtr &Ty, SourceLocation Loc,
                          const std::vector<std::string> &TypeParams = {}) const;
 
+  /// Validates an explicit `Module::TypeName` qualifier (from NamedType::
+  /// getModule()/GenericType::getModule(), or a qualified struct-literal's
+  /// ModuleQualifier) once @p TypeName is already confirmed to be a real,
+  /// known struct/enum. A no-op (returns true) if @p Qualifier is empty --
+  /// an unqualified reference has nothing to validate. Raises
+  /// UnknownScopeQualifierError if @p Qualifier isn't a known module at
+  /// all, or UnknownModuleSymbolError if it IS a real module but doesn't
+  /// own @p TypeName (e.g. `mem::List` when List actually lives in
+  /// `list`). Returns false in either error case (already raised), true
+  /// if the qualifier is empty or correct.
+  bool validateModuleQualifier(const std::string &Qualifier,
+                               const std::string &TypeName,
+                               SourceLocation Loc) const;
+
   // ── Pass 1: Hoisting ───────────────────────────────────────────────────────
   // Walk only the top-level list, registering struct names and function
   // signatures.  No bodies are visited in this pass.

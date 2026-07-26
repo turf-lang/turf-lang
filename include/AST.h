@@ -1020,15 +1020,23 @@ class StructInitExprAST : public ExprAST {
   std::string Name;
   std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields;
   SourceLocation Loc;
+  // The `Module` in `Module::Name { ... }` (empty for the ordinary, bare
+  // `Name { ... }` form). Validated by Resolver::visitStructInit via the
+  // same validateModuleQualifier() a type annotation's NamedType/
+  // GenericType qualifier goes through -- see that function's doc comment.
+  std::string ModuleQualifier;
 
 public:
   StructInitExprAST(
       SourceLocation Loc, std::string Name,
-      std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields)
-      : Loc(Loc), Name(std::move(Name)), NamedFields(std::move(NamedFields)) {}
+      std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields,
+      std::string ModuleQualifier = "")
+      : Loc(Loc), Name(std::move(Name)), NamedFields(std::move(NamedFields)),
+        ModuleQualifier(std::move(ModuleQualifier)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getName() const { return Name; }
+  const std::string &getModuleQualifier() const { return ModuleQualifier; }
   const std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> &
   getNamedFields() const {
     return NamedFields;
@@ -1042,7 +1050,8 @@ public:
     for (const auto &[FieldName, Val] : NamedFields)
       ClonedFields.emplace_back(FieldName, CloneExprAST(Val.get()));
     return std::make_unique<StructInitExprAST>(Loc, Name,
-                                               std::move(ClonedFields));
+                                               std::move(ClonedFields),
+                                               ModuleQualifier);
   }
 };
 

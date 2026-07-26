@@ -61,9 +61,17 @@ WHAT'S STILL FLAT REGARDLESS OF IMPORT FORM
   imported in ANY form, including the bare form -- `import list;` alone
   is enough to write `mut l: List<int> = ...`. This is different from
   FUNCTIONS, which the bare form deliberately does NOT expose unqualified
-  (see below). `list::List<int>` (explicitly qualified) also always
-  works, identically to the bare `List<int>` spelling -- qualifying a
-  type name never hurts, it's just usually unnecessary today.
+  (see below).
+
+  You can ALSO qualify a type explicitly: `list::List<int>`, and even
+  qualify its CONSTRUCTION the same way: `list::List { ... }` (not just
+  the type annotation -- both forms accept a qualifier). Qualifying is
+  genuinely validated, not decoration: `list` must be a real, imported
+  module, AND it must actually be the module that declares `List` --
+  `mem::List<int>` is a compile error even though `mem` is a real module,
+  because `List` isn't declared there. A bare, unqualified `List<int>`
+  and the fully-qualified `list::List { ... }` construct the exact same
+  thing -- qualifying is about being explicit, not a different type.
 
   Two different modules declaring a same-named struct or enum is a
   compile error (DuplicateTypeNameError) regardless of import form --

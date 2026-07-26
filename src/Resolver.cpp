@@ -321,7 +321,7 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
                    dynamic_cast<const StructDeclExprAST *>(Expr.get())) {
       SourceLocation Loc = Struct->getLoc();
       if (auto PrevLoc = SymTable_.registerStruct(
-              Struct->getName(), {Loc.Line, Loc.Col})) {
+              Struct->getName(), {Loc.Line, Loc.Col}, ModuleName)) {
         DuplicateTypeNameError(Loc, Struct->getName(), "struct",
                                {PrevLoc->Line, PrevLoc->Col})
             .raise();
@@ -339,7 +339,7 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
           Enum->getName(), Enum->getVariants(), Enum->getUnderlyingType());
       SourceLocation Loc = Enum->getLoc();
       if (auto PrevLoc = SymTable_.registerEnumType(
-              Enum->getName(), {Loc.Line, Loc.Col}, ET)) {
+              Enum->getName(), {Loc.Line, Loc.Col}, ET, ModuleName)) {
         DuplicateTypeNameError(Loc, Enum->getName(), "enum",
                                {PrevLoc->Line, PrevLoc->Col})
             .raise();
@@ -1191,6 +1191,25 @@ void Resolver::validateNamedType(
   // cause (e.g. "No overload of 'List.push' matches argument types (int)",
   // blaming the call's argument instead of the undeclared type argument).
   if (const auto *GT = dynamic_cast<const GenericType *>(BaseType)) {
+    // The generic's OWN base name (e.g. "List" in List<int>) was never
+    // validated here either, only its type arguments -- confirmed live:
+    // `mut x: NonExistentGeneric<int> = 5;` produced an unrelated type-
+    // mismatch error ("Cannot initialise... with value of type 'int'"),
+    // never "unknown type", because nothing checked BaseName existed at
+    // all. Found and fixed alongside the module-qualifier validation below
+    // since both need the exact same isKnownStruct/isEnumName groundwork.
+    const std::string &BaseName = GT->getBaseName();
+    bool BaseIsOwnTypeParam =
+        std::find(TypeParams.begin(), TypeParams.end(), BaseName) != TypeParams.end();
+    if (!BaseIsOwnTypeParam &&
+        !SymTable_.isKnownStruct(BaseName) && !SymTable_.isEnumName(BaseName)) {
+      RankedSuggestions Suggestions;
+      Suggestions.Local =
+          SuggestionIndex::suggestVisible(BaseName, SymTable_.getAllStructNames());
+      UnknownTypeError(Loc, BaseName, Suggestions).raise();
+    } else {
+      validateModuleQualifier(GT->getModule(), BaseName, Loc);
+    }
     for (const auto &Arg : GT->getTypeArgs())
       validateNamedType(Arg, Loc, TypeParams);
     return;
@@ -1236,8 +1255,38 @@ void Resolver::validateNamedType(
       Suggestions.Local =
           SuggestionIndex::suggestVisible(TypeName, SymTable_.getAllStructNames());
       UnknownTypeError(Loc, TypeName, Suggestions).raise();
+    } else if (!IsOwnTypeParam && !KnownPrimitives.count(TypeName)) {
+      validateModuleQualifier(NT->getModule(), TypeName, Loc);
     }
   }
+}
+
+// See the doc comment on the declaration in Resolver.h.
+bool Resolver::validateModuleQualifier(const std::string &Qualifier,
+                                       const std::string &TypeName,
+                                       SourceLocation Loc) const {
+  if (Qualifier.empty())
+    return true;
+
+  if (!SymTable_.hasModule(Qualifier)) {
+    RankedSuggestions Suggestions;
+    auto EnumSugg = SuggestionIndex::suggestVisible(Qualifier, SymTable_.getAllEnumNames());
+    for (const auto &S : EnumSugg)
+      Suggestions.Local.push_back(S + "::" + TypeName);
+    UnknownScopeQualifierError(Loc, Qualifier, Suggestions).raise();
+    return false;
+  }
+
+  std::string Owner = SymTable_.getTypeOwningModule(TypeName);
+  if (Owner != Qualifier) {
+    RankedSuggestions Suggestions;
+    if (!Owner.empty())
+      Suggestions.Module[Owner].push_back(TypeName);
+    UnknownModuleSymbolError(Loc, Qualifier, TypeName, Suggestions).raise();
+    return false;
+  }
+
+  return true;
 }
 
 void Resolver::visitStructDecl(StructDeclExprAST &Node) {
@@ -1257,7 +1306,7 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
   // file.
   if (!SymTable_.isKnownStruct(Node.getName())) {
     SourceLocation Loc = Node.getLoc();
-    SymTable_.registerStruct(Node.getName(), {Loc.Line, Loc.Col});
+    SymTable_.registerStruct(Node.getName(), {Loc.Line, Loc.Col}, currentModuleName());
   }
 
   // Rewrite any field NamedType("T") that names one of this struct's own
@@ -1280,6 +1329,20 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
 }
 
 void Resolver::visitStructInit(StructInitExprAST &Node) {
+  // Validates an explicit `Module::StructName { ... }` qualifier, if any
+  // (a no-op for the ordinary bare `StructName { ... }` form). Note this
+  // function does NOT otherwise validate that Node.getName() is a real,
+  // known struct at all -- that pre-existing gap (a totally nonexistent
+  // struct name in a BARE construction currently falls through to an
+  // unrelated error, or worse, uncaught) is separate from the module-
+  // qualifier work and intentionally not addressed here; the qualifier
+  // check below, however, naturally still produces a correct, specific
+  // error even when the struct name itself doesn't exist anywhere (see
+  // validateModuleQualifier(): an unknown TypeName has no owning module,
+  // so it never equals a real Qualifier, correctly raising
+  // UnknownModuleSymbolError either way).
+  validateModuleQualifier(Node.getModuleQualifier(), Node.getName(), Node.getLoc());
+
   for (const auto &[FieldName, Val] : Node.getNamedFields())
     visitChild(Val.get());
 }

@@ -1,0 +1,13 @@
+// Regression test: same wrong-module check as
+// fail_scope_type_wrong_module.tr, but for qualified struct-literal
+// CONSTRUCTION (mem::List { ... }) rather than a type annotation --
+// confirms Resolver::visitStructInit's validateModuleQualifier() call
+// catches this too, not just validateNamedType()'s.
+
+import list;
+import mem;
+
+fn main(): int {
+    mut l: list::List<int> = mem::List { data: null, len: 0, cap: 0 };
+    return 0;
+}

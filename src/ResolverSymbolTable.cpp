@@ -264,11 +264,13 @@ ResolverSymbolTable::getAllModuleFunctionNames() const {
 
 std::optional<ResolverSourceLocation>
 ResolverSymbolTable::registerStruct(const std::string &Name,
-                                    ResolverSourceLocation Loc) {
+                                    ResolverSourceLocation Loc,
+                                    const std::string &ModuleName) {
   auto It = RegisteredStructs_.find(Name);
   if (It != RegisteredStructs_.end())
     return It->second; // duplicate -- caller raises DuplicateTypeNameError
   RegisteredStructs_.emplace(Name, Loc);
+  TypeOwningModule_.emplace(Name, ModuleName);
   return std::nullopt;
 }
 
@@ -285,18 +287,25 @@ std::vector<std::string> ResolverSymbolTable::getAllStructNames() const {
   return Names;
 }
 
+std::string ResolverSymbolTable::getTypeOwningModule(const std::string &Name) const {
+  auto It = TypeOwningModule_.find(Name);
+  return It == TypeOwningModule_.end() ? "" : It->second;
+}
+
 
 // ─── Enum registry ──────────────────────────────────────────────────────────
 
 std::optional<ResolverSourceLocation>
 ResolverSymbolTable::registerEnumType(const std::string &Name,
                                       ResolverSourceLocation Loc,
-                                      std::shared_ptr<TurfEnumType> ET) {
+                                      std::shared_ptr<TurfEnumType> ET,
+                                      const std::string &ModuleName) {
   auto LocIt = EnumDeclLocs_.find(Name);
   if (LocIt != EnumDeclLocs_.end())
     return LocIt->second; // duplicate -- caller raises DuplicateTypeNameError
   EnumDeclLocs_.emplace(Name, Loc);
   RegisteredEnums_[Name] = std::move(ET);
+  TypeOwningModule_.emplace(Name, ModuleName);
   return std::nullopt;
 }
 

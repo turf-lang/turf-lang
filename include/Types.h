@@ -225,10 +225,22 @@ public:
  */
 class NamedType : public TurfType {
   std::string Name;
+  // The `Module` in `Module::Name` (empty if unqualified). Deliberately NOT
+  // part of getName()/isNamed()'s identity -- struct/enum names are still
+  // one flat, module-blind namespace (a name is globally unique once
+  // declared), so two NamedTypes for the same bare Name must still compare
+  // equal for ordinary type-compatibility purposes regardless of whether
+  // one spelling happened to be qualified. This field exists ONLY so the
+  // Resolver can validate the qualifier (real module? does IT own this
+  // type?) once, at the point the type reference is first resolved -- see
+  // Resolver::validateModuleQualifier().
+  std::string Module;
 
 public:
-  explicit NamedType(std::string N) : Name(std::move(N)) {}
+  explicit NamedType(std::string N, std::string M = "")
+      : Name(std::move(N)), Module(std::move(M)) {}
   std::string getName() const override { return Name; }
+  const std::string &getModule() const { return Module; }
   bool isNamed(const std::string &N) const override { return Name == N; }
   bool isVoid() const override { return Name == "void"; }
 };
@@ -342,10 +354,16 @@ class GenericType : public TurfType {
 protected:
   std::string            BaseName;   ///< "list", "map", etc.
   std::vector<TurfTypePtr> TypeArgs; ///< [int], [string, int], etc.
+  // The `Module` in `Module::BaseName<...>` (empty if unqualified) -- same
+  // purpose and same "not part of type identity" rule as NamedType::Module,
+  // see its doc comment.
+  std::string Module;
 
 public:
-  GenericType(std::string Base, std::vector<TurfTypePtr> Args)
-      : BaseName(std::move(Base)), TypeArgs(std::move(Args)) {}
+  GenericType(std::string Base, std::vector<TurfTypePtr> Args, std::string Mod = "")
+      : BaseName(std::move(Base)), TypeArgs(std::move(Args)), Module(std::move(Mod)) {}
+
+  const std::string &getModule() const { return Module; }
 
   std::string getName() const override {
     std::string S = BaseName + "<";
