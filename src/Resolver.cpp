@@ -652,7 +652,32 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
   const std::string &CalleeName = VarCallee->getName();
 
   auto CurrentFileMatches = SymTable_.lookupCurrentFileFunctions(CalleeName);
-  auto ModuleMatches = SymTable_.findInModules(CalleeName);
+
+  // A bare (unqualified) call may only resolve to a function declared in the
+  // SAME module currently being walked -- i.e. genuine self-reference, like
+  // math.tr's abs() calling its own fabs() bare, or io.tr's print() calling
+  // its own printf() bare. It must NOT resolve to some OTHER transitively-
+  // imported module's function just because that module happens to be
+  // loaded somewhere in the program.
+  //
+  // This used to be an unconditional, unscoped SymTable_.findInModules(...)
+  // search across EVERY loaded module, with no check that the CURRENT file
+  // itself imported (let alone flat-imported) anything at all -- confirmed
+  // live: bare `printline("x");` compiled successfully with ZERO import
+  // statements anywhere in user code, because lib/std/prelude.tr always
+  // `import io;`-ed for every compile and this lookup didn't care who
+  // actually asked for that visibility. prelude.tr is gone now (see its
+  // removal), but the underlying promiscuous lookup was the real bug, not
+  // just prelude.tr's existence -- fixed here by scoping the search to
+  // currentModuleName() (empty = main file, which has no "self" module to
+  // search) instead of every module ever loaded.
+  std::vector<ResolverSymbolTable::ModuleFunctionMatch> ModuleMatches;
+  const std::string &SelfModule = currentModuleName();
+  if (!SelfModule.empty()) {
+    for (const auto &Match : SymTable_.findInModules(CalleeName))
+      if (Match.ModuleName == SelfModule)
+        ModuleMatches.push_back(Match);
+  }
 
   if (CurrentFileMatches.empty() && ModuleMatches.empty()) {
     // Before emitting an error, check whether the callee is a true language-level
@@ -668,10 +693,11 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     //   - malloc / realloc / free    → mem.tr   (call as mem.malloc(...))
     //   - abs / power / sqrt / …     → math.tr  (call as math.abs(...))
     //
-    // Those stdlib functions are found by findInModules() above (when their
-    // module is imported), so they never reach this branch.  Do NOT add them
-    // here — they should produce a proper "did you mean io.printline?" error
-    // when called without a qualifier.
+    // A module-qualified call (io.printline(...)) never reaches this
+    // function at all -- it's a MethodCallExprAST, handled by
+    // visitMethodCall instead. This function only ever sees bare,
+    // unqualified names, so no stdlib function name belongs in the
+    // BareIntrinsics set below no matter how "primitive" it feels.
     static const std::unordered_set<std::string> BareIntrinsics = {
         "typeof",
         "lengthof",
@@ -692,6 +718,19 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
         Suggestions.Local.push_back(Sym->signature());
       }
     }
+
+    // Exact-name matches in OTHER modules (checked before the fuzzy pass
+    // below, which deliberately skips exact matches -- see
+    // SuggestionIndex::suggestFromCandidates' `Candidate == Query` guard,
+    // since it exists for typo-correction, not this case). This is now the
+    // single most common way to land in this branch: a real, correctly-
+    // spelled function that exists in some OTHER imported module, called
+    // bare with no qualifier -- e.g. `printline(x)` when `io.printline(x)`
+    // was meant. Surface it as a real suggestion instead of the generic
+    // "double-check the spelling" fallback, which is actively wrong here
+    // (the spelling IS correct; the qualifier is just missing).
+    for (const auto &Match : SymTable_.findInModules(CalleeName))
+      Suggestions.Module[Match.ModuleName].push_back(Match.Symbol->signature());
 
     auto ModuleNames = SuggestionIndex::suggestVisible(
         CalleeName, SymTable_.getAllModuleFunctionNames());
@@ -1015,6 +1054,18 @@ void Resolver::validateNamedType(
   // produces one for a type ANNOTATION (only GlobalSymbolTable's separate,
   // Codegen-facing registration does), so the caller-supplied TypeParams
   // list below is what actually exempts `T` in `fn<T> f(x: T)`.
+  //
+  // NOTE (deliberately NOT changed by the bare-call-scoping fix in
+  // visitFuncCall): isKnownStruct()/isEnumName() below still check the
+  // GLOBAL, module-blind struct/enum registry, so `List<int>` still works
+  // unqualified after just `import list;`, unlike bare function calls
+  // (which now require self-reference or, eventually, an explicit
+  // `import list::List;`-style on-demand import). Gating bare TYPE
+  // visibility the same way functions now are requires that on-demand
+  // import grammar to exist first as the escape hatch -- flipping this
+  // check before that lands would break every stdlib collection test
+  // (List/Stack/Queue) with no way to fix it forward. Left as a marked
+  // follow-on, not forgotten.
   if (const auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
     const std::string &TypeName = NT->getName();
     bool IsOwnTypeParam =

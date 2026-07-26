@@ -1,0 +1,16 @@
+// Regression test: selfref_module.tr's outerQuadruple() calls its own
+// sibling function innerDouble() bare, twice, with no qualifier -- this
+// must still work after the bare-call scoping fix in
+// Resolver::visitFuncCall (which stops a bare call from resolving to some
+// OTHER, unrelated imported module's function, but must NOT break a
+// module calling its own declarations bare). See selfref_module.tr's doc
+// comment for the full picture.
+
+import io;
+import selfref_module;
+
+fn main(): int {
+    assert(selfref_module.outerQuadruple(3) == 12, "outerQuadruple(3) should be 12");
+    io.printline("self-reference within a module still works");
+    return 0;
+}

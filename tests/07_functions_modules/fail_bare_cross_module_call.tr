@@ -1,0 +1,24 @@
+// Regression test: this is the literal bug report. Before this fix,
+// Resolver::visitFuncCall resolved ANY bare (unqualified) function call by
+// searching EVERY module ever transitively imported anywhere in the
+// program (SymTable_.findInModules(CalleeName), with no check that the
+// CURRENT file itself imported -- let alone asked to expose unqualified --
+// that specific module). Confirmed live: bare `printline("x");` compiled
+// successfully with ZERO import statements anywhere in user code, because
+// lib/std/prelude.tr always `import io;`-ed for every compile and this
+// lookup didn't care who actually requested that visibility.
+//
+// A bare call must now resolve ONLY to (a) a function declared directly in
+// the current file, or (b) -- if the bare call happens INSIDE a module's
+// own body -- another function declared in that SAME module (self-
+// reference, see selfref_module.tr/selfref_module_call.tr). Calling an
+// imported module's function bare from OUTSIDE that module, like here,
+// must be a clean UnknownFunctionError telling you to qualify it, not a
+// silent cross-module resolution.
+
+import cross_module_bare_call_module;
+
+fn main(): int {
+    mut x: int = helperFn();
+    return 0;
+}
