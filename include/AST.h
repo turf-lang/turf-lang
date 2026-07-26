@@ -326,20 +326,31 @@ public:
 };
 
 class ModuleImportExprAST : public ExprAST {
+  SourceLocation Loc;         ///< location of the `import` statement itself
   std::string ModuleName;
+  std::string ResolvedPath;   ///< canonical path the module was actually loaded
+                              ///< from (one of ParseImport()'s 3 search
+                              ///< candidates) -- the identity key circular-
+                              ///< import detection and per-file import
+                              ///< scoping both key off of, so neither has to
+                              ///< re-derive "what file is this" separately.
   std::unique_ptr<ExprAST> Body;
 
 public:
-  ModuleImportExprAST(std::string ModuleName, std::unique_ptr<ExprAST> Body)
-      : ModuleName(std::move(ModuleName)), Body(std::move(Body)) {}
+  ModuleImportExprAST(SourceLocation Loc, std::string ModuleName,
+                      std::string ResolvedPath, std::unique_ptr<ExprAST> Body)
+      : Loc(Loc), ModuleName(std::move(ModuleName)),
+        ResolvedPath(std::move(ResolvedPath)), Body(std::move(Body)) {}
 
+  const SourceLocation &getLoc() const { return Loc; }
   const std::string &getModuleName() const { return ModuleName; }
+  const std::string &getResolvedPath() const { return ResolvedPath; }
   const ExprAST *getBody() const { return Body.get(); }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitModuleImport(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ModuleImportExprAST>(ModuleName,
+    return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, ResolvedPath,
                                                  CloneExprAST(Body.get()));
   }
 };

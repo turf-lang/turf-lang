@@ -1,0 +1,6 @@
+// Companion module shared by diamond_left_module.tr and
+// diamond_right_module.tr, imported by BOTH -- see
+// diamond_import_no_false_cycle.tr's doc comment for what this is testing.
+fn sharedValue(): int {
+    return 99;
+}

@@ -9,7 +9,9 @@ extern int CurTok;
 int getNextToken();
 void InitializePrecedence();
 
-std::unique_ptr<ExprAST> ParseFile(const std::string &Path);
+std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
+                                   const std::string &ModuleName = "",
+                                   SourceLocation ImportLoc = SourceLocation{});
 std::unique_ptr<ExprAST> ParseExpression();
 std::unique_ptr<ExprAST> Parse();
 

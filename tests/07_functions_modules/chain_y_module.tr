@@ -1,0 +1,7 @@
+// Companion module for fail_circular_import_three_module_chain.tr -- see
+// chain_x_module.tr's doc comment.
+import chain_z_module;
+
+fn chainY(): int {
+    return 2;
+}

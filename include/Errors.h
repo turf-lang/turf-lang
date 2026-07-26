@@ -1013,6 +1013,54 @@ public:
   }
 };
 
+// A single hop in a detected import cycle: which module, and the location
+// of the `import` statement that pulled it onto the in-progress stack.
+struct ImportChainEntry {
+  std::string ModuleName;
+  SourceLocation Loc;
+};
+
+// Raised when ParseFile() re-enters a module that is still being parsed
+// (present on the Parser's in-progress import stack) -- a genuine cycle
+// (A imports B imports ... imports A), not the ordinary "already fully
+// parsed, reuse it" case (which returns an empty body silently and is by
+// design, see ParseFile()'s ImportedFiles set). Before this class existed, a
+// cycle didn't error or hang -- it silently truncated the re-imported side
+// to an empty module body, which is a confusing, hard-to-diagnose class of
+// bug all on its own (missing symbols with no explanation), not just a
+// missing diagnostic.
+class CircularImportError : public TurfError {
+public:
+  CircularImportError(SourceLocation Loc, const std::string &ModuleName,
+                      const std::vector<ImportChainEntry> &Chain)
+      : TurfError(Loc, Colors::BRIGHT_RED +
+                           "Circular import detected -- these modules are "
+                           "waiting on each other." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+
+    // Render as a simple linear chain (A --imports--> B --imports--> ...
+    // --imports--> A) rather than true box-drawing: a 2-3 module cycle is
+    // the overwhelmingly common case and reads perfectly clearly this way,
+    // and unlike a box diagram this degrades gracefully to any chain length
+    // without needing terminal-width-aware layout logic.
+    std::string Diagram = "\n\n    ";
+    for (const auto &Entry : Chain) {
+      Diagram += Colors::CYAN + Entry.ModuleName + Colors::RESET +
+                 Colors::BRIGHT_BLACK + "  --imports-->  " + Colors::RESET;
+    }
+    Diagram += Colors::CYAN + ModuleName + Colors::RESET + Colors::BRIGHT_RED +
+               "  <- back to the start!" + Colors::RESET;
+    Message += Diagram;
+
+    Hint_ = "Break the cycle by removing one of these imports, or moving "
+            "the code both sides actually need into a third module that "
+            "neither one has to import the other to reach.";
+
+    for (const auto &Entry : Chain)
+      RelatedLocations_.push_back({Entry.Loc, "imports '" + Entry.ModuleName + "' here"});
+  }
+};
+
 
 // Phase 2: Module-scoped method lookup error
 // Raised when a user types e.g. io.pritn() — wrong function name in a known

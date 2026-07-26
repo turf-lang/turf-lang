@@ -1,0 +1,8 @@
+// Companion module for fail_circular_import_three_module_chain.tr -- closes
+// the 3-module cycle back to chain_x_module. See chain_x_module.tr's doc
+// comment.
+import chain_x_module;
+
+fn chainZ(): int {
+    return 3;
+}

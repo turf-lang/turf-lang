@@ -32,6 +32,22 @@
 #include <vector>
 
 static std::unordered_set<std::string> ImportedFiles;
+
+// Tracks the chain of modules currently being parsed (not yet finished) so a
+// circular `import` (A -> B -> ... -> A) can be reported as a real
+// diagnostic instead of silently truncating. This is deliberately a SEPARATE
+// structure from ImportedFiles above: ImportedFiles is a "fully parsed,
+// cacheable" set (a module already finished parsing returns an empty body on
+// a second import, by design -- see ParseFile()), while ImportStack is an
+// "in progress right now" stack that must be empty of a path the moment that
+// path's own ParseFile() call returns, cycle or not.
+struct ImportStackFrame {
+  std::string ModuleName;
+  std::string ResolvedPath;
+  SourceLocation ImportLoc; // location of the `import` statement that pulled this in
+};
+static std::vector<ImportStackFrame> ImportStack;
+
 // Current state of the Parser
 int CurTok; // The current token the parser is looking at
 static std::map<int, int> BinopPrecedence; // Precedence table: '*' > '+'
@@ -130,6 +146,10 @@ void InitializePrecedence() {
 void ClearParsedTopLevelASTs() {
   ParsedTopLevelASTs.clear();
   ImportedFiles.clear();
+  // ImportStack should always be empty already (the RAII guard in ParseFile()
+  // pops every frame it pushes, cycle or not) -- cleared defensively anyway,
+  // mirroring ImportedFiles' own reset-between-compiles behavior above.
+  ImportStack.clear();
 }
 
 std::vector<std::unique_ptr<ExprAST>> SwapParsedTopLevelASTs(std::vector<std::unique_ptr<ExprAST>> New) {
@@ -168,7 +188,6 @@ std::unique_ptr<ExprAST> ParseEnumDecl();
 std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 std::unique_ptr<ExprAST> ParseFuncDef();
-std::unique_ptr<ExprAST> ParseFile(const std::string &Path);
 std::unique_ptr<ExprAST> ParseImport();
 std::unique_ptr<ExprAST> ParseReturnExpr();
 std::unique_ptr<ExprAST> ParseStructDecl();
@@ -2186,7 +2205,44 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
                                           std::move(Body), TypeParams);
 }
 
-std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
+// Builds the reportable chain for a detected import cycle: the sub-sequence
+// of ImportStack starting at the frame that re-enters Path (the module
+// currently being closed back on) through to the top of the stack (whoever's
+// `import ModuleName;` triggered this specific ParseFile() call). The caller
+// appends ModuleName itself to close the loop when rendering.
+static std::vector<ImportChainEntry>
+BuildCircularImportChain(const std::vector<ImportStackFrame> &Stack,
+                         const std::string &Path) {
+  std::vector<ImportChainEntry> Chain;
+  bool Started = false;
+  for (const auto &Frame : Stack) {
+    if (Frame.ResolvedPath == Path)
+      Started = true;
+    if (Started)
+      Chain.push_back({Frame.ModuleName, Frame.ImportLoc});
+  }
+  return Chain;
+}
+
+std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
+                                   const std::string &ModuleName,
+                                   SourceLocation ImportLoc) {
+  // Circular-import check FIRST, before the ImportedFiles cache check below:
+  // a module still being parsed (on ImportStack) is a genuine cycle, not a
+  // cache hit. Checking ImportedFiles first would be wrong here -- that set
+  // isn't populated for the CURRENT file until after this check anyway, but
+  // conceptually the two checks answer different questions ("is this a
+  // cycle" vs "did we already fully parse this") and cycle detection must
+  // win when both could apply.
+  for (const auto &Frame : ImportStack) {
+    if (Frame.ResolvedPath == Path) {
+      CircularImportError(ImportLoc, ModuleName,
+                          BuildCircularImportChain(ImportStack, Path))
+          .raise();
+      return nullptr;
+    }
+  }
+
   if (ImportedFiles.count(Path)) {
     return std::make_unique<BlockExprAST>(
         std::vector<std::unique_ptr<ExprAST>>{});
@@ -2198,6 +2254,18 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path) {
   }
 
   ImportedFiles.insert(Path);
+
+  // Push this module onto the in-progress stack for the duration of parsing
+  // its body; popped via RAII (including on every early-return path below,
+  // e.g. the "nested ParseExpression already reported a real error" bailouts
+  // already documented further down in this function) so a missed pop can
+  // never silently poison every subsequent import in the same compile.
+  struct ImportStackGuard {
+    ImportStackGuard(std::string MN, std::string RP, SourceLocation Loc) {
+      ImportStack.push_back({std::move(MN), std::move(RP), Loc});
+    }
+    ~ImportStackGuard() { ImportStack.pop_back(); }
+  } IGuard(ModuleName, Path, ImportLoc);
 
   // Save current lexer state
   struct LexerStateGuard {
@@ -2383,8 +2451,14 @@ std::unique_ptr<ExprAST> ParseImport() {
   // real one, since the module WAS found, just broken). Distinguish the two
   // by snapshotting the diagnostic count before each attempt and checking
   // whether it grew.
+  // ResolvedPath tracks whichever of the 3 candidates actually got parsed --
+  // it's the canonical identity of "this physical module file", used by
+  // both circular-import detection (Parser-level) and per-file import
+  // scoping (Resolver-level) so neither has to re-derive or guess a path
+  // string independently of the other.
+  std::string ResolvedPath = StdlibPath.str().str();
   size_t DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-  auto Block = ParseFile(StdlibPath.str().str());
+  auto Block = ParseFile(ResolvedPath, ModuleName, Loc);
   bool FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
   if (!Block && !FoundButBroken) {
     // Issue #19 fix: resolve relative to the source file's directory so that
@@ -2393,15 +2467,16 @@ std::unique_ptr<ExprAST> ParseImport() {
       llvm::SmallString<256> SrcRelPath(SourceFilename);
       llvm::sys::path::remove_filename(SrcRelPath);
       llvm::sys::path::append(SrcRelPath, ModuleName + ".tr");
+      ResolvedPath = SrcRelPath.str().str();
       DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-      Block = ParseFile(SrcRelPath.str().str());
+      Block = ParseFile(ResolvedPath, ModuleName, Loc);
       FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
     }
   }
   if (!Block && !FoundButBroken) {
-    std::string CwdPath = ModuleName + ".tr";
+    ResolvedPath = ModuleName + ".tr";
     DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-    Block = ParseFile(CwdPath);
+    Block = ParseFile(ResolvedPath, ModuleName, Loc);
     FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
     if (!Block && !FoundButBroken) {
       ModuleNotFoundError(Loc, ModuleName).raise();
@@ -2415,7 +2490,8 @@ std::unique_ptr<ExprAST> ParseImport() {
   if (!Block)
     return nullptr;
 
-  return std::make_unique<ModuleImportExprAST>(ModuleName, std::move(Block));
+  return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, ResolvedPath,
+                                                std::move(Block));
 }
 
 
