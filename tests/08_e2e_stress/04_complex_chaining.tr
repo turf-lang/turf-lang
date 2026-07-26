@@ -5,7 +5,7 @@ fn get_index(): int {
 }
 
 fn dummy_func(val: int): void {
-    io.printline(val);
+    io::printline(val);
 }
 
 fn main(): int {

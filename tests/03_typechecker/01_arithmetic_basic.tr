@@ -36,16 +36,16 @@ fn main(): int {
     assert(j == 7.5, "");
 
     // Math module integration
-    mut p1: int = math.power(2, 3);
+    mut p1: int = math::power(2, 3);
     assert(p1 == 8, "");
 
-    mut p2: double = math.power(2.0, 3.0);
+    mut p2: double = math::power(2.0, 3.0);
     assert(p2 == 8.0, "");
 
-    mut abs1: int = math.abs(-10);
+    mut abs1: int = math::abs(-10);
     assert(abs1 == 10, "");
 
-    mut abs2: double = math.abs(-3.2);
+    mut abs2: double = math::abs(-3.2);
     // double comparison warning workaround
     assert(abs2 > 3.1, "");
     assert(abs2 < 3.3, "");

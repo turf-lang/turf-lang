@@ -1,31 +1,31 @@
 import io;
 
 fn main(): int {
-    io.printline("Running 1");
+    io::printline("Running 1");
     mut a: double = 42 to double;
     assert(a > 41.9 && a < 42.1, "");
 
-    io.printline("Running 2");
+    io::printline("Running 2");
     mut b: int = 3.75 to int;
     assert(b == 3, ""); // Removes the decimal part.
 
-    io.printline("Running 3");
+    io::printline("Running 3");
     mut c: int = "100" to int;
     assert(c == 100, "");
 
-    io.printline("Running 4");
+    io::printline("Running 4");
     mut d: double = "2.718" to double;
     assert(d > 2.717 && d < 2.719, "");
 
-    io.printline("Running 5");
+    io::printline("Running 5");
     mut e: int = (1.9 to int) + (2.1 to int);
     assert(e == 3, ""); // 1 + 2
 
-    io.printline("Running 6");
+    io::printline("Running 6");
     mut f: double = (9.9 to int) to double;
     assert(f > 8.9 && f < 9.1, ""); // int(9.9) is 9, double(9) is 9.0
 
-    io.printline("Running 7");
+    io::printline("Running 7");
     mut g: int = (7 to double) to int;
     assert(g == 7, "");
 
@@ -58,6 +58,6 @@ fn main(): int {
     mut s9: string = x to string;
     assert(s9 == "10", "");
 
-    io.printline("Done");
+    io::printline("Done");
     return 0;
 }

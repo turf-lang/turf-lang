@@ -34,7 +34,7 @@ import io;
 fn checkPositive(x: int): int {
     if (x < 0) {
         fail("checkPositive: x must not be negative");
-        io.printline("unreachable: this line must never execute");
+        io::printline("unreachable: this line must never execute");
     }
     return x * 2;
 }
@@ -42,6 +42,6 @@ fn checkPositive(x: int): int {
 fn main(): int {
     assert(checkPositive(21) == 42, "checkPositive(21) should be 42");
     assert(checkPositive(0) == 0, "checkPositive(0) should be 0");
-    io.printline("all checks passed");
+    io::printline("all checks passed");
     return 0;
 }

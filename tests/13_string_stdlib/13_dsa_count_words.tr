@@ -1,13 +1,13 @@
 // tests/13_string_stdlib/13_dsa_count_words.tr
 // DSA: Word count tokenizer — counts space-delimited tokens in a string.
-// Exercises: char access, strings.length, loops, boundary detection.
+// Exercises: char access, strings::length, loops, boundary detection.
 
 import io;
 import strings;
 
 // Count the number of whitespace-delimited words in `s`.
 fn count_words(s: string): int {
-    mut n: int = strings.length(s);
+    mut n: int = strings::length(s);
     mut count: int = 0;
     mut in_word: bool = false;
     mut i: int = 0;
@@ -41,6 +41,6 @@ fn main(): int {
     // Longer sentence
     assert(count_words("the quick brown fox jumps over the lazy dog") == 9, "9-word sentence");
 
-    io.printline("13 PASS: DSA word count tokenizer");
+    io::printline("13 PASS: DSA word count tokenizer");
     return 0;
 }

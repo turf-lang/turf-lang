@@ -33,10 +33,10 @@ fn<T> Queue.enqueue(item: T): void {
       // Buffer is full and already at front — grow it
       if (self.cap == 0) {
         self.cap = 8;
-        self.data = mem.malloc(self.cap * 8) to T*;
+        self.data = mem::malloc(self.cap * 8) to T*;
       } else {
         self.cap = self.cap * 2;
-        self.data = mem.realloc(self.data, self.cap * 8) to T*;
+        self.data = mem::realloc(self.data, self.cap * 8) to T*;
       }
     }
   }

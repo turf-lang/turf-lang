@@ -2,7 +2,7 @@
 // DSA: Longest Common Prefix (LCP) of an array of strings.
 // Algorithm: use the first string as the candidate prefix, shrink it character
 // by character until all strings start with it.
-// Exercises: strings.starts_with, strings.substring, strings.length, string arrays.
+// Exercises: strings::starts_with, strings::substring, strings::length, string arrays.
 
 import io;
 import strings;
@@ -15,12 +15,12 @@ fn lcp(words: string[5], n: int): string {
     mut i: int = 1;
     while i < n {
         // Shrink prefix until words[i] starts with it
-        while strings.starts_with(words[i], prefix) == false {
-            mut plen: int = strings.length(prefix);
+        while strings::starts_with(words[i], prefix) == false {
+            mut plen: int = strings::length(prefix);
             if plen == 0 {
                 return "";
             }
-            prefix = strings.substring(prefix, 0, plen - 1);
+            prefix = strings::substring(prefix, 0, plen - 1);
         }
         i = i + 1;
     }
@@ -43,6 +43,6 @@ fn main(): int {
     mut w5: string[5] = ["a", "a", "a", "a", "a"];
     assert(lcp(w5, 5) == "a", "all same single char -> a");
 
-    io.printline("16 PASS: DSA longest common prefix");
+    io::printline("16 PASS: DSA longest common prefix");
     return 0;
 }

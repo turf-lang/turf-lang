@@ -17,6 +17,6 @@ fn main(): int {
     assert(s.length() == 1, "");
     assert(s.peek() == 1, "");
 
-    io.printline("stack ok");
+    io::printline("stack ok");
     return 0;
 }

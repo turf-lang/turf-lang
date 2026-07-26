@@ -5,7 +5,7 @@ struct Point { x: int }
 fn main(): int {
     mut p: Point = Point { x: 5 };
     mut s: string = p to string;
-    io.printline(s);
+    io::printline(s);
 
     return 0;
 }

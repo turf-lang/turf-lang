@@ -25,7 +25,7 @@ struct Thing {
 // `io`, so this exercises the genuine (non-shadowed) module-call path in
 // the same file as the shadowed case below.
 fn Thing.show(): void {
-    io.printline(self.val);
+    io::printline(self.val);
 }
 
 fn main(): int {

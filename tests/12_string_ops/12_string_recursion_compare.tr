@@ -28,6 +28,6 @@ fn main(): int {
     assert(is_palindrome_3("aba"), "aba should match ends");
     assert(!is_palindrome_3("abc"), "abc should not match ends");
 
-    io.printline("12_string_recursion_compare passed!");
+    io::printline("12_string_recursion_compare passed!");
     return 0;
 }

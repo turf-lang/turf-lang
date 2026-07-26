@@ -51,6 +51,6 @@ fn main(): int {
     }
     assert(z == 99, "");
 
-    io.printline("ok");
+    io::printline("ok");
     return 0;
 }

@@ -22,7 +22,7 @@
 
 fn main(): int {
     iff (5 > 3) {
-        io.printline("hi");
+        io::printline("hi");
     }
     return 0;
 }

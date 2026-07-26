@@ -11,6 +11,6 @@ import selfref_module;
 
 fn main(): int {
     assert(selfref_module.outerQuadruple(3) == 12, "outerQuadruple(3) should be 12");
-    io.printline("self-reference within a module still works");
+    io::printline("self-reference within a module still works");
     return 0;
 }

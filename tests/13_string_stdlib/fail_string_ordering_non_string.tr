@@ -9,6 +9,6 @@ import io;
 
 fn main(): int {
     mut result: bool = "hello" < 42;
-    io.printline(result);
+    io::printline(result);
     return 0;
 }

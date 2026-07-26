@@ -30,6 +30,6 @@ fn main(): int {
     mut e: string = make_label(make_label(99) to int);
     assert(e == "99", "round-trip int->string->int->string failed");
 
-    io.printline("01 PASS: int to string return");
+    io::printline("01 PASS: int to string return");
     return 0;
 }

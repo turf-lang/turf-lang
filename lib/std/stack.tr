@@ -24,9 +24,9 @@ fn<T> Stack.push(item: T): void {
     immutable byteSize: int = self.cap * 8;
 
     if (self.data == null) {
-      self.data = mem.malloc(byteSize) to T*;
+      self.data = mem::malloc(byteSize) to T*;
     } else {
-      self.data = mem.realloc(self.data, byteSize) to T*;
+      self.data = mem::realloc(self.data, byteSize) to T*;
     }
   }
 

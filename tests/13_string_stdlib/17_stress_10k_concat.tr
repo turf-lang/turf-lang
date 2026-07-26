@@ -17,11 +17,11 @@ fn main(): int {
         i = i + 1;
     }
 
-    assert(strings.length(s) == 10000, "10k concat: final length must be 10000");
+    assert(strings::length(s) == 10000, "10k concat: final length must be 10000");
 
     // Spot-check: starts and ends with 'a'
-    assert(strings.starts_with(s, "a"), "10k concat: starts with a");
-    assert(strings.ends_with(s, "a"),   "10k concat: ends with a");
+    assert(strings::starts_with(s, "a"), "10k concat: starts with a");
+    assert(strings::ends_with(s, "a"),   "10k concat: ends with a");
 
     // All characters must be 'a' — spot-check first 10
     mut j: int = 0;
@@ -30,6 +30,6 @@ fn main(): int {
         j = j + 1;
     }
 
-    io.printline("17 PASS: 10k string concatenation stress test");
+    io::printline("17 PASS: 10k string concatenation stress test");
     return 0;
 }

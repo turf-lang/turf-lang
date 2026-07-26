@@ -33,6 +33,6 @@ fn describe(d: Direction): int {
 }
 
 fn main(): int {
-    io.printline(describe(Direction::East));
+    io::printline(describe(Direction::East));
     return 0;
 }

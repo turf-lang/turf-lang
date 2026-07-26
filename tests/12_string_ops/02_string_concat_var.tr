@@ -6,6 +6,6 @@ fn main(): int {
     mut greeting: string = "Welcome to " + name;
     assert(greeting == "Welcome to Turf", "Variable concatenation failed");
 
-    io.printline(greeting);
+    io::printline(greeting);
     return 0;
 }

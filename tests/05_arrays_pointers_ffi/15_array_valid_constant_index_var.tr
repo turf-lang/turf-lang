@@ -15,6 +15,6 @@ fn main(): int {
         assert(arr[j] == 30, "");
     }
 
-    io.printline("ok");
+    io::printline("ok");
     return 0;
 }

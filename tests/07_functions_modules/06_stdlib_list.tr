@@ -15,7 +15,7 @@
 // diagnostic. Confirmed via `--emit-llvm`: an entire sequence of
 // `l.push(...)`/`l.pop()`/`assert(...)` calls vanished COMPLETELY from the
 // generated `main()` function body -- not a crash, not a compile error,
-// just silently absent, while an unconditional trailing io.printline still
+// just silently absent, while an unconditional trailing io::printline still
 // ran and made the test look like it passed. Every test in this file was
 // re-verified via `--emit-llvm` (not just "exit code 0") after the fix,
 // specifically because of how convincingly that failure mode fakes success.
@@ -41,6 +41,6 @@ fn main(): int {
     }
     assert(l.length() == 21, "");
 
-    io.printline("list ok");
+    io::printline("list ok");
     return 0;
 }

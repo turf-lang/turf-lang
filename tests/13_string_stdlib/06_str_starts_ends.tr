@@ -1,25 +1,25 @@
 // tests/13_string_stdlib/06_str_starts_ends.tr
-// Tests strings.starts_with and strings.ends_with, including edge cases where
+// Tests strings::starts_with and strings::ends_with, including edge cases where
 // prefix/suffix equals the full string.
 
 import io;
 import strings;
 
 fn main(): int {
-    assert(strings.starts_with("hello world", "hello"),         "starts_with: hello");
-    assert(strings.starts_with("hello world", "h"),             "starts_with: h");
-    assert(strings.starts_with("abc", "abc"),                   "starts_with: full string");
+    assert(strings::starts_with("hello world", "hello"),         "starts_with: hello");
+    assert(strings::starts_with("hello world", "h"),             "starts_with: h");
+    assert(strings::starts_with("abc", "abc"),                   "starts_with: full string");
 
-    assert(strings.starts_with("hello world", "world") == false, "starts_with: world is not prefix");
-    assert(strings.starts_with("abc", "abcd") == false,          "starts_with: longer prefix");
+    assert(strings::starts_with("hello world", "world") == false, "starts_with: world is not prefix");
+    assert(strings::starts_with("abc", "abcd") == false,          "starts_with: longer prefix");
 
-    assert(strings.ends_with("hello world", "world"),            "ends_with: world");
-    assert(strings.ends_with("hello world", "d"),                "ends_with: d");
-    assert(strings.ends_with("abc", "abc"),                      "ends_with: full string");
+    assert(strings::ends_with("hello world", "world"),            "ends_with: world");
+    assert(strings::ends_with("hello world", "d"),                "ends_with: d");
+    assert(strings::ends_with("abc", "abc"),                      "ends_with: full string");
 
-    assert(strings.ends_with("hello world", "hello") == false,   "ends_with: hello is not suffix");
-    assert(strings.ends_with("abc", "xabc") == false,            "ends_with: longer suffix");
+    assert(strings::ends_with("hello world", "hello") == false,   "ends_with: hello is not suffix");
+    assert(strings::ends_with("abc", "xabc") == false,            "ends_with: longer suffix");
 
-    io.printline("06 PASS: strings.starts_with / strings.ends_with");
+    io::printline("06 PASS: strings::starts_with / strings::ends_with");
     return 0;
 }

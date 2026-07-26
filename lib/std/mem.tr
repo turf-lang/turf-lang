@@ -11,8 +11,8 @@
 //
 // Usage:
 //   import mem;
-//   mut buf: void* = mem.alloc(1024);
-//   mem.free(buf);
+//   mut buf: void* = mem::alloc(1024);
+//   mem::free(buf);
 //
 // NOTE: parameters are named `p`, not `ptr` -- `ptr` is this language's own
 // reserved type keyword (the opaque-pointer type), so using it as a

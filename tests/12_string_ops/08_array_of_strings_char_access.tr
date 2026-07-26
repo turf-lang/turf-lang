@@ -28,6 +28,6 @@ fn main(): int {
     // Also check direct inline indexing on function call return
     assert(get_words()[2][0] == 99, "get_words()[2][0] should be 99 ('c')");
 
-    io.printline("08_array_of_strings_char_access passed!");
+    io::printline("08_array_of_strings_char_access passed!");
     return 0;
 }

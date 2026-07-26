@@ -283,17 +283,42 @@ static const TurfType *getExprType(const ExprAST *E) {
     return getExprType(Unary->getOperand());
   }
   if (auto *FuncCall = dynamic_cast<const FuncCallExprAST *>(E)) {
-    if (auto *VarCallee =
-            dynamic_cast<const VariableExprAST *>(FuncCall->getCallee())) {
-      std::string CalleeName = VarCallee->getName();
+    auto *VarCallee = dynamic_cast<const VariableExprAST *>(FuncCall->getCallee());
+    auto *ScopeCallee = dynamic_cast<const ScopeAccessExprAST *>(FuncCall->getCallee());
+    if (VarCallee || ScopeCallee) {
+      std::string CalleeName = VarCallee ? VarCallee->getName() : ScopeCallee->getRightName();
 
       if (CalleeName == "typeof")
         return TurfString().get();
       if (CalleeName == "lengthof")
         return TurfInt().get();
 
+      // Mangled names are built from the CALL SITE's actual argument types
+      // (not the function's own declared param types) so that a generic
+      // function's type-erased instantiation resolves correctly below (see
+      // the Unify()-based substitution further down) -- so we can't just
+      // take ResolvedCallTarget->mangledName() wholesale, that reflects the
+      // declared signature, not this call site's. What WAS missing here
+      // entirely is the MODULE PREFIX: a module function actually mangles
+      // as turf_<module>_<name>_<paramtypes>, and this manual reconstruction
+      // never accounted for that at all -- for a call reached via a
+      // ScopeAccessExprAST callee (Module::func(...)) or a bare self-
+      // reference/on-demand-imported module call, it always missed
+      // FuncReturnTypes and fell through to `return nullptr`. Invisible for
+      // int-returning functions (an int compare doesn't care), but a real,
+      // silent wrong-answer bug for a string-returning one: e.g.
+      // `strings::trim(s) == "hello"` needs an accurate LHS type to choose
+      // strcmp over a raw pointer comparison, and a null type here meant it
+      // silently chose the wrong one. Recovered from ResolvedCallTarget's
+      // own SourceModule (Issue #9: trust the Resolver for WHERE this
+      // function lives, even though its declared types aren't usable here).
+      std::string ModulePrefix;
+      if (const auto *Target = FuncCall->getResolvedCallTarget())
+        if (!Target->SourceModule.empty())
+          ModulePrefix = Target->SourceModule + "_";
+
       std::string MangledName =
-          (CalleeName == "main") ? CalleeName : "turf_" + CalleeName;
+          (CalleeName == "main") ? CalleeName : "turf_" + ModulePrefix + CalleeName;
       std::vector<const TurfType *> ArgTypes;
       for (const auto &Arg : FuncCall->getArgs()) {
         const TurfType *T = getExprType(Arg.get());
@@ -314,7 +339,7 @@ static const TurfType *getExprType(const ExprAST *E) {
         return ItRaw->second.get();
 
       for (const auto &[Name, ParamTypes] : FuncParamTypes) {
-        std::string Prefix = "turf_" + CalleeName;
+        std::string Prefix = "turf_" + ModulePrefix + CalleeName;
         if (Name == Prefix ||
             (Name.size() > Prefix.size() && Name[Prefix.size()] == '_' &&
              Name.compare(0, Prefix.size(), Prefix) == 0)) {

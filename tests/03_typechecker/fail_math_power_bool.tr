@@ -3,9 +3,9 @@ import math;
 
 fn main(): int {
     // Issue #10 regression test: bool must NOT be implicitly coerced to int.
-    // math.power expects (double, double) or (int, int) — passing a `bool`
+    // math::power expects (double, double) or (int, int) — passing a `bool`
     // must be rejected by the TypeChecker with a type mismatch error.
-    io.printline(math.power(true, 2));
+    io::printline(math::power(true, 2));
 
     return 0;
 }

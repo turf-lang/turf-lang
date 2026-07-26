@@ -23,6 +23,6 @@ fn main(): int {
     assert(("banana" < "apple") == false, "banana < apple must be false");
     assert(("a" > "z") == false, "a > z must be false");
 
-    io.printline("03 PASS: string ordering operators");
+    io::printline("03 PASS: string ordering operators");
     return 0;
 }

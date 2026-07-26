@@ -26,6 +26,6 @@ fn main(): int {
     mut initial: int = b.author[0];
     assert(initial == 65, "Author first initial should be 65 ('A')");
 
-    io.printline("11_struct_string_fields passed!");
+    io::printline("11_struct_string_fields passed!");
     return 0;
 }

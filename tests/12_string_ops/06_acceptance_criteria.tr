@@ -17,6 +17,6 @@ fn main(): int {
     mut char_e: int = "hello"[1];
     assert(char_e == 101, "AC3 failed: character access");
 
-    io.printline("All Issue #183 acceptance criteria passed!");
+    io::printline("All Issue #183 acceptance criteria passed!");
     return 0;
 }

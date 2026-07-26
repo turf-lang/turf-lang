@@ -21,7 +21,7 @@ fn main(): int {
     if true {
         mut p: int* = null;
         free(p);
-        io.printline("freed the shadowed (null) p, not the outer one");
+        io::printline("freed the shadowed (null) p, not the outer one");
     }
 
     return 0;

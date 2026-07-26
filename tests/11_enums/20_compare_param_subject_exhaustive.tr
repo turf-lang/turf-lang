@@ -35,6 +35,6 @@ fn main(): int {
     assert(describe(Direction::East) == 2, "");
     assert(describe(Direction::South) == 3, "");
     assert(describe(Direction::West) == 4, "");
-    io.printline("ok");
+    io::printline("ok");
     return 0;
 }

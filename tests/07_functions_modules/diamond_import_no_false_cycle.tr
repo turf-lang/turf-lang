@@ -15,6 +15,6 @@ import diamond_right_module;
 fn main(): int {
     assert(diamond_left_module.leftValue() == 1, "leftValue should be 1");
     assert(diamond_right_module.rightValue() == 2, "rightValue should be 2");
-    io.printline("diamond import ok");
+    io::printline("diamond import ok");
     return 0;
 }

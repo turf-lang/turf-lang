@@ -33,6 +33,6 @@ fn main(): int {
     mut full_log: string = prefix + get_name(1) + " connected.";
     assert(full_log == "[LOG] Alice connected.", "full_log concatenation failed");
 
-    io.printline("07_func_return_string_concat passed!");
+    io::printline("07_func_return_string_concat passed!");
     return 0;
 }

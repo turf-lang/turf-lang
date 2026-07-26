@@ -5,6 +5,6 @@ fn main(): int {
     mut s: string = "Hello, " + "world";
     assert(s == "Hello, world", "String concatenation failed");
 
-    io.printline(s);
+    io::printline(s);
     return 0;
 }

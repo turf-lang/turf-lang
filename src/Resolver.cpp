@@ -1205,19 +1205,25 @@ void Resolver::validateNamedType(
   // list below is what actually exempts `T` in `fn<T> f(x: T)`.
   //
   // NOTE (deliberately NOT changed by the bare-call-scoping fix in
-  // visitFuncCall, and STILL true even after on-demand imports landed --
-  // see registerOnDemandImports()): isKnownStruct()/isEnumName() below
-  // still check the GLOBAL, module-blind struct/enum registry, so
+  // visitFuncCall, on-demand imports landing (registerOnDemandImports()),
+  // or the `.`-to-`::` call-site migration): isKnownStruct()/isEnumName()
+  // below still check the GLOBAL, module-blind struct/enum registry, so
   // `List<int>` still works unqualified after just `import list;` (the
   // BARE form), unlike bare function calls (which require self-reference
-  // or an explicit on-demand import). The on-demand import grammar now
-  // exists (`import list::List;` / `list::[*]` already validate that the
-  // requested type name is real), but gating this check to actually
-  // REQUIRE one of those forms -- instead of just accepting the bare form
-  // too -- means rewriting every stdlib collection test's imports
-  // (List/Stack/Queue) to the on-demand form first, which is exactly what
-  // the `.`-to-`::` call-site migration pass already needs to touch those
-  // same files for. Left as that pass's job rather than doing it twice.
+  // or an explicit on-demand import). The on-demand import grammar exists
+  // and validates type-symbol imports (`import list::List;` / `list::[*]`
+  // confirm the requested name is real), but actually REQUIRING one of
+  // those forms -- instead of also accepting the bare form -- turned out
+  // to need more than flipping this one check: struct-literal
+  // CONSTRUCTION (`List { ... }`, StructInitExprAST/visitStructInit) is a
+  // completely separate code path from a type ANNOTATION's NamedType
+  // reference and would need the identical gate, and possibly other
+  // struct/enum name lookups not yet audited for this. Deliberately left
+  // as its own follow-on rather than a partial flip that leaves some bare
+  // struct/enum references gated and others not, which would be more
+  // confusing than the current, fully-consistent "bare always works,
+  // qualified always works, on-demand import forms are honest about
+  // symbol existence but not yet enforced" state.
   if (const auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
     const std::string &TypeName = NT->getName();
     bool IsOwnTypeParam =

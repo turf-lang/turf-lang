@@ -8,6 +8,6 @@ import io;
 fn main(): int {
     assert(1 + 1 == 2);
     assert(true, "should never fire");
-    io.printline("ok");
+    io::printline("ok");
     return 0;
 }

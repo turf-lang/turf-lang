@@ -22,6 +22,6 @@
 fn main(): int {
     mut arr: int[3] = [10, 20, 30];
     mut i: int = 5;
-    io.printline(arr[i]);
+    io::printline(arr[i]);
     return 0;
 }

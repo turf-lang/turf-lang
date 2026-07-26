@@ -1,7 +1,7 @@
 // Regression test: struct (and enum) names live in ONE flat namespace shared
 // by the current file and every transitively-imported module -- unlike
 // functions, which are namespaced per-module (this is also why List<int>
-// works without a `list.` prefix; see list.tr). Importing two unrelated
+// works without a `list::` prefix; see list.tr). Importing two unrelated
 // modules that happen to declare a same-named struct must be rejected with a
 // clean DuplicateTypeNameError at Resolver time.
 //

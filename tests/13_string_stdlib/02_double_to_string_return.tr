@@ -28,6 +28,6 @@ fn main(): int {
     mut f: string = e to string;
     assert(f == "3.14", "round-trip string->double->string failed");
 
-    io.printline("02 PASS: double to string return");
+    io::printline("02 PASS: double to string return");
     return 0;
 }

@@ -15,11 +15,11 @@ import math;
 import io;
 
 fn main(): int {
-    mut x: double = math.sqrt(0.0 - 1.0); // NaN: sqrt of a negative number
+    mut x: double = math::sqrt(0.0 - 1.0); // NaN: sqrt of a negative number
 
     assert(x != x, "NaN must compare unequal to itself"); // triggers the (hedged) self-comparison warning
     assert(!(x == x), "NaN must not compare equal to itself");
 
-    io.printline("ok");
+    io::printline("ok");
     return 0;
 }

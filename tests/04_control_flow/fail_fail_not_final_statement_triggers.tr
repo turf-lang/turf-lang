@@ -11,13 +11,13 @@ import io;
 fn checkPositive(x: int): int {
     if (x < 0) {
         fail("checkPositive: x must not be negative");
-        io.printline("must never print: fail() should have aborted first");
+        io::printline("must never print: fail() should have aborted first");
     }
     return x * 2;
 }
 
 fn main(): int {
     mut result: int = checkPositive(-5);
-    io.printline("must never print: checkPositive should have aborted");
+    io::printline("must never print: checkPositive should have aborted");
     return 0;
 }

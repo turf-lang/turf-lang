@@ -26,6 +26,6 @@ fn main(): int {
     countdown = countdown + "GO!";
     assert(countdown == "3...2...1...GO!", "countdown string concatenation failed");
 
-    io.printline("10_string_loop_char_sum passed!");
+    io::printline("10_string_loop_char_sum passed!");
     return 0;
 }

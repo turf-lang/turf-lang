@@ -37,7 +37,7 @@ fn main(): int {
     // must also actually execute and produce output -- this was the
     // clearest symptom before the fix: the containing statement compiled
     // clean but the printline call never ran at all.
-    io.printline(p);
+    io::printline(p);
 
     return 0;
 }

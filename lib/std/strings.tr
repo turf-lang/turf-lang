@@ -7,13 +7,13 @@
 //   - High-level functions are implemented in Turf on top of the C bindings.
 //   - String ordering uses byte-by-byte strcmp (Decision D2). Unicode-aware
 //     sorting belongs in a future `unicode` module.
-//   - `strings.length(s)` is the preferred way to get string length. The bare
+//   - `strings::length(s)` is the preferred way to get string length. The bare
 //     `lengthof(s)` intrinsic is deprecated (kept for backward compatibility).
 //
 // Usage:
 //   import strings;
-//   if strings.contains("hello world", "world") { ... }
-//   mut upper: string = strings.to_upper("hello");
+//   if strings::contains("hello world", "world") { ... }
+//   mut upper: string = strings::to_upper("hello");
 
 // ─── C bindings ───────────────────────────────────────────────────────────────
 

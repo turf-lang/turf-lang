@@ -19,6 +19,6 @@ fn main(): int {
     mut status_msg: string = "ID_" + (999 to string) + "_Active_" + (true to string);
     assert(status_msg == "ID_999_Active_true", "status_msg concatenation failed");
 
-    io.printline("09_string_concat_with_casts passed!");
+    io::printline("09_string_concat_with_casts passed!");
     return 0;
 }

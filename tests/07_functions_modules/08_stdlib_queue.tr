@@ -30,6 +30,6 @@ fn main(): int {
     assert(q.dequeue() == 3, "");
     assert(q.dequeue() == 4, "");
 
-    io.printline("queue ok");
+    io::printline("queue ok");
     return 0;
 }

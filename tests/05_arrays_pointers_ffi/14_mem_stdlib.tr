@@ -13,31 +13,31 @@ import io;
 
 fn main(): int {
     // alloc / zero / free
-    mut buf: void* = mem.alloc(32);
+    mut buf: void* = mem::alloc(32);
     assert(buf != null, "");
-    mem.zero(buf, 32);
+    mem::zero(buf, 32);
 
     // alloc_zeroed
-    mut zbuf: void* = mem.alloc_zeroed(4, 8);
+    mut zbuf: void* = mem::alloc_zeroed(4, 8);
     assert(zbuf != null, "");
 
     // grow (realloc wrapper)
-    mut grown: void* = mem.grow(buf, 64);
+    mut grown: void* = mem::grow(buf, 64);
     assert(grown != null, "");
 
     // dup: copy bytes out of a fresh buffer and confirm it round-trips via
     // an int written into the source and read back out of the copy.
-    mut src: int* = mem.alloc(8) to int*;
+    mut src: int* = mem::alloc(8) to int*;
     src[0] = 12345;
-    mut copy: int* = mem.dup(src, 8) to int*;
+    mut copy: int* = mem::dup(src, 8) to int*;
     assert(copy[0] == 12345, "");
     assert(copy != src, ""); // dup must return a genuinely distinct buffer
 
-    mem.free(grown);
-    mem.free(zbuf);
-    mem.free(src);
-    mem.free(copy);
+    mem::free(grown);
+    mem::free(zbuf);
+    mem::free(src);
+    mem::free(copy);
 
-    io.printline("mem ok");
+    io::printline("mem ok");
     return 0;
 }

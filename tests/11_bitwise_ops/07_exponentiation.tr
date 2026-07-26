@@ -20,9 +20,9 @@ fn main(): int {
     mut e: double = 10.0 ** 1.0;
     assert(e == 10.0, "10.0 ** 1.0 should equal 10.0");
 
-    // math.power should still work too
-    mut p: int = math.power(2, 8);
-    assert(p == 256, "math.power(2, 8) should equal 256");
+    // math::power should still work too
+    mut p: int = math::power(2, 8);
+    assert(p == 256, "math::power(2, 8) should equal 256");
 
     return 0;
 }

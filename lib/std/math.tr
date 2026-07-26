@@ -10,8 +10,8 @@
 //
 // Usage:
 //   import math;
-//   mut x: double = math.sqrt(2.0);
-//   mut n: int    = math.abs(-5);
+//   mut x: double = math::sqrt(2.0);
+//   mut n: int    = math::abs(-5);
 
 // ─── libm bindings ────────────────────────────────────────────────────────────
 
