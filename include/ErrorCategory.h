@@ -36,10 +36,12 @@ extractContextKeyword(const std::string &msg,
   // directly into the compiler (see general.txt's "TRUE INTRINSICS vs.
   // STANDARD LIBRARY" section for the full explanation). This list
   // previously also contained "printline"/"print"/"input" (ordinary
-  // stdlib functions declared in lib/std/io.tr -- not intrinsics, just
-  // auto-imported) and "abs"/"power" (used to be @intrinsic stubs, now
-  // pure-Turf/extern-fn stdlib in lib/std/math.tr, per Builtins.cpp's own
-  // comments) -- all five were wrongly routed to the BUILTIN_FUNCTION
+  // stdlib functions declared in lib/std/io.tr, requiring `import io;`
+  // like any other module -- no longer even implemented via @intrinsic,
+  // which has been removed from the compiler entirely) and "abs"/"power"
+  // (used to be @intrinsic stubs, now pure-Turf/extern-fn stdlib in
+  // lib/std/math.tr, per Builtins.cpp's own comments) -- all five were
+  // wrongly routed to the BUILTIN_FUNCTION
   // category below as a result. Order: longer/more-specific names first
   // to avoid partial matches.
   static const char *builtinNames[] = {"lengthof", "typeof", "assert",
@@ -81,6 +83,30 @@ extractContextKeyword(const std::string &msg,
   if (msg.find("Enum") != std::string::npos ||
       msg.find("enum") != std::string::npos)
     return "enum";
+
+  // Module/import construct keywords -- checked AFTER struct/enum above
+  // (struct/enum must win first: DuplicateTypeNameError's own message, for
+  // a plain same-file struct-name collision with nothing module-related
+  // about it, contains the substring "every module you import" in its Note
+  // text -- checking "module" before "struct"/"enum" would misroute that
+  // error to modules.txt instead of structs.txt/enums.txt, exactly the
+  // ordering trap this function's struct/enum-before-controlKeywords
+  // reordering already fixed once for "for enum"/"for"). Still checked
+  // before controlKeywords, for the same reason struct/enum is. Routes to
+  // docs/slm/modules.txt via getCategoryDocPath()'s constructDocs map.
+  // Covers CircularImportError ("Circular import detected"),
+  // UnknownModuleSymbolError/ModuleMethodNotFoundError/ModuleArityOrTypeError
+  // ("Module 'X' has..."), ImportSymbolCollisionError ("...imported from
+  // two different modules..."), ModuleNotFoundError ("Could not find
+  // module..."), and UnknownScopeQualifierError ("...isn't a known enum or
+  // module.") -- the last one is deliberately included here even though it
+  // could also be an enum-shaped mistake, since a bad `::` qualifier is
+  // fundamentally an import/namespace question, not a struct/enum one.
+  if (msg.find("module") != std::string::npos ||
+      msg.find("Module") != std::string::npos ||
+      msg.find("import") != std::string::npos ||
+      msg.find("Import") != std::string::npos)
+    return "module";
 
   // Check for control-flow construct keywords in the error message.
   static const char *controlKeywords[] = {"elseif", "while", "for",     "if",
@@ -278,6 +304,7 @@ inline std::string getCategoryDocPath(ErrorCategory cat,
         // folding the content in here still reaches the relevant errors.
         {"struct", "docs/slm/structs.txt"},
         {"enum", "docs/slm/enums.txt"},
+        {"module", "docs/slm/modules.txt"},
     };
     auto it = constructDocs.find(contextKeyword);
     if (it != constructDocs.end())

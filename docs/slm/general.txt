@@ -170,7 +170,7 @@ FUNCTIONS:
     }
 
     fn greet(name: string): void {
-        io.printline(name);
+        io::printline(name);
     }
 
   RULES:
@@ -211,7 +211,8 @@ STRUCTS:
 
   Struct (and enum) names live in ONE flat namespace shared by the current
   file and every imported module -- unlike functions, they are NOT
-  namespaced per-module, so `List<int>` works without a `list.` prefix.
+  namespaced per-module, so `List<int>` works without a `list::` prefix
+  (though `list::List<int>` also works, identically -- see modules.txt).
   Two different modules declaring a same-named struct is a compile error.
 
   Generic structs: `struct Box<T> { val: T }`, instantiated as `Box<int>`.
@@ -224,7 +225,9 @@ STRUCTS:
 ENUMS:
     enum Color { Red, Green, Blue }
 
-  Access a variant with `::` (also used nowhere else in the language today):
+  Access a variant with `::` (also the general namespace-resolution
+  operator for module-qualified function/type access -- see MODULES /
+  IMPORTS below; `::` is never used for instance access, only `.` is):
     immut c: Color = Color::Red;
 
   Compare with a `compare` block, not `if`/`==`:
@@ -246,22 +249,24 @@ ENUMS:
 
 ---
 
-MODULES / IMPORTS:
-  import io;
-  import list;
-  import mem;
+MODULES / IMPORTS (full reference: modules.txt):
+  import io;                        // bare -- qualified access only
+  import io::printline;             // on-demand -- one name, usable bare too
+  import io::[print, printline];    // on-demand -- a list of names
+  import math::[*];                 // on-demand -- every name, wildcard
 
-  Call a module's function qualified by module name:
-    io.printline("hi");
-    mem.malloc(64);
+  Call a module's function qualified by module name, using `::` (never
+  `.` -- `.` is instance-only):
+    io::printline("hi");
+    mem::malloc(64);
 
-  `io` is auto-imported into every program (lib/std/prelude.tr does
-  `import io;` for you), so `io.printline`/`io.print`/`io.input` are also
-  reachable unqualified (`printline(...)`) without writing `import io;`
-  yourself -- but they are still ordinary STANDARD LIBRARY functions
-  declared in lib/std/io.tr, not a special no-import language feature.
-  Other modules (mem, math, list, ...) are NOT auto-imported and always
-  need their own explicit `import`.
+  There is no auto-imported module -- every module, including `io`, must
+  be imported explicitly by every file that uses it. A BARE import
+  (`import io;`) makes the module's functions reachable ONLY via `io::`
+  qualification; nothing is pasted unqualified into your file. To call a
+  function bare (no qualifier), either declare it yourself or on-demand-
+  import it (`import io::printline;` or a list/wildcard form) -- see
+  modules.txt for the full collision/circular-import rules.
 
 ---
 
@@ -276,14 +281,13 @@ easy to get backwards:
   Everything else that might look "built-in" -- print, printline, input,
   and every function in mem/math/list/strings/stack/queue -- is ordinary
   Turf standard library code living in lib/std/*.tr, exactly as import-
-  able/inspectable as anything a user could write themselves. Some of
-  those (print, printline, input) happen to be implemented via an internal
-  `@intrinsic("name")` decorator on their `fn` declaration in io.tr, which
-  tells the compiler to generate native code for the call instead of
-  compiling a Turf-language body -- but that's purely an implementation
-  detail invisible from the language side; they're called and typed
-  exactly like any other stdlib function. Do NOT describe io/mem/math
-  functions as "intrinsics" or "builtins" -- they are standard library.
+  able/inspectable as anything a user could write themselves, requiring
+  the same `import` + `::` qualification as any module. There is no
+  decorator or compiler-native-codegen mechanism backing any of them --
+  print/printline/input are plain Turf functions delegating to `extern fn
+  printf`/`scanf`/`getchar` FFI bindings, same pattern math.tr/mem.tr use
+  for libm/libc. Do NOT describe io/mem/math functions as "intrinsics" or
+  "builtins" -- they are standard library.
 
 TRUE INTRINSICS (never need an import; not declared in any .tr file):
 
@@ -309,9 +313,9 @@ TRUE INTRINSICS (never need an import; not declared in any .tr file):
 ---
 
 MEMORY (via `import mem;`, manual, no garbage collector):
-  mem.malloc(size)              -- allocate size bytes, returns a raw pointer
-  mem.realloc(ptr, newSize)     -- resize a previous allocation
-  mem.free(ptr)                 -- release memory
+  mem::malloc(size)              -- allocate size bytes, returns a raw pointer
+  mem::realloc(ptr, newSize)     -- resize a previous allocation
+  mem::free(ptr)                 -- release memory
   Using a pointer after free(), or calling free() twice on the same pointer,
   is a compile-time-detected bug where the compiler can prove it (dataflow
   analysis, not a runtime check).

@@ -85,6 +85,13 @@ DECLARATION
       argument (e.g. `List<NoSuchType>`)
     - Reassigning an `immut` variable, directly or through a mutating
       struct method
+    - `import`ing a module that doesn't exist, or `import module::symbol;`
+      naming a symbol that module doesn't export
+    - A circular import chain (module A imports B imports ... imports A)
+    - Two on-demand imports (`import module::[...];`) flattening two
+      DIFFERENT symbols under the same bare name
+    - `Left::Right` where `Left` isn't a known enum or a known (imported)
+      module (see modules.txt for `::`'s full scope)
 
 FUNCTION_SIGNATURE
   An error in a function definition, call, parameters, or return type.
@@ -110,8 +117,8 @@ BUILTIN_FUNCTION
 MEMORY_ERROR
   Manual memory management misuse (via `import mem;`).
   Examples:
-    - Using a pointer after mem.free() was called on it (use-after-free)
-    - Calling mem.free() twice on the same pointer (double-free)
+    - Using a pointer after mem::free() was called on it (use-after-free)
+    - Calling mem::free() twice on the same pointer (double-free)
   These are detected by dataflow analysis where the compiler can prove the
   bug statically -- not every use-after-free/double-free is caught (e.g.
   ones that depend on runtime-only conditions).
