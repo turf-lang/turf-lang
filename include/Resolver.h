@@ -253,6 +253,17 @@ private:
   /// Called by hoistTopLevel when it encounters a ModuleImportExprAST.
   void hoistModuleBody(const ExprAST *Body, const std::string &ModuleName);
 
+  /// Processes an on-demand import's requested symbols (ImportMode::Symbol/
+  /// SymbolList/Wildcard) against the already-hoisted target module,
+  /// registering each into ContextLabel's flat namespace ("" = main file,
+  /// else the enclosing module doing the importing). No-op for
+  /// ImportMode::Bare. Called right after hoistModuleBody() has fully
+  /// populated the target module's own registrations, from both
+  /// hoistTopLevel (ContextLabel="") and hoistModuleBody's own nested-
+  /// import case (ContextLabel=the enclosing module's name).
+  void registerOnDemandImports(const ModuleImportExprAST &Import,
+                               const std::string &ContextLabel);
+
   /// Register one function's signature (name, params, return type) in
   /// SymTable_ under the given module namespace ("\'" = current file).
   void registerFunctionSignature(const FuncDefExprAST &Node,

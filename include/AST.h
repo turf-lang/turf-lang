@@ -325,6 +325,29 @@ public:
   }
 };
 
+// Which of the four `import` forms this statement used. Bare is the
+// original, only-ever-supported form (`import io;`) -- qualified-access
+// only, nothing pasted flat. The other three are on-demand: they each pull
+// SPECIFIC symbols into the importing file's own flat (unqualified)
+// namespace, instead of the old blanket "importing a module makes
+// everything in it bare-visible" behavior.
+enum class ImportMode {
+  Bare,       // import io;
+  Symbol,     // import io::printline;
+  SymbolList, // import io::[print, input, printline];
+  Wildcard,   // import io::[*];
+};
+
+// One requested name in a Symbol/SymbolList/Wildcard import. Carries its
+// own SourceLocation (not just the enclosing import statement's) so
+// collision diagnostics can point at exactly which name in a list caused
+// the problem, and so a future LSP can offer go-to-definition on the
+// individual symbol name, not just the import line as a whole.
+struct ImportedSymbolRef {
+  std::string Name;
+  SourceLocation Loc;
+};
+
 class ModuleImportExprAST : public ExprAST {
   SourceLocation Loc;         ///< location of the `import` statement itself
   std::string ModuleName;
@@ -335,23 +358,33 @@ class ModuleImportExprAST : public ExprAST {
                               ///< scoping both key off of, so neither has to
                               ///< re-derive "what file is this" separately.
   std::unique_ptr<ExprAST> Body;
+  ImportMode Mode = ImportMode::Bare;
+  std::vector<ImportedSymbolRef> RequestedSymbols; // empty for Bare/Wildcard
 
 public:
   ModuleImportExprAST(SourceLocation Loc, std::string ModuleName,
-                      std::string ResolvedPath, std::unique_ptr<ExprAST> Body)
+                      std::string ResolvedPath, std::unique_ptr<ExprAST> Body,
+                      ImportMode Mode = ImportMode::Bare,
+                      std::vector<ImportedSymbolRef> RequestedSymbols = {})
       : Loc(Loc), ModuleName(std::move(ModuleName)),
-        ResolvedPath(std::move(ResolvedPath)), Body(std::move(Body)) {}
+        ResolvedPath(std::move(ResolvedPath)), Body(std::move(Body)),
+        Mode(Mode), RequestedSymbols(std::move(RequestedSymbols)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const std::string &getModuleName() const { return ModuleName; }
   const std::string &getResolvedPath() const { return ResolvedPath; }
   const ExprAST *getBody() const { return Body.get(); }
+  ImportMode getMode() const { return Mode; }
+  const std::vector<ImportedSymbolRef> &getRequestedSymbols() const {
+    return RequestedSymbols;
+  }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitModuleImport(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, ResolvedPath,
-                                                 CloneExprAST(Body.get()));
+                                                 CloneExprAST(Body.get()),
+                                                 Mode, RequestedSymbols);
   }
 };
 

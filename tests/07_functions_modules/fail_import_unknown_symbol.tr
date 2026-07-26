@@ -1,0 +1,9 @@
+// Regression test: `import module::symbol;` naming a symbol that doesn't
+// actually exist in that module must be a clean UnknownModuleSymbolError,
+// not a silent no-op or an error deferred to first use.
+
+import io::nosuchfunction;
+
+fn main(): int {
+    return 0;
+}

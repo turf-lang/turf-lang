@@ -291,6 +291,7 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
   // Hoist imported modules: recurse into the module body to find its fns.
   if (const auto *Import = dynamic_cast<const ModuleImportExprAST *>(Node)) {
     hoistModuleBody(Import->getBody(), Import->getModuleName());
+    registerOnDemandImports(*Import, /*ContextLabel=*/"");
   }
   // All other top-level nodes (e.g. standalone expressions, variable decls)
   // are not declarations and have nothing to hoist.
@@ -347,6 +348,73 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
                    dynamic_cast<const ModuleImportExprAST *>(Expr.get())) {
       // Nested module imports (unusual but possible)
       hoistModuleBody(Import->getBody(), Import->getModuleName());
+      // ContextLabel is the OUTER module currently being hoisted (this
+      // function's own ModuleName parameter) -- an on-demand import
+      // written INSIDE module M's own file makes its requested symbols
+      // bare-visible within M, not within whatever imported M.
+      registerOnDemandImports(*Import, ModuleName);
+    }
+  }
+}
+
+void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
+                                       const std::string &ContextLabel) {
+  if (Import.getMode() == ImportMode::Bare)
+    return;
+
+  const std::string &SourceModule = Import.getModuleName();
+
+  // Registers every overload of Name found in SourceModule as flat-imported
+  // into ContextLabel. Returns true if Name was found there at all (as a
+  // function) -- the caller uses this to decide whether an explicit
+  // Symbol/SymbolList request also needs to fall back to checking the
+  // (already-flat, module-blind) struct/enum registry before giving up.
+  auto RegisterFunctionIfPresent = [&](const std::string &Name,
+                                       SourceLocation Loc) -> bool {
+    bool Found = false;
+    for (const auto &Match : SymTable_.findInModules(Name)) {
+      if (Match.ModuleName != SourceModule)
+        continue;
+      Found = true;
+      ResolverSymbolTable::FlatImportedSymbol Sym{SourceModule, {Loc.Line, Loc.Col}};
+      if (auto Prev = SymTable_.registerFlatFunctionImport(ContextLabel, Name, Sym)) {
+        if (Prev->SourceModule != SourceModule) {
+          ImportSymbolCollisionError(Loc, Name, Prev->SourceModule, SourceModule,
+                                     toSourceLocation(Prev->ImportLoc))
+              .raise();
+        }
+        // Same module claiming the same name twice (e.g. re-listed in the
+        // same import, or two overloads both already handled by the loop
+        // above finding multiple Matches) is not a real collision -- just
+        // don't re-raise.
+      }
+    }
+    return Found;
+  };
+
+  if (Import.getMode() == ImportMode::Wildcard) {
+    // Every function name SourceModule exports becomes flat-visible.
+    // Struct/enum types need no action here at all -- see
+    // FlatImportedFunctions_'s doc comment on why types aren't tracked
+    // per-context.
+    for (const auto &Name : SymTable_.getModuleFunctionNames(SourceModule))
+      RegisterFunctionIfPresent(Name, Import.getLoc());
+    return;
+  }
+
+  // Symbol / SymbolList: each requested name must resolve to SOMETHING in
+  // SourceModule -- a function (flat-registered) or a struct/enum (already
+  // globally flat; only existence is validated here).
+  for (const auto &Ref : Import.getRequestedSymbols()) {
+    bool FoundFn = RegisterFunctionIfPresent(Ref.Name, Ref.Loc);
+    bool FoundType = SymTable_.isKnownStruct(Ref.Name) || SymTable_.isEnumName(Ref.Name);
+    if (!FoundFn && !FoundType) {
+      RankedSuggestions Suggestions;
+      auto Sugg = SuggestionIndex::suggestVisible(
+          Ref.Name, SymTable_.getModuleFunctionNames(SourceModule));
+      if (!Sugg.empty())
+        Suggestions.Module[SourceModule] = Sugg;
+      UnknownModuleSymbolError(Ref.Loc, SourceModule, Ref.Name, Suggestions).raise();
     }
   }
 }
@@ -691,6 +759,17 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     if (!SelfModule.empty()) {
       for (const auto &Match : SymTable_.findInModules(CalleeName))
         if (Match.ModuleName == SelfModule)
+          ModuleMatches.push_back(Match);
+    }
+
+    // Also allow a bare call to resolve via an explicit on-demand import
+    // (`import module::CalleeName;` / `module::[..., CalleeName, ...]` /
+    // `module::[*]`) made by THIS same context -- currentModuleName() is
+    // exactly the right key (empty = main file), matching whatever
+    // registerOnDemandImports() registered things under during hoisting.
+    if (const auto *Flat = SymTable_.lookupFlatFunctionImport(SelfModule, CalleeName)) {
+      for (const auto &Match : SymTable_.findInModules(CalleeName))
+        if (Match.ModuleName == Flat->SourceModule)
           ModuleMatches.push_back(Match);
     }
   } else {
@@ -1126,16 +1205,19 @@ void Resolver::validateNamedType(
   // list below is what actually exempts `T` in `fn<T> f(x: T)`.
   //
   // NOTE (deliberately NOT changed by the bare-call-scoping fix in
-  // visitFuncCall): isKnownStruct()/isEnumName() below still check the
-  // GLOBAL, module-blind struct/enum registry, so `List<int>` still works
-  // unqualified after just `import list;`, unlike bare function calls
-  // (which now require self-reference or, eventually, an explicit
-  // `import list::List;`-style on-demand import). Gating bare TYPE
-  // visibility the same way functions now are requires that on-demand
-  // import grammar to exist first as the escape hatch -- flipping this
-  // check before that lands would break every stdlib collection test
-  // (List/Stack/Queue) with no way to fix it forward. Left as a marked
-  // follow-on, not forgotten.
+  // visitFuncCall, and STILL true even after on-demand imports landed --
+  // see registerOnDemandImports()): isKnownStruct()/isEnumName() below
+  // still check the GLOBAL, module-blind struct/enum registry, so
+  // `List<int>` still works unqualified after just `import list;` (the
+  // BARE form), unlike bare function calls (which require self-reference
+  // or an explicit on-demand import). The on-demand import grammar now
+  // exists (`import list::List;` / `list::[*]` already validate that the
+  // requested type name is real), but gating this check to actually
+  // REQUIRE one of those forms -- instead of just accepting the bare form
+  // too -- means rewriting every stdlib collection test's imports
+  // (List/Stack/Queue) to the on-demand form first, which is exactly what
+  // the `.`-to-`::` call-site migration pass already needs to touch those
+  // same files for. Left as that pass's job rather than doing it twice.
   if (const auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
     const std::string &TypeName = NT->getName();
     bool IsOwnTypeParam =

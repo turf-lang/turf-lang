@@ -1084,6 +1084,57 @@ public:
   }
 };
 
+// Raised when `import module::symbol;` / `module::[a, b]` / `module::[*]`
+// names a symbol that doesn't actually exist in that module (as either a
+// function or a struct/enum type) -- the on-demand counterpart to
+// ModuleNotFoundError (which is about the MODULE not existing; this is
+// about the module existing but not having what was asked for).
+class UnknownModuleSymbolError : public TurfError {
+public:
+  UnknownModuleSymbolError(SourceLocation Loc, const std::string &ModuleName,
+                           const std::string &SymbolName,
+                           const RankedSuggestions &Suggestions)
+      : TurfError(Loc, Colors::BRIGHT_RED + "Module '" + Colors::CYAN +
+                           ModuleName + Colors::BRIGHT_RED +
+                           "' has nothing named '" + Colors::CYAN + SymbolName +
+                           Colors::BRIGHT_RED + "'." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    Hint_ = suggestionsOrFallback(
+        Suggestions, "Double-check the spelling, or check " + ModuleName +
+                         ".tr for its actual exported names.",
+        "Did you mean:\n");
+  }
+};
+
+// Raised when two on-demand imports (import module::[...];) in the SAME
+// file/context bring in two DIFFERENT symbols under the same bare name --
+// exactly the ambiguity the on-demand import feature was designed to catch
+// explicitly rather than silently letting one shadow the other. Distinct
+// from DuplicateDeclarationError/DuplicateTypeNameError (which are about
+// two actual DECLARATIONS colliding): here neither symbol is declared
+// twice, they're both real, singly-declared symbols that just happen to
+// share a bare name once flattened into the same importing file.
+class ImportSymbolCollisionError : public TurfError {
+public:
+  ImportSymbolCollisionError(SourceLocation Loc, const std::string &SymbolName,
+                             const std::string &FirstModule,
+                             const std::string &SecondModule,
+                             SourceLocation FirstImportLoc)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + SymbolName +
+                           Colors::BRIGHT_RED +
+                           "' is imported from two different modules -- '" +
+                           Colors::CYAN + FirstModule + Colors::BRIGHT_RED +
+                           "' and '" + Colors::CYAN + SecondModule +
+                           Colors::BRIGHT_RED + "'." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    Hint_ = "Either qualify one of them explicitly (`" + FirstModule +
+            "::" + SymbolName + "` or `" + SecondModule + "::" + SymbolName +
+            "`), or switch one of the wildcard/list imports to a more "
+            "targeted one that leaves '" + SymbolName + "' out.";
+    RelatedLocations_.push_back({FirstImportLoc, "'" + SymbolName + "' first imported from '" + FirstModule + "' here"});
+  }
+};
+
 // Phase 2: Module-scoped method lookup error
 // Raised when a user types e.g. io.pritn() — wrong function name in a known
 // module. Suggestions are sourced from that module's function registry.

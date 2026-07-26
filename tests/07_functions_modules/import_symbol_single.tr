@@ -1,0 +1,12 @@
+// Regression test: `import module::symbol;` pulls exactly that one name
+// into the current file's flat (unqualified) namespace, so a bare call to
+// it resolves -- distinct from `import module;` (bare form), which is
+// qualified-access-only and would NOT make this bare call resolve (see
+// fail_bare_cross_module_call.tr).
+
+import io::printline;
+
+fn main(): int {
+    printline("bare call via single-symbol on-demand import");
+    return 0;
+}

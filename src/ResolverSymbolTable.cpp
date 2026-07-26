@@ -207,6 +207,32 @@ ResolverSymbolTable::getAllCurrentFileFunctionNames() const {
   return Names;
 }
 
+// ─── On-demand (flat) import registry ────────────────────────────────────────
+
+std::optional<ResolverSymbolTable::FlatImportedSymbol>
+ResolverSymbolTable::registerFlatFunctionImport(const std::string &ContextLabel,
+                                                const std::string &Name,
+                                                const FlatImportedSymbol &Sym) {
+  auto &ContextMap = FlatImportedFunctions_[ContextLabel];
+  auto It = ContextMap.find(Name);
+  if (It != ContextMap.end())
+    return It->second; // collision -- caller raises an error
+  ContextMap.emplace(Name, Sym);
+  return std::nullopt;
+}
+
+const ResolverSymbolTable::FlatImportedSymbol *
+ResolverSymbolTable::lookupFlatFunctionImport(const std::string &ContextLabel,
+                                              const std::string &Name) const {
+  auto ContextIt = FlatImportedFunctions_.find(ContextLabel);
+  if (ContextIt == FlatImportedFunctions_.end())
+    return nullptr;
+  auto It = ContextIt->second.find(Name);
+  if (It == ContextIt->second.end())
+    return nullptr;
+  return &It->second;
+}
+
 // ─── Two-tier diagnostic helpers ─────────────────────────────────────────────
 
 std::vector<ResolverSymbolTable::ModuleFunctionMatch>

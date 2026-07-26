@@ -404,6 +404,54 @@ public:
    */
   std::vector<std::string> getAllCurrentFileFunctionNames() const;
 
+  // ── On-demand (flat) import registry ─────────────────────────────────────────
+  // Backs `import module::symbol;` / `import module::[a, b];` /
+  // `import module::[*];` (ImportMode::Symbol/SymbolList/Wildcard) -- each
+  // pulls specific function names into a "context" (the main file, if
+  // ContextLabel == "", or a module name, if some module itself does an
+  // on-demand import of another module) so a BARE call can resolve to them,
+  // same as it already can for that context's own self-declared functions.
+  // The registry only ever stores WHICH module backs a name, not the
+  // function symbol itself -- the actual overload data is already in
+  // Modules_ (see findInModules()), so this is purely a name->module
+  // routing table, re-queried through findInModules() at lookup time
+  // exactly like self-reference already is (Resolver::visitFuncCall).
+  //
+  // Struct/enum symbol imports are NOT tracked here at all: those types
+  // are already registered in ONE flat, module-blind namespace (see
+  // registerStruct()'s doc comment) regardless of import mode, since P3's
+  // bare-call scoping fix deliberately did not extend to struct/enum
+  // visibility yet (see Resolver::validateNamedType's NOTE comment) --
+  // `import module::TypeName;` currently only VALIDATES that TypeName is a
+  // real struct/enum somewhere, it doesn't need to register anything new.
+
+  struct FlatImportedSymbol {
+    std::string SourceModule;
+    ResolverSourceLocation ImportLoc;
+  };
+
+  /**
+   * @brief Register that @p Name is on-demand-imported from @p Sym.SourceModule
+   * into @p ContextLabel's flat namespace.
+   * Returns the PREVIOUS entry if @p Name already has a flat import in this
+   * context (from an earlier explicit symbol/list import, or a previous
+   * wildcard import that already claimed the name) -- the caller raises a
+   * collision error using it. Returns std::nullopt on a fresh registration.
+   */
+  std::optional<FlatImportedSymbol>
+  registerFlatFunctionImport(const std::string &ContextLabel,
+                             const std::string &Name,
+                             const FlatImportedSymbol &Sym);
+
+  /**
+   * @brief Look up whether @p Name is flat-imported into @p ContextLabel.
+   * Returns nullptr if not. Used by visitFuncCall's bare-call resolution
+   * alongside (not instead of) the self-reference check.
+   */
+  const FlatImportedSymbol *
+  lookupFlatFunctionImport(const std::string &ContextLabel,
+                           const std::string &Name) const;
+
   // ── Two-tier diagnostic helpers ──────────────────────────────────────────────
 
   /**
@@ -500,6 +548,12 @@ private:
   /// "this file" from "imported modules" without string-matching module names.
   std::unordered_map<std::string, std::vector<ResolverFunctionSymbol>>
       CurrentFileFunctions_;
+
+  /// On-demand flat function imports, keyed by context ("" = main file,
+  /// else a module name), then by the bare imported name. See
+  /// registerFlatFunctionImport()'s doc comment.
+  std::unordered_map<std::string, std::unordered_map<std::string, FlatImportedSymbol>>
+      FlatImportedFunctions_;
 
   /// Struct names declared in the current file or any transitively-imported
   /// module (hoisted in Pass 1), mapped to their declaration site so a

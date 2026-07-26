@@ -2469,6 +2469,63 @@ std::unique_ptr<ExprAST> ParseImport() {
   }
   getNextToken();
 
+  // On-demand qualified forms: import Path::Symbol; / import Path::[a, b];
+  // / import Path::[*]; -- each pulls SPECIFIC symbols into the importing
+  // file's own flat (unqualified) namespace, instead of the bare form's
+  // qualified-access-only behavior (see ImportMode's doc comment). The
+  // module file itself is still always fully parsed below regardless of
+  // mode -- even a single targeted symbol import needs the whole file
+  // searched, since there's no lazy/partial parsing.
+  ImportMode Mode = ImportMode::Bare;
+  std::vector<ImportedSymbolRef> RequestedSymbols;
+  if (CurTok == TOK_SCOPE) {
+    getNextToken(); // eat '::'
+    if (CurTok == '[') {
+      getNextToken(); // eat '['
+      if (CurTok == '*') {
+        getNextToken(); // eat '*'
+        if (CurTok != ']') {
+          LogErrorAt(CurLoc, "Expected ']' after '*' in import list");
+          return nullptr;
+        }
+        getNextToken(); // eat ']'
+        Mode = ImportMode::Wildcard;
+      } else {
+        Mode = ImportMode::SymbolList;
+        while (CurTok != ']' && CurTok != TOK_EOF) {
+          if (CurTok != TOK_IDENTIFIER) {
+            LogErrorAt(CurLoc, "Expected a symbol name in import list");
+            return nullptr;
+          }
+          RequestedSymbols.push_back({IdentifierStr, CurLoc});
+          getNextToken();
+          if (CurTok == ',') {
+            getNextToken();
+          } else {
+            break;
+          }
+        }
+        if (CurTok != ']') {
+          LogErrorAt(CurLoc, "Expected ']' to close import list");
+          return nullptr;
+        }
+        getNextToken(); // eat ']'
+        if (RequestedSymbols.empty()) {
+          LogErrorAt(CurLoc, "Expected at least one symbol name in import list");
+          return nullptr;
+        }
+      }
+    } else if (CurTok == TOK_IDENTIFIER) {
+      Mode = ImportMode::Symbol;
+      RequestedSymbols.push_back({IdentifierStr, CurLoc});
+      getNextToken();
+    } else {
+      LogErrorAt(CurLoc,
+                 "Expected a symbol name or '[' after '::' in import");
+      return nullptr;
+    }
+  }
+
   llvm::SmallString<128> StdlibPath(CompilerExecutablePath);
   llvm::sys::path::remove_filename(StdlibPath);
   llvm::sys::path::append(StdlibPath, "..", "lib", "std", ModuleName + ".tr");
@@ -2527,7 +2584,8 @@ std::unique_ptr<ExprAST> ParseImport() {
     return nullptr;
 
   return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, ResolvedPath,
-                                                std::move(Block));
+                                                std::move(Block), Mode,
+                                                std::move(RequestedSymbols));
 }
 
 

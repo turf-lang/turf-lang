@@ -1,0 +1,8 @@
+// Companion module for fail_import_symbol_collision.tr -- declares a
+// function named the same as import_collision_b_module.tr's, so on-demand-
+// importing both flattens two DIFFERENT symbols under one bare name.
+// Named `..._module.tr` so scripts/test_runner.sh's `grep -v "_module.tr"`
+// skips it as a standalone test entry point.
+fn shared(): int {
+    return 1;
+}

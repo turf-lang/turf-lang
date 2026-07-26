@@ -1,0 +1,14 @@
+// Regression test: same collision-detection path as
+// fail_import_symbol_collision.tr, but triggered via two wildcard imports
+// instead of two explicit single-symbol imports -- proves
+// registerOnDemandImports() runs the identical per-name registration
+// (and collision check) for ImportMode::Wildcard as it does for
+// ImportMode::Symbol/SymbolList, not a separate, less-checked code path.
+
+import io;
+import import_collision_a_module::[*];
+import import_collision_b_module::[*];
+
+fn main(): int {
+    return 0;
+}
