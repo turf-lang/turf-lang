@@ -4,9 +4,7 @@
 // qualifier" error (that would be the wrong diagnostic -- StructName IS a
 // known qualifier, it's the method name that's wrong).
 
-struct MathUtil {
-    dummy: int
-}
+struct MathUtil {}
 
 fn MathUtil::square(x: int): int {
     return x * x;

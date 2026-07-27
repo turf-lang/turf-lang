@@ -3,16 +3,14 @@
 // arity naturally mismatches (the implicit self the '.' call form always
 // passes has no matching declared parameter to receive it).
 
-struct MathUtil {
-    dummy: int
-}
+struct MathUtil {}
 
 fn MathUtil::square(x: int): int {
     return x * x;
 }
 
 fn main(): int {
-    mut mu: MathUtil = MathUtil { dummy: 0 };
+    mut mu: MathUtil = MathUtil {};
     immut y: int = mu.square(5);
     return 0;
 }

@@ -28,9 +28,7 @@
 // specifically exercises the OLD dot-declared instance method called the
 // wrong way, not the new syntax.
 
-struct MathUtil {
-    dummy: int
-}
+struct MathUtil {}
 
 fn MathUtil.square(x: int): int {
     return x * x;

@@ -4,16 +4,14 @@
 // name -- the crash fix and the "no true static methods" finding are
 // specific to the static-call form, not method calls in general.
 
-struct MathUtil {
-    dummy: int
-}
+struct MathUtil {}
 
 fn MathUtil.square(x: int): int {
     return x * x;
 }
 
 fn main(): int {
-    mut mu: MathUtil = MathUtil { dummy: 0 };
+    mut mu: MathUtil = MathUtil {};
     assert(mu.square(5) == 25, "instance method call should work");
     return 0;
 }

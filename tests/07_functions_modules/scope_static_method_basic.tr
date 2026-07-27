@@ -3,28 +3,35 @@
 // `StructName::method(args)`, never through an instance. The exact same
 // struct can also declare ordinary instance methods (`.` form) alongside
 // it; the two forms don't interfere with each other.
+//
+// MathUtil is a genuinely EMPTY struct (`struct MathUtil {}`) -- a static
+// method has no use for instance state at all, so there's no reason a
+// "namespace"-style struct that exists only to hold static methods should
+// need a meaningless placeholder field just to satisfy the parser. Empty
+// structs are fully supported (see tests/06_structs/29_empty_struct.tr);
+// this was in fact the direct motivation for confirming that.
 
 import io;
 
-struct MathUtil {
-    dummy: int
-}
+struct MathUtil {}
 
 fn MathUtil::square(x: int): int {
     return x * x;
 }
 
-fn MathUtil.addDummy(x: int): int {
-    return self.dummy + x;
+fn MathUtil.describe(): string {
+    // A legitimate instance method on an empty struct: self is still a
+    // real pointer, it just never needs to read a field through it.
+    return "a MathUtil instance";
 }
 
 fn main(): int {
     assert(MathUtil::square(5) == 25, "static method call works");
     assert(MathUtil::square(0) == 0, "static method call works for zero");
 
-    mut mu: MathUtil = MathUtil { dummy: 10 };
-    assert(mu.addDummy(5) == 15, "instance method still works alongside a static one");
+    mut mu: MathUtil = MathUtil {};
+    io::printline(mu.describe());
 
-    io::printline("static + instance methods coexist on one struct");
+    io::printline("static + instance methods coexist on one (empty) struct");
     return 0;
 }
