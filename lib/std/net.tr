@@ -1,0 +1,186 @@
+// ─── net.tr ────────────────────────────────────────────────────────────────
+// TCP networking for TurfLang.
+//
+// Design:
+//   - Wraps the raw POSIX sockets API (socket/bind/listen/accept/connect/
+//     recv/send) behind two ordinary Turf structs, exactly like io.tr wraps
+//     libc's printf/scanf and mem.tr wraps malloc/free -- the `extern fn`
+//     declarations, `void*` handling, and the sockaddr_in byte-layout trick
+//     all live in here, never in caller code.
+//   - `TcpListener` is a server-side listening socket; `TcpConnection` is
+//     either an accepted inbound connection or an outbound client
+//     connection -- the same struct either way, since once connected a
+//     socket is symmetric (both ends just read()/write()).
+//
+// Why the address is 4 separate int octets (`connect(127, 0, 0, 1, 8080)`)
+// instead of a single "127.0.0.1" string: `struct sockaddr_in` needs a raw
+// 32-bit address in a specific byte layout, and strings.tr doesn't have a
+// dotted-decimal parser (splitting on '.') yet -- four octets sidesteps
+// needing one, and is itself a completely ordinary shape for a low-level
+// sockets API. `TcpListener::bind()` doesn't take an address at all since a
+// listener always binds all interfaces (equivalent to C's INADDR_ANY).
+//
+// Usage:
+//   import net;
+//
+//   // Server
+//   mut server: net::TcpListener = net::TcpListener::bind(8080);
+//   mut conn: net::TcpConnection = server.accept();
+//   immut request: string = conn.read(4096);
+//   conn.write("hello back");
+//   conn.close();
+//
+//   // Client
+//   mut conn2: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8080);
+//   conn2.write("hello server");
+//   immut reply: string = conn2.read(4096);
+//   conn2.close();
+
+import mem;
+
+// ─── POSIX socket bindings (private to this module) ────────────────────────
+
+extern fn socket(domain: int, socktype: int, protocol: int): int;
+extern fn bind(fd: int, addr: void*, len: int): int;
+extern fn listen(fd: int, backlog: int): int;
+extern fn accept(fd: int, addr: void*, len: void*): int;
+extern fn connect(fd: int, addr: void*, len: int): int;
+extern fn recv(fd: int, buf: void*, len: int, flags: int): int;
+extern fn send(fd: int, buf: string, len: int, flags: int): int;
+extern fn close(fd: int): int;
+extern fn setsockopt(fd: int, level: int, optname: int, optval: void*, optlen: int): int;
+extern fn strlen(s: string): int;
+
+// Named POSIX constants (AF_INET=2, SOCK_STREAM=1, SOL_SOCKET=1,
+// SO_REUSEADDR=2) are inlined directly at each use site below rather than
+// declared once up here -- Turf doesn't currently support a top-level
+// `immut` module-level constant (only functions/structs/enums/externs/
+// imports are valid at file scope; a bare `immut NAME: int = value;`
+// outside any function is a parse error). Tracked as a real stdlib/
+// language gap in docs/planning/CODE_REVIEW_GAPS_2026-07.md.
+
+// Builds a 16-byte `struct sockaddr_in` memory image for address a.b.c.d
+// (all zero = INADDR_ANY, "any local interface") on the given port, ready
+// to pass straight to bind()/connect().
+//
+// Every Turf `int` is 64 bits, but C's sockaddr_in has 16-bit fields
+// (sin_family, sin_port) -- there's no way to declare a Turf struct whose
+// field sizes match that layout. Instead this computes the correct 16-byte
+// image as one packed little-endian integer and writes it through a
+// `void* to int*` indexed store -- the same pointer-indexing idiom
+// list.tr/stack.tr already use for their own `data: T*` fields.
+fn buildSockAddr(a: int, b: int, c: int, d: int, port: int): void* {
+    mut addr: void* = mem::alloc_zeroed(1, 16);
+    mut iaddr: int* = addr to int*;
+
+    // Byte layout (little-endian host store, network-order port/address):
+    //   byte 0-1: sin_family = AF_INET
+    //   byte 2-3: sin_port, HIGH byte first (network/big-endian order)
+    //   byte 4-7: sin_addr = a.b.c.d, byte4=a .. byte7=d (also network order,
+    //             which for a dotted-decimal address is just left-to-right)
+    immut portHigh: int = (port / 256) % 256;
+    immut portLow: int = port % 256;
+    immut addrPart: int = a + (b * 256) + (c * 65536) + (d * 16777216);
+    immut packed: int = 2 + (portHigh * 65536) + (portLow * 16777216) + (addrPart * 4294967296); // 2 = AF_INET
+    iaddr[0] = packed;
+
+    return addr;
+}
+
+// ─── TcpConnection ───────────────────────────────────────────────────────
+// A connected socket -- either accepted server-side (from
+// TcpListener.accept()) or dialed client-side (from
+// TcpConnection::connect()). Symmetric once connected: both sides just
+// read()/write().
+
+struct TcpConnection {
+    fd: int
+}
+
+// Dial out to a.b.c.d:port. Aborts with a clear message on failure.
+fn TcpConnection::connect(a: int, b: int, c: int, d: int, port: int): TcpConnection {
+    mut fd: int = socket(2, 1, 0); // AF_INET, SOCK_STREAM
+    assert(fd >= 0, "net::TcpConnection::connect: socket() failed");
+
+    mut addr: void* = buildSockAddr(a, b, c, d, port);
+    immut result: int = connect(fd, addr, 16);
+    mem::free(addr);
+    assert(result == 0, "net::TcpConnection::connect: connect() failed -- is anything listening on that host/port?");
+
+    return TcpConnection { fd: fd };
+}
+
+// Reads up to maxBytes from the connection. Returns whatever arrived
+// (possibly less than maxBytes, possibly "" on a closed connection) as a
+// string. Blocks until at least some data arrives or the peer closes.
+//
+// Deliberately does NOT free the buffer before returning: `string` and
+// `void*` are the same opaque pointer at the LLVM level, so `buf to
+// string` does not copy -- the returned string IS the buffer. Freeing it
+// here would hand the caller a dangling pointer (confirmed live: the
+// caller received corrupted/garbage bytes instead of the real response
+// before this was fixed). Matches the exact convention io.tr's input()
+// already established -- ownership of the heap buffer transfers to the
+// caller, who is never expected to free it either (this language has no
+// GC yet; small leaks like this are an accepted, documented tradeoff, see
+// EmitStringConcat's own TURF-MEMLEAK comment in Codegen.cpp).
+fn TcpConnection.read(maxBytes: int): string {
+    mut buf: void* = mem::alloc_zeroed(1, maxBytes + 1);
+    recv(self.fd, buf, maxBytes, 0);
+    return buf to string;
+}
+
+// Writes the entirety of `data` to the connection.
+fn TcpConnection.write(data: string): void {
+    send(self.fd, data, strlen(data), 0);
+}
+
+// Closes the connection. Safe to call once; the underlying fd is not
+// reusable afterward.
+fn TcpConnection.close(): void {
+    close(self.fd);
+}
+
+// ─── TcpListener ─────────────────────────────────────────────────────────
+// A server-side listening socket, bound to all local interfaces.
+
+struct TcpListener {
+    fd: int
+}
+
+// Binds and starts listening on the given port (all interfaces). Sets
+// SO_REUSEADDR so restarting a server doesn't fail with "address already
+// in use" while the previous socket lingers in TIME_WAIT. Aborts with a
+// clear message on failure.
+fn TcpListener::bind(port: int): TcpListener {
+    mut fd: int = socket(2, 1, 0); // AF_INET, SOCK_STREAM
+    assert(fd >= 0, "net::TcpListener::bind: socket() failed");
+
+    mut optVal: void* = mem::alloc(8);
+    mut iOpt: int* = optVal to int*;
+    iOpt[0] = 1;
+    setsockopt(fd, 1, 2, optVal, 4); // SOL_SOCKET, SO_REUSEADDR
+    mem::free(optVal);
+
+    mut addr: void* = buildSockAddr(0, 0, 0, 0, port);
+    immut bindResult: int = bind(fd, addr, 16);
+    mem::free(addr);
+    assert(bindResult == 0, "net::TcpListener::bind: bind() failed -- is the port already in use?");
+
+    immut listenResult: int = listen(fd, 128);
+    assert(listenResult == 0, "net::TcpListener::bind: listen() failed");
+
+    return TcpListener { fd: fd };
+}
+
+// Blocks until a client connects, then returns the accepted connection.
+fn TcpListener.accept(): TcpConnection {
+    mut clientFd: int = accept(self.fd, null, null);
+    assert(clientFd >= 0, "net::TcpListener.accept: accept() failed");
+    return TcpConnection { fd: clientFd };
+}
+
+// Stops listening and closes the socket.
+fn TcpListener.close(): void {
+    close(self.fd);
+}
