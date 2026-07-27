@@ -1076,14 +1076,39 @@ public:
                              const RankedSuggestions &Suggestions)
       : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + LeftName +
                            Colors::BRIGHT_RED +
-                           "' isn't a known enum or module." + Colors::RESET) {
+                           "' isn't a known enum, struct, or module." + Colors::RESET) {
     Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = suggestionsOrFallback(
         Suggestions,
-        "'::' only works after an enum name (Color::Red) or an imported "
-        "module name (io::printline). Double-check the spelling, or make "
+        "'::' only works after an enum name (Color::Red), an imported "
+        "module name (io::printline), or a struct type name for a static "
+        "method (StructName::method). Double-check the spelling, or make "
         "sure you've imported the module.",
         "Did you mean:\n");
+  }
+};
+
+// Raised when '::' -- reserved for namespace-resolution (enum/module/
+// struct-type qualifiers) -- is used with a base that names a real
+// declared VARIABLE (an instance) instead. The natural counterpart to
+// DotOperatorOnNonInstanceError ('.' misused on a non-instance): this is
+// '::' misused ON an instance. Deliberately a separate, more specific
+// error than the generic UnknownScopeQualifierError fallback -- "isn't a
+// known enum, struct, or module" is technically true but unhelpful here,
+// since the real, nameable mistake is "you have an instance; you meant
+// '.', not '::'".
+class ScopeOperatorOnInstanceError : public TurfError {
+public:
+  ScopeOperatorOnInstanceError(SourceLocation Loc, const std::string &Name,
+                               const std::string &RightName)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + Name +
+                           Colors::BRIGHT_RED +
+                           "' is a variable, not a type or module -- '::' "
+                           "doesn't apply to it." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    Hint_ = "'::' is for namespace-qualified access (enum variants, module "
+            "functions, static methods) -- '" + Name + "' holds an "
+            "instance. Did you mean '" + Name + "." + RightName + "(...)'?";
   }
 };
 

@@ -115,7 +115,8 @@ A **diamond** (two modules both importing the same third module) is not a cycle 
 |---|---|
 | `ModuleNotFoundError` | `import xyz;` and no `xyz.tr` exists anywhere on the search path |
 | `CircularImportError` | A module import chain loops back on itself |
-| `UnknownScopeQualifierError` | `Left::Right` where `Left` is neither a known enum, struct, nor module |
+| `UnknownScopeQualifierError` | `Left::Right` where `Left` is neither a known enum, struct, module, nor a declared variable |
+| `ScopeOperatorOnInstanceError` | `::` used with a base that's a real declared variable (an instance) instead of a type/module/enum name -- e.g. `p::method(...)` where `p: SomeStruct`; points at `.` instead |
 | `UnknownModuleSymbolError` | `import module::symbol;` (or a qualified type/construction/static-method-call qualifier) names a symbol/owner the module doesn't actually have |
 | `ImportSymbolCollisionError` | Two on-demand imports flatten two different symbols under one bare name |
 | `UnknownFunctionError` | A bare call that isn't a local declaration, self-reference, or on-demand import |
@@ -273,11 +274,12 @@ A related bug was found and fixed alongside this: `registerOnDemandImports()`'s 
   1. Known enum → `TypeError` (variants aren't callable).
   2. Known struct → **`StaticMethodRef`** (2.8.1 below) — a true static method call, no instance.
   3. Known module → `ModuleFunctionRef` — `ModuleMatches` from `findInModules()` filtered to the **explicit** `LeftName` (no self-reference concept needed — the module is stated outright). If the module is real but has no function named `func` at all, `ModuleMethodNotFoundError` is raised directly, with suggestions ranked from `getModuleFunctionNames(LeftName)` — this specific branch previously existed as dead code (the error class was defined but nothing constructed/raised it), so a call to a nonexistent module function fell through to a generic, less-specific diagnostic instead.
-  4. Neither → `UnknownScopeQualifierError`.
+  4. Neither, but `LeftName` is a real declared variable (an instance) → `ScopeOperatorOnInstanceError`, a more specific "you meant '.'" diagnosis than the generic fallback just below (a genuinely common mistake to make right after learning static methods exist: `p::method(...)` instead of `p.method(...)`).
+  5. Neither, and not a variable either → `UnknownScopeQualifierError`.
 
 Both the struct and module branches then share the exact same downstream arity-check/`ResolvedCandidates`-population code (`src/Resolver.cpp` continues past line ~760) — the callee-shape branching only decides *where `ModuleMatches`/`CurrentFileMatches` come from*, not how they're used afterward.
 
-**`visitScopeAccess()`** (`src/Resolver.cpp:1136-...`) handles a `ScopeAccessExprAST` reached as an ordinary expression (i.e. **not** as a call's direct callee — that's the branch above, which never even calls this): enum-variant validation (unchanged from the enum-only era) if `LeftName` is a known enum; `TypeError` ("no first-class functions") if it's a known module or a known struct instead (the struct case: `StructName::method` referenced without being called — same "no first-class functions" reasoning as the module case); `UnknownScopeQualifierError` if none of the three.
+**`visitScopeAccess()`** (`src/Resolver.cpp:1136-...`) handles a `ScopeAccessExprAST` reached as an ordinary expression (i.e. **not** as a call's direct callee — that's the branch above, which never even calls this): enum-variant validation (unchanged from the enum-only era) if `LeftName` is a known enum; `TypeError` ("no first-class functions") if it's a known module or a known struct instead (the struct case: `StructName::method` referenced without being called — same "no first-class functions" reasoning as the module case); the same `ScopeOperatorOnInstanceError` upgrade as `visitFuncCall()` above if `LeftName` is a declared variable; `UnknownScopeQualifierError` as the final fallback.
 
 **`validateNamedType()`** (`src/Resolver.cpp:1167-1263`) — called for every type annotation (params, return types, fields, var decls). For a `GenericType`, now validates the base name itself (previously only recursed into type *arguments* — `NonExistentGeneric<int>` used to silently pass) *and* calls `validateModuleQualifier()` on it; for a `NamedType`, the existing `isKnownStruct`/`isEnumName` check is unchanged, with `validateModuleQualifier()` called afterward if the name resolved.
 
@@ -371,11 +373,11 @@ Contrast with `input()` (never on-demand-imported in this file): step 4's on-dem
 | `include/AST.h` | `ScopeAccessExprAST`, `ModuleImportExprAST`, `StructInitExprAST` (+ `ImportMode`, `ImportedSymbolRef`, `ScopeAccessKind`) |
 | `include/Types.h` | `NamedType`/`GenericType`'s `Module` field |
 | `src/Parser.cpp` | `ParseImport()`, `ParseType()`'s qualifier handling, `ParsePrimaryBase()`'s `TOK_SCOPE`/struct-init branches, `ParseFile()`'s `ImportStack`, `ParseStructInitFieldsBody()` |
-| `include/Resolver.h`, `src/Resolver.cpp` | `hoistTopLevel`/`hoistModuleBody`, `registerOnDemandImports`, `visitFuncCall`, `visitScopeAccess`, `validateNamedType`, `validateModuleQualifier`, `visitStructInit`, `visitModuleImport`, `currentModuleName`/`ModuleStack_` |
-| `include/ResolverSymbolTable.h`, `src/ResolverSymbolTable.cpp` | `Modules_`, `CurrentFileFunctions_`, `FlatImportedFunctions_`, `RegisteredStructs_`/`RegisteredEnums_`, `TypeOwningModule_`, `registerFlatFunctionImport`/`lookupFlatFunctionImport`, `getTypeOwningModule` |
-| `include/TypeChecker.h`, `src/TypeChecker.cpp` | `visitScopeAccess` |
-| `src/Codegen.cpp` | `FuncCallExprAST::codegen()`, `ScopeAccessExprAST::codegen()`, `getExprType()` |
-| `include/Errors.h` | `CircularImportError`, `UnknownScopeQualifierError`, `UnknownModuleSymbolError`, `ImportSymbolCollisionError` |
+| `include/Resolver.h`, `src/Resolver.cpp` | `hoistTopLevel`/`hoistModuleBody`, `registerOnDemandImports`, `visitFuncCall`, `visitMethodCall`, `visitScopeAccess`, `validateNamedType`, `validateModuleQualifier`, `visitStructInit`, `visitModuleImport`, `currentModuleName`/`ModuleStack_` |
+| `include/ResolverSymbolTable.h`, `src/ResolverSymbolTable.cpp` | `Modules_`, `CurrentFileFunctions_`, `FlatImportedFunctions_`, `FlatImportedTypes_`, `RegisteredStructs_`/`RegisteredEnums_`, `TypeOwningModule_`, `registerFlatFunctionImport`/`lookupFlatFunctionImport`, `registerFlatTypeImport`/`isTypeVisibleUnqualified`, `getTypeOwningModule` |
+| `include/TypeChecker.h`, `src/TypeChecker.cpp` | `visitScopeAccess`, `visitMethodCall` |
+| `src/Codegen.cpp` | `FuncCallExprAST::codegen()`, `ScopeAccessExprAST::codegen()`, `MethodCallExprAST::codegen()`, `getExprType()` |
+| `include/Errors.h` | `CircularImportError`, `UnknownScopeQualifierError`, `ScopeOperatorOnInstanceError`, `DotOperatorOnNonInstanceError`, `UnknownModuleSymbolError`, `ImportSymbolCollisionError`, `UnqualifiedTypeNotVisibleError` |
 | `include/ErrorCategory.h` | `"module"`/`"import"` keyword routing to `docs/slm/modules.txt` |
 | `src/Builtins.cpp`, `lib/std/io.tr` | `@intrinsic` removal; `print`/`printline`/`input` now plain Turf + `extern fn` FFI |
 | `lib/std/*.tr` | The 7 real stdlib modules (`io`, `mem`, `math`, `list`, `stack`, `queue`, `strings`), each an ordinary `.tr` file, no compiler special-casing |

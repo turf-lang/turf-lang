@@ -1,0 +1,21 @@
+// Regression test: `instance::method(...)` (using '::' on a real declared
+// variable, not a type/module/enum name) must raise a specific
+// ScopeOperatorOnInstanceError pointing at '.' instead -- not the generic
+// "isn't a known enum, struct, or module" UnknownScopeQualifierError, which
+// is technically true but doesn't explain the actual, common mistake (using
+// '::' right after learning static methods exist, on an instance instead
+// of the struct's type name).
+
+struct P {
+    x: int
+}
+
+fn P.get(): int {
+    return self.x;
+}
+
+fn main(): int {
+    mut p: P = P { x: 5 };
+    immut y: int = p::get();
+    return 0;
+}

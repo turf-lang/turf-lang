@@ -1,0 +1,18 @@
+// Regression test: same ScopeOperatorOnInstanceError, but the method being
+// reached for is a TRUE static method (fn StructName::method(...), no
+// self) rather than an instance method -- confirms the "you meant '.'"
+// diagnosis fires purely based on whether the LEFT-hand name is a real
+// variable, independent of what kind of method the RIGHT-hand name would
+// have resolved to.
+
+struct P {}
+
+fn P::square(x: int): int {
+    return x * x;
+}
+
+fn main(): int {
+    mut p: P = P {};
+    immut y: int = p::square(5);
+    return 0;
+}

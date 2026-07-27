@@ -849,6 +849,16 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
             ModuleMatches.push_back(Match);
       }
     } else if (!SymTable_.hasModule(LeftName)) {
+      // Not an enum, struct, or module -- but if it's a real, declared
+      // variable (an instance), give the specific "you meant '.'" error
+      // instead of the generic "unknown qualifier" one. `p::get()` where
+      // `p: SomeStruct` is a genuinely common mistake to make right after
+      // learning static methods exist, and "isn't a known enum, struct,
+      // or module" doesn't actually tell the user what they did wrong.
+      if (SymTable_.lookupVariable(LeftName)) {
+        ScopeOperatorOnInstanceError(Node.getLoc(), LeftName, CalleeName).raise();
+        return;
+      }
       RankedSuggestions QualifierSuggestions;
       auto EnumSugg = SuggestionIndex::suggestVisible(LeftName, SymTable_.getAllEnumNames());
       for (const auto &S : EnumSugg)
@@ -1206,6 +1216,14 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
                                  "aren't first-class yet, only calls like '" +
                                  LeftName + "::" + RightName + "(...)' work.")
         .raise();
+    return;
+  }
+
+  // Same "you meant '.'" specific-error upgrade as visitFuncCall's
+  // equivalent fallback -- see its comment for why this is worth
+  // distinguishing from the generic "unknown qualifier" case below.
+  if (SymTable_.lookupVariable(LeftName)) {
+    ScopeOperatorOnInstanceError(Node.getLoc(), LeftName, RightName).raise();
     return;
   }
 
