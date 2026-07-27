@@ -216,7 +216,8 @@ enum Token {
   TOK_POWER    = -78, ///< `**`       token   — exponentiation operator
   TOK_ENUM     = -81, ///< `enum`     token   — enum declaration
   TOK_LSHIFT   = -79, ///< `<<`       token   — bitwise left shift
-  TOK_RSHIFT   = -80  ///< `>>`       token   — bitwise right shift
+  TOK_RSHIFT   = -80, ///< `>>`       token   — bitwise right shift
+  TOK_EXPORT   = -82  ///< `export`   keyword — top-level exported constant declaration
 };
 
 int gettok();

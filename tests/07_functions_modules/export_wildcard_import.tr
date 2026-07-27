@@ -1,0 +1,10 @@
+// `import module::[*];` flat-imports every exported constant (alongside
+// every function/type) a module declares -- mirrors import_wildcard.tr.
+import io;
+import lib_export_constants_module::[*];
+
+fn main(): int {
+    io::printline(VERSION);
+    io::printline(GREETING);
+    return 0;
+}

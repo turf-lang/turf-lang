@@ -428,7 +428,7 @@ int main(int argc, char **argv) {
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') { getNextToken(); continue; }
         if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
-            CurTok == TOK_AT || CurTok == TOK_EXTERN) {
+            CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
@@ -619,6 +619,18 @@ int main(int argc, char **argv) {
         for (auto &AST : PrePassASTs) {
           if (dynamic_cast<StructDeclExprAST *>(AST.get()))
             continue;
+          // `export immut` constants have no real LLVM storage at all --
+          // Resolver Pass 1 (hoistExportedConstant) already extracted their
+          // literal value into the symbol table, and every reference site
+          // emits that literal directly (see VariableExprAST/
+          // ScopeAccessExprAST's ResolvedConstant field). Calling
+          // VarDeclExprAST::codegen() here would run it with no enclosing
+          // function/basic-block context (true top level), corrupting
+          // whatever LLVM function is being codegenned adjacent to it in
+          // iteration order -- confirmed live via a real crash ("Basic
+          // Block ... does not have terminator") in an unrelated function.
+          if (dynamic_cast<VarDeclExprAST *>(AST.get()))
+            continue;
           size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
@@ -682,9 +694,11 @@ int main(int argc, char **argv) {
     // re-codegen them).  TOK_IMPORT is included here because `import` nodes
     // are top-level declarations handled by the pre-pass, exactly like `fn`.
     // TOK_EXTERN is included because extern fn declarations are also emitted
-    // in the pre-pass.
+    // in the pre-pass. TOK_EXPORT (export immut NAME: TYPE = LITERAL;) is
+    // included for the same reason -- it's a genuine top-level declaration,
+    // not a statement, and needs the exact same hoist-then-lint treatment.
     if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
-        CurTok == TOK_AT || CurTok == TOK_EXTERN) {
+        CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();

@@ -151,6 +151,28 @@ void ResolverSymbolTable::registerModuleFunction(
   It->second->registerFunction(Sym);
 }
 
+void ResolverSymbolTable::registerModuleConstant(
+    const std::string &ModuleName, const ResolverConstantSymbol &Sym) {
+
+  auto It = Modules_.find(ModuleName);
+  if (It == Modules_.end()) {
+    Modules_[ModuleName] = std::make_unique<ResolverModule>(ModuleName);
+    It = Modules_.find(ModuleName);
+  }
+  It->second->Variables[Sym.Name] = Sym;
+}
+
+const ResolverConstantSymbol *ResolverSymbolTable::findModuleConstant(
+    const std::string &ModuleName, const std::string &Name) const {
+  auto ModIt = Modules_.find(ModuleName);
+  if (ModIt == Modules_.end())
+    return nullptr;
+  auto VarIt = ModIt->second->Variables.find(Name);
+  if (VarIt == ModIt->second->Variables.end())
+    return nullptr;
+  return &VarIt->second;
+}
+
 bool ResolverSymbolTable::hasModule(const std::string &ModuleName) const {
   return Modules_.count(ModuleName) > 0;
 }
@@ -161,6 +183,19 @@ std::vector<std::string> ResolverSymbolTable::getModuleFunctionNames(
   if (It == Modules_.end())
     return {};
   return It->second->getFunctionNames();
+}
+
+std::vector<std::string> ResolverSymbolTable::getModuleConstantNames(
+    const std::string &ModuleName) const {
+  auto It = Modules_.find(ModuleName);
+  if (It == Modules_.end())
+    return {};
+  std::vector<std::string> Names;
+  Names.reserve(It->second->Variables.size());
+  for (const auto &Pair : It->second->Variables)
+    Names.push_back(Pair.first);
+  std::sort(Names.begin(), Names.end());
+  return Names;
 }
 
 // ─── Current-file function registry ──────────────────────────────────────────
@@ -200,6 +235,19 @@ ResolverSymbolTable::lookupCurrentFileFunctions(
   return Result;
 }
 
+void ResolverSymbolTable::registerCurrentFileConstant(
+    const ResolverConstantSymbol &Sym) {
+  CurrentFileConstants_[Sym.Name] = Sym;
+}
+
+const ResolverConstantSymbol *ResolverSymbolTable::lookupCurrentFileConstant(
+    const std::string &Name) const {
+  auto It = CurrentFileConstants_.find(Name);
+  if (It == CurrentFileConstants_.end())
+    return nullptr;
+  return &It->second;
+}
+
 std::vector<std::string>
 ResolverSymbolTable::getAllCurrentFileFunctionNames() const {
   std::vector<std::string> Names;
@@ -229,6 +277,30 @@ ResolverSymbolTable::lookupFlatFunctionImport(const std::string &ContextLabel,
                                               const std::string &Name) const {
   auto ContextIt = FlatImportedFunctions_.find(ContextLabel);
   if (ContextIt == FlatImportedFunctions_.end())
+    return nullptr;
+  auto It = ContextIt->second.find(Name);
+  if (It == ContextIt->second.end())
+    return nullptr;
+  return &It->second;
+}
+
+std::optional<ResolverSymbolTable::FlatImportedSymbol>
+ResolverSymbolTable::registerFlatConstantImport(const std::string &ContextLabel,
+                                                const std::string &Name,
+                                                const FlatImportedSymbol &Sym) {
+  auto &ContextMap = FlatImportedConstants_[ContextLabel];
+  auto It = ContextMap.find(Name);
+  if (It != ContextMap.end())
+    return It->second; // collision -- caller raises an error
+  ContextMap.emplace(Name, Sym);
+  return std::nullopt;
+}
+
+const ResolverSymbolTable::FlatImportedSymbol *
+ResolverSymbolTable::lookupFlatConstantImport(const std::string &ContextLabel,
+                                              const std::string &Name) const {
+  auto ContextIt = FlatImportedConstants_.find(ContextLabel);
+  if (ContextIt == FlatImportedConstants_.end())
     return nullptr;
   auto It = ContextIt->second.find(Name);
   if (It == ContextIt->second.end())

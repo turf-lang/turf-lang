@@ -266,6 +266,15 @@ import io::[*];                  // + bare access to everything the module expor
 
 A plain `import Module;` always grants qualified access (`Module::thing`), regardless of form — the on-demand forms only add *bare*, unqualified access to specific symbols on top of that. This applies uniformly to functions, structs, and enums: a struct or enum declared in another module is not usable unqualified unless it (or `*`) was explicitly on-demand imported, exactly like a bare function call. Circular imports are detected and reported with the full import chain, not a silent truncation or a hang. See `docs/architecture/modules_and_scope_resolution.md` for the complete internal and external reference.
 
+Functions, structs, and enums are exportable automatically — anything declared at a file's top level is visible to importers with no keyword needed. A top-level *constant* needs `export`, since bare `mut`/`immut` only makes sense inside a function otherwise:
+
+```
+export immut PI: double = 3.14159;
+export immut MAX_USERS: int = 100;
+```
+
+`export` only works on `immut` declarations at the true top level (a compile error either inside a function or on `export mut`), and the initializer must be a literal — an exported constant has no real storage; every reference to it is replaced by its value directly at compile time. Everything else (typos, duplicate names, immutability) behaves exactly like any other variable.
+
 ### FFI
 
 ```

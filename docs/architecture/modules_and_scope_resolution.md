@@ -109,7 +109,40 @@ Circular import detected -- these modules are waiting on each other.
 
 A **diamond** (two modules both importing the same third module) is not a cycle and compiles fine — only a genuine loop back to a module already being loaded triggers this (Part 2.8).
 
-### 1.7 Error reference
+### 1.7 Exporting constants: `export immut`
+
+Functions, structs, and enums are exportable with no keyword at all — anything declared at a file or module's top level is automatically visible to importers per the visibility rules above. Plain variables are different: a bare `mut`/`immut` declaration only ever makes sense *inside* a function (it's destroyed when that scope ends), so there is no existing top-level-variable syntax to piggyback on. `export` fills exactly that gap, and **only** that gap:
+
+```turf
+export immut PI: double = 3.14159;
+export immut MAX_USERS: int = 100;
+export immut GREETING: string = "hello";
+export immut DEBUG: bool = true;
+```
+
+Rules, deliberately narrow:
+- **Top level only.** `export` inside a function body is a compile error (`ExportOutsideTopLevelError`) — grammatically it parses in any statement position (the parser has no reason to reject it there), so this is enforced by the Resolver checking function-nesting depth, the same style of enforcement as 1.1's `.`-rejection.
+- **`immut` only, for now.** `export mut PI: double = 3.14159;` is rejected at parse time (`'export mut' isn't supported yet`) — a true mutable shared global needs its own future feature (initialization ordering, real global-variable codegen); `export` today only covers compile-time constants.
+- **Initializer must be a literal.** `export immut X: int = someFunction();` is rejected (`ExportNonConstantInitializerError`) — an exported constant has **no real storage at all**. Every reference to it, anywhere, is replaced by the literal value directly at compile time; there is no global variable, no alloca, nothing to load from.
+- **Everything else about it is an ordinary variable.** Typo detection, duplicate-name detection, and immutability (you cannot assign to an exported constant, same `ImmutableAssignmentError` as any other `immut`) all apply exactly as they would to a local `immut` — `export` only changes *where* it can be declared and *how far* its visibility reaches.
+
+Visibility and access follow the exact same rules as functions (1.3):
+
+```turf
+// consts.tr
+export immut VERSION: int = 7;
+```
+
+```turf
+import consts;
+consts::VERSION        // qualified access always works once imported, in any form
+
+import consts::VERSION;
+VERSION                 // bare access -- only after an on-demand import (or self-reference
+                         // within consts.tr itself)
+```
+
+### 1.8 Error reference
 
 | Error | Raised when |
 |---|---|
@@ -126,6 +159,9 @@ A **diamond** (two modules both importing the same third module) is not a cycle 
 | `UnqualifiedTypeNotVisibleError` | A real struct/enum type referenced bare, but not visible from this file/module (2.7.1) |
 | `UnknownTypeError` | A type name (bare or generic base name) that doesn't exist as a struct/enum/primitive anywhere |
 | `TypeError` (several shapes) | Calling an enum variant as a function; using a module or static-method reference as a bare value; a module name nonsensically qualified by another module name (`Module::Module2::func(...)`) |
+| `ExportOutsideTopLevelError` | `export` used inside a function body |
+| `ExportMutNotSupportedError` | `export mut` — only `export immut` is supported today |
+| `ExportNonConstantInitializerError` | `export immut X = <non-literal>;` — the initializer isn't a literal the compiler can fold at compile time |
 
 ---
 
@@ -226,6 +262,23 @@ FlatImportedFunctions_ : unordered_map<ContextLabel, unordered_map<Name, FlatImp
 
 RegisteredStructs_,     : FLAT, module-blind. One name -> one declaration site, globally,
 RegisteredEnums_          across the whole program (see 2.6 for why this is intentional).
+
+CurrentFileConstants_, : Same shape/keying as the *Functions_ registries above, but for
+Modules_[M].Variables,   `export immut` constants -- a Name -> ResolverConstantSymbol map,
+FlatImportedConstants_   never a vector (constants don't overload). ResolverConstantSymbol
+                          deliberately stores the constant's actual VALUE (a tagged union of
+                          int64/double/bool/string), not a pointer back to the initializer's
+                          AST node -- this header has a hard "zero LLVM/AST dependency"
+                          constraint, and there is no other way to make a reference site
+                          usable from Codegen without re-parsing the initializer. Populated
+                          during Pass 1 hoisting (Resolver::hoistExportedConstant), consumed
+                          by VariableExprAST::ResolvedConstant / ScopeAccessExprAST::
+                          ResolvedConstant (set by visitVariable / visitScopeAccess), which
+                          Codegen reads directly (CodegenConstantValue(), src/Codegen.cpp) --
+                          an exported constant has no alloca, no GlobalVariable, nothing to
+                          load from; VarDeclExprAST::codegen() is an explicit no-op for one
+                          (IsExported), since it's reached from multiple blind top-level/
+                          module-body codegen loops that assume a valid insertion point.
 
 TypeOwningModule_       : unordered_map<TypeName, ModuleName>
                           WHICH module actually declared each struct/enum ("" = main
@@ -374,10 +427,10 @@ Contrast with `input()` (never on-demand-imported in this file): step 4's on-dem
 | `include/Types.h` | `NamedType`/`GenericType`'s `Module` field |
 | `src/Parser.cpp` | `ParseImport()`, `ParseType()`'s qualifier handling, `ParsePrimaryBase()`'s `TOK_SCOPE`/struct-init branches, `ParseFile()`'s `ImportStack`, `ParseStructInitFieldsBody()` |
 | `include/Resolver.h`, `src/Resolver.cpp` | `hoistTopLevel`/`hoistModuleBody`, `registerOnDemandImports`, `visitFuncCall`, `visitMethodCall`, `visitScopeAccess`, `validateNamedType`, `validateModuleQualifier`, `visitStructInit`, `visitModuleImport`, `currentModuleName`/`ModuleStack_` |
-| `include/ResolverSymbolTable.h`, `src/ResolverSymbolTable.cpp` | `Modules_`, `CurrentFileFunctions_`, `FlatImportedFunctions_`, `FlatImportedTypes_`, `RegisteredStructs_`/`RegisteredEnums_`, `TypeOwningModule_`, `registerFlatFunctionImport`/`lookupFlatFunctionImport`, `registerFlatTypeImport`/`isTypeVisibleUnqualified`, `getTypeOwningModule` |
+| `include/ResolverSymbolTable.h`, `src/ResolverSymbolTable.cpp` | `Modules_`, `CurrentFileFunctions_`, `FlatImportedFunctions_`, `FlatImportedTypes_`, `RegisteredStructs_`/`RegisteredEnums_`, `TypeOwningModule_`, `registerFlatFunctionImport`/`lookupFlatFunctionImport`, `registerFlatTypeImport`/`isTypeVisibleUnqualified`, `getTypeOwningModule`, `ResolverConstantSymbol`, `CurrentFileConstants_`/`Modules_[M].Variables`/`FlatImportedConstants_` |
 | `include/TypeChecker.h`, `src/TypeChecker.cpp` | `visitScopeAccess`, `visitMethodCall` |
-| `src/Codegen.cpp` | `FuncCallExprAST::codegen()`, `ScopeAccessExprAST::codegen()`, `MethodCallExprAST::codegen()`, `getExprType()` |
-| `include/Errors.h` | `CircularImportError`, `UnknownScopeQualifierError`, `ScopeOperatorOnInstanceError`, `DotOperatorOnNonInstanceError`, `UnknownModuleSymbolError`, `ImportSymbolCollisionError`, `UnqualifiedTypeNotVisibleError` |
+| `src/Codegen.cpp` | `FuncCallExprAST::codegen()`, `ScopeAccessExprAST::codegen()`, `MethodCallExprAST::codegen()`, `getExprType()`, `CodegenConstantValue()`, `VarDeclExprAST::codegen()`'s `IsExported` no-op |
+| `include/Errors.h` | `CircularImportError`, `UnknownScopeQualifierError`, `ScopeOperatorOnInstanceError`, `DotOperatorOnNonInstanceError`, `UnknownModuleSymbolError`, `ImportSymbolCollisionError`, `UnqualifiedTypeNotVisibleError`, `ExportOutsideTopLevelError`, `ExportMutNotSupportedError`, `ExportNonConstantInitializerError` |
 | `include/ErrorCategory.h` | `"module"`/`"import"` keyword routing to `docs/slm/modules.txt` |
 | `src/Builtins.cpp`, `lib/std/io.tr` | `@intrinsic` removal; `print`/`printline`/`input` now plain Turf + `extern fn` FFI |
 | `lib/std/*.tr` | The 7 real stdlib modules (`io`, `mem`, `math`, `list`, `stack`, `queue`, `strings`), each an ordinary `.tr` file, no compiler special-casing |

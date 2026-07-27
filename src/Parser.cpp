@@ -192,6 +192,7 @@ std::unique_ptr<ExprAST> ParseImport();
 std::unique_ptr<ExprAST> ParseReturnExpr();
 std::unique_ptr<ExprAST> ParseStructDecl();
 std::unique_ptr<ExprAST> ParseExternDecl();
+std::unique_ptr<ExprAST> ParseExportDecl();
 std::unique_ptr<ExprAST> ParseCompareExpr();
 // list<T> declarations have no dedicated parse function: ParseType() already
 // produces a GenericType("list", [elemType]) for any `Name<...>` spelling,
@@ -889,6 +890,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_EXTERN:
     return ParseExternDecl();
 
+  case TOK_EXPORT:
+    return ParseExportDecl();
+
 
   case TOK_RETURN:
     return ParseReturnExpr();
@@ -1130,6 +1134,22 @@ std::unique_ptr<ExprAST> ParseBlock() {
 
     if (CurTok == TOK_MUTABLE || CurTok == TOK_IMMUTABLE) {
       auto Expr = ParseLetStatement(CurTok == TOK_IMMUTABLE);
+      if (!Expr) return nullptr;
+      Exprs.push_back(std::move(Expr));
+      continue;
+    }
+    if (CurTok == TOK_EXPORT) {
+      // `export` grammatically parses in any statement position (the
+      // top-level-only rule is enforced semantically by the Resolver, via
+      // FunctionNestingDepth_ -- see ExportOutsideTopLevelError), so a block
+      // must still be able to parse one syntactically, even though it will
+      // always be rejected downstream here. Needs its own branch (not the
+      // generic ParseExpression() fallback below) for the same reason
+      // TOK_MUTABLE/TOK_IMMUTABLE do: ParseExportDecl() -> ParseLetStatement()
+      // already consumes the statement's trailing ';' itself, so the
+      // fallback's OWN `if (CurTok != ';') error` check would immediately
+      // misfire against the token that follows (already past the ';').
+      auto Expr = ParseExportDecl();
       if (!Expr) return nullptr;
       Exprs.push_back(std::move(Expr));
       continue;
@@ -1392,6 +1412,15 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
           OtherStmts.push_back(std::move(E));
           continue;
         }
+        if (CurTok == TOK_EXPORT) {
+          // See ParseBlock()'s matching TOK_EXPORT branch for why this
+          // needs its own case instead of falling through to the generic
+          // ParseExpression() path below.
+          auto E = ParseExportDecl();
+          if (!E) return nullptr;
+          OtherStmts.push_back(std::move(E));
+          continue;
+        }
         if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
             CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_COMPARE) {
           auto E = ParseExpression();
@@ -1514,6 +1543,15 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       }
       if (CurTok == TOK_MUTABLE || CurTok == TOK_IMMUTABLE) {
         auto E = ParseLetStatement(CurTok == TOK_IMMUTABLE);
+        if (!E) return nullptr;
+        ArmStmts.push_back(std::move(E));
+        continue;
+      }
+      if (CurTok == TOK_EXPORT) {
+        // See ParseBlock()'s matching TOK_EXPORT branch for why this needs
+        // its own case instead of falling through to the generic
+        // ParseExpression() path below.
+        auto E = ParseExportDecl();
         if (!E) return nullptr;
         ArmStmts.push_back(std::move(E));
         continue;
@@ -2088,6 +2126,96 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
                                                  std::move(LibName));
 }
 
+// ParseExportDecl - called when CurTok == TOK_EXPORT.
+// Parses: export immut <name>: <type> = <literal>;
+//
+// Grammar-wise this accepts `export` anywhere ParsePrimaryBase() is reached
+// (the same shared dispatch point `fn`/`struct`/`import`/etc. all go
+// through) -- it does NOT check whether it's actually at true top level.
+// That's deliberate: enforcing "top level only" here would mean duplicating
+// whatever notion of "am I inside a function" the parser has at every call
+// site, when the Resolver already tracks that precisely (FunctionNestingDepth_)
+// and can raise a far more specific error (ExportOutsideTopLevelError)
+// pointing at the actual problem, matching how other semantic-only
+// constraints in this language are enforced post-parse rather than baked
+// into the grammar.
+//
+// `export mut` (a genuinely mutable, shared global) is deliberately
+// rejected right here at parse time rather than deferred -- true mutable
+// global state (initialization ordering, real LLVM global-variable
+// codegen) is a meaningfully bigger feature than a named constant and is
+// not implemented at all yet; see docs/planning/ROADMAP_v1.0.0.md.
+std::unique_ptr<ExprAST> ParseExportDecl() {
+  SourceLocation ExportLoc = CurLoc;
+  getNextToken(); // eat 'export'
+
+  // Both error paths below fire BEFORE any '{' could possibly be open (right
+  // after the 'export' keyword), so the CALLER's SkipToNextTopLevelBoundary()
+  // (main.cpp) -- which only makes ONE token of forward progress when
+  // g_braceDepth is already 0 -- doesn't skip far enough past a whole broken
+  // declaration like `export mut X: int = 5;` on its own. Left entirely to
+  // that, recovery lands mid-statement (e.g. on the `X` identifier), which
+  // the top-level dispatch then misreads as a bare expression statement,
+  // producing a confusing SECOND "Statements are not allowed outside of a
+  // function" error stacked on top of the real one.
+  //
+  // Skip up TO (but deliberately not PAST) the next statement boundary
+  // ourselves -- stopping one token short of what the caller's own
+  // always-advances-at-least-once SkipToNextTopLevelBoundary() will do right
+  // after we return nullptr. Consuming the boundary token here too would
+  // double-skip (the caller's forced extra step would then land one token
+  // PAST the real boundary, e.g. eating the next `fn` and desyncing the
+  // parse of the statement that follows).
+  auto SkipRestOfBrokenStatement = [&]() {
+    while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
+          CurTok != TOK_STRUCT && CurTok != TOK_ENUM && CurTok != TOK_AT &&
+          CurTok != TOK_EXTERN && CurTok != TOK_EXPORT && CurTok != TOK_IMPORT)
+      getNextToken();
+  };
+
+  if (CurTok == TOK_MUTABLE) {
+    LogErrorAt(ExportLoc,
+               "'export mut' is not supported yet -- only 'export immut' "
+               "(a compile-time constant) works right now."
+               "\n  Hint: true mutable shared global state needs its own "
+               "future feature (initialization ordering, real global-"
+               "variable codegen). If you don't need to mutate it, use "
+               "'export immut' instead.");
+    SkipRestOfBrokenStatement();
+    return nullptr;
+  }
+
+  if (CurTok != TOK_IMMUTABLE) {
+    LogErrorAt(ExportLoc,
+               "Expected 'immut' or 'immutable' after 'export'."
+               "\n  Hint: 'export' only works on variable declarations, "
+               "e.g. export immut PI: double = 3.14159;");
+    SkipRestOfBrokenStatement();
+    return nullptr;
+  }
+
+  auto Decl = ParseLetStatement(/*IsImmutable=*/true);
+  if (!Decl)
+    return nullptr;
+
+  auto *VarDecl = dynamic_cast<VarDeclExprAST *>(Decl.get());
+  if (!VarDecl) {
+    // ParseLetStatement() can also return an ArrayDeclExprAST for an array
+    // type with no initializer (`export immut arr: int[5];`) -- exported
+    // constants must have a real initializer value to export in the first
+    // place, so that shape is rejected here rather than silently accepted
+    // and then failing some other way downstream.
+    LogErrorAt(ExportLoc,
+               "'export immut' requires an explicit initializer value."
+               "\n  Hint: e.g. export immut MAX_RETRIES: int = 3; -- an "
+               "exported constant with no value has nothing to export.");
+    return nullptr;
+  }
+
+  VarDecl->setExported(true);
+  return Decl;
+}
+
 // ParseFuncDef - called when CurTok == TOK_FN.
 // Parses: fn <rettype> <name>(<type> <param>, ...) { body }
 std::unique_ptr<ExprAST> ParseFuncDef() {
@@ -2450,7 +2578,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     }
 
     if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_AT ||
-        CurTok == TOK_EXTERN) {
+        CurTok == TOK_EXTERN || CurTok == TOK_EXPORT) {
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok == ';') {

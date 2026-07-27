@@ -371,6 +371,13 @@ void TypeChecker::visitVariable(VariableExprAST &Node) {
     return;
   }
 
+  // 2a. An `export immut` constant (no ResolvedSymbol -- see its field's
+  //     doc comment in AST.h; the Resolver sets ResolvedConstant instead).
+  if (Node.ResolvedConstant && Node.ResolvedConstant->Type) {
+    setType(&Node, Node.ResolvedConstant->Type);
+    return;
+  }
+
   // 2b. Fallback: try a direct RST lookup.  This covers two cases:
   //     (a) Unit tests that call RST.declareVariable() directly without a
   //         Resolver pass (in production the RST scope stack is empty here).
@@ -646,6 +653,18 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
 #else
       throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
 #endif
+    } else if (LHSVar->ResolvedConstant) {
+      // `export immut` constants are always immutable (export mut isn't
+      // supported yet -- see ExportMutNotSupportedError) and have no
+      // ResolvedSymbol to hang the check above off of.
+#ifndef TYPECHECKER_NO_ERRORS
+      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName())
+          .withRelated(toSourceLocation(LHSVar->ResolvedConstant->DeclLoc),
+                       "declared immutable here")
+          .raise();
+#else
+      throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
+#endif
     }
   }
 }
@@ -690,6 +709,15 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
 #else
       throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
 #endif
+    } else if (LHSVar->ResolvedConstant) {
+#ifndef TYPECHECKER_NO_ERRORS
+      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName())
+          .withRelated(toSourceLocation(LHSVar->ResolvedConstant->DeclLoc),
+                       "declared immutable here")
+          .raise();
+#else
+      throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
+#endif
     }
   }
 }
@@ -715,6 +743,15 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
 #ifndef TYPECHECKER_NO_ERRORS
       ImmutableAssignmentError(Node.getLoc(), LHSVar->getName())
           .withRelated(toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
+                       "declared immutable here")
+          .raise();
+#else
+      throw std::runtime_error("ImmutableAssignmentError: " + LHSVar->getName());
+#endif
+    } else if (LHSVar->ResolvedConstant) {
+#ifndef TYPECHECKER_NO_ERRORS
+      ImmutableAssignmentError(Node.getLoc(), LHSVar->getName())
+          .withRelated(toSourceLocation(LHSVar->ResolvedConstant->DeclLoc),
                        "declared immutable here")
           .raise();
 #else
@@ -2069,6 +2106,12 @@ void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
   // (computed by visitFuncCall itself, independent of the callee node).
   // Only the enum-variant meaning (Node.ResolvedKind set by the Resolver)
   // has a real type to assign here.
+  if (Node.ResolvedKind == ScopeAccessKind::ModuleConstantRef) {
+    if (Node.ResolvedConstant)
+      setType(&Node, Node.ResolvedConstant->Type);
+    return;
+  }
+
   if (Node.ResolvedKind != ScopeAccessKind::EnumVariant)
     return;
 

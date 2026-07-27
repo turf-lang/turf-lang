@@ -212,6 +212,39 @@ struct ResolverFunctionSymbol {
  * Lookup is strictly namespace-isolated: searching "io" will never find
  * functions registered under "math".
  */
+/**
+ * @brief A single `export immut NAME: TYPE = LITERAL;` declaration.
+ *
+ * Unlike ResolverFunctionSymbol, there is no MangledName-avoidance concern
+ * here at all -- an exported constant never becomes a real, addressable
+ * LLVM symbol in the first place. It's a pure compile-time value: Codegen
+ * emits the literal directly at every reference site (bare or
+ * `Module::NAME`-qualified) instead of loading from any storage location.
+ * That's why this struct stores the actual VALUE (as a small tagged union
+ * over the 4 primitive kinds `export immut` currently supports), not a
+ * name to look up later -- there IS no "later", the value IS the symbol.
+ *
+ * Deliberately excludes any `ExprAST*`/AST-node reference, matching this
+ * whole header's "zero LLVM/AST dependency" design constraint (see the
+ * file-level doc comment) -- the value is extracted from the literal
+ * initializer expression ONCE, during Resolver Pass 1 hoisting, and lives
+ * here as plain data from then on.
+ */
+struct ResolverConstantSymbol {
+  std::string Name;
+  std::string SourceModule; ///< "" = current file, else the declaring module
+  TurfTypePtr Type;
+  ResolverSourceLocation DeclLoc;
+
+  // Exactly one of these is meaningful, selected by Type->isInt()/
+  // isDouble()/isBool()/isString() -- `export immut` only supports these 4
+  // primitive literal kinds today (see ParseExportDecl()'s validation).
+  long long IntVal = 0;
+  double DoubleVal = 0.0;
+  bool BoolVal = false;
+  std::string StringVal;
+};
+
 class ResolverModule {
 public:
   std::string Name; ///< e.g. "io", "math"
@@ -219,6 +252,10 @@ public:
   /// base name → list of overloads
   std::unordered_map<std::string, std::vector<ResolverFunctionSymbol>>
       Functions;
+
+  /// base name → exported constant. Unlike Functions, never a vector --
+  /// variables don't overload.
+  std::unordered_map<std::string, ResolverConstantSymbol> Variables;
 
   explicit ResolverModule(std::string name) : Name(std::move(name)) {}
 
@@ -352,6 +389,29 @@ public:
   void registerModuleFunction(const std::string &ModuleName,
                                const ResolverFunctionSymbol &Sym);
 
+  /**
+   * @brief Register an `export immut` constant under the given module
+   * namespace. Mirrors registerModuleFunction() exactly (auto-creates the
+   * module entry if needed), except a duplicate name is a real conflict
+   * (variables don't overload) -- the caller is expected to have already
+   * checked isKnownConstant()-style existence before calling this, the same
+   * way registerStruct()/registerEnumType() callers do for DuplicateTypeNameError.
+   */
+  void registerModuleConstant(const std::string &ModuleName,
+                              const ResolverConstantSymbol &Sym);
+
+  /**
+   * @brief Look up an exported constant by name, scoped to exactly
+   * @p ModuleName. Returns nullptr if that module has no such constant
+   * (or isn't a known module at all). Mirrors the "explicit qualification"
+   * lookup shape findInModules() + a ModuleName filter already provides for
+   * functions, but constants never overload so this returns at most one
+   * match directly instead of a candidate list.
+   */
+  const ResolverConstantSymbol *
+  findModuleConstant(const std::string &ModuleName,
+                     const std::string &Name) const;
+
   // NOTE: this class used to also have resolveModuleFunction(ModuleName,
   // FuncName, ArgTypes) and getModule(ModuleName) methods for looking up a
   // single named module directly. Both were removed after confirming via
@@ -391,6 +451,15 @@ public:
   std::vector<std::string> getModuleFunctionNames(
       const std::string &ModuleName) const;
 
+  /**
+   * @brief Return all `export immut` constant names registered under
+   * @p ModuleName. Mirrors getModuleFunctionNames(); used by
+   * registerOnDemandImports()'s Wildcard branch to flat-import every
+   * constant a module exports, same as it already does for functions/types.
+   */
+  std::vector<std::string> getModuleConstantNames(
+      const std::string &ModuleName) const;
+
   // ── Current-file function registry ──────────────────────────────────────────
   // These track `fn` definitions in the file being compiled, separately from
   // imported module functions.  This separation powers the two-tier diagnostic:
@@ -407,6 +476,23 @@ public:
    * Emits no error on overloads — that is the TypeChecker's job.
    */
   void registerCurrentFileFunction(const ResolverFunctionSymbol &Sym);
+
+  /**
+   * @brief Register an `export immut` constant declared at the top level of
+   * the current (main) source file. Mirrors registerCurrentFileFunction();
+   * see ResolverConstantSymbol's doc comment for why this stores the actual
+   * value rather than a name to resolve later.
+   */
+  void registerCurrentFileConstant(const ResolverConstantSymbol &Sym);
+
+  /**
+   * @brief Look up an `export immut` constant declared in the current file
+   * by name. Returns nullptr if no such constant exists there (this file's
+   * own self-reference case -- mirrors lookupCurrentFileFunctions(), minus
+   * the vector-of-overloads shape since constants never overload).
+   */
+  const ResolverConstantSymbol *
+  lookupCurrentFileConstant(const std::string &Name) const;
 
   /**
    * @brief Return all overloads of @p Name defined in the current file.
@@ -484,6 +570,29 @@ public:
   registerFlatTypeImport(const std::string &ContextLabel,
                          const std::string &Name,
                          const FlatImportedSymbol &Sym);
+
+  /**
+   * @brief Register that `export immut` constant @p Name is on-demand-
+   * imported from @p Sym.SourceModule into @p ContextLabel's flat namespace.
+   * Mirrors registerFlatFunctionImport()/registerFlatTypeImport() exactly,
+   * kept as its own registry (FlatImportedConstants_) for the same reason
+   * the type registry is separate from the function one -- see this class's
+   * FlatImportedConstants_ doc comment.
+   * Returns the PREVIOUS entry on a same-name collision from a different
+   * module, std::nullopt on a fresh registration.
+   */
+  std::optional<FlatImportedSymbol>
+  registerFlatConstantImport(const std::string &ContextLabel,
+                             const std::string &Name,
+                             const FlatImportedSymbol &Sym);
+
+  /**
+   * @brief Look up whether constant @p Name is flat-imported into
+   * @p ContextLabel. Returns nullptr if not.
+   */
+  const FlatImportedSymbol *
+  lookupFlatConstantImport(const std::string &ContextLabel,
+                           const std::string &Name) const;
 
   /**
    * @brief True if struct/enum @p Name is unqualified-visible from
@@ -652,6 +761,19 @@ private:
   /// registerFlatTypeImport()'s doc comment for why).
   std::unordered_map<std::string, std::unordered_map<std::string, FlatImportedSymbol>>
       FlatImportedTypes_;
+
+  /// `export immut` constants declared at the top level of the current
+  /// (main) source file. Mirrors CurrentFileFunctions_ but never a vector --
+  /// variables don't overload.
+  std::unordered_map<std::string, ResolverConstantSymbol> CurrentFileConstants_;
+
+  /// On-demand flat CONSTANT imports -- same shape and keying as
+  /// FlatImportedFunctions_/FlatImportedTypes_ above, kept as a third
+  /// separate map since a constant, a function, and a type can all legally
+  /// share one bare spelling without colliding (they occupy different
+  /// syntactic positions: value position, call position, type position).
+  std::unordered_map<std::string, std::unordered_map<std::string, FlatImportedSymbol>>
+      FlatImportedConstants_;
 
   /// Struct names declared in the current file or any transitively-imported
   /// module (hoisted in Pass 1), mapped to their declaration site so a

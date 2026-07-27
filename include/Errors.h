@@ -501,6 +501,56 @@ public:
     Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
   }
 };
+// `export` used inside a function body -- only legal at the top level of a
+// file or module (see VarDeclExprAST::IsExported's doc comment).
+class ExportOutsideTopLevelError : public TurfError {
+public:
+  ExportOutsideTopLevelError(SourceLocation Loc, const std::string &Name)
+      : TurfError(Loc, Colors::BRIGHT_RED +
+                           "'export' can't be used inside a function: '" +
+                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'.",
+                  "Move this declaration to the top level of the file "
+                  "(outside any function) if it needs to be exported. "
+                  "A regular 'mut " + Name + "' or 'immut " + Name +
+                  "' declaration (no 'export') is fine right here if it "
+                  "doesn't need to be shared with other files.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
+// `export mut` -- true mutable shared globals aren't supported yet; only
+// `export immut` (compile-time constants) are.
+class ExportMutNotSupportedError : public TurfError {
+public:
+  ExportMutNotSupportedError(SourceLocation Loc, const std::string &Name)
+      : TurfError(Loc, Colors::BRIGHT_RED +
+                           "'export mut' isn't supported yet: '" +
+                           Colors::CYAN + Name + Colors::BRIGHT_RED + "'.",
+                  "Only 'export immut' (a shared compile-time constant) "
+                  "is supported right now. Use 'export immut " + Name +
+                  ": <type> = <value>;' instead.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
+// `export immut` whose initializer isn't a literal the compiler can fold at
+// compile time -- exported constants have no real storage (see
+// ResolverConstantSymbol's doc comment), so the value must be known now.
+class ExportNonConstantInitializerError : public TurfError {
+public:
+  ExportNonConstantInitializerError(SourceLocation Loc, const std::string &Name)
+      : TurfError(Loc, Colors::BRIGHT_RED +
+                           "'export immut " + Colors::CYAN + Name +
+                           Colors::BRIGHT_RED +
+                           "' needs a literal value I can compute right now.",
+                  "Exported constants must be initialised with a plain "
+                  "literal (a number, string, or bool), like "
+                  "'export immut " + Name + ": int = 42;' -- not an "
+                  "expression or a call to another function.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
 class ArithmeticError : public TurfError {
 public:
   ArithmeticError(SourceLocation Loc, const std::string &Msg)

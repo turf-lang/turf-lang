@@ -283,6 +283,30 @@ private:
   void registerFunctionSignature(const FuncDefExprAST &Node,
                                  const std::string &ModuleName);
 
+  /**
+   * @brief Hoist a top-level `export immut NAME: TYPE = LITERAL;` into
+   * SymTable_'s current-file or module constant registry (mirrors
+   * registerFunctionSignature()'s empty-vs-named ModuleName split). Called
+   * from both hoistTopLevel (ModuleName="") and hoistModuleBody
+   * (ModuleName=the module being hoisted) so an exported constant is
+   * visible to forward references regardless of which file it's declared
+   * in, exactly like functions already are.
+   *
+   * Validates and raises here (not in visitVarDecl) because hoisting is
+   * unconditional -- an invalid export (non-literal initializer, `export
+   * mut`) must be caught even if the declaration is never subsequently
+   * visited by Pass 2 due to an earlier unrelated parse error aborting
+   * that statement's recovery.
+   *
+   * Does NOT check FunctionNestingDepth_ -- hoisting only ever walks
+   * top-level nodes (see hoistTopLevel's own doc comment), so a `export`
+   * written inside a function body never reaches this helper at all; that
+   * case is instead caught by visitVarDecl in Pass 2 (the only pass that
+   * actually descends into function bodies).
+   */
+  void hoistExportedConstant(const VarDeclExprAST &Var,
+                             const std::string &ModuleName);
+
   /// Dispatch to @p Node if non-null (no-op otherwise).
   void visitChild(ExprAST *Node) {
     if (Node)

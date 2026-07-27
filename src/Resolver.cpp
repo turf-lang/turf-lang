@@ -228,6 +228,60 @@ void Resolver::registerFunctionSignature(const FuncDefExprAST &Node,
   }
 }
 
+void Resolver::hoistExportedConstant(const VarDeclExprAST &Var,
+                                     const std::string &ModuleName) {
+  SourceLocation Loc = Var.getLoc();
+
+  if (!Var.isImmutable()) {
+    ExportMutNotSupportedError(Loc, Var.getName()).raise();
+    return;
+  }
+
+  // Duplicate check -- exported constants never go through
+  // SymTable_.declareVariable() (they have no scope/storage at all, see
+  // visitVarDecl), so this hoisting step is the only place a same-name
+  // collision within one file/module would ever be caught.
+  if (ModuleName.empty()) {
+    if (const auto *Prev = SymTable_.lookupCurrentFileConstant(Var.getName())) {
+      DuplicateDeclarationError(Loc, Var.getName(),
+                                toSourceLocation(Prev->DeclLoc))
+          .raise();
+      return;
+    }
+  } else if (const auto *Prev =
+                 SymTable_.findModuleConstant(ModuleName, Var.getName())) {
+    DuplicateDeclarationError(Loc, Var.getName(), toSourceLocation(Prev->DeclLoc))
+        .raise();
+    return;
+  }
+
+  const ExprAST *Init = Var.getInitializer();
+  ResolverConstantSymbol Sym;
+  Sym.Name = Var.getName();
+  Sym.SourceModule = ModuleName;
+  Sym.Type = Var.getTypePtr();
+  Sym.DeclLoc = {Loc.Line, Loc.Col};
+
+  if (const auto *Num = dynamic_cast<const NumberExprAST *>(Init)) {
+    if (Num->isInteger())
+      Sym.IntVal = Num->getIntVal();
+    else
+      Sym.DoubleVal = Num->getDoubleVal();
+  } else if (const auto *B = dynamic_cast<const BoolExprAST *>(Init)) {
+    Sym.BoolVal = B->getVal();
+  } else if (const auto *S = dynamic_cast<const StringExprAST *>(Init)) {
+    Sym.StringVal = S->getValue();
+  } else {
+    ExportNonConstantInitializerError(Loc, Var.getName()).raise();
+    return;
+  }
+
+  if (ModuleName.empty())
+    SymTable_.registerCurrentFileConstant(Sym);
+  else
+    SymTable_.registerModuleConstant(ModuleName, Sym);
+}
+
 // ─── Pass 1: Hoisting ─────────────────────────────────────────────────────────────────
 
 void Resolver::hoistTopLevel(
@@ -292,9 +346,21 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
   if (const auto *Import = dynamic_cast<const ModuleImportExprAST *>(Node)) {
     hoistModuleBody(Import->getBody(), Import->getModuleName());
     registerOnDemandImports(*Import, /*ContextLabel=*/"");
+    return;
   }
-  // All other top-level nodes (e.g. standalone expressions, variable decls)
-  // are not declarations and have nothing to hoist.
+
+  // Hoist `export immut` constants declared at the top level of the main
+  // file. A plain (non-exported) VarDeclExprAST can't reach hoistTopLevel
+  // at all -- ParsePrimaryBase() has no case for bare TOK_MUTABLE/
+  // TOK_IMMUTABLE, so main.cpp's top-level dispatch never produces one; the
+  // only way a VarDeclExprAST shows up here is via TOK_EXPORT.
+  if (const auto *Var = dynamic_cast<const VarDeclExprAST *>(Node)) {
+    if (Var->isExported())
+      hoistExportedConstant(*Var, /*ModuleName=*/"");
+    return;
+  }
+  // All other top-level nodes (e.g. standalone expressions) are not
+  // declarations and have nothing to hoist.
 }
 
 void Resolver::hoistModuleBody(const ExprAST *Body,
@@ -358,6 +424,10 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
       // written INSIDE module M's own file makes its requested symbols
       // bare-visible within M, not within whatever imported M.
       registerOnDemandImports(*Import, ModuleName);
+    } else if (const auto *Var =
+                   dynamic_cast<const VarDeclExprAST *>(Expr.get())) {
+      if (Var->isExported())
+        hoistExportedConstant(*Var, ModuleName);
     }
   }
 }
@@ -418,22 +488,44 @@ void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
     return true;
   };
 
+  // Registers Name as flat-CONSTANT-imported into ContextLabel IF
+  // SourceModule actually owns an `export immut` constant by that name.
+  // Kept as its own registry (FlatImportedConstants_) for the same reason
+  // types are separate from functions -- see that map's doc comment.
+  auto RegisterConstantIfPresent = [&](const std::string &Name,
+                                       SourceLocation Loc) -> bool {
+    if (!SymTable_.findModuleConstant(SourceModule, Name))
+      return false;
+    ResolverSymbolTable::FlatImportedSymbol Sym{SourceModule, {Loc.Line, Loc.Col}};
+    if (auto Prev = SymTable_.registerFlatConstantImport(ContextLabel, Name, Sym)) {
+      if (Prev->SourceModule != SourceModule) {
+        ImportSymbolCollisionError(Loc, Name, Prev->SourceModule, SourceModule,
+                                   toSourceLocation(Prev->ImportLoc))
+            .raise();
+      }
+    }
+    return true;
+  };
+
   if (Import.getMode() == ImportMode::Wildcard) {
-    // Every function AND every struct/enum type SourceModule declares
-    // becomes flat-visible.
+    // Every function, struct/enum type, AND `export immut` constant
+    // SourceModule declares becomes flat-visible.
     for (const auto &Name : SymTable_.getModuleFunctionNames(SourceModule))
       RegisterFunctionIfPresent(Name, Import.getLoc());
     for (const auto &Name : SymTable_.getModuleTypeNames(SourceModule))
       RegisterTypeIfOwned(Name, Import.getLoc());
+    for (const auto &Name : SymTable_.getModuleConstantNames(SourceModule))
+      RegisterConstantIfPresent(Name, Import.getLoc());
     return;
   }
 
   // Symbol / SymbolList: each requested name must resolve to SOMETHING
-  // SourceModule actually owns -- a function or a struct/enum.
+  // SourceModule actually owns -- a function, a struct/enum, or a constant.
   for (const auto &Ref : Import.getRequestedSymbols()) {
     bool FoundFn = RegisterFunctionIfPresent(Ref.Name, Ref.Loc);
     bool FoundType = RegisterTypeIfOwned(Ref.Name, Ref.Loc);
-    if (!FoundFn && !FoundType) {
+    bool FoundConst = RegisterConstantIfPresent(Ref.Name, Ref.Loc);
+    if (!FoundFn && !FoundType && !FoundConst) {
       RankedSuggestions Suggestions;
       auto Sugg = SuggestionIndex::suggestVisible(
           Ref.Name, SymTable_.getModuleFunctionNames(SourceModule));
@@ -451,6 +543,22 @@ void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
 // see the variable being declared, matching Turf's semantics), then add the
 // name to the current scope.
 void Resolver::visitVarDecl(VarDeclExprAST &Node) {
+  if (Node.isExported()) {
+    // `export` is only legal at the top level (FunctionNestingDepth_ is
+    // incremented only for the duration of a function body traversal --
+    // see visitFuncDef) -- grammatically this node parses in ANY statement
+    // position (see its doc comment in AST.h), so this is the ONLY place
+    // that rule is actually enforced.
+    if (FunctionNestingDepth_ > 0) {
+      ExportOutsideTopLevelError(Node.getLoc(), Node.getName()).raise();
+      return;
+    }
+    // Already fully registered by hoistExportedConstant() in Pass 1 -- an
+    // exported constant has no real scope storage (declareVariable() is
+    // never called for it), so there is nothing left for Pass 2 to do here.
+    return;
+  }
+
   // Validate the declared type name -- struct fields, function params, and
   // return types already go through validateNamedType() (see its doc
   // comment), but a plain variable declaration never did. Without this,
@@ -506,6 +614,24 @@ void Resolver::visitVariable(VariableExprAST &Node) {
     // (TypeChecker, Codegen) can read it directly without a second lookup.
     Node.ResolvedSymbol = Sym;
     return;
+  }
+
+  // Bare reference to an `export immut` constant -- checked AFTER ordinary
+  // scoped variables (a local shadowing an exported name is not an error,
+  // same shadowing rule as everywhere else) and BEFORE the ReferenceError
+  // fallback. Two sources, mirroring bare function-call resolution exactly:
+  // this file's own exported constants (self-reference, always visible, no
+  // import needed), then on-demand-imported ones (registerFlatConstantImport,
+  // via `import module::CONST;`).
+  if (const auto *Const = SymTable_.lookupCurrentFileConstant(Node.getName())) {
+    Node.ResolvedConstant = Const;
+    return;
+  }
+  if (const auto *Flat = SymTable_.lookupFlatConstantImport(currentModuleName(), Node.getName())) {
+    if (const auto *Const = SymTable_.findModuleConstant(Flat->SourceModule, Node.getName())) {
+      Node.ResolvedConstant = Const;
+      return;
+    }
   }
 
   // Build Damerau-Levenshtein suggestions from every name currently in scope.
@@ -1196,6 +1322,15 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
   }
 
   if (SymTable_.hasModule(LeftName)) {
+    // `module::CONST` -- a qualified reference to an `export immut`
+    // constant. Checked BEFORE the "functions aren't first-class" fallback
+    // just below, since a constant genuinely IS usable as a value (unlike a
+    // bare `module::function`).
+    if (const auto *Const = SymTable_.findModuleConstant(LeftName, RightName)) {
+      Node.ResolvedKind = ScopeAccessKind::ModuleConstantRef;
+      Node.ResolvedConstant = Const;
+      return;
+    }
     // A module name IS real, but referencing `module::function` without
     // calling it has no meaning in this language yet.
     TypeError(Node.getLoc(), "'" + LeftName + "::" + RightName +

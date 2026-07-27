@@ -1,0 +1,8 @@
+// Two `export immut` constants with the same name in the same file collide,
+// same as any other duplicate top-level declaration.
+export immut LIMIT: int = 5;
+export immut LIMIT: int = 10;
+
+fn main(): int {
+    return 0;
+}

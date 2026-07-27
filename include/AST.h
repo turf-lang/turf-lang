@@ -195,6 +195,18 @@ public:
   std::shared_ptr<VariableSymbol> ResolvedSymbol;
   const VariableSymbol *getResolvedSymbol() const { return ResolvedSymbol.get(); }
 
+  /// Populated by the Resolver instead of ResolvedSymbol when this bare name
+  /// refers to an `export immut` constant (self-reference in the declaring
+  /// file, or an on-demand-imported bare name) rather than a real scoped
+  /// variable -- exported constants have no alloca/storage (see
+  /// ResolverConstantSymbol's doc comment), so Codegen checks this field
+  /// FIRST and emits the literal value directly, never falling through to
+  /// the ordinary ResolvedSymbol/NamedValues lookup chain. Points into a
+  /// long-lived unordered_map owned by the Resolver's symbol table (never
+  /// erased during a compile), so the raw pointer stays valid throughout.
+  /// Not copied by clone() -- same reasoning as ResolvedSymbol.
+  const ResolverConstantSymbol *ResolvedConstant = nullptr;
+
   /// Populated by the Resolver when this node is the base of a module-qualified
   /// method call (e.g. `io` in `io.printline(...)`).  Empty for ordinary
   /// variables.  NOT copied by clone() — default std::string is "". ✓
@@ -558,6 +570,15 @@ class VarDeclExprAST : public ExprAST {
   SourceLocation Loc;
   bool IsImmutable;
   bool HasExplicitInit = true;
+  // Set only by `export immut NAME: TYPE = LITERAL;` (see ParseExportDecl()
+  // in Parser.cpp). A top-level-only construct enforced semantically by the
+  // Resolver (not the parser -- grammar-wise this node parses in any
+  // statement position, exactly like an ordinary VarDeclExprAST; Resolver
+  // raises ExportOutsideTopLevelError if FunctionNestingDepth_ > 0 when it
+  // visits one). A static property of the declaration itself (like
+  // IsImmutable), not resolve-time state, so unlike ResolvedSymbol it IS
+  // copied by clone().
+  bool IsExported = false;
 
 public:
   VarDeclExprAST(SourceLocation Loc, std::string Name, TurfTypePtr Type,
@@ -574,6 +595,8 @@ public:
   const ExprAST *getInitializer() const { return InitVal.get(); }
   bool isImmutable() const { return IsImmutable; }
   bool hasExplicitInit() const { return HasExplicitInit; }
+  bool isExported() const { return IsExported; }
+  void setExported(bool V) { IsExported = V; }
 
   /// Populated by the Resolver after a successful declareVariable().
   /// Nulled by clone() semantics (fresh node, default nullptr). Cloned ASTs must be re-resolved.
@@ -583,8 +606,10 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitVarDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<VarDeclExprAST>(Loc, Name, Type,
+    auto Cloned = std::make_unique<VarDeclExprAST>(Loc, Name, Type,
                                             CloneExprAST(InitVal.get()), IsImmutable, HasExplicitInit);
+    Cloned->IsExported = IsExported;
+    return Cloned;
     // Note: ResolvedSymbol intentionally NOT copied. ✓
   }
   // Kept private access for codegen
@@ -881,6 +906,7 @@ enum class ScopeAccessKind {
     ModuleFunctionRef, // io::printline (as a call target)
     ModuleTypeRef,     // list::List<int> (in type position)
     StaticMethodRef,   // StructName::method(...) (as a call target, no instance)
+    ModuleConstantRef, // math::PI -- a qualified reference to an `export immut` constant
 };
 
 // `Left::Right` -- the general namespace-resolution operator. Originally
@@ -916,6 +942,12 @@ public:
     // LSP driving the same Resolver can read this post-resolution to know
     // what kind of hover/go-to-definition target this is.
     ScopeAccessKind ResolvedKind = ScopeAccessKind::Unresolved;
+
+    /// Populated by the Resolver when ResolvedKind == ModuleConstantRef
+    /// (a qualified `module::CONST` value reference) -- see
+    /// VariableExprAST::ResolvedConstant's doc comment for the storage-
+    /// lifetime reasoning, identical here.
+    const ResolverConstantSymbol *ResolvedConstant = nullptr;
 
     ScopeAccessExprAST(SourceLocation Loc, std::string LeftName,
                        SourceLocation LeftLoc, std::string RightName,

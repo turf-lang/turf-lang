@@ -1,0 +1,8 @@
+// An array-typed `export immut` with no initializer has nothing to export
+// (ParseLetStatement() produces an ArrayDeclExprAST here, not a
+// VarDeclExprAST -- ParseExportDecl() rejects that shape explicitly).
+export immut BUF: int[5];
+
+fn main(): int {
+    return 0;
+}

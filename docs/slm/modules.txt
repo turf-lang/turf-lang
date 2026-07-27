@@ -138,6 +138,45 @@ CIRCULAR IMPORTS
 
 ---
 
+EXPORTING CONSTANTS: `export immut`
+
+  Functions, structs, and enums need no keyword to be exportable -- anything
+  declared at a file/module's top level is automatically visible per the
+  rules above. Plain variables are different: `mut`/`immut` only makes
+  sense INSIDE a function (it's destroyed when that scope ends), so there's
+  no existing syntax for a top-level one. `export` fills that gap:
+
+    export immut PI: double = 3.14159;
+    export immut MAX_USERS: int = 100;
+
+  Rules:
+  - TOP LEVEL ONLY. `export` inside a function body is a compile error.
+  - `immut` ONLY, for now -- `export mut PI: double = 3.14159;` is
+    rejected; a true mutable shared global is a separate, not-yet-built
+    feature. If you don't need to mutate it, `export immut` is what you
+    want.
+  - The initializer MUST be a literal (a number, string, or bool) --
+    `export immut X: int = someFunction();` is rejected. An exported
+    constant has no real storage at all; every reference to it is replaced
+    by the literal value directly, at compile time.
+  - Everything else works exactly like an ordinary variable: typo
+    detection, duplicate-name detection, and immutability (you can't
+    assign to it) all apply normally.
+
+  Visibility follows the SAME rules as functions:
+
+    // consts.tr
+    export immut VERSION: int = 7;
+
+    import consts;
+    consts::VERSION          // qualified access, works after any import form
+
+    import consts::VERSION;
+    VERSION                   // bare access, only after an on-demand import
+                               // (or self-reference from inside consts.tr itself)
+
+---
+
 `::` ALSO WORKS FOR ENUM VARIANTS (this predates the module use, and
 hasn't changed):
 

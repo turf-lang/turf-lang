@@ -1,0 +1,10 @@
+// `import module::CONST;` on-demand-imports a single exported constant into
+// this file's flat (bare) namespace -- mirrors import_symbol_single.tr's
+// function case exactly.
+import io;
+import lib_export_constants_module::VERSION;
+
+fn main(): int {
+    io::printline(VERSION);
+    return 0;
+}

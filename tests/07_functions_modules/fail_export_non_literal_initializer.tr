@@ -1,0 +1,12 @@
+// Exported constants have no real storage -- Codegen inlines the literal
+// value at every reference site -- so the initializer must be a plain
+// literal the compiler can fold right now, not a function call.
+fn helper(): int {
+    return 5;
+}
+
+export immut COMPUTED: int = helper();
+
+fn main(): int {
+    return 0;
+}

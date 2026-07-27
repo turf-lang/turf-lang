@@ -102,10 +102,17 @@ extractContextKeyword(const std::string &msg,
   // module.") -- the last one is deliberately included here even though it
   // could also be an enum-shaped mistake, since a bad `::` qualifier is
   // fundamentally an import/namespace question, not a struct/enum one.
+  // "export" is included here too: ExportOutsideTopLevelError/
+  // ExportMutNotSupportedError/ExportNonConstantInitializerError are all
+  // about the module-visibility feature `export immut` (docs/slm/
+  // modules.txt now documents it directly), even though their own message
+  // text doesn't happen to also contain "module"/"import".
   if (msg.find("module") != std::string::npos ||
       msg.find("Module") != std::string::npos ||
       msg.find("import") != std::string::npos ||
-      msg.find("Import") != std::string::npos)
+      msg.find("Import") != std::string::npos ||
+      msg.find("export") != std::string::npos ||
+      msg.find("Export") != std::string::npos)
     return "module";
 
   // Check for control-flow construct keywords in the error message.

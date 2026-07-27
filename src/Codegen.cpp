@@ -437,6 +437,10 @@ static const TurfType *getExprType(const ExprAST *E) {
     }
     if (Var->ResolvedSymbol && Var->ResolvedSymbol->Type)
       return Var->ResolvedSymbol->Type.get();
+    // An `export immut` constant (no ResolvedSymbol -- see its field's doc
+    // comment in AST.h).
+    if (Var->ResolvedConstant && Var->ResolvedConstant->Type)
+      return Var->ResolvedConstant->Type.get();
     auto It = NamedValues.find(Var->getName());
     if (It != NamedValues.end() && It->second.Type)
       return It->second.Type.get();
@@ -859,6 +863,11 @@ static const TurfType *getExprType(const ExprAST *E) {
   // it has no standalone type of its own, same as visitScopeAccess() in
   // TypeChecker.cpp.
   if (auto *EA = dynamic_cast<const ScopeAccessExprAST *>(E)) {
+    // module::CONST -- an `export immut` constant reference (Node.
+    // ResolvedConstant, set by Resolver::visitScopeAccess).
+    if (EA->ResolvedKind == ScopeAccessKind::ModuleConstantRef &&
+        EA->ResolvedConstant)
+      return EA->ResolvedConstant->Type.get();
     if (GlobalSymbolTable) {
       if (auto Registered = GlobalSymbolTable->LookupType(EA->getLeftName()))
         return Registered.get();
@@ -1496,6 +1505,23 @@ static llvm::Constant *GetDefaultValue(const TurfType *T) {
 }
 
 Value *VarDeclExprAST::codegen() {
+  // `export immut` constants have no real LLVM storage at all -- Resolver
+  // Pass 1 (Resolver::hoistExportedConstant) already extracted their literal
+  // value into the symbol table, and every reference site inlines it
+  // directly (see VariableExprAST/ScopeAccessExprAST's ResolvedConstant
+  // field + CodegenConstantValue()). This is a genuine no-op, not just an
+  // optimization: an exported constant is reached here from MULTIPLE blind-
+  // iteration call sites with no valid insertion point at all -- top-level
+  // main-file codegen (main.cpp's pre-pass, which also explicitly skips
+  // these) AND, for a module-declared export, ModuleImportExprAST::codegen()
+  // unconditionally codegenning every expression in the module's body.
+  // Running the ordinary alloca-based path below in either case corrupts
+  // whatever LLVM function happens to be getting built adjacent to it in
+  // iteration order (confirmed live: "Basic Block ... does not have
+  // terminator" in a totally unrelated function).
+  if (IsExported)
+    return nullptr;
+
   // Validation (void type, keywords, duplicates, etc.) is handled by the
   // Resolver and TypeChecker passes before Codegen.
 
@@ -1571,7 +1597,27 @@ Value *VarDeclExprAST::codegen() {
   return Init;
 }
 
+// Emit the literal value of an `export immut` constant directly at a
+// reference site -- exported constants have no LLVM storage of their own
+// (see ResolverConstantSymbol's doc comment in ResolverSymbolTable.h), so
+// every use (bare or module-qualified) inlines this instead of loading from
+// an alloca/global. Mirrors NumberExprAST/BoolExprAST/StringExprAST's own
+// codegen() bodies exactly -- this is just those three dispatched by the
+// constant's stored Type instead of by AST node class.
+static Value *CodegenConstantValue(const ResolverConstantSymbol &C) {
+  if (C.Type && C.Type->isDouble())
+    return ConstantFP::get(*TheContext, APFloat(C.DoubleVal));
+  if (C.Type && C.Type->isBool())
+    return ConstantInt::get(Type::getInt1Ty(*TheContext), C.BoolVal ? 1 : 0);
+  if (C.Type && C.Type->isString())
+    return Builder->CreateGlobalString(C.StringVal, "str");
+  return ConstantInt::get(*TheContext, APInt(64, C.IntVal, true));
+}
+
 Value *VariableExprAST::codegen() {
+  if (ResolvedConstant)
+    return CodegenConstantValue(*ResolvedConstant);
+
   // Use the mangled name resolved by Resolver/TypeChecker (Issue #5)
   Symbol *Sym = nullptr;
   if (GlobalSymbolTable && ResolvedSymbol) {
@@ -1604,6 +1650,15 @@ Value *VariableExprAST::codegen() {
 }
 
 Value *VariableExprAST::codegenLValue() {
+  if (ResolvedConstant) {
+    // No real storage exists (see CodegenConstantValue's doc comment) --
+    // return nullptr so callers get the SAME "not addressable" handling as
+    // any other non-lvalue expression (AddressOfExprAST::codegen() already
+    // turns a null LValue into a clean diagnostic; ordinary assignment to a
+    // constant is caught earlier, at TypeChecker time, by
+    // ImmutableAssignmentError).
+    return nullptr;
+  }
   Symbol *Sym = nullptr;
   if (GlobalSymbolTable && ResolvedSymbol)
     Sym = GlobalSymbolTable->LookupSymbol(ResolvedSymbol->Name);
@@ -3813,6 +3868,16 @@ Value *EnumDeclExprAST::codegen() {
 // (which never calls Callee->codegen() at all -- a bare/qualified function
 // name has no "value" to compute, only a lookup).
 Value *ScopeAccessExprAST::codegen() {
+  // module::CONST -- an `export immut` constant, e.g. `math::PI`. Checked
+  // first since every other branch below assumes LeftName names an enum.
+  if (ResolvedKind == ScopeAccessKind::ModuleConstantRef) {
+    if (!ResolvedConstant) {
+      LogErrorAt(Loc, "Internal error: exported constant not resolved in codegen");
+      return nullptr;
+    }
+    return CodegenConstantValue(*ResolvedConstant);
+  }
+
   auto EnumTy = GlobalSymbolTable->LookupType(LeftName);
   auto *ET = dynamic_cast<const TurfEnumType *>(EnumTy.get());
   if (!ET) {
