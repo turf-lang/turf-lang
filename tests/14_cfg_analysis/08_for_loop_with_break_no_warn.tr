@@ -1,0 +1,16 @@
+// Regression test (Issue #185, CFG Phase 1): a `for` loop with a `break`
+// inside must NOT trigger an InfiniteLoopWarning. Even though the loop
+// iterates, the break inside satisfies the Break-terminator check.
+// Also tests that break inside for-loop exits correctly at runtime.
+
+fn main(): int {
+    mut found: int = 0;
+    for i in 0..100 step i += 1 {
+        if i == 7 {
+            found = i;
+            break;
+        }
+    }
+    assert(found == 7, "Break exited at i=7");
+    return 0;
+}

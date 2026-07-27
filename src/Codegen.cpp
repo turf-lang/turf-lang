@@ -2962,6 +2962,18 @@ Value *FuncDefExprAST::codegen() {
     CFG *CfgPtr = GlobalCFGs.back().get();
     CfgPtr->reportFlowDiagnostics();
 
+    // CFG Phase 1 (Issue #185): Cyclomatic complexity check.
+    // M = E - N + 2P; threshold 15. Warning only — does not stop compilation.
+    int M = CfgPtr->calculateCyclomaticComplexity();
+    if (M > 15)
+      CyclomaticComplexityWarning(Loc, Name, M).emit();
+
+    // CFG Phase 1 (Issue #185): Infinite loop detection.
+    // A back-edge cycle with no Break/Return terminator AND no outside-cycle
+    // successor means the loop can never exit. Warning only.
+    if (CfgPtr->hasUnbreakableLoop())
+      InfiniteLoopWarning(Loc, Name).emit();
+
     // Run definite-assignment analysis (parameters are considered assigned)
     DefiniteAssignmentPass DAP;
     DAP.runOnCFG(*CfgPtr, ParamIDs);

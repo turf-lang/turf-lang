@@ -131,6 +131,15 @@ public:
   std::vector<TurfBasicBlock *>
   getDeadBranches() const; // Get dead conditional branches
 
+  // CFG Phase 1 analysis passes (Issue #185)
+  // M = E - N + 2P (P=1 per function). Values above 15 indicate functions
+  // that are hard to read, test, and maintain.
+  int calculateCyclomaticComplexity() const;
+  // True when the CFG contains a back-edge cycle where no block in the cycle
+  // has a Break/Return terminator AND no block has a successor outside the
+  // cycle — i.e. the loop cannot exit by any path.
+  bool hasUnbreakableLoop() const;
+
   // Diagnostics
   void reportFlowDiagnostics() const;
 
