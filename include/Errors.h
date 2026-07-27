@@ -795,6 +795,49 @@ public:
   }
 };
 
+// CFG Phase 1 (Issue #185): Cyclomatic complexity exceeds threshold (M > 15).
+// M = E - N + 2P, computed over the function's CFG. High complexity correlates
+// with functions that are difficult to test, review, and maintain.
+class CyclomaticComplexityWarning : public TurfWarning {
+public:
+  CyclomaticComplexityWarning(SourceLocation Loc, const std::string &FuncName,
+                              int M)
+      : TurfWarning(
+            Loc,
+            Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                Colors::BRIGHT_YELLOW + "Function '" + Colors::CYAN + FuncName +
+                Colors::BRIGHT_YELLOW + "' has cyclomatic complexity " +
+                Colors::CYAN + std::to_string(M) + Colors::BRIGHT_YELLOW +
+                " (threshold: 15). Consider breaking it into smaller functions." +
+                Colors::RESET,
+            "High cyclomatic complexity makes code harder to test and maintain. "
+            "Try splitting this function into smaller, focused helpers.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
+// CFG Phase 1 (Issue #185): A loop whose CFG cycle has no reachable exit.
+// Triggered when DFS finds a back-edge where no block in the cycle has a
+// Break/Return terminator AND no cycle block has a successor outside the cycle.
+// The second condition is what separates while(true) from while(cond): a
+// while(cond) loop's condition block always has an edge to the loop-exit block
+// (outside the cycle), so it never triggers this warning.
+class InfiniteLoopWarning : public TurfWarning {
+public:
+  InfiniteLoopWarning(SourceLocation Loc, const std::string &FuncName)
+      : TurfWarning(
+            Loc,
+            Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                Colors::BRIGHT_YELLOW + "Function '" + Colors::CYAN + FuncName +
+                Colors::BRIGHT_YELLOW +
+                "' contains a loop with no exit path. "
+                "This will run forever." + Colors::RESET,
+            "Add a 'break', 'return', or a condition that can become false "
+            "to allow the loop to exit.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
 /**
  * @brief A `for` loop's induction variable is never modified by its `step`
  *        clause or its body.

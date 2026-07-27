@@ -1,0 +1,17 @@
+// Regression test (Issue #185, CFG Phase 1): `while true` with a body that
+// has no break, continue, or return must trigger an InfiniteLoopWarning but
+// still compile successfully (TurfWarning never interrupts compilation).
+//
+// This test intentionally never reaches the while loop at runtime — returning
+// early via `if true { return 0; }` — so the test suite does not actually hang.
+
+fn main(): int {
+    mut x: int = 0;
+    if true {
+        return 0;
+    }
+    while true {
+        x = x + 1;
+    }
+    return 0;
+}

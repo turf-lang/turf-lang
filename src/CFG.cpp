@@ -19,8 +19,11 @@
 #include "AST.h"
 #include "Errors.h"
 #include <algorithm>
+#include <functional>
 #include <iostream>
 #include <queue>
+#include <set>
+#include <unordered_map>
 
 // Global CFG storage
 std::vector<std::unique_ptr<CFG>> GlobalCFGs;
@@ -114,6 +117,129 @@ std::vector<TurfBasicBlock *> CFG::getDeadBranches() const {
   }
 
   return Dead;
+}
+
+/**
+ * @brief Computes the cyclomatic complexity of this function's CFG.
+ *
+ * Uses the standard formula M = E - N + 2P where:
+ *   E = total directed edges (sum of each block's successor count)
+ *   N = total nodes (number of basic blocks)
+ *   P = 1 (a single-function CFG is one connected component)
+ *
+ * Values above 15 are considered too complex for comfortable reading,
+ * testing, and maintenance. The CFG includes the virtual exit block and its
+ * incoming edges (from every return path), so the count is faithful to the
+ * actual control-flow structure — no special-casing of the exit block needed.
+ */
+int CFG::calculateCyclomaticComplexity() const {
+  int E = 0, N = static_cast<int>(Blocks.size());
+  for (const auto &Block : Blocks)
+    E += static_cast<int>(Block->getSuccessors().size());
+  return E - N + 2;
+}
+
+/**
+ * @brief Returns true when the CFG contains a loop with no reachable exit.
+ *
+ * Uses Tarjan's SCC algorithm on the reachable sub-graph. A Strongly
+ * Connected Component with ≥ 2 blocks (or one block with a self-edge) that
+ * has NO outgoing edge to any block outside the SCC is an unbreakable loop.
+ *
+ * This is strictly more correct than path-based back-edge detection because:
+ *
+ * 1. Nested break: `while true { while true { break; } }` — the inner break
+ *    exits to inner.end, but inner.end → outer.cond keeps everything in the
+ *    same SCC. The SCC has no outside edge → correctly warns.
+ *
+ * 2. Branching inside while true: `while true { if true { continue; } }` —
+ *    path-based detection excludes if.end from the cycle when the back-edge
+ *    is found through if.then, creating a spurious "outside successor". In
+ *    the SCC view both if.then and if.end loop back into outer.cond, so they
+ *    all belong to the same SCC → correctly warns.
+ *
+ * 3. Normal while(cond): the condition block always has an edge to while.end
+ *    (a different SCC), so the SCC containing the loop IS NOT closed and the
+ *    check correctly does not warn.
+ *
+ * Only reachable blocks are considered; unreachable loops cannot execute.
+ */
+bool CFG::hasUnbreakableLoop() const {
+  if (!EntryBlock)
+    return false;
+
+  int Counter = 0;
+  std::unordered_map<TurfBasicBlock *, int> DiscIdx; // Tarjan discovery index
+  std::unordered_map<TurfBasicBlock *, int> LowLink;  // lowest reachable index
+  std::unordered_map<TurfBasicBlock *, bool> OnStack;
+  std::vector<TurfBasicBlock *> Stack;
+  bool Found = false; // set to true as soon as an unbreakable SCC is found
+
+  // Iterative early-exit: once Found is true, all recursive calls return
+  // immediately without inspecting further blocks.
+  std::function<void(TurfBasicBlock *)> Tarjan = [&](TurfBasicBlock *V) {
+    if (Found)
+      return;
+    DiscIdx[V] = LowLink[V] = Counter++;
+    Stack.push_back(V);
+    OnStack[V] = true;
+
+    for (TurfBasicBlock *W : V->getSuccessors()) {
+      if (Found || !W || !W->isReachable())
+        continue;
+      if (!DiscIdx.count(W)) {
+        Tarjan(W);
+        LowLink[V] = std::min(LowLink[V], LowLink[W]);
+      } else if (OnStack[W]) {
+        LowLink[V] = std::min(LowLink[V], DiscIdx[W]);
+      }
+    }
+
+    // V is the root of an SCC when its low-link equals its discovery index.
+    if (LowLink[V] == DiscIdx[V]) {
+      std::set<TurfBasicBlock *> SCC;
+      TurfBasicBlock *W;
+      do {
+        W = Stack.back();
+        Stack.pop_back();
+        OnStack[W] = false;
+        SCC.insert(W);
+      } while (W != V);
+
+      // A single-block SCC with no self-loop is just a straight-line node —
+      // not a loop at all. Skip it.
+      if (SCC.size() == 1) {
+        TurfBasicBlock *Sole = *SCC.begin();
+        bool SelfLoop = false;
+        for (TurfBasicBlock *S : Sole->getSuccessors())
+          if (S == Sole) {
+            SelfLoop = true;
+            break;
+          }
+        if (!SelfLoop)
+          return;
+      }
+
+      // Check whether the SCC has any exit edge to a block outside itself.
+      // If it does, the loop has a reachable exit path and is not unbreakable.
+      for (TurfBasicBlock *BB : SCC) {
+        for (TurfBasicBlock *S : BB->getSuccessors()) {
+          if (S && S->isReachable() && !SCC.count(S))
+            return; // exit edge found — loop can terminate
+        }
+      }
+      Found = true; // closed SCC — loop can never exit
+    }
+  };
+
+  for (const auto &BlockPtr : Blocks) {
+    TurfBasicBlock *BB = BlockPtr.get();
+    if (BB->isReachable() && !DiscIdx.count(BB))
+      Tarjan(BB);
+    if (Found)
+      return true;
+  }
+  return false;
 }
 
 void CFG::reportFlowDiagnostics() const {
@@ -511,8 +637,27 @@ void CFGBuilder::visitWhile(ExprAST *E) {
   if (While->getCond())
     CondBB->addStatement(const_cast<ExprAST *>(While->getCond()));
   CurrentCFG->addEdge(CondBB, BodyBB);
-  CurrentCFG->addEdge(CondBB, ExitBB);
-  CondBB->setTerminator(TerminatorKind::Branch, While->getLoc());
+
+  // Detect `while true`: a literal BoolExprAST(true) condition means the
+  // false-exit branch from the cond block can never be taken at runtime.
+  // Omitting the cond→exit edge makes the cycle structurally closed — no
+  // outside-cycle successor — which is exactly the signal hasUnbreakableLoop()
+  // needs to distinguish `while true` from `while (cond)`. For normal
+  // while(cond) loops the cond→exit edge remains and hasUnbreakableLoop()
+  // condition (2) silences them.
+  bool IsLiteralTrue = false;
+  if (const auto *BoolCond = dynamic_cast<const BoolExprAST *>(While->getCond()))
+    IsLiteralTrue = BoolCond->getVal();
+
+  if (!IsLiteralTrue) {
+    CurrentCFG->addEdge(CondBB, ExitBB);
+    CondBB->setTerminator(TerminatorKind::Branch, While->getLoc());
+  } else {
+    // while(true): cond only reaches the body; there is no reachable exit
+    // from the condition itself. Mark Unconditional so downstream analyses
+    // don't treat this like a normal conditional branch.
+    CondBB->setTerminator(TerminatorKind::Unconditional, While->getLoc());
+  }
 
   // Save loop targets for break/continue
   TurfBasicBlock *SavedBreak = LoopBreakTarget;
@@ -534,7 +679,10 @@ void CFGBuilder::visitWhile(ExprAST *E) {
   LoopBreakTarget = SavedBreak;
   LoopContinueTarget = SavedContinue;
 
-  // Continue from exit
+  // Continue from exit (while.end is unreachable for while(true) when there
+  // is no break/return, but we still set the insert point so that any code
+  // textually following the loop is modelled correctly in the CFG — it will
+  // simply end up in an unreachable block, which is fine and correct).
   setInsertPoint(ExitBB);
 }
 

@@ -1,0 +1,40 @@
+CFG Phase 1: Cyclomatic Complexity & Infinite Loop Detection
+
+1. Changes Made:
+- Declared `calculateCyclomaticComplexity()` and `hasUnbreakableLoop()` analysis methods on `CFG` class in `include/CFG.h`.
+- Added `CyclomaticComplexityWarning` and `InfiniteLoopWarning` warning classes in `include/Errors.h` (inheriting from `TurfWarning` under `SLM::ErrorCategory::CONTROL_FLOW`).
+- Implemented `CFG::calculateCyclomaticComplexity()` in `src/CFG.cpp` using the formula M = E - N + 2P (P=1 per function CFG).
+- Implemented `CFG::hasUnbreakableLoop()` in `src/CFG.cpp` using Tarjan's Strongly Connected Components (SCC) algorithm to detect closed cycles with no outgoing edges to reachable blocks outside the SCC.
+- Updated `CFGBuilder::visitWhile()` in `src/CFG.cpp` to omit the condition-to-exit edge for literal `while true` loops, producing closed CFG cycles.
+- Wired up both analysis passes in `Codegen.cpp` immediately following `CFG::reportFlowDiagnostics()`.
+- Created regression test suite in `tests/14_cfg_analysis/` (9 test files) verifying cyclomatic complexity thresholds, while(true) warnings, break/return/for exit scenarios, and edge cases.
+
+2. Why the Change was Made:
+- Turf previously lacked non-interrupting static analysis warnings to inform developers about unmaintainable or visually complex code structures.
+- Functions with high cyclomatic complexity (M > 15) are difficult to test, review, and maintain.
+- Infinite loops created by `while true` statements without exit paths (`break` / `return`) cause execution to hang without warning the developer during compilation.
+
+3. How it Helps/Changed:
+- Functions exceeding M > 15 emit a non-interrupting `CyclomaticComplexityWarning` detailing the function name and actual complexity score.
+- Infinite loops emit a non-interrupting `InfiniteLoopWarning` detailing the function containing the unbreakable cycle.
+- Both diagnostics are non-interrupting warnings (`TurfWarning`), meaning compilation continues successfully without abortion.
+- Loops containing `break`, `return`, or exit conditions (such as standard `while(cond)` or `for` loops) are correctly recognized as breakable and do not emit false warnings.
+
+4. Example Diagnostic Output Format:
+── warning at line 8, col 1
+
+  Warning: Function 'complex' has cyclomatic complexity 16 (threshold: 15). Consider breaking it into smaller functions.
+
+  Hint: High cyclomatic complexity makes code harder to test and maintain. Try splitting this function into smaller, focused helpers.
+
+  8 │ fn complex(x: int): int {
+    │ ^ Here!
+
+── warning at line 12, col 5
+
+  Warning: Function 'an_infinite_body' contains a loop with no exit path. This will run forever.
+
+  Hint: Add a 'break', 'return', or a condition that can become false to allow the loop to exit.
+
+  12 │     while true {
+     │     ^ Here!
