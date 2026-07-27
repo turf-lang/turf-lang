@@ -1,0 +1,29 @@
+// Regression test: `.` is instance-member-access only -- calling a static
+// method (declared `fn StructName::method(...)`, no `self` at all) via `.`
+// on the BARE STRUCT TYPE NAME (no instance) must be rejected. Only
+// `StructName::method(...)` is valid.
+//
+// Before this fix, `.` silently worked here too: Resolver::visitMethodCall()
+// had a separate legacy path (VariableExprAST::IsStructName) originally
+// added only to turn a compiler CRASH (calling a method via a bare struct
+// type name used to `report_fatal_error`) into a clean arity error -- never
+// intended to make `.` an actual working way to invoke a method. But once
+// true static methods existed (this session's own feature, `fn
+// StructName::method(...)`, arity with no `self`), that old path's arity
+// comparison (`ExpectedArity = IsStaticMethod ? ArgCount : ArgCount + 1`)
+// accidentally matched them perfectly -- `MathUtil.square(5)` compiled and
+// ran, computing the correct answer, identically to `MathUtil::square(5)`.
+// Found by direct user request to actually verify the '.' vs '::' split is
+// really enforced, not just assumed from the tests that happened to use
+// '::' already.
+
+struct MathUtil {}
+
+fn MathUtil::square(x: int): int {
+    return x * x;
+}
+
+fn main(): int {
+    immut y: int = MathUtil.square(5);
+    return 0;
+}

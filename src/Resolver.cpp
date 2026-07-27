@@ -1062,130 +1062,79 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
 }
 
 void Resolver::visitMethodCall(MethodCallExprAST &Node) {
-  // If the base is a plain identifier that names a known imported module
-  // (e.g. `io` in `io.printline(...)`), skip variable-resolution on it.
-  // Module names live in the module registry, not the variable scope stack,
-  // so calling visitVariable("io") would always produce a spurious
-  // ReferenceError.  The module import visitor already populated the Tier-2
-  // registry; nothing more needs to be done for the base in this case.
-  //
-  // We do, however, mark the base node with its resolved module name so
-  // that the ASTPrinter can show a proper badge (Issue #5 completeness).
-  //
+  // Resolve argument expressions FIRST (mirrors visitFuncCall's own
+  // ordering) so a genuinely broken argument (e.g. an undeclared variable)
+  // is still reported even when the base itself turns out to be rejected
+  // below -- errors accumulate across the whole Resolver pass rather than
+  // stopping at the first one, so there's no reason to skip resolving the
+  // arguments just because the call as a whole won't be allowed to proceed.
+  for (const auto &Arg : Node.getArgs())
+    visitChild(Arg.get());
+
   // IMPORTANT — variable shadowing: a locally-declared variable of the same
-  // spelling as a module ALWAYS takes priority over the module, exactly like
+  // spelling as a module or struct type ALWAYS takes priority, exactly like
   // ordinary lexical scoping everywhere else in the language. This is not a
-  // hypothetical: `io` is auto-imported into EVERY Turf program via
+  // hypothetical: `io` used to be auto-imported into EVERY Turf program via
   // lib/std/prelude.tr, so a variable literally named `io` used to always be
   // misread as the io module — `mut io: Thing = ...; io.show();` raised
   // "Unknown function 'io.show'" instead of calling Thing's struct method,
   // because the module check ran before any check for an actual declared
-  // variable of that name. ExistingVar is looked up ONCE here and reused
-  // below (in the arity-check gate) so both places agree on the same
-  // variable-wins decision instead of independently re-deriving it.
+  // variable of that name.
   auto *BaseVar = dynamic_cast<VariableExprAST *>(
       const_cast<ExprAST *>(Node.getBase()));
-  std::shared_ptr<VariableSymbol> ExistingVar;
-  bool BaseIsModule = false;
   if (BaseVar) {
-    ExistingVar = SymTable_.lookupVariable(BaseVar->getName());
-    BaseIsModule = !ExistingVar && SymTable_.hasModule(BaseVar->getName());
-
+    auto ExistingVar = SymTable_.lookupVariable(BaseVar->getName());
     if (ExistingVar) {
       // Base is a declared variable — resolve it directly (equivalent to
       // what visitVariable() would do, without re-running its lookup).
       BaseVar->ResolvedSymbol = ExistingVar;
-    } else if (BaseIsModule) {
-      // Base is a module qualifier — annotate it and skip variable resolution.
-      BaseVar->ResolvedModuleName = BaseVar->getName();
-    } else if (SymTable_.isKnownStruct(BaseVar->getName())) {
-      // Base is a struct type name (static method call)
-      BaseVar->IsStructName = true;
-    } else {
-      // Base is neither a declared variable, a module, nor a struct name —
-      // resolve normally so visitVariable() raises the proper ReferenceError.
-      visitChild(Node.getBase());
-    }
-  } else {
-    // Base is a complex expression — resolve normally.
-    visitChild(Node.getBase());
-  }
-  // Always resolve argument expressions regardless.
-  for (const auto &Arg : Node.getArgs())
-    visitChild(Arg.get());
-
-  // ── Module method arity check ─────────────────────────────────────────────
-  // If the base is a known module, look up the method in the module registry
-  // and verify that at least one overload accepts the supplied argument count.
-  // This mirrors the arity check in visitFuncCall — all done from symbol table
-  // data, no hardcoded maps.
-  //
-  // Uses BaseIsModule (computed above, variable-priority-aware) rather than
-  // re-checking SymTable_.hasModule() directly — otherwise a variable that
-  // shadows a module name would correctly resolve as a variable above, but
-  // still incorrectly trigger a module-only arity check down here.
-  if (BaseIsModule) {
-    const std::string &ModuleName = BaseVar->getName();
-    const std::string &MethodName = Node.getMethod();
-    const int ArgCount = static_cast<int>(Node.getArgs().size());
-
-    // Look up all overloads of this method in the module.
-    auto ModuleMatches = SymTable_.findInModules(MethodName);
-    // Filter to those belonging to this specific module.
-    std::vector<const ResolverFunctionSymbol *> MethodOverloads;
-    for (const auto &Match : ModuleMatches) {
-      if (Match.ModuleName == ModuleName)
-        MethodOverloads.push_back(Match.Symbol);
-    }
-
-    if (!MethodOverloads.empty()) {
-      // Method name exists in this module — check arity.
-      bool AnyArityMatch = false;
-      std::vector<std::string> AllSigs;
-      std::vector<const ResolverFunctionSymbol *> ArityMatches;
-      for (const auto *Sym : MethodOverloads) {
-        AllSigs.push_back(ModuleName + "." + Sym->signature());
-        if (Sym->arity() == ArgCount) {
-          AnyArityMatch = true;
-          ArityMatches.push_back(Sym);
-        }
-      }
-      if (!AnyArityMatch) {
-        auto Err = WrongArityError(Node.getLoc(),
-                        ModuleName + "." + MethodName,
-                        ArgCount, AllSigs);
-        for (const auto *Cand : MethodOverloads)
-          Err.withRelated(toSourceLocation(Cand->DeclLoc), "candidate");
-        Err.raise();
-        return;
-      }
-
-      // ── Set ResolvedCallTarget for the unambiguous case ──────────────────
-      // When exactly one overload matches the arity, set it directly so that
-      // Codegen can read mangledName() in the pre-pass before TypeChecker runs.
-      // TypeChecker handles the multi-overload narrowing via type compatibility.
-      if (ArityMatches.size() == 1) {
-        Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*ArityMatches[0]);
-      }
-    } else {
-      // Method does not exist in this module.
-      RankedSuggestions Suggestions;
-      std::vector<std::string> ModuleNames = SuggestionIndex::suggestVisible(
-          MethodName, SymTable_.getModuleFunctionNames(ModuleName));
-      
-      for (const auto &SuggestedName : ModuleNames) {
-        auto Matches = SymTable_.findInModules(SuggestedName);
-        for (const auto &Match : Matches) {
-          if (Match.ModuleName == ModuleName) {
-            Suggestions.Module[ModuleName].push_back(Match.Symbol->signature());
-          }
-        }
-      }
-      
-      UnknownFunctionError(Node.getLoc(), ModuleName + "." + MethodName, Suggestions).raise();
       return;
     }
+    if (SymTable_.hasModule(BaseVar->getName())) {
+      // Base is a module qualifier used with '.' -- not allowed. '.' is
+      // instance-member-access only; a module-qualified call must use
+      // '::' (io::printline(...), not io.printline(...)). This used to
+      // silently succeed via VariableExprAST::ResolvedModuleName, a legacy
+      // resolution path threaded all the way through TypeChecker/Codegen
+      // that made '.' a working, undocumented alias for '::' here --
+      // confirmed live before this check existed. That field (and its
+      // downstream TypeChecker.cpp/Codegen.cpp readers) are left in place
+      // purely as defense-in-depth; they can no longer be reached in a
+      // real compile now that this branch always raises and returns
+      // instead of ever setting it.
+      DotOperatorOnNonInstanceError(Node.getLoc(), BaseVar->getName(),
+                                    "module", Node.getMethod())
+          .raise();
+      return;
+    }
+    if (SymTable_.isKnownStruct(BaseVar->getName())) {
+      // Base is a bare struct TYPE name used with '.' -- same rule as the
+      // module case just above: only '::' can invoke a static method
+      // (StructName::method(...)), never '.'. This used to silently
+      // succeed for any method whose arity happened to match with no
+      // `self` (i.e. any `::`-declared static method, or coincidentally
+      // any '.'-declared instance method called with one fewer argument
+      // than it actually needs) via VariableExprAST::IsStructName, a
+      // legacy path originally added only to turn a compiler CRASH into a
+      // clean arity error -- never intended to make '.' a real, working
+      // way to call a static method, but it accidentally became exactly
+      // that once true static methods (fn StructName::method(...), no
+      // self at all) were introduced. Confirmed live before this check
+      // existed. IsStructName is left in place (TypeChecker.cpp/
+      // Codegen.cpp still read it) as defense-in-depth only, same
+      // rationale as ResolvedModuleName above.
+      DotOperatorOnNonInstanceError(Node.getLoc(), BaseVar->getName(),
+                                    "struct type", Node.getMethod())
+          .raise();
+      return;
+    }
+    // Base is neither a declared variable, a module, nor a struct name —
+    // resolve normally so visitVariable() raises the proper ReferenceError.
+    visitChild(Node.getBase());
+    return;
   }
+  // Base is a complex expression — resolve normally.
+  visitChild(Node.getBase());
 }
 
 void Resolver::visitFieldAccess(FieldAccessExprAST &Node) {

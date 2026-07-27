@@ -1162,6 +1162,37 @@ public:
   }
 };
 
+// Raised when '.' -- reserved for instance-member access -- is used on a
+// base that names a MODULE (`io.printline(...)`) or a STRUCT TYPE used
+// bare, i.e. a static-style call with no instance (`StructName.method(...)`)
+// -- instead of the required '::' (`io::printline(...)` /
+// `StructName::method(...)`).
+//
+// Before this check existed, both cases had their own separate, fully
+// functional legacy resolution paths (VariableExprAST::ResolvedModuleName
+// for the module case, ::IsStructName for the struct case) that silently
+// let '.' work as an undocumented ALIAS for '::' -- directly contradicting
+// this language's stated, otherwise-consistent design ("'.' is instance-
+// member-only, '::' is the general namespace-resolution operator", see
+// docs/architecture/modules_and_scope_resolution.md section 1.1).
+// Confirmed live: `io.printline(...)` and a `::`-declared static method
+// called as `StructName.method(...)` both compiled and ran successfully
+// before this fix, identically to their correct `::` counterparts.
+class DotOperatorOnNonInstanceError : public TurfError {
+public:
+  DotOperatorOnNonInstanceError(SourceLocation Loc, const std::string &Name,
+                                const std::string &Kind,
+                                const std::string &MethodName)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'.' can't be used here -- '" +
+                           Colors::CYAN + Name + Colors::BRIGHT_RED +
+                           "' is a " + Kind + ", not an instance." +
+                           Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    Hint_ = "'.' is for instance-member access only. Use '" + Name + "::" +
+            MethodName + "(...)' instead.";
+  }
+};
+
 // Phase 2: Module-scoped method lookup error
 // Raised when a user types e.g. io.pritn() — wrong function name in a known
 // module. Suggestions are sourced from that module's function registry.

@@ -20,7 +20,9 @@ Two, and only two, kinds of qualified access exist, and they are never interchan
 | `.` | Access something on an **instance you hold** | `p.x`, `p.sum()` (struct field/method) |
 | `::` | Access something **by name through a namespace**, no instance involved | `Color::Red` (enum variant), `io::printline(...)` (module function), `list::List<int>` (module type) |
 
-Writing `io.printline(...)` is a **syntax error**, not a semantic one — the parser doesn't get far enough to say "io isn't an instance"; `io` followed by `.printline` simply isn't valid postfix syntax for a bare module name at all (dot-postfix parsing expects a value to dereference, and a module name never produces one — see 2.5).
+Writing `io.printline(...)` is rejected — but as a **semantic** error caught by the Resolver (`Resolver::visitMethodCall()`, 2.8.2), not a syntax error: `.` after any identifier parses perfectly fine as an ordinary method-call attempt (the parser has no way to know `io` isn't a variable at parse time), so `io.printline(...)` and `StructName.method(...)` (a bare struct TYPE name, no instance, attempting to reach a static method) both reach Pass 2 as normal-looking method calls. `visitMethodCall()` checks whether the base actually names a known module or struct TYPE (as opposed to a real declared variable) and rejects both immediately with `DotOperatorOnNonInstanceError`, pointing at the `::` form instead.
+
+This is enforcement, not just documentation of intent — until this was checked, BOTH of these cases had their own separate, fully-working legacy resolution paths (`VariableExprAST::ResolvedModuleName` for the module case, `::IsStructName` for the struct case) that silently let `.` compile and run identically to `::`, discovered only when directly tested rather than assumed from the fact that every test in this suite happened to already use `::`. See 2.8.2.
 
 ### 1.2 Import forms
 
@@ -119,6 +121,7 @@ A **diamond** (two modules both importing the same third module) is not a cycle 
 | `UnknownFunctionError` | A bare call that isn't a local declaration, self-reference, or on-demand import |
 | `ModuleMethodNotFoundError` | `Module::func(...)` where `Module` is real but has no function named `func` |
 | `StructMethodNotFoundError` | `StructName::method(...)` where `StructName` is real but has no method (static or instance) by that name |
+| `DotOperatorOnNonInstanceError` | `.` used with a base that names a module (`io.printline(...)`) or a bare struct type (`StructName.method(...)`, no instance) instead of `::` |
 | `UnqualifiedTypeNotVisibleError` | A real struct/enum type referenced bare, but not visible from this file/module (2.7.1) |
 | `UnknownTypeError` | A type name (bare or generic base name) that doesn't exist as a struct/enum/primitive anywhere |
 | `TypeError` (several shapes) | Calling an enum variant as a function; using a module or static-method reference as a bare value; a module name nonsensically qualified by another module name (`Module::Module2::func(...)`) |
@@ -307,6 +310,22 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
 **Codegen needs zero changes.** `FuncCallExprAST::codegen()` for a `ScopeAccessExprAST` callee (2.10) never distinguishes `ModuleFunctionRef` from `StaticMethodRef` at all — it evaluates `Args` exactly as written (no implicit prepending) and calls whatever `ResolvedCallTarget->mangledName()` resolves to. Static methods "just work" once the Resolver sets `ResolvedCallTarget` correctly, the same way `ModuleFunctionRef` already did.
 
 **A 3-part chain's leading `ModuleQualifier` is validated, not ignored** — `Module::StructName::method(...)` re-validates `ModuleQualifier` via `validateModuleQualifier()` (does `Module` exist, does it actually own `StructName`) before proceeding. Two related bugs were found and fixed while wiring this up, both from the SAME root cause (the parser's 3-part-chain reinterpretation, 2.3, lands the leading name in `ModuleQualifier` — but until now, NOTHING in `visitFuncCall` ever read that field for a call callee, for either the struct or the plain-module case): `mem::Vec2::zero()` used to compile cleanly even when `Vec2` actually lives in a different module (the wrong qualifier was silently ignored, only `LeftName`/`RightName` mattered); and `mem::io::printline(...)` — a module name nonsensically qualified by ANOTHER module name, which has no defined meaning at all — also used to compile identically to plain `io::printline(...)`. Both now raise a clean, specific error instead of silently discarding the (wrong or meaningless) qualifier.
+
+### 2.8.2 `.` on a module or a bare struct type name is rejected (fixed, not just documented)
+
+`Resolver::visitMethodCall()` (`src/Resolver.cpp:1064-...`) handles every `Left.method(...)` call — the ENTIRE `.`-call path, separate from `visitFuncCall`'s handling of bare calls and `Left::method(...)`. Resolves `Node`'s arguments first (mirroring `visitFuncCall`'s own ordering, so a broken argument still gets its own diagnostic even when the base is about to be rejected), then dispatches on what the base actually is, in priority order:
+
+1. A real declared variable (`ExistingVar`) — resolve it as an instance, `return`. Variable shadowing always wins here: a local variable named the same as a module or struct type takes priority, exactly like ordinary lexical scoping (`mut io: Thing = ...; io.show();` calls `Thing.show()`, not anything module-related — even though `io` is also a real module name).
+2. A known **module** name with no shadowing variable — `DotOperatorOnNonInstanceError("module")`, pointing at `Module::func(...)` instead.
+3. A known **struct** type name with no shadowing variable — `DotOperatorOnNonInstanceError("struct type")`, pointing at `StructName::method(...)` instead.
+4. Neither — resolve normally so `visitVariable()` raises the ordinary `ReferenceError` for a genuinely undeclared name.
+
+**This used to be two separate, fully-functional legacy resolution paths instead of a rejection**, both pre-dating this session's `::` work entirely:
+
+- `VariableExprAST::ResolvedModuleName` (module case) — set instead of erroring, then read all the way through `TypeChecker.cpp` (`Node.ResolvedModuleName`) and `Codegen.cpp` (`Var->ResolvedModuleName`) to actually resolve and emit the call. `io.printline(...)` compiled and ran identically to `io::printline(...)`.
+- `VariableExprAST::IsStructName` (struct case) — originally added specifically to fix the static-struct-method-call CRASH (a bare struct type name used to make `getExprType()` return null, crashing Codegen with `report_fatal_error`; see 5.1's history). The fix made `TypeChecker::visitMethodCall()` compute `ExpectedArity = IsStaticMethod ? ArgCount : (ArgCount + 1)` — i.e. "if the base is a bare type name, don't require a `self` argument's worth of extra arity." That was meant only to turn the crash into a clean, always-failing arity error (every method, at the time, was `.`-declared and therefore always had a `self` parameter, so `ArgCount` could never equal a `.`-declared method's real arity). Once true static methods (2.8.1, `fn StructName::method(...)`, genuinely no `self` at all) existed, their arity IS exactly `ArgCount` — so this old check started **succeeding** for them. `MathUtil.square(5)` (bare type name, `.` syntax) compiled, ran, and computed the correct answer, identically to `MathUtil::square(5)`.
+
+Both were found by direct testing (not inferred from the fact that every test file in the suite happened to already use `::`) after a direct request to verify the `.`/`::` split is actually enforced. Neither field was deleted — `ResolvedModuleName`/`IsStructName` and their `TypeChecker.cpp`/`Codegen.cpp` readers are left in place as defense-in-depth (harmless, and now permanently unreachable in a real compile, since `visitMethodCall` always raises and returns before ever setting either field again).
 
 ### 2.9 TypeChecker layer
 
