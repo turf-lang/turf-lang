@@ -1,8 +1,8 @@
 # Turf
 
-Turf is a statically-typed, LLVM-backed programming language. It compiles directly to native binaries, supports structs, generics, pointers, and native FFI, and ships with an integrated compiler-diagnostics system built around a locally-run language model.
+Turf is a statically-typed, LLVM-backed programming language. It compiles directly to native binaries, supports structs, enums, generics, modules, pointers, and native FFI, and ships with an integrated compiler-diagnostics system built around a locally-run language model.
 
-Current version: **v0.7.0**, pre-1.0, actively developed.
+Current version: **pre-1.0**, actively developed (past `v0.8.0`).
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ source of truth for AI-assisted suggestions, rather than pattern-matching agains
 
 ### The diagnostic pipeline, precisely
 
-When a diagnostic fires with `--smart` or `--online` enabled, this is what actually happens, in order:
+When a diagnostic fires with `--smart` enabled, this is what actually happens, in order:
 
 1. **The error itself carries structural context, not just a message.**
   Every diagnostic class that has something meaningful to point to (a variable's declaration site on a type mismatch, every candidate overload on an arity mismatch, the array's declaration on an out-of-bounds access, the prior declaration on a duplicate) attaches a `RelatedLocation` — `{SourceLocation, Description}` — at the exact point in the Resolver/TypeChecker/Codegen where that information is already known, because real symbol-table resolution already happened there. This is threaded through `TurfError`/`TurfWarning` via a chainable `.withRelated(loc, "declared here")`, into `DiagnosticEngine::add()`, and stored on the diagnostic itself. Nothing is recovered later by regex over an error string or by re-scanning source text for a keyword — the data is real from the moment the compiler pass produces it.
@@ -42,17 +42,15 @@ When a diagnostic fires with `--smart` or `--online` enabled, this is what actua
 6. **The suggested fix is never trusted — it's tested.**
   Before anything is shown to you, the fix is applied to an isolated snapshot of the compiler state — a real sandboxed copy of the source, symbol table, and AST, not the live one — and speculatively re-parsed and re-validated. Only a fix that demonstrably resolves the original error, without introducing new ones, is surfaced. Anything else is silently discarded and you see the compiler's own original diagnostic, unmodified.
 
-### `--smart` vs. `--online`
+### `--smart`
 
-Both flags run this exact same pipeline, on error only — no cost, no model inference, nothing happens on a clean compile. The difference is purely which model answers:
-
-- **`--smart`** runs entirely locally via a small quantized model loaded through `llama.cpp` — no network call, no external dependency.
-- **`--online`** routes the identical pipeline (same structural context, same grammar constraints, same sandbox validation) to a larger model hosted online instead, for cases on more complex programs where the extra capability of a bigger model is worth the round-trip and where `--smart`'s local model may not have enough capacity to produce a fix with real confidence.
+Runs the pipeline above on error only — no cost, no model inference, nothing happens on a clean compile — entirely locally via a small quantized model loaded through `llama.cpp`. No network call, no external dependency.
 
 ```bash
 turf my_program.tr --smart -o my_program
-turf my_program.tr --online -o my_program
 ```
+
+Useful compiler introspection flags, beyond ordinary compilation: `--dump-ast`, `--dump-resolved`, `--dump-typechecked`, `--dump-modules` (everything the compiler knows about the current program's modules — every imported module's functions, struct/enum type ownership, and every on-demand import), `--emit-llvm`.
 
 ## Installation
 
@@ -63,8 +61,10 @@ and Intel), and Windows (x86_64).
 
 ```
 // hello.tr
+import io;
+
 fn main(): int {
-    io.printline("Hello, Turf!");
+    io::printline("Hello, Turf!");
     return 0;
 }
 ```
@@ -74,7 +74,7 @@ turf hello.tr -o hello
 ./hello
 ```
 
-I/O lives in the standard library's `io` module and is called qualified — `io.printline`, not a bare global.
+I/O lives in the standard library's `io` module. `::` is Turf's namespace-resolution operator — `io::printline`, not a bare global and not `io.printline` (`.` is reserved for instance-member access; see [Modules & Imports](#modules--imports)).
 
 ## Language Tour
 
@@ -106,11 +106,26 @@ Block form:
 
 ```
 if x > 0 {
-    io.printline("positive");
+    io::printline("positive");
 } elseif x < 0 {
-    io.printline("negative");
+    io::printline("negative");
 } else {
-    io.printline("zero");
+    io::printline("zero");
+}
+```
+
+`compare` is Turf's switch statement — each `matches` arm ends with `done`, and an optional `otherwise` arm must come last:
+
+```
+compare x {
+    matches 1:
+        io::printline("one");
+    done
+    matches 2:
+        io::printline("two");
+    done
+    otherwise:
+        io::printline("something else");
 }
 ```
 
@@ -148,7 +163,7 @@ mut u: User = User { age: 10, name: "Alice" };
 u.age = 25;
 ```
 
-Methods are declared as `StructName.methodName(...)`. `self` is implicit — it's not a declared parameter, but it's available inside the method body:
+Instance methods are declared as `StructName.methodName(...)` — `self` is implicit; it's not a declared parameter, but it's available inside the method body, called via `.`:
 
 ```
 fn User.grow(): void {
@@ -158,7 +173,22 @@ fn User.grow(): void {
 fn User.rename(new_name: string): void {
     self.name = new_name;
 }
+
+u.grow();
+u.rename("Bob");
 ```
+
+Static methods are declared as `StructName::methodName(...)` — no `self` at all, called on the type itself via `::`, never through an instance:
+
+```
+fn User::default(): User {
+    return User { age: 0, name: "unnamed" };
+}
+
+mut u2: User = User::default();
+```
+
+A struct with no fields at all (`struct Empty {}`) is fully supported — the natural shape for a "namespace" struct that only ever holds static methods.
 
 ### Arrays
 
@@ -177,9 +207,64 @@ users[0] = User { age: 25, name: "Alice" };
 assert(users[0].age == 25, "");
 ```
 
+### Enums
+
+`::` addresses a variant, the same operator used for every other namespace-qualified reference in the language:
+
+```
+enum Color { Red, Green, Blue }
+
+mut c: Color = Color::Green;
+if c == Color::Green {
+    io::printline("green");
+}
+```
+
+`Color::COUNT`, `Color::VALUES`, and `Color::NAMES` are built in for every enum — variant count, the array of underlying values, and the array of variant name strings, respectively.
+
 ### Generics
 
-Turf uses real generics (`Name<T1, T2>`) rather than a single hardcoded collection type baked into the language.
+Turf uses real generics (`Name<T1, T2>`) rather than a single hardcoded collection type baked into the language — both user-defined generic structs and the standard library's own collections work the same way:
+
+```
+import io;
+import list::List;
+
+struct Box<T> {
+    val: T
+}
+
+fn Box.get(): T {
+    return self.val;
+}
+
+fn main(): int {
+    mut b: Box<int> = Box { val: 42 };
+    assert(b.get() == 42, "");
+
+    mut nums: List<int> = List { data: null, len: 0, cap: 0 };
+    nums.push(10);
+    nums.push(20);
+    assert(nums.length() == 2, "");
+
+    return 0;
+}
+```
+
+### Modules & Imports
+
+`::` is the general namespace-resolution operator — enum variants, module-qualified functions, module-qualified types, and static methods all use it. `.` stays reserved for instance-member access only. Writing `io.printline(...)` or calling a static method as `StructName.method(...)` is a compile error, with a message pointing at the correct `::` form.
+
+Every source file — the standard library's own modules included — is an ordinary `.tr` file with no compiler special-casing. `import` has four forms:
+
+```
+import io;                       // qualified access only: io::printline(...)
+import io::printline;            // + bare access to just that one symbol
+import io::[printline, print];   // + bare access to exactly these symbols
+import io::[*];                  // + bare access to everything the module exports
+```
+
+A plain `import Module;` always grants qualified access (`Module::thing`), regardless of form — the on-demand forms only add *bare*, unqualified access to specific symbols on top of that. This applies uniformly to functions, structs, and enums: a struct or enum declared in another module is not usable unqualified unless it (or `*`) was explicitly on-demand imported, exactly like a bare function call. Circular imports are detected and reported with the full import chain, not a silent truncation or a hang. See `docs/architecture/modules_and_scope_resolution.md` for the complete internal and external reference.
 
 ### FFI
 
@@ -204,7 +289,7 @@ assert(condition, "message shown on failure");
 
 ## Examples
 
-**Structs and methods:**
+**Structs, instance methods, and static methods:**
 
 ```
 extern fn strlen(s: string): int;
@@ -213,13 +298,42 @@ struct User { age: int, name: string }
 
 fn User.grow(): void { self.age = self.age + 1; }
 fn User.rename(new_name: string): void { self.name = new_name; }
+fn User::default(): User { return User { age: 0, name: "unnamed" }; }
 
 fn main(): int {
-    mut u: User = User { age: 10, name: "Alice" };
+    mut u: User = User::default();
     u.grow();
-    assert(u.age == 11, "");
+    assert(u.age == 1, "");
 
     u.rename("Bob");
+    return 0;
+}
+```
+
+**Enums and modules:**
+
+```
+import io;
+
+enum Status { Pending, Active, Closed }
+
+fn describe(s: Status): string {
+    compare s {
+        matches Status::Pending:
+            return "pending";
+        done
+        matches Status::Active:
+            return "active";
+        done
+        otherwise:
+            return "closed";
+    }
+}
+
+fn main(): int {
+    immut s: Status = Status::Active;
+    io::printline(describe(s));
+    assert(Status::COUNT == 3, "");
     return 0;
 }
 ```
@@ -337,6 +451,8 @@ fn main(): int {
 
 A larger FFI showcase (file I/O, `libm`, environment variables, sockets, variadic `printf` via `extern fn printf(fmt: string, ...): int;`, and linking against arbitrary system libraries via `extern from "libname" fn`) lives in the test suite alongside the rest of the examples above.
 
+**A real HTTP server** — raw POSIX sockets via FFI, no C helper code — lives in `examples/http_server.tr`. It's a genuine, working multi-request server with basic routing; see the file's own header comment for how to run it.
+
 ## Building from Source
 
 ### Requirements
@@ -367,9 +483,14 @@ Compiles, runs, and cleans up the produced binary.
 
 ## Roadmap
 
-Turf is pre-1.0. In progress:
+Turf is pre-1.0. The full, actively-maintained tracker — with each item marked done or open against the real codebase — is `docs/planning/ROADMAP_v1.0.0.md`. Highlights of what's still open:
 
+- `do { } while (cond)` — not yet implemented.
+- First-class functions (passing a function as a value) and `!T` error unions (`catch` / `?` / `error.XYZ`) — the last two big Phase 3 language-backbone items.
+- `unsafe { }` blocks and safe references (`&T`) — memory-model work, Phase 4.
+- Operator overloading (magic methods like `__add__`) — Phase 4.
+- CFG-based static analysis beyond what already exists (cyclomatic complexity warnings, liveness/dead-store analysis) — see `docs/planning/cfg_analysis_roadmap.md`.
 - `turf-cli`: a standalone package manager (written in Go) for Turf projects
   and dependencies — currently a working showcase, not yet linked into the
   main `turf` binary's workflow.
-- Continued standard library growth.
+- An LSP server, `turf fmt`, and `turf test` — none exist yet.
