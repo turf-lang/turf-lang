@@ -303,6 +303,11 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
   if (!Block)
     return;
 
+  // Register this module as known EVEN IF it turns out to declare zero
+  // functions (e.g. a module that only declares structs/enums) -- see
+  // registerModule()'s doc comment for the real bug this fixes.
+  SymTable_.registerModule(ModuleName);
+
   for (const auto &Expr : Block->getExpressions()) {
     if (const auto *Func = dynamic_cast<const FuncDefExprAST *>(Expr.get())) {
       registerFunctionSignature(*Func, ModuleName);
@@ -806,6 +811,23 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
   }
 
   if (CurrentFileMatches.empty() && ModuleMatches.empty()) {
+    // An explicit `Module::func(...)` call where Module IS real but doesn't
+    // have `func` needs its own, much more specific error than the bare-call
+    // path below -- that path's hints ("import the module that defines it")
+    // are actively confusing once the user has ALREADY written the
+    // qualifier. ModuleMethodNotFoundError existed in Errors.h for exactly
+    // this shape (written for the old dot-based module-call syntax) but was
+    // never actually wired up anywhere -- confirmed by grep, dead code until
+    // now.
+    if (ScopeCallee && ScopeCallee->ResolvedKind == ScopeAccessKind::ModuleFunctionRef) {
+      const std::string &LeftName = ScopeCallee->getLeftName();
+      RankedSuggestions Suggestions;
+      Suggestions.Local = SuggestionIndex::suggestVisible(
+          CalleeName, SymTable_.getModuleFunctionNames(LeftName));
+      ModuleMethodNotFoundError(Node.getLoc(), LeftName, CalleeName, Suggestions).raise();
+      return;
+    }
+
     // Before emitting an error, check whether the callee is a true language-level
     // bare intrinsic — one that is callable WITHOUT a module qualifier AND has no
     // module home in the standard library.
@@ -1097,6 +1119,12 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
 
   if (SymTable_.isEnumName(LeftName)) {
     Node.ResolvedKind = ScopeAccessKind::EnumVariant;
+    // Module::EnumName::Variant -- the parser already reinterpreted the
+    // module-qualified enum name into ModuleQualifier/LeftName by the time
+    // this runs; validate it the same way a qualified type/struct-literal
+    // is (Resolver::validateModuleQualifier()).
+    if (!validateModuleQualifier(Node.getModuleQualifier(), LeftName, Node.getLoc()))
+      return;
     if (RightName != "COUNT" && RightName != "VALUES" && RightName != "NAMES") {
       auto ET = SymTable_.lookupEnumType(LeftName);
       if (ET && !ET->hasVariant(RightName)) {

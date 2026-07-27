@@ -1,0 +1,40 @@
+// Regression test: a module that declares ONLY structs/enums (zero
+// functions or externs) must still be a real, known module for `::`
+// qualification purposes -- both for its enum type/value access
+// (Module::EnumName, Module::EnumName::Variant) and, implicitly, for
+// hasModule() checks anywhere else in the compiler.
+//
+// Before this fix: Modules_[ModuleName] (ResolverSymbolTable) was ONLY
+// ever created lazily, inside registerModuleFunction() -- a module with
+// no functions at all never got an entry, so hasModule() (which ALSO used
+// to require `!Functions.empty()` even when an entry DID exist) returned
+// false for it. `import colors;` (colors.tr declaring only `enum Shade`)
+// then failed with "'colors' isn't a known enum or module" on
+// `colors::Shade` -- despite the import succeeding, the enum being
+// perfectly real, and bare `Shade::Medium` (no qualifier) working fine.
+// Found during a systematic import bug hunt.
+//
+// Fixed by unconditionally registering every module the moment it's
+// hoisted (Resolver::hoistModuleBody -> SymTable_.registerModule()),
+// regardless of what it turns out to contain, and simplifying hasModule()
+// to just check existence.
+
+import io;
+import functionless_module_enum_module;
+
+fn main(): int {
+    // Bare access already worked before this fix (enums are flat/module-
+    // blind regardless) -- kept here to prove the fix didn't change this.
+    immut bare: Shade = Shade::Medium;
+    assert(bare == Shade::Medium, "bare enum access from a function-less module");
+
+    // The actual regression: qualified type AND qualified value access.
+    immut qualified: functionless_module_enum_module::Shade =
+        functionless_module_enum_module::Shade::Dark;
+    assert(qualified == Shade::Dark, "qualified enum access from a function-less module");
+    assert(functionless_module_enum_module::Shade::COUNT == 3,
+           "qualified pseudo-variant access from a function-less module");
+
+    io::printline("function-less module :: qualification works");
+    return 0;
+}

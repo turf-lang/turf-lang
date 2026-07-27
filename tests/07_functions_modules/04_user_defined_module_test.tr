@@ -1,6 +1,6 @@
 import lib_user_defined_module;
 
 fn main(): int {
-    lib_user_defined_module.greet();
+    lib_user_defined_module::greet();
     return 0;
 }

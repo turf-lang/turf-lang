@@ -363,7 +363,25 @@ public:
   // lookup.
 
   /**
-   * @brief True if a module with the given name has at least one function.
+   * @brief Ensures @p ModuleName is registered as a known, imported module,
+   * even if it turns out to declare zero functions (e.g. a module that only
+   * declares structs/enums, like `enum Shade {...}` with no functions at
+   * all). Called once per hoisted `ModuleImportExprAST`, unconditionally,
+   * BEFORE any function/struct/enum inside it is processed -- registerModuleFunction()
+   * ALSO lazily creates an entry, but only when a function actually exists,
+   * which used to mean a function-less module was completely invisible to
+   * hasModule() (found via a real bug: `import colors;` where colors.tr
+   * declares only an enum -- `colors::Shade` then failed with "'colors'
+   * isn't a known enum or module" despite the import succeeding and the
+   * enum being perfectly real and usable bare). Idempotent.
+   */
+  void registerModule(const std::string &ModuleName);
+
+  /**
+   * @brief True if @p ModuleName names a module that was actually imported
+   * somewhere in this program -- regardless of whether it happens to
+   * declare any functions. NOT the same question as "does findInModules()
+   * return anything for some specific name in it".
    */
   bool hasModule(const std::string &ModuleName) const;
 
@@ -550,6 +568,17 @@ public:
    * @brief Dumps the contents of the symbol table (all scopes and modules) to the output stream.
    */
   void dump(std::ostream &OS) const;
+
+  /**
+   * @brief Dumps EVERYTHING this Resolver instance knows about modules,
+   * specifically -- unlike dump() (which mixes in variable scopes and is
+   * organized around the two-tier call-resolution model), this is a
+   * dedicated module-system introspection report: every imported module's
+   * full function list, which module owns each struct/enum type, and every
+   * on-demand (Symbol/SymbolList/Wildcard) flat import currently in effect,
+   * grouped by which file/module requested it. Backs `--dump-modules`.
+   */
+  void dumpModules(std::ostream &OS) const;
 
 private:
   // Stack of scope objects.  We own them via unique_ptr; the parent pointer

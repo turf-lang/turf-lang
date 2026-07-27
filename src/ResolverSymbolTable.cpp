@@ -9,6 +9,7 @@
 #include "ResolverSymbolTable.h"
 
 #include <algorithm>
+#include <map>
 #include <ostream>
 #include <stdexcept>
 #include <unordered_set>
@@ -134,6 +135,11 @@ std::vector<std::string> ResolverSymbolTable::getAllVisibleNames() const {
   return Names;
 }
 
+void ResolverSymbolTable::registerModule(const std::string &ModuleName) {
+  if (!Modules_.count(ModuleName))
+    Modules_[ModuleName] = std::make_unique<ResolverModule>(ModuleName);
+}
+
 void ResolverSymbolTable::registerModuleFunction(
     const std::string &ModuleName, const ResolverFunctionSymbol &Sym) {
 
@@ -146,10 +152,7 @@ void ResolverSymbolTable::registerModuleFunction(
 }
 
 bool ResolverSymbolTable::hasModule(const std::string &ModuleName) const {
-  auto It = Modules_.find(ModuleName);
-  if (It == Modules_.end())
-    return false;
-  return !It->second->Functions.empty();
+  return Modules_.count(ModuleName) > 0;
 }
 
 std::vector<std::string> ResolverSymbolTable::getModuleFunctionNames(
@@ -394,4 +397,111 @@ void ResolverSymbolTable::dump(std::ostream &OS) const {
     }
   }
   OS << "==================================\n\n";
+}
+
+void ResolverSymbolTable::dumpModules(std::ostream &OS) const {
+  OS << "\n=== Module System Dump ===\n";
+
+  // ── Every imported module and its full function registry ──────────────────
+  OS << "--- Imported Modules ---\n";
+  if (Modules_.empty()) {
+    OS << "  (no modules imported)\n";
+  } else {
+    std::vector<std::string> ModNames;
+    ModNames.reserve(Modules_.size());
+    for (const auto &Pair : Modules_)
+      ModNames.push_back(Pair.first);
+    std::sort(ModNames.begin(), ModNames.end());
+    for (const auto &MName : ModNames) {
+      const auto &Mod = Modules_.at(MName);
+      OS << "Module '" << MName << "':\n";
+      if (Mod->Functions.empty()) {
+        OS << "    (no functions)\n";
+        continue;
+      }
+      std::vector<std::string> FnNames;
+      FnNames.reserve(Mod->Functions.size());
+      for (const auto &FPair : Mod->Functions)
+        FnNames.push_back(FPair.first);
+      std::sort(FnNames.begin(), FnNames.end());
+      for (const auto &FName : FnNames) {
+        for (const auto &Sym : Mod->Functions.at(FName)) {
+          OS << "    fn " << Sym.signature();
+          if (Sym.IsExtern) OS << "  [extern]";
+          if (Sym.IsVarArg) OS << "  [vararg]";
+          OS << "  @ " << Sym.DeclLoc.Line << ":" << Sym.DeclLoc.Col << "\n";
+        }
+      }
+    }
+  }
+
+  // ── Struct/enum ownership, grouped by declaring module ─────────────────────
+  OS << "\n--- Struct/Enum Type Ownership ---\n";
+  if (TypeOwningModule_.empty()) {
+    OS << "  (no struct/enum types registered)\n";
+  } else {
+    std::map<std::string, std::vector<std::string>> ByModule; // "" = main file
+    for (const auto &Pair : TypeOwningModule_)
+      ByModule[Pair.second].push_back(Pair.first);
+    for (auto &Pair : ByModule)
+      std::sort(Pair.second.begin(), Pair.second.end());
+    for (const auto &Pair : ByModule) {
+      OS << (Pair.first.empty() ? "(main file)" : "Module '" + Pair.first + "'")
+         << " declares:\n";
+      for (const auto &TypeName : Pair.second) {
+        const char *Kind = RegisteredEnums_.count(TypeName) ? "enum" : "struct";
+        OS << "    " << Kind << " " << TypeName << "\n";
+      }
+    }
+  }
+
+  // ── On-demand flat imports, grouped by requesting file/module context ─────
+  OS << "\n--- On-Demand Flat Imports (import module::sym / [list] / [*]) ---\n";
+  if (FlatImportedFunctions_.empty()) {
+    OS << "  (none -- every import in this program is bare, qualified-access-only)\n";
+  } else {
+    std::vector<std::string> Contexts;
+    Contexts.reserve(FlatImportedFunctions_.size());
+    for (const auto &Pair : FlatImportedFunctions_)
+      Contexts.push_back(Pair.first);
+    std::sort(Contexts.begin(), Contexts.end());
+    for (const auto &Ctx : Contexts) {
+      OS << (Ctx.empty() ? "(main file)" : "Module '" + Ctx + "'")
+         << " flat-imports:\n";
+      const auto &Imports = FlatImportedFunctions_.at(Ctx);
+      if (Imports.empty()) {
+        OS << "    (none)\n";
+        continue;
+      }
+      std::vector<std::string> Names;
+      Names.reserve(Imports.size());
+      for (const auto &Pair : Imports)
+        Names.push_back(Pair.first);
+      std::sort(Names.begin(), Names.end());
+      for (const auto &Name : Names) {
+        const auto &Sym = Imports.at(Name);
+        OS << "    " << Name << "  <- from module '" << Sym.SourceModule
+           << "' (imported at " << Sym.ImportLoc.Line << ":" << Sym.ImportLoc.Col
+           << ")\n";
+      }
+    }
+  }
+
+  // ── Main file's own top-level functions, for contrast ──────────────────────
+  OS << "\n--- Main-File Top-Level Functions ---\n";
+  if (CurrentFileFunctions_.empty()) {
+    OS << "  (none)\n";
+  } else {
+    std::vector<std::string> Names;
+    Names.reserve(CurrentFileFunctions_.size());
+    for (const auto &Pair : CurrentFileFunctions_)
+      Names.push_back(Pair.first);
+    std::sort(Names.begin(), Names.end());
+    for (const auto &Name : Names)
+      for (const auto &Sym : CurrentFileFunctions_.at(Name))
+        OS << "  fn " << Sym.signature() << "  @ " << Sym.DeclLoc.Line << ":"
+           << Sym.DeclLoc.Col << "\n";
+  }
+
+  OS << "===========================\n\n";
 }

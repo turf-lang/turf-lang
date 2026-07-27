@@ -73,6 +73,7 @@ struct CompilerOptions {
   bool DumpResolved = false;          // --dump-resolved: run Resolver then print annotated AST (Issue #5)
   bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
   bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
+  bool DumpModules = false;           // --dump-modules: print full module-system introspection
   std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
 };
 
@@ -108,6 +109,12 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.RunResolver = true;
       opts.RunTypeChecker = true;
       opts.DumpTypechecked = true;
+    } else if (arg == "--dump-modules") {
+      // Implies --resolve: the module system's state (Modules_,
+      // TypeOwningModule_, FlatImportedFunctions_) only exists once Pass 1
+      // hoisting has run, same as every other --dump-* flag.
+      opts.RunResolver = true;
+      opts.DumpModules = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg == "--link" && i + 1 < argc) {
@@ -125,7 +132,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
         << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] "
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
-           "[--link <libname>]\n";
+           "[--dump-modules] [--link <libname>]\n";
     std::exit(1);
   }
 
@@ -823,6 +830,9 @@ int main(int argc, char **argv) {
 
     if (opts.DumpResolverSymbols)
       R.symbolTable().dump(std::cerr);
+
+    if (opts.DumpModules)
+      R.symbolTable().dumpModules(std::cerr);
 
     if (opts.DumpResolved) {
       ASTPrinter Printer;

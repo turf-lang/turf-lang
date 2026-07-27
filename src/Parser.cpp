@@ -727,6 +727,27 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                                                    std::move(NamedFields), IdName);
       }
 
+      // A THIRD name chained on: `IdName::RightName` just parsed was
+      // actually `Module::EnumName`, not the enum-and-variant pair itself
+      // -- reinterpret it as such and parse the real variant name that
+      // follows this second '::'. `Module::func::whatever` (chaining past
+      // a module-function-ref) or any other shape is nonsensical and left
+      // to the Resolver to reject once it knows IdName isn't an enum's
+      // module-qualifying prefix at all.
+      if (CurTok == TOK_SCOPE) {
+        getNextToken(); // eat second '::'
+        if (CurTok != TOK_IDENTIFIER) {
+          LogErrorAt(CurLoc, "Expected a variant name after '::'");
+          return nullptr;
+        }
+        std::string VariantName = IdentifierStr;
+        SourceLocation VariantLoc = CurLoc;
+        getNextToken();
+        return std::make_unique<ScopeAccessExprAST>(IdLoc, RightName, RightLoc,
+                                                     VariantName, VariantLoc,
+                                                     /*ModuleQualifier=*/IdName);
+      }
+
       return std::make_unique<ScopeAccessExprAST>(IdLoc, IdName, IdLoc,
                                                    RightName, RightLoc);
     }

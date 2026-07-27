@@ -1,0 +1,21 @@
+// Regression test: a generic struct (with a generic instance method)
+// declared inside a user-written module -- not just the stdlib's own
+// List<T>/Stack<T>/Queue<T> -- must work identically bare AND fully
+// qualified (type annotation + construction). Confirms the type-erasure/
+// substitution machinery (Codegen's getExprType() fix, TypeChecker's
+// Subst-building) is genuinely module-agnostic, not somehow special-cased
+// around the specific stdlib collection types it was originally fixed for.
+
+import io;
+import generic_struct_custom_module;
+
+fn main(): int {
+    mut b: Box<int> = Box { val: 42 };
+    assert(b.get() == 42, "bare generic struct in a custom module");
+
+    mut b2: generic_struct_custom_module::Box<int> = generic_struct_custom_module::Box { val: 99 };
+    assert(b2.get() == 99, "fully qualified generic struct in a custom module");
+
+    io::printline("generic struct in a custom module works both ways");
+    return 0;
+}

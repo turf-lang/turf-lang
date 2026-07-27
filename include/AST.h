@@ -903,6 +903,18 @@ class ScopeAccessExprAST : public ExprAST {
     SourceLocation LeftLoc;
     SourceLocation RightLoc;
     SourceLocation Loc;
+    // The `Module` in `Module::EnumName::Variant` (empty for the ordinary
+    // `EnumName::Variant` form). A THIRD name is otherwise unrepresentable
+    // in this node's two-name shape -- `Module::EnumName` on its own parses
+    // as an ordinary ScopeAccessExprAST(LeftName=Module, RightName=EnumName)
+    // like any other `Left::Right`, but when the PARSER sees yet another
+    // `::` immediately follow, it knows the pair it just built was actually
+    // a module-qualified ENUM NAME, not the enum-and-variant pair itself --
+    // reinterpreted as ModuleQualifier=LeftName, LeftName=RightName (the
+    // enum), RightName=the real variant that follows the second `::`. Only
+    // meaningful when ResolvedKind == EnumVariant; validated the same way
+    // as a qualified type/struct-literal (Resolver::validateModuleQualifier()).
+    std::string ModuleQualifier;
 public:
     // Set by the Resolver (visitScopeAccess / visitFuncCall for the call
     // form) once it decides what this node actually refers to. A future
@@ -912,9 +924,10 @@ public:
 
     ScopeAccessExprAST(SourceLocation Loc, std::string LeftName,
                        SourceLocation LeftLoc, std::string RightName,
-                       SourceLocation RightLoc)
+                       SourceLocation RightLoc, std::string ModuleQualifier = "")
         : LeftName(std::move(LeftName)), RightName(std::move(RightName)),
-          LeftLoc(LeftLoc), RightLoc(RightLoc), Loc(Loc) {}
+          LeftLoc(LeftLoc), RightLoc(RightLoc), Loc(Loc),
+          ModuleQualifier(std::move(ModuleQualifier)) {}
     // Convenience overload for call sites that don't need distinct
     // left/right locations (both default to the whole expression's Loc).
     ScopeAccessExprAST(SourceLocation Loc, std::string LeftName, std::string RightName)
@@ -925,6 +938,7 @@ public:
     const SourceLocation& getLeftLoc()  const { return LeftLoc; }
     const SourceLocation& getRightLoc() const { return RightLoc; }
     const SourceLocation& getLoc()   const { return Loc; }
+    const std::string& getModuleQualifier() const { return ModuleQualifier; }
     // Pre-existing call sites written against the enum-only meaning of this
     // node (TypeChecker's compare/matches exhaustiveness checks, Codegen's
     // enum-variant codegen) keep working unchanged via these aliases.
@@ -934,7 +948,8 @@ public:
     void accept(ASTVisitor& V) override { V.visitScopeAccess(*this); }
     std::unique_ptr<ExprAST> clone() const override {
         auto Cloned = std::make_unique<ScopeAccessExprAST>(Loc, LeftName, LeftLoc,
-                                                            RightName, RightLoc);
+                                                            RightName, RightLoc,
+                                                            ModuleQualifier);
         return Cloned;
     }
 };

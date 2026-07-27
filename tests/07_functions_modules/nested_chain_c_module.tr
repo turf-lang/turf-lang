@@ -1,0 +1,6 @@
+// Companion module for scope_nested_on_demand_chain.tr -- the innermost
+// link (C) in a 3-deep module chain (user -> A -> B -> C), each linked by
+// its own on-demand single-symbol import.
+fn cFunc(): int {
+    return 100;
+}

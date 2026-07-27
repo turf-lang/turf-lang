@@ -1,0 +1,14 @@
+// Regression test: `import module::[*];` on a module that declares ZERO
+// functions (only an enum) must not crash or error -- the wildcard
+// expansion iterates getModuleFunctionNames(), which is legitimately
+// empty here; confirms that loop handles the empty case cleanly rather
+// than assuming at least one function always exists.
+
+import io;
+import functionless_module_enum_module::[*];
+
+fn main(): int {
+    immut s: Shade = Shade::Medium;
+    io::printline("wildcard import of a function-less module works");
+    return 0;
+}
