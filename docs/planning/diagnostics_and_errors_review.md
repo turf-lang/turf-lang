@@ -39,8 +39,11 @@ Finally, `DiagnosticEngine` prints the standard error, followed by a bright cyan
 
 The `Errors.h` file is in excellent shape, containing highly specific error classes (`UseBeforeDeclarationError`, `ArrayBoundsError`, etc.). However, to make the DX the main attraction of Turf-Lang, here are 5 high-impact improvements:
 
-### 1. Source Spans instead of just Source Locations
-Right now, `SourceLocation` only tracks `{Line, Col}`. If you update the Lexer to track `{Line, StartCol, EndCol}` for tokens, your `DiagnosticEngine` can underline the exact expression that is failing, rather than just pointing a single `^` at it.
+> **STATUS (2026-07 review):** #3 and #5 are DONE (also tracked as Issues #174/#173
+> in `ROADMAP_v1.0.0.md`, both checked there). #1, #2, #4 verified still open below.
+
+### 1. Source Spans instead of just Source Locations — still open
+Confirmed still true: `SourceLocation` (`include/Lexer.h`) is `{Line, Col, Filename}` — no span. Right now, `SourceLocation` only tracks `{Line, Col}`. If you update the Lexer to track `{Line, StartCol, EndCol}` for tokens, your `DiagnosticEngine` can underline the exact expression that is failing, rather than just pointing a single `^` at it.
 **Example improvement:**
 ```
   7 |     io.printline(add(5 + 6, add(3, "4")));
@@ -48,22 +51,24 @@ Right now, `SourceLocation` only tracks `{Line, Col}`. If you update the Lexer t
     |                             Type mismatch: expected 'int', got 'string'
 ```
 
-### 2. Error Codes and Explainers
-Every error class should have a unique, searchable Error Code (e.g., `E001` for `SyntaxError`, `E042` for `TypeError`). 
+### 2. Error Codes and Explainers — still open
+Confirmed still true: no `--explain` flag anywhere in `main.cpp`'s arg parsing, no per-class error codes. Every error class should have a unique, searchable Error Code (e.g., `E001` for `SyntaxError`, `E042` for `TypeError`). 
 If a user hits `E042`, they should be able to run `turf --explain E042` in their terminal, and your compiler prints out a beautiful, multi-paragraph markdown explanation of how Turf's type system works with examples (similar to Rust).
 
-### 3. Decouple Hints from Error Messages
-Right now, inside `Errors.h`, the "Hint:" strings are hardcoded directly into the message body using string concatenation:
+### 3. Decouple Hints from Error Messages — DONE
+`TurfError` (`include/Errors.h`) carries `Hint_` as its own field, separate from `Message`, alongside `RelatedLocations_` for structured SLM context. Tracked as Issue #174 in `ROADMAP_v1.0.0.md`, already checked off there.
+~~Right now, inside `Errors.h`, the "Hint:" strings are hardcoded directly into the message body using string concatenation:~~
 ```cpp
 Colors::BRIGHT_RED + "Type mismatch!\n" + Colors::RESET + "  " + Msg + "\n  " + Colors::BRIGHT_GREEN + "Hint: ..."
 ```
-Change `TurfError` to accept a separate `Hint` string: `TurfError(Loc, Msg, Hint)`. This allows the `DiagnosticEngine` to dynamically decide how to render hints, or even pass the hint separately to the SLM to give the model more context.
+~~Change `TurfError` to accept a separate `Hint` string: `TurfError(Loc, Msg, Hint)`. This allows the `DiagnosticEngine` to dynamically decide how to render hints, or even pass the hint separately to the SLM to give the model more context.~~
 
-### 4. Broaden the "Did You Mean?" Engine
-You currently have `SuggestionIndex.h` which does fuzzy-matching to suggest correct names. Expand this beyond variables and functions to:
-- **Struct Fields:** If the user types `user.pasword`, suggest `user.password`.
-- **Module Methods:** If the user types `string.lenght()`, suggest `string.length()`.
-- **Keywords:** If the user types `funtion`, suggest `fn`.
+### 4. Broaden the "Did You Mean?" Engine — partially open
+`SuggestionIndex.h`'s core `suggestVisible()` is a generic candidate-list matcher already reused all over the compiler (struct names, enum names, module function names, on-demand-import symbols, etc. — confirmed via grep, dozens of call sites). But the two SPECIFIC cases named below are still not wired up: no struct-FIELD-name suggestion on a typo'd `.field` access, no keyword-typo suggestion (`funtion` → `fn`). Module-method typos DO already get suggestions (confirmed: `ModuleMethodNotFoundError`/`StructMethodNotFoundError` both rank suggestions from the real candidate list). You currently have `SuggestionIndex.h` which does fuzzy-matching to suggest correct names. Expand this beyond variables and functions to:
+- **Struct Fields:** If the user types `user.pasword`, suggest `user.password`. — still open.
+- **Module Methods:** If the user types `string.lenght()`, suggest `string.length()`. — DONE.
+- **Keywords:** If the user types `funtion`, suggest `fn`. — still open.
 
-### 5. Separation of Warnings and Errors
-Calling `raise()` on a `TurfError` usually throws a `longjmp` and halts the compilation pass. As you build more advanced CFG features (like "Unused variable"), you will need a dedicated `TurfWarning` class that registers with the `DiagnosticEngine` but **never** interrupts the execution flow.
+### 5. Separation of Warnings and Errors — DONE
+`class TurfWarning` (`include/Errors.h`) exists exactly as proposed. Tracked as Issue #173 in `ROADMAP_v1.0.0.md`, already checked off there.
+~~Calling `raise()` on a `TurfError` usually throws a `longjmp` and halts the compilation pass. As you build more advanced CFG features (like "Unused variable"), you will need a dedicated `TurfWarning` class that registers with the `DiagnosticEngine` but **never** interrupts the execution flow.~~

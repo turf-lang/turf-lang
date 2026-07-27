@@ -105,25 +105,25 @@ fn apply(f: fn(int): int, x: int): int { return f(x); }
 
 **Group A — Infrastructure (do first):**
 - [x] **#175: `extern fn` FFI 🔴**
-- [ ] **#176: Self-Referential Structs (LLVM Backend) 🔴**
+- [x] **#176: Self-Referential Structs (LLVM Backend) 🔴** (two-step opaque-stub-then-`setBody()` struct creation, see `Codegen.cpp`'s `StructDeclExprAST::codegen()`)
 - [x] **#177: `null` Type Enforcement (TypeChecker) 🔴**
 
 **Group B — Language Features:**
 - [x] **#178: Default Variable Initialization 🔴**
 - [x] **#179: Logical NOT `!` Operator 🔴**
-- [ ] **#180: `do { } while(cond)` Statement 🔴**
-- [ ] **#181: `compare` Statement (Switch) 🔴**
-- [ ] **#182: Bitwise Operators (`&`, `|`, `~`, `^`, `<<`, `>>`) 🔴**
-- [ ] **#183: String Operations (`+`, `==`, `s[i]`) 🔴**
-- [ ] **#184: `enum` Declaration 🟡**
+- [ ] **#180: `do { } while(cond)` Statement 🔴** — still not implemented, no `TOK_DO`/`DoWhileExprAST` anywhere
+- [x] **#181: `compare` Statement (Switch) 🔴**
+- [x] **#182: Bitwise Operators (`&`, `|`, `~`, `^`, `<<`, `>>`) 🔴**
+- [x] **#183: String Operations (`+`, `==`, `s[i]`) 🔴**
+- [x] **#184: `enum` Declaration 🟡**
 
 **Group C — CFG Static Analysis (Phases 1 & 2):**
-- [ ] **#185: CFG Phase 1 — Cyclomatic Complexity & Infinite Loop Detection 🔴**
-- [ ] **#186: CFG Phase 2 — Liveness Pass & Infinite Recursion Detection 🔴**
+- [ ] **#185: CFG Phase 1 — Cyclomatic Complexity & Infinite Loop Detection 🔴** — not implemented; current `CFG`/`CFGBuilder` (`include/CFG.h`) only does reachability/missing-return/dead-code-after-terminator analysis, no complexity metric or loop-exit-path check
+- [ ] **#186: CFG Phase 2 — Liveness Pass & Infinite Recursion Detection 🔴** — not implemented; `CallGraphPass` (`include/CallGraph.h`) exists but is a minimal 26-line call-edge tracker, no liveness/dead-store analysis or recursion-without-base-case detection
 
 **Group D — Type System Completion:**
-- [ ] **#187: First-Class Functions 🟡**
-- [ ] **#188: `!T` Error Unions (`catch`, `?`, `error.XYZ`) 🔴** *(last — heaviest)*
+- [ ] **#187: First-Class Functions 🟡** — not implemented; `Resolver::visitScopeAccess()` explicitly rejects a bare function reference ("functions aren't first-class yet")
+- [ ] **#188: `!T` Error Unions (`catch`, `?`, `error.XYZ`) 🔴** *(last — heaviest)* — not implemented, no `!T`/`catch`/`?`/`error.XYZ` tokens anywhere (see `docs/planning/ERROR_HANDLING_RFC.md`, still an open proposal)
 
 > **⛔ Explicitly Rejected**: `loop { }` keyword. Adds nothing over `while(true)`. `TOK_LOOP` must NOT be added at any point.
 
@@ -150,38 +150,35 @@ mutable nums: list<int> = list<int> {};
 mutable names: list<string> = list<string> {};
 ```
 
-- [ ] **Struct Pointers & `self` Returns 🔴**
-  - **Implementation**: Bridge the value vs pointer gap for structs. Allow `malloc` (`ptr`) to be safely cast to structural pointers, and allow struct methods to return `self` by reference (`*self` / `&self`). Resolves Issues #22 and #23.
+- [x] **Struct Pointers & `self` Returns 🔴**
+  - **Implementation**: Bridge the value vs pointer gap for structs. Allow `malloc` (`ptr`) to be safely cast to structural pointers, and allow struct methods to return `self` by reference (`*self` / `&self`). Resolves Issues #22 and #23. Confirmed: `raw to Node*` (ptr → struct-pointer cast) compiles and runs; chained self-returning method calls (`c.increment().increment()`) work.
 
-- [ ] **Module Search Path & Circular Import Guard 🔴**
-  - **Implementation**: Search `<compiler_bin_dir>/lib/std/` first, then `./`. `std::set<std::string> ActiveImports` during parsing; error on duplicate import.
+- [x] **Module Search Path & Circular Import Guard 🔴**
+  - **Implementation**: Search `<compiler_bin_dir>/lib/std/` first, then `./`. `std::set<std::string> ActiveImports` during parsing; error on duplicate import. Done, and substantially exceeds this original spec — see `docs/architecture/modules_and_scope_resolution.md` for the full on-demand-import/`::`-namespace-resolution/circular-import-diagram system that replaced it.
 
-- [ ] **`unsafe { }` Block 🔴**
-  - **Implementation**: `TOK_UNSAFE`, `UnsafeBlockExprAST`. TypeChecker: any raw pointer type (`T*`, `unsafe_ptr<T>`) or `malloc`/`free`/`realloc` call outside an `unsafe` block is a compile error. No grace period — enforced from day one of Phase 4.
+- [ ] **`unsafe { }` Block 🔴** — not implemented, no `TOK_UNSAFE`/`UnsafeBlockExprAST`; raw pointers remain unrestricted everywhere
 
-- [ ] **Safe References (`&T`) 🔴**
-  - **Implementation**: `TOK_AMPERSAND` in type position produces `SafeRefType`. TypeChecker guarantees non-null. Codegen lowers to a regular pointer (same IR — the safety is purely a compile-time contract).
+- [ ] **Safe References (`&T`) 🔴** — not implemented
 
-- [ ] **Rewrite `std/io.tr` via FFI 🔴**
-  - **Implementation**: Replace all `@intrinsic` entries. Bind `printf`, `fopen`, `fread`, `fwrite`, `fclose`, `fgets` via `extern fn`.
+- [x] **Rewrite `std/io.tr` via FFI 🔴**
+  - **Implementation**: `@intrinsic` removed entirely (now a hard parse error). `lib/std/io.tr` binds `printf`/`scanf`/`getchar`/`calloc` via `extern fn`; `print`/`printline`/`input` are ordinary Turf functions.
 
-- [ ] **Rewrite `std/math.tr` via FFI 🔴**
-  - **Implementation**: Replace all `@intrinsic(\"llvm.sin.f64\")` etc. Bind `sin`, `cos`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `fabs` from `libm`. Add native `min`, `max`, `clamp`. Expose `PI` and `E` as module-level `immutable` declarations.
+- [x] **Rewrite `std/math.tr` via FFI 🔴** (partial function coverage)
+  - `lib/std/math.tr` is fully `extern fn`-based (no `@intrinsic`), with `abs`/`power`/`min`/`max`/`clamp`. `sin`/`cos`/`sqrt`/`floor`/`ceil`/`round` and `PI`/`E` constants from the original spec are not yet added.
 
-- [ ] **Write `std/string.tr` via FFI 🔴**
-  - **Implementation**: Bind `strlen`, `strcmp`, `strstr`, `strcpy`, `strcat`, `toupper`, `tolower`, `malloc`. Implement `length`, `equals`, `concat`, `contains`, `indexOf`, `trim`, `split`, `startsWith`, `endsWith`, `toUpper`, `toLower`.
+- [x] **Write `std/string.tr` via FFI 🔴** (shipped as `lib/std/strings.tr`, not `string.tr`)
+  - `extern fn`-based (`strlen`, `strstr`, `strncpy`, `toupper`, `tolower`, `malloc`); string `+`/`==`/indexing work at the language level (see #183 above) independent of this module.
 
-- [ ] **Write `std/os.tr` via FFI 🟡**
-  - **Implementation**: Bind `getenv`, `exit`. Expose `env`, `exit`. Argc/argv hook.
+- [ ] **Write `std/os.tr` via FFI 🟡** — not implemented, `lib/std/os.tr` does not exist
 
-- [ ] **Write `std/mem.tr` via FFI 🟡**
-  - **Implementation**: Bind `malloc`, `realloc`, `free` as `mem.alloc`, `mem.realloc`, `mem.free`. Only callable from `unsafe { }` blocks after the `unsafe` enforcement is in place.
+- [x] **Write `std/mem.tr` via FFI 🟡**
+  - **Implementation**: `lib/std/mem.tr` binds `malloc`/`calloc`/`realloc`/`free` via `extern fn`. Not gated behind an `unsafe {}` block (that feature doesn't exist yet — see above).
 
-- [ ] **Delete `@intrinsic` and `Builtins.cpp` Monolith 🔴**
-  - **Implementation**: Once all stdlib modules use `extern fn`, delete `TOK_INTRINSIC`, `@intrinsic` parsing, `CodegenIntrinsic()`, `IntrinsicArity`, and `EarlyArityMap`. The TypeChecker is now the sole authority for arity and type validation.
+- [ ] **Delete `@intrinsic` and `Builtins.cpp` Monolith 🔴** (half done)
+  - The `@intrinsic` decorator/keyword is fully removed from the parser (`'@' is not valid here`, hard error). `Builtins.cpp` itself was NOT deleted and still exists (307 lines) — genuine true intrinsics (`typeof`/`lengthof`/`assert`/`fail`) are still routed through its `CodegenIntrinsic()`, which is correct and expected to stay. However it also still contains now-fully-dead `"print"`/`"printline"`/`"input"`/`"abs"`/`"power"` branches that are no longer reachable from anywhere (io.tr/math.tr are pure Turf now) and should be deleted as cleanup.
 
-- [ ] **Generics with Type Erasure 🟡**
-  - **Implementation**: `list<T>` and `map<K,V>` compile to a single LLVM struct (`{ i8* data, i64 length, i64 capacity }`) regardless of `T`. The TypeChecker tracks the element type for validation. No code explosion. Trade-off: no LLVM-level specialization (can be added opt-in with `@specialize` post-1.0.0 if needed).
+- [x] **Generics with Type Erasure 🟡** (implemented as a hybrid, not exactly as specced)
+  - Generic instantiations (`List<int>`, `Box<string>`, etc.) get per-instantiation mangled type NAMES (`getMangledName()` → `"List_int"`) for frontend type-identity/validation purposes, but `Codegen`'s `getLLVMType()` resolves every instantiation of a given base to the SAME underlying `llvm::StructType` (generic fields lower to opaque pointers — "Type Erasure: Generic Type Parameters are compiled as void*"), so there genuinely is no LLVM-level code explosion per instantiation, matching the spec's actual goal even though the mechanism differs from "one shared struct, erased type name" as literally described.
 
 - [ ] **Operator Overloading 🟡**
   - **Implementation**: Magic methods (`__add__`, `__eq__`, `__index__`, etc.) on structs. TypeChecker desugars `Matrix + Matrix` into a `MethodCallExprAST`. Codegen sees only a normal method call — zero LLVM-level changes required.
@@ -203,8 +200,8 @@ mutable names: list<string> = list<string> {};
 - [ ] **The SLM Query Loop 🔴**
   - **Implementation**: `SLMBlockExprAST::codegen()` invokes `SLMEngine`. Returned string passes through `Lexer → Parser → Resolver → TypeChecker`. Retry up to 3× on TypeChecker failure, feeding the error back into the prompt.
 
-- [ ] **Dynamic Error Context for `--smart` 🟡**
-  - **Implementation**: Size context window dynamically: ±3 lines for syntax errors, ±8 lines for semantic errors.
+- [x] **Dynamic Error Context for `--smart` 🟡**
+  - **Implementation**: `src/SLMIntegration.cpp` sizes the context window per deterministic error category (tight ±3 for self-contained statement errors, wider for semantic errors needing more surrounding code) and pins relevant out-of-window definitions (e.g. a variable/function's declaration line) into the prompt regardless of distance.
 
 - [ ] **LoRA Fine-Tuning 🟡**
   - **Implementation**: Convert `needs_slm_training_dynamiccontext/` to JSONL for Adapter A (Error Healing). Convert `lib/std/` to JSONL for Adapter B (POP Codegen).

@@ -23,18 +23,19 @@ Currently, strings are treated strictly as raw `i8*` memory pointers.
 
 ## 3. Identified Limitations & Proposed Solutions
 
-### 3.1. Recursive and Self-Referential Structs
-**Limitation**: Defining a struct that contains a pointer to itself (e.g., linked list nodes) fails with an `Unknown type` error.
-**Root Cause**: `ParseStructDecl()` evaluates the entire struct body before registering the struct name in the `GlobalSymbolTable`. When a self-reference is encountered, the type lookup fails.
-**Proposed Solution**: Implement forward-registration in the parser. The struct's identifier must be injected into the symbol table prior to parsing its fields. Furthermore, self-references must strictly use pointer semantics (`Node*`) to prevent LLVM infinite sizing errors.
+### 3.1. Recursive and Self-Referential Structs — DONE
+**Status (2026-07 review)**: Fixed, shipped as Issue #176. `src/Codegen.cpp` (`StructDeclExprAST::codegen()`) implements exactly the proposed two-step forward-registration: an opaque `llvm::StructType` stub is created and registered *before* field types are evaluated, so a self-referential pointer field (`Node*`) resolves against the stub instead of failing. Verified live: linked-list/tree-shaped structs compile and run correctly today.
+~~**Limitation**: Defining a struct that contains a pointer to itself (e.g., linked list nodes) fails with an `Unknown type` error.~~
+~~**Root Cause**: `ParseStructDecl()` evaluates the entire struct body before registering the struct name in the `GlobalSymbolTable`. When a self-reference is encountered, the type lookup fails.~~
+~~**Proposed Solution**: Implement forward-registration in the parser. The struct's identifier must be injected into the symbol table prior to parsing its fields. Furthermore, self-references must strictly use pointer semantics (`Node*`) to prevent LLVM infinite sizing errors.~~
 
-### 3.2. Universal Method Dispatch ("Everything is an Object")
-**Limitation**: `MethodCallExprAST` restricts method invocation strictly to `TurfStructType` and `GenericType`. Primitive types like `string` cannot utilize method chaining (e.g., `"hello".length()`).
+### 3.2. Universal Method Dispatch ("Everything is an Object") — still open
+**Status (2026-07 review)**: Confirmed still not implemented — `s.length()` / `"hello".length()` on a `string` still fail with a clean, specific error ("Cannot call method 'length' on type 'string' -- only struct instances have methods."), not a crash, but the feature itself doesn't exist. **Limitation**: `MethodCallExprAST` restricts method invocation strictly to `TurfStructType` and `GenericType`. Primitive types like `string` cannot utilize method chaining (e.g., `"hello".length()`).
 **Proposed Solution**: Remove the struct-specific constraint and utilize the base type's name for method resolution. By standardizing method lookup to `turf_[type]_[method]`, Turflang can support standard library extensions for primitives (e.g., `lib/std/string.tr`), enabling a modern, unified syntax.
 
-### 3.3. Compiler Intrinsics for String Operations
-**Limitation**: Implementing a generalized user-facing operator overloading system requires significant parser and type-checker restructuring.
-**Proposed Solution**: Utilize compiler intrinsics for standard types. 
+### 3.3. Compiler Intrinsics for String Operations — DONE
+**Status (2026-07 review)**: `+` (concatenation) and `==` (content comparison, not pointer comparison) both work correctly on strings today, verified live. **Limitation**: Implementing a generalized user-facing operator overloading system requires significant parser and type-checker restructuring.
+~~**Proposed Solution**: Utilize compiler intrinsics for standard types. ~~
 - **Equality**: Intercept the `TOK_EQ` operator in `BinaryExprAST` for string operands and inject a call to `strcmp`, comparing the result against zero.
 - **Concatenation**: Intercept the `+` operator for strings and route it to a standard library function (e.g., `turf_string.concat`).
 

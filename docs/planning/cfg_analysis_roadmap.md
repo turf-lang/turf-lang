@@ -4,6 +4,35 @@ This document outlines the strategic roadmap for expanding Turflang's Control Fl
 
 Because implementing all of these simultaneously would be chaotic and difficult to debug, they should be implemented sequentially. Each feature builds upon the infrastructure of the previous one.
 
+> **STATUS (2026-07 review): Real CFG infrastructure exists (`include/CFG.h`/`src/CFG.cpp`,
+> `include/Analysis.h` `DefiniteAssignmentPass`, `include/ValueRange.h`/`src/ValueRange.cpp`
+> `ValueRangePass`, `src/AliasAnalysis.cpp` `AliasAnalysisPass`, `include/CallGraph.h`/
+> `src/CallGraph.cpp`), wired into `Codegen.cpp` per function — but it solves a
+> DIFFERENT, more targeted set of problems than this doc originally proposed, not
+> the specific checks below. None of the 4 phases as WRITTEN are complete;
+> what actually shipped instead:
+> - `CFG`: unreachable-code warnings, dead-branch warnings, missing-return errors,
+>   statement-after-terminator errors. No cyclomatic complexity metric, no
+>   infinite-loop-without-break detection (Phase 1 as specced: not done).
+> - `DefiniteAssignmentPass`: use-before-initialization errors. Related to but
+>   distinct from Phase 2's "dead store / unused variable" liveness pass
+>   (which does not exist) — this checks reads-before-writes, not
+>   writes-without-reads.
+> - `AliasAnalysisPass`: use-after-free and double-free errors (tracks a
+>   malloc'd pointer's points-to/freed state through the CFG). Stricter and
+>   arguably more valuable than Phase 3's originally-proposed "warn if a
+>   malloc is never freed", but it's a different check — no leak warning,
+>   no `NullabilityPass`/nullable-pointer-dereference tracking exists.
+> - `ValueRangePass`: constant-propagation only right now, per its own doc
+>   comment ("currently used for diagnostics and later passes") — Phase 4's
+>   bounds-check-elimination optimization is not built on top of it yet.
+> - `CallGraphPass::runGlobal()` is a literal empty stub ("Function is
+>   currently just a stub.") — infinite-recursion detection (Phase 2, item 2)
+>   is not implemented.
+>
+> Left as an open roadmap, not closed — genuinely still future work, just
+> re-scope against what's already built before picking it back up.
+
 ---
 
 ## Phase 1: Complexity & Basic Traversal

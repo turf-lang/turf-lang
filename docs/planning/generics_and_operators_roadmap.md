@@ -2,6 +2,23 @@
 
 This roadmap details how to fully implement Frontend Monomorphization (for generic types like `list<T>`) and Operator Overloading (e.g., `Matrix + Matrix`) by leveraging the new multi-pass compiler architecture.
 
+> **STATUS (2026-07 review): Generics work, but NOT via the design in Phase 1
+> below.** No `GenericTemplateAST`, no clone-and-substitute Monomorphizer sub-pass
+> in the Resolver, no per-instantiation mangled AST cloning. Instead: `TurfGenericParamType`
+> (`include/Types.h`) type-erases every generic parameter to an opaque pointer
+> (`void*`) at the LLVM level, and `GenericType` instantiations (e.g. `List<int>`,
+> `List<string>`) all share ONE LLVM struct type keyed by the base name ("List") --
+> see `Codegen.cpp`'s `getLLVMType()`, "Type Erasure: Generic Type Parameters are
+> compiled as void*". This is a *simpler, working* alternative to the proposed
+> design (closer to `ROADMAP_v1.0.0.md`'s Phase 4 "Generics with Type Erasure"
+> item, already checked off there) -- generic structs/functions (`Box<T>`,
+> `List<T>`, `Stack<T>`, `Queue<T>`, user-defined generics) are fully usable
+> today. Phase 1 as WRITTEN here (the Monomorphizer/blueprint-cloning approach)
+> was never built and probably shouldn't be now that type erasure already works.
+> Phase 2 (Operator Overloading, `__add__`/`__eq__`/etc magic methods) is
+> untouched -- confirmed zero references to any magic-method name anywhere in
+> the compiler or stdlib. Still open, future work.
+
 ---
 
 ## Phase 1: Frontend Monomorphization (Generics)
