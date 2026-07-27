@@ -442,7 +442,10 @@ public:
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check the spelling, or make sure the method is declared as "
-      "`fn<T> " + StructName + "." + MethodName + "(...)`.");
+      "`fn " + StructName + "." + MethodName + "(...)` (instance method, " +
+      "called as `x." + MethodName + "(...)`) or `fn " + StructName +
+      "::" + MethodName + "(...)` (static method, called as `" + StructName +
+      "::" + MethodName + "(...)`).");
   }
 };
 

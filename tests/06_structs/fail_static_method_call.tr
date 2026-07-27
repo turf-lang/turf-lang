@@ -10,15 +10,23 @@
 // WHOLE COMPILER PROCESS. No test in the suite exercised this at all.
 //
 // The crash is now fixed (getExprType() correctly resolves the struct
-// type via GlobalSymbolTable), but this REVEALS a separate, deeper fact:
-// this language has no real "static method" feature today.
-// ParseFuncDef() unconditionally injects a `self` parameter into EVERY
-// `fn StructName.method(...)` declaration with no way to opt out, so a
-// static-style call (no instance) can never satisfy that required
-// parameter -- it always fails with a wrong-arity error, regardless of
-// what arguments are given. Calling the SAME method through a real
-// instance (`instance.method(...)`) works fine (see the companion
+// type via GlobalSymbolTable). This test now specifically pins down a
+// DIFFERENT, still-true fact: a `fn StructName.method(...)` declaration
+// (dot form) is always an INSTANCE method -- ParseFuncDef() unconditionally
+// injects a `self` parameter for it, with no opt-out -- so calling it via
+// the bare struct TYPE NAME with '.' syntax (no instance) can never satisfy
+// that required parameter and always fails with a wrong-arity error,
+// regardless of what arguments are given. Calling the SAME method through a
+// real instance (`instance.method(...)`) works fine (see the companion
 // non-fail test using an instance instead).
+//
+// True static methods DO now exist as a separate, deliberate declaration
+// form: `fn StructName::method(...)` (the '::' form -- no `self` injected
+// at all), callable only as `StructName::method(args)`. See
+// tests/07_functions_modules/scope_static_method*.tr for that feature's own
+// regression tests. This file is unaffected by that feature's existence: it
+// specifically exercises the OLD dot-declared instance method called the
+// wrong way, not the new syntax.
 
 struct MathUtil {
     dummy: int

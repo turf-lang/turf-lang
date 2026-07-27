@@ -112,13 +112,15 @@ A **diamond** (two modules both importing the same third module) is not a cycle 
 |---|---|
 | `ModuleNotFoundError` | `import xyz;` and no `xyz.tr` exists anywhere on the search path |
 | `CircularImportError` | A module import chain loops back on itself |
-| `UnknownScopeQualifierError` | `Left::Right` where `Left` is neither a known enum nor a known module |
-| `UnknownModuleSymbolError` | `import module::symbol;` (or a qualified type/construction) names a symbol the module doesn't actually have |
+| `UnknownScopeQualifierError` | `Left::Right` where `Left` is neither a known enum, struct, nor module |
+| `UnknownModuleSymbolError` | `import module::symbol;` (or a qualified type/construction/static-method-call qualifier) names a symbol/owner the module doesn't actually have |
 | `ImportSymbolCollisionError` | Two on-demand imports flatten two different symbols under one bare name |
 | `UnknownFunctionError` | A bare call that isn't a local declaration, self-reference, or on-demand import |
 | `ModuleMethodNotFoundError` | `Module::func(...)` where `Module` is real but has no function named `func` |
+| `StructMethodNotFoundError` | `StructName::method(...)` where `StructName` is real but has no method (static or instance) by that name |
+| `UnqualifiedTypeNotVisibleError` | A real struct/enum type referenced bare, but not visible from this file/module (2.7.1) |
 | `UnknownTypeError` | A type name (bare or generic base name) that doesn't exist as a struct/enum/primitive anywhere |
-| `TypeError` (two shapes) | Calling an enum variant as a function; using a module reference as a bare value |
+| `TypeError` (several shapes) | Calling an enum variant as a function; using a module or static-method reference as a bare value; a module name nonsensically qualified by another module name (`Module::Module2::func(...)`) |
 
 ---
 
@@ -263,11 +265,15 @@ A related bug was found and fixed alongside this: `registerOnDemandImports()`'s 
 
 **`visitFuncCall()`** (`src/Resolver.cpp:706-...`) branches on the callee's AST shape:
 - `VariableExprAST` (bare call) → `CurrentFileMatches` from `CurrentFileFunctions_`; `ModuleMatches` from **two** sources ORed together: (a) `findInModules()` filtered to `currentModuleName()` (self-reference, empty string = main file = never matches, correctly), and (b) `lookupFlatFunctionImport(currentModuleName(), CalleeName)` (on-demand imports for this exact context).
-- `ScopeAccessExprAST` (`Module::func(...)`) → if `LeftName` is a known enum, `TypeError` (variants aren't callable); if `LeftName` isn't a known module either, `UnknownScopeQualifierError`; otherwise `ModuleMatches` comes from `findInModules()` filtered to the **explicit** `LeftName` (no self-reference concept needed — the module is stated outright), and `Node.ResolvedKind = ModuleFunctionRef`. If the module is real but has no function named `func` at all (`CurrentFileMatches`/`ModuleMatches` both empty and `ResolvedKind == ModuleFunctionRef`), `ModuleMethodNotFoundError` is raised directly, with suggestions ranked from `getModuleFunctionNames(LeftName)` — this specific branch previously existed as dead code (the error class was defined but nothing constructed/raised it), so a call to a nonexistent module function fell through to a generic, less-specific diagnostic instead.
+- `ScopeAccessExprAST` (`Left::Right(...)`) → dispatches on what `LeftName` actually is, in order:
+  1. Known enum → `TypeError` (variants aren't callable).
+  2. Known struct → **`StaticMethodRef`** (2.8.1 below) — a true static method call, no instance.
+  3. Known module → `ModuleFunctionRef` — `ModuleMatches` from `findInModules()` filtered to the **explicit** `LeftName` (no self-reference concept needed — the module is stated outright). If the module is real but has no function named `func` at all, `ModuleMethodNotFoundError` is raised directly, with suggestions ranked from `getModuleFunctionNames(LeftName)` — this specific branch previously existed as dead code (the error class was defined but nothing constructed/raised it), so a call to a nonexistent module function fell through to a generic, less-specific diagnostic instead.
+  4. Neither → `UnknownScopeQualifierError`.
 
-Both paths then share the exact same downstream arity-check/`ResolvedCandidates`-population code (`src/Resolver.cpp` continues past line ~760) — the callee-shape branching only decides *where `ModuleMatches` comes from*, not how it's used afterward.
+Both the struct and module branches then share the exact same downstream arity-check/`ResolvedCandidates`-population code (`src/Resolver.cpp` continues past line ~760) — the callee-shape branching only decides *where `ModuleMatches`/`CurrentFileMatches` come from*, not how they're used afterward.
 
-**`visitScopeAccess()`** (`src/Resolver.cpp:1094-...`) handles a `ScopeAccessExprAST` reached as an ordinary expression (i.e. **not** as a call's direct callee — that's the branch above, which never even calls this): enum-variant validation (unchanged from the enum-only era) if `LeftName` is a known enum; `TypeError` ("no first-class functions") if it's a known module instead; `UnknownScopeQualifierError` if neither.
+**`visitScopeAccess()`** (`src/Resolver.cpp:1136-...`) handles a `ScopeAccessExprAST` reached as an ordinary expression (i.e. **not** as a call's direct callee — that's the branch above, which never even calls this): enum-variant validation (unchanged from the enum-only era) if `LeftName` is a known enum; `TypeError` ("no first-class functions") if it's a known module or a known struct instead (the struct case: `StructName::method` referenced without being called — same "no first-class functions" reasoning as the module case); `UnknownScopeQualifierError` if none of the three.
 
 **`validateNamedType()`** (`src/Resolver.cpp:1167-1263`) — called for every type annotation (params, return types, fields, var decls). For a `GenericType`, now validates the base name itself (previously only recursed into type *arguments* — `NonExistentGeneric<int>` used to silently pass) *and* calls `validateModuleQualifier()` on it; for a `NamedType`, the existing `isKnownStruct`/`isEnumName` check is unchanged, with `validateModuleQualifier()` called afterward if the name resolved.
 
@@ -286,6 +292,20 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
 **`visitStructInit()`** (`src/Resolver.cpp:1379-...`) calls `validateModuleQualifier()` for the qualified form, or (since 2.7.1) `isTypeVisibleUnqualified()` for the bare form when `Node.getName()` is a known struct. Note this function still does **not** validate that `Node.getName()` is a real struct at all for the *unqualified* form when it ISN'T a known struct — that's a separate, pre-existing gap (5.2), not addressed by this work (a totally nonexistent bare struct name currently reaches an unrelated error path). The qualifier check happens to still produce a sensible error even then, since an unknown type name has no owning module and therefore can never equal a real `Qualifier`.
 
 **`visitModuleImport()`** (`src/Resolver.cpp:1384-...`) pushes/pops `ModuleStack_`, the backing store for `currentModuleName()` (`include/Resolver.h:199-201`, `ModuleStack_.empty() ? "" : ModuleStack_.back()`) — the single source of truth for "which module's body is Pass 2 currently walking through", consulted by both the self-reference check above and every `registerOnDemandImports()` call's `ContextLabel`.
+
+### 2.8.1 True static struct methods
+
+`fn StructName::method(...)` — note `::`, not `.` — declares a genuine static method: no implicit `self` parameter at all, callable only as `StructName::method(args)`, never through an instance.
+
+**Declaration** (`ParseFuncDef()`, `src/Parser.cpp:2091-...`): the existing `.`-branch (instance method: `StructName = FuncName; FuncName = StructName + "." + method`, then unconditionally injects `self: StructName*` as parameter 0) gets a parallel `TOK_SCOPE` branch — same `FuncName = StructName + "." + method` internal registration (methods of one struct, static or instance, share ONE flat name — the `.`-joined internal name is an implementation detail, never user-visible), but the `self`-injection block is skipped entirely (`!StructName.empty() && !IsStaticMethodDecl`). Reusing the exact same internal name means overload resolution, mangling, and forward-reference tolerance all fall out for free — a static and instance method of the same name on the same struct simply become different-arity overloads of one registered name (the presence/absence of `self` as parameter 0 is what actually distinguishes them at the call site, not any separate "is static" flag).
+
+**Call resolution** (`visitFuncCall()`, 2.8): when `LeftName` is a known struct, `Node.ResolvedKind = StaticMethodRef` and the lookup is byte-identical to the `ModuleFunctionRef` case — `getTypeOwningModule(LeftName)` gives the owning context ("" = main file, else a real module), then either `lookupCurrentFileFunctions("StructName.method")` or `findInModules("StructName.method")` filtered to that owning module. Not-found reuses `StructMethodNotFoundError` — the SAME class the ordinary `instance.method()` not-found path already raised (via `TypeChecker::visitMethodCall`) — for one consistent message regardless of which call form was used; its hint now explains both the `.` and `::` declaration forms since it's shared between them.
+
+**Qualified access is existence-only, not visibility-gated** — `StructName::method(...)` only requires `isKnownStruct(LeftName)`, exactly like a qualified type annotation (2.7.1) bypasses the bare-type-visibility gate. A plain `import Module;` (bare form, no symbol) is enough to call `Module::StructName::method(...)` or (once the struct itself is bare-visible, e.g. via `import Module::StructName;`) the shorter `StructName::method(...)`.
+
+**Codegen needs zero changes.** `FuncCallExprAST::codegen()` for a `ScopeAccessExprAST` callee (2.10) never distinguishes `ModuleFunctionRef` from `StaticMethodRef` at all — it evaluates `Args` exactly as written (no implicit prepending) and calls whatever `ResolvedCallTarget->mangledName()` resolves to. Static methods "just work" once the Resolver sets `ResolvedCallTarget` correctly, the same way `ModuleFunctionRef` already did.
+
+**A 3-part chain's leading `ModuleQualifier` is validated, not ignored** — `Module::StructName::method(...)` re-validates `ModuleQualifier` via `validateModuleQualifier()` (does `Module` exist, does it actually own `StructName`) before proceeding. Two related bugs were found and fixed while wiring this up, both from the SAME root cause (the parser's 3-part-chain reinterpretation, 2.3, lands the leading name in `ModuleQualifier` — but until now, NOTHING in `visitFuncCall` ever read that field for a call callee, for either the struct or the plain-module case): `mem::Vec2::zero()` used to compile cleanly even when `Vec2` actually lives in a different module (the wrong qualifier was silently ignored, only `LeftName`/`RightName` mattered); and `mem::io::printline(...)` — a module name nonsensically qualified by ANOTHER module name, which has no defined meaning at all — also used to compile identically to plain `io::printline(...)`. Both now raise a clean, specific error instead of silently discarding the (wrong or meaningless) qualifier.
 
 ### 2.9 TypeChecker layer
 
@@ -344,9 +364,9 @@ Contrast with `input()` (never on-demand-imported in this file): step 4's on-dem
 
 ## Part 5 — Known limitations, deliberately deferred
 
-### 5.1 No true static struct methods
+### 5.1 (Resolved) No true static struct methods
 
-`ScopeAccessKind` reserves a `StaticMethodRef` case (commented out, not implemented) for `StructName::method(...)` with no instance — a separate, older, independently-tracked finding: `ParseFuncDef()` unconditionally injects a `self` parameter into every `fn StructName.method(...)` declaration with no opt-out, so even once `::` can *parse* a static-style call, it will still fail arity-checking. Implementing real static methods needs that parser-level change first; this work only reserved the namespace-resolution slot for it.
+Previously documented here as a known limitation — fixed; see 2.8.1. `fn StructName::method(...)` (note `::`) now declares a genuine static method, callable as `StructName::method(args)` with no instance. Left as a pointer rather than deleted outright, same rationale as 5.3 below.
 
 ### 5.2 Unqualified struct-literal construction of a nonexistent struct
 

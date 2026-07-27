@@ -880,12 +880,7 @@ enum class ScopeAccessKind {
     EnumVariant,      // Color::Red
     ModuleFunctionRef, // io::printline (as a call target)
     ModuleTypeRef,     // list::List<int> (in type position)
-    // StaticMethodRef is deliberately not a case yet -- true static struct
-    // methods (StructName::method(...)) are a known, separate, deferred
-    // language feature (see the crash-fix + "no true static methods"
-    // finding this was built on top of). This enum's shape reserves the
-    // natural slot for it without disturbing anything else once that
-    // lands.
+    StaticMethodRef,   // StructName::method(...) (as a call target, no instance)
 };
 
 // `Left::Right` -- the general namespace-resolution operator. Originally

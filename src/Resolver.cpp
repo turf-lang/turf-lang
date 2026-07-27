@@ -812,22 +812,75 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       return;
     }
 
-    if (!SymTable_.hasModule(LeftName)) {
+    if (SymTable_.isKnownStruct(LeftName)) {
+      // `StructName::method(args)` -- a true STATIC method call: no
+      // instance involved at all (unlike `instance.method(args)`, handled
+      // entirely separately by visitMethodCall/MethodCallExprAST). A
+      // static method is registered under the exact same "StructName.method"
+      // internal name an INSTANCE method would be (see ParseFuncDef()'s
+      // `::`-declaration branch), just without a `self` parameter -- so the
+      // lookup here is byte-identical to the ModuleFunctionRef branch below,
+      // just scoped to the struct's OWNING module (main file "" or a real
+      // module name) instead of a qualifier that names a module directly.
+      // Qualified access is never gated by bare-type visibility (2.7.1 in
+      // the architecture doc) -- isKnownStruct() alone (existence) is the
+      // only requirement, exactly like a qualified type annotation.
+      ScopeCallee->ResolvedKind = ScopeAccessKind::StaticMethodRef;
+      // `Module::StructName::method(...)` -- the parser reinterprets a
+      // second consecutive '::' the same way it does for
+      // Module::EnumName::Variant (see ParsePrimaryBase()'s TOK_SCOPE
+      // branch), landing the leading module name in ModuleQualifier rather
+      // than LeftName/RightName. Without this check, a WRONG qualifier
+      // (`mem::Vec2::zero()` when Vec2 actually lives in a different
+      // module) was silently ignored entirely -- LeftName/RightName alone
+      // determine the lookup below, and ModuleQualifier was never
+      // consulted, so any qualifier (right or wrong) produced the same
+      // result. Confirmed live before this check existed.
+      if (!validateModuleQualifier(ScopeCallee->getModuleQualifier(), LeftName,
+                                   Node.getLoc()))
+        return;
+      const std::string OwningModule = SymTable_.getTypeOwningModule(LeftName);
+      const std::string MethodKey = LeftName + "." + CalleeName;
+      if (OwningModule.empty()) {
+        CurrentFileMatches = SymTable_.lookupCurrentFileFunctions(MethodKey);
+      } else {
+        for (const auto &Match : SymTable_.findInModules(MethodKey))
+          if (Match.ModuleName == OwningModule)
+            ModuleMatches.push_back(Match);
+      }
+    } else if (!SymTable_.hasModule(LeftName)) {
       RankedSuggestions QualifierSuggestions;
       auto EnumSugg = SuggestionIndex::suggestVisible(LeftName, SymTable_.getAllEnumNames());
       for (const auto &S : EnumSugg)
         QualifierSuggestions.Local.push_back(S + "::" + CalleeName);
       UnknownScopeQualifierError(Node.getLoc(), LeftName, QualifierSuggestions).raise();
       return;
+    } else {
+      ScopeCallee->ResolvedKind = ScopeAccessKind::ModuleFunctionRef;
+      // A 3-part `ModuleQualifier::LeftName::RightName` chain only has a
+      // defined meaning when LeftName is an enum or struct (Module owns
+      // it -- validated above/below); modules aren't nested inside other
+      // modules via '::' at all, so a qualifier here is always meaningless.
+      // Without this check it was silently IGNORED entirely -- LeftName
+      // alone determined the lookup, so `mem::io::printline(...)` compiled
+      // identically to `io::printline(...)` regardless of what the leading
+      // qualifier said. Confirmed live before this check existed.
+      if (!ScopeCallee->getModuleQualifier().empty()) {
+        TypeError(Node.getLoc(), "'" + ScopeCallee->getModuleQualifier() +
+                                     "::" + LeftName +
+                                     "' -- modules can't be qualified by "
+                                     "another module; just write '" +
+                                     LeftName + "::" + CalleeName + "(...)'.")
+            .raise();
+        return;
+      }
+      // Explicit qualification means the search is scoped to EXACTLY the
+      // named module -- no self-reference concept applies here, unlike the
+      // bare-call case above.
+      for (const auto &Match : SymTable_.findInModules(CalleeName))
+        if (Match.ModuleName == LeftName)
+          ModuleMatches.push_back(Match);
     }
-
-    ScopeCallee->ResolvedKind = ScopeAccessKind::ModuleFunctionRef;
-    // Explicit qualification means the search is scoped to EXACTLY the
-    // named module -- no self-reference concept applies here, unlike the
-    // bare-call case above.
-    for (const auto &Match : SymTable_.findInModules(CalleeName))
-      if (Match.ModuleName == LeftName)
-        ModuleMatches.push_back(Match);
   }
 
   if (CurrentFileMatches.empty() && ModuleMatches.empty()) {
@@ -845,6 +898,29 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       Suggestions.Local = SuggestionIndex::suggestVisible(
           CalleeName, SymTable_.getModuleFunctionNames(LeftName));
       ModuleMethodNotFoundError(Node.getLoc(), LeftName, CalleeName, Suggestions).raise();
+      return;
+    }
+
+    // Same idea as ModuleMethodNotFoundError above, for the struct case:
+    // `StructName::method(...)` where StructName is real but has no
+    // (static OR instance -- either would show up here, since both share
+    // the "StructName.method" registration name) method by that name.
+    // Reuses StructMethodNotFoundError, the exact class the INSTANCE
+    // (`instance.method()`) not-found path already raises, for one
+    // consistent message regardless of which call form the user wrote.
+    if (ScopeCallee && ScopeCallee->ResolvedKind == ScopeAccessKind::StaticMethodRef) {
+      const std::string &LeftName = ScopeCallee->getLeftName();
+      const std::string Prefix = LeftName + ".";
+      std::vector<std::string> AllNames = SymTable_.getAllCurrentFileFunctionNames();
+      std::vector<std::string> ModuleNames = SymTable_.getAllModuleFunctionNames();
+      AllNames.insert(AllNames.end(), ModuleNames.begin(), ModuleNames.end());
+      std::vector<std::string> BareMethodNames;
+      for (const auto &N : AllNames)
+        if (N.size() > Prefix.size() && N.compare(0, Prefix.size(), Prefix) == 0)
+          BareMethodNames.push_back(N.substr(Prefix.size()));
+      RankedSuggestions Suggestions;
+      Suggestions.Local = SuggestionIndex::suggestVisible(CalleeName, BareMethodNames);
+      StructMethodNotFoundError(Node.getLoc(), LeftName, CalleeName, Suggestions).raise();
       return;
     }
 
@@ -1163,6 +1239,19 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
   if (SymTable_.hasModule(LeftName)) {
     // A module name IS real, but referencing `module::function` without
     // calling it has no meaning in this language yet.
+    TypeError(Node.getLoc(), "'" + LeftName + "::" + RightName +
+                                 "' can't be used as a value -- functions "
+                                 "aren't first-class yet, only calls like '" +
+                                 LeftName + "::" + RightName + "(...)' work.")
+        .raise();
+    return;
+  }
+
+  if (SymTable_.isKnownStruct(LeftName)) {
+    // A struct name IS real, but referencing `StructName::method` without
+    // calling it has no meaning either -- same "no first-class functions"
+    // rule as the module case just above, worded for the static-method form.
+    Node.ResolvedKind = ScopeAccessKind::StaticMethodRef;
     TypeError(Node.getLoc(), "'" + LeftName + "::" + RightName +
                                  "' can't be used as a value -- functions "
                                  "aren't first-class yet, only calls like '" +

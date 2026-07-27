@@ -1,0 +1,16 @@
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+fn Vec2::zero(): Vec2 {
+    return Vec2 { x: 0, y: 0 };
+}
+
+fn Vec2::make(x: int, y: int): Vec2 {
+    return Vec2 { x: x, y: y };
+}
+
+fn Vec2.length2(): int {
+    return self.x * self.x + self.y * self.y;
+}

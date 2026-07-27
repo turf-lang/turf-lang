@@ -2129,12 +2129,29 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   std::string FuncName = IdentifierStr;
   getNextToken();
   std::string StructName = "";
+  bool IsStaticMethodDecl = false;
 
   if (CurTok == '.') {
     StructName = FuncName;
     getNextToken(); // eat '.'
     if (CurTok != TOK_IDENTIFIER) {
       LogErrorAt(CurLoc, "Expected method name after '.'");
+      return nullptr;
+    }
+    FuncName = StructName + "." + IdentifierStr;
+    getNextToken();
+  } else if (CurTok == TOK_SCOPE) {
+    // `fn StructName::method(...)` -- a true STATIC method: no implicit
+    // `self` parameter, callable only as `StructName::method(args)` (never
+    // through an instance). Mirrors the '.' instance-method form above in
+    // every other respect (internal registration name, overloading,
+    // forward-reference tolerance) -- see the `!StructName.empty()`
+    // self-injection block below, which this deliberately skips.
+    StructName = FuncName;
+    IsStaticMethodDecl = true;
+    getNextToken(); // eat '::'
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc, "Expected a static method name after '::'");
       return nullptr;
     }
     FuncName = StructName + "." + IdentifierStr;
@@ -2149,7 +2166,7 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   getNextToken(); // eat '('
 
   std::vector<ParamDecl> Params;
-  if (!StructName.empty()) {
+  if (!StructName.empty() && !IsStaticMethodDecl) {
     // Build 'self' as a pointer to a lazy NamedType(StructName) placeholder
     // rather than eagerly resolving StructName via GlobalSymbolTable here.
     //
