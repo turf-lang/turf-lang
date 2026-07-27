@@ -69,31 +69,21 @@ mut parts: List<string> = strings::split("127.0.0.1", ".");
 
 ### 2.3 `mem` — reasonably complete for a low-level module
 
-The checked wrappers (`alloc`/`alloc_zeroed`/`grow`/`dup`/`zero`) cover the common cases well. What's missing is higher-level and explicitly **not urgent** — it's Phase-4-memory-model-adjacent (`docs/planning/MEMORY_ARCHITECTURE_RFC.md`), not a gap in today's manual-memory story:
-- Arena/pool allocators (bulk-allocate, free all at once on scope exit) — most valuable *after* there's a language-level hook (scope-exit/`defer`) to drive the "free all at once" trigger automatically.
+The checked wrappers (`alloc`/`alloc_zeroed`/`grow`/`dup`/`zero`/`alloc_aligned`/`usable_size`) cover the common cases well, plus a bulk-free `Pool<T>` (track a batch of allocations, `free_pool()` them all at once) added 2026-07-27 -- an honest stopgap for the "free everything at scope exit" pattern, not a step toward real ARC. What's left is higher-level and explicitly **not urgent** — it's Phase-4-memory-model-adjacent (`docs/planning/MEMORY_ARCHITECTURE_RFC.md`), not a gap in today's manual-memory story:
+- A real arena allocator (single contiguous bump-allocated region, not just a tracked list of individual `malloc`s like `Pool<T>`) — most valuable *after* there's a language-level hook (scope-exit/`defer`) to drive the "reset the arena" trigger automatically.
 - Reference counting helpers — redundant work if/when ARC lands as a language feature per the RFC; don't build a parallel stdlib-level ref-counting scheme in the meantime.
 
-### 2.4 `math` — missing constants, blocked on a real language gap
+### 2.4 `math` — missing constants, no longer blocked
 
 Every libm binding needed (`sin`/`cos`/`tan`/`sqrt`/`floor`/`ceil`/`round`/`log`/`exp`/etc.) is already declared via `extern from "m" fn` — genuinely nothing to add there, they're just not yet re-exposed as ordinary Turf-named wrappers the way `abs`/`power` are (a small, mechanical addition: `fn sqrt(x: double): double { return sqrt(x); }`-shaped one-liners for each, since the raw `extern fn` names are currently only reachable if the caller somehow already knows they exist and imports them directly, which defeats the point of a clean module surface).
 
-**Blocked on a language gap, not a stdlib gap:** `PI`/`E` constants. Turf has **no way to declare a top-level module constant at all** — `immut NAME: int = value;` outside a function is a parse error (confirmed directly this session, hit while writing `net.tr`). Every module that wants a named constant today must either inline the literal at every use site (what `net.tr` does for `AF_INET`/`SOCK_STREAM`/etc., with a comment explaining why) or expose a zero-argument getter function (`fn PI(): double { return 3.14159265358979; }`, called as `math::PI()`) as the only current workaround. Worth fixing at the language level (see `docs/planning/CODE_REVIEW_GAPS_2026-07.md`) before `math` grows many constants, since a function-call spelling for a mathematical constant is a permanent, mildly awkward wart otherwise.
+**DONE (2026-07-27):** top-level module constants. `export immut NAME: TYPE = LITERAL;` now exists as a real language feature — see `docs/architecture/modules_and_scope_resolution.md` section 1.7. `net.tr`'s `AF_INET`/`SOCK_STREAM`/`SOL_SOCKET`/`SO_REUSEADDR` were migrated off inline literals onto real named `export immut` constants as the first real user of this. `math::PI`/`math::E` are a natural, trivial next addition now that the language supports it — not yet added (no code currently needs them), but no longer blocked on anything.
 
-### 2.5 `list` / `stack` / `queue` — the missing type is a map
+### 2.5 `list` / `stack` / `queue` — the missing type was a map
 
-**Missing, high value — nothing like this exists at all:** a `map`/dictionary/hash-table generic type (`Map<K, V>`). This is arguably the single highest-value addition across the entire stdlib — almost every non-trivial real program needs key-value lookup somewhere (routing tables, caches, counting/grouping, config), and today there is no way to build one without hand-rolling parallel `List<K>`/`List<V>` arrays and linear-scanning them.
-```turflang
-struct Map<K, V> {
-    keys: List<K>,
-    vals: List<V>
-    // or a real hash-table layout once one exists; linear-scan parallel
-    // lists is a legitimate, honest FIRST implementation given List<T>
-    // already exists and works
-}
-fn<K, V> Map.get(key: K): V { ... }
-fn<K, V> Map.set(key: K, val: V): void { ... }
-fn<K, V> Map.contains(key: K): bool { ... }
-```
+**DONE (2026-07-27):** `Map<K, V>` — `lib/std/map.tr`, linear-scan over two parallel type-erased arrays (`keys`/`values`), the same proven pattern `List<T>` already uses, doubled rather than risking an unexercised nested-generic `Entry<K,V>` struct. `put`/`get`/`contains`/`remove`/`length`, `get` on a missing key `fail()`s (mirrors `List.pop()` on empty). Not hashed — there's no generic `hash(T)` in the language yet, so lookup is O(n); a real `HashMap<K,V>` is a natural separate future addition once hashing exists. Tests: `tests/07_functions_modules/09_stdlib_map.tr`, `fail_map_get_missing_key.tr`.
+
+Found and fixed a real, pre-existing compiler bug while building this (unrelated to `Map` itself, but only surfaced by actually calling a generic method with a `double` argument, e.g. `Map<K, V>.put(key, 1.5)`): `MethodCallExprAST::codegen()`'s argument-casting loop was missing the "erase a `double` argument into an opaque generic-parameter slot" case entirely, silently falling through to an illegal `bitcast double to ptr`. Confirmed this affected `List<double>.push(...)` too, not just `Map`. Fixed in both this method-call path and the parallel struct-`init()`-call path. Regression: `tests/07_functions_modules/10_generic_double_erasure.tr`.
 
 **Missing, medium value:**
 - A `Set<T>` type — same underlying need (fast membership test) as `Map`, could plausibly share implementation once `Map` exists.
@@ -128,10 +118,10 @@ Everything here is a natural "next" rather than an urgent gap — the module is 
 
 **Blocking / near-term (small, concrete, already-identified gaps with real programs depending on them):**
 1. `strings::split` — directly blocked real code this session (`net.tr`'s IP handling).
-2. `Map<K, V>` — the single most obviously-missing data structure; unblocks a huge fraction of "real" programs.
-3. `io` file I/O (`read_to_string` especially) — no file access at all today is a hard ceiling on usefulness.
-4. `os` (env vars + argv) — no Turf program can currently be configured or invoked with arguments.
-5. Top-level module constants (language-level fix, not stdlib) — currently forces every stdlib module needing a named constant into an awkward workaround; unblocks `math::PI`/`math::E` and cleans up `net.tr`'s existing inline-literal workaround.
+2. `io` file I/O (`read_to_string` especially) — no file access at all today is a hard ceiling on usefulness.
+3. `os` (env vars + argv) — no Turf program can currently be configured or invoked with arguments.
+
+(`Map<K, V>` and top-level module constants, both formerly listed here, are DONE — see §2.5 and §2.4 above.)
 
 **High-value, natural next steps (larger but well-understood, no open design questions):**
 - `http.tr` built on the now-working `net.tr`.

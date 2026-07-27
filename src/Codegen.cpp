@@ -3836,6 +3836,19 @@ Value *MethodCallExprAST::codegen() {
           V = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext));
           V = Builder->CreateBitCast(V, ExpectedTy, "argcast_dbl");
         }
+        // The reverse direction (erasing a `double` argument INTO an opaque
+        // generic-parameter slot, e.g. calling Map<K,V>.put(key, 1.5) where
+        // V is type-erased to `ptr`) was missing entirely -- confirmed via a
+        // real crash: `bitcast double to ptr` is illegal LLVM IR (bitcast
+        // never converts between float and pointer types, only same-size
+        // int-like/pointer-like ones), which the catch-all `else` branch
+        // below produced unconditionally for this combination. Fixed by
+        // mirroring CastToType()'s own generic-erasure branch exactly:
+        // double -> i64 (bitcast, same width) -> ptr (inttoptr).
+        else if (ExpectedTy->isPointerTy() && V->getType()->isDoubleTy()) {
+          V = Builder->CreateBitCast(V, Type::getInt64Ty(*TheContext), "argcast_dbl_to_i64");
+          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_erase_dbl");
+        }
         else
           V = Builder->CreateBitCast(V, ExpectedTy, "argcast_bit");
       }
@@ -4149,6 +4162,14 @@ Value *StructInitExprAST::codegen() {
         else if (ExpectedTy->isDoubleTy() && V->getType()->isPointerTy()) {
           V = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext));
           V = Builder->CreateBitCast(V, ExpectedTy, "argcast_dbl");
+        }
+        // See the matching fix on MethodCallExprAST's argument-casting loop
+        // above for why this branch is needed: erasing a `double` argument
+        // into an opaque generic-parameter `init(...)` field is the same
+        // missing case, same illegal-bitcast crash.
+        else if (ExpectedTy->isPointerTy() && V->getType()->isDoubleTy()) {
+          V = Builder->CreateBitCast(V, Type::getInt64Ty(*TheContext), "argcast_dbl_to_i64");
+          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_erase_dbl");
         } else
           V = Builder->CreateBitCast(V, ExpectedTy, "argcast_bit");
       }

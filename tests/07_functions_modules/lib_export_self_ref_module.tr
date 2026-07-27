@@ -1,0 +1,15 @@
+// Helper module for export_self_reference_within_module.tr. Named
+// *_module.tr so scripts/test_runner.sh excludes it from standalone runs.
+// Mirrors a real bug found in lib/std/net.tr: a bare reference to an
+// `export immut` constant from within a FREE FUNCTION in the SAME module
+// (not a struct method, not the main file) failed to resolve, because
+// Resolver::visitVariable() only checked the main-file constant registry
+// and on-demand imports -- never a module's OWN constant referenced from
+// inside that same module's own body (the constant equivalent of bare
+// function self-reference).
+
+export immut SCALE: int = 10;
+
+fn scaleUp(x: int): int {
+    return x * SCALE;
+}

@@ -51,13 +51,12 @@ extern fn close(fd: int): int;
 extern fn setsockopt(fd: int, level: int, optname: int, optval: void*, optlen: int): int;
 extern fn strlen(s: string): int;
 
-// Named POSIX constants (AF_INET=2, SOCK_STREAM=1, SOL_SOCKET=1,
-// SO_REUSEADDR=2) are inlined directly at each use site below rather than
-// declared once up here -- Turf doesn't currently support a top-level
-// `immut` module-level constant (only functions/structs/enums/externs/
-// imports are valid at file scope; a bare `immut NAME: int = value;`
-// outside any function is a parse error). Tracked as a real stdlib/
-// language gap in docs/planning/CODE_REVIEW_GAPS_2026-07.md.
+// Named POSIX constants, exported so callers of net.tr could reference them
+// too if they ever needed to (e.g. a future UdpSocket built the same way).
+export immut AF_INET: int = 2;
+export immut SOCK_STREAM: int = 1;
+export immut SOL_SOCKET: int = 1;
+export immut SO_REUSEADDR: int = 2;
 
 // Builds a 16-byte `struct sockaddr_in` memory image for address a.b.c.d
 // (all zero = INADDR_ANY, "any local interface") on the given port, ready
@@ -81,7 +80,7 @@ fn buildSockAddr(a: int, b: int, c: int, d: int, port: int): void* {
     immut portHigh: int = (port / 256) % 256;
     immut portLow: int = port % 256;
     immut addrPart: int = a + (b * 256) + (c * 65536) + (d * 16777216);
-    immut packed: int = 2 + (portHigh * 65536) + (portLow * 16777216) + (addrPart * 4294967296); // 2 = AF_INET
+    immut packed: int = AF_INET + (portHigh * 65536) + (portLow * 16777216) + (addrPart * 4294967296);
     iaddr[0] = packed;
 
     return addr;
@@ -99,7 +98,7 @@ struct TcpConnection {
 
 // Dial out to a.b.c.d:port. Aborts with a clear message on failure.
 fn TcpConnection::connect(a: int, b: int, c: int, d: int, port: int): TcpConnection {
-    mut fd: int = socket(2, 1, 0); // AF_INET, SOCK_STREAM
+    mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
     assert(fd >= 0, "net::TcpConnection::connect: socket() failed");
 
     mut addr: void* = buildSockAddr(a, b, c, d, port);
@@ -153,13 +152,13 @@ struct TcpListener {
 // in use" while the previous socket lingers in TIME_WAIT. Aborts with a
 // clear message on failure.
 fn TcpListener::bind(port: int): TcpListener {
-    mut fd: int = socket(2, 1, 0); // AF_INET, SOCK_STREAM
+    mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
     assert(fd >= 0, "net::TcpListener::bind: socket() failed");
 
     mut optVal: void* = mem::alloc(8);
     mut iOpt: int* = optVal to int*;
     iOpt[0] = 1;
-    setsockopt(fd, 1, 2, optVal, 4); // SOL_SOCKET, SO_REUSEADDR
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, optVal, 4);
     mem::free(optVal);
 
     mut addr: void* = buildSockAddr(0, 0, 0, 0, port);

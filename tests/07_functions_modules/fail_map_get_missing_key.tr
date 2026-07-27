@@ -1,0 +1,11 @@
+// RUNTIME_ABORT_EXPECTED
+// Map.get() on a key that was never put() must fail() at runtime (mirrors
+// List.pop() on an empty list) -- this is otherwise valid, compiling code.
+import map::Map;
+
+fn main(): int {
+    mut m: Map<string, int>;
+    m.put("a", 1);
+    m.get("nope");
+    return 0;
+}

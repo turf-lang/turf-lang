@@ -619,15 +619,26 @@ void Resolver::visitVariable(VariableExprAST &Node) {
   // Bare reference to an `export immut` constant -- checked AFTER ordinary
   // scoped variables (a local shadowing an exported name is not an error,
   // same shadowing rule as everywhere else) and BEFORE the ReferenceError
-  // fallback. Two sources, mirroring bare function-call resolution exactly:
-  // this file's own exported constants (self-reference, always visible, no
-  // import needed), then on-demand-imported ones (registerFlatConstantImport,
-  // via `import module::CONST;`).
+  // fallback. Three sources, mirroring bare function-call resolution
+  // exactly: this file's own exported constants (self-reference, always
+  // visible, no import needed), a MODULE's own exported constants
+  // referenced bare from within that same module's own body (e.g. net.tr's
+  // buildSockAddr() using its own AF_INET bare -- the same self-reference
+  // rule visitFuncCall already gives functions, via currentModuleName()),
+  // then on-demand-imported ones (registerFlatConstantImport, via
+  // `import module::CONST;`).
   if (const auto *Const = SymTable_.lookupCurrentFileConstant(Node.getName())) {
     Node.ResolvedConstant = Const;
     return;
   }
-  if (const auto *Flat = SymTable_.lookupFlatConstantImport(currentModuleName(), Node.getName())) {
+  const std::string &SelfModule = currentModuleName();
+  if (!SelfModule.empty()) {
+    if (const auto *Const = SymTable_.findModuleConstant(SelfModule, Node.getName())) {
+      Node.ResolvedConstant = Const;
+      return;
+    }
+  }
+  if (const auto *Flat = SymTable_.lookupFlatConstantImport(SelfModule, Node.getName())) {
     if (const auto *Const = SymTable_.findModuleConstant(Flat->SourceModule, Node.getName())) {
       Node.ResolvedConstant = Const;
       return;
