@@ -150,3 +150,38 @@ Everything here is a natural "next" rather than an urgent gap — the module is 
 - Non-blocking/concurrent networking (needs a concurrency story in the language first — none exists today).
 - Arena allocators / ref-counting helpers in `mem` (Phase-4-memory-model-adjacent; wait for that RFC's direction).
 - `turf test` (compiler-level, tracked separately in `docs/planning/ROADMAP_v1.0.0.md` Phase 6).
+
+---
+
+## 4. RFC Coverage Plan
+
+What it would concretely take to deliver on each of the three standing RFCs (`STDLIB_AND_WEB_RFC.md`, `ERROR_HANDLING_RFC.md`, `MEMORY_ARCHITECTURE_RFC.md`), given what's real today vs. what's still blocked on a language feature that doesn't exist yet. Planning only — nothing in this section is implemented.
+
+### 4.1 `STDLIB_AND_WEB_RFC.md` — buildable NOW, in layers
+
+The RFC's own example code (`app.get("/", fn(req, res): void {...})`, callback-based routing) needs **first-class functions as values**, which don't exist yet (`ROADMAP_v1.0.0.md` Issue #187, still open) — so the *literal* syntax sketched in that RFC isn't reachable yet. But the underlying capability — a real HTTP layer — doesn't need to wait for that. A realistic build order, each layer genuinely shippable on its own:
+
+1. **`http.tr`, request/response structs + manual if/elseif routing** (buildable today, on top of the now-working `net.tr`):
+   ```turflang
+   struct Request { method: string, path: string, headers: string, body: string }
+   struct Response { conn: net::TcpConnection }
+
+   fn parse_request(conn: net::TcpConnection): Request { /* split conn.read() on \n\n into headers/body, first line into method/path */ }
+   fn Response.send_text(status: int, body: string): void { /* build + conn.write() the raw HTTP response, exactly like showcase/http_server.tr does inline today */ }
+   fn Response.send_json(status: int, body: string): void { /* same, Content-Type: application/json */ }
+   ```
+   This is a mechanical extraction of exactly what `showcase/http_server.tr` already hand-writes inline — the showcase file IS the reference implementation for what `http.tr` needs to wrap. Depends on `strings::split` (§3, already tier-1) to cleanly parse headers into something queryable, rather than the showcase's simpler `starts_with`-only routing.
+2. **Callback-based routing** (`app.get(path, handler)`, matching the RFC's actual example) — blocked on first-class functions (Issue #187). Until then, `http.tr` route dispatch has to stay a manual `if request.path == "/" { ... } elseif ...` chain inside the caller's own loop, same shape `showcase/http_server.tr` uses — a real ergonomic loss vs. the RFC's vision, but not a blocker to shipping layer 1.
+3. **`json.tr`** — the RFC itself proposes wrapping `cJSON` via FFI rather than hand-rolling a parser (`extern from "cjson" fn cJSON_Parse(...): ptr;` etc., exactly the `extern from "libname" fn` mechanism `math.tr`'s `extern from "m" fn sqrt(...)` already proves out). Concretely: confirm `libcjson` (or equivalent) is available/vendorable in the build environment first — this session's `llvm-c` FFI proof-of-concept (`showcase/llvm_ffi_selfhost_demo.tr`) is the template for "confirm the .so exports what you need via `nm -D`, then bind it with `extern from`." A hand-rolled pure-Turf JSON parser is the fallback if no C library is available, but is meaningfully more work and duplicates a solved problem.
+
+### 4.2 `ERROR_HANDLING_RFC.md` — entirely blocked on the `!T` language decision
+
+Nothing stdlib-buildable here yet. The RFC's `!T` error unions, `catch`, `?`, and `error.XYZ` are a **parser/type-system feature** (`ROADMAP_v1.0.0.md` Issue #188, still open, explicitly called out there as "last -- heaviest"), not a stdlib module — there's no FFI angle to build ahead of that decision. The one stdlib-adjacent risk already flagged in §2.5 above: don't build an ad-hoc `Optional<T>`/`Result<T, E>` generic struct in `list`/`map` land as a stopgap, since it would almost certainly need to be thrown away or awkwardly reconciled once `!T` actually lands. Wait for the language decision first.
+
+### 4.3 `MEMORY_ARCHITECTURE_RFC.md` — the FFI-facing pieces are stdlib-buildable now; the safety pieces are not
+
+The RFC bundles two genuinely separate things:
+- **FFI interop primitives** (`unsafe_ptr<T>`, an explicit "get the raw pointer out of a safe type" escape hatch) — these are really just naming/convention work once `unsafe {}` blocks exist (Issue not yet filed as its own roadmap line item beyond the RFC itself; `ROADMAP_v1.0.0.md` Phase 4 lists `unsafe {}` as its own still-open item). Not stdlib work per se — `mem.tr` already exposes the raw allocator surface this needs; the RFC's ask is a compiler-level *restriction* (raw pointer types illegal outside `unsafe {}`), not a new capability.
+- **ARC / safe references (`&T`) / heap-managed strings and arrays** — a memory-MODEL change (how every existing type is represented and who frees it), not something `mem.tr` (or any stdlib module) can deliver by itself; this is compiler + Codegen work (automatic retain/release insertion at every assignment/scope-exit), fundamentally different in kind from every other item in this document. `mem.tr`'s current `Pool<T>`/`free_pool()` (this session's addition, see §2.3) is the honest, purely-stdlib-level stopgap available in the meantime — bulk-free tracking, not automatic lifetime management — and is explicitly NOT a step toward ARC, just a smaller, immediately-useful convenience that doesn't require any language change to deliver.
+
+Bottom line: of the three RFCs, only `STDLIB_AND_WEB_RFC.md` has a real "start building stdlib code today" path. The other two are gated on specific, already-tracked language decisions (`!T` error unions; ARC/safe-references) rather than stdlib engineering effort.

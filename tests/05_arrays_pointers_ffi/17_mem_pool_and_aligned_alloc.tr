@@ -1,0 +1,39 @@
+// Regression test: lib/std/mem.tr's newer additions -- alloc_aligned,
+// usable_size, and Pool<T>/free_pool (bulk-free allocation tracking) --
+// exercised end to end. See 14_mem_stdlib.tr for the original module's
+// core allocator wrappers.
+
+import mem;
+import io;
+
+fn main(): int {
+    // alloc_aligned: the returned address must actually be a multiple of
+    // the requested alignment. Turf has no bitwise AND on... actually it
+    // does (see tests/11_bitwise_ops/) -- but there's still no ptr->int
+    // cast to check the address numerically, so this just confirms the
+    // call succeeds and the memory is usable for the requested size.
+    mut aligned: void* = mem::alloc_aligned(64, 128);
+    assert(aligned != null, "alloc_aligned should succeed for a valid alignment/size");
+    assert(mem::usable_size(aligned) >= 128, "usable_size must be at least what was requested");
+    mem::free(aligned);
+
+    // Pool<T>: track a batch of allocations, then bulk-free them all in
+    // one call via the non-generic free_pool() (see mem.tr's own doc
+    // comment on Pool.free_all()'s absence -- a generic method can't cast
+    // its own erased T to void*, so bulk-freeing is a plain function
+    // taking a concrete Pool<void*> instead).
+    mut pool: mem::Pool<void*> = mem::Pool { items: null, len: 0, cap: 0 };
+    assert(pool.length() == 0, "a fresh pool tracks nothing");
+
+    mut i: int = 0;
+    while i < 20 {
+        pool.track(mem::alloc(16));
+        i = i + 1;
+    }
+    assert(pool.length() == 20, "pool must track every allocation, including across growth");
+
+    mem::free_pool(pool);
+
+    io::printline("mem.tr Pool<T> and aligned-allocation additions work");
+    return 0;
+}
