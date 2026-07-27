@@ -232,7 +232,7 @@ TypeOwningModule_       : unordered_map<TypeName, ModuleName>
 
 ### 2.6 Why structs/enums stay flat (and functions don't)
 
-This is a **deliberate, load-bearing design choice**, not an oversight: LLVM type identity (`LLVMTypeCache[Name]` in `SymbolTable.h`, keyed by bare name with no module prefix) is not a source-visibility concern, and two modules declaring the same struct name is a genuine, permanent conflict regardless of import mode — `DuplicateTypeNameError` already rejects it unconditionally. What *could* still be tightened (and deliberately hasn't been, see Part 5.1) is *lookup*: today, `isKnownStruct()`/`isEnumName()` answer "does this name exist anywhere in the whole program", with no per-file gate the way `CurrentFileFunctions_`/`FlatImportedFunctions_` gate bare function calls.
+This is a **deliberate, load-bearing design choice**, not an oversight: LLVM type identity (`LLVMTypeCache[Name]` in `SymbolTable.h`, keyed by bare name with no module prefix) is not a source-visibility concern, and two modules declaring the same struct name is a genuine, permanent conflict regardless of import mode — `DuplicateTypeNameError` already rejects it unconditionally. `isKnownStruct()`/`isEnumName()` answer "does this name exist anywhere in the whole program" — that's an EXISTENCE question and stays flat/global. *Visibility* (can THIS file/module reference the name unqualified) is a separate question, answered by `isTypeVisibleUnqualified()` — see 2.7/2.8.
 
 ### 2.7 Resolver layer — Pass 1 (hoisting)
 
@@ -243,9 +243,19 @@ This is a **deliberate, load-bearing design choice**, not an oversight: LLVM typ
 
 `hoistModuleBody()` also unconditionally calls `SymTable_.registerModule(ModuleName)` up front, before iterating the body at all. This matters for a module that declares **only** structs/enums and no functions at all: `Modules_[ModuleName]` used to only ever get created lazily, inside `registerModuleFunction()` — a function-less module therefore never got an entry, and `hasModule()` (which, before this fix, additionally required `!Functions.empty()`) reported it as unknown even though it had imported successfully. Every `::`-qualified reference into such a module — `Module::Type` in type position, `Module::Type { ... }` construction, `Module::EnumName::Variant` — routed through `validateModuleQualifier()`'s `hasModule()` check and was rejected with "isn't a known enum or module", even though the qualifier was completely correct. `registerModule()` is now idempotent and called unconditionally so module *existence* is decoupled from module *function count*; `hasModule()` is now a pure `Modules_.count(...)` check.
 
-Immediately after each `ModuleImportExprAST`'s body is hoisted, **`registerOnDemandImports()`** (`src/Resolver.cpp:360-419`) runs, using the now-fully-hoisted target module's registries:
-- `Wildcard` → iterate every name `getModuleFunctionNames(SourceModule)` returns, flat-register each.
-- `Symbol`/`SymbolList` → for each requested name, look it up via `findInModules()` filtered to `SourceModule`; if found, flat-register; else check `isKnownStruct`/`isEnumName` (types need no registration, just existence — 2.6); else `UnknownModuleSymbolError`.
+Immediately after each `ModuleImportExprAST`'s body is hoisted, **`registerOnDemandImports()`** (`src/Resolver.cpp:365-...`) runs, using the now-fully-hoisted target module's registries:
+- `Wildcard` → every name `getModuleFunctionNames(SourceModule)` returns is flat-registered as a function; every name `getModuleTypeNames(SourceModule)` returns is flat-registered as a type (via `registerFlatTypeImport()`, into the separate `FlatImportedTypes_` map — see 2.7.1).
+- `Symbol`/`SymbolList` → for each requested name, first tried as a function (`findInModules()` filtered to `SourceModule`); if not found there, tried as a type via `getTypeOwningModule(Name) == SourceModule` (**ownership**, not mere existence — see 2.7.1 for why this distinction was itself a bug fix); neither → `UnknownModuleSymbolError`.
+
+#### 2.7.1 Bare struct/enum type visibility gate
+
+Struct/enum type **visibility** (as opposed to existence, 2.6) now follows the identical rule bare function-call visibility already did: a plain `import Module;` grants QUALIFIED access to its types (`Module::Type`) but not bare access; bare access requires either declaring the type in the SAME file/module, or an explicit on-demand import (`import Module::Type;` / `Module::[Type,...]` / `Module::[*]`).
+
+`ResolverSymbolTable::isTypeVisibleUnqualified(ContextLabel, Name)` answers this: true if `getTypeOwningModule(Name) == ContextLabel` (own declaration — the same rule the function self-reference check already used), or if `FlatImportedTypes_[ContextLabel]` contains `Name` (on-demand import). `FlatImportedTypes_` is a second, parallel map to `FlatImportedFunctions_` (same shape, same `registerFlatFunctionImport`-style collision handling) rather than folded into it, since a struct/enum name and a function name legally occupy different syntactic positions (type position vs. call position) and can coexist under one bare spelling without colliding.
+
+Enforced at the same three call sites `validateModuleQualifier()` already covered: `validateNamedType()`'s `NamedType` branch, its `GenericType` branch (base name), and `visitStructInit()`. Each follows the same shape: if a qualifier is present, validate it via `validateModuleQualifier()` as before (qualified access is **never** gated by this — only bare/unqualified references are); if no qualifier and the name is a real, known struct/enum, check `isTypeVisibleUnqualified(currentModuleName(), Name)` and raise `UnqualifiedTypeNotVisibleError` if false. Type params (`T` in `fn<T> f(x: T)`) are exempted the same way they already were from the existence check.
+
+A related bug was found and fixed alongside this: `registerOnDemandImports()`'s `Symbol`/`SymbolList` branch used to accept ANY struct/enum name that existed ANYWHERE in the program as satisfying `import Module::TypeName;`, never checking that `Module` actually owns it (only `isKnownStruct`/`isEnumName`, the flat existence check — see 2.6). `import mem::List;` (List actually lives in `list`) incorrectly succeeded as long as `list` had been imported by *something* in the program. Fixed by checking `getTypeOwningModule(Name) == SourceModule` (ownership) instead, mirroring `validateModuleQualifier()`'s own ownership check for qualified type annotations.
 - Flat-registration collisions (`registerFlatFunctionImport()` returning a previous, *different*-module entry) raise `ImportSymbolCollisionError`.
 - The `ContextLabel` passed in is `""` for a main-file import, or the *enclosing* module's own name for an on-demand import written inside another module's file (the outer `hoistModuleBody()` call's own `ModuleName` parameter — not the module being imported).
 
@@ -273,7 +283,7 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
 }
 ```
 
-**`visitStructInit()`** (`src/Resolver.cpp:1331-...`) calls `validateModuleQualifier(Node.getModuleQualifier(), Node.getName(), Node.getLoc())` unconditionally (a no-op for the bare form) before recursing into field values. Note this function still does **not** validate that `Node.getName()` is a real struct at all for the *unqualified* form — that's a separate, pre-existing gap, not addressed by this work (a totally nonexistent bare struct name currently reaches an unrelated error path). The qualifier check happens to still produce a sensible error even then, since an unknown type name has no owning module and therefore can never equal a real `Qualifier`.
+**`visitStructInit()`** (`src/Resolver.cpp:1379-...`) calls `validateModuleQualifier()` for the qualified form, or (since 2.7.1) `isTypeVisibleUnqualified()` for the bare form when `Node.getName()` is a known struct. Note this function still does **not** validate that `Node.getName()` is a real struct at all for the *unqualified* form when it ISN'T a known struct — that's a separate, pre-existing gap (5.2), not addressed by this work (a totally nonexistent bare struct name currently reaches an unrelated error path). The qualifier check happens to still produce a sensible error even then, since an unknown type name has no owning module and therefore can never equal a real `Qualifier`.
 
 **`visitModuleImport()`** (`src/Resolver.cpp:1384-...`) pushes/pops `ModuleStack_`, the backing store for `currentModuleName()` (`include/Resolver.h:199-201`, `ModuleStack_.empty() ? "" : ModuleStack_.back()`) — the single source of truth for "which module's body is Pass 2 currently walking through", consulted by both the self-reference check above and every `registerOnDemandImports()` call's `ContextLabel`.
 
@@ -284,6 +294,8 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
 ### 2.10 Codegen layer
 
 **Name mangling**: a module function's real LLVM name is always `turf_<module>_<name>_<paramtype>_<paramtype>...`, regardless of how many files import it or by which mode — Codegen only ever compiles it once, under its true owning module. Only Resolver-side *source lookup* changes with import mode; Codegen is essentially untouched by the whole on-demand-import feature.
+
+**Struct codegen idempotency**: `StructDeclExprAST::codegen()` (`src/Codegen.cpp:3769-...`) can genuinely be invoked more than once for the SAME struct declared inside a module — `main.cpp`'s pre-pass calls `ModuleImportExprAST::codegen()` twice (once during its prototype-only sub-pass, again during its body sub-pass), and that function unconditionally re-walks the entire module body, including any nested `StructDeclExprAST` nodes, on every call. A second call now detects the cached `llvm::StructType` is already non-opaque (fully built) and returns immediately, rather than falling through to `StructType::create()` again — which used to silently produce a second, LLVM-renamed `Name.0` type and corrupt `LLVMTypeCache` for every reference already built against the original (see 5.4 for the crash this caused before the guard existed).
 
 **`FuncCallExprAST::codegen()`** (`src/Codegen.cpp:2958-...`) derives `CalleeName` from **either** a `VariableExprAST` **or** a `ScopeAccessExprAST` callee (previously only the former — a qualified call used to hit the function's `report_fatal_error("First-class functions are not supported yet.")` fallback, since nothing else could interpret the callee). Everything downstream (`ResolvedCallTarget->mangledName()` lookup, argument marshaling) is unchanged and callee-shape-agnostic.
 
@@ -332,14 +344,18 @@ Contrast with `input()` (never on-demand-imported in this file): step 4's on-dem
 
 ## Part 5 — Known limitations, deliberately deferred
 
-### 5.1 Struct/enum bare-type visibility is not gated
-
-Per 1.3/2.6: `List<int>` works unqualified after just `import list;` (the bare form), even though the on-demand import machinery (2.5, 2.7) fully exists and would support gating this the same way bare function calls now are. Closing this requires more than flipping `isKnownStruct()`/`isEnumName()`'s check in `validateNamedType()` — struct-literal **construction** (`visitStructInit()`) is a separate code path from a type annotation's `NamedType` reference and would need the identical gate, and every stdlib collection test (`List`/`Stack`/`Queue`) would need its imports rewritten to an on-demand form first. Left as its own follow-on rather than a partial flip that leaves some bare struct/enum references gated and others not.
-
-### 5.2 No true static struct methods
+### 5.1 No true static struct methods
 
 `ScopeAccessKind` reserves a `StaticMethodRef` case (commented out, not implemented) for `StructName::method(...)` with no instance — a separate, older, independently-tracked finding: `ParseFuncDef()` unconditionally injects a `self` parameter into every `fn StructName.method(...)` declaration with no opt-out, so even once `::` can *parse* a static-style call, it will still fail arity-checking. Implementing real static methods needs that parser-level change first; this work only reserved the namespace-resolution slot for it.
 
-### 5.3 Unqualified struct-literal construction of a nonexistent struct
+### 5.2 Unqualified struct-literal construction of a nonexistent struct
 
-`visitStructInit()` (2.8) validates a *qualifier* if present, but still does not validate that the *struct name itself* is real for the ordinary bare form — pre-existing, not introduced or fixed by this work.
+`visitStructInit()` (2.8) validates a *qualifier* if present, and (since 2.7.1) validates *visibility* for a name that's a known struct — but still does not validate that the *struct name itself* is real at all for the ordinary bare form. A totally nonexistent bare struct name in `StructName { ... }` construction still falls through to an unrelated downstream error rather than a clean `UnknownTypeError` — pre-existing, not introduced or fixed by this work.
+
+### 5.3 (Resolved) Struct/enum bare-type visibility gate
+
+Previously documented here as a known limitation (`List<int>` working unqualified after just `import list;`) — fixed; see 2.7.1. Left as a pointer rather than deleted outright so anyone who read this doc before the fix landed can find where the behavior changed.
+
+### 5.4 A general note on cross-pass struct codegen safety
+
+While hunting the visibility-gate work above, a real compiler CRASH was found and fixed: a struct declared inside a module, used BY VALUE (not just via pointer/`self`) by a free function in that same module, crashed the whole compiler process with an LLVM IR verifier failure (`ret %Point.0 %structval` against a function still declaring `%Point`). Root cause: `main.cpp`'s pre-pass invokes `ModuleImportExprAST::codegen()` twice (once per prototype/body sub-pass), and it unconditionally re-walks the entire module body — including any `StructDeclExprAST` nodes — on every call, with no guard against re-running struct codegen. `StructDeclExprAST::codegen()` (2.10) now tolerates being called more than once for the same struct (returns immediately if the cached LLVM type is already fully built, instead of creating a second, LLVM-renamed `Name.0` type and corrupting the cache for every already-built reference). Never caught before because every prior struct-in-module test only ever used instance methods (pointer receiver, unaffected by which concrete `StructType` backs it) or constructed the struct in the same file it was declared in — a free function passing/returning a module struct BY VALUE across the import boundary was untested territory until this bug hunt.

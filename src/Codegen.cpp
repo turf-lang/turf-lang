@@ -3775,23 +3775,48 @@ Value *StructDeclExprAST::codegen() {
   // recursion or creating a duplicate struct (which LLVM would rename to
   // "Node.0", breaking all previously-built call/alloca sites).
   //
-  // NOTE: this function must never be called more than once for the same
-  // struct (see main.cpp's pre-pass sub-pass 2c, which now runs every
-  // struct's codegen exactly once, before any function prototype or body).
-  // A second call would find the cached type no longer opaque (setBody()
-  // already ran below) and fall through to creating a brand-new, distinct
-  // llvm::StructType -- silently corrupting LLVMTypeCache for every
-  // already-built reference to the original.
+  // This function CAN be called more than once for the same struct -- see
+  // the early-return guard right below for why that's a real, reachable
+  // case (not hypothetical) and how it's made safe. main.cpp's pre-pass
+  // sub-pass 2c still tries to codegen every TOP-LEVEL struct exactly once
+  // up front, before any function prototype or body, for forward-reference
+  // reasons (see its own doc comment) -- but a struct declared inside an
+  // IMPORTED MODULE is invisible to that top-level-only scan, and instead
+  // gets (re-)built as a side effect of ModuleImportExprAST::codegen()
+  // walking the whole module body, which main.cpp's pre-pass invokes twice
+  // (sub-pass 3a's prototype walk, then sub-pass 3b's body walk).
   StructType *ST = nullptr;
   auto CacheIt = LLVMTypeCache.find(Name);
   if (CacheIt != LLVMTypeCache.end()) {
-    // An opaque forward-declaration was already inserted (e.g., because a
-    // NamedType("Node") appeared in another struct or function signature
-    // before this decl ran).  Reuse it so the single LLVM type identity is
-    // preserved everywhere it was referenced.
     if (auto *Existing = dyn_cast<StructType>(CacheIt->second)) {
-      if (Existing->isOpaque())
-        ST = Existing;
+      if (!Existing->isOpaque()) {
+        // Already fully built (setBody() ran on a PREVIOUS call to this
+        // function for the same struct) -- return immediately instead of
+        // falling through to the `!ST` branch below, which would create a
+        // SECOND, distinct llvm::StructType under the same name (LLVM
+        // silently renames it "Name.0") and corrupt LLVMTypeCache for
+        // every already-built reference to the original. This guard is
+        // NOT just defensive: a struct declared inside an IMPORTED
+        // MODULE genuinely gets its ModuleImportExprAST::codegen() call
+        // -- which walks the whole module body, including this node --
+        // invoked twice by main.cpp's pre-pass (once in sub-pass 3a's
+        // prototype walk, again in sub-pass 3b's body walk), so this is
+        // a real, reachable path, not a hypothetical one. Confirmed live:
+        // a module declaring a struct AND a free function that returns it
+        // by value crashed the whole compiler ("ret %Point.0 %structval"
+        // against a function signature still declaring %Point) before
+        // this guard existed, because the corrupted SECOND StructType
+        // landed in the cache in between the function's prototype being
+        // declared (sub-pass 3a, using the original %Point) and its body
+        // being codegenned (sub-pass 3b, using the corrupted %Point.0
+        // read back out of the cache for the return-value construction).
+        return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+      }
+      // An opaque forward-declaration was already inserted (e.g., because a
+      // NamedType("Node") appeared in another struct or function signature
+      // before this decl ran).  Reuse it so the single LLVM type identity is
+      // preserved everywhere it was referenced.
+      ST = Existing;
     }
   }
   if (!ST) {

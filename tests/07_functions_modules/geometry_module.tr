@@ -1,0 +1,8 @@
+struct Rect {
+    w: int,
+    h: int
+}
+
+fn area(r: Rect): int {
+    return r.w * r.h;
+}

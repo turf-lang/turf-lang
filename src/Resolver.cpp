@@ -397,22 +397,42 @@ void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
     return Found;
   };
 
+  // Registers Name as flat-type-imported into ContextLabel IF SourceModule
+  // actually owns it (per TypeOwningModule_, not the flat/module-blind
+  // isKnownStruct()/isEnumName() existence check -- a name that merely
+  // exists SOMEWHERE in the program, declared by a totally different
+  // module, must not satisfy `import SourceModule::Name;`). Returns
+  // whether Name is a real struct/enum owned by SourceModule at all.
+  auto RegisterTypeIfOwned = [&](const std::string &Name,
+                                 SourceLocation Loc) -> bool {
+    if (SymTable_.getTypeOwningModule(Name) != SourceModule)
+      return false;
+    ResolverSymbolTable::FlatImportedSymbol Sym{SourceModule, {Loc.Line, Loc.Col}};
+    if (auto Prev = SymTable_.registerFlatTypeImport(ContextLabel, Name, Sym)) {
+      if (Prev->SourceModule != SourceModule) {
+        ImportSymbolCollisionError(Loc, Name, Prev->SourceModule, SourceModule,
+                                   toSourceLocation(Prev->ImportLoc))
+            .raise();
+      }
+    }
+    return true;
+  };
+
   if (Import.getMode() == ImportMode::Wildcard) {
-    // Every function name SourceModule exports becomes flat-visible.
-    // Struct/enum types need no action here at all -- see
-    // FlatImportedFunctions_'s doc comment on why types aren't tracked
-    // per-context.
+    // Every function AND every struct/enum type SourceModule declares
+    // becomes flat-visible.
     for (const auto &Name : SymTable_.getModuleFunctionNames(SourceModule))
       RegisterFunctionIfPresent(Name, Import.getLoc());
+    for (const auto &Name : SymTable_.getModuleTypeNames(SourceModule))
+      RegisterTypeIfOwned(Name, Import.getLoc());
     return;
   }
 
-  // Symbol / SymbolList: each requested name must resolve to SOMETHING in
-  // SourceModule -- a function (flat-registered) or a struct/enum (already
-  // globally flat; only existence is validated here).
+  // Symbol / SymbolList: each requested name must resolve to SOMETHING
+  // SourceModule actually owns -- a function or a struct/enum.
   for (const auto &Ref : Import.getRequestedSymbols()) {
     bool FoundFn = RegisterFunctionIfPresent(Ref.Name, Ref.Loc);
-    bool FoundType = SymTable_.isKnownStruct(Ref.Name) || SymTable_.isEnumName(Ref.Name);
+    bool FoundType = RegisterTypeIfOwned(Ref.Name, Ref.Loc);
     if (!FoundFn && !FoundType) {
       RankedSuggestions Suggestions;
       auto Sugg = SuggestionIndex::suggestVisible(
@@ -1235,8 +1255,13 @@ void Resolver::validateNamedType(
       Suggestions.Local =
           SuggestionIndex::suggestVisible(BaseName, SymTable_.getAllStructNames());
       UnknownTypeError(Loc, BaseName, Suggestions).raise();
-    } else {
+    } else if (!GT->getModule().empty()) {
       validateModuleQualifier(GT->getModule(), BaseName, Loc);
+    } else if (!BaseIsOwnTypeParam &&
+               !SymTable_.isTypeVisibleUnqualified(currentModuleName(), BaseName)) {
+      UnqualifiedTypeNotVisibleError(Loc, BaseName,
+                                     SymTable_.getTypeOwningModule(BaseName))
+          .raise();
     }
     for (const auto &Arg : GT->getTypeArgs())
       validateNamedType(Arg, Loc, TypeParams);
@@ -1251,26 +1276,15 @@ void Resolver::validateNamedType(
   // Codegen-facing registration does), so the caller-supplied TypeParams
   // list below is what actually exempts `T` in `fn<T> f(x: T)`.
   //
-  // NOTE (deliberately NOT changed by the bare-call-scoping fix in
-  // visitFuncCall, on-demand imports landing (registerOnDemandImports()),
-  // or the `.`-to-`::` call-site migration): isKnownStruct()/isEnumName()
-  // below still check the GLOBAL, module-blind struct/enum registry, so
-  // `List<int>` still works unqualified after just `import list;` (the
-  // BARE form), unlike bare function calls (which require self-reference
-  // or an explicit on-demand import). The on-demand import grammar exists
-  // and validates type-symbol imports (`import list::List;` / `list::[*]`
-  // confirm the requested name is real), but actually REQUIRING one of
-  // those forms -- instead of also accepting the bare form -- turned out
-  // to need more than flipping this one check: struct-literal
-  // CONSTRUCTION (`List { ... }`, StructInitExprAST/visitStructInit) is a
-  // completely separate code path from a type ANNOTATION's NamedType
-  // reference and would need the identical gate, and possibly other
-  // struct/enum name lookups not yet audited for this. Deliberately left
-  // as its own follow-on rather than a partial flip that leaves some bare
-  // struct/enum references gated and others not, which would be more
-  // confusing than the current, fully-consistent "bare always works,
-  // qualified always works, on-demand import forms are honest about
-  // symbol existence but not yet enforced" state.
+  // isKnownStruct()/isEnumName() below check the GLOBAL, module-blind
+  // struct/enum EXISTENCE registry (does this name exist ANYWHERE) --
+  // that's a separate question from whether it's VISIBLE UNQUALIFIED from
+  // the current file/module, which isTypeVisibleUnqualified() below
+  // answers (own declaration, or an on-demand `import Module::Type;` /
+  // `Module::[Type,...]` / `Module::[*]`). A plain `import Module;` alone
+  // grants qualified access (`Module::Type`) but not bare access, exactly
+  // mirroring how bare function-call visibility already worked before this
+  // gate existed for types too.
   if (const auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
     const std::string &TypeName = NT->getName();
     bool IsOwnTypeParam =
@@ -1284,7 +1298,13 @@ void Resolver::validateNamedType(
           SuggestionIndex::suggestVisible(TypeName, SymTable_.getAllStructNames());
       UnknownTypeError(Loc, TypeName, Suggestions).raise();
     } else if (!IsOwnTypeParam && !KnownPrimitives.count(TypeName)) {
-      validateModuleQualifier(NT->getModule(), TypeName, Loc);
+      if (!NT->getModule().empty()) {
+        validateModuleQualifier(NT->getModule(), TypeName, Loc);
+      } else if (!SymTable_.isTypeVisibleUnqualified(currentModuleName(), TypeName)) {
+        UnqualifiedTypeNotVisibleError(Loc, TypeName,
+                                       SymTable_.getTypeOwningModule(TypeName))
+            .raise();
+      }
     }
   }
 }
@@ -1369,7 +1389,19 @@ void Resolver::visitStructInit(StructInitExprAST &Node) {
   // validateModuleQualifier(): an unknown TypeName has no owning module,
   // so it never equals a real Qualifier, correctly raising
   // UnknownModuleSymbolError either way).
-  validateModuleQualifier(Node.getModuleQualifier(), Node.getName(), Node.getLoc());
+  if (!Node.getModuleQualifier().empty()) {
+    validateModuleQualifier(Node.getModuleQualifier(), Node.getName(), Node.getLoc());
+  } else if (SymTable_.isKnownStruct(Node.getName()) &&
+             !SymTable_.isTypeVisibleUnqualified(currentModuleName(), Node.getName())) {
+    // Bare construction of a REAL struct that just isn't bare-visible from
+    // here (declared in another module, never on-demand imported) -- see
+    // isTypeVisibleUnqualified()'s doc comment. A totally unknown struct
+    // name still falls through untouched, per the pre-existing gap noted
+    // above.
+    UnqualifiedTypeNotVisibleError(Node.getLoc(), Node.getName(),
+                                   SymTable_.getTypeOwningModule(Node.getName()))
+        .raise();
+  }
 
   for (const auto &[FieldName, Val] : Node.getNamedFields())
     visitChild(Val.get());

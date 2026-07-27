@@ -1,0 +1,12 @@
+struct Point {
+    x: int,
+    y: int
+}
+
+fn makeOrigin(): Point {
+    return Point { x: 0, y: 0 };
+}
+
+fn addPoints(a: Point, b: Point): Point {
+    return Point { x: a.x + b.x, y: a.y + b.y };
+}

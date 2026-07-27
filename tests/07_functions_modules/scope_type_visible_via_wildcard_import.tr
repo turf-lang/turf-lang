@@ -1,0 +1,16 @@
+// Regression test: `import module::[*];` also flat-imports every STRUCT/
+// ENUM type that module declares, not just its functions -- exercises
+// ResolverSymbolTable::getModuleTypeNames() + registerOnDemandImports()'s
+// Wildcard branch's type-registration loop. Previously untested with an
+// actual STRUCT (scope_wildcard_functionless_mod.tr only ever covered an
+// enum from a function-less module).
+
+import io;
+import geometry_module::[*];
+
+fn main(): int {
+    mut r: Rect = Rect { w: 6, h: 7 };
+    assert(area(r) == 42, "bare struct type visible after wildcard import");
+    io::printline("wildcard import grants bare type visibility");
+    return 0;
+}

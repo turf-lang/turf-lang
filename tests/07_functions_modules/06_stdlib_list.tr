@@ -20,7 +20,7 @@
 // re-verified via `--emit-llvm` (not just "exit code 0") after the fix,
 // specifically because of how convincingly that failure mode fakes success.
 
-import list;
+import list::List;
 import io;
 
 fn main(): int {

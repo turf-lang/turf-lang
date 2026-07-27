@@ -1,0 +1,45 @@
+// Regression test: a struct declared inside a module, and a FREE FUNCTION
+// (not an instance method -- no self pointer involved) in that SAME module
+// that takes and/or returns that struct BY VALUE, must work correctly when
+// called from the importing file.
+//
+// This used to CRASH THE WHOLE COMPILER PROCESS with "Internal compiler
+// error: generated LLVM IR is invalid... Function return type does not
+// match operand type of return inst! ret %Point.0 %structval". Root cause:
+// main.cpp's pre-pass invokes ModuleImportExprAST::codegen() TWICE (once
+// in sub-pass 3a's prototype-only walk, again in sub-pass 3b's body walk),
+// and that function unconditionally re-walks the ENTIRE module body on
+// each call, including any StructDeclExprAST nodes inside it.
+// StructDeclExprAST::codegen() used to have no idempotency guard at all --
+// a second call for the same struct found the type already built (no
+// longer opaque) and fell through to creating a SECOND, distinct
+// llvm::StructType under the same name, which LLVM silently renames to
+// "Name.0". The function's prototype (built during the FIRST walk, using
+// the original type) and its body (built during the SECOND walk, using the
+// now-corrupted cache entry for the return-value construction) ended up
+// disagreeing about which "Point" they meant.
+//
+// Never caught before because every prior test with a struct declared
+// inside a module only ever used it via INSTANCE METHODS (self: T*, a
+// pointer -- unaffected by which concrete StructType instance backs it) or
+// constructed it directly in the SAME file it was declared in. A free
+// function passing/returning the struct BY VALUE across the module
+// boundary was untested territory.
+
+import io;
+import return_struct_module::makeOrigin;
+import return_struct_module::addPoints;
+import return_struct_module::Point;
+
+fn main(): int {
+    immut origin: Point = makeOrigin();
+    assert(origin.x == 0 && origin.y == 0, "struct returned by value from a module function");
+
+    immut a: Point = Point { x: 3, y: 4 };
+    immut b: Point = Point { x: 10, y: 20 };
+    immut sum: Point = addPoints(a, b);
+    assert(sum.x == 13 && sum.y == 24, "struct passed AND returned by value across the module boundary");
+
+    io::printline("struct-by-value across a module boundary works");
+    return 0;
+}

@@ -1,0 +1,15 @@
+// Regression test (positive counterpart to fail_bare_type_no_visibility.tr):
+// `import module::Type;` (on-demand symbol form) DOES grant bare visibility
+// to that type -- construction, type annotations, and passing it by value
+// to/from a module function should all work unqualified after this.
+
+import io;
+import geometry_module::Rect;
+import geometry_module::area;
+
+fn main(): int {
+    mut r: Rect = Rect { w: 4, h: 5 };
+    assert(area(r) == 20, "bare struct type visible after on-demand symbol import");
+    io::printline("on-demand symbol import grants bare type visibility");
+    return 0;
+}

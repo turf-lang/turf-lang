@@ -1135,6 +1135,30 @@ public:
   }
 };
 
+// Raised when a struct/enum type name is real (declared SOMEWHERE in the
+// program) but not visible UNQUALIFIED from the current file/module: it
+// isn't declared in this same file/module, and it was never brought in via
+// an on-demand import (`import Module::Type;` / `import Module::[Type,
+// ...];` / `import Module::[*];`). Bare visibility for types now follows
+// the exact same rule bare function-call visibility already did -- a plain
+// `import Module;` grants QUALIFIED access (Module::Type) but not bare
+// access, matching import.tr's documented on-demand semantics.
+class UnqualifiedTypeNotVisibleError : public TurfError {
+public:
+  UnqualifiedTypeNotVisibleError(SourceLocation Loc, const std::string &TypeName,
+                                 const std::string &OwningModule)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + TypeName +
+                           Colors::BRIGHT_RED +
+                           "' isn't visible here without qualification." +
+                           Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    Hint_ = "'" + TypeName + "' is declared in module '" + OwningModule +
+            "'. Either use it qualified (`" + OwningModule + "::" + TypeName +
+            "`), or bring it into scope with `import " + OwningModule +
+            "::" + TypeName + ";`.";
+  }
+};
+
 // Phase 2: Module-scoped method lookup error
 // Raised when a user types e.g. io.pritn() — wrong function name in a known
 // module. Suggestions are sourced from that module's function registry.

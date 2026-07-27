@@ -3,7 +3,7 @@
 // 06_stdlib_list.tr's doc comment for the cross-module struct-method-
 // resolution bug this (and the whole rewrite) was blocked on.
 
-import queue;
+import queue::Queue;
 import io;
 
 fn main(): int {

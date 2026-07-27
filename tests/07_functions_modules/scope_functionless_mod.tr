@@ -18,13 +18,20 @@
 // hoisted (Resolver::hoistModuleBody -> SymTable_.registerModule()),
 // regardless of what it turns out to contain, and simplifying hasModule()
 // to just check existence.
+//
+// Also exercises the bare-type visibility gate (a separate, later fix):
+// enum/struct types are no longer bare-visible from just a plain
+// `import Module;` -- an explicit on-demand symbol import is required, same
+// as bare function calls already needed. Hence `Shade` specifically below.
 
 import io;
-import functionless_module_enum_module;
+import functionless_module_enum_module::Shade;
 
 fn main(): int {
-    // Bare access already worked before this fix (enums are flat/module-
-    // blind regardless) -- kept here to prove the fix didn't change this.
+    // Bare access works because Shade was on-demand imported above (see
+    // isTypeVisibleUnqualified()'s doc comment) -- NOT because enums are
+    // flat/module-blind regardless, which was the pre-gate behavior this
+    // test used to document.
     immut bare: Shade = Shade::Medium;
     assert(bare == Shade::Medium, "bare enum access from a function-less module");
 

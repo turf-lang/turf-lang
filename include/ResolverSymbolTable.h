@@ -435,13 +435,10 @@ public:
   // routing table, re-queried through findInModules() at lookup time
   // exactly like self-reference already is (Resolver::visitFuncCall).
   //
-  // Struct/enum symbol imports are NOT tracked here at all: those types
-  // are already registered in ONE flat, module-blind namespace (see
-  // registerStruct()'s doc comment) regardless of import mode, since P3's
-  // bare-call scoping fix deliberately did not extend to struct/enum
-  // visibility yet (see Resolver::validateNamedType's NOTE comment) --
-  // `import module::TypeName;` currently only VALIDATES that TypeName is a
-  // real struct/enum somewhere, it doesn't need to register anything new.
+  // Struct/enum symbol imports get the PARALLEL FlatImportedTypes_ registry
+  // below, not this one -- see its doc comment for why bare TYPE visibility
+  // is gated the same way as bare CALL visibility now (it deliberately
+  // wasn't at first; see isTypeVisibleUnqualified()'s doc comment).
 
   struct FlatImportedSymbol {
     std::string SourceModule;
@@ -469,6 +466,54 @@ public:
   const FlatImportedSymbol *
   lookupFlatFunctionImport(const std::string &ContextLabel,
                            const std::string &Name) const;
+
+  /**
+   * @brief Register that struct/enum @p Name is on-demand-imported from
+   * @p Sym.SourceModule into @p ContextLabel's flat namespace. Mirrors
+   * registerFlatFunctionImport() exactly, kept as a SEPARATE registry (not
+   * folded into FlatImportedFunctions_) because a struct/enum name and a
+   * function name can legally coexist under the same bare spelling without
+   * colliding -- they occupy different syntactic positions (type position
+   * vs. call position) so there is no reason to force them to share one
+   * collision-detection namespace.
+   * Returns the PREVIOUS entry on a same-name collision from a different
+   * module, std::nullopt on a fresh registration -- same contract as the
+   * function-import version.
+   */
+  std::optional<FlatImportedSymbol>
+  registerFlatTypeImport(const std::string &ContextLabel,
+                         const std::string &Name,
+                         const FlatImportedSymbol &Sym);
+
+  /**
+   * @brief True if struct/enum @p Name is unqualified-visible from
+   * @p ContextLabel: either @p ContextLabel is the type's OWN declaring
+   * module (per getTypeOwningModule()), or it was brought in via an
+   * on-demand symbol/list/wildcard import (registerFlatTypeImport()).
+   *
+   * Before this gate existed, isKnownStruct()/isEnumName() alone answered
+   * "does this name exist ANYWHERE in the whole program" with no per-file
+   * dimension at all -- so `List<int>` (or ANY struct/enum from ANY
+   * transitively-imported module) was bare-usable after just `import
+   * list;`, unlike bare function calls, which already required
+   * self-reference or an explicit on-demand import
+   * (lookupFlatFunctionImport()). That inconsistency is the literal bug
+   * this method fixes: bare type visibility now follows the identical rule
+   * bare call visibility already did. Qualified access (`list::List`) is
+   * NOT gated by this at all -- it goes through validateModuleQualifier()
+   * instead, which only cares whether the qualifier is correct, not
+   * whether it was on-demand-imported.
+   */
+  bool isTypeVisibleUnqualified(const std::string &ContextLabel,
+                                const std::string &Name) const;
+
+  /**
+   * @brief Every struct/enum name declared directly by @p ModuleName (not
+   * transitively -- a nested import inside that module doesn't count).
+   * Used by registerOnDemandImports()'s Wildcard branch to flat-import
+   * every type a module owns, mirroring getModuleFunctionNames().
+   */
+  std::vector<std::string> getModuleTypeNames(const std::string &ModuleName) const;
 
   // ── Two-tier diagnostic helpers ──────────────────────────────────────────────
 
@@ -601,6 +646,12 @@ private:
   /// registerFlatFunctionImport()'s doc comment.
   std::unordered_map<std::string, std::unordered_map<std::string, FlatImportedSymbol>>
       FlatImportedFunctions_;
+
+  /// On-demand flat struct/enum TYPE imports -- same shape and keying as
+  /// FlatImportedFunctions_ above, kept as a separate map (see
+  /// registerFlatTypeImport()'s doc comment for why).
+  std::unordered_map<std::string, std::unordered_map<std::string, FlatImportedSymbol>>
+      FlatImportedTypes_;
 
   /// Struct names declared in the current file or any transitively-imported
   /// module (hoisted in Pass 1), mapped to their declaration site so a

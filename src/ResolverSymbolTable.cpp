@@ -236,6 +236,38 @@ ResolverSymbolTable::lookupFlatFunctionImport(const std::string &ContextLabel,
   return &It->second;
 }
 
+std::optional<ResolverSymbolTable::FlatImportedSymbol>
+ResolverSymbolTable::registerFlatTypeImport(const std::string &ContextLabel,
+                                            const std::string &Name,
+                                            const FlatImportedSymbol &Sym) {
+  auto &ContextMap = FlatImportedTypes_[ContextLabel];
+  auto It = ContextMap.find(Name);
+  if (It != ContextMap.end())
+    return It->second; // collision -- caller raises an error
+  ContextMap.emplace(Name, Sym);
+  return std::nullopt;
+}
+
+bool ResolverSymbolTable::isTypeVisibleUnqualified(
+    const std::string &ContextLabel, const std::string &Name) const {
+  if (getTypeOwningModule(Name) == ContextLabel)
+    return true;
+  auto ContextIt = FlatImportedTypes_.find(ContextLabel);
+  if (ContextIt == FlatImportedTypes_.end())
+    return false;
+  return ContextIt->second.count(Name) > 0;
+}
+
+std::vector<std::string>
+ResolverSymbolTable::getModuleTypeNames(const std::string &ModuleName) const {
+  std::vector<std::string> Names;
+  for (const auto &Pair : TypeOwningModule_)
+    if (Pair.second == ModuleName)
+      Names.push_back(Pair.first);
+  std::sort(Names.begin(), Names.end());
+  return Names;
+}
+
 // ─── Two-tier diagnostic helpers ─────────────────────────────────────────────
 
 std::vector<ResolverSymbolTable::ModuleFunctionMatch>

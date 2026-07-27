@@ -5,9 +5,13 @@
 // substitution machinery (Codegen's getExprType() fix, TypeChecker's
 // Subst-building) is genuinely module-agnostic, not somehow special-cased
 // around the specific stdlib collection types it was originally fixed for.
+//
+// The "bare" form here works because Box is on-demand imported explicitly
+// below -- a plain `import generic_struct_custom_module;` alone grants
+// only qualified access now (see the bare-type visibility gate).
 
 import io;
-import generic_struct_custom_module;
+import generic_struct_custom_module::Box;
 
 fn main(): int {
     mut b: Box<int> = Box { val: 42 };

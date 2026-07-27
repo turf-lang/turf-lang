@@ -2,7 +2,7 @@
 // end-to-end. See 06_stdlib_list.tr's doc comment for the cross-module
 // struct-method-resolution bug this (and the whole rewrite) was blocked on.
 
-import stack;
+import stack::Stack;
 import io;
 
 fn main(): int {

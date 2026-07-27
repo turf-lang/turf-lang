@@ -29,10 +29,12 @@
 // error blaming the wrong thing.
 
 import io;
-import list;
+import list::List;
 
 fn main(): int {
-    // Bare form (unqualified) -- must keep working exactly as before.
+    // Bare form (unqualified) -- works here because List is on-demand
+    // imported above; a plain `import list;` alone would only grant
+    // qualified access now (see the bare-type visibility gate).
     mut a: List<int> = List { data: null, len: 0, cap: 0 };
     a.push(1);
     assert(a.length() == 1, "bare form still works");
