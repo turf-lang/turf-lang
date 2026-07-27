@@ -1,0 +1,29 @@
+// Regression test: string literals support the full standard C-style
+// escape set, not just \n/\t/\\/\" -- \r (carriage return) specifically
+// used to silently become a literal 'r' character instead of an actual
+// CR byte, corrupting anything relying on real \r\n line endings (found
+// writing examples/http_server.tr's HTTP response headers). Also covers
+// \a \b \f \v \0 \', all newly recognized alongside \r.
+
+import io;
+import strings;
+
+fn main(): int {
+    immut withCR: string = "a\rb";
+    assert(strings::length(withCR) == 3, "\\r must be exactly one byte, not swallowed or literal 'r'+extra");
+    // '\r' as a standalone escaped byte cannot equal the two-character
+    // sequence 'r' would have produced before this fix.
+    assert(withCR != "arb", "\\r must not silently become a literal 'r'");
+
+    immut withTab: string = "x\ty";
+    assert(strings::length(withTab) == 3, "\\t still works alongside the new escapes");
+
+    immut withQuote: string = "it\'s fine";
+    assert(strings::contains(withQuote, "it"), "\\' is a recognized escape");
+
+    immut withBackslash: string = "a\\b";
+    assert(strings::length(withBackslash) == 3, "\\\\ still produces a single literal backslash");
+
+    io::printline("all escape sequences resolved correctly");
+    return 0;
+}

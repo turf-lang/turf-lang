@@ -418,18 +418,50 @@ int gettok() {
 
     while (LastChar != '"' && LastChar != EOF && LastChar != '\n') {
       if (LastChar == '\\') {
-        // Handle escape sequences
+        // Handle escape sequences. Snapshot the backslash's own location
+        // before consuming the escape character, so an "unknown escape"
+        // diagnostic points at the actual '\' rather than wherever CurLoc
+        // (the opening-quote location, unchanged since) happens to be.
+        SourceLocation EscapeLoc{CurLine, CurCol, ""};
         LastChar = SourceFile->get();
         CurCol++;
         if (LastChar == 'n') {
           StringVal += '\n';
         } else if (LastChar == 't') {
           StringVal += '\t';
+        } else if (LastChar == 'r') {
+          StringVal += '\r';
+        } else if (LastChar == '0') {
+          StringVal += '\0';
+        } else if (LastChar == 'a') {
+          StringVal += '\a';
+        } else if (LastChar == 'b') {
+          StringVal += '\b';
+        } else if (LastChar == 'f') {
+          StringVal += '\f';
+        } else if (LastChar == 'v') {
+          StringVal += '\v';
         } else if (LastChar == '\\') {
           StringVal += '\\';
         } else if (LastChar == '"') {
           StringVal += '"';
+        } else if (LastChar == '\'') {
+          StringVal += '\'';
         } else {
+          // Anything else after a '\' used to be silently accepted as if
+          // the backslash weren't there at all -- e.g. "a\rb" used to
+          // produce the 3-character string a/r/b (a literal 'r', not a
+          // carriage return), because \r wasn't in the recognized set.
+          // That's exactly the kind of mistake that should be caught at
+          // compile time, not silently miscompiled: an unrecognized
+          // escape is now a clean error instead of a quiet pass-through.
+          LogErrorAt(EscapeLoc,
+                     std::string("Unknown escape sequence '\\") +
+                         static_cast<char>(LastChar) +
+                         "' in string literal.\n  Hint: Recognized escapes "
+                         "are \\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'. "
+                         "Did you mean to write a literal backslash? Use "
+                         "'\\\\' instead.");
           StringVal += LastChar;
         }
       } else {
