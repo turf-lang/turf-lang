@@ -1,0 +1,141 @@
+// A minimal HTTP/1.1 server, written entirely in Turf, using nothing but
+// the raw POSIX sockets API via `extern fn` FFI -- no C helper code, no
+// pre-built socket wrapper library.
+//
+// Run it:
+//   turf examples/http_server.tr -o http_server
+//   ./http_server &
+//   curl http://127.0.0.1:8080/
+//   curl http://127.0.0.1:8080/time
+//   curl http://127.0.0.1:8080/anything-else   # -> 404
+//
+// Why buildSockAddr() manually packs bytes into an int* instead of
+// declaring a Turf `struct sockaddr_in`: every Turf `int` is 64 bits, but
+// C's `struct sockaddr_in` is laid out with 16-bit fields (sin_family,
+// sin_port) -- there's no way to declare a Turf struct whose field sizes
+// match that layout, so the struct can't be built field-by-field the way
+// you'd build an ordinary Turf struct. Instead, `buildSockAddr` computes
+// the correct 16-byte memory image as a single little-endian integer and
+// writes it directly through a `ptr` cast to `int*` (the same pointer-
+// indexing idiom the standard library's own `list.tr`/`stack.tr` use for
+// `data: T*` fields) -- `malloc` gives an untyped `ptr`, casting it to
+// `int*` and assigning `iaddr[0] = ...` writes exactly 8 raw bytes at
+// that address, precisely like array-index-assignment on any other typed
+// pointer.
+//
+// Also note: this file deliberately uses `\n`-only line endings in the
+// HTTP response, not `\r\n` -- Turf's string-literal lexer currently only
+// recognizes `\n`, `\t`, `\\`, and `\"` as escapes; `\r` is not special
+// and comes through as a literal backslash-less 'r' character, which
+// corrupts strict HTTP headers (e.g. "Content-Length: 16r"). Real HTTP
+// clients (curl, browsers) accept bare-LF responses without complaint, so
+// this isn't a blocker for a working server today -- just a real, small
+// lexer gap worth knowing about if you're generating anything that needs
+// literal CRLF.
+
+import io;
+import strings;
+
+extern fn socket(domain: int, type: int, protocol: int): int;
+extern fn bind(fd: int, addr: ptr, len: int): int;
+extern fn listen(fd: int, backlog: int): int;
+extern fn accept(fd: int, addr: ptr, len: ptr): int;
+extern fn recv(fd: int, buf: ptr, len: int, flags: int): int;
+extern fn send(fd: int, buf: string, len: int, flags: int): int;
+extern fn close(fd: int): int;
+extern fn setsockopt(fd: int, level: int, optname: int, optval: ptr, optlen: int): int;
+
+extern fn malloc(size: int): ptr;
+extern fn free(p: ptr): void;
+extern fn memset(p: ptr, val: int, n: int): ptr;
+extern fn strlen(s: string): int;
+
+// Builds a 16-byte `struct sockaddr_in` image for AF_INET/INADDR_ANY on
+// the given port, ready to pass straight to bind().
+fn buildSockAddr(port: int): ptr {
+    mut addr: ptr = malloc(16);
+    memset(addr, 0, 16);
+
+    mut iaddr: int* = addr to int*;
+    // Byte layout (little-endian host, network-order port):
+    //   byte 0-1: sin_family = AF_INET (2)
+    //   byte 2-3: sin_port, high byte first (network/big-endian order)
+    //   byte 4-7: sin_addr = INADDR_ANY (0)
+    // Packed into one 64-bit little-endian store, byte 0 is the lowest
+    // bits and byte 7 is the highest -- so sin_family goes in bits 0-15,
+    // and the port's HIGH byte must land in bits 16-23 (byte 2) with the
+    // LOW byte in bits 24-31 (byte 3) to come out as network-order bytes.
+    immut portHigh: int = (port / 256) % 256;
+    immut portLow: int = port % 256;
+    immut packed: int = 2 + (portHigh * 65536) + (portLow * 16777216);
+    iaddr[0] = packed;
+
+    return addr;
+}
+
+fn handle(clientFd: int): void {
+    mut reqBuf: ptr = malloc(4096);
+    memset(reqBuf, 0, 4096);
+    recv(clientFd, reqBuf, 4095, 0);
+
+    immut reqStr: string = reqBuf to string;
+    io::printline("--- request ---");
+    io::printline(reqStr);
+
+    mut body: string = "";
+    mut status: string = "200 OK";
+
+    if strings::starts_with(reqStr, "GET / ") {
+        body = "Hello from Turf!";
+    } elseif strings::starts_with(reqStr, "GET /time") {
+        body = "the Turf web server is alive";
+    } else {
+        status = "404 Not Found";
+        body = "not found";
+    }
+
+    immut bodyLen: int = strlen(body);
+    immut lenStr: string = bodyLen to string;
+    immut response: string = "HTTP/1.1 " + status + "\nContent-Type: text/plain\nContent-Length: " + lenStr + "\nConnection: close\n\n" + body;
+
+    send(clientFd, response, strlen(response), 0);
+    close(clientFd);
+    free(reqBuf);
+}
+
+fn main(): int {
+    mut serverFd: int = socket(2, 1, 0); // AF_INET, SOCK_STREAM
+    assert(serverFd >= 0, "socket() failed");
+
+    // SO_REUSEADDR so restarting the server doesn't fail with
+    // "address already in use" while the previous socket lingers in
+    // TIME_WAIT -- SOL_SOCKET=1, SO_REUSEADDR=2 on Linux.
+    mut optVal: ptr = malloc(8);
+    mut iOpt: int* = optVal to int*;
+    iOpt[0] = 1;
+    setsockopt(serverFd, 1, 2, optVal, 4);
+    free(optVal);
+
+    mut addr: ptr = buildSockAddr(8080);
+    immut bindResult: int = bind(serverFd, addr, 16);
+    assert(bindResult == 0, "bind() failed");
+    free(addr);
+
+    immut listenResult: int = listen(serverFd, 10);
+    assert(listenResult == 0, "listen() failed");
+
+    io::printline("Turf HTTP server listening on port 8080...");
+
+    mut requestCount: int = 0;
+    while requestCount < 1000 {
+        mut clientFd: int = accept(serverFd, null, null);
+        if clientFd >= 0 {
+            handle(clientFd);
+            requestCount = requestCount + 1;
+        }
+    }
+
+    close(serverFd);
+    io::printline("Handled 1000 requests, shutting down.");
+    return 0;
+}
