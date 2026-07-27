@@ -1977,6 +1977,17 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   // path. Without this, TypeChecker::getType() for `b.val` (b: Box<int>)
   // came back null, silently skipping any further type checking that
   // depends on it (e.g. comparing `b.val` against another value).
+  //
+  // Captured BEFORE BaseTy is overwritten below, same reason
+  // visitMethodCall() captures its own copy early: needed afterward to
+  // substitute this struct's OWN generic parameter(s) into the field's
+  // declared type (T -> Entry for a List<Entry>-typed base, say) -- see
+  // the Subst-building block below.
+  std::vector<TurfTypePtr> GenericTypeArgs;
+  if (BaseTy) {
+    if (auto *GT0 = dynamic_cast<const GenericType *>(BaseTy.get()))
+      GenericTypeArgs = GT0->getTypeArgs();
+  }
   if (BaseTy) {
     if (auto *GT = dynamic_cast<const GenericType *>(BaseTy.get())) {
       if (GlobalSymbolTable)
@@ -1987,6 +1998,46 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   if (BaseTy) {
     if (auto *STy = dynamic_cast<const TurfStructType *>(BaseTy.get())) {
       TurfTypePtr FieldTy = STy->getFieldType(Node.getFieldName());
+
+      // Substitute this struct's own generic type parameter(s) into the
+      // field's declared type -- e.g. `data: T*` on a List<Entry>-typed
+      // base must report `Entry*`, not the bare, unsubstituted `T*`.
+      // Mirrors visitMethodCall()'s identical Subst-recovery technique
+      // (scan every field for a NamedType/TurfGenericParamType name that
+      // isn't a known struct/enum elsewhere -- see that function's own
+      // doc comment for why GlobalSymbolTable's copy of a generic
+      // struct's fields is permanently stuck unsubstituted). Without
+      // this, `someList.data[0].value`'s type came back as the generic
+      // placeholder instead of the real field type, and something
+      // depending on the real type downstream (e.g. `printline`'s
+      // overload pick) silently chose the wrong one instead of erroring
+      // -- confirmed live: printed a raw pointer bit pattern as a number
+      // instead of the actual string. Reuses the same substituteReturnType()
+      // helper visitMethodCall() already uses for return types.
+      if (FieldTy && !GenericTypeArgs.empty()) {
+        std::unordered_map<std::string, TurfTypePtr> Subst;
+        std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
+          if (!FTy || Subst.size() >= GenericTypeArgs.size()) return;
+          if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
+            if (!Subst.count(GP->getName()))
+              Subst.emplace(GP->getName(), GenericTypeArgs[Subst.size()]);
+          } else if (auto *NT = dynamic_cast<const NamedType *>(FTy.get())) {
+            bool KnownElsewhere = GlobalSymbolTable &&
+                                 GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
+            if (!KnownElsewhere && !Subst.count(NT->getName()))
+              Subst.emplace(NT->getName(), GenericTypeArgs[Subst.size()]);
+          } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
+            Scan(PT->getPointee());
+          } else if (isArrayType(FTy.get())) {
+            Scan(dynamic_cast<const ArrayType *>(FTy.get())->getElementTypePtr());
+          }
+        };
+        for (const auto &F : STy->getFields())
+          Scan(F.Type);
+        if (!Subst.empty())
+          FieldTy = substituteReturnType(FieldTy, Subst);
+      }
+
       // Resolve NamedType field types so chained access (a.b.c) propagates
       if (FieldTy) {
         if (auto *NT = dynamic_cast<const NamedType *>(FieldTy.get())) {
@@ -2251,6 +2302,38 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
     setType(&Node, ElemTy);
   } else if (BaseTy && BaseTy->isString()) {
     setType(&Node, TurfInt());
+  } else if (BaseTy) {
+    if (const auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy.get())) {
+      // Pointer-style indexing (`p[i]` on a `T*`, as opposed to a fixed-
+      // size Turf array `T[N]`) -- the exact idiom list.tr/stack.tr/
+      // queue.tr all use internally for their own `data[i]` field, and any
+      // caller reading a generic collection's public `data` field directly
+      // (`someList.data[0]`) hits it too. This branch never existed at
+      // all before -- `p[i]` always fell through to the final `else`
+      // below and got type `nullptr`, so anything depending on its type
+      // (an overload pick like `printline(p[i])`, a further `.field`
+      // access) silently got the wrong answer instead of a diagnostic.
+      // Confirmed live: `printline(someList.data[0].value)` (value: string)
+      // printed the raw pointer bit pattern as a number -- the `int`
+      // print() overload got picked because `.value`'s type came back
+      // null here, not because anything about the VALUE itself was wrong
+      // (Codegen's independent getExprType() already resolved it
+      // correctly; this is a completely separate type-inference pass that
+      // never consults Codegen's results, same relationship as every
+      // other getExprType()/TypeChecker parity gap this session found).
+      TurfTypePtr ElemTy = PtrTy->getPointee();
+      if (ElemTy) {
+        if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy.get())) {
+          if (GlobalSymbolTable) {
+            if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+              ElemTy = Resolved;
+          }
+        }
+      }
+      setType(&Node, ElemTy);
+    } else {
+      setType(&Node, nullptr);
+    }
   } else {
     setType(&Node, nullptr);
   }

@@ -714,9 +714,106 @@ static const TurfType *getExprType(const ExprAST *E) {
           BaseTy = R.get();
       }
     }
+    // Resolve a GenericType base (e.g. List<Entry>) to its underlying
+    // TurfStructType, mirroring the identical MethodCallExprAST handling
+    // above (see its extensive doc comment for the full rationale). Without
+    // this, `someList.data` (a FIELD access on a GENERIC struct instance)
+    // never matched the `dynamic_cast<TurfStructType>` check just below at
+    // all -- GenericType doesn't inherit from TurfStructType -- so this
+    // whole branch fell through to `return nullptr` for ANY field access on
+    // a generic struct, including the publicly-exposed `data`/`len`/`cap`
+    // fields List<T>/Stack<T>/Queue<T> all have. Confirmed live: `someList.
+    // data[0].value` (index into a `List<Entry>`, then read a field off the
+    // result) crashed the WHOLE COMPILER with "Internal error: Could not
+    // determine type of array/list base" in ArrayAccessExprAST::
+    // codegenLValue() -- getExprType() on `someList.data` (the array being
+    // indexed) silently returned null here, and that function has no
+    // graceful fallback for a null base type.
+    std::vector<TurfTypePtr> GenericTypeArgs;
+    if (auto *GT0 = dynamic_cast<const GenericType *>(BaseTy))
+      GenericTypeArgs = GT0->getTypeArgs();
+    if (auto *GT = dynamic_cast<const GenericType *>(BaseTy)) {
+      if (GlobalSymbolTable) {
+        if (auto R = GlobalSymbolTable->LookupType(GT->getBaseName()))
+          BaseTy = R.get();
+      }
+    }
     if (auto *STy = dynamic_cast<const TurfStructType *>(BaseTy)) {
       TurfTypePtr FieldTy = STy->getFieldType(FieldAccess->getFieldName());
       if (!FieldTy) return nullptr;
+
+      // Substitute this struct's own generic type parameter(s) into the
+      // field's declared type (e.g. T -> Entry for a List<Entry> instance,
+      // turning the field's stuck-as-declared `T*` into `Entry*`). Fixing
+      // the GenericType-base gap above alone isn't enough on its own: even
+      // once `.data`'s declared type (`T*`) is found at all, it's still the
+      // UNSUBSTITUTED generic placeholder -- indexing into it would report
+      // each element's type as bare `T`, and `T` isn't a real struct, so a
+      // further `.value` field access on THAT would fail too. Mirrors the
+      // identical scan-the-fields Subst-recovery technique the
+      // MethodCallExprAST branch above already uses for method return
+      // types (GlobalSymbolTable's copy of a generic struct's fields is
+      // permanently stuck as NamedType/TurfGenericParamType, never
+      // rewritten per-instantiation -- see that branch's own doc comment).
+      if (!GenericTypeArgs.empty()) {
+        std::unordered_map<std::string, TurfTypePtr> Subst;
+        std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
+          if (!FTy || Subst.size() >= GenericTypeArgs.size()) return;
+          if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
+            if (!Subst.count(GP->getName()))
+              Subst.emplace(GP->getName(), GenericTypeArgs[Subst.size()]);
+          } else if (auto *NT2 = dynamic_cast<const NamedType *>(FTy.get())) {
+            bool KnownElsewhere = GlobalSymbolTable &&
+                                 GlobalSymbolTable->LookupType(NT2->getName()) != nullptr;
+            if (!KnownElsewhere && !Subst.count(NT2->getName()))
+              Subst.emplace(NT2->getName(), GenericTypeArgs[Subst.size()]);
+          } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
+            Scan(PT->getPointee());
+          } else if (isArrayType(FTy.get())) {
+            Scan(dynamic_cast<const ::ArrayType *>(FTy.get())->getElementTypePtr());
+          }
+        };
+        for (const auto &F : STy->getFields())
+          Scan(F.Type);
+
+        if (!Subst.empty()) {
+          // Recursively substitute FieldTy through Subst, rebuilding
+          // wrapper (pointer) types as needed. A freshly-constructed
+          // wrapper type is cached statically, keyed by its mangled name,
+          // so the raw pointer this function ultimately returns stays
+          // valid for the caller's lifetime without leaking or dangling --
+          // the exact same pattern AddressOfExprAST's case below already
+          // uses for the same reason (a locally-constructed TurfTypePtr
+          // would otherwise be destroyed the moment this function returns,
+          // leaving `.get()` a dangling pointer).
+          static std::map<std::string, TurfTypePtr> FieldSubstCache;
+          std::function<TurfTypePtr(const TurfTypePtr &)> Apply =
+              [&](const TurfTypePtr &FTy) -> TurfTypePtr {
+            if (!FTy) return FTy;
+            if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
+              auto It = Subst.find(GP->getName());
+              if (It != Subst.end()) return It->second;
+            } else if (auto *NT2 = dynamic_cast<const NamedType *>(FTy.get())) {
+              auto It = Subst.find(NT2->getName());
+              if (It != Subst.end()) return It->second;
+            } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
+              TurfTypePtr NewPointee = Apply(PT->getPointee());
+              if (NewPointee.get() != PT->getPointee().get()) {
+                std::string Key = "fieldsubst_ptr_" + NewPointee->getMangledName();
+                auto CacheIt = FieldSubstCache.find(Key);
+                if (CacheIt != FieldSubstCache.end())
+                  return CacheIt->second;
+                auto NewPtr = std::make_shared<TurfPointerType>(NewPointee);
+                FieldSubstCache[Key] = NewPtr;
+                return NewPtr;
+              }
+            }
+            return FTy;
+          };
+          FieldTy = Apply(FieldTy);
+        }
+      }
+
       // Resolve NamedType field types so chained access (a.b.c) works correctly.
       if (auto *NT = dynamic_cast<const NamedType *>(FieldTy.get())) {
         if (GlobalSymbolTable) {
