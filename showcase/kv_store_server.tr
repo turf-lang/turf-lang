@@ -1,0 +1,132 @@
+// A tiny in-memory key-value store, served over TCP -- a miniature
+// Redis-shaped service written entirely in Turf. Combines four separate
+// stdlib pieces (net, list, strings, mem) the way a real small service
+// would: state held in a generic collection, a hand-rolled text protocol
+// parsed with string primitives, network I/O via the net module, entries
+// heap-allocated via the mem module. No `extern fn` anywhere in this file.
+//
+// Protocol: one command per connection (connect, send one line, get one
+// line back, connection closes) -- kept simple deliberately; see
+// showcase/http_server.tr for the same "process an accepted connection"
+// shape applied to HTTP instead.
+//   SET <key> <value>   -> "OK"
+//   GET <key>           -> the value, or "NOT_FOUND"
+//
+// Run it:
+//   turf showcase/kv_store_server.tr -o kv_store_server
+//   ./kv_store_server &
+//   turf showcase/kv_store_client.tr -o kv_store_client
+//   ./kv_store_client SET name Turf
+//   ./kv_store_client GET name
+//
+// Two things worth knowing if you're using this file as a reference for
+// your own generic-collection-of-structs code:
+//
+// 1. The store is `List<Entry*>` (a list of POINTERS to heap-allocated
+//    Entry structs), not `List<Entry>` directly. Turf's generics use type
+//    erasure -- every element of a `List<T>` is assumed to fit in one
+//    8-byte slot (an int, a double, a pointer). `Entry` itself is 16 bytes
+//    (two string fields), which doesn't fit that assumption; a pointer to
+//    one always does, regardless of the pointee's size. Confirmed live:
+//    `List<Entry>` (by value) crashed the whole compiler trying to pass a
+//    16-byte struct value into `push(item: T)`'s type-erased (8-byte,
+//    pointer-shaped) parameter.
+//
+// 2. The per-connection handling is inlined directly in main()'s accept
+//    loop instead of factored into its own `handle(conn, store)` function.
+//    Turf doesn't yet have a way to take the address of a stack-local
+//    variable (no `&x` operator -- "safe references" are still an open
+//    roadmap item, see docs/planning/ROADMAP_v1.0.0.md's Phase 4). Passing
+//    `store: List<Entry*>` to a helper function would pass the LIST
+//    STRUCT itself by value, so a `.push()` inside that helper (which can
+//    reallocate the list's backing buffer and update its own
+//    `len`/`cap`/`data` fields) would only mutate the helper's own copy --
+//    the very next connection would see the store exactly as it was
+//    before that push, silently losing every write. Confirmed live while
+//    first writing this file with a `handle()` helper. Keeping the
+//    mutation in the same scope as the `mut store` declaration sidesteps
+//    the whole problem.
+
+import io;
+import net;
+import strings;
+import mem;
+import list::List;
+
+struct Entry {
+    key: string,
+    value: string
+}
+
+// List<T>'s own public `data`/`len` fields (see lib/std/list.tr) give
+// direct indexed access -- List.push()/pop()/length() alone would only
+// support stack-shaped access, not the "find by key" scan a KV store
+// actually needs. There's no Map<K,V> in the standard library yet (see
+// docs/planning/STDLIB_ROADMAP.md) -- this linear scan is the honest
+// current alternative for a small store like this one.
+fn findIndex(store: List<Entry*>, key: string): int {
+    mut i: int = 0;
+    while i < store.length() {
+        if store.data[i].key == key {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn main(): int {
+    mut store: List<Entry*> = List { data: null, len: 0, cap: 0 };
+    mut server: net::TcpListener = net::TcpListener::bind(8181);
+    io::printline("Turf key-value store listening on port 8181...");
+
+    mut requestCount: int = 0;
+    while requestCount < 1000 {
+        mut conn: net::TcpConnection = server.accept();
+        immut line: string = strings::trim(conn.read(4096));
+
+        immut firstSpace: int = strings::index_of(line, " ");
+        if firstSpace < 0 {
+            conn.write("ERROR malformed command\n");
+        } else {
+            immut cmd: string = strings::substring(line, 0, firstSpace);
+            immut rest: string = strings::substring(line, firstSpace + 1, strings::length(line));
+
+            if cmd == "GET" {
+                immut idx: int = findIndex(store, rest);
+                if idx >= 0 {
+                    conn.write(store.data[idx].value + "\n");
+                } else {
+                    conn.write("NOT_FOUND\n");
+                }
+            } elseif cmd == "SET" {
+                immut secondSpace: int = strings::index_of(rest, " ");
+                if secondSpace < 0 {
+                    conn.write("ERROR: SET needs a key and a value\n");
+                } else {
+                    immut key: string = strings::substring(rest, 0, secondSpace);
+                    immut value: string = strings::substring(rest, secondSpace + 1, strings::length(rest));
+                    immut idx: int = findIndex(store, key);
+                    if idx >= 0 {
+                        store.data[idx].value = value;
+                    } else {
+                        mut e: Entry* = mem::alloc(16) to Entry*;
+                        e.key = key;
+                        e.value = value;
+                        store.push(e);
+                    }
+                    conn.write("OK\n");
+                }
+            } else {
+                conn.write("ERROR: unknown command '" + cmd + "'\n");
+            }
+        }
+
+        conn.close();
+        requestCount = requestCount + 1;
+    }
+
+    server.close();
+    io::printline("Handled 1000 requests, shutting down.");
+    return 0;
+}

@@ -1,0 +1,32 @@
+// A client for showcase/kv_store_server.tr. Sends one hardcoded SET
+// followed by one hardcoded GET over two separate connections (matching
+// the server's one-command-per-connection protocol), printing both
+// responses -- a self-contained demonstration that doesn't need any CLI
+// argument handling (there's no argv access in the standard library yet,
+// see docs/planning/STDLIB_ROADMAP.md's `os` module entry).
+//
+// Run it (after starting showcase/kv_store_server.tr):
+//   turf showcase/kv_store_client.tr -o kv_store_client
+//   ./kv_store_client
+
+import io;
+import net;
+
+fn main(): int {
+    mut setConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181);
+    setConn.write("SET language Turf\n");
+    io::printline("SET response: " + setConn.read(1024));
+    setConn.close();
+
+    mut getConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181);
+    getConn.write("GET language\n");
+    io::printline("GET response: " + getConn.read(1024));
+    getConn.close();
+
+    mut missConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181);
+    missConn.write("GET nonexistent\n");
+    io::printline("GET (miss) response: " + missConn.read(1024));
+    missConn.close();
+
+    return 0;
+}

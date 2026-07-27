@@ -1,0 +1,68 @@
+// A minimal HTTP/1.1 server, written the way an actual Turf application
+// programmer would write one -- using the standard library's `net` module,
+// not raw POSIX sockets. There is no `extern fn`, no `ptr`, and no manual
+// memory management anywhere in this file; all of that lives inside
+// `lib/std/net.tr` (and the `mem`/`strings` modules it and this file build
+// on), exactly the way `io::printline` hides `printf` from every caller.
+//
+// Run it:
+//   turf showcase/http_server.tr -o http_server
+//   ./http_server &
+//   curl http://127.0.0.1:8080/
+//   curl http://127.0.0.1:8080/time
+//   curl http://127.0.0.1:8080/anything-else   # -> 404
+//
+// See showcase/http_client.tr for a companion Turf *client* that talks to
+// this exact server -- a full request/response round trip with both ends
+// written in Turf.
+//
+// One thing worth knowing if you go looking at raw HTTP traffic from this
+// server: it uses `\n`-only line endings, not `\r\n` -- both are accepted
+// here since 2026-07-27's lexer fix added \r as a recognized string escape
+// (previously it silently became a literal 'r' character and corrupted
+// strict headers), but `\n`-only is kept since every real HTTP client
+// (curl, browsers) tolerates it fine and it reads slightly cleaner in Turf
+// source.
+
+import io;
+import net;
+import strings;
+
+fn handle(conn: net::TcpConnection): void {
+    immut request: string = conn.read(4096);
+    io::printline("--- request ---");
+    io::printline(request);
+
+    mut body: string = "";
+    mut status: string = "200 OK";
+
+    if strings::starts_with(request, "GET / ") {
+        body = "Hello from Turf!";
+    } elseif strings::starts_with(request, "GET /time") {
+        body = "the Turf web server is alive";
+    } else {
+        status = "404 Not Found";
+        body = "not found";
+    }
+
+    immut bodyLen: int = strings::length(body);
+    immut response: string = "HTTP/1.1 " + status + "\nContent-Type: text/plain\nContent-Length: " + (bodyLen to string) + "\nConnection: close\n\n" + body;
+    conn.write(response);
+    conn.close();
+}
+
+fn main(): int {
+    mut server: net::TcpListener = net::TcpListener::bind(8080);
+    io::printline("Turf HTTP server listening on port 8080...");
+
+    mut requestCount: int = 0;
+    while requestCount < 1000 {
+        mut conn: net::TcpConnection = server.accept();
+        handle(conn);
+        requestCount = requestCount + 1;
+    }
+
+    server.close();
+    io::printline("Handled 1000 requests, shutting down.");
+    return 0;
+}

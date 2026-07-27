@@ -451,7 +451,7 @@ fn main(): int {
 
 A larger FFI showcase (file I/O, `libm`, environment variables, sockets, variadic `printf` via `extern fn printf(fmt: string, ...): int;`, and linking against arbitrary system libraries via `extern from "libname" fn`) lives in the test suite alongside the rest of the examples above.
 
-**A real HTTP server** — raw POSIX sockets via FFI, no C helper code — lives in `examples/http_server.tr`. It's a genuine, working multi-request server with basic routing; see the file's own header comment for how to run it.
+**`showcase/`** has larger, real-world-shaped programs — an HTTP server and a companion Turf HTTP client that talks to it over a real TCP socket (a full request/response round trip, both ends written in Turf, using nothing but standard-library modules — no `extern fn`/`ptr` in the showcase files themselves), plus more. See that directory's own files for details on running each one.
 
 ## Building from Source
 

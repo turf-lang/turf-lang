@@ -75,30 +75,6 @@ suite as a "real" bug — it's asserting the *current*, accepted behavior):
 
 ---
 
-## Open: `\r` is not a recognized string-literal escape sequence
-
-**Where:** `src/Lexer.cpp`, the string-literal scanning loop (~line 420-434).
-
-Only `\n`, `\t`, `\\`, and `\"` are handled as escapes; any other character
-after a backslash (including `\r`) falls through to `StringVal +=
-LastChar`, silently dropping the backslash and keeping the bare letter. So
-`"a\rb"` produces the 3-character string `a`, `r`, `b` — a literal `r`, not
-a carriage-return byte.
-
-**Found:** 2026-07-27, writing `examples/http_server.tr` — an HTTP
-response built with `"...\r\n..."` line endings came out corrupted
-(`"Content-Length: 16r"`, breaking `curl`'s header parser) because every
-`\r` silently became a literal `r`. Worked around by using LF-only (`\n`)
-line endings, which real HTTP clients accept without complaint — not a
-practical blocker for that example, but a real, easy-to-hit gap for
-anything that needs a literal CR (raw protocol text, `\r\n` line endings,
-terminal control sequences, etc.).
-
-**Fix:** add `\r` (and probably `\0`) to the escape-handling `if`/`else`
-chain in `src/Lexer.cpp`, mirroring the existing `\n`/`\t` cases exactly.
-
----
-
 ## Cross-references
 
 - `docs/planning/generics_and_operators_roadmap.md` — the aspirational "real

@@ -1,0 +1,37 @@
+// A Turf HTTP *client* -- talks to showcase/http_server.tr over a real TCP
+// connection, entirely in Turf on both ends. Run the server first, then
+// this: a full client/server round trip written in one language, no `curl`
+// or any other external tool involved.
+//
+// Run it:
+//   turf showcase/http_server.tr -o http_server
+//   ./http_server &
+//   turf showcase/http_client.tr -o http_client
+//   ./http_client
+//   ./http_client /time
+//   ./http_client /nope
+
+import io;
+import net;
+
+fn main(): int {
+    mut path: string = "/";
+    // No argv access in the standard library yet (see
+    // docs/planning/STDLIB_ROADMAP.md's `os` module entry) -- this demo
+    // deliberately keeps it to a single hardcoded default path rather than
+    // reaching for a workaround; run the three curl-equivalent requests
+    // below by editing `path` and recompiling, or just use curl itself
+    // side by side with this file to compare the same server handling both.
+    immut request: string = "GET " + path + " HTTP/1.1\nHost: 127.0.0.1:8080\nConnection: close\n\n";
+
+    mut conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8080);
+    conn.write(request);
+
+    immut response: string = conn.read(4096);
+    conn.close();
+
+    io::printline("--- response from the Turf HTTP server ---");
+    io::printline(response);
+
+    return 0;
+}
