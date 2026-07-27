@@ -4,7 +4,8 @@ Complete internal + external reference for Turflang's module/import system and t
 
 Related, narrower docs:
 - `docs/slm/modules.txt` — the user-facing quick-reference used by the SLM diagnostic assistant (shorter, example-driven, no internals).
-- `docs/detailed/modules_and_stdlib.md` — **stale as of this rewrite** (still describes the old `prelude.tr` auto-import and `.`-based module calls, neither of which exist anymore). Not corrected here since it wasn't in scope for this document; flagged for whoever picks that file up next.
+
+`docs/detailed/modules_and_stdlib.md` (which described the old `prelude.tr` auto-import and `.`-based module calls, neither of which exist anymore) was removed rather than corrected — this document is its replacement for anything internals-related; a new user-facing detailed doc for modules/stdlib is deferred to a later, separate pass.
 
 ---
 
