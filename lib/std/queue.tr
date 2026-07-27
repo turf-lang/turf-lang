@@ -1,7 +1,7 @@
 // Queue<T> — FIFO (First In, First Out) collection.
 // Usage:
-//   import queue;
-//   mut q: Queue<int> = Queue { data: null, len: 0, cap: 0, head: 0 };
+//   import queue::Queue;   // (or `import queue;` + spell it `queue::Queue<int>` below)
+//   mut q: Queue<int>;   // default-initialized -- no need to write out the fields
 //   q.enqueue(1)  q.dequeue()  q.peek()  q.length()
 //
 // Implementation: dynamic array with a head offset.

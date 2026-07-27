@@ -1,7 +1,7 @@
 // list.tr — List<T>: a dynamically-growing array.
 // Usage:
-//   import list;
-//   mut l: List<int> = List { data: null, len: 0, cap: 0 };
+//   import list::List;   // (or `import list;` + spell it `list::List<int>` below)
+//   mut l: List<int>;   // default-initialized -- no need to write out the fields
 //   l.push(1);
 //   l.push(2);
 //   mut x: int = l.pop();   // 2

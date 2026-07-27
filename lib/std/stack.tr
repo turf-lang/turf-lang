@@ -1,7 +1,7 @@
 // Stack<T> — LIFO (Last In, First Out) collection.
 // Usage:
-//   import stack;
-//   mut s: Stack<int> = Stack { data: null, len: 0, cap: 0 };
+//   import stack::Stack;   // (or `import stack;` + spell it `stack::Stack<int>` below)
+//   mut s: Stack<int>;   // default-initialized -- no need to write out the fields
 //   s.push(1)  s.pop()  s.peek()  s.length()
 
 import mem;

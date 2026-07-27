@@ -76,7 +76,7 @@ fn findIndex(store: List<Entry*>, key: string): int {
 }
 
 fn main(): int {
-    mut store: List<Entry*> = List { data: null, len: 0, cap: 0 };
+    mut store: List<Entry*>;
     mut server: net::TcpListener = net::TcpListener::bind(8181);
     io::printline("Turf key-value store listening on port 8181...");
 
