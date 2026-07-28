@@ -54,7 +54,6 @@ class FieldAccessExprAST;
 class EnumDeclExprAST;
 class ScopeAccessExprAST;
 class StructDeclExprAST;
-class StructInitExprAST;
 class ModuleImportExprAST;
 class SizeOfExprAST;
 class ExternFuncDeclExprAST;
@@ -129,7 +128,6 @@ public:
   virtual void visitEnumDecl(EnumDeclExprAST &Node) {}
   virtual void visitScopeAccess(ScopeAccessExprAST &Node) {}
   virtual void visitStructDecl(StructDeclExprAST &Node) {}
-  virtual void visitStructInit(StructInitExprAST &Node) {}
 
   // ── Arrays ────────────────────────────────────────────────────────────────
   virtual void visitArrayDecl(ArrayDeclExprAST &Node) {}

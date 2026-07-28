@@ -344,21 +344,6 @@ public:
     ascend();
   }
 
-  void visitStructInit(StructInitExprAST &N) override {
-    printIndent(Depth_);
-    std::cout << "StructInit(" << N.getName()
-              << ", fields=" << N.getNamedFields().size() << ")\n";
-    descend();
-    for (const auto &[FieldName, Val] : N.getNamedFields()) {
-      printIndent(Depth_);
-      std::cout << "Field(" << FieldName << "):\n";
-      descend();
-      print(Val.get(), Depth_);
-      ascend();
-    }
-    ascend();
-  }
-
   void visitFieldAccess(FieldAccessExprAST &N) override {
     printIndent(Depth_);
     std::cout << "FieldAccess(." << N.getFieldName() << ")\n";

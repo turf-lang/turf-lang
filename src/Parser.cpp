@@ -53,16 +53,6 @@ int CurTok; // The current token the parser is looking at
 static std::map<int, int> BinopPrecedence; // Precedence table: '*' > '+'
 static std::vector<std::unique_ptr<ExprAST>> ParsedTopLevelASTs;
 
-// Issue #1 fix: When parsing an if/while/for condition, we must NOT allow
-// struct-brace-init syntax (Identifier '{' ...) because '{' is ambiguous
-// with the block opener. This mirrors Rust's grammar restriction.
-static bool g_AllowStructInit = true;
-struct NoStructInitGuard {
-  bool Previous;
-  NoStructInitGuard() : Previous(g_AllowStructInit) { g_AllowStructInit = false; }
-  ~NoStructInitGuard() { g_AllowStructInit = Previous; }
-};
-
 struct SymbolScopeGuard {
   bool Active;
   SymbolScopeGuard(bool ShouldEnter) : Active(ShouldEnter) {
@@ -530,11 +520,7 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
   SourceLocation KeywordLoc = CurLoc;
   getNextToken(); // eat 'if'
 
-  std::unique_ptr<ExprAST> Cond;
-  {
-    NoStructInitGuard Guard;
-    Cond = ParseExpression();
-  }
+  std::unique_ptr<ExprAST> Cond = ParseExpression();
   if (!Cond)
     return nullptr;
 
@@ -553,11 +539,7 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
     SourceLocation ElseifLoc = CurLoc;
     getNextToken(); // eat 'elseif'
 
-    std::unique_ptr<ExprAST> ElseifCond;
-    {
-      NoStructInitGuard Guard;
-      ElseifCond = ParseExpression();
-    }
+    std::unique_ptr<ExprAST> ElseifCond = ParseExpression();
     if (!ElseifCond)
       return nullptr;
 
@@ -604,47 +586,6 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
                                      ElseLoc);
 }
 
-// Parses the `field: expr, ...` body of a struct literal. The opening '{'
-// has already been consumed by the caller; this consumes up to and
-// including the closing '}'. Shared by both the bare form (Identifier
-// { ... }) and the qualified form (Module::StructName { ... }) so the two
-// don't duplicate this loop -- @p StructNameForError is only used to name
-// the struct in the "Expected '}'" diagnostic. Returns false (having
-// already raised an error) on failure.
-static bool ParseStructInitFieldsBody(
-    const std::string &StructNameForError,
-    std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> &NamedFields) {
-  while (CurTok != '}' && CurTok != TOK_EOF) {
-    if (CurTok != TOK_IDENTIFIER) {
-      LogErrorAt(CurLoc, "Expected field name in struct initializer");
-      return false;
-    }
-    std::string FieldName = IdentifierStr;
-    getNextToken(); // eat field name
-    if (CurTok != TOK_COLON) {
-      LogErrorAt(CurLoc, "Expected ':' after field name '" + FieldName +
-                             "' in struct initializer");
-      return false;
-    }
-    getNextToken(); // eat ':'
-    auto Val = ParseExpression();
-    if (!Val)
-      return false;
-    NamedFields.emplace_back(FieldName, std::move(Val));
-    if (CurTok == ',')
-      getNextToken(); // eat ','
-    else if (CurTok != '}')
-      break;
-  }
-  if (CurTok != '}') {
-    LogErrorAt(CurLoc, "Expected '}' to close struct initializer for '" +
-                           StructNameForError + "'");
-    return false;
-  }
-  getNextToken(); // eat '}'
-  return true;
-}
-
 // "Primary" means the basic building blocks: numbers or parentheses.
 static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   switch (CurTok) {
@@ -682,16 +623,28 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     SourceLocation IdLoc = CurLoc;
     getNextToken(); // consume the identifier; CurTok now = next token
 
-    // ── Struct brace-init: Identifier '{' field: expr, ... '}' ──────────────
-    // Checked before the keyword-typo guard so `Point { ... }` is never
-    // mistaken for a typo.
-    if (g_AllowStructInit && CurTok == '{') {
-      getNextToken(); // eat '{'
-      std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields;
-      if (!ParseStructInitFieldsBody(IdName, NamedFields))
-        return nullptr;
-      return std::make_unique<StructInitExprAST>(IdLoc, IdName,
-                                                 std::move(NamedFields));
+    // ── Legacy struct brace-init is gone: `Identifier '{' ... '}'` no longer
+    // constructs anything -- see `StructName::new(...)`/`StructName::default()`
+    // instead. This branch used to build a StructInitExprAST here (removed
+    // entirely, along with the g_AllowStructInit flag it needed to avoid
+    // colliding with every block-taking construct's own '{'). Best-effort,
+    // not authoritative: if `IdName` is a struct type already registered by
+    // this point in the (top-to-bottom, live) parse, give a specific hint
+    // instead of letting this fall through to a generic/confusing parse
+    // error a few tokens later -- a forward-declared struct just won't hit
+    // this check, which is fine, since the ordinary parse failure that
+    // follows is still a real, if less specific, diagnostic.
+    if (CurTok == '{' && GlobalSymbolTable) {
+      if (auto T = GlobalSymbolTable->LookupType(IdName)) {
+        if (dynamic_cast<TurfStructType *>(T.get())) {
+          LogErrorAt(IdLoc, "'" + IdName + " { ... }' is no longer valid syntax "
+                             "for constructing a struct."
+                             "\n  Hint: use '" + IdName + "::new(...)' (if '" +
+                             IdName + "' declares a constructor) or '" + IdName +
+                             "::default()' instead.");
+          return nullptr;
+        }
+      }
     }
 
     // ── Scope access: Left::Right ────────────────────────────────────────────
@@ -713,19 +666,22 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       SourceLocation RightLoc = CurLoc;
       getNextToken(); // eat right-hand name
 
-      // Qualified struct-literal construction: Module::StructName { ... }.
-      // Module ownership (is IdName a real module, and does it actually
-      // declare RightName) is validated later by the Resolver
-      // (visitStructInit -> validateModuleQualifier()) once module
-      // registrations are known -- not here, same reason ParseType()'s
-      // qualifier can't be validated at parse time either.
-      if (g_AllowStructInit && CurTok == '{') {
-        getNextToken(); // eat '{'
-        std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields;
-        if (!ParseStructInitFieldsBody(RightName, NamedFields))
-          return nullptr;
-        return std::make_unique<StructInitExprAST>(IdLoc, RightName,
-                                                   std::move(NamedFields), IdName);
+      // Same removed-syntax hint as the bare form above, for the qualified
+      // `Module::StructName { ... }` spelling -- RightName is checked
+      // (structs/enums stay flat and module-blind, see 2.6 in
+      // modules_and_scope_resolution.md, so a bare LookupType is correct
+      // here too even though IdName is the module, not the struct).
+      if (CurTok == '{' && GlobalSymbolTable) {
+        if (auto T = GlobalSymbolTable->LookupType(RightName)) {
+          if (dynamic_cast<TurfStructType *>(T.get())) {
+            LogErrorAt(IdLoc, "'" + IdName + "::" + RightName + " { ... }' is no "
+                               "longer valid syntax for constructing a struct."
+                               "\n  Hint: use '" + IdName + "::" + RightName +
+                               "::new(...)' or '" + IdName + "::" + RightName +
+                               "::default()' instead.");
+            return nullptr;
+          }
+        }
       }
 
       // A THIRD name chained on: `IdName::RightName` just parsed was
@@ -1210,11 +1166,7 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
   SourceLocation KeywordLoc = CurLoc;
   getNextToken();
 
-  std::unique_ptr<ExprAST> Cond;
-  {
-    NoStructInitGuard Guard;
-    Cond = ParseExpression();
-  }
+  std::unique_ptr<ExprAST> Cond = ParseExpression();
   if (!Cond) {
     return nullptr;
   }
@@ -1258,13 +1210,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   }
   getNextToken();
 
-  // Suppress struct-init inside for range/step expressions to avoid
-  // ambiguity between a trailing identifier and the block opener '{'
   std::unique_ptr<ExprAST> Start, End, Step;
-  {
-    NoStructInitGuard Guard;
-    Start = ParseExpression();
-  }
+  Start = ParseExpression();
   if (!Start)
     return nullptr;
   if (CurTok != TOK_RANGE) {
@@ -1276,10 +1223,7 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   }
   getNextToken();
 
-  {
-    NoStructInitGuard Guard;
-    End = ParseExpression();
-  }
+  End = ParseExpression();
   if (!End)
     return nullptr;
   if (CurTok != TOK_STEP) {
@@ -1290,10 +1234,7 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   }
   getNextToken();
 
-  {
-    NoStructInitGuard Guard;
-    Step = ParseExpression();
-  }
+  Step = ParseExpression();
   if (!Step)
     return nullptr;
 
@@ -1340,11 +1281,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
   if (HasParen)
     getNextToken(); // eat '('
 
-  std::unique_ptr<ExprAST> Subject;
-  {
-    NoStructInitGuard Guard;
-    Subject = ParseExpression();
-  }
+  std::unique_ptr<ExprAST> Subject = ParseExpression();
   if (!Subject)
     return nullptr;
 
@@ -2269,21 +2206,21 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
     FuncName = StructName + "." + IdentifierStr;
     getNextToken();
   } else if (CurTok == TOK_SCOPE) {
-    // `fn StructName::method(...)` -- a true STATIC method: no implicit
-    // `self` parameter, callable only as `StructName::method(args)` (never
-    // through an instance). Mirrors the '.' instance-method form above in
-    // every other respect (internal registration name, overloading,
-    // forward-reference tolerance) -- see the `!StructName.empty()`
-    // self-injection block below, which this deliberately skips.
-    StructName = FuncName;
-    IsStaticMethodDecl = true;
-    getNextToken(); // eat '::'
-    if (CurTok != TOK_IDENTIFIER) {
-      LogErrorAt(CurLoc, "Expected a static method name after '::'");
-      return nullptr;
-    }
-    FuncName = StructName + "." + IdentifierStr;
-    getNextToken();
+    // `fn StructName::method(...)` used to declare a static method (no
+    // implicit `self`). That form is gone -- ALL method declarations use
+    // '.' now, static or not, distinguished by a trailing 'static' keyword
+    // instead: `fn StructName.method(...) static: RetType { ... }`. '::' is
+    // reserved for call/reference syntax only (StructName::method(...),
+    // StructName::new(...), StructName::default()), never a declaration.
+    LogErrorAt(CurLoc,
+               "'fn " + FuncName + "::method(...)' is no longer valid syntax "
+               "for declaring a static method."
+               "\n  Hint: declare it as 'fn " + FuncName +
+               ".method(...) static: ReturnType { ... }' instead -- '.' is "
+               "used for every method declaration now (instance or static); "
+               "'static' marks the no-self case. '::' is only for calling "
+               "it (StructName::method(...) is unchanged).");
+    return nullptr;
   }
 
   // Expect '('
@@ -2294,46 +2231,6 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   getNextToken(); // eat '('
 
   std::vector<ParamDecl> Params;
-  if (!StructName.empty() && !IsStaticMethodDecl) {
-    // Build 'self' as a pointer to a lazy NamedType(StructName) placeholder
-    // rather than eagerly resolving StructName via GlobalSymbolTable here.
-    //
-    // This intentionally mirrors how every OTHER struct-type reference in
-    // this parser works (see ParseType()'s `Base = std::make_shared<NamedType>(BaseName);`
-    // fallback for any non-primitive name) instead of special-casing this
-    // one spot to require the struct to already be registered.
-    //
-    // Why this matters: GlobalSymbolTable is populated by ParseStructDecl()
-    // as it is encountered during this single top-to-bottom parse -- there is
-    // no separate pre-pass that hoists struct names ahead of the parser the
-    // way the Resolver later hoists them ahead of name resolution. An eager
-    // lookup here previously meant `fn User.grow(): void { ... }` failed to
-    // even PARSE ("Unknown struct type 'User' in method declaration") if it
-    // appeared textually before `struct User { ... }` in the same file --
-    // contradicting the language's forward-declaration story (plain function
-    // calls, and struct fields referencing later-declared structs, both work
-    // fine) for no reason other than this one spot being stricter than it
-    // needs to be.
-    //
-    // This is safe: TypeChecker::visitFieldAccess/visitMethodCall and
-    // Codegen's FieldAccessExprAST/MethodCallExprAST already unwrap a
-    // TurfPointerType's pointee and, if it's a NamedType, resolve it via
-    // GlobalSymbolTable->LookupType() at every `self.field` / `self.method()`
-    // use site inside the method body -- that resolve-on-use path is exactly
-    // what runs for every other NamedType field/parameter already, so 'self'
-    // is not gaining or losing any capability here, just becoming consistent.
-    //
-    // Note this does mean a genuinely misspelled struct name in a method
-    // declaration (`fn Usre.grow()`) is no longer caught here either -- but
-    // that validation was never systematic to begin with (an ordinary
-    // function parameter of an unknown struct type, e.g. `fn f(x: NoSuch)`,
-    // already silently compiles with zero diagnostics today). Catching
-    // unknown NamedType names belongs in the Resolver, which already has the
-    // registered-struct-name machinery (isKnownStruct()) for exactly this,
-    // currently applied only to struct fields.
-    auto SelfPointee = std::make_shared<NamedType>(StructName);
-    Params.push_back({std::make_shared<TurfPointerType>(SelfPointee), "self"});
-  }
 
   // Parse parameter list: each param is: Identifier TOK_COLON ParseType()
   // Params separated by ','
@@ -2394,6 +2291,64 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   }
   getNextToken(); // eat ')'
 
+  // Optional 'static' keyword: `fn StructName.method(...) static: RetType`.
+  // Self-injection is decided HERE, after the parameter list is already
+  // parsed (rather than before it, as this used to work when '::' picked
+  // static-ness up front) -- 'static' is only known once we've read past
+  // ')', so the self parameter (when applicable) is prepended to the
+  // already-parsed Params vector instead of being pushed first.
+  // Semantic legality (static only on a struct-bound method; 'new' can
+  // never be static; 'default' can never be declared at all) is checked by
+  // the Resolver (visitFuncDef), not here -- see ExportMutNotSupportedError
+  // for the precedent this project already follows: a syntactically valid
+  // but semantically-restricted combination is rejected downstream, with a
+  // real diagnostic class, rather than in the parser.
+  IsStaticMethodDecl = (CurTok == TOK_STATIC);
+  if (IsStaticMethodDecl)
+    getNextToken(); // eat 'static'
+
+  if (!StructName.empty() && !IsStaticMethodDecl) {
+    // Build 'self' as a pointer to a lazy NamedType(StructName) placeholder
+    // rather than eagerly resolving StructName via GlobalSymbolTable here.
+    //
+    // This intentionally mirrors how every OTHER struct-type reference in
+    // this parser works (see ParseType()'s `Base = std::make_shared<NamedType>(BaseName);`
+    // fallback for any non-primitive name) instead of special-casing this
+    // one spot to require the struct to already be registered.
+    //
+    // Why this matters: GlobalSymbolTable is populated by ParseStructDecl()
+    // as it is encountered during this single top-to-bottom parse -- there is
+    // no separate pre-pass that hoists struct names ahead of the parser the
+    // way the Resolver later hoists them ahead of name resolution. An eager
+    // lookup here previously meant `fn User.grow(): void { ... }` failed to
+    // even PARSE ("Unknown struct type 'User' in method declaration") if it
+    // appeared textually before `struct User { ... }` in the same file --
+    // contradicting the language's forward-declaration story (plain function
+    // calls, and struct fields referencing later-declared structs, both work
+    // fine) for no reason other than this one spot being stricter than it
+    // needs to be.
+    //
+    // This is safe: TypeChecker::visitFieldAccess/visitMethodCall and
+    // Codegen's FieldAccessExprAST/MethodCallExprAST already unwrap a
+    // TurfPointerType's pointee and, if it's a NamedType, resolve it via
+    // GlobalSymbolTable->LookupType() at every `self.field` / `self.method()`
+    // use site inside the method body -- that resolve-on-use path is exactly
+    // what runs for every other NamedType field/parameter already, so 'self'
+    // is not gaining or losing any capability here, just becoming consistent.
+    //
+    // Note this does mean a genuinely misspelled struct name in a method
+    // declaration (`fn Usre.grow()`) is no longer caught here either -- but
+    // that validation was never systematic to begin with (an ordinary
+    // function parameter of an unknown struct type, e.g. `fn f(x: NoSuch)`,
+    // already silently compiles with zero diagnostics today). Catching
+    // unknown NamedType names belongs in the Resolver, which already has the
+    // registered-struct-name machinery (isKnownStruct()) for exactly this,
+    // currently applied only to struct fields.
+    auto SelfPointee = std::make_shared<NamedType>(StructName);
+    Params.insert(Params.begin(),
+                  {std::make_shared<TurfPointerType>(SelfPointee), "self"});
+  }
+
   // Expect TOK_COLON
   if (CurTok != TOK_COLON) {
     LogErrorAt(CurLoc, "Expected ':' followed by return type after parameter list.");
@@ -2412,7 +2367,8 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   if (CurTok == ';') {
     getNextToken(); // eat ';'
     return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
-                                            nullptr, TypeParams);
+                                            nullptr, TypeParams,
+                                            IsStaticMethodDecl);
   }
 
   // Expect '{' to open function body
@@ -2427,7 +2383,8 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
 
 
   return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
-                                          std::move(Body), TypeParams);
+                                          std::move(Body), TypeParams,
+                                          IsStaticMethodDecl);
 }
 
 // Builds the reportable chain for a detected import cycle: the sub-sequence

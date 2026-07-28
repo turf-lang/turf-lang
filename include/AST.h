@@ -744,16 +744,28 @@ class FuncDefExprAST : public ExprAST {
   std::unique_ptr<ExprAST> Body;
   std::vector<std::string> TypeParams;
   SourceLocation Loc;
+  // Whether the `static` keyword was written at declaration (`fn Rect.area()
+  // static: int { ... }`). This is NOT redundant with "self absent from
+  // Params": a free, non-struct-bound function also has no self, so
+  // Resolver::visitFuncDef() needs this explicit signal to reject `static`
+  // written on something that isn't a struct-bound method at all (a case
+  // where "self absent" is already unconditionally true and tells it
+  // nothing). For a genuine struct-bound method, self-presence and
+  // !IsStaticDecl are kept in lockstep by the Parser (ParseFuncDef()), so
+  // every OTHER call site can keep using self-presence alone, unchanged.
+  bool IsStaticDecl = false;
 
 public:
   FuncDefExprAST(SourceLocation Loc, std::string Name, TurfTypePtr ReturnType,
                  std::vector<ParamDecl> Params, std::unique_ptr<ExprAST> Body,
-                 std::vector<std::string> TypeParams = {})
+                 std::vector<std::string> TypeParams = {},
+                 bool IsStaticDecl = false)
       : Loc(Loc), Name(std::move(Name)), ReturnType(std::move(ReturnType)),
         Params(std::move(Params)), Body(std::move(Body)),
-        TypeParams(std::move(TypeParams)) {}
+        TypeParams(std::move(TypeParams)), IsStaticDecl(IsStaticDecl) {}
 
   const std::string &getName() const { return Name; }
+  bool isStaticDecl() const { return IsStaticDecl; }
   const SourceLocation &getLoc() const { return Loc; }
   const TurfType *getReturnType() const { return ReturnType.get(); }
   TurfTypePtr getReturnTypePtr() const { return ReturnType; }
@@ -785,7 +797,8 @@ public:
   void accept(ASTVisitor &V) override { V.visitFuncDef(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncDefExprAST>(
-        Loc, Name, ReturnType, Params, CloneExprAST(Body.get()), TypeParams);
+        Loc, Name, ReturnType, Params, CloneExprAST(Body.get()), TypeParams,
+        IsStaticDecl);
     // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. The default-constructed field is nullptr.
   }
@@ -907,6 +920,8 @@ enum class ScopeAccessKind {
     ModuleTypeRef,     // list::List<int> (in type position)
     StaticMethodRef,   // StructName::method(...) (as a call target, no instance)
     ModuleConstantRef, // math::PI -- a qualified reference to an `export immut` constant
+    ConstructorCall,   // StructName::new(...) (as a call target)
+    DefaultConstruct,  // StructName::default() (as a call target)
 };
 
 // `Left::Right` -- the general namespace-resolution operator. Originally
@@ -1054,46 +1069,6 @@ public:
   void accept(ASTVisitor &V) override { V.visitStructDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<StructDeclExprAST>(Loc, Name, Fields, TypeParams);
-  }
-};
-
-// StructName { field: val, ... }
-class StructInitExprAST : public ExprAST {
-  std::string Name;
-  std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields;
-  SourceLocation Loc;
-  // The `Module` in `Module::Name { ... }` (empty for the ordinary, bare
-  // `Name { ... }` form). Validated by Resolver::visitStructInit via the
-  // same validateModuleQualifier() a type annotation's NamedType/
-  // GenericType qualifier goes through -- see that function's doc comment.
-  std::string ModuleQualifier;
-
-public:
-  StructInitExprAST(
-      SourceLocation Loc, std::string Name,
-      std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> NamedFields,
-      std::string ModuleQualifier = "")
-      : Loc(Loc), Name(std::move(Name)), NamedFields(std::move(NamedFields)),
-        ModuleQualifier(std::move(ModuleQualifier)) {}
-
-  const SourceLocation &getLoc() const { return Loc; }
-  const std::string &getName() const { return Name; }
-  const std::string &getModuleQualifier() const { return ModuleQualifier; }
-  const std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> &
-  getNamedFields() const {
-    return NamedFields;
-  }
-
-  llvm::Value *codegen() override;
-  void accept(ASTVisitor &V) override { V.visitStructInit(*this); }
-  std::unique_ptr<ExprAST> clone() const override {
-    std::vector<std::pair<std::string, std::unique_ptr<ExprAST>>> ClonedFields;
-    ClonedFields.reserve(NamedFields.size());
-    for (const auto &[FieldName, Val] : NamedFields)
-      ClonedFields.emplace_back(FieldName, CloneExprAST(Val.get()));
-    return std::make_unique<StructInitExprAST>(Loc, Name,
-                                               std::move(ClonedFields),
-                                               ModuleQualifier);
   }
 };
 
@@ -1356,12 +1331,6 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
-
-  if (const auto *StructInit = dynamic_cast<const StructInitExprAST *>(Node)) {
-    for (const auto &[FieldName, Val] : StructInit->getNamedFields())
-      CollectAllNodeIDsInternal(Val.get(), NodeIDs);
-    return;
-  }
 
   if (const auto *FieldAccess =
           dynamic_cast<const FieldAccessExprAST *>(Node)) {
@@ -1786,27 +1755,6 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
     if (structChanged) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
-    }
-    return ChangedIDs;
-  }
-
-  // StructInitExprAST
-  if (auto *OrigStructInit = dynamic_cast<const StructInitExprAST *>(OriginalAST)) {
-    auto *ModStructInit = dynamic_cast<const StructInitExprAST *>(ModifiedAST);
-    if (OrigStructInit->getName() != ModStructInit->getName() ||
-        OrigStructInit->getNamedFields().size() != ModStructInit->getNamedFields().size()) {
-      ChangedIDs.insert(OriginalAST->getNodeID());
-      ChangedIDs.insert(ModifiedAST->getNodeID());
-    } else {
-      const auto &OrigFields = OrigStructInit->getNamedFields();
-      const auto &ModFields = ModStructInit->getNamedFields();
-      for (size_t i = 0; i < OrigFields.size(); ++i) {
-        if (OrigFields[i].first != ModFields[i].first) {
-          ChangedIDs.insert(OriginalAST->getNodeID());
-          ChangedIDs.insert(ModifiedAST->getNodeID());
-        }
-        CollectChangedNodeIDsInternal(OrigFields[i].second.get(), ModFields[i].second.get(), ChangedIDs);
-      }
     }
     return ChangedIDs;
   }

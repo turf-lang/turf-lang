@@ -156,11 +156,6 @@ public:
       onDef(Node.getLoc(), Node.ResolvedSymbol.get());
   }
 
-  void visitStructInit(StructInitExprAST &Node) override {
-    for (const auto &Field : Node.getNamedFields())
-      visitChild(Field.second.get());
-  }
-
   void visitDefaultInit(DefaultInitExprAST &Node) override {
     (void)Node;
   }
@@ -509,4 +504,255 @@ void LivenessAnalysisPass::runOnCFG(
       for (auto &[Loc, Sym] : StmtDefs)   LiveAfter.erase(Sym);
     }
   }
+}
+
+// ─── ConstructorFieldAssignmentPass ──────────────────────────────────────────
+
+namespace {
+
+// Walks an expression and fires onFieldDef(fieldName) for every direct
+// `self.<field> = expr` / `self.<field> += expr` assignment found -- NOT
+// `self.a.b = x` or `self.arr[i] = x` (the LHS must be a FieldAccessExprAST
+// directly on `self`, nothing nested further), and NOT through a helper
+// function call (`self.setup()`) -- this is intraprocedural only, same
+// conservative scope as MutatesSelfField() (Resolver.cpp) already uses for
+// the closely-related "does this method mutate self" scan. Mirrors
+// AnalysisVisitor's exact traversal shape above (same node types recursed
+// into) so every place a `self.field = ...` could legally appear inside a
+// constructor body is actually reached.
+class SelfFieldDefVisitor : public ASTVisitor {
+  const std::function<void(const std::string &)> &onFieldDef;
+
+  void visitChild(const ExprAST *Node) {
+    if (Node)
+      const_cast<ExprAST *>(Node)->accept(*this);
+  }
+
+  // Returns the field name if LHS is exactly `self.<field>`, else nullptr.
+  static const std::string *asSelfFieldName(const ExprAST *LHS) {
+    const auto *FA = dynamic_cast<const FieldAccessExprAST *>(LHS);
+    if (!FA)
+      return nullptr;
+    const auto *Base = dynamic_cast<const VariableExprAST *>(FA->getBase());
+    if (!Base || Base->getName() != "self")
+      return nullptr;
+    return &FA->getFieldName();
+  }
+
+public:
+  explicit SelfFieldDefVisitor(const std::function<void(const std::string &)> &cb)
+      : onFieldDef(cb) {}
+
+  void visitAssignment(AssignmentExprAST &Node) override {
+    visitChild(Node.getRHS());
+    if (const auto *F = asSelfFieldName(Node.getLHS()))
+      onFieldDef(*F);
+    else
+      visitChild(Node.getLHS());
+  }
+
+  void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override {
+    visitChild(Node.getRHS());
+    if (const auto *F = asSelfFieldName(Node.getLHS()))
+      onFieldDef(*F);
+    else
+      visitChild(Node.getLHS());
+  }
+
+  void visitPostfixExpr(PostfixExprAST &Node) override {
+    // `self.field++`/`--` -- not a realistic constructor pattern, but
+    // handled for consistency: it both reads and re-assigns the field,
+    // so it counts as a def the same way a compound assignment does.
+    if (const auto *F = asSelfFieldName(Node.getOperand()))
+      onFieldDef(*F);
+    else
+      visitChild(Node.getOperand());
+  }
+
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    visitChild(Node.getInitializer());
+  }
+
+  void visitBinary(BinaryExprAST &Node) override {
+    visitChild(Node.getLHS());
+    visitChild(Node.getRHS());
+  }
+
+  void visitUnary(UnaryExprAST &Node) override { visitChild(Node.getOperand()); }
+
+  void visitCast(CastExprAST &Node) override { visitChild(Node.getOperand()); }
+
+  void visitBlock(BlockExprAST &Node) override {
+    for (const auto &E : Node.getExpressions())
+      visitChild(E.get());
+  }
+
+  void visitIf(IfExprAST &Node) override {
+    for (const auto &Branch : Node.getBranches()) {
+      visitChild(Branch.Cond.get());
+      visitChild(Branch.Body.get());
+    }
+    visitChild(Node.getElse());
+  }
+
+  void visitWhile(WhileExprAST &Node) override {
+    visitChild(Node.getCond());
+    visitChild(Node.getBody());
+  }
+
+  void visitFor(ForExprAST &Node) override {
+    visitChild(Node.getStart());
+    visitChild(Node.getEnd());
+    visitChild(Node.getStep());
+    visitChild(Node.getBody());
+  }
+
+  void visitCompare(CompareExprAST &Node) override {
+    visitChild(Node.getSubjectMut());
+    for (auto &Arm : Node.getArmsMut()) {
+      for (auto &Val : Arm.Values)
+        visitChild(Val.get());
+      visitChild(Arm.Body.get());
+    }
+    visitChild(Node.getOtherBodyMut());
+  }
+
+  void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
+
+  void visitFuncCall(FuncCallExprAST &Node) override {
+    for (const auto &Arg : Node.getArgs())
+      visitChild(Arg.get());
+  }
+
+  void visitMethodCall(MethodCallExprAST &Node) override {
+    visitChild(Node.getBase());
+    for (const auto &Arg : Node.getArgs())
+      visitChild(Arg.get());
+  }
+
+  void visitFieldAccess(FieldAccessExprAST &Node) override {
+    visitChild(Node.getBase());
+  }
+
+  void visitArrayAccess(ArrayAccessExprAST &Node) override {
+    visitChild(Node.getBase());
+    visitChild(Node.getIndex());
+  }
+
+  void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
+    for (const auto &Elem : Node.getElements())
+      visitChild(Elem.get());
+  }
+
+  void visitArrayDecl(ArrayDeclExprAST &Node) override {
+    for (const auto &Init : Node.getInitList())
+      visitChild(Init.get());
+    if (Node.getInitExpr())
+      visitChild(Node.getInitExpr().get());
+  }
+};
+
+} // namespace
+
+void ConstructorFieldAssignmentPass::runOnCFG(
+    CFG &Cfg, const std::string &StructName,
+    const std::vector<std::string> &RequiredFields,
+    SourceLocation ConstructorLoc) {
+  const auto &Blocks = Cfg.getBlocks();
+  size_t N = Blocks.size();
+  if (N == 0 || RequiredFields.empty())
+    return;
+
+  using FieldSet = std::unordered_set<std::string>;
+  const FieldSet AllFields(RequiredFields.begin(), RequiredFields.end());
+
+  std::unordered_map<const TurfBasicBlock *, size_t> index;
+  for (size_t i = 0; i < N; ++i)
+    index[Blocks[i].get()] = i;
+
+  TurfBasicBlock *Entry = Cfg.getEntryBlock();
+  size_t entryIdx = Entry && index.count(Entry) ? index[Entry] : 0;
+
+  // ── Dataflow (mirrors DefiniteAssignmentPass exactly) ─────────────────────
+  // Transfer : OUT[b] = IN[b] ∪ FieldsAssignedIn(b)
+  // Meet     : IN[b]  = ∩ OUT[pred] for all predecessors p
+  // Entry IN starts empty (nothing is assigned before the constructor
+  // starts); every other block starts at the universal set (AllFields) so
+  // intersection with real predecessor data is what narrows it down.
+  std::vector<FieldSet> IN(N), OUT(N);
+  for (size_t i = 0; i < N; ++i)
+    if (i != entryIdx)
+      IN[i] = AllFields;
+
+  auto computeOUT = [&](size_t b) {
+    FieldSet cur = IN[b];
+    for (ExprAST *Stmt : Blocks[b]->getStatements()) {
+      SelfFieldDefVisitor V([&](const std::string &Field) { cur.insert(Field); });
+      if (Stmt)
+        const_cast<ExprAST *>(static_cast<const ExprAST *>(Stmt))->accept(V);
+    }
+    return cur;
+  };
+  for (size_t i = 0; i < N; ++i)
+    OUT[i] = computeOUT(i);
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t b = 0; b < N; ++b) {
+      if (b == entryIdx)
+        continue;
+
+      FieldSet newIN = AllFields;
+      bool hasPred = false;
+      for (size_t p = 0; p < N; ++p) {
+        bool isPred = false;
+        for (const auto *succ : Blocks[p]->getSuccessors()) {
+          if (index.count(succ) && index.at(succ) == b) {
+            isPred = true;
+            break;
+          }
+        }
+        if (!isPred)
+          continue;
+        hasPred = true;
+        FieldSet intersected;
+        for (const auto &f : newIN)
+          if (OUT[p].count(f))
+            intersected.insert(f);
+        newIN = std::move(intersected);
+      }
+      if (!hasPred)
+        continue;
+
+      if (newIN != IN[b]) {
+        IN[b] = newIN;
+        OUT[b] = computeOUT(b);
+        changed = true;
+      }
+    }
+  }
+
+  // ── Check: is every field assigned on every path to the CFG's exit? ──────
+  // Cfg.getExitBlock() is the single virtual sink every return AND the
+  // natural fall-through end of the function already target (CFGBuilder::
+  // buildCFG links a terminator-less final block to it too) -- its fixed-
+  // point IN set is exactly "assigned on every path from entry to the end
+  // of the constructor". A totally unreachable exit (e.g. an infinite loop
+  // with no return -- already reported separately by InfiniteLoopWarning/
+  // MissingReturnError) leaves IN at its initial universal value, which
+  // conservatively reports no missing fields rather than a confusing
+  // second diagnostic for the same root cause.
+  TurfBasicBlock *ExitBB = Cfg.getExitBlock();
+  FieldSet AssignedOnEveryPath = AllFields;
+  if (ExitBB && index.count(ExitBB))
+    AssignedOnEveryPath = IN[index.at(ExitBB)];
+
+  std::vector<std::string> Missing;
+  for (const auto &Field : RequiredFields)
+    if (!AssignedOnEveryPath.count(Field))
+      Missing.push_back(Field);
+
+  if (!Missing.empty())
+    IncompleteConstructorError(ConstructorLoc, StructName, Missing).raise();
 }

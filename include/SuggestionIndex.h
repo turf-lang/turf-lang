@@ -92,9 +92,25 @@ inline int getThreshold(const std::string &Query) {
 }
 
 inline std::vector<std::string> buildKeywordCandidates() {
+  // 'static' is deliberately excluded from fuzzy keyword-typo suggestions:
+  // it sits at edit-distance 2 from extremely common identifiers like
+  // 'state' (well within getThreshold()'s distance-2 allowance for a
+  // 5-letter query) -- confirmed live via `fn f(state: T): ...` starting to
+  // raise a false "did you mean 'static'?" KeywordError the moment 'static'
+  // was added as a keyword, even though 'state' is a perfectly ordinary
+  // parameter name with no typo at all. Unlike every other keyword here,
+  // 'static' is only ever meaningful in one narrow grammatical position
+  // (right after a struct method's parameter list, before the return-type
+  // ':') -- a genuine typo of it there still surfaces as an ordinary
+  // "expected ':'" parse error, so the false-positive cost of suggesting it
+  // as a typo elsewhere far outweighs the rare genuine-typo benefit.
+  static const std::unordered_set<std::string> ExcludedFromTypoSuggestions = {
+      "static"};
   std::vector<std::string> Candidates;
   Candidates.reserve(Keywords.size());
   for (const auto &Pair : Keywords) {
+    if (ExcludedFromTypoSuggestions.count(Pair.first))
+      continue;
     Candidates.push_back(Pair.first);
   }
   return Candidates;

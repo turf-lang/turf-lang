@@ -164,8 +164,6 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialA
             checkAccesses(P->getOperand());
           } else if (auto M = dynamic_cast<const MethodCallExprAST *>(N)) {
             checkAccesses(M->getBase()); for (const auto &Arg : M->getArgs()) checkAccesses(Arg.get());
-          } else if (auto SI = dynamic_cast<const StructInitExprAST *>(N)) {
-            for (const auto &F : SI->getNamedFields()) checkAccesses(F.second.get());
           } else if (auto FA = dynamic_cast<const FieldAccessExprAST *>(N)) {
             checkAccesses(FA->getBase());
           } else if (auto AL = dynamic_cast<const ArrayLiteralExprAST *>(N)) {

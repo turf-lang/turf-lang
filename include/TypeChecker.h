@@ -212,7 +212,6 @@ public:
   void visitEnumDecl(EnumDeclExprAST &Node) override;
   void visitScopeAccess(ScopeAccessExprAST &Node) override;
   void visitStructDecl(StructDeclExprAST &Node) override;
-  void visitStructInit(StructInitExprAST &Node) override;
 
   // ── Arrays ────────────────────────────────────────────────────────────────
   void visitArrayDecl(ArrayDeclExprAST &Node) override;

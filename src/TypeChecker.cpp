@@ -19,8 +19,8 @@
 // It drags in LLVM headers, but TypeChecker itself does not use any LLVM API.
 #include "AST.h"
 
-// SymbolTable.h is included for GlobalSymbolTable, used in visitStructInit
-// to look up struct type definitions for named-field validation.
+// SymbolTable.h is included for GlobalSymbolTable, used to look up struct
+// type definitions (e.g. generic-struct field substitution in visitMethodCall).
 // Not available in the unit-test binary (TYPECHECKER_NO_ERRORS mode) since it
 // pulls in the LLVM-dependent SymbolTable implementation.
 #ifndef TYPECHECKER_NO_ERRORS
@@ -1294,11 +1294,35 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
   }
   const int ArgCount = static_cast<int>(Node.getArgs().size());
 
-  // 3. Determine the callee name for diagnostics and builtin lookup.
+  // 3. Determine the callee name for diagnostics and builtin lookup. Also
+  // covers a `Left::Right(...)` callee (module call, static method,
+  // StructName::new/default) -- previously only VariableExprAST was
+  // handled here, leaving CalleeName empty for every qualified call's own
+  // diagnostics (arity/type-mismatch messages below would print `''`
+  // instead of e.g. `'new'`); Resolver::visitFuncCall and
+  // Codegen::FuncCallExprAST::codegen() already derive it the same way.
   std::string CalleeName;
+  const auto *ScopeCallee =
+      dynamic_cast<const ScopeAccessExprAST *>(Node.getCallee());
   if (const auto *VE =
           dynamic_cast<const VariableExprAST *>(Node.getCallee())) {
     CalleeName = VE->getName();
+  } else if (ScopeCallee) {
+    CalleeName = ScopeCallee->getRightName();
+  }
+
+  // `StructName::default()` -- compiler-synthesized, no ResolverFunctionSymbol
+  // at all (Resolver::visitFuncCall never populates ResolvedCandidates for
+  // this kind), so it must be short-circuited here before the ordinary
+  // builtin/candidate paths below, which would otherwise treat it as an
+  // unresolved call and leave its type null. `StructName::new(...)` needs
+  // NO equivalent branch here -- Resolver already synthesizes a self-
+  // stripped candidate with ReturnType overridden to the struct's own type,
+  // so it flows through the ordinary "User-defined / Resolver-registered
+  // call path" below completely unmodified.
+  if (ScopeCallee && ScopeCallee->ResolvedKind == ScopeAccessKind::DefaultConstruct) {
+    setType(&Node, std::make_shared<NamedType>(ScopeCallee->getLeftName()));
+    return;
   }
 
   // ── Bare language intrinsic path ─────────────────────────────────────────
@@ -2131,109 +2155,6 @@ void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
 
 void TypeChecker::visitStructDecl(StructDeclExprAST &Node) {
   setType(&Node, TurfVoid());
-}
-
-void TypeChecker::visitStructInit(StructInitExprAST &Node) {
-  // Visit each value expression for type annotation regardless of validation.
-  for (const auto &[FieldName, Val] : Node.getNamedFields())
-    Val->accept(*this);
-
-#ifndef TYPECHECKER_NO_ERRORS
-  // Look up the struct definition so we can validate the named fields.
-  // GlobalSymbolTable is only available in the full build (not unit tests).
-  TurfTypePtr StructTPtr;
-  if (GlobalSymbolTable)
-    StructTPtr = GlobalSymbolTable->LookupType(Node.getName());
-  const TurfStructType *SType =
-      StructTPtr ? dynamic_cast<const TurfStructType *>(StructTPtr.get())
-                 : nullptr;
-
-  if (SType) {
-    const auto &DeclFields = SType->getFields();
-
-    // Infer a Subst map (type-parameter name -> concrete type) for a
-    // generic struct FROM THIS LITERAL'S OWN field values, since the
-    // struct-literal syntax carries no explicit type arguments at all --
-    // `Box { val: 42 }`, not `Box<int> { val: 42 }`. Without this, a
-    // generic struct's bare (non-pointer) field -- `struct Box<T> { val: T
-    // }` -- always failed here: DeclField->Type stayed the raw, never-
-    // substituted NamedType("T") (see substituteReturnType()'s doc comment
-    // for why GlobalSymbolTable's copy of a generic struct's fields is
-    // permanently stuck as NamedType, not TurfGenericParamType), which is
-    // never "compatible" with a concrete type like int -- so `Box { val: 42
-    // }` was rejected outright: "Field 'val' of struct 'Box' expects type
-    // 'T', but got 'int'." list.tr/stack.tr/queue.tr never hit this because
-    // their own generic fields are all pointer-wrapped (`data: T*`), which
-    // sidesteps substitution entirely (a raw pointer type doesn't care what
-    // it points to at the LLVM level) -- Box's bare `val: T` is the first
-    // struct literal to actually exercise this path.
-    //
-    // First occurrence of each parameter name wins, mirroring the identical
-    // pattern in visitMethodCall's own Subst-building code.
-    std::unordered_map<std::string, TurfTypePtr> Subst;
-    for (const auto &DeclF : DeclFields) {
-      if (const auto *NT = dynamic_cast<const NamedType *>(DeclF.Type.get())) {
-        bool KnownElsewhere =
-            GlobalSymbolTable && GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
-        if (!KnownElsewhere && !Subst.count(NT->getName())) {
-          for (const auto &[FieldName, Val] : Node.getNamedFields()) {
-            if (FieldName == DeclF.Name) {
-              if (TurfTypePtr VTy = getType(Val.get()))
-                Subst.emplace(NT->getName(), VTy);
-              break;
-            }
-          }
-        }
-      }
-    }
-
-    // 1. Check for unknown fields (fields provided that don't exist in the
-    //    struct) AND that each provided value's type is compatible with its
-    //    field's declared type.
-    //
-    //    The type check is not optional hardening: before it existed,
-    //    `User { age: "not a number" }` (age declared as int) compiled with
-    //    ZERO diagnostics. At runtime this stored the string literal's raw
-    //    pointer bit-pattern directly into the field's i64 storage slot --
-    //    silent type confusion producing garbage data (confirmed: printing
-    //    the resulting `age` field gave a nonsense value like
-    //    102697087172654, not even a crash to signal something was wrong).
-    for (const auto &[FieldName, Val] : Node.getNamedFields()) {
-      const StructField *DeclField = nullptr;
-      for (const auto &DeclF : DeclFields) {
-        if (DeclF.Name == FieldName) {
-          DeclField = &DeclF;
-          break;
-        }
-      }
-      if (!DeclField) {
-        reportError(Node.getLoc(), "Unknown field '" + FieldName +
-                                       "' in struct '" + Node.getName() + "'");
-        continue;
-      }
-
-      TurfTypePtr ValTy = getType(Val.get());
-      // Substitute the field's declared type through Subst before comparing
-      // -- a no-op (returns DeclField->Type unchanged) for a non-generic
-      // struct or a field that isn't type-parameter-shaped, since Subst is
-      // built from and only ever contains this struct's own type-parameter
-      // names.
-      TurfTypePtr ExpectedTy = substituteReturnType(DeclField->Type, Subst);
-      if (ValTy && ExpectedTy &&
-          !typesCompatible(ValTy.get(), ExpectedTy.get())) {
-        reportError(Node.getLoc(),
-                    "Field '" + FieldName + "' of struct '" + Node.getName() +
-                        "' expects type '" + ExpectedTy->getName() +
-                        "', but got '" + ValTy->getName() + "'.");
-      }
-    }
-
-    // 2. Missing fields are allowed and default-initialized under the hood.
-  }
-#endif
-
-  // Result type is the struct name.
-  setType(&Node, std::make_shared<NamedType>(Node.getName()));
 }
 
 // ─── Arrays ───────────────────────────────────────────────────────────────────

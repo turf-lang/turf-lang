@@ -780,6 +780,45 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
     return;
   }
 
+  // `new`/`default`/`static` reservation checks. These are all syntactically
+  // valid (ParseFuncDef() parses them fine -- see its own comment on why:
+  // this mirrors how `export mut` parses fine and is rejected here, in the
+  // Resolver, rather than in the parser). Internal method names are always
+  // "StructName.method" (ParseFuncDef()'s '.'-declaration branch); an
+  // ordinary free function's name never contains '.', so this split is
+  // unambiguous and correctly a no-op for anything not struct-bound.
+  {
+    const std::string &FullName = Node.getName();
+    size_t Dot = FullName.find('.');
+    bool IsStructBound = Dot != std::string::npos;
+    std::string MethodPart = IsStructBound ? FullName.substr(Dot + 1) : FullName;
+
+    if (IsStructBound && MethodPart == "default") {
+      // `default()` is compiler-synthesized (recursively default-inits
+      // every field, reusing GetDefaultValue()) and can never be
+      // hand-written -- there is no user code to run, so a body here would
+      // just be silently unreachable in practice (StructName::default()
+      // never calls it, see Resolver::visitFuncCall's DefaultConstruct
+      // dispatch).
+      ReservedConstructorNameError(Node.getLoc(), FullName.substr(0, Dot)).raise();
+      return;
+    }
+    if (Node.isStaticDecl() && !IsStructBound) {
+      // `static` only makes sense as "no self" on a struct-bound method --
+      // on a free function it's meaningless (a free function never had
+      // self to begin with).
+      StaticOutsideStructError(Node.getLoc(), FullName).raise();
+      return;
+    }
+    if (Node.isStaticDecl() && IsStructBound && MethodPart == "new") {
+      // `new` always constructs via `self` (StructName::new(...) allocates
+      // a fresh instance and calls this with that as self) -- 'static'
+      // would mean no self at all, contradicting its entire purpose.
+      ConstructorCannotBeStaticError(Node.getLoc(), FullName.substr(0, Dot)).raise();
+      return;
+    }
+  }
+
   // Rewrite any parameter/return NamedType("T") that names one of this
   // function's own TypeParams into a real TurfGenericParamType("T") --
   // ParseType() always parses a bare identifier as NamedType regardless of
@@ -950,6 +989,129 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     }
 
     if (SymTable_.isKnownStruct(LeftName)) {
+      // `StructName::new(...)` / `StructName::default()` -- construction,
+      // reserved and dispatched BEFORE the general static-method lookup
+      // below (so a struct can never declare an ordinary static/instance
+      // method literally named `new` or `default` that would otherwise
+      // shadow this -- Resolver::visitFuncDef already rejects declaring
+      // `default` at all and declaring `new` as `static`, so the only
+      // `new`/`default` internal names that can ever exist are the ones
+      // this dispatch expects).
+      //
+      // Unlike an ordinary static method call (existence-only, never
+      // bare-visibility-gated -- see 2.7.1/2.8.1), CONSTRUCTING a struct is
+      // treated the same as naming its TYPE: bare (unqualified)
+      // construction respects the same isTypeVisibleUnqualified() gate a
+      // `mut r: Rect = ...` type annotation already goes through
+      // (validateNamedType(), visitVarDecl) -- this mirrors exactly what
+      // the now-removed visitStructInit() enforced for the old brace-
+      // literal form, so `Rect::new(...)`/`Rect::default()` still requires
+      // `Rect` to be visible from this file/module, not merely to exist
+      // somewhere in the program.
+      if (CalleeName == "new" || CalleeName == "default") {
+        if (ScopeCallee->getModuleQualifier().empty()) {
+          if (!SymTable_.isTypeVisibleUnqualified(currentModuleName(), LeftName)) {
+            UnqualifiedTypeNotVisibleError(Node.getLoc(), LeftName,
+                                           SymTable_.getTypeOwningModule(LeftName))
+                .raise();
+            return;
+          }
+        } else if (!validateModuleQualifier(ScopeCallee->getModuleQualifier(),
+                                            LeftName, Node.getLoc())) {
+          return;
+        }
+      }
+
+      if (CalleeName == "default") {
+        ScopeCallee->ResolvedKind = ScopeAccessKind::DefaultConstruct;
+        const int DefaultArgCount = static_cast<int>(Node.getArgs().size());
+        if (DefaultArgCount != 0) {
+          DefaultConstructorArityError(Node.getLoc(), LeftName, DefaultArgCount).raise();
+        }
+        return;
+      }
+
+      if (CalleeName == "new") {
+        ScopeCallee->ResolvedKind = ScopeAccessKind::ConstructorCall;
+        const int NewArgCount = static_cast<int>(Node.getArgs().size());
+        const std::string OwningModule = SymTable_.getTypeOwningModule(LeftName);
+        const std::string CtorKey = LeftName + ".new";
+
+        std::vector<const ResolverFunctionSymbol *> RawCurrentFileMatches;
+        std::vector<ResolverSymbolTable::ModuleFunctionMatch> RawModuleMatches;
+        if (OwningModule.empty()) {
+          RawCurrentFileMatches = SymTable_.lookupCurrentFileFunctions(CtorKey);
+        } else {
+          for (const auto &Match : SymTable_.findInModules(CtorKey))
+            if (Match.ModuleName == OwningModule)
+              RawModuleMatches.push_back(Match);
+        }
+
+        if (RawCurrentFileMatches.empty() && RawModuleMatches.empty()) {
+          NoConstructorDefinedError(Node.getLoc(), LeftName).raise();
+          return;
+        }
+
+        // Build a self-stripped copy of each overload (dropping Params[0],
+        // always self -- 'new' can never be declared 'static', enforced by
+        // visitFuncDef above) with ReturnType overridden to the struct's
+        // own NamedType (its real declared return type is always 'void':
+        // it mutates self in place, but the CALL EXPRESSION `StructName::
+        // new(...)` itself evaluates to the constructed value). Pushing
+        // these into ResolvedCandidates lets EVERY downstream consumer --
+        // the shared arity/signature code just below, and TypeChecker's
+        // own overload-narrowing in visitFuncCall -- treat this exactly
+        // like an ordinary resolved call, entirely unmodified. Codegen
+        // reconstructs the TRUE (self-included) mangled name from this
+        // stripped candidate instead of needing the original preserved
+        // anywhere (see FuncCallExprAST::codegen()).
+        auto stripSelf = [&](const ResolverFunctionSymbol &Sym) {
+          auto Copy = std::make_shared<ResolverFunctionSymbol>(Sym);
+          if (!Copy->Params.empty())
+            Copy->Params.erase(Copy->Params.begin());
+          Copy->ReturnType = std::make_shared<NamedType>(LeftName);
+          return Copy;
+        };
+
+        std::vector<std::shared_ptr<ResolverFunctionSymbol>> StrippedCandidates;
+        for (const auto *Sym : RawCurrentFileMatches)
+          StrippedCandidates.push_back(stripSelf(*Sym));
+        for (const auto &Match : RawModuleMatches)
+          StrippedCandidates.push_back(stripSelf(*Match.Symbol));
+
+        bool AnyArityMatch = false;
+        for (const auto &Cand : StrippedCandidates) {
+          if (Cand->arity() == NewArgCount ||
+              (Cand->isVarArg() && NewArgCount >= Cand->arity())) {
+            AnyArityMatch = true;
+            break;
+          }
+        }
+
+        if (!AnyArityMatch) {
+          std::vector<std::string> AllSignatures;
+          for (const auto &Cand : StrippedCandidates)
+            AllSignatures.push_back(Cand->signature());
+          auto Err = WrongArityError(Node.getLoc(), LeftName + "::new",
+                                     NewArgCount, AllSignatures);
+          for (const auto *Sym : RawCurrentFileMatches)
+            Err.withRelated(toSourceLocation(Sym->DeclLoc), "candidate");
+          for (const auto &Match : RawModuleMatches)
+            Err.withRelated(toSourceLocation(Match.Symbol->DeclLoc), "candidate");
+          Err.raise();
+          return;
+        }
+
+        for (const auto &Cand : StrippedCandidates) {
+          if (Cand->arity() == NewArgCount ||
+              (Cand->isVarArg() && NewArgCount >= Cand->arity()))
+            Node.ResolvedCandidates.push_back(Cand);
+        }
+        if (Node.ResolvedCandidates.size() == 1)
+          Node.ResolvedCallTarget = Node.ResolvedCandidates[0];
+        return;
+      }
+
       // `StructName::method(args)` -- a true STATIC method call: no
       // instance involved at all (unlike `instance.method(args)`, handled
       // entirely separately by visitMethodCall/MethodCallExprAST). A
@@ -1217,6 +1379,20 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
   // arguments just because the call as a whole won't be allowed to proceed.
   for (const auto &Arg : Node.getArgs())
     visitChild(Arg.get());
+
+  // 'new'/'default' are reserved for construction (StructName::new(...)/
+  // StructName::default()) and can never be invoked via '.', on ANY base --
+  // checked unconditionally, up front, so a real instance is rejected here
+  // too (a bare struct TYPE NAME base is separately, already caught by the
+  // isKnownStruct() branch below via DotOperatorOnNonInstanceError, for
+  // every method name, not just these two -- this check exists specifically
+  // for the gap that WOULD otherwise remain: a real instance calling
+  // `.new(...)` would otherwise resolve completely normally, since `new` is
+  // registered as an ordinary '.'-declared instance method internally).
+  if (Node.getMethod() == "new" || Node.getMethod() == "default") {
+    ConstructorCalledOnInstanceError(Node.getLoc(), Node.getMethod()).raise();
+    return;
+  }
 
   // IMPORTANT — variable shadowing: a locally-declared variable of the same
   // spelling as a module or struct type ALWAYS takes priority, exactly like
@@ -1576,37 +1752,6 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
   // In Pass 2 (here) we validate every field's type via validateNamedType().
   for (const auto &Field : Node.getFields())
     validateNamedType(Field.Type, Node.getLoc(), Node.getTypeParams());
-}
-
-void Resolver::visitStructInit(StructInitExprAST &Node) {
-  // Validates an explicit `Module::StructName { ... }` qualifier, if any
-  // (a no-op for the ordinary bare `StructName { ... }` form). Note this
-  // function does NOT otherwise validate that Node.getName() is a real,
-  // known struct at all -- that pre-existing gap (a totally nonexistent
-  // struct name in a BARE construction currently falls through to an
-  // unrelated error, or worse, uncaught) is separate from the module-
-  // qualifier work and intentionally not addressed here; the qualifier
-  // check below, however, naturally still produces a correct, specific
-  // error even when the struct name itself doesn't exist anywhere (see
-  // validateModuleQualifier(): an unknown TypeName has no owning module,
-  // so it never equals a real Qualifier, correctly raising
-  // UnknownModuleSymbolError either way).
-  if (!Node.getModuleQualifier().empty()) {
-    validateModuleQualifier(Node.getModuleQualifier(), Node.getName(), Node.getLoc());
-  } else if (SymTable_.isKnownStruct(Node.getName()) &&
-             !SymTable_.isTypeVisibleUnqualified(currentModuleName(), Node.getName())) {
-    // Bare construction of a REAL struct that just isn't bare-visible from
-    // here (declared in another module, never on-demand imported) -- see
-    // isTypeVisibleUnqualified()'s doc comment. A totally unknown struct
-    // name still falls through untouched, per the pre-existing gap noted
-    // above.
-    UnqualifiedTypeNotVisibleError(Node.getLoc(), Node.getName(),
-                                   SymTable_.getTypeOwningModule(Node.getName()))
-        .raise();
-  }
-
-  for (const auto &[FieldName, Val] : Node.getNamedFields())
-    visitChild(Val.get());
 }
 
 void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {

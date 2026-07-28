@@ -293,6 +293,20 @@ static const TurfType *getExprType(const ExprAST *E) {
       if (CalleeName == "lengthof")
         return TurfInt().get();
 
+      // `StructName::new(...)` / `StructName::default()` -- both evaluate to
+      // the constructed struct, looked up the same way the removed
+      // StructInitExprAST branch (further below) used to for the old
+      // brace-literal form.
+      if (ScopeCallee &&
+          (ScopeCallee->ResolvedKind == ScopeAccessKind::ConstructorCall ||
+           ScopeCallee->ResolvedKind == ScopeAccessKind::DefaultConstruct)) {
+        if (GlobalSymbolTable) {
+          if (auto T = GlobalSymbolTable->LookupType(ScopeCallee->getLeftName()))
+            return T.get();
+        }
+        return nullptr;
+      }
+
       // Mangled names are built from the CALL SITE's actual argument types
       // (not the function's own declared param types) so that a generic
       // function's type-erased instantiation resolves correctly below (see
@@ -696,13 +710,6 @@ static const TurfType *getExprType(const ExprAST *E) {
               return ApplySubst(FuncReturnTypes[Name].get());
           }
         }
-      }
-    }
-  }
-  if (auto *StructInit = dynamic_cast<const StructInitExprAST *>(E)) {
-    if (GlobalSymbolTable) {
-      if (auto T = GlobalSymbolTable->LookupType(StructInit->getName())) {
-        return T.get();
       }
     }
   }
@@ -1557,14 +1564,26 @@ Value *VarDeclExprAST::codegen() {
     if (!Init)
       return nullptr;
 
-    // ── Struct-init shortcut ───────────────────────────────────────────────
-    // StructInitExprAST already allocated a fresh alloca, filled it
-    // field-by-field, and returned a load of that alloca.  If we create
-    // ANOTHER alloca and store the loaded struct value into it, LLVM's SROA
-    // pass promotes each alloca independently and loses the alias between
-    // `u`'s alloca and the pointer passed to `self` inside a method.
-    // Fix: detect the load-from-structinit-alloca and reuse it directly.
-    if (dynamic_cast<const StructInitExprAST *>(InitVal.get())) {
+    // ── Struct-construction shortcut ────────────────────────────────────────
+    // `StructName::new(...)`/`StructName::default()` (FuncCallExprAST::codegen()'s
+    // ConstructorCall/DefaultConstruct branches, below) already allocated a
+    // fresh alloca, filled it, and returned a load of that alloca. If we
+    // create ANOTHER alloca and store the loaded struct value into it,
+    // LLVM's SROA pass promotes each alloca independently and loses the
+    // alias between `u`'s alloca and the pointer passed to `self` inside a
+    // method. Fix: detect the load-from-construction-alloca and reuse it
+    // directly. (Previously gated on `dynamic_cast<StructInitExprAST*>` for
+    // the old brace-literal form, which allocated the same way.)
+    auto *InitScopeCallee = [&]() -> const ScopeAccessExprAST * {
+      auto *FC = dynamic_cast<const FuncCallExprAST *>(InitVal.get());
+      return FC ? dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee())
+               : nullptr;
+    }();
+    bool IsConstructionInit =
+        InitScopeCallee &&
+        (InitScopeCallee->ResolvedKind == ScopeAccessKind::ConstructorCall ||
+         InitScopeCallee->ResolvedKind == ScopeAccessKind::DefaultConstruct);
+    if (IsConstructionInit) {
       if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(Init)) {
         if (auto *SrcAlloca = llvm::dyn_cast<AllocaInst>(LI->getPointerOperand())) {
           SrcAlloca->setName(Name);
@@ -3012,6 +3031,30 @@ Value *FuncDefExprAST::codegen() {
     if (CfgPtr->allPathsRecurse()) {
       RecursionWithoutBaseError(Loc, Name).raise();
     }
+
+    // Constructor field-assignment analysis: `fn StructName.new(...): void`
+    // must assign every field of StructName on every path (see
+    // ConstructorFieldAssignmentPass, Analysis.h/Analysis.cpp). The
+    // internal name suffix ".new" unambiguously identifies a real
+    // constructor here -- Resolver::visitFuncDef already guarantees 'new'
+    // can never be declared 'static' and 'default' can never be declared
+    // by hand at all, so nothing else can produce this exact suffix on a
+    // struct-bound method.
+    {
+      size_t Dot = Name.rfind('.');
+      if (Dot != std::string::npos && Name.substr(Dot + 1) == "new") {
+        std::string CtorStructName = Name.substr(0, Dot);
+        TurfTypePtr CtorStructT =
+            GlobalSymbolTable ? GlobalSymbolTable->LookupType(CtorStructName) : nullptr;
+        if (auto *CtorSType = dynamic_cast<TurfStructType *>(CtorStructT.get())) {
+          std::vector<std::string> FieldNames;
+          for (const auto &F : CtorSType->getFields())
+            FieldNames.push_back(F.Name);
+          ConstructorFieldAssignmentPass CFAP;
+          CFAP.runOnCFG(*CfgPtr, CtorStructName, FieldNames, Loc);
+        }
+      }
+    }
   }
 
   // Emit a return if the block has no terminator yet.
@@ -3160,6 +3203,113 @@ Value *FuncCallExprAST::codegen() {
   // below (which a qualified call can never match, since those are always
   // spelled bare) and as ResolvedCallTarget's fallback if it's ever null.
   std::string CalleeName = Var ? Var->getName() : ScopeCallee->getRightName();
+
+  // `StructName::default()` / `StructName::new(...)` -- construction.
+  // Neither reaches the ordinary ResolvedCallTarget->mangledName() lookup
+  // below the same way: default() has no backing function at all (fully
+  // compiler-synthesized), and new()'s ResolvedCallTarget (set by
+  // Resolver::visitFuncCall) deliberately has `self` STRIPPED from its
+  // Params (so TypeChecker's ordinary overload-narrowing works unmodified,
+  // see that function's comment) -- its mangledName() would therefore be
+  // missing the `_StructName_ptr` component the REAL LLVM function
+  // (declared with self as its first parameter) actually has, so it's
+  // reconstructed manually here instead of trusting mangledName() wholesale.
+  if (ScopeCallee &&
+      (ScopeCallee->ResolvedKind == ScopeAccessKind::ConstructorCall ||
+       ScopeCallee->ResolvedKind == ScopeAccessKind::DefaultConstruct)) {
+    const std::string &StructName = ScopeCallee->getLeftName();
+    TurfTypePtr T = GlobalSymbolTable ? GlobalSymbolTable->LookupType(StructName) : nullptr;
+    auto *SType = dynamic_cast<TurfStructType *>(T.get());
+    if (!SType) {
+      SemanticError(Loc, "Internal error: unknown struct type '" + StructName +
+                             "' in construction -- this is a compiler bug.")
+          .raise();
+      return nullptr;
+    }
+    Type *LLVMTy = getLLVMType(T.get());
+    auto *LLVMStructType = dyn_cast<StructType>(LLVMTy);
+    if (!LLVMStructType) {
+      SemanticError(Loc, "Internal error: LLVM StructType '" + StructName +
+                             "' not found -- this is a compiler bug.")
+          .raise();
+      return nullptr;
+    }
+
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                     TheFunction->getEntryBlock().begin());
+
+    if (ScopeCallee->ResolvedKind == ScopeAccessKind::DefaultConstruct) {
+      AllocaInst *Alloca = TmpB.CreateAlloca(LLVMStructType, nullptr, StructName + "_default");
+      Builder->CreateStore(GetDefaultValue(T.get()), Alloca);
+      return Builder->CreateLoad(LLVMStructType, Alloca, "structval");
+    }
+
+    // ConstructorCall: `StructName::new(args...)`.
+    const ResolverFunctionSymbol *Target = getResolvedCallTarget();
+    if (!Target) {
+      SemanticError(Loc, "Internal error: '" + StructName +
+                             "::new' has no resolved constructor target -- "
+                             "this is a compiler bug.")
+          .raise();
+      return nullptr;
+    }
+
+    std::string CtorMangledName = "turf_";
+    if (!Target->SourceModule.empty())
+      CtorMangledName += Target->SourceModule + "_";
+    CtorMangledName += Target->BaseName;      // "StructName.new"
+    CtorMangledName += "_" + StructName + "_ptr"; // self, reinserted
+    for (const auto &P : Target->Params)
+      if (P.Type)
+        CtorMangledName += "_" + P.Type->getMangledName();
+
+    Function *CtorF = TheModule->getFunction(CtorMangledName);
+    if (!CtorF) {
+      SemanticError(Loc, "Internal error: LLVM function '" + CtorMangledName +
+                             "' not found after successful name resolution. "
+                             "This is a compiler bug.")
+          .raise();
+      return nullptr;
+    }
+
+    std::vector<Value *> EvaluatedArgs;
+    for (auto &Arg : Args) {
+      Value *V = Arg->codegen();
+      if (!V)
+        return nullptr;
+      EvaluatedArgs.push_back(V);
+    }
+
+    AllocaInst *SelfAlloca = TmpB.CreateAlloca(LLVMStructType, nullptr, StructName + "_new");
+    std::vector<Value *> ArgVals;
+    ArgVals.push_back(SelfAlloca); // implicit self pointer
+
+    unsigned Idx = 0;
+    for (auto ArgIt = std::next(CtorF->arg_begin()); ArgIt != CtorF->arg_end();
+         ++ArgIt, ++Idx) {
+      Value *V = EvaluatedArgs[Idx];
+      Type *ExpectedTy = ArgIt->getType();
+      if (V->getType() != ExpectedTy) {
+        if (ExpectedTy->isPointerTy() && V->getType()->isIntegerTy())
+          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_ptr");
+        else if (ExpectedTy->isIntegerTy() && V->getType()->isPointerTy())
+          V = Builder->CreatePtrToInt(V, ExpectedTy, "argcast_int");
+        else if (ExpectedTy->isDoubleTy() && V->getType()->isPointerTy()) {
+          V = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext));
+          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_dbl");
+        } else if (ExpectedTy->isPointerTy() && V->getType()->isDoubleTy()) {
+          V = Builder->CreateBitCast(V, Type::getInt64Ty(*TheContext), "argcast_dbl_to_i64");
+          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_erase_dbl");
+        } else
+          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_bit");
+      }
+      ArgVals.push_back(V);
+    }
+
+    Builder->CreateCall(CtorF, ArgVals);
+    return Builder->CreateLoad(LLVMStructType, SelfAlloca, "structval");
+  }
 
   // For malloc/realloc/free: if the user declared an extern fn with that name,
   // let it flow through the normal symbol-table path below. Only use the
@@ -4065,198 +4215,6 @@ Value *StructDeclExprAST::codegen() {
   ST->setBody(LLVMFieldTypes);
 
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
-}
-
-Value *StructInitExprAST::codegen() {
-  TurfTypePtr T;
-  if (GlobalSymbolTable)
-    T = GlobalSymbolTable->LookupType(Name);
-  auto *SType = dynamic_cast<TurfStructType *>(T.get());
-  if (!SType) {
-    LogErrorAt(Loc, "Unknown struct type '" + Name + "'");
-    return nullptr;
-  }
-
-  Type *LLVMTy = getLLVMType(T.get());
-  StructType *LLVMStructType = dyn_cast<StructType>(LLVMTy);
-  if (!LLVMStructType) {
-    LogErrorAt(Loc, "LLVM StructType '" + Name + "' not found");
-    return nullptr;
-  }
-
-  // Reorder NamedFields to match the struct definition's field order.
-  // TypeChecker already validated completeness and no unknown fields.
-  const auto &DeclFields = SType->getFields();
-  std::vector<Value *> EvaluatedArgs;
-  std::vector<TurfTypePtr> ArgTypes;
-  EvaluatedArgs.reserve(DeclFields.size());
-  ArgTypes.reserve(DeclFields.size());
-
-  for (const auto &DeclF : DeclFields) {
-    // Find the matching named field supplied by the caller.
-    const ExprAST *MatchedExpr = nullptr;
-    for (const auto &[FieldName, Val] : NamedFields) {
-      if (FieldName == DeclF.Name) {
-        MatchedExpr = Val.get();
-        break;
-      }
-    }
-    Value *V = nullptr;
-    if (MatchedExpr) {
-      V = const_cast<ExprAST *>(MatchedExpr)->codegen();
-      if (!V)
-        return nullptr;
-    } else {
-      V = GetDefaultValue(DeclF.Type.get());
-    }
-    EvaluatedArgs.push_back(V);
-
-    TurfTypePtr ActTy = DeclF.Type;
-    if (MatchedExpr) {
-      if (auto *VE = dynamic_cast<const VariableExprAST *>(MatchedExpr)) {
-        if (VE->ResolvedSymbol)
-          ActTy = VE->ResolvedSymbol->Type;
-        else if (GlobalSymbolTable) {
-          Symbol *Sym = GlobalSymbolTable->LookupSymbol(VE->getName());
-          if (Sym) ActTy = Sym->Type;
-        }
-      }
-      if (!ActTy)
-        ActTy = getTurfTypeFromLLVM(V->getType());
-    }
-    ArgTypes.push_back(ActTy);
-  }
-
-  // Try to find a user-defined constructor function (init method).
-  std::string InitName = Name + ".init";
-  std::string MangledName = "turf_" + InitName + "_" + Name + "_ptr";
-  for (const auto &AT : ArgTypes) {
-    MangledName += "_" + AT->getMangledName();
-  }
-
-  Function *InitF = TheModule->getFunction(MangledName);
-  if (!InitF) {
-    for (const auto &[FName, ParamTypes] : FuncParamTypes) {
-      std::string Prefix = "turf_" + InitName;
-      std::string Suffix = "_" + InitName;
-      bool Match = false;
-      if (FName == Prefix ||
-          (FName.size() > Prefix.size() && FName[Prefix.size()] == '_' &&
-           FName.substr(0, Prefix.size()) == Prefix)) {
-        Match = true;
-      } else {
-        size_t Pos = FName.find(Suffix);
-        if (Pos != std::string::npos &&
-            (Pos + Suffix.size() == FName.size() ||
-             FName[Pos + Suffix.size()] == '_')) {
-          Match = true;
-        }
-      }
-      if (Match) {
-        if (ParamTypes.size() == ArgTypes.size() + 1) {
-          bool Compatible = true;
-          for (size_t i = 0; i < ArgTypes.size(); ++i) {
-            if (!typesCompatible(ArgTypes[i].get(), ParamTypes[i + 1].get())) {
-              Compatible = false;
-              break;
-            }
-          }
-          if (Compatible) {
-            InitF = TheModule->getFunction(FName);
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  if (InitF) {
-    if (InitF->arg_size() != EvaluatedArgs.size() + 1) {
-      LogErrorAt(Loc, "Constructor for '" + Name + "' expects " +
-                          std::to_string(InitF->arg_size() - 1) +
-                          " arguments, but got " +
-                          std::to_string(EvaluatedArgs.size()));
-      return nullptr;
-    }
-
-    Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-                     TheFunction->getEntryBlock().begin());
-    AllocaInst *Alloca =
-        TmpB.CreateAlloca(LLVMStructType, nullptr, Name + "_init");
-
-    std::vector<Value *> ArgVals;
-    ArgVals.push_back(Alloca); // Implicit self pointer
-
-    unsigned Idx = 0;
-    for (auto ArgIt = std::next(InitF->arg_begin()); ArgIt != InitF->arg_end();
-         ++ArgIt, ++Idx) {
-      Value *V = EvaluatedArgs[Idx];
-      Type *ExpectedTy = ArgIt->getType();
-      if (V->getType() != ExpectedTy) {
-        if (ExpectedTy->isPointerTy() && V->getType()->isIntegerTy())
-          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_ptr");
-        else if (ExpectedTy->isIntegerTy() && V->getType()->isPointerTy())
-          V = Builder->CreatePtrToInt(V, ExpectedTy, "argcast_int");
-        else if (ExpectedTy->isDoubleTy() && V->getType()->isPointerTy()) {
-          V = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext));
-          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_dbl");
-        }
-        // See the matching fix on MethodCallExprAST's argument-casting loop
-        // above for why this branch is needed: erasing a `double` argument
-        // into an opaque generic-parameter `init(...)` field is the same
-        // missing case, same illegal-bitcast crash.
-        else if (ExpectedTy->isPointerTy() && V->getType()->isDoubleTy()) {
-          V = Builder->CreateBitCast(V, Type::getInt64Ty(*TheContext), "argcast_dbl_to_i64");
-          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_erase_dbl");
-        } else
-          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_bit");
-      }
-      ArgVals.push_back(V);
-    }
-
-    Builder->CreateCall(InitF, ArgVals);
-    return Builder->CreateLoad(LLVMStructType, Alloca, "structval");
-  }
-
-  // Fallback to default struct initialization (no user constructor).
-  if (EvaluatedArgs.empty()) {
-    Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-                     TheFunction->getEntryBlock().begin());
-    AllocaInst *Alloca =
-        TmpB.CreateAlloca(LLVMStructType, nullptr, Name + "_init");
-
-    llvm::Constant *DefaultVal = GetDefaultValue(T.get());
-    Builder->CreateStore(DefaultVal, Alloca);
-
-    return Builder->CreateLoad(LLVMStructType, Alloca, "structval");
-  }
-
-  // Direct field-by-field initialization using definition order.
-  Function *TheFunction = Builder->GetInsertBlock()->getParent();
-  IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
-                   TheFunction->getEntryBlock().begin());
-  AllocaInst *Alloca =
-      TmpB.CreateAlloca(LLVMStructType, nullptr, Name + "_init");
-
-  for (size_t i = 0; i < EvaluatedArgs.size(); ++i) {
-    Value *ArgVal = EvaluatedArgs[i];
-
-    TurfTypePtr FieldType = DeclFields[i].Type;
-    TurfTypePtr ArgTurfType = getTurfTypeFromLLVM(ArgVal->getType());
-    ArgTurfType = RefineLLVMType(ArgTurfType, FieldType, ArgVal->getType());
-
-    // Type mismatch validation is handled by the TypeChecker.
-
-    ArgVal = CastToType(ArgVal, FieldType, "fieldcast", Loc);
-
-    Value *FieldPtr =
-        Builder->CreateStructGEP(LLVMStructType, Alloca, i, "fieldptr");
-    Builder->CreateStore(ArgVal, FieldPtr);
-  }
-
-  return Builder->CreateLoad(LLVMStructType, Alloca, "structval");
 }
 
 Value *FieldAccessExprAST::codegenLValue() {

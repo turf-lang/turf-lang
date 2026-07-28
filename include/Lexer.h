@@ -217,7 +217,8 @@ enum Token {
   TOK_ENUM     = -81, ///< `enum`     token   — enum declaration
   TOK_LSHIFT   = -79, ///< `<<`       token   — bitwise left shift
   TOK_RSHIFT   = -80, ///< `>>`       token   — bitwise right shift
-  TOK_EXPORT   = -82  ///< `export`   keyword — top-level exported constant declaration
+  TOK_EXPORT   = -82, ///< `export`   keyword — top-level exported constant declaration
+  TOK_STATIC   = -83  ///< `static`   keyword — no-`self` struct-bound method declaration
 };
 
 int gettok();

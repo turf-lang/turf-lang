@@ -116,7 +116,8 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"compare", TOK_COMPARE},
                                        {"matches", TOK_MATCHES},
                                        {"done", TOK_DONE},
-                                       {"export", TOK_EXPORT}};
+                                       {"export", TOK_EXPORT},
+                                       {"static", TOK_STATIC}};
 
 /**
  * @brief True if @p Msg looks like a warning rather than a hard error.
