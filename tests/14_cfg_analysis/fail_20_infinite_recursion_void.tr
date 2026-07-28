@@ -1,0 +1,9 @@
+// Regression test (#186): void function with unconditional self-call.
+// No base case → RecursionWithoutBaseError.
+fn loop_forever(): void {
+    loop_forever();
+}
+fn main(): int {
+    loop_forever();
+    return 0;
+}

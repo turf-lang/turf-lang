@@ -1,0 +1,14 @@
+// Regression test (#186): Fibonacci with two recursive calls and two base cases.
+// There exists a path (n == 0 → return 0, n == 1 → return 1) that does NOT
+// recurse → must NOT emit RecursionWithoutBaseError.
+fn fib(n: int): int {
+    if n == 0 { return 0; }
+    if n == 1 { return 1; }
+    return fib(n - 1) + fib(n - 2);
+}
+fn main(): int {
+    assert(fib(0) == 0,  "fib(0)=0");
+    assert(fib(1) == 1,  "fib(1)=1");
+    assert(fib(6) == 8,  "fib(6)=8");
+    return 0;
+}

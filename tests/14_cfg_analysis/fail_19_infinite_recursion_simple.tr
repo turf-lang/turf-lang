@@ -1,0 +1,9 @@
+// Regression test (#186): fn foo(): int { return foo(); }
+// Every path passes through a self-call with no base case.
+// Must emit RecursionWithoutBaseError and fail to compile.
+fn foo(): int {
+    return foo();
+}
+fn main(): int {
+    return foo();
+}

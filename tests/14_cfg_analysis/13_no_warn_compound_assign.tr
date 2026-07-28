@@ -1,0 +1,8 @@
+// Regression test (#186): x += 5 is a read-modify-write. Neither the initial
+// assignment nor the compound assignment is a dead store. No warning expected.
+fn main(): int {
+    mutable x: int = 0;
+    x += 5;
+    x += 3;
+    return 0;
+}
