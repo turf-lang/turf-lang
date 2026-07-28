@@ -1,0 +1,76 @@
+// Regression test for ConstructorFieldAssignmentPass (Analysis.h/
+// Analysis.cpp): `new()` must assign every field of its struct on EVERY
+// path from entry to exit -- a real control-flow-sensitive check (mirrors
+// DefiniteAssignmentPass's forward dataflow), not just "is it assigned
+// somewhere in the body". This file pins down cases that MUST compile
+// (every field genuinely covered on every path); the companion
+// fail_incomplete_constructor_*.tr files pin down cases that must NOT.
+
+import io;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+// Every field assigned in BOTH branches of the if/else -- must compile.
+fn Point.new(x: int, y: int, negate: bool): void {
+    if (negate) {
+        self.x = 0 - x;
+        self.y = 0 - y;
+    } else {
+        self.x = x;
+        self.y = y;
+    }
+}
+
+struct Counter {
+    value: int,
+    increment: int
+}
+
+// A field assigned more than once (overwritten) on the same path is still
+// "assigned" -- the analysis only cares whether it happens at all on every
+// path, not how many times.
+fn Counter.new(start: int): void {
+    self.value = 0;
+    self.increment = 1;
+    self.value = start;
+}
+
+struct Choice {
+    picked: int
+}
+
+// A while loop that always executes at least once (via a preceding
+// unconditional assignment path) is not required here -- this constructor
+// assigns the field unconditionally BEFORE the loop, so the loop's own
+// conditional re-assignment doesn't matter for definite-assignment.
+fn Choice.new(n: int): void {
+    self.picked = 0;
+    mut i: int = 0;
+    while (i < n) {
+        self.picked = i;
+        i = i + 1;
+    }
+}
+
+fn main(): int {
+    mut p1: Point = Point::new(3, 4, false);
+    assert(p1.x == 3, "no-negate x");
+    assert(p1.y == 4, "no-negate y");
+
+    mut p2: Point = Point::new(3, 4, true);
+    assert(p2.x == 0 - 3, "negate x");
+    assert(p2.y == 0 - 4, "negate y");
+
+    mut c: Counter = Counter::new(5);
+    assert(c.value == 5, "counter value overwritten to start");
+    assert(c.increment == 1, "counter increment");
+
+    mut ch: Choice = Choice::new(3);
+    assert(ch.picked == 2, "choice picked last loop value");
+
+    io::printline("constructor definite-assignment checks pass");
+    return 0;
+}

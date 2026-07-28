@@ -1,0 +1,13 @@
+// Regression test: `StructName::default()` is always zero-argument -- it
+// has no user code to pass values to at all, unlike `::new(...)`. Must
+// raise DefaultConstructorArityError, not a generic arity-mismatch message.
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut p: Point = Point::default(1, 2);
+    return 0;
+}

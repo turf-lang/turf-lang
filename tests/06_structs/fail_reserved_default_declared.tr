@@ -1,0 +1,17 @@
+// Regression test: `default` is reserved for the compiler-synthesized
+// StructName::default() and can never be declared by hand, static or not --
+// must raise ReservedConstructorNameError at the declaration site.
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.default(): void {
+    self.x = 0;
+    self.y = 0;
+}
+
+fn main(): int {
+    return 0;
+}

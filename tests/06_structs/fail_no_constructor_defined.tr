@@ -1,0 +1,15 @@
+// Regression test: `StructName::new(...)` requires StructName to actually
+// declare a `.new` constructor -- unlike `StructName::default()`, which is
+// always available (compiler-synthesized), there's no fallback for new().
+// Must raise NoConstructorDefinedError, not fall through to some other
+// (misleading) error.
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut p: Point = Point::new(1, 2);
+    return 0;
+}

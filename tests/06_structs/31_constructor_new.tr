@@ -1,0 +1,54 @@
+// Regression test for the struct-construction overhaul: `StructName::new(...)`
+// replaces the old ambiguous `StructName { field: val }` brace-literal (now
+// removed from the parser entirely, along with the g_AllowStructInit flag it
+// needed). A constructor is an ordinary '.'-declared instance method named
+// "new" -- 'self' is auto-injected exactly like any other instance method --
+// but can ONLY be invoked via `StructName::new(args...)`, never `x.new(...)`
+// (see fail_dot_call_new.tr).
+//
+// Also covers: multiple fields set from constructor arguments in a
+// different order than declared (constructor params are positional to the
+// FUNCTION's own signature, not tied to field declaration order at all --
+// unlike the old brace-literal form, which matched by field NAME).
+
+import io;
+extern fn strlen(s: string): int;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+// Params intentionally NOT in field-declaration order, to prove field
+// values come from explicit `self.field = ...` assignments, not positional
+// struct-field matching.
+fn Point.new(y: int, x: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+struct Rect {
+    width: int,
+    height: int,
+    label: string
+}
+
+fn Rect.new(w: int, h: int, name: string): void {
+    self.width = w;
+    self.height = h;
+    self.label = name;
+}
+
+fn main(): int {
+    mut p: Point = Point::new(20, 10);
+    assert(p.x == 10, "x should be 10");
+    assert(p.y == 20, "y should be 20");
+
+    mut r: Rect = Rect::new(3, 4, "box");
+    assert(r.width == 3, "width should be 3");
+    assert(r.height == 4, "height should be 4");
+    assert(strlen(r.label) == 3, "label should be 'box'");
+
+    io::printline("constructor new() works");
+    return 0;
+}

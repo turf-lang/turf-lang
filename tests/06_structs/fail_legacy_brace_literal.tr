@@ -1,0 +1,15 @@
+// Regression test: the old `StructName { field: val, ... }` brace-literal
+// construction syntax is gone entirely (removed from the parser along with
+// the g_AllowStructInit flag it needed) -- must be rejected with a clear,
+// specific error pointing at `::new(...)`/`::default()`, not a generic or
+// confusing parse failure.
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut p: Point = Point { x: 1, y: 2 };
+    return 0;
+}
