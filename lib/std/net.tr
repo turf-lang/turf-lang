@@ -96,8 +96,12 @@ struct TcpConnection {
     fd: int
 }
 
+fn TcpConnection.new(fd: int): void {
+    self.fd = fd;
+}
+
 // Dial out to a.b.c.d:port. Aborts with a clear message on failure.
-fn TcpConnection::connect(a: int, b: int, c: int, d: int, port: int): TcpConnection {
+fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: TcpConnection {
     mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
     assert(fd >= 0, "net::TcpConnection::connect: socket() failed");
 
@@ -106,7 +110,7 @@ fn TcpConnection::connect(a: int, b: int, c: int, d: int, port: int): TcpConnect
     mem::free(addr);
     assert(result == 0, "net::TcpConnection::connect: connect() failed -- is anything listening on that host/port?");
 
-    return TcpConnection { fd: fd };
+    return TcpConnection::new(fd);
 }
 
 // Reads up to maxBytes from the connection. Returns whatever arrived
@@ -147,11 +151,15 @@ struct TcpListener {
     fd: int
 }
 
+fn TcpListener.new(fd: int): void {
+    self.fd = fd;
+}
+
 // Binds and starts listening on the given port (all interfaces). Sets
 // SO_REUSEADDR so restarting a server doesn't fail with "address already
 // in use" while the previous socket lingers in TIME_WAIT. Aborts with a
 // clear message on failure.
-fn TcpListener::bind(port: int): TcpListener {
+fn TcpListener.bind(port: int) static: TcpListener {
     mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
     assert(fd >= 0, "net::TcpListener::bind: socket() failed");
 
@@ -169,14 +177,14 @@ fn TcpListener::bind(port: int): TcpListener {
     immut listenResult: int = listen(fd, 128);
     assert(listenResult == 0, "net::TcpListener::bind: listen() failed");
 
-    return TcpListener { fd: fd };
+    return TcpListener::new(fd);
 }
 
 // Blocks until a client connects, then returns the accepted connection.
 fn TcpListener.accept(): TcpConnection {
     mut clientFd: int = accept(self.fd, null, null);
     assert(clientFd >= 0, "net::TcpListener.accept: accept() failed");
-    return TcpConnection { fd: clientFd };
+    return TcpConnection::new(clientFd);
 }
 
 // Stops listening and closes the socket.
