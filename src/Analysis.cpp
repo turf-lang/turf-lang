@@ -338,3 +338,175 @@ void DefiniteAssignmentPass::runOnCFG(CFG &Cfg,
     }
   }
 }
+
+// ─── LivenessAnalysisPass ─────────────────────────────────────────────────────
+//
+// Classic backward data-flow liveness analysis.
+//
+// Notation:
+//   Gen[B]     = variables READ before being written in block B (upward exposed uses)
+//   Kill[B]    = variables WRITTEN in block B
+//   LiveIn[B]  = variables live at the entry of B
+//   LiveOut[B] = variables live at the exit of B
+//
+// Equations:
+//   LiveOut[B] = ∪ LiveIn[S]  for each successor S of B
+//   LiveIn[B]  = Gen[B] ∪ (LiveOut[B] − Kill[B])
+//
+// Fixed-point is reached when no LiveIn set changes (worklist convergence).
+//
+// After convergence, dead stores and unused variables are reported.
+
+void LivenessAnalysisPass::runOnCFG(
+    CFG &Cfg,
+    const std::unordered_set<const VariableSymbol *> &ParamSymbols) {
+
+  const auto &Blocks = Cfg.getBlocks();
+  size_t N = Blocks.size();
+  if (N == 0) return;
+
+  // ── Step 0: Identify all body-declared locals ─────────────────────────────
+  // Mirrors DefiniteAssignmentPass's AllBodyDeclared. Parameters are excluded
+  // so we never warn about an unused parameter.
+  AssignSet AllBodyDeclared;
+  // Also collect the SourceLocation of each VarDecl for the declaration site
+  // in UnusedVariableWarning.
+  std::unordered_map<const VariableSymbol *, SourceLocation> DeclLocMap;
+  for (size_t b = 0; b < N; ++b) {
+    for (ExprAST *Stmt : Blocks[b]->getStatements()) {
+      BodyDeclCollector Coll;
+      if (Stmt) const_cast<ExprAST *>(Stmt)->accept(Coll);
+      for (const VariableSymbol *Sym : Coll.LocalDecls) {
+        AllBodyDeclared.insert(Sym);
+        // DeclLoc from ResolverSourceLocation → SourceLocation
+        DeclLocMap[Sym] = {Sym->DeclLoc.Line, Sym->DeclLoc.Col};
+      }
+    }
+  }
+
+  // ── Step 1: Compute Gen and Kill per block ────────────────────────────────
+  // Walk each block's statements IN ORDER. For each statement:
+  //   - A READ of variable V that has NOT yet been written in this block
+  //     adds V to Gen[B] (upward-exposed use).
+  //   - A WRITE to V adds V to Kill[B].
+  // "Written in this block before this point" is tracked via a local set.
+
+  using LiveSet = std::unordered_set<const VariableSymbol *>;
+  std::vector<LiveSet> Gen(N), Kill(N);
+
+  for (size_t b = 0; b < N; ++b) {
+    LiveSet WrittenSoFar; // tracks defs seen in this block so far (left to right)
+    for (ExprAST *Stmt : Blocks[b]->getStatements()) {
+      collectReadsAndDefs(Stmt,
+        [&](SourceLocation, const VariableSymbol *Sym) {
+          // Read: if not already written in this block, it's upward-exposed
+          if (!WrittenSoFar.count(Sym))
+            Gen[b].insert(Sym);
+        },
+        [&](SourceLocation, const VariableSymbol *Sym) {
+          // Write (def)
+          Kill[b].insert(Sym);
+          WrittenSoFar.insert(Sym);
+        });
+    }
+  }
+
+  // ── Step 2: Backward data-flow fixed-point ────────────────────────────────
+  // Build a block-index map for successor lookup.
+  std::unordered_map<const TurfBasicBlock *, size_t> IndexOf;
+  for (size_t i = 0; i < N; ++i) IndexOf[Blocks[i].get()] = i;
+
+  std::vector<LiveSet> LiveIn(N), LiveOut(N);
+  // Initialize LiveIn[B] = Gen[B]
+  for (size_t i = 0; i < N; ++i) LiveIn[i] = Gen[i];
+
+  // Worklist: all block indices
+  std::vector<bool> InWorklist(N, true);
+  // Process in reverse order (approximates reverse postorder for backward DFA)
+  bool Changed = true;
+  while (Changed) {
+    Changed = false;
+    for (size_t b = N; b-- > 0;) {
+      // LiveOut[B] = union of LiveIn of all successors
+      LiveSet NewOut;
+      for (const TurfBasicBlock *Succ : Blocks[b]->getSuccessors()) {
+        auto It = IndexOf.find(Succ);
+        if (It == IndexOf.end()) continue;
+        for (const VariableSymbol *V : LiveIn[It->second])
+          NewOut.insert(V);
+      }
+      // LiveIn[B] = Gen[B] ∪ (LiveOut[B] − Kill[B])
+      LiveSet NewIn = Gen[b];
+      for (const VariableSymbol *V : NewOut)
+        if (!Kill[b].count(V))
+          NewIn.insert(V);
+
+      if (NewOut != LiveOut[b] || NewIn != LiveIn[b]) {
+        LiveOut[b] = std::move(NewOut);
+        LiveIn[b] = std::move(NewIn);
+        Changed = true;
+      }
+    }
+  }
+
+  // ── Step 3: Report UnusedVariableWarning ─────────────────────────────────
+  // A variable declared in the body that never appears in ANY Gen set across
+  // all blocks is never read anywhere. Flag it at its declaration site.
+  LiveSet EverRead;
+  for (size_t b = 0; b < N; ++b)
+    for (const VariableSymbol *V : Gen[b])
+      EverRead.insert(V);
+
+  for (const VariableSymbol *Sym : AllBodyDeclared) {
+    if (!EverRead.count(Sym) && !ParamSymbols.count(Sym)) {
+      auto LocIt = DeclLocMap.find(Sym);
+      SourceLocation Loc = (LocIt != DeclLocMap.end()) ? LocIt->second : SourceLocation{0, 0};
+      UnusedVariableWarning(Loc, Sym->Name).emit();
+    }
+  }
+
+  // ── Step 4: Report DeadStoreWarning ──────────────────────────────────────
+  // Walk each block again, simulating the live set from LiveOut[B] backward.
+  // At each write (def) to variable V: if V is NOT in the current live set
+  // at that point, the store is dead.
+  for (size_t b = 0; b < N; ++b) {
+    // current = set of variables live AFTER the current statement
+    // We start at the end of the block with LiveOut[b] and walk backward.
+    LiveSet Current = LiveOut[b];
+    const auto &Stmts = Blocks[b]->getStatements();
+    // Collect (def-location, symbol) pairs forward first, then process backward
+    struct DefEntry { SourceLocation Loc; const VariableSymbol *Sym; };
+    std::vector<DefEntry> Defs;
+    std::vector<DefEntry> Reads;
+
+    for (ExprAST *Stmt : Stmts) {
+      collectReadsAndDefs(Stmt,
+        [&](SourceLocation L, const VariableSymbol *S) { Reads.push_back({L, S}); },
+        [&](SourceLocation L, const VariableSymbol *S) { Defs.push_back({L, S}); });
+    }
+    // For dead-store detection we need statement-level granularity:
+    // re-walk in statement order, maintaining a "live after" set that
+    // shrinks when we pass a use and grows when we pass a def.
+    LiveSet LiveAfter = LiveOut[b];
+    for (size_t s = Stmts.size(); s-- > 0;) {
+      // Collect reads and defs for this single statement
+      std::vector<std::pair<SourceLocation, const VariableSymbol *>> StmtDefs, StmtReads;
+      collectReadsAndDefs(Stmts[s],
+        [&](SourceLocation L, const VariableSymbol *S) { StmtReads.push_back({L, S}); },
+        [&](SourceLocation L, const VariableSymbol *S) { StmtDefs.push_back({L, S}); });
+
+      // Any def whose target is NOT in LiveAfter is a dead store.
+      // Only flag locals (in AllBodyDeclared), not parameters.
+      for (auto &[Loc, Sym] : StmtDefs) {
+        if (AllBodyDeclared.count(Sym) && !LiveAfter.count(Sym)) {
+          DeadStoreWarning(Loc, Sym->Name).emit();
+        }
+      }
+      // Update LiveAfter: reads make variables live (add), defs kill liveness (remove)
+      // Process in backward order for the statement: first reads (going backward)
+      // then defs.
+      for (auto &[Loc, Sym] : StmtReads)  LiveAfter.insert(Sym);
+      for (auto &[Loc, Sym] : StmtDefs)   LiveAfter.erase(Sym);
+    }
+  }
+}
