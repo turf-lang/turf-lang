@@ -18,8 +18,13 @@ struct Wrapper {
     count: int
 }
 
-fn Empty::make(): Empty {
-    return Empty {};
+fn Wrapper.new(tag: Empty, count: int): void {
+    self.tag = tag;
+    self.count = count;
+}
+
+fn Empty.make() static: Empty {
+    return Empty::default();
 }
 
 fn Empty.describe(): string {
@@ -30,7 +35,7 @@ fn Empty.describe(): string {
 }
 
 fn main(): int {
-    mut e: Empty = Empty {};
+    mut e: Empty = Empty::default();
     io::printline(e.describe());
 
     // Uninitialized declaration -- must default-init cleanly (zero fields
@@ -40,9 +45,9 @@ fn main(): int {
 
     immut e3: Empty = Empty::make();
 
-    mut arr: Empty[3] = [Empty {}, Empty {}, Empty {}];
+    mut arr: Empty[3] = [Empty::default(), Empty::default(), Empty::default()];
 
-    mut w: Wrapper = Wrapper { tag: Empty {}, count: 5 };
+    mut w: Wrapper = Wrapper::new(Empty::default(), 5);
     assert(w.count == 5, "empty struct as a field of another struct works");
 
     io::printline("empty structs work in every position");

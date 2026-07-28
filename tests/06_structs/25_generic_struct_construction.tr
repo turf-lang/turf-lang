@@ -10,12 +10,16 @@
 // would need real backtracking support this hand-written recursive-descent
 // parser doesn't have). Instead:
 //
-//   1. `Types.cpp`'s typesCompatible() now treats a bare struct-init's type
-//      (`Box { val: null }` always produces plain NamedType("Box") --
-//      TypeChecker::visitStructInit() can never produce a GenericType
-//      itself) as compatible with a GenericType of the same base name
-//      (`Box<int>`) on the OTHER side of an assignment/declaration. This is
-//      sound because this compiler's type-erasure model gives every
+//   1. `Types.cpp`'s typesCompatible() now treats a bare construction's type
+//      (`Box::new(...)`/`Box::default()` always produce plain
+//      NamedType("Box") -- the Resolver's ConstructorCall/DefaultConstruct
+//      dispatch in visitFuncCall, and TypeChecker's DefaultConstruct branch,
+//      never produce a GenericType themselves; this was originally true of
+//      the now-removed brace-literal form's TypeChecker::visitStructInit()
+//      too, and still holds through the newer construction paths) as
+//      compatible with a GenericType of the same base name (`Box<int>`) on
+//      the OTHER side of an assignment/declaration. This is sound because
+//      this compiler's type-erasure model gives every
 //      instantiation of a generic struct the exact same LLVM layout (a
 //      field typed with the struct's own type parameter is always a
 //      pointer, which erases to an opaque pointer regardless of what it
@@ -64,8 +68,11 @@ fn<T> Box.get(): T* {
 }
 
 fn main(): int {
-    // Construction + direct field access, no methods involved.
-    mut b: Box<int> = Box { val: null };
+    // Construction + direct field access, no user-defined constructor
+    // involved -- `val` is a pointer field, and ::default() already
+    // zero-inits it to null, exactly the value the old brace-literal spelled
+    // out explicitly.
+    mut b: Box<int> = Box::default();
     assert(b.val == null, "");
 
     // Generic method call: set() takes T* (int*), get() returns T* (int*).
@@ -78,7 +85,7 @@ fn main(): int {
     // A second, independently-typed instantiation of the SAME generic
     // struct in the same file, to confirm the shared-layout model doesn't
     // cause any cross-instantiation interference.
-    mut sb: Box<string> = Box { val: null };
+    mut sb: Box<string> = Box::default();
     mut s: string = "hello";
     sb.set(&s);
     mut sp: string* = sb.get();

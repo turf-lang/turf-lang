@@ -6,9 +6,19 @@ struct Employee {
     level: Level
 }
 
+fn Employee.new(name: string, level: Level): void {
+    self.name = name;
+    self.level = level;
+}
+
 struct Team {
     lead: Employee,
     size: int
+}
+
+fn Team.new(lead: Employee, size: int): void {
+    self.lead = lead;
+    self.size = size;
 }
 
 fn level_pay(lv: Level): int {
@@ -22,8 +32,8 @@ fn level_pay(lv: Level): int {
 }
 
 fn main(): int {
-    immut lead: Employee = Employee { name: "Alice", level: Level::Senior };
-    immut team: Team = Team { lead: lead, size: 5 };
+    immut lead: Employee = Employee::new("Alice", Level::Senior);
+    immut team: Team = Team::new(lead, 5);
 
     assert(team.lead.level == Level::Senior, "Team lead is Senior");
     assert((team.lead.level to int) == 2, "Senior ordinal == 2");
@@ -31,7 +41,7 @@ fn main(): int {
     assert(level_pay(team.lead.level) == 120000, "Senior pays 120k");
 
     // Upgrade lead
-    immut upgraded: Employee = Employee { name: "Alice", level: Level::Principal };
+    immut upgraded: Employee = Employee::new("Alice", Level::Principal);
     assert(upgraded.level != team.lead.level, "Upgraded != original");
     assert(level_pay(upgraded.level) == 160000, "Principal pays 160k");
     return 0;

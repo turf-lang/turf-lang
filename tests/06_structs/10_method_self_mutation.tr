@@ -3,6 +3,11 @@ struct Node {
     next: Node*
 }
 
+fn Node.new(val: int, next: Node*): void {
+    self.val = val;
+    self.next = next;
+}
+
 fn Node.scale(factor: int): void {
     self.val = self.val * factor;
 }
@@ -12,7 +17,7 @@ fn Node.add(delta: int): void {
 }
 
 fn main(): int {
-    mut n: Node = Node { val: 20, next: null };
+    mut n: Node = Node::new(20, null);
     n.scale(3);
     assert(n.val == 60, "FAIL: self.val mutation not visible after scale()");
 

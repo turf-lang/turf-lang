@@ -1,8 +1,8 @@
-// Regression test: `fn StructName::method(...)` declares a TRUE static
-// method -- no implicit `self` parameter -- callable only as
+// Regression test: `fn StructName.method(...) static: RetType` declares a
+// TRUE static method -- no implicit `self` parameter -- callable only as
 // `StructName::method(args)`, never through an instance. The exact same
-// struct can also declare ordinary instance methods (`.` form) alongside
-// it; the two forms don't interfere with each other.
+// struct can also declare ordinary instance methods (`.` form, no
+// `static`) alongside it; the two forms don't interfere with each other.
 //
 // MathUtil is a genuinely EMPTY struct (`struct MathUtil {}`) -- a static
 // method has no use for instance state at all, so there's no reason a
@@ -15,7 +15,7 @@ import io;
 
 struct MathUtil {}
 
-fn MathUtil::square(x: int): int {
+fn MathUtil.square(x: int) static: int {
     return x * x;
 }
 
@@ -29,7 +29,7 @@ fn main(): int {
     assert(MathUtil::square(5) == 25, "static method call works");
     assert(MathUtil::square(0) == 0, "static method call works for zero");
 
-    mut mu: MathUtil = MathUtil {};
+    mut mu: MathUtil = MathUtil::default();
     io::printline(mu.describe());
 
     io::printline("static + instance methods coexist on one (empty) struct");

@@ -8,9 +8,19 @@ struct Point {
     y: int
 }
 
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
 struct Rect {
     top_left: Point,
     bottom_right: Point
+}
+
+fn Rect.new(top_left: Point, bottom_right: Point): void {
+    self.top_left = top_left;
+    self.bottom_right = bottom_right;
 }
 
 // A tree-like self-referential struct that also holds a pointer to another struct
@@ -19,6 +29,13 @@ struct GraphNode {
     left: GraphNode*,
     right: GraphNode*,
     data: Rect*
+}
+
+fn GraphNode.new(id: int, left: GraphNode*, right: GraphNode*, data: Rect*): void {
+    self.id = id;
+    self.left = left;
+    self.right = right;
+    self.data = data;
 }
 
 fn area(r: Rect): int {
@@ -36,15 +53,15 @@ fn sum_graph(node: GraphNode*): int {
 }
 
 fn main(): int {
-    mut p1: Point = Point { x: 0, y: 0 };
-    mut p2: Point = Point { x: 10, y: 5 };
-    mut r: Rect = Rect { top_left: p1, bottom_right: p2 };
-    
+    mut p1: Point = Point::new(0, 0);
+    mut p2: Point = Point::new(10, 5);
+    mut r: Rect = Rect::new(p1, p2);
+
     assert(area(r) == 50, "FAIL: Rect area calculation");
 
-    mut root: GraphNode = GraphNode { id: 100, left: null, right: null, data: &r };
-    mut left: GraphNode = GraphNode { id: 50, left: null, right: null, data: null };
-    mut right: GraphNode = GraphNode { id: 150, left: null, right: null, data: null };
+    mut root: GraphNode = GraphNode::new(100, null, null, &r);
+    mut left: GraphNode = GraphNode::new(50, null, null, null);
+    mut right: GraphNode = GraphNode::new(150, null, null, null);
     
     root.left = &left;
     root.right = &right;

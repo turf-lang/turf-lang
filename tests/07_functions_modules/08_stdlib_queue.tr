@@ -7,7 +7,7 @@ import queue::Queue;
 import io;
 
 fn main(): int {
-    mut q: Queue<int> = Queue { data: null, len: 0, cap: 0, head: 0 };
+    mut q: Queue<int> = Queue::default();
     q.enqueue(1);
     q.enqueue(2);
     q.enqueue(3);

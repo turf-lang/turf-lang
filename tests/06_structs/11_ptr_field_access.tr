@@ -3,6 +3,11 @@ struct Node {
     next: Node*
 }
 
+fn Node.new(val: int, next: Node*): void {
+    self.val = val;
+    self.next = next;
+}
+
 fn get_val(p: Node*): int {
     return p.val;
 }
@@ -12,8 +17,8 @@ fn get_next_val(p: Node*): int {
 }
 
 fn main(): int {
-    mut n: Node = Node { val: 99, next: null };
-    mut m: Node = Node { val: 42, next: null };
+    mut n: Node = Node::new(99, null);
+    mut m: Node = Node::new(42, null);
 
     assert(get_val(&n) == 99, "FAIL: cannot read field through typed pointer param");
     assert(get_val(&m) == 42, "FAIL: second ptr param read");

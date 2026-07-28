@@ -2,9 +2,13 @@ struct Node {
     val: int
 }
 
+fn Node.new(val: int): void {
+    self.val = val;
+}
+
 fn main(): int {
-    mut n1: Node = Node { val: 10 };
-    mut n2: Node = Node { val: 20 };
+    mut n1: Node = Node::new(10);
+    mut n2: Node = Node::new(20);
     
     // Assign struct by value
     n1 = n2;

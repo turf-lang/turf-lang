@@ -8,13 +8,18 @@ struct Node {
     next: Node*
 }
 
+fn Node.new(val: int, next: Node*): void {
+    self.val = val;
+    self.next = next;
+}
+
 fn main(): int {
     // Allocate a simple Node on the stack and verify field access.
-    mut a: Node = Node { val: 42, next: null };
+    mut a: Node = Node::new(42, null);
     assert(a.val == 42, "Node.val should be 42");
 
     // Create a second node and chain it.
-    mut b: Node = Node { val: 7, next: null };
+    mut b: Node = Node::new(7, null);
     assert(b.val == 7, "Node.val should be 7");
 
     return 0;

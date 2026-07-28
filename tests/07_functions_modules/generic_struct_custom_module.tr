@@ -4,6 +4,10 @@ struct Box<T> {
     val: T
 }
 
+fn<T> Box.new(v: T): void {
+    self.val = v;
+}
+
 fn<T> Box.get(): T {
     return self.val;
 }

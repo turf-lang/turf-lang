@@ -3,14 +3,19 @@ struct Node {
     next: Node*
 }
 
+fn Node.new(val: int, next: Node*): void {
+    self.val = val;
+    self.next = next;
+}
+
 fn get_val(p: Node*): int {
     return p.val;
 }
 
 fn main(): int {
-    mut n1: Node = Node { val: 1, next: null };
-    mut n2: Node = Node { val: 2, next: null };
-    mut n3: Node = Node { val: 3, next: null };
+    mut n1: Node = Node::new(1, null);
+    mut n2: Node = Node::new(2, null);
+    mut n3: Node = Node::new(3, null);
 
     // Chain: n1 → n2 → n3
     n2.next = &n3;

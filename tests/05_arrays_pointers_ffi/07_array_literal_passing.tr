@@ -3,12 +3,17 @@ struct Point {
     y: int
 }
 
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
 fn sum_array(arr: int[4]): int {
     return arr[0] + arr[1] + arr[2] + arr[3];
 }
 
 fn get_points(): Point[2] {
-    return [Point { x: 10, y: 20 }, Point { x: 30, y: 40 }];
+    return [Point::new(10, 20), Point::new(30, 40)];
 }
 
 fn main(): int {
@@ -21,7 +26,7 @@ fn main(): int {
     assert(sum_array(arr) == 26, "Array literal assignment failed");
     
     // 3. Array of structs using literals
-    mut points: Point[2] = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }];
+    mut points: Point[2] = [Point::new(1, 2), Point::new(3, 4)];
     assert(points[0].x == 1, "Struct array 0.x failed");
     assert(points[1].y == 4, "Struct array 1.y failed");
     

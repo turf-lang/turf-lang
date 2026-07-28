@@ -14,10 +14,10 @@ import io;
 import generic_struct_custom_module::Box;
 
 fn main(): int {
-    mut b: Box<int> = Box { val: 42 };
+    mut b: Box<int> = Box::new(42);
     assert(b.get() == 42, "bare generic struct in a custom module");
 
-    mut b2: generic_struct_custom_module::Box<int> = generic_struct_custom_module::Box { val: 99 };
+    mut b2: generic_struct_custom_module::Box<int> = generic_struct_custom_module::Box::new(99);
     assert(b2.get() == 99, "fully qualified generic struct in a custom module");
 
     io::printline("generic struct in a custom module works both ways");

@@ -3,6 +3,11 @@ struct Data {
     name: string
 }
 
+fn Data.new(id: int, name: string): void {
+    self.id = id;
+    self.name = name;
+}
+
 struct Node {
     val: int,
     data: Data*,
@@ -10,13 +15,15 @@ struct Node {
     right: Node*
 }
 
+fn Node.new(val: int, data: Data*, left: Node*, right: Node*): void {
+    self.val = val;
+    self.data = data;
+    self.left = left;
+    self.right = right;
+}
+
 fn createNode(val: int, data: Data*, left: Node*, right: Node*): Node {
-    return Node {
-        val: val,
-        data: data,
-        left: left,
-        right: right
-    };
+    return Node::new(val, data, left, right);
 }
 
 fn findVal(node: Node*, target: int): bool {
@@ -34,8 +41,8 @@ fn findVal(node: Node*, target: int): bool {
 }
 
 fn main(): int {
-    mut d1: Data = Data { id: 1, name: "Data 1" };
-    mut d2: Data = Data { id: 2, name: "Data 2" };
+    mut d1: Data = Data::new(1, "Data 1");
+    mut d2: Data = Data::new(2, "Data 2");
 
     // Initialize root, left, right nodes with valid pointers and null pointers
     mut l_node: Node = createNode(5, &d1, null, null);

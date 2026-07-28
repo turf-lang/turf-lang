@@ -35,7 +35,7 @@ struct Entry {
 }
 
 fn main(): int {
-    mut store: List<Entry*> = List { data: null, len: 0, cap: 0 };
+    mut store: List<Entry*> = List::default();
 
     mut e: Entry* = mem::alloc(16) to Entry*;
     e.key = "language";

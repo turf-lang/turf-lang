@@ -9,6 +9,11 @@ struct Node {
     next: Node*
 }
 
+fn Node.new(val: int, next: Node*): void {
+    self.val = val;
+    self.next = next;
+}
+
 // Computes the sum of all elements in the linked list
 fn sum_list(head: Node*): int {
     mut current: Node* = head;
@@ -33,11 +38,11 @@ fn list_length(head: Node*): int {
 
 fn main(): int {
     // 1. Create a bunch of stack-allocated nodes
-    mut n1: Node = Node { val: 10, next: null };
-    mut n2: Node = Node { val: 20, next: null };
-    mut n3: Node = Node { val: 30, next: null };
-    mut n4: Node = Node { val: 40, next: null };
-    mut n5: Node = Node { val: 50, next: null };
+    mut n1: Node = Node::new(10, null);
+    mut n2: Node = Node::new(20, null);
+    mut n3: Node = Node::new(30, null);
+    mut n4: Node = Node::new(40, null);
+    mut n5: Node = Node::new(50, null);
 
     // 2. Link them up using the address-of operator
     n1.next = &n2;

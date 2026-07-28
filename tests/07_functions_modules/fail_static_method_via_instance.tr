@@ -5,12 +5,12 @@
 
 struct MathUtil {}
 
-fn MathUtil::square(x: int): int {
+fn MathUtil.square(x: int) static: int {
     return x * x;
 }
 
 fn main(): int {
-    mut mu: MathUtil = MathUtil {};
+    mut mu: MathUtil = MathUtil::default();
     immut y: int = mu.square(5);
     return 0;
 }

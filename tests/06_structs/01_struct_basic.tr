@@ -3,8 +3,13 @@ struct User {
   name: string
 }
 
+fn User.new(age: int, name: string): void {
+  self.age = age;
+  self.name = name;
+}
+
 fn main(): int {
-  mut u: User = User { age: 10, name: "Alice" };
+  mut u: User = User::new(10, "Alice");
   
   assert(u.age == 10, "");
     // Verify basic int property

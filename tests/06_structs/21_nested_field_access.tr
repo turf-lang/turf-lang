@@ -14,7 +14,13 @@ struct L1 { l2: L2, name: string }
 struct Outer { inner: L1 }
 
 fn main(): int {
-    mut o: L1 = L1 { l2: L2 { l3: L3 { v: 7 }, tag: 99 }, name: "root" };
+    // This test is about chained field ACCESS, not construction -- build
+    // each level via ::default() and set the deeply-nested fields directly,
+    // rather than authoring a constructor per level.
+    mut o: L1 = L1::default();
+    o.l2.l3.v = 7;
+    o.l2.tag = 99;
+    o.name = "root";
 
     // 3-level chain
     assert(o.l2.l3.v == 7, "");
@@ -26,7 +32,9 @@ fn main(): int {
     assert(o.l2.l3.v == 42, "");
 
     // 4-level chain
-    mut deep: Outer = Outer { inner: L1 { l2: L2 { l3: L3 { v: 1 }, tag: 2 }, name: "deep" } };
+    mut deep: Outer = Outer::default();
+    deep.inner.l2.l3.v = 1;
+    deep.inner.name = "deep";
     assert(deep.inner.l2.l3.v == 1, "");
     deep.inner.l2.l3.v = 100;
     assert(deep.inner.l2.l3.v == 100, "");

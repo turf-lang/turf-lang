@@ -28,6 +28,11 @@ struct Node {
     next: Node*
 }
 
+fn Node.new(val: int, next: Node*): void {
+    self.val = val;
+    self.next = next;
+}
+
 // Read-only method: return the node's val via self
 fn Node.get(): int {
     return self.val;
@@ -67,9 +72,9 @@ fn main(): int {
     // ── Construction ─────────────────────────────────────────────────────────
     // Three stack-allocated nodes.  Constructed tail-first so each node's
     // `next` can point at an already-initialized later node via `&`.
-    mut n3: Node = Node { val: 30, next: null };
-    mut n2: Node = Node { val: 20, next: &n3 };
-    mut n1: Node = Node { val: 10, next: &n2 };
+    mut n3: Node = Node::new(30, null);
+    mut n2: Node = Node::new(20, &n3);
+    mut n1: Node = Node::new(10, &n2);
 
     // ── Real chaining via address-of ─────────────────────────────────────────
     // n1 -> n2 -> n3 -> null

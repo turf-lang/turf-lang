@@ -1,8 +1,12 @@
 import io;
 extern fn strlen(s: string): int;
 struct User { age: int, name: string }
+fn User.new(age: int, name: string): void {
+    self.age = age;
+    self.name = name;
+}
 fn main(): int {
-    mut u: User = User { age: 25, name: "Alice" };
+    mut u: User = User::new(25, "Alice");
     assert(strlen(u.name) == 5, "");
     return 0;
 }

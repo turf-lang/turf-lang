@@ -6,13 +6,18 @@ struct Account {
     role: Role
 }
 
+fn Account.new(id: int, role: Role): void {
+    self.id = id;
+    self.role = role;
+}
+
 fn is_admin(acc: Account): bool {
     return acc.role == Role::Admin;
 }
 
 fn main(): int {
-    immut admin: Account = Account { id: 1, role: Role::Admin };
-    immut guest: Account = Account { id: 2, role: Role::Guest };
+    immut admin: Account = Account::new(1, Role::Admin);
+    immut guest: Account = Account::new(2, Role::Guest);
 
     assert(is_admin(admin) == true, "Account 1 is admin");
     assert(is_admin(guest) == false, "Account 2 is not admin");

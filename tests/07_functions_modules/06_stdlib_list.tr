@@ -24,7 +24,7 @@ import list::List;
 import io;
 
 fn main(): int {
-    mut l: List<int> = List { data: null, len: 0, cap: 0 };
+    mut l: List<int> = List::default();
     l.push(10);
     l.push(20);
     l.push(30);

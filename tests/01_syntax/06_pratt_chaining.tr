@@ -23,7 +23,7 @@ fn Builder.push(x: int): Builder* {
 }
 
 fn main(): int {
-    mut b: Builder = Builder { val: 0 };
+    mut b: Builder = Builder::default();
 
     // Test Pratt Parser's ability to chain method calls
     b.push(1).push(2);

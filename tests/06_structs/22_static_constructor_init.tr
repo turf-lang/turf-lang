@@ -1,15 +1,21 @@
 // Regression test (was DISCOVERED_ISSUES.md #16, "Missing Static
-// Constructors"): a `fn StructName.init(args...)` function is picked up
-// automatically by StructInitExprAST::codegen() when brace-init supplies
-// arguments matching its parameter types, letting user code run side
-// effects (validation, derived-field computation, etc.) during
-// construction instead of just doing a flat field-by-field copy.
+// Constructors"; migrated for the struct-construction overhaul -- see
+// tests/06_structs/31_constructor_new.tr for the newer, primary coverage of
+// this same mechanism). Originally exercised `fn StructName.init(args...)`,
+// auto-detected by the (now-removed) StructInitExprAST::codegen() whenever a
+// brace-literal's field VALUES happened to arity/type-match its params.
+// That whole "guess whether this brace-literal wants the constructor" bridge
+// is gone: `StructName.new(...)` is exactly the same idea (a '.'-declared
+// method running arbitrary side effects via self) but reached only through
+// the explicit `StructName::new(args...)` call form -- no implicit
+// brace-literal-to-constructor matching left to get right or wrong.
 //
-// This entire mechanism (StructInitExprAST::codegen()'s "Try to find a
-// user-defined constructor function" block, ~80 lines in src/Codegen.cpp)
-// had ZERO test coverage anywhere in tests/ before this file, discovered
-// while re-verifying issue #16 during a code review pass. Confirmed working
-// via direct testing before this file was added.
+// Kept as its own file (rather than folded into 31_constructor_new.tr) to
+// preserve the ORIGINAL point being tested: a constructor can transform or
+// validate its inputs instead of just copying them field-by-field, and a
+// struct with NO constructor must still be constructible some other way
+// (via `::default()` now, not an implicit fallback inside failed brace-init
+// resolution).
 
 struct Point {
     x: int,
@@ -17,7 +23,7 @@ struct Point {
 }
 
 // Constructor that transforms its inputs rather than storing them verbatim.
-fn Point.init(x: int, y: int): void {
+fn Point.new(x: int, y: int): void {
     self.x = x * 10;
     self.y = y * 10;
 }
@@ -29,7 +35,7 @@ struct Fraction {
 
 // A constructor that validates/normalizes -- rejects a zero denominator by
 // substituting a sentinel, and always stores a positive denominator.
-fn Fraction.init(n: int, d: int): void {
+fn Fraction.new(n: int, d: int): void {
     if (d == 0) {
         self.num = 0;
         self.den = 1;
@@ -42,9 +48,9 @@ fn Fraction.init(n: int, d: int): void {
     }
 }
 
-// A struct with NO custom constructor -- must still fall back to plain
-// field-by-field initialization, unaffected by the mangled-name lookup
-// mechanism finding no match.
+// A struct with NO custom constructor at all -- `::new(...)` isn't
+// available for it (see fail_no_constructor_defined.tr); `::default()` is
+// the only construction path.
 struct Plain {
     a: int,
     b: int
@@ -52,27 +58,28 @@ struct Plain {
 
 fn main(): int {
     // Constructor transforms inputs (x*10, y*10).
-    mut p: Point = Point { x: 1, y: 2 };
+    mut p: Point = Point::new(1, 2);
     assert(p.x == 10, "");
     assert(p.y == 20, "");
 
-    // Constructor normalizes a negative denominator. NOTE: brace-init field
-    // names must match the STRUCT's declared field names (num/den), not the
-    // constructor's parameter names (n/d) -- the constructor's own
-    // parameter names are irrelevant to caller syntax; values are matched
-    // by field name, then passed positionally in field-declaration order.
-    mut f: Fraction = Fraction { num: 3, den: -4 };
+    // Constructor normalizes a negative denominator. Unlike the old
+    // brace-literal form, arguments are now positional to the CONSTRUCTOR's
+    // own declared parameter order (n, d) -- there's no struct field name
+    // to match against at the call site at all.
+    mut f: Fraction = Fraction::new(3, -4);
     assert(f.num == -3, "");
     assert(f.den == 4, "");
 
     // Constructor substitutes a sentinel for a zero denominator.
-    mut bad: Fraction = Fraction { num: 5, den: 0 };
+    mut bad: Fraction = Fraction::new(5, 0);
     assert(bad.num == 0, "");
     assert(bad.den == 1, "");
 
-    // No constructor defined for Plain -- plain field-by-field init still
-    // works, unaffected by the constructor-lookup mechanism.
-    mut pl: Plain = Plain { a: 7, b: 8 };
+    // No constructor defined for Plain -- ::default() zero-inits, then
+    // fields are set directly.
+    mut pl: Plain = Plain::default();
+    pl.a = 7;
+    pl.b = 8;
     assert(pl.a == 7, "");
     assert(pl.b == 8, "");
 

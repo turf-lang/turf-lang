@@ -25,8 +25,12 @@ struct Box {
     val: int
 }
 
+fn Box.new(val: int): void {
+    self.val = val;
+}
+
 fn makeBox(): Box {
-    return Box { val: 42 };
+    return Box::new(42);
 }
 
 fn main(): int {

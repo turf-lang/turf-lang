@@ -1,15 +1,21 @@
 // Regression test: a generic struct with a BARE (non-pointer) field typed
-// as its own type parameter must correctly type-check and codegen its
-// struct-literal initializer and any method returning that type parameter.
+// as its own type parameter must correctly type-check and codegen a
+// constructor call that sets it, and any method returning that type
+// parameter.
 //
-// Before this fix, TypeChecker::visitStructInit() never substituted a
-// generic struct's field types at all -- `Box { val: 42 }` for a
-// `Box<int>`-typed variable failed with "Field 'val' of struct 'Box'
-// expects type 'T', but got 'int'." lib/std/list.tr/stack.tr/queue.tr
-// never hit this because their own generic fields are all pointer-wrapped
-// (`data: T*`), which sidesteps substitution entirely -- this is the
-// first bare (non-pointer) generic field this compiler has ever had to
-// type-check in a literal. Separately, Codegen.cpp's own independent
+// Originally exercised via the (now-removed) brace-literal form directly --
+// `Box { val: 42 }` for a `Box<int>`-typed variable used to fail with
+// "Field 'val' of struct 'Box' expects type 'T', but got 'int'" before
+// TypeChecker::visitStructInit() substituted a generic struct's field types
+// at all. Migrated to go through `Box::new(42)` (an ordinary generic
+// function call, substituted by the SAME collectGenericSubstitution()/
+// substituteReturnType() machinery every other generic function call
+// already uses -- see Resolver::visitFuncCall's self-stripped-candidate
+// design for `new`), which exercises the equivalent bare (non-pointer)
+// generic substitution concern through the constructor's own parameter
+// instead. lib/std/list.tr/stack.tr/queue.tr never hit this because their
+// own generic fields are all pointer-wrapped (`data: T*`), which sidesteps
+// substitution entirely. Separately, Codegen.cpp's own independent
 // type-inference (getExprType(), used for `b.get() to string` below) had
 // the identical gap for the RETURN type of a generic struct method.
 
@@ -17,12 +23,16 @@ struct Box<T> {
     val: T
 }
 
+fn<T> Box.new(v: T): void {
+    self.val = v;
+}
+
 fn<T> Box.get(): T {
     return self.val;
 }
 
 fn main(): int {
-    mut b: Box<int> = Box { val: 42 };
+    mut b: Box<int> = Box::new(42);
     assert(b.get() == 42, "Box<int>.get() should return 42");
     assert((b.get() to string) == "42", "generic return type must resolve to int, not stay 'T'");
     return 0;

@@ -21,12 +21,16 @@ struct Node {
     val: int
 }
 
+fn Node.new(val: int): void {
+    self.val = val;
+}
+
 fn Node.get_self(): Node {
     return self;
 }
 
 fn main(): int {
-    mut n: Node = Node { val: 42 };
+    mut n: Node = Node::new(42);
 
     // Chaining method calls on a returned-by-value struct instance.
     assert(n.get_self().get_self().val == 42, "");

@@ -6,7 +6,7 @@
 
 struct MathUtil {}
 
-fn MathUtil::square(x: int): int {
+fn MathUtil.square(x: int) static: int {
     return x * x;
 }
 

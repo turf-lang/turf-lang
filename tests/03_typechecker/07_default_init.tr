@@ -21,8 +21,13 @@ fn main(): int {
     assert(p.name == "", "struct field default init name");
     assert(p.z == 0.0, "struct field default init z");
 
-    // 3. Struct literal with partial fields — missing fields are default-initialized.
-    mut p2: Point = Point{x: 5};
+    // 3. ::default() zero-inits every field; fields set afterward override
+    //    just that field, leaving the rest at their defaults -- the
+    //    replacement for the old brace-literal's "missing fields
+    //    default-initialize" behavior (partial-field brace-literal
+    //    construction no longer exists at all).
+    mut p2: Point = Point::default();
+    p2.x = 5;
     assert(p2.x == 5, "explicit field init");
     assert(p2.y == 0, "missing field y default init");
     assert(p2.name == "", "missing field name default init");

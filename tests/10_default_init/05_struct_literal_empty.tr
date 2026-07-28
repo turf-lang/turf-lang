@@ -1,4 +1,5 @@
-// Test: struct literal with all fields missing defaults to zero
+// Test: Config::default() zero-inits every field (the replacement for the
+// old empty brace-literal `Config{}`, which no longer parses at all).
 import io;
 
 struct Config {
@@ -8,9 +9,9 @@ struct Config {
 }
 
 fn main(): int {
-    mut cfg: Config = Config{};
-    assert(cfg.retries == 0, "Config{} retries default 0");
-    assert(cfg.timeout == 0, "Config{} timeout default 0");
-    assert(cfg.verbose == false, "Config{} verbose default false");
+    mut cfg: Config = Config::default();
+    assert(cfg.retries == 0, "Config::default() retries default 0");
+    assert(cfg.timeout == 0, "Config::default() timeout default 0");
+    assert(cfg.verbose == false, "Config::default() verbose default false");
     return 0;
 }

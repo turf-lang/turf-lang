@@ -7,18 +7,23 @@ struct User {
     name: string
 }
 
+fn User.new(age: int, name: string): void {
+    self.age = age;
+    self.name = name;
+}
+
 fn main(): int {
     mut users: User[5] = [
-        User { age: 0, name: "" },
-        User { age: 0, name: "" },
-        User { age: 0, name: "" },
-        User { age: 0, name: "" },
-        User { age: 0, name: "" }
+        User::default(),
+        User::default(),
+        User::default(),
+        User::default(),
+        User::default()
     ];
 
-    users[0] = User { age: 25, name: "Alice" };
-    users[1] = User { age: 30, name: "Bob" };
-    users[2] = User { age: 35, name: "Charlie" };
+    users[0] = User::new(25, "Alice");
+    users[1] = User::new(30, "Bob");
+    users[2] = User::new(35, "Charlie");
 
     // Issue #17 fix: direct field access on array elements now works
     assert(users[0].age == 25, "");

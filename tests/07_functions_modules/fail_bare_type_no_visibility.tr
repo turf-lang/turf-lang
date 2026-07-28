@@ -11,7 +11,7 @@ import io;
 import geometry_module;
 
 fn main(): int {
-    mut r: Rect = Rect { w: 2, h: 3 };
+    mut r: Rect = Rect::new(2, 3);
     io::printline("should not compile");
     return 0;
 }

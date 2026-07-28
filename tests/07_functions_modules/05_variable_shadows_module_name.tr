@@ -21,6 +21,10 @@ struct Thing {
     val: int
 }
 
+fn Thing.new(val: int): void {
+    self.val = val;
+}
+
 // `io` here is the module -- this function has no local variable named
 // `io`, so this exercises the genuine (non-shadowed) module-call path in
 // the same file as the shadowed case below.
@@ -31,7 +35,7 @@ fn Thing.show(): void {
 fn main(): int {
     // Inside this scope, `io` is a Thing variable, not the module -- every
     // reference to `io` below must resolve as the variable.
-    mut io: Thing = Thing { val: 42 };
+    mut io: Thing = Thing::new(42);
     io.show();
     assert(io.val == 42, "");
 

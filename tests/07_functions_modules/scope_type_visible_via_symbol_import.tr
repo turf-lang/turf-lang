@@ -8,7 +8,7 @@ import geometry_module::Rect;
 import geometry_module::area;
 
 fn main(): int {
-    mut r: Rect = Rect { w: 4, h: 5 };
+    mut r: Rect = Rect::new(4, 5);
     assert(area(r) == 20, "bare struct type visible after on-demand symbol import");
     io::printline("on-demand symbol import grants bare type visibility");
     return 0;

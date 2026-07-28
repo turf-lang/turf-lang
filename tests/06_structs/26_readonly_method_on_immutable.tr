@@ -8,6 +8,10 @@ struct Counter {
     val: int
 }
 
+fn Counter.new(val: int): void {
+    self.val = val;
+}
+
 fn Counter.bump(): void {
     self.val = self.val + 1;
 }
@@ -17,11 +21,11 @@ fn Counter.get(): int {
 }
 
 fn main(): int {
-    mut c: Counter = Counter { val: 5 };
+    mut c: Counter = Counter::new(5);
     c.bump();
     assert(c.val == 6, "mutable bump should work");
 
-    immut d: Counter = Counter { val: 10 };
+    immut d: Counter = Counter::new(10);
     assert(d.get() == 10, "read-only get() must work on an immutable variable");
 
     return 0;

@@ -3,10 +3,15 @@ struct Point {
     y: int
 }
 
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
 fn makeOrigin(): Point {
-    return Point { x: 0, y: 0 };
+    return Point::default();
 }
 
 fn addPoints(a: Point, b: Point): Point {
-    return Point { x: a.x + b.x, y: a.y + b.y };
+    return Point::new(a.x + b.x, a.y + b.y);
 }
