@@ -37,6 +37,8 @@ find tests -name "*.tr" -not -name "*_module.tr" -not -name "fail_*" | xargs gre
 ```
 Also watch for names that end in `_module.tr` as a plain SUBSTRING coincidence (e.g. `fail_import_nonexistent_module.tr`, `scope_struct_by_value_across_module.tr`) — the filter is a bare substring match, not a suffix-of-the-meaningful-name check.
 
+**`scripts/test_runner.sh` only covers `tests/`.** For any change to language syntax or semantics, also grep/compile-check `lib/std/*.tr` and `showcase/*.tr` directly — neither is exercised by the test runner (the stdlib is only pulled in by whichever tests happen to `import` it, and showcase programs aren't run by it at all), so a stdlib or showcase file using old syntax can sit broken indefinitely with the full suite reporting green. Confirmed live: a language-syntax change once left two `lib/std/net.tr` methods on removed syntax, caught only by directly compiling the showcase programs that import `net`.
+
 ## Repo map
 
 - `src/`, `include/` — the compiler itself (Lexer, Parser, Resolver, TypeChecker, Codegen, Errors, SLM integration).
@@ -52,5 +54,7 @@ Also watch for names that end in `_module.tr` as a plain SUBSTRING coincidence (
 - **Doc comments explain WHY, not what.** A hidden invariant, a past bug this code prevents, a non-obvious constraint — not a restatement of the code. Applies to functions touched by a fix and closely adjacent ones.
 - **Every fix gets a regression test** in `tests/<NN_topic>/`, following that folder's existing naming/numbering. A bug fix needs both directions covered where it makes sense: a `fail_*.tr` proving the bad case is now rejected, and/or a plain `.tr` proving the good case still works.
 - **Small, scoped commits.** One logical fix or feature per commit, not batched sweeps, with a message explaining the *why* and the failure scenario that motivated it — future readers (human or agent) should be able to understand a change from its commit message alone.
+  - Title format is `type(scope): summary (@username)` — Conventional Commits (`feat`/`fix`/`test`/`docs`/`refactor`/`misc`, optional parenthesized scope) with the committer's own `git config user.name` appended in parens at the very end. Consistent across recent history; match it going forward even though older commits predate it.
+  - No `Co-Authored-By` trailer or other AI-attribution text in the message body.
 - **Verify claims live, don't assume from a prior fix's scope.** More than once this project has stated a design rule ("`.` is instance-only") as settled fact in a doc without a fresh test that actually tries to break it. If you're about to write "X is enforced" anywhere, try the specific input that would prove it wrong first.
 - Full test suite (`./scripts/test_runner.sh`) must stay green before considering any change done.
