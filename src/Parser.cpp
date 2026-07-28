@@ -2409,6 +2409,43 @@ BuildCircularImportChain(const std::vector<ImportStackFrame> &Stack,
 std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
                                    const std::string &ModuleName,
                                    SourceLocation ImportLoc) {
+  // Force TurfError::raise() to take its plain "print and exit" branch,
+  // never the longjmp-based recovery one, for the ENTIRE duration of
+  // parsing this file (including anything it transitively imports).
+  //
+  // main.cpp's pre-pass "parse all top-level declarations" loop wraps each
+  // top-level statement's parse in `g_recoverActive = true; if (setjmp(
+  // g_recoverJmp) == 0) { ParseExpression(); } else { SkipToNextTopLevel
+  // Boundary(); }` -- a deliberate mechanism to skip one broken top-level
+  // statement in the file actively being compiled and keep collecting
+  // errors from the rest of it. That's safe for an error raised directly
+  // in the main file's own statement (nothing but trivial scope guards sit
+  // between the raise() and the setjmp point), but NOT safe once a nested
+  // `import` is involved: longjmp() never runs C++ destructors for stack
+  // objects between the jump and its setjmp point, and ParseFile()'s own
+  // LexerStateGuard/ImportStackGuard below live exactly there. A
+  // CircularImportError (or ModuleNotFoundError, or any other TurfError)
+  // firing two or more import-levels deep would longjmp straight past
+  // those guards, permanently leaving the global `SourceFile` pointer
+  // aimed at an already-destroyed local std::ifstream (this function's own
+  // `ImportFile`, still "open" on the stack, never restored to whatever it
+  // pointed at before) -- confirmed live as a heap-corruption crash
+  // (`munmap_chunk(): invalid pointer`) far downstream, the next time
+  // ANYTHING touched that dangling pointer (main()'s own unrelated
+  // `SourceFile->close()` call during pre-pass cleanup). Forcing
+  // g_recoverActive false here means any hard error anywhere inside an
+  // imported module (at any nesting depth) instead calls std::exit()
+  // directly -- always safe, since exit() terminates immediately and never
+  // depends on the intermediate stack state a longjmp would corrupt. The
+  // tradeoff -- a broken import ends the whole compile instead of being
+  // "skipped" -- is the right one anyway: there's no useful way to skip
+  // past a broken dependency and keep compiling against it.
+  struct RecoveryGuard {
+    bool Previous;
+    RecoveryGuard() : Previous(g_recoverActive) { g_recoverActive = false; }
+    ~RecoveryGuard() { g_recoverActive = Previous; }
+  } RecovGuard;
+
   // Circular-import check FIRST, before the ImportedFiles cache check below:
   // a module still being parsed (on ImportStack) is a genuine cycle, not a
   // cache hit. Checking ImportedFiles first would be wrong here -- that set
