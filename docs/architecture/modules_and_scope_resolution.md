@@ -57,11 +57,13 @@ Both of these are valid and mean the same thing:
 ```turf
 import list;
 
-mut a: List<int>      = List { data: null, len: 0, cap: 0 };
-mut b: list::List<int> = list::List { data: null, len: 0, cap: 0 };
+mut a: List<int>      = List::default();
+mut b: list::List<int> = list::List::default();
 ```
 
-Qualifying is **validated**, not decorative. Two independent checks run whenever a `Module::Name` appears, in type position or construction position:
+(Struct construction is `StructName::new(args...)`/`StructName::default()` only — see the struct-construction-overhaul work; there is no brace-literal form anymore. `List` has no user-defined `.new`, so `::default()` is the only way to construct it.)
+
+Qualifying is **validated**, not decorative. Two independent checks run whenever a `Module::Name` appears, in type position or construction position (`new`/`default` included):
 1. Is `Module` a real, imported module at all? (`UnknownScopeQualifierError` if not.)
 2. Does `Module` actually declare `Name`? (`UnknownModuleSymbolError` if some *other* real module owns it instead — e.g. `mem::List` is rejected even though `mem` is real, because `List` lives in `list`.)
 
@@ -162,6 +164,13 @@ VERSION                 // bare access -- only after an on-demand import (or sel
 | `ExportOutsideTopLevelError` | `export` used inside a function body |
 | `ExportMutNotSupportedError` | `export mut` — only `export immut` is supported today |
 | `ExportNonConstantInitializerError` | `export immut X = <non-literal>;` — the initializer isn't a literal the compiler can fold at compile time |
+| `NoConstructorDefinedError` | `StructName::new(...)` called but `StructName` has no `.new` declared |
+| `ReservedConstructorNameError` | `fn StructName.default(...)` declared by hand — `default` is always compiler-synthesized |
+| `StaticOutsideStructError` | `static` used on a function that isn't struct-bound (`fn StructName.method(...)`) |
+| `ConstructorCannotBeStaticError` | `fn StructName.new(...) static: ...` — `new` always constructs via `self` |
+| `DefaultConstructorArityError` | `StructName::default(x, ...)` — `default()` never takes arguments |
+| `ConstructorCalledOnInstanceError` | `instance.new(...)` / `instance.default(...)` — reserved for `StructName::new/default(...)` only |
+| `IncompleteConstructorError` | `new()` doesn't assign every field of its struct on every path (ConstructorFieldAssignmentPass, a real dataflow check, not "assigned somewhere") |
 
 ---
 
@@ -213,7 +222,7 @@ class ModuleImportExprAST : public ExprAST {
 ```
 `Body` is always the full recursively-parsed module — even a single-symbol import parses everything, per 1.2.
 
-**`StructInitExprAST`** (`include/AST.h:1019-1054`) gained a `ModuleQualifier` field (empty for the ordinary bare form), validated the same way as a type annotation's qualifier (2.7).
+**Struct construction** (`StructName::new(...)`/`StructName::default()`) needed no new AST node or field at all -- it parses as an ordinary `ScopeAccessExprAST` callee (see 2.3 above) with `RightName` "new"/"default", reusing the SAME `ModuleQualifier` field the enum/static-method paths already had. The Resolver sets `ResolvedKind` to the new `ConstructorCall`/`DefaultConstruct` enum values and validates the qualifier via the same `validateModuleQualifier()` a qualified type annotation goes through (2.7) -- see 2.8.1a. (The former `StructInitExprAST` node, which backed the old brace-literal form `StructName { field: val, ... }`, was deleted entirely as part of this -- there is no brace-literal construction anymore.)
 
 **`NamedType` / `GenericType`** (`include/Types.h:226-241`, `341-395`) each gained a `Module` field. Deliberately **not** part of `getName()`/type identity — struct/enum names are still one flat, globally-unique namespace (2.6), so two `NamedType`s for the same bare name must compare equal for type-compatibility purposes regardless of whether one spelling happened to be qualified. The field exists solely so the Resolver can validate the qualifier once, at first reference.
 
@@ -354,9 +363,13 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
 
 ### 2.8.1 True static struct methods
 
-`fn StructName::method(...)` — note `::`, not `.` — declares a genuine static method: no implicit `self` parameter at all, callable only as `StructName::method(args)`, never through an instance.
+`fn StructName.method(...) static: RetType { ... }` declares a genuine static method: no implicit `self` parameter at all, callable only as `StructName::method(args)`, never through an instance.
 
-**Declaration** (`ParseFuncDef()`, `src/Parser.cpp:2091-...`): the existing `.`-branch (instance method: `StructName = FuncName; FuncName = StructName + "." + method`, then unconditionally injects `self: StructName*` as parameter 0) gets a parallel `TOK_SCOPE` branch — same `FuncName = StructName + "." + method` internal registration (methods of one struct, static or instance, share ONE flat name — the `.`-joined internal name is an implementation detail, never user-visible), but the `self`-injection block is skipped entirely (`!StructName.empty() && !IsStaticMethodDecl`). Reusing the exact same internal name means overload resolution, mangling, and forward-reference tolerance all fall out for free — a static and instance method of the same name on the same struct simply become different-arity overloads of one registered name (the presence/absence of `self` as parameter 0 is what actually distinguishes them at the call site, not any separate "is static" flag).
+**Declaration syntax note (post struct-construction-overhaul):** this used to be spelled `fn StructName::method(...)` (note `::`, not `.`) — a separate declaration branch keyed on `TOK_SCOPE` right after the function name. That branch is gone: **every** method declaration, static or not, now goes through the single `.`-branch; a trailing `static` keyword (consumed right after the parameter list, before the return-type `:`) is what skips `self`-injection instead of the callee-name token deciding it. This was a deliberate simplification, not just a respelling — `::` had started meaning two structurally different things at the SAME token position depending on context (declaring a static method vs., after this overhaul, nothing at all in declaration position), which is exactly the kind of "colliding grammar" this project avoids elsewhere (see 1.1's `.`/`::` split itself). `::` is now reserved purely for call/reference syntax (enum variants, module functions, static method calls, and `new`/`default`) — it never appears in a `fn` declaration.
+
+**Declaration** (`ParseFuncDef()`, `src/Parser.cpp`): the `.`-branch always does `StructName = FuncName; FuncName = StructName + "." + method` (methods of one struct, static or instance, share ONE flat name — the `.`-joined internal name is an implementation detail, never user-visible). Self-injection is decided AFTER the parameter list is parsed: `IsStaticMethodDecl = (CurTok == TOK_STATIC)` right after `)`; if true, consume it and skip injecting `self: StructName*` as parameter 0. Reusing the exact same internal name means overload resolution, mangling, and forward-reference tolerance all fall out for free — a static and instance method of the same name on the same struct simply become different-arity overloads of one registered name (the presence/absence of `self` as parameter 0 is what actually distinguishes them at the call site, not the `static` keyword itself — `FuncDefExprAST::IsStaticDecl` exists only so `Resolver::visitFuncDef()` can reject `static` in a position where "self absent" would otherwise be ambiguous, e.g. a free non-struct-bound function).
+
+**Reserved names, enforced in `Resolver::visitFuncDef()`:** `default` can never be declared by hand at all (`ReservedConstructorNameError`, any struct-bound method named `default`, static or not) — it's always compiler-synthesized (2.8.1a). `new` can never be `static` (`ConstructorCannotBeStaticError`) — it always constructs via `self`. `static` on a function whose name has no `StructName.` prefix at all is rejected (`StaticOutsideStructError`) — meaningless, since a free function never had a `self` to omit.
 
 **Call resolution** (`visitFuncCall()`, 2.8): when `LeftName` is a known struct, `Node.ResolvedKind = StaticMethodRef` and the lookup is byte-identical to the `ModuleFunctionRef` case — `getTypeOwningModule(LeftName)` gives the owning context ("" = main file, else a real module), then either `lookupCurrentFileFunctions("StructName.method")` or `findInModules("StructName.method")` filtered to that owning module. Not-found reuses `StructMethodNotFoundError` — the SAME class the ordinary `instance.method()` not-found path already raised (via `TypeChecker::visitMethodCall`) — for one consistent message regardless of which call form was used; its hint now explains both the `.` and `::` declaration forms since it's shared between them.
 
@@ -366,9 +379,23 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
 
 **A 3-part chain's leading `ModuleQualifier` is validated, not ignored** — `Module::StructName::method(...)` re-validates `ModuleQualifier` via `validateModuleQualifier()` (does `Module` exist, does it actually own `StructName`) before proceeding. Two related bugs were found and fixed while wiring this up, both from the SAME root cause (the parser's 3-part-chain reinterpretation, 2.3, lands the leading name in `ModuleQualifier` — but until now, NOTHING in `visitFuncCall` ever read that field for a call callee, for either the struct or the plain-module case): `mem::Vec2::zero()` used to compile cleanly even when `Vec2` actually lives in a different module (the wrong qualifier was silently ignored, only `LeftName`/`RightName` mattered); and `mem::io::printline(...)` — a module name nonsensically qualified by ANOTHER module name, which has no defined meaning at all — also used to compile identically to plain `io::printline(...)`. Both now raise a clean, specific error instead of silently discarding the (wrong or meaningless) qualifier.
 
+### 2.8.1a Struct construction: `::new(...)` / `::default()`
+
+Replaces the old brace-literal (`StructName { field: val, ... }`, and the `g_AllowStructInit`/`NoStructInitGuard` flag machinery it needed to avoid colliding with every block-taking construct's own `{`) entirely. Dispatched in `Resolver::visitFuncCall()`'s `isKnownStruct(LeftName)` branch, BEFORE the general static-method lookup (2.8.1) — `new`/`default` are reserved names a struct's own methods can never shadow, enforced at declaration time (2.8.1's reserved-names paragraph).
+
+**`StructName::default()`** — no user function involved at all. Set `ScopeCallee->ResolvedKind = DefaultConstruct`; reject any arguments (`DefaultConstructorArityError`). TypeChecker short-circuits at the top of `visitFuncCall()` (before the ordinary builtin/candidate paths, which would otherwise see empty `ResolvedCandidates` and treat it as unresolved) and sets the node's type to a bare `NamedType(StructName)` directly — the same type a resolved struct construction always produced under the old brace-literal form, which is what makes it compatible with a `GenericType` of the same base name on the assignment's other side (see 25_generic_struct_construction.tr's own doc comment for why that compatibility rule exists and still applies). Codegen allocates the struct type, stores `GetDefaultValue()`'s recursive zero-fill, and loads it back — the exact same fallback path the old brace-literal used when no fields were given.
+
+**`StructName::new(args...)`** is declared as an ordinary `.`-method named `new` (self at `Params[0]`) but CALLED with self omitted. Rather than a parallel type-checking implementation, the Resolver builds a **self-stripped, return-type-overridden copy** of each matching `StructName.new` overload — `Params.erase(begin())`, `ReturnType = NamedType(StructName)` (the declared return type is always `void`; the constructed struct is what the CALL EXPRESSION evaluates to) — and pushes those into `Node.ResolvedCandidates` exactly like an ordinary call. This means TypeChecker's existing arity/type-match/generic-substitution loop in `visitFuncCall()` handles overload resolution completely unmodified, landing on the correct struct type on its own. Errors: zero overloads found at all → `NoConstructorDefinedError`; none arity-match → `WrongArityError` against the stripped signatures.
+
+Codegen reconstructs the REAL (self-included) mangled name from the stripped `ResolvedCallTarget` by manually inserting `"_" + StructName + "_ptr"` right after the base name — mirroring `ResolverFunctionSymbol::mangledName()`'s own algorithm with self's mangled type (`TurfPointerType::getMangledName()` = `"<pointee>_ptr"`) reinserted where `Params[0]` used to be — rather than needing the original (unstripped) symbol carried through some new field. It then allocates the struct as `self`, calls the real function, and loads the result — the same alloca-call-load shape the old brace-literal's "user-defined constructor" block used for its `.init()` mechanism (see 22_static_constructor_init.tr's migration notes for how that old mechanism maps onto this one).
+
+**Bare-visibility IS gated, unlike a static method call** — `StructName::new/default()`'s bare (unqualified) form goes through the same `isTypeVisibleUnqualified()` check a `mut x: StructName = ...` type annotation already does (2.7.1), matching what the old `visitStructInit()` enforced for bare brace-literal construction. This is a deliberate asymmetry with 2.8.1's static-method calls (existence-only, never visibility-gated) — constructing a struct is treated the same as naming its TYPE, not as an arbitrary namespaced function call.
+
+**Definite field assignment** (`new()` must assign every field on every path, not just "somewhere in the body") is a genuine control-flow-sensitive dataflow analysis, `ConstructorFieldAssignmentPass` (`include/Analysis.h`/`src/Analysis.cpp`), mirroring `DefiniteAssignmentPass`'s exact shape (forward dataflow, meet-as-intersection at merge points) but tracking `self.<field>` assignment names instead of local-variable identities, and checking the CFG's exit-block fixed-point set (covers every declared field?) rather than reporting per-use-site. Wired into `FuncDefExprAST::codegen()` (Codegen layer, 2.10) alongside the other CFG passes, gated on the function's internal name ending in `.new`. Raises `IncompleteConstructorError`, naming every field missed on at least one path.
+
 ### 2.8.2 `.` on a module or a bare struct type name is rejected (fixed, not just documented)
 
-`Resolver::visitMethodCall()` (`src/Resolver.cpp:1064-...`) handles every `Left.method(...)` call — the ENTIRE `.`-call path, separate from `visitFuncCall`'s handling of bare calls and `Left::method(...)`. Resolves `Node`'s arguments first (mirroring `visitFuncCall`'s own ordering, so a broken argument still gets its own diagnostic even when the base is about to be rejected), then dispatches on what the base actually is, in priority order:
+`Resolver::visitMethodCall()` (`src/Resolver.cpp:1064-...`) handles every `Left.method(...)` call — the ENTIRE `.`-call path, separate from `visitFuncCall`'s handling of bare calls and `Left::method(...)`. Resolves `Node`'s arguments first (mirroring `visitFuncCall`'s own ordering, so a broken argument still gets its own diagnostic even when the base is about to be rejected), then unconditionally rejects `.new(...)`/`.default(...)` on ANY base at all (`ConstructorCalledOnInstanceError`) BEFORE the base-shape dispatch below — a real instance calling `.new(...)` would otherwise resolve completely normally, since `new` is registered as an ordinary `.`-declared instance method internally (2.8.1a); a bare struct type name calling either is already separately caught by the dispatch below, for every method name, not just these two. After that check, dispatches on what the base actually is, in priority order:
 
 1. A real declared variable (`ExistingVar`) — resolve it as an instance, `return`. Variable shadowing always wins here: a local variable named the same as a module or struct type takes priority, exactly like ordinary lexical scoping (`mut io: Thing = ...; io.show();` calls `Thing.show()`, not anything module-related — even though `io` is also a real module name).
 2. A known **module** name with no shadowing variable — `DotOperatorOnNonInstanceError("module")`, pointing at `Module::func(...)` instead.
@@ -423,14 +450,15 @@ Contrast with `input()` (never on-demand-imported in this file): step 4's on-dem
 | File | Role |
 |---|---|
 | `include/Lexer.h`, `src/Lexer.cpp` | `TOK_SCOPE` token |
-| `include/AST.h` | `ScopeAccessExprAST`, `ModuleImportExprAST`, `StructInitExprAST` (+ `ImportMode`, `ImportedSymbolRef`, `ScopeAccessKind`) |
+| `include/AST.h` | `ScopeAccessExprAST` (+ `ImportMode`, `ImportedSymbolRef`, `ScopeAccessKind` incl. `ConstructorCall`/`DefaultConstruct`), `ModuleImportExprAST`, `FuncDefExprAST::IsStaticDecl`. `StructInitExprAST` is GONE (deleted with the brace-literal form). |
 | `include/Types.h` | `NamedType`/`GenericType`'s `Module` field |
-| `src/Parser.cpp` | `ParseImport()`, `ParseType()`'s qualifier handling, `ParsePrimaryBase()`'s `TOK_SCOPE`/struct-init branches, `ParseFile()`'s `ImportStack`, `ParseStructInitFieldsBody()` |
-| `include/Resolver.h`, `src/Resolver.cpp` | `hoistTopLevel`/`hoistModuleBody`, `registerOnDemandImports`, `visitFuncCall`, `visitMethodCall`, `visitScopeAccess`, `validateNamedType`, `validateModuleQualifier`, `visitStructInit`, `visitModuleImport`, `currentModuleName`/`ModuleStack_` |
+| `src/Parser.cpp` | `ParseImport()`, `ParseType()`'s qualifier handling, `ParsePrimaryBase()`'s `TOK_SCOPE` branch (struct-init branches removed entirely), `ParseFile()`'s `ImportStack`, `ParseFuncDef()`'s `.`-declaration + `static`-keyword handling |
+| `include/Resolver.h`, `src/Resolver.cpp` | `hoistTopLevel`/`hoistModuleBody`, `registerOnDemandImports`, `visitFuncCall` (incl. `new`/`default` dispatch), `visitFuncDef` (reserved-name checks), `visitMethodCall` (incl. `ConstructorCalledOnInstanceError`), `visitScopeAccess`, `validateNamedType`, `validateModuleQualifier`, `visitModuleImport`, `currentModuleName`/`ModuleStack_`. `visitStructInit` is GONE. |
 | `include/ResolverSymbolTable.h`, `src/ResolverSymbolTable.cpp` | `Modules_`, `CurrentFileFunctions_`, `FlatImportedFunctions_`, `FlatImportedTypes_`, `RegisteredStructs_`/`RegisteredEnums_`, `TypeOwningModule_`, `registerFlatFunctionImport`/`lookupFlatFunctionImport`, `registerFlatTypeImport`/`isTypeVisibleUnqualified`, `getTypeOwningModule`, `ResolverConstantSymbol`, `CurrentFileConstants_`/`Modules_[M].Variables`/`FlatImportedConstants_` |
-| `include/TypeChecker.h`, `src/TypeChecker.cpp` | `visitScopeAccess`, `visitMethodCall` |
-| `src/Codegen.cpp` | `FuncCallExprAST::codegen()`, `ScopeAccessExprAST::codegen()`, `MethodCallExprAST::codegen()`, `getExprType()`, `CodegenConstantValue()`, `VarDeclExprAST::codegen()`'s `IsExported` no-op |
-| `include/Errors.h` | `CircularImportError`, `UnknownScopeQualifierError`, `ScopeOperatorOnInstanceError`, `DotOperatorOnNonInstanceError`, `UnknownModuleSymbolError`, `ImportSymbolCollisionError`, `UnqualifiedTypeNotVisibleError`, `ExportOutsideTopLevelError`, `ExportMutNotSupportedError`, `ExportNonConstantInitializerError` |
+| `include/TypeChecker.h`, `src/TypeChecker.cpp` | `visitScopeAccess`, `visitMethodCall`, `visitFuncCall` (broadened `CalleeName` derivation, `DefaultConstruct` branch). `visitStructInit` is GONE. |
+| `src/Codegen.cpp` | `FuncCallExprAST::codegen()` (incl. `ConstructorCall`/`DefaultConstruct` branches), `ScopeAccessExprAST::codegen()`, `MethodCallExprAST::codegen()`, `getExprType()`, `CodegenConstantValue()`, `VarDeclExprAST::codegen()`'s `IsExported` no-op and its alias-avoidance construction check. `StructInitExprAST::codegen()` is GONE. |
+| `include/Analysis.h`, `src/Analysis.cpp` | `ConstructorFieldAssignmentPass` (definite field assignment for `new()`) |
+| `include/Errors.h` | `CircularImportError`, `UnknownScopeQualifierError`, `ScopeOperatorOnInstanceError`, `DotOperatorOnNonInstanceError`, `UnknownModuleSymbolError`, `ImportSymbolCollisionError`, `UnqualifiedTypeNotVisibleError`, `ExportOutsideTopLevelError`, `ExportMutNotSupportedError`, `ExportNonConstantInitializerError`, `NoConstructorDefinedError`, `ReservedConstructorNameError`, `StaticOutsideStructError`, `ConstructorCannotBeStaticError`, `DefaultConstructorArityError`, `ConstructorCalledOnInstanceError`, `IncompleteConstructorError` |
 | `include/ErrorCategory.h` | `"module"`/`"import"` keyword routing to `docs/slm/modules.txt` |
 | `src/Builtins.cpp`, `lib/std/io.tr` | `@intrinsic` removal; `print`/`printline`/`input` now plain Turf + `extern fn` FFI |
 | `lib/std/*.tr` | The 7 real stdlib modules (`io`, `mem`, `math`, `list`, `stack`, `queue`, `strings`), each an ordinary `.tr` file, no compiler special-casing |
@@ -441,11 +469,11 @@ Contrast with `input()` (never on-demand-imported in this file): step 4's on-dem
 
 ### 5.1 (Resolved) No true static struct methods
 
-Previously documented here as a known limitation — fixed; see 2.8.1. `fn StructName::method(...)` (note `::`) now declares a genuine static method, callable as `StructName::method(args)` with no instance. Left as a pointer rather than deleted outright, same rationale as 5.3 below.
+Previously documented here as a known limitation — fixed; see 2.8.1. A genuine static method, callable as `StructName::method(args)` with no instance, is fully supported (declared `fn StructName.method(...) static: RetType { ... }` — see 2.8.1's note on the `::`-declaration form this originally shipped with, later respelled to `.` + `static`). Left as a pointer rather than deleted outright, same rationale as 5.3 below.
 
-### 5.2 Unqualified struct-literal construction of a nonexistent struct
+### 5.2 (Resolved) Unqualified struct-literal construction of a nonexistent struct
 
-`visitStructInit()` (2.8) validates a *qualifier* if present, and (since 2.7.1) validates *visibility* for a name that's a known struct — but still does not validate that the *struct name itself* is real at all for the ordinary bare form. A totally nonexistent bare struct name in `StructName { ... }` construction still falls through to an unrelated downstream error rather than a clean `UnknownTypeError` — pre-existing, not introduced or fixed by this work.
+Previously documented here as a known limitation of the old brace-literal form (`StructName { ... }`'s `visitStructInit()` validated a qualifier and, since 2.7.1, bare-visibility for a name that WAS a known struct, but never validated that a totally nonexistent bare struct name was real at all — it fell through to an unrelated downstream error instead of a clean `UnknownTypeError`). Moot now: brace-literal construction doesn't exist anymore. Its replacement, `StructName::new(...)`/`StructName::default()` (2.8.1a), goes through the SAME `isKnownStruct(LeftName)` gate every other `::`-on-a-struct form already used, so a nonexistent struct name here falls through to `UnknownScopeQualifierError` (or, if it happens to shadow a real variable, `ScopeOperatorOnInstanceError`) — the same clean, existing diagnostics any other unknown `::` qualifier gets, not a struct-construction-specific gap.
 
 ### 5.3 (Resolved) Struct/enum bare-type visibility gate
 

@@ -151,7 +151,7 @@ for j in 1..10 step j += 1 {
 
 ### Structs
 
-Fields are `name: Type`, comma-separated. Instances are constructed with brace syntax and named fields:
+Fields are `name: Type`, comma-separated. There is no brace-literal construction syntax — every struct is built via exactly one of two reserved, compiler-recognized calls:
 
 ```
 struct User {
@@ -159,11 +159,24 @@ struct User {
     name: string
 }
 
-mut u: User = User { age: 10, name: "Alice" };
+fn User.new(age: int, name: string): void {
+    self.age = age;
+    self.name = name;
+}
+
+mut u: User = User::new(10, "Alice");
 u.age = 25;
+
+mut u2: User = User::default();   // every field recursively zero-initialized
 ```
 
-Instance methods are declared as `StructName.methodName(...)` — `self` is implicit; it's not a declared parameter, but it's available inside the method body, called via `.`:
+`new` and `default` are reserved struct-method names, not ordinary functions:
+
+- **`StructName::new(args...)`** calls a user-defined constructor — declared exactly like any other instance method (`.`, `self` implicit), just named `new`. It must assign every field of the struct on every path before returning (checked with a real control-flow-sensitive analysis, not just "assigned somewhere in the body") — a field missed on even one branch is a compile error. A struct with no `.new` declared can't be constructed with `::new(...)` at all.
+- **`StructName::default()`** is always compiler-synthesized — it recursively zero-initializes every field (including nested structs) and takes no arguments. It can never be declared by hand (`fn StructName.default(...)` is a compile error), and it's always available, even for a struct with no methods at all.
+- Neither can be called via `.` on an instance (`x.new(...)`/`x.default()`) — only `StructName::new(...)`/`StructName::default()`.
+
+Other instance methods are declared the same way as `new`, called via `.`, with `self` implicit — not a declared parameter, but available inside the method body:
 
 ```
 fn User.grow(): void {
@@ -178,17 +191,19 @@ u.grow();
 u.rename("Bob");
 ```
 
-Static methods are declared as `StructName::methodName(...)` — no `self` at all, called on the type itself via `::`, never through an instance:
+Static methods use the exact same `.` declaration form, distinguished only by a trailing `static` keyword (no implicit `self` at all) — but are *called* on the type itself via `::`, never through an instance:
 
 ```
-fn User::default(): User {
-    return User { age: 0, name: "unnamed" };
+fn User.describe(prefix: string) static: string {
+    return prefix + " user";
 }
 
-mut u2: User = User::default();
+io::printline(User::describe("a"));
 ```
 
-A struct with no fields at all (`struct Empty {}`) is fully supported — the natural shape for a "namespace" struct that only ever holds static methods.
+`::` never appears in a `fn` declaration — it's reserved for calling/referencing through a namespace (enum variants, module-qualified functions, static methods, and `new`/`default`), while `.` is used for every method *declaration*, static or not.
+
+A struct with no fields at all (`struct Empty {}`) is fully supported — the natural shape for a "namespace" struct that only ever holds static methods. `Empty::default()` works even with zero fields to initialize.
 
 ### Arrays
 
@@ -196,14 +211,14 @@ Fixed-size, typed, and index directly — including arrays of structs, with fiel
 
 ```
 mut users: User[5] = [
-    User { age: 0, name: "" },
-    User { age: 0, name: "" },
-    User { age: 0, name: "" },
-    User { age: 0, name: "" },
-    User { age: 0, name: "" }
+    User::default(),
+    User::default(),
+    User::default(),
+    User::default(),
+    User::default()
 ];
 
-users[0] = User { age: 25, name: "Alice" };
+users[0] = User::new(25, "Alice");
 assert(users[0].age == 25, "");
 ```
 
@@ -234,15 +249,19 @@ struct Box<T> {
     val: T
 }
 
+fn Box.new(v: T): void {
+    self.val = v;
+}
+
 fn Box.get(): T {
     return self.val;
 }
 
 fn main(): int {
-    mut b: Box<int> = Box { val: 42 };
+    mut b: Box<int> = Box::new(42);
     assert(b.get() == 42, "");
 
-    mut nums: List<int> = List { data: null, len: 0, cap: 0 };
+    mut nums: List<int> = List::default();
     nums.push(10);
     nums.push(20);
     assert(nums.length() == 2, "");
@@ -298,23 +317,25 @@ assert(condition, "message shown on failure");
 
 ## Examples
 
-**Structs, instance methods, and static methods:**
+**Structs, constructors, instance methods, and static methods:**
 
 ```
 extern fn strlen(s: string): int;
 
 struct User { age: int, name: string }
 
+fn User.new(age: int, name: string): void { self.age = age; self.name = name; }
 fn User.grow(): void { self.age = self.age + 1; }
 fn User.rename(new_name: string): void { self.name = new_name; }
-fn User::default(): User { return User { age: 0, name: "unnamed" }; }
+fn User.describe() static: string { return "a user"; }
 
 fn main(): int {
-    mut u: User = User::default();
+    mut u: User = User::new(0, "unnamed");
     u.grow();
     assert(u.age == 1, "");
 
     u.rename("Bob");
+    assert(User::describe() == "a user", "");
     return 0;
 }
 ```
@@ -357,18 +378,23 @@ struct User {
     name: string
 }
 
+fn User.new(age: int, name: string): void {
+    self.age = age;
+    self.name = name;
+}
+
 fn main(): int {
     mut users: User[5] = [
-        User { age: 0, name: "" },
-        User { age: 0, name: "" },
-        User { age: 0, name: "" },
-        User { age: 0, name: "" },
-        User { age: 0, name: "" }
+        User::default(),
+        User::default(),
+        User::default(),
+        User::default(),
+        User::default()
     ];
 
-    users[0] = User { age: 25, name: "Alice" };
-    users[1] = User { age: 30, name: "Bob" };
-    users[2] = User { age: 35, name: "Charlie" };
+    users[0] = User::new(25, "Alice");
+    users[1] = User::new(30, "Bob");
+    users[2] = User::new(35, "Charlie");
 
     assert(users[0].age == 25, "");
     assert(strlen(users[0].name) == 5, "");

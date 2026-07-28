@@ -144,7 +144,7 @@ fn usable_size(p: void*): int {
 //
 // Usage:
 //   import mem;
-//   mut pool: mem::Pool<void*> = mem::Pool { items: null, len: 0, cap: 0 };
+//   mut pool: mem::Pool<void*> = mem::Pool::default();
 //   mut buf: void* = mem::alloc(256);
 //   pool.track(buf);              // pool now owns `buf`'s lifetime
 //   // ... use buf, and any number of other pool.track()'d allocations ...

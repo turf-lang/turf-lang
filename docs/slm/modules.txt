@@ -4,16 +4,18 @@ TURF-LANG MODULES / IMPORTS / `::` REFERENCE
 THE CORE RULE: `.` IS INSTANCE-ONLY, `::` IS NAMESPACE-ONLY
   `.` is exclusively for accessing something on an INSTANCE you hold: a
   struct value's fields and methods.
-    mut p: Point = Point { x: 1, y: 2 };
+    mut p: Point = Point::new(1, 2);
     p.x = 5;              // field access
     p.sum();               // instance method call
 
   `::` is exclusively for accessing something by NAME through a namespace
-  you don't hold an instance of: an enum's variant, or an imported
-  module's function or type.
+  you don't hold an instance of: an enum's variant, a module's function or
+  type, a static method, or -- the one exception that isn't module-related
+  at all -- constructing a struct.
     immut c: Color = Color::Red;        // enum variant
     io::printline("hi");                 // module function call
-    mut l: list::List<int> = List { data: null, len: 0, cap: 0 };  // module type
+    mut l: list::List<int> = List::default();  // module type, default-constructed
+    mut p: Point = Point::new(1, 2);     // constructor call (see CONSTRUCTING A STRUCT below)
 
   Mixing them up is the single most common mistake: `io.printline(...)`
   (dot instead of double-colon) is a syntax error, not a semantic one --
@@ -22,6 +24,36 @@ THE CORE RULE: `.` IS INSTANCE-ONLY, `::` IS NAMESPACE-ONLY
   after the identifier `io` used this way. If you see a confusing parse
   error right after a module name, check for a stray `.` that should be
   `::`.
+
+---
+
+CONSTRUCTING A STRUCT: `StructName::new(...)` / `StructName::default()`
+
+  There is no brace-literal construction syntax (`StructName { field: val }`
+  does not exist) -- every struct is built via exactly one of these two
+  reserved, compiler-recognized calls:
+
+    mut u: User = User::new(10, "Alice");   // calls a user-defined constructor
+    mut u2: User = User::default();          // every field zero-initialized
+
+  `StructName::new(args...)` calls a `.`-declared instance method literally
+  named `new` (`fn User.new(age: int, name: string): void { self.age = age;
+  self.name = name; }` -- `self` is implicit, exactly like any other
+  instance method). It must assign every field of the struct on every
+  path before returning; a field missed on even one branch is a compile
+  error. If the struct has no `.new` declared, `StructName::new(...)` is a
+  compile error -- there is no positional-field-order fallback.
+
+  `StructName::default()` is ALWAYS compiler-generated (recursively
+  zero-inits every field, nested structs included) and takes no arguments.
+  It can never be declared by hand -- `fn StructName.default(...)` is a
+  compile error, `default` is reserved -- and it's always available, even
+  for a struct with zero methods.
+
+  Neither can be called through an instance with '.' (`x.new(...)`,
+  `x.default()` are both compile errors) -- only `StructName::new(...)` /
+  `StructName::default()` work, exactly the same qualifier-vs-instance
+  split as everything else `::` covers.
 
 ---
 
@@ -64,13 +96,13 @@ WHAT'S STILL FLAT REGARDLESS OF IMPORT FORM
   (see below).
 
   You can ALSO qualify a type explicitly: `list::List<int>`, and even
-  qualify its CONSTRUCTION the same way: `list::List { ... }` (not just
+  qualify its CONSTRUCTION the same way: `list::List::default()` (not just
   the type annotation -- both forms accept a qualifier). Qualifying is
   genuinely validated, not decoration: `list` must be a real, imported
   module, AND it must actually be the module that declares `List` --
   `mem::List<int>` is a compile error even though `mem` is a real module,
   because `List` isn't declared there. A bare, unqualified `List<int>`
-  and the fully-qualified `list::List { ... }` construct the exact same
+  and the fully-qualified `list::List::default()` construct the exact same
   thing -- qualifying is about being explicit, not a different type.
 
   Two different modules declaring a same-named struct or enum is a
