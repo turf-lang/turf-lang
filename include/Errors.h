@@ -838,6 +838,62 @@ public:
   }
 };
 
+// CFG Phase 2 (Issue #186): A variable is written to but the value is never
+// subsequently read before the next write or the function exits. The assigned
+// value is immediately discarded. Non-fatal — compilation continues.
+class DeadStoreWarning : public TurfWarning {
+public:
+  DeadStoreWarning(SourceLocation Loc, const std::string &VarName)
+      : TurfWarning(
+            Loc,
+            Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                Colors::BRIGHT_YELLOW + "Variable '" + Colors::CYAN + VarName +
+                Colors::BRIGHT_YELLOW +
+                "' is assigned but the value is never read (dead store)." +
+                Colors::RESET,
+            "The assigned value is overwritten or the function returns before "
+            "this variable is ever used. Remove the assignment or use the "
+            "value.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
+// CFG Phase 2 (Issue #186): A local variable is declared but its value is
+// never read on any path through the function. Non-fatal.
+class UnusedVariableWarning : public TurfWarning {
+public:
+  UnusedVariableWarning(SourceLocation Loc, const std::string &VarName)
+      : TurfWarning(
+            Loc,
+            Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                Colors::BRIGHT_YELLOW + "Variable '" + Colors::CYAN + VarName +
+                Colors::BRIGHT_YELLOW +
+                "' is declared but never used." + Colors::RESET,
+            "If the variable is intentionally unused, prefix its name with "
+            "'_' by convention. Otherwise, remove the declaration or use "
+            "its value.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
+// CFG Phase 2 (Issue #186): Every path from the function's entry block to
+// its exit block passes through at least one self-call, meaning no base case
+// exists. This guarantees a stack overflow at runtime. Raised as a fatal
+// error (uses raise()) because the program is guaranteed to crash — there is
+// no safe way to proceed.
+class RecursionWithoutBaseError : public TurfError {
+public:
+  RecursionWithoutBaseError(SourceLocation Loc, const std::string &FuncName)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Infinite recursion detected in '" +
+                      Colors::CYAN + FuncName + Colors::BRIGHT_RED + "'." +
+                      Colors::RESET,
+                  "Every recursive function needs a base case — "
+                  "a path that returns without calling itself.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
 /**
  * @brief A `for` loop's induction variable is never modified by its `step`
  *        clause or its body.

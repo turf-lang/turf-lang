@@ -242,6 +242,112 @@ bool CFG::hasUnbreakableLoop() const {
   return false;
 }
 
+// Helper (file-scope, anonymous namespace): returns true if the given block
+// contains at least one direct call to `FuncName`.
+static bool blockContainsSelfCall(const TurfBasicBlock *BB,
+                                  const std::string &FuncName) {
+  for (const ExprAST *Stmt : BB->getStatements()) {
+    // Walk the statement tree looking for FuncCallExprAST nodes whose
+    // resolved target matches FuncName.
+    std::function<bool(const ExprAST *)> scan = [&](const ExprAST *E) -> bool {
+      if (!E) return false;
+      if (const auto *Call = dynamic_cast<const FuncCallExprAST *>(E)) {
+        // Primary: use ResolvedCallTarget (set by TypeChecker)
+        if (Call->ResolvedCallTarget &&
+            Call->ResolvedCallTarget->BaseName == FuncName)
+          return true;
+        // Fallback: callee is a VariableExprAST with the function name
+        if (const auto *Var =
+                dynamic_cast<const VariableExprAST *>(Call->getCallee())) {
+          if (Var->getName() == FuncName) return true;
+        }
+        // Also check args for nested self-calls (e.g. foo(foo(x)))
+        for (const auto &Arg : Call->getArgs())
+          if (scan(Arg.get())) return true;
+      }
+      // Recurse into binary/unary/return/vardecl/assignment nodes
+      if (const auto *B = dynamic_cast<const BinaryExprAST *>(E))
+        return scan(B->getLHS()) || scan(B->getRHS());
+      if (const auto *U = dynamic_cast<const UnaryExprAST *>(E))
+        return scan(U->getOperand());
+      if (const auto *R = dynamic_cast<const ReturnExprAST *>(E))
+        return scan(R->getVal());
+      if (const auto *V = dynamic_cast<const VarDeclExprAST *>(E))
+        return scan(V->getInitializer());
+      if (const auto *A = dynamic_cast<const AssignmentExprAST *>(E))
+        return scan(A->getLHS()) || scan(A->getRHS());
+      return false;
+    };
+    if (scan(Stmt)) return true;
+  }
+  return false;
+}
+
+// CFG Phase 2 (Issue #186): Returns true when every path from EntryBlock
+// to ExitBlock passes through a self-call block.
+//
+// Algorithm: DFS from EntryBlock. If we reach ExitBlock on a path that
+// did NOT pass through any self-call block → a base case exists → return false.
+// If all DFS paths to ExitBlock contained at least one self-call → return true.
+//
+// `Visited` prevents infinite traversal of back-edges (loop cycles).
+// We do NOT use `Visited` to prune paths early — a block can be entered on
+// multiple paths with different `hasSelfCall` prefix states — instead we use
+// a per-path `OnPath` set.
+bool CFG::allPathsRecurse() const {
+  if (!EntryBlock || !ExitBlock) return false;
+
+  // Pre-compute which blocks contain a self-call.
+  std::unordered_set<const TurfBasicBlock *> SelfCallBlocks;
+  for (const auto &BB : Blocks) {
+    if (blockContainsSelfCall(BB.get(), FunctionName))
+      SelfCallBlocks.insert(BB.get());
+  }
+
+  // If there are no self-call blocks at all, it's not recursive.
+  if (SelfCallBlocks.empty()) return false;
+
+  // DFS: returns true if ALL paths from `current` to ExitBlock pass through
+  // a self-call. `seenSelfCall` tracks whether the current path so far has
+  // seen a self-call. `OnPath` is the per-path visited set (prevents cycles).
+  std::function<bool(const TurfBasicBlock *, bool,
+                     std::unordered_set<const TurfBasicBlock *> &)>
+      dfs = [&](const TurfBasicBlock *Cur, bool SeenSelfCall,
+                std::unordered_set<const TurfBasicBlock *> &OnPath) -> bool {
+    bool CurHasSelf = SelfCallBlocks.count(Cur) > 0;
+    bool NowSeen = SeenSelfCall || CurHasSelf;
+
+    if (Cur == ExitBlock) {
+      // This path reached the exit: does it pass through a self-call?
+      return NowSeen;
+    }
+
+    if (OnPath.count(Cur)) {
+      // Back-edge (cycle in CFG): treat as "this path recurses" to avoid
+      // falsely claiming a loop provides a base case.
+      return true;
+    }
+
+    const auto &Succs = Cur->getSuccessors();
+    if (Succs.empty()) {
+      // Dead-end that isn't ExitBlock: not a valid return path. Skip.
+      return true;
+    }
+
+    OnPath.insert(Cur);
+    for (const TurfBasicBlock *Succ : Succs) {
+      std::unordered_set<const TurfBasicBlock *> ChildPath = OnPath;
+      if (!dfs(Succ, NowSeen, ChildPath)) {
+        return false; // Found a base-case path — not all paths recurse
+      }
+    }
+    return true; // All successor paths recurse
+  };
+
+  std::unordered_set<const TurfBasicBlock *> OnPath;
+  return dfs(EntryBlock, false, OnPath);
+}
+
 void CFG::reportFlowDiagnostics() const {
   // Report unreachable code
   auto Unreachable = getUnreachableBlocks();

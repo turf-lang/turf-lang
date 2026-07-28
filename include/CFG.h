@@ -140,6 +140,13 @@ public:
   // cycle — i.e. the loop cannot exit by any path.
   bool hasUnbreakableLoop() const;
 
+  // CFG Phase 2 (Issue #186): Infinite Recursion Detection.
+  // Returns true when every path from EntryBlock to ExitBlock passes through
+  // at least one block that contains a direct call to `FunctionName` — i.e.
+  // no base case exists. Uses DFS with a visited-set to handle CFG cycles
+  // (loops within a recursive function) without infinite traversal.
+  bool allPathsRecurse() const;
+
   // Diagnostics
   void reportFlowDiagnostics() const;
 
