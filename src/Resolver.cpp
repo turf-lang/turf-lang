@@ -1245,17 +1245,20 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     //   - print / printline / input  → io.tr   (call as io.printline(...))
     //   - malloc / realloc / free    → mem.tr   (call as mem.malloc(...))
     //   - abs / power / sqrt / …     → math.tr  (call as math.abs(...))
+    //   - assert / fail / assert_eq  → test.tr  (call as test::assert(...))
     //
     // A module-qualified call (io.printline(...)) never reaches this
     // function at all -- it's a MethodCallExprAST, handled by
     // visitMethodCall instead. This function only ever sees bare,
     // unqualified names, so no stdlib function name belongs in the
     // BareIntrinsics set below no matter how "primitive" it feels.
+    // assert/fail used to be listed here too, back when they were compiler
+    // intrinsics; they're now ordinary, real overloaded Turf functions in
+    // lib/std/test.tr, resolved through the exact same module-function path
+    // as everything else in this comment.
     static const std::unordered_set<std::string> BareIntrinsics = {
         "typeof",
         "lengthof",
-        "assert",
-        "fail",
     };
     if (BareIntrinsics.count(CalleeName)) {
       // True bare intrinsic — skip error, TypeChecker validates arity/types.

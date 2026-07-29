@@ -275,19 +275,22 @@ easy to get backwards:
 
   A handful of names really ARE wired directly into the compiler and never
   require ANY import, because they aren't declared anywhere in Turf source
-  at all: typeof, lengthof, assert, fail, and sizeof (sizeof is actually
-  its own piece of syntax, not even a function call -- see below).
+  at all: typeof, lengthof, and sizeof (sizeof is actually its own piece of
+  syntax, not even a function call -- see below).
 
   Everything else that might look "built-in" -- print, printline, input,
-  and every function in mem/math/list/strings/stack/queue -- is ordinary
-  Turf standard library code living in lib/std/*.tr, exactly as import-
-  able/inspectable as anything a user could write themselves, requiring
-  the same `import` + `::` qualification as any module. There is no
-  decorator or compiler-native-codegen mechanism backing any of them --
-  print/printline/input are plain Turf functions delegating to `extern fn
-  printf`/`scanf`/`getchar` FFI bindings, same pattern math.tr/mem.tr use
-  for libm/libc. Do NOT describe io/mem/math functions as "intrinsics" or
-  "builtins" -- they are standard library.
+  assert, fail, assert_eq/assert_neq, and every function in
+  mem/math/list/strings/stack/queue/sys/test -- is ordinary Turf standard
+  library code living in lib/std/*.tr, exactly as importable/inspectable as
+  anything a user could write themselves, requiring the same `import` +
+  `::` qualification as any module. There is no decorator or compiler-
+  native-codegen mechanism backing any of them -- print/printline/input are
+  plain Turf functions delegating to `extern fn printf`/`scanf`/`getchar`
+  FFI bindings, same pattern math.tr/mem.tr use for libm/libc, and
+  test::assert/test::fail are plain Turf functions delegating to
+  sys::panic (itself a thin `extern fn abort`/`write` wrapper). Do NOT
+  describe io/mem/math/sys/test functions as "intrinsics" or "builtins" --
+  they are standard library.
 
 TRUE INTRINSICS (never need an import; not declared in any .tr file):
 
@@ -296,13 +299,6 @@ TRUE INTRINSICS (never need an import; not declared in any .tr file):
 
   lengthof(str: string): int
     Number of characters in a STRING. For arrays, use `.length()` instead.
-
-  assert(condition: bool, message: string)
-    Aborts at runtime with `message` if `condition` is false. The message
-    is optional -- `assert(condition)` alone uses a default message.
-
-  fail(message: string)
-    Unconditionally aborts at runtime, printing `message` to stderr.
 
   sizeof(Type): int
     NOT a function call -- its own dedicated syntax (`sizeof(int)`,
@@ -319,6 +315,33 @@ MEMORY (via `import mem;`, manual, no garbage collector):
   Using a pointer after free(), or calling free() twice on the same pointer,
   is a compile-time-detected bug where the compiler can prove it (dataflow
   analysis, not a runtime check).
+
+---
+
+SYSTEM (via `import sys;`): process termination, no test-writing intent.
+  sys::abort()                   -- terminate immediately (SIGABRT), no message
+  sys::exit(code)                -- terminate immediately with the given exit code
+  sys::panic(msg)                -- write `msg` to stderr, then abort. Never
+                                     returns. Every other stdlib module's
+                                     internal "this should be impossible"
+                                     guard rails (OOM, a failed syscall) call
+                                     this -- it's the shared low-level
+                                     primitive test::fail() is itself built on.
+
+TESTING (via `import test;`):
+  test::assert(cond)             -- aborts (via test::fail) if cond is false,
+                                     using a default message
+  test::assert(cond, msg)        -- same, with a custom failure message
+  test::assert_eq(a, b[, msg])   -- aborts if a != b; overloaded for
+                                     int/double/bool/string
+  test::assert_neq(a, b[, msg])  -- aborts if a == b; overloaded for
+                                     int/double/bool/string
+  test::fail(msg)                -- unconditionally aborts, printing `msg` to
+                                     stderr (thin wrapper over sys::panic)
+  Every existing test file in tests/ uses these -- `import test;` then
+  qualified `test::assert(...)` calls, matching this codebase's own
+  convention of always qualifying stdlib calls (io::printline, mem::alloc,
+  etc.) rather than relying on bare on-demand imports.
 
 ---
 

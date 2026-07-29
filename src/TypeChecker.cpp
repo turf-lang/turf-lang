@@ -1368,61 +1368,15 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         return;
       }
 
-      // ── assert(cond, [msg]) → int, fail(msg) → int ──────────────────────
-      // Both are registered with BuiltinInfo::Arity == -1 ("variadic/
-      // unknown") because assert() genuinely accepts either 1 or 2 args
-      // (condition, optional message) -- not a single fixed count the
-      // generic arity check above can express. That means the generic
-      // check never rejects a wrong argument count for assert() (0 args,
-      // or 3+), and -- unlike typeof/lengthof -- neither of these two ever
-      // reached a `setType(&Node, ...); return;` here at all, so they fell
-      // through everything below and hit the final "Unknown call — be
-      // permissive" branch, which sets a null type.
-      //
-      // That was never just a type-annotation gap: CodegenIntrinsic's
-      // "assert"/"fail" handlers unconditionally read Args[0] (and
-      // Args[1] for assert's optional message) with no bounds check,
-      // trusting this exact arity validation to have already run. It
-      // normally has, by the time Codegen's main pass runs -- but
-      // main.cpp's pre-pass (sub-pass 2b) deliberately swallows TypeChecker
-      // errors ("informational only... main-pass TC will re-check") and
-      // then unconditionally proceeds to codegen the same AST anyway in
-      // sub-pass 3b. A call like `assert()` or `fail()` (0 args) hits that
-      // gap: the pre-pass TypeChecker's error is discarded, pre-pass
-      // codegen runs CodegenIntrinsic with an empty Args vector, and
-      // `Args[0]` is a real out-of-bounds vector access -- a compiler
-      // crash (SIGABRT) before the user ever sees a diagnostic, for input
-      // as simple as a bare `assert();`. Fixed on two fronts: this
-      // explicit arity check closes the TypeChecker-side gap (so the
-      // pre-pass's own TC invocation reports the SAME error, even if that
-      // particular report is discarded) and, as defense in depth,
-      // CodegenIntrinsic itself now bounds-checks Args before indexing
-      // (see src/Builtins.cpp) so any future gap of this shape degrades to
-      // a clean SemanticError instead of undefined behavior.
-      if (CalleeName == "assert") {
-        if (ArgCount != 1 && ArgCount != 2) {
-          reportError(Node.getLoc(),
-                      "'assert' expects 1 or 2 arguments (a condition, and "
-                      "an optional message), got " +
-                          std::to_string(ArgCount) + ".");
-          setType(&Node, nullptr);
-          return;
-        }
-        setType(&Node, TurfInt());
-        return;
-      }
-
-      // ── fail(msg) → int ───────────────────────────────────────────────────
-      // Arity (exactly 1) is already enforced by the generic check above
-      // (BuiltinInfo::Arity == 1). This branch only exists to give a valid
-      // call a real type -- CodegenIntrinsic's "fail" handler returns a
-      // dummy int(0) (its call site is unreachable; abort() is called
-      // first), so TurfInt() here matches actual codegen behavior instead
-      // of silently falling through to the "unknown call" branch below.
-      if (CalleeName == "fail") {
-        setType(&Node, TurfInt());
-        return;
-      }
+      // assert/fail used to have bespoke branches here (assert needed a
+      // special Arity == -1 sentinel to express its 1-or-2-arg signature,
+      // since it isn't a single fixed count the generic check above can
+      // express). Both are now ordinary, real overloaded Turf functions in
+      // lib/std/test.tr -- LookupBuiltin() returns null for them (they're
+      // not in g_builtins at all anymore), so they never reach this branch;
+      // they resolve through the exact same "User-defined / Resolver-
+      // registered call path" below as any other function, including
+      // proper per-overload arity/type checking for free.
 
       // Any other name that hits LookupBuiltin() is unexpected — fall through.
     }

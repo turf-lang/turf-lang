@@ -65,13 +65,15 @@ static void ensure_builtins_registered() {
   // appear in g_builtins for suggestion quality (suggestBuiltins()) and
   // for the IntrinsicArity guard in CodegenIntrinsic().
   //
-  // stdlib functions (print, printline, input, malloc, abs, power, sqrt, …)
-  // live in lib/std modules and are resolved via the Resolver's module
-  // registry — they must NOT be listed here.
+  // stdlib functions (print, printline, input, malloc, abs, power, sqrt,
+  // assert, fail, …) live in lib/std modules and are resolved via the
+  // Resolver's module registry — they must NOT be listed here. assert/fail
+  // specifically used to be registered here (with `assert` needing a
+  // bespoke Arity == -1 sentinel to express its 1-or-2-arg signature,
+  // bypassing the generic arity check entirely) until they moved to
+  // lib/std/test.tr as ordinary, real overloaded Turf functions.
   RegisterBuiltin("typeof",   {1, "Compile-time type name of an expression"});
   RegisterBuiltin("lengthof", {1, "Byte-length of a string"});
-  RegisterBuiltin("assert",   {-1, "Asserts a condition at runtime"});
-  RegisterBuiltin("fail",     {1, "Aborts execution with a message"});
 }
 
 /**
@@ -191,117 +193,75 @@ llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
     return Builder->CreateGlobalString(TypeName, "typename");
   }
 
-  if (IntrinsicName == "fail") {
-    if (Args.empty()) {
-      SemanticError(Loc, "'fail' requires exactly 1 argument").raise();
-      return nullptr;
-    }
-    // Arg 0: message string
-    Value *MsgVal = Args[0];
-
-    // Get or declare fprintf
-    Function *FPrintFFunc = TheModule->getFunction("fprintf");
-    if (!FPrintFFunc) {
-      FunctionType *FT =
-          FunctionType::get(Type::getInt32Ty(*TheContext),
-                            {PointerType::getUnqual(*TheContext), PointerType::getUnqual(*TheContext)}, true);
-      FPrintFFunc = Function::Create(FT, Function::ExternalLinkage, "fprintf",
-                                     TheModule.get());
-    }
-
-    // Get or declare abort
-    Function *AbortFunc = TheModule->getFunction("abort");
-    if (!AbortFunc) {
-      FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext), false);
-      AbortFunc = Function::Create(FT, Function::ExternalLinkage, "abort", TheModule.get());
-    }
-
-    // Get stderr
-    std::string StderrSymbol = "stderr";
-#ifdef __APPLE__
-    StderrSymbol = "__stderrp";
-#endif
-    GlobalVariable *StderrGV = TheModule->getNamedGlobal(StderrSymbol);
-    if (!StderrGV) {
-      StderrGV = new GlobalVariable(*TheModule, PointerType::getUnqual(*TheContext), false,
-                                    GlobalValue::ExternalLinkage, nullptr, StderrSymbol);
-    }
-    Value *StderrVal = Builder->CreateLoad(PointerType::getUnqual(*TheContext), StderrGV, "stderr_val");
-
-    // Print message to stderr and abort
-    Value *Fmt = Builder->CreateGlobalString("%s\n", "failfmt");
-    Builder->CreateCall(FPrintFFunc, {StderrVal, Fmt, MsgVal});
-    Builder->CreateCall(AbortFunc, {});
-    Builder->CreateUnreachable();
-
-    // Mirrors ReturnExprAST::codegen(): CreateUnreachable() is a terminator,
-    // so if fail() is not the last statement in its block, the next
-    // statement's codegen would try to add IR to an already-terminated
-    // block ("Terminator found in the middle of a basic block"). Give the
-    // builder a fresh dead block to keep emitting into; it's either erased
-    // as dead code (fail() was the function's last statement) or picked up
-    // as an unreachable predecessor-less block wired into the live CFG by
-    // whatever nested construct (if/while) owns this statement list.
-    if (CurrentFunction) {
-      BasicBlock *DeadBB =
-          BasicBlock::Create(*TheContext, "after_fail", CurrentFunction);
-      Builder->SetInsertPoint(DeadBB);
-    }
-
-    // fail doesn't return, but we need to return something to satisfy the type signature
-    // Any value will do since it's unreachable, we'll return a dummy integer
-    return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
-  }
-
-  if (IntrinsicName == "assert") {
-    if (Args.empty()) {
-      SemanticError(Loc, "'assert' requires at least 1 argument (a condition)").raise();
-      return nullptr;
-    }
-    // Arg 0: condition (bool)
-    // Arg 1 (optional): message string
-    Value *Cond = Args[0];
-    
-    // We check if it's already a boolean (i1), though TypeChecker enforces this
-    if (!Cond->getType()->isIntegerTy(1)) {
-        SemanticError(Loc, "'assert' condition must be a boolean").raise();
-        return nullptr;
-    }
-
-    Value *MsgVal;
-    if (Args.size() > 1) {
-      MsgVal = Args[1];
-    } else {
-      MsgVal = Builder->CreateGlobalString("Oops! An assertion failed here.\nHint: Assertions are checks that make sure your code is running exactly as you expect. This one didn't pass.", "default_assert_msg");
-    }
-
-    Function *TheFunction = Builder->GetInsertBlock()->getParent();
-    BasicBlock *FailBB = BasicBlock::Create(*TheContext, "assert.fail", TheFunction);
-    BasicBlock *PassBB = BasicBlock::Create(*TheContext, "assert.pass", TheFunction);
-
-    Builder->CreateCondBr(Cond, PassBB, FailBB);
-
-    // Fail block
-    Builder->SetInsertPoint(FailBB);
-    std::vector<llvm::Value *> FailArgs = {MsgVal};
-    CodegenIntrinsic("fail", FailArgs, Loc);
-    // CodegenIntrinsic for fail already creates unreachable, then repositions
-    // the builder to a fresh dead block of its own (so a bare `fail(...);`
-    // statement can be followed by more statements in the same source
-    // block). We abandon that dead block by repositioning to PassBB below,
-    // so -- same as every other internal fail() call site in Codegen.cpp --
-    // it must be given its own terminator or verifyFunction() rejects the
-    // orphaned, terminator-less block.
-    if (!Builder->GetInsertBlock()->getTerminator())
-      Builder->CreateUnreachable();
-
-    // Pass block
-    Builder->SetInsertPoint(PassBB);
-
-    return ConstantInt::get(Type::getInt64Ty(*TheContext), 1);
-  }
-
   SemanticError(Loc, "Unknown intrinsic: " + IntrinsicName).raise();
   return nullptr;
+}
+
+/**
+ * @brief Emits the compiler's own internal panic sequence: print MsgVal to
+ *        stderr, then abort. SOLELY for the compiler's own runtime safety
+ *        guards (division/modulo by zero, bad string->int/enum casts, array
+ *        bounds checks) -- not reachable from Turf source under any name.
+ *        `fail`/`assert` used to share this exact IR shape as compiler
+ *        intrinsics; now that they're ordinary Turf functions in
+ *        lib/std/test.tr (built on lib/std/sys.tr's own, separate
+ *        write(2,...)-based sys::panic()), this is purely an internal C++
+ *        helper with no user-facing name at all.
+ */
+llvm::Value *CodegenPanic(llvm::Value *MsgVal, SourceLocation Loc) {
+  (void)Loc;
+
+  // Get or declare fprintf
+  Function *FPrintFFunc = TheModule->getFunction("fprintf");
+  if (!FPrintFFunc) {
+    FunctionType *FT =
+        FunctionType::get(Type::getInt32Ty(*TheContext),
+                          {PointerType::getUnqual(*TheContext), PointerType::getUnqual(*TheContext)}, true);
+    FPrintFFunc = Function::Create(FT, Function::ExternalLinkage, "fprintf",
+                                   TheModule.get());
+  }
+
+  // Get or declare abort
+  Function *AbortFunc = TheModule->getFunction("abort");
+  if (!AbortFunc) {
+    FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext), false);
+    AbortFunc = Function::Create(FT, Function::ExternalLinkage, "abort", TheModule.get());
+  }
+
+  // Get stderr
+  std::string StderrSymbol = "stderr";
+#ifdef __APPLE__
+  StderrSymbol = "__stderrp";
+#endif
+  GlobalVariable *StderrGV = TheModule->getNamedGlobal(StderrSymbol);
+  if (!StderrGV) {
+    StderrGV = new GlobalVariable(*TheModule, PointerType::getUnqual(*TheContext), false,
+                                  GlobalValue::ExternalLinkage, nullptr, StderrSymbol);
+  }
+  Value *StderrVal = Builder->CreateLoad(PointerType::getUnqual(*TheContext), StderrGV, "stderr_val");
+
+  // Print message to stderr and abort
+  Value *Fmt = Builder->CreateGlobalString("%s\n", "panicfmt");
+  Builder->CreateCall(FPrintFFunc, {StderrVal, Fmt, MsgVal});
+  Builder->CreateCall(AbortFunc, {});
+  Builder->CreateUnreachable();
+
+  // Mirrors ReturnExprAST::codegen(): CreateUnreachable() is a terminator,
+  // so if this panic is not the last statement in its block, the next
+  // statement's codegen would try to add IR to an already-terminated block
+  // ("Terminator found in the middle of a basic block"). Give the builder a
+  // fresh dead block to keep emitting into; it's either erased as dead code
+  // (the panic was the function's last statement) or picked up as an
+  // unreachable predecessor-less block wired into the live CFG by whatever
+  // nested construct (if/while) owns this statement list.
+  if (CurrentFunction) {
+    BasicBlock *DeadBB =
+        BasicBlock::Create(*TheContext, "after_panic", CurrentFunction);
+    Builder->SetInsertPoint(DeadBB);
+  }
+
+  // Doesn't return, but we need to return something to satisfy the type
+  // signature. Any value will do since it's unreachable.
+  return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
 }
 

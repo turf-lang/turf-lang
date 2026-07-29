@@ -1295,7 +1295,7 @@ Value *BinaryExprAST::codegen() {
     Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
 
     Builder->SetInsertPoint(DivZeroBB);
-    CodegenIntrinsic("fail", {Builder->CreateGlobalString("Division by zero")}, Loc);
+    CodegenPanic(Builder->CreateGlobalString("Division by zero"), Loc);
     if (!Builder->GetInsertBlock()->getTerminator())
       Builder->CreateUnreachable();
 
@@ -1326,7 +1326,7 @@ Value *BinaryExprAST::codegen() {
     Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
 
     Builder->SetInsertPoint(DivZeroBB);
-    CodegenIntrinsic("fail", {Builder->CreateGlobalString("Modulo by zero")}, Loc);
+    CodegenPanic(Builder->CreateGlobalString("Modulo by zero"), Loc);
     if (!Builder->GetInsertBlock()->getTerminator())
       Builder->CreateUnreachable();
 
@@ -1787,7 +1787,7 @@ Value *CompoundAssignmentExprAST::codegen() {
     Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
 
     Builder->SetInsertPoint(DivZeroBB);
-    CodegenIntrinsic("fail", {Builder->CreateGlobalString("Division by zero in compound assignment")}, Loc);
+    CodegenPanic(Builder->CreateGlobalString("Division by zero in compound assignment"), Loc);
     if (!Builder->GetInsertBlock()->getTerminator())
       Builder->CreateUnreachable();
 
@@ -1808,7 +1808,7 @@ Value *CompoundAssignmentExprAST::codegen() {
     Builder->CreateCondBr(IsZero, DivZeroBB, DivContBB);
 
     Builder->SetInsertPoint(DivZeroBB);
-    CodegenIntrinsic("fail", {Builder->CreateGlobalString("Modulo by zero in compound assignment")}, Loc);
+    CodegenPanic(Builder->CreateGlobalString("Modulo by zero in compound assignment"), Loc);
     if (!Builder->GetInsertBlock()->getTerminator())
       Builder->CreateUnreachable();
 
@@ -2133,8 +2133,8 @@ Value *CastExprAST::codegen() {
 
     Builder->SetInsertPoint(ErrorBB);
 
-    CodegenIntrinsic("fail", {Builder->CreateGlobalString(
-        "Runtime Error: Invalid string to int conversion.")}, Loc);
+    CodegenPanic(Builder->CreateGlobalString(
+        "Runtime Error: Invalid string to int conversion."), Loc);
     if (!Builder->GetInsertBlock()->getTerminator())
       Builder->CreateUnreachable();
 
@@ -2320,8 +2320,8 @@ Value *CastExprAST::codegen() {
 
     // Build fail block
     Builder->SetInsertPoint(FailBB);
-    CodegenIntrinsic("fail", {Builder->CreateGlobalString(
-        "Runtime Error: Invalid string to enum conversion.")}, Loc);
+    CodegenPanic(Builder->CreateGlobalString(
+        "Runtime Error: Invalid string to enum conversion."), Loc);
     if (!Builder->GetInsertBlock()->getTerminator())
       Builder->CreateUnreachable();
 
@@ -3311,19 +3311,20 @@ Value *FuncCallExprAST::codegen() {
     return Builder->CreateLoad(LLVMStructType, SelfAlloca, "structval");
   }
 
-  // For malloc/realloc/free: if the user declared an extern fn with that name,
-  // let it flow through the normal symbol-table path below. Only use the
-  // builtin path when no user declaration exists.
-  bool UserDeclaredExtern = (CalleeName == "malloc" || CalleeName == "realloc" ||
-                              CalleeName == "free") &&
-                             TheModule->getFunction(CalleeName) != nullptr;
-
-  if (!UserDeclaredExtern &&
-      (CalleeName == "typeof" || CalleeName == "lengthof" ||
-       CalleeName == "assert" || CalleeName == "fail" ||
-       CalleeName == "malloc" || CalleeName == "realloc" ||
-       CalleeName == "free")) {
-
+  // malloc/realloc/free/assert/fail used to be routed through this dispatch
+  // (gated on "no user extern fn with that name exists yet" for the first
+  // three), but CodegenIntrinsic itself has had no case for ANY of these
+  // five names for a while now -- malloc/realloc/free became ordinary
+  // lib/std/mem.tr `extern fn` bindings, assert/fail became ordinary
+  // lib/std/test.tr Turf functions. Every program that actually uses any of
+  // them imports the owning module, so the "no user declaration" condition
+  // this dispatch was gating on is never true in practice; keeping these
+  // five names listed here was pure dead weight that could only ever reach
+  // CodegenIntrinsic's final "Unknown intrinsic: ..." fallback -- a worse,
+  // more confusing diagnostic than the normal unresolved-function path
+  // below already gives (e.g. "unknown function 'malloc', did you mean
+  // mem::alloc?"). Only typeof/lengthof are real intrinsics left.
+  if (CalleeName == "typeof" || CalleeName == "lengthof") {
 
     std::vector<Value *> ArgVals;
     for (auto &Arg : Args) {
@@ -3629,8 +3630,8 @@ static void EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
 
   // Out-of-bounds block: call fail()
   Builder->SetInsertPoint(OobBB);
-  CodegenIntrinsic("fail", {Builder->CreateGlobalString(
-      "Array index out of bounds for '" + ArrayName + "'")}, Loc);
+  CodegenPanic(Builder->CreateGlobalString(
+      "Array index out of bounds for '" + ArrayName + "'"), Loc);
 
   if (!Builder->GetInsertBlock()->getTerminator())
     Builder->CreateUnreachable();
