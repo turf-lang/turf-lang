@@ -2971,7 +2971,7 @@ Value *FuncDefExprAST::codegen() {
   // Build and analyze CFG for flow diagnostics
   if (Body) {
     CFGBuilder CFGBuilder;
-    auto FuncCFG = CFGBuilder.buildCFG(Name, ReturnType, Body.get(), Loc);
+    auto FuncCFG = CFGBuilder.buildCFG(Name, ReturnType, Body.get(), Loc, MangledName);
 
     // Store CFG for later use (push before analyses so it survives raises)
     GlobalCFGs.push_back(std::move(FuncCFG));

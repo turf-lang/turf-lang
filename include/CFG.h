@@ -82,6 +82,16 @@ public:
 class CFG {
 private:
   std::string FunctionName; // Name of the function this CFG represents
+  // Mangled identity of this function (e.g. "turf_assert_bool_string"),
+  // distinct from FunctionName ("assert") whenever overloading is in play.
+  // Empty when the caller didn't supply one (buildCFG's mangled-name param
+  // defaults to ""). Exists solely so allPathsRecurse()/blockContainsSelfCall
+  // can tell "this function calls ITSELF" apart from "this function calls a
+  // same-named sibling overload" -- see that function's doc comment for the
+  // false-positive this fixes. FunctionName stays the plain, user-facing
+  // name for every diagnostic message; only self-call detection needs the
+  // mangled form.
+  std::string MangledFunctionName;
   TurfTypePtr ReturnType;   // Return type of the function
   SourceLocation FuncLoc;
   std::vector<std::unique_ptr<TurfBasicBlock>> Blocks; // All blocks (owned)
@@ -99,12 +109,16 @@ public:
   // confirmed to print things like "at line 1986079736, col 30179" instead
   // of the function's real declaration site.
   explicit CFG(std::string FunctionName, TurfTypePtr ReturnType = TurfVoid(),
-              SourceLocation FuncLoc = {0, 0})
-      : FunctionName(std::move(FunctionName)), ReturnType(std::move(ReturnType)),
+              SourceLocation FuncLoc = {0, 0},
+              std::string MangledFunctionName = "")
+      : FunctionName(std::move(FunctionName)),
+        MangledFunctionName(std::move(MangledFunctionName)),
+        ReturnType(std::move(ReturnType)),
         FuncLoc(FuncLoc), EntryBlock(nullptr), ExitBlock(nullptr), NextID(0) {}
 
   // Accessors
   const std::string &getFunctionName() const { return FunctionName; }
+  const std::string &getMangledFunctionName() const { return MangledFunctionName; }
   const TurfType *getReturnType() const { return ReturnType.get(); }
   TurfTypePtr getReturnTypePtr() const { return ReturnType; }
   TurfBasicBlock *getEntryBlock() const { return EntryBlock; }
@@ -169,10 +183,13 @@ public:
       : CurrentCFG(nullptr), CurrentBlock(nullptr), LoopContinueTarget(nullptr),
         LoopBreakTarget(nullptr), LastTerminatorLoc{0, 0} {}
 
-  // Build CFG for a function
+  // Build CFG for a function. MangledFunctionName, when supplied, lets
+  // allPathsRecurse() distinguish real self-recursion from a call to a
+  // same-named sibling overload (see CFG::MangledFunctionName's doc comment).
   std::unique_ptr<CFG> buildCFG(const std::string &FunctionName,
                                 TurfTypePtr ReturnType, ExprAST *Body,
-                                SourceLocation FuncLoc = {0, 0});
+                                SourceLocation FuncLoc = {0, 0},
+                                const std::string &MangledFunctionName = "");
 
 private:
   // Visit methods for different AST nodes

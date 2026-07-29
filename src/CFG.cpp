@@ -243,24 +243,48 @@ bool CFG::hasUnbreakableLoop() const {
 }
 
 // Helper (file-scope, anonymous namespace): returns true if the given block
-// contains at least one direct call to `FuncName`.
+// contains at least one direct call to the function identified by
+// (FuncName, MangledFuncName). When MangledFuncName is non-empty and the
+// call has a ResolvedCallTarget, identity is decided by mangled name
+// (mangledName() encodes the parameter types, so it uniquely identifies one
+// overload) -- NOT by FuncName alone, which two different overloads of the
+// same base name (e.g. `assert(cond)` and `assert(cond, msg)`) both share.
+// Comparing only by base name previously made `assert(cond: bool) { return
+// assert(cond, msg); }` look like infinite self-recursion, when it's really
+// a call to a completely different, non-recursive sibling overload — the
+// exact delegation-to-a-wider-overload shape io.tr's print/printline never
+// happens to use, but a minimal assert() library naturally does.
 static bool blockContainsSelfCall(const TurfBasicBlock *BB,
-                                  const std::string &FuncName) {
+                                  const std::string &FuncName,
+                                  const std::string &MangledFuncName) {
   for (const ExprAST *Stmt : BB->getStatements()) {
     // Walk the statement tree looking for FuncCallExprAST nodes whose
     // resolved target matches FuncName.
     std::function<bool(const ExprAST *)> scan = [&](const ExprAST *E) -> bool {
       if (!E) return false;
       if (const auto *Call = dynamic_cast<const FuncCallExprAST *>(E)) {
-        // Primary: use ResolvedCallTarget (set by TypeChecker)
-        if (Call->ResolvedCallTarget &&
-            Call->ResolvedCallTarget->BaseName == FuncName)
-          return true;
-        // Fallback: callee is a VariableExprAST with the function name
-        if (const auto *Var =
-                dynamic_cast<const VariableExprAST *>(Call->getCallee())) {
-          if (Var->getName() == FuncName) return true;
+        // Primary: use ResolvedCallTarget (set by TypeChecker). Prefer
+        // mangled-name identity when we have one to compare against;
+        // otherwise fall back to the old base-name-only comparison (still
+        // correct for any non-overloaded function, and preserves behavior
+        // for any caller that didn't supply a mangled name). Whichever
+        // branch runs, ResolvedCallTarget is authoritative -- this call is
+        // NOT allowed to fall through to the bare-name fallback below, or a
+        // resolved call to a different overload (the exact case this whole
+        // function exists to get right) would still get caught by that
+        // fallback's bare name check and produce the same false positive
+        // all over again.
+        bool IsSelfCall = false;
+        if (Call->ResolvedCallTarget) {
+          IsSelfCall = !MangledFuncName.empty()
+              ? (Call->ResolvedCallTarget->mangledName() == MangledFuncName)
+              : (Call->ResolvedCallTarget->BaseName == FuncName);
+        } else if (const auto *Var =
+                       dynamic_cast<const VariableExprAST *>(Call->getCallee())) {
+          // Fallback: no resolved target at all -- match by bare callee name.
+          IsSelfCall = (Var->getName() == FuncName);
         }
+        if (IsSelfCall) return true;
         // Also check args for nested self-calls (e.g. foo(foo(x)))
         for (const auto &Arg : Call->getArgs())
           if (scan(Arg.get())) return true;
@@ -300,7 +324,7 @@ bool CFG::allPathsRecurse() const {
   // Pre-compute which blocks contain a self-call.
   std::unordered_set<const TurfBasicBlock *> SelfCallBlocks;
   for (const auto &BB : Blocks) {
-    if (blockContainsSelfCall(BB.get(), FunctionName))
+    if (blockContainsSelfCall(BB.get(), FunctionName, MangledFunctionName))
       SelfCallBlocks.insert(BB.get());
   }
 
@@ -445,8 +469,10 @@ void CFG::print() const {
 std::unique_ptr<CFG> CFGBuilder::buildCFG(const std::string &FunctionName,
                                           TurfTypePtr ReturnType,
                                           ExprAST *Body,
-                                          SourceLocation FuncLoc) {
-  auto CFGPtr = std::make_unique<CFG>(FunctionName, std::move(ReturnType), FuncLoc);
+                                          SourceLocation FuncLoc,
+                                          const std::string &MangledFunctionName) {
+  auto CFGPtr = std::make_unique<CFG>(FunctionName, std::move(ReturnType), FuncLoc,
+                                      MangledFunctionName);
   CurrentCFG = CFGPtr.get();
 
   // Create entry and exit blocks
