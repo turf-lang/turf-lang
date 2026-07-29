@@ -1,0 +1,48 @@
+// ─── sys.tr ────────────────────────────────────────────────────────────────
+// Low-level system interaction for TurfLang: process termination and the
+// one primitive every other stdlib module's internal guard rails are built
+// on (`panic`).
+//
+// Design:
+//   - `abort`/`exit` need no wrapping logic, so they're used directly as
+//     their raw `extern fn` bindings -- `sys::abort()`/`sys::exit(code)` --
+//     exactly like net.tr exposes `close(fd)` with no Turf-level wrapper.
+//     (A same-named, same-signature Turf `fn abort(): void { abort(); }`
+//     wrapper is NOT an overload of the extern declaration -- it's a
+//     duplicate declaration, which is a compile error, and would recurse
+//     into itself even if it weren't.)
+//   - `panic` is the shared "print a message to stderr, then terminate"
+//     primitive. It exists here, in sys.tr, rather than in test.tr, because
+//     it's used by other stdlib modules' internal correctness guards (e.g.
+//     mem.tr's out-of-memory checks, net.tr's socket-failure checks) --
+//     those are production code, not test code, and must not depend on a
+//     module named "test".
+//   - There is no way to `extern` a global variable in this language (only
+//     functions), so libc's `stderr` FILE* is unreachable directly. `panic`
+//     instead uses the POSIX `write(2, ...)` syscall with the fd hardcoded
+//     to `STDERR_FD` -- no FILE* needed, mirrors net.tr's raw-socket-fd
+//     style rather than io.tr's buffered-stream style.
+//
+// Usage:
+//   import sys;
+//   if bad_thing { sys::panic("something went wrong"); }
+//   sys::exit(1);
+
+// ─── libc bindings ────────────────────────────────────────────────────────
+
+extern fn abort(): void;
+extern fn exit(code: int): void;
+extern fn write(fd: int, buf: string, count: int): int;
+
+// ─── Turf-level helpers ───────────────────────────────────────────────────
+
+export immut STDERR_FD: int = 2;
+
+// panic: write `msg` (plus a trailing newline) to stderr, then abort. Never
+// returns -- every stdlib module's internal "this should be impossible"
+// guard rails (OOM, a failed syscall, a violated invariant) call this.
+fn panic(msg: string): void {
+    mut line: string = msg + "\n";
+    write(STDERR_FD, line, lengthof(line));
+    abort();
+}
