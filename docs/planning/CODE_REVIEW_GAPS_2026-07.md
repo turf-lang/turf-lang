@@ -71,7 +71,7 @@ the idiom already used everywhere else.
 
 Regression test documenting this (still present, not excluded from the
 suite as a "real" bug — it's asserting the *current*, accepted behavior):
-`tests/10_known_bugs/fail_compare_only_body_missing_return.tr`.
+`tests/99_known_bugs/fail_compare_only_body_missing_return.tr`.
 
 ---
 

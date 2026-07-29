@@ -28,7 +28,7 @@ fi
 echo -e "${BOLD}Running Turf Test Suites...${RESET}\n"
 
 # Find all test files, exclude custom directory, and ignore module files
-TEST_FILES=$(find "$TEST_DIR" -type f -name "*.tr" | grep -v "$TEST_DIR/custom/" | grep -v "$TEST_DIR/10_known_bugs/" | grep -v "_module.tr")
+TEST_FILES=$(find "$TEST_DIR" -type f -name "*.tr" | grep -v "$TEST_DIR/custom/" | grep -v "$TEST_DIR/99_known_bugs/" | grep -v "_module.tr")
 
 for test_file in $TEST_FILES; do
     TOTAL_TESTS=$((TOTAL_TESTS + 1))

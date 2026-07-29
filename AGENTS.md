@@ -43,7 +43,7 @@ Also watch for names that end in `_module.tr` as a plain SUBSTRING coincidence (
 
 - `src/`, `include/` — the compiler itself (Lexer, Parser, Resolver, TypeChecker, Codegen, Errors, SLM integration).
 - `lib/std/` — the standard library, written in Turf itself (`io.tr`, `mem.tr`, `math.tr`, `list.tr`, `stack.tr`, `queue.tr`, `strings.tr`). No compiler special-casing; ordinary `.tr` files.
-- `tests/` — the regression suite, organized by numbered topic folders (`06_structs`, `07_functions_modules`, etc.) plus `tests/10_known_bugs/` (excluded from the runner — documents accepted/deferred limitations, not live regressions) and `tests/custom/` (also excluded).
+- `tests/` — the regression suite, organized by numbered topic folders (`06_structs`, `07_functions_modules`, etc.) plus `tests/99_known_bugs/` (excluded from the runner — documents accepted/deferred limitations, not live regressions) and `tests/custom/` (also excluded).
 - `docs/architecture/` — deep internals references for specific subsystems, kept accurate and updated alongside the code they describe (e.g. `modules_and_scope_resolution.md` for the `::`/import system). Read the relevant one before making non-trivial changes to that subsystem — don't re-derive from scratch.
 - `docs/planning/` — roadmap and issue-tracker-style docs (`ROADMAP_v1.0.0.md` is the authoritative "what's done vs. open" tracker; the `PHASE_*_ISSUES.md` files are historical specs, trimmed to only the genuinely-still-open issues in detail).
 - `changelog/issueNNN.txt` — historical, permanent records of specific past changes. Not a tracker; don't edit these to reflect new work, add new ones only if following that same historical-record convention.
