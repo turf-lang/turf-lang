@@ -1,3 +1,5 @@
+import test;
+
 struct Node {
     val: int,
     next: Node*
@@ -22,13 +24,13 @@ fn main(): int {
     n1.next = &n2;
 
     // Traverse: read fields through pointer parameters
-    assert(get_val(&n1) == 1, "FAIL: n1.val should be 1");
-    assert(get_val(&n2) == 2, "FAIL: n2.val should be 2");
-    assert(get_val(&n3) == 3, "FAIL: n3.val should be 3");
+    test::assert(get_val(&n1) == 1, "FAIL: n1.val should be 1");
+    test::assert(get_val(&n2) == 2, "FAIL: n2.val should be 2");
+    test::assert(get_val(&n3) == 3, "FAIL: n3.val should be 3");
 
     // Follow .next chain to read n2's value through n1.next
-    assert(get_val(n1.next) == 2, "FAIL: n1.next.val should be 2");
-    assert(get_val(n2.next) == 3, "FAIL: n2.next.val should be 3");
+    test::assert(get_val(n1.next) == 2, "FAIL: n1.next.val should be 2");
+    test::assert(get_val(n2.next) == 3, "FAIL: n2.next.val should be 3");
 
     return 0;
 }

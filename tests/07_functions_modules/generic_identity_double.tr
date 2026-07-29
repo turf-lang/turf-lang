@@ -14,12 +14,14 @@
 // that point in the pipeline. A `bool` return had the same gap and
 // segfaulted outright; see generic_identity_scalar.tr for that case.
 
+import test;
+
 fn<T> identity(x: T): T {
     return x;
 }
 
 fn main(): int {
     mut b: double = identity(3.5);
-    assert(b == 3.5, "");
+    test::assert(b == 3.5, "");
     return 0;
 }

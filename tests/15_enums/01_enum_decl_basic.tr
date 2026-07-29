@@ -1,9 +1,11 @@
 // Test: Basic enum declaration, assignment, and compare statement
+import test;
+
 enum Direction { North, South, East, West }
 
 fn main(): int {
     immut d: Direction = Direction::North;
-    assert((d to int) == 0, "North == 0");
+    test::assert((d to int) == 0, "North == 0");
 
     mut result: int = 0;
     compare d {
@@ -20,6 +22,6 @@ fn main(): int {
             result = 4;
         done
     }
-    assert(result == 1, "compare should match North");
+    test::assert(result == 1, "compare should match North");
     return 0;
 }

@@ -4,6 +4,8 @@
 // name -- the crash fix and the "no true static methods" finding are
 // specific to the static-call form, not method calls in general.
 
+import test;
+
 struct MathUtil {}
 
 fn MathUtil.square(x: int): int {
@@ -12,6 +14,6 @@ fn MathUtil.square(x: int): int {
 
 fn main(): int {
     mut mu: MathUtil = MathUtil::default();
-    assert(mu.square(5) == 25, "instance method call should work");
+    test::assert(mu.square(5) == 25, "instance method call should work");
     return 0;
 }

@@ -17,6 +17,8 @@
 // still does (see tests/06_structs/23_self_pointer_chaining.tr for that
 // case specifically) -- this file is about the BY-VALUE half.
 
+import test;
+
 struct Node {
     val: int
 }
@@ -33,15 +35,15 @@ fn main(): int {
     mut n: Node = Node::new(42);
 
     // Chaining method calls on a returned-by-value struct instance.
-    assert(n.get_self().get_self().val == 42, "");
+    test::assert(n.get_self().get_self().val == 42, "");
 
     // The returned value is a genuine by-value COPY, not an alias: mutating
     // the original afterward must not affect a variable holding the copy.
     mut copy: Node = n.get_self();
-    assert(copy.val == 42, "");
+    test::assert(copy.val == 42, "");
     n.val = 999;
-    assert(copy.val == 42, "");
-    assert(n.val == 999, "");
+    test::assert(copy.val == 42, "");
+    test::assert(n.val == 999, "");
 
     return 0;
 }

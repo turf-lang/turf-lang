@@ -2,6 +2,8 @@
 // number of branches must NOT trigger a CyclomaticComplexityWarning.
 // 4 if-branches produces M well below 15 — compiles and runs cleanly.
 
+import test;
+
 fn simple(x: int): int {
     mut result: int = 0;
     if x > 1 { result = result + 1; }
@@ -12,7 +14,7 @@ fn simple(x: int): int {
 }
 
 fn main(): int {
-    assert(simple(5) == 4, "All 4 branches taken for x=5");
-    assert(simple(1) == 0, "No branches taken for x=1");
+    test::assert(simple(5) == 4, "All 4 branches taken for x=5");
+    test::assert(simple(1) == 0, "No branches taken for x=1");
     return 0;
 }

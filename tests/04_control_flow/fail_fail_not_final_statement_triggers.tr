@@ -1,17 +1,18 @@
 // RUNTIME_ABORT_EXPECTED
-// Companion to 14_fail_not_final_statement.tr: when the fail() branch IS
+// Companion to 14_fail_not_final_statement.tr: when the test::fail() branch IS
 // actually taken, it must still compile cleanly (see that test's doc
 // comment for the full crash history) AND actually abort at runtime --
-// the dead-block-repositioning fix must not accidentally make fail()
+// the dead-block-repositioning fix must not accidentally make test::fail()
 // stop calling abort(), or let execution fall through into the
 // "unreachable" code that follows it in source.
 
 import io;
 
+import test;
 fn checkPositive(x: int): int {
     if (x < 0) {
-        fail("checkPositive: x must not be negative");
-        io::printline("must never print: fail() should have aborted first");
+        test::fail("checkPositive: x must not be negative");
+        io::printline("must never print: test::fail() should have aborted first");
     }
     return x * 2;
 }

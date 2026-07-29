@@ -17,6 +17,8 @@
 // (via `::default()` now, not an implicit fallback inside failed brace-init
 // resolution).
 
+import test;
+
 struct Point {
     x: int,
     y: int
@@ -59,29 +61,29 @@ struct Plain {
 fn main(): int {
     // Constructor transforms inputs (x*10, y*10).
     mut p: Point = Point::new(1, 2);
-    assert(p.x == 10, "");
-    assert(p.y == 20, "");
+    test::assert(p.x == 10, "");
+    test::assert(p.y == 20, "");
 
     // Constructor normalizes a negative denominator. Unlike the old
     // brace-literal form, arguments are now positional to the CONSTRUCTOR's
     // own declared parameter order (n, d) -- there's no struct field name
     // to match against at the call site at all.
     mut f: Fraction = Fraction::new(3, -4);
-    assert(f.num == -3, "");
-    assert(f.den == 4, "");
+    test::assert(f.num == -3, "");
+    test::assert(f.den == 4, "");
 
     // Constructor substitutes a sentinel for a zero denominator.
     mut bad: Fraction = Fraction::new(5, 0);
-    assert(bad.num == 0, "");
-    assert(bad.den == 1, "");
+    test::assert(bad.num == 0, "");
+    test::assert(bad.den == 1, "");
 
     // No constructor defined for Plain -- ::default() zero-inits, then
     // fields are set directly.
     mut pl: Plain = Plain::default();
     pl.a = 7;
     pl.b = 8;
-    assert(pl.a == 7, "");
-    assert(pl.b == 8, "");
+    test::assert(pl.a == 7, "");
+    test::assert(pl.b == 8, "");
 
     return 0;
 }

@@ -1,5 +1,5 @@
-// Regression test: `fail(...)` followed by MORE statements in the same
-// block must compile and run cleanly (as long as the fail() branch is
+// Regression test: `test::fail(...)` followed by MORE statements in the same
+// block must compile and run cleanly (as long as the test::fail() branch is
 // never actually taken at runtime), not crash the compiler.
 //
 // CodegenIntrinsic's "fail" branch (src/Builtins.cpp) emits
@@ -8,14 +8,14 @@
 // statement in the same block tried to insert into an already-terminated
 // basic block -- "Internal compiler error: generated LLVM IR is invalid...
 // Terminator found in the middle of a basic block!" crashing the whole
-// compiler on any `fail(...); <more code>` shape, including the extremely
-// common `if (bad) { fail("..."); } more_code();` pattern.
+// compiler on any `test::fail(...); <more code>` shape, including the extremely
+// common `if (bad) { test::fail("..."); } more_code();` pattern.
 //
 // Fixed by mirroring the exact technique ReturnExprAST::codegen() already
 // used for the identical problem with `return`: after CreateUnreachable(),
 // reposition the builder to a fresh dead block so subsequent statements
 // have somewhere valid to codegen into. That dead block is either erased
-// (fail() was the function's last statement) or picked up and terminated
+// (test::fail() was the function's last statement) or picked up and terminated
 // by whatever construct owns the statement list (block-form if/while
 // already guard with `if (!terminator) CreateBr(...)`).
 //
@@ -23,25 +23,26 @@
 // (division/modulo-by-zero checks, array-bounds checks, string/enum
 // conversion failures -- all in Codegen.cpp) already guards with
 // `if (!Builder->GetInsertBlock()->getTerminator()) CreateUnreachable();`
-// right after calling it, specifically so the now-dead block fail() leaves
+// right after calling it, specifically so the now-dead block test::fail() leaves
 // the builder in gets its own terminator instead of staying an orphaned,
-// terminator-less block (which verifyFunction() rejects). assert()'s own
-// internal fail() call (Builtins.cpp) was missing that same guard --
+// terminator-less block (which verifyFunction() rejects). test::assert()'s own
+// internal test::fail() call (Builtins.cpp) was missing that same guard --
 // added to match the established convention.
 
 import io;
 
+import test;
 fn checkPositive(x: int): int {
     if (x < 0) {
-        fail("checkPositive: x must not be negative");
+        test::fail("checkPositive: x must not be negative");
         io::printline("unreachable: this line must never execute");
     }
     return x * 2;
 }
 
 fn main(): int {
-    assert(checkPositive(21) == 42, "checkPositive(21) should be 42");
-    assert(checkPositive(0) == 0, "checkPositive(0) should be 0");
+    test::assert(checkPositive(21) == 42, "checkPositive(21) should be 42");
+    test::assert(checkPositive(0) == 0, "checkPositive(0) should be 0");
     io::printline("all checks passed");
     return 0;
 }

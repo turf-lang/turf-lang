@@ -8,6 +8,7 @@
 
 import io;
 
+import test;
 struct Point {
     x: int,
     y: int
@@ -57,19 +58,19 @@ fn Choice.new(n: int): void {
 
 fn main(): int {
     mut p1: Point = Point::new(3, 4, false);
-    assert(p1.x == 3, "no-negate x");
-    assert(p1.y == 4, "no-negate y");
+    test::assert(p1.x == 3, "no-negate x");
+    test::assert(p1.y == 4, "no-negate y");
 
     mut p2: Point = Point::new(3, 4, true);
-    assert(p2.x == 0 - 3, "negate x");
-    assert(p2.y == 0 - 4, "negate y");
+    test::assert(p2.x == 0 - 3, "negate x");
+    test::assert(p2.y == 0 - 4, "negate y");
 
     mut c: Counter = Counter::new(5);
-    assert(c.value == 5, "counter value overwritten to start");
-    assert(c.increment == 1, "counter increment");
+    test::assert(c.value == 5, "counter value overwritten to start");
+    test::assert(c.increment == 1, "counter increment");
 
     mut ch: Choice = Choice::new(3);
-    assert(ch.picked == 2, "choice picked last loop value");
+    test::assert(ch.picked == 2, "choice picked last loop value");
 
     io::printline("constructor definite-assignment checks pass");
     return 0;

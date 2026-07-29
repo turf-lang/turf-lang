@@ -17,6 +17,7 @@
 
 import io;
 
+import test;
 struct Thing {
     val: int
 }
@@ -37,7 +38,7 @@ fn main(): int {
     // reference to `io` below must resolve as the variable.
     mut io: Thing = Thing::new(42);
     io.show();
-    assert(io.val == 42, "");
+    test::assert(io.val == 42, "");
 
     return 0;
 }

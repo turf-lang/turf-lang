@@ -1,9 +1,11 @@
 // Test: Iterate via Direction::VALUES and Direction::NAMES
+import test;
+
 enum Direction { North, East, South, West }
 
 fn main(): int {
     immut count: int = Direction::COUNT;
-    assert(count == 4, "COUNT == 4");
+    test::assert(count == 4, "COUNT == 4");
 
     immut vals: Direction* = Direction::VALUES;
     immut names: string* = Direction::NAMES;
@@ -13,14 +15,14 @@ fn main(): int {
         immut d: Direction = vals[i];
         immut n: string = names[i];
 
-        assert((d to int) == i, "VALUES element matches ordinal");
-        assert((d to string) == n, "NAMES element matches to_string cast");
+        test::assert((d to int) == i, "VALUES element matches ordinal");
+        test::assert((d to string) == n, "NAMES element matches to_string cast");
         
         // Also verify string matches
-        if i == 0 { assert(n == "North", "index 0 is North"); }
-        if i == 1 { assert(n == "East", "index 1 is East"); }
-        if i == 2 { assert(n == "South", "index 2 is South"); }
-        if i == 3 { assert(n == "West", "index 3 is West"); }
+        if i == 0 { test::assert(n == "North", "index 0 is North"); }
+        if i == 1 { test::assert(n == "East", "index 1 is East"); }
+        if i == 2 { test::assert(n == "South", "index 2 is South"); }
+        if i == 3 { test::assert(n == "West", "index 3 is West"); }
 
         i = i + 1;
     }

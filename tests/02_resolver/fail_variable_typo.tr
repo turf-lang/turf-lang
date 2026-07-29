@@ -1,8 +1,10 @@
+import test;
+
 fn main(): int {
     mut myvar: int = 5;
     
     // In-scope variable typo should suggest 'myvar'
-    assert(myvvar == 5, "Testing variable typo");
+    test::assert(myvvar == 5, "Testing variable typo");
     
     return 0;
 }

@@ -1,5 +1,7 @@
 // Test: DSA — Traffic light finite state machine
 // State: Red -> Green -> Yellow -> Red
+import test;
+
 enum TrafficLight { Red, Green, Yellow }
 
 fn next_state(state: TrafficLight): TrafficLight {
@@ -22,20 +24,20 @@ fn main(): int {
 
     // Cycle through: Red -> Green -> Yellow -> Red -> Green
     state = next_state(state);
-    assert(state == TrafficLight::Green, "Red -> Green");
+    test::assert(state == TrafficLight::Green, "Red -> Green");
 
     state = next_state(state);
-    assert(state == TrafficLight::Yellow, "Green -> Yellow");
+    test::assert(state == TrafficLight::Yellow, "Green -> Yellow");
 
     state = next_state(state);
-    assert(state == TrafficLight::Red, "Yellow -> Red");
+    test::assert(state == TrafficLight::Red, "Yellow -> Red");
 
     state = next_state(state);
-    assert(state == TrafficLight::Green, "Red -> Green again");
+    test::assert(state == TrafficLight::Green, "Red -> Green again");
 
     // Verify int values throughout
-    assert((TrafficLight::Red    to int) == 0, "Red == 0");
-    assert((TrafficLight::Green  to int) == 1, "Green == 1");
-    assert((TrafficLight::Yellow to int) == 2, "Yellow == 2");
+    test::assert((TrafficLight::Red    to int) == 0, "Red == 0");
+    test::assert((TrafficLight::Green  to int) == 1, "Green == 1");
+    test::assert((TrafficLight::Yellow to int) == 2, "Yellow == 2");
     return 0;
 }

@@ -31,14 +31,15 @@ import return_struct_module::makeOrigin;
 import return_struct_module::addPoints;
 import return_struct_module::Point;
 
+import test;
 fn main(): int {
     immut origin: Point = makeOrigin();
-    assert(origin.x == 0 && origin.y == 0, "struct returned by value from a module function");
+    test::assert(origin.x == 0 && origin.y == 0, "struct returned by value from a module function");
 
     immut a: Point = Point::new(3, 4);
     immut b: Point = Point::new(10, 20);
     immut sum: Point = addPoints(a, b);
-    assert(sum.x == 13 && sum.y == 24, "struct passed AND returned by value across the module boundary");
+    test::assert(sum.x == 13 && sum.y == 24, "struct passed AND returned by value across the module boundary");
 
     io::printline("struct-by-value across a module boundary works");
     return 0;

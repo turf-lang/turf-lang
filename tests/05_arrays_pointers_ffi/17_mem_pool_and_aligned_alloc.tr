@@ -6,6 +6,7 @@
 import mem;
 import io;
 
+import test;
 fn main(): int {
     // alloc_aligned: the returned address must actually be a multiple of
     // the requested alignment. Turf has no bitwise AND on... actually it
@@ -13,8 +14,8 @@ fn main(): int {
     // cast to check the address numerically, so this just confirms the
     // call succeeds and the memory is usable for the requested size.
     mut aligned: void* = mem::alloc_aligned(64, 128);
-    assert(aligned != null, "alloc_aligned should succeed for a valid alignment/size");
-    assert(mem::usable_size(aligned) >= 128, "usable_size must be at least what was requested");
+    test::assert(aligned != null, "alloc_aligned should succeed for a valid alignment/size");
+    test::assert(mem::usable_size(aligned) >= 128, "usable_size must be at least what was requested");
     mem::free(aligned);
 
     // Pool<T>: track a batch of allocations, then bulk-free them all in
@@ -23,14 +24,14 @@ fn main(): int {
     // its own erased T to void*, so bulk-freeing is a plain function
     // taking a concrete Pool<void*> instead).
     mut pool: mem::Pool<void*> = mem::Pool::default();
-    assert(pool.length() == 0, "a fresh pool tracks nothing");
+    test::assert(pool.length() == 0, "a fresh pool tracks nothing");
 
     mut i: int = 0;
     while i < 20 {
         pool.track(mem::alloc(16));
         i = i + 1;
     }
-    assert(pool.length() == 20, "pool must track every allocation, including across growth");
+    test::assert(pool.length() == 20, "pool must track every allocation, including across growth");
 
     mem::free_pool(pool);
 

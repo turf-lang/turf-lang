@@ -11,6 +11,8 @@
 // the by-pointer half, which already works and is the idiomatic way to do
 // method chaining in this language today.
 
+import test;
+
 struct Counter {
     val: int
 }
@@ -30,16 +32,16 @@ fn main(): int {
 
     // Single call returns a usable pointer.
     mut p: Counter* = c.increment();
-    assert(p.val == 1, "");
-    assert(c.val == 1, "");
+    test::assert(p.val == 1, "");
+    test::assert(c.val == 1, "");
 
     // Chained calls: increment().increment().increment()
     c.increment().increment().increment();
-    assert(c.val == 4, "");
+    test::assert(c.val == 4, "");
 
     // Chained call ending in a read via .get()
-    assert(c.increment().get() == 5, "");
-    assert(c.val == 5, "");
+    test::assert(c.increment().get() == 5, "");
+    test::assert(c.val == 5, "");
 
     return 0;
 }

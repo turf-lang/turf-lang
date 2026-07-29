@@ -1,4 +1,5 @@
 import io;
+import test;
 extern fn strlen(s: string): int;
 struct User { age: int, name: string }
 fn User.new(age: int, name: string): void { self.age = age; self.name = name; }
@@ -8,7 +9,7 @@ fn main(): int {
     mut u: User = User::new(10, "Alice");
     u.grow();
     
-    assert(u.age == 11, "");
+    test::assert(u.age == 11, "");
     
     u.rename("Bob");
     return 0;

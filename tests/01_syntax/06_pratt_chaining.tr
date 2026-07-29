@@ -1,3 +1,5 @@
+import test;
+
 struct Builder {
     val: int
 }
@@ -27,7 +29,7 @@ fn main(): int {
 
     // Test Pratt Parser's ability to chain method calls
     b.push(1).push(2);
-    assert(b.val == 3, "chained push(1).push(2) should leave val == 3");
+    test::assert(b.val == 3, "chained push(1).push(2) should leave val == 3");
 
     return 0;
 }

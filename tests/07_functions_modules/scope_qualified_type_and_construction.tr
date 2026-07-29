@@ -35,24 +35,25 @@
 import io;
 import list::List;
 
+import test;
 fn main(): int {
     // Bare form (unqualified) -- works here because List is on-demand
     // imported above; a plain `import list;` alone would only grant
     // qualified access now (see the bare-type visibility gate).
     mut a: List<int> = List::default();
     a.push(1);
-    assert(a.length() == 1, "bare form still works");
+    test::assert(a.length() == 1, "bare form still works");
 
     // Fully qualified form -- type annotation AND construction.
     mut b: list::List<int> = list::List::default();
     b.push(2);
-    assert(b.length() == 1, "fully qualified form works");
+    test::assert(b.length() == 1, "fully qualified form works");
 
     // Mixed form (qualified type, bare construction) -- was already
     // possible before this fix and must stay working.
     mut c: list::List<int> = List::default();
     c.push(3);
-    assert(c.length() == 1, "mixed qualified-type/bare-construction form works");
+    test::assert(c.length() == 1, "mixed qualified-type/bare-construction form works");
 
     io::printline("all module-qualifier forms work correctly");
     return 0;

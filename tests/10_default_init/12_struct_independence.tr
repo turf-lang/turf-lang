@@ -2,6 +2,7 @@
 // mutations to one don't affect the other
 import io;
 
+import test;
 struct Counter {
     value: int,
     delta: int
@@ -12,15 +13,15 @@ fn main(): int {
     mut b: Counter;
 
     // Both start at zero
-    assert(a.value == 0, "a.value initially 0");
-    assert(b.value == 0, "b.value initially 0");
+    test::assert(a.value == 0, "a.value initially 0");
+    test::assert(b.value == 0, "b.value initially 0");
 
     // Mutate a, b is unaffected
     a.value = 10;
     a.delta = 2;
-    assert(a.value == 10, "a.value after mutation");
-    assert(b.value == 0, "b.value still 0 after a mutation");
-    assert(b.delta == 0, "b.delta still 0 after a mutation");
+    test::assert(a.value == 10, "a.value after mutation");
+    test::assert(b.value == 0, "b.value still 0 after a mutation");
+    test::assert(b.delta == 0, "b.delta still 0 after a mutation");
 
     return 0;
 }

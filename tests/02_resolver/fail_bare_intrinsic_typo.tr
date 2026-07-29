@@ -7,7 +7,9 @@
 // (they're recognized via LookupBuiltin(), not registered as callable
 // symbols), so the typo corrector's SymbolTable-only candidate search never
 // saw them. Re-verified fixed: misspelling 'assert' as 'asert' now gets a
-// direct 'assert(...)' suggestion.
+// direct 'test::assert(...)' suggestion.
+import test;
+
 fn main(): int {
     asert(1 == 1);
     return 0;

@@ -1,5 +1,6 @@
 import io;
 
+import test;
 fn main(): int {
     mut a: bool = true && false;
     mut b: bool = true || false;
@@ -8,12 +9,12 @@ fn main(): int {
     mut e: bool = 5 == 5;
     mut f: bool = 5 != 3;
 
-    assert(a == false, "");
-    assert(b == true, "");
-    assert(c == true, "");
-    assert(d == true, "");
-    assert(e == true, "");
-    assert(f == true, "");
+    test::assert(a == false, "");
+    test::assert(b == true, "");
+    test::assert(c == true, "");
+    test::assert(d == true, "");
+    test::assert(e == true, "");
+    test::assert(f == true, "");
 
     return 0;
 }

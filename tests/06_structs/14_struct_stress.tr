@@ -3,6 +3,8 @@
 // This test exercises deep nesting, chaining field access through pointers,
 // and passing structs by value vs pointer in complex nested arrangements.
 
+import test;
+
 struct Point {
     x: int,
     y: int
@@ -57,7 +59,7 @@ fn main(): int {
     mut p2: Point = Point::new(10, 5);
     mut r: Rect = Rect::new(p1, p2);
 
-    assert(area(r) == 50, "FAIL: Rect area calculation");
+    test::assert(area(r) == 50, "FAIL: Rect area calculation");
 
     mut root: GraphNode = GraphNode::new(100, null, null, &r);
     mut left: GraphNode = GraphNode::new(50, null, null, null);
@@ -67,17 +69,17 @@ fn main(): int {
     root.right = &right;
     
     // Test recursive structure traversal
-    assert(sum_graph(&root) == 300, "FAIL: Graph tree sum");
+    test::assert(sum_graph(&root) == 300, "FAIL: Graph tree sum");
     
     // Test deep field access through a mix of direct fields and pointer fields
     // root (GraphNode) -> data (Rect*) -> bottom_right (Point) -> x (int)
-    assert(root.data.bottom_right.x == 10, "FAIL: Deep nested field access x");
-    assert(root.data.bottom_right.y == 5, "FAIL: Deep nested field access y");
+    test::assert(root.data.bottom_right.x == 10, "FAIL: Deep nested field access x");
+    test::assert(root.data.bottom_right.y == 5, "FAIL: Deep nested field access y");
 
     // Modify deep field and verify
     root.data.bottom_right.x = 20;
-    assert(r.bottom_right.x == 20, "FAIL: Mutation through pointer didn't persist");
-    assert(area(r) == 100, "FAIL: Area didn't update after deep mutation");
+    test::assert(r.bottom_right.x == 20, "FAIL: Mutation through pointer didn't persist");
+    test::assert(area(r) == 100, "FAIL: Area didn't update after deep mutation");
 
     return 0;
 }

@@ -5,23 +5,24 @@
 
 import io;
 
+import test;
 fn main(): int {
-    assert("apple" < "banana", "apple < banana");
-    assert("a" < "b", "a < b");
-    assert("A" < "a", "A < a (uppercase < lowercase in ASCII)");
+    test::assert("apple" < "banana", "apple < banana");
+    test::assert("a" < "b", "a < b");
+    test::assert("A" < "a", "A < a (uppercase < lowercase in ASCII)");
 
-    assert("z" > "a", "z > a");
-    assert("banana" > "apple", "banana > apple");
+    test::assert("z" > "a", "z > a");
+    test::assert("banana" > "apple", "banana > apple");
 
-    assert("cat" <= "cat", "cat <= cat (equality)");
-    assert("apple" <= "banana", "apple <= banana");
+    test::assert("cat" <= "cat", "cat <= cat (equality)");
+    test::assert("apple" <= "banana", "apple <= banana");
 
-    assert("dog" >= "cat", "dog >= cat");
-    assert("cat" >= "cat", "cat >= cat (equality)");
+    test::assert("dog" >= "cat", "dog >= cat");
+    test::assert("cat" >= "cat", "cat >= cat (equality)");
 
     // Negatives
-    assert(("banana" < "apple") == false, "banana < apple must be false");
-    assert(("a" > "z") == false, "a > z must be false");
+    test::assert(("banana" < "apple") == false, "banana < apple must be false");
+    test::assert(("a" > "z") == false, "a > z must be false");
 
     io::printline("03 PASS: string ordering operators");
     return 0;

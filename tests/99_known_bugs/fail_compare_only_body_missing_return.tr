@@ -1,4 +1,4 @@
-// KNOWN, TRACKED, ACCEPTED LIMITATION -- this file lives in 10_known_bugs/,
+// KNOWN, TRACKED, ACCEPTED LIMITATION -- this file lives in 99_known_bugs/,
 // which scripts/test_runner.sh deliberately excludes from the main suite, so
 // it is not asserted either way by `./scripts/test_runner.sh`.
 //
@@ -17,7 +17,7 @@
 // intentional idiom throughout this codebase's own test suite: the same
 // kind of exhaustive compare, immediately followed by a redundant "belt
 // and suspenders" trailing `return` (see
-// tests/14_enums/20_compare_param_subject_exhaustive.tr, and pre-existing
+// tests/15_enums/20_compare_param_subject_exhaustive.tr, and pre-existing
 // tests like 13_dsa_state_machine.tr, 15_dsa_direction_navigation.tr,
 // 16_dsa_priority_levels.tr, and others -- confirmed to break at least 7
 // existing tests each time). Since the codebase clearly prefers "always
@@ -39,6 +39,8 @@
 // treat its AllTerminate result, rather than visitCompare() deciding in
 // isolation. Flagged for a future CFG pass rather than chased down here.
 
+import test;
+
 enum Direction { North, East, South, West }
 
 fn describe(d: Direction): int {
@@ -59,6 +61,6 @@ fn describe(d: Direction): int {
 }
 
 fn main(): int {
-    assert(describe(Direction::North) == 1, "");
+    test::assert(describe(Direction::North) == 1, "");
     return 0;
 }

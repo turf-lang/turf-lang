@@ -1,30 +1,31 @@
 import io;
 
+import test;
 fn main(): int {
     // Basic string literal
     mut a: int = lengthof("hello");
-    assert(a == 5, "");
+    test::assert(a == 5, "");
 
     // Empty string must return 0
     mut b: int = lengthof("");
-    assert(b == 0, "");
+    test::assert(b == 0, "");
 
     // Three-character string
     mut c: int = lengthof("abc");
-    assert(c == 3, "");
+    test::assert(c == 3, "");
 
     // Stored in a variable first
     mut s: string = "Turf";
     mut d: int = lengthof(s);
-    assert(d == 4, "");
+    test::assert(d == 4, "");
 
     // Used directly in an expression
     mut e: int = lengthof("hi") + lengthof("!");
-    assert(e == 3, "");
+    test::assert(e == 3, "");
 
     // Longer string
     mut f: int = lengthof("Hello, World!");
-    assert(f == 13, "");
+    test::assert(f == 13, "");
     
     return 0;
 }

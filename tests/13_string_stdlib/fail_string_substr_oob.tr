@@ -1,6 +1,6 @@
 // tests/13_string_stdlib/fail_string_substr_oob.tr
 // NEGATIVE TEST — must compile successfully, then abort at RUNTIME.
-// strings::substring with an out-of-bounds end index must call fail().
+// strings::substring with an out-of-bounds end index must call test::fail().
 // RUNTIME_ABORT_EXPECTED
 //
 // Expected: Runtime abort with "strings.substring: index out of bounds".
@@ -18,6 +18,7 @@
 import io;
 import strings;
 
+import test;
 fn main(): int {
     // "hi" has length 2; asking for [5, 10] is out of bounds.
     mut s: string = strings::substring("hi", 5, 10);

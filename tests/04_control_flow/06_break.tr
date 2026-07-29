@@ -1,3 +1,5 @@
+import test;
+
 fn main(): int {
     mut i: int = 0;
     mut sum: int = 0;
@@ -10,8 +12,8 @@ fn main(): int {
         i = i + 1;
     }
 
-    assert(sum == 10, "");
-    assert(i == 5, "");
+    test::assert(sum == 10, "");
+    test::assert(i == 5, "");
 
     return 0;
 }

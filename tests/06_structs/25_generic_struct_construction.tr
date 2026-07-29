@@ -51,9 +51,11 @@
 //      unrelated-looking "you're trying to use 'p' before telling me what
 //      it is" error at the NEXT place that variable happened to be
 //      referenced in a way Codegen actually reached (this specific failure
-//      mode only became visible once the call was wrapped in `assert()`,
+//      mode only became visible once the call was wrapped in `test::assert()`,
 //      since TypeChecker's earlier, unrelated rejections in other contexts
 //      had been masking it).
+
+import test;
 
 struct Box<T> {
     val: T*
@@ -73,14 +75,14 @@ fn main(): int {
     // zero-inits it to null, exactly the value the old brace-literal spelled
     // out explicitly.
     mut b: Box<int> = Box::default();
-    assert(b.val == null, "");
+    test::assert(b.val == null, "");
 
     // Generic method call: set() takes T* (int*), get() returns T* (int*).
     mut n: int = 42;
     b.set(&n);
     mut p: int* = b.get();
-    assert(p == &n, "");
-    assert(p != null, "");
+    test::assert(p == &n, "");
+    test::assert(p != null, "");
 
     // A second, independently-typed instantiation of the SAME generic
     // struct in the same file, to confirm the shared-layout model doesn't
@@ -89,7 +91,7 @@ fn main(): int {
     mut s: string = "hello";
     sb.set(&s);
     mut sp: string* = sb.get();
-    assert(sp == &s, "");
+    test::assert(sp == &s, "");
 
     return 0;
 }

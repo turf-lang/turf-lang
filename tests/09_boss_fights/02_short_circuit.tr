@@ -1,3 +1,5 @@
+import test;
+
 struct Flag {
     val: int
 }
@@ -11,10 +13,10 @@ fn main(): int {
     mut f: Flag = Flag::default();
     
     if false && f.side_effect() {
-        assert(false, "Entered if block");
+        test::assert(false, "Entered if block");
     }
 
-    assert(f.val == 0, "side_effect should NOT have run! Short-circuiting failed!");
+    test::assert(f.val == 0, "side_effect should NOT have run! Short-circuiting failed!");
 
     return 0;
 }

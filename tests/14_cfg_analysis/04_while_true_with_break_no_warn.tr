@@ -5,6 +5,8 @@
 // satisfying condition (1) of hasUnbreakableLoop() — so the check correctly
 // recognises the loop as breakable and emits no warning.
 
+import test;
+
 fn main(): int {
     mut x: int = 0;
     while true {
@@ -13,6 +15,6 @@ fn main(): int {
             break;
         }
     }
-    assert(x == 11, "Loop exited after x reached 11");
+    test::assert(x == 11, "Loop exited after x reached 11");
     return 0;
 }

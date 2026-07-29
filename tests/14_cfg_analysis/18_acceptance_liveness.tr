@@ -9,6 +9,8 @@
 // AC1 is verified at runtime (function executes correctly).
 // AC2 and AC3 each trigger non-fatal warnings; compilation continues.
 
+import test;
+
 fn ac1(a: int): int {
     mutable x: int = 5;
     mutable y: int = x + 1;
@@ -29,10 +31,10 @@ fn ac3(): int {
 
 fn main(): int {
     mutable r: int = ac1(0);
-    assert(r == 6, "AC1: y = x + 1 = 6");
+    test::assert(r == 6, "AC1: y = x + 1 = 6");
     mutable r2: int = ac2();
-    assert(r2 == 0, "AC2: returns 0 despite unused x");
+    test::assert(r2 == 0, "AC2: returns 0 despite unused x");
     mutable r3: int = ac3();
-    assert(r3 == 10, "AC3: returns 10 despite dead store on x=5");
+    test::assert(r3 == 10, "AC3: returns 10 despite dead store on x=5");
     return 0;
 }

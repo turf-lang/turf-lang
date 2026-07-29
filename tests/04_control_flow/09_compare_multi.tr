@@ -1,5 +1,6 @@
 import io;
 
+import test;
 fn main(): int {
     mut x: int = 2;
     mut result: int = 0;
@@ -15,7 +16,7 @@ fn main(): int {
         otherwise:
             result = 999;
     }
-    assert(result == 100, "stacked matches: x=2 should hit shared body");
+    test::assert(result == 100, "stacked matches: x=2 should hit shared body");
 
     mut y: int = 5;
     mut result2: int = 0;
@@ -28,7 +29,7 @@ fn main(): int {
         otherwise:
             result2 = 200;
     }
-    assert(result2 == 200, "stacked matches: x=5 should hit otherwise");
+    test::assert(result2 == 200, "stacked matches: x=5 should hit otherwise");
 
     return 0;
 }

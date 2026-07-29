@@ -1,3 +1,5 @@
+import test;
+
 struct Data {
     id: int,
     name: string
@@ -50,9 +52,9 @@ fn main(): int {
     mut root: Node = createNode(10, null, &l_node, &r_node);
 
     // Verify properties
-    assert(root.data == null, "root data should be null");
-    assert(root.left != null, "root left should not be null");
-    assert(root.right != null, "root right should not be null");
+    test::assert(root.data == null, "root data should be null");
+    test::assert(root.left != null, "root left should not be null");
+    test::assert(root.right != null, "root right should not be null");
 
     // Traverse and find values using the recursive function which checks against null
     mut found_10: bool = findVal(&root, 10);
@@ -60,15 +62,15 @@ fn main(): int {
     mut found_15: bool = findVal(&root, 15);
     mut found_100: bool = findVal(&root, 100);
 
-    assert(found_10 == true, "should find 10");
-    assert(found_5 == true, "should find 5");
-    assert(found_15 == true, "should find 15");
-    assert(found_100 == false, "should not find 100");
+    test::assert(found_10 == true, "should find 10");
+    test::assert(found_5 == true, "should find 5");
+    test::assert(found_15 == true, "should find 15");
+    test::assert(found_100 == false, "should not find 100");
 
     // Re-assign pointers to null and check behavior
     mut p_node: Node* = &root;
     p_node = null;
-    assert(p_node == null, "p_node should be successfully assigned to null");
+    test::assert(p_node == null, "p_node should be successfully assigned to null");
 
     // Chain pointers in multiple levels
     mut current: Node* = &root;
@@ -81,7 +83,7 @@ fn main(): int {
             current = null;
         }
     }
-    assert(count == 2, "should iterate twice");
+    test::assert(count == 2, "should iterate twice");
 
     return 0;
 }

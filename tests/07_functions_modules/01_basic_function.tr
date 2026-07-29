@@ -1,10 +1,12 @@
+import test;
+
 fn add(a: int, b: int): int {
     return a + b;
 }
 
 fn main(): int {
     mut result: int = add(3, 7);
-    assert(result == 10, "");
+    test::assert(result == 10, "");
 
     return 0;
 }

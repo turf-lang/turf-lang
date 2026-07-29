@@ -1,3 +1,5 @@
+import test;
+
 struct Point {
     x: int,
     y: int
@@ -18,8 +20,8 @@ fn main(): int {
     grid[0] = Point::new(1, 2);
     grid[1] = Point::new(3, 4);
 
-    assert(grid[0].x == 1, "FAIL: array of structs read index 0");
-    assert(grid[1].y == 4, "FAIL: array of structs read index 1");
+    test::assert(grid[0].x == 1, "FAIL: array of structs read index 0");
+    test::assert(grid[1].y == 4, "FAIL: array of structs read index 1");
 
     // Test struct containing array -- Polygon::default() zero-inits the
     // fixed-size Point[3] array, then each element is set individually.
@@ -28,8 +30,8 @@ fn main(): int {
     poly.points[1] = Point::new(20, 21);
     poly.points[2] = Point::new(30, 31);
 
-    assert(poly.points[0].x == 10, "FAIL: struct of arrays read [0].x");
-    assert(poly.points[2].y == 31, "FAIL: struct of arrays read [2].y");
+    test::assert(poly.points[0].x == 10, "FAIL: struct of arrays read [0].x");
+    test::assert(poly.points[2].y == 31, "FAIL: struct of arrays read [2].y");
 
     return 0;
 }

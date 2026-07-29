@@ -11,6 +11,8 @@
 // Both re-verified fixed; this file covers a few variations (different
 // sizes, a 2D array, reassigning an already-declared array from a call).
 
+import test;
+
 fn make3(): int[3] {
     mut a: int[3] = [1, 2, 3];
     return a;
@@ -27,21 +29,21 @@ fn make2d(): int[2][2] {
 fn main(): int {
     // Assign directly from a function call (not a literal).
     mut a: int[3] = make3();
-    assert(a[0] == 1, "");
-    assert(a[1] == 2, "");
-    assert(a[2] == 3, "");
+    test::assert(a[0] == 1, "");
+    test::assert(a[1] == 2, "");
+    test::assert(a[2] == 3, "");
 
     mut b: int[5] = make5();
-    assert(b[4] == 50, "");
+    test::assert(b[4] == 50, "");
 
     // Reassign an already-declared array variable from a function call.
     b = make5();
-    assert(b[0] == 10, "");
+    test::assert(b[0] == 10, "");
 
     // 2D array returned and assigned from a call.
     mut c: int[2][2] = make2d();
-    assert(c[1][0] == 3, "");
-    assert(c[1][1] == 4, "");
+    test::assert(c[1][0] == 3, "");
+    test::assert(c[1][1] == 4, "");
 
     return 0;
 }

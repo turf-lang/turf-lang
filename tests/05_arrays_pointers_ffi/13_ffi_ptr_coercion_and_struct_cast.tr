@@ -10,6 +10,8 @@
 //        allocation of structs / building heap-based recursive structures.
 // Both re-verified fixed.
 
+import test;
+
 extern fn malloc(size: int): ptr;
 extern fn free(p: ptr): void;
 
@@ -20,13 +22,13 @@ struct Node {
 fn main(): int {
     // #15: untyped `ptr` from malloc coerces directly into a typed pointer.
     mut ip: int* = malloc(8);
-    assert(ip != null, "");
+    test::assert(ip != null, "");
 
     // #23: explicit ptr -> struct-pointer cast, for heap-allocated structs.
     mut raw: ptr = malloc(8);
     mut h: Node* = raw to Node*;
     h.val = 77;
-    assert(h.val == 77, "");
+    test::assert(h.val == 77, "");
 
     free(raw);
     free(ip);

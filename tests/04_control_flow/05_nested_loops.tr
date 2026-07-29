@@ -1,3 +1,5 @@
+import test;
+
 fn main(): int {
     mut total: int = 0;
     for i in 1..5 step i += 1 {
@@ -13,7 +15,7 @@ fn main(): int {
             total = total + (i * j);
         }
     }
-    assert(total == 72, "");
+    test::assert(total == 72, "");
 
     return 0;
 }

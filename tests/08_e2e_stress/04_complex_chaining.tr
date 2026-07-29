@@ -1,5 +1,6 @@
 import io;
 
+import test;
 fn get_index(): int {
     return 2;
 }
@@ -12,10 +13,10 @@ fn main(): int {
     mut arr: int[5] = [10, 20, 30, 40, 50];
 
     // 1. Deep grouping
-    assert(((((arr))))[1] == 20, "");
+    test::assert(((((arr))))[1] == 20, "");
 
     // 2. Using a function call as an index
-    assert(arr[get_index()] == 30, "");
+    test::assert(arr[get_index()] == 30, "");
 
     // 3. Function call using a grouped base
     if true {
@@ -35,9 +36,9 @@ fn main(): int {
         i = i + 1;
     }
 
-    assert(arr[0] == 20, "");
-    assert(arr[1] == 40, "");
-    assert(arr[2] == 60, "");
+    test::assert(arr[0] == 20, "");
+    test::assert(arr[1] == 40, "");
+    test::assert(arr[2] == 60, "");
 
     return 0;
 }

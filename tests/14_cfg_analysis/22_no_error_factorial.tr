@@ -1,5 +1,7 @@
 // Regression test (#186 acceptance criteria):
 // factorial has a base case (n == 0 → return 1). Must compile and run correctly.
+import test;
+
 fn factorial(n: int): int {
     if n == 0 {
         return 1;
@@ -7,8 +9,8 @@ fn factorial(n: int): int {
     return n * factorial(n - 1);
 }
 fn main(): int {
-    assert(factorial(0) == 1,  "0! = 1");
-    assert(factorial(1) == 1,  "1! = 1");
-    assert(factorial(5) == 120, "5! = 120");
+    test::assert(factorial(0) == 1,  "0! = 1");
+    test::assert(factorial(1) == 1,  "1! = 1");
+    test::assert(factorial(5) == 120, "5! = 120");
     return 0;
 }

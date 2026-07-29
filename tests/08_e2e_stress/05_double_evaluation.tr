@@ -1,5 +1,6 @@
 import io;
 
+import test;
 extern fn malloc(size: int): int*;
 extern fn free(p: int*): void;
 
@@ -15,22 +16,22 @@ fn main(): int {
 
     // Regular assignment should evaluate LHS once
     arr[get_index(counter)] = 50;
-    assert(counter[0] == 1, "Counter should be 1 after normal assignment");
+    test::assert(counter[0] == 1, "Counter should be 1 after normal assignment");
 
     // Compound assignment should evaluate LHS once
     arr[get_index(counter)] += 20;
-    assert(counter[0] == 2, "Counter should be 2 after compound assignment");
-    assert(arr[0] == 70, "arr[0] should be 70");
+    test::assert(counter[0] == 2, "Counter should be 2 after compound assignment");
+    test::assert(arr[0] == 70, "arr[0] should be 70");
 
     // Postfix should evaluate LHS once
     arr[get_index(counter)]++;
-    assert(counter[0] == 3, "Counter should be 3 after postfix increment");
-    assert(arr[0] == 71, "arr[0] should be 71");
+    test::assert(counter[0] == 3, "Counter should be 3 after postfix increment");
+    test::assert(arr[0] == 71, "arr[0] should be 71");
     
     // Postfix decrement
     arr[get_index(counter)]--;
-    assert(counter[0] == 4, "Counter should be 4 after postfix decrement");
-    assert(arr[0] == 70, "arr[0] should be 70");
+    test::assert(counter[0] == 4, "Counter should be 4 after postfix decrement");
+    test::assert(arr[0] == 70, "arr[0] should be 70");
 
     free(counter);
 

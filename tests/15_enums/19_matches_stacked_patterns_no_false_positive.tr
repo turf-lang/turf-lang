@@ -6,6 +6,8 @@
 // are distinct variants/values, each appearing exactly once across the
 // whole compare block.
 
+import test;
+
 enum Color { Red, Green, Blue, Yellow }
 
 fn classify(c: Color): string {
@@ -24,10 +26,10 @@ fn classify(c: Color): string {
 }
 
 fn main(): int {
-    assert(classify(Color::Red) == "warm", "");
-    assert(classify(Color::Yellow) == "warm", "");
-    assert(classify(Color::Green) == "cool", "");
-    assert(classify(Color::Blue) == "cool", "");
+    test::assert(classify(Color::Red) == "warm", "");
+    test::assert(classify(Color::Yellow) == "warm", "");
+    test::assert(classify(Color::Green) == "cool", "");
+    test::assert(classify(Color::Blue) == "cool", "");
 
     // Distinct int literal patterns (not duplicates) must also still work.
     mut x: int = 2;
@@ -45,7 +47,7 @@ fn main(): int {
         otherwise:
             result = -1;
     }
-    assert(result == 20, "");
+    test::assert(result == 20, "");
 
     return 0;
 }

@@ -10,6 +10,7 @@
 
 import io;
 
+import test;
 enum Direction { North, East, South, West }
 
 fn describe(d: Direction): int {
@@ -31,10 +32,10 @@ fn describe(d: Direction): int {
 }
 
 fn main(): int {
-    assert(describe(Direction::North) == 1, "");
-    assert(describe(Direction::East) == 2, "");
-    assert(describe(Direction::South) == 3, "");
-    assert(describe(Direction::West) == 4, "");
+    test::assert(describe(Direction::North) == 1, "");
+    test::assert(describe(Direction::East) == 2, "");
+    test::assert(describe(Direction::South) == 3, "");
+    test::assert(describe(Direction::West) == 4, "");
     io::printline("ok");
     return 0;
 }

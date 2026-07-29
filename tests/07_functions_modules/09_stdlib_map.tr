@@ -5,26 +5,27 @@
 import map::Map;
 import io;
 
+import test;
 fn main(): int {
     mut m: Map<string, int>;
     m.put("a", 1);
     m.put("b", 2);
     m.put("c", 3);
-    assert(m.length() == 3, "");
-    assert(m.get("a") == 1, "");
-    assert(m.get("b") == 2, "");
-    assert(m.get("c") == 3, "");
-    assert(m.contains("a") == true, "");
-    assert(m.contains("z") == false, "");
+    test::assert(m.length() == 3, "");
+    test::assert(m.get("a") == 1, "");
+    test::assert(m.get("b") == 2, "");
+    test::assert(m.get("c") == 3, "");
+    test::assert(m.contains("a") == true, "");
+    test::assert(m.contains("z") == false, "");
 
     // Overwriting an existing key must not grow the map.
     m.put("a", 100);
-    assert(m.length() == 3, "");
-    assert(m.get("a") == 100, "");
+    test::assert(m.length() == 3, "");
+    test::assert(m.get("a") == 100, "");
 
     m.remove("b");
-    assert(m.length() == 2, "");
-    assert(m.contains("b") == false, "");
+    test::assert(m.length() == 2, "");
+    test::assert(m.contains("b") == false, "");
 
     // Force growth past the initial capacity (8) -- a separate int-keyed
     // map, since `m` above is string-keyed.
@@ -34,8 +35,8 @@ fn main(): int {
         ints.put(i, i * 2);
         i = i + 1;
     }
-    assert(ints.length() == 20, "");
-    assert(ints.get(19) == 38, "");
+    test::assert(ints.length() == 20, "");
+    test::assert(ints.get(19) == 38, "");
 
     // int -> double instantiation, exercising the double-erasure argument-
     // passing path (see 10_generic_double_erasure.tr for the dedicated,
@@ -43,8 +44,8 @@ fn main(): int {
     mut prices: Map<int, double>;
     prices.put(1, 1.5);
     prices.put(2, 2.75);
-    assert(prices.get(1) == 1.5, "");
-    assert(prices.get(2) == 2.75, "");
+    test::assert(prices.get(1) == 1.5, "");
+    test::assert(prices.get(2) == 2.75, "");
 
     io::printline("map ok");
     return 0;

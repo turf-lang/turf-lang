@@ -23,6 +23,8 @@
 // correctly. The docstring was stale; this file now exercises all three
 // directly instead of working around them.
 
+import test;
+
 struct Node {
     val: int,
     next: Node*
@@ -78,57 +80,57 @@ fn main(): int {
 
     // ── Real chaining via address-of ─────────────────────────────────────────
     // n1 -> n2 -> n3 -> null
-    assert(n1.next.val == 20, "n1.next should point at n2 (val 20)");
-    assert(n1.next.next.val == 30, "n1.next.next should point at n3 (val 30)");
-    assert(n1.next.next.next == null, "n3.next should still be null");
+    test::assert(n1.next.val == 20, "n1.next should point at n2 (val 20)");
+    test::assert(n1.next.next.val == 30, "n1.next.next should point at n3 (val 30)");
+    test::assert(n1.next.next.next == null, "n3.next should still be null");
 
     // ── fn(p: Node*) field access on a chained pointer ───────────────────────
-    assert(nodeVal(n1.next) == 20, "nodeVal(n1.next) should read n2.val");
-    assert(nodeVal(n1.next.next) == 30, "nodeVal(n1.next.next) should read n3.val");
+    test::assert(nodeVal(n1.next) == 20, "nodeVal(n1.next) should read n2.val");
+    test::assert(nodeVal(n1.next.next) == 30, "nodeVal(n1.next.next) should read n3.val");
 
     // ── Mutating method: self.val = v persists to the caller ────────────────
     n2.setVal(99);
-    assert(n2.val == 99, "n2.val should be 99 after setVal(99)");
-    assert(n1.next.val == 99, "n1.next.val should see the mutation through the chain");
+    test::assert(n2.val == 99, "n2.val should be 99 after setVal(99)");
+    test::assert(n1.next.val == 99, "n1.next.val should see the mutation through the chain");
     n2.setVal(20); // restore for the assertions below
 
     // ── Field reads ───────────────────────────────────────────────────────────
-    assert(n1.val == 10, "n1.val should be 10");
-    assert(n2.val == 20, "n2.val should be 20");
-    assert(n3.val == 30, "n3.val should be 30");
+    test::assert(n1.val == 10, "n1.val should be 10");
+    test::assert(n2.val == 20, "n2.val should be 20");
+    test::assert(n3.val == 30, "n3.val should be 30");
 
     // ── is_tail: only n3 (next == null) is a tail; n1/n2 point onward ────────
-    assert(n1.is_tail() == false, "n1 should not be a tail (points at n2)");
-    assert(n2.is_tail() == false, "n2 should not be a tail (points at n3)");
-    assert(n3.is_tail() == true, "n3 should be a tail");
+    test::assert(n1.is_tail() == false, "n1 should not be a tail (points at n2)");
+    test::assert(n2.is_tail() == false, "n2 should not be a tail (points at n3)");
+    test::assert(n3.is_tail() == true, "n3 should be a tail");
 
     // ── get(): read-only accessor ─────────────────────────────────────────────
-    assert(n1.get() == 10, "n1.get() should be 10");
-    assert(n2.get() == 20, "n2.get() should be 20");
-    assert(n3.get() == 30, "n3.get() should be 30");
+    test::assert(n1.get() == 10, "n1.get() should be 10");
+    test::assert(n2.get() == 20, "n2.get() should be 20");
+    test::assert(n3.get() == 30, "n3.get() should be 30");
 
     // ── Direct field mutation ─────────────────────────────────────────────────
     // Both direct field assignment and method-based mutation (setVal above) work.
     n1.val = 5;
-    assert(n1.val == 5, "n1.val should be 5 after direct assignment");
+    test::assert(n1.val == 5, "n1.val should be 5 after direct assignment");
     n1.val = 10;   // restore
 
     // ── Summation (list reduce) ───────────────────────────────────────────────
     // Equivalent to summing over [n1.val=10, n2.val=20, n3.val=30]
     mut total: int = sum2(sum2(n1.val, n2.val), n3.val);
-    assert(total == 60, "sum of [10, 20, 30] should be 60");
+    test::assert(total == 60, "sum of [10, 20, 30] should be 60");
 
     // ── Max across nodes ──────────────────────────────────────────────────────
     mut biggest: int = max2(max2(n1.val, n2.val), n3.val);
-    assert(biggest == 30, "max of [10, 20, 30] should be 30");
+    test::assert(biggest == 30, "max of [10, 20, 30] should be 30");
 
     // ── Conceptual "prepend": replace head value ──────────────────────────────
     n1.val = 0;
     mut new_total: int = sum2(sum2(n1.val, n2.val), n3.val);
-    assert(new_total == 50, "sum after head mutation should be 50");
+    test::assert(new_total == 50, "sum after head mutation should be 50");
 
     // ── Null sentinel on the tail's next pointer field ────────────────────────
-    assert(n3.next == null, "n3.next should be null (n3 is the tail)");
+    test::assert(n3.next == null, "n3.next should be null (n3 is the tail)");
 
     return 0;
 }

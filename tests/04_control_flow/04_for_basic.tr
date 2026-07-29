@@ -1,10 +1,11 @@
 import io;
 
+import test;
 fn main(): int {
     mut sum: int = 0;
     for i in 1..10 step i += 1 {
         sum = sum + i;
     }
-    assert(sum == 45, "");
+    test::assert(sum == 45, "");
     return 0;
 }

@@ -13,12 +13,13 @@
 import io;
 import static_shape_module::Vec2;
 
+import test;
 fn main(): int {
     immut z: Vec2 = static_shape_module::Vec2::zero();
-    assert(z.x == 0 && z.y == 0, "fully qualified static method call across a module works");
+    test::assert(z.x == 0 && z.y == 0, "fully qualified static method call across a module works");
 
     immut v: Vec2 = Vec2::make(3, 4);
-    assert(v.length2() == 25, "bare static method call (via on-demand import) works, chained with an instance method");
+    test::assert(v.length2() == 25, "bare static method call (via on-demand import) works, chained with an instance method");
 
     io::printline("static methods across a module boundary work");
     return 0;

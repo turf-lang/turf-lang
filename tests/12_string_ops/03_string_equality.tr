@@ -1,15 +1,16 @@
 // Test: String equality and inequality operators
 import io;
 
+import test;
 fn main(): int {
     mut a: string = "hello";
     mut b: string = "hello";
     mut c: string = "world";
 
-    assert(a == b, "Equal strings should compare equal");
-    assert(a != c, "Different strings should compare not equal");
-    assert(!(a == c), "Different strings should not compare equal");
-    assert(!(a != b), "Equal strings should not compare not equal");
+    test::assert(a == b, "Equal strings should compare equal");
+    test::assert(a != c, "Different strings should compare not equal");
+    test::assert(!(a == c), "Different strings should not compare equal");
+    test::assert(!(a != b), "Equal strings should not compare not equal");
 
     return 0;
 }

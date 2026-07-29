@@ -9,26 +9,27 @@
 
 import io;
 
+import test;
 fn make_label(n: int): string {
     return n to string;
 }
 
 fn main(): int {
     mut a: string = make_label(42);
-    assert(a == "42", "int 42 to string failed");
+    test::assert(a == "42", "int 42 to string failed");
 
     mut b: string = make_label(0 - 7);
-    assert(b == "-7", "int -7 to string failed");
+    test::assert(b == "-7", "int -7 to string failed");
 
     mut c: string = make_label(0);
-    assert(c == "0", "int 0 to string failed");
+    test::assert(c == "0", "int 0 to string failed");
 
     mut d: string = make_label(2147483647);
-    assert(d == "2147483647", "int max to string failed");
+    test::assert(d == "2147483647", "int max to string failed");
 
     // Chain: return from one function, pass to another
     mut e: string = make_label(make_label(99) to int);
-    assert(e == "99", "round-trip int->string->int->string failed");
+    test::assert(e == "99", "round-trip int->string->int->string failed");
 
     io::printline("01 PASS: int to string return");
     return 0;

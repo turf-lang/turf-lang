@@ -5,6 +5,8 @@
 // Each `if` branch adds one extra CFG edge (condition-true vs condition-false),
 // raising M by 1. With 16 branches M ≥ 16, which exceeds the threshold of 15.
 
+import test;
+
 fn complex(x: int): int {
     mut result: int = 0;
     if x > 1  { result = result + 1; }
@@ -28,6 +30,6 @@ fn complex(x: int): int {
 
 fn main(): int {
     mut r: int = complex(20);
-    assert(r == 16, "All 16 branches taken for x=20");
+    test::assert(r == 16, "All 16 branches taken for x=20");
     return 0;
 }

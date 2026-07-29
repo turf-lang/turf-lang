@@ -1,6 +1,7 @@
 // Test: struct containing all primitive types — all zero-default
 import io;
 
+import test;
 struct AllTypes {
     i: int,
     d: double,
@@ -10,9 +11,9 @@ struct AllTypes {
 
 fn main(): int {
     mut a: AllTypes;
-    assert(a.i == 0, "int field default 0");
-    assert(a.d == 0.0, "double field default 0.0");
-    assert(a.b == false, "bool field default false");
-    assert(a.s == "", "string field default empty");
+    test::assert(a.i == 0, "int field default 0");
+    test::assert(a.d == 0.0, "double field default 0.0");
+    test::assert(a.b == false, "bool field default false");
+    test::assert(a.s == "", "string field default empty");
     return 0;
 }

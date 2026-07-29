@@ -5,8 +5,9 @@
 
 import math::[*];
 
+import test;
 fn main(): int {
-    assert(abs(-5) == 5, "abs should be bare-callable via wildcard import");
-    assert(max(3, 7) == 7, "max should be bare-callable via wildcard import");
+    test::assert(abs(-5) == 5, "abs should be bare-callable via wildcard import");
+    test::assert(max(3, 7) == 7, "max should be bare-callable via wildcard import");
     return 0;
 }

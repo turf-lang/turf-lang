@@ -10,7 +10,8 @@
 
 import nested_chain_a_module::aFunc;
 
+import test;
 fn main(): int {
-    assert(aFunc() == 102, "3-deep nested on-demand import chain resolves correctly");
+    test::assert(aFunc() == 102, "3-deep nested on-demand import chain resolves correctly");
     return 0;
 }

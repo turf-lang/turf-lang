@@ -16,11 +16,12 @@
 // use 'p' before telling me what it is." -- nowhere near the real bug.
 //
 // See also tests/06_structs/16_struct_rvalue.tr, which exercises the same
-// underlying codegen path (chained r-value field access) but via `assert()`
+// underlying codegen path (chained r-value field access) but via `test::assert()`
 // directly on the call result rather than through an intermediate variable.
 
 import io;
 
+import test;
 struct Box {
     val: int
 }
@@ -35,7 +36,7 @@ fn makeBox(): Box {
 
 fn main(): int {
     mut p: int = makeBox().val;
-    assert(p == 42, "");
+    test::assert(p == 42, "");
 
     // Chained field access as a call argument (not just a bare statement)
     // must also actually execute and produce output -- this was the

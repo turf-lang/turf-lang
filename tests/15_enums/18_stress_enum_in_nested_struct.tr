@@ -1,4 +1,6 @@
 // Test: Nested structs with enum fields
+import test;
+
 enum Level { Junior, Mid, Senior, Principal }
 
 struct Employee {
@@ -35,14 +37,14 @@ fn main(): int {
     immut lead: Employee = Employee::new("Alice", Level::Senior);
     immut team: Team = Team::new(lead, 5);
 
-    assert(team.lead.level == Level::Senior, "Team lead is Senior");
-    assert((team.lead.level to int) == 2, "Senior ordinal == 2");
-    assert((team.lead.level to string) == "Senior", "Senior -> string");
-    assert(level_pay(team.lead.level) == 120000, "Senior pays 120k");
+    test::assert(team.lead.level == Level::Senior, "Team lead is Senior");
+    test::assert((team.lead.level to int) == 2, "Senior ordinal == 2");
+    test::assert((team.lead.level to string) == "Senior", "Senior -> string");
+    test::assert(level_pay(team.lead.level) == 120000, "Senior pays 120k");
 
     // Upgrade lead
     immut upgraded: Employee = Employee::new("Alice", Level::Principal);
-    assert(upgraded.level != team.lead.level, "Upgraded != original");
-    assert(level_pay(upgraded.level) == 160000, "Principal pays 160k");
+    test::assert(upgraded.level != team.lead.level, "Upgraded != original");
+    test::assert(level_pay(upgraded.level) == 160000, "Principal pays 160k");
     return 0;
 }

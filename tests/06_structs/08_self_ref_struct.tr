@@ -3,6 +3,8 @@
 // LLVM IR without infinite recursion or segfault during codegen.
 // Expected LLVM IR: %Node = type { i64, ptr }
 
+import test;
+
 struct Node {
     val: int,
     next: Node*
@@ -16,11 +18,11 @@ fn Node.new(val: int, next: Node*): void {
 fn main(): int {
     // Allocate a simple Node on the stack and verify field access.
     mut a: Node = Node::new(42, null);
-    assert(a.val == 42, "Node.val should be 42");
+    test::assert(a.val == 42, "Node.val should be 42");
 
     // Create a second node and chain it.
     mut b: Node = Node::new(7, null);
-    assert(b.val == 7, "Node.val should be 7");
+    test::assert(b.val == 7, "Node.val should be 7");
 
     return 0;
 }

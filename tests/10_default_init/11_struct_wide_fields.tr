@@ -1,6 +1,7 @@
 // Stress test: struct with many fields of various types — all default-initialized
 import io;
 
+import test;
 struct BigStruct {
     a: int,
     b: int,
@@ -14,13 +15,13 @@ struct BigStruct {
 
 fn main(): int {
     mut s: BigStruct;
-    assert(s.a == 0, "a=0");
-    assert(s.b == 0, "b=0");
-    assert(s.c == 0, "c=0");
-    assert(s.d == 0.0, "d=0.0");
-    assert(s.e == 0.0, "e=0.0");
-    assert(s.f == false, "f=false");
-    assert(s.g == false, "g=false");
-    assert(s.h == "", "h=empty");
+    test::assert(s.a == 0, "a=0");
+    test::assert(s.b == 0, "b=0");
+    test::assert(s.c == 0, "c=0");
+    test::assert(s.d == 0.0, "d=0.0");
+    test::assert(s.e == 0.0, "e=0.0");
+    test::assert(s.f == false, "f=false");
+    test::assert(s.g == false, "g=false");
+    test::assert(s.h == "", "h=empty");
     return 0;
 }

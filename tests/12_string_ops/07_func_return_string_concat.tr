@@ -1,6 +1,7 @@
 // Test: Concatenating return values from multiple functions returning strings
 import io;
 
+import test;
 fn get_greeting(): string {
     return "Hello";
 }
@@ -23,15 +24,15 @@ fn get_exclamation(): string {
 fn main(): int {
     // Concatenate return values from 4 different functions
     mut msg1: string = get_greeting() + get_separator() + get_name(1) + get_exclamation();
-    assert(msg1 == "Hello, Alice!", "msg1 concatenation failed");
+    test::assert(msg1 == "Hello, Alice!", "msg1 concatenation failed");
 
     mut msg2: string = get_greeting() + get_separator() + get_name(2) + get_exclamation();
-    assert(msg2 == "Hello, Bob!", "msg2 concatenation failed");
+    test::assert(msg2 == "Hello, Bob!", "msg2 concatenation failed");
 
     // Also test function return + literal + variable
     mut prefix: string = "[LOG] ";
     mut full_log: string = prefix + get_name(1) + " connected.";
-    assert(full_log == "[LOG] Alice connected.", "full_log concatenation failed");
+    test::assert(full_log == "[LOG] Alice connected.", "full_log concatenation failed");
 
     io::printline("07_func_return_string_concat passed!");
     return 0;

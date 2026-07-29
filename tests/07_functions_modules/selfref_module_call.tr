@@ -9,8 +9,9 @@
 import io;
 import selfref_module;
 
+import test;
 fn main(): int {
-    assert(selfref_module::outerQuadruple(3) == 12, "outerQuadruple(3) should be 12");
+    test::assert(selfref_module::outerQuadruple(3) == 12, "outerQuadruple(3) should be 12");
     io::printline("self-reference within a module still works");
     return 0;
 }

@@ -1,10 +1,11 @@
 import io;
 import strings;
+import test;
 fn main(): int {
     io::printline("before contains");
     mut ok: bool = strings::contains("hello world", "world");
     io::printline("after contains");
-    assert(ok, "contains works");
+    test::assert(ok, "contains works");
     io::printline("04 PASS");
     return 0;
 }

@@ -5,6 +5,7 @@
 import io;
 import strings;
 
+import test;
 // Count the number of whitespace-delimited words in `s`.
 fn count_words(s: string): int {
     mut n: int = strings::length(s);
@@ -29,17 +30,17 @@ fn count_words(s: string): int {
 }
 
 fn main(): int {
-    assert(count_words("hello world") == 2,          "two words");
-    assert(count_words("one two three") == 3,        "three words");
-    assert(count_words("  leading spaces") == 2,     "leading spaces ignored");
-    assert(count_words("trailing spaces  ") == 2,    "trailing spaces ignored");
-    assert(count_words("  multiple   spaces  ") == 2,"multiple spaces between words");
-    assert(count_words("single") == 1,               "single word");
-    assert(count_words("") == 0,                     "empty string has 0 words");
-    assert(count_words("   ") == 0,                  "all spaces has 0 words");
+    test::assert(count_words("hello world") == 2,          "two words");
+    test::assert(count_words("one two three") == 3,        "three words");
+    test::assert(count_words("  leading spaces") == 2,     "leading spaces ignored");
+    test::assert(count_words("trailing spaces  ") == 2,    "trailing spaces ignored");
+    test::assert(count_words("  multiple   spaces  ") == 2,"multiple spaces between words");
+    test::assert(count_words("single") == 1,               "single word");
+    test::assert(count_words("") == 0,                     "empty string has 0 words");
+    test::assert(count_words("   ") == 0,                  "all spaces has 0 words");
 
     // Longer sentence
-    assert(count_words("the quick brown fox jumps over the lazy dog") == 9, "9-word sentence");
+    test::assert(count_words("the quick brown fox jumps over the lazy dog") == 9, "9-word sentence");
 
     io::printline("13 PASS: DSA word count tokenizer");
     return 0;

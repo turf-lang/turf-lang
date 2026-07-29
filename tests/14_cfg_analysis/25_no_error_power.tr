@@ -1,5 +1,7 @@
 // Regression test (#186): iterative power function, no recursion at all.
 // Must compile and run with correct results. No liveness warnings.
+import test;
+
 fn power(base: int, exp: int): int {
     mutable result: int = 1;
     mutable i: int = 0;
@@ -10,7 +12,7 @@ fn power(base: int, exp: int): int {
     return result;
 }
 fn main(): int {
-    assert(power(2, 10) == 1024, "2^10 = 1024");
-    assert(power(3, 4)  == 81,   "3^4 = 81");
+    test::assert(power(2, 10) == 1024, "2^10 = 1024");
+    test::assert(power(3, 4)  == 81,   "3^4 = 81");
     return 0;
 }

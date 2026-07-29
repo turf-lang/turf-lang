@@ -25,14 +25,15 @@
 import io;
 import strings;
 
+import test;
 fn main(): int {
     // The exact failure shape: calling a module-qualified, string-
     // returning function DIRECTLY as an operand of == (not through an
     // intermediate variable first) -- that intermediate-variable form
     // masked the bug entirely, since VarDeclExprAST's own type annotation
     // supplied the correct type independently of getExprType().
-    assert(strings::trim("  hello  ") == "hello", "direct :: call in == must infer string type correctly");
-    assert(strings::to_upper("hi") == "HI", "same shape, different module function");
+    test::assert(strings::trim("  hello  ") == "hello", "direct :: call in == must infer string type correctly");
+    test::assert(strings::to_upper("hi") == "HI", "same shape, different module function");
 
     io::printline("scope-qualified string-returning calls type-infer correctly");
     return 0;

@@ -1,3 +1,5 @@
+import test;
+
 fn main(): int {
     mut a: int = 10;
     mut b: int = 20;
@@ -9,14 +11,14 @@ fn main(): int {
         max_val = b;
     }
 
-    assert(max_val == 20, "max_val should be 20, ensuring if-else parses without trailing semicolons");
+    test::assert(max_val == 20, "max_val should be 20, ensuring if-else parses without trailing semicolons");
 
     mut i: int = 0;
     while i < 5 {
         i = i + 1;
     }
 
-    assert(i == 5, "while loop should run 5 times and not require a semicolon after the block");
+    test::assert(i == 5, "while loop should run 5 times and not require a semicolon after the block");
 
     return 0;
 }

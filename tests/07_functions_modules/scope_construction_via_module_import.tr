@@ -12,22 +12,23 @@
 import io;
 import construction_shape_module::[Shape, ShapeUtil];
 
+import test;
 fn main(): int {
     // Fully module-qualified.
     mut s1: construction_shape_module::Shape =
         construction_shape_module::Shape::new(3, "triangle");
-    assert(s1.sides == 3, "qualified new() sets sides");
+    test::assert(s1.sides == 3, "qualified new() sets sides");
 
     mut s2: construction_shape_module::Shape =
         construction_shape_module::Shape::default();
-    assert(s2.sides == 0, "qualified default() zero-inits");
+    test::assert(s2.sides == 0, "qualified default() zero-inits");
 
     // Bare form, now that Shape/ShapeUtil are on-demand imported above.
     mut s3: Shape = Shape::new(4, "square");
-    assert(s3.sides == 4, "bare new() after on-demand import");
+    test::assert(s3.sides == 4, "bare new() after on-demand import");
 
-    assert(ShapeUtil::describe(3) == "triangle", "static method, '.' decl + 'static' keyword, cross-module");
-    assert(construction_shape_module::ShapeUtil::describe(5) == "polygon", "qualified static method call still works");
+    test::assert(ShapeUtil::describe(3) == "triangle", "static method, '.' decl + 'static' keyword, cross-module");
+    test::assert(construction_shape_module::ShapeUtil::describe(5) == "polygon", "qualified static method call still works");
 
     io::printline("module-qualified construction works");
     return 0;

@@ -6,6 +6,7 @@
 import io;
 import strings;
 
+import test;
 fn rle_encode(s: string): string {
     mut n: int = strings::length(s);
     if n == 0 {
@@ -31,13 +32,13 @@ fn rle_encode(s: string): string {
 }
 
 fn main(): int {
-    assert(rle_encode("aaabbc") == "3a2b1c",       "aaabbc -> 3a2b1c");
-    assert(rle_encode("abcd") == "1a1b1c1d",       "abcd -> 1a1b1c1d (no runs)");
-    assert(rle_encode("aaaa") == "4a",             "aaaa -> 4a (single run)");
-    assert(rle_encode("a") == "1a",                "a -> 1a (single char)");
-    assert(rle_encode("") == "",                   "empty -> empty");
-    assert(rle_encode("aabbcc") == "2a2b2c",       "aabbcc -> 2a2b2c");
-    assert(rle_encode("aaabbbccc") == "3a3b3c",    "aaabbbccc -> 3a3b3c");
+    test::assert(rle_encode("aaabbc") == "3a2b1c",       "aaabbc -> 3a2b1c");
+    test::assert(rle_encode("abcd") == "1a1b1c1d",       "abcd -> 1a1b1c1d (no runs)");
+    test::assert(rle_encode("aaaa") == "4a",             "aaaa -> 4a (single run)");
+    test::assert(rle_encode("a") == "1a",                "a -> 1a (single char)");
+    test::assert(rle_encode("") == "",                   "empty -> empty");
+    test::assert(rle_encode("aabbcc") == "2a2b2c",       "aabbcc -> 2a2b2c");
+    test::assert(rle_encode("aaabbbccc") == "3a3b3c",    "aaabbbccc -> 3a3b3c");
 
     io::printline("14 PASS: DSA run-length encoding");
     return 0;

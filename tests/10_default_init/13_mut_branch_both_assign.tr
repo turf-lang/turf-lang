@@ -1,6 +1,7 @@
 // Stress test: mut int assigned in a branch — if both branches assign, no error on use
 import io;
 
+import test;
 fn compute(cond: bool): int {
     mut result: int;
     if cond {
@@ -12,7 +13,7 @@ fn compute(cond: bool): int {
 }
 
 fn main(): int {
-    assert(compute(true) == 1, "true branch");
-    assert(compute(false) == 2, "false branch");
+    test::assert(compute(true) == 1, "true branch");
+    test::assert(compute(false) == 2, "false branch");
     return 0;
 }

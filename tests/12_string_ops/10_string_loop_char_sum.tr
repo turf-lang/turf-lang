@@ -1,6 +1,7 @@
 // Test: Iterating through characters of a string in a loop and checking ASCII values
 import io;
 
+import test;
 fn main(): int {
     mut s: string = "TURFLANG";
     mut sum: int = 0;
@@ -14,7 +15,7 @@ fn main(): int {
     }
 
     // ASCII sum of T(84)+U(85)+R(82)+F(70)+L(76)+A(65)+N(78)+G(71) = 611
-    assert(sum == 611, "ASCII sum of TURFLANG should be 611");
+    test::assert(sum == 611, "ASCII sum of TURFLANG should be 611");
 
     // Test loop concatenating characters converted to string
     mut countdown: string = "";
@@ -24,7 +25,7 @@ fn main(): int {
         n = n - 1;
     }
     countdown = countdown + "GO!";
-    assert(countdown == "3...2...1...GO!", "countdown string concatenation failed");
+    test::assert(countdown == "3...2...1...GO!", "countdown string concatenation failed");
 
     io::printline("10_string_loop_char_sum passed!");
     return 0;

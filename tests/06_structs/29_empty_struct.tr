@@ -11,6 +11,7 @@
 
 import io;
 
+import test;
 struct Empty {}
 
 struct Wrapper {
@@ -48,7 +49,7 @@ fn main(): int {
     mut arr: Empty[3] = [Empty::default(), Empty::default(), Empty::default()];
 
     mut w: Wrapper = Wrapper::new(Empty::default(), 5);
-    assert(w.count == 5, "empty struct as a field of another struct works");
+    test::assert(w.count == 5, "empty struct as a field of another struct works");
 
     io::printline("empty structs work in every position");
     return 0;

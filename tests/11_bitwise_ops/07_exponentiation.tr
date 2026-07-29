@@ -3,26 +3,27 @@
 
 import math;
 
+import test;
 fn main(): int {
     // ** should work like the old ^ for power
     mut a: double = 2.0 ** 3.0;
-    assert(a == 8.0, "2.0 ** 3.0 should equal 8.0");
+    test::assert(a == 8.0, "2.0 ** 3.0 should equal 8.0");
 
     mut b: double = 2.0 ** 10.0;
-    assert(b == 1024.0, "2.0 ** 10.0 should equal 1024.0");
+    test::assert(b == 1024.0, "2.0 ** 10.0 should equal 1024.0");
 
     mut c: double = 3.0 ** 3.0;
-    assert(c == 27.0, "3.0 ** 3.0 should equal 27.0");
+    test::assert(c == 27.0, "3.0 ** 3.0 should equal 27.0");
 
     mut d: double = 5.0 ** 0.0;
-    assert(d == 1.0, "5.0 ** 0.0 should equal 1.0");
+    test::assert(d == 1.0, "5.0 ** 0.0 should equal 1.0");
 
     mut e: double = 10.0 ** 1.0;
-    assert(e == 10.0, "10.0 ** 1.0 should equal 10.0");
+    test::assert(e == 10.0, "10.0 ** 1.0 should equal 10.0");
 
     // math::power should still work too
     mut p: int = math::power(2, 8);
-    assert(p == 256, "math::power(2, 8) should equal 256");
+    test::assert(p == 256, "math::power(2, 8) should equal 256");
 
     return 0;
 }

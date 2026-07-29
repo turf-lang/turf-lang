@@ -1,5 +1,6 @@
 import io;
 
+import test;
 fn main(): int {
     mut x: int = 9;
     mut result: int = 0;
@@ -14,7 +15,7 @@ fn main(): int {
         result = -1;
     }
 
-    assert(result == 2, "");
+    test::assert(result == 2, "");
 
     return 0;
 }

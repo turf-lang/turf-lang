@@ -6,16 +6,17 @@
 import queue::Queue;
 import io;
 
+import test;
 fn main(): int {
     mut q: Queue<int> = Queue::default();
     q.enqueue(1);
     q.enqueue(2);
     q.enqueue(3);
-    assert(q.length() == 3, "");
-    assert(q.peek() == 1, "");
-    assert(q.dequeue() == 1, "");
-    assert(q.dequeue() == 2, "");
-    assert(q.length() == 1, "");
+    test::assert(q.length() == 3, "");
+    test::assert(q.peek() == 1, "");
+    test::assert(q.dequeue() == 1, "");
+    test::assert(q.dequeue() == 2, "");
+    test::assert(q.length() == 1, "");
 
     // head is now 2, len is 1 -- enqueue past capacity to exercise both the
     // "compact to front" and "grow" branches of Queue.enqueue().
@@ -26,9 +27,9 @@ fn main(): int {
     q.enqueue(8);
     q.enqueue(9);
     q.enqueue(10);
-    assert(q.length() == 8, "");
-    assert(q.dequeue() == 3, "");
-    assert(q.dequeue() == 4, "");
+    test::assert(q.length() == 8, "");
+    test::assert(q.dequeue() == 3, "");
+    test::assert(q.dequeue() == 4, "");
 
     io::printline("queue ok");
     return 0;

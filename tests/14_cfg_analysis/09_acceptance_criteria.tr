@@ -19,6 +19,8 @@
 // AC1: This function has a while(true) loop with no exit — triggers
 // InfiniteLoopWarning at compile time. It is intentionally never called
 // from main() so the process does not actually loop forever.
+import test;
+
 fn an_infinite_body(): int {
     mut x: int = 0;
     while true {
@@ -37,7 +39,7 @@ fn main(): int {
             break;
         }
     }
-    assert(x == 11, "AC2: while(true) with break exited at x==11");
+    test::assert(x == 11, "AC2: while(true) with break exited at x==11");
 
     // AC3: for loop with break — must compile without warning and exit
     // at the correct iteration.
@@ -48,11 +50,11 @@ fn main(): int {
             break;
         }
     }
-    assert(found == 5, "AC3: for loop break at i==5");
+    test::assert(found == 5, "AC3: for loop break at i==5");
 
     // AC4/AC5: reaching here proves all compilations succeeded and no
     // TurfWarning interrupted compilation.
-    assert(true, "AC4/AC5: program reached completion");
+    test::assert(true, "AC4/AC5: program reached completion");
 
     return 0;
 }

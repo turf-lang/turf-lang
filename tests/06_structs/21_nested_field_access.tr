@@ -6,6 +6,8 @@
 // access, not single-level access (which had its own, separately-tracked
 // coverage already).
 
+import test;
+
 struct L3 { v: int }
 struct L2 { l3: L3, tag: int }
 struct L1 { l2: L2, name: string }
@@ -23,22 +25,22 @@ fn main(): int {
     o.name = "root";
 
     // 3-level chain
-    assert(o.l2.l3.v == 7, "");
-    assert(o.l2.tag == 99, "");
-    assert(o.name == "root", "");
+    test::assert(o.l2.l3.v == 7, "");
+    test::assert(o.l2.tag == 99, "");
+    test::assert(o.name == "root", "");
 
     // Mutate through a chained field path
     o.l2.l3.v = 42;
-    assert(o.l2.l3.v == 42, "");
+    test::assert(o.l2.l3.v == 42, "");
 
     // 4-level chain
     mut deep: Outer = Outer::default();
     deep.inner.l2.l3.v = 1;
     deep.inner.name = "deep";
-    assert(deep.inner.l2.l3.v == 1, "");
+    test::assert(deep.inner.l2.l3.v == 1, "");
     deep.inner.l2.l3.v = 100;
-    assert(deep.inner.l2.l3.v == 100, "");
-    assert(deep.inner.name == "deep", "");
+    test::assert(deep.inner.l2.l3.v == 100, "");
+    test::assert(deep.inner.name == "deep", "");
 
     return 0;
 }

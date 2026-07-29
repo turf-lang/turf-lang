@@ -13,6 +13,7 @@
 
 import io;
 
+import test;
 struct MathUtil {}
 
 fn MathUtil.square(x: int) static: int {
@@ -26,8 +27,8 @@ fn MathUtil.describe(): string {
 }
 
 fn main(): int {
-    assert(MathUtil::square(5) == 25, "static method call works");
-    assert(MathUtil::square(0) == 0, "static method call works for zero");
+    test::assert(MathUtil::square(5) == 25, "static method call works");
+    test::assert(MathUtil::square(0) == 0, "static method call works for zero");
 
     mut mu: MathUtil = MathUtil::default();
     io::printline(mu.describe());

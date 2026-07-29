@@ -7,10 +7,11 @@
 import io;
 import enum_in_module::Status;
 
+import test;
 fn main(): int {
     immut s: Status = Status::Failed;
     immut code: int = enum_in_module::describe(s);
-    assert(code == 2, "describe(Status::Failed) should return 2");
+    test::assert(code == 2, "describe(Status::Failed) should return 2");
     io::printline("ok");
     return 0;
 }

@@ -16,6 +16,7 @@
 
 import io;
 
+import test;
 enum Color { Red, Green, Blue }
 
 fn main(): int {
@@ -33,7 +34,7 @@ fn main(): int {
             y = 3;
         done
     }
-    assert(y == 2, "");
+    test::assert(y == 2, "");
 
     // Case 2: int compare with an explicit `otherwise` (exhaustive via
     // otherwise, not via SubjectIsEnum).
@@ -49,7 +50,7 @@ fn main(): int {
         otherwise:
             z = 99;
     }
-    assert(z == 99, "");
+    test::assert(z == 99, "");
 
     io::printline("ok");
     return 0;

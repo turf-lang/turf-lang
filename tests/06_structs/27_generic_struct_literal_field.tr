@@ -19,6 +19,8 @@
 // type-inference (getExprType(), used for `b.get() to string` below) had
 // the identical gap for the RETURN type of a generic struct method.
 
+import test;
+
 struct Box<T> {
     val: T
 }
@@ -33,7 +35,7 @@ fn<T> Box.get(): T {
 
 fn main(): int {
     mut b: Box<int> = Box::new(42);
-    assert(b.get() == 42, "Box<int>.get() should return 42");
-    assert((b.get() to string) == "42", "generic return type must resolve to int, not stay 'T'");
+    test::assert(b.get() == 42, "Box<int>.get() should return 42");
+    test::assert((b.get() to string) == "42", "generic return type must resolve to int, not stay 'T'");
     return 0;
 }

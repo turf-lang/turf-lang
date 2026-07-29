@@ -1,5 +1,6 @@
 import io;
 
+import test;
 fn main(): int {
     mut x: int = 2;
     mut result: int = 0;
@@ -21,7 +22,7 @@ fn main(): int {
             result = 99;
     }
 
-    assert(result == 20, "compare single-value arm failed");
+    test::assert(result == 20, "compare single-value arm failed");
 
     mut y: int = 7;
     mut result2: int = 0;
@@ -32,7 +33,7 @@ fn main(): int {
         otherwise:
             result2 = 100;
     }
-    assert(result2 == 100, "compare otherwise arm failed");
+    test::assert(result2 == 100, "compare otherwise arm failed");
 
     return 0;
 }

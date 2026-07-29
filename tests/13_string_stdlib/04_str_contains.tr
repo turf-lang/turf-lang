@@ -4,15 +4,16 @@
 import io;
 import strings;
 
+import test;
 fn main(): int {
-    assert(strings::contains("hello world", "world"), "contains: world in hello world");
-    assert(strings::contains("hello world", "hello"), "contains: hello in hello world");
-    assert(strings::contains("hello world", "o w"),   "contains: 'o w' in hello world");
-    assert(strings::contains("abcdef", "cde"),         "contains: cde in abcdef");
+    test::assert(strings::contains("hello world", "world"), "contains: world in hello world");
+    test::assert(strings::contains("hello world", "hello"), "contains: hello in hello world");
+    test::assert(strings::contains("hello world", "o w"),   "contains: 'o w' in hello world");
+    test::assert(strings::contains("abcdef", "cde"),         "contains: cde in abcdef");
 
-    assert(strings::contains("hello world", "xyz") == false, "contains: xyz not in hello world");
-    assert(strings::contains("", "x") == false,              "contains: x not in empty string");
-    assert(strings::contains("abc", "") == true,             "contains: empty needle always true");
+    test::assert(strings::contains("hello world", "xyz") == false, "contains: xyz not in hello world");
+    test::assert(strings::contains("", "x") == false,              "contains: x not in empty string");
+    test::assert(strings::contains("abc", "") == true,             "contains: empty needle always true");
 
     io::printline("04 PASS: strings::contains");
     return 0;

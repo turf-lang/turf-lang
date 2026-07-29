@@ -29,6 +29,8 @@
 // substitution issue could even be reached. Fixed by adding the same
 // leniency for a pointer whose pointee is a TurfGenericParamType.
 
+import test;
+
 fn<T> firstElem(arr: T[]): T {
     return arr[0];
 }
@@ -43,14 +45,14 @@ fn<T> identityPtr(x: T*): T* {
 
 fn main(): int {
     mut a: int[5] = [10, 20, 30, 40, 50];
-    assert(firstElem(a) == 10, "");
+    test::assert(firstElem(a) == 10, "");
 
     mut d: double[3] = [1.5, 2.5, 3.5];
-    assert(firstElem(d) == 1.5, "");
+    test::assert(firstElem(d) == 1.5, "");
 
     mut n: int = 7;
     mut p: int* = identityPtr(&n);
-    assert(p == &n, "");
+    test::assert(p == &n, "");
 
     return 0;
 }

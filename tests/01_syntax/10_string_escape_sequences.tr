@@ -8,21 +8,22 @@
 import io;
 import strings;
 
+import test;
 fn main(): int {
     immut withCR: string = "a\rb";
-    assert(strings::length(withCR) == 3, "\\r must be exactly one byte, not swallowed or literal 'r'+extra");
+    test::assert(strings::length(withCR) == 3, "\\r must be exactly one byte, not swallowed or literal 'r'+extra");
     // '\r' as a standalone escaped byte cannot equal the two-character
     // sequence 'r' would have produced before this fix.
-    assert(withCR != "arb", "\\r must not silently become a literal 'r'");
+    test::assert(withCR != "arb", "\\r must not silently become a literal 'r'");
 
     immut withTab: string = "x\ty";
-    assert(strings::length(withTab) == 3, "\\t still works alongside the new escapes");
+    test::assert(strings::length(withTab) == 3, "\\t still works alongside the new escapes");
 
     immut withQuote: string = "it\'s fine";
-    assert(strings::contains(withQuote, "it"), "\\' is a recognized escape");
+    test::assert(strings::contains(withQuote, "it"), "\\' is a recognized escape");
 
     immut withBackslash: string = "a\\b";
-    assert(strings::length(withBackslash) == 3, "\\\\ still produces a single literal backslash");
+    test::assert(strings::length(withBackslash) == 3, "\\\\ still produces a single literal backslash");
 
     io::printline("all escape sequences resolved correctly");
     return 0;

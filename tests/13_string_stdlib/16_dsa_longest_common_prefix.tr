@@ -7,6 +7,7 @@
 import io;
 import strings;
 
+import test;
 fn lcp(words: string[5], n: int): string {
     if n == 0 {
         return "";
@@ -29,19 +30,19 @@ fn lcp(words: string[5], n: int): string {
 
 fn main(): int {
     mut w1: string[5] = ["flower", "flow", "flight", "", ""];
-    assert(lcp(w1, 3) == "fl", "flower/flow/flight -> fl");
+    test::assert(lcp(w1, 3) == "fl", "flower/flow/flight -> fl");
 
     mut w2: string[5] = ["dog", "racecar", "car", "", ""];
-    assert(lcp(w2, 3) == "", "dog/racecar/car -> empty (no common prefix)");
+    test::assert(lcp(w2, 3) == "", "dog/racecar/car -> empty (no common prefix)");
 
     mut w3: string[5] = ["interview", "interact", "interpose", "interstate", "interior"];
-    assert(lcp(w3, 5) == "inter", "inter* -> inter");
+    test::assert(lcp(w3, 5) == "inter", "inter* -> inter");
 
     mut w4: string[5] = ["abc", "abc", "abc", "", ""];
-    assert(lcp(w4, 3) == "abc", "identical strings -> full string");
+    test::assert(lcp(w4, 3) == "abc", "identical strings -> full string");
 
     mut w5: string[5] = ["a", "a", "a", "a", "a"];
-    assert(lcp(w5, 5) == "a", "all same single char -> a");
+    test::assert(lcp(w5, 5) == "a", "all same single char -> a");
 
     io::printline("16 PASS: DSA longest common prefix");
     return 0;

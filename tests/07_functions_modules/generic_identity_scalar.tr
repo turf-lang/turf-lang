@@ -35,19 +35,21 @@
 // round-trip and is NOT covered here -- see
 // tests/10_known_bugs/fail_generic_double_param.tr.
 
+import test;
+
 fn<T> identity(x: T): T {
     return x;
 }
 
 fn main(): int {
     mut a: int = identity(42);
-    assert(a == 42, "");
+    test::assert(a == 42, "");
 
     mut flag: bool = identity(true);
-    assert(flag == true, "");
+    test::assert(flag == true, "");
 
     mut s: string = identity("hello");
-    assert(s == "hello", "");
+    test::assert(s == "hello", "");
 
     return 0;
 }

@@ -5,14 +5,15 @@
 
 import io;
 
+import test;
 fn main(): int {
     mut arr: int[3] = [10, 20, 30];
     mut i: int = 1;
-    assert(arr[i] == 20, "");
+    test::assert(arr[i] == 20, "");
 
     if true {
         mut j: int = 2;
-        assert(arr[j] == 30, "");
+        test::assert(arr[j] == 30, "");
     }
 
     io::printline("ok");

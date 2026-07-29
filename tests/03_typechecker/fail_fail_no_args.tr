@@ -1,4 +1,4 @@
-// Regression test: `fail()` with zero arguments must be a clean compile
+// Regression test: `test::fail()` with zero arguments must be a clean compile
 // error, not a compiler crash. `fail` is registered with a correct fixed
 // arity (1) in Builtins.cpp, so TypeChecker::visitFuncCall's generic arity
 // check DID already reject this -- but only in the mandatory main-pass
@@ -12,7 +12,9 @@
 // gap) and src/TypeChecker.cpp's visitFuncCall doc comment for the full
 // story.
 
+import test;
+
 fn main(): int {
-    fail();
+    test::fail();
     return 0;
 }

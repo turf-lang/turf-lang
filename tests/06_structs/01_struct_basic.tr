@@ -1,3 +1,5 @@
+import test;
+
 struct User {
   age: int,
   name: string
@@ -11,11 +13,11 @@ fn User.new(age: int, name: string): void {
 fn main(): int {
   mut u: User = User::new(10, "Alice");
   
-  assert(u.age == 10, "");
+  test::assert(u.age == 10, "");
     // Verify basic int property
 
   u.age = 25;
-  assert(u.age == 25, "");
+  test::assert(u.age == 25, "");
 
   return 0;
 }

@@ -12,6 +12,7 @@
 // unlike the old brace-literal form, which matched by field NAME).
 
 import io;
+import test;
 extern fn strlen(s: string): int;
 
 struct Point {
@@ -41,13 +42,13 @@ fn Rect.new(w: int, h: int, name: string): void {
 
 fn main(): int {
     mut p: Point = Point::new(20, 10);
-    assert(p.x == 10, "x should be 10");
-    assert(p.y == 20, "y should be 20");
+    test::assert(p.x == 10, "x should be 10");
+    test::assert(p.y == 20, "y should be 20");
 
     mut r: Rect = Rect::new(3, 4, "box");
-    assert(r.width == 3, "width should be 3");
-    assert(r.height == 4, "height should be 4");
-    assert(strlen(r.label) == 3, "label should be 'box'");
+    test::assert(r.width == 3, "width should be 3");
+    test::assert(r.height == 4, "height should be 4");
+    test::assert(strlen(r.label) == 3, "label should be 'box'");
 
     io::printline("constructor new() works");
     return 0;

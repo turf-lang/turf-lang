@@ -1,4 +1,6 @@
 // Test: Pass enum as function parameter and return from function
+import test;
+
 enum Priority { Low, Medium, High, Critical }
 
 fn is_urgent(p: Priority): bool {
@@ -38,14 +40,14 @@ fn escalate(p: Priority): Priority {
 }
 
 fn main(): int {
-    assert(is_urgent(Priority::Low) == false, "Low is not urgent");
-    assert(is_urgent(Priority::Medium) == false, "Medium is not urgent");
-    assert(is_urgent(Priority::High) == true, "High is urgent");
-    assert(is_urgent(Priority::Critical) == true, "Critical is urgent");
+    test::assert(is_urgent(Priority::Low) == false, "Low is not urgent");
+    test::assert(is_urgent(Priority::Medium) == false, "Medium is not urgent");
+    test::assert(is_urgent(Priority::High) == true, "High is urgent");
+    test::assert(is_urgent(Priority::Critical) == true, "Critical is urgent");
 
-    assert((escalate(Priority::Low) to int) == 1, "Low escalates to Medium");
-    assert((escalate(Priority::Medium) to int) == 2, "Medium escalates to High");
-    assert((escalate(Priority::High) to int) == 3, "High escalates to Critical");
-    assert((escalate(Priority::Critical) to int) == 3, "Critical stays Critical");
+    test::assert((escalate(Priority::Low) to int) == 1, "Low escalates to Medium");
+    test::assert((escalate(Priority::Medium) to int) == 2, "Medium escalates to High");
+    test::assert((escalate(Priority::High) to int) == 3, "High escalates to Critical");
+    test::assert((escalate(Priority::Critical) to int) == 3, "Critical stays Critical");
     return 0;
 }

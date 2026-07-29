@@ -11,27 +11,28 @@
 import mem;
 import io;
 
+import test;
 fn main(): int {
     // alloc / zero / free
     mut buf: void* = mem::alloc(32);
-    assert(buf != null, "");
+    test::assert(buf != null, "");
     mem::zero(buf, 32);
 
     // alloc_zeroed
     mut zbuf: void* = mem::alloc_zeroed(4, 8);
-    assert(zbuf != null, "");
+    test::assert(zbuf != null, "");
 
     // grow (realloc wrapper)
     mut grown: void* = mem::grow(buf, 64);
-    assert(grown != null, "");
+    test::assert(grown != null, "");
 
     // dup: copy bytes out of a fresh buffer and confirm it round-trips via
     // an int written into the source and read back out of the copy.
     mut src: int* = mem::alloc(8) to int*;
     src[0] = 12345;
     mut copy: int* = mem::dup(src, 8) to int*;
-    assert(copy[0] == 12345, "");
-    assert(copy != src, ""); // dup must return a genuinely distinct buffer
+    test::assert(copy[0] == 12345, "");
+    test::assert(copy != src, ""); // dup must return a genuinely distinct buffer
 
     mem::free(grown);
     mem::free(zbuf);

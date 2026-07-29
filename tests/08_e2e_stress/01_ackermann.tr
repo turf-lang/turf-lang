@@ -1,3 +1,5 @@
+import test;
+
 fn ackermann(m: int, n: int): int {
     if m == 0 {
         return n + 1;
@@ -12,7 +14,7 @@ fn ackermann(m: int, n: int): int {
 
 fn main(): int {
     mut result: int = ackermann(3, 4);
-    assert(result == 125, "");
+    test::assert(result == 125, "");
 
     return 0;
 }

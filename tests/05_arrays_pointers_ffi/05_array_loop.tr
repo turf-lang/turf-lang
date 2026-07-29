@@ -1,3 +1,5 @@
+import test;
+
 fn main(): int {
     mut squares: int[5] = [0, 0, 0, 0, 0];
 
@@ -5,11 +7,11 @@ fn main(): int {
         squares[i] = i * i;
     }
 
-    assert(squares[0] == 0, "");
-    assert(squares[1] == 1, "");
-    assert(squares[2] == 4, "");
-    assert(squares[3] == 9, "");
-    assert(squares[4] == 16, "");
+    test::assert(squares[0] == 0, "");
+    test::assert(squares[1] == 1, "");
+    test::assert(squares[2] == 4, "");
+    test::assert(squares[3] == 9, "");
+    test::assert(squares[4] == 16, "");
 
     return 0;
 }

@@ -1,3 +1,5 @@
+import test;
+
 fn factorial(n: int): int {
     if n <= 1 {
         return 1;
@@ -7,7 +9,7 @@ fn factorial(n: int): int {
 
 fn main(): int {
     mut result: int = factorial(5);
-    assert(result == 120, "");
+    test::assert(result == 120, "");
 
     return 0;
 }

@@ -29,6 +29,7 @@ import io;
 import mem;
 import list::List;
 
+import test;
 struct Entry {
     key: string,
     value: string
@@ -48,8 +49,8 @@ fn main(): int {
     // `printline` overload) and compared directly (proves the VALUE
     // itself, not just its reported type, is correct).
     io::printline(store.data[0].value);
-    assert(store.data[0].key == "language", "key field resolves correctly");
-    assert(store.data[0].value == "Turf", "value field resolves correctly");
+    test::assert(store.data[0].key == "language", "key field resolves correctly");
+    test::assert(store.data[0].value == "Turf", "value field resolves correctly");
 
     io::printline("generic collection field chain resolves correctly");
     return 0;

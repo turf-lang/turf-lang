@@ -4,6 +4,8 @@
 // (ResolverFunctionSymbol::MutatesSelf) becoming overly broad and rejecting
 // legitimate read-only calls.
 
+import test;
+
 struct Counter {
     val: int
 }
@@ -23,10 +25,10 @@ fn Counter.get(): int {
 fn main(): int {
     mut c: Counter = Counter::new(5);
     c.bump();
-    assert(c.val == 6, "mutable bump should work");
+    test::assert(c.val == 6, "mutable bump should work");
 
     immut d: Counter = Counter::new(10);
-    assert(d.get() == 10, "read-only get() must work on an immutable variable");
+    test::assert(d.get() == 10, "read-only get() must work on an immutable variable");
 
     return 0;
 }

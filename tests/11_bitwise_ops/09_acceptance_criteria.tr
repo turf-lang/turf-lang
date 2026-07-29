@@ -1,30 +1,32 @@
 // Test: Bitwise operators in combination (acceptance criteria tests)
 // These are the exact acceptance criteria from issue #182
 
+import test;
+
 fn main(): int {
     // AC1: 5 & 3 evaluates to 1
     mut ac1: int = 5 & 3;
-    assert(ac1 == 1, "AC1: 5 & 3 should equal 1");
+    test::assert(ac1 == 1, "AC1: 5 & 3 should equal 1");
 
     // AC2: 5 | 3 evaluates to 7
     mut ac2: int = 5 | 3;
-    assert(ac2 == 7, "AC2: 5 | 3 should equal 7");
+    test::assert(ac2 == 7, "AC2: 5 | 3 should equal 7");
 
     // AC3: 5 ^ 3 evaluates to 6 (XOR, not power)
     mut ac3: int = 5 ^ 3;
-    assert(ac3 == 6, "AC3: 5 ^ 3 should equal 6 (XOR)");
+    test::assert(ac3 == 6, "AC3: 5 ^ 3 should equal 6 (XOR)");
 
     // AC4: 1 << 4 evaluates to 16
     mut ac4: int = 1 << 4;
-    assert(ac4 == 16, "AC4: 1 << 4 should equal 16");
+    test::assert(ac4 == 16, "AC4: 1 << 4 should equal 16");
 
     // AC5: 256 >> 2 evaluates to 64
     mut ac5: int = 256 >> 2;
-    assert(ac5 == 64, "AC5: 256 >> 2 should equal 64");
+    test::assert(ac5 == 64, "AC5: 256 >> 2 should equal 64");
 
     // AC6: ~0 evaluates to -1 (all bits set, two's complement)
     mut ac6: int = ~0;
-    assert(ac6 == -1, "AC6: ~0 should equal -1");
+    test::assert(ac6 == -1, "AC6: ~0 should equal -1");
 
     return 0;
 }

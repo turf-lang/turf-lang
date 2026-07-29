@@ -7,6 +7,7 @@
 // already relied on (src/Codegen.cpp).
 
 import io;
+import test;
 extern fn strlen(s: string): int;
 
 struct Point {
@@ -22,14 +23,14 @@ struct Line {
 
 fn main(): int {
     mut p: Point = Point::default();
-    assert(p.x == 0, "default x should be 0");
-    assert(p.y == 0, "default y should be 0");
+    test::assert(p.x == 0, "default x should be 0");
+    test::assert(p.y == 0, "default y should be 0");
 
     mut l: Line = Line::default();
-    assert(l.start.x == 0, "nested default start.x should be 0");
-    assert(l.start.y == 0, "nested default start.y should be 0");
-    assert(l.end.x == 0, "nested default end.x should be 0");
-    assert(strlen(l.label) == 0, "default string field should be empty");
+    test::assert(l.start.x == 0, "nested default start.x should be 0");
+    test::assert(l.start.y == 0, "nested default start.y should be 0");
+    test::assert(l.end.x == 0, "nested default end.x should be 0");
+    test::assert(strlen(l.label) == 0, "default string field should be empty");
 
     io::printline("default() works, including nested structs");
     return 0;

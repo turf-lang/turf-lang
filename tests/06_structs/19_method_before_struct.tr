@@ -9,6 +9,8 @@
 // declaration" even though ordinary functions and struct fields have always
 // supported forward references. See ParseFuncDef()'s lazy `self` type.
 
+import test;
+
 fn User.new(age: int, name: string): void {
     self.age = age;
     self.name = name;
@@ -30,7 +32,7 @@ struct User {
 fn main(): int {
     mut u: User = User::new(10, "Alice");
     u.grow();
-    assert(u.age == 11, "");
+    test::assert(u.age == 11, "");
 
     u.rename("Bob");
     return 0;

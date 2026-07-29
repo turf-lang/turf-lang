@@ -8,9 +8,10 @@
 import io;
 import geometry_module::[*];
 
+import test;
 fn main(): int {
     mut r: Rect = Rect::new(6, 7);
-    assert(area(r) == 42, "bare struct type visible after wildcard import");
+    test::assert(area(r) == 42, "bare struct type visible after wildcard import");
     io::printline("wildcard import grants bare type visibility");
     return 0;
 }

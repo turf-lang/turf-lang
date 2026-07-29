@@ -18,13 +18,14 @@
 
 import io;
 
+import test;
 fn<T> firstElem(arr: T[]): T {
     return arr[0];
 }
 
 fn main(): int {
     mut intArray: int[3] = [10, 20, 30];
-    assert(firstElem(intArray) == 10, "firstElem should return the first element");
+    test::assert(firstElem(intArray) == 10, "firstElem should return the first element");
     io::printline(firstElem(intArray) to string);
     return 0;
 }

@@ -1,20 +1,22 @@
+import test;
+
 fn main(): int {
     mut x: int = 100;
     
     x += 50;
-    assert(x == 150, "x should be 150");
+    test::assert(x == 150, "x should be 150");
     
     x -= 25;
-    assert(x == 125, "x should be 125");
+    test::assert(x == 125, "x should be 125");
     
     x *= 2;
-    assert(x == 250, "x should be 250");
+    test::assert(x == 250, "x should be 250");
     
     x /= 5;
-    assert(x == 50, "x should be 50");
+    test::assert(x == 50, "x should be 50");
     
     x %= 7;
-    assert(x == 1, "x should be 1");
+    test::assert(x == 1, "x should be 1");
     
     return 0;
 }

@@ -1,15 +1,16 @@
 import io;
 
+import test;
 fn main(): int {
     mut a: int = -5;
     mut b: int = -a;
     mut c: double = -3.14;
     mut d: double = -c;
 
-    assert(a == -5, "");
-    assert(b == 5, "");
-    assert(c < -3.13 && c > -3.15, "");
-    assert(d > 3.13 && d < 3.15, "");
+    test::assert(a == -5, "");
+    test::assert(b == 5, "");
+    test::assert(c < -3.13 && c > -3.15, "");
+    test::assert(d > 3.13 && d < 3.15, "");
 
     return 0;
 }

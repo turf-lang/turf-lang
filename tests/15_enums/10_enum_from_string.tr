@@ -1,4 +1,6 @@
 // Test: String-to-enum casting (from_string)
+import test;
+
 enum Direction { North, East, South, West }
 
 fn main(): int {
@@ -7,21 +9,21 @@ fn main(): int {
     immut s: Direction = "South" to Direction;
     immut w: Direction = "West"  to Direction;
 
-    assert(n == Direction::North, "\"North\" to Direction == North");
-    assert(e == Direction::East,  "\"East\"  to Direction == East");
-    assert(s == Direction::South, "\"South\" to Direction == South");
-    assert(w == Direction::West,  "\"West\"  to Direction == West");
+    test::assert(n == Direction::North, "\"North\" to Direction == North");
+    test::assert(e == Direction::East,  "\"East\"  to Direction == East");
+    test::assert(s == Direction::South, "\"South\" to Direction == South");
+    test::assert(w == Direction::West,  "\"West\"  to Direction == West");
 
     // Round-trip: enum -> string -> enum
     immut orig: Direction = Direction::East;
     immut sval: string    = orig to string;
     immut back: Direction = sval to Direction;
-    assert(back == Direction::East, "Round-trip East -> string -> East");
+    test::assert(back == Direction::East, "Round-trip East -> string -> East");
 
     // Cast ordinal values match
-    assert((n to int) == 0, "North ordinal");
-    assert((e to int) == 1, "East ordinal");
-    assert((s to int) == 2, "South ordinal");
-    assert((w to int) == 3, "West ordinal");
+    test::assert((n to int) == 0, "North ordinal");
+    test::assert((e to int) == 1, "East ordinal");
+    test::assert((s to int) == 2, "South ordinal");
+    test::assert((w to int) == 3, "West ordinal");
     return 0;
 }

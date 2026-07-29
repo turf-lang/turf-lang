@@ -22,14 +22,15 @@ import io;
 import math;
 import list;
 
+import test;
 fn main(): int {
     io::printline("scope-qualified call works");
-    assert(math::abs(-7) == 7, "math::abs should work via ::");
+    test::assert(math::abs(-7) == 7, "math::abs should work via ::");
 
     mut l: list::List<int> = list::List::default();
     l.push(10);
     l.push(20);
-    assert(l.length() == 2, "list::List<int> in type position should work");
+    test::assert(l.length() == 2, "list::List<int> in type position should work");
 
     return 0;
 }

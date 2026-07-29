@@ -1,23 +1,24 @@
 // Test: Adding multiple strings together with integers and booleans converted to string
 import io;
 
+import test;
 fn main(): int {
     // 1. Strings with positive and negative integer conversions
     mut score_msg: string = "Score: " + (100 to string) + " / " + (200 to string);
-    assert(score_msg == "Score: 100 / 200", "score_msg concatenation failed");
+    test::assert(score_msg == "Score: 100 / 200", "score_msg concatenation failed");
 
     mut delta_msg: string = "Change: " + (-42 to string) + " points";
-    assert(delta_msg == "Change: -42 points", "delta_msg concatenation failed");
+    test::assert(delta_msg == "Change: -42 points", "delta_msg concatenation failed");
 
     // 2. Strings with calculation converted to string
     mut x: int = 15;
     mut y: int = 4;
     mut calc_msg: string = "Result = " + ((x * y + 3) to string);
-    assert(calc_msg == "Result = 63", "calc_msg concatenation failed");
+    test::assert(calc_msg == "Result = 63", "calc_msg concatenation failed");
 
     // 3. Mixed strings, ints, and bools
     mut status_msg: string = "ID_" + (999 to string) + "_Active_" + (true to string);
-    assert(status_msg == "ID_999_Active_true", "status_msg concatenation failed");
+    test::assert(status_msg == "ID_999_Active_true", "status_msg concatenation failed");
 
     io::printline("09_string_concat_with_casts passed!");
     return 0;

@@ -1,5 +1,6 @@
 import io;
 
+import test;
 struct Point {
     x: int,
     y: int,
@@ -12,14 +13,14 @@ fn main(): int {
     //    Declare then assign — this is valid.
     mut x: int;
     x = 42;
-    assert(x == 42, "assign after empty declaration");
+    test::assert(x == 42, "assign after empty declaration");
 
     // 2. Struct variables declared without "= value" are default-initialized.
     mut p: Point;
-    assert(p.x == 0, "struct field default init x");
-    assert(p.y == 0, "struct field default init y");
-    assert(p.name == "", "struct field default init name");
-    assert(p.z == 0.0, "struct field default init z");
+    test::assert(p.x == 0, "struct field default init x");
+    test::assert(p.y == 0, "struct field default init y");
+    test::assert(p.name == "", "struct field default init name");
+    test::assert(p.z == 0.0, "struct field default init z");
 
     // 3. ::default() zero-inits every field; fields set afterward override
     //    just that field, leaving the rest at their defaults -- the
@@ -28,10 +29,10 @@ fn main(): int {
     //    construction no longer exists at all).
     mut p2: Point = Point::default();
     p2.x = 5;
-    assert(p2.x == 5, "explicit field init");
-    assert(p2.y == 0, "missing field y default init");
-    assert(p2.name == "", "missing field name default init");
-    assert(p2.z == 0.0, "missing field z default init");
+    test::assert(p2.x == 5, "explicit field init");
+    test::assert(p2.y == 0, "missing field y default init");
+    test::assert(p2.name == "", "missing field name default init");
+    test::assert(p2.z == 0.0, "missing field z default init");
 
     return 0;
 }

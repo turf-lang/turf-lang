@@ -2,6 +2,7 @@
 // old empty brace-literal `Config{}`, which no longer parses at all).
 import io;
 
+import test;
 struct Config {
     retries: int,
     timeout: int,
@@ -10,8 +11,8 @@ struct Config {
 
 fn main(): int {
     mut cfg: Config = Config::default();
-    assert(cfg.retries == 0, "Config::default() retries default 0");
-    assert(cfg.timeout == 0, "Config::default() timeout default 0");
-    assert(cfg.verbose == false, "Config::default() verbose default false");
+    test::assert(cfg.retries == 0, "Config::default() retries default 0");
+    test::assert(cfg.timeout == 0, "Config::default() timeout default 0");
+    test::assert(cfg.verbose == false, "Config::default() verbose default false");
     return 0;
 }

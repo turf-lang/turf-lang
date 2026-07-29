@@ -6,6 +6,7 @@
 import io;
 import strings;
 
+import test;
 fn reverse(s: string): string {
     mut n: int = strings::length(s);
     if n <= 1 {
@@ -18,15 +19,15 @@ fn reverse(s: string): string {
 }
 
 fn main(): int {
-    assert(reverse("hello") == "olleh",          "reverse hello");
-    assert(reverse("abcd") == "dcba",            "reverse abcd");
-    assert(reverse("a") == "a",                  "reverse single char");
-    assert(reverse("") == "",                    "reverse empty");
-    assert(reverse("racecar") == "racecar",      "reverse palindrome == itself");
+    test::assert(reverse("hello") == "olleh",          "reverse hello");
+    test::assert(reverse("abcd") == "dcba",            "reverse abcd");
+    test::assert(reverse("a") == "a",                  "reverse single char");
+    test::assert(reverse("") == "",                    "reverse empty");
+    test::assert(reverse("racecar") == "racecar",      "reverse palindrome == itself");
 
     // Double reversal must return original
     mut original: string = "turf language";
-    assert(reverse(reverse(original)) == original, "double reverse == original");
+    test::assert(reverse(reverse(original)) == original, "double reverse == original");
 
     io::printline("15 PASS: DSA recursive string reverse");
     return 0;

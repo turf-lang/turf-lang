@@ -1,5 +1,7 @@
 // Test: Enum declarations, access, casting, and pseudo-properties
 
+import test;
+
 enum Direction {
     North,
     East,
@@ -10,33 +12,33 @@ enum Direction {
 fn main(): int {
     // Basic assignment and int value
     immut d: Direction = Direction::North;
-    assert((d to int) == 0, "North should have value 0");
+    test::assert((d to int) == 0, "North should have value 0");
 
     immut e: Direction = Direction::East;
-    assert((e to int) == 1, "East should have value 1");
+    test::assert((e to int) == 1, "East should have value 1");
 
     immut s: Direction = Direction::South;
-    assert((s to int) == 2, "South should have value 2");
+    test::assert((s to int) == 2, "South should have value 2");
 
     immut w: Direction = Direction::West;
-    assert((w to int) == 3, "West should have value 3");
+    test::assert((w to int) == 3, "West should have value 3");
 
     // Enum to String casting
     immut dStr: string = d to string;
-    assert(dStr == "North", "North to string should be 'North'");
+    test::assert(dStr == "North", "North to string should be 'North'");
 
     immut sStr: string = s to string;
-    assert(sStr == "South", "South to string should be 'South'");
+    test::assert(sStr == "South", "South to string should be 'South'");
 
     // String to Enum casting
     immut dParsed: Direction = "South" to Direction;
-    assert((dParsed to int) == 2, "Parsed 'South' should have value 2");
+    test::assert((dParsed to int) == 2, "Parsed 'South' should have value 2");
 
     immut eParsed: Direction = "East" to Direction;
-    assert((eParsed to int) == 1, "Parsed 'East' should have value 1");
+    test::assert((eParsed to int) == 1, "Parsed 'East' should have value 1");
 
     // COUNT pseudo-property
-    assert(Direction::COUNT == 4, "Direction should have 4 variants");
+    test::assert(Direction::COUNT == 4, "Direction should have 4 variants");
 
     return 0;
 }

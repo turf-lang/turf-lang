@@ -1,3 +1,5 @@
+import test;
+
 fn main(): int {
     mut i: int = 0;
     mut sum: int = 0;
@@ -9,7 +11,7 @@ fn main(): int {
         }
         sum = sum + i;
     }
-    assert(sum == 25, "");
+    test::assert(sum == 25, "");
 
     mut for_sum: int = 0;
     for j in 1..10 step j += 1 {
@@ -18,7 +20,7 @@ fn main(): int {
         }
         for_sum = for_sum + j;
     }
-    assert(for_sum == 25, "");
+    test::assert(for_sum == 25, "");
 
     return 0;
 }

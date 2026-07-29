@@ -7,9 +7,10 @@
 import io;
 import counter_module::Counter;
 
+import test;
 fn main(): int {
     mut c: Counter = Counter::new(5);
-    assert(c.increment() == 6, "instance method works via on-demand symbol import");
+    test::assert(c.increment() == 6, "instance method works via on-demand symbol import");
     io::printline("instance method via on-demand symbol import works");
     return 0;
 }

@@ -1,6 +1,7 @@
 // Test: struct declared without init — must be zero-initialized
 import io;
 
+import test;
 struct Config {
     retries: int,
     timeout: int
@@ -8,7 +9,7 @@ struct Config {
 
 fn main(): int {
     mut cfg: Config;
-    assert(cfg.retries == 0, "Config.retries default 0");
-    assert(cfg.timeout == 0, "Config.timeout default 0");
+    test::assert(cfg.retries == 0, "Config.retries default 0");
+    test::assert(cfg.timeout == 0, "Config.timeout default 0");
     return 0;
 }

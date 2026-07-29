@@ -1,3 +1,5 @@
+import test;
+
 fn main(): int {
     // Test Chained Assignment Support
     mut a: int = 0;
@@ -5,9 +7,9 @@ fn main(): int {
     mut c: int = 0;
     a = b = c = 100;
     
-    assert(a == 100, "");
-    assert(b == 100, "");
-    assert(c == 100, "");
+    test::assert(a == 100, "");
+    test::assert(b == 100, "");
+    test::assert(c == 100, "");
 
     return 0;
 }
