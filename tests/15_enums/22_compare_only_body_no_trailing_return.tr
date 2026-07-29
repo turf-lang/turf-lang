@@ -1,0 +1,49 @@
+// Regression test: a function whose ENTIRE body is a single, provably-
+// exhaustive `compare` (every enum variant covered, return in every arm)
+// with NO trailing statement after the compare must compile and run
+// cleanly -- must NOT trigger a false "The function ... promises to give
+// back a result, but sometimes it doesn't!" error.
+//
+// This used to be a tracked, accepted limitation (previously
+// tests/10_known_bugs/fail_compare_only_body_missing_return.tr, later
+// tests/99_known_bugs/... after a folder renumbering) -- CFG::allPathsReturn()
+// only counts a predecessor of the virtual exit block against a function
+// if that predecessor is actually reachable (`Pred->isReachable()`), and
+// when every arm of an exhaustive compare returns, the compare's merge
+// block ends up with zero incoming edges (see src/CFG.cpp's visitCompare()
+// doc comment) -- genuinely unreachable, and therefore correctly excluded
+// from the check. Re-verified live while auditing 99_known_bugs/ and found
+// to already compile and run correctly; moved here as a real passing test
+// instead of a documented limitation.
+//
+// Companion to 20_compare_param_subject_exhaustive.tr, which covers the
+// same shape WITH a trailing "belt and suspenders" return -- this file is
+// the same function with that trailing line removed entirely.
+import test;
+
+enum Direction { North, East, South, West }
+
+fn describe(d: Direction): int {
+    compare d {
+        matches Direction::North:
+            return 1;
+        done
+        matches Direction::East:
+            return 2;
+        done
+        matches Direction::South:
+            return 3;
+        done
+        matches Direction::West:
+            return 4;
+        done
+    }
+}
+
+fn main(): int {
+    test::assert(describe(Direction::North) == 1, "");
+    test::assert(describe(Direction::East) == 2, "");
+    test::assert(describe(Direction::South) == 3, "");
+    test::assert(describe(Direction::West) == 4, "");
+    return 0;
+}

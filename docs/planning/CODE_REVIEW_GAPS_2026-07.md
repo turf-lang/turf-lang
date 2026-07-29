@@ -52,26 +52,24 @@ full-pass split currently conflates.
 
 ---
 
-## Accepted limitation: exhaustive `compare` as a function's ENTIRE body still false-flags "missing return"
+## RESOLVED: exhaustive `compare` as a function's ENTIRE body no longer false-flags "missing return"
 
 **Where:** `src/CFG.cpp` (definite-return analysis).
 
-A function whose entire body is a single, provably-exhaustive `compare`
-with no trailing statement still gets a false "missing return" diagnostic.
-`compare` is deliberately never treated as a hard CFG terminator by itself
-(this preserves the widely-used "exhaustive compare + trailing belt-and-
-suspenders return" idiom throughout the test suite — an earlier, more
-"precise" version of the CFG pass broke 7+ existing tests by treating
-`compare` as terminating). The narrower case of a `compare` with literally
-nothing after it inherits that same choice as a side effect.
-
-**Workaround:** add a trailing `return` (or any statement) after the
-`compare`, even though it's unreachable in the exhaustive case — matches
-the idiom already used everywhere else.
-
-Regression test documenting this (still present, not excluded from the
-suite as a "real" bug — it's asserting the *current*, accepted behavior):
-`tests/99_known_bugs/fail_compare_only_body_missing_return.tr`.
+Previously tracked here as an accepted limitation: a function whose entire
+body is a single, provably-exhaustive `compare` with no trailing statement
+was believed to still get a false "missing return" diagnostic, with
+`compare` deliberately never treated as a hard CFG terminator by itself as
+the reason why. Re-verified live and found to already compile and run
+correctly — `CFG::allPathsReturn()` only counts a predecessor of the
+virtual exit block if it's actually reachable (`Pred->isReachable()`), and
+when every arm of an exhaustive compare returns, the compare's merge block
+ends up with zero incoming edges (see `visitCompare()`'s doc comment) —
+genuinely unreachable, and therefore already correctly excluded from the
+check. The regression test that documented this as a known bug
+(`tests/99_known_bugs/fail_compare_only_body_missing_return.tr`) has been
+replaced by a real passing test:
+`tests/15_enums/22_compare_only_body_no_trailing_return.tr`.
 
 ---
 
