@@ -1,0 +1,43 @@
+// Regression test: LivenessAnalysisPass's UnusedVariableWarning used to be
+// computed purely from Gen[] (upward-exposed reads -- a read NOT preceded
+// by a write to the same variable earlier in the same block), which is the
+// correct input for the pass's actual dead-store/liveness dataflow, but is
+// the WRONG definition of "was this variable ever read": a variable's own
+// declaration is itself a write, so any read that happens later in the SAME
+// block as its declaration (the single most common local-variable shape in
+// the entire language -- `mut x = ...; return x;`) is never upward-exposed,
+// and was therefore invisible to the old check. Confirmed as a real,
+// previously-undetected false positive on this exact file's shape (and on
+// the existing tests/14_cfg_analysis/09_acceptance_criteria.tr /
+// 11_no_warn_variable_used.tr AC1 cases, whose own "no warning" comments
+// were never actually true until this fix -- nothing in the test harness
+// checks compiler stderr, only exit codes/test::assert(), so it went unnoticed).
+// Fixed by tracking a separate EverRead set (unconditional on every read,
+// independent of Gen[]) for this specific check.
+//
+// This file can't assert on warning ABSENCE (the runner doesn't capture
+// stderr) -- manually verified via direct compilation that no
+// UnusedVariableWarning fires for any variable below. The test::assert()s here
+// just confirm the values themselves are still computed correctly.
+import test;
+
+fn takes_arg(a: int): int {
+    return a + 1;
+}
+
+// Read via a bare `return`, in the same block as the declaration.
+fn returns_declared_value(): int {
+    mut x: int = 41;
+    return x;
+}
+
+fn main(): int {
+    test::assert(returns_declared_value() == 41, "x should be read by its own return");
+
+    // Read only as a function-call argument, same block as declaration.
+    mut y: int = 10;
+    mut result: int = takes_arg(y);
+    test::assert(result == 11, "takes_arg(y) should be 11");
+
+    return 0;
+}

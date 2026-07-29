@@ -389,11 +389,26 @@ void LivenessAnalysisPass::runOnCFG(
   using LiveSet = std::unordered_set<const VariableSymbol *>;
   std::vector<LiveSet> Gen(N), Kill(N);
 
+  // EverRead tracks every variable read ANYWHERE in the function, completely
+  // independent of Gen[]. Gen[b] only records upward-exposed reads (a read
+  // not preceded by a write to the same variable earlier in the same
+  // block) -- that's the correct input for the Step 2 backward dataflow
+  // and Step 4's dead-store detection, but it systematically misses the
+  // single most common local-variable pattern in the entire language:
+  // declare-then-use within the same block (`mut x: int = 5; return x;`).
+  // That read is never upward-exposed (the declaration's own write shadows
+  // it in WrittenSoFar), so a naive "was this variable ever in some Gen[b]"
+  // check -- which Step 3 used to do -- flagged it as unused even though it
+  // was read on the very next line. EverRead exists so Step 3 can answer
+  // "was this ever read" without disturbing Gen[]'s dataflow semantics.
+  LiveSet EverRead;
+
   for (size_t b = 0; b < N; ++b) {
     LiveSet WrittenSoFar; // tracks defs seen in this block so far (left to right)
     for (ExprAST *Stmt : Blocks[b]->getStatements()) {
       collectReadsAndDefs(Stmt,
         [&](SourceLocation, const VariableSymbol *Sym) {
+          EverRead.insert(Sym);
           // Read: if not already written in this block, it's upward-exposed
           if (!WrittenSoFar.count(Sym))
             Gen[b].insert(Sym);
@@ -445,13 +460,8 @@ void LivenessAnalysisPass::runOnCFG(
   }
 
   // ── Step 3: Report UnusedVariableWarning ─────────────────────────────────
-  // A variable declared in the body that never appears in ANY Gen set across
-  // all blocks is never read anywhere. Flag it at its declaration site.
-  LiveSet EverRead;
-  for (size_t b = 0; b < N; ++b)
-    for (const VariableSymbol *V : Gen[b])
-      EverRead.insert(V);
-
+  // A variable declared in the body that's never in EverRead (collected
+  // above, in Step 1) is never read anywhere. Flag it at its declaration site.
   for (const VariableSymbol *Sym : AllBodyDeclared) {
     if (!EverRead.count(Sym) && !ParamSymbols.count(Sym)) {
       auto LocIt = DeclLocMap.find(Sym);
