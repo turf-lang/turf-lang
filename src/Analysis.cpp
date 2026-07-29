@@ -531,7 +531,7 @@ namespace {
 // into) so every place a `self.field = ...` could legally appear inside a
 // constructor body is actually reached.
 class SelfFieldDefVisitor : public ASTVisitor {
-  const std::function<void(const std::string &)> &onFieldDef;
+  std::function<void(const std::string &)> onFieldDef;
 
   void visitChild(const ExprAST *Node) {
     if (Node)
@@ -550,8 +550,8 @@ class SelfFieldDefVisitor : public ASTVisitor {
   }
 
 public:
-  explicit SelfFieldDefVisitor(const std::function<void(const std::string &)> &cb)
-      : onFieldDef(cb) {}
+  explicit SelfFieldDefVisitor(std::function<void(const std::string &)> cb)
+      : onFieldDef(std::move(cb)) {}
 
   void visitAssignment(AssignmentExprAST &Node) override {
     visitChild(Node.getRHS());
