@@ -37,6 +37,7 @@
 //   conn2.close();
 
 import mem;
+import sys;
 
 // ─── POSIX socket bindings (private to this module) ────────────────────────
 
@@ -103,12 +104,16 @@ fn TcpConnection.new(fd: int): void {
 // Dial out to a.b.c.d:port. Aborts with a clear message on failure.
 fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: TcpConnection {
     mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
-    assert(fd >= 0, "net::TcpConnection::connect: socket() failed");
+    if !(fd >= 0) {
+        sys::panic("net::TcpConnection::connect: socket() failed");
+    }
 
     mut addr: void* = buildSockAddr(a, b, c, d, port);
     immut result: int = connect(fd, addr, 16);
     mem::free(addr);
-    assert(result == 0, "net::TcpConnection::connect: connect() failed -- is anything listening on that host/port?");
+    if !(result == 0) {
+        sys::panic("net::TcpConnection::connect: connect() failed -- is anything listening on that host/port?");
+    }
 
     return TcpConnection::new(fd);
 }
@@ -161,7 +166,9 @@ fn TcpListener.new(fd: int): void {
 // clear message on failure.
 fn TcpListener.bind(port: int) static: TcpListener {
     mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
-    assert(fd >= 0, "net::TcpListener::bind: socket() failed");
+    if !(fd >= 0) {
+        sys::panic("net::TcpListener::bind: socket() failed");
+    }
 
     mut optVal: void* = mem::alloc(8);
     mut iOpt: int* = optVal to int*;
@@ -172,10 +179,14 @@ fn TcpListener.bind(port: int) static: TcpListener {
     mut addr: void* = buildSockAddr(0, 0, 0, 0, port);
     immut bindResult: int = bind(fd, addr, 16);
     mem::free(addr);
-    assert(bindResult == 0, "net::TcpListener::bind: bind() failed -- is the port already in use?");
+    if !(bindResult == 0) {
+        sys::panic("net::TcpListener::bind: bind() failed -- is the port already in use?");
+    }
 
     immut listenResult: int = listen(fd, 128);
-    assert(listenResult == 0, "net::TcpListener::bind: listen() failed");
+    if !(listenResult == 0) {
+        sys::panic("net::TcpListener::bind: listen() failed");
+    }
 
     return TcpListener::new(fd);
 }
@@ -183,7 +194,9 @@ fn TcpListener.bind(port: int) static: TcpListener {
 // Blocks until a client connects, then returns the accepted connection.
 fn TcpListener.accept(): TcpConnection {
     mut clientFd: int = accept(self.fd, null, null);
-    assert(clientFd >= 0, "net::TcpListener.accept: accept() failed");
+    if !(clientFd >= 0) {
+        sys::panic("net::TcpListener.accept: accept() failed");
+    }
     return TcpConnection::new(clientFd);
 }
 

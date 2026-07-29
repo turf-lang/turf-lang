@@ -5,6 +5,7 @@
 //   s.push(1)  s.pop()  s.peek()  s.length()
 
 import mem;
+import sys;
 
 struct Stack<T> {
   data: T*,
@@ -36,7 +37,7 @@ fn<T> Stack.push(item: T): void {
 
 fn<T> Stack.pop(): T {
   if (self.len == 0) {
-    fail("Stack.pop: pop on empty stack");
+    sys::panic("Stack.pop: pop on empty stack");
   }
 
   self.len = self.len - 1;
@@ -45,7 +46,7 @@ fn<T> Stack.pop(): T {
 
 fn<T> Stack.peek(): T {
   if (self.len == 0) {
-    fail("Stack.peek: peek on empty stack");
+    sys::panic("Stack.peek: peek on empty stack");
   }
 
   return self.data[self.len - 1];

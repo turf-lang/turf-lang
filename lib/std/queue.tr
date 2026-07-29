@@ -11,6 +11,7 @@
 //     otherwise double the capacity
 
 import mem;
+import sys;
 
 struct Queue<T> {
   data: T*,
@@ -47,7 +48,7 @@ fn<T> Queue.enqueue(item: T): void {
 
 fn<T> Queue.dequeue(): T {
   if (self.len == 0) {
-    fail("Queue.dequeue: dequeue on empty queue");
+    sys::panic("Queue.dequeue: dequeue on empty queue");
   }
 
   immutable item: T = self.data[self.head];
@@ -58,7 +59,7 @@ fn<T> Queue.dequeue(): T {
 
 fn<T> Queue.peek(): T {
   if (self.len == 0) {
-    fail("Queue.peek: peek on empty queue");
+    sys::panic("Queue.peek: peek on empty queue");
   }
 
   return self.data[self.head];

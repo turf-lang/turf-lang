@@ -24,6 +24,8 @@
 // side half of this fix; this file is the "don't actually trigger it"
 // stdlib-side half.
 
+import sys;
+
 // ─── C allocator bindings ─────────────────────────────────────────────────────
 
 extern fn malloc(size: int): void*;
@@ -62,7 +64,7 @@ extern fn memcmp(a: void*, b: void*, n: int): int;
 fn alloc(size: int): void* {
     mut result: void* = malloc(size);
     if result == null {
-        fail("mem.alloc: out of memory");
+        sys::panic("mem.alloc: out of memory");
     }
     return result;
 }
@@ -71,7 +73,7 @@ fn alloc(size: int): void* {
 fn alloc_zeroed(count: int, elem_size: int): void* {
     mut result: void* = calloc(count, elem_size);
     if result == null {
-        fail("mem.alloc_zeroed: out of memory");
+        sys::panic("mem.alloc_zeroed: out of memory");
     }
     return result;
 }
@@ -80,7 +82,7 @@ fn alloc_zeroed(count: int, elem_size: int): void* {
 fn grow(p: void*, new_size: int): void* {
     mut result: void* = realloc(p, new_size);
     if result == null {
-        fail("mem.grow: out of memory");
+        sys::panic("mem.grow: out of memory");
     }
     return result;
 }
@@ -105,7 +107,7 @@ fn alloc_aligned(alignment: int, size: int): void* {
     mut outSlot: void* = malloc(8);
     immut result: int = posix_memalign(outSlot, alignment, size);
     if result != 0 {
-        fail("mem.alloc_aligned: allocation failed (bad alignment or out of memory)");
+        sys::panic("mem.alloc_aligned: allocation failed (bad alignment or out of memory)");
     }
     mut iSlot: int* = outSlot to int*;
     mut allocated: void* = iSlot[0] to void*;

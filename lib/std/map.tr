@@ -27,6 +27,7 @@
 //     behavior) -- check contains() first if a miss is expected.
 
 import mem;
+import sys;
 
 struct Map<K, V> {
   keys: K*,
@@ -84,7 +85,7 @@ fn<K, V> Map.put(key: K, value: V): void {
 fn<K, V> Map.get(key: K): V {
   immutable idx: int = self.indexOf(key);
   if (idx < 0) {
-    fail("Map.get: no such key");
+    sys::panic("Map.get: no such key");
   }
   return self.values[idx];
 }

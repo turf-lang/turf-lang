@@ -8,6 +8,7 @@
 //   mut n: int = l.length(); // 1
 
 import mem;
+import sys;
 
 struct List<T> {
   data: T*,
@@ -39,7 +40,7 @@ fn<T> List.push(item: T): void {
 
 fn<T> List.pop(): T {
   if (self.len == 0) {
-    fail("List.pop: pop on empty list");
+    sys::panic("List.pop: pop on empty list");
   }
 
   self.len = self.len - 1;

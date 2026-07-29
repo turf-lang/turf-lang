@@ -15,6 +15,8 @@
 //   if strings::contains("hello world", "world") { ... }
 //   mut upper: string = strings::to_upper("hello");
 
+import sys;
+
 // ─── C bindings ───────────────────────────────────────────────────────────────
 
 extern fn malloc(size: int): void*;
@@ -145,7 +147,7 @@ fn count_char(s: string, ch: int): int {
 fn substring(s: string, start: int, end: int): string {
     mut n: int = strlen(s);
     if start < 0 || end < start || end > n {
-        fail("strings.substring: index out of bounds");
+        sys::panic("strings.substring: index out of bounds");
     }
     mut len: int = end - start;
     // Allocate len+1 bytes (for null terminator)
