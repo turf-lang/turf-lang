@@ -326,7 +326,11 @@ static void LintBinaryExpr(const BinaryExprAST *Bin) {
   const ExprAST *RHS = Bin->getRHS();
 
   // Redundant boolean comparison: x == true, x != false, etc.
-  if (Op == TOK_EQ || Op == TOK_NEQ) {
+  // Skip nodes ParseUnary() synthesized to desugar a literal `!x` (see
+  // BinaryExprAST::IsDesugaredNot's doc comment) -- those aren't a
+  // comparison the user wrote at all, so warning "remove the comparison"
+  // would be nagging about syntax that doesn't exist in their source.
+  if ((Op == TOK_EQ || Op == TOK_NEQ) && !Bin->IsDesugaredNot) {
     bool RHSIsBool = dynamic_cast<const BoolExprAST *>(RHS) != nullptr;
     bool LHSIsBool = dynamic_cast<const BoolExprAST *>(LHS) != nullptr;
 

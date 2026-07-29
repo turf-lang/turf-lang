@@ -88,6 +88,17 @@ public:
                 std::unique_ptr<ExprAST> RHS)
       : Loc(Loc), Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 
+  // True only for the `x != true` shape ParseUnary() synthesizes to desugar
+  // a literal `!x` in the source (see Parser.cpp's ParseUnary, "Desugar: !x
+  // -> x != true"). Lint.cpp's redundant-boolean-comparison check would
+  // otherwise treat EVERY `!x` in the entire language as if the user had
+  // literally written the comparison `x != true` and nag them to "remove"
+  // a comparison that doesn't exist in their source at all -- this flag is
+  // how that check tells the two apart. Not preserved by construction (only
+  // ParseUnary's desugar site sets it); clone() below does propagate it so
+  // cloned generic-instantiation bodies don't regain the false positive.
+  bool IsDesugaredNot = false;
+
   const SourceLocation &getLoc() const { return Loc; }
   int getOp() const { return Op; }
   const ExprAST *getLHS() const { return LHS.get(); }
@@ -96,9 +107,11 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitBinary(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<BinaryExprAST>(Loc, static_cast<char>(Op),
-                                           CloneExprAST(LHS.get()),
-                                           CloneExprAST(RHS.get()));
+    auto Cloned = std::make_unique<BinaryExprAST>(Loc, static_cast<char>(Op),
+                                                   CloneExprAST(LHS.get()),
+                                                   CloneExprAST(RHS.get()));
+    Cloned->IsDesugaredNot = IsDesugaredNot;
+    return Cloned;
   }
 };
 

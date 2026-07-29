@@ -1002,11 +1002,16 @@ std::unique_ptr<ExprAST> ParseUnary() {
     if (!Operand)
       return nullptr;
     // Desugar: !x -> x != true
-    return std::make_unique<BinaryExprAST>(
+    auto NotExpr = std::make_unique<BinaryExprAST>(
         Loc, TOK_NEQ,
         std::move(Operand),
         std::make_unique<BoolExprAST>(true)
     );
+    // Marks this node as compiler-synthesized, not literal user source --
+    // see BinaryExprAST::IsDesugaredNot's doc comment (AST.h) for why
+    // Lint.cpp needs to tell the two apart.
+    NotExpr->IsDesugaredNot = true;
+    return NotExpr;
   }
 
   // Bitwise NOT: ~expr
