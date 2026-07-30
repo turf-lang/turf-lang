@@ -1,0 +1,8 @@
+// Negative test: same as fail_extern_conflicting_param_type.tr but the
+// conflict is in arity (different number of parameters).
+extern fn baz(x: int): void;
+extern fn baz(x: int, y: int): void;
+
+fn main(): int {
+    return 0;
+}

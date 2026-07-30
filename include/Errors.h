@@ -709,6 +709,36 @@ public:
   }
 };
 
+// Two `extern fn` declarations for the same raw C name with genuinely
+// different signatures (arity, parameter types, return type, or variadic-
+// ness). Extern mangled names are just the bare C symbol name (not
+// parameter-type-qualified, unlike ordinary Turf functions), so this can't
+// be caught the way an ordinary duplicate-function-body collision already
+// is (see FuncDefExprAST::codegen()'s "Duplicate function definition"
+// check) -- ExternFuncDeclExprAST::codegen() used to silently reuse
+// whichever declaration came first, regardless of whether the second one's
+// signature actually matched, binding any call resolved against the SECOND
+// declaration's (different) signature to the FIRST one's real LLVM type.
+// A re-declaration with an IDENTICAL signature (the legitimate case: the
+// same libc function externed from two different stdlib modules, e.g.
+// strlen in both strings.tr and net.tr) is NOT an error -- only a genuine
+// mismatch is.
+class ConflictingExternDeclarationError : public TurfError {
+public:
+  ConflictingExternDeclarationError(SourceLocation Loc, const std::string &Name)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'extern fn " + Colors::CYAN +
+                           Name + Colors::BRIGHT_RED +
+                           "' conflicts with an earlier declaration of the "
+                           "same name." + Colors::RESET,
+                  "Two 'extern fn " + Name + "' declarations exist with "
+                  "different signatures (parameter types, return type, or "
+                  "variadic-ness). Only ONE C function can actually be "
+                  "called through this name -- make both declarations "
+                  "match exactly, or give one a different name.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
 class ArithmeticError : public TurfError {
 public:
   ArithmeticError(SourceLocation Loc, const std::string &Msg)

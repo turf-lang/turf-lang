@@ -55,6 +55,13 @@ std::vector<std::pair<llvm::BasicBlock *, llvm::BasicBlock *>> LoopBlocks;
 static std::map<std::string, std::vector<TurfTypePtr>> FuncParamTypes;
 static std::map<std::string, TurfTypePtr> FuncReturnTypes;
 
+// Tracks where each `extern fn` name was FIRST declared, so a later
+// conflicting re-declaration (see ExternFuncDeclExprAST::codegen()) can
+// point at it via a RelatedLocation instead of just naming the conflict
+// with no context. LLVM's own `Function` object carries no Turf-level
+// SourceLocation, hence this small side table.
+static std::map<std::string, SourceLocation> ExternDeclLocations;
+
 // Set of library names collected from 'extern from "libname" fn' declarations.
 // Populated during codegen; consumed by main.cpp::linkObject().
 std::set<std::string> g_RequiredLibs;
@@ -3091,12 +3098,6 @@ Value *FuncDefExprAST::codegen() {
 // Emits an LLVM ExternalLinkage prototype (no body block).
 // Mirrors what `declare i64 @strlen(ptr)` looks like in LLVM IR.
 Value *ExternFuncDeclExprAST::codegen() {
-  // If a declaration with this name already exists in the module (e.g. because
-  // the user declared it twice, or a builtin already emitted it), reuse it.
-  if (Function *Existing = TheModule->getFunction(Name_)) {
-    return Existing;
-  }
-
   // Build the LLVM parameter type list.
   std::vector<Type *> ParamLLVMTypes;
   std::vector<TurfTypePtr> ParamTurfTypes;
@@ -3105,10 +3106,39 @@ Value *ExternFuncDeclExprAST::codegen() {
     ParamTurfTypes.push_back(PType);
   }
 
-  // Build the LLVM function type.
+  // Build the LLVM function type. Built BEFORE the existing-declaration
+  // check below (moved up from where it used to live, after that check)
+  // so a re-declaration's signature can be compared against any earlier
+  // one -- LLVM interns structurally-identical FunctionTypes to the same
+  // pointer within a context, so this comparison is a cheap, exact one.
   Type *RetLLVMType = getLLVMType(ReturnType_.get());
   FunctionType *FT =
       FunctionType::get(RetLLVMType, ParamLLVMTypes, /*isVarArg=*/IsVarArg_);
+
+  // If a declaration with this name already exists in the module, this is a
+  // re-declaration (e.g. the same libc function externed from two
+  // different stdlib modules, like strlen in both strings.tr and net.tr) --
+  // legitimate ONLY if the signature actually matches. Extern mangled names
+  // are just the bare C name (not parameter-type-qualified, unlike ordinary
+  // Turf functions), so unlike a genuine duplicate function BODY (caught by
+  // FuncDefExprAST::codegen()'s "Duplicate function definition" check via
+  // LLVM's own function table), nothing else in the compiler previously
+  // verified two externs of the same name actually agreed on what they
+  // were declaring -- confirmed real: the old code reused whichever
+  // declaration came first UNCONDITIONALLY, with no signature check at
+  // all, silently binding any call resolved against a conflicting second
+  // declaration to the first one's real (different) LLVM type.
+  if (Function *Existing = TheModule->getFunction(Name_)) {
+    if (Existing->getFunctionType() != FT) {
+      auto It = ExternDeclLocations.find(Name_);
+      auto Err = ConflictingExternDeclarationError(Loc_, Name_);
+      if (It != ExternDeclLocations.end())
+        Err.withRelated(It->second, "first declared here");
+      Err.raise();
+    }
+    return Existing;
+  }
+  ExternDeclLocations[Name_] = Loc_;
 
   // Create with ExternalLinkage — no body block is created.
   Function *F =

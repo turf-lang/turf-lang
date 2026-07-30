@@ -81,13 +81,45 @@ public:
 
   /**
    * @brief Add a function overload to this module.
-   * Duplicate mangled names are silently ignored (prototype re-entry).
+   *
+   * Dedups by arity + per-parameter type name (mirrors
+   * ResolverModule::registerFunction in ResolverSymbolTable.h, the
+   * Resolver-side twin of this table) rather than MangledName string
+   * equality. Behaviorally these are equivalent for every current caller
+   * -- a mangled name is deterministically derived from module + base name
+   * + parameter types, so two registrations with the same MangledName
+   * always have the same signature anyway -- but comparing the actual
+   * TurfType data directly doesn't depend on the mangling scheme staying
+   * in lockstep with signature identity, and matches the Resolver-side
+   * table's own logic instead of re-deriving the same fact a second way.
+   * A true signature COLLISION between two different declarations (as
+   * opposed to the same declaration seen twice, e.g. a prototype pass then
+   * the real pass) is caught upstream, at the point each symbol is
+   * actually created -- see FuncDefExprAST::codegen()'s "Duplicate
+   * function definition" check and ExternFuncDeclExprAST::codegen()'s
+   * signature-comparison check -- so a second registration reaching this
+   * function with a matching signature is always the legitimate re-entry
+   * case, safe to silently ignore.
    */
   void registerFunction(const FunctionSymbol &sym) {
     auto &overloads = Functions[sym.BaseName];
-    for (const auto &existing : overloads)
-      if (existing.MangledName == sym.MangledName)
-        return; // already registered
+    for (const auto &existing : overloads) {
+      if (existing.Arity != sym.Arity)
+        continue;
+      bool SameParams = true;
+      for (size_t i = 0; i < existing.ParamTypes.size(); ++i) {
+        const std::string ExistingName =
+            existing.ParamTypes[i] ? existing.ParamTypes[i]->getName() : "";
+        const std::string NewName =
+            sym.ParamTypes[i] ? sym.ParamTypes[i]->getName() : "";
+        if (ExistingName != NewName) {
+          SameParams = false;
+          break;
+        }
+      }
+      if (SameParams)
+        return; // already registered (same signature)
+    }
     overloads.push_back(sym);
   }
 

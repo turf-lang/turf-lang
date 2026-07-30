@@ -1,0 +1,9 @@
+// Companion module A (no main()) -- declares an extern with an IDENTICAL
+// signature to extern_b_module.tr's, mirroring the real, legitimate
+// pattern already in the stdlib (strlen declared in both strings.tr and
+// net.tr). Must NOT be flagged as a conflict when both are imported.
+extern fn strlen(s: string): int;
+
+fn wraps_a(s: string): int {
+    return strlen(s);
+}
