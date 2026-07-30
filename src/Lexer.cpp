@@ -121,7 +121,12 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"export", TOK_EXPORT},
                                        {"static", TOK_STATIC},
                                        {"operator", TOK_OPERATOR},
-                                       {"int32", TOK_TYPE_INT32}};
+                                       {"int32", TOK_TYPE_INT32},
+                                       {"error", TOK_ERROR},
+                                       {"recover", TOK_RECOVER},
+                                       {"produce", TOK_PRODUCE},
+                                       {"run", TOK_RUN},
+                                       {"as", TOK_AS}};
 
 /**
  * @brief True if @p Msg looks like a warning rather than a hard error.

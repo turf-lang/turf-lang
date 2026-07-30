@@ -223,7 +223,12 @@ enum Token {
   TOK_TYPE_CHAR    = -84, ///< `char`   keyword — 1-byte primitive type (no arithmetic)
   TOK_CHAR_LITERAL = -85, ///< `'x'`    token   — single-quoted char literal
   TOK_OPERATOR     = -86, ///< `operator` keyword — top-level operator overload declaration
-  TOK_TYPE_INT32   = -87  ///< `int32`   keyword — honest 32-bit extern-fn ABI declaration type
+  TOK_TYPE_INT32   = -87, ///< `int32`   keyword — honest 32-bit extern-fn ABI declaration type
+  TOK_ERROR   = -88, ///< `error`   keyword — user-defined error type declaration (docs/planning/Errors.md)
+  TOK_RECOVER = -89, ///< `recover` keyword — handles a `!T` call site's failure
+  TOK_PRODUCE = -90, ///< `produce` keyword — `recover produce value` form
+  TOK_RUN     = -91, ///< `run`     keyword — `recover run {}` / `recover as x run {}` block form
+  TOK_AS      = -92  ///< `as`      keyword — `recover as x run {}` binding form
 };
 
 int gettok();
