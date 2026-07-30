@@ -229,6 +229,27 @@ struct ResolverFunctionSymbol {
   /// functions (none of which have a "self" to mutate).
   bool                     MutatesSelf = false;
 
+  /// Candidate scope-qualifier names (`Left` in every `Left::Right` or
+  /// `Left::Right(...)` shape) found among this function's own `return`
+  /// statements (docs/planning/Errors.md), computed once by
+  /// Resolver::buildFunctionSymbol() via a conservative, non-interprocedural
+  /// scan (CollectReturnedErrorTypeNames() in Resolver.cpp) -- same
+  /// conservatism/limitations as MutatesSelf above (no nested-call
+  /// awareness).
+  ///
+  /// NOT pre-filtered to "genuinely a declared error type": this is computed
+  /// at Pass 1 hoisting time (buildFunctionSymbol() runs from
+  /// registerFunctionSignature(), called from hoistTopLevel()), when a
+  /// later-declared error type might not be registered yet, and a
+  /// `Left::Right` return could just as easily name an enum/struct/module
+  /// call that has nothing to do with errors at all. Consumers (the
+  /// "never returns an error" warning and the `recover as err` bare-error
+  /// restriction, both in Resolver::visitFuncDef/visitRecoverExpr) must
+  /// filter this list through ResolverSymbolTable::isErrorTypeName() /
+  /// lookupErrorType() themselves, once ALL error types are guaranteed
+  /// registered (Pass 2).
+  std::vector<std::string> PossibleErrorTypeNames;
+
   /// Arity of this overload.
   /// For variadic functions, this is the number of *named* (declared) params.
   /// Callers should use isVarArg() to determine if extra args are accepted.

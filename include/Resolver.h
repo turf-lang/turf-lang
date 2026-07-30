@@ -167,6 +167,7 @@ public:
   void visitEnumDecl(EnumDeclExprAST &Node) override;
   void visitScopeAccess(ScopeAccessExprAST &Node) override;
   void visitErrorDecl(ErrorDeclExprAST &Node) override;
+  void visitRecoverExpr(RecoverExprAST &Node) override;
 
   void visitArrayDecl(ArrayDeclExprAST &Node) override;
   void visitArrayLiteral(ArrayLiteralExprAST &Node) override;

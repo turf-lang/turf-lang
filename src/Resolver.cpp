@@ -192,6 +192,55 @@ static bool MutatesSelfField(const ExprAST *E) {
   return false;
 }
 
+/**
+ * @brief Collects candidate error-type names from a function body's `return`
+ * statements (docs/planning/Errors.md), for ResolverFunctionSymbol::
+ * PossibleErrorTypeNames -- see that field's doc comment for why this is
+ * intentionally unfiltered (not yet checked against isErrorTypeName()) and
+ * why the scan is conservative/non-interprocedural, same rationale as
+ * MutatesSelfField() just above (mirrors its exact recursion shape).
+ *
+ * Recognizes two shapes as a "return `Left::Right`" candidate:
+ *   - `return ErrorType::Variant;`       (bare, ScopeAccessExprAST)
+ *   - `return ErrorType::Variant(...);`  (FuncCallExprAST(Callee=ScopeAccess))
+ * collecting `Left` (e.g. "MathError") in both cases.
+ */
+static void CollectReturnedErrorTypeNames(const ExprAST *E,
+                                          std::vector<std::string> &Out) {
+  if (!E)
+    return;
+
+  if (auto *Ret = dynamic_cast<const ReturnExprAST *>(E)) {
+    const ExprAST *Val = Ret->getVal();
+    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(Val)) {
+      Out.push_back(SA->getLeftName());
+    } else if (auto *Call = dynamic_cast<const FuncCallExprAST *>(Val)) {
+      if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(Call->getCallee()))
+        Out.push_back(SA->getLeftName());
+    }
+    return;
+  }
+  if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
+    for (const auto &Child : Blk->getExpressions())
+      CollectReturnedErrorTypeNames(Child.get(), Out);
+    return;
+  }
+  if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
+    for (const auto &B : If->getBranches())
+      CollectReturnedErrorTypeNames(B.Body.get(), Out);
+    CollectReturnedErrorTypeNames(If->getElseBody(), Out);
+    return;
+  }
+  if (auto *W = dynamic_cast<const WhileExprAST *>(E)) {
+    CollectReturnedErrorTypeNames(W->getBody(), Out);
+    return;
+  }
+  if (auto *F = dynamic_cast<const ForExprAST *>(E)) {
+    CollectReturnedErrorTypeNames(F->getBody(), Out);
+    return;
+  }
+}
+
 ResolverFunctionSymbol
 Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
                               const std::string &ModuleName) const {
@@ -215,6 +264,7 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   // default false.
   if (!Sym.Params.empty() && Sym.Params[0].Name == "self")
     Sym.MutatesSelf = MutatesSelfField(Node.getBody());
+  CollectReturnedErrorTypeNames(Node.getBody(), Sym.PossibleErrorTypeNames);
   return Sym;
 }
 
@@ -1021,6 +1071,42 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   visitChild(Node.getBody());
   CurrentFuncTypeParams_.clear();
 
+  // "Never returns an error" warning (docs/planning/Errors.md): a `!T`-
+  // declared function is PERMITTED, not obliged, to fail -- so this is a
+  // warning, not a hard error. Checked here (once per function, after the
+  // body is fully resolved) rather than inside buildFunctionSymbol() itself,
+  // which runs multiple times per function (Pass 1 hoisting, then again
+  // here) and would otherwise emit this warning 2-3x for the same function.
+  // Filters Sym->PossibleErrorTypeNames through isErrorTypeName() since that
+  // list is collected unfiltered (see its own doc comment) -- by now (Pass
+  // 2, body fully walked) every error type in the program is registered, so
+  // this filtering is finally safe to do.
+  //
+  // Deduped by source location (process-lifetime static, same convention as
+  // ImportedFiles/ImportStack elsewhere in this file): this compiler parses
+  // and resolves every function TWICE on two entirely separate AST
+  // instances -- once in main.cpp's pre-pass (hoisting/self-reference/
+  // codegen), once again in its main pass (a fresh re-parse, used only for
+  // linting) -- confirmed live via this exact warning firing twice for one
+  // function. Every OTHER existing warning happens to dodge this by living
+  // in Codegen (which only runs once), which only runs once per function;
+  // this is the first Resolver-level warning, so it's the first to hit it.
+  if (Node.getReturnType() && Node.getReturnType()->isErrorUnion()) {
+    bool ReturnsRealError = false;
+    for (const auto &Name : Sym->PossibleErrorTypeNames) {
+      if (SymTable_.isErrorTypeName(Name)) {
+        ReturnsRealError = true;
+        break;
+      }
+    }
+    static std::unordered_set<long long> WarnedLocations;
+    SourceLocation WarnLoc = Node.getLoc();
+    long long LocKey = (static_cast<long long>(WarnLoc.Line) << 32) |
+                       static_cast<unsigned>(WarnLoc.Col);
+    if (!ReturnsRealError && WarnedLocations.insert(LocKey).second)
+      NeverReturnsErrorWarning(WarnLoc, Node.getName()).emit();
+  }
+
   SymTable_.exitScope();
   --FunctionNestingDepth_;
 }
@@ -1125,6 +1211,63 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
                                    "' is an enum variant, not a function -- "
                                    "it can't be called.")
           .raise();
+      return;
+    }
+
+    if (SymTable_.isErrorTypeName(LeftName)) {
+      // `IOError::FileNotFound("a.txt")` -- constructing a value of a
+      // user-declared `error` type (docs/planning/Errors.md). Unlike a plain
+      // `enum` variant just above, this IS callable -- every variant
+      // (payload-carrying or not) can be constructed via call syntax; a
+      // payload-less variant can ALSO be referenced bare (no parens), see
+      // this function's sibling branch in visitScopeAccess.
+      ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantConstruct;
+      auto ET = SymTable_.lookupErrorType(LeftName);
+      if (!ET)
+        return; // Should not happen -- isErrorTypeName() just confirmed it.
+
+      if (!ET->hasVariant(CalleeName)) {
+        std::string Msg = "Error type '" + LeftName + "' has no variant '" +
+                          CalleeName + "'.";
+        auto Sugg = SuggestionIndex::suggestVisible(CalleeName, ET->getVariantNames());
+        if (!Sugg.empty()) {
+          Msg += "\nDid you mean:\n";
+          for (const auto &S : Sugg) Msg += "    " + S + "\n";
+        }
+        LogErrorAt(Node.getLoc(), Msg);
+        return;
+      }
+
+      const ErrorVariant *Variant = ET->getVariant(CalleeName);
+      const int ArgCount = static_cast<int>(Node.getArgs().size());
+      const int FieldCount = static_cast<int>(Variant->Fields.size());
+      if (ArgCount != FieldCount) {
+        std::string Sig = LeftName + "::" + CalleeName + "(";
+        for (size_t i = 0; i < Variant->Fields.size(); ++i) {
+          if (i) Sig += ", ";
+          Sig += Variant->Fields[i].Name + ": " +
+                 (Variant->Fields[i].Type ? Variant->Fields[i].Type->getName() : "?");
+        }
+        Sig += ")";
+        WrongArityError(Node.getLoc(), LeftName + "::" + CalleeName, ArgCount,
+                        {Sig})
+            .raise();
+        return;
+      }
+
+      // Synthesize a candidate exactly like StructName::new(...) does (see
+      // that branch below): this hands the existing generic arity/arg-type-
+      // checking machinery in TypeChecker::visitFuncCall a real
+      // ResolverFunctionSymbol to narrow against, so no separate argument
+      // type-checking code is needed here -- the fields ARE the params.
+      auto Sym = std::make_shared<ResolverFunctionSymbol>();
+      Sym->BaseName = LeftName + "::" + CalleeName;
+      Sym->ReturnType = std::make_shared<NamedType>(LeftName);
+      Sym->DeclLoc = {Node.getLoc().Line, Node.getLoc().Col};
+      for (const auto &Field : Variant->Fields)
+        Sym->Params.push_back({Field.Name, Field.Type});
+      Node.ResolvedCandidates.push_back(Sym);
+      Node.ResolvedCallTarget = Sym;
       return;
     }
 
@@ -1612,9 +1755,70 @@ void Resolver::visitEnumDecl(EnumDeclExprAST &Node) {
 }
 
 void Resolver::visitErrorDecl(ErrorDeclExprAST &Node) {
-  // Pass 1 already hoisted the error type to the registry. Per-variant field
-  // type validation, `!T` return-type compatibility, and `recover` semantics
-  // all land in Stage 2 (docs/planning/Errors.md) -- not yet implemented.
+  // Pass 1 already hoisted the error type to the registry, same as
+  // visitEnumDecl -- nothing left to do at Pass 2 for the DECLARATION
+  // itself (variant field types were already fully specified/parsed; there
+  // are no generic type parameters on an error type to substitute, unlike
+  // visitStructDecl/visitFuncDef).
+}
+
+// `<expr> recover ...` (docs/planning/Errors.md). Resolves the wrapped `!T`
+// expression first (populating its callee's ResolvedCandidates/
+// ResolvedCallTarget, needed below), then dispatches on which of the three
+// forms this is.
+void Resolver::visitRecoverExpr(RecoverExprAST &Node) {
+  visitChild(const_cast<ExprAST *>(Node.getWrapped()));
+
+  if (Node.getKind() == RecoverKind::Produce) {
+    visitChild(const_cast<ExprAST *>(Node.getProduceExpr()));
+    return;
+  }
+
+  // Run / AsRun: the block gets its own scope, mirroring if/while/function
+  // bodies -- needed so AsRun's bound name doesn't leak past the block.
+  SymTable_.enterScope();
+
+  if (Node.getKind() == RecoverKind::AsRun) {
+    // Bare-error restriction (docs/planning/Errors.md): `recover as err run`
+    // is rejected when every error type this call can actually fail with
+    // (per the callee's PossibleErrorTypeNames, computed by
+    // CollectReturnedErrorTypeNames -- see its own doc comment on why it's
+    // unfiltered) is bare-form (`error Name;`, sugar for one informationless
+    // DEFAULT variant, nothing to discriminate on). If the callee is
+    // ambiguous (overloaded, no unique ResolvedCallTarget) or has no
+    // apparent error-shaped return at all, conservatively allow it --
+    // erring toward under-flagging, same rationale as MutatesSelfField's
+    // doc comment for hard-error-gating checks.
+    if (const auto *Call = dynamic_cast<const FuncCallExprAST *>(Node.getWrapped())) {
+      if (const auto *Target = Call->getResolvedCallTarget()) {
+        std::vector<std::string> RealErrorTypes;
+        for (const auto &Name : Target->PossibleErrorTypeNames)
+          if (SymTable_.isErrorTypeName(Name))
+            RealErrorTypes.push_back(Name);
+
+        if (!RealErrorTypes.empty()) {
+          bool AllBare = true;
+          for (const auto &Name : RealErrorTypes) {
+            auto ET = SymTable_.lookupErrorType(Name);
+            if (ET && !ET->isBareForm()) {
+              AllBare = false;
+              break;
+            }
+          }
+          if (AllBare) {
+            BareErrorAsBindingError(Node.getLoc(), Node.getBoundName()).raise();
+          }
+        }
+      }
+    }
+
+    SourceLocation Loc = Node.getLoc();
+    SymTable_.declareVariable(Node.getBoundName(), TurfAnyError(),
+                              {Loc.Line, Loc.Col});
+  }
+
+  visitChild(const_cast<ExprAST *>(Node.getBlock()));
+  SymTable_.exitScope();
 }
 
 // Handles a `Left::Right` node reached as an ordinary expression -- i.e.
@@ -1653,6 +1857,39 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
         }
         LogErrorAt(Node.getLoc(), Msg);
       }
+    }
+    return;
+  }
+
+  if (SymTable_.isErrorTypeName(LeftName)) {
+    // Bare `ErrorType::Variant` (no call) -- only valid for a payload-less
+    // variant (e.g. `return MathError::DivisionByZero;`); a variant WITH
+    // fields must be constructed via call syntax instead (handled by
+    // visitFuncCall's sibling branch), since there's nowhere for the field
+    // values to come from otherwise.
+    Node.ResolvedKind = ScopeAccessKind::ErrorVariantConstruct;
+    auto ET = SymTable_.lookupErrorType(LeftName);
+    if (!ET)
+      return; // Should not happen -- isErrorTypeName() just confirmed it.
+
+    if (!ET->hasVariant(RightName)) {
+      std::string Msg = "Error type '" + LeftName + "' has no variant '" + RightName + "'.";
+      auto Sugg = SuggestionIndex::suggestVisible(RightName, ET->getVariantNames());
+      if (!Sugg.empty()) {
+        Msg += "\nDid you mean:\n";
+        for (const auto &S : Sugg) Msg += "    " + S + "\n";
+      }
+      LogErrorAt(Node.getLoc(), Msg);
+      return;
+    }
+
+    const ErrorVariant *Variant = ET->getVariant(RightName);
+    if (Variant && !Variant->Fields.empty()) {
+      TypeError(Node.getLoc(), "'" + LeftName + "::" + RightName +
+                                   "' has fields and must be constructed "
+                                   "with call syntax, e.g. '" +
+                                   LeftName + "::" + RightName + "(...)'.")
+          .raise();
     }
     return;
   }
@@ -1831,7 +2068,8 @@ void Resolver::validateNamedType(
         TypeParams.end();
     if (!IsOwnTypeParam && !KnownPrimitives.count(TypeName) &&
         !SymTable_.isKnownStruct(TypeName) &&
-        !SymTable_.isEnumName(TypeName)) {
+        !SymTable_.isEnumName(TypeName) &&
+        !SymTable_.isErrorTypeName(TypeName)) {
       RankedSuggestions Suggestions;
       Suggestions.Local =
           SuggestionIndex::suggestVisible(TypeName, SymTable_.getAllStructNames());
