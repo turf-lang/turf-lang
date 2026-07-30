@@ -118,11 +118,11 @@ fn apply(f: fn(int): int, x: int): int { return f(x); }
 - [x] **#184: `enum` Declaration 🟡**
 
 **Group C — CFG Static Analysis (Phases 1 & 2):**
-- [ ] **#185: CFG Phase 1 — Cyclomatic Complexity & Infinite Loop Detection 🔴** — not implemented; current `CFG`/`CFGBuilder` (`include/CFG.h`) only does reachability/missing-return/dead-code-after-terminator analysis, no complexity metric or loop-exit-path check
-- [ ] **#186: CFG Phase 2 — Liveness Pass & Infinite Recursion Detection 🔴** — not implemented; `CallGraphPass` (`include/CallGraph.h`) exists but is a minimal 26-line call-edge tracker, no liveness/dead-store analysis or recursion-without-base-case detection
+- [x] **#185: CFG Phase 1 — Cyclomatic Complexity & Infinite Loop Detection 🔴** (this checklist was stale — `CFG::calculateCyclomaticComplexity()`/`CFG::hasUnbreakableLoop()` are implemented in `src/CFG.cpp` and wired up in `Codegen.cpp`; confirmed live 2026-07-30 while starting #187)
+- [x] **#186: CFG Phase 2 — Liveness Pass & Infinite Recursion Detection 🔴** (also stale — `LivenessAnalysisPass` (`src/Analysis.cpp`) and `RecursionWithoutBaseError` (`Errors.h`, raised from `Codegen.cpp`) are both implemented; confirmed live 2026-07-30)
 
 **Group D — Type System Completion:**
-- [ ] **#187: First-Class Functions 🟡** — not implemented; `Resolver::visitScopeAccess()` explicitly rejects a bare function reference ("functions aren't first-class yet")
+- [x] **#187: First-Class Functions 🟡** — `FuncType` (`Types.h`), `fn(T1, T2, ...): R` type syntax (`Parser.cpp`'s `ParseType()`), bare function names as values (`Resolver::visitVariable`'s `ResolvedFunctionRef` path, restricted to the same self-file/self-module/on-demand-import visibility bare calls already get), and indirect calls through a function-typed variable/parameter (`Resolver`/`TypeChecker`/`Codegen`'s `visitFuncCall`/`FuncCallExprAST::codegen()`). Functions can be passed as arguments, stored in variables, and returned from other functions. **Deliberately out of scope**: `Module::func`/`StructName::method` used bare as a value still raises "functions aren't first-class yet" (`Resolver::visitScopeAccess`) — only unqualified function names are first-class values today.
 - [ ] **#188: `!T` Error Unions (`catch`, `?`, `error.XYZ`) 🔴** *(last — heaviest)* — not implemented, no `!T`/`catch`/`?`/`error.XYZ` tokens anywhere (see `docs/planning/ERROR_HANDLING_RFC.md`, still an open proposal)
 
 > **⛔ Explicitly Rejected**: `loop { }` keyword. Adds nothing over `while(true)`. `TOK_LOOP` must NOT be added at any point.

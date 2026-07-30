@@ -10,13 +10,16 @@
 ## Final Turflang Phase 3 Syntax Reference (locked in)
 
 > **2026-07 status note**: most of this block IS the current language (FFI, `compare`,
-> enum, logical NOT, bitwise ops, string ops, default init) — but **do/while,
-> first-class functions, and error unions (`!T`/`catch`/`?`/`error.XYZ`/`match`)
-> are still NOT implemented** (see the per-issue status list below). Also,
+> enum, logical NOT, bitwise ops, string ops, default init, first-class functions) —
+> but **do/while and error unions (`!T`/`catch`/`?`/`error.XYZ`/`match`) are still
+> NOT implemented** (see the per-issue status list below). Also,
 > module-qualified calls and enum-value access now use `::`, not `.`
 > (`io::printline(...)`, `Color::Red`) — this example block predates that
 > change and was left as-is below rather than silently rewritten, since the
-> do-while/first-class-function/error-union examples are aspirational anyway.
+> do-while/error-union examples are aspirational anyway. The first-class-
+> function example below still uses `io.printline`-era `.` module syntax in
+> spirit but is otherwise real, working code today (only unqualified `fn`
+> names are first-class values — see Issue #187's status note).
 
 ```turflang
 // FFI — bind a C library function
@@ -79,7 +82,7 @@ mutable flag:  bool;     // false
 mutable label: string;   // ""
 mutable ptr:   Node*;    // null
 
-// First-class functions — NOT YET IMPLEMENTED (#187)
+// First-class functions — IMPLEMENTED (#187)
 fn apply(f: fn(int): int, x: int): int {
     return f(x);
 }
@@ -129,6 +132,9 @@ All of the following are implemented and confirmed working in the current compil
 - **#182: Bitwise operators** (`&`, `|`, `~`, `^`, `<<`, `>>`).
 - **#183: String operations** (`+`, `==`, `s[i]`).
 - **#184: `enum` declaration**.
+- **#185: CFG Phase 1** — cyclomatic complexity + infinite-loop-with-no-exit `TurfWarning`s (`CFG::calculateCyclomaticComplexity()`/`hasUnbreakableLoop()`).
+- **#186: CFG Phase 2** — liveness analysis (`LivenessAnalysisPass`, dead-store/unused-variable `TurfWarning`s) + infinite-recursion-without-base-case detection (`RecursionWithoutBaseError`).
+- **#187: First-class functions** — `fn(T1, T2, ...): R` type syntax; bare unqualified function names usable as values (arguments, variable initializers, return values); indirect calls through a function-typed variable/parameter. See its own section below for the deliberately-out-of-scope parts (`Module::func`/`StructName::method` as values).
 
 Note: enum-value and module-qualified access now use `::` (`Color::Red`, `io::printline(...)`), not `.` as shown in some of the original issue text — see `docs/architecture/modules_and_scope_resolution.md`.
 
@@ -227,241 +233,21 @@ Standard: enter scope for body, resolve body, resolve condition. TypeChecker: co
 
 ---
 
-## Issue #185 — CFG Phase 1: Cyclomatic Complexity & Infinite Loop Detection
+## Issues #185, #186, #187 — CFG Phase 1, CFG Phase 2, First-Class Functions
 
-**Labels:** `cfg`, `static-analysis`, `phase-3`
-**Depends on:** #173 (`TurfWarning` must exist), #184
-**Files:** `include/CFG.h`, `src/CFG.cpp`
-**Status (2026-07): NOT implemented.** Current `CFG`/`CFGBuilder` (`include/CFG.h`) only builds basic blocks and does reachability / missing-return / dead-code-after-terminator analysis — no `calculateCyclomaticComplexity()`, no `hasUnbreakableLoop()`.
+Implemented and confirmed working (see the "Completed Issues" summary above for
+#185/#186/#187's one-line descriptions and the relevant source files); their
+full Description/Implementation/Acceptance-Criteria sections were removed
+here, same convention as the #173-#184 cleanup above. See git history for the
+original specs if needed.
 
-### Description
-
-Two static analysis passes built on the existing CFG infrastructure. Both emit `TurfWarning` (non-interrupting) — the program still compiles if a warning is triggered.
-
-### Pass 1: Cyclomatic Complexity Monitor
-
-**Goal:** Warn when a function is too complex to read or maintain.
-
-**Formula:** `M = E - N + 2P` where:
-- `E` = total edges (count all `Successors` across all `Blocks`)
-- `N` = total nodes (count of `Blocks`)
-- `P` = 1 (single connected component per function CFG)
-
-```cpp
-// In CFG.h:
-int CFG::calculateCyclomaticComplexity() const;
-
-// Implementation:
-int CFG::calculateCyclomaticComplexity() const {
-    int E = 0, N = static_cast<int>(Blocks.size());
-    for (const auto &Block : Blocks)
-        E += static_cast<int>(Block.Successors.size());
-    return E - N + 2;
-}
-```
-
-**Trigger:** After building the CFG in `Codegen.cpp`, call this method. If `M > 15`:
-
-```cpp
-TurfWarning(FuncLoc,
-    "Function '" + FuncName + "' has cyclomatic complexity " +
-    std::to_string(M) + " (threshold: 15). "
-    "Consider breaking it into smaller functions.").emit();
-```
-
-### Pass 2: Infinite Loop Detection
-
-**Goal:** Detect `while(true)` loops with no reachable exit.
-
-```cpp
-// In CFG.h:
-bool CFG::hasUnbreakableLoop() const;
-```
-
-**Algorithm:**
-1. Run a DFS from `EntryBlock`, tracking visited blocks and the current DFS path (for cycle detection).
-2. When a back-edge is found (a `Successor` already in the current path), a cycle exists.
-3. Collect all blocks within the cycle.
-4. If **none** of the cycle's blocks contain a `TerminatorKind::Break` or `TerminatorKind::Return` → infinite loop.
-
-**Trigger:** After CFG construction:
-
-```cpp
-if (CFG.hasUnbreakableLoop()) {
-    TurfWarning(FuncLoc,
-        "Function '" + FuncName + "' contains a loop with no exit path. "
-        "This will run forever.").emit();
-}
-```
-
-### Acceptance Criteria
-
-- A function with 16 branches triggers a cyclomatic complexity warning.
-- A function with `while(true) { x = x + 1; }` triggers an infinite loop warning.
-- A function with `while(true) { if (x > 10) { break; } }` does NOT trigger the warning (break is present).
-- Both warnings use `TurfWarning` and do not prevent compilation.
-- `--resolve` flag (resolver-only mode) does NOT trigger CFG warnings (CFG runs after Codegen begins).
-
----
-
-## Issue #186 — CFG Phase 2: Liveness Pass & Infinite Recursion Detection
-
-**Labels:** `cfg`, `static-analysis`, `phase-3`
-**Depends on:** #185
-**Files:** `include/CFG.h`, `src/CFG.cpp`, `src/CallGraph.cpp` (existing)
-**Status (2026-07): NOT implemented.** `CallGraphPass` (`include/CallGraph.h`) exists but is a minimal ~26-line call-edge tracker — no liveness data-flow analysis, no `RecursionWithoutBaseError`.
-
-### Description
-
-Two more static analysis passes. The liveness pass is the first real data-flow analysis in the compiler. Infinite recursion detection leverages the existing `CallGraph` infrastructure already built in `main.cpp`.
-
-### Pass 3: Liveness Analysis (Dead Stores & Unused Variables)
-
-**Goal:** Warn about variables that are assigned but never read.
-
-**Algorithm:** Classic backward data-flow analysis (worklist algorithm).
-
-```cpp
-class LivenessAnalysisPass {
-  // Per-block sets:
-  std::unordered_map<TurfBasicBlock*, std::unordered_set<std::string>> Gen_;   // read before written
-  std::unordered_map<TurfBasicBlock*, std::unordered_set<std::string>> Kill_;  // written
-  std::unordered_map<TurfBasicBlock*, std::unordered_set<std::string>> LiveIn_;
-  std::unordered_map<TurfBasicBlock*, std::unordered_set<std::string>> LiveOut_;
-
-public:
-  void run(const CFG &G);
-};
-```
-
-**Worklist algorithm:**
-1. Initialize `Gen` and `Kill` for each block by walking its statements.
-2. Initialize `LiveIn[B] = Gen[B]` for all `B`.
-3. Repeat until convergence:
-   ```
-   For each block B (reverse postorder):
-     LiveOut[B] = ∪ LiveIn[S] for each successor S of B
-     LiveIn[B]  = Gen[B] ∪ (LiveOut[B] − Kill[B])
-   ```
-
-**Triggers:**
-- **Dead store**: variable in `Kill[stmt]` but not in `LiveOut[B]` and not read later in the block.
-  - Emit: `TurfWarning(loc, "Variable '" + name + "' is assigned but never read (dead store).")`
-- **Unused variable**: a `VarDeclExprAST` whose name never appears in any `Gen` set across all blocks.
-  - Emit: `TurfWarning(loc, "Variable '" + name + "' is declared but never used.")`
-
-### Pass 4: Infinite Recursion Detection
-
-**Goal:** Detect functions where every path from entry to exit passes through a recursive call — meaning there is no base case.
-
-**Algorithm** (uses the existing `CallGraph`):
-1. During CFG construction, tag basic blocks that contain a call to the **current** function (self-call).
-2. Compute all paths from `EntryBlock` to `ExitBlock` using DFS (with visited set to prevent infinite traversal of loops).
-3. If **every** path passes through a self-call block: no base case exists.
-4. Emit fatal error: `RecursionWithoutBaseError`.
-
-Add `RecursionWithoutBaseError` to `Errors.h`:
-
-```cpp
-class RecursionWithoutBaseError : public TurfError {
-public:
-  RecursionWithoutBaseError(SourceLocation Loc, const std::string &FuncName)
-      : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Infinite recursion detected in '" +
-                      Colors::CYAN + FuncName + Colors::BRIGHT_RED + "'." +
-                      Colors::RESET,
-                  "Hint: Every recursive function needs a base case — "
-                  "a path that returns without calling itself.") {}
-};
-```
-
-This is a **fatal error** (uses `raise()`) because infinite recursion guarantees a stack overflow at runtime with no recovery.
-
-### Acceptance Criteria
-
-**Liveness:**
-- `mutable x: int = 5; mutable y: int = x + 1;` then `return y;` (x is read → no warning, y is read → no warning).
-- `mutable x: int = 5; return 0;` (x declared, never read) → unused variable warning.
-- `mutable x: int = 5; x = 10; return x;` (first assignment is dead store since x is overwritten before read) → dead store warning for the first assignment.
-
-**Infinite Recursion:**
-- `fn foo(): int { return foo(); }` → `RecursionWithoutBaseError`.
-- `fn factorial(n: int): int { if n == 0 { return 1; } return n * factorial(n - 1); }` → NO error (base case exists).
-
----
-
-## Issue #187 — First-Class Functions
-
-**Labels:** `typechecker`, `ast`, `codegen`, `phase-3`
-**Depends on:** #186
-**Files:** `include/Types.h`, `src/Parser.cpp`, `src/TypeChecker.cpp`, `src/Codegen.cpp`
-**Status (2026-07): NOT implemented.** `Resolver::visitScopeAccess()` explicitly rejects a bare function reference with "functions aren't first-class yet"; no `FuncType`.
-
-### Description
-
-Allow functions to be passed as arguments, stored in variables, and returned from other functions. This is required before generics can be useful (generic algorithms like `map`, `filter`, `sort` all take functions as parameters).
-
-```turflang
-fn apply(f: fn(int): int, x: int): int {
-    return f(x);
-}
-
-fn double_it(n: int): int { return n * 2; }
-
-mutable result: int = apply(double_it, 5);  // 10
-```
-
-### Types.h Changes
-
-Add `FuncType`:
-
-```cpp
-class FuncType : public TurfType {
-  TurfTypePtr ReturnType_;
-  std::vector<TurfTypePtr> ParamTypes_;
-public:
-  FuncType(TurfTypePtr ReturnType, std::vector<TurfTypePtr> ParamTypes);
-  std::string getName() const override; // e.g. "fn(int, int): double"
-  bool isFunc() const override { return true; }
-  TurfTypePtr getReturnType() const { return ReturnType_; }
-  const std::vector<TurfTypePtr> &getParamTypes() const { return ParamTypes_; }
-};
-```
-
-### Parser Changes (`ParseType()`)
-
-When `ParseType()` encounters `TOK_FN`:
-
-```
-Consume TOK_FN
-Expect '('
-Parse comma-separated type list
-Expect ')'
-Expect TOK_COLON
-Parse return type
-Return FuncType(ReturnType, ParamTypes)
-```
-
-This means `fn(int): int` is a valid type expression in any type-annotation position.
-
-### TypeChecker Changes
-
-`TypeChecker::visitFuncCall`: when the callee resolves to a variable of `FuncType`, validate argument count and types against `FuncType::getParamTypes()`.
-
-`TypeChecker::visitVarDecl`: when the declared type is `FuncType`, the initializer must be a function name that matches the signature.
-
-### Codegen Changes
-
-`VariableExprAST::codegen()`: when the resolved symbol has type `FuncType`, look up the `llvm::Function*` by name and return it as a value (functions are already first-class in LLVM IR).
-
-`FuncCallExprAST::codegen()`: when the callee is a variable (not a direct function name), load the `llvm::Function*` value and emit `CreateCall` with it.
-
-### Acceptance Criteria
-
-- `fn apply(f: fn(int): int, x: int): int { return f(x); }` compiles.
-- `apply(double_it, 5)` produces `10`.
-- Passing a function with the wrong signature emits a TypeChecker error.
-- `mutable f: fn(int): int = double_it;` compiles and calling `f(3)` produces `6`.
+**#187's deliberately-out-of-scope note** (not covered by the original spec
+above, discovered while implementing): only an unqualified, bare `fn` name
+resolves as a first-class function value (an argument, a variable
+initializer/reassignment, or a return value) — `Module::func` and
+`StructName::method` used bare as a value still raise "functions aren't
+first-class yet" (`Resolver::visitScopeAccess`). Extending first-class-ness to
+qualified references is a real, separate follow-up, not started.
 
 ---
 
@@ -670,13 +456,13 @@ This order minimizes breakage and respects all dependency chains. Items already 
 #183 (string operations)          — DONE
 #184 (enum)                       — DONE
 
-#185 (CFG Phase 1)                — OPEN — Group C — depends on #173 (done), #184 (done)
-#186 (CFG Phase 2)                — OPEN — Group C — depends on #185 (open)
+#185 (CFG Phase 1)                — DONE
+#186 (CFG Phase 2)                — DONE
 
-#187 (first-class functions)      — OPEN — Group D — depends on #186 (open)
+#187 (first-class functions)      — DONE
 #188 (!T error unions)            — OPEN — Group E — LAST. depends on ALL above.
 ```
 
-**Remaining open work, in original dependency order:** #180 → #185 → #186 → #187 → #188 (the doc's original ordering no longer strictly holds since #180/#181 aren't sequential dependencies of each other in practice — #181 shipped despite #180 not being done — but nothing here blocks starting #180 or #185 independently).
+**Remaining open work:** #180 (do/while) and #188 (!T error unions) — #185/#186/#187 turned out to already be implemented (their "OPEN" status above was stale; confirmed via source-code grep on 2026-07-30 while starting #187), and #180/#181 were never sequential dependencies of each other in practice (#181 shipped despite #180 not being done). #188 stays last regardless — see its own "why last" note below.
 
 **Why `!T` is last:** It touches the most files and introduces the most new concepts. Every other Phase 3 item produces a clean, stable compiler state that `!T` can be built on top of.
