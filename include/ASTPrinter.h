@@ -71,6 +71,13 @@ public:
     std::cout << "\n";
   }
 
+  void visitChar(CharExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "CharExpr('" << N.getVal() << "')";
+    printTypeBadge(&N);
+    std::cout << "\n";
+  }
+
   void visitString(StringExprAST &N) override {
     printIndent(Depth_);
     std::cout << "StringExpr(\"" << N.getValue() << "\")";

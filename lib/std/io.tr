@@ -38,6 +38,10 @@ fn print(val: bool): void {
     printf("%d", val);
 }
 
+fn print(val: char): void {
+    printf("%c", val);
+}
+
 fn print(val: string): void {
     printf("%s", val);
 }
@@ -54,6 +58,10 @@ fn printline(val: double): void {
 
 fn printline(val: bool): void {
     printf("%d\n", val);
+}
+
+fn printline(val: char): void {
+    printf("%c\n", val);
 }
 
 fn printline(val: string): void {

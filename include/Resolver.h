@@ -137,6 +137,7 @@ public:
 
   void visitNumber(NumberExprAST &Node) override { (void)Node; }
   void visitBool(BoolExprAST &Node) override { (void)Node; }
+  void visitChar(CharExprAST &Node) override { (void)Node; }
   void visitString(StringExprAST &Node) override { (void)Node; }
   void visitNull(NullExprAST &Node) override { (void)Node; }
   void visitDefaultInit(DefaultInitExprAST &Node) override { (void)Node; }

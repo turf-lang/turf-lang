@@ -105,6 +105,8 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = llvm::Type::getDoubleTy(*TheContext);
   if (T->isNamed("bool"))
     return LLVMTypeCache[Key] = llvm::Type::getInt1Ty(*TheContext);
+  if (T->isNamed("char"))
+    return LLVMTypeCache[Key] = llvm::Type::getInt8Ty(*TheContext);
   if (T->isNamed("string"))
     return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
   if (T->isNamed("void"))
@@ -188,6 +190,12 @@ static TurfTypePtr getTurfTypeFromLLVM(llvm::Type *Ty) {
     return TurfInt();
   if (Ty->isIntegerTy(1))
     return TurfBool();
+  // Must come before the final double fallback: an i8 char value would
+  // otherwise be silently misidentified as double, which breaks
+  // CastExprAST's SrcName==DstName identity fast path for any char-involving
+  // cast or comparison (see STRING_UFCS_OPERATOR_CHAR_RFC.md §3 build notes).
+  if (Ty->isIntegerTy(8))
+    return TurfChar();
   if (Ty->isPointerTy())
     return TurfPtr(); // All LLVM pointers map to ptr; callers refine via RefineLLVMType
   if (Ty->isVoidTy())
@@ -204,6 +212,8 @@ static int getTypeRank(const TurfType *T) {
     return 2;
   if (T->isNamed("bool"))
     return 1;
+  if (T->isNamed("char"))
+    return 5;
   if (T->isNamed("string"))
     return 4;
   return 0;
@@ -1053,6 +1063,11 @@ Value *BoolExprAST::codegen() {
   return ConstantInt::get(Type::getInt1Ty(*TheContext), Val ? 1 : 0);
 }
 
+Value *CharExprAST::codegen() {
+  return ConstantInt::get(Type::getInt8Ty(*TheContext),
+                           static_cast<uint8_t>(Val));
+}
+
 Value *StringExprAST::codegen() {
   // Create a global string constant
   return Builder->CreateGlobalString(Val, "str");
@@ -1483,6 +1498,8 @@ static llvm::Constant *GetDefaultValue(const TurfType *T) {
     return llvm::ConstantFP::get(llvm::Type::getDoubleTy(*TheContext), 0.0);
   if (T->isNamed("bool"))
     return llvm::ConstantInt::get(llvm::Type::getInt1Ty(*TheContext), 0);
+  if (T->isNamed("char"))
+    return llvm::ConstantInt::get(llvm::Type::getInt8Ty(*TheContext), 0);
   if (T->isNamed("string"))
     return Builder->CreateGlobalStringPtr("");
 
@@ -2073,6 +2090,17 @@ Value *CastExprAST::codegen() {
 
   if (SrcName == "double" && DstName == "int")
     return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), "dtoi");
+
+  // char -> int : zero-extend. char is treated as an unsigned byte (0-255),
+  // not a signed C-style char, per STRING_UFCS_OPERATOR_CHAR_RFC.md §3's
+  // "byte, not codepoint" framing -- predictable, no negative surprises.
+  if (SrcName == "char" && DstName == "int")
+    return Builder->CreateZExt(Val, Type::getInt64Ty(*TheContext), "chartoint");
+
+  // int -> char : truncate. Explicit narrowing cast only, mirroring the
+  // double->int narrowing-requires-explicit-cast philosophy above.
+  if (SrcName == "int" && DstName == "char")
+    return Builder->CreateTrunc(Val, Type::getInt8Ty(*TheContext), "inttochar");
 
   // Resolve both SrcType and DestType through GlobalSymbolTable so that
   // enum types (stored as NamedType at parse time) are correctly identified.

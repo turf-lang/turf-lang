@@ -49,6 +49,11 @@ TurfTypePtr TurfBool() {
   return T;
 }
 
+TurfTypePtr TurfChar() {
+  static TurfTypePtr T = std::make_shared<CharType>();
+  return T;
+}
+
 TurfTypePtr TurfString() {
   static TurfTypePtr T = std::make_shared<StringType>();
   return T;

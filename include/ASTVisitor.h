@@ -25,6 +25,7 @@
 // ─── Forward declarations (all AST node types) ───────────────────────────────
 class NumberExprAST;
 class BoolExprAST;
+class CharExprAST;
 class StringExprAST;
 class NullExprAST;
 class VariableExprAST;
@@ -90,6 +91,7 @@ public:
   // ── Literals ──────────────────────────────────────────────────────────────
   virtual void visitNumber(NumberExprAST &Node) {}
   virtual void visitBool(BoolExprAST &Node) {}
+  virtual void visitChar(CharExprAST &Node) {}
   virtual void visitString(StringExprAST &Node) {}
   virtual void visitNull(NullExprAST &Node) {}
   virtual void visitDefaultInit(DefaultInitExprAST &Node) {}

@@ -74,6 +74,7 @@ std::ifstream *SourceFile = &GlobalSourceFile;
 double NumVal;
 long long IntVal;
 bool BoolVal;
+char CharVal;
 std::string IdentifierStr;
 std::string StringVal;
 int GetLastChar() { return LastChar; }
@@ -85,6 +86,7 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"float", TOK_TYPE_DOUBLE},
                                        {"double", TOK_TYPE_DOUBLE},
                                        {"bool", TOK_TYPE_BOOL},
+                                       {"char", TOK_TYPE_CHAR},
                                        {"true", TOK_BOOL_LITERAL},
                                        {"false", TOK_BOOL_LITERAL},
                                        {"string", TOK_TYPE_STRING},
@@ -515,6 +517,109 @@ int gettok() {
     CurCol++;
 
     return TOK_STRING_LITERAL;
+  }
+
+  // Char literals: 'x'
+  //
+  // A char is a single byte (RFC STRING_UFCS_OPERATOR_CHAR_RFC §3), not a
+  // Unicode codepoint -- exactly one character, or one escape sequence, may
+  // appear between the quotes. Reuses the identical escape-sequence set
+  // recognized inside double-quoted strings above (\n \t \r \0 \a \b \f \v
+  // \\ \" \'), so the same source text means the same byte in both string
+  // and char literals.
+  if (LastChar == '\'') {
+    LastChar = SourceFile->get();
+    CurCol++;
+
+    if (LastChar == '\'') {
+      // Empty literal '' -- consume the closing quote so the lexer doesn't
+      // desync, report, and recover with a placeholder value.
+      LogErrorAt(CurLoc,
+                 "Empty char literal.\n  Hint: A char literal must contain "
+                 "exactly one character, e.g. 'a'.");
+      LastChar = SourceFile->get();
+      CurCol++;
+      CharVal = '\0';
+      return TOK_CHAR_LITERAL;
+    }
+
+    if (LastChar == EOF || LastChar == '\n') {
+      // Same rationale as the unterminated-string case above: don't consume
+      // the newline, so the next gettok() call's whitespace-skip recovers
+      // line tracking cleanly instead of desyncing for the rest of the file.
+      LogErrorAt(CurLoc,
+                 std::string("Unterminated char literal") +
+                     "\n  Hint: Add a closing ''' after the character.");
+      return LastChar == EOF ? TOK_EOF : TOK_CHAR_LITERAL;
+    }
+
+    if (LastChar == '\\') {
+      SourceLocation EscapeLoc{CurLine, CurCol, ""};
+      LastChar = SourceFile->get();
+      CurCol++;
+      if (LastChar == 'n') {
+        CharVal = '\n';
+      } else if (LastChar == 't') {
+        CharVal = '\t';
+      } else if (LastChar == 'r') {
+        CharVal = '\r';
+      } else if (LastChar == '0') {
+        CharVal = '\0';
+      } else if (LastChar == 'a') {
+        CharVal = '\a';
+      } else if (LastChar == 'b') {
+        CharVal = '\b';
+      } else if (LastChar == 'f') {
+        CharVal = '\f';
+      } else if (LastChar == 'v') {
+        CharVal = '\v';
+      } else if (LastChar == '\\') {
+        CharVal = '\\';
+      } else if (LastChar == '"') {
+        CharVal = '"';
+      } else if (LastChar == '\'') {
+        CharVal = '\'';
+      } else {
+        LogErrorAt(EscapeLoc,
+                   std::string("Unknown escape sequence '\\") +
+                       static_cast<char>(LastChar) +
+                       "' in char literal.\n  Hint: Recognized escapes are "
+                       "\\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'.");
+        CharVal = static_cast<char>(LastChar);
+      }
+    } else {
+      CharVal = static_cast<char>(LastChar);
+    }
+
+    // Consume the character (or the last byte of the escape) just recorded.
+    LastChar = SourceFile->get();
+    CurCol++;
+
+    if (LastChar != '\'') {
+      // More than one character before the closing quote, e.g. 'ab'. Skip
+      // forward to the next ''' (or EOF/newline) so the rest of the file
+      // keeps lexing from a sane point instead of every later token being
+      // offset by the stray characters.
+      LogErrorAt(CurLoc,
+                 "Char literal must contain exactly one character.\n  Hint: "
+                 "Use a string literal (\"ab\") for multiple characters, or "
+                 "check for a missing closing '.");
+      while (LastChar != '\'' && LastChar != EOF && LastChar != '\n') {
+        LastChar = SourceFile->get();
+        CurCol++;
+      }
+      if (LastChar == '\'') {
+        LastChar = SourceFile->get();
+        CurCol++;
+      }
+      return TOK_CHAR_LITERAL;
+    }
+
+    // Consume closing '
+    LastChar = SourceFile->get();
+    CurCol++;
+
+    return TOK_CHAR_LITERAL;
   }
 
   // Ellipsis '...' (variadic marker in extern fn) must be checked before '..'

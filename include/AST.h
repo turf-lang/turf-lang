@@ -643,6 +643,23 @@ public:
   }
 };
 
+// A single-byte char literal ('x'). Deliberately a distinct AST node from
+// StringExprAST -- see STRING_UFCS_OPERATOR_CHAR_RFC.md §3: char is a byte,
+// not a codepoint, with no arithmetic and only built-in comparisons.
+class CharExprAST : public ExprAST {
+  char Val;
+
+public:
+  explicit CharExprAST(char Val) : Val(Val) {}
+  char getVal() const { return Val; }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitChar(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<CharExprAST>(Val);
+  }
+};
+
 class StringExprAST : public ExprAST {
   std::string Val;
 

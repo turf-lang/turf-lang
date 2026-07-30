@@ -13,6 +13,7 @@
  *   ├─ IntType                — the `int` primitive
  *   ├─ DoubleType             — the `double` primitive
  *   ├─ BoolType               — the `bool` primitive
+ *   ├─ CharType               — the `char` primitive (1 byte, no arithmetic)
  *   ├─ StringType             — the `string` primitive
  *   ├─ VoidType               — the `void` return type
  *   ├─ TurfNullType           — the `null` literal type
@@ -73,6 +74,7 @@ public:
   virtual bool isInt()    const { return false; }
   virtual bool isDouble() const { return false; }
   virtual bool isBool()   const { return false; }
+  virtual bool isChar()   const { return false; }
   virtual bool isString() const { return false; }
   virtual bool isVoid()   const { return false; }
   virtual bool isNull()   const { return false; }
@@ -155,6 +157,23 @@ public:
   std::string getName() const override { return "bool"; }
   bool isBool()    const override { return true; }
   bool isNumeric() const override { return true; }
+};
+
+/**
+ * @brief The `char` primitive type.
+ *
+ * A single byte, not a Unicode codepoint (RFC: STRING_UFCS_OPERATOR_CHAR_RFC
+ * §3). Maps to llvm::Type::getInt8Ty in Codegen. Deliberately does NOT
+ * override isNumeric() -- this is the load-bearing decision that keeps char
+ * out of every existing numeric-coercion path (typesCompatible(), implicit
+ * widening, etc.) without needing any new exclusion logic anywhere else.
+ * char supports built-in comparisons but not arithmetic; arithmetic requires
+ * an explicit `to int` cast first.
+ */
+class CharType : public TurfType {
+public:
+  std::string getName() const override { return "char"; }
+  bool isChar() const override { return true; }
 };
 
 /**
@@ -489,6 +508,7 @@ struct RankedSuggestions {
 TurfTypePtr TurfInt();
 TurfTypePtr TurfDouble();
 TurfTypePtr TurfBool();
+TurfTypePtr TurfChar();
 TurfTypePtr TurfString();
 TurfTypePtr TurfVoid();
 TurfTypePtr TurfNull();

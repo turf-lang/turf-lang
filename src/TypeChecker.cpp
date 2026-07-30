@@ -300,6 +300,14 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
   if (LhsTy->isString() && RhsTy->isString())
     return TurfBool();
 
+  // char ordering is built in (byte-value comparison) but, per
+  // STRING_UFCS_OPERATOR_CHAR_RFC.md \u00a73, char is deliberately NOT isNumeric()
+  // -- so without this explicit branch it would fall through to the
+  // isNumeric()&&isNumeric() check below and be rejected. This branch is the
+  // one place char's built-in ordering actually gets granted.
+  if (LhsTy->isChar() && RhsTy->isChar())
+    return TurfBool();
+
   if (LhsTy->isEnum() || RhsTy->isEnum()) {
     std::string EnumName = LhsTy->isEnum() ? LhsTy->getName() : RhsTy->getName();
     reportError(Loc, "Cannot use ordering operators on enum type '" + EnumName + 
@@ -324,6 +332,10 @@ void TypeChecker::visitNumber(NumberExprAST &Node) {
 
 void TypeChecker::visitBool(BoolExprAST &Node) {
   setType(&Node, TurfBool());
+}
+
+void TypeChecker::visitChar(CharExprAST &Node) {
+  setType(&Node, TurfChar());
 }
 
 void TypeChecker::visitString(StringExprAST &Node) {

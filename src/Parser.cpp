@@ -176,6 +176,7 @@ std::unique_ptr<ExprAST> ParseForExpr();
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
 std::unique_ptr<ExprAST> ParseEnumDecl();
 std::unique_ptr<ExprAST> ParseBoolExpr();
+std::unique_ptr<ExprAST> ParseCharExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 std::unique_ptr<ExprAST> ParseFuncDef();
 std::unique_ptr<ExprAST> ParseImport();
@@ -197,6 +198,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr();
 static TurfTypePtr ParseType() {
   if (CurTok != TOK_IDENTIFIER && CurTok != TOK_TYPE_INT &&
       CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
+      CurTok != TOK_TYPE_CHAR &&
       CurTok != TOK_TYPE_STRING && CurTok != TOK_TYPE_VOID &&
       CurTok != TOK_PTR) {
     SyntaxError(CurLoc, "Expected a type name").raise();
@@ -210,6 +212,8 @@ static TurfTypePtr ParseType() {
     BaseName = "double";
   else if (CurTok == TOK_TYPE_BOOL)
     BaseName = "bool";
+  else if (CurTok == TOK_TYPE_CHAR)
+    BaseName = "char";
   else if (CurTok == TOK_TYPE_STRING)
     BaseName = "string";
   else if (CurTok == TOK_TYPE_VOID)
@@ -303,6 +307,8 @@ static TurfTypePtr ParseType() {
     Base = TurfDouble();
   else if (BaseName == "bool")
     Base = TurfBool();
+  else if (BaseName == "char")
+    Base = TurfChar();
   else if (BaseName == "string")
     Base = TurfString();
   else if (BaseName == "void")
@@ -393,6 +399,12 @@ std::unique_ptr<ExprAST> ParseBoolExpr() {
   bool SavedBoolVal = BoolVal;
   getNextToken();
   return std::make_unique<BoolExprAST>(SavedBoolVal);
+}
+
+std::unique_ptr<ExprAST> ParseCharExpr() {
+  auto Result = std::make_unique<CharExprAST>(CharVal);
+  getNextToken();
+  return Result;
 }
 
 std::unique_ptr<ExprAST> ParseStringExpr() {
@@ -750,7 +762,10 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
   case TOK_STRING_LITERAL:
     return ParseStringExpr();
-    
+
+  case TOK_CHAR_LITERAL:
+    return ParseCharExpr();
+
   case TOK_NULL:
     return ParseNullExpr();
 
@@ -812,6 +827,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_TYPE_DOUBLE:
   case TOK_TYPE_STRING:
   case TOK_TYPE_BOOL:
+  case TOK_TYPE_CHAR:
     LogErrorAt(CurLoc, "Expected 'mutable' or 'immutable' to begin a declaration.");
     return nullptr;
 

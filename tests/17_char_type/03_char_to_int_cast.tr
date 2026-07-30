@@ -1,0 +1,17 @@
+// char<->int casts are explicit-only (char is deliberately not isNumeric(),
+// so no implicit coercion exists -- RFC §3). char->int is zero-extend (char
+// is an unsigned byte, 0-255, not a signed C-style char).
+import test;
+
+fn main(): int {
+    test::assert(('a' to int) == 97, "'a' to int should be 97");
+    test::assert(('A' to int) == 65, "'A' to int should be 65");
+    test::assert(('0' to int) == 48, "'0' to int should be 48");
+
+    // round trip
+    test::assert((97 to char) == 'a', "97 to char should round-trip to 'a'");
+    mut c: char = 200 to char;
+    test::assert((c to int) == 200, "200 to char to int should round-trip (unsigned byte range)");
+
+    return 0;
+}

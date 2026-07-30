@@ -39,6 +39,7 @@ extern std::ifstream *SourceFile;
 extern double NumVal;
 extern long long IntVal;
 extern bool BoolVal;
+extern char CharVal;
 extern std::string IdentifierStr;
 extern std::string StringVal;
 
@@ -218,7 +219,9 @@ enum Token {
   TOK_LSHIFT   = -79, ///< `<<`       token   — bitwise left shift
   TOK_RSHIFT   = -80, ///< `>>`       token   — bitwise right shift
   TOK_EXPORT   = -82, ///< `export`   keyword — top-level exported constant declaration
-  TOK_STATIC   = -83  ///< `static`   keyword — no-`self` struct-bound method declaration
+  TOK_STATIC   = -83, ///< `static`   keyword — no-`self` struct-bound method declaration
+  TOK_TYPE_CHAR    = -84, ///< `char`   keyword — 1-byte primitive type (no arithmetic)
+  TOK_CHAR_LITERAL = -85  ///< `'x'`    token   — single-quoted char literal
 };
 
 int gettok();

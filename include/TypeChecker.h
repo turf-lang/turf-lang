@@ -175,6 +175,7 @@ public:
   // ── Literals ─────────────────────────────────────────────────────────────
   void visitNumber(NumberExprAST &Node) override;
   void visitBool(BoolExprAST &Node) override;
+  void visitChar(CharExprAST &Node) override;
   void visitString(StringExprAST &Node) override;
   void visitNull(NullExprAST &Node) override;
   void visitDefaultInit(DefaultInitExprAST &Node) override;

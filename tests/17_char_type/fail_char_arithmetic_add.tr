@@ -1,0 +1,6 @@
+// Negative test: char has no arithmetic (RFC §3) -- 'a' + 'b' must be
+// rejected at compile time. Arithmetic requires an explicit `to int` cast.
+fn main(): int {
+    mut c: char = 'a' + 'b';
+    return 0;
+}
