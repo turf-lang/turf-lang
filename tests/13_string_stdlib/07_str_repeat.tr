@@ -17,7 +17,7 @@ fn main(): int {
 
     // Length stress: 50 copies of "ab" = 100 chars
     mut r50: string = strings::repeat("ab", 50);
-    test::assert(lengthof(r50) == 100, "repeat ab x50: length must be 100");
+    test::assert(strings::length(r50) == 100, "repeat ab x50: length must be 100");
 
     // Verify it starts and ends correctly
     test::assert(strings::starts_with(r50, "ab"), "repeat ab x50: starts with ab");

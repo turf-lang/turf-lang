@@ -29,10 +29,11 @@ STRING CONCATENATION:
   A string and a non-string CANNOT be combined with '+' -- convert the
   non-string side with `to string` first.
 
-LENGTHOF VS ARRAY LENGTH:
-  - lengthof(str) gets the character count of a STRING. It accepts ONLY
-    strings -- not int, double, bool, or arrays.
-  - For an array, use `.length()` (a method call) instead, not lengthof().
+STRING LENGTH VS ARRAY LENGTH:
+  - strings::length(str) gets the character count of a STRING. It accepts
+    ONLY strings -- not int, double, bool, or arrays.
+  - For an array, use `.length()` (a method call) instead, not
+    strings::length().
 
 PRINT AND PRINTLINE:
   Both accept int, double, bool, or string directly -- no separate
@@ -46,7 +47,7 @@ PRINT AND PRINTLINE:
 CORRECT EXAMPLES:
   immut s: string = 100 to string;    // "100"
   mut n: int = "99" to int;           // 99
-  immut len: int = lengthof("hello"); // 5
+  immut len: int = strings::length("hello"); // 5
 
 COMMON MISTAKES:
 - Trying to concatenate a string and a NUMBER with '+' without casting the

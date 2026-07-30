@@ -33,7 +33,7 @@ SCOPE RULES:
     namespace visible throughout the file, independent of block scoping.
 
 BUILTIN / INTRINSIC NAMES (exact spelling required):
-  print   printline   input   lengthof   typeof   sizeof   assert
+  print   printline   input   typeof   sizeof   assert
 
 CORRECT USAGE:
   mut x: int = 5;
@@ -42,7 +42,7 @@ CORRECT USAGE:
 INCORRECT USAGE:
   io.printline(y);                // ERROR: y was never declared
   io.praintline("hi");            // ERROR: typo -- should be 'printline'
-  length("hi");                   // ERROR: no such function -- use lengthof("hi")
+  length("hi");                   // ERROR: no such function -- use strings::length("hi")
 
 COMMON MISTAKES:
 - Typos in variable names (e.g. `coutn` instead of `count`).

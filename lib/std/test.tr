@@ -152,7 +152,7 @@ fn assert_neq(left: string, right: string, msg: string): void {
 
 fn assert_fail_eq(left: string, right: string, msg: string): void {
     mut detail: string = "assert_eq failed: " + left + " != " + right;
-    if lengthof(msg) > 0 {
+    if strings::length(msg) > 0 {
         fail(detail + " (" + msg + ")");
     } else {
         fail(detail);
@@ -161,7 +161,7 @@ fn assert_fail_eq(left: string, right: string, msg: string): void {
 
 fn assert_fail_neq(left: string, right: string, msg: string): void {
     mut detail: string = "assert_neq failed: both sides equal " + left;
-    if lengthof(msg) > 0 {
+    if strings::length(msg) > 0 {
         fail(detail + " (" + msg + ")");
     } else {
         fail(detail);

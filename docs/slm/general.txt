@@ -275,8 +275,8 @@ easy to get backwards:
 
   A handful of names really ARE wired directly into the compiler and never
   require ANY import, because they aren't declared anywhere in Turf source
-  at all: typeof, lengthof, and sizeof (sizeof is actually its own piece of
-  syntax, not even a function call -- see below).
+  at all: typeof and sizeof (sizeof is actually its own piece of syntax,
+  not even a function call -- see below).
 
   Everything else that might look "built-in" -- print, printline, input,
   assert, fail, assert_eq/assert_neq, and every function in
@@ -296,9 +296,6 @@ TRUE INTRINSICS (never need an import; not declared in any .tr file):
 
   typeof(expr): string
     Compile-time type name, e.g. "int", "double", "Point".
-
-  lengthof(str: string): int
-    Number of characters in a STRING. For arrays, use `.length()` instead.
 
   sizeof(Type): int
     NOT a function call -- its own dedicated syntax (`sizeof(int)`,
@@ -353,7 +350,8 @@ COMMON PITFALLS:
 - Forgetting `step <expr>` in a for loop (step is required), or writing a
   step that never actually updates the loop variable (infinite loop).
 - Using function-call-style casts (`int(x)`) instead of postfix `x to int`.
-- Calling `lengthof()` on an array instead of using `.length()`.
+- Calling `strings::length()` on an array instead of using `.length()` --
+  strings::length only works on `string`.
 - Mixing string and numeric types in arithmetic without an explicit
   `to string` cast.
 - Comparing two struct instances with `==` (not supported -- compare fields).

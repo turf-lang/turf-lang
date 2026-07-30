@@ -1,6 +1,0 @@
-fn main(): int {
-    mut count: int = 5;
-    mut bad: int = lengthof(count);
-
-    return 0;
-}

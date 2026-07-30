@@ -16,7 +16,7 @@ enum class ErrorCategory {
   ARRAY_ERROR,
   DECLARATION,
   FUNCTION_SIGNATURE,
-  BUILTIN_FUNCTION, // Errors specific to a builtin function (lengthof, typeof,
+  BUILTIN_FUNCTION, // Errors specific to a builtin function (typeof, sizeof,
                     // etc.)
   MEMORY_ERROR,     // Use-after-free, double-free (AliasAnalysisPass)
   GENERAL
@@ -32,7 +32,7 @@ inline std::string
 extractContextKeyword(const std::string &msg,
                       const std::string & /*codeContext*/ = "") {
   // Check for TRUE intrinsic names mentioned in the error message itself --
-  // typeof/lengthof/sizeof, the only names actually wired directly into
+  // typeof/sizeof, the only names actually wired directly into
   // the compiler (see general.txt's "TRUE INTRINSICS vs. STANDARD LIBRARY"
   // section for the full explanation). This list previously also contained
   // "printline"/"print"/"input" (ordinary stdlib functions declared in
@@ -40,12 +40,14 @@ extractContextKeyword(const std::string &msg,
   // longer even implemented via @intrinsic, which has been removed from
   // the compiler entirely), "abs"/"power" (used to be @intrinsic stubs, now
   // pure-Turf/extern-fn stdlib in lib/std/math.tr, per Builtins.cpp's own
-  // comments), and "assert"/"fail" (used to be compiler intrinsics with
+  // comments), "assert"/"fail" (used to be compiler intrinsics with
   // their own CodegenIntrinsic branches; now ordinary, real overloaded Turf
-  // functions in lib/std/test.tr) -- all seven were wrongly routed to the
-  // BUILTIN_FUNCTION category below as a result. Order: longer/more-
-  // specific names first to avoid partial matches.
-  static const char *builtinNames[] = {"lengthof", "typeof", "sizeof"};
+  // functions in lib/std/test.tr), and "lengthof" (deleted entirely,
+  // STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7 -- strings::length(s) is the
+  // real replacement, an ordinary stdlib function) -- all eight were
+  // wrongly routed to the BUILTIN_FUNCTION category below as a result.
+  // Order: longer/more-specific names first to avoid partial matches.
+  static const char *builtinNames[] = {"typeof", "sizeof"};
   for (const char *name : builtinNames) {
     if (msg.find(name) != std::string::npos)
       return name;
@@ -64,8 +66,7 @@ extractContextKeyword(const std::string &msg,
   // has no field..." vs. "...a struct named..."; "Enum 'X' already
   // has..." vs. "...out of range for enum"). Routes to docs/slm/structs.txt
   // / enums.txt via getCategoryDocPath()'s constructDocs map, the same
-  // mechanism already used for lengthof/typeof/print/input -- see that
-  // map's doc comment.
+  // mechanism already used for typeof -- see that map's doc comment.
   //
   // "has no method named" is ALSO checked here even though it never
   // contains the literal word "struct" -- StructMethodNotFoundError's
@@ -142,8 +143,7 @@ inline ErrorCategory classifyError(const std::string &msg,
   // generic pattern-based classification below, same as any other
   // stdlib/user function.
   if (!contextKeyword.empty()) {
-    if (contextKeyword == "lengthof" || contextKeyword == "typeof" ||
-        contextKeyword == "sizeof")
+    if (contextKeyword == "typeof" || contextKeyword == "sizeof")
       return ErrorCategory::BUILTIN_FUNCTION;
   }
 
@@ -174,10 +174,8 @@ inline ErrorCategory classifyError(const std::string &msg,
       msg.find("impossible to reach") != std::string::npos)
     return ErrorCategory::CONTROL_FLOW;
 
-  // String conversion / lengthof / builtin arg types
+  // String conversion / builtin arg types
   if (msg.find("can't convert") != std::string::npos ||
-      msg.find("lengthof only works") != std::string::npos ||
-      msg.find("lengthof") != std::string::npos ||
       msg.find("'abs' only works") != std::string::npos ||
       msg.find("'power' only works") != std::string::npos)
     return ErrorCategory::STRING_CONVERSION;
@@ -291,14 +289,13 @@ inline const char *getCategoryName(ErrorCategory cat) {
 
 // Returns the path to the external documentation file for a given category.
 // When a contextKeyword is provided and a construct-specific doc exists, use
-// that instead of the generic category doc (e.g. "lengthof" →
-// builtin_lengthof.txt).
+// that instead of the generic category doc (e.g. "typeof" →
+// builtin_typeof.txt).
 inline std::string getCategoryDocPath(ErrorCategory cat,
                                       const std::string &contextKeyword = "") {
   // Construct-specific docs (highest priority)
   if (!contextKeyword.empty()) {
     static const std::unordered_map<std::string, std::string> constructDocs = {
-        {"lengthof", "docs/slm/builtin_lengthof.txt"},
         {"typeof", "docs/slm/builtin_typeof.txt"},
         // structs.txt also covers generic structs/functions (fn<T>,
         // struct<T>) -- there's no reliable standalone keyword for

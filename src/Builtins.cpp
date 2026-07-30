@@ -60,142 +60,33 @@ std::vector<std::string> GetBuiltinNames() {
 }
 
 static void ensure_builtins_registered() {
-  // Only register the two true bare language-level intrinsics that are
-  // callable without a module qualifier.  These are the only names that
-  // appear in g_builtins for suggestion quality (suggestBuiltins()) and
-  // for the IntrinsicArity guard in CodegenIntrinsic().
+  // Only register the one true bare language-level intrinsic that is
+  // callable without a module qualifier. This is the only name that
+  // appears in g_builtins for suggestion quality (suggestBuiltins()) and
+  // for TypeChecker's own arity check (LookupBuiltin()).
   //
   // stdlib functions (print, printline, input, malloc, abs, power, sqrt,
-  // assert, fail, …) live in lib/std modules and are resolved via the
-  // Resolver's module registry — they must NOT be listed here. assert/fail
-  // specifically used to be registered here (with `assert` needing a
-  // bespoke Arity == -1 sentinel to express its 1-or-2-arg signature,
-  // bypassing the generic arity check entirely) until they moved to
-  // lib/std/test.tr as ordinary, real overloaded Turf functions.
+  // assert, fail, length, …) live in lib/std modules and are resolved via
+  // the Resolver's module registry — they must NOT be listed here.
+  // assert/fail specifically used to be registered here (with `assert`
+  // needing a bespoke Arity == -1 sentinel to express its 1-or-2-arg
+  // signature, bypassing the generic arity check entirely) until they
+  // moved to lib/std/test.tr as ordinary, real overloaded Turf functions.
+  // `lengthof` was the other bare intrinsic here until
+  // STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7 deleted it in favor of
+  // strings::length(s).
   RegisterBuiltin("typeof",   {1, "Compile-time type name of an expression"});
-  RegisterBuiltin("lengthof", {1, "Byte-length of a string"});
 }
 
-/**
- * @brief Generates LLVM IR for a built-in intrinsic function.
- *
- * Takes the name of an intrinsic (e.g., "print", "malloc") and its arguments,
- * then constructs the appropriate LLVM instructions or C standard library
- * function calls.
- *
- * @param IntrinsicName The string name of the intrinsic function to generate.
- * @param Args A vector of LLVM Values representing the arguments to the
- * intrinsic.
- * @param Loc The source location where the intrinsic is called, used for error
- * reporting.
- * @return llvm::Value* The resulting LLVM Value after evaluating the intrinsic,
- * or nullptr on failure.
- * @note Arity and type validation are the TypeChecker's responsibility.
- *       By the time this is called, all arguments are guaranteed correct.
- */
-llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
-                              const std::vector<llvm::Value *> &Args,
-                              SourceLocation Loc) {
-
-  // ── Removed: "print", "printline", "input" ────────────────────────────────
-  // These were the only three names ever reached via the @intrinsic("name")
-  // decorator, which has been removed from the compiler entirely (Parser.cpp
-  // no longer parses "@" as anything but a syntax error). print/printline/
-  // input are now ordinary Turf functions in lib/std/io.tr that delegate to
-  // `extern fn printf`/`scanf`/`getchar`/`calloc` FFI bindings -- no compiler
-  // C++ needed, mirroring how malloc/free (mem.tr) and abs/power (math.tr)
-  // were already handled below.
-
-  // ── Removed: "malloc", "realloc", "free" ─────────────────────────────────
-  // These were previously @intrinsic stubs, but are now declared as extern fn
-  // in lib/std/mem.tr and resolved by the linker against libc. The compiler
-  // no longer needs to know about them here.
-  // Codegen.cpp still uses TheModule->getFunction("malloc") internally for
-  // EmitStringConcat and CastExprAST (int/double → string) — those are
-  // compiler-emitted IR, not user-facing stdlib calls, and correctly remain.
-
-  // ── Removed: "llvm.*" ────────────────────────────────────────────────────
-  // LLVM intrinsic math functions (llvm.sqrt.f64, llvm.pow.f64, etc.) were
-  // previously forwarded here. They are now replaced by extern fn declarations
-  // in lib/std/math.tr that link against libm (e.g. sqrt, pow from <math.h>).
-  // ── Removed: "power", "abs" ───────────────────────────────────────────────
-  // Both are now implemented in Turf in lib/std/math.tr.
-  // math.power() delegates to extern fn pow (libm).
-  // math.abs()   delegates to extern fn fabs for doubles; Turf conditional for int.
-  // No compiler C++ needed.
-
-  // Defensive Args.size() checks below (lengthof/fail/assert): these three,
-  // together with typeof above, are the only names reachable through the
-  // "bare intrinsic" path -- called with no module qualifier, arity/type
-  // validated by TypeChecker's ad-hoc BuiltinInfo registry rather than by
-  // real overload resolution against a fixed-arity FunctionSymbol (compare
-  // print/printline/input, which are ordinary Turf functions reached via
-  // real, fully-typed call sites in lib/std/io.tr, so Args there is already
-  // guaranteed correct by the normal call machinery -- this file no longer
-  // handles them at all, see the "Removed" note above).
-  // That ad-hoc registry isn't a reliable enough guarantee to skip
-  // bounds-checking on: main.cpp's pre-pass (sub-pass 2b) runs its own
-  // TypeChecker instance but deliberately discards its errors
-  // ("informational only... main-pass TC will re-check"), then sub-pass 3b
-  // unconditionally codegens the same AST anyway. A wrong-arity call like a
-  // bare `assert();` or `fail();` used to hit an unchecked Args[0] and
-  // crash the compiler (SIGABRT) via the pre-pass, before the user ever saw
-  // a diagnostic -- see TypeChecker.cpp's visitFuncCall doc comment on the
-  // assert/fail branches for the full story and the TypeChecker-side half
-  // of this fix (assert's arity was also never validated at all: it's
-  // registered with BuiltinInfo::Arity == -1 since it takes 1 or 2 args,
-  // which disabled the generic single-arity check entirely).
-  if (IntrinsicName == "lengthof") {
-    if (Args.empty()) {
-      SemanticError(Loc, "'lengthof' requires exactly 1 argument").raise();
-      return nullptr;
-    }
-    Value *Val = Args[0];
-    Type *Ty = Val->getType();
-    if (!Ty->isPointerTy()) {
-      SemanticError(Loc, "lengthof requires a string (pointer) type").raise();
-      return nullptr;
-    }
-    Function *StrlenF = TheModule->getFunction("strlen");
-    if (!StrlenF) {
-      FunctionType *FT =
-          FunctionType::get(Type::getInt64Ty(*TheContext),
-                            {PointerType::getUnqual(*TheContext)}, false);
-      StrlenF = Function::Create(FT, Function::ExternalLinkage, "strlen",
-                                 TheModule.get());
-    }
-    return Builder->CreateCall(StrlenF, {Val}, "lengthof");
-  }
-
-  if (IntrinsicName == "typeof") {
-    // Arity is already verified above (exactly 1 arg).
-    // Defensive check retained as belt-and-suspenders.
-    if (Args.empty()) {
-      SemanticError(Loc, "'typeof' requires exactly 1 argument").raise();
-      return nullptr;
-    }
-    Value *Val = Args[0];
-    Type *Ty = Val->getType();
-    const char *TypeName = nullptr;
-    if (Ty->isDoubleTy()) {
-      TypeName = "double";
-    } else if (Ty->isIntegerTy(64)) {
-      TypeName = "int";
-    } else if (Ty->isIntegerTy(1)) {
-      TypeName = "bool";
-    } else if (Ty->isPointerTy()) {
-      TypeName = "string";
-    } else if (Ty->isVoidTy()) {
-      TypeName = "void";
-    } else {
-      TypeName = "unknown";
-    }
-    return Builder->CreateGlobalString(TypeName, "typename");
-  }
-
-  SemanticError(Loc, "Unknown intrinsic: " + IntrinsicName).raise();
-  return nullptr;
-}
+// CodegenIntrinsic() used to live here -- the Codegen-side implementation
+// for the two true bare intrinsics (typeof, lengthof). It's gone now:
+// lengthof was deleted entirely (STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step
+// 7 -- strings::length(s) is the real replacement), and typeof's own
+// handling was inlined directly into its one call site in Codegen.cpp
+// (FuncCallExprAST::codegen()) rather than routed through a
+// single-remaining-case dispatcher. BuiltinInfo/LookupBuiltin/g_builtins
+// below are still very much alive -- TypeChecker still uses them for
+// typeof's arity check -- only the Codegen-side generator function is gone.
 
 /**
  * @brief Emits the compiler's own internal panic sequence: print MsgVal to

@@ -309,8 +309,6 @@ static const TurfType *getExprType(const ExprAST *E) {
 
       if (CalleeName == "typeof")
         return TurfString().get();
-      if (CalleeName == "lengthof")
-        return TurfInt().get();
 
       // `StructName::new(...)` / `StructName::default()` -- both evaluate to
       // the constructed struct, looked up the same way the removed
@@ -3343,12 +3341,14 @@ Value *FuncCallExprAST::codegen() {
   // lib/std/test.tr Turf functions. Every program that actually uses any of
   // them imports the owning module, so the "no user declaration" condition
   // this dispatch was gating on is never true in practice; keeping these
-  // five names listed here was pure dead weight that could only ever reach
+  // names listed here was pure dead weight that could only ever reach
   // CodegenIntrinsic's final "Unknown intrinsic: ..." fallback -- a worse,
   // more confusing diagnostic than the normal unresolved-function path
   // below already gives (e.g. "unknown function 'malloc', did you mean
-  // mem::alloc?"). Only typeof/lengthof are real intrinsics left.
-  if (CalleeName == "typeof" || CalleeName == "lengthof") {
+  // mem::alloc?"). `typeof` is the only real intrinsic left (`lengthof`
+  // was the other one -- STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7 deleted
+  // it, `strings::length(s)` is the real replacement).
+  if (CalleeName == "typeof") {
 
     std::vector<Value *> ArgVals;
     for (auto &Arg : Args) {
@@ -3357,32 +3357,28 @@ Value *FuncCallExprAST::codegen() {
         return nullptr;
       ArgVals.push_back(V);
     }
-    
+
     // Phase 4 Note 14: typeof should return the compile-time type of the expression,
     // avoiding the loss of generic type information in LLVM IR.
-    if (CalleeName == "typeof") {
-      std::string TypeNameStr = "unknown";
-      if (const TurfType *ExprTy = getExprType(Args[0].get())) {
-        TypeNameStr = turfTypeName(ExprTy);
-      } else {
-        // Fallback to LLVM type if AST type resolution failed
-        Type *Ty = ArgVals[0]->getType();
-        if (Ty->isDoubleTy()) {
-          TypeNameStr = "double";
-        } else if (Ty->isIntegerTy(64)) {
-          TypeNameStr = "int";
-        } else if (Ty->isIntegerTy(1)) {
-          TypeNameStr = "bool";
-        } else if (Ty->isPointerTy()) {
-          TypeNameStr = "string";
-        } else if (Ty->isVoidTy()) {
-          TypeNameStr = "void";
-        }
+    std::string TypeNameStr = "unknown";
+    if (const TurfType *ExprTy = getExprType(Args[0].get())) {
+      TypeNameStr = turfTypeName(ExprTy);
+    } else {
+      // Fallback to LLVM type if AST type resolution failed
+      Type *Ty = ArgVals[0]->getType();
+      if (Ty->isDoubleTy()) {
+        TypeNameStr = "double";
+      } else if (Ty->isIntegerTy(64)) {
+        TypeNameStr = "int";
+      } else if (Ty->isIntegerTy(1)) {
+        TypeNameStr = "bool";
+      } else if (Ty->isPointerTy()) {
+        TypeNameStr = "string";
+      } else if (Ty->isVoidTy()) {
+        TypeNameStr = "void";
       }
-      return Builder->CreateGlobalString(TypeNameStr, "typename");
     }
-
-    return CodegenIntrinsic(CalleeName, ArgVals, Loc);
+    return Builder->CreateGlobalString(TypeNameStr, "typename");
   }
 
   std::vector<Value *> EvaluatedArgs;
@@ -3398,8 +3394,8 @@ Value *FuncCallExprAST::codegen() {
   // Codegen reads the pre-computed mangled name blindly — no scanning, no
   // FuncParamTypes lookups, no arity checks.  Those are the Resolver's job.
   //
-  // typeof / lengthof are handled above (language-level bare intrinsics that
-  // never pass through the Resolver's function registry).
+  // typeof is handled above (the one remaining language-level bare
+  // intrinsic that never passes through the Resolver's function registry).
   std::string MangledName;
   if (CalleeName == "main") {
     MangledName = "main";

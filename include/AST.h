@@ -884,7 +884,7 @@ public:
 
   /// The single overload selected by TypeChecker::visitFuncCall() after
   /// narrowing ResolvedCandidates to one match (arity + type compatible).
-  /// For bare intrinsics (typeof, lengthof, …) without a ResolvedCandidates
+  /// For bare intrinsics (typeof, sizeof, …) without a ResolvedCandidates
   /// entry this field is left null — the TypeChecker still sets the node's
   /// type directly.
   /// clone() returns a fresh node, so this is null in cloned trees — same

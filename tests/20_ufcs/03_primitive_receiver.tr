@@ -7,7 +7,7 @@ fn double_it(x: int): int {
 }
 
 fn is_long(s: string): bool {
-    return lengthof(s) > 3;
+    return strings::length(s) > 3;
 }
 
 fn main(): int {

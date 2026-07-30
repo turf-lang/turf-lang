@@ -294,5 +294,5 @@ Turf-Lang comes with several built-in functions available globally:
 - `free(ptr)`: Frees the previously allocated memory.
 
 ### Utilities
-- `lengthof(str)`: Returns the string length of `str`. *(Note: For arrays and lists, use the `.length` property instead).*
+- `strings::length(str)`: Returns the string length of `str` (requires `import strings;` -- or nothing at all, since `strings` is part of the auto-imported prelude). *(Note: For arrays and lists, use the `.length` property instead).*
 - `typeof(expr)`: Returns a `string` representing the static type of the evaluated expression (e.g., `"int"`, `"double"`, `"bool"`, `"string"`).

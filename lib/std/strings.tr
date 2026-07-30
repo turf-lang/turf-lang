@@ -7,8 +7,9 @@
 //   - High-level functions are implemented in Turf on top of the C bindings.
 //   - String ordering uses byte-by-byte strcmp (Decision D2). Unicode-aware
 //     sorting belongs in a future `unicode` module.
-//   - `strings::length(s)` is the preferred way to get string length. The bare
-//     `lengthof(s)` intrinsic is deprecated (kept for backward compatibility).
+//   - `strings::length(s)` is the way to get string length. The bare
+//     `lengthof(s)` intrinsic that used to exist has been removed entirely
+//     (STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7).
 //
 // Usage:
 //   import strings;
@@ -86,7 +87,7 @@ operator >=(a: string, b: string): bool {
 // ─── length ───────────────────────────────────────────────────────────────────
 
 // length: returns the byte-length of string `s`.
-// Preferred over the deprecated `lengthof(s)` intrinsic.
+// The `lengthof(s)` intrinsic this replaced has been removed entirely.
 fn length(s: string): int {
     return strlen(s);
 }

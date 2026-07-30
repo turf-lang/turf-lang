@@ -219,23 +219,6 @@ public:
   }
 };
 
-// lengthof() Argument Type Error : non-string passed to lengthof
-class LengthofTypeError : public TurfError {
-public:
-  LengthofTypeError(SourceLocation Loc, const std::string &GotTypeName)
-      : TurfError(Loc,
-                  Colors::BRIGHT_RED +
-                      "Oops! 'lengthof' only works with strings, but you gave "
-                      "it a '" +
-                      Colors::CYAN + GotTypeName + Colors::BRIGHT_RED + "'.\n" +
-                      Colors::RESET,
-                  "'lengthof' counts the characters in a string.\n"
-                  "    Correct usage:  lengthof(\"hello\")  →  5\n"
-                  "    Correct usage:  int n = lengthof(myStringVar)") {
-    Category_ = SLM::ErrorCategory::BUILTIN_FUNCTION;
-  }
-};
-
 // abs() Argument Type Error : non-int/double passed to abs
 class AbsArgTypeError : public TurfError {
 public:
@@ -390,7 +373,7 @@ public:
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check the spelling against the built-in "
-      "functions like 'printline' or 'lengthof'.");
+      "functions like 'printline' or 'typeof'.");
   }
 };
 

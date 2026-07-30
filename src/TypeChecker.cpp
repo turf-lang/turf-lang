@@ -36,7 +36,7 @@
 #endif
 
 // Builtins.h provides LookupBuiltin() / BuiltinInfo for arity checking of
-// pure intrinsics (typeof, lengthof, abs, power, …) that have no
+// pure intrinsics (typeof, abs, power, …) that have no
 // ResolvedCandidates entry.  It is LLVM-free at the header level; the
 // function implementations live in Builtins.cpp which links against LLVM,
 // but the header itself (and LookupBuiltin) are safe to call from the
@@ -1400,10 +1400,12 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
   }
 
   // ── Bare language intrinsic path ─────────────────────────────────────────
-  // Only 'typeof' and 'lengthof' are true bare intrinsics (callable without a
-  // module qualifier and not registered as user functions).
-  // Everything else that used to live here (abs, power, print, input, malloc…)
-  // now lives in lib/std and is resolved via the Resolver's module registry.
+  // Only 'typeof' is a true bare intrinsic (callable without a module
+  // qualifier and not registered as user functions).
+  // Everything else that used to live here (abs, power, print, input,
+  // malloc, lengthof…) now lives in lib/std and is resolved via the
+  // Resolver's module registry (lengthof's replacement is
+  // strings::length(s), part of the prelude).
   // LookupBuiltin() returns null for all stdlib functions since Issue #9.
   if (Node.ResolvedCandidates.empty() && !CalleeName.empty()) {
     const BuiltinInfo *BI = LookupBuiltin(CalleeName);
@@ -1422,23 +1424,6 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       // ── typeof(x) → string ───────────────────────────────────────────────
       if (CalleeName == "typeof") {
         setType(&Node, TurfString());
-        return;
-      }
-
-      // ── lengthof(x) → int ────────────────────────────────────────────────
-      if (CalleeName == "lengthof") {
-        // Argument must be a string.
-        if (ArgCount == 1) {
-          const TurfType *ArgTy = ArgTypes[0].get();
-          if (ArgTy && !ArgTy->isString()) {
-            reportError(Node.getLoc(),
-                        "'lengthof' expects a string argument, got '" +
-                            ArgTy->getName() + "'.");
-            setType(&Node, nullptr);
-            return;
-          }
-        }
-        setType(&Node, TurfInt());
         return;
       }
 

@@ -42,9 +42,9 @@ ARRAY LENGTH:
     mut len2: int = arr.length;    // bare property style also works
 
   INCORRECT:
-    mut len: int = lengthof(arr);
-      // ERROR: lengthof() only works on strings, not arrays -- use
-      //        arr.length() instead.
+    mut len: int = strings::length(arr);
+      // ERROR: strings::length() only accepts a string argument, not an
+      //        array -- use arr.length() instead.
 
 COMMON MISTAKES:
 - Using () instead of [] for the array's declared size (`mut arr: int(5)`
@@ -52,5 +52,5 @@ COMMON MISTAKES:
 - Forgetting `mut`/`immut` before the array's name.
 - Providing the wrong number of initializers vs. the declared size.
 - Providing an initializer of the wrong element type.
-- Confusing `.length()`/`.length` (arrays) with `lengthof()` (strings only).
+- Confusing `.length()`/`.length` (arrays) with `strings::length()` (strings only).
 - Using a non-integer index.
