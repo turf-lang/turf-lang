@@ -16,8 +16,12 @@ This roadmap details how to fully implement Frontend Monomorphization (for gener
 > today. Phase 1 as WRITTEN here (the Monomorphizer/blueprint-cloning approach)
 > was never built and probably shouldn't be now that type erasure already works.
 > Phase 2 (Operator Overloading, `__add__`/`__eq__`/etc magic methods) is
-> untouched -- confirmed zero references to any magic-method name anywhere in
-> the compiler or stdlib. Still open, future work.
+> **superseded** by `STRING_UFCS_OPERATOR_CHAR_RFC.md` (2026-07-30) -- the
+> `operator` keyword (`operator +(lhs: T, rhs: U): V`) replaces the
+> double-underscore magic-method convention below, and the design there also
+> covers `[]`/`[]=` indexing semantics (lvalue-preserving, no pointer
+> returns) that this document never addressed. Read that RFC instead; Phase
+> 2 below is kept for historical context only.
 
 ---
 
