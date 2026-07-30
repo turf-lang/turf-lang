@@ -685,6 +685,30 @@ public:
   }
 };
 
+// `operator +(int, int)`-shaped declarations -- both operand types are
+// already in the compiler's builtin set (int/double/bool/char/Pointer), so
+// there's nothing for a user overload to add; allowing it would also make
+// builtin arithmetic itself ambiguous with the user's own definition. See
+// STRING_UFCS_OPERATOR_CHAR_RFC.md §4.3's "builtin-pair" hard-error rule --
+// this is a compile-time error at the DECLARATION site, not merely
+// unreachable due to resolution order.
+class OperatorBuiltinPairError : public TurfError {
+public:
+  OperatorBuiltinPairError(SourceLocation Loc, const std::string &OpSpelling,
+                           const std::string &LhsType,
+                           const std::string &RhsType)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'operator " + OpSpelling +
+                           "(" + LhsType + ", " + RhsType +
+                           ")' is not allowed." + Colors::RESET,
+                  "Both operand types are already built in -- overloading "
+                  "an operator between two builtin types would make "
+                  "ordinary arithmetic ambiguous. Operator overloads only "
+                  "make sense when at least one operand is a struct or "
+                  "'string'.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
 class ArithmeticError : public TurfError {
 public:
   ArithmeticError(SourceLocation Loc, const std::string &Msg)

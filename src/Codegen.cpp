@@ -101,6 +101,8 @@ llvm::Type *getLLVMType(const TurfType *T) {
   // Primitive named types
   if (T->isNamed("int"))
     return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
+  if (T->isNamed("int32"))
+    return LLVMTypeCache[Key] = llvm::Type::getInt32Ty(*TheContext);
   if (T->isNamed("double"))
     return LLVMTypeCache[Key] = llvm::Type::getDoubleTy(*TheContext);
   if (T->isNamed("bool"))
@@ -1021,6 +1023,23 @@ static Value *CastToType(Value *Val, const TurfType *DestType,
     return Val;
   }
 
+  // int32 as a DestType: note SrcType can never legitimately be "int32"
+  // here -- CastToType()'s very first step (top of this function)
+  // unconditionally sign-extends ANY genuinely-i32-typed value to i64
+  // before SrcType is even derived, so by this point an int32-origin value
+  // has already become a plain "int". This branch only exists for casting
+  // an ordinary int/double/bool value DOWN INTO int32 (e.g. two int32
+  // operands in BinaryExprAST::codegen()'s CastBoth(), where NumericType
+  // ends up being int32 itself and both operands -- already force-widened
+  // to i64 by the step above -- need to come back down to i32).
+  if (DestType->isNamed("int32")) {
+    if (SrcType->isNamed("int"))
+      return Builder->CreateTrunc(Val, Type::getInt32Ty(*TheContext), Name);
+    if (SrcType->isNamed("double"))
+      return Builder->CreateFPToSI(Val, Type::getInt32Ty(*TheContext), Name);
+    if (SrcType->isNamed("bool"))
+      return Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), Name);
+  }
   if (DestType->isNamed("double")) {
     if (SrcType->isNamed("int"))
       return Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext), Name);
@@ -1084,85 +1103,19 @@ Value *DefaultInitExprAST::codegen() {
   return GetDefaultValue(Type.get());
 }
 
-// Turns any expression into IR operation
-static Value *EmitStringConcat(Value *L, Value *R) {
-  Function *StrlenF = TheModule->getFunction("strlen");
-  if (!StrlenF) {
-    FunctionType *FT =
-        FunctionType::get(Type::getInt64Ty(*TheContext),
-                          {PointerType::getUnqual(*TheContext)}, false);
-    StrlenF = Function::Create(FT, Function::ExternalLinkage, "strlen",
-                               TheModule.get());
-  }
-  Function *StrcpyF = TheModule->getFunction("strcpy");
-  if (!StrcpyF) {
-    FunctionType *FT =
-        FunctionType::get(PointerType::getUnqual(*TheContext),
-                          {PointerType::getUnqual(*TheContext),
-                           PointerType::getUnqual(*TheContext)}, false);
-    StrcpyF = Function::Create(FT, Function::ExternalLinkage, "strcpy",
-                               TheModule.get());
-  }
-  Function *StrcatF = TheModule->getFunction("strcat");
-  if (!StrcatF) {
-    FunctionType *FT =
-        FunctionType::get(PointerType::getUnqual(*TheContext),
-                          {PointerType::getUnqual(*TheContext),
-                           PointerType::getUnqual(*TheContext)}, false);
-    StrcatF = Function::Create(FT, Function::ExternalLinkage, "strcat",
-                               TheModule.get());
-  }
-  Function *MallocF = TheModule->getFunction("malloc");
-  if (!MallocF) {
-    FunctionType *FT =
-        FunctionType::get(PointerType::getUnqual(*TheContext),
-                          {Type::getInt64Ty(*TheContext)}, false);
-    MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
-                               TheModule.get());
-  }
-
-  Value *LenL = Builder->CreateCall(StrlenF, {L}, "lenL");
-  Value *LenR = Builder->CreateCall(StrlenF, {R}, "lenR");
-  Value *SumLen = Builder->CreateAdd(LenL, LenR, "sumlen");
-  Value *TotalLen = Builder->CreateAdd(
-      SumLen, ConstantInt::get(Type::getInt64Ty(*TheContext), 1), "totallen");
-
-  // TURF-MEMLEAK: This malloc is intentionally not freed — Turf has no GC yet.
-  // Every string concatenation allocates a fresh buffer on the heap and leaks it.
-  // Future work: replace with an arena allocator or Boehm GC sweep.
-  Value *Buf = Builder->CreateCall(MallocF, {TotalLen}, "strbuf");
-  Builder->CreateCall(StrcpyF, {Buf, L});
-  Builder->CreateCall(StrcatF, {Buf, R});
-  return Buf;
-}
-
-static Value *EmitStrcmp(Value *L, Value *R) {
-  Function *StrcmpF = TheModule->getFunction("strcmp");
-  if (!StrcmpF) {
-    FunctionType *FT =
-        FunctionType::get(Type::getInt32Ty(*TheContext),
-                          {PointerType::getUnqual(*TheContext),
-                           PointerType::getUnqual(*TheContext)}, false);
-    StrcmpF = Function::Create(FT, Function::ExternalLinkage, "strcmp",
-                               TheModule.get());
-  }
-  return Builder->CreateCall(StrcmpF, {L, R}, "strcmptmp");
-}
-
-// EmitStrcmpRelational — emit a boolean comparison of two strings using strcmp.
-// strcmp returns <0, 0, >0. We compare the result to 0 using the requested op.
-// Called from BinaryExprAST::codegen() when both operands are string type.
-static Value *EmitStrcmpRelational(Value *L, Value *R, int Op) {
-  Value *Cmp  = EmitStrcmp(L, R);
-  Value *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
-  switch (Op) {
-    case '<':     return Builder->CreateICmpSLT(Cmp, Zero, "strlt");
-    case '>':     return Builder->CreateICmpSGT(Cmp, Zero, "strgt");
-    case TOK_LEQ: return Builder->CreateICmpSLE(Cmp, Zero, "strle");
-    case TOK_GEQ: return Builder->CreateICmpSGE(Cmp, Zero, "strge");
-    default:      llvm_unreachable("EmitStrcmpRelational: invalid op");
-  }
-}
+// EmitStringConcat/EmitStrcmp/EmitStrcmpRelational used to live here,
+// hand-rolling String's `+`/`==`/`!=`/`< > <= >=` directly in Codegen.
+// Deleted: this behavior now lives in lib/std/strings.tr as ordinary
+// `operator` overloads (operator +/==/!=/</>/<=/>= (string, string)),
+// resolved the same way any other operator overload is (see
+// TypeChecker::visitBinary()'s operator-resolution gate and this
+// function's ResolvedOperatorTarget dispatch below). See
+// STRING_UFCS_OPERATOR_CHAR_RFC.md §1/§7 step 2. Note: two OTHER,
+// independent strcmp-based call sites still exist (string->enum
+// conversion, match/switch-over-string) -- both inline their own
+// `getOrInsertFunction("strcmp", ...)` and never referenced these helpers,
+// so they are correctly unaffected by this deletion (documented follow-on
+// cleanup, RFC §1, not done here).
 
 Value *BinaryExprAST::codegen() {
   // ── Short-circuit && / || ───────────────────────────────────────────────
@@ -1232,16 +1185,25 @@ Value *BinaryExprAST::codegen() {
   if (!L || !R)
     return nullptr;
 
-  const TurfType *LHSTyAST = getExprType(LHS.get());
-  const TurfType *RHSTyAST = getExprType(RHS.get());
-
-  if (Op == '+') {
-    if ((LHSTyAST && LHSTyAST->isString()) || (RHSTyAST && RHSTyAST->isString())) {
-      if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString()) {
-        return EmitStringConcat(L, R);
-      }
+  // ── Operator overload dispatch ──────────────────────────────────────────
+  // TypeChecker::visitBinary() already resolved ResolvedOperatorTarget (if
+  // any) via exact operand-type match against ResolvedOperatorCandidates --
+  // a non-null target here means a user/stdlib `operator` overload applies
+  // and the builtin arithmetic/comparison switch below must NOT run at all.
+  // Mirrors MethodCallExprAST::codegen()'s module-call dispatch (mangled-
+  // name lookup, direct call). No argument casting needed: exact-match
+  // resolution guarantees L/R already have the exact types the overload
+  // declares.
+  if (ResolvedOperatorTarget) {
+    std::string MangledName = ResolvedOperatorTarget->mangledName();
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: operator overload '" +
+                          MangledName + "' was resolved but never codegenned."));
       return nullptr;
     }
+    return Builder->CreateCall(CalleeF, {L, R}, "optmp");
   }
 
   // Type validation (void checks, compatibility, etc.) is handled by the TypeChecker.
@@ -1353,9 +1315,6 @@ Value *BinaryExprAST::codegen() {
 
   // Comparison
   case '<': {
-    // String ordering: byte-by-byte via strcmp (see EmitStrcmpRelational).
-    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString())
-      return EmitStrcmpRelational(L, R, '<');
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     return CmpType->isNamed("double") ? Builder->CreateFCmpOLT(L, R, "cmptmp")
@@ -1363,9 +1322,6 @@ Value *BinaryExprAST::codegen() {
   }
 
   case '>': {
-    // String ordering: byte-by-byte via strcmp.
-    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString())
-      return EmitStrcmpRelational(L, R, '>');
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     return CmpType->isNamed("double") ? Builder->CreateFCmpOGT(L, R, "cmptmp")
@@ -1373,11 +1329,6 @@ Value *BinaryExprAST::codegen() {
   }
 
   case TOK_EQ: {
-    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString()) {
-      Value *Cmp = EmitStrcmp(L, R);
-      Value *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
-      return Builder->CreateICmpEQ(Cmp, Zero, "streq");
-    }
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     return CmpType->isNamed("double") ? Builder->CreateFCmpOEQ(L, R, "cmptmp")
@@ -1385,11 +1336,6 @@ Value *BinaryExprAST::codegen() {
   }
 
   case TOK_NEQ: {
-    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString()) {
-      Value *Cmp = EmitStrcmp(L, R);
-      Value *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
-      return Builder->CreateICmpNE(Cmp, Zero, "strne");
-    }
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     // UNE ("unordered or not equal"), not ONE ("ordered and not equal"):
@@ -1406,9 +1352,6 @@ Value *BinaryExprAST::codegen() {
   }
 
   case TOK_GEQ: {
-    // String ordering: byte-by-byte via strcmp.
-    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString())
-      return EmitStrcmpRelational(L, R, TOK_GEQ);
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     return CmpType->isNamed("double") ? Builder->CreateFCmpOGE(L, R, "cmptmp")
@@ -1416,9 +1359,6 @@ Value *BinaryExprAST::codegen() {
   }
 
   case TOK_LEQ: {
-    // String ordering: byte-by-byte via strcmp.
-    if (LHSTyAST && LHSTyAST->isString() && RHSTyAST && RHSTyAST->isString())
-      return EmitStrcmpRelational(L, R, TOK_LEQ);
     TurfTypePtr CmpType = CommonType->isNamed("bool") ? TurfInt() : CommonType;
     CastBoth(CmpType);
     return CmpType->isNamed("double") ? Builder->CreateFCmpOLE(L, R, "cmptmp")
@@ -1494,6 +1434,8 @@ static llvm::Constant *GetDefaultValue(const TurfType *T) {
 
   if (T->isNamed("int"))
     return llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), 0);
+  if (T->isNamed("int32"))
+    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
   if (T->isNamed("double"))
     return llvm::ConstantFP::get(llvm::Type::getDoubleTy(*TheContext), 0.0);
   if (T->isNamed("bool"))
@@ -2090,6 +2032,24 @@ Value *CastExprAST::codegen() {
 
   if (SrcName == "double" && DstName == "int")
     return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), "dtoi");
+
+  // int32 -> int : sign-extend. Widening, no precision loss -- int32 exists
+  // purely as an honest extern-fn ABI declaration type (see Int32Type's doc
+  // comment in Types.h), so this mirrors int->double's implicit-widening
+  // philosophy rather than needing any special narrowing guard.
+  if (SrcName == "int32" && DstName == "int")
+    return Builder->CreateSExt(Val, Type::getInt64Ty(*TheContext), "i32toi64");
+
+  // int -> int32 : truncate. Explicit narrowing cast only, mirroring the
+  // double->int narrowing-requires-explicit-cast philosophy above.
+  if (SrcName == "int" && DstName == "int32")
+    return Builder->CreateTrunc(Val, Type::getInt32Ty(*TheContext), "i64toi32");
+
+  // int32 -> double / double -> int32 : same widen/narrow split as int<->double.
+  if (SrcName == "int32" && DstName == "double")
+    return Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext), "i32tod");
+  if (SrcName == "double" && DstName == "int32")
+    return Builder->CreateFPToSI(Val, Type::getInt32Ty(*TheContext), "dtoi32");
 
   // char -> int : zero-extend. char is treated as an unsigned byte (0-255),
   // not a signed C-style char, per STRING_UFCS_OPERATOR_CHAR_RFC.md §3's
@@ -2849,7 +2809,13 @@ Value *FuncDefExprAST::codegen() {
   }
 
   if (Name != "main") {
-    MangledName = "turf_" + Prefix + Name;
+    // sanitizeSymbolName() is a no-op for every ordinary function name
+    // (map-miss fallback) -- only synthesized operator names like
+    // "operator+" get remapped here, to match ResolverFunctionSymbol::
+    // mangledName()'s identical use of it (both must agree, or Codegen's
+    // ResolvedOperatorTarget dispatch in BinaryExprAST::codegen() would
+    // look up a symbol that was never actually registered under that name).
+    MangledName = "turf_" + Prefix + sanitizeSymbolName(Name);
     for (const auto &P : Params) {
       MangledName += "_" + P.Type->getMangledName();
     }

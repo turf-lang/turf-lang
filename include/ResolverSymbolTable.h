@@ -35,6 +35,7 @@
 #ifndef RESOLVER_SYMBOL_TABLE_H
 #define RESOLVER_SYMBOL_TABLE_H
 
+#include "Lexer.h" // TOK_EQ/TOK_NEQ/TOK_LEQ/TOK_GEQ -- operator token constants, lightweight/no LLVM
 #include "Types.h" // TurfTypePtr, TurfType — pure C++ header, no LLVM
 
 #include <memory>
@@ -91,6 +92,89 @@ struct FunctionParam {
   std::string Name; ///< e.g. "x"
   TurfTypePtr Type; ///< e.g. TurfInt()
 };
+
+// ─── operator overload helpers ────────────────────────────────────────────
+//
+// Shared by Parser (ParseOperatorDecl), Resolver (visitBinary candidate
+// gathering, registerFunctionSignature's builtin-pair check), and Codegen
+// (mangled-name computation) so the four passes can never disagree on what
+// counts as an overloadable operator or what its synthesized function name
+// is. See STRING_UFCS_OPERATOR_CHAR_RFC.md §4 for the design this implements.
+// Declared here, BEFORE ResolverFunctionSymbol, because its own inline
+// mangledName() member calls sanitizeSymbolName() -- an inline member
+// function body is looked up as if placed right after its enclosing class's
+// closing brace, not deferred to end-of-translation-unit, so the free
+// function it calls must already be declared earlier in the file.
+
+/// The fixed, whitelisted set of binary operator tokens that `operator`
+/// declarations may overload (RFC §8's assumed whitelist, minus []/[]= and
+/// unary -/! -- both explicitly out of scope for this pass; see the RFC's
+/// build-order notes). Deliberately excludes `%`, `**`, bitwise (`& | ^ <<
+/// >>`), `&&`/`||`, and every assignment form -- none of those go through
+/// operator resolution at all, so e.g. `a & b` on a struct with no bitwise
+/// meaning stays a plain, unambiguous type error rather than silently
+/// searching an overload table that was never meant to apply to it.
+inline bool isOverloadableBinaryOp(int Tok) {
+  switch (Tok) {
+  case '+':
+  case '-':
+  case '*':
+  case '/':
+  case TOK_EQ:
+  case TOK_NEQ:
+  case '<':
+  case '>':
+  case TOK_LEQ:
+  case TOK_GEQ:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// Synthesizes the overload-table key / FuncDefExprAST name for an
+/// `operator` declaration or use, e.g. '+' -> "operator+", TOK_EQ ->
+/// "operator==". This can never collide with a real user identifier --
+/// `operator` is a keyword token (TOK_OPERATOR) and no legal TOK_IDENTIFIER
+/// spelling can contain '+ - * / = < >' -- so storing operator overloads in
+/// the same name-keyed overload map ordinary `fn`s use (ResolverModule::
+/// Functions / TurfModule::Functions) is safe and requires no new map.
+/// Returns "" for a non-overloadable token (callers should have already
+/// checked isOverloadableBinaryOp() first).
+inline std::string operatorFunctionName(int Tok) {
+  switch (Tok) {
+  case '+': return "operator+";
+  case '-': return "operator-";
+  case '*': return "operator*";
+  case '/': return "operator/";
+  case TOK_EQ: return "operator==";
+  case TOK_NEQ: return "operator!=";
+  case '<': return "operator<";
+  case '>': return "operator>";
+  case TOK_LEQ: return "operator<=";
+  case TOK_GEQ: return "operator>=";
+  default: return "";
+  }
+}
+
+/// Maps a synthesized operator function name (e.g. "operator+",
+/// "operator==") to a symbol-safe spelling for LLVM mangled names, so the
+/// emitted symbol is e.g. "turf_strings_operator_plus_string_string"
+/// instead of the raw "turf_strings_operator+_string_string" (which
+/// contains characters no linker/assembler is guaranteed to accept in a
+/// symbol name). Every non-operator name (the overwhelming majority of
+/// calls) passes through completely unchanged via the map-miss fallback.
+inline std::string sanitizeSymbolName(const std::string &Name) {
+  static const std::unordered_map<std::string, std::string> Map = {
+      {"operator+", "operator_plus"},   {"operator-", "operator_minus"},
+      {"operator*", "operator_star"},   {"operator/", "operator_slash"},
+      {"operator==", "operator_eq"},    {"operator!=", "operator_ne"},
+      {"operator<", "operator_lt"},     {"operator>", "operator_gt"},
+      {"operator<=", "operator_le"},    {"operator>=", "operator_ge"},
+  };
+  auto It = Map.find(Name);
+  return It != Map.end() ? It->second : Name;
+}
 
 // ─── ResolverFunctionSymbol ──────────────────────────────────────────────────
 
@@ -197,7 +281,7 @@ struct ResolverFunctionSymbol {
     if (IsExtern) return BaseName;
     std::string S = "turf_";
     if (!SourceModule.empty()) S += SourceModule + "_";
-    S += BaseName;
+    S += sanitizeSymbolName(BaseName);
     for (const auto &P : Params)
       if (P.Type) S += "_" + P.Type->getMangledName();
     return S;

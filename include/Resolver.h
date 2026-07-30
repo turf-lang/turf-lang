@@ -204,6 +204,23 @@ private:
                                              const std::string &ModuleName) const;
 
   /**
+   * @brief Reject an `operator` declaration whose BOTH operand types are
+   *        already in the compiler's builtin set (int/double/bool/char/
+   *        Pointer) -- RFC §4.3's "builtin-pair" hard error, checked at the
+   *        declaration site. `String` is deliberately excluded from that
+   *        set, which is what makes `operator +(string, string)` legal --
+   *        that's the entire point of this restructuring.
+   *
+   * Called from registerFunctionSignature() (the single choke point reached
+   * by main-file hoisting, module hoisting, AND visitFuncDef -- so an
+   * operator declared anywhere is always checked, not just top-level ones).
+   * A no-op for any Sym whose BaseName doesn't start with "operator" (the
+   * overwhelming majority of calls), so ordinary functions pay one prefix
+   * check and nothing else.
+   */
+  void validateOperatorDecl(const ResolverFunctionSymbol &Sym) const;
+
+  /**
    * @brief Validate that a type reference (field, parameter, or return type)
    *        names either a known primitive, a struct/enum registered in
    *        Pass 1, or one of the enclosing declaration's own generic type

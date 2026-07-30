@@ -221,11 +221,35 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
 void Resolver::registerFunctionSignature(const FuncDefExprAST &Node,
                                          const std::string &ModuleName) {
   auto Sym = buildFunctionSymbol(Node, ModuleName);
+  validateOperatorDecl(Sym);
   if (ModuleName.empty()) {
     SymTable_.registerCurrentFileFunction(Sym);
   } else {
     SymTable_.registerModuleFunction(ModuleName, Sym);
   }
+}
+
+void Resolver::validateOperatorDecl(const ResolverFunctionSymbol &Sym) const {
+  if (Sym.BaseName.rfind("operator", 0) != 0)
+    return;
+
+  auto IsBuiltinOperandType = [](const TurfType *T) {
+    return T && (T->isInt() || T->isInt32() || T->isDouble() || T->isBool() ||
+                 T->isChar() || T->isPointer());
+  };
+
+  if (Sym.Params.size() != 2)
+    return; // arity mismatch is caught elsewhere (parser); nothing to check here
+
+  const TurfType *LhsTy = Sym.Params[0].Type.get();
+  const TurfType *RhsTy = Sym.Params[1].Type.get();
+  if (!IsBuiltinOperandType(LhsTy) || !IsBuiltinOperandType(RhsTy))
+    return;
+
+  std::string OpSpelling = Sym.BaseName.substr(8); // strip "operator" prefix
+  OperatorBuiltinPairError(toSourceLocation(Sym.DeclLoc), OpSpelling,
+                           LhsTy->getName(), RhsTy->getName())
+      .raise();
 }
 
 void Resolver::hoistExportedConstant(const VarDeclExprAST &Var,
@@ -659,6 +683,36 @@ void Resolver::visitVariable(VariableExprAST &Node) {
 void Resolver::visitBinary(BinaryExprAST &Node) {
   visitChild(Node.getLHS());
   visitChild(Node.getRHS());
+
+  Node.ResolvedOperatorCandidates.clear();
+  if (!isOverloadableBinaryOp(Node.getOp()))
+    return; // bitwise/&&/||/** etc never go through operator resolution
+
+  const std::string Key = operatorFunctionName(Node.getOp());
+
+  // Self-module: lets a program declare `operator +(a: Vec2, b: Vec2)` in
+  // its own file and use it there via bare `a + b`, mirroring
+  // visitFuncCall's identical self-reference allowance for ordinary `fn`s.
+  for (const auto *S : SymTable_.lookupCurrentFileFunctions(Key))
+    Node.ResolvedOperatorCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*S));
+
+  // Every other module: visible if the module is known/hoisted ANYWHERE in
+  // this compile (Option A visibility -- confirmed with the user; see
+  // STRING_UFCS_OPERATOR_CHAR_RFC.md §4.5's discussion). Operators have no
+  // qualifier syntax (`a + b`, never `strings::+(a, b)`), so the strict
+  // per-file on-demand-import gating ordinary bare `fn` calls get doesn't
+  // apply here -- this instead matches how qualified `Module::func()` calls
+  // already work (validateModuleQualifier() only checks the module exists
+  // globally, not per-file).
+  for (const auto &M : SymTable_.findInModules(Key))
+    Node.ResolvedOperatorCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*M.Symbol));
+
+  // No candidates found is NOT an error here -- e.g. `int + int` legitimately
+  // has none and must fall through to the builtin arithmetic path. The
+  // TypeChecker decides whether the absence of a candidate is actually an
+  // error (no builtin match either).
 }
 
 void Resolver::visitUnary(UnaryExprAST &Node) {

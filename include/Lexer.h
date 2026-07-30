@@ -221,7 +221,9 @@ enum Token {
   TOK_EXPORT   = -82, ///< `export`   keyword — top-level exported constant declaration
   TOK_STATIC   = -83, ///< `static`   keyword — no-`self` struct-bound method declaration
   TOK_TYPE_CHAR    = -84, ///< `char`   keyword — 1-byte primitive type (no arithmetic)
-  TOK_CHAR_LITERAL = -85  ///< `'x'`    token   — single-quoted char literal
+  TOK_CHAR_LITERAL = -85, ///< `'x'`    token   — single-quoted char literal
+  TOK_OPERATOR     = -86, ///< `operator` keyword — top-level operator overload declaration
+  TOK_TYPE_INT32   = -87  ///< `int32`   keyword — honest 32-bit extern-fn ABI declaration type
 };
 
 int gettok();

@@ -104,6 +104,30 @@ public:
   const ExprAST *getLHS() const { return LHS.get(); }
   const ExprAST *getRHS() const { return RHS.get(); }
 
+  /// `operator<sym>` overloads whose name matches this node's operator
+  /// token, gathered by Resolver::visitBinary() (empty for non-overloadable
+  /// tokens like bitwise/`&&`/`||`, and for whitelisted tokens with no
+  /// visible operator declared at all -- e.g. plain `int + int`). Mirrors
+  /// FuncCallExprAST::ResolvedCandidates's two-phase pattern (see its doc
+  /// comment). clone() returns a fresh node, so this is empty in cloned trees.
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedOperatorCandidates;
+  const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &
+  getResolvedOperatorCandidates() const {
+    return ResolvedOperatorCandidates;
+  }
+
+  /// The single overload TypeChecker::visitBinary() selected from
+  /// ResolvedOperatorCandidates by EXACT operand-type match (no numeric
+  /// coercion -- see STRING_UFCS_OPERATOR_CHAR_RFC.md §4.2). Null means "no
+  /// operator overload applies" -- Codegen falls through to the builtin
+  /// arithmetic/comparison switch, exactly as it always has.
+  /// clone() returns a fresh node, so this is null in cloned trees — same
+  /// clone-semantics contract as ResolvedCallTarget.
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedOperatorTarget;
+  const ResolverFunctionSymbol *getResolvedOperatorTarget() const {
+    return ResolvedOperatorTarget.get();
+  }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitBinary(*this); }
   std::unique_ptr<ExprAST> clone() const override {
@@ -111,6 +135,8 @@ public:
                                                    CloneExprAST(LHS.get()),
                                                    CloneExprAST(RHS.get()));
     Cloned->IsDesugaredNot = IsDesugaredNot;
+    // Note: ResolvedOperatorCandidates and ResolvedOperatorTarget are
+    // intentionally NOT copied — cloned ASTs are stale until re-resolved.
     return Cloned;
   }
 };

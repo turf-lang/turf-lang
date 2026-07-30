@@ -39,6 +39,11 @@ TurfTypePtr TurfInt() {
   return T;
 }
 
+TurfTypePtr TurfInt32() {
+  static TurfTypePtr T = std::make_shared<Int32Type>();
+  return T;
+}
+
 TurfTypePtr TurfDouble() {
   static TurfTypePtr T = std::make_shared<DoubleType>();
   return T;
@@ -256,10 +261,20 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   // Rule 3: numeric widening/narrowing.
   // int -> double (widening): allowed.
   // double -> int (narrowing): rejected, requires explicit cast.
+  // int32 -> int / int32 -> double (widening, no precision loss): allowed --
+  // int32 exists purely as an honest extern-fn ABI declaration type (see
+  // Int32Type's doc comment in Types.h), so it should widen into normal
+  // `int` usage exactly as freely as `int` widens into `double`.
+  // int -> int32 (narrowing): rejected, requires explicit cast, same
+  // reasoning as double -> int.
   if (From->isNumeric() && To->isNumeric()) {
     if (From->isInt() && To->isDouble())
       return true;
     if (From->isDouble() && To->isInt())
+      return false;
+    if (From->isInt32() && (To->isInt() || To->isDouble()))
+      return true;
+    if (To->isInt32() && !From->isInt32())
       return false;
     // Same-kind numerics not already caught by the exact-name check above
     // (shouldn't normally be reached, but keep as a safe explicit case).

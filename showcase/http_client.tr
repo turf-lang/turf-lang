@@ -13,6 +13,7 @@
 
 import io;
 import net;
+import strings; // string '+' is an operator overload now, not a builtin
 
 fn main(): int {
     mut path: string = "/";

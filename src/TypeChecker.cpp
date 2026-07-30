@@ -174,23 +174,14 @@ bool TypeChecker::inferArithmeticType(SourceLocation Loc, int Op,
     return true;
   }
 
-  // ── string concatenation (only '+' is valid) ─────────────────────────────
-  if (LhsTy->isString() || RhsTy->isString()) {
-    if (LhsTy->isString() && RhsTy->isString() && Op == '+') {
-      ResultOut = TurfString();
-      return true;
-    }
-    // Any other combination of string with non-string, or string OP non-'+':
-    reportError(Loc,
-                "Cannot apply operator '" + OpToDisplayString(Op) +
-                    "' to types '" + LhsTy->getName() + "' and '" +
-                    RhsTy->getName() + "'.",
-                {},
-                "To concatenate a non-string, convert it first with "
-                "`<expr> to string`.");
-    ResultOut = nullptr;
-    return false;
-  }
+  // String arithmetic ('+' concatenation) is no longer hardcoded here -- it
+  // goes through operator overload resolution in visitBinary() (see
+  // strings.tr's `operator +(string, string)`), which runs BEFORE this
+  // function is ever called and returns early on a match. Reaching this
+  // function with a string-typed operand therefore means no operator
+  // matched (either `strings` isn't imported, or the combination genuinely
+  // has no overload, e.g. `s - 1`) -- fall through to the generic mismatch
+  // error below, which gets a string-specific hint.
 
   // ── numeric arithmetic ───────────────────────────────────────────────────
   if (LhsTy->isNumeric() && RhsTy->isNumeric()) {
@@ -205,10 +196,19 @@ bool TypeChecker::inferArithmeticType(SourceLocation Loc, int Op,
   }
 
   // ── anything else is a mismatch ──────────────────────────────────────────
+  std::string Hint;
+  if (LhsTy->isString() || RhsTy->isString()) {
+    Hint = "String '" + OpToDisplayString(Op) + "' is provided by an "
+           "'operator " + OpToDisplayString(Op) + "' overload in "
+           "lib/std/strings.tr -- make sure 'strings' is imported. To "
+           "concatenate a non-string, convert it first with `<expr> to "
+           "string`.";
+  }
   reportError(Loc,
               "Type mismatch: cannot apply '" + OpToDisplayString(Op) +
                   "' to '" + LhsTy->getName() + "' and '" +
-                  RhsTy->getName() + "'.");
+                  RhsTy->getName() + "'.",
+              {}, Hint);
   ResultOut = nullptr;
   return false;
 }
@@ -278,27 +278,42 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
                   "`a.x == b.x`).");
       return TurfBool();
     }
-    // Same type or both numeric is fine
-    if (LhsTy->getName() == RhsTy->getName())
+    // Same type or both numeric is fine -- EXCLUDING string. Two strings
+    // must resolve via an `operator ==`/`operator !=` overload instead (see
+    // STRING_UFCS_OPERATOR_CHAR_RFC.md's build notes, "Blocker 2"): leaving
+    // string in this same-name shortcut would let `s1 == s2` compile to a
+    // raw pointer-identity ICmp on the underlying i8* whenever no operator
+    // overload is visible -- silently comparing addresses while LOOKING
+    // like a real string comparison, which is far worse than a compile
+    // error. visitBinary()'s operator-resolution gate (above, before this
+    // function is ever called) already handles the case where an overload
+    // IS visible; reaching here with two strings means none was.
+    if (LhsTy->getName() == RhsTy->getName() && !LhsTy->isString())
       return TurfBool();
     if (LhsTy->isNumeric() && RhsTy->isNumeric())
       return TurfBool();
-    
-    // Allow comparing pointers to null
-    bool isLhsPtrOrNull = LhsTy->isPointer() || LhsTy->isNull() || LhsTy->isNamed("ptr") || LhsTy->isNamed("void*") || LhsTy->isString();
-    bool isRhsPtrOrNull = RhsTy->isPointer() || RhsTy->isNull() || RhsTy->isNamed("ptr") || RhsTy->isNamed("void*") || RhsTy->isString();
-    if (isLhsPtrOrNull && isRhsPtrOrNull)
-      return TurfBool();
+
+    // Allow comparing pointers to null -- but not two strings against each
+    // other (same rationale as directly above). A string still legitimately
+    // compares against null/an actual pointer type here.
+    if (!(LhsTy->isString() && RhsTy->isString())) {
+      bool isLhsPtrOrNull = LhsTy->isPointer() || LhsTy->isNull() || LhsTy->isNamed("ptr") || LhsTy->isNamed("void*") || LhsTy->isString();
+      bool isRhsPtrOrNull = RhsTy->isPointer() || RhsTy->isNull() || RhsTy->isNamed("ptr") || RhsTy->isNamed("void*") || RhsTy->isString();
+      if (isLhsPtrOrNull && isRhsPtrOrNull)
+        return TurfBool();
+    }
 
     reportError(Loc, "Cannot compare '" + LhsTy->getName() + "' with '" +
                          RhsTy->getName() + "'.");
     return TurfBool(); // continue with bool to limit cascade errors
   }
 
-  // Ordering operators (< > <= >=): both must be numeric OR both must be string.
-  // String ordering is byte-by-byte via strcmp (Decision D2 \u2014 no locale, no Unicode).
-  if (LhsTy->isString() && RhsTy->isString())
-    return TurfBool();
+  // Ordering operators (< > <= >=): both must be numeric. String ordering
+  // used to be hardcoded here (byte-by-byte via strcmp) but now goes through
+  // operator overload resolution instead (strings.tr's `operator </>/<=/>=`),
+  // handled by visitBinary()'s operator-resolution gate before this function
+  // is ever called -- reaching here with two strings means no overload was
+  // visible, so it correctly falls through to the generic error below.
 
   // char ordering is built in (byte-value comparison) but, per
   // STRING_UFCS_OPERATOR_CHAR_RFC.md \u00a73, char is deliberately NOT isNumeric()
@@ -467,6 +482,16 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
 
 // ─── Expression visitors ──────────────────────────────────────────────────────
 
+// Exact-name-match only, no numeric coercion (int->double widening etc).
+// Deliberately NOT typesCompatible() (used by ordinary `fn` overload
+// resolution, which DOES permit that widening) -- RFC §4.2/§0 mandate
+// exact-match-only for operator resolution specifically, to avoid a `char`
+// or `int` value silently binding to an overload written for a different
+// type. See STRING_UFCS_OPERATOR_CHAR_RFC.md §4.2.
+static bool sameTypeExact(const TurfType *A, const TurfType *B) {
+  return A && B && A->getName() == B->getName();
+}
+
 void TypeChecker::visitBinary(BinaryExprAST &Node) {
   // Visit children first (bottom-up)
   if (Node.getLHS())
@@ -477,6 +502,43 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
   const TurfType *LhsTy = getType(Node.getLHS()).get();
   const TurfType *RhsTy = getType(Node.getRHS()).get();
   int Op = Node.getOp();
+
+  // ── Operator overload resolution ─────────────────────────────────────────
+  // Checked BEFORE the builtin bitwise/relational/exponent/arithmetic
+  // dispatch below, for every whitelisted operator token. Safe to check
+  // first rather than "builtin fast path first" (RFC §4.2's stated order):
+  // Resolver::validateOperatorDecl() already hard-rejects any `operator`
+  // declaration where BOTH operand types are builtin, so a user overload can
+  // never shadow a builtin match here -- there is no ordering ambiguity to
+  // resolve. Exact-type-match only (sameTypeExact, no numeric coercion).
+  if (isOverloadableBinaryOp(Op) && !Node.ResolvedOperatorCandidates.empty() &&
+      LhsTy && RhsTy) {
+    for (const auto &C : Node.ResolvedOperatorCandidates) {
+      if (!C || C->arity() != 2)
+        continue;
+      if (sameTypeExact(C->Params[0].Type.get(), LhsTy) &&
+          sameTypeExact(C->Params[1].Type.get(), RhsTy)) {
+        if (Node.ResolvedOperatorTarget) {
+          // Two visible candidates with an identical operand-type signature
+          // -- RFC §4.3's universal conflict rule, enforced here at the call
+          // site (declaration-site detection needs RFC step 5's
+          // TurfModule::registerFunction origin-tracking fix, out of scope
+          // for this pass).
+          reportError(Node.getLoc(),
+                      "Ambiguous 'operator " + OpToDisplayString(Op) +
+                          "(" + LhsTy->getName() + ", " + RhsTy->getName() +
+                          ")' call: more than one visible overload matches "
+                          "at this call site.");
+          break;
+        }
+        Node.ResolvedOperatorTarget = C;
+      }
+    }
+    if (Node.ResolvedOperatorTarget) {
+      setType(&Node, Node.ResolvedOperatorTarget->ReturnType);
+      return;
+    }
+  }
 
   // Determine operator category
   // Relational / logical: < > <= >= == != && ||

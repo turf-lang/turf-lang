@@ -1,0 +1,9 @@
+// Negative test: operator +(int, int) is a hard error at the declaration
+// site -- both operand types are already builtin.
+operator +(a: int, b: int): int {
+    return a;
+}
+
+fn main(): int {
+    return 0;
+}

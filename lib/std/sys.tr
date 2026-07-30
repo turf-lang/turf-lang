@@ -41,8 +41,16 @@ export immut STDERR_FD: int = 2;
 // panic: write `msg` (plus a trailing newline) to stderr, then abort. Never
 // returns -- every stdlib module's internal "this should be impossible"
 // guard rails (OOM, a failed syscall, a violated invariant) call this.
+//
+// Two separate write() calls instead of one concatenated `msg + "\n"`
+// write, deliberately: string `+` is now an `operator` overload defined in
+// lib/std/strings.tr (STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 2/3), and
+// strings.tr itself needs sys.tr for panics on its own internal errors
+// (e.g. substring's bounds check) -- sys.tr importing strings.tr back would
+// be a circular import. Avoiding string arithmetic here entirely breaks
+// that cycle without sys.tr needing any operator overload at all.
 fn panic(msg: string): void {
-    mut line: string = msg + "\n";
-    write(STDERR_FD, line, lengthof(line));
+    write(STDERR_FD, msg, lengthof(msg));
+    write(STDERR_FD, "\n", 1);
     abort();
 }

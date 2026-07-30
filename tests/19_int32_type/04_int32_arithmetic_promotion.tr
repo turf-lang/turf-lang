@@ -1,0 +1,23 @@
+// int32 arithmetic (whether both operands are int32, or mixed with a plain
+// int) promotes straight to `int` -- mirrors the existing "bool + bool ->
+// int" rule (int32, like bool, is not a parallel arithmetic type system;
+// see Int32Type's doc comment in Types.h). Comparisons work the same way
+// via the generic isNumeric() && isNumeric() path.
+import test;
+
+fn main(): int {
+    mut a: int32 = 10 to int32;
+    mut b: int32 = 3 to int32;
+
+    mut sum: int = a + b;
+    test::assert(sum == 13, "int32 + int32 promotes to int");
+
+    mut mixed: int = a + 5;
+    test::assert(mixed == 15, "int32 + int (mixed) promotes to int");
+
+    test::assert(a > b, "int32 > int32 comparison");
+    test::assert(a > 5, "int32 > int (mixed) comparison");
+    test::assert(a == 10, "int32 == int (mixed) comparison");
+
+    return 0;
+}

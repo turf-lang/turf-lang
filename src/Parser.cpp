@@ -179,6 +179,7 @@ std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseCharExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
 std::unique_ptr<ExprAST> ParseFuncDef();
+std::unique_ptr<ExprAST> ParseOperatorDecl();
 std::unique_ptr<ExprAST> ParseImport();
 std::unique_ptr<ExprAST> ParseReturnExpr();
 std::unique_ptr<ExprAST> ParseStructDecl();
@@ -197,6 +198,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr();
 // first-class. Returns nullptr on failure.
 static TurfTypePtr ParseType() {
   if (CurTok != TOK_IDENTIFIER && CurTok != TOK_TYPE_INT &&
+      CurTok != TOK_TYPE_INT32 &&
       CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
       CurTok != TOK_TYPE_CHAR &&
       CurTok != TOK_TYPE_STRING && CurTok != TOK_TYPE_VOID &&
@@ -208,6 +210,8 @@ static TurfTypePtr ParseType() {
   std::string BaseName;
   if (CurTok == TOK_TYPE_INT)
     BaseName = "int";
+  else if (CurTok == TOK_TYPE_INT32)
+    BaseName = "int32";
   else if (CurTok == TOK_TYPE_DOUBLE)
     BaseName = "double";
   else if (CurTok == TOK_TYPE_BOOL)
@@ -303,6 +307,8 @@ static TurfTypePtr ParseType() {
   TurfTypePtr Base;
   if (BaseName == "int")
     Base = TurfInt();
+  else if (BaseName == "int32")
+    Base = TurfInt32();
   else if (BaseName == "double")
     Base = TurfDouble();
   else if (BaseName == "bool")
@@ -824,6 +830,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   }
 
   case TOK_TYPE_INT:
+  case TOK_TYPE_INT32:
   case TOK_TYPE_DOUBLE:
   case TOK_TYPE_STRING:
   case TOK_TYPE_BOOL:
@@ -838,6 +845,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
   case TOK_FN:
     return ParseFuncDef();
+
+  case TOK_OPERATOR:
+    return ParseOperatorDecl();
 
   case TOK_AT: {
     // The @intrinsic("name") decorator (used to bind print/printline/input
@@ -2408,6 +2418,150 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
                                           IsStaticMethodDecl);
 }
 
+// ParseOperatorDecl -- called when CurTok == TOK_OPERATOR.
+//
+// `operator +(a: string, b: string): string { ... }`. Deliberately does NOT
+// share a body with ParseFuncDef(): operators are top-level-only (no '.'/'::'
+// method-name handling), non-generic (no '<T>' block), and have no 'static'
+// keyword -- so reusing ParseFuncDef() directly would mean threading a bunch
+// of "but not for operators" conditionals through an already-long function.
+// Instead this reuses ParseFuncDef()'s PARAM-LIST/RETURN-TYPE/BODY parsing
+// shape verbatim (same three blocks, same error messages) and produces an
+// ordinary FuncDefExprAST with a synthesized name (operatorFunctionName()) --
+// every downstream pass (hoisting, Resolver, TypeChecker, Codegen mangling)
+// therefore needs zero changes to handle the DECLARATION side of an operator
+// at all; it's just a function with a funny name. See
+// STRING_UFCS_OPERATOR_CHAR_RFC.md §4 and §7 step 3.
+std::unique_ptr<ExprAST> ParseOperatorDecl() {
+  SourceLocation OpLoc = CurLoc;
+  getNextToken(); // consume 'operator'
+
+  if (!isOverloadableBinaryOp(CurTok)) {
+    LogErrorAt(OpLoc,
+               "Expected an overloadable operator after 'operator'."
+               "\n  Hint: only + - * / == != < > <= >= may be overloaded "
+               "right now ([]/[]= and unary -/! are not supported yet).");
+    return nullptr;
+  }
+  int OpTok = CurTok;
+  std::string FuncName = operatorFunctionName(OpTok);
+  getNextToken(); // consume the operator token
+
+  // Expect '('
+  if (CurTok != '(') {
+    LogErrorAt(OpLoc, "Expected '(' after 'operator " + FuncName.substr(8) + "'.");
+    return nullptr;
+  }
+  getNextToken(); // eat '('
+
+  std::vector<ParamDecl> Params;
+
+  // Parse parameter list -- identical shape to ParseFuncDef()'s.
+  while (CurTok != ')' && CurTok != TOK_EOF) {
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc,
+                 "Expected a parameter name in the parameter list of '" +
+                     FuncName + "'.");
+      return nullptr;
+    }
+    std::string ParamName = IdentifierStr;
+    SourceLocation ParamNameLoc = CurLoc;
+    getNextToken(); // consume parameter name
+
+    if (CurTok != TOK_COLON) {
+      LogErrorAt(CurLoc,
+                 "Expected ':' after parameter name '" + ParamName + "' in '" +
+                     FuncName + "'.");
+      return nullptr;
+    }
+    getNextToken(); // consume ':'
+
+    SourceLocation ParamTypeLoc = CurLoc;
+    TurfTypePtr ParamType = ParseType();
+    if (!ParamType) {
+      LogErrorAt(CurLoc,
+                 "Expected a parameter type after ':' in the parameter list of '" +
+                     FuncName + "'.");
+      return nullptr;
+    }
+
+    if (isDisallowedVoidType(ParamType.get())) {
+      LogErrorAt(ParamTypeLoc,
+                 "'void' cannot be a parameter's type."
+                 "\n  Hint: give parameter '" + ParamName + "' a real type.");
+      return nullptr;
+    }
+
+    Params.push_back({ParamType, ParamName, ParamNameLoc});
+
+    if (CurTok == ',')
+      getNextToken();
+    else if (CurTok != ')')
+      break;
+  }
+
+  if (CurTok != ')') {
+    LogErrorAt(
+        OpLoc,
+        "Expected ')' to close the parameter list of '" + FuncName + "'.");
+    return nullptr;
+  }
+  getNextToken(); // eat ')'
+
+  // Arity check: this pass only supports binary operator overloading ([]/[]=
+  // and unary -/! are explicitly deferred, see STRING_UFCS_OPERATOR_CHAR_RFC.md
+  // §7's build order). A 1-param declaration is almost certainly someone
+  // trying to write a unary overload (`operator -(a: Vec2): Vec2`), which
+  // deserves a specific "not yet" message rather than a generic arity error.
+  if (Params.size() == 1) {
+    LogErrorAt(OpLoc,
+               "Unary operator overloading is not supported yet."
+               "\n  Hint: 'operator " + FuncName.substr(8) +
+                   "' must take exactly 2 parameters (a binary overload).");
+    return nullptr;
+  }
+  if (Params.size() != 2) {
+    LogErrorAt(OpLoc,
+               "'operator " + FuncName.substr(8) +
+                   "' must take exactly 2 parameters, got " +
+                   std::to_string(Params.size()) + ".");
+    return nullptr;
+  }
+
+  // Expect ':' then return type -- identical shape to ParseFuncDef()'s.
+  if (CurTok != TOK_COLON) {
+    LogErrorAt(CurLoc, "Expected ':' followed by return type after parameter list.");
+    return nullptr;
+  }
+  getNextToken(); // eat ':'
+
+  TurfTypePtr RetType = ParseType();
+  if (!RetType) {
+    LogErrorAt(CurLoc, "Expected return type.");
+    return nullptr;
+  }
+
+  if (CurTok == ';') {
+    getNextToken(); // eat ';'
+    return std::make_unique<FuncDefExprAST>(OpLoc, FuncName, RetType, Params,
+                                            nullptr, std::vector<std::string>{},
+                                            /*IsStaticMethodDecl=*/false);
+  }
+
+  if (CurTok != '{') {
+    LogErrorAt(OpLoc, "Expected '{' to begin the body of 'operator " +
+                          FuncName.substr(8) + "'.");
+    return nullptr;
+  }
+  auto Body = ParseBlock();
+  if (!Body)
+    return nullptr;
+
+  return std::make_unique<FuncDefExprAST>(OpLoc, FuncName, RetType, Params,
+                                          std::move(Body), std::vector<std::string>{},
+                                          /*IsStaticMethodDecl=*/false);
+}
+
 // Builds the reportable chain for a detected import cycle: the sub-sequence
 // of ImportStack starting at the frame that re-enters Path (the module
 // currently being closed back on) through to the top of the stack (whoever's
@@ -2593,7 +2747,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     }
 
     if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_AT ||
-        CurTok == TOK_EXTERN || CurTok == TOK_EXPORT) {
+        CurTok == TOK_EXTERN || CurTok == TOK_EXPORT || CurTok == TOK_OPERATOR) {
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok == ';') {

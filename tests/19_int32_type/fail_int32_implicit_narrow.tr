@@ -1,0 +1,6 @@
+// Negative test: int -> int32 narrowing must be rejected without an
+// explicit `to int32` cast, same as double -> int is rejected.
+fn main(): int {
+    mut n: int32 = 5;
+    return 0;
+}

@@ -428,7 +428,8 @@ int main(int argc, char **argv) {
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') { getNextToken(); continue; }
         if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
-            CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT) {
+            CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
+            CurTok == TOK_OPERATOR) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
@@ -698,7 +699,8 @@ int main(int argc, char **argv) {
     // included for the same reason -- it's a genuine top-level declaration,
     // not a statement, and needs the exact same hoist-then-lint treatment.
     if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
-        CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT) {
+        CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
+        CurTok == TOK_OPERATOR) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();

@@ -72,6 +72,7 @@ public:
   // Callers should prefer these over string comparisons.
 
   virtual bool isInt()    const { return false; }
+  virtual bool isInt32()  const { return false; }
   virtual bool isDouble() const { return false; }
   virtual bool isBool()   const { return false; }
   virtual bool isChar()   const { return false; }
@@ -132,6 +133,32 @@ class IntType : public TurfType {
 public:
   std::string getName() const override { return "int"; }
   bool isInt()     const override { return true; }
+  bool isNumeric() const override { return true; }
+};
+
+/**
+ * @brief The `int32` primitive type.
+ *
+ * Maps to llvm::Type::getInt32Ty in Codegen. Exists specifically so
+ * `extern fn` declarations can honestly describe a C function whose
+ * parameter/return is a genuine 32-bit `int` (e.g. libc's strcmp, toupper) --
+ * declaring those as Turf's 64-bit `int` builds the wrong LLVM function
+ * signature and silently reads garbage upper bits from the return register
+ * (confirmed live: strcmp() reads back as an unsigned 4294967295 instead of
+ * signed -1). isNumeric() IS overridden true (unlike CharType) -- int32 is a
+ * genuine arithmetic integer, just narrower; arithmetic/comparisons with it
+ * fall through the ordinary numeric paths for free and promote straight to
+ * `int` (mirrors how `bool` arithmetic already promotes to `int` today).
+ * Deliberately NOT a parallel 32-bit arithmetic type system -- see
+ * typesCompatible()'s int32<->int Rule 3 entries and CastToType()'s existing
+ * "normalize foreign i32 to i64" step, which together mean a genuinely
+ * i32-typed value widens to i64 automatically the moment it's used in any
+ * operation, with no new Codegen dispatch needed.
+ */
+class Int32Type : public TurfType {
+public:
+  std::string getName() const override { return "int32"; }
+  bool isInt32()   const override { return true; }
   bool isNumeric() const override { return true; }
 };
 
@@ -506,6 +533,7 @@ struct RankedSuggestions {
  * @{
  */
 TurfTypePtr TurfInt();
+TurfTypePtr TurfInt32();
 TurfTypePtr TurfDouble();
 TurfTypePtr TurfBool();
 TurfTypePtr TurfChar();

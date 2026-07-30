@@ -30,6 +30,16 @@
 //   test::assert_eq(x, 5, "x should be 5");
 
 import sys;
+// String `==`/`!=`/`+` used below (assert_eq/assert_neq's string overloads,
+// assert_fail_eq/assert_fail_neq's message building) are `operator`
+// overloads defined in strings.tr, not compiler builtins anymore -- must be
+// imported explicitly like any other operator consumer. See
+// STRING_UFCS_OPERATOR_CHAR_RFC.md's Option-A visibility discussion: since
+// virtually every test file already imports `test`, this is what makes
+// string operators available everywhere with zero test-file edits, at the
+// deliberate cost of them becoming de-facto globally visible in any program
+// using the test harness.
+import strings;
 
 // ─── fail ──────────────────────────────────────────────────────────────────
 

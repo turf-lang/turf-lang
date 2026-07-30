@@ -1,0 +1,21 @@
+// Negative test: only operator +(Vec2, double) is declared. Calling it with
+// (Vec2, int) must FAIL -- no numeric coercion in operator resolution
+// (RFC §4.2), unlike ordinary `fn` overload resolution which does permit
+// int->double widening. This is the key behavioral difference from
+// typesCompatible()-based call resolution.
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+operator +(a: Vec2, b: double): Vec2 {
+    return a;
+}
+
+fn main(): int {
+    mut a: Vec2 = Vec2::default();
+    a.x = 1;
+    a.y = 2;
+    mut r: Vec2 = a + 5;
+    return 0;
+}

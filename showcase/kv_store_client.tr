@@ -11,6 +11,7 @@
 
 import io;
 import net;
+import strings; // string '+' is an operator overload now, not a builtin
 
 fn main(): int {
     mut setConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181);

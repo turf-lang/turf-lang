@@ -23,8 +23,65 @@ extern fn malloc(size: int): void*;
 extern fn strlen(s: string): int;
 extern fn strstr(haystack: string, needle: string): string;
 extern fn strncpy(dst: string, src: string, n: int): string;
-extern fn toupper(c: int): int;
-extern fn tolower(c: int): int;
+extern fn strcpy(dst: string, src: string): string;
+extern fn strcat(dst: string, src: string): string;
+// strcmp/toupper/tolower are declared with their REAL C ABI signatures --
+// all three genuinely take/return a 32-bit C `int`, not Turf's 64-bit
+// `int`. Declaring them as `int` builds the wrong LLVM function signature
+// (a real, confirmed bug: strcmp() silently read back as an unsigned
+// 4294967295 instead of signed -1, because the call read a full 64-bit
+// register through a prototype that only ever had 32 valid bits). See
+// Int32Type's doc comment in Types.h.
+extern fn strcmp(a: string, b: string): int32;
+extern fn toupper(c: int32): int32;
+extern fn tolower(c: int32): int32;
+
+// ─── operator overloads ─────────────────────────────────────────────────────
+//
+// String is a compiler-recognized type with ZERO hardcoded operator
+// behavior (STRING_UFCS_OPERATOR_CHAR_RFC.md §1) -- `+`/`==`/`!=`/`< > <= >=`
+// on two strings are ordinary `operator` overloads, resolved the same way
+// any user-defined operator overload would be. This is the first real
+// consumer of the `operator` keyword/resolution mechanism (RFC §7 step 3),
+// and it's the reason `strings` module functions below must only ever use
+// `int`-typed comparisons/arithmetic internally (never string `+`/`==` on
+// themselves) -- doing so would try to resolve against these same
+// definitions recursively. `operator +`'s body mirrors exactly what used to
+// be Codegen's hardcoded EmitStringConcat, including the same TURF-MEMLEAK
+// tradeoff: the malloc'd buffer is intentionally never freed (Turf has no
+// GC yet); future work is an arena allocator or a Boehm GC sweep.
+
+operator +(a: string, b: string): string {
+    mut n: int = strlen(a) + strlen(b) + 1;
+    mut buf: string = malloc(n) to string;
+    strcpy(buf, a);
+    strcat(buf, b);
+    return buf;
+}
+
+operator ==(a: string, b: string): bool {
+    return strcmp(a, b) == 0;
+}
+
+operator !=(a: string, b: string): bool {
+    return strcmp(a, b) != 0;
+}
+
+operator <(a: string, b: string): bool {
+    return strcmp(a, b) < 0;
+}
+
+operator >(a: string, b: string): bool {
+    return strcmp(a, b) > 0;
+}
+
+operator <=(a: string, b: string): bool {
+    return strcmp(a, b) <= 0;
+}
+
+operator >=(a: string, b: string): bool {
+    return strcmp(a, b) >= 0;
+}
 
 // ─── length ───────────────────────────────────────────────────────────────────
 
@@ -210,7 +267,7 @@ fn to_upper(s: string): string {
     mut buf: string = malloc(n + 1) to string;
     mut i: int = 0;
     while i < n {
-        buf[i] = toupper(s[i]);
+        buf[i] = toupper(s[i] to int32);
         i = i + 1;
     }
     buf[n] = 0;
@@ -225,7 +282,7 @@ fn to_lower(s: string): string {
     mut buf: string = malloc(n + 1) to string;
     mut i: int = 0;
     while i < n {
-        buf[i] = tolower(s[i]);
+        buf[i] = tolower(s[i] to int32);
         i = i + 1;
     }
     buf[n] = 0;
