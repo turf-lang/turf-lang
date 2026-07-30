@@ -8,6 +8,7 @@
 //   mut x: int = m.get("a");        // 1
 //   mut has: bool = m.contains("z"); // false
 //   mut n: int = m.length();         // 2
+//   mut y: int = m.tryGet("z") recover produce -1; // -1, no abort
 //
 // Design:
 //   - Two parallel type-erased arrays (keys/values), grown exactly like
@@ -86,6 +87,25 @@ fn<K, V> Map.get(key: K): V {
   immutable idx: int = self.indexOf(key);
   if (idx < 0) {
     sys::panic("Map.get: no such key");
+  }
+  return self.values[idx];
+}
+
+// Recoverable alternative to get() (docs/planning/Errors.md): a missing key
+// is often an ordinary, expected outcome (checking a cache, an optional
+// config value, ...), not a programming bug worth aborting the whole
+// process over -- `m.tryGet(key) recover produce default;` or a full
+// `recover run { ... }` lets the caller decide, instead of get()'s
+// unconditional abort. get() itself is left as-is (unchanged behavior,
+// still the right choice when a missing key really would be a bug).
+error MapError {
+  KeyNotFound,
+}
+
+fn<K, V> Map.tryGet(key: K): !V {
+  immutable idx: int = self.indexOf(key);
+  if (idx < 0) {
+    return MapError::KeyNotFound;
   }
   return self.values[idx];
 }
