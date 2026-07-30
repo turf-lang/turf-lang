@@ -1137,6 +1137,17 @@ public:
     ExprAST*             getBlock()       const { return Block.get(); }
     const SourceLocation& getLoc()         const { return Loc; }
 
+    /// The wrapped expression's success type T (docs/planning/Errors.md),
+    /// set by TypeChecker::visitRecoverExpr and read by Codegen -- needed
+    /// there to know how to unbox the FallibleValue's boxed successBits
+    /// slot back to T's real LLVM representation (Codegen can't derive this
+    /// from the runtime value alone, since every `!T` lowers to the SAME
+    /// FallibleValue struct regardless of T; see getFallibleValueType()'s
+    /// doc comment in Codegen.cpp). Same cross-pass-communication pattern
+    /// as ResolvedKind/ResolvedCandidates elsewhere in this file. Nulled by
+    /// clone() (a cloned tree is stale until re-typechecked).
+    TurfTypePtr ResolvedSuccessType;
+
     llvm::Value* codegen() override;
     void accept(ASTVisitor& V) override { V.visitRecoverExpr(*this); }
     std::unique_ptr<ExprAST> clone() const override {
