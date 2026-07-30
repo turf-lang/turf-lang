@@ -6,31 +6,26 @@ A basic syntax of an `error` type is:
 
 ```turf
 error IOError {
-    FileNotFound(path: string),
-    PermissionDenied(path: string),
-    InvalidEncoding(path: string, line: int)
+    FileNotFound,
+    PermissionDenied,
+    InvalidEncoding
 }
 
 error NetworkError {
-    Timeout(seconds: int),
-    ConnectionRefused(host: string, port: int)
+    Timeout,
+    ConnectionRefused
 }
 
 error MathError {
     DivisionByZero,
     Overflow,
-    InvalidInput(message: string),
+    InvalidInput,
 }
 ```
 
-This means that the user can define their own errors just like they define their own types. They are allowed to form errors with parameters of however they like, checked by the compiler later on. That means, it is not necessary to put in parameters itself. This would allow stuff like (taking formed error types from above):
+This means that the user can define their own errors just like they define their own types. An error type's variants are bare names only, exactly like `enum` variants -- no payload/parameters on a variant (no `FileNotFound(path: string)`-style fields). This is a deliberate, explicit scope decision, not an oversight: real programs so far have only ever needed to know *which* error variant happened (compared via `== MathError::DivisionByZero`, etc.), never any data carried alongside it, so payload support is deferred until there's an actual need for it -- adding it back later (plus a real destructuring syntax to read the fields safely, since different variants of the same error type can carry different fields) is future work, not part of this spec.
 
-```turf
-NetworkError::Timeout(30); // This is allowed
-MathError::InvalidInput(33.33); // This is not allowed and will be rejected in the typecheck phase just like every other typecheck
-```
-
-Just how `StructType` and `EnumType` are present in the language, the above three error types, starting with the `error` keyword would then become `ErrorType`, and will be validated in the pipeline and form a node in the AST just like anything else.
+Just how `StructType` and `EnumType` are present in the language, the above three error types, starting with the `error` keyword would then become `ErrorType`, and will be validated in the pipeline and form a node in the AST just like anything else. Referencing a variant (`MathError::DivisionByZero`) is a bare, non-callable reference, exactly like an `enum` variant -- `MathError::DivisionByZero()` (call syntax, even with zero arguments) is rejected the same way `Color::Red()` already is.
 
 Now, since errors are being introduced, the following syntax:
 
