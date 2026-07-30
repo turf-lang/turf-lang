@@ -1573,6 +1573,96 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
   setType(&Node, nullptr);
 }
 
+bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
+                                  const TurfType *BaseTy,
+                                  const std::vector<TurfTypePtr> &ArgTypes) {
+  if (!BaseTy)
+    return false;
+  const std::string &MethodName = Node.getMethod();
+  const int ArgCount = static_cast<int>(ArgTypes.size());
+
+  // Gather candidates: self-file free functions + every module known/hoisted
+  // anywhere in the compile (Option A visibility, same rule already applied
+  // to `operator` resolution -- RFC §5.3 explicitly says "same rule as
+  // operators").
+  std::vector<const ResolverFunctionSymbol *> Candidates;
+  for (const auto *S : RST_.lookupCurrentFileFunctions(MethodName))
+    Candidates.push_back(S);
+  for (const auto &M : RST_.findInModules(MethodName))
+    if (M.Symbol)
+      Candidates.push_back(M.Symbol);
+
+  // Receiver (implicit self-argument) matching is EXACT-name-match only --
+  // no numeric coercion -- RFC §5.4. Arity must also account for the
+  // receiver occupying the first declared parameter slot.
+  std::vector<const ResolverFunctionSymbol *> ReceiverMatches;
+  for (const auto *C : Candidates) {
+    if (C->arity() == ArgCount + 1 && !C->Params.empty() &&
+        sameTypeExact(C->Params[0].Type.get(), BaseTy))
+      ReceiverMatches.push_back(C);
+  }
+  if (ReceiverMatches.empty())
+    return false;
+
+  // The REMAINING, explicitly-written call arguments are not an implicit
+  // binding -- they use the ordinary typesCompatible() coercion rules, same
+  // as any other function call (RFC §5.4's "no coercion" language is scoped
+  // to the receiver specifically, not the whole call).
+  std::vector<const ResolverFunctionSymbol *> TypeMatches;
+  for (const auto *C : ReceiverMatches) {
+    bool AllOk = true;
+    for (int i = 0; i < ArgCount; ++i) {
+      const TurfType *ParamTy = C->Params[i + 1].Type.get();
+      const TurfType *ArgTy = ArgTypes[i].get();
+      if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy)) {
+        AllOk = false;
+        break;
+      }
+    }
+    if (AllOk)
+      TypeMatches.push_back(C);
+  }
+  if (TypeMatches.empty())
+    return false;
+
+  // Prefer an exact-match-on-remaining-args candidate over a numeric-
+  // promotion one, matching visitFuncCall's identical tie-break -- but if
+  // MORE THAN ONE candidate is exact on every remaining arg too, that's a
+  // genuine identical-signature conflict (RFC §5.4's universal conflict
+  // rule / §4.3), not a preference to silently resolve.
+  const ResolverFunctionSymbol *Best = TypeMatches[0];
+  const ResolverFunctionSymbol *ExactMatch = nullptr;
+  for (const auto *C : TypeMatches) {
+    bool ExactAll = true;
+    for (int i = 0; i < ArgCount; ++i) {
+      const TurfType *P = C->Params[i + 1].Type.get();
+      const TurfType *A = ArgTypes[i].get();
+      if (P && A && P->getName() != A->getName()) {
+        ExactAll = false;
+        break;
+      }
+    }
+    if (ExactAll) {
+      if (ExactMatch) {
+        reportError(Node.getLoc(),
+                    "Ambiguous UFCS call to '" + MethodName +
+                        "': more than one visible free-function overload "
+                        "matches this call site exactly.");
+        setType(&Node, nullptr);
+        return true; // handled (as an error) -- caller must not also report
+      }
+      ExactMatch = C;
+    }
+  }
+  if (ExactMatch)
+    Best = ExactMatch;
+
+  Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
+  Node.ResolvedViaUFCS = true;
+  setType(&Node, Best->ReturnType);
+  return true;
+}
+
 void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
   // 1. Visit the base expression (e.g. `io` in io.printline(...)).
   if (Node.getBase())
@@ -1855,6 +1945,13 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         }
 
         if (!ArityMatches.empty() && TypeMatches.empty()) {
+          // Tier 1 (bound methods) is exhausted with zero matches for this
+          // exact call -- right types don't exist for this arity. Try tier
+          // 2 (UFCS) before reporting this as an error (RFC §5.2's tiering:
+          // "this tier is exhausted in full before falling through").
+          if (tryUFCSFallback(Node, BaseTy.get(), ArgTypes))
+            return;
+
           // Method name and argument COUNT are both right, but no overload's
           // parameter types accept what was actually passed -- e.g.
           // List<int>.push("hello"). Distinct from "wrong number of
@@ -1956,7 +2053,14 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           return;
         }
 
-        // No overload matched. Distinguish "this method doesn't exist on
+        // No overload matched -- tier 1 (bound methods) is exhausted with
+        // zero matches (whether because the method name doesn't exist at
+        // all, or exists but not at this arity). Try tier 2 (UFCS) before
+        // reporting either error.
+        if (tryUFCSFallback(Node, BaseTy.get(), ArgTypes))
+          return;
+
+        // Distinguish "this method doesn't exist on
         // this struct at all" from "it exists, but not with this many
         // arguments" -- see StructMethodNotFoundError's doc comment in
         // Errors.h for why this used to be silently permissive (both
@@ -2004,7 +2108,11 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       }
       // BaseTy resolved to something real, but it's not a struct at all
       // (e.g. `x.foo()` where x: int, or a string, or a pointer to a
-      // non-struct). Previously fell all the way through to Codegen's
+      // non-struct). Primitives have NO bound-method mechanism whatsoever
+      // (STRING_UFCS_OPERATOR_CHAR_RFC.md §5.1) -- UFCS is the ONLY way
+      // dot-call syntax can ever work on them, so this is the primary UFCS
+      // entry point for primitive receivers, not just a struct-side
+      // fallback. Previously fell all the way through to Codegen's
       // `MethodCallExprAST::codegen()`, which calls
       // `llvm::report_fatal_error("Internal error: method call on
       // unsupported type. This is a compiler bug.")` -- an abrupt process
@@ -2012,6 +2120,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       // typo'd method call on a non-struct value), not an actual internal
       // invariant violation. Confirmed via `x.foo()` on an int, a string,
       // and an `int*`.
+      if (tryUFCSFallback(Node, BaseTy.get(), ArgTypes))
+        return;
       reportError(Node.getLoc(),
                   "Cannot call method '" + MethodName + "' on type '" +
                       BaseTy->getName() +

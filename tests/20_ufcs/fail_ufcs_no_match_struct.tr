@@ -1,0 +1,12 @@
+// Negative test: a method call matching neither tier (no bound method, no
+// UFCS candidate) must be a clean type error, not an ICE.
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut v: Vec2 = Vec2::default();
+    v.nonexistent_method();
+    return 0;
+}

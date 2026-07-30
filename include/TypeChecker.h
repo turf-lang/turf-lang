@@ -275,6 +275,33 @@ private:
                                   const TurfType *LhsTy,
                                   const TurfType *RhsTy);
 
+  /**
+   * @brief UFCS fallback (STRING_UFCS_OPERATOR_CHAR_RFC.md §5): try to
+   * resolve a dot-call as an ordinary free function taking the receiver as
+   * its first argument, when the bound-method tier (struct methods, or "no
+   * bound-method mechanism at all" for primitives) has already produced
+   * zero matches for this exact call.
+   *
+   * Receiver matching is EXACT-name-match only (no numeric coercion) --
+   * RFC §5.4. The remaining, explicitly-written call arguments use the
+   * ordinary typesCompatible() coercion rules, same as any other function
+   * call -- §5.4's "no coercion" language is scoped to the implicit
+   * receiver binding specifically, not the whole call.
+   *
+   * On success: sets Node.ResolvedCallTarget + Node.ResolvedViaUFCS and the
+   * node's type, then returns true. On failure (no UFCS candidate matches
+   * either): returns false and reports NOTHING -- the caller is expected to
+   * raise whatever tier-1 diagnostic it already would have, so UFCS never
+   * changes an error message when it doesn't apply.
+   *
+   * @param BaseTy  The receiver's type, resolved exactly as far as the
+   *                caller had already unwrapped it (pointer/NamedType/
+   *                GenericType for a struct receiver; the primitive type
+   *                itself otherwise).
+   */
+  bool tryUFCSFallback(MethodCallExprAST &Node, const TurfType *BaseTy,
+                       const std::vector<TurfTypePtr> &ArgTypes);
+
   /// True if @p T is a numeric primitive (int, double, or bool).
   static bool isNumericType(const TurfType *T);
 

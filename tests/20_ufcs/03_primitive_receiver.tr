@@ -1,0 +1,21 @@
+// UFCS is the ONLY way dot-call syntax works on a primitive at all (no
+// bound-method mechanism exists for int/double/bool/char/string/array).
+import test;
+
+fn double_it(x: int): int {
+    return x * 2;
+}
+
+fn is_long(s: string): bool {
+    return lengthof(s) > 3;
+}
+
+fn main(): int {
+    mut n: int = 21;
+    test::assert(n.double_it() == 42, "UFCS on an int receiver");
+
+    mut s: string = "hello";
+    test::assert(s.is_long(), "UFCS on a string receiver");
+
+    return 0;
+}

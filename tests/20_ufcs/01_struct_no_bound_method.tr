@@ -1,0 +1,23 @@
+// UFCS fallback: a struct with NO bound method of this name at all --
+// resolves entirely via the free-function tier (tier 1 has zero candidates,
+// not just zero matches for this arity).
+import test;
+
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+fn magnitude_sq(v: Vec2): int {
+    return v.x * v.x + v.y * v.y;
+}
+
+fn main(): int {
+    mut v: Vec2 = Vec2::default();
+    v.x = 3;
+    v.y = 4;
+
+    test::assert(v.magnitude_sq() == 25, "UFCS resolves a struct method with no bound version");
+
+    return 0;
+}

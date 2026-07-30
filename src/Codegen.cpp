@@ -3899,6 +3899,75 @@ Value *MethodCallExprAST::codegen() {
     }
   }
 
+  // ── UFCS call ─────────────────────────────────────────────────────────────
+  // TypeChecker::tryUFCSFallback() resolved this dot-call to an ordinary
+  // free function taking the receiver as its first argument (ResolvedViaUFCS
+  // -- STRING_UFCS_OPERATOR_CHAR_RFC.md §5.5: no AST desugaring, Codegen
+  // just needs to know which calling convention to use). This is a real
+  // free function, not a bound method, so it uses the SAME by-value
+  // argument-passing shape as the module-call branch above -- NOT the
+  // struct-method branch's self-pointer convention below, which only
+  // applies to genuine `fn StructName.method(...)` declarations.
+  if (ResolvedViaUFCS) {
+    if (!ResolvedCallTarget) {
+      llvm::report_fatal_error(
+          "Internal error: ResolvedViaUFCS set with no ResolvedCallTarget. "
+          "This is a compiler bug.");
+      return nullptr;
+    }
+    Value *ReceiverVal = Base->codegen();
+    if (!ReceiverVal)
+      return nullptr;
+    std::vector<Value *> ArgVals;
+    ArgVals.push_back(ReceiverVal);
+    for (auto &Arg : Args) {
+      Value *V = Arg->codegen();
+      if (!V)
+        return nullptr;
+      ArgVals.push_back(V);
+    }
+
+    std::string MangledName = ResolvedCallTarget->mangledName();
+    llvm::Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: LLVM function '" + MangledName +
+          "' not found after successful UFCS resolution. This is a compiler bug."));
+      return nullptr;
+    }
+
+    // Cast arguments to match callee signature (numeric promotions only) --
+    // identical shape to the module-call branch's own cast chain above,
+    // since a UFCS callee is an ordinary free function exactly like a
+    // module function is.
+    std::vector<Value *> CastVals;
+    unsigned Idx = 0;
+    for (auto &FArg : CalleeF->args()) {
+      Value *V = ArgVals[Idx++];
+      llvm::Type *ExpTy = FArg.getType();
+      if (V->getType() != ExpTy) {
+        if (ExpTy->isDoubleTy() && V->getType()->isIntegerTy(64))
+          V = Builder->CreateSIToFP(V, ExpTy, "argcast");
+        else if (ExpTy->isDoubleTy() && V->getType()->isIntegerTy(1))
+          V = Builder->CreateUIToFP(V, ExpTy, "argcast");
+        else if (ExpTy->isIntegerTy(64) && V->getType()->isDoubleTy())
+          V = Builder->CreateFPToSI(V, ExpTy, "argcast");
+        else if (ExpTy->isIntegerTy(64) && V->getType()->isIntegerTy(1))
+          V = Builder->CreateZExt(V, ExpTy, "argcast");
+        else if (ExpTy->isIntegerTy(1) && V->getType()->isIntegerTy(64))
+          V = Builder->CreateICmpNE(
+                  V, ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
+                  "argcast");
+        // pointer <-> integer / pointer passthrough handled by LLVM
+      }
+      CastVals.push_back(V);
+    }
+
+    if (CalleeF->getReturnType()->isVoidTy())
+      return Builder->CreateCall(CalleeF, CastVals);
+    return Builder->CreateCall(CalleeF, CastVals, "ufcscalltmp");
+  }
+
   // ── Struct / pointer method call ─────────────────────────────────────────
   // Base is a struct instance or pointer-to-struct.  ResolvedCallTarget is set
   // by the TypeChecker.  We just emit the call.

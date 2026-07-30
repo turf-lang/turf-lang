@@ -1230,13 +1230,22 @@ public:
     return ResolvedCallTarget.get();
   }
 
+  /// True when TypeChecker resolved this call via UFCS (a free function
+  /// taking the receiver as its first argument, per
+  /// STRING_UFCS_OPERATOR_CHAR_RFC.md §5) rather than a real bound struct
+  /// method. Codegen needs to know which convention to use for passing the
+  /// receiver -- by-value, like an ordinary argument, vs the self-pointer
+  /// convention every bound method uses. Not copied by clone() -- same
+  /// contract as ResolvedCallTarget.
+  bool ResolvedViaUFCS = false;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitMethodCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()),
                                                Method, CloneExprList(Args));
-    // Note: ResolvedCallTarget intentionally NOT copied — cloned ASTs are
-    // stale until re-resolved. ✓
+    // Note: ResolvedCallTarget and ResolvedViaUFCS intentionally NOT
+    // copied — cloned ASTs are stale until re-resolved. ✓
   }
 };
 
