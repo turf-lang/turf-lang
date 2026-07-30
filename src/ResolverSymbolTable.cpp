@@ -438,6 +438,44 @@ std::vector<std::string> ResolverSymbolTable::getAllEnumNames() const {
   return Names;
 }
 
+// ─── User-declared `error` type registry ─────────────────────────────────────
+
+std::optional<ResolverSourceLocation>
+ResolverSymbolTable::registerErrorType(const std::string &Name,
+                                       ResolverSourceLocation Loc,
+                                       std::shared_ptr<TurfUserErrorType> ET,
+                                       const std::string &ModuleName) {
+  auto LocIt = ErrorDeclLocs_.find(Name);
+  if (LocIt != ErrorDeclLocs_.end())
+    return LocIt->second; // duplicate -- caller raises DuplicateTypeNameError
+  ErrorDeclLocs_.emplace(Name, Loc);
+  RegisteredErrorTypes_[Name] = std::move(ET);
+  TypeOwningModule_.emplace(Name, ModuleName);
+  return std::nullopt;
+}
+
+std::shared_ptr<TurfUserErrorType> ResolverSymbolTable::lookupErrorType(const std::string& Name) const {
+  auto It = RegisteredErrorTypes_.find(Name);
+  if (It != RegisteredErrorTypes_.end()) {
+    return It->second;
+  }
+  return nullptr;
+}
+
+bool ResolverSymbolTable::isErrorTypeName(const std::string& Name) const {
+  return RegisteredErrorTypes_.count(Name) > 0;
+}
+
+std::vector<std::string> ResolverSymbolTable::getAllErrorTypeNames() const {
+  std::vector<std::string> Names;
+  Names.reserve(RegisteredErrorTypes_.size());
+  for (const auto& Pair : RegisteredErrorTypes_) {
+    Names.push_back(Pair.first);
+  }
+  std::sort(Names.begin(), Names.end());
+  return Names;
+}
+
 void ResolverSymbolTable::dump(std::ostream &OS) const {
   OS << "\n=== Resolver Symbol Table Dump ===\n";
 

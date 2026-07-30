@@ -793,6 +793,20 @@ public:
   bool isEnumName(const std::string& Name) const;
   std::vector<std::string> getAllEnumNames() const;
 
+  // ── User-declared `error` type registry (docs/planning/Errors.md) ────────
+
+  // Same shape as the enum registry above -- a flat, module-blind namespace,
+  // own duplicate-name map (not cross-checked against structs/enums, same as
+  // struct vs. enum today). Returns the original declaration's location on a
+  // duplicate name, std::nullopt on a fresh registration.
+  std::optional<ResolverSourceLocation>
+  registerErrorType(const std::string& Name, ResolverSourceLocation Loc,
+                    std::shared_ptr<TurfUserErrorType> ET,
+                    const std::string &ModuleName = "");
+  std::shared_ptr<TurfUserErrorType> lookupErrorType(const std::string& Name) const;
+  bool isErrorTypeName(const std::string& Name) const;
+  std::vector<std::string> getAllErrorTypeNames() const;
+
   /**
    * @brief Which module declares @p Name ("" for the main file, or if
    * @p Name isn't a known struct/enum at all). Struct/enum names are
@@ -873,7 +887,13 @@ private:
   /// declaration location -- see registerEnumType()'s doc comment.
   std::unordered_map<std::string, ResolverSourceLocation> EnumDeclLocs_;
 
-  /// Which module owns each struct/enum name ("" = main file). See
+  /// User-declared `error` types (docs/planning/Errors.md), declared in the
+  /// current file or any transitively-imported module. Parallel shape to
+  /// RegisteredEnums_/EnumDeclLocs_ above.
+  std::unordered_map<std::string, std::shared_ptr<TurfUserErrorType>> RegisteredErrorTypes_;
+  std::unordered_map<std::string, ResolverSourceLocation> ErrorDeclLocs_;
+
+  /// Which module owns each struct/enum/error name ("" = main file). See
   /// getTypeOwningModule()'s doc comment.
   std::unordered_map<std::string, std::string> TypeOwningModule_;
 };

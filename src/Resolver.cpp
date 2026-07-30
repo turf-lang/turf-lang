@@ -344,6 +344,21 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
     return;
   }
 
+  // Hoist `error` type declarations (docs/planning/Errors.md): register the
+  // name and variants so NamedType/ScopeAccess references resolve in Pass 2.
+  if (const auto *ErrDecl = dynamic_cast<const ErrorDeclExprAST *>(Node)) {
+    auto ET = std::make_shared<TurfUserErrorType>(
+        ErrDecl->getName(), ErrDecl->getVariants(), ErrDecl->isBareForm());
+    SourceLocation Loc = ErrDecl->getLoc();
+    if (auto PrevLoc = SymTable_.registerErrorType(
+            ErrDecl->getName(), {Loc.Line, Loc.Col}, ET)) {
+      DuplicateTypeNameError(Loc, ErrDecl->getName(), "error",
+                             {PrevLoc->Line, PrevLoc->Col})
+          .raise();
+    }
+    return;
+  }
+
   // Hoist function definitions: register the signature (NOT the body).
   if (const auto *Func = dynamic_cast<const FuncDefExprAST *>(Node)) {
     registerFunctionSignature(*Func, currentModuleName());
@@ -436,6 +451,21 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
       if (auto PrevLoc = SymTable_.registerEnumType(
               Enum->getName(), {Loc.Line, Loc.Col}, ET, ModuleName)) {
         DuplicateTypeNameError(Loc, Enum->getName(), "enum",
+                               {PrevLoc->Line, PrevLoc->Col})
+            .raise();
+      }
+    } else if (const auto *ErrDecl =
+                   dynamic_cast<const ErrorDeclExprAST *>(Expr.get())) {
+      // Hoisted here too, not just in hoistTopLevel() -- the enum branch
+      // just above was ONCE missing from this function entirely (see its own
+      // comment), silently breaking any enum declared inside an imported
+      // module's body. Don't repeat that gap for `error` types.
+      auto ET = std::make_shared<TurfUserErrorType>(
+          ErrDecl->getName(), ErrDecl->getVariants(), ErrDecl->isBareForm());
+      SourceLocation Loc = ErrDecl->getLoc();
+      if (auto PrevLoc = SymTable_.registerErrorType(
+              ErrDecl->getName(), {Loc.Line, Loc.Col}, ET, ModuleName)) {
+        DuplicateTypeNameError(Loc, ErrDecl->getName(), "error",
                                {PrevLoc->Line, PrevLoc->Col})
             .raise();
       }
@@ -1579,6 +1609,12 @@ void Resolver::visitFieldAccess(FieldAccessExprAST &Node) {
 
 void Resolver::visitEnumDecl(EnumDeclExprAST &Node) {
   // Pass 1 already hoisted the enum to the registry.
+}
+
+void Resolver::visitErrorDecl(ErrorDeclExprAST &Node) {
+  // Pass 1 already hoisted the error type to the registry. Per-variant field
+  // type validation, `!T` return-type compatibility, and `recover` semantics
+  // all land in Stage 2 (docs/planning/Errors.md) -- not yet implemented.
 }
 
 // Handles a `Left::Right` node reached as an ordinary expression -- i.e.
