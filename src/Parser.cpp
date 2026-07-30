@@ -25,6 +25,7 @@
 #include "SuggestionIndex.h"
 #include "SymbolTable.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include <map>
 #include <memory>
@@ -2955,7 +2956,44 @@ static const char *const PreludeModuleNames[] = {
 // is an internal compiler error, not a user-facing diagnostic.
 std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc) {
   std::vector<std::unique_ptr<ExprAST>> Result;
+
+  // A top-level file that IS one of these prelude modules itself (e.g.
+  // compiling lib/std/char.tr directly -- `turf lib/std/char.tr`, or the
+  // `--resolve`-only compile-check AGENTS.md mandates for every lib/std/*.tr
+  // file since the test runner doesn't otherwise exercise them) must NOT
+  // auto-import itself: doing so re-parses the same file a second time as an
+  // imported module, registering every one of its own functions TWICE --
+  // once as an ordinary top-level "current file" function
+  // (Resolver::visitFuncDef's normal registration) and once again under the
+  // module's own namespace. Any function in that file that then calls one of
+  // its own siblings via UFCS or an operator overload (e.g. char.tr's
+  // isAlpha() calling c.isUpper()/c.isLower(), int.tr's gcd() calling
+  // a.mod(b), strings.tr's `+` operator concatenating in a loop) finds TWO
+  // exact-match candidates for the same call site and reports a false
+  // "Ambiguous ... call" -- confirmed live before this check existed. This
+  // is a pure self-import artifact of compiling a prelude module AS the
+  // entry point: the identical file compiled as a real user program that
+  // `import char;`s it normally has no duplicate and always worked correctly
+  // (bare unqualified UFCS/operator calls inside the module itself are the
+  // only thing this ever affected).
+  llvm::SmallString<256> CanonicalSource;
+  bool HaveCanonicalSource = false;
+  if (!SourceFilename.empty() &&
+      !llvm::sys::fs::real_path(SourceFilename, CanonicalSource))
+    HaveCanonicalSource = true;
+
   for (const char *Name : PreludeModuleNames) {
+    if (HaveCanonicalSource) {
+      llvm::SmallString<128> StdlibPath(CompilerExecutablePath);
+      llvm::sys::path::remove_filename(StdlibPath);
+      llvm::sys::path::append(StdlibPath, "..", "lib", "std",
+                              std::string(Name) + ".tr");
+      llvm::SmallString<256> CanonicalCandidate;
+      if (!llvm::sys::fs::real_path(StdlibPath, CanonicalCandidate) &&
+          CanonicalCandidate == CanonicalSource)
+        continue; // compiling this prelude module as the top-level file itself
+    }
+
     auto AST = ParseModuleImportByName(Name, Loc);
     if (!AST) {
       llvm::report_fatal_error(
