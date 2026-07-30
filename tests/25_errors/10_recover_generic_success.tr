@@ -1,0 +1,30 @@
+// Regression test: `!T` where T is a GENERIC function's own type parameter
+// (e.g. `fn<T> firstOrFail(arr: T[], len: int): !T`) must substitute T to
+// its concrete instantiation at the call site. Found live while looking for
+// a generic Map::tryGet<K,V>(): !V candidate -- `recover`'s success type
+// stayed the raw, unsubstituted TurfGenericParamType("T") forever before
+// substituteReturnType() learned to recurse into TurfErrorUnionType.
+import test;
+
+error LookupError {
+    NotFound,
+}
+
+fn<T> firstOrFail(arr: T[], len: int): !T {
+    if (len == 0) {
+        return LookupError::NotFound;
+    }
+    return arr[0];
+}
+
+fn main(): int {
+    mut nums: int[3] = [10, 20, 30];
+    mut x: int = firstOrFail(nums, 3) recover produce -1;
+    test::assert_eq(x, 10, "generic !T success path should substitute T correctly");
+
+    mut empty: int[3] = [0, 0, 0];
+    mut y: int = firstOrFail(empty, 0) recover produce -1;
+    test::assert_eq(y, -1, "generic !T failure path should still work with T substituted");
+
+    return 0;
+}

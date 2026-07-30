@@ -1429,6 +1429,20 @@ static TurfTypePtr substituteReturnType(
                                                     std::move(NewArgs))
                    : Ty;
   }
+  // `!T` (docs/planning/Errors.md) where T is itself the generic function's
+  // own type parameter (e.g. `fn<T> firstOrFail(arr: T[], len: int): !T`) --
+  // without this branch, `recover`'s success type stayed the raw,
+  // unsubstituted TurfGenericParamType("T") forever, so e.g.
+  // `firstOrFail(intArray, n) recover produce -1` failed to typecheck
+  // ("'recover produce int' doesn't match this call's success type 'T'")
+  // even though the concrete instantiation is genuinely `!int`. Found live
+  // while looking for a generic Map::tryGet<K,V>(): !V candidate.
+  if (const auto *EU = dynamic_cast<const TurfErrorUnionType *>(Ty.get())) {
+    TurfTypePtr NewSuccess = substituteReturnType(EU->getSuccessTypePtr(), Subst);
+    return NewSuccess == EU->getSuccessTypePtr()
+              ? Ty
+              : std::make_shared<TurfErrorUnionType>(NewSuccess);
+  }
   return Ty;
 }
 
