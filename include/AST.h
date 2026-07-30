@@ -1019,6 +1019,13 @@ enum class ScopeAccessKind {
     ModuleConstantRef, // math::PI -- a qualified reference to an `export immut` constant
     ConstructorCall,   // StructName::new(...) (as a call target)
     DefaultConstruct,  // StructName::default() (as a call target)
+    // ErrorType::Variant or ErrorType::Variant(args) -- constructs a value of
+    // a user-declared `error` type (docs/planning/Errors.md). Set uniformly
+    // whether reached bare (ScopeAccessExprAST::codegen(), payload-less
+    // variants only) or as a FuncCallExprAST callee (any arity) -- unlike
+    // EnumVariant, this kind IS callable. Deliberately separate from
+    // EnumVariant: a plain `enum` variant must stay non-callable.
+    ErrorVariantConstruct,
 };
 
 // `Left::Right` -- the general namespace-resolution operator. Originally
