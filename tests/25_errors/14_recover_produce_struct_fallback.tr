@@ -1,0 +1,43 @@
+// Regression test: `recover produce <StructValue>` as a guaranteed-fallback
+// mechanism for a struct success type. Added after a user question about
+// `recover run { return -1; }` against a `!Point` call: that `-1` is main's
+// own return value on a path that abandons the assignment entirely -- it is
+// never a Point, and `p` gets no value at all on that path. `recover produce`
+// is the actual tool for "the variable always ends up with a real Point,"
+// so this test proves that both the success path AND the produced-fallback
+// path give `p` a genuine, correctly-populated Point -- never a placeholder,
+// zeroed, or partially-constructed one.
+import test;
+
+error MyError {
+    Failed,
+}
+
+struct Point {
+    x: int,
+    y: int,
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn makePoint(shouldFail: bool): !Point {
+    if (shouldFail) {
+        return MyError::Failed;
+    }
+    return Point::new(42, 7);
+}
+
+fn main(): int {
+    mut p: Point = makePoint(false) recover produce Point::new(0, 0);
+    test::assert_eq(p.x, 42, "success path should keep the real Point, not the fallback");
+    test::assert_eq(p.y, 7, "success path should keep the real Point, not the fallback");
+
+    mut fallback: Point = makePoint(true) recover produce Point::new(0, 0);
+    test::assert_eq(fallback.x, 0, "failure path should produce the real fallback Point's first field");
+    test::assert_eq(fallback.y, 0, "failure path should produce the real fallback Point's second field");
+
+    return 0;
+}
