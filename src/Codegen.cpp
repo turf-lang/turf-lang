@@ -151,26 +151,8 @@ static Value *UnboxFromI64Slot(Value *Slot, const TurfType *T) {
   return Slot; // void -- caller never uses this value
 }
 
-/// Declares (once) or looks up the C `malloc` used for heap-allocating an
-/// error payload -- same lookup-or-create pattern already used for string
-/// conversion buffers (see CastToType()'s int/double -> string branches),
-/// needed here for the identical reason: the payload must outlive the
-/// function that constructs it (it flows out through a `!T` return and
-/// through `recover as err`'s binding), so a stack alloca would dangle.
-static Function *getOrCreateMallocFn() {
-  Function *MallocF = TheModule->getFunction("malloc");
-  if (!MallocF) {
-    llvm::FunctionType *FT = llvm::FunctionType::get(
-        PointerType::get(*TheContext, 0),
-        {llvm::Type::getInt64Ty(*TheContext)}, false);
-    MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
-                               TheModule.get());
-  }
-  return MallocF;
-}
-
 /// Declares (once) or looks up the C `strcmp` used to compare two error
-/// tag strings (see BuildErrorPayload()/GetErrorTag()).
+/// tag strings (see BuildErrorTag()/GetErrorTagValue()).
 static Function *getOrCreateStrcmpFn() {
   Function *StrcmpF = TheModule->getFunction("strcmp");
   if (!StrcmpF) {
@@ -183,68 +165,30 @@ static Function *getOrCreateStrcmpFn() {
   return StrcmpF;
 }
 
-/// Builds a heap-allocated error payload for `ErrorTypeName::VariantName`
-/// (docs/planning/Errors.md), laid out as `{ i8* tag, i64 field0, ... }` --
-/// `tag` is a global string constant identifying the (error type, variant)
-/// pair uniquely (used by GetErrorTag()/BinaryExprAST::codegen()'s equality
-/// branch instead of a whole-program variant-ID registry, since a plain
-/// string is trivially unique per declared variant with no cross-
-/// compilation-unit coordination needed). Field VALUES are stored (boxed to
-/// i64) but never read back anywhere yet -- Errors.md's `recover as err`
-/// only ever compares variant IDENTITY, never destructures fields; storing
-/// them now is forward-compatible groundwork, not speculative complexity in
-/// the sense of adding unused CODE paths, just unused-so-far field slots.
-/// Returns an i8* pointing at the payload.
-static Value *BuildErrorPayload(const std::string &ErrorTypeName,
-                                const std::string &VariantName,
-                                const std::vector<Value *> &FieldVals) {
-  std::vector<llvm::Type *> FieldTypes;
-  FieldTypes.push_back(PointerType::get(*TheContext, 0)); // tag
-  for (size_t I = 0; I < FieldVals.size(); ++I)
-    FieldTypes.push_back(llvm::Type::getInt64Ty(*TheContext));
-  llvm::StructType *PayloadTy = llvm::StructType::get(*TheContext, FieldTypes);
-
-  uint64_t Size = TheModule->getDataLayout().getTypeAllocSize(PayloadTy);
-  Value *SizeVal = ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), Size);
-  Value *Payload = Builder->CreateCall(getOrCreateMallocFn(), {SizeVal},
-                                       "errpayload");
-
-  Value *Tag = Builder->CreateGlobalString(ErrorTypeName + "::" + VariantName,
-                                           "errtag");
-  Value *TagSlot = Builder->CreateStructGEP(PayloadTy, Payload, 0, "errtag.slot");
-  Builder->CreateStore(Tag, TagSlot);
-
-  for (size_t I = 0; I < FieldVals.size(); ++I) {
-    Value *FieldSlot = Builder->CreateStructGEP(
-        PayloadTy, Payload, static_cast<unsigned>(I + 1), "errfield.slot");
-    Builder->CreateStore(BoxToI64Slot(FieldVals[I]), FieldSlot);
-  }
-
-  return Payload;
-}
-
-/// Extracts the tag string (i8*) identifying which `ErrorType::Variant` a
-/// runtime error-payload pointer (`err`, or any other AnyErrorType/
-/// TurfUserErrorType-typed value) actually holds -- the payload's first
-/// field, per BuildErrorPayload()'s layout.
-static Value *GetErrorTagFromPayload(Value *PayloadPtr) {
-  std::vector<llvm::Type *> TagOnlyFields = {PointerType::get(*TheContext, 0)};
-  llvm::StructType *TagOnlyTy = llvm::StructType::get(*TheContext, TagOnlyFields);
-  Value *TagSlot =
-      Builder->CreateStructGEP(TagOnlyTy, PayloadPtr, 0, "errtag.slot");
-  return Builder->CreateLoad(PointerType::get(*TheContext, 0), TagSlot,
-                             "errtag");
+/// Builds the runtime value of an `ErrorType::Variant` reference
+/// (docs/planning/Errors.md): a global string constant uniquely identifying
+/// the (error type, variant) pair, e.g. "MathError::DivisionByZero". Variants
+/// are bare names only (no payload fields -- deferred, see Errors.md's own
+/// note on why), so this tag string IS the whole runtime representation of
+/// an error value: no heap allocation, no wrapping struct, just an i8*.
+/// Comparing two error values (BinaryExprAST::codegen()'s equality branch)
+/// is then a plain strcmp on this string, which is also why a single global
+/// string constant works as identity with no whole-program variant-ID
+/// registry needed -- it's already unique by construction.
+static Value *BuildErrorTag(const std::string &ErrorTypeName,
+                            const std::string &VariantName) {
+  return Builder->CreateGlobalString(ErrorTypeName + "::" + VariantName, "errtag");
 }
 
 /// True if `E` is an error-tag-shaped operand for `==`/`!=`
 /// (docs/planning/Errors.md): either a bare `ErrorType::Variant` reference,
 /// or a variable already known (via its Resolver-set ResolvedSymbol, not
 /// TypeChecker's type map -- see IsErrorConstructionExpr's doc comment for
-/// why) to hold an error payload -- `err` inside `recover as err run { ... }`
+/// why) to hold an error tag -- `err` inside `recover as err run { ... }`
 /// being the only way such a variable is ever created today.
 static bool IsErrorTagExpr(const ExprAST *E) {
   if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E))
-    return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct;
+    return SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
   if (auto *Var = dynamic_cast<const VariableExprAST *>(E)) {
     if (const auto *Sym = Var->getResolvedSymbol())
       return Sym->Type && (Sym->Type->isAnyError() || Sym->Type->isUserError());
@@ -253,27 +197,25 @@ static bool IsErrorTagExpr(const ExprAST *E) {
 }
 
 /// Returns the tag string (i8*) for an error-tag-shaped `==`/`!=` operand.
-/// A bare `ErrorType::Variant` reference is handled WITHOUT going through
-/// its ordinary ScopeAccessExprAST::codegen() (which would malloc a whole
-/// payload just to compare identity) -- its tag is a compile-time-known
-/// constant, so it's built directly here instead.
+/// A bare `ErrorType::Variant` reference's tag is compile-time-known, so
+/// it's built directly via BuildErrorTag() instead of going through its
+/// ordinary ScopeAccessExprAST::codegen() (which would do the exact same
+/// thing anyway, just less directly) -- everything else (`err`, or any other
+/// AnyErrorType/TurfUserErrorType-typed expression) already codegens
+/// straight to its tag string, since that IS an error value's whole runtime
+/// representation now.
 static Value *GetErrorTagValue(const ExprAST *E) {
   if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E)) {
-    if (SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct) {
-      return Builder->CreateGlobalString(SA->getLeftName() + "::" + SA->getRightName(),
-                                         "errtag.static");
-    }
+    if (SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef)
+      return BuildErrorTag(SA->getLeftName(), SA->getRightName());
   }
-  Value *V = const_cast<ExprAST *>(E)->codegen();
-  if (!V)
-    return nullptr;
-  return GetErrorTagFromPayload(V);
+  return const_cast<ExprAST *>(E)->codegen();
 }
 
-/// True if `E` is exactly the `ErrorType::Variant` / `ErrorType::Variant(...)`
-/// construction shape (docs/planning/Errors.md) -- mirrors Resolver's
+/// True if `E` is exactly the `ErrorType::Variant` reference shape
+/// (docs/planning/Errors.md) -- mirrors Resolver's
 /// CollectReturnedErrorTypeNames' identical structural recognition, used
-/// here to decide whether a `return`ed value is an error payload (i8*) or a
+/// here to decide whether a `return`ed value is an error tag (i8*) or a
 /// genuine success value, since Codegen can't rely on TypeChecker's inferred
 /// types (this compiler resolves/typechecks/codegens function bodies in a
 /// pre-pass that runs its own full pipeline on its own AST instance --
@@ -281,13 +223,8 @@ static Value *GetErrorTagValue(const ExprAST *E) {
 /// info set directly on the AST node by the Resolver, like ResolvedKind, is
 /// safe to depend on here).
 static bool IsErrorConstructionExpr(const ExprAST *E) {
-  if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E))
-    return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct;
-  if (auto *Call = dynamic_cast<const FuncCallExprAST *>(E)) {
-    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(Call->getCallee()))
-      return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct;
-  }
-  return false;
+  auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E);
+  return SA && SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
 }
 
 /// Wraps a raw success value (or, if IsError, an error payload i8*) into a
@@ -396,13 +333,13 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
   }
 
-  // User-declared `error` type value (docs/planning/Errors.md) -- a heap-
-  // allocated tagged payload `{ i8* tag, i64 field0, ... }` (see
-  // BuildErrorPayload()), always referred to through an opaque pointer, same
-  // representation string/struct values already use. AnyErrorType (the type
-  // of `err` inside `recover as err run { ... }`) is the SAME payload
-  // pointer with its concrete error type erased, so it gets the identical
-  // representation.
+  // User-declared `error` type value (docs/planning/Errors.md) -- a global
+  // string constant identifying (error type, variant), e.g.
+  // "MathError::DivisionByZero" (see BuildErrorTag()) -- variants are bare
+  // names with no payload, so this tag string IS the whole value, an i8*
+  // like any other string. AnyErrorType (the type of `err` inside
+  // `recover as err run { ... }`) is the SAME tag string with its concrete
+  // error type erased, so it gets the identical representation.
   if (T->isUserError() || T->isAnyError()) {
     return LLVMTypeCache[Key] = PointerType::get(*TheContext, 0);
   }
@@ -3584,23 +3521,10 @@ Value *FuncCallExprAST::codegen() {
     return Builder->CreateCall(FnLLVMType, CalleeVal, ArgVals, "calltmp");
   }
 
-  // `ErrorType::Variant(args)` (docs/planning/Errors.md) -- construction with
-  // a payload. Doesn't reach the ordinary ResolvedCallTarget->mangledName()
-  // lookup below either: Resolver::visitFuncCall's ErrorVariantConstruct
-  // branch synthesizes a candidate purely to let TypeChecker's generic
-  // overload-narrowing validate arity/argument types (exactly like
-  // StructName::new(...) does) -- there's no REAL backing LLVM function to
-  // look up at all, unlike an ordinary call.
-  if (ScopeCallee && ScopeCallee->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct) {
-    std::vector<Value *> FieldVals;
-    for (auto &Arg : Args) {
-      Value *V = Arg->codegen();
-      if (!V)
-        return nullptr;
-      FieldVals.push_back(V);
-    }
-    return BuildErrorPayload(ScopeCallee->getLeftName(), ScopeCallee->getRightName(), FieldVals);
-  }
+  // NOTE: `ErrorType::Variant(...)` (call syntax) never reaches Codegen at
+  // all -- Resolver::visitFuncCall rejects it with a TypeError ("is an
+  // error variant, not a function") before this point, exactly like a
+  // plain `enum` variant. No branch is needed here.
 
   // `StructName::default()` / `StructName::new(...)` -- construction.
   // Neither reaches the ordinary ResolvedCallTarget->mangledName() lookup
@@ -4704,14 +4628,11 @@ Value *ScopeAccessExprAST::codegen() {
     return CodegenConstantValue(*ResolvedConstant);
   }
 
-  // Bare `ErrorType::Variant` (docs/planning/Errors.md) -- a payload-less
-  // variant reference (the Resolver already rejects a bare reference to a
-  // variant WITH fields, so Fields is always empty here; a payload-carrying
-  // variant only ever reaches this class's codegen through FuncCallExprAST
-  // instead, see that function's ErrorVariantConstruct branch). Returns an
-  // i8* pointing at the freshly-built error payload.
-  if (ResolvedKind == ScopeAccessKind::ErrorVariantConstruct) {
-    return BuildErrorPayload(LeftName, RightName, {});
+  // `ErrorType::Variant` (docs/planning/Errors.md) -- always a bare,
+  // non-callable reference (variants have no payload, see BuildErrorTag()'s
+  // doc comment). Returns the (error type, variant)'s tag string.
+  if (ResolvedKind == ScopeAccessKind::ErrorVariantRef) {
+    return BuildErrorTag(LeftName, RightName);
   }
 
   auto EnumTy = GlobalSymbolTable->LookupType(LeftName);

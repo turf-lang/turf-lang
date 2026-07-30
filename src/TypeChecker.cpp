@@ -2499,7 +2499,7 @@ void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
   // instead, same as any other call -- this just gives the callee itself
   // SOME type too, harmlessly, exactly like the comment above already
   // describes for ModuleFunctionRef/StaticMethodRef).
-  if (Node.ResolvedKind == ScopeAccessKind::ErrorVariantConstruct) {
+  if (Node.ResolvedKind == ScopeAccessKind::ErrorVariantRef) {
     if (GlobalSymbolTable) {
       if (auto ET = GlobalSymbolTable->LookupType(Node.getLeftName()))
         setType(&Node, ET);

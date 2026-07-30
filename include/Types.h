@@ -485,15 +485,6 @@ struct StructField {
   TurfTypePtr Type;
 };
 
-/// A single variant of a user-declared `error` type, e.g. `FileNotFound(path:
-/// string)` inside `error IOError { FileNotFound(path: string), ... }`.
-/// `Fields` is empty for a payload-less variant (e.g. `DivisionByZero`) or
-/// for the implicit `DEFAULT` variant of a bare `error Name;` declaration.
-struct ErrorVariant {
-  std::string Name;
-  std::vector<StructField> Fields;
-};
-
 /**
  * @brief A user-defined aggregate (struct) type.
  *
@@ -557,49 +548,44 @@ public:
 // ─── TurfUserErrorType ────────────────────────────────────────────────────────
 
 /**
- * @brief A user-declared `error Name { Variant(field: type, ...), ... }` type
+ * @brief A user-declared `error Name { Variant, ... }` type
  * (docs/planning/Errors.md). Deliberately NOT named `TurfErrorType` -- one
  * character away from `TurfError` (include/Errors.h), the compiler's own
  * internal diagnostic base class, which is an entirely unrelated concept.
  *
- * Each variant carries its own typed field list (unlike `TurfEnumType`,
- * whose variants are bare names with no payload) -- closer in shape to a
- * small per-variant struct than to a plain C-style enum.
+ * Variants are bare names only, exactly like `TurfEnumType` -- no payload
+ * fields. This is a deliberate scope decision (see Errors.md's own note on
+ * why): a variant with fields, and a real destructuring syntax to read them
+ * back safely, is deferred until there's an actual need for it.
  */
 class TurfUserErrorType : public TurfType {
-    std::string                Name_;
-    std::vector<ErrorVariant>  Variants_;
-    bool                       IsBareForm_; // true for `error Name;` (implicit single DEFAULT variant)
+    std::string               Name_;
+    std::vector<std::string> Variants_;
+    bool                      IsBareForm_; // true for `error Name;` (implicit single DEFAULT variant)
 
 public:
-    TurfUserErrorType(std::string Name, std::vector<ErrorVariant> Variants, bool IsBareForm)
+    TurfUserErrorType(std::string Name, std::vector<std::string> Variants, bool IsBareForm)
         : Name_(std::move(Name)), Variants_(std::move(Variants)), IsBareForm_(IsBareForm) {}
 
     std::string getName() const override { return Name_; }
     bool isUserError() const override { return true; }
     bool isBareForm() const { return IsBareForm_; }
 
-    const std::vector<ErrorVariant>& getVariants() const { return Variants_; }
+    const std::vector<std::string>& getVariants() const { return Variants_; }
 
     bool hasVariant(const std::string& V) const {
         for (const auto& Variant : Variants_)
-            if (Variant.Name == V) return true;
+            if (Variant == V) return true;
         return false;
     }
 
-    const ErrorVariant* getVariant(const std::string& V) const {
-        for (const auto& Variant : Variants_)
-            if (Variant.Name == V) return &Variant;
-        return nullptr;
-    }
-
-    /// Variant names only, for Damerau-Levenshtein suggestion diagnostics
-    /// (mirrors TurfEnumType::getVariants(), which is already bare names).
+    /// Alias for getVariants() -- for Damerau-Levenshtein suggestion
+    /// diagnostics (mirrors TurfEnumType::getVariants(), already bare names).
     std::vector<std::string> getVariantNames() const {
         std::vector<std::string> Names;
         Names.reserve(Variants_.size());
         for (const auto& Variant : Variants_)
-            Names.push_back(Variant.Name);
+            Names.push_back(Variant);
         return Names;
     }
 

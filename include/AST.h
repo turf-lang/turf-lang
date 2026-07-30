@@ -978,26 +978,28 @@ public:
     }
 };
 
-// `error Name { Variant(field: type, ...), ... }` (docs/planning/Errors.md).
-// Named ErrorDeclExprAST (not e.g. ErrorExprAST) deliberately to stay well
-// clear of TurfError (include/Errors.h), the compiler's own internal
-// diagnostic base class -- an unrelated concept that happens to share the
-// English word "error". `IsBareForm` distinguishes the sugar `error Name;`
-// (a single implicit `DEFAULT` variant, no fields) from the full braced form.
+// `error Name { Variant, ... }` (docs/planning/Errors.md). Named
+// ErrorDeclExprAST (not e.g. ErrorExprAST) deliberately to stay well clear
+// of TurfError (include/Errors.h), the compiler's own internal diagnostic
+// base class -- an unrelated concept that happens to share the English word
+// "error". `IsBareForm` distinguishes the sugar `error Name;` (a single
+// implicit `DEFAULT` variant) from the full braced form. Variants are bare
+// names only, exactly like EnumDeclExprAST -- no payload fields (deferred,
+// see Errors.md's own note on why).
 class ErrorDeclExprAST : public ExprAST {
-    std::string               Name;
-    std::vector<ErrorVariant> Variants;
-    bool                      IsBareForm;
-    SourceLocation            Loc;
+    std::string              Name;
+    std::vector<std::string> Variants;
+    bool                     IsBareForm;
+    SourceLocation           Loc;
 public:
     ErrorDeclExprAST(SourceLocation Loc, std::string Name,
-                     std::vector<ErrorVariant> Variants, bool IsBareForm)
+                     std::vector<std::string> Variants, bool IsBareForm)
         : Name(std::move(Name)), Variants(std::move(Variants)),
           IsBareForm(IsBareForm), Loc(Loc) {}
-    const std::string&               getName()       const { return Name; }
-    const std::vector<ErrorVariant>& getVariants()    const { return Variants; }
-    bool                              isBareForm()     const { return IsBareForm; }
-    const SourceLocation&             getLoc()         const { return Loc; }
+    const std::string&              getName()       const { return Name; }
+    const std::vector<std::string>& getVariants()    const { return Variants; }
+    bool                             isBareForm()     const { return IsBareForm; }
+    const SourceLocation&            getLoc()         const { return Loc; }
     llvm::Value* codegen() override;
     void accept(ASTVisitor& V) override { V.visitErrorDecl(*this); }
     std::unique_ptr<ExprAST> clone() const override {
@@ -1019,13 +1021,16 @@ enum class ScopeAccessKind {
     ModuleConstantRef, // math::PI -- a qualified reference to an `export immut` constant
     ConstructorCall,   // StructName::new(...) (as a call target)
     DefaultConstruct,  // StructName::default() (as a call target)
-    // ErrorType::Variant or ErrorType::Variant(args) -- constructs a value of
-    // a user-declared `error` type (docs/planning/Errors.md). Set uniformly
-    // whether reached bare (ScopeAccessExprAST::codegen(), payload-less
-    // variants only) or as a FuncCallExprAST callee (any arity) -- unlike
-    // EnumVariant, this kind IS callable. Deliberately separate from
-    // EnumVariant: a plain `enum` variant must stay non-callable.
-    ErrorVariantConstruct,
+    // ErrorType::Variant -- a bare, non-callable reference to a user-
+    // declared `error` type's variant (docs/planning/Errors.md), e.g. the
+    // `MathError::DivisionByZero` in `err == MathError::DivisionByZero` or
+    // `return MathError::DivisionByZero;`. Semantically identical to
+    // EnumVariant (bare name, no payload, rejected if called) -- kept as a
+    // separate kind rather than reusing EnumVariant only because error
+    // types lower differently in Codegen (a tag string, not an integer
+    // ordinal) and participate in `!T`/`recover`/AnyErrorType comparisons
+    // that plain enums don't.
+    ErrorVariantRef,
 };
 
 // `Left::Right` -- the general namespace-resolution operator. Originally

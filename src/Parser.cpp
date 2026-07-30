@@ -2085,40 +2085,43 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
   std::string Name = IdentifierStr;
   getNextToken();
 
-  std::vector<ErrorVariant> Variants;
+  std::vector<std::string> Variants;
   bool IsBareForm = false;
 
   if (CurTok == ';') {
     // Bare form: `error GeneralError;` -- sugar for a single implicit
-    // DEFAULT variant with no fields (docs/planning/Errors.md). Unlike the
-    // braced form (which ends in '}', same as struct/enum), this form's own
-    // trailing ';' is consumed HERE, not by the caller -- every top-level/
-    // block statement loop in this file treats TOK_ERROR like TOK_STRUCT/
+    // DEFAULT variant (docs/planning/Errors.md). Unlike the braced form
+    // (which ends in '}', same as struct/enum), this form's own trailing
+    // ';' is consumed HERE, not by the caller -- every top-level/block
+    // statement loop in this file treats TOK_ERROR like TOK_STRUCT/
     // TOK_ENUM (a construct that must NOT be followed by a ';'), so if this
     // branch left the ';' unconsumed those loops would reject it as
     // "Unexpected ';'". Same self-terminating convention as TOK_EXPORT's
     // branch in ParseBlock().
     IsBareForm = true;
-    Variants.push_back({"DEFAULT", {}});
+    Variants.push_back("DEFAULT");
     getNextToken(); // eat ';'
   } else if (CurTok == '{') {
     getNextToken(); // eat '{'
 
+    // Variants are bare names only, exactly like ParseEnumDecl's loop -- no
+    // payload fields (a deliberate scope decision, see Errors.md's own note
+    // on why; a variant with fields and a real destructuring syntax to read
+    // it back safely is deferred rather than half-built now).
     while (CurTok != '}' && CurTok != TOK_EOF) {
       if (CurTok != TOK_IDENTIFIER) {
         LogErrorAt(CurLoc, "Expected variant name in error type definition");
         return nullptr;
       }
-      std::string VariantName = IdentifierStr;
-      SourceLocation VariantLoc = CurLoc;
-      getNextToken(); // eat variant name
 
       // Reject a variant name reused from earlier in this same error type --
       // mirrors ParseEnumDecl's identical duplicate-variant check (see its
       // own doc comment for the exact bug this prevents: a later duplicate
       // silently orphaning the earlier one with no diagnostic anywhere).
+      std::string VariantName = IdentifierStr;
+      SourceLocation VariantLoc = CurLoc;
       for (const auto &Existing : Variants) {
-        if (Existing.Name == VariantName) {
+        if (Existing == VariantName) {
           LogErrorAt(VariantLoc,
                      "Error type '" + Name + "' already has a variant named '" +
                          VariantName + "'."
@@ -2128,71 +2131,8 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
         }
       }
 
-      std::vector<StructField> Fields;
-      if (CurTok == '(') {
-        getNextToken(); // eat '('
-        while (CurTok != ')' && CurTok != TOK_EOF) {
-          if (CurTok != TOK_IDENTIFIER) {
-            LogErrorAt(CurLoc, "Expected field name in error variant '" +
-                                    VariantName + "'");
-            return nullptr;
-          }
-          std::string FieldName = IdentifierStr;
-          SourceLocation FieldNameLoc = CurLoc;
-          getNextToken(); // eat field name
-
-          // Reject a field name reused from earlier in this same variant --
-          // mirrors ParseStructDecl's identical duplicate-field check.
-          for (const auto &Existing : Fields) {
-            if (Existing.Name == FieldName) {
-              LogErrorAt(FieldNameLoc,
-                         "Variant '" + VariantName + "' already has a field "
-                         "named '" + FieldName + "'."
-                         "\n  Hint: Field names must be unique within a "
-                         "variant -- rename one of them.");
-              return nullptr;
-            }
-          }
-
-          if (CurTok != TOK_COLON) {
-            LogErrorAt(CurLoc,
-                       "Expected ':' after field name '" + FieldName +
-                           "' in error variant (syntax: name: type)");
-            return nullptr;
-          }
-          getNextToken(); // eat ':'
-
-          SourceLocation FieldTypeLoc = CurLoc;
-          TurfTypePtr FieldType = ParseType();
-          if (!FieldType)
-            return nullptr;
-
-          if (isDisallowedVoidType(FieldType.get())) {
-            LogErrorAt(FieldTypeLoc,
-                       "'void' cannot be an error variant field's type."
-                       "\n  Hint: Give field '" + FieldName +
-                           "' a real type instead.");
-            return nullptr;
-          }
-
-          Fields.push_back({FieldName, std::move(FieldType)});
-
-          if (CurTok == ',') {
-            getNextToken();
-          } else if (CurTok != ')') {
-            LogErrorAt(CurLoc, "Expected ',' or ')' after field definition");
-            return nullptr;
-          }
-        }
-        if (CurTok != ')') {
-          LogErrorAt(CurLoc, "Expected ')' to close variant '" + VariantName +
-                                  "'s field list");
-          return nullptr;
-        }
-        getNextToken(); // eat ')'
-      }
-
-      Variants.push_back({VariantName, std::move(Fields)});
+      Variants.push_back(VariantName);
+      getNextToken(); // eat variant name
 
       if (CurTok == ',') {
         getNextToken();
@@ -2210,7 +2150,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
   } else {
     LogErrorAt(CurLoc, "Expected '{' or ';' after error type name '" + Name + "'"
                "\n  Hint: `error Name;` (bare, no variants) or "
-               "`error Name { Variant(field: type, ...), ... }`.");
+               "`error Name { Variant1, Variant2, ... }`.");
     return nullptr;
   }
 

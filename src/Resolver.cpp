@@ -200,10 +200,10 @@ static bool MutatesSelfField(const ExprAST *E) {
  * why the scan is conservative/non-interprocedural, same rationale as
  * MutatesSelfField() just above (mirrors its exact recursion shape).
  *
- * Recognizes two shapes as a "return `Left::Right`" candidate:
- *   - `return ErrorType::Variant;`       (bare, ScopeAccessExprAST)
- *   - `return ErrorType::Variant(...);`  (FuncCallExprAST(Callee=ScopeAccess))
- * collecting `Left` (e.g. "MathError") in both cases.
+ * Recognizes `return ErrorType::Variant;` (a bare ScopeAccessExprAST -- error
+ * variants are always bare, non-callable references, exactly like `enum`
+ * variants; there's no `ErrorType::Variant(...)` call shape to also check
+ * for), collecting `Left` (e.g. "MathError").
  */
 static void CollectReturnedErrorTypeNames(const ExprAST *E,
                                           std::vector<std::string> &Out) {
@@ -211,13 +211,8 @@ static void CollectReturnedErrorTypeNames(const ExprAST *E,
     return;
 
   if (auto *Ret = dynamic_cast<const ReturnExprAST *>(E)) {
-    const ExprAST *Val = Ret->getVal();
-    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(Val)) {
+    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(Ret->getVal()))
       Out.push_back(SA->getLeftName());
-    } else if (auto *Call = dynamic_cast<const FuncCallExprAST *>(Val)) {
-      if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(Call->getCallee()))
-        Out.push_back(SA->getLeftName());
-    }
     return;
   }
   if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
@@ -1215,59 +1210,15 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     }
 
     if (SymTable_.isErrorTypeName(LeftName)) {
-      // `IOError::FileNotFound("a.txt")` -- constructing a value of a
-      // user-declared `error` type (docs/planning/Errors.md). Unlike a plain
-      // `enum` variant just above, this IS callable -- every variant
-      // (payload-carrying or not) can be constructed via call syntax; a
-      // payload-less variant can ALSO be referenced bare (no parens), see
-      // this function's sibling branch in visitScopeAccess.
-      ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantConstruct;
-      auto ET = SymTable_.lookupErrorType(LeftName);
-      if (!ET)
-        return; // Should not happen -- isErrorTypeName() just confirmed it.
-
-      if (!ET->hasVariant(CalleeName)) {
-        std::string Msg = "Error type '" + LeftName + "' has no variant '" +
-                          CalleeName + "'.";
-        auto Sugg = SuggestionIndex::suggestVisible(CalleeName, ET->getVariantNames());
-        if (!Sugg.empty()) {
-          Msg += "\nDid you mean:\n";
-          for (const auto &S : Sugg) Msg += "    " + S + "\n";
-        }
-        LogErrorAt(Node.getLoc(), Msg);
-        return;
-      }
-
-      const ErrorVariant *Variant = ET->getVariant(CalleeName);
-      const int ArgCount = static_cast<int>(Node.getArgs().size());
-      const int FieldCount = static_cast<int>(Variant->Fields.size());
-      if (ArgCount != FieldCount) {
-        std::string Sig = LeftName + "::" + CalleeName + "(";
-        for (size_t i = 0; i < Variant->Fields.size(); ++i) {
-          if (i) Sig += ", ";
-          Sig += Variant->Fields[i].Name + ": " +
-                 (Variant->Fields[i].Type ? Variant->Fields[i].Type->getName() : "?");
-        }
-        Sig += ")";
-        WrongArityError(Node.getLoc(), LeftName + "::" + CalleeName, ArgCount,
-                        {Sig})
-            .raise();
-        return;
-      }
-
-      // Synthesize a candidate exactly like StructName::new(...) does (see
-      // that branch below): this hands the existing generic arity/arg-type-
-      // checking machinery in TypeChecker::visitFuncCall a real
-      // ResolverFunctionSymbol to narrow against, so no separate argument
-      // type-checking code is needed here -- the fields ARE the params.
-      auto Sym = std::make_shared<ResolverFunctionSymbol>();
-      Sym->BaseName = LeftName + "::" + CalleeName;
-      Sym->ReturnType = std::make_shared<NamedType>(LeftName);
-      Sym->DeclLoc = {Node.getLoc().Line, Node.getLoc().Col};
-      for (const auto &Field : Variant->Fields)
-        Sym->Params.push_back({Field.Name, Field.Type});
-      Node.ResolvedCandidates.push_back(Sym);
-      Node.ResolvedCallTarget = Sym;
+      // e.g. `MathError::DivisionByZero(...)` -- a real error type, but
+      // variants are bare, non-callable names, exactly like a plain `enum`
+      // variant just above (docs/planning/Errors.md -- payload fields on a
+      // variant are deferred, see Errors.md's own note on why).
+      ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantRef;
+      TypeError(Node.getLoc(), "'" + LeftName + "::" + CalleeName +
+                                   "' is an error variant, not a function -- "
+                                   "it can't be called.")
+          .raise();
       return;
     }
 
@@ -1862,12 +1813,12 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
   }
 
   if (SymTable_.isErrorTypeName(LeftName)) {
-    // Bare `ErrorType::Variant` (no call) -- only valid for a payload-less
-    // variant (e.g. `return MathError::DivisionByZero;`); a variant WITH
-    // fields must be constructed via call syntax instead (handled by
-    // visitFuncCall's sibling branch), since there's nowhere for the field
-    // values to come from otherwise.
-    Node.ResolvedKind = ScopeAccessKind::ErrorVariantConstruct;
+    // Bare `ErrorType::Variant` reference (docs/planning/Errors.md) -- e.g.
+    // `return MathError::DivisionByZero;` or `err == MathError::
+    // DivisionByZero`. Mirrors the EnumVariant branch above exactly: a
+    // variant is always a bare name, never callable (payload fields are
+    // deferred, see Errors.md's own note on why).
+    Node.ResolvedKind = ScopeAccessKind::ErrorVariantRef;
     auto ET = SymTable_.lookupErrorType(LeftName);
     if (!ET)
       return; // Should not happen -- isErrorTypeName() just confirmed it.
@@ -1880,16 +1831,6 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
         for (const auto &S : Sugg) Msg += "    " + S + "\n";
       }
       LogErrorAt(Node.getLoc(), Msg);
-      return;
-    }
-
-    const ErrorVariant *Variant = ET->getVariant(RightName);
-    if (Variant && !Variant->Fields.empty()) {
-      TypeError(Node.getLoc(), "'" + LeftName + "::" + RightName +
-                                   "' has fields and must be constructed "
-                                   "with call syntax, e.g. '" +
-                                   LeftName + "::" + RightName + "(...)'.")
-          .raise();
     }
     return;
   }
