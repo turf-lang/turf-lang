@@ -2429,6 +2429,10 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
   }
   const auto *EU = static_cast<const TurfErrorUnionType *>(WrappedTy.get());
   TurfTypePtr SuccessTy = EU->getSuccessTypePtr();
+  // Codegen can't derive T from the runtime FallibleValue (every `!T` lowers
+  // to the same struct regardless of T) -- stash it directly on the node,
+  // same cross-pass pattern as ResolvedKind/ResolvedCandidates elsewhere.
+  Node.ResolvedSuccessType = SuccessTy;
 
   if (Node.getKind() == RecoverKind::Produce) {
     if (Node.getProduceExpr())
