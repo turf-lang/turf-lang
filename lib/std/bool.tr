@@ -1,0 +1,11 @@
+// ─── bool.tr ─────────────────────────────────────────────────────────────────
+// UFCS-callable helpers for `bool` (STRING_UFCS_OPERATOR_CHAR_RFC.md §5.3).
+// Part of the prelude -- always in scope, no explicit `import bool;` needed.
+//
+// Deliberately minimal -- bool has little room for extra helpers beyond
+// the built-in `&&`/`||`/`!`. logical_xor is included since Turf has no
+// built-in XOR for bool (`^` is bitwise, int-only).
+
+fn logical_xor(a: bool, b: bool): bool {
+    return a != b;
+}

@@ -1,0 +1,12 @@
+// A program that explicitly re-imports a prelude module anyway must still
+// compile fine -- no duplicate-import conflict with the auto-injected one.
+import char;
+import strings;
+import test;
+
+fn main(): int {
+    test::assert('9'.isDigit(), "explicit re-import of a prelude module still works");
+    test::assert("a" + "b" == "ab", "explicit re-import of strings still works");
+
+    return 0;
+}

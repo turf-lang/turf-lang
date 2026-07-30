@@ -1,0 +1,44 @@
+// The core proof of RFC step 6: prelude modules (int/double/bool/char/
+// strings/array) are auto-imported into the top-level file with ZERO
+// import statements anywhere in this source. Note there is no
+// `import test;` here either -- this file can't use test::assert() for
+// that reason (test.tr is a real stdlib module, not part of the prelude),
+// so it signals success/failure via main()'s own exit code instead.
+fn main(): int {
+    mut c: char = '7';
+    if !c.isDigit() {
+        return 1;
+    }
+    if c.isAlpha() {
+        return 2;
+    }
+
+    mut letter: char = 'a';
+    if !letter.isLower() {
+        return 3;
+    }
+    if letter.toUpper() != 'A' {
+        return 4;
+    }
+
+    mut n: int = 8;
+    if !n.is_even() {
+        return 5;
+    }
+    if n.is_odd() {
+        return 6;
+    }
+
+    mut x: double = 0.0 - 3.5;
+    if x.sign() != (0.0 - 1.0) {
+        return 7;
+    }
+
+    mut a: bool = true;
+    mut b: bool = false;
+    if !a.logical_xor(b) {
+        return 8;
+    }
+
+    return 0;
+}

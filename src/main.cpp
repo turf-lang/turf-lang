@@ -425,6 +425,20 @@ int main(int argc, char **argv) {
       // ResolvedCallTarget blindly, so Resolver must run first).
       std::vector<std::unique_ptr<ExprAST>> PrePassASTs;
 
+      // Prelude auto-import (STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 6):
+      // inject `import int; import double; ...` as if they were the literal
+      // first lines of the TOP-LEVEL file only (not library modules
+      // importing each other -- see ParsePreludeImports()'s doc comment).
+      // These go through the exact same ParseModuleImportByName() path a
+      // real import does -- not a separate always-on registry, which is
+      // what caused the original prelude.tr's two bugs (see this file's
+      // other prelude comment, a few dozen lines below, for that history).
+      // Deliberately NOT passed to RecordParsedTopLevelAST() -- that tracks
+      // the USER's own top-level declarations for sandbox/SLM diffing, and
+      // these aren't part of the user's source.
+      for (auto &PreludeAST : ParsePreludeImports(CurLoc))
+        PrePassASTs.push_back(std::move(PreludeAST));
+
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') { getNextToken(); continue; }
         if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
@@ -680,6 +694,14 @@ int main(int argc, char **argv) {
   // every warning a second time for the same source line.
   std::vector<std::unique_ptr<ExprAST>> TopLevelASTs; // non-fn: lint + codegen
   std::vector<std::unique_ptr<ExprAST>> FnASTs;       // fn:     kept for Resolver/TypeChecker re-validation only
+
+  // Prelude auto-import, main-pass side -- mirrors the pre-pass injection
+  // above exactly (same ParsePreludeImports() call, same rationale). Pushed
+  // into FnASTs, matching how a real `import X;` is categorized in this
+  // pass (already codegenned in the pre-pass; re-parsed here purely for
+  // Resolver/TypeChecker re-validation, not re-codegen).
+  for (auto &PreludeAST : ParsePreludeImports(CurLoc))
+    FnASTs.push_back(std::move(PreludeAST));
 
   while (true) {
     if (CurTok == TOK_EOF)

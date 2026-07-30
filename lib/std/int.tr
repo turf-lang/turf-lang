@@ -1,0 +1,17 @@
+// ─── int.tr ──────────────────────────────────────────────────────────────────
+// UFCS-callable helpers for `int` (STRING_UFCS_OPERATOR_CHAR_RFC.md §5.3).
+// Part of the prelude -- always in scope, no explicit `import int;` needed.
+//
+// Deliberately minimal: arithmetic helpers (abs/min/max/clamp/power) already
+// live in lib/std/math.tr and aren't duplicated here. This file exists to
+// prove the prelude mechanism works for `int`, plus one genuinely new,
+// non-duplicate helper.
+
+// is_even/is_odd: parity checks -- not something math.tr provides.
+fn is_even(n: int): bool {
+    return n % 2 == 0;
+}
+
+fn is_odd(n: int): bool {
+    return n % 2 != 0;
+}

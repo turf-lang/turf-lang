@@ -2815,12 +2815,137 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   return std::make_unique<BlockExprAST>(std::move(Exprs));
 }
 
+// Module-name -> file-search -> ParseFile() -> ModuleImportExprAST tail,
+// shared by ParseImport() (real, source-text `import X;`/`import X::[...];`
+// statements) and ParsePreludeImports() (synthetic prelude imports injected
+// by main.cpp with no source text at all -- see its own doc comment). This
+// function doesn't care how ModuleName/Loc/Mode/RequestedSymbols were
+// obtained, only that they're valid; the two callers just supply them
+// differently. Search order and error handling are unchanged from the
+// original inline ParseImport() body this was extracted from.
+std::unique_ptr<ExprAST>
+ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
+                        ImportMode Mode = ImportMode::Bare,
+                        std::vector<ImportedSymbolRef> RequestedSymbols = {}) {
+  llvm::SmallString<128> StdlibPath(CompilerExecutablePath);
+  llvm::sys::path::remove_filename(StdlibPath);
+  llvm::sys::path::append(StdlibPath, "..", "lib", "std", ModuleName + ".tr");
+
+  // Search order:
+  //   1. Compiler stdlib (<binary>/../lib/std/<module>.tr)
+  //   2. Same directory as the source file being compiled
+  //   3. Current working directory
+  //
+  // A ParseFile() call can return nullptr for two very different reasons:
+  // the file simply doesn't exist at that path (fine, keep trying the next
+  // one), or the file DOES exist but has a genuine syntax error inside it
+  // (LogErrorAt already recorded a real diagnostic -- trying the NEXT
+  // fallback path at that point would be wrong: it can only ever produce a
+  // confusing, unrelated "module not found" error stacked on top of the
+  // real one, since the module WAS found, just broken). Distinguish the two
+  // by snapshotting the diagnostic count before each attempt and checking
+  // whether it grew.
+  // ResolvedPath tracks whichever of the 3 candidates actually got parsed --
+  // it's the canonical identity of "this physical module file", used by
+  // both circular-import detection (Parser-level) and per-file import
+  // scoping (Resolver-level) so neither has to re-derive or guess a path
+  // string independently of the other.
+  std::string ResolvedPath = StdlibPath.str().str();
+  size_t DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
+  auto Block = ParseFile(ResolvedPath, ModuleName, Loc);
+  bool FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
+  if (!Block && !FoundButBroken) {
+    // Issue #19 fix: resolve relative to the source file's directory so that
+    // `turf path/to/file.tr` can find sibling modules without a cd first.
+    if (!SourceFilename.empty()) {
+      llvm::SmallString<256> SrcRelPath(SourceFilename);
+      llvm::sys::path::remove_filename(SrcRelPath);
+      llvm::sys::path::append(SrcRelPath, ModuleName + ".tr");
+      ResolvedPath = SrcRelPath.str().str();
+      DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
+      Block = ParseFile(ResolvedPath, ModuleName, Loc);
+      FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
+    }
+  }
+  if (!Block && !FoundButBroken) {
+    ResolvedPath = ModuleName + ".tr";
+    DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
+    Block = ParseFile(ResolvedPath, ModuleName, Loc);
+    FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
+    if (!Block && !FoundButBroken) {
+      ModuleNotFoundError(Loc, ModuleName).raise();
+      return nullptr;
+    }
+  }
+
+  // The module WAS found at some path but failed to parse -- a real
+  // diagnostic was already recorded there (see FoundButBroken's doc comment
+  // above); don't construct a ModuleImportExprAST wrapping a null Block.
+  if (!Block)
+    return nullptr;
+
+  return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, ResolvedPath,
+                                                std::move(Block), Mode,
+                                                std::move(RequestedSymbols));
+}
+
+// The fixed set of stdlib modules auto-imported into every top-level
+// compile (STRING_UFCS_OPERATOR_CHAR_RFC.md §5.3/§7 step 6) -- this list
+// IS "prelude.tr" as far as the compiler is concerned; there is no actual
+// lib/std/prelude.tr file the compiler reads. Scoped to the top-level file
+// only (see main.cpp's two call sites) -- library modules importing each
+// other still explicitly import what they need, exactly like today.
+static const char *const PreludeModuleNames[] = {
+    "int", "double", "bool", "char", "strings", "array"};
+
+// Synthesizes a `ModuleImportExprAST` for each prelude module, as if the
+// user had written `import int; import double; ...` as the literal first
+// lines of their file -- reuses ParseModuleImportByName() (the exact same
+// search-path/ParseFile()/AST-construction logic a real import goes
+// through), so this is indistinguishable from a real import as far as the
+// Resolver is concerned. NOT a new, separate always-on registry -- that
+// shortcut is exactly what caused prelude.tr's original two bugs (see
+// main.cpp's doc comment on why prelude.tr was removed, and the fixes
+// referenced there that are already in place independent of this).
+// These are compiler-shipped files that must always exist; a missing one
+// is an internal compiler error, not a user-facing diagnostic.
+std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc) {
+  std::vector<std::unique_ptr<ExprAST>> Result;
+  for (const char *Name : PreludeModuleNames) {
+    auto AST = ParseModuleImportByName(Name, Loc);
+    if (!AST) {
+      llvm::report_fatal_error(
+          llvm::StringRef(std::string("Internal error: prelude module '") +
+                          Name + "' failed to load. This is a compiler bug."));
+    }
+    Result.push_back(std::move(AST));
+  }
+  return Result;
+}
+
 std::unique_ptr<ExprAST> ParseImport() {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat import
   std::string ModuleName;
+  // int/double/bool/char are prelude module names (STRING_UFCS_OPERATOR_
+  // CHAR_RFC.md §7 step 6) that are ALSO primitive-type keywords, so they
+  // lex as TOK_TYPE_INT/TOK_TYPE_DOUBLE/TOK_TYPE_BOOL/TOK_TYPE_CHAR, not
+  // TOK_IDENTIFIER -- without this, a user literally writing `import char;`
+  // hit "Expected module name after 'import'", even though the prelude
+  // mechanism itself loads char.tr internally just fine (it never goes
+  // through this token-based path at all, see ParsePreludeImports()).
+  // `string` (singular, the type keyword) doesn't need an entry here: the
+  // actual module is `strings` (plural), a real TOK_IDENTIFIER, no collision.
   if (CurTok == TOK_IDENTIFIER) {
     ModuleName = IdentifierStr;
+  } else if (CurTok == TOK_TYPE_INT) {
+    ModuleName = "int";
+  } else if (CurTok == TOK_TYPE_DOUBLE) {
+    ModuleName = "double";
+  } else if (CurTok == TOK_TYPE_BOOL) {
+    ModuleName = "bool";
+  } else if (CurTok == TOK_TYPE_CHAR) {
+    ModuleName = "char";
   } else {
     LogErrorAt(CurLoc, "Expected module name after 'import'");
     return nullptr;
@@ -2884,66 +3009,7 @@ std::unique_ptr<ExprAST> ParseImport() {
     }
   }
 
-  llvm::SmallString<128> StdlibPath(CompilerExecutablePath);
-  llvm::sys::path::remove_filename(StdlibPath);
-  llvm::sys::path::append(StdlibPath, "..", "lib", "std", ModuleName + ".tr");
-
-  // Search order:
-  //   1. Compiler stdlib (<binary>/../lib/std/<module>.tr)
-  //   2. Same directory as the source file being compiled
-  //   3. Current working directory
-  //
-  // A ParseFile() call can return nullptr for two very different reasons:
-  // the file simply doesn't exist at that path (fine, keep trying the next
-  // one), or the file DOES exist but has a genuine syntax error inside it
-  // (LogErrorAt already recorded a real diagnostic -- trying the NEXT
-  // fallback path at that point would be wrong: it can only ever produce a
-  // confusing, unrelated "module not found" error stacked on top of the
-  // real one, since the module WAS found, just broken). Distinguish the two
-  // by snapshotting the diagnostic count before each attempt and checking
-  // whether it grew.
-  // ResolvedPath tracks whichever of the 3 candidates actually got parsed --
-  // it's the canonical identity of "this physical module file", used by
-  // both circular-import detection (Parser-level) and per-file import
-  // scoping (Resolver-level) so neither has to re-derive or guess a path
-  // string independently of the other.
-  std::string ResolvedPath = StdlibPath.str().str();
-  size_t DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-  auto Block = ParseFile(ResolvedPath, ModuleName, Loc);
-  bool FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
-  if (!Block && !FoundButBroken) {
-    // Issue #19 fix: resolve relative to the source file's directory so that
-    // `turf path/to/file.tr` can find sibling modules without a cd first.
-    if (!SourceFilename.empty()) {
-      llvm::SmallString<256> SrcRelPath(SourceFilename);
-      llvm::sys::path::remove_filename(SrcRelPath);
-      llvm::sys::path::append(SrcRelPath, ModuleName + ".tr");
-      ResolvedPath = SrcRelPath.str().str();
-      DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-      Block = ParseFile(ResolvedPath, ModuleName, Loc);
-      FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
-    }
-  }
-  if (!Block && !FoundButBroken) {
-    ResolvedPath = ModuleName + ".tr";
-    DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-    Block = ParseFile(ResolvedPath, ModuleName, Loc);
-    FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
-    if (!Block && !FoundButBroken) {
-      ModuleNotFoundError(Loc, ModuleName).raise();
-      return nullptr;
-    }
-  }
-
-  // The module WAS found at some path but failed to parse -- a real
-  // diagnostic was already recorded there (see FoundButBroken's doc comment
-  // above); don't construct a ModuleImportExprAST wrapping a null Block.
-  if (!Block)
-    return nullptr;
-
-  return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, ResolvedPath,
-                                                std::move(Block), Mode,
-                                                std::move(RequestedSymbols));
+  return ParseModuleImportByName(ModuleName, Loc, Mode, std::move(RequestedSymbols));
 }
 
 

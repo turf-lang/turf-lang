@@ -1,0 +1,13 @@
+// ─── array.tr ────────────────────────────────────────────────────────────────
+// Prelude placeholder for array UFCS helpers (STRING_UFCS_OPERATOR_CHAR_RFC.md
+// §5.3/§7 step 6).
+//
+// Deliberately near-empty: a genuinely useful array utility library (sum,
+// map, filter, etc.) needs to work across every element type, which means
+// generic free functions (`fn<T> sum(arr: T[]): T`) -- but UFCS resolution
+// was deliberately scoped to NON-generic candidates only (RFC step 4,
+// TypeChecker::tryUFCSFallback()'s receiver matching is a plain, non-generic
+// exact-name match). Writing separate concrete overloads per element type
+// isn't a real substitute for a generic array library. This file exists so
+// `array` is a valid prelude module name today; real content is blocked on
+// UFCS gaining generic-function support, a separate future step.

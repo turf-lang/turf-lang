@@ -1,0 +1,28 @@
+// ─── double.tr ───────────────────────────────────────────────────────────────
+// UFCS-callable helpers for `double` (STRING_UFCS_OPERATOR_CHAR_RFC.md §5.3).
+// Part of the prelude -- always in scope, no explicit `import double;` needed.
+//
+// Deliberately minimal: arithmetic helpers (abs/min/max/clamp/power) already
+// live in lib/std/math.tr and aren't duplicated here.
+//
+// NOTE: an `is_nan` helper (the standard `x != x` idiom) was considered and
+// deliberately NOT added here -- Lint.cpp's self-comparison check has no
+// type information and can't distinguish that legitimate idiom from a
+// copy-paste bug (see tests/02_resolver/warn_self_comparison_nan.tr), so it
+// always warns on `x != x`. That's an accepted tradeoff for ordinary user
+// code, but this file is auto-imported into EVERY compile (it's part of the
+// prelude) -- baking that warning into a helper here would mean literally
+// every program compiled shows a warning about this file's own internals,
+// regardless of whether the program ever calls the helper.
+
+// sign: -1.0 / 0.0 / 1.0 depending on x's sign. Lint-clean (no self-
+// comparison), and not something math.tr provides.
+fn sign(x: double): double {
+    if x > 0.0 {
+        return 1.0;
+    }
+    if x < 0.0 {
+        return 0.0 - 1.0;
+    }
+    return 0.0;
+}
