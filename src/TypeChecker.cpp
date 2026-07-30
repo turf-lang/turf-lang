@@ -492,6 +492,34 @@ static bool sameTypeExact(const TurfType *A, const TurfType *B) {
   return A && B && A->getName() == B->getName();
 }
 
+/**
+ * @brief Like sameTypeExact(), but for arrays, mirrors typesCompatible()'s
+ *        existing size-erasure rule: a declared "unsized" array parameter
+ *        (`int[]`, Size == -1) matches a receiver of ANY concrete size of
+ *        the same element type. Plain sameTypeExact() can't do this because
+ *        ArrayType::getName() now includes the size ("int[5]" != "int[]"),
+ *        which is correct for ordinary type equality but would make a
+ *        UFCS-callable `fn sum(arr: int[]): int` unreachable via `arr.sum()`
+ *        for every concretely-sized array variable -- i.e. always, since
+ *        variables are declared with a concrete size. This is not new
+ *        coercion (RFC §5.4's receiver rule is about rejecting numeric
+ *        promotion, e.g. int-to-double); it's the same size-genericity
+ *        array parameters already have for ordinary calls, extended to the
+ *        UFCS receiver position specifically.
+ */
+static bool ufcsReceiverTypeMatches(const TurfType *ParamTy,
+                                     const TurfType *ActualTy) {
+  if (ParamTy && ActualTy && ParamTy->isArray() && ActualTy->isArray()) {
+    const auto *PArr = dynamic_cast<const ArrayType *>(ParamTy);
+    const auto *AArr = dynamic_cast<const ArrayType *>(ActualTy);
+    if (!sameTypeExact(PArr->getElementType(), AArr->getElementType()))
+      return false;
+    return PArr->getSize() == -1 || AArr->getSize() == -1 ||
+           PArr->getSize() == AArr->getSize();
+  }
+  return sameTypeExact(ParamTy, ActualTy);
+}
+
 void TypeChecker::visitBinary(BinaryExprAST &Node) {
   // Visit children first (bottom-up)
   if (Node.getLHS())
@@ -1578,12 +1606,14 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
       Candidates.push_back(M.Symbol);
 
   // Receiver (implicit self-argument) matching is EXACT-name-match only --
-  // no numeric coercion -- RFC §5.4. Arity must also account for the
-  // receiver occupying the first declared parameter slot.
+  // no numeric coercion -- RFC §5.4 (arrays get the same unsized-matches-
+  // any-size leniency ordinary calls already have, see
+  // ufcsReceiverTypeMatches()). Arity must also account for the receiver
+  // occupying the first declared parameter slot.
   std::vector<const ResolverFunctionSymbol *> ReceiverMatches;
   for (const auto *C : Candidates) {
     if (C->arity() == ArgCount + 1 && !C->Params.empty() &&
-        sameTypeExact(C->Params[0].Type.get(), BaseTy))
+        ufcsReceiverTypeMatches(C->Params[0].Type.get(), BaseTy))
       ReceiverMatches.push_back(C);
   }
   if (ReceiverMatches.empty())

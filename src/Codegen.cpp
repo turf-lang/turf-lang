@@ -3941,9 +3941,39 @@ Value *MethodCallExprAST::codegen() {
           "This is a compiler bug.");
       return nullptr;
     }
-    Value *ReceiverVal = Base->codegen();
-    if (!ReceiverVal)
-      return nullptr;
+    // Unsized-array receiver (`fn sum(arr: int[]): int` called as
+    // `arr.sum()`): mirrors FuncCallExprAST::codegen()'s identical special
+    // case for ordinary calls -- the callee's real LLVM parameter type is an
+    // opaque pointer (getLLVMType()'s unsized-array branch), not the
+    // aggregate array value Base->codegen() would load. Passing the loaded
+    // aggregate here would build an ill-typed llvm::CallInst (wrong argument
+    // type for the callee's declared parameter). TypeChecker's
+    // ufcsReceiverTypeMatches() only accepts a receiver whose base is
+    // array-typed to begin with, and UFCS call syntax's Base is always
+    // itself an addressable expression (a variable, field, or index), so
+    // codegenLValue() here has the exact same safety guarantee ordinary
+    // calls already rely on.
+    Value *ReceiverVal;
+    const TurfType *ReceiverParamTy =
+        !ResolvedCallTarget->Params.empty()
+            ? ResolvedCallTarget->Params[0].Type.get()
+            : nullptr;
+    const auto *ReceiverArrTy =
+        ReceiverParamTy ? dynamic_cast<const ::ArrayType *>(ReceiverParamTy)
+                         : nullptr;
+    if (ReceiverArrTy && ReceiverArrTy->getSize() == -1) {
+      ReceiverVal = Base->codegenLValue();
+      if (!ReceiverVal) {
+        llvm::report_fatal_error(
+            "Internal error: UFCS array receiver must be addressable. "
+            "This should have been caught by the TypeChecker.");
+        return nullptr;
+      }
+    } else {
+      ReceiverVal = Base->codegen();
+      if (!ReceiverVal)
+        return nullptr;
+    }
     std::vector<Value *> ArgVals;
     ArgVals.push_back(ReceiverVal);
     for (auto &Arg : Args) {
