@@ -110,6 +110,15 @@ public:
   /// from a function DECLARATION, which has no TurfType of its own at all).
   virtual bool isFunc() const { return false; }
 
+  /// True if this type is a `TurfUserErrorType` (a user-declared `error Name
+  /// { ... }` type, e.g. `IOError`/`MathError`). NOT related to `TurfError`
+  /// (include/Errors.h), the compiler's own internal diagnostic base class.
+  virtual bool isUserError() const { return false; }
+
+  /// True if this type is a `TurfErrorUnionType` (a `!T` fallible return
+  /// type -- T on success, or any declared error-type value on failure).
+  virtual bool isErrorUnion() const { return false; }
+
   // ── Legacy predicate (backward-compatible) ───────────────────────────────
 
   /**
@@ -456,6 +465,15 @@ struct StructField {
   TurfTypePtr Type;
 };
 
+/// A single variant of a user-declared `error` type, e.g. `FileNotFound(path:
+/// string)` inside `error IOError { FileNotFound(path: string), ... }`.
+/// `Fields` is empty for a payload-less variant (e.g. `DivisionByZero`) or
+/// for the implicit `DEFAULT` variant of a bare `error Name;` declaration.
+struct ErrorVariant {
+  std::string Name;
+  std::vector<StructField> Fields;
+};
+
 /**
  * @brief A user-defined aggregate (struct) type.
  *
@@ -514,6 +532,73 @@ public:
     std::string getMangledName() const override {
         return Name_ + "_enum_" + UnderlyingType_->getMangledName();
     }
+};
+
+// ─── TurfUserErrorType ────────────────────────────────────────────────────────
+
+/**
+ * @brief A user-declared `error Name { Variant(field: type, ...), ... }` type
+ * (docs/planning/Errors.md). Deliberately NOT named `TurfErrorType` -- one
+ * character away from `TurfError` (include/Errors.h), the compiler's own
+ * internal diagnostic base class, which is an entirely unrelated concept.
+ *
+ * Each variant carries its own typed field list (unlike `TurfEnumType`,
+ * whose variants are bare names with no payload) -- closer in shape to a
+ * small per-variant struct than to a plain C-style enum.
+ */
+class TurfUserErrorType : public TurfType {
+    std::string                Name_;
+    std::vector<ErrorVariant>  Variants_;
+    bool                       IsBareForm_; // true for `error Name;` (implicit single DEFAULT variant)
+
+public:
+    TurfUserErrorType(std::string Name, std::vector<ErrorVariant> Variants, bool IsBareForm)
+        : Name_(std::move(Name)), Variants_(std::move(Variants)), IsBareForm_(IsBareForm) {}
+
+    std::string getName() const override { return Name_; }
+    bool isUserError() const override { return true; }
+    bool isBareForm() const { return IsBareForm_; }
+
+    const std::vector<ErrorVariant>& getVariants() const { return Variants_; }
+
+    bool hasVariant(const std::string& V) const {
+        for (const auto& Variant : Variants_)
+            if (Variant.Name == V) return true;
+        return false;
+    }
+
+    const ErrorVariant* getVariant(const std::string& V) const {
+        for (const auto& Variant : Variants_)
+            if (Variant.Name == V) return &Variant;
+        return nullptr;
+    }
+
+    std::string getMangledName() const override { return Name_ + "_error"; }
+};
+
+// ─── TurfErrorUnionType ───────────────────────────────────────────────────────
+
+/**
+ * @brief The `!T` fallible-return type (docs/planning/Errors.md): T on
+ * success, or a value of ANY declared `error` type on failure. Distinct from
+ * `TurfUserErrorType` (the declared error TYPE itself) -- a `!T` function
+ * doesn't name one specific error type, it can fail with any of the
+ * program's declared error types. Also unrelated to `TurfError`
+ * (include/Errors.h), the compiler's internal diagnostic base class.
+ */
+class TurfErrorUnionType : public TurfType {
+    TurfTypePtr SuccessType_;
+
+public:
+    explicit TurfErrorUnionType(TurfTypePtr SuccessType) : SuccessType_(std::move(SuccessType)) {}
+
+    std::string getName() const override { return "!" + SuccessType_->getName(); }
+    bool isErrorUnion() const override { return true; }
+
+    const TurfType* getSuccessType()    const { return SuccessType_.get(); }
+    TurfTypePtr     getSuccessTypePtr() const { return SuccessType_; }
+
+    std::string getMangledName() const override { return "errunion_" + SuccessType_->getMangledName(); }
 };
 
 // ─── FuncType ─────────────────────────────────────────────────────────────────
