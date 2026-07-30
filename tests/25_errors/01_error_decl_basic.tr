@@ -1,24 +1,23 @@
-// Stage 1 (docs/planning/Errors.md): `error` type declarations parse and
-// hoist without breaking anything -- no construction/!T/recover semantics
-// exist yet (that's Stage 2/3), so this just proves several shapes of
-// `error` declaration compile and run cleanly.
+// `error` type declarations (docs/planning/Errors.md): variants are bare
+// names only, exactly like `enum` (no payload fields -- deferred, see
+// Errors.md's own note on why).
 import test;
 
 error IOError {
-    FileNotFound(path: string),
-    PermissionDenied(path: string),
-    InvalidEncoding(path: string, line: int)
+    FileNotFound,
+    PermissionDenied,
+    InvalidEncoding
 }
 
 error NetworkError {
-    Timeout(seconds: int),
-    ConnectionRefused(host: string, port: int)
+    Timeout,
+    ConnectionRefused
 }
 
 error MathError {
     DivisionByZero,
     Overflow,
-    InvalidInput(message: string),
+    InvalidInput,
 }
 
 fn main(): int {

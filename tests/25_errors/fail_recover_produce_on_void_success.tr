@@ -2,11 +2,11 @@
 // is invalid when the call's success type is 'void' (there's no value to
 // produce a mismatched replacement for).
 error IOError {
-    FileNotFound(path: string),
+    FileNotFound,
 }
 
 fn writeFile(path: string): !void {
-    return IOError::FileNotFound(path);
+    return IOError::FileNotFound;
 }
 
 fn main(): int {

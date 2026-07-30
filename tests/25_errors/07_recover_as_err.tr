@@ -7,7 +7,7 @@ import test;
 
 error NetworkError {
     Timeout,
-    ConnectionRefused(host: string, port: int),
+    ConnectionRefused,
 }
 
 fn connect(mode: int): !int {
@@ -15,7 +15,7 @@ fn connect(mode: int): !int {
         return NetworkError::Timeout;
     }
     if (mode == 2) {
-        return NetworkError::ConnectionRefused("example.com", 8080);
+        return NetworkError::ConnectionRefused;
     }
     return 200;
 }

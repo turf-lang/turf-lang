@@ -4,12 +4,12 @@
 import test;
 
 error IOError {
-    FileNotFound(path: string),
+    FileNotFound,
 }
 
 fn writeFile(path: string, shouldFail: bool): !void {
     if (shouldFail) {
-        return IOError::FileNotFound(path);
+        return IOError::FileNotFound;
     }
     return;
 }
