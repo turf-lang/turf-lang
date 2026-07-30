@@ -87,6 +87,231 @@ void InitializeModule() {
   Builder = std::make_unique<IRBuilder<>>(*TheContext);
 }
 
+// ─── `!T` / `error` runtime representation (docs/planning/Errors.md) ────────
+//
+// See getLLVMType()'s TurfErrorUnionType/TurfUserErrorType/AnyErrorType
+// branches just below for the overall design: `!T` is one fixed struct type
+// regardless of T (the success value is boxed into a 64-bit slot), and every
+// `error`-type value (constructed or type-erased as AnyErrorType) is a
+// pointer to a heap-allocated tagged payload.
+
+/// `{ i1 isOk, i64 successBits, i8* errorPayload }` -- cached, built once.
+static llvm::StructType *getFallibleValueType() {
+  static llvm::StructType *Ty = nullptr;
+  if (!Ty) {
+    Ty = llvm::StructType::create(*TheContext, "FallibleValue");
+    Ty->setBody({llvm::Type::getInt1Ty(*TheContext),
+                llvm::Type::getInt64Ty(*TheContext),
+                PointerType::get(*TheContext, 0)});
+  }
+  return Ty;
+}
+
+/// Box an arbitrary primitive Turf value into a 64-bit slot for storage in a
+/// FallibleValue's successBits field -- same "reinterpret without loss"
+/// trick CastToType() already uses to erase a generic type parameter into a
+/// void* (bitcast for same-width types, [sz]ext for narrower ones,
+/// ptrtoint for pointers), just targeting an i64 slot instead of a pointer.
+static Value *BoxToI64Slot(Value *Val) {
+  llvm::Type *Ty = Val->getType();
+  llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
+  if (Ty->isIntegerTy(64))
+    return Val;
+  if (Ty->isIntegerTy(32))
+    return Builder->CreateSExt(Val, I64Ty, "box_i32");
+  if (Ty->isIntegerTy(1))
+    return Builder->CreateZExt(Val, I64Ty, "box_bool");
+  if (Ty->isIntegerTy(8))
+    return Builder->CreateZExt(Val, I64Ty, "box_char");
+  if (Ty->isDoubleTy())
+    return Builder->CreateBitCast(Val, I64Ty, "box_dbl");
+  if (Ty->isPointerTy())
+    return Builder->CreatePtrToInt(Val, I64Ty, "box_ptr");
+  // void success values reach here with no meaningful bits to store --
+  // callers never read successBits back for a void T anyway.
+  return llvm::ConstantInt::get(I64Ty, 0);
+}
+
+/// Reverse of BoxToI64Slot(): reinterpret a FallibleValue's successBits back
+/// to the real LLVM representation of Turf type `T`.
+static Value *UnboxFromI64Slot(Value *Slot, const TurfType *T) {
+  llvm::Type *TargetTy = getLLVMType(T);
+  if (TargetTy->isIntegerTy(64))
+    return Slot;
+  if (TargetTy->isIntegerTy(32))
+    return Builder->CreateTrunc(Slot, llvm::Type::getInt32Ty(*TheContext), "unbox_i32");
+  if (TargetTy->isIntegerTy(1))
+    return Builder->CreateTrunc(Slot, llvm::Type::getInt1Ty(*TheContext), "unbox_bool");
+  if (TargetTy->isIntegerTy(8))
+    return Builder->CreateTrunc(Slot, llvm::Type::getInt8Ty(*TheContext), "unbox_char");
+  if (TargetTy->isDoubleTy())
+    return Builder->CreateBitCast(Slot, llvm::Type::getDoubleTy(*TheContext), "unbox_dbl");
+  if (TargetTy->isPointerTy())
+    return Builder->CreateIntToPtr(Slot, TargetTy, "unbox_ptr");
+  return Slot; // void -- caller never uses this value
+}
+
+/// Declares (once) or looks up the C `malloc` used for heap-allocating an
+/// error payload -- same lookup-or-create pattern already used for string
+/// conversion buffers (see CastToType()'s int/double -> string branches),
+/// needed here for the identical reason: the payload must outlive the
+/// function that constructs it (it flows out through a `!T` return and
+/// through `recover as err`'s binding), so a stack alloca would dangle.
+static Function *getOrCreateMallocFn() {
+  Function *MallocF = TheModule->getFunction("malloc");
+  if (!MallocF) {
+    llvm::FunctionType *FT = llvm::FunctionType::get(
+        PointerType::get(*TheContext, 0),
+        {llvm::Type::getInt64Ty(*TheContext)}, false);
+    MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
+                               TheModule.get());
+  }
+  return MallocF;
+}
+
+/// Declares (once) or looks up the C `strcmp` used to compare two error
+/// tag strings (see BuildErrorPayload()/GetErrorTag()).
+static Function *getOrCreateStrcmpFn() {
+  Function *StrcmpF = TheModule->getFunction("strcmp");
+  if (!StrcmpF) {
+    Type *I8Ptr = PointerType::get(*TheContext, 0);
+    llvm::FunctionType *FT = llvm::FunctionType::get(
+        llvm::Type::getInt32Ty(*TheContext), {I8Ptr, I8Ptr}, false);
+    StrcmpF = Function::Create(FT, Function::ExternalLinkage, "strcmp",
+                               TheModule.get());
+  }
+  return StrcmpF;
+}
+
+/// Builds a heap-allocated error payload for `ErrorTypeName::VariantName`
+/// (docs/planning/Errors.md), laid out as `{ i8* tag, i64 field0, ... }` --
+/// `tag` is a global string constant identifying the (error type, variant)
+/// pair uniquely (used by GetErrorTag()/BinaryExprAST::codegen()'s equality
+/// branch instead of a whole-program variant-ID registry, since a plain
+/// string is trivially unique per declared variant with no cross-
+/// compilation-unit coordination needed). Field VALUES are stored (boxed to
+/// i64) but never read back anywhere yet -- Errors.md's `recover as err`
+/// only ever compares variant IDENTITY, never destructures fields; storing
+/// them now is forward-compatible groundwork, not speculative complexity in
+/// the sense of adding unused CODE paths, just unused-so-far field slots.
+/// Returns an i8* pointing at the payload.
+static Value *BuildErrorPayload(const std::string &ErrorTypeName,
+                                const std::string &VariantName,
+                                const std::vector<Value *> &FieldVals) {
+  std::vector<llvm::Type *> FieldTypes;
+  FieldTypes.push_back(PointerType::get(*TheContext, 0)); // tag
+  for (size_t I = 0; I < FieldVals.size(); ++I)
+    FieldTypes.push_back(llvm::Type::getInt64Ty(*TheContext));
+  llvm::StructType *PayloadTy = llvm::StructType::get(*TheContext, FieldTypes);
+
+  uint64_t Size = TheModule->getDataLayout().getTypeAllocSize(PayloadTy);
+  Value *SizeVal = ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), Size);
+  Value *Payload = Builder->CreateCall(getOrCreateMallocFn(), {SizeVal},
+                                       "errpayload");
+
+  Value *Tag = Builder->CreateGlobalString(ErrorTypeName + "::" + VariantName,
+                                           "errtag");
+  Value *TagSlot = Builder->CreateStructGEP(PayloadTy, Payload, 0, "errtag.slot");
+  Builder->CreateStore(Tag, TagSlot);
+
+  for (size_t I = 0; I < FieldVals.size(); ++I) {
+    Value *FieldSlot = Builder->CreateStructGEP(
+        PayloadTy, Payload, static_cast<unsigned>(I + 1), "errfield.slot");
+    Builder->CreateStore(BoxToI64Slot(FieldVals[I]), FieldSlot);
+  }
+
+  return Payload;
+}
+
+/// Extracts the tag string (i8*) identifying which `ErrorType::Variant` a
+/// runtime error-payload pointer (`err`, or any other AnyErrorType/
+/// TurfUserErrorType-typed value) actually holds -- the payload's first
+/// field, per BuildErrorPayload()'s layout.
+static Value *GetErrorTagFromPayload(Value *PayloadPtr) {
+  std::vector<llvm::Type *> TagOnlyFields = {PointerType::get(*TheContext, 0)};
+  llvm::StructType *TagOnlyTy = llvm::StructType::get(*TheContext, TagOnlyFields);
+  Value *TagSlot =
+      Builder->CreateStructGEP(TagOnlyTy, PayloadPtr, 0, "errtag.slot");
+  return Builder->CreateLoad(PointerType::get(*TheContext, 0), TagSlot,
+                             "errtag");
+}
+
+/// True if `E` is an error-tag-shaped operand for `==`/`!=`
+/// (docs/planning/Errors.md): either a bare `ErrorType::Variant` reference,
+/// or a variable already known (via its Resolver-set ResolvedSymbol, not
+/// TypeChecker's type map -- see IsErrorConstructionExpr's doc comment for
+/// why) to hold an error payload -- `err` inside `recover as err run { ... }`
+/// being the only way such a variable is ever created today.
+static bool IsErrorTagExpr(const ExprAST *E) {
+  if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E))
+    return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct;
+  if (auto *Var = dynamic_cast<const VariableExprAST *>(E)) {
+    if (const auto *Sym = Var->getResolvedSymbol())
+      return Sym->Type && (Sym->Type->isAnyError() || Sym->Type->isUserError());
+  }
+  return false;
+}
+
+/// Returns the tag string (i8*) for an error-tag-shaped `==`/`!=` operand.
+/// A bare `ErrorType::Variant` reference is handled WITHOUT going through
+/// its ordinary ScopeAccessExprAST::codegen() (which would malloc a whole
+/// payload just to compare identity) -- its tag is a compile-time-known
+/// constant, so it's built directly here instead.
+static Value *GetErrorTagValue(const ExprAST *E) {
+  if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E)) {
+    if (SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct) {
+      return Builder->CreateGlobalString(SA->getLeftName() + "::" + SA->getRightName(),
+                                         "errtag.static");
+    }
+  }
+  Value *V = const_cast<ExprAST *>(E)->codegen();
+  if (!V)
+    return nullptr;
+  return GetErrorTagFromPayload(V);
+}
+
+/// True if `E` is exactly the `ErrorType::Variant` / `ErrorType::Variant(...)`
+/// construction shape (docs/planning/Errors.md) -- mirrors Resolver's
+/// CollectReturnedErrorTypeNames' identical structural recognition, used
+/// here to decide whether a `return`ed value is an error payload (i8*) or a
+/// genuine success value, since Codegen can't rely on TypeChecker's inferred
+/// types (this compiler resolves/typechecks/codegens function bodies in a
+/// pre-pass that runs its own full pipeline on its own AST instance --
+/// see main.cpp's "Pre-pass sub-pass 2b" comment -- so only structural
+/// info set directly on the AST node by the Resolver, like ResolvedKind, is
+/// safe to depend on here).
+static bool IsErrorConstructionExpr(const ExprAST *E) {
+  if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E))
+    return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct;
+  if (auto *Call = dynamic_cast<const FuncCallExprAST *>(E)) {
+    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(Call->getCallee()))
+      return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct;
+  }
+  return false;
+}
+
+/// Wraps a raw success value (or, if IsError, an error payload i8*) into a
+/// `!T` FallibleValue for a `return` inside a `!T`-declared function.
+/// `RawVal` may be null when the function's success type is void (a bare
+/// `return;` inside a `!void` function still needs to produce a real
+/// FallibleValue -- the function's actual LLVM return type is never void
+/// once its declared type is `!void`).
+static Value *WrapFallibleValue(Value *RawVal, bool IsError) {
+  llvm::StructType *FVTy = getFallibleValueType();
+  llvm::Type *I1Ty = llvm::Type::getInt1Ty(*TheContext);
+  llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
+  Value *Result = llvm::UndefValue::get(FVTy);
+  Value *IsOk = ConstantInt::get(I1Ty, IsError ? 0 : 1);
+  Result = Builder->CreateInsertValue(Result, IsOk, 0, "fv.isok");
+  Value *SuccessBits = (!IsError && RawVal) ? BoxToI64Slot(RawVal)
+                                            : ConstantInt::get(I64Ty, 0);
+  Result = Builder->CreateInsertValue(Result, SuccessBits, 1, "fv.bits");
+  Value *ErrPtr = IsError ? RawVal
+                          : ConstantPointerNull::get(PointerType::get(*TheContext, 0));
+  Result = Builder->CreateInsertValue(Result, ErrPtr, 2, "fv.errptr");
+  return Result;
+}
+
 /**
  * @brief Maps a frontend TurfType to its corresponding backend llvm::Type.
  *
@@ -171,14 +396,42 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
   }
 
-  // NamedType — may refer to a user-defined struct OR an enum registered in
-  // GlobalSymbolTable. Check GlobalSymbolTable first so enums resolve to i64.
+  // User-declared `error` type value (docs/planning/Errors.md) -- a heap-
+  // allocated tagged payload `{ i8* tag, i64 field0, ... }` (see
+  // BuildErrorPayload()), always referred to through an opaque pointer, same
+  // representation string/struct values already use. AnyErrorType (the type
+  // of `err` inside `recover as err run { ... }`) is the SAME payload
+  // pointer with its concrete error type erased, so it gets the identical
+  // representation.
+  if (T->isUserError() || T->isAnyError()) {
+    return LLVMTypeCache[Key] = PointerType::get(*TheContext, 0);
+  }
+
+  // `!T` (docs/planning/Errors.md) -- uniformly `{ i1 isOk, i64 successBits,
+  // i8* errorPayload }` regardless of what T is: the success value is boxed
+  // into the i64 slot (see BoxToI64Slot()/UnboxFromI64Slot()) exactly like
+  // this compiler already boxes a generic type parameter into a void*
+  // (CastToType()'s "Type Erasure" branches) -- same idea, fixed-width slot
+  // instead of a pointer. This keeps ONE concrete LLVM type for every `!T`
+  // no matter what T is, so a function's LLVM return type/a variable's LLVM
+  // type never needs to vary per success type.
+  if (T->isErrorUnion()) {
+    return LLVMTypeCache[Key] = getFallibleValueType();
+  }
+
+  // NamedType — may refer to a user-defined struct, enum, or error type
+  // registered in GlobalSymbolTable. Check GlobalSymbolTable first so
+  // enums/error types resolve to their real representation instead of
+  // falling through to the opaque-struct-forward-decl path below (which is
+  // only correct for structs).
   if (dynamic_cast<const NamedType *>(T)) {
     // Try to resolve through GlobalSymbolTable first
     if (GlobalSymbolTable) {
       if (auto Registered = GlobalSymbolTable->LookupType(T->getName())) {
         if (dynamic_cast<const TurfEnumType *>(Registered.get()))
           return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
+        if (Registered->isUserError())
+          return LLVMTypeCache[Key] = PointerType::get(*TheContext, 0);
       }
     }
     auto CacheIt = LLVMTypeCache.find(Key);
@@ -1129,6 +1382,27 @@ Value *DefaultInitExprAST::codegen() {
 // cleanup, RFC §1, not done here).
 
 Value *BinaryExprAST::codegen() {
+  // `err == MathError::DivisionByZero` (docs/planning/Errors.md) --
+  // compares error-tag identity via strcmp, since every error-type value
+  // (constructed or type-erased as AnyErrorType) lowers to an opaque i8*
+  // payload pointer that's meaningless to compare by raw pointer identity
+  // (two logically-equal error references never share one malloc'd
+  // payload). Checked before operand codegen (not just before the generic
+  // fallback further down) specifically so a bare `ErrorType::Variant`
+  // operand can skip its ordinary ScopeAccessExprAST::codegen() path
+  // entirely -- see GetErrorTagValue()'s doc comment.
+  if ((Op == TOK_EQ || Op == TOK_NEQ) &&
+      (IsErrorTagExpr(LHS.get()) || IsErrorTagExpr(RHS.get()))) {
+    Value *LTag = GetErrorTagValue(LHS.get());
+    Value *RTag = GetErrorTagValue(RHS.get());
+    if (!LTag || !RTag)
+      return nullptr;
+    Value *Cmp = Builder->CreateCall(getOrCreateStrcmpFn(), {LTag, RTag}, "errtagcmp");
+    Value *Zero = ConstantInt::get(Type::getInt32Ty(*TheContext), 0);
+    return Op == TOK_EQ ? Builder->CreateICmpEQ(Cmp, Zero, "erreq")
+                        : Builder->CreateICmpNE(Cmp, Zero, "errneq");
+  }
+
   // ── Short-circuit && / || ───────────────────────────────────────────────
   // These operators must NOT evaluate both sides eagerly.
   // We emit a branch: LHS first, then conditionally evaluate RHS.
@@ -3214,9 +3488,20 @@ Value *ReturnExprAST::codegen() {
     GlobalSymbolTable->MarkEarlyExit();
   }
 
+  // `!T` (docs/planning/Errors.md): the function's ACTUAL LLVM return type
+  // is always the FallibleValue struct (see getLLVMType()), never a bare
+  // T/void, so every `return` inside a `!T` function -- including a bare
+  // `return;` for a `!void` function's success case -- must wrap its value
+  // instead of returning it (or void) directly.
+  bool IsFallibleReturn = CurrentFuncReturnType && CurrentFuncReturnType->isErrorUnion();
+
   if (!Val) {
-    // empty return; TypeChecker has verified this is a void function.
-    Builder->CreateRetVoid();
+    // empty return; TypeChecker has verified this is a void (or `!void`)
+    // function.
+    if (IsFallibleReturn)
+      Builder->CreateRet(WrapFallibleValue(nullptr, /*IsError=*/false));
+    else
+      Builder->CreateRetVoid();
   } else {
     // return <expr>; TypeChecker has verified the expression type.
     Value *RetVal = Val->codegen();
@@ -3225,8 +3510,13 @@ Value *ReturnExprAST::codegen() {
 
     // Type validation and compatibility are handled by the TypeChecker.
 
-    RetVal = CastToType(RetVal, CurrentFuncReturnType, "retcast", Loc);
-    Builder->CreateRet(RetVal);
+    if (IsFallibleReturn) {
+      bool IsError = IsErrorConstructionExpr(Val.get());
+      Builder->CreateRet(WrapFallibleValue(RetVal, IsError));
+    } else {
+      RetVal = CastToType(RetVal, CurrentFuncReturnType, "retcast", Loc);
+      Builder->CreateRet(RetVal);
+    }
   }
 
   // After a terminator, create a fresh unreachable block so the IR builder
@@ -3292,6 +3582,24 @@ Value *FuncCallExprAST::codegen() {
     if (FT->getReturnType()->isVoid())
       return Builder->CreateCall(FnLLVMType, CalleeVal, ArgVals);
     return Builder->CreateCall(FnLLVMType, CalleeVal, ArgVals, "calltmp");
+  }
+
+  // `ErrorType::Variant(args)` (docs/planning/Errors.md) -- construction with
+  // a payload. Doesn't reach the ordinary ResolvedCallTarget->mangledName()
+  // lookup below either: Resolver::visitFuncCall's ErrorVariantConstruct
+  // branch synthesizes a candidate purely to let TypeChecker's generic
+  // overload-narrowing validate arity/argument types (exactly like
+  // StructName::new(...) does) -- there's no REAL backing LLVM function to
+  // look up at all, unlike an ordinary call.
+  if (ScopeCallee && ScopeCallee->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct) {
+    std::vector<Value *> FieldVals;
+    for (auto &Arg : Args) {
+      Value *V = Arg->codegen();
+      if (!V)
+        return nullptr;
+      FieldVals.push_back(V);
+    }
+    return BuildErrorPayload(ScopeCallee->getLeftName(), ScopeCallee->getRightName(), FieldVals);
   }
 
   // `StructName::default()` / `StructName::new(...)` -- construction.
@@ -4258,11 +4566,124 @@ Value *ErrorDeclExprAST::codegen() {
   return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
 }
 
-// Stage 1 only wires `recover` through the Lexer/Parser/AST -- Resolver never
-// resolves a `!T` call site yet (Stage 2), so no Stage 1 test can legitimately
-// make it here. Stage 2/3 replace this with real control-flow lowering.
+// `<expr> recover ...` (docs/planning/Errors.md) -- branches on the wrapped
+// FallibleValue's isOk bit, unboxes/produces/runs accordingly, and merges
+// back to a single value of the success type T (or, if T is void, no value
+// at all -- see the IsVoidSuccess early-return below).
+//
+// A block that diverges (every `recover run`/`recover as err run` except the
+// void-success case -- enforced by TypeChecker's AllPathsDiverge check)
+// leaves Builder's insert point on the "after_ret" dead block
+// ReturnExprAST::codegen() creates after every `ret` -- unconditionally
+// branching that dead block to MergeBB below (same as the live/void-success
+// fall-through case) is deliberately NOT special-cased away: that branch is
+// provably unreachable at runtime (nothing can reach a block positioned
+// right after an unconditional `ret`), so it becomes a harmless extra PHI
+// predecessor rather than a correctness problem -- LLVM permits this, and it
+// avoids needing a parallel, error-prone re-implementation of the
+// TypeChecker's own divergence analysis here.
 Value *RecoverExprAST::codegen() {
-  llvm_unreachable("RecoverExprAST::codegen: not yet implemented (Stage 2/3, docs/planning/Errors.md)");
+  Value *FV = Wrapped ? Wrapped->codegen() : nullptr;
+  if (!FV)
+    return nullptr;
+
+  TurfTypePtr SuccessTy = ResolvedSuccessType ? ResolvedSuccessType : TurfVoid();
+  bool IsVoidSuccess = SuccessTy->isVoid();
+
+  Value *IsOk = Builder->CreateExtractValue(FV, 0, "fv.isok");
+
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  BasicBlock *SuccessBB = BasicBlock::Create(*TheContext, "recover.ok", TheFunction);
+  BasicBlock *FailBB = BasicBlock::Create(*TheContext, "recover.fail", TheFunction);
+  BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "recover.merge");
+
+  Builder->CreateCondBr(IsOk, SuccessBB, FailBB);
+
+  // ── Success path ──────────────────────────────────────────────────────
+  Builder->SetInsertPoint(SuccessBB);
+  Value *SuccessVal = nullptr;
+  if (!IsVoidSuccess) {
+    Value *SuccessBits = Builder->CreateExtractValue(FV, 1, "fv.bits");
+    SuccessVal = UnboxFromI64Slot(SuccessBits, SuccessTy.get());
+  }
+  BasicBlock *SuccessEndBB = Builder->GetInsertBlock();
+  Builder->CreateBr(MergeBB);
+
+  // ── Failure path ─────────────────────────────────────────────────────
+  Builder->SetInsertPoint(FailBB);
+  Value *ErrPayload = Builder->CreateExtractValue(FV, 2, "fv.errptr");
+
+  Value *FailVal = IsVoidSuccess ? nullptr : llvm::UndefValue::get(getLLVMType(SuccessTy.get()));
+  BasicBlock *FailEndBB = nullptr;
+
+  if (Kind == RecoverKind::Produce) {
+    Value *P = ProduceExpr ? ProduceExpr->codegen() : nullptr;
+    if (!P)
+      return nullptr;
+    FailVal = IsVoidSuccess ? nullptr : CastToType(P, SuccessTy, "producecast");
+    FailEndBB = Builder->GetInsertBlock();
+    Builder->CreateBr(MergeBB);
+  } else {
+    // Run / AsRun: AsRun binds `err` to the error payload for the duration
+    // of the block, same save/restore-NamedValues + GlobalSymbolTable
+    // scope-push/pop idiom ForExprAST::codegen() already uses for its loop
+    // variable.
+    bool HadOldBinding = false;
+    VarInfo SavedBinding;
+    if (Kind == RecoverKind::AsRun) {
+      AllocaInst *ErrAlloca = CreateEntryBlockAlloca(TheFunction, BoundName, TurfAnyError().get());
+      Builder->CreateStore(ErrPayload, ErrAlloca);
+
+      auto OldBinding = NamedValues.find(BoundName);
+      if (OldBinding != NamedValues.end()) {
+        SavedBinding = OldBinding->second;
+        HadOldBinding = true;
+      }
+      NamedValues[BoundName] = {ErrAlloca, TurfAnyError()};
+
+      if (GlobalSymbolTable) {
+        GlobalSymbolTable->EnterScope();
+        GlobalSymbolTable->DeclareSymbol(BoundName, TurfAnyError(),
+                                        {Loc.Line, Loc.Col}, ErrAlloca);
+      }
+    }
+
+    Value *BlockResult = Block ? Block->codegen() : nullptr;
+
+    if (Kind == RecoverKind::AsRun) {
+      if (GlobalSymbolTable)
+        GlobalSymbolTable->ExitScope();
+      if (HadOldBinding)
+        NamedValues[BoundName] = SavedBinding;
+      else
+        NamedValues.erase(BoundName);
+    }
+
+    if (!BlockResult)
+      return nullptr;
+
+    // See this function's doc comment for why branching unconditionally
+    // here (rather than only for the "legitimately falls through" case) is
+    // correct even when the block actually diverged.
+    if (!Builder->GetInsertBlock()->getTerminator()) {
+      FailEndBB = Builder->GetInsertBlock();
+      Builder->CreateBr(MergeBB);
+    }
+  }
+
+  // ── Merge ────────────────────────────────────────────────────────────
+  TheFunction->insert(TheFunction->end(), MergeBB);
+  Builder->SetInsertPoint(MergeBB);
+
+  if (IsVoidSuccess)
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+
+  llvm::PHINode *Phi =
+      Builder->CreatePHI(getLLVMType(SuccessTy.get()), 2, "recover.result");
+  Phi->addIncoming(SuccessVal, SuccessEndBB);
+  if (FailEndBB)
+    Phi->addIncoming(FailVal, FailEndBB);
+  return Phi;
 }
 
 // Only ever reached for the EnumVariant meaning of a ScopeAccessExprAST
@@ -4281,6 +4702,16 @@ Value *ScopeAccessExprAST::codegen() {
       return nullptr;
     }
     return CodegenConstantValue(*ResolvedConstant);
+  }
+
+  // Bare `ErrorType::Variant` (docs/planning/Errors.md) -- a payload-less
+  // variant reference (the Resolver already rejects a bare reference to a
+  // variant WITH fields, so Fields is always empty here; a payload-carrying
+  // variant only ever reaches this class's codegen through FuncCallExprAST
+  // instead, see that function's ErrorVariantConstruct branch). Returns an
+  // i8* pointing at the freshly-built error payload.
+  if (ResolvedKind == ScopeAccessKind::ErrorVariantConstruct) {
+    return BuildErrorPayload(LeftName, RightName, {});
   }
 
   auto EnumTy = GlobalSymbolTable->LookupType(LeftName);
