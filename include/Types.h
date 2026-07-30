@@ -119,6 +119,14 @@ public:
   /// type -- T on success, or any declared error-type value on failure).
   virtual bool isErrorUnion() const { return false; }
 
+  /// True if this type is `AnyErrorType` -- the type of `err` inside
+  /// `recover as err run { ... }`. Since `!T` doesn't restrict WHICH declared
+  /// error type a fallible call can fail with, `err`'s real concrete type
+  /// isn't knowable at compile time; AnyErrorType is a type-erased stand-in
+  /// that `==`/`!=` specifically allows comparing against any real
+  /// TurfUserErrorType value (see TypeChecker::inferRelationalType).
+  virtual bool isAnyError() const { return false; }
+
   // ── Legacy predicate (backward-compatible) ───────────────────────────────
 
   /**
@@ -236,6 +244,18 @@ public:
  *
  * Used as the return type of functions that produce no value.
  */
+/**
+ * @brief The type of `err` inside `recover as err run { ... }`
+ * (docs/planning/Errors.md). See `TurfType::isAnyError()`'s doc comment for
+ * why this exists as its own type rather than any specific declared error
+ * type.
+ */
+class AnyErrorType : public TurfType {
+public:
+  std::string getName() const override { return "<error>"; }
+  bool isAnyError() const override { return true; }
+};
+
 class VoidType : public TurfType {
 public:
   std::string getName() const override { return "void"; }
@@ -573,6 +593,16 @@ public:
         return nullptr;
     }
 
+    /// Variant names only, for Damerau-Levenshtein suggestion diagnostics
+    /// (mirrors TurfEnumType::getVariants(), which is already bare names).
+    std::vector<std::string> getVariantNames() const {
+        std::vector<std::string> Names;
+        Names.reserve(Variants_.size());
+        for (const auto& Variant : Variants_)
+            Names.push_back(Variant.Name);
+        return Names;
+    }
+
     std::string getMangledName() const override { return Name_ + "_error"; }
 };
 
@@ -695,6 +725,9 @@ TurfTypePtr TurfVoid();
 TurfTypePtr TurfNull();
 /// Opaque pointer singleton — the `ptr` FFI type (i8* in LLVM IR).
 TurfTypePtr TurfPtr();
+/// The type of `err` inside `recover as err run { ... }` -- see
+/// `AnyErrorType`'s doc comment.
+TurfTypePtr TurfAnyError();
 /** @} */
 
 // ─── Array helper functions ───────────────────────────────────────────────────

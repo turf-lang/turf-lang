@@ -79,6 +79,11 @@ TurfTypePtr TurfPtr() {
   return T;
 }
 
+TurfTypePtr TurfAnyError() {
+  static TurfTypePtr T = std::make_shared<AnyErrorType>();
+  return T;
+}
+
 // ─── Array helpers ────────────────────────────────────────────────────────────
 
 bool isArrayType(const TurfType *T) {
