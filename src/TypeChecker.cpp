@@ -2326,6 +2326,13 @@ void TypeChecker::visitEnumDecl(EnumDeclExprAST &Node) {
   setType(&Node, TurfVoid());
 }
 
+void TypeChecker::visitErrorDecl(ErrorDeclExprAST &Node) {
+  // Declaration itself has no value-type, mirroring visitEnumDecl/
+  // visitStructDecl. Variant-construction typechecking, `!T` compatibility,
+  // and `recover` typechecking land in Stage 2 (docs/planning/Errors.md).
+  setType(&Node, TurfVoid());
+}
+
 void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
   // A module-qualified call's callee (`io::printline` inside
   // `io::printline(x)`) reaches here too -- visitFuncCall() visits every
