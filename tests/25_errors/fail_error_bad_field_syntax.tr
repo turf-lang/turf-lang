@@ -1,0 +1,9 @@
+// Test (fail): malformed variant field list (missing ':' before the type)
+// must be rejected at parse time.
+error IOError {
+    FileNotFound(path string),
+}
+
+fn main(): int {
+    return 0;
+}

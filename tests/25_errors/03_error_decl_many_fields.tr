@@ -1,0 +1,12 @@
+// Stage 1: a variant with several typed fields of different primitive types.
+import test;
+
+error ValidationError {
+    OutOfRange(field: string, min: int, max: int, actual: int),
+    TypeMismatch(field: string, expected: string, gotDouble: double, isFatal: bool),
+}
+
+fn main(): int {
+    test::assert(true, "multi-field error variants should parse and compile");
+    return 0;
+}

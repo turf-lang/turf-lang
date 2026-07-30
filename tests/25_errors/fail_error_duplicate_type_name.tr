@@ -1,0 +1,14 @@
+// Test (fail): two `error` declarations sharing the same type name must be
+// rejected by the Resolver's hoisting pass (DuplicateTypeNameError), mirroring
+// the identical struct/enum duplicate-name check.
+error MathError {
+    DivisionByZero,
+}
+
+error MathError {
+    Overflow,
+}
+
+fn main(): int {
+    return 0;
+}

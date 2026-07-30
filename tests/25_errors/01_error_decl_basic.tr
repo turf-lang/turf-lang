@@ -1,0 +1,27 @@
+// Stage 1 (docs/planning/Errors.md): `error` type declarations parse and
+// hoist without breaking anything -- no construction/!T/recover semantics
+// exist yet (that's Stage 2/3), so this just proves several shapes of
+// `error` declaration compile and run cleanly.
+import test;
+
+error IOError {
+    FileNotFound(path: string),
+    PermissionDenied(path: string),
+    InvalidEncoding(path: string, line: int)
+}
+
+error NetworkError {
+    Timeout(seconds: int),
+    ConnectionRefused(host: string, port: int)
+}
+
+error MathError {
+    DivisionByZero,
+    Overflow,
+    InvalidInput(message: string),
+}
+
+fn main(): int {
+    test::assert(true, "error type declarations should not break compilation");
+    return 0;
+}

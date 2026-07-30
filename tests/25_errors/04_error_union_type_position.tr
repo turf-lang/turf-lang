@@ -1,0 +1,18 @@
+// Stage 1: `!T` type syntax parses in every position ParseType() is already
+// wired into. Deliberately does NOT use `!T` as a real function's return
+// type with an actual `return` -- return-type compatibility and `recover`
+// semantics don't exist until Stage 2 (docs/planning/Errors.md), so this
+// only proves the syntax itself, via an unused parameter type and an
+// uninitialized local variable's declared type (both never actually used
+// in a way that would require Stage 2/3 semantics).
+import test;
+
+fn unusedHelper(x: !int, y: !string): void {
+}
+
+fn main(): int {
+    mut a: !int;
+    mut b: !bool;
+    test::assert(true, "!T type syntax should parse in parameter/var-decl position");
+    return 0;
+}

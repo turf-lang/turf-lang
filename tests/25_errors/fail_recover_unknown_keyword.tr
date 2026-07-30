@@ -1,0 +1,6 @@
+// Test (fail): `recover` followed by anything other than 'produce', 'run',
+// or 'as' must be rejected at parse time.
+fn main(): int {
+    mut x: int = 5 recover 0;
+    return 0;
+}
