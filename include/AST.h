@@ -246,6 +246,20 @@ public:
   /// Not copied by clone() -- same reasoning as ResolvedSymbol.
   const ResolverConstantSymbol *ResolvedConstant = nullptr;
 
+  /// Populated by the Resolver instead of ResolvedSymbol/ResolvedConstant when
+  /// this bare name refers to a real top-level `fn` used as a first-class
+  /// function VALUE (e.g. `double_it` in `mutable f: fn(int): int =
+  /// double_it;` or `apply(double_it, 5)`) rather than a local variable or
+  /// constant. Only set here in visitVariable() -- a bare name in CALL
+  /// position (the direct callee of a FuncCallExprAST) never reaches
+  /// visitVariable() at all, and is resolved via the ordinary
+  /// ResolvedCandidates/ResolvedCallTarget path on FuncCallExprAST instead
+  /// (see Resolver::visitFuncCall's VarCallee branch). A distinct field from
+  /// ResolvedSymbol because a function value has no alloca/storage of its
+  /// own to look up -- Codegen returns the llvm::Function* directly. Not
+  /// copied by clone() -- same reasoning as ResolvedSymbol/ResolvedConstant.
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedFunctionRef;
+
   /// Populated by the Resolver when this node is the base of a module-qualified
   /// method call (e.g. `io` in `io.printline(...)`).  Empty for ordinary
   /// variables.  NOT copied by clone() — default std::string is "". ✓

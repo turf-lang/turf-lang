@@ -23,7 +23,9 @@
  *   ├─ TurfPointerType        — T*   (pass-by-reference / self)
  *   ├─ TurfGenericParamType   — open generic parameter (e.g. T in fn<T>)
  *   ├─ GenericType            — closed generic instantiation (e.g. map<K,V>)
- *   └─ TurfStructType         — user-defined aggregate type
+ *   ├─ TurfStructType         — user-defined aggregate type
+ *   ├─ TurfEnumType           — user-defined enum type
+ *   └─ FuncType               — first-class function value type (fn(T): R)
  *
  * @author a2ys
  * @author AaravTandon24
@@ -102,6 +104,11 @@ public:
 
   /// True if this type is an `TurfEnumType`.
   virtual bool isEnum() const { return false; }
+
+  /// True if this type is a `FuncType` (a function VALUE's type, e.g. the
+  /// `fn(int): int` in `mutable f: fn(int): int = double_it;` -- distinct
+  /// from a function DECLARATION, which has no TurfType of its own at all).
+  virtual bool isFunc() const { return false; }
 
   // ── Legacy predicate (backward-compatible) ───────────────────────────────
 
@@ -507,6 +514,67 @@ public:
     std::string getMangledName() const override {
         return Name_ + "_enum_" + UnderlyingType_->getMangledName();
     }
+};
+
+// ─── FuncType ─────────────────────────────────────────────────────────────────
+
+/**
+ * @brief The type of a first-class function VALUE: `fn(T1, T2, ...): R`.
+ *
+ * Not to be confused with a function DECLARATION (`FuncDefExprAST`/
+ * `ResolverFunctionSymbol`), which is a named, callable entity registered in
+ * the symbol table, not a value with a TurfType. FuncType exists so a
+ * function can also be treated as an ordinary VALUE: passed as an argument,
+ * stored in a variable, or used as a parameter/return type annotation --
+ * `fn(int): int` is parsed by ParseType() exactly like any other type
+ * expression (see Parser.cpp's TOK_FN branch).
+ *
+ * Two FuncTypes are compatible (typesCompatible()) purely via the "exact
+ * getName() match" fallback every other TurfType already gets -- no bespoke
+ * structural-equality code was needed since getName() is itself already a
+ * deterministic, structural rendering of the signature.
+ */
+class FuncType : public TurfType {
+  TurfTypePtr ReturnType_;
+  std::vector<TurfTypePtr> ParamTypes_;
+
+public:
+  FuncType(TurfTypePtr ReturnType, std::vector<TurfTypePtr> ParamTypes)
+      : ReturnType_(std::move(ReturnType)), ParamTypes_(std::move(ParamTypes)) {}
+
+  std::string getName() const override {
+    std::string S = "fn(";
+    for (size_t i = 0; i < ParamTypes_.size(); ++i) {
+      if (i) S += ", ";
+      S += ParamTypes_[i] ? ParamTypes_[i]->getName() : "?";
+    }
+    S += "): ";
+    S += ReturnType_ ? ReturnType_->getName() : "void";
+    return S;
+  }
+
+  std::string getMangledName() const override {
+    std::string S = "fnty";
+    for (const auto &P : ParamTypes_)
+      S += "_" + (P ? P->getMangledName() : "unk");
+    S += "_ret_" + (ReturnType_ ? ReturnType_->getMangledName() : "void");
+    return S;
+  }
+
+  bool isFunc() const override { return true; }
+
+  TurfTypePtr getReturnType() const { return ReturnType_; }
+  const std::vector<TurfTypePtr> &getParamTypes() const { return ParamTypes_; }
+
+  bool isEquivalent(const TurfType *Other) const override {
+    const auto *OtherFT = dynamic_cast<const FuncType *>(Other);
+    if (!OtherFT || ParamTypes_.size() != OtherFT->ParamTypes_.size())
+      return false;
+    for (size_t i = 0; i < ParamTypes_.size(); ++i)
+      if (!ParamTypes_[i] || !ParamTypes_[i]->isEquivalent(OtherFT->ParamTypes_[i].get()))
+        return false;
+    return ReturnType_ && ReturnType_->isEquivalent(OtherFT->ReturnType_.get());
+  }
 };
 
 // ─── RankedSuggestions (used by SymbolTable diagnostics) ─────────────────────

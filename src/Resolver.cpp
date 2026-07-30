@@ -669,6 +669,43 @@ void Resolver::visitVariable(VariableExprAST &Node) {
     }
   }
 
+  // First-class function reference: a bare name that isn't a variable or
+  // constant, but IS a real `fn` -- e.g. `double_it` in `mutable f: fn(int):
+  // int = double_it;` or `apply(double_it, 5)`. Same self-file/self-module/
+  // on-demand-import visibility rule an ordinary BARE CALL gets (mirrors the
+  // three sources above and visitFuncCall's identical VarCallee lookup) --
+  // NOT every function visible anywhere in the program. A name used in CALL
+  // position never reaches this function at all (see ResolvedFunctionRef's
+  // doc comment in AST.h), so this only ever fires for a function used AS A
+  // VALUE.
+  {
+    std::vector<const ResolverFunctionSymbol *> Candidates =
+        SymTable_.lookupCurrentFileFunctions(Node.getName());
+    if (!SelfModule.empty()) {
+      for (const auto &Match : SymTable_.findInModules(Node.getName()))
+        if (Match.ModuleName == SelfModule)
+          Candidates.push_back(Match.Symbol);
+    }
+    if (const auto *Flat = SymTable_.lookupFlatFunctionImport(SelfModule, Node.getName())) {
+      for (const auto &Match : SymTable_.findInModules(Node.getName()))
+        if (Match.ModuleName == Flat->SourceModule)
+          Candidates.push_back(Match.Symbol);
+    }
+    if (Candidates.size() == 1) {
+      Node.ResolvedFunctionRef =
+          std::make_shared<ResolverFunctionSymbol>(*Candidates[0]);
+      return;
+    }
+    if (Candidates.size() > 1) {
+      TypeError(Node.getLoc(), "'" + Node.getName() +
+                                   "' is overloaded -- it can't be used as a "
+                                   "first-class function value without an "
+                                   "unambiguous single signature.")
+          .raise();
+      return;
+    }
+  }
+
   // Build Damerau-Levenshtein suggestions from every name currently in scope.
   std::vector<std::string> VisibleNames = SymTable_.getAllVisibleNames();
   RankedSuggestions Suggestions;
@@ -989,6 +1026,25 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
 
   if (VarCallee) {
     CalleeName = VarCallee->getName();
+
+    // First-class functions: `f(3)` where `f` is a local variable/parameter
+    // of fn(...):... type (holding a function VALUE), not the name of a
+    // real top-level `fn`. Must be checked before the ordinary function-
+    // overload lookup below -- a local variable and a top-level `fn` can
+    // never share a name in the same scope anyway (SymTable_.declareVariable
+    // enforces one flat name per scope), so this can never misfire against a
+    // genuine direct call. When it matches, resolve the callee exactly like
+    // an ordinary variable reference (ResolvedSymbol, not ResolvedCandidates/
+    // ResolvedCallTarget) -- Codegen detects this shape from the callee's
+    // own resolved symbol type and emits an indirect call instead of the
+    // usual mangled-name lookup.
+    if (auto VarSym = SymTable_.lookupVariable(CalleeName)) {
+      if (VarSym->Type && VarSym->Type->isFunc()) {
+        const_cast<VariableExprAST *>(VarCallee)->ResolvedSymbol = VarSym;
+        return;
+      }
+    }
+
     CurrentFileMatches = SymTable_.lookupCurrentFileFunctions(CalleeName);
 
     // A bare (unqualified) call may only resolve to a function declared in
@@ -1666,6 +1722,18 @@ void Resolver::validateNamedType(
   // Unwrap any number of array dimensions (e.g. User[5][2] -> check "User").
   while (isArrayType(BaseType))
     BaseType = getArrayElementType(BaseType);
+
+  // Recurse into a function type's own parameter/return types (e.g.
+  // `fn(NoSuchStruct): int`) -- same reasoning as the GenericType case just
+  // below: without this, a misspelled type buried inside a `fn(...): ...`
+  // annotation would compile with zero diagnostics and only surface later as
+  // a confusing, misattributed Codegen-side opaque-struct issue.
+  if (const auto *FT = dynamic_cast<const FuncType *>(BaseType)) {
+    for (const auto &Param : FT->getParamTypes())
+      validateNamedType(Param, Loc, TypeParams);
+    validateNamedType(FT->getReturnType(), Loc, TypeParams);
+    return;
+  }
 
   // Recurse into a generic type's own type arguments (e.g. List<NoSuchType>)
   // -- this function never used to look inside GenericType at all, so an

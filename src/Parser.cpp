@@ -197,6 +197,50 @@ std::unique_ptr<ExprAST> ParseCompareExpr();
 // Trailing [N] brackets are consumed here, making array types fully
 // first-class. Returns nullptr on failure.
 static TurfTypePtr ParseType() {
+  // Function-value type: fn(T1, T2, ...): RetType -- e.g. the `f` parameter
+  // in `fn apply(f: fn(int): int, x: int): int`. Handled as its own branch,
+  // before the primitive/identifier dispatch below, since 'fn' is a keyword
+  // token (TOK_FN) here, not a TOK_IDENTIFIER -- this can never collide with
+  // a top-level `fn name(...)` declaration, which is parsed by
+  // ParseFuncDef() at the statement level and never calls ParseType() to
+  // consume its own leading 'fn'.
+  if (CurTok == TOK_FN) {
+    getNextToken(); // consume 'fn'
+    if (CurTok != '(') {
+      SyntaxError(CurLoc, "Expected '(' after 'fn' in a function type").raise();
+      return nullptr;
+    }
+    getNextToken(); // consume '('
+    std::vector<TurfTypePtr> ParamTypes;
+    if (CurTok != ')') {
+      while (true) {
+        TurfTypePtr ParamTy = ParseType();
+        if (!ParamTy)
+          return nullptr;
+        ParamTypes.push_back(std::move(ParamTy));
+        if (CurTok == ',') {
+          getNextToken();
+          continue;
+        }
+        break;
+      }
+    }
+    if (CurTok != ')') {
+      SyntaxError(CurLoc, "Expected ')' to close a function type's parameter list").raise();
+      return nullptr;
+    }
+    getNextToken(); // consume ')'
+    if (CurTok != TOK_COLON) {
+      SyntaxError(CurLoc, "Expected ':' before a function type's return type").raise();
+      return nullptr;
+    }
+    getNextToken(); // consume ':'
+    TurfTypePtr RetType = ParseType();
+    if (!RetType)
+      return nullptr;
+    return std::make_shared<FuncType>(std::move(RetType), std::move(ParamTypes));
+  }
+
   if (CurTok != TOK_IDENTIFIER && CurTok != TOK_TYPE_INT &&
       CurTok != TOK_TYPE_INT32 &&
       CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&

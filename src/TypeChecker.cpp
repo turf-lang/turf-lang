@@ -405,6 +405,16 @@ void TypeChecker::visitVariable(VariableExprAST &Node) {
     return;
   }
 
+  // 2b. A first-class function reference -- a bare name resolved by the
+  //     Resolver to a real `fn` used as a VALUE (see ResolvedFunctionRef's
+  //     doc comment in AST.h). Its type is the FuncType matching that
+  //     function's own signature.
+  if (Node.ResolvedFunctionRef) {
+    setType(&Node, std::make_shared<FuncType>(Node.ResolvedFunctionRef->ReturnType,
+                                              Node.ResolvedFunctionRef->paramTypes()));
+    return;
+  }
+
   // 2b. Fallback: try a direct RST lookup.  This covers two cases:
   //     (a) Unit tests that call RST.declareVariable() directly without a
   //         Resolver pass (in production the RST scope stack is empty here).
@@ -1578,6 +1588,48 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
 
     setType(&Node, substituteReturnType(Best->ReturnType, Subst));
     return;
+  }
+
+  // ── Indirect call through a function-typed variable/parameter ───────────
+  // `f(3)` where `f: fn(int): int` -- Resolver deliberately leaves
+  // ResolvedCandidates/ResolvedCallTarget empty for this shape (see
+  // Resolver::visitFuncCall's function-value branch) and instead attaches an
+  // ordinary ResolvedSymbol to the VariableExprAST callee, exactly like any
+  // other variable read -- so step 1 above (visiting the callee) already
+  // gave it the right type via the ordinary visitVariable path, and that IS
+  // the FuncType to check this call's arguments against.
+  {
+    const auto *VE = dynamic_cast<const VariableExprAST *>(Node.getCallee());
+    if (VE && VE->getResolvedSymbol()) {
+      TurfTypePtr CalleeTy = getType(Node.getCallee());
+      if (CalleeTy && CalleeTy->isFunc()) {
+        const auto *FT = static_cast<const FuncType *>(CalleeTy.get());
+        const auto &ParamTypes = FT->getParamTypes();
+        if (static_cast<int>(ParamTypes.size()) != ArgCount) {
+          reportError(Node.getLoc(),
+                      "'" + CalleeName + "' expects " +
+                          std::to_string(ParamTypes.size()) + " argument" +
+                          (ParamTypes.size() == 1 ? "" : "s") + ", got " +
+                          std::to_string(ArgCount) + ".");
+          setType(&Node, nullptr);
+          return;
+        }
+        for (int i = 0; i < ArgCount; ++i) {
+          if (ParamTypes[i] && ArgTypes[i] &&
+              !typesCompatible(ArgTypes[i].get(), ParamTypes[i].get())) {
+            reportError(Node.getLoc(),
+                        "Argument " + std::to_string(i + 1) + " to '" +
+                            CalleeName + "' expects '" +
+                            ParamTypes[i]->getName() + "', got '" +
+                            ArgTypes[i]->getName() + "'.");
+            setType(&Node, nullptr);
+            return;
+          }
+        }
+        setType(&Node, FT->getReturnType());
+        return;
+      }
+    }
   }
 
   // ── Unknown call (no builtin, no candidates) — be permissive. ─────────────

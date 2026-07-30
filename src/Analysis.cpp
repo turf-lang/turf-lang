@@ -122,6 +122,16 @@ public:
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
 
   void visitFuncCall(FuncCallExprAST &Node) override {
+    // First-class functions: `f(x)` where `f` is a local variable/parameter
+    // of fn(...):... type is a genuine READ of `f` -- unlike an ordinary
+    // direct call (`double_it(5)`), whose VariableExprAST callee never gets
+    // a ResolvedSymbol attached (Resolver::visitFuncCall intercepts it
+    // before visitVariable() ever runs; see its comment), so visitVariable()
+    // above is naturally a no-op for that case and only fires onRead for the
+    // genuine indirect-call shape. Without this, `mut f: fn(int):int = ...;
+    // f(3);` falsely warned "'f' is declared but never used" / "assigned but
+    // never read" -- confirmed live before this fix.
+    visitChild(Node.getCallee());
     for (const auto &Arg : Node.getArgs())
       visitChild(Arg.get());
   }

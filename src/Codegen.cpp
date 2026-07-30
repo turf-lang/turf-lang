@@ -124,6 +124,12 @@ llvm::Type *getLLVMType(const TurfType *T) {
   if (T->isNamed("ptr") || dynamic_cast<const OpaquePointerType *>(T))
     return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
 
+  // First-class function value (fn(T): R) — functions are already pointer-
+  // shaped values under LLVM's opaque-pointer model; a variable/parameter of
+  // this type just stores that pointer, same representation as `ptr`/T*.
+  if (T->isFunc())
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+
   // Array types — return ArrayType for fixed size, opaque pointer for unsized.
   if (isArrayType(T)) {
     const auto *AT = dynamic_cast<const ::ArrayType *>(T);
@@ -254,7 +260,7 @@ static bool isPointerLike(const TurfType *T) {
   if (!T) return false;
   return T->isNamed("string") || T->isNamed("ptr") || T->isNamed("void*") ||
          dynamic_cast<const OpaquePointerType *>(T) ||
-         dynamic_cast<const TurfPointerType *>(T);
+         dynamic_cast<const TurfPointerType *>(T) || T->isFunc();
 }
 
 
@@ -1450,7 +1456,8 @@ static llvm::Constant *GetDefaultValue(const TurfType *T) {
   if (T->isNamed("string"))
     return Builder->CreateGlobalStringPtr("");
 
-  if (isArrayType(T) || dynamic_cast<const TurfPointerType *>(T) || dynamic_cast<const TurfGenericParamType *>(T)) {
+  if (isArrayType(T) || dynamic_cast<const TurfPointerType *>(T) ||
+      dynamic_cast<const TurfGenericParamType *>(T) || T->isFunc()) {
     return llvm::ConstantPointerNull::get(llvm::PointerType::get(*TheContext, 0));
   }
 
@@ -1600,6 +1607,27 @@ static Value *CodegenConstantValue(const ResolverConstantSymbol &C) {
 Value *VariableExprAST::codegen() {
   if (ResolvedConstant)
     return CodegenConstantValue(*ResolvedConstant);
+
+  // First-class function reference (bare name of a real `fn`, e.g.
+  // `double_it` in `mutable f: fn(int): int = double_it;` or
+  // `apply(double_it, 5)`) -- functions are already first-class values under
+  // LLVM's opaque-pointer model, so this just looks up the existing
+  // llvm::Function* by its mangled name and returns it directly; no alloca/
+  // load involved (see ResolvedFunctionRef's doc comment in AST.h).
+  if (ResolvedFunctionRef) {
+    std::string MangledName = ResolvedFunctionRef->mangledName();
+    Function *F = TheModule->getFunction(MangledName);
+    if (!F)
+      F = TheModule->getFunction(ResolvedFunctionRef->BaseName);
+    if (!F) {
+      SemanticError(Loc, "Internal error: LLVM function '" + MangledName +
+                             "' not found after successful name resolution. "
+                             "This is a compiler bug.")
+          .raise();
+      return nullptr;
+    }
+    return F;
+  }
 
   // Use the mangled name resolved by Resolver/TypeChecker (Issue #5)
   Symbol *Sym = nullptr;
@@ -3225,6 +3253,46 @@ Value *FuncCallExprAST::codegen() {
   // below (which a qualified call can never match, since those are always
   // spelled bare) and as ResolvedCallTarget's fallback if it's ever null.
   std::string CalleeName = Var ? Var->getName() : ScopeCallee->getRightName();
+
+  // Indirect call through a function-typed local variable/parameter, e.g.
+  // `fn apply(f: fn(int): int, x: int): int { return f(x); }` -- Resolver
+  // deliberately leaves ResolvedCallTarget/ResolvedCandidates empty for this
+  // shape (see Resolver::visitFuncCall's function-value branch: it attaches
+  // an ordinary ResolvedSymbol to the callee instead, exactly like any other
+  // variable read), so it's detected here purely from the callee's own
+  // resolved symbol type, before the mangled-name lookup path below (which
+  // has nothing to look up -- there is no single LLVM function this call
+  // resolves to statically).
+  if (Var && Var->getResolvedSymbol() && Var->getResolvedSymbol()->Type &&
+      Var->getResolvedSymbol()->Type->isFunc()) {
+    const auto *FT =
+        static_cast<const FuncType *>(Var->getResolvedSymbol()->Type.get());
+    Value *CalleeVal = Var->codegen();
+    if (!CalleeVal)
+      return nullptr;
+
+    std::vector<llvm::Type *> ParamLLVMTypes;
+    for (const auto &PT : FT->getParamTypes())
+      ParamLLVMTypes.push_back(getLLVMType(PT.get()));
+    llvm::Type *RetLLVMType = getLLVMType(FT->getReturnType().get());
+    auto *FnLLVMType =
+        llvm::FunctionType::get(RetLLVMType, ParamLLVMTypes, false);
+
+    const auto &ParamTypes = FT->getParamTypes();
+    std::vector<Value *> ArgVals;
+    for (size_t i = 0; i < Args.size(); ++i) {
+      Value *V = Args[i]->codegen();
+      if (!V)
+        return nullptr;
+      if (i < ParamTypes.size())
+        V = CastToType(V, ParamTypes[i], "argcast", Loc);
+      ArgVals.push_back(V);
+    }
+
+    if (FT->getReturnType()->isVoid())
+      return Builder->CreateCall(FnLLVMType, CalleeVal, ArgVals);
+    return Builder->CreateCall(FnLLVMType, CalleeVal, ArgVals, "calltmp");
+  }
 
   // `StructName::default()` / `StructName::new(...)` -- construction.
   // Neither reaches the ordinary ResolvedCallTarget->mangledName() lookup
