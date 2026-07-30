@@ -1,5 +1,13 @@
 # Turflang Phase 3 RFC: Modern Error Handling (Errors as Values)
 
+> **SUPERSEDED**: This RFC's design (`error.XYZ("msg")` dot-notation, a single
+> flat global error registry, `catch`, `?` propagation) is **not** what got
+> built. The actual implementation follows `docs/planning/Errors.md` instead:
+> named `error` types with typed-payload variants (`error IOError { FileNotFound(path: string), ... }`),
+> `::`-qualified construction (`IOError::FileNotFound(...)`), and `recover`
+> (not `catch`/`?`) at call sites. Kept here only as a historical record of
+> the earlier proposal — do not implement anything from this file.
+
 ## The Problem
 Turflang originally relied on a `try/raise` exception model (similar to Python or Java). However, exception-based control flow is often considered an anti-pattern in modern systems programming because:
 1. **Hidden Control Flow**: Exceptions jump up the call stack invisibly, making code hard to reason about.

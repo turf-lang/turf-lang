@@ -253,6 +253,14 @@ qualified references is a real, separate follow-up, not started.
 
 ## Issue #188 — `!T` Error Unions (`catch`, `?`, `error.XYZ`)
 
+> **SUPERSEDED**: The `catch`/`?`/`error.XYZ` design below (and in
+> `ERROR_HANDLING_RFC.md`) was replaced before implementation started. The
+> actual feature (named `error` types with typed-payload variants,
+> `::`-qualified construction, `recover` at call sites) is specced in
+> `docs/planning/Errors.md` and tracked incrementally there — the
+> description/design notes below are historical only, not a work item to
+> pick up as written.
+
 **Labels:** `parser`, `lexer`, `ast`, `typechecker`, `codegen`, `resolver`, `phase-3`
 **Depends on:** #187 (all other Phase 3 items must be complete first)
 **Files:** `include/Lexer.h`, `src/Lexer.cpp`, `include/AST.h`, `include/Types.h`, `src/Parser.cpp`, `src/Resolver.cpp`, `src/TypeChecker.cpp`, `src/Codegen.cpp`, `include/Errors.h`, `lib/std/*.tr`
