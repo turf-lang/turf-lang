@@ -24,6 +24,17 @@ fn isAlpha(c: char): bool {
     return c.isUpper() || c.isLower();
 }
 
+fn isAlphaNumeric(c: char): bool {
+    return c.isAlpha() || c.isDigit();
+}
+
+// isPunctuation: printable ASCII (33..126) that's neither a letter nor a
+// digit -- e.g. '.', ',', '!', '('.
+fn isPunctuation(c: char): bool {
+    mut n: int = c to int;
+    return n >= 33 && n <= 126 && !c.isAlphaNumeric();
+}
+
 fn isWhitespace(c: char): bool {
     mut n: int = c to int;
     return n == 32 || n == 9 || n == 10 || n == 13; // space, tab, \n, \r

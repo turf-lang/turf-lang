@@ -26,3 +26,45 @@ fn sign(x: double): double {
     }
     return 0.0;
 }
+
+fn is_positive(x: double): bool {
+    return x > 0.0;
+}
+
+fn is_negative(x: double): bool {
+    return x < 0.0;
+}
+
+fn is_zero(x: double): bool {
+    return x == 0.0;
+}
+
+// is_integer: true if x has no fractional part. Truncate-and-compare, not
+// self-comparison, so it's Lint-clean the same way sign() is above.
+fn is_integer(x: double): bool {
+    return ((x to int) to double) == x;
+}
+
+// round: nearest integer, half-away-from-zero.
+fn round(x: double): double {
+    if x >= 0.0 {
+        return ((x + 0.5) to int) to double;
+    }
+    return ((x - 0.5) to int) to double;
+}
+
+fn floor(x: double): double {
+    mut truncated: double = (x to int) to double;
+    if x < 0.0 && truncated != x {
+        return truncated - 1.0;
+    }
+    return truncated;
+}
+
+fn ceil(x: double): double {
+    mut truncated: double = (x to int) to double;
+    if x > 0.0 && truncated != x {
+        return truncated + 1.0;
+    }
+    return truncated;
+}

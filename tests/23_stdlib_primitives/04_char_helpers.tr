@@ -1,0 +1,22 @@
+// lib/std/char.tr's new isAlphaNumeric/isPunctuation UFCS helpers (the rest
+// of char.tr -- isDigit/isUpper/isLower/isAlpha/isWhitespace/toUpper/
+// toLower -- already has coverage in tests/17_char_type/).
+
+import test;
+
+fn main(): int {
+    mut a: char = 'a';
+    mut nine: char = '9';
+    mut space: char = ' ';
+    mut bang: char = '!';
+
+    test::assert(a.isAlphaNumeric(), "'a' is alphanumeric");
+    test::assert(nine.isAlphaNumeric(), "'9' is alphanumeric");
+    test::assert(!space.isAlphaNumeric(), "' ' is not alphanumeric");
+
+    test::assert(bang.isPunctuation(), "'!' is punctuation");
+    test::assert(!a.isPunctuation(), "'a' is not punctuation");
+    test::assert(!space.isPunctuation(), "' ' is not punctuation");
+
+    return 0;
+}
