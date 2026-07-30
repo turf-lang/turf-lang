@@ -52,12 +52,20 @@ fn handle(conn: net::TcpConnection): void {
 }
 
 fn main(): int {
-    mut server: net::TcpListener = net::TcpListener::bind(8080);
+    mut server: net::TcpListener = net::TcpListener::bind(8080) recover run {
+        io::printline("Could not start the server -- is port 8080 already in use?");
+        return 1;
+    };
     io::printline("Turf HTTP server listening on port 8080...");
 
     mut requestCount: int = 0;
     while requestCount < 1000 {
-        mut conn: net::TcpConnection = server.accept();
+        // A single bad accept() shouldn't bring the whole server down --
+        // log it and keep serving instead of aborting.
+        mut conn: net::TcpConnection = server.accept() recover run {
+            io::printline("accept() failed, skipping.");
+            continue;
+        };
         handle(conn);
         requestCount = requestCount + 1;
     }

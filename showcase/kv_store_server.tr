@@ -77,12 +77,20 @@ fn findIndex(store: List<Entry*>, key: string): int {
 
 fn main(): int {
     mut store: List<Entry*>;
-    mut server: net::TcpListener = net::TcpListener::bind(8181);
+    mut server: net::TcpListener = net::TcpListener::bind(8181) recover run {
+        io::printline("Could not start the store -- is port 8181 already in use?");
+        return 1;
+    };
     io::printline("Turf key-value store listening on port 8181...");
 
     mut requestCount: int = 0;
     while requestCount < 1000 {
-        mut conn: net::TcpConnection = server.accept();
+        // A single bad accept() shouldn't bring the whole store down --
+        // log it and keep serving instead of aborting.
+        mut conn: net::TcpConnection = server.accept() recover run {
+            io::printline("accept() failed, skipping.");
+            continue;
+        };
         immut line: string = strings::trim(conn.read(4096));
 
         immut firstSpace: int = strings::index_of(line, " ");

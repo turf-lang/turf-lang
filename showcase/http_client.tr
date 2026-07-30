@@ -25,7 +25,14 @@ fn main(): int {
     // side by side with this file to compare the same server handling both.
     immut request: string = "GET " + path + " HTTP/1.1\nHost: 127.0.0.1:8080\nConnection: close\n\n";
 
-    mut conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8080);
+    mut conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8080) recover as err run {
+        if err == net::NetworkError::ConnectionRefused {
+            io::printline("Connection refused -- is showcase/http_server.tr running on port 8080?");
+        } else {
+            io::printline("Failed to connect (socket() error).");
+        }
+        return 1;
+    };
     conn.write(request);
 
     immut response: string = conn.read(4096);

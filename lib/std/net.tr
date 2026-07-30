@@ -24,20 +24,34 @@
 //   import net;
 //
 //   // Server
-//   mut server: net::TcpListener = net::TcpListener::bind(8080);
-//   mut conn: net::TcpConnection = server.accept();
+//   mut server: net::TcpListener = net::TcpListener::bind(8080) recover run {
+//       sys::exit(1); // can't serve without a listening socket -- fatal
+//   };
+//   mut conn: net::TcpConnection = server.accept() recover run {
+//       continue; // a single bad accept() shouldn't kill the whole server
+//   };
 //   immut request: string = conn.read(4096);
 //   conn.write("hello back");
 //   conn.close();
 //
 //   // Client
-//   mut conn2: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8080);
+//   mut conn2: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8080) recover as err run {
+//       if err == net::NetworkError::ConnectionRefused {
+//           io::printline("nothing is listening on that host/port");
+//       }
+//       return;
+//   };
 //   conn2.write("hello server");
 //   immut reply: string = conn2.read(4096);
 //   conn2.close();
+//
+// connect()/bind()/accept() all return `!T` instead of aborting the process
+// on failure (docs/planning/Errors.md) -- a refused connection, a port
+// already in use, or a transient accept() failure are ordinary, expected
+// outcomes for a network program, not bugs, so the caller decides how to
+// recover instead of the whole process dying unconditionally.
 
 import mem;
-import sys;
 
 // ─── POSIX socket bindings (private to this module) ────────────────────────
 
@@ -58,6 +72,20 @@ export immut AF_INET: int = 2;
 export immut SOCK_STREAM: int = 1;
 export immut SOL_SOCKET: int = 1;
 export immut SO_REUSEADDR: int = 2;
+
+// One variant per distinct syscall failure connect()/bind()/accept() can
+// report (docs/planning/Errors.md) -- kept separate rather than one generic
+// "NetworkError::Failed" so callers using `recover as err run { ... }` can
+// still tell them apart (e.g. ConnectionRefused vs. a local socket() failure
+// are very different things to react to), even though a variant itself
+// carries no payload/message.
+error NetworkError {
+    SocketCreationFailed,
+    ConnectionRefused,
+    BindFailed,
+    ListenFailed,
+    AcceptFailed,
+}
 
 // Builds a 16-byte `struct sockaddr_in` memory image for address a.b.c.d
 // (all zero = INADDR_ANY, "any local interface") on the given port, ready
@@ -101,18 +129,20 @@ fn TcpConnection.new(fd: int): void {
     self.fd = fd;
 }
 
-// Dial out to a.b.c.d:port. Aborts with a clear message on failure.
-fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: TcpConnection {
+// Dial out to a.b.c.d:port. Returns `!TcpConnection`: a refused connection
+// (nothing listening) or a local socket() failure are both ordinary,
+// expected outcomes -- the caller decides how to recover.
+fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: !TcpConnection {
     mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
     if !(fd >= 0) {
-        sys::panic("net::TcpConnection::connect: socket() failed");
+        return NetworkError::SocketCreationFailed;
     }
 
     mut addr: void* = buildSockAddr(a, b, c, d, port);
     immut result: int = connect(fd, addr, 16);
     mem::free(addr);
     if !(result == 0) {
-        sys::panic("net::TcpConnection::connect: connect() failed -- is anything listening on that host/port?");
+        return NetworkError::ConnectionRefused;
     }
 
     return TcpConnection::new(fd);
@@ -162,12 +192,15 @@ fn TcpListener.new(fd: int): void {
 
 // Binds and starts listening on the given port (all interfaces). Sets
 // SO_REUSEADDR so restarting a server doesn't fail with "address already
-// in use" while the previous socket lingers in TIME_WAIT. Aborts with a
-// clear message on failure.
-fn TcpListener.bind(port: int) static: TcpListener {
+// in use" while the previous socket lingers in TIME_WAIT. Returns
+// `!TcpListener`: a port already in use, or any other socket/bind/listen
+// failure, is an ordinary startup condition the caller decides how to
+// handle (most programs will just treat it as fatal via `recover run {
+// sys::exit(1); }`, but that's the caller's call, not this function's).
+fn TcpListener.bind(port: int) static: !TcpListener {
     mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
     if !(fd >= 0) {
-        sys::panic("net::TcpListener::bind: socket() failed");
+        return NetworkError::SocketCreationFailed;
     }
 
     mut optVal: void* = mem::alloc(8);
@@ -180,22 +213,25 @@ fn TcpListener.bind(port: int) static: TcpListener {
     immut bindResult: int = bind(fd, addr, 16);
     mem::free(addr);
     if !(bindResult == 0) {
-        sys::panic("net::TcpListener::bind: bind() failed -- is the port already in use?");
+        return NetworkError::BindFailed;
     }
 
     immut listenResult: int = listen(fd, 128);
     if !(listenResult == 0) {
-        sys::panic("net::TcpListener::bind: listen() failed");
+        return NetworkError::ListenFailed;
     }
 
     return TcpListener::new(fd);
 }
 
 // Blocks until a client connects, then returns the accepted connection.
-fn TcpListener.accept(): TcpConnection {
+// Returns `!TcpConnection`: a single bad accept() shouldn't necessarily
+// bring down a whole server -- the caller decides (commonly
+// `recover run { continue; }` to just keep serving).
+fn TcpListener.accept(): !TcpConnection {
     mut clientFd: int = accept(self.fd, null, null);
     if !(clientFd >= 0) {
-        sys::panic("net::TcpListener.accept: accept() failed");
+        return NetworkError::AcceptFailed;
     }
     return TcpConnection::new(clientFd);
 }

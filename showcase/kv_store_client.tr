@@ -14,17 +14,30 @@ import net;
 import strings; // string '+' is an operator overload now, not a builtin
 
 fn main(): int {
-    mut setConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181);
+    mut setConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181) recover as err run {
+        if err == net::NetworkError::ConnectionRefused {
+            io::printline("Connection refused -- is showcase/kv_store_server.tr running on port 8181?");
+        } else {
+            io::printline("Failed to connect (socket() error).");
+        }
+        return 1;
+    };
     setConn.write("SET language Turf\n");
     io::printline("SET response: " + setConn.read(1024));
     setConn.close();
 
-    mut getConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181);
+    mut getConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181) recover run {
+        io::printline("Failed to connect for GET.");
+        return 1;
+    };
     getConn.write("GET language\n");
     io::printline("GET response: " + getConn.read(1024));
     getConn.close();
 
-    mut missConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181);
+    mut missConn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8181) recover run {
+        io::printline("Failed to connect for GET (miss).");
+        return 1;
+    };
     missConn.write("GET nonexistent\n");
     io::printline("GET (miss) response: " + missConn.read(1024));
     missConn.close();
