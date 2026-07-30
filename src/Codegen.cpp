@@ -107,11 +107,37 @@ static llvm::StructType *getFallibleValueType() {
   return Ty;
 }
 
-/// Box an arbitrary primitive Turf value into a 64-bit slot for storage in a
+/// Declares (once) or looks up the C `malloc` used to heap-box a success
+/// value that doesn't fit in a FallibleValue's 64-bit successBits slot (see
+/// BoxToI64Slot()'s struct branch) -- same lookup-or-create pattern already
+/// used for string conversion buffers (see CastToType()'s int/double ->
+/// string branches), needed here for the identical reason: the boxed value
+/// must outlive the function that returns it.
+static Function *getOrCreateMallocFn() {
+  Function *MallocF = TheModule->getFunction("malloc");
+  if (!MallocF) {
+    llvm::FunctionType *FT = llvm::FunctionType::get(
+        PointerType::get(*TheContext, 0),
+        {llvm::Type::getInt64Ty(*TheContext)}, false);
+    MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
+                               TheModule.get());
+  }
+  return MallocF;
+}
+
+/// Box an arbitrary Turf value into a 64-bit slot for storage in a
 /// FallibleValue's successBits field -- same "reinterpret without loss"
 /// trick CastToType() already uses to erase a generic type parameter into a
 /// void* (bitcast for same-width types, [sz]ext for narrower ones,
 /// ptrtoint for pointers), just targeting an i64 slot instead of a pointer.
+///
+/// A struct success type (e.g. `!TcpConnection`) doesn't fit inline -- found
+/// live while converting net.tr's TcpConnection::connect() to `!T` (a
+/// single-field `{fd: int}` struct is still a real LLVM struct, not a bare
+/// i64, so returning it silently truncated to zero bits before this branch
+/// existed). Heap-allocates space, stores the struct there, and boxes the
+/// POINTER instead -- same "must outlive the function" reasoning as an
+/// error tag string, just for the success side.
 static Value *BoxToI64Slot(Value *Val) {
   llvm::Type *Ty = Val->getType();
   llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
@@ -127,9 +153,16 @@ static Value *BoxToI64Slot(Value *Val) {
     return Builder->CreateBitCast(Val, I64Ty, "box_dbl");
   if (Ty->isPointerTy())
     return Builder->CreatePtrToInt(Val, I64Ty, "box_ptr");
-  // void success values reach here with no meaningful bits to store --
-  // callers never read successBits back for a void T anyway.
-  return llvm::ConstantInt::get(I64Ty, 0);
+  if (Ty->isVoidTy())
+    // void success values reach here with no meaningful bits to store --
+    // callers never read successBits back for a void T anyway.
+    return llvm::ConstantInt::get(I64Ty, 0);
+  // Anything else (structs, fixed-size arrays by value): too wide for the
+  // inline slot, so heap-box it instead.
+  Value *Size = ConstantInt::get(I64Ty, TheModule->getDataLayout().getTypeAllocSize(Ty));
+  Value *HeapSlot = Builder->CreateCall(getOrCreateMallocFn(), {Size}, "box_slot");
+  Builder->CreateStore(Val, HeapSlot);
+  return Builder->CreatePtrToInt(HeapSlot, I64Ty, "box_ptr_wide");
 }
 
 /// Reverse of BoxToI64Slot(): reinterpret a FallibleValue's successBits back
@@ -148,7 +181,12 @@ static Value *UnboxFromI64Slot(Value *Slot, const TurfType *T) {
     return Builder->CreateBitCast(Slot, llvm::Type::getDoubleTy(*TheContext), "unbox_dbl");
   if (TargetTy->isPointerTy())
     return Builder->CreateIntToPtr(Slot, TargetTy, "unbox_ptr");
-  return Slot; // void -- caller never uses this value
+  if (TargetTy->isVoidTy())
+    return Slot; // caller never uses this value
+  // Struct/array: the slot holds a heap pointer (see BoxToI64Slot()), load
+  // the real value back through it.
+  Value *HeapSlot = Builder->CreateIntToPtr(Slot, PointerType::get(*TheContext, 0), "unbox_slot");
+  return Builder->CreateLoad(TargetTy, HeapSlot, "unbox_wide");
 }
 
 /// Declares (once) or looks up the C `strcmp` used to compare two error
