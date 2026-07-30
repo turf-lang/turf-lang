@@ -2382,21 +2382,32 @@ void TypeChecker::visitErrorDecl(ErrorDeclExprAST &Node) {
   setType(&Node, TurfVoid());
 }
 
-// True if every path through `E` diverges (ends in a `return`) -- used to
-// enforce Errors.md's "recover run { ... }` must not silently fall through"
-// rule. Deliberately a direct, non-interprocedural structural check (same
-// spirit/limitations as Resolver's MutatesSelfField -- see its doc comment)
-// rather than a full CFG reachability analysis: only `return` is recognized
-// as a diverging statement, so a block that only diverges via e.g.
-// `sys::exit(1)` or `fail(...)` (ordinary function calls, not something the
-// compiler can prove never returns) is conservatively treated as NOT
-// diverging. This errs toward rejecting some valid code rather than
-// silently accepting invalid code, matching this codebase's usual posture
-// for a hard-error gate.
+// True if every path through `E` diverges (ends in `return`/`break`/
+// `continue`) -- used to enforce Errors.md's "recover run { ... }` must not
+// silently fall through" rule. Deliberately a direct, non-interprocedural
+// structural check (same spirit/limitations as Resolver's MutatesSelfField
+// -- see its doc comment) rather than a full CFG reachability analysis:
+// only these three are recognized as diverging, so a block that only
+// diverges via e.g. `sys::exit(1)` or `fail(...)` (ordinary function calls,
+// not something the compiler can prove never returns) is conservatively
+// treated as NOT diverging. This errs toward rejecting some valid code
+// rather than silently accepting invalid code, matching this codebase's
+// usual posture for a hard-error gate.
+//
+// `break`/`continue` count alongside `return`: a genuinely common recovery
+// shape is `recover run { logError(); continue; }` inside a server's accept
+// loop (retry on a bad connection instead of aborting the whole loop) --
+// confirmed live while converting net.tr's TcpListener::accept() to `!T`.
+// Both are only legal syntax inside a loop in the first place (an earlier,
+// unrelated check already rejects a stray break/continue outside one), so
+// by the time this function ever sees one, it's already known to genuinely
+// divert control away from the rest of this block, same as `return`.
 static bool AllPathsDiverge(const ExprAST *E) {
   if (!E)
     return false;
-  if (dynamic_cast<const ReturnExprAST *>(E))
+  if (dynamic_cast<const ReturnExprAST *>(E) ||
+      dynamic_cast<const BreakExprAST *>(E) ||
+      dynamic_cast<const ContinueExprAST *>(E))
     return true;
   if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
     for (const auto &Child : Blk->getExpressions())
