@@ -1,0 +1,10 @@
+// Test (fail): constructing an error variant with the wrong number of
+// arguments must be rejected, mirroring struct/function arity checks.
+error NetworkError {
+    Timeout(seconds: int),
+}
+
+fn main(): int {
+    mut e: NetworkError = NetworkError::Timeout(30, 40);
+    return 0;
+}

@@ -1,0 +1,10 @@
+// Test (fail): a variant with fields cannot be referenced bare (no parens)
+// -- there's nowhere for the field values to come from. Must use call syntax.
+error MathError {
+    InvalidInput(message: string),
+}
+
+fn main(): int {
+    mut e: MathError = MathError::InvalidInput;
+    return 0;
+}
