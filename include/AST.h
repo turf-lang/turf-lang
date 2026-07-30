@@ -978,6 +978,33 @@ public:
     }
 };
 
+// `error Name { Variant(field: type, ...), ... }` (docs/planning/Errors.md).
+// Named ErrorDeclExprAST (not e.g. ErrorExprAST) deliberately to stay well
+// clear of TurfError (include/Errors.h), the compiler's own internal
+// diagnostic base class -- an unrelated concept that happens to share the
+// English word "error". `IsBareForm` distinguishes the sugar `error Name;`
+// (a single implicit `DEFAULT` variant, no fields) from the full braced form.
+class ErrorDeclExprAST : public ExprAST {
+    std::string               Name;
+    std::vector<ErrorVariant> Variants;
+    bool                      IsBareForm;
+    SourceLocation            Loc;
+public:
+    ErrorDeclExprAST(SourceLocation Loc, std::string Name,
+                     std::vector<ErrorVariant> Variants, bool IsBareForm)
+        : Name(std::move(Name)), Variants(std::move(Variants)),
+          IsBareForm(IsBareForm), Loc(Loc) {}
+    const std::string&               getName()       const { return Name; }
+    const std::vector<ErrorVariant>& getVariants()    const { return Variants; }
+    bool                              isBareForm()     const { return IsBareForm; }
+    const SourceLocation&             getLoc()         const { return Loc; }
+    llvm::Value* codegen() override;
+    void accept(ASTVisitor& V) override { V.visitErrorDecl(*this); }
+    std::unique_ptr<ExprAST> clone() const override {
+        return std::make_unique<ErrorDeclExprAST>(Loc, Name, Variants, IsBareForm);
+    }
+};
+
 // What a `Left::Right` scope-access expression turns out to mean, decided
 // by the Resolver (the parser stays fully agnostic -- see ScopeAccessExprAST
 // below). Unresolved is the state every node starts in; a fresh clone()
@@ -1063,6 +1090,53 @@ public:
                                                             RightName, RightLoc,
                                                             ModuleQualifier);
         return Cloned;
+    }
+};
+
+// Which of the three `recover` forms this expression uses
+// (docs/planning/Errors.md): `recover produce value`, `recover run { ... }`,
+// or `recover as err run { ... }`.
+enum class RecoverKind {
+    Produce, // recover produce <expr>
+    Run,     // recover run { ... }
+    AsRun,   // recover as <name> run { ... }
+};
+
+// `<expr> recover ...` -- handles the failure case of a `!T`-typed call
+// expression at the call site (docs/planning/Errors.md). `Wrapped` is the
+// `!T` expression being recovered; `Block` (Run/AsRun) is a `BlockExprAST`,
+// same as any other `{ ... }` body in this language (if/while/function
+// bodies). `BoundName` (AsRun only) names the variable the failing error
+// value is bound to inside `Block` (e.g. `err`).
+class RecoverExprAST : public ExprAST {
+    std::unique_ptr<ExprAST> Wrapped;
+    RecoverKind              Kind;
+    std::unique_ptr<ExprAST> ProduceExpr; // Kind == Produce
+    std::string              BoundName;   // Kind == AsRun
+    std::unique_ptr<ExprAST> Block;       // Kind == Run / AsRun (a BlockExprAST)
+    SourceLocation           Loc;
+public:
+    RecoverExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Wrapped,
+                   RecoverKind Kind, std::unique_ptr<ExprAST> ProduceExpr,
+                   std::string BoundName, std::unique_ptr<ExprAST> Block)
+        : Wrapped(std::move(Wrapped)), Kind(Kind),
+          ProduceExpr(std::move(ProduceExpr)), BoundName(std::move(BoundName)),
+          Block(std::move(Block)), Loc(Loc) {}
+
+    ExprAST*             getWrapped()     const { return Wrapped.get(); }
+    RecoverKind           getKind()        const { return Kind; }
+    ExprAST*             getProduceExpr() const { return ProduceExpr.get(); }
+    const std::string&    getBoundName()   const { return BoundName; }
+    ExprAST*             getBlock()       const { return Block.get(); }
+    const SourceLocation& getLoc()         const { return Loc; }
+
+    llvm::Value* codegen() override;
+    void accept(ASTVisitor& V) override { V.visitRecoverExpr(*this); }
+    std::unique_ptr<ExprAST> clone() const override {
+        return std::make_unique<RecoverExprAST>(
+            Loc, Wrapped ? Wrapped->clone() : nullptr, Kind,
+            ProduceExpr ? ProduceExpr->clone() : nullptr, BoundName,
+            Block ? Block->clone() : nullptr);
     }
 };
 
