@@ -176,6 +176,7 @@ std::unique_ptr<ExprAST> ParseWhileExpr();
 std::unique_ptr<ExprAST> ParseForExpr();
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
 std::unique_ptr<ExprAST> ParseEnumDecl();
+std::unique_ptr<ExprAST> ParseErrorDecl();
 std::unique_ptr<ExprAST> ParseBoolExpr();
 std::unique_ptr<ExprAST> ParseCharExpr();
 std::unique_ptr<ExprAST> ParseStringExpr();
@@ -198,6 +199,21 @@ std::unique_ptr<ExprAST> ParseCompareExpr();
 // Trailing [N] brackets are consumed here, making array types fully
 // first-class. Returns nullptr on failure.
 static TurfTypePtr ParseType() {
+  // `!T` -- a fallible/error-union type (docs/planning/Errors.md): T on
+  // success, or any declared `error` type value on failure. Unambiguous with
+  // the unary logical-not operator ('!' desugars to `x != true` -- see
+  // ParseUnary()) since that's parsed entirely inside EXPRESSION parsing;
+  // ParseType() is a wholly separate function only ever called from type
+  // positions (return types, parameter types, var-decl annotations, struct/
+  // error-variant fields), which previously rejected a leading '!' outright.
+  if (CurTok == '!') {
+    getNextToken(); // consume '!'
+    TurfTypePtr SuccessType = ParseType();
+    if (!SuccessType)
+      return nullptr;
+    return std::make_shared<TurfErrorUnionType>(std::move(SuccessType));
+  }
+
   // Function-value type: fn(T1, T2, ...): RetType -- e.g. the `f` parameter
   // in `fn apply(f: fn(int): int, x: int): int`. Handled as its own branch,
   // before the primitive/identifier dispatch below, since 'fn' is a keyword
@@ -914,6 +930,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_ENUM:
     return ParseEnumDecl();
 
+  case TOK_ERROR:
+    return ParseErrorDecl();
+
   case TOK_EXTERN:
     return ParseExternDecl();
 
@@ -1054,6 +1073,71 @@ std::unique_ptr<ExprAST> ParseExpression() {
     return std::make_unique<IfExprAST>(std::move(Branches), std::move(ElseExpr), ElseLoc);
   }
 
+  // `<expr> recover ...` -- handles the failure case of a `!T`-typed call
+  // expression at the call site (docs/planning/Errors.md). Bound to the
+  // whole expression parsed so far (same "loosest binding" position as the
+  // give/otherwise ternary just above), since every example in Errors.md
+  // attaches `recover` directly to a call expression, not to some inner
+  // sub-term of a larger arithmetic expression.
+  if (CurTok == TOK_RECOVER) {
+    SourceLocation RecoverLoc = CurLoc;
+    getNextToken(); // consume 'recover'
+
+    if (CurTok == TOK_PRODUCE) {
+      getNextToken(); // consume 'produce'
+      auto ProduceExpr = ParseExpression();
+      if (!ProduceExpr)
+        return nullptr;
+      return std::make_unique<RecoverExprAST>(
+          RecoverLoc, std::move(LHS), RecoverKind::Produce,
+          std::move(ProduceExpr), "", nullptr);
+    }
+
+    if (CurTok == TOK_RUN) {
+      getNextToken(); // consume 'run'
+      auto Block = ParseBlock();
+      if (!Block)
+        return nullptr;
+      return std::make_unique<RecoverExprAST>(RecoverLoc, std::move(LHS),
+                                              RecoverKind::Run, nullptr, "",
+                                              std::move(Block));
+    }
+
+    if (CurTok == TOK_AS) {
+      getNextToken(); // consume 'as'
+      if (CurTok != TOK_IDENTIFIER) {
+        LogErrorAt(CurLoc, "Expected an identifier after 'recover as' to "
+                           "bind the failing error value."
+                           "\n  Hint: `recover as err run { ... }`.");
+        return nullptr;
+      }
+      std::string BoundName = IdentifierStr;
+      getNextToken(); // consume the bound name
+
+      if (CurTok != TOK_RUN) {
+        LogErrorAt(CurLoc, "Expected 'run' after 'recover as " + BoundName +
+                               "'."
+                               "\n  Hint: `recover as " +
+                               BoundName + " run { ... }`.");
+        return nullptr;
+      }
+      getNextToken(); // consume 'run'
+
+      auto Block = ParseBlock();
+      if (!Block)
+        return nullptr;
+      return std::make_unique<RecoverExprAST>(RecoverLoc, std::move(LHS),
+                                              RecoverKind::AsRun, nullptr,
+                                              BoundName, std::move(Block));
+    }
+
+    LogErrorAt(CurLoc, "Expected 'produce', 'run', or 'as' after 'recover'."
+                       "\n  Hint: `recover produce value`, "
+                       "`recover run { ... }`, or "
+                       "`recover as err run { ... }`.");
+    return nullptr;
+  }
+
   return LHS;
 }
 
@@ -1187,7 +1271,8 @@ std::unique_ptr<ExprAST> ParseBlock() {
       continue;
     }
     if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
-        CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_COMPARE) {
+        CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+        CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
       auto Expr = ParseExpression();
       if (!Expr) return nullptr;
       if (CurTok == ';') {
@@ -1435,7 +1520,8 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
           continue;
         }
         if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
-            CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_COMPARE) {
+            CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+            CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
           auto E = ParseExpression();
           if (!E) return nullptr;
           OtherStmts.push_back(std::move(E));
@@ -1570,7 +1656,8 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         continue;
       }
       if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
-          CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_COMPARE) {
+          CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+          CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
         auto E = ParseExpression();
         if (!E) return nullptr;
         ArmStmts.push_back(std::move(E));
@@ -1980,6 +2067,163 @@ std::unique_ptr<ExprAST> ParseEnumDecl() {
   return std::make_unique<EnumDeclExprAST>(Loc, Name, Variants);
 }
 
+// ParseErrorDecl - called when CurTok == TOK_ERROR (docs/planning/Errors.md).
+// Parses either:
+//   error Name;                                          -- bare form, sugar
+//                                                            for a single
+//                                                            implicit
+//                                                            DEFAULT variant
+//   error Name { Variant(f: type, ...), Variant2, ... }   -- braced form
+std::unique_ptr<ExprAST> ParseErrorDecl() {
+  SourceLocation Loc = CurLoc;
+  getNextToken(); // eat 'error'
+
+  if (CurTok != TOK_IDENTIFIER) {
+    LogErrorAt(CurLoc, "Expected identifier after 'error'");
+    return nullptr;
+  }
+  std::string Name = IdentifierStr;
+  getNextToken();
+
+  std::vector<ErrorVariant> Variants;
+  bool IsBareForm = false;
+
+  if (CurTok == ';') {
+    // Bare form: `error GeneralError;` -- sugar for a single implicit
+    // DEFAULT variant with no fields (docs/planning/Errors.md). Unlike the
+    // braced form (which ends in '}', same as struct/enum), this form's own
+    // trailing ';' is consumed HERE, not by the caller -- every top-level/
+    // block statement loop in this file treats TOK_ERROR like TOK_STRUCT/
+    // TOK_ENUM (a construct that must NOT be followed by a ';'), so if this
+    // branch left the ';' unconsumed those loops would reject it as
+    // "Unexpected ';'". Same self-terminating convention as TOK_EXPORT's
+    // branch in ParseBlock().
+    IsBareForm = true;
+    Variants.push_back({"DEFAULT", {}});
+    getNextToken(); // eat ';'
+  } else if (CurTok == '{') {
+    getNextToken(); // eat '{'
+
+    while (CurTok != '}' && CurTok != TOK_EOF) {
+      if (CurTok != TOK_IDENTIFIER) {
+        LogErrorAt(CurLoc, "Expected variant name in error type definition");
+        return nullptr;
+      }
+      std::string VariantName = IdentifierStr;
+      SourceLocation VariantLoc = CurLoc;
+      getNextToken(); // eat variant name
+
+      // Reject a variant name reused from earlier in this same error type --
+      // mirrors ParseEnumDecl's identical duplicate-variant check (see its
+      // own doc comment for the exact bug this prevents: a later duplicate
+      // silently orphaning the earlier one with no diagnostic anywhere).
+      for (const auto &Existing : Variants) {
+        if (Existing.Name == VariantName) {
+          LogErrorAt(VariantLoc,
+                     "Error type '" + Name + "' already has a variant named '" +
+                         VariantName + "'."
+                         "\n  Hint: Variant names must be unique within an "
+                         "error type -- rename one of them.");
+          return nullptr;
+        }
+      }
+
+      std::vector<StructField> Fields;
+      if (CurTok == '(') {
+        getNextToken(); // eat '('
+        while (CurTok != ')' && CurTok != TOK_EOF) {
+          if (CurTok != TOK_IDENTIFIER) {
+            LogErrorAt(CurLoc, "Expected field name in error variant '" +
+                                    VariantName + "'");
+            return nullptr;
+          }
+          std::string FieldName = IdentifierStr;
+          SourceLocation FieldNameLoc = CurLoc;
+          getNextToken(); // eat field name
+
+          // Reject a field name reused from earlier in this same variant --
+          // mirrors ParseStructDecl's identical duplicate-field check.
+          for (const auto &Existing : Fields) {
+            if (Existing.Name == FieldName) {
+              LogErrorAt(FieldNameLoc,
+                         "Variant '" + VariantName + "' already has a field "
+                         "named '" + FieldName + "'."
+                         "\n  Hint: Field names must be unique within a "
+                         "variant -- rename one of them.");
+              return nullptr;
+            }
+          }
+
+          if (CurTok != TOK_COLON) {
+            LogErrorAt(CurLoc,
+                       "Expected ':' after field name '" + FieldName +
+                           "' in error variant (syntax: name: type)");
+            return nullptr;
+          }
+          getNextToken(); // eat ':'
+
+          SourceLocation FieldTypeLoc = CurLoc;
+          TurfTypePtr FieldType = ParseType();
+          if (!FieldType)
+            return nullptr;
+
+          if (isDisallowedVoidType(FieldType.get())) {
+            LogErrorAt(FieldTypeLoc,
+                       "'void' cannot be an error variant field's type."
+                       "\n  Hint: Give field '" + FieldName +
+                           "' a real type instead.");
+            return nullptr;
+          }
+
+          Fields.push_back({FieldName, std::move(FieldType)});
+
+          if (CurTok == ',') {
+            getNextToken();
+          } else if (CurTok != ')') {
+            LogErrorAt(CurLoc, "Expected ',' or ')' after field definition");
+            return nullptr;
+          }
+        }
+        if (CurTok != ')') {
+          LogErrorAt(CurLoc, "Expected ')' to close variant '" + VariantName +
+                                  "'s field list");
+          return nullptr;
+        }
+        getNextToken(); // eat ')'
+      }
+
+      Variants.push_back({VariantName, std::move(Fields)});
+
+      if (CurTok == ',') {
+        getNextToken();
+      } else if (CurTok != '}') {
+        LogErrorAt(CurLoc, "Expected ',' or '}' after error variant");
+        return nullptr;
+      }
+    }
+
+    if (CurTok != '}') {
+      LogErrorAt(CurLoc, "Expected '}' to close error type definition");
+      return nullptr;
+    }
+    getNextToken(); // eat '}'
+  } else {
+    LogErrorAt(CurLoc, "Expected '{' or ';' after error type name '" + Name + "'"
+               "\n  Hint: `error Name;` (bare, no variants) or "
+               "`error Name { Variant(field: type, ...), ... }`.");
+    return nullptr;
+  }
+
+  // Register the error type in GlobalSymbolTable, mirroring how struct/enum
+  // types are registered during ParseStructDecl/ParseEnumDecl.
+  auto ErrType = std::make_shared<TurfUserErrorType>(Name, Variants, IsBareForm);
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->RegisterType(Name, ErrType);
+  }
+
+  return std::make_unique<ErrorDeclExprAST>(Loc, Name, Variants, IsBareForm);
+}
+
 // ParseExternDecl - called when CurTok == TOK_EXTERN.
 // Parses: extern fn Name(paramName: paramType, ...): ReturnType;
 std::unique_ptr<ExprAST> ParseExternDecl() {
@@ -2182,7 +2426,8 @@ std::unique_ptr<ExprAST> ParseExportDecl() {
   auto SkipRestOfBrokenStatement = [&]() {
     while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
           CurTok != TOK_STRUCT && CurTok != TOK_ENUM && CurTok != TOK_AT &&
-          CurTok != TOK_EXTERN && CurTok != TOK_EXPORT && CurTok != TOK_IMPORT)
+          CurTok != TOK_EXTERN && CurTok != TOK_EXPORT && CurTok != TOK_IMPORT &&
+          CurTok != TOK_ERROR)
       getNextToken();
   };
 
@@ -2792,7 +3037,8 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     }
 
     if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_AT ||
-        CurTok == TOK_EXTERN || CurTok == TOK_EXPORT || CurTok == TOK_OPERATOR) {
+        CurTok == TOK_EXTERN || CurTok == TOK_EXPORT || CurTok == TOK_OPERATOR ||
+        CurTok == TOK_ERROR) {
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok == ';') {

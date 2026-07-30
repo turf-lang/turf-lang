@@ -443,7 +443,7 @@ int main(int argc, char **argv) {
         if (CurTok == ';') { getNextToken(); continue; }
         if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
             CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
-            CurTok == TOK_OPERATOR) {
+            CurTok == TOK_OPERATOR || CurTok == TOK_ERROR) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
@@ -722,7 +722,7 @@ int main(int argc, char **argv) {
     // not a statement, and needs the exact same hoist-then-lint treatment.
     if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
         CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
-        CurTok == TOK_OPERATOR) {
+        CurTok == TOK_OPERATOR || CurTok == TOK_ERROR) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();
