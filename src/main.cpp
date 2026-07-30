@@ -785,7 +785,7 @@ int main(int argc, char **argv) {
             !dynamic_cast<ExternFuncDeclExprAST *>(AST.get())) {
           std::cerr
               << "Error: Statements are not allowed outside of a function. "
-                 "Please define 'fn int main()' and move this code inside.\n";
+                 "Please define 'fn main(): int' and move this code inside.\n";
           DiagnosticEngine::flushAll();
           exit(1);
         }
@@ -978,7 +978,7 @@ int main(int argc, char **argv) {
   // Verify that an explicit 'main' function was defined in the primary module
   Function *MainFunc = TheModule->getFunction("main");
   if (!MainFunc || MainFunc->empty()) {
-    std::cerr << "Error: No entry point found. Please define 'fn int main()' "
+    std::cerr << "Error: No entry point found. Please define 'fn main(): int' "
                  "in your file.\n";
     return 1;
   }
