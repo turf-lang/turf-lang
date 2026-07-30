@@ -4250,6 +4250,21 @@ Value *EnumDeclExprAST::codegen() {
   return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
 }
 
+// A declaration codegens to nothing meaningful, mirroring EnumDeclExprAST
+// above -- the real type info was already registered by the Parser/Resolver.
+// Runtime representation for `!T`/error variants lands in Stage 3
+// (docs/planning/Errors.md).
+Value *ErrorDeclExprAST::codegen() {
+  return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+}
+
+// Stage 1 only wires `recover` through the Lexer/Parser/AST -- Resolver never
+// resolves a `!T` call site yet (Stage 2), so no Stage 1 test can legitimately
+// make it here. Stage 2/3 replace this with real control-flow lowering.
+Value *RecoverExprAST::codegen() {
+  llvm_unreachable("RecoverExprAST::codegen: not yet implemented (Stage 2/3, docs/planning/Errors.md)");
+}
+
 // Only ever reached for the EnumVariant meaning of a ScopeAccessExprAST
 // (Color::Red used as a value) -- the Resolver (visitScopeAccess) already
 // rejects a module-function-ref used outside call position with a clean
