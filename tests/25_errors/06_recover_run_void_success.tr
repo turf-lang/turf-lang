@@ -1,0 +1,31 @@
+// Stage 3: `recover run { ... }` on a `!void` function -- Errors.md's own
+// example (a non-diverging block, just a side effect) on both the success
+// and failure paths.
+import test;
+
+error IOError {
+    FileNotFound(path: string),
+}
+
+fn writeFile(path: string, shouldFail: bool): !void {
+    if (shouldFail) {
+        return IOError::FileNotFound(path);
+    }
+    return;
+}
+
+fn main(): int {
+    mut failed: bool = false;
+
+    writeFile("ok.txt", false) recover run {
+        failed = true;
+    };
+    test::assert_eq(failed, false, "success path should not run the recover block");
+
+    writeFile("bad.txt", true) recover run {
+        failed = true;
+    };
+    test::assert_eq(failed, true, "failure path should run the recover block");
+
+    return 0;
+}

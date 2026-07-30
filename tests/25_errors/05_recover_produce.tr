@@ -1,0 +1,25 @@
+// Stage 3 (docs/planning/Errors.md): `recover produce value` end-to-end --
+// the success path returns the real value, the failure path returns the
+// produced replacement.
+import test;
+
+error MathError {
+    DivisionByZero,
+}
+
+fn divide(a: int, b: int): !int {
+    if (b == 0) {
+        return MathError::DivisionByZero;
+    }
+    return a / b;
+}
+
+fn main(): int {
+    mut ok: int = divide(10, 2) recover produce -1;
+    test::assert_eq(ok, 5, "success path should produce the real quotient");
+
+    mut failed: int = divide(10, 0) recover produce -1;
+    test::assert_eq(failed, -1, "failure path should produce the replacement value");
+
+    return 0;
+}

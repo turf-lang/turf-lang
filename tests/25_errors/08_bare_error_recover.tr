@@ -1,0 +1,23 @@
+// Stage 3: the bare `error GeneralError;` form constructed via
+// `GeneralError::DEFAULT` and recovered with `recover produce` (bare-error
+// types can't use `recover as err`, see fail_recover_as_err_bare_only.tr).
+import test;
+
+error GeneralError;
+
+fn maybeFail(shouldFail: bool): !int {
+    if (shouldFail) {
+        return GeneralError::DEFAULT;
+    }
+    return 99;
+}
+
+fn main(): int {
+    mut ok: int = maybeFail(false) recover produce -1;
+    test::assert_eq(ok, 99, "success should produce 99");
+
+    mut failed: int = maybeFail(true) recover produce -1;
+    test::assert_eq(failed, -1, "bare-error failure should produce the replacement");
+
+    return 0;
+}
