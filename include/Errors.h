@@ -1611,4 +1611,54 @@ public:
   }
 };
 
+// ─── `error`/`!T`/`recover` diagnostics (docs/planning/Errors.md) ────────────
+// Named `...Error : public TurfError` / `...Warning : public TurfWarning`
+// like every other diagnostic in this file -- this is the COMPILER's own
+// diagnostic machinery reporting on the user-facing `error` keyword feature,
+// not to be confused with that feature's own types (TurfUserErrorType/
+// TurfErrorUnionType in Types.h, deliberately named to stay clear of
+// `TurfError` itself).
+
+// A `!T`-declared function whose body never actually returns a value of any
+// declared error type -- a warning (not a hard error, per Errors.md), since
+// `!T` doesn't OBLIGE a function to fail, only permits it to.
+class NeverReturnsErrorWarning : public TurfWarning {
+public:
+  NeverReturnsErrorWarning(SourceLocation Loc, const std::string &FuncName)
+      : TurfWarning(Loc,
+                    Colors::BOLD + Colors::BRIGHT_YELLOW + "Warning: " + Colors::RESET +
+                        Colors::BRIGHT_YELLOW + "'" + FuncName +
+                        "' is declared to return a fallible type ('!T') but "
+                        "never actually returns an error." + Colors::RESET,
+                    "If this function can never really fail, its return "
+                    "type doesn't need the '!' -- drop it and return T "
+                    "directly.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
+// `recover as err run { ... }` on a call whose only possible failure(s) are
+// bare-form error types (`error Name;`, sugar for a single, informationless
+// DEFAULT variant) -- Errors.md explicitly calls this out as a diagnostic
+// error: a bare error carries nothing to discriminate on, so binding `err`
+// to compare it against anything is pointless. Determined by scanning the
+// callee's own `return` statements for which declared error types it can
+// actually produce (Resolver::CollectReturnedErrorTypeNames).
+class BareErrorAsBindingError : public TurfError {
+public:
+  BareErrorAsBindingError(SourceLocation Loc, const std::string &BoundName)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "'recover as " + Colors::CYAN + BoundName +
+                      Colors::BRIGHT_RED +
+                      " run' can't be used here -- every error this call can "
+                      "fail with is a bare 'error Name;' declaration." +
+                      Colors::RESET,
+                  "A bare error type carries no information to discriminate "
+                  "on (it only ever has a single DEFAULT variant) -- use "
+                  "'recover run { ... }' or 'recover produce value' instead, "
+                  "since they don't need to inspect which error happened.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
 #endif
