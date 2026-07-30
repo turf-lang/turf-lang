@@ -278,6 +278,17 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
                   "`a.x == b.x`).");
       return TurfBool();
     }
+    // `err == MathError::DivisionByZero` inside `recover as err run { ... }`
+    // (docs/planning/Errors.md): `err`'s type is AnyErrorType (its real
+    // concrete error type isn't knowable at compile time -- `!T` doesn't
+    // restrict which declared error type a call can fail with), so the
+    // ordinary "same getName()" check below can never match it against a
+    // real TurfUserErrorType. Allowed specifically (and only) when one side
+    // is AnyErrorType and the other is a genuine declared error-type value.
+    if ((LhsTy->isAnyError() && RhsTy->isUserError()) ||
+        (RhsTy->isAnyError() && LhsTy->isUserError()))
+      return TurfBool();
+
     // Same type or both numeric is fine -- EXCLUDING string. Two strings
     // must resolve via an `operator ==`/`operator !=` overload instead (see
     // STRING_UFCS_OPERATOR_CHAR_RFC.md's build notes, "Blocker 2"): leaving
@@ -1069,6 +1080,32 @@ void TypeChecker::visitContinue(ContinueExprAST &Node) {
   setType(&Node, TurfVoid());
 }
 
+// True if `T` is (or, if an unresolved NamedType, names) a declared `error`
+// type (docs/planning/Errors.md). A bare `error` variant reference
+// (TypeChecker::visitScopeAccess) already resolves directly to the real
+// TurfUserErrorType, but a CONSTRUCTED variant (`IOError::FileNotFound(...)`)
+// gets its type from the Resolver's synthetic candidate, which -- like
+// StructName::new(...) -- deliberately returns a bare NamedType(LeftName)
+// (see Resolver::visitFuncCall's struct-constructor branch for why: the
+// exact-getName()-match fallback in typesCompatible() already makes
+// NamedType("MathError") interchangeable with the real TurfUserErrorType
+// everywhere else, so nothing but THIS specific check -- "is this actually
+// an error type at all," which name-equality alone can't answer -- needs the
+// real lookup).
+static bool isDeclaredErrorTypeValue(const TurfType *T) {
+  if (!T)
+    return false;
+  if (T->isUserError())
+    return true;
+  if (const auto *NT = dynamic_cast<const NamedType *>(T)) {
+    if (GlobalSymbolTable) {
+      if (auto Registered = GlobalSymbolTable->LookupType(NT->getName()))
+        return Registered->isUserError();
+    }
+  }
+  return false;
+}
+
 void TypeChecker::visitReturn(ReturnExprAST &Node) {
   if (Node.getVal())
     const_cast<ExprAST *>(Node.getVal())->accept(*this);
@@ -1079,7 +1116,20 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
   if (!ReturnTypeStack_.empty() && ReturnTypeStack_.back()) {
     const TurfType *Declared = ReturnTypeStack_.back().get();
     if (RetTy) {
-      bool Compatible = typesCompatible(RetTy.get(), Declared);
+      bool Compatible;
+      // `!T` (docs/planning/Errors.md): a function declared to return `!T`
+      // may return either something compatible with T, OR a value of ANY
+      // declared error type -- `!T` is an open/unenumerated union, unlike
+      // e.g. Rust's `Result<T, E>`, so there's no specific error type to
+      // check RetTy against here; only "is this some declared error value
+      // at all" matters.
+      if (Declared->isErrorUnion()) {
+        const auto *EU = static_cast<const TurfErrorUnionType *>(Declared);
+        Compatible = typesCompatible(RetTy.get(), EU->getSuccessType()) ||
+                     isDeclaredErrorTypeValue(RetTy.get());
+      } else {
+        Compatible = typesCompatible(RetTy.get(), Declared);
+      }
 
       // Special-case: a pointer-to-struct value whose pointee is exactly
       // the declared (bare, by-value) struct return type -- most commonly
@@ -2328,9 +2378,99 @@ void TypeChecker::visitEnumDecl(EnumDeclExprAST &Node) {
 
 void TypeChecker::visitErrorDecl(ErrorDeclExprAST &Node) {
   // Declaration itself has no value-type, mirroring visitEnumDecl/
-  // visitStructDecl. Variant-construction typechecking, `!T` compatibility,
-  // and `recover` typechecking land in Stage 2 (docs/planning/Errors.md).
+  // visitStructDecl.
   setType(&Node, TurfVoid());
+}
+
+// True if every path through `E` diverges (ends in a `return`) -- used to
+// enforce Errors.md's "recover run { ... }` must not silently fall through"
+// rule. Deliberately a direct, non-interprocedural structural check (same
+// spirit/limitations as Resolver's MutatesSelfField -- see its doc comment)
+// rather than a full CFG reachability analysis: only `return` is recognized
+// as a diverging statement, so a block that only diverges via e.g.
+// `sys::exit(1)` or `fail(...)` (ordinary function calls, not something the
+// compiler can prove never returns) is conservatively treated as NOT
+// diverging. This errs toward rejecting some valid code rather than
+// silently accepting invalid code, matching this codebase's usual posture
+// for a hard-error gate.
+static bool AllPathsDiverge(const ExprAST *E) {
+  if (!E)
+    return false;
+  if (dynamic_cast<const ReturnExprAST *>(E))
+    return true;
+  if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
+    for (const auto &Child : Blk->getExpressions())
+      if (AllPathsDiverge(Child.get()))
+        return true; // a diverging statement makes everything after it
+                      // unreachable, so the block as a whole diverges too
+    return false;
+  }
+  if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
+    if (!If->getElseBody())
+      return false; // no 'else' -- the "no branch taken" path falls through
+    for (const auto &B : If->getBranches())
+      if (!AllPathsDiverge(B.Body.get()))
+        return false;
+    return AllPathsDiverge(If->getElseBody());
+  }
+  return false; // while/for/anything else: conservatively assume it can fall through
+}
+
+void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
+  if (Node.getWrapped())
+    const_cast<ExprAST *>(Node.getWrapped())->accept(*this);
+  TurfTypePtr WrappedTy = getType(Node.getWrapped());
+
+  if (!WrappedTy || !WrappedTy->isErrorUnion()) {
+    reportError(Node.getLoc(),
+               "'recover' can only be used on a fallible ('!T') expression.");
+    setType(&Node, nullptr);
+    return;
+  }
+  const auto *EU = static_cast<const TurfErrorUnionType *>(WrappedTy.get());
+  TurfTypePtr SuccessTy = EU->getSuccessTypePtr();
+
+  if (Node.getKind() == RecoverKind::Produce) {
+    if (Node.getProduceExpr())
+      const_cast<ExprAST *>(Node.getProduceExpr())->accept(*this);
+    TurfTypePtr ProduceTy = getType(Node.getProduceExpr());
+    // "A recover block must evaluate to the function's success type"
+    // (Errors.md) -- e.g. `writeFile(...) recover produce 42;` is invalid
+    // when writeFile's success type is void, exactly like the doc's own
+    // example: typesCompatible() already rejects int-vs-void generically,
+    // no special-casing needed here.
+    if (ProduceTy && SuccessTy && !typesCompatible(ProduceTy.get(), SuccessTy.get())) {
+      reportError(Node.getLoc(),
+                  "'recover produce " + ProduceTy->getName() +
+                      "' doesn't match this call's success type '" +
+                      SuccessTy->getName() + "'.");
+    }
+  } else {
+    // Run / AsRun: per docs/planning/Errors.md, a block that doesn't
+    // `produce` a value must diverge on every path instead -- otherwise
+    // there's no value for the recovered expression to have. EXCEPT when the
+    // success type is `void`: Errors.md's own worked example shows a plain
+    // `writeFile(...) recover run { io::printline("Write failed."); };` (no
+    // 'return' at all) as explicitly VALID for a `!void` function -- there's
+    // no value needed in that case, so simply running the block and falling
+    // through is fine; only a non-void success type actually needs a value
+    // to come from somewhere.
+    if (Node.getBlock())
+      const_cast<ExprAST *>(Node.getBlock())->accept(*this);
+    if (!(SuccessTy && SuccessTy->isVoid()) && !AllPathsDiverge(Node.getBlock())) {
+      reportError(Node.getLoc(),
+                  "'recover " +
+                      std::string(Node.getKind() == RecoverKind::AsRun
+                                      ? "as " + Node.getBoundName() + " run"
+                                      : "run") +
+                      "' must end every path with 'return' -- it doesn't "
+                      "produce a value, so falling through leaves this "
+                      "expression with nothing to evaluate to.");
+    }
+  }
+
+  // All three forms recover to the success type T, not `!T` (confirmed).
+  setType(&Node, SuccessTy);
 }
 
 void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
@@ -2345,6 +2485,21 @@ void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
   if (Node.ResolvedKind == ScopeAccessKind::ModuleConstantRef) {
     if (Node.ResolvedConstant)
       setType(&Node, Node.ResolvedConstant->Type);
+    return;
+  }
+
+  // `ErrorType::Variant` (docs/planning/Errors.md) -- covers both the bare,
+  // payload-less reference (this node visited directly as an expression)
+  // and this node as the callee of a FuncCallExprAST construction (the
+  // CALL's own type comes from ResolvedCandidates/ResolvedCallTarget
+  // instead, same as any other call -- this just gives the callee itself
+  // SOME type too, harmlessly, exactly like the comment above already
+  // describes for ModuleFunctionRef/StaticMethodRef).
+  if (Node.ResolvedKind == ScopeAccessKind::ErrorVariantConstruct) {
+    if (GlobalSymbolTable) {
+      if (auto ET = GlobalSymbolTable->LookupType(Node.getLeftName()))
+        setType(&Node, ET);
+    }
     return;
   }
 
