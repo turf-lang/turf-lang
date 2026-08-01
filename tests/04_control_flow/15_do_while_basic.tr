@@ -1,0 +1,16 @@
+import test;
+
+fn main(): int {
+    mut x: int = 5;
+    mut iterations: int = 0;
+
+    do {
+        x = x - 1;
+        iterations = iterations + 1;
+    } while (x > 0);
+
+    test::assert(x == 0, "");
+    test::assert(iterations == 5, "");
+
+    return 0;
+}

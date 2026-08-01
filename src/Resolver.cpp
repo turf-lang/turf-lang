@@ -869,6 +869,11 @@ void Resolver::visitWhile(WhileExprAST &Node) {
   visitChild(Node.getBody());
 }
 
+void Resolver::visitDoWhile(DoWhileExprAST &Node) {
+  visitChild(Node.getBody());
+  visitChild(Node.getCond());
+}
+
 void Resolver::visitFor(ForExprAST &Node) {
   // ForExprAST desugars to:  { <var> = start;  while <var> < end { body; step } }
   // The Resolver mirrors that structure:

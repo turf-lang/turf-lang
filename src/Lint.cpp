@@ -102,6 +102,11 @@ static bool ContainsLoopExit(const ExprAST *E) {
       return true;
   }
 
+  if (auto *DW = dynamic_cast<const DoWhileExprAST *>(E)) {
+    if (ContainsLoopExit(DW->getBody()))
+      return true;
+  }
+
   if (auto *F = dynamic_cast<const ForExprAST *>(E)) {
     if (ContainsLoopExit(F->getBody()))
       return true;
@@ -249,6 +254,7 @@ static bool MayModifyVariable(const ExprAST *E, const std::string &VarName) {
 static void LintBinaryExpr(const BinaryExprAST *Bin);
 static void LintAssignment(const AssignmentExprAST *Assign);
 static void LintWhile(const WhileExprAST *While);
+static void LintDoWhile(const DoWhileExprAST *DoWhile);
 static void LintIf(const IfExprAST *If);
 
 static void LintFor(const ForExprAST *For);
@@ -281,6 +287,10 @@ void LintExpression(ExprAST *E) {
 
   if (auto *While = dynamic_cast<WhileExprAST *>(E)) {
     LintWhile(While);
+  }
+
+  if (auto *DoWhile = dynamic_cast<DoWhileExprAST *>(E)) {
+    LintDoWhile(DoWhile);
   }
 
   if (auto *For = dynamic_cast<ForExprAST *>(E)) {
@@ -449,6 +459,27 @@ static void LintWhile(const WhileExprAST *While) {
   LintExpression(const_cast<ExprAST *>(While->getCond()));
   // Recurse into body
   LintExpression(const_cast<ExprAST *>(While->getBody()));
+}
+
+static void LintDoWhile(const DoWhileExprAST *DoWhile) {
+  if (!DoWhile)
+    return;
+
+  const ExprAST *Cond = DoWhile->getCond();
+
+  // Check for do { } while(true) — condition is a BoolExprAST with value true
+  if (auto *BoolCond = dynamic_cast<const BoolExprAST *>(Cond)) {
+    if (BoolCond->getVal()) {
+      // Condition is literally 'true'
+      if (!ContainsLoopExit(DoWhile->getBody())) {
+        SuspiciousInfiniteLoopWarning(DoWhile->getLoc()).warn();
+      }
+    }
+  }
+
+  LintExpression(const_cast<ExprAST *>(DoWhile->getCond()));
+  // Recurse into body
+  LintExpression(DoWhile->getBody());
 }
 
 static void LintFor(const ForExprAST *For) {

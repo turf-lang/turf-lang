@@ -82,6 +82,7 @@ void SetLastChar(int c) { LastChar = c; }
 std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"else", TOK_ELSE},
                                        {"while", TOK_WHILE},
+                                       {"do", TOK_DO},
                                        {"int", TOK_TYPE_INT},
                                        {"float", TOK_TYPE_DOUBLE},
                                        {"double", TOK_TYPE_DOUBLE},

@@ -228,7 +228,8 @@ enum Token {
   TOK_RECOVER = -89, ///< `recover` keyword — handles a `!T` call site's failure
   TOK_PRODUCE = -90, ///< `produce` keyword — `recover produce value` form
   TOK_RUN     = -91, ///< `run`     keyword — `recover run {}` / `recover as x run {}` block form
-  TOK_AS      = -92  ///< `as`      keyword — `recover as x run {}` binding form
+  TOK_AS      = -92, ///< `as`      keyword — `recover as x run {}` binding form
+  TOK_DO      = -93  ///< `do`      keyword — `do { } while (cond)` loop (Issue #180)
 };
 
 int gettok();

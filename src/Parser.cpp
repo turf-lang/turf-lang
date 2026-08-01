@@ -173,6 +173,7 @@ std::unique_ptr<ExprAST> ParseUnary();
 std::unique_ptr<ExprAST> ParseBlock();
 
 std::unique_ptr<ExprAST> ParseWhileExpr();
+std::unique_ptr<ExprAST> ParseDoWhileExpr();
 std::unique_ptr<ExprAST> ParseForExpr();
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
 std::unique_ptr<ExprAST> ParseEnumDecl();
@@ -870,6 +871,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_WHILE:
     return ParseWhileExpr();
 
+  case TOK_DO:
+    return ParseDoWhileExpr();
+
   case TOK_FOR:
     return ParseForExpr();
 
@@ -1270,7 +1274,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
       Exprs.push_back(std::move(Expr));
       continue;
     }
-    if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
+    if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
         CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
         CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
       auto Expr = ParseExpression();
@@ -1346,6 +1350,58 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
 
   return std::make_unique<WhileExprAST>(KeywordLoc, std::move(Cond),
                                         std::move(Body));
+}
+
+// ParseDoWhileExpr - parses:
+//   do { body } while (cond);
+// Unlike while/if/for, the body always runs at least once: the condition is
+// only checked after the first pass through the body.
+std::unique_ptr<ExprAST> ParseDoWhileExpr() {
+  SourceLocation KeywordLoc = CurLoc;
+  getNextToken(); // eat 'do'
+
+  if (CurTok != '{') {
+    LogErrorAt(
+        KeywordLoc,
+        "Expected '{' to open the do-block body."
+        "\n  Hint: do-while loops must use braces: do { ... } while (cond);");
+    return nullptr;
+  }
+
+  auto Body = ParseBlock();
+  if (!Body)
+    return nullptr;
+
+  if (CurTok != TOK_WHILE) {
+    LogErrorAt(CurLoc, "Expected 'while' after do-block");
+    return nullptr;
+  }
+  getNextToken(); // eat 'while'
+
+  if (CurTok != '(') {
+    LogErrorAt(CurLoc, "Expected '(' after 'while' in do-while loop.");
+    return nullptr;
+  }
+  getNextToken(); // eat '('
+
+  std::unique_ptr<ExprAST> Cond = ParseExpression();
+  if (!Cond)
+    return nullptr;
+
+  if (CurTok != ')') {
+    LogErrorAt(CurLoc, "Expected ')' after do-while condition.");
+    return nullptr;
+  }
+  getNextToken(); // eat ')'
+
+  if (CurTok != ';') {
+    LogErrorAt(CurLoc, "Expected ';' after do-while loop.");
+    return nullptr;
+  }
+  getNextToken(); // eat ';'
+
+  return std::make_unique<DoWhileExprAST>(KeywordLoc, std::move(Body),
+                                          std::move(Cond));
 }
 
 
@@ -1519,7 +1575,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
           OtherStmts.push_back(std::move(E));
           continue;
         }
-        if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
+        if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
             CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
             CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
           auto E = ParseExpression();
@@ -1655,7 +1711,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         ArmStmts.push_back(std::move(E));
         continue;
       }
-      if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_FOR ||
+      if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
           CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
           CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
         auto E = ParseExpression();
