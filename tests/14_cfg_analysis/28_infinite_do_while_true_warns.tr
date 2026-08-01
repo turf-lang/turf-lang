@@ -1,0 +1,20 @@
+// Regression test (Issue #180): `do { } while(true)` with a body that has no
+// break, continue, or return must trigger an InfiniteLoopWarning (from
+// Lint.cpp's LintDoWhile) but still compile successfully (TurfWarning never
+// interrupts compilation) -- mirrors 03_infinite_while_true_warns.tr but for
+// the do-while sibling construct.
+//
+// This test intentionally never reaches the do-while loop at runtime --
+// returning early via `if true { return 0; }` -- so the test suite does not
+// actually hang.
+
+fn main(): int {
+    mut x: int = 0;
+    if true {
+        return 0;
+    }
+    do {
+        x = x + 1;
+    } while (true);
+    return 0;
+}

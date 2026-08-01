@@ -39,6 +39,7 @@ class CastExprAST;
 class BlockExprAST;
 class IfExprAST;
 class WhileExprAST;
+class DoWhileExprAST;
 class ForExprAST;
 class BreakExprAST;
 class ContinueExprAST;
@@ -115,6 +116,7 @@ public:
   virtual void visitBlock(BlockExprAST &Node) {}
   virtual void visitIf(IfExprAST &Node) {}
   virtual void visitWhile(WhileExprAST &Node) {}
+  virtual void visitDoWhile(DoWhileExprAST &Node) {}
   virtual void visitFor(ForExprAST &Node) {}
   virtual void visitBreak(BreakExprAST &Node) {}
   virtual void visitContinue(ContinueExprAST &Node) {}

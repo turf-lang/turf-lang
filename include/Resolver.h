@@ -152,6 +152,7 @@ public:
 
   void visitIf(IfExprAST &Node) override;
   void visitWhile(WhileExprAST &Node) override;
+  void visitDoWhile(DoWhileExprAST &Node) override;
   void visitFor(ForExprAST &Node) override;
   void visitBreak(BreakExprAST &Node) override { (void)Node; }
   void visitContinue(ContinueExprAST &Node) override { (void)Node; }

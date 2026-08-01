@@ -528,6 +528,8 @@ void CFGBuilder::visitExpr(ExprAST *E) {
     visitIf(E);
   } else if (dynamic_cast<WhileExprAST *>(E)) {
     visitWhile(E);
+  } else if (dynamic_cast<DoWhileExprAST *>(E)) {
+    visitDoWhile(E);
   } else if (dynamic_cast<ForExprAST *>(E)) {
     visitFor(E);
   } else if (dynamic_cast<CompareExprAST *>(E)) {
@@ -815,6 +817,69 @@ void CFGBuilder::visitWhile(ExprAST *E) {
   // is no break/return, but we still set the insert point so that any code
   // textually following the loop is modelled correctly in the CFG — it will
   // simply end up in an unreachable block, which is fine and correct).
+  setInsertPoint(ExitBB);
+}
+
+void CFGBuilder::visitDoWhile(ExprAST *E) {
+  auto *DoWhile = dynamic_cast<DoWhileExprAST *>(E);
+  if (!DoWhile)
+    return;
+
+  TurfBasicBlock *DoWhileEntry = CurrentBlock;
+
+  // Create blocks
+  TurfBasicBlock *BodyBB = createBlock("dowhile.body");
+  TurfBasicBlock *CondBB = createBlock("dowhile.cond");
+  TurfBasicBlock *ExitBB = createBlock("dowhile.end");
+
+  // Entry jumps straight into the body — no condition check on first entry,
+  // unlike while's entry->cond edge.
+  CurrentCFG->addEdge(DoWhileEntry, BodyBB);
+  DoWhileEntry->setTerminator(TerminatorKind::Unconditional, DoWhile->getLoc());
+
+  // Save loop targets for break/continue: continue re-checks the condition,
+  // break exits the loop, same convention as visitWhile.
+  TurfBasicBlock *SavedBreak = LoopBreakTarget;
+  TurfBasicBlock *SavedContinue = LoopContinueTarget;
+  LoopBreakTarget = ExitBB;
+  LoopContinueTarget = CondBB;
+
+  // Build body
+  setInsertPoint(BodyBB);
+  if (DoWhile->getBody()) {
+    visitExpr(DoWhile->getBody());
+  }
+  // Fall through to the condition check if no explicit terminator
+  if (CurrentBlock && !CurrentBlock->hasExplicitTerminator()) {
+    CurrentCFG->addEdge(CurrentBlock, CondBB);
+  }
+
+  // Restore loop targets
+  LoopBreakTarget = SavedBreak;
+  LoopContinueTarget = SavedContinue;
+
+  // Condition branches back to the body or out to exit.
+  // Add the condition expression as a statement so the DAP can detect reads
+  // of uninitialized variables used as do-while conditions.
+  if (DoWhile->getCond())
+    CondBB->addStatement(const_cast<ExprAST *>(DoWhile->getCond()));
+  CurrentCFG->addEdge(CondBB, BodyBB);
+
+  // Detect `do { } while(true)`: same literal-true special case as visitWhile
+  // — omitting the cond→exit edge makes the cycle structurally closed, which
+  // is what hasUnbreakableLoop() needs to flag it as unbreakable.
+  bool IsLiteralTrue = false;
+  if (const auto *BoolCond = dynamic_cast<const BoolExprAST *>(DoWhile->getCond()))
+    IsLiteralTrue = BoolCond->getVal();
+
+  if (!IsLiteralTrue) {
+    CurrentCFG->addEdge(CondBB, ExitBB);
+    CondBB->setTerminator(TerminatorKind::Branch, DoWhile->getLoc());
+  } else {
+    CondBB->setTerminator(TerminatorKind::Unconditional, DoWhile->getLoc());
+  }
+
+  // Continue from exit
   setInsertPoint(ExitBB);
 }
 

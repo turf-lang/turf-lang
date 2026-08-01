@@ -221,6 +221,15 @@ public:
     ascend();
   }
 
+  void visitDoWhile(DoWhileExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "DoWhileExpr\n";
+    descend();
+    print(N.getBody(), Depth_);
+    print(const_cast<ExprAST *>(N.getCond()), Depth_);
+    ascend();
+  }
+
   void visitFor(ForExprAST &N) override {
     printIndent(Depth_);
     std::cout << "ForExpr(var=" << N.getVarName() << ")";

@@ -1,0 +1,68 @@
+do { } while(cond) Statement
+
+1. Changes Made:
+- Added `TOK_DO = -93` to `include/Lexer.h` and mapped the `"do"` keyword to it in `src/Lexer.cpp`'s `Keywords` table.
+- Added `DoWhileExprAST` in `include/AST.h` (body + condition, mirroring `WhileExprAST`), wired into `ASTVisitor` (`visitDoWhile`), `ASTPrinter`, and the AST node-ID diffing helpers.
+- Implemented `ParseDoWhileExpr()` in `src/Parser.cpp`: `do { body } while (cond);` — requires the trailing `;` that `while`/`if`/`for` don't need, so `TOK_DO` was added to the parser's "statement already consumed its own semicolon" skip-lists rather than the brace-body no-semicolon lists. Emits `Expected 'while' after do-block` when `while` is missing after the closing `}`.
+- Added `Resolver::visitDoWhile()` and `TypeChecker::visitDoWhile()` in `src/Resolver.cpp`/`src/TypeChecker.cpp`, resolving/type-checking the body before the condition (matching do-while's actual execution order, the reverse of `while`'s condition-then-body order).
+- Implemented `DoWhileExprAST::codegen()` in `src/Codegen.cpp`: entry branches straight into the body block (no condition check on first entry), the condition is only evaluated after the body, and `continue`/`break` reuse the existing `LoopBlocks` stack (`continue` → condition re-check, `break` → after-loop), matching `WhileExprAST::codegen()`'s convention.
+- Added `CFGBuilder::visitDoWhile()` in `src/CFG.cpp`/`include/CFG.h`, wired into `CFGBuilder::visitExpr()`'s dispatch — builds body→cond→(body|exit) edges with the same literal-`true` special case `visitWhile()` uses (omitting the cond→exit edge) so `hasUnbreakableLoop()` correctly flags an unbreakable `do {} while(true)`.
+- Added `LintDoWhile()` in `src/Lint.cpp`, wired into `LintExpression()`'s dispatch and `ContainsLoopExit()` — without this, no lint warning (including the generic stale-condition `x != true`/`x == true` check) would ever fire inside a do-while's body or condition.
+- Created 10 regression tests: `tests/04_control_flow/15_do_while_basic.tr`, `16_do_while_runs_at_least_once.tr`, `17_do_while_break.tr`, `18_do_while_continue.tr`, `fail_do_while_missing_while.tr`; and `tests/14_cfg_analysis/28_infinite_do_while_true_warns.tr` through `32_do_while_stale_condition_warns.tr`.
+
+2. Why the Change was Made:
+- Turf previously had `while` and `for` but no loop guaranteeing at least one execution of its body, forcing awkward workarounds (duplicating the body before the loop, or restructuring as `while(true) { ...; if !cond { break } }`) for a very common pattern.
+- The design was already specified in `docs/planning/PHASE_3_ISSUES.md` (Issue #180) but never implemented — no `TOK_DO` or `DoWhileExprAST` existed anywhere in the codebase before this change. The spec's suggested token value (`-72`) turned out to already be taken by `TOK_PTR` (and the next candidate, `-92`, by `TOK_AS`), so `-93` was used instead.
+- `CFG.cpp` (added for Issue #185's cyclomatic-complexity/infinite-loop analysis) and `Lint.cpp` both dispatch on AST node type via hardcoded `dynamic_cast` chains. Without adding matching cases for `DoWhileExprAST`, a `do { } while(true)` with no break would have compiled clean with zero infinite-loop warning — silently defeating the issue's explicit requirement that infinite-loop detection cover "every variation."
+
+3. How it Helps/Changed:
+- `do { body } while (cond);` now compiles and produces correct LLVM IR, with the body always executing at least once — even when `cond` is false on entry.
+- `break` and `continue` behave correctly inside a do-while, including when nested inside other loops (do-while, while, or for) — each always targets its own innermost loop's condition/exit blocks via the shared `LoopBlocks` stack.
+- A do-while body is properly block-scoped: a variable declared inside the body is correctly out of scope by the time the condition (which sits textually after the closing `}`) is evaluated.
+- Missing `while` after a do-block's closing `}` is rejected with the exact diagnostic `Expected 'while' after do-block`.
+- `do { } while(true)` with no exit path triggers both `InfiniteLoopWarning` (generic CFG cycle analysis) and `SuspiciousInfiniteLoopWarning` (Lint's literal-true + no-loop-exit check) — and correctly stays silent when a `break`/`return` is present.
+- Stale-condition warnings (`x != true`, `x == true`) fire inside a do-while's condition exactly as they already did for `while`, since `LintBinaryExpr`'s check is generic once `LintExpression` actually recurses into the condition.
+
+4. Usage Examples (Source of Truth):
+
+```turflang
+import test;
+
+fn main(): int {
+    mut x: int = 5;
+
+    // Body always runs at least once, even though checked only afterward.
+    do {
+        x = x - 1;
+    } while (x > 0);
+    test::assert(x == 0, "");
+
+    // break/continue behave the same as in while/for.
+    mut i: int = 0;
+    mut sum: int = 0;
+    do {
+        i = i + 1;
+        if i % 2 == 0 {
+            continue;
+        }
+        if i > 8 {
+            break;
+        }
+        sum = sum + i;
+    } while (i < 100);
+    test::assert(sum == 16, ""); // 1 + 3 + 5 + 7
+
+    return 0;
+}
+```
+
+Rejected: missing `while` after the do-block.
+
+```turflang
+fn main(): int {
+    do {
+        return 0;
+    }
+    // error: Expected 'while' after do-block
+}
+```

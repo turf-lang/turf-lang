@@ -197,6 +197,7 @@ private:
   void visitBlock(ExprAST *E);
   void visitIf(ExprAST *E);
   void visitWhile(ExprAST *E);
+  void visitDoWhile(ExprAST *E);
   void visitReturn(ExprAST *E);
   void visitBreak(ExprAST *E);
   void visitContinue(ExprAST *E);

@@ -2699,6 +2699,54 @@ Value *WhileExprAST::codegen() {
   return Constant::getNullValue(Type::getDoubleTy(*TheContext));
 }
 
+Value *DoWhileExprAST::codegen() {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+  BasicBlock *LoopBodyBB =
+      BasicBlock::Create(*TheContext, "loopbody", TheFunction);
+  BasicBlock *LoopCondBB = BasicBlock::Create(*TheContext, "loopcond");
+  BasicBlock *AfterBB = BasicBlock::Create(*TheContext, "afterloop");
+
+  // Entry jumps straight into the body — no condition check on first entry.
+  Builder->CreateBr(LoopBodyBB);
+  Builder->SetInsertPoint(LoopBodyBB);
+
+  // continue -> re-check the condition; break -> after the loop.
+  LoopBlocks.push_back({LoopCondBB, AfterBB});
+
+  if (!Body->codegen()) {
+    LoopBlocks.pop_back();
+    return nullptr;
+  }
+
+  LoopBlocks.pop_back();
+
+  // Fall through to the condition check if the body didn't already terminate.
+  if (!Builder->GetInsertBlock()->getTerminator()) {
+    Builder->CreateBr(LoopCondBB);
+  }
+
+  // Condition Block
+  TheFunction->insert(TheFunction->end(), LoopCondBB);
+  Builder->SetInsertPoint(LoopCondBB);
+
+  Value *CondV = Cond->codegen();
+  if (!CondV)
+    return nullptr;
+
+  CondV = CastToType(CondV, TurfBool(), "loopcond");
+
+  // Conditional Branch: if true -> loop back to Body, else -> After
+  Builder->CreateCondBr(CondV, LoopBodyBB, AfterBB);
+
+  // After Loop Block
+  TheFunction->insert(TheFunction->end(), AfterBB);
+  Builder->SetInsertPoint(AfterBB);
+
+  // do-while loops always return 0.0, matching while's convention.
+  return Constant::getNullValue(Type::getDoubleTy(*TheContext));
+}
+
 // ForExprAST::codegen : desugars to init + while(cond) { body; step }
 Value *ForExprAST::codegen() {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();

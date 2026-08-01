@@ -1001,6 +1001,14 @@ void TypeChecker::visitWhile(WhileExprAST &Node) {
   setType(&Node, TurfVoid());
 }
 
+void TypeChecker::visitDoWhile(DoWhileExprAST &Node) {
+  if (Node.getBody())
+    Node.getBody()->accept(*this);
+  if (Node.getCond())
+    const_cast<ExprAST *>(Node.getCond())->accept(*this);
+  setType(&Node, TurfVoid());
+}
+
 void TypeChecker::visitFor(ForExprAST &Node) {
   // Visit start / end first so we know their types -- this determines the
   // loop variable's inferred type below.

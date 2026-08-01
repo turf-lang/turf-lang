@@ -491,6 +491,30 @@ public:
                                           CloneExprAST(Body.get()));
   }
 };
+
+// do-while loop: do { body } while (cond);
+// Key difference from WhileExprAST: the body always executes at least once,
+// since the condition is only checked after the first pass through the body.
+class DoWhileExprAST : public ExprAST {
+  SourceLocation Loc;
+  std::unique_ptr<ExprAST> Body, Cond;
+
+public:
+  DoWhileExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Body,
+                 std::unique_ptr<ExprAST> Cond)
+      : Loc(Loc), Body(std::move(Body)), Cond(std::move(Cond)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  ExprAST *getBody() const { return Body.get(); }
+  const ExprAST *getCond() const { return Cond.get(); }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitDoWhile(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<DoWhileExprAST>(Loc, CloneExprAST(Body.get()),
+                                            CloneExprAST(Cond.get()));
+  }
+};
 // For-loop: for <var> in <start>..<end> step <step_expr> { body }
 // Note: ForExprAST desugars to init + while(cond) { body; step } during Codegen.
 // The AST node is kept for clean visitor dispatch and future TypeChecker support.
@@ -1450,6 +1474,12 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
+  if (const auto *DoWhile = dynamic_cast<const DoWhileExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(DoWhile->getBody(), NodeIDs);
+    CollectAllNodeIDsInternal(DoWhile->getCond(), NodeIDs);
+    return;
+  }
+
   if (const auto *For = dynamic_cast<const ForExprAST *>(Node)) {
     CollectAllNodeIDsInternal(For->getStart(), NodeIDs);
     CollectAllNodeIDsInternal(For->getEnd(), NodeIDs);
@@ -1758,6 +1788,16 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
     CollectChangedNodeIDsInternal(OrigWhile->getCond(), ModWhile->getCond(),
                                   ChangedIDs);
     CollectChangedNodeIDsInternal(OrigWhile->getBody(), ModWhile->getBody(),
+                                  ChangedIDs);
+    return ChangedIDs;
+  }
+
+  // DoWhileExprAST: Recursively diff body and condition
+  if (auto *OrigDoWhile = dynamic_cast<const DoWhileExprAST *>(OriginalAST)) {
+    auto *ModDoWhile = dynamic_cast<const DoWhileExprAST *>(ModifiedAST);
+    CollectChangedNodeIDsInternal(OrigDoWhile->getBody(), ModDoWhile->getBody(),
+                                  ChangedIDs);
+    CollectChangedNodeIDsInternal(OrigDoWhile->getCond(), ModDoWhile->getCond(),
                                   ChangedIDs);
     return ChangedIDs;
   }
