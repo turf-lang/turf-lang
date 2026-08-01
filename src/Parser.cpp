@@ -1353,7 +1353,9 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
 }
 
 // ParseDoWhileExpr - parses:
-//   do { body } while (cond);
+//   do { body } while cond;
+// Parens around `cond` are optional, same as if/while/elseif -- only needed
+// for grouping in complex conditions.
 // Unlike while/if/for, the body always runs at least once: the condition is
 // only checked after the first pass through the body.
 std::unique_ptr<ExprAST> ParseDoWhileExpr() {
@@ -1364,7 +1366,7 @@ std::unique_ptr<ExprAST> ParseDoWhileExpr() {
     LogErrorAt(
         KeywordLoc,
         "Expected '{' to open the do-block body."
-        "\n  Hint: do-while loops must use braces: do { ... } while (cond);");
+        "\n  Hint: do-while loops must use braces: do { ... } while cond;");
     return nullptr;
   }
 
@@ -1378,21 +1380,12 @@ std::unique_ptr<ExprAST> ParseDoWhileExpr() {
   }
   getNextToken(); // eat 'while'
 
-  if (CurTok != '(') {
-    LogErrorAt(CurLoc, "Expected '(' after 'while' in do-while loop.");
-    return nullptr;
-  }
-  getNextToken(); // eat '('
-
+  // Parens around the condition are optional, same as if/while/elseif:
+  // ParseExpression() already handles a leading '(' as grouping via
+  // ParseParenExpr(), so no explicit '(' / ')' handling is needed here.
   std::unique_ptr<ExprAST> Cond = ParseExpression();
   if (!Cond)
     return nullptr;
-
-  if (CurTok != ')') {
-    LogErrorAt(CurLoc, "Expected ')' after do-while condition.");
-    return nullptr;
-  }
-  getNextToken(); // eat ')'
 
   if (CurTok != ';') {
     LogErrorAt(CurLoc, "Expected ';' after do-while loop.");
