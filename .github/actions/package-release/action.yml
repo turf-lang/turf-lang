@@ -32,6 +32,13 @@ runs:
         cp "${{ inputs.binary-path }}" "${DIR}/"
         cp scripts/compile_and_run.sh "${DIR}/scripts/"
         cp README.md "${DIR}/"
+        # Bundle the standard library so the binary can resolve imports with
+        # zero setup when run from inside the extracted archive (binary-
+        # relative fallback in ParseModuleImportByName(), src/Parser.cpp) --
+        # without this, every release binary was unable to `import` anything
+        # at all once separated from a full repo checkout. See TURF_HOME in
+        # README.md for pointing a relocated binary back at this lib/ dir.
+        cp -r lib "${DIR}/"
 
         if [ -n "${{ inputs.extra-files }}" ]; then
           while IFS= read -r f; do
