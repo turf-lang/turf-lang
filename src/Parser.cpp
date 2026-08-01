@@ -82,9 +82,6 @@ int getNextToken() {
 }
 
 void InitializePrecedence() {
-  // Cast
-  BinopPrecedence[TOK_TO] = 5;
-
   // Assignment
   BinopPrecedence['='] = 10;
   BinopPrecedence[TOK_ASSIGN] = 10;
@@ -93,6 +90,18 @@ void InitializePrecedence() {
   BinopPrecedence[TOK_MUL_ASSIGN] = 10;
   BinopPrecedence[TOK_DIV_ASSIGN] = 10;
   BinopPrecedence[TOK_MOD_ASSIGN] = 10;
+
+  // Cast. Must bind TIGHTER than assignment (12 > 10) so `y = x to int;`
+  // parses as `y = (x to int)`, not `(y = x) to int` -- the latter used to
+  // silently discard the cast entirely (the assignment's own value, already
+  // computed and stored, just got cast-and-thrown-away), which was live in
+  // lib/std (`self.data = mem::malloc(n) to T*;` in list.tr/stack.tr/queue.tr/
+  // map.tr/mem.tr) and only "worked" by accident because raw `ptr` already
+  // implicitly coerces to any `T*` (see typesCompatible()'s Rule 2) -- the
+  // explicit cast was dead weight, not the thing actually making it compile.
+  // Still looser than every other real binary operator (15+) so
+  // `1 + 2 to double` keeps meaning `(1 + 2) to double`, unchanged.
+  BinopPrecedence[TOK_TO] = 12;
 
   // Logical
   BinopPrecedence[TOK_OR] = 15;  // ||
@@ -1001,10 +1010,17 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
 
     // LOOKAHEAD: Is the *next* operator even stronger?
     int NextPrec = GetTokPrecedence();
+    // Right-associative operators: all assignment forms (so `a = b = c`
+    // groups as `a = (b = c)`) and exponentiation (so `2 ** 3 ** 2` groups
+    // as `2 ** (3 ** 2)` == 512, matching every other language that has a
+    // `**` operator -- this used to be missing, silently making `**`
+    // left-associative like `+`/`*` instead (`(2**3)**2` == 64), with no
+    // test ever exercising a chained exponent to catch it.
     bool isRightAssociative =
         (BinOp == TOK_ASSIGN || BinOp == TOK_PLUS_ASSIGN ||
          BinOp == TOK_MINUS_ASSIGN || BinOp == TOK_MUL_ASSIGN ||
-         BinOp == TOK_DIV_ASSIGN || BinOp == TOK_MOD_ASSIGN);
+         BinOp == TOK_DIV_ASSIGN || BinOp == TOK_MOD_ASSIGN ||
+         BinOp == TOK_POWER);
     if (TokPrec < NextPrec || (isRightAssociative && TokPrec == NextPrec)) {
       // Recursively parse the high-priority part first
       RHS = ParseBinOpRHS(isRightAssociative ? TokPrec : TokPrec + 1,
