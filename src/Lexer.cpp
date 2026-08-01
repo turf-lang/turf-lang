@@ -721,6 +721,11 @@ int gettok() {
     if (LastChar == '>') {
       LastChar = SourceFile->get();
       CurCol++;
+      if (LastChar == '=') {
+        LastChar = SourceFile->get();
+        CurCol++;
+        return TOK_RSHIFT_ASSIGN;
+      }
       return TOK_RSHIFT;
     }
 
@@ -740,6 +745,11 @@ int gettok() {
     if (LastChar == '<') {
       LastChar = SourceFile->get();
       CurCol++;
+      if (LastChar == '=') {
+        LastChar = SourceFile->get();
+        CurCol++;
+        return TOK_LSHIFT_ASSIGN;
+      }
       return TOK_LSHIFT;
     }
 
@@ -756,6 +766,12 @@ int gettok() {
       return TOK_AND;
     }
 
+    if (LastChar == '=') {
+      LastChar = SourceFile->get();
+      CurCol++;
+      return TOK_AND_ASSIGN;
+    }
+
     return '&';
   }
 
@@ -769,7 +785,26 @@ int gettok() {
       return TOK_OR;
     }
 
+    if (LastChar == '=') {
+      LastChar = SourceFile->get();
+      CurCol++;
+      return TOK_OR_ASSIGN;
+    }
+
     return '|';
+  }
+
+  if (LastChar == '^') {
+    LastChar = SourceFile->get();
+    CurCol++;
+
+    if (LastChar == '=') {
+      LastChar = SourceFile->get();
+      CurCol++;
+      return TOK_XOR_ASSIGN;
+    }
+
+    return '^';
   }
 
   if (LastChar == '+') {
@@ -823,6 +858,11 @@ int gettok() {
     if (LastChar == '*') {
       LastChar = SourceFile->get();
       CurCol++;
+      if (LastChar == '=') {
+        LastChar = SourceFile->get();
+        CurCol++;
+        return TOK_POWER_ASSIGN;
+      }
       return TOK_POWER;
     }
 

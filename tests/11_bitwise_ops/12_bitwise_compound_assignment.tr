@@ -1,0 +1,42 @@
+// Test: Compound-assignment forms of the bitwise/shift operators (&=, |=,
+// ^=, <<=, >>=). Only the plain binary forms (&, |, ^, <<, >>) existed
+// before -- there was no way to write `x &= mask;` instead of the more
+// verbose `x = x & mask;`, unlike the arithmetic operators which already had
+// += -= *= /= %=. Mirrors 09_acceptance_criteria.tr's values so each result
+// here is directly checkable against the plain-operator acceptance test.
+
+import test;
+
+fn main(): int {
+    mut a: int = 5;
+    a &= 3;
+    test::assert(a == 1, "5 &= 3 should equal 1 (same as 5 & 3)");
+
+    mut b: int = 5;
+    b |= 3;
+    test::assert(b == 7, "5 |= 3 should equal 7 (same as 5 | 3)");
+
+    mut c: int = 5;
+    c ^= 3;
+    test::assert(c == 6, "5 ^= 3 should equal 6 (same as 5 ^ 3)");
+
+    mut d: int = 1;
+    d <<= 4;
+    test::assert(d == 16, "1 <<= 4 should equal 16 (same as 1 << 4)");
+
+    mut e: int = 256;
+    e >>= 2;
+    test::assert(e == 64, "256 >>= 2 should equal 64 (same as 256 >> 2)");
+
+    // Chained on the same variable, left to right (each op reads the
+    // variable's CURRENT value, not its original one).
+    mut f: int = 255;
+    f &= 15;                  // 255 & 15  = 15
+    f |= 48;                  // 15  | 48  = 63
+    f ^= 15;                  // 63  ^ 15  = 48
+    f <<= 1;                  // 48  << 1  = 96
+    f >>= 2;                  // 96  >> 2  = 24
+    test::assert(f == 24, "chained bitwise compound-assign should equal 24");
+
+    return 0;
+}

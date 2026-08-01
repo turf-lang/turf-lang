@@ -82,7 +82,7 @@ int getNextToken() {
 }
 
 void InitializePrecedence() {
-  // Assignment
+  // Assignment (incl. all compound-assignment forms)
   BinopPrecedence['='] = 10;
   BinopPrecedence[TOK_ASSIGN] = 10;
   BinopPrecedence[TOK_PLUS_ASSIGN] = 10;
@@ -90,6 +90,12 @@ void InitializePrecedence() {
   BinopPrecedence[TOK_MUL_ASSIGN] = 10;
   BinopPrecedence[TOK_DIV_ASSIGN] = 10;
   BinopPrecedence[TOK_MOD_ASSIGN] = 10;
+  BinopPrecedence[TOK_AND_ASSIGN] = 10;
+  BinopPrecedence[TOK_OR_ASSIGN] = 10;
+  BinopPrecedence[TOK_XOR_ASSIGN] = 10;
+  BinopPrecedence[TOK_LSHIFT_ASSIGN] = 10;
+  BinopPrecedence[TOK_RSHIFT_ASSIGN] = 10;
+  BinopPrecedence[TOK_POWER_ASSIGN] = 10;
 
   // Cast. Must bind TIGHTER than assignment (12 > 10) so `y = x to int;`
   // parses as `y = (x to int)`, not `(y = x) to int` -- the latter used to
@@ -1020,6 +1026,9 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
         (BinOp == TOK_ASSIGN || BinOp == TOK_PLUS_ASSIGN ||
          BinOp == TOK_MINUS_ASSIGN || BinOp == TOK_MUL_ASSIGN ||
          BinOp == TOK_DIV_ASSIGN || BinOp == TOK_MOD_ASSIGN ||
+         BinOp == TOK_AND_ASSIGN || BinOp == TOK_OR_ASSIGN ||
+         BinOp == TOK_XOR_ASSIGN || BinOp == TOK_LSHIFT_ASSIGN ||
+         BinOp == TOK_RSHIFT_ASSIGN || BinOp == TOK_POWER_ASSIGN ||
          BinOp == TOK_POWER);
     if (TokPrec < NextPrec || (isRightAssociative && TokPrec == NextPrec)) {
       // Recursively parse the high-priority part first
@@ -1035,8 +1044,16 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
                                                 std::move(RHS));
     } else if (BinOp == TOK_PLUS_ASSIGN || BinOp == TOK_MINUS_ASSIGN ||
                BinOp == TOK_MUL_ASSIGN || BinOp == TOK_DIV_ASSIGN ||
-               BinOp == TOK_MOD_ASSIGN) {
-      char Op = '+';
+               BinOp == TOK_MOD_ASSIGN || BinOp == TOK_AND_ASSIGN ||
+               BinOp == TOK_OR_ASSIGN || BinOp == TOK_XOR_ASSIGN ||
+               BinOp == TOK_LSHIFT_ASSIGN || BinOp == TOK_RSHIFT_ASSIGN ||
+               BinOp == TOK_POWER_ASSIGN) {
+      // Opcode is the plain operator this desugars to -- reusing the exact
+      // same encoding BinaryExprAST uses (raw ASCII for single-char ops,
+      // the token enum for multi-char ones) so TypeChecker/Codegen's
+      // existing per-operator switches can be shared/mirrored directly
+      // instead of inventing a second parallel encoding.
+      int Op = '+';
       if (BinOp == TOK_MINUS_ASSIGN)
         Op = '-';
       else if (BinOp == TOK_MUL_ASSIGN)
@@ -1045,6 +1062,18 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
         Op = '/';
       else if (BinOp == TOK_MOD_ASSIGN)
         Op = '%';
+      else if (BinOp == TOK_AND_ASSIGN)
+        Op = '&';
+      else if (BinOp == TOK_OR_ASSIGN)
+        Op = '|';
+      else if (BinOp == TOK_XOR_ASSIGN)
+        Op = '^';
+      else if (BinOp == TOK_LSHIFT_ASSIGN)
+        Op = TOK_LSHIFT;
+      else if (BinOp == TOK_RSHIFT_ASSIGN)
+        Op = TOK_RSHIFT;
+      else if (BinOp == TOK_POWER_ASSIGN)
+        Op = TOK_POWER;
 
       LHS = std::make_unique<CompoundAssignmentExprAST>(OpLoc, Op, std::move(LHS),
                                                         std::move(RHS));

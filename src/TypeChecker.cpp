@@ -801,9 +801,57 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
   TurfTypePtr LhsTy = getType(Node.getLHS());
   TurfTypePtr RhsTy = getType(Node.getRHS());
   TurfTypePtr ResultTy;
+  int Op = Node.getOpcode();
 
-  if (LhsTy && RhsTy) {
-    if (inferArithmeticType(Node.getLoc(), Node.getOpcode(), LhsTy.get(), RhsTy.get(), ResultTy)) {
+  // Bitwise compound-assign (&=, |=, ^=, <<=, >>=) -- same "int operands
+  // only" rule as the plain binary form (visitBinary()'s isBitwise branch).
+  // Skipping this and falling into the generic inferArithmeticType() call
+  // below would silently accept e.g. `d &= 3.0;` for a double `d`: that
+  // function only ever checks "both numeric" and bool/double promote to
+  // int/double like ordinary arithmetic, so it would never reject the
+  // double operand the way bitwise ops must.
+  auto isBitwiseOp = [](int op) -> bool {
+    return op == '&' || op == '|' || op == '^' ||
+           op == TOK_LSHIFT || op == TOK_RSHIFT;
+  };
+  if (isBitwiseOp(Op)) {
+    if (LhsTy && !LhsTy->isNamed("int")) {
+      reportError(Node.getLoc(),
+                  "Bitwise compound assignment requires an integer operand, "
+                  "but the left operand is '" + LhsTy->getName() + "'.");
+    }
+    if (RhsTy && !RhsTy->isNamed("int")) {
+      reportError(Node.getLoc(),
+                  "Bitwise compound assignment requires an integer operand, "
+                  "but the right operand is '" + RhsTy->getName() + "'.");
+    }
+    // LhsTy is set on Node below (unconditionally, same as every other
+    // branch) -- nothing further to do here.
+  } else if (Op == TOK_POWER) {
+    // `**=` -- same numeric-operand rule as the plain `**` binary form.
+    // Deliberately does NOT run the generic typesCompatible(ResultTy, LhsTy)
+    // check below: `**`'s result is always double (see visitBinary()'s
+    // TOK_POWER branch and Codegen's CompoundAssignmentExprAST::codegen(),
+    // which lowers this through the same llvm.pow-on-doubles path and casts
+    // the result back down to LhsTy for the store), so an int LHS is
+    // perfectly valid here (`x **= 2;` narrows the pow result back to int)
+    // even though ResultTy itself is double -- the generic check would
+    // reject that as "cannot assign double to int", which is wrong for this
+    // one operator specifically.
+    if (LhsTy && !LhsTy->isNumeric()) {
+      reportError(Node.getLoc(),
+                  "Exponentiation compound assignment requires a numeric "
+                  "operand, but the left operand is '" + LhsTy->getName() + "'.");
+    }
+    if (RhsTy && !RhsTy->isNumeric()) {
+      reportError(Node.getLoc(),
+                  "Exponentiation compound assignment requires a numeric "
+                  "operand, but the right operand is '" + RhsTy->getName() + "'.");
+    }
+    // LhsTy is set on Node below (unconditionally, same as every other
+    // branch) -- nothing further to do here.
+  } else if (LhsTy && RhsTy) {
+    if (inferArithmeticType(Node.getLoc(), Op, LhsTy.get(), RhsTy.get(), ResultTy)) {
       if (!typesCompatible(ResultTy.get(), LhsTy.get())) {
         const VariableExprAST *LHSVar_early = findRootVariable(Node.getLHS());
         std::vector<RelatedLocation> Related;

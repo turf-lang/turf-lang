@@ -1,0 +1,10 @@
+// FAIL TEST: Compound bitwise-XOR assignment with a non-integer LHS.
+// d ^= 3 should emit a TypeError (double is not an integer type), same
+// restriction as the plain `d ^ 3` form (see fail_bitwise_xor_double.tr).
+
+fn main(): int {
+    mut d: double = 1.5;
+    d ^= 3;  // TypeError: bitwise compound assignment requires integer operands
+
+    return 0;
+}

@@ -229,7 +229,13 @@ enum Token {
   TOK_PRODUCE = -90, ///< `produce` keyword — `recover produce value` form
   TOK_RUN     = -91, ///< `run`     keyword — `recover run {}` / `recover as x run {}` block form
   TOK_AS      = -92, ///< `as`      keyword — `recover as x run {}` binding form
-  TOK_DO      = -93  ///< `do`      keyword — `do { } while (cond)` loop (Issue #180)
+  TOK_DO      = -93, ///< `do`      keyword — `do { } while (cond)` loop (Issue #180)
+  TOK_AND_ASSIGN    = -94, ///< `&=`  token — bitwise-AND compound assignment
+  TOK_OR_ASSIGN     = -95, ///< `|=`  token — bitwise-OR compound assignment
+  TOK_XOR_ASSIGN    = -96, ///< `^=`  token — bitwise-XOR compound assignment
+  TOK_LSHIFT_ASSIGN = -97, ///< `<<=` token — left-shift compound assignment
+  TOK_RSHIFT_ASSIGN = -98, ///< `>>=` token — right-shift compound assignment
+  TOK_POWER_ASSIGN  = -99  ///< `**=` token — exponentiation compound assignment
 };
 
 int gettok();
@@ -270,6 +276,12 @@ inline std::string OpToDisplayString(int Op) {
     case TOK_POWER: return "**";
     case TOK_LSHIFT: return "<<";
     case TOK_RSHIFT: return ">>";
+    case TOK_AND_ASSIGN: return "&=";
+    case TOK_OR_ASSIGN: return "|=";
+    case TOK_XOR_ASSIGN: return "^=";
+    case TOK_LSHIFT_ASSIGN: return "<<=";
+    case TOK_RSHIFT_ASSIGN: return ">>=";
+    case TOK_POWER_ASSIGN: return "**=";
     default:
       if (Op >= 0 && Op <= 127 && isprint(Op))
         return std::string(1, static_cast<char>(Op));

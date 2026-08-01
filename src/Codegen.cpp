@@ -1998,6 +1998,35 @@ Value *CompoundAssignmentExprAST::codegen() {
   Value *LHSVal = Builder->CreateLoad(LLVMTy, Ptr, "compassign.load");
 
   TurfTypePtr VarType = getTurfTypeFromLLVM(LLVMTy);
+
+  // `**=` handled separately, BEFORE the generic `CastRHS = CastToType(Val,
+  // VarType, ...)` below: llvm.pow only has a double overload, so both
+  // operands must go in as doubles regardless of LhsTy. Using the generic
+  // CastRHS here would be wrong for an int LHS -- it truncates the exponent
+  // to int BEFORE the call (`x **= 2.5;` on an int x would silently compute
+  // `x ** 2`, not `x ** 2.5` rounded afterward). Mirrors visitBinary()'s
+  // TOK_POWER codegen (both operands cast to double, llvm.pow, one shared
+  // path) but additionally casts the double result back down to LHSTy
+  // before the store, since a compound assignment must leave the variable's
+  // own declared type unchanged.
+  if (Opcode == TOK_POWER) {
+    Value *BaseD = CastToType(LHSVal, TurfDouble(), "compassign.powbase", Loc);
+    Value *ExpD = CastToType(Val, TurfDouble(), "compassign.powexp", Loc);
+#if LLVM_VERSION_MAJOR >= 19
+    Function *PowFunc = llvm::Intrinsic::getOrInsertDeclaration(
+      TheModule.get(), llvm::Intrinsic::pow,
+      {Type::getDoubleTy(*TheContext)});
+#else
+    Function *PowFunc = llvm::Intrinsic::getDeclaration(
+      TheModule.get(), llvm::Intrinsic::pow,
+      {Type::getDoubleTy(*TheContext)});
+#endif
+    Value *PowResultD = Builder->CreateCall(PowFunc, {BaseD, ExpD}, "powtmp");
+    Value *Result = CastToType(PowResultD, VarType, "compassign.powcast", Loc);
+    Builder->CreateStore(Result, Ptr);
+    return Result;
+  }
+
   Value *CastRHS = CastToType(Val, VarType, "compassign.cast", Loc);
 
   Value *Result = nullptr;
@@ -2058,6 +2087,24 @@ Value *CompoundAssignmentExprAST::codegen() {
                       : Builder->CreateSRem(LHSVal, CastRHS, "modtmp");
     break;
   }
+  // Bitwise compound-assign: TypeChecker::visitCompoundAssignment() already
+  // rejected anything but int operands for these, so LHSVal/CastRHS are
+  // guaranteed int here -- no isDouble branching needed, unlike +/-/*/%.
+  case '^':
+    Result = Builder->CreateXor(LHSVal, CastRHS, "xorassigntmp");
+    break;
+  case '&':
+    Result = Builder->CreateAnd(LHSVal, CastRHS, "andassigntmp");
+    break;
+  case '|':
+    Result = Builder->CreateOr(LHSVal, CastRHS, "orassigntmp");
+    break;
+  case TOK_LSHIFT:
+    Result = Builder->CreateShl(LHSVal, CastRHS, "lshiftassigntmp");
+    break;
+  case TOK_RSHIFT:
+    Result = Builder->CreateAShr(LHSVal, CastRHS, "rshiftassigntmp");
+    break;
   default:
     llvm::report_fatal_error("Unknown compound assignment operator");
   }

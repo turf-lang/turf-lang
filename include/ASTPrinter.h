@@ -165,7 +165,12 @@ public:
 
   void visitCompoundAssignment(CompoundAssignmentExprAST &N) override {
     printIndent(Depth_);
-    std::cout << "CompoundAssignmentExpr(op:'" << (char)N.getOpcode() << "')\n";
+    // OpToDisplayString(), not a raw (char) cast: the opcode can now be a
+    // multi-char operator (&=, <<=, **=, ...) encoded as a negative token
+    // constant, which a bare char cast renders as garbage (see its doc
+    // comment in Lexer.h for the identical bug this already caused for
+    // BinaryExprAST's own dump output).
+    std::cout << "CompoundAssignmentExpr(op:'" << OpToDisplayString(N.getOpcode()) << "=')\n";
     descend();
     print(const_cast<ExprAST *>(N.getLHS()), Depth_);
     print(const_cast<ExprAST *>(N.getRHS()), Depth_);
