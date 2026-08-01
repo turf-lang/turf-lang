@@ -55,7 +55,43 @@ Useful compiler introspection flags, beyond ordinary compilation: `--dump-ast`, 
 ## Installation
 
 No package-manager distribution yet. Build from source (see [Building from Source](#building-from-source)), or use a pre-built binary from the [Releases page](../../releases) if one exists for your platform — CI currently builds for Linux (x86_64, Arch x86_64), macOS (Apple Silicon
-and Intel), and Windows (x86_64).
+and Intel), and Windows (x86_64). Release archives bundle `lib/` alongside the binary, so extracting one and running the binary from inside the extracted folder works with no further setup.
+
+### Setting up `TURF_HOME`
+
+The compiler resolves every `import` (its own standard library under `lib/std/`, and — once a package format exists — third-party packages under `lib/usr/`) against the `TURF_HOME` environment variable: it should point at the Turf installation root, i.e. the folder that directly contains `lib/`. Running the binary from right inside an extracted release archive, or a source checkout you've just built, needs no setup at all — with `TURF_HOME` unset, the compiler falls back to looking for `lib/` next to its own binary. You only need to set `TURF_HOME` once you move the binary somewhere else: a system-wide install, a symlink on `PATH`, a shortcut, etc.
+
+**Linux / macOS** (bash or zsh) — add one line to your shell profile (`~/.bashrc`, `~/.zshrc`, or `~/.profile`, whichever your shell reads) so it's set in every new terminal:
+
+```bash
+export TURF_HOME="/path/to/turf-installation"   # e.g. the extracted release folder, or this repo's root
+```
+
+Then either open a new terminal, or run `source ~/.zshrc` (or your equivalent file) to pick it up in the current one.
+
+**Windows — PowerShell** — set it once, persistently, for your user account (a new PowerShell/cmd window is required for it to take effect):
+
+```powershell
+setx TURF_HOME "C:\path\to\turf-installation"
+```
+
+Or, for the current session only (lost when the window closes):
+
+```powershell
+$env:TURF_HOME = "C:\path\to\turf-installation"
+```
+
+**Windows — Command Prompt (cmd.exe)** — same idea:
+
+```bat
+setx TURF_HOME "C:\path\to\turf-installation"
+:: or, current session only:
+set TURF_HOME=C:\path\to\turf-installation
+```
+
+**Windows — GUI, if you'd rather not use a terminal**: Start Menu → search "Environment Variables" → *Edit environment variables for your account* → *New...* under "User variables" → Variable name `TURF_HOME`, Variable value the path to your Turf installation → OK. Log out/in (or just open a fresh terminal) for it to apply.
+
+Once set, verify it from a fresh terminal: `cd` somewhere completely unrelated to your Turf installation (e.g. your home directory) and compile the `hello.tr` from [Quick Start](#quick-start) below. If `TURF_HOME` is wired up correctly, `import io;` resolves regardless of your current directory or where the `turf` binary itself lives.
 
 ## Quick Start
 
