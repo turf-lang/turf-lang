@@ -1,0 +1,39 @@
+import test;
+
+// Regression test (Issue #180 follow-up): parens are optional even for
+// compound/complex conditions (&&, ||) -- they only exist for grouping, same
+// as every other conditional in Turf. Exercises both styles side by side so
+// a regression that only fixes the "simple condition, no parens" case (but
+// not compound conditions, or breaks parenthesized conditions) is caught.
+fn main(): int {
+    mut a: int = 0;
+    mut b: int = 10;
+
+    // No parens, compound condition.
+    do {
+        a = a + 1;
+        b = b - 1;
+    } while a < 5 && b > 0;
+    test::assert(a == 5, "");
+    test::assert(b == 5, "");
+
+    // Parens still work when the caller wants them for grouping/readability.
+    mut c: int = 0;
+    do {
+        c = c + 1;
+    } while (c < 3 || c < 1);
+    test::assert(c == 3, "");
+
+    // Parens used purely for grouping precedence inside the condition.
+    mut d: int = 0;
+    mut finished: bool = false;
+    do {
+        d = d + 1;
+        if d == 4 {
+            finished = true;
+        }
+    } while (d < 10) && !finished;
+    test::assert(d == 4, "");
+
+    return 0;
+}

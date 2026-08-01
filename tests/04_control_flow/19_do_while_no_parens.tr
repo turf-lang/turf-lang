@@ -1,0 +1,24 @@
+import test;
+
+// Regression test (Issue #180 follow-up): parentheses around a do-while's
+// condition are optional, exactly like if/while/elseif -- they're only ever
+// needed for grouping in complex conditions, never mandatory syntax. Before
+// this fix, ParseDoWhileExpr() hard-required '(' and ')' around the
+// condition (unlike ParseWhileExpr()/ParseIfExpr(), which just call
+// ParseExpression() directly), so `do { } while x > 0;` was rejected with
+// "Expected '(' after 'while' in do-while loop."
+fn main(): int {
+    mut x: int = 5;
+    do {
+        x = x - 1;
+    } while x > 0;
+    test::assert(x == 0, "");
+
+    mut i: int = 0;
+    do {
+        i = i + 1;
+    } while i < 3;
+    test::assert(i == 3, "");
+
+    return 0;
+}
