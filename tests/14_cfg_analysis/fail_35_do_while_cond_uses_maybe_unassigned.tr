@@ -1,0 +1,20 @@
+// Regression test (Issue #180 follow-up): DefiniteAssignmentPass must reach
+// a do-while's condition. CFGBuilder::visitDoWhile() adds the condition
+// expression to `dowhile.cond`'s own statement list (see CFG.cpp), so a read
+// of a variable that isn't assigned on every path reaching that block must
+// still be flagged -- exactly like it already is for a plain `while`
+// condition. `y` is only assigned inside a conditionally-taken branch of the
+// loop body, so on the very first pass through `dowhile.cond` (i starts at
+// 0, so `i > 100` never took the true branch) `y` is not definitely
+// assigned yet.
+fn main(): int {
+    mut y: int;
+    mut i: int = 0;
+    do {
+        if i > 100 {
+            y = 5;
+        }
+        i = i + 1;
+    } while y > 0;
+    return 0;
+}
