@@ -238,7 +238,18 @@ WHAT MODULES EXIST TODAY
           trim/to_upper/to_lower/repeat, and more
 
   None of these are special-cased by the compiler in any way -- they are
-  ordinary Turf source files in lib/std/*.tr, and a program can declare
-  and import its own modules the exact same way (any `.tr` file next to
-  your source, or on the module search path, is importable by its
+  ordinary Turf source files under lib/std/ (grouped into subfolders like
+  core/, collections/, io/, mem/, math/, testing/ purely for browsing the
+  repo -- `import list;` never names a path, so which subfolder a module's
+  file lives in is invisible to a program importing it). A program can
+  declare and import its own modules the exact same way (any `.tr` file
+  next to your source, or on the module search path, is importable by its
   filename).
+
+  The module search path is: the installation's stdlib (`$TURF_HOME/lib/std`
+  if TURF_HOME is set in your environment, else wherever the compiler
+  binary's own `lib/` sits), then an installed-package directory
+  (`$TURF_HOME/lib/usr`), then the importing file's own directory, then the
+  current working directory. Set TURF_HOME in your shell profile to point at
+  a Turf installation if the compiler binary isn't sitting next to its own
+  `lib/` (e.g. a relocated or system-installed binary).

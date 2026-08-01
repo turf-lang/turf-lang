@@ -12,6 +12,14 @@ ordinary Turf functions/structs layered on top so calling code never sees
 `void*`/FFI details. Any new module proposed below should follow the exact
 same shape.
 
+As of 2026-08, `lib/std/` is organized into logical subfolders on disk
+(`core/`, `collections/`, `io/`, `mem/`, `math/`, `testing/`) — this is
+purely a browsing convenience, `import <module>;` doesn't reference a path
+and never needs to change when a module moves between subfolders (see
+`docs/architecture/modules_and_scope_resolution.md` Part 2.4). Any new
+module proposed below goes in the subfolder matching its category, not the
+`lib/std/` root.
+
 ---
 
 ## 1. Current baseline (what actually exists right now)

@@ -415,7 +415,7 @@ New diagnostics (`include/Errors.h:1625`, `1647`) follow this codebase's existin
 | `include/TypeChecker.h`, `src/TypeChecker.cpp` | `visitScopeAccess`'s `ErrorVariantRef` branch, `visitReturn`'s `!T` rule, `inferRelationalType`'s `AnyErrorType` branch, `visitRecoverExpr`, `AllPathsDiverge`, `substituteReturnType`'s `TurfErrorUnionType` branch |
 | `src/Codegen.cpp` | `getFallibleValueType`, `BoxToI64Slot`/`UnboxFromI64Slot`, `BuildErrorTag`/`GetErrorTagValue`, `ReturnExprAST::codegen()`'s wrap logic, `RecoverExprAST::codegen()`, `BinaryExprAST::codegen()`'s equality dispatch |
 | `include/Errors.h` | `NeverReturnsErrorWarning`, `BareErrorAsBindingError` |
-| `lib/std/net.tr`, `lib/std/math.tr`, `lib/std/map.tr` | Real stdlib usage: `NetworkError` (`connect`/`bind`/`accept`), `MathError` (`divide`), `MapError` (`tryGet`) |
+| `lib/std/io/net.tr`, `lib/std/math/math.tr`, `lib/std/collections/map.tr` | Real stdlib usage: `NetworkError` (`connect`/`bind`/`accept`), `MathError` (`divide`), `MapError` (`tryGet`) |
 | `tests/25_errors/` | The full regression suite for this feature |
 
 ---

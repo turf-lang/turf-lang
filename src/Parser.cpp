@@ -27,8 +27,10 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include <cstdlib>
 #include <map>
 #include <memory>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -3139,26 +3141,83 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   return std::make_unique<BlockExprAST>(std::move(Exprs));
 }
 
+// The Turf installation root: everything module resolution needs (lib/std,
+// and lib/usr once a package manager exists) hangs off this one directory.
+// `TURF_HOME`, if set, IS the installation -- a real install unpacked
+// somewhere, or a dev checkout of this repo pointed at by hand -- and is
+// authoritative. Without it, fall back to deriving the root from the
+// compiler binary's own location (<binary>/..), so a freshly-built
+// `build/turf` still finds the sibling `lib/` directory with zero setup
+// (this is the previous, only, behavior -- kept as a fallback rather than
+// removed so CI/local dev builds don't all need TURF_HOME exported just to
+// run the test suite). See docs/architecture/modules_and_scope_resolution.md
+// Part 2.4 for the full rationale.
+static std::string TurfInstallRoot() {
+  if (const char *Env = std::getenv("TURF_HOME")) {
+    if (*Env)
+      return std::string(Env);
+  }
+  llvm::SmallString<128> Root(CompilerExecutablePath);
+  llvm::sys::path::remove_filename(Root); // strip the "turf"/"turf.exe" itself
+  llvm::sys::path::append(Root, "..");
+  return Root.str().str();
+}
+
+// Recursively indexes every "<name>.tr" file under <Root>/lib/<SubdirName>
+// ONCE per (Root, SubdirName) pair, keyed by module name (filename minus
+// ".tr"), and caches it for the rest of this compiler invocation. `lib/std`
+// is organized into logical subfolders on disk (core/collections/io/mem/
+// math/testing) purely for humans browsing the repo -- `import list;` names
+// a MODULE, never a path, so this index is what lets a module move between
+// subfolders later without a single import statement anywhere changing.
+// `lib/usr` (third-party/user-installed packages, one subfolder per module
+// name -- no installer exists yet, this is the search side of that story
+// only) is indexed the same way, just under a different subdirectory.
+static const std::unordered_map<std::string, std::string> &
+IndexModuleDir(const std::string &Root, const char *SubdirName) {
+  static std::map<std::string, std::unordered_map<std::string, std::string>>
+      Cache;
+  std::string Key = Root + "|" + SubdirName;
+  auto Cached = Cache.find(Key);
+  if (Cached != Cache.end())
+    return Cached->second;
+
+  std::unordered_map<std::string, std::string> Index;
+  llvm::SmallString<256> Dir(Root);
+  llvm::sys::path::append(Dir, "lib", SubdirName);
+
+  std::error_code EC;
+  for (llvm::sys::fs::recursive_directory_iterator I(Dir.str(), EC), E;
+       !EC && I != E; I.increment(EC)) {
+    if (I->type() == llvm::sys::fs::file_type::regular_file &&
+        llvm::sys::path::extension(I->path()) == ".tr") {
+      std::string Name = llvm::sys::path::stem(I->path()).str();
+      // First hit wins. A genuine same-name collision can't happen in
+      // lib/std today (curated, one file per module name) and lib/usr has
+      // no installer yet to ever produce one -- not worth a diagnostic for
+      // a case that isn't reachable yet.
+      Index.emplace(std::move(Name), I->path());
+    }
+  }
+  return Cache.emplace(std::move(Key), std::move(Index)).first->second;
+}
+
 // Module-name -> file-search -> ParseFile() -> ModuleImportExprAST tail,
 // shared by ParseImport() (real, source-text `import X;`/`import X::[...];`
 // statements) and ParsePreludeImports() (synthetic prelude imports injected
 // by main.cpp with no source text at all -- see its own doc comment). This
 // function doesn't care how ModuleName/Loc/Mode/RequestedSymbols were
 // obtained, only that they're valid; the two callers just supply them
-// differently. Search order and error handling are unchanged from the
-// original inline ParseImport() body this was extracted from.
+// differently.
 std::unique_ptr<ExprAST>
 ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
                         ImportMode Mode = ImportMode::Bare,
                         std::vector<ImportedSymbolRef> RequestedSymbols = {}) {
-  llvm::SmallString<128> StdlibPath(CompilerExecutablePath);
-  llvm::sys::path::remove_filename(StdlibPath);
-  llvm::sys::path::append(StdlibPath, "..", "lib", "std", ModuleName + ".tr");
-
   // Search order:
-  //   1. Compiler stdlib (<binary>/../lib/std/<module>.tr)
-  //   2. Same directory as the source file being compiled
-  //   3. Current working directory
+  //   1. Installation stdlib   -- $TURF_HOME (or <binary>/..)/lib/std/**/<module>.tr
+  //   2. Installed user package -- $TURF_HOME (or <binary>/..)/lib/usr/**/<module>.tr
+  //   3. Same directory as the source file being compiled
+  //   4. Current working directory
   //
   // A ParseFile() call can return nullptr for two very different reasons:
   // the file simply doesn't exist at that path (fine, keep trying the next
@@ -3169,15 +3228,35 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
   // real one, since the module WAS found, just broken). Distinguish the two
   // by snapshotting the diagnostic count before each attempt and checking
   // whether it grew.
-  // ResolvedPath tracks whichever of the 3 candidates actually got parsed --
-  // it's the canonical identity of "this physical module file", used by
-  // both circular-import detection (Parser-level) and per-file import
-  // scoping (Resolver-level) so neither has to re-derive or guess a path
-  // string independently of the other.
-  std::string ResolvedPath = StdlibPath.str().str();
-  size_t DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-  auto Block = ParseFile(ResolvedPath, ModuleName, Loc);
-  bool FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
+  // ResolvedPath tracks whichever candidate actually got parsed -- it's the
+  // canonical identity of "this physical module file", used by both
+  // circular-import detection (Parser-level) and per-file import scoping
+  // (Resolver-level) so neither has to re-derive or guess a path string
+  // independently of the other.
+  std::string Root = TurfInstallRoot();
+  std::string ResolvedPath;
+  std::unique_ptr<ExprAST> Block;
+  size_t DiagCountBefore;
+  bool FoundButBroken = false;
+
+  const auto &StdIndex = IndexModuleDir(Root, "std");
+  if (auto It = StdIndex.find(ModuleName); It != StdIndex.end()) {
+    ResolvedPath = It->second;
+    DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
+    Block = ParseFile(ResolvedPath, ModuleName, Loc);
+    FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
+  }
+
+  if (!Block && !FoundButBroken) {
+    const auto &UsrIndex = IndexModuleDir(Root, "usr");
+    if (auto It = UsrIndex.find(ModuleName); It != UsrIndex.end()) {
+      ResolvedPath = It->second;
+      DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
+      Block = ParseFile(ResolvedPath, ModuleName, Loc);
+      FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
+    }
+  }
+
   if (!Block && !FoundButBroken) {
     // Issue #19 fix: resolve relative to the source file's directory so that
     // `turf path/to/file.tr` can find sibling modules without a cd first.
@@ -3263,14 +3342,21 @@ std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc) {
 
   for (const char *Name : PreludeModuleNames) {
     if (HaveCanonicalSource) {
-      llvm::SmallString<128> StdlibPath(CompilerExecutablePath);
-      llvm::sys::path::remove_filename(StdlibPath);
-      llvm::sys::path::append(StdlibPath, "..", "lib", "std",
-                              std::string(Name) + ".tr");
-      llvm::SmallString<256> CanonicalCandidate;
-      if (!llvm::sys::fs::real_path(StdlibPath, CanonicalCandidate) &&
-          CanonicalCandidate == CanonicalSource)
-        continue; // compiling this prelude module as the top-level file itself
+      // Same TURF_HOME/binary-relative root + recursive index the real
+      // lookup uses (TurfInstallRoot()/IndexModuleDir()) -- this MUST agree
+      // with ParseModuleImportByName()'s own resolution, since a prelude
+      // name found at a different physical path than the one about to be
+      // compiled as the entry point would defeat this self-import check
+      // entirely (see the doc comment above for what that breaks).
+      std::string Root = TurfInstallRoot();
+      const auto &StdIndex = IndexModuleDir(Root, "std");
+      auto It = StdIndex.find(Name);
+      if (It != StdIndex.end()) {
+        llvm::SmallString<256> CanonicalCandidate;
+        if (!llvm::sys::fs::real_path(It->second, CanonicalCandidate) &&
+            CanonicalCandidate == CanonicalSource)
+          continue; // compiling this prelude module as the top-level file itself
+      }
     }
 
     auto AST = ParseModuleImportByName(Name, Loc);
