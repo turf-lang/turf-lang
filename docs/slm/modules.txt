@@ -14,7 +14,7 @@ THE CORE RULE: `.` IS INSTANCE-ONLY, `::` IS NAMESPACE-ONLY
   at all -- constructing a struct.
     immut c: Color = Color::Red;        // enum variant
     io::printline("hi");                 // module function call
-    mut l: list::List<int> = List::default();  // module type, default-constructed
+    mut l: list::List<int> = list::List::default();  // module type, default-constructed
     mut p: Point = Point::new(1, 2);     // constructor call (see CONSTRUCTING A STRUCT below)
 
   Mixing them up is the single most common mistake: `io.printline(...)`
@@ -87,13 +87,19 @@ IMPORT FORMS -- exactly four, all starting with `import <module-name>`:
 
 WHAT'S STILL FLAT REGARDLESS OF IMPORT FORM
 
-  Struct and enum TYPE NAMES (not their methods) are a shared, module-
-  blind namespace today: `List`, `Stack`, `Queue`, and any struct/enum
-  YOU declare, are visible unqualified as soon as their module is
-  imported in ANY form, including the bare form -- `import list;` alone
-  is enough to write `mut l: List<int> = ...`. This is different from
-  FUNCTIONS, which the bare form deliberately does NOT expose unqualified
-  (see below).
+  Struct and enum TYPE NAMES (not their methods) share one global,
+  module-blind namespace for EXISTENCE purposes: two different modules
+  declaring a same-named struct or enum is a compile error
+  (DuplicateTypeNameError) regardless of import form.
+
+  Bare (unqualified) VISIBILITY of a type, however, follows the exact
+  same rule bare function-call visibility does: a plain bare
+  `import list;` alone only grants QUALIFIED access (`list::List<int>`).
+  Writing bare `List<int>` after only `import list;` is a compile error
+  (UnqualifiedTypeNotVisibleError) -- you need `import list::List;` (or
+  `list::[List, ...]` / `list::[*]`), or to declare/be inside `list`
+  itself, exactly like a bare function call would need an on-demand
+  import.
 
   You can ALSO qualify a type explicitly: `list::List<int>`, and even
   qualify its CONSTRUCTION the same way: `list::List::default()` (not just
@@ -102,12 +108,9 @@ WHAT'S STILL FLAT REGARDLESS OF IMPORT FORM
   module, AND it must actually be the module that declares `List` --
   `mem::List<int>` is a compile error even though `mem` is a real module,
   because `List` isn't declared there. A bare, unqualified `List<int>`
-  and the fully-qualified `list::List::default()` construct the exact same
-  thing -- qualifying is about being explicit, not a different type.
-
-  Two different modules declaring a same-named struct or enum is a
-  compile error (DuplicateTypeNameError) regardless of import form --
-  this shared namespace is exactly why.
+  (once visible) and the fully-qualified `list::List::default()` construct
+  the exact same thing -- qualifying is about being explicit, not a
+  different type.
 
 ---
 

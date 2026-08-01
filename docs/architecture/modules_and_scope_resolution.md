@@ -46,7 +46,7 @@ A module is **always fully parsed** regardless of form — even a single-symbol 
 
 There is **no always-auto-imported module** — `io` must be imported like anything else. (This used to be different and was a real bug: `lib/std/prelude.tr` used to silently `import io;` for every compile, and the bare-call lookup searched every module ever loaded anywhere in the program with no check that the *current* file asked for that visibility — see Part 2.5 and Part 3 for the fix.)
 
-**Struct/enum type names** are a separate, more lenient case, **on purpose, for now**: `List`, `Stack`, `Queue`, and any struct/enum you declare, are visible unqualified as soon as their module is imported in **any** form, including bare — `import list;` alone is enough for `mut l: List<int> = ...`. This is a deliberately-kept, not-yet-closed gap; see Part 5.1 for exactly why and what closing it would require.
+**Struct/enum type names** follow the identical rule bare function-call visibility does (2.7.1): a plain bare `import list;` grants **qualified** access only (`list::List`) — bare `List` is visible unqualified only if it's declared in the same file/module, or brought in via an on-demand import (`import list::List;` / `import list::[List, ...];` / `import list::[*];`). This used to be more lenient (any import form, including bare, made the type bare-visible) — that was a deliberately-kept gap, closed by 2.7.1; see Part 5.1 for the history.
 
 **Qualifying is always allowed and always means the same thing as the unqualified spelling** — `list::List<int>` and bare `List<int>` construct/name the exact same type. Qualifying a *function* call, by contrast, is sometimes the *only* way to reach it (anything not on-demand-imported).
 
@@ -55,11 +55,13 @@ There is **no always-auto-imported module** — `io` must be imported like anyth
 Both of these are valid and mean the same thing:
 
 ```turf
-import list;
+import list::List;
 
 mut a: List<int>      = List::default();
 mut b: list::List<int> = list::List::default();
 ```
+
+(`import list::List;` is what makes the bare `List` spelling on the first line legal at all — see 1.3/2.7.1. A plain bare `import list;` alone would only make the second, qualified line compile.)
 
 (Struct construction is `StructName::new(args...)`/`StructName::default()` only — see the struct-construction-overhaul work; there is no brace-literal form anymore. `List` has no user-defined `.new`, so `::default()` is the only way to construct it.)
 
