@@ -1263,9 +1263,9 @@ std::unique_ptr<ExprAST> ParseUnary() {
     return std::make_unique<AddressOfExprAST>(Loc, std::move(Operand));
   }
 
-  // If the current token is not an operator that handles unary (like '-'),
-  // then it must be a primary expression.
-  if (CurTok != '-')
+  // If the current token is not an operator that handles unary (like '-' or
+  // '+'), then it must be a primary expression.
+  if (CurTok != '-' && CurTok != '+')
     return ParsePrimary();
 
   int Opc = CurTok;

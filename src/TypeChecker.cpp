@@ -673,11 +673,15 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
   TurfTypePtr OperandTy = getType(Node.getOperand());
   int Op = Node.getOpcode();
 
-  if (Op == '-') {
-    // Negation: operand must be numeric
+  if (Op == '-' || Op == '+') {
+    // Negation / unary plus: operand must be numeric. Unary '+' is a no-op
+    // on every numeric type (added purely for symmetry with '-' -- e.g.
+    // `+5` next to `-5`); still type-checked the same way so `+"str"` is
+    // rejected rather than silently passing the string through.
     if (OperandTy && !OperandTy->isNumeric()) {
       reportError(Node.getLoc(),
-                  "Unary '-' requires a numeric operand, got '" +
+                  "Unary '" + std::string(1, static_cast<char>(Op)) +
+                      "' requires a numeric operand, got '" +
                       OperandTy->getName() + "'.");
       setType(&Node, nullptr);
       return;

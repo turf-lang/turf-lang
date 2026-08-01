@@ -2256,6 +2256,10 @@ Value *UnaryExprAST::codegen() {
       return Builder->CreateNeg(OperandV);
     llvm::report_fatal_error("Internal error: Unknown unary operand type");
     return nullptr;
+  case '+':
+    // No-op: +x == x for every numeric type. TypeChecker::visitUnary()
+    // already rejected a non-numeric operand, so there's nothing to lower.
+    return OperandV;
   case '~':
     // Bitwise NOT: ~x == x XOR -1 (all bits set)
     if (!OperandType->isNamed("int")) {
