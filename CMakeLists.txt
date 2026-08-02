@@ -15,7 +15,11 @@ message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 # ─── llama.cpp (external static build) ───────────────────────────────────────
-set(LLAMA_BUILD_DIR "${CMAKE_SOURCE_DIR}/external/llama.cpp/build")
+# NOTE: local/uncommitted fix, see https://github.com/turf-lang/turf-lang/issues/229 --
+# CMAKE_SOURCE_DIR is always the top-level project's root, which breaks this
+# path whenever turf-lang is consumed via add_subdirectory() (e.g. turf-lsp).
+# CMAKE_CURRENT_SOURCE_DIR is this file's own directory in both cases.
+set(LLAMA_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/llama.cpp/build")
 
 # Auto-build llama.cpp if the static libs aren't present yet
 set(LIBLLAMA   "${LLAMA_BUILD_DIR}/src/libllama.a")
@@ -108,9 +112,15 @@ if(APPLE)
   list(APPEND PLATFORM_LIBS ${METAL_FRAMEWORK} ${METALKIT_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
 endif()
 
-# ─── Executable ──────────────────────────────────────────────────────────────
-add_executable(turf
-  src/main.cpp
+# ─── Core library (everything but main.cpp) ─────────────────────────────────
+# NOTE: local/uncommitted addition -- see
+# https://github.com/turf-lang/turf-lang/issues/229. turf-lsp's CMakeLists.txt
+# already assumes a `turfcore` target exists for it to link against; upstream
+# only ever defined the monolithic `turf` executable. Added here, additively,
+# so external tooling (turf-lsp) can build against the real compiler frontend
+# instead of duplicating it. `turf` itself now links this instead of
+# recompiling the same sources a second time.
+add_library(turfcore STATIC
   src/Algorithms.cpp
   src/AliasAnalysis.cpp
   src/Analysis.cpp
@@ -132,23 +142,22 @@ add_executable(turf
   src/ValueRange.cpp
 )
 
-
-target_include_directories(turf PRIVATE
+target_include_directories(turfcore PUBLIC
   include
   external/llama.cpp/include
   external/llama.cpp/ggml/include
   ${LLVM_INCLUDE_DIRS}
 )
 
-target_compile_definitions(turf PRIVATE ${LLVM_DEFINITIONS})
+target_compile_definitions(turfcore PUBLIC ${LLVM_DEFINITIONS})
 
-target_compile_options(turf PRIVATE
+target_compile_options(turfcore PRIVATE
   -Wall -Wextra -Wpedantic
   $<$<CONFIG:Debug>:-g -O0>
   $<$<CONFIG:Release>:-O3>
 )
 
-target_link_libraries(turf PRIVATE
+target_link_libraries(turfcore PUBLIC
   ${LLAMA_IMPORTED_TARGETS}
   LLVM
   ${OPENMP_LINK_FLAGS}
@@ -156,3 +165,8 @@ target_link_libraries(turf PRIVATE
   pthread
   m
 )
+
+# ─── Executable ──────────────────────────────────────────────────────────────
+add_executable(turf src/main.cpp)
+
+target_link_libraries(turf PRIVATE turfcore)
