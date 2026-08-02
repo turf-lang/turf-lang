@@ -1444,19 +1444,65 @@ std::unique_ptr<ExprAST> ParseDoWhileExpr() {
                                           std::move(Cond));
 }
 
-// ParseForExpr - parses:
-//   for <ident> in <start>..<end> step <step_expr> { body }
+// ParseForExpr - parses three forms sharing a "for ... in <expr>" prefix:
+//   for <ident> in <start>..<end> step <step_expr> { body }   (range-based for)
+//   for <ident> in <iterable> { body }                        (for-each, single-var)
+//   for (<index>, <value>) in <iterable> { body }              (for-each, paired)
+// The prefix (loop variable(s) + 'in' + the first expression) is genuinely
+// shared -- which continuation follows (TOK_RANGE vs '{') is only knowable
+// after parsing that first expression, so all three forms live in one
+// function rather than being split at TOK_FOR dispatch time.
 std::unique_ptr<ExprAST> ParseForExpr() {
   SourceLocation ForLoc = CurLoc;
   getNextToken();
 
-  if (CurTok != TOK_IDENTIFIER) {
-    LogErrorAt(CurLoc, "Expected a loop variable name after 'for'."
-                       "\n  Hint: Correct syntax: for i in 0..10 step i++ { }");
+  std::string VarName;      // range-for's induction var, or for-each's value var
+  std::string IndexVarName; // for-each paired form only; empty otherwise
+  bool IsPairForm = false;
+
+  if (CurTok == '(') {
+    IsPairForm = true;
+    getNextToken(); // eat '('
+
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc, "Expected an index variable name after '(' in a for-each loop."
+                         "\n  Hint: Correct syntax: for (index, value) in numbers { }");
+      return nullptr;
+    }
+    IndexVarName = IdentifierStr;
+    getNextToken();
+
+    if (CurTok != ',') {
+      LogErrorAt(CurLoc, "Expected ',' between the index and value variable names."
+                         "\n  Hint: Correct syntax: for (index, value) in numbers { }");
+      return nullptr;
+    }
+    getNextToken(); // eat ','
+
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc, "Expected a value variable name after ',' in a for-each loop."
+                         "\n  Hint: Correct syntax: for (index, value) in numbers { }");
+      return nullptr;
+    }
+    VarName = IdentifierStr;
+    getNextToken();
+
+    if (CurTok != ')') {
+      LogErrorAt(CurLoc, "Expected ')' to close the '(index, value)' pair."
+                         "\n  Hint: Correct syntax: for (index, value) in numbers { }");
+      return nullptr;
+    }
+    getNextToken(); // eat ')'
+  } else if (CurTok == TOK_IDENTIFIER) {
+    VarName = IdentifierStr;
+    getNextToken();
+  } else {
+    LogErrorAt(CurLoc, "Expected a loop variable name (or '(index, value)') after 'for'."
+                       "\n  Hint: for i in 0..10 step i += 1 { }"
+                       "\n    or: for value in numbers { }"
+                       "\n    or: for (index, value) in numbers { }");
     return nullptr;
   }
-  std::string VarName = IdentifierStr;
-  getNextToken();
 
   if (CurTok != TOK_IN) {
     LogErrorAt(ForLoc, "Expected 'in' after the loop variable in a for-loop."
@@ -1466,38 +1512,59 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   }
   getNextToken();
 
-  std::unique_ptr<ExprAST> Start, End, Step;
-  Start = ParseExpression();
+  std::unique_ptr<ExprAST> Start = ParseExpression();
   if (!Start)
     return nullptr;
-  if (CurTok != TOK_RANGE) {
-    LogErrorAt(ForLoc,
-               "Expected '..' between the start and end values of the range."
-               "\n  Hint: Correct syntax: for " +
-                   VarName + " in 0..10 step " + VarName + "++ { }");
-    return nullptr;
+
+  // Range-based for: `for i in 0..10 step i += 1 { }`
+  if (CurTok == TOK_RANGE) {
+    if (IsPairForm) {
+      LogErrorAt(ForLoc,
+                 "The '(index, value)' form isn't supported for a range-based for-loop."
+                 "\n  Hint: Range-based for only binds a single scalar variable: "
+                 "for i in 0..10 step i += 1 { }");
+      return nullptr;
+    }
+
+    getNextToken(); // eat '..'
+
+    std::unique_ptr<ExprAST> End = ParseExpression();
+    if (!End)
+      return nullptr;
+    if (CurTok != TOK_STEP) {
+      LogErrorAt(ForLoc, "Expected 'step' after the range end value."
+                         "\n  Hint: Correct syntax: for " +
+                             VarName + " in 0..10 step " + VarName + "++ { }");
+      return nullptr;
+    }
+    getNextToken();
+
+    std::unique_ptr<ExprAST> Step = ParseExpression();
+    if (!Step)
+      return nullptr;
+
+    if (CurTok != '{') {
+      LogErrorAt(ForLoc, "Expected '{' to open the for-loop body."
+                         "\n  Hint: Correct syntax: for " +
+                             VarName + " in 0..10 step " + VarName + "++ { }");
+      return nullptr;
+    }
+
+    auto Body = ParseBlock();
+    if (!Body)
+      return nullptr;
+
+    return std::make_unique<ForExprAST>(ForLoc, VarName, std::move(Start),
+                                        std::move(End), std::move(Step),
+                                        std::move(Body));
   }
-  getNextToken();
 
-  End = ParseExpression();
-  if (!End)
-    return nullptr;
-  if (CurTok != TOK_STEP) {
-    LogErrorAt(ForLoc, "Expected 'step' after the range end value."
-                       "\n  Hint: Correct syntax: for " +
-                           VarName + " in 0..10 step " + VarName + "++ { }");
-    return nullptr;
-  }
-  getNextToken();
-
-  Step = ParseExpression();
-  if (!Step)
-    return nullptr;
-
+  // For-each: `for value in numbers { }`  /  `for (index, value) in numbers { }`
   if (CurTok != '{') {
-    LogErrorAt(ForLoc, "Expected '{' to open the for-loop body."
-                       "\n  Hint: Correct syntax: for " +
-                           VarName + " in 0..10 step " + VarName + "++ { }");
+    LogErrorAt(ForLoc, "Expected '..' (range-based for) or '{' (for-each loop) here."
+                       "\n  Hint: for i in 0..10 step i += 1 { }"
+                       "\n    or: for value in numbers { }"
+                       "\n    or: for (index, value) in numbers { }");
     return nullptr;
   }
 
@@ -1505,9 +1572,8 @@ std::unique_ptr<ExprAST> ParseForExpr() {
   if (!Body)
     return nullptr;
 
-  return std::make_unique<ForExprAST>(ForLoc, VarName, std::move(Start),
-                                      std::move(End), std::move(Step),
-                                      std::move(Body));
+  return std::make_unique<ForEachExprAST>(ForLoc, VarName, IndexVarName,
+                                          std::move(Start), std::move(Body));
 }
 
 // ParseCompareExpr — parses:

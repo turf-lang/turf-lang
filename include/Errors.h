@@ -1291,6 +1291,37 @@ public:
   }
 };
 
+// for-each target isn't an array at all (scalar, bare struct, List<T>/Map<K,V>, etc.)
+class ForEachNonArrayError : public TurfError {
+public:
+  ForEachNonArrayError(SourceLocation Loc, const std::string &GotType)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "for-each requires an array!\n" +
+                      Colors::RESET + "  You tried to iterate over a value of type '" +
+                      Colors::CYAN + GotType + Colors::RESET + "'.",
+                  "for-each only works on Turf's built-in fixed-size array "
+                  "type (T[N]). Lists, maps, structs, and scalars aren't "
+                  "supported yet.") {
+    Category_ = SLM::ErrorCategory::ARRAY_ERROR;
+  }
+};
+
+// for-each target is an unsized array parameter (`T[]`), which carries no
+// length at runtime -- there's no safe way to bound the loop.
+class ForEachUnsizedArrayError : public TurfError {
+public:
+  ForEachUnsizedArrayError(SourceLocation Loc, const std::string &GotType)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "for-each requires a known array size!\n" +
+                      Colors::RESET + "  '" + Colors::CYAN + GotType + Colors::RESET +
+                      "' is an unsized array parameter, which carries no "
+                      "length at runtime.",
+                  "Pass a concrete-size array, or add a separate 'len: int' "
+                  "parameter and use an ordinary for-loop instead.") {
+    Category_ = SLM::ErrorCategory::ARRAY_ERROR;
+  }
+};
+
 // Use-after-free error
 class UseAfterFreeError : public TurfError {
 public:

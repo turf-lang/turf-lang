@@ -119,6 +119,11 @@ public:
     visitChild(Node.getBody());
   }
 
+  void visitForEach(ForEachExprAST &Node) override {
+    visitChild(Node.getIterable());
+    visitChild(Node.getBody());
+  }
+
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
 
   void visitFuncCall(FuncCallExprAST &Node) override {
@@ -215,6 +220,9 @@ public:
   void visitFor(ForExprAST &Node) override {
     visitChild(Node.getStart()); visitChild(Node.getEnd());
     visitChild(Node.getStep()); visitChild(Node.getBody());
+  }
+  void visitForEach(ForEachExprAST &Node) override {
+    visitChild(Node.getIterable()); visitChild(Node.getBody());
   }
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
   void visitAssignment(AssignmentExprAST &Node) override {
@@ -624,6 +632,11 @@ public:
     visitChild(Node.getStart());
     visitChild(Node.getEnd());
     visitChild(Node.getStep());
+    visitChild(Node.getBody());
+  }
+
+  void visitForEach(ForEachExprAST &Node) override {
+    visitChild(Node.getIterable());
     visitChild(Node.getBody());
   }
 

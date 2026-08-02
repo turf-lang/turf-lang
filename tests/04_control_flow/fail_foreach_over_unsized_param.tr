@@ -1,0 +1,12 @@
+fn sumAll(arr: int[]): int {
+    mut total: int = 0;
+    for value in arr {
+        total = total + value;
+    }
+    return total;
+}
+
+fn main(): int {
+    mut a: int[5] = [1, 2, 3, 4, 5];
+    return sumAll(a);
+}

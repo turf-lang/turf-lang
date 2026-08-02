@@ -203,6 +203,7 @@ private:
   void visitContinue(ExprAST *E);
   void visitCompare(ExprAST *E);
   void visitFor(ExprAST *E);
+  void visitForEach(ExprAST *E);
 
   // Utility methods
   TurfBasicBlock *createBlock(std::string Name);

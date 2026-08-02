@@ -41,6 +41,7 @@ class IfExprAST;
 class WhileExprAST;
 class DoWhileExprAST;
 class ForExprAST;
+class ForEachExprAST;
 class BreakExprAST;
 class ContinueExprAST;
 class ReturnExprAST;
@@ -118,6 +119,7 @@ public:
   virtual void visitWhile(WhileExprAST &Node) {}
   virtual void visitDoWhile(DoWhileExprAST &Node) {}
   virtual void visitFor(ForExprAST &Node) {}
+  virtual void visitForEach(ForEachExprAST &Node) {}
   virtual void visitBreak(BreakExprAST &Node) {}
   virtual void visitContinue(ContinueExprAST &Node) {}
   virtual void visitReturn(ReturnExprAST &Node) {}

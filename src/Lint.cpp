@@ -112,6 +112,11 @@ static bool ContainsLoopExit(const ExprAST *E) {
       return true;
   }
 
+  if (auto *FE = dynamic_cast<const ForEachExprAST *>(E)) {
+    if (ContainsLoopExit(FE->getBody()))
+      return true;
+  }
+
   return false;
 }
 
@@ -225,6 +230,14 @@ static bool MayModifyVariable(const ExprAST *E, const std::string &VarName) {
            MayModifyVariable(F->getStep(), VarName) ||
            MayModifyVariable(F->getBody(), VarName);
   }
+  if (auto *FE = dynamic_cast<const ForEachExprAST *>(E)) {
+    // Same shadowing note as ForExprAST just above -- a nested for-each
+    // reusing VarName as its own value/index var would shadow the outer
+    // one, but treating it as "might modify" is the conservative-safe
+    // direction anyway.
+    return MayModifyVariable(FE->getIterable(), VarName) ||
+           MayModifyVariable(FE->getBody(), VarName);
+  }
   if (auto *Ret = dynamic_cast<const ReturnExprAST *>(E))
     return MayModifyVariable(Ret->getVal(), VarName);
   if (auto *Call = dynamic_cast<const FuncCallExprAST *>(E)) {
@@ -295,6 +308,15 @@ void LintExpression(ExprAST *E) {
 
   if (auto *For = dynamic_cast<ForExprAST *>(E)) {
     LintFor(For);
+  }
+
+  if (auto *ForEach = dynamic_cast<ForEachExprAST *>(E)) {
+    // No LintForEach() helper needed: there's no "loop variable never
+    // advances" analog for for-each (the value/index vars are never
+    // manually advanced by design -- that check is ForExprAST-specific by
+    // construction), so a bare recursion into children is sufficient.
+    LintExpression(const_cast<ExprAST *>(ForEach->getIterable()));
+    LintExpression(ForEach->getBody());
   }
 
   if (auto *If = dynamic_cast<IfExprAST *>(E)) {
@@ -655,6 +677,14 @@ LintChangedNodesOnlyInternal(ExprAST *E,
     LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getStep()),
                                  ChangedNodeIDs);
     LintChangedNodesOnlyInternal(For->getBody(), ChangedNodeIDs);
+    return;
+  }
+
+  // Recurse into for-each loop children
+  if (auto *ForEach = dynamic_cast<ForEachExprAST *>(E)) {
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(ForEach->getIterable()),
+                                 ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(ForEach->getBody(), ChangedNodeIDs);
     return;
   }
 

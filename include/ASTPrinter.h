@@ -249,6 +249,20 @@ public:
     ascend();
   }
 
+  void visitForEach(ForEachExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "ForEachExpr(value=" << N.getValueVarName();
+    if (N.hasIndexVar())
+      std::cout << ", index=" << N.getIndexVarName();
+    std::cout << ")";
+    printResolvedBadge(N.ResolvedValueVar.get());
+    std::cout << "\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getIterable()), Depth_);
+    print(N.getBody(), Depth_);
+    ascend();
+  }
+
   void visitBreak(BreakExprAST &N) override {
     printIndent(Depth_);
     std::cout << "BreakExpr\n";

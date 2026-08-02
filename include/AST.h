@@ -552,6 +552,49 @@ public:
   }
 };
 
+// For-each loop over an array: for <value> in <iterable> { body }
+//                          or:  for (<index>, <value>) in <iterable> { body }
+// IndexVarName is empty for the single-var form. Desugars to a compiler-
+// generated 0..Size-1 counted loop during Codegen (see ForEachExprAST::codegen()).
+class ForEachExprAST : public ExprAST {
+  std::string ValueVarName;
+  std::string IndexVarName; // empty = single-var form
+  SourceLocation Loc;
+  std::unique_ptr<ExprAST> Iterable, Body;
+
+public:
+  ForEachExprAST(SourceLocation Loc, std::string ValueVarName,
+                 std::string IndexVarName, std::unique_ptr<ExprAST> Iterable,
+                 std::unique_ptr<ExprAST> Body)
+      : ValueVarName(std::move(ValueVarName)),
+        IndexVarName(std::move(IndexVarName)), Loc(Loc),
+        Iterable(std::move(Iterable)), Body(std::move(Body)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }  ///< Location of the 'for' keyword.
+  const std::string &getValueVarName() const { return ValueVarName; }
+  const std::string &getIndexVarName() const { return IndexVarName; }
+  bool hasIndexVar() const { return !IndexVarName.empty(); }
+  ExprAST *getBody() const { return Body.get(); }
+  const ExprAST *getIterable() const { return Iterable.get(); }
+
+  /// Populated by the Resolver after successfully declaring the loop
+  /// variable(s). Nulled by clone() semantics (fresh node, default nullptr).
+  /// Cloned ASTs must be re-resolved.
+  std::shared_ptr<VariableSymbol> ResolvedValueVar;
+  std::shared_ptr<VariableSymbol> ResolvedIndexVar;
+  const VariableSymbol *getResolvedValueVar() const { return ResolvedValueVar.get(); }
+  const VariableSymbol *getResolvedIndexVar() const { return ResolvedIndexVar.get(); }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitForEach(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<ForEachExprAST>(
+        Loc, ValueVarName, IndexVarName, CloneExprAST(Iterable.get()),
+        CloneExprAST(Body.get()));
+    // Note: ResolvedValueVar/ResolvedIndexVar intentionally NOT copied. ✓
+  }
+};
+
 class BreakExprAST : public ExprAST {
   SourceLocation Loc;
 
@@ -1488,6 +1531,12 @@ inline void CollectAllNodeIDsInternal(const ExprAST *Node,
     return;
   }
 
+  if (const auto *ForEach = dynamic_cast<const ForEachExprAST *>(Node)) {
+    CollectAllNodeIDsInternal(ForEach->getIterable(), NodeIDs);
+    CollectAllNodeIDsInternal(ForEach->getBody(), NodeIDs);
+    return;
+  }
+
   if (const auto *FuncCall = dynamic_cast<const FuncCallExprAST *>(Node)) {
     CollectAllNodeIDsInternal(FuncCall->getCallee(), NodeIDs);
     for (const auto &Arg : FuncCall->getArgs())
@@ -1816,6 +1865,21 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
     CollectChangedNodeIDsInternal(OrigFor->getStep(), ModFor->getStep(),
                                   ChangedIDs);
     CollectChangedNodeIDsInternal(OrigFor->getBody(), ModFor->getBody(),
+                                  ChangedIDs);
+    return ChangedIDs;
+  }
+
+  // ForEachExprAST: Recursively diff loop variable(s), iterable, and body
+  if (auto *OrigForEach = dynamic_cast<const ForEachExprAST *>(OriginalAST)) {
+    auto *ModForEach = dynamic_cast<const ForEachExprAST *>(ModifiedAST);
+    if (OrigForEach->getValueVarName() != ModForEach->getValueVarName() ||
+        OrigForEach->getIndexVarName() != ModForEach->getIndexVarName()) {
+      ChangedIDs.insert(OriginalAST->getNodeID());
+      ChangedIDs.insert(ModifiedAST->getNodeID());
+    }
+    CollectChangedNodeIDsInternal(OrigForEach->getIterable(),
+                                  ModForEach->getIterable(), ChangedIDs);
+    CollectChangedNodeIDsInternal(OrigForEach->getBody(), ModForEach->getBody(),
                                   ChangedIDs);
     return ChangedIDs;
   }

@@ -189,6 +189,8 @@ static bool MutatesSelfField(const ExprAST *E) {
     return MutatesSelfField(W->getBody());
   if (auto *F = dynamic_cast<const ForExprAST *>(E))
     return MutatesSelfField(F->getBody());
+  if (auto *FE = dynamic_cast<const ForEachExprAST *>(E))
+    return MutatesSelfField(FE->getBody());
   return false;
 }
 
@@ -232,6 +234,10 @@ static void CollectReturnedErrorTypeNames(const ExprAST *E,
   }
   if (auto *F = dynamic_cast<const ForExprAST *>(E)) {
     CollectReturnedErrorTypeNames(F->getBody(), Out);
+    return;
+  }
+  if (auto *FE = dynamic_cast<const ForEachExprAST *>(E)) {
+    CollectReturnedErrorTypeNames(FE->getBody(), Out);
     return;
   }
 }
@@ -914,6 +920,68 @@ void Resolver::visitFor(ForExprAST &Node) {
   // Step must be resolved inside the scope so it can reference the loop var
   // (e.g. `step i += 1` uses i).
   visitChild(Node.getStep());
+  visitChild(Node.getBody());
+
+  SymTable_.exitScope();
+}
+
+void Resolver::visitForEach(ForEachExprAST &Node) {
+  // Mirrors visitFor()'s structure:
+  //   1. Resolve the iterable in the *outer* scope (loop vars don't exist yet).
+  //   2. Push a new scope, declare the loop variable(s).
+  //   3. Resolve the body inside that scope.
+  //   4. Exit the scope so the loop variable(s) don't leak.
+
+  visitChild(Node.getIterable());
+
+  SymTable_.enterScope();
+
+  ResolverSourceLocation Loc{Node.getLoc().Line, Node.getLoc().Col};
+
+  // Value var gets a placeholder int type here -- the Resolver doesn't do
+  // type inference (that's TypeChecker's job). TypeChecker::visitForEach()
+  // overwrites Node.ResolvedValueVar->Type with the array's real element
+  // type once it's known, same "placeholder now, refine later" contract
+  // ForExprAST's induction variable already relies on (see its own comment
+  // above).
+  try {
+    Node.ResolvedValueVar =
+        SymTable_.declareVariable(Node.getValueVarName(), TurfInt(), Loc);
+  } catch (const std::runtime_error &) {
+    auto Prev = SymTable_.lookupVariable(Node.getValueVarName());
+    SourceLocation ErrLoc = Node.getLoc();
+    if (Prev) {
+      SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
+      DuplicateDeclarationError(ErrLoc, Node.getValueVarName(), PrevLoc).raise();
+    } else {
+      SyntaxError(ErrLoc, "Loop variable '" + Node.getValueVarName() +
+                               "' conflicts with an existing declaration.")
+          .raise();
+    }
+  }
+
+  // Index var (paired form only) is genuinely always int -- not a
+  // placeholder, TypeChecker doesn't need to touch it. Declaring it in the
+  // same scope as the value var means `for (x, x) in arr` naturally hits
+  // declareVariable()'s same-scope-duplicate throw below.
+  if (Node.hasIndexVar()) {
+    try {
+      Node.ResolvedIndexVar =
+          SymTable_.declareVariable(Node.getIndexVarName(), TurfInt(), Loc);
+    } catch (const std::runtime_error &) {
+      auto Prev = SymTable_.lookupVariable(Node.getIndexVarName());
+      SourceLocation ErrLoc = Node.getLoc();
+      if (Prev) {
+        SourceLocation PrevLoc{Prev->DeclLoc.Line, Prev->DeclLoc.Col};
+        DuplicateDeclarationError(ErrLoc, Node.getIndexVarName(), PrevLoc).raise();
+      } else {
+        SyntaxError(ErrLoc, "Loop variable '" + Node.getIndexVarName() +
+                                 "' conflicts with an existing declaration.")
+            .raise();
+      }
+    }
+  }
+
   visitChild(Node.getBody());
 
   SymTable_.exitScope();

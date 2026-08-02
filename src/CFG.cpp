@@ -532,6 +532,8 @@ void CFGBuilder::visitExpr(ExprAST *E) {
     visitDoWhile(E);
   } else if (dynamic_cast<ForExprAST *>(E)) {
     visitFor(E);
+  } else if (dynamic_cast<ForEachExprAST *>(E)) {
+    visitForEach(E);
   } else if (dynamic_cast<CompareExprAST *>(E)) {
     visitCompare(E);
   } else if (dynamic_cast<ReturnExprAST *>(E)) {
@@ -921,6 +923,60 @@ void CFGBuilder::visitFor(ExprAST *E) {
   setInsertPoint(BodyBB);
   if (For->getBody()) {
     visitExpr(For->getBody());
+  }
+  // Fall through to step if no explicit terminator
+  if (CurrentBlock && !CurrentBlock->hasExplicitTerminator()) {
+    CurrentCFG->addEdge(CurrentBlock, StepBB);
+  }
+
+  // Step block loops back to condition
+  CurrentCFG->addEdge(StepBB, CondBB);
+  StepBB->setTerminator(TerminatorKind::Unconditional, SourceLocation{});
+
+  // Restore loop targets
+  LoopBreakTarget = SavedBreak;
+  LoopContinueTarget = SavedContinue;
+
+  // Continue from exit
+  setInsertPoint(ExitBB);
+}
+
+void CFGBuilder::visitForEach(ExprAST *E) {
+  auto *ForEach = dynamic_cast<ForEachExprAST *>(E);
+  if (!ForEach)
+    return;
+
+  TurfBasicBlock *ForEachEntry = CurrentBlock;
+
+  // Create blocks
+  TurfBasicBlock *CondBB = createBlock("foreach.cond");
+  TurfBasicBlock *BodyBB = createBlock("foreach.body");
+  TurfBasicBlock *StepBB = createBlock("foreach.step");
+  TurfBasicBlock *ExitBB = createBlock("foreach.end");
+
+  // Entry jumps to condition
+  CurrentCFG->addEdge(ForEachEntry, CondBB);
+  ForEachEntry->setTerminator(TerminatorKind::Unconditional, SourceLocation{});
+
+  // Condition branches to body or exit. Add the iterable expression as a
+  // statement in foreach.cond so the DAP can detect reads of uninitialized
+  // variables in it -- mirrors visitFor()'s identical Start/End treatment.
+  if (ForEach->getIterable())
+    CondBB->addStatement(const_cast<ExprAST *>(ForEach->getIterable()));
+  CurrentCFG->addEdge(CondBB, BodyBB);
+  CurrentCFG->addEdge(CondBB, ExitBB);
+  CondBB->setTerminator(TerminatorKind::Branch, SourceLocation{});
+
+  // Save loop targets for break/continue
+  TurfBasicBlock *SavedBreak = LoopBreakTarget;
+  TurfBasicBlock *SavedContinue = LoopContinueTarget;
+  LoopBreakTarget = ExitBB;
+  LoopContinueTarget = StepBB; // continue in for-each goes to step, not cond
+
+  // Build body
+  setInsertPoint(BodyBB);
+  if (ForEach->getBody()) {
+    visitExpr(ForEach->getBody());
   }
   // Fall through to step if no explicit terminator
   if (CurrentBlock && !CurrentBlock->hasExplicitTerminator()) {

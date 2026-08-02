@@ -2952,6 +2952,186 @@ Value *ForExprAST::codegen() {
   return Constant::getNullValue(Type::getDoubleTy(*TheContext));
 }
 
+// ForEachExprAST::codegen : desugars to a compiler-generated ascending
+// 0..Size-1 counted loop over the array's compile-time-known size (the
+// TypeChecker already guarantees the iterable is an array with Size > 0 --
+// see TypeChecker::visitForEach()). Unlike ForExprAST, direction is always
+// ascending and step is always 1, so there's no need for the
+// ascending/descending dance ForExprAST::codegen() does for user-supplied
+// ranges.
+Value *ForEachExprAST::codegen() {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+  const TurfType *IterableTy = getExprType(Iterable.get());
+  if (!IterableTy || !isArrayType(IterableTy)) {
+    llvm::report_fatal_error(
+        "Internal error: for-each iterable is not an array. "
+        "This should have been caught by the TypeChecker.");
+    return nullptr;
+  }
+
+  const auto *ArrTy = dynamic_cast<const ::ArrayType *>(IterableTy);
+  int Size = ArrTy->getSize();
+  if (Size <= 0) {
+    llvm::report_fatal_error(
+        "Internal error: for-each over an unsized array reached Codegen. "
+        "This should have been caught by the TypeChecker.");
+    return nullptr;
+  }
+
+  TurfTypePtr ElemTy = ArrTy->getElementTypePtr();
+  Type *ElemLLVMTy = getLLVMType(ElemTy.get());
+  llvm::ArrayType *ArrLLVMTy = llvm::ArrayType::get(ElemLLVMTy, Size);
+
+  // 1. Get an address for the iterable to GEP into. Same dual-path pattern
+  //    ArrayAccessExprAST::codegenLValue()/codegen() use: prefer the
+  //    l-value form (a variable, field, or nested index), falling back to
+  //    dumping an r-value (e.g. a function call returning an array) into a
+  //    fresh temp alloca.
+  Value *ArrPtr = Iterable->codegenLValue();
+  if (!ArrPtr) {
+    Value *AggVal = Iterable->codegen();
+    if (!AggVal)
+      return nullptr;
+    AllocaInst *TmpAlloca =
+        CreateEntryBlockAlloca(TheFunction, "foreach.tmp", IterableTy);
+    Builder->CreateStore(AggVal, TmpAlloca);
+    ArrPtr = TmpAlloca;
+  }
+
+  // 2. Alloca the value var. The index var (paired form) gets its own
+  //    alloca that doubles as the loop counter; the single-var form uses
+  //    one hidden counter alloca instead.
+  AllocaInst *ValueAlloca =
+      CreateEntryBlockAlloca(TheFunction, ValueVarName, ElemTy.get());
+
+  AllocaInst *CounterAlloca =
+      hasIndexVar()
+          ? CreateEntryBlockAlloca(TheFunction, IndexVarName, TurfInt().get())
+          : CreateEntryBlockAlloca(TheFunction, "foreach.idx", TurfInt().get());
+  Builder->CreateStore(ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
+                       CounterAlloca);
+
+  // 3. Push a new scope so the loop variable(s) don't leak out after the
+  //    loop ends, saving/restoring any pre-existing NamedValues bindings --
+  //    exact mirror of ForExprAST::codegen()'s scope handling.
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->EnterScope();
+  }
+
+  auto OldValueBinding = NamedValues.find(ValueVarName);
+  VarInfo SavedValueBinding;
+  bool HadOldValueBinding = false;
+  if (OldValueBinding != NamedValues.end()) {
+    SavedValueBinding = OldValueBinding->second;
+    HadOldValueBinding = true;
+  }
+  NamedValues[ValueVarName] = {ValueAlloca, ElemTy};
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->DeclareSymbol(ValueVarName, ElemTy, Loc, ValueAlloca);
+  }
+
+  bool HadOldIndexBinding = false;
+  VarInfo SavedIndexBinding;
+  if (hasIndexVar()) {
+    auto OldIndexBinding = NamedValues.find(IndexVarName);
+    if (OldIndexBinding != NamedValues.end()) {
+      SavedIndexBinding = OldIndexBinding->second;
+      HadOldIndexBinding = true;
+    }
+    NamedValues[IndexVarName] = {CounterAlloca, TurfInt()};
+    if (GlobalSymbolTable) {
+      GlobalSymbolTable->DeclareSymbol(IndexVarName, TurfInt(), Loc, CounterAlloca);
+    }
+  }
+
+  // 4. Basic blocks.
+  BasicBlock *CondBB =
+      BasicBlock::Create(*TheContext, "foreach.cond", TheFunction);
+  BasicBlock *BodyBB = BasicBlock::Create(*TheContext, "foreach.body");
+  BasicBlock *StepBB = BasicBlock::Create(*TheContext, "foreach.step");
+  BasicBlock *AfterBB = BasicBlock::Create(*TheContext, "foreach.end");
+
+  Builder->CreateBr(CondBB);
+
+  // 5. Condition: counter < Size
+  Builder->SetInsertPoint(CondBB);
+  Value *CounterVal = Builder->CreateLoad(Type::getInt64Ty(*TheContext),
+                                          CounterAlloca, "foreach.idxval");
+  Value *SizeConst = ConstantInt::get(Type::getInt64Ty(*TheContext), Size);
+  Value *CondV = Builder->CreateICmpSLT(CounterVal, SizeConst, "foreach.cond");
+  Builder->CreateCondBr(CondV, BodyBB, AfterBB);
+
+  // 6. Body: load array[counter] into the value var's alloca.
+  TheFunction->insert(TheFunction->end(), BodyBB);
+  Builder->SetInsertPoint(BodyBB);
+
+  Value *IdxForGEP = Builder->CreateLoad(Type::getInt64Ty(*TheContext),
+                                         CounterAlloca, "foreach.idxval");
+  Value *Indices[] = {ConstantInt::get(Type::getInt64Ty(*TheContext), 0),
+                      IdxForGEP};
+  // The index is compiler-generated and provably in [0, Size) -- no runtime
+  // bounds check needed here, unlike ordinary user-supplied array indexing
+  // (ArrayAccessExprAST::codegen()).
+  Value *ElemPtr =
+      Builder->CreateInBoundsGEP(ArrLLVMTy, ArrPtr, Indices, "foreach.elemptr");
+  Value *ElemVal = Builder->CreateLoad(ElemLLVMTy, ElemPtr, "foreach.elem");
+  Builder->CreateStore(ElemVal, ValueAlloca);
+
+  // Push {StepBB, AfterBB} so 'continue' jumps to step, 'break' jumps to after.
+  LoopBlocks.push_back({StepBB, AfterBB});
+
+  if (!Body->codegen()) {
+    LoopBlocks.pop_back();
+    if (GlobalSymbolTable) GlobalSymbolTable->ExitScope();
+    return nullptr;
+  }
+
+  LoopBlocks.pop_back();
+
+  // Fall through to step block.
+  if (!Builder->GetInsertBlock()->getTerminator()) {
+    Builder->CreateBr(StepBB);
+  }
+
+  // 7. Step: counter += 1.
+  TheFunction->insert(TheFunction->end(), StepBB);
+  Builder->SetInsertPoint(StepBB);
+  Value *CurCounter = Builder->CreateLoad(Type::getInt64Ty(*TheContext),
+                                          CounterAlloca, "foreach.idxval");
+  Value *NextCounter = Builder->CreateAdd(
+      CurCounter, ConstantInt::get(Type::getInt64Ty(*TheContext), 1),
+      "foreach.next");
+  Builder->CreateStore(NextCounter, CounterAlloca);
+
+  if (!Builder->GetInsertBlock()->getTerminator()) {
+    Builder->CreateBr(CondBB);
+  }
+
+  // 8. After loop.
+  TheFunction->insert(TheFunction->end(), AfterBB);
+  Builder->SetInsertPoint(AfterBB);
+
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->ExitScope();
+  }
+
+  if (HadOldValueBinding) {
+    NamedValues[ValueVarName] = SavedValueBinding;
+  } else {
+    NamedValues.erase(ValueVarName);
+  }
+  if (hasIndexVar()) {
+    if (HadOldIndexBinding) {
+      NamedValues[IndexVarName] = SavedIndexBinding;
+    } else {
+      NamedValues.erase(IndexVarName);
+    }
+  }
+
+  return Constant::getNullValue(Type::getDoubleTy(*TheContext));
+}
+
 // ─── CompareExprAST::codegen ─────────────────────────────────────────────────
 //
 // Two code-generation paths:

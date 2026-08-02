@@ -1132,6 +1132,65 @@ void TypeChecker::visitFor(ForExprAST &Node) {
   setType(&Node, TurfVoid());
 }
 
+void TypeChecker::visitForEach(ForEachExprAST &Node) {
+  if (Node.getIterable())
+    const_cast<ExprAST *>(Node.getIterable())->accept(*this);
+
+  TurfTypePtr IterableTy = getType(Node.getIterable());
+
+  if (!IterableTy || !isArrayType(IterableTy.get())) {
+    ForEachNonArrayError(Node.getLoc(),
+                         IterableTy ? IterableTy->getName() : "unknown")
+        .raise();
+    setType(&Node, TurfVoid());
+    return;
+  }
+
+  const auto *ArrTy = dynamic_cast<const ArrayType *>(IterableTy.get());
+  if (ArrTy->getSize() < 0) {
+    // Unsized array parameter (`T[]`) -- no runtime length to bound the
+    // loop with. See docs/planning/PHASE_3_ISSUES.md Issue #192's status
+    // note and ArrayType's getSize() doc comment for why this genuinely
+    // can't be made to work without a much bigger calling-convention change.
+    ForEachUnsizedArrayError(Node.getLoc(), IterableTy->getName()).raise();
+    setType(&Node, TurfVoid());
+    return;
+  }
+
+  TurfTypePtr ElemTy = ArrTy->getElementTypePtr();
+
+  // If the element type is a NamedType (e.g. "User"), resolve it to the
+  // actual TurfStructType/enum via the symbol table -- same "Issue #17 fix"
+  // visitArrayAccess() already applies. Without this, `for user in users {
+  // user.name }` would set the value var's type to a bare NamedType("User")
+  // and the field access inside the body would fail to type-check.
+  if (ElemTy) {
+    if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy.get())) {
+      if (GlobalSymbolTable) {
+        if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+          ElemTy = Resolved;
+      }
+    }
+  }
+
+  // Same reasoning as visitFor(): LoopVarTypes_ is TypeChecker-private
+  // bookkeeping that only affects visitVariable()'s answer, but Codegen's
+  // independent getExprType() reads ResolvedSymbol->Type directly -- so
+  // both need to be updated, not just one.
+  LoopVarTypes_[Node.getValueVarName()] = ElemTy;
+  if (Node.ResolvedValueVar)
+    Node.ResolvedValueVar->Type = ElemTy;
+  if (Node.hasIndexVar() && Node.ResolvedIndexVar)
+    Node.ResolvedIndexVar->Type = TurfInt();
+
+  if (Node.getBody())
+    Node.getBody()->accept(*this);
+
+  LoopVarTypes_.erase(Node.getValueVarName());
+
+  setType(&Node, TurfVoid());
+}
+
 void TypeChecker::visitBreak(BreakExprAST &Node) {
   setType(&Node, TurfVoid());
 }

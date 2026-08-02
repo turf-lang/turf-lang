@@ -1,0 +1,6 @@
+fn main(): int {
+    immut x: int = 5;
+    for value in x {
+    }
+    return 0;
+}
