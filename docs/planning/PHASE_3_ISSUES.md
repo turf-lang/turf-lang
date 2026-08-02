@@ -23,8 +23,9 @@
 > first-class-function example still uses `io.printline`-era `.` module
 > syntax in spirit but is otherwise real, working code today (only
 > unqualified `fn` names are first-class values — see Issue #187's status
-> note). **Phase 3's only remaining open item is Issue #189 (for-each loops
-> over primitive arrays)** — see its own section below.
+> note). **Phase 3 is now complete** — Issue #189 (for-each loops over
+> arrays), its last remaining item, landed 2026-08-02; see its own section
+> below.
 
 ```turflang
 // FFI — bind a C library function
@@ -159,11 +160,15 @@ qualified references is a real, separate follow-up, not started.
 
 ---
 
-## Issue #189 — For-Each Loop over Arrays
+## Issue #192 — For-Each Loop over Arrays
 
 **Labels:** `parser`, `lexer`, `ast`, `resolver`, `typechecker`, `codegen`, `phase-3`
 **Depends on:** Arrays (done), first-class functions (done, unrelated but confirms Phase 3's other language-backbone pieces are in place)
-**Status: OPEN.** This is the last item blocking Phase 3 completion. No code-level implementation plan is specified here on purpose — this is a feature description for scoping and issue-tracking, not a line-by-line spec like the older Phase 3 issues above. The desugaring strategy (most likely lowering to an index-based `while` loop, mirroring how the existing range-based `for` already desugars to `init + while` in `ForExprAST::codegen()`) is an implementation decision to make when the work is picked up, not part of this description.
+**Status: DONE (2026-08-02).** This was the last item blocking Phase 3 completion — Phase 3 is now complete in full. Shipped as a dedicated `ForEachExprAST` AST node (not a mode flag on `ForExprAST`) mirroring `ForExprAST`'s handling across every pipeline stage (Resolver/TypeChecker/Codegen, plus the CFG/Lint/Analysis/ASTPrinter side-passes). Codegen desugars to a compiler-generated ascending `0..Size-1` counted loop over the array's compile-time-known size (`ArrayType::getSize()`) — see `ForEachExprAST::codegen()` in `Codegen.cpp`. `break`/`continue` reuse the same `LoopBlocks` mechanism every other loop construct uses.
+
+Scope decision made during implementation, beyond what this issue originally specified: unsized array *parameters* (`T[]`, `ArrayType::getSize() == -1`) are rejected with a dedicated `ForEachUnsizedArrayError`, not silently mis-compiled — such a parameter lowers to a bare opaque pointer with no length carried at runtime at all (`getLLVMType()` in `Codegen.cpp`), so there's no safe way to bound the loop. Non-array iterables (scalars, bare structs, `List<T>`/`Map<K,V>`, error unions) are rejected with `ForEachNonArrayError`, naming the actual type.
+
+Regression tests: `tests/04_control_flow/22_foreach_single_var.tr` through `29_foreach_nested_loops.tr` (single-var form, paired `(index, value)` form, struct/enum/nested-array element types, `break`/`continue`, loop nesting), and `tests/04_control_flow/fail_foreach_*.tr` (non-array target, unsized-array parameter, pair-form-over-non-array, pair-form-with-range conflict, duplicate `(x, x)` names).
 
 ### Description
 
@@ -229,7 +234,7 @@ This order minimizes breakage and respects all dependency chains. Items already 
 
 ── Last item ──
 
-#189 (for-each over primitive arrays) — OPEN — LAST remaining Phase 3 item.
+#189 (for-each over arrays)       — DONE (2026-08-02)
 ```
 
-**Remaining open work:** #189 (for-each loops) only — every other Phase 3 item, including #180 and #188 whose "OPEN" status was stale in earlier versions of this doc, is confirmed implemented in the current codebase (source-code grep, 2026-08-02). Once #189 lands, Phase 3 is complete and Phase 4 (`docs/planning/ROADMAP_v1.0.0.md` §6) becomes the active phase.
+**Phase 3 status:** Complete. #189 (for-each loops) was the last remaining item — it landed 2026-08-02. Every other Phase 3 item, including #180 and #188 whose "OPEN" status was stale in earlier versions of this doc, was already confirmed implemented in the current codebase (source-code grep, 2026-08-02). Phase 4 (`docs/planning/ROADMAP_v1.0.0.md` §6) is now the active phase.

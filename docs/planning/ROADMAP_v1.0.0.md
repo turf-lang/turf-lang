@@ -66,7 +66,7 @@ mutable r: int = x > 0 give x otherwise -x;  // ternary: give...otherwise
 
 ## 5. Phase 3: The Language Backbone
 
-*The structural primitives required to build real programs. See `PHASE_3_ISSUES.md` for full issue descriptions. Phase 3 is otherwise complete — the only remaining item is Issue #189 (for-each loops), listed under Group B below.*
+*The structural primitives required to build real programs. See `PHASE_3_ISSUES.md` for full issue descriptions. Phase 3 is now complete — Issue #189 (for-each loops), the last remaining item, landed 2026-08-02 (see Group B below). Phase 4 (`docs/planning/ROADMAP_v1.0.0.md` §6) is now the active phase.*
 
 **New syntax introduced in this phase** (illustrative only — kept close to the original design intent rather than kept in sync keystroke-for-keystroke; see `PHASE_3_ISSUES.md`'s "Final Turflang Phase 3 Syntax Reference" for the accurate, current syntax, including the fact that error handling shipped as `error` types + `recover produce`/`recover run`/`recover as x run`, not the `catch`/`?`/`error.XYZ` shown here):
 ```turflang
@@ -102,7 +102,7 @@ mut shifted: int = 1 << 4;
 // First-class functions
 fn apply(f: fn(int): int, x: int): int { return f(x); }
 
-// For-each over arrays (any element type) — NOT YET IMPLEMENTED (Issue #189, last Phase 3 item)
+// For-each over arrays (any element type) — IMPLEMENTED (#189)
 for value in numbers { io::printline(value to string); }
 for (index, value) in numbers { io::printline(index to string); }
 for user in users { io::printline(user.name); }   // structs/enums work too — only non-arrays are rejected
@@ -121,7 +121,7 @@ for user in users { io::printline(user.name); }   // structs/enums work too — 
 - [x] **#182: Bitwise Operators (`&`, `|`, `~`, `^`, `<<`, `>>`) 🔴**
 - [x] **#183: String Operations (`+`, `==`, `s[i]`) 🔴**
 - [x] **#184: `enum` Declaration 🟡**
-- [ ] **#189: For-Each Loop over Arrays 🟡** *(last Phase 3 item)* — `for value in arr { ... }` / `for (index, value) in arr { ... }`, works over the built-in array type (`T[]`) for ANY element type, including structs and enums (not restricted to primitive elements). Only non-arrays (scalars, bare structs, `List<T>`/`Map<K,V>`, etc.) are rejected, with a dedicated error message, not a crash. See `PHASE_3_ISSUES.md` Issue #189 for the full feature description — deliberately a description, not a code-level implementation plan; the desugaring approach is left open.
+- [x] **#189: For-Each Loop over Arrays 🟡** *(last Phase 3 item — DONE 2026-08-02)* — `for value in arr { ... }` / `for (index, value) in arr { ... }`, works over the built-in array type (`T[]`) for ANY element type, including structs and enums (not restricted to primitive elements). Non-arrays (scalars, bare structs, `List<T>`/`Map<K,V>`, etc.) and unsized `T[]` array parameters (no runtime length to bound the loop) are rejected with dedicated error messages (`ForEachNonArrayError`/`ForEachUnsizedArrayError` in `Errors.h`), not a crash. Implemented as a dedicated `ForEachExprAST` node (not a mode flag on `ForExprAST`) that desugars in Codegen to a compiler-generated ascending `0..Size-1` counted loop over the array's compile-time-known size — see `ForEachExprAST::codegen()` in `Codegen.cpp`. Regression tests: `tests/04_control_flow/22-29_foreach_*.tr` and `fail_foreach_*.tr`.
 
 **Group C — CFG Static Analysis (Phases 1 & 2):**
 - [x] **#185: CFG Phase 1 — Cyclomatic Complexity & Infinite Loop Detection 🔴** (this checklist was stale — `CFG::calculateCyclomaticComplexity()`/`CFG::hasUnbreakableLoop()` are implemented in `src/CFG.cpp` and wired up in `Codegen.cpp`; confirmed live 2026-07-30 while starting #187)
