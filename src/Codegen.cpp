@@ -3648,8 +3648,53 @@ Value *FuncDefExprAST::codegen() {
   return nullptr;
 }
 
+// Some libc symbols an `extern fn` declaration binds to aren't named
+// consistently across platforms -- e.g. lib/std/mem/mem.tr's
+// malloc_usable_size() is a glibc/Linux extension; Darwin's equivalent is
+// malloc_size() (identical void* -> size_t signature), and MSVC's CRT
+// equivalent is _msize(). Turf itself has no conditional-compilation
+// feature a stdlib .tr file could use to route around this per platform
+// (see mem.tr's own doc comment on malloc_usable_size()), so a bare
+// `extern fn malloc_usable_size` compiles fine everywhere but only LINKS
+// successfully on glibc/Linux -- confirmed via a real link failure
+// ("Undefined symbols ... _malloc_usable_size") on macOS/arm64.
+//
+// Rather than push platform knowledge into every extern declaration site
+// (there's only this one case today), ExternFuncDeclExprAST::codegen()
+// consults this small, explicit table for the specific extern name being
+// declared and, if the HOST platform this compiler itself was built for
+// has a same-signature equivalent under a different name, emits a
+// one-line DEFINED wrapper under the Turf-visible name that forwards to
+// the real platform symbol -- instead of a bare external declaration.
+// Every other extern-fn code path (call resolution, the symbol table,
+// FuncParamTypes/FuncReturnTypes) keeps treating this exactly like an
+// ordinary external declaration; only this one function's LLVM IR shape
+// (defined body vs. no body) differs.
+//
+// Returns the real symbol to forward `Name` to, or empty if `Name` needs
+// no remapping on this platform (either because the literal libc name
+// already resolves here, or because `Name` isn't one of the small set of
+// known-portability-hazard symbols this table covers).
+static std::string PlatformExternForward(const std::string &Name) {
+#if defined(__APPLE__)
+  if (Name == "malloc_usable_size")
+    return "malloc_size";
+#elif defined(_WIN32)
+  // Same void* -> size_t shape as malloc_usable_size(); MSVC CRT's name
+  // for it. Untested on Windows in this environment -- guarded behind
+  // _WIN32 so it can only ever affect a Windows build, never Linux/macOS.
+  if (Name == "malloc_usable_size")
+    return "_msize";
+#endif
+  (void)Name;
+  return "";
+}
+
 // ExternFuncDeclExprAST::codegen
-// Emits an LLVM ExternalLinkage prototype (no body block).
+// Emits an LLVM ExternalLinkage prototype (no body block) -- unless
+// PlatformExternForward() says this name needs a same-signature forwarding
+// wrapper on the host platform, in which case a defined one-line wrapper is
+// emitted instead (see that function's doc comment).
 // Mirrors what `declare i64 @strlen(ptr)` looks like in LLVM IR.
 Value *ExternFuncDeclExprAST::codegen() {
   // Build the LLVM parameter type list.
@@ -3694,9 +3739,34 @@ Value *ExternFuncDeclExprAST::codegen() {
   }
   ExternDeclLocations[Name_] = Loc_;
 
-  // Create with ExternalLinkage — no body block is created.
-  Function *F =
-      Function::Create(FT, Function::ExternalLinkage, Name_, TheModule.get());
+  Function *F;
+  std::string ForwardTo = PlatformExternForward(Name_);
+  if (!ForwardTo.empty()) {
+    // This platform doesn't export `Name_` under that literal name --
+    // declare the real symbol (same FT, since it's a documented
+    // same-signature equivalent) and define Name_ as a one-line wrapper
+    // that forwards every argument to it. See PlatformExternForward()'s
+    // doc comment for why this happens here instead of at the call site.
+    Function *RealF = TheModule->getFunction(ForwardTo);
+    if (!RealF)
+      RealF = Function::Create(FT, Function::ExternalLinkage, ForwardTo,
+                               TheModule.get());
+
+    F = Function::Create(FT, Function::ExternalLinkage, Name_, TheModule.get());
+    BasicBlock *WrapperBB = BasicBlock::Create(*TheContext, "entry", F);
+    IRBuilder<> WrapperBuilder(WrapperBB);
+    std::vector<Value *> ForwardArgs;
+    for (auto &Arg : F->args())
+      ForwardArgs.push_back(&Arg);
+    Value *ForwardResult = WrapperBuilder.CreateCall(RealF, ForwardArgs);
+    if (RetLLVMType->isVoidTy())
+      WrapperBuilder.CreateRetVoid();
+    else
+      WrapperBuilder.CreateRet(ForwardResult);
+  } else {
+    // Create with ExternalLinkage — no body block is created.
+    F = Function::Create(FT, Function::ExternalLinkage, Name_, TheModule.get());
+  }
 
   // Name the parameters for IR readability.
   unsigned Idx = 0;
