@@ -183,6 +183,17 @@ for j in 1..10 step j += 1 {
     if j % 2 == 0 { continue; }
     sum = sum + j;
 }
+
+do {
+    i = i - 1;
+} while (i > 0);   // body always runs at least once
+```
+
+Bitwise operators: `&`, `|`, `~`, `^` (XOR), `<<`, `>>`.
+
+```
+mut flags: int = 0b1010 & 0b1100;
+mut shifted: int = 1 << 4;
 ```
 
 ### Structs
@@ -272,6 +283,66 @@ if c == Color::Green {
 ```
 
 `Color::COUNT`, `Color::VALUES`, and `Color::NAMES` are built in for every enum — variant count, the array of underlying values, and the array of variant name strings, respectively.
+
+### Error handling
+
+Recoverable errors are named `error` types — bare-name variants only, no payload fields:
+
+```
+error MathError {
+    DivisionByZero
+}
+
+fn divide(a: int, b: int): !int {
+    if b == 0 {
+        return MathError::DivisionByZero;
+    }
+    return a / b;
+}
+```
+
+A function returning `!T` can't be used as a plain `T` at the call site — it must be handled with `recover`, in one of three forms:
+
+```
+mut x: int = divide(10, 0) recover produce 0;   // fallback value on failure
+
+fn tryDivide(a: int, b: int): int {
+    return divide(a, b) recover as err run {     // bind the specific error variant
+        if err == MathError::DivisionByZero {
+            io::printline("division by zero");
+        }
+        return -1;
+    };
+}
+```
+
+`recover run`/`recover as err run` blocks must produce the success type on every path (usually via `return`) — the one exception is a `!void` success type, where the block can just run side effects and fall through:
+
+```
+extern fn writeFile(path: string, contents: string): !void;
+
+writeFile("a.txt", "hi") recover run {
+    io::printline("write failed");
+};
+```
+
+`recover as err run { ... }` requires the callee to declare a real `error` type — a bare `error GeneralError;` type (no variants beyond the implicit `GeneralError::DEFAULT`) can still use `recover produce`/`recover run`, just not `recover as`. See `docs/planning/Errors.md` for the full spec.
+
+### First-class functions
+
+An unqualified `fn` name is a value — it can be passed as an argument, stored in a variable, and called indirectly:
+
+```
+fn apply(f: fn(int): int, x: int): int {
+    return f(x);
+}
+
+fn double_it(n: int): int { return n * 2; }
+
+mut result: int = apply(double_it, 5); // 10
+```
+
+Only bare, unqualified function names are first-class today — `Module::func` and `StructName::method` referenced as a value (not called) still raise a compile error.
 
 ### Generics
 
@@ -554,10 +625,9 @@ Compiles, runs, and cleans up the produced binary.
 
 ## Roadmap
 
-Turf is pre-1.0. The full, actively-maintained tracker — with each item marked done or open against the real codebase — is `docs/planning/ROADMAP_v1.0.0.md`. Highlights of what's still open:
+Turf is pre-1.0. The full, actively-maintained tracker — with each item marked done or open against the real codebase — is `docs/planning/ROADMAP_v1.0.0.md`. Phase 3 (the language backbone: FFI, `do`/`while`, `compare`, enums, bitwise/string ops, first-class functions, error handling) is essentially complete. Highlights of what's still open:
 
-- `do { } while (cond)` — not yet implemented.
-- First-class functions (passing a function as a value) and `!T` error unions (`catch` / `?` / `error.XYZ`) — the last two big Phase 3 language-backbone items.
+- **For-each loops over arrays** (`for value in arr { ... }` / `for (index, value) in arr { ... }`) — works over the built-in array type for any element type (primitives, structs, enums); only non-array operands are rejected. The last remaining Phase 3 item; see `docs/planning/PHASE_3_ISSUES.md` Issue #189.
 - `unsafe { }` blocks and safe references (`&T`) — memory-model work, Phase 4.
 - Operator overloading (magic methods like `__add__`) — Phase 4.
 - CFG-based static analysis beyond what already exists (cyclomatic complexity warnings, liveness/dead-store analysis) — see `docs/planning/cfg_analysis_roadmap.md`.

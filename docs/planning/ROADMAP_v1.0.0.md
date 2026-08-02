@@ -66,41 +66,46 @@ mutable r: int = x > 0 give x otherwise -x;  // ternary: give...otherwise
 
 ## 5. Phase 3: The Language Backbone
 
-*The structural primitives required to build real programs. See `PHASE_3_ISSUES.md` for full issue descriptions.*
+*The structural primitives required to build real programs. See `PHASE_3_ISSUES.md` for full issue descriptions. Phase 3 is otherwise complete — the only remaining item is Issue #189 (for-each loops), listed under Group B below.*
 
-**New syntax introduced in this phase:**
+**New syntax introduced in this phase** (illustrative only — kept close to the original design intent rather than kept in sync keystroke-for-keystroke; see `PHASE_3_ISSUES.md`'s "Final Turflang Phase 3 Syntax Reference" for the accurate, current syntax, including the fact that error handling shipped as `error` types + `recover produce`/`recover run`/`recover as x run`, not the `catch`/`?`/`error.XYZ` shown here):
 ```turflang
 // FFI
 extern fn strlen(s: string): int;
 
-// Error unions
+// Error handling (shipped design — see docs/planning/Errors.md)
+error MathError { DivisionByZero }
 fn divide(a: int, b: int): !int {
-    if b == 0 { return error.DivisionByZero("cannot divide by zero"); }
+    if b == 0 { return MathError::DivisionByZero; }
     return a / b;
 }
-mutable x: int = divide(10, 0) catch 0;
-mutable y: int = divide(10, 2)?;
+mut x: int = divide(10, 0) recover produce 0;
 
 // do/while
-do { io.printline("once"); } while (x > 0);
+do { io::printline("once"); } while (x > 0);
 
 // compare/switch
 compare (x) {
-    matches (1): io.printline("one"); done
-    matches (2): io.printline("two"); done
-    other: io.printline("other");
+    matches (1): io::printline("one"); done
+    matches (2): io::printline("two"); done
+    other: io::printline("other");
 }
 
 // enum
 enum Color { Red, Green, Blue }
-mutable c: Color = Color.Red;
+mut c: Color = Color::Red;
 
 // Bitwise
-mutable flags: int = 0b1010 & 0b1100;
-mutable shifted: int = 1 << 4;
+mut flags: int = 0b1010 & 0b1100;
+mut shifted: int = 1 << 4;
 
 // First-class functions
 fn apply(f: fn(int): int, x: int): int { return f(x); }
+
+// For-each over arrays (any element type) — NOT YET IMPLEMENTED (Issue #189, last Phase 3 item)
+for value in numbers { io::printline(value to string); }
+for (index, value) in numbers { io::printline(index to string); }
+for user in users { io::printline(user.name); }   // structs/enums work too — only non-arrays are rejected
 ```
 
 **Group A — Infrastructure (do first):**
@@ -111,11 +116,12 @@ fn apply(f: fn(int): int, x: int): int { return f(x); }
 **Group B — Language Features:**
 - [x] **#178: Default Variable Initialization 🔴**
 - [x] **#179: Logical NOT `!` Operator 🔴**
-- [ ] **#180: `do { } while(cond)` Statement 🔴** — still not implemented, no `TOK_DO`/`DoWhileExprAST` anywhere
+- [x] **#180: `do { } while(cond)` Statement 🔴** — `TOK_DO`/`DoWhileExprAST`, body runs at least once, condition checked after the body (`Resolver::visitDoWhile`/`TypeChecker::visitDoWhile`/`DoWhileExprAST::codegen()`)
 - [x] **#181: `compare` Statement (Switch) 🔴**
 - [x] **#182: Bitwise Operators (`&`, `|`, `~`, `^`, `<<`, `>>`) 🔴**
 - [x] **#183: String Operations (`+`, `==`, `s[i]`) 🔴**
 - [x] **#184: `enum` Declaration 🟡**
+- [ ] **#189: For-Each Loop over Arrays 🟡** *(last Phase 3 item)* — `for value in arr { ... }` / `for (index, value) in arr { ... }`, works over the built-in array type (`T[]`) for ANY element type, including structs and enums (not restricted to primitive elements). Only non-arrays (scalars, bare structs, `List<T>`/`Map<K,V>`, etc.) are rejected, with a dedicated error message, not a crash. See `PHASE_3_ISSUES.md` Issue #189 for the full feature description — deliberately a description, not a code-level implementation plan; the desugaring approach is left open.
 
 **Group C — CFG Static Analysis (Phases 1 & 2):**
 - [x] **#185: CFG Phase 1 — Cyclomatic Complexity & Infinite Loop Detection 🔴** (this checklist was stale — `CFG::calculateCyclomaticComplexity()`/`CFG::hasUnbreakableLoop()` are implemented in `src/CFG.cpp` and wired up in `Codegen.cpp`; confirmed live 2026-07-30 while starting #187)
