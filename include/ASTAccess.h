@@ -1,0 +1,270 @@
+#ifndef AST_ACCESS_H
+#define AST_ACCESS_H
+
+#include "AST.h"
+
+
+// Call to a user-defined function: name(arg1, arg2, ...)
+class FuncCallExprAST : public ExprAST {
+  std::unique_ptr<ExprAST> Callee;
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  SourceLocation Loc;
+
+public:
+  FuncCallExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Callee,
+                  std::vector<std::unique_ptr<ExprAST>> Args)
+      : Callee(std::move(Callee)), Args(std::move(Args)), Loc(Loc) {}
+  const ExprAST *getCallee() const { return Callee.get(); }
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
+
+  /// All overloads matching the call name.  TypeChecker narrows this to one.
+  /// clone() returns a fresh node, so this is empty in cloned trees.
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedCandidates;
+  const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &
+  getResolvedCandidates() const {
+    return ResolvedCandidates;
+  }
+
+  /// The single overload selected by TypeChecker::visitFuncCall() after
+  /// narrowing ResolvedCandidates to one match (arity + type compatible).
+  /// For bare intrinsics (typeof, sizeof, …) without a ResolvedCandidates
+  /// entry this field is left null — the TypeChecker still sets the node's
+  /// type directly.
+  /// clone() returns a fresh node, so this is null in cloned trees — same
+  /// clone-semantics contract as ResolvedSymbol. ✓
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedCallTarget;
+  const ResolverFunctionSymbol *getResolvedCallTarget() const {
+    return ResolvedCallTarget.get();
+  }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitFuncCall(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
+                                             CloneExprList(Args));
+    // Note: ResolvedCandidates and ResolvedCallTarget are intentionally NOT
+    // copied — cloned ASTs are stale until re-resolved. ✓
+  }
+};
+
+// What a `Left::Right` scope-access expression turns out to mean, decided
+// by the Resolver (the parser stays fully agnostic -- see ScopeAccessExprAST
+// below). Unresolved is the state every node starts in; a fresh clone()
+// resets back to it since a cloned tree is stale until re-resolved, same
+// convention as FuncDefExprAST::ResolvedDef.
+enum class ScopeAccessKind {
+    Unresolved,
+    EnumVariant,      // Color::Red
+    ModuleFunctionRef, // io::printline (as a call target)
+    ModuleTypeRef,     // list::List<int> (in type position)
+    StaticMethodRef,   // StructName::method(...) (as a call target, no instance)
+    ModuleConstantRef, // math::PI -- a qualified reference to an `export immut` constant
+    ConstructorCall,   // StructName::new(...) (as a call target)
+    DefaultConstruct,  // StructName::default() (as a call target)
+    // ErrorType::Variant -- a bare, non-callable reference to a user-
+    // declared `error` type's variant (docs/planning/Errors.md), e.g. the
+    // `MathError::DivisionByZero` in `err == MathError::DivisionByZero` or
+    // `return MathError::DivisionByZero;`. Semantically identical to
+    // EnumVariant (bare name, no payload, rejected if called) -- kept as a
+    // separate kind rather than reusing EnumVariant only because error
+    // types lower differently in Codegen (a tag string, not an integer
+    // ordinal) and participate in `!T`/`recover`/AnyErrorType comparisons
+    // that plain enums don't.
+    ErrorVariantRef,
+};
+
+// `Left::Right` -- the general namespace-resolution operator. Originally
+// only ever meant an enum-variant reference (EnumName::Variant); now also
+// covers module-qualified function/type access (io::printline,
+// list::List<int>). Renamed from EnumAccessExprAST when this was
+// generalized: the class is otherwise unchanged in shape (still exactly
+// two names + a location), because the parser was ALREADY fully agnostic
+// about what `Identifier '::' Identifier` means -- it just records the two
+// names and lets the Resolver decide, so widening what the Resolver is
+// willing to decide is all a new kind of `::` usage needs.
+class ScopeAccessExprAST : public ExprAST {
+    std::string    LeftName;
+    std::string    RightName;
+    SourceLocation LeftLoc;
+    SourceLocation RightLoc;
+    SourceLocation Loc;
+    // The `Module` in `Module::EnumName::Variant` (empty for the ordinary
+    // `EnumName::Variant` form). A THIRD name is otherwise unrepresentable
+    // in this node's two-name shape -- `Module::EnumName` on its own parses
+    // as an ordinary ScopeAccessExprAST(LeftName=Module, RightName=EnumName)
+    // like any other `Left::Right`, but when the PARSER sees yet another
+    // `::` immediately follow, it knows the pair it just built was actually
+    // a module-qualified ENUM NAME, not the enum-and-variant pair itself --
+    // reinterpreted as ModuleQualifier=LeftName, LeftName=RightName (the
+    // enum), RightName=the real variant that follows the second `::`. Only
+    // meaningful when ResolvedKind == EnumVariant; validated the same way
+    // as a qualified type/struct-literal (Resolver::validateModuleQualifier()).
+    std::string ModuleQualifier;
+public:
+    // Set by the Resolver (visitScopeAccess / visitFuncCall for the call
+    // form) once it decides what this node actually refers to. A future
+    // LSP driving the same Resolver can read this post-resolution to know
+    // what kind of hover/go-to-definition target this is.
+    ScopeAccessKind ResolvedKind = ScopeAccessKind::Unresolved;
+
+    /// Populated by the Resolver when ResolvedKind == ModuleConstantRef
+    /// (a qualified `module::CONST` value reference) -- see
+    /// VariableExprAST::ResolvedConstant's doc comment for the storage-
+    /// lifetime reasoning, identical here.
+    const ResolverConstantSymbol *ResolvedConstant = nullptr;
+
+    ScopeAccessExprAST(SourceLocation Loc, std::string LeftName,
+                       SourceLocation LeftLoc, std::string RightName,
+                       SourceLocation RightLoc, std::string ModuleQualifier = "")
+        : LeftName(std::move(LeftName)), RightName(std::move(RightName)),
+          LeftLoc(LeftLoc), RightLoc(RightLoc), Loc(Loc),
+          ModuleQualifier(std::move(ModuleQualifier)) {}
+    // Convenience overload for call sites that don't need distinct
+    // left/right locations (both default to the whole expression's Loc).
+    ScopeAccessExprAST(SourceLocation Loc, std::string LeftName, std::string RightName)
+        : ScopeAccessExprAST(Loc, std::move(LeftName), Loc, std::move(RightName), Loc) {}
+
+    const std::string& getLeftName()  const { return LeftName; }
+    const std::string& getRightName() const { return RightName; }
+    const SourceLocation& getLeftLoc()  const { return LeftLoc; }
+    const SourceLocation& getRightLoc() const { return RightLoc; }
+    const SourceLocation& getLoc()   const { return Loc; }
+    const std::string& getModuleQualifier() const { return ModuleQualifier; }
+    // Pre-existing call sites written against the enum-only meaning of this
+    // node (TypeChecker's compare/matches exhaustiveness checks, Codegen's
+    // enum-variant codegen) keep working unchanged via these aliases.
+    const std::string& getEnumName() const { return LeftName; }
+    const std::string& getVariant()  const { return RightName; }
+    llvm::Value* codegen() override;
+    void accept(ASTVisitor& V) override { V.visitScopeAccess(*this); }
+    std::unique_ptr<ExprAST> clone() const override {
+        auto Cloned = std::make_unique<ScopeAccessExprAST>(Loc, LeftName, LeftLoc,
+                                                            RightName, RightLoc,
+                                                            ModuleQualifier);
+        return Cloned;
+    }
+};
+
+// Base.Field
+class FieldAccessExprAST : public ExprAST {
+  std::unique_ptr<ExprAST> Base;
+  std::string FieldName;
+  SourceLocation Loc;
+
+public:
+  FieldAccessExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Base,
+                     std::string FieldName)
+      : Loc(Loc), Base(std::move(Base)), FieldName(std::move(FieldName)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const ExprAST *getBase() const { return Base.get(); }
+  const std::string &getFieldName() const { return FieldName; }
+
+  llvm::Value *codegen() override;
+  llvm::Value *codegenLValue() override;
+  void accept(ASTVisitor &V) override { V.visitFieldAccess(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<FieldAccessExprAST>(Loc, CloneExprAST(Base.get()),
+                                                FieldName);
+  }
+};
+
+// Array literal: [expr, expr, ...]
+class ArrayLiteralExprAST : public ExprAST {
+  std::vector<std::unique_ptr<ExprAST>> Elements;
+  SourceLocation Loc;
+
+public:
+  TurfTypePtr CachedType;
+  ArrayLiteralExprAST(SourceLocation Loc, std::vector<std::unique_ptr<ExprAST>> Elements)
+      : Elements(std::move(Elements)), Loc(Loc) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::vector<std::unique_ptr<ExprAST>> &getElements() const { return Elements; }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitArrayLiteral(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    std::vector<std::unique_ptr<ExprAST>> ClonedElements;
+    for (const auto &E : Elements)
+      ClonedElements.push_back(CloneExprAST(E.get()));
+    auto Cloned = std::make_unique<ArrayLiteralExprAST>(Loc, std::move(ClonedElements));
+    Cloned->CachedType = CachedType;
+    return Cloned;
+  }
+};
+
+// Array element access: arr[index]
+class ArrayAccessExprAST : public ExprAST {
+  std::unique_ptr<ExprAST> Base;
+  std::unique_ptr<ExprAST> Index;
+  SourceLocation Loc;
+
+public:
+  ArrayAccessExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Base,
+                     std::unique_ptr<ExprAST> Index)
+      : Base(std::move(Base)), Index(std::move(Index)), Loc(Loc) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const ExprAST *getBase() const { return Base.get(); }
+  const ExprAST *getIndex() const { return Index.get(); }
+
+  llvm::Value *codegen() override;
+  llvm::Value *codegenLValue() override;
+  void accept(ASTVisitor &V) override { V.visitArrayAccess(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<ArrayAccessExprAST>(Loc, CloneExprAST(Base.get()),
+                                                CloneExprAST(Index.get()));
+  }
+};
+
+// list method call: nums.push(val)  /  nums.pop()  /  nums.length
+// Note: list<T> *declaration* is now a plain VarDeclExprAST with a
+// GenericType("list", [elemType]) — no separate ListDeclExprAST needed.
+class MethodCallExprAST : public ExprAST {
+  std::unique_ptr<ExprAST> Base;
+  std::string Method;
+  std::vector<std::unique_ptr<ExprAST>> Args;
+  SourceLocation Loc;
+
+public:
+  MethodCallExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Base,
+                    std::string Method,
+                    std::vector<std::unique_ptr<ExprAST>> Args = {})
+      : Base(std::move(Base)), Method(std::move(Method)), Args(std::move(Args)),
+        Loc(Loc) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const ExprAST *getBase() const { return Base.get(); }
+  const std::string &getMethod() const { return Method; }
+  const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
+
+  /// The single overload selected by TypeChecker::visitMethodCall() after
+  /// narrowing module-qualified candidates (e.g. io.printline).
+  /// null until TypeChecker runs; also null in cloned trees (not copied). ✓
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedCallTarget;
+  const ResolverFunctionSymbol *getResolvedCallTarget() const {
+    return ResolvedCallTarget.get();
+  }
+
+  /// True when TypeChecker resolved this call via UFCS (a free function
+  /// taking the receiver as its first argument, per
+  /// STRING_UFCS_OPERATOR_CHAR_RFC.md §5) rather than a real bound struct
+  /// method. Codegen needs to know which convention to use for passing the
+  /// receiver -- by-value, like an ordinary argument, vs the self-pointer
+  /// convention every bound method uses. Not copied by clone() -- same
+  /// contract as ResolvedCallTarget.
+  bool ResolvedViaUFCS = false;
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitMethodCall(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()),
+                                               Method, CloneExprList(Args));
+    // Note: ResolvedCallTarget and ResolvedViaUFCS intentionally NOT
+    // copied — cloned ASTs are stale until re-resolved. ✓
+  }
+};
+
+#endif
