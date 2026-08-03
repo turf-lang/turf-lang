@@ -139,7 +139,14 @@ add_library(turfcore STATIC
   src/SLMEngine.cpp
   src/SLMIntegration.cpp
   src/ResolverSymbolTable.cpp
-  src/Resolver.cpp
+  src/ResolverScopeTable.cpp
+  src/ResolverModuleTable.cpp
+  src/ResolverTypeRegistry.cpp
+  src/ResolverCore.cpp
+  src/ResolverExpr.cpp
+  src/ResolverStmt.cpp
+  src/ResolverDecl.cpp
+  src/ResolverCall.cpp
   src/SymbolTable.cpp
   src/TypeChecker.cpp
   src/Types.cpp
