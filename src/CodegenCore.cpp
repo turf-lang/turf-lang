@@ -1,0 +1,1380 @@
+/**
+ * @file CodegenCore.cpp
+ * @brief Shared LLVM setup, type mapping, casting, and cross-category codegen helpers.
+ * @details Part of LLVM IR generation for TurfLang, split from the original
+ *          monolithic Codegen.cpp by category (mirrors AST.h's
+ *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
+ *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *
+ * @author a2ys
+ * @author AaravTandon24
+ * @author Karan
+ *
+ * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
+ * Apache License.
+ * @version 1.0.0
+ * @date 2026-05-25
+ */
+
+#include "Codegen.h"
+#include "AST.h"
+#include "Algorithms.h"
+#include "Builtins.h"
+#include "CFG.h"
+#include "Errors.h"
+#include "Analysis.h"
+#include "AliasAnalysis.h"
+#include "Lexer.h"
+#include "ValueRange.h"
+#include "Lint.h"
+#include "SymbolTable.h"
+#include "CallGraph.h"
+#include "Types.h"
+#include "CodegenInternal.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/Verifier.h"
+#include <algorithm>
+#include <iostream>
+#include <set>
+#include <unordered_map>
+
+using namespace llvm;
+
+std::unique_ptr<LLVMContext> TheContext;
+std::unique_ptr<IRBuilder<>> Builder;
+std::unique_ptr<Module> TheModule;
+
+std::map<std::string, VarInfo> NamedValues;
+
+// Current enclosing function context (nullptr at top level)
+TurfTypePtr CurrentFuncReturnType = TurfVoid();
+llvm::Function *CurrentFunction = nullptr;
+
+// Tracks full param types for user-defined functions. Declared `extern` in
+// CodegenInternal.h -- CodegenFunc.cpp (FuncDefExprAST/ExternFuncDeclExprAST)
+// populates these; CodegenCore.cpp's own getExprType() also reads them.
+std::map<std::string, std::vector<TurfTypePtr>> FuncParamTypes;
+std::map<std::string, TurfTypePtr> FuncReturnTypes;
+
+// Type cache for Monomorphization: maps type name -> LLVM type
+std::map<std::string, llvm::Type *> LLVMTypeCache;
+
+void InitializeModule() {
+  // Holds types and constants
+  TheContext = std::make_unique<LLVMContext>();
+
+  // Holds functions
+  TheModule = std::make_unique<Module>("Turf Compiler", *TheContext);
+
+  // Builder to insert instructions
+  Builder = std::make_unique<IRBuilder<>>(*TheContext);
+}
+
+
+// ─── `!T` / `error` runtime representation (docs/planning/Errors.md) ────────
+//
+// See getLLVMType()'s TurfErrorUnionType/TurfUserErrorType/AnyErrorType
+// branches just below for the overall design: `!T` is one fixed struct type
+// regardless of T (the success value is boxed into a 64-bit slot), and every
+// `error`-type value (constructed or type-erased as AnyErrorType) is a
+// pointer to a heap-allocated tagged payload.
+
+/// `{ i1 isOk, i64 successBits, i8* errorPayload }` -- cached, built once.
+static llvm::StructType *getFallibleValueType() {
+  static llvm::StructType *Ty = nullptr;
+  if (!Ty) {
+    Ty = llvm::StructType::create(*TheContext, "FallibleValue");
+    Ty->setBody({llvm::Type::getInt1Ty(*TheContext),
+                llvm::Type::getInt64Ty(*TheContext),
+                PointerType::get(*TheContext, 0)});
+  }
+  return Ty;
+}
+
+
+/// Declares (once) or looks up the C `malloc` used to heap-box a success
+/// value that doesn't fit in a FallibleValue's 64-bit successBits slot (see
+/// BoxToI64Slot()'s struct branch) -- same lookup-or-create pattern already
+/// used for string conversion buffers (see CastToType()'s int/double ->
+/// string branches), needed here for the identical reason: the boxed value
+/// must outlive the function that returns it.
+static Function *getOrCreateMallocFn() {
+  Function *MallocF = TheModule->getFunction("malloc");
+  if (!MallocF) {
+    llvm::FunctionType *FT = llvm::FunctionType::get(
+        PointerType::get(*TheContext, 0),
+        {llvm::Type::getInt64Ty(*TheContext)}, false);
+    MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
+                               TheModule.get());
+  }
+  return MallocF;
+}
+
+
+/// Box an arbitrary Turf value into a 64-bit slot for storage in a
+/// FallibleValue's successBits field -- same "reinterpret without loss"
+/// trick CastToType() already uses to erase a generic type parameter into a
+/// void* (bitcast for same-width types, [sz]ext for narrower ones,
+/// ptrtoint for pointers), just targeting an i64 slot instead of a pointer.
+///
+/// A struct success type (e.g. `!TcpConnection`) doesn't fit inline -- found
+/// live while converting net.tr's TcpConnection::connect() to `!T` (a
+/// single-field `{fd: int}` struct is still a real LLVM struct, not a bare
+/// i64, so returning it silently truncated to zero bits before this branch
+/// existed). Heap-allocates space, stores the struct there, and boxes the
+/// POINTER instead -- same "must outlive the function" reasoning as an
+/// error tag string, just for the success side.
+static Value *BoxToI64Slot(Value *Val) {
+  llvm::Type *Ty = Val->getType();
+  llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
+  if (Ty->isIntegerTy(64))
+    return Val;
+  if (Ty->isIntegerTy(32))
+    return Builder->CreateSExt(Val, I64Ty, "box_i32");
+  if (Ty->isIntegerTy(1))
+    return Builder->CreateZExt(Val, I64Ty, "box_bool");
+  if (Ty->isIntegerTy(8))
+    return Builder->CreateZExt(Val, I64Ty, "box_char");
+  if (Ty->isDoubleTy())
+    return Builder->CreateBitCast(Val, I64Ty, "box_dbl");
+  if (Ty->isPointerTy())
+    return Builder->CreatePtrToInt(Val, I64Ty, "box_ptr");
+  if (Ty->isVoidTy())
+    // void success values reach here with no meaningful bits to store --
+    // callers never read successBits back for a void T anyway.
+    return llvm::ConstantInt::get(I64Ty, 0);
+  // Anything else (structs, fixed-size arrays by value): too wide for the
+  // inline slot, so heap-box it instead.
+  Value *Size = ConstantInt::get(I64Ty, TheModule->getDataLayout().getTypeAllocSize(Ty));
+  Value *HeapSlot = Builder->CreateCall(getOrCreateMallocFn(), {Size}, "box_slot");
+  Builder->CreateStore(Val, HeapSlot);
+  return Builder->CreatePtrToInt(HeapSlot, I64Ty, "box_ptr_wide");
+}
+
+
+/// Reverse of BoxToI64Slot(): reinterpret a FallibleValue's successBits back
+/// to the real LLVM representation of Turf type `T`.
+Value *UnboxFromI64Slot(Value *Slot, const TurfType *T) {
+  llvm::Type *TargetTy = getLLVMType(T);
+  if (TargetTy->isIntegerTy(64))
+    return Slot;
+  if (TargetTy->isIntegerTy(32))
+    return Builder->CreateTrunc(Slot, llvm::Type::getInt32Ty(*TheContext), "unbox_i32");
+  if (TargetTy->isIntegerTy(1))
+    return Builder->CreateTrunc(Slot, llvm::Type::getInt1Ty(*TheContext), "unbox_bool");
+  if (TargetTy->isIntegerTy(8))
+    return Builder->CreateTrunc(Slot, llvm::Type::getInt8Ty(*TheContext), "unbox_char");
+  if (TargetTy->isDoubleTy())
+    return Builder->CreateBitCast(Slot, llvm::Type::getDoubleTy(*TheContext), "unbox_dbl");
+  if (TargetTy->isPointerTy())
+    return Builder->CreateIntToPtr(Slot, TargetTy, "unbox_ptr");
+  if (TargetTy->isVoidTy())
+    return Slot; // caller never uses this value
+  // Struct/array: the slot holds a heap pointer (see BoxToI64Slot()), load
+  // the real value back through it.
+  Value *HeapSlot = Builder->CreateIntToPtr(Slot, PointerType::get(*TheContext, 0), "unbox_slot");
+  return Builder->CreateLoad(TargetTy, HeapSlot, "unbox_wide");
+}
+
+
+/// Declares (once) or looks up the C `strcmp` used to compare two error
+/// tag strings (see BuildErrorTag()/GetErrorTagValue()).
+Function *getOrCreateStrcmpFn() {
+  Function *StrcmpF = TheModule->getFunction("strcmp");
+  if (!StrcmpF) {
+    Type *I8Ptr = PointerType::get(*TheContext, 0);
+    llvm::FunctionType *FT = llvm::FunctionType::get(
+        llvm::Type::getInt32Ty(*TheContext), {I8Ptr, I8Ptr}, false);
+    StrcmpF = Function::Create(FT, Function::ExternalLinkage, "strcmp",
+                               TheModule.get());
+  }
+  return StrcmpF;
+}
+
+
+/// Builds the runtime value of an `ErrorType::Variant` reference
+/// (docs/planning/Errors.md): a global string constant uniquely identifying
+/// the (error type, variant) pair, e.g. "MathError::DivisionByZero". Variants
+/// are bare names only (no payload fields -- deferred, see Errors.md's own
+/// note on why), so this tag string IS the whole runtime representation of
+/// an error value: no heap allocation, no wrapping struct, just an i8*.
+/// Comparing two error values (BinaryExprAST::codegen()'s equality branch)
+/// is then a plain strcmp on this string, which is also why a single global
+/// string constant works as identity with no whole-program variant-ID
+/// registry needed -- it's already unique by construction.
+Value *BuildErrorTag(const std::string &ErrorTypeName,
+                            const std::string &VariantName) {
+  return Builder->CreateGlobalString(ErrorTypeName + "::" + VariantName, "errtag");
+}
+
+
+/// True if `E` is an error-tag-shaped operand for `==`/`!=`
+/// (docs/planning/Errors.md): either a bare `ErrorType::Variant` reference,
+/// or a variable already known (via its Resolver-set ResolvedSymbol, not
+/// TypeChecker's type map -- see IsErrorConstructionExpr's doc comment for
+/// why) to hold an error tag -- `err` inside `recover as err run { ... }`
+/// being the only way such a variable is ever created today.
+bool IsErrorTagExpr(const ExprAST *E) {
+  if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E))
+    return SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
+  if (auto *Var = dynamic_cast<const VariableExprAST *>(E)) {
+    if (const auto *Sym = Var->getResolvedSymbol())
+      return Sym->Type && (Sym->Type->isAnyError() || Sym->Type->isUserError());
+  }
+  return false;
+}
+
+
+/// Returns the tag string (i8*) for an error-tag-shaped `==`/`!=` operand.
+/// A bare `ErrorType::Variant` reference's tag is compile-time-known, so
+/// it's built directly via BuildErrorTag() instead of going through its
+/// ordinary ScopeAccessExprAST::codegen() (which would do the exact same
+/// thing anyway, just less directly) -- everything else (`err`, or any other
+/// AnyErrorType/TurfUserErrorType-typed expression) already codegens
+/// straight to its tag string, since that IS an error value's whole runtime
+/// representation now.
+Value *GetErrorTagValue(const ExprAST *E) {
+  if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E)) {
+    if (SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef)
+      return BuildErrorTag(SA->getLeftName(), SA->getRightName());
+  }
+  return const_cast<ExprAST *>(E)->codegen();
+}
+
+
+/// True if `E` is exactly the `ErrorType::Variant` reference shape
+/// (docs/planning/Errors.md) -- mirrors Resolver's
+/// CollectReturnedErrorTypeNames' identical structural recognition, used
+/// here to decide whether a `return`ed value is an error tag (i8*) or a
+/// genuine success value, since Codegen can't rely on TypeChecker's inferred
+/// types (this compiler resolves/typechecks/codegens function bodies in a
+/// pre-pass that runs its own full pipeline on its own AST instance --
+/// see main.cpp's "Pre-pass sub-pass 2b" comment -- so only structural
+/// info set directly on the AST node by the Resolver, like ResolvedKind, is
+/// safe to depend on here).
+bool IsErrorConstructionExpr(const ExprAST *E) {
+  auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E);
+  return SA && SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
+}
+
+
+/// Wraps a raw success value (or, if IsError, an error payload i8*) into a
+/// `!T` FallibleValue for a `return` inside a `!T`-declared function.
+/// `RawVal` may be null when the function's success type is void (a bare
+/// `return;` inside a `!void` function still needs to produce a real
+/// FallibleValue -- the function's actual LLVM return type is never void
+/// once its declared type is `!void`).
+Value *WrapFallibleValue(Value *RawVal, bool IsError) {
+  llvm::StructType *FVTy = getFallibleValueType();
+  llvm::Type *I1Ty = llvm::Type::getInt1Ty(*TheContext);
+  llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
+  Value *Result = llvm::UndefValue::get(FVTy);
+  Value *IsOk = ConstantInt::get(I1Ty, IsError ? 0 : 1);
+  Result = Builder->CreateInsertValue(Result, IsOk, 0, "fv.isok");
+  Value *SuccessBits = (!IsError && RawVal) ? BoxToI64Slot(RawVal)
+                                            : ConstantInt::get(I64Ty, 0);
+  Result = Builder->CreateInsertValue(Result, SuccessBits, 1, "fv.bits");
+  Value *ErrPtr = IsError ? RawVal
+                          : ConstantPointerNull::get(PointerType::get(*TheContext, 0));
+  Result = Builder->CreateInsertValue(Result, ErrPtr, 2, "fv.errptr");
+  return Result;
+}
+
+
+/**
+ * @brief Maps a frontend TurfType to its corresponding backend llvm::Type.
+ *
+ * Monomorphizes generic types like list<T> by generating and caching a unique
+ * LLVM struct type for each specific instantiation.
+ *
+ * @param T The frontend TurfType pointer.
+ * @return llvm::Type* The mapped LLVM type pointer.
+ */
+llvm::Type *getLLVMType(const TurfType *T) {
+  if (!T)
+    return llvm::Type::getDoubleTy(*TheContext);
+  std::string Key = T->getMangledName();
+
+  auto It = LLVMTypeCache.find(Key);
+  if (It != LLVMTypeCache.end())
+    return It->second;
+
+  // Primitive named types
+  if (T->isNamed("int"))
+    return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
+  if (T->isNamed("int32"))
+    return LLVMTypeCache[Key] = llvm::Type::getInt32Ty(*TheContext);
+  if (T->isNamed("double"))
+    return LLVMTypeCache[Key] = llvm::Type::getDoubleTy(*TheContext);
+  if (T->isNamed("bool"))
+    return LLVMTypeCache[Key] = llvm::Type::getInt1Ty(*TheContext);
+  if (T->isNamed("char"))
+    return LLVMTypeCache[Key] = llvm::Type::getInt8Ty(*TheContext);
+  if (T->isNamed("string"))
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+  if (T->isNamed("void"))
+    return LLVMTypeCache[Key] = llvm::Type::getVoidTy(*TheContext);
+  // `ptr` — opaque pointer (i8* in LLVM IR)
+  if (T->isNamed("ptr") || dynamic_cast<const OpaquePointerType *>(T))
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+
+  // First-class function value (fn(T): R) — functions are already pointer-
+  // shaped values under LLVM's opaque-pointer model; a variable/parameter of
+  // this type just stores that pointer, same representation as `ptr`/T*.
+  if (T->isFunc())
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+
+  // Array types — return ArrayType for fixed size, opaque pointer for unsized.
+  if (isArrayType(T)) {
+    const auto *AT = dynamic_cast<const ::ArrayType *>(T);
+    if (AT && AT->getSize() > 0)
+      return LLVMTypeCache[Key] = llvm::ArrayType::get(getLLVMType(AT->getElementTypePtr().get()), AT->getSize());
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+  }
+
+  // PointerType — lowers to ptr
+  if (dynamic_cast<const TurfPointerType *>(T))
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+
+  // User-defined structs must be declared and cached prior to this call.
+  // Missing structs fallback to an opaque type to prevent immediate crashes.
+  if (auto *ST = dynamic_cast<const TurfStructType *>(T)) {
+    // If we reach here, StructDecl codegen hasn't happened or it failed.
+    // We'll return an opaque struct to avoid crashing.
+    return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, Key);
+  }
+
+  // Type Erasure: Generic Type Parameters are compiled as void* 
+  if (dynamic_cast<const TurfGenericParamType *>(T)) {
+    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
+  }
+
+  // GenericType instantiations (e.g. List<int>) — look up the base struct.
+  // The base struct (e.g. "List") was registered in LLVMTypeCache by
+  // StructDeclExprAST::codegen(). Use that layout for the generic instance.
+  if (auto *GT = dynamic_cast<const GenericType *>(T)) {
+    auto BaseIt = LLVMTypeCache.find(GT->getBaseName());
+    if (BaseIt != LLVMTypeCache.end())
+      return LLVMTypeCache[Key] = BaseIt->second;
+    // Base struct not yet seen — create a forward-declared opaque type
+    return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, GT->getBaseName());
+  }
+
+  // User-defined enums — always stored as their underlying integer type (i64).
+  if (dynamic_cast<const TurfEnumType *>(T)) {
+    return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
+  }
+
+  // User-declared `error` type value (docs/planning/Errors.md) -- a global
+  // string constant identifying (error type, variant), e.g.
+  // "MathError::DivisionByZero" (see BuildErrorTag()) -- variants are bare
+  // names with no payload, so this tag string IS the whole value, an i8*
+  // like any other string. AnyErrorType (the type of `err` inside
+  // `recover as err run { ... }`) is the SAME tag string with its concrete
+  // error type erased, so it gets the identical representation.
+  if (T->isUserError() || T->isAnyError()) {
+    return LLVMTypeCache[Key] = PointerType::get(*TheContext, 0);
+  }
+
+  // `!T` (docs/planning/Errors.md) -- uniformly `{ i1 isOk, i64 successBits,
+  // i8* errorPayload }` regardless of what T is: the success value is boxed
+  // into the i64 slot (see BoxToI64Slot()/UnboxFromI64Slot()) exactly like
+  // this compiler already boxes a generic type parameter into a void*
+  // (CastToType()'s "Type Erasure" branches) -- same idea, fixed-width slot
+  // instead of a pointer. This keeps ONE concrete LLVM type for every `!T`
+  // no matter what T is, so a function's LLVM return type/a variable's LLVM
+  // type never needs to vary per success type.
+  if (T->isErrorUnion()) {
+    return LLVMTypeCache[Key] = getFallibleValueType();
+  }
+
+  // NamedType — may refer to a user-defined struct, enum, or error type
+  // registered in GlobalSymbolTable. Check GlobalSymbolTable first so
+  // enums/error types resolve to their real representation instead of
+  // falling through to the opaque-struct-forward-decl path below (which is
+  // only correct for structs).
+  if (dynamic_cast<const NamedType *>(T)) {
+    // Try to resolve through GlobalSymbolTable first
+    if (GlobalSymbolTable) {
+      if (auto Registered = GlobalSymbolTable->LookupType(T->getName())) {
+        if (dynamic_cast<const TurfEnumType *>(Registered.get()))
+          return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
+        if (Registered->isUserError())
+          return LLVMTypeCache[Key] = PointerType::get(*TheContext, 0);
+      }
+    }
+    auto CacheIt = LLVMTypeCache.find(Key);
+    if (CacheIt != LLVMTypeCache.end())
+      return CacheIt->second;
+    // Not yet registered — create a forward-declared opaque struct so the
+    // function type can be built; StructDeclExprAST::codegen will fill it in.
+    return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, Key);
+  }
+
+  // Unknown / future types
+  return LLVMTypeCache[Key] = llvm::Type::getDoubleTy(*TheContext);
+}
+
+
+// Recover a TurfTypePtr from an LLVM Value type.
+// Pointers are ambiguous (could be string or list), so callers that need
+// precise list-vs-string info should use NamedValues directly.
+TurfTypePtr getTurfTypeFromLLVM(llvm::Type *Ty) {
+  if (Ty->isDoubleTy())
+    return TurfDouble();
+  if (Ty->isIntegerTy(64))
+    return TurfInt();
+  if (Ty->isIntegerTy(32))
+    return TurfInt();
+  if (Ty->isIntegerTy(1))
+    return TurfBool();
+  // Must come before the final double fallback: an i8 char value would
+  // otherwise be silently misidentified as double, which breaks
+  // CastExprAST's SrcName==DstName identity fast path for any char-involving
+  // cast or comparison (see STRING_UFCS_OPERATOR_CHAR_RFC.md §3 build notes).
+  if (Ty->isIntegerTy(8))
+    return TurfChar();
+  if (Ty->isPointerTy())
+    return TurfPtr(); // All LLVM pointers map to ptr; callers refine via RefineLLVMType
+  if (Ty->isVoidTy())
+    return TurfVoid();
+  return TurfDouble();
+}
+
+
+static int getTypeRank(const TurfType *T) {
+  if (!T)
+    return 0;
+  if (T->isNamed("double"))
+    return 3;
+  if (T->isNamed("int"))
+    return 2;
+  if (T->isNamed("bool"))
+    return 1;
+  if (T->isNamed("char"))
+    return 5;
+  if (T->isNamed("string"))
+    return 4;
+  return 0;
+}
+
+
+TurfTypePtr getCommonType(TurfTypePtr A, TurfTypePtr B) {
+  return getTypeRank(A.get()) >= getTypeRank(B.get()) ? A : B;
+}
+
+
+static TurfTypePtr RefineLLVMType(TurfTypePtr Deduced, TurfTypePtr Expected,
+                                  llvm::Type *LLVMTy) {
+  // When the LLVM type is a pointer and the expected type is any pointer-like
+  // Turf type, trust the expected type (it has more info than the raw LLVM type).
+  if (LLVMTy->isPointerTy() && Expected &&
+      (isArrayType(Expected.get()) ||
+       dynamic_cast<const TurfPointerType *>(Expected.get()) ||
+       dynamic_cast<const OpaquePointerType *>(Expected.get()) ||
+       Expected->isNamed("string") ||
+       Expected->isNamed("void*"))) {
+    return Expected;
+  }
+  return Deduced;
+}
+
+
+// Returns true when T is any pointer-like Turf type:
+// string, ptr (OpaquePointerType), T* (TurfPointerType), void*.
+// All of these share the same LLVM representation (opaque pointer).
+static bool isPointerLike(const TurfType *T) {
+  if (!T) return false;
+  return T->isNamed("string") || T->isNamed("ptr") || T->isNamed("void*") ||
+         dynamic_cast<const OpaquePointerType *>(T) ||
+         dynamic_cast<const TurfPointerType *>(T) || T->isFunc();
+}
+
+
+
+const TurfType *getExprType(const ExprAST *E) {
+  if (!E)
+    return nullptr;
+  if (auto *Num = dynamic_cast<const NumberExprAST *>(E)) {
+    if (!Num->isInteger())
+      return TurfDouble().get();
+    return TurfInt().get();
+  }
+  if (auto *BoolE = dynamic_cast<const BoolExprAST *>(E)) {
+    return TurfBool().get();
+  }
+  if (auto *Str = dynamic_cast<const StringExprAST *>(E)) {
+    return TurfString().get();
+  }
+  if (auto *NullE = dynamic_cast<const NullExprAST *>(E)) {
+    return TurfNull().get();
+  }
+  if (auto *Bin = dynamic_cast<const BinaryExprAST *>(E)) {
+    int Op = Bin->getOp();
+    if (Op == '<' || Op == '>' || Op == '!' || Op == '=' ||
+        Op == TOK_EQ || Op == TOK_NEQ || Op == TOK_LEQ || Op == TOK_GEQ ||
+        Op == TOK_AND || Op == TOK_OR)
+      return TurfBool().get();
+    // Bitwise operators return int
+    if (Op == '&' || Op == '|' || Op == '^' ||
+        Op == TOK_LSHIFT || Op == TOK_RSHIFT)
+      return TurfInt().get();
+    // Exponentiation returns double
+    if (Op == TOK_POWER)
+      return TurfDouble().get();
+    const TurfType *LType = getExprType(Bin->getLHS());
+    const TurfType *RType = getExprType(Bin->getRHS());
+    if (!LType)
+      return RType;
+    if (!RType)
+      return LType;
+    if (LType->isNamed("double") || RType->isNamed("double"))
+      return TurfDouble().get();
+    return LType;
+  }
+  if (auto *Unary = dynamic_cast<const UnaryExprAST *>(E)) {
+    return getExprType(Unary->getOperand());
+  }
+  if (auto *FuncCall = dynamic_cast<const FuncCallExprAST *>(E)) {
+    auto *VarCallee = dynamic_cast<const VariableExprAST *>(FuncCall->getCallee());
+    auto *ScopeCallee = dynamic_cast<const ScopeAccessExprAST *>(FuncCall->getCallee());
+    if (VarCallee || ScopeCallee) {
+      std::string CalleeName = VarCallee ? VarCallee->getName() : ScopeCallee->getRightName();
+
+      if (CalleeName == "typeof")
+        return TurfString().get();
+
+      // `StructName::new(...)` / `StructName::default()` -- both evaluate to
+      // the constructed struct, looked up the same way the removed
+      // StructInitExprAST branch (further below) used to for the old
+      // brace-literal form.
+      if (ScopeCallee &&
+          (ScopeCallee->ResolvedKind == ScopeAccessKind::ConstructorCall ||
+           ScopeCallee->ResolvedKind == ScopeAccessKind::DefaultConstruct)) {
+        if (GlobalSymbolTable) {
+          if (auto T = GlobalSymbolTable->LookupType(ScopeCallee->getLeftName()))
+            return T.get();
+        }
+        return nullptr;
+      }
+
+      // Mangled names are built from the CALL SITE's actual argument types
+      // (not the function's own declared param types) so that a generic
+      // function's type-erased instantiation resolves correctly below (see
+      // the Unify()-based substitution further down) -- so we can't just
+      // take ResolvedCallTarget->mangledName() wholesale, that reflects the
+      // declared signature, not this call site's. What WAS missing here
+      // entirely is the MODULE PREFIX: a module function actually mangles
+      // as turf_<module>_<name>_<paramtypes>, and this manual reconstruction
+      // never accounted for that at all -- for a call reached via a
+      // ScopeAccessExprAST callee (Module::func(...)) or a bare self-
+      // reference/on-demand-imported module call, it always missed
+      // FuncReturnTypes and fell through to `return nullptr`. Invisible for
+      // int-returning functions (an int compare doesn't care), but a real,
+      // silent wrong-answer bug for a string-returning one: e.g.
+      // `strings::trim(s) == "hello"` needs an accurate LHS type to choose
+      // strcmp over a raw pointer comparison, and a null type here meant it
+      // silently chose the wrong one. Recovered from ResolvedCallTarget's
+      // own SourceModule (Issue #9: trust the Resolver for WHERE this
+      // function lives, even though its declared types aren't usable here).
+      std::string ModulePrefix;
+      if (const auto *Target = FuncCall->getResolvedCallTarget())
+        if (!Target->SourceModule.empty())
+          ModulePrefix = Target->SourceModule + "_";
+
+      std::string MangledName =
+          (CalleeName == "main") ? CalleeName : "turf_" + ModulePrefix + CalleeName;
+      std::vector<const TurfType *> ArgTypes;
+      for (const auto &Arg : FuncCall->getArgs()) {
+        const TurfType *T = getExprType(Arg.get());
+        if (!T)
+          return nullptr;
+        ArgTypes.push_back(T);
+        if (CalleeName != "main")
+          MangledName += "_" + T->getMangledName();
+      }
+      // Check FuncReturnTypes for user-declared extern fn first.
+      // This covers both normal turf functions and extern fn declarations.
+      auto It = FuncReturnTypes.find(MangledName);
+      if (It != FuncReturnTypes.end())
+        return It->second.get();
+      // Also check by raw CalleeName (extern fns register under their C name)
+      auto ItRaw = FuncReturnTypes.find(CalleeName);
+      if (ItRaw != FuncReturnTypes.end())
+        return ItRaw->second.get();
+
+      for (const auto &[Name, ParamTypes] : FuncParamTypes) {
+        std::string Prefix = "turf_" + ModulePrefix + CalleeName;
+        if (Name == Prefix ||
+            (Name.size() > Prefix.size() && Name[Prefix.size()] == '_' &&
+             Name.compare(0, Prefix.size(), Prefix) == 0)) {
+          if (ParamTypes.size() == ArgTypes.size()) {
+            bool Compatible = true;
+            for (size_t i = 0; i < ArgTypes.size(); ++i) {
+              if (!typesCompatible(ArgTypes[i], ParamTypes[i].get())) {
+                Compatible = false;
+                break;
+              }
+            }
+            if (Compatible) {
+              // Same class of gap as the struct-method case just above:
+              // a generic FREE function is type-erased to ONE compiled
+              // version, registered here under its bare declared return
+              // type (e.g. TurfGenericParamType("T") for `fn<T>
+              // firstElem(arr: T[]): T`) -- returning it unsubstituted
+              // meant `firstElem(intArray) to string` failed with "I
+              // can't convert 'T' to a string!" even though
+              // TypeChecker's OWN (separate) inference already correctly
+              // resolves this call's type as int. Recover T -> int by
+              // unifying each DECLARED parameter type against the
+              // ACTUAL argument type at this call site (recursing
+              // through pointer/array wrapping, e.g. T[] vs int[] ->
+              // T=int), then substitute it into the declared return type.
+              std::unordered_map<std::string, TurfTypePtr> Subst;
+              std::function<void(const TurfTypePtr &, const TurfType *)> Unify =
+                  [&](const TurfTypePtr &ParamTy, const TurfType *ArgTy) {
+                    if (!ParamTy || !ArgTy) return;
+                    if (auto *GP = dynamic_cast<const TurfGenericParamType *>(ParamTy.get())) {
+                      if (!Subst.count(GP->getName())) {
+                        // Subst stores an owning TurfTypePtr; ArgTypes are
+                        // raw pointers into caches that outlive this call,
+                        // so wrap without taking ownership of a temporary.
+                        Subst.emplace(GP->getName(), TurfTypePtr(const_cast<TurfType *>(ArgTy), [](TurfType*){}));
+                      }
+                    } else if (auto *NT = dynamic_cast<const NamedType *>(ParamTy.get())) {
+                      bool KnownElsewhere = GlobalSymbolTable &&
+                                           GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
+                      if (!KnownElsewhere && !Subst.count(NT->getName()))
+                        Subst.emplace(NT->getName(), TurfTypePtr(const_cast<TurfType *>(ArgTy), [](TurfType*){}));
+                    } else if (auto *PPT = dynamic_cast<const TurfPointerType *>(ParamTy.get())) {
+                      if (auto *APT = dynamic_cast<const TurfPointerType *>(ArgTy))
+                        Unify(PPT->getPointee(), APT->getPointee().get());
+                    } else if (isArrayType(ParamTy.get()) && isArrayType(ArgTy)) {
+                      Unify(dynamic_cast<const ::ArrayType *>(ParamTy.get())->getElementTypePtr(),
+                            getArrayElementType(ArgTy));
+                    }
+                  };
+              for (size_t i = 0; i < ArgTypes.size(); ++i)
+                Unify(ParamTypes[i], ArgTypes[i]);
+
+              const TurfType *RetTy = FuncReturnTypes[Name].get();
+              if (!Subst.empty() && RetTy) {
+                if (auto *GP = dynamic_cast<const TurfGenericParamType *>(RetTy)) {
+                  auto It2 = Subst.find(GP->getName());
+                  if (It2 != Subst.end())
+                    return It2->second.get();
+                } else if (auto *NT = dynamic_cast<const NamedType *>(RetTy)) {
+                  auto It2 = Subst.find(NT->getName());
+                  if (It2 != Subst.end())
+                    return It2->second.get();
+                }
+              }
+              return RetTy;
+            }
+          }
+        }
+      }
+      // Fallback for intrinsic path: malloc/realloc return ptr, free returns void
+      if (CalleeName == "malloc" || CalleeName == "realloc")
+        return TurfPtr().get();
+      if (CalleeName == "free")
+        return TurfVoid().get();
+    }
+    return nullptr;
+  }
+  if (auto *Cast = dynamic_cast<const CastExprAST *>(E)) {
+    return Cast->getDestType();
+  }
+  if (auto *Var = dynamic_cast<const VariableExprAST *>(E)) {
+    // A bare struct TYPE NAME used as a static-method-call qualifier
+    // (`MathUtil` in `MathUtil.square(5)`, Var->IsStructName set by the
+    // Resolver) is not a real variable/symbol at all, so none of the three
+    // lookups below could ever find it -- this branch fell all the way
+    // through to `return nullptr;` at the end of the function, and the
+    // null propagated to a `report_fatal_error("could not determine type
+    // of method call base... this is a compiler bug")` further down in
+    // MethodCallExprAST::codegen(), crashing the WHOLE compiler process on
+    // ANY static struct method call, correctly-typed arguments or not.
+    // Confirmed: no test in the suite exercised this at all before now.
+    if (Var->IsStructName && GlobalSymbolTable) {
+      if (auto T = GlobalSymbolTable->LookupType(Var->getName()))
+        return T.get();
+    }
+    if (Var->ResolvedSymbol && Var->ResolvedSymbol->Type)
+      return Var->ResolvedSymbol->Type.get();
+    // An `export immut` constant (no ResolvedSymbol -- see its field's doc
+    // comment in AST.h).
+    if (Var->ResolvedConstant && Var->ResolvedConstant->Type)
+      return Var->ResolvedConstant->Type.get();
+    auto It = NamedValues.find(Var->getName());
+    if (It != NamedValues.end() && It->second.Type)
+      return It->second.Type.get();
+    if (GlobalSymbolTable) {
+      Symbol *Sym = GlobalSymbolTable->LookupSymbol(Var->getName());
+      if (Sym)
+        return Sym->Type.get();
+    }
+  }
+  if (auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(E)) {
+    const TurfType *BaseTy = getExprType(ArrAcc->getBase());
+    if (BaseTy) {
+      if (BaseTy->isString())
+        return TurfInt().get();
+      const TurfType *ElemTy = nullptr;
+      if (isArrayType(BaseTy)) {
+        ElemTy = getArrayElementType(BaseTy);
+      } else if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy)) {
+        ElemTy = PtrTy->getPointee().get();
+      }
+      
+      if (ElemTy) {
+        // Issue #17 fix: resolve NamedType element types (e.g. struct User)
+        // to TurfStructType so that arr[0].field codegen works correctly.
+        if (GlobalSymbolTable) {
+          if (const auto *NT = dynamic_cast<const NamedType *>(ElemTy)) {
+            if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+              return Resolved.get();
+          }
+        }
+        return ElemTy;
+      }
+    }
+  }
+  if (auto *MethodCall = dynamic_cast<const MethodCallExprAST *>(E)) {
+    const TurfType *BaseTy = getExprType(MethodCall->getBase());
+
+    if (!BaseTy) {
+      // Could be a module call (e.g. mem.malloc)
+      if (auto *VarBase = dynamic_cast<const VariableExprAST *>(MethodCall->getBase())) {
+        std::string CalleeName = VarBase->getName() + "_" + MethodCall->getMethod();
+        std::string MangledName = "turf_" + CalleeName;
+        std::vector<const TurfType *> ArgTypes;
+        for (const auto &Arg : MethodCall->getArgs()) {
+          const TurfType *T = getExprType(Arg.get());
+          if (!T) {
+            return nullptr;
+          }
+          ArgTypes.push_back(T);
+          MangledName += "_" + T->getMangledName();
+        }
+        auto It = FuncReturnTypes.find(MangledName);
+        if (It != FuncReturnTypes.end()) {
+          return It->second.get();
+        }
+          
+        for (const auto &[Name, ParamTypes] : FuncParamTypes) {
+          std::string Prefix = "turf_" + CalleeName;
+          if (Name == Prefix ||
+              (Name.size() > Prefix.size() && Name[Prefix.size()] == '_' &&
+               Name.compare(0, Prefix.size(), Prefix) == 0)) {
+            if (ParamTypes.size() == ArgTypes.size()) {
+              bool Compatible = true;
+              for (size_t i = 0; i < ArgTypes.size(); ++i) {
+                if (!typesCompatible(ArgTypes[i], ParamTypes[i].get())) {
+                  Compatible = false;
+                  break;
+                }
+              }
+              if (Compatible)
+                return FuncReturnTypes[Name].get();
+            }
+          }
+        }
+      }
+      return nullptr;
+    }
+
+    if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy))
+      BaseTy = PtrTy->getPointee().get();
+
+    // Resolve NamedType base (e.g. the pointee of a method's own `Counter*`
+    // return type) to the real TurfStructType, mirroring what the sibling
+    // FieldAccessExprAST case below already does. Without this, a chained
+    // method call three levels deep (`c.increment().increment().increment()`,
+    // where `increment(): Counter*` returns self for chaining) crashed with
+    // "Internal error: could not determine type of method call base": the
+    // middle level's BaseTy resolved fine (a bare VariableExprAST base), but
+    // the outermost level's Base is itself a MethodCallExprAST whose type
+    // came back as NamedType("Counter") (the unresolved pointee of the
+    // previous call's Counter* return type) instead of TurfStructType --
+    // which the `dynamic_cast<const TurfStructType *>(BaseTy)` check just
+    // below silently failed to match, falling through to `return nullptr`
+    // with no other fallback since the Base isn't a VariableExprAST either.
+    if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
+      if (GlobalSymbolTable) {
+        if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+          BaseTy = R.get();
+      }
+    }
+
+    if (MethodCall->getMethod() == "pop" || MethodCall->getMethod() == "peek" ||
+        MethodCall->getMethod() == "dequeue") {
+      // For a concrete generic instantiation like List<int>, return the
+      // first type argument as the element type so callers know how to
+      // un-erase the returned void* back to the concrete type.
+      if (auto *GenTy = dynamic_cast<const GenericType *>(BaseTy)) {
+        if (!GenTy->getTypeArgs().empty())
+          return GenTy->getTypeArg(0);
+      }
+    }
+    // Resolve a GenericType base (e.g. List<int>) to its underlying
+    // TurfStructType, mirroring the NamedType unwrap just above -- without
+    // this, the general lookup just below (which only matches
+    // TurfStructType) never fired for ANY method call on a generic struct
+    // instance, including 'push'. That gap used to be papered over by a
+    // hardcoded `if (MethodName == "push") return BaseTy;` special case
+    // (removed) that assumed EVERY method literally named "push", on ANY
+    // struct, generic or not, returns its receiver's bare type -- which
+    // happens to not matter for List<T>.push (declared 'void', and its
+    // result is never used), but is flatly wrong for a user-defined struct
+    // whose OWN "push" method has a real, different declared return type.
+    // Confirmed via a `Builder.push(x: int): Builder*` fluent/chaining
+    // method (returns self by pointer, like the already-covered
+    // `Counter.increment(): Counter*` pattern): this hack made
+    // getExprType() report the chained call's type as bare `Builder`
+    // instead of `Builder*`, so MethodCallExprAST::codegen()'s self-pointer
+    // logic (which branches on "is Base's type actually a pointer") took
+    // the wrong path -- spilling the returned pointer into a fresh temp
+    // alloca and passing THAT ALLOCA'S ADDRESS as `self` instead of the
+    // pointer itself, an extra level of indirection. Only the FIRST call in
+    // `b.push(1).push(2)` ever mutated the real struct; the second silently
+    // wrote through to a throwaway temporary.
+    // Capture the ORIGINAL GenericType's type arguments (e.g. `int` for
+    // `Box<int>`) before BaseTy gets overwritten to the resolved
+    // TurfStructType just below -- needed for the substitution a few lines
+    // down. Copied into an owning vector so it stays valid regardless of
+    // what BaseTy is reassigned to.
+    std::vector<TurfTypePtr> GenericTypeArgs;
+    if (auto *GT0 = dynamic_cast<const GenericType *>(BaseTy))
+      GenericTypeArgs = GT0->getTypeArgs();
+
+    if (auto *GT = dynamic_cast<const GenericType *>(BaseTy)) {
+      if (GlobalSymbolTable) {
+        if (auto R = GlobalSymbolTable->LookupType(GT->getBaseName()))
+          BaseTy = R.get();
+      }
+    }
+    if (BaseTy && dynamic_cast<const TurfStructType *>(BaseTy)) {
+      std::string MethodName =
+          BaseTy->getName() + "." + MethodCall->getMethod();
+      std::string MangledName =
+          "turf_" + MethodName + "_" + BaseTy->getName() + "_ptr";
+      std::vector<const TurfType *> ArgTypes;
+      for (const auto &Arg : MethodCall->getArgs()) {
+        const TurfType *T = getExprType(Arg.get());
+        if (!T)
+          return nullptr;
+        ArgTypes.push_back(T);
+        MangledName += "_" + T->getMangledName();
+      }
+
+      // Recover this struct's own type-parameter substitution (T -> int,
+      // from GenericTypeArgs captured above) by scanning its fields for a
+      // NamedType/TurfGenericParamType name that isn't a known struct/enum
+      // -- mirrors TypeChecker::visitMethodCall()'s identical Subst-
+      // building code exactly (see that function's doc comment for why
+      // GlobalSymbolTable's copy of a generic struct's fields is
+      // permanently stuck as NamedType, never rewritten to
+      // TurfGenericParamType).
+      //
+      // Without this, a method's FuncReturnTypes entry -- the function's
+      // own DECLARED return type, e.g. TurfGenericParamType("T") for
+      // `fn<T> Box.get(): T` -- was returned completely unsubstituted.
+      // This used to be silently papered over for exactly three method
+      // names (pop/peek/dequeue, handled above by a hardcoded special
+      // case using GenTy->getTypeArg(0) directly), but ANY OTHER
+      // generically-returning method fell through to here with zero
+      // substitution. Confirmed via `fn<T> Box.get(): T` on a `Box<int>`:
+      // `b.get() to string` failed with "I can't convert 'T' to a
+      // string!" even though TypeChecker had already correctly inferred
+      // `int` for the very same call -- Codegen's getExprType() is a
+      // completely separate, independent type-inference pass that never
+      // consults TypeChecker's results.
+      std::unordered_map<std::string, TurfTypePtr> Subst;
+      if (!GenericTypeArgs.empty()) {
+        if (auto *STy2 = dynamic_cast<const TurfStructType *>(BaseTy)) {
+          std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
+            if (!FTy || Subst.size() >= GenericTypeArgs.size()) return;
+            if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
+              if (!Subst.count(GP->getName()))
+                Subst.emplace(GP->getName(), GenericTypeArgs[Subst.size()]);
+            } else if (auto *NT = dynamic_cast<const NamedType *>(FTy.get())) {
+              bool KnownElsewhere = GlobalSymbolTable &&
+                                   GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
+              if (!KnownElsewhere && !Subst.count(NT->getName()))
+                Subst.emplace(NT->getName(), GenericTypeArgs[Subst.size()]);
+            } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
+              Scan(PT->getPointee());
+            } else if (isArrayType(FTy.get())) {
+              Scan(dynamic_cast<const ::ArrayType *>(FTy.get())->getElementTypePtr());
+            }
+          };
+          for (const auto &F : STy2->getFields())
+            Scan(F.Type);
+        }
+      }
+      // Substitute a TurfGenericParamType/NamedType return type through
+      // Subst -- a no-op for a non-generic struct (Subst stays empty) or a
+      // return type that doesn't mention any of this struct's parameters.
+      auto ApplySubst = [&](const TurfType *RetTy) -> const TurfType * {
+        if (Subst.empty() || !RetTy)
+          return RetTy;
+        if (auto *GP = dynamic_cast<const TurfGenericParamType *>(RetTy)) {
+          auto It2 = Subst.find(GP->getName());
+          if (It2 != Subst.end())
+            return It2->second.get();
+        } else if (auto *NT = dynamic_cast<const NamedType *>(RetTy)) {
+          auto It2 = Subst.find(NT->getName());
+          if (It2 != Subst.end())
+            return It2->second.get();
+        }
+        return RetTy;
+      };
+
+      auto It = FuncReturnTypes.find(MangledName);
+      if (It != FuncReturnTypes.end())
+        return ApplySubst(It->second.get());
+
+      for (const auto &[Name, ParamTypes] : FuncParamTypes) {
+        std::string Prefix = "turf_" + MethodName;
+        std::string Suffix = "_" + MethodName;
+        bool Match = false;
+        if (Name == Prefix || (Name.size() > Prefix.size() && Name[Prefix.size()] == '_' &&
+                               Name.compare(0, Prefix.size(), Prefix) == 0)) {
+          Match = true;
+        } else {
+          size_t Pos = Name.find(Suffix);
+          if (Pos != std::string::npos && (Pos + Suffix.size() == Name.size() || Name[Pos + Suffix.size()] == '_')) {
+            Match = true;
+          }
+        }
+        if (Match) {
+          if (ParamTypes.size() == ArgTypes.size() + 1) {
+            bool Compatible = true;
+            for (size_t i = 0; i < ArgTypes.size(); ++i) {
+              if (!typesCompatible(ArgTypes[i], ParamTypes[i + 1].get())) {
+                Compatible = false;
+                break;
+              }
+            }
+            if (Compatible)
+              return ApplySubst(FuncReturnTypes[Name].get());
+          }
+        }
+      }
+    }
+  }
+  if (auto *FieldAccess = dynamic_cast<const FieldAccessExprAST *>(E)) {
+    const TurfType *BaseTy = getExprType(FieldAccess->getBase());
+    if (!BaseTy) return nullptr;
+    if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy))
+      BaseTy = PtrTy->getPointee().get();
+    // Resolve NamedType base (e.g. field type from a parent struct field)
+    if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
+      if (GlobalSymbolTable) {
+        if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+          BaseTy = R.get();
+      }
+    }
+    // Resolve a GenericType base (e.g. List<Entry>) to its underlying
+    // TurfStructType, mirroring the identical MethodCallExprAST handling
+    // above (see its extensive doc comment for the full rationale). Without
+    // this, `someList.data` (a FIELD access on a GENERIC struct instance)
+    // never matched the `dynamic_cast<TurfStructType>` check just below at
+    // all -- GenericType doesn't inherit from TurfStructType -- so this
+    // whole branch fell through to `return nullptr` for ANY field access on
+    // a generic struct, including the publicly-exposed `data`/`len`/`cap`
+    // fields List<T>/Stack<T>/Queue<T> all have. Confirmed live: `someList.
+    // data[0].value` (index into a `List<Entry>`, then read a field off the
+    // result) crashed the WHOLE COMPILER with "Internal error: Could not
+    // determine type of array/list base" in ArrayAccessExprAST::
+    // codegenLValue() -- getExprType() on `someList.data` (the array being
+    // indexed) silently returned null here, and that function has no
+    // graceful fallback for a null base type.
+    std::vector<TurfTypePtr> GenericTypeArgs;
+    if (auto *GT0 = dynamic_cast<const GenericType *>(BaseTy))
+      GenericTypeArgs = GT0->getTypeArgs();
+    if (auto *GT = dynamic_cast<const GenericType *>(BaseTy)) {
+      if (GlobalSymbolTable) {
+        if (auto R = GlobalSymbolTable->LookupType(GT->getBaseName()))
+          BaseTy = R.get();
+      }
+    }
+    if (auto *STy = dynamic_cast<const TurfStructType *>(BaseTy)) {
+      TurfTypePtr FieldTy = STy->getFieldType(FieldAccess->getFieldName());
+      if (!FieldTy) return nullptr;
+
+      // Substitute this struct's own generic type parameter(s) into the
+      // field's declared type (e.g. T -> Entry for a List<Entry> instance,
+      // turning the field's stuck-as-declared `T*` into `Entry*`). Fixing
+      // the GenericType-base gap above alone isn't enough on its own: even
+      // once `.data`'s declared type (`T*`) is found at all, it's still the
+      // UNSUBSTITUTED generic placeholder -- indexing into it would report
+      // each element's type as bare `T`, and `T` isn't a real struct, so a
+      // further `.value` field access on THAT would fail too. Mirrors the
+      // identical scan-the-fields Subst-recovery technique the
+      // MethodCallExprAST branch above already uses for method return
+      // types (GlobalSymbolTable's copy of a generic struct's fields is
+      // permanently stuck as NamedType/TurfGenericParamType, never
+      // rewritten per-instantiation -- see that branch's own doc comment).
+      if (!GenericTypeArgs.empty()) {
+        std::unordered_map<std::string, TurfTypePtr> Subst;
+        std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
+          if (!FTy || Subst.size() >= GenericTypeArgs.size()) return;
+          if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
+            if (!Subst.count(GP->getName()))
+              Subst.emplace(GP->getName(), GenericTypeArgs[Subst.size()]);
+          } else if (auto *NT2 = dynamic_cast<const NamedType *>(FTy.get())) {
+            bool KnownElsewhere = GlobalSymbolTable &&
+                                 GlobalSymbolTable->LookupType(NT2->getName()) != nullptr;
+            if (!KnownElsewhere && !Subst.count(NT2->getName()))
+              Subst.emplace(NT2->getName(), GenericTypeArgs[Subst.size()]);
+          } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
+            Scan(PT->getPointee());
+          } else if (isArrayType(FTy.get())) {
+            Scan(dynamic_cast<const ::ArrayType *>(FTy.get())->getElementTypePtr());
+          }
+        };
+        for (const auto &F : STy->getFields())
+          Scan(F.Type);
+
+        if (!Subst.empty()) {
+          // Recursively substitute FieldTy through Subst, rebuilding
+          // wrapper (pointer) types as needed. A freshly-constructed
+          // wrapper type is cached statically, keyed by its mangled name,
+          // so the raw pointer this function ultimately returns stays
+          // valid for the caller's lifetime without leaking or dangling --
+          // the exact same pattern AddressOfExprAST's case below already
+          // uses for the same reason (a locally-constructed TurfTypePtr
+          // would otherwise be destroyed the moment this function returns,
+          // leaving `.get()` a dangling pointer).
+          static std::map<std::string, TurfTypePtr> FieldSubstCache;
+          std::function<TurfTypePtr(const TurfTypePtr &)> Apply =
+              [&](const TurfTypePtr &FTy) -> TurfTypePtr {
+            if (!FTy) return FTy;
+            if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
+              auto It = Subst.find(GP->getName());
+              if (It != Subst.end()) return It->second;
+            } else if (auto *NT2 = dynamic_cast<const NamedType *>(FTy.get())) {
+              auto It = Subst.find(NT2->getName());
+              if (It != Subst.end()) return It->second;
+            } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
+              TurfTypePtr NewPointee = Apply(PT->getPointee());
+              if (NewPointee.get() != PT->getPointee().get()) {
+                std::string Key = "fieldsubst_ptr_" + NewPointee->getMangledName();
+                auto CacheIt = FieldSubstCache.find(Key);
+                if (CacheIt != FieldSubstCache.end())
+                  return CacheIt->second;
+                auto NewPtr = std::make_shared<TurfPointerType>(NewPointee);
+                FieldSubstCache[Key] = NewPtr;
+                return NewPtr;
+              }
+            }
+            return FTy;
+          };
+          FieldTy = Apply(FieldTy);
+        }
+      }
+
+      // Resolve NamedType field types so chained access (a.b.c) works correctly.
+      if (auto *NT = dynamic_cast<const NamedType *>(FieldTy.get())) {
+        if (GlobalSymbolTable) {
+          if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+            return R.get();
+        }
+      }
+      return FieldTy.get();
+    }
+  }
+  if (auto *ArrLit = dynamic_cast<const ArrayLiteralExprAST *>(E)) {
+    return ArrLit->CachedType.get();
+  }
+  // Address-of: &expr produces a pointer to the operand's type.
+  // We cache one TurfPointerType per call site inside a static map keyed by
+  // the pointee's mangled name so the returned pointer stays valid for the
+  // caller's lifetime without leaking.
+  if (auto *AddrOf = dynamic_cast<const AddressOfExprAST *>(E)) {
+    const TurfType *InnerTy = getExprType(AddrOf->getOperand());
+    if (!InnerTy) return nullptr;
+    static std::map<std::string, TurfTypePtr> AddrOfTypeCache;
+    std::string Key = InnerTy->getMangledName();
+    auto It = AddrOfTypeCache.find(Key);
+    if (It == AddrOfTypeCache.end()) {
+      // Build a TurfPointerType wrapping a shared_ptr to a copy of InnerTy.
+      // We cannot hold a bare pointer because InnerTy may be a temporary.
+      TurfTypePtr InnerCopy;
+      // Attempt cheap reconstruction from known primitive names first.
+      if (InnerTy->isNamed("int"))    InnerCopy = TurfInt();
+      else if (InnerTy->isNamed("double")) InnerCopy = TurfDouble();
+      else if (InnerTy->isNamed("bool"))   InnerCopy = TurfBool();
+      else {
+        // For structs / named types, wrap the raw pointer with a no-op deleter.
+        InnerCopy = TurfTypePtr(const_cast<TurfType*>(InnerTy), [](TurfType*){});
+      }
+      AddrOfTypeCache[Key] = std::make_shared<TurfPointerType>(std::move(InnerCopy));
+    }
+    return AddrOfTypeCache[Key].get();
+  }
+  // ScopeAccess as an enum variant: Direction::North → the type is Direction
+  // (TurfEnumType). A module-function-ref ScopeAccess (io::printline) falls
+  // through to nullptr below since "io" was never registered as a TYPE --
+  // it has no standalone type of its own, same as visitScopeAccess() in
+  // TypeChecker.cpp.
+  if (auto *EA = dynamic_cast<const ScopeAccessExprAST *>(E)) {
+    // module::CONST -- an `export immut` constant reference (Node.
+    // ResolvedConstant, set by Resolver::visitScopeAccess).
+    if (EA->ResolvedKind == ScopeAccessKind::ModuleConstantRef &&
+        EA->ResolvedConstant)
+      return EA->ResolvedConstant->Type.get();
+    if (GlobalSymbolTable) {
+      if (auto Registered = GlobalSymbolTable->LookupType(EA->getLeftName()))
+        return Registered.get();
+    }
+  }
+  return nullptr;
+}
+
+
+Value *CastToType(Value *Val, TurfTypePtr DestType,
+                         const std::string &Name, SourceLocation Loc) {
+  return CastToType(Val, DestType.get(), Name, Loc);
+}
+
+
+Value *CastToType(Value *Val, const TurfType *DestType,
+                         const std::string &Name, SourceLocation Loc) {
+  Type *ValTy = Val->getType();
+
+  if (isa<ConstantPointerNull>(Val)) {
+    if (isPointerLike(DestType)) {
+      return Builder->CreateBitCast(Val, getLLVMType(DestType), Name);
+    }
+  }
+
+  // Normalize foreign integer widths (e.g. i32 from printf) to i64
+  if (ValTy->isIntegerTy(32)) {
+    Val = Builder->CreateSExt(Val, Type::getInt64Ty(*TheContext), "i32toi64");
+    ValTy = Val->getType();
+  }
+
+  TurfTypePtr SrcType = getTurfTypeFromLLVM(ValTy);
+  SrcType = RefineLLVMType(SrcType, TurfTypePtr(const_cast<TurfType*>(DestType), [](TurfType*){}), ValTy);
+  if (SrcType->getName() == DestType->getName())
+    return Val;
+
+  // Auto-coerce void* to/from any pointer
+  if (SrcType->getName() == "void*" &&
+      dynamic_cast<const TurfPointerType *>(DestType))
+    return Val;
+  if (DestType->getName() == "void*" &&
+      dynamic_cast<const TurfPointerType *>(SrcType.get()))
+    return Val;
+
+  // Type Erasure: cast to generic parameter (stored as void*)
+  if (dynamic_cast<const TurfGenericParamType *>(DestType)) {
+    Type *VoidPtrTy = PointerType::get(*TheContext, 0);
+    if (ValTy->isPointerTy())
+      return Val; // already a pointer
+    if (ValTy->isDoubleTy())
+      Val = Builder->CreateBitCast(Val, Type::getInt64Ty(*TheContext), "dbl_to_i64");
+    if (Val->getType()->isIntegerTy())
+      return Builder->CreateIntToPtr(Val, VoidPtrTy, "erased_ptr");
+    return Builder->CreateBitCast(Val, VoidPtrTy, "erased_ptr");
+  }
+
+  // Type Erasure: cast from generic parameter (void*) back to actual type.
+  //
+  // Gated on `ValTy->isPointerTy()`, NOT on `dynamic_cast<TurfGenericParamType>
+  // (SrcType.get())` (the condition this replaced) -- SrcType a few lines up
+  // is always produced by getTurfTypeFromLLVM(ValTy), which only ever
+  // returns TurfDouble/TurfInt/TurfBool/TurfPtr/TurfVoid: it can NEVER
+  // itself construct a TurfGenericParamType, so the old condition could
+  // never match and this whole branch was dead code. What actually
+  // identifies "this pointer is an erased generic value" at this point is
+  // that it's a raw pointer being cast to a genuinely numeric DestType --
+  // by the time Codegen runs, TypeChecker's typesCompatible() type-erasure
+  // fast path is the only reason a pointer-typed value would ever be
+  // assignment-compatible with int/bool/double in the first place, so this
+  // combination cannot arise from anything else. Confirmed via
+  // `fn<T> identity(x: T): T` returning a bool or double: with the old dead
+  // condition, `identity(true)` segfaulted (a bare i1 was stored into an
+  // opaque-pointer-typed alloca with no conversion at all) and
+  // `identity(3.5)` silently returned garbage -- both are fixed by this
+  // branch actually running.
+  if (ValTy->isPointerTy()) {
+    if (DestType->isNamed("int") || DestType->isNamed("bool")) {
+      Value *IntVal = Builder->CreatePtrToInt(Val, Type::getInt64Ty(*TheContext), "unerased_int");
+      if (DestType->isNamed("bool"))
+        return Builder->CreateICmpNE(IntVal, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), "unerased_bool");
+      return IntVal;
+    }
+    if (DestType->isNamed("double")) {
+      Value *IntVal = Builder->CreatePtrToInt(Val, Type::getInt64Ty(*TheContext), "unerased_int");
+      return Builder->CreateBitCast(IntVal, Type::getDoubleTy(*TheContext), "unerased_dbl");
+    }
+    if (isPointerLike(DestType)) {
+      return Val; // already pointer
+    }
+
+    // Implicit dereference: a pointer-to-struct value cast to the bare
+    // struct type BY VALUE -- e.g. `return self;` from a struct method
+    // declared to return the struct type itself rather than a pointer.
+    // `self` is always typed as `StructName*` (see ParseFuncDef's implicit
+    // self-parameter construction), and there is no explicit dereference
+    // operator in this language, so this is the only way
+    // `fn Node.get(): Node { return self; }` can ever be satisfied.
+    // TypeChecker::visitReturn() allows this exact pattern through its
+    // return-type check (a pointer whose pointee resolves to the declared
+    // return struct type); this is where the actual load happens.
+    {
+      const TurfType *ResolvedDest = DestType;
+      if (const auto *NT = dynamic_cast<const NamedType *>(DestType)) {
+        if (GlobalSymbolTable) {
+          if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+            ResolvedDest = R.get();
+        }
+      }
+      if (dynamic_cast<const TurfStructType *>(ResolvedDest)) {
+        return Builder->CreateLoad(getLLVMType(ResolvedDest), Val, "derefstruct");
+      }
+    }
+  }
+
+  // All pointer-like types (string, ptr, T*, void*) share the same LLVM
+  // representation. Casts between them are always no-ops at the IR level.
+  if (isPointerLike(SrcType.get()) && isPointerLike(DestType))
+    return Val;
+
+  // Struct-to-struct: if DestType is a struct (NamedType or TurfStructType) and
+  // the LLVM types already match (e.g. inner struct init), pass through without
+  // casting. Without this, CastToType would hit the string-error guard below.
+  if (ValTy->isStructTy()) {
+    if (dynamic_cast<const TurfStructType *>(DestType) ||
+        dynamic_cast<const NamedType *>(DestType))
+      return Val;
+  }
+
+  // Strings cannot be cast to/from non-pointer types implicitly
+  if (SrcType->isNamed("string") || DestType->isNamed("string")) {
+    TypeError(CurLoc, "Cannot cast between string and non-pointer types. SrcType: " + SrcType->getName() + ", DestType: " + DestType->getName() + ", Context Name: " + Name)
+        .raise();
+    return Val;
+  }
+
+  // int32 as a DestType: note SrcType can never legitimately be "int32"
+  // here -- CastToType()'s very first step (top of this function)
+  // unconditionally sign-extends ANY genuinely-i32-typed value to i64
+  // before SrcType is even derived, so by this point an int32-origin value
+  // has already become a plain "int". This branch only exists for casting
+  // an ordinary int/double/bool value DOWN INTO int32 (e.g. two int32
+  // operands in BinaryExprAST::codegen()'s CastBoth(), where NumericType
+  // ends up being int32 itself and both operands -- already force-widened
+  // to i64 by the step above -- need to come back down to i32).
+  if (DestType->isNamed("int32")) {
+    if (SrcType->isNamed("int"))
+      return Builder->CreateTrunc(Val, Type::getInt32Ty(*TheContext), Name);
+    if (SrcType->isNamed("double"))
+      return Builder->CreateFPToSI(Val, Type::getInt32Ty(*TheContext), Name);
+    if (SrcType->isNamed("bool"))
+      return Builder->CreateZExt(Val, Type::getInt32Ty(*TheContext), Name);
+  }
+  if (DestType->isNamed("double")) {
+    if (SrcType->isNamed("int"))
+      return Builder->CreateSIToFP(Val, Type::getDoubleTy(*TheContext), Name);
+    if (SrcType->isNamed("bool"))
+      return Builder->CreateUIToFP(Val, Type::getDoubleTy(*TheContext), Name);
+  }
+  if (DestType->isNamed("int")) {
+    if (SrcType->isNamed("double"))
+      return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), Name);
+    if (SrcType->isNamed("bool"))
+      return Builder->CreateZExt(Val, Type::getInt64Ty(*TheContext), Name);
+  }
+  if (DestType->isNamed("bool")) {
+    if (SrcType->isNamed("double"))
+      // UNE, not ONE: this cast means "is Val truthy (non-zero)?", i.e.
+      // `Val != 0.0`. ONE ("ordered and not equal") is false whenever Val
+      // is NaN, which would make NaN cast to `false` -- but NaN != 0.0 is
+      // true, so NaN should cast to `true`, matching the same '!=' fix
+      // applied to TOK_NEQ above (see its doc comment for the full story).
+      return Builder->CreateFCmpUNE(
+          Val, ConstantFP::get(*TheContext, APFloat(0.0)), Name);
+    if (SrcType->isNamed("int"))
+      return Builder->CreateICmpNE(
+          Val, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), Name);
+  }
+
+  return Val;
+}
+
+
+// This creates an alloca instruction in the entry block of a function
+AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
+                                   const std::string &VarName,
+                                   const TurfType *Type) {
+  IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                   TheFunction->getEntryBlock().begin());
+  return TmpB.CreateAlloca(getLLVMType(Type), 0, VarName.c_str());
+}
+
+
+llvm::Constant *GetDefaultValue(const TurfType *T) {
+  if (!T)
+    return llvm::ConstantFP::get(llvm::Type::getDoubleTy(*TheContext), 0.0);
+
+  if (T->isNamed("int"))
+    return llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), 0);
+  if (T->isNamed("int32"))
+    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
+  if (T->isNamed("double"))
+    return llvm::ConstantFP::get(llvm::Type::getDoubleTy(*TheContext), 0.0);
+  if (T->isNamed("bool"))
+    return llvm::ConstantInt::get(llvm::Type::getInt1Ty(*TheContext), 0);
+  if (T->isNamed("char"))
+    return llvm::ConstantInt::get(llvm::Type::getInt8Ty(*TheContext), 0);
+  if (T->isNamed("string"))
+    return Builder->CreateGlobalStringPtr("");
+
+  if (isArrayType(T) || dynamic_cast<const TurfPointerType *>(T) ||
+      dynamic_cast<const TurfGenericParamType *>(T) || T->isFunc()) {
+    return llvm::ConstantPointerNull::get(llvm::PointerType::get(*TheContext, 0));
+  }
+
+  if (auto *ST = dynamic_cast<const TurfStructType *>(T)) {
+    llvm::Type *LLVMTy = getLLVMType(T);
+    auto *StructTy = llvm::dyn_cast<llvm::StructType>(LLVMTy);
+    if (!StructTy)
+      return llvm::UndefValue::get(LLVMTy);
+
+    std::vector<llvm::Constant *> FieldVals;
+    for (const auto &Field : ST->getFields()) {
+      FieldVals.push_back(GetDefaultValue(Field.Type.get()));
+    }
+    return llvm::ConstantStruct::get(StructTy, FieldVals);
+  }
+
+  if (auto *GT = dynamic_cast<const GenericType *>(T)) {
+    llvm::Type *LLVMTy = getLLVMType(T);
+    return llvm::Constant::getNullValue(LLVMTy);
+  }
+
+  return llvm::Constant::getNullValue(getLLVMType(T));
+}
+
+
+// Emit the literal value of an `export immut` constant directly at a
+// reference site -- exported constants have no LLVM storage of their own
+// (see ResolverConstantSymbol's doc comment in ResolverSymbolTable.h), so
+// every use (bare or module-qualified) inlines this instead of loading from
+// an alloca/global. Mirrors NumberExprAST/BoolExprAST/StringExprAST's own
+// codegen() bodies exactly -- this is just those three dispatched by the
+// constant's stored Type instead of by AST node class.
+Value *CodegenConstantValue(const ResolverConstantSymbol &C) {
+  if (C.Type && C.Type->isDouble())
+    return ConstantFP::get(*TheContext, APFloat(C.DoubleVal));
+  if (C.Type && C.Type->isBool())
+    return ConstantInt::get(Type::getInt1Ty(*TheContext), C.BoolVal ? 1 : 0);
+  if (C.Type && C.Type->isString())
+    return Builder->CreateGlobalString(C.StringVal, "str");
+  return ConstantInt::get(*TheContext, APInt(64, C.IntVal, true));
+}
