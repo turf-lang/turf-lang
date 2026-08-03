@@ -130,7 +130,11 @@ add_library(turfcore STATIC
   src/Codegen.cpp
   src/Lexer.cpp
   src/Lint.cpp
-  src/Parser.cpp
+  src/ParserCore.cpp
+  src/ParserLiteral.cpp
+  src/ParserStmt.cpp
+  src/ParserDecl.cpp
+  src/ParserModule.cpp
   src/Sandbox.cpp
   src/SLMEngine.cpp
   src/SLMIntegration.cpp
