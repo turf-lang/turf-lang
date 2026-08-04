@@ -465,7 +465,9 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
     // ── 'otherwise' arm (optional, must be last) ─────────────────────────
     if (CurTok == TOK_OTHERWISE) {
       if (HasOther) {
-        CompareError(CurLoc, "Duplicate 'otherwise' arm in compare.").raise();
+        CompareError(CurLoc, "Duplicate 'otherwise' arm in compare.")
+            .withRelated(OtherLoc, "first 'otherwise' arm here")
+            .raise();
         return nullptr;
       }
       HasOther = true;
@@ -531,7 +533,9 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       // after it -- both stop the body loop above on the same condition, but
       // deserve their own specific message rather than collapsing to one.
       if (CurTok == TOK_OTHERWISE) {
-        CompareError(CurLoc, "Duplicate 'otherwise' arm in compare.").raise();
+        CompareError(CurLoc, "Duplicate 'otherwise' arm in compare.")
+            .withRelated(OtherLoc, "first 'otherwise' arm here")
+            .raise();
         return nullptr;
       }
       if (CurTok != '}') {

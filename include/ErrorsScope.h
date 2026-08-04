@@ -124,13 +124,14 @@ public:
                       "Wait a minute! You already created a variable named '" +
                       Colors::CYAN + Name + Colors::BRIGHT_RED + "'.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Message += "\n  " + Colors::BRIGHT_BLUE +
-               "Note: You first created it at line " +
-               std::to_string(PrevLoc.Line) + ", column " +
-               std::to_string(PrevLoc.Col) + Colors::RESET;
     Hint_ = "If you want to change its value, just do `" + Name +
             " = new_value;` without the type (like 'int' or 'string'). If "
             "you want a new variable, give it a different name!";
+    // Renders as "Note: first declared here (line X, col Y)" -- printDiag()
+    // (Lexer.cpp) now shows every RelatedLocation, so this used to also be
+    // hand-embedded directly into Message with its own wording ("Note: You
+    // first created it at line X, column Y") before that rendering existed;
+    // removed here to avoid printing the same location twice.
     RelatedLocations_.push_back({PrevLoc, "first declared here"});
   }
 };
@@ -184,10 +185,9 @@ public:
                     "It's better to give this new variable a different name "
                     "to avoid confusion later.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    Message += "\n  " + Colors::BRIGHT_BLUE +
-               "Note: The older one is at line " +
-               std::to_string(PrevLoc.Line) + ", column " +
-               std::to_string(PrevLoc.Col) + Colors::RESET;
+    // Renders as "Note: originally declared here (line X, col Y)" -- see
+    // DuplicateDeclarationError's matching comment for why this is no
+    // longer also hand-embedded into Message directly.
     RelatedLocations_.push_back({PrevLoc, "originally declared here"});
   }
 };

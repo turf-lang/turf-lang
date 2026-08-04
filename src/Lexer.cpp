@@ -166,6 +166,25 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   // Message body — embedded ANSI codes from error classes render intact.
   std::cerr << "  " << D.Msg << "\n";
 
+  // Structural "declared here" / "candidate: ..." context -- e.g. where an
+  // earlier conflicting declaration or a rejected overload actually lives.
+  // ~30 call sites across the compiler already attach these via
+  // TurfError::withRelated()/RelatedLocations_, but until now they were
+  // ONLY ever fed to the SLM prompt as pinned context (see RelatedLocation's
+  // own doc comment) -- an ordinary compile with no --smart/--online never
+  // rendered them at all, so e.g. an extern-conflict or duplicate-
+  // 'otherwise'-arm error pointed at the new occurrence with no way to see
+  // where the original one was. Rendered as one blue note per location,
+  // mirroring the hand-rolled "Note: you first created it at line X..."
+  // wording a couple of error classes used to build manually before this
+  // existed (now redundant there and removed, see DuplicateDeclarationError/
+  // ShadowingWarning).
+  for (const auto &Rel : D.RelatedLocations) {
+    std::cerr << "  " << Colors::BRIGHT_BLUE << "Note: " << Rel.Description
+              << " (line " << Rel.Loc.Line << ", col " << Rel.Loc.Col << ")"
+              << Colors::RESET << "\n";
+  }
+
   if (!D.Hint.empty()) {
     std::cerr << "\n  " << Colors::BRIGHT_GREEN << "Hint: " << D.Hint << Colors::RESET << "\n";
   }
