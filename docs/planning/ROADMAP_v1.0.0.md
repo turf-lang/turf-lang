@@ -25,7 +25,7 @@ This document outlines the exact path to `v1.0.0`. Every item here is derived fr
 
 ## 3. Phase 2: The Grand Syntactic Overhaul ✅
 
-*See `PHASE_2_ISSUES.md` for full issue descriptions.*
+*`PHASE_2_ISSUES.md` (the original per-issue spec doc) was removed 2026-08-04 — everything it tracked is complete and is now this section's checklist below; the full original issue text is retrievable from git history if ever needed.*
 
 **Final Syntax (locked in):**
 ```turflang
@@ -66,14 +66,14 @@ mutable r: int = x > 0 give x otherwise -x;  // ternary: give...otherwise
 
 ## 5. Phase 3: The Language Backbone
 
-*The structural primitives required to build real programs. See `PHASE_3_ISSUES.md` for full issue descriptions. Phase 3 is now complete — Issue #189 (for-each loops), the last remaining item, landed 2026-08-02 (see Group B below). Phase 4 (`docs/planning/ROADMAP_v1.0.0.md` §6) is now the active phase.*
+*The structural primitives required to build real programs. `PHASE_3_ISSUES.md` (the original per-issue spec doc) was removed 2026-08-04 — everything it tracked is complete and is now this section's checklist below; the full original issue text, including the superseded `catch`/`?`/`error.XYZ` design notes, is retrievable from git history if ever needed. Phase 3 is complete — Issue #189 (for-each loops), the last remaining item, landed 2026-08-02 (see Group B below). Phase 4 (§6 below) is complete except for the memory-model items; Phase 5 (§7) and Diagnostics Polish (§9) are the remaining work before 1.0.0 — see `docs/planning/FINAL_SPRINT.md` for the scoped, dependency-ordered checklist covering all of it.*
 
 **New syntax introduced in this phase** (illustrative only — kept close to the original design intent rather than kept in sync keystroke-for-keystroke; see `PHASE_3_ISSUES.md`'s "Final Turflang Phase 3 Syntax Reference" for the accurate, current syntax, including the fact that error handling shipped as `error` types + `recover produce`/`recover run`/`recover as x run`, not the `catch`/`?`/`error.XYZ` shown here):
 ```turflang
 // FFI
 extern fn strlen(s: string): int;
 
-// Error handling (shipped design — see docs/planning/Errors.md)
+// Error handling (shipped design — see docs/architecture/errors_and_recover.md)
 error MathError { DivisionByZero }
 fn divide(a: int, b: int): !int {
     if b == 0 { return MathError::DivisionByZero; }
@@ -129,7 +129,7 @@ for user in users { io::printline(user.name); }   // structs/enums work too — 
 
 **Group D — Type System Completion:**
 - [x] **#187: First-Class Functions 🟡** — `FuncType` (`Types.h`), `fn(T1, T2, ...): R` type syntax (`Parser.cpp`'s `ParseType()`), bare function names as values (`Resolver::visitVariable`'s `ResolvedFunctionRef` path, restricted to the same self-file/self-module/on-demand-import visibility bare calls already get), and indirect calls through a function-typed variable/parameter (`Resolver`/`TypeChecker`/`Codegen`'s `visitFuncCall`/`FuncCallExprAST::codegen()`). Functions can be passed as arguments, stored in variables, and returned from other functions. **Deliberately out of scope**: `Module::func`/`StructName::method` used bare as a value still raises "functions aren't first-class yet" (`Resolver::visitScopeAccess`) — only unqualified function names are first-class values today.
-- [x] **#188: `!T` Error Unions + `recover` 🔴** *(last — heaviest)* — DONE 2026-07-31. **Design superseded**: the `catch`/`?`/`error.XYZ` shape below and in `docs/planning/ERROR_HANDLING_RFC.md` was replaced before implementation; the actual feature (named `error` types with typed-payload variants, `::`-qualified construction, `recover produce`/`recover run`/`recover as x run`) is specced in `docs/planning/Errors.md`. All three stages landed: Lexer/Parser/AST syntax (2026-07-30), Resolver/TypeChecker semantics including the bare-error `recover as err` restriction and the "never returns an error" warning (2026-07-31), and Codegen -- `!T` lowers to a fixed `{i1,i64,i8*}` struct, error variants to a malloc'd tagged payload, `recover` to real branch/PHI control flow, `==` on error values to a strcmp-based tag comparison (2026-07-31, verified via direct compile+run, not just compile).
+- [x] **#188: `!T` Error Unions + `recover` 🔴** *(last — heaviest)* — DONE 2026-07-31. **Design superseded**: the `catch`/`?`/`error.XYZ` shape below (originally specced in a now-removed `ERROR_HANDLING_RFC.md`, see git history) was replaced before implementation; the actual feature (named `error` types with bare-name variants, `::`-qualified construction, `recover produce`/`recover run`/`recover as x run`) is specced in `docs/architecture/errors_and_recover.md`. All three stages landed: Lexer/Parser/AST syntax (2026-07-30), Resolver/TypeChecker semantics including the bare-error `recover as err` restriction and the "never returns an error" warning (2026-07-31), and Codegen -- `!T` lowers to a fixed `{i1,i64,i8*}` struct, error variants to a malloc'd tagged payload, `recover` to real branch/PHI control flow, `==` on error values to a strcmp-based tag comparison (2026-07-31, verified via direct compile+run, not just compile).
 
 > **⛔ Explicitly Rejected**: `loop { }` keyword. Adds nothing over `while(true)`. `TOK_LOOP` must NOT be added at any point.
 
@@ -162,15 +162,15 @@ mutable names: list<string> = list<string> {};
 - [x] **Module Search Path & Circular Import Guard 🔴**
   - **Implementation**: Search `<compiler_bin_dir>/lib/std/` first, then `./`. `std::set<std::string> ActiveImports` during parsing; error on duplicate import. Done, and substantially exceeds this original spec — see `docs/architecture/modules_and_scope_resolution.md` for the full on-demand-import/`::`-namespace-resolution/circular-import-diagram system that replaced it.
 
-- [ ] **`unsafe { }` Block 🔴** — not implemented, no `TOK_UNSAFE`/`UnsafeBlockExprAST`; raw pointers remain unrestricted everywhere
+- [ ] **`unsafe { }` Block 🔴** — not implemented, no `TOK_UNSAFE`/`UnsafeBlockExprAST`; raw pointers remain unrestricted everywhere. Scoped (narrow, not full ARC) as Track A in `docs/planning/FINAL_SPRINT.md`.
 
-- [ ] **Safe References (`&T`) 🔴** — not implemented
+- [ ] **Safe References (`&T`) 🔴** — not implemented. Same track as `unsafe {}` above — see `FINAL_SPRINT.md` Track A.
 
 - [x] **Rewrite `std/io.tr` via FFI 🔴**
   - **Implementation**: `@intrinsic` removed entirely (now a hard parse error). `lib/std/io.tr` binds `printf`/`scanf`/`getchar`/`calloc` via `extern fn`; `print`/`printline`/`input` are ordinary Turf functions.
 
-- [x] **Rewrite `std/math.tr` via FFI 🔴** (partial function coverage)
-  - `lib/std/math.tr` is fully `extern fn`-based (no `@intrinsic`), with `abs`/`power`/`min`/`max`/`clamp`. `sin`/`cos`/`sqrt`/`floor`/`ceil`/`round` and `PI`/`E` constants from the original spec are not yet added.
+- [x] **Rewrite `std/math.tr` via FFI 🔴** (near-complete — see `STDLIB_ROADMAP.md` §2.4)
+  - `lib/std/math/math.tr` is fully `extern fn`-based (no `@intrinsic`). Libm bindings (`sqrt`/`sin`/`cos`/`tan`/`floor`/`ceil`/`round`/`log`/`log2`/`log10`/`exp`/`pow`/`fabs`) are all declared via `extern from "m" fn` and directly callable as `math::sqrt(x)` etc.; `abs`/`power`/`min`/`max`/`clamp`/`divide` are hand-written Turf wrappers on top. Only `PI`/`E` named constants (now trivial via `export immut`, landed 2026-07-27) are still missing.
 
 - [x] **Write `std/string.tr` via FFI 🔴** (shipped as `lib/std/strings.tr`, not `string.tr`)
   - `extern fn`-based (`strlen`, `strstr`, `strncpy`, `toupper`, `tolower`, `malloc`); string `+`/`==`/indexing work at the language level (see #183 above) independent of this module.
@@ -181,19 +181,19 @@ mutable names: list<string> = list<string> {};
   - **Implementation**: `lib/std/mem.tr` binds `malloc`/`calloc`/`realloc`/`free` via `extern fn`. Not gated behind an `unsafe {}` block (that feature doesn't exist yet — see above).
 
 - [x] **Delete `@intrinsic` and `Builtins.cpp` Monolith 🔴**
-  - The `@intrinsic` decorator/keyword is fully removed from the parser (`'@' is not valid here`, hard error). `Builtins.cpp` still exists, but `CodegenIntrinsic()` itself is gone entirely (STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7): `lengthof` -- the only other true intrinsic besides `typeof` -- was deleted (`strings::length(s)`, part of the auto-imported prelude, is the replacement), which left `typeof` as `CodegenIntrinsic()`'s only remaining case, so its logic was inlined directly into its one call site instead of kept behind a dispatcher. `assert`/`fail` were never routed through `CodegenIntrinsic()` at all by this point -- they moved to `lib/std/test.tr` earlier. `Builtins.cpp` today only owns `BuiltinInfo`/`RegisterBuiltin`/`LookupBuiltin` (typeof's arity-check registry) and `CodegenPanic` (the compiler's own internal runtime-guard panic sequence, never user-reachable).
+  - The `@intrinsic` decorator/keyword is fully removed from the parser (`'@' is not valid here`, hard error). `Builtins.cpp` still exists, but `CodegenIntrinsic()` itself is gone entirely (last step of the now-removed `STRING_UFCS_OPERATOR_CHAR_RFC.md`'s build order, see git history): `lengthof` -- the only other true intrinsic besides `typeof` -- was deleted (`strings::length(s)`, part of the auto-imported prelude, is the replacement), which left `typeof` as `CodegenIntrinsic()`'s only remaining case, so its logic was inlined directly into its one call site instead of kept behind a dispatcher. `assert`/`fail` were never routed through `CodegenIntrinsic()` at all by this point -- they moved to `lib/std/test.tr` earlier. `Builtins.cpp` today only owns `BuiltinInfo`/`RegisterBuiltin`/`LookupBuiltin` (typeof's arity-check registry) and `CodegenPanic` (the compiler's own internal runtime-guard panic sequence, never user-reachable).
 
 - [x] **Generics with Type Erasure 🟡** (implemented as a hybrid, not exactly as specced)
   - Generic instantiations (`List<int>`, `Box<string>`, etc.) get per-instantiation mangled type NAMES (`getMangledName()` → `"List_int"`) for frontend type-identity/validation purposes, but `Codegen`'s `getLLVMType()` resolves every instantiation of a given base to the SAME underlying `llvm::StructType` (generic fields lower to opaque pointers — "Type Erasure: Generic Type Parameters are compiled as void*"), so there genuinely is no LLVM-level code explosion per instantiation, matching the spec's actual goal even though the mechanism differs from "one shared struct, erased type name" as literally described.
 
-- [ ] **Operator Overloading 🟡**
-  - **Implementation**: Magic methods (`__add__`, `__eq__`, `__index__`, etc.) on structs. TypeChecker desugars `Matrix + Matrix` into a `MethodCallExprAST`. Codegen sees only a normal method call — zero LLVM-level changes required.
+- [x] **Operator Overloading 🟡**
+  - **Implementation**: Shipped with a different design than originally proposed — a now-removed `generics_and_operators_roadmap.md`'s double-underscore magic-method sketch (`__add__`/`__eq__`/etc.) was superseded before implementation by the `operator` keyword design from a now-removed `STRING_UFCS_OPERATOR_CHAR_RFC.md` §4 (see git history for both): `operator +(lhs: T, rhs: U): V { ... }` at top level, arity distinguishes unary/binary, exact-type-match resolution with coercion off, builtin-pair overloads (`int`/`double`/`bool`/`char`/`Pointer`) rejected at declaration. Covers `[]`/`[]=` indexing too (lvalue-preserving, no pointer returns). Tests: `tests/18_operator_overload/`.
 
 ---
 
 ## 7. Phase 5: Prompt-Oriented Programming (SLM Integration)
 
-*The Two-Adapter Architecture (Base: Qwen2.5-Coder-1.5B ~1GB RAM).*
+*The Two-Adapter Architecture (Base: Qwen2.5-Coder-1.5B ~1GB RAM). The 1.0.0 final sprint narrows this phase's scope — see `docs/planning/FINAL_SPRINT.md` Track C: only the `--smart` retry loop is in scope for 1.0.0; `@slm` in-source syntax and LoRA fine-tuning are deferred past it.*
 
 **Architecture Note**: The SLM (`SLMEngine.cpp`) calls `llama.h` directly as a C++ library compiled into the Turflang binary. It does NOT go through Turflang's FFI system.
 
@@ -256,7 +256,7 @@ extern fn llama_decode(ctx: unsafe_ptr<void>, batch: unsafe_ptr<void>): int;
 
 ## Diagnostics Polish (Phase 5/6, not before)
 
-*The error class taxonomy is still changing through Phase 3. These are deferred until the error surface is stable.*
+*The error class taxonomy is still changing through Phase 3. These are deferred until the error surface is stable.* **Phase 3 is now complete, so this is unblocked — see `docs/planning/FINAL_SPRINT.md` Track D for all three items.**
 
 - [ ] **Source Spans** — Track `{Line, StartCol, EndCol}` per token. Underline the full failing expression, not just `^`.
 - [ ] **Error Codes + `turf --explain`** — Every error class gets a unique code (e.g., `E042`). `turf --explain E042` prints a multi-paragraph markdown explanation with examples.

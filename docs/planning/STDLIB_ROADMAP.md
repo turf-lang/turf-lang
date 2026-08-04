@@ -99,7 +99,7 @@ Found and fixed a real, pre-existing compiler bug while building this (unrelated
 - Iteration: checked whether the language has any `for x in someList` form beyond numeric ranges (`for i in 0..10 step i++`) — it does not currently; iterating a `List<T>` today means a manual `while i < l.length() { ... l.pop()-or-index ... i = i + 1; }` loop. This is really a language-level gap (needs some notion of an iterator protocol or at minimum indexable-range sugar for collections), not purely a stdlib one, but it directly limits how usable `list`/`stack`/`queue` feel in practice.
 
 **Missing, lower priority, overlapping with language work already tracked elsewhere:**
-- An `Optional<T>`/`Result<T, E>`-style generic wrapper type. Meaningfully overlaps with the still-unimplemented `!T` error-union proposal (`docs/planning/ERROR_HANDLING_RFC.md`) — worth waiting for that decision rather than building a parallel ad-hoc convention now that would likely need throwing away.
+- An `Optional<T>`/`Result<T, E>`-style generic wrapper type. `!T` error unions (`docs/architecture/errors_and_recover.md`) already shipped and cover the common single-function-return case natively — a wrapper struct would mostly matter for storing a fallible result in a field/collection, which is a real but lower-priority gap than it looked when `!T` was still undecided.
 
 ### 2.6 `net` — TCP-only, blocking-only, IPv4-only, no DNS, no TLS
 
@@ -141,7 +141,7 @@ Everything here is a natural "next" rather than an urgent gap — the module is 
 **Valuable but larger / has open design questions:**
 - `Set<T>`, sort/search helpers, some iteration story for collections (language-level question: does Turf ever get a `for x in collection` form, or does everything stay index-loop-based?).
 - `json` (natural, but depends on deciding the FFI-vs-hand-rolled-parser question `STDLIB_AND_WEB_RFC.md` already raises).
-- `Optional<T>`/`Result<T, E>` — deliberately deferred pending the `!T` error-union decision (`ERROR_HANDLING_RFC.md`) so the stdlib doesn't ship a convention that gets thrown away.
+- `Optional<T>`/`Result<T, E>` — now unblocked (`!T` shipped, see §4.2) but still not urgent; `!T` on a function's own return type already covers the common case.
 
 **Large undertakings, not near-term:**
 - TLS/HTTPS.
@@ -153,7 +153,7 @@ Everything here is a natural "next" rather than an urgent gap — the module is 
 
 ## 4. RFC Coverage Plan
 
-What it would concretely take to deliver on each of the three standing RFCs (`STDLIB_AND_WEB_RFC.md`, `ERROR_HANDLING_RFC.md`, `MEMORY_ARCHITECTURE_RFC.md`), given what's real today vs. what's still blocked on a language feature that doesn't exist yet. Planning only — nothing in this section is implemented.
+What it would concretely take to deliver on the standing RFCs (`STDLIB_AND_WEB_RFC.md`, `MEMORY_ARCHITECTURE_RFC.md`), given what's real today vs. what's still blocked on a language feature that doesn't exist yet. Planning only — nothing in this section is implemented. (A third RFC originally covered here, `ERROR_HANDLING_RFC.md`, is gone — see §4.2 below.)
 
 ### 4.1 `STDLIB_AND_WEB_RFC.md` — buildable NOW, in layers
 
@@ -172,9 +172,9 @@ The RFC's own example code (`app.get("/", fn(req, res): void {...})`, callback-b
 2. **Callback-based routing** (`app.get(path, handler)`, matching the RFC's actual example) — blocked on first-class functions (Issue #187). Until then, `http.tr` route dispatch has to stay a manual `if request.path == "/" { ... } elseif ...` chain inside the caller's own loop, same shape `showcase/http_server.tr` uses — a real ergonomic loss vs. the RFC's vision, but not a blocker to shipping layer 1.
 3. **`json.tr`** — the RFC itself proposes wrapping `cJSON` via FFI rather than hand-rolling a parser (`extern from "cjson" fn cJSON_Parse(...): ptr;` etc., exactly the `extern from "libname" fn` mechanism `math.tr`'s `extern from "m" fn sqrt(...)` already proves out). Concretely: confirm `libcjson` (or equivalent) is available/vendorable in the build environment first — this session's `llvm-c` FFI proof-of-concept (`showcase/llvm_ffi_selfhost_demo.tr`) is the template for "confirm the .so exports what you need via `nm -D`, then bind it with `extern from`." A hand-rolled pure-Turf JSON parser is the fallback if no C library is available, but is meaningfully more work and duplicates a solved problem.
 
-### 4.2 `ERROR_HANDLING_RFC.md` — entirely blocked on the `!T` language decision
+### 4.2 Error handling — shipped; `Optional<T>`/`Result<T, E>` is now just unbuilt, not blocked
 
-Nothing stdlib-buildable here yet. The RFC's `!T` error unions, `catch`, `?`, and `error.XYZ` are a **parser/type-system feature** (`ROADMAP_v1.0.0.md` Issue #188, still open, explicitly called out there as "last -- heaviest"), not a stdlib module — there's no FFI angle to build ahead of that decision. The one stdlib-adjacent risk already flagged in §2.5 above: don't build an ad-hoc `Optional<T>`/`Result<T, E>` generic struct in `list`/`map` land as a stopgap, since it would almost certainly need to be thrown away or awkwardly reconciled once `!T` actually lands. Wait for the language decision first.
+`!T` error unions + `recover` (`ROADMAP_v1.0.0.md` Issue #188) landed 2026-07-31 — see `docs/architecture/errors_and_recover.md` for the real, shipped design (named `error` types, bare-name variants, `recover produce`/`recover run`/`recover as x run`; not the `catch`/`?`/`error.XYZ` shape originally proposed in a now-removed `ERROR_HANDLING_RFC.md`). The one stdlib-adjacent item this unblocks: an `Optional<T>`/`Result<T, E>` generic wrapper type (§2.5) is no longer waiting on a language decision — the decision is made and shipped. It just hasn't been built yet, and isn't urgent (`!T` on a function's own return type already covers the common case natively, without needing a wrapper struct at all).
 
 ### 4.3 `MEMORY_ARCHITECTURE_RFC.md` — the FFI-facing pieces are stdlib-buildable now; the safety pieces are not
 

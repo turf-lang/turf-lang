@@ -2,9 +2,9 @@
 
 Technical reference for Turflang's recoverable-error system, as implemented. This document defines **what a Turflang programmer observes** (Part 1) and **how the compiler implements it, pass by pass** (Part 2), with file:line references throughout so the two halves can be cross-checked against the real source.
 
-The original design brief is `docs/planning/Errors.md` — read that first for the feature's motivation and worked examples. This document is the precise technical reference for the same feature as actually built: where `Errors.md` describes intent with prose examples, this document defines exact contracts (what type each construct has, when each diagnostic fires, what each pass does) and traces the implementation.
+The original design brief was `docs/planning/Errors.md`, a first-draft proposal doc removed 2026-08-04 once the feature shipped and this document (its precise technical reference) superseded it — see git history if the original prose motivation/worked-examples version is ever needed. This document defines exact contracts (what type each construct has, when each diagnostic fires, what each pass does) and traces the implementation.
 
-**Scope note**: error variants are bare names only, carrying no payload fields (no `FileNotFound(path: string)`-style data) — see Errors.md's own note and §5.1 below for why this is a deliberate, not-yet-filled gap, not an oversight.
+**Scope note**: error variants are bare names only, carrying no payload fields (no `FileNotFound(path: string)`-style data) — see §5.1 below for why this is a deliberate, not-yet-filled gap, not an oversight.
 
 ---
 
@@ -72,7 +72,7 @@ Every `recover` expression wraps a `!T` expression (the **wrapped expression**) 
 | `expr recover run { BLOCK }` | evaluates to the wrapped expression's success value; `BLOCK` never runs | `BLOCK` runs instead; must diverge (§1.5) unless `T` is `void` | `T` |
 | `expr recover as err run { BLOCK }` | same as `run` | same as `run`, plus `err` is bound inside `BLOCK` | `T` |
 
-**The recover expression's own type is always `T` — never `!T`.** This holds for all three forms, in every worked example in `Errors.md`; a `!T` annotation on the variable receiving a `recover` result would be a mistake, not a second valid spelling.
+**The recover expression's own type is always `T` — never `!T`.** This holds for all three forms; a `!T` annotation on the variable receiving a `recover` result would be a mistake, not a second valid spelling.
 
 #### 1.4.1 `recover produce value`
 
@@ -326,7 +326,7 @@ This list is **deliberately unfiltered** at collection time: `buildFunctionSymbo
 
 **`visitScopeAccess()`**'s `ErrorVariantRef` branch (`src/TypeChecker.cpp`, alongside the existing `EnumVariant` branch) — sets the node's type via `GlobalSymbolTable->LookupType(LeftName)`, the real `TurfUserErrorType`.
 
-**`visitReturn()`**'s `!T` compatibility rule (`src/TypeChecker.cpp:1109`) — a genuinely different rule from ordinary `typesCompatible()`: a function declared `!T` may return either something compatible with `T`, or a value of *any* declared error type (§1.3 — there is no single specific type to check the return value against). `isDeclaredErrorTypeValue()` (`TypeChecker.cpp:1095`) resolves a bare `NamedType` (the shape a would-be constructed variant's type would take, following the same convention `StructName::new(...)` uses) through `GlobalSymbolTable` when needed. Errors.md's forbidden example (`fn foo(): int { return divide(10, 0); }`, `divide` returning `!int`) is rejected by the ordinary generic fallback with no extra code at all — `!int` and `int` simply aren't the same or a compatible type by any existing rule.
+**`visitReturn()`**'s `!T` compatibility rule (`src/TypeChecker.cpp:1109`) — a genuinely different rule from ordinary `typesCompatible()`: a function declared `!T` may return either something compatible with `T`, or a value of *any* declared error type (§1.3 — there is no single specific type to check the return value against). `isDeclaredErrorTypeValue()` (`TypeChecker.cpp:1095`) resolves a bare `NamedType` (the shape a would-be constructed variant's type would take, following the same convention `StructName::new(...)` uses) through `GlobalSymbolTable` when needed. The canonical forbidden example (`fn foo(): int { return divide(10, 0); }`, `divide` returning `!int`) is rejected by the ordinary generic fallback with no extra code at all — `!int` and `int` simply aren't the same or a compatible type by any existing rule.
 
 **`inferRelationalType()`**'s `AnyErrorType` branch — `==`/`!=` between one side typed `AnyErrorType` and the other `isUserError()` (a real declared error-type value) is allowed explicitly; neither side can ever satisfy the ordinary "same `getName()`" shortcut every other type pair gets, since `err`'s type is deliberately erased (§2.4).
 
@@ -428,7 +428,7 @@ An error variant carries no data (§1.1's scope note). This was a deliberate sim
 
 ### 5.2 No error-type propagation shorthand
 
-There is no `?`-style operator or any other shorthand to auto-forward an unhandled `!T` failure to the caller's own `!T'` return type. Every `!T` call site must handle it with `recover`, explicitly, every time — this is the whole design as specified in `Errors.md`, not a gap.
+There is no `?`-style operator or any other shorthand to auto-forward an unhandled `!T` failure to the caller's own `!T'` return type. Every `!T` call site must handle it with `recover`, explicitly, every time — this is the whole design, not a gap.
 
 ### 5.3 `AllPathsDiverge` is structural, not a full CFG reachability analysis
 

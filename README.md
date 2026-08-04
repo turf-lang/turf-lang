@@ -326,7 +326,7 @@ writeFile("a.txt", "hi") recover run {
 };
 ```
 
-`recover as err run { ... }` requires the callee to declare a real `error` type — a bare `error GeneralError;` type (no variants beyond the implicit `GeneralError::DEFAULT`) can still use `recover produce`/`recover run`, just not `recover as`. See `docs/planning/Errors.md` for the full spec.
+`recover as err run { ... }` requires the callee to declare a real `error` type — a bare `error GeneralError;` type (no variants beyond the implicit `GeneralError::DEFAULT`) can still use `recover produce`/`recover run`, just not `recover as`. See `docs/architecture/errors_and_recover.md` for the full spec.
 
 ### First-class functions
 
@@ -625,13 +625,13 @@ Compiles, runs, and cleans up the produced binary.
 
 ## Roadmap
 
-Turf is pre-1.0. The full, actively-maintained tracker — with each item marked done or open against the real codebase — is `docs/planning/ROADMAP_v1.0.0.md`. Phase 3 (the language backbone: FFI, `do`/`while`, `compare`, enums, bitwise/string ops, first-class functions, error handling) is essentially complete. Highlights of what's still open:
+Turf is pre-1.0. The full, actively-maintained tracker — with each item marked done or open against the real codebase — is `docs/planning/ROADMAP_v1.0.0.md`. Phases 1–3 (the language backbone: FFI, `do`/`while`, `compare`, enums, bitwise/string ops, first-class functions, error handling, for-each loops) and operator overloading are complete. Highlights of what's still open:
 
-- **For-each loops over arrays** (`for value in arr { ... }` / `for (index, value) in arr { ... }`) — works over the built-in array type for any element type (primitives, structs, enums); only non-array operands are rejected. The last remaining Phase 3 item; see `docs/planning/PHASE_3_ISSUES.md` Issue #189.
-- `unsafe { }` blocks and safe references (`&T`) — memory-model work, Phase 4.
-- Operator overloading (magic methods like `__add__`) — Phase 4.
-- CFG-based static analysis beyond what already exists (cyclomatic complexity warnings, liveness/dead-store analysis) — see `docs/planning/cfg_analysis_roadmap.md`.
+- `unsafe { }` blocks and safe references (`&T`) — the remaining memory-model work from Phase 4.
+- `std/os.tr` (env vars, argv) — the remaining Phase 4 stdlib module; see `docs/planning/STDLIB_ROADMAP.md`.
+- Prompt-Oriented Programming (`@slm` syntax, structured context serialization, the SLM query loop, LoRA fine-tuning) — Phase 5. The `--smart` error-healing context pipeline is already live; the in-language `@slm { }` block is not.
+- Diagnostics polish (source spans, error codes + `turf --explain`, broader "did you mean?") — see `docs/planning/ROADMAP_v1.0.0.md`'s Diagnostics Polish section.
 - `turf-cli`: a standalone package manager (written in Go) for Turf projects
   and dependencies — currently a working showcase, not yet linked into the
   main `turf` binary's workflow.
-- An LSP server, `turf fmt`, and `turf test` — none exist yet.
+- An LSP server, `turf fmt`, and `turf test` — none exist yet (Phase 6).
