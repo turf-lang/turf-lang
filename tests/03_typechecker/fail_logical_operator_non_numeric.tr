@@ -20,8 +20,8 @@ struct A { x: int }
 struct B { y: int }
 
 fn main(): int {
-    mut a: A = A { x: 1 };
-    mut b: B = B { y: 2 };
+    mut a: A = A::default();
+    mut b: B = B::default();
     mut result: bool = a && b;
     return 0;
 }

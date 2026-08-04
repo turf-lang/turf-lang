@@ -13,7 +13,7 @@ struct Point {
 }
 
 fn main(): int {
-    mut p: Point = Point { x: 1 };
+    mut p: Point = Point::default();
     p.nonexistentMethod(5);
     return 0;
 }

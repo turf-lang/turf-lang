@@ -6,7 +6,7 @@
 import io;
 
 fn main(): int {
-    mut c: Counter = Counter { val: 5 };
+    mut c: Counter = Counter::new(5);
     io::printline("should not compile");
     return 0;
 }

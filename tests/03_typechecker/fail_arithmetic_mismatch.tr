@@ -4,7 +4,7 @@ struct Point { x: int }
 
 fn main(): int {
     mut a: int = 5;
-    mut p: Point = Point { x: 10 };
+    mut p: Point = Point::default();
     mut c: int = a + p;
 
     return 0;

@@ -9,6 +9,6 @@ import list;
 import mem;
 
 fn main(): int {
-    mut l: mem::List<int> = List { data: null, len: 0, cap: 0 };
+    mut l: mem::List<int> = list::List::default();
     return 0;
 }

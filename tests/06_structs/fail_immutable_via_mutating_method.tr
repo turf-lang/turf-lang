@@ -17,7 +17,7 @@ fn Counter.bump(): void {
 }
 
 fn main(): int {
-    immut c: Counter = Counter { val: 0 };
+    immut c: Counter = Counter::default();
     c.bump();
     return 0;
 }

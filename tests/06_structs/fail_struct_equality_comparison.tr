@@ -13,8 +13,8 @@ struct Point {
 }
 
 fn main(): int {
-    mut a: Point = Point { x: 1 };
-    mut b: Point = Point { x: 1 };
+    mut a: Point = Point::default();
+    mut b: Point = Point::default();
     if (a == b) {
     }
     return 0;

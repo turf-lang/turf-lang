@@ -9,10 +9,10 @@
 // an int. See TypeChecker::visitMethodCall()'s TypeMatches filter (mirrors
 // the equivalent check the module-call path already had) for the fix.
 
-import list;
+import list::List;
 
 fn main(): int {
-    mut l: List<int> = List { data: null, len: 0, cap: 0 };
+    mut l: List<int> = List::default();
     l.push("hello");
     return 0;
 }

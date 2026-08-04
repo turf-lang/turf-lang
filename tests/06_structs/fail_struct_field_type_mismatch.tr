@@ -1,13 +1,19 @@
-// Regression test: a struct initializer's field value must be type-checked
-// against that field's declared type. Before the fix,
+// Regression test: assigning a value to a struct field must be type-checked
+// against that field's declared type, same as assigning to an ordinary
+// variable. Originally written against the old brace-literal struct
+// constructor (`User { age: "not a number", name: "Alice" }`, since removed
+// -- see StructName::new(...)/StructName::default()) -- before the fix,
 // TypeChecker::visitStructInit() only checked for UNKNOWN field names (a
 // typo'd field), never that a correctly-named field's VALUE actually
-// matched its declared type -- `User { age: "not a number", name: "Alice" }`
-// (age declared as int) compiled with ZERO diagnostics, and at runtime
-// stored the string literal's raw pointer bit-pattern directly into the
-// field's i64 storage slot: silent type confusion producing garbage data
-// (confirmed: printing the resulting `age` gave a nonsense value like
-// 102697087172654, not even a crash to signal something was wrong).
+// matched its declared type, and `age: "not a number"` (age declared as
+// int) compiled with ZERO diagnostics, storing the string literal's raw
+// pointer bit-pattern directly into the field's i64 storage slot: silent
+// type confusion producing garbage data (confirmed: printing the resulting
+// `age` gave a nonsense value like 102697087172654, not even a crash to
+// signal something was wrong). Re-expressed here as a direct field
+// assignment (`u.age = ...`), the modern equivalent of supplying a field
+// value -- still exercises ordinary field-typed assignment checking, the
+// same underlying guarantee this test exists to protect.
 
 struct User {
     age: int,
@@ -15,6 +21,7 @@ struct User {
 }
 
 fn main(): int {
-    mut u: User = User { age: "not a number", name: "Alice" };
+    mut u: User = User::default();
+    u.age = "not a number";
     return 0;
 }

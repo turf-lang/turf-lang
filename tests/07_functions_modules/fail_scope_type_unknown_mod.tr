@@ -3,9 +3,9 @@
 // rejected -- before the fix, ParseType() accepted ANY qualifier
 // syntactically and silently discarded it, so this compiled cleanly.
 
-import list;
+import list::List;
 
 fn main(): int {
-    mut l: totallyBogusModuleNameThatDoesNotExist::List<int> = List { data: null, len: 0, cap: 0 };
+    mut l: totallyBogusModuleNameThatDoesNotExist::List<int> = List::default();
     return 0;
 }

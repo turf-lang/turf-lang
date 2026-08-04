@@ -15,7 +15,7 @@ fn P.get(): int {
 }
 
 fn main(): int {
-    mut p: P = P { x: 5 };
+    mut p: P = P::default();
     immut y: int = p::get();
     return 0;
 }
