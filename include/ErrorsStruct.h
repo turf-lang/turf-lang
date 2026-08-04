@@ -198,5 +198,30 @@ public:
             MethodName + "(...)' instead.";
   }
 };
+// The reverse of DotOperatorOnNonInstanceError: the base IS a real
+// instance, but the named method is a TRUE static method (declared with
+// 'static', no 'self' parameter at all). A '.' call always implies passing
+// self, so the method's declared parameter list has one fewer slot than
+// the call site assumes -- e.g. `mu.square(5)` where `square` takes only
+// `(x: int)`. Before this check existed, that mismatch fell through to the
+// generic WrongArityError, which described it self-contradictorily: "was
+// called with 1 argument, but no overload accepts that many" printed right
+// next to a listed candidate that visibly DOES take exactly 1 argument --
+// the implicit self silently added by '.' was never mentioned anywhere.
+class StaticMethodCalledOnInstanceError : public TurfError {
+public:
+  StaticMethodCalledOnInstanceError(SourceLocation Loc,
+                                    const std::string &StructName,
+                                    const std::string &MethodName)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + MethodName +
+                           Colors::BRIGHT_RED +
+                           "' is a static method -- it can't be called "
+                           "through an instance with '.'." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    Hint_ = "'" + StructName + "." + MethodName + "' takes no implicit "
+            "'self' (it's declared 'static'). Call it as '" + StructName +
+            "::" + MethodName + "(...)' instead.";
+  }
+};
 
 #endif

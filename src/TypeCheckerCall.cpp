@@ -968,6 +968,23 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           StructMethodNotFoundError(Node.getLoc(), StructName, MethodName,
                                     Suggestions)
               .raise();
+        } else if (!IsStaticMethod && [&] {
+          // This '.' call expected every candidate's arity to be
+          // ArgCount + 1 (an implicit self, see ExpectedArity above), and
+          // NONE matched -- check whether every candidate's REAL declared
+          // arity instead equals the raw argument count exactly, i.e. each
+          // one would have matched perfectly if self weren't being assumed
+          // at all. That's not "wrong number of arguments", it's a true
+          // static method (no self parameter) reached through an instance
+          // with '.' -- see StaticMethodCalledOnInstanceError's doc
+          // comment for why the generic WrongArityError below is actively
+          // self-contradictory for this specific case.
+          for (const auto *C : Candidates)
+            if (C->arity() != ArgCount) return false;
+          return true;
+        }()) {
+          StaticMethodCalledOnInstanceError(Node.getLoc(), StructName, MethodName)
+              .raise();
         } else {
           // Unlike module functions (whose BaseName is the bare method
           // name, with the module qualifier added by the import), a struct
