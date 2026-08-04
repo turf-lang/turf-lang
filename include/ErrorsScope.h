@@ -199,5 +199,31 @@ public:
     RelatedLocations_.push_back({PrevLoc, "originally declared here"});
   }
 };
+// `EnumName::NoSuchVariant` / `ErrorTypeName::NoSuchVariant` -- the
+// enum/error type itself is real, but the named variant isn't one of its
+// declared variants. Covers both kinds (Resolver::visitScopeAccess's
+// EnumVariant and ErrorVariantRef branches) via a shared Kind string
+// ("enum"/"error type") rather than two near-identical classes -- both
+// used to be raised via a raw LogErrorAt() call with the suggestion list
+// hand-formatted directly into the message body: no color at all (every
+// other diagnostic in this file is wrapped in Colors::BRIGHT_RED, so this
+// one visibly stood out as plain white text) and no Hint_, just an
+// inline "\nDid you mean:\n    X\n" appended to the message instead of the
+// suggestionsOrFallback()-based Hint every comparable "unknown name" error
+// in this file already uses.
+class NoSuchVariantError : public TurfError {
+public:
+  NoSuchVariantError(SourceLocation Loc, const std::string &Kind,
+                     const std::string &TypeName, const std::string &VariantName,
+                     const RankedSuggestions &Suggestions)
+      : TurfError(Loc, Colors::BRIGHT_RED + (Kind == "enum" ? "Enum '" : "Error type '") +
+                           Colors::CYAN + TypeName + Colors::BRIGHT_RED +
+                           "' has no variant '" + Colors::CYAN + VariantName +
+                           Colors::BRIGHT_RED + "'." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    Hint_ = suggestionsOrFallback(Suggestions,
+      "Double-check the spelling against " + TypeName + "'s declared variants.");
+  }
+};
 
 #endif

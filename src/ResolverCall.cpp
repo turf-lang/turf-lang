@@ -728,13 +728,10 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
     if (RightName != "COUNT" && RightName != "VALUES" && RightName != "NAMES") {
       auto ET = SymTable_.lookupEnumType(LeftName);
       if (ET && !ET->hasVariant(RightName)) {
-        std::string Msg = "Enum '" + LeftName + "' has no variant '" + RightName + "'.";
-        auto Sugg = SuggestionIndex::suggestVisible(RightName, ET->getVariants());
-        if (!Sugg.empty()) {
-          Msg += "\nDid you mean:\n";
-          for (const auto& s : Sugg) Msg += "    " + s + "\n";
-        }
-        LogErrorAt(Node.getLoc(), Msg);
+        RankedSuggestions Suggestions;
+        Suggestions.Local = SuggestionIndex::suggestVisible(RightName, ET->getVariants());
+        NoSuchVariantError(Node.getRightLoc(), "enum", LeftName, RightName, Suggestions)
+            .raise();
       }
     }
     return;
@@ -752,13 +749,10 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
       return; // Should not happen -- isErrorTypeName() just confirmed it.
 
     if (!ET->hasVariant(RightName)) {
-      std::string Msg = "Error type '" + LeftName + "' has no variant '" + RightName + "'.";
-      auto Sugg = SuggestionIndex::suggestVisible(RightName, ET->getVariantNames());
-      if (!Sugg.empty()) {
-        Msg += "\nDid you mean:\n";
-        for (const auto &S : Sugg) Msg += "    " + S + "\n";
-      }
-      LogErrorAt(Node.getLoc(), Msg);
+      RankedSuggestions Suggestions;
+      Suggestions.Local = SuggestionIndex::suggestVisible(RightName, ET->getVariantNames());
+      NoSuchVariantError(Node.getRightLoc(), "error", LeftName, RightName, Suggestions)
+          .raise();
     }
     return;
   }
