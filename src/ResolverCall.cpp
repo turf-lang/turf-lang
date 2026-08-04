@@ -323,7 +323,13 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       auto EnumSugg = SuggestionIndex::suggestVisible(LeftName, SymTable_.getAllEnumNames());
       for (const auto &S : EnumSugg)
         QualifierSuggestions.Local.push_back(S + "::" + CalleeName);
-      UnknownScopeQualifierError(Node.getLoc(), LeftName, QualifierSuggestions).raise();
+      // ScopeCallee->getLeftLoc(), not Node.getLoc() -- the latter is the
+      // whole call expression's location (lands on the call's '(' for a
+      // `nosuchmodule::foo()`-shaped call), not the unresolved qualifier
+      // token itself.
+      UnknownScopeQualifierError(ScopeCallee->getLeftLoc(), LeftName,
+                                 QualifierSuggestions)
+          .raise();
       return;
     } else {
       ScopeCallee->ResolvedKind = ScopeAccessKind::ModuleFunctionRef;
