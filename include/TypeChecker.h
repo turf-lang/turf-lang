@@ -302,9 +302,19 @@ private:
    *                caller had already unwrapped it (pointer/NamedType/
    *                GenericType for a struct receiver; the primitive type
    *                itself otherwise).
+   * @param OutNamedCandidates  When non-null, always populated (even on
+   *                failure) with every visible function sharing the call's
+   *                method name, regardless of arity/receiver-type match --
+   *                lets a caller whose only remaining fallback is "no
+   *                bound-method mechanism at all" (the primitive-receiver
+   *                path) distinguish "no such function exists anywhere" from
+   *                "it exists, but no overload's receiver/arity matches this
+   *                call" and report the latter with an accurate, specific
+   *                message instead of a generic "no such method" one.
    */
   bool tryUFCSFallback(MethodCallExprAST &Node, const TurfType *BaseTy,
-                       const std::vector<TurfTypePtr> &ArgTypes);
+                       const std::vector<TurfTypePtr> &ArgTypes,
+                       std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates = nullptr);
 
   /// True if @p T is a numeric primitive (int, double, or bool).
   static bool isNumericType(const TurfType *T);

@@ -458,7 +458,8 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
 
 bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
                                   const TurfType *BaseTy,
-                                  const std::vector<TurfTypePtr> &ArgTypes) {
+                                  const std::vector<TurfTypePtr> &ArgTypes,
+                                  std::vector<const ResolverFunctionSymbol *> *OutNamedCandidates) {
   if (!BaseTy)
     return false;
   const std::string &MethodName = Node.getMethod();
@@ -474,6 +475,14 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
   for (const auto &M : RST_.findInModules(MethodName))
     if (M.Symbol)
       Candidates.push_back(M.Symbol);
+
+  // Populated regardless of whether this call ultimately resolves -- a
+  // caller with no other fallback left (the primitive-receiver path) needs
+  // this even on failure, to tell "no such function anywhere" apart from
+  // "it exists, just not for this receiver/arity" (see this parameter's
+  // doc comment in TypeChecker.h).
+  if (OutNamedCandidates)
+    *OutNamedCandidates = Candidates;
 
   // Receiver (implicit self-argument) matching is EXACT-name-match only --
   // no numeric coercion -- RFC §5.4 (arrays get the same unsized-matches-
@@ -1023,13 +1032,37 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       // typo'd method call on a non-struct value), not an actual internal
       // invariant violation. Confirmed via `x.foo()` on an int, a string,
       // and an `int*`.
-      if (tryUFCSFallback(Node, BaseTy.get(), ArgTypes))
+      std::vector<const ResolverFunctionSymbol *> NamedCandidates;
+      if (tryUFCSFallback(Node, BaseTy.get(), ArgTypes, &NamedCandidates))
         return;
-      reportError(Node.getLoc(),
-                  "Cannot call method '" + MethodName + "' on type '" +
-                      BaseTy->getName() +
-                      "' -- only struct instances have methods.",
-                  {});
+      if (NamedCandidates.empty()) {
+        reportError(Node.getLoc(),
+                    "Cannot call method '" + MethodName + "' on type '" +
+                        BaseTy->getName() +
+                        "' -- only struct instances have methods.",
+                    {});
+      } else {
+        // A function named MethodName exists and IS visible for UFCS --
+        // it just doesn't accept THIS receiver (wrong type -- UFCS's
+        // receiver match is exact, no coercion, see tryUFCSFallback()'s
+        // doc comment -- or wrong arity). Previously this fell into the
+        // exact same "only struct instances have methods" message as
+        // "no function by this name exists anywhere", which reads as
+        // "primitives can never use UFCS at all" -- false, and the
+        // opposite of what a near-miss like this actually means.
+        std::vector<RelatedLocation> Related;
+        for (const auto *Cand : NamedCandidates)
+          Related.push_back({toSourceLocation(Cand->DeclLoc),
+                             "candidate: " + Cand->signature()});
+        reportError(Node.getLoc(),
+                    "No visible '" + MethodName + "' overload accepts a '" +
+                        BaseTy->getName() + "' receiver via UFCS.",
+                    Related,
+                    "UFCS matches the receiver's type exactly -- it never "
+                    "coerces or widens it (e.g. char -> int). Either change "
+                    "the receiver's declared parameter type, or convert '" +
+                        MethodName + "'s receiver explicitly before calling.");
+      }
       setType(&Node, nullptr);
       return;
     }
