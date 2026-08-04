@@ -398,6 +398,19 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   TurfTypePtr LhsTy = getType(Node.getLHS());
   TurfTypePtr RhsTy = getType(Node.getRHS());
   const VariableExprAST *LHSVar = findRootVariable(Node.getLHS());
+  // findRootVariable() unwraps FieldAccessExprAST/ArrayAccessExprAST down to
+  // the base variable (e.g. 'u' in 'u.age = ...'), which is exactly what's
+  // needed to find the ResolvedSymbol for the immutability check below --
+  // but that base variable's OWN declaration location is only meaningful as
+  // a "declared here" pointer for the "declared type" mismatch when the
+  // LHS actually IS that variable directly. For 'u.age = "x"', 'u's
+  // declaration line shows User's type, not 'age's declared type -- pointing
+  // "declared here" at it implied the wrong thing entirely. StructField
+  // carries no location of its own to point at instead (would need a new
+  // field threaded through struct parsing), so the safest fix is to simply
+  // not attach a location note when the LHS isn't the bare variable itself.
+  const bool LHSIsBareVariable =
+      dynamic_cast<const VariableExprAST *>(Node.getLHS()) != nullptr;
 
   if (LhsTy && RhsTy) {
     if (RhsTy->isNull()) {
@@ -406,7 +419,7 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
 #ifndef TYPECHECKER_NO_ERRORS
         {
           NullAssignmentError Err(Node.getLoc(), VarName, LhsTy->getName());
-          if (LHSVar && LHSVar->ResolvedSymbol)
+          if (LHSIsBareVariable && LHSVar && LHSVar->ResolvedSymbol)
             Err.withRelated(toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
                             "declared here");
           Err.raise();
@@ -418,7 +431,7 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
     }
     if (!typesCompatible(RhsTy.get(), LhsTy.get())) {
       std::vector<RelatedLocation> Related;
-      if (LHSVar && LHSVar->ResolvedSymbol) {
+      if (LHSIsBareVariable && LHSVar && LHSVar->ResolvedSymbol) {
         Related.push_back({toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
                            "declared here"});
       }
