@@ -653,7 +653,8 @@ void TypeChecker::visitCast(CastExprAST &Node) {
                       {},
                       "Use one of '" + ET->getName() +
                           "'s declared variants instead of an arbitrary "
-                          "integer literal.");
+                          "integer literal.",
+                      "Value out of range!");
         }
       }
     }
@@ -766,7 +767,8 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
                     {},
                     "Remove the duplicate arm, or combine it with the "
                     "earlier one by stacking (`matches A:` then "
-                    "`matches B:` sharing one body).");
+                    "`matches B:` sharing one body).",
+                    "Duplicate pattern!");
       }
     }
 
@@ -805,7 +807,8 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
           for (const auto& M : Missing)
               Msg += "\n    " + ET->getName() + "::" + M;
           reportError(Node.getLoc(), Msg, {},
-                      "Add 'otherwise:' to handle remaining variants.");
+                      "Add 'otherwise:' to handle remaining variants.",
+                      "Non-exhaustive match!");
       }
   }
 

@@ -125,7 +125,10 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       ScopeCallee->ResolvedKind = ScopeAccessKind::EnumVariant;
       TypeError(Node.getLoc(), "'" + LeftName + "::" + CalleeName +
                                    "' is an enum variant, not a function -- "
-                                   "it can't be called.")
+                                   "it can't be called.",
+                "Drop the '(...)' -- '" + LeftName + "::" + CalleeName +
+                    "' is already a complete value on its own.",
+                "Not callable!")
           .raise();
       return;
     }
@@ -138,7 +141,10 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantRef;
       TypeError(Node.getLoc(), "'" + LeftName + "::" + CalleeName +
                                    "' is an error variant, not a function -- "
-                                   "it can't be called.")
+                                   "it can't be called.",
+                "Drop the '(...)' -- '" + LeftName + "::" + CalleeName +
+                    "' is already a complete value on its own.",
+                "Not callable!")
           .raise();
       return;
     }
@@ -334,7 +340,10 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
                                      "::" + LeftName +
                                      "' -- modules can't be qualified by "
                                      "another module; just write '" +
-                                     LeftName + "::" + CalleeName + "(...)'.")
+                                     LeftName + "::" + CalleeName + "(...)'.",
+                  "Modules aren't nested inside each other -- drop the '" +
+                      ScopeCallee->getModuleQualifier() + "::' prefix.",
+                  "Invalid module qualifier!")
             .raise();
         return;
       }
@@ -763,7 +772,10 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
     TypeError(Node.getLoc(), "'" + LeftName + "::" + RightName +
                                  "' can't be used as a value -- functions "
                                  "aren't first-class yet, only calls like '" +
-                                 LeftName + "::" + RightName + "(...)' work.")
+                                 LeftName + "::" + RightName + "(...)' work.",
+              "Call it directly at the point you need its result, or wrap "
+              "it in your own function if you need to pass it around.",
+              "Not a value!")
         .raise();
     return;
   }
@@ -776,7 +788,10 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
     TypeError(Node.getLoc(), "'" + LeftName + "::" + RightName +
                                  "' can't be used as a value -- functions "
                                  "aren't first-class yet, only calls like '" +
-                                 LeftName + "::" + RightName + "(...)' work.")
+                                 LeftName + "::" + RightName + "(...)' work.",
+              "Call it directly at the point you need its result, or wrap "
+              "it in your own function if you need to pass it around.",
+              "Not a value!")
         .raise();
     return;
   }

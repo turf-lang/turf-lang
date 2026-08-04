@@ -4,27 +4,37 @@
 #include "Errors.h"
 
 // Type Error : Errors generated due to incompatible types
+//
+// TypeChecker::reportError() is the single production path every
+// TypeChecker diagnostic funnels through, so this is the single
+// constructor every one of them -- from a genuine "int vs string" clash to
+// a duplicate `matches` pattern, a non-exhaustive enum, an out-of-range
+// cast, or a missing initializer -- goes through. Two knobs let a call
+// site say something accurate instead of settling for the generic
+// default, each independently, without stacking alongside it:
+//
+//   CustomHint:   the actionable "what to do about it" line. Several call
+//                 sites used to embed their own much more specific hint
+//                 directly IN THE MESSAGE TEXT, before this parameter
+//                 existed, producing a redundant, sometimes literally
+//                 doubled ("Hint: ... \n\n Hint: ...") diagnostic.
+//   CustomBanner: the bold header line above the message. Left at the
+//                 default "Type mismatch!" for genuine type clashes;
+//                 overridden for anything that ISN'T actually a mismatch
+//                 between two types (e.g. "Non-exhaustive match!",
+//                 "Missing initializer!", "Duplicate pattern!") so the
+//                 header doesn't misdescribe what's actually wrong.
 class TypeError : public TurfError {
 public:
-  // CustomHint, when non-empty, replaces the generic default below instead
-  // of stacking alongside it. TypeChecker::reportError() is the single
-  // production path every TypeChecker diagnostic funnels through
-  // (TypeChecker.h's productionErrorHandler always constructs a TypeError
-  // regardless of what kind of semantic problem actually occurred -- a
-  // duplicate `matches` pattern, a non-exhaustive enum, an arity mismatch,
-  // and a genuine "int vs string" type clash all render as "Type
-  // mismatch!" with this same hint), so several call sites used to embed
-  // their own much more specific hint directly IN THE MESSAGE TEXT as the
-  // only way to say anything more useful -- producing a redundant,
-  // sometimes literally doubled ("Hint: ... \n\n Hint: ...") diagnostic.
   TypeError(SourceLocation Loc, const std::string &Msg,
-           const std::string &CustomHint = "")
+           const std::string &CustomHint = "",
+           const std::string &CustomBanner = "")
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Type mismatch!\n" + Colors::RESET +
-                      "  " + Msg,
+                  Colors::BRIGHT_RED +
+                      (CustomBanner.empty() ? "Type mismatch!" : CustomBanner) +
+                      "\n" + Colors::RESET + "  " + Msg,
                   CustomHint.empty()
-                      ? "Check that you're not mixing incompatible types "
-                        "(like assigning a string to an int variable)."
+                      ? "Check that both sides have compatible types."
                       : CustomHint) {
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
   }

@@ -36,7 +36,12 @@
 
 void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   if (Node.isImmutable() && !Node.hasExplicitInit()) {
-    reportError(Node.getLoc(), "Immutable variable '" + Node.getName() + "' requires an explicit initializer.");
+    reportError(Node.getLoc(),
+                "Immutable variable '" + Node.getName() + "' requires an explicit initializer.",
+                {},
+                "'immutable'/'immut' variables can never be assigned to "
+                "later, so they must get their only value right here.",
+                "Missing initializer!");
   }
 
   // Visit the initializer first (bottom-up)
@@ -145,7 +150,8 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
                       (Node.getInitList().size() == 1 ? "" : "s") + ".",
                   {},
                   "Change the declared size to match the initializer list, "
-                  "or add/remove elements so the counts agree.");
+                  "or add/remove elements so the counts agree.",
+                  "Array size mismatch!");
     }
     // ExprAST has no base-class getLoc() (each concrete node declares its
     // own, inconsistently), so this uses the array declaration's own

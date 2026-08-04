@@ -104,10 +104,20 @@ public:
   // more specific than the generic hint, before this parameter existed),
   // producing a confusing, redundant double hint. When non-empty, this
   // overrides the generic default instead of stacking alongside it.
+  //
+  // CustomBanner: reportError() is the single production path EVERY
+  // TypeChecker diagnostic funnels through -- a duplicate `matches`
+  // pattern, a non-exhaustive enum, an out-of-range cast, a missing
+  // initializer, a call to something uncallable, and a genuine "int vs
+  // string" mismatch all used to render under the identical hardcoded
+  // "Type mismatch!" header, regardless of whether anything was actually
+  // being compared/assigned between two types at all. When non-empty,
+  // this overrides that header the same way CustomHint overrides the
+  // default hint.
   using ErrorHandler =
       std::function<void(SourceLocation, const std::string &,
                          const std::vector<RelatedLocation> &,
-                         const std::string &)>;
+                         const std::string &, const std::string &)>;
 
   // ── Constructors ──────────────────────────────────────────────────────────
 
@@ -237,10 +247,13 @@ private:
 
   /// Fire the error handler with the given location and message.
   /// CustomHint, when non-empty, overrides the default TypeError hint
-  /// instead of stacking alongside it -- see ErrorHandler's doc comment.
+  /// instead of stacking alongside it; CustomBanner, when non-empty,
+  /// overrides the default "Type mismatch!" header -- see ErrorHandler's
+  /// doc comment for why that header isn't always accurate.
   void reportError(SourceLocation Loc, const std::string &Msg,
                    const std::vector<RelatedLocation> &Related = {},
-                   const std::string &CustomHint = "");
+                   const std::string &CustomHint = "",
+                   const std::string &CustomBanner = "");
 
   /**
    * @brief Infer the result type of a binary arithmetic/string operation.

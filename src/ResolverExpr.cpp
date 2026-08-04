@@ -97,7 +97,10 @@ void Resolver::visitVariable(VariableExprAST &Node) {
       TypeError(Node.getLoc(), "'" + Node.getName() +
                                    "' is overloaded -- it can't be used as a "
                                    "first-class function value without an "
-                                   "unambiguous single signature.")
+                                   "unambiguous single signature.",
+                "Give the variable a more specific function type so only "
+                "one overload matches, or rename one of the overloads.",
+                "Ambiguous reference!")
           .raise();
       return;
     }

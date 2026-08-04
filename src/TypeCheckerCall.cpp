@@ -271,7 +271,9 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
                     "'" + CalleeName + "' expects " +
                         std::to_string(BI->Arity) + " argument" +
                         (BI->Arity == 1 ? "" : "s") + ", got " +
-                        std::to_string(ArgCount) + ".");
+                        std::to_string(ArgCount) + ".",
+                    {}, "Check the number of arguments.",
+                    "Wrong argument count!");
         setType(&Node, nullptr);
         return;
       }
@@ -324,7 +326,8 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
                       std::to_string(ArgCount) + " argument" +
                       (ArgCount == 1 ? "" : "s") +
                       "; known overloads: " + Overloads + ".",
-                  Related);
+                  Related, "Check the number of arguments.",
+                  "Wrong argument count!");
       setType(&Node, nullptr);
       return;
     }
@@ -352,9 +355,12 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       // Build argument-type string for the error.
       std::string ArgTypeStr;
       std::vector<RelatedLocation> Related;
+      bool AnyNullArg = false;
       for (int i = 0; i < ArgCount; ++i) {
         if (i) ArgTypeStr += ", ";
         ArgTypeStr += (ArgTypes[i] ? ArgTypes[i]->getName() : "unknown");
+        if (ArgTypes[i] && ArgTypes[i]->isNull())
+          AnyNullArg = true;
       }
       for (const auto &Cand : ArityMatches)
         if (Cand)
@@ -363,7 +369,12 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       reportError(Node.getLoc(),
                   "No overload of '" + CalleeName +
                       "' matches argument types (" + ArgTypeStr + ").",
-                  Related);
+                  Related,
+                  AnyNullArg
+                      ? "'null' is only valid for pointer-typed parameters -- "
+                        "none of the overloads above take a pointer here."
+                      : "",
+                  "No matching overload!");
       setType(&Node, nullptr);
       return;
     }
@@ -427,7 +438,9 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
                       "'" + CalleeName + "' expects " +
                           std::to_string(ParamTypes.size()) + " argument" +
                           (ParamTypes.size() == 1 ? "" : "s") + ", got " +
-                          std::to_string(ArgCount) + ".");
+                          std::to_string(ArgCount) + ".",
+                      {}, "Check the number of arguments.",
+                      "Wrong argument count!");
           setType(&Node, nullptr);
           return;
         }
@@ -541,7 +554,8 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
         reportError(Node.getLoc(),
                     "Ambiguous UFCS call to '" + MethodName +
                         "': more than one visible free-function overload "
-                        "matches this call site exactly.");
+                        "matches this call site exactly.",
+                    {}, "", "Ambiguous call!");
         setType(&Node, nullptr);
         return true; // handled (as an error) -- caller must not also report
       }
@@ -621,7 +635,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
                       std::to_string(ArgCount) + " argument" +
                       (ArgCount == 1 ? "" : "s") +
                       "; known overloads: " + Overloads + ".",
-                  Related);
+                  Related, "Check the number of arguments.",
+                  "Wrong argument count!");
       setType(&Node, nullptr);
       return;
     }
@@ -655,7 +670,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       reportError(Node.getLoc(),
                   "No overload of '" + ModuleName + "." + MethodName +
                       "' matches argument types (" + ArgTypeStr + ").",
-                  Related);
+                  Related, "", "No matching overload!");
       setType(&Node, nullptr);
       return;
     }
@@ -865,7 +880,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           reportError(Node.getLoc(),
                       "No overload of '" + StructName + "." + MethodName +
                           "' matches argument types (" + ArgTypeStr + ").",
-                      Related);
+                      Related, "", "No matching overload!");
           setType(&Node, nullptr);
           return;
         }
@@ -1040,7 +1055,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
                     "Cannot call method '" + MethodName + "' on type '" +
                         BaseTy->getName() +
                         "' -- only struct instances have methods.",
-                    {});
+                    {}, "", "No such method!");
       } else {
         // A function named MethodName exists and IS visible for UFCS --
         // it just doesn't accept THIS receiver (wrong type -- UFCS's
@@ -1061,7 +1076,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
                     "UFCS matches the receiver's type exactly -- it never "
                     "coerces or widens it (e.g. char -> int). Either change "
                     "the receiver's declared parameter type, or convert '" +
-                        MethodName + "'s receiver explicitly before calling.");
+                        MethodName + "'s receiver explicitly before calling.",
+                    "No matching overload!");
       }
       setType(&Node, nullptr);
       return;
@@ -1246,7 +1262,12 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
 
   if (!WrappedTy || !WrappedTy->isErrorUnion()) {
     reportError(Node.getLoc(),
-               "'recover' can only be used on a fallible ('!T') expression.");
+               "'recover' can only be used on a fallible ('!T') expression.",
+               {},
+               "Only a call whose declared return type is '!T' can be "
+               "followed by 'recover' -- an ordinary, non-fallible call has "
+               "nothing to recover from.",
+               "Invalid 'recover' use!");
     setType(&Node, nullptr);
     return;
   }
@@ -1292,7 +1313,11 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
                                       : "run") +
                       "' must end every path with 'return' -- it doesn't "
                       "produce a value, so falling through leaves this "
-                      "expression with nothing to evaluate to.");
+                      "expression with nothing to evaluate to.",
+                  {},
+                  "Either add 'return <value>;' on every path through the "
+                  "block, or use 'recover produce <value>;' instead.",
+                  "Non-diverging 'recover run'!");
     }
   }
 

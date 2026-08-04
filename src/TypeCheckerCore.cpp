@@ -39,8 +39,9 @@ namespace {
 /// Default error handler: uses the real TypeError class from Errors.h.
 void productionErrorHandler(SourceLocation Loc, const std::string &Msg,
                             const std::vector<RelatedLocation> &Related,
-                            const std::string &CustomHint) {
-  TypeError Err(Loc, Msg, CustomHint);
+                            const std::string &CustomHint,
+                            const std::string &CustomBanner) {
+  TypeError Err(Loc, Msg, CustomHint, CustomBanner);
   for (const auto &R : Related)
     Err.withRelated(R.Loc, R.Description);
   Err.raise();
@@ -50,7 +51,7 @@ void productionErrorHandler(SourceLocation Loc, const std::string &Msg,
 /// Throws std::runtime_error so tests can catch it with EXPECT_THROWS.
 void unitTestErrorHandler(SourceLocation, const std::string &Msg,
                           const std::vector<RelatedLocation> &,
-                          const std::string &) {
+                          const std::string &, const std::string &) {
   throw std::runtime_error("TypeError: " + Msg);
 }
 #endif
@@ -102,10 +103,11 @@ void TypeChecker::setType(const ExprAST *Node, TurfTypePtr Ty) {
 
 void TypeChecker::reportError(SourceLocation Loc, const std::string &Msg,
                               const std::vector<RelatedLocation> &Related,
-                              const std::string &CustomHint) {
+                              const std::string &CustomHint,
+                              const std::string &CustomBanner) {
   HadError_ = true;
   if (ErrorHandler_)
-    ErrorHandler_(Loc, Msg, Related, CustomHint);
+    ErrorHandler_(Loc, Msg, Related, CustomHint, CustomBanner);
 }
 
 
@@ -170,6 +172,22 @@ bool TypeChecker::inferArithmeticType(SourceLocation Loc, int Op,
            "lib/std/strings.tr -- make sure 'strings' is imported. To "
            "concatenate a non-string, convert it first with `<expr> to "
            "string`.";
+  } else if (LhsTy->isStruct() || RhsTy->isStruct()) {
+    // Distinguishes two different reasons this can happen: no overload was
+    // ever declared for this operator on these types at all, OR one WAS
+    // declared but didn't match because operator resolution requires an
+    // EXACT type match on both operands (no int->double widening the way
+    // ordinary function-call arguments get, see visitBinary()'s operator-
+    // resolution gate) -- e.g. only `operator +(Vec2, double)` exists and
+    // this call passed an int. Naming both possibilities here avoids the
+    // false impression that no '+' overload exists at all when one
+    // actually does, just not for this exact pairing.
+    Hint = "'" + OpToDisplayString(Op) + "' isn't a builtin operation on a "
+           "struct -- declare 'operator " + OpToDisplayString(Op) + "(" +
+           LhsTy->getName() + ", " + RhsTy->getName() +
+           "): ReturnType { ... }', or check that an existing overload's "
+           "parameter types match EXACTLY (operator resolution never "
+           "widens int to double the way an ordinary function call does).";
   }
   reportError(Loc,
               "Type mismatch: cannot apply '" + OpToDisplayString(Op) +
@@ -283,7 +301,13 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
     }
 
     reportError(Loc, "Cannot compare '" + LhsTy->getName() + "' with '" +
-                         RhsTy->getName() + "'.");
+                         RhsTy->getName() + "'.",
+                {},
+                (LhsTy->isNull() || RhsTy->isNull())
+                    ? "'null' is only valid for pointer types -- a plain "
+                      "int/double/bool/string value can never be null, so "
+                      "this comparison can never be true."
+                    : "");
     return TurfBool(); // continue with bool to limit cascade errors
   }
 
