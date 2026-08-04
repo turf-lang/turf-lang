@@ -343,7 +343,18 @@ Value *FuncDefExprAST::codegen() {
     Builder->SetInsertPoint(SavedInsertBlock, SavedInsertPoint);
 
   // Function definitions are statements; they do not produce a value.
-  return nullptr;
+  // Return a non-null sentinel, NOT nullptr -- same convention
+  // StructDeclExprAST/EnumDeclExprAST/ErrorDeclExprAST/VarDeclExprAST's
+  // exported-constant path already use for "processed successfully,
+  // nothing to return." nullptr specifically means "codegen failed" to
+  // every blind-iteration caller (BlockExprAST::codegen(),
+  // ModuleImportExprAST::codegen()'s Body->codegen()) -- this is by far
+  // the most common statement kind inside a module body, so returning a
+  // literal nullptr here silently truncated EVERY imported module after
+  // its first function once BlockExprAST::codegen() was hardened to stop
+  // at the first null statement (see git history for the now-removed
+  // docs/planning/CODE_REVIEW_GAPS_2026-07.md's original writeup).
+  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }
 
 

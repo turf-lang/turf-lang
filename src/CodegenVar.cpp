@@ -56,8 +56,24 @@ Value *VarDeclExprAST::codegen() {
   // whatever LLVM function happens to be getting built adjacent to it in
   // iteration order (confirmed live: "Basic Block ... does not have
   // terminator" in a totally unrelated function).
+  //
+  // Return a non-null sentinel, NOT nullptr -- nullptr means "codegen
+  // failed" to every blind-iteration caller (BlockExprAST::codegen(),
+  // ModuleImportExprAST::codegen()'s Body->codegen()), and this is a
+  // success, just one with no real value to produce. Same convention
+  // StructDeclExprAST/EnumDeclExprAST/ErrorDeclExprAST already use for
+  // their own "processed, nothing to return" codegen paths. Confirmed
+  // live: returning nullptr here made BlockExprAST::codegen() (once
+  // hardened to stop at the first null statement -- see this file's
+  // history and git history for the now-removed
+  // docs/planning/CODE_REVIEW_GAPS_2026-07.md's original writeup) silently
+  // abandon the rest of a module's body the moment it reached an
+  // `export immut` constant -- e.g. sys.tr's `export immut STDERR_FD`
+  // sits right before `fn panic(...)`, so `panic` never got a prototype
+  // or body, and every caller (mem.tr, test.tr) hit "LLVM function
+  // 'turf_sys_panic_string' not found after successful name resolution."
   if (IsExported)
-    return nullptr;
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 
   // Validation (void type, keywords, duplicates, etc.) is handled by the
   // Resolver and TypeChecker passes before Codegen.

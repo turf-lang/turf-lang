@@ -148,9 +148,30 @@ Value *BlockExprAST::codegen() {
     GlobalSymbolTable->EnterScope();
   }
 
+  // A statement whose codegen() returns nullptr without having raised its
+  // own diagnostic first is a genuine, silent compiler failure -- stop
+  // processing the rest of this block instead of quietly dropping the
+  // failing statement from the compiled program. This closes the
+  // "BlockExprAST::codegen() never checks for a null statement result" gap
+  // tracked in the now-removed docs/planning/CODE_REVIEW_GAPS_2026-07.md
+  // (see git history for the original writeup). This relies on every "processed
+  // StructDeclExprAST, EnumDeclExprAST, ErrorDeclExprAST, an `export
+  // immut` VarDeclExprAST) returning a non-null sentinel instead of a
+  // literal nullptr -- see each of their own codegen()'s doc comments.
+  // A block is exactly the context that would otherwise mask this: it's
+  // the only place multiple top-level-style statements (a module's own
+  // functions/structs/etc, reached via ModuleImportExprAST::codegen()'s
+  // Body->codegen()) get blindly iterated and their individual return
+  // values ignored except for the last one.
   Value *LastVal = nullptr;
   for (auto &Expr : Expressions) {
     LastVal = Expr->codegen();
+    if (!LastVal) {
+      if (GlobalSymbolTable) {
+        GlobalSymbolTable->ExitScope();
+      }
+      return nullptr;
+    }
   }
 
   // Exit scope
