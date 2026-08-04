@@ -18,6 +18,8 @@
 // case: this exact program (missing East and West, no otherwise) compiled
 // with ZERO diagnostics before the fix.
 
+import io;
+
 enum Direction { North, East, South, West }
 
 fn describe(d: Direction): int {

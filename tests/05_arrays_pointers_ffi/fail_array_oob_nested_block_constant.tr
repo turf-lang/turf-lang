@@ -5,6 +5,8 @@
 // src/ValueRange.cpp's ValueRangePass::runOnCFG() doc comment for the full
 // root-cause writeup, which turned out to apply to top-level locals too).
 
+import io;
+
 fn main(): int {
     mut arr: int[3] = [10, 20, 30];
     if true {

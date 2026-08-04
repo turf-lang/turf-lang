@@ -19,6 +19,8 @@
 // independent of the SymbolTable's scope-stack timing) -- the same fix
 // already applied to DefiniteAssignmentPass, see Analysis.cpp.
 
+import io;
+
 fn main(): int {
     mut arr: int[3] = [10, 20, 30];
     mut i: int = 5;
