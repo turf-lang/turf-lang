@@ -52,6 +52,35 @@ const VariableExprAST *findRootVariable(const ExprAST *Base) {
   return nullptr;
 }
 
+// The only expression kinds Codegen knows how to produce a store address
+// for (see each class's codegenLValue() override in AST.h/ASTAccess.h --
+// everything else inherits the base class's `return nullptr`). Checked here,
+// at TypeCheck time, so an invalid target (`true = 5;`, `break = 5;`) gets
+// one clear, specific diagnostic instead of either a nonsensical generic
+// type-mismatch message (see InvalidAssignmentTargetError's doc comment) or
+// silently falling through to a null Value* deep in Codegen.
+bool isAssignableLValue(const ExprAST *E) {
+  return dynamic_cast<const VariableExprAST *>(E) ||
+         dynamic_cast<const ArrayAccessExprAST *>(E) ||
+         dynamic_cast<const FieldAccessExprAST *>(E);
+}
+
+// A short, human-readable description of what non-lvalue expression kind
+// was found on the LHS of '=', for InvalidAssignmentTargetError's message.
+std::string describeNonLValue(const ExprAST *E) {
+  if (dynamic_cast<const BoolExprAST *>(E)) return "a boolean literal";
+  if (dynamic_cast<const NumberExprAST *>(E)) return "a numeric literal";
+  if (dynamic_cast<const StringExprAST *>(E)) return "a string literal";
+  if (dynamic_cast<const CharExprAST *>(E)) return "a character literal";
+  if (dynamic_cast<const NullExprAST *>(E)) return "'null'";
+  if (dynamic_cast<const BreakExprAST *>(E)) return "the 'break' keyword";
+  if (dynamic_cast<const ContinueExprAST *>(E)) return "the 'continue' keyword";
+  if (dynamic_cast<const FuncCallExprAST *>(E) ||
+      dynamic_cast<const MethodCallExprAST *>(E))
+    return "a function call's result";
+  return "this expression";
+}
+
 } // namespace
 
 
@@ -355,6 +384,17 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   if (Node.getRHS())
     const_cast<ExprAST *>(Node.getRHS())->accept(*this);
 
+  if (Node.getLHS() && !isAssignableLValue(Node.getLHS())) {
+#ifndef TYPECHECKER_NO_ERRORS
+    InvalidAssignmentTargetError(Node.getLoc(),
+                                 describeNonLValue(Node.getLHS()))
+        .raise();
+#else
+    throw std::runtime_error("InvalidAssignmentTargetError");
+#endif
+    return;
+  }
+
   TurfTypePtr LhsTy = getType(Node.getLHS());
   TurfTypePtr RhsTy = getType(Node.getRHS());
   const VariableExprAST *LHSVar = findRootVariable(Node.getLHS());
@@ -424,6 +464,17 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     const_cast<ExprAST *>(Node.getLHS())->accept(*this);
   if (Node.getRHS())
     const_cast<ExprAST *>(Node.getRHS())->accept(*this);
+
+  if (Node.getLHS() && !isAssignableLValue(Node.getLHS())) {
+#ifndef TYPECHECKER_NO_ERRORS
+    InvalidAssignmentTargetError(Node.getLoc(),
+                                 describeNonLValue(Node.getLHS()))
+        .raise();
+#else
+    throw std::runtime_error("InvalidAssignmentTargetError");
+#endif
+    return;
+  }
 
   TurfTypePtr LhsTy = getType(Node.getLHS());
   TurfTypePtr RhsTy = getType(Node.getRHS());

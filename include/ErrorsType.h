@@ -211,5 +211,24 @@ public:
     Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
   }
 };
+// Invalid Assignment Target Error : the LHS of '=' isn't an lvalue (a
+// variable, struct field, or array element) -- e.g. `true = 5;` or
+// `break = 5;`. Without this check, visitAssignment() type-checked both
+// sides and reported a generic TypeError as if the LHS were a real,
+// declared variable of whatever type it happened to have (even inventing
+// nonsense like "variable of type void" for `break`, which has no type at
+// all) -- confusing and wrong about the actual rule being violated.
+class InvalidAssignmentTargetError : public TurfError {
+public:
+  InvalidAssignmentTargetError(SourceLocation Loc, const std::string &What)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "Cannot assign to " +
+                      Colors::CYAN + What + Colors::BRIGHT_RED +
+                      " -- it isn't a variable, struct field, or array "
+                      "element." + Colors::RESET,
+                  "Only those can appear on the left of '='.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
 
 #endif
