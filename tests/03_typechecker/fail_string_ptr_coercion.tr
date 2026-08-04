@@ -1,7 +1,10 @@
 fn main(): int {
-    // string should not implicitly coerce to T*
-    mut ptr: ptr = null;
+    // string should not implicitly coerce to T*.
+    // (Variable named 'p', not 'ptr' -- 'ptr' is a type keyword and can't
+    // be used as a variable name; using it here used to fail one statement
+    // earlier on a generic parse error instead of ever reaching this check.)
+    mut p: ptr = null;
     mut s: string = "hello";
-    ptr = s;
+    p = s;
     return 0;
 }
