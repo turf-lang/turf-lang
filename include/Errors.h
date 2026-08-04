@@ -107,13 +107,22 @@ public:
     return result;
   }
 
-  static std::string suggestionsOrFallback(const RankedSuggestions &Suggestions, const std::string &Fallback, const std::string &Prefix = "") {
+  // No longer takes a Prefix param (e.g. "Did you mean:\n") to prepend --
+  // formatRankedSuggestions() already produces a complete, self-contained
+  // sentence on its own ("It may be from the current file: ..." / "Or,
+  // could be one of these from the imported files: ..."), so a prefix
+  // stacked in front of it either double-headed the local-suggestion case
+  // ("Did you mean:\nIt may be from the current file: ...") or, when only
+  // module suggestions existed with no local match at all, left the prefix
+  // dangling above an unrelated "Or, could be..." sentence with nothing
+  // for the "Or" to follow. Confirmed live on both call sites that used to
+  // pass one (UnknownScopeQualifierError, UnknownModuleSymbolError).
+  static std::string suggestionsOrFallback(const RankedSuggestions &Suggestions, const std::string &Fallback) {
     std::string formatted = formatRankedSuggestions(Suggestions);
     if (!formatted.empty()) {
-      if (formatted.rfind("\n  ", 0) == 0) {
-        return Prefix + formatted.substr(3);
-      }
-      return Prefix + formatted;
+      if (formatted.rfind("\n  ", 0) == 0)
+        return formatted.substr(3);
+      return formatted;
     }
     return Fallback;
   }

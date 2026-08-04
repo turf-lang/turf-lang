@@ -179,8 +179,7 @@ public:
         "'::' only works after an enum name (Color::Red), an imported "
         "module name (io::printline), or a struct type name for a static "
         "method (StructName::method). Double-check the spelling, or make "
-        "sure you've imported the module.",
-        "Did you mean:\n");
+        "sure you've imported the module.");
   }
 };
 // Raised when '::' -- reserved for namespace-resolution (enum/module/
@@ -223,8 +222,7 @@ public:
     Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = suggestionsOrFallback(
         Suggestions, "Double-check the spelling, or check " + ModuleName +
-                         ".tr for its actual exported names.",
-        "Did you mean:\n");
+                         ".tr for its actual exported names.");
   }
 };
 // Raised when two on-demand imports (import module::[...];) in the SAME
