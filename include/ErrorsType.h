@@ -200,7 +200,7 @@ public:
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "Oops! You can't change the value of '" +
                       Colors::CYAN + VarName + Colors::BRIGHT_RED +
-                      "' because it's immutable.\n" + Colors::RESET,
+                      "' because it's immutable." + Colors::RESET,
                   "If you need to change its value later, declare it "
                   "with 'mutable' instead of 'immutable'.") {
     Category_ = SLM::ErrorCategory::DECLARATION;

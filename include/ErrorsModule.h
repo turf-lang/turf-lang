@@ -108,7 +108,7 @@ public:
   ModuleNotFoundError(SourceLocation Loc, const std::string &ModuleName)
       : TurfError(Loc, Colors::BRIGHT_RED + "Could not find module '" +
                            Colors::CYAN + ModuleName + Colors::BRIGHT_RED +
-                           "'.\n" + Colors::RESET,
+                           "'." + Colors::RESET,
                   "Make sure the file '" + ModuleName + ".tr' exists in the standard library or your current directory.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
@@ -295,9 +295,15 @@ public:
     // Left as the default GENERAL (a judgment call): could arguably be
     // UNDECLARED_VAR, but the ranked suggestions already do the heavy
     // lifting here, and classifyError()'s text match gets a fair shot too.
+    // No explicit "Did you mean:\n" prefix -- suggestionsOrFallback()'s
+    // formatted suggestion text already starts with its own lead-in
+    // ("It may be from the current file: ..."), and stripping its leading
+    // "\n  " indent (to attach a prefix in front) left this hint's SECOND
+    // line with no indentation of its own once printDiag() added its
+    // single "Hint: " lead-in, unlike every other Suggestions-based error
+    // class in this file, which passes no prefix and reads cleanly.
     Hint_ = suggestionsOrFallback(Suggestions,
-      "Double-check your spelling, or maybe you need to define it?",
-      "Did you mean:\n");
+      "Double-check your spelling, or maybe you need to define it?");
   }
 };
 // Phase 2: Module-scoped argument type mismatch error

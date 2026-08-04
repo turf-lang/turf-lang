@@ -226,12 +226,12 @@ Value *ArrayAccessExprAST::codegenLValue() {
     if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
       long long Idx = CI->getSExtValue();
       if (Idx < 0 || Idx >= ArraySize) {
-        ArrayBoundsError Err(Loc, "array", Idx, ArraySize);
-        if (auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base.get())) {
-          if (GlobalSymbolTable) {
-            if (Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName()))
-              Err.withRelated(S->DeclLoc, "array declared here");
-          }
+        auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base.get());
+        ArrayBoundsError Err(Loc, BaseVar ? BaseVar->getName() : "array", Idx,
+                             ArraySize);
+        if (BaseVar && GlobalSymbolTable) {
+          if (Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName()))
+            Err.withRelated(S->DeclLoc, "array declared here");
         }
         Err.raise();
         return nullptr;
@@ -312,12 +312,12 @@ Value *ArrayAccessExprAST::codegen() {
     if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
       long long Idx = CI->getSExtValue();
       if (Idx < 0 || Idx >= ArraySize) {
-        ArrayBoundsError Err(Loc, "array", Idx, ArraySize);
-        if (auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base.get())) {
-          if (GlobalSymbolTable) {
-            if (Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName()))
-              Err.withRelated(S->DeclLoc, "array declared here");
-          }
+        auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base.get());
+        ArrayBoundsError Err(Loc, BaseVar ? BaseVar->getName() : "array", Idx,
+                             ArraySize);
+        if (BaseVar && GlobalSymbolTable) {
+          if (Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName()))
+            Err.withRelated(S->DeclLoc, "array declared here");
         }
         Err.raise();
         return nullptr;

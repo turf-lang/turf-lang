@@ -156,12 +156,20 @@ public:
  */
 class DuplicateTypeNameError : public TurfError {
 public:
+  // "enum"/"error" need "An", "struct" needs "A" -- every Kind this is
+  // called with (ResolverCore.cpp) starts with either a vowel or 's', so a
+  // plain vowel check is sufficient (no need for a full English-article
+  // table).
+  static bool startsWithVowel(const std::string &S) {
+    return !S.empty() && std::string("aeiouAEIOU").find(S[0]) != std::string::npos;
+  }
+
   DuplicateTypeNameError(SourceLocation NewLoc, const std::string &Name,
                          const std::string &Kind, SourceLocation PrevLoc)
       : TurfError(NewLoc,
-                  Colors::BRIGHT_RED + "A " + Kind + " named '" +
-                      Colors::CYAN + Name + Colors::BRIGHT_RED +
-                      "' is already declared.") {
+                  Colors::BRIGHT_RED + (startsWithVowel(Kind) ? "An " : "A ") +
+                      Kind + " named '" + Colors::CYAN + Name +
+                      Colors::BRIGHT_RED + "' is already declared.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
     Message += "\n  " + Colors::BRIGHT_BLUE +
                "Note: struct/enum names are shared across your file and "

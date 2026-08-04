@@ -12,7 +12,8 @@ public:
                   Colors::BRIGHT_RED + "Array index out of bounds!\n" +
                       Colors::RESET + "  You tried to access '" + Colors::CYAN +
                       ArrayName + "[" + std::to_string(Index) + "]" +
-                      Colors::RESET + "', but the array only has " +
+                      Colors::RESET + "', but '" + Colors::CYAN + ArrayName +
+                      Colors::RESET + "' only has " +
                       Colors::CYAN + std::to_string(ArraySize) + Colors::RESET +
                       " elements (indices 0 to " +
                       std::to_string(ArraySize - 1) + ").",
