@@ -309,6 +309,23 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
     IsBareForm = true;
     Variants.push_back("DEFAULT");
     getNextToken(); // eat ';'
+
+    // `error Name;` already fully declares the type (an implicit DEFAULT
+    // variant) -- a braced variant list can't also follow right after it.
+    // Reject this explicitly rather than returning a valid bare decl and
+    // leaving the stray '{ ... }' block for the top-level dispatch loop to
+    // misread as unrelated statement garbage (it used to surface as a
+    // cascade of unrelated "expected a value"/"expected ';'" errors instead
+    // of naming the actual rule that was broken).
+    if (CurTok == '{') {
+      LogErrorAt(Loc,
+                 "An 'error' declaration can't mix the bare ';' form with a "
+                 "braced variant list."
+                 "\n  Hint: use either 'error " + Name + ";' (bare, a single "
+                 "implicit DEFAULT variant) or 'error " + Name +
+                 " { Variant1, Variant2, ... }' (braced), not both.");
+      return nullptr;
+    }
   } else if (CurTok == '{') {
     getNextToken(); // eat '{'
 
