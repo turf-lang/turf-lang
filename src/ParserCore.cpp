@@ -566,11 +566,25 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
     if (CouldBeKeywordTypo) {
       // Heuristic: If this is a keyword typo (like 'iff x'), the next token is
-      // usually an identifier, number, string, or brace — things that cannot
+      // usually an identifier, number, or string — things that cannot
       // directly follow a valid variable expression without an operator.
-      if (CurTok == TOK_IDENTIFIER || CurTok == TOK_NUMBER || 
-          CurTok == TOK_INT_LITERAL || CurTok == TOK_STRING_LITERAL || 
-          CurTok == '{') {
+      //
+      // '{' is deliberately NOT one of these triggers (it used to be, until
+      // this false-positive was found: `if x < d2 { ... }` misfired here on
+      // 'd2' -- a perfectly ordinary variable one edit away from the
+      // keyword 'do' -- because it's immediately followed by the if-block's
+      // own opening brace). Unlike an adjacent identifier/number/string,
+      // '{' is NOT unambiguous evidence of a typo: this language has no
+      // parens around if/while/for/compare conditions, so "some expression
+      // immediately followed by '{'" is also the ordinary shape of every
+      // condition's last token right before its block -- indistinguishable
+      // from a real keyword typo using only the next token. No test in this
+      // suite exercises a typo'd keyword whose own very next token is '{'
+      // with nothing in between (e.g. a hypothetical 'els { ... }'); such a
+      // case still gets a real diagnostic, just a less specific one, from
+      // whatever this identifier fails to parse as further down.
+      if (CurTok == TOK_IDENTIFIER || CurTok == TOK_NUMBER ||
+          CurTok == TOK_INT_LITERAL || CurTok == TOK_STRING_LITERAL) {
         KeywordError(IdLoc, IdName).raise();
         return nullptr;
       }
