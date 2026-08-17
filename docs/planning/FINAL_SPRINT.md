@@ -76,6 +76,29 @@ is explicitly out of scope here.
    This needs a real decision (and probably a short addendum to this file)
    before implementation starts, not mid-implementation.
 
+**Resolved (2026-08-17), see GitHub issue #238:**
+
+- **Trust boundary:** the entire `lib/std/` tree is exempt from the `unsafe`
+  gate. `mem.tr`/`net.tr`/`list.tr`/etc. keep using `ptr`/`T*`/`void*`
+  exactly as they do today — no migration of existing stdlib files. The gate
+  applies only to code outside `lib/std/`.
+- **Caller-side locals:** binding a stdlib call's pointer-typed return value
+  to a variable in user code requires `unsafe { }`, even though the call
+  itself (`mem::alloc(64)`) is an ordinary safe call. Example:
+  ```turflang
+  unsafe {
+    mutable p: ptr = mem::alloc(64);
+  }
+  ```
+- **Struct fields:** a `T*`-typed field is itself a gated use. The *entire
+  struct declaration* must be lexically inside `unsafe { }` if it has a raw
+  pointer field — not just the code that later dereferences it. This blocks
+  raw-pointer-containing types from being introduced into safe user code even
+  when the field is never dereferenced.
+- **Escape hatch form:** block-only (`unsafe { }`) for 1.0.0. No
+  expression-level `unsafe(expr)` form — out of scope, would expand the
+  parser surface beyond this track's sketch.
+
 ---
 
 ## Track B: Phase 4 Stdlib Remainder
