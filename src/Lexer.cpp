@@ -452,6 +452,15 @@ int gettok() {
       CurCol++;
     }
 
+    // CurCol has now advanced one past the identifier's last character (the
+    // scan loop above increments it for every character consumed) -- i.e.
+    // exactly the exclusive end column an LSP Range expects. Identifiers
+    // never span multiple lines, so EndLine is always CurLine. See
+    // SourceLocation's own doc comment (Lexer.h) for why this is populated
+    // here specifically (issue #243).
+    CurLoc.EndLine = CurLine;
+    CurLoc.EndCol = CurCol;
+
     // Check for keywords
     auto It = Keywords.find(IdentifierStr);
     if (It != Keywords.end()) {

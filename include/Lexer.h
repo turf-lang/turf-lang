@@ -19,10 +19,30 @@
 // DiagnosticEngine::add()-time fallback -- see its doc comment). Locations
 // captured from CurLoc during lexing (the overwhelming majority of real AST
 // node locations) DO get a real Filename -- see gettok()'s CurLoc assignment.
+// EndLine/EndCol added after Filename (not between Line/Col and Filename)
+// for the exact same reason Filename itself defaults rather than being
+// mandatory: several hundred call sites construct a SourceLocation via
+// positional aggregate-init, including a real 3-arg `{Line, Col, Filename}`
+// form (gettok()'s own CurLoc assignment) -- appending new fields at the
+// end, each with its own default member initializer, keeps every existing
+// 2-arg and 3-arg call site compiling unchanged; they simply don't get an
+// end position (EndLine/EndCol default to -1, meaning "not computed" --
+// NOT "same as Line/Col", so a caller can tell the difference between "this
+// is a single-column token" and "no end position was ever recorded here").
+//
+// Currently populated only for identifier/keyword tokens (gettok()'s
+// isalpha() branch, Lexer.cpp) -- the dominant case for LSP tooling, since
+// it covers every name-token location #230 threads into AST nodes (struct/
+// function/variable/field/method/module names). NOT yet populated for
+// other token kinds (operators, string/char/number literals) or for
+// multi-token spans (a whole declaration, a qualified `A::B::C` path) --
+// see issue #243 for that remaining scope.
 struct SourceLocation {
   int Line;
   int Col;
   std::string Filename;
+  int EndLine = -1;
+  int EndCol = -1;
 };
 
 // Carries the location of a contextually relevant secondary site alongside
