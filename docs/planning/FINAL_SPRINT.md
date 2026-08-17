@@ -169,12 +169,21 @@ Not attempted earlier because "the error class taxonomy is still changing
 through Phase 3" — that's no longer true, Phase 3 is done, so this is
 unblocked.
 
-- **Source Spans** — track `{Line, StartCol, EndCol}` per token (currently
-  just `Line`, confirmed via grep — no `StartCol`/`EndCol` exist anywhere in
-  `include/`). Touches `Lexer.h`'s token struct and every `SourceLocation`
-  call site across Parser/Resolver/TypeChecker — mechanical but wide-reaching.
-  Payoff: underline the full failing expression in `DiagnosticEngine`
-  output, not just a single `^`.
+- **Source Spans — partially done.** `SourceLocation` (`include/Lexer.h`)
+  now carries `EndLine`/`EndCol` (default `-1` = "not computed"), added
+  while building `turf-lsp` support (turf-lang/turf-lang#243) —
+  `gettok()` populates them for identifier/keyword tokens, which reaches
+  every AST node's name location for free (struct/function/variable/
+  field/method/module names, #230). Remaining scope, unchanged from the
+  original ask: (1) `DiagnosticEngine`'s own `printDiag()` doesn't consume
+  `EndCol` yet — the CLI's `^` output is still single-point; wiring it up
+  to underline a span when `EndCol != -1` is a `Lexer.cpp`-local change.
+  (2) Operators, string/char/number literals, and genuine multi-token
+  spans (a whole `add(3, "4")`-shaped sub-expression, not just one
+  identifier) still have no end position — extending coverage there is
+  the "mechanical but wide-reaching" work the original estimate describes.
+  Payoff once both land: underline the full failing expression in
+  `DiagnosticEngine` output, not just a single `^`.
 - **Error Codes + `turf --explain`** — every `TurfError` subclass in
   `Errors.h`/`ErrorsLex.h` gets a unique code (`E042` etc.). `turf --explain
   E042` prints a multi-paragraph markdown explanation — likely reusing the
