@@ -138,11 +138,31 @@ public:
    * Must be called before resuming resolution on subsequent top-level nodes
    * if a previous node raised an error caught by `setjmp`.
    * Warning: Do not loop-with-recovery over multiple top-level nodes without
-   * resetting scope depth and FunctionNestingDepth_ between iterations.
+   * resetting scope depth, FunctionNestingDepth_, ModuleStack_, and
+   * CurrentFuncTypeParams_ between iterations.
+   *
+   * ModuleStack_/CurrentFuncTypeParams_ (found via code review, added after
+   * this method's first use in resolveAll()'s RecoverPerDeclaration loop):
+   * both are set-before/cleared-after patterns around visitModuleImport()'s
+   * and visitFuncDef()'s own body traversal (ResolverDecl.cpp), with no
+   * RAII guard -- a longjmp mid-body skips the clear the same way it used
+   * to skip FunctionNestingDepth_/scope depth's reset before this method
+   * existed. Left stale, a failing `import`'s ModuleStack_ entry makes
+   * currentModuleName() return the wrong module for every UNRELATED
+   * top-level declaration that follows in the same buffer; a failing
+   * generic function's CurrentFuncTypeParams_ makes validateNamedType()
+   * wrongly accept that function's own type parameter name (e.g. `T`) as
+   * in-scope everywhere else too -- both silent mis-resolutions, not just
+   * missing diagnostics. Both are simple "current value, no nesting across
+   * top-level declarations" state (never legitimately non-empty at the
+   * start of a fresh top-level node), so clearing unconditionally is
+   * correct, mirroring FunctionNestingDepth_/scope depth's own reset here.
    */
   void resetForRecovery() {
     FunctionNestingDepth_ = 0;
     SymTable_.resetToDepth(0);
+    ModuleStack_.clear();
+    CurrentFuncTypeParams_.clear();
   }
 
   // ── ASTVisitor overrides ───────────────────────────────────────────────────

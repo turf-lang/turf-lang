@@ -10,6 +10,7 @@
 #include "CompileBuffer.h"
 #include "Parser.h"
 #include "Resolver.h"
+#include "SymbolTable.h"
 #include "TypeChecker.h"
 
 #include <cstring>
@@ -102,16 +103,28 @@ std::pair<SourceLocation, bool> GetAnyNodeLocation(const ExprAST &Node) {
 static CompileBufferResult
 CompileBufferInternal(const std::string &Source, const std::string &AsIfPath,
                       Resolver::ScopeSnapshotCallback SnapshotCB) {
-  // See Parser.h's doc comment -- idempotent, safe (and required) on every
-  // call: an embedder must not have to separately remember to call this
-  // once at process start before its first CompileBufferBestEffort() call.
-  InitializeCompilerGlobals();
-
   // ── Save every piece of global lexer/parser state this function touches,
   // so a call here is fully isolated from -- and doesn't leak into -- any
   // other compile in the same process (another CompileBufferBestEffort()
   // call, or a real main.cpp compile / Sandbox.cpp pass that happens to be
   // mid-flight). Mirrors Sandbox.cpp's own save/restore discipline.
+  //
+  // GlobalSymbolTable (found via code review) MUST be saved here, before
+  // InitializeCompilerGlobals() below replaces it -- InitializeSymbolTable()
+  // unconditionally does `GlobalSymbolTable = std::make_unique<SymbolTable>()`,
+  // discarding whatever was there. Without this save/restore, an embedder
+  // interleaving a CompileBufferBestEffort() call with another mid-flight
+  // compile in the same process (Sandbox.cpp's own passes, or main.cpp)
+  // would have every previously-registered struct/enum/machine type
+  // silently wiped out from under it, breaking later TypeChecker lookups
+  // against that OTHER compile's AST.
+  auto SavedGlobalSymbolTable = std::move(GlobalSymbolTable);
+
+  // See Parser.h's doc comment -- idempotent, safe (and required) on every
+  // call: an embedder must not have to separately remember to call this
+  // once at process start before its first CompileBufferBestEffort() call.
+  InitializeCompilerGlobals();
+
   const std::string SavedSourceFilename = SourceFilename;
   auto SavedSourceLines = SourceLines;
   const bool SavedAIEnabled = g_AIEnabled;
@@ -187,26 +200,42 @@ CompileBufferInternal(const std::string &Source, const std::string &AsIfPath,
   // recover per TOP-LEVEL DECLARATION internally now, not just per whole
   // call -- one declaration's semantic error no longer prevents every
   // OTHER declaration in the buffer from being resolved/checked and
-  // having its own errors surfaced too. The outer setjmp() here remains
-  // as the safety net for a Pass-1 hoisting failure (resolveAll() never
-  // recovers per-declaration for Pass 1 -- see RecoverPerDeclaration's own
-  // doc comment, Resolver.h, for why) and for symmetry with checkAll(),
-  // which has no separate pass to distinguish.
+  // having its own errors surfaced too. The outer setjmp() here remains as
+  // the safety net for a Pass-1 HOISTING failure specifically -- with
+  // RecoverPerDeclaration=true, that's the only thing left that can still
+  // reach it (every Pass-2 error is now caught internally, per node, and
+  // never propagates this far -- see RecoverPerDeclaration's own doc
+  // comment, Resolver.h, for why Pass 1 alone keeps the whole-call-abort
+  // behavior).
+  //
+  // TypeChecker deliberately does NOT run at all when Pass 1 failed (found
+  // via code review): mirrors main.cpp's own ResolverClean/PreResolverClean
+  // pattern (`src/main.cpp`) of skipping TypeChecker entirely rather than
+  // feeding it a symbol table Pass 1 never finished populating -- a
+  // duplicate-struct-name Pass 1 failure, for instance, would otherwise let
+  // TypeChecker run against an incomplete/inconsistent registration and
+  // produce a pile of confusing cascade diagnostics instead of cleanly
+  // stopping after the real Pass-1 error.
   Resolver R;
   if (SnapshotCB)
     R.setScopeSnapshotCallback(std::move(SnapshotCB));
+  bool ResolverHoistingClean = true;
   g_recoverActive = true;
   if (setjmp(g_recoverJmp) == 0) {
     R.resolveAll(BufferASTs, /*RecoverPerDeclaration=*/true);
+  } else {
+    ResolverHoistingClean = false;
   }
   g_recoverActive = false;
 
-  TypeChecker TC(R.symbolTable());
-  g_recoverActive = true;
-  if (setjmp(g_recoverJmp) == 0) {
-    TC.checkAll(BufferASTs, /*RecoverPerDeclaration=*/true);
+  if (ResolverHoistingClean) {
+    TypeChecker TC(R.symbolTable());
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      TC.checkAll(BufferASTs, /*RecoverPerDeclaration=*/true);
+    }
+    g_recoverActive = false;
   }
-  g_recoverActive = false;
 
   CompileBufferResult Result;
   Result.AST = std::make_unique<BlockExprAST>(std::move(BufferASTs));
@@ -224,10 +253,21 @@ CompileBufferInternal(const std::string &Source, const std::string &AsIfPath,
   g_recoverActive = SavedRecoverActive;
   SwapParsedTopLevelASTs(std::move(SavedASTs));
   PopImportCycleState();
-  if (!SourceFilename.empty()) {
-    OpenSourceFile(SourceFilename);
-    resetLexer();
-  }
+  GlobalSymbolTable = std::move(SavedGlobalSymbolTable);
+  // Unconditional (found via code review): repoints SourceFile away from
+  // this function's own local `Buffer` (about to be destroyed) regardless
+  // of whether SavedSourceFilename was empty. OpenSourceFile() already
+  // handles an empty path safely -- it repoints SourceFile at the always-
+  // alive GlobalSourceFile object and simply fails to actually open
+  // anything (is_open() false), which correctly matches "no real file was
+  // active before this call" (the common pure-embedder case: a process
+  // that has never compiled a real file at all). The OLD `if
+  // (!SourceFilename.empty())` guard skipped this entirely in that case,
+  // leaving SourceFile dangling at the destroyed local buffer -- safe only
+  // by luck, as long as nothing else in the process happened to touch
+  // SourceFile before the next SetSourceBuffer()/OpenSourceFile() call.
+  OpenSourceFile(SourceFilename);
+  resetLexer();
 
   return Result;
 }
