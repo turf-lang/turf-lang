@@ -30,6 +30,11 @@ struct ImportedSymbolRef {
 class ModuleImportExprAST : public ExprAST {
   SourceLocation Loc;         ///< location of the `import` statement itself
   std::string ModuleName;
+  // Location of the module NAME token specifically (distinct from Loc, the
+  // `import` keyword's own position) -- see issue #230. Defaults equal to
+  // Loc for prelude imports (ParsePreludeImports()), which are synthesized
+  // with no real second source position to point at.
+  SourceLocation NameLoc;
   std::string ResolvedPath;   ///< canonical path the module was actually loaded
                               ///< from (one of ParseImport()'s 3 search
                               ///< candidates) -- the identity key circular-
@@ -42,14 +47,16 @@ class ModuleImportExprAST : public ExprAST {
 
 public:
   ModuleImportExprAST(SourceLocation Loc, std::string ModuleName,
-                      std::string ResolvedPath, std::unique_ptr<ExprAST> Body,
+                      SourceLocation NameLoc, std::string ResolvedPath,
+                      std::unique_ptr<ExprAST> Body,
                       ImportMode Mode = ImportMode::Bare,
                       std::vector<ImportedSymbolRef> RequestedSymbols = {})
-      : Loc(Loc), ModuleName(std::move(ModuleName)),
+      : Loc(Loc), ModuleName(std::move(ModuleName)), NameLoc(NameLoc),
         ResolvedPath(std::move(ResolvedPath)), Body(std::move(Body)),
         Mode(Mode), RequestedSymbols(std::move(RequestedSymbols)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
+  const SourceLocation &getNameLoc() const { return NameLoc; }
   const std::string &getModuleName() const { return ModuleName; }
   const std::string &getResolvedPath() const { return ResolvedPath; }
   const ExprAST *getBody() const { return Body.get(); }
@@ -61,7 +68,8 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitModuleImport(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, ResolvedPath,
+    return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, NameLoc,
+                                                 ResolvedPath,
                                                  CloneExprAST(Body.get()),
                                                  Mode, RequestedSymbols);
   }
@@ -71,7 +79,8 @@ class VarDeclExprAST : public ExprAST {
   std::string Name;
   TurfTypePtr Type;
   std::unique_ptr<ExprAST> InitVal;
-  SourceLocation Loc;
+  SourceLocation Loc;      ///< location of the 'mutable'/'immutable' keyword
+  SourceLocation NameLoc;  ///< location of the variable's own name token -- see issue #230
   bool IsImmutable;
   bool HasExplicitInit = true;
   // Set only by `export immut NAME: TYPE = LITERAL;` (see ParseExportDecl()
@@ -85,13 +94,15 @@ class VarDeclExprAST : public ExprAST {
   bool IsExported = false;
 
 public:
-  VarDeclExprAST(SourceLocation Loc, std::string Name, TurfTypePtr Type,
-                 std::unique_ptr<ExprAST> InitVal, bool IsImmutable, bool HasExplicitInit = true)
+  VarDeclExprAST(SourceLocation Loc, std::string Name, SourceLocation NameLoc,
+                 TurfTypePtr Type, std::unique_ptr<ExprAST> InitVal,
+                 bool IsImmutable, bool HasExplicitInit = true)
       : Name(std::move(Name)), Type(std::move(Type)),
-        InitVal(std::move(InitVal)), Loc(Loc), IsImmutable(IsImmutable),
-        HasExplicitInit(HasExplicitInit) {}
+        InitVal(std::move(InitVal)), Loc(Loc), NameLoc(NameLoc),
+        IsImmutable(IsImmutable), HasExplicitInit(HasExplicitInit) {}
 
   const SourceLocation &getLoc() const { return Loc; }
+  const SourceLocation &getNameLoc() const { return NameLoc; }
   const std::string &getName() const { return Name; }
   const TurfType *getType() const { return Type.get(); }
   TurfTypePtr getTypePtr() const { return Type; }
@@ -110,7 +121,7 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitVarDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    auto Cloned = std::make_unique<VarDeclExprAST>(Loc, Name, Type,
+    auto Cloned = std::make_unique<VarDeclExprAST>(Loc, Name, NameLoc, Type,
                                             CloneExprAST(InitVal.get()), IsImmutable, HasExplicitInit);
     Cloned->IsExported = IsExported;
     return Cloned;
@@ -143,7 +154,13 @@ class FuncDefExprAST : public ExprAST {
   std::vector<ParamDecl> Params;
   std::unique_ptr<ExprAST> Body;
   std::vector<std::string> TypeParams;
-  SourceLocation Loc;
+  SourceLocation Loc;      ///< location of the 'fn'/'operator' keyword
+  // Location of the function/method's own NAME token -- for `Struct.method`,
+  // this is the METHOD name's position, not the struct name's (the more
+  // useful hover/rename target). For a synthesized operator-overload name
+  // (ParseOperatorDecl(), no real identifier token backs the name), this
+  // equals the operator token's own location. See issue #230.
+  SourceLocation NameLoc;
   // Whether the `static` keyword was written at declaration (`fn Rect.area()
   // static: int { ... }`). This is NOT redundant with "self absent from
   // Params": a free, non-struct-bound function also has no self, so
@@ -156,17 +173,19 @@ class FuncDefExprAST : public ExprAST {
   bool IsStaticDecl = false;
 
 public:
-  FuncDefExprAST(SourceLocation Loc, std::string Name, TurfTypePtr ReturnType,
+  FuncDefExprAST(SourceLocation Loc, std::string Name, SourceLocation NameLoc,
+                 TurfTypePtr ReturnType,
                  std::vector<ParamDecl> Params, std::unique_ptr<ExprAST> Body,
                  std::vector<std::string> TypeParams = {},
                  bool IsStaticDecl = false)
-      : Loc(Loc), Name(std::move(Name)), ReturnType(std::move(ReturnType)),
+      : Loc(Loc), NameLoc(NameLoc), Name(std::move(Name)), ReturnType(std::move(ReturnType)),
         Params(std::move(Params)), Body(std::move(Body)),
         TypeParams(std::move(TypeParams)), IsStaticDecl(IsStaticDecl) {}
 
   const std::string &getName() const { return Name; }
   bool isStaticDecl() const { return IsStaticDecl; }
   const SourceLocation &getLoc() const { return Loc; }
+  const SourceLocation &getNameLoc() const { return NameLoc; }
   const TurfType *getReturnType() const { return ReturnType.get(); }
   TurfTypePtr getReturnTypePtr() const { return ReturnType; }
   ExprAST *getBodyMut() const { return Body.get(); }
@@ -197,7 +216,7 @@ public:
   void accept(ASTVisitor &V) override { V.visitFuncDef(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncDefExprAST>(
-        Loc, Name, ReturnType, Params, CloneExprAST(Body.get()), TypeParams,
+        Loc, Name, NameLoc, ReturnType, Params, CloneExprAST(Body.get()), TypeParams,
         IsStaticDecl);
     // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. The default-constructed field is nullptr.
@@ -211,32 +230,34 @@ class ExternFuncDeclExprAST : public ExprAST {
   std::string Name_;
   std::vector<std::pair<std::string, TurfTypePtr>> Params_;
   TurfTypePtr ReturnType_;
-  SourceLocation Loc_;
+  SourceLocation Loc_;     ///< location of the 'extern' keyword
+  SourceLocation NameLoc_; ///< location of the function name token -- see issue #230
   bool IsVarArg_;        ///< true when the declaration ends with '...'
   std::string LibName_;  ///< non-empty when 'extern from "lib" fn' syntax used
 
 public:
   ExternFuncDeclExprAST(
-      SourceLocation Loc, std::string Name,
+      SourceLocation Loc, std::string Name, SourceLocation NameLoc,
       std::vector<std::pair<std::string, TurfTypePtr>> Params,
       TurfTypePtr ReturnType,
       bool IsVarArg = false,
       std::string LibName = "")
       : Name_(std::move(Name)), Params_(std::move(Params)),
-        ReturnType_(std::move(ReturnType)), Loc_(Loc),
+        ReturnType_(std::move(ReturnType)), Loc_(Loc), NameLoc_(NameLoc),
         IsVarArg_(IsVarArg), LibName_(std::move(LibName)) {}
 
   const std::string &getName()     const { return Name_; }
   const auto        &getParams()   const { return Params_; }
   TurfTypePtr        getReturnType()const { return ReturnType_; }
   const SourceLocation &getLoc()   const { return Loc_; }
+  const SourceLocation &getNameLoc() const { return NameLoc_; }
   bool               isVarArg()    const { return IsVarArg_; }
   const std::string &getLibName()  const { return LibName_; }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitExternFuncDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ExternFuncDeclExprAST>(Loc_, Name_, Params_,
+    return std::make_unique<ExternFuncDeclExprAST>(Loc_, Name_, NameLoc_, Params_,
                                                    ReturnType_, IsVarArg_,
                                                    LibName_);
   }
@@ -383,15 +404,17 @@ class StructDeclExprAST : public ExprAST {
   std::string Name;
   std::vector<StructField> Fields;
   std::vector<std::string> TypeParams;
-  SourceLocation Loc;
+  SourceLocation Loc;      ///< location of the 'struct' keyword
+  SourceLocation NameLoc;  ///< location of the struct's own name token -- see issue #230
 
 public:
-  StructDeclExprAST(SourceLocation Loc, std::string Name,
+  StructDeclExprAST(SourceLocation Loc, std::string Name, SourceLocation NameLoc,
                     std::vector<StructField> Fields,
                     std::vector<std::string> TypeParams = {})
-      : Loc(Loc), Name(std::move(Name)), Fields(std::move(Fields)), TypeParams(std::move(TypeParams)) {}
+      : Loc(Loc), NameLoc(NameLoc), Name(std::move(Name)), Fields(std::move(Fields)), TypeParams(std::move(TypeParams)) {}
 
   const SourceLocation &getLoc() const { return Loc; }
+  const SourceLocation &getNameLoc() const { return NameLoc; }
   const std::string &getName() const { return Name; }
   const std::vector<StructField> &getFields() const { return Fields; }
   /// Mutable access used only by Resolver::visitStructDecl() to rewrite a
@@ -403,7 +426,7 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitStructDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<StructDeclExprAST>(Loc, Name, Fields, TypeParams);
+    return std::make_unique<StructDeclExprAST>(Loc, Name, NameLoc, Fields, TypeParams);
   }
 };
 

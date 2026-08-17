@@ -138,15 +138,15 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
         }
         getNextToken(); // eat ')'
         Base = std::make_unique<MethodCallExprAST>(Loc, std::move(Base),
-                                                   MethodName, std::move(Args));
+                                                   MethodName, MethodLoc, std::move(Args));
       } else {
         if (MethodName == "length") {
           Base = std::make_unique<MethodCallExprAST>(
-              Loc, std::move(Base), "length",
+              Loc, std::move(Base), "length", MethodLoc,
               std::vector<std::unique_ptr<ExprAST>>{});
         } else {
           Base = std::make_unique<FieldAccessExprAST>(Loc, std::move(Base),
-                                                      MethodName);
+                                                      MethodName, MethodLoc);
         }
       }
     } else if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {

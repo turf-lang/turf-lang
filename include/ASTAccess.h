@@ -150,14 +150,17 @@ public:
 class FieldAccessExprAST : public ExprAST {
   std::unique_ptr<ExprAST> Base;
   std::string FieldName;
-  SourceLocation Loc;
+  SourceLocation Loc;      ///< location of the '.' token
+  SourceLocation NameLoc;  ///< location of the field name token itself -- see issue #230
 
 public:
   FieldAccessExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Base,
-                     std::string FieldName)
-      : Loc(Loc), Base(std::move(Base)), FieldName(std::move(FieldName)) {}
+                     std::string FieldName, SourceLocation NameLoc)
+      : Loc(Loc), Base(std::move(Base)), FieldName(std::move(FieldName)),
+        NameLoc(NameLoc) {}
 
   const SourceLocation &getLoc() const { return Loc; }
+  const SourceLocation &getNameLoc() const { return NameLoc; }
   const ExprAST *getBase() const { return Base.get(); }
   const std::string &getFieldName() const { return FieldName; }
 
@@ -166,7 +169,7 @@ public:
   void accept(ASTVisitor &V) override { V.visitFieldAccess(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FieldAccessExprAST>(Loc, CloneExprAST(Base.get()),
-                                                FieldName);
+                                                FieldName, NameLoc);
   }
 };
 
@@ -226,16 +229,18 @@ class MethodCallExprAST : public ExprAST {
   std::unique_ptr<ExprAST> Base;
   std::string Method;
   std::vector<std::unique_ptr<ExprAST>> Args;
-  SourceLocation Loc;
+  SourceLocation Loc;      ///< location of the '.' token
+  SourceLocation NameLoc;  ///< location of the method name token itself -- see issue #230
 
 public:
   MethodCallExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Base,
-                    std::string Method,
+                    std::string Method, SourceLocation NameLoc,
                     std::vector<std::unique_ptr<ExprAST>> Args = {})
       : Base(std::move(Base)), Method(std::move(Method)), Args(std::move(Args)),
-        Loc(Loc) {}
+        Loc(Loc), NameLoc(NameLoc) {}
 
   const SourceLocation &getLoc() const { return Loc; }
+  const SourceLocation &getNameLoc() const { return NameLoc; }
   const ExprAST *getBase() const { return Base.get(); }
   const std::string &getMethod() const { return Method; }
   const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
@@ -278,7 +283,7 @@ public:
   void accept(ASTVisitor &V) override { V.visitMethodCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()),
-                                               Method, CloneExprList(Args));
+                                               Method, NameLoc, CloneExprList(Args));
     // Note: ResolvedCallTarget, ResolvedViaUFCS, IsMachineTransition, and
     // TransitionCompileTimeProven intentionally NOT
     // copied — cloned ASTs are stale until re-resolved. ✓

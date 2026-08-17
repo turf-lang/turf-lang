@@ -64,9 +64,20 @@ public:
     DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/false,
                           RelatedLocations_, Category_);
 
-    if (g_recoverActive)
+    if (g_recoverActive) {
+      // longjmp() skips C++ destructors between here and the setjmp() point
+      // -- including every live ParseRecursionGuard on the abandoned call
+      // stack, which would otherwise leave g_parseRecursionDepth
+      // permanently inflated by however deep parsing had gotten when this
+      // error fired. Reset explicitly here (still on the deep side of the
+      // jump, so this runs regardless of which of the many setjmp() call
+      // sites ends up catching it) -- mirrors g_braceDepth's own defensive
+      // per-pass reset in resetLexer(), just at the point that actually
+      // needs it for a counter that longjmp can desync. See ParseExpression/
+      // ParseBlock's recursion-guard doc comment in Lexer.h.
+      g_parseRecursionDepth = 0;
       longjmp(g_recoverJmp, 1);
-    else {
+    } else {
       DiagnosticEngine::flushAll();
       std::exit(1);
     }

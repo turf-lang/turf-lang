@@ -35,7 +35,37 @@ struct RelatedLocation {
   std::string Description; // e.g. "declared here", "overload: fn foo(int)"
 };
 
-extern std::ifstream *SourceFile;
+// Generalized to std::istream* (was std::ifstream*) so a buffer-based
+// embedder (an LSP's unsaved editor buffer, a REPL line, a fuzzer corpus
+// entry) can point this at an in-memory std::istringstream via
+// SetSourceBuffer() instead of round-tripping through a real temp file on
+// disk -- see issue #232. gettok() (Lexer.cpp) only ever calls ->get()/
+// ->peek(), both plain std::istream members, so nothing about token
+// scanning itself changes; only code that opens/closes the underlying file
+// needs to go through the helpers below instead of calling
+// ->open()/->close()/->is_open() directly (istream has no such members).
+extern std::istream *SourceFile;
+
+// Opens Path as the real on-disk source file and points SourceFile at it.
+// Returns false (mirrors std::ifstream::is_open()) if Path can't be opened.
+// The disk-file counterpart to SetSourceBuffer() below.
+bool OpenSourceFile(const std::string &Path);
+
+// Closes the on-disk file SourceFile currently points at. Safe to call even
+// when SourceFile points at a caller-owned buffer (SetSourceBuffer()) --
+// a no-op in that case, since there's nothing of ours to close.
+void CloseSourceFile();
+
+// Points SourceFile at a caller-owned in-memory stream (typically a
+// std::istringstream wrapping an unsaved editor buffer) instead of a real
+// on-disk file -- see issue #232. The caller owns Buffer's lifetime and
+// must keep it alive for as long as SourceFile points at it; call
+// OpenSourceFile() or SetSourceBuffer() again (or let the process exit) to
+// stop using it. Import resolution still needs a real filesystem path to
+// search relative to -- set SourceFilename separately to whatever path the
+// buffer conceptually represents (its unsaved editor path, say), same as a
+// real file would.
+void SetSourceBuffer(std::istream &Buffer);
 extern double NumVal;
 extern long long IntVal;
 extern bool BoolVal;
@@ -80,6 +110,32 @@ extern bool g_protoOnlyPass; // true during sub-pass 3a: emit prototypes only
 // in Lexer.cpp for the full story (SkipToNextTopLevelBoundary()'s parse-
 // error recovery in main.cpp is what actually consumes this).
 extern int g_braceDepth;
+
+// The recursive-descent parser has no built-in recursion-depth limit --
+// ParseExpression()/ParseUnary()/ParsePrimary()/ParseBlock() etc. are
+// ordinary unbounded C++ recursion. Deeply nested malformed input (a long
+// run of unmatched '(' or '{', exactly what a half-typed expression in an
+// LSP's live edit buffer produces constantly while the user is still
+// typing) risks a genuine C++ stack overflow -- a hard process crash, not
+// something a diagnostic or setjmp/longjmp recovery can catch. Guarded at
+// the two true recursive-descent entry points, ParseExpression() (covers
+// arbitrarily nested parens/calls/unary chains) and ParseBlock() (covers
+// arbitrarily nested '{ { { ... } } }' blocks) -- together these cover
+// every path deep nesting can take through the grammar, since every other
+// recursive parse function is reached through one or the other.
+constexpr int MaxParseRecursionDepth = 2000;
+extern int g_parseRecursionDepth;
+
+// RAII guard: increments on construction, decrements on destruction, so
+// every one of ParseExpression()/ParseBlock()'s many early-return paths is
+// covered automatically with no manual bookkeeping at each one. Construct
+// one as the very first statement in the guarded function and check
+// tooDeep() before doing any real work.
+struct ParseRecursionGuard {
+  ParseRecursionGuard() { ++g_parseRecursionDepth; }
+  ~ParseRecursionGuard() { --g_parseRecursionDepth; }
+  bool tooDeep() const { return g_parseRecursionDepth > MaxParseRecursionDepth; }
+};
 
 // When true, the SLM is loaded and AI suggestions are generated for errors.
 // Controlled by the --smart CLI flag. Default is off for deterministic output.
@@ -149,9 +205,24 @@ public:
   }
   static size_t getDiagnosticCount() { return Diagnostics.size(); }
 
+  // Off by default: add() caps at one primary error per source line (see
+  // its own doc comment) -- deliberate CLI noise reduction, unchanged for
+  // existing callers. A tooling embedder wanting every real diagnostic for
+  // a buffer (e.g. an LSP populating squiggly lines needs to know about a
+  // SECOND genuine error on one physical line, not just the first) should
+  // set this true before its parse/resolve/typecheck pass and restore it
+  // afterward -- same save/restore convention g_AIEnabled already uses at
+  // Sandbox.cpp's own pass boundaries. Purely additive: does not change
+  // hasErrors()/hasErrorAt() semantics (ErrorLines is still populated the
+  // same way either way), only whether add() suppresses a diagnostic on an
+  // already-errored line.
+  static void setCollectAllDiagnostics(bool V) { CollectAllDiagnostics = V; }
+  static bool getCollectAllDiagnostics() { return CollectAllDiagnostics; }
+
 private:
   static std::vector<Diag> Diagnostics;
   static std::set<int> ErrorLines; // lines that already have an error
+  static bool CollectAllDiagnostics;
 };
 
 enum Token {

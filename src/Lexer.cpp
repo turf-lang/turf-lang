@@ -45,6 +45,7 @@ static int LastChar = ' ';
 // DiagnosticEngine : static storage
 std::vector<DiagnosticEngine::Diag> DiagnosticEngine::Diagnostics;
 std::set<int> DiagnosticEngine::ErrorLines;
+bool DiagnosticEngine::CollectAllDiagnostics = false;
 
 // setjmp/longjmp recovery buffers
 jmp_buf g_recoverJmp;
@@ -62,6 +63,11 @@ bool g_protoOnlyPass = false; // set by pre-pass 3a to stop after prototype
 // main pass, or a Sandbox.cpp re-parse) never inherits a stale value.
 int g_braceDepth = 0;
 
+// See Lexer.h for the full doc comment. Reset to 0 on longjmp (TurfError::
+// raise(), Errors.h) since a RAII ParseRecursionGuard's destructor never
+// runs for a stack frame longjmp skips past.
+int g_parseRecursionDepth = 0;
+
 // AI/SLM flag: only true when --smart is passed on the CLI.
 bool g_AIEnabled = false;
 
@@ -69,8 +75,32 @@ bool g_AIEnabled = false;
 // analysis of subsequent cascading errors.
 static bool g_slmFiredThisPass = false;
 
+// The real on-disk backing store for the common case (OpenSourceFile()
+// below). SourceFile itself is a std::istream* -- see Lexer.h's doc comment
+// -- so it can ALSO point at a caller-owned in-memory std::istringstream via
+// SetSourceBuffer() (issue #232) without gettok() (which only ever calls
+// ->get()/->peek(), both plain std::istream members) needing to know or
+// care which kind of stream is currently backing it.
 std::ifstream GlobalSourceFile;
-std::ifstream *SourceFile = &GlobalSourceFile;
+std::istream *SourceFile = &GlobalSourceFile;
+
+bool OpenSourceFile(const std::string &Path) {
+  GlobalSourceFile.close();
+  GlobalSourceFile.clear(); // clear any eof/fail bits left over from a previous file
+  GlobalSourceFile.open(Path);
+  SourceFile = &GlobalSourceFile;
+  return GlobalSourceFile.is_open();
+}
+
+void CloseSourceFile() {
+  // A no-op when SourceFile currently points at a caller-owned buffer
+  // (SetSourceBuffer()) rather than GlobalSourceFile -- there is nothing of
+  // ours to close in that case; the caller owns that stream's lifetime.
+  if (SourceFile == &GlobalSourceFile)
+    GlobalSourceFile.close();
+}
+
+void SetSourceBuffer(std::istream &Buffer) { SourceFile = &Buffer; }
 double NumVal;
 long long IntVal;
 bool BoolVal;
@@ -258,8 +288,10 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                            const std::vector<RelatedLocation> &Related,
                            SLM::ErrorCategory Category) {
   // If there is already an error on this line, suppress everything else
-  // (both additional errors and warnings) to avoid cascading noise.
-  if (ErrorLines.count(Loc.Line))
+  // (both additional errors and warnings) to avoid cascading noise -- unless
+  // an embedder opted into CollectAllDiagnostics (see its doc comment),
+  // which wants every real diagnostic, not just the first per line.
+  if (!CollectAllDiagnostics && ErrorLines.count(Loc.Line))
     return;
 
   std::string finalMessage = Msg;

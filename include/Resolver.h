@@ -58,6 +58,7 @@
  *
  * Usage:
  * @code
+ *   InitializeCompilerGlobals();     // see Parser.h -- required once per process, before the below
  *   Resolver resolver;
  *   resolver.resolve(programRoot);   // throws on the first error found
  * @endcode
@@ -65,6 +66,20 @@
  * The Resolver walks the whole AST once before Codegen runs.  In the current
  * "shadow mode" (Phase 2 of the migration plan) its output is not yet fed into
  * Codegen; the pass is merely run for early error detection.
+ *
+ * Despite this header being LLVM-free/self-contained (see file doc comment
+ * above), the Resolver is NOT fully decoupled from process-global state:
+ * ParseStructDecl() (Parser, not this class) registers every parsed struct
+ * into the global `GlobalSymbolTable` (SymbolTable.h), which TypeChecker's
+ * visitMethodCall() later reads back from to decide whether a call's base
+ * expression is a struct instance. `GlobalSymbolTable` is null until
+ * `InitializeCompilerGlobals()`/`InitializeSymbolTable()` runs -- every read
+ * site is null-guarded so skipping it will not crash, but every struct
+ * registration and lookup silently becomes a no-op instead, which surfaces
+ * later as misleading unrelated diagnostics (see issue #231). An embedder
+ * constructing a bare `Resolver` outside main.cpp's own pipeline (e.g. a
+ * unit test exercising just resolution) still needs this call first if the
+ * source under test declares or calls into any struct.
  */
 class Resolver : public ASTVisitor {
 public:

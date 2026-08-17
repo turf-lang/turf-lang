@@ -31,9 +31,21 @@
  *  the integer range bounds), visible to visitVariable() during the body walk,
  *  and removed when the for-loop node is fully visited.
  *
+ * Global-state dependency (despite the "LLVM-free header" constraint above)
+ * ─────────────────────────────────────────────────────────────────────────
+ *  visitMethodCall() consults the process-global `GlobalSymbolTable`
+ *  (SymbolTable.h, populated by the Parser's ParseStructDecl()) to decide
+ *  whether a call's base expression is a struct instance. It is null until
+ *  `InitializeCompilerGlobals()`/`InitializeSymbolTable()` (Parser.h) runs
+ *  once per process; the read site is null-guarded so this will not crash,
+ *  but every instance method call silently fails to resolve instead, with a
+ *  diagnostic ("only struct instances have methods") that reads exactly
+ *  like a real type error in otherwise-valid source. See issue #231.
+ *
  * Usage
  * ─────
  * @code
+ *   InitializeCompilerGlobals();     // see Parser.h -- required once per process, before the below
  *   // 1. Build the symbol table (Resolver pass fills it).
  *   ResolverSymbolTable rst;
  *   // ... Resolver runs here ...

@@ -338,53 +338,12 @@ static int linkObject(const std::string &ObjFile,
  * a fixed assumption re-derived locally at each call site) fixes this for
  * ANY nesting depth, not just one level.
  */
-// A token that legitimately starts a new top-level declaration (or ends the
-// previous statement). TOK_AT is deliberately excluded: '@' can never
-// successfully start anything any more (the decorator syntax it used to
-// introduce is gone, see ParsePrimaryBase()'s TOK_AT case), so a failed
-// construct is guaranteed to have made ZERO progress past its own leading
-// '@' -- treating '@' as a safe place to stop would make the "already at a
-// boundary, don't skip further" guard below fire before any token is ever
-// consumed, looping forever on the very same '@'.
-static bool IsTopLevelBoundaryToken(int Tok) {
-  return Tok == TOK_EOF || Tok == ';' || Tok == TOK_FN || Tok == TOK_STRUCT ||
-         Tok == TOK_ENUM || Tok == TOK_MACHINE || Tok == TOK_EXTERN ||
-         Tok == TOK_EXPORT ||
-         Tok == TOK_OPERATOR || Tok == TOK_ERROR || Tok == TOK_IMPORT;
-}
-
-static void SkipToNextTopLevelBoundary() {
-  if (CurTok == TOK_EOF) return;
-
-  // If the construct that just failed already consumed everything through
-  // its own natural boundary before rejecting the result (e.g.
-  // ParseLetStatement() eats a declaration's trailing ';' as part of
-  // building the node; ParseExportDecl() then rejects the shape of that
-  // already-complete node), CurTok is already sitting on the START of the
-  // next legitimate declaration. Forcing an extra token here -- the old,
-  // unconditional behavior below -- would eat that next declaration's own
-  // leading keyword, corrupting the parse of a statement that was never
-  // broken in the first place (confirmed: this desynced 'fn main(): int'
-  // into a bogus bare call 'main()' after fail_export_array_no_initializer's
-  // rejection, producing a second, unrelated "Expected ';'" error on top of
-  // the real one).
-  if (g_braceDepth == 0 && IsTopLevelBoundaryToken(CurTok)) return;
-
-  // Otherwise there's genuine leftover garbage from the failed construct --
-  // anywhere from a single bad token (e.g. an unsupported operator symbol,
-  // rejected before any '(' was even reached) to an entire un-consumed
-  // signature-and-body (e.g. 'operator -(a: Vec2): Vec2 { ... }' rejected
-  // for being unary, with its ': Vec2 { return a; }' tail never parsed).
-  // Skip forward, tracking nesting via g_braceDepth (maintained globally by
-  // getNextToken(), see its own doc comment), until back at depth 0 AND
-  // sitting on a real boundary -- always making at least one token of
-  // forward progress, since we already know from the guard above that we
-  // are NOT currently sitting on one.
-  do {
-    getNextToken();
-  } while (CurTok != TOK_EOF &&
-           (g_braceDepth > 0 || !IsTopLevelBoundaryToken(CurTok)));
-}
+// IsTopLevelBoundaryToken()/SkipToNextTopLevelBoundary() used to live here as
+// file-local `static` functions. Moved to ParserCore.cpp (declared in
+// Parser.h) so Sandbox.cpp's own recovery-mode parse passes can resync on a
+// per-statement basis using the exact same logic, instead of duplicating it
+// -- see issue #228/#233. Behavior is unchanged; only the definitions' home
+// and linkage moved.
 
 // main
 /**
@@ -407,8 +366,7 @@ int main(int argc, char **argv) {
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
 
-  SourceFile->open(opts.InputFile);
-  if (!SourceFile->is_open()) {
+  if (!OpenSourceFile(opts.InputFile)) {
     std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
     return 1;
   }
@@ -430,8 +388,7 @@ int main(int argc, char **argv) {
   // Clear any previous call graph state
   ClearCallGraph();
   ClearGlobalCFGs();
-  InitializeSymbolTable(); // Initialize semantic symbol table
-  InitializePrecedence();
+  InitializeCompilerGlobals(); // GlobalSymbolTable + BinopPrecedence -- see Parser.h
 
   // Pre-pass: hoist 'fn' function prototypes so that forward calls work.
   // We perform a second full parse of the file, i.e. only processing
@@ -447,8 +404,8 @@ int main(int argc, char **argv) {
   // that program itself.
 
   // Swap the global SourceFile for the pre-pass stream
-  SourceFile->close();
-      SourceFile->open(opts.InputFile);
+  CloseSourceFile();
+      OpenSourceFile(opts.InputFile);
       CurLoc = {1, 0};
 
       // Reset the lexer token stream
@@ -699,8 +656,8 @@ int main(int argc, char **argv) {
       }
 
   // Re-open for the main pass
-  SourceFile->close();
-  SourceFile->open(opts.InputFile);
+  CloseSourceFile();
+  OpenSourceFile(opts.InputFile);
   CurLoc = {1, 0};
   CurTok = 0;
 
