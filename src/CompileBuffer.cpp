@@ -180,21 +180,31 @@ CompileBufferInternal(const std::string &Source, const std::string &AsIfPath,
 
   // ── Resolve, then type-check -- each in its own recovery guard so an
   // error in one doesn't discard everything already resolved for the rest
-  // of the buffer (matches main.cpp's own PreR/PreTC pattern). No codegen:
-  // this function only ever produces diagnostics + a queryable AST.
+  // of the buffer. No codegen: this function only ever produces
+  // diagnostics + a queryable AST.
+  //
+  // RecoverPerDeclaration=true (issue #246): resolveAll()/checkAll() each
+  // recover per TOP-LEVEL DECLARATION internally now, not just per whole
+  // call -- one declaration's semantic error no longer prevents every
+  // OTHER declaration in the buffer from being resolved/checked and
+  // having its own errors surfaced too. The outer setjmp() here remains
+  // as the safety net for a Pass-1 hoisting failure (resolveAll() never
+  // recovers per-declaration for Pass 1 -- see RecoverPerDeclaration's own
+  // doc comment, Resolver.h, for why) and for symmetry with checkAll(),
+  // which has no separate pass to distinguish.
   Resolver R;
   if (SnapshotCB)
     R.setScopeSnapshotCallback(std::move(SnapshotCB));
   g_recoverActive = true;
   if (setjmp(g_recoverJmp) == 0) {
-    R.resolveAll(BufferASTs);
+    R.resolveAll(BufferASTs, /*RecoverPerDeclaration=*/true);
   }
   g_recoverActive = false;
 
   TypeChecker TC(R.symbolTable());
   g_recoverActive = true;
   if (setjmp(g_recoverJmp) == 0) {
-    TC.checkAll(BufferASTs);
+    TC.checkAll(BufferASTs, /*RecoverPerDeclaration=*/true);
   }
   g_recoverActive = false;
 

@@ -26,6 +26,7 @@
 #include "TypeCheckerInternal.h"
 
 #include <cassert>
+#include <cstring>
 #include <functional>
 #include <iostream>
 #include <optional>
@@ -70,9 +71,31 @@ TypeChecker::TypeChecker(const ResolverSymbolTable &RST, ErrorHandler Handler)
     : RST_(RST), ErrorHandler_(std::move(Handler)) {}
 
 
-void TypeChecker::checkAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
-  for (const auto &Node : Nodes)
-    check(Node.get());
+void TypeChecker::checkAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes,
+                           bool RecoverPerDeclaration) {
+  if (!RecoverPerDeclaration) {
+    for (const auto &Node : Nodes)
+      check(Node.get());
+    return;
+  }
+
+  // Per-top-level-node recovery (issue #246, opt-in) -- mirrors the
+  // identical fix in Resolver::resolveAll() (ResolverCore.cpp); see that
+  // function's own doc comment for the full save/restore rationale.
+  for (const auto &Node : Nodes) {
+    const bool SavedRecoverActive = g_recoverActive;
+    jmp_buf SavedJmpBuf;
+    std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
+
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      check(Node.get());
+    } else {
+      resetForRecovery();
+    }
+    g_recoverActive = SavedRecoverActive;
+    std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
+  }
 }
 
 
