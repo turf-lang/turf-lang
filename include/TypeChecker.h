@@ -174,9 +174,34 @@ public:
    *
    * Convenience wrapper that iterates over a vector of unique_ptr<ExprAST>
    * and calls check() on each one in order.
-   * Mirrors Resolver::resolveAll().
+   * Mirrors Resolver::resolveAll(), including the RecoverPerDeclaration
+   * parameter's semantics -- see that doc comment (Resolver.h) for the
+   * full rationale (issue #246). Default false preserves today's exact
+   * behavior for every existing caller (main.cpp's real compile pipeline,
+   * which must never let a partially-checked AST reach Codegen); pass true
+   * only for tooling that wants best-effort, multi-diagnostic results and
+   * will never codegen the result (e.g. CompileBufferBestEffort()).
    */
-  void checkAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes);
+  void checkAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes,
+               bool RecoverPerDeclaration = false);
+
+  /**
+   * @brief Reset internal per-declaration state after a longjmp recovery.
+   *
+   * Mirrors Resolver::resetForRecovery() (Resolver.h) -- see issue #246.
+   * A TypeError raised mid-body and caught via setjmp/longjmp skips
+   * whatever push/pop pairs were mid-flight (visitFuncDef()'s
+   * ReturnTypeStack_ push, visitCompare()'s MachineNarrowStack_ push,
+   * visitFor()'s LoopVarTypes_ insert), leaving them non-empty/stale for
+   * the NEXT top-level declaration's type-checking. Does NOT clear
+   * NodeTypes_ or HadError_ -- those are meant to accumulate across the
+   * whole checkAll() call, not reset per-declaration.
+   */
+  void resetForRecovery() {
+    ReturnTypeStack_.clear();
+    MachineNarrowStack_.clear();
+    LoopVarTypes_.clear();
+  }
 
   // ── Type query ────────────────────────────────────────────────────────────
 

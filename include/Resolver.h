@@ -101,8 +101,36 @@ public:
    *
    * Convenience wrapper that iterates over a vector of unique_ptr<ExprAST>
    * and calls resolve() on each one in order.
+   *
+   * @param RecoverPerDeclaration  See issue #246. When false (the default,
+   *        unchanged behavior for every existing caller -- main.cpp's real
+   *        compile pipeline relies on this): Pass 2 is one uninterrupted
+   *        walk, so the FIRST TurfError raised anywhere longjmps straight
+   *        back out of this whole call, matching the caller's own single
+   *        outer setjmp() guard -- the correct, deliberate behavior for a
+   *        pipeline that must never let Codegen run on a partially-
+   *        resolved AST (main.cpp's own "Codegen must never run on an
+   *        unresolved AST" invariant). When true, each top-level node
+   *        instead gets its OWN setjmp() guard (mirroring #228's identical
+   *        fix for the parser's per-statement loop), so one declaration's
+   *        semantic error doesn't prevent every OTHER declaration in the
+   *        buffer from being resolved and having its own errors surfaced
+   *        too -- errors are still recorded via the normal
+   *        DiagnosticEngine::add() path either way; only whether a single
+   *        error aborts the WHOLE call changes. Intended for tooling that
+   *        wants best-effort, multi-diagnostic results (e.g.
+   *        CompileBufferBestEffort(), CompileBuffer.h) and will never feed
+   *        the result to Codegen, not for the CLI's own real compile.
+   *
+   * Applies only to Pass 2. Pass 1 (hoistTopLevel) always aborts the whole
+   * call on its first error regardless of this flag -- a hoisting failure
+   * (e.g. two structs registered under the same name) leaves the symbol
+   * table in a state Pass 2 cannot safely reason about for ANY
+   * declaration, not just the one that caused it, unlike a Pass 2 failure,
+   * which genuinely doesn't affect other declarations' correctness.
    */
-  void resolveAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes);
+  void resolveAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes,
+                  bool RecoverPerDeclaration = false);
 
   /**
    * @brief Reset internal scope tracking after a longjmp recovery.

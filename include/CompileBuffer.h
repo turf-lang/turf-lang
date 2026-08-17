@@ -52,17 +52,22 @@ struct CompileBufferResult {
   // error on one physical line is here too, not silently dropped, thanks to
   // per-statement recovery (issue #228).
   //
-  // Scope limit, confirmed live: this only fully applies to parse-level
-  // diagnostics. Resolver::resolveAll()/TypeChecker::checkAll() are each
-  // still wrapped in a single recovery guard for their ENTIRE call (mirrors
-  // main.cpp's own PreR/PreTC pattern exactly -- not a new limitation this
-  // function introduces), so the FIRST resolver error anywhere in the
-  // buffer aborts the whole resolve pass, and likewise for type-checking --
-  // a second, independent "undefined variable" elsewhere in the same buffer
-  // will not be in this list. Making Resolver/TypeChecker themselves
-  // resumable per top-level declaration (the equivalent of #228, but for a
-  // two-pass hoist-then-resolve walk instead of a flat statement loop) is a
-  // real, separate follow-up, not attempted here.
+  // Scope limit (issue #246, narrowed but not eliminated): resolveAll()/
+  // checkAll() are called with RecoverPerDeclaration=true, so a resolver
+  // or type error in one top-level declaration no longer prevents every
+  // OTHER top-level declaration in the buffer from being resolved/checked
+  // and having its own errors surfaced -- two independent undefined-
+  // variable errors in two DIFFERENT functions are both in this list.
+  // Still limited WITHIN a single top-level declaration's own body,
+  // though: Pass 2's per-node recovery guards one whole top-level node at
+  // a time (a whole function body, a whole struct decl, ...), not each
+  // individual statement inside it, so the first resolver/type error
+  // inside ONE function still stops resolution of the REST of that same
+  // function's body -- a second independent error 3 lines further down in
+  // the SAME function won't be in this list. Narrowing that further would
+  // need per-STATEMENT (not per-declaration) resolver/type-checker
+  // recovery, a bigger change to the Resolver/TypeChecker classes'
+  // internal walk logic than this parameter attempts.
   std::vector<DiagnosticEngine::Diag> Diagnostics;
 
   // True only if parsing, resolving, AND type-checking all completed with

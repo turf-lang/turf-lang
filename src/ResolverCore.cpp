@@ -23,6 +23,7 @@
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
 #include "Types.h"           // RankedSuggestions
 
+#include <cstring>
 #include <memory>
 #include <unordered_set>
 
@@ -44,13 +45,18 @@ void Resolver::resolve(ExprAST *Node) {
 
 
 void Resolver::resolveAll(
-    const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
+    const std::vector<std::unique_ptr<ExprAST>> &Nodes,
+    bool RecoverPerDeclaration) {
   // ─────────────────────────────────────────────────────────────────────────
   // Pass 1 — Hoisting
   // Walk only top-level nodes (no body recursion).
   // Register every struct name and function signature so that Pass 2
   // can resolve forward references (foo calling bar defined below, or
   // a struct field using a type declared later in the file).
+  //
+  // Always one uninterrupted call regardless of RecoverPerDeclaration --
+  // see this parameter's own doc comment (Resolver.h) for why a Pass 1
+  // failure must still abort the whole resolveAll() call.
   // ─────────────────────────────────────────────────────────────────────────
   hoistTopLevel(Nodes);
 
@@ -59,8 +65,40 @@ void Resolver::resolveAll(
   // Walk the entire AST (all bodies). Forward references resolve correctly
   // because Pass 1 has already registered all struct names and signatures.
   // ─────────────────────────────────────────────────────────────────────────
-  for (const auto &Node : Nodes)
-    resolve(Node.get());
+  if (!RecoverPerDeclaration) {
+    for (const auto &Node : Nodes)
+      resolve(Node.get());
+    return;
+  }
+
+  // Per-top-level-node recovery (issue #246, opt-in -- see
+  // RecoverPerDeclaration's doc comment). Mirrors #228's identical fix for
+  // the PARSER's own per-statement loop: each node gets its own setjmp()
+  // instead of one guard around the whole Pass-2 loop, so one
+  // declaration's error doesn't prevent every other declaration from being
+  // resolved and having its own errors surfaced too.
+  //
+  // g_recoverJmp/g_recoverActive are saved and restored around each node's
+  // own setjmp() so this doesn't corrupt whatever OUTER recovery scope the
+  // caller already has active around this whole resolveAll() call.
+  for (const auto &Node : Nodes) {
+    const bool SavedRecoverActive = g_recoverActive;
+    jmp_buf SavedJmpBuf;
+    std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
+
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      resolve(Node.get());
+    } else {
+      // See resetForRecovery()'s own doc comment: scope depth and
+      // FunctionNestingDepth_ can be left non-zero by a longjmp that
+      // skipped whatever enterScope()/exitScope() pairs or nesting-depth
+      // increments were mid-flight when the error fired.
+      resetForRecovery();
+    }
+    g_recoverActive = SavedRecoverActive;
+    std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
+  }
 }
 
 
