@@ -65,6 +65,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
     return nullptr;
   }
   std::string Name = IdentifierStr;
+  SourceLocation NameLoc = CurLoc;
   getNextToken();
 
   std::vector<std::string> TypeParams;
@@ -194,7 +195,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
     GlobalSymbolTable->RegisterType(Name, SType);
   }
 
-  return std::make_unique<StructDeclExprAST>(Loc, Name, Fields, TypeParams);
+  return std::make_unique<StructDeclExprAST>(Loc, Name, NameLoc, Fields, TypeParams);
 }
 
 // ParseEnumDecl - called when CurTok == TOK_ENUM.
@@ -658,7 +659,7 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
   }
   getNextToken(); // eat ';'
 
-  return std::make_unique<ExternFuncDeclExprAST>(ExternLoc, Name,
+  return std::make_unique<ExternFuncDeclExprAST>(ExternLoc, Name, NameLoc,
                                                  std::move(Params),
                                                  std::move(RetType),
                                                  IsVarArg,
@@ -796,6 +797,7 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
     return nullptr;
   }
   std::string FuncName = IdentifierStr;
+  SourceLocation NameLoc = CurLoc;
   getNextToken();
   std::string StructName = "";
   bool IsStaticMethodDecl = false;
@@ -807,6 +809,9 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
       LogErrorAt(CurLoc, "Expected method name after '.'");
       return nullptr;
     }
+    // Repoint NameLoc at the METHOD name specifically -- the more useful
+    // hover/rename target than the struct name captured above. See #230.
+    NameLoc = CurLoc;
     FuncName = StructName + "." + IdentifierStr;
     getNextToken();
   } else if (CurTok == TOK_SCOPE) {
@@ -970,7 +975,7 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
   // If CurTok == ';': external declaration (forward decl)
   if (CurTok == ';') {
     getNextToken(); // eat ';'
-    return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
+    return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, NameLoc, RetType, Params,
                                             nullptr, TypeParams,
                                             IsStaticMethodDecl);
   }
@@ -986,7 +991,7 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
 
 
 
-  return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, RetType, Params,
+  return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, NameLoc, RetType, Params,
                                           std::move(Body), TypeParams,
                                           IsStaticMethodDecl);
 }
@@ -1116,7 +1121,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
 
   if (CurTok == ';') {
     getNextToken(); // eat ';'
-    return std::make_unique<FuncDefExprAST>(OpLoc, FuncName, RetType, Params,
+    return std::make_unique<FuncDefExprAST>(OpLoc, FuncName, OpLoc, RetType, Params,
                                             nullptr, std::vector<std::string>{},
                                             /*IsStaticMethodDecl=*/false);
   }
@@ -1130,7 +1135,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
   if (!Body)
     return nullptr;
 
-  return std::make_unique<FuncDefExprAST>(OpLoc, FuncName, RetType, Params,
+  return std::make_unique<FuncDefExprAST>(OpLoc, FuncName, OpLoc, RetType, Params,
                                           std::move(Body), std::vector<std::string>{},
                                           /*IsStaticMethodDecl=*/false);
 }

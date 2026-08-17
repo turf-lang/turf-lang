@@ -132,6 +132,53 @@ void InitializePrecedence() {
   BinopPrecedence[TOK_POWER] = 60;
 }
 
+void InitializeCompilerGlobals() {
+  InitializeSymbolTable();
+  InitializePrecedence();
+}
+
+// See Parser.h for the doc comment -- moved here (non-static) from main.cpp
+// so Sandbox.cpp's own recovery passes can share this logic; see #228/#233.
+bool IsTopLevelBoundaryToken(int Tok) {
+  return Tok == TOK_EOF || Tok == ';' || Tok == TOK_FN || Tok == TOK_STRUCT ||
+         Tok == TOK_ENUM || Tok == TOK_MACHINE || Tok == TOK_EXTERN ||
+         Tok == TOK_EXPORT ||
+         Tok == TOK_OPERATOR || Tok == TOK_ERROR || Tok == TOK_IMPORT;
+}
+
+void SkipToNextTopLevelBoundary() {
+  if (CurTok == TOK_EOF) return;
+
+  // If the construct that just failed already consumed everything through
+  // its own natural boundary before rejecting the result (e.g.
+  // ParseLetStatement() eats a declaration's trailing ';' as part of
+  // building the node; ParseExportDecl() then rejects the shape of that
+  // already-complete node), CurTok is already sitting on the START of the
+  // next legitimate declaration. Forcing an extra token here -- the old,
+  // unconditional behavior below -- would eat that next declaration's own
+  // leading keyword, corrupting the parse of a statement that was never
+  // broken in the first place (confirmed: this desynced 'fn main(): int'
+  // into a bogus bare call 'main()' after fail_export_array_no_initializer's
+  // rejection, producing a second, unrelated "Expected ';'" error on top of
+  // the real one).
+  if (g_braceDepth == 0 && IsTopLevelBoundaryToken(CurTok)) return;
+
+  // Otherwise there's genuine leftover garbage from the failed construct --
+  // anywhere from a single bad token (e.g. an unsupported operator symbol,
+  // rejected before any '(' was even reached) to an entire un-consumed
+  // signature-and-body (e.g. 'operator -(a: Vec2): Vec2 { ... }' rejected
+  // for being unary, with its ': Vec2 { return a; }' tail never parsed).
+  // Skip forward, tracking nesting via g_braceDepth (maintained globally by
+  // getNextToken(), see its own doc comment), until back at depth 0 AND
+  // sitting on a real boundary -- always making at least one token of
+  // forward progress, since we already know from the guard above that we
+  // are NOT currently sitting on one.
+  do {
+    getNextToken();
+  } while (CurTok != TOK_EOF &&
+           (g_braceDepth > 0 || !IsTopLevelBoundaryToken(CurTok)));
+}
+
 // Returns the priority of the current operator. If it's not an operator (like a
 // number), returns -1.
 static int GetTokPrecedence() {
@@ -859,6 +906,14 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
  * @return std::unique_ptr<ExprAST> The fully constructed expression AST.
  */
 std::unique_ptr<ExprAST> ParseExpression() {
+  ParseRecursionGuard RecursionGuard;
+  if (RecursionGuard.tooDeep()) {
+    LogErrorAt(CurLoc,
+               "Expression nested too deeply to parse."
+               "\n  Hint: check for unbalanced '(', '[', or '{'.");
+    return nullptr;
+  }
+
   auto LHS = ParseUnary();
   if (!LHS)
     return nullptr;

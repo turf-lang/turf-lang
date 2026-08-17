@@ -75,6 +75,36 @@ std::vector<std::unique_ptr<ExprAST>> SwapParsedTopLevelASTs(std::vector<std::un
   return Old;
 }
 
+// Saved (ImportedFiles, ImportStack) pairs, pushed/popped alongside
+// SwapParsedTopLevelASTs() by anything that runs a SECOND, isolated parse
+// pass in the same process as an already-in-progress or already-finished
+// compile (Sandbox.cpp's temp-file validation passes today; a future
+// buffer-compile library entry point tomorrow -- see issue #233). Without
+// this, a sandboxed pass ran with the REAL compile's ImportedFiles cache
+// still warm: re-`import`ing a module the real compile had already fully
+// parsed silently returned an empty block for the SANDBOXED buffer too
+// (ParseFile()'s cache-hit fast path, `include/Parser.h`), even though that
+// import is genuinely new work for this isolated pass. ImportStack is
+// included for symmetry/safety even though it should always be empty at
+// push/pop time in practice -- see ClearParsedTopLevelASTs()'s doc comment.
+// A vector-of-pairs (not a single saved slot) so nested save/restore is
+// safe, matching SwapParsedTopLevelASTs' own move-in/move-out shape.
+static std::vector<std::pair<std::unordered_set<std::string>, std::vector<ImportStackFrame>>>
+    SavedImportCycleStates;
+
+void PushImportCycleState() {
+  SavedImportCycleStates.emplace_back(std::move(ImportedFiles), std::move(ImportStack));
+  ImportedFiles.clear();
+  ImportStack.clear();
+}
+
+void PopImportCycleState() {
+  auto &Saved = SavedImportCycleStates.back();
+  ImportedFiles = std::move(Saved.first);
+  ImportStack = std::move(Saved.second);
+  SavedImportCycleStates.pop_back();
+}
+
 void RecordParsedTopLevelAST(const ExprAST *AST) {
   if (AST) {
     ParsedTopLevelASTs.push_back(CloneExprAST(AST));
@@ -187,7 +217,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
 
   // Save current lexer state
   struct LexerStateGuard {
-    std::ifstream *SavedSourceFile;
+    std::istream *SavedSourceFile;
     int SavedLastChar, SavedCurTok, SavedCurLine, SavedCurCol;
     SourceLocation SavedCurLoc;
     std::string SavedFilename, SavedIdentifierStr, SavedStringVal;
@@ -412,6 +442,7 @@ IndexModuleDir(const std::string &Root, const char *SubdirName) {
 // differently.
 std::unique_ptr<ExprAST>
 ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
+                        SourceLocation NameLoc,
                         ImportMode Mode = ImportMode::Bare,
                         std::vector<ImportedSymbolRef> RequestedSymbols = {}) {
   // Search order:
@@ -488,7 +519,7 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
   if (!Block)
     return nullptr;
 
-  return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, ResolvedPath,
+  return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, NameLoc, ResolvedPath,
                                                 std::move(Block), Mode,
                                                 std::move(RequestedSymbols));
 }
@@ -561,7 +592,7 @@ std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc) {
       }
     }
 
-    auto AST = ParseModuleImportByName(Name, Loc);
+    auto AST = ParseModuleImportByName(Name, Loc, /*NameLoc=*/Loc);
     if (!AST) {
       llvm::report_fatal_error(
           llvm::StringRef(std::string("Internal error: prelude module '") +
@@ -586,6 +617,7 @@ std::unique_ptr<ExprAST> ParseImport() {
   // through this token-based path at all, see ParsePreludeImports()).
   // `string` (singular, the type keyword) doesn't need an entry here: the
   // actual module is `strings` (plural), a real TOK_IDENTIFIER, no collision.
+  SourceLocation NameLoc = CurLoc; // location of the module-name token itself -- see #230
   if (CurTok == TOK_IDENTIFIER) {
     ModuleName = IdentifierStr;
   } else if (CurTok == TOK_TYPE_INT) {
@@ -659,5 +691,5 @@ std::unique_ptr<ExprAST> ParseImport() {
     }
   }
 
-  return ParseModuleImportByName(ModuleName, Loc, Mode, std::move(RequestedSymbols));
+  return ParseModuleImportByName(ModuleName, Loc, NameLoc, Mode, std::move(RequestedSymbols));
 }

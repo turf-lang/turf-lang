@@ -111,6 +111,14 @@ std::unique_ptr<ExprAST> ParseIfExpr() {
 
 
 std::unique_ptr<ExprAST> ParseBlock() {
+  ParseRecursionGuard RecursionGuard;
+  if (RecursionGuard.tooDeep()) {
+    LogErrorAt(CurLoc,
+               "Block nested too deeply to parse."
+               "\n  Hint: check for unbalanced '{'.");
+    return nullptr;
+  }
+
   if (CurTok != '{') {
     LogErrorAt(CurLoc, "Expected '{' to open a block");
     return nullptr;
@@ -776,7 +784,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
       return nullptr;
     }
     getNextToken(); // eat ';'
-    return std::make_unique<VarDeclExprAST>(Loc, Name, Type, std::move(Init), IsImmutable, false);
+    return std::make_unique<VarDeclExprAST>(Loc, Name, NameLoc, Type, std::move(Init), IsImmutable, false);
   }
   getNextToken(); // eat '='
 
@@ -828,7 +836,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
     return nullptr;
   }
   getNextToken(); // eat ';'
-  return std::make_unique<VarDeclExprAST>(Loc, Name, Type, std::move(Init), IsImmutable, true);
+  return std::make_unique<VarDeclExprAST>(Loc, Name, NameLoc, Type, std::move(Init), IsImmutable, true);
 }
 
 

@@ -93,9 +93,8 @@ static bool runParseOnlyPass(const std::filesystem::path &sourcePath,
                              std::unique_ptr<ExprAST> &parsedASTOut) {
   const std::string savedSourceFilename = SourceFilename;
   auto savedSourceLines = SourceLines;
-  SourceFile->close();
-  SourceFile->open(sourcePath.string());
-  if (!SourceFile->is_open()) {
+  CloseSourceFile();
+  if (!OpenSourceFile(sourcePath.string())) {
     SourceLines = savedSourceLines;
     return false;
   }
@@ -105,6 +104,7 @@ static bool runParseOnlyPass(const std::filesystem::path &sourcePath,
   resetLexer();
   DiagnosticEngine::clearDiagnostics();
   auto savedASTs = SwapParsedTopLevelASTs({});
+  PushImportCycleState(); // see issue -- stale ImportedFiles cache across repeated compiles
 
   bool success = true;
   bool savedAIEnabled = g_AIEnabled;
@@ -112,51 +112,59 @@ static bool runParseOnlyPass(const std::filesystem::path &sourcePath,
 
   jmp_buf savedJmpBuf;
   std::memcpy(savedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
+  bool savedRecoverActive = g_recoverActive;
 
-  int jumpResult = setjmp(g_recoverJmp);
-  if (jumpResult == 0) {
-    g_recoverActive = true;
-    getNextToken();
-
-    while (CurTok != TOK_EOF) {
-      if (CurTok == ';') {
-        getNextToken();
-        continue;
-      }
-
-      auto AST = ParseExpression();
-      if (!AST) {
-        success = false;
-        break;
-      }
-
-      RecordParsedTopLevelAST(AST.get());
-      // NOTE: No linting here - will be done selectively via
-      // LintChangedNodesOnly
-
-      if (CurTok == ';') {
-        getNextToken();
-      }
+  // Per-statement recovery (see issue #228): setjmp() is re-armed inside the
+  // loop, once per top-level statement, exactly like main.cpp's own pre-pass
+  // loop -- so a syntax error in ONE statement resyncs via
+  // SkipToNextTopLevelBoundary() and keeps parsing the rest of the buffer,
+  // instead of a single setjmp() outside the whole loop (the old shape)
+  // unwinding straight past every remaining statement on the FIRST error.
+  // `success` still goes false on any failure (existing callers gate on
+  // it), but parsedASTOut below now accumulates every statement that DID
+  // parse successfully, not just whatever came before the first failure.
+  getNextToken();
+  while (CurTok != TOK_EOF) {
+    if (CurTok == ';') {
+      getNextToken();
+      continue;
     }
-  } else {
-    success = false;
-  }
 
-  g_recoverActive = false;
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      auto AST = ParseExpression();
+      if (AST) {
+        RecordParsedTopLevelAST(AST.get());
+        // NOTE: No linting here - will be done selectively via
+        // LintChangedNodesOnly
+        if (CurTok == ';') {
+          getNextToken();
+        }
+      } else {
+        success = false;
+        SkipToNextTopLevelBoundary();
+      }
+    } else {
+      success = false;
+      SkipToNextTopLevelBoundary();
+    }
+  }
+  g_recoverActive = savedRecoverActive;
   g_AIEnabled = savedAIEnabled;
 
   // Build the program AST from the cached top-level expressions
   parsedASTOut = BuildProgramASTFromCache();
 
-  SourceFile->close();
+  CloseSourceFile();
   SourceFilename = savedSourceFilename;
   SourceLines = savedSourceLines;
   SwapParsedTopLevelASTs(std::move(savedASTs));
+  PopImportCycleState();
   std::memcpy(g_recoverJmp, savedJmpBuf, sizeof(jmp_buf));
 
   // Restore the real source file and lexer state
   if (!SourceFilename.empty()) {
-    SourceFile->open(SourceFilename);
+    OpenSourceFile(SourceFilename);
     resetLexer();
   }
 
@@ -168,9 +176,8 @@ static bool runParseAndLintPass(const std::filesystem::path &sourcePath,
                                 std::unique_ptr<ExprAST> &parsedASTOut) {
   const std::string savedSourceFilename = SourceFilename;
   auto savedSourceLines = SourceLines;
-  SourceFile->close();
-  SourceFile->open(sourcePath.string());
-  if (!SourceFile->is_open()) {
+  CloseSourceFile();
+  if (!OpenSourceFile(sourcePath.string())) {
     SourceLines = savedSourceLines;
     return false;
   }
@@ -180,6 +187,7 @@ static bool runParseAndLintPass(const std::filesystem::path &sourcePath,
   resetLexer();
   DiagnosticEngine::clearDiagnostics();
   auto savedASTs = SwapParsedTopLevelASTs({});
+  PushImportCycleState(); // see issue -- stale ImportedFiles cache across repeated compiles
 
   bool success = true;
   bool savedAIEnabled = g_AIEnabled;
@@ -187,36 +195,36 @@ static bool runParseAndLintPass(const std::filesystem::path &sourcePath,
 
   jmp_buf savedJmpBuf;
   std::memcpy(savedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
+  bool savedRecoverActive = g_recoverActive;
 
-  int jumpResult = setjmp(g_recoverJmp);
-  if (jumpResult == 0) {
-    g_recoverActive = true;
-    getNextToken();
-
-    while (CurTok != TOK_EOF) {
-      if (CurTok == ';') {
-        getNextToken();
-        continue;
-      }
-
-      auto AST = ParseExpression();
-      if (!AST) {
-        success = false;
-        break;
-      }
-
-      RecordParsedTopLevelAST(AST.get());
-
-      LintExpression(AST.get());
-      if (CurTok == ';') {
-        getNextToken();
-      }
+  // Per-statement recovery -- see the matching comment in runParseOnlyPass()
+  // above and issue #228.
+  getNextToken();
+  while (CurTok != TOK_EOF) {
+    if (CurTok == ';') {
+      getNextToken();
+      continue;
     }
-  } else {
-    success = false;
-  }
 
-  g_recoverActive = false;
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      auto AST = ParseExpression();
+      if (AST) {
+        RecordParsedTopLevelAST(AST.get());
+        LintExpression(AST.get());
+        if (CurTok == ';') {
+          getNextToken();
+        }
+      } else {
+        success = false;
+        SkipToNextTopLevelBoundary();
+      }
+    } else {
+      success = false;
+      SkipToNextTopLevelBoundary();
+    }
+  }
+  g_recoverActive = savedRecoverActive;
   g_AIEnabled = savedAIEnabled;
 
   if (success && DiagnosticEngine::getDiagnosticCount() == 0) {
@@ -225,13 +233,14 @@ static bool runParseAndLintPass(const std::filesystem::path &sourcePath,
     parsedASTOut.reset();
   }
 
-  SourceFile->close();
+  CloseSourceFile();
   if (!savedSourceFilename.empty()) {
-    SourceFile->open(savedSourceFilename);
+    OpenSourceFile(savedSourceFilename);
   }
   SourceFilename = savedSourceFilename;
   SourceLines = savedSourceLines;
   SwapParsedTopLevelASTs(std::move(savedASTs));
+  PopImportCycleState();
   std::memcpy(g_recoverJmp, savedJmpBuf, sizeof(jmp_buf));
   resetLexer();
 
