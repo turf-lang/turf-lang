@@ -30,6 +30,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include <cstdlib>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <unordered_map>
@@ -138,42 +139,52 @@ BuildCircularImportChain(const std::vector<ImportStackFrame> &Stack,
 std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
                                    const std::string &ModuleName,
                                    SourceLocation ImportLoc) {
-  // Force TurfError::raise() to take its plain "print and exit" branch,
-  // never the longjmp-based recovery one, for the ENTIRE duration of
-  // parsing this file (including anything it transitively imports).
+  // NOTE (issue #242, history): this function used to force
+  // g_recoverActive = false unconditionally here, making any TurfError
+  // anywhere inside an imported module (at any nesting depth) call
+  // std::exit() directly instead of the normal longjmp-based recovery --
+  // because longjmp() never runs C++ destructors for stack objects between
+  // the jump and its setjmp() point, and a longjmp reaching all the way
+  // back out to some CALLER's distant setjmp (main.cpp's pre-pass loop,
+  // or any other embedder's own per-statement loop) would skip straight
+  // past THIS function's own LexerStateGuard/ImportStackGuard below,
+  // permanently leaving the global `SourceFile` pointer aimed at an
+  // already-destroyed local std::ifstream (this function's own
+  // `ImportFile`) -- confirmed at the time as a heap-corruption crash
+  // (`munmap_chunk(): invalid pointer`) the next time anything touched
+  // that dangling pointer. That was a real, necessary fix for the crash,
+  // but the exit() tradeoff meant a broken import always killed the whole
+  // process -- fatal for any tool embedding this compiler in-process
+  // (an LSP) rather than shelling out per compile.
   //
-  // main.cpp's pre-pass "parse all top-level declarations" loop wraps each
-  // top-level statement's parse in `g_recoverActive = true; if (setjmp(
-  // g_recoverJmp) == 0) { ParseExpression(); } else { SkipToNextTopLevel
-  // Boundary(); }` -- a deliberate mechanism to skip one broken top-level
-  // statement in the file actively being compiled and keep collecting
-  // errors from the rest of it. That's safe for an error raised directly
-  // in the main file's own statement (nothing but trivial scope guards sit
-  // between the raise() and the setjmp point), but NOT safe once a nested
-  // `import` is involved: longjmp() never runs C++ destructors for stack
-  // objects between the jump and its setjmp point, and ParseFile()'s own
-  // LexerStateGuard/ImportStackGuard below live exactly there. A
-  // CircularImportError (or ModuleNotFoundError, or any other TurfError)
-  // firing two or more import-levels deep would longjmp straight past
-  // those guards, permanently leaving the global `SourceFile` pointer
-  // aimed at an already-destroyed local std::ifstream (this function's own
-  // `ImportFile`, still "open" on the stack, never restored to whatever it
-  // pointed at before) -- confirmed live as a heap-corruption crash
-  // (`munmap_chunk(): invalid pointer`) far downstream, the next time
-  // ANYTHING touched that dangling pointer (main()'s own unrelated
-  // `SourceFile->close()` call during pre-pass cleanup). Forcing
-  // g_recoverActive false here means any hard error anywhere inside an
-  // imported module (at any nesting depth) instead calls std::exit()
-  // directly -- always safe, since exit() terminates immediately and never
-  // depends on the intermediate stack state a longjmp would corrupt. The
-  // tradeoff -- a broken import ends the whole compile instead of being
-  // "skipped" -- is the right one anyway: there's no useful way to skip
-  // past a broken dependency and keep compiling against it.
-  struct RecoveryGuard {
-    bool Previous;
-    RecoveryGuard() : Previous(g_recoverActive) { g_recoverActive = false; }
-    ~RecoveryGuard() { g_recoverActive = Previous; }
-  } RecovGuard;
+  // Fixed properly below by giving THIS ParseFile() invocation its own
+  // LOCAL recovery boundary (its own setjmp() point, armed right before
+  // the parse loop) instead of relying on some distant caller's. Since the
+  // jump target and LexerStateGuard/ImportStackGuard now live in the exact
+  // same function scope, a longjmp() triggered by anything during this
+  // file's own parsing -- or by a TurfError bubbling up through a
+  // TRANSITIVELY nested `import` (that nested ParseFile() call installs
+  // ITS OWN local recovery boundary the same way, so the jump never
+  // travels further than the innermost currently-parsing ParseFile()) --
+  // never needs to leave this function at all, so the guards' destructors
+  // run normally regardless of whether parsing this file succeeds,
+  // returns nullptr via an ordinary early return, or is caught by this
+  // function's own setjmp(). See the setjmp() call further down for where
+  // this pays off, and RecoveryBoundaryGuard just below for the g_recover*
+  // save/restore (so this doesn't corrupt whatever OUTER recovery scope --
+  // main.cpp's own loop, or any embedder's -- is already active around
+  // the `import` statement that triggered this call).
+  struct RecoveryBoundaryGuard {
+    bool PrevActive;
+    jmp_buf PrevJmpBuf;
+    RecoveryBoundaryGuard() : PrevActive(g_recoverActive) {
+      std::memcpy(PrevJmpBuf, g_recoverJmp, sizeof(jmp_buf));
+    }
+    ~RecoveryBoundaryGuard() {
+      g_recoverActive = PrevActive;
+      std::memcpy(g_recoverJmp, PrevJmpBuf, sizeof(jmp_buf));
+    }
+  } RecovBoundary;
 
   // Circular-import check FIRST, before the ImportedFiles cache check below:
   // a module still being parsed (on ImportStack) is a genuine cycle, not a
@@ -229,6 +240,14 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     // would snapshot the IMPORTING file's line text (whatever line happened
     // to share the same line number) instead of the module's real line.
     std::vector<std::string> SavedSourceLines;
+    // g_braceDepth (issue #242): previously never needed saving/restoring
+    // here because a failed import always called std::exit() immediately --
+    // whatever this file's own parsing left g_braceDepth at, the process
+    // was already dead. Now that a failed import returns cleanly instead
+    // (see RecoveryBoundaryGuard above), the IMPORTING file's own
+    // subsequent parsing must not inherit a bracket-depth counter left
+    // mid-count by this file's abandoned parse.
+    int SavedBraceDepth;
 
     LexerStateGuard() {
       SavedSourceFile = SourceFile;
@@ -244,6 +263,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       SavedIdentifierStr = IdentifierStr;
       SavedStringVal = StringVal;
       SavedSourceLines = SourceLines;
+      SavedBraceDepth = g_braceDepth;
     }
     ~LexerStateGuard() {
       SourceFile = SavedSourceFile;
@@ -259,6 +279,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       IdentifierStr = SavedIdentifierStr;
       StringVal = SavedStringVal;
       SourceLines = SavedSourceLines;
+      g_braceDepth = SavedBraceDepth;
     }
   } LGuard;
 
@@ -286,6 +307,19 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   // LexerStateGuard's restore below, so Resolver/TypeChecker/Codegen
   // diagnostics about content inside THIS module can still find their line.
   AllSourceLines[Path] = SourceLines;
+
+  // Arm this function's own local recovery boundary (see
+  // RecoveryBoundaryGuard's doc comment above for the full rationale): any
+  // TurfError raised from here on -- directly in this file's own parsing,
+  // or bubbling up through a transitively nested `import` -- longjmps back
+  // to this exact setjmp() call, still well within RecovBoundary/IGuard/
+  // LGuard's scope, so their destructors run normally once this function
+  // returns (either the ordinary success path below, an ordinary early
+  // `return nullptr;` inside the loop, or the `else` branch here).
+  g_recoverActive = true;
+  if (setjmp(g_recoverJmp) != 0) {
+    return nullptr;
+  }
 
   getNextToken();
 

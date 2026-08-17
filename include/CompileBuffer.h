@@ -99,14 +99,18 @@ struct CompileBufferResult {
 // correctly in the returned Diagnostics list (each Diag's Filename field) as
 // distinct from any imported module's.
 //
-// A syntax error inside an IMPORTED module (not the buffer itself) still
-// terminates the whole process via std::exit() rather than being reported
-// as an ordinary diagnostic -- a deliberate, pre-existing tradeoff
-// documented on ParseFile()'s RecoveryGuard (src/ParserModule.cpp) to avoid
-// a longjmp-past-destructors heap corruption crash. This is a real,
-// currently-unresolved limitation for a host process embedding this
-// function directly (rather than shelling out to a subprocess per call) --
-// tracked separately, not fixed by this function.
+// A syntax error inside an IMPORTED module (not the buffer itself) is
+// reported as an ordinary diagnostic here (issue #242), not a process-
+// killing std::exit() -- ParseFile() (src/ParserModule.cpp) now arms its
+// own local recovery boundary (its own setjmp(), in the same function
+// scope as its LexerStateGuard/ImportStackGuard) instead of relying on a
+// distant caller's, so a longjmp triggered anywhere inside a nested
+// import chain never needs to skip past those guards' destructors -- the
+// original reason std::exit() was used at all. Verified via a standalone
+// smoke test (a 3-level-deep import chain with a broken innermost module)
+// under AddressSanitizer: no corruption, the process survives, and a
+// SECOND, unrelated CompileBufferBestEffort() call in the same process
+// still succeeds normally afterward.
 CompileBufferResult CompileBufferBestEffort(const std::string &Source,
                                              const std::string &AsIfPath);
 
