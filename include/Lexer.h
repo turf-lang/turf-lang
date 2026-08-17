@@ -132,17 +132,25 @@ extern bool g_protoOnlyPass; // true during sub-pass 3a: emit prototypes only
 extern int g_braceDepth;
 
 // The recursive-descent parser has no built-in recursion-depth limit --
-// ParseExpression()/ParseUnary()/ParsePrimary()/ParseBlock() etc. are
-// ordinary unbounded C++ recursion. Deeply nested malformed input (a long
-// run of unmatched '(' or '{', exactly what a half-typed expression in an
-// LSP's live edit buffer produces constantly while the user is still
-// typing) risks a genuine C++ stack overflow -- a hard process crash, not
-// something a diagnostic or setjmp/longjmp recovery can catch. Guarded at
-// the two true recursive-descent entry points, ParseExpression() (covers
-// arbitrarily nested parens/calls/unary chains) and ParseBlock() (covers
-// arbitrarily nested '{ { { ... } } }' blocks) -- together these cover
-// every path deep nesting can take through the grammar, since every other
-// recursive parse function is reached through one or the other.
+// ParseExpression()/ParseUnary()/ParsePrimary()/ParseBlock()/ParseType()
+// etc. are ordinary unbounded C++ recursion. Deeply nested malformed input
+// (a long run of unmatched '(' or '{', exactly what a half-typed
+// expression in an LSP's live edit buffer produces constantly while the
+// user is still typing) risks a genuine C++ stack overflow -- a hard
+// process crash, not something a diagnostic or setjmp/longjmp recovery can
+// catch. Guarded at four entry points: ParseExpression() and ParseBlock()
+// (the two top-level recursive-descent entry points reached from
+// statement/declaration parsing), plus ParseUnary() and ParseType()
+// (each recurses directly into ITSELF for chained prefix operators
+// (`!!!!x`) and nested generic/error-union types (`list<list<...>>`,
+// `!!T`) respectively, WITHOUT going back through ParseExpression() in
+// between -- confirmed via code review to be completely unbounded even
+// after the ParseExpression()/ParseBlock() guards existed, since neither
+// of those is re-entered by this kind of direct self-recursion). Every
+// OTHER recursive parse function either goes through one of these four on
+// its way to recursing, or is bounded by the token stream itself (e.g. a
+// parameter list can only be as long as the tokens the user actually
+// typed) rather than by unbounded self-recursion.
 constexpr int MaxParseRecursionDepth = 2000;
 extern int g_parseRecursionDepth;
 

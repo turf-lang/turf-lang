@@ -212,7 +212,22 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     return nullptr;
   }
 
-  ImportedFiles.insert(Path);
+  // NOTE (issue #242 follow-up, found via code review): NOT inserted into
+  // ImportedFiles here, before parsing is even attempted -- that used to
+  // mean a module that fails to parse was still marked "fully imported,"
+  // so a SECOND, unrelated `import` of the same broken path (e.g. two
+  // different files both importing it) hit the ImportedFiles cache check
+  // above and silently returned an empty-but-"successful" block instead of
+  // re-attempting the parse and re-reporting the failure. Unreachable
+  // before #242 (any import failure called std::exit() immediately, so a
+  // second import attempt never got a chance to run); newly reachable now
+  // that a broken import returns cleanly instead. Not needed here for
+  // cycle-safety either -- a genuine self-referencing import is already
+  // caught by the ImportStack check above (IGuard below pushes onto it
+  // BEFORE the parse loop starts), which is a completely separate
+  // structure from this "fully parsed" cache -- see ImportStack's own doc
+  // comment. Inserted instead at the bottom of this function, only once
+  // parsing has genuinely succeeded.
 
   // Push this module onto the in-progress stack for the duration of parsing
   // its body; popped via RAII (including on every early-return path below,
@@ -401,6 +416,11 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       return nullptr;
     }
   }
+
+  // Only marked "fully imported" on this definite success path -- see the
+  // NOTE above (issue #242 follow-up) for why this moved here instead of
+  // being inserted eagerly before the parse was even attempted.
+  ImportedFiles.insert(Path);
 
   return std::make_unique<BlockExprAST>(std::move(Exprs));
 }

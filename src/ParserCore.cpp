@@ -226,6 +226,21 @@ static int GetTokPrecedence() {
 // Trailing [N] brackets are consumed here, making array types fully
 // first-class. Returns nullptr on failure.
 TurfTypePtr ParseType() {
+  // Recurses into itself directly (generic type args, `!T` error unions,
+  // pointer types) without ever going back through ParseExpression() --
+  // needs its OWN recursion guard rather than relying on ParseExpression's
+  // (found via code review: a deeply nested generic type,
+  // `list<list<list<...>>>`, recurses this function directly and was
+  // completely unbounded even after the ParseExpression()/ParseBlock()
+  // guards existed). See ParseRecursionGuard's doc comment in Lexer.h.
+  ParseRecursionGuard RecursionGuard;
+  if (RecursionGuard.tooDeep()) {
+    LogErrorAt(CurLoc,
+               "Type nested too deeply to parse."
+               "\n  Hint: check for unbalanced '<', '[', or '!'.");
+    return nullptr;
+  }
+
   // `!T` -- a fallible/error-union type (docs/planning/Errors.md): T on
   // success, or any declared `error` type value on failure. Unambiguous with
   // the unary logical-not operator ('!' desugars to `x != true` -- see
@@ -1049,6 +1064,22 @@ std::unique_ptr<ExprAST> Parse() {
 
 
 std::unique_ptr<ExprAST> ParseUnary() {
+  // Recurses into itself directly for chained prefix operators (`!!!!x`,
+  // `~~~x`, `---x`) without ever going back through ParseExpression() --
+  // needs its OWN recursion guard rather than relying on ParseExpression's
+  // (found via code review: `!` repeated ~100000 times recurses this
+  // function that many C++ stack frames deep, completely unbounded even
+  // after the ParseExpression()/ParseBlock() guards existed -- exactly the
+  // uncatchable-stack-overflow failure class those guards were meant to
+  // close). See ParseRecursionGuard's doc comment in Lexer.h.
+  ParseRecursionGuard RecursionGuard;
+  if (RecursionGuard.tooDeep()) {
+    LogErrorAt(CurLoc,
+               "Expression nested too deeply to parse."
+               "\n  Hint: check for a runaway chain of unary operators.");
+    return nullptr;
+  }
+
   if (CurTok == '!') {
     SourceLocation Loc = CurLoc;
     getNextToken(); // consume '!'

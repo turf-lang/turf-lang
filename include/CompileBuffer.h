@@ -116,7 +116,21 @@ CompileBufferResult CompileBufferBestEffort(const std::string &Source,
 
 // Returns every unqualified name visible in scope at (Line, Col) -- see
 // issue #244 (no position-indexed scope-query API existed for completions/
-// autocomplete tooling). Parses and resolves `Source` exactly like
+// autocomplete tooling).
+//
+// Line/Col are 1-BASED (found ambiguous via code review -- worth stating
+// explicitly since this is exactly the kind of thing an LSP client gets
+// wrong): they match SourceLocation's own convention everywhere else in
+// this codebase (gettok()'s CurLine starts at 1, per Lexer.cpp), NOT the
+// 0-based line numbers the Language Server Protocol itself uses for
+// editor cursor positions. A caller wiring this up to a real
+// textDocument/completion request must convert the LSP position's line
+// (and, per LSP's UTF-16-code-unit column convention vs. this codebase's
+// byte/character column -- see SourceLocation's own Col semantics, plain
+// character count -- possibly the column too, for non-ASCII lines) before
+// calling this function.
+//
+// Parses and resolves `Source` exactly like
 // CompileBufferBestEffort() (per-statement recovery, no codegen), but
 // instead of returning the whole AST, hooks Resolver's
 // ScopeSnapshotCallback (Resolver.h) to find the LATEST AST node visited
