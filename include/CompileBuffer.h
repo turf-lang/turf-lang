@@ -105,4 +105,29 @@ struct CompileBufferResult {
 CompileBufferResult CompileBufferBestEffort(const std::string &Source,
                                              const std::string &AsIfPath);
 
+// Returns every unqualified name visible in scope at (Line, Col) -- see
+// issue #244 (no position-indexed scope-query API existed for completions/
+// autocomplete tooling). Parses and resolves `Source` exactly like
+// CompileBufferBestEffort() (per-statement recovery, no codegen), but
+// instead of returning the whole AST, hooks Resolver's
+// ScopeSnapshotCallback (Resolver.h) to find the LATEST AST node visited
+// (in Pass-2 walk order) whose own start position is still at-or-before
+// (Line, Col), and returns the names visible at exactly that point.
+//
+// This is a heuristic, not a precise lexical-scope query: "latest node in
+// walk order" tracks source order for the common top-to-bottom case, but
+// isn't a span-containment test (a node's END position isn't reliably
+// known for every node kind yet -- see issue #243), and a handful of node
+// kinds (NumberExprAST/BoolExprAST/CharExprAST/StringExprAST/BlockExprAST)
+// carry no location at all and are silently skipped when picking the
+// "latest" node. Good enough for "what's visible around line L" today;
+// not a substitute for a real per-token span index if one is added later.
+//
+// Returns an empty vector if (Line, Col) is before any resolvable node
+// (e.g. inside/before the very first statement) or if nothing in the
+// buffer parsed far enough to reach Pass 2 at all.
+std::vector<std::string> GetVisibleNamesAtPosition(const std::string &Source,
+                                                    const std::string &AsIfPath,
+                                                    int Line, int Col);
+
 #endif
