@@ -50,6 +50,7 @@
 #include "ASTVisitor.h"
 #include "ResolverSymbolTable.h"
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -201,7 +202,41 @@ public:
   /// Read-only access to the symbol table (e.g. for unit tests).
   const ResolverSymbolTable &symbolTable() const { return SymTable_; }
 
+  /**
+   * @brief Optional per-node scope-visibility snapshot hook -- see issue
+   *        #244 (no position-indexed scope-query API existed for
+   *        completions/autocomplete tooling).
+   *
+   * When set, fired once for every node the Pass-2 walk is ABOUT to visit
+   * (before that node's own declarations, e.g. its own VarDeclExprAST
+   * name, become visible), passing the node itself and every name visible
+   * in scope at that exact point (SymTable_.getAllVisibleNames() --
+   * unqualified names only, no kind/type metadata; see that method's own
+   * doc comment for what it already covers).
+   *
+   * Fires from the Resolver's single existing child-dispatch chokepoints
+   * (visitChild() below, and resolve() for top-level nodes) rather than
+   * needing a callback added to every individual visitXXX() method, so
+   * this covers the ENTIRE Pass-2 walk (every node, not just a hand-picked
+   * subset) with no change to the traversal logic itself. Not fired during
+   * Pass 1 (hoistTopLevel) -- hoisting doesn't visit function/block
+   * bodies, so there's nothing position-relevant to snapshot there.
+   *
+   * A caller wanting "what's visible at position (line, col)" builds this
+   * into a position -> names index themselves (see
+   * GetVisibleNamesAtPosition() in CompileBuffer.h for a ready-made
+   * implementation) -- the Resolver itself stays storage-agnostic and has
+   * zero overhead when this isn't set.
+   */
+  using ScopeSnapshotCallback =
+      std::function<void(const ExprAST &Node,
+                         const std::vector<std::string> &VisibleNames)>;
+  void setScopeSnapshotCallback(ScopeSnapshotCallback CB) {
+    ScopeSnapshotCB_ = std::move(CB);
+  }
+
 private:
+  ScopeSnapshotCallback ScopeSnapshotCB_;
   ResolverSymbolTable SymTable_;
   int FunctionNestingDepth_ = 0;
   std::vector<std::string> ModuleStack_;
@@ -344,16 +379,22 @@ private:
   void hoistExportedConstant(const VarDeclExprAST &Var,
                              const std::string &ModuleName);
 
-  /// Dispatch to @p Node if non-null (no-op otherwise).
+  /// Dispatch to @p Node if non-null (no-op otherwise). The single shared
+  /// chokepoint EVERY Pass-2 child dispatch goes through -- see
+  /// ScopeSnapshotCallback's doc comment above for why that makes this the
+  /// right (and only) place to fire it.
   void visitChild(ExprAST *Node) {
-    if (Node)
-      Node->accept(*this);
+    if (!Node)
+      return;
+    if (ScopeSnapshotCB_)
+      ScopeSnapshotCB_(*Node, SymTable_.getAllVisibleNames());
+    Node->accept(*this);
   }
 
   /// Convenience: dispatch a const child.
   void visitChild(const ExprAST *Node) {
     if (Node)
-      const_cast<ExprAST *>(Node)->accept(*this);
+      visitChild(const_cast<ExprAST *>(Node));
   }
 };
 

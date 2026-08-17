@@ -30,8 +30,16 @@
 // ─── Public entry points ──────────────────────────────────────────────────────
 
 void Resolver::resolve(ExprAST *Node) {
-  if (Node)
-    Node->accept(*this);
+  if (!Node)
+    return;
+  // Top-level nodes are dispatched directly here rather than through
+  // visitChild() (there is no "parent" child-dispatch call for them to go
+  // through) -- fire the same scope-snapshot hook here too, so it covers
+  // top-level declarations as well as everything nested under them. See
+  // ScopeSnapshotCallback's doc comment (Resolver.h) and issue #244.
+  if (ScopeSnapshotCB_)
+    ScopeSnapshotCB_(*Node, SymTable_.getAllVisibleNames());
+  Node->accept(*this);
 }
 
 
