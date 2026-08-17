@@ -147,6 +147,33 @@ bool IsTopLevelBoundaryToken(int Tok) {
 }
 
 void SkipToNextTopLevelBoundary() {
+  // Every call site of this function is a TOP-LEVEL per-statement recovery
+  // loop (main.cpp's pre-pass/main-pass, Sandbox.cpp's two incremental
+  // parse passes, CompileBufferBestEffort()) -- i.e. this is only ever
+  // invoked at a point that logically SHOULD be top-level depth 0, even
+  // when the ACTUAL g_braceDepth reading is wrong. It reads wrong whenever
+  // the just-failed statement opened a '{'/'('/'[' it never got to close
+  // before the parse bailed out (e.g. `fn broken(: int {` -- the '(' is
+  // incremented, then the parse fails immediately on the next token,
+  // before any ')' is ever seen) -- confirmed live: without this reset,
+  // that permanent +1 offset makes the do-while below never see depth
+  // return to 0 again until EOF, silently swallowing every remaining
+  // top-level declaration in the file as "still skipping," not just the
+  // one broken statement (issue #245).
+  //
+  // Resetting to 0 here is safe for the OTHER, already-correct case too
+  // (a genuinely nested, not-yet-parsed tail that WILL close naturally,
+  // e.g. 'operator -(a: Vec2): Vec2 { ... }' rejected for being unary,
+  // with its ': Vec2 { return a; }' tail never parsed): by the time that
+  // kind of failure reaches this function, the failed construct's own
+  // brackets are already balanced (the arity check happens right after
+  // the already-fully-matched parameter list), so g_braceDepth is already
+  // 0 -- this reset is a no-op there, and the do-while below still
+  // correctly walks forward through the real, still-untouched '{'...'}'
+  // body by tracking depth incrementally from this point on, exactly as
+  // before.
+  g_braceDepth = 0;
+
   if (CurTok == TOK_EOF) return;
 
   // If the construct that just failed already consumed everything through
