@@ -134,6 +134,7 @@ add_library(turfcore STATIC
   src/CodegenFunc.cpp
   src/CodegenArray.cpp
   src/CodegenStruct.cpp
+  src/CompileBuffer.cpp
   src/Lexer.cpp
   src/Lint.cpp
   src/ParserCore.cpp
