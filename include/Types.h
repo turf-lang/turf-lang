@@ -43,6 +43,7 @@
 #include <cassert>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -104,6 +105,7 @@ public:
 
   /// True if this type is an `TurfEnumType`.
   virtual bool isEnum() const { return false; }
+  virtual bool isMachine() const { return false; }
 
   /// True if this type is a `FuncType` (a function VALUE's type, e.g. the
   /// `fn(int): int` in `mutable f: fn(int): int = double_it;` -- distinct
@@ -542,6 +544,42 @@ public:
 
     std::string getMangledName() const override {
         return Name_ + "_enum_" + UnderlyingType_->getMangledName();
+    }
+};
+
+// ─── TurfMachineType ─────────────────────────────────────────────────────────
+
+// A `machine` declaration's type: an enum (states = variants, same positional
+// ordinals) plus a compiler-checked transition graph. Subclasses TurfEnumType
+// rather than duplicating its variant/ordinal machinery -- this is the design
+// spine of the whole `machine` feature: because a TurfMachineType IS-A
+// TurfEnumType, `MachineName::State` access, `compare`/`matches`
+// exhaustiveness checking, and Codegen's "inline the variant's ordinal as a
+// constant at every use site" all work completely unchanged, with zero new
+// code anywhere in those paths (see ResolverCall.cpp's visitScopeAccess(),
+// TypeCheckerExpr.cpp's visitCompare(), CodegenStruct.cpp's
+// ScopeAccessExprAST::codegen() -- all three only ever check
+// isEnum()/dynamic_cast<TurfEnumType*>, both of which a TurfMachineType
+// satisfies for free). Only the transition-edge data below is new.
+class TurfMachineType : public TurfEnumType {
+    // Adjacency keyed by STATE NAME (not ordinal) -- checked directly against
+    // a ScopeAccessExprAST's variant name (a string) at every `.transition()`
+    // call site with no extra ordinal lookup, and machine state counts are
+    // always small enough that this isn't a performance concern.
+    std::map<std::string, std::set<std::string>> Edges_; // From -> {To, To, ...}
+
+public:
+    TurfMachineType(std::string Name, std::vector<std::string> States,
+                    std::map<std::string, std::set<std::string>> Edges);
+
+    bool isMachine() const override { return true; }
+    bool hasEdge(const std::string &From, const std::string &To) const;
+    const std::map<std::string, std::set<std::string>> &getEdges() const {
+        return Edges_;
+    }
+
+    std::string getMangledName() const override {
+        return getName() + "_machine";
     }
 };
 

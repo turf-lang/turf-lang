@@ -391,6 +391,28 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
     return;
   }
 
+  // Hoist `machine` declarations: register the name/states/edges through the
+  // SAME registerEnumType() enums use (a TurfMachineType IS-A TurfEnumType,
+  // see its doc comment in include/Types.h) -- this one decision is what
+  // lets MachineName::State access, `compare`/`matches` exhaustiveness, and
+  // Codegen's constant-inlining all work on a machine subject with zero
+  // further code anywhere in those paths.
+  if (const auto *Machine = dynamic_cast<const MachineDeclExprAST *>(Node)) {
+    std::map<std::string, std::set<std::string>> Edges;
+    for (const auto &E : Machine->getEdges())
+      Edges[E.From].insert(E.To);
+    auto MT = std::make_shared<TurfMachineType>(Machine->getName(),
+                                                Machine->getStates(), Edges);
+    SourceLocation Loc = Machine->getLoc();
+    if (auto PrevLoc = SymTable_.registerEnumType(
+            Machine->getName(), {Loc.Line, Loc.Col}, MT)) {
+      DuplicateTypeNameError(Loc, Machine->getName(), "state machine",
+                             {PrevLoc->Line, PrevLoc->Col})
+          .raise();
+    }
+    return;
+  }
+
   // Hoist `error` type declarations (docs/planning/Errors.md): register the
   // name and variants so NamedType/ScopeAccess references resolve in Pass 2.
   if (const auto *ErrDecl = dynamic_cast<const ErrorDeclExprAST *>(Node)) {
@@ -499,6 +521,24 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
       if (auto PrevLoc = SymTable_.registerEnumType(
               Enum->getName(), {Loc.Line, Loc.Col}, ET, ModuleName)) {
         DuplicateTypeNameError(Loc, Enum->getName(), "enum",
+                               {PrevLoc->Line, PrevLoc->Col})
+            .raise();
+      }
+    } else if (const auto *Machine =
+                   dynamic_cast<const MachineDeclExprAST *>(Expr.get())) {
+      // Hoisted here too, not just in hoistTopLevel() -- the enum branch
+      // just above was ONCE missing from this function entirely (see its own
+      // comment), silently breaking any enum declared inside an imported
+      // module's body. Don't repeat that gap for `machine` declarations.
+      std::map<std::string, std::set<std::string>> Edges;
+      for (const auto &E : Machine->getEdges())
+        Edges[E.From].insert(E.To);
+      auto MT = std::make_shared<TurfMachineType>(
+          Machine->getName(), Machine->getStates(), Edges);
+      SourceLocation Loc = Machine->getLoc();
+      if (auto PrevLoc = SymTable_.registerEnumType(
+              Machine->getName(), {Loc.Line, Loc.Col}, MT, ModuleName)) {
+        DuplicateTypeNameError(Loc, Machine->getName(), "state machine",
                                {PrevLoc->Line, PrevLoc->Col})
             .raise();
       }

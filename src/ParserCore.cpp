@@ -709,6 +709,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_ENUM:
     return ParseEnumDecl();
 
+  case TOK_MACHINE:
+    return ParseMachineDecl();
+
   case TOK_ERROR:
     return ParseErrorDecl();
 

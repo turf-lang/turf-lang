@@ -1,0 +1,38 @@
+// Test: machine declarations reuse the enum machinery for free -- ::-access,
+// equality, ordinals, and COUNT should all "just work" with zero machine-
+// specific code anywhere in the Resolver/TypeChecker/Codegen ::/compare
+// paths (TurfMachineType IS-A TurfEnumType, see include/Types.h).
+
+import test;
+
+machine ConnectionState {
+    Idle -> Connecting,
+    Connecting -> Connected,
+    Connecting -> Failed,
+    Connected -> Closing,
+    Closing -> Idle,
+}
+
+fn main(): int {
+    immut idle: ConnectionState = ConnectionState::Idle;
+    test::assert((idle to int) == 0, "Idle should have ordinal 0");
+
+    immut connecting: ConnectionState = ConnectionState::Connecting;
+    test::assert((connecting to int) == 1, "Connecting should have ordinal 1");
+
+    immut connected: ConnectionState = ConnectionState::Connected;
+    test::assert((connected to int) == 2, "Connected should have ordinal 2");
+
+    immut failed: ConnectionState = ConnectionState::Failed;
+    test::assert((failed to int) == 3, "Failed should have ordinal 3");
+
+    immut closing: ConnectionState = ConnectionState::Closing;
+    test::assert((closing to int) == 4, "Closing should have ordinal 4");
+
+    test::assert(idle == ConnectionState::Idle, "Idle should equal itself");
+    test::assert(idle != connecting, "Idle should not equal Connecting");
+
+    test::assert(ConnectionState::COUNT == 5, "ConnectionState should have 5 states");
+
+    return 0;
+}

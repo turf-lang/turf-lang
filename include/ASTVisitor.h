@@ -55,6 +55,7 @@ class ArrayLiteralExprAST;
 class ArrayAccessExprAST;
 class FieldAccessExprAST;
 class EnumDeclExprAST;
+class MachineDeclExprAST;
 class ScopeAccessExprAST;
 class ErrorDeclExprAST;
 class RecoverExprAST;
@@ -134,6 +135,7 @@ public:
   // ── Structs & Field access ────────────────────────────────────────────────
   virtual void visitFieldAccess(FieldAccessExprAST &Node) {}
   virtual void visitEnumDecl(EnumDeclExprAST &Node) {}
+  virtual void visitMachineDecl(MachineDeclExprAST &Node) {}
   virtual void visitScopeAccess(ScopeAccessExprAST &Node) {}
   virtual void visitErrorDecl(ErrorDeclExprAST &Node) {}
   virtual void visitRecoverExpr(RecoverExprAST &Node) {}

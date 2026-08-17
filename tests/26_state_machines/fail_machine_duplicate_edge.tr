@@ -1,0 +1,12 @@
+// Test: the same transition edge declared twice in one machine block is a
+// parse-time error, mirroring ParseEnumDecl()'s duplicate-variant check.
+
+machine ConnectionState {
+    Idle -> Connecting,
+    Connecting -> Connected,
+    Idle -> Connecting,
+}
+
+fn main(): int {
+    return 0;
+}

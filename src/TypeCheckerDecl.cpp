@@ -110,6 +110,15 @@ void TypeChecker::visitEnumDecl(EnumDeclExprAST &Node) {
 }
 
 
+void TypeChecker::visitMachineDecl(MachineDeclExprAST &Node) {
+  // Declaration itself has no value-type, mirroring visitEnumDecl -- all the
+  // real per-use typing happens at MachineName::State access sites, which
+  // already goes through the ordinary enum ScopeAccess path unchanged (see
+  // TurfMachineType's doc comment in include/Types.h).
+  setType(&Node, TurfVoid());
+}
+
+
 void TypeChecker::visitErrorDecl(ErrorDeclExprAST &Node) {
   // Declaration itself has no value-type, mirroring visitEnumDecl/
   // visitStructDecl.

@@ -270,7 +270,8 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       continue;
     }
 
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_AT ||
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+        CurTok == TOK_MACHINE || CurTok == TOK_AT ||
         CurTok == TOK_EXTERN || CurTok == TOK_EXPORT || CurTok == TOK_OPERATOR ||
         CurTok == TOK_ERROR) {
       auto Expr = ParseExpression();

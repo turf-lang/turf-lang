@@ -1,0 +1,20 @@
+// RUNTIME_ABORT_EXPECTED
+// Test: an unnarrowed .transition() call whose actual runtime state has no
+// declared edge to the target must compile cleanly (this is outside any
+// compare arm, so TypeChecker has no static proof either way) and then
+// abort at runtime via Codegen's switch+CodegenPanic() guard.
+
+machine ConnectionState {
+    Idle -> Connecting,
+    Connecting -> Connected,
+    Connecting -> Failed,
+    Connected -> Closing,
+    Closing -> Idle,
+}
+
+fn main(): int {
+    mut conn: ConnectionState = ConnectionState::Idle;
+    // Idle has no declared edge straight to Closing -- must abort at runtime.
+    conn.transition(ConnectionState::Closing);
+    return 0;
+}

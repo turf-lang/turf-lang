@@ -1,0 +1,31 @@
+// Test: a plain (non-compare-arm) .transition() call, outside any narrowed
+// context, is runtime-guarded via a switch over the current value -- this
+// is the happy path where the actual runtime state DOES have a declared
+// edge to the target, so the guard falls through to the store with no panic.
+
+import test;
+
+machine ConnectionState {
+    Idle -> Connecting,
+    Connecting -> Connected,
+    Connecting -> Failed,
+    Connected -> Closing,
+    Closing -> Idle,
+}
+
+fn main(): int {
+    mut conn: ConnectionState = ConnectionState::Idle;
+    conn.transition(ConnectionState::Connecting);
+    test::assert(conn == ConnectionState::Connecting,
+                "conn should now be Connecting");
+
+    conn.transition(ConnectionState::Connected);
+    test::assert(conn == ConnectionState::Connected,
+                "conn should now be Connected");
+
+    conn.transition(ConnectionState::Closing);
+    test::assert(conn == ConnectionState::Closing,
+                "conn should now be Closing");
+
+    return 0;
+}

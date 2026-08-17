@@ -348,7 +348,8 @@ static int linkObject(const std::string &ObjFile,
 // consumed, looping forever on the very same '@'.
 static bool IsTopLevelBoundaryToken(int Tok) {
   return Tok == TOK_EOF || Tok == ';' || Tok == TOK_FN || Tok == TOK_STRUCT ||
-         Tok == TOK_ENUM || Tok == TOK_EXTERN || Tok == TOK_EXPORT ||
+         Tok == TOK_ENUM || Tok == TOK_MACHINE || Tok == TOK_EXTERN ||
+         Tok == TOK_EXPORT ||
          Tok == TOK_OPERATOR || Tok == TOK_ERROR || Tok == TOK_IMPORT;
 }
 
@@ -478,6 +479,7 @@ int main(int argc, char **argv) {
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') { getNextToken(); continue; }
         if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+            CurTok == TOK_MACHINE ||
             CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
             CurTok == TOK_OPERATOR || CurTok == TOK_ERROR) {
           g_recoverActive = true;
@@ -757,6 +759,7 @@ int main(int argc, char **argv) {
     // included for the same reason -- it's a genuine top-level declaration,
     // not a statement, and needs the exact same hoist-then-lint treatment.
     if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+        CurTok == TOK_MACHINE ||
         CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
         CurTok == TOK_OPERATOR || CurTok == TOK_ERROR) {
       g_recoverActive = true;

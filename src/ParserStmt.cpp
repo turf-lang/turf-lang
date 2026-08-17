@@ -149,7 +149,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
       continue;
     }
     if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
-        CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+        CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_MACHINE ||
         CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
       auto Expr = ParseExpression();
       if (!Expr) return nullptr;
@@ -510,7 +510,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
           continue;
         }
         if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
-            CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+            CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_MACHINE ||
             CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
           auto E = ParseExpression();
           if (!E) return nullptr;
@@ -648,7 +648,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         continue;
       }
       if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
-          CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+          CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_MACHINE ||
           CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
         auto E = ParseExpression();
         if (!E) return nullptr;

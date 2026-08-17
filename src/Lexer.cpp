@@ -105,6 +105,7 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"sizeof", TOK_SIZEOF},
                                        {"import", TOK_IMPORT},
                                        {"enum", TOK_ENUM},
+                                       {"machine", TOK_MACHINE},
 
                                        {"null", TOK_NULL},
                                        {"mutable", TOK_MUTABLE},
@@ -859,6 +860,12 @@ int gettok() {
       LastChar = SourceFile->get();
       CurCol++;
       return TOK_MINUS_ASSIGN;
+    }
+
+    if (LastChar == '>') {
+      LastChar = SourceFile->get();
+      CurCol++;
+      return TOK_ARROW;
     }
 
     return '-';

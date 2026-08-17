@@ -223,6 +223,7 @@ public:
   // ── Structs & field access ────────────────────────────────────────────────
   void visitFieldAccess(FieldAccessExprAST &Node) override;
   void visitEnumDecl(EnumDeclExprAST &Node) override;
+  void visitMachineDecl(MachineDeclExprAST &Node) override;
   void visitErrorDecl(ErrorDeclExprAST &Node) override;
   void visitRecoverExpr(RecoverExprAST &Node) override;
   void visitScopeAccess(ScopeAccessExprAST &Node) override;
@@ -352,6 +353,25 @@ private:
   /// Stack of expected return types for nested function definitions.
   /// Empty when we are at the top level.
   std::vector<TurfTypePtr> ReturnTypeStack_;
+
+  /// One frame per enclosing `compare` arm that narrows a TurfMachineType-
+  /// typed, plain-variable subject to exactly one specific state -- pushed
+  /// by visitCompare() right before checking that arm's body, popped right
+  /// after. visitMethodCall()'s machine-transition branch searches this
+  /// (innermost first) by receiver variable name to decide whether a
+  /// `.transition()` call can be proven safe at compile time
+  /// (TransitionCompileTimeProven) instead of falling back to Codegen's
+  /// runtime switch+panic guard. Only ever holds an entry for a
+  /// single-pattern arm (`matches State:`) on a bare variable subject --
+  /// a stacked-pattern arm (`matches A, matches B:`) or a non-variable
+  /// subject (e.g. a field access) is a v1 scope limit and is left
+  /// unnarrowed, per polymorphic-seeking-lark.md.
+  struct MachineNarrowFrame {
+    std::string VarName;
+    std::string MachineName;
+    std::string StateName;
+  };
+  std::vector<MachineNarrowFrame> MachineNarrowStack_;
 
   /// Loop variable types: populated by visitFor(), consulted by visitVariable().
   /// Maps loop variable name → inferred type (always int for range-for).

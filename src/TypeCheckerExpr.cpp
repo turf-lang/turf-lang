@@ -785,8 +785,33 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
       }
     }
 
+    // Narrow a TurfMachineType-typed, plain-variable subject to one specific
+    // state for the duration of this arm's body -- see MachineNarrowStack_'s
+    // doc comment (include/TypeChecker.h). Only a single-pattern arm on a
+    // bare variable subject qualifies; a stacked-pattern arm or a non-
+    // variable subject (e.g. a field access) is a v1 scope limit and stays
+    // unnarrowed, so any `.transition()` inside it falls back to Codegen's
+    // runtime guard instead of being compile-time-proven.
+    bool PushedNarrow = false;
+    if (Arm.Values.size() == 1) {
+      if (const auto *MT = dynamic_cast<const TurfMachineType *>(SubjectTy.get())) {
+        if (const auto *SubjVar =
+                dynamic_cast<const VariableExprAST *>(Node.getSubject())) {
+          if (const auto *EA =
+                  dynamic_cast<const ScopeAccessExprAST *>(Arm.Values[0].get())) {
+            MachineNarrowStack_.push_back(
+                {SubjVar->getName(), MT->getName(), EA->getVariant()});
+            PushedNarrow = true;
+          }
+        }
+      }
+    }
+
     // Type-check arm body
     check(Arm.Body.get());
+
+    if (PushedNarrow)
+      MachineNarrowStack_.pop_back();
   }
 
   // 3. Type-check the 'otherwise' body if present

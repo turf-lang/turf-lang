@@ -275,6 +275,123 @@ std::unique_ptr<ExprAST> ParseEnumDecl() {
   return std::make_unique<EnumDeclExprAST>(Loc, Name, Variants);
 }
 
+// ParseMachineDecl - called when CurTok == TOK_MACHINE.
+// `machine Name { State -> State, ... }` -- see MachineDeclExprAST's doc
+// comment (include/ASTDecl.h) for the overall design. States are declared
+// implicitly by appearing on either side of an edge (no separate
+// `{ State, State }` list) -- ordinal = first-appearance order, mirroring
+// how enum variant order = ordinal today in ParseEnumDecl() above.
+std::unique_ptr<ExprAST> ParseMachineDecl() {
+  SourceLocation Loc = CurLoc;
+  getNextToken(); // eat 'machine'
+
+  if (CurTok != TOK_IDENTIFIER) {
+    LogErrorAt(CurLoc, "Expected identifier after 'machine'");
+    return nullptr;
+  }
+  std::string Name = IdentifierStr;
+  getNextToken();
+
+  if (CurTok != '{') {
+    LogErrorAt(CurLoc, "Expected '{' after machine name");
+    return nullptr;
+  }
+  getNextToken(); // eat '{'
+
+  std::vector<std::string> States;
+  std::vector<MachineEdge> Edges;
+  std::map<std::string, std::set<std::string>> EdgeSet; // adjacency, also used for duplicate-edge detection
+
+  while (CurTok != '}' && CurTok != TOK_EOF) {
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc, "Expected state name in machine definition");
+      return nullptr;
+    }
+    std::string From = IdentifierStr;
+    SourceLocation EdgeLoc = CurLoc;
+    getNextToken(); // eat From
+
+    if (CurTok != TOK_ARROW) {
+      LogErrorAt(CurLoc, "Expected '->' after state name in machine definition");
+      return nullptr;
+    }
+    getNextToken(); // eat '->'
+
+    if (CurTok != TOK_IDENTIFIER) {
+      LogErrorAt(CurLoc, "Expected target state name after '->' in machine definition");
+      return nullptr;
+    }
+    std::string To = IdentifierStr;
+    getNextToken(); // eat To
+
+    // Reject the same edge declared twice in one machine block. Mirrors
+    // ParseEnumDecl()'s duplicate-variant check just above -- same
+    // reasoning: harmless to the adjacency set either way (it just absorbs
+    // the repeat), but almost certainly a copy-paste mistake worth flagging
+    // at parse time rather than silently accepting it.
+    if (EdgeSet[From].count(To)) {
+      LogErrorAt(EdgeLoc,
+                 "Machine '" + Name + "' already declares a transition from '" +
+                     From + "' to '" + To + "'."
+                     "\n  Hint: Remove the duplicate transition.");
+      return nullptr;
+    }
+    EdgeSet[From].insert(To);
+    Edges.push_back({From, To, EdgeLoc});
+
+    // States are ordered by first appearance on either side of an edge --
+    // linear scan, not std::find, to match this file's existing style for
+    // small "have I seen this name yet" checks (see the duplicate-variant
+    // loop in ParseEnumDecl() just above).
+    for (const std::string &S : {From, To}) {
+      bool Seen = false;
+      for (const auto &Existing : States) {
+        if (Existing == S) { Seen = true; break; }
+      }
+      if (!Seen) States.push_back(S);
+    }
+
+    if (CurTok == ',') {
+      getNextToken();
+    } else if (CurTok != '}') {
+      LogErrorAt(CurLoc, "Expected ',' or '}' after transition");
+      return nullptr;
+    }
+  }
+
+  if (CurTok != '}') {
+    LogErrorAt(CurLoc, "Expected '}' to close machine definition");
+    return nullptr;
+  }
+  getNextToken(); // eat '}'
+
+  // Warn on any declared state with zero INCOMING edges -- see
+  // UnreachableStateWarning's doc comment (include/ErrorsScope.h) for why
+  // this is a warning, not an error, and its known false-positive on a
+  // machine's legitimate start state. Computed here (not per-edge above)
+  // since it needs the full edge set to know which states were ever a
+  // target.
+  {
+    std::set<std::string> HasIncoming;
+    for (const auto &[From, Tos] : EdgeSet)
+      for (const auto &To : Tos)
+        HasIncoming.insert(To);
+    for (const std::string &S : States)
+      if (!HasIncoming.count(S))
+        UnreachableStateWarning(Loc, Name, S).warn();
+  }
+
+  // Register the machine type in GlobalSymbolTable so that a parse-time
+  // lookup elsewhere in the same file already sees it -- mirrors
+  // ParseEnumDecl()'s identical registration just above.
+  auto MType = std::make_shared<TurfMachineType>(Name, States, EdgeSet);
+  if (GlobalSymbolTable) {
+    GlobalSymbolTable->RegisterType(Name, MType);
+  }
+
+  return std::make_unique<MachineDeclExprAST>(Loc, Name, States, Edges);
+}
+
 // ParseErrorDecl - called when CurTok == TOK_ERROR (docs/planning/Errors.md).
 // Parses either:
 //   error Name;                                          -- bare form, sugar
@@ -590,7 +707,8 @@ std::unique_ptr<ExprAST> ParseExportDecl() {
   // parse of the statement that follows).
   auto SkipRestOfBrokenStatement = [&]() {
     while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
-          CurTok != TOK_STRUCT && CurTok != TOK_ENUM && CurTok != TOK_AT &&
+          CurTok != TOK_STRUCT && CurTok != TOK_ENUM && CurTok != TOK_MACHINE &&
+          CurTok != TOK_AT &&
           CurTok != TOK_EXTERN && CurTok != TOK_EXPORT && CurTok != TOK_IMPORT &&
           CurTok != TOK_ERROR)
       getNextToken();

@@ -226,4 +226,84 @@ public:
   }
 };
 
+// `.transition(X)` where X isn't a state of the SAME machine as the
+// receiver -- either X belongs to a completely different `machine` type, or
+// isn't a state/variant access at all (e.g. `conn.transition(5)`).
+// Deliberately NOT reusing NoSuchVariantError: that class covers "the type
+// is right but the variant NAME doesn't exist", which for a `machine`
+// receiver is already caught earlier and more precisely by
+// Resolver::visitScopeAccess()'s own NoSuchVariantError (e.g.
+// `conn.transition(ConnectionState::Bogus)` never reaches TypeChecker's
+// machine-transition check at all -- it fails to resolve the scope access
+// itself first). This class covers the type-level mismatch that check can't
+// see: a real state, just not one of THIS machine's.
+class InvalidTransitionTargetError : public TurfError {
+public:
+  InvalidTransitionTargetError(SourceLocation Loc, const std::string &MachineName,
+                               const std::string &GotTypeName)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + "transition" +
+                           Colors::BRIGHT_RED + "' target must be a state of '" +
+                           Colors::CYAN + MachineName + Colors::BRIGHT_RED +
+                           "', got '" + Colors::CYAN + GotTypeName +
+                           Colors::BRIGHT_RED + "'." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+    Hint_ = "Pass a state of '" + MachineName + "' (e.g. '" + MachineName +
+           "::SomeState') to transition().";
+  }
+};
+
+// `.transition(X)` called inside a `compare`/`matches` arm that has narrowed
+// the receiver to one specific state (TypeChecker::MachineNarrowStack_), where
+// the declared machine has no edge from that narrowed state to X. Distinct
+// from the runtime panic message Codegen builds for the UNNARROWED case
+// (CodegenStruct.cpp) -- this is a real compile-time error with a caret,
+// since the narrowed state is statically known, not just possible.
+class InvalidTransitionError : public TurfError {
+public:
+  InvalidTransitionError(SourceLocation Loc, const std::string &MachineName,
+                         const std::string &FromState, const std::string &ToState)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + MachineName +
+                           Colors::BRIGHT_RED + "' has no transition from '" +
+                           Colors::CYAN + FromState + Colors::BRIGHT_RED +
+                           "' to '" + Colors::CYAN + ToState + Colors::BRIGHT_RED +
+                           "'." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+    Hint_ = "This arm has already narrowed the receiver to '" + FromState +
+           "', which has no declared edge to '" + ToState +
+           "' -- add `" + FromState + " -> " + ToState +
+           ",` to the machine's declaration, or transition to a state '" +
+           FromState + "' actually has an edge to.";
+  }
+};
+
+// A declared machine state with zero INCOMING edges -- nothing in the
+// machine's own declaration ever transitions INTO it, so (short of an
+// external `.transition()` call constructing it out of thin air via some
+// other machine's state, which can't happen -- InvalidTransitionTargetError
+// already rejects cross-machine targets) it can only ever be reached by
+// being the variable's OWN initial value, never arrived at mid-flow.
+// Deliberately a warning, not an error, and its hint says so explicitly:
+// this is the expected, correct shape for a machine's legitimate start
+// state (e.g. `Idle` in a connection-state machine) -- v1 has no separate
+// syntax to mark a state as "the" entry point, so this warning has a known,
+// intentional false-positive on every well-designed machine's start state.
+class UnreachableStateWarning : public TurfWarning {
+public:
+  UnreachableStateWarning(SourceLocation Loc, const std::string &MachineName,
+                          const std::string &StateName)
+      : TurfWarning(Loc,
+                    TurfWarning::WarningLabel() + "Machine '" +
+                        Colors::CYAN + MachineName + Colors::BRIGHT_YELLOW +
+                        "' declares state '" + Colors::CYAN + StateName +
+                        Colors::BRIGHT_YELLOW +
+                        "' with no incoming transitions." + Colors::RESET,
+                    "If '" + StateName + "' is meant to be " + MachineName +
+                    "'s starting state, this is expected and safe to ignore. "
+                    "Otherwise, it's unreachable once the machine leaves its "
+                    "initial value -- double check for a missing `-> " +
+                    StateName + "` edge.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
+
 #endif

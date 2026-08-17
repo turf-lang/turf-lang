@@ -264,6 +264,44 @@ public:
     }
 };
 
+// One declared transition edge inside a `machine` block: `From -> To`.
+struct MachineEdge {
+    std::string    From;
+    std::string    To;
+    SourceLocation Loc;
+};
+
+// `machine Name { State -> State, ... }` -- an enum whose variants ("states")
+// carry a compiler-checked transition graph. Kept as its own AST node rather
+// than bolting an edge list onto EnumDeclExprAST, for the same reason
+// ErrorDeclExprAST stays distinct from EnumDeclExprAST below despite a
+// near-identical variant-name shape: the declaration's own semantics
+// (edge validation, a dedicated TurfMachineType) diverge enough to earn a
+// separate node, even though `MachineName::State` access downstream reuses
+// the ordinary enum-variant machinery unchanged (TurfMachineType subclasses
+// TurfEnumType -- see include/Types.h).
+class MachineDeclExprAST : public ExprAST {
+    std::string               Name;
+    std::vector<std::string>  States;   // first-appearance order = ordinal, same role as EnumDeclExprAST::Variants
+    std::vector<MachineEdge>  Edges;    // declared transitions, in source order
+    SourceLocation            Loc;
+public:
+    MachineDeclExprAST(SourceLocation Loc, std::string Name,
+                       std::vector<std::string> States,
+                       std::vector<MachineEdge> Edges)
+        : Name(std::move(Name)), States(std::move(States)),
+          Edges(std::move(Edges)), Loc(Loc) {}
+    const std::string&              getName()   const { return Name; }
+    const std::vector<std::string>& getStates() const { return States; }
+    const std::vector<MachineEdge>& getEdges()  const { return Edges; }
+    const SourceLocation&           getLoc()    const { return Loc; }
+    llvm::Value* codegen() override;
+    void accept(ASTVisitor& V) override { V.visitMachineDecl(*this); }
+    std::unique_ptr<ExprAST> clone() const override {
+        return std::make_unique<MachineDeclExprAST>(Loc, Name, States, Edges);
+    }
+};
+
 // `error Name { Variant, ... }` (docs/planning/Errors.md). Named
 // ErrorDeclExprAST (not e.g. ErrorExprAST) deliberately to stay well clear
 // of TurfError (include/Errors.h), the compiler's own internal diagnostic

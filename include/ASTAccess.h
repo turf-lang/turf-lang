@@ -257,12 +257,30 @@ public:
   /// contract as ResolvedCallTarget.
   bool ResolvedViaUFCS = false;
 
+  /// True once TypeChecker::visitMethodCall() confirms this is a
+  /// `.transition(State)` call on a `TurfMachineType`-typed receiver (see
+  /// include/Types.h's TurfMachineType doc comment). Codegen branches on
+  /// this the same way it branches on ResolvedViaUFCS -- a machine
+  /// transition needs a completely different lowering (a plain store or a
+  /// runtime-guarded switch, never an ordinary call). Not copied by
+  /// clone() -- same contract as ResolvedCallTarget/ResolvedViaUFCS.
+  bool IsMachineTransition = false;
+
+  /// True only when IsMachineTransition is also true AND
+  /// TypeChecker::visitCompare() statically narrowed the receiver to one
+  /// specific state for the compare arm this call sits in, and verified the
+  /// declared edge exists -- see TypeChecker's MachineNarrowStack_. Lets
+  /// Codegen skip the runtime switch/panic guard entirely and emit a plain,
+  /// zero-cost store, since the transition's validity is already proven.
+  bool TransitionCompileTimeProven = false;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitMethodCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()),
                                                Method, CloneExprList(Args));
-    // Note: ResolvedCallTarget and ResolvedViaUFCS intentionally NOT
+    // Note: ResolvedCallTarget, ResolvedViaUFCS, IsMachineTransition, and
+    // TransitionCompileTimeProven intentionally NOT
     // copied — cloned ASTs are stale until re-resolved. ✓
   }
 };

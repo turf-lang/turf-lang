@@ -314,3 +314,18 @@ int TurfEnumType::getVariantValue(const std::string& V) const {
 bool TurfEnumType::hasVariant(const std::string& V) const {
     return VariantValues_.find(V) != VariantValues_.end();
 }
+
+// ─── TurfMachineType ─────────────────────────────────────────────────────────
+
+TurfMachineType::TurfMachineType(std::string Name,
+                                 std::vector<std::string> States,
+                                 std::map<std::string, std::set<std::string>> Edges)
+    : TurfEnumType(std::move(Name), std::move(States), nullptr),
+      Edges_(std::move(Edges)) {}
+
+bool TurfMachineType::hasEdge(const std::string &From, const std::string &To) const {
+    auto It = Edges_.find(From);
+    if (It == Edges_.end())
+        return false;
+    return It->second.count(To) > 0;
+}

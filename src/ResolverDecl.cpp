@@ -199,6 +199,13 @@ void Resolver::visitEnumDecl(EnumDeclExprAST &Node) {
 }
 
 
+void Resolver::visitMachineDecl(MachineDeclExprAST &Node) {
+  // Pass 1 already hoisted the machine (states + edges) to the registry,
+  // same as visitEnumDecl -- nothing left to do at Pass 2 for the
+  // DECLARATION itself.
+}
+
+
 void Resolver::visitErrorDecl(ErrorDeclExprAST &Node) {
   // Pass 1 already hoisted the error type to the registry, same as
   // visitEnumDecl -- nothing left to do at Pass 2 for the DECLARATION

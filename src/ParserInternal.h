@@ -40,6 +40,7 @@ std::unique_ptr<ExprAST> ParseReturnExpr();
 // Defined in ParserDecl.cpp
 std::unique_ptr<ExprAST> ParseStructDecl();
 std::unique_ptr<ExprAST> ParseEnumDecl();
+std::unique_ptr<ExprAST> ParseMachineDecl();
 std::unique_ptr<ExprAST> ParseErrorDecl();
 std::unique_ptr<ExprAST> ParseExternDecl();
 std::unique_ptr<ExprAST> ParseExportDecl();

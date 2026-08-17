@@ -235,7 +235,9 @@ enum Token {
   TOK_XOR_ASSIGN    = -96, ///< `^=`  token — bitwise-XOR compound assignment
   TOK_LSHIFT_ASSIGN = -97, ///< `<<=` token — left-shift compound assignment
   TOK_RSHIFT_ASSIGN = -98, ///< `>>=` token — right-shift compound assignment
-  TOK_POWER_ASSIGN  = -99  ///< `**=` token — exponentiation compound assignment
+  TOK_POWER_ASSIGN  = -99, ///< `**=` token — exponentiation compound assignment
+  TOK_MACHINE  = -100, ///< `machine` keyword — state-machine declaration (enum + transition graph)
+  TOK_ARROW    = -101  ///< `->`      token   — transition edge separator in a `machine` block
 };
 
 int gettok();
@@ -282,6 +284,7 @@ inline std::string OpToDisplayString(int Op) {
     case TOK_LSHIFT_ASSIGN: return "<<=";
     case TOK_RSHIFT_ASSIGN: return ">>=";
     case TOK_POWER_ASSIGN: return "**=";
+    case TOK_ARROW: return "->";
     default:
       if (Op >= 0 && Op <= 127 && isprint(Op))
         return std::string(1, static_cast<char>(Op));

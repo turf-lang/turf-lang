@@ -46,6 +46,106 @@ using namespace llvm;
 // The VarDeclExprAST::codegen handles list initialization via the type system.
 
 Value *MethodCallExprAST::codegen() {
+  // ── Machine transition (conn.transition(ConnectionState::X)) ────────────
+  // TypeChecker::visitMethodCall() already confirmed IsMachineTransition
+  // only when the receiver is TurfMachineType-typed, Method == "transition",
+  // and Args[0] resolves to a state of the SAME machine -- Codegen doesn't
+  // re-verify any of that, only picks a lowering strategy.
+  if (IsMachineTransition) {
+    Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+    Value *TargetVal = Args[0]->codegen(); // inlined ordinal constant
+    if (!TargetVal)
+      return nullptr;
+
+    Value *Ptr = Base->codegenLValue();
+    if (!Ptr)
+      return nullptr;
+
+    if (TransitionCompileTimeProven) {
+      // TypeChecker's compare-arm narrowing already proved this specific
+      // edge exists -- a plain store, zero runtime cost, no switch needed.
+      // Returns a non-null sentinel, NOT a literal nullptr -- this is a
+      // successful void-statement codegen, and a literal nullptr here reads
+      // as "codegen failed" to every blind-iteration caller (most
+      // importantly BlockExprAST::codegen(), which stops processing the
+      // rest of the block the moment any statement returns nullptr -- see
+      // its own doc comment and CodegenVar.cpp's/CodegenFunc.cpp's matching
+      // ones for the exact same convention on other void statements).
+      Builder->CreateStore(TargetVal, Ptr);
+      return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+    }
+
+    // Unproven: runtime-guard via a switch over the CURRENT value, one case
+    // per declared source state that has an edge to the target, default =
+    // panic. Mirrors CompareExprAST::codegen()'s int/enum switch and
+    // EmitRuntimeBoundsCheck()'s panic-on-default pattern (CodegenArray.cpp).
+    const TurfType *BaseTy = getExprType(Base.get());
+    if (auto *NT = dynamic_cast<const NamedType *>(BaseTy)) {
+      if (GlobalSymbolTable)
+        BaseTy = GlobalSymbolTable->LookupType(NT->getName()).get();
+    }
+    const auto *MT = dynamic_cast<const TurfMachineType *>(BaseTy);
+    if (!MT) {
+      llvm::report_fatal_error(
+          "Internal error: machine transition receiver lost its machine "
+          "type in codegen. This is a compiler bug.");
+      return nullptr;
+    }
+
+    const auto *TargetAccess =
+        dynamic_cast<const ScopeAccessExprAST *>(Args[0].get());
+    std::string TargetState = TargetAccess ? TargetAccess->getRightName() : "";
+
+    Value *CurVal = Base->codegen();
+    if (!CurVal)
+      return nullptr;
+
+    unsigned NumCases = 0;
+    for (const auto &[From, Tos] : MT->getEdges())
+      if (Tos.count(TargetState))
+        ++NumCases;
+
+    BasicBlock *OkBB = BasicBlock::Create(*TheContext, "transition.ok", TheFunction);
+    BasicBlock *InvalidBB =
+        BasicBlock::Create(*TheContext, "transition.invalid", TheFunction);
+    // Created without a parent (like EmitRuntimeBoundsCheck's ContBB) and
+    // inserted explicitly right before use, so it lands after the panic
+    // block in the function's layout instead of interleaved.
+    BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "transition.merge");
+
+    SwitchInst *SI = Builder->CreateSwitch(CurVal, InvalidBB, NumCases);
+    for (const auto &[From, Tos] : MT->getEdges()) {
+      if (Tos.count(TargetState)) {
+        SI->addCase(
+            ConstantInt::get(cast<IntegerType>(CurVal->getType()),
+                             MT->getVariantValue(From)),
+            OkBB);
+      }
+    }
+
+    Builder->SetInsertPoint(OkBB);
+    Builder->CreateStore(TargetVal, Ptr);
+    Builder->CreateBr(MergeBB);
+
+    Builder->SetInsertPoint(InvalidBB);
+    Value *MsgVal = Builder->CreateGlobalString(
+        MT->getName() + "::transition(" + TargetState +
+            ") -- no such transition from the current state.",
+        "panicmsg");
+    CodegenPanic(MsgVal, Loc);
+    if (!Builder->GetInsertBlock()->getTerminator())
+      Builder->CreateUnreachable();
+
+    TheFunction->insert(TheFunction->end(), MergeBB);
+    Builder->SetInsertPoint(MergeBB);
+    // Same non-null-sentinel convention as the proven branch above -- a
+    // literal nullptr here would look like a codegen failure to
+    // BlockExprAST::codegen() and silently truncate every statement after
+    // this one.
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+  }
+
   if (auto *Var = dynamic_cast<VariableExprAST *>(Base.get())) {
     // Trust the Resolver's ResolvedModuleName verdict -- set only when the
     // base name is a genuine module qualifier AND is not shadowed by a
@@ -387,6 +487,16 @@ Value *MethodCallExprAST::codegen() {
 
 
 Value *EnumDeclExprAST::codegen() {
+  return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+}
+
+
+// A `machine` declaration generates no LLVM type/global of its own, exactly
+// like EnumDeclExprAST just above -- every use site (MachineName::State)
+// inlines the state's ordinal as a plain constant via
+// ScopeAccessExprAST::codegen() below, which works unchanged on a
+// TurfMachineType since it IS-A TurfEnumType (see include/Types.h).
+Value *MachineDeclExprAST::codegen() {
   return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
 }
 

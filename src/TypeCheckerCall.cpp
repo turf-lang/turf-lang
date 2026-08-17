@@ -763,6 +763,84 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           BaseTy = GlobalSymbolTable->LookupType(GT->getBaseName());
       }
     }
+    // ── Machine transition call (e.g. conn.transition(ConnectionState::X)) ──
+    // Checked before the struct-method dynamic_cast just below so a machine
+    // receiver never falls through to the permissive "no such method" UFCS
+    // fallback with zero diagnostic -- same reasoning as the arr.length()
+    // special case above. `transition` is deliberately NOT a reserved word
+    // (see TurfMachineType's doc comment, include/Types.h): a machine
+    // receiver whose method name ISN'T "transition" falls straight through
+    // to ordinary UFCS/struct dispatch below unchanged, so a user's own
+    // unrelated `fn transition(...)` still works via UFCS on a non-machine
+    // receiver.
+    //
+    // If an enclosing compare arm narrowed this call's receiver to one
+    // specific state (TypeChecker::visitCompare()'s MachineNarrowStack_),
+    // the edge is checked statically here instead of deferring to Codegen's
+    // runtime switch+panic guard -- see MachineNarrowStack_'s doc comment
+    // (include/TypeChecker.h) for exactly which arm shapes qualify.
+    if (BaseTy) {
+      if (auto *MT = dynamic_cast<const TurfMachineType *>(BaseTy.get())) {
+        if (MethodName == "transition") {
+          if (ArgCount != 1) {
+            reportError(Node.getLoc(),
+                        "'transition' expects exactly 1 argument (the target "
+                        "state), got " + std::to_string(ArgCount) + ".",
+                        {}, "", "Wrong argument count!");
+            setType(&Node, TurfVoid());
+            return;
+          }
+
+          // The target must resolve to a state of THIS SAME machine type
+          // (Color::Red-style ScopeAccess -- ArgTypes[0] is already the
+          // TypeChecker-resolved type of that access, see visitScopeAccess()).
+          const TurfType *TargetTy = ArgTypes[0].get();
+          const auto *TargetMT =
+              TargetTy ? dynamic_cast<const TurfMachineType *>(TargetTy) : nullptr;
+          if (!TargetMT || TargetMT->getName() != MT->getName()) {
+            InvalidTransitionTargetError(
+                Node.getLoc(), MT->getName(),
+                TargetTy ? TargetTy->getName() : "unknown")
+                .raise();
+            setType(&Node, TurfVoid());
+            return;
+          }
+
+          const std::string *NarrowedState = nullptr;
+          if (const auto *BaseVar =
+                  dynamic_cast<const VariableExprAST *>(Node.getBase())) {
+            for (auto It = MachineNarrowStack_.rbegin();
+                 It != MachineNarrowStack_.rend(); ++It) {
+              if (It->VarName == BaseVar->getName() &&
+                  It->MachineName == MT->getName()) {
+                NarrowedState = &It->StateName;
+                break;
+              }
+            }
+          }
+
+          if (NarrowedState) {
+            const auto *TargetAccess =
+                dynamic_cast<const ScopeAccessExprAST *>(Node.getArgs()[0].get());
+            std::string TargetState =
+                TargetAccess ? TargetAccess->getVariant() : "";
+            if (!MT->hasEdge(*NarrowedState, TargetState)) {
+              InvalidTransitionError(Node.getLoc(), MT->getName(),
+                                     *NarrowedState, TargetState)
+                  .raise();
+              setType(&Node, TurfVoid());
+              return;
+            }
+            Node.TransitionCompileTimeProven = true;
+          }
+
+          Node.IsMachineTransition = true;
+          setType(&Node, TurfVoid());
+          return;
+        }
+      }
+    }
+
     if (BaseTy) {
       if (auto *STy = dynamic_cast<const TurfStructType *>(BaseTy.get())) {
         const std::string &StructName = STy->getName();
