@@ -92,11 +92,22 @@ e.g. `funtion` → `fn`).
 
 Genuinely still open (also tracked as `FINAL_SPRINT.md` Track D — see that
 doc for current sequencing):
-- **Source spans instead of single-point locations.** `SourceLocation`
-  (`include/Lexer.h`) is still just `{Line, Col, Filename}`. Extending
-  Lexer tokens to carry `{Line, StartCol, EndCol}` would let
-  `DiagnosticEngine` underline a whole failing sub-expression instead of
-  pointing one `^` at its start:
+- **Source spans instead of single-point locations — partially done.**
+  `SourceLocation` (`include/Lexer.h`) gained `EndLine`/`EndCol` fields
+  (default `-1`, meaning "not computed") while building `turf-lsp`
+  support (turf-lang/turf-lang#243) — `gettok()` now populates them for
+  every identifier/keyword token, which flows for free into every AST
+  node's name location (struct/function/variable/field/method/module
+  names, per #230's fix) and into any diagnostic whose `Loc` happens to be
+  one of those. Still open: (1) `DiagnosticEngine`/`printDiag()`
+  (`Lexer.cpp`) doesn't read `EndCol` at all yet — the CLI's own `^` caret
+  output is visually unchanged; only library consumers reading
+  `Diag.Loc.EndCol` directly (e.g. an LSP building a `Range`) benefit
+  today. (2) Other token kinds (operators, string/char/number literals)
+  and genuine multi-token spans — a whole sub-expression like
+  `add(3, "4")` below, not just one identifier — still have no end
+  position. Wiring `printDiag()` to underline using `EndCol` when present,
+  and extending coverage to operators/literals, remains open scope:
   ```
     7 |     io.printline(add(5 + 6, add(3, "4")));
       |                             ^^^^^^^^^^^

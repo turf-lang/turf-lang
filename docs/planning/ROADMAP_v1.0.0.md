@@ -258,6 +258,6 @@ extern fn llama_decode(ctx: unsafe_ptr<void>, batch: unsafe_ptr<void>): int;
 
 *The error class taxonomy is still changing through Phase 3. These are deferred until the error surface is stable.* **Phase 3 is now complete, so this is unblocked — see `docs/planning/FINAL_SPRINT.md` Track D for all three items.**
 
-- [ ] **Source Spans** — Track `{Line, StartCol, EndCol}` per token. Underline the full failing expression, not just `^`.
+- [ ] **Source Spans** *(partially started)* — `SourceLocation` now has `EndLine`/`EndCol`, populated for identifier/keyword tokens only; `DiagnosticEngine` doesn't render spans yet. See `FINAL_SPRINT.md` Track D for exactly what's left. Underline the full failing expression, not just `^`.
 - [ ] **Error Codes + `turf --explain`** — Every error class gets a unique code (e.g., `E042`). `turf --explain E042` prints a multi-paragraph markdown explanation with examples.
 - [ ] **Broader "Did You Mean?"** — Extend `SuggestionIndex` to cover struct fields (`user.pasword` → `user.password`) and module methods (`string.lenght` → `string.length`).
