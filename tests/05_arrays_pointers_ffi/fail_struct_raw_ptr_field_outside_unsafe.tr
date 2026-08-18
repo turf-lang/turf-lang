@@ -1,0 +1,20 @@
+// Regression test (issue #238): a struct declaration with a raw
+// ptr/T*-typed field must be rejected when the struct decl itself is
+// outside `unsafe { }` -- this is stricter than gating the field's later
+// USE: FINAL_SPRINT.md's Track A requires the ENTIRE struct declaration
+// to be lexically inside `unsafe { }`, blocking a raw-pointer-containing
+// type from being introduced into safe user code even when the field is
+// never dereferenced anywhere. See also fail_ptr_outside_unsafe.tr,
+// fail_cast_raw_pointer_outside_unsafe.tr, and
+// fail_fn_signature_raw_pointer_disallowed.tr for the other three gated
+// shapes, and 18_unsafe_block_and_safe_reference.tr for the corresponding
+// passing case (the identical struct, but `unsafe { }`-wrapped).
+
+struct Node {
+    val: int,
+    next: Node*
+}
+
+fn main(): int {
+    return 0;
+}
