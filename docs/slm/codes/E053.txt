@@ -1,0 +1,29 @@
+TURF E053 -- 'static' OUTSIDE A STRUCT:
+
+CAUSE:
+  The `static` keyword was written on a function that isn't struct-bound
+  at all -- i.e. it has no `StructName.` prefix in its declaration.
+  `static` only makes sense as a way to say "this struct method has no
+  implicit `self`"; a plain free function never had a `self` parameter to
+  omit in the first place, so `static` on one is meaningless.
+
+CORRECT SYNTAX:
+    fn Point.origin() static: Point {   // correct -- struct-bound,
+        return Point::default();        // 'static' means "no self"
+    }
+
+    fn add(a: int, b: int): int {       // correct -- ordinary free
+        return a + b;                   // function, no 'static' needed
+    }
+
+INCORRECT:
+    fn add(a: int, b: int) static: int {
+        return a + b;
+    }
+    // ERROR: 'static' can only be used on a struct-bound method.
+
+FIX:
+  Either remove `static` (if this was meant to be an ordinary free
+  function all along), or, if it was actually meant to be a struct's
+  method, declare it with the `StructName.` prefix: `fn StructName.
+  methodName(...) static: ReturnType { ... }`.

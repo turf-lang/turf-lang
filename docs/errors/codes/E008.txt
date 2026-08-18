@@ -1,0 +1,29 @@
+You're reading a variable that might not have a value yet
+
+In Turf, you're allowed to declare a variable without giving it a starting value right away -- `mut x: int;` is totally fine on its own. But before you actually read that variable, every possible path your program could take needs to have given it a real value first. If there's even one path where that never happens, Turf stops you before it becomes a bug.
+
+The classic way to trip this is an if without a matching else:
+
+    mut x: int;
+    if some_condition {
+        x = 1;
+    }
+    mut y: int = x;   // what if some_condition was false? x was never set!
+
+Turf can't know at compile time whether `some_condition` will be true or false when your program actually runs, so it has to assume both are possible -- and on the "false" path, `x` never gets a value. Reading it afterward would read garbage, so Turf catches it now instead of letting that happen.
+
+The fix is usually one of two things. Either give the variable a starting value right when you declare it:
+
+    mut x: int = 0;
+
+...or make sure every branch assigns it, by adding the missing else:
+
+    mut x: int;
+    if some_condition {
+        x = 1;
+    } else {
+        x = 2;
+    }
+    mut y: int = x;   // now every path sets x before this line
+
+Either approach works -- pick whichever makes more sense for what your program is actually trying to do. Once every path is guaranteed to set the variable before it's read, this error goes away and you're good to go.

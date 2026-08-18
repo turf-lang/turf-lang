@@ -1,0 +1,26 @@
+TURF E032 -- UNQUALIFIED TYPE NOT VISIBLE:
+
+CAUSE:
+  A bare type name (e.g. `List`) was used where that type is actually
+  declared inside a DIFFERENT module, and was never brought into scope
+  under its own bare name -- Turf refuses to guess which module's `List`
+  you meant if there's any ambiguity, so an un-imported cross-module type
+  name is rejected rather than silently resolved.
+
+CORRECT SYNTAX (two options):
+    // Option 1: use it fully qualified, no import needed for this form
+    mut l: list::List<int> = list::List::default();
+
+    // Option 2: bring the bare name into scope with an on-demand import
+    import list::List;
+    mut l: List<int> = List::default();
+
+INCORRECT:
+    mut l: List<int> = List::default();
+    // ERROR: 'List' isn't visible here without qualification.
+    //   (no `import list;` / `import list::List;` anywhere above)
+
+FIX:
+  Either qualify every use of the type with its owning module name
+  (`module::TypeName`), or add `import module::TypeName;` once near the
+  top of the file so the bare name works everywhere after that.

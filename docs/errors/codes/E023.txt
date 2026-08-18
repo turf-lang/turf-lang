@@ -1,0 +1,25 @@
+`export` only works at the top level of a file, not inside a function
+
+The whole point of `export` is to share a constant with other files that import this one. That only makes sense for something declared at the top level of a file -- if you write `export` on a declaration inside a function body, it's contradicting itself: local to one function call, but also supposedly shared everywhere.
+
+    fn setup(): void {
+        export immut ready: bool = true;
+    }
+
+Here, `ready` is declared inside `setup()`, which means it doesn't even exist until `setup()` actually runs -- there's nothing for another file to import ahead of time. Turf catches this and asks you to pick one: either it lives at the top level and is genuinely shared, or it stays local and drops the `export`.
+
+If you really do want other files to be able to use this value, move it out to the top level of the file:
+
+    export immut ready: bool = true;
+
+    fn setup(): void {
+        // ready is available here too, and to any file that imports this one
+    }
+
+If it was only ever meant to be used inside that one function, it doesn't need `export` at all -- just declare it normally:
+
+    fn setup(): void {
+        immut localFlag: bool = true;
+    }
+
+Either way, the fix is quick once you decide which of those two things you actually meant.

@@ -1,0 +1,23 @@
+TURF E003 -- ARRAY SIZE MISMATCH:
+
+CAUSE:
+  An array's initializer list `[v1, v2, ...]` has a different number of
+  values than the array's declared size. The count must match exactly --
+  Turf never pads with zeros or truncates extra values.
+
+CORRECT USAGE:
+    immut primes: int[3] = [2, 3, 5];         // 3 values for size 3
+
+INCORRECT:
+    immut primes: int[3] = [2, 3, 5, 7];
+    // ERROR: Array size mismatch! 'primes' was declared with size 3,
+    //   but you gave 4 initial values.
+
+    immut evens: int[4] = [2, 4];
+    // ERROR: 'evens' was declared with size 4, but you gave 2 initial
+    //   values.
+
+FIX:
+  Either change the declared size to match how many values you're
+  actually providing, or add/remove values from the initializer list
+  until the count matches the declared size.

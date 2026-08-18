@@ -1,0 +1,31 @@
+TURF E042 -- UNKNOWN TYPE:
+
+CAUSE:
+  A type annotation (a variable's `: Type`, a function parameter's `: Type`,
+  a return type, a struct field's `: Type`) named a type that doesn't exist
+  ANYWHERE Turf can see -- not in this file, not in any imported module,
+  and it isn't a builtin (int, double, bool, char, string, int32, void).
+  Distinct from UnqualifiedTypeNotVisibleError (E032), which fires when the
+  type DOES exist in an imported module but needs `module::` qualification
+  or an explicit import to use by its bare name.
+
+  Almost always one of:
+  1. A typo in the type name (`Piont` instead of `Point`).
+  2. The struct/enum genuinely hasn't been declared yet.
+  3. It's declared, but in a module you never imported at all.
+
+CORRECT SYNTAX:
+    struct Point { x: int, y: int }
+    mut p: Point = Point::default();   // 'Point' really is declared
+
+INCORRECT:
+    mut p: Piont = Point::default();
+    // ERROR: Unknown type 'Piont'.
+    //   (did-you-mean suggests 'Point' when it's a close match)
+
+FIX:
+  Check the spelling against the struct/enum's real declaration. If it's
+  meant to come from a module, make sure that module is imported (see
+  UnqualifiedTypeNotVisibleError, E032, if the type IS declared somewhere
+  but just isn't in scope yet) -- and check that the struct/enum has
+  actually been declared before this point at all.

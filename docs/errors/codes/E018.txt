@@ -1,0 +1,23 @@
+You used memory after already freeing it
+
+`mem::free(buf)` tells the computer "I'm done with this memory, you can use it for something else now." Once that's happened, reading or writing through `buf` again is genuinely risky -- that memory might still look fine for a while, or it might already contain something completely different, and there's no reliable way to tell which. Turf catches this for you at compile time so you never end up debugging a mysterious runtime crash caused by reading memory that isn't yours anymore.
+
+Here's the mistake:
+
+    unsafe {
+        mut buf: int* = mem::malloc(40);
+        mem::free(buf);
+        unsafe { buf[0] = 5; }   // buf was already freed above
+    }
+
+And here's the safe order -- use the memory first, free it last:
+
+    unsafe {
+        mut buf: int* = mem::malloc(40);
+        unsafe { buf[0] = 5; }
+        mem::free(buf);
+    }
+
+The fix is almost always about ordering: make sure every place you read from or write to a pointer happens BEFORE the `mem::free(...)` call for it, not after. If your function has multiple exit points, double-check that none of them try to use a pointer that an earlier path already freed.
+
+A helpful habit once you do free a pointer: set it to `null` right afterward. That way, if you (or future you) accidentally try to use it again, you get an obvious null-related error instead of a confusing one about stale memory.

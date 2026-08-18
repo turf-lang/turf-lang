@@ -1,0 +1,30 @@
+You tried to overload an operator for two types Turf already handles
+
+Operator overloading lets you teach Turf what `+`, `-`, `*`, and friends should do for your OWN struct types -- like adding two `Point`s together. But Turf already knows how to add two `int`s, compare two `bool`s, and so on, so it won't let you redeclare an operator where BOTH sides are builtin types (`int`, `double`, `bool`, `char`, `string`, `int32`). If that were allowed, `1 + 2` would become ambiguous -- which version runs, the language's or yours?
+
+Here's a valid overload, where at least one side is your own struct:
+
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    operator +(a: Point, b: Point): Point {
+        mut r: Point = Point::default();
+        r.x = a.x + b.x;
+        r.y = a.y + b.y;
+        return r;
+    }
+
+And here's what triggers this error -- both sides are builtin types:
+
+    operator +(a: int, b: int): int {
+        return a;
+    }
+
+To fix it, do one of two things:
+
+  - If you meant to add behavior for your own struct, change one of the parameter types from a builtin to your struct's name -- `operator +(a: Point, b: int): Point` works fine, since one side is now a struct.
+  - If you were just trying to use `+` on two plain numbers, you don't need an overload at all -- delete it and use `a + b` directly, it already does what you want.
+
+This one's really just Turf protecting you from accidentally breaking how ordinary math works everywhere else in your program.

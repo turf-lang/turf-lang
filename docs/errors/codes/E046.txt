@@ -1,0 +1,19 @@
+You marked your struct's constructor as static, but it can't be
+
+`new` is the method that sets up a struct's fields when it's constructed -- its entire job is to fill in `self`. The `static` keyword means "this method has no `self` at all," which is the exact opposite of what `new` needs, so Turf won't let the two be combined.
+
+Here's a `new` declared correctly, with no `static`:
+
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;
+    }
+
+Adding `static` to that same declaration is what triggers this error:
+
+    fn Point.new(x: int, y: int) static: void {   // ERROR: 'new' can't be 'static'
+        self.x = x;
+        self.y = y;
+    }
+
+The fix is simple: just delete the `static` keyword from the declaration. `new` is always allowed to use `self`, because filling in `self` is the whole point of having a constructor in the first place.

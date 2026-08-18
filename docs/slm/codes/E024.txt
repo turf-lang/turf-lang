@@ -1,0 +1,22 @@
+TURF E024 -- IMPORT SYMBOL COLLISION:
+
+CAUSE:
+  Two on-demand imports (`import module::symbol;` / `import module::[a, b];`
+  / `import module::[*];`) in the same file bring in two DIFFERENT symbols
+  that happen to share the same bare name. Both symbols are real and each
+  is declared exactly once in its own module -- this isn't a duplicate
+  declaration -- but once flattened into the same importing file, the bare
+  name would be ambiguous, so Turf catches it explicitly instead of
+  silently letting one shadow the other.
+
+EXAMPLE:
+    import shapes::area;
+    import geometry::area;   // ERROR: 'area' now means two different things
+
+FIX:
+  Either qualify one (or both) of the calls explicitly instead of relying
+  on the bare on-demand import:
+    shapes::area(...);
+    geometry::area(...);
+  ...or narrow one of the imports so it no longer brings in that symbol
+  (e.g. `import geometry::[perimeter];` instead of a wildcard import).

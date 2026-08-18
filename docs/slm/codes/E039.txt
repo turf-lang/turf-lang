@@ -1,0 +1,29 @@
+TURF E039 -- NO SUCH VARIANT (ENUM OR ERROR TYPE):
+
+CAUSE:
+  `TypeName::VariantName` was used where `TypeName` is a real, declared
+  `enum` or `error` type, but `VariantName` isn't one of its declared
+  variants. The type itself resolved fine -- this is purely about which
+  variant name you picked.
+
+CORRECT SYNTAX:
+    enum Color { Red, Green, Blue }
+    immut c: Color = Color::Red;        // 'Red' really is a variant
+
+    error IOError {
+        FileNotFound,
+        PermissionDenied
+    }
+    // (raised/matched via 'error'/'recover'/'compare' constructs elsewhere)
+
+INCORRECT:
+    enum Color { Red, Green, Blue }
+    immut c: Color = Color::Purple;
+    // ERROR: Enum 'Color' has no variant 'Purple'.
+    //   (did-you-mean suggests a close variant name if one exists)
+
+FIX:
+  Check the enum's (or error type's) own declaration for the exact
+  variant names and spelling -- variant names are case-sensitive, exactly
+  like any other Turf identifier, and there is no way to add a variant
+  without editing the type's own declaration.

@@ -1,0 +1,33 @@
+TURF E005 -- FOR-EACH NON-ARRAY:
+
+CAUSE:
+  A `for x in y { ... }` loop was used where `y` isn't Turf's built-in
+  fixed-size array type (`T[N]`). For-each currently only iterates arrays
+  -- scalars, structs, `List<T>`/`Map<K,V>`, and other types aren't
+  supported targets.
+
+CORRECT USAGE:
+    mut nums: int[3] = [1, 2, 3];
+    for value in nums {
+        io::printline(value to string);
+    }
+
+INCORRECT:
+    mut n: int = 5;
+    for value in n {
+        io::printline(value to string);
+    }
+    // ERROR: for-each requires an array! You tried to iterate over a
+    //   value of type 'int'.
+
+WHAT THIS ERROR IS NOT:
+  Not about array SIZE -- a for-each over an unsized array parameter
+  (`arr: int[]`) is a different, more specific error (see E006). This
+  one fires when the target isn't an array at all, of any size.
+
+FIX:
+  Only use `for x in y` when `y` is a real `T[N]` array. To iterate a
+  `List<T>`, drive a range-based for-loop off its own `.length()`
+  instead (`for i in 0..myList.length() step i += 1 { ... }`), popping
+  or otherwise accessing elements through the list's own methods -- a
+  bare for-each does not work on `List<T>`.

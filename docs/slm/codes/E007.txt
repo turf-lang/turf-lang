@@ -1,0 +1,44 @@
+TURF E007 -- CONTROL FLOW ERROR:
+
+CAUSE:
+  A jump keyword (`break`, `continue`, `return`) was used somewhere it
+  structurally cannot apply. This is caught independently in two places
+  (CFG.cpp's flow analysis and Codegen.cpp's own defensive check), but the
+  underlying mistake is always one of:
+  1. `break` used outside any `while`/`for` loop.
+  2. `continue` used outside any `while`/`for` loop.
+  3. `return` used outside any function body.
+
+CORRECT USAGE:
+    fn sumPositive(nums: int[5]): int {
+        mut total: int = 0;
+        for i in 0..5 {
+            if nums[i] < 0 {
+                continue;   // valid -- inside the for loop
+            }
+            if total > 1000 {
+                break;      // valid -- inside the for loop
+            }
+            total = total + nums[i];
+        }
+        return total;       // valid -- inside the function
+    }
+
+INCORRECT:
+    fn broken(): void {
+        if true {
+            break;   // ERROR: 'break' used outside of a loop.
+        }
+    }
+
+WHAT THIS ERROR IS NOT:
+  - Not about a MISSING return -- a function that's missing a return on
+    some path is MissingReturnError (E009), a different code.
+  - Not about unreachable code -- code that can never execute because it
+    comes after a terminator is UnreachableCodeError (E013) or
+    StatementAfterTerminatorError (E012).
+
+FIX:
+  Move the `break`/`continue` inside an enclosing loop, or remove it if it
+  was left over from refactored code. An `if`/`else` block on its own does
+  NOT count as a loop -- only `while` and `for` do.

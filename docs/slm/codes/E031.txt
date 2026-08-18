@@ -1,0 +1,36 @@
+TURF E031 -- UNKNOWN SCOPE QUALIFIER (LEFT SIDE OF '::' NOT RECOGNIZED):
+
+CAUSE:
+  `LeftName::something` was used where `LeftName` itself isn't a known
+  enum, struct, or module at all -- the compiler can't even figure out
+  WHAT `::` is being applied to. Distinct from UnknownModuleSymbolError
+  (E030), where the left side IS a real, recognized module but the symbol
+  after `::` doesn't exist inside it.
+
+  Almost always one of:
+  1. A typo in the enum/struct/module name itself (`Colr::Red` instead
+     of `Color::Red`).
+  2. The module was never imported (`io::printline(...)` without an
+     `import io;` line first).
+  3. `LeftName` is actually a variable holding an instance, not a type --
+     that's a different, more specific error (ScopeOperatorOnInstanceError,
+     E029) when the compiler can tell it's a variable; this one fires when
+     it can't identify `LeftName` as anything at all.
+
+CORRECT SYNTAX:
+    import io;
+    io::printline("hello");        // module, imported first
+
+    enum Color { Red, Green, Blue }
+    immut c: Color = Color::Red;   // enum variant
+
+    mut p: Point = Point::new(1, 2);  // struct static constructor
+
+INCORRECT:
+    io::printline("hello");   // 'io' was never imported
+    // ERROR: 'io' isn't a known enum, struct, or module.
+
+FIX:
+  Double-check the spelling of the name before '::'. If it's a module,
+  make sure you actually wrote `import ModuleName;` earlier in the file --
+  `::` only works on names Turf can already resolve to something.

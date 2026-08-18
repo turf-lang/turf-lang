@@ -1,0 +1,36 @@
+TURF E041 -- UNKNOWN FUNCTION:
+
+CAUSE:
+  A function CALL (`name(args...)`) named a function the Resolver
+  couldn't find anywhere -- not declared locally, not a prelude
+  builtin, not visible through any import. Run through the same
+  suggestion engine as every other unknown-name diagnostic.
+
+CORRECT:
+    fn greet(name: string): void {
+        printline("Hello, " + name);
+    }
+
+    greet("world");   // 'greet' is declared above
+
+INCORRECT:
+    grete("world");
+    // ERROR: Unknown function 'grete'.
+    //   (suggests 'greet' when it's a close match)
+
+WHAT THIS ERROR IS NOT:
+  - Not ReferenceError (E040) -- that's a bare-value reference
+    (`x`), not a call (`x(...)`).
+  - Not StructMethodNotFoundError (E054) -- that's a `.`-qualified
+    method call on a struct instance (`obj.method()`), which is looked
+    up against that struct's own methods, not the general function
+    namespace.
+  - Not ModuleMethodNotFoundError (E026) -- that's a `::`-qualified
+    module call (`module::fn()`) where the module itself resolved fine
+    but doesn't have that function.
+
+FIX:
+  Check the spelling against the suggested name if one is given. If the
+  function genuinely doesn't exist yet, either declare it, or import
+  the module that defines it (`import moduleName;`) if it's meant to
+  come from the standard library or another file.

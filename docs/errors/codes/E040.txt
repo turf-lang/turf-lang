@@ -1,0 +1,21 @@
+I can't find anything with that name
+
+Turf looked everywhere it knows to look -- the current block, any block around it, the whole file -- and couldn't find anything called by that name. No variable, no struct, no enum, nothing. This is the most common error you'll hit while learning, and it's almost always one of two very fixable things.
+
+The first is a plain typo:
+
+    mut count: int = 0;
+    count = coutn + 1;   // typo! should be "count"
+
+If there's something similar already declared nearby, Turf will usually notice and suggest it for you right in the error message, so you can just apply the fix it's pointing at.
+
+The second is forgetting to declare the variable at all before using it:
+
+    mut n: int = undeclaredVariable;   // this was never created anywhere
+
+In Turf, you always create a variable with `mut` or `immut` before you can use it -- there's no way to just start using a name and have it exist automatically:
+
+    mut undeclaredVariable: int = 5;
+    mut n: int = undeclaredVariable;   // now this works
+
+If neither of those is it, one more thing worth checking: is the name something from a module you haven't imported yet? A function or type that lives in another module needs `import` (or the right `::` qualifier) before Turf can see it. Once the name resolves to something real, this error clears right up.

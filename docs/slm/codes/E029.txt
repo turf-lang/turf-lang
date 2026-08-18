@@ -1,0 +1,28 @@
+TURF E029 -- SCOPE OPERATOR ('::') USED ON AN INSTANCE VARIABLE:
+
+CAUSE:
+  `name::something` was written where `name` is a plain variable holding
+  an instance (a struct value), not a type, enum, or module. `::` is only
+  for namespace-qualified access -- enum variants, module functions/types,
+  and static methods, none of which need an instance in hand. An instance
+  variable's fields and methods are accessed with `.`, not `::`.
+
+CORRECT SYNTAX:
+    mut p: Point = Point::new(1, 2);   // '::' -- constructing via the TYPE name
+    p.sum();                            // '.'  -- calling a method on the INSTANCE
+
+INCORRECT:
+    mut p: Point = Point::new(1, 2);
+    p::sum();
+    // ERROR: 'p' is a variable, not a type or module -- '::' doesn't apply to it.
+
+WHAT THIS ERROR IS NOT:
+  - Not about the METHOD name being wrong -- `sum` may exist exactly as
+    spelled; the mistake is purely the operator (`::` vs `.`).
+  - `Point::new(...)`/`Point::default()` are still correct as-is -- those
+    use `::` on the TYPE name (`Point`), not an instance, which is exactly
+    what `::` is for.
+
+FIX:
+  Replace `::` with `.` whenever the thing on the left is a variable that
+  already holds an instance, not a type/enum/module name.

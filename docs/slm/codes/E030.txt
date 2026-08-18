@@ -1,0 +1,31 @@
+TURF E030 -- UNKNOWN MODULE SYMBOL:
+
+CAUSE:
+  `ModuleName::symbol` was used where `ModuleName` is a real, correctly
+  imported module, but `symbol` (a function or type name) isn't declared
+  anywhere in it. The module itself resolved fine -- this is purely about
+  what's inside it. Distinct from UnknownScopeQualifierError (E031), which
+  fires when the LEFT-hand name isn't a recognized module/enum/struct at
+  all.
+
+  Almost always one of:
+  1. A typo in the function/type name (`io::printlne` instead of
+     `io::printline`).
+  2. The symbol exists in a DIFFERENT module, not this one.
+  3. The symbol was renamed/removed from the module but call sites
+     weren't updated.
+
+CORRECT SYNTAX:
+    import io;
+    io::printline("hello");   // 'printline' really is declared in io.tr
+
+INCORRECT:
+    import io;
+    io::printlne("hello");
+    // ERROR: Module 'io' has nothing named 'printlne'.
+    //   (did-you-mean suggests 'printline' when it's a close match)
+
+FIX:
+  Check the module's own source file (or its stdlib location under
+  lib/std/) for the exact exported name and spelling. Module symbols are
+  case-sensitive, exactly like any other Turf identifier.

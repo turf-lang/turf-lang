@@ -1,0 +1,30 @@
+TURF E066 -- TYPE MISMATCH:
+
+CAUSE:
+  This is TypeChecker's general-purpose type-clash diagnostic -- the
+  catch-all for a value of one type being used somewhere a different,
+  incompatible type was expected, when the mismatch doesn't already have
+  its own more specific error class (unlike, say, ArgumentTypeError for
+  function-call arguments or ReturnTypeMismatchError for `return`). Real
+  examples include a variable's declared type not matching its
+  initializer, a duplicate `matches` pattern, a non-exhaustive enum match,
+  an out-of-range cast, or a missing struct-field initializer -- the exact
+  banner line above the message changes to describe which of these it is
+  ("Type mismatch!", "Non-exhaustive match!", "Missing initializer!",
+  "Duplicate pattern!", etc.), since not all of these are literally "two
+  types don't match."
+
+CORRECT USAGE:
+    mut n: int = 5;              // initializer type matches declared type
+
+INCORRECT:
+    mut n: int = "five";
+    // ERROR: Type mismatch!
+    //   <specific detail about the clash follows>
+
+FIX:
+  Read the specific message text under the "Type mismatch!" (or other)
+  banner carefully -- it names the two concrete types (or the specific
+  structural issue, e.g. which enum variant wasn't handled) involved. Make
+  the value's actual type match what was expected, or fix the declared
+  type if IT was actually the mistake.

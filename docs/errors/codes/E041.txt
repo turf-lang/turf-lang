@@ -1,0 +1,17 @@
+I don't know a function by that name
+
+You called a function -- something with parentheses after it, like `doSomething()` -- and Turf couldn't find any function with that exact name anywhere it looked: not in this file, not among the built-ins, not through anything you've imported.
+
+    fn greet(name: string): void {
+        printline("Hello, " + name);
+    }
+
+    greet("world");   // works -- "greet" is declared right above
+
+Usually this is just a small typo in the function's name:
+
+    grete("world");   // typo! should be "greet"
+
+Just like with variable names, Turf will often notice a close match nearby and suggest it for you, so check the error message for a suggestion before anything else.
+
+If it's not a typo, the function might genuinely not exist yet in your code (you can write it yourself with `fn`), or it might live in a standard-library module you haven't imported. Things like `strings::length(...)` or `mem::malloc(...)` need their module imported first with `import strings;` or `import mem;` before Turf can see them. Once the name matches something real and reachable, you're good to go.

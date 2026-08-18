@@ -1,0 +1,31 @@
+TURF E043 -- USE BEFORE DECLARATION:
+
+CAUSE:
+  A variable was referenced at a point in the source that comes BEFORE
+  its own `mut`/`immut` declaration statement, textually, within the
+  same function. The name is real and does get declared later in this
+  same scope -- it's specifically the ORDER that's wrong. Detected at
+  codegen time (when no storage/alloca exists yet for the name), run
+  through the same suggestion engine as every other unknown-name
+  diagnostic in case it's actually an unrelated typo instead.
+
+CORRECT:
+    mut x: int = 5;
+    mut y: int = x + 1;   // x is declared above this line
+
+INCORRECT:
+    mut y: int = x + 1;   // ERROR: x isn't declared until the next line
+    mut x: int = 5;
+
+WHAT THIS ERROR IS NOT:
+  - Not ReferenceError (E040) -- that name doesn't exist ANYWHERE in
+    scope; this one does exist, just later in the same block.
+  - Not DefiniteAssignmentError (E008) -- that's about a declaration
+    that already ran but wasn't assigned on every control-flow path;
+    this is about the declaration statement itself not having executed
+    yet at all, because it's later in the source.
+
+FIX:
+  Move the declaration above its first use, or move the use below the
+  declaration -- either way, Turf executes statements top-to-bottom
+  within a block, so the `mut`/`immut` line has to come first.

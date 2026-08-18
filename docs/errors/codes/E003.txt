@@ -1,0 +1,21 @@
+The number of values you gave doesn't match the array's declared size
+
+When you declare an array with a size, like `int[3]`, and give it a list of starting values, the number of values in that list has to match the size exactly -- not more, not fewer.
+
+    immut primes: int[3] = [2, 3, 5];   // correct -- 3 values for size 3
+
+If you give too many or too few:
+
+    immut primes: int[3] = [2, 3, 5, 7];   // 4 values, but size is 3
+
+Turf won't quietly drop the extra value or leave a slot empty -- it stops and tells you exactly how many values it expected versus how many you gave, so nothing about your array's contents is left ambiguous.
+
+To fix it, just make the two numbers agree. Either change the size to match your list:
+
+    immut primes: int[4] = [2, 3, 5, 7];
+
+...or trim the list to match the size:
+
+    immut primes: int[3] = [2, 3, 5];
+
+Either way works -- pick whichever one actually reflects what you meant the array to hold. This is an easy one to fix once you spot the mismatch, and Turf tells you both numbers up front so you don't have to go count them yourself.

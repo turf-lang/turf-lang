@@ -1,0 +1,20 @@
+You used something other than a whole number to index an array
+
+Array indices in Turf have to be plain integers -- things like 0, 1, 2, and so on. If you try to use a decimal number, a string, a bool, or anything else as the position inside the square brackets, the compiler stops you here.
+
+    immut primes: int[3] = [2, 3, 5];
+    mut i: int = 1;
+    mut val: int = primes[i];      // correct -- 'i' is a whole number
+
+If you use something that isn't a whole number:
+
+    mut d: double = 1.0;
+    mut val: int = primes[d];      // 'd' is a double, not an int
+
+Even though `1.0` looks like it obviously means index 1, Turf won't guess for you -- it wants you to be explicit, since not every double cleanly represents a whole number (what would `primes[1.5]` even mean?).
+
+If the value you have really is meant to be a whole number, convert it first with `to int`:
+
+    mut val: int = primes[d to int];
+
+Once the value you're indexing with is a genuine `int`, this error goes away. This one usually shows up early on, right around when you're first mixing doubles and array indices together -- a quick `to int` sorts it out.

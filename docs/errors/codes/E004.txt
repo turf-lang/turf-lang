@@ -1,0 +1,17 @@
+One of the values in your array's initializer list is the wrong type
+
+An array holds one specific type of value -- an `int[3]` holds three ints, a `string[2]` holds two strings, and so on. If even one value in the initializer list doesn't match that type, Turf catches it right away instead of letting a mixed-up array sneak into your program.
+
+    immut primes: int[3] = [2, 3, 5];   // correct -- every value is an int
+
+If one of the values is the wrong type:
+
+    immut primes: int[3] = [2, 3, "five"];   // "five" is a string, not an int
+
+Turf tells you exactly which array and which type it expected versus what it actually found, so you don't have to scan the whole list yourself looking for the odd one out.
+
+To fix it, make sure every value in the list is really the array's declared type. If you have a value of a different type that should logically become that type, convert it explicitly:
+
+    immut primes: int[3] = [2, 3, 5];   // just use the right value directly
+
+This is a great one to double-check whenever you're typing out a long list of values by hand -- it's easy for one typo (like quoting a number by accident) to slip in.

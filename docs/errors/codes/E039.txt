@@ -1,0 +1,19 @@
+You asked for a variant that doesn't exist on this enum (or error type)
+
+Enums and `error` types in Turf only have the variants you actually listed when you declared them. This error means you wrote `TypeName::SomeVariant`, and `TypeName` is real and correctly declared, but `SomeVariant` isn't one of the names inside its `{ }` list.
+
+Here's a correctly declared enum and a correct use of one of its variants:
+
+    enum Color { Red, Green, Blue }
+    immut c: Color = Color::Red;
+
+And here's the mistake -- asking for a variant that was never declared:
+
+    immut c: Color = Color::Purple;
+    // ERROR: Enum 'Color' has no variant 'Purple'.
+
+Just like with struct fields, if your typo is close to a real variant name, Turf will usually suggest the one it thinks you meant.
+
+The fix is to go back to the enum's (or `error` type's) own declaration and check the exact spelling of its variants -- they're case-sensitive, just like any other name in Turf. If the variant genuinely doesn't exist yet and you need it, you'll have to add it directly inside the type's own `{ }` list, since there's no separate way to extend one afterward.
+
+This applies the exact same way to `error` types (declared with the `error` keyword instead of `enum`) -- they use the same variant-name rules under the hood.

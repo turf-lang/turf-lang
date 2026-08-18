@@ -1,0 +1,30 @@
+TURF E064 -- RETURN TYPE MISMATCH:
+
+CAUSE:
+  A function's `return` statement produced a value whose type doesn't
+  match the function's declared return type.
+
+CORRECT USAGE:
+    fn square(n: int): int {
+        return n * n;    // int -- matches the declared return type
+    }
+
+INCORRECT:
+    fn square(n: int): int {
+        return "nine";
+        // ERROR: Wrong return type in 'square'!
+        //   The function returns 'int', but you're trying to return 'string'.
+    }
+
+WHAT THIS ERROR IS NOT:
+  - Not about a MISSING return on some path (that's a separate error,
+    "missing return").
+  - Not about the function's PARAMETERS -- this is purely about the value
+    given to `return`.
+
+FIX:
+  Either change the returned expression so its type matches the function's
+  declared return type, or change the function's own declared return type
+  if the value you're returning was actually correct. A numeric value can
+  be turned into text with `expr to string` if that's genuinely what's
+  needed.

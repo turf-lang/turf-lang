@@ -1,0 +1,31 @@
+You tried to call a method that doesn't exist on this struct
+
+This is the method-call sibling of the "unknown struct field" error -- same idea, just for something you're trying to call instead of something you're trying to read. Every struct only has the methods you actually declared for it (with `fn StructName.methodName(...)`), and if you call a name that isn't one of them, Turf stops you before your program runs with a call that goes nowhere.
+
+The most common reason is a simple typo. Here's a struct with an `increment` method:
+
+    fn Counter.increment(): void {
+        self.val = self.val + 1;
+    }
+
+    mut c: Counter = Counter::default();
+    c.increment();   // correct -- calls the real method
+
+If you accidentally typed the method name wrong:
+
+    c.incrament();   // typo!
+
+...Turf will tell you exactly which method it thinks you meant, so you can just fix the spelling and move on, the same way it does for a misspelled field.
+
+A couple of other things worth checking if it's NOT a typo:
+
+  - Are you calling the method on the right variable? It's easy to mix up two structs that have similarly-named methods.
+  - Did you mean to read a field instead? `c.val` and `c.val()` are different things -- one reads a stored value, the other tries to call it like a function. If `val` is a field, not a method, drop the parentheses.
+  - Is the method declared `static`? A static method is called with `::` on the struct's type name, never `.` on an instance -- `Counter.increment()` would also fail this way if `increment` were static, since a static method isn't reachable through `.` at all.
+  - If the method really should exist and just hasn't been written yet, declare it on the struct:
+
+    fn Counter.reset(): void {
+        self.val = 0;
+    }
+
+Once the method name matches exactly what the struct declares (and you're using `.` or `::` correctly for how it was declared), this error goes away and your code compiles like normal. Just like a misspelled field, this is a very normal thing to run into while you're still learning your way around a struct's methods -- nothing to worry about.

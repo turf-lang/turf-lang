@@ -1,0 +1,23 @@
+You freed the same memory twice
+
+When you call `mem::free(buf)`, you're telling the computer "I'm done with this memory, it's safe to give back." Once that happens, the memory isn't yours to manage anymore -- so freeing the exact same pointer a second time is a real bug, not just a style issue. It confuses the system that keeps track of what memory is in use, which can cause strange crashes or corrupted data later in ways that are genuinely hard to track down. Turf catches this for you at compile time instead, before it ever becomes that kind of mess.
+
+Here's the mistake:
+
+    unsafe {
+        mut buf: int* = mem::malloc(40);
+        mem::free(buf);
+        mem::free(buf);   // buf was already freed on the line above
+    }
+
+And here's the safe version -- free it once, and set it to `null` afterward so there's nothing left to accidentally free again:
+
+    unsafe {
+        mut buf: int* = mem::malloc(40);
+        mem::free(buf);
+        buf = null;
+    }
+
+If you're seeing this error, look for a code path where the same pointer might get freed more than once -- often this happens when a function has multiple `return` points and more than one of them tries to clean up the same allocation. Setting a pointer to `null` right after freeing it is a good habit in general, since it makes an accidental second free much easier to spot.
+
+Manual memory management (the `unsafe`/`mem::malloc`/`mem::free` world) is genuinely one of the trickier things to get right in any language -- this error existing at all is Turf catching a mistake for you before it turns into a much harder bug to find later.

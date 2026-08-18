@@ -1,0 +1,17 @@
+You defined a function inside another function
+
+Turf doesn't allow "nested" functions -- a `fn` has to live at the top level of your file (or be attached to a struct as a method), never tucked inside another function's `{ }` body. If you write a function definition inside another one, the compiler will stop you here.
+
+Here's the fix -- just pull the inner function out to the top level:
+
+    fn outer(): int {
+        return helper(2);
+    }
+
+    fn helper(x: int): int {
+        return x * 2;
+    }
+
+This is different from what a lot of other languages allow (Python and JavaScript both let you define a function inside another one), so it's a really common thing to trip over early on if you're coming from one of those. In Turf, every function name lives in one flat, top-level list, so there's no real downside to moving it out -- it won't clash with anything just because it's no longer "hidden" inside another function.
+
+If the function only makes sense in the context of a particular struct (like a helper that only operates on that struct's data), consider making it a method on the struct instead, declared with `fn StructName.methodName(...): ReturnType { ... }` and called as `instance.methodName(...)`.

@@ -1,0 +1,33 @@
+TURF E038 -- NESTED FUNCTION DEFINITION:
+
+CAUSE:
+  A `fn` declaration was written inside the body of another function. Turf
+  does not support nested/local function definitions -- every function
+  (free function, struct method, or module function) must be declared at
+  the top level of a file, never inside a `{ }` block that belongs to
+  another function.
+
+CORRECT SYNTAX:
+    fn outer(): int {
+        return helper(2);
+    }
+
+    fn helper(x: int): int {
+        return x * 2;
+    }
+
+INCORRECT:
+    fn outer(): int {
+        fn helper(x: int): int {   // ERROR: nested function definitions
+            return x * 2;          //         are not allowed: 'helper'
+        }
+        return helper(2);
+    }
+
+FIX:
+  Move the inner function out to the top level of the file (or into a
+  struct as a `.`-declared method, if it's conceptually tied to that
+  struct). If you only needed the inner function to avoid polluting the
+  outer scope with a name, that's fine -- Turf's flat top-level namespace
+  already keeps function names distinct from variable names, so there's no
+  collision risk from moving it out.

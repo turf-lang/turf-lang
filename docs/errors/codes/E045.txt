@@ -1,0 +1,17 @@
+You tried to construct a struct through an existing instance instead of its type
+
+In Turf, `new` and `default` are special -- they're the only two ways to build a struct, and they're always called on the struct's TYPE NAME with `::`, never on a variable you already have with `.`. Even though `.new` looks like it's declared as a normal method internally, calling it is reserved specifically for construction.
+
+Here's the correct way to build a struct:
+
+    mut p: Point = Point::new(1, 2);
+    mut d: Point = Point::default();
+
+If you already have a `Point` called `p` and try to call `.new(...)` or `.default()` on it directly, Turf stops you:
+
+    p.new(3, 4);      // ERROR: 'new' can't be called on an instance with '.'
+    p.default();       // ERROR: 'default' can't be called on an instance with '.'
+
+It's an easy slip to make, especially if you're used to languages where "calling a constructor again" on an existing object is a normal thing to do. In Turf it isn't -- construction always makes a brand-new value, and it always goes through `::` on the type name, not `.` on a variable.
+
+If what you actually wanted was to reset an existing instance's fields back to some starting values, that's not something `new`/`default` do for you automatically -- write your own ordinary method (with any name other than `new` or `default`) that assigns the fields you want, and call that through `.` like any other method.

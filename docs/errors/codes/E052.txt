@@ -1,0 +1,18 @@
+You called a static method through an instance with '.'
+
+A `static` method on a struct doesn't take a `self` at all -- it's not tied to any one instance, it belongs to the type itself. That means it should always be called with `::` on the struct's name, never with `.` on a variable you're holding, because `.` always implies "pass this instance in," and a static method has nowhere for that instance to go.
+
+Here's a static method declared correctly, and called the right way:
+
+    fn Point.origin() static: Point {
+        return Point::default();
+    }
+
+    Point::origin();   // correct -- called on the type, with '::'
+
+If you instead try to call it through an actual instance with `.`, Turf catches it:
+
+    mut p: Point = Point::new(1, 2);
+    p.origin();   // ERROR: 'origin' is a static method -- it can't be called through an instance with '.'
+
+The fix is just to swap `p.origin()` for `Point::origin()` -- use the type name instead of your variable. It's an easy mistake to make since ordinary (non-static) methods use `.` on an instance, and it's not always obvious from the call site alone whether a method was declared `static` or not -- if you're unsure, check the method's own declaration for the `static` keyword.

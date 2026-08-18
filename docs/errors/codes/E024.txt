@@ -1,0 +1,19 @@
+Two different imports both want to give you something called the same thing
+
+Turf lets you import a specific name straight out of a module with `import module::name;`, so you can call it without qualifying it every time. But if two different modules you import both happen to have something with the same bare name, Turf can't guess which one you mean when you just write the name by itself -- so it stops and asks you to be specific.
+
+    import shapes::area;
+    import geometry::area;
+
+Both of these are real functions, each declared in its own module -- neither one is a mistake by itself. The problem is only that once they're both imported under the bare name `area`, Turf genuinely doesn't know which `area` you mean if you just write `area(...)`.
+
+The easiest fix is to stop relying on the bare name and just qualify one (or both) calls with their module name instead:
+
+    shapes::area(...);
+    geometry::area(...);
+
+If you only actually need one of the two, you can also narrow the second import so it doesn't bring in the conflicting name at all -- for example, if you imported everything from a module with a wildcard, switch to listing only the specific names you need:
+
+    import geometry::[perimeter];   // no longer imports 'area', no more collision
+
+Either way works fine -- pick whichever keeps your code clearest. This kind of naming clash is pretty rare in small projects, but it's a good thing Turf catches it the moment it happens instead of letting one function quietly shadow the other.

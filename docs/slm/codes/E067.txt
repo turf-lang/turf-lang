@@ -1,0 +1,25 @@
+TURF E067 -- VOID VALUE USED AS A VALUE:
+
+CAUSE:
+  The result of a `void`-returning function was used somewhere a value is
+  required (assigned to a variable, passed as an argument, used in an
+  expression). A `void` function produces no value at all, so there is
+  nothing to use.
+
+CORRECT USAGE:
+    fn logMessage(msg: string): void {
+        io::printline(msg);
+    }
+
+    logMessage("hello");    // fine -- called as a plain statement
+
+INCORRECT:
+    mut result: string = logMessage("hello");
+    // ERROR: You can't use a void value here!
+    //   <context describing where the void result was used>
+
+FIX:
+  Call the `void` function as its own statement (don't assign its result
+  or pass it into an expression). If you actually need a return value,
+  change the function's declared return type from `void` to the real type
+  and add a `return` statement that produces it.

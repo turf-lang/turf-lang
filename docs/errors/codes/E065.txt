@@ -1,0 +1,19 @@
+You tried to convert something to a string that Turf doesn't know how to convert
+
+Turf's `expr to string` conversion only understands a small, specific set of types: whole numbers, decimal numbers, and true/false values.
+
+    mut s1: string = 42 to string;      // "42"
+    mut s2: string = 3.14 to string;    // "3.14"
+    mut s3: string = true to string;    // "true"
+
+If you try it on something else, like a whole struct:
+
+    mut bad: string = myStruct to string;
+
+...Turf tells you which type it couldn't convert, because there's no automatic, one-size-fits-all way to turn an arbitrary struct into readable text -- it doesn't know which fields you'd want shown, or in what order.
+
+The fix is to build the string yourself out of the pieces that ARE convertible. You can combine strings with `+`, so something like this works today:
+
+    mut description: string = "x=" + (p.x to string) + ", y=" + (p.y to string);
+
+If you find yourself doing this for the same struct in a lot of places, it's worth writing a small helper function that takes the struct and returns the formatted `string`, so you only have to write the field-by-field logic once.

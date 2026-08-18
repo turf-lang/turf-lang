@@ -1,0 +1,36 @@
+TURF E015 -- SYNTAX ERROR (GENERAL PARSER CATCH-ALL):
+
+CAUSE:
+  The parser hit source text that doesn't match the grammar at that
+  point -- a missing/extra token, wrong punctuation, or something in the
+  wrong order. This class wraps an arbitrary explanation string set per
+  call site (dozens of them across the parser), so the specific message
+  always names the exact thing the parser expected, e.g. "Expected '('
+  after 'fn' in a function type", "Expected a type name", "Expected ']'
+  to close array size".
+
+CORRECT:
+    fn add(a: int, b: int): int {
+        return a + b;
+    }
+
+INCORRECT (a few common shapes):
+    fn add(a: int, b: int) int {    // ERROR: missing ':' before return type
+        return a + b;
+    }
+
+    struct Point {
+        x: int
+        y: int                       // ERROR: missing ',' between fields
+    }
+
+WHAT THIS ERROR IS NOT:
+  Not KeywordError (E014) -- that's specifically a misspelled reserved
+  word; this is any other shape-of-the-code mistake (wrong punctuation,
+  missing token, wrong nesting).
+
+FIX:
+  Read the specific message -- it names exactly what the parser expected
+  and didn't find. Check punctuation (',', ':', ';', matching
+  brackets/braces/parens) around the reported line and column first;
+  that covers the large majority of real cases.

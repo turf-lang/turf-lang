@@ -1,0 +1,35 @@
+TURF E018 -- USE AFTER FREE:
+
+CAUSE:
+  A raw pointer was read from, written to, or otherwise used AFTER
+  `mem::free(...)` was called on it. Once freed, that memory is no longer
+  guaranteed to hold what you put there -- it may have been reused for
+  something else entirely by the time you touch it again. Turf's alias
+  analysis tracks this statically and rejects it at compile time.
+
+CORRECT USAGE:
+    unsafe {
+        mut buf: int* = mem::malloc(40);
+        unsafe { buf[0] = 5; }
+        mem::free(buf);
+        // buf is not touched again after this point
+    }
+
+INCORRECT:
+    unsafe {
+        mut buf: int* = mem::malloc(40);
+        mem::free(buf);
+        unsafe { buf[0] = 5; }
+        // ERROR: Oops! You're using memory from 'buf' after it was freed.
+    }
+
+WHAT THIS ERROR IS NOT:
+  - Not about freeing the same pointer twice -- that's DoubleFreeError
+    (E017), the closely related sibling check.
+
+FIX:
+  Move all uses of the pointer to BEFORE the `mem::free(...)` call, or
+  restructure the code so the free genuinely happens last. Setting the
+  pointer to `null` immediately after freeing is good practice -- it turns
+  an accidental later use into a null-dereference you'll notice
+  immediately, rather than silently reading stale/reused memory.

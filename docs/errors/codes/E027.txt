@@ -1,0 +1,17 @@
+Turf couldn't find a module by this name anywhere
+
+When you write `import moduleName;`, Turf looks for a file called `moduleName.tr`, both in the standard library and in your own project. This error means it searched and simply couldn't find one anywhere.
+
+    import strnigs;
+
+There's no module called `strnigs` -- it's a typo for `strings`, one of Turf's standard library modules. Fixing the spelling solves it:
+
+    import strings;
+
+The most common causes of this error, in order of how often they actually happen:
+
+  - A typo in the module name -- by far the most common cause, exactly like the example above.
+  - You meant to write your own module, but the file doesn't exist yet, or it's named differently than you think (module names match the `.tr` filename exactly, without the `.tr` extension).
+  - You meant a standard library module but got the name slightly wrong -- it's worth double-checking the exact name if you're not sure (for example, it's `strings`, not `string`).
+
+If none of those explain it and you're confident the file really does exist, it's worth checking that your project's search setup is pointing at the right place -- but for the vast majority of the time you'll see this error, it really is just a small typo in the module name.

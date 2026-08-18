@@ -1,0 +1,23 @@
+You passed a function an argument of the wrong type
+
+Every Turf function has a fixed shape -- each parameter has its own declared type, and every call has to match that shape exactly. Turf checks this at compile time, before your program ever runs, so a mismatch like this can't sneak through.
+
+Here's a function with a clear shape:
+
+    fn greet(name: string, times: int): void {
+        mut i: int = 0;
+        while i < times {
+            io::printline(name);
+            i = i + 1;
+        }
+    }
+
+    greet("Ada", 3);   // name gets a string, times gets an int -- matches
+
+If you swap the arguments, or pass the wrong kind of value:
+
+    greet(3, "Ada");
+
+...Turf tells you exactly which parameter (by name, and by which argument position) got the wrong type, and what type it actually expects versus what you gave it.
+
+The most common causes are simply passing arguments in the wrong order, or passing a value you assumed was one type when it's actually another. Since Turf doesn't automatically convert between types for you (a number won't silently become text, for example), double-check the function's declaration and match your call up to it argument by argument.

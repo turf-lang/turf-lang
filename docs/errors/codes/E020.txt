@@ -1,0 +1,23 @@
+You declared the same extern function two different ways
+
+`extern fn` is how Turf talks to real C functions, and it identifies them purely by name -- not by their full signature the way ordinary Turf functions are. That means if you (or two different files you both import) declare `extern fn` for the same name but describe it with different parameter types or a different return type, Turf can no longer tell which description is the real one.
+
+    // strings.tr
+    extern fn strlen(s: string): int32;
+
+    // net.tr
+    extern fn strlen(s: int32): int32;
+
+Both of these claim to describe the C function `strlen`, but they disagree about what it takes as a parameter. Turf has no way to know which one is actually correct, so it stops and asks you to fix it rather than silently picking one and possibly miscompiling every call to the other.
+
+Declaring the exact same `extern fn` more than once is completely fine, by the way -- it's common for two different library files to both need the same C function (like `strlen`) and both declare it. That's not an error, as long as every declaration matches word for word.
+
+To fix this, make sure every `extern fn` for a given name has the exact same parameter types, return type, and does the same thing:
+
+    // strings.tr
+    extern fn strlen(s: string): int32;
+
+    // net.tr
+    extern fn strlen(s: string): int32;   // now they match
+
+If you actually meant to call two genuinely different C functions, give one of them a different name on the Turf side instead of reusing the same one.

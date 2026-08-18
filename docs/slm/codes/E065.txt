@@ -1,0 +1,25 @@
+TURF E065 -- STRING CONVERSION:
+
+CAUSE:
+  `expr to string` was used on a type that has no supported conversion to
+  `string`. Only a fixed, small set of types can be converted this way.
+
+SUPPORTED CONVERSIONS:
+    intExpr to string    - turns a whole number into text
+    doubleExpr to string - turns a decimal number into text
+    boolExpr to string   - gives you "true" or "false"
+
+CORRECT USAGE:
+    mut s1: string = 42 to string;         // "42"
+    mut s2: string = 3.14 to string;       // "3.14"
+    mut s3: string = true to string;       // "true"
+
+INCORRECT:
+    mut bad: string = myStruct to string;
+    // ERROR: I can't convert 'MyStruct' to a string!
+
+FIX:
+  Only convert `int`, `double`, or `bool` expressions with `to string`.
+  For a struct, either build the string yourself field-by-field (e.g.
+  `"x=" + (p.x to string)`), or add a dedicated method on the struct that
+  returns a `string`.

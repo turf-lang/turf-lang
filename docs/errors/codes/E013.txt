@@ -1,0 +1,17 @@
+You declared a variable right after a return, so it can never run
+
+Just like any other code, a variable declaration placed right after a `return` can never actually execute -- the function already handed back its answer and left before your program ever gets to that line.
+
+    fn compute(): int {
+        return 10;
+        mut result: int = 5;   // never happens -- return already left
+    }
+
+If you meant for `result` to be used to compute the return value, move the declaration up before the `return`:
+
+    fn compute(): int {
+        mut result: int = 10;
+        return result;
+    }
+
+This is basically the same idea as "code after return can't run" (you may see this described elsewhere as a statement-after-terminator mistake) -- Turf just happens to catch this particular case (a declaration specifically) at a slightly different point while compiling. The fix is the same either way: move the code before the `return`, or delete it if it isn't needed.

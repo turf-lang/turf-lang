@@ -1,0 +1,29 @@
+TURF E063 -- POWER ARGUMENT TYPE:
+
+CAUSE:
+  `power(base, exponent)` was called with one or both arguments not being
+  an `int` or `double`. `power` raises the first number to the power of the
+  second, so both sides have to be numeric.
+
+VALID OVERLOADS:
+    power(int, int)       → int
+    power(int, double)    → double
+    power(double, int)    → double
+    power(double, double) → double
+
+CORRECT USAGE:
+    mut a: int = power(2, 10);          // 1024
+    mut b: double = power(2.0, 0.5);    // square root of 2
+
+INCORRECT:
+    mut bad: int = power("2", 10);
+    // ERROR: 'power' only works with int or double, but you gave it 'string' and 'int'.
+
+    mut bad2: int = power(2, true);
+    // ERROR: 'power' only works with int or double, but you gave it 'int' and 'bool'.
+
+FIX:
+  Make sure BOTH arguments are `int` or `double` -- mixing the two is fine
+  (the overload table above covers every int/double combination and picks
+  `double` as the result whenever either side is a `double`), but neither
+  side may be a `string`, `bool`, `char`, or anything else non-numeric.

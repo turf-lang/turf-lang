@@ -1,0 +1,50 @@
+TURF E035 -- INVALID TRANSITION:
+
+CAUSE:
+  Inside a `compare`/`matches` arm that has narrowed a `machine`-typed
+  receiver to one specific state, `.transition(TargetState)` was called
+  with a target the declared machine has no edge to FROM that narrowed
+  state. This is a real compile-time error, not deferred to a runtime
+  panic, because the narrowed state is statically known at that point in
+  the code.
+
+  A `machine` declares its states and the only legal edges between them:
+    machine ConnectionState {
+        Idle -> Connecting,
+        Connecting -> Connected,
+        Connecting -> Failed,
+        Connected -> Closing,
+        Closing -> Idle,
+    }
+
+CORRECT USAGE:
+    mut conn: ConnectionState = ConnectionState::Idle;
+    compare conn {
+        matches ConnectionState::Idle:
+            conn.transition(ConnectionState::Connecting);   // Idle -> Connecting is declared
+        done
+        otherwise:
+            mut noop: int = 0;
+    }
+
+INCORRECT:
+    compare conn {
+        matches ConnectionState::Idle:
+            conn.transition(ConnectionState::Closing);   // no Idle -> Closing edge
+        done
+        otherwise:
+            mut noop: int = 0;
+    }
+    // ERROR: 'ConnectionState' has no transition from 'Idle' to 'Closing'.
+
+WHAT THIS ERROR IS NOT:
+  - Not about the target being the wrong TYPE of machine entirely -- that's
+    InvalidTransitionTargetError (a different code) instead.
+  - Not about `.transition()` called on an UNNARROWED receiver (outside any
+    `matches` arm) -- that case can't be checked at compile time and is
+    instead a runtime panic if the edge doesn't exist.
+
+FIX:
+  Either add the missing edge to the machine's declaration
+  (`FromState -> ToState,`), or change the call to transition to a state
+  the current narrowed state actually has a declared edge to.

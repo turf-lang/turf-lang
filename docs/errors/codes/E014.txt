@@ -1,0 +1,17 @@
+I don't recognize that word here
+
+Turf expected a real keyword at this spot in your code -- something like `if`, `while`, `struct`, or `return` -- but the word it found isn't one of Turf's actual keywords. This is almost always a small typo.
+
+    if x > 0 {
+        return x;
+    }
+
+If you accidentally typed it wrong:
+
+    iff x > 0 {   // typo! Turf doesn't know the word "iff"
+        return x;
+    }
+
+The good news is Turf usually already knows what you meant and will suggest the real keyword right in the error message, so you can just fix the spelling and keep going.
+
+If you're not sure what the actual keyword should be, it's worth glancing at a piece of working Turf code with a similar structure -- `if`/`elseif`/`else`, `while`, `for ... in ... step`, `struct`, `enum`, `fn`, `return`, `mut`/`immut`, and a handful of others are the reserved words Turf understands. Once the spelling matches one of those exactly, you're all set.

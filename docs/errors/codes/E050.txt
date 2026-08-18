@@ -1,0 +1,27 @@
+You called new() on a struct that never defined one
+
+`StructName::new(...)` only works if that struct actually has a `.new` constructor written for it somewhere. Unlike calling a regular method with a typo, there's no "did you mean" fallback here -- a struct either has a `new` you can call with arguments, or it doesn't, and this error means yours doesn't (yet).
+
+For example, this struct never declared a `.new`:
+
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    mut p: Point = Point::new(1, 2);   // ERROR: 'Point' has no constructor -- 'Point::new(...)' can't be called
+
+You've got two good options here, depending on what you actually want:
+
+If you want to construct it with specific starting values, write a `.new` for it:
+
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;
+    }
+
+If you just want an instance with every field zeroed out and don't need custom logic, you don't need to write anything at all -- every struct automatically gets a `::default()` you can call instead:
+
+    mut p: Point = Point::default();
+
+So if you're seeing this error and don't actually need custom construction logic, switching from `Point::new(1, 2)` to `Point::default()` (and then setting fields manually with `p.x = 1;` afterward, if needed) is often the quickest fix.

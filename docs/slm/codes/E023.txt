@@ -1,0 +1,26 @@
+TURF E023 -- EXPORT OUTSIDE TOP LEVEL:
+
+CAUSE:
+  `export` was used on a declaration inside a function body. `export` only
+  makes sense at the top level of a file/module -- something meant to be
+  shared with OTHER files can't simultaneously be local to one function
+  call.
+
+EXAMPLE:
+    fn setup(): void {
+        export immut ready: bool = true;   // ERROR: inside a function
+    }
+
+CORRECT:
+    export immut ready: bool = true;   // top level of the file
+
+    fn setup(): void {
+        immut localFlag: bool = true;   // fine -- no 'export', local is OK
+    }
+
+FIX:
+  Move the declaration to the top level of the file (outside any function)
+  if it genuinely needs to be shared with other files. If it was only ever
+  meant to be used inside that one function, just drop the `export`
+  keyword -- an ordinary `mut`/`immut` declaration works fine inside a
+  function body.

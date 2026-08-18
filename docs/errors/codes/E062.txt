@@ -1,0 +1,15 @@
+You assigned null to a variable that isn't a pointer
+
+`null` means "no value yet," and in Turf that concept only applies to pointer types -- variables declared with a `*` in their type, like `int*`. A plain `int`, `double`, `bool`, `string`, `char`, or ordinary struct always holds a real value; there's no such thing as an "empty" one of those, so `null` doesn't make sense for them.
+
+This is fine, because `ptr` is a pointer type:
+
+    mut ptr: int* = null;
+
+This isn't, because `n` is a plain `int`, not a pointer:
+
+    mut n: int = null;
+
+Turf tells you the variable's actual declared type, so you can see right away why `null` doesn't fit there.
+
+If you really wanted a placeholder value you can check for later, you'll need to declare the variable as a pointer type (`int*` instead of `int`). If you just wanted a normal starting value, skip the `= null` entirely -- declaring a variable without an initializer already gives it a sensible default (zero for numbers, false for bools, and so on), which is almost always what you actually want here.

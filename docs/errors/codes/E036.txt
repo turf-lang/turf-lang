@@ -1,0 +1,27 @@
+You tried to transition into a state that belongs to a different machine
+
+Turf's `machine` construct lets you declare a set of states and the moves allowed between them, like `machine ConnectionState { Idle -> Connecting, Connecting -> Connected }`. When you call `.transition(...)`, the thing inside the parentheses has to be one of THAT SAME machine's own states.
+
+Here's a valid transition:
+
+    machine ConnectionState {
+        Idle -> Connecting,
+        Connecting -> Connected,
+    }
+
+    mut conn: ConnectionState = ConnectionState::Idle;
+    conn.transition(ConnectionState::Connecting);   // ConnectionState -> ConnectionState, matches
+
+If you pass a state from a totally different machine, or something that isn't a state at all:
+
+    machine LightState {
+        Off -> On,
+    }
+
+    conn.transition(LightState::On);   // conn is a ConnectionState, not a LightState!
+
+...Turf stops you, because `conn` can never actually become a `LightState` -- the two machines are unrelated types, even if their state names happen to look similar.
+
+To fix it, double-check which machine's state you meant to use, and make sure it's a state defined on the exact machine type your variable was declared with. If the state name has a typo or doesn't exist on any machine at all, you'll actually see a different error first (an "unknown variant" error) -- this one specifically means the state exists, just on the wrong machine.
+
+This kind of mix-up is easy to make once you have a couple of machines in the same file -- Turf catching it here means you find out immediately, not while debugging a confusing runtime issue later.

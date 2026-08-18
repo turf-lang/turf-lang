@@ -1,0 +1,42 @@
+TURF E036 -- INVALID TRANSITION TARGET:
+
+CAUSE:
+  `.transition(X)` was called on a `machine`-typed receiver, but `X` is not
+  a state belonging to THAT machine's type at all -- either a state of a
+  completely different `machine`, or an expression that isn't a state
+  reference in the first place (e.g. `conn.transition(5)`).
+
+  This is a type-level mismatch, distinct from InvalidTransitionError (E035),
+  which fires when X IS a real state of the right machine, just not one
+  reachable from the current narrowed state.
+
+CORRECT USAGE:
+    machine ConnectionState {
+        Idle -> Connecting,
+        Connecting -> Connected,
+    }
+    machine LightState {
+        Off -> On,
+        On -> Off,
+    }
+
+    mut conn: ConnectionState = ConnectionState::Idle;
+    conn.transition(ConnectionState::Connecting);   // ConnectionState state -> fine
+
+INCORRECT:
+    conn.transition(LightState::On);
+    // ERROR: 'transition' target must be a state of 'ConnectionState', got 'LightState'.
+
+    conn.transition(5);
+    // ERROR: 'transition' target must be a state of 'ConnectionState', got 'int'.
+
+WHAT THIS ERROR IS NOT:
+  - Not "the state name doesn't exist on this machine at all" -- that
+    (`ConnectionState::Bogus`) is caught earlier, during name resolution,
+    as NoSuchVariantError, before this type check ever runs.
+  - Not InvalidTransitionError (E035) -- this class is purely about the
+    TYPE of the argument, independent of which state you're currently in.
+
+FIX:
+  Pass a state that belongs to the SAME machine type as the receiver, e.g.
+  `MachineName::SomeState`.

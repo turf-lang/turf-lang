@@ -1,0 +1,35 @@
+TURF E013 -- UNREACHABLE CODE:
+
+CAUSE:
+  A specific piece of code -- currently: a variable declaration -- appears
+  after a terminator (`return`, by default) in the same block, so it can
+  never actually execute. This is a narrower, Codegen-level sibling of
+  StatementAfterTerminatorError (E012): E012 catches the general "any
+  statement after return/break/continue" case earlier (at the CFG/parse
+  level); this one is a defensive second check specifically for
+  declarations, phrased around what kind of code is unreachable ("this
+  declaration will never happen...") rather than what came before it.
+
+CORRECT USAGE:
+    fn compute(): int {
+        mut result: int = 10;
+        return result;
+    }
+
+INCORRECT:
+    fn compute(): int {
+        return 10;
+        mut result: int = 5;   // ERROR: this declaration will never
+                               // happen because you used 'return' before it!
+    }
+
+WHAT THIS ERROR IS NOT:
+  - Not about an entire unreachable BLOCK (an `else` branch that can never
+    run because the `if` is always true) -- that's a lint-level warning,
+    not this error.
+  - See StatementAfterTerminatorError (E012) for the general form of this
+    mistake covering non-declaration statements too.
+
+FIX:
+  Delete the unreachable declaration, or move it to before the `return`
+  (or whichever terminator precedes it) if it's actually needed.

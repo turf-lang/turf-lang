@@ -1,0 +1,20 @@
+You declared the same variable twice in the same scope
+
+Once you've created a variable with `mut` or `immut`, you don't declare it again to change its value later -- you just assign to its name directly. This error means Turf found a SECOND `mut`/`immut` declaration for a name that's already in use, and it's not sure if you meant to make a new variable (in which case, use a different name) or just update the value of the one you already have.
+
+This is the correct way to update a variable's value after it's declared:
+
+    mut count: int = 0;
+    count = count + 1;
+
+And here's what triggers the error -- declaring `count` a second time instead of just assigning to it:
+
+    mut count: int = 0;
+    mut count: int = 5;
+    // ERROR: Wait a minute! You already created a variable named 'count'.
+
+Turf will also point you back to exactly where the first declaration was, so you can see both at once.
+
+The fix is almost always to drop the `mut`/`immut` and the type from the second line -- just write `count = 5;` instead. If you genuinely wanted two separate variables, give the second one its own distinct name instead.
+
+One thing this is NOT: a variable declared again inside a nested block, like inside an `if` or a `while` loop, isn't this error -- that's a different (and totally normal) thing called shadowing, since the inner one lives in its own scope.
