@@ -1,0 +1,46 @@
+TURF E068 -- UNKNOWN STRUCT FIELD:
+
+CAUSE:
+  `base.name` was used where `name` is not a field declared on `base`'s
+  struct type. This is purely about FIELD ACCESS -- it does not mean the
+  struct itself is wrong, and it is a different mistake from calling a
+  method that doesn't exist (that's a separate error, "has no method
+  named ...", not this one).
+
+  Almost always one of:
+  1. A typo in the field name (`user.pasword` instead of `user.password`).
+  2. The field exists on a DIFFERENT struct, not this one.
+  3. The field was renamed/removed but call sites weren't updated.
+  4. `.` was used where `::` was meant, or vice versa -- `.` is for an
+     instance's fields/methods; `::` is for `StructName::new(...)` /
+     `StructName::default()` / a static method. `p.new(...)` is always
+     wrong regardless of field names.
+
+CORRECT FIELD ACCESS SYNTAX:
+    struct User {
+        password: string
+    }
+
+    mut u: User = User::new("secret");
+    mut pw: string = u.password;   // read
+    u.password = "new-secret";     // write
+
+INCORRECT:
+    mut pw: string = u.pasword;
+    // ERROR: Struct 'User' has no field named 'pasword'.
+    //   (did-you-mean suggests 'password' when it's a close match)
+
+WHAT THIS ERROR IS NOT:
+  - Not a missing-import problem -- the struct type itself resolved fine
+    (an unresolved struct TYPE is a different error, "Unknown type").
+  - Not a method-call problem -- `u.password()` (calling a field like a
+    method) still resolves to this error if `password` isn't a field,
+    since field access and method calls share the same `.` syntax and are
+    disambiguated by what's declared on the struct, not by the call site.
+
+FIX:
+  Check the struct's own declaration for the exact field name and spelling
+  (field names are case-sensitive, exactly like any other Turf identifier).
+  If the field genuinely doesn't exist yet, add it to the struct's `{ }`
+  field list -- fields are comma-separated `name: Type` pairs, same shape
+  as a function parameter.

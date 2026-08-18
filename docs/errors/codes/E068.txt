@@ -1,0 +1,31 @@
+You tried to use a field that doesn't exist on this struct
+
+Every struct in Turf only has the fields you declared for it -- nothing more. If you write `something.someField` and `someField` was never listed in that struct's `{ }` block, the compiler stops you right here, before your program can run with a value that was never really there.
+
+The most common reason this happens is a simple typo. Here's a struct with a `password` field:
+
+    struct User {
+        password: string
+    }
+
+    mut u: User = User::new("secret");
+    mut pw: string = u.password;   // correct -- reads the real field
+
+If you accidentally typed the field name wrong:
+
+    mut pw: string = u.pasword;   // typo!
+
+...Turf will tell you exactly which field it thinks you meant, so you can just fix the spelling and move on.
+
+A couple of other things worth checking if it's NOT a typo:
+
+  - Are you accessing the field on the right variable? It's easy to mix up two structs that have similarly-named fields.
+  - Did you mean to call a method instead? `u.password` and `u.password()` are different things -- one reads a stored value, the other calls a function. If `password` is meant to be a method, make sure it's declared as one (with `fn User.password(): ...`), not as a field.
+  - If the field really should exist and just hasn't been added yet, you can add it straight to the struct's declaration:
+
+    struct User {
+        password: string,
+        email: string   // new field -- comma-separated, just like this
+    }
+
+Once the field name matches exactly what the struct declares, this error goes away and your code compiles like normal. This is a very normal thing to run into while you're still learning your way around a struct's shape -- nothing to worry about.
