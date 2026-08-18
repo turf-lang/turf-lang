@@ -267,10 +267,18 @@ void Sandbox::captureCompilerState(CompilerStateSnapshot &target) {
   // Capture the parsed top-level AST cache as a program block, if available.
   target.AST = BuildProgramASTFromCache();
 
-  // TODO: Clone global symbol table
-  if (GlobalSymbolTable) {
-    target.SymbolTableCopy = cloneSymbolTable(GlobalSymbolTable.get());
-  }
+  // Deliberately NOT cloning GlobalSymbolTable here (used to be an
+  // unconditional cloneSymbolTable() call on every CreateSandbox()). This is
+  // the only call site of captureCompilerState() (constructor -> Original-
+  // Snapshot); Snapshot's own SymbolTableCopy is never populated by this
+  // function at all (see the constructor -- it's left null, deferred). A
+  // full SymbolTable copy-construct deep-clones the ENTIRE symbol universe
+  // (every stdlib module's function registry, every declared symbol) --
+  // real cost for any program importing a few stdlib modules -- yet nothing
+  // in this class ever reads OriginalSnapshot.SymbolTableCopy back
+  // (confirmed: no reference anywhere below, or in Sandbox.h's accessors).
+  // With SLMIntegration.cpp's retry loop calling CreateSandbox() up to 3x
+  // per diagnostic, that was 3x a full, unread deep clone for nothing.
 
   // Capture current diagnostics
   target.Diagnostics = DiagnosticEngine::getDiagnostics();
