@@ -730,8 +730,21 @@ void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
     bool FoundConst = RegisterConstantIfPresent(Ref.Name, Ref.Loc);
     if (!FoundFn && !FoundType && !FoundConst) {
       RankedSuggestions Suggestions;
-      auto Sugg = SuggestionIndex::suggestVisible(
-          Ref.Name, SymTable_.getModuleFunctionNames(SourceModule));
+      // Candidates must cover every name-kind the gate above actually
+      // accepts (function, type, OR constant) -- this used to search
+      // function names alone, so `import math::[Pi];` (meaning the real
+      // constant `PI`) got no suggestion at all even though
+      // RegisterConstantIfPresent() right above already considered and
+      // rejected that exact possibility.
+      std::vector<std::string> Candidates =
+          SymTable_.getModuleFunctionNames(SourceModule);
+      std::vector<std::string> TypeNames =
+          SymTable_.getModuleTypeNames(SourceModule);
+      Candidates.insert(Candidates.end(), TypeNames.begin(), TypeNames.end());
+      std::vector<std::string> ConstNames =
+          SymTable_.getModuleConstantNames(SourceModule);
+      Candidates.insert(Candidates.end(), ConstNames.begin(), ConstNames.end());
+      auto Sugg = SuggestionIndex::suggestVisible(Ref.Name, Candidates);
       if (!Sugg.empty())
         Suggestions.Module[SourceModule] = Sugg;
       UnknownModuleSymbolError(Ref.Loc, SourceModule, Ref.Name, Suggestions).raise();

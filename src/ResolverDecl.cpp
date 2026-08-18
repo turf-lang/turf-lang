@@ -398,6 +398,19 @@ void Resolver::validateNamedType(
 
 
 // See the doc comment on the declaration in Resolver.h.
+std::vector<std::string> Resolver::unknownQualifierSuggestionCandidates() const {
+  std::vector<std::string> Candidates = SymTable_.getAllEnumNames();
+  std::vector<std::string> Structs = SymTable_.getAllStructNames();
+  Candidates.insert(Candidates.end(), Structs.begin(), Structs.end());
+  std::vector<std::string> Errors = SymTable_.getAllErrorTypeNames();
+  Candidates.insert(Candidates.end(), Errors.begin(), Errors.end());
+  std::vector<std::string> Modules = SymTable_.getAllModuleNames();
+  Candidates.insert(Candidates.end(), Modules.begin(), Modules.end());
+  return Candidates;
+}
+
+
+// See the doc comment on the declaration in Resolver.h.
 bool Resolver::validateModuleQualifier(const std::string &Qualifier,
                                        const std::string &TypeName,
                                        SourceLocation Loc) const {
@@ -405,9 +418,17 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
     return true;
 
   if (!SymTable_.hasModule(Qualifier)) {
+    // Unlike the general `Left::Right` fallback (unknownQualifierSuggestion
+    // Candidates(), Resolver.h), Qualifier here is syntactically ALWAYS a
+    // module position (`Module::TypeName`) -- modules are never nested and
+    // a struct/enum/error-type can never legally appear here (see
+    // ResolverCall.cpp's "modules aren't nested inside each other" check),
+    // so the only name-kind worth suggesting is another module. This used
+    // to search enum names instead, which could never actually match what
+    // was being typed here.
     RankedSuggestions Suggestions;
-    auto EnumSugg = SuggestionIndex::suggestVisible(Qualifier, SymTable_.getAllEnumNames());
-    for (const auto &S : EnumSugg)
+    auto ModuleSugg = SuggestionIndex::suggestVisible(Qualifier, SymTable_.getAllModuleNames());
+    for (const auto &S : ModuleSugg)
       Suggestions.Local.push_back(S + "::" + TypeName);
     UnknownScopeQualifierError(Loc, Qualifier, Suggestions).raise();
     return false;

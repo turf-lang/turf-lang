@@ -118,6 +118,10 @@ public:
     return ModuleTable_.hasModule(ModuleName);
   }
 
+  std::vector<std::string> getAllModuleNames() const {
+    return ModuleTable_.getAllModuleNames();
+  }
+
   std::vector<std::string> getModuleFunctionNames(
       const std::string &ModuleName) const {
     return ModuleTable_.getModuleFunctionNames(ModuleName);
