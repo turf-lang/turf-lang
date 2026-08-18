@@ -345,7 +345,8 @@ static float finalizeConfidence(float structuralPrior, bool sandboxValidated) {
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
                              const std::string &hint,
                              const std::vector<RelatedLocation> &related,
-                             ErrorCategory category) {
+                             ErrorCategory category,
+                             const std::string &previousAttemptFailed) {
   AISuggestion suggestion;
   std::string cleanError = stripAnsiCodes(errorMessage);
 
@@ -550,8 +551,20 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "{\n"
       "  \"error\": \"" + escapeJsonString(cleanError) + "\",\n"
       "  \"hint\": \"" + escapeJsonString(hint) + "\",\n"
-      "  \"code\": \"" + escapeJsonString(codeContext) + "\"\n"
-      "}\n"
+      "  \"code\": \"" + escapeJsonString(codeContext) + "\"";
+  if (!previousAttemptFailed.empty()) {
+    userPrompt += ",\n  \"previous_attempt_failed\": \"" +
+                  escapeJsonString(previousAttemptFailed) + "\"";
+  }
+  userPrompt += "\n}\n";
+  if (!previousAttemptFailed.empty()) {
+    userPrompt +=
+        "Your previous suggested fix did not compile -- "
+        "\"previous_attempt_failed\" above is the compiler's own error for "
+        "that attempt. Produce a DIFFERENT replacement_line that actually "
+        "addresses that specific feedback, not the same patch again.\n";
+  }
+  userPrompt +=
       "Respond with ONLY this JSON object — fill every field yourself:\n"
       "{\"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
       "\"suggested_comment\": <string>, \"code_patch\": <human-readable "
@@ -645,7 +658,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
 
 // Sandbox-Based Suggestion Validation
 
-bool verifySuggestion(const AISuggestion &suggestion, int errorLine) {
+bool verifySuggestion(const AISuggestion &suggestion, int errorLine,
+                      std::string *outDiagnostics) {
   // Create a sandbox from the current compiler state
   auto sandbox = CreateSandbox();
   if (!sandbox) {
@@ -661,62 +675,122 @@ bool verifySuggestion(const AISuggestion &suggestion, int errorLine) {
     return false; // no valid code to validate; code_patch is prose-only
   }
   const std::string &fixLine = suggestion.replacement_line;
-  return ApplyAndValidateFix(*sandbox, errorLine, fixLine, suggestion);
+  bool ok = ApplyAndValidateFix(*sandbox, errorLine, fixLine, suggestion);
+
+  // On failure, hand the sandbox's own compiler diagnostics back to the
+  // caller (validateAndApplySuggestion()'s retry loop) so the next
+  // fetchSuggestion() call can tell the model exactly why the last patch
+  // didn't compile, instead of blindly re-guessing.
+  if (!ok && outDiagnostics) {
+    std::string joined;
+    for (const auto &diag : sandbox->getValidationDiagnostics()) {
+      if (!joined.empty())
+        joined += " | ";
+      joined += diag.Msg;
+    }
+    *outDiagnostics = joined;
+  }
+
+  return ok;
 }
 
 // High-Level Auto-Fix API
 
-// Wrapper that gets SLM suggestion, validates it in a sandbox, and applies it
-// if valid. Returns an enhanced AISuggestion with validation results.
+// Retry cap for the loop below -- matches the roadmap wording exactly
+// ("Retry up to 3x on TypeChecker failure, feeding the error back into the
+// prompt", docs/planning/FINAL_SPRINT.md's Track C).
+static constexpr int kMaxSlmAttempts = 3;
+
+// Wrapper that gets an SLM suggestion, validates it in a sandbox, and
+// applies it if valid. Returns an enhanced AISuggestion with validation
+// results.
+//
+// Single-shot until this loop was added: one fetchSuggestion() +
+// verifySuggestion() pair, downgrading straight to fix_mode "NONE" on the
+// first sandbox rejection. That wastes the sandbox's most useful output --
+// verifySuggestion() (via Sandbox::getValidationDiagnostics()) already
+// knows exactly why the patch didn't compile, but nothing was feeding that
+// back to the model. Now: on a sandbox failure, that diagnostic text is
+// passed to the next fetchSuggestion() call as `previousAttemptFailed`, and
+// a whole new attempt (new model call, new sandbox) runs, up to
+// kMaxSlmAttempts total. computeStructuralPrior()/finalizeConfidence()
+// themselves are unchanged -- they just run once per attempt instead of
+// once total, exactly like every other step in the loop body.
 AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
                                         int errorLine, const std::string &hint,
                                         const std::vector<RelatedLocation> &related,
                                         ErrorCategory category) {
-  // First, get the SLM suggestion
-  AISuggestion suggestion = fetchSuggestion(errorMessage, errorLine, hint, related, category);
+  AISuggestion suggestion;
+  std::string previousAttemptFailed; // empty on attempt 1
 
-  if (!suggestion.valid) {
-    return suggestion;
-  }
+  for (int attempt = 1; attempt <= kMaxSlmAttempts; ++attempt) {
+    suggestion = fetchSuggestion(errorMessage, errorLine, hint, related,
+                                 category, previousAttemptFailed);
 
-  // Skip validation for NONE fixes (no patch to apply)
-  if (suggestion.fix_mode == "NONE") {
-    std::cerr << Colors::BRIGHT_BLACK
-              << "[Sandbox] Fix mode is NONE, skipping validation"
-              << Colors::RESET << "\n";
-    return suggestion;
-  }
-
-  // Verify the suggestion in a sandbox
-  bool isValid = verifySuggestion(suggestion, errorLine);
-
-  // Finalize confidence NOW — after sandbox validation.
-  // The structural prior (computed before sandbox ran) is only a prior;
-  // the sandbox result is the strongest possible signal (empirical proof).
-  // A proven-correct fix is clamped to >= 0.9; an unvalidated fix is capped
-  // at <= 0.5, making it impossible for a pre-validation guess to veto a
-  // validated fix, or to promote an unvalidated one past the display gate.
-  suggestion.confidence = finalizeConfidence(suggestion.confidence, isValid);
-
-  if (isValid) {
-    suggestion.valid = true;
-    std::cerr << Colors::BRIGHT_GREEN << "[Sandbox] ✓ Suggestion validated"
-              << Colors::RESET << "\n";
-    if (std::getenv("TURF_SLM_DEBUG")) {
-      std::cerr << "Final Confidence (post-sandbox): " << suggestion.confidence << "\n";
+    if (!suggestion.valid) {
+      // The SLM itself failed/timed out/produced unparsable JSON -- not a
+      // sandbox rejection, so retrying with the same unreachable model
+      // wouldn't help. Bail immediately, same as the old single-shot path.
+      return suggestion;
     }
-  } else {
-    suggestion.valid = false;
-    suggestion.fix_mode = "NONE"; // Downgrade to no fix on validation failure
-    std::cerr << Colors::BRIGHT_YELLOW
-              << "[Sandbox] ✗ Suggestion validation failed" << Colors::RESET
-              << "\n";
-    if (std::getenv("TURF_SLM_DEBUG")) {
-      std::cerr << "Final Confidence (post-sandbox, capped): " << suggestion.confidence << "\n";
+
+    // Skip validation for NONE fixes (no patch to apply)
+    if (suggestion.fix_mode == "NONE") {
+      std::cerr << Colors::BRIGHT_BLACK
+                << "[Sandbox] Fix mode is NONE, skipping validation"
+                << Colors::RESET << "\n";
+      return suggestion;
     }
+
+    // Verify the suggestion in a sandbox
+    std::string diagnosticText;
+    bool isValid = verifySuggestion(suggestion, errorLine, &diagnosticText);
+
+    // Finalize confidence NOW — after sandbox validation.
+    // The structural prior (computed before sandbox ran) is only a prior;
+    // the sandbox result is the strongest possible signal (empirical proof).
+    // A proven-correct fix is clamped to >= 0.9; an unvalidated fix is capped
+    // at <= 0.5, making it impossible for a pre-validation guess to veto a
+    // validated fix, or to promote an unvalidated one past the display gate.
+    suggestion.confidence = finalizeConfidence(suggestion.confidence, isValid);
+
+    if (isValid) {
+      suggestion.valid = true;
+      std::cerr << Colors::BRIGHT_GREEN << "[Sandbox] ✓ Suggestion validated"
+                << (attempt > 1 ? " (attempt " + std::to_string(attempt) + "/" +
+                                      std::to_string(kMaxSlmAttempts) + ")"
+                                : "")
+                << Colors::RESET << "\n";
+      if (std::getenv("TURF_SLM_DEBUG")) {
+        std::cerr << "Final Confidence (post-sandbox): " << suggestion.confidence << "\n";
+      }
+      return suggestion;
+    }
+
+    if (attempt == kMaxSlmAttempts) {
+      suggestion.valid = false;
+      suggestion.fix_mode = "NONE"; // Downgrade to no fix -- out of attempts
+      std::cerr << Colors::BRIGHT_YELLOW
+                << "[Sandbox] ✗ Suggestion validation failed after "
+                << kMaxSlmAttempts << " attempts" << Colors::RESET << "\n";
+      if (std::getenv("TURF_SLM_DEBUG")) {
+        std::cerr << "Final Confidence (post-sandbox, capped): " << suggestion.confidence << "\n";
+      }
+      return suggestion;
+    }
+
+    // Attempts remain: feed this attempt's real compiler diagnostic back
+    // into the next fetchSuggestion() call and try again.
+    previousAttemptFailed = diagnosticText.empty()
+        ? "The previous suggested replacement_line failed to compile."
+        : diagnosticText;
+    std::cerr << Colors::BRIGHT_YELLOW << "[Sandbox] Attempt " << attempt
+              << "/" << kMaxSlmAttempts
+              << " failed validation, retrying with compiler feedback..."
+              << Colors::RESET << "\n";
   }
 
-  return suggestion;
+  return suggestion; // unreachable -- loop always returns on its last iteration
 }
 
 } // namespace SLM
