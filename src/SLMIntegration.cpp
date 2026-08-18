@@ -111,12 +111,21 @@ static int contextSizeForCategory(ErrorCategory cat) {
 // surrounding range.
 // Lines that already fall within the [errorLine ± contextSize] window are
 // silently skipped to avoid duplication.
+//
+// Takes the full RelatedLocation list (not just line numbers): each one's
+// Description ("declared here", "candidate", "first freed here", ...) is a
+// real, meaningful label every .withRelated() call site already computes --
+// previously only rel.Loc.Line survived into this function, so the model
+// saw an unlabeled source line with no indication of WHY it was pinned or
+// how it relates to the error (especially bad for a multi-candidate arity
+// error, or telling a double-free's "declared here" apart from its "first
+// freed here").
 static std::string
 getCodeContextWithPinnedLines(int errorLine, int contextSize,
-                              const std::vector<int> &pinnedLines) {
+                              const std::vector<RelatedLocation> &related) {
   std::string context = getCodeContext(errorLine, contextSize);
 
-  if (pinnedLines.empty() || SourceLines.empty())
+  if (related.empty() || SourceLines.empty())
     return context;
 
   // Compute the window boundaries to avoid pinning lines already visible.
@@ -125,7 +134,8 @@ getCodeContextWithPinnedLines(int errorLine, int contextSize,
       std::min(static_cast<int>(SourceLines.size()), errorLine + contextSize);
 
   bool headerAdded = false;
-  for (int lineNo : pinnedLines) {
+  for (const auto &rel : related) {
+    int lineNo = rel.Loc.Line;
     if (lineNo < 1 || lineNo > static_cast<int>(SourceLines.size()))
       continue;
     // Skip lines already inside the normal context window.
@@ -135,8 +145,11 @@ getCodeContextWithPinnedLines(int errorLine, int contextSize,
       context += "Relevant definition(s)\n";
       headerAdded = true;
     }
-    context +=
-        "*  " + std::to_string(lineNo) + " | " + SourceLines[lineNo - 1] + "\n";
+    context += "*  " + std::to_string(lineNo) + " | " +
+              SourceLines[lineNo - 1];
+    if (!rel.Description.empty())
+      context += "   // " + rel.Description;
+    context += "\n";
   }
   if (headerAdded)
     context += "\n";
@@ -423,13 +436,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   // Zero category branching, zero hardcoded syntax, zero scanner functions.
   // If `related` is empty (error classes that don't yet populate it), this
   // naturally falls back to plain sliding-window context — same as before.
-  std::vector<int> pinnedLines;
-  for (const auto &rel : related)
-    pinnedLines.push_back(rel.Loc.Line);
-
-  codeContext = pinnedLines.empty()
+  codeContext = related.empty()
       ? getCodeContext(errorLine, contextSize)
-      : getCodeContextWithPinnedLines(errorLine, contextSize, pinnedLines);
+      : getCodeContextWithPinnedLines(errorLine, contextSize, related);
 
   if (std::getenv("TURF_SLM_DEBUG")) {
     std::cerr << "--- PINNED CONTEXT ---\n" << codeContext << "\n----------------------\n";
