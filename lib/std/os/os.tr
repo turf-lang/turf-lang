@@ -1,0 +1,81 @@
+// ─── os.tr ─────────────────────────────────────────────────────────────────
+// Process/OS interaction for TurfLang: environment variables and argv/argc.
+//
+// Design:
+//   - getenv/setenv follow the raw-libc-binding-plus-safe-wrapper split
+//     already used throughout the stdlib (mem.tr's malloc/alloc, strings.tr's
+//     strstr/contains): `env`/`set_env` are the Turf-facing names since the
+//     raw `getenv`/`setenv` extern names can't be reused for a same-
+//     signature Turf wrapper (sys.tr's own doc comment explains why -- a
+//     same-named wrapper isn't an overload, it's a duplicate declaration,
+//     and would need to call itself even if it were).
+//   - libc's getenv() returns NULL when the variable isn't set; env()
+//     normalizes that to "" so callers never have to null-check a Turf
+//     `string` themselves -- matching this stdlib's existing convention of
+//     never handing back a value that crashes on ordinary use (e.g.
+//     strings.tr's contains()/index_of() doing the identical null-check
+//     over strstr()'s result).
+//   - argc()/argv(i) read from TurfRuntimeGetArgc()/TurfRuntimeGetArgv(i),
+//     two C-ABI helper functions the compiler itself synthesizes directly
+//     in LLVM IR at codegen time (see CodegenFunc.cpp's
+//     EnsureArgvHelpers()) -- there is no other way to reach main()'s real
+//     argc/argv from Turf, since `fn main(): int` has no language syntax to
+//     declare them as params. argv(i) is already bounds-checked by that
+//     same synthesized helper (returns "" out of range, never a crash), so
+//     no extra checking is needed on this side.
+//   - Process exit beyond main()'s own return value is already covered by
+//     sys::exit(code) (sys.tr) -- no os.tr-level wrapper needed for it.
+//
+// Usage:
+//   import os;
+//   immut path: string = os::env("PATH");
+//   os::set_env("MY_VAR", "value", 1);
+//
+//   mut i: int = 0;
+//   while i < os::argc() {
+//       io::printline(os::argv(i));   // argv(0) is the program's own path
+//       i = i + 1;
+//   }
+
+// ─── libc bindings ────────────────────────────────────────────────────────
+
+extern fn getenv(name: string): string;
+extern fn setenv(name: string, value: string, overwrite: int): int;
+
+// ─── compiler-synthesized argv/argc bindings ───────────────────────────────
+// These two symbols exist only because main's own codegen synthesizes them
+// directly in IR -- they are not real libc functions, and calling either
+// from a program whose `main` the compiler didn't itself compile (i.e.
+// anywhere outside this pipeline) would be undefined.
+
+extern fn TurfRuntimeGetArgc(): int;
+extern fn TurfRuntimeGetArgv(index: int): string;
+
+// ─── Turf-level helpers ────────────────────────────────────────────────────
+
+// env: read an environment variable, or "" if it isn't set.
+fn env(name: string): string {
+    immut result: string = getenv(name);
+    if result == null {
+        return "";
+    }
+    return result;
+}
+
+// set_env: set (or, if `overwrite` is nonzero, overwrite) an environment
+// variable for the current process. Returns true on success.
+fn set_env(name: string, value: string, overwrite: int): bool {
+    return setenv(name, value, overwrite) == 0;
+}
+
+// argc: the number of command-line arguments, including argv(0) (the
+// program's own invocation path) -- matches C's argc convention exactly.
+fn argc(): int {
+    return TurfRuntimeGetArgc();
+}
+
+// argv: the command-line argument at `index` (0 is the program's own
+// invocation path), or "" if `index` is out of range.
+fn argv(index: int): string {
+    return TurfRuntimeGetArgv(index);
+}
