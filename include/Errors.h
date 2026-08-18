@@ -5,6 +5,7 @@
 #include "Builtins.h"
 #include "Colors.h"
 #include "ErrorCategory.h"
+#include "ErrorCodes.h"
 #include "Lexer.h"
 #include "SuggestionIndex.h"
 #include "SLMIntegration.h"
@@ -14,9 +15,33 @@
 #include <map>
 
 #include <string>
+#include <typeinfo>
 #include <vector>
 
+#if defined(__GNUC__) || defined(__clang__)
+#include <cxxabi.h>
+#endif
+
 struct SourceLocation;
+
+// Demangles a typeid(...).name() string into a plain C++ class name (e.g.
+// "18ArrayBoundsError" -> "ArrayBoundsError"). GCC/Clang only -- the only
+// toolchains this project builds with (see AGENTS.md) -- via the Itanium
+// ABI's __cxa_demangle. Falls back to the raw mangled name on any other
+// toolchain or if demangling fails, which just means ErrorCodes::
+// lookupByClassName() below won't find a match (getCode() degrades to "").
+inline std::string demangleTypeName(const char *MangledName) {
+#if defined(__GNUC__) || defined(__clang__)
+  int Status = 0;
+  char *Demangled = abi::__cxa_demangle(MangledName, nullptr, nullptr, &Status);
+  if (Status == 0 && Demangled) {
+    std::string Result(Demangled);
+    free(Demangled);
+    return Result;
+  }
+#endif
+  return MangledName;
+}
 
 // Base Class
 class TurfError {
@@ -54,6 +79,19 @@ public:
     return RelatedLocations_;
   }
 
+  // Stable "E0NN" diagnostic code for this error, looked up from
+  // ErrorCodes.h's registry by the ACTUAL derived class -- typeid(*this)
+  // resolves polymorphically (TurfError has a virtual destructor) as long as
+  // this runs on a fully-constructed object, which raise()/warn() always do
+  // (never called from inside a constructor). Returns "" for any subclass
+  // not yet in the registry, e.g. one added after ErrorCodes.h was last
+  // regenerated -- callers must treat that as "no code", not an error.
+  std::string getCode() const {
+    const ErrorCodeEntry *Entry =
+        ErrorCodes::lookupByClassName(demangleTypeName(typeid(*this).name()));
+    return Entry ? Entry->Code : "";
+  }
+
   // Chainable: TurfError(loc, msg).withRelated(declLoc, "declared here").raise();
   TurfError &withRelated(SourceLocation RelLoc, const std::string &Desc) {
     RelatedLocations_.push_back({RelLoc, Desc});
@@ -62,7 +100,7 @@ public:
 
   void raise() const {
     DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/false,
-                          RelatedLocations_, Category_);
+                          RelatedLocations_, Category_, getCode());
 
     if (g_recoverActive) {
       // longjmp() skips C++ destructors between here and the setjmp() point
