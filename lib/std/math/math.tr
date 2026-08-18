@@ -14,6 +14,11 @@
 //   mut n: int    = math::abs(-5);
 //   mut q: int    = math::divide(10, 0) recover produce -1;
 
+// ─── constants ─────────────────────────────────────────────────────────────
+
+export immut PI: double = 3.14159265358979323846;
+export immut E: double = 2.71828182845904523536;
+
 // ─── libm bindings ────────────────────────────────────────────────────────────
 
 extern from "m" fn pow(base: double, exp: double): double;
