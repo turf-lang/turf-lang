@@ -18,6 +18,7 @@
 #include "AST.h"
 #include "Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
 #include "Errors.h"          // ReferenceError, DuplicateDeclarationError
+#include "ErrorsFlow.h"      // SemanticError
 #include "ResolverSymbolTable.h"
 #include "ResolverInternal.h"
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
@@ -70,6 +71,24 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
       ConstructorCannotBeStaticError(Node.getLoc(), FullName.substr(0, Dot)).raise();
       return;
     }
+  }
+
+  // `main` is always compiled as the real C-ABI entry point with a fixed
+  // (argc: i32, argv: ptr) LLVM signature (see CodegenFunc.cpp's argv/argc
+  // plumbing) -- there is no language syntax to declare argc/argv as Turf
+  // params, and Codegen's alloca loop for "main" never looks at Params at
+  // all. A declared `fn main(x: int): int` used to parse and typecheck
+  // fine, then silently drop `x` (never alloca'd, never in NamedValues),
+  // turning any reference to it in main's body into a confusing "undefined
+  // variable" codegen error. Reject the declaration itself, up front, with
+  // a diagnostic that names the actual constraint.
+  if (Node.getName() == "main" && !Node.getParams().empty()) {
+    SemanticError(Node.getLoc(),
+                   "'main' cannot declare parameters -- it is the "
+                   "program's entry point and always has the implicit "
+                   "C-ABI signature (argc, argv).")
+        .raise();
+    return;
   }
 
   // Rewrite any parameter/return NamedType("T") that names one of this
