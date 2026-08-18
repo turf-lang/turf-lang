@@ -336,7 +336,8 @@ enum Token {
   TOK_RSHIFT_ASSIGN = -98, ///< `>>=` token — right-shift compound assignment
   TOK_POWER_ASSIGN  = -99, ///< `**=` token — exponentiation compound assignment
   TOK_MACHINE  = -100, ///< `machine` keyword — state-machine declaration (enum + transition graph)
-  TOK_ARROW    = -101  ///< `->`      token   — transition edge separator in a `machine` block
+  TOK_ARROW    = -101, ///< `->`      token   — transition edge separator in a `machine` block
+  TOK_UNSAFE   = -102  ///< `unsafe`  keyword — lexical gate for raw pointer types (issue #238)
 };
 
 int gettok();
