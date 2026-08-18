@@ -18,6 +18,7 @@
 
 #include "Lexer.h"
 #include "Colors.h"
+#include "ErrorCodes.h"
 #include "SLMIntegration.h"
 
 #include <algorithm>
@@ -269,9 +270,23 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   // a code (warnings and the raw LogErrorAt() path never do -- see
   // DiagnosticEngine::Diag::Code's own doc comment in Lexer.h), so this
   // never dangles into "for more details on ''" for those.
+  //
+  // A small curated set of codes (ErrorCodeEntry::Important -- raw-
+  // pointer lifetime rules, unbounded recursion, state-machine
+  // transitions) get a more insistent, differently-colored version of
+  // this line instead of the routine one: these are exactly the errors
+  // whose one-line message is least likely to be self-explanatory on
+  // its own, so it's worth nudging harder than for a plain typo.
   if (!D.Code.empty()) {
-    std::cerr << "\n  " << Colors::BRIGHT_BLACK << "Run `turf --explain "
-              << D.Code << "` for more details." << Colors::RESET << "\n";
+    const ErrorCodeEntry *Entry = ErrorCodes::lookupByCode(D.Code);
+    if (Entry && Entry->Important) {
+      std::cerr << "\n  " << Colors::BOLD << Colors::BRIGHT_CYAN
+                << "Worth reading in full -- run `turf --explain " << D.Code
+                << "` before you patch this one." << Colors::RESET << "\n";
+    } else {
+      std::cerr << "\n  " << Colors::BRIGHT_BLACK << "Run `turf --explain "
+                << D.Code << "` for more details." << Colors::RESET << "\n";
+    }
   }
 
   std::cerr << "\n";

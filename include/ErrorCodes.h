@@ -31,6 +31,18 @@ struct ErrorCodeEntry {
   const char *ClassName;
   const char *Description;
   SLM::ErrorCategory Category;
+  // True for a small, deliberately curated set of codes whose one-line
+  // compiler message is unlikely to be enough on its own -- genuinely
+  // non-obvious concepts (raw-pointer lifetime rules, unbounded
+  // recursion, state-machine transitions) rather than a simple typo/
+  // arity mismatch a beginner can usually fix from the message alone.
+  // printDiag() (Lexer.cpp) gives these a more insistent footer than the
+  // plain "Run turf --explain E0NN for more details." every other coded
+  // error gets. Defaults to false via this member initializer, so every
+  // existing positional aggregate-init row below (4 values) still
+  // compiles unchanged -- only the handful of rows that opt in add a
+  // 5th `true`.
+  bool Important = false;
 };
 
 inline const ErrorCodeEntry AllErrorCodes[] = {
@@ -43,15 +55,15 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E007", "ControlFlowError", "Control flow", SLM::ErrorCategory::CONTROL_FLOW},
     {"E008", "DefiniteAssignmentError", "Definite assignment", SLM::ErrorCategory::UNDECLARED_VAR},
     {"E009", "MissingReturnError", "Missing return", SLM::ErrorCategory::CONTROL_FLOW},
-    {"E010", "RecursionWithoutBaseError", "Recursion without base", SLM::ErrorCategory::CONTROL_FLOW},
+    {"E010", "RecursionWithoutBaseError", "Recursion without base", SLM::ErrorCategory::CONTROL_FLOW, true},
     {"E011", "SemanticError", "Semantic", SLM::ErrorCategory::GENERAL},
     {"E012", "StatementAfterTerminatorError", "Statement after terminator", SLM::ErrorCategory::CONTROL_FLOW},
     {"E013", "UnreachableCodeError", "Unreachable code", SLM::ErrorCategory::CONTROL_FLOW},
     {"E014", "KeywordError", "Keyword", SLM::ErrorCategory::SYNTAX_ERROR},
     {"E015", "SyntaxError", "Syntax", SLM::ErrorCategory::SYNTAX_ERROR},
     {"E016", "BareErrorAsBindingError", "Bare error as binding", SLM::ErrorCategory::CONTROL_FLOW},
-    {"E017", "DoubleFreeError", "Double free", SLM::ErrorCategory::MEMORY_ERROR},
-    {"E018", "UseAfterFreeError", "Use after free", SLM::ErrorCategory::MEMORY_ERROR},
+    {"E017", "DoubleFreeError", "Double free", SLM::ErrorCategory::MEMORY_ERROR, true},
+    {"E018", "UseAfterFreeError", "Use after free", SLM::ErrorCategory::MEMORY_ERROR, true},
     {"E019", "CircularImportError", "Circular import", SLM::ErrorCategory::DECLARATION},
     {"E020", "ConflictingExternDeclarationError", "Conflicting extern declaration", SLM::ErrorCategory::DECLARATION},
     {"E021", "ExportMutNotSupportedError", "Export mut not supported", SLM::ErrorCategory::DECLARATION},
@@ -68,8 +80,8 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E032", "UnqualifiedTypeNotVisibleError", "Unqualified type not visible", SLM::ErrorCategory::DECLARATION},
     {"E033", "DuplicateDeclarationError", "Duplicate declaration", SLM::ErrorCategory::DECLARATION},
     {"E034", "DuplicateTypeNameError", "Duplicate type name", SLM::ErrorCategory::DECLARATION},
-    {"E035", "InvalidTransitionError", "Invalid transition", SLM::ErrorCategory::TYPE_MISMATCH},
-    {"E036", "InvalidTransitionTargetError", "Invalid transition target", SLM::ErrorCategory::TYPE_MISMATCH},
+    {"E035", "InvalidTransitionError", "Invalid transition", SLM::ErrorCategory::TYPE_MISMATCH, true},
+    {"E036", "InvalidTransitionTargetError", "Invalid transition target", SLM::ErrorCategory::TYPE_MISMATCH, true},
     {"E037", "LookupError", "Lookup", SLM::ErrorCategory::UNDECLARED_VAR},
     {"E038", "NestedFunctionError", "Nested function", SLM::ErrorCategory::FUNCTION_SIGNATURE},
     {"E039", "NoSuchVariantError", "No such variant", SLM::ErrorCategory::DECLARATION},
