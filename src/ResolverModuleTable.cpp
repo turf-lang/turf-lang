@@ -90,6 +90,14 @@ bool ResolverModuleTable::hasModule(const std::string &ModuleName) const {
   return Modules_.count(ModuleName) > 0;
 }
 
+std::vector<std::string> ResolverModuleTable::getAllModuleNames() const {
+  std::vector<std::string> Names;
+  Names.reserve(Modules_.size());
+  for (const auto &Pair : Modules_)
+    Names.push_back(Pair.first);
+  return Names;
+}
+
 std::vector<std::string> ResolverModuleTable::getModuleFunctionNames(
     const std::string &ModuleName) const {
   auto It = Modules_.find(ModuleName);

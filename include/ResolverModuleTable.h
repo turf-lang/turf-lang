@@ -104,6 +104,15 @@ public:
   bool hasModule(const std::string &ModuleName) const;
 
   /**
+   * @brief Return the name of every module imported somewhere in this
+   * program (the keys of Modules_) -- used as suggestion candidates for a
+   * `Left::Right` scope access whose `Left` isn't a known enum/struct/
+   * error-type either, so is most plausibly a typo'd module name (e.g.
+   * `oi::printline` meaning `io::printline`).
+   */
+  std::vector<std::string> getAllModuleNames() const;
+
+  /**
    * @brief Return all base function names registered under @p ModuleName.
    */
   std::vector<std::string> getModuleFunctionNames(

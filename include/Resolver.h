@@ -373,6 +373,18 @@ private:
                                const std::string &TypeName,
                                SourceLocation Loc) const;
 
+  /// Suggestion candidates for an unresolved `Left::Right` qualifier once
+  /// @p Left has already been confirmed to be none of: a known enum, a
+  /// known error type, a known struct, a known module, or a declared
+  /// variable (every one of those has its own earlier, more specific
+  /// check/error with an early return -- see visitFuncCall's and
+  /// visitScopeAccess's own dispatch chains). At that point @p Left can
+  /// only be a typo of one of those four global name kinds, so the
+  /// candidate pool spans all four -- searching only enum names (the
+  /// original, narrower behavior) missed a struct/error-type/module typo
+  /// entirely, no matter how close the spelling.
+  std::vector<std::string> unknownQualifierSuggestionCandidates() const;
+
   // ── Pass 1: Hoisting ───────────────────────────────────────────────────────
   // Walk only the top-level list, registering struct names and function
   // signatures.  No bodies are visited in this pass.

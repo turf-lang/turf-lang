@@ -338,8 +338,9 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
         return;
       }
       RankedSuggestions QualifierSuggestions;
-      auto EnumSugg = SuggestionIndex::suggestVisible(LeftName, SymTable_.getAllEnumNames());
-      for (const auto &S : EnumSugg)
+      auto QualifierSugg = SuggestionIndex::suggestVisible(
+          LeftName, unknownQualifierSuggestionCandidates());
+      for (const auto &S : QualifierSugg)
         QualifierSuggestions.Local.push_back(S + "::" + CalleeName);
       // ScopeCallee->getLeftLoc(), not Node.getLoc() -- the latter is the
       // whole call expression's location (lands on the call's '(' for a
@@ -823,8 +824,9 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
   }
 
   RankedSuggestions Suggestions;
-  auto EnumSugg = SuggestionIndex::suggestVisible(LeftName, SymTable_.getAllEnumNames());
-  for (const auto &S : EnumSugg)
+  auto QualifierSugg = SuggestionIndex::suggestVisible(
+      LeftName, unknownQualifierSuggestionCandidates());
+  for (const auto &S : QualifierSugg)
     Suggestions.Local.push_back(S + "::" + RightName);
   UnknownScopeQualifierError(Node.getLoc(), LeftName, Suggestions).raise();
 }
