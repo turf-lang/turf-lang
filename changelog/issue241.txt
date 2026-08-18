@@ -1,0 +1,46 @@
+Track D: Diagnostics Polish (source spans, error codes + --explain, broader Did You Mean)
+
+1. Changes Made:
+- Renamed the token-scanning body of `gettok()` to `gettokScan()` (`src/Lexer.cpp`) and added a thin `gettok()` wrapper that stamps `SourceLocation::EndLine`/`EndCol` uniformly after every token, not just identifiers/keywords (previously the only kind populated, since issue #230). `DiagnosticEngine::printDiag()` now underlines the full token width (`^~~~~~~`) instead of a single `^` whenever an end position is known.
+- Added `include/ErrorCodes.h`: a generated registry mapping all 67 existing `TurfError` subclasses to a stable `E0NN` code, plus a class name/description/`SLM::ErrorCategory`. `TurfError::getCode()` (`include/Errors.h`) resolves a subclass's code at `raise()`-time via `typeid(*this)` + `abi::__cxa_demangle`, so adding a new error class costs one registry line rather than a constructor edit at each of the 67+ call sites.
+- Threaded the resolved code through `DiagnosticEngine::Diag`/`add()` (`include/Lexer.h`, `src/Lexer.cpp`) so each error's header shows `[E0NN]`.
+- Added `turf --explain E0NN` (`src/main.cpp`), handled before ordinary CLI arg parsing since it takes no input `.tr` file. Prints the class/category plus the matching `docs/slm/*.txt` category doc -- the same per-category documentation the SLM integration already loads for `--smart`, rather than a second parallel doc set.
+- Added `UnknownStructFieldError` (`include/ErrorsStruct.h`, code `E068`), raised from `TypeChecker::visitFieldAccess()` (`src/TypeCheckerCall.cpp`) when a struct field access names a field that doesn't exist, fed `SuggestionIndex::suggestVisible` with the struct's real field names for a "did you mean?" suggestion.
+- Added regression tests `tests/06_structs/fail_unknown_struct_field.tr` and `fail_misspelled_field_struct.tr`.
+
+2. Why the Change was Made:
+- All three items are the remaining, previously-deferred entries in `ROADMAP_v1.0.0.md`'s "Diagnostics Polish" section ("the error class taxonomy is still changing through Phase 3" -- no longer true once Phase 3 landed), tracked as GitHub issue #241 Track D.
+- Source spans: only identifier/keyword tokens carried an end position before this, so a failing operator, literal, or expression could only ever be pointed at with a single `^`, not underlined.
+- Error codes: diagnostics had no stable, greppable identifier -- no way to link to, search for, or look up documentation on a specific error class from outside the compiler's own message text.
+- Struct field suggestions: `TypeChecker::visitFieldAccess()` silently left the node's type null for an unknown field, letting compilation continue; the only place that ever caught the mistake was `CodegenStruct.cpp`'s raw `LogErrorAt()` at actual codegen time, with no error code, no category, and -- unlike the sibling `StructMethodNotFoundError` case -- no suggestions at all.
+
+3. How it Helps/Changed:
+- A failing operator, string/char/number literal, or identifier is now underlined across its full width in the CLI, not just marked with a single caret.
+- Every error prints a stable `[E0NN]` code in its header, and `turf --explain E0NN` gives a standalone, multi-paragraph explanation for it (with a clean "unknown error code" message for an unrecognized one).
+- `user.pasword` (a struct field typo) is now rejected at TypeCheck time with a `Did you mean 'password'?`-shaped suggestion, instead of silently compiling further and only failing later at Codegen with no help at all.
+- Module- and struct-method-name suggestions already existed prior to this change (`ResolverCall.cpp`) -- struct fields were the concrete remaining gap the issue's own example (`user.pasword` -> `user.password`) named.
+
+4. Example Diagnostic Output Format:
+── error [E040] at line 3, col 7
+
+  I can't find anything named 'notavar'.
+
+  Hint: Did you forget to create this variable? You have to create it before you can use it, like this: `mut notavar: int = 5;`
+
+  3 │   x = notavar + 1;
+    │       ^~~~~~~ Here!
+
+$ turf --explain E001
+E001  ArrayBoundsError (ARRAY_ERROR)
+
+TURF ARRAY ERRORS:
+...
+
+── error [E068] at line 13, col 18
+
+  Struct 'User' has no field named 'pasword'.
+
+  Hint: It may be from the current file: 'password'
+
+  13 │   io::printline(u.pasword);
+     │                  ^ Here!
