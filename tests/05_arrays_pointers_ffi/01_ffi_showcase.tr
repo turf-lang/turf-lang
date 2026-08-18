@@ -37,28 +37,33 @@ fn section(name: string): void {
     printf("\n=== %s ===\n", name);
 }
 
+// (issue #238) Every `ptr`-typed local below needs `unsafe { }` around its
+// declaration (FINAL_SPRINT.md's Track A "Caller-side locals" rule) --
+// the extern fn calls themselves stay ordinary, ungated calls.
 fn test_file_io(): void {
     section("File I/O");
 
-    mut whandle: ptr = fopen("/tmp/turf_test.txt", "w");
-    mut msg: string  = "Hello from Turflang FFI!\nLine two.\n";
-    mut written: int = fwrite(msg, 1, strlen(msg), whandle);
-    test::assert(written > 0, "");
-    fclose(whandle);
+    unsafe {
+        mut whandle: ptr = fopen("/tmp/turf_test.txt", "w");
+        mut msg: string  = "Hello from Turflang FFI!\nLine two.\n";
+        mut written: int = fwrite(msg, 1, strlen(msg), whandle);
+        test::assert(written > 0, "");
+        fclose(whandle);
 
-    mut rhandle: ptr = fopen("/tmp/turf_test.txt", "r");
-    mut rbuf: ptr    = malloc(256);
-    memset(rbuf, 0, 256);
-    mut nbytes: int  = fread(rbuf, 1, 255, rhandle);
-    test::assert(nbytes == written, "");
-    fclose(rhandle);
-    free(rbuf);
+        mut rhandle: ptr = fopen("/tmp/turf_test.txt", "r");
+        mut rbuf: ptr    = malloc(256);
+        memset(rbuf, 0, 256);
+        mut nbytes: int  = fread(rbuf, 1, 255, rhandle);
+        test::assert(nbytes == written, "");
+        fclose(rhandle);
+        free(rbuf);
 
-    mut shandle: ptr  = fopen("/tmp/turf_test.txt", "r");
-    fseek(shandle, 0, 2);                
-    mut filesize: int = ftell(shandle);
-    test::assert(filesize == written, "");
-    fclose(shandle);
+        mut shandle: ptr  = fopen("/tmp/turf_test.txt", "r");
+        fseek(shandle, 0, 2);
+        mut filesize: int = ftell(shandle);
+        test::assert(filesize == written, "");
+        fclose(shandle);
+    }
 }
 
 fn test_math(): void {
@@ -73,22 +78,26 @@ fn test_math(): void {
 fn test_time(): void {
     section("Time");
 
-    mut timebuf: ptr = malloc(8);
-    mut epoch: int    = time(timebuf);
-    free(timebuf);
-    mut clk0: int  = clock();
-    mut clk1: int  = clock();
-    test::assert(epoch > 0, "");
-    test::assert(clk1 >= clk0, "");
+    unsafe {
+        mut timebuf: ptr = malloc(8);
+        mut epoch: int    = time(timebuf);
+        free(timebuf);
+        mut clk0: int  = clock();
+        mut clk1: int  = clock();
+        test::assert(epoch > 0, "");
+        test::assert(clk1 >= clk0, "");
+    }
 }
 
 fn test_env(): void {
     section("Environment");
 
-    // "PATH" is always set.
-    mut pathdir: ptr = getenv("PATH");
-    // Just verify we can fetch it without crashing
-    printf("PATH is present at ptr: %%p\n", pathdir);
+    unsafe {
+        // "PATH" is always set.
+        mut pathdir: ptr = getenv("PATH");
+        // Just verify we can fetch it without crashing
+        printf("PATH is present at ptr: %%p\n", pathdir);
+    }
 }
 
 fn test_strings(): void {
@@ -97,12 +106,14 @@ fn test_strings(): void {
     mut greeting: string = "turflang is not a C wrapper";
     test::assert(strlen(greeting) == 27, "");
 
-    mut srcbuf: ptr = malloc(32);
-    mut dstbuf: ptr = malloc(32);
-    memset(srcbuf, 88, 10);
-    memcpy(dstbuf, srcbuf, 10);
-    free(srcbuf);
-    free(dstbuf);
+    unsafe {
+        mut srcbuf: ptr = malloc(32);
+        mut dstbuf: ptr = malloc(32);
+        memset(srcbuf, 88, 10);
+        memcpy(dstbuf, srcbuf, 10);
+        free(srcbuf);
+        free(dstbuf);
+    }
 }
 
 fn test_process(): void {

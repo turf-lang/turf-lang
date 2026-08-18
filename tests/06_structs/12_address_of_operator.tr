@@ -1,36 +1,55 @@
 import test;
 
-struct Node {
-    val: int,
-    next: Node*
+// Regression test for the `&` address-of operator (issue #238: `&expr` now
+// always produces a `&T` safe reference, not a raw `T*` -- a breaking
+// retype). `next` still needs to be a genuinely nullable raw pointer (a
+// `&T` can never be null), so the struct decl is wrapped in `unsafe { }`
+// per FINAL_SPRINT.md's Track A; `get_val` takes the now-mandatory `&Node`
+// (a plain function may never have a raw pointer parameter, even inside
+// `unsafe { }` -- see checkNoRawPointersInSignature()).
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
 }
 
-fn Node.new(val: int, next: Node*): void {
+fn Node.new(val: int): void {
     self.val = val;
-    self.next = next;
+    unsafe {
+        self.next = null;
+    }
 }
 
-fn get_val(p: Node*): int {
+fn get_val(p: &Node): int {
     return p.val;
 }
 
 fn main(): int {
-    mut n1: Node = Node::new(1, null);
-    mut n2: Node = Node::new(2, null);
-    mut n3: Node = Node::new(3, null);
+    mut n1: Node = Node::new(1);
+    mut n2: Node = Node::new(2);
+    mut n3: Node = Node::new(3);
 
-    // Chain: n1 → n2 → n3
+    // Chain: n1 → n2 → n3. &n3/&n2 are &Node (safe); assigning into a
+    // Node* field is the safe-to-raw widening typesCompatible() always
+    // allows (see src/Types.cpp's Rule 2.5), so no unsafe/cast is needed
+    // for the WRITE side, only for declaring the field itself (above).
     n2.next = &n3;
     n1.next = &n2;
 
-    // Traverse: read fields through pointer parameters
+    // Traverse: read fields through safe reference parameters
     test::assert(get_val(&n1) == 1, "FAIL: n1.val should be 1");
     test::assert(get_val(&n2) == 2, "FAIL: n2.val should be 2");
     test::assert(get_val(&n3) == 3, "FAIL: n3.val should be 3");
 
-    // Follow .next chain to read n2's value through n1.next
-    test::assert(get_val(n1.next) == 2, "FAIL: n1.next.val should be 2");
-    test::assert(get_val(n2.next) == 3, "FAIL: n2.next.val should be 3");
+    // Follow .next chain to read n2's value through n1.next: n1.next is a
+    // raw Node*, so converting it back to &Node for get_val() is the
+    // raw-to-safe direction, which always requires an explicit cast
+    // inside unsafe (it might have been null).
+    unsafe {
+        test::assert(get_val(n1.next to &Node) == 2, "FAIL: n1.next.val should be 2");
+        test::assert(get_val(n2.next to &Node) == 3, "FAIL: n2.next.val should be 3");
+    }
 
     return 0;
 }

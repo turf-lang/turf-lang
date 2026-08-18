@@ -14,7 +14,9 @@ fn Book.new(title: string, author: string, year: int): void {
     self.year = year;
 }
 
-fn format_book(b: Book*): string {
+// (issue #238) `b: &Book` -- a plain function may never have a raw ptr/T*
+// parameter, even inside `unsafe { }`; used to be `b: Book*`.
+fn format_book(b: &Book): string {
     return b.title + " by " + b.author + " (" + (b.year to string) + ")";
 }
 

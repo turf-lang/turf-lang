@@ -5,23 +5,33 @@
 
 import test;
 
-struct Node {
-    val: int,
-    next: Node*
+// (issue #238) struct decl wrapped in `unsafe { }`: `next` is a genuinely
+// nullable raw pointer, which a `&T` safe reference can never represent.
+// See 12_address_of_operator.tr's comment for the fuller rationale.
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
 }
 
-fn Node.new(val: int, next: Node*): void {
+// A plain function may never take a raw ptr/T* parameter (issue #238),
+// even inside `unsafe { }` -- `next` is no longer a constructor param;
+// every caller sets it via a direct field assignment afterward instead.
+fn Node.new(val: int): void {
     self.val = val;
-    self.next = next;
+    unsafe {
+        self.next = null;
+    }
 }
 
 fn main(): int {
     // Allocate a simple Node on the stack and verify field access.
-    mut a: Node = Node::new(42, null);
+    mut a: Node = Node::new(42);
     test::assert(a.val == 42, "Node.val should be 42");
 
     // Create a second node and chain it.
-    mut b: Node = Node::new(7, null);
+    mut b: Node = Node::new(7);
     test::assert(b.val == 7, "Node.val should be 7");
 
     return 0;

@@ -1,32 +1,47 @@
 import test;
 
-struct Node {
-    val: int,
-    next: Node*
+// (issue #238) struct decl wrapped in `unsafe { }`: `next` is a genuinely
+// nullable raw pointer, which a `&T` safe reference can never represent.
+// See 12_address_of_operator.tr's comment for the fuller rationale.
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
 }
 
-fn Node.new(val: int, next: Node*): void {
+// A plain function may never take a raw ptr/T* parameter (issue #238),
+// even inside `unsafe { }` -- `next` is no longer a constructor param;
+// every caller sets it via a direct field assignment afterward instead.
+fn Node.new(val: int): void {
     self.val = val;
-    self.next = next;
+    unsafe {
+        self.next = null;
+    }
 }
 
-fn get_val(p: Node*): int {
+// (issue #238) Both take a safe `&Node` now -- a plain function may never
+// have a raw ptr/T* parameter, even inside `unsafe { }`.
+fn get_val(p: &Node): int {
     return p.val;
 }
 
-fn get_next_val(p: Node*): int {
+fn get_next_val(p: &Node): int {
     return p.val;
 }
 
 fn main(): int {
-    mut n: Node = Node::new(99, null);
-    mut m: Node = Node::new(42, null);
+    mut n: Node = Node::new(99);
+    mut m: Node = Node::new(42);
 
     test::assert(get_val(&n) == 99, "FAIL: cannot read field through typed pointer param");
     test::assert(get_val(&m) == 42, "FAIL: second ptr param read");
 
     n.next = &m;
-    test::assert(get_next_val(n.next) == 42, "FAIL: chained pointer field read");
+    // n.next is a raw Node*; converting it to &Node for get_next_val() is
+    // the raw-to-safe direction, which always requires an explicit cast
+    // inside `unsafe { }` (it might have been null).
+    test::assert(unsafe { get_next_val(n.next to &Node); } == 42, "FAIL: chained pointer field read");
 
     return 0;
 }

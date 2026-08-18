@@ -1,13 +1,23 @@
 import test;
 
-struct Node {
-    val: int,
-    next: Node*
+// (issue #238) struct decl wrapped in `unsafe { }`: `next` is a genuinely
+// nullable raw pointer, which a `&T` safe reference can never represent.
+// See 12_address_of_operator.tr's comment for the fuller rationale.
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
 }
 
-fn Node.new(val: int, next: Node*): void {
+// A plain function may never take a raw ptr/T* parameter (issue #238),
+// even inside `unsafe { }` -- `next` is no longer a constructor param;
+// every caller sets it via a direct field assignment afterward instead.
+fn Node.new(val: int): void {
     self.val = val;
-    self.next = next;
+    unsafe {
+        self.next = null;
+    }
 }
 
 fn Node.scale(factor: int): void {
@@ -19,7 +29,7 @@ fn Node.add(delta: int): void {
 }
 
 fn main(): int {
-    mut n: Node = Node::new(20, null);
+    mut n: Node = Node::new(20);
     n.scale(3);
     test::assert(n.val == 60, "FAIL: self.val mutation not visible after scale()");
 

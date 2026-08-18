@@ -1,15 +1,26 @@
 // Regression test (was DISCOVERED_ISSUES.md #22, "Methods Cannot Return
-// self"): a struct method CAN return self as a pointer (`: Node*`) and this
-// supports real method chaining -- `self.next.next` style traversal built
-// entirely from methods, not just direct field access.
+// self"): a struct method CAN return self as a reference (`: &Node`) and
+// this supports real method chaining -- `self.next.next` style traversal
+// built entirely from methods, not just direct field access.
+//
+// (issue #238) `increment()`'s return type used to be `Counter*` (a raw
+// pointer) -- a plain function may never return a raw ptr/T* type, even
+// inside `unsafe { }` (see checkNoRawPointersInSignature()), so it now
+// returns `&Counter` instead. `self`'s own synthesized type is still a raw
+// `Counter*` under the hood (unchanged by this issue -- see
+// TypeCheckerCall.cpp's `self`-exemption comment), so converting it to the
+// declared `&Counter` return type is the raw-to-safe direction, which
+// always needs an explicit cast inside `unsafe { }` -- self is always
+// non-null by construction, so this is exactly the sound, narrow use the
+// escape hatch exists for.
 //
 // By-value self-return (`fn Node.get_self(): Node { return self; }`) is
 // still rejected ("function declares 'Node' but returns 'Node*'") since
 // there is no dereference operator to satisfy that signature -- that half
 // of the original issue remains a real, tracked gap (see
 // docs/planning/CODE_REVIEW_GAPS_2026-07.md gap #6). This file only covers
-// the by-pointer half, which already works and is the idiomatic way to do
-// method chaining in this language today.
+// the by-reference half, which already works and is the idiomatic way to
+// do method chaining in this language today.
 
 import test;
 
@@ -17,10 +28,12 @@ struct Counter {
     val: int
 }
 
-// Mutates self and returns self by pointer, enabling chained calls.
-fn Counter.increment(): Counter* {
+// Mutates self and returns self by reference, enabling chained calls.
+fn Counter.increment(): &Counter {
     self.val = self.val + 1;
-    return self;
+    unsafe {
+        return self to &Counter;
+    }
 }
 
 fn Counter.get(): int {
@@ -30,8 +43,8 @@ fn Counter.get(): int {
 fn main(): int {
     mut c: Counter = Counter::default();
 
-    // Single call returns a usable pointer.
-    mut p: Counter* = c.increment();
+    // Single call returns a usable reference.
+    mut p: &Counter = c.increment();
     test::assert(p.val == 1, "");
     test::assert(c.val == 1, "");
 

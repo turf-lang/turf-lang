@@ -4,9 +4,14 @@ struct Builder {
     val: int
 }
 
-// Mutates self and returns self by pointer -- see
+// Mutates self and returns self by reference -- see
 // tests/06_structs/23_self_pointer_chaining.tr for why this (rather than a
-// by-value `Builder` return) is the idiomatic way to support chaining.
+// by-value `Builder` return) is the idiomatic way to support chaining, and
+// for why the return type is `&Builder` (issue #238: a plain function may
+// never return a raw ptr/T* type, even inside `unsafe { }` -- it used to
+// be `Builder*` here too) with an explicit `unsafe { self to &Builder }`
+// to satisfy it (self's own synthesized type is still a raw pointer,
+// unchanged by this issue, but always non-null by construction).
 //
 // This method was MISSING entirely until this fix: the original test called
 // `b.push(1).push(2)` against a `Builder` struct that declared zero methods.
@@ -19,9 +24,11 @@ struct Builder {
 // resolved or executed). Now that the compiler correctly rejects a call to
 // a genuinely nonexistent method, the test needs a REAL method to chain
 // against for its own claimed purpose to mean anything.
-fn Builder.push(x: int): Builder* {
+fn Builder.push(x: int): &Builder {
     self.val = self.val + x;
-    return self;
+    unsafe {
+        return self to &Builder;
+    }
 }
 
 fn main(): int {
