@@ -41,6 +41,45 @@ public:
       "as `" + StructName + "::" + MethodName + "(...)`).");
   }
 };
+/**
+ * @brief A struct field access (`x.field`) names a field that doesn't exist
+ *        on that struct -- the field-access counterpart of
+ *        StructMethodNotFoundError above, and the concrete target of issue
+ *        #241 Track D's "Did You Mean?" extension to struct fields
+ *        (`user.pasword` -> `user.password`).
+ *
+ * Before this class existed, TypeChecker::visitFieldAccess() silently left
+ * the node's type null for an unknown field (a deliberate permissive
+ * fallback, same shape StructMethodNotFoundError's own doc comment
+ * describes for methods) and let compilation continue -- the only place
+ * that ever caught the mistake was CodegenStruct.cpp's raw LogErrorAt() at
+ * actual codegen time, with no error code, no category, and critically no
+ * suggestions at all, even though the exact same SuggestionIndex trie every
+ * other "unknown name" diagnostic in this compiler already uses was sitting
+ * right there unused. Raising this earlier, at TypeCheck time, also means a
+ * bad field access is now caught before Codegen ever runs, same as every
+ * other TypeChecker-owned class of mistake -- CodegenStruct.cpp's own check
+ * stays in place as a defensive fallback for the CodegenExpr-only-nodes
+ * case (see calling code), not because this path is expected to be reached
+ * anymore.
+ */
+class UnknownStructFieldError : public TurfError {
+public:
+  UnknownStructFieldError(SourceLocation Loc, const std::string &StructName,
+                          const std::string &FieldName,
+                          const RankedSuggestions &Suggestions)
+      : TurfError(Loc, Colors::BRIGHT_RED + "Struct '" + Colors::CYAN +
+                           StructName + Colors::BRIGHT_RED +
+                           "' has no field named '" + Colors::CYAN +
+                           FieldName + Colors::BRIGHT_RED + "'." +
+                           Colors::RESET) {
+    Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
+    Hint_ = suggestionsOrFallback(
+        Suggestions, "Double-check the spelling, or make sure '" +
+                         FieldName + "' is declared as a field on '" +
+                         StructName + "'.");
+  }
+};
 // `StructName::new(...)` was called but `StructName` has no `.new`
 // constructor declared at all -- unlike a static method, `new` has no
 // generic "not found" fallback because it isn't looked up by an arbitrary
