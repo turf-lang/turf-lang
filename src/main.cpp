@@ -17,6 +17,9 @@
 
 #include "Builtins.h"
 #include "Codegen.h"
+#include "Colors.h"
+#include "ErrorCategory.h"
+#include "ErrorCodes.h"
 #include "Lexer.h"
 #include "Lint.h"
 #include "Parser.h"
@@ -77,6 +80,52 @@ struct CompilerOptions {
   std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
 };
 
+// `turf --explain E0NN` prints a multi-paragraph explanation for a
+// diagnostic code and exits -- this mode takes no input .tr file, so it's
+// handled before parseArgs() (which requires and validates one) rather than
+// folded into CompilerOptions. Reuses the same per-category docs/slm/*.txt
+// files the SLM integration already loads for --smart's context-window
+// prompts (SLMIntegration.cpp's loadDocFile()/getCategoryDocPath()), rather
+// than maintaining a second, parallel set of per-code documentation --
+// see issue #241 Track D.
+static void handleExplainFlagIfPresent(int argc, char **argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) != "--explain")
+      continue;
+
+    if (i + 1 >= argc) {
+      std::cerr << "Usage: turf --explain E0NN\n";
+      std::exit(1);
+    }
+
+    std::string Code = argv[i + 1];
+    const ErrorCodeEntry *Entry = ErrorCodes::lookupByCode(Code);
+    if (!Entry) {
+      std::cerr << "Unknown error code: " << Code
+                << "\nRun `turf --explain E0NN` with a code shown in an "
+                   "error's \"[E0NN]\" header, e.g. `turf --explain E001`.\n";
+      std::exit(1);
+    }
+
+    std::cout << Colors::BOLD << Colors::BRIGHT_CYAN << Entry->Code
+              << Colors::RESET << "  " << Entry->ClassName << " ("
+              << SLM::getCategoryName(Entry->Category) << ")\n\n";
+
+    std::string DocPath = SLM::getCategoryDocPath(Entry->Category);
+    std::ifstream Doc(DocPath);
+    if (Doc.is_open()) {
+      std::cout << Doc.rdbuf() << "\n";
+    } else {
+      // Doc file missing on disk (e.g. run from outside the repo root) --
+      // fall back to the short auto-generated description rather than
+      // printing nothing.
+      std::cout << Entry->Description << ".\n";
+    }
+
+    std::exit(0);
+  }
+}
+
 static CompilerOptions parseArgs(int argc, char **argv) {
   CompilerOptions opts;
 
@@ -132,7 +181,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
         << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] "
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
-           "[--dump-modules] [--link <libname>]\n";
+           "[--dump-modules] [--link <libname>]\n"
+           "       turf --explain E0NN\n";
     std::exit(1);
   }
 
@@ -356,6 +406,7 @@ static int linkObject(const std::string &ObjFile,
 int main(int argc, char **argv) {
   CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)main);
 
+  handleExplainFlagIfPresent(argc, argv);
 
   struct SLMCleanup {
     ~SLMCleanup() { SLM::SLMEngine::getInstance().release(); }

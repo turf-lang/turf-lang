@@ -201,6 +201,11 @@ public:
     // to select the right entry out of AllSourceLines at print time, since
     // Line numbers alone are ambiguous across files.
     std::string Filename;
+    // Stable "E0NN" code (see ErrorCodes.h), set only for diagnostics raised
+    // through a TurfError subclass (TurfError::raise() passes getCode()).
+    // Empty for the raw, untyped LogErrorAt() path and for warnings -- both
+    // print without a "[E0NN]" tag in printDiag().
+    std::string Code;
   };
 
   // Record a diagnostic. Errors on a line that already has an error are
@@ -208,7 +213,8 @@ public:
   static void add(SourceLocation Loc, const std::string &Msg,
                   const std::string &Hint, bool IsWarning = false,
                   const std::vector<RelatedLocation> &Related = {},
-                  SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL);
+                  SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL,
+                  const std::string &Code = "");
 
   static void add(SourceLocation Loc, const std::string &Msg,
                   bool IsWarning = false,

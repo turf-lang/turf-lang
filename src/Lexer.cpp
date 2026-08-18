@@ -183,9 +183,11 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
       isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
   const char *TypeLabel = isWarning ? "warning" : "error";
 
-  // error/warning at line X, col Y [in file: ...]
-  std::cerr << Colors::BOLD << AccentColor << "\u2500\u2500 " << TypeLabel
-            << " " << Colors::RESET << Colors::BRIGHT_BLACK << "at line "
+  // error/warning [E0NN] at line X, col Y [in file: ...]
+  std::cerr << Colors::BOLD << AccentColor << "\u2500\u2500 " << TypeLabel;
+  if (!D.Code.empty())
+    std::cerr << " " << Colors::BRIGHT_BLACK << "[" << D.Code << "]" << AccentColor;
+  std::cerr << " " << Colors::RESET << Colors::BRIGHT_BLACK << "at line "
             << D.Loc.Line << ", col " << D.Loc.Col;
   // Only worth calling out when it's NOT the file the user actually
   // compiled -- i.e. the diagnostic is about content inside an imported
@@ -299,7 +301,8 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
 void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                            const std::string &Hint, bool IsWarning,
                            const std::vector<RelatedLocation> &Related,
-                           SLM::ErrorCategory Category) {
+                           SLM::ErrorCategory Category,
+                           const std::string &Code) {
   // If there is already an error on this line, suppress everything else
   // (both additional errors and warnings) to avoid cascading noise -- unless
   // an embedder opted into CollectAllDiagnostics (see its doc comment),
@@ -358,7 +361,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   std::string Filename = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
 
   Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning, Related, Category,
-                         Filename});
+                         Filename, Code});
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);
