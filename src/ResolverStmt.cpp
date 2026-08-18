@@ -98,6 +98,17 @@ void Resolver::visitBlock(BlockExprAST &Node) {
   SymTable_.exitScope();
 }
 
+// `unsafe { }` (issue #238): a pure lexical gate, not a Resolver concern --
+// all raw-pointer-use enforcement lives in the TypeChecker (see
+// TypeChecker::visitUnsafeBlock()'s UnsafeDepth_ tracking). Resolver only
+// needs to keep resolving names inside the body; Body is always a
+// BlockExprAST (see ParseUnsafeExpr()), so delegating straight to it
+// reuses visitBlock()'s own enterScope/exitScope bracket above instead of
+// duplicating it here.
+void Resolver::visitUnsafeBlock(UnsafeBlockExprAST &Node) {
+  visitChild(Node.getBodyMut());
+}
+
 
 
 void Resolver::visitIf(IfExprAST &Node) {

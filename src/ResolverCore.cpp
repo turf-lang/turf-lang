@@ -139,6 +139,20 @@ TurfTypePtr substituteTypeParams(const TurfTypePtr &Ty,
       return std::make_shared<TurfGenericParamType>(NT->getName());
     return Ty;
   }
+  // Checked BEFORE the plain TurfPointerType branch below: TurfReferenceType
+  // (&T, issue #238) is a SUBCLASS of TurfPointerType (see its own doc
+  // comment, Types.h), so `dynamic_cast<const TurfPointerType *>` matches
+  // it too -- without this earlier, more specific check, substituting a
+  // generic function's own `&T` parameter/return/field type silently
+  // reconstructed a plain `TurfPointerType`, turning every `&T` into `T*`
+  // (confirmed live: `fn<T> Box.set(v: &T)` reported its own parameter as
+  // `T*` in the "raw pointer in function signature" diagnostic).
+  if (const auto *RT = dynamic_cast<const TurfReferenceType *>(Ty.get())) {
+    TurfTypePtr NewPointee = substituteTypeParams(RT->getPointee(), TypeParams);
+    return NewPointee == RT->getPointee()
+              ? Ty
+              : std::make_shared<TurfReferenceType>(NewPointee);
+  }
   if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty.get())) {
     TurfTypePtr NewPointee = substituteTypeParams(PT->getPointee(), TypeParams);
     return NewPointee == PT->getPointee()
