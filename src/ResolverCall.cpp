@@ -18,6 +18,7 @@
 #include "AST.h"
 #include "Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
 #include "Errors.h"          // ReferenceError, DuplicateDeclarationError
+#include "ErrorsFlow.h"      // SemanticError
 #include "ResolverSymbolTable.h"
 #include "ResolverInternal.h"
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
@@ -58,6 +59,23 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
 
   if (VarCallee) {
     CalleeName = VarCallee->getName();
+
+    // `main` is compiled directly as the real C-ABI entry point (see
+    // CodegenFunc.cpp's argv/argc plumbing) -- its LLVM FunctionType is
+    // forced to (argc: i32, argv: ptr) regardless of Turf's always-empty
+    // Params list. A Turf-level call `main()` supplies zero arguments,
+    // which would desync from that 2-arg signature and previously reached
+    // Codegen's `EvaluatedArgs[Idx]` indexing with an out-of-bounds Idx
+    // (main is otherwise an ordinary, calls-just-fine function symbol, so
+    // nothing else in the Resolver would have caught this). Reject it here
+    // with a clear diagnostic instead of letting it crash the compiler.
+    if (CalleeName == "main") {
+      SemanticError(Node.getLoc(),
+                     "'main' cannot be called directly -- it is the "
+                     "program's entry point, not an ordinary function.")
+          .raise();
+      return;
+    }
 
     // First-class functions: `f(3)` where `f` is a local variable/parameter
     // of fn(...):... type (holding a function VALUE), not the name of a
