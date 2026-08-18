@@ -13,7 +13,7 @@ DEFINITION SYNTAX:
     }
 
     fn greet(name: string): void {
-        io.printline(name);
+        io::printline(name);
         return;
     }
 

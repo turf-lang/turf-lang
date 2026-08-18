@@ -19,11 +19,11 @@ RETURN TYPE:
     (a struct's own name), "Color" (an enum's own name).
 
 CORRECT USAGE:
-  io.printline(typeof(5));           // prints "int"
-  io.printline(typeof(3.14));        // prints "double"
-  io.printline(typeof("hello"));     // prints "string"
-  io.printline(typeof(true));        // prints "bool"
-  io.printline(typeof(myPoint));     // prints "Point" (the struct's name)
+  io::printline(typeof(5));          // prints "int"
+  io::printline(typeof(3.14));       // prints "double"
+  io::printline(typeof("hello"));    // prints "string"
+  io::printline(typeof(true));       // prints "bool"
+  io::printline(typeof(myPoint));    // prints "Point" (the struct's name)
   immut t: string = typeof(myVar);   // stores the type name
 
 COMMON MISTAKES:

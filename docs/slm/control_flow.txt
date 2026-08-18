@@ -9,15 +9,15 @@ IF STATEMENT: block form only -- there is NO single-line `then`/`else` form.
 
   CORRECT EXAMPLES:
     if x > 0 {
-        io.printline(x to string);
+        io::printline(x to string);
     } elseif x < 0 {
-        io.printline((-x) to string);
+        io::printline((-x) to string);
     } else {
-        io.printline("0");
+        io::printline("0");
     }
 
     if (score >= 90) {    // parentheses around condition are optional
-        io.printline("A");
+        io::printline("A");
     }
 
   RULES:
@@ -75,16 +75,16 @@ FOR LOOP:
 
   CORRECT EXAMPLES:
     for i in 0..10 step i += 1 {
-        io.printline(i to string);
+        io::printline(i to string);
     }
 
     for i in 10..0 step i -= 1 {
-        io.printline(i to string);
+        io::printline(i to string);
     }
 
     immut factor: int = 2;
     for i in 1..100 step i *= factor {
-        io.printline(i to string);
+        io::printline(i to string);
     }
 
   INCORRECT EXAMPLES:

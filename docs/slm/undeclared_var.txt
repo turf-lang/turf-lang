@@ -20,7 +20,7 @@ DECLARATION SYNTAX:
     if true {
         mut x: int = 5;
     }
-    io.printline(x to string);      // ERROR: x is out of scope here --
+    io::printline(x to string);     // ERROR: x is out of scope here --
                                     // "I can't find anything named 'x'."
 
 SCOPE RULES:
@@ -37,11 +37,11 @@ BUILTIN / INTRINSIC NAMES (exact spelling required):
 
 CORRECT USAGE:
   mut x: int = 5;
-  io.printline(x to string);
+  io::printline(x to string);
 
 INCORRECT USAGE:
-  io.printline(y);                // ERROR: y was never declared
-  io.praintline("hi");            // ERROR: typo -- should be 'printline'
+  io::printline(y);               // ERROR: y was never declared
+  io::praintline("hi");           // ERROR: typo -- should be 'printline'
   length("hi");                   // ERROR: no such function -- use strings::length("hi")
 
 COMMON MISTAKES:

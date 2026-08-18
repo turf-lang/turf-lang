@@ -50,9 +50,9 @@ SHADOWING (warning, not error):
     mut x: int = 1;
     if true {
         mut x: int = 99;    // Warning: shadows outer 'x'
-        io.printline(x to string);  // prints 99
+        io::printline(x to string); // prints 99
     }
-    io.printline(x to string);      // prints 1 (outer x unaffected)
+    io::printline(x to string);     // prints 1 (outer x unaffected)
 
 KEYWORD NAMES:
   You cannot use a reserved keyword as a variable name.
