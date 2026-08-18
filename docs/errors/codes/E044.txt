@@ -1,0 +1,17 @@
+You called a function with the wrong number of arguments
+
+Turf found the function you're calling just fine -- the name is right -- but none of its versions take the number of arguments you gave it. This is one of the friendlier errors to fix, because the compiler prints out every valid way to call that function right in the error message.
+
+For example, if `add` is declared like this:
+
+    fn add(a: int, b: int): int {
+        return a + b;
+    }
+
+...then calling it with three arguments instead of two will trigger this error:
+
+    add(2, 3, 4);   // ERROR: 'add' was called with 3 arguments, but no overload accepts that many.
+
+The fix is almost always just counting again -- look at the "Known overloads" list the error prints, and match your call to one of them exactly. Either you added or forgot an argument, or the function's own declaration needs to change if it's supposed to accept a different number of values.
+
+One thing worth knowing about: if you're calling a method on a struct instance with `.` (like `thing.method(x)`) and that method is declared `static`, the argument count can look off by one in a confusing way, because `.` normally passes the instance itself in as a hidden first argument that a `static` method doesn't expect. If that's what's happening, Turf will usually catch it and tell you directly rather than leaving you to puzzle over a mismatched count -- but it's worth keeping in mind if the numbers don't seem to add up.

@@ -1,0 +1,34 @@
+Your constructor doesn't set every field on every possible path
+
+When you write a `.new` constructor, Turf checks that it always sets EVERY field of the struct, no matter which path the code takes through it -- not just "somewhere in the function," but on every single branch. If a field only gets assigned inside one half of an if/else, or only before some early returns and not others, Turf will catch that and tell you exactly which field it's worried about.
+
+Here's a constructor that assigns both fields unconditionally, which is fine:
+
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;
+    }
+
+But here's one where a field is only set some of the time:
+
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        if x > 0 {
+            self.y = y;
+        }
+    }
+
+If `x` isn't greater than 0, `self.y` never gets a value -- and Turf would rather stop you here at compile time than let a struct silently end up with garbage/uninitialized memory in one of its fields. The error message tells you exactly which field(s) it couldn't prove were always assigned, so you know exactly what to fix.
+
+The fix is almost always to make sure the field gets a value on every path -- for example, by assigning a sensible default before the `if`, or by also assigning it inside the `else` branch:
+
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        if x > 0 {
+            self.y = y;
+        } else {
+            self.y = 0;
+        }
+    }
+
+Once every field is guaranteed to be set no matter which way the code branches, this error goes away.

@@ -1,0 +1,22 @@
+TURF E022 -- EXPORT NON-CONSTANT INITIALIZER:
+
+CAUSE:
+  `export immut NAME: TYPE = EXPR;` was used where EXPR isn't a plain
+  literal the compiler can fold at compile time (a number, string, or
+  bool). Exported constants have no real runtime storage -- every importer
+  gets the value inlined at compile time -- so the value must be fully
+  known when the export is compiled, not computed from another variable,
+  a function call, or any other expression.
+
+EXAMPLE:
+    immut base: int = 10;
+    export immut total: int = base * 2;   // ERROR: not a plain literal
+
+CORRECT:
+    export immut total: int = 20;
+
+FIX:
+  Replace the expression with the literal value it would evaluate to, or
+  stop exporting it and compute the value normally at the point it's
+  actually used (a regular, non-exported `immut`/`mut` can be initialized
+  from any expression).

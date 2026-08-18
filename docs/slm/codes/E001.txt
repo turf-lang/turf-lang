@@ -1,0 +1,27 @@
+TURF E001 -- ARRAY BOUNDS:
+
+CAUSE:
+  A LITERAL (compile-time-constant) array index was used that falls
+  outside the array's declared size. Turf arrays are zero-indexed and
+  fixed-size, so `arr[N]` is only valid for `0 <= N < SIZE`.
+
+  This check only fires for a literal index the compiler can see at
+  compile time (`arr[5]`). A computed index (`arr[i]`) is NOT checked
+  here -- an out-of-bounds computed index is a runtime mistake, not a
+  compile-time one, and Turf does not currently catch it either way.
+
+CORRECT USAGE:
+    immut primes: int[3] = [2, 3, 5];
+    mut first: int = primes[0];    // valid: index 0
+    mut last: int = primes[2];     // valid: index 2 (SIZE - 1)
+
+INCORRECT:
+    mut oops: int = primes[3];
+    // ERROR: Array index out of bounds! You tried to access
+    //   'primes[3]', but 'primes' only has 3 elements (indices 0 to 2).
+
+FIX:
+  Recount from 0: the last valid index is always `SIZE - 1`, never
+  `SIZE`. If the array genuinely needs to hold more elements, increase
+  its declared size (`int[3]` -> `int[4]`) and add the missing
+  initializer, rather than indexing past the end of the current one.

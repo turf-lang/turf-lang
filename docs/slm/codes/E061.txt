@@ -1,0 +1,35 @@
+TURF E061 -- INVALID ASSIGNMENT TARGET:
+
+CAUSE:
+  The left-hand side of `=` isn't something that can be assigned to at
+  all -- not a variable, a struct field, or an array element. Only those
+  three kinds of expression are valid assignment targets (lvalues) in
+  Turf.
+
+CORRECT USAGE:
+    mut x: int = 5;
+    x = 10;              // variable -- valid target
+
+    mut p: Point = Point::default();
+    p.x = 10;             // struct field -- valid target
+
+    mut arr: int[3] = [1, 2, 3];
+    arr[0] = 10;          // array element -- valid target
+
+INCORRECT:
+    true = 5;
+    // ERROR: Cannot assign to true -- it isn't a variable, struct field, or array element.
+
+    (x + 1) = 5;
+    // ERROR: Cannot assign to (x + 1) -- it isn't a variable, struct field, or array element.
+
+WHAT THIS ERROR IS NOT:
+  - Not ImmutableAssignmentError -- that fires when the LHS IS a valid
+    target (a real variable) but it was declared `immut`. This error fires
+    when the LHS isn't a valid assignment target in the first place,
+    regardless of mutability.
+
+FIX:
+  Rewrite the left-hand side of the `=` so it's an actual variable, struct
+  field, or array element -- never a literal, a computed expression, or a
+  keyword.

@@ -1,0 +1,22 @@
+TURF E021 -- EXPORT MUT NOT SUPPORTED:
+
+CAUSE:
+  `export mut NAME: TYPE = VALUE;` was used. Only `export immut` (a shared,
+  compile-time constant) is supported right now -- true mutable shared
+  globals across files aren't implemented.
+
+EXAMPLE:
+    export mut counter: int = 0;   // ERROR: export mut isn't supported
+
+CORRECT:
+    export immut MAX_USERS: int = 100;
+
+FIX:
+  Change `mut` to `immut`. If you genuinely need mutable state that's
+  visible across files, that isn't currently a language feature -- keep
+  the mutable variable local to one file/function and pass it explicitly
+  (by pointer, or via a function's return value) instead.
+
+WHAT THIS ERROR IS NOT:
+  Not about ordinary (non-exported) `mut` variables -- those are completely
+  normal and unrelated to this restriction, which only applies to `export`.

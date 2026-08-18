@@ -1,0 +1,26 @@
+The left side of your assignment isn't something you can actually assign to
+
+`=` needs somewhere real to put the value -- a variable, a struct field, or a slot in an array. Those three are the only things Turf will let you write on the left side of an assignment.
+
+All three of these are valid targets:
+
+    mut x: int = 5;
+    x = 10;                 // a variable
+
+    mut p: Point = Point::default();
+    p.x = 10;                // a struct field
+
+    mut arr: int[3] = [1, 2, 3];
+    arr[0] = 10;             // an array element
+
+This isn't valid, because `true` is a fixed value, not a place to store something:
+
+    true = 5;
+
+Neither is this, because `(x + 1)` is a computed result, not a variable you can point at and overwrite:
+
+    (x + 1) = 5;
+
+Turf tells you exactly what was on the left side that it couldn't accept.
+
+This error is almost always a sign of a typo or a mixed-up line -- maybe you meant to compare with `==` instead of assign with `=`, or you meant to assign to a variable but accidentally wrote an expression instead. Take a second look at what's actually on the left of the `=` and make sure it's a genuine variable, field, or array slot.

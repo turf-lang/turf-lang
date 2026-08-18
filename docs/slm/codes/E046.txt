@@ -1,0 +1,23 @@
+TURF E046 -- CONSTRUCTOR CANNOT BE STATIC:
+
+CAUSE:
+  `fn StructName.new(...)` was declared with a trailing `static` keyword.
+  `new` always initializes `self` (the freshly-allocated instance
+  `StructName::new(...)` creates and passes in), so `static` -- which means
+  "no `self` at all" -- directly contradicts what `new` exists to do.
+
+CORRECT SYNTAX:
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;
+    }
+
+INCORRECT:
+    fn Point.new(x: int, y: int) static: void {   // ERROR: 'new' can't
+        self.x = x;                               //        be 'static'.
+        self.y = y;
+    }
+
+FIX:
+  Remove `static` from the `.new` declaration. `new` is never static --
+  it's the one method whose entire job is to initialize `self`.

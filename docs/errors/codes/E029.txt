@@ -1,0 +1,17 @@
+You used '::' on a variable, but '::' is only for types, enums, and modules
+
+Turf splits access into two operators, and it's an easy thing to mix up while you're still getting used to it. `.` is for things you already HOLD -- an instance's fields and methods. `::` is for looking something up by NAME, without needing an instance at all -- constructing a struct, picking an enum variant, calling a module function, or calling a static method.
+
+So this works, because `p` is a real `Point` you're holding, and `.` is instance access:
+
+    mut p: Point = Point::new(1, 2);
+    p.sum();
+
+But this doesn't, because `p` is a variable holding an instance, and `::` isn't for that:
+
+    p::sum();
+    // ERROR: 'p' is a variable, not a type or module -- '::' doesn't apply to it.
+
+Notice that `Point::new(1, 2)` on the first line is still correct -- that's `::` on the TYPE name `Point`, which is exactly what `::` is for. The only thing that changed on the second line is that `p` is now an instance, so it needs `.` instead.
+
+The fix is simple: wherever you see this error, swap that one `::` for a `.`. The name after it (the method or field) is very likely already spelled right -- it's just the operator that needs to change.

@@ -1,0 +1,21 @@
+TURF E027 -- MODULE NOT FOUND:
+
+CAUSE:
+  `import moduleName;` (or a module-qualified reference to it) names a
+  module that can't be located anywhere Turf searches: the standard
+  library (`lib/std/**`, searched recursively regardless of subfolder) or
+  the current project. There is no `moduleName.tr` file findable.
+
+EXAMPLE:
+    import strnigs;   // ERROR: no such module -- typo for 'strings'
+
+FIX:
+  Check the spelling of the module name (it should exactly match the
+  `.tr` file's name, without the extension). If it's meant to be your own
+  file, make sure it actually exists in your project and, if you're using
+  TURF_HOME, that your install root/search path is set correctly.
+
+WHAT THIS ERROR IS NOT:
+  Not about a symbol/function being missing INSIDE a module that was found
+  (that's ModuleMethodNotFoundError, E026, or UnknownModuleSymbolError) --
+  this is specifically about the module file itself never being located.

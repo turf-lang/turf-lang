@@ -1,0 +1,19 @@
+You tried to change a variable that was declared as immutable
+
+In Turf, when you declare a variable with `immutable` (or its shorter spelling `immut`), you're making a promise that its value will never change again after that line. Turf holds you to that promise at compile time.
+
+This is fine -- `counter` was declared `mut`, so it's allowed to change:
+
+    mut counter: int = 0;
+    counter = counter + 1;
+
+This isn't, because `pi` was declared `immut`:
+
+    immut pi: double = 3.14159;
+    pi = 3.14;
+
+Turf tells you exactly which variable you tried to reassign, so there's no guessing which line caused it.
+
+If you genuinely need this value to change later in your program, the fix is simple: go back to where it was declared and use `mut` (or `mutable`) instead of `immut`. If it really shouldn't change, then the assignment itself is the mistake -- you probably meant to introduce a brand new variable with a different name, rather than overwrite this one.
+
+`immutable`-by-default thinking takes a little getting used to if you're coming from a language where every variable can always change, but it's a genuinely useful safety net: it means once you see `immut`, you know for certain that value is never going to shift under you later in the code.

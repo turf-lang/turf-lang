@@ -1,0 +1,12 @@
+You used a value where a different, incompatible type was expected
+
+This is Turf's general type-mismatch error -- the one you'll see when a value's actual type doesn't line up with what was expected, and the mistake doesn't already have its own more specific, more detailed error message (function-call arguments and `return` values, for instance, have their own dedicated errors with more context).
+
+The most common shape of this error is a variable's initializer not matching its declared type:
+
+    mut n: int = 5;       // fine -- 5 is an int, matches the declaration
+    mut bad: int = "five"; // string doesn't match int
+
+But the same underlying check also covers a few related structural mistakes, like a `matches` pattern that's listed twice, an enum `compare` that doesn't handle every possible variant, a numeric cast that's out of range for the target type, or a struct literal that's missing one of its required fields. Whichever one it is, the banner line right above the message tells you which kind of problem you're looking at, and the line under it spells out the specific details.
+
+To fix it, read that detail line carefully -- it names the exact two types (or the exact missing piece) involved. From there it's usually one of two fixes: change the value so it's genuinely the type that was expected, or -- if the value was actually right and the *declared* type was the real mistake -- fix the declaration instead.

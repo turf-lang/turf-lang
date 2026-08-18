@@ -1,0 +1,35 @@
+TURF E014 -- KEYWORD ERROR (UNRECOGNIZED WORD IN A KEYWORD POSITION):
+
+CAUSE:
+  A word appeared in a position where the parser expected a Turf keyword
+  (`if`, `while`, `struct`, `return`, `mut`, etc.) but the word it saw
+  isn't a real keyword at all -- almost always a typo of one.
+
+CORRECT:
+    if x > 0 {
+        return x;
+    }
+
+INCORRECT:
+    iff x > 0 {          // ERROR: 'iff' isn't a keyword
+        return x;
+    }
+
+  Turf runs the misspelled word through the same suggestion engine used
+  for misspelled variable/function names, so the error usually already
+  names the keyword it thinks you meant (e.g. "Did you mean: 'if'?").
+
+WHAT THIS ERROR IS NOT:
+  Not about a misspelled VARIABLE or FUNCTION name (that's ReferenceError
+  E040 / UnknownFunctionError E041) -- this is specifically about a
+  reserved-word position, where only a fixed set of real keywords is
+  valid at all, typo-suggestion or not.
+
+FIX:
+  Fix the spelling to match a real Turf keyword. If the suggestion is
+  wrong or empty, double check the exact reserved word list (`if`,
+  `elseif`, `else`, `while`, `do`, `for`, `in`, `step`, `struct`, `enum`,
+  `fn`, `return`, `break`, `continue`, `mut`/`mutable`,
+  `immut`/`immutable`, `import`, `export`, `static`, `self`, `error`,
+  `recover`, `produce`, `run`, `as`, `unsafe`, and the primitive type
+  names).

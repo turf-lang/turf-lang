@@ -1,0 +1,33 @@
+TURF E012 -- STATEMENT AFTER TERMINATOR:
+
+CAUSE:
+  A statement appears immediately after a terminator (`return`, `break`,
+  `continue`) in the SAME block, with nothing conditional separating them.
+  Since the terminator unconditionally exits the block, every statement
+  after it in that block is dead code -- guaranteed to never run.
+
+CORRECT USAGE:
+    fn abs(x: int): int {
+        if x < 0 {
+            return -x;
+        }
+        return x;
+    }
+
+INCORRECT:
+    fn example(): int {
+        return 5;
+        io::printline("this never prints");
+        // ERROR: this code comes after a return, so it's impossible to
+        // reach it.
+    }
+
+WHAT THIS ERROR IS NOT:
+  - Not the same as UnreachableCodeError (E013), which flags an entire
+    unreachable BLOCK (e.g. an `else` after a condition that's always
+    true) rather than a single trailing statement in the same block as its
+    terminator. The two overlap in spirit but fire from different checks.
+
+FIX:
+  Delete the dead statement(s), or move them BEFORE the terminator if they
+  were meant to run first.

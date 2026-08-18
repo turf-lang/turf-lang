@@ -1,0 +1,38 @@
+TURF E006 -- FOR-EACH UNSIZED ARRAY:
+
+CAUSE:
+  A `for x in y { ... }` loop was used where `y` is an unsized array
+  function parameter (`arr: T[]`, no size in the brackets). An unsized
+  array parameter carries no length at runtime, so for-each has no safe
+  way to know where to stop.
+
+CORRECT USAGE:
+    fn sumAll(arr: int[5]): int {   // concrete size -- length is known
+        mut total: int = 0;
+        for value in arr {
+            total = total + value;
+        }
+        return total;
+    }
+
+INCORRECT:
+    fn sumAll(arr: int[]): int {    // unsized -- no known length
+        mut total: int = 0;
+        for value in arr {
+            total = total + value;
+        }
+        return total;
+    }
+    // ERROR: for-each requires a known array size! 'arr' is an unsized
+    //   array parameter, which carries no length at runtime.
+
+WHAT THIS ERROR IS NOT:
+  Not the same as E005 (for-each on a non-array). This fires specifically
+  when the target IS an array, just one whose size isn't known at the
+  point of the loop.
+
+FIX:
+  Either declare the parameter with a concrete size (`arr: int[5]`) if
+  the caller always passes a fixed-size array, or add a separate
+  `len: int` parameter and use an ordinary counting for-loop
+  (`for i in 0..len step i += 1 { arr[i] }`) instead of for-each.

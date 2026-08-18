@@ -1,0 +1,20 @@
+You tried to do math with something that isn't a number
+
+Operators like `+`, `-`, `*`, `/`, and `%` are for numbers. If one side of the operation isn't actually a number -- a `string`, a `bool`, or anything else -- Turf can't figure out what the math is supposed to mean, so it stops and tells you.
+
+This works fine:
+
+    mut sum: int = 3 + 4;
+    mut avg: double = 7.0 / 2.0;
+
+This doesn't, because `"4"` is text, not a number:
+
+    mut bad: int = 3 + "4";
+
+The other common way to see this error is dividing (or taking the remainder) by a literal zero:
+
+    mut boom: int = 10 / 0;
+
+Turf catches an obvious `/ 0` or `% 0` at compile time, before your program even runs, since dividing by zero has no sensible answer.
+
+To fix a type mismatch, make sure everything on both sides of the operator is genuinely a number -- if you have a number stored as text, you'll need an actual numeric value in hand before doing math with it, since Turf doesn't automatically parse text into numbers. To fix a divide-by-zero, double-check the math -- it's usually a sign that something upstream (like a size or a count) isn't what you expected it to be.

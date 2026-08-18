@@ -1,0 +1,27 @@
+One of your compare arms doesn't match the type you're comparing against
+
+A Turf `compare subject { matches ... }` block checks a value against a list of possibilities, and every single `matches` arm has to be the same type as `subject` itself.
+
+Here, `code` is an `int`, so every arm is an `int` too:
+
+    mut code: int = 404;
+    compare code {
+        matches 200:
+            io::printline("OK");
+        done
+        matches 404:
+            io::printline("Not Found");
+        done
+        otherwise:
+            io::printline("Unknown");
+    }
+
+If one arm is written as text instead:
+
+    matches "404":
+        io::printline("Not Found");
+    done
+
+...Turf catches it, because `code` can never actually equal the string `"404"` -- it's an `int`, and `"404"` is a completely different type, not just a different-looking version of the same value.
+
+To fix it, look at the compare subject's type first, then make sure every arm matches that exactly -- drop the quotes if the subject is a number, or add them if the subject is a string. It's an easy typo to make, especially when a number and its text form look almost identical.

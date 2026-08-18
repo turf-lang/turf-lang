@@ -1,0 +1,33 @@
+You used break, continue, or return somewhere it doesn't belong
+
+`break` and `continue` only make sense inside a loop -- they're instructions for "stop this loop right now" or "skip to the next round of this loop." If the compiler finds one sitting outside any `while` or `for`, there's nothing for it to break out of or continue, so it stops you here.
+
+Here's `break` and `continue` used the right way, inside a `for` loop:
+
+    fn sumPositive(nums: int[5]): int {
+        mut total: int = 0;
+        for i in 0..5 {
+            if nums[i] < 0 {
+                continue;
+            }
+            if total > 1000 {
+                break;
+            }
+            total = total + nums[i];
+        }
+        return total;
+    }
+
+And here's the mistake -- `break` sitting inside an `if`, with no loop around it at all:
+
+    fn broken(): void {
+        if true {
+            break;   // there's no loop here for this to break out of
+        }
+    }
+
+A plain `if`/`else` block does NOT count as a loop, even though it also uses `{ }`. Only `while` and `for` create a loop that `break`/`continue` can target.
+
+If you meant to write a loop, wrap the code in a `while` or `for`. If the `break`/`continue` was left over from some earlier version of the code, it's safe to just delete it.
+
+This one's usually a quick fix once you spot which keyword is in the wrong spot -- happens to everyone while you're still getting a feel for where loops start and end.

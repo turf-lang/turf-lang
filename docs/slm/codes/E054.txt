@@ -1,0 +1,48 @@
+TURF E054 -- UNKNOWN STRUCT METHOD:
+
+CAUSE:
+  `base.name(...)` was called where `name` is not a method declared on
+  `base`'s struct type. This is the METHOD-CALL counterpart of E068
+  (UnknownStructFieldError) -- same shape of mistake (a typo'd `.` access
+  resolving to nothing), just for a callable method instead of a stored
+  field. It does not mean the struct itself is wrong, and it is a
+  different mistake from accessing a field that doesn't exist (that's
+  E068 instead).
+
+  Almost always one of:
+  1. A typo in the method name (`p.legnth()` instead of `p.length()`).
+  2. The method exists on a DIFFERENT struct, not this one.
+  3. The method was renamed/removed but call sites weren't updated.
+  4. The method genuinely hasn't been written yet.
+  5. `.` was used where `::` was meant -- a `static` method is called via
+     `::`, never `.`, even from an existing instance (see
+     StaticMethodCalledOnInstanceError for that specific case).
+
+CORRECT METHOD CALL SYNTAX:
+    fn Counter.increment(): void {
+        self.val = self.val + 1;
+    }
+
+    mut c: Counter = Counter::default();
+    c.increment();     // correct -- 'increment' is a real declared method
+
+INCORRECT:
+    c.incrament();
+    // ERROR: 'Counter' has no method named 'incrament'.
+    //   (did-you-mean suggests 'increment' when it's a close match)
+
+WHAT THIS ERROR IS NOT:
+  - Not a field-access problem -- `c.val` (a real field) still resolves
+    fine; this error is specifically about the CALLED name not matching
+    any declared method.
+  - Not necessarily an arity problem -- this fires when NO method by this
+    name exists at all, regardless of how many arguments were passed. A
+    real method called with the wrong argument count is WrongArityError
+    instead.
+
+FIX:
+  Check the struct's method declarations (`fn StructName.methodName(...)`)
+  for the exact name and spelling (method names are case-sensitive). If
+  the method genuinely doesn't exist yet, declare it: `fn StructName.
+  methodName(...): ReturnType { ... }` for an instance method, or add
+  `static` before the return type for one called via `::` instead of `.`.

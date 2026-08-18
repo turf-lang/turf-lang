@@ -1,0 +1,21 @@
+You wrote code that comes right after a return, so it can never run
+
+Once a function hits `return`, it's done -- control leaves right there and nothing else in that same block gets a chance to execute. Turf noticed a statement sitting right after a `return` (or `break`/`continue`) in the same block, which means that statement is dead code: it's there in your file, but the program can never actually reach it.
+
+Here's the mistake:
+
+    fn example(): int {
+        return 5;
+        io::printline("this never prints");
+    }
+
+That `printline` call looks perfectly normal, but the function already returned on the line above it, so it will never run -- not once, no matter what.
+
+If that statement wasn't meant to run at all, just delete it. If you actually wanted it to happen, move it to BEFORE the `return`:
+
+    fn example(): int {
+        io::printline("this prints now");
+        return 5;
+    }
+
+This one's easy to run into when you're moving code around while editing a function -- a quick reread of the lines right after a `return`/`break`/`continue` usually makes it obvious which case you're in.

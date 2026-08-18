@@ -1,0 +1,53 @@
+TURF E058 -- COMPARE STRUCTURAL ERROR:
+
+CAUSE:
+  The STRUCTURE of a `compare { ... }` block is malformed at parse time --
+  not a type mismatch (that's CompareTypeError, E059), a genuine grammar
+  violation in how the arms are written. Concretely, one of:
+  1. Every `matches <value>:` arm's body is missing its closing `done`.
+  2. More than one `otherwise:` arm in the same `compare` block.
+  3. `otherwise:` is not the LAST arm (something follows it).
+
+CORRECT USAGE:
+    compare x {
+        matches 1:
+            result = 1;
+        done
+        matches 3:
+            result = 3;
+        done
+        otherwise:
+            result = 0;
+        done
+    }
+
+INCORRECT:
+    compare x {
+        matches 1:
+            result = 1;
+        // ERROR: Expected 'done' after matches arm body -- arm has no body
+        // wasn't closed before the next arm started.
+        matches 2:
+            result = 2;
+        done
+    }
+
+    compare x {
+        otherwise:
+            result = 0;
+        done
+        matches 1:            // ERROR: 'otherwise' must be the last arm
+            result = 1;
+        done
+    }
+
+WHAT THIS ERROR IS NOT:
+  - Not about the TYPE of the value being compared against the arm
+    patterns -- that's CompareTypeError (E059).
+  - `otherwise` itself is optional -- a `compare` with no matching arm and
+    no `otherwise` is valid and simply does nothing.
+
+FIX:
+  Close every `matches` arm's body with `done`, keep at most one
+  `otherwise:` arm, and make sure `otherwise:` (if present) is the very
+  last arm in the block.

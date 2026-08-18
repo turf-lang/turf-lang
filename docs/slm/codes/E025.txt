@@ -1,0 +1,25 @@
+TURF E025 -- MODULE ARITY OR TYPE:
+
+CAUSE:
+  A module-qualified function call (`module::function(args...)`) found a
+  function of that name in the module, but no overload matches the
+  argument types/count you passed. The function name itself is correct --
+  this is purely about the arguments.
+
+EXAMPLE:
+    math::abs(true);   // ERROR: no math::abs(bool) overload
+
+CORRECT:
+    math::abs(-5);        // int overload
+    math::abs(-5.0);      // double overload
+
+FIX:
+  Check the argument types and count against the module's real declared
+  overloads (grep the module's own `.tr` file, e.g. `lib/std/math/`, for
+  every `fn` named `abs` to see the exact set of overloads that exist).
+  Pass an argument of one of those exact types, or convert your value
+  first (e.g. `to double`) if the type you have isn't directly supported.
+
+NOTE: module-qualified calls use `::`, not `.` -- `math.abs(...)` is a
+syntax error before it ever reaches this check; only `math::abs(...)` is
+valid call syntax to begin with.

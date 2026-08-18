@@ -1,0 +1,37 @@
+TURF E028 -- OPERATOR OVERLOAD ON TWO BUILTIN TYPES:
+
+CAUSE:
+  `operator OP(a: T1, b: T2): R { ... }` was declared where BOTH T1 and T2
+  are already builtin types (int, double, bool, char, string, int32).
+  Turf already knows how to apply every operator between two builtins --
+  overloading that pairing again would make ordinary arithmetic ambiguous
+  (which `+` runs for `1 + 2`, the builtin or yours?). Operator overloads
+  only make sense when AT LEAST ONE operand is a struct (or another
+  user-declared type).
+
+CORRECT OPERATOR OVERLOAD SYNTAX:
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    operator +(a: Point, b: Point): Point {
+        mut r: Point = Point::default();
+        r.x = a.x + b.x;
+        r.y = a.y + b.y;
+        return r;
+    }
+
+  A mixed pairing (one struct, one builtin) is fine too, e.g.
+  `operator *(a: Point, b: int): Point`.
+
+INCORRECT:
+    operator +(a: int, b: int): int {
+        return a;
+    }
+    // ERROR: 'operator +(int, int)' is not allowed.
+
+FIX:
+  Change at least one parameter's type to a struct you declared, or --
+  if you were just trying to use `+`/`-`/etc. on two builtins -- delete
+  the overload entirely and use the operator directly; it already works.

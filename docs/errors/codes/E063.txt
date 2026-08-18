@@ -1,0 +1,16 @@
+You passed power() something that isn't a number
+
+`power(base, exponent)` raises the first number to the power of the second -- `power(2, 10)` is `1024`. Since that's a math operation, both `base` and `exponent` have to be `int` or `double`.
+
+Mixing whole numbers and decimals is totally fine:
+
+    mut a: int = power(2, 10);        // 1024
+    mut b: double = power(2.0, 0.5);  // square root of 2
+
+But if either side isn't actually a number:
+
+    mut bad: int = power("2", 10);
+
+...Turf tells you exactly which argument (and which type) was the problem, so you know right away whether it was the base or the exponent that needs fixing.
+
+To fix it, check both arguments and make sure they're genuinely `int` or `double` by the time they reach `power()` -- not text, not a boolean, not anything else. It's an easy slip if you built the exponent from user input or a string somewhere earlier in your program.

@@ -1,0 +1,30 @@
+TURF E052 -- STATIC METHOD CALLED ON INSTANCE:
+
+CAUSE:
+  A method declared `static` (no `self` parameter at all) was called
+  through an existing instance with '.' (`p.origin()`). This is the
+  reverse of DotOperatorOnNonInstanceError: here the base genuinely IS a
+  real instance, but the method being called takes no implicit `self`, so
+  '.' -- which always implies passing the instance in as `self` -- doesn't
+  apply. Before this specific check existed, this mismatch surfaced as a
+  confusing generic WrongArityError instead, with no mention of the
+  invisible implicit `self` argument responsible for the miscount.
+
+CORRECT SYNTAX:
+    fn Point.origin() static: Point {
+        return Point::default();
+    }
+
+    Point::origin();      // correct -- '::' on the TYPE, no instance
+
+INCORRECT:
+    mut p: Point = Point::new(1, 2);
+    p.origin();
+    // ERROR: 'origin' is a static method -- it can't be called through
+    //        an instance with '.'.
+
+FIX:
+  Call the method via '::' on the struct's type name instead of '.' on an
+  instance -- static methods never take an instance argument, implicit or
+  otherwise, so there's no instance to call them "through" in the first
+  place.

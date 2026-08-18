@@ -1,0 +1,32 @@
+TURF E033 -- DUPLICATE VARIABLE DECLARATION:
+
+CAUSE:
+  A variable with the same name was declared twice (with `mut`/`immut`)
+  in a scope where the first one is still visible. Turf points at both
+  locations -- the new, rejected declaration and a "first declared here"
+  note at the original one.
+
+CORRECT:
+    mut count: int = 0;
+    count = count + 1;      // reassignment -- no 'mut'/type, just the name
+
+INCORRECT:
+    mut count: int = 0;
+    mut count: int = 5;
+    // ERROR: Wait a minute! You already created a variable named 'count'.
+    //   Note: first declared here (line 1, ...)
+
+WHAT THIS ERROR IS NOT:
+  - Not about reassigning a value -- `count = 5;` (no `mut`/type) is a
+    normal, always-legal reassignment (assuming `count` isn't `immut`; an
+    `immut` reassignment is a different error, ImmutableAssignmentError).
+    This error is specifically about the REDECLARATION keyword+type form.
+  - A variable in an INNER block (`if`/`while`/`for`) with the same name
+    as an outer one is shadowing, not this error -- shadowing is allowed
+    (with its own separate warning) as long as the two declarations are in
+    genuinely different scopes, not the same one.
+
+FIX:
+  If you meant to change the existing variable's value, drop `mut`/`immut`
+  and the type annotation -- just `count = new_value;`. If you genuinely
+  need a second variable, give it a different name.

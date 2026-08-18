@@ -1,0 +1,25 @@
+TURF E060 -- IMMUTABLE ASSIGNMENT:
+
+CAUSE:
+  A variable declared with `immutable`/`immut` was assigned a new value
+  after its initial declaration. `immut` means exactly that -- the value is
+  set once, at declaration, and can never change again for the lifetime of
+  that variable.
+
+CORRECT USAGE:
+    mut counter: int = 0;
+    counter = counter + 1;   // fine -- 'mut'/'mutable' allows reassignment
+
+    immut pi: double = 3.14159;
+    // pi is fixed forever after this line
+
+INCORRECT:
+    immut pi: double = 3.14159;
+    pi = 3.14;
+    // ERROR: You can't change the value of 'pi' because it's immutable.
+
+FIX:
+  If the variable genuinely needs to change later, declare it with
+  `mutable`/`mut` instead of `immutable`/`immut` in the first place. If it
+  really should never change, remove the reassignment -- you likely meant
+  to declare a NEW variable instead of reusing this one's name.

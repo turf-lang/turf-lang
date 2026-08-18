@@ -1,0 +1,22 @@
+TURF E062 -- NULL ASSIGNMENT:
+
+CAUSE:
+  `null` was assigned to a variable whose type isn't a pointer type.
+  `null` is only meaningful for pointer types (`T*`) -- it has no meaning
+  for `int`, `double`, `bool`, `string`, `char`, or a plain (non-pointer)
+  struct.
+
+CORRECT USAGE:
+    mut ptr: int* = null;    // fine -- ptr's type is a pointer
+
+INCORRECT:
+    mut n: int = null;
+    // ERROR: Cannot assign 'null' to variable 'n' of type 'int'.
+
+FIX:
+  Either give the variable an actual value of its declared type, or, if
+  you genuinely wanted a "no value yet" pointer, declare the variable's
+  type as a pointer (`T*`) in the first place. For a plain (non-pointer)
+  numeric/string/bool/struct variable, use its own default/zero
+  initializer instead (e.g. declare without `= null` at all to get a
+  zero-initialized value).

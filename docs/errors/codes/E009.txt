@@ -1,0 +1,26 @@
+Your function promises a value back, but doesn't always give one
+
+When you write `fn abs(x: int): int`, you're promising that every single time this function finishes, it hands back an `int`. Turf checks every possible path through your function's body to make sure that promise actually holds -- and it found at least one path that reaches the end of the function without ever hitting a `return`.
+
+Here's a version that covers every path:
+
+    fn abs(x: int): int {
+        if x < 0 {
+            return -x;
+        }
+        return x;
+    }
+
+And here's the same function missing its safety net:
+
+    fn abs(x: int): int {
+        if x < 0 {
+            return -x;
+        }
+    }
+
+It looks complete at a glance, but think it through: if `x` is 0 or positive, the `if` never runs, and the function just... ends, with nothing to give back. That's exactly the gap Turf is pointing out.
+
+The fix is almost always one of two things: add a final `return` after the `if` to catch every path that isn't covered yet, or add an `else` branch that also returns something. Either way, walk through your function's logic and ask "what happens if none of my `if`s are true?" -- that's usually where the missing return needs to go.
+
+This is one of the most common things to run into as you're learning -- it just means the compiler is making sure your function always keeps its promise, which is a genuinely good thing to have checked for you automatically.

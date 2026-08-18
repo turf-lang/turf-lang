@@ -1,0 +1,28 @@
+TURF E020 -- CONFLICTING EXTERN DECLARATION:
+
+CAUSE:
+  Two `extern fn` declarations for the same raw C symbol name exist with
+  genuinely different signatures (arity, parameter types, return type, or
+  variadic-ness). Extern names are just the bare C symbol (not mangled by
+  parameter types the way ordinary Turf functions are), so two mismatched
+  declarations can't be told apart by signature the way a normal duplicate-
+  function collision is -- without this check, the SECOND declaration's
+  (different) signature would silently bind to the FIRST one's real LLVM
+  type, corrupting any call made through it.
+
+  A re-declaration with an IDENTICAL signature is NOT an error -- that's
+  the legitimate case of the same libc function externed from two different
+  stdlib modules (e.g. `strlen` needed by both `strings.tr` and `net.tr`).
+
+EXAMPLE:
+    // strings.tr
+    extern fn strlen(s: string): int32;
+
+    // net.tr
+    extern fn strlen(s: int32): int32;   // ERROR: different param type
+
+FIX:
+  Make every `extern fn` declaration of the same C name match EXACTLY
+  (same parameter types, same return type, same variadic-ness), or give
+  one of them a different Turf-side name if they really are different C
+  functions that happen to share a name in your source.

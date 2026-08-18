@@ -1,0 +1,21 @@
+You used a type's short name, but it lives in another module
+
+This one shows up when you write a bare type name like `List`, but `List` is actually declared inside a different module (say, `list`), and you never told Turf you wanted to use that short name directly. Turf won't guess -- it wants you to either spell out where the type comes from, or explicitly bring the short name into your file.
+
+You've got two ways to fix this, and either one works:
+
+    mut l: list::List<int> = list::List::default();
+
+That fully-qualified form works with no import needed. Or, if you'd rather use the short name everywhere in the file:
+
+    import list::List;
+    mut l: List<int> = List::default();
+
+Here's what triggers the error -- using the short name with neither of those:
+
+    mut l: List<int> = List::default();
+    // ERROR: 'List' isn't visible here without qualification.
+
+If you're not sure which module a type actually lives in, the error message tells you -- it names the owning module directly, so you can copy that name straight into either the qualified form or the import line.
+
+This is really just Turf being explicit about where things come from, especially useful once your program starts pulling in several modules that might otherwise have similarly-named types.

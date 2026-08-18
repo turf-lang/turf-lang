@@ -1,0 +1,29 @@
+Two of your files are waiting on each other to finish loading
+
+Imagine module A saying "I need to import B before I can start," and module B saying "I need to import A before I can start." Neither one can ever actually finish -- that's a circular import, and Turf catches it instead of letting your program end up with mysterious missing functions.
+
+    // a.tr
+    import b;
+    fn useB(): void { b::doSomething(); }
+
+    // b.tr
+    import a;
+    fn doSomething(): void { a::useB(); }
+
+Here, a.tr imports b.tr, and b.tr imports a.tr right back. Turf will print out the whole chain so you can see exactly which files are involved, even if the cycle is longer than two files.
+
+This usually means two files each ended up needing something small from the other one. There are two good ways to fix it:
+
+  - If one of the imports genuinely isn't needed, just remove it.
+  - If both files really do need to share something, move that shared piece into a third file that both of them import -- so neither one has to import the other.
+
+    // shared.tr
+    fn doSomething(): void { /* the shared logic */ }
+
+    // a.tr
+    import shared;
+
+    // b.tr
+    import shared;
+
+Once nothing points back to where it started, the cycle is broken and both files can load normally. This is a very natural thing to run into once your project has more than a couple of files talking to each other -- it just means it's time to pull the shared piece out into its own place.

@@ -1,0 +1,16 @@
+You passed abs() something that isn't a number
+
+`abs()` is a builtin that gives you the positive version of a number -- `abs(-5)` is `5`, `abs(3.14)` stays `3.14`. Because "positive version of" only makes sense for numbers, `abs()` only accepts an `int` or a `double`.
+
+This works fine:
+
+    mut n: int = abs(-5);          // 5
+    mut d: double = abs(-3.14);    // 3.14
+
+This doesn't, because the argument isn't a number:
+
+    mut bad: int = abs("negative five");
+
+Turf tells you exactly what type you actually passed, so you can see at a glance that a `string` (or `bool`, or anything else non-numeric) snuck in where a number was expected.
+
+To fix it, make sure whatever you're passing to `abs()` is genuinely an `int` or `double` value by that point in your code -- not text that merely looks like a number, and not a variable of the wrong declared type.

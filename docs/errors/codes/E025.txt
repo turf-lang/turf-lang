@@ -1,0 +1,18 @@
+That module function exists, but not for the arguments you gave it
+
+Turf found the function you're calling -- the name is right -- but none of its declared versions accept the arguments you passed. Some functions in Turf have more than one version (called overloads) so they can work with different types, and this error means none of those versions match what you gave it.
+
+    math::abs(true);
+
+`math::abs` exists, but it only knows how to take an `int` or a `double` -- there's no version that accepts a `bool`. Turf tells you it found `abs`, just not one that fits a boolean argument.
+
+    math::abs(-5);      // works -- matches the int version
+    math::abs(-5.0);     // works -- matches the double version
+
+If this happens to you, the fix is almost always to double check what type you're actually passing, and either pass a value of a type the function really supports, or convert your value first:
+
+    mut flag: bool = true;
+    mut asNumber: int = 1;   // convert however makes sense for your case
+    math::abs(asNumber);
+
+One small syntax reminder while you're here: module functions are always called with `::`, like `math::abs(...)`, never with a dot like `math.abs(...)` -- a dot is only for accessing fields and methods on a struct instance you're holding, not for module functions.
