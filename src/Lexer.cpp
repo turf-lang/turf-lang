@@ -183,12 +183,18 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
       isWarning ? Colors::BRIGHT_YELLOW : Colors::BRIGHT_RED;
   const char *TypeLabel = isWarning ? "warning" : "error";
 
-  // error/warning [E0NN] at line X, col Y [in file: ...]
-  std::cerr << Colors::BOLD << AccentColor << "\u2500\u2500 " << TypeLabel;
-  if (!D.Code.empty())
-    std::cerr << " " << Colors::BRIGHT_BLACK << "[" << D.Code << "]" << AccentColor;
-  std::cerr << " " << Colors::RESET << Colors::BRIGHT_BLACK << "at line "
+  // error/warning at line X, col Y [E0NN] [in file: ...]
+  //
+  // [E0NN] (when present) is folded into the same BRIGHT_BLACK segment as
+  // "at line X, col Y" rather than getting its own AccentColor->BRIGHT_BLACK
+  // ->AccentColor round-trip mid-line -- one color switch (AccentColor for
+  // the "error"/"warning" label, then a single RESET+BRIGHT_BLACK for
+  // everything after it), same as before E0NN codes existed.
+  std::cerr << Colors::BOLD << AccentColor << "\u2500\u2500 " << TypeLabel
+            << " " << Colors::RESET << Colors::BRIGHT_BLACK << "at line "
             << D.Loc.Line << ", col " << D.Loc.Col;
+  if (!D.Code.empty())
+    std::cerr << " [" << D.Code << "]";
   // Only worth calling out when it's NOT the file the user actually
   // compiled -- i.e. the diagnostic is about content inside an imported
   // module, which is otherwise easy to mistake for a problem in your own
