@@ -13,7 +13,78 @@ something here is missing by accident.
 
 ---
 
-## Track A: `unsafe { }` + Safe References (`&T`)
+## Track A: `unsafe { }` + Safe References (`&T`) — IMPLEMENTED (2026-08-18)
+
+**Implemented (2026-08-18), see GitHub issue #238.** Two further design
+forks not covered by the 2026-08-17 "Resolved" section below came up during
+implementation and were settled directly with the user:
+
+- **`&expr` (address-of) is fully retyped** to always produce `&T` now,
+  instead of the raw `T*` it produced before this track — a deliberate
+  breaking change, matching the issue's own `breaking-change` label and
+  this section's original implementation-sketch wording. Every existing
+  test/showcase file that used `&x` to build a `T*`-typed value was
+  migrated as part of this track.
+- **A plain (non-`extern`, non-`lib/std`) function's parameters and return
+  type may never be a raw `ptr`/`T*`, full stop** — not even inside
+  `unsafe { }` (block-scoped `unsafe` can't reach a function *signature*,
+  only its body). This forces `&T` at every ordinary function boundary;
+  only `extern fn` bindings and anything under `lib/std` are exempt.
+
+**`&T` is implemented as a subclass of the existing raw-pointer type**
+(`TurfReferenceType : public TurfPointerType`, `include/Types.h`) — at the
+LLVM level a `&T` and a `T*` are identical (both an opaque pointer value),
+so this lets the ~15 existing `dynamic_cast<TurfPointerType*>` auto-deref/
+argument-passing/cast sites throughout Codegen work for `&T` unmodified.
+The safe/raw distinction is concentrated in one new `isReference()`
+predicate, consulted only by `typesCompatible()` (`src/Types.cpp`) and the
+TypeChecker's gate checks. One real gotcha this inheritance shape produces:
+any code that reconstructs a type from an existing `dynamic_cast<const
+TurfPointerType *>` match (there were two — `ResolverCore.cpp`'s
+`substituteTypeParams()` and `TypeCheckerCall.cpp`'s
+`substituteReturnType()`, both generic-parameter substitution helpers) has
+to check for `TurfReferenceType` FIRST, or it silently rebuilds a `&T` as a
+plain `T*` — fixed at both sites, flagged here in case a third such site
+turns up later.
+
+**Top-level `unsafe { struct ... }` doesn't produce a real nested AST
+node.** `Resolver::hoistTopLevel()`, `main.cpp`'s multi-pass codegen
+driver, and the TypeChecker/Sandbox resumable-per-declaration machinery
+all treat a file's top level as a *flat list* of decl-shaped nodes, found
+by `dynamic_cast`, not a recursive walk — so a struct/fn declared inside a
+genuine `UnsafeBlockExprAST` wrapper at that level would be invisible to
+all of them. Fixed by flattening at parse time instead: `ParseFile()`'s
+(and `main.cpp`'s two mirrored loops') dedicated `TOK_UNSAFE` branch calls
+`AppendFlattenedTopLevelDecl()` (`include/Parser.h`), which splices the
+unsafe block's children directly into the flat list and tags each one in a
+side-set the TypeChecker's gate consults — no consumer of that flat list
+needed to change. Everywhere else (inside a function body, inside another
+block), `unsafe { }` stays a genuine nested `UnsafeBlockExprAST`, walked
+normally by the already-recursive Resolver/TypeChecker/Codegen visitors,
+using an `UnsafeDepth_` int counter on the TypeChecker (mirrors
+`Resolver::FunctionNestingDepth_`).
+
+`self`'s implicit parameter is still synthesized as a raw
+`TurfPointerType` (unchanged) rather than retyped to `&Self` — it's always
+non-null by construction, but retyping it risked disturbing method-
+mangled-name/`dynamic_cast` assumptions across a huge amount of
+already-tested code for no behavioral gain. Instead, `self` is explicitly
+exempted from both the field-access "dereference" gate
+(`TypeCheckerCall.cpp::visitFieldAccess`) and the function-signature
+disallow check (`TypeChecker::checkNoRawPointersInSignature`) by name
+(`self` is a reserved keyword token, never a possible user variable name,
+so this can't collide).
+
+Regression tests: `tests/05_arrays_pointers_ffi/18_unsafe_block_and_safe_reference.tr`
+(passing, covers all four gated shapes plus `&T`) and four `fail_*.tr`
+siblings in the same directory, one per gated shape (declaration, cast,
+struct field, function signature). ~36 existing test/showcase files
+across `tests/06_structs/`, `tests/05_arrays_pointers_ffi/`, and two
+`showcase/*.tr` files were migrated to the new rules; the full suite
+(`./scripts/test_runner.sh`) and every `lib/std/**/*.tr`/`showcase/*.tr`
+file were reverified after.
+
+---
 
 **Scope decision (2026-08-04): narrow, not the full ARC RFC.** There are two
 very different things both called "Phase 4 memory work" in this codebase's

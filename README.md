@@ -410,9 +410,31 @@ extern fn strlen(s: string): int;
 extern from "m" fn sqrt(x: double): double;   // links -lm automatically
 
 fn main(): int {
-    mut buf: ptr = malloc(64);
-    free(buf);
+    unsafe {
+        mut buf: ptr = malloc(64);
+        free(buf);
+    }
     return 0;
+}
+```
+
+### `unsafe { }` and safe references (`&T`)
+
+Raw pointer types (`ptr`, `T*`) are gated behind `unsafe { }` everywhere outside `lib/std` — declaring a raw-pointer-typed variable, casting to/from one, or accessing a field through one (there's no explicit dereference operator; field access through a raw pointer base is the closest thing) all require lexically being inside `unsafe { }`. A struct with a raw pointer field needs its *entire declaration* wrapped, not just the code that dereferences it later. An ordinary (non-`extern`) function's parameters and return type may never be raw pointers at all, even inside `unsafe { }` — `extern fn` bindings (the FFI surface itself) and anything under `lib/std` are exempt from all of this.
+
+`&T` is a compiler-guaranteed non-null reference — `&expr` (address-of) always produces one:
+
+```
+mutable val: int = 42;
+mutable ref: &int = &val;   // compiler-guaranteed non-null
+```
+
+A `&T` auto-derefs on field/member access exactly like a raw pointer does, and always safely widens into a raw `T*`/`ptr` (assigning or passing it needs no cast or `unsafe { }`). The reverse — turning a raw pointer into a `&T` — always needs an explicit `to` cast inside `unsafe { }`, since the raw pointer might be null:
+
+```
+unsafe {
+    mutable p: Node* = ...;
+    mutable safe: &Node = p to &Node;   // asserts p isn't null
 }
 ```
 
@@ -574,15 +596,16 @@ extern fn memset(p: ptr, c: int, n: int): ptr;
 extern fn memcpy(dst: ptr, src: ptr, n: int): ptr;
 extern fn strlen(s: string): int;
 
-fn make_buffer(size: int): ptr {
-    mut p: ptr = malloc(size);
-    memset(p, 0, size);
-    return p;
-}
+// An ordinary function may never take or return a raw `ptr`/`T*` (even
+// inside `unsafe { }`) -- only `extern fn` bindings and lib/std can, so
+// buffer allocation stays inlined in main() below instead of its own helper.
 
 fn main(): int {
-    mut b: ptr = make_buffer(32);
-    free(b);
+    unsafe {
+        mut b: ptr = malloc(32);
+        memset(b, 0, 32);
+        free(b);
+    }
 
     mut len: int = strlen("verify");
     assert(len == 6, "");

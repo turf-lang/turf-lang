@@ -162,9 +162,10 @@ mutable names: list<string> = list<string> {};
 - [x] **Module Search Path & Circular Import Guard 🔴**
   - **Implementation**: Search `<compiler_bin_dir>/lib/std/` first, then `./`. `std::set<std::string> ActiveImports` during parsing; error on duplicate import. Done, and substantially exceeds this original spec — see `docs/architecture/modules_and_scope_resolution.md` for the full on-demand-import/`::`-namespace-resolution/circular-import-diagram system that replaced it.
 
-- [ ] **`unsafe { }` Block 🔴** — not implemented, no `TOK_UNSAFE`/`UnsafeBlockExprAST`; raw pointers remain unrestricted everywhere. Scoped (narrow, not full ARC) as Track A in `docs/planning/FINAL_SPRINT.md`.
+- [x] **`unsafe { }` Block 🔴** (2026-08-18, narrow scope, not full ARC — Track A in `docs/planning/FINAL_SPRINT.md`)
+  - **Implementation**: `TOK_UNSAFE`/`UnsafeBlockExprAST` gate raw pointer types (`ptr`, `T*`) everywhere outside `lib/std` — declaring one, casting to/from one, or accessing a field through one now requires lexically being inside `unsafe { }`; a struct with a raw pointer field needs its entire declaration wrapped. An ordinary function's parameters/return type may never be raw pointers at all, not even inside `unsafe { }`. Note this uses the existing `ptr`/`T*` types directly, not a new `unsafe_ptr<T>` generic wrapper as this section's own example syntax above shows — that part of the original sketch was dropped as unnecessary scope during implementation.
 
-- [ ] **Safe References (`&T`) 🔴** — not implemented. Same track as `unsafe {}` above — see `FINAL_SPRINT.md` Track A.
+- [x] **Safe References (`&T`) 🔴** (2026-08-18) — Same track as `unsafe {}` above. `&expr` (address-of) now always produces a `&T`, a compiler-guaranteed non-null reference that auto-derefs like a raw pointer and always safely widens into `T*`/`ptr`; the reverse needs an explicit `to` cast inside `unsafe { }`.
 
 - [x] **Rewrite `std/io.tr` via FFI 🔴**
   - **Implementation**: `@intrinsic` removed entirely (now a hard parse error). `lib/std/io.tr` binds `printf`/`scanf`/`getchar`/`calloc` via `extern fn`; `print`/`printline`/`input` are ordinary Turf functions.
@@ -178,7 +179,7 @@ mutable names: list<string> = list<string> {};
 - [ ] **Write `std/os.tr` via FFI 🟡** — not implemented, `lib/std/os.tr` does not exist
 
 - [x] **Write `std/mem.tr` via FFI 🟡**
-  - **Implementation**: `lib/std/mem.tr` binds `malloc`/`calloc`/`realloc`/`free` via `extern fn`. Not gated behind an `unsafe {}` block (that feature doesn't exist yet — see above).
+  - **Implementation**: `lib/std/mem.tr` binds `malloc`/`calloc`/`realloc`/`free` via `extern fn`. Not gated behind an `unsafe {}` block -- the entire `lib/std` tree is exempt from that gate by design (see the `unsafe { }` entry above), so this doesn't need migrating even now that the feature exists.
 
 - [x] **Delete `@intrinsic` and `Builtins.cpp` Monolith 🔴**
   - The `@intrinsic` decorator/keyword is fully removed from the parser (`'@' is not valid here`, hard error). `Builtins.cpp` still exists, but `CodegenIntrinsic()` itself is gone entirely (last step of the now-removed `STRING_UFCS_OPERATOR_CHAR_RFC.md`'s build order, see git history): `lengthof` -- the only other true intrinsic besides `typeof` -- was deleted (`strings::length(s)`, part of the auto-imported prelude, is the replacement), which left `typeof` as `CodegenIntrinsic()`'s only remaining case, so its logic was inlined directly into its one call site instead of kept behind a dispatcher. `assert`/`fail` were never routed through `CodegenIntrinsic()` at all by this point -- they moved to `lib/std/test.tr` earlier. `Builtins.cpp` today only owns `BuiltinInfo`/`RegisterBuiltin`/`LookupBuiltin` (typeof's arity-check registry) and `CodegenPanic` (the compiler's own internal runtime-guard panic sequence, never user-reachable).
