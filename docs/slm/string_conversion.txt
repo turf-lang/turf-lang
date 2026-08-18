@@ -38,11 +38,11 @@ STRING LENGTH VS ARRAY LENGTH:
 PRINT AND PRINTLINE:
   Both accept int, double, bool, or string directly -- no separate
   toString()-style call is needed for a SINGLE value:
-    io.printline(42);          // prints "42"
-    io.printline(3.14);        // prints "3.14"
+    io::printline(42);         // prints "42"
+    io::printline(3.14);       // prints "3.14"
   To combine a label and a value in one call, cast the value to string
   and concatenate:
-    io.printline("Score: " + (42 to string));
+    io::printline("Score: " + (42 to string));
 
 CORRECT EXAMPLES:
   immut s: string = 100 to string;    // "100"
