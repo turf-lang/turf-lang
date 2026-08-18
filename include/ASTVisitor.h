@@ -37,6 +37,7 @@ class PostfixExprAST;
 class VarDeclExprAST;
 class CastExprAST;
 class BlockExprAST;
+class UnsafeBlockExprAST;
 class IfExprAST;
 class WhileExprAST;
 class DoWhileExprAST;
@@ -116,6 +117,7 @@ public:
 
   // ── Control flow ──────────────────────────────────────────────────────────
   virtual void visitBlock(BlockExprAST &Node) {}
+  virtual void visitUnsafeBlock(UnsafeBlockExprAST &Node) {}
   virtual void visitIf(IfExprAST &Node) {}
   virtual void visitWhile(WhileExprAST &Node) {}
   virtual void visitDoWhile(DoWhileExprAST &Node) {}

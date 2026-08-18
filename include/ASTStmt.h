@@ -64,10 +64,58 @@ public:
     return Expressions;
   }
 
+  /// Moves the child list out, leaving this block empty. Used only by the
+  /// top-level `unsafe { }` flattening (issue #238, see
+  /// UnsafeBlockExprAST::takeChildren() and Parser.h's
+  /// AppendFlattenedTopLevelDecl()) -- everywhere else, prefer
+  /// getExpressions().
+  std::vector<std::unique_ptr<ExprAST>> takeExpressions() {
+    return std::move(Expressions);
+  }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitBlock(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<BlockExprAST>(CloneExprList(Expressions));
+  }
+};
+
+// `unsafe { }` block (issue #238) -- a lexical gate, not a new control-flow
+// construct: doesn't affect break/continue/return, purely marks its body
+// (a plain BlockExprAST) as authorized to declare/cast/dereference raw
+// pointer types (`ptr`, `T*`). Carries the `unsafe` keyword's own
+// SourceLocation (unlike BlockExprAST, which has none) so the TypeChecker
+// can point a "missing unsafe" diagnostic somewhere sensible relative to
+// where the block DOES exist, and so callers can request it back.
+class UnsafeBlockExprAST : public ExprAST {
+  SourceLocation Loc;
+  std::unique_ptr<ExprAST> Body; // always a BlockExprAST, from ParseBlock()
+
+public:
+  UnsafeBlockExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Body)
+      : Loc(Loc), Body(std::move(Body)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const ExprAST *getBody() const { return Body.get(); }
+  ExprAST *getBodyMut() const { return Body.get(); }
+
+  /// Moves this block's children out (its Body is always a BlockExprAST,
+  /// from ParseBlock() -- see the constructor's callers). Used only by
+  /// Parser.h's AppendFlattenedTopLevelDecl() to splice a TOP-LEVEL
+  /// `unsafe { }`'s contents directly into a flat top-level declaration
+  /// list -- see that function's own doc comment for why. Returns empty
+  /// if Body somehow isn't a BlockExprAST (never true for a
+  /// parser-constructed node, only relevant to a hand-built AST).
+  std::vector<std::unique_ptr<ExprAST>> takeChildren() {
+    if (auto *B = dynamic_cast<BlockExprAST *>(Body.get()))
+      return B->takeExpressions();
+    return {};
+  }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitUnsafeBlock(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<UnsafeBlockExprAST>(Loc, CloneExprAST(Body.get()));
   }
 };
 
