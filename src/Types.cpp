@@ -229,9 +229,13 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
     return true;
 
   // Rule 1: null is only compatible with pointer-like types (ptr,
-  // void*, T*). It must NEVER be compatible with plain numerics, bool, or string.
+  // void*, T*). It must NEVER be compatible with plain numerics, bool, or
+  // string. A `&T` safe reference (issue #238) is deliberately EXCLUDED
+  // here even though isPointer() is true for it (inherited from
+  // TurfPointerType) -- `&T`'s whole point is a compiler-guaranteed
+  // non-null contract, so `null` must never be assignable to it.
   auto isPointerLikeStrict = [](const TurfType *T) {
-    return T->isPointer() ||
+    return (T->isPointer() && !T->isReference()) ||
            T->isNamed("ptr") || T->isNamed("void*");
   };
   if (From->isNull())
@@ -241,13 +245,40 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
 
   // Rule 2: ptr / void* mutually coercible with typed pointers (T*) only.
   // Deliberately NOT extended to `string` — string and T* remain distinct.
+  // The raw-ptr/void* -> To direction excludes `&T` targets (`!To->isReference()`)
+  // for the same non-null-contract reason as Rule 1 -- a raw/opaque pointer
+  // might be null, so it must go through an explicit `to`-cast inside
+  // `unsafe { }` to become a `&T`, never an implicit coercion. The reverse
+  // direction (`&T` decaying into `ptr`/`void*`) is unaffected: it's
+  // always sound, since a non-null reference is always a valid raw pointer.
   auto isOpaquePtr = [](const TurfType *T) {
     return T->isNamed("ptr") || T->isNamed("void*");
   };
-  if (isOpaquePtr(From) && To->isPointer())
+  if (isOpaquePtr(From) && To->isPointer() && !To->isReference())
     return true;
   if (isOpaquePtr(To) && From->isPointer())
     return true;
+
+  // Rule 2.5 (issue #238): a safe reference (&T) always widens implicitly
+  // into a concrete raw pointer of an equivalent pointee type -- this
+  // direction is unconditionally sound (a non-null &T is always a valid
+  // T*), so no `unsafe` gate applies to the widening itself (only to the
+  // raw pointer TYPE's use at the target location, which the TypeChecker
+  // gates separately). The reverse (raw T*/ptr -> &T) is deliberately NOT
+  // handled here -- with no matching rule anywhere above, it correctly
+  // falls through to `false` below, forcing an explicit `to`-cast inside
+  // `unsafe { }`. Pointee comparison uses isEquivalent(), not a recursive
+  // typesCompatible() call, so this doesn't accidentally also permit
+  // unsound pointee widening (e.g. &int -> double* through int->double's
+  // numeric-widening rule below) -- only a genuinely equivalent pointee.
+  if (const auto *FromRef = dynamic_cast<const TurfReferenceType *>(From)) {
+    if (!To->isReference()) {
+      if (const auto *ToPtr = dynamic_cast<const TurfPointerType *>(To)) {
+        if (FromRef->getPointee()->isEquivalent(ToPtr->getPointee().get()))
+          return true;
+      }
+    }
+  }
 
   // void and string are never compatible with anything else past this point
   if (From->isVoid() || To->isVoid())

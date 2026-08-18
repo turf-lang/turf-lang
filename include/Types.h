@@ -97,6 +97,14 @@ public:
   /// True if this type is a `TurfPointerType`.
   virtual bool isPointer() const { return false; }
 
+  /// True if this type is a `TurfReferenceType` (`&T`). A reference IS-A
+  /// pointer (isPointer() is also true for it, via inheritance -- see
+  /// TurfReferenceType's own doc comment) but carries a stricter,
+  /// compiler-enforced non-null contract; this predicate is how callers
+  /// that need to tell the two apart (typesCompatible(), the `unsafe`
+  /// gate) do so without dynamic_cast.
+  virtual bool isReference() const { return false; }
+
   /// True if this type is a `TurfStructType`.
   virtual bool isStruct() const { return false; }
 
@@ -406,6 +414,37 @@ public:
   bool isPointer() const override { return true; }
 
   TurfTypePtr getPointee() const { return Pointee; }
+};
+
+// ─── TurfReferenceType ───────────────────────────────────────────────────────
+
+/**
+ * @brief Compiler-guaranteed non-null safe reference: `&T` (issue #238).
+ *
+ * Deliberately a SUBCLASS of TurfPointerType, not a sibling. At the LLVM
+ * level a `&T` and a `T*` are identical -- both an opaque pointer value --
+ * so every existing `dynamic_cast<const TurfPointerType *>` call site
+ * throughout Codegen (auto-deref field access, argument passing,
+ * address-of caching, pointer-cast codegen) keeps working for `&T` for
+ * free via ordinary derived-to-base dynamic_cast, with zero Codegen
+ * changes. `isPointer()` is inherited (stays true); the only new surface
+ * is `isReference()`, consulted exclusively by typesCompatible()
+ * (src/Types.cpp) and the TypeChecker's `unsafe` gate to tell a safe
+ * reference apart from a raw, gated pointer.
+ */
+class TurfReferenceType : public TurfPointerType {
+public:
+  explicit TurfReferenceType(TurfTypePtr Pointee)
+      : TurfPointerType(std::move(Pointee)) {}
+
+  std::string getName() const override {
+    return "&" + getPointee()->getName();
+  }
+  std::string getMangledName() const override {
+    return getPointee()->getMangledName() + "_ref";
+  }
+
+  bool isReference() const override { return true; }
 };
 
 // ─── TurfGenericParamType ────────────────────────────────────────────────────
