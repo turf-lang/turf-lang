@@ -143,7 +143,8 @@ bool IsTopLevelBoundaryToken(int Tok) {
   return Tok == TOK_EOF || Tok == ';' || Tok == TOK_FN || Tok == TOK_STRUCT ||
          Tok == TOK_ENUM || Tok == TOK_MACHINE || Tok == TOK_EXTERN ||
          Tok == TOK_EXPORT ||
-         Tok == TOK_OPERATOR || Tok == TOK_ERROR || Tok == TOK_IMPORT;
+         Tok == TOK_OPERATOR || Tok == TOK_ERROR || Tok == TOK_IMPORT ||
+         Tok == TOK_UNSAFE;
 }
 
 void SkipToNextTopLevelBoundary() {
@@ -254,6 +255,21 @@ TurfTypePtr ParseType() {
     if (!SuccessType)
       return nullptr;
     return std::make_shared<TurfErrorUnionType>(std::move(SuccessType));
+  }
+
+  // `&T` -- a compiler-guaranteed non-null safe reference (issue #238).
+  // Symmetric to the `!T` branch just above: its own leading-token branch,
+  // ahead of the primitive/identifier dispatch below, recursing into
+  // ParseType() for the pointee. Unambiguous with the binary bitwise-AND
+  // operator ('&') and the unary address-of operator (also '&') since both
+  // of those are parsed entirely inside EXPRESSION parsing -- ParseType()
+  // is a wholly separate function only ever called from type positions.
+  if (CurTok == '&') {
+    getNextToken(); // consume '&'
+    TurfTypePtr Pointee = ParseType();
+    if (!Pointee)
+      return nullptr;
+    return std::make_shared<TurfReferenceType>(std::move(Pointee));
   }
 
   // Function-value type: fn(T1, T2, ...): RetType -- e.g. the `f` parameter
@@ -743,6 +759,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
   case TOK_COMPARE:
     return ParseCompareExpr();
+
+  case TOK_UNSAFE:
+    return ParseUnsafeExpr();
 
   case TOK_ELSE: {
     SourceLocation KeywordLoc = CurLoc;

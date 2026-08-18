@@ -158,7 +158,7 @@ std::unique_ptr<ExprAST> ParseBlock() {
     }
     if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
         CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_MACHINE ||
-        CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
+        CurTok == TOK_COMPARE || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE) {
       auto Expr = ParseExpression();
       if (!Expr) return nullptr;
       if (CurTok == ';') {
@@ -232,6 +232,35 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
 
   return std::make_unique<WhileExprAST>(KeywordLoc, std::move(Cond),
                                         std::move(Body));
+}
+
+// `unsafe { }` (issue #238) -- a thin wrapper exactly like ParseWhileExpr()
+// above, minus the condition: consume the keyword, parse the body with the
+// ordinary ParseBlock() (which already supports nested struct/fn/enum/
+// machine declarations, not just statements -- see the block-decl branch
+// further down in this function), wrap the result. Reachable from three
+// call sites: ParsePrimary()'s generic dispatch (ParserCore.cpp), this
+// file's own ParseBlock() statement-keyword list (nested/statement-level
+// unsafe), and ParseFile()'s top-level loop (ParserModule.cpp), which
+// calls this directly and then FLATTENS the result -- see that call site's
+// own comment for why a top-level unsafe-wrapped struct/fn decl can't stay
+// wrapped in a real nested AST node.
+std::unique_ptr<ExprAST> ParseUnsafeExpr() {
+  SourceLocation KeywordLoc = CurLoc;
+  getNextToken(); // consume 'unsafe'
+
+  if (CurTok != '{') {
+    LogErrorAt(KeywordLoc,
+               "Expected '{' to open an unsafe block."
+               "\n  Hint: unsafe blocks must use braces: unsafe { ... }");
+    return nullptr;
+  }
+
+  auto Body = ParseBlock();
+  if (!Body)
+    return nullptr;
+
+  return std::make_unique<UnsafeBlockExprAST>(KeywordLoc, std::move(Body));
 }
 
 // ParseDoWhileExpr - parses:
