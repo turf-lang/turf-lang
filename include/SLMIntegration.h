@@ -32,10 +32,16 @@ std::string getCodeContext(int errorLine, int contextSize = 10);
 // matching -- GENERAL (the default) preserves the old classifyError()
 // fallback behavior for callers that don't have a category (the raw
 // LogErrorAt() path has no TurfError instance to read one from).
+// `previousAttemptFailed`: the real compiler diagnostic text from the
+// sandbox's rejection of a prior attempt's replacement_line (see
+// Sandbox::getValidationDiagnostics()), fed back into the prompt so a retry
+// (validateAndApplySuggestion()'s retry loop) can course-correct instead of
+// re-guessing blind. Empty on a first attempt.
 AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
                              const std::string &hint = "",
                              const std::vector<RelatedLocation> &related = {},
-                             ErrorCategory category = ErrorCategory::GENERAL);
+                             ErrorCategory category = ErrorCategory::GENERAL,
+                             const std::string &previousAttemptFailed = "");
 
 // ── End-to-End Helper ────────────────────────────────────────────────────────
 // 1. Calls fetchSuggestion() to query the SLM.
@@ -47,18 +53,15 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
                                         const std::vector<RelatedLocation> &related = {},
                                         ErrorCategory category = ErrorCategory::GENERAL);
 
-// TODO(future): Self-running verification of AI-suggested code patches.
-// Before presenting a suggested fix to the user, this function should:
-// 1. Take the original source code and the suggested patch.
-// 2. Substitute the patched line(s) into the source.
-// 3. Run the modified source through a lightweight compilation pass.
-// 4. Return true only if the patched code compiles without errors.
-// If verification fails, the AI suggestion should be silently discarded
-// and the default compiler error message shown instead.
-//
-// Current status: stub — always returns true. The infrastructure for
-// invoking a child compile pass needs to be designed first.
-bool verifySuggestion(const AISuggestion &suggestion, int errorLine);
+// Applies `suggestion.replacement_line` in a fresh Sandbox and validates it
+// (parse + semantic check + confirms the original error is actually gone).
+// If validation fails and `outDiagnostics` is non-null, it's filled with the
+// sandbox's own compiler diagnostics for the failed attempt (joined into one
+// string) -- validateAndApplySuggestion()'s retry loop feeds this back into
+// the next fetchSuggestion() call as `previousAttemptFailed` so a retry has
+// the real reason the last patch didn't compile, not just "try again".
+bool verifySuggestion(const AISuggestion &suggestion, int errorLine,
+                      std::string *outDiagnostics = nullptr);
 
 } // namespace SLM
 
