@@ -167,6 +167,18 @@ static TurfTypePtr substituteReturnType(
     auto It = Subst.find(NT->getName());
     return It != Subst.end() ? It->second : Ty;
   }
+  // Checked BEFORE the plain TurfPointerType branch below -- same reason as
+  // the identical guard in ResolverCore.cpp's substituteTypeParams():
+  // TurfReferenceType (&T, issue #238) IS-A TurfPointerType, so the more
+  // general dynamic_cast below matches it too, and without this earlier
+  // check would silently rebuild it as a plain TurfPointerType, turning a
+  // substituted `&T` into `T*`.
+  if (const auto *RT = dynamic_cast<const TurfReferenceType *>(Ty.get())) {
+    TurfTypePtr NewPointee = substituteReturnType(RT->getPointee(), Subst);
+    return NewPointee == RT->getPointee()
+              ? Ty
+              : std::make_shared<TurfReferenceType>(NewPointee);
+  }
   if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty.get())) {
     TurfTypePtr NewPointee = substituteReturnType(PT->getPointee(), Subst);
     return NewPointee == PT->getPointee()
@@ -1187,6 +1199,28 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   // Resolve the base type and look up the field.
   // GlobalSymbolTable is only available in the full build (not unit tests).
   TurfTypePtr BaseTy = getType(Node.getBase());
+
+  // `unsafe { }` gate (issue #238): field/member access through a raw
+  // ptr/T* base is the closest proxy this language has for a "dereference"
+  // -- there's no explicit deref operator (see AddressOfExprAST's history)
+  // -- so this is where that third gated "use" (declaration, cast,
+  // dereference) is enforced. A `&T` base is exempt (isRawPointer()
+  // already excludes it) -- auto-deref through a safe reference is always
+  // allowed, the whole point of `&T`. `self` is ALSO exempt here even
+  // though its synthesized type is still a raw TurfPointerType (ParserDecl.cpp's
+  // implicit-self-param construction, unchanged by this issue -- `self` is
+  // always non-null by construction, but retyping it to `&StructName`
+  // wholesale risks disturbing method-mangled-name/dynamic_cast assumptions
+  // across a huge amount of already-tested code for no behavioral gain).
+  // `self` is a reserved keyword token (TOK_SELF, Lexer.h) -- a user can
+  // never declare their own variable literally named "self" -- so a
+  // VariableExprAST base named "self" unambiguously IS the method
+  // receiver, not a name collision to worry about.
+  bool IsSelfBase = false;
+  if (const auto *BaseVar = dynamic_cast<const VariableExprAST *>(Node.getBase()))
+    IsSelfBase = BaseVar->getName() == "self";
+  if (!IsSelfBase)
+    checkUnsafeGate(BaseTy.get(), Node.getLoc(), &Node);
 
   // Unwrap pointer-to-struct (e.g. self in method bodies)
   if (BaseTy) {

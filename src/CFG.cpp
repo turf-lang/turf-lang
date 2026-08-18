@@ -524,6 +524,19 @@ void CFGBuilder::visitExpr(ExprAST *E) {
   // Determine expression type and dispatch
   if (dynamic_cast<BlockExprAST *>(E)) {
     visitBlock(E);
+  } else if (auto *Unsafe = dynamic_cast<UnsafeBlockExprAST *>(E)) {
+    // `unsafe { }` (issue #238) is a pure lexical gate, not a new
+    // control-flow construct (see its own AST doc comment, ASTStmt.h) --
+    // for CFG/return-path-analysis purposes it's completely transparent:
+    // delegate straight to its Body (always a BlockExprAST, from
+    // ParseUnsafeExpr()) exactly as if the `unsafe { }` wrapper weren't
+    // there. Without this case, a `return` statement lexically inside an
+    // `unsafe { }` block was invisible to this analysis (UnsafeBlockExprAST
+    // doesn't dynamic_cast to any of the other handled kinds, so it fell
+    // into the "regular statement" branch below and was never recursed
+    // into), producing a false "doesn't always return" diagnostic on any
+    // function whose only return happened to be wrapped in `unsafe { }`.
+    visitBlock(Unsafe->getBodyMut());
   } else if (dynamic_cast<IfExprAST *>(E)) {
     visitIf(E);
   } else if (dynamic_cast<WhileExprAST *>(E)) {

@@ -201,6 +201,14 @@ public:
     ReturnTypeStack_.clear();
     MachineNarrowStack_.clear();
     LoopVarTypes_.clear();
+    // UnsafeDepth_ (issue #238): mirrors ReturnTypeStack_/MachineNarrowStack_
+    // above -- a TypeError raised mid-body inside `unsafe { }` skips
+    // visitUnsafeBlock()'s own `--UnsafeDepth_` on the way out via longjmp,
+    // which would otherwise leave every SUBSEQUENT top-level declaration in
+    // the same file wrongly gate-exempt (or, if the error happened while
+    // NOT inside unsafe but a prior recovery already left this non-zero,
+    // wrongly gated) for the rest of the compile.
+    UnsafeDepth_ = 0;
   }
 
   // ── Type query ────────────────────────────────────────────────────────────
@@ -242,6 +250,7 @@ public:
 
   // ── Control flow ──────────────────────────────────────────────────────────
   void visitBlock(BlockExprAST &Node) override;
+  void visitUnsafeBlock(UnsafeBlockExprAST &Node) override;
   void visitIf(IfExprAST &Node) override;
   void visitWhile(WhileExprAST &Node) override;
   void visitDoWhile(DoWhileExprAST &Node) override;
@@ -292,6 +301,46 @@ private:
                    const std::vector<RelatedLocation> &Related = {},
                    const std::string &CustomHint = "",
                    const std::string &CustomBanner = "");
+
+  // ── `unsafe { }` gate (issue #238) ──────────────────────────────────────
+
+  /// True for a raw, GATED pointer type -- `ptr` (OpaquePointerType) or a
+  /// concrete `T*` (TurfPointerType) -- and false for everything else,
+  /// including a `&T` safe reference (TurfReferenceType), which is a
+  /// TurfPointerType SUBCLASS (isPointer() is true for it too) but is
+  /// deliberately exempt from the gate -- see TurfReferenceType's own doc
+  /// comment (Types.h) for why the inheritance is structured that way.
+  static bool isRawPointer(const TurfType *T) {
+    return T && T->isPointer() && !T->isReference();
+  }
+
+  /// True when a raw pointer type's use at @p Loc is authorized: either
+  /// lexically inside an `unsafe { }` block (UnsafeDepth_ > 0), spliced in
+  /// from a TOP-LEVEL `unsafe { }` block (Parser.h's
+  /// WasDeclaredInsideTopLevelUnsafe() -- see AppendFlattenedTopLevelDecl()'s
+  /// doc comment for why top-level unsafe-wrapping can't just be
+  /// UnsafeDepth_), or declared inside `lib/std` (the whole tree is exempt
+  /// from this gate -- see FINAL_SPRINT.md's Track A "Resolved" section).
+  /// @p Node is optional -- pass it whenever available so the
+  /// WasDeclaredInsideTopLevelUnsafe() check can run; omit it (nullptr) for
+  /// call sites checking a SUB-part of a node (e.g. a cast operand) that
+  /// isn't itself the flattened top-level node.
+  bool isUnsafeGateExempt(const SourceLocation &Loc,
+                          const ExprAST *Node = nullptr) const;
+
+  /// Raises a "raw pointer used outside unsafe" diagnostic if @p T is a raw
+  /// pointer type and its use at @p Loc isn't gate-exempt. Returns true if
+  /// it raised (so callers that want to bail out early can check).
+  bool checkUnsafeGate(const TurfType *T, SourceLocation Loc,
+                       const ExprAST *Node = nullptr);
+
+  /// Unconditional (never fixable by `unsafe { }`) check for an ordinary
+  /// (non-extern) function's parameter/return types, applied in
+  /// visitFuncDef(): raw pointer types are disallowed outright in a plain
+  /// function's signature outside `lib/std` -- see FINAL_SPRINT.md's Track A
+  /// addendum. `extern fn` goes through visitExternFuncDecl() instead and
+  /// is unaffected by this check.
+  void checkNoRawPointersInSignature(const FuncDefExprAST &Node);
 
   /**
    * @brief Infer the result type of a binary arithmetic/string operation.
@@ -413,6 +462,14 @@ private:
   /// Loop variable types: populated by visitFor(), consulted by visitVariable().
   /// Maps loop variable name → inferred type (always int for range-for).
   std::unordered_map<std::string, TurfTypePtr> LoopVarTypes_;
+
+  /// Nesting depth of `unsafe { }` blocks (issue #238) -- an int counter,
+  /// not a bool, so `unsafe { unsafe { } }` (silly but harmless) stays
+  /// authorized all the way through, and so a stray extra pop can never
+  /// underflow past zero. Mirrors Resolver::FunctionNestingDepth_
+  /// (Resolver.h) -- incremented/decremented bracketing visitUnsafeBlock()'s
+  /// body traversal. Consulted by isUnsafeGateExempt().
+  int UnsafeDepth_ = 0;
 
   /// Whether we had at least one error during this pass.
   bool HadError_ = false;

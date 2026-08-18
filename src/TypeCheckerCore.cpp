@@ -24,6 +24,7 @@
 #include "Builtins.h"
 
 #include "TypeCheckerInternal.h"
+#include "Parser.h"
 
 #include <cassert>
 #include <cstring>
@@ -131,6 +132,96 @@ void TypeChecker::reportError(SourceLocation Loc, const std::string &Msg,
   HadError_ = true;
   if (ErrorHandler_)
     ErrorHandler_(Loc, Msg, Related, CustomHint, CustomBanner);
+}
+
+
+// ─── `unsafe { }` gate (issue #238) ────────────────────────────────────────
+
+bool TypeChecker::isUnsafeGateExempt(const SourceLocation &Loc,
+                                     const ExprAST *Node) const {
+  if (UnsafeDepth_ > 0)
+    return true;
+  if (Node && WasDeclaredInsideTopLevelUnsafe(Node))
+    return true;
+  return IsPathUnderLibStd(Loc.Filename);
+}
+
+
+bool TypeChecker::checkUnsafeGate(const TurfType *T, SourceLocation Loc,
+                                  const ExprAST *Node) {
+  if (!isRawPointer(T))
+    return false;
+  if (isUnsafeGateExempt(Loc, Node))
+    return false;
+  // isRawPointer(T) already established T->isPointer(), so this always
+  // succeeds -- OpaquePointerType ("ptr") is the only isPointer() type NOT
+  // a TurfPointerType, and it has no pointee to suggest a "&T" spelling
+  // for anyway, hence the "&T" fallback.
+  const auto *PtrTy = dynamic_cast<const TurfPointerType *>(T);
+  std::string SuggestedRef = PtrTy ? "&" + PtrTy->getPointee()->getName() : "&T";
+  reportError(
+      Loc,
+      "Raw pointer type '" + T->getName() +
+          "' cannot be used outside an 'unsafe' block.",
+      {},
+      "Wrap this in 'unsafe { }', or use a safe reference ('" + SuggestedRef +
+          "') instead if you don't actually need a possibly-null raw pointer.",
+      "Unsafe pointer use!");
+  return true;
+}
+
+
+void TypeChecker::checkNoRawPointersInSignature(const FuncDefExprAST &Node) {
+  if (IsPathUnderLibStd(Node.getLoc().Filename))
+    return;
+  for (const auto &Param : Node.getParams()) {
+    // The implicit `self` parameter (ParserDecl.cpp's ParseFuncDef()) is
+    // always synthesized as a raw TurfPointerType(StructName), the same
+    // "pass-by-reference" idiom this whole issue is narrowing everywhere
+    // ELSE -- but self is always non-null by construction and every
+    // struct-bound method signature would otherwise fail this check,
+    // which would ban ordinary struct methods entirely. Mirrors the
+    // identical self-exemption in visitFieldAccess() (TypeCheckerCall.cpp).
+    if (Param.Name == "self")
+      continue;
+    if (isRawPointer(Param.Type.get())) {
+      reportError(
+          Node.getLoc(),
+          "Function '" + Node.getName() + "' cannot use raw pointer type '" +
+              Param.Type->getName() + "' for parameter '" + Param.Name + "'.",
+          {},
+          "Raw pointer types are never allowed in an ordinary function's "
+          "signature, even inside 'unsafe { }' -- use '&T' instead. Only "
+          "'extern fn' bindings and lib/std may use raw pointers here.",
+          "Raw pointer in function signature!");
+    }
+  }
+  if (isRawPointer(Node.getReturnType())) {
+    reportError(
+        Node.getLoc(),
+        "Function '" + Node.getName() + "' cannot return raw pointer type '" +
+            Node.getReturnType()->getName() + "'.",
+        {},
+        "Raw pointer types are never allowed in an ordinary function's "
+        "signature, even inside 'unsafe { }' -- use '&T' instead. Only "
+        "'extern fn' bindings and lib/std may use raw pointers here.",
+        "Raw pointer in function signature!");
+  }
+}
+
+
+void TypeChecker::visitUnsafeBlock(UnsafeBlockExprAST &Node) {
+  ++UnsafeDepth_;
+  check(Node.getBodyMut());
+  --UnsafeDepth_;
+  // The unsafe block's type is its Body's type -- mirrors visitBlock()
+  // (TypeCheckerStmt.cpp)'s own "last expression's type, or void if empty"
+  // rule, since Body is always a BlockExprAST (see ParseUnsafeExpr()) and
+  // this needs to stay transparent for `unsafe { }` used as a
+  // value-producing expression (e.g. `x = unsafe { someRawDeref; };`), not
+  // just as a bare statement.
+  TurfTypePtr BodyTy = getType(Node.getBody());
+  setType(&Node, BodyTy ? BodyTy : TurfVoid());
 }
 
 

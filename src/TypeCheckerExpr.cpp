@@ -373,8 +373,15 @@ void TypeChecker::visitAddressOf(AddressOfExprAST &Node) {
     setType(&Node, nullptr);
     return;
   }
-  // &expr produces a TurfPointerType wrapping the operand's type.
-  setType(&Node, std::make_shared<TurfPointerType>(OperandTy));
+  // &expr produces a TurfReferenceType wrapping the operand's type (issue
+  // #238 -- a breaking retype: this used to produce a raw TurfPointerType).
+  // Codegen is unaffected -- AddressOfExprAST::codegen() just returns the
+  // operand's lvalue address either way, and &T's LLVM representation is
+  // identical to T*'s (see TurfReferenceType's own doc comment, Types.h).
+  // Always sound: the operand went through codegenLValue() (an existing
+  // named variable/field/array element's real storage), so the resulting
+  // address is never null.
+  setType(&Node, std::make_shared<TurfReferenceType>(OperandTy));
 }
 
 
@@ -672,6 +679,19 @@ void TypeChecker::visitCast(CastExprAST &Node) {
       }
     }
   }
+
+  // `unsafe { }` gate (issue #238): a cast whose SOURCE or DESTINATION is a
+  // raw ptr/T* type is one of the three explicitly-gated "uses"
+  // (declaration, cast, dereference -- see FINAL_SPRINT.md's Track A) --
+  // this is also the mechanism that lets a caller explicitly convert a raw
+  // pointer into a `&T` (`somePtr to &T`) or vice versa, always inside
+  // `unsafe { }`. Checked against the ORIGINAL (possibly-NamedType)
+  // DestTypePtr, not the enum-resolved DestTy local above -- a struct/enum
+  // cast target is never pointer-shaped either way, so this doesn't matter
+  // for correctness, only for using the accurate as-written type.
+  TurfTypePtr OperandTy = Node.getOperand() ? getType(Node.getOperand()) : nullptr;
+  if (!checkUnsafeGate(Node.getDestTypePtr().get(), Node.getLoc(), &Node))
+    checkUnsafeGate(OperandTy.get(), Node.getLoc(), &Node);
 
   // Explicit cast always succeeds at the TypeChecker level; result is DestType.
   setType(&Node, Node.getDestTypePtr());
