@@ -68,6 +68,10 @@ void InitializeModule() {
 
   // Builder to insert instructions
   Builder = std::make_unique<IRBuilder<>>(*TheContext);
+
+  // See CodegenInternal.h's doc comment: CodegenFunc.cpp's main argv/argc
+  // plumbing globals must not survive into a fresh TheModule.
+  ResetArgvHelpers();
 }
 
 
