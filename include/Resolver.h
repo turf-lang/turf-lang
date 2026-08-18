@@ -196,6 +196,7 @@ public:
    * Every statement inside the block is recursed via accept(*this).
    */
   void visitBlock(BlockExprAST &Node) override;
+  void visitUnsafeBlock(UnsafeBlockExprAST &Node) override;
 
   // ── All other node types — just recurse into children ─────────────────────
 
