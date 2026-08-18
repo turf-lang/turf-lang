@@ -30,13 +30,17 @@
 // NOT "same as Line/Col", so a caller can tell the difference between "this
 // is a single-column token" and "no end position was ever recorded here").
 //
-// Currently populated only for identifier/keyword tokens (gettok()'s
-// isalpha() branch, Lexer.cpp) -- the dominant case for LSP tooling, since
-// it covers every name-token location #230 threads into AST nodes (struct/
-// function/variable/field/method/module names). NOT yet populated for
-// other token kinds (operators, string/char/number literals) or for
-// multi-token spans (a whole declaration, a qualified `A::B::C` path) --
-// see issue #243 for that remaining scope.
+// Populated for every single-token span -- identifiers/keywords, operators,
+// and string/char/number literals -- via gettok()'s wrapper around
+// gettokScan() (Lexer.cpp), which stamps EndLine/EndCol uniformly right
+// after each token finishes scanning (originally only identifiers stamped
+// this manually, added for #230's name-token AST locations; broadened to
+// every token kind for #241 Track D's "underline the full token" DiagnosticEngine
+// output). Still NOT populated for genuine multi-token spans (a whole
+// declaration, a qualified `A::B::C` path, an entire failing sub-expression
+// like `add(3, "4")`) -- that requires each AST node to track its own
+// end location built from its last consumed token, not just a lexer-level
+// change, and remains open scope (see issue #241 Track D / #243).
 struct SourceLocation {
   int Line;
   int Col;
