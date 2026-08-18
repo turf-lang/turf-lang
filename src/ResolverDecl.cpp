@@ -320,8 +320,13 @@ void Resolver::validateNamedType(
     if (!BaseIsOwnTypeParam &&
         !SymTable_.isKnownStruct(BaseName) && !SymTable_.isEnumName(BaseName)) {
       RankedSuggestions Suggestions;
-      Suggestions.Local =
-          SuggestionIndex::suggestVisible(BaseName, SymTable_.getAllStructNames());
+      // Candidates match exactly what the check above accepts as a valid
+      // generic base (struct or enum name) -- see the NamedType branch
+      // below for why primitives/errors are excluded here specifically.
+      std::vector<std::string> Candidates = SymTable_.getAllStructNames();
+      std::vector<std::string> EnumNames = SymTable_.getAllEnumNames();
+      Candidates.insert(Candidates.end(), EnumNames.begin(), EnumNames.end());
+      Suggestions.Local = SuggestionIndex::suggestVisible(BaseName, Candidates);
       UnknownTypeError(Loc, BaseName, Suggestions).raise();
     } else if (!GT->getModule().empty()) {
       validateModuleQualifier(GT->getModule(), BaseName, Loc);
@@ -363,8 +368,21 @@ void Resolver::validateNamedType(
         !SymTable_.isEnumName(TypeName) &&
         !SymTable_.isErrorTypeName(TypeName)) {
       RankedSuggestions Suggestions;
-      Suggestions.Local =
-          SuggestionIndex::suggestVisible(TypeName, SymTable_.getAllStructNames());
+      // Candidates must cover every name the check just above actually
+      // accepts, not just struct names -- this used to be
+      // getAllStructNames() alone, so a primitive typo (e.g. "itn" for
+      // "int") could never surface a suggestion no matter how close the
+      // spelling: the correct name simply wasn't in the search space.
+      // TypeParams is included too (the enclosing fn<T>/struct<T>'s own
+      // generic parameters, valid here but not a global registry entry).
+      std::vector<std::string> Candidates = SymTable_.getAllStructNames();
+      std::vector<std::string> EnumNames = SymTable_.getAllEnumNames();
+      Candidates.insert(Candidates.end(), EnumNames.begin(), EnumNames.end());
+      std::vector<std::string> ErrorNames = SymTable_.getAllErrorTypeNames();
+      Candidates.insert(Candidates.end(), ErrorNames.begin(), ErrorNames.end());
+      Candidates.insert(Candidates.end(), KnownPrimitives.begin(), KnownPrimitives.end());
+      Candidates.insert(Candidates.end(), TypeParams.begin(), TypeParams.end());
+      Suggestions.Local = SuggestionIndex::suggestVisible(TypeName, Candidates);
       UnknownTypeError(Loc, TypeName, Suggestions).raise();
     } else if (!IsOwnTypeParam && !KnownPrimitives.count(TypeName)) {
       if (!NT->getModule().empty()) {
