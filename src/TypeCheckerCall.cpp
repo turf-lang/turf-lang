@@ -1079,7 +1079,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
               BareMethodNames.push_back(N.substr(Prefix.size()));
           Suggestions.Local =
               SuggestionIndex::suggestVisible(MethodName, BareMethodNames);
-          StructMethodNotFoundError(Node.getLoc(), StructName, MethodName,
+          StructMethodNotFoundError(Node.getNameLoc(), StructName, MethodName,
                                     Suggestions)
               .raise();
         } else if (!IsStaticMethod && [&] {
@@ -1276,7 +1276,7 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
         RankedSuggestions Suggestions;
         Suggestions.Local =
             SuggestionIndex::suggestVisible(Node.getFieldName(), FieldNames);
-        UnknownStructFieldError(Node.getLoc(), STy->getName(),
+        UnknownStructFieldError(Node.getNameLoc(), STy->getName(),
                                 Node.getFieldName(), Suggestions)
             .raise();
         return;
