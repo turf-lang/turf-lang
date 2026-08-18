@@ -263,6 +263,17 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
               << AccentColor << Underline << " Here!" << Colors::RESET << "\n";
   }
 
+  // Point at `turf --explain E0NN` for the longer, beginner-facing
+  // writeup -- same Code the header already showed, so no separate
+  // lookup on the reader's part. Only for diagnostics that actually have
+  // a code (warnings and the raw LogErrorAt() path never do -- see
+  // DiagnosticEngine::Diag::Code's own doc comment in Lexer.h), so this
+  // never dangles into "for more details on ''" for those.
+  if (!D.Code.empty()) {
+    std::cerr << "\n  " << Colors::BRIGHT_BLACK << "Run `turf --explain "
+              << D.Code << "` for more details." << Colors::RESET << "\n";
+  }
+
   std::cerr << "\n";
 }
 
