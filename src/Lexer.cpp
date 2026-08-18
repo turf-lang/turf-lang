@@ -234,13 +234,25 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
     std::string LineNumStr = std::to_string(D.Loc.Line);
     int CaretOffset = (D.Loc.Col > 0) ? D.Loc.Col - 1 : 0;
 
+    // Underline the token's full width when an end position was recorded
+    // (EndCol != -1, same line as the start -- see SourceLocation's own doc
+    // comment in Lexer.h for which token kinds populate this) instead of
+    // just a single '^'. Falls back to a bare '^' for locations with no end
+    // position yet (multi-token spans -- a whole sub-expression -- remain
+    // out of scope, see issue #241 Track D) or a degenerate zero-width span.
+    int SpanWidth = 1;
+    if (D.Loc.EndCol != -1 && D.Loc.EndLine == D.Loc.Line &&
+        D.Loc.EndCol > D.Loc.Col)
+      SpanWidth = D.Loc.EndCol - D.Loc.Col;
+    std::string Underline = "^" + std::string(SpanWidth - 1, '~');
+
     std::cerr << "\n"
               << Colors::BRIGHT_BLACK << "  " << LineNumStr << " \u2502 "
               << Colors::RESET << LineContent << "\n"
               << Colors::BRIGHT_BLACK << "  "
               << std::string(LineNumStr.length(), ' ') << " \u2502 "
               << Colors::RESET << std::string(CaretOffset, ' ') << Colors::BOLD
-              << AccentColor << "^ Here!" << Colors::RESET << "\n";
+              << AccentColor << Underline << " Here!" << Colors::RESET << "\n";
   }
 
   std::cerr << "\n";
@@ -409,7 +421,9 @@ void resetLexer() {
 }
 
 /**
- * @brief Retrieves the next token from the standard input or source file.
+ * @brief Scans and returns the next token, without stamping CurLoc's end
+ *        position -- see gettok() below, the public entry point, which
+ *        wraps this and does that uniformly for every token kind.
  *
  * Scans characters sequentially, skipping whitespace, identifying keywords,
  * operators, numeric literals, and strings. Updates CurLoc for diagnostics.
@@ -417,7 +431,7 @@ void resetLexer() {
  * @return int The token type identifier (e.g., TOK_IDENTIFIER, TOK_NUMBER, or
  * ASCII value).
  */
-int gettok() {
+static int gettokScan() {
   while (isspace(LastChar)) {
     // Handle newlines to track line numbers
     if (LastChar == '\n') {
@@ -452,15 +466,6 @@ int gettok() {
       LastChar = SourceFile->get();
       CurCol++;
     }
-
-    // CurCol has now advanced one past the identifier's last character (the
-    // scan loop above increments it for every character consumed) -- i.e.
-    // exactly the exclusive end column an LSP Range expects. Identifiers
-    // never span multiple lines, so EndLine is always CurLine. See
-    // SourceLocation's own doc comment (Lexer.h) for why this is populated
-    // here specifically (issue #243).
-    CurLoc.EndLine = CurLine;
-    CurLoc.EndCol = CurCol;
 
     // Check for keywords
     auto It = Keywords.find(IdentifierStr);
@@ -958,7 +963,7 @@ int gettok() {
       } while (LastChar != EOF && LastChar != '\n' && LastChar != '\r');
 
       if (LastChar != EOF)
-        return gettok();
+        return gettokScan();
     } else if (SourceFile->peek() == '=') {
       LastChar = SourceFile->get();
       CurCol++;
@@ -983,5 +988,31 @@ int gettok() {
   CurCol++;
 
   return ThisChar;
+}
+
+/**
+ * @brief Public token-scanning entry point. Wraps gettokScan() and stamps
+ *        CurLoc's end position (EndLine/EndCol) uniformly for every token
+ *        kind it returns -- see SourceLocation's own doc comment (Lexer.h)
+ *        for the field's semantics.
+ *
+ * By the time gettokScan() returns, CurLine/CurCol already sit exactly one
+ * past the token's last consumed character for every branch that fully
+ * scans its token (this was true even before this wrapper existed --
+ * confirmed by tracing the '='/'==' branch: CurCol is incremented once per
+ * character actually read via SourceFile->get(), and every branch reads
+ * through the last character of its token before returning) -- i.e.
+ * exactly the exclusive end column an LSP Range expects, and previously
+ * only identifiers stamped explicitly (issue #243). The few branches that
+ * intentionally stop short of a full token (unterminated string/char
+ * literal recovery) never consume a mid-token newline, so CurLine is
+ * always still the token's start line there too -- a same-line span is a
+ * safe invariant to rely on unconditionally, not just for identifiers.
+ */
+int gettok() {
+  int Tok = gettokScan();
+  CurLoc.EndLine = CurLine;
+  CurLoc.EndCol = CurCol;
+  return Tok;
 }
 
