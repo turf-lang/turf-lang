@@ -111,15 +111,46 @@ struct CompilerOptions {
 // rendered through the same human colorizer either way.
 // See issue #241 Track D.
 
+// Prints one line of body prose, highlighting `backtick`-quoted spans --
+// the docs already write inline identifiers/snippets this way ("the
+// `password` field") -- in bold green and stripping the backticks
+// themselves, rather than printing them literally. Bold (vs. a code
+// block's plain green) so a reader can tell "this is a snippet worth
+// noticing inline" from "this is a full sample to read" at a glance.
+// Deliberately minimal -- balanced backtick pairs only, no nesting, no
+// other markdown -- so doc authors don't need to learn real markdown.
+static void printBodyLine(const std::string &Line) {
+  size_t Pos = 0;
+  while (Pos < Line.size()) {
+    size_t Open = Line.find('`', Pos);
+    if (Open == std::string::npos) {
+      std::cout << Line.substr(Pos);
+      return;
+    }
+    size_t Close = Line.find('`', Open + 1);
+    if (Close == std::string::npos) {
+      // Unmatched backtick -- print the remainder literally rather than
+      // silently eating it while searching for a partner that isn't there.
+      std::cout << Line.substr(Pos);
+      return;
+    }
+    std::cout << Line.substr(Pos, Open - Pos) << Colors::BOLD
+              << Colors::BRIGHT_GREEN
+              << Line.substr(Open + 1, Close - Open - 1) << Colors::RESET;
+    Pos = Close + 1;
+  }
+}
+
 // Renders a doc file (docs/errors/codes/*.txt, or a docs/slm/*.txt
 // category/construct fallback -- both already follow the same loose shape)
 // with real terminal color instead of a flat rdbuf() dump: the first
 // non-blank line is treated as a title, any line indented 4+ spaces is
 // treated as a code sample (the exact convention every docs/slm/*.txt file
-// already uses for its own examples), and everything else is body prose.
-// Deliberately simple -- no markdown, no inline-span parsing -- so doc
-// authors don't need to learn a new syntax; it works with the shape these
-// files already have.
+// already uses for its own examples), and everything else is body prose
+// (which additionally gets `backtick` spans highlighted -- see
+// printBodyLine() above). Deliberately simple -- no markdown beyond that
+// one convention, no nested spans -- so doc authors don't need to learn a
+// new syntax; it works with the shape these files already have.
 static void printHumanExplainDoc(std::istream &Doc) {
   std::string Line;
   bool PrintedTitle = false;
@@ -136,10 +167,12 @@ static void printHumanExplainDoc(std::istream &Doc) {
 
     size_t FirstNonSpace = Line.find_first_not_of(' ');
     bool IsCode = FirstNonSpace != std::string::npos && FirstNonSpace >= 4;
-    if (IsCode)
+    if (IsCode) {
       std::cout << Colors::BRIGHT_GREEN << Line << Colors::RESET << "\n";
-    else
-      std::cout << Line << "\n";
+    } else {
+      printBodyLine(Line);
+      std::cout << "\n";
+    }
   }
 }
 
