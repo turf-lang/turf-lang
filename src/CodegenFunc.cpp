@@ -52,6 +52,110 @@ static std::map<std::string, SourceLocation> ExternDeclLocations;
 // own separate `extern std::set<std::string> g_RequiredLibs;` declaration).
 std::set<std::string> g_RequiredLibs;
 
+// ─── argv/argc plumbing for main ───────────────────────────────────────────
+// Turf's `main` is compiled directly AS the real C-ABI `main` (no wrapper --
+// see the `Name == "main"` branches below and main.cpp:980's lookup of the
+// LLVM function literally named "main"), but Turf source never declares
+// argc/argv as params on `fn main(): int` -- there is no language syntax
+// for it. To let lib/std/os/os.tr's `extern fn TurfRuntimeGetArgc()`/
+// `TurfRuntimeGetArgv(idx)` bindings reach the real values, main's LLVM
+// FunctionType is forced to `(i32, ptr) -> <ReturnType>` below regardless of
+// its (always-empty) Turf Params list, the two incoming args are stashed
+// into these two compiler-private globals at the top of main's body, and
+// two small C-ABI accessor functions are synthesized directly in IR here
+// (mirrors ExternFuncDeclExprAST's platform-forwarding-wrapper pattern
+// further down this file) so os.tr can reach them via ordinary `extern fn`
+// declarations, exactly like any other libc binding.
+//
+// Known limitation: an explicit in-Turf call to `main()` (CodegenFunc.cpp's
+// own CalleeName == "main" passthrough further below suggests this was once
+// intended to be callable) would now mismatch this synthesized 2-arg LLVM
+// signature against the 0-arg call site and fail LLVM's module verifier.
+// No test or showcase file does this -- recursive/explicit `main()` calls
+// aren't part of the language's supported surface.
+static GlobalVariable *ArgcStorageGV = nullptr;
+static GlobalVariable *ArgvStorageGV = nullptr;
+
+static void EnsureArgvHelpers() {
+  if (ArgcStorageGV)
+    return; // already synthesized for this module
+
+  // Turf's `int` is LLVM i64 (getLLVMType() in CodegenCore.cpp), NOT i32 --
+  // so every Turf-facing surface here (storage, TurfRuntimeGetArgc's return,
+  // TurfRuntimeGetArgv's `index` param) must be i64 to match the i64
+  // FunctionType os.tr's `extern fn ...: int;` declarations actually build.
+  // Only the real C-ABI `main(int argc, ...)` parameter itself stays i32
+  // (see the call site below, and FuncDefExprAST::codegen()'s FunctionType
+  // for "main") -- that one genuinely is a 32-bit `int` at the platform ABI
+  // level, sign-extended into the i64 storage slot on entry.
+  Type *I32Ty = Type::getInt32Ty(*TheContext);
+  Type *I64Ty = Type::getInt64Ty(*TheContext);
+  Type *PtrTy = PointerType::get(*TheContext, 0);
+
+  ArgcStorageGV = new GlobalVariable(
+      *TheModule, I64Ty, /*isConstant=*/false, GlobalValue::InternalLinkage,
+      ConstantInt::get(I64Ty, 0), "turf_runtime_argc_storage");
+  ArgvStorageGV = new GlobalVariable(
+      *TheModule, PtrTy, /*isConstant=*/false, GlobalValue::InternalLinkage,
+      ConstantPointerNull::get(cast<PointerType>(PtrTy)),
+      "turf_runtime_argv_storage");
+
+  // int TurfRuntimeGetArgc() -- os.tr's `extern fn TurfRuntimeGetArgc()`
+  // declaration (if present in the program being compiled) already created
+  // this Function as a body-less prototype during the pre-pass; reuse it
+  // rather than calling Function::Create() again, which would silently
+  // rename the new one to "TurfRuntimeGetArgc.1" on a name collision and
+  // leave the real declared symbol permanently undefined at link time.
+  FunctionType *ArgcFT = FunctionType::get(I64Ty, {}, /*isVarArg=*/false);
+  Function *ArgcF = TheModule->getFunction("TurfRuntimeGetArgc");
+  if (!ArgcF)
+    ArgcF = Function::Create(ArgcFT, Function::ExternalLinkage,
+                             "TurfRuntimeGetArgc", TheModule.get());
+  BasicBlock *ArgcBB = BasicBlock::Create(*TheContext, "entry", ArgcF);
+  IRBuilder<> ArgcBuilder(ArgcBB);
+  ArgcBuilder.CreateRet(ArgcBuilder.CreateLoad(I64Ty, ArgcStorageGV));
+
+  // ptr TurfRuntimeGetArgv(int index) -- bounds-checked; returns "" (not a
+  // crash) for an out-of-range index, since a Turf `string` and a raw `ptr`
+  // are the same opaque LLVM pointer type (see getLLVMType in
+  // CodegenCore.cpp), so the empty-string constant is a valid return value
+  // with no conversion needed. Same reuse-if-declared reasoning as above.
+  FunctionType *ArgvFT = FunctionType::get(PtrTy, {I64Ty}, /*isVarArg=*/false);
+  Function *ArgvF = TheModule->getFunction("TurfRuntimeGetArgv");
+  if (!ArgvF)
+    ArgvF = Function::Create(ArgvFT, Function::ExternalLinkage,
+                             "TurfRuntimeGetArgv", TheModule.get());
+  Argument *IdxArg = ArgvF->getArg(0);
+  IdxArg->setName("index");
+
+  BasicBlock *EntryBB = BasicBlock::Create(*TheContext, "entry", ArgvF);
+  BasicBlock *InRangeBB = BasicBlock::Create(*TheContext, "in_range", ArgvF);
+  BasicBlock *OutRangeBB =
+      BasicBlock::Create(*TheContext, "out_of_range", ArgvF);
+
+  IRBuilder<> ArgvBuilder(EntryBB);
+  Value *ArgcVal = ArgvBuilder.CreateLoad(I64Ty, ArgcStorageGV);
+  Value *TooLow = ArgvBuilder.CreateICmpSLT(IdxArg, ConstantInt::get(I64Ty, 0));
+  Value *TooHigh = ArgvBuilder.CreateICmpSGE(IdxArg, ArgcVal);
+  Value *OutOfRange = ArgvBuilder.CreateOr(TooLow, TooHigh);
+  ArgvBuilder.CreateCondBr(OutOfRange, OutRangeBB, InRangeBB);
+
+  ArgvBuilder.SetInsertPoint(InRangeBB);
+  Value *ArgvBase = ArgvBuilder.CreateLoad(PtrTy, ArgvStorageGV);
+  // GEP index must match the real argv array's element width regardless of
+  // Turf `int` being 64-bit -- truncate back down to i32 (an argv array
+  // longer than INT32_MAX entries doesn't happen in practice, matching the
+  // real C-ABI argc's own i32 width used to bound this array in the first
+  // place).
+  Value *Idx32 = ArgvBuilder.CreateTrunc(IdxArg, I32Ty, "index_i32");
+  Value *ElemPtr =
+      ArgvBuilder.CreateGEP(PtrTy, ArgvBase, Idx32, "argv_elem");
+  Value *Elem = ArgvBuilder.CreateLoad(PtrTy, ElemPtr);
+  ArgvBuilder.CreateRet(Elem);
+
+  ArgvBuilder.SetInsertPoint(OutRangeBB);
+  ArgvBuilder.CreateRet(ArgvBuilder.CreateGlobalStringPtr(""));
+}
 
 // FuncDefExprAST::codegen
 // Two-pass strategy:
@@ -91,10 +195,17 @@ Value *FuncDefExprAST::codegen() {
     FuncParamTypes[MangledName] = PTypes;
     FuncReturnTypes[MangledName] = ReturnType;
 
-    // Build the LLVM FunctionType
+    // Build the LLVM FunctionType. `main` is special: it's always the real
+    // C-ABI entry point (argc: i32, argv: ptr) -> ReturnType, regardless of
+    // Turf's Params list (always empty -- see EnsureArgvHelpers() above).
     std::vector<Type *> ParamTypes;
-    for (const auto &P : Params)
-      ParamTypes.push_back(getLLVMType(P.Type.get()));
+    if (Name == "main") {
+      ParamTypes = {Type::getInt32Ty(*TheContext),
+                    PointerType::get(*TheContext, 0)};
+    } else {
+      for (const auto &P : Params)
+        ParamTypes.push_back(getLLVMType(P.Type.get()));
+    }
 
     FunctionType *FT =
         FunctionType::get(getLLVMType(ReturnType.get()), ParamTypes,
@@ -104,9 +215,15 @@ Value *FuncDefExprAST::codegen() {
     TheFunc = Function::Create(FT, Linkage, MangledName, TheModule.get());
 
     // Name the arguments
-    unsigned Idx = 0;
-    for (auto &Arg : TheFunc->args())
-      Arg.setName(Params[Idx++].Name);
+    if (Name == "main") {
+      auto ArgIt = TheFunc->args().begin();
+      ArgIt->setName("argc");
+      (++ArgIt)->setName("argv");
+    } else {
+      unsigned Idx = 0;
+      for (auto &Arg : TheFunc->args())
+        Arg.setName(Params[Idx++].Name);
+    }
   } else {
     // If the function already has a body, this is a duplicate definition
     if (!TheFunc->empty()) {
@@ -170,28 +287,43 @@ Value *FuncDefExprAST::codegen() {
     GlobalSymbolTable->EnterScope();
   }
 
-  // Alloca each parameter and add to NamedValues and GlobalSymbolTable
+  // Alloca each parameter and add to NamedValues and GlobalSymbolTable.
+  // `main`'s two LLVM-level args (argc/argv) are not real Turf parameters --
+  // they're not in Params and have no Turf type to alloca -- so they're
+  // stashed into the argv-plumbing globals instead (see EnsureArgvHelpers()
+  // above) and never registered as visible symbols.
   std::vector<SymbolID> ParamIDs;
-  for (auto &Arg : TheFunc->args()) {
-    TurfTypePtr ParamTurfType = TurfInt(); // fallback
-    for (const auto &P : Params)
-      if (P.Name == Arg.getName())
-        ParamTurfType = P.Type;
+  if (Name == "main") {
+    EnsureArgvHelpers();
+    auto ArgIt = TheFunc->args().begin();
+    Argument &ArgcArg = *ArgIt;
+    Argument &ArgvArg = *(++ArgIt);
+    Value *Argc64 = Builder->CreateSExt(&ArgcArg, Type::getInt64Ty(*TheContext),
+                                        "argc_i64");
+    Builder->CreateStore(Argc64, ArgcStorageGV);
+    Builder->CreateStore(&ArgvArg, ArgvStorageGV);
+  } else {
+    for (auto &Arg : TheFunc->args()) {
+      TurfTypePtr ParamTurfType = TurfInt(); // fallback
+      for (const auto &P : Params)
+        if (P.Name == Arg.getName())
+          ParamTurfType = P.Type;
 
-    AllocaInst *Alloca = CreateEntryBlockAlloca(
-        TheFunc, std::string(Arg.getName()), ParamTurfType.get());
-    Builder->CreateStore(&Arg, Alloca);
+      AllocaInst *Alloca = CreateEntryBlockAlloca(
+          TheFunc, std::string(Arg.getName()), ParamTurfType.get());
+      Builder->CreateStore(&Arg, Alloca);
 
-    TurfTypePtr RegisteredType = ParamTurfType;
+      TurfTypePtr RegisteredType = ParamTurfType;
 
-    NamedValues[std::string(Arg.getName())] = {Alloca, RegisteredType};
+      NamedValues[std::string(Arg.getName())] = {Alloca, RegisteredType};
 
-    // Add parameter to symbol table
-    if (GlobalSymbolTable) {
-      SourceLocation ParamLoc = Loc;
-      SymbolID id = GlobalSymbolTable->DeclareSymbol(std::string(Arg.getName()),
-                                       RegisteredType, ParamLoc, Alloca);
-      ParamIDs.push_back(id);
+      // Add parameter to symbol table
+      if (GlobalSymbolTable) {
+        SourceLocation ParamLoc = Loc;
+        SymbolID id = GlobalSymbolTable->DeclareSymbol(
+            std::string(Arg.getName()), RegisteredType, ParamLoc, Alloca);
+        ParamIDs.push_back(id);
+      }
     }
   }
 
