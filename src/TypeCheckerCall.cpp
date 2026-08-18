@@ -1263,6 +1263,25 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
     if (auto *STy = dynamic_cast<const TurfStructType *>(BaseTy.get())) {
       TurfTypePtr FieldTy = STy->getFieldType(Node.getFieldName());
 
+      // No field by this name on the struct at all -- issue #241 Track D's
+      // "Did You Mean?" extension to struct fields. Reuses the same
+      // SuggestionIndex trie every other unknown-name diagnostic already
+      // does, fed this struct's own field names as candidates. See
+      // UnknownStructFieldError's own doc comment (ErrorsStruct.h) for why
+      // this used to be a silent no-op here instead.
+      if (!FieldTy) {
+        std::vector<std::string> FieldNames;
+        for (const auto &F : STy->getFields())
+          FieldNames.push_back(F.Name);
+        RankedSuggestions Suggestions;
+        Suggestions.Local =
+            SuggestionIndex::suggestVisible(Node.getFieldName(), FieldNames);
+        UnknownStructFieldError(Node.getLoc(), STy->getName(),
+                                Node.getFieldName(), Suggestions)
+            .raise();
+        return;
+      }
+
       // Substitute this struct's own generic type parameter(s) into the
       // field's declared type -- e.g. `data: T*` on a List<Entry>-typed
       // base must report `Entry*`, not the bare, unsubstituted `T*`.
