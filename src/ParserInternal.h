@@ -36,6 +36,7 @@ std::unique_ptr<ExprAST> ParseForExpr();
 std::unique_ptr<ExprAST> ParseCompareExpr();
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
 std::unique_ptr<ExprAST> ParseReturnExpr();
+std::unique_ptr<ExprAST> ParseUnsafeExpr();
 
 // Defined in ParserDecl.cpp
 std::unique_ptr<ExprAST> ParseStructDecl();

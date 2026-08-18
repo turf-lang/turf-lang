@@ -60,6 +60,14 @@ std::unique_ptr<ExprAST> Parse();
 // to load (these are compiler-shipped files expected to always exist).
 std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc);
 
+// True if @p Path (canonicalized) falls under this install's `lib/std`
+// tree -- the `unsafe { }` gate's trust boundary (issue #238). See its
+// definition in ParserModule.cpp for the full rationale; exported here
+// (rather than kept file-local like TurfInstallRoot()) specifically so
+// TypeChecker.cpp's gate checks can call it without linking against
+// llvm::sys::fs directly.
+bool IsPathUnderLibStd(const std::string &Path);
+
 // Top-level AST capture for sandbox diffing
 void ClearParsedTopLevelASTs();
 std::vector<std::unique_ptr<ExprAST>> SwapParsedTopLevelASTs(std::vector<std::unique_ptr<ExprAST>> New);
@@ -75,5 +83,41 @@ void PushImportCycleState();
 void PopImportCycleState();
 void RecordParsedTopLevelAST(const ExprAST *AST);
 std::unique_ptr<ExprAST> BuildProgramASTFromCache();
+
+// True if @p Node was spliced out of a top-level `unsafe { }` block by
+// AppendFlattenedTopLevelDecl() below (issue #238) -- see that function's
+// own comment for why top-level unsafe-wrapping works this way instead of
+// a real nested UnsafeBlockExprAST node. Consulted only by the
+// TypeChecker's unsafe-gate checks.
+bool WasDeclaredInsideTopLevelUnsafe(const ExprAST *Node);
+
+// Appends a just-parsed top-level declaration to @p Target, transparently
+// flattening it first if it's a top-level `unsafe { }` block (issue #238).
+//
+// Every consumer of a file's top-level declaration list --
+// Resolver::hoistTopLevel(), main.cpp's multi-pass codegen driver,
+// TypeChecker::checkAll()'s resumable-per-declaration loop -- walks a FLAT
+// vector of decl-shaped nodes, found by dynamic_cast, not a recursive AST
+// walk. Pushing a real UnsafeBlockExprAST wrapper node onto that flat list
+// (the way `unsafe { }` behaves everywhere else -- inside a function body,
+// inside an ordinary block) would make a struct/fn declared inside it
+// invisible to all of them. Instead: if @p AST is an UnsafeBlockExprAST,
+// its children are moved out (UnsafeBlockExprAST::takeChildren()) and
+// pushed onto @p Target individually, each one registered in the
+// WasDeclaredInsideTopLevelUnsafe() side-set so the TypeChecker's
+// unsafe-gate checks can still tell it was authorized; the wrapper node
+// itself is discarded. Otherwise @p AST is pushed onto @p Target
+// unchanged. If @p RecordForSandbox is true, RecordParsedTopLevelAST() is
+// called for each node actually pushed (mirrors the existing call sites
+// this replaces -- some call it, some don't, depending on whether that
+// particular top-level loop's nodes feed the sandbox/SLM diff cache).
+//
+// Used identically by three call sites that each used to duplicate this
+// same "if UnsafeBlockExprAST, flatten and mark; else push as-is" logic:
+// ParserModule.cpp's ParseFile() (imported modules) and main.cpp's two
+// top-level parse loops (the pre-pass and the resumable main pass).
+void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
+                                 std::vector<std::unique_ptr<ExprAST>> &Target,
+                                 bool RecordForSandbox);
 
 #endif

@@ -61,6 +61,21 @@ static std::vector<ImportStackFrame> ImportStack;
 // caches above on every fresh compile.
 static std::vector<std::unique_ptr<ExprAST>> ParsedTopLevelASTs;
 
+// Nodes spliced out of a top-level `unsafe { }` block by ParseFile()'s
+// dedicated TOK_UNSAFE branch below (issue #238). Every other consumer of
+// a file's top-level declaration list (Resolver::hoistTopLevel(),
+// main.cpp's multi-pass codegen driver, TypeChecker::checkAll()'s
+// resumable-per-declaration loop) walks a FLAT vector of decl-shaped
+// nodes, found by dynamic_cast, not a recursive AST walk -- wrapping a
+// top-level struct/fn declaration in a real nested UnsafeBlockExprAST node
+// would make it invisible to all of them. Flattening at parse time instead
+// (splice the unsafe block's own children directly into the file's
+// top-level list, tag each one here) means none of those consumers need
+// to change at all; only the TypeChecker's unsafe-gate checks consult this
+// set. Keyed by raw ExprAST* identity, the same idiom TypeChecker's own
+// NodeTypes_ map already uses for per-node side-state.
+static std::unordered_set<const ExprAST *> UnsafeTopLevelDecls;
+
 void ClearParsedTopLevelASTs() {
   ParsedTopLevelASTs.clear();
   ImportedFiles.clear();
@@ -68,6 +83,10 @@ void ClearParsedTopLevelASTs() {
   // pops every frame it pushes, cycle or not) -- cleared defensively anyway,
   // mirroring ImportedFiles' own reset-between-compiles behavior above.
   ImportStack.clear();
+  // Never cleared mid-compile -- reset here alongside the other per-compile
+  // parser caches so a stale entry can't survive into the next compile in
+  // the same process (a long-lived embedder, e.g. an LSP).
+  UnsafeTopLevelDecls.clear();
 }
 
 std::vector<std::unique_ptr<ExprAST>> SwapParsedTopLevelASTs(std::vector<std::unique_ptr<ExprAST>> New) {
@@ -110,6 +129,29 @@ void RecordParsedTopLevelAST(const ExprAST *AST) {
   if (AST) {
     ParsedTopLevelASTs.push_back(CloneExprAST(AST));
   }
+}
+
+bool WasDeclaredInsideTopLevelUnsafe(const ExprAST *Node) {
+  return Node && UnsafeTopLevelDecls.count(Node) != 0;
+}
+
+void AppendFlattenedTopLevelDecl(std::unique_ptr<ExprAST> AST,
+                                 std::vector<std::unique_ptr<ExprAST>> &Target,
+                                 bool RecordForSandbox) {
+  if (!AST)
+    return;
+  if (auto *UB = dynamic_cast<UnsafeBlockExprAST *>(AST.get())) {
+    for (auto &Child : UB->takeChildren()) {
+      UnsafeTopLevelDecls.insert(Child.get());
+      if (RecordForSandbox)
+        RecordParsedTopLevelAST(Child.get());
+      Target.push_back(std::move(Child));
+    }
+    return;
+  }
+  if (RecordForSandbox)
+    RecordParsedTopLevelAST(AST.get());
+  Target.push_back(std::move(AST));
 }
 
 std::unique_ptr<ExprAST> BuildProgramASTFromCache() {
@@ -352,14 +394,16 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
         CurTok == TOK_MACHINE || CurTok == TOK_AT ||
         CurTok == TOK_EXTERN || CurTok == TOK_EXPORT || CurTok == TOK_OPERATOR ||
-        CurTok == TOK_ERROR) {
+        CurTok == TOK_ERROR || CurTok == TOK_UNSAFE) {
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok == ';') {
           LogErrorAt(CurLoc, "Unexpected ';'");
           return nullptr;
         }
-        Exprs.push_back(std::move(Expr));
+        // Flattens Expr first if it's a top-level `unsafe { }` block -- see
+        // AppendFlattenedTopLevelDecl()'s doc comment (Parser.h) for why.
+        AppendFlattenedTopLevelDecl(std::move(Expr), Exprs, false);
       } else {
         // A nested ParseExpression() call already reported a real error
         // (via LogErrorAt) and returned nullptr -- bail out of this file
@@ -446,6 +490,48 @@ static std::string TurfInstallRoot() {
   llvm::sys::path::remove_filename(Root); // strip the "turf"/"turf.exe" itself
   llvm::sys::path::append(Root, "..");
   return Root.str().str();
+}
+
+// The `unsafe { }` gate's trust boundary (issue #238, FINAL_SPRINT.md's
+// Track A "Resolved" section): the entire `lib/std` tree is exempt --
+// mem.tr/net.tr/list.tr/etc. keep using ptr/T*/void* exactly as they do
+// today, no migration needed. Used by TypeChecker::isUnsafeGateExempt()
+// via this exported wrapper so the TypeChecker doesn't need to depend on
+// llvm::sys::fs itself (its header is deliberately kept LLVM-free -- see
+// TypeChecker.h's own doc comment). Reuses the exact same
+// TurfInstallRoot()/real_path() primitives ParsePreludeImports()'s
+// self-import-skip check above already relies on, so this can't disagree
+// with real module resolution about where `lib/std` physically lives.
+//
+// A path that can't be resolved (e.g. a synthesized AST node with an empty
+// SourceLocation.Filename) is conservatively NOT considered lib/std --
+// correct, since only a real, on-disk lib/std/*.tr file should ever be
+// exempt from the gate. The prefix check requires a path-separator
+// boundary right after the lib/std root so a sibling directory that merely
+// STARTS WITH the same characters (e.g. a hypothetical "lib/std2") can
+// never false-match.
+bool IsPathUnderLibStd(const std::string &Path) {
+  if (Path.empty())
+    return false;
+
+  llvm::SmallString<256> CanonicalPath;
+  if (llvm::sys::fs::real_path(Path, CanonicalPath))
+    return false;
+
+  llvm::SmallString<256> StdDir(TurfInstallRoot());
+  llvm::sys::path::append(StdDir, "lib", "std");
+  llvm::SmallString<256> CanonicalStdDir;
+  if (llvm::sys::fs::real_path(StdDir, CanonicalStdDir))
+    return false;
+
+  std::string P = CanonicalPath.str().str();
+  std::string S = CanonicalStdDir.str().str();
+  if (P.size() < S.size() || P.compare(0, S.size(), S) != 0)
+    return false;
+  if (P.size() == S.size())
+    return true;
+  char Sep = P[S.size()];
+  return Sep == '/' || Sep == '\\';
 }
 
 // Recursively indexes every "<name>.tr" file under <Root>/lib/<SubdirName>

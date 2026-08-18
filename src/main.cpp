@@ -438,7 +438,7 @@ int main(int argc, char **argv) {
         if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
             CurTok == TOK_MACHINE ||
             CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
-            CurTok == TOK_OPERATOR || CurTok == TOK_ERROR) {
+            CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
@@ -446,7 +446,6 @@ int main(int argc, char **argv) {
               if (CurTok == ';') {
                 LogErrorAt(CurLoc, "Unexpected ';'");
               }
-              RecordParsedTopLevelAST(AST.get());
               // NOTE: no LintExpression() call here (deliberately -- see the
               // "Phase Separation: Lint All" comment near FnASTs' declaration
               // for the full story). This AST is about to flow through
@@ -460,7 +459,11 @@ int main(int argc, char **argv) {
               // lints THAT via the FnASTs loop -- three near-identical
               // warnings for one line of source. Found while adding a
               // regression test for Lint.cpp's self-comparison wording fix.
-              PrePassASTs.push_back(std::move(AST));
+              //
+              // AppendFlattenedTopLevelDecl() also transparently splices a
+              // top-level `unsafe { }` block's children in here instead of
+              // the wrapper node itself -- see its doc comment (Parser.h).
+              AppendFlattenedTopLevelDecl(std::move(AST), PrePassASTs, true);
             } else {
               // ParseExpression() already reported a real error and
               // returned nullptr NORMALLY (no longjmp) -- see
@@ -718,7 +721,7 @@ int main(int argc, char **argv) {
     if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
         CurTok == TOK_MACHINE ||
         CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
-        CurTok == TOK_OPERATOR || CurTok == TOK_ERROR) {
+        CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();
@@ -726,8 +729,10 @@ int main(int argc, char **argv) {
           if (CurTok == ';') {
             LogErrorAt(CurLoc, "Unexpected ';'");
           }
-          RecordParsedTopLevelAST(AST.get());
-          FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
+          // lint only — not re-codegenned. Also transparently flattens a
+          // top-level `unsafe { }` block -- see AppendFlattenedTopLevelDecl()'s
+          // doc comment (Parser.h).
+          AppendFlattenedTopLevelDecl(std::move(AST), FnASTs, true);
         } else {
           // ParseExpression() already reported a real error (e.g. a typo'd
           // keyword deep inside the function body, like `iff` for `if`) and
