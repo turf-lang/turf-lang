@@ -44,8 +44,12 @@ public:
 
     for (const auto &Child : Root.Children) {
       std::string Prefix(1, Child.first);
-      searchRecursive(Child.second.get(), Prefix, Child.first, Query,
-                      InitialRow, MaxDistance, Results);
+      // PrevChar='\0' and PrevPreviousRow=InitialRow: there is no candidate
+      // character before the trie root's children, so the transposition
+      // branch below (guarded on PrevChar) can never fire at depth 1 --
+      // InitialRow is just a harmless placeholder, never actually read.
+      searchRecursive(Child.second.get(), Prefix, Child.first, '\0', Query,
+                      InitialRow, InitialRow, MaxDistance, Results);
     }
 
     return Results;
@@ -54,9 +58,30 @@ public:
 private:
   TrieNode Root;
 
+  // Damerau-Levenshtein (restricted/OSA variant, same recurrence
+  // Algorithms.cpp's getLevenshteinDistance() already uses independently --
+  // this trie search never called it, and reimplemented a plain-Levenshtein
+  // row DP with no transposition support instead. That made a one-swap typo
+  // like "itn" for "int" cost 2 substitutions instead of 1 transposition,
+  // which pushed it past getThreshold()'s distance-1 allowance for short
+  // (<=4 char) queries -- adjacent-letter-swap typos are common enough that
+  // this was a real, silent gap in every "did you mean?" suggestion in the
+  // compiler (types, functions, variables, keywords, builtins all go through
+  // this one search()).
+  //
+  // Extending the existing per-row DP (rather than switching to a per-
+  // candidate call to Algorithms.cpp's function and losing the trie's
+  // prefix-sharing) needs one extra piece of history: a transposition
+  // consumes TWO characters from both strings at once, so scoring it needs
+  // the row from two trie levels up (PrevPreviousRow), not just the
+  // immediate parent's row (PreviousRow) -- along with the parent's own
+  // character (PrevChar) to compare against CurrentChar.
   void searchRecursive(const TrieNode *Node, const std::string &Prefix,
-                       char CurrentChar, const std::string &Query,
-                       const std::vector<int> &PreviousRow, int MaxDistance,
+                       char CurrentChar, char PrevChar,
+                       const std::string &Query,
+                       const std::vector<int> &PreviousRow,
+                       const std::vector<int> &PrevPreviousRow,
+                       int MaxDistance,
                        std::vector<std::pair<std::string, int>> &Results) const {
     std::vector<int> CurrentRow(Query.size() + 1);
     CurrentRow[0] = PreviousRow[0] + 1;
@@ -65,7 +90,20 @@ private:
       int InsertCost = CurrentRow[I - 1] + 1;
       int DeleteCost = PreviousRow[I] + 1;
       int ReplaceCost = PreviousRow[I - 1] + (Query[I - 1] == CurrentChar ? 0 : 1);
-      CurrentRow[I] = std::min({InsertCost, DeleteCost, ReplaceCost});
+      int Best = std::min({InsertCost, DeleteCost, ReplaceCost});
+
+      // Transposition: candidate's last two characters (PrevChar,
+      // CurrentChar) match the query's characters at [I-2, I-1] in swapped
+      // order -- one edit instead of two substitutions. Mirrors
+      // Algorithms.cpp getLevenshteinDistance()'s
+      // `s1[i-1]==s2[j-2] && s1[i-2]==s2[j-1]` condition exactly (s1 =
+      // candidate here, s2 = Query).
+      if (I >= 2 && PrevChar != '\0' &&
+          CurrentChar == Query[I - 2] && PrevChar == Query[I - 1]) {
+        Best = std::min(Best, PrevPreviousRow[I - 2] + 1);
+      }
+
+      CurrentRow[I] = Best;
     }
 
     if (Node->Terminal && CurrentRow.back() <= MaxDistance) {
@@ -79,7 +117,8 @@ private:
 
     for (const auto &Child : Node->Children) {
       searchRecursive(Child.second.get(), Prefix + Child.first, Child.first,
-                      Query, CurrentRow, MaxDistance, Results);
+                      CurrentChar, Query, CurrentRow, PreviousRow, MaxDistance,
+                      Results);
     }
   }
 };
