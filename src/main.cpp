@@ -80,14 +80,69 @@ struct CompilerOptions {
   std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
 };
 
-// `turf --explain E0NN` prints a multi-paragraph explanation for a
-// diagnostic code and exits -- this mode takes no input .tr file, so it's
-// handled before parseArgs() (which requires and validates one) rather than
-// folded into CompilerOptions. Reuses the same per-category docs/slm/*.txt
-// files the SLM integration already loads for --smart's context-window
-// prompts (SLMIntegration.cpp's loadDocFile()/getCategoryDocPath()), rather
-// than maintaining a second, parallel set of per-code documentation --
-// see issue #241 Track D.
+// `turf --explain E0NN` is the HUMAN-facing side of error-code
+// documentation -- read straight in a terminal, so it's rendered with
+// actual colors/structure instead of a flat file dump (see
+// printHumanExplainDoc() below). It is NOT what a future
+// `--explain-to-slm` would use: that flag (not implemented yet) would read
+// the parallel docs/slm/codes/ tree instead -- plain, uncolored grounding
+// text meant for the model, not a person. Keeping the two trees (and this
+// comment) separate is deliberate -- see ErrorCodes::getHumanCodeDocPath()/
+// getSlmCodeDocPath()'s own doc comment in ErrorCodes.h for why.
+//
+// This mode takes no input .tr file, so it's handled before parseArgs()
+// (which requires and validates one) rather than folded into
+// CompilerOptions. Doc resolution is a three-tier fallback, most-specific
+// first:
+//   1. A per-code human doc, "docs/errors/codes/E0NN.txt" (ErrorCodes::
+//      getHumanCodeDocPath()) -- opt-in, only written for codes where the
+//      coarser tiers below conflate genuinely distinct mistakes (e.g. E068
+//      "unknown struct field" vs E054 "unknown struct method").
+//   2. A construct-specific doc derived from the code's own short
+//      Description run through the SAME keyword classifier
+//      (extractContextKeyword()) the live --smart pipeline already uses on
+//      real error messages -- e.g. "Struct method not found" contains
+//      "struct" and routes to docs/slm/structs.txt, matching what a live
+//      compile of that same error class would show.
+//   3. The plain per-category doc (SLM::getCategoryDocPath() with no
+//      keyword) -- the original, coarsest fallback.
+// Tiers 2 and 3 both read from docs/slm/ (there's no per-category human
+// tree -- only per-code docs are split by audience so far) but are still
+// rendered through the same human colorizer either way.
+// See issue #241 Track D.
+
+// Renders a doc file (docs/errors/codes/*.txt, or a docs/slm/*.txt
+// category/construct fallback -- both already follow the same loose shape)
+// with real terminal color instead of a flat rdbuf() dump: the first
+// non-blank line is treated as a title, any line indented 4+ spaces is
+// treated as a code sample (the exact convention every docs/slm/*.txt file
+// already uses for its own examples), and everything else is body prose.
+// Deliberately simple -- no markdown, no inline-span parsing -- so doc
+// authors don't need to learn a new syntax; it works with the shape these
+// files already have.
+static void printHumanExplainDoc(std::istream &Doc) {
+  std::string Line;
+  bool PrintedTitle = false;
+
+  while (std::getline(Doc, Line)) {
+    if (!PrintedTitle) {
+      if (Line.empty())
+        continue; // skip leading blank lines before the title
+      std::cout << Colors::BOLD << Colors::BRIGHT_CYAN << Line
+                << Colors::RESET << "\n";
+      PrintedTitle = true;
+      continue;
+    }
+
+    size_t FirstNonSpace = Line.find_first_not_of(' ');
+    bool IsCode = FirstNonSpace != std::string::npos && FirstNonSpace >= 4;
+    if (IsCode)
+      std::cout << Colors::BRIGHT_GREEN << Line << Colors::RESET << "\n";
+    else
+      std::cout << Line << "\n";
+  }
+}
+
 static void handleExplainFlagIfPresent(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
     if (std::string(argv[i]) != "--explain")
@@ -111,10 +166,14 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
               << Colors::RESET << "  " << Entry->ClassName << " ("
               << SLM::getCategoryName(Entry->Category) << ")\n\n";
 
-    std::string DocPath = SLM::getCategoryDocPath(Entry->Category);
+    std::string DocPath = ErrorCodes::getHumanCodeDocPath(Entry->Code);
+    if (DocPath.empty()) {
+      std::string Keyword = SLM::extractContextKeyword(Entry->Description);
+      DocPath = SLM::getCategoryDocPath(Entry->Category, Keyword);
+    }
     std::ifstream Doc(DocPath);
     if (Doc.is_open()) {
-      std::cout << Doc.rdbuf() << "\n";
+      printHumanExplainDoc(Doc);
     } else {
       // Doc file missing on disk (e.g. run from outside the repo root) --
       // fall back to the short auto-generated description rather than

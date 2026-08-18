@@ -23,6 +23,7 @@
 #include "ErrorCategory.h"
 
 #include <cstring>
+#include <fstream>
 #include <string>
 
 struct ErrorCodeEntry {
@@ -128,6 +129,41 @@ inline const ErrorCodeEntry *lookupByCode(const std::string &Code) {
     if (Code == Entry.Code)
       return &Entry;
   return nullptr;
+}
+
+// Per-code documentation lives in TWO parallel trees, one per audience --
+// the split is deliberate, not duplication for its own sake:
+//
+//   docs/slm/codes/E0NN.txt     -- machine-facing. Plain text, no color
+//                                  codes, written as dense grounding text
+//                                  for a future `--explain-to-slm` to feed
+//                                  the model directly.
+//   docs/errors/codes/E0NN.txt  -- human-facing. Warmer, more explanatory
+//                                  language, meant to be read by a person
+//                                  in a terminal via `turf --explain`
+//                                  (which colorizes it -- see main.cpp's
+//                                  printHumanExplainDoc()).
+//
+// Both are opt-in overrides, checked with a real file-open (not just a
+// string build) so callers get an honest "does this exist" answer -- most
+// codes don't have either one yet. This exists for codes where the shared
+// category/construct doc (SLM::getCategoryDocPath()) conflates genuinely
+// distinct mistakes under one explanation (e.g. E068 "unknown struct
+// field" was falling into the same structs.txt as E054 "unknown struct
+// method", even though a misspelled field and a misspelled method call
+// call for completely different fixes). Returns "" when no override
+// exists in that tree; callers should fall back to the coarser
+// keyword/category doc in that case, exactly like today.
+inline std::string getSlmCodeDocPath(const std::string &Code) {
+  std::string Path = "docs/slm/codes/" + Code + ".txt";
+  std::ifstream Test(Path);
+  return Test.is_open() ? Path : "";
+}
+
+inline std::string getHumanCodeDocPath(const std::string &Code) {
+  std::string Path = "docs/errors/codes/" + Code + ".txt";
+  std::ifstream Test(Path);
+  return Test.is_open() ? Path : "";
 }
 
 } // namespace ErrorCodes
