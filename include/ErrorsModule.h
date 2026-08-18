@@ -306,7 +306,16 @@ public:
 };
 // Phase 2: Module-scoped argument type mismatch error
 // Raised when the function name is found in a module but no overload matches
-// the given argument types (e.g. math.abs(true) — no abs(bool) overload).
+// the given argument types (e.g. math::abs(true) — no abs(bool) overload).
+//
+// Currently unreachable: grep confirms no call site anywhere in the
+// compiler actually constructs this class (module-qualified arity/type
+// mismatches are reported through a different path today). Kept
+// registered (E025) rather than deleted since the class/message are
+// still correct for the scenario it names and it may get wired up again;
+// the '.'-form syntax in its message/hint was stale from before the
+// module-call migration to '::' and has been corrected here even though
+// it isn't live, so it's right if this class is ever raised again.
 class ModuleArityOrTypeError : public TurfError {
 public:
   ModuleArityOrTypeError(SourceLocation Loc,
@@ -315,12 +324,12 @@ public:
                          const std::string &Detail)
       : TurfError(Loc,
                   Colors::BRIGHT_RED + "No matching overload of '" +
-                      Colors::CYAN + ModuleName + "." + MethodName +
+                      Colors::CYAN + ModuleName + "::" + MethodName +
                       Colors::BRIGHT_RED + "' for the arguments you gave.\n" +
                       Colors::RESET + "  " + Detail,
                   "Check the argument types and count. Use the "
-                  "correct overload, e.g. 'math.abs(int)' or "
-                  "'math.abs(double)'.") {
+                  "correct overload, e.g. 'math::abs(int)' or "
+                  "'math::abs(double)'.") {
     Category_ = SLM::ErrorCategory::FUNCTION_SIGNATURE;
   }
 };
