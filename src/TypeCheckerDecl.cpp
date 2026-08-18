@@ -68,12 +68,26 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
 
   setType(&Node, DeclTy);
 
+  // `unsafe { }` gate (issue #238): declaring a raw ptr/T*-typed variable
+  // is one of the three explicitly-gated "uses" (declaration, cast,
+  // dereference -- see FINAL_SPRINT.md's Track A). Checked after
+  // NamedType resolution above so a struct-pointer field's real type is
+  // seen here, not a placeholder.
+  checkUnsafeGate(DeclTy.get(), Node.getLoc(), &Node);
+
   // Optional: validate that the initializer type is compatible
   if (Node.getInitializer() && DeclTy) {
     TurfTypePtr InitTy = getType(Node.getInitializer());
     if (InitTy) {
       if (InitTy->isNull()) {
-        if (!DeclTy->isPointer() && !DeclTy->isNamed("ptr") && !DeclTy->isNamed("void*")) {
+        // A `&T` safe reference (issue #238) is deliberately excluded even
+        // though isPointer() is true for it (inherited from
+        // TurfPointerType, see that class's own doc comment) -- its whole
+        // point is a compiler-guaranteed non-null contract, so `null` must
+        // be rejected here exactly like any other non-pointer type. Mirrors
+        // typesCompatible()'s own Rule 1 (src/Types.cpp).
+        if ((!DeclTy->isPointer() || DeclTy->isReference()) &&
+            !DeclTy->isNamed("ptr") && !DeclTy->isNamed("void*")) {
 #ifndef TYPECHECKER_NO_ERRORS
           NullAssignmentError(Node.getLoc(), Node.getName(), DeclTy->getName()).raise();
 #else
@@ -94,6 +108,12 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
 
 
 void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
+  // Unconditional (issue #238, "disallow outright" -- see
+  // checkNoRawPointersInSignature()'s own doc comment): a plain function's
+  // raw pointer parameter/return type is never fixable by wrapping in
+  // `unsafe { }`, so this runs regardless of UnsafeDepth_.
+  checkNoRawPointersInSignature(Node);
+
   // Push the declared return type so visitReturn() can validate it
   ReturnTypeStack_.push_back(Node.getReturnTypePtr());
 
@@ -127,6 +147,18 @@ void TypeChecker::visitErrorDecl(ErrorDeclExprAST &Node) {
 
 
 void TypeChecker::visitStructDecl(StructDeclExprAST &Node) {
+  // `unsafe { }` gate (issue #238): a raw ptr/T*-typed FIELD is a gated
+  // use, but unlike a var-decl/cast, the diagnostic is raised once against
+  // the struct's OWN location (not each field) -- the resolved design
+  // (FINAL_SPRINT.md's Track A) requires the ENTIRE struct declaration to
+  // be lexically inside `unsafe { }` if it has even one raw pointer field,
+  // so "which field" isn't the actionable part of the message.
+  for (const auto &Field : Node.getFields()) {
+    if (isRawPointer(Field.Type.get())) {
+      checkUnsafeGate(Field.Type.get(), Node.getLoc(), &Node);
+      break; // one diagnostic per struct is enough
+    }
+  }
   setType(&Node, TurfVoid());
 }
 

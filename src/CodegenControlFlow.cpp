@@ -189,6 +189,16 @@ Value *BlockExprAST::codegen() {
 }
 
 
+Value *UnsafeBlockExprAST::codegen() {
+  // Pure pass-through -- by Codegen time the TypeChecker has already
+  // rejected anything the `unsafe` gate disallows (issue #238), so there's
+  // no unsafe-tracking to do here, only the same-representation Body to
+  // codegen. Body is always a BlockExprAST (see ParseUnsafeExpr()), which
+  // already opens/closes its own scope, so this doesn't need to.
+  return Body->codegen();
+}
+
+
 Value *WhileExprAST::codegen() {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
