@@ -34,18 +34,28 @@
 //
 // 2. The per-connection handling is inlined directly in main()'s accept
 //    loop instead of factored into its own `handle(conn, store)` function.
-//    Turf doesn't yet have a way to take the address of a stack-local
-//    variable (no `&x` operator -- "safe references" are still an open
-//    roadmap item, see docs/planning/ROADMAP_v1.0.0.md's Phase 4). Passing
-//    `store: List<Entry*>` to a helper function would pass the LIST
-//    STRUCT itself by value, so a `.push()` inside that helper (which can
-//    reallocate the list's backing buffer and update its own
+//    Passing `store: List<Entry*>` to a helper function would pass the
+//    LIST STRUCT itself by value, so a `.push()` inside that helper (which
+//    can reallocate the list's backing buffer and update its own
 //    `len`/`cap`/`data` fields) would only mutate the helper's own copy --
 //    the very next connection would see the store exactly as it was
 //    before that push, silently losing every write. Confirmed live while
 //    first writing this file with a `handle()` helper. Keeping the
 //    mutation in the same scope as the `mut store` declaration sidesteps
-//    the whole problem.
+//    the whole problem. (`&store` -- issue #238's safe-reference operator
+//    -- doesn't fix this either: `.push()` needs a genuinely mutable
+//    receiver to persist a reallocation, which this language's method-call
+//    ABI already gives `self` for an ordinary by-value struct parameter
+//    passed to a method; the constraint here is about a HELPER FUNCTION's
+//    own by-value parameter losing later mutations, an unrelated shape.)
+//
+// 3. Every `Entry*`/raw-pointer access below (`store.data[i]`, `mem::alloc`)
+//    is wrapped in `unsafe { }` per issue #238 -- Entry* is a genuinely
+//    nullable raw pointer (List<Entry*> stores pointers precisely because
+//    Entry doesn't fit the type-erased 8-byte element slot, see point 1
+//    above), and `&T` can't replace it here for the same reason a linked
+//    list's `next` field can't become `&T` (see
+//    tests/06_structs/12_address_of_operator.tr's comment).
 
 import io;
 import net;
@@ -67,7 +77,9 @@ struct Entry {
 fn findIndex(store: List<Entry*>, key: string): int {
     mut i: int = 0;
     while i < store.length() {
-        if store.data[i].key == key {
+        // store.data[i] is a raw Entry*; `.key` through it is a gated
+        // "dereference" (issue #238).
+        if unsafe { store.data[i].key; } == key {
             return i;
         }
         i = i + 1;
@@ -103,7 +115,9 @@ fn main(): int {
             if cmd == "GET" {
                 immut idx: int = findIndex(store, rest);
                 if idx >= 0 {
-                    conn.write(store.data[idx].value + "\n");
+                    // store.data[idx] is a raw Entry*; `.value` through it
+                    // is a gated "dereference" (issue #238).
+                    conn.write(unsafe { store.data[idx].value; } + "\n");
                 } else {
                     conn.write("NOT_FOUND\n");
                 }
@@ -116,12 +130,20 @@ fn main(): int {
                     immut value: string = strings::substring(rest, secondSpace + 1, strings::length(rest));
                     immut idx: int = findIndex(store, key);
                     if idx >= 0 {
-                        store.data[idx].value = value;
+                        unsafe {
+                            store.data[idx].value = value;
+                        }
                     } else {
-                        mut e: Entry* = mem::alloc(16) to Entry*;
-                        e.key = key;
-                        e.value = value;
-                        store.push(e);
+                        // mem::alloc()'s raw pointer result needs
+                        // `unsafe { }` to bind to a caller-side local, and
+                        // writing `.key`/`.value` THROUGH the raw `Entry*`
+                        // base `e` is the same gated dereference as above.
+                        unsafe {
+                            mut e: Entry* = mem::alloc(16) to Entry*;
+                            e.key = key;
+                            e.value = value;
+                            store.push(e);
+                        }
                     }
                     conn.write("OK\n");
                 }

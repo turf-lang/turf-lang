@@ -35,11 +35,17 @@ fn<T> firstElem(arr: T[]): T {
     return arr[0];
 }
 
-// Return type built from the type parameter through a pointer wrapper
-// (T*), not just a bare T -- exercises collectGenericSubstitution()'s
-// pointer-unification branch, not just its top-level TurfGenericParamType
-// branch, and the typesCompatible() pointer-to-generic-parameter fix above.
-fn<T> identityPtr(x: T*): T* {
+// Return type built from the type parameter through a reference wrapper
+// (&T), not just a bare T -- exercises collectGenericSubstitution()'s
+// pointer/reference-unification branch, not just its top-level
+// TurfGenericParamType branch, and the typesCompatible() pointer-to-
+// generic-parameter fix above (which TurfReferenceType inherits for free,
+// see that class's own doc comment).
+//
+// (issue #238) `x: &T`, returns `&T` -- used to be `T*`/`T*`, but a plain
+// function may never have a raw ptr/T* parameter or return type, even
+// inside `unsafe { }` -- see checkNoRawPointersInSignature().
+fn<T> identityPtr(x: &T): &T {
     return x;
 }
 
@@ -51,7 +57,7 @@ fn main(): int {
     test::assert(firstElem(d) == 1.5, "");
 
     mut n: int = 7;
-    mut p: int* = identityPtr(&n);
+    mut p: &int = identityPtr(&n);
     test::assert(p == &n, "");
 
     return 0;

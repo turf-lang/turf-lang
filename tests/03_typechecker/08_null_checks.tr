@@ -1,40 +1,46 @@
+// (issue #238) A plain function may never take/return a raw ptr/T* type,
+// even inside `unsafe { }` -- see checkNoRawPointersInSignature() -- so
+// the original "pass null as a function argument" / "return null from a
+// function" sub-cases below are no longer expressible through an ordinary
+// function boundary (getNullNode()/processNode() used to do exactly
+// that). Struct-field null-assignment covers the same underlying
+// null-compatibility rule (typesCompatible()'s Rule 1, src/Types.cpp)
+// without needing a banned function signature.
+
 import test;
 
-struct Node {
-    val: int,
-    next: Node*
-}
-
-fn getNullNode(): Node* {
-    return null;
-}
-
-fn processNode(n: Node*): bool {
-    if n == null {
-        return true;
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
     }
-    return false;
 }
 
 fn main(): int {
     // 1. Assign null to pointer type T*
-    mut p: Node* = null;
-    test::assert(p == null, "p should be null");
+    unsafe {
+        mut p: Node* = null;
+        test::assert(p == null, "p should be null");
+    }
 
     // 2. Assign null to ptr
-    mut raw: ptr = null;
-    test::assert(raw == null, "raw should be null");
+    unsafe {
+        mut raw: ptr = null;
+        test::assert(raw == null, "raw should be null");
+    }
 
-    // 3. Pass null as argument expecting pointer
-    mut is_null: bool = processNode(null);
-    test::assert(is_null == true, "passed null should be detected");
+    // 3. Assign null to a raw-pointer-typed struct field
+    unsafe {
+        mut n: Node = Node::default();
+        n.next = null;
+        test::assert(n.next == null, "n.next should be null");
+    }
 
-    // 4. Return null from function expecting pointer
-    mut ret: Node* = getNullNode();
-    test::assert(ret == null, "ret should be null");
-
-    // 5. Compare ptr and void* to null
-    test::assert(null == raw, "null comparison is symmetric");
+    // 4. Compare ptr and void* to null
+    unsafe {
+        mut raw2: ptr = null;
+        test::assert(null == raw2, "null comparison is symmetric");
+    }
 
     return 0;
 }

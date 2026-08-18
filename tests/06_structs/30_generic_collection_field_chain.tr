@@ -36,21 +36,34 @@ struct Entry {
 }
 
 fn main(): int {
+    // (issue #238) mem::alloc()'s ptr result requires `unsafe { }` to bind
+    // to a caller-side local (this is the exact "Caller-side locals"
+    // example FINAL_SPRINT.md's Track A itself gives); the cast to
+    // `Entry*` is also gated; and writing `.key`/`.value` THROUGH the raw
+    // `Entry*` base `e` is a gated "dereference" (no explicit deref
+    // operator exists -- field access through a raw pointer base is the
+    // closest proxy). `List<Entry*>.push()` itself is a `lib/std` call and
+    // stays exempt regardless of the argument's raw-pointer type.
     mut store: List<Entry*> = List::default();
-
-    mut e: Entry* = mem::alloc(16) to Entry*;
-    e.key = "language";
-    e.value = "Turf";
-    store.push(e);
+    unsafe {
+        mut e: Entry* = mem::alloc(16) to Entry*;
+        e.key = "language";
+        e.value = "Turf";
+        store.push(e);
+    }
 
     // The actual regression: chained field access through a generic
     // collection's indexed backing array, used both as a value passed to
     // an overloaded function (proves TypeChecker picked the right
     // `printline` overload) and compared directly (proves the VALUE
-    // itself, not just its reported type, is correct).
-    io::printline(store.data[0].value);
-    test::assert(store.data[0].key == "language", "key field resolves correctly");
-    test::assert(store.data[0].value == "Turf", "value field resolves correctly");
+    // itself, not just its reported type, is correct). store.data[0] is
+    // itself a raw Entry* (List<Entry*>'s element type), so `.value`/`.key`
+    // on it is the same gated dereference as above.
+    unsafe {
+        io::printline(store.data[0].value);
+    }
+    test::assert(unsafe { store.data[0].key; } == "language", "key field resolves correctly");
+    test::assert(unsafe { store.data[0].value; } == "Turf", "value field resolves correctly");
 
     io::printline("generic collection field chain resolves correctly");
     return 0;

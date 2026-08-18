@@ -19,18 +19,24 @@ struct Node {
     val: int
 }
 
+// (issue #238) Every raw pointer local below needs `unsafe { }` around its
+// declaration/cast (FINAL_SPRINT.md's Track A "Caller-side locals" rule),
+// and `h.val` -- a field access THROUGH the raw `Node*` base `h` -- is a
+// gated "dereference" (no explicit deref operator exists).
 fn main(): int {
-    // #15: untyped `ptr` from malloc coerces directly into a typed pointer.
-    mut ip: int* = malloc(8);
-    test::assert(ip != null, "");
+    unsafe {
+        // #15: untyped `ptr` from malloc coerces directly into a typed pointer.
+        mut ip: int* = malloc(8);
+        test::assert(ip != null, "");
 
-    // #23: explicit ptr -> struct-pointer cast, for heap-allocated structs.
-    mut raw: ptr = malloc(8);
-    mut h: Node* = raw to Node*;
-    h.val = 77;
-    test::assert(h.val == 77, "");
+        // #23: explicit ptr -> struct-pointer cast, for heap-allocated structs.
+        mut raw: ptr = malloc(8);
+        mut h: Node* = raw to Node*;
+        h.val = 77;
+        test::assert(h.val == 77, "");
 
-    free(raw);
-    free(ip);
+        free(raw);
+        free(ip);
+    }
     return 0;
 }

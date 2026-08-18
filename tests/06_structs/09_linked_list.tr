@@ -25,14 +25,30 @@
 
 import test;
 
-struct Node {
-    val: int,
-    next: Node*
+// (issue #238) struct decl wrapped in `unsafe { }`: `next` is a genuinely
+// nullable raw pointer (a `&T` safe reference can never be null), so this
+// field can't become `&Node`. See 12_address_of_operator.tr's own comment
+// for the fuller rationale -- this file follows the identical pattern.
+unsafe {
+    struct Node {
+        val: int,
+        next: Node*
+    }
 }
 
-fn Node.new(val: int, next: Node*): void {
+// (issue #238) No longer takes `next` as a parameter: a plain function
+// (struct methods included) can never have a raw ptr/T* parameter, even
+// inside `unsafe { }` -- see checkNoRawPointersInSignature(). Every
+// caller now sets `.next` via a separate direct field assignment after
+// construction (see main() below) -- itself not gated, since writing a
+// `&T` value into an already-unsafely-declared raw pointer field is the
+// same always-sound safe-to-raw widening 12_address_of_operator.tr's own
+// comment explains (src/Types.cpp's Rule 2.5).
+fn Node.new(val: int): void {
     self.val = val;
-    self.next = next;
+    unsafe {
+        self.next = null;
+    }
 }
 
 // Read-only method: return the node's val via self
@@ -47,15 +63,21 @@ fn Node.setVal(v: int): void {
     self.val = v;
 }
 
-// Read-only method: true if next pointer is null (structural tail check)
+// Read-only method: true if next pointer is null (structural tail check).
+// self.next reads a raw-pointer-TYPED field off `self` -- not a
+// dereference THROUGH a raw pointer base (self is always non-null and
+// exempt regardless, see visitFieldAccess()'s own comment) -- so this
+// needs no `unsafe { }` at all.
 fn Node.is_tail(): bool {
     return self.next == null;
 }
 
-// Plain function (not a struct method) taking a struct pointer parameter
-// and reading a field off it -- exercises FieldAccessExprAST's NamedType ->
-// TurfStructType resolution outside of the self/method-call path.
-fn nodeVal(p: Node*): int {
+// Plain function (not a struct method) taking a SAFE reference parameter
+// (issue #238: used to be `p: Node*`, no longer allowed -- see
+// checkNoRawPointersInSignature()) and reading a field off it -- exercises
+// FieldAccessExprAST's NamedType -> TurfStructType resolution outside of
+// the self/method-call path.
+fn nodeVal(p: &Node): int {
     return p.val;
 }
 
@@ -73,25 +95,40 @@ fn max2(a: int, b: int): int {
 fn main(): int {
     // ── Construction ─────────────────────────────────────────────────────────
     // Three stack-allocated nodes.  Constructed tail-first so each node's
-    // `next` can point at an already-initialized later node via `&`.
-    mut n3: Node = Node::new(30, null);
-    mut n2: Node = Node::new(20, &n3);
-    mut n1: Node = Node::new(10, &n2);
+    // `next` can point at an already-initialized later node via `&`. `&n3`/
+    // `&n2` are `&Node` (safe references); assigning one into a `Node*`
+    // field is the always-sound safe-to-raw widening (src/Types.cpp's Rule
+    // 2.5), so this needs no `unsafe { }` -- only the struct/constructor
+    // declarations above did.
+    mut n3: Node = Node::new(30);
+    mut n2: Node = Node::new(20);
+    n2.next = &n3;
+    mut n1: Node = Node::new(10);
+    n1.next = &n2;
 
     // ── Real chaining via address-of ─────────────────────────────────────────
-    // n1 -> n2 -> n3 -> null
-    test::assert(n1.next.val == 20, "n1.next should point at n2 (val 20)");
-    test::assert(n1.next.next.val == 30, "n1.next.next should point at n3 (val 30)");
-    test::assert(n1.next.next.next == null, "n3.next should still be null");
+    // n1 -> n2 -> n3 -> null. Each `.field` access THROUGH a raw `Node*`
+    // base (n1.next, n1.next.next, ...) is a gated "dereference" (issue
+    // #238) -- there's no explicit deref operator, so this is the closest
+    // proxy the gate has -- hence the `unsafe { ...; }` wrapping every
+    // multi-hop chain below (`unsafe { }` used as a value-producing
+    // expression: its type is its last statement's type, see
+    // TypeChecker::visitUnsafeBlock()).
+    test::assert(unsafe { n1.next.val; } == 20, "n1.next should point at n2 (val 20)");
+    test::assert(unsafe { n1.next.next.val; } == 30, "n1.next.next should point at n3 (val 30)");
+    test::assert(unsafe { n1.next.next.next; } == null, "n3.next should still be null");
 
-    // ── fn(p: Node*) field access on a chained pointer ───────────────────────
-    test::assert(nodeVal(n1.next) == 20, "nodeVal(n1.next) should read n2.val");
-    test::assert(nodeVal(n1.next.next) == 30, "nodeVal(n1.next.next) should read n3.val");
+    // ── fn(p: &Node) field access on a chained pointer ───────────────────────
+    // n1.next/n1.next.next are raw Node* values; converting one to &Node
+    // for nodeVal() is the raw-to-safe direction, which always requires an
+    // explicit cast inside `unsafe { }` (it might have been null).
+    test::assert(unsafe { nodeVal(n1.next to &Node); } == 20, "nodeVal(n1.next) should read n2.val");
+    test::assert(unsafe { nodeVal(n1.next.next to &Node); } == 30, "nodeVal(n1.next.next) should read n3.val");
 
     // ── Mutating method: self.val = v persists to the caller ────────────────
     n2.setVal(99);
     test::assert(n2.val == 99, "n2.val should be 99 after setVal(99)");
-    test::assert(n1.next.val == 99, "n1.next.val should see the mutation through the chain");
+    test::assert(unsafe { n1.next.val; } == 99, "n1.next.val should see the mutation through the chain");
     n2.setVal(20); // restore for the assertions below
 
     // ── Field reads ───────────────────────────────────────────────────────────

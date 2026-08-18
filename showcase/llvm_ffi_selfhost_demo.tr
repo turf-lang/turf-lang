@@ -56,31 +56,37 @@ extern from "LLVM" fn LLVMDisposeBuilder(builder: ptr): void;
 
 import io;
 
+// (issue #238) Every `ptr`-typed local below needs `unsafe { }` around its
+// declaration (FINAL_SPRINT.md's Track A "Caller-side locals" rule) --
+// the `extern fn`/`extern from` calls themselves stay ordinary, ungated
+// calls (FFI declarations are exempt regardless of where they're used).
 fn main(): int {
-    mut ctx: ptr = LLVMContextCreate();
-    mut mod: ptr = LLVMModuleCreateWithNameInContext("turf_selfhost_demo", ctx);
+    unsafe {
+        mut ctx: ptr = LLVMContextCreate();
+        mut mod: ptr = LLVMModuleCreateWithNameInContext("turf_selfhost_demo", ctx);
 
-    // Build: define i64 @answer() { entry: %sum = add i64 19, 23  ret i64 %sum }
-    mut i64Ty: ptr = LLVMInt64TypeInContext(ctx);
-    mut fnType: ptr = LLVMFunctionType(i64Ty, null, 0, 0);
-    mut answerFn: ptr = LLVMAddFunction(mod, "answer", fnType);
+        // Build: define i64 @answer() { entry: %sum = add i64 19, 23  ret i64 %sum }
+        mut i64Ty: ptr = LLVMInt64TypeInContext(ctx);
+        mut fnType: ptr = LLVMFunctionType(i64Ty, null, 0, 0);
+        mut answerFn: ptr = LLVMAddFunction(mod, "answer", fnType);
 
-    mut entry: ptr = LLVMAppendBasicBlockInContext(ctx, answerFn, "entry");
-    mut builder: ptr = LLVMCreateBuilderInContext(ctx);
-    LLVMPositionBuilderAtEnd(builder, entry);
+        mut entry: ptr = LLVMAppendBasicBlockInContext(ctx, answerFn, "entry");
+        mut builder: ptr = LLVMCreateBuilderInContext(ctx);
+        LLVMPositionBuilderAtEnd(builder, entry);
 
-    mut lhs: ptr = LLVMConstInt(i64Ty, 19, 0);
-    mut rhs: ptr = LLVMConstInt(i64Ty, 23, 0);
-    mut sum: ptr = LLVMBuildAdd(builder, lhs, rhs, "sum");
-    LLVMBuildRet(builder, sum);
+        mut lhs: ptr = LLVMConstInt(i64Ty, 19, 0);
+        mut rhs: ptr = LLVMConstInt(i64Ty, 23, 0);
+        mut sum: ptr = LLVMBuildAdd(builder, lhs, rhs, "sum");
+        LLVMBuildRet(builder, sum);
 
-    immut ir: string = LLVMPrintModuleToString(mod);
-    io::printline("--- IR built entirely from Turf, via llvm-c FFI ---");
-    io::printline(ir);
+        immut ir: string = LLVMPrintModuleToString(mod);
+        io::printline("--- IR built entirely from Turf, via llvm-c FFI ---");
+        io::printline(ir);
 
-    LLVMDisposeBuilder(builder);
-    LLVMDisposeModule(mod);
-    LLVMContextDispose(ctx);
+        LLVMDisposeBuilder(builder);
+        LLVMDisposeModule(mod);
+        LLVMContextDispose(ctx);
+    }
 
     return 0;
 }
