@@ -123,4 +123,11 @@ llvm::Constant *GetDefaultValue(const TurfType *T);
 /// and CodegenVar.cpp (VariableExprAST's self-reference-to-a-constant case).
 llvm::Value *CodegenConstantValue(const ResolverConstantSymbol &C);
 
+/// Clears main's argv/argc plumbing globals (CodegenFunc.cpp's
+/// ArgcStorageGV/ArgvStorageGV) so a fresh InitializeModule() doesn't reuse
+/// GlobalVariable* pointers that belong to a torn-down previous TheModule.
+/// Called from InitializeModule() itself (CodegenCore.cpp); a no-op the
+/// first time, since those statics start out null.
+void ResetArgvHelpers();
+
 #endif

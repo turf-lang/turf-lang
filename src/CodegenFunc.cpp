@@ -67,14 +67,49 @@ std::set<std::string> g_RequiredLibs;
 // further down this file) so os.tr can reach them via ordinary `extern fn`
 // declarations, exactly like any other libc binding.
 //
-// Known limitation: an explicit in-Turf call to `main()` (CodegenFunc.cpp's
-// own CalleeName == "main" passthrough further below suggests this was once
-// intended to be callable) would now mismatch this synthesized 2-arg LLVM
-// signature against the 0-arg call site and fail LLVM's module verifier.
-// No test or showcase file does this -- recursive/explicit `main()` calls
-// aren't part of the language's supported surface.
+// An explicit in-Turf call to `main()` would mismatch this synthesized
+// 2-arg LLVM signature against a 0-arg call site (CalleeName == "main"
+// passthrough further below never applies argc/argv). Resolver::visitFuncCall
+// rejects `main()` calls outright (ResolverCall.cpp), and
+// Resolver::visitFuncDef rejects a declared `fn main(...)` with params
+// (ResolverDecl.cpp), so this mismatch can never actually reach Codegen --
+// the passthrough below is defense-in-depth, not a supported call path.
 static GlobalVariable *ArgcStorageGV = nullptr;
 static GlobalVariable *ArgvStorageGV = nullptr;
+
+// See CodegenInternal.h's doc comment -- called from InitializeModule() so
+// these don't outlive the TheModule they were allocated in.
+void ResetArgvHelpers() {
+  ArgcStorageGV = nullptr;
+  ArgvStorageGV = nullptr;
+}
+
+// Looks up an already-declared `extern fn Name` (os.tr's TurfRuntimeGetArgc/
+// TurfRuntimeGetArgv, created bodyless during the pre-pass) and reuses it,
+// or creates a fresh prototype if none exists yet -- same lookup-or-create
+// shape as getOrCreateMallocFn()/getOrCreateStrcmpFn() (CodegenCore.cpp),
+// specialized here because these two also need the conflicting-signature
+// guard below (mirrors ExternFuncDeclExprAST::codegen()'s own check, just
+// against Codegen's own synthesized definition instead of another extern).
+static Function *getOrCreateArgvHelperPrototype(const std::string &Name,
+                                                FunctionType *FT) {
+  Function *F = TheModule->getFunction(Name);
+  if (!F)
+    return Function::Create(FT, Function::ExternalLinkage, Name,
+                            TheModule.get());
+  if (F->getFunctionType() != FT) {
+    // A conflicting `extern fn` declaration of this name exists (wrong
+    // arity/types) -- reusing it as-is would attach a body to a Function
+    // whose declared type disagrees, an invalid-module verifier failure
+    // with no clue as to why.
+    auto It = ExternDeclLocations.find(Name);
+    auto Err = ConflictingExternDeclarationError(
+        It != ExternDeclLocations.end() ? It->second : SourceLocation{0, 0},
+        Name);
+    Err.raise();
+  }
+  return F;
+}
 
 static void EnsureArgvHelpers() {
   if (ArgcStorageGV)
@@ -107,10 +142,8 @@ static void EnsureArgvHelpers() {
   // rename the new one to "TurfRuntimeGetArgc.1" on a name collision and
   // leave the real declared symbol permanently undefined at link time.
   FunctionType *ArgcFT = FunctionType::get(I64Ty, {}, /*isVarArg=*/false);
-  Function *ArgcF = TheModule->getFunction("TurfRuntimeGetArgc");
-  if (!ArgcF)
-    ArgcF = Function::Create(ArgcFT, Function::ExternalLinkage,
-                             "TurfRuntimeGetArgc", TheModule.get());
+  Function *ArgcF =
+      getOrCreateArgvHelperPrototype("TurfRuntimeGetArgc", ArgcFT);
   BasicBlock *ArgcBB = BasicBlock::Create(*TheContext, "entry", ArgcF);
   IRBuilder<> ArgcBuilder(ArgcBB);
   ArgcBuilder.CreateRet(ArgcBuilder.CreateLoad(I64Ty, ArgcStorageGV));
@@ -121,10 +154,8 @@ static void EnsureArgvHelpers() {
   // CodegenCore.cpp), so the empty-string constant is a valid return value
   // with no conversion needed. Same reuse-if-declared reasoning as above.
   FunctionType *ArgvFT = FunctionType::get(PtrTy, {I64Ty}, /*isVarArg=*/false);
-  Function *ArgvF = TheModule->getFunction("TurfRuntimeGetArgv");
-  if (!ArgvF)
-    ArgvF = Function::Create(ArgvFT, Function::ExternalLinkage,
-                             "TurfRuntimeGetArgv", TheModule.get());
+  Function *ArgvF =
+      getOrCreateArgvHelperPrototype("TurfRuntimeGetArgv", ArgvFT);
   Argument *IdxArg = ArgvF->getArg(0);
   IdxArg->setName("index");
 
@@ -195,35 +226,38 @@ Value *FuncDefExprAST::codegen() {
     FuncParamTypes[MangledName] = PTypes;
     FuncReturnTypes[MangledName] = ReturnType;
 
-    // Build the LLVM FunctionType. `main` is special: it's always the real
-    // C-ABI entry point (argc: i32, argv: ptr) -> ReturnType, regardless of
-    // Turf's Params list (always empty -- see EnsureArgvHelpers() above).
+    // `main` is special: it's always the real C-ABI entry point
+    // (argc: i32, argv: ptr) -> ReturnType, ExternalLinkage, with its two
+    // args named "argc"/"argv" -- regardless of Turf's Params list (always
+    // empty -- see EnsureArgvHelpers() above). Built as one combined
+    // ParamTypes/Linkage/ArgNames branch rather than three separate
+    // `Name == "main"` checks (FunctionType, Linkage, argument naming used
+    // to be decided independently a few lines apart) so a future change to
+    // main's ABI (e.g. adding envp) has one place to touch, not three.
     std::vector<Type *> ParamTypes;
+    std::vector<std::string> ArgNames;
+    Function::LinkageTypes Linkage;
     if (Name == "main") {
       ParamTypes = {Type::getInt32Ty(*TheContext),
                     PointerType::get(*TheContext, 0)};
+      ArgNames = {"argc", "argv"};
+      Linkage = Function::ExternalLinkage;
     } else {
-      for (const auto &P : Params)
+      for (const auto &P : Params) {
         ParamTypes.push_back(getLLVMType(P.Type.get()));
+        ArgNames.push_back(P.Name);
+      }
+      Linkage = Function::InternalLinkage;
     }
 
     FunctionType *FT =
         FunctionType::get(getLLVMType(ReturnType.get()), ParamTypes,
                           /*isVarArg=*/false);
-    auto Linkage = (Name == "main") ? Function::ExternalLinkage
-                                    : Function::InternalLinkage;
     TheFunc = Function::Create(FT, Linkage, MangledName, TheModule.get());
 
-    // Name the arguments
-    if (Name == "main") {
-      auto ArgIt = TheFunc->args().begin();
-      ArgIt->setName("argc");
-      (++ArgIt)->setName("argv");
-    } else {
-      unsigned Idx = 0;
-      for (auto &Arg : TheFunc->args())
-        Arg.setName(Params[Idx++].Name);
-    }
+    unsigned ArgIdx = 0;
+    for (auto &Arg : TheFunc->args())
+      Arg.setName(ArgNames[ArgIdx++]);
   } else {
     // If the function already has a body, this is a duplicate definition
     if (!TheFunc->empty()) {
