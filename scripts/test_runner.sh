@@ -25,12 +25,25 @@ echo -e "${BOLD}Running Turf Test Suites...${RESET}\n"
 # idea as the parallel `-j$(nproc)` build), with a portable fallback chain
 # for environments where `nproc` isn't installed (e.g. macOS) -- overridable
 # via TURF_TEST_JOBS for a CI runner that deliberately wants to cap it.
+#
+# On macOS specifically, every test execs a brand-new uniquely-named binary
+# (see PROGRAM below), and macOS's on-demand Gatekeeper/AMFI signature check
+# for a never-before-seen executable (~0.3-0.5s) appears to serialize across
+# concurrent processes -- confirmed by measurement: 8 freshly-compiled
+# binaries launched concurrently took 3.2s total wall time, vs ~10ms once
+# each had already been run once ("warmed"). At full core-count parallelism
+# that queuing alone was enough to push individual tests past the run
+# timeout below, producing mass false "Timed out" failures with nothing
+# actually wrong with the compiler or the test. Halving default parallelism
+# on macOS cuts how many of these checks queue up at once; it doesn't
+# eliminate the per-test tax (see the timeout bump below for that).
 if [ -n "$TURF_TEST_JOBS" ]; then
     JOBS="$TURF_TEST_JOBS"
 elif command -v nproc >/dev/null 2>&1; then
     JOBS=$(nproc)
 elif command -v sysctl >/dev/null 2>&1; then
-    JOBS=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+    JOBS=$(( $(sysctl -n hw.ncpu 2>/dev/null || echo 8) / 2 ))
+    [ "$JOBS" -lt 1 ] && JOBS=1
 else
     JOBS=4
 fi
@@ -115,7 +128,7 @@ run_one_test() {
         fi
         "$PROGRAM" > "$LOGFILE" 2>&1 &
         CMD_PID=$!
-        (sleep 2 && kill -9 $CMD_PID 2>/dev/null) &
+        (sleep 5 && kill -9 $CMD_PID 2>/dev/null) &
         wait $CMD_PID 2>/dev/null
         RUN_STATUS=$?
         RUN_OUTPUT=$(cat "$LOGFILE")
@@ -189,7 +202,7 @@ run_one_test() {
         # Pipe dummy values (e.g., name and age) to avoid blocking
         echo -e "TestUser\n25" | "$PROGRAM" > "$LOGFILE" 2>&1 &
         CMD_PID=$!
-        (sleep 2 && kill -9 $CMD_PID 2>/dev/null) &
+        (sleep 5 && kill -9 $CMD_PID 2>/dev/null) &
         wait $CMD_PID 2>/dev/null
         RUN_STATUS=$?
         RUN_OUTPUT=$(cat "$LOGFILE")
@@ -197,7 +210,7 @@ run_one_test() {
         # Regular tests
         "$PROGRAM" > "$LOGFILE" 2>&1 &
         CMD_PID=$!
-        (sleep 2 && kill -9 $CMD_PID 2>/dev/null) &
+        (sleep 5 && kill -9 $CMD_PID 2>/dev/null) &
         wait $CMD_PID 2>/dev/null
         RUN_STATUS=$?
         RUN_OUTPUT=$(cat "$LOGFILE")
@@ -205,7 +218,7 @@ run_one_test() {
 
     if [ $RUN_STATUS -eq 137 ] || [ $RUN_STATUS -eq 143 ] || [ $RUN_STATUS -eq 211 ]; then
         echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${YELLOW}TIMEOUT (Likely infinite loop)${RESET}"
-        { echo "STATUS=FAIL"; echo "DETAIL=$test_file (Timed out after 2s)"; } > "$RESULT_FILE"
+        { echo "STATUS=FAIL"; echo "DETAIL=$test_file (Timed out after 5s)"; } > "$RESULT_FILE"
     elif [ $RUN_STATUS -ne 0 ]; then
         echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${RED}RUNTIME FAILED${RESET} (Exit code $RUN_STATUS)"
         {
