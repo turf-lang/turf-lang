@@ -32,13 +32,14 @@ For internals — how the compiler actually implements any of this (stack vs. he
 17. [Random](stdlib/random.md) — `random_int`/`random_double`/`random_bool` (not cryptographic)
 18. [Filesystem](stdlib/fs.md) — path manipulation, directory operations
 19. [JSON](stdlib/json.md) — a dependency-free `JsonValue` parser/serializer
-20. [Testing](stdlib/testing.md) — `test`
+20. [HTTP](stdlib/http.md) — `Request`/`Response` parsing/building over `net`, a callback-based `Server`
+21. [Testing](stdlib/testing.md) — `test`
 
 **Tooling**
-21. [CLI & Diagnostics](cli_and_diagnostics.md) — the `turf` command, error codes, `--explain`, compile-time static analysis
+22. [CLI & Diagnostics](cli_and_diagnostics.md) — the `turf` command, error codes, `--explain`, compile-time static analysis
 
 ## Scope note
 
 SLM-assisted tooling (`--smart`, `turf --explain`'s per-code writeups in `docs/slm/`) is documented only at the surface level here — its own dedicated documentation pass is still to come.
 
-`lib/std/http/` exists in the tree but is **not** documented here — it has two known unresolved bugs (a heap-corruption crash and broken callback routing) and isn't ready to use. `docs/reference/stdlib/io_and_net.md` and `core.md` also each carry a note on a separate, still-unresolved heap-corruption issue: combining `io`'s file I/O with further string processing (including `strings::trim`/`trim_start`/`trim_end` on a `List<string>`-sourced value) can corrupt the heap and crash later, at an unrelated allocation. Read those notes before relying on either in a program you're writing today.
+`Map<K, V>`/`Set<T>` have one documented, unresolved limitation: lookups compare `K`/`T` by raw identity rather than content when `K`/`T = string` (see [`stdlib/collections.md`](stdlib/collections.md) for the full mechanism and a working non-generic-method pattern that sidesteps it). Nothing else in the standard library has a known live bug as of this writing.

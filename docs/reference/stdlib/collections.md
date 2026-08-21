@@ -233,8 +233,31 @@ for small maps. A hashed `HashMap<K, V>` is a distinct, deferred future
 addition. Storage is two parallel type-erased arrays (`keys`, `values`),
 grown exactly like `List<T>.push()`.
 
-Because lookups use `==` on `K`, your key type must support equality — a
-primitive, or `string` via the operator overload in `strings.tr`.
+Because lookups use `==` on `K`, your key type must support equality.
+
+> **Known limitation: `K = string` lookups compare by identity, not
+> content.** `indexOf`'s `self.keys[i] == key` is a raw pointer/bit
+> comparison here, not a call into `strings.tr`'s real content-comparing
+> `operator==(string, string)` — a generic method body is type-checked and
+> codegenned exactly once, shared across every instantiation (every `K`/`V`
+> erases to one uniform 8-byte slot), so `self.keys[i]`/`key` never carry
+> the concrete type `string` for overload resolution to match against. This
+> is correct (bit-exact identity genuinely is `==`) for `K` = `int`/
+> `double`/`bool`/pointer, but wrong for `K` = `string`: two content-equal
+> keys built from different allocations (e.g. one from `strings::trim()`,
+> the other a literal) compare unequal. A same-file literal-to-literal
+> comparison (`m.put("a", 1); m.contains("a")`) can appear to work by
+> coincidence — the linker merges identical string-literal constants into
+> one address — which is why this went unnoticed until a real, non-literal
+> key surfaced it. No general fix exists without per-instantiation codegen
+> or a trait/constraint system, neither of which this compiler has. If your
+> struct embedding a `Map<string, V>` is itself non-generic, you can write
+> your own plain (non-generic) method on it doing the linear scan directly
+> instead of calling `.get()`/`.contains()`/`.tryGet()` — a field access
+> from a non-generic method resolves fully concretely, so `==` there
+> correctly reaches the real string operator. See `http.tr`'s
+> `Request.get_header()`/`has_header()` and `Server.route_index()` for a
+> real, working example of exactly this pattern.
 
 ### `Map.indexOf(key: K): int`
 
@@ -365,12 +388,22 @@ test::assert(seen.length() == 2, "");
 test::assert(seen.contains(2), "");
 ```
 
-> **Known bug: dedup doesn't work correctly for `T = string`.**
-> `indexOf`'s equality check (`self.items[i] == item`) has only ever been
-> verified with `T = int` (see `tests/32_set_and_sort_stdlib/`) — with
-> `T = string`, adding `"hello"`, `"world"`, `"hello"` was observed to
-> produce a length of `3`, not the expected `2`, suggesting the generic
-> `==` isn't dispatching to `string`'s real content-comparing
-> `operator==` for an erased `T`. Not yet root-caused or fixed — prefer
-> `Set<int>`/`Set<double>` until this is resolved, and don't rely on
-> `Set<string>` deduplicating correctly.
+> **Known limitation: dedup doesn't work correctly for `T = string`.**
+> Root cause fully identified — the identical `K = string` gap `Map<K, V>`
+> documents above, on `Set<T>`'s own `indexOf`. `self.items[i] == item`
+> inside `Set.indexOf`'s single, shared generic-method body compares by raw
+> pointer identity for `T = string`, not content, so adding `"hello"`,
+> then a *separately-allocated* string that's content-equal to `"hello"`
+> (e.g. via `strings::trim(" hello ")` — not a second occurrence of the
+> same string literal, which the linker can merge to the same address by
+> coincidence and mask the bug) produces a length one higher than
+> expected — the second add never found the first. Correct for `T` =
+> `int`/`double`/`bool`/pointer. No general fix exists without per-
+> instantiation codegen or a trait/constraint system, neither of which this
+> compiler has yet — prefer `Set<int>`/`Set<double>`, and don't rely on
+> `Set<string>` deduplicating correctly. If you need one today, embed
+> `items: T*`-shaped storage as a field of your own concrete (non-generic)
+> struct and write a plain (non-generic) method doing the linear scan
+> yourself (see `Map<K, V>`'s callout above for why that sidesteps the
+> issue). Tracked as an accepted, deferred limitation in
+> `tests/99_known_bugs/`, not a live regression.

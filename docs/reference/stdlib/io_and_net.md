@@ -75,22 +75,6 @@ immut content: string = io::read_to_string("notes.txt") recover produce "";
 test::assert(io::exists("notes.txt"), "...");
 ```
 
-> **Known bug — do not combine file I/O with further string processing
-> yet.** `io::write_string` followed by `io::read_to_string` or
-> `read_lines`, followed by essentially *any* further string allocation
-> (a `strings::split`, a `strings::trim*` call — see
-> [`core.md`](./core.md)'s own warning on this), has been observed to
-> corrupt the heap and crash with a `malloc.c:2199` assertion failure on a
-> *later*, unrelated allocation — not at the read/write call itself. This
-> "corrupt now, crash later" pattern means the existing regression tests
-> for these functions (which pass) are not sufficient evidence of
-> correctness; it needs a real audit of `read_to_string`'s buffer-size/
-> null-termination arithmetic, not yet done. Until it's fixed, prefer
-> building strings in memory over round-tripping through a file if your
-> program needs to do further string processing on the result —
-> `showcase/text_toolkit.tr` was rewritten to avoid this combination
-> entirely for exactly this reason.
-
 ### `eprint(val: string): void` / `eprintline(val: string): void` / `flush(): void`
 
 `eprint`/`eprintline` write to stderr via a raw `write(2, ...)` syscall

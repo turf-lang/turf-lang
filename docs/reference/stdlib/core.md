@@ -447,18 +447,6 @@ test::assert(all_space == "", "trim: all-whitespace string -> empty");
 test::assert(strings::trim("  hello world  ") == "hello world", "trim: interior space preserved");
 ```
 
-> **Known bug — do not call on a value popped from a `List<string>`.**
-> `strings::trim`/`trim_start`/`trim_end` (any of the three, even a single,
-> non-chained call) reliably corrupts the heap when their argument came
-> from `List<string>.pop()` — confirmed with a 4-line repro, crashing with
-> a `malloc.c:2199` assertion failure on a *later*, unrelated allocation,
-> not at the `trim*` call site itself. A plain string literal or a
-> locally-built string is unaffected. Not yet root-caused or fixed. Until
-> it is, avoid trimming a list-sourced string — copy it into a fresh local
-> first via `strings::substring(s, 0, strings::length(s))`, or restructure
-> to not need trimming (e.g. control the input so it has no incidental
-> whitespace, as `showcase/text_toolkit.tr` does).
-
 ### `split(s: string, delimiter: string): List<string>`
 
 Splits `s` on every occurrence of `delimiter`. An empty `delimiter`, or a
@@ -473,14 +461,6 @@ import list::List;
 mut octets: List<string> = strings::split("127.0.0.1", ".");
 test::assert(octets.length() == 4, "split: 4 octets");
 ```
-
-> **Known bug, likely the same root cause as the `trim*` bug above.**
-> `io::read_lines` (see [`io_and_net.md`](./io_and_net.md)) is itself built
-> on `split`, and the combination of `io::write_string` +
-> `io::read_to_string`/`read_lines` followed by essentially any further
-> string allocation has also been observed to corrupt the heap the same
-> way. See that page's own warning for the current recommended workaround
-> (avoid the file-I/O + further-string-processing combination for now).
 
 ### `join(items: List<string>, sep: string): string`
 
