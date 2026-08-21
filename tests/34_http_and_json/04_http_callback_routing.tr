@@ -8,6 +8,15 @@
 // anymore, and this test is the proof: registration, storage in a struct
 // field, lookup, and a real call all happen below.
 //
+// Lookup goes through `app.has_route()`/`app.get_route()`, not
+// `app.routes.tryGet()`/`.contains()` directly -- the latter looked like
+// the natural spelling and even compiled, but silently never matched a
+// freshly-PARSED path against a route registered with a string literal
+// (Map<string, V>'s generic accessors compare K by raw pointer identity,
+// not content -- see http.tr's Request.get_header() doc comment for the
+// full mechanism). Confirmed live: this test failed its "route '/' should
+// have been registered" assertion under the old `.tryGet()` spelling.
+//
 // Server.listen() itself (bind + infinite accept loop, see http.tr) isn't
 // called directly here -- an unbounded accept loop has no natural stopping
 // point for a single test process to assert against and return from. This
@@ -57,10 +66,8 @@ fn main(): int {
     mut req: http::Request = http::parse_request(serverConn);
     mut res: http::Response;
     res.conn = serverConn;
-    mut handler: fn(http::Request, http::Response): void = app.routes.tryGet(req.path) recover run {
-        test::fail("route '/' should have been registered");
-        return 1;
-    };
+    test::assert(app.has_route(req.path), "route '/' should have been registered");
+    mut handler: fn(http::Request, http::Response): void = app.get_route(req.path);
     handler(req, res);
 
     immut respText: string = client.read(4096);
@@ -84,10 +91,8 @@ fn main(): int {
     mut req2: http::Request = http::parse_request(serverConn2);
     mut res2: http::Response;
     res2.conn = serverConn2;
-    mut handler2: fn(http::Request, http::Response): void = app.routes.tryGet(req2.path) recover run {
-        test::fail("route '/echo' should have been registered");
-        return 1;
-    };
+    test::assert(app.has_route(req2.path), "route '/echo' should have been registered");
+    mut handler2: fn(http::Request, http::Response): void = app.get_route(req2.path);
     handler2(req2, res2);
 
     immut respText2: string = client2.read(4096);
@@ -98,7 +103,7 @@ fn main(): int {
     serverConn2.close();
 
     // ── an unregistered path is correctly absent from the route table ─────
-    test::assert(!app.routes.contains("/nope"), "unregistered path should not be in the route table");
+    test::assert(!app.has_route("/nope"), "unregistered path should not be in the route table");
 
     listener.close();
 

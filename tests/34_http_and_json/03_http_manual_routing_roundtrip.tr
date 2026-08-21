@@ -13,6 +13,16 @@
 // `read()` (called after the write, exactly like below) returns that data
 // right away instead of blocking. Verified reliable, not flaky, across
 // repeated runs.
+//
+// Header lookups go through `req.get_header()`/`req.has_header()`, not
+// `req.headers.get()`/`.contains()` directly -- the latter compiled but
+// silently never matched a freshly-parsed header value against itself
+// (Map<string, V>'s generic accessors compare K by raw pointer identity,
+// not content; see http.tr's Request.get_header() doc comment). This test
+// also used to crash with a `malloc.c:2199` heap-corruption assertion
+// before src/CodegenVar.cpp's string-index-assignment fix (see http.tr's
+// header comment) -- parse_request's own string building
+// (substring/trim_end) was corrupting the heap on every request parsed.
 import io;
 import net;
 import http;
@@ -42,8 +52,10 @@ fn main(): int {
     mut req: http::Request = http::parse_request(serverConn);
     test::assert_eq(req.method, "GET", "parsed method");
     test::assert_eq(req.path, "/hello", "parsed path");
-    test::assert_eq(req.headers.get("Host"), "localhost", "parsed Host header");
-    test::assert_eq(req.headers.get("X-Test"), "abc", "parsed custom header");
+    test::assert_eq(req.get_header("Host"), "localhost", "parsed Host header");
+    test::assert_eq(req.get_header("X-Test"), "abc", "parsed custom header");
+    test::assert(req.has_header("Host"), "has_header finds a present header");
+    test::assert(!req.has_header("Nonexistent"), "has_header rejects an absent header");
     test::assert_eq(req.body, "", "GET request has no body");
 
     mut res: http::Response;
