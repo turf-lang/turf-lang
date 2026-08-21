@@ -78,6 +78,52 @@ test::assert(l.pop() == 30, "");
 
 Returns the current element count (`self.len`) — not the backing capacity.
 
+`List<T>` has no random-access `get`/`set` — `push`/`pop`/`length` are the
+entire public surface. To visit every element, pop in a loop until the list
+is empty (this is the idiom the standard library and its own tests use).
+
+### `list::list_sort(l: List<int>, cmp: fn(int, int): int): void` / `list::list_binary_search(l: List<int>, target: int, cmp: fn(int, int): int): int` / `list::list_find(l: List<int>, predicate: fn(int): bool): int`
+
+Sort and search, as free functions in `list.tr` rather than generic
+`List<T>` methods.
+
+> **Why free functions, and why `List<int>` only.** This isn't a stylistic
+> choice — it's a real, confirmed compiler limitation. A comparator
+> parameter typed `fn(T, T): int` inside a generic method never
+> type-checks correctly (`FuncType` parameters are never substituted
+> through generic instantiation anywhere in the compiler), and the
+> fallback of comparing `T` values with a bare `<`/`>` operator inside a
+> generic body doesn't work either (ordering operators aren't resolved
+> generically the way `==`/`!=` are). Both dead ends are documented
+> directly in `lib/std/collections/list.tr` so they aren't "fixed" back to
+> the broken shape later. Plain functions taking a concrete `List<int>`
+> sidestep the problem entirely, and `int` is the only element type this
+> could be numerically meaningful for anyway — `List<double>` sorted this
+> way would compare raw IEEE-754 bit patterns as integers.
+
+- **`list_sort`** — in-place insertion sort. `cmp(a, b)` should return
+  negative/zero/positive, matching C's `qsort` convention.
+- **`list_binary_search`** — only meaningful on an already-sorted list
+  (not checked/enforced); returns the index if found, `-1` otherwise.
+- **`list_find`** — linear search with an arbitrary predicate, for
+  unsorted lists or non-equality lookups; returns the first matching
+  index or `-1`.
+
+```turflang
+import list::List;
+
+fn byValue(a: int, b: int): int { return a - b; }
+fn isEven(n: int): bool { return n % 2 == 0; }
+
+mut nums: List<int> = List::default();
+nums.push(3);
+nums.push(1);
+nums.push(2);
+
+list::list_sort(nums, byValue);
+test::assert(list::list_find(nums, isEven) >= 0, "found an even number");
+```
+
 ---
 
 ## `Stack<T>` (`collections/stack.tr`)
@@ -284,3 +330,47 @@ test::assert(m.contains("b") == false, "");
 ### `Map.length(): int`
 
 Current key/value pair count.
+
+---
+
+## `Set<T>` (`collections/set.tr`)
+
+Same underlying need as `Map<K, V>` — same type-erasure/linear-scan model
+(see the top of this page), but with a single array instead of two, since a
+set only stores presence, not an associated value.
+
+### `Set.add(item: T): void`
+
+Adds `item` if it isn't already present (checked via `indexOf`, a linear
+scan); a no-op if it is — no duplicate entries.
+
+### `Set.contains(item: T): bool`
+
+### `Set.remove(item: T): bool`
+
+Removes `item` if present (swap-with-last, same O(1)-removal/order-breaking
+tradeoff as `Map.remove` above). Returns whether it was actually present
+and removed.
+
+### `Set.length(): int`
+
+```turflang
+import set::Set;
+
+mut seen: Set<int> = Set::default();
+seen.add(1);
+seen.add(2);
+seen.add(1); // no-op, already present
+test::assert(seen.length() == 2, "");
+test::assert(seen.contains(2), "");
+```
+
+> **Known bug: dedup doesn't work correctly for `T = string`.**
+> `indexOf`'s equality check (`self.items[i] == item`) has only ever been
+> verified with `T = int` (see `tests/32_set_and_sort_stdlib/`) — with
+> `T = string`, adding `"hello"`, `"world"`, `"hello"` was observed to
+> produce a length of `3`, not the expected `2`, suggesting the generic
+> `==` isn't dispatching to `string`'s real content-comparing
+> `operator==` for an erased `T`. Not yet root-caused or fixed — prefer
+> `Set<int>`/`Set<double>` until this is resolved, and don't rely on
+> `Set<string>` deduplicating correctly.

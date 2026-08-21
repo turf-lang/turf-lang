@@ -1,8 +1,8 @@
 # Turf
 
-Turf is a statically-typed, LLVM-backed programming language. It compiles directly to native binaries, supports structs, enums, generics, modules, pointers, and native FFI, and ships with an integrated compiler-diagnostics system built around a locally-run language model.
+Turf is a statically-typed, LLVM-backed programming language. It compiles directly to native binaries, supports structs, enums, generics, state machines, modules, pointers, and native FFI, ships with a real standard library (strings, collections, file I/O, JSON, time, randomness, filesystem paths, networking), and includes an integrated compiler-diagnostics system built around a locally-run language model.
 
-Current version: **pre-1.0**, actively developed (past `v0.8.0`).
+Current version: **v1.0.0**.
 
 ## Table of Contents
 
@@ -10,9 +10,11 @@ Current version: **pre-1.0**, actively developed (past `v0.8.0`).
 2. [Installation](#installation)
 3. [Quick Start](#quick-start)
 4. [Language Tour](#language-tour)
-5. [Examples](#examples)
-6. [Building from Source](#building-from-source)
-7. [Roadmap](#roadmap)
+5. [Standard Library](#standard-library)
+6. [Examples](#examples)
+7. [Building from Source](#building-from-source)
+8. [Documentation](#documentation)
+9. [Roadmap](#roadmap)
 
 ## Why Turf
 
@@ -438,11 +440,65 @@ unsafe {
 }
 ```
 
+### State machines
+
+`machine` declares a set of states plus a transition graph in one construct — a `TurfMachineType` is a real `enum` underneath (`::`-access, `==`, `COUNT` all just work), with a `.transition(State)` call the compiler tries to prove safe at compile time:
+
+```
+machine TrafficLight {
+    Red -> Green,
+    Green -> Yellow,
+    Yellow -> Red
+}
+
+fn main(): int {
+    mut light: TrafficLight = TrafficLight::Red;
+
+    compare light {
+        matches TrafficLight::Red:
+            light.transition(TrafficLight::Green);   // compile-time-proven safe: zero runtime cost
+        done
+        otherwise:
+            io::printline("not red");
+    }
+
+    assert(light == TrafficLight::Green, "");
+    return 0;
+}
+```
+
+Inside a single-pattern `matches` arm that's narrowed the receiver to one exact state, `.transition(...)` compiles to a plain store — no runtime check at all. Everywhere else it falls back to a runtime switch that panics on an edge the graph doesn't declare. See `docs/reference/state_machines.md` for the full reference, including exactly which shapes qualify for the compile-time-proven path.
+
 ### Assertions
 
 ```
 assert(condition, "message shown on failure");
 ```
+
+## Standard Library
+
+Every module is an ordinary `.tr` file under `lib/std/` — no compiler special-casing, `import <module>;` doesn't care which subfolder it lives in. `int`/`double`/`bool`/`char`/`strings`/`array` are auto-imported into every file (the "prelude"); everything else needs an explicit `import`.
+
+| Module | What it gives you |
+|---|---|
+| `strings` | length/contains/index_of/starts_with/ends_with/repeat/substring/replace/to_upper/to_lower/trim(_start/_end), `split`/`join`, `pad_left`/`pad_right`, `parse_int`/`parse_double` |
+| `io` | `print`/`printline`/`input`, plus file I/O: `read_to_string`, `read_lines`, `write_string`, `exists`, `eprint`/`eprintline`, `flush` |
+| `list` / `stack` / `queue` / `map` / `collections::set` | `List<T>`/`Stack<T>`/`Queue<T>`/`Map<K,V>`/`Set<T>`, plus `list_sort`/`list_binary_search`/`list_find` free functions over `List<int>` |
+| `mem` | checked `alloc`/`alloc_zeroed`/`grow`/`dup`/`zero` wrappers over `malloc`/`calloc`/`realloc`/`free`, plus `Pool<T>` |
+| `math` | `abs`/`power`/`min`/`max`/`clamp`, libm bindings (`sqrt`, `sin`, `pow`, ...), `PI`/`E` |
+| `time` | `now_seconds()` (wall clock), `clock_ticks()`/`elapsed_ms()` (CPU time — not wall time, see the module's own doc comment), `sleep_seconds`/`sleep_ms` |
+| `random` | `random_int`/`random_double`/`random_bool` — not cryptographically secure |
+| `fs` | path manipulation (`join`/`dirname`/`basename`/`extension`/`is_absolute`) and directory ops (`mkdir`/`remove_file`/`remove_dir`/`is_dir`) |
+| `net` | `TcpListener`/`TcpConnection`, plus `resolve_hostname` for DNS |
+| `json` | a hand-rolled, dependency-free `JsonValue` parser/serializer (`json::parse`/`json::stringify`) |
+| `os` | `env`/`set_env`, `argc`/`argv` |
+| `sys` / `test` | `panic`/`exit`/`abort`; `assert`/`fail`/`assert_eq` |
+
+Full per-function reference for every module: [`docs/reference/stdlib/`](docs/reference/stdlib/).
+
+> **Not yet ready**: `lib/std/http/` exists in the tree but has two known unresolved bugs (a heap-corruption crash and broken callback routing) — don't use it yet. `showcase/http_server.tr`/`http_client.tr` build HTTP handling directly on `net`/`strings` instead, without depending on it.
+>
+> **Known bug**: combining `io`'s file I/O (`write_string` + `read_to_string`/`read_lines`) with further string processing afterward (a `strings::split`, or any of `strings::trim`/`trim_start`/`trim_end` on a value that came out of a `List<string>`) can corrupt the heap and crash later, at an unrelated allocation. See `docs/reference/stdlib/io_and_net.md` and `core.md` for the current workaround.
 
 ## Examples
 
@@ -616,7 +672,7 @@ fn main(): int {
 
 A larger FFI showcase (file I/O, `libm`, environment variables, sockets, variadic `printf` via `extern fn printf(fmt: string, ...): int;`, and linking against arbitrary system libraries via `extern from "libname" fn`) lives in the test suite alongside the rest of the examples above.
 
-**`showcase/`** has larger, real-world-shaped programs — an HTTP server and a companion Turf HTTP client that talks to it over a real TCP socket (a full request/response round trip, both ends written in Turf, using nothing but standard-library modules — no `extern fn`/`ptr` in the showcase files themselves), plus more. See that directory's own files for details on running each one.
+**`showcase/`** has larger, real-world-shaped programs — an HTTP server and a companion Turf HTTP client that talks to it over a real TCP socket (a full request/response round trip, both ends written in Turf, using nothing but standard-library modules — no `extern fn`/`ptr` in the showcase files themselves), a key-value store client/server pair, a self-hosting-adjacent LLVM-C FFI demo, a text-analysis tool exercising `strings`/`fs`/`Set`/sort-and-search/`time`, and a JSON-config-driven dice roller exercising `json`/`random`/`net::resolve_hostname`. See that directory's own files for details on running each one.
 
 ## Building from Source
 
@@ -646,15 +702,22 @@ chmod +x scripts/cmake_build.sh
 
 Compiles, runs, and cleans up the produced binary.
 
+## Documentation
+
+- **[`docs/reference/`](docs/reference/)** — the full language reference, one topic per page (variables & types, control flow, error handling, functions & modules, FFI & `unsafe`, structs & enums, state machines, generics & operators, arrays, the standard library, CLI & diagnostics). Start at [`docs/reference/README.md`](docs/reference/README.md).
+- **[`docs/architecture/`](docs/architecture/)** — deep internals references for contributors: the module/`::` system, pointers/`unsafe`/`&T`, error handling/`recover`, the compiler's memory model (what's heap vs. stack, in plain CS terms, not LLVM internals), and the full Lexer→Parser→Resolver→TypeChecker→Codegen pipeline plus its CFG static-analysis passes.
+- **[`docs/planning/`](docs/planning/)** — `ROADMAP_v1.0.0_COMPLETE.md` (the completed v1.0.0 tracker) and `FUTURE.md` (what's next, see below).
+
 ## Roadmap
 
-Turf is pre-1.0. The full, actively-maintained tracker — with each item marked done or open against the real codebase — is `docs/planning/ROADMAP_v1.0.0_COMPLETE.md`. Phases 1–3 (the language backbone: FFI, `do`/`while`, `compare`, enums, bitwise/string ops, first-class functions, error handling, for-each loops) and operator overloading are complete. Highlights of what's still open:
+**Turf is `v1.0.0`.** Every phase in `docs/planning/ROADMAP_v1.0.0_COMPLETE.md` is done: the full language backbone (FFI, `do`/`while`, `compare`, enums, bitwise/string ops, first-class functions, error handling, for-each loops, state machines, operator overloading), `unsafe { }`/`&T` safe references, the standard library rewrite via FFI, the `--smart` diagnostics retry loop, and diagnostics polish (source spans, error codes + `turf --explain`, broader "did you mean?").
 
-- `unsafe { }` blocks and safe references (`&T`) — the remaining memory-model work from Phase 4.
-- `std/os.tr` (env vars, argv) — the remaining Phase 4 stdlib module; see `docs/planning/STDLIB_ROADMAP.md`.
-- Prompt-Oriented Programming (`@slm` syntax, structured context serialization, the SLM query loop, LoRA fine-tuning) — Phase 5. The `--smart` error-healing context pipeline is already live; the in-language `@slm { }` block is not.
-- Diagnostics polish (source spans, error codes + `turf --explain`, broader "did you mean?") — see `docs/planning/ROADMAP_v1.0.0_COMPLETE.md`'s Diagnostics Polish section.
-- `turf-cli`: a standalone package manager (written in Go) for Turf projects
-  and dependencies — currently a working showcase, not yet linked into the
-  main `turf` binary's workflow.
-- An LSP server, `turf fmt`, and `turf test` — none exist yet (Phase 6).
+What's next is tracked in **[`docs/planning/FUTURE.md`](docs/planning/FUTURE.md)**, roughly in priority order:
+
+- Developer tooling: an LSP server, `turf fmt`, `turf test`, a package manager.
+- `@slm { }` in-source syntax (Prompt-Oriented Programming) — the `--smart` error-healing pipeline is live today; writing natural-language blocks that generate real code is not.
+- LoRA fine-tuning for the local SLM.
+- The rest of the standard library (`lib/std/http/` is written but has two known bugs and is parked, not shipped — see the Standard Library section above; a `time`/DNS/`json`-adjacent web stack is otherwise close).
+- The proposed memory-architecture RFC (automatic reference counting) — today's model is entirely manual: raw pointers gated behind `unsafe { }`, `&T` giving a non-null guarantee only, no GC.
+
+**Turflang 2.0.0** is reserved for self-hosting — writing the compiler in Turf itself, once the above has landed.
