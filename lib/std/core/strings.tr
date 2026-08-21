@@ -17,6 +17,11 @@
 //   mut upper: string = strings::to_upper("hello");
 
 import sys;
+// split()/join() below return/take `List<string>`. list.tr only imports
+// mem/sys (never strings), so pulling it in here does not create the
+// inter-stdlib import cycle this file otherwise avoids (confirmed by
+// actually compiling tests/13_string_stdlib/18_str_split_join.tr etc.).
+import list::List;
 
 // ─── C bindings ───────────────────────────────────────────────────────────────
 
@@ -305,4 +310,248 @@ fn trim(s: string): string {
         end_idx = end_idx - 1;
     }
     return substring(s, start_idx, end_idx);
+}
+
+// ─── trim_start / trim_end ─────────────────────────────────────────────────────
+
+// trim_start: returns `s` with leading ASCII whitespace removed (trailing
+// whitespace, if any, is left alone). Same whitespace set as `trim`.
+fn trim_start(s: string): string {
+    mut n: int = strlen(s);
+    mut start_idx: int = 0;
+    while start_idx < n && (s[start_idx] == 32 || s[start_idx] == 9 || s[start_idx] == 10 || s[start_idx] == 13) {
+        start_idx = start_idx + 1;
+    }
+    return substring(s, start_idx, n);
+}
+
+// trim_end: returns `s` with trailing ASCII whitespace removed (leading
+// whitespace, if any, is left alone). Same whitespace set as `trim`.
+fn trim_end(s: string): string {
+    mut n: int = strlen(s);
+    mut end_idx: int = n;
+    while end_idx > 0 && (s[end_idx - 1] == 32 || s[end_idx - 1] == 9 || s[end_idx - 1] == 10 || s[end_idx - 1] == 13) {
+        end_idx = end_idx - 1;
+    }
+    return substring(s, 0, end_idx);
+}
+
+// ─── split / join ───────────────────────────────────────────────────────────────
+//
+// split()'s two edge cases, decided explicitly rather than left ambiguous:
+//   - Empty `delimiter`: splitting on "" is not well-defined (it could mean
+//     "one piece per byte" or "no-op"); this returns a single-element list
+//     containing all of `s` unchanged, treating an empty delimiter as "no
+//     real delimiter given" rather than silently exploding every string
+//     into one-byte pieces.
+//   - `delimiter` not found anywhere in `s`: also returns a single-element
+//     list containing all of `s` -- exactly like Python's/JS's `.split()`,
+//     so `split(s, d).length() == 1` is the normal way callers detect "no
+//     delimiter present" without a separate contains() check first.
+// join() is split()'s exact inverse: `join(split(s, d), d) == s` holds for
+// any `s`/non-empty `d` where `d` doesn't appear at the very start/end
+// (matches every other language's split/join pair -- e.g. splitting
+// "a,,b" on "," produces ["a", "", "b"], and joining that back with ","
+// reproduces "a,,b" exactly).
+
+// split: splits `s` on every non-overlapping occurrence of `delimiter`,
+// returning the pieces (in order, including empty pieces between adjacent
+// delimiters) as a `List<string>`. See the block comment above for the
+// empty-delimiter and no-match behavior.
+fn split(s: string, delimiter: string): List<string> {
+    mut result: List<string> = List::default();
+    mut dlen: int = strlen(delimiter);
+    mut slen: int = strlen(s);
+    if dlen == 0 {
+        result.push(s);
+        return result;
+    }
+    mut start: int = 0;
+    mut i: int = 0;
+    while i <= slen - dlen {
+        mut is_match: bool = true;
+        mut j: int = 0;
+        while j < dlen {
+            if s[i + j] != delimiter[j] {
+                is_match = false;
+            }
+            j = j + 1;
+        }
+        if is_match {
+            result.push(substring(s, start, i));
+            i = i + dlen;
+            start = i;
+        } else {
+            i = i + 1;
+        }
+    }
+    result.push(substring(s, start, slen));
+    return result;
+}
+
+// join: concatenates every element of `items` in order, separated by `sep`
+// (no leading/trailing `sep`). Returns "" for an empty list. The exact
+// inverse of `split` -- see the block comment above.
+fn join(items: List<string>, sep: string): string {
+    mut result: string = "";
+    mut n: int = items.length();
+    mut i: int = 0;
+    while i < n {
+        if i > 0 {
+            result = result + sep;
+        }
+        result = result + items.data[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+// ─── pad_left / pad_right ───────────────────────────────────────────────────────
+
+// pad_left: pads `s` on the left with `pad_char` until it is `target_len`
+// bytes long. Returns `s` unchanged if it is already `target_len` bytes or
+// longer.
+fn pad_left(s: string, target_len: int, pad_char: char): string {
+    mut n: int = strlen(s);
+    if n >= target_len {
+        return s;
+    }
+    mut pad_count: int = target_len - n;
+    mut buf: string = malloc(target_len + 1) to string;
+    mut i: int = 0;
+    while i < pad_count {
+        buf[i] = pad_char to int;
+        i = i + 1;
+    }
+    mut j: int = 0;
+    while j < n {
+        buf[pad_count + j] = s[j];
+        j = j + 1;
+    }
+    buf[target_len] = 0;
+    return buf;
+}
+
+// pad_right: pads `s` on the right with `pad_char` until it is `target_len`
+// bytes long. Returns `s` unchanged if it is already `target_len` bytes or
+// longer.
+fn pad_right(s: string, target_len: int, pad_char: char): string {
+    mut n: int = strlen(s);
+    if n >= target_len {
+        return s;
+    }
+    mut buf: string = malloc(target_len + 1) to string;
+    mut i: int = 0;
+    while i < n {
+        buf[i] = s[i];
+        i = i + 1;
+    }
+    while i < target_len {
+        buf[i] = pad_char to int;
+        i = i + 1;
+    }
+    buf[target_len] = 0;
+    return buf;
+}
+
+// ─── parse_int / parse_double ───────────────────────────────────────────────────
+//
+// Unlike `substring`'s out-of-bounds check (a programming bug -- hard
+// panic via sys::panic()), a malformed number is ordinary, expected input
+// (e.g. parsing a line of user/file/network input) -- these report failure
+// through the `!T` error-union return type instead, so the caller decides
+// how to recover (`recover produce 0` / `recover as err run { ... }`),
+// exactly like math::divide's DivisionByZero. Hand-rolled digit parsing
+// (no atoi/atof binding) so the failure paths -- empty string, a bare "-",
+// a non-digit byte, more than one "." -- are all real, checked error
+// returns instead of C's atoi/atof silently returning 0 on garbage input.
+
+error StringParseError {
+    InvalidInt,
+    InvalidDouble,
+}
+
+// parse_int: parses `s` as a base-10 integer, with an optional leading `-`.
+// Fails on an empty string, a bare "-", or any non-digit byte.
+fn parse_int(s: string): !int {
+    mut n: int = strlen(s);
+    if n == 0 {
+        return StringParseError::InvalidInt;
+    }
+    mut i: int = 0;
+    mut neg: bool = false;
+    if s[0] == 45 { // '-'
+        neg = true;
+        i = 1;
+    }
+    if i >= n {
+        return StringParseError::InvalidInt;
+    }
+    mut result: int = 0;
+    while i < n {
+        mut c: int = s[i];
+        if c < 48 || c > 57 {
+            return StringParseError::InvalidInt;
+        }
+        result = result * 10 + (c - 48);
+        i = i + 1;
+    }
+    if neg {
+        result = 0 - result;
+    }
+    return result;
+}
+
+// parse_double: parses `s` as a base-10 decimal number, with an optional
+// leading `-` and at most one `.`. Fails on an empty string, a bare "-",
+// any non-digit byte outside the single decimal point, or a string with
+// no digits at all (e.g. "-" or ".").
+fn parse_double(s: string): !double {
+    mut n: int = strlen(s);
+    if n == 0 {
+        return StringParseError::InvalidDouble;
+    }
+    mut i: int = 0;
+    mut neg: bool = false;
+    if s[0] == 45 { // '-'
+        neg = true;
+        i = 1;
+    }
+    if i >= n {
+        return StringParseError::InvalidDouble;
+    }
+    mut saw_digit: bool = false;
+    mut int_part: double = 0.0;
+    while i < n && s[i] != 46 { // '.'
+        mut c: int = s[i];
+        if c < 48 || c > 57 {
+            return StringParseError::InvalidDouble;
+        }
+        int_part = int_part * 10.0 + ((c - 48) to double);
+        saw_digit = true;
+        i = i + 1;
+    }
+    mut frac_part: double = 0.0;
+    if i < n && s[i] == 46 { // '.'
+        i = i + 1;
+        mut frac_div: double = 1.0;
+        while i < n {
+            mut c: int = s[i];
+            if c < 48 || c > 57 {
+                return StringParseError::InvalidDouble;
+            }
+            frac_div = frac_div * 10.0;
+            frac_part = frac_part + ((c - 48) to double) / frac_div;
+            saw_digit = true;
+            i = i + 1;
+        }
+    }
+    if !saw_digit {
+        return StringParseError::InvalidDouble;
+    }
+    mut result: double = int_part + frac_part;
+    if neg {
+        result = 0.0 - result;
+    }
+    return result;
 }

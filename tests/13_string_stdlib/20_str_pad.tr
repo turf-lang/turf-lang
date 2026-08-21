@@ -1,0 +1,38 @@
+// tests/13_string_stdlib/20_str_pad.tr
+// Tests strings::pad_left and strings::pad_right, including the
+// already-long-enough (unchanged) and exact-length cases.
+
+import io;
+import strings;
+
+import test;
+fn main(): int {
+    // pad_left: shorter than target
+    test::assert(strings::pad_left("7", 3, '0') == "007", "pad_left: '7' padded to width 3 with '0'");
+    test::assert(strings::pad_left("42", 5, ' ') == "   42", "pad_left: '42' padded to width 5 with space");
+
+    // pad_left: already exactly target length -> unchanged
+    test::assert(strings::pad_left("abc", 3, '0') == "abc", "pad_left: already exact length -> unchanged");
+
+    // pad_left: already longer than target -> unchanged
+    test::assert(strings::pad_left("hello", 3, '0') == "hello", "pad_left: already longer -> unchanged");
+
+    // pad_left: empty string
+    test::assert(strings::pad_left("", 3, 'x') == "xxx", "pad_left: empty string padded fully");
+
+    // pad_right: shorter than target
+    test::assert(strings::pad_right("7", 3, '0') == "700", "pad_right: '7' padded to width 3 with '0'");
+    test::assert(strings::pad_right("42", 5, '.') == "42...", "pad_right: '42' padded to width 5 with '.'");
+
+    // pad_right: already exactly target length -> unchanged
+    test::assert(strings::pad_right("abc", 3, '0') == "abc", "pad_right: already exact length -> unchanged");
+
+    // pad_right: already longer than target -> unchanged
+    test::assert(strings::pad_right("hello", 3, '0') == "hello", "pad_right: already longer -> unchanged");
+
+    // pad_right: empty string
+    test::assert(strings::pad_right("", 3, 'x') == "xxx", "pad_right: empty string padded fully");
+
+    io::printline("20 PASS: strings::pad_left / strings::pad_right");
+    return 0;
+}

@@ -1,0 +1,54 @@
+// tests/13_string_stdlib/22_str_parse_double.tr
+// Tests strings::parse_double -- success paths (integer-looking and real
+// decimals, positive and negative) and every documented failure path.
+
+import io;
+import strings;
+import math;
+
+import test;
+// See tests/13_string_stdlib/21_str_parse_int.tr's comment: a diverging
+// `return` inside `recover as err run { ... }` returns from the ENCLOSING
+// function, so this lives in its own helper rather than inline in main().
+fn parseFailsWithInvalidDouble(s: string): bool {
+    mut result: double = strings::parse_double(s) recover as err run {
+        if err == strings::StringParseError::InvalidDouble {
+            return true;
+        }
+        return false;
+    };
+    return false;
+}
+
+// parse_double accumulates its fractional part digit-by-digit through
+// floating-point division, which is not guaranteed to land on the exact
+// same bit pattern as the compiler's own decimal-literal parser (e.g.
+// "3.14") -- both are correct, just via different rounding paths. So
+// success-path checks below compare within a small epsilon instead of
+// exact `==`, same as any other cross-implementation float comparison.
+fn assertClose(actual: double, expected: double, msg: string): void {
+    test::assert(math::abs(actual - expected) < 0.0000001, msg);
+}
+
+fn main(): int {
+    // Success paths
+    assertClose(strings::parse_double("3.14") recover produce -1.0, 3.14, "parse_double: '3.14' -> 3.14");
+    assertClose(strings::parse_double("0.5") recover produce -1.0, 0.5, "parse_double: '0.5' -> 0.5");
+    assertClose(strings::parse_double("42") recover produce -1.0, 42.0, "parse_double: integer-looking string");
+    assertClose(strings::parse_double("-2.5") recover produce 999.0, -2.5, "parse_double: negative decimal");
+    assertClose(strings::parse_double("0") recover produce -1.0, 0.0, "parse_double: '0' -> 0.0");
+
+    // Failure paths
+    test::assert_eq(strings::parse_double("") recover produce -1.0, -1.0, "parse_double: empty string fails");
+    test::assert_eq(strings::parse_double("-") recover produce -1.0, -1.0, "parse_double: bare '-' fails");
+    test::assert_eq(strings::parse_double(".") recover produce -1.0, -1.0, "parse_double: bare '.' fails");
+    test::assert_eq(strings::parse_double("1.2.3") recover produce -1.0, -1.0, "parse_double: two decimal points fails");
+    test::assert_eq(strings::parse_double("abc") recover produce -1.0, -1.0, "parse_double: all non-digit fails");
+    test::assert_eq(strings::parse_double("1.5x") recover produce -1.0, -1.0, "parse_double: trailing garbage fails");
+
+    // recover as err: distinguish the error variant
+    test::assert(parseFailsWithInvalidDouble("nope"), "parse_double: recover as err sees InvalidDouble variant");
+
+    io::printline("22 PASS: strings::parse_double");
+    return 0;
+}

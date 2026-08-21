@@ -16,6 +16,16 @@
 //   import io;
 //   io::printline("hello");
 //   mut name: string = io::input();
+//
+//   mut content: string = io::read_to_string("file.txt") recover run {
+//       io::eprintline("couldn't read file.txt");
+//       return;
+//   };
+//   io::write_string("out.txt", "hello");
+//   if io::exists("out.txt") { io::printline("it's there"); }
+
+import list::List;
+import strings;
 
 // ─── libc bindings ────────────────────────────────────────────────────────
 
@@ -23,6 +33,31 @@ extern fn printf(fmt: string, ...): int;
 extern fn scanf(fmt: string, ...): int;
 extern fn getchar(): int;
 extern fn calloc(count: int, size: int): void*;
+
+// Buffered file I/O (fopen/fclose/fseek/ftell/fread/fwrite/fflush) --
+// `string` and `void*` are the same opaque pointer at the LLVM level in
+// this compiler (confirmed by net.tr's TcpConnection.read()), so a `string`
+// buffer is passed wherever a C function wants a `char*`/`void*` and back,
+// exactly like net.tr/strings.tr already do.
+extern fn fopen(path: string, mode: string): void*;
+extern fn fclose(stream: void*): int;
+extern fn fseek(stream: void*, offset: int, whence: int): int;
+extern fn ftell(stream: void*): int;
+extern fn fread(buf: void*, size: int, count: int, stream: void*): int;
+extern fn fwrite(buf: string, size: int, count: int, stream: void*): int;
+extern fn fflush(stream: void*): int;
+
+// A raw POSIX write(2) syscall, not buffered stdio -- eprint/eprintline use
+// this instead of an fprintf+FILE* stream, mirroring sys.tr's own panic()
+// implementation exactly (see its doc comment: there's no way to `extern` a
+// libc global like `stderr`, and repeatedly fdopen()-ing fd 2 for every
+// eprint() call would leak one FILE* per call with no way to free it, since
+// this language has no way to cache a persistent handle across calls --
+// only `export immut` constants exist at module scope, not mutable
+// globals). A raw write() to the well-known stderr fd sidesteps both
+// problems entirely.
+extern fn write(fd: int, buf: string, count: int): int;
+extern fn strlen(s: string): int;
 
 // ─── print ────────────────────────────────────────────────────────────────
 
@@ -80,4 +115,155 @@ fn input(): string {
     scanf("%4095[^\n]", buf);
     getchar();
     return buf to string;
+}
+
+// ─── file errors ──────────────────────────────────────────────────────────
+
+// One variant per distinct file-I/O failure the functions below can report
+// (docs/reference/error_handling.md) -- kept separate rather than one
+// generic "FileError::Failed" so callers using `recover as err run { ... }`
+// can still tell "the file isn't there" apart from "it's there but
+// something went wrong reading/writing it", mirroring net.tr's
+// NetworkError split.
+error FileError {
+    NotFound,
+    ReadFailed,
+}
+
+// ─── read_to_string ───────────────────────────────────────────────────────
+
+// read_to_string: reads the entire contents of the file at `path` into one
+// string. Returns `!string`: a missing/unopenable file or a short read are
+// both ordinary, expected outcomes for file I/O (a typo'd path, a deleted
+// file, a permissions error), not bugs -- the caller decides how to
+// recover, exactly like net.tr's connect()/bind()/accept().
+//
+// Opens in binary mode ("rb") and seeks to the end to find the size before
+// reading, rather than growing a buffer incrementally -- simplest correct
+// approach for "read the whole file in one shot". Allocates with calloc
+// (zero-initialised), not malloc, specifically so the byte one past the
+// last byte actually read is already 0 -- a free, always-correct null
+// terminator with no separate write needed, even on a short read.
+//
+// Deliberately does NOT free the buffer before returning: `string` and
+// `void*` are the same opaque pointer at the LLVM level, so `buf to
+// string` does not copy -- the returned string IS the buffer. This matches
+// the exact convention io.tr's own input() and net.tr's TcpConnection.read()
+// already established -- ownership of the heap buffer transfers to the
+// caller, who is never expected to free it either (this language has no GC
+// yet; small leaks like this are an accepted, documented tradeoff, see
+// EmitStringConcat's own TURF-MEMLEAK comment in Codegen.cpp).
+fn read_to_string(path: string): !string {
+    mut stream: void* = fopen(path, "rb");
+    if stream == null {
+        return FileError::NotFound;
+    }
+
+    fseek(stream, 0, 2); // SEEK_END
+    immut size: int = ftell(stream);
+    fseek(stream, 0, 0); // SEEK_SET
+
+    mut buf: void* = calloc(size + 1, 1);
+    immut readCount: int = fread(buf, 1, size, stream);
+    fclose(stream);
+
+    if readCount != size {
+        return FileError::ReadFailed;
+    }
+
+    return buf to string;
+}
+
+// ─── read_lines ───────────────────────────────────────────────────────────
+
+// read_lines: reads the file at `path` and splits it into lines on '\n'.
+// Returns `!List<string>` for the same reasons read_to_string returns
+// `!string` -- built directly on top of it (this collapses BOTH of
+// read_to_string's failure variants into FileError::NotFound, the by-far
+// more common real-world cause; a caller that needs to tell them apart can
+// always call read_to_string() itself instead).
+//
+// A trailing '\n' at the very end of the file (the overwhelmingly common
+// case for a normal text file) would otherwise leave strings::split with a
+// spurious empty trailing element ("a\nb\n" -> ["a", "b", ""]) -- dropped
+// explicitly so callers get the lines they'd actually expect, not an extra
+// blank one. A trailing empty line from a genuine blank line (two '\n' in
+// a row at the end, "a\n\n") is intentionally left alone -- only ONE
+// trailing empty element is ever dropped.
+fn read_lines(path: string): !List<string> {
+    immut content: string = read_to_string(path) recover run {
+        return FileError::NotFound;
+    };
+
+    mut lines: List<string> = strings::split(content, "\n");
+    if lines.length() > 0 {
+        if lines.data[lines.length() - 1] == "" {
+            lines.pop();
+        }
+    }
+
+    return lines;
+}
+
+// ─── write_string ─────────────────────────────────────────────────────────
+
+// write_string: writes `content` to the file at `path`, overwriting it if
+// it already exists (creating it if not). Returns true on success, false
+// on any failure (can't open the path, or a short write) -- a plain bool
+// rather than `!void`, since "did the write succeed" is a simple binary
+// outcome here, not something callers typically need to distinguish
+// further.
+fn write_string(path: string, content: string): bool {
+    mut stream: void* = fopen(path, "wb");
+    if stream == null {
+        return false;
+    }
+
+    immut n: int = strlen(content);
+    immut written: int = fwrite(content, 1, n, stream);
+    fclose(stream);
+
+    return written == n;
+}
+
+// ─── exists ────────────────────────────────────────────────────────────────
+
+// exists: true if the file at `path` can be opened for reading.
+fn exists(path: string): bool {
+    mut stream: void* = fopen(path, "rb");
+    if stream == null {
+        return false;
+    }
+    fclose(stream);
+    return true;
+}
+
+// ─── eprint / eprintline ───────────────────────────────────────────────────
+
+// eprint: like print(val: string), but writes to stderr (fd 2) instead of
+// stdout. See the `write`/`strlen` extern bindings' doc comment above for
+// why this is a raw write(2) syscall rather than buffered stdio.
+fn eprint(val: string): void {
+    write(2, val, strlen(val));
+}
+
+// eprintline: like printline(val: string), but writes to stderr (fd 2)
+// instead of stdout.
+fn eprintline(val: string): void {
+    write(2, val, strlen(val));
+    write(2, "\n", 1);
+}
+
+// ─── flush ─────────────────────────────────────────────────────────────────
+
+// flush: forces any buffered stdout output (from print/printline, which go
+// through libc's buffered printf) out immediately. Passing a null stream
+// to fflush() is glibc-specific behavior (this codebase already targets
+// glibc/Linux primarily, e.g. net.tr's Linux-numbered socket constants):
+// it flushes every open output stream, not just stdout, which is what's
+// wanted here since there's no way to obtain stdout's own FILE* handle
+// directly (same reasoning as eprint/eprintline above -- no `extern`-able
+// libc global, and no persistent handle to cache one in).
+fn flush(): void {
+    fflush(null);
 }
