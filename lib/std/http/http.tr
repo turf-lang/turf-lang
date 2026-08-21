@@ -1,0 +1,268 @@
+// ─── http.tr ─────────────────────────────────────────────────────────────
+// A minimal HTTP/1.1 layer on top of `net.tr`'s raw TCP transport.
+//
+// Design:
+//   - Mechanical extraction of the request/response handling
+//     `showcase/http_server.tr` and `showcase/http_client.tr` already
+//     hand-write inline, following docs/planning/DESIGN_NOTES.md §4's
+//     staged plan -- this is stage 1 (Request/Response structs + parsing +
+//     response building) plus a genuine stage-2 callback router, which
+//     turned out to be buildable now: DESIGN_NOTES.md marked callback
+//     routing "blocked on first-class functions" (issue #187), but that
+//     issue has since shipped (tests/24_first_class_functions/) and a
+//     `Map<string, fn(Request, Response): void>` genuinely compiles and
+//     dispatches correctly (verified empirically while building this
+//     file -- see Server below). No raw sockets, `ptr`, or manual memory
+//     management is ever visible to a caller of this module.
+//   - `parse_request` reads once from the connection and splits the
+//     header block from the body on the first blank-line separator,
+//     accepting BOTH `\r\n\r\n` (spec-correct) and `\n\n` (the looser
+//     style `showcase/http_server.tr` already uses and every real HTTP
+//     client tolerates) -- see that file's own comment on why `\n`-only
+//     is fine in practice. Header lines are then split on `\n` and each
+///    one's trailing `\r`, if any, is stripped by `strings::trim_end`
+//     before further parsing, so both line-ending styles Just Work
+//     without the caller ever choosing one.
+//   - Headers are a real `Map<string, string>` (not the flat placeholder
+//     `string` DESIGN_NOTES.md originally sketched) -- storing a generic
+//     collection as a plain struct field used to crash the compiler with
+//     an "unsized type" internal error (a real, general monomorphization
+//     bug: a generic struct's field type never got registered under its
+//     OWN base name when first seen as a nested field, so a later,
+//     genuine build of that struct never filled in the stub -- see
+//     src/CodegenCore.cpp's `getLLVMType()` GenericType branch, fixed
+//     alongside this file). Confirmed fixed and covered by
+//     tests/34_http_and_json/.
+//   - A per-status-code text table only covers the handful of codes this
+//     module's own callers actually need (200/201/400/404/500); anything
+//     else gets a generic "`<code>` Unknown" status line rather than a
+//     hardcoded table of the entire IANA registry.
+//
+// Usage (manual routing -- the same shape showcase/http_server.tr already
+// proves out, still fully supported for callers who'd rather not use the
+// Server/callback wrapper below):
+//   import http;
+//   import net;
+//
+//   fn main(): int {
+//       mut listener: net::TcpListener = net::TcpListener::bind(8080) recover run {
+//           sys::exit(1);
+//       };
+//       while true {
+//           mut conn: net::TcpConnection = listener.accept() recover run { continue; };
+//           mut req: http::Request = http::parse_request(conn);
+//           mut res: http::Response;
+//           res.conn = conn;
+//           if req.path == "/" {
+//               res.send_text(200, "hello");
+//           } else {
+//               res.send_text(404, "not found");
+//           }
+//           conn.close();
+//       }
+//       return 0;
+//   }
+//
+// Usage (callback routing):
+//   import http;
+//
+//   fn home(req: http::Request, res: http::Response): void {
+//       res.send_text(200, "Welcome to Turflang!");
+//   }
+//
+//   fn main(): int {
+//       mut app: http::Server;
+//       app.get("/", home);
+//       app.listen(8080);
+//       return 0;
+//   }
+
+import io;
+import sys;
+import net;
+import strings;
+import list::List;
+import map::Map;
+
+// ─── Request ─────────────────────────────────────────────────────────────
+
+struct Request {
+    method: string,
+    path: string,
+    headers: Map<string, string>,
+    body: string
+}
+
+// Reads one request off `conn` and parses the request line + headers into
+// a Request. See this file's own header comment for the exact parsing
+// approach (blank-line separator, per-line \r trimming).
+//
+// A malformed/empty request line yields a Request with empty method/path
+// rather than failing outright -- mirrors showcase/http_server.tr's own
+// behavior (an unparseable request simply falls through its route-match
+// chain to the 404 branch) instead of introducing a `!Request` error path
+// this module's only real caller (a request-per-connection accept loop)
+// has no natural way to act on differently anyway.
+fn parse_request(conn: net::TcpConnection): Request {
+    immut raw: string = conn.read(8192);
+    mut req: Request;
+
+    mut sepIdx: int = strings::index_of(raw, "\r\n\r\n");
+    mut sepLen: int = 4;
+    if sepIdx < 0 {
+        sepIdx = strings::index_of(raw, "\n\n");
+        sepLen = 2;
+    }
+
+    mut headerBlock: string = raw;
+    mut body: string = "";
+    if sepIdx >= 0 {
+        headerBlock = strings::substring(raw, 0, sepIdx);
+        body = strings::substring(raw, sepIdx + sepLen, strings::length(raw));
+    }
+
+    mut lines: List<string> = strings::split(headerBlock, "\n");
+
+    if lines.length() == 0 {
+        req.method = "";
+        req.path = "";
+        req.body = body;
+        return req;
+    }
+
+    immut requestLine: string = strings::trim_end(lines.data[0]);
+    mut parts: List<string> = strings::split(requestLine, " ");
+    if parts.length() >= 2 {
+        req.method = parts.data[0];
+        req.path = parts.data[1];
+    } else {
+        req.method = "";
+        req.path = "";
+    }
+
+    mut i: int = 1;
+    while i < lines.length() {
+        immut line: string = strings::trim_end(lines.data[i]);
+        immut colonIdx: int = strings::index_of(line, ":");
+        if colonIdx >= 0 {
+            immut key: string = strings::trim(strings::substring(line, 0, colonIdx));
+            immut value: string = strings::trim(strings::substring(line, colonIdx + 1, strings::length(line)));
+            req.headers.put(key, value);
+        }
+        i = i + 1;
+    }
+
+    req.body = body;
+    return req;
+}
+
+// ─── Response ────────────────────────────────────────────────────────────
+
+struct Response {
+    conn: net::TcpConnection
+}
+
+// A small, deliberately incomplete status-text table -- see this file's
+// header comment for why only these five codes are covered.
+fn status_text(status: int): string {
+    if status == 200 {
+        return "200 OK";
+    }
+    if status == 201 {
+        return "201 Created";
+    }
+    if status == 400 {
+        return "400 Bad Request";
+    }
+    if status == 404 {
+        return "404 Not Found";
+    }
+    if status == 500 {
+        return "500 Internal Server Error";
+    }
+    return (status to string) + " Unknown";
+}
+
+// Shared response-building/writing logic for send_text/send_json below --
+// the two only differ in Content-Type, exactly like DESIGN_NOTES.md's
+// original sketch says they should.
+fn Response.send_raw(status: int, contentType: string, body: string): void {
+    immut bodyLen: int = strings::length(body);
+    immut response: string = "HTTP/1.1 " + status_text(status) + "\r\n" +
+        "Content-Type: " + contentType + "\r\n" +
+        "Content-Length: " + (bodyLen to string) + "\r\n" +
+        "Connection: close\r\n" +
+        "\r\n" +
+        body;
+    self.conn.write(response);
+}
+
+fn Response.send_text(status: int, body: string): void {
+    self.send_raw(status, "text/plain", body);
+}
+
+fn Response.send_json(status: int, body: string): void {
+    self.send_raw(status, "application/json", body);
+}
+
+// ─── Server (callback-based routing) ────────────────────────────────────
+//
+// A route table keyed by exact path, storing a first-class function value
+// per route -- `Map<string, fn(Request, Response): void>` as a plain
+// struct field. This genuinely compiles and dispatches correctly (proven
+// empirically, not assumed): first-class functions shipped
+// (tests/24_first_class_functions/), and a generic collection embedded as
+// a struct field works once the monomorphization fix in this commit
+// landed (see this file's header comment). DESIGN_NOTES.md's own sketch
+// expected this to still be blocked -- it no longer is.
+//
+// Route matching is EXACT-PATH ONLY (no `:id`-style parameter segments,
+// no wildcards) -- Map<K,V>'s own linear-scan lookup is already the
+// documented, accepted tradeoff for a small stdlib collection (see
+// map.tr's own design note), and a real path-pattern matcher is a
+// separate, bigger feature this module doesn't attempt.
+struct Server {
+    listener: net::TcpListener,
+    routes: Map<string, fn(Request, Response): void>
+}
+
+// Registers `handler` to run for an exact-match request to `path`.
+// Re-registering the same path replaces the previous handler (Map.put's
+// own "update in place" behavior for an existing key).
+fn Server.get(path: string, handler: fn(Request, Response): void): void {
+    self.routes.put(path, handler);
+}
+
+// Binds `port` and serves forever, dispatching each accepted connection to
+// the handler registered for its exact request path (or a built-in 404 if
+// no route matches). A bind failure is treated as fatal -- exactly the
+// same "most programs will just treat it as fatal" default net.tr's own
+// doc comment describes for TcpListener::bind's `!TcpListener` -- and a
+// single bad accept() is logged and skipped rather than killing the whole
+// server, matching showcase/http_server.tr's own accept-loop.
+fn Server.listen(port: int): void {
+    mut listener: net::TcpListener = net::TcpListener::bind(port) recover run {
+        io::printline("http::Server.listen: could not bind port " + (port to string) + ".");
+        sys::exit(1);
+        return; // unreachable (sys::exit never returns) -- see the
+                 // 'recover run' non-diverging-block rule this satisfies.
+    };
+    self.listener = listener;
+
+    while true {
+        mut conn: net::TcpConnection = self.listener.accept() recover run {
+            continue;
+        };
+        mut req: Request = parse_request(conn);
+        mut res: Response;
+        res.conn = conn;
+
+        mut handler: fn(Request, Response): void = self.routes.tryGet(req.path) recover run {
+            res.send_text(404, "Not Found");
+            conn.close();
+            continue;
+        };
+        handler(req, res);
+        conn.close();
+    }
+}

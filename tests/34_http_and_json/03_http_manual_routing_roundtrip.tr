@@ -1,0 +1,100 @@
+// A genuine end-to-end HTTP round trip over a real TCP connection --
+// exercises http::parse_request, Response.send_text, and
+// Response.send_json against a real net::TcpConnection, not just a type
+// check.
+//
+// No background process/thread needed and nothing to race or time out:
+// TCP's three-way handshake completes as soon as the listening socket has
+// the connection queued in its backlog, so `TcpConnection::connect()`
+// against an already-`bind()`-ed local port returns immediately, before
+// `accept()` is ever called -- both ends of the same connection can
+// therefore live in this one single-threaded process. `write()` on one
+// end lands in the kernel socket buffer immediately, so the other end's
+// `read()` (called after the write, exactly like below) returns that data
+// right away instead of blocking. Verified reliable, not flaky, across
+// repeated runs.
+import io;
+import net;
+import http;
+import strings;
+import test;
+
+fn main(): int {
+    mut listener: net::TcpListener = net::TcpListener::bind(18080) recover run {
+        test::fail("could not bind test port 18080");
+        return 1;
+    };
+
+    mut client: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 18080) recover run {
+        test::fail("could not connect to the listener we just bound");
+        return 1;
+    };
+
+    mut serverConn: net::TcpConnection = listener.accept() recover run {
+        test::fail("accept() failed on a connection already in the backlog");
+        return 1;
+    };
+
+    // ── request 1: GET /hello, manual routing, text response ──────────────
+    immut reqText: string = "GET /hello HTTP/1.1\r\nHost: localhost\r\nX-Test: abc\r\n\r\n";
+    client.write(reqText);
+
+    mut req: http::Request = http::parse_request(serverConn);
+    test::assert_eq(req.method, "GET", "parsed method");
+    test::assert_eq(req.path, "/hello", "parsed path");
+    test::assert_eq(req.headers.get("Host"), "localhost", "parsed Host header");
+    test::assert_eq(req.headers.get("X-Test"), "abc", "parsed custom header");
+    test::assert_eq(req.body, "", "GET request has no body");
+
+    mut res: http::Response;
+    res.conn = serverConn;
+    if req.path == "/hello" {
+        res.send_text(200, "hello from turf");
+    } else {
+        res.send_text(404, "not found");
+    }
+
+    immut respText: string = client.read(4096);
+    test::assert(strings::starts_with(respText, "HTTP/1.1 200 OK"), "status line for /hello");
+    test::assert(strings::contains(respText, "Content-Type: text/plain"), "content-type for send_text");
+    test::assert(strings::contains(respText, "hello from turf"), "body for /hello");
+
+    client.close();
+    serverConn.close();
+
+    // ── request 2: unknown path, manual routing, json response ────────────
+    mut client2: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 18080) recover run {
+        test::fail("could not connect for second request");
+        return 1;
+    };
+    mut serverConn2: net::TcpConnection = listener.accept() recover run {
+        test::fail("accept() failed for second connection");
+        return 1;
+    };
+
+    immut reqText2: string = "GET /nope HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    client2.write(reqText2);
+
+    mut req2: http::Request = http::parse_request(serverConn2);
+    test::assert_eq(req2.path, "/nope", "parsed path for second request");
+
+    mut res2: http::Response;
+    res2.conn = serverConn2;
+    if req2.path == "/hello" {
+        res2.send_text(200, "hello from turf");
+    } else {
+        res2.send_json(404, "{\"error\":\"not found\"}");
+    }
+
+    immut respText2: string = client2.read(4096);
+    test::assert(strings::starts_with(respText2, "HTTP/1.1 404 Not Found"), "status line for /nope");
+    test::assert(strings::contains(respText2, "Content-Type: application/json"), "content-type for send_json");
+    test::assert(strings::contains(respText2, "{\"error\":\"not found\"}"), "json body for /nope");
+
+    client2.close();
+    serverConn2.close();
+    listener.close();
+
+    io::printline("03 PASS: http manual routing roundtrip");
+    return 0;
+}
