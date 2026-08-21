@@ -1,17 +1,34 @@
 // ─── http.tr ─────────────────────────────────────────────────────────────
 // A minimal HTTP/1.1 layer on top of `net.tr`'s raw TCP transport.
 //
-// NOT READY -- PARKED, DO NOT IMPORT FROM SHOWCASE/PRODUCTION CODE.
-// Two confirmed live bugs as of 2026-08-22, both covered by their own
-// deliberately-failing regression tests (not deleted -- see
-// tests/34_http_and_json/03_http_manual_routing_roundtrip.tr and
-// 04_http_callback_routing.tr): a heap-corruption crash during a real
-// request/response round trip, and the Server.get/listen callback-routing
-// registration below not actually working at runtime despite compiling
-// and (per the paragraph below) once appearing to work in isolation.
-// Left in the tree because it's real, substantial work worth keeping and
-// fixing, not because it's usable today. See
-// docs/reference/README.md's own note on this before touching it.
+// Both bugs tracked here as of 2026-08-22 are now fixed and covered by
+// real regression tests (tests/34_http_and_json/03_http_manual_routing_roundtrip.tr
+// and 04_http_callback_routing.tr, both passing):
+//   - The heap-corruption crash during a real request/response round trip
+//     was NOT specific to this file at all -- it was a compiler bug in
+//     AssignmentExprAST::codegen() (src/CodegenVar.cpp): `buf[i] = charExpr;`
+//     on a `string` stored a full 8-byte i64 at a 1-byte-wide `i8` GEP
+//     slot (the LOGICAL type of a string-index access is `int`, but its
+//     physical storage is one byte), silently overwriting 7 bytes past
+//     every single character written -- every `strings.tr` function that
+//     builds a string one byte at a time (`substring`, and everything
+//     built on it: `trim*`, `to_upper`/`to_lower`, `pad_left`/`pad_right`,
+//     `replace`) was affected, this file's own `parse_request` included.
+//     Fixed by truncating the stored value to `i8` when the LHS is a
+//     string-index access, mirroring the read side
+//     (`ArrayAccessExprAST::codegen()`), which already loaded a single
+//     `i8` and zext'd it back up.
+//   - `Server.get/listen`'s callback routing wasn't a first-class-
+//     functions-in-generics problem as originally suspected -- it was the
+//     same `Map<string, V>` content-equality gap `Request.get_header()`'s
+//     own doc comment below explains in full (a generic method's body is
+//     type-checked/codegenned once, shared across every instantiation, so
+//     `self.routes.keys[i] == path` inside `Map`'s own `.tryGet()`/
+//     `.contains()` can never see the concrete `string` type needed to
+//     dispatch `strings.tr`'s real `operator==`). `Server.route_index()`/
+//     `has_route()`/`get_route()` below sidestep it exactly like
+//     `Request.get_header()`/`has_header()` do -- see either doc comment
+//     for the mechanism.
 //
 // Design:
 //   - Mechanical extraction of the request/response handling
@@ -23,9 +40,11 @@
 //     routing "blocked on first-class functions" (issue #187), but that
 //     issue has since shipped (tests/24_first_class_functions/) and a
 //     `Map<string, fn(Request, Response): void>` genuinely compiles and
-//     dispatches correctly (verified empirically while building this
-//     file -- see Server below). No raw sockets, `ptr`, or manual memory
-//     management is ever visible to a caller of this module.
+//     stores/retrieves handler values correctly as a struct field --
+//     dispatch (finding the right route BY PATH) needed its own fix, see
+//     this file's header comment and Server.route_index() below. No raw
+//     sockets, `ptr`, or manual memory management is ever visible to a
+//     caller of this module.
 //   - `parse_request` reads once from the connection and splits the
 //     header block from the body on the first blank-line separator,
 //     accepting BOTH `\r\n\r\n` (spec-correct) and `\n\n` (the looser
@@ -103,6 +122,41 @@ struct Request {
     path: string,
     headers: Map<string, string>,
     body: string
+}
+
+// get_header/has_header exist instead of calling `self.headers.get(name)`/
+// `.contains(name)` directly, because Map<K, V>'s own generic accessors are
+// content-INCORRECT for K = string (map.tr's Map.indexOf doc comment has the
+// full mechanism) -- they'd compare a freshly-parsed header name against a
+// stored one by raw pointer identity, not bytes, so a real request's headers
+// would almost never be found. `Request` itself is NOT generic, though, so a
+// plain method here sees `self.headers`'s field type fully concretely as
+// `Map<string, string>` -- `self.headers.keys[i] == name` therefore DOES
+// correctly reach strings.tr's real `operator==(string, string)`, sidestepping
+// the generic-erasure gap entirely. Confirmed live: this is what actually
+// fixed tests/34_http_and_json/03_http_manual_routing_roundtrip.tr's parsed
+// Host/X-Test header lookups, which failed via `.headers.get()` directly.
+fn Request.get_header(name: string): string {
+    mut i: int = 0;
+    while i < self.headers.length() {
+        if self.headers.keys[i] == name {
+            return self.headers.values[i];
+        }
+        i = i + 1;
+    }
+    sys::panic("Request.get_header: no such header '" + name + "'");
+    return "";
+}
+
+fn Request.has_header(name: string): bool {
+    mut i: int = 0;
+    while i < self.headers.length() {
+        if self.headers.keys[i] == name {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
 }
 
 // Reads one request off `conn` and parses the request line + headers into
@@ -221,12 +275,15 @@ fn Response.send_json(status: int, body: string): void {
 //
 // A route table keyed by exact path, storing a first-class function value
 // per route -- `Map<string, fn(Request, Response): void>` as a plain
-// struct field. This genuinely compiles and dispatches correctly (proven
-// empirically, not assumed): first-class functions shipped
-// (tests/24_first_class_functions/), and a generic collection embedded as
-// a struct field works once the monomorphization fix in this commit
-// landed (see this file's header comment). DESIGN_NOTES.md's own sketch
-// expected this to still be blocked -- it no longer is.
+// struct field. First-class functions shipped
+// (tests/24_first_class_functions/) and a generic collection embedded as
+// a struct field genuinely compiles and stores/retrieves handler values
+// correctly (a separate monomorphization fix, see this file's header
+// comment) -- DESIGN_NOTES.md's own sketch expected BOTH of those to
+// still be blocked, and neither is. Route DISPATCH (finding the right
+// handler by path) needed its own additional fix on top of that, though --
+// see route_index()/has_route()/get_route() below and this file's header
+// comment for why `self.routes.tryGet(path)` doesn't work.
 //
 // Route matching is EXACT-PATH ONLY (no `:id`-style parameter segments,
 // no wildcards) -- Map<K,V>'s own linear-scan lookup is already the
@@ -243,6 +300,44 @@ struct Server {
 // own "update in place" behavior for an existing key).
 fn Server.get(path: string, handler: fn(Request, Response): void): void {
     self.routes.put(path, handler);
+}
+
+// route_index/has_route/get_route exist for the exact same reason
+// Request.get_header/has_header do (see that pair's doc comment on
+// Request, above) -- `self.routes`'s KEY type is `string`, so
+// `Map<string, V>`'s own generic `.tryGet()`/`.contains()` would compare a
+// freshly-PARSED request path against a route registered with a STRING
+// LITERAL by raw pointer identity, not content, and (confirmed live) never
+// match even for the exact same path text: this is what made
+// tests/34_http_and_json/04_http_callback_routing.tr fail its "route '/'
+// should have been registered" assertion -- not a first-class-functions-
+// in-generics problem as originally suspected, but the identical
+// Map<string, V> content-equality gap bug 2 (this file's own Request) hit,
+// just on `Server.routes` instead of `Request.headers`. `Server` isn't
+// generic, so a plain method here sees `self.routes`'s field type fully
+// concretely, and `self.routes.keys[i] == path` correctly reaches
+// strings.tr's real `operator==(string, string)`.
+fn Server.route_index(path: string): int {
+    mut i: int = 0;
+    while i < self.routes.length() {
+        if self.routes.keys[i] == path {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn Server.has_route(path: string): bool {
+    return self.route_index(path) >= 0;
+}
+
+fn Server.get_route(path: string): fn(Request, Response): void {
+    immut idx: int = self.route_index(path);
+    if idx < 0 {
+        sys::panic("Server.get_route: no such route '" + path + "'");
+    }
+    return self.routes.values[idx];
 }
 
 // Binds `port` and serves forever, dispatching each accepted connection to
@@ -269,11 +364,12 @@ fn Server.listen(port: int): void {
         mut res: Response;
         res.conn = conn;
 
-        mut handler: fn(Request, Response): void = self.routes.tryGet(req.path) recover run {
+        if !self.has_route(req.path) {
             res.send_text(404, "Not Found");
             conn.close();
             continue;
-        };
+        }
+        mut handler: fn(Request, Response): void = self.get_route(req.path);
         handler(req, res);
         conn.close();
     }

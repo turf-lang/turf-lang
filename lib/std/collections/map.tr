@@ -37,6 +37,45 @@ struct Map<K, V> {
   cap: int
 }
 
+// KNOWN LIMITATION: `self.keys[i] == key` below is a raw pointer/bit
+// comparison for K = string, NOT a content comparison, even though
+// strings.tr defines a real content-comparing `operator==(string, string)`.
+// This is the same class of gap list.tr's own list_sort()/list_binary_search()
+// doc comment documents in detail for List<T> -- read that comment first for
+// the full mechanism; the short version, confirmed live for Map specifically:
+// TypeChecker::visitBinary()'s operator-overload gate matches a candidate by
+// `sameTypeExact(candidateParamType, operandType)`, and from INSIDE this
+// generic method body, `self.keys[i]` and `key` both have the STATIC type
+// TurfGenericParamType("K") -- never the real, concrete "string" -- because
+// a generic method's body is type-checked and codegenned exactly ONCE,
+// shared across every instantiation (Type Erasure: every K/V is a uniform
+// 8-byte slot). No candidate's declared `(string, string)` signature can
+// ever `sameTypeExact`-match against a bare "K", so overload resolution
+// silently fails and TypeChecker::inferRelationalType()'s "same-name"
+// fallback (LhsTy->getName() == RhsTy->getName(), both "K") lets the
+// comparison through anyway -- Codegen then emits a bare pointer-identity
+// ICmp on the erased slot. This is CORRECT for K = int/double/bool/pointer
+// (bit-exact identity genuinely is `==`'s meaning there), but wrong for
+// K = string, where two content-equal keys from different allocations
+// (e.g. one built via strings::trim(), the other a literal) compare
+// unequal. Confirmed live: `Map<string, string>.get()`/`.contains()`
+// returned "no such key" / false for a freshly-parsed key content-equal to
+// a literal put earlier -- see http.tr's own Request.get_header()/
+// has_header() for why that module does NOT rely on Map<string,V>'s
+// generic accessors and instead implements its own comparison inline in a
+// plain (non-generic) method on the concrete `Request` struct: a field
+// access like `self.headers.keys[i]` from a NON-generic method (self's
+// type is the concrete struct `Request`, not an abstract generic param)
+// resolves `headers`'s declared field type `Map<string, string>` fully
+// concretely, so `self.headers.keys[i] == name` DOES correctly hit
+// strings.tr's operator== there. That workaround only applies when the
+// generic collection is a field of some OTHER concrete (non-generic) host
+// struct you control -- it is not something Map<K,V> itself can do for
+// its own `.get()`/`.contains()`/`.put()` methods, since fixing this in
+// general requires either per-instantiation codegen (this compiler shares
+// one generic-method body across all instantiations, by design) or a
+// trait/constraint system neither of which exists yet. `tests/99_known_bugs/`
+// tracks this as an accepted, deferred limitation, not a live regression.
 fn<K, V> Map.indexOf(key: K): int {
   mut i: int = 0;
   while i < self.len {
