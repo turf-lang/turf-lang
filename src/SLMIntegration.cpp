@@ -177,6 +177,69 @@ static std::string escapeJsonString(const std::string &src) {
   return result;
 }
 
+// Extracts an unquoted integer JSON field (e.g. "target_line": 42). Returns
+// 0 (the "unset" sentinel -- see AISuggestion::target_line) if the field is
+// missing or not a plain integer.
+static int extractJsonFieldInt(const std::string &json,
+                               const std::string &field) {
+  std::string key = "\"" + field + "\":";
+  size_t pos = json.find(key);
+  if (pos == std::string::npos)
+    return 0;
+  pos += key.length();
+
+  while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t' ||
+                                 json[pos] == '\n' || json[pos] == '\r')) {
+    pos++;
+  }
+
+  bool negative = false;
+  if (pos < json.length() && json[pos] == '-') {
+    negative = true;
+    pos++;
+  }
+
+  size_t start = pos;
+  while (pos < json.length() && std::isdigit(static_cast<unsigned char>(json[pos])))
+    pos++;
+
+  if (pos == start)
+    return 0;
+
+  int value = std::atoi(json.substr(start, pos - start).c_str());
+  return negative ? -value : value;
+}
+
+// Defensive cleanup for a known small-model failure mode: despite explicit
+// prompt instructions not to, the model occasionally echoes the "N |  code"
+// line-number-prefix formatting used to display context lines (see
+// getCodeContext()/getCodeContextWithPinnedLines()) back inside
+// replacement_line itself, e.g. "6 |     mut b: int = 5;" instead of just
+// "    mut b: int = 5;". That prefix is never valid Turf-Lang syntax at the
+// start of a line, so stripping it here is safe and turns an otherwise
+// guaranteed sandbox-parse failure into a usable patch.
+static std::string stripLineNumberPrefix(const std::string &line) {
+  static const std::regex prefixPattern("^\\s*(?:>>\\s*)?[0-9]+\\s*\\|\\s?");
+  return std::regex_replace(line, prefixPattern, "", std::regex_constants::format_first_only);
+}
+
+// Defensive cleanup for another known small-model failure mode: wrapping
+// replacement_line in a markdown code fence (```turf ... ``` or ``` ... ```)
+// despite rule 6 explicitly saying "no markdown code blocks". A leading or
+// trailing fence line is never valid Turf-Lang syntax, so stripping it here
+// is safe and turns an otherwise guaranteed sandbox-parse failure (the
+// parser chokes on a literal "```" token) into a usable patch. Observed
+// especially often on multi-line replacement_line values.
+static std::string stripMarkdownFences(const std::string &text) {
+  static const std::regex leadingFence("^\\s*```[A-Za-z]*[ \\t]*\\n?");
+  static const std::regex trailingFence("\\n?[ \\t]*```\\s*$");
+  std::string result =
+      std::regex_replace(text, leadingFence, "", std::regex_constants::format_first_only);
+  result =
+      std::regex_replace(result, trailingFence, "", std::regex_constants::format_first_only);
+  return result;
+}
+
 static std::string extractJsonFieldString(const std::string &json,
                                           const std::string &field) {
   std::string key = "\"" + field + "\":";
@@ -267,20 +330,39 @@ static float computeStructuralPrior(const AISuggestion &s, ErrorCategory categor
   const std::string &patchCode = s.replacement_line;
 
   if (!patchCode.empty()) {
-    // Hard-reject: the model echoed back the original broken line unchanged.
+    // Hard-reject: the model echoed back the original text unchanged.
     // This is a known small-model failure mode. An identical replacement is
     // actively harmful — it passes every other check while fixing nothing.
-    std::string originalLine =
-        (errorLine >= 1 && errorLine <= static_cast<int>(SourceLines.size()))
-            ? SourceLines[errorLine - 1]
-            : "";
+    // Compared against the actual text being patched: s.target_line (if set
+    // and in range) through s.end_line when a multi-line range was given,
+    // otherwise just the single line (s.target_line if set, else errorLine)
+    // -- comparing against errorLine when target_line points elsewhere, or
+    // against only the first line of a multi-line range, would check the
+    // wrong original text entirely.
+    int compareStart = (s.target_line > 0 &&
+                        s.target_line <= static_cast<int>(SourceLines.size()))
+                           ? s.target_line
+                           : errorLine;
+    int compareEnd = (s.end_line >= compareStart &&
+                      s.end_line <= static_cast<int>(SourceLines.size()))
+                          ? s.end_line
+                          : compareStart;
+    std::string originalText;
+    if (compareStart >= 1 &&
+        compareEnd <= static_cast<int>(SourceLines.size())) {
+      for (int ln = compareStart; ln <= compareEnd; ++ln) {
+        if (ln > compareStart)
+          originalText += "\n";
+        originalText += SourceLines[ln - 1];
+      }
+    }
     // Trim leading/trailing whitespace for comparison
     auto trim = [](const std::string &s) {
       size_t l = s.find_first_not_of(" \t\r\n");
       size_t r = s.find_last_not_of(" \t\r\n");
       return (l == std::string::npos) ? std::string{} : s.substr(l, r - l + 1);
     };
-    if (!originalLine.empty() && trim(patchCode) == trim(originalLine)) {
+    if (!originalText.empty() && trim(patchCode) == trim(originalText)) {
       // Hard override — this score can never clear the gate.
       return 0.0f;
     }
@@ -288,7 +370,11 @@ static float computeStructuralPrior(const AISuggestion &s, ErrorCategory categor
     // +0.2 if a non-empty replacement_line was produced
     score += 0.2f;
 
-    // +0.1 if it is a single, clean line (no embedded newlines or lone braces)
+    // +0.1 if it is a single, clean line (no embedded newlines or lone
+    // braces). A genuine multi-line range fix (end_line > compareStart) is
+    // expected to contain newlines, so it simply doesn't earn this bonus
+    // rather than being penalized -- the sandbox's empirical pass/fail is
+    // what ultimately decides those cases (see finalizeConfidence()).
     bool hasNewline = patchCode.find('\n') != std::string::npos;
     bool isBareBrace = (patchCode == "{" || patchCode == "}");
     if (!hasNewline && !isBareBrace)
@@ -537,21 +623,47 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "RULES:\n"
       "1. Follow Turf-Lang type and ownership rules exactly, as shown in "
       "the documentation above -- not general programming intuition.\n"
-      "2. code_patch must be a SINGLE LINE of valid Turf-Lang syntax ONLY.\n"
+      "2. Prefer a SINGLE LINE of valid Turf-Lang syntax in replacement_line.\n"
       "   Do NOT use C, Java, Python, or any other language syntax.\n"
       "   Do NOT include multiple statements, semicolons, or braces unless\n"
-      "   they are required by Turf-Lang syntax for that construct.\n"
+      "   they are required by Turf-Lang syntax for that construct -- unless\n"
+      "   the fix genuinely needs more than one line (see rule 5), in which\n"
+      "   case replacement_line may span multiple lines. NEVER wrap "
+      "replacement_line\n"
+      "   in a markdown code fence (```) -- it is fed directly to the "
+      "compiler,\n"
+      "   not rendered as markdown, so a fence is a guaranteed syntax "
+      "error.\n"
       "3. If you cannot produce a valid Turf-Lang patch, set fix_mode to NONE\n"
       "   and leave code_patch empty. This is not a failure -- 'NONE' is\n"
       "   the right answer whenever you're not sure, and is far better than\n"
       "   a wrong patch.\n"
       "4. Set fix_mode to one of: MODIFY, NONE.\n"
-      "   Use MODIFY when you have a concrete single-line patch.\n"
-      "   Use NONE when the issue requires multi-line restructuring or you "
-      "are\n"
-      "   not confident enough to suggest a specific change.\n"
-      "5. Respond ONLY in valid JSON without markdown code blocks.\n"
-      "6. Keep explanation, suggested_comment, and warning to 1-3 sentences "
+      "   Use MODIFY when you have a concrete patch (single-line or, per "
+      "rule 5,\n"
+      "   a small multi-line block). Use NONE when you are not confident "
+      "enough\n"
+      "   to suggest a specific change.\n"
+      "5. target_line/end_line: usually target_line=0, end_line=0 (fix is a\n"
+      "   single line, the error's own line). If the real fix site is a\n"
+      "   different line shown above (e.g. a declaration), set target_line "
+      "to\n"
+      "   that line number. If the fix genuinely requires replacing MORE "
+      "THAN\n"
+      "   ONE existing line (e.g. wrapping a statement in a new loop, "
+      "adding a\n"
+      "   multi-line function signature), set target_line to the first "
+      "line of\n"
+      "   that range and end_line to the last line (both from the code "
+      "shown\n"
+      "   above), and put the ENTIRE replacement block in replacement_line, "
+      "with\n"
+      "   its lines separated by \\n. Keep the range as small as it can "
+      "possibly\n"
+      "   be -- never replace more existing lines than the fix strictly "
+      "needs.\n"
+      "6. Respond ONLY in valid JSON without markdown code blocks.\n"
+      "7. Keep explanation, suggested_comment, and warning to 1-3 sentences "
       "-- warm and human-sized, not a one-word reply, but never rambling.\n"
       "<|im_end|>\n";
 
@@ -578,9 +690,13 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "{\"explanation\": <string>, \"fix_mode\": <MODIFY|NONE>, "
       "\"suggested_comment\": <string>, \"code_patch\": <human-readable "
       "description of what changed>, "
-      "\"replacement_line\": <THE EXACT SINGLE LINE of valid Turf-Lang code "
-      "that replaces the erroneous line — no explanation, no prose, just the "
-      "raw code>, "
+      "\"replacement_line\": <THE EXACT Turf-Lang code that replaces "
+      "target_line, or the whole [target_line, end_line] range if end_line "
+      "is set — no explanation, no prose, just the raw code, lines "
+      "separated by \\n if more than one>, "
+      "\"target_line\": <0, or a different line number — see rule 5>, "
+      "\"end_line\": <0, or the last line of a multi-line range — see rule "
+      "5>, "
       "\"warning\": <string>, "
       "\"category\": <one of: TYPE_MISMATCH, UNDECLARED_VARIABLE, "
       "CONTROL_FLOW, SYNTAX_ERROR, ARITHMETIC, STRING_CONVERSION, "
@@ -614,8 +730,10 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
     suggestion.suggested_comment =
         extractJsonFieldString(jsonStr, "suggested_comment");
     suggestion.code_patch = extractJsonFieldString(jsonStr, "code_patch");
-    suggestion.replacement_line =
-        extractJsonFieldString(jsonStr, "replacement_line");
+    suggestion.replacement_line = stripLineNumberPrefix(stripMarkdownFences(
+        extractJsonFieldString(jsonStr, "replacement_line")));
+    suggestion.target_line = extractJsonFieldInt(jsonStr, "target_line");
+    suggestion.end_line = extractJsonFieldInt(jsonStr, "end_line");
     suggestion.warning = extractJsonFieldString(jsonStr, "warning");
     suggestion.self_reported_category =
         extractJsonFieldString(jsonStr, "category");
@@ -652,7 +770,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
                 << suggestion.confidence << "\n";
       std::cerr << "  category_deterministic=" << categoryWasDeterministic
                 << " fix_mode=" << suggestion.fix_mode
-                << " replacement_line_empty=" << suggestion.replacement_line.empty() << "\n";
+                << " replacement_line_empty=" << suggestion.replacement_line.empty()
+                << " target_line=" << suggestion.target_line
+                << " end_line=" << suggestion.end_line << "\n";
       std::cerr << "Parsed Fix Mode: " << suggestion.fix_mode << "\n";
     }
 
@@ -666,6 +786,99 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
 }
 
 // Sandbox-Based Suggestion Validation
+
+// Recover the intended [start, end] source range for a multi-line
+// replacement_line whose end_line the model left unset (== 0 or an
+// out-of-range/backwards value that didn't resolve to a real range).
+//
+// This is the fix for the single most impactful defect found while
+// benchmarking the pipeline (docs/patent/PATENT_BENCHMARK_DATA.md A.4 §7):
+// when the model decides the right fix is to "regenerate an enclosing
+// declaration" (a struct / error / machine / function block), it naturally
+// emits the WHOLE corrected block in replacement_line but still reports
+// target_line as just the error's own line and leaves end_line at 0. The
+// old code then spliced that N-line block into that ONE line, leaving the
+// other M-1 original block lines in place and producing a nested, duplicated
+// construct that fails re-validation no matter how correct the model's fix
+// idea was. This reproduced verbatim on state machines, structs, AND error
+// types -- i.e. across entirely ordinary syntax, not just novel constructs --
+// and is a large part of why 06_structs / 25_errors / 26_state_machines
+// scored so low. A 1.5B model does not reliably set end_line no matter how
+// the prompt is worded, so the robust fix belongs here, in the harness.
+//
+// Recovery strategy: content-anchoring. The first and last lines of a
+// regenerated block are structural markers ("struct User {" ... "}",
+// "machine ConnectionState {" ... "}") that appear verbatim in the source.
+// Find the source line matching the replacement's first line, then the next
+// source line matching its last line, and accept that range only if it is
+// strictly multi-line (end > start) and brackets target_line -- so a spurious
+// match can't run away. A wrong guess is still completely safe: the spliced
+// result is re-parsed, re-resolved, and re-typechecked in full by the sandbox
+// (same path as every other fix), so it can only ever fail validation, never
+// silently apply incorrect code.
+//
+// NOTE this deliberately does NOT fire for the "wrap a single statement in a
+// new loop" shape (fix A.4 §5): there the replacement is multi-line but is
+// meant to replace exactly ONE original line, its first line ("while ... {")
+// does not appear in the source, so anchoring fails and the caller correctly
+// falls back to a single-line [target, target] splice -- which is exactly
+// right for a wrap/insert.
+static bool inferBlockRange(const std::string &replacement, int targetLine,
+                            int &outStart, int &outEnd) {
+  auto trim = [](const std::string &s) {
+    size_t l = s.find_first_not_of(" \t\r\n");
+    size_t r = s.find_last_not_of(" \t\r\n");
+    return (l == std::string::npos) ? std::string{} : s.substr(l, r - l + 1);
+  };
+
+  // Split replacement into trimmed, non-empty lines.
+  std::vector<std::string> lines;
+  size_t pos = 0;
+  while (pos <= replacement.size()) {
+    size_t nl = replacement.find('\n', pos);
+    std::string raw = (nl == std::string::npos)
+                          ? replacement.substr(pos)
+                          : replacement.substr(pos, nl - pos);
+    std::string t = trim(raw);
+    if (!t.empty())
+      lines.push_back(t);
+    if (nl == std::string::npos)
+      break;
+    pos = nl + 1;
+  }
+  if (lines.size() < 2)
+    return false;
+
+  const std::string &firstRepl = lines.front();
+  const std::string &lastRepl = lines.back();
+  const int n = static_cast<int>(SourceLines.size());
+  if (targetLine < 1 || targetLine > n)
+    return false;
+
+  // For each source line matching the replacement's first line, find the next
+  // source line matching its last line; accept the tightest resulting range
+  // that is strictly multi-line and brackets targetLine.
+  int bestStart = 0, bestEnd = 0;
+  for (int s = 1; s <= n; ++s) {
+    if (trim(SourceLines[s - 1]) != firstRepl)
+      continue;
+    for (int e = s + 1; e <= n; ++e) {
+      if (trim(SourceLines[e - 1]) != lastRepl)
+        continue;
+      if (s <= targetLine && targetLine <= e &&
+          (bestStart == 0 || (e - s) < (bestEnd - bestStart))) {
+        bestStart = s;
+        bestEnd = e;
+      }
+      break; // only the first lastRepl match after this s
+    }
+  }
+  if (bestStart == 0)
+    return false;
+  outStart = bestStart;
+  outEnd = bestEnd;
+  return true;
+}
 
 bool verifySuggestion(const AISuggestion &suggestion, int errorLine,
                       std::string *outDiagnostics) {
@@ -684,7 +897,61 @@ bool verifySuggestion(const AISuggestion &suggestion, int errorLine,
     return false; // no valid code to validate; code_patch is prose-only
   }
   const std::string &fixLine = suggestion.replacement_line;
-  bool ok = ApplyAndValidateFix(*sandbox, errorLine, fixLine, suggestion);
+
+  // target_line == 0 means "same line as the error" (the common case). A
+  // positive target_line is only honored if it's within the actual source
+  // range -- a model-hallucinated out-of-range value silently falls back to
+  // errorLine rather than crashing applyFix().
+  int applyLine = errorLine;
+  if (suggestion.target_line > 0 &&
+      suggestion.target_line <= static_cast<int>(SourceLines.size())) {
+    applyLine = suggestion.target_line;
+  }
+
+  // end_line == 0 (or an out-of-range/backwards value) means "just
+  // applyLine" -- a single-line edit, the common case. Only honored as a
+  // genuine range when it's within source bounds and doesn't precede
+  // applyLine -- a hallucinated value silently falls back to a single-line
+  // edit rather than crashing applyFix() with an inverted range.
+  int applyEndLine = applyLine;
+  if (suggestion.end_line >= applyLine &&
+      suggestion.end_line <= static_cast<int>(SourceLines.size())) {
+    applyEndLine = suggestion.end_line;
+  }
+
+  // Recover the intended range when replacement_line is multi-line but
+  // end_line didn't resolve to a real range above (applyEndLine collapsed
+  // back to applyLine). Two distinct shapes land here, and only one needs
+  // recovery:
+  //   (a) block rewrite -- the model regenerated a whole enclosing
+  //       declaration (struct/error/machine/fn) and left end_line at 0.
+  //       inferBlockRange() content-anchors the replacement's first/last
+  //       lines to the source to recover [start, end]. This is the A.4 §7
+  //       fix -- without it these validate at ~0% despite a correct fix idea.
+  //   (b) wrap/insert -- the model wrapped ONE original line in a new
+  //       construct (e.g. a bare `break;` into a loop). The replacement is
+  //       multi-line but replaces exactly one source line; its first line
+  //       does not appear in the source, so inferBlockRange() declines and we
+  //       correctly keep the [applyLine, applyLine] single-line splice.
+  // Either way the sandbox below re-validates the full spliced result, so a
+  // mis-inferred range can only fail validation, never apply bad code.
+  if (fixLine.find('\n') != std::string::npos && applyEndLine == applyLine) {
+    int inferredStart = 0, inferredEnd = 0;
+    if (inferBlockRange(fixLine, applyLine, inferredStart, inferredEnd)) {
+      if (std::getenv("TURF_SLM_DEBUG")) {
+        std::cerr << Colors::BRIGHT_BLACK
+                  << "[Sandbox] Recovered multi-line range [" << inferredStart
+                  << ", " << inferredEnd << "] for a block rewrite the model "
+                  << "left end_line=0 on (target_line=" << applyLine << ")"
+                  << Colors::RESET << "\n";
+      }
+      applyLine = inferredStart;
+      applyEndLine = inferredEnd;
+    }
+  }
+
+  bool ok = ApplyAndValidateFix(*sandbox, errorLine, applyLine, applyEndLine,
+                                fixLine, suggestion);
 
   // On failure, hand the sandbox's own compiler diagnostics back to the
   // caller (validateAndApplySuggestion()'s retry loop) so the next

@@ -18,6 +18,7 @@
 #include "Sandbox.h"
 #include "Codegen.h"
 #include "Colors.h"
+#include "CompileBuffer.h"
 #include "Lexer.h"
 #include "Lint.h"
 #include "Parser.h"
@@ -25,10 +26,7 @@
 
 #include <algorithm>
 #include <cctype>
-#include <chrono>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <regex>
 #include <set>
@@ -72,179 +70,118 @@ void Sandbox::computeChangedNodes() {
            " changed nodes");
 }
 
-static std::filesystem::path
-writeTempSourceFile(const std::vector<std::string> &source) {
-  auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-  std::filesystem::path tempPath =
-      std::filesystem::temp_directory_path() /
-      ("turf_sandbox_" + std::to_string(stamp) + ".tr");
+// Splits text on '\n' into individual lines, for splicing a (possibly
+// multi-line) AI-suggested replacement block into the source-line vector.
+// A single-line input with no embedded '\n' yields a one-element vector,
+// matching the previous single-line applyFix() behavior exactly.
+static std::vector<std::string> splitLines(const std::string &text) {
+  std::vector<std::string> lines;
+  size_t start = 0;
+  while (true) {
+    size_t pos = text.find('\n', start);
+    if (pos == std::string::npos) {
+      lines.push_back(text.substr(start));
+      break;
+    }
+    lines.push_back(text.substr(start, pos - start));
+    start = pos + 1;
+  }
+  return lines;
+}
 
-  std::ofstream out(tempPath, std::ios::trunc);
+// Joins source lines back into a single buffer for CompileBufferBestEffort()
+// (CompileBuffer.h), which takes an in-memory buffer rather than a file path
+// -- no temp file needed.
+static std::string joinSourceLines(const std::vector<std::string> &source) {
+  std::string joined;
   for (const auto &line : source) {
-    out << line << '\n';
+    joined += line;
+    joined += '\n';
   }
-  return tempPath;
+  return joined;
 }
 
-// Parse-only pass: Parses without linting (for incremental validation)
-// Allows semantic pruning to selectively lint only changed nodes
-static bool runParseOnlyPass(const std::filesystem::path &sourcePath,
-                             const std::vector<std::string> &sourceLines,
-                             std::unique_ptr<ExprAST> &parsedASTOut) {
-  const std::string savedSourceFilename = SourceFilename;
-  auto savedSourceLines = SourceLines;
-  CloseSourceFile();
-  if (!OpenSourceFile(sourcePath.string())) {
-    SourceLines = savedSourceLines;
-    return false;
-  }
+// Runs the real semantic pipeline (parse -> resolve -> typecheck, via
+// CompileBufferBestEffort()) over `source`, then additionally runs the
+// built-in Linter (shadowing/unreachable-code/void-assignment/etc.) over the
+// resulting AST -- CompileBufferBestEffort() deliberately does not lint (see
+// its own doc comment), so this is the one extra step needed to match what
+// a real compile of this buffer would actually report.
+//
+// This replaces what used to be TWO separate, much shallower passes here
+// (runParseOnlyPass()/runParseAndLintPass(), removed) that only ever
+// re-parsed and re-linted a fix, never re-resolved or re-typechecked it --
+// meaning a "fix" that remained syntactically valid but was semantically
+// wrong (e.g. still didn't compile per the TypeChecker, or was a byte-for-
+// byte no-op) could pass validation simply because nothing downstream of
+// the parser ever ran against it. Found via a real, reproducible case: a
+// SLM-proposed replacement_line identical to the original erroring line was
+// reported as "validated" by the old code.
+static bool runFullSemanticPass(const std::vector<std::string> &sourceLines,
+                                const std::string &asIfPath,
+                                std::unique_ptr<ExprAST> &parsedASTOut,
+                                std::vector<DiagnosticEngine::Diag> &diagsOut) {
+  CompileBufferResult Result =
+      CompileBufferBestEffort(joinSourceLines(sourceLines), asIfPath);
 
-  SourceFilename = sourcePath.string();
-  SourceLines = sourceLines;
-  resetLexer();
-  DiagnosticEngine::clearDiagnostics();
-  auto savedASTs = SwapParsedTopLevelASTs({});
-  PushImportCycleState(); // see issue -- stale ImportedFiles cache across repeated compiles
+  bool astOk = Result.AST != nullptr;
+  diagsOut = std::move(Result.Diagnostics);
+  parsedASTOut = std::move(Result.AST);
 
-  bool success = true;
-  bool savedAIEnabled = g_AIEnabled;
-  g_AIEnabled = false;
+  // Run the built-in Linter over the same AST CompileBufferBestEffort() just
+  // resolved/typechecked, so lint-level errors (e.g. void-function-result
+  // assignment) are still caught -- CompileBufferBestEffort() itself never
+  // lints. Guarded by the same per-call recovery pattern used everywhere
+  // else in this file: LintExpression() can raise a TurfError, which
+  // longjmps, and there is no other setjmp() active at this call site.
+  if (parsedASTOut) {
+    auto savedDiagnostics = DiagnosticEngine::getDiagnostics();
+    auto savedCollectAll = DiagnosticEngine::getCollectAllDiagnostics();
+    DiagnosticEngine::clearDiagnostics();
+    DiagnosticEngine::setCollectAllDiagnostics(true);
 
-  jmp_buf savedJmpBuf;
-  std::memcpy(savedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
-  bool savedRecoverActive = g_recoverActive;
-
-  // Per-statement recovery (see issue #228): setjmp() is re-armed inside the
-  // loop, once per top-level statement, exactly like main.cpp's own pre-pass
-  // loop -- so a syntax error in ONE statement resyncs via
-  // SkipToNextTopLevelBoundary() and keeps parsing the rest of the buffer,
-  // instead of a single setjmp() outside the whole loop (the old shape)
-  // unwinding straight past every remaining statement on the FIRST error.
-  // `success` still goes false on any failure (existing callers gate on
-  // it), but parsedASTOut below now accumulates every statement that DID
-  // parse successfully, not just whatever came before the first failure.
-  getNextToken();
-  while (CurTok != TOK_EOF) {
-    if (CurTok == ';') {
-      getNextToken();
-      continue;
-    }
-
+    jmp_buf savedJmpBuf;
+    std::memcpy(savedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
+    bool savedRecoverActive = g_recoverActive;
     g_recoverActive = true;
     if (setjmp(g_recoverJmp) == 0) {
-      auto AST = ParseExpression();
-      if (AST) {
-        RecordParsedTopLevelAST(AST.get());
-        // NOTE: No linting here - will be done selectively via
-        // LintChangedNodesOnly
-        if (CurTok == ';') {
-          getNextToken();
-        }
-      } else {
-        success = false;
-        SkipToNextTopLevelBoundary();
-      }
-    } else {
-      success = false;
-      SkipToNextTopLevelBoundary();
+      LintExpression(parsedASTOut.get());
+    }
+    g_recoverActive = savedRecoverActive;
+    std::memcpy(g_recoverJmp, savedJmpBuf, sizeof(jmp_buf));
+
+    auto lintDiags = DiagnosticEngine::getDiagnostics();
+    DiagnosticEngine::setCollectAllDiagnostics(savedCollectAll);
+    DiagnosticEngine::restoreDiagnostics(savedDiagnostics);
+
+    diagsOut.insert(diagsOut.end(), lintDiags.begin(), lintDiags.end());
+  }
+
+  // A fix is "valid" when it produces a parseable AST with no ERROR-level
+  // diagnostics. Warnings must NOT count as validation failures: they don't
+  // stop a real compile (`turf file.tr` emits the binary and exits 0 with
+  // warnings present), and a warning is frequently pre-existing in the
+  // original source rather than introduced by the fix. Counting warnings here
+  // was silently sinking otherwise-correct fixes -- found while benchmarking:
+  // fail_machine_duplicate_edge.tr's correct fix (drop the duplicate edge)
+  // re-parsed cleanly with zero errors but ONE warning ("Idle has no incoming
+  // transitions", inherent to that machine and present in the original too),
+  // and the old `diagsOut.empty()` check rejected it on that warning alone,
+  // across all 3 retry attempts. This affects any category whose valid fix
+  // legitimately still warns (shadowing, unreachable code, a state machine
+  // with a source/sink state, ...), not just this one case. The authoritative
+  // "did we make things worse" check is isOriginalErrorResolved(), which
+  // already compares ERROR lines only (it filters `!IsWarning`) -- so leaving
+  // warnings in diagsOut here is correct: they stay visible to that check
+  // without falsely failing this one.
+  bool hasError = false;
+  for (const auto &d : diagsOut) {
+    if (!d.IsWarning) {
+      hasError = true;
+      break;
     }
   }
-  g_recoverActive = savedRecoverActive;
-  g_AIEnabled = savedAIEnabled;
-
-  // Build the program AST from the cached top-level expressions
-  parsedASTOut = BuildProgramASTFromCache();
-
-  CloseSourceFile();
-  SourceFilename = savedSourceFilename;
-  SourceLines = savedSourceLines;
-  SwapParsedTopLevelASTs(std::move(savedASTs));
-  PopImportCycleState();
-  std::memcpy(g_recoverJmp, savedJmpBuf, sizeof(jmp_buf));
-
-  // Restore the real source file and lexer state
-  if (!SourceFilename.empty()) {
-    OpenSourceFile(SourceFilename);
-    resetLexer();
-  }
-
-  return success;
-}
-
-static bool runParseAndLintPass(const std::filesystem::path &sourcePath,
-                                const std::vector<std::string> &sourceLines,
-                                std::unique_ptr<ExprAST> &parsedASTOut) {
-  const std::string savedSourceFilename = SourceFilename;
-  auto savedSourceLines = SourceLines;
-  CloseSourceFile();
-  if (!OpenSourceFile(sourcePath.string())) {
-    SourceLines = savedSourceLines;
-    return false;
-  }
-
-  SourceFilename = sourcePath.string();
-  SourceLines = sourceLines;
-  resetLexer();
-  DiagnosticEngine::clearDiagnostics();
-  auto savedASTs = SwapParsedTopLevelASTs({});
-  PushImportCycleState(); // see issue -- stale ImportedFiles cache across repeated compiles
-
-  bool success = true;
-  bool savedAIEnabled = g_AIEnabled;
-  g_AIEnabled = false;
-
-  jmp_buf savedJmpBuf;
-  std::memcpy(savedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
-  bool savedRecoverActive = g_recoverActive;
-
-  // Per-statement recovery -- see the matching comment in runParseOnlyPass()
-  // above and issue #228.
-  getNextToken();
-  while (CurTok != TOK_EOF) {
-    if (CurTok == ';') {
-      getNextToken();
-      continue;
-    }
-
-    g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0) {
-      auto AST = ParseExpression();
-      if (AST) {
-        RecordParsedTopLevelAST(AST.get());
-        LintExpression(AST.get());
-        if (CurTok == ';') {
-          getNextToken();
-        }
-      } else {
-        success = false;
-        SkipToNextTopLevelBoundary();
-      }
-    } else {
-      success = false;
-      SkipToNextTopLevelBoundary();
-    }
-  }
-  g_recoverActive = savedRecoverActive;
-  g_AIEnabled = savedAIEnabled;
-
-  if (success && DiagnosticEngine::getDiagnosticCount() == 0) {
-    parsedASTOut = BuildProgramASTFromCache();
-  } else {
-    parsedASTOut.reset();
-  }
-
-  CloseSourceFile();
-  if (!savedSourceFilename.empty()) {
-    OpenSourceFile(savedSourceFilename);
-  }
-  SourceFilename = savedSourceFilename;
-  SourceLines = savedSourceLines;
-  SwapParsedTopLevelASTs(std::move(savedASTs));
-  PopImportCycleState();
-  std::memcpy(g_recoverJmp, savedJmpBuf, sizeof(jmp_buf));
-  resetLexer();
-
-  return success && DiagnosticEngine::getDiagnosticCount() == 0;
+  return astOk && !hasError;
 }
 
 Sandbox::Sandbox(const std::vector<std::string> &SourceLines) {
@@ -300,27 +237,37 @@ Sandbox::cloneSymbolTable(const SymbolTable *original) {
                   : std::make_unique<SymbolTable>();
 }
 
-bool Sandbox::applyFix(int lineNumber, const std::string &newLine) {
-  // Validate line number (1-based)
-  if (lineNumber < 1 ||
-      lineNumber > static_cast<int>(Snapshot.SourceCode.size())) {
-    logDebug("applyFix: line number " + std::to_string(lineNumber) +
-             " out of bounds");
+bool Sandbox::applyFix(int startLine, int endLine, const std::string &newText) {
+  // Validate the range (1-based, inclusive)
+  if (startLine < 1 || endLine < startLine ||
+      endLine > static_cast<int>(Snapshot.SourceCode.size())) {
+    logDebug("applyFix: line range [" + std::to_string(startLine) + ", " +
+             std::to_string(endLine) + "] out of bounds");
     return false;
   }
 
+  std::vector<std::string> newLines = splitLines(newText);
+
   // Apply the source-level fix
-  LastEditedLine = lineNumber;
-  LastEditedLineText = newLine;
-  LastEditKind = classifyEditKind(newLine);
-  LocalizedValidationOnly = isLocalizedEdit(LastEditKind);
-  applySourceFix(lineNumber, newLine);
+  LastEditedLine = startLine;
+  LastEditedLineText = newText;
+  // The classify/symbol-table heuristics below only make sense for a true
+  // single-line edit (one old line replaced by one new line); a genuine
+  // range edit is, by definition, a structural block change.
+  bool isSingleLineEdit = (startLine == endLine && newLines.size() == 1);
+  LastEditKind = isSingleLineEdit ? classifyEditKind(newText)
+                                 : EditKind::BLOCK_STRUCTURE;
+  LocalizedValidationOnly =
+      isSingleLineEdit && isLocalizedEdit(LastEditKind);
+  applySourceFix(startLine, endLine, newLines);
 
   // Update AST and symbol table
-  updateASTAfterFix(lineNumber);
-  updateSymbolTableAfterFix(lineNumber, newLine, LastEditKind);
+  updateASTAfterFix(startLine);
+  if (isSingleLineEdit)
+    updateSymbolTableAfterFix(startLine, newText, LastEditKind);
 
-  logDebug("Applied fix to line " + std::to_string(lineNumber));
+  logDebug("Applied fix to line(s) [" + std::to_string(startLine) + ", " +
+           std::to_string(endLine) + "]");
   return true;
 }
 
@@ -413,12 +360,19 @@ bool Sandbox::isLocalizedEdit(EditKind kind) {
          kind == EditKind::ARRAY_DECLARATION;
 }
 
-void Sandbox::applySourceFix(int lineNumber, const std::string &newLine) {
-  // Convert from 1-based to 0-based indexing
-  size_t idx = lineNumber - 1;
-  if (idx < Snapshot.SourceCode.size()) {
-    Snapshot.SourceCode[idx] = newLine;
+void Sandbox::applySourceFix(int startLine, int endLine,
+                             const std::vector<std::string> &newLines) {
+  // Convert from 1-based inclusive [startLine, endLine] to 0-based
+  // [beginIdx, endIdx) for std::vector::erase/insert.
+  size_t beginIdx = startLine - 1;
+  size_t endIdx = endLine; // one past the last replaced element
+  if (beginIdx >= Snapshot.SourceCode.size() ||
+      endIdx > Snapshot.SourceCode.size()) {
+    return;
   }
+  auto it = Snapshot.SourceCode.erase(Snapshot.SourceCode.begin() + beginIdx,
+                                      Snapshot.SourceCode.begin() + endIdx);
+  Snapshot.SourceCode.insert(it, newLines.begin(), newLines.end());
 }
 
 void Sandbox::updateASTAfterFix(int lineNumber) {
@@ -466,23 +420,18 @@ bool Sandbox::validate() {
   ChangedNodeIDs.clear();
 
   // Save the global state so we can restore it after validation
+  // (CompileBufferBestEffort() saves/restores everything it directly
+  // touches itself -- see its own doc comment -- but SourceLines and the
+  // diagnostics list are still ours to manage here since Snapshot.Diagnostics
+  // needs to observe the sandboxed compile's diagnostics specifically).
   auto savedSourceLines = SourceLines;
   auto savedDiagnostics = DiagnosticEngine::getDiagnostics();
 
-  // Temporarily swap in the sandbox source
   SourceLines = Snapshot.SourceCode;
   DiagnosticEngine::clearDiagnostics();
 
-  bool validationSucceeded = false;
-  std::filesystem::path tempPath = writeTempSourceFile(Snapshot.SourceCode);
-  validationSucceeded =
-      runParseAndLintPass(tempPath, Snapshot.SourceCode, Snapshot.AST);
-
-  std::error_code ignored;
-  std::filesystem::remove(tempPath, ignored);
-
-  // Capture validation diagnostics
-  Snapshot.Diagnostics = DiagnosticEngine::getDiagnostics();
+  bool validationSucceeded = runFullSemanticPass(
+      Snapshot.SourceCode, SourceFilename, Snapshot.AST, Snapshot.Diagnostics);
 
   // If validation succeeded, compute which AST nodes changed
   // This enables incremental semantic validation in future passes
@@ -504,75 +453,22 @@ bool Sandbox::validate() {
 }
 
 bool Sandbox::validateIncremental() {
-  // Incremental semantic validation: only re-check changed nodes
-  // For single-line edits that don't affect scope structure, this is much
-  // faster than full re-parse (avoids re-lexing and re-parsing entire file)
-
+  // This used to have a separate "fast path" for single-expression edits
+  // that only re-parsed and selectively re-linted changed nodes, skipping
+  // the Resolver/TypeChecker entirely on the theory that a localized edit
+  // couldn't need them. That theory was wrong: it meant NO edit ever got a
+  // real semantic re-check (full validate() only ran the same shallow
+  // parse+lint pass anyway -- see runFullSemanticPass()'s doc comment for
+  // the real bug this caused), and it could never re-validate the specific
+  // error category (TYPE_MISMATCH, UNDECLARED_VAR, ...) most AI-suggested
+  // fixes exist to resolve. Always doing the full, correct pass here is the
+  // fix; keeping this as a separate entry point (rather than having callers
+  // call validate() directly) preserves the call sites' existing intent
+  // ("something changed, please tell me if it's still broken") without
+  // implying a semantic shortcut that no longer exists.
   Snapshot.Diagnostics.clear();
   ChangedNodeIDs.clear();
-
-  // If this is a simple expression edit on a single line, do a lightweight
-  // check
-  if (LocalizedValidationOnly && LastEditKind == EditKind::EXPRESSION &&
-      LastEditedLine > 0 &&
-      LastEditedLine <= static_cast<int>(Snapshot.SourceCode.size())) {
-
-    logDebug("Using incremental validation for single-line expression edit");
-
-    // For a simple expression change, we can:
-    // 1. Parse only (skip full lint pass initially)
-    // 2. Compute changed nodes
-    // 3. Lint only changed nodes (semantic pruning)
-
-    // Save global state
-    auto savedSourceLines = SourceLines;
-    auto savedDiagnostics = DiagnosticEngine::getDiagnostics();
-
-    // Temporarily use sandbox source
-    SourceLines = Snapshot.SourceCode;
-    DiagnosticEngine::clearDiagnostics();
-
-    // Write temp file and do parse-only pass
-    std::filesystem::path tempPath = writeTempSourceFile(Snapshot.SourceCode);
-    bool validationSucceeded =
-        runParseOnlyPass(tempPath, Snapshot.SourceCode, Snapshot.AST);
-
-    std::error_code ignored;
-    std::filesystem::remove(tempPath, ignored);
-
-    Snapshot.Diagnostics = DiagnosticEngine::getDiagnostics();
-
-    // If parsing succeeded, compute changed nodes and selectively lint them
-    if (validationSucceeded && Snapshot.AST) {
-      computeChangedNodes();
-
-      // Semantic pruning: only lint changed nodes
-      logDebug("Semantic pruning: linting only " +
-               std::to_string(ChangedNodeIDs.size()) + " changed nodes");
-      logDebug("Semantic validation: entering LintChangedNodesOnly()");
-      LintChangedNodesOnly(Snapshot.AST.get(), ChangedNodeIDs);
-      logDebug("Semantic validation: completed LintChangedNodesOnly()");
-
-      // Update diagnostics after selective linting
-      Snapshot.Diagnostics = DiagnosticEngine::getDiagnostics();
-    }
-
-    // Restore global state
-    SourceLines = savedSourceLines;
-    DiagnosticEngine::restoreDiagnostics(savedDiagnostics);
-
-    IsValid = validationSucceeded;
-
-    logDebug(std::string("Incremental validation ") +
-             (validationSucceeded ? "PASSED" : "FAILED"));
-
-    return validationSucceeded;
-  } else {
-    // Complex edit (scope change, block structure, etc.) falls back to full
-    // validation
-    logDebug("Complex edit detected; falling back to full validation");
-    return validate();
-  }
+  return validate();
 }
 
 bool Sandbox::isOriginalErrorResolved(int errorLine) const {
@@ -642,19 +538,30 @@ std::unique_ptr<Sandbox> CreateSandbox() {
 /**
  * @brief Applies an AI suggestion in a sandbox and validates it.
  *
- * Modifies the target line in the sandboxed source, runs a parse/lint pass,
- * and confirms that the original semantic error is resolved without introducing
- * new cascading errors.
+ * Modifies the target line range in the sandboxed source, runs a full
+ * semantic pass, and confirms that the original semantic error is resolved
+ * without introducing new cascading errors.
  *
  * @param sandbox The active Sandbox instance.
- * @param lineNumber The 1-based source line to modify.
- * @param fixedLine The replacement string for the target line.
+ * @param errorLine The 1-based line the original diagnostic fired on --
+ *                  used only to confirm that diagnostic is actually gone.
+ * @param applyLine The 1-based first source line of the range fixedText is
+ *                  patched into. Equal to errorLine in the common case;
+ *                  differs when the model targets a declaration/related
+ *                  line instead (see AISuggestion::target_line).
+ * @param applyEndLine The 1-based last source line (inclusive) of the range
+ *                  fixedText is patched into. Equal to applyLine for a
+ *                  single-line edit (the common case); greater when the fix
+ *                  is a multi-line block replacement (see
+ *                  AISuggestion::end_line).
+ * @param fixedText The replacement text for [applyLine, applyEndLine] --
+ *                  may itself contain embedded '\n's for a multi-line block.
  * @param suggestion The AI suggestion metadata (confidence, fix_mode).
  * @return true If the fix is valid and resolves the error.
  * @return false If validation fails or confidence is too low.
  */
-bool ApplyAndValidateFix(Sandbox &sandbox, int lineNumber,
-                         const std::string &fixedLine,
+bool ApplyAndValidateFix(Sandbox &sandbox, int errorLine, int applyLine,
+                         int applyEndLine, const std::string &fixedText,
                          const SLM::AISuggestion &suggestion) {
   // NOTE: there used to be a confidence gate here ("only proceed if
   // suggestion.confidence >= 0.9") that ran BEFORE the sandbox validation
@@ -687,10 +594,10 @@ bool ApplyAndValidateFix(Sandbox &sandbox, int lineNumber,
   }
 
   // Apply the fix
-  if (!sandbox.applyFix(lineNumber, fixedLine)) {
+  if (!sandbox.applyFix(applyLine, applyEndLine, fixedText)) {
     std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] " << Colors::BRIGHT_YELLOW
-              << "Failed to apply fix at line " << lineNumber << Colors::RESET
-              << "\n";
+              << "Failed to apply fix at line(s) [" << applyLine << ", "
+              << applyEndLine << "]" << Colors::RESET << "\n";
     return false;
   }
 
@@ -701,10 +608,13 @@ bool ApplyAndValidateFix(Sandbox &sandbox, int lineNumber,
     return false;
   }
 
-  // Check that the original error is resolved
-  if (!sandbox.isOriginalErrorResolved(lineNumber)) {
+  // Check that the original error is resolved. Deliberately keyed on
+  // errorLine (not applyLine): the diagnostic fired at errorLine, so that's
+  // the line that must now be clean, even when the patch itself landed
+  // elsewhere (e.g. a declaration line fixing a later use-before-init read).
+  if (!sandbox.isOriginalErrorResolved(errorLine)) {
     std::cerr << Colors::BRIGHT_BLACK << "[Sandbox] " << Colors::BRIGHT_YELLOW
-              << "Original error still present at line " << lineNumber
+              << "Original error still present at line " << errorLine
               << Colors::RESET << "\n";
     return false;
   }

@@ -51,3 +51,7 @@ models/
 # Compilation database
 compile_commands.json
 
+# Patent disclosure material -- never pushed
+docs/patent/
+docs/patent.zip
+

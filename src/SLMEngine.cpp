@@ -18,6 +18,7 @@
 #include "SLMEngine.h"
 #include "llama.h"
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <string_view>
 #include <unistd.h>
@@ -74,6 +75,16 @@ bool SLMEngine::initialize(const std::string &modelPath) {
   // ctx_params.n_ctx = 4096;
   // ctx_params.n_ctx = 8192;
   ctx_params.n_ctx = 10240;
+  // NOTE: keep well below n_ctx -- llama_decode() hard-aborts via
+  // GGML_ASSERT(n_tokens_all <= n_batch) if a single call's token count
+  // (e.g. system-prompt evaluation in generateSuggestion()) exceeds this,
+  // and raising it materially slows every call (ggml-metal appears to fall
+  // off a fast kernel path above ~4096 batch size -- measured ~4-5x slower
+  // at 5120/8192/10240 than at 4096, not proportional to the increase, so
+  // this isn't a "just raise it" fix). The real fix for a too-long prompt is
+  // keeping the prompt under this cap (see SLMIntegration.cpp's system
+  // prompt construction) -- this constant is a hard ceiling to stay under,
+  // not a knob to tune around a too-long prompt.
   ctx_params.n_batch = 4096;
   ctx_params.type_k = GGML_TYPE_Q8_0;
   ctx_params.type_v = GGML_TYPE_Q8_0;
@@ -124,17 +135,34 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
   }
 
   int n_ctx = llama_n_ctx(ctx);
+  // llama_decode() hard-aborts via GGML_ASSERT if a single call's token
+  // count exceeds n_batch -- not a catchable error, a native abort that
+  // takes the whole process down. n_batch is deliberately kept well below
+  // n_ctx (see initialize()'s own comment on why it isn't just raised to
+  // match), so either the system prompt (a large per-category doc file, or
+  // future prompt growth) or the user prompt (large code context) can
+  // legitimately exceed it even though n_ctx has room. Every llama_decode()
+  // call below clamps its token count to n_batch first -- a clipped prompt
+  // degrades response quality, which is fine: the caller's own
+  // confidence-gated, sandbox-validated pipeline is exactly the safety net
+  // that makes a worse response from a clipped prompt safe to just fall
+  // through as normal, since it still can't reach the user without passing
+  // sandbox re-validation either way. A crashed compiler process has no
+  // such safety net.
+  int n_batch = static_cast<int>(llama_n_batch(ctx));
   const llama_vocab *vocab_tok = llama_model_get_vocab(llama_get_model(ctx));
 
   // ── 1. Evaluate System Prompt (Cached) ──
   if (systemPrompt != CurrentCachedSystemPrompt || CachedSystemTokens.empty()) {
     llama_memory_clear(llama_get_memory(ctx), false);
-    
+
     std::vector<llama_token> sysTokens(n_ctx);
     int n_sys = llama_tokenize(vocab_tok, systemPrompt.c_str(), systemPrompt.size(),
                                sysTokens.data(), n_ctx,
                                /*add_special=*/true, /*parse_special=*/true);
-    
+    if (n_sys > n_batch)
+      n_sys = n_batch;
+
     if (n_sys > 0) {
       sysTokens.resize(n_sys);
       llama_batch sysBatch = llama_batch_get_one(sysTokens.data(), n_sys);
@@ -162,6 +190,8 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
     }
     return "";
   }
+  if (n_user > n_batch)
+    n_user = n_batch;
   userTokens.resize(n_user);
 
   int total_tokens = CachedSystemTokens.size() + n_user;

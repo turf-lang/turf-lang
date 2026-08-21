@@ -15,6 +15,22 @@ struct AISuggestion {
   std::string suggested_comment;
   std::string code_patch;       // Human-readable description of the patch
   std::string replacement_line; // Exact Turf-Lang source line to substitute
+  // Which line replacement_line should be applied to. 0 (the default) means
+  // "the line the diagnostic was raised on" -- the common case. A model can
+  // set this to a different line (e.g. a declaration site shown in the
+  // prompt's pinned context) when the correct fix belongs there instead of
+  // at the line the error fired on -- see target_line's doc comment in
+  // grammars/slm_suggestion.gbnf for the motivating case.
+  int target_line = 0;
+  // Last line (inclusive, same 1-based numbering as target_line) of the
+  // range replacement_line replaces. 0 (the default) means "just
+  // target_line" -- a single-line edit, the common case. Set > target_line
+  // when the fix genuinely requires replacing more than one existing line
+  // (e.g. wrapping a statement in a new loop, adding a multi-line function
+  // signature) -- replacement_line then holds the full new block, with
+  // individual lines separated by the JSON "\n" escape. See
+  // grammars/slm_suggestion.gbnf for the matching grammar rule.
+  int end_line = 0;
   std::string warning;
   std::string self_reported_category; // Model's own assessment of error category
   bool valid = false;

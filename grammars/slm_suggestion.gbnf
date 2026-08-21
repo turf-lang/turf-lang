@@ -28,11 +28,27 @@ root ::= "{" ws (
          "\"suggested_comment\":" ws string "," ws
          "\"code_patch\":"       ws string "," ws
          "\"replacement_line\":" ws string "," ws
+         "\"target_line\":"      ws integer "," ws
+         "\"end_line\":"         ws integer "," ws
          "\"warning\":"          ws string "," ws
          "\"category\":"         ws category
          ) ws "}"
 
 fix-mode ::= "\"MODIFY\"" | "\"NONE\""
+
+# target_line: 0 means "same line the error was raised on" (the common
+# case). Any other positive value means "apply replacement_line at this line
+# instead" -- used when the correct fix targets a declaration/related site
+# shown in the prompt's context rather than the line the diagnostic fired
+# on (e.g. a use-before-init error, where the error fires at the *use* but
+# the fix belongs at the *declaration*).
+#
+# end_line: 0 means "just target_line" (a single-line edit, the common
+# case). A value greater than target_line means replacement_line replaces
+# the whole [target_line, end_line] range instead of one line -- used when
+# a fix genuinely requires editing more than one existing line (e.g.
+# wrapping a statement in a new loop).
+integer ::= "0" | [1-9] [0-9]*
 
 category ::= ("\"TYPE_MISMATCH\""       | "\"UNDECLARED_VARIABLE\""
            | "\"CONTROL_FLOW\""        | "\"SYNTAX_ERROR\""
