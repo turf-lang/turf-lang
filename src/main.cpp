@@ -495,8 +495,8 @@ static int linkObject(const std::string &ObjFile,
  * @param argv An array of command-line argument strings.
  * @return int Exit code (0 on success, non-zero on compilation failure).
  */
-int main(int argc, char **argv) {
-  CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)main);
+static int runCompilerMain(int argc, char **argv) {
+  CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)runCompilerMain);
 
   handleExplainFlagIfPresent(argc, argv);
 
@@ -931,7 +931,17 @@ int main(int argc, char **argv) {
               << "Error: Statements are not allowed outside of a function. "
                  "Please define 'fn main(): int' and move this code inside.\n";
           DiagnosticEngine::flushAll();
-          exit(1);
+          // _Exit (not exit): this raw exit point bypasses the rest of the
+          // call stack, so the SLMCleanup guard in runCompilerMain() never
+          // runs. That's fine for our own state, but it means llama.cpp's
+          // ggml Metal backend never gets its explicit teardown either --
+          // skip the whole static-destructor phase (ggml's own internal,
+          // TU-static device registry included) rather than let it run
+          // uncleanly. See runCompilerMain -> main's own _Exit for the full
+          // explanation.
+          std::cout.flush();
+          std::cerr.flush();
+          std::_Exit(1);
         }
         RecordParsedTopLevelAST(AST.get());
         TopLevelASTs.push_back(std::move(AST));
@@ -1213,4 +1223,28 @@ int main(int argc, char **argv) {
   }
 
   return 0;
+}
+
+/**
+ * @brief Real process entry point.
+ *
+ * Delegates to runCompilerMain() for all compiler work, then terminates via
+ * _Exit() instead of a normal return. This deliberately skips the C++
+ * static-destructor phase of exit() -- by this point every real output
+ * (object/IR files, the linked binary, stdout/stderr) has already been
+ * flushed by ordinary automatic-storage unwinding inside runCompilerMain(),
+ * so nothing is lost. The only things being skipped are process-wide
+ * static/global destructors, which is required here because llama.cpp's
+ * ggml Metal backend keeps its own internal, TU-static device registry
+ * (ggml-metal-device.m) that is torn down independently of -- and after --
+ * SLM::SLMEngine's own explicit, already-correct cleanup (see the
+ * SLMCleanup guard above). That independent teardown can hit
+ * `GGML_ASSERT([rsets->data count] == 0)` during normal exit() on macOS,
+ * a vendored-library issue outside this compiler's control.
+ */
+int main(int argc, char **argv) {
+  int ExitCode = runCompilerMain(argc, argv);
+  std::cout.flush();
+  std::cerr.flush();
+  std::_Exit(ExitCode);
 }
