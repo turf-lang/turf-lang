@@ -1,0 +1,34 @@
+// Documents and regression-tests time.tr's most important, easy-to-get-
+// wrong design fact: clock_ticks()/elapsed_ms() measure CPU time, NOT
+// wall-clock time. A naive reader could otherwise assume
+// `sleep_ms(200); elapsed_ms(start)` reports "about 200" the way a wall-
+// clock stopwatch would -- it does not, because a sleeping process consumes
+// essentially zero CPU time. This test pins that behavior down so a future
+// change to time.tr (e.g. accidentally swapping clock() for a wall-clock
+// syscall) gets caught.
+import time;
+import test;
+import io;
+
+fn main(): int {
+    immut start: int = time::clock_ticks();
+    immut wallStart: int = time::now_seconds();
+
+    time::sleep_ms(300);
+
+    immut cpuMs: int = time::elapsed_ms(start);
+    immut wallDeltaSeconds: int = time::now_seconds() - wallStart;
+
+    // CPU time barely moves during a pure sleep -- generous upper bound
+    // (well under the 300ms actually slept) to absorb scheduler/measurement
+    // noise without the test becoming flaky.
+    test::assert(cpuMs < 100, "elapsed_ms() (CPU time) should stay far below the real sleep duration, since sleeping consumes ~no CPU time");
+
+    // Meanwhile real wall-clock time did pass (allow 0 or 1 -- 300ms may or
+    // may not cross a now_seconds() 1-second boundary depending on timing).
+    test::assert(wallDeltaSeconds >= 0 && wallDeltaSeconds <= 1,
+                 "wall-clock now_seconds() sanity bound across a 300ms sleep");
+
+    io::printline("04 PASS: elapsed_ms()/clock_ticks() correctly measure CPU time, not wall-clock time, across a sleep");
+    return 0;
+}

@@ -1,0 +1,13 @@
+// tests/31_fs_and_path_stdlib/05_fs_is_absolute.tr
+// Tests fs::is_absolute -- true iff the path starts with '/'.
+
+import fs;
+import test;
+
+fn main(): int {
+    test::assert(fs::is_absolute("/usr/bin"), "is_absolute: '/usr/bin' is absolute");
+    test::assert(!fs::is_absolute("rel/path"), "is_absolute: 'rel/path' is not absolute");
+    test::assert(!fs::is_absolute("file.txt"), "is_absolute: bare filename is not absolute");
+
+    return 0;
+}

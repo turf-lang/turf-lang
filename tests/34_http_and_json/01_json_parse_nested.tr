@@ -1,0 +1,36 @@
+// Parses a realistic nested JSON document (an object containing a string,
+// a number, a bool, a null, a nested array, and a nested object) and
+// checks every extracted value.
+import io;
+import json;
+import test;
+
+fn main(): int {
+    immut text: string = "{\"name\":\"Turf\",\"count\":3,\"active\":true,\"missing\":null,\"tags\":[\"lang\",\"compiler\",\"llvm\"],\"meta\":{\"version\":1,\"stable\":false}}";
+
+    mut v: json::JsonValue = json::parse(text) recover run {
+        test::fail("parse should have succeeded on well-formed JSON");
+        return 1;
+    };
+
+    test::assert_eq(v.get_string("name"), "Turf", "top-level string field");
+    test::assert_eq(v.get_number("count"), 3.0, "top-level number field");
+    test::assert_eq(v.get_bool("active"), true, "top-level bool field");
+    test::assert(v.get("missing").kind == json::JsonType::Null, "top-level null field");
+
+    mut tags: json::JsonValue = v.get("tags");
+    test::assert_eq(tags.length(), 3, "nested array length");
+    test::assert_eq(tags.at(0).str_val, "lang", "nested array[0]");
+    test::assert_eq(tags.at(1).str_val, "compiler", "nested array[1]");
+    test::assert_eq(tags.at(2).str_val, "llvm", "nested array[2]");
+
+    mut meta: json::JsonValue = v.get("meta");
+    test::assert_eq(meta.get_number("version"), 1.0, "nested object number field");
+    test::assert_eq(meta.get_bool("stable"), false, "nested object bool field");
+
+    test::assert(v.has("name"), "has() should find an existing key");
+    test::assert(!v.has("nope"), "has() should not find a missing key");
+
+    io::printline("01 PASS: json parse nested");
+    return 0;
+}

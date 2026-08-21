@@ -66,6 +66,11 @@ extern fn close(fd: int): int;
 extern fn setsockopt(fd: int, level: int, optname: int, optval: void*, optlen: int): int;
 extern fn strlen(s: string): int;
 
+// The classic (deprecated, but still universally present and ABI-stable on
+// Linux glibc) hostname-lookup call -- see resolve_hostname() below for the
+// full explanation of why this one, and how its result is read.
+extern fn gethostbyname(name: string): ptr;
+
 // Named POSIX constants, exported so callers of net.tr could reference them
 // too if they ever needed to (e.g. a future UdpSocket built the same way).
 export immut AF_INET: int = 2;
@@ -85,6 +90,95 @@ error NetworkError {
     BindFailed,
     ListenFailed,
     AcceptFailed,
+    ResolutionFailed,
+}
+
+// Resolves a hostname ("localhost", "example.com", ...) to a dotted-decimal
+// IPv4 address string ("127.0.0.1", ...), so callers can connect by name
+// instead of by four raw octets:
+//
+//   immut ip: string = net::resolve_hostname("localhost") recover produce "127.0.0.1";
+//   mut conn: net::TcpConnection = net::TcpConnection::connect(...) // still needs octets, see below
+//
+// Returns `!string`: an unresolvable hostname (typo, no DNS record, no
+// network at all) is an ordinary, expected outcome for a network program,
+// not a bug -- the caller decides how to recover, same philosophy as
+// connect()/bind()/accept() above.
+//
+// Implementation: binds the classic libc `struct hostent
+// *gethostbyname(const char *name)`. It's deprecated in favor of
+// getaddrinfo() (which is reentrant and IPv6-aware), but it's still
+// universally present, and -- critically for a compiler that can't declare
+// a Turf struct matching an arbitrary C struct's real memory layout --
+// `struct hostent`'s layout is a stable, simple part of the Linux x86_64
+// glibc ABI:
+//
+//   struct hostent {
+//       char  *h_name;       // offset 0,  8 bytes (pointer)
+//       char **h_aliases;    // offset 8,  8 bytes (pointer)
+//       int    h_addrtype;   // offset 16, 4 bytes (int)
+//       int    h_length;     // offset 20, 4 bytes (int)
+//       char **h_addr_list;  // offset 24, 8 bytes (pointer) -- NULL-
+//                             // terminated array of pointers, each to a
+//                             // 4-byte (AF_INET) address in NETWORK byte
+//                             // order
+//   };
+//
+// This is the READING counterpart to buildSockAddr()'s WRITING technique
+// above: no Turf struct can express this mixed 8-byte/4-byte-field layout,
+// so this reads the raw bytes through pointer-indexed loads instead --
+// `void* to int*` indexed loads, the same idiom list.tr/stack.tr use for
+// their own `data: T*` fields, plus (new here) `void* to char*` indexed
+// loads for single-BYTE granularity, needed for the final 4 address bytes.
+//
+// h_addrtype/h_length are two 4-byte C `int`s that together occupy exactly
+// one 8-byte slot (bytes 16-23) -- every other field is an 8-byte pointer,
+// so h_addr_list's byte offset (24) happens to land exactly on `int*`
+// element index 3 (3 * 8 = 24). That's the one piece of luck that makes
+// this doable with plain `int*` indexing instead of needing raw
+// pointer-to-integer address arithmetic (which this language's `to` cast
+// doesn't support directly for the opaque `ptr` type -- only `T* <-> int`,
+// not `ptr <-> int`): every field this function actually touches sits on
+// an 8-byte boundary.
+//
+// Once at h_addr_list[0] (the first resolved address, a pointer to 4 raw
+// bytes in network order), `char*` indexing reads those bytes one at a
+// time -- byte 0 of that 4-byte address is the first octet ("a" in
+// "a.b.c.d"), since network byte order for a dotted-decimal address is
+// just left-to-right, same as buildSockAddr()'s own addrPart comment notes.
+fn resolve_hostname(host: string): !string {
+    mut h: ptr = gethostbyname(host);
+    if h == null {
+        return NetworkError::ResolutionFailed;
+    }
+
+    // Byte offset 24 == int* element index 3 (24 / 8 == 3) -- see doc
+    // comment above for why every field up to here is 8-byte aligned.
+    mut ih: int* = h to int*;
+    immut hAddrListRaw: int = ih[3];
+    if hAddrListRaw == 0 {
+        return NetworkError::ResolutionFailed;
+    }
+
+    // h_addr_list[0]: the first entry of the NULL-terminated
+    // address-pointer array -- itself another pointer, to the actual
+    // 4-byte address.
+    mut hAddrList: int* = hAddrListRaw to int*;
+    immut firstAddrRaw: int = hAddrList[0];
+    if firstAddrRaw == 0 {
+        return NetworkError::ResolutionFailed;
+    }
+
+    // Now read the 4 individual address bytes at BYTE granularity --
+    // this is the one place `int*`'s 8-byte stride is too coarse, so
+    // `char*` (1-byte elements) is used instead.
+    mut addrBytes: char* = firstAddrRaw to char*;
+    immut a: int = addrBytes[0] to int;
+    immut b: int = addrBytes[1] to int;
+    immut c: int = addrBytes[2] to int;
+    immut d: int = addrBytes[3] to int;
+
+    return (a to string) + "." + (b to string) + "." + (c to string) + "." + (d to string);
 }
 
 // Builds a 16-byte `struct sockaddr_in` memory image for address a.b.c.d

@@ -1,0 +1,40 @@
+// Regression test: list_sort() (lib/std/collections/list.tr), sorting a
+// List<int> of unsorted values in place using a comparator function.
+//
+// A free function `list_sort(l: List<int>, cmp: fn(int, int): int): void`,
+// NOT a generic `fn<T> List.sort(...)` method -- see list_sort()'s doc
+// comment in list.tr for the full story on why every genuinely-generic
+// shape (comparator-with-T, bare `<`/`>` on T, pointer-based comparator)
+// is a confirmed dead end in this compiler, and why a concrete
+// `List<int>` free function is the design that actually compiles.
+import list::List;
+import list::list_sort;
+import test;
+
+fn cmp_int(a: int, b: int): int {
+    return a - b;
+}
+
+fn main(): int {
+    mut l: List<int>;
+    l.push(5);
+    l.push(1);
+    l.push(4);
+    l.push(2);
+    l.push(8);
+    l.push(3);
+    l.push(9);
+
+    list_sort(l, cmp_int);
+
+    test::assert(l.length() == 7, "sort must not change the length");
+    test::assert(l.pop() == 9, "");
+    test::assert(l.pop() == 8, "");
+    test::assert(l.pop() == 5, "");
+    test::assert(l.pop() == 4, "");
+    test::assert(l.pop() == 3, "");
+    test::assert(l.pop() == 2, "");
+    test::assert(l.pop() == 1, "");
+
+    return 0;
+}
