@@ -66,7 +66,7 @@ mutable r: int = x > 0 give x otherwise -x;  // ternary: give...otherwise
 
 ## 5. Phase 3: The Language Backbone
 
-*The structural primitives required to build real programs. `PHASE_3_ISSUES.md` (the original per-issue spec doc) was removed 2026-08-04 — everything it tracked is complete and is now this section's checklist below; the full original issue text, including the superseded `catch`/`?`/`error.XYZ` design notes, is retrievable from git history if ever needed. Phase 3 is complete — Issue #189 (for-each loops), the last remaining item, landed 2026-08-02 (see Group B below). Phase 4 (§6 below) is complete except for the memory-model items; Phase 5 (§7) and Diagnostics Polish (§9) are the remaining work before 1.0.0 — see `docs/planning/FINAL_SPRINT.md` for the scoped, dependency-ordered checklist covering all of it.*
+*The structural primitives required to build real programs. `PHASE_3_ISSUES.md` (the original per-issue spec doc) was removed 2026-08-04 — everything it tracked is complete and is now this section's checklist below; the full original issue text, including the superseded `catch`/`?`/`error.XYZ` design notes, is retrievable from git history if ever needed. Phase 3 is complete — Issue #189 (for-each loops), the last remaining item, landed 2026-08-02 (see Group B below). Phase 4 (§6 below) is now fully complete, including the memory-model items. Phase 5 (§7) is complete for the item actually scoped into 1.0.0 (the `--smart` retry loop); the rest of that phase's checklist is real future work, deferred to `docs/planning/FUTURE.md`. Diagnostics Polish (§9) is complete. **Turflang 1.0.0 is feature-complete as of 2026-08-21** — see the closing note at the bottom of this document. `docs/planning/FINAL_SPRINT.md`, the scoped dependency-ordered checklist that carried Phase 4's remainder + narrowed Phase 5 + Diagnostics Polish to completion, was removed once everything it tracked landed — same convention as `PHASE_2_ISSUES.md`/`PHASE_3_ISSUES.md` above; retrievable from git history.*
 
 **New syntax introduced in this phase** (illustrative only — kept close to the original design intent rather than kept in sync keystroke-for-keystroke; see `PHASE_3_ISSUES.md`'s "Final Turflang Phase 3 Syntax Reference" for the accurate, current syntax, including the fact that error handling shipped as `error` types + `recover produce`/`recover run`/`recover as x run`, not the `catch`/`?`/`error.XYZ` shown here):
 ```turflang
@@ -135,7 +135,7 @@ for user in users { io::printline(user.name); }   // structs/enums work too — 
 
 ---
 
-## 6. Phase 4: Standard Library & Memory Model
+## 6. Phase 4: Standard Library & Memory Model ✅
 
 *Rewrite the entire standard library in Turflang via `extern fn` FFI. Simultaneously, transition the memory model: raw pointers are locked inside `unsafe { }` blocks (no grace period), and safe references (`&T`) become the default.*
 
@@ -162,7 +162,7 @@ mutable names: list<string> = list<string> {};
 - [x] **Module Search Path & Circular Import Guard 🔴**
   - **Implementation**: Search `<compiler_bin_dir>/lib/std/` first, then `./`. `std::set<std::string> ActiveImports` during parsing; error on duplicate import. Done, and substantially exceeds this original spec — see `docs/architecture/modules_and_scope_resolution.md` for the full on-demand-import/`::`-namespace-resolution/circular-import-diagram system that replaced it.
 
-- [x] **`unsafe { }` Block 🔴** (2026-08-18, narrow scope, not full ARC — Track A in `docs/planning/FINAL_SPRINT.md`)
+- [x] **`unsafe { }` Block 🔴** (2026-08-18, narrow scope, not full ARC — see git history for the removed `FINAL_SPRINT.md`'s Track A, which carried this to completion)
   - **Implementation**: `TOK_UNSAFE`/`UnsafeBlockExprAST` gate raw pointer types (`ptr`, `T*`) everywhere outside `lib/std` — declaring one, casting to/from one, or accessing a field through one now requires lexically being inside `unsafe { }`; a struct with a raw pointer field needs its entire declaration wrapped. An ordinary function's parameters/return type may never be raw pointers at all, not even inside `unsafe { }`. Note this uses the existing `ptr`/`T*` types directly, not a new `unsafe_ptr<T>` generic wrapper as this section's own example syntax above shows — that part of the original sketch was dropped as unnecessary scope during implementation.
 
 - [x] **Safe References (`&T`) 🔴** (2026-08-18) — Same track as `unsafe {}` above. `&expr` (address-of) now always produces a `&T`, a compiler-guaranteed non-null reference that auto-derefs like a raw pointer and always safely widens into `T*`/`ptr`; the reverse needs an explicit `to` cast inside `unsafe { }`.
@@ -170,13 +170,13 @@ mutable names: list<string> = list<string> {};
 - [x] **Rewrite `std/io.tr` via FFI 🔴**
   - **Implementation**: `@intrinsic` removed entirely (now a hard parse error). `lib/std/io.tr` binds `printf`/`scanf`/`getchar`/`calloc` via `extern fn`; `print`/`printline`/`input` are ordinary Turf functions.
 
-- [x] **Rewrite `std/math.tr` via FFI 🔴** (near-complete — see `STDLIB_ROADMAP.md` §2.4)
-  - `lib/std/math/math.tr` is fully `extern fn`-based (no `@intrinsic`). Libm bindings (`sqrt`/`sin`/`cos`/`tan`/`floor`/`ceil`/`round`/`log`/`log2`/`log10`/`exp`/`pow`/`fabs`) are all declared via `extern from "m" fn` and directly callable as `math::sqrt(x)` etc.; `abs`/`power`/`min`/`max`/`clamp`/`divide` are hand-written Turf wrappers on top. Only `PI`/`E` named constants (now trivial via `export immut`, landed 2026-07-27) are still missing.
+- [x] **Rewrite `std/math.tr` via FFI 🔴**
+  - `lib/std/math/math.tr` is fully `extern fn`-based (no `@intrinsic`). Libm bindings (`sqrt`/`sin`/`cos`/`tan`/`floor`/`ceil`/`round`/`log`/`log2`/`log10`/`exp`/`pow`/`fabs`) are all declared via `extern from "m" fn` and directly callable as `math::sqrt(x)` etc.; `abs`/`power`/`min`/`max`/`clamp`/`divide` are hand-written Turf wrappers on top. `math::PI`/`math::E` (`export immut`) landed too.
 
 - [x] **Write `std/string.tr` via FFI 🔴** (shipped as `lib/std/strings.tr`, not `string.tr`)
   - `extern fn`-based (`strlen`, `strstr`, `strncpy`, `toupper`, `tolower`, `malloc`); string `+`/`==`/indexing work at the language level (see #183 above) independent of this module.
 
-- [ ] **Write `std/os.tr` via FFI 🟡** — not implemented, `lib/std/os.tr` does not exist
+- [x] **Write `std/os.tr` via FFI 🟡** (2026-08-21) — `lib/std/os/os.tr`: `env`/`set_env` wrap `getenv`/`setenv`; `argc`/`argv` read from `TurfRuntimeGetArgc`/`TurfRuntimeGetArgv`, two C-ABI helpers the compiler synthesizes directly in IR at codegen time (`CodegenFunc.cpp`'s `EnsureArgvHelpers()`), since `fn main(): int` has no language syntax to declare argc/argv as params. Process exit beyond `main()`'s own return is already covered by `sys::exit` (`sys.tr`), so no os.tr-level wrapper was needed for that. This closes exactly what blocked real programs (env vars + argv) — the broader `os` wishlist (process spawning, etc.) is unscoped stdlib expansion, not a 1.0.0 blocker; see `docs/planning/FUTURE.md`.
 
 - [x] **Write `std/mem.tr` via FFI 🟡**
   - **Implementation**: `lib/std/mem.tr` binds `malloc`/`calloc`/`realloc`/`free` via `extern fn`. Not gated behind an `unsafe {}` block -- the entire `lib/std` tree is exempt from that gate by design (see the `unsafe { }` entry above), so this doesn't need migrating even now that the feature exists.
@@ -192,30 +192,22 @@ mutable names: list<string> = list<string> {};
 
 ---
 
-## 7. Phase 5: Prompt-Oriented Programming (SLM Integration)
+## 7. Phase 5: Prompt-Oriented Programming (SLM Integration) — narrowed scope ✅
 
-*The Two-Adapter Architecture (Base: Qwen2.5-Coder-1.5B ~1GB RAM). The 1.0.0 final sprint narrows this phase's scope — see `docs/planning/FINAL_SPRINT.md` Track C: only the `--smart` retry loop is in scope for 1.0.0; `@slm` in-source syntax and LoRA fine-tuning are deferred past it.*
+*The Two-Adapter Architecture (Base: Qwen2.5-Coder-1.5B ~1GB RAM). 1.0.0 narrowed this phase's scope to only the `--smart` retry loop below; `@slm` in-source syntax, structured context serialization, and LoRA fine-tuning are real future work for post-1.0.0 Turflang — see `docs/planning/FUTURE.md`, which supersedes the three unchecked items this section used to list.*
 
 **Architecture Note**: The SLM (`SLMEngine.cpp`) calls `llama.h` directly as a C++ library compiled into the Turflang binary. It does NOT go through Turflang's FFI system.
-
-- [ ] **`@slm` Syntax & Parser 🔴**
-  - **Implementation**: `TOK_SLM_BLOCK`. `SLMBlockExprAST`. Parser generates from `@slm { "prompt" }`.
-
-- [ ] **Structured Context Serialization 🔴**
-  - **Implementation**: `serializeSymbolContext()` extracts the current function signature and all visible variables/types from `ResolverSymbolTable` to build the prompt prefix.
-
-- [ ] **The SLM Query Loop 🔴**
-  - **Implementation**: `SLMBlockExprAST::codegen()` invokes `SLMEngine`. Returned string passes through `Lexer → Parser → Resolver → TypeChecker`. Retry up to 3× on TypeChecker failure, feeding the error back into the prompt.
 
 - [x] **Dynamic Error Context for `--smart` 🟡**
   - **Implementation**: `src/SLMIntegration.cpp` sizes the context window per deterministic error category (tight ±3 for self-contained statement errors, wider for semantic errors needing more surrounding code) and pins relevant out-of-window definitions (e.g. a variable/function's declaration line) into the prompt regardless of distance.
 
-- [ ] **LoRA Fine-Tuning 🟡**
-  - **Implementation**: Convert `needs_slm_training_dynamiccontext/` to JSONL for Adapter A (Error Healing). Convert `lib/std/` to JSONL for Adapter B (POP Codegen).
+- [x] **`--smart` Retry Loop 🔴** (2026-08-21) — `validateAndApplySuggestion()`'s attempt loop in `SLMIntegration.cpp` (`kMaxSlmAttempts`): on `verifySuggestion()`'s sandbox-compile failure, the real compiler diagnostic (`Sandbox::getValidationDiagnostics()`) is fed back into a fresh `fetchSuggestion()` call as a `"previous_attempt_failed"` prompt field instead of giving up immediately. Capped at 3 total attempts; if all 3 fail, `fix_mode` downgrades to `"NONE"` and the original compiler error surfaces, same as before this loop existed. This is the narrow, `--smart`-only version of what the rest of this phase's original "SLM Query Loop" item described — the `@slm`-block-codegen version of a retry loop (below) is separate and still not built.
 
 ---
 
 ## 8. Phase 6: Developer Tooling & Ecosystem
+
+*Post-1.0.0 Turflang (v1.x) work — none of this blocks the 1.0.0 tag. See `docs/planning/FUTURE.md` for how this is sequenced relative to the other post-1.0.0 work (POP/`@slm`, stdlib expansion, memory architecture).*
 
 - [ ] **LSP Server (`turf --lsp`) 🔴**
   - **Implementation**: Persistent process, JSON-RPC over stdin/stdout. Serve autocomplete and hover types via `ResolverSymbolTable` and TypeChecker annotations.
@@ -231,34 +223,29 @@ mutable names: list<string> = list<string> {};
 
 ---
 
-## 9. Phase 7: Self-Hosting & Bootstrapping
+## 9. Phase 7: Self-Hosting & Bootstrapping — retargeted to Turflang 2.0.0
 
-*The final milestone: writing Turflang in Turflang.*
-
-**Requirements for Self-Hosting:**
-- Phase 3 complete (specifically **`extern fn` FFI**, to bind LLVM's C API).
-- Phase 4 complete (specifically **`std/io.tr`**, to read/write source files and object files).
-
-**Bootstrap cycle:**
-1. Write new compiler logic using *existing* Turflang features.
-2. Compile using the *current* compiler binary.
-3. Output is a new binary that understands the new feature.
-4. Use the new feature in everyday Turflang programs.
-
-**SLM in the Self-Hosted Compiler:** The `@slm { }` syntax is for user programs. The compiler's own SLM calls become ordinary `extern fn` FFI calls binding `llama.cpp`'s C API:
-
-```turflang
-extern fn llama_backend_init(): bool;
-extern fn llama_model_load_from_file(path: string, params: unsafe_ptr<void>): unsafe_ptr<void>;
-extern fn llama_decode(ctx: unsafe_ptr<void>, batch: unsafe_ptr<void>): int;
-```
+*The final milestone: writing Turflang in Turflang. Decided 2026-08-21: self-hosting is big enough, and independent enough of everything else post-1.0.0, to be its own major-version milestone rather than a "Phase 7" tail on the 1.0.0 roadmap. The full requirements/bootstrap-cycle/SLM-FFI-binding sketch that used to live in this section is unchanged in substance and now lives in `docs/planning/FUTURE.md` under "Turflang 2.0.0", alongside the prerequisite check (Phase 3's `extern fn` FFI and Phase 4's `std/io.tr` — both already satisfied today).*
 
 ---
 
-## Diagnostics Polish (Phase 5/6, not before)
+## Diagnostics Polish ✅
 
-*The error class taxonomy is still changing through Phase 3. These are deferred until the error surface is stable.* **Phase 3 is now complete, so this is unblocked — see `docs/planning/FINAL_SPRINT.md` Track D for all three items.**
+*The error class taxonomy stopped changing once Phase 3 landed, which unblocked this. All three items are now complete (2026-08-21):*
 
-- [ ] **Source Spans** *(partially started)* — `SourceLocation` now has `EndLine`/`EndCol`, populated for identifier/keyword tokens only; `DiagnosticEngine` doesn't render spans yet. See `FINAL_SPRINT.md` Track D for exactly what's left. Underline the full failing expression, not just `^`.
-- [ ] **Error Codes + `turf --explain`** — Every error class gets a unique code (e.g., `E042`). `turf --explain E042` prints a multi-paragraph markdown explanation with examples.
-- [ ] **Broader "Did You Mean?"** — Extend `SuggestionIndex` to cover struct fields (`user.pasword` → `user.password`) and module methods (`string.lenght` → `string.length`).
+- [x] **Source Spans** — `SourceLocation`'s `EndLine`/`EndCol` are now populated uniformly for *every* token kind (`gettok()` in `Lexer.cpp`, not just identifiers/keywords as originally scoped), and `DiagnosticEngine::printDiag()` consumes them: it underlines the full token width (`^~~~~`) instead of a single `^` whenever an end position was recorded, falling back to a bare `^` only for the rare case with no end position. Genuine multi-token spans (underlining a whole sub-expression like `add(3, "4")`, not just one token) remain unbuilt — a real future item, tracked in `docs/planning/FUTURE.md`, not a 1.0.0 blocker.
+- [x] **Error Codes + `turf --explain`** — Every one of the 68 `TurfError` subclasses has a stable `E0NN` code (`include/ErrorCodes.h`'s `AllErrorCodes` table, looked up via `typeid(*this)` at raise-time). `turf --explain E0NN` (`main.cpp`) prints the matching `docs/slm/*.txt` writeup; a curated `Important` subset gets a more insistent footer nudge in `printDiag()` instead of the routine "Run `turf --explain E0NN`" line.
+- [x] **Broader "Did You Mean?"** — `SuggestionIndex::suggestVisible()` now covers struct fields (`TypeCheckerCall.cpp`'s field-access check, feeding it the struct's own field names — `user.pasword` → `user.password`), module functions (`ModuleMethodNotFoundError`), and static/instance struct methods (`StructMethodNotFoundError`, shared between `StructName::method()` and `instance.method()` call shapes) — on top of the variable/type/keyword coverage that already existed.
+
+---
+
+## Turflang 1.0.0: Complete
+
+Every phase in this document (1 through 6) is done. Phase 7 (self-hosting) was
+deliberately retargeted to Turflang 2.0.0, not dropped — see §9 above. What's
+left beyond that — the rest of Phase 5/6's checklists, remaining stdlib
+modules, the memory-architecture RFC, and further-out SLM/language-paradigm
+sketches — is real, tracked future work, not a 1.0.0 gap: see
+`docs/planning/FUTURE.md` for the post-1.0.0 sequencing and
+`docs/planning/DESIGN_NOTES.md` for the longer-tail design rationale behind
+each item.
