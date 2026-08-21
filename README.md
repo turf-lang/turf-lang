@@ -648,12 +648,12 @@ Compiles, runs, and cleans up the produced binary.
 
 ## Roadmap
 
-Turf is pre-1.0. The full, actively-maintained tracker — with each item marked done or open against the real codebase — is `docs/planning/ROADMAP_v1.0.0.md`. Phases 1–3 (the language backbone: FFI, `do`/`while`, `compare`, enums, bitwise/string ops, first-class functions, error handling, for-each loops) and operator overloading are complete. Highlights of what's still open:
+Turf is pre-1.0. The full, actively-maintained tracker — with each item marked done or open against the real codebase — is `docs/planning/ROADMAP_v1.0.0_COMPLETE.md`. Phases 1–3 (the language backbone: FFI, `do`/`while`, `compare`, enums, bitwise/string ops, first-class functions, error handling, for-each loops) and operator overloading are complete. Highlights of what's still open:
 
 - `unsafe { }` blocks and safe references (`&T`) — the remaining memory-model work from Phase 4.
 - `std/os.tr` (env vars, argv) — the remaining Phase 4 stdlib module; see `docs/planning/STDLIB_ROADMAP.md`.
 - Prompt-Oriented Programming (`@slm` syntax, structured context serialization, the SLM query loop, LoRA fine-tuning) — Phase 5. The `--smart` error-healing context pipeline is already live; the in-language `@slm { }` block is not.
-- Diagnostics polish (source spans, error codes + `turf --explain`, broader "did you mean?") — see `docs/planning/ROADMAP_v1.0.0.md`'s Diagnostics Polish section.
+- Diagnostics polish (source spans, error codes + `turf --explain`, broader "did you mean?") — see `docs/planning/ROADMAP_v1.0.0_COMPLETE.md`'s Diagnostics Polish section.
 - `turf-cli`: a standalone package manager (written in Go) for Turf projects
   and dependencies — currently a working showcase, not yet linked into the
   main `turf` binary's workflow.

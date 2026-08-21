@@ -9,11 +9,16 @@ areas. Each section below was re-verified against the live codebase at merge
 time — items already shipped were cut rather than carried forward as stale
 checkboxes; only genuinely open work and durable design rationale survive.
 
-`docs/planning/ROADMAP_v1.0.0.md` and `docs/planning/FINAL_SPRINT.md` are
+`docs/planning/ROADMAP_v1.0.0_COMPLETE.md` and `docs/planning/FUTURE.md` (the latter
+added 2026-08-21, once 1.0.0 shipped and `FINAL_SPRINT.md` was retired) are
 **not** part of this merge and remain the authoritative, separately-tracked
 planning docs — some items below (e.g. `unsafe {}`, source spans, error
 codes) are also tracked there; where that's true it's called out explicitly
-rather than duplicated in full.
+rather than duplicated in full. **§2 below predates 1.0.0 shipping and is
+now stale in places** — source spans, error codes/`--explain`, and
+struct-field "did you mean?" all shipped; see `ROADMAP_v1.0.0_COMPLETE.md`'s
+"Diagnostics Polish" section for the current, accurate status. Not
+re-verified past that point yet — see that section's own header for why.
 
 ---
 
@@ -90,8 +95,11 @@ across struct/enum/module-function/import-symbol lookups); keyword-typo
 "did you mean?" (`KeywordError` via `SuggestionIndex::suggestKeywords()`,
 e.g. `funtion` → `fn`).
 
-Genuinely still open (also tracked as `FINAL_SPRINT.md` Track D — see that
-doc for current sequencing):
+**Superseded — all three items below shipped 2026-08-21. Left in place
+below only as the original pre-implementation design record; see
+`ROADMAP_v1.0.0_COMPLETE.md`'s "Diagnostics Polish" section for what actually
+shipped, which differs in scope from a couple of these (e.g. source spans
+now cover every token kind, not just identifiers/keywords).**
 - **Source spans instead of single-point locations — partially done.**
   `SourceLocation` (`include/Lexer.h`) gained `EndLine`/`EndCol` fields
   (default `-1`, meaning "not computed") while building `turf-lsp`
@@ -217,7 +225,7 @@ manipulation + directory ops, distinct from raw file *content* I/O);
 `random` (no RNG in any form, not even a raw `extern fn rand()` binding —
 note: not suitable for security-sensitive randomness without a dedicated
 CSPRNG binding later); `testing` (structured `test "name" { ... }`
-declarations + runner — `ROADMAP_v1.0.0.md` Phase 6 already earmarks this
+declarations + runner — `ROADMAP_v1.0.0_COMPLETE.md` Phase 6 already earmarks this
 as a *compiler* feature, `turf test`, not a stdlib module; don't build a
 competing stdlib-only convention).
 
@@ -241,7 +249,7 @@ helpers, a real iteration story for collections (does Turf ever get
 **Large, not near-term:** TLS/HTTPS; non-blocking/concurrent networking
 (needs a concurrency story in the language first — none exists); arena
 allocators/ref-counting helpers in `mem` (wait for §5's direction);
-`turf test` (compiler-level, tracked in `ROADMAP_v1.0.0.md` Phase 6).
+`turf test` (compiler-level, tracked in `ROADMAP_v1.0.0_COMPLETE.md` Phase 6).
 
 ---
 
@@ -290,7 +298,7 @@ the layer above it, buildable now in stages:
    parsing.
 2. **Callback-based routing** (`app.get(path, handler)`, matching the
    example above) — blocked on first-class functions as values
-   (`ROADMAP_v1.0.0.md` Issue #187, still open). Until then, route dispatch
+   (`ROADMAP_v1.0.0_COMPLETE.md` Issue #187, still open). Until then, route dispatch
    stays a manual `if request.path == "/" { ... } elseif ...` chain, same
    shape the showcase files already use.
 3. **`json.tr`** — wrap `cJSON` via FFI (`extern from "cjson" fn
@@ -352,7 +360,7 @@ the call): `write(1, my_str.get_raw_pointer(), my_str.length());`.
 This is a genuine memory-*model* change — automatic retain/release
 insertion at every assignment and scope exit — not something any stdlib
 module can deliver on its own; it's compiler + Codegen work, gated on
-`unsafe {}` blocks existing first (`ROADMAP_v1.0.0.md` Phase 4 tracks
+`unsafe {}` blocks existing first (`ROADMAP_v1.0.0_COMPLETE.md` Phase 4 tracks
 `unsafe {}` as its own open item). The one already-shipped, purely
 stdlib-level stopgap in the meantime is `mem.tr`'s `Pool<T>`/`free_pool()`
 (bulk-free tracking) — explicitly *not* a step toward ARC, just a smaller

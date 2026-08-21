@@ -1,7 +1,10 @@
 # Pointers, Safe References, and `unsafe { }`
 
 Complete internal + external reference for Turflang's pointer system as it
-exists after issue #238 ("Track A" of `docs/planning/FINAL_SPRINT.md`):
+exists after issue #238 ("Track A" of the now-removed `FINAL_SPRINT.md`,
+folded into `docs/planning/ROADMAP_v1.0.0_COMPLETE.md` §6 once complete — the
+original design sketch, the 2026-08-17 resolved decisions, and the
+2026-08-18 implementation summary are retrievable from git history):
 the `unsafe { }` block, the `&T` safe-reference type, and the raw-pointer
 gate that ties them together. Like `docs/architecture/modules_and_scope_resolution.md`,
 this describes both **what a Turflang programmer observes** (Part 1) and
@@ -9,9 +12,8 @@ this describes both **what a Turflang programmer observes** (Part 1) and
 file:line references throughout.
 
 Related docs:
-- `docs/planning/FINAL_SPRINT.md`'s Track A section — the original design
-  sketch, the 2026-08-17 resolved decisions, and the 2026-08-18
-  implementation summary this doc expands on.
+- `docs/planning/ROADMAP_v1.0.0_COMPLETE.md` §6 — the shipped-feature summary this
+  doc expands on.
 - `README.md`'s "FFI" and "`unsafe { }` and safe references (`&T`)"
   sections — the short, example-driven version of Part 1 below.
 
@@ -718,7 +720,7 @@ exactly like the `BlockExprAST` case right next to it:
 - **No `unsafe_ptr<T>`.** The much larger `MEMORY_ARCHITECTURE_RFC.md`
   proposal (full ARC, heap-managed strings/arrays, a dedicated
   `unsafe_ptr<T>` FFI type) is explicitly out of scope for this track —
-  see `FINAL_SPRINT.md`'s "Explicitly Deferred" section. `ptr`/`T*` are
+  see `docs/planning/FUTURE.md`'s "Memory Architecture (ARC)" section. `ptr`/`T*` are
   the only raw-pointer spellings; they're unchanged in meaning, just newly
   gated.
 - **`self` stays a raw pointer internally**, by deliberate choice (2.5.3)
