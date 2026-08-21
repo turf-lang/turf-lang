@@ -1,0 +1,12 @@
+// Regression test: 'void' as a function parameter's type must be rejected at
+// parse time, not hang the compiler. Before the fix, `fn f(x: void): void {}`
+// hung indefinitely (same underlying issue as fail_void_variable.tr in
+// 01_syntax, just at a different ParseType() call site). See Parser.cpp's
+// isDisallowedVoidType() check inside ParseFuncDef()'s parameter loop.
+
+fn takesVoid(x: void): void {
+}
+
+fn main(): int {
+    return 0;
+}

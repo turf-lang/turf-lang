@@ -1,8 +1,0 @@
-@intrinsic("malloc")
-fn void* malloc(int size)
-
-@intrinsic("realloc")
-fn void* realloc(void* ptr, int size)
-
-@intrinsic("free")
-fn void free(void* ptr)

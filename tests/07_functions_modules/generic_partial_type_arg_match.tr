@@ -1,0 +1,55 @@
+// Regression test: Types.cpp's typesCompatible() must recurse through a
+// GenericType's own argument list, so a function generic in only SOME of
+// a multi-type-param generic struct's arguments (e.g. `fn<V> foo(m:
+// Map<string, V>, ...)`, concrete in K, generic in V) can still match a
+// fully concrete call-site argument (`Map<string, string>`).
+//
+// Before this fix, the overload-candidate filter treated two GenericTypes
+// (Param = "Map<string, V>", Arg = "Map<string, string>") as incompatible
+// whenever NEITHER side was a bare, unparameterized name -- the only
+// existing GenericType leniency rule matched a bare "Box" against
+// "Box<AnyArg>", not two GenericTypes with the same base name and a MIX of
+// concrete/placeholder type arguments. `collectGenericSubstitution()`
+// already recursed per-argument to fill in the substitution map once a
+// candidate was accepted, but nothing upstream of it did the same
+// recursion for the "is this candidate even a match" check that runs
+// first -- so a call like the one below was rejected with "No matching
+// overload" against the one candidate whose signature is, in fact, the
+// correct match. This is the same underlying pattern http.tr's
+// Request.get_header()/Server.route_index() rely on to sidestep
+// Map<K,V>'s generic-erasure equality gap (see
+// docs/reference/stdlib/collections.md) -- a free function concrete in K
+// (here, string) can compare `m.keys[i] == key` correctly even while
+// staying generic in V.
+
+import io;
+import map::Map;
+
+import test;
+fn<V> mapContainsStrKey(m: Map<string, V>, key: string): bool {
+    mut i: int = 0;
+    while i < m.length() {
+        if m.keys[i] == key {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn main(): int {
+    mut strMap: Map<string, string> = Map::default();
+    strMap.put("a", "one");
+    test::assert(mapContainsStrKey(strMap, "a") == true, "V=string: present key found");
+    test::assert(mapContainsStrKey(strMap, "z") == false, "V=string: absent key not found");
+
+    // Same free function, instantiated with a DIFFERENT V -- proves V
+    // really is still generic, not accidentally pinned to string too.
+    mut intMap: Map<string, int> = Map::default();
+    intMap.put("b", 2);
+    test::assert(mapContainsStrKey(intMap, "b") == true, "V=int: present key found");
+    test::assert(mapContainsStrKey(intMap, "nope") == false, "V=int: absent key not found");
+
+    io::printline("generic_partial_type_arg_match PASS");
+    return 0;
+}

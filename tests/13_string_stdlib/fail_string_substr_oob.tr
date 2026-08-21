@@ -1,0 +1,27 @@
+// tests/13_string_stdlib/fail_string_substr_oob.tr
+// NEGATIVE TEST — must compile successfully, then abort at RUNTIME.
+// strings::substring with an out-of-bounds end index must call test::fail().
+// RUNTIME_ABORT_EXPECTED
+//
+// Expected: Runtime abort with "strings.substring: index out of bounds".
+//
+// This test used to import a module named 'str', which does not exist
+// (the real module is 'strings' -- see lib/std/strings.tr) -- so it was
+// failing to COMPILE on "Could not find module 'str'" and never actually
+// reached, let alone exercised, the substring-OOB runtime check it claims
+// to verify. It accidentally satisfied test_runner.sh's old fail_*.tr
+// contract (compilation must fail) for a completely unrelated reason.
+// Fixed to use the real module name, which now means the test genuinely
+// compiles and must be verified via the RUNTIME_ABORT_EXPECTED marker
+// above instead of the default compile-must-fail contract.
+
+import io;
+import strings;
+
+import test;
+fn main(): int {
+    // "hi" has length 2; asking for [5, 10] is out of bounds.
+    mut s: string = strings::substring("hi", 5, 10);
+    io::printline(s);
+    return 0;
+}

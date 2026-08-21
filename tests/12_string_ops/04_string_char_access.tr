@@ -1,0 +1,20 @@
+// Test: String character indexing (s[i] -> int)
+import io;
+
+import test;
+fn main(): int {
+    mut s: string = "hello";
+
+    mut c0: int = s[0];
+    mut c1: int = s[1];
+    mut c4: int = s[4];
+
+    test::assert(c0 == 104, "s[0] should be 104 ('h')");
+    test::assert(c1 == 101, "s[1] should be 101 ('e')");
+    test::assert(c4 == 111, "s[4] should be 111 ('o')");
+
+    // Also test direct literal indexing
+    test::assert("hello"[1] == 101, "'hello'[1] should be 101");
+
+    return 0;
+}

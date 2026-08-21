@@ -1,0 +1,68 @@
+// A small dice-roller configured via JSON: builds a config value in
+// memory, serializes it to real JSON text, parses that text back (a
+// genuine round trip through json::stringify/json::parse, not just
+// reusing the in-memory value directly), reads the settings back out,
+// then rolls that many dice using the random module and reports the
+// results. Also resolves "localhost" via net::resolve_hostname as a
+// stand-in for "here's the server this program would report scores to".
+//
+// Run it:
+//   turf showcase/config_and_dice.tr -o config_and_dice
+//   ./config_and_dice
+
+import io;
+import json;
+import random;
+import net;
+
+fn main(): int {
+    // Build the config in memory, then round-trip it through real JSON text.
+    mut config: json::JsonValue = json::JsonValue::new_object();
+    config.set("dice_sides", json::JsonValue::from_number(6.0));
+    config.set("rolls", json::JsonValue::from_number(5.0));
+    config.set("game_name", json::JsonValue::from_string("Turf Dice"));
+
+    immut configText: string = json::stringify(config);
+    io::print("Config as JSON: ");
+    io::printline(configText);
+
+    mut parsed: json::JsonValue = json::parse(configText) recover run {
+        io::printline("Could not parse the config we just wrote -- this should never happen.");
+        return 1;
+    };
+
+    immut sides: int = parsed.get_int("dice_sides");
+    immut rolls: int = parsed.get_int("rolls");
+    immut gameName: string = parsed.get_string("game_name");
+
+    io::print("Playing ");
+    io::print(gameName);
+    io::print(": rolling a ");
+    io::print(sides to string);
+    io::print("-sided die ");
+    io::print(rolls to string);
+    io::printline(" time(s).");
+
+    mut total: int = 0;
+    mut i: int = 0;
+    while i < rolls {
+        immut roll: int = random::random_int(1, sides);
+        io::print("  roll ");
+        io::print((i + 1) to string);
+        io::print(": ");
+        io::printline(roll to string);
+        total = total + roll;
+        i = i + 1;
+    }
+
+    io::print("Total: ");
+    io::printline(total to string);
+
+    // Report where we'd send the score, if this were a real client/server game.
+    immut scoreServer: string = net::resolve_hostname("localhost") recover produce "127.0.0.1";
+    io::print("Would report this score to ");
+    io::print(scoreServer);
+    io::printline(" if a score server were running.");
+
+    return 0;
+}

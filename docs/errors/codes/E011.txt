@@ -1,0 +1,27 @@
+Something about this code breaks one of Turf's basic rules
+
+This error covers a handful of specific rules that don't really belong under any of Turf's other, more specific errors. The exact message tells you which rule -- here are the ones you're most likely to actually run into:
+
+You can't call `main` yourself:
+
+    fn main(): int {
+        return 0;
+    }
+
+    main();   // not allowed -- main is your program's starting point, not a function you call
+
+`main` runs automatically when your program starts. Calling it again from inside your own code doesn't make sense, so Turf stops you.
+
+You also can't give `main` its own parameters:
+
+    fn main(x: int): int {   // not allowed
+        return 0;
+    }
+
+`main` always has the same fixed shape -- no parameters, just `fn main(): int`. If you need input from outside your program, that comes through other means, not through `main`'s own parameter list.
+
+If you're using a `compare`/`matches` block, every pattern you match against has to be something Turf can figure out at compile time, like a plain number -- not something computed while the program runs.
+
+If you happen to see a message that starts with "Internal error", that one's different -- it means the compiler itself hit a situation it wasn't expecting, which is a bug in Turf, not a mistake in your code. It's worth reporting rather than trying to work around.
+
+For everything else under this error, the message itself tells you exactly which rule got broken -- just follow what it says and you'll be past it in no time.

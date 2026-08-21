@@ -1,0 +1,33 @@
+TURF E056 -- ARGUMENT TYPE MISMATCH:
+
+CAUSE:
+  A function was called with an argument whose type doesn't match that
+  parameter's declared type. Turf checks every call's arguments against the
+  function's declared signature at compile time -- there is no implicit
+  numeric widening or silent coercion between unrelated types.
+
+CORRECT USAGE:
+    fn greet(name: string, times: int): void {
+        mut i: int = 0;
+        while i < times {
+            io::printline(name);
+            i = i + 1;
+        }
+    }
+
+    greet("Ada", 3);   // string, int -- matches the declaration
+
+INCORRECT:
+    greet(3, "Ada");
+    // ERROR: Type mismatch in call to 'greet'!
+    //   Parameter 'name' (argument 1) expects 'string', but got 'int'.
+
+    greet("Ada", "three");
+    // ERROR: Parameter 'times' (argument 2) expects 'int', but got 'string'.
+
+FIX:
+  Reorder or convert the arguments so each one matches its parameter's
+  declared type exactly. A numeric value can be converted to text with
+  `expr to string`; there is no built-in text-to-number parse yet, so a
+  `string` can't be passed where an `int`/`double` is expected without
+  first genuinely having a numeric value to give it.

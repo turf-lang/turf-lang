@@ -1,7 +1,0 @@
-// Error test: typeof() with no arguments (should fail at parse time)
-
-fn int main() {
-    io.printline(typeof())
-
-    return 0
-}

@@ -1,0 +1,17 @@
+You passed arguments to default(), but it never takes any
+
+`StructName::default()` is a special constructor that Turf generates for you automatically -- it just sets every field on the struct back to its zero value (0 for numbers, empty for strings, and so on). Because it doesn't do anything with input values, it never accepts any arguments at all, not even zero of some and some of others -- always exactly none.
+
+This is the correct way to call it:
+
+    mut p: Point = Point::default();
+
+Passing anything in triggers this error:
+
+    mut p: Point = Point::default(1, 2);   // ERROR: 'Point::default()' takes no arguments, but got 2
+
+If you want a struct built with specific starting values instead of all zeros, `default()` isn't the tool for that -- you want `StructName::new(...)` instead, which is where you (or whoever wrote the struct) define exactly what arguments it takes:
+
+    mut p: Point = Point::new(1, 2);
+
+Just swapping `default` for `new` (assuming the struct has a `.new` defined) is usually all it takes to fix this.

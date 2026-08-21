@@ -1,0 +1,27 @@
+// Regression test (Issue #180 follow-up): nested `do { } while(true)` where
+// only the INNER loop has a break. Mirrors the "Nested break" case
+// documented in CFG.cpp's hasUnbreakableLoop() doc comment (point 1), which
+// was proven for plain `while` -- this exercises the same shape for the
+// do-while sibling construct. The inner break only exits the inner
+// do-while (inner.end merges back into the outer cycle via
+// outer.dowhile.cond), so the OUTER loop's SCC still has no edge leaving the
+// cycle -- it must still be flagged unbreakable.
+//
+// Intentionally returns before ever reaching the loop so the test suite
+// doesn't actually hang (same technique as 28_infinite_do_while_true_warns.tr).
+
+fn main(): int {
+    mut x: int = 0;
+    if true {
+        return 0;
+    }
+    do {
+        do {
+            x = x + 1;
+            if x > 3 {
+                break;
+            }
+        } while (true);
+    } while (true);
+    return 0;
+}

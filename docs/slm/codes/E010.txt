@@ -1,0 +1,34 @@
+TURF E010 -- RECURSION WITHOUT BASE CASE:
+
+CAUSE:
+  A recursive function (one that calls itself) was detected with no base
+  case -- no path through the function that returns WITHOUT calling itself
+  again. Without a base case, every call recurses forever (in practice:
+  until the call stack overflows and the program crashes), so this is
+  caught as a compile-time error rather than left to fail at runtime.
+
+CORRECT USAGE:
+    fn factorial(n: int): int {
+        if n <= 1 {
+            return 1;          // base case -- stops the recursion
+        }
+        return n * factorial(n - 1);   // recursive case
+    }
+
+INCORRECT:
+    fn factorial(n: int): int {
+        return n * factorial(n - 1);
+        // ERROR: infinite recursion -- every call unconditionally calls
+        // itself again, with no path that ever just returns a value.
+    }
+
+WHAT THIS ERROR IS NOT:
+  - Not about whether the recursion actually terminates for every input at
+    RUNTIME (e.g. an `n` that never reaches the base case due to a logic
+    bug) -- this check is purely structural: does at least one path avoid
+    the recursive call entirely.
+
+FIX:
+  Add a condition (usually an `if`) that returns a plain value without
+  calling the function again, and make sure every recursive call is
+  genuinely moving toward that condition (e.g. `n - 1` moves toward `n <= 1`).

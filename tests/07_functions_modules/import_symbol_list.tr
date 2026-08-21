@@ -1,0 +1,10 @@
+// Regression test: `import module::[a, b, c];` pulls every listed name
+// into the current file's flat namespace in one statement.
+
+import io::[print, printline];
+
+fn main(): int {
+    print("a");
+    printline("b");
+    return 0;
+}

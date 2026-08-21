@@ -1,0 +1,75 @@
+TURF ENUMS:
+
+DECLARATION:
+    enum Color { Red, Green, Blue }
+
+  Variant names are comma-separated, no explicit values -- they're assigned
+  0, 1, 2, ... in declaration order automatically.
+
+ACCESS a variant with '::' (this operator is used nowhere else in the
+language today):
+    immut c: Color = Color::Red;
+
+COMPARE: enums do NOT support == / != or ordering operators (<, >, etc.)
+directly -- use a `compare` / `matches` block instead:
+    mut result: int = 0;
+    compare c {
+        matches Color::Red:
+            result = 1;
+        done
+        matches Color::Green:
+            result = 2;
+        done
+        matches Color::Blue:
+            result = 3;
+        done
+    }
+
+  RULES:
+  - Every `matches` arm's body ends with `done`.
+  - `otherwise:` (optional) must be the LAST arm, has no `done`, and
+    catches any variant not explicitly matched above it.
+  - EVERY variant must be covered, either by its own `matches` arm or by a
+    trailing `otherwise:` -- omitting one without `otherwise:` is a
+    compile-time error:
+      "Non-exhaustive enum comparison on 'Color'.
+       Missing variants:
+           Color::Blue"
+  - A duplicate `matches` pattern, or a duplicate/misplaced `otherwise:`,
+    is also a compile-time error.
+  - If every arm already `return`s and the compare is exhaustive, any code
+    AFTER the compare block in that function is unreachable (a warning,
+    not an error).
+
+  Trying to use == or ordering operators directly on an enum:
+    if (a < b) { }   // a, b: Color
+      // ERROR: "Cannot use ordering operators on enum type 'Color'. Cast
+      //         to int first: (a to int) < (b to int)"
+
+CASTING TO/FROM int:
+    immut n: int = c to int;         // get the underlying variant index
+    mut c2: Color = 1 to Color;      // construct from an index (1 = Green)
+
+  Casting an out-of-range integer LITERAL to an enum type is rejected at
+  compile time:
+    mut bad: Color = 99 to Color;
+      // ERROR: "Value 99 is out of range for enum 'Color' (valid range:
+      //         0 to 2)."
+  (A variable-valued cast, `someInt to Color` where someInt isn't a
+  literal, can't be checked this way and is allowed through -- an
+  out-of-range value there is only caught if something else notices.)
+
+NAMESPACE: enum names live in the SAME flat namespace as struct names,
+shared by the current file and every imported module (see structs.txt).
+Two different modules declaring a same-named enum is a compile-time error.
+Variant names must be unique WITHIN one enum:
+  "Enum 'Color' already has a variant named 'Red'." -- rename one of them.
+
+COMMON MISTAKES:
+- Using == or < / > directly on enum values instead of `compare`/`matches`.
+- Forgetting `done` at the end of a `matches` arm's body.
+- Leaving a variant uncovered with no `otherwise:` arm.
+- Putting `otherwise:` before other `matches` arms, or writing it twice.
+- Casting an out-of-range literal to an enum type.
+- Assuming `enum` variants can hold associated data -- they can't; a Turf
+  enum is a plain named integer, nothing more.

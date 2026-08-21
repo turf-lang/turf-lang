@@ -1,0 +1,9 @@
+// RUNTIME_ABORT_EXPECTED
+// test::assert_eq() with mismatched values actually aborts at runtime --
+// must compile successfully, then abort at runtime.
+import test;
+
+fn main(): int {
+    test::assert_eq(5, 6, "5 should never equal 6");
+    return 0;
+}

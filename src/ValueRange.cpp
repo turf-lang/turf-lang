@@ -1,13 +1,31 @@
 #include "ValueRange.h"
 #include "AST.h"
-#include "SymbolTable.h"
 #include "Errors.h"
 
+#include <functional>
 #include <optional>
 #include <queue>
 #include <unordered_map>
 
-using ConstMap = std::unordered_map<SymbolID, std::optional<long long>>;
+// Use raw VariableSymbol* as the constant-tracking key, mirroring the fix
+// already applied to DefiniteAssignmentPass (see Analysis.cpp). This pass
+// runs inside FuncDefExprAST::codegen() AFTER Body->codegen() has already
+// fully executed -- which means every EnterScope()/ExitScope() pair opened
+// by nested BlockExprAST::codegen() calls (including the function's own
+// top-level body block, see BlockExprAST::codegen()) has already unwound by
+// the time this pass runs. GlobalSymbolTable->LookupSymbol(name) walks the
+// *current* scope stack, so at this point it can no longer find ANY local
+// variable of the function being analyzed -- not just ones declared in
+// nested blocks, but even top-level ones, since the body's own block scope
+// has already been popped. That silently disabled this pass's constant
+// tracking (and therefore its compile-time out-of-bounds detection)
+// entirely: `mut i: int = 5; arr[i]` at the very top of a function body
+// never fired a diagnostic, only the separate runtime bounds check did.
+// VariableSymbol* (populated by the Resolver via ResolvedSymbol on the AST
+// node itself) has no such lifetime issue -- it's a shared_ptr-owned object
+// that lives for as long as the AST does, independent of the SymbolTable's
+// scope stack.
+using ConstMap = std::unordered_map<const VariableSymbol *, std::optional<long long>>;
 
 static std::optional<long long> evalConstExpr(const ExprAST *E, const ConstMap &M) {
   if (!E) return std::nullopt;
@@ -16,10 +34,9 @@ static std::optional<long long> evalConstExpr(const ExprAST *E, const ConstMap &
     return std::nullopt;
   }
   if (auto V = dynamic_cast<const VariableExprAST *>(E)) {
-    if (!GlobalSymbolTable) return std::nullopt;
-    Symbol *S = GlobalSymbolTable->LookupSymbol(V->getName());
+    const VariableSymbol *S = V->getResolvedSymbol();
     if (!S) return std::nullopt;
-    auto it = M.find(S->ID);
+    auto it = M.find(S);
     if (it != M.end()) return it->second;
     return std::nullopt;
   }
@@ -43,7 +60,14 @@ static std::optional<long long> evalConstExpr(const ExprAST *E, const ConstMap &
   return std::nullopt;
 }
 
-void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialAssigned) {
+void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialAssigned*/) {
+  // InitialAssigned (parameter SymbolIDs from the codegen-time SymbolTable)
+  // is intentionally unused: parameters never have a statically-known
+  // constant value anyway, so there is nothing useful to seed IN[] with --
+  // an absent entry in ConstMap already means "unknown", same as the old
+  // `= std::nullopt` seeding did. Kept in the signature to match
+  // DefiniteAssignmentPass::runOnCFG's identical (also-unused) parameter,
+  // and so Codegen.cpp's call site needs no changes.
   const auto &Blocks = Cfg.getBlocks();
   size_t N = Blocks.size();
   if (N == 0) return;
@@ -52,12 +76,6 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialAssi
   for (size_t i = 0; i < N; ++i) index[Blocks[i].get()] = i;
 
   std::vector<ConstMap> IN(N), OUT(N);
-
-  TurfBasicBlock *Entry = Cfg.getEntryBlock();
-  if (Entry) {
-    size_t ei = index[Entry];
-    for (auto id : InitialAssigned) IN[ei][id] = std::nullopt; // parameters unknown values
-  }
 
   std::queue<size_t> work;
   for (size_t i = 0; i < N; ++i) work.push(i);
@@ -80,7 +98,7 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialAssi
           // join: keep value only if equal in both maps, else unknown
           ConstMap tmp;
           for (const auto &kv : newIN) {
-            SymbolID sid = kv.first;
+            const VariableSymbol *sid = kv.first;
             auto it = OUT[pi].find(sid);
             if (it != OUT[pi].end() && kv.second.has_value() && it->second.has_value() && kv.second == it->second) {
               tmp[sid] = kv.second;
@@ -105,18 +123,16 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialAssi
             auto idxVal = evalConstExpr(AA->getIndex(), cur);
             if (idxVal.has_value()) {
               if (auto BaseVar = dynamic_cast<const VariableExprAST *>(AA->getBase())) {
-                if (GlobalSymbolTable) {
-                  Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName());
-                  if (S && S->Type && S->Type->isArray()) {
-                    const ArrayType *AT = dynamic_cast<const ArrayType *>(S->Type.get());
-                    if (AT) {
-                      int sz = AT->getSize();
-                      if (sz > 0) {
-                        long long iv = *idxVal;
-                        if (iv < 0 || iv >= sz) {
-                          ArrayBoundsError err(AA->getLoc(), BaseVar->getName(), iv, sz);
-                          err.raise();
-                        }
+                const VariableSymbol *S = BaseVar->getResolvedSymbol();
+                if (S && S->Type && S->Type->isArray()) {
+                  const ArrayType *AT = dynamic_cast<const ArrayType *>(S->Type.get());
+                  if (AT) {
+                    int sz = AT->getSize();
+                    if (sz > 0) {
+                      long long iv = *idxVal;
+                      if (iv < 0 || iv >= sz) {
+                        ArrayBoundsError err(AA->getLoc(), BaseVar->getName(), iv, sz);
+                        err.raise();
                       }
                     }
                   }
@@ -140,25 +156,40 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialAssi
             checkAccesses(F->getCallee());
           } else if (auto ArrA = dynamic_cast<const ArrayAccessExprAST *>(N)) {
             checkAccesses(ArrA->getBase()); checkAccesses(ArrA->getIndex());
-          } else if (auto ArrAs = dynamic_cast<const ArrayAssignExprAST *>(N)) {
-            checkAccesses(ArrAs->getIndex()); checkAccesses(ArrAs->getRHS());
-          } else if (auto R = dynamic_cast<const ReturnExprAST *>(N)) checkAccesses(R->getVal());
+          } else if (auto R = dynamic_cast<const ReturnExprAST *>(N)) {
+            checkAccesses(R->getVal());
+          } else if (auto CA = dynamic_cast<const CompoundAssignmentExprAST *>(N)) {
+            checkAccesses(CA->getLHS()); checkAccesses(CA->getRHS());
+          } else if (auto P = dynamic_cast<const PostfixExprAST *>(N)) {
+            checkAccesses(P->getOperand());
+          } else if (auto M = dynamic_cast<const MethodCallExprAST *>(N)) {
+            checkAccesses(M->getBase()); for (const auto &Arg : M->getArgs()) checkAccesses(Arg.get());
+          } else if (auto FA = dynamic_cast<const FieldAccessExprAST *>(N)) {
+            checkAccesses(FA->getBase());
+          } else if (auto AL = dynamic_cast<const ArrayLiteralExprAST *>(N)) {
+            for (const auto &E2 : AL->getElements()) checkAccesses(E2.get());
+          } else if (auto AD = dynamic_cast<const ArrayDeclExprAST *>(N)) {
+            for (const auto &E2 : AD->getInitList()) checkAccesses(E2.get());
+            if (AD->getInitExpr()) checkAccesses(AD->getInitExpr().get());
+          } else if (auto C = dynamic_cast<const CastExprAST *>(N)) {
+            checkAccesses(C->getOperand());
+          }
         };
         checkAccesses(Stmt);
 
       // Handle var decl
       if (auto Vd = dynamic_cast<VarDeclExprAST *>(Stmt)) {
         auto val = evalConstExpr(Vd->getInitializer(), cur);
-        Symbol *S = GlobalSymbolTable ? GlobalSymbolTable->LookupSymbol(Vd->getName()) : nullptr;
-        if (S) cur[S->ID] = val;
+        const VariableSymbol *S = Vd->getResolvedSymbol();
+        if (S) cur[S] = val;
         continue;
       }
       if (auto A = dynamic_cast<AssignmentExprAST *>(Stmt)) {
         // LHS variable assign
         if (auto L = dynamic_cast<const VariableExprAST *>(A->getLHS())) {
           auto val = evalConstExpr(A->getRHS(), cur);
-          Symbol *S = GlobalSymbolTable ? GlobalSymbolTable->LookupSymbol(L->getName()) : nullptr;
-          if (S) cur[S->ID] = val;
+          const VariableSymbol *S = L->getResolvedSymbol();
+          if (S) cur[S] = val;
         }
         continue;
       }
@@ -175,5 +206,4 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> &InitialAssi
     }
   }
 
-  // Currently no diagnostics emitted; results are available for later passes.
 }

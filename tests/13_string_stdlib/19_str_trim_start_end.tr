@@ -1,0 +1,30 @@
+// tests/13_string_stdlib/19_str_trim_start_end.tr
+// Tests strings::trim_start and strings::trim_end -- one-sided variants of
+// the existing strings::trim.
+
+import io;
+import strings;
+
+import test;
+fn main(): int {
+    // trim_start
+    test::assert(strings::trim_start("   hello") == "hello", "trim_start: leading spaces removed");
+    test::assert(strings::trim_start("hello   ") == "hello   ", "trim_start: trailing spaces preserved");
+    test::assert(strings::trim_start("  hello  ") == "hello  ", "trim_start: only leading side stripped");
+    test::assert(strings::trim_start("hello") == "hello", "trim_start: no whitespace (identity)");
+    test::assert(strings::trim_start("     ") == "", "trim_start: all-whitespace -> empty");
+    test::assert(strings::trim_start("") == "", "trim_start: empty string -> empty");
+    test::assert(strings::trim_start("\t\nhello") == "hello", "trim_start: tab/newline leading");
+
+    // trim_end
+    test::assert(strings::trim_end("hello   ") == "hello", "trim_end: trailing spaces removed");
+    test::assert(strings::trim_end("   hello") == "   hello", "trim_end: leading spaces preserved");
+    test::assert(strings::trim_end("  hello  ") == "  hello", "trim_end: only trailing side stripped");
+    test::assert(strings::trim_end("hello") == "hello", "trim_end: no whitespace (identity)");
+    test::assert(strings::trim_end("     ") == "", "trim_end: all-whitespace -> empty");
+    test::assert(strings::trim_end("") == "", "trim_end: empty string -> empty");
+    test::assert(strings::trim_end("hello\r\n") == "hello", "trim_end: CRLF trailing");
+
+    io::printline("19 PASS: strings::trim_start / strings::trim_end");
+    return 0;
+}

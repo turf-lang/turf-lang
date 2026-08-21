@@ -1,0 +1,13 @@
+// Regression test: found alongside the module-qualifier validation work.
+// validateNamedType() recursed into a GenericType's own TYPE ARGUMENTS
+// (see fail_unknown_generic_type_arg.tr) but never validated the
+// generic's own BASE name at all -- `NonExistentGeneric<int>` used to
+// slip through "unknown type" validation entirely and only surface later
+// as an unrelated, misattributed type-mismatch error far from the real
+// cause. Must now be a clean "unknown type" error, same as any other
+// undeclared type name.
+
+fn main(): int {
+    mut x: NonExistentGeneric<int> = 5;
+    return 0;
+}

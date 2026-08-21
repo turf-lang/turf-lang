@@ -1,0 +1,40 @@
+// Test: Structs containing string fields, string concatenation of struct fields, and character indexing
+import io;
+
+import test;
+struct Book {
+    title: string,
+    author: string,
+    year: int
+}
+
+fn Book.new(title: string, author: string, year: int): void {
+    self.title = title;
+    self.author = author;
+    self.year = year;
+}
+
+// (issue #238) `b: &Book` -- a plain function may never have a raw ptr/T*
+// parameter, even inside `unsafe { }`; used to be `b: Book*`.
+fn format_book(b: &Book): string {
+    return b.title + " by " + b.author + " (" + (b.year to string) + ")";
+}
+
+fn main(): int {
+    mut b: Book = Book::new("The Turf Programming Language", "Ada Lovelace", 2026);
+
+    // Concatenate struct string fields with integer field
+    mut formatted: string = format_book(&b);
+    test::assert(formatted == "The Turf Programming Language by Ada Lovelace (2026)", "Struct formatting failed");
+
+    // Check equality on struct fields
+    test::assert(b.author == "Ada Lovelace", "Author equality failed");
+    test::assert(b.title != "C++", "Title inequality failed");
+
+    // Check character access on struct string field
+    mut initial: int = b.author[0];
+    test::assert(initial == 65, "Author first initial should be 65 ('A')");
+
+    io::printline("11_struct_string_fields passed!");
+    return 0;
+}

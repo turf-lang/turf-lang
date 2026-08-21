@@ -1,0 +1,24 @@
+Turf doesn't recognize the name you put before '::'
+
+`::` always needs something real on its left side -- an enum, a struct, or an imported module. This error means Turf looked at the name you wrote before `::` and couldn't match it to any of those three things at all. That's a slightly different problem than "the module exists but doesn't have that function" (which is a separate error) -- here, the very first name wasn't recognized.
+
+Here's correct usage of all three kinds:
+
+    import io;
+    io::printline("hello");
+
+    enum Color { Red, Green, Blue }
+    immut c: Color = Color::Red;
+
+    mut p: Point = Point::new(1, 2);
+
+The most common way to trip this is forgetting the import line:
+
+    io::printline("hello");
+    // ERROR: 'io' isn't a known enum, struct, or module.
+
+Even though `io` is a real module in the standard library, Turf won't know that unless you write `import io;` near the top of your file first.
+
+A couple of other things to check if you did remember the import: is the name spelled exactly right (case matters)? And is `LeftName` actually a variable holding a value rather than a type name -- like `p::sum()` where `p` is a `Point` you already created? That's a slightly different mistake (you'd want `.` there instead of `::`), and Turf usually tells you that more specifically when it can recognize `p` as a variable.
+
+Once the name before `::` is spelled correctly and (if it's a module) actually imported, this error clears up right away.

@@ -59,8 +59,12 @@ public:
   Sandbox &operator=(Sandbox &&) = default;
 
   // Fix Application
-  // Apply a single-line fix at the given line number
-  bool applyFix(int lineNumber, const std::string &newLine);
+  // Replace the 1-based inclusive line range [startLine, endLine] with
+  // newText. newText may itself contain embedded '\n's (a multi-line block);
+  // it is split on those and spliced in, so the replacement can have a
+  // different number of lines than the range it replaces. For a
+  // single-line edit, pass startLine == endLine.
+  bool applyFix(int startLine, int endLine, const std::string &newText);
 
   // Validation
   // Re-validate the entire sandbox source (parse + semantic check)
@@ -136,8 +140,10 @@ private:
   void updateSymbolTableForEdit(int lineNumber, const std::string &newLine,
                                 EditKind kind);
 
-  // Apply source-level fix: replace line at lineNumber with newLine
-  void applySourceFix(int lineNumber, const std::string &newLine);
+  // Apply source-level fix: splice the line range [startLine, endLine]
+  // (1-based, inclusive) out and insert newLines in its place.
+  void applySourceFix(int startLine, int endLine,
+                      const std::vector<std::string> &newLines);
 
   // Update AST nodes that reference the modified line (stub)
   void updateASTAfterFix(int lineNumber);
@@ -173,10 +179,17 @@ private:
 // Create a sandbox from the current main compiler state
 std::unique_ptr<Sandbox> CreateSandbox();
 
-// Validate and optionally commit an SLM fix in a sandbox
+// Validate and optionally commit an SLM fix in a sandbox.
+// `errorLine` is the line the original diagnostic fired on -- used only to
+// check that diagnostic is actually gone afterward (isOriginalErrorResolved).
+// `applyLine`/`applyEndLine` are the 1-based inclusive line range fixedText
+// gets patched into -- normally both equal errorLine (a single-line edit),
+// but may differ when suggestion.target_line/end_line point at a
+// declaration/related site or a multi-line block instead (see
+// AISuggestion::target_line and AISuggestion::end_line).
 // Returns true if the fix was applied and committed successfully
-bool ApplyAndValidateFix(Sandbox &sandbox, int lineNumber,
-                         const std::string &fixedLine,
+bool ApplyAndValidateFix(Sandbox &sandbox, int errorLine, int applyLine,
+                         int applyEndLine, const std::string &fixedText,
                          const SLM::AISuggestion &suggestion);
 
 #endif

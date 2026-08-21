@@ -1,0 +1,19 @@
+You returned a value that doesn't match the function's declared return type
+
+When you write `fn square(n: int): int { ... }`, that `: int` at the end is a promise -- every `return` inside the function has to hand back a real `int`. Turf checks that promise at compile time.
+
+This keeps the promise:
+
+    fn square(n: int): int {
+        return n * n;
+    }
+
+This breaks it:
+
+    fn square(n: int): int {
+        return "nine";
+    }
+
+Turf tells you both halves of the mismatch -- what the function is declared to return, and what you actually tried to return -- so you can see immediately which side needs to change.
+
+There are two honest ways to fix this: change what you're returning so it's really the declared type (maybe you meant `n` or `n * n`, not a string), or change the function's own `: Type` if the value you're returning was correct all along and the declaration is what's actually wrong. Either is a completely normal thing to need while you're still shaping out a function -- it just means the signature and the body haven't quite agreed with each other yet.

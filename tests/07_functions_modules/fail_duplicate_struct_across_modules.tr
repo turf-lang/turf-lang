@@ -1,0 +1,26 @@
+// Regression test: struct (and enum) names live in ONE flat namespace shared
+// by the current file and every transitively-imported module -- unlike
+// functions, which are namespaced per-module (this is also why List<int>
+// works without a `list::` prefix; see list.tr). Importing two unrelated
+// modules that happen to declare a same-named struct must be rejected with a
+// clean DuplicateTypeNameError at Resolver time.
+//
+// Before the fix, this collision went undetected all the way to Codegen:
+// LLVM's StructType::create refuses two distinct opaque types sharing one
+// name, silently renames the second to "Point.1", and the GEP/return-type
+// instructions already emitted against the frontend name "Point" ended up
+// pointing at the wrong LLVM type -- producing a crash reported as "Internal
+// compiler error: generated LLVM IR is invalid... this is a compiler bug,
+// please report it," which is misleading: it's a legitimate, avoidable
+// naming collision, not a compiler bug.
+//
+// See dup_struct_a_module.tr / dup_struct_b_module.tr for the two
+// differently-shaped 'Point' structs this imports.
+
+import io;
+import dup_struct_a_module;
+import dup_struct_b_module;
+
+fn main(): int {
+    return 0;
+}

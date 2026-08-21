@@ -1,0 +1,15 @@
+// Regression test (issue #238): declaring a raw pointer-typed variable
+// (`ptr`/`T*`) outside an `unsafe { }` block must be rejected -- this is
+// the "declaration" leg of the three explicitly gated uses (declaration,
+// cast, dereference) FINAL_SPRINT.md's Track A specifies. `lib/std` is
+// exempt from this gate, but this file is ordinary user code, so it
+// isn't. See also fail_cast_raw_pointer_outside_unsafe.tr,
+// fail_struct_raw_ptr_field_outside_unsafe.tr, and
+// fail_fn_signature_raw_pointer_disallowed.tr for the other three gated
+// shapes, and 18_unsafe_block_and_safe_reference.tr for the corresponding
+// passing cases.
+
+fn main(): int {
+    mutable p: ptr = null;
+    return 0;
+}

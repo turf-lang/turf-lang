@@ -1,0 +1,43 @@
+// Regression test: a UFCS free function declared with an unsized array
+// parameter (`arr: int[]`) must be reachable via `arr.method()` dot-call
+// syntax for a receiver of ANY concrete array size -- not just the specific
+// size the receiver happened to be tested with.
+//
+// This exercises two real bugs found and fixed while building lib/std/
+// array.tr's UFCS helpers:
+// 1. TypeChecker::tryUFCSFallback()'s receiver matching used plain
+//    sameTypeExact() (ArrayType::getName() includes the size, e.g. "int[5]"
+//    != "int[]"), so a concretely-sized array variable could NEVER match an
+//    unsized-array UFCS candidate at all -- fixed via
+//    ufcsReceiverTypeMatches(), which mirrors typesCompatible()'s existing
+//    unsized-matches-any-size array rule.
+// 2. Codegen's UFCS dispatch branch loaded the receiver by value
+//    (Base->codegen(), an LLVM aggregate for a fixed-size array) instead of
+//    by address (Base->codegenLValue(), a pointer) -- the callee's real
+//    LLVM parameter type for an unsized array is an opaque pointer, so the
+//    aggregate value was passed into the wrong-typed argument slot. Fixed by
+//    special-casing unsized-array receivers to use codegenLValue(),
+//    mirroring FuncCallExprAST::codegen()'s identical existing special case
+//    for ordinary calls.
+
+import test;
+
+fn total(arr: int[], len: int): int {
+    mut sum: int = 0;
+    mut i: int = 0;
+    while i < len {
+        sum += arr[i];
+        i++;
+    }
+    return sum;
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    test::assert_eq(a.total(3), 6, "3-element array receiver");
+
+    mut b: int[7] = [1, 2, 3, 4, 5, 6, 7];
+    test::assert_eq(b.total(7), 28, "7-element array receiver, same UFCS candidate");
+
+    return 0;
+}

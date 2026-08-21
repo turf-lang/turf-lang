@@ -1,0 +1,22 @@
+// Regression test (Issue #180 follow-up): LivenessAnalysisPass must reach
+// statements inside a do-while's body the same way it already does for
+// while/for bodies -- individual body statements land directly in
+// `dowhile.body`'s own block (CFGBuilder::visitDoWhile() -> visitExpr() on
+// the body), so per-block Gen/Kill/dead-store detection needs no special
+// casing for the do-while construct itself. Mirrors
+// 15_dead_store_in_loop.tr's for-loop version.
+//
+// `temp` is written every iteration but never read anywhere (in the loop or
+// after it) -> dead store warning on each iteration's assignment.
+// `sum` is correctly live-through (read by the loop condition via the
+// `count` it also depends on) and must NOT be flagged.
+fn main(): int {
+    mutable sum: int = 0;
+    mutable count: int = 0;
+    do {
+        mutable temp: int = count * 2;
+        sum += 1;
+        count += 1;
+    } while count < 5;
+    return 0;
+}

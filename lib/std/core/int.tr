@@ -1,0 +1,56 @@
+// ─── int.tr ──────────────────────────────────────────────────────────────────
+// UFCS-callable helpers for `int` (STRING_UFCS_OPERATOR_CHAR_RFC.md §5.3).
+// Part of the prelude -- always in scope, no explicit `import int;` needed.
+//
+// Arithmetic helpers already covered by lib/std/math.tr (abs/min/max/clamp/
+// power) are not duplicated here.
+
+fn is_even(n: int): bool {
+    return n % 2 == 0;
+}
+
+fn is_odd(n: int): bool {
+    return n % 2 != 0;
+}
+
+fn is_positive(n: int): bool {
+    return n > 0;
+}
+
+fn is_negative(n: int): bool {
+    return n < 0;
+}
+
+fn is_zero(n: int): bool {
+    return n == 0;
+}
+
+// gcd/lcm: not provided anywhere else in the stdlib. gcd(0, 0) returns 0.
+fn gcd(a: int, b: int): int {
+    mut x: int = a;
+    mut y: int = b;
+    if x < 0 {
+        x = 0 - x;
+    }
+    if y < 0 {
+        y = 0 - y;
+    }
+    while y != 0 {
+        mut t: int = y;
+        y = x % y;
+        x = t;
+    }
+    return x;
+}
+
+fn lcm(a: int, b: int): int {
+    if a == 0 || b == 0 {
+        return 0;
+    }
+    mut g: int = a.gcd(b);
+    mut result: int = a / g * b;
+    if result < 0 {
+        result = 0 - result;
+    }
+    return result;
+}

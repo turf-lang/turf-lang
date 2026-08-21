@@ -1,0 +1,6 @@
+// Companion module A (no main()) -- declares a UFCS candidate with the
+// same name+signature as ufcs_ambiguous_b_module.tr's, to trigger the
+// universal conflict rule when BOTH are imported by the same file.
+fn describe_int(x: int): string {
+    return "from A";
+}

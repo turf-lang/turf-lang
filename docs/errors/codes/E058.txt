@@ -1,0 +1,33 @@
+Your compare block isn't structured quite right
+
+A `compare` block in Turf looks a bit like a switch statement: you give it a value, then list `matches <value>:` arms to handle each case, each one closed off with `done`. Turf found something wrong with the shape of this particular `compare` block -- not with the values or types involved, just with how the arms themselves are written.
+
+A correctly structured compare looks like this:
+
+    compare x {
+        matches 1:
+            result = 1;
+        done
+        matches 3:
+            result = 3;
+        done
+        otherwise:
+            result = 0;
+        done
+    }
+
+This error usually comes from one of three mistakes. First, forgetting to close an arm with `done` before starting the next one:
+
+    compare x {
+        matches 1:
+            result = 1;
+        matches 2:
+            result = 2;
+        done
+    }
+
+Here, the first `matches 1:` arm never got its own `done` before `matches 2:` started, so Turf can't tell where one arm ends and the next begins.
+
+Second and third: using more than one `otherwise:` arm, or putting `otherwise:` somewhere other than last. `otherwise` is your catch-all for "none of the above matched," so it only makes sense as the final arm -- Turf won't let you have two of them, or one in the middle with more arms after it.
+
+The fix is almost always to slow down and check that every `matches` arm has its own `done`, and that if you're using `otherwise` at all, there's exactly one, at the very end. Once the shape is right, the error goes away and the block behaves exactly as you'd expect.

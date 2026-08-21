@@ -1,0 +1,17 @@
+An exported constant needs a value Turf can know right away
+
+`export immut` shares a constant with every file that imports it, but it does that by baking the literal value directly into each importing file at compile time -- there's no shared storage behind the scenes. That means the value has to be something Turf can figure out immediately, like a plain number, string, or true/false, not something computed from another variable or a function call.
+
+    immut base: int = 10;
+    export immut total: int = base * 2;
+
+Even though `base * 2` is obviously 20 to a person reading this, Turf's exported constants can only hold a literal value written directly, not an expression -- even a simple one like this. The fix is just to write out the actual value:
+
+    export immut total: int = 20;
+
+If the real value genuinely needs to be computed (not just a simple literal you can write by hand), it can't be an exported constant. Instead, keep it as a normal (non-exported) variable and compute it wherever it's actually used:
+
+    immut base: int = 10;
+    immut total: int = base * 2;   // fine -- not exported, so any expression works
+
+This is a small tradeoff for how `export immut` works, but it's a fair one: it means every file that imports a constant gets a value with zero runtime cost, right there at compile time.

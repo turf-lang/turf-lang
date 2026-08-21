@@ -1,0 +1,92 @@
+// Proves a Turf program can drive LLVM's C API (llvm-c -- NOT the C++ API
+// this compiler's own src/Codegen.cpp uses internally, which isn't
+// FFI-reachable at all) directly via `extern fn`: creating a real LLVM
+// context and module, building a real function's IR body
+// instruction-by-instruction through the C API's builder functions, and
+// printing the resulting IR text back out.
+//
+// Why this matters: docs/planning/ROADMAP_v1.0.0.md's Phase 7 describes
+// eventually rewriting the Turflang compiler itself in Turflang
+// (self-hosting). This file is architectural validation for the natural
+// follow-on question -- once self-hosted, how would NEW compiler features
+// or backends get built without ever touching C++ again? Answer,
+// demonstrated concretely here: bind llvm-c from ordinary Turf code via
+// `extern fn`, the exact same FFI mechanism every other stdlib module
+// (io.tr, net.tr, mem.tr, ...) already uses to wrap C libraries. Nothing
+// about this technique is hypothetical or LLVM-specific -- it's the same
+// "wrap a C API behind extern fn" pattern this whole codebase already
+// leans on, just pointed at LLVM's own C API instead of libc/POSIX.
+//
+// Run it:
+//   turf showcase/llvm_ffi_selfhost_demo.tr -o llvm_ffi_demo
+//   ./llvm_ffi_demo
+//
+// Links against libLLVM.so via `extern from "LLVM" fn ...` (the same
+// `extern from "libname" fn` mechanism math.tr uses for `extern from "m"
+// fn sqrt(...)`, just pointed at a different library). Confirmed this
+// environment's libLLVM.so exports the plain llvm-c ABI symbols this file
+// needs (versioned `LLVM_22.1`, e.g. `LLVMModuleCreateWithNameInContext`)
+// via `nm -D /usr/lib/libLLVM.so`; headers at /usr/include/llvm-c/Core.h
+// for reference (not included by Turf -- these `extern fn` declarations
+// below are Turf's own restatement of the same C signatures, exactly like
+// every other extern fn binding in this codebase).
+//
+// Every LLVM-C handle type (LLVMContextRef, LLVMModuleRef, LLVMBuilderRef,
+// LLVMValueRef, LLVMTypeRef, LLVMBasicBlockRef) is just a typedef'd opaque
+// pointer in the C API -- llvm-c was designed from the start to be a
+// C-ABI-stable FFI surface, which is exactly why it (not the C++ API) is
+// the right thing to bind from a self-hosted compiler. Every one of those
+// handle types maps directly onto Turf's `ptr` below.
+
+extern from "LLVM" fn LLVMContextCreate(): ptr;
+extern from "LLVM" fn LLVMContextDispose(ctx: ptr): void;
+extern from "LLVM" fn LLVMModuleCreateWithNameInContext(id: string, ctx: ptr): ptr;
+extern from "LLVM" fn LLVMDisposeModule(m: ptr): void;
+extern from "LLVM" fn LLVMInt64TypeInContext(ctx: ptr): ptr;
+extern from "LLVM" fn LLVMFunctionType(returnType: ptr, paramTypes: ptr, paramCount: int, isVarArg: int): ptr;
+extern from "LLVM" fn LLVMAddFunction(m: ptr, name: string, fnType: ptr): ptr;
+extern from "LLVM" fn LLVMAppendBasicBlockInContext(ctx: ptr, theFn: ptr, name: string): ptr;
+extern from "LLVM" fn LLVMCreateBuilderInContext(ctx: ptr): ptr;
+extern from "LLVM" fn LLVMPositionBuilderAtEnd(builder: ptr, block: ptr): void;
+extern from "LLVM" fn LLVMConstInt(intTy: ptr, n: int, signExtend: int): ptr;
+extern from "LLVM" fn LLVMBuildAdd(builder: ptr, lhs: ptr, rhs: ptr, name: string): ptr;
+extern from "LLVM" fn LLVMBuildRet(builder: ptr, v: ptr): ptr;
+extern from "LLVM" fn LLVMPrintModuleToString(m: ptr): string;
+extern from "LLVM" fn LLVMDisposeBuilder(builder: ptr): void;
+
+import io;
+
+// (issue #238) Every `ptr`-typed local below needs `unsafe { }` around its
+// declaration (FINAL_SPRINT.md's Track A "Caller-side locals" rule) --
+// the `extern fn`/`extern from` calls themselves stay ordinary, ungated
+// calls (FFI declarations are exempt regardless of where they're used).
+fn main(): int {
+    unsafe {
+        mut ctx: ptr = LLVMContextCreate();
+        mut mod: ptr = LLVMModuleCreateWithNameInContext("turf_selfhost_demo", ctx);
+
+        // Build: define i64 @answer() { entry: %sum = add i64 19, 23  ret i64 %sum }
+        mut i64Ty: ptr = LLVMInt64TypeInContext(ctx);
+        mut fnType: ptr = LLVMFunctionType(i64Ty, null, 0, 0);
+        mut answerFn: ptr = LLVMAddFunction(mod, "answer", fnType);
+
+        mut entry: ptr = LLVMAppendBasicBlockInContext(ctx, answerFn, "entry");
+        mut builder: ptr = LLVMCreateBuilderInContext(ctx);
+        LLVMPositionBuilderAtEnd(builder, entry);
+
+        mut lhs: ptr = LLVMConstInt(i64Ty, 19, 0);
+        mut rhs: ptr = LLVMConstInt(i64Ty, 23, 0);
+        mut sum: ptr = LLVMBuildAdd(builder, lhs, rhs, "sum");
+        LLVMBuildRet(builder, sum);
+
+        immut ir: string = LLVMPrintModuleToString(mod);
+        io::printline("--- IR built entirely from Turf, via llvm-c FFI ---");
+        io::printline(ir);
+
+        LLVMDisposeBuilder(builder);
+        LLVMDisposeModule(mod);
+        LLVMContextDispose(ctx);
+    }
+
+    return 0;
+}

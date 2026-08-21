@@ -1,0 +1,48 @@
+// tests/13_string_stdlib/24_str_builder_no_heap_corruption.tr
+// Regression test: a compiler bug (src/CodegenVar.cpp's
+// AssignmentExprAST::codegen()) made every string-index assignment
+// (`buf[i] = someIntExpr;`) store a full 8-byte i64 at what is actually a
+// 1-byte `i8` slot -- silently overwriting 7 bytes past every character
+// written. This affected substring() and everything built on it
+// (trim*/to_upper/to_lower/pad_left/pad_right/replace/split), and
+// reliably corrupted glibc's heap metadata (a `malloc.c:2199` fatal error
+// on a LATER, unrelated allocation -- not at the corrupting call itself).
+// Confirmed to reproduce with a plain runtime-built string (no networking,
+// no List<string> needed) once it crossed roughly ~55 bytes; this test
+// exercises substring/split/trim on a value popped from a List<string>
+// (the exact repro shape originally reported) at a length well past that
+// threshold, and checks the RESULT is byte-correct, not just "didn't
+// crash" -- a truncated store could silently corrupt content without
+// aborting, depending on heap layout.
+
+import io;
+import strings;
+import list::List;
+
+import test;
+fn main(): int {
+    mut lines: List<string> = List::default();
+    lines.push("Turf compiles directly to native code, with no VM or runtime in the loop");
+    immut line: string = lines.pop();
+
+    immut trimmed: string = strings::trim(line);
+    test::assert(trimmed == line, "trim: no incidental whitespace, should be unchanged");
+    test::assert(strings::length(trimmed) == 72, "trim: correct length after heap-corruption fix");
+
+    immut sub: string = strings::substring(line, 0, 21);
+    test::assert(sub == "Turf compiles directl", "substring: exact byte-correct slice");
+
+    mut parts: List<string> = strings::split(line, ", ");
+    test::assert(parts.length() == 2, "split: two pieces on a mid-string delimiter");
+    test::assert(parts.data[0] == "Turf compiles directly to native code", "split: first piece exact");
+    test::assert(parts.data[1] == "with no VM or runtime in the loop", "split: second piece exact");
+
+    // Padded strings write one byte at a time too (pad_left/pad_right) --
+    // same write path, same corruption risk, checked here for good measure.
+    immut padded: string = strings::pad_right(line, 90, '.');
+    test::assert(strings::length(padded) == 90, "pad_right: correct final length");
+    test::assert(strings::starts_with(padded, line), "pad_right: original content preserved");
+
+    io::printline("24 PASS: string-builder functions on a runtime-length string, no heap corruption");
+    return 0;
+}

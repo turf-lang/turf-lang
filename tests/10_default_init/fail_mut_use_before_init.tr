@@ -1,0 +1,6 @@
+// Test: reading a mut primitive before any assignment — must fail
+fn main(): int {
+    mut x: int;
+    mut y: int = x;
+    return 0;
+}

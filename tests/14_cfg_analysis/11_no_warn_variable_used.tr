@@ -1,0 +1,6 @@
+// Regression test (#186): variable read before function exits → no warning.
+fn main(): int {
+    mutable x: int = 5;
+    mutable y: int = x + 1;
+    return 0;
+}

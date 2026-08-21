@@ -1,0 +1,15 @@
+You used '.' on something that isn't an actual instance
+
+Turf has one consistent rule: `.` is only for reaching into a real instance you're holding -- a variable that actually contains a value. Anything else -- a module name, or a struct's bare type name used without an instance -- needs `::` instead. This error means you used `.` on one of those "anything else" cases.
+
+The two most common ways to hit this:
+
+    io.printline("hi");   // ERROR -- 'io' is a module, not an instance
+    Point.origin();        // ERROR -- 'Point' is a struct type, not an instance
+
+Both are fixed the same way -- just swap `.` for `::`:
+
+    io::printline("hi");
+    Point::origin();
+
+A quick way to tell which one you need: if you can point at an actual value on the left (something you got back from `Point::new(...)` or `Point::default()`, stored in a variable), that value's fields and methods use `.`. Everything else -- the module itself, or the type name on its own -- always uses `::`. So `p.sum()` is right if `p` is a real `Point` you're holding, but `Point.origin()` is never right, because `Point` there is just the type's name, not a value.

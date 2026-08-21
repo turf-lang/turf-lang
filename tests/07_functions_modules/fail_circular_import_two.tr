@@ -1,0 +1,17 @@
+// Regression test: a direct 2-module import cycle (cycle_a_module imports
+// cycle_b_module, which imports cycle_a_module right back) must be rejected
+// with a clean CircularImportError, not silently truncated.
+//
+// Before this fix, no cycle detection existed at all: ParseFile()'s
+// ImportedFiles dedup set makes a second import of an in-progress module
+// return an EMPTY body (by design, for the ordinary "already fully parsed
+// elsewhere" case) -- which means a genuine cycle didn't error or hang, it
+// silently registered zero symbols for whichever side of the cycle got
+// re-entered, producing confusing "unknown function" errors far away from
+// the actual cause with no indication a cycle was involved at all.
+
+import cycle_a_module;
+
+fn main(): int {
+    return 0;
+}

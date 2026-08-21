@@ -1,0 +1,39 @@
+TURF E050 -- NO CONSTRUCTOR DEFINED:
+
+CAUSE:
+  `StructName::new(...)` was called, but that struct has no `.new`
+  constructor declared at all. Unlike an ordinary method (which falls back
+  to a generic "not found" error with did-you-mean suggestions), `new` has
+  no such fallback -- either it's explicitly declared, or
+  construction-by-arguments simply isn't available for that struct.
+
+CORRECT SYNTAX:
+    struct Point {
+        x: int,
+        y: int
+    }
+
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;
+    }
+
+    mut p: Point = Point::new(1, 2);   // works, because .new is declared
+
+INCORRECT:
+    struct Point {
+        x: int,
+        y: int
+    }
+    // no fn Point.new(...) declared anywhere
+
+    mut p: Point = Point::new(1, 2);
+    // ERROR: 'Point' has no constructor -- 'Point::new(...)' can't be
+    //        called.
+
+FIX:
+  Either declare a `.new` constructor for the struct (assigning every
+  field on every path -- see IncompleteConstructorError if that check
+  then fails), or, if you just want a zero-initialized instance with no
+  custom logic, use `StructName::default()` instead -- that's always
+  available, even for a struct with zero declared methods.

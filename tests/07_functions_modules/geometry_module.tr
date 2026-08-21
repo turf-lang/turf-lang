@@ -1,0 +1,13 @@
+struct Rect {
+    w: int,
+    h: int
+}
+
+fn Rect.new(w: int, h: int): void {
+    self.w = w;
+    self.h = h;
+}
+
+fn area(r: Rect): int {
+    return r.w * r.h;
+}

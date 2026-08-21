@@ -1,0 +1,14 @@
+// Regression test: an unknown/misspelled type name in a plain variable
+// declaration must be rejected with a clean "unknown type" diagnostic.
+// Before this fix, Resolver::visitVarDecl() never called
+// validateNamedType() at all (struct fields, function params, and return
+// types already did) -- `mut x: NoSuchStruct = 5;` compiled with no
+// "unknown type" diagnostic; it only reached the TypeChecker's ordinary
+// type-mismatch path ("Cannot initialise 'NoSuchStruct' variable 'x' with
+// value of type 'int'"), which is misleading since it implies NoSuchStruct
+// is a real type that just doesn't match int.
+
+fn main(): int {
+    mut x: NoSuchStruct = 5;
+    return 0;
+}

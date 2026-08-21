@@ -1,0 +1,12 @@
+// Regression test: a longer import cycle (chain_x_module -> chain_y_module
+// -> chain_z_module -> chain_x_module) must also be detected and rendered
+// as a full multi-hop chain, not just the direct-2-module case (see
+// fail_circular_import_two_module.tr). Confirms BuildCircularImportChain()
+// walks the whole in-progress ImportStack from the re-entered module's own
+// frame through to the top, not just the immediate two ends.
+
+import chain_x_module;
+
+fn main(): int {
+    return 0;
+}

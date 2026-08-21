@@ -1,0 +1,130 @@
+// (issue #238) Node's `data`/`left`/`right` fields are genuinely nullable
+// raw pointers (a `&T` safe reference can never be null), so the struct
+// decl is `unsafe { }`-wrapped, and neither Node.new() nor createNode()
+// take them as constructor params anymore (a plain function may never
+// have a raw ptr/T* parameter, even inside `unsafe { }` -- see
+// checkNoRawPointersInSignature()) -- every caller sets them via direct
+// field assignment afterward instead. findVal() is restructured to take a
+// safe, non-null `&Node` and check each child for null (via the raw
+// `.left`/`.right` field values) BEFORE recursing, rather than passing
+// null into the function and checking at the top -- the same reasoning
+// tests/06_structs/14_struct_stress.tr's sum_graph() follows.
+
+import test;
+
+struct Data {
+    id: int,
+    name: string
+}
+
+fn Data.new(id: int, name: string): void {
+    self.id = id;
+    self.name = name;
+}
+
+unsafe {
+    struct Node {
+        val: int,
+        data: Data*,
+        left: Node*,
+        right: Node*
+    }
+}
+
+fn Node.new(val: int): void {
+    self.val = val;
+    unsafe {
+        self.data = null;
+        self.left = null;
+        self.right = null;
+    }
+}
+
+fn createNode(val: int): Node {
+    return Node::new(val);
+}
+
+fn findVal(node: &Node, target: int): bool {
+    if node.val == target {
+        return true;
+    }
+    unsafe {
+        if node.left != null {
+            if findVal(node.left to &Node, target) {
+                return true;
+            }
+        }
+        if node.right != null {
+            if findVal(node.right to &Node, target) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+fn main(): int {
+    mut d1: Data = Data::new(1, "Data 1");
+    mut d2: Data = Data::new(2, "Data 2");
+
+    // Initialize root, left, right nodes, then wire up their pointer
+    // fields via direct assignment. &d1/&l_node/etc. are safe references;
+    // assigning one into a raw pointer field is the always-sound
+    // safe-to-raw widening (src/Types.cpp's Rule 2.5), so this needs no
+    // `unsafe { }` -- only the struct/constructor declarations above did.
+    mut l_node: Node = createNode(5);
+    l_node.data = &d1;
+    mut r_node: Node = createNode(15);
+    r_node.data = &d2;
+    mut root: Node = createNode(10);
+    root.left = &l_node;
+    root.right = &r_node;
+
+    // Verify properties -- reading a raw-pointer-TYPED field's value off a
+    // by-value struct base isn't a "dereference" (nothing is chained
+    // further through it), so this needs no `unsafe { }` either.
+    test::assert(root.data == null, "root data should be null");
+    test::assert(root.left != null, "root left should not be null");
+    test::assert(root.right != null, "root right should not be null");
+
+    // Traverse and find values using the recursive function which checks against null
+    mut found_10: bool = findVal(&root, 10);
+    mut found_5: bool = findVal(&root, 5);
+    mut found_15: bool = findVal(&root, 15);
+    mut found_100: bool = findVal(&root, 100);
+
+    test::assert(found_10 == true, "should find 10");
+    test::assert(found_5 == true, "should find 5");
+    test::assert(found_15 == true, "should find 15");
+    test::assert(found_100 == false, "should not find 100");
+
+    // Re-assign pointers to null and check behavior. p_node's declared
+    // type is the raw Node* (needs `unsafe { }`); &root -> Node* is the
+    // safe-to-raw widening (no unsafe needed for the initializer itself),
+    // and reassigning an already-declared raw-pointer variable to null
+    // isn't itself a gated "use" (declaration, cast, dereference).
+    unsafe {
+        mut p_node: Node* = &root;
+        p_node = null;
+        test::assert(p_node == null, "p_node should be successfully assigned to null");
+    }
+
+    // Chain pointers in multiple levels. `current.left` is a field access
+    // THROUGH a raw Node* base -- a gated "dereference" -- so the whole
+    // walk is wrapped in `unsafe { }`.
+    unsafe {
+        mut current: Node* = &root;
+        mut count: int = 0;
+        while current != null {
+            count = count + 1;
+            if count == 1 {
+                current = current.left;
+            } else {
+                current = null;
+            }
+        }
+        test::assert(count == 2, "should iterate twice");
+    }
+
+    return 0;
+}

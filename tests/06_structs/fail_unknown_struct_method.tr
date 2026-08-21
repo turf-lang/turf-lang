@@ -1,0 +1,19 @@
+// Regression test: calling a method that doesn't exist on a struct must be
+// a compile error. Before StructMethodNotFoundError existed,
+// TypeChecker::visitMethodCall()'s struct-method branch had a deliberate
+// "be permissive" fallback for this case, and Codegen's
+// MethodCallExprAST::codegen() silently returned nullptr with no
+// diagnostic either -- the net effect (confirmed via `l.nonexistentMethod
+// (5)` on a List<int>) was that the call simply vanished from the compiled
+// program: no error, no warning, no crash, just silently miscompiled code
+// that looked like it worked.
+
+struct Point {
+    x: int
+}
+
+fn main(): int {
+    mut p: Point = Point::default();
+    p.nonexistentMethod(5);
+    return 0;
+}

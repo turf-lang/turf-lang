@@ -1,0 +1,17 @@
+// Regression test: `import Module::TypeName;` where TypeName is a REAL
+// struct/enum but declared in a DIFFERENT module, not Module, must be
+// rejected -- registerOnDemandImports() used to only check the flat,
+// module-blind isKnownStruct()/isEnumName() EXISTENCE registry for the
+// Symbol/SymbolList forms, so `import mem::List;` (List actually lives in
+// `list`, not `mem`) incorrectly satisfied the import just because List
+// exists SOMEWHERE in the program. Fixed by checking
+// getTypeOwningModule(Name) == SourceModule (ownership), not just
+// existence -- the same distinction validateModuleQualifier() already
+// made for qualified type annotations.
+
+import list;
+import mem::List;
+
+fn main(): int {
+    return 0;
+}

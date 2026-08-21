@@ -102,8 +102,18 @@ static bool ContainsLoopExit(const ExprAST *E) {
       return true;
   }
 
+  if (auto *DW = dynamic_cast<const DoWhileExprAST *>(E)) {
+    if (ContainsLoopExit(DW->getBody()))
+      return true;
+  }
+
   if (auto *F = dynamic_cast<const ForExprAST *>(E)) {
     if (ContainsLoopExit(F->getBody()))
+      return true;
+  }
+
+  if (auto *FE = dynamic_cast<const ForEachExprAST *>(E)) {
+    if (ContainsLoopExit(FE->getBody()))
       return true;
   }
 
@@ -141,10 +151,123 @@ static bool IsZeroLiteral(const ExprAST *E) {
   return false;
 }
 
+/**
+ * @brief Conservatively determine whether @p E might assign a new value to
+ *        the variable named @p VarName, anywhere in its subtree.
+ *
+ * Used by LintFor()'s "loop variable never advances" check (see
+ * StuckForLoopVariableWarning's doc comment in Errors.h). This function MUST
+ * be conservative in the "return true" direction: a false negative (failing
+ * to notice a real modification, so the warning wrongly fires) is a
+ * correctness bug -- a false positive suppression (returning true when
+ * nothing actually modifies the variable) just silently skips the warning,
+ * which is safe. Concretely: taking the variable's address anywhere
+ * (`&i`) unconditionally returns true, since a function receiving that
+ * pointer could mutate it in a way this purely-structural check can't trace.
+ */
+static bool MayModifyVariable(const ExprAST *E, const std::string &VarName) {
+  if (!E)
+    return false;
+
+  auto IsTargetVar = [&](const ExprAST *Candidate) {
+    auto *V = dynamic_cast<const VariableExprAST *>(Candidate);
+    return V && V->getName() == VarName;
+  };
+
+  if (auto *Assign = dynamic_cast<const AssignmentExprAST *>(E)) {
+    if (IsTargetVar(Assign->getLHS()))
+      return true;
+    return MayModifyVariable(Assign->getLHS(), VarName) ||
+           MayModifyVariable(Assign->getRHS(), VarName);
+  }
+  if (auto *CAssign = dynamic_cast<const CompoundAssignmentExprAST *>(E)) {
+    if (IsTargetVar(CAssign->getLHS()))
+      return true;
+    return MayModifyVariable(CAssign->getLHS(), VarName) ||
+           MayModifyVariable(CAssign->getRHS(), VarName);
+  }
+  if (auto *Post = dynamic_cast<const PostfixExprAST *>(E)) {
+    if (IsTargetVar(Post->getOperand()))
+      return true;
+    return MayModifyVariable(Post->getOperand(), VarName);
+  }
+  if (auto *Addr = dynamic_cast<const AddressOfExprAST *>(E)) {
+    // See doc comment: unconditionally conservative once the address of ANY
+    // variable is taken inside the loop, not just VarName -- a pointer to
+    // some OTHER variable could, in principle, alias VarName's storage in
+    // ways this structural check has no way to rule out (e.g. passed to an
+    // extern/FFI function). Narrowing this to only IsTargetVar(Operand)
+    // would be more precise but riskier; erring conservative here is cheap
+    // since it only costs a missed warning, never a wrong one.
+    (void)Addr;
+    return true;
+  }
+  if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
+    for (const auto &Child : Blk->getExpressions())
+      if (MayModifyVariable(Child.get(), VarName))
+        return true;
+    return false;
+  }
+  if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
+    for (const auto &B : If->getBranches()) {
+      if (MayModifyVariable(B.Cond.get(), VarName) ||
+          MayModifyVariable(B.Body.get(), VarName))
+        return true;
+    }
+    return MayModifyVariable(If->getElseBody(), VarName);
+  }
+  if (auto *W = dynamic_cast<const WhileExprAST *>(E)) {
+    return MayModifyVariable(W->getCond(), VarName) ||
+           MayModifyVariable(W->getBody(), VarName);
+  }
+  if (auto *F = dynamic_cast<const ForExprAST *>(E)) {
+    // A nested for-loop reusing VarName as ITS OWN induction variable would
+    // shadow the outer one -- assignments inside it wouldn't actually touch
+    // the outer VarName. Not worth special-casing: treating it as "might
+    // modify" here is the conservative (safe) direction anyway.
+    return MayModifyVariable(F->getStart(), VarName) ||
+           MayModifyVariable(F->getEnd(), VarName) ||
+           MayModifyVariable(F->getStep(), VarName) ||
+           MayModifyVariable(F->getBody(), VarName);
+  }
+  if (auto *FE = dynamic_cast<const ForEachExprAST *>(E)) {
+    // Same shadowing note as ForExprAST just above -- a nested for-each
+    // reusing VarName as its own value/index var would shadow the outer
+    // one, but treating it as "might modify" is the conservative-safe
+    // direction anyway.
+    return MayModifyVariable(FE->getIterable(), VarName) ||
+           MayModifyVariable(FE->getBody(), VarName);
+  }
+  if (auto *Ret = dynamic_cast<const ReturnExprAST *>(E))
+    return MayModifyVariable(Ret->getVal(), VarName);
+  if (auto *Call = dynamic_cast<const FuncCallExprAST *>(E)) {
+    for (const auto &Arg : Call->getArgs())
+      if (MayModifyVariable(Arg.get(), VarName))
+        return true;
+    return false;
+  }
+  if (auto *MCall = dynamic_cast<const MethodCallExprAST *>(E)) {
+    if (MayModifyVariable(MCall->getBase(), VarName))
+      return true;
+    for (const auto &Arg : MCall->getArgs())
+      if (MayModifyVariable(Arg.get(), VarName))
+        return true;
+    return false;
+  }
+  if (auto *Bin = dynamic_cast<const BinaryExprAST *>(E))
+    return MayModifyVariable(Bin->getLHS(), VarName) ||
+           MayModifyVariable(Bin->getRHS(), VarName);
+  if (auto *Un = dynamic_cast<const UnaryExprAST *>(E))
+    return MayModifyVariable(Un->getOperand(), VarName);
+
+  return false;
+}
+
 // Forward declarations
 static void LintBinaryExpr(const BinaryExprAST *Bin);
 static void LintAssignment(const AssignmentExprAST *Assign);
 static void LintWhile(const WhileExprAST *While);
+static void LintDoWhile(const DoWhileExprAST *DoWhile);
 static void LintIf(const IfExprAST *If);
 
 static void LintFor(const ForExprAST *For);
@@ -179,8 +302,21 @@ void LintExpression(ExprAST *E) {
     LintWhile(While);
   }
 
+  if (auto *DoWhile = dynamic_cast<DoWhileExprAST *>(E)) {
+    LintDoWhile(DoWhile);
+  }
+
   if (auto *For = dynamic_cast<ForExprAST *>(E)) {
     LintFor(For);
+  }
+
+  if (auto *ForEach = dynamic_cast<ForEachExprAST *>(E)) {
+    // No LintForEach() helper needed: there's no "loop variable never
+    // advances" analog for for-each (the value/index vars are never
+    // manually advanced by design -- that check is ForExprAST-specific by
+    // construction), so a bare recursion into children is sufficient.
+    LintExpression(const_cast<ExprAST *>(ForEach->getIterable()));
+    LintExpression(ForEach->getBody());
   }
 
   if (auto *If = dynamic_cast<IfExprAST *>(E)) {
@@ -191,11 +327,24 @@ void LintExpression(ExprAST *E) {
     LintExpression(const_cast<ExprAST*>(Ret->getVal()));
   }
 
+  if (auto *FD = dynamic_cast<FuncDefExprAST *>(E)) {
+    LintExpression(FD->getBodyMut());
+  }
+
   // Recurse into block children
   if (auto *Blk = dynamic_cast<BlockExprAST *>(E)) {
     for (const auto &Child : Blk->getExpressions()) {
       LintExpression(Child.get());
     }
+  }
+
+  if (auto *CAssign = dynamic_cast<CompoundAssignmentExprAST *>(E)) {
+    LintExpression(const_cast<ExprAST*>(CAssign->getLHS()));
+    LintExpression(const_cast<ExprAST*>(CAssign->getRHS()));
+  }
+
+  if (auto *Post = dynamic_cast<PostfixExprAST *>(E)) {
+    LintExpression(const_cast<ExprAST*>(Post->getOperand()));
   }
 }
 
@@ -209,7 +358,11 @@ static void LintBinaryExpr(const BinaryExprAST *Bin) {
   const ExprAST *RHS = Bin->getRHS();
 
   // Redundant boolean comparison: x == true, x != false, etc.
-  if (Op == TOK_EQ || Op == TOK_NEQ) {
+  // Skip nodes ParseUnary() synthesized to desugar a literal `!x` (see
+  // BinaryExprAST::IsDesugaredNot's doc comment) -- those aren't a
+  // comparison the user wrote at all, so warning "remove the comparison"
+  // would be nagging about syntax that doesn't exist in their source.
+  if ((Op == TOK_EQ || Op == TOK_NEQ) && !Bin->IsDesugaredNot) {
     bool RHSIsBool = dynamic_cast<const BoolExprAST *>(RHS) != nullptr;
     bool LHSIsBool = dynamic_cast<const BoolExprAST *>(LHS) != nullptr;
 
@@ -236,7 +389,7 @@ static void LintBinaryExpr(const BinaryExprAST *Bin) {
     std::string RFP = Fingerprint(RHS);
 
     // Only flag for variable references and literals, not complex expressions
-    if (LFP == RFP && LFP != "<complex>" && LFP != "<null>") {
+    if (LFP == RFP && LFP != "<null>") {
       // Don't double-report if we already flagged a redundant bool comparison
       bool AlreadyFlagged =
           (Op == TOK_EQ || Op == TOK_NEQ) &&
@@ -250,6 +403,21 @@ static void LintBinaryExpr(const BinaryExprAST *Bin) {
         else
           result = "false";
 
+        // '==' and '!=' are NOT unconditionally reflexive: if the value is
+        // a double holding NaN, `x == x` is false and `x != x` is true --
+        // the opposite of the claim below -- and `x != x` is in fact the
+        // standard idiom for isnan(x). Lint.cpp has no type information
+        // (it runs structurally, before the TypeChecker's results are
+        // available here), so it can't tell whether `x` might be a double.
+        // Rather than silence the check for variables entirely (which
+        // would lose its main value: catching copy-paste mistakes like
+        // `a.val == a.val`), hedge the wording so it's never technically
+        // wrong. '<', '>', '<=', '>=' don't need this: every IEEE-754
+        // ordered comparison against NaN is false, so "always true/false"
+        // is correct for those regardless of type.
+        if (Op == TOK_EQ || Op == TOK_NEQ)
+          result += " (unless the value can be NaN)";
+
         // Extract a readable name from the fingerprint
         std::string readableName = LFP;
         if (LFP.substr(0, 4) == "var:")
@@ -258,6 +426,10 @@ static void LintBinaryExpr(const BinaryExprAST *Bin) {
           readableName = LFP.substr(4);
         else if (LFP.substr(0, 4) == "dbl:")
           readableName = LFP.substr(4);
+        else if (LFP.substr(0, 4) == "str:")
+          readableName = LFP.substr(4);
+        else if (LFP.substr(0, 5) == "bool:")
+          readableName = LFP.substr(5);
 
         SelfComparisonWarning(Bin->getLoc(), readableName, result).warn();
       }
@@ -311,9 +483,74 @@ static void LintWhile(const WhileExprAST *While) {
   LintExpression(const_cast<ExprAST *>(While->getBody()));
 }
 
+static void LintDoWhile(const DoWhileExprAST *DoWhile) {
+  if (!DoWhile)
+    return;
+
+  const ExprAST *Cond = DoWhile->getCond();
+
+  // Check for do { } while(true) — condition is a BoolExprAST with value true
+  if (auto *BoolCond = dynamic_cast<const BoolExprAST *>(Cond)) {
+    if (BoolCond->getVal()) {
+      // Condition is literally 'true'
+      if (!ContainsLoopExit(DoWhile->getBody())) {
+        SuspiciousInfiniteLoopWarning(DoWhile->getLoc()).warn();
+      }
+    }
+  }
+
+  LintExpression(const_cast<ExprAST *>(DoWhile->getCond()));
+  // Recurse into body
+  LintExpression(DoWhile->getBody());
+}
+
 static void LintFor(const ForExprAST *For) {
   if (!For)
     return;
+
+  // Loop variable never advances: neither 'step' nor the body ever assigns
+  // to it. See StuckForLoopVariableWarning's doc comment in Errors.h for why
+  // this is deterministically knowable (not a general halting-problem
+  // question) and MayModifyVariable()'s doc comment above for the
+  // conservative-false-negative-only guarantee that keeps it false-positive
+  // free.
+  const std::string &VarName = For->getVarName();
+  bool Advances = MayModifyVariable(For->getStep(), VarName) ||
+                  MayModifyVariable(For->getBody(), VarName);
+
+  if (!Advances) {
+    // Try to say whether this specifically runs forever or never runs, by
+    // comparing literal start/end bounds -- purely a wording nicety; when
+    // start/end aren't both literals (the common case), fall back to the
+    // honest "one or the other, can't tell which" phrasing.
+    std::string Outcome =
+        "this loop's fate was already decided before it started -- it "
+        "either runs forever or never runs at all, depending on how '" +
+        VarName + "' compares to the end value.";
+
+    auto *StartLit = dynamic_cast<const NumberExprAST *>(For->getStart());
+    auto *EndLit = dynamic_cast<const NumberExprAST *>(For->getEnd());
+    if (StartLit && EndLit) {
+      double StartV = StartLit->isInteger()
+                          ? static_cast<double>(StartLit->getIntVal())
+                          : StartLit->getDoubleVal();
+      double EndV = EndLit->isInteger()
+                        ? static_cast<double>(EndLit->getIntVal())
+                        : EndLit->getDoubleVal();
+      if (StartV < EndV)
+        Outcome = "it will loop forever: '" + VarName +
+                  "' starts below the end value and never changes.";
+      else if (StartV > EndV)
+        Outcome = "it will loop forever: '" + VarName +
+                  "' starts above the end value and never changes "
+                  "(descending range).";
+      else
+        Outcome = "the body will never execute even once: '" + VarName +
+                  "' already equals the end value at the start.";
+    }
+
+    StuckForLoopVariableWarning(For->getLoc(), VarName, Outcome).warn();
+  }
 
   LintExpression(const_cast<ExprAST *>(For->getStart()));
   LintExpression(const_cast<ExprAST *>(For->getEnd()));
@@ -333,7 +570,8 @@ static void LintIf(const IfExprAST *If) {
       std::string Kind = (i == 0) ? "then" : "elseif";
       EmptyBranchWarning(Branches[i].Loc, Kind).warn();
     }
-    // Recurse into branch body
+    // Recurse into branch condition and body
+    LintExpression(const_cast<ExprAST*>(Branches[i].Cond.get()));
     LintExpression(Branches[i].Body.get());
   }
 
@@ -439,6 +677,30 @@ LintChangedNodesOnlyInternal(ExprAST *E,
     LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getStep()),
                                  ChangedNodeIDs);
     LintChangedNodesOnlyInternal(For->getBody(), ChangedNodeIDs);
+    return;
+  }
+
+  // Recurse into for-each loop children
+  if (auto *ForEach = dynamic_cast<ForEachExprAST *>(E)) {
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(ForEach->getIterable()),
+                                 ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(ForEach->getBody(), ChangedNodeIDs);
+    return;
+  }
+
+  // Recurse into compound assignment children
+  if (auto *CAssign = dynamic_cast<CompoundAssignmentExprAST *>(E)) {
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(CAssign->getLHS()),
+                                 ChangedNodeIDs);
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(CAssign->getRHS()),
+                                 ChangedNodeIDs);
+    return;
+  }
+
+  // Recurse into postfix expression operand
+  if (auto *Post = dynamic_cast<PostfixExprAST *>(E)) {
+    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Post->getOperand()),
+                                 ChangedNodeIDs);
     return;
   }
 }

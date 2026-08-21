@@ -1,0 +1,44 @@
+// Regression test: a local variable named the same as an imported module
+// (here `io`, explicitly imported below) must resolve as the variable, not
+// the module, when used as a method-call base -- ordinary lexical
+// shadowing, same as everywhere else in the language.
+//
+// Before the fix this was worse than a wrong diagnostic: Resolver::
+// visitMethodCall() checked SymTable_.hasModule() before checking for an
+// actual declared variable, so `io.show()` failed name resolution entirely
+// ("Unknown function 'io.show'"). Fixing that surfaced a SECOND, independent
+// copy of the same bug in Codegen::MethodCallExprAST::codegen(), which
+// re-derived "is this a module call" from the raw variable name via
+// GlobalSymbolTable->HasModule() instead of trusting the Resolver's verdict
+// -- causing a hard compiler crash (out-of-bounds std::vector access,
+// ArgVals[Idx] against the wrong function's argument count) once the
+// Resolver started correctly treating `io` as a struct-typed variable.
+// Both fixes are required together for this file to pass.
+
+import io;
+
+import test;
+struct Thing {
+    val: int
+}
+
+fn Thing.new(val: int): void {
+    self.val = val;
+}
+
+// `io` here is the module -- this function has no local variable named
+// `io`, so this exercises the genuine (non-shadowed) module-call path in
+// the same file as the shadowed case below.
+fn Thing.show(): void {
+    io::printline(self.val);
+}
+
+fn main(): int {
+    // Inside this scope, `io` is a Thing variable, not the module -- every
+    // reference to `io` below must resolve as the variable.
+    mut io: Thing = Thing::new(42);
+    io.show();
+    test::assert(io.val == 42, "");
+
+    return 0;
+}

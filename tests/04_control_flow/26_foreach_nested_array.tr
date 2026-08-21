@@ -1,0 +1,25 @@
+import test;
+
+fn main(): int {
+    mut grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];
+
+    mut total: int = 0;
+    for row in grid {
+        for value in row {
+            total = total + value;
+        }
+    }
+    test::assert(total == 21, "");
+
+    // Spot-check one inner element via the (index, value) form on the outer loop.
+    mut checked: bool = false;
+    for (i, row) in grid {
+        if i == 1 {
+            test::assert(row[2] == 6, "");
+            checked = true;
+        }
+    }
+    test::assert(checked, "");
+
+    return 0;
+}

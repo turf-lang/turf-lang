@@ -1,0 +1,43 @@
+// Test: DSA — Traffic light finite state machine
+// State: Red -> Green -> Yellow -> Red
+import test;
+
+enum TrafficLight { Red, Green, Yellow }
+
+fn next_state(state: TrafficLight): TrafficLight {
+    compare state {
+        matches TrafficLight::Red:
+            return TrafficLight::Green;
+        done
+        matches TrafficLight::Green:
+            return TrafficLight::Yellow;
+        done
+        matches TrafficLight::Yellow:
+            return TrafficLight::Red;
+        done
+    }
+    return TrafficLight::Red;
+}
+
+fn main(): int {
+    mut state: TrafficLight = TrafficLight::Red;
+
+    // Cycle through: Red -> Green -> Yellow -> Red -> Green
+    state = next_state(state);
+    test::assert(state == TrafficLight::Green, "Red -> Green");
+
+    state = next_state(state);
+    test::assert(state == TrafficLight::Yellow, "Green -> Yellow");
+
+    state = next_state(state);
+    test::assert(state == TrafficLight::Red, "Yellow -> Red");
+
+    state = next_state(state);
+    test::assert(state == TrafficLight::Green, "Red -> Green again");
+
+    // Verify int values throughout
+    test::assert((TrafficLight::Red    to int) == 0, "Red == 0");
+    test::assert((TrafficLight::Green  to int) == 1, "Green == 1");
+    test::assert((TrafficLight::Yellow to int) == 2, "Yellow == 2");
+    return 0;
+}

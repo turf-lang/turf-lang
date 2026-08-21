@@ -1,0 +1,64 @@
+// Regression test (was tests/10_known_bugs/fail_generic_array_param.tr,
+// CODE_REVIEW_GAPS_2026-07.md gap #3): a generic function's return type,
+// when it mentions the function's own type parameter, must be reported by
+// TypeChecker as the CONCRETE type that parameter was instantiated to at
+// this call site -- not the literal declared TurfGenericParamType.
+//
+// Before the fix, `TypeChecker::visitFuncCall()` set the call node's type
+// straight from the matched candidate's declared `ReturnType` verbatim.
+// For `fn<T> firstElem(arr: T[]): T`, that is the literal
+// TurfGenericParamType("T") itself, regardless of what T actually was for
+// this call -- so `firstElem(intArray) == 10` failed type-checking with
+// "Cannot compare 'T' with 'int'" even though the call was perfectly valid
+// and (after two earlier fixes this session -- see
+// tests/07_functions_modules/generic_identity_scalar.tr and
+// generic_identity_double.tr) correctly erased at the Codegen level.
+//
+// Fixed by collectGenericSubstitution()/substituteReturnType() in
+// TypeChecker.cpp: after picking the best-matching overload, walk its
+// declared parameter types against the actual argument types to build a
+// {TypeParamName -> ConcreteType} map, then rewrite the declared return
+// type through that map before calling setType().
+//
+// Also fixed alongside this (found while writing the identityPtr variation
+// below): Types.cpp's typesCompatible() had a type-erasure leniency rule
+// for a bare `T` and for `T[]` (array-of-T), but none for `T*`
+// (pointer-to-T) -- so calling `fn<T> identityPtr(x: T*): T*` with a real
+// `int*` argument failed overload resolution entirely ("No overload of
+// 'identityPtr' matches argument types (int*)"), before this return-type
+// substitution issue could even be reached. Fixed by adding the same
+// leniency for a pointer whose pointee is a TurfGenericParamType.
+
+import test;
+
+fn<T> firstElem(arr: T[]): T {
+    return arr[0];
+}
+
+// Return type built from the type parameter through a reference wrapper
+// (&T), not just a bare T -- exercises collectGenericSubstitution()'s
+// pointer/reference-unification branch, not just its top-level
+// TurfGenericParamType branch, and the typesCompatible() pointer-to-
+// generic-parameter fix above (which TurfReferenceType inherits for free,
+// see that class's own doc comment).
+//
+// (issue #238) `x: &T`, returns `&T` -- used to be `T*`/`T*`, but a plain
+// function may never have a raw ptr/T* parameter or return type, even
+// inside `unsafe { }` -- see checkNoRawPointersInSignature().
+fn<T> identityPtr(x: &T): &T {
+    return x;
+}
+
+fn main(): int {
+    mut a: int[5] = [10, 20, 30, 40, 50];
+    test::assert(firstElem(a) == 10, "");
+
+    mut d: double[3] = [1.5, 2.5, 3.5];
+    test::assert(firstElem(d) == 1.5, "");
+
+    mut n: int = 7;
+    mut p: &int = identityPtr(&n);
+    test::assert(p == &n, "");
+
+    return 0;
+}

@@ -1,0 +1,13 @@
+That module doesn't have a function with this name
+
+Turf found the module you're calling into just fine -- it just couldn't find a function by that name inside it. This is almost always a typo, and Turf is usually able to guess what you meant and suggest it.
+
+    io::pritn("hello");
+
+`io` is a real module, but it has no function called `pritn` -- it's missing a letter. Turf will tell you it thinks you meant `printline`, and once you fix the spelling it compiles right away:
+
+    io::printline("hello");
+
+If Turf's suggestion doesn't look right, or it doesn't have one, double-check two things: that you spelled the function name exactly as it's declared (function names are case-sensitive), and that the function actually lives in the module you're calling it on -- it's easy to remember a function existing "somewhere in the standard library" without remembering which specific module it's in.
+
+This is different from the module itself not existing (that's a separate error) -- here, Turf already found and understood `io` just fine. It's only the function name after the `::` that it couldn't match.

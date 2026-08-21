@@ -1,0 +1,11 @@
+import test;
+
+fn main(): int {
+    mut my_val: int = 100;
+    test::assert(my_val == 100, "");
+
+    mut my_val: int = 200; // Error: redeclaration in same scope
+    test::assert(my_val == 200, "");
+
+    return 0;
+}

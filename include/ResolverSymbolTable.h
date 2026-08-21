@@ -1,32 +1,9 @@
 /**
  * @file ResolverSymbolTable.h
- * @brief Isolated, LLVM-free symbol table data structures for the Resolver pass.
- *
- * Issue #2 of the monolith → multi-pass migration.
- *
- * This file intentionally has ZERO dependency on LLVM headers.  It models the
- * same concepts as the codegen-facing SymbolTable (scopes, variables, functions,
- * modules) but stores only the information the Resolver and TypeChecker need:
- *
- *   VariableSymbol   — name + type + declaration source location + scope depth
- *   FunctionParam    — a single parameter (name + type) for diagnostic formatting
- *   FunctionSymbol   — base name, arity, parameter names+types, return type,
- *                      source module, and declaration location.
- *                      NOTE: No mangled name — Codegen derives it on demand from
- *                      SourceModule + BaseName + ParamTypes.  This keeps the
- *                      Resolver's error messages in the user's namespace, never
- *                      the LLVM namespace.
- *   ResolverModule   — namespace-isolated map of function overloads (imported)
- *   ResolverScope    — flat name→VariableSymbol map + parent pointer
- *   ResolverSymbolTable — hierarchical scope manager + loaded modules +
- *                         current-file function registry (two-tier diagnostics)
- *
- * Design constraints:
- *  - No llvm::AllocaInst, no llvm::Type, no LLVM headers of any kind.
- *  - All symbols use std::shared_ptr so the Resolver can safely attach them
- *    to AST nodes (Issue #5 will add AST fields to hold these pointers).
- *  - The SymbolTable can be constructed and used entirely without running the
- *    LLVM back-end; unit tests therefore require no special LLVM initialisation.
+ * @brief The composite Resolver symbol table (Issue #2) -- see
+ *        ResolverSymbolBase.h for the shared data types, and
+ *        ResolverScopeTable.h/ResolverModuleTable.h/ResolverTypeRegistry.h
+ *        for the 3 sub-tables this composes.
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -35,219 +12,38 @@
 #ifndef RESOLVER_SYMBOL_TABLE_H
 #define RESOLVER_SYMBOL_TABLE_H
 
-#include "Types.h" // TurfTypePtr, TurfType — pure C++ header, no LLVM
+#include "ResolverSymbolBase.h"
 
-#include <memory>
-#include <optional>
-#include <stdexcept>
-#include <string>
-#include <unordered_map>
-#include <vector>
 
-// ─── Source location (same layout as Lexer.h's SourceLocation) ───────────────
-// Duplicated as a plain POD here so this header has no dependency on Lexer.h.
-struct ResolverSourceLocation {
-  int Line = 0;
-  int Col  = 0;
-};
+// Umbrella: the scope/module/type-registry halves of what used to be one
+// single ResolverSymbolTable class each live in their own header now (split
+// out for the same reason Parser/Resolver/TypeChecker/Codegen were --  see
+// docs/planning/COMPILER_MODULE_BREAKDOWN.md). Included here, after the
+// shared data types above (VariableSymbol, ResolverFunctionSymbol, ...) that
+// all 3 depend on, so ResolverSymbolTable below can compose them.
+#include "ResolverScopeTable.h"
+#include "ResolverModuleTable.h"
+#include "ResolverTypeRegistry.h"
 
-// ─── VariableSymbol ──────────────────────────────────────────────────────────
-
-/**
- * @brief Represents a single declared variable visible to the Resolver.
- *
- * Fields deliberately mirror what a future TypeChecker pass will need:
- *  - Name and Type are the primary data.
- *  - DeclLoc enables rich "already declared here" error messages.
- *  - ScopeDepth allows the Resolver to implement correct shadowing rules.
- */
-struct VariableSymbol {
-  std::string            Name;
-  TurfTypePtr            Type;        ///< Frontend type (no LLVM involvement)
-  ResolverSourceLocation DeclLoc;
-  size_t                 ScopeDepth; ///< 0 = global, 1 = first block, …
-
-  VariableSymbol() = default;
-  VariableSymbol(std::string Name, TurfTypePtr Type,
-                 ResolverSourceLocation DeclLoc, size_t ScopeDepth)
-      : Name(std::move(Name)), Type(std::move(Type)), DeclLoc(DeclLoc),
-        ScopeDepth(ScopeDepth) {}
-};
-
-// ─── FunctionParam ───────────────────────────────────────────────────────────
-
-/**
- * @brief A single function parameter, carrying both name and type.
- *
- * Storing the name enables rich diagnostic messages:
- *   print(int x)   — rather than just   print(int)
- *
- * The TypeChecker and Codegen use ParamTypes extracted from this for overload
- * resolution and LLVM type mapping respectively.
- */
-struct FunctionParam {
-  std::string Name; ///< e.g. "x"
-  TurfTypePtr Type; ///< e.g. TurfInt()
-};
-
-// ─── ResolverFunctionSymbol ──────────────────────────────────────────────────
-
-/**
- * @brief Represents one overload of a function visible to the Resolver.
- *
- * Design decisions driven by the two-tier diagnostic system:
- *
- *  - NO MangledName field.  The LLVM symbol name is derived by Codegen on
- *    demand via a deterministic mangling function:
- *        mangle("io", "printline", [int])  → "turf_io_printline_int"
- *        mangle("",   "foo",       [int])  → "foo"
- *    Removing it from the Resolver keeps all error messages in the user's
- *    namespace, never in LLVM's.
- *
- *  - SourceModule: empty = defined in the current file;
- *                  non-empty = name of the imported module ("io", "math", …).
- *    This drives the two-tier error format:
- *
- *        Error: Unknown function 'pritn'
- *          Current file:   print(int x)     — line 12
- *          From io module: io.printline(str) — try 'io.printline(x)'
- *
- *  - DeclLoc: source location of the fn keyword, used for "defined at …" notes.
- *
- *  - IsIntrinsic: marks compiler-synthesised builtins that never have a Turf
- *    source location.
- */
-struct ResolverFunctionSymbol {
-  std::string              BaseName;     ///< User-visible name, e.g. "printline"
-  std::string              SourceModule; ///< "" = current file, "io" = imported
-  std::vector<FunctionParam> Params;     ///< Ordered parameters (name + type)
-  TurfTypePtr              ReturnType;
-  ResolverSourceLocation   DeclLoc;      ///< Location of the fn definition
-  bool                     IsIntrinsic = false;
-
-  /// Arity of this overload.
-  int arity() const { return static_cast<int>(Params.size()); }
-
-  /// Format a human-readable signature for diagnostics:
-  ///   "print(int x, string y) -> void"
-  std::string signature() const {
-    std::string S = BaseName + "(";
-    for (size_t i = 0; i < Params.size(); ++i) {
-      if (i) S += ", ";
-      S += (Params[i].Type ? Params[i].Type->getName() : "?");
-      if (!Params[i].Name.empty()) { S += " "; S += Params[i].Name; }
-    }
-    S += ") -> ";
-    S += (ReturnType ? ReturnType->getName() : "void");
-    return S;
-  }
-
-  /// Extract just the parameter types — used by overload resolution logic
-  /// and by ResolverModule::lookupFunction.
-  std::vector<TurfTypePtr> paramTypes() const {
-    std::vector<TurfTypePtr> T;
-    T.reserve(Params.size());
-    for (const auto &P : Params) T.push_back(P.Type);
-    return T;
-  }
-
-  /// Derive the LLVM-level mangled name for this overload.
-  /// Mirrors the mangling performed by FuncDefExprAST::codegen():
-  ///   module="io",  base="printline", params=[int] → "turf_io_printline_int"
-  ///   module="",    base="add",       params=[int,int] → "turf_add_int_int"
-  ///   module="",    base="main",      params=[] → "main"
-  std::string mangledName() const {
-    if (BaseName == "main") return "main";
-    std::string S = "turf_";
-    if (!SourceModule.empty()) S += SourceModule + "_";
-    S += BaseName;
-    for (const auto &P : Params)
-      if (P.Type) S += "_" + P.Type->getMangledName();
-    return S;
-  }
-};
-
-// ─── ResolverModule ──────────────────────────────────────────────────────────
-
-/**
- * @brief Represents one imported module's function namespace.
- *
- * Lookup is strictly namespace-isolated: searching "io" will never find
- * functions registered under "math".
- */
-class ResolverModule {
-public:
-  std::string Name; ///< e.g. "io", "math"
-
-  /// base name → list of overloads
-  std::unordered_map<std::string, std::vector<ResolverFunctionSymbol>>
-      Functions;
-
-  explicit ResolverModule(std::string name) : Name(std::move(name)) {}
-
-  /**
-   * @brief Register a function overload.
-   * Duplicate registrations (same BaseName + arity + param types) are
-   * silently ignored to handle prototype re-entry during the pre-pass.
-   */
-  void registerFunction(const ResolverFunctionSymbol &Sym);
-
-  /**
-   * @brief Look up a function overload by base name and argument types.
-   *
-   * Resolution rules (priority order):
-   *  1. Arity match is required.
-   *  2. Exact type name match wins.
-   *  3. Numeric implicit coercion (int↔double↔bool) allowed as fallback.
-   *
-   * @return Pointer to the matching symbol, or nullptr on no match.
-   */
-  const ResolverFunctionSymbol *lookupFunction(
-      const std::string &BaseName,
-      const std::vector<TurfTypePtr> &ArgTypes) const;
-
-  /// Return all registered base names (for suggestion / diagnostics).
-  std::vector<std::string> getFunctionNames() const;
-};
-
-// ─── ResolverScope ───────────────────────────────────────────────────────────
-
-/**
- * @brief A single lexical scope in the Resolver's scope stack.
- *
- * Uses a pointer-to-parent chain so scopes can be queried independently of
- * the full stack (useful for the TypeChecker which may clone a scope chain).
- */
-struct ResolverScope {
-  size_t Depth;   ///< 0 = global, increments per nested block
-  ResolverScope *Parent = nullptr; ///< Outer scope, or nullptr at global level
-
-  /// Variable name → owned VariableSymbol
-  std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> Symbols;
-
-  explicit ResolverScope(size_t Depth, ResolverScope *Parent = nullptr)
-      : Depth(Depth), Parent(Parent) {}
-
-  /// Look up a name in this scope only (no parent traversal).
-  std::shared_ptr<VariableSymbol> lookupLocal(const std::string &Name) const {
-    auto It = Symbols.find(Name);
-    return It != Symbols.end() ? It->second : nullptr;
-  }
-
-  /// True if @p Name is declared directly in this scope.
-  bool has(const std::string &Name) const {
-    return Symbols.count(Name) > 0;
-  }
-};
+#include <ostream>
 
 // ─── ResolverSymbolTable ─────────────────────────────────────────────────────
 
 /**
  * @brief Hierarchical symbol table for the Resolver and TypeChecker passes.
  *
- * This class manages:
- *  - A stack of ResolverScope objects for lexical scope handling.
- *  - A registry of ResolverModule objects for module-qualified lookups.
+ * A thin composite over 3 independent sub-tables:
+ *  - ResolverScopeTable    — lexical variable scoping.
+ *  - ResolverModuleTable   — imported-module/current-file function+constant
+ *                            registries, and on-demand ("flat") imports.
+ *  - ResolverTypeRegistry  — struct/enum/error type names and their owning
+ *                            module.
+ *
+ * Every public method below just forwards to the sub-table that actually
+ * owns the relevant state, EXCEPT isTypeVisibleUnqualified(), which
+ * genuinely needs data from both ResolverTypeRegistry (getTypeOwningModule)
+ * and ResolverModuleTable (the flat type-import registry) and so is
+ * implemented here, at the one layer that has both.
  *
  * It is entirely LLVM-free.  Unit tests can construct and exercise it without
  * initialising the LLVM back-end.
@@ -259,167 +55,251 @@ struct ResolverScope {
  */
 class ResolverSymbolTable {
 public:
-  ResolverSymbolTable();
+  // Preserved as nested-type aliases so existing call sites that spell
+  // `ResolverSymbolTable::FlatImportedSymbol` / `::ModuleFunctionMatch`
+  // (e.g. Resolver::registerOnDemandImports, Resolver::visitFuncCall) don't
+  // need to change -- the canonical definitions now live on
+  // ResolverModuleTable, which actually owns the underlying registries.
+  using FlatImportedSymbol = ResolverModuleTable::FlatImportedSymbol;
+  using ModuleFunctionMatch = ResolverModuleTable::ModuleFunctionMatch;
+
+  ResolverSymbolTable() = default;
 
   // ── Scope management ────────────────────────────────────────────────────────
 
-  /// Push a new nested scope.
-  void enterScope();
-
-  /// Pop the current scope.  Variables declared in it become invisible.
-  void exitScope();
-
-  /// Current nesting depth (0 = global).
-  size_t currentDepth() const { return Depth_; }
+  void enterScope() { ScopeTable_.enterScope(); }
+  void exitScope() { ScopeTable_.exitScope(); }
+  void resetToDepth(size_t TargetDepth) { ScopeTable_.resetToDepth(TargetDepth); }
+  size_t currentDepth() const { return ScopeTable_.currentDepth(); }
 
   // ── Variable declarations ────────────────────────────────────────────────────
 
-  /**
-   * @brief Declare a new variable in the current scope.
-   *
-   * Returns a shared_ptr to the new VariableSymbol so the Resolver can attach
-   * it to AST nodes (Issue #5).  Throws std::runtime_error if the name is
-   * already declared in the *current* scope (shadowing outer scopes is allowed).
-   */
   std::shared_ptr<VariableSymbol> declareVariable(
       const std::string &Name, TurfTypePtr Type,
-      ResolverSourceLocation Loc = {});
+      ResolverSourceLocation Loc = {}, bool IsImmutable = false) {
+    return ScopeTable_.declareVariable(Name, std::move(Type), Loc, IsImmutable);
+  }
 
-  /**
-   * @brief Look up a variable by name, searching from the innermost scope out.
-   * @return Shared pointer to the symbol, or nullptr if not found.
-   */
-  std::shared_ptr<VariableSymbol> lookupVariable(const std::string &Name) const;
+  std::shared_ptr<VariableSymbol> lookupVariable(const std::string &Name) const {
+    return ScopeTable_.lookupVariable(Name);
+  }
 
-  /**
-   * @brief True if @p Name is declared in the current (innermost) scope only.
-   */
-  bool isDeclaredInCurrentScope(const std::string &Name) const;
+  bool isDeclaredInCurrentScope(const std::string &Name) const {
+    return ScopeTable_.isDeclaredInCurrentScope(Name);
+  }
 
-  /**
-   * @brief Collect every variable name visible from the current scope.
-   *
-   * Walks the scope stack from innermost to outermost and deduplicates names
-   * so that a shadowed outer variable is only listed once.  The result is
-   * suitable as the candidate list passed to SuggestionIndex::suggestVisible
-   * when emitting an "Unknown Variable" diagnostic.
-   */
-  std::vector<std::string> getAllVisibleNames() const;
+  std::vector<std::string> getAllVisibleNames() const {
+    return ScopeTable_.getAllVisibleNames();
+  }
 
   // ── Module / imported function registry ─────────────────────────────────────
 
-  /**
-   * @brief Register a function symbol under the given imported module namespace.
-   * The module is created automatically if it doesn't exist yet.
-   * Use this for `import io` declarations — not for functions defined in the
-   * current file (use registerCurrentFileFunction for those).
-   */
   void registerModuleFunction(const std::string &ModuleName,
-                               const ResolverFunctionSymbol &Sym);
+                               const ResolverFunctionSymbol &Sym) {
+    ModuleTable_.registerModuleFunction(ModuleName, Sym);
+  }
 
-  /**
-   * @brief Resolve a module-qualified call (e.g. io.printline(42)).
-   * Only the named module is searched.
-   * @return Pointer to the matching symbol, or nullptr.
-   */
-  const ResolverFunctionSymbol *resolveModuleFunction(
-      const std::string &ModuleName,
-      const std::string &FuncName,
-      const std::vector<TurfTypePtr> &ArgTypes) const;
+  void registerModuleConstant(const std::string &ModuleName,
+                              const ResolverConstantSymbol &Sym) {
+    ModuleTable_.registerModuleConstant(ModuleName, Sym);
+  }
 
-  /**
-   * @brief True if a module with the given name has at least one function.
-   */
-  bool hasModule(const std::string &ModuleName) const;
+  const ResolverConstantSymbol *
+  findModuleConstant(const std::string &ModuleName,
+                     const std::string &Name) const {
+    return ModuleTable_.findModuleConstant(ModuleName, Name);
+  }
 
-  /**
-   * @brief Return all base function names registered under @p ModuleName.
-   */
+  void registerModule(const std::string &ModuleName) {
+    ModuleTable_.registerModule(ModuleName);
+  }
+
+  bool hasModule(const std::string &ModuleName) const {
+    return ModuleTable_.hasModule(ModuleName);
+  }
+
+  std::vector<std::string> getAllModuleNames() const {
+    return ModuleTable_.getAllModuleNames();
+  }
+
   std::vector<std::string> getModuleFunctionNames(
-      const std::string &ModuleName) const;
+      const std::string &ModuleName) const {
+    return ModuleTable_.getModuleFunctionNames(ModuleName);
+  }
 
-  /**
-   * @brief Retrieve the ResolverModule object for @p ModuleName.
-   * Returns nullptr if not registered.
-   */
-  const ResolverModule *getModule(const std::string &ModuleName) const;
+  std::vector<std::string> getModuleConstantNames(
+      const std::string &ModuleName) const {
+    return ModuleTable_.getModuleConstantNames(ModuleName);
+  }
 
   // ── Current-file function registry ──────────────────────────────────────────
-  // These track `fn` definitions in the file being compiled, separately from
-  // imported module functions.  This separation powers the two-tier diagnostic:
-  //
-  //   Error: Unknown function 'pritn'
-  //     Current file:   print(int x)      — line 12
-  //     From io module: io.printline(str)  — try 'io.printline(x)'
-  //
-  // Issue #6 wires visitFuncDef to call registerCurrentFileFunction.
 
-  /**
-   * @brief Register a top-level fn definition from the current source file.
-   * Duplicate registrations (same signature) are silently ignored.
-   * Emits no error on overloads — that is the TypeChecker's job.
-   */
-  void registerCurrentFileFunction(const ResolverFunctionSymbol &Sym);
+  void registerCurrentFileFunction(const ResolverFunctionSymbol &Sym) {
+    ModuleTable_.registerCurrentFileFunction(Sym);
+  }
 
-  /**
-   * @brief Return all overloads of @p Name defined in the current file.
-   * Returns an empty vector if the name is not defined here.
-   */
+  void registerCurrentFileConstant(const ResolverConstantSymbol &Sym) {
+    ModuleTable_.registerCurrentFileConstant(Sym);
+  }
+
+  const ResolverConstantSymbol *
+  lookupCurrentFileConstant(const std::string &Name) const {
+    return ModuleTable_.lookupCurrentFileConstant(Name);
+  }
+
   std::vector<const ResolverFunctionSymbol *>
-  lookupCurrentFileFunctions(const std::string &Name) const;
+  lookupCurrentFileFunctions(const std::string &Name) const {
+    return ModuleTable_.lookupCurrentFileFunctions(Name);
+  }
+
+  std::vector<std::string> getAllCurrentFileFunctionNames() const {
+    return ModuleTable_.getAllCurrentFileFunctionNames();
+  }
+
+  // ── On-demand (flat) import registry ─────────────────────────────────────────
+
+  std::optional<FlatImportedSymbol>
+  registerFlatFunctionImport(const std::string &ContextLabel,
+                             const std::string &Name,
+                             const FlatImportedSymbol &Sym) {
+    return ModuleTable_.registerFlatFunctionImport(ContextLabel, Name, Sym);
+  }
+
+  const FlatImportedSymbol *
+  lookupFlatFunctionImport(const std::string &ContextLabel,
+                           const std::string &Name) const {
+    return ModuleTable_.lookupFlatFunctionImport(ContextLabel, Name);
+  }
+
+  std::optional<FlatImportedSymbol>
+  registerFlatTypeImport(const std::string &ContextLabel,
+                         const std::string &Name,
+                         const FlatImportedSymbol &Sym) {
+    return ModuleTable_.registerFlatTypeImport(ContextLabel, Name, Sym);
+  }
+
+  std::optional<FlatImportedSymbol>
+  registerFlatConstantImport(const std::string &ContextLabel,
+                             const std::string &Name,
+                             const FlatImportedSymbol &Sym) {
+    return ModuleTable_.registerFlatConstantImport(ContextLabel, Name, Sym);
+  }
+
+  const FlatImportedSymbol *
+  lookupFlatConstantImport(const std::string &ContextLabel,
+                           const std::string &Name) const {
+    return ModuleTable_.lookupFlatConstantImport(ContextLabel, Name);
+  }
 
   /**
-   * @brief Return all function names defined in the current file.
-   * Used as the Tier-1 candidate list for Damerau-Levenshtein suggestions
-   * when an unknown function name is encountered.
+   * @brief True if struct/enum @p Name is unqualified-visible from
+   * @p ContextLabel: either @p ContextLabel is the type's OWN declaring
+   * module (per ResolverTypeRegistry::getTypeOwningModule()), or it was
+   * brought in via an on-demand symbol/list/wildcard import
+   * (ResolverModuleTable::registerFlatTypeImport()).
+   *
+   * Qualified access (`list::List`) is NOT gated by this at all -- it goes
+   * through Resolver::validateModuleQualifier() instead, which only cares
+   * whether the qualifier is correct, not whether it was on-demand-imported.
    */
-  std::vector<std::string> getAllCurrentFileFunctionNames() const;
+  bool isTypeVisibleUnqualified(const std::string &ContextLabel,
+                                const std::string &Name) const {
+    if (TypeRegistry_.getTypeOwningModule(Name) == ContextLabel)
+      return true;
+    return ModuleTable_.hasFlatTypeImport(ContextLabel, Name);
+  }
+
+  std::vector<std::string> getModuleTypeNames(const std::string &ModuleName) const {
+    return TypeRegistry_.getModuleTypeNames(ModuleName);
+  }
 
   // ── Two-tier diagnostic helpers ──────────────────────────────────────────────
 
-  /**
-   * @brief Search every loaded module for overloads matching @p Name.
-   *
-   * Returns a list of (module_name, symbol_ptr) pairs so the diagnostic
-   * can format:  "From io: io.printline(str)  — try 'io.printline(x)'"
-   *
-   * This is Tier-2 in the error hierarchy — checked after the current-file
-   * registry fails.
-   */
-  struct ModuleFunctionMatch {
-    std::string ModuleName;
-    const ResolverFunctionSymbol *Symbol;
-  };
   std::vector<ModuleFunctionMatch>
-  findInModules(const std::string &Name) const;
+  findInModules(const std::string &Name) const {
+    return ModuleTable_.findInModules(Name);
+  }
 
-  /**
-   * @brief Collect every function name visible across ALL modules.
-   * Used to compute Damerau-Levenshtein suggestions spanning both tiers:
-   * the Resolver can rank and present them grouped by source.
-   */
-  std::vector<std::string> getAllModuleFunctionNames() const;
+  std::vector<std::string> getAllModuleFunctionNames() const {
+    return ModuleTable_.getAllModuleFunctionNames();
+  }
+
+  // ── Struct name registry ─────────────────────────────────────────────────
+
+  std::optional<ResolverSourceLocation>
+  registerStruct(const std::string &Name, ResolverSourceLocation Loc,
+                 const std::string &ModuleName = "") {
+    return TypeRegistry_.registerStruct(Name, Loc, ModuleName);
+  }
+
+  bool isKnownStruct(const std::string &Name) const {
+    return TypeRegistry_.isKnownStruct(Name);
+  }
+
+  std::vector<std::string> getAllStructNames() const {
+    return TypeRegistry_.getAllStructNames();
+  }
+
+  // ── Enum registry ─────────────────────────────────────────────────────────
+
+  std::optional<ResolverSourceLocation>
+  registerEnumType(const std::string& Name, ResolverSourceLocation Loc,
+                   std::shared_ptr<TurfEnumType> ET,
+                   const std::string &ModuleName = "") {
+    return TypeRegistry_.registerEnumType(Name, Loc, std::move(ET), ModuleName);
+  }
+  std::shared_ptr<TurfEnumType> lookupEnumType(const std::string& Name) const {
+    return TypeRegistry_.lookupEnumType(Name);
+  }
+  bool isEnumName(const std::string& Name) const {
+    return TypeRegistry_.isEnumName(Name);
+  }
+  std::vector<std::string> getAllEnumNames() const {
+    return TypeRegistry_.getAllEnumNames();
+  }
+
+  // ── User-declared `error` type registry (docs/planning/Errors.md) ────────
+
+  std::optional<ResolverSourceLocation>
+  registerErrorType(const std::string& Name, ResolverSourceLocation Loc,
+                    std::shared_ptr<TurfUserErrorType> ET,
+                    const std::string &ModuleName = "") {
+    return TypeRegistry_.registerErrorType(Name, Loc, std::move(ET), ModuleName);
+  }
+  std::shared_ptr<TurfUserErrorType> lookupErrorType(const std::string& Name) const {
+    return TypeRegistry_.lookupErrorType(Name);
+  }
+  bool isErrorTypeName(const std::string& Name) const {
+    return TypeRegistry_.isErrorTypeName(Name);
+  }
+  std::vector<std::string> getAllErrorTypeNames() const {
+    return TypeRegistry_.getAllErrorTypeNames();
+  }
+
+  std::string getTypeOwningModule(const std::string &Name) const {
+    return TypeRegistry_.getTypeOwningModule(Name);
+  }
 
   /**
    * @brief Dumps the contents of the symbol table (all scopes and modules) to the output stream.
    */
   void dump(std::ostream &OS) const;
 
+  /**
+   * @brief Dumps EVERYTHING this Resolver instance knows about modules,
+   * specifically -- unlike dump() (which mixes in variable scopes and is
+   * organized around the two-tier call-resolution model), this is a
+   * dedicated module-system introspection report: every imported module's
+   * full function list, which module owns each struct/enum type, and every
+   * on-demand (Symbol/SymbolList/Wildcard) flat import currently in effect,
+   * grouped by which file/module requested it. Backs `--dump-modules`.
+   */
+  void dumpModules(std::ostream &OS) const;
+
 private:
-  // Stack of scope objects.  We own them via unique_ptr; the parent pointer
-  // inside ResolverScope is a raw (non-owning) back-reference.
-  std::vector<std::unique_ptr<ResolverScope>> ScopeStack_;
-  size_t Depth_ = 0;
-
-  /// Imported module registries (one per 'import X' statement).
-  std::unordered_map<std::string, std::unique_ptr<ResolverModule>> Modules_;
-
-  /// Top-level fn definitions from the current source file.
-  /// Keyed by bare function name; value is the list of overloads.
-  /// Separate from Modules_ so the two-tier error system can distinguish
-  /// "this file" from "imported modules" without string-matching module names.
-  std::unordered_map<std::string, std::vector<ResolverFunctionSymbol>>
-      CurrentFileFunctions_;
+  ResolverScopeTable ScopeTable_;
+  ResolverModuleTable ModuleTable_;
+  ResolverTypeRegistry TypeRegistry_;
 };
 
 #endif // RESOLVER_SYMBOL_TABLE_H

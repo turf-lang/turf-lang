@@ -1,0 +1,4 @@
+fn main(): int {
+    mut b: bool = null;
+    return 0;
+}

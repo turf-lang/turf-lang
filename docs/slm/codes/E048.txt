@@ -1,0 +1,31 @@
+TURF E048 -- '.' USED ON A NON-INSTANCE:
+
+CAUSE:
+  `.` was used on something that is NOT an instance value -- either a
+  MODULE (`io.printline(...)`) or a struct TYPE used bare, i.e. a
+  static-style call with no actual instance in hand (`Point.origin()`
+  instead of `Point::origin()`). Turf's rule is consistent and absolute:
+  '.' is for instance-member access ONLY; '::' is the general
+  namespace-resolution operator, used for modules, static methods, and
+  construction alike.
+
+CORRECT SYNTAX:
+    io::printline("hi");     // module access -- always '::'
+    Point::origin();         // static method / construction -- always '::'
+    mut p: Point = Point::new(1, 2);
+    p.sum();                 // instance access -- '.', because 'p' is a
+                              // real Point VALUE, not the type itself
+
+INCORRECT:
+    io.printline("hi");
+    // ERROR: '.' can't be used here -- 'io' is a module, not an instance.
+    Point.origin();
+    // ERROR: '.' can't be used here -- 'Point' is a struct, not an
+    //        instance.
+
+FIX:
+  Replace '.' with '::' whenever the thing on the left is a module name or
+  a bare struct/type name rather than an actual instance variable. A quick
+  test: if you could write `mut x: Point = ...` and get a real value out
+  of it, '.' is for members of THAT value; the type name itself, and every
+  module, always uses '::'.

@@ -1,0 +1,18 @@
+// Only the RECEIVER position is exact-match (RFC §5.4). The remaining,
+// explicitly-written arguments still use ordinary typesCompatible()
+// coercion, same as any other function call -- an int literal should still
+// widen to a declared double parameter.
+import test;
+
+fn scale(x: int, factor: double): double {
+    return x * factor;
+}
+
+fn main(): int {
+    mut n: int = 10;
+    mut r: double = n.scale(2);
+
+    test::assert(r == 20.0, "non-receiver int argument widens to double via UFCS");
+
+    return 0;
+}

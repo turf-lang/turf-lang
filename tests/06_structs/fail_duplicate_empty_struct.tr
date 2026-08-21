@@ -1,0 +1,11 @@
+// Regression test: two struct declarations sharing a name are rejected
+// exactly the same way regardless of whether either one has any fields --
+// DuplicateTypeNameError's check happens before field parsing/registration
+// is even relevant, so an empty struct is no exception to the rule.
+
+struct Empty {}
+struct Empty {}
+
+fn main(): int {
+    return 0;
+}

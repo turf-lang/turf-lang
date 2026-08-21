@@ -1,0 +1,18 @@
+// Regression test: List<int>.push() must reject an argument of the wrong
+// type at COMPILE time. Before this fix, struct method calls (unlike free
+// function / module calls) never checked argument TYPES at all -- only
+// argument COUNT -- because `push(item: T)`'s declared parameter type is
+// the generic placeholder T, which trivially "matched" anything with no
+// check. Confirmed as a genuine type-safety hole, not just a missing
+// diagnostic: `l.push("hello")` on a `List<int>` compiled clean, and the
+// next `l.pop()` read the string's raw pointer bits back reinterpreted as
+// an int. See TypeChecker::visitMethodCall()'s TypeMatches filter (mirrors
+// the equivalent check the module-call path already had) for the fix.
+
+import list::List;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push("hello");
+    return 0;
+}

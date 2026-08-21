@@ -1,0 +1,34 @@
+TURF E019 -- CIRCULAR IMPORT:
+
+CAUSE:
+  Module A imports module B, which (directly or through a longer chain)
+  imports module A again, before A has finished being parsed. Detected by
+  the parser's in-progress import stack: re-entering a module that is still
+  being parsed (not one already fully parsed and just being reused) is a
+  genuine cycle, not the ordinary "already imported, reuse it" case.
+
+  Before this error existed, a cycle didn't fail loudly -- it silently
+  truncated the re-imported side to an empty module body, producing
+  confusing "missing symbol" errors elsewhere with no explanation.
+
+EXAMPLE CYCLE:
+    // a.tr
+    import b;
+    fn useB(): void { b::doSomething(); }
+
+    // b.tr
+    import a;                 // ERROR: a imports b imports a
+    fn doSomething(): void { a::useB(); }
+
+  The compiler prints the full chain: `a --imports--> b --imports--> a`.
+
+FIX:
+  Break the cycle. Two common approaches:
+  1. Remove one of the imports if it isn't actually needed both ways.
+  2. Move the shared functionality both modules need into a third module
+     that neither A nor B has to import the other to reach.
+
+WHAT THIS ERROR IS NOT:
+  Not about importing the SAME module twice from unrelated places -- that's
+  fine and common (`import io;` in five different files). This is
+  specifically about a cycle where the modules depend on each other.

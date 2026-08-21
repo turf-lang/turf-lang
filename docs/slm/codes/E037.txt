@@ -1,0 +1,22 @@
+TURF E037 -- LOOKUP ERROR:
+
+CAUSE:
+  Defined as "can't find a function named 'X'" (same shape as
+  UnknownFunctionError E041 -- an unresolved function-call name, run
+  through the same suggestion engine as every other unknown-name
+  diagnostic). As of this writing, this specific class has no active
+  call site in the compiler -- the function-name-not-found case in
+  practice is raised through UnknownFunctionError (E041) instead. This
+  entry exists because the class and its E037 code are both registered,
+  but the class is not currently wired to fire anywhere.
+
+WHAT TO DO IF YOU SEE THIS CODE:
+  If you actually encounter "[E037]" in real compiler output, that means
+  a new call site was added since this doc was written -- treat it the
+  same as UnknownFunctionError (E041): the named function doesn't
+  resolve. Double-check the spelling, and make sure the module that
+  declares it is imported if it's not a local/prelude function.
+
+SEE INSTEAD:
+  UnknownFunctionError (E041) documents the actual, currently-reachable
+  version of this same mistake.

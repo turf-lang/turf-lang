@@ -1,0 +1,42 @@
+// Regression test (was DISCOVERED_ISSUES.md #15 and #23):
+//   #15 — SymbolTable::canAssign checked `From->getName() == "void*"` when
+//        allowing an untyped FFI pointer to coerce into a typed pointer
+//        (e.g. int*), but the untyped pointer type is actually named "ptr",
+//        not "void*" -- so `mut p: int* = malloc(8);` was rejected outright
+//        (required declaring `extern fn malloc(...): int*;` as a workaround
+//        to bypass the broken check).
+//   #23 — explicit `ptr to StructName` casts were rejected
+//        ("Cannot explicitly cast 'ptr' to 'Node'"), which blocked dynamic
+//        allocation of structs / building heap-based recursive structures.
+// Both re-verified fixed.
+
+import test;
+
+extern fn malloc(size: int): ptr;
+extern fn free(p: ptr): void;
+
+struct Node {
+    val: int
+}
+
+// (issue #238) Every raw pointer local below needs `unsafe { }` around its
+// declaration/cast (FINAL_SPRINT.md's Track A "Caller-side locals" rule),
+// and `h.val` -- a field access THROUGH the raw `Node*` base `h` -- is a
+// gated "dereference" (no explicit deref operator exists).
+fn main(): int {
+    unsafe {
+        // #15: untyped `ptr` from malloc coerces directly into a typed pointer.
+        mut ip: int* = malloc(8);
+        test::assert(ip != null, "");
+
+        // #23: explicit ptr -> struct-pointer cast, for heap-allocated structs.
+        mut raw: ptr = malloc(8);
+        mut h: Node* = raw to Node*;
+        h.val = 77;
+        test::assert(h.val == 77, "");
+
+        free(raw);
+        free(ip);
+    }
+    return 0;
+}

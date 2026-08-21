@@ -1,0 +1,20 @@
+You called something that doesn't exist inside this module
+
+The module itself is fine -- you imported it correctly, and Turf found it without any trouble. The problem is more specific: you asked for a function or type inside that module that isn't actually there.
+
+Here's a correct call into the `io` module:
+
+    import io;
+    io::printline("hello");
+
+And here's the kind of mistake that trips this error -- a typo in the function name:
+
+    import io;
+    io::printlne("hello");
+    // ERROR: Module 'io' has nothing named 'printlne'.
+
+Just like with struct fields, Turf will usually notice how close your typo is to a real name and suggest it for you, so you can fix the spelling and move on.
+
+If it's not a typo, double-check two other things: that you're calling into the right module (it's easy to expect a function to live in one module when it's actually declared in another), and that the function or type wasn't renamed or removed since you last used it. Looking at the module's own source file is the most reliable way to see exactly what it exports.
+
+This is a completely normal thing to hit while you're still learning what each module in the standard library actually offers -- nothing to stress about, just a quick spelling or module check away from working.

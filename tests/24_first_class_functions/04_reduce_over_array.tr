@@ -1,0 +1,27 @@
+// The stated motivation for Issue #187 (ROADMAP_v1.0.0.md): "required
+// before generics can be useful (generic algorithms like map, filter, sort
+// all take functions as parameters)". A hand-rolled reduce() over a fixed
+// array is the smallest realistic proof that a function parameter is
+// genuinely reusable across different call sites, not just a single fixed
+// pass-through.
+import test;
+
+fn reduce(arr: int[5], f: fn(int, int): int, init: int): int {
+    mutable acc: int = init;
+    for i in 0..5 step i += 1 {
+        acc = f(acc, arr[i]);
+    }
+    return acc;
+}
+
+fn add(a: int, b: int): int { return a + b; }
+fn mul(a: int, b: int): int { return a * b; }
+
+fn main(): int {
+    mutable nums: int[5] = [1, 2, 3, 4, 5];
+
+    test::assert(reduce(nums, add, 0) == 15, "reduce with add should sum to 15");
+    test::assert(reduce(nums, mul, 1) == 120, "reduce with mul should be 120");
+
+    return 0;
+}

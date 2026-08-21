@@ -1,0 +1,14 @@
+// Regression test: `io::printline` referenced WITHOUT being called (e.g.
+// assigned to a variable) must be a clean TypeError -- this language has
+// no first-class functions, so a bare module-qualified reference has no
+// valid meaning outside call position. Before this fix, ANY use of
+// `Module::name` reached Codegen and crashed with an unrelated internal
+// error ("First-class functions are not supported yet") instead of a
+// clean, on-topic diagnostic explaining why.
+
+import io;
+
+fn main(): int {
+    mut x: void* = io::printline;
+    return 0;
+}

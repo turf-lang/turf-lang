@@ -17,6 +17,9 @@
 
 #include "Builtins.h"
 #include "Codegen.h"
+#include "Colors.h"
+#include "ErrorCategory.h"
+#include "ErrorCodes.h"
 #include "Lexer.h"
 #include "Lint.h"
 #include "Parser.h"
@@ -48,6 +51,14 @@
 #include <iostream>
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Path.h"
+#include <set>
+#include <vector>
+#ifdef _WIN32
+#include <process.h> // _spawnvp, _P_WAIT
+#else
+#include <sys/wait.h> // waitpid, WIFEXITED, WEXITSTATUS
+#include <unistd.h>   // fork, execvp
+#endif
 
 using namespace llvm;
 
@@ -56,7 +67,7 @@ std::string CompilerExecutablePath;
 // CLI helpers
 struct CompilerOptions {
   std::string InputFile;
-  std::string OutputName = "program"; // default output binary name
+  std::string OutputName;             // default derived from input later
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
@@ -65,7 +76,147 @@ struct CompilerOptions {
   bool DumpResolved = false;          // --dump-resolved: run Resolver then print annotated AST (Issue #5)
   bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
   bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
+  bool DumpModules = false;           // --dump-modules: print full module-system introspection
+  std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
 };
+
+// `turf --explain E0NN` is the HUMAN-facing side of error-code
+// documentation -- read straight in a terminal, so it's rendered with
+// actual colors/structure instead of a flat file dump (see
+// printHumanExplainDoc() below). It is NOT what a future
+// `--explain-to-slm` would use: that flag (not implemented yet) would read
+// the parallel docs/slm/codes/ tree instead -- plain, uncolored grounding
+// text meant for the model, not a person. Keeping the two trees (and this
+// comment) separate is deliberate -- see ErrorCodes::getHumanCodeDocPath()/
+// getSlmCodeDocPath()'s own doc comment in ErrorCodes.h for why.
+//
+// This mode takes no input .tr file, so it's handled before parseArgs()
+// (which requires and validates one) rather than folded into
+// CompilerOptions. Doc resolution is a three-tier fallback, most-specific
+// first:
+//   1. A per-code human doc, "docs/errors/codes/E0NN.txt" (ErrorCodes::
+//      getHumanCodeDocPath()) -- opt-in, only written for codes where the
+//      coarser tiers below conflate genuinely distinct mistakes (e.g. E068
+//      "unknown struct field" vs E054 "unknown struct method").
+//   2. A construct-specific doc derived from the code's own short
+//      Description run through the SAME keyword classifier
+//      (extractContextKeyword()) the live --smart pipeline already uses on
+//      real error messages -- e.g. "Struct method not found" contains
+//      "struct" and routes to docs/slm/structs.txt, matching what a live
+//      compile of that same error class would show.
+//   3. The plain per-category doc (SLM::getCategoryDocPath() with no
+//      keyword) -- the original, coarsest fallback.
+// Tiers 2 and 3 both read from docs/slm/ (there's no per-category human
+// tree -- only per-code docs are split by audience so far) but are still
+// rendered through the same human colorizer either way.
+// See issue #241 Track D.
+
+// Prints one line of body prose, highlighting `backtick`-quoted spans --
+// the docs already write inline identifiers/snippets this way ("the
+// `password` field") -- in bold green and stripping the backticks
+// themselves, rather than printing them literally. Bold (vs. a code
+// block's plain green) so a reader can tell "this is a snippet worth
+// noticing inline" from "this is a full sample to read" at a glance.
+// Deliberately minimal -- balanced backtick pairs only, no nesting, no
+// other markdown -- so doc authors don't need to learn real markdown.
+static void printBodyLine(const std::string &Line) {
+  size_t Pos = 0;
+  while (Pos < Line.size()) {
+    size_t Open = Line.find('`', Pos);
+    if (Open == std::string::npos) {
+      std::cout << Line.substr(Pos);
+      return;
+    }
+    size_t Close = Line.find('`', Open + 1);
+    if (Close == std::string::npos) {
+      // Unmatched backtick -- print the remainder literally rather than
+      // silently eating it while searching for a partner that isn't there.
+      std::cout << Line.substr(Pos);
+      return;
+    }
+    std::cout << Line.substr(Pos, Open - Pos) << Colors::BOLD
+              << Colors::BRIGHT_GREEN
+              << Line.substr(Open + 1, Close - Open - 1) << Colors::RESET;
+    Pos = Close + 1;
+  }
+}
+
+// Renders a doc file (docs/errors/codes/*.txt, or a docs/slm/*.txt
+// category/construct fallback -- both already follow the same loose shape)
+// with real terminal color instead of a flat rdbuf() dump: the first
+// non-blank line is treated as a title, any line indented 4+ spaces is
+// treated as a code sample (the exact convention every docs/slm/*.txt file
+// already uses for its own examples), and everything else is body prose
+// (which additionally gets `backtick` spans highlighted -- see
+// printBodyLine() above). Deliberately simple -- no markdown beyond that
+// one convention, no nested spans -- so doc authors don't need to learn a
+// new syntax; it works with the shape these files already have.
+static void printHumanExplainDoc(std::istream &Doc) {
+  std::string Line;
+  bool PrintedTitle = false;
+
+  while (std::getline(Doc, Line)) {
+    if (!PrintedTitle) {
+      if (Line.empty())
+        continue; // skip leading blank lines before the title
+      std::cout << Colors::BOLD << Colors::BRIGHT_CYAN << Line
+                << Colors::RESET << "\n";
+      PrintedTitle = true;
+      continue;
+    }
+
+    size_t FirstNonSpace = Line.find_first_not_of(' ');
+    bool IsCode = FirstNonSpace != std::string::npos && FirstNonSpace >= 4;
+    if (IsCode) {
+      std::cout << Colors::BRIGHT_GREEN << Line << Colors::RESET << "\n";
+    } else {
+      printBodyLine(Line);
+      std::cout << "\n";
+    }
+  }
+}
+
+static void handleExplainFlagIfPresent(int argc, char **argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) != "--explain")
+      continue;
+
+    if (i + 1 >= argc) {
+      std::cerr << "Usage: turf --explain E0NN\n";
+      std::exit(1);
+    }
+
+    std::string Code = argv[i + 1];
+    const ErrorCodeEntry *Entry = ErrorCodes::lookupByCode(Code);
+    if (!Entry) {
+      std::cerr << "Unknown error code: " << Code
+                << "\nRun `turf --explain E0NN` with a code shown in an "
+                   "error's \"[E0NN]\" header, e.g. `turf --explain E001`.\n";
+      std::exit(1);
+    }
+
+    std::cout << Colors::BOLD << Colors::BRIGHT_CYAN << Entry->Code
+              << Colors::RESET << "  " << Entry->ClassName << " ("
+              << SLM::getCategoryName(Entry->Category) << ")\n\n";
+
+    std::string DocPath = ErrorCodes::getHumanCodeDocPath(Entry->Code);
+    if (DocPath.empty()) {
+      std::string Keyword = SLM::extractContextKeyword(Entry->Description);
+      DocPath = SLM::getCategoryDocPath(Entry->Category, Keyword);
+    }
+    std::ifstream Doc(DocPath);
+    if (Doc.is_open()) {
+      printHumanExplainDoc(Doc);
+    } else {
+      // Doc file missing on disk (e.g. run from outside the repo root) --
+      // fall back to the short auto-generated description rather than
+      // printing nothing.
+      std::cout << Entry->Description << ".\n";
+    }
+
+    std::exit(0);
+  }
+}
 
 static CompilerOptions parseArgs(int argc, char **argv) {
   CompilerOptions opts;
@@ -99,8 +250,16 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.RunResolver = true;
       opts.RunTypeChecker = true;
       opts.DumpTypechecked = true;
+    } else if (arg == "--dump-modules") {
+      // Implies --resolve: the module system's state (Modules_,
+      // TypeOwningModule_, FlatImportedFunctions_) only exists once Pass 1
+      // hoisting has run, same as every other --dump-* flag.
+      opts.RunResolver = true;
+      opts.DumpModules = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
+    } else if (arg == "--link" && i + 1 < argc) {
+      opts.LinkLibs.push_back(argv[++i]);
     } else if (arg[0] == '-') {
       std::cerr << "Unknown option: " << arg << "\n";
       std::exit(1);
@@ -113,13 +272,24 @@ static CompilerOptions parseArgs(int argc, char **argv) {
     std::cerr
         << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] "
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
-           "[--dump-resolved] [--typecheck] [--dump-typechecked]\n";
+           "[--dump-resolved] [--typecheck] [--dump-typechecked] "
+           "[--dump-modules] [--link <libname>]\n"
+           "       turf --explain E0NN\n";
     std::exit(1);
   }
 
   if (opts.InputFile.size() < 3 || opts.InputFile.substr(opts.InputFile.size() - 3) != ".tr") {
     std::cerr << "Error: Input file must have a '.tr' extension (got: " << opts.InputFile << ").\n";
     std::exit(1);
+  }
+
+  if (opts.OutputName.empty()) {
+    size_t lastSlash = opts.InputFile.find_last_of("/\\");
+    std::string base = (lastSlash == std::string::npos) ? opts.InputFile : opts.InputFile.substr(lastSlash + 1);
+    opts.OutputName = base.substr(0, base.size() - 3);
+    if (opts.OutputName.empty()) {
+      opts.OutputName = "program"; // fallback
+    }
   }
 
   return opts;
@@ -185,27 +355,137 @@ static int emitObjectFile(Module &M, const std::string &ObjFilename) {
   return 0;
 }
 
+// g_RequiredLibs is populated by ExternFuncDeclExprAST::codegen() for every
+// 'extern from "libname" fn' declaration encountered during code generation.
+extern std::set<std::string> g_RequiredLibs;
+
 // Invoke system linker
+//
+// Runs the linker directly via fork+exec (POSIX) / _spawnvp (Windows) with
+// an explicit argument array, NOT std::system() on a concatenated shell
+// command string. ObjFile and OutputName both ultimately derive from `-o`
+// and the input filename on the command line -- arbitrary, unescaped user
+// input. The previous std::system("cc \"" + ObjFile + "\" -o \"" +
+// OutputName + "\" ...") only quoted against spaces; a filename containing
+// a `"`, `` ` ``, `$(...)`, or `;` would break out of the quoting and run as
+// shell syntax (e.g. `turf prog.tr -o 'x"; rm -rf ~; echo "'`). Passing
+// argv entries directly to exec*/_spawnvp means the OS never re-parses them
+// through a shell, so no argument can ever be interpreted as shell syntax
+// regardless of its contents.
 static int linkObject(const std::string &ObjFile,
-                      const std::string &OutputName) {
-  std::string Cmd;
+                      const std::string &OutputName,
+                      const std::vector<std::string> &ExtraLibs) {
+  // Build -l flags from both sources:
+  //   1. Libraries declared via 'extern from "libname" fn' in source code
+  //   2. Libraries passed via --link on the command line
+  std::set<std::string> AllLibs(g_RequiredLibs);
+  for (const auto &L : ExtraLibs) AllLibs.insert(L);
 
 #ifdef _WIN32
-  // On Windows, try gcc (MinGW) first
-  Cmd = "gcc \"" + ObjFile + "\" -o \"" + OutputName + ".exe\" -lm";
+  std::string FinalOutput = OutputName + ".exe";
+  std::vector<std::string> Args = {"gcc", ObjFile, "-o", FinalOutput, "-lm"};
 #else
-  // On Unix, use cc (always available on dev machines).
-  Cmd = "cc \"" + ObjFile + "\" -o \"" + OutputName + "\" -lm";
+  std::string FinalOutput = OutputName;
+  std::vector<std::string> Args = {"cc", ObjFile, "-o", FinalOutput, "-lm"};
 #endif
+  for (const auto &L : AllLibs) Args.push_back("-l" + L);
 
-  int Ret = std::system(Cmd.c_str());
+  // Human-readable form for error reporting only -- never passed to a shell.
+  std::string CmdForDisplay;
+  for (const auto &A : Args) CmdForDisplay += A + " ";
+
+#ifdef _WIN32
+  std::vector<const char *> Argv;
+  for (const auto &A : Args) Argv.push_back(A.c_str());
+  Argv.push_back(nullptr);
+  intptr_t Ret = _spawnvp(_P_WAIT, Argv[0], Argv.data());
   if (Ret != 0) {
     std::cerr << "Linking failed (exit code " << Ret << ")\n";
-    std::cerr << "Command was: " << Cmd << "\n";
+    std::cerr << "Command was: " << CmdForDisplay << "\n";
     return 1;
   }
+#else
+  std::vector<char *> Argv;
+  for (auto &A : Args) Argv.push_back(const_cast<char *>(A.c_str()));
+  Argv.push_back(nullptr);
+
+  pid_t Pid = fork();
+  if (Pid < 0) {
+    std::cerr << "Linking failed: fork() error\n";
+    return 1;
+  }
+  if (Pid == 0) {
+    execvp(Argv[0], Argv.data());
+    // execvp only returns on failure.
+    std::cerr << "Linking failed: could not exec '" << Argv[0] << "'\n";
+    _exit(127);
+  }
+  int Status = 0;
+  if (waitpid(Pid, &Status, 0) < 0) {
+    std::cerr << "Linking failed: waitpid() error\n";
+    return 1;
+  }
+  if (!WIFEXITED(Status) || WEXITSTATUS(Status) != 0) {
+    std::cerr << "Linking failed (exit code "
+              << (WIFEXITED(Status) ? WEXITSTATUS(Status) : -1) << ")\n";
+    std::cerr << "Command was: " << CmdForDisplay << "\n";
+    return 1;
+  }
+#endif
   return 0;
 }
+
+/**
+ * @brief Skip forward past a malformed top-level construct (a `fn`/`struct`/
+ *        `enum`/`extern`/`import` whose own parse just failed) until reaching
+ *        the next safe top-level boundary -- i.e. until g_braceDepth (see
+ *        Lexer.h/.cpp, maintained globally by getNextToken() as it consumes
+ *        each token) returns to 0.
+ *
+ * All eight recovery loops in the parsing loops below (pre-pass and main
+ * pass, `fn`/`struct`/... branch and `import` branch, longjmp path and
+ * plain-nullptr-return path) used to do a flat, depth-blind scan: skip
+ * tokens one at a time until hitting ANY of a fixed set of boundary tokens
+ * (`fn`, `struct`, ..., `;`). That works fine when the failure happens
+ * genuinely at the top level, but a failure partway through a function
+ * BODY (e.g. a typo'd keyword like `iff` for `if`) leaves the token stream
+ * mid-way through that body, with its own already-open, not-yet-closed `{`
+ * that the naive scan has no way to know about -- it stops at the FIRST
+ * `;` or `fn`/`struct`/... it happens to see, which is very often still
+ * inside the malformed body, not a real top-level boundary. The leftover
+ * garbage after that point (the rest of the body, its closing `}`, etc.)
+ * then gets misread as new top-level content, producing a second,
+ * completely unrelated, confusing error stacked on top of the real one.
+ *
+ * This function itself went through exactly that bug once already: the
+ * first version assumed the failure was always exactly ONE brace level
+ * deep (hardcoding "Depth = 1", i.e. only the failed construct's own `{`
+ * is open) -- true for a failure directly inside a function body, but not
+ * for one nested further, e.g. inside a `compare` block's `otherwise` arm
+ * within that body (two levels: the function's `{` AND the compare's `{`).
+ * A second stray `otherwise:` there produced a "duplicate/must be last"
+ * error from a totally different, unrelated code path than expected --
+ * the arm's own statement-parsing loop tried to parse the second
+ * `otherwise:` as the START OF A NEW STATEMENT (it has no way to know
+ * "otherwise" means "the compare block's next arm header, stop here"), hit
+ * ParsePrimaryBase()'s generic "unexpected token" fallback, and returned a
+ * soft (non-longjmp) nullptr failure -- which the OLD Depth=1 recovery then
+ * mis-resynchronized one brace level too shallow (stopping at the
+ * COMPARE block's closing `}`, not the function's), leaving `return 0; }`
+ * dangling as apparent new top-level content and producing a second,
+ * unrelated "Statements are not allowed outside of a function" error
+ * stacked on top of the real one -- the exact class of bug this function
+ * exists to prevent, just at a nesting depth the original fix didn't
+ * anticipate. g_braceDepth's global, always-accurate tracking (rather than
+ * a fixed assumption re-derived locally at each call site) fixes this for
+ * ANY nesting depth, not just one level.
+ */
+// IsTopLevelBoundaryToken()/SkipToNextTopLevelBoundary() used to live here as
+// file-local `static` functions. Moved to ParserCore.cpp (declared in
+// Parser.h) so Sandbox.cpp's own recovery-mode parse passes can resync on a
+// per-statement basis using the exact same logic, instead of duplicating it
+// -- see issue #228/#233. Behavior is unchanged; only the definitions' home
+// and linkage moved.
 
 // main
 /**
@@ -215,8 +495,10 @@ static int linkObject(const std::string &ObjFile,
  * @param argv An array of command-line argument strings.
  * @return int Exit code (0 on success, non-zero on compilation failure).
  */
-int main(int argc, char **argv) {
-  CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)main);
+static int runCompilerMain(int argc, char **argv) {
+  CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)runCompilerMain);
+
+  handleExplainFlagIfPresent(argc, argv);
 
   struct SLMCleanup {
     ~SLMCleanup() { SLM::SLMEngine::getInstance().release(); }
@@ -227,12 +509,12 @@ int main(int argc, char **argv) {
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
 
-  SourceFile.open(opts.InputFile);
-  if (!SourceFile.is_open()) {
+  if (!OpenSourceFile(opts.InputFile)) {
     std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
     return 1;
   }
   SourceFilename = opts.InputFile;
+  MainSourceFilename = opts.InputFile;
 
   // Read file into memory for error printing
   std::ifstream File(opts.InputFile);
@@ -240,44 +522,38 @@ int main(int argc, char **argv) {
   while (std::getline(File, Line)) {
     SourceLines.push_back(Line);
   }
+  // Also seed the persistent cross-pass cache -- see AllSourceLines' doc
+  // comment in Lexer.h for why this can't just be SourceLines alone.
+  AllSourceLines[SourceFilename] = SourceLines;
 
   // Builtin registry removed
   InitializeModule(); // Initialize LLVM Context, Module, Builder
   // Clear any previous call graph state
   ClearCallGraph();
-  InitializeSymbolTable(); // Initialize semantic symbol table
-  InitializePrecedence();
+  ClearGlobalCFGs();
+  InitializeCompilerGlobals(); // GlobalSymbolTable + BinopPrecedence -- see Parser.h
 
   // Pre-pass: hoist 'fn' function prototypes so that forward calls work.
   // We perform a second full parse of the file, i.e. only processing
   // FuncDefExprAST nodes, which registers the LLVM prototype on first
   // codegen call (before the body exists).
-  // PreludeAST is kept alive so the Resolver can walk it later and register
-  // the `io` module (and any other prelude imports) in its module registry
-  // before it processes user code.
-  std::unique_ptr<ExprAST> PreludeAST;
+  //
+  // There is deliberately no prelude auto-import here. lib/std/prelude.tr
+  // used to always `import io;` for every compile, which meant bare
+  // `printline(...)` (etc.) silently compiled with zero import statements
+  // anywhere in user code -- io's functions leaked into every program's
+  // module registry regardless of whether that program actually asked for
+  // them. Every module a program uses must now be imported explicitly by
+  // that program itself.
 
-  {
-    if (true) {
-      // Swap the global SourceFile for the pre-pass stream
-      SourceFile.close();
-      SourceFile.open(opts.InputFile);
+  // Swap the global SourceFile for the pre-pass stream
+  CloseSourceFile();
+      OpenSourceFile(opts.InputFile);
       CurLoc = {1, 0};
 
       // Reset the lexer token stream
       CurTok = 0;
       getNextToken();
-
-      // Auto-import prelude using relative path from compiler
-      llvm::SmallString<128> PreludePath(CompilerExecutablePath);
-      llvm::sys::path::remove_filename(PreludePath);
-      llvm::sys::path::append(PreludePath, "..", "lib", "std", "prelude.tr");
-
-      if (auto Parsed = ParseFile(PreludePath.str().str())) {
-        RecordParsedTopLevelAST(Parsed.get());
-        Parsed->codegen();
-        PreludeAST = std::move(Parsed); // keep alive for Resolver
-      }
 
       // ── Pre-pass sub-pass 1: Parse ALL top-level declarations ─────────────
       // We collect every fn/struct/import node BEFORE codegenning any body.
@@ -286,27 +562,81 @@ int main(int argc, char **argv) {
       // ResolvedCallTarget blindly, so Resolver must run first).
       std::vector<std::unique_ptr<ExprAST>> PrePassASTs;
 
+      // Prelude auto-import (STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 6):
+      // inject `import int; import double; ...` as if they were the literal
+      // first lines of the TOP-LEVEL file only (not library modules
+      // importing each other -- see ParsePreludeImports()'s doc comment).
+      // These go through the exact same ParseModuleImportByName() path a
+      // real import does -- not a separate always-on registry, which is
+      // what caused the original prelude.tr's two bugs (see this file's
+      // other prelude comment, a few dozen lines below, for that history).
+      // Deliberately NOT passed to RecordParsedTopLevelAST() -- that tracks
+      // the USER's own top-level declarations for sandbox/SLM diffing, and
+      // these aren't part of the user's source.
+      for (auto &PreludeAST : ParsePreludeImports(CurLoc))
+        PrePassASTs.push_back(std::move(PreludeAST));
+
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') { getNextToken(); continue; }
-        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_IMPORT ||
-            CurTok == TOK_AT) {
+        if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+            CurTok == TOK_MACHINE ||
+            CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
+            CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
             auto AST = ParseExpression();
             if (AST) {
-              if (RequiresSemicolon(AST.get())) {
-                if (CurTok != ';') LogErrorAt(CurLoc, "Expected ';' after statement");
-                else getNextToken();
+              if (CurTok == ';') {
+                LogErrorAt(CurLoc, "Unexpected ';'");
               }
-              RecordParsedTopLevelAST(AST.get());
-              LintExpression(AST.get());
-              PrePassASTs.push_back(std::move(AST));
+              // NOTE: no LintExpression() call here (deliberately -- see the
+              // "Phase Separation: Lint All" comment near FnASTs' declaration
+              // for the full story). This AST is about to flow through
+              // Resolver -> TypeChecker -> full codegen (sub-pass 3b) in this
+              // same pre-pass, and FuncDefExprAST::codegen() already lints
+              // its own body once that's done. Linting here too used to
+              // triple-warn on every function: once here (before the AST was
+              // even resolved), once via that embedded codegen-time lint,
+              // and a third time later when the main pass re-parses the same
+              // source into a fresh (but structurally identical) AST and
+              // lints THAT via the FnASTs loop -- three near-identical
+              // warnings for one line of source. Found while adding a
+              // regression test for Lint.cpp's self-comparison wording fix.
+              //
+              // AppendFlattenedTopLevelDecl() also transparently splices a
+              // top-level `unsafe { }` block's children in here instead of
+              // the wrapper node itself -- see its doc comment (Parser.h).
+              AppendFlattenedTopLevelDecl(std::move(AST), PrePassASTs, true);
+            } else {
+              // ParseExpression() already reported a real error and
+              // returned nullptr NORMALLY (no longjmp) -- see
+              // SkipToNextTopLevelBoundary()'s doc comment for why a
+              // depth-aware skip is needed here instead of a flat scan.
+              SkipToNextTopLevelBoundary();
             }
           } else {
-            while (CurTok != TOK_FN && CurTok != TOK_STRUCT &&
-                   CurTok != TOK_IMPORT && CurTok != TOK_AT &&
-                   CurTok != TOK_EOF)
-              getNextToken();
+            SkipToNextTopLevelBoundary();
+          }
+          g_recoverActive = false;
+        } else if (CurTok == TOK_IMPORT) {
+          g_recoverActive = true;
+          if (setjmp(g_recoverJmp) == 0) {
+            auto AST = ParseExpression();
+            if (AST) {
+              if (CurTok != ';') {
+                LogErrorAt(CurLoc, "Expected ';' after statement");
+              } else {
+                getNextToken(); // eat ';'
+              }
+              RecordParsedTopLevelAST(AST.get());
+              // See the matching NOTE above (fn/struct/enum/@/extern branch):
+              // no LintExpression() call here either, for the same reason.
+              PrePassASTs.push_back(std::move(AST));
+            } else {
+              SkipToNextTopLevelBoundary();
+            }
+          } else {
+            SkipToNextTopLevelBoundary();
           }
           g_recoverActive = false;
         } else {
@@ -315,7 +645,8 @@ int main(int argc, char **argv) {
       }
 
       // ── Pre-pass sub-pass 2a: Resolve ─────────────────────────────────────
-      // Run the Resolver over everything parsed so far (prelude + user fns).
+      // Run the Resolver over everything parsed so far (user fns only -- no
+      // prelude to resolve first any more).
       // This populates ResolvedCandidates on every FuncCallExprAST and sets
       // ResolvedCallTarget for unambiguous single-overload calls.
       Resolver PreR;
@@ -323,8 +654,6 @@ int main(int argc, char **argv) {
         bool PreResolverClean = true;
         g_recoverActive = true;
         if (setjmp(g_recoverJmp) == 0) {
-          if (PreludeAST)
-            PreR.resolve(PreludeAST.get());
           PreR.resolveAll(PrePassASTs);
         } else {
           PreResolverClean = false;
@@ -340,17 +669,71 @@ int main(int argc, char **argv) {
       // Run the TypeChecker over the pre-pass ASTs to narrow overloaded calls
       // (e.g. io.printline has 4 overloads; TypeChecker picks the right one
       // and sets ResolvedCallTarget so sub-pass 3b codegen reads it blindly).
+      bool PreTCClean = true;
       {
         TypeChecker PreTC(PreR.symbolTable());
         g_recoverActive = true;
         if (setjmp(g_recoverJmp) == 0) {
-          if (PreludeAST)
-            PreTC.check(PreludeAST.get());
           PreTC.checkAll(PrePassASTs);
+        } else {
+          PreTCClean = false;
         }
-        // Errors in the pre-pass TC are informational only here — the main-pass
-        // TC will re-check and report them with full diagnostics.
+        // Errors in the pre-pass TC are informational only in the sense that
+        // the main-pass TC (below, after the whole pre-pass finishes) is what
+        // actually PRINTS them with full diagnostics and is authoritative for
+        // whether compilation ultimately fails -- but PreTCClean still gates
+        // sub-pass 3b's body codegen just below. Without that gate, a type
+        // error the pre-pass TC correctly caught (e.g. `x.foo()` where
+        // x: int -- "cannot call methods on a non-struct type") used to be
+        // silently discarded here, and sub-pass 3b would codegen the same
+        // broken body anyway, reaching a Codegen-side
+        // `llvm::report_fatal_error()` ("this is a compiler bug") and
+        // aborting the whole process -- BEFORE the main-pass TC ever got a
+        // chance to run and print the real, correct diagnostic. The prior
+        // codegen (structs, sub-pass 2c) and prototypes (sub-pass 3a) stay
+        // ungated: they're structural/signature-level and don't execute
+        // arbitrary expression codegen, so they carry effectively none of
+        // this crash risk, and skipping them too would serve no purpose
+        // since the main-pass TC exits before anything downstream of them
+        // runs anyway once PreTCClean is false.
         g_recoverActive = false;
+      }
+
+      // ── Pre-pass sub-pass 2c: Fully codegen all structs FIRST ──────────────
+      // Unlike functions, StructDeclExprAST::codegen() has no g_protoOnlyPass
+      // split -- one call does the whole job: create-or-reuse an opaque
+      // llvm::StructType stub, then immediately populate its body (field
+      // types) in place. That "immediately" is the problem this pass exists
+      // to fix. Structs used to only be codegen'd in sub-pass 3b below,
+      // interleaved with everything else in TEXTUAL file order -- so a
+      // struct field access GEP built while compiling a method that's
+      // declared BEFORE its owning struct (`fn User.grow()` above `struct
+      // User {...}`, a supported forward-reference -- see
+      // tests/06_structs/19_method_before_struct.tr) got built against the
+      // struct type while it was still opaque (zero fields). The opaque
+      // llvm::StructType* object identity is correctly preserved and later
+      // filled in via setBody() -- so by the time the module finishes,
+      // GlobalSymbolTable and LLVMTypeCache both point at a fully-populated
+      // struct -- but the GEP instruction itself was already permanently
+      // constructed while that type had no known fields, and its embedded
+      // "indexed type" information doesn't get retroactively fixed up by a
+      // later setBody() call on the same object. The result was IR that
+      // `verifyModule()` (see below) correctly rejects: "GEP is not of right
+      // type for indices!". This was completely invisible before that
+      // verification call was wired up correctly (see its own doc comment).
+      //
+      // Fix: give structs the same treatment functions already get for
+      // exactly this reason (forward calls) -- process ALL of them, fully,
+      // before ANY function prototype or body touches a struct type. Structs
+      // are excluded from both loops below since they're entirely done here.
+      for (auto &AST : PrePassASTs) {
+        if (dynamic_cast<StructDeclExprAST *>(AST.get())) {
+          g_recoverActive = true;
+          if (setjmp(g_recoverJmp) == 0) {
+            AST->codegen();
+          }
+          g_recoverActive = false;
+        }
       }
 
       // ── Pre-pass sub-pass 3a: Emit all LLVM function prototypes ────────────
@@ -362,6 +745,8 @@ int main(int argc, char **argv) {
       g_protoOnlyPass = true;
       for (auto &AST : PrePassASTs) {
         if (dynamic_cast<FuncDefExprAST *>(AST.get()) ||
+            dynamic_cast<EnumDeclExprAST *>(AST.get()) ||
+            dynamic_cast<ExternFuncDeclExprAST *>(AST.get()) ||
             dynamic_cast<ModuleImportExprAST *>(AST.get())) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
@@ -374,27 +759,53 @@ int main(int argc, char **argv) {
 
       // ── Pre-pass sub-pass 3b: Full codegen (bodies) ───────────────────────
       // All prototypes exist now — codegen each function body safely.
-      for (auto &AST : PrePassASTs) {
-        size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
-        g_recoverActive = true;
-        if (setjmp(g_recoverJmp) == 0) {
-          AST->codegen();
-        } else {
-          if (GlobalSymbolTable) {
-            GlobalSymbolTable->ResetToDepth(SavedDepth);
-            GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+      // Structs are skipped: sub-pass 2c above already fully codegen'd them,
+      // and StructDeclExprAST::codegen() is NOT safe to call a second time
+      // (its opaque-stub reuse check keys on `isOpaque()`, which is false
+      // once setBody() has run -- a second call would create a second,
+      // distinct llvm::StructType and silently corrupt LLVMTypeCache).
+      //
+      // Gated on PreTCClean: if the pre-pass TypeChecker (sub-pass 2b) found
+      // ANY error anywhere in the file, don't run body codegen at all here --
+      // see PreTCClean's doc comment above for why. The main-pass TC (after
+      // this whole pre-pass block) will re-find the same error and exit
+      // cleanly before its own codegen ever runs, so skipping this is always
+      // safe when !PreTCClean, never a missed compile.
+      if (PreTCClean) {
+        for (auto &AST : PrePassASTs) {
+          if (dynamic_cast<StructDeclExprAST *>(AST.get()))
+            continue;
+          // `export immut` constants have no real LLVM storage at all --
+          // Resolver Pass 1 (hoistExportedConstant) already extracted their
+          // literal value into the symbol table, and every reference site
+          // emits that literal directly (see VariableExprAST/
+          // ScopeAccessExprAST's ResolvedConstant field). Calling
+          // VarDeclExprAST::codegen() here would run it with no enclosing
+          // function/basic-block context (true top level), corrupting
+          // whatever LLVM function is being codegenned adjacent to it in
+          // iteration order -- confirmed live via a real crash ("Basic
+          // Block ... does not have terminator") in an unrelated function.
+          if (dynamic_cast<VarDeclExprAST *>(AST.get()))
+            continue;
+          size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
+          g_recoverActive = true;
+          if (setjmp(g_recoverJmp) == 0) {
+            AST->codegen();
+          } else {
+            if (GlobalSymbolTable) {
+              GlobalSymbolTable->ResetToDepth(SavedDepth);
+              GlobalSymbolTable->ResetEarlyExitForCurrentScope();
+            }
           }
+          g_recoverActive = false;
         }
-        g_recoverActive = false;
       }
 
-      // Re-open for the main pass
-      SourceFile.close();
-      SourceFile.open(opts.InputFile);
-      CurLoc = {1, 0};
-      CurTok = 0;
-    }
-  }
+  // Re-open for the main pass
+  CloseSourceFile();
+  OpenSourceFile(opts.InputFile);
+  CurLoc = {1, 0};
+  CurTok = 0;
 
 
   // Main pass: re-enter the entry block and codegen everything.
@@ -403,6 +814,7 @@ int main(int argc, char **argv) {
   // pre-pass 1 ends
   // Reset the lexer's internal state so that it starts from the beginning of
   // the file
+  ClearParsedTopLevelASTs();
   resetLexer();
 
   // Bootstrap the lexer for the main pass
@@ -415,10 +827,22 @@ int main(int argc, char **argv) {
   // (e.g. type mismatch) triggered a longjmp mid-codegen.
   //
   // fn definitions are kept in a SEPARATE list (FnASTs) because they were
-  // already fully codegenned in the pre-pass. We parse them here purely to
-  // sync the token stream and run the lint pass — not to codegen them again.
+  // already fully codegenned -- and linted (see FuncDefExprAST::codegen()'s
+  // own LintExpression(Body.get()) call) -- in the pre-pass. We parse them
+  // here purely to sync the token stream, NOT to codegen or lint them again:
+  // this is a fresh re-parse producing structurally-identical-but-distinct
+  // AST nodes from the pre-pass's copy, so re-linting here would just repeat
+  // every warning a second time for the same source line.
   std::vector<std::unique_ptr<ExprAST>> TopLevelASTs; // non-fn: lint + codegen
-  std::vector<std::unique_ptr<ExprAST>> FnASTs;       // fn:     lint only
+  std::vector<std::unique_ptr<ExprAST>> FnASTs;       // fn:     kept for Resolver/TypeChecker re-validation only
+
+  // Prelude auto-import, main-pass side -- mirrors the pre-pass injection
+  // above exactly (same ParsePreludeImports() call, same rationale). Pushed
+  // into FnASTs, matching how a real `import X;` is categorized in this
+  // pass (already codegenned in the pre-pass; re-parsed here purely for
+  // Resolver/TypeChecker re-validation, not re-codegen).
+  for (auto &PreludeAST : ParsePreludeImports(CurLoc))
+    FnASTs.push_back(std::move(PreludeAST));
 
   while (true) {
     if (CurTok == TOK_EOF)
@@ -429,24 +853,61 @@ int main(int argc, char **argv) {
       continue;
     }
 
-    // fn definitions and import statements were already fully codegenned in
     // the pre-pass.  Parse them here to keep the token stream in sync and to
     // lint/resolve them, but do NOT push them into TopLevelASTs (that would
     // re-codegen them).  TOK_IMPORT is included here because `import` nodes
     // are top-level declarations handled by the pre-pass, exactly like `fn`.
-    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_AT ||
-        CurTok == TOK_IMPORT) {
+    // TOK_EXTERN is included because extern fn declarations are also emitted
+    // in the pre-pass. TOK_EXPORT (export immut NAME: TYPE = LITERAL;) is
+    // included for the same reason -- it's a genuine top-level declaration,
+    // not a statement, and needs the exact same hoist-then-lint treatment.
+    if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
+        CurTok == TOK_MACHINE ||
+        CurTok == TOK_AT || CurTok == TOK_EXTERN || CurTok == TOK_EXPORT ||
+        CurTok == TOK_OPERATOR || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE) {
       g_recoverActive = true;
       if (setjmp(g_recoverJmp) == 0) {
         auto AST = ParseExpression();
         if (AST) {
-          RecordParsedTopLevelAST(AST.get());
-          FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
+          if (CurTok == ';') {
+            LogErrorAt(CurLoc, "Unexpected ';'");
+          }
+          // lint only — not re-codegenned. Also transparently flattens a
+          // top-level `unsafe { }` block -- see AppendFlattenedTopLevelDecl()'s
+          // doc comment (Parser.h).
+          AppendFlattenedTopLevelDecl(std::move(AST), FnASTs, true);
+        } else {
+          // ParseExpression() already reported a real error (e.g. a typo'd
+          // keyword deep inside the function body, like `iff` for `if`) and
+          // returned nullptr NORMALLY -- see SkipToNextTopLevelBoundary()'s
+          // doc comment for why a depth-aware skip is needed here instead
+          // of a flat token scan.
+          SkipToNextTopLevelBoundary();
         }
       } else {
-        while (CurTok != TOK_FN && CurTok != TOK_STRUCT && CurTok != TOK_AT &&
-               CurTok != ';' && CurTok != TOK_EOF)
-          getNextToken();
+        SkipToNextTopLevelBoundary();
+      }
+      g_recoverActive = false;
+      continue;
+    }
+
+    if (CurTok == TOK_IMPORT) {
+      g_recoverActive = true;
+      if (setjmp(g_recoverJmp) == 0) {
+        auto AST = ParseExpression();
+        if (AST) {
+          if (CurTok != ';') {
+            LogErrorAt(CurLoc, "Expected ';' after statement");
+          } else {
+            getNextToken(); // eat ';'
+          }
+          RecordParsedTopLevelAST(AST.get());
+          FnASTs.push_back(std::move(AST)); // lint only — not re-codegenned
+        } else {
+          SkipToNextTopLevelBoundary();
+        }
+      } else {
+        SkipToNextTopLevelBoundary();
       }
       g_recoverActive = false;
       continue;
@@ -456,21 +917,31 @@ int main(int argc, char **argv) {
     if (setjmp(g_recoverJmp) == 0) {
       auto AST = ParseExpression();
       if (AST) {
-        if (RequiresSemicolon(AST.get())) {
-          if (CurTok != ';') {
-            LogErrorAt(CurLoc, "Expected ';' after statement");
-          } else {
-            getNextToken(); // eat ';'
-          }
+        if (CurTok != ';') {
+          LogErrorAt(CurLoc, "Expected ';' after statement");
+        } else {
+          getNextToken(); // eat ';'
         }
         if (!dynamic_cast<FuncDefExprAST *>(AST.get()) &&
             !dynamic_cast<StructDeclExprAST *>(AST.get()) &&
-            !dynamic_cast<ModuleImportExprAST *>(AST.get())) {
+            !dynamic_cast<EnumDeclExprAST *>(AST.get()) &&
+            !dynamic_cast<ModuleImportExprAST *>(AST.get()) &&
+            !dynamic_cast<ExternFuncDeclExprAST *>(AST.get())) {
           std::cerr
               << "Error: Statements are not allowed outside of a function. "
-                 "Please define 'fn int main()' and move this code inside.\n";
+                 "Please define 'fn main(): int' and move this code inside.\n";
           DiagnosticEngine::flushAll();
-          exit(1);
+          // _Exit (not exit): this raw exit point bypasses the rest of the
+          // call stack, so the SLMCleanup guard in runCompilerMain() never
+          // runs. That's fine for our own state, but it means llama.cpp's
+          // ggml Metal backend never gets its explicit teardown either --
+          // skip the whole static-destructor phase (ggml's own internal,
+          // TU-static device registry included) rather than let it run
+          // uncleanly. See runCompilerMain -> main's own _Exit for the full
+          // explanation.
+          std::cout.flush();
+          std::cerr.flush();
+          std::_Exit(1);
         }
         RecordParsedTopLevelAST(AST.get());
         TopLevelASTs.push_back(std::move(AST));
@@ -480,9 +951,8 @@ int main(int argc, char **argv) {
     } else {
       // longjmp landed here: skip to next statement boundary.
       while (CurTok != ';' && CurTok != TOK_EOF && CurTok != TOK_FN &&
-             CurTok != TOK_STRUCT && CurTok != TOK_TYPE_INT &&
-             CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
-             CurTok != TOK_TYPE_STRING && CurTok != TOK_IF &&
+             CurTok != TOK_STRUCT && CurTok != TOK_MUTABLE &&
+             CurTok != TOK_IMMUTABLE && CurTok != TOK_IF &&
              CurTok != TOK_WHILE && CurTok != TOK_FOR && CurTok != TOK_RETURN) {
         getNextToken();
       }
@@ -491,9 +961,13 @@ int main(int argc, char **argv) {
   }
 
   // Phase Separation: Lint All
-  // Lint fn definitions first (body-only checks), then top-level statements.
-  for (auto &AST : FnASTs)
-    LintExpression(AST.get());
+  // Only TopLevelASTs (non-fn statements) are linted here. FnASTs are
+  // deliberately skipped: they're a fresh re-parse of the same fn bodies
+  // the pre-pass already codegenned (and, via FuncDefExprAST::codegen()'s
+  // own embedded LintExpression(Body.get()) call, already linted) --
+  // linting them again here would just repeat every warning for the exact
+  // same source line a second time. See the FnASTs declaration's comment
+  // above for the full story.
   for (auto &AST : TopLevelASTs)
     LintExpression(AST.get());
 
@@ -525,11 +999,6 @@ int main(int argc, char **argv) {
     bool ResolverClean = true;
     g_recoverActive = true;
     if (setjmp(g_recoverJmp) == 0) {
-      // Resolve the prelude first so that module imports (e.g. `import io`)
-      // are registered in the Resolver's module registry before any user
-      // code is walked.
-      if (PreludeAST)
-        R.resolve(PreludeAST.get());
       R.resolveAll(FnASTs);
       R.resolveAll(TopLevelASTs);
     } else {
@@ -553,6 +1022,9 @@ int main(int argc, char **argv) {
 
     if (opts.DumpResolverSymbols)
       R.symbolTable().dump(std::cerr);
+
+    if (opts.DumpModules)
+      R.symbolTable().dumpModules(std::cerr);
 
     if (opts.DumpResolved) {
       ASTPrinter Printer;
@@ -590,8 +1062,6 @@ int main(int argc, char **argv) {
     bool TCClean = true;
     g_recoverActive = true;
     if (setjmp(g_recoverJmp) == 0) {
-      if (PreludeAST)
-        TC.check(PreludeAST.get());
       TC.checkAll(FnASTs);
       TC.checkAll(TopLevelASTs);
     } else {
@@ -635,13 +1105,14 @@ int main(int argc, char **argv) {
   // Phase Separation: Codegen All
   // Only non-fn top-level statements need codegen here. fn bodies were already
   // compiled in the pre-pass; codegenning them again would duplicate them.
+  size_t SavedDepth = GlobalSymbolTable ? GlobalSymbolTable->GetDepth() : 0;
   for (auto &AST : TopLevelASTs) {
     g_recoverActive = true;
     if (setjmp(g_recoverJmp) == 0) {
       AST->codegen();
     } else {
       if (GlobalSymbolTable) {
-        GlobalSymbolTable->ResetToDepth(1);
+        GlobalSymbolTable->ResetToDepth(SavedDepth);
         GlobalSymbolTable->ResetEarlyExitForCurrentScope();
       }
     }
@@ -649,7 +1120,6 @@ int main(int argc, char **argv) {
   }
 
   // Build cross-function call graph and print summary (run before flushing diagnostics)
-  std::cerr << "[Main] GlobalCFGs size before CallGraph: " << GlobalCFGs.size() << "\n";
   CallGraphPass CGP;
   CGP.runGlobal();
 
@@ -662,13 +1132,38 @@ int main(int argc, char **argv) {
   // Verify that an explicit 'main' function was defined in the primary module
   Function *MainFunc = TheModule->getFunction("main");
   if (!MainFunc || MainFunc->empty()) {
-    std::cerr << "Error: No entry point found. Please define 'fn int main()' "
+    std::cerr << "Error: No entry point found. Please define 'fn main(): int' "
                  "in your file.\n";
     return 1;
   }
 
-  // Verify the generated IR
-  verifyFunction(*MainFunc);
+  // Verify the generated IR for the WHOLE module (not just main -- a bug in
+  // any function's codegen can produce broken IR that crashes or misbehaves
+  // deep inside the optimizer/backend below with no indication of where the
+  // real problem is).
+  //
+  // This used to be `verifyFunction(*MainFunc);` with the return value
+  // discarded and no output stream passed -- verifyFunction() only prints a
+  // diagnostic if given a non-null raw_ostream*, and only actually means
+  // anything if the caller checks its bool return ("true" = broken). With
+  // neither done, this call was a complete no-op: it could never abort
+  // compilation and never printed anything, regardless of whether the
+  // generated IR was valid. A broken-IR bug in Codegen.cpp -- for any
+  // function, not just main -- would silently sail through this checkpoint
+  // and only surface later as a confusing LLVM optimizer/backend crash with
+  // no TurfLang-level context, rather than a clear internal-compiler-error
+  // message right here, before any of that runs.
+  {
+    std::string VerifyErrors;
+    raw_string_ostream VerifyOS(VerifyErrors);
+    if (verifyModule(*TheModule, &VerifyOS)) {
+      std::cerr << "Internal compiler error: generated LLVM IR is invalid.\n"
+                   "This is a compiler bug, not a mistake in your Turf code "
+                   "-- please report it.\n\n"
+                << VerifyErrors;
+      return 1;
+    }
+  }
 
   // Phase 5: LLVM Optimization Passes
   // Run LLVM's standard optimization pipeline over every function in the
@@ -714,7 +1209,7 @@ int main(int argc, char **argv) {
 
     std::cout << "Compiled to " << ObjFile << "\n";
 
-    if (linkObject(ObjFile, opts.OutputName) != 0)
+    if (linkObject(ObjFile, opts.OutputName, opts.LinkLibs) != 0)
       return 1;
 
     // Clean up intermediate object file
@@ -728,4 +1223,28 @@ int main(int argc, char **argv) {
   }
 
   return 0;
+}
+
+/**
+ * @brief Real process entry point.
+ *
+ * Delegates to runCompilerMain() for all compiler work, then terminates via
+ * _Exit() instead of a normal return. This deliberately skips the C++
+ * static-destructor phase of exit() -- by this point every real output
+ * (object/IR files, the linked binary, stdout/stderr) has already been
+ * flushed by ordinary automatic-storage unwinding inside runCompilerMain(),
+ * so nothing is lost. The only things being skipped are process-wide
+ * static/global destructors, which is required here because llama.cpp's
+ * ggml Metal backend keeps its own internal, TU-static device registry
+ * (ggml-metal-device.m) that is torn down independently of -- and after --
+ * SLM::SLMEngine's own explicit, already-correct cleanup (see the
+ * SLMCleanup guard above). That independent teardown can hit
+ * `GGML_ASSERT([rsets->data count] == 0)` during normal exit() on macOS,
+ * a vendored-library issue outside this compiler's control.
+ */
+int main(int argc, char **argv) {
+  int ExitCode = runCompilerMain(argc, argv);
+  std::cout.flush();
+  std::cerr.flush();
+  std::_Exit(ExitCode);
 }

@@ -1,0 +1,34 @@
+TURF E040 -- REFERENCE ERROR (NAME DOESN'T EXIST ANYWHERE):
+
+CAUSE:
+  A name was used as a variable/value reference, and the Resolver
+  couldn't find ANY declaration of it -- not in the current scope, not
+  in any enclosing scope, not as a struct/enum/function name. This is
+  the general "this name genuinely doesn't exist" case, run through the
+  same suggestion engine as every other unknown-name diagnostic.
+
+CORRECT:
+    mut count: int = 0;
+    count = count + 1;   // 'count' was declared above -- visible here
+
+INCORRECT:
+    mut n: int = undeclaredVariable;
+    // ERROR: I can't find anything named 'undeclaredVariable'.
+
+  A close-but-not-exact match nearby (e.g. an existing 'count' when you
+  typed 'coutn') triggers a "did you mean?" suggestion instead of the
+  generic fallback hint.
+
+WHAT THIS ERROR IS NOT:
+  - Not DefiniteAssignmentError (E008) -- that name IS declared, just
+    maybe not assigned on every path yet.
+  - Not UseBeforeDeclarationError (E043) -- that name IS declared
+    somewhere in this scope, just textually after this use.
+  - Not UnknownFunctionError (E041) -- that's specifically a CALL
+    (`name(...)`) that doesn't resolve; this is a bare-value reference.
+
+FIX:
+  Check for a typo against a name that does exist nearby (the error's
+  own hint usually already names the closest match). If the name really
+  doesn't exist yet, declare it (`mut name: Type = value;`) before using
+  it, or check whether it lives in a module you haven't imported.

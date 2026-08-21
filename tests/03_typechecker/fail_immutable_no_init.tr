@@ -1,0 +1,4 @@
+fn main(): int {
+    immutable PI: double;
+    return 0;
+}

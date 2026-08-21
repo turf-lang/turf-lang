@@ -59,7 +59,7 @@ public:
   const SourceLocation &getTerminatorLoc() const { return TerminatorLoc; }
   bool isReachable() const { return IsReachable; }
   bool isEmpty() const { return Statements.empty(); }
-
+  
   // Mutators
   void addStatement(ExprAST *Stmt) { Statements.push_back(Stmt); }
   void addPredecessor(TurfBasicBlock *BB) { Predecessors.push_back(BB); }
@@ -82,6 +82,16 @@ public:
 class CFG {
 private:
   std::string FunctionName; // Name of the function this CFG represents
+  // Mangled identity of this function (e.g. "turf_assert_bool_string"),
+  // distinct from FunctionName ("assert") whenever overloading is in play.
+  // Empty when the caller didn't supply one (buildCFG's mangled-name param
+  // defaults to ""). Exists solely so allPathsRecurse()/blockContainsSelfCall
+  // can tell "this function calls ITSELF" apart from "this function calls a
+  // same-named sibling overload" -- see that function's doc comment for the
+  // false-positive this fixes. FunctionName stays the plain, user-facing
+  // name for every diagnostic message; only self-call detection needs the
+  // mangled form.
+  std::string MangledFunctionName;
   TurfTypePtr ReturnType;   // Return type of the function
   SourceLocation FuncLoc;
   std::vector<std::unique_ptr<TurfBasicBlock>> Blocks; // All blocks (owned)
@@ -90,13 +100,25 @@ private:
   BlockID NextID;             // Next available block ID
 
 public:
-  explicit CFG(std::string FunctionName, TurfTypePtr ReturnType = TurfVoid())
+  // FuncLoc defaults to {0, 0} (not left uninitialized): SourceLocation is a
+  // plain aggregate with no default member initializers, so before this
+  // explicit default, a CFG built via the single-arg constructor (still
+  // used by anything that doesn't pass a location) left FuncLoc containing
+  // whatever garbage happened to be on the stack. reportFlowDiagnostics()
+  // passes FuncLoc straight into MissingReturnError() with no validation --
+  // confirmed to print things like "at line 1986079736, col 30179" instead
+  // of the function's real declaration site.
+  explicit CFG(std::string FunctionName, TurfTypePtr ReturnType = TurfVoid(),
+              SourceLocation FuncLoc = {0, 0},
+              std::string MangledFunctionName = "")
       : FunctionName(std::move(FunctionName)),
-        ReturnType(std::move(ReturnType)), EntryBlock(nullptr),
-        ExitBlock(nullptr), NextID(0) {}
+        MangledFunctionName(std::move(MangledFunctionName)),
+        ReturnType(std::move(ReturnType)),
+        FuncLoc(FuncLoc), EntryBlock(nullptr), ExitBlock(nullptr), NextID(0) {}
 
   // Accessors
   const std::string &getFunctionName() const { return FunctionName; }
+  const std::string &getMangledFunctionName() const { return MangledFunctionName; }
   const TurfType *getReturnType() const { return ReturnType.get(); }
   TurfTypePtr getReturnTypePtr() const { return ReturnType; }
   TurfBasicBlock *getEntryBlock() const { return EntryBlock; }
@@ -123,6 +145,22 @@ public:
   std::vector<TurfBasicBlock *>
   getDeadBranches() const; // Get dead conditional branches
 
+  // CFG Phase 1 analysis passes (Issue #185)
+  // M = E - N + 2P (P=1 per function). Values above 15 indicate functions
+  // that are hard to read, test, and maintain.
+  int calculateCyclomaticComplexity() const;
+  // True when the CFG contains a back-edge cycle where no block in the cycle
+  // has a Break/Return terminator AND no block has a successor outside the
+  // cycle — i.e. the loop cannot exit by any path.
+  bool hasUnbreakableLoop() const;
+
+  // CFG Phase 2 (Issue #186): Infinite Recursion Detection.
+  // Returns true when every path from EntryBlock to ExitBlock passes through
+  // at least one block that contains a direct call to `FunctionName` — i.e.
+  // no base case exists. Uses DFS with a visited-set to handle CFG cycles
+  // (loops within a recursive function) without infinite traversal.
+  bool allPathsRecurse() const;
+
   // Diagnostics
   void reportFlowDiagnostics() const;
 
@@ -145,9 +183,13 @@ public:
       : CurrentCFG(nullptr), CurrentBlock(nullptr), LoopContinueTarget(nullptr),
         LoopBreakTarget(nullptr), LastTerminatorLoc{0, 0} {}
 
-  // Build CFG for a function
+  // Build CFG for a function. MangledFunctionName, when supplied, lets
+  // allPathsRecurse() distinguish real self-recursion from a call to a
+  // same-named sibling overload (see CFG::MangledFunctionName's doc comment).
   std::unique_ptr<CFG> buildCFG(const std::string &FunctionName,
-                                TurfTypePtr ReturnType, ExprAST *Body);
+                                TurfTypePtr ReturnType, ExprAST *Body,
+                                SourceLocation FuncLoc = {0, 0},
+                                const std::string &MangledFunctionName = "");
 
 private:
   // Visit methods for different AST nodes
@@ -155,10 +197,13 @@ private:
   void visitBlock(ExprAST *E);
   void visitIf(ExprAST *E);
   void visitWhile(ExprAST *E);
+  void visitDoWhile(ExprAST *E);
   void visitReturn(ExprAST *E);
   void visitBreak(ExprAST *E);
   void visitContinue(ExprAST *E);
+  void visitCompare(ExprAST *E);
   void visitFor(ExprAST *E);
+  void visitForEach(ExprAST *E);
 
   // Utility methods
   TurfBasicBlock *createBlock(std::string Name);
@@ -168,5 +213,6 @@ private:
 
 // Global CFG storage (for diagnostics during compilation)
 extern std::vector<std::unique_ptr<CFG>> GlobalCFGs;
+void ClearGlobalCFGs();
 
 #endif

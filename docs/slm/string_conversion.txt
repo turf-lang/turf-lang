@@ -1,42 +1,58 @@
 TURF STRING CONVERSION:
 
-TYPE CASTING SYNTAX:
-  string(value)    // convert to string
-  int(value)       // convert to int
-  double(value)    // convert to double
+TYPE CASTING SYNTAX (postfix `expr to Type`, NOT `Type(expr)`):
+  value to string    // convert to string
+  value to int       // convert to int
+  value to double    // convert to double
 
-SUPPORTED CONVERSIONS TO STRING (string()):
-  string(42)       // int to string  → "42"
-  string(3.14)     // double to string → "3.14"
-  string(true)     // bool to string → "true" or "false"
-  // string(string) is a no-op (returns the same string)
+SUPPORTED CONVERSIONS TO STRING:
+  42 to string      // int to string    -> "42"
+  3.14 to string    // double to string -> "3.14"
+  true to string    // bool to string   -> "true" or "false"
+  // string to string is a no-op
 
 SUPPORTED CONVERSIONS FROM STRING:
-  int("42")        // string to int — calls strtoll at runtime
-  double("3.14")   // string to double — calls strtod at runtime
-  // NOTE: if the string is not a valid number, the program will exit at runtime.
+  "42" to int       // string to int    -- parsed at runtime
+  "3.14" to double  // string to double -- parsed at runtime
+  // If the string is not a valid number, the program aborts at runtime.
 
 WHAT IS NOT SUPPORTED:
-  string + 5       // ERROR: cannot add string and int. Use string(5) to convert.
-  string(arr)      // ERROR: arrays cannot be converted to strings.
-  int(str) + str   // ERROR: cannot mix int and string in arithmetic.
+  someString + 5
+    // ERROR: "Cannot apply operator '+' to types 'string' and 'int'."
+    //        Fix: someString + (5 to string)
+  someArray to string
+    // ERROR: arrays cannot be converted to strings this way.
 
-LENGTHOF VS STRING LENGTH:
-  - Use lengthof(str) to get the character count of a string.
-  - lengthof accepts ONLY strings. Not int, double, or bool.
+STRING CONCATENATION:
+  Two strings CAN be combined with '+' directly:
+    immut greeting: string = "hello " + "world";   // "hello world"
+  A string and a non-string CANNOT be combined with '+' -- convert the
+  non-string side with `to string` first.
+
+STRING LENGTH VS ARRAY LENGTH:
+  - strings::length(str) gets the character count of a STRING. It accepts
+    ONLY strings -- not int, double, bool, or arrays.
+  - For an array, use `.length()` (a method call) instead, not
+    strings::length().
 
 PRINT AND PRINTLINE:
-  If you want to print a number and a string together, call them separately:
-    printline("Score: ")
-    printline(42)
-  Or cast the number first and concatenate manually (not natively supported).
+  Both accept int, double, bool, or string directly -- no separate
+  toString()-style call is needed for a SINGLE value:
+    io::printline(42);         // prints "42"
+    io::printline(3.14);       // prints "3.14"
+  To combine a label and a value in one call, cast the value to string
+  and concatenate:
+    io::printline("Score: " + (42 to string));
 
 CORRECT EXAMPLES:
-  string s = string(100)      // "100"
-  int n = int("99")           // 99
-  int len = lengthof("hello") // 5
+  immut s: string = 100 to string;    // "100"
+  mut n: int = "99" to int;           // 99
+  immut len: int = strings::length("hello"); // 5
 
 COMMON MISTAKES:
-- Trying to concatenate strings and numbers with +.
-- Using single quotes '' instead of double quotes "" for string literals.
-- Using toString() or str() — these functions do not exist in Turf.
+- Trying to concatenate a string and a NUMBER with '+' without casting the
+  number to string first (string + string works fine on its own).
+- Using single quotes '' instead of double quotes "" for string literals
+  (single quotes are a syntax error).
+- Using a `Type(expr)` function-call-style cast, or `toString()`/`str()` --
+  none of these exist; the only cast syntax is postfix `expr to Type`.

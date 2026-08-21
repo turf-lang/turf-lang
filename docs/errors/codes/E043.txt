@@ -1,0 +1,13 @@
+You're using this variable before you've actually created it
+
+Turf runs your code from top to bottom, one statement at a time -- so a variable has to be declared with `mut` or `immut` BEFORE you can use it, not after. This error means Turf found a real, valid declaration for the name you used... it's just further down in the same block, after the line that tried to use it.
+
+    mut y: int = x + 1;   // x doesn't exist yet at this point!
+    mut x: int = 5;       // x is only created here, one line too late
+
+The fix is simply to reorder things so the declaration comes first:
+
+    mut x: int = 5;
+    mut y: int = x + 1;   // now x already exists by the time we use it
+
+This is an easy one to trip on when you're moving code around or writing things in a different order than you first thought of them -- nothing to worry about, just swap the two lines (or move the declaration up) and you're done. If it turns out the name is a typo instead of a real ordering issue, Turf's other unknown-name error will usually catch that case and suggest the right name instead.

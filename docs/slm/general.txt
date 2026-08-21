@@ -2,16 +2,18 @@ TURF-LANG GENERAL REFERENCE
 ============================
 
 NOTE ON SEMICOLONS:
-  Semicolons are OPTIONAL in Turf-Lang. Both `x = 5` and `x = 5;` are valid.
+  Semicolons are REQUIRED after every statement. `mut x: int = 5` (no
+  semicolon) is a syntax error: "Expected ';' after statement."
 
 ---
 
 TYPES:
   int      64-bit signed integer
-  double   64-bit floating point (alias: float)
+  double   64-bit floating point
   bool     boolean: true or false
-  string   byte string pointer
+  string   string
   void     ONLY allowed as a function return type, never as a variable type
+  ptr      opaque pointer (FFI); any T* is a typed pointer to T
 
 ---
 
@@ -21,93 +23,98 @@ LITERALS:
   true        bool
   false       bool
   "hello\n"   string (escape sequences: \n \t \\ \")
+  null        the null pointer literal
 
 ---
 
 VARIABLES:
-  Declared with type keyword and must be initialized immediately.
-  type name = value
+  Every declaration starts with `mut` (reassignable) or `immut`
+  (write-once), then `name: Type = value`. The type annotation comes AFTER
+  the name, separated by a colon. A value is required at declaration time.
 
-  int x = 5
-  double pi = 3.14
-  bool flag = false
-  string msg = "hi"
+    mut x: int = 5;
+    immut pi: double = 3.14;
+    mut flag: bool = false;
+    mut msg: string = "hi";
 
-  REASSIGNMENT (no type keyword):
-    x = 10
-    x += 5
-    x -= 2
-    x *= 3
-    x /= 2
-    x %= 4
-    x++
-    x--
-    ++x
-    --x
+  REASSIGNMENT (name only, no `mut`/`immut`, no type):
+    x = 10;
+    x += 5;
+    x -= 2;
+    x *= 3;
+    x /= 2;
+    x %= 4;
+    x++;
+    x--;
+    ++x;
+    --x;
+
+  Reassigning an `immut` variable is a compile error ("Oops! You can't
+  change the value of 'x' because it's immutable."), including indirectly
+  through a struct method that mutates one of its own fields.
 
 ---
 
 ARRAYS:
-  type[SIZE] name
-  type[SIZE] name = [v1, v2, v3]
+  mut name: Type[SIZE] = [v1, v2, v3];
 
-  int[5] nums
-  int[3] primes = [2, 3, 5]
+    mut nums: int[5] = [1, 2, 3, 4, 5];
+    immut primes: int[3] = [2, 3, 5];
 
   ACCESS:
-    primes[0]               // read element (zero-indexed)
-    primes[0] = 7           // write element
+    primes[0]                // read element (zero-indexed)
+    primes[0] = 7;            // write element
+    primes[0] += 1;           // compound assignment on an element IS supported
 
-  LENGTH:
-    int n = primes.length   // .length property — NOT a function call
+  LENGTH: a method call, not a property.
+    mut n: int = primes.length();
 
   RULES:
   - SIZE must be a positive integer literal.
-  - Compound assignment on elements (arr[0] += 1) is NOT supported.
-    Use arr[0] = arr[0] + 1 instead.
+  - The initializer list's length must exactly match the declared SIZE.
+  - Every element's type must match the declared element type (or be a
+    compatible numeric promotion) -- e.g. `int[3] = [1, "two", 3]` is
+    rejected at compile time.
 
 ---
 
 OPERATORS:
-  Arithmetic:  +  -  *  /  %  ^
+  Arithmetic:  +  -  *  /  %  ** (exponentiation -- result is ALWAYS
+                                 double, even for two int operands, e.g.
+                                 `2 ** 3` is 8.0, not 8)
   Relational:  ==  !=  <  >  <=  >=
-  Logical:     &&  ||
-  Unary:       - (negate)
+  Logical:     &&  ||  !  (prefix ! desugars to `expr != true`)
+  Bitwise:     ~ (not)  &  |  ^ (XOR)  <<  >>
+  Unary:       - (negate)  ~ (bitwise not)
   Assignment:  =  +=  -=  *=  /=  %=
   Increment:   x++  x--  ++x  --x
-
-  NOT SUPPORTED:
-    !  (logical NOT — use == false instead)
-    &  |  (bitwise operators do not exist)
-    ** (use ^ for exponentiation)
+  Scope:       :: (enum variant access, e.g. Color::Red)
 
   TYPE PROMOTION IN EXPRESSIONS:
     bool -> int -> double (promoted automatically in expressions)
-    string cannot be combined with any other type in arithmetic
+    string cannot be combined with any other type in arithmetic --
+    concatenate with `<expr> to string` first.
 
 ---
 
-TYPE CASTING (explicit):
-  int(expr)       double/string -> int
-  double(expr)    int/string -> double
-  string(expr)    int/double/bool -> string
-
-  EXAMPLES:
-    int(3.14)       // 3
-    double(10)      // 10.0
-    string(42)      // "42"
-    string(true)    // "true"
-    int("99")       // 99 (runtime parse of string)
+TYPE CASTING (explicit, POSTFIX -- `expr to Type`, not `Type(expr)`):
+    3.14 to int        // 3 (truncates)
+    10 to double        // 10.0
+    42 to string        // "42"
+    true to string       // "true"
+    "99" to int          // 99 (runtime parse of string)
+    99 to Color          // cast an int to an enum type -- the value must be
+                         // a valid variant index, or it's rejected at
+                         // compile time when it's a literal
 
 ---
 
 CONTROL FLOW:
 
-  IF (single-line form):
-    if <cond> then <expr> else <expr>
-    if (x > 0) then x = 1 else x = 0   // parentheses optional
+  IF: block form only. There is no single-line `then`/`else` form -- use
+  the `give ... otherwise ...` ternary (below) for a single-expression
+  conditional instead.
 
-  IF (block form):
     if <cond> {
         ...
     } elseif <cond> {
@@ -115,9 +122,13 @@ CONTROL FLOW:
     } else {
         ...
     }
-    // Parentheses around condition are optional in both forms.
-    // `elseif` is one word — `else if` is a parse error.
-    // `then` must NOT be used in block form.
+    // Parentheses around <cond> are optional.
+    // `elseif` is ONE word -- `else if` (two words) is a parse error.
+
+  TERNARY (single expression, no blocks):
+    <condition> give <then_value> otherwise <else_value>
+
+    mut y: int = x > 0 give 1 otherwise 0;
 
   WHILE LOOP:
     while <cond> {
@@ -125,14 +136,20 @@ CONTROL FLOW:
     }
 
   FOR LOOP:
-    for <var> in <start> .. <end> step <step_expr> {
+    for <var> in <start>..<end> step <step_expr> {
         ...
     }
-    // <step_expr> is an ASSIGNMENT EXPRESSION executed after each iteration.
-    // The loop variable is automatically declared (int or double).
+    // <step_expr> is an ASSIGNMENT EXPRESSION executed after each
+    // iteration (e.g. `i += 1`, not a bare number). The loop variable is
+    // automatically declared as int or double based on <start>/<end>.
+    // IMPORTANT: nothing forces <step_expr> to touch the loop variable --
+    // if it never does (typo, or it updates a different variable by
+    // mistake), the loop runs forever or not at all. The compiler warns
+    // about this ("the loop variable is never changed by this loop's
+    // 'step' or its body") but it does not stop compilation.
     EXAMPLE:
-      for i in 0 .. 10 step i += 1 { printline(i) }
-      for i in 10 .. 0 step i -= 2 { printline(i) }
+      for i in 0..10 step i += 1 { }
+      for i in 10..0 step i -= 2 { }
 
   BREAK / CONTINUE:
     break     // exits innermost loop
@@ -141,57 +158,202 @@ CONTROL FLOW:
 ---
 
 FUNCTIONS:
-  fn <return_type> <name>(<type> <param>, ...) {
-      return <value>
+  fn name(param: Type, param2: Type, ...): ReturnType {
+      return value;
   }
 
-  fn int add(int a, int b) {
-      return a + b
-  }
+  The return type comes AFTER the parameter list, separated by a colon --
+  the opposite order from the parameters themselves.
 
-  fn void greet(string name) {
-      printline(name)
-      return
-  }
+    fn add(a: int, b: int): int {
+        return a + b;
+    }
+
+    fn greet(name: string): void {
+        io::printline(name);
+    }
 
   RULES:
-  - Return type is required (int, double, bool, string, void).
+  - Return type is required: int, double, bool, string, void, a struct/enum
+    name, a pointer type, or an array type.
   - Non-void functions must return a value on every code path.
-  - void functions use bare `return` or can omit it.
-  - Parameters use `type name` pairs; void is not a valid parameter type.
+  - void functions may use a bare `return;` or omit it.
+  - void is not a valid parameter type.
   - Functions can be called before they are defined (pre-pass hoisting).
+  - `fn<T> name(x: T): T { ... }` declares a generic function; T is erased
+    to a 64-bit slot at codegen time (works uniformly for int/double/bool/
+    pointers).
 
 ---
 
-BUILTIN FUNCTIONS:
+STRUCTS:
+    struct Point {
+        x: int,
+        y: int
+    }
 
-  print(expr)
-    Prints expr to stdout with no newline.
-    Accepts: int, double, bool, string
+  Construct with a struct literal (field names required, any order):
+    mut p: Point = Point { x: 1, y: 2 };
+    p.x = 5;                 // field access/assignment via '.'
 
-  printline(expr)
-    Prints expr to stdout followed by a newline.
-    Accepts: int, double, bool, string
+  Methods are declared OUTSIDE the struct body, qualified by struct name:
+    fn Point.sum(): int {
+        return self.x + self.y;   // 'self' is the implicit receiver
+    }
+    p.sum();                  // call via '.', same as a field access
 
-  input()
-    Reads a line from stdin. Returns: string
+  A method can mutate and return `self` (as a pointer) to support chaining:
+    fn Counter.increment(): Counter* {
+        self.val = self.val + 1;
+        return self;
+    }
+    c.increment().increment();   // chained calls
 
-  lengthof(str)
-    Returns the number of characters in a string. Returns: int
-    Accepts: string ONLY. For arrays, use arr.length instead.
+  Struct (and enum) names live in ONE flat namespace shared by the current
+  file and every imported module -- unlike functions, they are NOT
+  namespaced per-module, so `List<int>` works without a `list::` prefix
+  (though `list::List<int>` also works, identically -- see modules.txt).
+  Two different modules declaring a same-named struct is a compile error.
 
-  typeof(expr)
-    Returns the compile-time type name as a string.
-    Returns: "int", "double", "bool", "string", "void", or "unknown"
+  Generic structs: `struct Box<T> { val: T }`, instantiated as `Box<int>`.
+
+  Struct instances do NOT support `==`/`!=` comparison -- compare the
+  fields you care about individually instead (`a.x == b.x`).
+
+---
+
+ENUMS:
+    enum Color { Red, Green, Blue }
+
+  Access a variant with `::` (also the general namespace-resolution
+  operator for module-qualified function/type access -- see MODULES /
+  IMPORTS below; `::` is never used for instance access, only `.` is):
+    immut c: Color = Color::Red;
+
+  Compare with a `compare` block, not `if`/`==`:
+    compare c {
+        matches Color::Red:
+            ...
+        done
+        matches Color::Green:
+            ...
+        done
+        otherwise:
+            ...
+    }
+  Every `matches` arm's body ends with `done`. `otherwise:` (optional) must
+  be the LAST arm and has no `done`. Omitting a variant without an
+  `otherwise:` arm is a compile error ("Non-exhaustive enum comparison").
+  Casting an out-of-range integer LITERAL to an enum type is rejected at
+  compile time (e.g. `99 to Color` when Color only has 3 variants).
+
+---
+
+MODULES / IMPORTS (full reference: modules.txt):
+  import io;                        // bare -- qualified access only
+  import io::printline;             // on-demand -- one name, usable bare too
+  import io::[print, printline];    // on-demand -- a list of names
+  import math::[*];                 // on-demand -- every name, wildcard
+
+  Call a module's function qualified by module name, using `::` (never
+  `.` -- `.` is instance-only):
+    io::printline("hi");
+    mem::malloc(64);
+
+  There is no auto-imported module -- every module, including `io`, must
+  be imported explicitly by every file that uses it. A BARE import
+  (`import io;`) makes the module's functions reachable ONLY via `io::`
+  qualification; nothing is pasted unqualified into your file. To call a
+  function bare (no qualifier), either declare it yourself or on-demand-
+  import it (`import io::printline;` or a list/wildcard form) -- see
+  modules.txt for the full collision/circular-import rules.
+
+---
+
+TRUE INTRINSICS vs. STANDARD LIBRARY -- this distinction matters and is
+easy to get backwards:
+
+  A handful of names really ARE wired directly into the compiler and never
+  require ANY import, because they aren't declared anywhere in Turf source
+  at all: typeof and sizeof (sizeof is actually its own piece of syntax,
+  not even a function call -- see below).
+
+  Everything else that might look "built-in" -- print, printline, input,
+  assert, fail, assert_eq/assert_neq, and every function in
+  mem/math/list/strings/stack/queue/sys/test -- is ordinary Turf standard
+  library code living in lib/std/*.tr, exactly as importable/inspectable as
+  anything a user could write themselves, requiring the same `import` +
+  `::` qualification as any module. There is no decorator or compiler-
+  native-codegen mechanism backing any of them -- print/printline/input are
+  plain Turf functions delegating to `extern fn printf`/`scanf`/`getchar`
+  FFI bindings, same pattern math.tr/mem.tr use for libm/libc, and
+  test::assert/test::fail are plain Turf functions delegating to
+  sys::panic (itself a thin `extern fn abort`/`write` wrapper). Do NOT
+  describe io/mem/math/sys/test functions as "intrinsics" or "builtins" --
+  they are standard library.
+
+TRUE INTRINSICS (never need an import; not declared in any .tr file):
+
+  typeof(expr): string
+    Compile-time type name, e.g. "int", "double", "Point".
+
+  sizeof(Type): int
+    NOT a function call -- its own dedicated syntax (`sizeof(int)`,
+    `sizeof(SomeStruct)`), parsed directly, with no module or import
+    involved at all. Returns a type's size in bytes. Every type in this
+    language happens to be 8 bytes today (type erasure to a 64-bit slot).
+
+---
+
+MEMORY (via `import mem;`, manual, no garbage collector):
+  mem::malloc(size)              -- allocate size bytes, returns a raw pointer
+  mem::realloc(ptr, newSize)     -- resize a previous allocation
+  mem::free(ptr)                 -- release memory
+  Using a pointer after free(), or calling free() twice on the same pointer,
+  is a compile-time-detected bug where the compiler can prove it (dataflow
+  analysis, not a runtime check).
+
+---
+
+SYSTEM (via `import sys;`): process termination, no test-writing intent.
+  sys::abort()                   -- terminate immediately (SIGABRT), no message
+  sys::exit(code)                -- terminate immediately with the given exit code
+  sys::panic(msg)                -- write `msg` to stderr, then abort. Never
+                                     returns. Every other stdlib module's
+                                     internal "this should be impossible"
+                                     guard rails (OOM, a failed syscall) call
+                                     this -- it's the shared low-level
+                                     primitive test::fail() is itself built on.
+
+TESTING (via `import test;`):
+  test::assert(cond)             -- aborts (via test::fail) if cond is false,
+                                     using a default message
+  test::assert(cond, msg)        -- same, with a custom failure message
+  test::assert_eq(a, b[, msg])   -- aborts if a != b; overloaded for
+                                     int/double/bool/string
+  test::assert_neq(a, b[, msg])  -- aborts if a == b; overloaded for
+                                     int/double/bool/string
+  test::fail(msg)                -- unconditionally aborts, printing `msg` to
+                                     stderr (thin wrapper over sys::panic)
+  Every existing test file in tests/ uses these -- `import test;` then
+  qualified `test::assert(...)` calls, matching this codebase's own
+  convention of always qualifying stdlib calls (io::printline, mem::alloc,
+  etc.) rather than relying on bare on-demand imports.
 
 ---
 
 COMMON PITFALLS:
+- Forgetting `mut`/`immut` before a variable name, or putting the type
+  before the name instead of after the colon.
 - Using `else if` (space) instead of `elseif` (one keyword).
-- Using C-style for loops: for(int i=0;...) does not exist in Turf.
-- Forgetting `step <expr>` in a for loop (step is required).
-- Using step as a numeric value (step 1) — it must be an expression (i += 1).
-- Using compound assignments on array elements (arr[0] += x is not supported).
-- Calling lengthof() on an array instead of using .length.
-- Mixing string and numeric types in arithmetic without explicit cast.
-- Using ! for logical NOT — use == false instead.
+- Using C-style for loops: `for (int i = 0; ...)` does not exist in Turf.
+- Forgetting `step <expr>` in a for loop (step is required), or writing a
+  step that never actually updates the loop variable (infinite loop).
+- Using function-call-style casts (`int(x)`) instead of postfix `x to int`.
+- Calling `strings::length()` on an array instead of using `.length()` --
+  strings::length only works on `string`.
+- Mixing string and numeric types in arithmetic without an explicit
+  `to string` cast.
+- Comparing two struct instances with `==` (not supported -- compare fields).
+- Comparing an enum value with `==` instead of a `compare`/`matches` block.
+- Reassigning an `immut` variable, directly or through a mutating method.

@@ -1,0 +1,70 @@
+// Queue<T> — FIFO (First In, First Out) collection.
+// Usage:
+//   import queue::Queue;   // (or `import queue;` + spell it `queue::Queue<int>` below)
+//   mut q: Queue<int>;   // default-initialized -- no need to write out the fields
+//   q.enqueue(1)  q.dequeue()  q.peek()  q.length()
+//
+// Implementation: dynamic array with a head offset.
+//   - enqueue appends at data[head + len]
+//   - dequeue reads from data[head] and advances head
+//   - when (head + len == cap): if head > 0 compact elements to front,
+//     otherwise double the capacity
+
+import mem;
+import sys;
+
+struct Queue<T> {
+  data: T*,
+  len: int,
+  cap: int,
+  head: int
+}
+
+fn<T> Queue.enqueue(item: T): void {
+  if (self.head + self.len == self.cap) {
+    if (self.head > 0) {
+      // Compact: shift live elements to the front of the buffer
+      mut i: int = 0;
+      while i < self.len {
+        self.data[i] = self.data[self.head + i];
+        i = i + 1;
+      }
+      self.head = 0;
+    } else {
+      // Buffer is full and already at front — grow it
+      if (self.cap == 0) {
+        self.cap = 8;
+        self.data = mem::malloc(self.cap * 8) to T*;
+      } else {
+        self.cap = self.cap * 2;
+        self.data = mem::realloc(self.data, self.cap * 8) to T*;
+      }
+    }
+  }
+
+  self.data[self.head + self.len] = item;
+  self.len = self.len + 1;
+}
+
+fn<T> Queue.dequeue(): T {
+  if (self.len == 0) {
+    sys::panic("Queue.dequeue: dequeue on empty queue");
+  }
+
+  immutable item: T = self.data[self.head];
+  self.head = self.head + 1;
+  self.len = self.len - 1;
+  return item;
+}
+
+fn<T> Queue.peek(): T {
+  if (self.len == 0) {
+    sys::panic("Queue.peek: peek on empty queue");
+  }
+
+  return self.data[self.head];
+}
+
+fn<T> Queue.length(): int {
+  return self.len;
+}

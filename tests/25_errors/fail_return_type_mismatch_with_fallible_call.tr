@@ -1,0 +1,21 @@
+// Test (fail): Errors.md's own explicit forbidden example -- a plain-'int'
+// function can't just forward a '!int' call's result without recovering it
+// first, even via a bare 'return'.
+error MathError {
+    DivisionByZero,
+}
+
+fn divide(a: int, b: int): !int {
+    if (b == 0) {
+        return MathError::DivisionByZero;
+    }
+    return a / b;
+}
+
+fn foo(): int {
+    return divide(10, 0);
+}
+
+fn main(): int {
+    return 0;
+}

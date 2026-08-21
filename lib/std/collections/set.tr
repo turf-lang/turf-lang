@@ -1,0 +1,122 @@
+// set.tr — Set<T>: a collection of unique, unordered values.
+// Usage:
+//   import set::Set;
+//   mut s: Set<int>;   // default-initialized -- no need to write out the fields
+//   s.add(1);
+//   s.add(2);
+//   s.add(1);                  // no-op, already present
+//   mut has: bool = s.contains(1); // true
+//   mut n: int = s.length();        // 2
+//   mut removed: bool = s.remove(2); // true, and length() drops to 1
+//
+// Design:
+//   Same rationale as map.tr's Map<K, V> (see that file's comment for the
+//   full explanation): there is no generic `hash(T)` in the language yet,
+//   so this is a LINEAR SCAN over a single type-erased array, not a hash
+//   set. Set<T> is really just Map<K, V> with the value array dropped --
+//   presence in the `items` array *is* the membership -- grown exactly like
+//   list.tr's List<T>.push() (every T assumed to fit in one 8-byte slot).
+
+import mem;
+import sys;
+
+struct Set<T> {
+  items: T*,
+  len: int,
+  cap: int
+}
+
+// KNOWN LIMITATION: `self.items[i] == item` below is a raw pointer/bit
+// comparison for T = string, NOT a content comparison -- the exact same
+// gap map.tr's own Map.indexOf() doc comment explains in full mechanical
+// detail (read that one first) and the same class of issue list.tr's
+// list_sort()/list_binary_search() comment documents for List<T>: from
+// INSIDE this generic method body, both operands have the STATIC type
+// TurfGenericParamType("T"), never the real concrete "string", because a
+// generic method's body is checked and codegenned exactly ONCE, shared
+// across every instantiation -- no operator-overload candidate can ever
+// exact-match a bare "T", so `strings.tr`'s real `operator==(string,
+// string)` never gets a chance to run, and the same-name-fallback lets a
+// raw pointer-identity comparison through instead. Correct for T =
+// int/double/bool/pointer (bit-exact identity genuinely is `==` there);
+// wrong for T = string. Confirmed live -- but NOTE the duplicate has to be
+// a genuinely SEPARATE allocation (e.g. via strings::trim/substring), not
+// a second occurrence of the same string literal in one source file: the
+// linker merges identical read-only string constants into one address, so
+// two literal "hello"s can end up pointer-equal by sheer coincidence and
+// mask the bug entirely (this is also why tests/07_functions_modules/
+// 09_stdlib_map.tr's all-literal Map<string, int> keys "happened" to
+// work correctly despite Map having this identical gap -- see map.tr):
+//   mut s: Set<string> = Set::default();
+//   s.add("hello"); s.add("world");
+//   immut dup: string = strings::trim(" hello "); // separate allocation
+//   s.add(dup);
+//   // s.length() is 3, should be 2 -- add(dup) didn't dedup against the
+//   // first "hello", because indexOf() never found it.
+// No general fix exists without either per-instantiation codegen (this
+// compiler shares one generic-method body across every instantiation, by
+// design) or a trait/constraint system, neither of which exists yet. If
+// you need a deduping Set<string> today, the one proven-working pattern
+// (see map.tr's comment) is to embed `items: T*`-shaped storage as a field
+// of your OWN concrete (non-generic) struct and write your own plain
+// (non-generic) method doing the linear scan -- a field access from a
+// non-generic method resolves fully concretely, so `==` there correctly
+// reaches the real string operator. `tests/99_known_bugs/` tracks this as
+// an accepted, deferred limitation, not a live regression.
+fn<T> Set.indexOf(item: T): int {
+  mut i: int = 0;
+  while i < self.len {
+    if (self.items[i] == item) {
+      return i;
+    }
+    i = i + 1;
+  }
+  return -1;
+}
+
+fn<T> Set.contains(item: T): bool {
+  return self.indexOf(item) >= 0;
+}
+
+fn<T> Set.add(item: T): void {
+  if (self.contains(item)) {
+    return;
+  }
+
+  if (self.len == self.cap) {
+    if (self.cap == 0) {
+      self.cap = 8;
+    } else {
+      self.cap = self.cap * 2;
+    }
+
+    // In Type Erasure, all T are 64 bits (pointers, int, double).
+    immutable byteSize: int = self.cap * 8;
+
+    if (self.items == null) {
+      self.items = mem::malloc(byteSize) to T*;
+    } else {
+      self.items = mem::realloc(self.items, byteSize) to T*;
+    }
+  }
+
+  self.items[self.len] = item;
+  self.len = self.len + 1;
+}
+
+fn<T> Set.remove(item: T): bool {
+  immutable idx: int = self.indexOf(item);
+  if (idx < 0) {
+    return false;
+  }
+
+  // Swap-with-last removal -- O(1), doesn't preserve insertion order
+  // (mirrors Map.remove()'s identical tradeoff).
+  self.len = self.len - 1;
+  self.items[idx] = self.items[self.len];
+  return true;
+}
+
+fn<T> Set.length(): int {
+  return self.len;
+}

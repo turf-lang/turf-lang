@@ -1,4 +1,5 @@
-#pragma once
+#ifndef CALLGRAPH_H
+#define CALLGRAPH_H
 
 #include <string>
 #include <map>
@@ -17,3 +18,5 @@ void AddCallEdge(const std::string &caller, const std::string &callee);
 
 // Clear collected call edges
 void ClearCallGraph();
+
+#endif // CALLGRAPH_H

@@ -1,0 +1,17 @@
+// Regression test: `instance.default()` must be rejected with the same
+// specific ConstructorCalledOnInstanceError as fail_dot_call_new.tr, not a
+// generic "unknown method" error -- even though `default` is never a real
+// registered function at all (always compiler-synthesized), the check must
+// fire unconditionally on the method NAME, before any method-lookup even
+// happens.
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut p: Point = Point::default();
+    p.default();
+    return 0;
+}

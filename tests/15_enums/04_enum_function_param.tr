@@ -1,0 +1,53 @@
+// Test: Pass enum as function parameter and return from function
+import test;
+
+enum Priority { Low, Medium, High, Critical }
+
+fn is_urgent(p: Priority): bool {
+    compare p {
+        matches Priority::High:
+            return true;
+        done
+        matches Priority::Critical:
+            return true;
+        done
+        matches Priority::Low:
+            return false;
+        done
+        matches Priority::Medium:
+            return false;
+        done
+    }
+    return false;
+}
+
+fn escalate(p: Priority): Priority {
+    compare p {
+        matches Priority::Low:
+            return Priority::Medium;
+        done
+        matches Priority::Medium:
+            return Priority::High;
+        done
+        matches Priority::High:
+            return Priority::Critical;
+        done
+        matches Priority::Critical:
+            return Priority::Critical;
+        done
+    }
+    return Priority::Critical;
+}
+
+fn main(): int {
+    test::assert(is_urgent(Priority::Low) == false, "Low is not urgent");
+    test::assert(is_urgent(Priority::Medium) == false, "Medium is not urgent");
+    test::assert(is_urgent(Priority::High) == true, "High is urgent");
+    test::assert(is_urgent(Priority::Critical) == true, "Critical is urgent");
+
+    test::assert((escalate(Priority::Low) to int) == 1, "Low escalates to Medium");
+    test::assert((escalate(Priority::Medium) to int) == 2, "Medium escalates to High");
+    test::assert((escalate(Priority::High) to int) == 3, "High escalates to Critical");
+    test::assert((escalate(Priority::Critical) to int) == 3, "Critical stays Critical");
+    return 0;
+}

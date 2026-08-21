@@ -1,0 +1,170 @@
+// ─── fs.tr ─────────────────────────────────────────────────────────────────
+// Path manipulation and directory/filesystem operations for TurfLang.
+//
+// Design:
+//   - Part A (join/dirname/basename/extension/is_absolute) is pure string
+//     logic -- no FFI at all, built entirely on strings.tr. Byte-oriented
+//     throughout (a `/` is byte 47, a `.` is byte 46), matching strings.tr's
+//     own byte-by-byte approach (its own doc comment, Decision D2).
+//   - Part B (mkdir/remove_file/remove_dir/is_dir) wraps POSIX libc calls,
+//     following the raw-extern-plus-safe-Turf-wrapper split every other
+//     stdlib module already uses (mem.tr's malloc/alloc, os.tr's
+//     getenv/env). `mkdir` is the one exception where the wrapper reuses
+//     the extern binding's own name -- unlike sys.tr's abort/exit (where a
+//     same-named wrapper would be a same-SIGNATURE duplicate declaration,
+//     a compile error), the raw `extern fn mkdir(path, mode): int32` and
+//     the Turf-level `fn mkdir(path): bool` below have different arity, so
+//     this genuinely resolves as an ordinary overload (confirmed live --
+//     the two-arg extern and one-arg wrapper coexist and call each other
+//     correctly, exactly like io.tr's print(int)/print(string) overloads).
+//   - This compiler has no way to declare a Turf struct matching an
+//     arbitrary C struct's real memory layout (no `struct stat` binding is
+//     possible), so `is_dir` deliberately avoids `stat()` entirely. Instead
+//     it uses the standard "try to opendir() it" trick: `opendir(path)`
+//     returns a non-null opaque `DIR*` handle if and only if `path` names a
+//     directory it could actually open -- the handle is only ever checked
+//     for null and then immediately closed, never inspected, so the real
+//     (unknown-to-Turf) layout behind it never matters.
+//   - `remove_file`/`remove_dir` are deliberately separate wrappers over
+//     separate POSIX calls (`remove(2)`/`rmdir(2)`), not one merged
+//     "delete path" helper -- `remove()` on a non-empty directory and
+//     `rmdir()` on a file both just fail (return false) rather than doing
+//     something surprising, so callers keep explicit control over which
+//     kind of thing they mean to delete.
+//   - File existence (`io::exists`) already lives in io.tr, not here -- this
+//     module is specifically about paths and directories, not general file
+//     I/O.
+//
+// Usage:
+//   import fs;
+//   immut p: string = fs::join("a/b", "c.txt");      // "a/b/c.txt"
+//   fs::dirname("a/b/c.txt");                         // "a/b"
+//   fs::basename("a/b/c.txt");                        // "c.txt"
+//   fs::extension("a/b/c.txt");                       // "txt"
+//   fs::is_absolute("/usr/bin");                      // true
+//
+//   fs::mkdir("out");
+//   if fs::is_dir("out") { ... }
+//   fs::remove_file("out/file.txt");
+//   fs::remove_dir("out");
+
+import strings;
+
+// ─── libc bindings ──────────────────────────────────────────────────────────
+
+// mode_t is a 32-bit type on this compiler's target platforms (glibc/
+// Linux, matching every other stdlib file's target -- see net.tr's own
+// Linux-numbered socket constants) -- declared `int32`, not Turf's 64-bit
+// `int`, for the same real-ABI-width reason strings.tr's strcmp/toupper/
+// tolower bindings are (see strings.tr's own comment on that).
+extern fn mkdir(path: string, mode: int32): int32;
+// remove()/rmdir() both return a real (32-bit) C `int`, same reasoning.
+extern fn remove(path: string): int32;
+extern fn rmdir(path: string): int32;
+// opendir()/closedir() only ever need their handle checked for null and
+// then closed -- never dereferenced -- so `ptr` (this language's opaque
+// pointer type) is the right binding: there is no Turf struct that could
+// describe a real `DIR*`'s layout, and none is needed.
+extern fn opendir(path: string): ptr;
+extern fn closedir(d: ptr): int32;
+
+// ─── Turf-level helpers (path strings) ──────────────────────────────────────
+
+// last_index_of_char: the byte offset of the last occurrence of the byte
+// `ch` in `s`, or -1 if it doesn't appear. Internal helper -- strings.tr
+// only has a forward `index_of`, and dirname/basename/extension below all
+// need to search from the end.
+fn last_index_of_char(s: string, ch: int): int {
+    mut i: int = strings::length(s) - 1;
+    while i >= 0 {
+        if s[i] == ch {
+            return i;
+        }
+        i = i - 1;
+    }
+    return 0 - 1;
+}
+
+// join: joins path segments `a` and `b` with exactly one `/` between them --
+// no `//` if `a` already ends in `/`, no missing separator if it doesn't.
+fn join(a: string, b: string): string {
+    if strings::ends_with(a, "/") {
+        return a + b;
+    }
+    return a + "/" + b;
+}
+
+// dirname: everything before the last `/` in `path`. Returns "." if `path`
+// contains no `/` at all, or "/" if the last `/` is the very first byte
+// (e.g. "/file.txt" -> "/", matching POSIX dirname's own root-path case).
+fn dirname(path: string): string {
+    immut idx: int = last_index_of_char(path, 47); // '/'
+    if idx == (0 - 1) {
+        return ".";
+    }
+    if idx == 0 {
+        return "/";
+    }
+    return strings::substring(path, 0, idx);
+}
+
+// basename: everything after the last `/` in `path`. Returns `path`
+// unchanged if it contains no `/` at all.
+fn basename(path: string): string {
+    immut idx: int = last_index_of_char(path, 47); // '/'
+    if idx == (0 - 1) {
+        return path;
+    }
+    return strings::substring(path, idx + 1, strings::length(path));
+}
+
+// extension: everything after the last `.` in `path`'s basename, or "" if
+// there is none. A leading dot with no other dot (a "hidden file" name like
+// ".gitignore") is NOT treated as an extension -- only a `.` that isn't the
+// very first byte of the basename counts.
+fn extension(path: string): string {
+    immut b: string = basename(path);
+    immut idx: int = last_index_of_char(b, 46); // '.'
+    if idx == (0 - 1) || idx == 0 {
+        return "";
+    }
+    return strings::substring(b, idx + 1, strings::length(b));
+}
+
+// is_absolute: true if `path` starts with `/`.
+fn is_absolute(path: string): bool {
+    return strings::starts_with(path, "/");
+}
+
+// ─── Turf-level helpers (directories) ───────────────────────────────────────
+
+// mkdir: creates the directory at `path` with permissions 0755
+// (rwxr-xr-x). Returns true on success, false on failure (e.g. the parent
+// doesn't exist, or `path` already exists).
+fn mkdir(path: string): bool {
+    return mkdir(path, 493 to int32) == (0 to int32); // 493 == 0755 octal
+}
+
+// remove_file: deletes the file at `path`. Returns true on success. Does
+// NOT remove directories -- use remove_dir for those.
+fn remove_file(path: string): bool {
+    return remove(path) == (0 to int32);
+}
+
+// remove_dir: removes the EMPTY directory at `path`. Returns true on
+// success, false on failure -- including when the directory is not empty.
+fn remove_dir(path: string): bool {
+    return rmdir(path) == (0 to int32);
+}
+
+// is_dir: true if `path` names a directory that can be opened. Uses the
+// opendir()/closedir() trick (see this file's own doc comment above) --
+// never needs to know `DIR*`'s real layout.
+fn is_dir(path: string): bool {
+    mut d: ptr = opendir(path);
+    if d == null {
+        return false;
+    }
+    closedir(d);
+    return true;
+}

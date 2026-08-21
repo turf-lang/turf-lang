@@ -1,0 +1,21 @@
+// Regression test: comparing two struct instances with == must be a clean
+// compile error, not a crash. Before this fix,
+// TypeChecker::inferRelationalType()'s ==/!= branch accepted any pair of
+// same-named types (LhsTy->getName() == RhsTy->getName()), with no
+// exclusion for structs -- Codegen has no struct-equality lowering at all,
+// so it emitted a raw FCmp/ICmp on the whole aggregate LLVM struct value,
+// producing "Internal compiler error: generated LLVM IR is invalid...
+// Invalid operand types for FCmp instruction" -- a confusing ICE for what
+// is actually just an unsupported language feature, not a compiler bug.
+
+struct Point {
+    x: int
+}
+
+fn main(): int {
+    mut a: Point = Point::default();
+    mut b: Point = Point::default();
+    if (a == b) {
+    }
+    return 0;
+}

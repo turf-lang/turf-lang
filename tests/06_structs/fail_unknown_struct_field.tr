@@ -1,0 +1,19 @@
+// Regression test: reading a field that doesn't exist on a struct must be
+// a compile error. Before UnknownStructFieldError existed,
+// TypeChecker::visitFieldAccess() silently left the node's type null for an
+// unknown field and let compilation continue -- the only place that ever
+// caught the mistake was CodegenStruct.cpp's raw LogErrorAt() at actual
+// codegen time, with no error code, no category, and (unlike the sibling
+// struct-method-not-found case, StructMethodNotFoundError) no "did you
+// mean?" suggestions at all -- see issue #241 Track D.
+
+struct Point {
+    x: int
+}
+
+fn main(): int {
+    mut p: Point = Point::default();
+    p.x = 1;
+    mut n: int = p.nonexistentField;
+    return 0;
+}

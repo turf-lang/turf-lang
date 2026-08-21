@@ -1,0 +1,15 @@
+// Companion module (no main()) -- named *_module.tr so scripts/test_runner.sh
+// skips it as a standalone test (see AGENTS.md's documented convention).
+// Declares an operator overload for a struct defined in THIS module, to be
+// used from another file that imports it.
+struct Point {
+    x: int,
+    y: int
+}
+
+operator +(a: Point, b: Point): Point {
+    mut r: Point = Point::default();
+    r.x = a.x + b.x;
+    r.y = a.y + b.y;
+    return r;
+}

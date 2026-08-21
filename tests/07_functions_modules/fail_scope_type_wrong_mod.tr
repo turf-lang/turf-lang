@@ -1,0 +1,14 @@
+// Regression test: a type annotation qualified with a REAL module that
+// simply doesn't own the named type (List actually lives in `list`, not
+// `mem`) must be rejected, not just an unknown-module-name qualifier.
+// Confirms validateModuleQualifier() checks OWNERSHIP (via the new
+// ResolverSymbolTable::TypeOwningModule_ registry), not just "is this
+// string a real module name".
+
+import list;
+import mem;
+
+fn main(): int {
+    mut l: mem::List<int> = list::List::default();
+    return 0;
+}

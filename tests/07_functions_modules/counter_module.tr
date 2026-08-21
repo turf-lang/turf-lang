@@ -1,0 +1,11 @@
+struct Counter {
+    val: int
+}
+
+fn Counter.new(val: int): void {
+    self.val = val;
+}
+
+fn Counter.increment(): int {
+    return self.val + 1;
+}

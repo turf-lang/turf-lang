@@ -1,0 +1,70 @@
+// Regression test: indexing a generic collection's own public backing-array
+// field, then accessing a field on the result (`someList.data[i].field`),
+// must resolve to the REAL, substituted element type end to end -- not the
+// raw struct type. This used to fail two different ways depending on the
+// element type's size:
+//
+// - A generic struct field (`List<T>`'s `data: T*`) never matched
+//   TypeChecker::visitFieldAccess()'s GenericType-base handling at all for
+//   a POINTER-indexed access (`data[i]`, as opposed to a fixed-size Turf
+//   array `T[N]`) -- TypeChecker::visitArrayAccess() only ever had a case
+//   for `isArray()`, none for a plain `T*`. `someList.data[0]`'s type came
+//   back nullptr, so a further `.field` access on it also came back
+//   nullptr, and anything depending on the real type (like which
+//   `printline` overload to pick) silently chose the wrong one instead of
+//   erroring -- confirmed live: printed a raw pointer bit pattern as a
+//   number instead of the actual string.
+// - Separately, Codegen's OWN independent getExprType() had the identical
+//   gap in its FieldAccessExprAST handling (never resolved a GenericType
+//   base at all, only a bare TurfStructType) -- crashing the WHOLE
+//   COMPILER with "Internal error: Could not determine type of array/list
+//   base" the moment anything tried to further index/use the result.
+//
+// Both are now fixed (TypeChecker::visitArrayAccess gained a pointer-type
+// branch; both TypeChecker::visitFieldAccess and Codegen's getExprType()
+// gained the same generic-parameter substitution visitMethodCall() already
+// had for method return types).
+
+import io;
+import mem;
+import list::List;
+
+import test;
+struct Entry {
+    key: string,
+    value: string
+}
+
+fn main(): int {
+    // (issue #238) mem::alloc()'s ptr result requires `unsafe { }` to bind
+    // to a caller-side local (this is the exact "Caller-side locals"
+    // example FINAL_SPRINT.md's Track A itself gives); the cast to
+    // `Entry*` is also gated; and writing `.key`/`.value` THROUGH the raw
+    // `Entry*` base `e` is a gated "dereference" (no explicit deref
+    // operator exists -- field access through a raw pointer base is the
+    // closest proxy). `List<Entry*>.push()` itself is a `lib/std` call and
+    // stays exempt regardless of the argument's raw-pointer type.
+    mut store: List<Entry*> = List::default();
+    unsafe {
+        mut e: Entry* = mem::alloc(16) to Entry*;
+        e.key = "language";
+        e.value = "Turf";
+        store.push(e);
+    }
+
+    // The actual regression: chained field access through a generic
+    // collection's indexed backing array, used both as a value passed to
+    // an overloaded function (proves TypeChecker picked the right
+    // `printline` overload) and compared directly (proves the VALUE
+    // itself, not just its reported type, is correct). store.data[0] is
+    // itself a raw Entry* (List<Entry*>'s element type), so `.value`/`.key`
+    // on it is the same gated dereference as above.
+    unsafe {
+        io::printline(store.data[0].value);
+    }
+    test::assert(unsafe { store.data[0].key; } == "language", "key field resolves correctly");
+    test::assert(unsafe { store.data[0].value; } == "Turf", "value field resolves correctly");
+
+    io::printline("generic collection field chain resolves correctly");
+    return 0;
+}

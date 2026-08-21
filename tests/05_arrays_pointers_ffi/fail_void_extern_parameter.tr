@@ -1,0 +1,11 @@
+// Regression test: 'void' as an extern fn parameter's type must be rejected
+// at parse time. Note this must NOT reject 'void*' (the opaque-pointer FFI
+// idiom used throughout, e.g. extern fn free(ptr: void*): void;) -- only
+// bare 'void'. See Parser.cpp's isDisallowedVoidType() check inside
+// ParseExternDecl()'s parameter loop.
+
+extern fn bogus(x: void): void;
+
+fn main(): int {
+    return 0;
+}

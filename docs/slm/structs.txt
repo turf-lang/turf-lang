@@ -1,0 +1,139 @@
+TURF STRUCTS (AND GENERICS -- struct/function type parameters share this
+file since almost all real generic usage in this language is via a generic
+struct like List<T>):
+
+DECLARATION:
+    struct Point {
+        x: int,
+        y: int
+    }
+
+  Fields are comma-separated `name: Type` pairs, same shape as a function
+  parameter. `void` is not a valid field type.
+
+CONSTRUCTION: no brace-literal syntax at all -- `Point { x: 1, y: 2 }` does
+NOT parse. Every struct is built via exactly one of two reserved calls:
+    mut p: Point = Point::new(1, 2);      // calls a user-defined constructor
+    mut d: Point = Point::default();       // every field zero-initialized
+
+  `StructName::new(args...)` calls a `.`-declared instance method literally
+  named `new` (self implicit, exactly like any other instance method):
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;
+    }
+  It must assign every field on every path before returning -- a field set
+  in only one branch of an if/else is a compile error ("doesn't assign
+  every field on all paths"), not silently left at garbage. If the struct
+  has no `.new` declared, `StructName::new(...)` is a compile error --
+  there's no positional-field-order fallback.
+
+  `StructName::default()` is ALWAYS compiler-generated (recursively
+  zero-inits every field, including nested structs) and takes no
+  arguments -- it can never be declared by hand (`fn StructName.default(...)`
+  is a compile error, `default` is reserved) and is always available, even
+  for a struct with zero methods.
+
+  Neither works through an instance with '.' -- `p.new(...)`/`p.default()`
+  are both compile errors; only the `::` form constructs.
+
+FIELD ACCESS (read and write, via '.'):
+    p.x;                // read
+    p.x = 5;             // write
+    mut o: Outer = Outer::default();
+    o.i.v = 5;            // nested field access chains fine, read or write
+
+  Passing a struct BY VALUE to a function parameter (`fn f(p: Point): void`)
+  is supported and copies the struct.
+
+METHODS: declared OUTSIDE the struct body, qualified by struct name.
+The implicit receiver is `self` (a pointer to the instance):
+    fn Point.sum(): int {
+        return self.x + self.y;
+    }
+    p.sum();              // called via '.', same syntax as a field access
+
+  A STATIC method (no `self` at all) uses the exact same declaration form
+  plus a trailing `static` keyword, but is CALLED via `::` on the type
+  itself, never through an instance:
+    fn Point.origin() static: Point {
+        return Point::default();
+    }
+    Point::origin();      // note '::', not '.' -- no instance involved
+
+  A method can mutate self and return it (as a pointer) to support
+  chaining -- this is the idiomatic way to write a fluent/builder-style API:
+    fn Counter.increment(): Counter* {
+        self.val = self.val + 1;
+        return self;
+    }
+    c.increment().increment();   // chained calls both mutate the same c
+
+GENERICS: `struct Box<T> { val: T }`, instantiated as `Box<int>`,
+`Box<string>`, etc. A generic FUNCTION works the same way:
+    fn<T> identity(x: T): T {
+        return x;
+    }
+  Type arguments are ALWAYS INFERRED from the call's argument types -- there
+  is NO explicit instantiation syntax like `identity<int>(5)` (that's a
+  parse error: Turf-Lang has no `<...>` after a function name at a call
+  site, only in a type ANNOTATION like `List<int>`).
+
+NAMESPACE: struct and enum names live in ONE flat namespace shared by the
+current file and every imported module -- unlike functions, they are NOT
+namespaced per module. This is why `List<int>` works without a `list.`
+prefix. The tradeoff: two different modules (or a file and an imported
+module) declaring a same-named struct is a compile-time error:
+  "A struct named 'Point' is already declared." -- rename one of them.
+Field names must also be unique WITHIN one struct:
+  "Struct 'Point' already has a field named 'x'."
+
+STRUCT METHOD CALLS ARE FULLY CHECKED (name, argument count, AND argument
+types -- not just count):
+  p.nonexistentMethod();
+    // ERROR: "'Point' has no method named 'nonexistentMethod'."
+  l.push(1, 2, 3);   // push takes exactly 1 argument besides self
+    // ERROR: "'List.push' was called with 3 arguments, but no overload
+    //         accepts that many."
+  l.push("hello");   // l: List<int>
+    // ERROR: "No overload of 'List.push' matches argument types (string)."
+
+STRUCTS DO NOT SUPPORT == / != :
+  if (a == b) { }   // a, b: Point
+    // ERROR: "Cannot compare struct values with '=='." Compare the fields
+    // you actually care about instead: `a.x == b.x && a.y == b.y`.
+
+IMMUTABILITY APPLIES THROUGH METHODS TOO:
+  immut c: Counter = Counter::default();
+  c.increment();   // increment() assigns to self.val internally
+    // ERROR: "Oops! You can't change the value of 'c' because it's
+    //         immutable." -- the SAME error as a direct `c.val = 1;`
+    //         would give, even though this is a method call, not a
+    //         direct assignment. A genuinely READ-ONLY method (a getter
+    //         that never assigns to a field) is still fine to call on an
+    //         immutable variable.
+
+COMMON MISTAKES:
+- Trying `Point { x: 1, y: 2 }` brace-literal construction -- it doesn't
+  exist; use `Point::new(1, 2)` (if a `.new` is declared) or
+  `Point::default()`.
+- Calling `StructName::new(...)` on a struct with no `.new` declared --
+  there's no fallback; define one or use `::default()`.
+- Declaring `fn StructName.default(...)` by hand -- `default` is reserved
+  and always compiler-generated.
+- Writing `fn StructName.new(...) static: ...` -- `new` always constructs
+  via `self` and can never be `static`.
+- Calling `x.new(...)` or `x.default()` through an instance -- both only
+  work as `StructName::new(...)` / `StructName::default()`.
+- A `new()` that doesn't assign every field on every path (e.g. only
+  inside one branch of an if/else) -- "doesn't assign every field on all
+  paths" names exactly which field(s) were missed.
+- Declaring a method INSIDE the struct body (methods always go outside,
+  qualified as `fn StructName.methodName(...)`).
+- Trying `identity<int>(5)`-style explicit generic instantiation -- type
+  arguments are always inferred, never written at a call site.
+- Comparing two struct instances with == instead of comparing fields.
+- Assuming a same-named struct from a different module is a distinct type
+  -- struct names are global, so this is always a compile error, never a
+  silent shadow.
+- Calling a mutating method on an `immut` struct variable.

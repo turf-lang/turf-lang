@@ -1,59 +1,85 @@
 TURF FUNCTION DEFINITION AND RETURN TYPES:
 
 DEFINITION SYNTAX:
-  fn <return_type> <name>(<type> <param>, ...) { <body> }
+  fn name(param: Type, param2: Type, ...): ReturnType { <body> }
+
+  The return type comes AFTER the parameter list (separated by a colon),
+  and each parameter is `name: Type` -- the OPPOSITE order from many other
+  languages, and the opposite order of the two pieces from each other.
 
   CORRECT EXAMPLES:
-    fn int add(int a, int b) {
-        return a + b
+    fn add(a: int, b: int): int {
+        return a + b;
     }
 
-    fn void greet(string name) {
-        printline(name)
-        return
+    fn greet(name: string): void {
+        io::printline(name);
+        return;
     }
 
-    fn double scale(double x, int factor) {
-        return x * double(factor)
+    fn scale(x: double, factor: int): double {
+        return x * (factor to double);
     }
 
-    fn string label() {
-        return "hello"
+    fn label(): string {
+        return "hello";
     }
 
 RETURN RULES:
-  - The function MUST have a return type: int, double, bool, string, or void.
-  - `fn void` functions may use bare `return` with no value.
-  - Non-void functions must return a value on ALL control paths.
-  - The return value type must exactly match the declared return type,
-    or an explicit cast must be used.
+  - The function MUST have a return type: int, double, bool, string, void,
+    a struct/enum name, a pointer type, or an array type.
+  - `void`-returning functions may use a bare `return;` with no value, or
+    omit the return statement on paths that just fall off the end.
+  - Non-void functions must return a value on ALL control paths, or the
+    compiler rejects it: "The function 'foo' promises to give back a
+    result, but sometimes it doesn't!"
+  - The return value's type must exactly match the declared return type,
+    or an explicit `to` cast must be used.
 
   INCORRECT:
-    fn int foo() { }             // ERROR: missing return statement
-    fn int bar() { return 3.14 } // ERROR: returning double from int function
+    fn foo(): int { }                  // ERROR: missing return on some path
+    fn bar(): int { return 3.14; }     // ERROR: returning double from an
+                                       // int-returning function
   CORRECT FIX:
-    fn int bar() { return int(3.14) }
+    fn bar(): int { return 3.14 to int; }
 
 PARAMETER RULES:
-  - Parameters are declared as: <type> <name>
+  - Parameters are declared as `name: Type`, comma-separated.
   - void is NOT allowed as a parameter type.
-  - Supported parameter types: int, double, bool, string
+  - Supported parameter types: int, double, bool, string, ptr, struct/enum
+    names, pointer types, array types, and (in a generic function,
+    `fn<T> ...`) the function's own type parameter.
+  - Calling a function with the wrong number of arguments, or arguments of
+    incompatible types, is caught before Codegen ever runs -- both are
+    checked, not just the count.
 
 VOID VALUE MISUSE:
-  A void function call cannot be used in an expression or stored in a variable.
+  A void-returning function's call result cannot be stored in a variable
+  or used inside a larger expression.
 
   INCORRECT:
-    int x = voidFunc()           // ERROR: void value cannot be stored
-    printline(voidFunc())        // ERROR: void value cannot be passed as argument
+    mut x: int = voidFunc();     // ERROR: Cannot initialise 'int' variable
+                                 // 'x' with value of type 'void'.
   CORRECT:
-    voidFunc()                   // call it as a standalone statement
+    voidFunc();                  // call it as a standalone statement
 
 FORWARD CALLS:
   Turf performs a pre-pass that hoists function prototypes, so you CAN call
-  a function before it is textually defined in the file.
+  a function before it is textually defined later in the same file.
+
+STRUCT METHODS follow the same param/return-type rules, just declared
+outside the struct body and qualified by struct name:
+  fn Point.sum(): int {
+      return self.x + self.y;
+  }
+  Calling a method that doesn't exist on a struct, or with the wrong
+  argument count/types, is a compile error, not a silent no-op.
 
 COMMON MISTAKES:
-- Missing return type between `fn` and the function name.
-- Forgetting `return` in a non-void function.
-- Returning wrong type without explicit cast.
-- Using a void function call result as a value in an expression.
+- Putting the return type between `fn` and the function name (old/other-
+  language habit) instead of after the parameter list.
+- Putting a parameter's type before its name instead of after a colon.
+- Forgetting `return` on some code path in a non-void function.
+- Returning the wrong type without an explicit `to` cast.
+- Using a void function call's result as a value in an expression or
+  variable declaration.

@@ -1,0 +1,112 @@
+// Proves the http::Server callback-routing story actually works: a real
+// first-class function handler, registered via `app.get(path, handler)`,
+// stored in a `Map<string, fn(Request, Response): void>` STRUCT FIELD, and
+// invoked with a real Request/Response built from a real TCP connection.
+//
+// This is the part docs/planning/DESIGN_NOTES.md §4 expected to still be
+// blocked ("blocked on first-class functions", issue #187) -- it isn't
+// anymore, and this test is the proof: registration, storage in a struct
+// field, lookup, and a real call all happen below.
+//
+// Lookup goes through `app.has_route()`/`app.get_route()`, not
+// `app.routes.tryGet()`/`.contains()` directly -- the latter looked like
+// the natural spelling and even compiled, but silently never matched a
+// freshly-PARSED path against a route registered with a string literal
+// (Map<string, V>'s generic accessors compare K by raw pointer identity,
+// not content -- see http.tr's Request.get_header() doc comment for the
+// full mechanism). Confirmed live: this test failed its "route '/' should
+// have been registered" assertion under the old `.tryGet()` spelling.
+//
+// Server.listen() itself (bind + infinite accept loop, see http.tr) isn't
+// called directly here -- an unbounded accept loop has no natural stopping
+// point for a single test process to assert against and return from. This
+// test instead performs exactly the same steps listen() performs per
+// connection (parse the request, look the path up in the route table,
+// call the handler) against a real connection pair, using the same
+// single-process synchronous-connect technique as
+// 03_http_manual_routing_roundtrip.tr (see that file's own comment for why
+// it's reliable, not flaky). That exercises every piece of Server that
+// isn't the loop itself -- the loop is a thin, ordinary `while true`
+// wrapper around exactly this sequence (see http.tr's Server.listen()).
+import io;
+import net;
+import http;
+import strings;
+import test;
+
+fn homeHandler(req: http::Request, res: http::Response): void {
+    res.send_text(200, "welcome to turf");
+}
+
+fn echoPathHandler(req: http::Request, res: http::Response): void {
+    res.send_json(200, "{\"path\":\"" + req.path + "\"}");
+}
+
+fn main(): int {
+    mut app: http::Server;
+    app.get("/", homeHandler);
+    app.get("/echo", echoPathHandler);
+
+    mut listener: net::TcpListener = net::TcpListener::bind(18081) recover run {
+        test::fail("could not bind test port 18081");
+        return 1;
+    };
+
+    // ── "/" dispatches to homeHandler ──────────────────────────────────────
+    mut client: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 18081) recover run {
+        test::fail("could not connect for / request");
+        return 1;
+    };
+    mut serverConn: net::TcpConnection = listener.accept() recover run {
+        test::fail("accept() failed for / request");
+        return 1;
+    };
+    client.write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+    mut req: http::Request = http::parse_request(serverConn);
+    mut res: http::Response;
+    res.conn = serverConn;
+    test::assert(app.has_route(req.path), "route '/' should have been registered");
+    mut handler: fn(http::Request, http::Response): void = app.get_route(req.path);
+    handler(req, res);
+
+    immut respText: string = client.read(4096);
+    test::assert(strings::starts_with(respText, "HTTP/1.1 200 OK"), "status line for /");
+    test::assert(strings::contains(respText, "welcome to turf"), "homeHandler's body ran for /");
+
+    client.close();
+    serverConn.close();
+
+    // ── "/echo" dispatches to echoPathHandler ──────────────────────────────
+    mut client2: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 18081) recover run {
+        test::fail("could not connect for /echo request");
+        return 1;
+    };
+    mut serverConn2: net::TcpConnection = listener.accept() recover run {
+        test::fail("accept() failed for /echo request");
+        return 1;
+    };
+    client2.write("GET /echo HTTP/1.1\r\nHost: localhost\r\n\r\n");
+
+    mut req2: http::Request = http::parse_request(serverConn2);
+    mut res2: http::Response;
+    res2.conn = serverConn2;
+    test::assert(app.has_route(req2.path), "route '/echo' should have been registered");
+    mut handler2: fn(http::Request, http::Response): void = app.get_route(req2.path);
+    handler2(req2, res2);
+
+    immut respText2: string = client2.read(4096);
+    test::assert(strings::contains(respText2, "Content-Type: application/json"), "echoPathHandler used send_json");
+    test::assert(strings::contains(respText2, "{\"path\":\"/echo\"}"), "echoPathHandler's body reflects the request path");
+
+    client2.close();
+    serverConn2.close();
+
+    // ── an unregistered path is correctly absent from the route table ─────
+    test::assert(!app.has_route("/nope"), "unregistered path should not be in the route table");
+
+    listener.close();
+
+    io::printline("04 PASS: http callback routing");
+    return 0;
+}

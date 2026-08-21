@@ -1,0 +1,20 @@
+You tried to reach past the end of an array
+
+Turf arrays have a fixed size you choose when you declare them, and their valid indices always start at 0 and stop at `size - 1` -- never at `size` itself. So an array of 3 things has valid indices 0, 1, and 2, not 3.
+
+    immut primes: int[3] = [2, 3, 5];
+    mut first: int = primes[0];   // correct -- the first element
+    mut last: int = primes[2];    // correct -- the last element (size - 1)
+
+If you ask for one index too many:
+
+    mut oops: int = primes[3];   // there is no primes[3]!
+
+Turf catches this at compile time and tells you exactly how big the array actually is, so you don't have to go count the brackets yourself.
+
+This mistake almost always comes from an off-by-one: thinking of "3 elements" as meaning "indices 1 through 3" (like counting objects) instead of "indices 0 through 2" (like counting positions). It's one of the most common trips in programming in general, not just in Turf -- you'll stop making it once counting from 0 feels natural, which usually doesn't take long.
+
+If you actually need more room in the array, the fix isn't to index further -- it's to make the array bigger and give it the extra value:
+
+    immut primes: int[4] = [2, 3, 5, 7];
+    mut last: int = primes[3];   // now valid -- the array really has 4 slots

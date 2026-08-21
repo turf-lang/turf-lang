@@ -1,0 +1,258 @@
+TURF-LANG MODULES / IMPORTS / `::` REFERENCE
+==============================================
+
+THE CORE RULE: `.` IS INSTANCE-ONLY, `::` IS NAMESPACE-ONLY
+  `.` is exclusively for accessing something on an INSTANCE you hold: a
+  struct value's fields and methods.
+    mut p: Point = Point::new(1, 2);
+    p.x = 5;              // field access
+    p.sum();               // instance method call
+
+  `::` is exclusively for accessing something by NAME through a namespace
+  you don't hold an instance of: an enum's variant, a module's function or
+  type, a static method, or -- the one exception that isn't module-related
+  at all -- constructing a struct.
+    immut c: Color = Color::Red;        // enum variant
+    io::printline("hi");                 // module function call
+    mut l: list::List<int> = list::List::default();  // module type, default-constructed
+    mut p: Point = Point::new(1, 2);     // constructor call (see CONSTRUCTING A STRUCT below)
+
+  Mixing them up is the single most common mistake: `io.printline(...)`
+  (dot instead of double-colon) is a syntax error, not a semantic one --
+  the parser doesn't even get far enough to tell you "io" isn't an
+  instance; it just doesn't understand '.printline' as a token sequence
+  after the identifier `io` used this way. If you see a confusing parse
+  error right after a module name, check for a stray `.` that should be
+  `::`.
+
+---
+
+CONSTRUCTING A STRUCT: `StructName::new(...)` / `StructName::default()`
+
+  There is no brace-literal construction syntax (`StructName { field: val }`
+  does not exist) -- every struct is built via exactly one of these two
+  reserved, compiler-recognized calls:
+
+    mut u: User = User::new(10, "Alice");   // calls a user-defined constructor
+    mut u2: User = User::default();          // every field zero-initialized
+
+  `StructName::new(args...)` calls a `.`-declared instance method literally
+  named `new` (`fn User.new(age: int, name: string): void { self.age = age;
+  self.name = name; }` -- `self` is implicit, exactly like any other
+  instance method). It must assign every field of the struct on every
+  path before returning; a field missed on even one branch is a compile
+  error. If the struct has no `.new` declared, `StructName::new(...)` is a
+  compile error -- there is no positional-field-order fallback.
+
+  `StructName::default()` is ALWAYS compiler-generated (recursively
+  zero-inits every field, nested structs included) and takes no arguments.
+  It can never be declared by hand -- `fn StructName.default(...)` is a
+  compile error, `default` is reserved -- and it's always available, even
+  for a struct with zero methods.
+
+  Neither can be called through an instance with '.' (`x.new(...)`,
+  `x.default()` are both compile errors) -- only `StructName::new(...)` /
+  `StructName::default()` work, exactly the same qualifier-vs-instance
+  split as everything else `::` covers.
+
+---
+
+IMPORT FORMS -- exactly four, all starting with `import <module-name>`:
+
+  1. import io;
+     BARE form. Makes the module's functions and types reachable ONLY
+     through explicit `io::` qualification. Nothing is pasted unqualified
+     into your file. This is the default, safest form.
+
+  2. import io::printline;
+     SINGLE-SYMBOL on-demand form. Pulls exactly that one name into your
+     file's own unqualified namespace, IN ADDITION to it still being
+     reachable as `io::printline`. After this, both `printline("hi");`
+     (bare) and `io::printline("hi");` (qualified) work.
+
+  3. import io::[print, input, printline];
+     LIST form. Same as (2) but for several names in one statement.
+
+  4. import math::[*];
+     WILDCARD form. Pulls EVERY function the module exports into your
+     unqualified namespace. Convenient, but the most likely to cause a
+     collision (see below) -- prefer the targeted forms (2)/(3) when you
+     only need a few names.
+
+  A module is ALWAYS fully parsed regardless of which form you use --
+  even `import io::printline;` reads the whole of io.tr, it just only
+  exposes the one requested name unqualified.
+
+---
+
+WHAT'S STILL FLAT REGARDLESS OF IMPORT FORM
+
+  Struct and enum TYPE NAMES (not their methods) share one global,
+  module-blind namespace for EXISTENCE purposes: two different modules
+  declaring a same-named struct or enum is a compile error
+  (DuplicateTypeNameError) regardless of import form.
+
+  Bare (unqualified) VISIBILITY of a type, however, follows the exact
+  same rule bare function-call visibility does: a plain bare
+  `import list;` alone only grants QUALIFIED access (`list::List<int>`).
+  Writing bare `List<int>` after only `import list;` is a compile error
+  (UnqualifiedTypeNotVisibleError) -- you need `import list::List;` (or
+  `list::[List, ...]` / `list::[*]`), or to declare/be inside `list`
+  itself, exactly like a bare function call would need an on-demand
+  import.
+
+  You can ALSO qualify a type explicitly: `list::List<int>`, and even
+  qualify its CONSTRUCTION the same way: `list::List::default()` (not just
+  the type annotation -- both forms accept a qualifier). Qualifying is
+  genuinely validated, not decoration: `list` must be a real, imported
+  module, AND it must actually be the module that declares `List` --
+  `mem::List<int>` is a compile error even though `mem` is a real module,
+  because `List` isn't declared there. A bare, unqualified `List<int>`
+  (once visible) and the fully-qualified `list::List::default()` construct
+  the exact same thing -- qualifying is about being explicit, not a
+  different type.
+
+---
+
+WHY BARE IMPORT DOESN'T EXPOSE FUNCTIONS UNQUALIFIED (on purpose)
+
+  This used to work differently, and it was a real bug: earlier, `import
+  io;` (or even NO import at all, since io used to be silently auto-
+  imported into every program) made `printline(...)` callable bare, with
+  no `io::` qualifier, because the name-lookup for an unqualified call
+  searched every module ever loaded anywhere in the program, not just the
+  ones the CURRENT file actually asked to expose that way. That's exactly
+  backwards from what "on demand only" means, so it was fixed: a bare
+  (unqualified) call now only resolves to (a) something declared directly
+  in your own file, or (b) a name you explicitly on-demand-imported via
+  forms (2)/(3)/(4) above. There is no longer any always-auto-imported
+  module -- `io` must be imported like anything else.
+
+  The ONE exception: a function INSIDE a module's own file can always
+  call another function from that SAME module bare, with no import
+  needed at all -- this is ordinary same-file visibility, not a module
+  feature. (E.g. math.tr's own `power()` calling its own `pow()` bare.)
+
+---
+
+COLLISIONS
+
+  Explicitly importing two different symbols under the same bare name --
+  whether via two targeted imports or two wildcard imports -- is a
+  compile error, not a silent shadow:
+
+    import moduleA::shared;
+    import moduleB::shared;   // error: 'shared' imported from two different modules
+
+  Fix by qualifying one of them explicitly at the call site (`moduleA::
+  shared(...)`), or by not wildcard/list-importing the colliding name from
+  one of the two sides.
+
+  Importing a name that doesn't actually exist in the named module is
+  also a compile error at the `import` statement itself, not deferred to
+  first use:
+
+    import io::nosuchfunction;   // error: Module 'io' has nothing named 'nosuchfunction'
+
+---
+
+CIRCULAR IMPORTS
+
+  If module A imports module B, which (directly or through more modules)
+  imports A again, that's a compile error with the full chain shown:
+
+    Circular import detected -- these modules are waiting on each other.
+
+        a  --imports-->  b  --imports-->  a  <- back to the start!
+
+  Fix by removing one of the imports in the cycle, or by moving the code
+  both sides need into a third module neither one has to import the
+  other to reach. A "diamond" shape -- two modules both importing the
+  SAME third module -- is NOT a cycle and compiles fine; only a genuine
+  loop back to a module already being loaded triggers this.
+
+---
+
+EXPORTING CONSTANTS: `export immut`
+
+  Functions, structs, and enums need no keyword to be exportable -- anything
+  declared at a file/module's top level is automatically visible per the
+  rules above. Plain variables are different: `mut`/`immut` only makes
+  sense INSIDE a function (it's destroyed when that scope ends), so there's
+  no existing syntax for a top-level one. `export` fills that gap:
+
+    export immut PI: double = 3.14159;
+    export immut MAX_USERS: int = 100;
+
+  Rules:
+  - TOP LEVEL ONLY. `export` inside a function body is a compile error.
+  - `immut` ONLY, for now -- `export mut PI: double = 3.14159;` is
+    rejected; a true mutable shared global is a separate, not-yet-built
+    feature. If you don't need to mutate it, `export immut` is what you
+    want.
+  - The initializer MUST be a literal (a number, string, or bool) --
+    `export immut X: int = someFunction();` is rejected. An exported
+    constant has no real storage at all; every reference to it is replaced
+    by the literal value directly, at compile time.
+  - Everything else works exactly like an ordinary variable: typo
+    detection, duplicate-name detection, and immutability (you can't
+    assign to it) all apply normally.
+
+  Visibility follows the SAME rules as functions:
+
+    // consts.tr
+    export immut VERSION: int = 7;
+
+    import consts;
+    consts::VERSION          // qualified access, works after any import form
+
+    import consts::VERSION;
+    VERSION                   // bare access, only after an on-demand import
+                               // (or self-reference from inside consts.tr itself)
+
+---
+
+`::` ALSO WORKS FOR ENUM VARIANTS (this predates the module use, and
+hasn't changed):
+
+    enum Color { Red, Green, Blue }
+    immut c: Color = Color::Red;
+    Color::COUNT   // number of variants, as an int
+    Color::VALUES  // pointer to an array of every variant's underlying int value
+    Color::NAMES   // pointer to an array of every variant's name as a string
+
+  The parser treats `Left::Right` uniformly -- it doesn't know or care
+  in advance whether `Left` will turn out to be an enum or a module; that
+  distinction is made after parsing, once `Left`'s real identity is
+  known. A `Left` that's neither a known enum nor a known (imported)
+  module is a clean "isn't a known enum or module" error.
+
+---
+
+WHAT MODULES EXIST TODAY
+
+  io      print/printline/input (all overloaded for int/double/bool/string)
+  mem     malloc/realloc/free/calloc + checked helpers (alloc/grow/dup/zero)
+  math    sqrt/pow/trig/log/... (libm bindings) + abs/power/min/max/clamp
+  list    List<T>, a dynamically-growing array
+  stack   Stack<T>
+  queue   Queue<T>
+  strings length/contains/index_of/starts_with/ends_with/substring/replace/
+          trim/to_upper/to_lower/repeat, and more
+
+  None of these are special-cased by the compiler in any way -- they are
+  ordinary Turf source files under lib/std/ (grouped into subfolders like
+  core/, collections/, io/, mem/, math/, testing/ purely for browsing the
+  repo -- `import list;` never names a path, so which subfolder a module's
+  file lives in is invisible to a program importing it). A program can
+  declare and import its own modules the exact same way (any `.tr` file
+  next to your source, or on the module search path, is importable by its
+  filename).
+
+  The module search path is: the installation's stdlib (`$TURF_HOME/lib/std`
+  if TURF_HOME is set in your environment, else wherever the compiler
+  binary's own `lib/` sits), then an installed-package directory
+  (`$TURF_HOME/lib/usr`), then the importing file's own directory, then the
+  current working directory. Set TURF_HOME in your shell profile to point at
+  a Turf installation if the compiler binary isn't sitting next to its own
+  `lib/` (e.g. a relocated or system-installed binary).

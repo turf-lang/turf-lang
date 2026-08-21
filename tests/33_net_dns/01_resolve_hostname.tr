@@ -1,0 +1,22 @@
+// Regression test: net::resolve_hostname() -- resolves a hostname to a
+// dotted-decimal IPv4 string via the classic libc gethostbyname() binding
+// (see lib/std/io/net.tr's doc comment on resolve_hostname() for the full
+// struct hostent byte-layout explanation).
+//
+// "localhost" is the only hostname it's safe to assume resolves the same
+// way in every environment this test might run in (including a sandboxed
+// CI machine with no real network access) -- it's guaranteed by
+// /etc/hosts on essentially every POSIX system to map to 127.0.0.1, with
+// no actual DNS lookup or network I/O involved.
+import io;
+import net;
+import test;
+
+fn main(): int {
+    immut ip: string = net::resolve_hostname("localhost") recover produce "RESOLUTION_FAILED";
+
+    test::assert_eq(ip, "127.0.0.1", "resolve_hostname(\"localhost\") == 127.0.0.1");
+
+    io::printline("33/01 PASS: net::resolve_hostname(\"localhost\") == " + ip);
+    return 0;
+}

@@ -1,0 +1,16 @@
+// Regression test: `StructName::method(...)` where StructName is real but
+// has no method (static or instance) by that name must raise a clean
+// StructMethodNotFoundError, not a crash or a confusing "unknown scope
+// qualifier" error (that would be the wrong diagnostic -- StructName IS a
+// known qualifier, it's the method name that's wrong).
+
+struct MathUtil {}
+
+fn MathUtil.square(x: int) static: int {
+    return x * x;
+}
+
+fn main(): int {
+    immut y: int = MathUtil::cube(5);
+    return 0;
+}

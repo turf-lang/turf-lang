@@ -1,0 +1,43 @@
+// Regression coverage for io::read_lines() on a multi-line file, including
+// the trailing-newline edge case (a spurious 4th empty element must NOT
+// appear) and the genuine-trailing-blank-line case (that one must survive).
+import io;
+import strings;
+import list::List;
+import test;
+
+extern fn remove(path: string): int;
+
+fn main(): int {
+    immut path: string = "03_read_lines.tmp";
+    io::write_string(path, "alpha\nbeta\ngamma\n");
+
+    mut lines: List<string> = io::read_lines(path) recover run {
+        test::fail("read_lines should succeed on a file that was just written");
+        return 1;
+    };
+
+    test::assert_eq(lines.length(), 3, "read_lines: trailing newline should not produce a spurious 4th empty line");
+    test::assert(lines.data[0] == "alpha", "read_lines: line 0");
+    test::assert(lines.data[1] == "beta", "read_lines: line 1");
+    test::assert(lines.data[2] == "gamma", "read_lines: line 2");
+
+    // A genuine trailing blank line (two '\n' in a row at the end) must
+    // survive -- only ONE spurious trailing empty element (caused by the
+    // very last '\n' itself) is ever dropped.
+    immut path2: string = "03_read_lines_blank.tmp";
+    io::write_string(path2, "one\n\n");
+    mut lines2: List<string> = io::read_lines(path2) recover run {
+        test::fail("read_lines should succeed on a file that was just written");
+        return 1;
+    };
+    test::assert_eq(lines2.length(), 2, "read_lines: a genuine blank line before EOF is preserved");
+    test::assert(lines2.data[0] == "one", "read_lines: blank-line case, line 0");
+    test::assert(lines2.data[1] == "", "read_lines: blank-line case, line 1 is the genuine blank line");
+
+    remove(path);
+    remove(path2);
+
+    io::printline("03 PASS: io::read_lines on a multi-line file");
+    return 0;
+}

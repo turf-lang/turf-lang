@@ -1,0 +1,14 @@
+// TRACKED BUG: Issue #2 (No default init) + Issue #4 (Nested array literal parsing fails)
+// When those issues are fixed, this file should compile and run successfully.
+
+import test;
+
+fn main(): int {
+    // Fails because ParseExpression cannot parse '[' as an array literal
+    mut matrix: int[1][1] = [[0]];
+    
+    matrix[0][0] = 44;
+    test::assert(matrix[0][0] == 44, "Multidimensional array assignment failed");
+    
+    return 0;
+}

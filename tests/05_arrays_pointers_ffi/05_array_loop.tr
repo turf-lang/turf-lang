@@ -1,0 +1,17 @@
+import test;
+
+fn main(): int {
+    mut squares: int[5] = [0, 0, 0, 0, 0];
+
+    for i in 0..5 step i += 1 {
+        squares[i] = i * i;
+    }
+
+    test::assert(squares[0] == 0, "");
+    test::assert(squares[1] == 1, "");
+    test::assert(squares[2] == 4, "");
+    test::assert(squares[3] == 9, "");
+    test::assert(squares[4] == 16, "");
+
+    return 0;
+}

@@ -1,0 +1,118 @@
+// Regression test (was CODE_REVIEW_GAPS_2026-07.md gap #2, "Generic structs
+// have no valid syntax to instantiate with explicit type arguments"): a
+// generic struct can now be constructed, have its fields accessed, and have
+// generic methods called on it.
+//
+// This was fixed WITHOUT adding new Parser syntax for explicit type
+// arguments on a brace literal (`Box<int> { ... }` still does not parse --
+// `<` after an identifier in expression position is still just the
+// less-than operator, and disambiguating it from a generic-argument list
+// would need real backtracking support this hand-written recursive-descent
+// parser doesn't have). Instead:
+//
+//   1. `Types.cpp`'s typesCompatible() now treats a bare construction's type
+//      (`Box::new(...)`/`Box::default()` always produce plain
+//      NamedType("Box") -- the Resolver's ConstructorCall/DefaultConstruct
+//      dispatch in visitFuncCall, and TypeChecker's DefaultConstruct branch,
+//      never produce a GenericType themselves; this was originally true of
+//      the now-removed brace-literal form's TypeChecker::visitStructInit()
+//      too, and still holds through the newer construction paths) as
+//      compatible with a GenericType of the same base name (`Box<int>`) on
+//      the OTHER side of an assignment/declaration. This is sound because
+//      this compiler's type-erasure model gives every
+//      instantiation of a generic struct the exact same LLVM layout (a
+//      field typed with the struct's own type parameter is always a
+//      pointer, which erases to an opaque pointer regardless of what it
+//      points to) -- there is no monomorphized layout to pick between, so
+//      the concrete type argument only needs to be carried by the
+//      surrounding declared type, never by the literal itself.
+//   2. A genuinely separate, pre-existing Parser bug was found and fixed
+//      along the way: `ParseStructDecl()`'s own `GlobalSymbolTable->
+//      RegisterType(Name, SType)` call used to run INSIDE the temporary
+//      scope pushed for resolving the struct's generic type parameters,
+//      so it was immediately un-registered the moment the scope popped at
+//      the end of parsing -- meaning EVERY generic struct's own name was
+//      permanently unlookupable via GlobalSymbolTable->LookupType()
+//      immediately after being declared, in the SAME file, regardless of
+//      how it was later referenced.
+//   3. Codegen's FieldAccessExprAST (codegenLValue/codegen) and
+//      TypeChecker's visitMethodCall()/visitFieldAccess() all resolved a
+//      NamedType base to its real TurfStructType via GlobalSymbolTable, but
+//      had no equivalent resolution for a GenericType base (e.g. a
+//      `Box<int>`-typed variable) -- so field access and (much more subtly)
+//      METHOD CALLS on a generic struct instance silently failed.
+//      Specifically: TypeChecker::visitMethodCall()'s struct-method lookup
+//      fell through to "be permissive" (Node.ResolvedCallTarget left null)
+//      for any generic-struct-typed base, and Codegen's
+//      MethodCallExprAST::codegen() then silently returned nullptr with NO
+//      diagnostic when ResolvedCallTarget was null -- which meant a
+//      variable declared from that call's result was never registered in
+//      Codegen's symbol table, surfacing only much later as a totally
+//      unrelated-looking "you're trying to use 'p' before telling me what
+//      it is" error at the NEXT place that variable happened to be
+//      referenced in a way Codegen actually reached (this specific failure
+//      mode only became visible once the call was wrapped in `test::assert()`,
+//      since TypeChecker's earlier, unrelated rejections in other contexts
+//      had been masking it).
+
+// (issue #238) `Box<T>.val`'s field type is `T*` -- still a raw pointer
+// (isRawPointer() gates it regardless of T being an open generic param),
+// so the struct decl needs `unsafe { }`. set()/get() used to spell their
+// parameter/return as `T*`; a plain function may never have a raw ptr/T*
+// parameter or return type, even inside `unsafe { }` (see
+// checkNoRawPointersInSignature()), so they now use `&T` instead --
+// reference-to-generic-param compatibility already works the identical
+// way pointer-to-generic-param compatibility always has (src/Types.cpp),
+// via the same inheritance that makes `&T` a `TurfPointerType` underneath.
+import test;
+
+unsafe {
+    struct Box<T> {
+        val: T*
+    }
+}
+
+fn<T> Box.set(v: &T): void {
+    self.val = v;
+}
+
+fn<T> Box.get(): &T {
+    // self.val is a raw T*; converting it to the declared &T return type
+    // is the raw-to-safe direction, which always needs an explicit cast
+    // inside `unsafe { }` (it might have been null -- ::default() zero-
+    // inits every pointer field, so in practice it's never read before
+    // set() is called, but the compiler can't know that statically).
+    unsafe {
+        return self.val to &T;
+    }
+}
+
+fn main(): int {
+    // Construction + direct field access, no user-defined constructor
+    // involved -- `val` is a pointer field, and ::default() already
+    // zero-inits it to null, exactly the value the old brace-literal spelled
+    // out explicitly.
+    mut b: Box<int> = Box::default();
+    test::assert(b.val == null, "");
+
+    // Generic method call: set() takes &T (&int), get() returns &T (&int).
+    mut n: int = 42;
+    b.set(&n);
+    mut p: &int = b.get();
+    test::assert(p == &n, "");
+    // No `p != null` check anymore: &T is a compiler-guaranteed non-null
+    // reference, so that's now a static guarantee instead of something
+    // worth asserting at runtime (and `null` isn't even assignable/
+    // comparable to a `&T` -- see typesCompatible()'s Rule 1).
+
+    // A second, independently-typed instantiation of the SAME generic
+    // struct in the same file, to confirm the shared-layout model doesn't
+    // cause any cross-instantiation interference.
+    mut sb: Box<string> = Box::default();
+    mut s: string = "hello";
+    sb.set(&s);
+    mut sp: &string = sb.get();
+    test::assert(sp == &s, "");
+
+    return 0;
+}

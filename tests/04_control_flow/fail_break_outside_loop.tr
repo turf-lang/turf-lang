@@ -1,0 +1,6 @@
+fn main(): int {
+    if true {
+        break;
+    } else {}
+    return 0;
+}

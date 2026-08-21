@@ -1,0 +1,13 @@
+// Companion module for fail_duplicate_struct_across_modules.tr -- declares a
+// struct named 'Point' so importing it alongside dup_struct_b_module.tr (which
+// declares its own, differently-shaped 'Point') triggers a cross-module
+// struct-name collision. Named `..._module.tr` so scripts/test_runner.sh's
+// `grep -v "_module.tr"` skips it as a standalone test entry point; it only
+// exists to be imported.
+struct Point {
+    x: int
+}
+
+fn makeA(): Point {
+    return Point::default();
+}

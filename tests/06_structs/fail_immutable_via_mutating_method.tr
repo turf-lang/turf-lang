@@ -1,0 +1,23 @@
+// Regression test: calling a struct method that mutates `self` through an
+// immutable variable must be rejected, exactly like direct field assignment
+// already is (`c.val = 5;` on an `immut c` correctly raises
+// ImmutableAssignmentError). Before this fix, that check only ever looked
+// at direct assignment expressions -- a mutating method call like
+// `c.bump()` (where `bump()` internally does `self.val = self.val + 1`)
+// bypassed it entirely and silently mutated the "immutable" variable at
+// runtime. See ResolverFunctionSymbol::MutatesSelf (ResolverSymbolTable.h)
+// and its use in TypeChecker::visitMethodCall() for the fix.
+
+struct Counter {
+    val: int
+}
+
+fn Counter.bump(): void {
+    self.val = self.val + 1;
+}
+
+fn main(): int {
+    immut c: Counter = Counter::default();
+    c.bump();
+    return 0;
+}

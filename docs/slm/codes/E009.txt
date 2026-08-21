@@ -1,0 +1,37 @@
+TURF E009 -- MISSING RETURN:
+
+CAUSE:
+  A function declared with a non-void return type (e.g. `: int`, `: string`)
+  has at least one path through its body that reaches the closing `}`
+  without hitting a `return` statement. Turf requires every path to return
+  a value -- there's no implicit "falls off the end and returns garbage"
+  behavior.
+
+CORRECT USAGE:
+    fn abs(x: int): int {
+        if x < 0 {
+            return -x;
+        }
+        return x;   // covers the x >= 0 path too -- every path returns
+    }
+
+INCORRECT:
+    fn abs(x: int): int {
+        if x < 0 {
+            return -x;
+        }
+        // ERROR: missing return -- if x >= 0, this function falls off
+        // the end without returning anything.
+    }
+
+WHAT THIS ERROR IS NOT:
+  - Not about `void` functions -- a `void` function never needs a
+    `return` at all (an empty `return;` is optional, purely to exit early).
+  - Not caught by just "there's A return somewhere in the body" -- every
+    branch (`if`/`else if`/`else`, every `compare` arm) must return; one
+    missing `else` is enough to trigger this.
+
+FIX:
+  Add a `return` on every path, including a final fallback `return` after
+  an `if` with no matching `else` (as shown above), or add an explicit
+  `else` branch that also returns.

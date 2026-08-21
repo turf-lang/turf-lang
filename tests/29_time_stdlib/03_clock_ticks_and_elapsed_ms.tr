@@ -1,0 +1,36 @@
+// Coverage for time::clock_ticks()/time::elapsed_ms()/time::elapsed_seconds()
+// against real CPU-bound work (a busy loop), which is what clock() actually
+// measures -- see time.tr's design note on why this is CPU time, not
+// wall-clock time. Also pins CLOCKS_PER_SEC's real, empirically-confirmed
+// value (see time.tr's own doc comment).
+import time;
+import test;
+import io;
+
+fn main(): int {
+    test::assert_eq(time::CLOCKS_PER_SEC, 1000000, "CLOCKS_PER_SEC must be glibc/Linux's real value");
+
+    immut start: int = time::clock_ticks();
+
+    // A large, genuinely CPU-bound busy loop -- no I/O, no sleeping, so
+    // clock() should advance close to 1:1 with real time spent here.
+    mut i: int = 0;
+    while i < 500000000 {
+        i = i + 1;
+    }
+
+    immut ms: int = time::elapsed_ms(start);
+    immut seconds: int = time::elapsed_seconds(start);
+
+    // Generous band: this loop takes on the order of tens to a few hundred
+    // milliseconds on typical hardware, but must be strictly positive (real
+    // CPU work happened) and not implausibly large (e.g. a units bug that
+    // reports seconds as if they were milliseconds by 1000x).
+    test::assert(ms > 0, "elapsed_ms() must be positive after real CPU-bound work");
+    test::assert(ms < 30000, "elapsed_ms() should stay well under 30s for this loop -- guards against a units/scale bug");
+    test::assert(seconds >= 0 && seconds <= 30, "elapsed_seconds() should be consistent with elapsed_ms()'s band");
+    test::assert_eq(seconds, ms / 1000, "elapsed_seconds() must equal elapsed_ms() / 1000");
+
+    io::printline("03 PASS: time::clock_ticks / elapsed_ms / elapsed_seconds track real CPU-bound work");
+    return 0;
+}

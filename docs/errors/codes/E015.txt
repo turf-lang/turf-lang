@@ -1,0 +1,20 @@
+Turf couldn't quite make sense of this part of your code
+
+This is Turf's general "something about the shape of this code isn't right" error. It covers a lot of ground -- missing punctuation, a bracket that's never closed, a word in the wrong place -- so the exact wording changes every time, but it always tells you specifically what it was expecting to see at that spot.
+
+A couple of the most common shapes this takes:
+
+    struct Point {
+        x: int
+        y: int
+    }
+
+Struct fields need a comma between them, so the above is missing one -- it should read `x: int,` with a trailing comma before `y: int`. Another common one is forgetting the colon before a function's return type:
+
+    fn add(a: int, b: int) int {
+        return a + b;
+    }
+
+That needs a `:` right before `int` -- `fn add(a: int, b: int): int {`.
+
+Whenever you see this error, the best first move is to read the message itself closely -- it names the exact token Turf was looking for and couldn't find. Then look right around the reported line and column for the usual suspects: a missing comma, colon, or semicolon, or a bracket/brace/paren that isn't closed. Nine times out of ten that's exactly it, and a tiny punctuation fix gets you back to compiling.

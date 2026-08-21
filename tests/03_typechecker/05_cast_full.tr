@@ -1,0 +1,64 @@
+import io;
+
+import test;
+fn main(): int {
+    io::printline("Running 1");
+    mut a: double = 42 to double;
+    test::assert(a > 41.9 && a < 42.1, "");
+
+    io::printline("Running 2");
+    mut b: int = 3.75 to int;
+    test::assert(b == 3, ""); // Removes the decimal part.
+
+    io::printline("Running 3");
+    mut c: int = "100" to int;
+    test::assert(c == 100, "");
+
+    io::printline("Running 4");
+    mut d: double = "2.718" to double;
+    test::assert(d > 2.717 && d < 2.719, "");
+
+    io::printline("Running 5");
+    mut e: int = (1.9 to int) + (2.1 to int);
+    test::assert(e == 3, ""); // 1 + 2
+
+    io::printline("Running 6");
+    mut f: double = (9.9 to int) to double;
+    test::assert(f > 8.9 && f < 9.1, ""); // int(9.9) is 9, double(9) is 9.0
+
+    io::printline("Running 7");
+    mut g: int = (7 to double) to int;
+    test::assert(g == 7, "");
+
+    // string(int) conversions
+    mut s1: string = 42 to string;
+    test::assert(s1 == "42", "");
+
+    mut s2: string = -7 to string;
+    test::assert(s2 == "-7", "");
+
+    mut s3: string = 0 to string;
+    test::assert(s3 == "0", "");
+
+    // string(double) conversions
+    // we won't assert exact equality due to double formatting, but we can verify it doesn't crash
+
+    // string(bool) conversions
+    mut s6: string = true to string;
+    test::assert(s6 == "true", "");
+
+    mut s7: string = false to string;
+    test::assert(s7 == "false", "");
+
+    // string(int(double)) - chaining casts
+    mut s8: string = (9.9 to int) to string;
+    test::assert(s8 == "9", "");
+
+    // string(variable)
+    mut x: int = 10;
+    mut s9: string = x to string;
+    test::assert(s9 == "10", "");
+
+    io::printline("Done");
+    return 0;
+}

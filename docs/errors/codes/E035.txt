@@ -1,0 +1,37 @@
+You tried to transition a state machine to a state it can't reach from here
+
+Turf's `machine` construct lets you declare a set of states and the only legal moves between them. Once you write `machine ConnectionState { Idle -> Connecting, Connecting -> Connected, ... }`, that arrow list is the whole rulebook -- Turf checks every `.transition(...)` call against it.
+
+This particular error happens inside a `compare`/`matches` block, where Turf already knows exactly which state you're in:
+
+    machine ConnectionState {
+        Idle -> Connecting,
+        Connecting -> Connected,
+        Connecting -> Failed,
+        Connected -> Closing,
+        Closing -> Idle,
+    }
+
+    mut conn: ConnectionState = ConnectionState::Idle;
+    compare conn {
+        matches ConnectionState::Idle:
+            conn.transition(ConnectionState::Connecting);   // fine -- Idle -> Connecting exists
+        done
+        otherwise:
+            mut noop: int = 0;
+    }
+
+If you try to jump somewhere that isn't listed:
+
+    matches ConnectionState::Idle:
+        conn.transition(ConnectionState::Closing);   // there's no Idle -> Closing edge!
+    done
+
+...Turf catches it right away, at compile time, instead of letting your program crash later when it actually tries to make that jump.
+
+Two ways to fix it:
+
+  - If the jump really should be allowed, add it to the machine's declaration: `Idle -> Closing,`.
+  - If it shouldn't be allowed, that's Turf doing its job -- pick a state your current one can actually reach.
+
+State machines are one of the pickier parts of Turf to get right at first, but this exact error is the compiler catching a real bug for you before it ever runs -- that's a win, not a setback.

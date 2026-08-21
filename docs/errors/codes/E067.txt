@@ -1,0 +1,19 @@
+You tried to use the result of a function that doesn't return anything
+
+A function declared with `: void` doesn't hand back a value when it finishes -- it just does something (like printing a message) and returns to whoever called it. Because there's genuinely no value produced, you can't store it, pass it along, or use it in a bigger expression.
+
+Calling a `void` function on its own line is exactly what it's for:
+
+    fn logMessage(msg: string): void {
+        io::printline(msg);
+    }
+
+    logMessage("hello");   // fine -- just runs it
+
+But trying to grab a value out of it doesn't work, because there isn't one:
+
+    mut result: string = logMessage("hello");
+
+Turf tells you specifically that a void value was used where a real value was expected, along with a bit of context about where that happened.
+
+There are two honest fixes here. If you only ever wanted the side effect (like the printed message) and never actually needed a value back, just call the function as its own statement, without trying to store or use the result. If you genuinely do need a value back, the real fix is upstream: change the function's own declared return type from `void` to whatever type it should produce, and add a `return` statement inside it that actually returns that value.

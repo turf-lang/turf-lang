@@ -1,0 +1,20 @@
+// Regression test (Issue #185, CFG Phase 1): `while true` with a `break`
+// inside a nested `if` must NOT trigger an InfiniteLoopWarning.
+//
+// The CFG cycle contains an `if.then` block whose terminator is `Break`,
+// satisfying condition (1) of hasUnbreakableLoop() — so the check correctly
+// recognises the loop as breakable and emits no warning.
+
+import test;
+
+fn main(): int {
+    mut x: int = 0;
+    while true {
+        x = x + 1;
+        if x > 10 {
+            break;
+        }
+    }
+    test::assert(x == 11, "Loop exited after x reached 11");
+    return 0;
+}

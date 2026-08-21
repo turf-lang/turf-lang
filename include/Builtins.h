@@ -7,13 +7,18 @@
 #include <string>
 #include <vector>
 
-// CodegenIntrinsic
-// Invoked by FuncDefExprAST when an @intrinsic decorator is present.
-// It maps the intrinsic name string (e.g. "pow", "malloc") to LLVM IR
-// generation.
-llvm::Value *CodegenIntrinsic(const std::string &IntrinsicName,
-                              std::vector<llvm::Value *> &Args,
-                              SourceLocation Loc);
+// CodegenPanic
+// Emits the compiler's own internal "print MsgVal to stderr, then abort"
+// sequence -- fprintf(stderr, "%s\n", MsgVal); abort(); unreachable -- used
+// SOLELY by the compiler's own runtime safety guards (division/modulo by
+// zero, bad string->int/enum casts, array bounds checks; see Codegen.cpp's
+// call sites). This is deliberately NOT reachable from Turf source at all
+// (no name in g_builtins routes here) -- it used to be shared with the
+// user-facing `fail` builtin, back when `fail` was a compiler intrinsic.
+// Now that `fail` is an ordinary Turf function in lib/std/test.tr, this is
+// purely an internal C++ helper the compiler uses for panics it generates
+// itself.
+llvm::Value *CodegenPanic(llvm::Value *MsgVal, SourceLocation Loc);
 
 // Metadata for a builtin function. Keep minimal for now; extend as needed.
 struct BuiltinInfo {

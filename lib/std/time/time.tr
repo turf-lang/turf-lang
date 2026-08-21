@@ -1,0 +1,131 @@
+// ─── time.tr ─────────────────────────────────────────────────────────────
+// Wall-clock and CPU-time utilities for TurfLang: reading the current Unix
+// timestamp, measuring elapsed CPU time via clock(), and sleeping.
+//
+// Design:
+//   - now_seconds() wraps libc's `time(NULL)`. Turf's `null` literal is
+//     directly legal in any pointer-typed argument position (see
+//     docs/reference/variables_and_types.md's `null` section) -- no
+//     separate "construct a null pointer" helper is needed, and the raw
+//     parameter is named `t`, not `ptr`: `ptr` is this language's own
+//     reserved opaque-pointer type keyword, so using it as a parameter name
+//     fails to parse (see mem.tr's own doc comment on this exact trap).
+//   - clock_ticks()/CLOCKS_PER_SEC wrap libc's `clock()`, which measures CPU
+//     time consumed by this process, NOT wall-clock time -- it barely
+//     advances while the process is sleeping, blocked on I/O, or preempted.
+//     Confirmed empirically (tests/29_time_stdlib/02_sleep_and_elapsed.tr):
+//     a 200ms usleep-based sleep advances clock_ticks() by only a couple of
+//     ticks (real CPU work done, not time slept), while now_seconds()-based
+//     wall time advances by the full amount. elapsed_ms()/elapsed_seconds()
+//     below are therefore a "how much CPU time did this take" measurement,
+//     not a wall-clock stopwatch -- for sub-process-lifetime wall-clock
+//     durations there is no cheap high-resolution primitive in this binding
+//     set; now_seconds() is the only wall-clock reference point available,
+//     at 1-second resolution.
+//   - CLOCKS_PER_SEC is hardcoded to 1_000_000, not read from a `<time.h>`
+//     macro (Turf's `extern fn` mechanism can only bind real C functions,
+//     not preprocessor macros/constants). POSIX only requires
+//     CLOCKS_PER_SEC == 1_000_000 on XSI-conformant systems, but glibc
+//     defines it unconditionally as 1_000_000 on every Linux target
+//     regardless of clock()'s real underlying resolution, which is what
+//     this codebase already targets exclusively (see mem.tr's
+//     malloc_usable_size()/net.tr's socket constants for other
+//     glibc/Linux-specific precedent). Confirmed empirically, not just
+//     assumed: a ~1-second busy loop divided by this constant reports a
+//     plausible ~1-second CPU duration (see 02_sleep_and_elapsed.tr).
+//   - usleep() is declared with `int32` params/return, not this language's
+//     64-bit `int` -- POSIX's `usleep()` takes/returns a real C
+//     `useconds_t`/`int`, the same real-vs-Turf-int width mismatch
+//     strings.tr's strcmp/toupper/tolower binding comment explains in full
+//     (see Int32Type's doc comment in Types.h). usleep() is also POSIX-
+//     documented as having undefined behavior for microsecond counts
+//     >= 1,000,000 -- sleep_seconds()/sleep_ms() below both loop in
+//     <= 1-second chunks instead of multiplying one big value into a single
+//     call, which also sidesteps ever needing a value that doesn't fit in
+//     `int32` in the first place.
+//
+// Usage:
+//   import time;
+//   import io;
+//
+//   io::printline("unix time: " + (time::now_seconds() to string));
+//
+//   immut start: int = time::clock_ticks();
+//   time::sleep_ms(50);
+//   io::printline("cpu time elapsed: " + (time::elapsed_ms(start) to string) + "ms");
+
+// ─── libc bindings ────────────────────────────────────────────────────────
+
+extern fn time(t: ptr): int;
+extern fn clock(): int;
+// usleep genuinely takes/returns a 32-bit C `int` (`useconds_t`/`int` under
+// POSIX), not Turf's 64-bit `int` -- see this file's own design note above.
+extern fn usleep(usec: int32): int32;
+
+// ─── Turf-level constants ──────────────────────────────────────────────────
+
+// How many clock() ticks make up one second of CPU time. See this file's
+// design note above for why this is a hardcoded, glibc/Linux-specific
+// constant rather than something read out of a C macro.
+export immut CLOCKS_PER_SEC: int = 1000000;
+
+// The largest microsecond count a single usleep() call is documented-safe
+// for (POSIX: behavior is undefined at or above one second per call).
+// sleep_seconds()/sleep_ms() use this internally to chunk longer sleeps.
+export immut MAX_USLEEP_USEC: int = 1000000;
+
+// ─── Turf-level helpers ────────────────────────────────────────────────────
+
+// now_seconds: the current wall-clock time, in whole seconds since the Unix
+// epoch (1970-01-01 00:00:00 UTC) -- exactly libc's `time(NULL)`.
+fn now_seconds(): int {
+    return time(null);
+}
+
+// clock_ticks: CPU time consumed by this process so far, in clock() ticks
+// (CLOCKS_PER_SEC ticks per second of CPU time -- NOT wall-clock time; see
+// this file's design note above). Meant to be paired with elapsed_ms()/
+// elapsed_seconds() below, not read as an absolute timestamp on its own.
+fn clock_ticks(): int {
+    return clock();
+}
+
+// elapsed_ms: CPU milliseconds elapsed since `start_clock_ticks` (a value
+// previously returned by clock_ticks()).
+fn elapsed_ms(start_clock_ticks: int): int {
+    immut delta: int = clock_ticks() - start_clock_ticks;
+    return (delta * 1000) / CLOCKS_PER_SEC;
+}
+
+// elapsed_seconds: CPU seconds elapsed since `start_clock_ticks` (a value
+// previously returned by clock_ticks()), rounded down.
+fn elapsed_seconds(start_clock_ticks: int): int {
+    return elapsed_ms(start_clock_ticks) / 1000;
+}
+
+// sleep_seconds: suspend this thread for `n` real (wall-clock) seconds.
+// Implemented as `n` separate 1-second usleep() calls rather than one
+// `usleep(n * 1_000_000)` call -- see this file's design note above on why
+// a single call that large is unsafe.
+fn sleep_seconds(n: int): void {
+    mut i: int = 0;
+    while i < n {
+        usleep(MAX_USLEEP_USEC to int32);
+        i = i + 1;
+    }
+}
+
+// sleep_ms: suspend this thread for `n` real (wall-clock) milliseconds.
+// Chunks into <= 1-second usleep() calls exactly like sleep_seconds(), for
+// the same reason -- large `n` does not overflow a single unsafe usleep()
+// call.
+fn sleep_ms(n: int): void {
+    mut remainingUsec: int = n * 1000;
+    while remainingUsec >= MAX_USLEEP_USEC {
+        usleep(MAX_USLEEP_USEC to int32);
+        remainingUsec = remainingUsec - MAX_USLEEP_USEC;
+    }
+    if remainingUsec > 0 {
+        usleep(remainingUsec to int32);
+    }
+}

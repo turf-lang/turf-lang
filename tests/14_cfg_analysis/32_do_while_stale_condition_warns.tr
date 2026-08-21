@@ -1,0 +1,28 @@
+// Regression test (Issue #180): `x != true` / `x == true` style stale
+// conditions inside a do-while's `while (cond)` clause must trigger
+// RedundantComparisonWarning, same as they do for a plain `while` condition
+// (Lint.cpp's LintBinaryExpr is generic over the parent statement, but it
+// only ever runs if LintExpression actually recurses into the condition --
+// which requires LintDoWhile to exist and be dispatched to).
+
+import test;
+
+fn main(): int {
+    mut ok: bool = false;
+    mut iterations: int = 0;
+    do {
+        iterations = iterations + 1;
+        ok = true;
+    } while (ok != true);
+    test::assert(iterations == 1, "");
+
+    mut finished: bool = false;
+    mut count: int = 0;
+    do {
+        count = count + 1;
+        finished = true;
+    } while (finished == false);
+    test::assert(count == 1, "");
+
+    return 0;
+}

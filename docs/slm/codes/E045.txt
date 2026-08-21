@@ -1,0 +1,34 @@
+TURF E045 -- CONSTRUCTOR CALLED ON INSTANCE:
+
+CAUSE:
+  `new` or `default` -- the two reserved construction methods -- was called
+  through an existing instance with '.' (`p.new(...)` / `p.default()`)
+  instead of through the type itself with '::' (`Point::new(...)` /
+  `Point::default()`). These two names are special: even though `.new` is
+  otherwise declared like an ordinary instance method internally, calling
+  it is ALWAYS reserved for construction via `::`, never through '.', even
+  on an already-existing instance of the same struct.
+
+CORRECT SYNTAX:
+    mut p: Point = Point::new(1, 2);      // '::' constructs a NEW instance
+    mut d: Point = Point::default();
+
+INCORRECT:
+    mut p: Point = Point::new(1, 2);
+    p.new(3, 4);        // ERROR: 'new' can't be called on an instance
+                         //        with '.'.
+    p.default();         // ERROR: 'default' can't be called on an
+                         //        instance with '.'.
+
+WHAT THIS ERROR IS NOT:
+  - Not about the constructor's arguments being wrong -- the call is
+    rejected purely because of HOW it's being called (`.` vs `::`),
+    before argument checking is even relevant.
+  - Not the same as calling an ordinary (non-reserved) static method
+    through '.' -- that's StaticMethodCalledOnInstanceError instead.
+
+FIX:
+  Use '::' on the struct's TYPE NAME to construct, never '.' on an
+  existing variable. If you meant to reset an existing instance's fields,
+  there's no `.reset()`-style built-in for that -- write and call an
+  ordinary (non-reserved-name) method instead, e.g. `p.reset(...)`.

@@ -1,0 +1,22 @@
+import test;
+
+fn main(): int {
+    if (1 > 0) {
+        mut counter: int = 0;
+        test::assert(counter == 0, "");
+    }
+    
+    // ... padding so declaration is out of +/-5 window ...
+    // This tests the SLM context window logic when analyzing the error.
+    mut padding1: int = 0;
+    mut padding2: int = 0;
+    mut padding3: int = 0;
+    mut padding4: int = 0;
+    mut padding5: int = 0;
+    mut padding6: int = 0;
+    
+    // counter is out of scope here
+    test::assert(counter == 0, "should fail: undeclared var");
+    
+    return 0;
+}

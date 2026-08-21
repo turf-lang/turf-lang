@@ -1,0 +1,59 @@
+name: "Package Turf release"
+description: "Bundle the built binary, scripts, and README into a versioned archive"
+inputs:
+  platform-suffix:
+    description: "e.g. linux-x86_64, linux-arch-x86_64, macos-arm64, windows-x86_64"
+    required: true
+  binary-path:
+    description: "Path to the built binary (e.g. build/turf or build/turf.exe)"
+    required: true
+  archive-format:
+    description: "tar.gz or zip"
+    required: true
+  extra-files:
+    description: "Newline-separated list of additional files to bundle next to the binary (e.g. DLLs)"
+    required: false
+    default: ""
+outputs:
+  archive-path:
+    description: "Path to the produced archive"
+    value: ${{ steps.pack.outputs.archive-path }}
+runs:
+  using: "composite"
+  steps:
+    - id: pack
+      shell: bash
+      run: |
+        set -e
+        VERSION="${GITHUB_REF_NAME}"
+        DIR="turf-${VERSION}-${{ inputs.platform-suffix }}"
+        mkdir -p "${DIR}/scripts"
+
+        cp "${{ inputs.binary-path }}" "${DIR}/"
+        cp scripts/compile_and_run.sh "${DIR}/scripts/"
+        cp README.md "${DIR}/"
+        # Bundle the standard library so the binary can resolve imports with
+        # zero setup when run from inside the extracted archive (binary-
+        # relative fallback in ParseModuleImportByName(), src/Parser.cpp) --
+        # without this, every release binary was unable to `import` anything
+        # at all once separated from a full repo checkout. See TURF_HOME in
+        # README.md for pointing a relocated binary back at this lib/ dir.
+        cp -r lib "${DIR}/"
+
+        if [ -n "${{ inputs.extra-files }}" ]; then
+          while IFS= read -r f; do
+            [ -n "$f" ] && cp "$f" "${DIR}/"
+          done <<< "${{ inputs.extra-files }}"
+        fi
+
+        if [ "${{ inputs.archive-format }}" = "zip" ]; then
+          ARCHIVE="${DIR}.zip"
+          7z a "$ARCHIVE" "$DIR" > /dev/null
+        else
+          ARCHIVE="${DIR}.tar.gz"
+          tar -czf "$ARCHIVE" "$DIR"
+        fi
+
+        sha256sum "$ARCHIVE" > "${ARCHIVE}.sha256" 2>/dev/null || shasum -a 256 "$ARCHIVE" > "${ARCHIVE}.sha256"
+
+        echo "archive-path=${ARCHIVE}" >> "$GITHUB_OUTPUT"

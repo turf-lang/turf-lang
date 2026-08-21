@@ -1,0 +1,117 @@
+// Test: Stress test for structs and self-referential structures
+//
+// This test exercises deep nesting, chaining field access through pointers,
+// and passing structs by value vs pointer in complex nested arrangements.
+//
+// (issue #238) GraphNode's `left`/`right`/`data` fields are genuinely
+// nullable raw pointers (a `&T` safe reference can never be null), so the
+// struct decl is `unsafe { }`-wrapped and GraphNode.new() no longer takes
+// them as constructor params (a plain function may never have a raw
+// ptr/T* parameter, even inside `unsafe { }` -- see
+// checkNoRawPointersInSignature()) -- every caller sets them via direct
+// field assignment afterward instead. sum_graph() is restructured to take
+// a safe, non-null `&GraphNode` and check each child for null (via the
+// raw `.left`/`.right` field values) BEFORE recursing, rather than passing
+// null into the function and checking at the top -- the same reasoning
+// 13_linked_list_traverse.tr's traversal functions follow.
+
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+struct Rect {
+    top_left: Point,
+    bottom_right: Point
+}
+
+fn Rect.new(top_left: Point, bottom_right: Point): void {
+    self.top_left = top_left;
+    self.bottom_right = bottom_right;
+}
+
+// A tree-like self-referential struct that also holds a pointer to another struct
+unsafe {
+    struct GraphNode {
+        id: int,
+        left: GraphNode*,
+        right: GraphNode*,
+        data: Rect*
+    }
+}
+
+fn GraphNode.new(id: int): void {
+    self.id = id;
+    unsafe {
+        self.left = null;
+        self.right = null;
+        self.data = null;
+    }
+}
+
+fn area(r: Rect): int {
+    mut width: int = r.bottom_right.x - r.top_left.x;
+    mut height: int = r.bottom_right.y - r.top_left.y;
+    return width * height;
+}
+
+// Recursive function to sum all IDs in the graph. Takes a safe, non-null
+// &GraphNode -- each child is only ever passed along AFTER an explicit
+// null check on the raw pointer field, converting it to &GraphNode right
+// at the call site (the raw-to-safe direction always requires an explicit
+// cast inside `unsafe { }`, since it might have been null -- which is
+// exactly what the null check just before it already ruled out).
+fn sum_graph(node: &GraphNode): int {
+    mut total: int = node.id;
+    unsafe {
+        if node.left != null {
+            total = total + sum_graph(node.left to &GraphNode);
+        }
+        if node.right != null {
+            total = total + sum_graph(node.right to &GraphNode);
+        }
+    }
+    return total;
+}
+
+fn main(): int {
+    mut p1: Point = Point::new(0, 0);
+    mut p2: Point = Point::new(10, 5);
+    mut r: Rect = Rect::new(p1, p2);
+
+    test::assert(area(r) == 50, "FAIL: Rect area calculation");
+
+    mut root: GraphNode = GraphNode::new(100);
+    root.data = &r;
+    mut left: GraphNode = GraphNode::new(50);
+    mut right: GraphNode = GraphNode::new(150);
+
+    root.left = &left;
+    root.right = &right;
+
+    // Test recursive structure traversal
+    test::assert(sum_graph(&root) == 300, "FAIL: Graph tree sum");
+
+    // Test deep field access through a mix of direct fields and pointer
+    // fields. root (GraphNode) -> data (Rect*) -> bottom_right (Point) ->
+    // x (int): the `.bottom_right` hop goes THROUGH the raw `Rect*` base
+    // (root.data), a gated "dereference" (issue #238), hence `unsafe { }`.
+    test::assert(unsafe { root.data.bottom_right.x; } == 10, "FAIL: Deep nested field access x");
+    test::assert(unsafe { root.data.bottom_right.y; } == 5, "FAIL: Deep nested field access y");
+
+    // Modify deep field and verify
+    unsafe {
+        root.data.bottom_right.x = 20;
+    }
+    test::assert(r.bottom_right.x == 20, "FAIL: Mutation through pointer didn't persist");
+    test::assert(area(r) == 100, "FAIL: Area didn't update after deep mutation");
+
+    return 0;
+}

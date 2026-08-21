@@ -1,0 +1,31 @@
+// Stress test: deeply nested struct (4 levels) — all fields default-initialized
+import io;
+
+import test;
+struct D {
+    val: int
+}
+
+struct C {
+    count: double,
+    leaf: D
+}
+
+struct B {
+    active: bool,
+    data: C
+}
+
+struct A {
+    name: string,
+    child: B
+}
+
+fn main(): int {
+    mut a: A;
+    test::assert(a.name == "", "A.name default empty");
+    test::assert(a.child.active == false, "A.child.active default false");
+    test::assert(a.child.data.count == 0.0, "A.child.data.count default 0.0");
+    test::assert(a.child.data.leaf.val == 0, "A.child.data.leaf.val default 0");
+    return 0;
+}

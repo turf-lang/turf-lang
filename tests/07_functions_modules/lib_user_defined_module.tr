@@ -1,0 +1,5 @@
+import io;
+
+fn greet(): void {
+    io::printline("Hello, World!");
+}

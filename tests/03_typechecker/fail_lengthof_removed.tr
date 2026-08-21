@@ -1,0 +1,9 @@
+// Regression test: `lengthof` was deleted entirely
+// (STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7). A bare `lengthof(...)` call
+// must now be a clean "unknown function" error, not silently accepted and
+// not an internal compiler error -- `strings::length(s)` is the real
+// replacement.
+fn main(): int {
+    mut n: int = lengthof("hello");
+    return 0;
+}

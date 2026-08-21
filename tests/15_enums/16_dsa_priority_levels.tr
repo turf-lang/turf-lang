@@ -1,0 +1,56 @@
+// Test: DSA — Priority queue simulation with Priority enum
+// Simulate inserting tasks with priorities and counting by priority level
+import test;
+
+enum Priority { Low, Medium, High, Critical }
+
+fn priority_weight(p: Priority): int {
+    compare p {
+        matches Priority::Low:
+            return 1;
+        done
+        matches Priority::Medium:
+            return 2;
+        done
+        matches Priority::High:
+            return 4;
+        done
+        matches Priority::Critical:
+            return 8;
+        done
+    }
+    return 0;
+}
+
+fn main(): int {
+    // Simulate 6 tasks with mixed priorities
+    immut tasks: Priority[6] = [
+        Priority::High,
+        Priority::Low,
+        Priority::Critical,
+        Priority::Medium,
+        Priority::High,
+        Priority::Low
+    ];
+
+    mut total_weight: int = 0;
+    mut high_count: int = 0;
+    mut i: int = 0;
+    while i < 6 {
+        total_weight = total_weight + priority_weight(tasks[i]);
+        if tasks[i] == Priority::High {
+            high_count = high_count + 1;
+        }
+        i = i + 1;
+    }
+
+    // weights: 4 + 1 + 8 + 2 + 4 + 1 = 20
+    test::assert(total_weight == 20, "Total weight == 20");
+    test::assert(high_count == 2, "Two High priority tasks");
+
+    // Verify escalation by int comparison
+    immut lval: int = priority_weight(Priority::Low);
+    immut hval: int = priority_weight(Priority::High);
+    test::assert(lval < hval, "Low weight < High weight");
+    return 0;
+}

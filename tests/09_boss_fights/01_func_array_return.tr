@@ -1,0 +1,24 @@
+import io;
+
+import test;
+fn get_array(): int[3] {
+    mut arr: int[3] = [10, 20, 30];
+    return arr;
+}
+
+fn main(): int {
+    // 1. Assign to local variable
+    mut local_arr: int[3] = get_array();
+    test::assert(local_arr[0] == 10, "");
+    test::assert(local_arr[1] == 20, "");
+    test::assert(local_arr[2] == 30, "");
+
+
+    // 2. Direct inline indexing
+    // This tests if postfix parsing allows function calls followed by array indices
+    test::assert(get_array()[1] * get_array()[2] == 600, "");
+
+    io::printline(get_array()[1] * get_array()[2]);
+
+    return 0;
+}

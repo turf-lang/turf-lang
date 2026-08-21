@@ -25,35 +25,49 @@
 // ─── Forward declarations (all AST node types) ───────────────────────────────
 class NumberExprAST;
 class BoolExprAST;
+class CharExprAST;
 class StringExprAST;
 class NullExprAST;
 class VariableExprAST;
 class BinaryExprAST;
 class UnaryExprAST;
 class AssignmentExprAST;
+class CompoundAssignmentExprAST;
+class PostfixExprAST;
 class VarDeclExprAST;
 class CastExprAST;
 class BlockExprAST;
+class UnsafeBlockExprAST;
 class IfExprAST;
 class WhileExprAST;
+class DoWhileExprAST;
 class ForExprAST;
+class ForEachExprAST;
 class BreakExprAST;
 class ContinueExprAST;
 class ReturnExprAST;
-class RaiseExprAST;
-class TryExprAST;
+
 class FuncDefExprAST;
 class FuncCallExprAST;
 class MethodCallExprAST;
 class FieldAccessExprAST;
 class ArrayDeclExprAST;
+class ArrayLiteralExprAST;
 class ArrayAccessExprAST;
-class ArrayAssignExprAST;
-class ArrayLengthExprAST;
+class FieldAccessExprAST;
+class EnumDeclExprAST;
+class MachineDeclExprAST;
+class ScopeAccessExprAST;
+class ErrorDeclExprAST;
+class RecoverExprAST;
 class StructDeclExprAST;
-class StructInitExprAST;
 class ModuleImportExprAST;
 class SizeOfExprAST;
+class ExternFuncDeclExprAST;
+class AddressOfExprAST;
+class DefaultInitExprAST;
+class CompareExprAST;
+
 
 // ─── ASTVisitor base class ────────────────────────────────────────────────────
 
@@ -83,8 +97,10 @@ public:
   // ── Literals ──────────────────────────────────────────────────────────────
   virtual void visitNumber(NumberExprAST &Node) {}
   virtual void visitBool(BoolExprAST &Node) {}
+  virtual void visitChar(CharExprAST &Node) {}
   virtual void visitString(StringExprAST &Node) {}
   virtual void visitNull(NullExprAST &Node) {}
+  virtual void visitDefaultInit(DefaultInitExprAST &Node) {}
 
   // ── Variables & Declarations ──────────────────────────────────────────────
   virtual void visitVariable(VariableExprAST &Node) {}
@@ -93,19 +109,25 @@ public:
   // ── Expressions ───────────────────────────────────────────────────────────
   virtual void visitBinary(BinaryExprAST &Node) {}
   virtual void visitUnary(UnaryExprAST &Node) {}
+  virtual void visitAddressOf(AddressOfExprAST &Node) {}
   virtual void visitAssignment(AssignmentExprAST &Node) {}
+  virtual void visitCompoundAssignment(CompoundAssignmentExprAST &Node) {}
+  virtual void visitPostfixExpr(PostfixExprAST &Node) {}
   virtual void visitCast(CastExprAST &Node) {}
 
   // ── Control flow ──────────────────────────────────────────────────────────
   virtual void visitBlock(BlockExprAST &Node) {}
+  virtual void visitUnsafeBlock(UnsafeBlockExprAST &Node) {}
   virtual void visitIf(IfExprAST &Node) {}
   virtual void visitWhile(WhileExprAST &Node) {}
+  virtual void visitDoWhile(DoWhileExprAST &Node) {}
   virtual void visitFor(ForExprAST &Node) {}
+  virtual void visitForEach(ForEachExprAST &Node) {}
   virtual void visitBreak(BreakExprAST &Node) {}
   virtual void visitContinue(ContinueExprAST &Node) {}
   virtual void visitReturn(ReturnExprAST &Node) {}
-  virtual void visitRaise(RaiseExprAST &Node) {}
-  virtual void visitTry(TryExprAST &Node) {}
+  virtual void visitCompare(CompareExprAST &Node) {}
+
 
   // ── Functions & Calls ─────────────────────────────────────────────────────
   virtual void visitFuncDef(FuncDefExprAST &Node) {}
@@ -114,18 +136,23 @@ public:
 
   // ── Structs & Field access ────────────────────────────────────────────────
   virtual void visitFieldAccess(FieldAccessExprAST &Node) {}
+  virtual void visitEnumDecl(EnumDeclExprAST &Node) {}
+  virtual void visitMachineDecl(MachineDeclExprAST &Node) {}
+  virtual void visitScopeAccess(ScopeAccessExprAST &Node) {}
+  virtual void visitErrorDecl(ErrorDeclExprAST &Node) {}
+  virtual void visitRecoverExpr(RecoverExprAST &Node) {}
   virtual void visitStructDecl(StructDeclExprAST &Node) {}
-  virtual void visitStructInit(StructInitExprAST &Node) {}
 
   // ── Arrays ────────────────────────────────────────────────────────────────
   virtual void visitArrayDecl(ArrayDeclExprAST &Node) {}
+  virtual void visitArrayLiteral(ArrayLiteralExprAST &Node) {}
   virtual void visitArrayAccess(ArrayAccessExprAST &Node) {}
-  virtual void visitArrayAssign(ArrayAssignExprAST &Node) {}
-  virtual void visitArrayLength(ArrayLengthExprAST &Node) {}
-
   // ── Modules & misc ────────────────────────────────────────────────────────
   virtual void visitModuleImport(ModuleImportExprAST &Node) {}
   virtual void visitSizeOf(SizeOfExprAST &Node) {}
+
+  // ── FFI ────────────────────────────────────────────────────────────────────
+  virtual void visitExternFuncDecl(ExternFuncDeclExprAST &Node) {}
 };
 
 #endif // AST_VISITOR_H

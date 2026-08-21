@@ -1,7 +1,0 @@
-import math
-
-fn int main() {
-    io.printline(math.power(2, 3, 4)) // Can't match declaration thus cooked and started to find something else
-
-    return 0
-}

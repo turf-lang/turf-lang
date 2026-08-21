@@ -1,0 +1,8 @@
+// Negative test: a method call on a primitive with no UFCS candidate at
+// all must be a clean type error, not the old "internal compiler error"
+// abort (confirmed live before this feature existed).
+fn main(): int {
+    mut n: int = 5;
+    n.nonexistent_method();
+    return 0;
+}

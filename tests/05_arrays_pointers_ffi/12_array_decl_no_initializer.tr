@@ -1,0 +1,31 @@
+// Regression test (was DISCOVERED_ISSUES.md #14): `mut arr: int[5];` (no
+// explicit bracketed initializer) used to fail to parse with "Expected '='
+// after variable type" -- the language required a full literal like
+// `int[5] = [0, 0, 0, 0, 0]` even when zero-initialization was all that was
+// needed. Re-verified fixed: an array declared without an initializer is
+// zero-initialized and safely assignable element-by-element afterward.
+
+import test;
+
+fn main(): int {
+    mut arr: int[5];
+    arr[0] = 10;
+    arr[1] = 20;
+    arr[4] = 50;
+
+    // Untouched elements must be zero-initialized, not garbage.
+    test::assert(arr[2] == 0, "");
+    test::assert(arr[3] == 0, "");
+
+    test::assert(arr[0] == 10, "");
+    test::assert(arr[1] == 20, "");
+    test::assert(arr[4] == 50, "");
+
+    // Same for a double array.
+    mut darr: double[3];
+    test::assert(darr[0] == 0.0, "");
+    darr[1] = 3.5;
+    test::assert(darr[1] == 3.5, "");
+
+    return 0;
+}

@@ -2,6 +2,7 @@
 #define SLM_ENGINE_H
 
 #include <string>
+#include <vector>
 
 // Forward declarations to keep llama.cpp headers out of our compiler headers
 struct llama_model;
@@ -13,6 +14,10 @@ class SLMEngine {
 private:
   llama_model *model = nullptr;
   llama_context *ctx = nullptr;
+  bool backendInitialized = false;
+
+  std::string CurrentCachedSystemPrompt;
+  std::vector<int> CachedSystemTokens; // int to represent llama_token
 
   // Private constructor for Singleton / Lazy Load
   SLMEngine();
@@ -31,7 +36,12 @@ public:
   bool initialize(const std::string &modelPath);
 
   // Generates the suggestion based on the prompt.
-  std::string generateSuggestion(const std::string &prompt);
+  // The systemPrompt is evaluated and cached. If the systemPrompt matches the
+  // previously cached prompt, it reuses the KV cache for those tokens.
+  // If grammarStr is non-empty, grammar-constrained sampling is applied.
+  std::string generateSuggestion(const std::string &systemPrompt,
+                                 const std::string &userPrompt,
+                                 const std::string &grammarStr = "");
   void release();
 };
 

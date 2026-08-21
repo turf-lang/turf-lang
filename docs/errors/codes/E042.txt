@@ -1,0 +1,19 @@
+Turf has never heard of this type name anywhere
+
+This shows up whenever you write a type annotation -- on a variable, a function parameter, a return type, or a struct field -- and the type name you used doesn't match anything Turf knows about: not a struct or enum in your file, not one from any module you've imported, and not one of the built-in types like `int` or `string` either.
+
+Here's a struct declared correctly and then used correctly:
+
+    struct Point { x: int, y: int }
+    mut p: Point = Point::default();
+
+And here's the typo that trips this error:
+
+    mut p: Piont = Point::default();
+    // ERROR: Unknown type 'Piont'.
+
+As usual, if your typo is close to a real type name, Turf will suggest the one it thinks you meant.
+
+If it's not a typo, there are two other likely explanations. Maybe the struct or enum just hasn't been written yet -- double check you actually declared it somewhere in the file, above where you're using it. Or maybe it's meant to come from a module you haven't imported -- in that case, you'll usually see a slightly different, more specific error (about the type not being visible without qualification) instead of this one, which tells you exactly which module to import from.
+
+Once the name matches a real, in-scope struct, enum, or builtin type exactly, this error goes away.

@@ -1,0 +1,16 @@
+import test;
+
+struct L3 { val: int }
+struct L2 { l3: L3 }
+struct L1 { l2: L2 }
+
+fn main(): int {
+    mut matrix: L1 = L1::default();
+    
+    // Pratt parsing multidimensional AST depth (3 levels deep, same as [1][3][3])
+    matrix.l2.l3.val = 44;
+    
+    test::assert(matrix.l2.l3.val == 44, "Multidimensional Pratt parsing failed");
+    
+    return 0;
+}

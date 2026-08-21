@@ -1,0 +1,5 @@
+// Test: immutable must have initializer — no value = error
+fn main(): int {
+    immutable x: int;
+    return 0;
+}

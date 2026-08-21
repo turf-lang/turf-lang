@@ -1,0 +1,10 @@
+// mut c: char; (no initializer) should default to the zero byte,
+// exercising Codegen's GetDefaultValue() char branch.
+import test;
+
+fn main(): int {
+    mut c: char;
+    test::assert((c to int) == 0, "default-initialized char should be byte 0");
+
+    return 0;
+}

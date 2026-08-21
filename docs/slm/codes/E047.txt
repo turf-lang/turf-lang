@@ -1,0 +1,25 @@
+TURF E047 -- DEFAULT-CONSTRUCTOR ARGUMENT COUNT:
+
+CAUSE:
+  `StructName::default()` was called WITH arguments. `default()` is always
+  compiler-generated and always zero-argument -- it recursively
+  zero-initializes every field with no input of any kind, so there is
+  nothing for a passed-in argument to even do.
+
+CORRECT SYNTAX:
+    mut p: Point = Point::default();     // no arguments, ever
+
+INCORRECT:
+    mut p: Point = Point::default(1, 2);
+    // ERROR: 'Point::default()' takes no arguments, but got 2.
+
+WHAT THIS ERROR IS NOT:
+  - Not the general WrongArityError -- `default()` gets its own dedicated
+    error because it's not a user-declared function with overloads at all;
+    it always has exactly one valid call shape (zero arguments), so the
+    message can be more direct than "no overload accepts that many".
+
+FIX:
+  Remove the arguments from the `::default()` call. If you need to
+  initialize a struct WITH specific values, that's exactly what
+  `StructName::new(...)` is for -- use that instead.

@@ -1,0 +1,56 @@
+// Regression test: `struct Name {}` (zero fields) is a fully supported
+// declaration, not just something the parser happens to tolerate -- no
+// grammar or rule changes were needed for this; every existing code path
+// (parsing, registration, duplicate-name detection, construction,
+// uninitialized-declaration default-init, arrays, nesting as a field of
+// another struct, and both instance and static methods) already handled
+// it correctly once actually exercised. The main practical motivation:
+// a struct that exists ONLY to hold static methods (a "namespace" struct)
+// no longer needs a meaningless placeholder field just to satisfy the
+// parser -- see scope_static_method_basic.tr for that exact case.
+
+import io;
+
+import test;
+struct Empty {}
+
+struct Wrapper {
+    tag: Empty,
+    count: int
+}
+
+fn Wrapper.new(tag: Empty, count: int): void {
+    self.tag = tag;
+    self.count = count;
+}
+
+fn Empty.make() static: Empty {
+    return Empty::default();
+}
+
+fn Empty.describe(): string {
+    // A legitimate instance method on an empty struct: `self` is still a
+    // real, valid (non-null) pointer, it just never needs to read any
+    // field through it.
+    return "an empty struct instance";
+}
+
+fn main(): int {
+    mut e: Empty = Empty::default();
+    io::printline(e.describe());
+
+    // Uninitialized declaration -- must default-init cleanly (zero fields
+    // means GetDefaultValue()'s struct branch builds an empty
+    // llvm::ConstantStruct, not a crash or an assertion).
+    mut e2: Empty;
+
+    immut e3: Empty = Empty::make();
+
+    mut arr: Empty[3] = [Empty::default(), Empty::default(), Empty::default()];
+
+    mut w: Wrapper = Wrapper::new(Empty::default(), 5);
+    test::assert(w.count == 5, "empty struct as a field of another struct works");
+
+    io::printline("empty structs work in every position");
+    return 0;
+}

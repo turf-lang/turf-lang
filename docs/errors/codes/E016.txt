@@ -1,0 +1,30 @@
+You're binding an error that has nothing worth inspecting
+
+Turf's `recover as err run { ... }` exists so you can look at what actually went wrong -- `err` gives you access to the error's own data, so you can react differently depending on which kind of failure happened. But the function you called here can only ever fail with a "bare" error: one declared as just `error SomethingWentWrong;`, with no extra information attached at all. There's nothing on a bare error worth binding a name to and inspecting, so Turf stops you here instead of letting you write a check that can never actually tell you anything useful.
+
+Here's a bare error and a call that fails with it:
+
+    error GeneralError;
+
+    fn maybeFail(shouldFail: bool): !int {
+        if shouldFail {
+            return GeneralError::DEFAULT;
+        }
+        return 99;
+    }
+
+Since `GeneralError` is bare, you don't need (and can't use) `recover as err`:
+
+    fn main(): int {
+        return maybeFail(true) recover produce -1;
+    }
+
+And here's the version that trips this error:
+
+    fn main(): int {
+        return maybeFail(true) recover as err run {
+            return -1;
+        };
+    }
+
+The fix is simple: swap `recover as err run { ... }` for either `recover produce <value>` (just gives back a fallback value on failure) or `recover run { ... }` (runs some code on failure, without needing to inspect what went wrong). Save `recover as err` for functions that fail with a richer error type -- one that actually carries data worth looking at.

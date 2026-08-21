@@ -1,0 +1,8 @@
+// Companion module for fail_circular_import_two_module.tr -- imports
+// cycle_a_module back, closing the 2-module cycle. See cycle_a_module.tr's
+// doc comment for the full picture.
+import cycle_a_module;
+
+fn cycleB(): int {
+    return 2;
+}

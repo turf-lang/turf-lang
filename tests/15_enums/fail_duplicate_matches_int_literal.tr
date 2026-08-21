@@ -1,0 +1,20 @@
+// Regression test (was CODE_REVIEW_GAPS_2026-07.md gap #4): the same
+// duplicate-pattern rejection, but for an int-subject compare (not an
+// enum), since the underlying codegen risk (SwitchInst with two cases
+// sharing one value) applies identically to both.
+
+fn main(): int {
+    mut x: int = 5;
+    mut result: int = 0;
+    compare x {
+        matches 1:
+            result = 1;
+        done
+        matches 1:
+            result = 2;
+        done
+        otherwise:
+            result = 99;
+    }
+    return 0;
+}

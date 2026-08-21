@@ -1,0 +1,6 @@
+// Negative test: a char literal must contain exactly one character --
+// 'ab' is a lexer-level error, not a parser/typechecker one.
+fn main(): int {
+    mut c: char = 'ab';
+    return 0;
+}

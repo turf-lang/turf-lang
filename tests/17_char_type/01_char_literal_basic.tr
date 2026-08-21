@@ -1,0 +1,15 @@
+// char is a distinct 1-byte primitive (STRING_UFCS_OPERATOR_CHAR_RFC.md §3),
+// not sugar over int or string. Basic literal + equality/inequality.
+import test;
+
+fn main(): int {
+    mut a: char = 'a';
+    mut b: char = 'b';
+
+    test::assert(a == 'a', "char literal should equal itself");
+    test::assert(a != b, "distinct char literals should not be equal");
+    test::assert('z' == 'z', "bare literal equality");
+    test::assert(!('a' == 'b'), "distinct bare literals should not be equal");
+
+    return 0;
+}

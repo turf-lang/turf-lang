@@ -1,0 +1,15 @@
+// Regression test (Issue #185, CFG Phase 1): a `for` loop with a proper step
+// must NOT trigger an InfiniteLoopWarning. The for.cond block has an edge to
+// for.end (outside the cycle), satisfying the natural-exit check.
+// Also verifies the loop executes correctly (behavioral regression).
+
+import test;
+
+fn main(): int {
+    mut total: int = 0;
+    for i in 1..5 step i += 1 {
+        total = total + i;
+    }
+    test::assert(total == 10, "1+2+3+4 = 10");
+    return 0;
+}

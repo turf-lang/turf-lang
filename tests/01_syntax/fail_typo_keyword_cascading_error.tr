@@ -1,0 +1,28 @@
+// Regression test: a typo'd keyword whose condition is parenthesized (so it
+// parses as an expression-statement call, e.g. `iff(5 > 3)`, rather than
+// hitting the "I don't know the word 'iff'" keyword-typo path some other
+// shapes take -- see fail_bad_keyword.tr for that one) must fail with a
+// single, clean error, not cascade into a second, unrelated, confusing
+// error.
+//
+// Before the fix, this produced TWO errors: the real one below, AND a
+// bogus "Statements are not allowed outside of a function" -- because
+// ParseExpression() for the whole `fn main()...` returned nullptr
+// NORMALLY (not via longjmp) after the nested body-parse failure, and
+// main.cpp's top-level recovery loop had no handling for that case: it
+// fell straight through with CurTok left mid-parse (partway through the
+// malformed function's own body, not at a clean top-level boundary), and
+// the leftover tokens (the rest of the body, its closing '}', etc.) got
+// misread as new top-level content on the next loop iteration.
+//
+// This file only verifies the compile fails (test_runner.sh's fail_*.tr
+// convention checks exit code, not error count/content) -- to confirm the
+// cascading second error is actually gone, run this file directly and
+// inspect stderr: it should show exactly ONE error block, not two.
+
+fn main(): int {
+    iff (5 > 3) {
+        io::printline("hi");
+    }
+    return 0;
+}

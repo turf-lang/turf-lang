@@ -1,0 +1,57 @@
+// Stack<T> — LIFO (Last In, First Out) collection.
+// Usage:
+//   import stack::Stack;   // (or `import stack;` + spell it `stack::Stack<int>` below)
+//   mut s: Stack<int>;   // default-initialized -- no need to write out the fields
+//   s.push(1)  s.pop()  s.peek()  s.length()
+
+import mem;
+import sys;
+
+struct Stack<T> {
+  data: T*,
+  len: int,
+  cap: int
+}
+
+fn<T> Stack.push(item: T): void {
+  if (self.len == self.cap) {
+    if (self.cap == 0) {
+      self.cap = 8;
+    } else {
+      self.cap = self.cap * 2;
+    }
+
+    // Type Erasure: all T are 64-bit values (int, double, pointers)
+    immutable byteSize: int = self.cap * 8;
+
+    if (self.data == null) {
+      self.data = mem::malloc(byteSize) to T*;
+    } else {
+      self.data = mem::realloc(self.data, byteSize) to T*;
+    }
+  }
+
+  self.data[self.len] = item;
+  self.len = self.len + 1;
+}
+
+fn<T> Stack.pop(): T {
+  if (self.len == 0) {
+    sys::panic("Stack.pop: pop on empty stack");
+  }
+
+  self.len = self.len - 1;
+  return self.data[self.len];
+}
+
+fn<T> Stack.peek(): T {
+  if (self.len == 0) {
+    sys::panic("Stack.peek: peek on empty stack");
+  }
+
+  return self.data[self.len - 1];
+}
+
+fn<T> Stack.length(): int {
+  return self.len;
+}

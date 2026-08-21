@@ -1,0 +1,17 @@
+// Regression test: an enum declared INSIDE an imported module must be
+// hoisted and usable from the importing file, just like a struct declared
+// inside a module already was. See enum_in_module.tr for the companion
+// module and Resolver.cpp's hoistModuleBody() for the fix (it previously had
+// no EnumDeclExprAST branch at all).
+
+import io;
+import enum_in_module::Status;
+
+import test;
+fn main(): int {
+    immut s: Status = Status::Failed;
+    immut code: int = enum_in_module::describe(s);
+    test::assert(code == 2, "describe(Status::Failed) should return 2");
+    io::printline("ok");
+    return 0;
+}

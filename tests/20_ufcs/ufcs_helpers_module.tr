@@ -1,0 +1,5 @@
+// Companion module (no main()) -- named *_module.tr so scripts/test_runner.sh
+// skips it as a standalone test.
+fn triple(x: int): int {
+    return x * 3;
+}

@@ -1,0 +1,12 @@
+// Issue #187 acceptance criterion: "Passing a function with the wrong
+// signature emits a TypeChecker error."
+fn apply(f: fn(int): int, x: int): int {
+    return f(x);
+}
+
+fn stringify(n: double): string { return "x"; }
+
+fn main(): int {
+    mutable result: int = apply(stringify, 5);
+    return 0;
+}

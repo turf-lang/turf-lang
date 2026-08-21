@@ -1,0 +1,49 @@
+TURF E011 -- SEMANTIC ERROR (GENERAL CATCH-ALL):
+
+CAUSE:
+  A genuine catch-all for semantic mistakes that don't fit any other
+  specific error class. The message text varies by call site since this
+  class just wraps an arbitrary explanation string -- but the real,
+  user-triggerable cases seen in practice are all specific rule
+  violations, not vague failures:
+
+  1. Calling `main()` directly as an ordinary function call -- `main` is
+     the program's entry point, not a function you invoke yourself.
+  2. Declaring `main` WITH parameters (`fn main(x: int): int`) -- `main`
+     always has the implicit C-ABI signature and can't declare its own.
+  3. A `matches` arm pattern inside `compare`/`matches` that isn't a
+     compile-time integer constant.
+  4. Declaring two functions with the identical name in the same scope
+     (a plain duplicate-function-definition, distinct from
+     DuplicateDeclarationError E033, which is about variables).
+
+CORRECT:
+    fn main(): int {
+        return 0;
+    }
+
+    fn helper(): int {
+        return 1;
+    }
+
+    mut result: int = helper();   // call ordinary functions, not main
+
+INCORRECT:
+    fn main(x: int): int {   // ERROR: main can't declare parameters
+        return 0;
+    }
+
+    main();   // ERROR: main can't be called directly
+
+WHAT THIS ERROR IS NOT:
+  A message beginning with "Internal error: ..." under this same code
+  is NOT a user mistake -- it's this class also being reused internally
+  as a defensive fallback for states the compiler itself doesn't expect
+  to reach (a genuine compiler bug, not something wrong with your code).
+  If you see that specific wording, it's worth reporting as a bug rather
+  than trying to "fix" your source.
+
+FIX:
+  Read the specific message text -- it names the exact rule broken.
+  For the main()-related cases, remove the parameters from `main`'s
+  declaration and never call `main()` yourself; the runtime calls it.

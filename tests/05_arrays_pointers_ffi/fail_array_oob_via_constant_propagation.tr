@@ -1,0 +1,29 @@
+// Regression test: ValueRangePass must reject an array access indexed by a
+// LOCAL VARIABLE whose value is provably a constant out-of-bounds index --
+// not just a literal index (see the pre-existing fail_array_out_of_bounds.tr,
+// which only covers `arr[3]` written directly as a literal).
+//
+// Root cause: ValueRangePass::runOnCFG() resolved variables via
+// GlobalSymbolTable->LookupSymbol(name) -- a lookup against the SymbolTable's
+// *current* scope stack. This pass runs inside FuncDefExprAST::codegen()
+// AFTER Body->codegen() has already fully executed, and BlockExprAST::codegen()
+// unconditionally EnterScope()s/ExitScope()s around its statements -- including
+// the function's own top-level body block. By the time ValueRangePass ran,
+// that scope (and every local declared in it, e.g. `i` below) had already been
+// popped, so LookupSymbol("i") always returned nullptr and constant tracking
+// was silently a no-op for every local in the function: `mut i: int = 5;
+// arr[i]` compiled with zero diagnostics and only failed at RUNTIME via the
+// separate, existing bounds-check codegen path. Fixed by keying the pass's
+// constant map on VariableExprAST/VarDeclExprAST's ResolvedSymbol (a
+// VariableSymbol* set once by the Resolver and owned by the AST node itself,
+// independent of the SymbolTable's scope-stack timing) -- the same fix
+// already applied to DefiniteAssignmentPass, see Analysis.cpp.
+
+import io;
+
+fn main(): int {
+    mut arr: int[3] = [10, 20, 30];
+    mut i: int = 5;
+    io::printline(arr[i]);
+    return 0;
+}

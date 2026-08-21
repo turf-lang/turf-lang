@@ -1,0 +1,32 @@
+TURF E049 -- INCOMPLETE CONSTRUCTOR:
+
+CAUSE:
+  A `.new` constructor doesn't assign every field of its struct on EVERY
+  possible path through the function -- a real, control-flow-sensitive
+  definite-assignment check, not just "never assigned anywhere at all". A
+  field set in only one branch of an if/else, or only before some early
+  returns and not others, still triggers this. The error message names
+  every field that was missed on at least one path.
+
+CORRECT SYNTAX:
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        self.y = y;     // BOTH fields assigned, unconditionally
+    }
+
+INCORRECT:
+    fn Point.new(x: int, y: int): void {
+        self.x = x;
+        if x > 0 {
+            self.y = y;   // only assigned on ONE branch
+        }
+        // ERROR: 'Point.new' doesn't assign every field on all paths.
+        //   Not definitely assigned on every path: y
+    }
+
+FIX:
+  Make sure every field is assigned on every path through `.new`,
+  including inside every branch of every if/else and before any early
+  return. If a field's value genuinely depends on a condition, assign it
+  in BOTH branches (even if one branch just assigns a sensible default),
+  rather than leaving a path where it's skipped entirely.

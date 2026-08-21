@@ -1,0 +1,39 @@
+import io;
+
+import test;
+fn main(): int {
+    mut x: int = 2;
+    mut result: int = 0;
+
+    compare x {
+        matches 1:
+            result = 10;
+        done
+
+        matches 2:
+            result = 20;
+        done
+
+        matches 3:
+            result = 30;
+        done
+
+        otherwise:
+            result = 99;
+    }
+
+    test::assert(result == 20, "compare single-value arm failed");
+
+    mut y: int = 7;
+    mut result2: int = 0;
+    compare y {
+        matches 1:
+            result2 = 1;
+        done
+        otherwise:
+            result2 = 100;
+    }
+    test::assert(result2 == 100, "compare otherwise arm failed");
+
+    return 0;
+}

@@ -1,0 +1,31 @@
+TURF E057 -- ARITHMETIC ERROR:
+
+CAUSE:
+  A math operation (`+ - * / % **` etc.) was used on operand types that
+  can't be combined that way -- most commonly, one side is not a number at
+  all (e.g. a `string` or `bool`), or a division/modulo has a
+  compile-time-known divisor of zero.
+
+CORRECT USAGE:
+    mut sum: int = 3 + 4;
+    mut avg: double = 7.0 / 2.0;
+
+INCORRECT:
+    mut bad: int = 3 + "4";
+    // ERROR: Math trouble! <details on the specific type clash>
+
+    mut boom: int = 10 / 0;
+    // ERROR: Math trouble! <division by a literal zero>
+
+WHAT THIS ERROR IS NOT:
+  - Not TypeError (E066) or ArgumentTypeError (E056) -- those are about
+    general value/parameter type mismatches; this one is specifically
+    about an arithmetic OPERATOR applied to operands it can't work with.
+  - A division by a NON-literal (computed) zero is not caught here at
+    compile time -- only a literal `/ 0` or `% 0` is.
+
+FIX:
+  Make sure both operands of a math operator are actually numeric (`int`
+  or `double`), and that a division/modulo's divisor isn't a literal zero.
+  If you're combining two different numeric types, an explicit cast (e.g.
+  `int(x)` / `double(x)`) may be needed depending on the operation.

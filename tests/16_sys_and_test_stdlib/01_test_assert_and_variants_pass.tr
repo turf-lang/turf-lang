@@ -1,0 +1,38 @@
+// Regression test: lib/std/test.tr's assert/assert_eq/assert_neq -- every
+// passing-case overload actually passes (i.e. does NOT abort) for each of
+// int/double/bool/string, both the 2-arg (default message) and 3-arg
+// (custom message) forms.
+import test;
+
+fn main(): int {
+    // assert
+    test::assert(true);
+    test::assert(1 + 1 == 2);
+    test::assert(1 + 1 == 2, "math should work");
+
+    // assert_eq / assert_neq: int
+    test::assert_eq(5, 5);
+    test::assert_eq(5, 5, "fives should match");
+    test::assert_neq(5, 6);
+    test::assert_neq(5, 6, "five should not equal six");
+
+    // assert_eq / assert_neq: double
+    test::assert_eq(3.14, 3.14);
+    test::assert_eq(3.14, 3.14, "pi-ish should match");
+    test::assert_neq(3.14, 2.71);
+    test::assert_neq(3.14, 2.71, "pi should not equal e");
+
+    // assert_eq / assert_neq: bool
+    test::assert_eq(true, true);
+    test::assert_eq(false, false, "false should equal false");
+    test::assert_neq(true, false);
+    test::assert_neq(true, false, "true should not equal false");
+
+    // assert_eq / assert_neq: string
+    test::assert_eq("hi", "hi");
+    test::assert_eq("hi", "hi", "greeting should match");
+    test::assert_neq("hi", "bye");
+    test::assert_neq("hi", "bye", "greeting should not match farewell");
+
+    return 0;
+}

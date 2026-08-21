@@ -1,0 +1,32 @@
+import io;
+
+import test;
+fn main(): int {
+    mut s: string = "hello";
+    mut result: int = 0;
+
+    compare s {
+        matches "hello":
+            result = 1;
+        done
+        matches "world":
+            result = 2;
+        done
+        otherwise:
+            result = 3;
+    }
+    test::assert(result == 1, "compare string: 'hello' should match first arm");
+
+    mut s2: string = "other";
+    mut result2: int = 0;
+    compare s2 {
+        matches "hello":
+            result2 = 1;
+        done
+        otherwise:
+            result2 = 99;
+    }
+    test::assert(result2 == 99, "compare string: 'other' should hit otherwise");
+
+    return 0;
+}

@@ -1,0 +1,8 @@
+// Test (fail): No implicit int -> enum assignment without cast
+// Should fail with type mismatch error
+enum Direction { North, East, South, West }
+
+fn main(): int {
+    mut d: Direction = 3;
+    return 0;
+}

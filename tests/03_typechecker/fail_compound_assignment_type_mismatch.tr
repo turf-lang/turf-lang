@@ -1,0 +1,5 @@
+fn main(): int {
+    mut x: int = 5;
+    x += "hello";
+    return 0;
+}

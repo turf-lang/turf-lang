@@ -1,0 +1,39 @@
+TURF E044 -- WRONG ARITY (ARGUMENT COUNT):
+
+CAUSE:
+  A function (free function, struct method, or module function) exists
+  under the name used, but none of its overloads accept the number of
+  arguments the call site passed. This is purely about ARGUMENT COUNT --
+  the name resolved fine, and this is a different mistake from calling a
+  name that doesn't exist at all (that's UnknownFunctionError/
+  StructMethodNotFoundError/ModuleMethodNotFoundError instead).
+
+  The error message lists every known overload's real signature, so the
+  fix is almost always visible directly in the error output.
+
+CORRECT SYNTAX (example):
+    fn add(a: int, b: int): int {
+        return a + b;
+    }
+
+    add(2, 3);        // correct -- 2 arguments
+
+INCORRECT:
+    add(2, 3, 4);
+    // ERROR: 'add' was called with 3 arguments, but no overload accepts
+    //        that many.
+    //   Known overloads:
+    //     fn add(int, int): int
+
+WHAT THIS ERROR IS NOT:
+  - If the call is through '.' on a struct instance and the target method
+    is declared `static`, the real problem may be an invisible implicit
+    `self` argument being counted against you -- that's
+    StaticMethodCalledOnInstanceError instead, which explains the mismatch
+    directly rather than just reporting a raw count.
+
+FIX:
+  Check the "Known overloads" list printed with the error and match the
+  argument count exactly. If the function is meant to take a different
+  number of arguments than it currently does, the fix is in the function's
+  own declaration, not the call site.

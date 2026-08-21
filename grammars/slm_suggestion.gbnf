@@ -1,0 +1,65 @@
+# GBNF grammar for SLM suggestion JSON output.
+# Constrains the model to emit a well-formed JSON object with exactly the six
+# required fields in order, and token-constrains fix_mode to only "MODIFY" or
+# "NONE" — it is physically impossible for the model to emit any other value.
+#
+# Field order is fixed; update this file if the prompt schema changes.
+#
+# IMPORTANT -- multi-line rule bodies MUST be wrapped in parentheses.
+# llama.cpp's GBNF parser does NOT support bare line-continuation: a rule
+# body that spans multiple lines without an enclosing "(" ... ")" is parsed
+# as ending at the first newline, and the next line is then parsed as if it
+# were the start of a brand-new rule definition -- which fails immediately
+# with "error parsing grammar: expecting name at ...". This exact mistake
+# previously left BOTH the `root` and `category` rules below silently
+# unparseable for an unknown period: llama_sampler_init_grammar() returned
+# nullptr on every call, degrading every --smart invocation to fully
+# unconstrained generation, and the failure warning was itself swallowed by
+# SLMEngine.cpp's own stderr-suppression (see its doc comment) -- so this
+# had zero visible symptoms beyond the model occasionally emitting
+# unquoted enum values (e.g. `"fix_mode": MODIFY`) that failed to parse and
+# silently downgraded to fix_mode=NONE. See llama.cpp's own
+# grammars/json.gbnf for the canonical parenthesized multi-line style this
+# file now follows.
+
+root ::= "{" ws (
+         "\"explanation\":"      ws string "," ws
+         "\"fix_mode\":"         ws fix-mode "," ws
+         "\"suggested_comment\":" ws string "," ws
+         "\"code_patch\":"       ws string "," ws
+         "\"replacement_line\":" ws string "," ws
+         "\"target_line\":"      ws integer "," ws
+         "\"end_line\":"         ws integer "," ws
+         "\"warning\":"          ws string "," ws
+         "\"category\":"         ws category
+         ) ws "}"
+
+fix-mode ::= "\"MODIFY\"" | "\"NONE\""
+
+# target_line: 0 means "same line the error was raised on" (the common
+# case). Any other positive value means "apply replacement_line at this line
+# instead" -- used when the correct fix targets a declaration/related site
+# shown in the prompt's context rather than the line the diagnostic fired
+# on (e.g. a use-before-init error, where the error fires at the *use* but
+# the fix belongs at the *declaration*).
+#
+# end_line: 0 means "just target_line" (a single-line edit, the common
+# case). A value greater than target_line means replacement_line replaces
+# the whole [target_line, end_line] range instead of one line -- used when
+# a fix genuinely requires editing more than one existing line (e.g.
+# wrapping a statement in a new loop).
+integer ::= "0" | [1-9] [0-9]*
+
+category ::= ("\"TYPE_MISMATCH\""       | "\"UNDECLARED_VARIABLE\""
+           | "\"CONTROL_FLOW\""        | "\"SYNTAX_ERROR\""
+           | "\"ARITHMETIC\""          | "\"STRING_CONVERSION\""
+           | "\"ARRAY_ERROR\""         | "\"DECLARATION\""
+           | "\"FUNCTION_SIGNATURE\""  | "\"BUILTIN_FUNCTION\""
+           | "\"MEMORY_ERROR\""        | "\"GENERAL\"")
+
+# JSON string: any characters except raw " or \, or a valid escape sequence.
+string ::= "\"" string-char* "\""
+string-char ::= [^"\\\x00-\x1f] | "\\" escape
+escape ::= ["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]
+
+ws ::= [ \t\n\r]*

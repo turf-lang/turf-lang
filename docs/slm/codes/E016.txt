@@ -1,0 +1,48 @@
+TURF E016 -- BARE ERROR AS BINDING:
+
+CAUSE:
+  `recover as err run { ... }` was used on a call whose only possible
+  failure(s) are BARE `error Name;` declarations (the sugar form with a
+  single, informationless DEFAULT variant). A bare error carries nothing to
+  inspect -- there's no data or variant to distinguish inside the recover
+  block -- so binding it to a name (`as err`) and presumably checking `err`
+  against something is pointless.
+
+  Determined by scanning the callee's own `return` statements for which
+  declared error types it can actually produce.
+
+CORRECT USAGE:
+    error GeneralError;
+
+    fn maybeFail(shouldFail: bool): !int {
+        if shouldFail {
+            return GeneralError::DEFAULT;
+        }
+        return 99;
+    }
+
+    fn main(): int {
+        // Correct: no binding needed since GeneralError is bare.
+        return maybeFail(true) recover produce -1;
+    }
+
+INCORRECT:
+    fn main(): int {
+        return maybeFail(true) recover as err run {
+            // ERROR: 'recover as err run' can't be used here -- every
+            // error this call can fail with is a bare 'error Name;'
+            // declaration.
+            return -1;
+        };
+    }
+
+WHAT THIS ERROR IS NOT:
+  - Not about `recover as err` being wrong in general -- it's the right
+    tool when a call can fail with a RICH error type (one with fields/data
+    to inspect on `err`). It's only wrong here because every possible error
+    is bare.
+
+FIX:
+  Use `recover run { ... }` (no binding, for side-effecting recovery logic)
+  or `recover produce <value>` (a plain fallback value) instead of
+  `recover as err run { ... }`.

@@ -26,8 +26,13 @@
 #include "ASTVisitor.h"
 #include "TypeChecker.h"
 
+#include <cctype>
 #include <iostream>
 #include <string>
+
+// OpToDisplayString() now lives in Lexer.h (promoted there once
+// TypeChecker.cpp needed the identical fix for its own diagnostics) --
+// transitively available here via AST.h's include of Lexer.h.
 
 class ASTPrinter : public ASTVisitor {
 public:
@@ -66,6 +71,13 @@ public:
     std::cout << "\n";
   }
 
+  void visitChar(CharExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "CharExpr('" << N.getVal() << "')";
+    printTypeBadge(&N);
+    std::cout << "\n";
+  }
+
   void visitString(StringExprAST &N) override {
     printIndent(Depth_);
     std::cout << "StringExpr(\"" << N.getValue() << "\")";
@@ -76,6 +88,13 @@ public:
   void visitNull(NullExprAST &N) override {
     printIndent(Depth_);
     std::cout << "NullExpr";
+    printTypeBadge(&N);
+    std::cout << "\n";
+  }
+
+  void visitDefaultInit(DefaultInitExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "DefaultInit(" << (N.getTypePtr() ? N.getTypePtr()->getName() : "?") << ")";
     printTypeBadge(&N);
     std::cout << "\n";
   }
@@ -109,7 +128,7 @@ public:
   // ── Expressions ─────────────────────────────────────────────────────────────
   void visitBinary(BinaryExprAST &N) override {
     printIndent(Depth_);
-    std::cout << "BinaryExpr(op='" << static_cast<char>(N.getOp()) << "')";
+    std::cout << "BinaryExpr(op='" << OpToDisplayString(N.getOp()) << "')";
     printTypeBadge(&N);
     std::cout << "\n";
     descend();
@@ -120,7 +139,7 @@ public:
 
   void visitUnary(UnaryExprAST &N) override {
     printIndent(Depth_);
-    std::cout << "UnaryExpr(op='" << static_cast<char>(N.getOpcode()) << "')\n";
+    std::cout << "UnaryExpr(op='" << OpToDisplayString(N.getOpcode()) << "')\n";
     descend();
     print(const_cast<ExprAST *>(N.getOperand()), Depth_);
     ascend();
@@ -139,6 +158,28 @@ public:
     printIndent(Depth_);
     std::cout << "CastExpr(to:"
               << (N.getDestType() ? N.getDestType()->getName() : "?") << ")\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getOperand()), Depth_);
+    ascend();
+  }
+
+  void visitCompoundAssignment(CompoundAssignmentExprAST &N) override {
+    printIndent(Depth_);
+    // OpToDisplayString(), not a raw (char) cast: the opcode can now be a
+    // multi-char operator (&=, <<=, **=, ...) encoded as a negative token
+    // constant, which a bare char cast renders as garbage (see its doc
+    // comment in Lexer.h for the identical bug this already caused for
+    // BinaryExprAST's own dump output).
+    std::cout << "CompoundAssignmentExpr(op:'" << OpToDisplayString(N.getOpcode()) << "=')\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getLHS()), Depth_);
+    print(const_cast<ExprAST *>(N.getRHS()), Depth_);
+    ascend();
+  }
+
+  void visitPostfixExpr(PostfixExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "PostfixExpr(op:'" << (char)N.getOpcode() << "')\n";
     descend();
     print(const_cast<ExprAST *>(N.getOperand()), Depth_);
     ascend();
@@ -185,6 +226,15 @@ public:
     ascend();
   }
 
+  void visitDoWhile(DoWhileExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "DoWhileExpr\n";
+    descend();
+    print(N.getBody(), Depth_);
+    print(const_cast<ExprAST *>(N.getCond()), Depth_);
+    ascend();
+  }
+
   void visitFor(ForExprAST &N) override {
     printIndent(Depth_);
     std::cout << "ForExpr(var=" << N.getVarName() << ")";
@@ -195,6 +245,20 @@ public:
     print(const_cast<ExprAST *>(N.getEnd()), Depth_);
     if (N.getStep())
       print(const_cast<ExprAST *>(N.getStep()), Depth_);
+    print(N.getBody(), Depth_);
+    ascend();
+  }
+
+  void visitForEach(ForEachExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "ForEachExpr(value=" << N.getValueVarName();
+    if (N.hasIndexVar())
+      std::cout << ", index=" << N.getIndexVarName();
+    std::cout << ")";
+    printResolvedBadge(N.ResolvedValueVar.get());
+    std::cout << "\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getIterable()), Depth_);
     print(N.getBody(), Depth_);
     ascend();
   }
@@ -221,22 +285,37 @@ public:
     }
   }
 
-  void visitRaise(RaiseExprAST &N) override {
+  void visitCompare(CompareExprAST &N) override {
     printIndent(Depth_);
-    std::cout << "RaiseExpr\n";
-    if (N.getPayload()) {
+    std::cout << "CompareExpr(" << N.getArms().size() << " arms"
+              << (N.getOtherBody() ? ", otherwise" : "") << ")\n";
+    descend();
+    printIndent(Depth_);
+    std::cout << "Subject:\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getSubject()), Depth_);
+    ascend();
+    for (size_t i = 0; i < N.getArms().size(); ++i) {
+      const auto &Arm = N.getArms()[i];
+      printIndent(Depth_);
+      std::cout << "Arm[" << i << "] (" << Arm.Values.size() << " pattern(s)):\n";
       descend();
-      print(const_cast<ExprAST *>(N.getPayload()), Depth_);
+      for (const auto &V : Arm.Values)
+        print(const_cast<ExprAST *>(V.get()), Depth_);
+      printIndent(Depth_);
+      std::cout << "Body:\n";
+      descend();
+      print(Arm.Body.get(), Depth_);
+      ascend();
       ascend();
     }
-  }
-
-  void visitTry(TryExprAST &N) override {
-    printIndent(Depth_);
-    std::cout << "TryExpr(payload=" << N.getPayloadName() << ")\n";
-    descend();
-    print(const_cast<ExprAST *>(N.getTryBlock()), Depth_);
-    print(const_cast<ExprAST *>(N.getCatchBlock()), Depth_);
+    if (N.getOtherBody()) {
+      printIndent(Depth_);
+      std::cout << "Otherwise:\n";
+      descend();
+      print(const_cast<ExprAST *>(N.getOtherBody()), Depth_);
+      ascend();
+    }
     ascend();
   }
 
@@ -300,16 +379,6 @@ public:
     ascend();
   }
 
-  void visitStructInit(StructInitExprAST &N) override {
-    printIndent(Depth_);
-    std::cout << "StructInit(" << N.getName()
-              << ", args=" << N.getArgs().size() << ")\n";
-    descend();
-    for (const auto &Arg : N.getArgs())
-      print(Arg.get(), Depth_);
-    ascend();
-  }
-
   void visitFieldAccess(FieldAccessExprAST &N) override {
     printIndent(Depth_);
     std::cout << "FieldAccess(." << N.getFieldName() << ")\n";
@@ -331,7 +400,23 @@ public:
       for (const auto &Init : N.getInitList())
         print(Init.get(), Depth_);
       ascend();
+    } else if (N.getInitExpr()) {
+      descend();
+      print(N.getInitExpr().get(), Depth_);
+      ascend();
     }
+  }
+
+  void visitArrayLiteral(ArrayLiteralExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "ArrayLiteral(size=" << N.getElements().size() << ")";
+    printTypeBadge(&N);
+    std::cout << "\n";
+    descend();
+    for (const auto &E : N.getElements()) {
+      print(const_cast<ExprAST *>(E.get()), Depth_);
+    }
+    ascend();
   }
 
   void visitArrayAccess(ArrayAccessExprAST &N) override {
@@ -342,21 +427,6 @@ public:
     print(const_cast<ExprAST *>(N.getIndex()), Depth_);
     ascend();
   }
-
-  void visitArrayAssign(ArrayAssignExprAST &N) override {
-    printIndent(Depth_);
-    std::cout << "ArrayAssign(" << N.getName() << ")\n";
-    descend();
-    print(const_cast<ExprAST *>(N.getIndex()), Depth_);
-    print(const_cast<ExprAST *>(N.getRHS()), Depth_);
-    ascend();
-  }
-
-  void visitArrayLength(ArrayLengthExprAST &N) override {
-    printIndent(Depth_);
-    std::cout << "ArrayLength(" << N.getName() << ")\n";
-  }
-
   // ── Modules & misc ───────────────────────────────────────────────────────────
   void visitModuleImport(ModuleImportExprAST &N) override {
     printIndent(Depth_);

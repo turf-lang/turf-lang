@@ -1,0 +1,8 @@
+fn foo(n: int): int {
+    return n;
+}
+
+fn main(): int {
+    foo(null);
+    return 0;
+}

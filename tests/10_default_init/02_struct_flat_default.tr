@@ -1,0 +1,15 @@
+// Test: struct declared without init — must be zero-initialized
+import io;
+
+import test;
+struct Config {
+    retries: int,
+    timeout: int
+}
+
+fn main(): int {
+    mut cfg: Config;
+    test::assert(cfg.retries == 0, "Config.retries default 0");
+    test::assert(cfg.timeout == 0, "Config.timeout default 0");
+    return 0;
+}

@@ -1,0 +1,590 @@
+// ─── json.tr ─────────────────────────────────────────────────────────────
+// A small, hand-rolled JSON parser/serializer for TurfLang.
+//
+// Design:
+//   - Deliberately NOT a binding over an external C JSON library (cjson/
+//     json-c/jansson/...) via `extern fn` -- docs/planning/DESIGN_NOTES.md
+//     §4 originally sketched exactly that ("wrap cJSON via FFI"), but that
+//     would make any Turf program that does `import json;` fail to LINK on
+//     a machine that doesn't happen to have that specific shared library
+//     installed, which defeats "batteries included, works out of the box"
+//     for a language runtime. This file is pure Turf, using only the
+//     stdlib's own `strings`/`list`/`mem`/`sys` modules -- it always
+//     builds, everywhere this compiler already runs.
+//   - `JsonValue` is a tagged union in spirit, `struct` in practice --
+//     this language has no real tagged-union/`enum`-with-payload type, so
+//     it's one `JsonType` tag field plus one field per variant
+//     (`bool_val`/`num_val`/`str_val`/`arr_val`/`obj_keys`+`obj_vals`),
+//     exactly the shape sketched in DESIGN_NOTES.md. Only the field(s)
+//     matching `.kind` are meaningful at any given time; the rest sit at
+//     their zero value.
+//   - Objects use TWO PARALLEL LISTS (`obj_keys: List<string>`,
+//     `obj_vals: List<JsonValue*>`) rather than `Map<string, JsonValue>`.
+//     `Map<string, string>` as a plain struct field genuinely works now
+//     (see http.tr's `Request.headers` and the monomorphization fix in
+//     this same commit) -- but `Map<string, JsonValue>` would additionally
+//     need `JsonValue` (the very struct being declared) to fit in a
+//     generic collection's single type-erased 8-byte slot, and JsonValue
+//     is far bigger than 8 bytes (a double, a string pointer, three
+//     List<T> fields, ...). Confirmed live: `List<JsonValue>` (by value)
+//     compiles the STRUCT fine but fails at any `.push()` call site with
+//     an "Invalid bitcast %JsonValue ... to ptr" internal error -- this is
+//     the exact, already-documented `List<T*>` workaround for structs over
+//     8 bytes in a generic slot (see list.tr's own comment on
+//     `List.sort`/`binary_search`'s int-only caveat for the same root
+//     cause: type erasure assumes one 64-bit slot per element). Every
+//     array element / object value is therefore individually
+//     heap-allocated (`mem::alloc(sizeof(JsonValue))`) and stored as a
+//     `JsonValue*`, mirroring exactly how `struct Node { next: Node* }`
+//     already has to work in this language (tests/06_structs/
+//     15_struct_heap.tr) -- never freed (no GC yet, same accepted
+//     small-leak tradeoff `strings.tr`'s `operator +` already documents
+//     via its own TURF-MEMLEAK comment).
+//   - `obj_keys`/`obj_vals` lookup is a LINEAR SCAN, matching map.tr's own
+//     "small collections, correctness over cleverness" tradeoff (no
+//     generic `hash(T)` in the language yet either way).
+//   - Documented, deliberate parsing gaps (not attempted -- real, honest
+//     limitations, not silently wrong output): `\uXXXX` unicode escapes in
+//     strings (an unrecognized escape is appended literally instead, e.g.
+//     `\u` becomes the two characters `u`... note the backslash itself is
+//     simply dropped for an unrecognized escape); a number's exponent part
+//     (`1e10`) is consumed/accepted syntactically so it doesn't break
+//     parsing of the REST of the document, but `strings::parse_double`
+//     doesn't understand exponents, so its numeric VALUE comes out wrong
+//     (parsed as if the exponent text weren't there). Both are single,
+//     narrow, documented gaps -- objects, arrays, strings, ints, decimals,
+//     true/false/null, and arbitrary nesting are all fully, correctly
+//     handled.
+//
+// Usage:
+//   import json;
+//
+//   immut parsed: json::JsonValue = json::parse(text) recover as err run {
+//       io::printline("bad json");
+//       return;
+//   };
+//   immut name: string = parsed.get_string("name");
+//
+//   mut obj: json::JsonValue = json::JsonValue::new_object();
+//   obj.set("status", json::JsonValue::from_string("ok"));
+//   obj.set("count", json::JsonValue::from_number(3.0));
+//   immut text: string = json::stringify(obj);
+
+import io;
+import sys;
+import strings;
+import list::List;
+import mem;
+
+// ─── JsonValue ───────────────────────────────────────────────────────────
+
+enum JsonType {
+    Null,
+    Bool,
+    Number,
+    String,
+    Array,
+    Object
+}
+
+struct JsonValue {
+    kind: JsonType,
+    bool_val: bool,
+    num_val: double,
+    str_val: string,
+    arr_val: List<JsonValue*>,
+    obj_keys: List<string>,
+    obj_vals: List<JsonValue*>
+}
+
+// ─── constructors ──────────────────────────────────────────────────────────
+
+fn JsonValue.null_value() static: JsonValue {
+    mut v: JsonValue;
+    v.kind = JsonType::Null;
+    return v;
+}
+
+fn JsonValue.from_bool(b: bool) static: JsonValue {
+    mut v: JsonValue;
+    v.kind = JsonType::Bool;
+    v.bool_val = b;
+    return v;
+}
+
+fn JsonValue.from_number(n: double) static: JsonValue {
+    mut v: JsonValue;
+    v.kind = JsonType::Number;
+    v.num_val = n;
+    return v;
+}
+
+fn JsonValue.from_string(s: string) static: JsonValue {
+    mut v: JsonValue;
+    v.kind = JsonType::String;
+    v.str_val = s;
+    return v;
+}
+
+fn JsonValue.new_array() static: JsonValue {
+    mut v: JsonValue;
+    v.kind = JsonType::Array;
+    return v;
+}
+
+fn JsonValue.new_object() static: JsonValue {
+    mut v: JsonValue;
+    v.kind = JsonType::Object;
+    return v;
+}
+
+// ─── mutators (building a value to stringify) ───────────────────────────────
+
+// Appends `item` to an Array-kind value. Heap-boxes `item` (see this
+// file's header comment on the List<T*> workaround) -- the box is never
+// freed, an accepted small leak, same tradeoff as string `+`.
+fn JsonValue.push(item: JsonValue): void {
+    mut boxed: JsonValue* = mem::alloc(sizeof(JsonValue)) to JsonValue*;
+    boxed[0] = item;
+    self.arr_val.push(boxed);
+}
+
+// Sets `key` to `value` on an Object-kind value, replacing any existing
+// value for the same key (linear scan, same tradeoff as map.tr's Map.put).
+fn JsonValue.set(key: string, value: JsonValue): void {
+    mut idx: int = 0 - 1;
+    mut i: int = 0;
+    while i < self.obj_keys.length() {
+        if self.obj_keys.data[i] == key {
+            idx = i;
+        }
+        i = i + 1;
+    }
+
+    mut boxed: JsonValue* = mem::alloc(sizeof(JsonValue)) to JsonValue*;
+    boxed[0] = value;
+
+    if idx >= 0 {
+        self.obj_vals.data[idx] = boxed;
+    } else {
+        self.obj_keys.push(key);
+        self.obj_vals.push(boxed);
+    }
+}
+
+// ─── accessors ───────────────────────────────────────────────────────────
+
+// Looks up `key` on an Object-kind value. Aborts if the key is missing --
+// mirrors map.tr's Map.get()'s identical "missing key is a programming
+// bug" default; check `.has(key)` first if a miss is expected input.
+fn JsonValue.get(key: string): JsonValue {
+    mut i: int = 0;
+    while i < self.obj_keys.length() {
+        if self.obj_keys.data[i] == key {
+            immut boxed: JsonValue* = self.obj_vals.data[i];
+            return boxed[0];
+        }
+        i = i + 1;
+    }
+    sys::panic("JsonValue.get: no such key '" + key + "'");
+    return JsonValue::null_value();
+}
+
+// True if an Object-kind value has `key`.
+fn JsonValue.has(key: string): bool {
+    mut i: int = 0;
+    while i < self.obj_keys.length() {
+        if self.obj_keys.data[i] == key {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn JsonValue.get_string(key: string): string {
+    return self.get(key).str_val;
+}
+
+fn JsonValue.get_number(key: string): double {
+    return self.get(key).num_val;
+}
+
+fn JsonValue.get_int(key: string): int {
+    return self.get_number(key) to int;
+}
+
+fn JsonValue.get_bool(key: string): bool {
+    return self.get(key).bool_val;
+}
+
+// Indexes an Array-kind value. Aborts on an out-of-bounds index, mirroring
+// strings.tr's substring()'s identical "this is a programming bug" abort.
+fn JsonValue.at(index: int): JsonValue {
+    if index < 0 || index >= self.arr_val.length() {
+        sys::panic("JsonValue.at: index out of bounds");
+    }
+    immut boxed: JsonValue* = self.arr_val.data[index];
+    return boxed[0];
+}
+
+// Element count for an Array or key count for an Object; 0 for any other
+// kind (a scalar has no length, rather than treating that as an error).
+fn JsonValue.length(): int {
+    if self.kind == JsonType::Array {
+        return self.arr_val.length();
+    }
+    if self.kind == JsonType::Object {
+        return self.obj_keys.length();
+    }
+    return 0;
+}
+
+// ─── stringify ───────────────────────────────────────────────────────────
+
+// Serializes `v` to compact JSON text (no extra whitespace).
+fn stringify(v: JsonValue): string {
+    if v.kind == JsonType::Null {
+        return "null";
+    }
+    if v.kind == JsonType::Bool {
+        if v.bool_val {
+            return "true";
+        }
+        return "false";
+    }
+    if v.kind == JsonType::Number {
+        return v.num_val to string;
+    }
+    if v.kind == JsonType::String {
+        return "\"" + escape_string(v.str_val) + "\"";
+    }
+    if v.kind == JsonType::Array {
+        return stringify_array(v);
+    }
+    return stringify_object(v);
+}
+
+fn stringify_array(v: JsonValue): string {
+    mut result: string = "[";
+    mut i: int = 0;
+    mut n: int = v.arr_val.length();
+    while i < n {
+        if i > 0 {
+            result = result + ",";
+        }
+        immut boxed: JsonValue* = v.arr_val.data[i];
+        result = result + stringify(boxed[0]);
+        i = i + 1;
+    }
+    result = result + "]";
+    return result;
+}
+
+fn stringify_object(v: JsonValue): string {
+    mut result: string = "{";
+    mut i: int = 0;
+    mut n: int = v.obj_keys.length();
+    while i < n {
+        if i > 0 {
+            result = result + ",";
+        }
+        immut boxed: JsonValue* = v.obj_vals.data[i];
+        result = result + "\"" + escape_string(v.obj_keys.data[i]) + "\":" + stringify(boxed[0]);
+        i = i + 1;
+    }
+    result = result + "}";
+    return result;
+}
+
+// Escapes the handful of bytes JSON strings require escaped (`"`, `\`, and
+// the common control characters) -- see this file's header comment for
+// what's NOT handled (\uXXXX round-tripping).
+fn escape_string(s: string): string {
+    mut result: string = "";
+    mut i: int = 0;
+    mut n: int = strings::length(s);
+    while i < n {
+        immut c: int = s[i];
+        if c == 34 { // '"'
+            result = result + "\\\"";
+        } elseif c == 92 { // '\'
+            result = result + "\\\\";
+        } elseif c == 10 { // '\n'
+            result = result + "\\n";
+        } elseif c == 13 { // '\r'
+            result = result + "\\r";
+        } elseif c == 9 { // '\t'
+            result = result + "\\t";
+        } else {
+            result = result + strings::substring(s, i, i + 1);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+// ─── parse ───────────────────────────────────────────────────────────────
+
+// Every distinct way a JSON text can fail to parse -- kept as separate
+// variants (docs/planning/Errors.md) so a caller using
+// `recover as err run { ... }` can tell them apart, even though a variant
+// itself carries no payload/position (a documented simplification -- a
+// real "line/column of the error" would need SourceLocation-style
+// tracking this hand-rolled parser doesn't attempt).
+error JsonError {
+    UnexpectedEnd,
+    UnexpectedChar,
+    InvalidNumber,
+    InvalidLiteral,
+    UnterminatedString,
+    ExpectedColon,
+    ExpectedComma,
+}
+
+// Parser state, threaded through by-reference via `self` exactly like
+// List<T>/Map<K,V>'s own methods mutate `self.len` in place -- see
+// list.tr's own design note on why this compiler's generic collections
+// already rely on that same "self is mutated in place" method semantics.
+struct Parser {
+    s: string,
+    pos: int,
+    len: int
+}
+
+fn Parser.peek(): int {
+    if self.pos >= self.len {
+        return 0 - 1;
+    }
+    return self.s[self.pos];
+}
+
+fn Parser.skip_ws(): void {
+    while self.pos < self.len {
+        immut c: int = self.s[self.pos];
+        if c == 32 || c == 9 || c == 10 || c == 13 {
+            self.pos = self.pos + 1;
+        } else {
+            return;
+        }
+    }
+}
+
+fn Parser.parse_value(): !JsonValue {
+    self.skip_ws();
+    immut c: int = self.peek();
+    if c == (0 - 1) {
+        return JsonError::UnexpectedEnd;
+    }
+    if c == 123 { // '{'
+        // NOT a direct `return self.parse_object();` -- this compiler
+        // doesn't support propagating one `!T`-returning call's whole
+        // result (success-or-error) directly as another `!T` function's
+        // own return value; confirmed live ("Return type mismatch:
+        // function declares '!JsonValue' but returns '!JsonValue'" --
+        // Declared's success type gets compared against RetTy's WHOLE
+        // error-union type, not its success type, so they never match no
+        // matter what T is). Unwrap explicitly instead, same pattern every
+        // other call site in this file already uses.
+        immut obj: JsonValue = self.parse_object() recover as err run { return err; };
+        return obj;
+    }
+    if c == 91 { // '['
+        immut arr: JsonValue = self.parse_array() recover as err run { return err; };
+        return arr;
+    }
+    if c == 34 { // '"'
+        immut s: string = self.parse_string() recover as err run { return err; };
+        return JsonValue::from_string(s);
+    }
+    if c == 116 { // 't' -- true
+        immut b: JsonValue = self.parse_literal("true", JsonValue::from_bool(true)) recover as err run { return err; };
+        return b;
+    }
+    if c == 102 { // 'f' -- false
+        immut b: JsonValue = self.parse_literal("false", JsonValue::from_bool(false)) recover as err run { return err; };
+        return b;
+    }
+    if c == 110 { // 'n' -- null
+        immut nv: JsonValue = self.parse_literal("null", JsonValue::null_value()) recover as err run { return err; };
+        return nv;
+    }
+    if (c >= 48 && c <= 57) || c == 45 { // digit or '-'
+        immut num: JsonValue = self.parse_number() recover as err run { return err; };
+        return num;
+    }
+    return JsonError::UnexpectedChar;
+}
+
+fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
+    immut n: int = strings::length(lit);
+    mut i: int = 0;
+    while i < n {
+        if self.pos >= self.len || self.s[self.pos] != lit[i] {
+            return JsonError::InvalidLiteral;
+        }
+        self.pos = self.pos + 1;
+        i = i + 1;
+    }
+    return value;
+}
+
+fn Parser.parse_string(): !string {
+    // Precondition: self.peek() == '"' (only ever called from a context
+    // that already checked this).
+    self.pos = self.pos + 1; // consume opening quote
+    mut result: string = "";
+    while self.pos < self.len {
+        immut c: int = self.s[self.pos];
+        if c == 34 { // closing quote
+            self.pos = self.pos + 1;
+            return result;
+        }
+        if c == 92 { // backslash
+            self.pos = self.pos + 1;
+            if self.pos >= self.len {
+                return JsonError::UnterminatedString;
+            }
+            immut esc: int = self.s[self.pos];
+            if esc == 34 {
+                result = result + "\"";
+            } elseif esc == 92 {
+                result = result + "\\";
+            } elseif esc == 47 {
+                result = result + "/";
+            } elseif esc == 110 {
+                result = result + "\n";
+            } elseif esc == 116 {
+                result = result + "\t";
+            } elseif esc == 114 {
+                result = result + "\r";
+            } else {
+                // Unrecognized escape (including the unsupported \uXXXX --
+                // see this file's header comment) -- append the character
+                // itself literally rather than fail the whole parse.
+                result = result + strings::substring(self.s, self.pos, self.pos + 1);
+            }
+            self.pos = self.pos + 1;
+        } else {
+            result = result + strings::substring(self.s, self.pos, self.pos + 1);
+            self.pos = self.pos + 1;
+        }
+    }
+    return JsonError::UnterminatedString;
+}
+
+fn Parser.parse_number(): !JsonValue {
+    immut start: int = self.pos;
+    if self.pos < self.len && self.s[self.pos] == 45 { // '-'
+        self.pos = self.pos + 1;
+    }
+    mut sawDigit: bool = false;
+    while self.pos < self.len && self.s[self.pos] >= 48 && self.s[self.pos] <= 57 {
+        self.pos = self.pos + 1;
+        sawDigit = true;
+    }
+    if self.pos < self.len && self.s[self.pos] == 46 { // '.'
+        self.pos = self.pos + 1;
+        while self.pos < self.len && self.s[self.pos] >= 48 && self.s[self.pos] <= 57 {
+            self.pos = self.pos + 1;
+            sawDigit = true;
+        }
+    }
+    // Exponent: consumed so it doesn't break parsing of the rest of the
+    // document, but see this file's header comment -- the resulting
+    // NUMERIC VALUE is wrong (strings::parse_double doesn't understand
+    // exponents), a documented gap.
+    if self.pos < self.len && (self.s[self.pos] == 101 || self.s[self.pos] == 69) { // 'e'/'E'
+        self.pos = self.pos + 1;
+        if self.pos < self.len && (self.s[self.pos] == 43 || self.s[self.pos] == 45) {
+            self.pos = self.pos + 1;
+        }
+        while self.pos < self.len && self.s[self.pos] >= 48 && self.s[self.pos] <= 57 {
+            self.pos = self.pos + 1;
+        }
+    }
+    if !sawDigit {
+        return JsonError::InvalidNumber;
+    }
+    immut numStr: string = strings::substring(self.s, start, self.pos);
+    immut n: double = strings::parse_double(numStr) recover run {
+        return JsonError::InvalidNumber;
+    };
+    return JsonValue::from_number(n);
+}
+
+fn Parser.parse_array(): !JsonValue {
+    self.pos = self.pos + 1; // consume '['
+    mut arr: JsonValue = JsonValue::new_array();
+    self.skip_ws();
+    if self.peek() == 93 { // ']'
+        self.pos = self.pos + 1;
+        return arr;
+    }
+    while true {
+        immut item: JsonValue = self.parse_value() recover as err run { return err; };
+        arr.push(item);
+        self.skip_ws();
+        immut c: int = self.peek();
+        if c == 44 { // ','
+            self.pos = self.pos + 1;
+            self.skip_ws();
+        } elseif c == 93 { // ']'
+            self.pos = self.pos + 1;
+            return arr;
+        } else {
+            return JsonError::ExpectedComma;
+        }
+    }
+    return arr;
+}
+
+fn Parser.parse_object(): !JsonValue {
+    self.pos = self.pos + 1; // consume '{'
+    mut obj: JsonValue = JsonValue::new_object();
+    self.skip_ws();
+    if self.peek() == 125 { // '}'
+        self.pos = self.pos + 1;
+        return obj;
+    }
+    while true {
+        self.skip_ws();
+        if self.peek() != 34 { // '"'
+            return JsonError::UnexpectedChar;
+        }
+        immut key: string = self.parse_string() recover as err run { return err; };
+        self.skip_ws();
+        if self.peek() != 58 { // ':'
+            return JsonError::ExpectedColon;
+        }
+        self.pos = self.pos + 1;
+        self.skip_ws();
+        immut value: JsonValue = self.parse_value() recover as err run { return err; };
+        obj.set(key, value);
+        self.skip_ws();
+        immut c: int = self.peek();
+        if c == 44 { // ','
+            self.pos = self.pos + 1;
+        } elseif c == 125 { // '}'
+            self.pos = self.pos + 1;
+            return obj;
+        } else {
+            return JsonError::ExpectedComma;
+        }
+    }
+    return obj;
+}
+
+// Parses `s` as a single JSON text (object, array, string, number,
+// true/false/null). Trailing bytes after a complete value are ignored
+// rather than rejected -- a deliberate simplification, not a correctness
+// bug: this parser is meant for "parse the one JSON value a request/
+// response body contains", not for validating a whole document stream.
+fn parse(s: string): !JsonValue {
+    mut p: Parser;
+    p.s = s;
+    p.pos = 0;
+    p.len = strings::length(s);
+    immut v: JsonValue = p.parse_value() recover as err run { return err; };
+    return v;
+}

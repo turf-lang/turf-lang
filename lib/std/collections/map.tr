@@ -1,0 +1,166 @@
+// map.tr — Map<K, V>: a simple key/value association (linear-scan, not
+// hashed -- see the design note below for why).
+// Usage:
+//   import map::Map;
+//   mut m: Map<string, int>;   // default-initialized -- no need to write out fields
+//   m.put("a", 1);
+//   m.put("b", 2);
+//   mut x: int = m.get("a");        // 1
+//   mut has: bool = m.contains("z"); // false
+//   mut n: int = m.length();         // 2
+//   mut y: int = m.tryGet("z") recover produce -1; // -1, no abort
+//
+// Design:
+//   - Two parallel type-erased arrays (keys/values), grown exactly like
+//     list.tr's List<T>.push() (every T assumed to fit in one 8-byte slot --
+//     see that file's own comment on this). A single array of a combined
+//     Entry<K,V> struct was deliberately avoided: it would need `sizeof` on
+//     a generic instantiation and a THIRD level of generic-parameter
+//     substitution (Map -> Entry -> K/V) that nothing in the stdlib has
+//     exercised yet -- the parallel-array shape reuses the identical,
+//     already-proven List<T> pattern twice instead of risking new ground.
+//   - Lookup is a LINEAR SCAN, not a hash table -- there is no generic
+//     `hash(T)` in the language yet, so this is the honest, simple version.
+//     Fine for the small maps a program typically builds; a hashed
+//     HashMap<K,V> is a natural, separate future addition once hashing
+//     exists.
+//   - get() on a missing key fails() (mirrors List.pop()'s empty-list
+//     behavior) -- check contains() first if a miss is expected.
+
+import mem;
+import sys;
+
+struct Map<K, V> {
+  keys: K*,
+  values: V*,
+  len: int,
+  cap: int
+}
+
+// KNOWN LIMITATION: `self.keys[i] == key` below is a raw pointer/bit
+// comparison for K = string, NOT a content comparison, even though
+// strings.tr defines a real content-comparing `operator==(string, string)`.
+// This is the same class of gap list.tr's own list_sort()/list_binary_search()
+// doc comment documents in detail for List<T> -- read that comment first for
+// the full mechanism; the short version, confirmed live for Map specifically:
+// TypeChecker::visitBinary()'s operator-overload gate matches a candidate by
+// `sameTypeExact(candidateParamType, operandType)`, and from INSIDE this
+// generic method body, `self.keys[i]` and `key` both have the STATIC type
+// TurfGenericParamType("K") -- never the real, concrete "string" -- because
+// a generic method's body is type-checked and codegenned exactly ONCE,
+// shared across every instantiation (Type Erasure: every K/V is a uniform
+// 8-byte slot). No candidate's declared `(string, string)` signature can
+// ever `sameTypeExact`-match against a bare "K", so overload resolution
+// silently fails and TypeChecker::inferRelationalType()'s "same-name"
+// fallback (LhsTy->getName() == RhsTy->getName(), both "K") lets the
+// comparison through anyway -- Codegen then emits a bare pointer-identity
+// ICmp on the erased slot. This is CORRECT for K = int/double/bool/pointer
+// (bit-exact identity genuinely is `==`'s meaning there), but wrong for
+// K = string, where two content-equal keys from different allocations
+// (e.g. one built via strings::trim(), the other a literal) compare
+// unequal. Confirmed live: `Map<string, string>.get()`/`.contains()`
+// returned "no such key" / false for a freshly-parsed key content-equal to
+// a literal put earlier -- see http.tr's own Request.get_header()/
+// has_header() for why that module does NOT rely on Map<string,V>'s
+// generic accessors and instead implements its own comparison inline in a
+// plain (non-generic) method on the concrete `Request` struct: a field
+// access like `self.headers.keys[i]` from a NON-generic method (self's
+// type is the concrete struct `Request`, not an abstract generic param)
+// resolves `headers`'s declared field type `Map<string, string>` fully
+// concretely, so `self.headers.keys[i] == name` DOES correctly hit
+// strings.tr's operator== there. That workaround only applies when the
+// generic collection is a field of some OTHER concrete (non-generic) host
+// struct you control -- it is not something Map<K,V> itself can do for
+// its own `.get()`/`.contains()`/`.put()` methods, since fixing this in
+// general requires either per-instantiation codegen (this compiler shares
+// one generic-method body across all instantiations, by design) or a
+// trait/constraint system neither of which exists yet. `tests/99_known_bugs/`
+// tracks this as an accepted, deferred limitation, not a live regression.
+fn<K, V> Map.indexOf(key: K): int {
+  mut i: int = 0;
+  while i < self.len {
+    if (self.keys[i] == key) {
+      return i;
+    }
+    i = i + 1;
+  }
+  return -1;
+}
+
+fn<K, V> Map.contains(key: K): bool {
+  return self.indexOf(key) >= 0;
+}
+
+fn<K, V> Map.put(key: K, value: V): void {
+  immutable existing: int = self.indexOf(key);
+  if (existing >= 0) {
+    self.values[existing] = value;
+    return;
+  }
+
+  if (self.len == self.cap) {
+    if (self.cap == 0) {
+      self.cap = 8;
+    } else {
+      self.cap = self.cap * 2;
+    }
+
+    // In Type Erasure, all K/V are 64 bits (pointers, int, double).
+    immutable byteSize: int = self.cap * 8;
+
+    if (self.keys == null) {
+      self.keys = mem::malloc(byteSize) to K*;
+      self.values = mem::malloc(byteSize) to V*;
+    } else {
+      self.keys = mem::realloc(self.keys, byteSize) to K*;
+      self.values = mem::realloc(self.values, byteSize) to V*;
+    }
+  }
+
+  self.keys[self.len] = key;
+  self.values[self.len] = value;
+  self.len = self.len + 1;
+}
+
+fn<K, V> Map.get(key: K): V {
+  immutable idx: int = self.indexOf(key);
+  if (idx < 0) {
+    sys::panic("Map.get: no such key");
+  }
+  return self.values[idx];
+}
+
+// Recoverable alternative to get() (docs/planning/Errors.md): a missing key
+// is often an ordinary, expected outcome (checking a cache, an optional
+// config value, ...), not a programming bug worth aborting the whole
+// process over -- `m.tryGet(key) recover produce default;` or a full
+// `recover run { ... }` lets the caller decide, instead of get()'s
+// unconditional abort. get() itself is left as-is (unchanged behavior,
+// still the right choice when a missing key really would be a bug).
+error MapError {
+  KeyNotFound,
+}
+
+fn<K, V> Map.tryGet(key: K): !V {
+  immutable idx: int = self.indexOf(key);
+  if (idx < 0) {
+    return MapError::KeyNotFound;
+  }
+  return self.values[idx];
+}
+
+fn<K, V> Map.remove(key: K): void {
+  immutable idx: int = self.indexOf(key);
+  if (idx < 0) {
+    return;
+  }
+
+  // Swap-with-last removal -- O(1), doesn't preserve insertion order.
+  self.len = self.len - 1;
+  self.keys[idx] = self.keys[self.len];
+  self.values[idx] = self.values[self.len];
+}
+
+fn<K, V> Map.length(): int {
+  return self.len;
+}

@@ -1,0 +1,27 @@
+TURF E055 -- ABS ARGUMENT TYPE:
+
+CAUSE:
+  `abs(...)` was called with an argument that isn't an `int` or a `double`.
+  `abs` only knows how to give you the absolute (non-negative) value of a
+  number -- it has no meaning for a `string`, `bool`, `char`, a struct, or
+  any other type.
+
+VALID USES:
+    abs(int)    → int
+    abs(double) → double
+
+CORRECT USAGE:
+    mut n: int = abs(-5);        // 5
+    mut d: double = abs(-3.14);  // 3.14
+
+INCORRECT:
+    mut bad: int = abs("negative five");
+    // ERROR: 'abs' only works with int or double, but you gave it a 'string'.
+
+    mut bad2: int = abs(true);
+    // ERROR: 'abs' only works with int or double, but you gave it a 'bool'.
+
+FIX:
+  Pass an `int` or `double` expression. If you have a numeric value stored
+  as a `string`, there's currently no built-in string-to-number parse in
+  Turf -- make sure the value is numeric before calling `abs` on it.

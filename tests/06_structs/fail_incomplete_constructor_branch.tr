@@ -1,0 +1,23 @@
+// Regression test for ConstructorFieldAssignmentPass: a field assigned in
+// only ONE branch of an if/else is NOT definitely assigned on every path --
+// this is exactly the case a naive "is it assigned anywhere in the body"
+// scan would miss, and the whole reason this is a real, control-flow-
+// sensitive dataflow analysis (mirroring DefiniteAssignmentPass) rather than
+// a flat textual scan. Must raise IncompleteConstructorError naming 'y'.
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int, flag: bool): void {
+    self.x = x;
+    if (flag) {
+        self.y = y;
+    }
+}
+
+fn main(): int {
+    mut p: Point = Point::new(1, 2, true);
+    return 0;
+}

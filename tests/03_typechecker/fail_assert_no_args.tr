@@ -1,0 +1,23 @@
+// Regression test: `test::assert()` with zero arguments must be a clean compile
+// error, not a compiler crash.
+//
+// History: `assert` used to be a compiler intrinsic registered with
+// BuiltinInfo::Arity == -1 ("variadic/unknown") specifically because it
+// genuinely accepts either 1 or 2 args (condition, optional message) -- not
+// a single fixed count TypeChecker::visitFuncCall's generic single-arity
+// check could express. That disabled arity checking for it entirely, and a
+// 0-arg call reached CodegenIntrinsic's unbounds-checked Args[0] read and
+// crashed the compiler (SIGABRT) -- see changelog/ for the original fix.
+// `assert` is now an ordinary, real overloaded Turf function in
+// lib/std/test.tr (two overloads: 1-arg and 2-arg) -- a 0-arg call is
+// rejected by completely ordinary overload resolution ("no overload
+// accepts that many [arguments]"), the same mechanism any other
+// wrong-arity call to any function hits. Kept as a regression test to
+// confirm that migration didn't quietly reopen the 0-arg case.
+
+import test;
+
+fn main(): int {
+    test::assert();
+    return 0;
+}

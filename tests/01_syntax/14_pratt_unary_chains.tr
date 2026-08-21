@@ -1,0 +1,75 @@
+// Test: deeply nested / chained unary operators, and their precedence
+// relative to the binary operators they're adjacent to. Every unary
+// operator in the language (-, +, !, ~, prefix ++/--, &) binds TIGHTER
+// than every binary operator, with no exceptions -- this file exercises
+// that rule directly, including the one case (`-x ** y`) where several
+// other languages special-case unary minus to bind LOOSER than `**`
+// specifically (Python: `-2 ** 2 == -4`) or reject the combination
+// outright (JavaScript: `-2 ** 2` is a SyntaxError). Turf does neither --
+// it applies the same "unary binds tightest, no exceptions" rule
+// uniformly, so `-2 ** 2` groups as `(-2) ** 2 == 4`, not `-(2 ** 2)`.
+// This is intentional, documented behavior, not an oversight: special-
+// casing just `**` would make the grammar's unary/binary interaction
+// inconsistent for exactly one operator out of a dozen.
+//
+// Every multi-character prefix run below (`- - -`, `+ + +`) is written
+// with spaces between the individual operators on purpose: `--`/`++`
+// tokenize as single ATOMIC tokens (prefix decrement/increment) when
+// written adjacent with no space, which is a completely different
+// operator (and requires a bare identifier immediately after it, not an
+// arbitrary sub-expression) -- `---x` is `--` followed by `-x`, not three
+// separate unary minuses.
+
+import test;
+
+fn main(): int {
+    // Triple unary minus: an odd number of negations flips the sign.
+    mut a: int = 5;
+    mut b: int = - - - a;
+    test::assert(b == -5, "- - - a (three negations) should equal -5");
+
+    // Quadruple: an even number of negations returns the original value.
+    mut c: int = - - - - a;
+    test::assert(c == 5, "- - - - a (four negations) should equal 5");
+
+    // Unary plus is a no-op at any nesting depth.
+    mut d: int = + + + a;
+    test::assert(d == 5, "+ + + a (three no-op unary pluses) should equal 5");
+
+    // Bitwise NOT is its own inverse: ~~x == x, ~~~x == ~x.
+    mut e: int = 5;
+    test::assert(~~e == e, "~~e should equal e (double bitwise-NOT cancels)");
+    test::assert(~~~e == ~e, "~~~e should equal ~e (triple bitwise-NOT == single)");
+    test::assert(~e == -6, "~5 should equal -6 (two's complement)");
+
+    // Logical NOT ('!' desugars to `!= true`) is also its own inverse for
+    // booleans: !!x == x, !!!x == !x.
+    mut f: bool = true;
+    test::assert(!!f == f, "!!f should equal f (double logical-NOT cancels)");
+    test::assert(!!!f == !f, "!!!f should equal !f (triple logical-NOT == single)");
+    test::assert(!f == false, "!true should equal false");
+
+    // Mixed unary chain: bitwise-NOT of a negation.
+    mut g: int = ~ - 5;
+    test::assert(g == 4, "~(-5) should equal 4");
+
+    // Unary binds tighter than multiplication: (-x) * (-y), not -(x * -y).
+    mut x: int = 3;
+    mut y: int = 4;
+    mut h: int = -x * -y;
+    test::assert(h == 12, "-x * -y should equal (-x) * (-y) == 12");
+
+    // Unary minus binds TIGHTER than `**` in this language (see file header
+    // for why this differs from Python/JS) -- (-2) ** 2 == 4, not -(2**2).
+    mut i: double = -2.0 ** 2.0;
+    test::assert(i == 4.0, "-2.0 ** 2.0 should equal (-2.0) ** 2.0 == 4.0 (unary binds tighter than **)");
+
+    // Prefix ++ wrapped in a unary minus: the increment happens first
+    // (mutating x), and the minus applies to ITS result.
+    mut j: int = 5;
+    mut k: int = - ++j;
+    test::assert(j == 6, "prefix ++ inside - ++j should still increment j to 6");
+    test::assert(k == -6, "- ++j should equal -(j after increment) == -6");
+
+    return 0;
+}

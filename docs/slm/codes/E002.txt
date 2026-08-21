@@ -1,0 +1,22 @@
+TURF E002 -- ARRAY NON-INTEGER INDEX:
+
+CAUSE:
+  A value that isn't an `int` was used to index into an array. Turf array
+  indices must be plain integers -- no floats, no strings, no bools, no
+  enum/struct values.
+
+CORRECT USAGE:
+    immut primes: int[3] = [2, 3, 5];
+    mut i: int = 1;
+    mut val: int = primes[i];       // valid: 'i' is an int
+    mut val2: int = primes[0];      // valid: literal int
+
+INCORRECT:
+    mut d: double = 1.0;
+    mut val: int = primes[d];
+    // ERROR: Array index must be an integer! You used a value of type
+    //   'double' as an array index.
+
+FIX:
+  Convert the value to an int first if it's genuinely meant to be a whole
+  number (`d to int`), or use a real int variable/literal as the index.

@@ -1,0 +1,39 @@
+TURF E008 -- DEFINITE ASSIGNMENT (READ BEFORE ANY VALUE IS SET):
+
+CAUSE:
+  A local variable was declared without an initializer (`mut x: int;`,
+  legal in Turf) and then READ on some code path before every path
+  leading to that read had actually assigned it a value. This is a
+  control-flow (CFG dataflow) check, not a simple "was it ever assigned
+  anywhere" check -- assigning it in only ONE branch of an if/else and
+  then reading it after the branch still triggers this, because the
+  OTHER branch reaches the read with no value ever set.
+
+CORRECT:
+    mut x: int;
+    if some_condition {
+        x = 1;
+    } else {
+        x = 2;
+    }
+    mut y: int = x;   // fine -- every path assigns x before this read
+
+INCORRECT:
+    mut x: int;
+    if some_condition {
+        x = 1;
+    }
+    mut y: int = x;   // ERROR: the `else` path never assigns x
+
+WHAT THIS ERROR IS NOT:
+  - Not ReferenceError (E040) -- the name IS declared, just not reliably
+    assigned yet on every path.
+  - Not UseBeforeDeclarationError (E043) -- that's about referencing a
+    name before its `mut`/`immut` STATEMENT runs at all (declared later
+    in the same block); this is about a declaration that already ran,
+    but with no value guaranteed yet.
+
+FIX:
+  Either give the declaration an initializer up front (`mut x: int = 0;`),
+  or make sure every branch that can reach the read assigns the variable
+  first (add an `else`, or assign a value before the `if` as a default).

@@ -1,0 +1,14 @@
+// tests/13_string_stdlib/fail_string_ordering_non_string.tr
+// NEGATIVE TEST — must NOT compile (or must error at runtime).
+// Applying a string ordering operator to mixed types (string and int)
+// must be rejected by the TypeChecker.
+//
+// Expected: TypeChecker error — cannot compare 'string' with 'int' using '<'.
+
+import io;
+
+fn main(): int {
+    mut result: bool = "hello" < 42;
+    io::printline(result);
+    return 0;
+}

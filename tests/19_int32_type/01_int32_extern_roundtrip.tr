@@ -1,0 +1,20 @@
+// int32 exists to let extern fn declarations honestly describe a C
+// function whose parameter/return is a genuine 32-bit int (e.g. strcmp) --
+// this is the regression test for the real bug that motivated it: strcmp
+// declared as Turf `int` (64-bit) silently misread its return register.
+import test;
+
+extern fn strcmp(a: string, b: string): int32;
+
+fn main(): int {
+    mut r: int32 = strcmp("abc", "abd");
+    test::assert((r to int) < 0, "strcmp('abc','abd') should be negative");
+
+    mut r2: int32 = strcmp("abd", "abc");
+    test::assert((r2 to int) > 0, "strcmp('abd','abc') should be positive");
+
+    mut r3: int32 = strcmp("same", "same");
+    test::assert((r3 to int) == 0, "strcmp of equal strings should be 0");
+
+    return 0;
+}

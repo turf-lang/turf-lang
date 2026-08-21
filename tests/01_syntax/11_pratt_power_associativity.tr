@@ -1,0 +1,37 @@
+// Test: `**` (exponentiation) is right-associative, unlike every other
+// arithmetic operator in the language (+ - * / % are all left-associative).
+// `2 ** 3 ** 2` must group as `2 ** (3 ** 2)` == 2 ** 9 == 512, NOT
+// `(2 ** 3) ** 2` == 8 ** 2 == 64 -- the latter is what a plain Pratt parser
+// produces by default (same climbing loop as + - * /) unless the operator
+// is explicitly flagged right-associative, which `**` previously was not.
+//
+// Contrasted directly against - and / (confirmed left-associative here) so
+// this test also acts as a regression guard: fixing `**`'s associativity
+// must not accidentally flip any of the others.
+
+import test;
+
+fn main(): int {
+    mut a: double = 2.0 ** 3.0 ** 2.0;
+    test::assert(a == 512.0, "2 ** 3 ** 2 should right-associate to 2 ** (3 ** 2) == 512");
+
+    // Explicit parens confirm which grouping 512.0 actually corresponds to.
+    mut rightGroup: double = 2.0 ** (3.0 ** 2.0);
+    mut leftGroup: double = (2.0 ** 3.0) ** 2.0;
+    test::assert(a == rightGroup, "unparenthesized ** must match the right-grouped form");
+    test::assert(leftGroup == 64.0, "left-grouped (2**3)**2 should be 64, confirming it's a DIFFERENT value");
+    test::assert(a != leftGroup, "the two groupings must produce different results for this test to mean anything");
+
+    // Three-level chain: 2 ** 2 ** 3 == 2 ** (2 ** 3) == 2 ** 8 == 256
+    mut b: double = 2.0 ** 2.0 ** 3.0;
+    test::assert(b == 256.0, "2 ** 2 ** 3 should right-associate to 2 ** (2 ** 3) == 256");
+
+    // -- - and / remain left-associative (regression guard) --
+    mut c: int = 10 - 3 - 2;      // (10-3)-2 = 5, NOT 10-(3-2) = 9
+    test::assert(c == 5, "10 - 3 - 2 should left-associate to (10-3)-2 == 5");
+
+    mut d: int = 100 / 5 / 2;     // (100/5)/2 = 10, NOT 100/(5/2) = 40
+    test::assert(d == 10, "100 / 5 / 2 should left-associate to (100/5)/2 == 10");
+
+    return 0;
+}

@@ -1,0 +1,153 @@
+import io;
+
+import test;
+extern fn printf(fmt: string, ...): int;
+extern fn puts(s: string): int;
+extern fn fopen(path: string, mode: string): ptr;
+extern fn fclose(handle: ptr): int;
+extern fn fwrite(buf: string, size: int, count: int, handle: ptr): int;
+extern fn fread(buf: ptr, size: int, count: int, handle: ptr): int;
+extern fn fseek(handle: ptr, offset: int, whence: int): int;
+extern fn ftell(handle: ptr): int;
+
+extern fn malloc(size: int): ptr;
+extern fn free(p: ptr): void;
+extern fn memset(p: ptr, c: int, n: int): ptr;
+extern fn memcpy(dst: ptr, src: ptr, n: int): ptr;
+
+extern fn strlen(s: string): int;
+extern fn getenv(name: string): ptr;
+
+extern from "m" fn sqrt(x: double): double;
+extern from "m" fn pow(base: double, exp: double): double;
+extern from "m" fn sin(x: double): double;
+extern from "m" fn cos(x: double): double;
+extern from "m" fn log(x: double): double;
+extern from "m" fn floor(x: double): double;
+
+extern fn time(t: ptr): int;
+extern fn clock(): int;
+
+extern fn system(cmd: string): int;
+
+extern fn socket(domain: int, stype: int, proto: int): int;
+extern fn close(sockfd: int): int;
+
+fn section(name: string): void {
+    printf("\n=== %s ===\n", name);
+}
+
+// (issue #238) Every `ptr`-typed local below needs `unsafe { }` around its
+// declaration (FINAL_SPRINT.md's Track A "Caller-side locals" rule) --
+// the extern fn calls themselves stay ordinary, ungated calls.
+fn test_file_io(): void {
+    section("File I/O");
+
+    unsafe {
+        mut whandle: ptr = fopen("/tmp/turf_test.txt", "w");
+        mut msg: string  = "Hello from Turflang FFI!\nLine two.\n";
+        mut written: int = fwrite(msg, 1, strlen(msg), whandle);
+        test::assert(written > 0, "");
+        fclose(whandle);
+
+        mut rhandle: ptr = fopen("/tmp/turf_test.txt", "r");
+        mut rbuf: ptr    = malloc(256);
+        memset(rbuf, 0, 256);
+        mut nbytes: int  = fread(rbuf, 1, 255, rhandle);
+        test::assert(nbytes == written, "");
+        fclose(rhandle);
+        free(rbuf);
+
+        mut shandle: ptr  = fopen("/tmp/turf_test.txt", "r");
+        fseek(shandle, 0, 2);
+        mut filesize: int = ftell(shandle);
+        test::assert(filesize == written, "");
+        fclose(shandle);
+    }
+}
+
+fn test_math(): void {
+    section("Math (libm via extern from)");
+    
+    test::assert(floor(3.99) == 3.0, "");
+    // Note: Can't easily use test::assert(sqrt(2.0) == 1.414...) with floats due to precision,
+    // but we know pow(2.0, 10.0) is exactly 1024.0.
+    test::assert(pow(2.0, 10.0) == 1024.0, "");
+}
+
+fn test_time(): void {
+    section("Time");
+
+    unsafe {
+        mut timebuf: ptr = malloc(8);
+        mut epoch: int    = time(timebuf);
+        free(timebuf);
+        mut clk0: int  = clock();
+        mut clk1: int  = clock();
+        test::assert(epoch > 0, "");
+        test::assert(clk1 >= clk0, "");
+    }
+}
+
+fn test_env(): void {
+    section("Environment");
+
+    unsafe {
+        // "PATH" is always set.
+        mut pathdir: ptr = getenv("PATH");
+        // Just verify we can fetch it without crashing
+        printf("PATH is present at ptr: %%p\n", pathdir);
+    }
+}
+
+fn test_strings(): void {
+    section("Strings + Memory");
+
+    mut greeting: string = "turflang is not a C wrapper";
+    test::assert(strlen(greeting) == 27, "");
+
+    unsafe {
+        mut srcbuf: ptr = malloc(32);
+        mut dstbuf: ptr = malloc(32);
+        memset(srcbuf, 88, 10);
+        memcpy(dstbuf, srcbuf, 10);
+        free(srcbuf);
+        free(dstbuf);
+    }
+}
+
+fn test_process(): void {
+    section("Process Spawning");
+    mut res: int = system("echo 'test' > /dev/null");
+    test::assert(res == 0, "");
+}
+
+fn test_printf_formats(): void {
+    section("Variadic printf");
+    mut printed: int = printf("%%d: %d\n", 42);
+    test::assert(printed > 0, "");
+}
+
+fn test_socket(): void {
+    section("Socket FD");
+
+    mut sockval: int = socket(2, 1, 0);
+    if sockval >= 0 {
+        close(sockval);
+    }
+}
+
+fn main(): int {
+    puts("Turflang FFI — Real-World Showcase");
+
+    test_file_io();
+    test_math();
+    test_time();
+    test_env();
+    test_strings();
+    test_process();
+    test_printf_formats();
+    test_socket();
+
+    return 0;
+}

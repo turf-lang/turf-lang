@@ -1,0 +1,9 @@
+struct Empty {}
+
+fn Empty.make() static: Empty {
+    return Empty::default();
+}
+
+fn identity(e: Empty): Empty {
+    return e;
+}

@@ -1,0 +1,37 @@
+// Regression test: `StructName::default()` is compiler-synthesized (never
+// hand-declarable -- see fail_reserved_default_declared.tr), takes no
+// arguments (see fail_default_construction_with_args.tr), and recursively
+// zero-initializes every field -- including a struct-typed field nested
+// inside another struct, reusing the exact same GetDefaultValue() machinery
+// the old brace-literal's "missing fields default-initialize" behavior
+// already relied on (src/Codegen.cpp).
+
+import io;
+import test;
+extern fn strlen(s: string): int;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+struct Line {
+    start: Point,
+    end: Point,
+    label: string
+}
+
+fn main(): int {
+    mut p: Point = Point::default();
+    test::assert(p.x == 0, "default x should be 0");
+    test::assert(p.y == 0, "default y should be 0");
+
+    mut l: Line = Line::default();
+    test::assert(l.start.x == 0, "nested default start.x should be 0");
+    test::assert(l.start.y == 0, "nested default start.y should be 0");
+    test::assert(l.end.x == 0, "nested default end.x should be 0");
+    test::assert(strlen(l.label) == 0, "default string field should be empty");
+
+    io::printline("default() works, including nested structs");
+    return 0;
+}

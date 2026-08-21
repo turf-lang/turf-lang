@@ -1,0 +1,16 @@
+// Stage 1: bare-form `error Name;` declarations (sugar for a single implicit
+// DEFAULT variant) alongside ordinary braced declarations.
+import test;
+
+error GeneralError;
+error AnotherBareError;
+
+error MathError {
+    DivisionByZero,
+    Overflow,
+}
+
+fn main(): int {
+    test::assert(true, "bare-form error declarations should parse and compile");
+    return 0;
+}

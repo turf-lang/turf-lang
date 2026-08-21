@@ -1,0 +1,169 @@
+// ─── test.tr ───────────────────────────────────────────────────────────────
+// A minimal testing library for TurfLang.
+//
+// Design:
+//   - fail/assert/assert_eq/assert_neq are ordinary Turf functions, not
+//     compiler builtins -- they resolve through exactly the same overload
+//     machinery as io::print (see io.tr), with no special-casing anywhere
+//     in the compiler.
+//   - fail() is a thin wrapper over sys::panic() -- this file owns the
+//     name callers actually write in test code, sys.tr owns the mechanism
+//     (write-to-stderr-then-abort) that every OTHER stdlib module's
+//     internal guard rails also depend on. See sys.tr's own doc comment
+//     for why that split exists.
+//   - assert/assert_eq/assert_neq each have a 2-arg (default message) and a
+//     3-arg (custom message) overload of the same name -- arity-overloading
+//     is a real, compiler-supported feature (see io.tr's print/printline),
+//     not something this file has to work around.
+//   - assert_eq/assert_neq are only overloaded for int/double/bool/string --
+//     the four types every existing test in this codebase actually compares.
+//     Not attempted generically (`assert_eq<T>`): equality on an arbitrary
+//     generic T isn't guaranteed to mean anything yet (operator overloading
+//     doesn't exist), so a real per-type overload is both simpler and
+//     actually correct.
+//
+// Usage:
+//   import test;
+//   test::assert(x == 5);
+//   test::assert(x == 5, "x should be 5");
+//   test::assert_eq(x, 5);
+//   test::assert_eq(x, 5, "x should be 5");
+
+import sys;
+// String `==`/`!=`/`+` used below (assert_eq/assert_neq's string overloads,
+// assert_fail_eq/assert_fail_neq's message building) are `operator`
+// overloads defined in strings.tr, not compiler builtins anymore -- must be
+// imported explicitly like any other operator consumer. See
+// STRING_UFCS_OPERATOR_CHAR_RFC.md's Option-A visibility discussion: since
+// virtually every test file already imports `test`, this is what makes
+// string operators available everywhere with zero test-file edits, at the
+// deliberate cost of them becoming de-facto globally visible in any program
+// using the test harness.
+import strings;
+
+// ─── fail ──────────────────────────────────────────────────────────────────
+
+// fail: print `msg` to stderr and terminate immediately. Never returns.
+fn fail(msg: string): void {
+    sys::panic(msg);
+}
+
+// ─── assert ────────────────────────────────────────────────────────────────
+
+fn assert(cond: bool): void {
+    assert(cond, "Oops! An assertion failed here.\nHint: Assertions are checks that make sure your code is running exactly as you expect. This one didn't pass.");
+}
+
+fn assert(cond: bool, msg: string): void {
+    if !cond {
+        fail(msg);
+    }
+}
+
+// ─── assert_eq / assert_neq: int ──────────────────────────────────────────
+
+fn assert_eq(left: int, right: int): void {
+    assert_eq(left, right, "");
+}
+
+fn assert_eq(left: int, right: int, msg: string): void {
+    if left != right {
+        assert_fail_eq(left to string, right to string, msg);
+    }
+}
+
+fn assert_neq(left: int, right: int): void {
+    assert_neq(left, right, "");
+}
+
+fn assert_neq(left: int, right: int, msg: string): void {
+    if left == right {
+        assert_fail_neq(left to string, right to string, msg);
+    }
+}
+
+// ─── assert_eq / assert_neq: double ───────────────────────────────────────
+
+fn assert_eq(left: double, right: double): void {
+    assert_eq(left, right, "");
+}
+
+fn assert_eq(left: double, right: double, msg: string): void {
+    if left != right {
+        assert_fail_eq(left to string, right to string, msg);
+    }
+}
+
+fn assert_neq(left: double, right: double): void {
+    assert_neq(left, right, "");
+}
+
+fn assert_neq(left: double, right: double, msg: string): void {
+    if left == right {
+        assert_fail_neq(left to string, right to string, msg);
+    }
+}
+
+// ─── assert_eq / assert_neq: bool ─────────────────────────────────────────
+
+fn assert_eq(left: bool, right: bool): void {
+    assert_eq(left, right, "");
+}
+
+fn assert_eq(left: bool, right: bool, msg: string): void {
+    if left != right {
+        assert_fail_eq(left to string, right to string, msg);
+    }
+}
+
+fn assert_neq(left: bool, right: bool): void {
+    assert_neq(left, right, "");
+}
+
+fn assert_neq(left: bool, right: bool, msg: string): void {
+    if left == right {
+        assert_fail_neq(left to string, right to string, msg);
+    }
+}
+
+// ─── assert_eq / assert_neq: string ────────────────────────────────────────
+
+fn assert_eq(left: string, right: string): void {
+    assert_eq(left, right, "");
+}
+
+fn assert_eq(left: string, right: string, msg: string): void {
+    if left != right {
+        assert_fail_eq(left, right, msg);
+    }
+}
+
+fn assert_neq(left: string, right: string): void {
+    assert_neq(left, right, "");
+}
+
+fn assert_neq(left: string, right: string, msg: string): void {
+    if left == right {
+        assert_fail_neq(left, right, msg);
+    }
+}
+
+// ─── Shared failure-message formatting (private to this module) ──────────
+
+fn assert_fail_eq(left: string, right: string, msg: string): void {
+    mut detail: string = "assert_eq failed: " + left + " != " + right;
+    if strings::length(msg) > 0 {
+        fail(detail + " (" + msg + ")");
+    } else {
+        fail(detail);
+    }
+}
+
+fn assert_fail_neq(left: string, right: string, msg: string): void {
+    mut detail: string = "assert_neq failed: both sides equal " + left;
+    if strings::length(msg) > 0 {
+        fail(detail + " (" + msg + ")");
+    } else {
+        fail(detail);
+    }
+}

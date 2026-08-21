@@ -1,0 +1,57 @@
+// Regression test: a variable assigned in EVERY arm of a provably-
+// exhaustive `compare` (enum subject covering all variants, or an
+// explicit `otherwise`) must be considered definitely assigned afterward
+// -- not flagged as "used before it has a value".
+//
+// Root cause: CFGBuilder::visitCompare() unconditionally added a "nothing
+// matched" fallthrough edge straight from the compare's entry block to its
+// merge block, even when the compare was provably exhaustive. That edge
+// doesn't affect reachability (nothing reads it for that purpose), but
+// DefiniteAssignmentPass's dataflow computes "is X assigned here" as the
+// INTERSECTION of "assigned at end" across every predecessor of a block --
+// and the spurious fallthrough edge is a predecessor where NOTHING is
+// assigned (no arm ran), dragging the intersection down to "unassigned"
+// even when every real arm assigns the same variable. Fixed by only adding
+// that edge when the compare is NOT provably exhaustive.
+
+import io;
+
+import test;
+enum Color { Red, Green, Blue }
+
+fn main(): int {
+    // Case 1: exhaustive enum compare (SubjectIsEnum, no explicit otherwise).
+    mut c: Color = Color::Green;
+    mut y: int;
+    compare c {
+        matches Color::Red:
+            y = 1;
+        done
+        matches Color::Green:
+            y = 2;
+        done
+        matches Color::Blue:
+            y = 3;
+        done
+    }
+    test::assert(y == 2, "");
+
+    // Case 2: int compare with an explicit `otherwise` (exhaustive via
+    // otherwise, not via SubjectIsEnum).
+    mut x: int = 5;
+    mut z: int;
+    compare x {
+        matches 1:
+            z = 10;
+        done
+        matches 2:
+            z = 20;
+        done
+        otherwise:
+            z = 99;
+    }
+    test::assert(z == 99, "");
+
+    io::printline("ok");
+    return 0;
+}

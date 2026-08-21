@@ -1,0 +1,21 @@
+TURF E004 -- ARRAY TYPE MISMATCH:
+
+CAUSE:
+  An array's initializer list contains a value whose type doesn't match
+  the array's declared element type. Every value in `[v1, v2, ...]` must
+  be the same type as the array itself (or a compatible numeric
+  promotion, e.g. an int literal into a `double[]`).
+
+CORRECT USAGE:
+    immut primes: int[3] = [2, 3, 5];                 // all int
+    immut vals: double[3] = [1.0, 2.0, 3.0];           // all double
+
+INCORRECT:
+    immut primes: int[3] = [2, 3, "five"];
+    // ERROR: Array element type mismatch! Array 'primes' holds 'int'
+    //   values, but you tried to store a 'string'.
+
+FIX:
+  Make every element in the initializer list the declared element type.
+  If a value is a different-but-convertible type, convert it explicitly
+  (`x to int`) rather than mixing types in the literal.

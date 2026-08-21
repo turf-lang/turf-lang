@@ -1,0 +1,24 @@
+Your recursive function never stops calling itself
+
+A recursive function is one that calls itself to solve a smaller version of the same problem -- like `factorial(n)` calling `factorial(n - 1)`. For that to ever finish, there needs to be a "stop here" case: some condition where the function just returns an answer instead of calling itself again. Turf looked at this function and couldn't find one -- every path through it calls itself again, no matter what.
+
+Here's a `factorial` function with a proper stopping point:
+
+    fn factorial(n: int): int {
+        if n <= 1 {
+            return 1;
+        }
+        return n * factorial(n - 1);
+    }
+
+And here's the same function without one:
+
+    fn factorial(n: int): int {
+        return n * factorial(n - 1);
+    }
+
+Run this in your head: `factorial(3)` calls `factorial(2)`, which calls `factorial(1)`, which calls `factorial(0)`, which calls `factorial(-1)`... and it just keeps going forever, calling itself with smaller and smaller numbers with nothing to ever stop it. In a real program this crashes once it runs out of stack space to keep track of all those calls.
+
+The fix is to add an `if` (or similar check) that returns a plain answer once you've reached the simplest version of the problem -- for `factorial`, that's `n <= 1` returning `1`. Then double check that each recursive call is actually getting closer to that stopping point (here, `n - 1` moves toward `n <= 1` one step at a time).
+
+Recursion can feel tricky the first few times -- the trick that helps most people is to always write the "stop here" case first, before you write the part that calls itself again.

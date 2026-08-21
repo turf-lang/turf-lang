@@ -1,0 +1,11 @@
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut p: Point = Point::default();
+    for value in p {
+    }
+    return 0;
+}

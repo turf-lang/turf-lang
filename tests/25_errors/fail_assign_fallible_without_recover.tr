@@ -1,0 +1,17 @@
+// Test (fail): a '!T' value can't be assigned directly to a 'T'-typed
+// variable without going through 'recover' first.
+error MathError {
+    DivisionByZero,
+}
+
+fn divide(a: int, b: int): !int {
+    if (b == 0) {
+        return MathError::DivisionByZero;
+    }
+    return a / b;
+}
+
+fn main(): int {
+    mut x: int = divide(10, 2);
+    return 0;
+}

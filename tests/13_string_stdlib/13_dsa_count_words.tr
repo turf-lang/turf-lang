@@ -1,0 +1,47 @@
+// tests/13_string_stdlib/13_dsa_count_words.tr
+// DSA: Word count tokenizer — counts space-delimited tokens in a string.
+// Exercises: char access, strings::length, loops, boundary detection.
+
+import io;
+import strings;
+
+import test;
+// Count the number of whitespace-delimited words in `s`.
+fn count_words(s: string): int {
+    mut n: int = strings::length(s);
+    mut count: int = 0;
+    mut in_word: bool = false;
+    mut i: int = 0;
+    while i < n {
+        mut c: int = s[i];
+        // space=32, tab=9, newline=10
+        mut is_space: bool = (c == 32 || c == 9 || c == 10);
+        if is_space {
+            in_word = false;
+        } else {
+            if in_word == false {
+                count = count + 1;
+                in_word = true;
+            }
+        }
+        i = i + 1;
+    }
+    return count;
+}
+
+fn main(): int {
+    test::assert(count_words("hello world") == 2,          "two words");
+    test::assert(count_words("one two three") == 3,        "three words");
+    test::assert(count_words("  leading spaces") == 2,     "leading spaces ignored");
+    test::assert(count_words("trailing spaces  ") == 2,    "trailing spaces ignored");
+    test::assert(count_words("  multiple   spaces  ") == 2,"multiple spaces between words");
+    test::assert(count_words("single") == 1,               "single word");
+    test::assert(count_words("") == 0,                     "empty string has 0 words");
+    test::assert(count_words("   ") == 0,                  "all spaces has 0 words");
+
+    // Longer sentence
+    test::assert(count_words("the quick brown fox jumps over the lazy dog") == 9, "9-word sentence");
+
+    io::printline("13 PASS: DSA word count tokenizer");
+    return 0;
+}

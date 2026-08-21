@@ -1,0 +1,8 @@
+// Regression test (#186): self-call nested inside a binary expression.
+// `return 1 + double_self(n);` — every path still recurses.
+fn double_self(n: int): int {
+    return 1 + double_self(n);
+}
+fn main(): int {
+    return double_self(1);
+}

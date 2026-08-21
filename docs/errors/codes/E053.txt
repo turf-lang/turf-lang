@@ -1,0 +1,23 @@
+You put 'static' on a function that isn't attached to a struct
+
+`static` is a keyword that only makes sense for a struct's method -- it means "this method doesn't take an implicit `self`." An ordinary, free-standing function was never going to receive a `self` in the first place, so putting `static` on one doesn't mean anything, and Turf rejects it.
+
+Here's the difference between the two shapes: a struct method (where `static` is meaningful) looks like this:
+
+    fn Point.origin() static: Point {
+        return Point::default();
+    }
+
+...while an ordinary free function (where `static` doesn't apply at all) looks like this:
+
+    fn add(a: int, b: int): int {
+        return a + b;
+    }
+
+If you accidentally add `static` to that second kind, you'll see this error:
+
+    fn add(a: int, b: int) static: int {   // ERROR: 'static' can only be used on a struct-bound method
+        return a + b;
+    }
+
+There are two ways to fix it, depending on what you meant: if this was always supposed to be a plain function, just delete `static`. If you actually meant for it to be a method belonging to a specific struct, add the `StructName.` prefix to the function's name so it's declared as a real struct method, like `fn Point.add(...) static: int { ... }`.

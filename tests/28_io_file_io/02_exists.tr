@@ -1,0 +1,21 @@
+// Regression coverage for io::exists(): true/false cases.
+import io;
+import test;
+
+extern fn remove(path: string): int;
+
+fn main(): int {
+    immut path: string = "02_exists.tmp";
+
+    test::assert_eq(io::exists(path), false, "exists() should be false before the file is created");
+
+    io::write_string(path, "x");
+    test::assert_eq(io::exists(path), true, "exists() should be true right after write_string creates the file");
+
+    remove(path);
+    test::assert_eq(io::exists(path), false, "exists() should be false again after the file is removed");
+    test::assert_eq(io::exists("definitely_missing_28_file.tmp"), false, "exists() should be false for a path that never existed");
+
+    io::printline("02 PASS: io::exists true/false cases");
+    return 0;
+}

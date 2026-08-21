@@ -8,8 +8,12 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  # Linux (Ubuntu/Debian) — x86_64
+  # Linux (Ubuntu/Debian) - x86_64
   linux-x86_64:
     runs-on: ubuntu-latest
     steps:
@@ -17,96 +21,105 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/lib/llvm-22
+            /usr/include/llvm-22
+            /usr/include/llvm-c-22
+          key: llvm-22-${{ runner.os }}-v1
+
       - name: Install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 22
           sudo apt-get install -y llvm-22-dev cmake libomp-dev
-          echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
+      - run: echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
 
-      - name: Build llama.cpp
-        run: |
-          cd external/llama.cpp
-          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF
-          cmake --build build --config Release --parallel
+      - name: Get llama.cpp commit hash
+        id: llama-sha
+        run: echo "sha=$(git -C external/llama.cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache llama.cpp build
+        id: cache-llama
+        uses: actions/cache@v4
+        with:
+          path: external/llama.cpp/build
+          key: llama-build-linux-x86_64-${{ steps.llama-sha.outputs.sha }}
 
       - name: Build Turf
         run: |
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp \
-            -Iinclude -Iexternal/llama.cpp/include -Iexternal/llama.cpp/ggml/include \
-            external/llama.cpp/build/src/libllama.a \
-            external/llama.cpp/build/ggml/src/libggml.a \
-            external/llama.cpp/build/ggml/src/libggml-base.a \
-            external/llama.cpp/build/ggml/src/libggml-cpu.a \
-            $(llvm-config-22 --cxxflags --ldflags --system-libs --libs core native) \
-            -fopenmp -lpthread -lm -o turf
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
 
       - name: Package
-        run: |
-          VERSION=${GITHUB_REF_NAME}
-          DIR="turf-${VERSION}-linux-x86_64"
-          mkdir -p "${DIR}/scripts"
-          cp turf "${DIR}/"
-          cp scripts/compile_and_run.sh "${DIR}/scripts/"
-          cp README.md "${DIR}/"
-          tar -czf "${DIR}.tar.gz" "${DIR}"
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: linux-x86_64
+          binary-path: build/turf
+          archive-format: tar.gz
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-x86_64
-          path: turf-*-linux-x86_64.tar.gz
+          path: |
+            turf-*-linux-x86_64.tar.gz
+            turf-*-linux-x86_64.tar.gz.sha256
 
-  # Linux (Arch) — x86_64 via Docker
+  # Linux (Arch) - x86_64 via Docker
   linux-arch-x86_64:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
     steps:
+      # archlinux:latest ships no `git` at all, so actions/checkout's own
+      # `submodules: recursive` clone can't run yet -- it silently falls
+      # back to the GitHub REST API tarball download instead, which has no
+      # way to fetch submodules, and fails outright ("Input 'submodules'
+      # not supported when falling back to download using the GitHub REST
+      # API"). Confirmed live: this is exactly how the v0.8.0 release run
+      # failed. `git` has to be installed in a step BEFORE checkout, not
+      # folded into the "Install dependencies" step below (which runs
+      # after and is too late).
+      - name: Install git (required before actions/checkout can clone submodules)
+        run: pacman -Sy --noconfirm --needed git
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Install dependencies
         run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel llvm clang cmake
-
-      - name: Build llama.cpp
-        run: |
-          cd external/llama.cpp
-          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF
-          cmake --build build --config Release --parallel
+          pacman -Sy --noconfirm --needed base-devel llvm clang cmake openmp git tar
 
       - name: Build Turf
         run: |
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp \
-            -Iinclude -Iexternal/llama.cpp/include -Iexternal/llama.cpp/ggml/include \
-            external/llama.cpp/build/src/libllama.a \
-            external/llama.cpp/build/ggml/src/libggml.a \
-            external/llama.cpp/build/ggml/src/libggml-base.a \
-            external/llama.cpp/build/ggml/src/libggml-cpu.a \
-            $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
-            -fopenmp -lpthread -lm -o turf
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
 
       - name: Package
-        run: |
-          VERSION=${GITHUB_REF_NAME}
-          DIR="turf-${VERSION}-linux-arch-x86_64"
-          mkdir -p "${DIR}/scripts"
-          cp turf "${DIR}/"
-          cp scripts/compile_and_run.sh "${DIR}/scripts/"
-          cp README.md "${DIR}/"
-          tar -czf "${DIR}.tar.gz" "${DIR}"
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: linux-arch-x86_64
+          binary-path: build/turf
+          archive-format: tar.gz
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-arch-x86_64
-          path: turf-*-linux-arch-x86_64.tar.gz
+          path: |
+            turf-*-linux-arch-x86_64.tar.gz
+            turf-*-linux-arch-x86_64.tar.gz.sha256
 
-  # macOS — ARM64 (Apple Silicon)
+  # macOS - ARM64 (Apple Silicon)
   macos-arm64:
     runs-on: macos-latest
     steps:
@@ -119,41 +132,64 @@ jobs:
           brew install llvm cmake
           echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
 
-      - name: Build llama.cpp
-        run: |
-          cd external/llama.cpp
-          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF
-          cmake --build build --config Release --parallel
-
       - name: Build Turf
         run: |
           export PATH="$(brew --prefix llvm)/bin:$PATH"
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp \
-            -Iinclude -Iexternal/llama.cpp/include -Iexternal/llama.cpp/ggml/include \
-            external/llama.cpp/build/src/libllama.a \
-            external/llama.cpp/build/ggml/src/libggml.a \
-            external/llama.cpp/build/ggml/src/libggml-base.a \
-            external/llama.cpp/build/ggml/src/libggml-cpu.a \
-            $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
-            -fopenmp -o turf
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
 
       - name: Package
-        run: |
-          VERSION=${GITHUB_REF_NAME}
-          DIR="turf-${VERSION}-macos-arm64"
-          mkdir -p "${DIR}/scripts"
-          cp turf "${DIR}/"
-          cp scripts/compile_and_run.sh "${DIR}/scripts/"
-          cp README.md "${DIR}/"
-          tar -czf "${DIR}.tar.gz" "${DIR}"
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: macos-arm64
+          binary-path: build/turf
+          archive-format: tar.gz
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-arm64
-          path: turf-*-macos-arm64.tar.gz
+          path: |
+            turf-*-macos-arm64.tar.gz
+            turf-*-macos-arm64.tar.gz.sha256
 
-  # Windows — x86_64 (via MSYS2 MinGW)
+  # macOS - x86_64 (Intel)
+  macos-x86_64:
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install LLVM
+        run: |
+          brew install llvm cmake
+          echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
+
+      - name: Build Turf
+        run: |
+          export PATH="$(brew --prefix llvm)/bin:$PATH"
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
+
+      - name: Package
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: macos-x86_64
+          binary-path: build/turf
+          archive-format: tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-x86_64
+          path: |
+            turf-*-macos-x86_64.tar.gz
+            turf-*-macos-x86_64.tar.gz.sha256
+
+  # Windows - x86_64 (via MSYS2 MinGW)
   windows-x86_64:
     runs-on: windows-latest
     steps:
@@ -166,53 +202,58 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: mingw-w64-x86_64-llvm mingw-w64-x86_64-clang mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
-
-      - name: Build llama.cpp
-        shell: msys2 {0}
-        run: |
-          cd external/llama.cpp
-          cmake -B build -G Ninja -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF
-          cmake --build build --config Release --parallel
+          install: mingw-w64-x86_64-llvm mingw-w64-x86_64-clang mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-openmp
 
       - name: Build Turf
         shell: msys2 {0}
         run: |
-          clang++ src/main.cpp src/Lexer.cpp src/Parser.cpp src/Codegen.cpp src/Builtins.cpp src/Algorithms.cpp src/SymbolTable.cpp src/CFG.cpp src/Lint.cpp src/SLMIntegration.cpp src/SLMEngine.cpp src/Sandbox.cpp src/Types.cpp \
-            -Iinclude -Iexternal/llama.cpp/include -Iexternal/llama.cpp/ggml/include \
-            external/llama.cpp/build/src/libllama.a \
-            external/llama.cpp/build/ggml/src/libggml.a \
-            external/llama.cpp/build/ggml/src/libggml-base.a \
-            external/llama.cpp/build/ggml/src/libggml-cpu.a \
-            $(llvm-config --cxxflags --ldflags --system-libs --libs core native) \
-            -fopenmp -o turf.exe
+          chmod +x scripts/cmake_build.sh
+          ./scripts/cmake_build.sh --release
+
+      - name: Collect runtime DLL dependencies
+        id: dlls
+        shell: msys2 {0}
+        run: |
+          mkdir -p dll_bundle
+          ldd build/turf.exe | grep -i '/mingw64/bin/' | awk '{print $3}' | sort -u | while read -r dll; do
+            cp "$dll" dll_bundle/
+          done
+          # Format as newline-separated Windows paths for the composite action input
+          {
+            echo "list<<EOF"
+            find dll_bundle -type f | sed 's#^#dll_bundle/#' | sed 's#dll_bundle/dll_bundle/#dll_bundle/#'
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Package
-        shell: pwsh
-        run: |
-          $version = $env:GITHUB_REF_NAME
-          $dir = "turf-${version}-windows-x86_64"
-          New-Item -ItemType Directory -Force "$dir\scripts" | Out-Null
-          Copy-Item turf.exe "$dir\"
-          Copy-Item scripts\compile_and_run.sh "$dir\scripts\"
-          Copy-Item README.md "$dir\"
-          7z a "${dir}.zip" "$dir"
+        id: package
+        uses: ./.github/actions/package-release
+        with:
+          platform-suffix: windows-x86_64
+          binary-path: build/turf.exe
+          archive-format: zip
+          extra-files: ${{ steps.dlls.outputs.list }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-x86_64
-          path: turf-*-windows-x86_64.zip
+          path: |
+            turf-*-windows-x86_64.zip
+            turf-*-windows-x86_64.zip.sha256
 
   # Create GitHub Release with all artifacts
   release:
-    needs: [linux-x86_64, linux-arch-x86_64, macos-arm64, windows-x86_64]
+    needs: [linux-x86_64, linux-arch-x86_64, macos-arm64, macos-x86_64, windows-x86_64]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+
+      - name: Combine checksums
+        run: cat *.sha256 > checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -221,3 +262,4 @@ jobs:
           files: |
             turf-*.tar.gz
             turf-*.zip
+            checksums.txt

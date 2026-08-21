@@ -1,0 +1,37 @@
+TURF E059 -- COMPARE TYPE MISMATCH:
+
+CAUSE:
+  Inside a `compare subject { matches ... }` block, a `matches` arm's value
+  has a different type than the compare subject itself. Every arm's value
+  must be directly comparable to the subject -- Turf only supports `int` or
+  `string` subjects for `compare`.
+
+CORRECT USAGE:
+    mut code: int = 404;
+    compare code {
+        matches 200:
+            io::printline("OK");
+        done
+        matches 404:
+            io::printline("Not Found");
+        done
+        otherwise:
+            io::printline("Unknown");
+    }
+
+INCORRECT:
+    compare code {
+        matches "404":
+        // ERROR: Type mismatch in compare!
+        //   Subject has type 'int' but a matches arm has type 'string'.
+            io::printline("Not Found");
+        done
+        otherwise:
+            io::printline("Unknown");
+    }
+
+FIX:
+  Make every `matches` arm's value the exact same type as the compare
+  subject -- if the subject is `int`, every arm must be an `int` literal
+  (or an `int`-typed enum variant, etc.), never a quoted string, and vice
+  versa.

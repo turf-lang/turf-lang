@@ -1,0 +1,12 @@
+// Regression test: a struct declared in a module but never imported at all
+// (not bare-imported, not symbol-imported, not qualified) must be an
+// "Unknown type" error, not silently visible -- companion negative case to
+// scope_instance_method_via_symbol_import.tr.
+
+import io;
+
+fn main(): int {
+    mut c: Counter = Counter::new(5);
+    io::printline("should not compile");
+    return 0;
+}

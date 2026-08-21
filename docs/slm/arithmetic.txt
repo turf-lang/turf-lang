@@ -6,7 +6,9 @@ OPERATORS:
   *   multiplication
   /   division
   %   modulo (remainder)
-  ^   power (exponentiation)
+  **  exponentiation -- NOT `^` (that's bitwise XOR, a different operator).
+      The result is ALWAYS a double, even for `2 ** 3` (two int operands):
+      that's 8.0, not the int 8.
 
 COMPOUND ASSIGNMENT:
   +=  x += 5    is  x = x + 5
@@ -14,27 +16,41 @@ COMPOUND ASSIGNMENT:
   *=  x *= 2    is  x = x * 2
   /=  x /= 4    is  x = x / 4
   %=  x %= 3    is  x = x % 3
+  Also valid on array elements: arr[0] += 1.
 
 INCREMENT/DECREMENT:
-  x++   is  x = x + 1
-  x--   is  x = x - 1
+  x++   is  x = x + 1     (also valid: ++x, prefix form)
+  x--   is  x = x - 1     (also valid: --x, prefix form)
+
+BITWISE (separate from the arithmetic operators above):
+  ~   bitwise NOT (unary)
+  &   bitwise AND
+  |   bitwise OR
+  ^   bitwise XOR
+  <<  left shift
+  >>  right shift
 
 TYPE PROMOTION IN EXPRESSIONS:
-- bool -> int -> double (automatic in expressions only)
-- If one operand is double and the other is int, result is double.
+- bool -> int -> double (automatic, inside expressions ONLY -- does not
+  apply to a variable declaration's own type check).
+- If one operand is double and the other is int, the result is double.
 - If one operand is bool, it is treated as int (true=1, false=0).
 
 DIVISION RULES:
-- int / int = int (truncated, e.g. 7/2 = 3)
-- Dividing by zero is undefined behavior and will crash at runtime.
-- Modulo by zero is also undefined.
+- int / int = int (truncated toward zero, e.g. 7/2 = 3).
+- Dividing or taking modulo by zero (literal or computed) is undefined
+  behavior at runtime -- it is NOT rejected at compile time.
 
 CORRECT EXAMPLES:
-  int x = 10 / 3       // Result: 3 (integer division)
-  double y = 10.0 / 3  // Result: 3.333...
-  int z = 10 % 3       // Result: 1
+  mut x: int = 10 / 3;        // Result: 3 (integer division)
+  immut y: double = 10.0 / 3; // Result: 3.333...
+  mut z: int = 10 % 3;        // Result: 1
+  mut p: double = 2 ** 10;    // Result: 1024.0 (double, not int)
 
 INCORRECT EXAMPLES:
-  int x = 10 / 0       // ERROR: division by zero
-  int y = 10 % 0       // ERROR: modulo by zero
-  string s = "hi" + 5  // ERROR: cannot add string and int, use string(5)
+  immut s: string = "hi" + 5;
+    // ERROR: cannot mix string and int in arithmetic --
+    //        use "hi" + (5 to string) instead
+  mut w: int = 2 ** 3;
+    // ERROR: ** always produces a double; declare w as double, or cast:
+    //        mut w: int = (2 ** 3) to int;
