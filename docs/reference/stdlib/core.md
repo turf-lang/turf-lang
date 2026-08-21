@@ -434,14 +434,93 @@ bytes pass through unchanged.
 test::assert(strings::to_upper("hello123!") == "HELLO123!", "digits and punct unchanged");
 ```
 
-### `trim(s: string): string`
+### `trim(s: string): string` / `trim_start(s: string): string` / `trim_end(s: string): string`
 
 Strips leading/trailing ASCII whitespace (space, tab, `\n`, `\r`) by
-locating the trimmed range and delegating to `substring`. An all-whitespace
-input returns `""`.
+locating the trimmed range and delegating to `substring`. `trim` strips both
+ends; `trim_start`/`trim_end` strip only one. An all-whitespace input
+returns `""`.
 
 ```turflang
 mut all_space: string = strings::trim("     ");
 test::assert(all_space == "", "trim: all-whitespace string -> empty");
 test::assert(strings::trim("  hello world  ") == "hello world", "trim: interior space preserved");
+```
+
+> **Known bug — do not call on a value popped from a `List<string>`.**
+> `strings::trim`/`trim_start`/`trim_end` (any of the three, even a single,
+> non-chained call) reliably corrupts the heap when their argument came
+> from `List<string>.pop()` — confirmed with a 4-line repro, crashing with
+> a `malloc.c:2199` assertion failure on a *later*, unrelated allocation,
+> not at the `trim*` call site itself. A plain string literal or a
+> locally-built string is unaffected. Not yet root-caused or fixed. Until
+> it is, avoid trimming a list-sourced string — copy it into a fresh local
+> first via `strings::substring(s, 0, strings::length(s))`, or restructure
+> to not need trimming (e.g. control the input so it has no incidental
+> whitespace, as `showcase/text_toolkit.tr` does).
+
+### `split(s: string, delimiter: string): List<string>`
+
+Splits `s` on every occurrence of `delimiter`. An empty `delimiter`, or a
+`delimiter` that never occurs in `s`, both return a single-element list
+containing all of `s` unchanged (treated as "no real delimiter given," not
+an error). Requires `import list::List;` (or `list::List<string>` written
+out fully) since it returns a generic collection.
+
+```turflang
+import list::List;
+
+mut octets: List<string> = strings::split("127.0.0.1", ".");
+test::assert(octets.length() == 4, "split: 4 octets");
+```
+
+> **Known bug, likely the same root cause as the `trim*` bug above.**
+> `io::read_lines` (see [`io_and_net.md`](./io_and_net.md)) is itself built
+> on `split`, and the combination of `io::write_string` +
+> `io::read_to_string`/`read_lines` followed by essentially any further
+> string allocation has also been observed to corrupt the heap the same
+> way. See that page's own warning for the current recommended workaround
+> (avoid the file-I/O + further-string-processing combination for now).
+
+### `join(items: List<string>, sep: string): string`
+
+The inverse of `split` — concatenates every element of `items` with `sep`
+between them (no leading/trailing separator). An empty list returns `""`.
+
+```turflang
+import list::List;
+
+mut parts: List<string> = List::default();
+parts.push("a");
+parts.push("b");
+parts.push("c");
+test::assert(strings::join(parts, "-") == "a-b-c", "join: dash-separated");
+```
+
+### `pad_left(s: string, target_len: int, pad_char: char): string` / `pad_right(s: string, target_len: int, pad_char: char): string`
+
+Pads `s` with `pad_char` until it reaches `target_len` bytes — on the left
+or right respectively. If `s` is already `target_len` bytes or longer, it's
+returned unchanged (never truncated).
+
+```turflang
+test::assert(strings::pad_left("7", 3, '0') == "007", "pad_left: zero-pad");
+test::assert(strings::pad_right("hi", 5, '.') == "hi...", "pad_right: dot-fill");
+```
+
+### `parse_int(s: string): !int` / `parse_double(s: string): !double`
+
+Parses `s` as a number, hand-rolled (no `atoi`/`atof` binding). Returns the
+recoverable `error StringParseError { InvalidInt, InvalidDouble }` on
+malformed input — an empty string, a bare `-`, a non-digit byte, or (for
+`parse_double`) a malformed decimal point — rather than panicking, since a
+bad parse is an ordinary, expected outcome (e.g. user input, a config
+file), not a programming bug.
+
+```turflang
+immut n: int = strings::parse_int("42") recover produce -1;
+test::assert(n == 42, "parse_int: ordinary case");
+
+immut bad: int = strings::parse_int("not a number") recover produce -1;
+test::assert(bad == -1, "parse_int: malformed input recovers to -1");
 ```

@@ -51,6 +51,58 @@ immut name: string = io::input();
 io::printline("Hello, " + name + "!");
 ```
 
+### File I/O: `error FileError`, `read_to_string`, `read_lines`, `write_string`, `exists`
+
+```turflang
+error FileError { NotFound, ReadFailed }
+```
+
+- **`read_to_string(path: string): !string`** — reads an entire file into
+  one string (`fopen`/`fseek`/`ftell`/`fread`). `FileError::NotFound` if
+  the file can't be opened, `FileError::ReadFailed` on a short read.
+- **`read_lines(path: string): !List<string>`** — `read_to_string` + a
+  newline split, with exactly one spurious trailing empty element (caused
+  by the file's own final `\n`) dropped; a genuine blank line before EOF is
+  preserved.
+- **`write_string(path: string, content: string): bool`** — opens `"wb"`,
+  writes, closes. `true` iff the write was complete.
+- **`exists(path: string): bool`** — `true` if the path can be opened for
+  reading.
+
+```turflang
+io::write_string("notes.txt", "hello\nworld\n");
+immut content: string = io::read_to_string("notes.txt") recover produce "";
+test::assert(io::exists("notes.txt"), "...");
+```
+
+> **Known bug — do not combine file I/O with further string processing
+> yet.** `io::write_string` followed by `io::read_to_string` or
+> `read_lines`, followed by essentially *any* further string allocation
+> (a `strings::split`, a `strings::trim*` call — see
+> [`core.md`](./core.md)'s own warning on this), has been observed to
+> corrupt the heap and crash with a `malloc.c:2199` assertion failure on a
+> *later*, unrelated allocation — not at the read/write call itself. This
+> "corrupt now, crash later" pattern means the existing regression tests
+> for these functions (which pass) are not sufficient evidence of
+> correctness; it needs a real audit of `read_to_string`'s buffer-size/
+> null-termination arithmetic, not yet done. Until it's fixed, prefer
+> building strings in memory over round-tripping through a file if your
+> program needs to do further string processing on the result —
+> `showcase/text_toolkit.tr` was rewritten to avoid this combination
+> entirely for exactly this reason.
+
+### `eprint(val: string): void` / `eprintline(val: string): void` / `flush(): void`
+
+`eprint`/`eprintline` write to stderr via a raw `write(2, ...)` syscall
+(not a buffered `FILE*`), mirroring `sys::panic`'s own approach rather than
+risking a leaked or double-closed stream handle. `flush()` calls
+`fflush(NULL)`, which glibc documents as flushing every open output stream.
+
+```turflang
+io::eprintline("this goes to stderr, not stdout");
+io::flush();
+```
+
 ---
 
 ## `net`
@@ -84,12 +136,36 @@ error NetworkError {
     BindFailed,
     ListenFailed,
     AcceptFailed,
+    ResolutionFailed,
 }
 ```
 
 One variant per distinct syscall failure point, kept separate rather than a
 single generic `Failed`, so a `recover as err run { ... }` block can
 distinguish e.g. `ConnectionRefused` from a local `socket()` failure.
+
+### `resolve_hostname(host: string): !string`
+
+Resolves a hostname to a dotted-decimal IPv4 string, so a caller can dial
+by name instead of by raw octets — `net::resolve_hostname("localhost")`
+returns `"127.0.0.1"`. `NetworkError::ResolutionFailed` if the name doesn't
+resolve.
+
+Implemented via the classic (deprecated but ABI-stable) glibc
+`gethostbyname`, read back through manual byte-offset pointer arithmetic
+rather than a Turf struct mirroring `struct hostent`'s C layout (this
+compiler can't bind an arbitrary C struct's field layout — see
+[`docs/architecture/pointers_and_references.md`](../../architecture/pointers_and_references.md)
+for why). Verified end-to-end: resolving `"localhost"` and dialing the
+result with `TcpConnection::connect` reaches a real listening socket.
+
+```turflang
+immut ip: string = net::resolve_hostname("localhost") recover produce "127.0.0.1";
+mut conn: net::TcpConnection = net::TcpConnection::connect(127, 0, 0, 1, 8080) recover run {
+    io::printline("could not connect");
+    return 1;
+};
+```
 
 ### `struct TcpConnection { fd: int }`
 

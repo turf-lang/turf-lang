@@ -1,6 +1,18 @@
 // ─── http.tr ─────────────────────────────────────────────────────────────
 // A minimal HTTP/1.1 layer on top of `net.tr`'s raw TCP transport.
 //
+// NOT READY -- PARKED, DO NOT IMPORT FROM SHOWCASE/PRODUCTION CODE.
+// Two confirmed live bugs as of 2026-08-22, both covered by their own
+// deliberately-failing regression tests (not deleted -- see
+// tests/34_http_and_json/03_http_manual_routing_roundtrip.tr and
+// 04_http_callback_routing.tr): a heap-corruption crash during a real
+// request/response round trip, and the Server.get/listen callback-routing
+// registration below not actually working at runtime despite compiling
+// and (per the paragraph below) once appearing to work in isolation.
+// Left in the tree because it's real, substantial work worth keeping and
+// fixing, not because it's usable today. See
+// docs/reference/README.md's own note on this before touching it.
+//
 // Design:
 //   - Mechanical extraction of the request/response handling
 //     `showcase/http_server.tr` and `showcase/http_client.tr` already
