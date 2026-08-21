@@ -271,6 +271,28 @@ static bool isDeclaredErrorTypeValue(const TurfType *T) {
     return false;
   if (T->isUserError())
     return true;
+  // AnyErrorType (docs/planning/Errors.md) -- the type `err` is bound to
+  // inside `recover as err run { ... }` (Resolver::visitRecoverExpr,
+  // `SymTable_.declareVariable(Node.getBoundName(), TurfAnyError(), ...)`).
+  // Without this, propagating a caught error straight out of an outer
+  // `!T`-returning function (`inner() recover as err run { return err; }`)
+  // was flatly rejected: `err`'s erased AnyErrorType never satisfied
+  // `T->isUserError()` above (a DIFFERENT flag -- see TurfType::isAnyError()'s
+  // own doc comment in Types.h for why the two are deliberately distinct),
+  // so visitReturn's Compatible check failed no matter what the outer
+  // function's success type was, always reporting a confusing "function
+  // declares '!T' but returns '<error>'" (AnyErrorType's own getName()).
+  // Confirmed live with the smallest possible repro (`fn inner(): !int {
+  // return MyError::Bad; } fn outer(): !int { immut x: int = inner()
+  // recover as err run { return err; }; return x; }`) before this fix --
+  // this is a general gap in the core `!T` propagation idiom, not specific
+  // to any one caller. Codegen already treats AnyErrorType and a concrete
+  // user-error type identically (both are just the tag string, see
+  // getLLVMType()'s `T->isUserError() || T->isAnyError()` branch), so
+  // accepting it here doesn't newly permit anything Codegen can't already
+  // handle correctly.
+  if (T->isAnyError())
+    return true;
   if (const auto *NT = dynamic_cast<const NamedType *>(T)) {
     if (GlobalSymbolTable) {
       if (auto Registered = GlobalSymbolTable->LookupType(NT->getName()))
