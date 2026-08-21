@@ -1,0 +1,19 @@
+// Smoke coverage for io::eprint / io::eprintline / io::flush: none of them
+// should crash the process, and stdout/stderr must genuinely stay separate
+// (verified manually via `./program 2>err.txt 1>out.txt` during
+// development -- scripts/test_runner.sh merges 2>&1 for every test, so
+// that separation isn't something this specific harness run can assert on
+// its own).
+import io;
+import test;
+
+fn main(): int {
+    io::print("stdout via print: ");
+    io::printline("ok");
+    io::eprint("stderr via eprint: ");
+    io::eprintline("ok");
+    io::flush();
+    test::assert(true, "eprint/eprintline/flush should not crash the process");
+    io::printline("04 PASS: io::eprint / io::eprintline / io::flush");
+    return 0;
+}
