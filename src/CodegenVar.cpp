@@ -287,6 +287,33 @@ Value *AssignmentExprAST::codegen() {
   Value *Ptr = LHS->codegenLValue();
   if (!Ptr)
     return nullptr;
+
+  // `s[i] = someIntExpr;` on a `string` base is a special case: the
+  // TypeChecker gives `s[i]` the LOGICAL type `int` (so arithmetic/
+  // comparisons on characters work, e.g. strings.tr's `s[i] == 32`), but
+  // ArrayAccessExprAST::codegenLValue() -- correctly -- hands back a GEP
+  // into the underlying 1-BYTE-wide `i8` storage, not an `int`-sized slot.
+  // CastVal above is therefore a full i64 (LHSTy == int), and storing it
+  // directly at that i8 address wrote 8 bytes at every single index,
+  // stomping 7 bytes of whatever followed in the buffer -- a real, silent
+  // heap-buffer-overflow on every `buf[i] = ...` in the entire stdlib
+  // (substring/to_upper/to_lower/pad_left/pad_right/replace all build
+  // strings this way). Confirmed live: `strings::substring()` alone
+  // reliably corrupted glibc's heap metadata (`malloc.c:2199` fatal
+  // error), with the crash itself only surfacing later at an unrelated
+  // allocation once the corrupted chunk got coalesced -- exactly the
+  // "corrupt now, crash later" pattern this was tracked under. Truncating
+  // to i8 here makes the store match the GEP's actual element width; the
+  // read side (ArrayAccessExprAST::codegen()) already loads a single i8
+  // and zext's it back up to i64, so this is simply the write-side mirror
+  // of that existing convention.
+  if (const auto *ArrAccess = dynamic_cast<const ArrayAccessExprAST *>(LHS.get())) {
+    const TurfType *BaseTy = getExprType(ArrAccess->getBase());
+    if (BaseTy && BaseTy->isString()) {
+      CastVal = Builder->CreateTrunc(CastVal, Type::getInt8Ty(*TheContext), "strchartrunc");
+    }
+  }
+
   Builder->CreateStore(CastVal, Ptr);
 
   // Assignment expressions usually return the value assigned (allows x = y = 5)
