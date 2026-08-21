@@ -1,0 +1,32 @@
+// Coverage for time::sleep_ms/time::sleep_seconds against real wall-clock
+// time (time::now_seconds()).
+//
+// Deliberately measured against now_seconds(), NOT elapsed_ms()/
+// clock_ticks() -- see time.tr's own design note: clock() (what
+// elapsed_ms() is built on) measures CPU time, which barely advances while
+// a process is asleep. now_seconds() is the wall-clock reference point this
+// module actually offers, at 1-second resolution, so the sleep durations
+// below are chosen long enough (>= 1s) for that resolution to say something
+// meaningful, with a generous tolerance band so this test isn't flaky.
+import time;
+import test;
+import io;
+
+fn main(): int {
+    immut w1: int = time::now_seconds();
+    time::sleep_ms(1500);
+    immut w2: int = time::now_seconds();
+    immut deltaMs: int = w2 - w1;
+    test::assert(deltaMs >= 1 && deltaMs <= 4,
+                 "sleep_ms(1500) should advance wall-clock now_seconds() by roughly 1-2 seconds (generous band for 1s resolution)");
+
+    immut w3: int = time::now_seconds();
+    time::sleep_seconds(1);
+    immut w4: int = time::now_seconds();
+    immut deltaSeconds: int = w4 - w3;
+    test::assert(deltaSeconds >= 1 && deltaSeconds <= 3,
+                 "sleep_seconds(1) should advance wall-clock now_seconds() by roughly 1 second (generous band for 1s resolution)");
+
+    io::printline("02 PASS: time::sleep_ms / time::sleep_seconds advance real wall-clock time");
+    return 0;
+}

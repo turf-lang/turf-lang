@@ -1,0 +1,23 @@
+// Sanity coverage for time::now_seconds(): it must be a real Unix wall-clock
+// timestamp, not garbage -- checked against a lower bound (2020-01-01
+// 00:00:00 UTC) and a generous upper bound (2100-01-01 00:00:00 UTC) so this
+// test doesn't itself become the next Y2K-style expiring assertion for a
+// very long time.
+import time;
+import test;
+import io;
+
+fn main(): int {
+    immut now: int = time::now_seconds();
+
+    // 2020-01-01T00:00:00Z
+    immut year2020: int = 1577836800;
+    // 2100-01-01T00:00:00Z
+    immut year2100: int = 4102444800;
+
+    test::assert(now > year2020, "now_seconds() should be well past 2020 -- this is real wall-clock time, not garbage");
+    test::assert(now < year2100, "now_seconds() should be well before 2100 -- sanity bound against an obviously wrong value");
+
+    io::printline("01 PASS: time::now_seconds() is a plausible Unix timestamp");
+    return 0;
+}

@@ -1,0 +1,15 @@
+// tests/31_fs_and_path_stdlib/03_fs_basename.tr
+// Tests fs::basename -- everything after the last '/', or the whole string
+// when there's no '/' at all.
+
+import fs;
+import test;
+
+fn main(): int {
+    test::assert_eq(fs::basename("a/b/c.txt"), "c.txt", "basename: realistic nested path");
+    test::assert_eq(fs::basename("file.txt"), "file.txt", "basename: no '/' at all -> whole string");
+    test::assert_eq(fs::basename(".gitignore"), ".gitignore", "basename: hidden-file-style name with no '/' -> whole string");
+    test::assert_eq(fs::basename("a/b/"), "", "basename: trailing '/' -> empty string after it");
+
+    return 0;
+}

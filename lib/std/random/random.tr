@@ -1,0 +1,112 @@
+// ─── random.tr ───────────────────────────────────────────────────────────
+// Pseudo-random number generation for TurfLang, built directly on libc's
+// rand()/srand().
+//
+// Design:
+//   - THIS IS NOT CRYPTOGRAPHICALLY SECURE. rand()/srand() are the plain
+//     C PRNG -- predictable, low-quality, and trivially distinguishable
+//     from true randomness by anyone who observes a few outputs or guesses
+//     the seed. Never use anything in this module for tokens, keys,
+//     passwords, nonces, or any other security-sensitive purpose. A real
+//     CSPRNG binding (e.g. wrapping /dev/urandom or getrandom(2)) is a
+//     deliberately separate, future module -- out of scope here.
+//   - Seeding: this language has NO mutable global/module-level state at
+//     all, not even a module-private one -- only `export immut` constants
+//     exist; `export mut` (and a plain top-level `mut`) is rejected at
+//     parse time (see src/ParserDecl.cpp's ExportMutNotSupportedError:
+//     "true mutable shared global state...is not implemented at all
+//     yet"). That rules out the usual "seed exactly once, on first use,
+//     behind a hidden already-seeded flag" pattern outright -- there is no
+//     flag to hide.
+//
+//     Instead, every function below reseeds on EVERY call, from a mix of
+//     time::now_seconds() (whole-second wall clock) and time::clock_ticks()
+//     (sub-second CPU time -- see time.tr). The two calls in the same
+//     process are identical within a given wall-clock second if you look
+//     at now_seconds() alone, but clock_ticks() (glibc measures this via
+//     clock_gettime(CLOCK_PROCESS_CPUTIME_ID), not a coarse jiffy counter)
+//     empirically advances between calls only microseconds apart -- so the
+//     combined seed still changes call-to-call even within the same
+//     second. Confirmed directly, not just assumed: tests/30_random_stdlib
+//     calls random_int()/random_double() 1000+ times in a tight loop and
+//     asserts more than one distinct value comes out.
+//
+//     Be clear about what this IS and ISN'T. It is NOT "seeded once,
+//     drawn many times" like a normal PRNG session -- reseeding this often
+//     is itself something a careful C programmer would usually avoid, since
+//     it throws away rand()'s own internal state advancement on every
+//     single call instead of letting the sequence walk forward naturally.
+//     It is NOT suitable for anything that assumes one unbroken sequence
+//     across a run (e.g. a reproducible-by-seed simulation). What it IS:
+//     simple, requires zero ceremony from callers (no seed()-before-use
+//     step to forget, which was the actual goal), and -- confirmed
+//     empirically, not hoped -- still produces varied, non-constant output
+//     across many calls in a tight loop.
+//
+// Usage:
+//   import random;
+//
+//   immut roll: int = random::random_int(1, 6);      // 1..6 inclusive
+//   immut chance: double = random::random_double();  // [0.0, 1.0)
+//   if random::random_bool() { ... }                 // coin flip
+
+import time;
+
+// ─── libc bindings ────────────────────────────────────────────────────────
+
+// rand()/srand() are declared with their real (32-bit) C ABI signatures --
+// the same reasoning as strings.tr's strcmp/toupper/tolower binding
+// comment: declaring rand() as Turf's 64-bit `int` would read a full
+// 64-bit return register through a prototype whose upper 32 bits a 32-bit
+// C return value never defines. srand()'s parameter is `unsigned int` in
+// C; int32 round-trips it exactly the same way (bit pattern only, no sign
+// meaning is ever relied on below).
+extern fn rand(): int32;
+extern fn srand(seed: int32): void;
+
+// ─── constants ──────────────────────────────────────────────────────────────
+
+// The largest value rand() can return. POSIX only guarantees RAND_MAX is
+// at least 32767, but glibc -- this codebase's exclusive target, see
+// mem.tr's malloc_usable_size()/net.tr's socket constants for other
+// glibc-specific precedent already in this stdlib -- defines it as exactly
+// 2^31 - 1. Confirmed directly against this system's own header
+// (`grep RAND_MAX /usr/include/stdlib.h` -> `#define RAND_MAX 2147483647`),
+// not just assumed from the POSIX minimum.
+export immut RAND_MAX: int = 2147483647;
+
+// ─── Turf-level helpers ────────────────────────────────────────────────────
+
+// reseed: mix wall-clock seconds and CPU-time ticks into a fresh srand()
+// seed. Not exported -- every public function below calls this itself, so
+// there is no separate seeding step for callers to remember. See this
+// file's own design note above for exactly what tradeoff that implies.
+fn reseed(): void {
+    srand((time::now_seconds() + time::clock_ticks()) to int32);
+}
+
+// random_int: a pseudo-random integer in [min, max], inclusive of both
+// ends. Built on rand() % range, which is simple but has a well-known
+// slight bias toward the low end of the range whenever `range` doesn't
+// evenly divide RAND_MAX + 1 -- fine for games/tests/sampling, not for
+// anything that needs a provably uniform distribution.
+fn random_int(min: int, max: int): int {
+    reseed();
+    immut range: int = max - min + 1;
+    immut r: int = rand();
+    return min + (r % range);
+}
+
+// random_double: a pseudo-random value in [0.0, 1.0) -- never exactly
+// 1.0, since rand()'s maximum possible output (RAND_MAX) is divided by
+// RAND_MAX + 1, not RAND_MAX itself.
+fn random_double(): double {
+    reseed();
+    immut r: int = rand();
+    return (r to double) / ((RAND_MAX to double) + 1.0);
+}
+
+// random_bool: a coin flip -- true or false, each roughly 50% of the time.
+fn random_bool(): bool {
+    return random_int(0, 1) == 1;
+}
