@@ -222,6 +222,43 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
       return true;
     if (ToGen && !FromGen && ToGen->getBaseName() == From->getName())
       return true;
+
+    // Two GenericTypes of the SAME base ("Map<string, V>" vs
+    // "Map<string, string>", say) -- per-type-argument compatibility,
+    // recursing one level so a bare unresolved generic parameter in ONE
+    // argument slot (e.g. a function generic only over V, taking a
+    // `Map<string, V>` parameter) still matches a fully concrete argument
+    // (`Map<string, string>`). Same type-erasure leniency as the "T[]" /
+    // "T*" rules above, just one level deeper for a GenericType's own
+    // argument list -- that recursion was already relied on by
+    // collectGenericSubstitution() (TypeCheckerCall.cpp) to fill in the
+    // substitution map itself, but nothing upstream of it recursed the
+    // same way for the plain "is this candidate even a match" check,
+    // so a call site like this was rejected before substitution ever
+    // ran ("No matching overload" against the ONE candidate whose
+    // signature is, in fact, the correct match). Each argument pair uses
+    // isEquivalent(), not a recursive typesCompatible() call -- deliberately
+    // stricter than full compatibility (no numeric widening between type
+    // ARGUMENTS; `Map<int, int>` must not satisfy a `Map<double, double>`
+    // parameter just because int widens to double for ordinary values).
+    if (FromGen && ToGen && FromGen->getBaseName() == ToGen->getBaseName()) {
+      const auto &FA = FromGen->getTypeArgs();
+      const auto &TA = ToGen->getTypeArgs();
+      if (FA.size() == TA.size()) {
+        bool AllArgsCompatible = true;
+        for (size_t i = 0; i < FA.size(); ++i) {
+          if (dynamic_cast<const TurfGenericParamType *>(FA[i].get()) ||
+              dynamic_cast<const TurfGenericParamType *>(TA[i].get()))
+            continue;
+          if (!FA[i]->isEquivalent(TA[i].get())) {
+            AllArgsCompatible = false;
+            break;
+          }
+        }
+        if (AllArgsCompatible)
+          return true;
+      }
+    }
   }
 
   // Exact match
