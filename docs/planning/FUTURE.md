@@ -71,6 +71,15 @@ Full module-by-module gap analysis and priority tiering already in
 real `net.tr` transport). Not repeated here — that tiering already reflects
 what's actually blocking real programs vs. speculative.
 
+`docs/planning/LIMITATIONS.md` (new, 2026-08-22) tracks the confirmed,
+still-open generics gaps found while finishing that stdlib work for
+1.0.0 — `Map<K, V>`/`Set<T>` generic equality not dispatching to
+`operator==` for `string` keys/items, the same gap blocking a generic
+`List<T>` comparator/sort, and `List<T>` missing `get`/`set` indexing
+methods. Prioritized there; start with `List.get`/`set` (no blocker) and
+`Map`/`Set` string equality (highest value, probably wants a trait/
+constraint system as its real fix).
+
 ### 5. Memory Architecture (ARC)
 
 `DESIGN_NOTES.md` §5 in full: automatic reference counting, safe references

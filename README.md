@@ -490,15 +490,14 @@ Every module is an ordinary `.tr` file under `lib/std/` — no compiler special-
 | `random` | `random_int`/`random_double`/`random_bool` — not cryptographically secure |
 | `fs` | path manipulation (`join`/`dirname`/`basename`/`extension`/`is_absolute`) and directory ops (`mkdir`/`remove_file`/`remove_dir`/`is_dir`) |
 | `net` | `TcpListener`/`TcpConnection`, plus `resolve_hostname` for DNS |
+| `http` | `Request`/`Response` HTTP/1.1 parsing/building over `net`, plus a callback-based `Server` router |
 | `json` | a hand-rolled, dependency-free `JsonValue` parser/serializer (`json::parse`/`json::stringify`) |
 | `os` | `env`/`set_env`, `argc`/`argv` |
 | `sys` / `test` | `panic`/`exit`/`abort`; `assert`/`fail`/`assert_eq` |
 
 Full per-function reference for every module: [`docs/reference/stdlib/`](docs/reference/stdlib/).
 
-> **Not yet ready**: `lib/std/http/` exists in the tree but has two known unresolved bugs (a heap-corruption crash and broken callback routing) — don't use it yet. `showcase/http_server.tr`/`http_client.tr` build HTTP handling directly on `net`/`strings` instead, without depending on it.
->
-> **Known bug**: combining `io`'s file I/O (`write_string` + `read_to_string`/`read_lines`) with further string processing afterward (a `strings::split`, or any of `strings::trim`/`trim_start`/`trim_end` on a value that came out of a `List<string>`) can corrupt the heap and crash later, at an unrelated allocation. See `docs/reference/stdlib/io_and_net.md` and `core.md` for the current workaround.
+> **Known limitation**: `Map<K, V>`/`Set<T>` lookups compare keys/items by raw identity, not content, when `K`/`T` = `string` (correct for `int`/`double`/`bool`/pointer) — a generic method body is checked and codegenned once, shared across every instantiation, so it can never see the concrete `string` type to dispatch `strings.tr`'s real `operator==` through. `Set<string>` dedup and `Map<string, V>`'s own `.get()`/`.contains()`/`.tryGet()` are affected; see `docs/reference/stdlib/collections.md` for the full mechanism and the working non-generic-method pattern `http.tr`'s `Request`/`Server` use instead.
 
 ## Examples
 
@@ -717,7 +716,7 @@ What's next is tracked in **[`docs/planning/FUTURE.md`](docs/planning/FUTURE.md)
 - Developer tooling: an LSP server, `turf fmt`, `turf test`, a package manager.
 - `@slm { }` in-source syntax (Prompt-Oriented Programming) — the `--smart` error-healing pipeline is live today; writing natural-language blocks that generate real code is not.
 - LoRA fine-tuning for the local SLM.
-- The rest of the standard library (`lib/std/http/` is written but has two known bugs and is parked, not shipped — see the Standard Library section above; a `time`/DNS/`json`-adjacent web stack is otherwise close).
+- A hashed `HashMap<K, V>` (today's `map`/`collections::set` are linear-scan association lists — see the Standard Library section above) and, ideally, a trait/constraint system that would let `Map<K, V>`/`Set<T>` dispatch `==` correctly for `K`/`T = string` (documented limitation, see `docs/reference/stdlib/collections.md`).
 - The proposed memory-architecture RFC (automatic reference counting) — today's model is entirely manual: raw pointers gated behind `unsafe { }`, `&T` giving a non-null guarantee only, no GC.
 
 **Turflang 2.0.0** is reserved for self-hosting — writing the compiler in Turf itself, once the above has landed.
