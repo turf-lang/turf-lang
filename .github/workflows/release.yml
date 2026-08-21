@@ -78,6 +78,18 @@ jobs:
     container:
       image: archlinux:latest
     steps:
+      # archlinux:latest ships no `git` at all, so actions/checkout's own
+      # `submodules: recursive` clone can't run yet -- it silently falls
+      # back to the GitHub REST API tarball download instead, which has no
+      # way to fetch submodules, and fails outright ("Input 'submodules'
+      # not supported when falling back to download using the GitHub REST
+      # API"). Confirmed live: this is exactly how the v0.8.0 release run
+      # failed. `git` has to be installed in a step BEFORE checkout, not
+      # folded into the "Install dependencies" step below (which runs
+      # after and is too late).
+      - name: Install git (required before actions/checkout can clone submodules)
+        run: pacman -Sy --noconfirm --needed git
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
