@@ -360,8 +360,32 @@ llvm::Type *getLLVMType(const TurfType *T) {
     auto BaseIt = LLVMTypeCache.find(GT->getBaseName());
     if (BaseIt != LLVMTypeCache.end())
       return LLVMTypeCache[Key] = BaseIt->second;
-    // Base struct not yet seen — create a forward-declared opaque type
-    return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, GT->getBaseName());
+    // Base struct not yet seen (e.g. a top-level struct field like
+    // `headers: Map<string, string>` gets codegenned in main.cpp's
+    // sub-pass 2c, before `import map;` has run map.tr's own `struct
+    // Map<K, V>` through StructDeclExprAST::codegen() in sub-pass 3a) —
+    // create a forward-declared opaque stub, EXACTLY like
+    // StructDeclExprAST::codegen()'s own Step 1 does for a self-
+    // referential field (issue #176). Critically, register it under the
+    // BASE name ("Map") too, not just the mangled per-instantiation key
+    // ("Map_string_string") — StructDeclExprAST::codegen() looks up
+    // LLVMTypeCache[Name] by that same bare base name (its own Step 1),
+    // so caching only under `Key` here left that lookup missing the stub,
+    // making it create a SECOND, disconnected StructType and fill THAT
+    // one in via setBody() while every field that had already resolved
+    // to this orphaned stub stayed permanently opaque -- the exact "GEP
+    // into unsized type" / "storing unsized types" crash confirmed live
+    // for any struct embedding a generic collection field. One shared
+    // stub, filled in exactly once when the real generic struct decl
+    // codegens, is correct for every instantiation of the same base
+    // struct anyway (Type Erasure already makes every T/K/V a uniform
+    // 8-byte slot, so List<int> and List<string> were always meant to
+    // share one physical LLVM layout — see the `BaseIt != end()` branch
+    // just above, which already does exactly that once the base type is
+    // real).
+    llvm::StructType *Stub = llvm::StructType::create(*TheContext, GT->getBaseName());
+    LLVMTypeCache[GT->getBaseName()] = Stub;
+    return LLVMTypeCache[Key] = Stub;
   }
 
   // User-defined enums — always stored as their underlying integer type (i64).

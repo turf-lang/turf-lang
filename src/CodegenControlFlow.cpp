@@ -893,7 +893,26 @@ Value *ReturnExprAST::codegen() {
     // Type validation and compatibility are handled by the TypeChecker.
 
     if (IsFallibleReturn) {
-      bool IsError = IsErrorConstructionExpr(Val.get());
+      // NOT IsErrorConstructionExpr() alone -- that only recognizes the
+      // bare `ErrorType::Variant` shape, not `return err;` propagating a
+      // caught error straight out of an outer `!T` function (`inner()
+      // recover as err run { return err; }; ... return x;` doesn't hit
+      // this line at all -- it's the `return err;` INSIDE the recover
+      // block that does, once TypeChecker's isDeclaredErrorTypeValue()
+      // fix (TypeCheckerStmt.cpp) allows it to type-check in the first
+      // place). IsErrorTagExpr() (CodegenCore.cpp) already recognizes
+      // BOTH shapes -- a bare ErrorType::Variant reference AND a
+      // VariableExprAST whose ResolvedSymbol type is AnyErrorType/
+      // TurfUserErrorType (exactly `err`'s type, see
+      // Resolver::visitRecoverExpr) -- and RetVal is already the correct
+      // i8* tag pointer either way (a plain variable load for `err`), so
+      // no other change is needed: WrapFallibleValue's IsError=true branch
+      // just stores RetVal as-is into the errptr slot. Confirmed live:
+      // before this fix, `return err;` type-checked fine but ran with
+      // `err`'s tag pointer silently boxed into the SUCCESS slot instead
+      // (IsError=false), producing a garbage "successful" int value
+      // instead of the propagated error.
+      bool IsError = IsErrorTagExpr(Val.get());
       Builder->CreateRet(WrapFallibleValue(RetVal, IsError));
     } else {
       RetVal = CastToType(RetVal, CurrentFuncReturnType, "retcast", Loc);

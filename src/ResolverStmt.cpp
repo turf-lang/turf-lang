@@ -61,6 +61,26 @@ void Resolver::visitVarDecl(VarDeclExprAST &Node) {
   // was never declared anywhere.
   validateNamedType(Node.getTypePtr(), Node.getLoc(), CurrentFuncTypeParams_);
 
+  // Rewrite a bare `T` (or `T*`, `T[]`, `List<T>`, ...) in this local
+  // variable's declared type into a real TurfGenericParamType, exactly like
+  // buildFunctionSymbol() already does for a generic function/method's own
+  // parameters/return type (ResolverDecl.cpp) and visitStructDecl() already
+  // does for a generic struct's fields -- see substituteTypeParams()'s own
+  // doc comment (ResolverCore.cpp) for the full rationale. A plain
+  // VarDeclExprAST inside a generic function/method BODY was the one
+  // remaining place ParseType()'s NamedType("T") placeholder never got
+  // converted: validateNamedType() above only checks the name is a known
+  // type-param (harmless leniency), it never rewrites the AST, so
+  // typesCompatible()'s type-erasure fast path (Types.cpp, matches on a
+  // real TurfGenericParamType specifically) never fired for a local like
+  // `immutable key: T = self.data[i];` inside `fn<T> List.sort(...)`.
+  // Confirmed live: that exact line rejected with "Cannot initialise 'int'
+  // variable 'keyInt' with value of type 'T'" even though Codegen has
+  // always handled this correctly (T erases to a plain 64-bit slot).
+  // Non-generic contexts (CurrentFuncTypeParams_ empty) are a no-op, same
+  // guard substituteTypeParams() already has internally.
+  Node.setTypePtr(substituteTypeParams(Node.getTypePtr(), CurrentFuncTypeParams_));
+
   // 1. Resolve the initializer expression before registering the new name.
   //    This prevents `int x = x;` from passing the resolver.
   visitChild(Node.getInitializer());
