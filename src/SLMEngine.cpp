@@ -263,9 +263,17 @@ std::string SLMEngine::generateSuggestion(const std::string &systemPrompt,
       // never even reached. Writing straight to the saved fd means this
       // class of regression is visible again even with logging suppressed.
       if (saved_stderr != -1) {
-        dprintf(saved_stderr,
-                "Compiler Warning: GBNF grammar failed to parse; "
-                "falling back to unconstrained output.\n");
+        // Plain write(), not dprintf() -- MinGW's <unistd.h> compatibility
+        // shim (already relied on above for dup/dup2/close/STDERR_FILENO)
+        // declares write() but not the GNU/BSD-extension dprintf(), so this
+        // failed to compile at all on Windows ("'dprintf' was not declared
+        // in this scope"). No actual printf-style formatting was happening
+        // here anyway (no varargs beyond the literal message itself), so
+        // write() is a direct, no-behavior-change portable equivalent.
+        static const char Msg[] =
+            "Compiler Warning: GBNF grammar failed to parse; "
+            "falling back to unconstrained output.\n";
+        write(saved_stderr, Msg, sizeof(Msg) - 1);
       }
     }
   }

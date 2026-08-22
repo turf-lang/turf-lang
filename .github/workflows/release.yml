@@ -154,40 +154,14 @@ jobs:
             turf-*-macos-arm64.tar.gz
             turf-*-macos-arm64.tar.gz.sha256
 
-  # macOS - x86_64 (Intel)
-  macos-x86_64:
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install LLVM
-        run: |
-          brew install llvm cmake
-          echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
-
-      - name: Build Turf
-        run: |
-          export PATH="$(brew --prefix llvm)/bin:$PATH"
-          chmod +x scripts/cmake_build.sh
-          ./scripts/cmake_build.sh --release
-
-      - name: Package
-        id: package
-        uses: ./.github/actions/package-release
-        with:
-          platform-suffix: macos-x86_64
-          binary-path: build/turf
-          archive-format: tar.gz
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-x86_64
-          path: |
-            turf-*-macos-x86_64.tar.gz
-            turf-*-macos-x86_64.tar.gz.sha256
+  # macOS - x86_64 (Intel) -- DROPPED. `macos-13` (the last Intel-hosted
+  # runner label GitHub offers) queued for 9+ hours without ever starting
+  # during the v1.0.0-rc1 dry run while every other platform completed in
+  # minutes -- GitHub has been winding down Intel macOS runner capacity,
+  # and this job is no longer reliably schedulable at all, not just slow.
+  # macOS - x86_64 (via Rosetta 2 on an ARM runner) is a possible future
+  # replacement if Intel Mac support is ever needed again, but that's a
+  # deliberate follow-up, not a like-for-like swap done here.
 
   # Windows - x86_64 (via MSYS2 MinGW)
   windows-x86_64:
@@ -202,7 +176,10 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          install: mingw-w64-x86_64-llvm mingw-w64-x86_64-clang mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-openmp
+          # mingw-w64-x86_64-openmp was renamed to mingw-w64-x86_64-llvm-openmp
+          # upstream in the MSYS2 repos -- the old name now 404s ("target not
+          # found"), confirmed live via the v1.0.0-rc1 dry-run release build.
+          install: mingw-w64-x86_64-llvm mingw-w64-x86_64-clang mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-llvm-openmp
 
       - name: Build Turf
         shell: msys2 {0}
@@ -244,7 +221,7 @@ jobs:
 
   # Create GitHub Release with all artifacts
   release:
-    needs: [linux-x86_64, linux-arch-x86_64, macos-arm64, macos-x86_64, windows-x86_64]
+    needs: [linux-x86_64, linux-arch-x86_64, macos-arm64, windows-x86_64]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts

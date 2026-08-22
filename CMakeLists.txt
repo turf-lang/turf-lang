@@ -21,9 +21,26 @@ message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 # CMAKE_CURRENT_SOURCE_DIR is this file's own directory in both cases.
 set(LLAMA_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/llama.cpp/build")
 
+# ggml/CMakeLists.txt has its own `# remove the lib prefix on win32 mingw`
+# step (`set(CMAKE_STATIC_LIBRARY_PREFIX "")`) that only takes effect
+# inside ggml's own subdirectory scope -- so on Windows, ggml/ggml-base/
+# ggml-cpu (all built from within that scope) come out as `ggml.a`/
+# `ggml-base.a`/`ggml-cpu.a` (NO "lib" prefix), while `llama` (built from
+# llama.cpp's own top-level `src/` subdirectory, a sibling scope ggml's
+# local `set()` never reaches) keeps the ordinary `libllama.a` name on
+# every platform, Windows included. Confirmed live: a release-workflow
+# dry run's Windows build produced `ggml\src\ggml-base.a` (no prefix) but
+# still failed at turf's own link step looking for the Linux/macOS-style
+# `libggml.a` name specifically.
+if(WIN32)
+  set(GGML_LIB_PREFIX "")
+else()
+  set(GGML_LIB_PREFIX "lib")
+endif()
+
 # Auto-build llama.cpp if the static libs aren't present yet
 set(LIBLLAMA   "${LLAMA_BUILD_DIR}/src/libllama.a")
-set(LIBGGML    "${LLAMA_BUILD_DIR}/ggml/src/libggml.a")
+set(LIBGGML    "${LLAMA_BUILD_DIR}/ggml/src/${GGML_LIB_PREFIX}ggml.a")
 
 if(NOT EXISTS "${LIBLLAMA}" OR NOT EXISTS "${LIBGGML}")
   message(STATUS "llama.cpp static libs not found — building now (this may take a while)...")
@@ -35,6 +52,18 @@ if(NOT EXISTS "${LIBLLAMA}" OR NOT EXISTS "${LIBGGML}")
       -DLLAMA_BUILD_TOOLS=OFF
       -DLLAMA_BUILD_TESTS=OFF
       -DLLAMA_BUILD_EXAMPLES=OFF
+      # LLAMA_BUILD_COMMON defaults ON for a standalone configure (which
+      # this always is, per -S above) and pulls in BOTH llama.cpp's
+      # `common/` utils library AND vendor/cpp-httplib (see llama.cpp's
+      # own CMakeLists.txt -- httplib is gated on LLAMA_BUILD_COMMON, not
+      # LLAMA_BUILD_SERVER/EXAMPLES/TOOLS, all already OFF above). turf
+      # only ever links libllama/libggml* (see LLAMA_STATIC_LIBS below) --
+      # never anything from `common` -- so this has always been dead
+      # weight, and on MinGW/Windows it's actively broken: cpp-httplib's
+      # vendored mmap code calls `::CreateFile2`, which mingw-w64's headers
+      # don't declare, so it fails to compile at all ("has not been
+      # declared"). Confirmed live via a release-workflow dry run.
+      -DLLAMA_BUILD_COMMON=OFF
     RESULT_VARIABLE LLAMA_CONFIG_RESULT
   )
   if(NOT LLAMA_CONFIG_RESULT EQUAL 0)
@@ -47,8 +76,23 @@ if(NOT EXISTS "${LIBLLAMA}" OR NOT EXISTS "${LIBGGML}")
     set(NPROC 2)
   endif()
 
+  # Explicit --target list, not a plain default-target build. A plain
+  # default build (`cmake --build <dir> -- -jN`, no --target) was
+  # confirmed LIVE to leave `ggml/src/libggml.a` unbuilt on the Windows/
+  # MinGW/Ninja release job specifically (turf's own link step then failed
+  # with "libggml.a ... missing and no known rule to make it") -- Linux
+  # and macOS builds with the identical LLAMA_BUILD_COMMON=OFF configure
+  # were NOT observed to have this problem, so the exact platform-specific
+  # mechanism (a generator/dependency-graph quirk somewhere in ggml's own
+  # CMakeLists, not fully root-caused here) isn't the same as whatever
+  # used to paper over it when LLAMA_BUILD_COMMON defaulted ON. Rather
+  # than chase that further, requesting exactly the targets turf actually
+  # needs (LLAMA_STATIC_LIBS below) sidesteps the question of what is or
+  # isn't in the default set on any given platform/generator entirely.
   execute_process(
-    COMMAND ${CMAKE_COMMAND} --build "${LLAMA_BUILD_DIR}" -- -j${NPROC}
+    COMMAND ${CMAKE_COMMAND} --build "${LLAMA_BUILD_DIR}"
+      --target llama --target ggml --target ggml-base --target ggml-cpu
+      -- -j${NPROC}
     RESULT_VARIABLE LLAMA_BUILD_RESULT
   )
   if(NOT LLAMA_BUILD_RESULT EQUAL 0)
@@ -59,18 +103,18 @@ endif()
 # Collect llama.cpp static libs (core set + optional extras)
 set(LLAMA_STATIC_LIBS
   "${LLAMA_BUILD_DIR}/src/libllama.a"
-  "${LLAMA_BUILD_DIR}/ggml/src/libggml.a"
-  "${LLAMA_BUILD_DIR}/ggml/src/libggml-base.a"
-  "${LLAMA_BUILD_DIR}/ggml/src/libggml-cpu.a"
+  "${LLAMA_BUILD_DIR}/ggml/src/${GGML_LIB_PREFIX}ggml.a"
+  "${LLAMA_BUILD_DIR}/ggml/src/${GGML_LIB_PREFIX}ggml-base.a"
+  "${LLAMA_BUILD_DIR}/ggml/src/${GGML_LIB_PREFIX}ggml-cpu.a"
 )
 
-set(LIBGGML_METAL "${LLAMA_BUILD_DIR}/ggml/src/ggml-metal/libggml-metal.a")
+set(LIBGGML_METAL "${LLAMA_BUILD_DIR}/ggml/src/ggml-metal/${GGML_LIB_PREFIX}ggml-metal.a")
 if(EXISTS "${LIBGGML_METAL}")
   list(APPEND LLAMA_STATIC_LIBS "${LIBGGML_METAL}")
 endif()
 
 # Optional: ggml-blas (present in older builds)
-set(LIBGGML_BLAS "${LLAMA_BUILD_DIR}/ggml/src/ggml-blas/libggml-blas.a")
+set(LIBGGML_BLAS "${LLAMA_BUILD_DIR}/ggml/src/ggml-blas/${GGML_LIB_PREFIX}ggml-blas.a")
 if(EXISTS "${LIBGGML_BLAS}")
   list(APPEND LLAMA_STATIC_LIBS "${LIBGGML_BLAS}")
 endif()
@@ -171,7 +215,31 @@ target_include_directories(turfcore PUBLIC
   ${LLVM_INCLUDE_DIRS}
 )
 
-target_compile_definitions(turfcore PUBLIC ${LLVM_DEFINITIONS})
+# LLVM_DEFINITIONS (from LLVMConfig.cmake) is a single space-separated
+# STRING of "-Dname" / "-Dname=value" flags, not a proper CMake
+# semicolon-separated list -- confirmed via compile_commands.json: passing
+# it straight to target_compile_definitions() (which expects a LIST of
+# bare "name"/"name=value" entries, each getting its own "-D" prepended)
+# instead merges the whole string into the FIRST definition's value, e.g.
+# `-D_GLIBCXX_USE_CXX11_ABI="1 -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS ..."`.
+# This silently "worked" on every GCC/Clang tried on Linux/macOS (nothing
+# in the actual translation units did a `#if _GLIBCXX_USE_CXX11_ABI` numeric
+# check that choked on the garbage string value), but is fatal on MinGW's
+# GCC 16 libstdc++, which DOES `#if _GLIBCXX_USE_CXX11_ABI` internally --
+# confirmed live via a release-workflow dry run: "token '=' is not valid in
+# preprocessor expressions", for every single one of turfcore's translation
+# units. separate_arguments(NATIVE_COMMAND) splits the string the same way
+# the target platform's own shell would (handling the embedded `="..."`
+# quoting correctly), then each split flag's leading "-D" is stripped
+# before handing the resulting clean list to target_compile_definitions(),
+# which adds its own "-D" back per entry.
+separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND "${LLVM_DEFINITIONS}")
+set(LLVM_DEFINITIONS_CLEAN "")
+foreach(_llvm_def ${LLVM_DEFINITIONS_LIST})
+  string(REGEX REPLACE "^-D" "" _llvm_def "${_llvm_def}")
+  list(APPEND LLVM_DEFINITIONS_CLEAN "${_llvm_def}")
+endforeach()
+target_compile_definitions(turfcore PUBLIC ${LLVM_DEFINITIONS_CLEAN})
 
 target_compile_options(turfcore PRIVATE
   -Wall -Wextra -Wpedantic
