@@ -75,12 +75,23 @@ struct VariableSymbol {
   ResolverSourceLocation DeclLoc;
   size_t                 ScopeDepth; ///< 0 = global, 1 = first block, …
   bool                   IsImmutable = false;
+  /// True if this symbol was declared as a function parameter rather than a
+  /// local/global `mut`/`immut` variable. Both go through the same
+  /// declareVariable() call (a parameter is just a pre-bound local visible
+  /// for the duration of the function body), so nothing else on this struct
+  /// distinguishes them -- consumers that need to (e.g. the LSP's semantic
+  /// tokens, which color a parameter differently from an ordinary local)
+  /// previously had no way to ask. Defaults false so every existing
+  /// declareVariable() call site (ordinary locals, loop vars, catch-bound
+  /// error names, …) is unaffected.
+  bool                   IsParameter = false;
 
   VariableSymbol() = default;
   VariableSymbol(std::string Name, TurfTypePtr Type,
-                 ResolverSourceLocation DeclLoc, size_t ScopeDepth, bool IsImmutable = false)
+                 ResolverSourceLocation DeclLoc, size_t ScopeDepth,
+                 bool IsImmutable = false, bool IsParameter = false)
       : Name(std::move(Name)), Type(std::move(Type)), DeclLoc(DeclLoc),
-        ScopeDepth(ScopeDepth), IsImmutable(IsImmutable) {}
+        ScopeDepth(ScopeDepth), IsImmutable(IsImmutable), IsParameter(IsParameter) {}
 };
 
 // ─── FunctionParam ───────────────────────────────────────────────────────────

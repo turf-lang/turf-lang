@@ -76,8 +76,9 @@ public:
 
   std::shared_ptr<VariableSymbol> declareVariable(
       const std::string &Name, TurfTypePtr Type,
-      ResolverSourceLocation Loc = {}, bool IsImmutable = false) {
-    return ScopeTable_.declareVariable(Name, std::move(Type), Loc, IsImmutable);
+      ResolverSourceLocation Loc = {}, bool IsImmutable = false,
+      bool IsParameter = false) {
+    return ScopeTable_.declareVariable(Name, std::move(Type), Loc, IsImmutable, IsParameter);
   }
 
   std::shared_ptr<VariableSymbol> lookupVariable(const std::string &Name) const {

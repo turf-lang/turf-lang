@@ -144,7 +144,8 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
       // "declared here" note always say "line 0, column 0" for the FIRST
       // occurrence, regardless of where it actually was.
       ResolverSourceLocation ParamLoc{Param.Loc.Line, Param.Loc.Col};
-      SymTable_.declareVariable(Param.Name, Param.Type, ParamLoc);
+      SymTable_.declareVariable(Param.Name, Param.Type, ParamLoc,
+                                 /*IsImmutable=*/false, /*IsParameter=*/true);
     } catch (const std::runtime_error &) {
       auto Prev = SymTable_.lookupVariable(Param.Name);
       // Point the error itself at the DUPLICATE parameter's own occurrence

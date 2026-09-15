@@ -38,7 +38,8 @@ void ResolverScopeTable::resetToDepth(size_t TargetDepth) {
 }
 
 std::shared_ptr<VariableSymbol> ResolverScopeTable::declareVariable(
-    const std::string &Name, TurfTypePtr Type, ResolverSourceLocation Loc, bool IsImmutable) {
+    const std::string &Name, TurfTypePtr Type, ResolverSourceLocation Loc,
+    bool IsImmutable, bool IsParameter) {
 
   if (ScopeStack_.empty())
     enterScope();
@@ -50,7 +51,7 @@ std::shared_ptr<VariableSymbol> ResolverScopeTable::declareVariable(
                              "' is already declared in the current scope");
   }
 
-  auto Sym = std::make_shared<VariableSymbol>(Name, std::move(Type), Loc, Depth_, IsImmutable);
+  auto Sym = std::make_shared<VariableSymbol>(Name, std::move(Type), Loc, Depth_, IsImmutable, IsParameter);
   Current.Symbols[Name] = Sym;
   return Sym;
 }

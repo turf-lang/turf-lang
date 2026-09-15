@@ -76,7 +76,8 @@ public:
    */
   std::shared_ptr<VariableSymbol> declareVariable(
       const std::string &Name, TurfTypePtr Type,
-      ResolverSourceLocation Loc = {}, bool IsImmutable = false);
+      ResolverSourceLocation Loc = {}, bool IsImmutable = false,
+      bool IsParameter = false);
 
   /**
    * @brief Look up a variable by name, searching from the innermost scope out.
