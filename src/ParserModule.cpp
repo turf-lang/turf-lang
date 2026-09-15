@@ -573,6 +573,57 @@ IndexModuleDir(const std::string &Root, const char *SubdirName) {
   return Cache.emplace(std::move(Key), std::move(Index)).first->second;
 }
 
+// Pure "where would this module resolve to on disk" lookup -- the same
+// four-step search order ParseModuleImportByName() below uses (stdlib ->
+// installed user package -> ImportingFile's own directory -> cwd), but
+// without ever calling ParseFile(): no ImportedFiles/ImportStack mutation, no
+// diagnostics, no circular-import bookkeeping. For tooling that needs to
+// answer "which file does module X live in" without compiling it (the LSP's
+// go-to-definition, which used to hardcode a flat `lib/std/<name>.tr` path
+// and broke the moment stdlib modules were reorganized into subfolders --
+// see docs/architecture/modules_and_scope_resolution.md Part 2.4). Sharing
+// TurfInstallRoot()/IndexModuleDir() with the real import path means this
+// can never disagree with what a real `import ModuleName;` would actually
+// resolve to, the same guarantee ParsePreludeImports()'s self-import check
+// above already depends on.
+//
+// `ImportingFile`, if non-empty, is the path of the file that would contain
+// the `import` -- used for step 3 (same-directory relative lookup), mirroring
+// ParseModuleImportByName()'s use of the live SourceFilename for that same
+// step. Pass "" to skip step 3 (e.g. when the importing file isn't a real
+// on-disk path, or is unknown to the caller).
+//
+// Returns "" if no `<name>.tr` exists at any search location. Existence is
+// checked with llvm::sys::fs::exists(), not by attempting a parse -- a
+// module that exists but has a syntax error still resolves to a real path
+// here (this function answers "where", not "is it valid").
+std::string ResolveModuleFile(const std::string &ModuleName,
+                              const std::string &ImportingFile) {
+  std::string Root = TurfInstallRoot();
+
+  const auto &StdIndex = IndexModuleDir(Root, "std");
+  if (auto It = StdIndex.find(ModuleName); It != StdIndex.end())
+    return It->second;
+
+  const auto &UsrIndex = IndexModuleDir(Root, "usr");
+  if (auto It = UsrIndex.find(ModuleName); It != UsrIndex.end())
+    return It->second;
+
+  if (!ImportingFile.empty()) {
+    llvm::SmallString<256> SrcRelPath(ImportingFile);
+    llvm::sys::path::remove_filename(SrcRelPath);
+    llvm::sys::path::append(SrcRelPath, ModuleName + ".tr");
+    if (llvm::sys::fs::exists(SrcRelPath))
+      return SrcRelPath.str().str();
+  }
+
+  std::string CwdCandidate = ModuleName + ".tr";
+  if (llvm::sys::fs::exists(CwdCandidate))
+    return CwdCandidate;
+
+  return "";
+}
+
 // Module-name -> file-search -> ParseFile() -> ModuleImportExprAST tail,
 // shared by ParseImport() (real, source-text `import X;`/`import X::[...];`
 // statements) and ParsePreludeImports() (synthetic prelude imports injected

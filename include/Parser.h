@@ -68,6 +68,17 @@ std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc);
 // llvm::sys::fs directly.
 bool IsPathUnderLibStd(const std::string &Path);
 
+// Resolves a bare module name (e.g. "net") to the physical `.tr` file a real
+// `import net;` would load -- the same stdlib -> usr-package ->
+// ImportingFile's-directory -> cwd search order ParseModuleImportByName()
+// uses, but as a pure lookup with no parsing and no ImportedFiles/diagnostic
+// side effects. See its definition in ParserModule.cpp for the full
+// rationale (built for tooling -- an LSP's go-to-definition -- that needs
+// "where does this module live" without compiling it). Returns "" if the
+// module can't be found anywhere in the search order.
+std::string ResolveModuleFile(const std::string &ModuleName,
+                              const std::string &ImportingFile = "");
+
 // Top-level AST capture for sandbox diffing
 void ClearParsedTopLevelASTs();
 std::vector<std::unique_ptr<ExprAST>> SwapParsedTopLevelASTs(std::vector<std::unique_ptr<ExprAST>> New);
