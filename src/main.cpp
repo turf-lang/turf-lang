@@ -20,6 +20,7 @@
 #include "Colors.h"
 #include "ErrorCategory.h"
 #include "ErrorCodes.h"
+#include "Formatter.h"
 #include "Lexer.h"
 #include "Lint.h"
 #include "Parser.h"
@@ -52,6 +53,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Path.h"
 #include <set>
+#include <sstream>
 #include <vector>
 #ifdef _WIN32
 #include <process.h> // _spawnvp, _P_WAIT
@@ -77,6 +79,8 @@ struct CompilerOptions {
   bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
   bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
   bool DumpModules = false;           // --dump-modules: print full module-system introspection
+  bool Format = false;                // --format: print the formatted source to stdout and exit
+  bool FormatWrite = false;           // --write (with --format): rewrite the file in place instead
   std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
 };
 
@@ -256,6 +260,10 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       // hoisting has run, same as every other --dump-* flag.
       opts.RunResolver = true;
       opts.DumpModules = true;
+    } else if (arg == "--format") {
+      opts.Format = true;
+    } else if (arg == "--write") {
+      opts.FormatWrite = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg == "--link" && i + 1 < argc) {
@@ -274,6 +282,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
            "[--dump-modules] [--link <libname>]\n"
+           "       turf --format [--write] <filename.tr>\n"
            "       turf --explain E0NN\n";
     std::exit(1);
   }
@@ -508,6 +517,32 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
+
+  // --format needs none of the lex/parse/resolve/typecheck/codegen
+  // pipeline below -- just the raw source text -- so it short-circuits
+  // before any of that global state (GlobalSymbolTable, CallGraph, LLVM
+  // module, ...) gets initialized at all.
+  if (opts.Format) {
+    std::ifstream FormatInput(opts.InputFile);
+    if (!FormatInput) {
+      std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
+      return 1;
+    }
+    std::stringstream FormatBuf;
+    FormatBuf << FormatInput.rdbuf();
+    auto Result = turf::format::format(FormatBuf.str());
+    if (!Result.Ok) {
+      std::cerr << "Error: Could not format " << opts.InputFile << "\n";
+      return 1;
+    }
+    if (opts.FormatWrite) {
+      std::ofstream FormatOutput(opts.InputFile, std::ios::trunc | std::ios::binary);
+      FormatOutput << Result.Text;
+    } else {
+      std::cout << Result.Text;
+    }
+    return 0;
+  }
 
   if (!OpenSourceFile(opts.InputFile)) {
     std::cerr << "Error: Could not open file " << opts.InputFile << "\n";
