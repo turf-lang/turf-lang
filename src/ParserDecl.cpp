@@ -158,7 +158,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
       return nullptr;
     }
 
-    Fields.push_back({FieldName, std::move(FieldType)});
+    Fields.push_back({FieldName, std::move(FieldType), FieldNameLoc, FieldTypeLoc});
 
     if (CurTok == ',') {
       getNextToken();
@@ -883,7 +883,7 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
       return nullptr;
     }
 
-    Params.push_back({ParamType, ParamName, ParamNameLoc});
+    Params.push_back({ParamType, ParamName, ParamNameLoc, ParamTypeLoc});
 
     if (CurTok == ',')
       getNextToken();
@@ -1070,7 +1070,7 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
       return nullptr;
     }
 
-    Params.push_back({ParamType, ParamName, ParamNameLoc});
+    Params.push_back({ParamType, ParamName, ParamNameLoc, ParamTypeLoc});
 
     if (CurTok == ',')
       getNextToken();

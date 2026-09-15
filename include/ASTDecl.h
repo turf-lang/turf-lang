@@ -81,6 +81,14 @@ class VarDeclExprAST : public ExprAST {
   std::unique_ptr<ExprAST> InitVal;
   SourceLocation Loc;      ///< location of the 'mutable'/'immutable' keyword
   SourceLocation NameLoc;  ///< location of the variable's own name token -- see issue #230
+  // Location of the declared TYPE annotation (`: int` in `mut x: int = 5;`),
+  // distinct from NameLoc. Parser::ParseVarDeclBody() already captures this
+  // into a local `TypeLoc` to anchor a void-type error message; this keeps
+  // it on the node instead of discarding it, for the same reason as
+  // ParamDecl::TypeLoc (see its doc comment) -- TurfType itself carries no
+  // source span. Equal to {0,0} default only in the theoretical case of a
+  // node built without going through the real parser.
+  SourceLocation TypeLoc;
   bool IsImmutable;
   bool HasExplicitInit = true;
   // Set only by `export immut NAME: TYPE = LITERAL;` (see ParseExportDecl()
@@ -96,13 +104,15 @@ class VarDeclExprAST : public ExprAST {
 public:
   VarDeclExprAST(SourceLocation Loc, std::string Name, SourceLocation NameLoc,
                  TurfTypePtr Type, std::unique_ptr<ExprAST> InitVal,
-                 bool IsImmutable, bool HasExplicitInit = true)
+                 bool IsImmutable, bool HasExplicitInit = true,
+                 SourceLocation TypeLoc = {})
       : Name(std::move(Name)), Type(std::move(Type)),
-        InitVal(std::move(InitVal)), Loc(Loc), NameLoc(NameLoc),
+        InitVal(std::move(InitVal)), Loc(Loc), NameLoc(NameLoc), TypeLoc(TypeLoc),
         IsImmutable(IsImmutable), HasExplicitInit(HasExplicitInit) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   const SourceLocation &getNameLoc() const { return NameLoc; }
+  const SourceLocation &getTypeLoc() const { return TypeLoc; }
   const std::string &getName() const { return Name; }
   const TurfType *getType() const { return Type.get(); }
   TurfTypePtr getTypePtr() const { return Type; }
@@ -122,7 +132,7 @@ public:
   void accept(ASTVisitor &V) override { V.visitVarDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     auto Cloned = std::make_unique<VarDeclExprAST>(Loc, Name, NameLoc, Type,
-                                            CloneExprAST(InitVal.get()), IsImmutable, HasExplicitInit);
+                                            CloneExprAST(InitVal.get()), IsImmutable, HasExplicitInit, TypeLoc);
     Cloned->IsExported = IsExported;
     return Cloned;
     // Note: ResolvedSymbol intentionally NOT copied. ✓
@@ -144,6 +154,16 @@ struct ParamDecl {
   // used to hardcode {0,0} here and always report "declared here at line 0,
   // column 0" for the FIRST occurrence, regardless of where it actually was.
   SourceLocation Loc;
+  // Location of the parameter's TYPE annotation (the token right after the
+  // ':'), distinct from Loc (the parameter NAME's location) above. Every
+  // real parse site already computes this into a local `ParamTypeLoc` just
+  // to point a void-type error at it, then discarded it -- this just keeps
+  // it. Needed for tooling (e.g. an LSP semantic-token span over `: int` in
+  // `fn f(x: int)`), which a TurfTypePtr alone can't provide: TurfType is a
+  // semantic value object with no source span of its own (types can be
+  // shared/interned across unrelated syntactic occurrences). Defaults to
+  // {0,0} like Loc for the synthetic 'self' parameter.
+  SourceLocation TypeLoc;
 };
 
 

@@ -40,6 +40,8 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#include "Lexer.h" // SourceLocation -- for StructField's Name/Type spans; no circular dep (Lexer.h doesn't include Types.h)
+
 #include <cassert>
 #include <map>
 #include <memory>
@@ -524,6 +526,16 @@ public:
 struct StructField {
   std::string Name;
   TurfTypePtr Type;
+  // Source spans for the field's NAME and declared TYPE tokens respectively
+  // (`x` and `int` in `x: int`). Added for tooling (LSP semantic tokens /
+  // hover on a struct field) -- TurfType itself has no source location of
+  // its own (a type is a semantic value object, possibly shared across
+  // unrelated occurrences), so the span has to live on the syntactic site
+  // that names it instead. Default {0,0} for the handful of StructFields
+  // built without a real parse (e.g. by code paths other than
+  // Parser::ParseStructDecl(), if any exist).
+  SourceLocation NameLoc;
+  SourceLocation TypeLoc;
 };
 
 /**

@@ -813,7 +813,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
       return nullptr;
     }
     getNextToken(); // eat ';'
-    return std::make_unique<VarDeclExprAST>(Loc, Name, NameLoc, Type, std::move(Init), IsImmutable, false);
+    return std::make_unique<VarDeclExprAST>(Loc, Name, NameLoc, Type, std::move(Init), IsImmutable, false, TypeLoc);
   }
   getNextToken(); // eat '='
 
@@ -865,7 +865,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
     return nullptr;
   }
   getNextToken(); // eat ';'
-  return std::make_unique<VarDeclExprAST>(Loc, Name, NameLoc, Type, std::move(Init), IsImmutable, true);
+  return std::make_unique<VarDeclExprAST>(Loc, Name, NameLoc, Type, std::move(Init), IsImmutable, true, TypeLoc);
 }
 
 
