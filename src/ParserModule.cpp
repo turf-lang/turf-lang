@@ -624,6 +624,50 @@ std::string ResolveModuleFile(const std::string &ModuleName,
   return "";
 }
 
+// See declaration in Parser.h. Sibling of ResolveModuleFile(): same search
+// order, but enumerating every name instead of resolving one.
+std::vector<std::string> ListAvailableModules(const std::string &ImportingFile) {
+  std::string Root = TurfInstallRoot();
+
+  // std::map (not unordered_map) so insertion here is naturally sorted and
+  // de-duplicated by name -- a user module shadowing a stdlib name (step 3)
+  // collapses to one entry rather than listing "net" twice.
+  std::map<std::string, bool> Names; // value unused, std::set would do but
+                                     // keeps this symmetric with IndexModuleDir's map style
+
+  for (const auto &Entry : IndexModuleDir(Root, "std"))
+    Names.emplace(Entry.first, true);
+  for (const auto &Entry : IndexModuleDir(Root, "usr"))
+    Names.emplace(Entry.first, true);
+
+  if (!ImportingFile.empty()) {
+    llvm::SmallString<256> Dir(ImportingFile);
+    llvm::sys::path::remove_filename(Dir);
+    if (Dir.empty())
+      Dir = ".";
+    std::error_code EC;
+    for (llvm::sys::fs::directory_iterator I(Dir.str(), EC), E; !EC && I != E;
+         I.increment(EC)) {
+      if (I->type() != llvm::sys::fs::file_type::regular_file)
+        continue;
+      if (llvm::sys::path::extension(I->path()) != ".tr")
+        continue;
+      // Skip the importing file itself -- it can't meaningfully import
+      // itself, and ParseModuleImportByName()'s step 3 would only ever
+      // find it as a same-directory sibling of some OTHER file anyway.
+      if (llvm::sys::fs::equivalent(I->path(), ImportingFile))
+        continue;
+      Names.emplace(llvm::sys::path::stem(I->path()).str(), true);
+    }
+  }
+
+  std::vector<std::string> Result;
+  Result.reserve(Names.size());
+  for (const auto &Entry : Names)
+    Result.push_back(Entry.first);
+  return Result;
+}
+
 // Module-name -> file-search -> ParseFile() -> ModuleImportExprAST tail,
 // shared by ParseImport() (real, source-text `import X;`/`import X::[...];`
 // statements) and ParsePreludeImports() (synthetic prelude imports injected

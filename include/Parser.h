@@ -79,6 +79,19 @@ bool IsPathUnderLibStd(const std::string &Path);
 std::string ResolveModuleFile(const std::string &ModuleName,
                               const std::string &ImportingFile = "");
 
+// Lists every module name resolvable via the same search order
+// ResolveModuleFile()/ParseModuleImportByName() use: stdlib (lib/std/**),
+// then installed user packages (lib/usr/**), then any sibling ".tr" file
+// next to @p ImportingFile (skipping ImportingFile itself). Built for
+// tooling -- an LSP's `import <cursor>` completion needs the full list of
+// names a bare `import X;` could legally name, which nothing before this
+// exposed (ResolveModuleFile() only answers "does this ONE name resolve").
+// Shares IndexModuleDir()/TurfInstallRoot() with ResolveModuleFile(), so the
+// two can never disagree about what a real import would find. Deduplicated
+// and sorted; pass "" for ImportingFile to skip the sibling-file step (e.g.
+// when the importing file isn't a real on-disk path).
+std::vector<std::string> ListAvailableModules(const std::string &ImportingFile = "");
+
 // Top-level AST capture for sandbox diffing
 void ClearParsedTopLevelASTs();
 std::vector<std::unique_ptr<ExprAST>> SwapParsedTopLevelASTs(std::vector<std::unique_ptr<ExprAST>> New);
