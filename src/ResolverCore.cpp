@@ -307,8 +307,16 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   }
   Sym.ReturnType = substituteTypeParams(Node.getReturnTypePtr(), TypeParams);
   ResolverSourceLocation DeclLoc;
-  DeclLoc.Line = Node.getLoc().Line;
-  DeclLoc.Col = Node.getLoc().Col;
+  // getNameLoc(), not getLoc() -- getLoc() is the 'fn'/'operator' keyword's
+  // own position (see FuncDefExprAST's doc comment in ASTDecl.h), which
+  // used to make every "go to definition" land one token early, on 'f' of
+  // 'fn' rather than the function's actual name (confirmed live via
+  // turf-lsp: textDocument/definition on `io::print` returned a 1-character
+  // range at column 0 of `fn print(...)`, not on "print"). getNameLoc()
+  // already exists for exactly this (issue #230) and for a struct method
+  // (`fn Point.new(...)`) correctly points at "new", not "Point" or "fn".
+  DeclLoc.Line = Node.getNameLoc().Line;
+  DeclLoc.Col = Node.getNameLoc().Col;
   Sym.DeclLoc = DeclLoc;
   // Only instance methods (Params[0] is the implicit "self" -- see
   // ParseFuncDef's self-parameter construction) can mutate self at all;
