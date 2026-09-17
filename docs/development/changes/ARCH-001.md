@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | landed |
 | **Dates** | started 2026-09-17 · landed 2026-09-17 |
-| **Commits** | *(fill in on commit — the record predates the sha by design)* |
+| **Commits** | `a414d9c` citation re-points · `a2271fa` `docs/development/` · `bbcbd6d` scripts + CI · `ba5accd` AGENTS.md pointer + C-3 note |
 | **Sessions** | 1 of 1 |
 | **Depends on** | none — this is the first group |
 | **Frozen decisions relied on** | F-TRACK-1 (every session updates a change record). No semantic decision is relied on or touched. |
