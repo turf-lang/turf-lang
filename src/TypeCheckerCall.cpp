@@ -4,7 +4,7 @@
  * @details Part of the TypeChecker pass (Issue #7), split from the original
  *          monolithic TypeChecker.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -204,10 +204,10 @@ static TurfTypePtr substituteReturnType(
                                                     std::move(NewArgs))
                    : Ty;
   }
-  // `!T` (docs/planning/Errors.md) where T is itself the generic function's
-  // own type parameter (e.g. `fn<T> firstOrFail(arr: T[], len: int): !T`) --
-  // without this branch, `recover`'s success type stayed the raw,
-  // unsubstituted TurfGenericParamType("T") forever, so e.g.
+  // `!T` (docs/architecture/errors_and_recover.md) where T is itself the
+  // generic function's own type parameter (e.g. `fn<T> firstOrFail(arr: T[],
+  // len: int): !T`) -- without this branch, `recover`'s success type stayed the
+  // raw, unsubstituted TurfGenericParamType("T") forever, so e.g.
   // `firstOrFail(intArray, n) recover produce -1` failed to typecheck
   // ("'recover produce int' doesn't match this call's success type 'T'")
   // even though the concrete instantiation is genuinely `!int`. Found live
@@ -1341,8 +1341,8 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
 
 
 // True if every path through `E` diverges (ends in `return`/`break`/
-// `continue`) -- used to enforce Errors.md's "recover run { ... }` must not
-// silently fall through" rule. Deliberately a direct, non-interprocedural
+// `continue`) -- used to enforce errors_and_recover.md's "recover run { ... }`
+// must not silently fall through" rule. Deliberately a direct, non-interprocedural
 // structural check (same spirit/limitations as Resolver's MutatesSelfField
 // -- see its doc comment) rather than a full CFG reachability analysis:
 // only these three are recognized as diverging, so a block that only
@@ -1414,8 +1414,8 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
       const_cast<ExprAST *>(Node.getProduceExpr())->accept(*this);
     TurfTypePtr ProduceTy = getType(Node.getProduceExpr());
     // "A recover block must evaluate to the function's success type"
-    // (Errors.md) -- e.g. `writeFile(...) recover produce 42;` is invalid
-    // when writeFile's success type is void, exactly like the doc's own
+    // (errors_and_recover.md) -- e.g. `writeFile(...) recover produce 42;` is
+    // invalid when writeFile's success type is void, exactly like the doc's own
     // example: typesCompatible() already rejects int-vs-void generically,
     // no special-casing needed here.
     if (ProduceTy && SuccessTy && !typesCompatible(ProduceTy.get(), SuccessTy.get())) {
@@ -1425,12 +1425,12 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
                       SuccessTy->getName() + "'.");
     }
   } else {
-    // Run / AsRun: per docs/planning/Errors.md, a block that doesn't
-    // `produce` a value must diverge on every path instead -- otherwise
+    // Run / AsRun: per docs/architecture/errors_and_recover.md, a block that
+    // doesn't `produce` a value must diverge on every path instead -- otherwise
     // there's no value for the recovered expression to have. EXCEPT when the
-    // success type is `void`: Errors.md's own worked example shows a plain
-    // `writeFile(...) recover run { io::printline("Write failed."); };` (no
-    // 'return' at all) as explicitly VALID for a `!void` function -- there's
+    // success type is `void`: errors_and_recover.md's own worked example shows
+    // a plain `writeFile(...) recover run { io::printline("Write failed."); };`
+    // (no 'return' at all) as explicitly VALID for a `!void` function -- there's
     // no value needed in that case, so simply running the block and falling
     // through is fine; only a non-void success type actually needs a value
     // to come from somewhere.
@@ -1472,10 +1472,10 @@ void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
     return;
   }
 
-  // `ErrorType::Variant` (docs/planning/Errors.md) -- covers both the bare,
-  // payload-less reference (this node visited directly as an expression)
-  // and this node as the callee of a FuncCallExprAST construction (the
-  // CALL's own type comes from ResolvedCandidates/ResolvedCallTarget
+  // `ErrorType::Variant` (docs/architecture/errors_and_recover.md) -- covers
+  // both the bare, payload-less reference (this node visited directly as an
+  // expression) and this node as the callee of a FuncCallExprAST construction
+  // (the CALL's own type comes from ResolvedCandidates/ResolvedCallTarget
   // instead, same as any other call -- this just gives the callee itself
   // SOME type too, harmlessly, exactly like the comment above already
   // describes for ModuleFunctionRef/StaticMethodRef).

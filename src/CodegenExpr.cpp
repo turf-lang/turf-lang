@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -94,15 +94,16 @@ Value *DefaultInitExprAST::codegen() {
 // cleanup, RFC §1, not done here).
 
 Value *BinaryExprAST::codegen() {
-  // `err == MathError::DivisionByZero` (docs/planning/Errors.md) --
-  // compares error-tag identity via strcmp, since every error-type value
-  // (constructed or type-erased as AnyErrorType) lowers to an opaque i8*
-  // payload pointer that's meaningless to compare by raw pointer identity
-  // (two logically-equal error references never share one malloc'd
-  // payload). Checked before operand codegen (not just before the generic
-  // fallback further down) specifically so a bare `ErrorType::Variant`
-  // operand can skip its ordinary ScopeAccessExprAST::codegen() path
-  // entirely -- see GetErrorTagValue()'s doc comment.
+  // `err == MathError::DivisionByZero`
+  // (docs/architecture/errors_and_recover.md) -- compares error-tag identity
+  // via strcmp, since every error-type value (constructed or type-erased as
+  // AnyErrorType) lowers to an opaque i8* payload pointer that's meaningless to
+  // compare by raw pointer identity (two logically-equal error references never
+  // share one malloc'd payload). Checked before operand codegen (not just
+  // before the generic fallback further down) specifically so a bare
+  // `ErrorType::Variant` operand can skip its ordinary
+  // ScopeAccessExprAST::codegen() path entirely -- see GetErrorTagValue()'s doc
+  // comment.
   if ((Op == TOK_EQ || Op == TOK_NEQ) &&
       (IsErrorTagExpr(LHS.get()) || IsErrorTagExpr(RHS.get()))) {
     Value *LTag = GetErrorTagValue(LHS.get());

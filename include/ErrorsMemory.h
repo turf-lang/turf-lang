@@ -25,9 +25,9 @@ public:
 };
 // `recover as err run { ... }` on a call whose only possible failure(s) are
 // bare-form error types (`error Name;`, sugar for a single, informationless
-// DEFAULT variant) -- Errors.md explicitly calls this out as a diagnostic
-// error: a bare error carries nothing to discriminate on, so binding `err`
-// to compare it against anything is pointless. Determined by scanning the
+// DEFAULT variant) -- errors_and_recover.md explicitly calls this out as a
+// diagnostic error: a bare error carries nothing to discriminate on, so
+// binding `err` to compare it against anything is pointless. Determined by scanning the
 // callee's own `return` statements for which declared error types it can
 // actually produce (Resolver::CollectReturnedErrorTypeNames).
 class BareErrorAsBindingError : public TurfError {

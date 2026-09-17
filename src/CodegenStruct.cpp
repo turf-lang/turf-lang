@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -519,9 +519,10 @@ Value *ScopeAccessExprAST::codegen() {
     return CodegenConstantValue(*ResolvedConstant);
   }
 
-  // `ErrorType::Variant` (docs/planning/Errors.md) -- always a bare,
-  // non-callable reference (variants have no payload, see BuildErrorTag()'s
-  // doc comment). Returns the (error type, variant)'s tag string.
+  // `ErrorType::Variant` (docs/architecture/errors_and_recover.md) -- always a
+  // bare, non-callable reference (variants have no payload, see
+  // BuildErrorTag()'s doc comment). Returns the (error type, variant)'s tag
+  // string.
   if (ResolvedKind == ScopeAccessKind::ErrorVariantRef) {
     return BuildErrorTag(LeftName, RightName);
   }

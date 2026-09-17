@@ -4,7 +4,7 @@
 // Private, implementation-only forward declarations shared across the 7
 // CodegenCore/Expr/Var/ControlFlow/Func/Array/Struct.cpp files (the split of
 // the original monolithic Codegen.cpp -- see
-// docs/planning/COMPILER_MODULE_BREAKDOWN.md). NOT part of the compiler's
+// docs/architecture/compiler_pipeline.md). NOT part of the compiler's
 // public interface (that's Codegen.h) -- these are free functions and
 // globals that used to be `static`/file-scope in the monolith but are used
 // from more than one of the new files, so they need real external linkage

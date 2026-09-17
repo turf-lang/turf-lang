@@ -3,7 +3,7 @@
 
 // Private, implementation-only forward declarations shared across the 5
 // ParserCore/Literal/Stmt/Decl/Module.cpp files (the split of the original
-// monolithic Parser.cpp -- see docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+// monolithic Parser.cpp -- see docs/architecture/compiler_pipeline.md).
 // NOT part of the compiler's public interface (that's Parser.h) -- these
 // exist only so the mutually-recursive descent parser can call across the
 // 5 translation units it's now spread across. Mirrors the forward-decl

@@ -343,14 +343,14 @@ public:
     }
 };
 
-// `error Name { Variant, ... }` (docs/planning/Errors.md). Named
-// ErrorDeclExprAST (not e.g. ErrorExprAST) deliberately to stay well clear
-// of TurfError (include/Errors.h), the compiler's own internal diagnostic
+// `error Name { Variant, ... }` (docs/architecture/errors_and_recover.md).
+// Named ErrorDeclExprAST (not e.g. ErrorExprAST) deliberately to stay well
+// clear of TurfError (include/Errors.h), the compiler's own internal diagnostic
 // base class -- an unrelated concept that happens to share the English word
 // "error". `IsBareForm` distinguishes the sugar `error Name;` (a single
 // implicit `DEFAULT` variant) from the full braced form. Variants are bare
 // names only, exactly like EnumDeclExprAST -- no payload fields (deferred,
-// see Errors.md's own note on why).
+// see errors_and_recover.md §5.1).
 class ErrorDeclExprAST : public ExprAST {
     std::string              Name;
     std::vector<std::string> Variants;

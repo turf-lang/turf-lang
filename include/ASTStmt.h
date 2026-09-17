@@ -289,8 +289,8 @@ public:
 };
 
 // Which of the three `recover` forms this expression uses
-// (docs/planning/Errors.md): `recover produce value`, `recover run { ... }`,
-// or `recover as err run { ... }`.
+// (docs/architecture/errors_and_recover.md): `recover produce value`, `recover
+// run { ... }`, or `recover as err run { ... }`.
 enum class RecoverKind {
     Produce, // recover produce <expr>
     Run,     // recover run { ... }
@@ -298,11 +298,11 @@ enum class RecoverKind {
 };
 
 // `<expr> recover ...` -- handles the failure case of a `!T`-typed call
-// expression at the call site (docs/planning/Errors.md). `Wrapped` is the
-// `!T` expression being recovered; `Block` (Run/AsRun) is a `BlockExprAST`,
-// same as any other `{ ... }` body in this language (if/while/function
-// bodies). `BoundName` (AsRun only) names the variable the failing error
-// value is bound to inside `Block` (e.g. `err`).
+// expression at the call site (docs/architecture/errors_and_recover.md).
+// `Wrapped` is the `!T` expression being recovered; `Block` (Run/AsRun) is a
+// `BlockExprAST`, same as any other `{ ... }` body in this language
+// (if/while/function bodies). `BoundName` (AsRun only) names the variable the
+// failing error value is bound to inside `Block` (e.g. `err`).
 class RecoverExprAST : public ExprAST {
     std::unique_ptr<ExprAST> Wrapped;
     RecoverKind              Kind;
@@ -325,14 +325,15 @@ public:
     ExprAST*             getBlock()       const { return Block.get(); }
     const SourceLocation& getLoc()         const { return Loc; }
 
-    /// The wrapped expression's success type T (docs/planning/Errors.md),
-    /// set by TypeChecker::visitRecoverExpr and read by Codegen -- needed
-    /// there to know how to unbox the FallibleValue's boxed successBits
-    /// slot back to T's real LLVM representation (Codegen can't derive this
-    /// from the runtime value alone, since every `!T` lowers to the SAME
-    /// FallibleValue struct regardless of T; see getFallibleValueType()'s
-    /// doc comment in Codegen.cpp). Same cross-pass-communication pattern
-    /// as ResolvedKind/ResolvedCandidates elsewhere in this file. Nulled by
+    /// The wrapped expression's success type T
+    /// (docs/architecture/errors_and_recover.md), set by
+    /// TypeChecker::visitRecoverExpr and read by Codegen -- needed there to
+    /// know how to unbox the FallibleValue's boxed successBits slot back to T's
+    /// real LLVM representation (Codegen can't derive this from the runtime
+    /// value alone, since every `!T` lowers to the SAME FallibleValue struct
+    /// regardless of T; see getFallibleValueType()'s doc comment in
+    /// Codegen.cpp). Same cross-pass-communication pattern as
+    /// ResolvedKind/ResolvedCandidates elsewhere in this file. Nulled by
     /// clone() (a cloned tree is stale until re-typechecked).
     TurfTypePtr ResolvedSuccessType;
 

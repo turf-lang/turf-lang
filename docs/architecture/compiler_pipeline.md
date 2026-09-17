@@ -28,12 +28,15 @@ Related docs:
 - `docs/architecture/memory_model.md` — heap/stack layout and the runtime
   representation generics compile down to (companion doc, written
   alongside this one — see §7 below for where the two meet).
-- `docs/planning/COMPILER_MODULE_BREAKDOWN.md` — the 2026-08 split of the
-  original monolithic `Parser.cpp`/`Resolver.cpp`/`TypeChecker.cpp` into
-  the per-category files (`ParserCore.cpp`, `ResolverDecl.cpp`,
-  `TypeCheckerCall.cpp`, ...) cited throughout this document. The split
-  changed file organization only — every pass's actual algorithm is
-  unchanged from before it.
+- The 2026-08 split of the original monolithic
+  `Parser.cpp`/`Resolver.cpp`/`TypeChecker.cpp` into the per-category files
+  (`ParserCore.cpp`, `ResolverDecl.cpp`, `TypeCheckerCall.cpp`, ...) cited
+  throughout this document. The split changed file organization only — every
+  pass's actual algorithm is unchanged from before it. Its plan doc,
+  `docs/planning/COMPILER_MODULE_BREAKDOWN.md`, was retired once the split
+  landed (same convention as `PHASE_2_ISSUES.md`/`FINAL_SPRINT.md`; the text
+  is in git history) — **this document is where the per-pass file layout is
+  now described**, and every split file's own header doc comment points here.
 
 ---
 
@@ -230,9 +233,8 @@ noise from one bad statement.
 
 `src/ParserCore.cpp`, `src/ParserDecl.cpp`, `src/ParserStmt.cpp`,
 `src/ParserLiteral.cpp`, `src/ParserModule.cpp` (split by category from a
-single monolithic `Parser.cpp`, per `docs/planning/
-COMPILER_MODULE_BREAKDOWN.md` — every file's top doc comment says so
-explicitly). Classic **recursive-descent** parsing: each grammar
+single monolithic `Parser.cpp` in the 2026-08 module split — every file's top
+doc comment says so explicitly). Classic **recursive-descent** parsing: each grammar
 production is one C++ function (`ParseIfStmt()`, `ParseStructDecl()`,
 `ParseType()`, ...) that consumes tokens via the shared `CurTok`/
 `getNextToken()` cursor and recursively calls the functions for whatever
@@ -545,7 +547,8 @@ Two places the TypeChecker specifically understands this shape:
 - **`visitRecoverExpr()`** (`src/TypeCheckerCall.cpp:1389-1457`) type-
   checks Turf's three `recover` forms (`recover produce <value>`,
   `recover run { }`, `recover as x run { }` — see
-  `docs/planning/Errors.md` for the full language-level design). It first
+  `docs/architecture/errors_and_recover.md` for the full language-level
+  design). It first
   rejects `recover` on anything whose type isn't actually an error union
   (`!WrappedTy->isErrorUnion()`, `src/TypeCheckerCall.cpp:1394-1404`);
   for `recover produce`, checks the produced value against the success

@@ -258,9 +258,9 @@ public:
  */
 /**
  * @brief The type of `err` inside `recover as err run { ... }`
- * (docs/planning/Errors.md). See `TurfType::isAnyError()`'s doc comment for
- * why this exists as its own type rather than any specific declared error
- * type.
+ * (docs/architecture/errors_and_recover.md). See `TurfType::isAnyError()`'s doc
+ * comment for why this exists as its own type rather than any specific declared
+ * error type.
  */
 class AnyErrorType : public TurfType {
 public:
@@ -638,13 +638,14 @@ public:
 
 /**
  * @brief A user-declared `error Name { Variant, ... }` type
- * (docs/planning/Errors.md). Deliberately NOT named `TurfErrorType` -- one
- * character away from `TurfError` (include/Errors.h), the compiler's own
- * internal diagnostic base class, which is an entirely unrelated concept.
+ * (docs/architecture/errors_and_recover.md). Deliberately NOT named
+ * `TurfErrorType` -- one character away from `TurfError` (include/Errors.h),
+ * the compiler's own internal diagnostic base class, which is an entirely
+ * unrelated concept.
  *
  * Variants are bare names only, exactly like `TurfEnumType` -- no payload
- * fields. This is a deliberate scope decision (see Errors.md's own note on
- * why): a variant with fields, and a real destructuring syntax to read them
+ * fields. This is a deliberate scope decision (see errors_and_recover.md
+ * §5.1): a variant with fields, and a real destructuring syntax to read them
  * back safely, is deferred until there's an actual need for it.
  */
 class TurfUserErrorType : public TurfType {
@@ -684,12 +685,13 @@ public:
 // ─── TurfErrorUnionType ───────────────────────────────────────────────────────
 
 /**
- * @brief The `!T` fallible-return type (docs/planning/Errors.md): T on
- * success, or a value of ANY declared `error` type on failure. Distinct from
- * `TurfUserErrorType` (the declared error TYPE itself) -- a `!T` function
- * doesn't name one specific error type, it can fail with any of the
- * program's declared error types. Also unrelated to `TurfError`
- * (include/Errors.h), the compiler's internal diagnostic base class.
+ * @brief The `!T` fallible-return type
+ * (docs/architecture/errors_and_recover.md): T on success, or a value of ANY
+ * declared `error` type on failure. Distinct from `TurfUserErrorType` (the
+ * declared error TYPE itself) -- a `!T` function doesn't name one specific
+ * error type, it can fail with any of the program's declared error types. Also
+ * unrelated to `TurfError` (include/Errors.h), the compiler's internal
+ * diagnostic base class.
  */
 class TurfErrorUnionType : public TurfType {
     TurfTypePtr SuccessType_;

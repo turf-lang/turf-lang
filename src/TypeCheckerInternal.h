@@ -3,7 +3,7 @@
 
 // Private, implementation-only forward declarations shared across the 5
 // TypeCheckerCore/Expr/Stmt/Decl/Call.cpp files (the split of the original
-// monolithic TypeChecker.cpp -- see docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+// monolithic TypeChecker.cpp -- see docs/architecture/compiler_pipeline.md).
 // NOT part of the compiler's public interface (that's TypeChecker.h) -- these
 // are free functions (not TypeChecker:: methods, which are already all
 // visible across files via the class declaration in TypeChecker.h) that used

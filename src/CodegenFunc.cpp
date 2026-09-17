@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -518,8 +518,8 @@ Value *FuncDefExprAST::codegen() {
   // the most common statement kind inside a module body, so returning a
   // literal nullptr here silently truncated EVERY imported module after
   // its first function once BlockExprAST::codegen() was hardened to stop
-  // at the first null statement (see git history for the now-removed
-  // docs/planning/CODE_REVIEW_GAPS_2026-07.md's original writeup).
+  // at the first null statement (see git history for the retired 2026-07
+  // code-review-gaps audit's original writeup).
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }
 
@@ -1051,16 +1051,16 @@ Value *FuncCallExprAST::codegen() {
 // A declaration codegens to nothing meaningful, mirroring EnumDeclExprAST
 // above -- the real type info was already registered by the Parser/Resolver.
 // Runtime representation for `!T`/error variants lands in Stage 3
-// (docs/planning/Errors.md).
+// (docs/architecture/errors_and_recover.md).
 Value *ErrorDeclExprAST::codegen() {
   return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
 }
 
 
-// `<expr> recover ...` (docs/planning/Errors.md) -- branches on the wrapped
-// FallibleValue's isOk bit, unboxes/produces/runs accordingly, and merges
-// back to a single value of the success type T (or, if T is void, no value
-// at all -- see the IsVoidSuccess early-return below).
+// `<expr> recover ...` (docs/architecture/errors_and_recover.md) -- branches on
+// the wrapped FallibleValue's isOk bit, unboxes/produces/runs accordingly, and
+// merges back to a single value of the success type T (or, if T is void, no
+// value at all -- see the IsVoidSuccess early-return below).
 //
 // A block that diverges (every `recover run`/`recover as err run` except the
 // void-success case -- enforced by TypeChecker's AllPathsDiverge check)

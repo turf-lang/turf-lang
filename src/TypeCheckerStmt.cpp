@@ -4,7 +4,7 @@
  * @details Part of the TypeChecker pass (Issue #7), split from the original
  *          monolithic TypeChecker.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -201,9 +201,10 @@ void TypeChecker::visitForEach(ForEachExprAST &Node) {
   const auto *ArrTy = dynamic_cast<const ArrayType *>(IterableTy.get());
   if (ArrTy->getSize() < 0) {
     // Unsized array parameter (`T[]`) -- no runtime length to bound the
-    // loop with. See docs/planning/PHASE_3_ISSUES.md Issue #192's status
-    // note and ArrayType's getSize() doc comment for why this genuinely
-    // can't be made to work without a much bigger calling-convention change.
+    // loop with. See ArrayType's getSize() doc comment for why this genuinely
+    // can't be made to work without a much bigger calling-convention change
+    // (originally tracked as Issue #192, whose spec doc was retired in
+    // 2026-08 -- git history).
     ForEachUnsizedArrayError(Node.getLoc(), IterableTy->getName()).raise();
     setType(&Node, TurfVoid());
     return;
@@ -255,14 +256,14 @@ void TypeChecker::visitContinue(ContinueExprAST &Node) {
 
 
 // True if `T` is (or, if an unresolved NamedType, names) a declared `error`
-// type (docs/planning/Errors.md). A bare `error` variant reference
-// (TypeChecker::visitScopeAccess) already resolves directly to the real
-// TurfUserErrorType, but a CONSTRUCTED variant (`IOError::FileNotFound(...)`)
-// gets its type from the Resolver's synthetic candidate, which -- like
-// StructName::new(...) -- deliberately returns a bare NamedType(LeftName)
-// (see Resolver::visitFuncCall's struct-constructor branch for why: the
-// exact-getName()-match fallback in typesCompatible() already makes
-// NamedType("MathError") interchangeable with the real TurfUserErrorType
+// type (docs/architecture/errors_and_recover.md). A bare `error` variant
+// reference (TypeChecker::visitScopeAccess) already resolves directly to the
+// real TurfUserErrorType, but a CONSTRUCTED variant
+// (`IOError::FileNotFound(...)`) gets its type from the Resolver's synthetic
+// candidate, which -- like StructName::new(...) -- deliberately returns a bare
+// NamedType(LeftName) (see Resolver::visitFuncCall's struct-constructor branch
+// for why: the exact-getName()-match fallback in typesCompatible() already
+// makes NamedType("MathError") interchangeable with the real TurfUserErrorType
 // everywhere else, so nothing but THIS specific check -- "is this actually
 // an error type at all," which name-equality alone can't answer -- needs the
 // real lookup).
@@ -271,8 +272,8 @@ static bool isDeclaredErrorTypeValue(const TurfType *T) {
     return false;
   if (T->isUserError())
     return true;
-  // AnyErrorType (docs/planning/Errors.md) -- the type `err` is bound to
-  // inside `recover as err run { ... }` (Resolver::visitRecoverExpr,
+  // AnyErrorType (docs/architecture/errors_and_recover.md) -- the type `err` is
+  // bound to inside `recover as err run { ... }` (Resolver::visitRecoverExpr,
   // `SymTable_.declareVariable(Node.getBoundName(), TurfAnyError(), ...)`).
   // Without this, propagating a caught error straight out of an outer
   // `!T`-returning function (`inner() recover as err run { return err; }`)
@@ -314,10 +315,10 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
     const TurfType *Declared = ReturnTypeStack_.back().get();
     if (RetTy) {
       bool Compatible;
-      // `!T` (docs/planning/Errors.md): a function declared to return `!T`
-      // may return either something compatible with T, OR a value of ANY
-      // declared error type -- `!T` is an open/unenumerated union, unlike
-      // e.g. Rust's `Result<T, E>`, so there's no specific error type to
+      // `!T` (docs/architecture/errors_and_recover.md): a function declared to
+      // return `!T` may return either something compatible with T, OR a value
+      // of ANY declared error type -- `!T` is an open/unenumerated union,
+      // unlike e.g. Rust's `Result<T, E>`, so there's no specific error type to
       // check RetTy against here; only "is this some declared error value
       // at all" matters.
       if (Declared->isErrorUnion()) {

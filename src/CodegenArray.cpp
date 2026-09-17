@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24

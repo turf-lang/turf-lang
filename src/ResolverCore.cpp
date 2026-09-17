@@ -4,7 +4,7 @@
  * @details Part of the Resolver name-resolution pass (Issue #18), split from
  *          the original monolithic Resolver.cpp by category (mirrors
  *          AST.h's ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -246,11 +246,12 @@ static bool MutatesSelfField(const ExprAST *E) {
 
 /**
  * @brief Collects candidate error-type names from a function body's `return`
- * statements (docs/planning/Errors.md), for ResolverFunctionSymbol::
- * PossibleErrorTypeNames -- see that field's doc comment for why this is
- * intentionally unfiltered (not yet checked against isErrorTypeName()) and
- * why the scan is conservative/non-interprocedural, same rationale as
- * MutatesSelfField() just above (mirrors its exact recursion shape).
+ * statements (docs/architecture/errors_and_recover.md), for
+ * ResolverFunctionSymbol:: PossibleErrorTypeNames -- see that field's doc
+ * comment for why this is intentionally unfiltered (not yet checked against
+ * isErrorTypeName()) and why the scan is conservative/non-interprocedural, same
+ * rationale as MutatesSelfField() just above (mirrors its exact recursion
+ * shape).
  *
  * Recognizes `return ErrorType::Variant;` (a bare ScopeAccessExprAST -- error
  * variants are always bare, non-callable references, exactly like `enum`
@@ -481,8 +482,9 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
     return;
   }
 
-  // Hoist `error` type declarations (docs/planning/Errors.md): register the
-  // name and variants so NamedType/ScopeAccess references resolve in Pass 2.
+  // Hoist `error` type declarations (docs/architecture/errors_and_recover.md):
+  // register the name and variants so NamedType/ScopeAccess references resolve
+  // in Pass 2.
   if (const auto *ErrDecl = dynamic_cast<const ErrorDeclExprAST *>(Node)) {
     auto ET = std::make_shared<TurfUserErrorType>(
         ErrDecl->getName(), ErrDecl->getVariants(), ErrDecl->isBareForm());

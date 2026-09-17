@@ -792,7 +792,8 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
 // out-of-range/backwards value that didn't resolve to a real range).
 //
 // This is the fix for the single most impactful defect found while
-// benchmarking the pipeline (docs/patent/PATENT_BENCHMARK_DATA.md A.4 §7):
+// benchmarking the pipeline (benchmark writeup A.4 §7, kept outside this
+// repository):
 // when the model decides the right fix is to "regenerate an enclosing
 // declaration" (a struct / error / machine / function block), it naturally
 // emits the WHOLE corrected block in replacement_line but still reports
@@ -974,7 +975,8 @@ bool verifySuggestion(const AISuggestion &suggestion, int errorLine,
 
 // Retry cap for the loop below -- matches the roadmap wording exactly
 // ("Retry up to 3x on TypeChecker failure, feeding the error back into the
-// prompt", docs/planning/FINAL_SPRINT.md's Track C).
+// prompt"): docs/planning/ROADMAP_v1.0.0_COMPLETE.md §7's `--smart` Retry
+// Loop item, which absorbed the retired final-sprint checklist's Track C.
 static constexpr int kMaxSlmAttempts = 3;
 
 // Wrapper that gets an SLM suggestion, validates it in a sandbox, and

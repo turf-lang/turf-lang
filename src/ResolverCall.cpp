@@ -4,7 +4,7 @@
  * @details Part of the Resolver name-resolution pass (Issue #18), split from
  *          the original monolithic Resolver.cpp by category (mirrors
  *          AST.h's ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -154,8 +154,8 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     if (SymTable_.isErrorTypeName(LeftName)) {
       // e.g. `MathError::DivisionByZero(...)` -- a real error type, but
       // variants are bare, non-callable names, exactly like a plain `enum`
-      // variant just above (docs/planning/Errors.md -- payload fields on a
-      // variant are deferred, see Errors.md's own note on why).
+      // variant just above (docs/architecture/errors_and_recover.md -- payload
+      // fields on a variant are deferred, see errors_and_recover.md §5.1).
       ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantRef;
       TypeError(Node.getLoc(), "'" + LeftName + "::" + CalleeName +
                                    "' is an error variant, not a function -- "
@@ -659,8 +659,8 @@ void Resolver::visitFieldAccess(FieldAccessExprAST &Node) {
 }
 
 
-// `<expr> recover ...` (docs/planning/Errors.md). Resolves the wrapped `!T`
-// expression first (populating its callee's ResolvedCandidates/
+// `<expr> recover ...` (docs/architecture/errors_and_recover.md). Resolves the
+// wrapped `!T` expression first (populating its callee's ResolvedCandidates/
 // ResolvedCallTarget, needed below), then dispatches on which of the three
 // forms this is.
 void Resolver::visitRecoverExpr(RecoverExprAST &Node) {
@@ -676,9 +676,9 @@ void Resolver::visitRecoverExpr(RecoverExprAST &Node) {
   SymTable_.enterScope();
 
   if (Node.getKind() == RecoverKind::AsRun) {
-    // Bare-error restriction (docs/planning/Errors.md): `recover as err run`
-    // is rejected when every error type this call can actually fail with
-    // (per the callee's PossibleErrorTypeNames, computed by
+    // Bare-error restriction (docs/architecture/errors_and_recover.md):
+    // `recover as err run` is rejected when every error type this call can
+    // actually fail with (per the callee's PossibleErrorTypeNames, computed by
     // CollectReturnedErrorTypeNames -- see its own doc comment on why it's
     // unfiltered) is bare-form (`error Name;`, sugar for one informationless
     // DEFAULT variant, nothing to discriminate on). If the callee is
@@ -757,11 +757,12 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
   }
 
   if (SymTable_.isErrorTypeName(LeftName)) {
-    // Bare `ErrorType::Variant` reference (docs/planning/Errors.md) -- e.g.
-    // `return MathError::DivisionByZero;` or `err == MathError::
-    // DivisionByZero`. Mirrors the EnumVariant branch above exactly: a
-    // variant is always a bare name, never callable (payload fields are
-    // deferred, see Errors.md's own note on why).
+    // Bare `ErrorType::Variant` reference
+    // (docs/architecture/errors_and_recover.md) -- e.g. `return
+    // MathError::DivisionByZero;` or `err == MathError:: DivisionByZero`.
+    // Mirrors the EnumVariant branch above exactly: a variant is always a bare
+    // name, never callable (payload fields are deferred, see
+    // errors_and_recover.md §5.1).
     Node.ResolvedKind = ScopeAccessKind::ErrorVariantRef;
     auto ET = SymTable_.lookupErrorType(LeftName);
     if (!ET)

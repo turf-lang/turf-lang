@@ -4,7 +4,7 @@
  * @details Part of the TypeChecker pass (Issue #7), split from the original
  *          monolithic TypeChecker.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -379,9 +379,9 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
       return TurfBool();
     }
     // `err == MathError::DivisionByZero` inside `recover as err run { ... }`
-    // (docs/planning/Errors.md): `err`'s type is AnyErrorType (its real
-    // concrete error type isn't knowable at compile time -- `!T` doesn't
-    // restrict which declared error type a call can fail with), so the
+    // (docs/architecture/errors_and_recover.md): `err`'s type is AnyErrorType
+    // (its real concrete error type isn't knowable at compile time -- `!T`
+    // doesn't restrict which declared error type a call can fail with), so the
     // ordinary "same getName()" check below can never match it against a
     // real TurfUserErrorType. Allowed specifically (and only) when one side
     // is AnyErrorType and the other is a genuine declared error-type value.

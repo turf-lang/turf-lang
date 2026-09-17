@@ -63,14 +63,15 @@ enum class ScopeAccessKind {
     ConstructorCall,   // StructName::new(...) (as a call target)
     DefaultConstruct,  // StructName::default() (as a call target)
     // ErrorType::Variant -- a bare, non-callable reference to a user-
-    // declared `error` type's variant (docs/planning/Errors.md), e.g. the
+    // declared `error` type's variant
+    // (docs/architecture/errors_and_recover.md), e.g. the
     // `MathError::DivisionByZero` in `err == MathError::DivisionByZero` or
     // `return MathError::DivisionByZero;`. Semantically identical to
     // EnumVariant (bare name, no payload, rejected if called) -- kept as a
-    // separate kind rather than reusing EnumVariant only because error
-    // types lower differently in Codegen (a tag string, not an integer
-    // ordinal) and participate in `!T`/`recover`/AnyErrorType comparisons
-    // that plain enums don't.
+    // separate kind rather than reusing EnumVariant only because error types
+    // lower differently in Codegen (a tag string, not an integer ordinal) and
+    // participate in `!T`/`recover`/AnyErrorType comparisons that plain enums
+    // don't.
     ErrorVariantRef,
 };
 

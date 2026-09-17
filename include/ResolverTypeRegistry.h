@@ -13,7 +13,7 @@
 /**
  * @brief Struct/enum/user-error-type registry half of the Resolver's symbol
  * table (split out of the original monolithic ResolverSymbolTable -- see
- * docs/planning/COMPILER_MODULE_BREAKDOWN.md). Tracks every struct, enum,
+ * docs/architecture/compiler_pipeline.md). Tracks every struct, enum,
  * and `error` type name declared in the current file or any transitively-
  * imported module, plus which module owns each one -- struct/enum/error
  * names live in ONE flat namespace shared by the current file and every
@@ -73,7 +73,8 @@ public:
   bool isEnumName(const std::string& Name) const;
   std::vector<std::string> getAllEnumNames() const;
 
-  // ── User-declared `error` type registry (docs/planning/Errors.md) ────────
+  // ── User-declared `error` type registry ───────────────────────────────────
+  // (docs/architecture/errors_and_recover.md)
 
   // Same shape as the enum registry above -- a flat, module-blind namespace,
   // own duplicate-name map (not cross-checked against structs/enums, same as
@@ -131,9 +132,9 @@ private:
   /// declaration location -- see registerEnumType()'s doc comment.
   std::unordered_map<std::string, ResolverSourceLocation> EnumDeclLocs_;
 
-  /// User-declared `error` types (docs/planning/Errors.md), declared in the
-  /// current file or any transitively-imported module. Parallel shape to
-  /// RegisteredEnums_/EnumDeclLocs_ above.
+  /// User-declared `error` types (docs/architecture/errors_and_recover.md),
+  /// declared in the current file or any transitively-imported module. Parallel
+  /// shape to RegisteredEnums_/EnumDeclLocs_ above.
   std::unordered_map<std::string, std::shared_ptr<TurfUserErrorType>> RegisteredErrorTypes_;
   std::unordered_map<std::string, ResolverSourceLocation> ErrorDeclLocs_;
 

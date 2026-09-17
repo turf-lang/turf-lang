@@ -330,7 +330,8 @@ public:
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
   }
 };
-// ─── `error`/`!T`/`recover` diagnostics (docs/planning/Errors.md) ────────────
+// ─── `error`/`!T`/`recover` diagnostics ──────────────────────────────────────
+// (docs/architecture/errors_and_recover.md)
 // Named `...Error : public TurfError` / `...Warning : public TurfWarning`
 // like every other diagnostic in this file -- this is the COMPILER's own
 // diagnostic machinery reporting on the user-facing `error` keyword feature,
@@ -339,8 +340,9 @@ public:
 // `TurfError` itself).
 
 // A `!T`-declared function whose body never actually returns a value of any
-// declared error type -- a warning (not a hard error, per Errors.md), since
-// `!T` doesn't OBLIGE a function to fail, only permits it to.
+// declared error type -- a warning (not a hard error, per
+// errors_and_recover.md), since `!T` doesn't OBLIGE a function to fail, only
+// permits it to.
 class NeverReturnsErrorWarning : public TurfWarning {
 public:
   NeverReturnsErrorWarning(SourceLocation Loc, const std::string &FuncName)

@@ -4,7 +4,7 @@
  * @details Part of the Resolver name-resolution pass (Issue #18), split from
  *          the original monolithic Resolver.cpp by category (mirrors
  *          AST.h's ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -173,9 +173,9 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   visitChild(Node.getBody());
   CurrentFuncTypeParams_.clear();
 
-  // "Never returns an error" warning (docs/planning/Errors.md): a `!T`-
-  // declared function is PERMITTED, not obliged, to fail -- so this is a
-  // warning, not a hard error. Checked here (once per function, after the
+  // "Never returns an error" warning (docs/architecture/errors_and_recover.md):
+  // a `!T`- declared function is PERMITTED, not obliged, to fail -- so this is
+  // a warning, not a hard error. Checked here (once per function, after the
   // body is fully resolved) rather than inside buildFunctionSymbol() itself,
   // which runs multiple times per function (Pass 1 hoisting, then again
   // here) and would otherwise emit this warning 2-3x for the same function.

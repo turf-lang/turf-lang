@@ -4,7 +4,7 @@
  *        the foundation ResolverScopeTable/ResolverModuleTable/
  *        ResolverTypeRegistry/ResolverSymbolTable (split out of the
  *        original monolithic ResolverSymbolTable.h -- see
- *        docs/planning/COMPILER_MODULE_BREAKDOWN.md) all build on.
+ *        docs/architecture/compiler_pipeline.md) all build on.
  *
  * Issue #2 of the monolith → multi-pass migration.
  *
@@ -248,7 +248,7 @@ struct ResolverFunctionSymbol {
 
   /// Candidate scope-qualifier names (`Left` in every `Left::Right` or
   /// `Left::Right(...)` shape) found among this function's own `return`
-  /// statements (docs/planning/Errors.md), computed once by
+  /// statements (docs/architecture/errors_and_recover.md), computed once by
   /// Resolver::buildFunctionSymbol() via a conservative, non-interprocedural
   /// scan (CollectReturnedErrorTypeNames() in Resolver.cpp) -- same
   /// conservatism/limitations as MutatesSelf above (no nested-call

@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -75,7 +75,8 @@ void InitializeModule() {
 }
 
 
-// ─── `!T` / `error` runtime representation (docs/planning/Errors.md) ────────
+// ─── `!T` / `error` runtime representation ───────────────────────────────────
+// (docs/architecture/errors_and_recover.md)
 //
 // See getLLVMType()'s TurfErrorUnionType/TurfUserErrorType/AnyErrorType
 // branches just below for the overall design: `!T` is one fixed struct type
@@ -197,15 +198,16 @@ Function *getOrCreateStrcmpFn() {
 
 
 /// Builds the runtime value of an `ErrorType::Variant` reference
-/// (docs/planning/Errors.md): a global string constant uniquely identifying
-/// the (error type, variant) pair, e.g. "MathError::DivisionByZero". Variants
-/// are bare names only (no payload fields -- deferred, see Errors.md's own
-/// note on why), so this tag string IS the whole runtime representation of
-/// an error value: no heap allocation, no wrapping struct, just an i8*.
-/// Comparing two error values (BinaryExprAST::codegen()'s equality branch)
-/// is then a plain strcmp on this string, which is also why a single global
-/// string constant works as identity with no whole-program variant-ID
-/// registry needed -- it's already unique by construction.
+/// (docs/architecture/errors_and_recover.md): a global string constant uniquely
+/// identifying the (error type, variant) pair, e.g.
+/// "MathError::DivisionByZero". Variants are bare names only (no payload fields
+/// -- deferred, see errors_and_recover.md §5.1), so this tag string IS the
+/// whole runtime representation of an error value: no heap allocation, no
+/// wrapping struct, just an i8*. Comparing two error values
+/// (BinaryExprAST::codegen()'s equality branch) is then a plain strcmp on this
+/// string, which is also why a single global string constant works as identity
+/// with no whole-program variant-ID registry needed -- it's already unique by
+/// construction.
 Value *BuildErrorTag(const std::string &ErrorTypeName,
                             const std::string &VariantName) {
   return Builder->CreateGlobalString(ErrorTypeName + "::" + VariantName, "errtag");
@@ -213,11 +215,12 @@ Value *BuildErrorTag(const std::string &ErrorTypeName,
 
 
 /// True if `E` is an error-tag-shaped operand for `==`/`!=`
-/// (docs/planning/Errors.md): either a bare `ErrorType::Variant` reference,
-/// or a variable already known (via its Resolver-set ResolvedSymbol, not
-/// TypeChecker's type map -- see IsErrorConstructionExpr's doc comment for
-/// why) to hold an error tag -- `err` inside `recover as err run { ... }`
-/// being the only way such a variable is ever created today.
+/// (docs/architecture/errors_and_recover.md): either a bare
+/// `ErrorType::Variant` reference, or a variable already known (via its
+/// Resolver-set ResolvedSymbol, not TypeChecker's type map -- see
+/// IsErrorConstructionExpr's doc comment for why) to hold an error tag -- `err`
+/// inside `recover as err run { ... }` being the only way such a variable is
+/// ever created today.
 bool IsErrorTagExpr(const ExprAST *E) {
   if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E))
     return SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
@@ -247,7 +250,7 @@ Value *GetErrorTagValue(const ExprAST *E) {
 
 
 /// True if `E` is exactly the `ErrorType::Variant` reference shape
-/// (docs/planning/Errors.md) -- mirrors Resolver's
+/// (docs/architecture/errors_and_recover.md) -- mirrors Resolver's
 /// CollectReturnedErrorTypeNames' identical structural recognition, used
 /// here to decide whether a `return`ed value is an error tag (i8*) or a
 /// genuine success value, since Codegen can't rely on TypeChecker's inferred
@@ -393,8 +396,8 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
   }
 
-  // User-declared `error` type value (docs/planning/Errors.md) -- a global
-  // string constant identifying (error type, variant), e.g.
+  // User-declared `error` type value (docs/architecture/errors_and_recover.md)
+  // -- a global string constant identifying (error type, variant), e.g.
   // "MathError::DivisionByZero" (see BuildErrorTag()) -- variants are bare
   // names with no payload, so this tag string IS the whole value, an i8*
   // like any other string. AnyErrorType (the type of `err` inside
@@ -404,10 +407,10 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = PointerType::get(*TheContext, 0);
   }
 
-  // `!T` (docs/planning/Errors.md) -- uniformly `{ i1 isOk, i64 successBits,
-  // i8* errorPayload }` regardless of what T is: the success value is boxed
-  // into the i64 slot (see BoxToI64Slot()/UnboxFromI64Slot()) exactly like
-  // this compiler already boxes a generic type parameter into a void*
+  // `!T` (docs/architecture/errors_and_recover.md) -- uniformly `{ i1 isOk, i64
+  // successBits, i8* errorPayload }` regardless of what T is: the success value
+  // is boxed into the i64 slot (see BoxToI64Slot()/UnboxFromI64Slot()) exactly
+  // like this compiler already boxes a generic type parameter into a void*
   // (CastToType()'s "Type Erasure" branches) -- same idea, fixed-width slot
   // instead of a pointer. This keeps ONE concrete LLVM type for every `!T`
   // no matter what T is, so a function's LLVM return type/a variable's LLVM

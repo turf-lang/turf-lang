@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -153,8 +153,8 @@ Value *BlockExprAST::codegen() {
   // processing the rest of this block instead of quietly dropping the
   // failing statement from the compiled program. This closes the
   // "BlockExprAST::codegen() never checks for a null statement result" gap
-  // tracked in the now-removed docs/planning/CODE_REVIEW_GAPS_2026-07.md
-  // (see git history for the original writeup). This relies on every "processed
+  // tracked in the 2026-07 code-review-gaps audit (its doc was retired; see
+  // git history for the original writeup). This relies on every "processed
   // StructDeclExprAST, EnumDeclExprAST, ErrorDeclExprAST, an `export
   // immut` VarDeclExprAST) returning a non-null sentinel instead of a
   // literal nullptr -- see each of their own codegen()'s doc comments.
@@ -870,9 +870,9 @@ Value *ReturnExprAST::codegen() {
     GlobalSymbolTable->MarkEarlyExit();
   }
 
-  // `!T` (docs/planning/Errors.md): the function's ACTUAL LLVM return type
-  // is always the FallibleValue struct (see getLLVMType()), never a bare
-  // T/void, so every `return` inside a `!T` function -- including a bare
+  // `!T` (docs/architecture/errors_and_recover.md): the function's ACTUAL LLVM
+  // return type is always the FallibleValue struct (see getLLVMType()), never a
+  // bare T/void, so every `return` inside a `!T` function -- including a bare
   // `return;` for a `!void` function's success case -- must wrap its value
   // instead of returning it (or void) directly.
   bool IsFallibleReturn = CurrentFuncReturnType && CurrentFuncReturnType->isErrorUnion();

@@ -18,7 +18,7 @@
 // Umbrella: the scope/module/type-registry halves of what used to be one
 // single ResolverSymbolTable class each live in their own header now (split
 // out for the same reason Parser/Resolver/TypeChecker/Codegen were --  see
-// docs/planning/COMPILER_MODULE_BREAKDOWN.md). Included here, after the
+// docs/architecture/compiler_pipeline.md). Included here, after the
 // shared data types above (VariableSymbol, ResolverFunctionSymbol, ...) that
 // all 3 depend on, so ResolverSymbolTable below can compose them.
 #include "ResolverScopeTable.h"
@@ -259,7 +259,8 @@ public:
     return TypeRegistry_.getAllEnumNames();
   }
 
-  // ── User-declared `error` type registry (docs/planning/Errors.md) ────────
+  // ── User-declared `error` type registry ───────────────────────────────────
+  // (docs/architecture/errors_and_recover.md)
 
   std::optional<ResolverSourceLocation>
   registerErrorType(const std::string& Name, ResolverSourceLocation Loc,

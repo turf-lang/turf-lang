@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -65,8 +65,8 @@ Value *VarDeclExprAST::codegen() {
   // their own "processed, nothing to return" codegen paths. Confirmed
   // live: returning nullptr here made BlockExprAST::codegen() (once
   // hardened to stop at the first null statement -- see this file's
-  // history and git history for the now-removed
-  // docs/planning/CODE_REVIEW_GAPS_2026-07.md's original writeup) silently
+  // history, and git history for the retired 2026-07 code-review-gaps
+  // audit's original writeup) silently
   // abandon the rest of a module's body the moment it reached an
   // `export immut` constant -- e.g. sys.tr's `export immut STDERR_FD`
   // sits right before `fn panic(...)`, so `panic` never got a prototype

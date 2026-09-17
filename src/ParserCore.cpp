@@ -4,7 +4,7 @@
  * @details Part of the recursive-descent parser for TurfLang, split from the
  *          original monolithic Parser.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -242,13 +242,14 @@ TurfTypePtr ParseType() {
     return nullptr;
   }
 
-  // `!T` -- a fallible/error-union type (docs/planning/Errors.md): T on
-  // success, or any declared `error` type value on failure. Unambiguous with
-  // the unary logical-not operator ('!' desugars to `x != true` -- see
-  // ParseUnary()) since that's parsed entirely inside EXPRESSION parsing;
-  // ParseType() is a wholly separate function only ever called from type
-  // positions (return types, parameter types, var-decl annotations, struct/
-  // error-variant fields), which previously rejected a leading '!' outright.
+  // `!T` -- a fallible/error-union type
+  // (docs/architecture/errors_and_recover.md): T on success, or any declared
+  // `error` type value on failure. Unambiguous with the unary logical-not
+  // operator ('!' desugars to `x != true` -- see ParseUnary()) since that's
+  // parsed entirely inside EXPRESSION parsing; ParseType() is a wholly
+  // separate function only ever called from type positions (return types,
+  // parameter types, var-decl annotations, struct/error-variant fields),
+  // which previously rejected a leading '!' outright.
   if (CurTok == '!') {
     getNextToken(); // consume '!'
     TurfTypePtr SuccessType = ParseType();
@@ -1005,11 +1006,11 @@ std::unique_ptr<ExprAST> ParseExpression() {
   }
 
   // `<expr> recover ...` -- handles the failure case of a `!T`-typed call
-  // expression at the call site (docs/planning/Errors.md). Bound to the
-  // whole expression parsed so far (same "loosest binding" position as the
-  // give/otherwise ternary just above), since every example in Errors.md
-  // attaches `recover` directly to a call expression, not to some inner
-  // sub-term of a larger arithmetic expression.
+  // expression at the call site (docs/architecture/errors_and_recover.md).
+  // Bound to the whole expression parsed so far (same "loosest binding"
+  // position as the give/otherwise ternary just above), since every example in
+  // errors_and_recover.md attaches `recover` directly to a call expression,
+  // not to some inner sub-term of a larger arithmetic expression.
   if (CurTok == TOK_RECOVER) {
     SourceLocation RecoverLoc = CurLoc;
     getNextToken(); // consume 'recover'

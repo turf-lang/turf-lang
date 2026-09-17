@@ -4,7 +4,7 @@
  * @details Part of the Resolver name-resolution pass (Issue #18), split from
  *          the original monolithic Resolver.cpp by category (mirrors
  *          AST.h's ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.

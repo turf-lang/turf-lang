@@ -4,7 +4,7 @@
  * @details Part of the recursive-descent parser for TurfLang, split from the
  *          original monolithic Parser.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -393,8 +393,8 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
   return std::make_unique<MachineDeclExprAST>(Loc, Name, States, Edges);
 }
 
-// ParseErrorDecl - called when CurTok == TOK_ERROR (docs/planning/Errors.md).
-// Parses either:
+// ParseErrorDecl - called when CurTok == TOK_ERROR
+// (docs/architecture/errors_and_recover.md). Parses either:
 //   error Name;                                          -- bare form, sugar
 //                                                            for a single
 //                                                            implicit
@@ -416,9 +416,9 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
 
   if (CurTok == ';') {
     // Bare form: `error GeneralError;` -- sugar for a single implicit
-    // DEFAULT variant (docs/planning/Errors.md). Unlike the braced form
-    // (which ends in '}', same as struct/enum), this form's own trailing
-    // ';' is consumed HERE, not by the caller -- every top-level/block
+    // DEFAULT variant (docs/architecture/errors_and_recover.md). Unlike the
+    // braced form (which ends in '}', same as struct/enum), this form's own
+    // trailing ';' is consumed HERE, not by the caller -- every top-level/block
     // statement loop in this file treats TOK_ERROR like TOK_STRUCT/
     // TOK_ENUM (a construct that must NOT be followed by a ';'), so if this
     // branch left the ';' unconsumed those loops would reject it as
@@ -448,9 +448,10 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
     getNextToken(); // eat '{'
 
     // Variants are bare names only, exactly like ParseEnumDecl's loop -- no
-    // payload fields (a deliberate scope decision, see Errors.md's own note
-    // on why; a variant with fields and a real destructuring syntax to read
-    // it back safely is deferred rather than half-built now).
+    // payload fields (a deliberate scope decision, see
+    // errors_and_recover.md §5.1; a variant with fields and a real
+    // destructuring syntax to read it back safely is deferred rather than
+    // half-built now).
     while (CurTok != '}' && CurTok != TOK_EOF) {
       if (CurTok != TOK_IDENTIFIER) {
         LogErrorAt(CurLoc, "Expected variant name in error type definition");
@@ -684,7 +685,8 @@ std::unique_ptr<ExprAST> ParseExternDecl() {
 // rejected right here at parse time rather than deferred -- true mutable
 // global state (initialization ordering, real LLVM global-variable
 // codegen) is a meaningfully bigger feature than a named constant and is
-// not implemented at all yet; see docs/planning/ROADMAP_v1.0.0.md.
+// not implemented at all yet; the rule is stated for users in
+// docs/reference/functions_and_modules.md's `export` section.
 std::unique_ptr<ExprAST> ParseExportDecl() {
   SourceLocation ExportLoc = CurLoc;
   getNextToken(); // eat 'export'
