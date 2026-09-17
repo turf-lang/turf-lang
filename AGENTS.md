@@ -50,6 +50,7 @@ Compiling one of the 6 prelude modules (`int`/`double`/`bool`/`char`/`strings`/`
 - `docs/architecture/` — deep internals references for specific subsystems, kept accurate and updated alongside the code they describe (e.g. `modules_and_scope_resolution.md` for the `::`/import system, `memory_model.md` for stack/heap/lifetime, `compiler_pipeline.md` for the Lexer→Parser→Resolver→TypeChecker→Codegen pass structure and CFG static analysis, both explained in CS terms rather than LLVM-specific ones). Read the relevant one before making non-trivial changes to that subsystem — don't re-derive from scratch.
 - `docs/planning/` — roadmap and issue-tracker-style docs (`ROADMAP_v1.0.0_COMPLETE.md` is the authoritative "what's done vs. open" tracker; the `PHASE_*_ISSUES.md` files are historical specs, trimmed to only the genuinely-still-open issues in detail).
 - `scripts/` — `cmake_build.sh` (build), `test_runner.sh` (test), `compile_and_run.sh` (compile+run+cleanup one file).
+- `docs/development/` — **if your task is one of the architecture-overhaul feature groups (`ARCH-001`, `TYPE-001`, `SEM-001`, … — `docs/planning/ARCHITECTURE_OVERHAUL.md` Appendix B), read `docs/development/SESSION_PROTOCOL.md` and follow it**; it adds a freeze document, a change record per feature group, and `scripts/session_{pre,post}flight.sh` on top of everything in this file. This file stays the source of truth for build and test conventions.
 
 ## Conventions this project holds firmly to
 
