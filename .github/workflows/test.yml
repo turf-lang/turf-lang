@@ -1,9 +1,9 @@
 name: Turf Test Suites
 on:
   push:
-    branches: ["master", "dev"]
+    branches: ["master", "dev", "refactor/architecture"]
   pull_request:
-    branches: ["master", "dev"]
+    branches: ["master", "dev", "refactor/architecture"]
   workflow_dispatch:
 jobs:
   # Documentation cross-references. Deliberately its own job: it needs neither
