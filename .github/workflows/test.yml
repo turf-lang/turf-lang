@@ -6,6 +6,19 @@ on:
     branches: ["master", "dev"]
   workflow_dispatch:
 jobs:
+  # Documentation cross-references. Deliberately its own job: it needs neither
+  # LLVM nor a build, so a dangling `docs/....md` citation is reported in
+  # seconds rather than after a full compiler build. See
+  # docs/planning/ARCHITECTURE_OVERHAUL.md §5 C-8 for the failure this catches.
+  doc_links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check documentation cross-references
+        run: |
+          chmod +x scripts/check_doc_links.sh
+          ./scripts/check_doc_links.sh
+
   build_and_test:
     runs-on: ubuntu-latest
     steps:

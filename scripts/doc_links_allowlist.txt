@@ -1,0 +1,48 @@
+# Deliberate exceptions for scripts/check_doc_links.sh.
+#
+# Format, one per line:   <cited path> :: <citing-file glob> :: <why>
+#
+# The referrer glob is not optional and not decorative: a prose paragraph that
+# explains why a document was retired legitimately names it, but a fresh source
+# comment citing the same dead path is exactly the bug this check exists to
+# catch (ARCHITECTURE_OVERHAUL.md §5 C-8). Scoping each exception to the file
+# that earns it keeps the second case failing.
+#
+# An entry whose file now exists, or that nothing cites any more, FAILS the
+# check. Delete the line -- that is the intended maintenance.
+
+# --- Retired planning docs, named by the documents that record their removal.
+docs/planning/Errors.md :: docs/architecture/errors_and_recover.md :: names the design brief it superseded (removed 2026-08-04); the 43 source citations were re-pointed here by ARCH-001.
+docs/planning/Errors.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: §5 C-8 uses this exact path as the worked example of a dangling reference -- the citation is the point.
+docs/planning/COMPILER_MODULE_BREAKDOWN.md :: docs/architecture/compiler_pipeline.md :: records that the 2026-08 module-split plan was retired once the split landed, and that this document replaced it.
+docs/planning/FINAL_SPRINT.md :: docs/planning/ROADMAP_v1.0.0_COMPLETE.md :: §3's note explaining that the final-sprint checklist was removed once everything it tracked landed.
+docs/detailed/modules_and_stdlib.md :: docs/architecture/modules_and_scope_resolution.md :: §0 records that this stale doc was removed rather than corrected, and that this document replaced it.
+
+# --- Change records the overhaul plans but has not written yet. Each line dies
+# --- when its session lands, which is the point: the blueprint's forward
+# --- references stay honest without stub files pretending to be records.
+docs/development/changes/TYPE-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 TYPE-001 (session S2).
+docs/development/changes/SEM-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 SEM-001 (session S3).
+docs/development/changes/OPT-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 OPT-001 (session S4).
+docs/development/changes/TOOL-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 TOOL-001 (session S5).
+docs/development/changes/DIAG-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 DIAG-001 (session S6).
+docs/development/changes/HYG-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 HYG-001 (session S6b).
+docs/development/changes/LANG-004.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 LANG-004 (session S10b).
+docs/development/changes/SEM-002.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 SEM-002 (session S7).
+docs/development/changes/SEM-003.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 SEM-003 (session S8).
+docs/development/changes/SEM-004.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 SEM-004 (session S9).
+docs/development/changes/TYPE-002.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 TYPE-002 (sessions S11-S14).
+docs/development/changes/LANG-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 LANG-001 (session S15).
+docs/development/changes/LANG-002.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 LANG-002 (sessions S16-S17).
+docs/development/changes/LANG-003.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 LANG-003 (session S10).
+docs/development/changes/RT-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 RT-001 (session S18).
+docs/development/changes/MEM-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 MEM-001 (session S19).
+docs/development/changes/MEM-002.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 MEM-002 (sessions S20-S22).
+docs/development/changes/STD-003.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 STD-003 (session S24b).
+
+# --- Retired paths named by the change record that re-pointed them. A record's
+# --- job is to say exactly which citation moved where, so it necessarily spells
+# --- the dead path out; scoping this to changes/ keeps source comments failing.
+docs/planning/Errors.md :: docs/development/changes/*.md :: the record that re-pointed its 43 citations names the path it re-pointed.
+docs/planning/COMPILER_MODULE_BREAKDOWN.md :: docs/development/changes/*.md :: same, for the retired 2026-08 module-split plan.
+docs/patent/PATENT_BENCHMARK_DATA.md :: docs/development/changes/*.md :: same, for a path that never existed in this repository at all.
