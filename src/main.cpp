@@ -44,9 +44,17 @@
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVN.h"
-#include "llvm/Transforms/Utils.h"
+#include "llvm/Transforms/Scalar/EarlyCSE.h"
+#include "llvm/Transforms/Scalar/Reassociate.h"
+#include "llvm/Transforms/Scalar/SimplifyCFG.h"
+#include "llvm/Transforms/Utils/Mem2Reg.h"
+#include "llvm/Transforms/IPO/GlobalDCE.h"
+#include "llvm/Transforms/IPO/Internalize.h"
+#include "llvm/Analysis/CGSCCPassManager.h"
+#include "llvm/Analysis/LoopAnalysisManager.h"
+#include "llvm/IR/PassManager.h"
+#include "llvm/Passes/PassBuilder.h"
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -66,6 +74,14 @@ using namespace llvm;
 
 std::string CompilerExecutablePath;
 
+// OPT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §17.2): the five levels
+// the CLI's `-O` flag selects. Os is not "O1 through O3 plus one more" --
+// it is `PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel::Os)`,
+// a genuinely different pipeline tuned for size over throughput -- so this
+// is its own enum, not an int a caller could accidentally compare/clamp as
+// if the levels were totally ordered by "more optimization."
+enum class OptLevelKind { O0, O1, O2, O3, Os };
+
 // CLI helpers
 struct CompilerOptions {
   std::string InputFile;
@@ -82,6 +98,12 @@ struct CompilerOptions {
   bool Format = false;                // --format: print the formatted source to stdout and exit
   bool FormatWrite = false;           // --write (with --format): rewrite the file in place instead
   std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
+  // OPT-001: `-O2` is the FROZEN default (FREEZE.md §6.10/§17.2) so a user
+  // who never passes `-O` at all sees the exact optimization behavior this
+  // milestone shipped as its baseline, not the weakest level.
+  OptLevelKind OptLevel = OptLevelKind::O2;      // -O0/-O1/-O2/-O3/-Os
+  std::string TargetTriple;           // --target=<triple>; empty = host
+  std::string MCPU;                   // -mcpu=<cpu>; empty = "generic" (unchanged default)
 };
 
 // `turf --explain E0NN` is the HUMAN-facing side of error-code
@@ -268,6 +290,26 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.OutputName = argv[++i];
     } else if (arg == "--link" && i + 1 < argc) {
       opts.LinkLibs.push_back(argv[++i]);
+    } else if (arg.rfind("--target=", 0) == 0) {
+      opts.TargetTriple = arg.substr(std::string("--target=").size());
+    } else if (arg.rfind("-mcpu=", 0) == 0) {
+      opts.MCPU = arg.substr(std::string("-mcpu=").size());
+    } else if (arg.size() >= 2 && arg[0] == '-' && arg[1] == 'O') {
+      // F-OPT semantics (FREEZE.md §6.10): an unrecognized level is a hard
+      // error, never a silent fallback to some default -- a typo like
+      // `-O4`/`-Ox` must not quietly compile at `-O2` and let a user believe
+      // they got the level they asked for.
+      std::string Level = arg.substr(2);
+      if (Level == "0") opts.OptLevel = OptLevelKind::O0;
+      else if (Level == "1") opts.OptLevel = OptLevelKind::O1;
+      else if (Level == "2") opts.OptLevel = OptLevelKind::O2;
+      else if (Level == "3") opts.OptLevel = OptLevelKind::O3;
+      else if (Level == "s") opts.OptLevel = OptLevelKind::Os;
+      else {
+        std::cerr << "Error: unknown optimization level '" << arg
+                  << "' (expected one of -O0, -O1, -O2, -O3, -Os).\n";
+        std::exit(1);
+      }
     } else if (arg[0] == '-') {
       std::cerr << "Unknown option: " << arg << "\n";
       std::exit(1);
@@ -281,7 +323,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
         << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] "
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
-           "[--dump-modules] [--link <libname>]\n"
+           "[--dump-modules] [--link <libname>] "
+           "[-O0|-O1|-O2|-O3|-Os] [--target=<triple>] [-mcpu=<cpu>]\n"
            "       turf --format [--write] <filename.tr>\n"
            "       turf --explain E0NN\n";
     std::exit(1);
@@ -304,16 +347,57 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   return opts;
 }
 
-// Emit native object file via LLVM TargetMachine
-static int emitObjectFile(Module &M, const std::string &ObjFilename) {
-  // Initialise all targets so we can produce code for the host machine.
+// OPT-001: `-O0`/`-O1`/`-O2`/`-O3` map onto LLVM's own `CodeGenOptLevel`
+// (backend instruction selection/scheduling), while `-Os` shares `-O2`'s
+// backend level -- LLVM has no "smaller code" CodeGenOptLevel; the size
+// tuning for `-Os` happens entirely in the IR-level pipeline
+// (`OptimizationLevel::Os`, see runOptimizationPipeline() below), matching
+// how every other `PassBuilder`-based frontend (e.g. clang) maps it.
+static CodeGenOptLevel toCodeGenOptLevel(OptLevelKind Level) {
+  switch (Level) {
+  case OptLevelKind::O0: return CodeGenOptLevel::None;
+  case OptLevelKind::O1: return CodeGenOptLevel::Less;
+  case OptLevelKind::O2: return CodeGenOptLevel::Default;
+  case OptLevelKind::O3: return CodeGenOptLevel::Aggressive;
+  case OptLevelKind::Os: return CodeGenOptLevel::Default;
+  }
+  llvm_unreachable("unhandled OptLevelKind");
+}
+
+// Builds the ONE TargetMachine shared by both the optimization pipeline
+// (runOptimizationPipeline(), which needs it to enable target-aware
+// transforms) and native object emission (emitObjectFile()). Before
+// OPT-001 these were two independent, unsynchronized constructions:
+// Phase 5's FunctionPassManager ran with no TargetMachine at all (a
+// PassBuilder-based pipeline needs one to run any target-aware pass), and
+// emitObjectFile() built its own from a hardcoded host triple and
+// CPU="generic", invisible to `--target`/`-mcpu` (§8 OPT-001's own CLI
+// additions) if those had been threaded through separately. Constructing it
+// once here is what makes `--target`/`-mcpu`/`-O` agree between the two
+// phases by construction rather than by two call sites happening to be
+// kept in sync by hand.
+//
+// Returned pointer is intentionally leaked (never `delete`d) -- this
+// mirrors the pre-OPT-001 code's own lifetime (a `TargetMachine` built by
+// `createTargetMachine` was never freed either), and the process is a
+// short-lived CLI invocation that exits immediately after linking. Fixing
+// that leak is out of scope for this change (§25's scope discipline).
+static TargetMachine *createTurfTargetMachine(const CompilerOptions &opts,
+                                              Module &M) {
+  // Initialise all targets so we can produce code for the host machine (or,
+  // with --target, a different one -- see D20 in §27: a `--target` binary
+  // still links the HOST's libturfrt/libc, so cross-compilation is not a
+  // supported end-to-end path yet. This flag exists so OPT-001's own IR
+  // pipeline and object emission are target-correct; RT-001 is where
+  // "produces a binary you can actually run elsewhere" gets decided.).
   InitializeAllTargetInfos();
   InitializeAllTargets();
   InitializeAllTargetMCs();
   InitializeAllAsmParsers();
   InitializeAllAsmPrinters();
 
-  Triple TargetTriple(sys::getDefaultTargetTriple());
+  Triple TargetTriple(opts.TargetTriple.empty() ? sys::getDefaultTargetTriple()
+                                                 : opts.TargetTriple);
 
   // LLVM 20+ changed setTargetTriple to accept Triple; older versions take
   // StringRef. arch is so much better :((
@@ -324,27 +408,141 @@ static int emitObjectFile(Module &M, const std::string &ObjFilename) {
 #endif
 
   std::string Error;
-  auto Target = TargetRegistry::lookupTarget(TargetTriple.str(), Error);
+  auto Target = TargetRegistry::lookupTarget(TargetTriple, Error);
   if (!Target) {
     std::cerr << "Error: " << Error << "\n";
-    return 1;
+    return nullptr;
   }
 
-  auto CPU = "generic";
+  std::string CPU = opts.MCPU.empty() ? "generic" : opts.MCPU;
   auto Features = "";
-  TargetOptions opt;
+  TargetOptions TO;
+  CodeGenOptLevel CGOptLevel = toCodeGenOptLevel(opts.OptLevel);
 
   // LLVM 20+ also changed createTargetMachine to accept Triple.
 #if LLVM_VERSION_MAJOR >= 20
-  auto TM = Target->createTargetMachine(TargetTriple, CPU, Features, opt,
-                                        Reloc::PIC_);
+  auto TM = Target->createTargetMachine(TargetTriple, CPU, Features, TO,
+                                        Reloc::PIC_, std::nullopt, CGOptLevel);
 #else
-  auto TM = Target->createTargetMachine(TargetTriple.str(), CPU, Features, opt,
-                                        Reloc::PIC_);
+  auto TM = Target->createTargetMachine(TargetTriple.str(), CPU, Features, TO,
+                                        Reloc::PIC_, std::nullopt, CGOptLevel);
 #endif
+  if (TM)
+    M.setDataLayout(TM->createDataLayout());
+  return TM;
+}
 
-  M.setDataLayout(TM->createDataLayout());
+// OPT-001 (§17.1/§17.2): the module-level optimization pipeline, replacing
+// the pre-existing `legacy::FunctionPassManager` running a fixed 5-pass
+// sequence with no module-level view (could not see across functions, so
+// nothing could ever be deleted -- an empty `main` shipped 84 unused
+// `turf_*` functions, §1.9's measured baseline). `TM` may be null (target
+// lookup failed) -- the pipeline still runs target-INDEPENDENT passes in
+// that case rather than skipping optimization entirely; emitObjectFile()
+// is what actually fails the compile when `TM` is null.
+static void runOptimizationPipeline(Module &M, OptLevelKind Level,
+                                    TargetMachine *TM) {
+  LoopAnalysisManager LAM;
+  FunctionAnalysisManager FAM;
+  CGSCCAnalysisManager CGAM;
+  ModuleAnalysisManager MAM;
 
+  PassBuilder PB(TM);
+  PB.registerModuleAnalyses(MAM);
+  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerFunctionAnalyses(FAM);
+  PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+  // F-OPT-1/F-OPT-2 (FREEZE.md §6.10): internalizing anything the linker
+  // still needs breaks the link. TurfLang never separately compiles (every
+  // import is re-parsed and re-codegenned into THIS module, §27 D7), so the
+  // only symbol anything outside this translation unit can still reach by
+  // name is `main` (the C runtime's own entry point, invoked by name, not
+  // by an in-module reference GlobalDCE could see) -- every `extern fn` is a
+  // DECLARATION with no body to internalize, and every genuinely
+  // Turf-defined function this module calls is already a normal in-module
+  // use that keeps it live without needing external linkage at all. This is
+  // why the "must-preserve" set is exactly {main}, not something derived
+  // from `g_RequiredLibs` (§8 OPT-001's own text names that set as the
+  // starting point, but g_RequiredLibs is a list of *external C libraries
+  // to link against*, e.g. "m", not a list of Turf symbol names -- there is
+  // nothing in it to preserve BY). Verified live against
+  // showcase/llvm_ffi_selfhost_demo.tr (the most FFI-dense program in the
+  // tree, per §8's own risk note) at every level below.
+  auto MustPreserveGV = [](const GlobalValue &GV) {
+    return GV.getName() == "main";
+  };
+
+  switch (Level) {
+  case OptLevelKind::O0: {
+    // "verify only; AlwaysInliner; nothing else" (§17.2). LLVM's own
+    // buildO0DefaultPipeline() IS that pipeline for a coroutine-free,
+    // non-instrumented, non-LTO module (which every TurfLang module is) --
+    // using the real API here instead of hand-assembling the equivalent
+    // means it stays correct if a future LLVM upgrade changes what O0
+    // requires, rather than silently drifting from what "O0" means upstream.
+    ModulePassManager MPM = PB.buildO0DefaultPipeline(OptimizationLevel::O0);
+    MPM.run(M, MAM);
+    break;
+  }
+  case OptLevelKind::O1: {
+    // The pre-OPT-001 5-pass sequence (mem2reg, instcombine, reassociate,
+    // GVN, simplifycfg), ported to the new PM one-for-one PLUS EarlyCSE --
+    // this is Stage 1's "no behaviour change" pipeline, now reachable
+    // explicitly at `-O1` rather than unconditionally on every compile.
+    // Internalize+GlobalDCE run as a separate module-level step afterward
+    // (§8's own Stage 1/3 split): nothing in the function-local pipeline
+    // above can delete a whole function, so running them first would find
+    // nothing new dead, and running them after lets GlobalDCE see the
+    // now-simplified call graph.
+    FunctionPassManager FPM;
+    FPM.addPass(PromotePass());
+    FPM.addPass(InstCombinePass());
+    FPM.addPass(ReassociatePass());
+    FPM.addPass(GVNPass());
+    FPM.addPass(SimplifyCFGPass());
+    FPM.addPass(EarlyCSEPass());
+    ModulePassManager FuncMPM;
+    FuncMPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
+    FuncMPM.run(M, MAM);
+
+    ModulePassManager CleanupMPM;
+    CleanupMPM.addPass(InternalizePass(MustPreserveGV));
+    CleanupMPM.addPass(GlobalDCEPass());
+    CleanupMPM.run(M, MAM);
+    break;
+  }
+  case OptLevelKind::O2:
+  case OptLevelKind::O3:
+  case OptLevelKind::Os: {
+    // Internalize FIRST, in its own pass-manager run, strictly before
+    // handing off to LLVM's own default pipeline: buildPerModuleDefaultPipeline()
+    // runs its own GlobalDCE internally, but GlobalDCE only deletes a
+    // definition that is BOTH unreferenced AND not externally visible --
+    // without Internalize running first, every `turf_*` function still has
+    // external linkage (nothing in Codegen ever marks one internal), so the
+    // default pipeline's own DCE would see all 84 dead functions in the
+    // empty-main baseline as "externally visible, therefore keep" and
+    // delete none of them -- confirmed live while implementing this: the
+    // -O2 binary was NOT smaller than -O0's until this ordering was fixed.
+    ModulePassManager InternalizeMPM;
+    InternalizeMPM.addPass(InternalizePass(MustPreserveGV));
+    InternalizeMPM.run(M, MAM);
+
+    OptimizationLevel LLVMLevel = Level == OptLevelKind::O2 ? OptimizationLevel::O2
+                                 : Level == OptLevelKind::O3 ? OptimizationLevel::O3
+                                                              : OptimizationLevel::Os;
+    ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(LLVMLevel);
+    MPM.run(M, MAM);
+    break;
+  }
+  }
+}
+
+// Emit native object file via the shared TargetMachine (createTurfTargetMachine()).
+static int emitObjectFile(Module &M, TargetMachine &TM,
+                          const std::string &ObjFilename) {
   std::error_code EC;
   raw_fd_ostream dest(ObjFilename, EC, sys::fs::OF_None);
   if (EC) {
@@ -354,7 +552,7 @@ static int emitObjectFile(Module &M, const std::string &ObjFilename) {
 
   legacy::PassManager pass;
   auto FileType = CodeGenFileType::ObjectFile;
-  if (TM->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
+  if (TM.addPassesToEmitFile(pass, dest, nullptr, FileType)) {
     std::cerr << "Target machine can't emit a file of this type\n";
     return 1;
   }
@@ -1200,27 +1398,35 @@ static int runCompilerMain(int argc, char **argv) {
     }
   }
 
-  // Phase 5: LLVM Optimization Passes
-  // Run LLVM's standard optimization pipeline over every function in the
-  // module. This turns our Alloca/Load/Store pattern into register-based SSA
-  // (mem2reg), folds constants, eliminates dead code, and simplifies the CFG,
-  // reaching near-C-level performance without any extra compiler work.
-  {
-    legacy::FunctionPassManager FPM(TheModule.get());
-    // Promote memory to registers (eliminates alloca/load/store overhead)
-    FPM.add(createPromoteMemoryToRegisterPass());
-    // Fold redundant instructions (x + 0 => x, etc.)
-    FPM.add(createInstructionCombiningPass());
-    // Reassociate expressions for better constant folding
-    FPM.add(createReassociatePass());
-    // Eliminate common sub-expressions
-    FPM.add(createGVNPass());
-    // Simplify the control-flow graph (remove unreachable blocks, etc.)
-    FPM.add(createCFGSimplificationPass());
-    FPM.doInitialization();
-    for (auto &F : *TheModule)
-      FPM.run(F);
+  // Phase 5: OPT-001 optimization pipeline (runOptimizationPipeline() above).
+  //
+  // The TargetMachine is built here, BEFORE optimization runs, and shared
+  // with object emission below -- previously it was built entirely inside
+  // emitObjectFile(), strictly AFTER this phase, so the optimizer ran with
+  // no target triple/data layout set on the module at all. Building it
+  // first (when it's needed) means SROA/vectorization-adjacent passes now
+  // see the real target's pointer size/alignment instead of LLVM's
+  // triple-less defaults -- a correctness improvement, not an observable
+  // behavior change (F-OPT-1): the host target this module already linked
+  // against unconditionally is the same host emitObjectFile() always used.
+  //
+  // `--emit-llvm` never had a real TargetMachine before this change either
+  // (M.setTargetTriple()/setDataLayout() were only ever reached from inside
+  // emitObjectFile(), which that flag skips entirely) -- preserved as-is:
+  // PassBuilder(nullptr) is well-defined and simply runs no target-aware
+  // transform, which is what "just show me the IR" has always meant here.
+  TargetMachine *TM = nullptr;
+  if (!opts.EmitLLVM) {
+    TM = createTurfTargetMachine(opts, *TheModule);
+    if (!TM) {
+      std::cerr << "Error: could not create a target machine for '"
+                << (opts.TargetTriple.empty() ? sys::getDefaultTargetTriple()
+                                               : opts.TargetTriple)
+                << "'.\n";
+      return 1;
+    }
   }
+  runOptimizationPipeline(*TheModule, opts.OptLevel, TM);
 
   // Output stage: either emit LLVM IR text or compile to native binary
   if (opts.EmitLLVM) {
@@ -1239,7 +1445,7 @@ static int runCompilerMain(int argc, char **argv) {
     // New default: emit native object code and link
     std::string ObjFile = opts.OutputName + ".o";
 
-    if (emitObjectFile(*TheModule, ObjFile) != 0)
+    if (emitObjectFile(*TheModule, *TM, ObjFile) != 0)
       return 1;
 
     std::cout << "Compiled to " << ObjFile << "\n";
