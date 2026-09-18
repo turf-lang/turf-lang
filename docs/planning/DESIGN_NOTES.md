@@ -308,19 +308,13 @@ the layer above it, buildable now in stages:
    in the build environment first; a hand-rolled pure-Turf parser is the
    fallback, meaningfully more work, duplicating a solved problem.
 
-Two smaller, independently-open FFI ergonomics gaps surfaced while
-building the original HTTP proof-of-concept and re-verified since:
-- **Implicit `string`→`ptr` coercion in FFI calls.** `extern fn puts(s:
-  ptr): int; puts("hello");` still fails ("No overload of 'puts' matches
-  argument types (string)"). Workaround: declare the FFI parameter as
-  `string` instead of `ptr`.
-- **Local (in-function-body) `extern fn` declarations.** Still parser-
-  rejected ("Expected ';' after statement.") — `extern fn` only parses at
-  the top level (`ParserCore.cpp`'s top-level-declaration switch).
-  Workaround: declare all `extern fn`s at file scope.
-- **`for` loop requires an explicit `step` clause.** `for i in 0..1000000
-  { ... }` still fails ("Expected 'step' after the range end value.").
-  Workaround: `for i in 0..1000000 step i++`, or use `while`.
+The three smaller FFI/control-flow ergonomics gaps this section used to
+list here (implicit `string`→`ptr` coercion in FFI calls, local
+in-function-body `extern fn` declarations, and the mandatory range-`for`
+`step` clause) were closed by LANG-004
+(`docs/development/changes/LANG-004.md`, 2026-09-18) — all three now work
+as described in `docs/reference/control_flow.md` §"`for` — range form" and
+`docs/reference/ffi_and_unsafe.md` §1.
 
 ---
 

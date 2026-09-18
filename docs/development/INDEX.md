@@ -13,6 +13,7 @@ record does; `status` tracks the record, not the branch.
 | TOOL-001 | Debug information (`-g` / DWARF) | landed | 2026-09-18 | 2026-09-18 | Codegen, driver, LLVM integration | [TOOL-001](changes/TOOL-001.md) |
 | DIAG-001 | Structural error classification and the lint VarDecl gap | landed | 2026-09-18 | 2026-09-18 | diagnostics, SLM routing, Lint | [DIAG-001](changes/DIAG-001.md) |
 | HYG-001 | Compiler hygiene and diagnostic-rendering consistency | landed | 2026-09-18 | 2026-09-18 | build headers, CFG diagnostics | [HYG-001](changes/HYG-001.md) |
+| LANG-004 | Small language and FFI ergonomics | landed | 2026-09-18 | 2026-09-18 | Parser, Resolver, TypeChecker | [LANG-004](changes/LANG-004.md) |
 
 ## How to use this directory
 
