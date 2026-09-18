@@ -3,12 +3,23 @@
 
 #include "Lexer.h"
 #include "Types.h"
-#include "llvm/IR/Instructions.h"
 #include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+// Forward declaration only -- llvm::AllocaInst is used exclusively as a
+// pointer throughout this header and SymbolTable.cpp (stored, passed,
+// compared; never dereferenced). Pulling in the real
+// llvm/IR/Instructions.h here dragged the whole IR type hierarchy into
+// every TU that includes SymbolTable.h transitively -- measured:
+// src/ParserDecl.cpp alone preprocessed to 182,910 lines, of which this one
+// header contributed 119,047 (~65%), costing 3.07s of syntax-check time at
+// -O2 (HYG-001, docs/planning/ARCHITECTURE_OVERHAUL.md §3.4). The real
+// include lives in SymbolTable.cpp instead, the one TU that actually
+// constructs/consumes real AllocaInst values from Codegen.
+namespace llvm { class AllocaInst; }
 
 // Unique identifier for each symbol declaration
 using SymbolID = size_t;

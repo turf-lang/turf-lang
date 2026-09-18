@@ -18,6 +18,7 @@
 #include "SymbolTable.h"
 #include "Types.h"
 #include "SuggestionIndex.h"
+#include "llvm/IR/Instructions.h" // AllocaInst -- see SymbolTable.h's forward-decl comment (HYG-001)
 #include <algorithm>
 #include <unordered_set>
 
