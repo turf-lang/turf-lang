@@ -139,7 +139,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       if (!Index)
         return nullptr;
       if (CurTok != ']') {
-        LogErrorAt(CurLoc, "Expected ']' to close the array index");
+        LogErrorAt(CurLoc, "Expected ']' to close the array index", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       getNextToken();
@@ -160,7 +160,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
           break;
       }
       if (CurTok != ')') {
-        LogErrorAt(CurLoc, "Expected ')' to close the function call");
+        LogErrorAt(CurLoc, "Expected ')' to close the function call", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       getNextToken();
@@ -172,7 +172,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
       SourceLocation Loc = CurLoc;
       getNextToken();
       if (CurTok != TOK_IDENTIFIER) {
-        LogErrorAt(CurLoc, "Expected a method name after '.'");
+        LogErrorAt(CurLoc, "Expected a method name after '.'", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       std::string MethodName = IdentifierStr;
@@ -191,7 +191,7 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
             if (CurTok == ')')
               break;
             if (CurTok != ',') {
-              LogErrorAt(CurLoc, "Expected ')' or ',' in argument list");
+              LogErrorAt(CurLoc, "Expected ')' or ',' in argument list", SLM::ErrorCategory::SYNTAX_ERROR);
               return nullptr;
             }
             getNextToken();

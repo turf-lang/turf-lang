@@ -211,10 +211,11 @@ public:
     bool IsWarning;
     std::vector<RelatedLocation> RelatedLocations; // structural context for SLM
     // Ground-truth category, set by the raising TurfError subclass's own
-    // constructor (see Errors.h) -- NOT re-derived from message text. Stays
-    // GENERAL for diagnostics with no TurfError instance (the raw
-    // LogErrorAt() path), which the SLM layer falls back to classifyError()
-    // for, same as before this field existed.
+    // constructor (see Errors.h), or by the explicit argument a raw
+    // LogErrorAt() call site passes (see this file's own LogErrorAt()
+    // declaration) -- NOT re-derived from message text (DIAG-001 deleted
+    // that fallback, formerly SLM::classifyError()). GENERAL is a real,
+    // audited answer for a site, not "unclassified."
     SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL;
     // Which file Loc's Line/Col are relative to -- defaulted at add()-time
     // from Loc.Filename, falling back to the current SourceFilename if Loc
@@ -374,7 +375,16 @@ enum Token {
 
 int gettok();
 void resetLexer();
-void LogErrorAt(SourceLocation Loc, const std::string &Msg);
+// `Category` is the ground-truth SLM::ErrorCategory for this diagnostic,
+// same role as TurfError::Category_ (Errors.h) plays for a typed error --
+// LogErrorAt() is the untyped path (no TurfError subclass instance exists to
+// read one from), used throughout the Parser/Lexer/Codegen for messages that
+// don't warrant their own class. Every call site names its own category
+// explicitly (DIAG-001 audit); GENERAL is a deliberate choice for a site,
+// never an unaudited default. See ErrorCategory.h's removed classifyError()
+// -- category is no longer re-derived from message text.
+void LogErrorAt(SourceLocation Loc, const std::string &Msg,
+                SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL);
 int GetLastChar();
 void SetLastChar(int c);
 

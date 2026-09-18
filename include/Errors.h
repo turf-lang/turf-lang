@@ -54,14 +54,20 @@ protected:
   // (e.g. `Category_ = SLM::ErrorCategory::TYPE_MISMATCH;`). This is the
   // error's own C++ type telling the SLM layer what it is, directly --
   // replacing the old approach of re-deriving a category by pattern-matching
-  // the final rendered message text (SLM::classifyError()), which silently
-  // drifted out of sync every time a message was reworded and left several
-  // real, commonly-hit error classes (ImmutableAssignmentError,
-  // NullAssignmentError, DefiniteAssignmentError, UseAfterFreeError,
-  // DoubleFreeError) permanently misclassified as GENERAL. classifyError()
-  // is NOT removed -- it remains the correct fallback for the raw,
-  // untyped LogErrorAt() path (parser-level errors with no TurfError
-  // instance at all) and for any subclass left untagged (default GENERAL).
+  // the final rendered message text (formerly `SLM::classifyError()`, DELETED
+  // in DIAG-001), which silently drifted out of sync every time a message
+  // was reworded and left several real, commonly-hit error classes
+  // (ImmutableAssignmentError, NullAssignmentError, DefiniteAssignmentError,
+  // UseAfterFreeError, DoubleFreeError) permanently misclassified as GENERAL
+  // -- confirmed live, several of classifyError()'s own LogErrorAt-targeted
+  // substring patterns no longer matched ANY current message at all (the
+  // exact drift this comment used to warn about, caught only once it was
+  // actually verified: see docs/development/changes/DIAG-001.md). Every
+  // subclass here is individually audited (a class left at the GENERAL
+  // default is a deliberate judgment call, documented at that class -- see
+  // e.g. SemanticError, ModuleMethodNotFoundError); the raw, untyped
+  // LogErrorAt() path (Lexer.h) takes an explicit SLM::ErrorCategory
+  // argument at every call site instead of falling back to text matching.
   SLM::ErrorCategory Category_ = SLM::ErrorCategory::GENERAL;
 
 public:

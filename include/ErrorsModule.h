@@ -290,9 +290,9 @@ public:
                       ModuleName + Colors::BRIGHT_RED +
                       "' has no function named '" + Colors::CYAN + MethodName +
                       Colors::BRIGHT_RED + "'." + Colors::RESET) {
-    // Left as the default GENERAL (a judgment call): could arguably be
-    // UNDECLARED_VAR, but the ranked suggestions already do the heavy
-    // lifting here, and classifyError()'s text match gets a fair shot too.
+    // Left as the default GENERAL (a judgment call, DIAG-001 audit): could
+    // arguably be UNDECLARED_VAR, but the ranked suggestions already do the
+    // heavy lifting here.
     // No explicit "Did you mean:\n" prefix -- suggestionsOrFallback()'s
     // formatted suggestion text already starts with its own lead-in
     // ("It may be from the current file: ..."), and stripping its leading

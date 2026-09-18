@@ -449,25 +449,21 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   AISuggestion suggestion;
   std::string cleanError = stripAnsiCodes(errorMessage);
 
-  // Step 0: extract keyword hint early so classification can use it
-  // (classifyError only uses cleanError; codeContext not needed for this step)
+  // Extract a keyword hint for doc-path routing (getCategoryDocPath's
+  // constructDocs map) and the structural-prior patch-keyword bonus
+  // (computeStructuralPrior above) -- independent of category classification.
   std::string contextKeyword = extractContextKeyword(cleanError);
 
-  // Step 1: classify (deterministic, no context window required) ─
-  // We classify before building the context so we can size the window to fit
-  // the category rather than always using the generic ±10 default.
-  //
-  // `category` (the parameter) is the GROUND-TRUTH category attached by the
-  // raising TurfError subclass's own constructor -- see Errors.h's
-  // Category_ field. When it's non-GENERAL, it IS the category: no guessing
-  // needed, the C++ type of the error already told us exactly what kind of
-  // problem this is. Only fall back to classifyError()'s text-pattern
-  // matching when the caller didn't have one to give us -- GENERAL is both
-  // the default parameter value and every untagged/genuinely-miscellaneous
-  // class's value, so this is a strict refinement pass: it can only turn a
-  // GENERAL into something more specific, never override a real answer.
-  if (category == ErrorCategory::GENERAL)
-    category = classifyError(cleanError, contextKeyword);
+  // `category` (the parameter) is the GROUND-TRUTH category: either the
+  // raising TurfError subclass's own Category_ (Errors.h), or an explicit
+  // argument the raw LogErrorAt() call site passed (Lexer.h) -- every call
+  // site names one deliberately now (DIAG-001), so there is no text-matching
+  // fallback left to run here. GENERAL is a real, audited answer for a site
+  // (a genuine catch-all, or a judgment call documented at that site), not
+  // "classification failed" -- see ErrorCategory.h's removed classifyError()
+  // for why re-deriving a category from message text was deleted, not kept
+  // as a fallback: it silently drifted out of sync with reworded messages
+  // and had no way to recover once a real category was already known.
   bool categoryWasDeterministic = (category != ErrorCategory::GENERAL);
 
   llvm::SmallString<128> ModelPath(CompilerExecutablePath);

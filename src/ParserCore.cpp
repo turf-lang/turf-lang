@@ -238,7 +238,7 @@ TurfTypePtr ParseType() {
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(CurLoc,
                "Type nested too deeply to parse."
-               "\n  Hint: check for unbalanced '<', '[', or '!'.");
+               "\n  Hint: check for unbalanced '<', '[', or '!'.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -555,14 +555,14 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     LogErrorAt(CurLoc, "Unexpected token — expected a value, variable name, or "
                        "expression here."
                        "\n  Hint: Check for stray characters, a missing "
-                       "operator, or an incomplete statement.");
+                       "operator, or an incomplete statement.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
 
   case TOK_SIZEOF: {
     SourceLocation Loc = CurLoc;
     getNextToken(); // eat sizeof
     if (CurTok != '(') {
-      LogErrorAt(CurLoc, "Expected '(' after sizeof");
+      LogErrorAt(CurLoc, "Expected '(' after sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
     getNextToken(); // eat '('
@@ -570,7 +570,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     if (!Ty)
       return nullptr;
     if (CurTok != ')') {
-      LogErrorAt(CurLoc, "Expected ')' to close sizeof");
+      LogErrorAt(CurLoc, "Expected ')' to close sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
     getNextToken(); // eat ')'
@@ -602,7 +602,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                              "for constructing a struct."
                              "\n  Hint: use '" + IdName + "::new(...)' (if '" +
                              IdName + "' declares a constructor) or '" + IdName +
-                             "::default()' instead.");
+                             "::default()' instead.", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
       }
@@ -620,7 +620,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     if (CurTok == TOK_SCOPE) {
       getNextToken(); // eat '::'
       if (CurTok != TOK_IDENTIFIER) {
-        LogErrorAt(CurLoc, "Expected a name after '::'");
+        LogErrorAt(CurLoc, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
       std::string RightName = IdentifierStr;
@@ -639,7 +639,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                                "longer valid syntax for constructing a struct."
                                "\n  Hint: use '" + IdName + "::" + RightName +
                                "::new(...)' or '" + IdName + "::" + RightName +
-                               "::default()' instead.");
+                               "::default()' instead.", SLM::ErrorCategory::DECLARATION);
             return nullptr;
           }
         }
@@ -655,7 +655,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       if (CurTok == TOK_SCOPE) {
         getNextToken(); // eat second '::'
         if (CurTok != TOK_IDENTIFIER) {
-          LogErrorAt(CurLoc, "Expected a variant name after '::'");
+          LogErrorAt(CurLoc, "Expected a variant name after '::'", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         std::string VariantName = IdentifierStr;
@@ -745,12 +745,12 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       if (CurTok == ',') {
         getNextToken(); // eat ','
       } else if (CurTok != ']') {
-        LogErrorAt(CurLoc, "Expected ',' or ']' in array literal");
+        LogErrorAt(CurLoc, "Expected ',' or ']' in array literal", SLM::ErrorCategory::ARRAY_ERROR);
         return nullptr;
       }
     }
     if (CurTok != ']') {
-      LogErrorAt(CurLoc, "Expected ']' to close array literal");
+      LogErrorAt(CurLoc, "Expected ']' to close array literal", SLM::ErrorCategory::ARRAY_ERROR);
       return nullptr;
     }
     getNextToken(); // eat ']'
@@ -788,7 +788,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                    "\n  Hint: '" +
                    IdName +
                    "' is a control-flow keyword; it can't appear standalone in "
-                   "an expression.");
+                   "an expression.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
 
@@ -798,7 +798,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_TYPE_STRING:
   case TOK_TYPE_BOOL:
   case TOK_TYPE_CHAR:
-    LogErrorAt(CurLoc, "Expected 'mutable' or 'immutable' to begin a declaration.");
+    LogErrorAt(CurLoc, "Expected 'mutable' or 'immutable' to begin a declaration.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
 
   case TOK_TYPE_VOID:
@@ -819,7 +819,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // lib/std/io.tr. No decorator syntax is currently supported at all.
     LogErrorAt(CurLoc,
                "'@' is not valid here.\n  Hint: Turf has no decorator syntax "
-               "right now.");
+               "right now.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -986,7 +986,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(CurLoc,
                "Expression nested too deeply to parse."
-               "\n  Hint: check for unbalanced '(', '[', or '{'.");
+               "\n  Hint: check for unbalanced '(', '[', or '{'.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -1005,7 +1005,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
     if (!ThenExpr)
       return nullptr;
     if (CurTok != TOK_OTHERWISE) {
-      LogErrorAt(CurLoc, "Expected 'otherwise' after 'give' expression in ternary");
+      LogErrorAt(CurLoc, "Expected 'otherwise' after 'give' expression in ternary", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     SourceLocation ElseLoc = CurLoc;
@@ -1054,7 +1054,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
       if (CurTok != TOK_IDENTIFIER) {
         LogErrorAt(CurLoc, "Expected an identifier after 'recover as' to "
                            "bind the failing error value."
-                           "\n  Hint: `recover as err run { ... }`.");
+                           "\n  Hint: `recover as err run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
       }
       std::string BoundName = IdentifierStr;
@@ -1064,7 +1064,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
         LogErrorAt(CurLoc, "Expected 'run' after 'recover as " + BoundName +
                                "'."
                                "\n  Hint: `recover as " +
-                               BoundName + " run { ... }`.");
+                               BoundName + " run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
       }
       getNextToken(); // consume 'run'
@@ -1080,7 +1080,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
     LogErrorAt(CurLoc, "Expected 'produce', 'run', or 'as' after 'recover'."
                        "\n  Hint: `recover produce value`, "
                        "`recover run { ... }`, or "
-                       "`recover as err run { ... }`.");
+                       "`recover as err run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
 
@@ -1110,7 +1110,7 @@ std::unique_ptr<ExprAST> ParseUnary() {
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(CurLoc,
                "Expression nested too deeply to parse."
-               "\n  Hint: check for a runaway chain of unary operators.");
+               "\n  Hint: check for a runaway chain of unary operators.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -1148,7 +1148,7 @@ std::unique_ptr<ExprAST> ParseUnary() {
     getNextToken();
 
     if (CurTok != TOK_IDENTIFIER) {
-      LogErrorAt(Loc, "Expected identifier after prefix ++ or --");
+      LogErrorAt(Loc, "Expected identifier after prefix ++ or --", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
 

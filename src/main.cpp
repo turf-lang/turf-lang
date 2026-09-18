@@ -807,7 +807,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseExpression();
             if (AST) {
               if (CurTok == ';') {
-                LogErrorAt(CurLoc, "Unexpected ';'");
+                LogErrorAt(CurLoc, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
               }
               // NOTE: no LintExpression() call here (deliberately -- see the
               // "Phase Separation: Lint All" comment near FnASTs' declaration
@@ -844,7 +844,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseExpression();
             if (AST) {
               if (CurTok != ';') {
-                LogErrorAt(CurLoc, "Expected ';' after statement");
+                LogErrorAt(CurLoc, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
               } else {
                 getNextToken(); // eat ';'
               }
@@ -1090,7 +1090,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseExpression();
         if (AST) {
           if (CurTok == ';') {
-            LogErrorAt(CurLoc, "Unexpected ';'");
+            LogErrorAt(CurLoc, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
           }
           // lint only — not re-codegenned. Also transparently flattens a
           // top-level `unsafe { }` block -- see AppendFlattenedTopLevelDecl()'s
@@ -1117,7 +1117,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseExpression();
         if (AST) {
           if (CurTok != ';') {
-            LogErrorAt(CurLoc, "Expected ';' after statement");
+            LogErrorAt(CurLoc, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
           } else {
             getNextToken(); // eat ';'
           }
@@ -1138,7 +1138,7 @@ static int runCompilerMain(int argc, char **argv) {
       auto AST = ParseExpression();
       if (AST) {
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, "Expected ';' after statement");
+          LogErrorAt(CurLoc, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
         } else {
           getNextToken(); // eat ';'
         }

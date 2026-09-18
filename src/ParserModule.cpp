@@ -402,7 +402,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok == ';') {
-          LogErrorAt(CurLoc, "Unexpected ';'");
+          LogErrorAt(CurLoc, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
           return nullptr;
         }
         // Flattens Expr first if it's a top-level `unsafe { }` block -- see
@@ -438,7 +438,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, "Expected ';' after statement.");
+          LogErrorAt(CurLoc, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
           return nullptr;
         }
         getNextToken(); // eat ';'
@@ -454,7 +454,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     auto Expr = ParseExpression();
     if (Expr) {
       if (CurTok != ';') {
-        LogErrorAt(CurLoc, "Expected ';' after statement.");
+        LogErrorAt(CurLoc, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       getNextToken(); // eat ';'
@@ -868,7 +868,7 @@ std::unique_ptr<ExprAST> ParseImport() {
   } else if (CurTok == TOK_TYPE_CHAR) {
     ModuleName = "char";
   } else {
-    LogErrorAt(CurLoc, "Expected module name after 'import'");
+    LogErrorAt(CurLoc, "Expected module name after 'import'", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   getNextToken();
@@ -889,7 +889,7 @@ std::unique_ptr<ExprAST> ParseImport() {
       if (CurTok == '*') {
         getNextToken(); // eat '*'
         if (CurTok != ']') {
-          LogErrorAt(CurLoc, "Expected ']' after '*' in import list");
+          LogErrorAt(CurLoc, "Expected ']' after '*' in import list", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         getNextToken(); // eat ']'
@@ -898,7 +898,7 @@ std::unique_ptr<ExprAST> ParseImport() {
         Mode = ImportMode::SymbolList;
         while (CurTok != ']' && CurTok != TOK_EOF) {
           if (CurTok != TOK_IDENTIFIER) {
-            LogErrorAt(CurLoc, "Expected a symbol name in import list");
+            LogErrorAt(CurLoc, "Expected a symbol name in import list", SLM::ErrorCategory::DECLARATION);
             return nullptr;
           }
           RequestedSymbols.push_back({IdentifierStr, CurLoc});
@@ -910,12 +910,12 @@ std::unique_ptr<ExprAST> ParseImport() {
           }
         }
         if (CurTok != ']') {
-          LogErrorAt(CurLoc, "Expected ']' to close import list");
+          LogErrorAt(CurLoc, "Expected ']' to close import list", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         getNextToken(); // eat ']'
         if (RequestedSymbols.empty()) {
-          LogErrorAt(CurLoc, "Expected at least one symbol name in import list");
+          LogErrorAt(CurLoc, "Expected at least one symbol name in import list", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
       }
@@ -925,7 +925,7 @@ std::unique_ptr<ExprAST> ParseImport() {
       getNextToken();
     } else {
       LogErrorAt(CurLoc,
-                 "Expected a symbol name or '[' after '::' in import");
+                 "Expected a symbol name or '[' after '::' in import", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
   }

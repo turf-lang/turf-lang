@@ -42,12 +42,12 @@ std::string getCodeContext(int errorLine, int contextSize = 10);
 
 // Fetches a suggestion from the SLM based on the error message, source
 // context, and optional hint. Returns an empty AISuggestion if the SLM fails or times out.
-// `category`: ground-truth category from the raising TurfError subclass's own
-// C++ type (see Errors.h's Category_ field). When non-GENERAL, this is used
-// directly instead of re-deriving a category via classifyError()'s text
-// matching -- GENERAL (the default) preserves the old classifyError()
-// fallback behavior for callers that don't have a category (the raw
-// LogErrorAt() path has no TurfError instance to read one from).
+// `category`: ground-truth category, either from the raising TurfError
+// subclass's own C++ type (see Errors.h's Category_ field) or from the
+// explicit argument a raw LogErrorAt() call site passed (Lexer.h) -- never
+// re-derived from message text (DIAG-001 deleted that fallback, formerly
+// ErrorCategory.h's classifyError()). GENERAL is itself a real, audited
+// answer for a site, not "no category available."
 // `previousAttemptFailed`: the real compiler diagnostic text from the
 // sandbox's rejection of a prior attempt's replacement_line (see
 // Sandbox::getValidationDiagnostics()), fed back into the prompt so a retry

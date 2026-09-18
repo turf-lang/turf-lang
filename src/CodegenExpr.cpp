@@ -477,7 +477,7 @@ Value *AddressOfExprAST::codegen() {
   if (!LVal) {
     LogErrorAt(Loc, "Cannot take the address of a non-addressable expression."
                     "\n  Hint: Only variables, struct fields, and array elements"
-                    " are addressable.");
+                    " are addressable.", SLM::ErrorCategory::GENERAL);
     return nullptr;
   }
   return LVal;

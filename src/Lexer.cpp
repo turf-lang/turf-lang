@@ -447,9 +447,15 @@ void DiagnosticEngine::restoreDiagnostics(const std::vector<Diag> &Saved) {
   }
 }
 
-// Emits and collects a generic diagnostic message at the given source location.
-void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
-  DiagnosticEngine::add(Loc, Msg, isMessageWarning(Msg));
+// Emits and collects a generic diagnostic message at the given source
+// location. `Category` (see Lexer.h's doc comment on the declaration) is
+// forwarded to DiagnosticEngine::add() unconditionally -- inert for a
+// warning message (the SLM path is gated on !IsWarning, same as
+// TurfWarning::Category_), same as every other diagnostic sink in the
+// compiler.
+void LogErrorAt(SourceLocation Loc, const std::string &Msg,
+                SLM::ErrorCategory Category) {
+  DiagnosticEngine::add(Loc, Msg, "", isMessageWarning(Msg), {}, Category);
 }
 
 void resetLexer() {
@@ -580,7 +586,7 @@ static int gettokScan() {
                          "' in string literal.\n  Hint: Recognized escapes "
                          "are \\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'. "
                          "Did you mean to write a literal backslash? Use "
-                         "'\\\\' instead.");
+                         "'\\\\' instead.", SLM::ErrorCategory::SYNTAX_ERROR);
           StringVal += LastChar;
         }
       } else {
@@ -609,7 +615,7 @@ static int gettokScan() {
       // truly nothing left to lex, so end the token stream here exactly as
       // the pre-existing behavior did.
       LogErrorAt(CurLoc, std::string("Unterminated string literal") +
-                             UnterminatedStringHint);
+                             UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_EOF;
     }
 
@@ -623,7 +629,7 @@ static int gettokScan() {
       // CurCol -- so lexing (and line tracking) of the rest of the file
       // recovers cleanly instead of desyncing for every line that follows.
       LogErrorAt(CurLoc, std::string("Unterminated string literal") +
-                             UnterminatedStringHint);
+                             UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_STRING_LITERAL;
     }
 
@@ -651,7 +657,7 @@ static int gettokScan() {
       // desync, report, and recover with a placeholder value.
       LogErrorAt(CurLoc,
                  "Empty char literal.\n  Hint: A char literal must contain "
-                 "exactly one character, e.g. 'a'.");
+                 "exactly one character, e.g. 'a'.", SLM::ErrorCategory::SYNTAX_ERROR);
       LastChar = SourceFile->get();
       CurCol++;
       CharVal = '\0';
@@ -664,7 +670,7 @@ static int gettokScan() {
       // line tracking cleanly instead of desyncing for the rest of the file.
       LogErrorAt(CurLoc,
                  std::string("Unterminated char literal") +
-                     "\n  Hint: Add a closing ''' after the character.");
+                     "\n  Hint: Add a closing ''' after the character.", SLM::ErrorCategory::SYNTAX_ERROR);
       return LastChar == EOF ? TOK_EOF : TOK_CHAR_LITERAL;
     }
 
@@ -699,7 +705,7 @@ static int gettokScan() {
                    std::string("Unknown escape sequence '\\") +
                        static_cast<char>(LastChar) +
                        "' in char literal.\n  Hint: Recognized escapes are "
-                       "\\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'.");
+                       "\\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'.", SLM::ErrorCategory::SYNTAX_ERROR);
         CharVal = static_cast<char>(LastChar);
       }
     } else {
@@ -718,7 +724,7 @@ static int gettokScan() {
       LogErrorAt(CurLoc,
                  "Char literal must contain exactly one character.\n  Hint: "
                  "Use a string literal (\"ab\") for multiple characters, or "
-                 "check for a missing closing '.");
+                 "check for a missing closing '.", SLM::ErrorCategory::SYNTAX_ERROR);
       while (LastChar != '\'' && LastChar != EOF && LastChar != '\n') {
         LastChar = SourceFile->get();
         CurCol++;
