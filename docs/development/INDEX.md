@@ -12,6 +12,7 @@ record does; `status` tracks the record, not the branch.
 | OPT-001 | Optimization pipeline, levels, and module passes | landed | 2026-09-18 | 2026-09-18 | driver, LLVM integration | [OPT-001](changes/OPT-001.md) |
 | TOOL-001 | Debug information (`-g` / DWARF) | landed | 2026-09-18 | 2026-09-18 | Codegen, driver, LLVM integration | [TOOL-001](changes/TOOL-001.md) |
 | DIAG-001 | Structural error classification and the lint VarDecl gap | landed | 2026-09-18 | 2026-09-18 | diagnostics, SLM routing, Lint | [DIAG-001](changes/DIAG-001.md) |
+| HYG-001 | Compiler hygiene and diagnostic-rendering consistency | landed | 2026-09-18 | 2026-09-18 | build headers, CFG diagnostics | [HYG-001](changes/HYG-001.md) |
 
 ## How to use this directory
 
