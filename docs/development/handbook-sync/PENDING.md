@@ -11,6 +11,7 @@ the commit that did it — do not delete it.
 | Feature | Chapter / file | What is owed | Source record |
 |---|---|---|---|
 | ARCH-001 | `AGENTS.md` | Nothing owed — ARCH-001 added the one pointer line itself, and `AGENTS.md` is not part of the handbook. Listed so the next session sees the queue is genuinely empty, not merely unstarted. | [ARCH-001](../changes/ARCH-001.md) |
+| TYPE-001 | `docs/reference/structs_and_enums.md` §"Self-referential structs" | Add the by-value rule next to the existing pointer-field guidance (lines 46–83): a struct field, or an array-of-struct field, that holds another struct **by value** (not `T*`/`&T`/`&?T`) may not form a cycle with any other by-value field, directly or through a chain — rejected at compile time as `E069`/`StructLayoutCycleError`, naming the full cycle. The existing `next: Node*` example (and its `unsafe { }`/no-raw-pointer-parameter notes) is unaffected and stays exactly as written — pointer fields were never in scope for this rule. Suggested new example: `struct A { b: B } struct B { a: A }` rejected, contrasted with the same pair rewritten with `b: &B`/`a: A` (or either field made a pointer) to show the fix. | [TYPE-001](../changes/TYPE-001.md) |
 
 ## Why this file is not a changelog
 

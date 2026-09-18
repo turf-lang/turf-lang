@@ -1,0 +1,23 @@
+// Regression test: a struct that contains itself by value must be a
+// compile error, not a compiler segfault (TYPE-001,
+// docs/planning/ARCHITECTURE_OVERHAUL.md §8, INV-LAYOUT-1).
+//
+// Before checkStructLayoutAcyclicity() existed, this DECLARATION alone
+// compiled with zero diagnostics (registering a struct's name never
+// computes its layout), but the moment anything tried to INSTANTIATE the
+// type, the compiler itself crashed -- confirmed live: `mut x: A;` made
+// `turf --resolve` exit 139 (SIGSEGV), no output at all. This file doesn't
+// even need the `mut x: A;` line to reproduce the old crash in a debug
+// build, but the point of this test is the DIAGNOSTIC, not the crash --
+// see fail_mutual_struct_cycle.tr / fail_struct_array_cycle.tr for the
+// less obvious, cross-struct shapes of the same bug, and
+// 08_self_ref_struct.tr for the *pointer* field (`next: Node*`) that
+// remains completely legal and unaffected by this check.
+
+struct A {
+    me: A
+}
+
+fn main(): int {
+    return 0;
+}

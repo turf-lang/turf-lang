@@ -7,6 +7,7 @@ record does; `status` tracks the record, not the branch.
 | ID | Name | Status | Started | Landed | Subsystems | Record |
 |---|---|---|---|---|---|---|
 | ARCH-001 | Development change-tracking and semantic freeze | landed | 2026-09-17 | 2026-09-17 | documentation, CI | [ARCH-001](changes/ARCH-001.md) |
+| TYPE-001 | Struct layout acyclicity | landed | 2026-09-18 | 2026-09-18 | Resolver, diagnostics | [TYPE-001](changes/TYPE-001.md) |
 
 ## How to use this directory
 

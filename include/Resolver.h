@@ -298,6 +298,21 @@ private:
   // T = ...; }`) isn't wrongly flagged as an unknown type.
   std::vector<std::string> CurrentFuncTypeParams_;
 
+  // Every struct hoisted so far by hoistTopLevel()/hoistModuleBody() (main
+  // file plus every transitively-imported module), in hoist order. Neither
+  // of those functions keeps the AST node around once the NAME is
+  // registered in SymTable_ (ResolverTypeRegistry only stores name ->
+  // declaration location, never the fields -- see its own doc comment), so
+  // checkStructLayoutAcyclicity() needs its own record of "which
+  // StructDeclExprAST does this struct name mean" to walk field types at
+  // all. Never cleared: a Resolver instance may run resolveAll() more than
+  // once (main.cpp calls it once for FnASTs, once for TopLevelASTs, on the
+  // SAME Resolver -- structs only ever appear in the former, but nothing
+  // stops a future caller from splitting differently), and accumulating
+  // across calls is what makes a struct declared in an earlier call still
+  // participate in a cycle check that runs after a later one.
+  std::vector<const StructDeclExprAST *> HoistedStructDecls_;
+
   // ── Internal helpers ───────────────────────────────────────────────────────
 
   std::string currentModuleName() const {
@@ -399,6 +414,45 @@ private:
   /// Register all function signatures found inside an imported module body.
   /// Called by hoistTopLevel when it encounters a ModuleImportExprAST.
   void hoistModuleBody(const ExprAST *Body, const std::string &ModuleName);
+
+  /**
+   * @brief Reject a struct that contains itself by value, directly or
+   *        through a chain of other structs (TYPE-001,
+   *        docs/planning/ARCHITECTURE_OVERHAUL.md §8, INV-LAYOUT-1).
+   *
+   * Runs a grey/black-coloured DFS over the by-value containment graph
+   * built from HoistedStructDecls_ (every struct hoisted so far, from the
+   * main file and every transitively-imported module) and raises
+   * StructLayoutCycleError on the first cycle found, naming the full path.
+   * Reports one diagnostic per strongly-connected component, not per node
+   * in it (a black-coloured node is never re-explored), so a cycle
+   * touching several structs does not produce a diagnostic for each one.
+   *
+   * Called from resolveAll() right after hoistTopLevel(Nodes) -- i.e. at
+   * the end of Pass 1, once every struct name in this call's node list is
+   * registered, and strictly before Pass 2 (or anything else) ever
+   * computes a layout, a default value, or a GC descriptor for one. Must
+   * NOT run any earlier: a struct declared later in the same file/module
+   * still needs to be in HoistedStructDecls_ for a forward-referencing
+   * cycle (`struct A { b: B } struct B { a: A }`, B declared after A) to
+   * be found at all.
+   *
+   * Edges in the graph: a field whose type is a struct (by name, via the
+   * registry -- a field's parsed type is a NamedType placeholder, never
+   * yet a resolved TurfStructType, at this point in the pipeline), an
+   * array of a struct (`B[4]` contains 4 copies of `B`), or a GenericType
+   * whose OWN base name is a registered struct (`Box<T>`'s `inner: Box<T>`
+   * field is an edge to `Box` regardless of what `T` is -- see this
+   * function's .cpp doc comment for why type arguments themselves are not
+   * separately recursed into here). Deliberately NOT an edge: any pointer-
+   * shaped field (`T*`, `&T`, `&?T`, `ptr` -- TurfType::isPointer() covers
+   * all four via TurfReferenceType's inheritance from TurfPointerType, see
+   * docs/architecture/pointers_and_references.md §2.1) -- a pointer field
+   * is a fixed one word regardless of its pointee, which is exactly why it
+   * is the correct, intended way to write a real recursive data structure
+   * and must never be treated as containment.
+   */
+  void checkStructLayoutAcyclicity();
 
   /// Processes an on-demand import's requested symbols (ImportMode::Symbol/
   /// SymbolList/Wildcard) against the already-hoisted target module,

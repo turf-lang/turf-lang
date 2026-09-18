@@ -18,13 +18,16 @@
 #include "AST.h"
 #include "Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
 #include "Errors.h"          // ReferenceError, DuplicateDeclarationError
+#include "ErrorsStruct.h"    // StructLayoutCycleError
 #include "ResolverSymbolTable.h"
 #include "ResolverInternal.h"
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
 #include "Types.h"           // RankedSuggestions
 
 #include <cstring>
+#include <functional> // std::function -- checkStructLayoutAcyclicity()'s recursive DFS lambda
 #include <memory>
+#include <unordered_map> // checkStructLayoutAcyclicity()'s name -> AST / colour maps
 #include <unordered_set>
 
 
@@ -59,6 +62,16 @@ void Resolver::resolveAll(
   // failure must still abort the whole resolveAll() call.
   // ─────────────────────────────────────────────────────────────────────────
   hoistTopLevel(Nodes);
+
+  // Every struct name this call just hoisted (plus every one hoisted by an
+  // earlier resolveAll() call on this same Resolver instance, see
+  // HoistedStructDecls_'s own doc comment) now has a computable-or-not
+  // by-value layout to check. Must run here -- after EVERY struct name in
+  // this call's node list is registered, strictly before Pass 2 below (or
+  // anything else) ever computes a layout, a default value, or a GC
+  // descriptor for one. See checkStructLayoutAcyclicity()'s own doc
+  // comment (Resolver.h) for the full graph definition.
+  checkStructLayoutAcyclicity();
 
   // ─────────────────────────────────────────────────────────────────────────
   // Pass 2 — Full Resolution
@@ -444,6 +457,9 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
                              {PrevLoc->Line, PrevLoc->Col})
           .raise();
     }
+    // Keep the AST node itself, not just its name -- checkStructLayoutAcyclicity()
+    // needs the actual field types, which ResolverTypeRegistry never stores.
+    HoistedStructDecls_.push_back(Struct);
     return;
   }
 
@@ -576,6 +592,8 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
                                {PrevLoc->Line, PrevLoc->Col})
             .raise();
       }
+      // See the identical comment on the hoistTopLevel() struct branch above.
+      HoistedStructDecls_.push_back(Struct);
     } else if (const auto *Enum =
                    dynamic_cast<const EnumDeclExprAST *>(Expr.get())) {
       // Previously MISSING entirely: an enum declared inside an imported
@@ -641,6 +659,182 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
       if (Var->isExported())
         hoistExportedConstant(*Var, ModuleName);
     }
+  }
+}
+
+
+// ─── Pass 1 (end): struct layout acyclicity ────────────────────────────────
+//
+// See the doc comment on the declaration (Resolver.h) for the full graph
+// definition and why this must run where resolveAll() calls it (end of
+// hoisting, before Pass 2). What follows is the "how", kept out of the
+// header because it's implementation, not contract.
+
+namespace {
+
+// Three-colour DFS state, one entry per struct name that has been reached
+// (a name never reached at all -- e.g. one HoistedStructDecls_ has no entry
+// for, which should not happen but is handled defensively below -- has no
+// map entry and is implicitly White).
+enum class DFSColor { Grey, Black };
+
+/**
+ * @brief The struct name @p T's type contributes to a by-value containment
+ *        edge FROM, or "" if it contributes no edge at all.
+ *
+ * Unwraps array dimensions (an array of N structs still contains each by
+ * value) and looks inside a GenericType only as far as its OWN base name --
+ * `Box<T>`'s type ARGUMENTS are deliberately not recursed into here. This
+ * is a template-level check: at this point in the pipeline `T` in `Box<T>`
+ * is still an uninstantiated generic parameter, not a concrete type, so
+ * there is nothing concrete to check yet -- `struct Box<T> { inner: Box<T>
+ * }` is correctly caught (its OWN base name, "Box", is a registered struct,
+ * self-edge found regardless of T), but `struct List<T> { data: T* }`
+ * instantiated as `List<Container>` is correctly NOT flagged here even
+ * though a naive "recurse into type args" version would wrongly treat `T`
+ * (i.e. `Container` after substitution) as an edge. Once generics are
+ * monomorphized (TYPE-002), the exact same function is called again per
+ * concrete instantiation, where a real substituted field type CAN turn a
+ * template-safe generic struct into a genuinely cyclic concrete one -- see
+ * TYPE-001's "Generic interactions" note in
+ * docs/planning/ARCHITECTURE_OVERHAUL.md §8.
+ *
+ * A pointer-shaped field (isPointer() -- covers TurfPointerType, its
+ * TurfReferenceType subclass, and OpaquePointerType, see
+ * docs/architecture/pointers_and_references.md §2.1) is never an edge and
+ * is deliberately NOT unwrapped further -- what it points to is irrelevant
+ * to ITS OWN size.
+ *
+ * @param KnownStructs Every struct name reached so far (HoistedStructDecls_
+ *                     keyed by name) -- an edge target that isn't in this
+ *                     set is either a primitive/generic-param placeholder
+ *                     or a genuinely unknown name (Pass 2's validateNamedType()
+ *                     raises UnknownTypeError for the latter; this check
+ *                     runs before that and simply finds no edge either way).
+ */
+std::string byValueEdgeTarget(
+    const TurfType *T,
+    const std::unordered_map<std::string, const StructDeclExprAST *> &KnownStructs) {
+  if (!T || T->isPointer())
+    return "";
+
+  if (isArrayType(T))
+    return byValueEdgeTarget(getArrayElementType(T), KnownStructs);
+
+  if (const auto *GT = dynamic_cast<const GenericType *>(T)) {
+    auto It = KnownStructs.find(GT->getBaseName());
+    return It != KnownStructs.end() ? GT->getBaseName() : "";
+  }
+
+  if (const auto *NT = dynamic_cast<const NamedType *>(T)) {
+    auto It = KnownStructs.find(NT->getName());
+    return It != KnownStructs.end() ? NT->getName() : "";
+  }
+
+  // Defensive: a field type is a NamedType placeholder everywhere in the
+  // pipeline this check actually runs (Pass 1, before anything resolves a
+  // struct reference to a real TurfStructType) -- but handle the resolved
+  // form too rather than silently miss an edge if that ever changes.
+  if (const auto *ST = dynamic_cast<const TurfStructType *>(T))
+    return KnownStructs.count(ST->getName()) ? ST->getName() : "";
+
+  return "";
+}
+
+/// Finds @p FieldName inside @p Decl's own field list. Only ever called
+/// with a name that byValueEdgeTarget() just derived from one of Decl's own
+/// fields, so the lookup cannot fail in practice; returns nullptr instead
+/// of asserting so a future caller mistake degrades to a missing note
+/// rather than a crash in a diagnostic path.
+const StructField *findField(const StructDeclExprAST *Decl,
+                             const std::string &FieldName) {
+  for (const auto &F : Decl->getFields())
+    if (F.Name == FieldName)
+      return &F;
+  return nullptr;
+}
+
+} // namespace
+
+void Resolver::checkStructLayoutAcyclicity() {
+  std::unordered_map<std::string, const StructDeclExprAST *> ByName;
+  for (const auto *Decl : HoistedStructDecls_)
+    ByName[Decl->getName()] = Decl;
+
+  std::unordered_map<std::string, DFSColor> Color;
+  // The current DFS path: PathNames[i] is a struct name on the path;
+  // PathFields[i] is the name of the FIELD in PathNames[i] whose type is
+  // the edge to PathNames[i+1] (so PathFields.size() == PathNames.size() - 1
+  // at all times -- pushed immediately before recursing into the target,
+  // popped immediately after it returns).
+  std::vector<std::string> PathNames;
+  std::vector<std::string> PathFields;
+
+  // A cycle is reported once per strongly-connected component: the moment
+  // one is found, every struct still on PathNames is unwound normally
+  // (colored Black on the way out, like any other completed DFS node), so
+  // a second starting point that would re-enter the same SCC finds every
+  // member of it already Black and does no further work. In a normal
+  // (non-recovering) compile this is moot -- StructLayoutCycleError::raise()
+  // calls std::exit(1) or longjmp()s out of the whole pass on the first hit
+  // -- but the loop below is written to be correct even if raise() is ever
+  // changed to collect and continue.
+  std::function<void(const std::string &)> Visit = [&](const std::string &Name) {
+    Color[Name] = DFSColor::Grey;
+    PathNames.push_back(Name);
+
+    const StructDeclExprAST *Decl = ByName.at(Name);
+    for (const auto &Field : Decl->getFields()) {
+      std::string Target = byValueEdgeTarget(Field.Type.get(), ByName);
+      if (Target.empty())
+        continue;
+
+      auto CIt = Color.find(Target);
+      if (CIt != Color.end() && CIt->second == DFSColor::Black)
+        continue; // fully explored elsewhere already -- no cycle through here
+
+      if (CIt != Color.end() && CIt->second == DFSColor::Grey) {
+        // Found it: Target is somewhere earlier on PathNames. Reconstruct
+        // the cycle starting there, closing back through this field.
+        auto StartIt = std::find(PathNames.begin(), PathNames.end(), Target);
+        size_t Start = static_cast<size_t>(StartIt - PathNames.begin());
+
+        std::vector<std::string> CyclePath(PathNames.begin() + Start,
+                                           PathNames.end());
+        CyclePath.push_back(Target); // close the loop in the printed path
+
+        StructLayoutCycleError Err(ByName.at(Target)->getLoc(), Target, CyclePath);
+        // One note per edge in the cycle: PathFields[i] is the field inside
+        // PathNames[i] that points at PathNames[i+1], for every edge already
+        // on the path, plus the closing edge (Field, in the struct we're
+        // CURRENTLY visiting -- PathNames.back() -- back to Target).
+        for (size_t I = Start; I + 1 < PathNames.size(); ++I) {
+          const StructField *F = findField(ByName.at(PathNames[I]), PathFields[I]);
+          if (F)
+            Err.withRelated(F->NameLoc, "field '" + PathNames[I] + "::" +
+                                            F->Name + "' has type '" +
+                                            F->Type->getName() + "'");
+        }
+        Err.withRelated(Field.NameLoc, "field '" + Name + "::" + Field.Name +
+                                          "' has type '" +
+                                          Field.Type->getName() + "'");
+        Err.raise();
+        continue;
+      }
+
+      // White (unseen): record which field led here, then recurse.
+      PathFields.push_back(Field.Name);
+      Visit(Target);
+      PathFields.pop_back();
+    }
+
+    PathNames.pop_back();
+    Color[Name] = DFSColor::Black;
+  };
+
+  for (const auto *Decl : HoistedStructDecls_) {
+    if (Color.find(Decl->getName()) == Color.end())
+      Visit(Decl->getName());
   }
 }
 

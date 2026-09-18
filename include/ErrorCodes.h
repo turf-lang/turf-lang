@@ -116,6 +116,7 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // Appended after the initial 67-entry generation (see this file's own
     // doc comment on why new entries go at the end, not resorted in).
     {"E068", "UnknownStructFieldError", "Unknown struct field", SLM::ErrorCategory::UNDECLARED_VAR},
+    {"E069", "StructLayoutCycleError", "Struct layout cycle", SLM::ErrorCategory::DECLARATION, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);
