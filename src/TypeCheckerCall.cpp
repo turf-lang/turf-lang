@@ -76,6 +76,31 @@ static bool ufcsReceiverTypeMatches(const TurfType *ParamTy,
 }
 
 
+/**
+ * @brief LANG-004 item 2: does @p ArgTy (a `string`) coerce to @p ParamTy
+ *        (a raw-pointer parameter) at an `extern fn` call site?
+ *
+ * `string` and `ptr`/`T*`/`void*` already share the identical LLVM
+ * representation (`isPointerLike()`, CodegenCore.cpp), so this is purely a
+ * missing rule in argument matching, not a representation gap. Deliberately
+ * a standalone predicate, checked only where the candidate is a real
+ * `extern fn` (`Cand->IsExtern`) -- NOT folded into typesCompatible()
+ * (Types.cpp), which stays exact on this pair for ordinary Turf code.
+ * Widening typesCompatible() itself would let `string` silently bind to any
+ * raw-pointer parameter everywhere, undermining §6.2's frozen conversion
+ * matrix for the sake of one FFI convenience. See
+ * docs/planning/ARCHITECTURE_OVERHAUL.md §8 LANG-004, item 2 ("Must NOT
+ * reinterpret").
+ */
+static bool isExternStringToPtrCoercion(const TurfType *ArgTy,
+                                        const TurfType *ParamTy) {
+  if (!ArgTy || !ParamTy || !ArgTy->isString())
+    return false;
+  return (ParamTy->isPointer() && !ParamTy->isReference()) ||
+         ParamTy->isNamed("ptr") || ParamTy->isNamed("void*");
+}
+
+
 // ─── Functions & calls ────────────────────────────────────────────────────────
 
 /**
@@ -354,7 +379,8 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       for (int i = 0; i < CheckCount; ++i) {
         const TurfType *ParamTy = Cand->Params[i].Type.get();
         const TurfType *ArgTy   = ArgTypes[i].get();
-        if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy)) {
+        if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
+            !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy))) {
           AllOk = false;
           break;
         }
@@ -660,7 +686,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       for (int i = 0; i < ArgCount; ++i) {
         const TurfType *ParamTy = Cand->Params[i].Type.get();
         const TurfType *ArgTy   = ArgTypes[i].get();
-        if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy)) {
+        if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
+            !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy))) {
           AllOk = false;
           break;
         }
