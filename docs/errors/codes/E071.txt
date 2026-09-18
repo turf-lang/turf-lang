@@ -1,0 +1,29 @@
+A digit doesn't belong in this number's base
+
+Once you write `0x`, `0b`, or `0o`, every digit that follows has to be a
+valid digit in that particular base:
+
+  - Hexadecimal (`0x`) allows 0-9 and a-f (or A-F).
+  - Binary (`0b`) allows only 0 and 1.
+  - Octal (`0o`) allows only 0-7.
+
+This error means one of the characters right after the prefix isn't valid
+for the base you chose -- most often a simple typo:
+
+    mut x: int = 0b012;   // ERROR: '2' isn't valid in binary
+    mut y: int = 0o8;     // ERROR: '8' isn't valid in octal
+    mut z: int = 0xZZ;    // ERROR: 'Z' isn't a hex digit
+
+The fix depends on what you actually meant:
+
+  - If you mistyped a digit, correct it:
+
+        mut x: int = 0b010;   // fixed
+
+  - If you actually wanted a plain decimal number, drop the prefix
+    entirely:
+
+        mut y: int = 8;   // no '0o' needed for an ordinary decimal number
+
+Double-check which base you meant to use, and that every digit you typed
+is one that base actually has.

@@ -45,7 +45,7 @@ otherwise each answer differently, producing an incoherent language.
 
 | # | Concept | Rule |
 |---|---|---|
-| 1 | Lexical validity | `[0-9_]+`, `0x…`, `0b…`, `0o…`, `[0-9_]*.[0-9_]+([eE][+-]?[0-9]+)?`. `_` is a separator, never leading or trailing. |
+| 1 | Lexical validity | `[0-9_]+` (plain decimal int), `0x…`/`0b…`/`0o…` (radix-prefixed int), `[0-9_]*.[0-9_]+([eE][+-]?[0-9_]+)?` (dotted float) or `[0-9_]+[eE][+-]?[0-9_]+` (dotless-exponent float, e.g. `1e6` — corrected 2026-09-18/SEM-001: the original single dotted-float alternative made a bare exponent lexically invalid, contradicting SEM-001's own testing scope and every mainstream language's float grammar; this row now states both alternatives so it no longer self-contradicts). `_` is a separator, never leading or trailing. |
 | 2 | Literal representability | An integer literal is held exactly (arbitrary precision) until typed. A float literal is held as the exactly-rounded `double` **plus a flag for whether rounding overflowed to `inf`**. |
 | 3 | Destination representability | Checked when the literal's type is fixed. Out of range → **hard error**, never a clamp. A float literal that overflowed to `inf` → hard error. |
 | 4 | Implicit conversion | `int32 → int`, `int32 → double`, `int → double`. Nothing else. No narrowing, no `bool` ↔ numeric, no `char` ↔ numeric. |

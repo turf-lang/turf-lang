@@ -20,6 +20,7 @@
 #include "Errors.h"
 #include "Lexer.h"
 #include "Types.h"
+#include "llvm/ADT/SmallString.h"
 #include <string>
 
 // Helper: structural AST fingerprinting (for identical-branch detection)
@@ -28,8 +29,17 @@ static std::string Fingerprint(const ExprAST *E) {
     return "<null>";
 
   if (auto *N = dynamic_cast<const NumberExprAST *>(E)) {
-    if (N->isInteger())
-      return "int:" + std::to_string(N->getIntVal());
+    if (N->isInteger()) {
+      // Exact accessor, not getIntVal() -- this fingerprint feeds
+      // identical-BRANCH/duplicate-arm detection (SEM-001,
+      // docs/planning/ARCHITECTURE_OVERHAUL.md §8's own Risks note calls
+      // this file out by name), so two DIFFERENT wide literals that
+      // happen to share the same low 64 bits must not collide into one
+      // fingerprint.
+      llvm::SmallString<32> Digits;
+      N->getIntValExact().toString(Digits, 10);
+      return "int:" + Digits.str().str();
+    }
     return "dbl:" + std::to_string(N->getDoubleVal());
   }
 

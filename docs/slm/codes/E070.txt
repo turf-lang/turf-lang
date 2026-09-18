@@ -1,0 +1,25 @@
+TURF E070 -- MALFORMED RADIX PREFIX:
+
+CAUSE:
+  A radix prefix (`0x`/`0X` hex, `0b`/`0B` binary, `0o`/`0O` octal) was
+  found with NO valid digit for that radix anywhere after it -- the prefix
+  is immediately followed by whitespace, an operator, `;`, or EOF, with
+  nothing that could be interpreted as the start of a digit.
+
+  Distinct from E071 (InvalidRadixDigitError): E070 fires only when nothing
+  usable follows the prefix at all. If a character DOES follow that looks
+  like it was meant to continue the literal (alphanumeric) but is simply
+  the wrong digit for this radix, that is E071 instead, not this.
+
+CORRECT:
+    mut hex: int = 0xFF;
+    mut bin: int = 0b1010;
+    mut oct: int = 0o17;
+
+INCORRECT:
+    mut x: int = 0x;
+    // ERROR: '0x' isn't followed by any digit [E070]
+
+FIX:
+  Finish the literal with at least one valid digit for the chosen radix, or
+  remove the prefix entirely and write a plain decimal number instead.

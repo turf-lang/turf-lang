@@ -289,7 +289,9 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     int SavedLastChar, SavedCurTok, SavedCurLine, SavedCurCol;
     SourceLocation SavedCurLoc;
     std::string SavedFilename, SavedIdentifierStr, SavedStringVal;
-    double SavedNumVal; long long SavedIntVal; bool SavedBoolVal;
+    std::string SavedNumLitSpelling, SavedNumLitClean;
+    int SavedNumLitRadix;
+    bool SavedBoolVal;
     // SourceLines is what printDiag()'s caret snippet is snapshotted from
     // (see DiagnosticEngine::add() in Lexer.cpp) -- without saving/restoring
     // it here alongside SourceFilename, it never got populated for the
@@ -314,8 +316,9 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       SavedCurLine = CurLine;
       SavedCurCol = CurCol;
       SavedFilename = SourceFilename;
-      SavedNumVal = NumVal;
-      SavedIntVal = IntVal;
+      SavedNumLitSpelling = NumLitSpelling;
+      SavedNumLitClean = NumLitClean;
+      SavedNumLitRadix = NumLitRadix;
       SavedBoolVal = BoolVal;
       SavedIdentifierStr = IdentifierStr;
       SavedStringVal = StringVal;
@@ -330,8 +333,9 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       CurLine = SavedCurLine;
       CurCol = SavedCurCol;
       SourceFilename = SavedFilename;
-      NumVal = SavedNumVal;
-      IntVal = SavedIntVal;
+      NumLitSpelling = SavedNumLitSpelling;
+      NumLitClean = SavedNumLitClean;
+      NumLitRadix = SavedNumLitRadix;
       BoolVal = SavedBoolVal;
       IdentifierStr = SavedIdentifierStr;
       StringVal = SavedStringVal;

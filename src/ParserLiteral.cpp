@@ -26,9 +26,13 @@
 #include "SuggestionIndex.h"
 #include "SymbolTable.h"
 #include "ParserInternal.h"
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Error.h"
+#include <algorithm>
 #include <cstdlib>
 #include <map>
 #include <memory>
@@ -37,10 +41,67 @@
 #include <vector>
 
 
-// Called when CurTok is a Number.
+/**
+ * @brief Builds the literal's EXACT value from the lexer's own scan
+ * (NumLitSpelling/NumLitClean/NumLitRadix, Lexer.h) -- SEM-001
+ * (docs/planning/ARCHITECTURE_OVERHAUL.md §8). The lexer deliberately stays
+ * LLVM-free (plain strings, no llvm::APSInt/APFloat -- see those globals'
+ * own doc comment in Lexer.h), so this is the one place that actually
+ * constructs the bignum value; lexical well-formedness (radix, separators,
+ * exponent shape) was already fully validated in the lexer, so nothing
+ * here needs to raise a diagnostic of its own.
+ */
 std::unique_ptr<ExprAST> ParseNumberExpr(bool IsInteger) {
-  auto Result = IsInteger ? std::make_unique<NumberExprAST>(IntVal)
-                          : std::make_unique<NumberExprAST>(NumVal);
+  SourceLocation Loc = CurLoc;
+  std::string Spelling = NumLitSpelling;
+  std::unique_ptr<ExprAST> Result;
+
+  if (IsInteger) {
+    // NumLitClean holds just the radix digits (no prefix, no '_'). Bit
+    // width: llvm::APInt::getBitsNeeded() plus a round-trip safety check --
+    // construct at the reported width, and if the result's OWN sign bit
+    // ends up set (meaning this plain, never-negative-in-source magnitude
+    // would misread as negative), redo one bit wider. This is defensive
+    // rather than trusting getBitsNeeded()'s exact signed-vs-unsigned
+    // rounding convention, and cheap (runs once per literal token, not
+    // once per digit). A literal is never negative here regardless -- `-5`
+    // parses as UnaryExprAST('-', NumberExprAST(5)), unchanged by SEM-001
+    // (see this function's own doc comment: folding a literal unary minus
+    // into the literal itself, per §10.2's `-9223372036854775808` example,
+    // is explicitly deferred to whichever group actually enforces
+    // representability against a destination type).
+    unsigned Bits =
+        std::max(64u, llvm::APInt::getBitsNeeded(NumLitClean, NumLitRadix));
+    llvm::APInt Magnitude(Bits, NumLitClean, NumLitRadix);
+    if (Magnitude.isNegative()) {
+      Bits += 1;
+      Magnitude = llvm::APInt(Bits, NumLitClean, NumLitRadix);
+    }
+    llvm::APSInt Exact(std::move(Magnitude), /*isUnsigned=*/false);
+    Result = std::make_unique<NumberExprAST>(std::move(Exact), Spelling, Loc);
+  } else {
+    llvm::APFloat Value(llvm::APFloat::IEEEdouble());
+    bool Overflowed = false;
+    auto StatusOrErr =
+        Value.convertFromString(NumLitClean, llvm::APFloat::rmNearestTiesToEven);
+    if (StatusOrErr) {
+      Overflowed = (*StatusOrErr & llvm::APFloat::opOverflow) != 0;
+    } else {
+      // The lexer already validated this is a syntactically well-formed
+      // decimal float (digits, at most one '.', a well-formed optional
+      // exponent) -- convertFromString() failing here would mean the
+      // lexer's own grammar and LLVM's disagree about what's parseable,
+      // i.e. a compiler bug, not a user mistake. Consume the error (rather
+      // than let it propagate as an unhandled llvm::Error, which aborts
+      // the process) and fall back to +0.0 for this one literal instead of
+      // crashing the compiler over source that followed this language's
+      // own documented grammar.
+      llvm::consumeError(StatusOrErr.takeError());
+    }
+    Result = std::make_unique<NumberExprAST>(std::move(Value), Overflowed,
+                                             Spelling, Loc);
+  }
+
   getNextToken(); // consume the number
   return Result;
 }

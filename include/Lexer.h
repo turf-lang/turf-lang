@@ -90,8 +90,29 @@ void CloseSourceFile();
 // buffer conceptually represents (its unsaved editor path, say), same as a
 // real file would.
 void SetSourceBuffer(std::istream &Buffer);
-extern double NumVal;
-extern long long IntVal;
+// SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): the lexer used to
+// collapse every integer literal into a `long long` (via strtoll, silently
+// saturating on overflow) and every float literal into a `double` (via
+// strtod, silently rounding to `inf` on overflow) -- destroying the
+// literal's exact written value before the parser ever saw it. These three
+// globals replace `NumVal`/`IntVal` and carry the RAW, exact information
+// instead, deliberately kept LLVM-free (plain string/int, no APSInt/APFloat)
+// so Lexer.h itself stays free of an LLVM/AST dependency, same as it always
+// has been -- the caller (ParseNumberExpr, ParserLiteral.cpp, which already
+// needs LLVM for other reasons) is what actually builds the exact
+// llvm::APSInt/llvm::APFloat from these.
+//   NumLitSpelling -- the literal's exact original source text, including
+//     its radix prefix and every '_' separator, verbatim. For diagnostics
+//     and NumberExprAST::getSpelling() (round-trip proof).
+//   NumLitClean -- the same literal with the radix prefix and every '_'
+//     stripped: just the digits (int) or the digits/'.'/exponent (float),
+//     ready to hand directly to llvm::APInt's or llvm::APFloat's own
+//     string-parsing constructor with no further cleanup.
+//   NumLitRadix -- 10, 16, 2, or 8. Meaningful only when the token just
+//     returned was TOK_INT_LITERAL; unspecified (not reset) otherwise.
+extern std::string NumLitSpelling;
+extern std::string NumLitClean;
+extern int NumLitRadix;
 extern bool BoolVal;
 extern char CharVal;
 extern std::string IdentifierStr;

@@ -3,26 +3,128 @@
 
 #include "AST.h"
 
-// Number Node (Leaf)
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APSInt.h"
+
+/**
+ * @brief A numeric literal. SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md
+ * §8, FREEZE.md §6.2 row 2): before this shape existed, an integer literal
+ * was collapsed into a `long long` at LEX time (`strtoll`, `errno`
+ * unchecked -- a 48-digit literal silently became `9223372036854775807`)
+ * and a `double Val` copy was populated even when `IsInteger` was true, for
+ * no consumer that ever needed it. Now the literal's value is carried
+ * EXACTLY -- `llvm::APSInt` (arbitrary-precision, until SEM-002 checks it
+ * against a destination type) for an integer, `llvm::APFloat` (the
+ * exactly-rounded IEEE double, plus an explicit overflow flag) for a float
+ * -- as a genuine tagged union: only one of IntVal_/FloatVal_ is ever
+ * meaningful, selected by IsInteger_.
+ *
+ * `getIntVal()`/`getDoubleVal()` remain as narrow, TRUNCATING convenience
+ * accessors (matching the pre-SEM-001 `long long`/`double` surface almost
+ * every existing consumer only ever needed -- lint heuristics, debug
+ * printing guarded by isInteger(), a compile-time array-bounds pass that
+ * only ever deals in `int`-range indices) so this reshape did not force
+ * every one of those call sites to become bignum-aware. A consumer that
+ * genuinely needs the untruncated value (constant folding across a wide
+ * literal, `--dump-ast`'s own round-trip proof, sandbox AST diffing) uses
+ * getIntValExact()/getFloatValExact() instead -- see each call site's own
+ * comment for which one it needed and why.
+ */
 class NumberExprAST : public ExprAST {
-  double Val;       // Actual value, like "5", "5.0", etc.
-  long long IntVal; // Exact integer value when IsInteger is true
-  bool IsInteger = false;
+  llvm::APSInt IntVal_;    // exact, arbitrary-precision; meaningful iff IsInteger_
+  llvm::APFloat FloatVal_; // exact rounded double; meaningful iff !IsInteger_
+  bool IsInteger_;
+  // True for a literal actually written in the source; false for a
+  // compiler-synthesized constant (e.g. the desugared `1` in `x++`,
+  // ParserStmt.cpp's default range bounds). SEM-002/later passes will use
+  // this to decide whether a representability error should cite the
+  // user's own source text or stay silent about an internal synthesis --
+  // not consulted by anything in SEM-001 itself.
+  bool IsUntyped_;
+  // Float-only: true if decimal->binary rounding overflowed to +/-inf
+  // (FREEZE.md §6.2 row 2's explicit "plus a flag" requirement). Always
+  // false for a compiler-synthesized float and for any integer.
+  bool Overflowed_ = false;
+  // The literal's exact original source text (e.g. "0x1_000", "1.5e-3"),
+  // empty for a compiler-synthesized constant. For diagnostics and for
+  // --dump-ast's round-trip proof -- NOT necessarily reproducible from
+  // IntVal_/FloatVal_ alone (radix, separators, and trailing zeros are all
+  // lost once parsed into a value).
+  std::string Spelling_;
+  SourceLocation Loc_;
+
+  // Full-fidelity constructor: every OTHER constructor below (and clone())
+  // delegates here so there is exactly one place that initializes all
+  // seven fields together -- see clone()'s own comment for why this
+  // matters (a naive clone() built from the two "public convenience"
+  // constructors alone silently lost IsUntyped_/Spelling_/Loc_).
+  NumberExprAST(llvm::APSInt IV, llvm::APFloat FV, bool IsInteger,
+               bool IsUntyped, bool Overflowed, std::string Spelling,
+               SourceLocation Loc)
+      : IntVal_(std::move(IV)), FloatVal_(std::move(FV)), IsInteger_(IsInteger),
+        IsUntyped_(IsUntyped), Overflowed_(Overflowed),
+        Spelling_(std::move(Spelling)), Loc_(Loc) {}
 
 public:
-  explicit NumberExprAST(double Val) : Val(Val), IntVal(0), IsInteger(false) {}
+  // Compiler-synthesized integer/float constants (IsUntyped_ = false, no
+  // source spelling, a default-constructed {0,0,""} location) -- every
+  // pre-existing call site that built a NumberExprAST directly
+  // (ParserStmt.cpp's desugared range bounds, ParserCore.cpp's `x++`/`x--`
+  // desugaring) keeps compiling unchanged through these two.
+  explicit NumberExprAST(double Val)
+      : NumberExprAST(llvm::APSInt::get(0), llvm::APFloat(Val), false, false,
+                      false, "", SourceLocation{}) {}
   explicit NumberExprAST(long long Val)
-      : Val(static_cast<double>(Val)), IntVal(Val), IsInteger(true) {}
+      : NumberExprAST(llvm::APSInt::get(Val), llvm::APFloat::IEEEdouble(), true,
+                      false, false, "", SourceLocation{}) {}
 
-  bool isInteger() const { return IsInteger; }
-  long long getIntVal() const { return IntVal; }
-  double getDoubleVal() const { return Val; }
+  // A real source literal, built by ParseNumberExpr (ParserLiteral.cpp)
+  // from the lexer's own exact scan (NumLitSpelling/NumLitClean/
+  // NumLitRadix, Lexer.h) -- IsUntyped_ = true.
+  NumberExprAST(llvm::APSInt Val, std::string Spelling, SourceLocation Loc)
+      : NumberExprAST(std::move(Val), llvm::APFloat::IEEEdouble(), true, true,
+                      false, std::move(Spelling), Loc) {}
+  NumberExprAST(llvm::APFloat Val, bool Overflowed, std::string Spelling,
+               SourceLocation Loc)
+      : NumberExprAST(llvm::APSInt::get(0), std::move(Val), false, true,
+                      Overflowed, std::move(Spelling), Loc) {}
+
+  bool isInteger() const { return IsInteger_; }
+  bool isUntyped() const { return IsUntyped_; }
+  bool overflowed() const { return Overflowed_; }
+  const std::string &getSpelling() const { return Spelling_; }
+  const SourceLocation &getLoc() const { return Loc_; }
+
+  /// Exact, arbitrary-precision value. Only meaningful when isInteger().
+  const llvm::APSInt &getIntValExact() const { return IntVal_; }
+  /// Exact rounded value (see overflowed() for whether rounding it FROM the
+  /// source text hit +/-inf). Only meaningful when !isInteger().
+  const llvm::APFloat &getFloatValExact() const { return FloatVal_; }
+
+  /// Narrow, truncating convenience accessor -- see the class doc comment.
+  /// Safe against a wider-than-64-bit IntVal_ (never asserts/UB): widens or
+  /// truncates to exactly 64 bits first, THEN extracts, so a literal like
+  /// the 48-digit example in §10.2 returns a well-defined (if meaningless)
+  /// value here instead of crashing -- exactness for that case lives only
+  /// in getIntValExact().
+  long long getIntVal() const { return IntVal_.extOrTrunc(64).getSExtValue(); }
+  /// Only meaningful when !isInteger() -- every existing call site already
+  /// guards with isInteger() before calling this (Lint.cpp, ASTPrinter).
+  double getDoubleVal() const { return FloatVal_.convertToDouble(); }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitNumber(*this); }
+  // Uses the private full-fidelity constructor directly (legal from a
+  // member function regardless of access) so a clone of a
+  // compiler-synthesized node stays compiler-synthesized (IsUntyped_
+  // false) and a clone of a real source literal keeps its exact spelling
+  // and location -- going through either public convenience constructor
+  // instead would have silently reset IsUntyped_ to the wrong value for
+  // one of the two cases.
   std::unique_ptr<ExprAST> clone() const override {
-    return IsInteger ? std::make_unique<NumberExprAST>(IntVal)
-                     : std::make_unique<NumberExprAST>(Val);
+    return std::unique_ptr<NumberExprAST>(new NumberExprAST(
+        IntVal_, FloatVal_, IsInteger_, IsUntyped_, Overflowed_, Spelling_,
+        Loc_));
   }
 };
 

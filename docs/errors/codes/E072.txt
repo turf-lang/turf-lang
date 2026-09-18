@@ -1,0 +1,25 @@
+A number can't start or end with an underscore
+
+Turf lets you use `_` inside a numeric literal to make long numbers easier
+to read, the same way you might write "1,000,000" by hand:
+
+    mut population: int = 1_000_000;
+    mut pi_ish: double = 3.14_159;
+    mut big_hex: int = 0xFF_FF_FF_FF;
+
+The underscore only makes sense as a separator BETWEEN two digits. Put one
+at the very start or the very end of a run of digits, and there's nothing
+for it to actually separate:
+
+    mut a: int = _5;     // ERROR: leading underscore
+    mut b: int = 5_;     // ERROR: trailing underscore
+    mut c: int = 0x_FF;  // ERROR: leading underscore right after the prefix
+
+The fix is simply to remove the stray underscore:
+
+    mut a: int = 5;
+    mut b: int = 5;
+    mut c: int = 0xFF;
+
+If you were trying to group digits, make sure every underscore has a real
+digit immediately on both sides of it.

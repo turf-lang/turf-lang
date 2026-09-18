@@ -1,0 +1,35 @@
+TURF E071 -- INVALID RADIX DIGIT:
+
+CAUSE:
+  A character was found where a digit was expected for this literal's
+  radix, but it is not a valid digit for that radix:
+    - hex (`0x`/`0X`): only 0-9, a-f, A-F
+    - binary (`0b`/`0B`): only 0, 1
+    - octal (`0o`/`0O`): only 0-7
+
+  This fires specifically when the offending character looks like it was
+  meant to continue the literal (it is alphanumeric) -- a character that
+  clearly ends the token instead (whitespace, an operator, `;`, EOF) just
+  means the literal legitimately ended there; that is not an error (e.g.
+  `0b01 + 5` is fine).
+
+CORRECT:
+    mut a: int = 0b0110;
+    mut b: int = 0o17;
+    mut c: int = 0xFF;
+
+INCORRECT:
+    mut a: int = 0b012;
+    // ERROR: '2' isn't a valid digit in '0b01' (binary, 0-1) [E071]
+    mut b: int = 0o8;
+    // ERROR: '8' isn't a valid digit in '0o' (octal, 0-7) [E071]
+    mut c: int = 0xZZ;
+    // ERROR: 'Z' isn't a valid digit in '0x' (hexadecimal, 0-9/a-f) [E071]
+
+WHAT THIS ERROR IS NOT:
+  - Not E070 (MalformedRadixPrefixError) -- that fires only when NOTHING
+    followed the prefix at all, not when something did but was wrong.
+
+FIX:
+  Correct the invalid digit, or drop the radix prefix and write the number
+  in plain decimal instead if that is what was actually meant.

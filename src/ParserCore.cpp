@@ -403,7 +403,18 @@ TurfTypePtr ParseType() {
       getNextToken();
       int Size = -1;
       if (CurTok == TOK_INT_LITERAL) {
-        Size = static_cast<int>(IntVal);
+        // A best-effort (saturating) reading of the literal, same as this
+        // whole file did before SEM-001 -- an array size is always a small
+        // positive int in practice, and NumLitClean/NumLitRadix (not the
+        // exact llvm::APSInt NumberExprAST itself carries, since no
+        // NumberExprAST node exists for a type-position literal like this
+        // one at all) is all that's needed here; representability of an
+        // array SIZE is unrelated to SEM-001/002's literal-representability
+        // work, which is about literals used as VALUES, not this compile-
+        // time-only dimension. See ParseNumberExpr's own comment
+        // (ParserLiteral.cpp) for the exact-value path a real
+        // value-position literal takes instead.
+        Size = static_cast<int>(strtoll(NumLitClean.c_str(), nullptr, NumLitRadix));
         if (Size <= 0) {
           SyntaxError(CurLoc, "Array size must be positive").raise();
           return nullptr;
@@ -459,7 +470,10 @@ TurfTypePtr ParseType() {
     getNextToken(); // eat '['
     int Size = -1;
     if (CurTok == TOK_INT_LITERAL) {
-      Size = static_cast<int>(IntVal);
+      // See the identical comment on the other array-size site above (this
+      // file, `T[N]` in a generic base type) for why the best-effort
+      // NumLitClean/NumLitRadix reading is the right choice here too.
+      Size = static_cast<int>(strtoll(NumLitClean.c_str(), nullptr, NumLitRadix));
       if (Size <= 0) {
         SyntaxError(CurLoc,
                     "Array size must be a positive integer (greater than 0)")

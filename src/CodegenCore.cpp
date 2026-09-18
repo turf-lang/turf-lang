@@ -1407,5 +1407,20 @@ Value *CodegenConstantValue(const ResolverConstantSymbol &C) {
     return ConstantInt::get(Type::getInt1Ty(*TheContext), C.BoolVal ? 1 : 0);
   if (C.Type && C.Type->isString())
     return Builder->CreateGlobalString(C.StringVal, "str");
-  return ConstantInt::get(*TheContext, APInt(64, C.IntVal, true));
+  // C.IntVal is C.'s exact decimal string (SEM-001) -- see
+  // ResolverConstantSymbol::IntVal's own doc comment (ResolverSymbolBase.h)
+  // for why it's a string rather than a plain llvm::APSInt at the Resolver
+  // layer. Same getBitsNeeded()-then-extOrTrunc(64) pattern
+  // NumberExprAST::codegen() (CodegenExpr.cpp) and ParseNumberExpr
+  // (ParserLiteral.cpp) both already use to turn an exact, possibly-wider-
+  // than-64-bit value into the fixed 64-bit `int` LLVM constant this
+  // returns.
+  StringRef Digits = C.IntVal;
+  bool Negative = Digits.starts_with("-");
+  StringRef Magnitude = Negative ? Digits.drop_front() : Digits;
+  unsigned Bits = std::max(64u, APInt::getBitsNeeded(Magnitude, 10) + 1);
+  APInt Value(Bits, Magnitude, 10);
+  if (Negative)
+    Value = -Value;
+  return ConstantInt::get(*TheContext, Value.sextOrTrunc(64));
 }

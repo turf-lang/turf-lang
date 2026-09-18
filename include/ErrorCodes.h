@@ -117,6 +117,15 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // doc comment on why new entries go at the end, not resorted in).
     {"E068", "UnknownStructFieldError", "Unknown struct field", SLM::ErrorCategory::UNDECLARED_VAR},
     {"E069", "StructLayoutCycleError", "Struct layout cycle", SLM::ErrorCategory::DECLARATION, true},
+    // SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): four new lexical
+    // errors raised directly from the Lexer's own number-scanning branch
+    // (see ErrorsLex.h's own top comment for why that's safe). Routed to
+    // the existing SYNTAX_ERROR category, per §8's explicit instruction not
+    // to add a new SLM::ErrorCategory for these.
+    {"E070", "MalformedRadixPrefixError", "Malformed radix prefix", SLM::ErrorCategory::SYNTAX_ERROR},
+    {"E071", "InvalidRadixDigitError", "Invalid radix digit", SLM::ErrorCategory::SYNTAX_ERROR},
+    {"E072", "MisplacedSeparatorError", "Misplaced separator", SLM::ErrorCategory::SYNTAX_ERROR},
+    {"E073", "MalformedExponentError", "Malformed exponent", SLM::ErrorCategory::SYNTAX_ERROR},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

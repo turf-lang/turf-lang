@@ -41,13 +41,29 @@
 using namespace llvm;
 
 
-// Turns a number to LLVM Number constant
+// Turns a number to LLVM Number constant. SEM-001
+// (docs/planning/ARCHITECTURE_OVERHAUL.md §8): builds the LLVM constant
+// directly from the node's own exact APSInt/APFloat rather than round-
+// tripping through the narrow getIntVal()/getDoubleVal() convenience
+// accessors -- see NumberExprAST's own doc comment (ASTExpr.h).
+//
+// `int` is a fixed 64-bit LLVM type regardless of how many bits IntVal_
+// actually needed to hold the literal exactly (a wider-than-64-bit literal,
+// e.g. the 48-digit example in §10.2, is representationally impossible to
+// avoid narrowing here) -- extOrTrunc(64) makes that narrowing explicit and
+// well-defined (never UB) rather than relying on getIntVal()'s own
+// already-safe-but-indirect truncation. Out-of-range representability is
+// deliberately NOT checked here or anywhere else in SEM-001 (SEM-002's
+// job, per §8's completion criteria: an out-of-range literal must still
+// compile in this group, carrying its exact value up to this exact point).
 Value *NumberExprAST::codegen() {
   if (isInteger())
-    return ConstantInt::get(*TheContext, APInt(64, getIntVal(), true));
+    return ConstantInt::get(*TheContext, getIntValExact().extOrTrunc(64));
 
-  // APFloat is how LLVM represents floating point numbers internally
-  return ConstantFP::get(*TheContext, APFloat(getDoubleVal()));
+  // APFloat is how LLVM represents floating point numbers internally --
+  // getFloatValExact() already IS one (IEEEdouble semantics), so this is a
+  // direct pass-through, not a re-derivation from a plain C++ double.
+  return ConstantFP::get(*TheContext, getFloatValExact());
 }
 
 

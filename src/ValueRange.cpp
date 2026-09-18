@@ -2,6 +2,8 @@
 #include "AST.h"
 #include "Errors.h"
 
+#include "llvm/ADT/APInt.h"
+
 #include <functional>
 #include <optional>
 #include <queue>
@@ -44,14 +46,40 @@ static std::optional<long long> evalConstExpr(const ExprAST *E, const ConstMap &
     auto L = evalConstExpr(B->getLHS(), M);
     auto R = evalConstExpr(B->getRHS(), M);
     if (!L.has_value() || !R.has_value()) return std::nullopt;
-    long long lv = *L, rv = *R;
+    // SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): this used to be
+    // plain `long long lv + rv` -- signed-overflow UB in the compiler's
+    // OWN C++, confirmed by reading this exact line before the fix (not
+    // hypothetical: e.g. two folded constants near INT64_MAX/INT64_MIN
+    // feeding an array index expression could hit it for real). Checked
+    // llvm::APSInt arithmetic replaces it: on provable overflow, this pass
+    // gives up on the value (returns nullopt, i.e. "unknown from here"),
+    // the same conservative fallback already used for division by zero
+    // just below -- SEM-001 does not add a NEW diagnostic for compile-time-
+    // provable arithmetic overflow (representability/overflow ERRORS are
+    // out of this group's scope entirely, see its own "Desired behavior"
+    // item 4); this only removes the UB, it does not change what this pass
+    // reports. ArrayBoundsError (this pass's only consumer of the returned
+    // value) still fires exactly when it did before: a provably-out-of-
+    // range constant index. Widened to 65 bits (one more than `long long`
+    // needs) before the checked op so the SIGNED overflow flag genuinely
+    // means "the true mathematical result doesn't fit in 64 bits", not an
+    // artifact of computing at exactly 64.
+    llvm::APInt lv(65, static_cast<uint64_t>(*L), /*isSigned=*/true);
+    llvm::APInt rv(65, static_cast<uint64_t>(*R), /*isSigned=*/true);
+    bool Overflow = false;
+    llvm::APInt Result;
     switch (B->getOp()) {
-    case '+': return lv + rv;
-    case '-': return lv - rv;
-    case '*': return lv * rv;
-    case '/': if (rv == 0) return std::nullopt; return lv / rv;
+    case '+': Result = lv.sadd_ov(rv, Overflow); break;
+    case '-': Result = lv.ssub_ov(rv, Overflow); break;
+    case '*': Result = lv.smul_ov(rv, Overflow); break;
+    case '/':
+      if (rv.isZero()) return std::nullopt;
+      Result = lv.sdiv_ov(rv, Overflow);
+      break;
     default: return std::nullopt;
     }
+    if (Overflow || !Result.isSignedIntN(64)) return std::nullopt;
+    return Result.getSExtValue();
   }
   if (auto A = dynamic_cast<const AssignmentExprAST *>(E)) {
     return evalConstExpr(A->getRHS(), M);

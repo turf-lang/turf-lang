@@ -353,7 +353,20 @@ struct ResolverConstantSymbol {
   // Exactly one of these is meaningful, selected by Type->isInt()/
   // isDouble()/isBool()/isString() -- `export immut` only supports these 4
   // primitive literal kinds today (see ParseExportDecl()'s validation).
-  long long IntVal = 0;
+  //
+  // IntVal is the literal's EXACT value as a decimal string (SEM-001,
+  // docs/planning/ARCHITECTURE_OVERHAUL.md §8), not a `long long` -- this
+  // header is explicitly, deliberately LLVM/AST-free (see the struct's own
+  // doc comment just above), so it cannot hold an llvm::APSInt directly the
+  // way NumberExprAST now does. A plain decimal string preserves the same
+  // exactness (NumberExprAST::getIntValExact().toString(10, true), written
+  // by hoistExportedConstant, ResolverCore.cpp) without pulling in LLVM --
+  // CodegenConstantValue (CodegenCore.cpp), which already needs LLVM for
+  // everything else it does, is what actually reconstructs an APInt from
+  // this string, the same getBitsNeeded()-then-extOrTrunc(64) pattern
+  // ParseNumberExpr (ParserLiteral.cpp) and NumberExprAST::codegen()
+  // (CodegenExpr.cpp) both already use.
+  std::string IntVal = "0";
   double DoubleVal = 0.0;
   bool BoolVal = false;
   std::string StringVal;

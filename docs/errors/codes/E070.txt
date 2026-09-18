@@ -1,0 +1,22 @@
+A radix prefix isn't followed by any digit
+
+Turf lets you write integers in hexadecimal (`0x`), binary (`0b`), and octal
+(`0o`) as well as ordinary decimal:
+
+    mut hex: int = 0xFF;    // 255
+    mut bin: int = 0b1010;  // 10
+    mut oct: int = 0o17;    // 15
+
+Each of these prefixes has to be followed by at least one real digit in
+that base. If it isn't -- because you stopped typing partway through, or
+left a stray `0x`/`0b`/`0o` somewhere in your code -- there's nothing for
+the compiler to actually build a number out of:
+
+    mut x: int = 0x;   // ERROR: nothing after '0x'
+
+The fix is almost always just finishing the literal you meant to write:
+
+    mut x: int = 0xFF;
+
+If you didn't mean to write a hex/binary/octal number at all, remove the
+prefix and write a plain decimal number instead.

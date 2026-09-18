@@ -25,6 +25,8 @@
 
 #include "TypeCheckerInternal.h"
 
+#include "llvm/ADT/SmallString.h" // `compare` pattern-key exact-value fingerprinting
+
 #include <cassert>
 #include <functional>
 #include <iostream>
@@ -786,8 +788,17 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
       if (auto *EA = dynamic_cast<ScopeAccessExprAST *>(PatExpr.get())) {
         PatternKey = "enum:" + EA->getVariant();
       } else if (auto *Num = dynamic_cast<NumberExprAST *>(PatExpr.get())) {
-        if (Num->isInteger())
-          PatternKey = "int:" + std::to_string(Num->getIntVal());
+        if (Num->isInteger()) {
+          // Exact accessor, not getIntVal() -- this key is what makes two
+          // `compare` arms with the same literal a real
+          // DuplicateOtherwiseArmError-style diagnostic (SEM-001,
+          // docs/planning/ARCHITECTURE_OVERHAUL.md §8's own Risks note).
+          // getIntVal()'s 64-bit truncation could make two DIFFERENT wide
+          // literals collide into a false "duplicate arm".
+          llvm::SmallString<32> Digits;
+          Num->getIntValExact().toString(Digits, 10);
+          PatternKey = "int:" + Digits.str().str();
+        }
       } else if (auto *Str = dynamic_cast<StringExprAST *>(PatExpr.get())) {
         PatternKey = "str:" + Str->getValue();
       }

@@ -1,0 +1,33 @@
+TURF E072 -- MISPLACED SEPARATOR:
+
+CAUSE:
+  `_` is a digit separator inside a numeric literal (F-NUM-1 / FREEZE.md
+  §6.2 row 1), legal only BETWEEN two digits (`1_000_000`). This fires when
+  `_` is the FIRST or LAST character of any digit run in the literal --
+  right at the start of the whole number, right after a radix prefix,
+  right after a decimal point, right after an exponent marker/sign, or
+  right at the very end of any of those runs.
+
+  A separator between two digits is always fine, including doubled
+  (`1__000`) -- only a LEADING or TRAILING one in a single digit run is
+  rejected.
+
+CORRECT:
+    mut a: int = 1_000_000;
+    mut b: double = 3.14_159;
+    mut c: int = 0xFF_FF;
+    mut d: double = 1e1_0;
+
+INCORRECT:
+    mut a: int = _5;
+    // ERROR: A digit run can't start with '_' [E072]
+    mut b: int = 5_;
+    // ERROR: A digit run can't end with '_' [E072]
+    mut c: int = 0x_FF;
+    // ERROR: leading '_' right after the radix prefix [E072]
+    mut d: double = 1e_5;
+    // ERROR: leading '_' right after the exponent marker [E072]
+
+FIX:
+  Remove the leading or trailing underscore. Every `_` must have a real
+  digit immediately on both sides of it.

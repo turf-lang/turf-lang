@@ -1,0 +1,33 @@
+TURF E073 -- MALFORMED EXPONENT:
+
+CAUSE:
+  `e`/`E` appeared immediately after a decimal digit run (with or without a
+  preceding `.` fractional part), but was not followed by a syntactically
+  valid exponent: an optional `+`/`-` then AT LEAST ONE digit.
+
+  Once `e`/`E` appears right after a digit, it is ALWAYS committed to as an
+  exponent marker -- it is never silently reinterpreted as the start of a
+  separate following token. This matches how every mainstream language
+  with C-style float exponents treats a bare trailing `e`.
+
+CORRECT:
+    mut a: double = 1e6;
+    mut b: double = 1.5e-3;
+    mut c: double = 1E+10;
+
+INCORRECT:
+    mut a: double = 1.5e;
+    // ERROR: '1.5e' has an exponent marker with no exponent after it [E073]
+    mut b: double = 1.5e+;
+    // ERROR: sign with no digit after it [E073]
+
+WHAT THIS ERROR IS NOT:
+  - Not about whether a literal needs a decimal point before an exponent --
+    Turf allows BOTH `1.5e-3` (dotted) and `1e6` (dotless) forms; this
+    error is purely about the exponent's OWN digits being missing, in
+    either form.
+
+FIX:
+  Finish the exponent with at least one digit after `e`/`E` (and after the
+  optional sign), or remove the `e`/`E` entirely if an exponent was never
+  intended.

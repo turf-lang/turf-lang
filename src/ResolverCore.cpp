@@ -24,6 +24,8 @@
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
 #include "Types.h"           // RankedSuggestions
 
+#include "llvm/ADT/SmallString.h" // Num->getIntValExact().toString() below
+
 #include <cstring>
 #include <functional> // std::function -- checkStructLayoutAcyclicity()'s recursive DFS lambda
 #include <memory>
@@ -414,10 +416,16 @@ void Resolver::hoistExportedConstant(const VarDeclExprAST &Var,
   Sym.DeclLoc = {Loc.Line, Loc.Col};
 
   if (const auto *Num = dynamic_cast<const NumberExprAST *>(Init)) {
-    if (Num->isInteger())
-      Sym.IntVal = Num->getIntVal();
-    else
+    if (Num->isInteger()) {
+      // Exact decimal string, not the narrow getIntVal() -- see
+      // ResolverConstantSymbol::IntVal's own doc comment (ResolverSymbolBase.h)
+      // for why this field is a string at all.
+      llvm::SmallString<32> Digits;
+      Num->getIntValExact().toString(Digits, /*Radix=*/10);
+      Sym.IntVal = std::string(Digits.str());
+    } else {
       Sym.DoubleVal = Num->getDoubleVal();
+    }
   } else if (const auto *B = dynamic_cast<const BoolExprAST *>(Init)) {
     Sym.BoolVal = B->getVal();
   } else if (const auto *S = dynamic_cast<const StringExprAST *>(Init)) {

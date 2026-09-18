@@ -22,16 +22,20 @@
 // `const ExprAST&` the Resolver's scope-snapshot callback hands it. This
 // small internal visitor bridges that gap generically via the existing
 // ASTVisitor double-dispatch, instead of a large dynamic_cast chain.
-// visitNumber()/visitBool()/visitChar()/visitString()/visitBlock() are
-// deliberately NOT overridden -- NumberExprAST, BoolExprAST, CharExprAST,
-// StringExprAST, and BlockExprAST are the only node types with no
-// SourceLocation field at all (a separate, pre-existing gap -- confirmed
-// live via a real compile error, not assumed), so the base class's
-// default no-op correctly leaves Found false for them. BlockExprAST
-// specifically is a non-issue for this callback's actual use: it's only
-// ever the outer bracket around statements that DO each carry their own
-// location, never itself the natural "closest preceding declaration" a
-// position query would want to match against.
+// visitBool()/visitChar()/visitString()/visitBlock() are deliberately NOT
+// overridden -- BoolExprAST, CharExprAST, StringExprAST, and BlockExprAST
+// are node types with no SourceLocation field at all (confirmed live via a
+// real compile error, not assumed), so the base class's default no-op
+// correctly leaves Found false for them. BlockExprAST specifically is a
+// non-issue for this callback's actual use: it's only ever the outer
+// bracket around statements that DO each carry their own location, never
+// itself the natural "closest preceding declaration" a position query
+// would want to match against. visitNumber() WAS in this same no-location
+// group until SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8) gave
+// NumberExprAST a real Loc_ (needed for its own lexical-error diagnostics)
+// -- now wired up below like every other located node, closing that gap
+// as a direct, low-risk consequence of the same field addition rather
+// than leaving this comment quietly wrong.
 namespace {
 class LocationExtractorVisitor : public ASTVisitor {
 public:
@@ -43,6 +47,7 @@ public:
     Loc = Node.getLoc();                                                     \
     Found = true;                                                            \
   }
+  TURF_EXTRACT_LOC(visitNumber, NumberExprAST)
   TURF_EXTRACT_LOC(visitNull, NullExprAST)
   TURF_EXTRACT_LOC(visitDefaultInit, DefaultInitExprAST)
   TURF_EXTRACT_LOC(visitVariable, VariableExprAST)
@@ -83,8 +88,8 @@ public:
 };
 
 // Returns {Loc, true} if Node's concrete type carries a SourceLocation,
-// {{}, false} otherwise (NumberExprAST/BoolExprAST/CharExprAST/
-// StringExprAST/BlockExprAST only -- see the visitor's own doc comment).
+// {{}, false} otherwise (BoolExprAST/CharExprAST/StringExprAST/
+// BlockExprAST only -- see the visitor's own doc comment).
 std::pair<SourceLocation, bool> GetAnyNodeLocation(const ExprAST &Node) {
   LocationExtractorVisitor V;
   const_cast<ExprAST &>(Node).accept(V);
