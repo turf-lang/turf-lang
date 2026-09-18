@@ -1,0 +1,12 @@
+// RUNTIME_ABORT_EXPECTED
+// Regression test (DIAG-001): LintExpression() used to have no VarDeclExprAST
+// branch, so every lint check was silently skipped for the entire
+// right-hand side of a variable declaration's initializer -- confirmed live
+// before this fix, `mutable x: int = 5 / 0;` warned about nothing at all.
+// Emits DivisionByZeroLiteralWarning at compile time; the literal division
+// itself still traps at runtime (this is a warning, not a rejection), so
+// this is RUNTIME_ABORT_EXPECTED rather than a plain compile-and-run test.
+fn main(): int {
+    mutable x: int = 5 / 0;
+    return 0;
+}

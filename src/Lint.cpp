@@ -356,6 +356,15 @@ void LintExpression(ExprAST *E) {
   if (auto *Post = dynamic_cast<PostfixExprAST *>(E)) {
     LintExpression(const_cast<ExprAST*>(Post->getOperand()));
   }
+
+  // A variable declaration's initializer used to be entirely skipped here --
+  // no branch below ever recursed into VarDeclExprAST at all, so every lint
+  // check silently never ran over the right-hand side of any declaration
+  // (`mut x: int = 5 / 0;` warned about nothing; confirmed live before this
+  // fix). DIAG-001, INV-LINT-1.
+  if (auto *VD = dynamic_cast<VarDeclExprAST *>(E)) {
+    LintExpression(const_cast<ExprAST*>(VD->getInitializer()));
+  }
 }
 
 // Check: redundant boolean comparison, self-comparison, division by zero
