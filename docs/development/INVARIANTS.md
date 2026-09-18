@@ -51,7 +51,7 @@ built the thing enforcing it, and that session demonstrates it — per
 
 | ID | Invariant | Enforced by | Status |
 |---|---|---|---|
-| **INV-LINT-1** | `LintExpression`'s dispatch is exhaustive over statement-shaped nodes — a newly added node kind cannot be silently skipped. | An exhaustive switch over a node-kind enum, or a visitor base that reports an unhandled kind in debug builds (DIAG-001) | `planned` — **DIAG-001**. Today there is no `VarDeclExprAST` branch, so every lint check is skipped for the whole right-hand side of every declaration. |
+| **INV-LINT-1** | `LintExpression`'s dispatch is exhaustive over statement-shaped nodes — a newly added node kind cannot be silently skipped. | An exhaustive switch over a node-kind enum, or a visitor base that reports an unhandled kind in debug builds | `planned` — the dispatch is still a sequence of independent `dynamic_cast` checks, not an exhaustive switch/visitor, so a *future* missing node kind would still be silently skipped with nothing to catch it; that refactor remains unbuilt. The one concrete instance this invariant was written to describe (`VarDeclExprAST`'s initializer silently skipped, `mutable x: int = 5 / 0;` warning about nothing) is fixed as of **DIAG-001**, landed 2026-09-18 — verified live — but is a point fix, not the structural enforcement this row names. See DIAG-001's change record, *Known pitfalls*. |
 | **INV-LEX-1** | Maximal munch is uniform; no operator gets a special case. | Lexer | `holds (audited)` — this is why `---x` lexes as `--` then `-x`, and that is intended. |
 
 ## Capabilities and the standard library
