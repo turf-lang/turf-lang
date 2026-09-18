@@ -395,17 +395,22 @@ std::unique_ptr<ExprAST> ParseForExpr() {
     std::unique_ptr<ExprAST> End = ParseExpression();
     if (!End)
       return nullptr;
-    if (CurTok != TOK_STEP) {
-      LogErrorAt(ForLoc, "Expected 'step' after the range end value."
-                         "\n  Hint: Correct syntax: for " +
-                             VarName + " in 0..10 step " + VarName + "++ { }", SLM::ErrorCategory::CONTROL_FLOW);
-      return nullptr;
-    }
-    getNextToken();
 
-    std::unique_ptr<ExprAST> Step = ParseExpression();
-    if (!Step)
-      return nullptr;
+    // `step` is optional (LANG-004 item 1): omitting it means `step <var>++`,
+    // synthesized here rather than left as a Codegen-level special case, so
+    // every later pass (Resolver/TypeChecker/Codegen) sees the exact same
+    // AST shape an explicit `step i++` would have produced.
+    std::unique_ptr<ExprAST> Step;
+    if (CurTok == TOK_STEP) {
+      getNextToken();
+
+      Step = ParseExpression();
+      if (!Step)
+        return nullptr;
+    } else {
+      Step = std::make_unique<PostfixExprAST>(
+          ForLoc, '+', std::make_unique<VariableExprAST>(ForLoc, VarName));
+    }
 
     if (CurTok != '{') {
       LogErrorAt(ForLoc, "Expected '{' to open the for-loop body."
