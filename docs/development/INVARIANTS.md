@@ -66,6 +66,12 @@ built the thing enforcing it, and that session demonstrates it — per
 |---|---|---|---|
 | **INV-CG-1** | No GEP is built against a struct type whose `setBody()` has not run. | An assertion at GEP construction in `CodegenStruct.cpp` — **not** by relying on `main.cpp`'s pre-pass ordering | `planned` — the original bug is fixed, but the hazard is still only prevented by pass ordering. |
 
+## Optimization
+
+| ID | Invariant | Enforced by | Status |
+|---|---|---|---|
+| **INV-OPT-1** | Optimization levels never change a program's observable behaviour (stdout, exit code) — only compile time, run time, binary size, and debuggability. | `scripts/opt_levels_smoke.sh` (diffs a deterministic program set byte-for-byte across `-O0`..`-O3`/`-Os`) + the structural fact that Codegen never receives an opt level at all, so no language-mandated runtime check (bounds, division-by-zero) can be gated on one | `holds` — **OPT-001**, landed 2026-09-18. Verified live: `scripts/opt_levels_smoke.sh` clean (13/13 programs), and bounds-check/division-by-zero traps fire identically (exit 127 / exit 134) at every level on two throwaway probe programs. `grep -rln "OptLevel\|opts\." src/Codegen*.cpp include/Codegen*.h` returns no match, confirming Codegen cannot see the level even if a future change wanted it to. |
+
 ## Testing conventions
 
 | ID | Invariant | Enforced by | Status |

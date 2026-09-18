@@ -9,6 +9,7 @@ record does; `status` tracks the record, not the branch.
 | ARCH-001 | Development change-tracking and semantic freeze | landed | 2026-09-17 | 2026-09-17 | documentation, CI | [ARCH-001](changes/ARCH-001.md) |
 | TYPE-001 | Struct layout acyclicity | landed | 2026-09-18 | 2026-09-18 | Resolver, diagnostics | [TYPE-001](changes/TYPE-001.md) |
 | SEM-001 | Literal representation and lexical numeric syntax | landed | 2026-09-18 | 2026-09-18 | Lexer, Parser, AST, TypeChecker, Codegen, ValueRangePass, Resolver, diagnostics | [SEM-001](changes/SEM-001.md) |
+| OPT-001 | Optimization pipeline, levels, and module passes | landed | 2026-09-18 | 2026-09-18 | driver, LLVM integration | [OPT-001](changes/OPT-001.md) |
 
 ## How to use this directory
 
