@@ -98,6 +98,7 @@ struct CompilerOptions {
   OptLevelKind OptLevel = OptLevelKind::O2;      // -O0/-O1/-O2/-O3/-Os
   std::string TargetTriple;           // --target=<triple>; empty = host
   std::string MCPU;                   // -mcpu=<cpu>; empty = "generic" (unchanged default)
+  bool DebugInfo = false;             // -g: emit DWARF debug info (TOOL-001)
 };
 
 // `turf --explain E0NN` is the HUMAN-facing side of error-code
@@ -288,6 +289,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.TargetTriple = arg.substr(std::string("--target=").size());
     } else if (arg.rfind("-mcpu=", 0) == 0) {
       opts.MCPU = arg.substr(std::string("-mcpu=").size());
+    } else if (arg == "-g") {
+      opts.DebugInfo = true;
     } else if (arg.size() >= 2 && arg[0] == '-' && arg[1] == 'O') {
       // F-OPT semantics (FREEZE.md §6.10): an unrecognized level is a hard
       // error, never a silent fallback to some default -- a typo like
@@ -318,7 +321,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
            "[--dump-modules] [--link <libname>] "
-           "[-O0|-O1|-O2|-O3|-Os] [--target=<triple>] [-mcpu=<cpu>]\n"
+           "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
            "       turf --format [--write] <filename.tr>\n"
            "       turf --explain E0NN\n";
     std::exit(1);
@@ -694,6 +697,11 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
+
+  // TOOL-001: must be set before InitializeModule() runs (below) -- that's
+  // the one call site that decides whether DBuilder/DebugCU get built at
+  // all for this compile.
+  g_EmitDebugInfo = opts.DebugInfo;
 
   // --format needs none of the lex/parse/resolve/typecheck/codegen
   // pipeline below -- just the raw source text -- so it short-circuits
@@ -1348,6 +1356,15 @@ static int runCompilerMain(int argc, char **argv) {
                  "in your file.\n";
     return 1;
   }
+
+  // TOOL-001: resolve any still-outstanding forward-declared debug-info
+  // metadata (getDebugType()'s struct branch, CodegenCore.cpp) before
+  // verifyModule() below -- a temporary MDNode left unresolved is invalid
+  // IR, and this is the one point every function's codegen (pre-pass AND
+  // main pass) is guaranteed to have already run. A no-op when `-g` wasn't
+  // passed (DBuilder is null).
+  if (DBuilder)
+    DBuilder->finalize();
 
   // Verify the generated IR for the WHOLE module (not just main -- a bug in
   // any function's codegen can produce broken IR that crashes or misbehaves

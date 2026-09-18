@@ -31,8 +31,11 @@
 #include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
 #include <algorithm>
 #include <iostream>
 #include <set>
@@ -43,6 +46,16 @@ using namespace llvm;
 std::unique_ptr<LLVMContext> TheContext;
 std::unique_ptr<IRBuilder<>> Builder;
 std::unique_ptr<Module> TheModule;
+
+// TOOL-001 debug-info state (declared in Codegen.h -- see its own doc
+// comment). g_EmitDebugInfo is the ONLY one of these four set from outside
+// InitializeModule(): main.cpp sets it from the `-g` flag before calling
+// InitializeModule(), which is what decides whether DBuilder/DebugCU get
+// built at all.
+bool g_EmitDebugInfo = false;
+std::unique_ptr<DIBuilder> DBuilder;
+DICompileUnit *DebugCU = nullptr;
+DISubprogram *CurrentDebugScope = nullptr;
 
 std::map<std::string, VarInfo> NamedValues;
 
@@ -72,6 +85,66 @@ void InitializeModule() {
   // See CodegenInternal.h's doc comment: CodegenFunc.cpp's main argv/argc
   // plumbing globals must not survive into a fresh TheModule.
   ResetArgvHelpers();
+
+  // TOOL-001: `-g` DWARF debug info. g_EmitDebugInfo is set by main.cpp
+  // (from the `-g` flag) strictly BEFORE this function runs, so it's already
+  // final by the time we get here. DBuilder/DebugCU are rebuilt fresh
+  // alongside TheContext/TheModule above -- there is exactly one
+  // InitializeModule() call per compiler invocation (a single `.tr` file
+  // per process), so no stale-pointer-into-a-torn-down-Module hazard exists
+  // here the way ResetArgvHelpers() guards against for ArgcStorageGV/
+  // ArgvStorageGV.
+  DBuilder.reset();
+  DebugCU = nullptr;
+  CurrentDebugScope = nullptr;
+  if (g_EmitDebugInfo) {
+    DBuilder = std::make_unique<DIBuilder>(*TheModule);
+
+    // Both module flags are required for a DWARF-emitting backend to treat
+    // this module's debug metadata as well-formed at all -- omitting either
+    // one is silently accepted by LLVM (no verifier error) but produces an
+    // object file with no .debug_* sections whatsoever, which is a much
+    // harder failure to notice than a verifier error would be. Warning (not
+    // Error) behavior matches every other frontend that sets these (clang
+    // included): a conflicting flag from a differently-compiled object this
+    // one might someday link against should warn, not hard-fail the link.
+    TheModule->addModuleFlag(Module::Warning, "Debug Info Version",
+                             DEBUG_METADATA_VERSION);
+    TheModule->addModuleFlag(Module::Warning, "Dwarf Version", 4);
+
+    // MainSourceFilename (Lexer.h) is set by main.cpp strictly before this
+    // call (right after OpenSourceFile(), before InitializeModule()) -- see
+    // that assignment's own comment for why it's kept distinct from the
+    // transient, per-imported-module SourceFilename.
+    SmallString<256> AbsPath(MainSourceFilename);
+    // Failure here just means AbsPath stays relative (e.g. a filesystem
+    // that can't report a current working directory) -- DW_AT_comp_dir
+    // still gets SOME directory string either way, so there's no fallback
+    // branch worth writing for an error this narrow.
+    (void)sys::fs::make_absolute(AbsPath);
+    StringRef Dir = sys::path::parent_path(AbsPath);
+    StringRef Base = sys::path::filename(AbsPath);
+    DIFile *MainFile = DBuilder->createFile(Base, Dir);
+
+    // DW_LANG_C99: there is no assigned DWARF language code for TurfLang
+    // (it isn't one of the languages DWARF standardizes), and every
+    // DWARF-consuming debugger falls back to C-like expression evaluation
+    // for an unrecognized/generic code anyway -- picking the closest
+    // structurally-similar standardized code (like C's) is the same choice
+    // most small/custom-language compilers make, rather than inventing a
+    // vendor extension code nothing downstream would recognize.
+    // isOptimized=false unconditionally, not from opts.OptLevel: main.cpp
+    // sets g_EmitDebugInfo/calls InitializeModule() before it ever looks at
+    // -O, and INV-OPT-1 (INVARIANTS.md) is exactly the structural fact that
+    // Codegen never receives an opt level at all -- threading it in here
+    // just for this one cosmetic DWARF producer flag would be a real,
+    // if narrow, crack in that invariant for zero behavioral benefit (the
+    // flag only affects how a debugger prints "was this optimized", it
+    // changes no code generation).
+    DebugCU = DBuilder->createCompileUnit(
+        dwarf::DW_LANG_C99, MainFile, "turf", /*isOptimized=*/false, "",
+        /*RV=*/0);
+  }
 }
 
 
@@ -1423,4 +1496,259 @@ Value *CodegenConstantValue(const ResolverConstantSymbol &C) {
   if (Negative)
     Value = -Value;
   return ConstantInt::get(*TheContext, Value.sextOrTrunc(64));
+}
+
+
+// ─── TOOL-001: `-g` debug info helpers ───────────────────────────────────────
+// (docs/planning/ARCHITECTURE_OVERHAUL.md §8 TOOL-001, docs/architecture/
+// compiler_pipeline.md). See CodegenInternal.h for each function's own doc
+// comment -- kept there (not here) since that's the header every other
+// Codegen*.cpp file actually reads to learn these exist.
+
+static std::map<std::string, DIFile *> DebugFileCache;
+
+DIFile *getOrCreateDebugFile(const std::string &Filename) {
+  if (!DBuilder)
+    return nullptr;
+  if (Filename.empty())
+    return DebugCU ? DebugCU->getFile() : nullptr;
+  auto It = DebugFileCache.find(Filename);
+  if (It != DebugFileCache.end())
+    return It->second;
+  SmallString<256> AbsPath(Filename);
+  (void)sys::fs::make_absolute(AbsPath);
+  StringRef Dir = sys::path::parent_path(AbsPath);
+  StringRef Base = sys::path::filename(AbsPath);
+  DIFile *F = DBuilder->createFile(Base, Dir);
+  return DebugFileCache[Filename] = F;
+}
+
+
+static std::map<std::string, DIType *> DebugTypeCache;
+
+DIType *getDebugType(const TurfType *T) {
+  if (!DBuilder)
+    return nullptr;
+  if (!T)
+    return DBuilder->createUnspecifiedType("void");
+
+  std::string Key = T->getMangledName();
+  auto CacheIt = DebugTypeCache.find(Key);
+  if (CacheIt != DebugTypeCache.end())
+    return CacheIt->second;
+
+  // Primitives -- sizes/encodings match getLLVMType()'s own primitive
+  // branches exactly (int -> i64, int32 -> i32, double -> double, bool ->
+  // i1, char -> i8) so a debugger's "sizeof this local" matches the real
+  // storage getLLVMType() actually allocated for it.
+  if (T->isNamed("int"))
+    return DebugTypeCache[Key] =
+              DBuilder->createBasicType("int", 64, dwarf::DW_ATE_signed);
+  if (T->isNamed("int32"))
+    return DebugTypeCache[Key] =
+              DBuilder->createBasicType("int32", 32, dwarf::DW_ATE_signed);
+  if (T->isNamed("double"))
+    return DebugTypeCache[Key] =
+              DBuilder->createBasicType("double", 64, dwarf::DW_ATE_float);
+  if (T->isNamed("bool"))
+    // LLVM stores `bool` as i1, but DWARF has no 1-bit integer -- 8 bits
+    // (the smallest DWARF/gdb actually prints sanely) is what every C
+    // frontend does for `_Bool`/`bool` too.
+    return DebugTypeCache[Key] =
+              DBuilder->createBasicType("bool", 8, dwarf::DW_ATE_boolean);
+  if (T->isNamed("char"))
+    return DebugTypeCache[Key] = DBuilder->createBasicType(
+              "char", 8, dwarf::DW_ATE_unsigned_char);
+  if (T->isNamed("void"))
+    return DebugTypeCache[Key] = nullptr; // DWARF: no DIType at all means void
+
+  // `string` (FREEZE.md §6.8: "stays a NUL-terminated byte pointer") --
+  // pointer to char, exactly what it actually is at the LLVM level.
+  if (T->isNamed("string")) {
+    DIType *CharTy =
+        DBuilder->createBasicType("char", 8, dwarf::DW_ATE_unsigned_char);
+    return DebugTypeCache[Key] =
+              DBuilder->createPointerType(CharTy, 64, 64, std::nullopt, "string");
+  }
+
+  // Fixed-size arrays (`T[N]`) -- getLLVMType() only gives a real
+  // llvm::ArrayType for a KNOWN positive size; an unsized `T[]` parameter
+  // is already an opaque pointer at the LLVM level (§27 D3: no escape
+  // analysis exists for it yet), so its debug type is just "pointer to T",
+  // same as any other opaque-pointer-shaped Turf type below.
+  if (isArrayType(T)) {
+    const auto *AT = dynamic_cast<const ::ArrayType *>(T);
+    if (AT && AT->getSize() > 0) {
+      DIType *ElemTy = getDebugType(AT->getElementTypePtr().get());
+      llvm::Type *ElemLLVMTy = getLLVMType(AT->getElementTypePtr().get());
+      uint64_t ElemBits =
+          TheModule->getDataLayout().getTypeSizeInBits(ElemLLVMTy).getFixedValue();
+      llvm::Metadata *Subscript =
+          DBuilder->getOrCreateSubrange(0, AT->getSize());
+      DINodeArray Subscripts =
+          DBuilder->getOrCreateArray({Subscript});
+      return DebugTypeCache[Key] = DBuilder->createArrayType(
+                ElemBits * AT->getSize(), 0, ElemTy, Subscripts);
+    }
+  }
+
+  // Pointer-shaped types (`T*`, `&T`, `&?T`, `ptr`, an unsized `T[]`) --
+  // all share the same opaque-pointer LLVM representation (getLLVMType()'s
+  // own comment on this), so they share the same debug-type shape too: a
+  // real DIDerivedType pointer to the pointee's own debug type when the
+  // pointee is known, or an unspecified "ptr" type when it isn't (`ptr`
+  // itself has no pointee at all).
+  if (const auto *PT = dynamic_cast<const TurfPointerType *>(T)) {
+    DIType *PointeeTy = getDebugType(PT->getPointee().get());
+    return DebugTypeCache[Key] = DBuilder->createPointerType(PointeeTy, 64);
+  }
+  if (T->isNamed("ptr") || dynamic_cast<const OpaquePointerType *>(T))
+    return DebugTypeCache[Key] = DBuilder->createUnspecifiedType("ptr");
+
+  // Enums -- always stored as their underlying integer type (getLLVMType()'s
+  // own comment), so their debug type is a real DW_TAG_enumeration_type
+  // over that underlying type rather than a plain typedef -- lets a
+  // debugger print a variant NAME instead of a bare ordinal.
+  if (const auto *ET = dynamic_cast<const TurfEnumType *>(T)) {
+    DIType *UnderlyingTy = getDebugType(ET->getUnderlyingType());
+    std::vector<Metadata *> Enumerators;
+    for (const auto &Variant : ET->getVariants())
+      Enumerators.push_back(
+          DBuilder->createEnumerator(Variant, ET->getVariantValue(Variant)));
+    DINodeArray Elements = DBuilder->getOrCreateArray(Enumerators);
+    DIFile *File = DebugCU ? DebugCU->getFile() : nullptr;
+    return DebugTypeCache[Key] = DBuilder->createEnumerationType(
+              DebugCU, ET->getName(), File, 0, 64, 0, Elements, UnderlyingTy);
+  }
+
+  // Structs -- built lazily here (not at struct-declaration Codegen time)
+  // from the already-registered TurfStructType + the already-`setBody()`'d
+  // llvm::StructType's real DataLayout offsets, deliberately mirroring
+  // getLLVMType()'s own "register the stub in the cache BEFORE resolving
+  // fields" idiom (CodegenStruct.cpp's own long comment on issue #176) to
+  // break a pointer-mediated struct cycle (`struct Node { next: Node* }`)
+  // the exact same way: a cycle can only be reached through a pointer field
+  // now (INV-LAYOUT-1/TYPE-001 already rejects a genuine by-value cycle
+  // before Codegen ever runs), and a pointer field only needs ITS pointee's
+  // debug type once this composite's stub is already sitting in
+  // DebugTypeCache -- so the recursive getDebugType(Pointee) call a few
+  // lines above (the TurfPointerType branch) finds the stub instead of
+  // recursing back into this same struct forever.
+  if (const auto *ST = dynamic_cast<const TurfStructType *>(T)) {
+    llvm::Type *LLVMTy = getLLVMType(T);
+    auto *LLVMStructTy = dyn_cast<llvm::StructType>(LLVMTy);
+    DIFile *File = DebugCU ? DebugCU->getFile() : nullptr;
+    DICompositeType *Stub = DBuilder->createReplaceableCompositeType(
+        dwarf::DW_TAG_structure_type, ST->getName(), DebugCU, File, 0);
+    DebugTypeCache[Key] = Stub;
+
+    if (!LLVMStructTy || LLVMStructTy->isOpaque()) {
+      // Struct decl hasn't codegenned yet (a forward reference Codegen
+      // itself hasn't resolved either) -- leave the forward declaration in
+      // place. main.cpp's DBuilder->finalize() call (before verifyModule())
+      // resolves it if it's still a dangling temporary by the time the
+      // whole module is done; a debugger sees an incomplete-type
+      // declaration for this struct in that case, same as it would for a
+      // genuinely-opaque C struct.
+      return Stub;
+    }
+
+    const llvm::StructLayout *Layout =
+        TheModule->getDataLayout().getStructLayout(LLVMStructTy);
+    std::vector<Metadata *> Members;
+    const auto &Fields = ST->getFields();
+    for (unsigned i = 0; i < Fields.size() && i < LLVMStructTy->getNumElements();
+        ++i) {
+      DIType *FieldTy = getDebugType(Fields[i].Type.get());
+      llvm::Type *FieldLLVMTy = LLVMStructTy->getElementType(i);
+      uint64_t FieldBits =
+          TheModule->getDataLayout().getTypeSizeInBits(FieldLLVMTy).getFixedValue();
+      uint64_t OffsetBits = Layout->getElementOffsetInBits(i).getFixedValue();
+      Members.push_back(DBuilder->createMemberType(
+          DebugCU, Fields[i].Name, File, 0, FieldBits, 0, OffsetBits,
+          DINode::FlagZero, FieldTy));
+    }
+    DINodeArray Elements = DBuilder->getOrCreateArray(Members);
+    uint64_t TotalBits = Layout->getSizeInBits().getFixedValue();
+    DICompositeType *Full = DBuilder->createStructType(
+        DebugCU, ST->getName(), File, 0, TotalBits, 0, DINode::FlagZero,
+        nullptr, Elements);
+    DBuilder->replaceTemporary(llvm::TempDICompositeType(Stub), Full);
+    return DebugTypeCache[Key] = Full;
+  }
+
+  // Everything else (an uninstantiated/erased generic parameter, a
+  // first-class function value, an `error`/`!T` value, ...) -- all
+  // pointer- or i64-erased at the LLVM level with no single "real" Turf
+  // type a debugger could usefully name; TOOL-001's own completion
+  // criteria (a breakpoint, a backtrace, printing an ordinary local) don't
+  // need more than "some plausibly-named thing" for these.
+  return DebugTypeCache[Key] = DBuilder->createUnspecifiedType(T->getName());
+}
+
+
+SourceLocation GetNodeDebugLoc(const ExprAST *E) {
+  if (!E)
+    return SourceLocation{};
+
+#define TRY_LOC(NodeType)                                                    \
+  if (auto *N = dynamic_cast<const NodeType *>(E))                          \
+    return N->getLoc();
+
+  TRY_LOC(NumberExprAST)
+  TRY_LOC(BinaryExprAST)
+  TRY_LOC(AssignmentExprAST)
+  TRY_LOC(CompoundAssignmentExprAST)
+  TRY_LOC(PostfixExprAST)
+  TRY_LOC(VariableExprAST)
+  TRY_LOC(UnaryExprAST)
+  TRY_LOC(AddressOfExprAST)
+  TRY_LOC(SizeOfExprAST)
+  TRY_LOC(CompareExprAST)
+  TRY_LOC(NullExprAST)
+  TRY_LOC(DefaultInitExprAST)
+  TRY_LOC(CastExprAST)
+  TRY_LOC(FuncCallExprAST)
+  TRY_LOC(ScopeAccessExprAST)
+  TRY_LOC(FieldAccessExprAST)
+  TRY_LOC(ArrayLiteralExprAST)
+  TRY_LOC(ArrayAccessExprAST)
+  TRY_LOC(MethodCallExprAST)
+  TRY_LOC(IfExprAST)
+  TRY_LOC(UnsafeBlockExprAST)
+  TRY_LOC(WhileExprAST)
+  TRY_LOC(DoWhileExprAST)
+  TRY_LOC(ForExprAST)
+  TRY_LOC(ForEachExprAST)
+  TRY_LOC(BreakExprAST)
+  TRY_LOC(ContinueExprAST)
+  TRY_LOC(ReturnExprAST)
+  TRY_LOC(RecoverExprAST)
+  TRY_LOC(ModuleImportExprAST)
+  TRY_LOC(VarDeclExprAST)
+  TRY_LOC(FuncDefExprAST)
+  TRY_LOC(ExternFuncDeclExprAST)
+  TRY_LOC(EnumDeclExprAST)
+  TRY_LOC(MachineDeclExprAST)
+  TRY_LOC(ErrorDeclExprAST)
+  TRY_LOC(ArrayDeclExprAST)
+  TRY_LOC(StructDeclExprAST)
+
+#undef TRY_LOC
+
+  // BlockExprAST (a container, no location of its own), BoolExprAST,
+  // CharExprAST, StringExprAST (bare literals -- never a useful breakpoint
+  // target on their own; they're always reached as part of a larger
+  // statement whose OWN location is already set by the time these codegen)
+  // and anything not listed above all fall through here.
+  return SourceLocation{};
+}
+
+
+void SetDebugLoc(const SourceLocation &Loc) {
+  if (!g_EmitDebugInfo || !CurrentDebugScope || Loc.Line <= 0)
+    return;
+  Builder->SetCurrentDebugLocation(
+      DILocation::get(*TheContext, Loc.Line, Loc.Col > 0 ? Loc.Col : 1,
+                      CurrentDebugScope));
 }

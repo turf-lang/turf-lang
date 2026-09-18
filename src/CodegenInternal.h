@@ -130,4 +130,56 @@ llvm::Value *CodegenConstantValue(const ResolverConstantSymbol &C);
 /// first time, since those statics start out null.
 void ResetArgvHelpers();
 
+// ── TOOL-001: `-g` debug info helpers ────────────────────────────────────
+// All defined in CodegenCore.cpp. Every one of these is safe to call
+// unconditionally, `-g` or not -- each checks g_EmitDebugInfo/DBuilder
+// itself and no-ops (or returns nullptr) when debug info isn't being
+// emitted, so call sites in the other 6 Codegen*.cpp files never need their
+// own "if (g_EmitDebugInfo)" guard.
+
+/// Looks up (or lazily creates) the llvm::DIFile for a SourceLocation's own
+/// Filename -- cached by path, same idea as LLVMTypeCache. Needed by
+/// CodegenFunc.cpp (a function's own declaring file, which may differ from
+/// DebugCU's main file for a stdlib/imported-module function -- see the
+/// "double-parse wrinkle"/AllSourceLines note in docs/architecture/
+/// compiler_pipeline.md §0 and ARCHITECTURE_OVERHAUL.md §8 TOOL-001's own
+/// "two TurfLang-specific wrinkles"). Returns DebugCU's own file for an
+/// empty/synthesized location, and nullptr when `-g` is off.
+llvm::DIFile *getOrCreateDebugFile(const std::string &Filename);
+
+/// Best-effort DWARF DIType for a TurfType -- DIBasicType for primitives,
+/// DIDerivedType for pointers/string, DICompositeType for fixed-size arrays
+/// and structs (lazily built from the already-registered TurfStructType +
+/// the already-`setBody()`'d llvm::StructType's real DataLayout offsets, so
+/// it never needs its own struct-declaration-time hook), a typedef-to-
+/// underlying-int for enums, and DBuilder->createUnspecifiedType() for
+/// anything this doesn't specifically recognize (generics/erased type
+/// parameters, function values, error unions -- richness beyond "some named
+/// type with a plausible size" isn't needed for TOOL-001's own completion
+/// criteria: a breakpoint, a backtrace, and printing a local). Cached by
+/// mangled name, mirroring getLLVMType()'s own LLVMTypeCache. Returns
+/// nullptr when `-g` is off.
+llvm::DIType *getDebugType(const TurfType *T);
+
+/// Best-effort SourceLocation for an arbitrary AST node -- same dispatch
+/// shape as getExprType() (CodegenCore.cpp), dynamic_cast across every node
+/// kind that carries a real getLoc(). Returns a default-constructed (Line
+/// == 0) SourceLocation for a node with no location of its own (BlockExprAST
+/// itself, a handful of bare literals) or an unrecognized node -- SetDebugLoc()
+/// below treats Line == 0 as "keep whatever debug location is already set"
+/// rather than emitting a location that would point gdb at line 0.
+SourceLocation GetNodeDebugLoc(const ExprAST *E);
+
+/// Sets Builder's current debug location from @p Loc, scoped to
+/// CurrentDebugScope -- every subsequent llvm::IRBuilder Create*() call
+/// attaches this location automatically until the next SetDebugLoc() call,
+/// which is what gives every instruction a DILocation without every single
+/// codegen() needing to build one by hand (see CodegenControlFlow.cpp's
+/// BlockExprAST::codegen() loop, the one call site that alone covers every
+/// ordinary statement inside a `{ }` body). No-ops when `-g` is off,
+/// CurrentDebugScope is null (top level), or Loc.Line <= 0 (synthesized
+/// node -- keeping the previous real location is more useful to a debugger
+/// than pointing it at line 0).
+void SetDebugLoc(const SourceLocation &Loc);
+
 #endif

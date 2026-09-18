@@ -152,6 +152,32 @@ Value *VarDeclExprAST::codegen() {
 
   Builder->CreateStore(Init, Alloca);
 
+  // TOOL-001: `-g` local-variable debug info. NameLoc (the variable's own
+  // NAME token, distinct from Loc -- the 'mutable'/'immutable' keyword,
+  // see this class's own field doc comments in ASTDecl.h) is what a
+  // debugger should point at for "where is this local declared", matching
+  // what DuplicateDeclarationError/ShadowingWarning above already use
+  // NameLoc for. Flat function-level scoping (CurrentDebugScope is always
+  // the enclosing DISubprogram, never a nested DILexicalBlock per `{ }`) is
+  // a deliberate simplification -- see docs/development/changes/TOOL-001.md's
+  // Known pitfalls: correct for TOOL-001's own completion criteria (a
+  // breakpoint, a backtrace, printing a local by name), imprecise only for
+  // a debugger's *scope-based* view of two same-named locals in sibling
+  // blocks shadowing each other.
+  if (DBuilder && CurrentDebugScope) {
+    DIFile *File = getOrCreateDebugFile(NameLoc.Filename.empty()
+                                            ? Loc.Filename
+                                            : NameLoc.Filename);
+    unsigned DeclLine = NameLoc.Line > 0 ? NameLoc.Line : Loc.Line;
+    DILocalVariable *LV = DBuilder->createAutoVariable(
+        CurrentDebugScope, Name, File, DeclLine, getDebugType(Type.get()),
+        /*AlwaysPreserve=*/true);
+    DBuilder->insertDeclare(
+        Alloca, LV, DBuilder->createExpression(),
+        DILocation::get(*TheContext, DeclLine, 0, CurrentDebugScope),
+        Builder->GetInsertBlock());
+  }
+
   // Register in symbol table
   if (GlobalSymbolTable) {
     GlobalSymbolTable->DeclareSymbol(Name, Type, Loc, Alloca);

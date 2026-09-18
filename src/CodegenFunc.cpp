@@ -258,6 +258,46 @@ Value *FuncDefExprAST::codegen() {
     unsigned ArgIdx = 0;
     for (auto &Arg : TheFunc->args())
       Arg.setName(ArgNames[ArgIdx++]);
+
+    // TOOL-001: the DISubprogram is built once, right alongside the LLVM
+    // prototype -- this `if (!TheFunc)` block runs exactly once per
+    // function (the pre-pass's own proto-then-body two-call structure,
+    // §0's "double-parse wrinkle" doc comment above, finds the SAME
+    // llvm::Function* on its second call and skips this whole branch), so
+    // there's no risk of building a second, duplicate DISubprogram for the
+    // same function the way there would be if this lived down in the
+    // body-codegen section below. `TheFunc->getSubprogram()` (below, where
+    // body codegen starts) reads it back out regardless of which of the two
+    // calls actually created it.
+    if (DBuilder) {
+      DIFile *File = getOrCreateDebugFile(Loc.Filename);
+      std::vector<Metadata *> ParamDebugTypes;
+      ParamDebugTypes.push_back(getDebugType(ReturnType.get()));
+      for (const auto &P : Params)
+        ParamDebugTypes.push_back(getDebugType(P.Type.get()));
+      DISubroutineType *SubTy = DBuilder->createSubroutineType(
+          DBuilder->getOrCreateTypeArray(ParamDebugTypes));
+
+      DISubprogram::DISPFlags SPFlags = DISubprogram::SPFlagDefinition;
+      if (Name == "main")
+        SPFlags |= DISubprogram::SPFlagMainSubprogram;
+
+      // No distinct DW_AT_linkage_name: every low_pc/high_pc range LLVM's
+      // own DWARF emission attaches to this DISubprogram already comes
+      // straight from `TheFunc` itself (via TheFunc->setSubprogram(SP)
+      // below), so a separate linkage name buys nothing for breakpoint/
+      // backtrace correctness -- and empirically, HURTS it: gdb 17.2
+      // (confirmed live) prefers `DW_AT_linkage_name` over `DW_AT_name`
+      // for frame/breakpoint display whenever both are present on a
+      // `DW_LANG_C99` subprogram, which would show the raw mangled
+      // "turf_add_int_int" instead of "add" at every breakpoint hit and
+      // backtrace line -- exactly backwards from TOOL-001's own "show a
+      // backtrace with TurfLang function names" completion criterion.
+      DISubprogram *SP = DBuilder->createFunction(
+          File, Name, /*LinkageName=*/"", File, Loc.Line, SubTy, Loc.Line,
+          DINode::FlagPrototyped, SPFlags);
+      TheFunc->setSubprogram(SP);
+    }
   } else {
     // If the function already has a body, this is a duplicate definition
     if (!TheFunc->empty()) {
@@ -309,12 +349,20 @@ Value *FuncDefExprAST::codegen() {
   auto SavedFunction = CurrentFunction;
   auto *SavedInsertBlock = Builder->GetInsertBlock();
   auto SavedInsertPoint = Builder->GetInsertPoint();
+  DISubprogram *SavedDebugScope = CurrentDebugScope;
+  DebugLoc SavedDebugLoc = Builder->getCurrentDebugLocation();
 
   // Switch to the new function
   Builder->SetInsertPoint(BB);
   NamedValues.clear();
   CurrentFuncReturnType = ReturnType;
   CurrentFunction = TheFunc;
+  // TOOL-001: `getSubprogram()` reads back whichever of the two codegen()
+  // calls actually built it (see the `if (!TheFunc)` block above) -- null
+  // when `-g` is off, which is also what makes SetDebugLoc()/getDebugType()/
+  // every dbg-var insertion below into no-ops for the rest of this function.
+  CurrentDebugScope = TheFunc->getSubprogram();
+  SetDebugLoc(Loc);
 
   // Enter a new scope for the function body
   if (GlobalSymbolTable) {
@@ -337,11 +385,15 @@ Value *FuncDefExprAST::codegen() {
     Builder->CreateStore(Argc64, ArgcStorageGV);
     Builder->CreateStore(&ArgvArg, ArgvStorageGV);
   } else {
+    unsigned ArgNo = 1; // DIBuilder::createParameterVariable's ArgNo is 1-based.
     for (auto &Arg : TheFunc->args()) {
       TurfTypePtr ParamTurfType = TurfInt(); // fallback
+      SourceLocation ParamDeclLoc = Loc; // fallback: the 'fn' keyword itself
       for (const auto &P : Params)
-        if (P.Name == Arg.getName())
+        if (P.Name == Arg.getName()) {
           ParamTurfType = P.Type;
+          ParamDeclLoc = P.Loc;
+        }
 
       AllocaInst *Alloca = CreateEntryBlockAlloca(
           TheFunc, std::string(Arg.getName()), ParamTurfType.get());
@@ -358,6 +410,29 @@ Value *FuncDefExprAST::codegen() {
             std::string(Arg.getName()), RegisteredType, ParamLoc, Alloca);
         ParamIDs.push_back(id);
       }
+
+      // TOOL-001: `-g` parameter debug info -- a synthetic 'self' parameter
+      // has ParamDeclLoc == {0,0} (ParamDecl::Loc's own doc comment,
+      // ASTDecl.h), which SetDebugLoc()-style Line<=0 handling would treat
+      // as "keep the current location" if used for the dbg.declare's OWN
+      // location -- but createParameterVariable()'s LineNo just wants
+      // "where's a reasonable place to show this parameter", so a fallback
+      // to the function's own declaration line (ParamDeclLoc's default,
+      // already assigned above) is exactly right, not a bug to special-case.
+      if (CurrentDebugScope) {
+        DIFile *File = getOrCreateDebugFile(ParamDeclLoc.Filename.empty()
+                                                ? Loc.Filename
+                                                : ParamDeclLoc.Filename);
+        DILocalVariable *ParamVar = DBuilder->createParameterVariable(
+            CurrentDebugScope, std::string(Arg.getName()), ArgNo, File,
+            ParamDeclLoc.Line > 0 ? ParamDeclLoc.Line : Loc.Line,
+            getDebugType(ParamTurfType.get()), /*AlwaysPreserve=*/true);
+        DBuilder->insertDeclare(Alloca, ParamVar, DBuilder->createExpression(),
+                                DILocation::get(*TheContext, ParamVar->getLine(),
+                                                0, CurrentDebugScope),
+                                Builder->GetInsertBlock());
+      }
+      ++ArgNo;
     }
   }
 
@@ -496,6 +571,22 @@ Value *FuncDefExprAST::codegen() {
 
   verifyFunction(*TheFunc);
 
+  // TOOL-001: this function's own DISubprogram is fully built now (every
+  // local/parameter dbg.declare it will ever get has already been inserted)
+  // -- finalizing it here, per-function, rather than waiting for the single
+  // whole-module DBuilder->finalize() call (main.cpp, right before
+  // verifyModule()) is what DIBuilder's own docs recommend for a subprogram
+  // whose body is fully emitted before the next one starts, and is needed
+  // for a RECURSIVE function: this function may call itself, but that
+  // self-call is reached through a call site's OWN scope resolution, not
+  // through this DISubprogram being temporary/unresolved, so there's no
+  // cycle finalizeSubprogram() here could break -- it only ever resolves
+  // outstanding forward references belonging to THIS subprogram (e.g. a
+  // local variable's type that was still a temporary composite type when
+  // its dbg.declare was inserted, see getDebugType()'s struct branch).
+  if (DBuilder && CurrentDebugScope)
+    DBuilder->finalizeSubprogram(CurrentDebugScope);
+
   // Exit function scope
   if (GlobalSymbolTable) {
     GlobalSymbolTable->ExitScope();
@@ -505,6 +596,8 @@ Value *FuncDefExprAST::codegen() {
   NamedValues = SavedNamedValues;
   CurrentFuncReturnType = SavedReturnType;
   CurrentFunction = SavedFunction;
+  CurrentDebugScope = SavedDebugScope;
+  Builder->SetCurrentDebugLocation(SavedDebugLoc);
   if (SavedInsertBlock)
     Builder->SetInsertPoint(SavedInsertBlock, SavedInsertPoint);
 

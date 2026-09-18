@@ -59,6 +59,7 @@ Value *IfExprAST::codegen() {
     BasicBlock *MergeBB = BasicBlock::Create(*TheContext, "ifcont");
 
     for (size_t i = 0; i < Branches.size(); ++i) {
+      SetDebugLoc(Branches[i].Loc);
       Value *CondV = Branches[i].Cond->codegen();
       if (!CondV)
         return nullptr;
@@ -97,6 +98,7 @@ Value *IfExprAST::codegen() {
   }
 
   // Ternary form: if cond then expr else expr
+  SetDebugLoc(Branches[0].Loc);
   Value *CondV = Branches[0].Cond->codegen();
   if (!CondV)
     return nullptr;
@@ -165,6 +167,18 @@ Value *BlockExprAST::codegen() {
   // values ignored except for the last one.
   Value *LastVal = nullptr;
   for (auto &Expr : Expressions) {
+    // TOOL-001: this single loop is what gives every ORDINARY statement
+    // inside a `{ }` body a correct DILocation with no per-node-kind
+    // plumbing -- every statement-shaped AST node ends up as a direct
+    // child of some BlockExprAST (a function body, an if/while/for body,
+    // ...), so setting the debug location once here, right before each
+    // child's own codegen(), covers every instruction that child's
+    // codegen() goes on to build (IRBuilder attaches "the current debug
+    // location" to every instruction it creates until this call changes it
+    // again). A handful of control-flow HEADERS (an if/while/for's own
+    // condition, evaluated directly rather than through a Block) set their
+    // own location separately, right below in this same file.
+    SetDebugLoc(GetNodeDebugLoc(Expr.get()));
     LastVal = Expr->codegen();
     if (!LastVal) {
       if (GlobalSymbolTable) {
@@ -210,6 +224,7 @@ Value *WhileExprAST::codegen() {
   Builder->CreateBr(LoopCondBB);
   Builder->SetInsertPoint(LoopCondBB);
 
+  SetDebugLoc(getLoc());
   Value *CondV = Cond->codegen();
   if (!CondV)
     return nullptr;
@@ -277,6 +292,7 @@ Value *DoWhileExprAST::codegen() {
   TheFunction->insert(TheFunction->end(), LoopCondBB);
   Builder->SetInsertPoint(LoopCondBB);
 
+  SetDebugLoc(getLoc());
   Value *CondV = Cond->codegen();
   if (!CondV)
     return nullptr;
@@ -298,6 +314,8 @@ Value *DoWhileExprAST::codegen() {
 // ForExprAST::codegen : desugars to init + while(cond) { body; step }
 Value *ForExprAST::codegen() {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+  SetDebugLoc(getLoc());
 
   //  1. Init: declare loop variable with start value.
   //     Evaluate start/end in the outer scope first — they cannot reference
@@ -459,6 +477,8 @@ Value *ForExprAST::codegen() {
 // ranges.
 Value *ForEachExprAST::codegen() {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+  SetDebugLoc(getLoc());
 
   const TurfType *IterableTy = getExprType(Iterable.get());
   if (!IterableTy || !isArrayType(IterableTy)) {
