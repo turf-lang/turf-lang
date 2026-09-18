@@ -4,7 +4,7 @@
 |---|---|
 | **Status** | landed |
 | **Dates** | started 2026-09-18 · landed 2026-09-18 |
-| **Commits** | `<pending>` |
+| **Commits** | `1b9df4f` acyclicity check + E069 + tests + change record |
 | **Sessions** | 1 of 1 |
 | **Depends on** | ARCH-001 |
 | **Frozen decisions relied on** | F-INIT-3 (a struct may not contain itself by value, transitively, checked once in the Resolver before any layout or default value is computed). |
