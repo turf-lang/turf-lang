@@ -91,5 +91,30 @@ jobs:
           export CXX="ccache g++"
           ./scripts/cmake_build.sh --release
 
-      - name: Run Test Suites
+      - name: Run Test Suites (default level)
         run: ./scripts/test_runner.sh
+
+      # OPT-001 (docs/development/changes/OPT-001.md, INV-OPT-1): optimization
+      # levels must never change a program's observable behaviour. The default
+      # run above already exercises the compiler's default level (-O2); these
+      # five re-run the SAME 624-test suite once per level, unmodified, via
+      # test_runner.sh's optional level argument -- this is what proves
+      # INV-OPT-1 across the whole suite, not just opt_levels_smoke.sh's
+      # smaller representative program set (which deliberately can't byte-diff
+      # every showcase/server program -- see that script's own comment).
+      # Sequential, not a matrix: the build above (LLVM + llama.cpp + turf) is
+      # the expensive, cached part, and a matrix job would each pay for its
+      # own fresh checkout/build instead of reusing this one.
+      - name: Run Test Suites (-O0)
+        run: ./scripts/test_runner.sh -O0
+      - name: Run Test Suites (-O1)
+        run: ./scripts/test_runner.sh -O1
+      - name: Run Test Suites (-O2)
+        run: ./scripts/test_runner.sh -O2
+      - name: Run Test Suites (-O3)
+        run: ./scripts/test_runner.sh -O3
+      - name: Run Test Suites (-Os)
+        run: ./scripts/test_runner.sh -Os
+
+      - name: Optimization-level smoke test (cross-level output equality)
+        run: ./scripts/opt_levels_smoke.sh

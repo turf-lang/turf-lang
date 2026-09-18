@@ -20,7 +20,9 @@ Binary lands at `build/turf`. Rebuild after any `src/`/`include/` change with `c
 ./scripts/test_runner.sh
 ```
 
-Runs every `.tr` file under `tests/`. Two conventions the runner enforces:
+Runs every `.tr` file under `tests/`. Takes an optional `-O0`/`-O1`/`-O2`/`-O3`/`-Os` argument (`./scripts/test_runner.sh -O1`) that forwards that flag to every compile invocation — absent, it's whatever the compiler's own default is. CI runs the full suite once per level this way (`.github/workflows/test.yml`) as OPT-001's regression coverage for "optimization levels never change observable behaviour" (INV-OPT-1); `scripts/opt_levels_smoke.sh` covers the same property for `showcase/`, which the runner doesn't touch at all (see below).
+
+Two conventions the runner enforces:
 - A file named `fail_*.tr` is expected to **fail to compile**. A plain-named `.tr` file is expected to **compile and run successfully** (use `assert(cond, "message")` inside `main()` for behavioral checks).
 - A `fail_*.tr` file containing the marker comment `// RUNTIME_ABORT_EXPECTED` instead means: must compile successfully, then abort at runtime (non-zero exit) — for stdlib guards that fail at runtime, not compile time, e.g. bounds checks.
 

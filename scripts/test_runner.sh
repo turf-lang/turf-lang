@@ -13,13 +13,39 @@ YELLOW="\033[0;33m"
 CYAN="\033[0;36m"
 RESET="\033[0m"
 
+# OPT-001: optional `-O0`/`-O1`/`-O2`/`-O3`/`-Os` as $1, forwarded to every
+# compile invocation below. Absent (the default, and what every existing
+# caller/CLAUDE.md/AGENTS.md invocation still does) means "whatever the
+# compiler's own default is" -- this script deliberately does not hardcode
+# `-O2` itself, so it never drifts out of sync if the compiler's own
+# default ever changes. This is INV-OPT-1's actual whole-suite regression
+# coverage: `opt_levels_smoke.sh` only exercises a small representative
+# program set (its own doc comment explains why -- server/client showcase
+# programs and nondeterministic ones can't be byte-diffed across levels),
+# while this flag lets CI run the FULL 624-test suite, unmodified, at each
+# level individually.
+TURF_OPT_FLAG=""
+if [ $# -gt 0 ]; then
+    case "$1" in
+        -O0|-O1|-O2|-O3|-Os) TURF_OPT_FLAG="$1"; shift ;;
+        -O*)
+            echo -e "${RED}Unknown optimization level '$1' (expected one of -O0, -O1, -O2, -O3, -Os).${RESET}"
+            exit 1
+            ;;
+    esac
+fi
+
 # Ensure compiler exists
 if [ ! -f "$COMPILER" ]; then
     echo -e "${RED}Compiler not found at $COMPILER. Please build Turf first.${RESET}"
     exit 1
 fi
 
-echo -e "${BOLD}Running Turf Test Suites...${RESET}\n"
+if [ -n "$TURF_OPT_FLAG" ]; then
+    echo -e "${BOLD}Running Turf Test Suites... (${TURF_OPT_FLAG})${RESET}\n"
+else
+    echo -e "${BOLD}Running Turf Test Suites...${RESET}\n"
+fi
 
 # How many tests to run at once. Defaults to every available processor (same
 # idea as the parallel `-j$(nproc)` build), with a portable fallback chain
@@ -94,7 +120,11 @@ run_one_test() {
     cd "$TEST_DIR_PATH" || { echo "PASS_OR_FAIL=FAIL" > "$RESULT_FILE"; return; }
 
     # 1. Compile the test
-    COMPILE_OUTPUT=$("$COMPILER" "$FILE_NAME" -o "$PROGRAM" 2>&1)
+    if [ -n "$TURF_OPT_FLAG" ]; then
+        COMPILE_OUTPUT=$("$COMPILER" "$FILE_NAME" -o "$PROGRAM" "$TURF_OPT_FLAG" 2>&1)
+    else
+        COMPILE_OUTPUT=$("$COMPILER" "$FILE_NAME" -o "$PROGRAM" 2>&1)
+    fi
     COMPILE_STATUS=$?
 
     # A handful of fail_*.tr tests aren't testing "the compiler rejects this
@@ -235,7 +265,7 @@ run_one_test() {
     rm -f "$PROGRAM" "$LOGFILE"
 }
 export -f run_one_test
-export RESULTS_DIR COMPILER
+export RESULTS_DIR COMPILER TURF_OPT_FLAG
 export BOLD GREEN RED YELLOW CYAN RESET
 
 printf '%s\0' "${TEST_FILES[@]}" | xargs -0 -P "$JOBS" -I{} bash -c 'run_one_test "$@"' _ {}
