@@ -156,6 +156,21 @@ std::unique_ptr<ExprAST> ParseBlock() {
       Exprs.push_back(std::move(Expr));
       continue;
     }
+    if (CurTok == TOK_EXTERN) {
+      // LANG-004 item 3: `extern fn` may now appear inside a function body,
+      // not just at file scope. Needs its own branch for the same reason
+      // TOK_EXPORT does just above -- ParseExternDecl() already consumes
+      // the declaration's trailing ';' itself, so falling through to the
+      // generic ParseExpression() path below would hit its `if (CurTok !=
+      // ';') error` check against whatever token comes AFTER the one
+      // ParseExternDecl() already consumed, misreporting the failure at
+      // the following statement instead of anywhere near the real
+      // `extern fn` line.
+      auto Expr = ParseExternDecl();
+      if (!Expr) return nullptr;
+      Exprs.push_back(std::move(Expr));
+      continue;
+    }
     if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
         CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_MACHINE ||
         CurTok == TOK_COMPARE || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE) {

@@ -532,15 +532,52 @@ void Resolver::visitModuleImport(ModuleImportExprAST &Node) {
 }
 
 
-// ExternFuncDeclExprAST: hoistTopLevel already registered the symbol in Pass 1.
-// The only work left for Pass 2 is validating that the parameter and return
-// type names are real -- see validateNamedType()'s doc comment. This used to
-// be a complete no-op, meaning an extern fn parameter or return type
-// referencing an unknown struct name was never checked anywhere in the
-// compiler; ordinary `fn` definitions had the same gap until visitFuncDef()
-// was updated alongside this.
+// ExternFuncDeclExprAST: for a FILE-LEVEL extern, hoistTopLevel already
+// registered the symbol in Pass 1, so the only work left here is validating
+// that the parameter and return type names are real -- see
+// validateNamedType()'s doc comment. This used to be a complete no-op,
+// meaning an extern fn parameter or return type referencing an unknown
+// struct name was never checked anywhere in the compiler; ordinary `fn`
+// definitions had the same gap until visitFuncDef() was updated alongside
+// this.
+//
+// A FUNCTION-LOCAL extern (LANG-004 item 3, `extern fn` now legal inside a
+// function body -- see ParseBlock()'s TOK_EXTERN branch) is a genuinely
+// different case: hoistTopLevel() never enters a function body (see its own
+// doc comment; that's the whole reason Pass 1/Pass 2 are split), so a
+// function-local extern's symbol is NEVER registered before this visit --
+// unlike every other declaration this function handles. It must be
+// registered here instead, the moment Pass 2's sequential walk reaches it,
+// mirroring hoistTopLevel()'s own ExternFuncDeclExprAST branch verbatim.
+// `FunctionNestingDepth_ > 0` (incremented only while visiting a function
+// body, see visitFuncDef()) is what distinguishes the two cases -- at depth
+// 0 this is the ordinary top-level extern already hoisted, and registering
+// it again here would be redundant (registerCurrentFileFunction() dedups by
+// arity+param-types so it's harmless, but there's no reason to pay for it).
+//
+// Known limitation, not fixed here: `CurrentFileFunctions_` is a flat,
+// file-wide registry with no block-scoping concept (nothing in this
+// compiler's declaration model has one -- a nested `fn` is rejected
+// outright, see NestedFunctionError above). A function-local extern
+// therefore becomes callable from anywhere later in the file's sequential
+// Pass-2 walk, not just from within its own enclosing function -- genuine
+// lexical scoping would need a real scoped-function-symbol mechanism, which
+// is out of scope for this item (see docs/planning/ARCHITECTURE_OVERHAUL.md
+// §8 LANG-004: "Low value, but it is one switch case").
 void Resolver::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
   for (const auto &[ParamName, ParamType] : Node.getParams())
     validateNamedType(ParamType, Node.getLoc());
   validateNamedType(Node.getReturnType(), Node.getLoc());
+
+  if (FunctionNestingDepth_ > 0) {
+    ResolverFunctionSymbol Sym;
+    Sym.BaseName = Node.getName();
+    Sym.SourceModule = ""; // extern fns are in the global (file) namespace
+    Sym.ReturnType = Node.getReturnType();
+    Sym.IsExtern = true; // see IsExtern's doc comment in ResolverSymbolTable.h
+    Sym.IsVarArg = Node.isVarArg();
+    for (const auto &[PName, PType] : Node.getParams())
+      Sym.Params.push_back({PName, PType});
+    SymTable_.registerCurrentFileFunction(Sym);
+  }
 }
