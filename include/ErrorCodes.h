@@ -126,6 +126,15 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E071", "InvalidRadixDigitError", "Invalid radix digit", SLM::ErrorCategory::SYNTAX_ERROR},
     {"E072", "MisplacedSeparatorError", "Misplaced separator", SLM::ErrorCategory::SYNTAX_ERROR},
     {"E073", "MalformedExponentError", "Malformed exponent", SLM::ErrorCategory::SYNTAX_ERROR},
+    // HYG-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): these two classes
+    // already existed, fully written, but were never constructed --
+    // CFG::reportFlowDiagnostics() wrote directly to std::cerr instead,
+    // bypassing DiagnosticEngine entirely (no code, no color, no caret, no
+    // hint). Routed through the existing classes; routed to the existing
+    // CONTROL_FLOW category, per §8's explicit instruction not to add a new
+    // SLM::ErrorCategory for these.
+    {"E074", "UnreachableBlockWarning", "Unreachable block", SLM::ErrorCategory::CONTROL_FLOW},
+    {"E075", "DeadBranchWarning", "Dead branch", SLM::ErrorCategory::CONTROL_FLOW},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

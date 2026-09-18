@@ -219,10 +219,22 @@ public:
     return *this;
   }
 
+  // Mirrors TurfError::getCode() exactly (see its own doc comment) -- added
+  // for HYG-001, the first warning classes (UnreachableBlockWarning,
+  // DeadBranchWarning) to register a real "E0NN" code. Every other warning
+  // class predates this and has no registry entry, so this still returns ""
+  // for them, same as before this method existed (printDiag() only prints
+  // a "[E0NN]" tag when Code is non-empty).
+  std::string getCode() const {
+    const ErrorCodeEntry *Entry =
+        ErrorCodes::lookupByClassName(demangleTypeName(typeid(*this).name()));
+    return Entry ? Entry->Code : "";
+  }
+
   // NEVER interrupts compilation flow — always returns normally.
   void emit() const {
     DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true,
-                          RelatedLocations_, Category_);
+                          RelatedLocations_, Category_, getCode());
   }
 
   void warn() const { emit(); }

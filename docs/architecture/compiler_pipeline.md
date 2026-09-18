@@ -668,22 +668,36 @@ single connected component), counted over *every* block including the
 virtual exit block and its incoming edges. `src/CodegenFunc.cpp:405-407`
 warns (`CyclomaticComplexityWarning`, non-fatal) when `M > 15`.
 
-### Unreachable code / dead branches — a real inconsistency worth documenting plainly
+### Unreachable code / dead branches — was a real inconsistency, fixed by HYG-001
 
-`reportFlowDiagnostics()` (`src/CFG.cpp:375-400`) also calls
+`reportFlowDiagnostics()` (`src/CFG.cpp:375-...`) calls
 `getUnreachableBlocks()` (any non-exit, non-empty block the entry-block
 BFS never reached) and `getDeadBranches()` (unreachable blocks whose
-terminator is `Branch`). **Both are printed as plain, uncolored
-`std::cerr <<` strings** (`src/CFG.cpp:381-383, 396-397`), *not* routed
-through `DiagnosticEngine`/`TurfWarning` like every other diagnostic in
-this document — confirmed live (compiling a `while true { return 1; }
-return 2;` function prints exactly `Warning: Unreachable code in block
-'while.end' of function 'main'` with no `[E0NN]` code, no color, no hint,
-no source snippet, and compilation still succeeds). Dedicated
-`UnreachableBlockWarning`/`DeadBranchWarning` classes exist
-(`include/ErrorsFlow.h:58-82`) but `reportFlowDiagnostics()` never
-constructs either of them — this looks like a real, live gap between
-intent and implementation, not a subtlety to paper over.
+terminator is `Branch`). **This used to print both as plain, uncolored
+`std::cerr <<` strings**, *not* routed through `DiagnosticEngine`/
+`TurfWarning` like every other diagnostic in this document — confirmed
+live at the time (compiling a `while true { return 1; } return 2;`
+function printed exactly `Warning: Unreachable code in block 'while.end'
+of function 'main'` with no `[E0NN]` code, no color, no hint, no source
+snippet, and compilation still succeeded), even though the dedicated
+`UnreachableBlockWarning`/`DeadBranchWarning` classes already existed in
+`include/ErrorsFlow.h` and were simply never constructed by anything.
+
+Fixed by HYG-001 (`docs/development/changes/HYG-001.md`,
+2026-09-18): `reportFlowDiagnostics()` now constructs
+`UnreachableBlockWarning(BB->getTerminatorLoc(), FunctionName,
+BB->getName())`/`DeadBranchWarning(BB->getTerminatorLoc(), FunctionName)`
+and calls `.warn()`, same as every other warning in this pass. Both
+render with a real `[E0NN]` code (`E074`/`E075`), color, caret, source
+snippet, and hint, and both participate in `DiagnosticEngine`'s
+one-primary-error-per-line cap like everything else. Anchored at the
+unreachable block's own *terminator* location, not its first statement's
+— `ExprAST` has no virtual `getLoc()` (every concrete node type defines
+its own, non-polymorphically), so there is no generic way to read a
+location off an arbitrary statement here; this mirrors
+`StatementAfterTerminatorError`'s identical precedent earlier in this
+document rather than inventing new AST-wide dispatch. *When* the warnings
+fire did not change — only how they render.
 
 ### Use-before-initialization — `DefiniteAssignmentPass`
 

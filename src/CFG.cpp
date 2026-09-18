@@ -377,9 +377,20 @@ void CFG::reportFlowDiagnostics() const {
   auto Unreachable = getUnreachableBlocks();
   for (TurfBasicBlock *BB : Unreachable) {
     if (!BB->getStatements().empty()) {
-      // Report on first statement in unreachable block
-      std::cerr << "Warning: Unreachable code in block '" << BB->getName()
-                << "' of function '" << FunctionName << "'\n";
+      // Report on first statement in unreachable block. Anchored at the
+      // block's own TERMINATOR location, not the first statement's --
+      // ExprAST has no virtual getLoc() (every concrete node type defines
+      // its own, non-polymorphically), so there is no generic way to pull a
+      // location off an arbitrary statement here. This mirrors
+      // StatementAfterTerminatorError's own precedent immediately above in
+      // the pipeline (CFGBuilder::visitExpr(), anchored at the terminator's
+      // location rather than the unreachable statement's) rather than
+      // inventing new AST-wide dispatch for it. Still a real position
+      // inside the unreachable block itself, since the terminator is one of
+      // that block's own statements.
+      UnreachableBlockWarning(BB->getTerminatorLoc(), FunctionName,
+                              BB->getName())
+          .warn();
     }
   }
 
@@ -392,9 +403,7 @@ void CFG::reportFlowDiagnostics() const {
   auto Dead = getDeadBranches();
   for (TurfBasicBlock *BB : Dead) {
     if (BB->getTerminator() == TerminatorKind::Branch) {
-      SourceLocation Loc = BB->getTerminatorLoc();
-      std::cerr << "Warning: Dead branch in function '" << FunctionName
-                << "' at line " << Loc.Line << "\n";
+      DeadBranchWarning(BB->getTerminatorLoc(), FunctionName).warn();
     }
   }
 }
