@@ -10,6 +10,7 @@ record does; `status` tracks the record, not the branch.
 | TYPE-001 | Struct layout acyclicity | landed | 2026-09-18 | 2026-09-18 | Resolver, diagnostics | [TYPE-001](changes/TYPE-001.md) |
 | SEM-001 | Literal representation and lexical numeric syntax | landed | 2026-09-18 | 2026-09-18 | Lexer, Parser, AST, TypeChecker, Codegen, ValueRangePass, Resolver, diagnostics | [SEM-001](changes/SEM-001.md) |
 | OPT-001 | Optimization pipeline, levels, and module passes | landed | 2026-09-18 | 2026-09-18 | driver, LLVM integration | [OPT-001](changes/OPT-001.md) |
+| TOOL-001 | Debug information (`-g` / DWARF) | landed | 2026-09-18 | 2026-09-18 | Codegen, driver, LLVM integration | [TOOL-001](changes/TOOL-001.md) |
 
 ## How to use this directory
 

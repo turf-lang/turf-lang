@@ -21,7 +21,6 @@ docs/detailed/modules_and_stdlib.md :: docs/architecture/modules_and_scope_resol
 # --- Change records the overhaul plans but has not written yet. Each line dies
 # --- when its session lands, which is the point: the blueprint's forward
 # --- references stay honest without stub files pretending to be records.
-docs/development/changes/TOOL-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 TOOL-001 (session S5).
 docs/development/changes/DIAG-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 DIAG-001 (session S6).
 docs/development/changes/HYG-001.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 HYG-001 (session S6b).
 docs/development/changes/LANG-004.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 LANG-004 (session S10b).
