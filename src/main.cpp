@@ -43,12 +43,6 @@
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
-#include "llvm/Transforms/InstCombine/InstCombine.h"
-#include "llvm/Transforms/Scalar/GVN.h"
-#include "llvm/Transforms/Scalar/EarlyCSE.h"
-#include "llvm/Transforms/Scalar/Reassociate.h"
-#include "llvm/Transforms/Scalar/SimplifyCFG.h"
-#include "llvm/Transforms/Utils/Mem2Reg.h"
 #include "llvm/Transforms/IPO/GlobalDCE.h"
 #include "llvm/Transforms/IPO/Internalize.h"
 #include "llvm/Analysis/CGSCCPassManager.h"
@@ -486,36 +480,20 @@ static void runOptimizationPipeline(Module &M, OptLevelKind Level,
     MPM.run(M, MAM);
     break;
   }
-  case OptLevelKind::O1: {
-    // The pre-OPT-001 5-pass sequence (mem2reg, instcombine, reassociate,
-    // GVN, simplifycfg), ported to the new PM one-for-one PLUS EarlyCSE --
-    // this is Stage 1's "no behaviour change" pipeline, now reachable
-    // explicitly at `-O1` rather than unconditionally on every compile.
-    // Internalize+GlobalDCE run as a separate module-level step afterward
-    // (§8's own Stage 1/3 split): nothing in the function-local pipeline
-    // above can delete a whole function, so running them first would find
-    // nothing new dead, and running them after lets GlobalDCE see the
-    // now-simplified call graph.
-    FunctionPassManager FPM;
-    FPM.addPass(PromotePass());
-    FPM.addPass(InstCombinePass());
-    FPM.addPass(ReassociatePass());
-    FPM.addPass(GVNPass());
-    FPM.addPass(SimplifyCFGPass());
-    FPM.addPass(EarlyCSEPass());
-    ModulePassManager FuncMPM;
-    FuncMPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
-    FuncMPM.run(M, MAM);
-
-    ModulePassManager CleanupMPM;
-    CleanupMPM.addPass(InternalizePass(MustPreserveGV));
-    CleanupMPM.addPass(GlobalDCEPass());
-    CleanupMPM.run(M, MAM);
-    break;
-  }
+  case OptLevelKind::O1:
   case OptLevelKind::O2:
   case OptLevelKind::O3:
   case OptLevelKind::Os: {
+    // `-O1` used to run a small hand-picked 6-pass subset (the pre-OPT-001
+    // 5-pass sequence ported to the new PM, plus EarlyCSE) rather than
+    // LLVM's own `default<O1>` pipeline -- a deliberate reading of §17.2's
+    // table at the time, but a real gap once measured: LLVM's actual O1
+    // pipeline runs ~109 pass invocations (confirmed live via `opt
+    // -passes="default<O1>" -print-pipeline-passes`), not ~6. Folded into
+    // this same branch on request so `-O1` gets LLVM's real, full O1
+    // pipeline like every other non-O0 level, rather than a curated
+    // subset nobody was asking for specifically.
+    //
     // Internalize FIRST, in its own pass-manager run, strictly before
     // handing off to LLVM's own default pipeline: buildPerModuleDefaultPipeline()
     // runs its own GlobalDCE internally, but GlobalDCE only deletes a
@@ -530,7 +508,8 @@ static void runOptimizationPipeline(Module &M, OptLevelKind Level,
     InternalizeMPM.addPass(InternalizePass(MustPreserveGV));
     InternalizeMPM.run(M, MAM);
 
-    OptimizationLevel LLVMLevel = Level == OptLevelKind::O2 ? OptimizationLevel::O2
+    OptimizationLevel LLVMLevel = Level == OptLevelKind::O1 ? OptimizationLevel::O1
+                                 : Level == OptLevelKind::O2 ? OptimizationLevel::O2
                                  : Level == OptLevelKind::O3 ? OptimizationLevel::O3
                                                               : OptimizationLevel::Os;
     ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(LLVMLevel);
