@@ -1,0 +1,10 @@
+// RUNTIME_ABORT_EXPECTED
+// SEM-002 (FREEZE.md §6.2 row 7): runtime signed integer '-' traps on
+// overflow (INT64_MIN - 1 has no representable int64 result).
+fn main(): int {
+    mut a: int = -9223372036854775807;
+    mut b: int = 1;
+    a = a - 1;
+    mut c: int = a - b;
+    return 0;
+}

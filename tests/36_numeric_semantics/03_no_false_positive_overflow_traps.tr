@@ -1,0 +1,38 @@
+// SEM-002 regression: ordinary, in-range arithmetic across every operator
+// this group added overflow-trap codegen to must NOT trap -- covers
+// BinaryExprAST ('+ - * << /'), UnaryExprAST ('-'), CompoundAssignmentExprAST
+// ('+= -= *= <<='), and PostfixExprAST ('++ --'), since each has its own
+// independent codegen path (CodegenVar.cpp's own top comment) and each
+// needed its own overflow-trap wiring.
+
+import test;
+
+fn main(): int {
+    mut a: int = 5;
+    mut b: int = 7;
+    test::assert(a + b == 12, "in-range '+' does not trap");
+    test::assert(a - b == -2, "in-range '-' does not trap");
+    test::assert(a * b == 35, "in-range '*' does not trap");
+    test::assert(1 << 10 == 1024, "in-range '<<' does not trap");
+    test::assert(-a == -5, "in-range unary '-' does not trap");
+    test::assert(-9223372036854775808 == -9223372036854775808, "INT64_MIN literal negation-fold does not trap");
+    test::assert(b / a == 1, "in-range '/' does not trap");
+
+    mut c: int = 10;
+    c += 5;
+    test::assert(c == 15, "in-range '+=' does not trap");
+    c -= 3;
+    test::assert(c == 12, "in-range '-=' does not trap");
+    c *= 2;
+    test::assert(c == 24, "in-range '*=' does not trap");
+    c <<= 1;
+    test::assert(c == 48, "in-range '<<=' does not trap");
+
+    mut d: int = 1;
+    d++;
+    test::assert(d == 2, "in-range 'x++' does not trap");
+    d--;
+    test::assert(d == 1, "in-range 'x--' does not trap");
+
+    return 0;
+}

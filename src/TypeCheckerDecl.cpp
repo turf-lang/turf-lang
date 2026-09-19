@@ -101,6 +101,12 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
                     "Cannot initialise '" + DeclTy->getName() +
                         "' variable '" + Node.getName() + "' with value of type '" +
                         InitTy->getName() + "'.");
+      } else {
+        // SEM-002: typesCompatible() only checks the KIND of conversion
+        // (e.g. "int-literal -> int is fine"), never the literal's own
+        // exact value -- this is the destination-representability check
+        // FREEZE.md §6.2 rows 3/6/9 add on top.
+        checkLiteralRepresentable(Node.getInitializer(), DeclTy.get(), Node.getLoc());
       }
     }
   }
@@ -201,13 +207,17 @@ void TypeChecker::visitArrayDecl(ArrayDeclExprAST &Node) {
     TurfTypePtr DeclaredElemTy = Node.getElementTypePtr();
     for (const auto &Init : Node.getInitList()) {
       TurfTypePtr InitTy = getType(Init.get());
-      if (DeclaredElemTy && InitTy &&
-          !typesCompatible(InitTy.get(), DeclaredElemTy.get())) {
-        reportError(Node.getLoc(),
-                    "Cannot initialize an array of '" +
-                        DeclaredElemTy->getName() + "' with a value of type '" +
-                        InitTy->getName() + "'.",
-                    {});
+      if (DeclaredElemTy && InitTy) {
+        if (!typesCompatible(InitTy.get(), DeclaredElemTy.get())) {
+          reportError(Node.getLoc(),
+                      "Cannot initialize an array of '" +
+                          DeclaredElemTy->getName() + "' with a value of type '" +
+                          InitTy->getName() + "'.",
+                      {});
+        } else {
+          // SEM-002 -- see visitVarDecl()'s identical comment.
+          checkLiteralRepresentable(Init.get(), DeclaredElemTy.get(), Node.getLoc());
+        }
       }
     }
   }
@@ -236,8 +246,15 @@ void TypeChecker::visitArrayLiteral(ArrayLiteralExprAST &Node) {
     if (!ElemIType || ElemIType->getName() != ElemType->getName()) {
       std::string gotName = ElemIType ? ElemIType->getName() : "unknown";
       TypeError(Node.getLoc(), "Array literal type mismatch: expected " + ElemType->getName() + ", got " + gotName).raise();
+    } else {
+      // SEM-002 -- see visitVarDecl()'s identical comment. Element 0 also
+      // establishes ElemType itself, so it's checked against that same
+      // type too (a lone too-large first element would otherwise never be
+      // checked at all).
+      checkLiteralRepresentable(Node.getElements()[i].get(), ElemType.get(), Node.getLoc());
     }
   }
+  checkLiteralRepresentable(Node.getElements()[0].get(), ElemType.get(), Node.getLoc());
 
   auto ArrTy = makeArrayType(ElemType, Node.getElements().size());
   Node.CachedType = ArrTy;

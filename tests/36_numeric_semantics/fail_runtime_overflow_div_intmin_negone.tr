@@ -1,0 +1,13 @@
+// RUNTIME_ABORT_EXPECTED
+// SEM-002 (ARCHITECTURE_OVERHAUL.md §10.2's "one remaining overflow case"):
+// INT64_MIN / -1 has no representable int64 result -- LLVM's sdiv is
+// poison for this input (mirrors hardware idiv's own trap), caught
+// explicitly by EmitSignedDivOverflowGuard() (CodegenCore.cpp) right after
+// the pre-existing divide-by-zero check.
+fn main(): int {
+    mut a: int = -9223372036854775807;
+    a = a - 1;
+    mut n: int = -1;
+    mut b: int = a / n;
+    return 0;
+}

@@ -1,0 +1,16 @@
+A float literal is too large -- it rounds to infinity
+
+    mut d: double = 1e400;
+    // ERROR: 1e400 overflows 'double's range and rounds to +inf
+
+'double' is an IEEE-754 double-precision float, which can represent
+roughly up to ~1.8 * 10^308. A literal bigger than that has no finite
+'double' value to become, so Turf rejects it outright instead of silently
+handing you 'inf'.
+
+This is about the LITERAL itself -- computing 'inf' at runtime (e.g. by
+dividing/multiplying variables) is still allowed and behaves as ordinary
+IEEE-754 floating point.
+
+The fix is almost always a typo in the exponent, or the value genuinely
+doesn't belong in a 'double'.

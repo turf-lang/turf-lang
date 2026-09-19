@@ -1,0 +1,42 @@
+// SEM-002: regression coverage for docs/reference/variables_and_types.md's
+// "Legal conversions" table -- confirms the existing Codegen truncation/
+// conversion behavior for every numeric `to`-cast pair is unchanged now
+// that cast LEGALITY is checked earlier, in the TypeChecker (Rule B1),
+// instead of only in Codegen. See TypeChecker::visitCast()'s own comment
+// (TypeCheckerExpr.cpp) for the moved check itself.
+
+import test;
+
+fn main(): int {
+    // double -> int truncates toward zero (not rounds).
+    mut d: double = 5.9;
+    mut i: int = d to int;
+    test::assert(i == 5, "double -> int truncates toward zero (positive)");
+
+    mut d2: double = -5.9;
+    mut i2: int = d2 to int;
+    test::assert(i2 == -5, "double -> int truncates toward zero (negative)");
+
+    // int -> int32 truncates.
+    mut big: int = 4294967296 + 42; // 2^32 + 42 -- overflows int32's 32 bits
+    mut narrowed: int32 = big to int32;
+    test::assert((narrowed to int) == 42, "int -> int32 truncates the low 32 bits");
+
+    // int32 -> int sign-extends.
+    mut n32: int32 = -1 to int32;
+    mut widened: int = n32 to int;
+    test::assert(widened == -1, "int32 -> int sign-extends");
+
+    // char <-> int.
+    mut c: char = 97 to char;
+    test::assert((c to int) == 97, "int -> char -> int round-trips");
+
+    // int -> string -> (implicitly re-parsed by test::assert's own
+    // string-compare path isn't available here, so just confirm it doesn't
+    // crash and round-trips through string -> int).
+    mut s: string = 12345 to string;
+    mut back: int = s to int;
+    test::assert(back == 12345, "int -> string -> int round-trips");
+
+    return 0;
+}

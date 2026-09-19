@@ -130,6 +130,35 @@ llvm::Value *CodegenConstantValue(const ResolverConstantSymbol &C);
 /// first time, since those statics start out null.
 void ResetArgvHelpers();
 
+// ── SEM-002: runtime signed-integer-overflow trapping ────────────────────
+// All defined in CodegenCore.cpp. FREEZE.md §6.2 row 7: runtime signed
+// integer overflow traps (panics), never wraps, never UB. Needed by
+// CodegenExpr.cpp (BinaryExprAST '+'/'-'/'*'/'<<'/'/, UnaryExprAST '-') and
+// CodegenVar.cpp (CompoundAssignmentExprAST, PostfixExprAST -- neither
+// reuses BinaryExprAST::codegen(), so each needs the same helpers called
+// directly; see CodegenCore.cpp's own comment on EmitCheckedIntArith).
+
+/// Checked '+'/'-'/'*' on two i64 values -- traps via CodegenPanic() on
+/// overflow, otherwise returns the (in-range) result.
+llvm::Value *EmitCheckedIntArith(char Op, llvm::Value *L, llvm::Value *R,
+                                 SourceLocation Loc);
+
+/// Checked unary negation -- traps only for the single input (INT64_MIN)
+/// whose negation has no representable int64 result.
+llvm::Value *EmitCheckedIntNegate(llvm::Value *V, SourceLocation Loc);
+
+/// Checked '<<' -- traps if the shift amount is outside [0, 64) or if any
+/// set bit was shifted out past the sign (LLVM has no
+/// llvm.shl.with.overflow intrinsic, unlike +/-/*, so this is checked
+/// directly rather than via an intrinsic call).
+llvm::Value *EmitCheckedShl(llvm::Value *L, llvm::Value *R, SourceLocation Loc);
+
+/// Traps if computing `L / R` (or `L % R`) would be INT64_MIN / -1 -- the
+/// one signed-division overflow case (ARCHITECTURE_OVERHAUL.md §10.2).
+/// Call after the existing divide-by-zero check (so R != 0 is already
+/// established) and before emitting the actual CreateSDiv/CreateSRem.
+void EmitSignedDivOverflowGuard(llvm::Value *L, llvm::Value *R, SourceLocation Loc);
+
 // ── TOOL-001: `-g` debug info helpers ────────────────────────────────────
 // All defined in CodegenCore.cpp. Every one of these is safe to call
 // unconditionally, `-g` or not -- each checks g_EmitDebugInfo/DBuilder

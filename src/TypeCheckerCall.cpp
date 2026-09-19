@@ -441,6 +441,9 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
 
     Node.ResolvedCallTarget = Best;
 
+    // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
+    checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc());
+
     // If Best's return type mentions one of its own generic type parameters
     // (e.g. `fn<T> firstElem(arr: T[]): T`), report the CONCRETE type it was
     // instantiated to at this call site instead of the literal declared
@@ -605,6 +608,11 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
 
   Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
   Node.ResolvedViaUFCS = true;
+  // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
+  // ParamOffset=1 skips the receiver slot (Params[0]), which has no
+  // corresponding entry in Node.getArgs() -- the explicit args start at
+  // Params[1], per this function's own receiver-binding comments above.
+  checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc(), 1);
   setType(&Node, Best->ReturnType);
   return true;
 }
@@ -736,6 +744,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
     // deleter because the symbol is owned by the ResolverSymbolTable; we
     // just need an owning handle that Codegen can call ->mangledName() on.
     Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
+    // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
+    checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc());
     setType(&Node, Best->ReturnType);
     return;
   }
@@ -1005,6 +1015,11 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         if (!TypeMatches.empty()) {
           const ResolverFunctionSymbol *Best = TypeMatches[0];
           Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
+          // SEM-002 -- see visitVarDecl()'s identical comment
+          // (TypeCheckerDecl.cpp). Same ParamOffset (skip 'self' for an
+          // instance method) as the type-compatibility filter just above.
+          checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc(),
+                                     IsStaticMethod ? 0 : 1);
 
           // Calling a method that mutates self through an immutable
           // variable was previously silently allowed -- direct field

@@ -249,21 +249,40 @@ Value *BinaryExprAST::codegen() {
   // Create the instruction based on the operator
   switch (Op) {
 
-    // Arithmetic
+    // Arithmetic. int (never int32/double) gets runtime overflow trapping
+    // -- FREEZE.md §6.2 row 7 ("Runtime, signed integer: trap"). int32 is
+    // deliberately excluded: it exists solely for extern-fn ABI honesty
+    // (§6.2), and arithmetic on it isn't named anywhere in SEM-002's own
+    // scope -- see this group's change record for the explicit scoping
+    // note. A `TurfGenericParamType`-typed operand never reaches this
+    // branch at all: before TYPE-002, its erased runtime representation
+    // resolves to something other than "int" via getTurfTypeFromLLVM()
+    // above, so NumericType->isNamed("int") is naturally false for it --
+    // no separate exclusion needed (see §8 SEM-002's own "Generic
+    // interactions" note on why this group must not touch that case).
   case '+':
     CastBoth(NumericType);
-    return NumericType->isNamed("double") ? Builder->CreateFAdd(L, R, "addtmp")
-                                          : Builder->CreateAdd(L, R, "addtmp");
+    if (NumericType->isNamed("double"))
+      return Builder->CreateFAdd(L, R, "addtmp");
+    if (NumericType->isNamed("int"))
+      return EmitCheckedIntArith('+', L, R, Loc);
+    return Builder->CreateAdd(L, R, "addtmp");
 
   case '-':
     CastBoth(NumericType);
-    return NumericType->isNamed("double") ? Builder->CreateFSub(L, R, "subtmp")
-                                          : Builder->CreateSub(L, R, "subtmp");
+    if (NumericType->isNamed("double"))
+      return Builder->CreateFSub(L, R, "subtmp");
+    if (NumericType->isNamed("int"))
+      return EmitCheckedIntArith('-', L, R, Loc);
+    return Builder->CreateSub(L, R, "subtmp");
 
   case '*':
     CastBoth(NumericType);
-    return NumericType->isNamed("double") ? Builder->CreateFMul(L, R, "multmp")
-                                          : Builder->CreateMul(L, R, "multmp");
+    if (NumericType->isNamed("double"))
+      return Builder->CreateFMul(L, R, "multmp");
+    if (NumericType->isNamed("int"))
+      return EmitCheckedIntArith('*', L, R, Loc);
+    return Builder->CreateMul(L, R, "multmp");
 
   case '/': {
     CastBoth(NumericType);
@@ -291,6 +310,12 @@ Value *BinaryExprAST::codegen() {
       Builder->CreateUnreachable();
 
     Builder->SetInsertPoint(DivContBB);
+
+    // The one signed-division overflow case (INT64_MIN / -1) -- see
+    // EmitSignedDivOverflowGuard()'s own doc comment. int32/double are
+    // scoped out for the same reason noted above the '+' case.
+    if (NumericType->isNamed("int"))
+      EmitSignedDivOverflowGuard(L, R, Loc);
 
     return NumericType->isNamed("double") ? Builder->CreateFDiv(L, R, "divtmp")
                                           : Builder->CreateSDiv(L, R, "divtmp");
@@ -405,9 +430,13 @@ Value *BinaryExprAST::codegen() {
   case '|':
     return Builder->CreateOr(L, R, "bitormp");
 
-  // Bitwise left shift
+  // Bitwise left shift -- checked (FREEZE.md §6.2 row 7 names '<<'
+  // explicitly alongside +/-/*). Both operands are already 'int' by the
+  // time TypeChecker::visitBinary() accepts a shift, so no NumericType
+  // gate is needed here the way +/-/* need one (those also accept
+  // double).
   case TOK_LSHIFT:
-    return Builder->CreateShl(L, R, "lshifttmp");
+    return EmitCheckedShl(L, R, Loc);
 
   // Bitwise right shift (arithmetic, preserves sign)
   case TOK_RSHIFT:
@@ -449,8 +478,38 @@ Value *UnaryExprAST::codegen() {
   case '-':
     if (OperandType->isNamed("double"))
       return Builder->CreateFNeg(OperandV);
-    if (OperandType->isNamed("int"))
-      return Builder->CreateNeg(OperandV);
+    if (OperandType->isNamed("int")) {
+      // Unary '-' applied DIRECTLY to an untyped integer literal folds
+      // into the literal itself, before any runtime check -- FREEZE.md
+      // §6.2's `-9223372036854775808` example (ARCHITECTURE_OVERHAUL.md
+      // §10.2), explicitly deferred here by SEM-001 (see ParserLiteral.cpp's
+      // own doc comment on ParseNumberExpr). Without this special case,
+      // negating the ALREADY-64-BIT-TRUNCATED magnitude via the ordinary
+      // checked-negate path below would incorrectly TRAP for exactly this
+      // one legitimate input: NumberExprAST::codegen() truncates the
+      // literal `9223372036854775808` (2^63) to a 64-bit value whose bit
+      // pattern is indistinguishable from a genuine INT64_MIN, so
+      // EmitCheckedIntNegate() would (wrongly) read it as "negating
+      // INT64_MIN" and panic. TypeChecker::checkLiteralRepresentable()
+      // (SEM-002) is what actually enforces representability for this
+      // shape; this is purely correct bit-level construction of an
+      // already-validated (or, for a stray unchecked occurrence, honestly
+      // truncated -- mirroring NumberExprAST::codegen()'s own contract)
+      // literal value, never a runtime-checked operation.
+      if (const auto *NE = dynamic_cast<const NumberExprAST *>(Operand.get())) {
+        if (NE->isInteger() && NE->isUntyped()) {
+          const llvm::APSInt &Exact = NE->getIntValExact();
+          llvm::APInt Widened = llvm::APInt(Exact).sext(Exact.getBitWidth() + 1);
+          llvm::APInt Negated = -Widened;
+          return ConstantInt::get(*TheContext, Negated.sextOrTrunc(64));
+        }
+      }
+      // Checked (FREEZE.md §6.2 row 7 names negation alongside +/-/*):
+      // negating a genuine runtime INT64_MIN value is the one input with
+      // no representable int64 result -- see EmitCheckedIntNegate()'s own
+      // doc comment.
+      return EmitCheckedIntNegate(OperandV, Loc);
+    }
     llvm::report_fatal_error("Internal error: Unknown unary operand type");
     return nullptr;
   case '+':

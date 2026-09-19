@@ -1,0 +1,30 @@
+An integer literal is out of range for its destination type
+
+Turf now checks every integer literal's EXACT value against the type it's
+being given, instead of silently clamping or wrapping it:
+
+    mut x: int = 999999999999999999999999999999999999999999999999;
+    // ERROR: too big for 'int' -- 'int' only holds up to
+    // 9223372036854775807
+
+    mut y: int32 = 99999999999;
+    // ERROR: too big for 'int32' -- it only holds up to 2147483647
+
+This also fires for a compile-time expression built entirely out of
+literals, once the two values combine into something out of range:
+
+    mut c: int = 9223372036854775807 + 1;
+    // ERROR: the SUM doesn't fit in 'int', even though each literal alone
+    // would have
+
+'int' is a fixed 64-bit signed integer -- it's TurfLang's only
+general-purpose integer type, and there's no wider one to promote to.
+'int32' exists only for describing a C ABI honestly (`extern fn`
+declarations) and is narrower still.
+
+The fix is almost always one of:
+  - Use a smaller literal.
+  - If you're targeting 'int32' on purpose, double check the value fits
+    32 bits, or use 'int' instead.
+  - If you genuinely need arbitrary-precision arithmetic, that needs a
+    library type -- it isn't a primitive in this language.

@@ -1,0 +1,24 @@
+// SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 rows
+// 2/3): both ends of 'int's range must be exactly writable as literals.
+// INT64_MAX needed no special handling; INT64_MIN specifically exercises
+// the "unary '-' applied directly to an untyped literal folds into the
+// literal before representability is checked" rule (§10.2) -- without it,
+// `-9223372036854775808` either clamps one short or (once runtime overflow
+// trapping exists) is misread as negating a genuine runtime INT64_MIN and
+// wrongly traps. See UnaryExprAST::codegen()'s own comment (CodegenExpr.cpp).
+
+import test;
+
+fn main(): int {
+    mut max: int = 9223372036854775807;
+    test::assert(max == 9223372036854775807, "INT64_MAX literal round-trips");
+
+    mut min: int = -9223372036854775808;
+    test::assert(min == -9223372036854775808, "INT64_MIN literal round-trips");
+
+    // The negation is real, not a no-op: min + 1 must differ from min.
+    mut min_plus_one: int = min + 1;
+    test::assert(min_plus_one == -9223372036854775807, "INT64_MIN + 1 computes correctly");
+
+    return 0;
+}

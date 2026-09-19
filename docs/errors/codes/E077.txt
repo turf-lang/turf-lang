@@ -1,0 +1,21 @@
+An integer literal can't be represented exactly as a 'double'
+
+Turf allows an integer literal to implicitly become a 'double':
+
+    mut d: double = 5;   // fine -- 5 converts to 5.0 exactly
+
+But not every integer has an exact 'double' representation. A 'double'
+only has 53 bits of precision, so a large-enough integer literal can't be
+converted without silently losing its exact value:
+
+    mut d: double = 9223372036854775807;
+    // ERROR: this doesn't round-trip exactly as a double
+
+Turf refuses this rather than silently rounding, because the whole point
+of this check is to stop a number from silently becoming a slightly
+different number.
+
+The fix is one of:
+  - Use 'int' instead, if you need the exact integer value.
+  - Write it as an explicit float literal ('9223372036854775807.0') if
+    you're fine with the (slightly rounded) double value.

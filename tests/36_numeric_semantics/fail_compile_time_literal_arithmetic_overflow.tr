@@ -1,0 +1,12 @@
+// SEM-002 (FREEZE.md §6.2 row 6, ARCHITECTURE_OVERHAUL.md §10.2's own
+// worked example): "compile-time arithmetic over untyped literals is
+// exact; only the final value is checked" -- each literal individually
+// fits 'int', but their sum doesn't, so this is a COMPILE-time error
+// (TypeChecker::tryFoldUntypedIntConstant() folds the expression with
+// arbitrary precision), not a runtime trap. Contrast with
+// runtime_overflow_add.tr in this same folder, where the operands are
+// ordinary variables instead of literals -- that one is a RUNTIME trap.
+fn main(): int {
+    mut c: int = 9223372036854775807 + 1;
+    return 0;
+}

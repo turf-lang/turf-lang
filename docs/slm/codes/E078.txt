@@ -1,0 +1,21 @@
+TURF E078 -- FLOAT LITERAL OVERFLOW:
+
+CAUSE:
+  A float literal's decimal-to-binary rounding overflowed to +/-inf
+  (NumberExprAST::overflowed(), set at parse time by ParseNumberExpr --
+  SEM-001). FREEZE.md §6.2 row 8: a non-representable float LITERAL is a
+  hard error, unconditionally -- unlike a runtime float overflow (a
+  computed value becoming inf), which is allowed and behaves as ordinary
+  IEEE-754 (no trap).
+
+CORRECT:
+    mut d: double = 1.5e300;   // finite, fits comfortably
+
+INCORRECT:
+    mut d: double = 1e400;
+    // ERROR: rounds to +inf [E078]
+
+FIX:
+  The literal is too large for 'double' (max ~1.8e308). Check for a typo
+  in the exponent, or reconsider whether this value belongs in a
+  'double' at all.

@@ -135,6 +135,13 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // SLM::ErrorCategory for these.
     {"E074", "UnreachableBlockWarning", "Unreachable block", SLM::ErrorCategory::CONTROL_FLOW},
     {"E075", "DeadBranchWarning", "Dead branch", SLM::ErrorCategory::CONTROL_FLOW},
+    // SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): destination/
+    // literal-representability diagnostics (FREEZE.md §6.2 rows 3/6/8/9).
+    // Routed to the existing ARITHMETIC category, per §8's explicit
+    // instruction not to add a new SLM::ErrorCategory for these.
+    {"E076", "IntegerLiteralOutOfRangeError", "Integer literal out of range", SLM::ErrorCategory::ARITHMETIC},
+    {"E077", "IntegerLiteralNotExactAsDoubleError", "Integer literal not exact as double", SLM::ErrorCategory::ARITHMETIC},
+    {"E078", "FloatLiteralOverflowError", "Float literal overflow", SLM::ErrorCategory::ARITHMETIC},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

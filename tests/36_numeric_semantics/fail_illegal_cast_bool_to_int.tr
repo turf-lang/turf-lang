@@ -1,0 +1,10 @@
+// SEM-002 Rule B1: cast legality is now enforced in the TypeChecker
+// (TypeChecker::visitCast(), TypeCheckerExpr.cpp), not only in Codegen --
+// this is a regression check that an illegal pairing (bool -> int was
+// never supported, docs/reference/variables_and_types.md's "Not supported
+// at all" list) is still rejected after the check moved.
+fn main(): int {
+    mut flag: bool = true;
+    mut n: int = flag to int;
+    return 0;
+}

@@ -14,6 +14,7 @@ record does; `status` tracks the record, not the branch.
 | DIAG-001 | Structural error classification and the lint VarDecl gap | landed | 2026-09-18 | 2026-09-18 | diagnostics, SLM routing, Lint | [DIAG-001](changes/DIAG-001.md) |
 | HYG-001 | Compiler hygiene and diagnostic-rendering consistency | landed | 2026-09-18 | 2026-09-18 | build headers, CFG diagnostics | [HYG-001](changes/HYG-001.md) |
 | LANG-004 | Small language and FFI ergonomics | landed | 2026-09-18 | 2026-09-18 | Parser, Resolver, TypeChecker | [LANG-004](changes/LANG-004.md) |
+| SEM-002 | Numeric semantics: representability, conversion, overflow | landed | 2026-09-19 | 2026-09-19 | TypeChecker, Codegen, diagnostics | [SEM-002](changes/SEM-002.md) |
 
 ## How to use this directory
 

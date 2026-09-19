@@ -356,6 +356,17 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
                     "Return type mismatch: function declares '" +
                         Declared->getName() + "' but returns '" +
                         RetTy->getName() + "'.");
+      } else {
+        // SEM-002 -- see visitVarDecl()'s identical comment
+        // (TypeCheckerDecl.cpp). For a '!T'-declared function, the
+        // relevant destination is the success type T, not the error union
+        // itself (an error-tag value never has a NumberExprAST shape
+        // anyway, so this is a no-op on that path regardless).
+        const TurfType *EffectiveDest =
+            Declared->isErrorUnion()
+                ? static_cast<const TurfErrorUnionType *>(Declared)->getSuccessType()
+                : Declared;
+        checkLiteralRepresentable(Node.getVal(), EffectiveDest, Node.getLoc());
       }
     }
   }

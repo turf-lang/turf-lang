@@ -399,17 +399,23 @@ Value *CompoundAssignmentExprAST::codegen() {
   bool isDouble = LHSTy->isNamed("double");
 
   switch (Opcode) {
+  // Checked for int (never double) -- SEM-002 (FREEZE.md §6.2 row 7). This
+  // duplicates BinaryExprAST::codegen()'s own +/-/* handling rather than
+  // sharing it because CompoundAssignmentExprAST has never desugared to a
+  // literal re-walk of BinaryExprAST at the Codegen layer (each already had
+  // its own div-by-zero check, above/below, before this group) -- see
+  // EmitCheckedIntArith()'s own doc comment (CodegenCore.cpp).
   case '+':
     Result = isDouble ? Builder->CreateFAdd(LHSVal, CastRHS, "addtmp")
-                      : Builder->CreateAdd(LHSVal, CastRHS, "addtmp");
+                      : EmitCheckedIntArith('+', LHSVal, CastRHS, Loc);
     break;
   case '-':
     Result = isDouble ? Builder->CreateFSub(LHSVal, CastRHS, "subtmp")
-                      : Builder->CreateSub(LHSVal, CastRHS, "subtmp");
+                      : EmitCheckedIntArith('-', LHSVal, CastRHS, Loc);
     break;
   case '*':
     Result = isDouble ? Builder->CreateFMul(LHSVal, CastRHS, "multmp")
-                      : Builder->CreateMul(LHSVal, CastRHS, "multmp");
+                      : EmitCheckedIntArith('*', LHSVal, CastRHS, Loc);
     break;
   case '/': {
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
@@ -428,6 +434,10 @@ Value *CompoundAssignmentExprAST::codegen() {
       Builder->CreateUnreachable();
 
     Builder->SetInsertPoint(DivContBB);
+    // The one signed-division overflow case (INT64_MIN / -1) -- see
+    // EmitSignedDivOverflowGuard()'s own doc comment.
+    if (!isDouble)
+      EmitSignedDivOverflowGuard(LHSVal, CastRHS, Loc);
     Result = isDouble ? Builder->CreateFDiv(LHSVal, CastRHS, "divtmp")
                       : Builder->CreateSDiv(LHSVal, CastRHS, "divtmp");
     break;
@@ -466,7 +476,8 @@ Value *CompoundAssignmentExprAST::codegen() {
     Result = Builder->CreateOr(LHSVal, CastRHS, "orassigntmp");
     break;
   case TOK_LSHIFT:
-    Result = Builder->CreateShl(LHSVal, CastRHS, "lshiftassigntmp");
+    // Checked -- see EmitCheckedShl()'s own doc comment (CodegenCore.cpp).
+    Result = EmitCheckedShl(LHSVal, CastRHS, Loc);
     break;
   case TOK_RSHIFT:
     Result = Builder->CreateAShr(LHSVal, CastRHS, "rshiftassigntmp");
@@ -499,11 +510,14 @@ Value *PostfixExprAST::codegen() {
 
   Value *NewVal = nullptr;
   if (Opcode == '+') {
+    // Checked for int (never double) -- `x++`/`x--` is arithmetically
+    // `x = x +/- 1`, so it gets the same SEM-002 overflow trap as any other
+    // '+'/'-' -- see EmitCheckedIntArith()'s own doc comment (CodegenCore.cpp).
     NewVal = isDouble ? Builder->CreateFAdd(OldVal, One, "inctmp")
-                      : Builder->CreateAdd(OldVal, One, "inctmp");
+                      : EmitCheckedIntArith('+', OldVal, One, Loc);
   } else {
     NewVal = isDouble ? Builder->CreateFSub(OldVal, One, "dectmp")
-                      : Builder->CreateSub(OldVal, One, "dectmp");
+                      : EmitCheckedIntArith('-', OldVal, One, Loc);
   }
 
   Builder->CreateStore(NewVal, Ptr);

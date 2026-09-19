@@ -1239,6 +1239,156 @@ const TurfType *getExprType(const ExprAST *E) {
 }
 
 
+// SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 row 7):
+// "Runtime, signed integer: trap (panic)" -- LLVM's llvm.s{add,sub,mul}.
+// with.overflow intrinsics already compute both the wrapped result and an
+// i1 overflow flag in one instruction, so this is the same
+// compute-then-branch-to-panic shape the pre-existing division-by-zero
+// check (BinaryExprAST::codegen(), CodegenExpr.cpp) already used -- just
+// with the overflow flag coming from the intrinsic instead of a separate
+// icmp. Shared (not inlined at each call site) because THREE independent
+// codegen paths need identical arithmetic-overflow behavior and don't
+// share a common codegen() call: BinaryExprAST (CodegenExpr.cpp),
+// CompoundAssignmentExprAST, and PostfixExprAST (both CodegenVar.cpp) --
+// compound assignment and `x++`/`x--` deliberately do NOT desugar to a
+// literal `x = x + 1`-shaped re-walk of BinaryExprAST at the Codegen layer
+// (see CodegenVar.cpp's own top-of-file framing), so each already
+// duplicates the divide-by-zero check independently; this duplicates the
+// same way rather than inventing new shared plumbing beyond this function.
+Value *EmitCheckedIntArith(char Op, Value *L, Value *R, SourceLocation Loc) {
+  llvm::Intrinsic::ID ID;
+  const char *Name;
+  switch (Op) {
+  case '+': ID = llvm::Intrinsic::sadd_with_overflow; Name = "addtmp"; break;
+  case '-': ID = llvm::Intrinsic::ssub_with_overflow; Name = "subtmp"; break;
+  case '*': ID = llvm::Intrinsic::smul_with_overflow; Name = "multmp"; break;
+  default:
+    llvm::report_fatal_error(
+        "Internal error: EmitCheckedIntArith called with non-arithmetic operator");
+    return nullptr;
+  }
+#if LLVM_VERSION_MAJOR >= 19
+  Function *IntrinsicF = llvm::Intrinsic::getOrInsertDeclaration(
+      TheModule.get(), ID, {Type::getInt64Ty(*TheContext)});
+#else
+  Function *IntrinsicF = llvm::Intrinsic::getDeclaration(
+      TheModule.get(), ID, {Type::getInt64Ty(*TheContext)});
+#endif
+  Value *CallRes = Builder->CreateCall(IntrinsicF, {L, R}, Name);
+  Value *Result = Builder->CreateExtractValue(CallRes, 0, std::string(Name) + ".val");
+  Value *Overflowed = Builder->CreateExtractValue(CallRes, 1, std::string(Name) + ".ov");
+
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  BasicBlock *OverflowBB = BasicBlock::Create(*TheContext, "int.overflow", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "int.overflow.cont", TheFunction);
+  Builder->CreateCondBr(Overflowed, OverflowBB, ContBB);
+
+  Builder->SetInsertPoint(OverflowBB);
+  CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  Builder->SetInsertPoint(ContBB);
+  return Result;
+}
+
+// Negation overflows for exactly one input: negating INT64_MIN, whose
+// magnitude (2^63) has no positive int64 representation -- the same
+// "one remaining case" shape as EmitSignedDivOverflowGuard() below, just
+// for unary '-' instead of '/'.
+Value *EmitCheckedIntNegate(Value *V, SourceLocation Loc) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Value *IsIntMin = Builder->CreateICmpEQ(
+      V, ConstantInt::get(Type::getInt64Ty(*TheContext),
+                          static_cast<uint64_t>(INT64_MIN), true),
+      "isintmin");
+
+  BasicBlock *OverflowBB = BasicBlock::Create(*TheContext, "neg.overflow", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "neg.cont", TheFunction);
+  Builder->CreateCondBr(IsIntMin, OverflowBB, ContBB);
+
+  Builder->SetInsertPoint(OverflowBB);
+  CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  Builder->SetInsertPoint(ContBB);
+  return Builder->CreateNeg(V, "negtmp");
+}
+
+// '<<' has no LLVM "with.overflow" intrinsic (unlike +/-/*), so overflow is
+// defined directly: the shift amount must be in [0, 64), AND shifting the
+// result back right by the same amount (arithmetic, sign-preserving) must
+// recover the original value -- if any set bit was pushed out past the
+// sign bit, the recovered value differs from the input. The shift-amount
+// range is checked FIRST, in its own branch, so the actual shl/ashr below
+// never executes with an out-of-range amount at all (LLVM's shl/ashr are
+// poison for a shift amount >= the operand's bit width, so computing them
+// speculatively and only checking afterward would itself be the exact kind
+// of UB this group exists to remove).
+Value *EmitCheckedShl(Value *L, Value *R, SourceLocation Loc) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Value *Zero64 = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+  Value *SixtyFour = ConstantInt::get(Type::getInt64Ty(*TheContext), 64);
+  Value *AmtBad = Builder->CreateOr(
+      Builder->CreateICmpSLT(R, Zero64, "shiftamt.neg"),
+      Builder->CreateICmpSGE(R, SixtyFour, "shiftamt.toobig"), "shiftamt.bad");
+
+  BasicBlock *OverflowBB = BasicBlock::Create(*TheContext, "shl.overflow", TheFunction);
+  BasicBlock *ShiftOkBB = BasicBlock::Create(*TheContext, "shl.amtok", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "shl.cont", TheFunction);
+  Builder->CreateCondBr(AmtBad, OverflowBB, ShiftOkBB);
+
+  Builder->SetInsertPoint(ShiftOkBB);
+  Value *ShlResult = Builder->CreateShl(L, R, "lshifttmp");
+  Value *Recovered = Builder->CreateAShr(ShlResult, R, "lshiftcheck");
+  Value *LostBits = Builder->CreateICmpNE(Recovered, L, "lshift.lost");
+  Builder->CreateCondBr(LostBits, OverflowBB, ContBB);
+
+  Builder->SetInsertPoint(OverflowBB);
+  CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  // ShlResult dominates ContBB: the only edge into ContBB is from ShiftOkBB,
+  // after ShlResult was already computed -- no PHI needed.
+  Builder->SetInsertPoint(ContBB);
+  return ShlResult;
+}
+
+// The one signed-division overflow case (ARCHITECTURE_OVERHAUL.md §10.2):
+// INT64_MIN / -1 has no representable int64 result (the mathematical
+// result, 2^63, overflows by exactly one past INT64_MAX). LLVM's `sdiv` is
+// poison for this input (mirrors hardware `idiv`, which traps on it) --
+// must be caught explicitly, same shape as the pre-existing divide-by-zero
+// check this always runs alongside. Call this AFTER the zero check (so the
+// insert point is already the "R != 0" continuation block) and BEFORE
+// emitting the actual CreateSDiv/CreateSRem.
+void EmitSignedDivOverflowGuard(Value *L, Value *R, SourceLocation Loc) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Value *IsIntMin = Builder->CreateICmpEQ(
+      L, ConstantInt::get(Type::getInt64Ty(*TheContext),
+                          static_cast<uint64_t>(INT64_MIN), true),
+      "isintmin");
+  Value *IsNegOne = Builder->CreateICmpEQ(
+      R, ConstantInt::get(Type::getInt64Ty(*TheContext),
+                          static_cast<uint64_t>(-1), true),
+      "isnegone");
+  Value *WillOverflow = Builder->CreateAnd(IsIntMin, IsNegOne, "sdiv.overflow.check");
+
+  BasicBlock *OverflowBB = BasicBlock::Create(*TheContext, "sdiv.overflow", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "sdiv.overflow.cont", TheFunction);
+  Builder->CreateCondBr(WillOverflow, OverflowBB, ContBB);
+
+  Builder->SetInsertPoint(OverflowBB);
+  CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  Builder->SetInsertPoint(ContBB);
+}
+
+
 Value *CastToType(Value *Val, TurfTypePtr DestType,
                          const std::string &Name, SourceLocation Loc) {
   return CastToType(Val, DestType.get(), Name, Loc);

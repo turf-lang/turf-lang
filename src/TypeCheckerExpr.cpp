@@ -89,6 +89,18 @@ std::string describeNonLValue(const ExprAST *E) {
 // ─── Literal visitors ─────────────────────────────────────────────────────────
 
 void TypeChecker::visitNumber(NumberExprAST &Node) {
+  // SEM-002 (FREEZE.md §6.2 row 8): a float literal whose decimal->binary
+  // rounding overflowed to +/-inf is a hard error UNCONDITIONALLY --
+  // unlike the int-literal-range checks (checkLiteralRepresentable()),
+  // this doesn't depend on what destination the literal is acquiring, so
+  // it belongs here rather than at each acquires-a-type call site.
+  if (!Node.isInteger() && Node.overflowed()) {
+#ifndef TYPECHECKER_NO_ERRORS
+    FloatLiteralOverflowError(Node.getLoc(), Node.getSpelling()).raise();
+#else
+    throw std::runtime_error("FloatLiteralOverflowError");
+#endif
+  }
   setType(&Node, Node.isInteger() ? TurfInt() : TurfDouble());
 }
 
@@ -448,6 +460,9 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
                   "Cannot assign value of type '" + RhsTy->getName() +
                       "' to variable of type '" + LhsTy->getName() + "'.",
                   Related);
+    } else {
+      // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
+      checkLiteralRepresentable(Node.getRHS(), LhsTy.get(), Node.getLoc());
     }
   }
 
@@ -694,6 +709,72 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   TurfTypePtr OperandTy = Node.getOperand() ? getType(Node.getOperand()) : nullptr;
   if (!checkUnsafeGate(Node.getDestTypePtr().get(), Node.getLoc(), &Node))
     checkUnsafeGate(OperandTy.get(), Node.getLoc(), &Node);
+
+  // SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): 'to'-cast
+  // legality, Rule B1 -- moved here from Codegen (CastExprAST::codegen(),
+  // CodegenExpr.cpp) so an illegal cast is caught at the TypeChecker
+  // layer, like every other type rule, instead of Codegen being the only
+  // thing standing between it and a diagnostic (docs/architecture/
+  // compiler_pipeline.md §0's own stated pipeline invariant: Codegen only
+  // ever runs on an AST that has ALREADY passed the TypeChecker cleanly).
+  // Mirrors CodegenExpr.cpp's own pairwise dispatch pair-for-pair --
+  // Codegen's own final "Everything else is unsupported" TypeError stays
+  // in place as a defensive, should-be-unreachable fallback (see this
+  // group's change record's Known pitfalls on why it isn't deleted).
+  if (OperandTy) {
+    const std::string SrcName = OperandTy->getName();
+    const std::string DstName = DestTy->getName();
+
+    // Resolve OperandTy through GlobalSymbolTable too, mirroring DestTy's
+    // own resolution above -- an enum-typed operand is otherwise still a
+    // bare NamedType at this point (same root cause as the enum-literal
+    // check above).
+    TurfTypePtr ResolvedOperandTy = OperandTy;
+    if (auto *NT2 = dynamic_cast<const NamedType *>(OperandTy.get())) {
+      if (GlobalSymbolTable) {
+        if (auto Resolved = GlobalSymbolTable->LookupType(NT2->getName()))
+          ResolvedOperandTy = Resolved;
+      }
+    }
+    bool SrcIsEnum = dynamic_cast<const TurfEnumType *>(ResolvedOperandTy.get()) != nullptr;
+    bool DstIsEnum = dynamic_cast<const TurfEnumType *>(DestTy.get()) != nullptr;
+    bool SrcIsPtrLike = dynamic_cast<const TurfPointerType *>(OperandTy.get()) != nullptr ||
+                        SrcName == "ptr" || SrcName == "string";
+    bool DstIsPtrLike = dynamic_cast<const TurfPointerType *>(DestTy.get()) != nullptr ||
+                        DstName == "ptr" || DstName == "string";
+
+    bool Legal =
+        SrcName == DstName ||
+        (SrcName == "int" && DstName == "double") ||
+        (SrcName == "double" && DstName == "int") ||
+        (SrcName == "int32" && DstName == "int") ||
+        (SrcName == "int" && DstName == "int32") ||
+        (SrcName == "int32" && DstName == "double") ||
+        (SrcName == "double" && DstName == "int32") ||
+        (SrcName == "char" && DstName == "int") ||
+        (SrcName == "int" && DstName == "char") ||
+        (SrcIsEnum && DstName == "int") ||
+        (SrcName == "int" && DstIsEnum) ||
+        (SrcName == "string" && DstName == "int") ||
+        (SrcName == "string" && DstName == "double") ||
+        (SrcName == "int" && DstName == "string") ||
+        (SrcName == "double" && DstName == "string") ||
+        (SrcName == "bool" && DstName == "string") ||
+        (SrcIsEnum && DstName == "string") ||
+        (SrcName == "string" && DstIsEnum) ||
+        (SrcName == "int" && dynamic_cast<const TurfPointerType *>(DestTy.get()) != nullptr) ||
+        (SrcIsPtrLike && DstIsPtrLike);
+
+    if (!Legal) {
+#ifndef TYPECHECKER_NO_ERRORS
+      TypeError(Node.getLoc(), "Cannot explicitly cast '" + SrcName +
+                                    "' to '" + DstName + "'")
+          .raise();
+#else
+      throw std::runtime_error("TypeError: Cannot explicitly cast");
+#endif
+    }
+  }
 
   // Explicit cast always succeeds at the TypeChecker level; result is DestType.
   setType(&Node, Node.getDestTypePtr());

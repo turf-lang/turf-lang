@@ -1,0 +1,24 @@
+TURF E077 -- INTEGER LITERAL NOT EXACT AS DOUBLE:
+
+CAUSE:
+  An untyped integer literal is implicitly converting to 'double' (one of
+  the three legal implicit conversions, FREEZE.md §6.2 row 4), but its
+  exact value cannot be rounded to the nearest 'double' WITHOUT loss
+  (FREEZE.md §6.2 row 9: "An untyped literal -> double must be exactly
+  representable"). The literal DOES fit in 'int' (64-bit) -- that is
+  checked first and separately (E076) -- it just isn't exactly
+  representable in IEEE-754 double precision (53 significant bits).
+
+CORRECT:
+    mut d: double = 5;                 // exact
+    mut d2: double = 9223372036854775808.0; // written as a float literal,
+                                             // rounding is then explicit
+
+INCORRECT:
+    mut d: double = 9223372036854775807;
+    // ERROR: doesn't round-trip exactly as a double [E077]
+
+FIX:
+  Use 'int' if the exact integer value matters, or write the value as an
+  explicit float literal (with a decimal point) if the rounded value is
+  acceptable.

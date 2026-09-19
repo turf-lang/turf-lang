@@ -72,7 +72,10 @@
 #include "ResolverSymbolTable.h"
 #include "Types.h"
 
+#include "llvm/ADT/APSInt.h"
+
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -422,6 +425,71 @@ private:
   /// True if two types are compatible for arithmetic (both numeric or both
   /// string — string + string is valid; mixed is not).
   static bool areArithCompatible(const TurfType *A, const TurfType *B);
+
+  // ── SEM-002: literal-representability checking ─────────────────────────
+  // (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 rows 3/6/9)
+
+  /// Recursive fold of a compile-time integer constant built ONLY from
+  /// untyped literals via unary '-' and binary '+'/'-'/'*' (row 6).
+  /// Returns std::nullopt for anything else (a variable, a call, '/'/'%'/
+  /// '**', a typed constant reference, ...) without raising anything --
+  /// those are left to runtime overflow trapping instead (Codegen), or,
+  /// for a typed-constant reference specifically, are a disclosed,
+  /// deferred gap (see this group's change record).
+  ///
+  /// @p IsTopLevel is true only for the ORIGINAL call (from
+  /// checkLiteralRepresentable()) and propagates through a unary '-'
+  /// (folding "-BIG" is still conceptually the same single literal, just
+  /// negated -- FREEZE.md's own `-9223372036854775808` example), but is
+  /// always false for a BinaryExprAST's own LHS/RHS: those become genuine
+  /// independent leaves that Codegen (NumberExprAST::codegen(),
+  /// unconditionally since SEM-001) must truncate to 64 bits BEFORE any
+  /// arithmetic runs, so a leaf that doesn't independently fit int64 is
+  /// rejected immediately, from here, citing 'int' -- deferring to "maybe
+  /// the whole expression's final value still fits" is a check Codegen
+  /// could not actually honor for that leaf regardless of what the
+  /// surrounding expression's value turns out to be. Only a bare
+  /// top-level literal (this function called directly on a NumberExprAST)
+  /// defers instead to checkLiteralRepresentable()'s own
+  /// destination-aware message.
+  std::optional<llvm::APSInt> tryFoldUntypedIntConstant(const ExprAST *E,
+                                                         bool IsTopLevel);
+
+  /// Checks @p ValueExpr (an untyped-literal-only expression, per
+  /// tryFoldUntypedIntConstant() above) against @p DestType's
+  /// representable range, when @p DestType is 'int', 'int32', or 'double'
+  /// -- a no-op for every other destination (bool/char/string/struct/
+  /// enum/pointer either can't receive a NumberExprAST-shaped initializer
+  /// at all, or has no numeric range to violate) and a no-op when
+  /// @p ValueExpr isn't a pure literal-arithmetic tree.
+  ///
+  /// The 'double' destination case is narrower than FREEZE.md §6.2 row 9's
+  /// literal wording ("must be exactly representable"): this requires the
+  /// exact value to ALSO independently fit int64 first, because Codegen
+  /// (NumberExprAST::codegen()) truncates every literal through a 64-bit
+  /// int before any int-to-double conversion runs, regardless of the
+  /// literal's true magnitude -- a literal that's exactly representable
+  /// as a double but exceeds int64 (e.g. 2^100) would silently codegen a
+  /// WRONG value today if this check let it through. A disclosed, narrow
+  /// implementation constraint, not a reinterpretation of the frozen rule
+  /// -- see this group's change record's Known pitfalls.
+  void checkLiteralRepresentable(const ExprAST *ValueExpr, const TurfType *DestType,
+                                 SourceLocation Loc);
+
+  /// Applies checkLiteralRepresentable() to each argument against its
+  /// matching resolved parameter's type, once a call's final candidate is
+  /// chosen (NOT during multi-candidate overload filtering, which only
+  /// has TurfTypePtr on hand, not the argument ExprAST nodes themselves).
+  /// @p Loc is the call's own location -- reused for every argument since
+  /// ExprAST has no virtual getLoc() (see docs/architecture/
+  /// compiler_pipeline.md §6's identical note for CFG diagnostics), the
+  /// same convention visitArrayDecl() already uses for its own per-element
+  /// mismatch diagnostic. @p ParamOffset skips a UFCS candidate's own
+  /// implicit receiver slot (Params[0]), whose type never corresponds to
+  /// any entry in @p Args at all (tryUFCSFallback()'s own call site).
+  void checkCallArgsRepresentable(const std::vector<std::unique_ptr<ExprAST>> &Args,
+                                  const std::vector<FunctionParam> &Params,
+                                  SourceLocation Loc, size_t ParamOffset = 0);
 
   // ── State ─────────────────────────────────────────────────────────────────
 
