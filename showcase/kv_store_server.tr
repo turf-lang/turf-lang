@@ -88,7 +88,7 @@ fn findIndex(store: List<Entry*>, key: string): int {
 }
 
 fn main(): int {
-    mut store: List<Entry*>;
+    mut store: List<Entry*> = List::default();
     mut server: net::TcpListener = net::TcpListener::bind(8181) recover run {
         io::printline("Could not start the store -- is port 8181 already in use?");
         return 1;

@@ -1,0 +1,18 @@
+// SEM-004 (F-INIT-1, FREEZE.md §6.4): a struct declared without an
+// initializer is statically unassigned, exactly like a primitive local --
+// the eager zero-init Mechanism B used to give every struct (see
+// 07_default_init.tr) is removed. Reading a field before any assignment is
+// DefiniteAssignmentError (E008); `Point::default()` is the explicit,
+// mechanical replacement.
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut p: Point;
+    if p.x == 0 {
+        return 1;
+    }
+    return 0;
+}

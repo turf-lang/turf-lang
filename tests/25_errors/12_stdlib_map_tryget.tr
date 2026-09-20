@@ -10,7 +10,7 @@ import test;
 import map::Map;
 
 fn buildMap(): Map<string, int> {
-    mut m: Map<string, int>;
+    mut m: Map<string, int> = Map::default();
     m.put("a", 1);
     m.put("b", 2);
     return m;

@@ -65,7 +65,6 @@ class ModuleImportExprAST;
 class SizeOfExprAST;
 class ExternFuncDeclExprAST;
 class AddressOfExprAST;
-class DefaultInitExprAST;
 class CompareExprAST;
 
 
@@ -100,7 +99,6 @@ public:
   virtual void visitChar(CharExprAST &Node) {}
   virtual void visitString(StringExprAST &Node) {}
   virtual void visitNull(NullExprAST &Node) {}
-  virtual void visitDefaultInit(DefaultInitExprAST &Node) {}
 
   // ── Variables & Declarations ──────────────────────────────────────────────
   virtual void visitVariable(VariableExprAST &Node) {}

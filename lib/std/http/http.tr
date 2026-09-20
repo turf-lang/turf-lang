@@ -171,7 +171,7 @@ fn Request.has_header(name: string): bool {
 // has no natural way to act on differently anyway.
 fn parse_request(conn: net::TcpConnection): Request {
     immut raw: string = conn.read(8192);
-    mut req: Request;
+    mut req: Request = Request::default();
 
     mut sepIdx: int = strings::index_of(raw, "\r\n\r\n");
     mut sepLen: int = 4;
@@ -361,7 +361,7 @@ fn Server.listen(port: int): void {
             continue;
         };
         mut req: Request = parse_request(conn);
-        mut res: Response;
+        mut res: Response = Response::default();
         res.conn = conn;
 
         if !self.has_route(req.path) {

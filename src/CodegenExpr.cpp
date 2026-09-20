@@ -90,11 +90,6 @@ Value *NullExprAST::codegen() {
 }
 
 
-Value *DefaultInitExprAST::codegen() {
-  return GetDefaultValue(Type.get());
-}
-
-
 // EmitStringConcat/EmitStrcmp/EmitStrcmpRelational used to live here,
 // hand-rolling String's `+`/`==`/`!=`/`< > <= >=` directly in Codegen.
 // Deleted: this behavior now lives in lib/std/strings.tr as ordinary

@@ -1,0 +1,13 @@
+// SEM-004 (F-INIT-1): a generic-typed local declared without an
+// initializer is statically unassigned -- calling a method on it before
+// any assignment is DefiniteAssignmentError (E008). Before SEM-004,
+// `List<T>` was a Mechanism-B type Codegen eagerly zeroed, so this
+// compiled; see 17_generic_list_default_then_use.tr for the still-legal
+// default()-then-use shape.
+import list::List;
+
+fn main(): int {
+    mut l: List<int>;
+    l.push(5);
+    return 0;
+}

@@ -1,0 +1,29 @@
+// SEM-004 (§12.6, FREEZE.md §6.4): the array-element-write granularity
+// rule applies the same way to an array of STRUCTS as it does to an array
+// of primitives (05_arrays_pointers_ffi/12_array_decl_no_initializer.tr) --
+// one element write counts as assigning the whole array, and storage is
+// still always zero-filled (F-INIT-2), so an untouched element's fields
+// read back as genuinely zero.
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut pts: Point[3];
+    pts[0] = Point::default();
+    pts[0].x = 5;
+    pts[0].y = 9;
+
+    test::assert(pts[0].x == 5, "written element x");
+    test::assert(pts[0].y == 9, "written element y");
+    // Untouched element -- legal to read because the array as a whole is
+    // already assigned by the write to pts[0] above; genuinely zero
+    // because storage is always zero-filled.
+    test::assert(pts[1].x == 0, "untouched element x still zero");
+    test::assert(pts[1].y == 0, "untouched element y still zero");
+
+    return 0;
+}

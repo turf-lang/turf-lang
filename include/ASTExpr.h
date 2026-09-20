@@ -514,25 +514,6 @@ public:
   }
 };
 
-class DefaultInitExprAST : public ExprAST {
-  SourceLocation Loc;
-  TurfTypePtr Type;
-
-public:
-  DefaultInitExprAST(SourceLocation Loc, TurfTypePtr Type)
-      : Loc(Loc), Type(std::move(Type)) {}
-
-  const SourceLocation &getLoc() const { return Loc; }
-  TurfTypePtr getTypePtr() const { return Type; }
-  void setTypePtr(TurfTypePtr NewType) { Type = std::move(NewType); }
-
-  llvm::Value *codegen() override;
-  void accept(ASTVisitor &V) override { V.visitDefaultInit(*this); }
-  std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<DefaultInitExprAST>(Loc, Type);
-  }
-};
-
 // Explicit type conversion: int(expr) / double(expr)
 class CastExprAST : public ExprAST {
   TurfTypePtr DestType;

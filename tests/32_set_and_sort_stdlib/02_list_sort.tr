@@ -16,7 +16,7 @@ fn cmp_int(a: int, b: int): int {
 }
 
 fn main(): int {
-    mut l: List<int>;
+    mut l: List<int> = List::default();
     l.push(5);
     l.push(1);
     l.push(4);

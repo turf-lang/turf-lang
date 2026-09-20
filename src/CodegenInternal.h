@@ -114,8 +114,12 @@ llvm::Value *CastToType(llvm::Value *Val, TurfTypePtr DestType,
 /// The default (zero) value for a given type -- 0 for int, 0.0 for double,
 /// false for bool, a null pointer for pointer types, a recursively
 /// zero-initialized constant struct for struct types, etc. Needed by
-/// CodegenExpr.cpp (DefaultInitExprAST), CodegenFunc.cpp (implicit struct
-/// field defaults), and CodegenVar.cpp (VarDeclExprAST with no initializer).
+/// CodegenFunc.cpp (`T::default()`'s DefaultConstruct branch, and implicit
+/// struct field defaults) and CodegenVar.cpp (VarDeclExprAST with no
+/// initializer -- storage is still always zero-filled here regardless of
+/// type, per F-INIT-2/FREEZE.md §6.4, even though SEM-004 removed the
+/// separate DefaultInitExprAST node this used to also flow through for a
+/// no-initializer struct/char/int32/array/generic declaration).
 llvm::Constant *GetDefaultValue(const TurfType *T);
 
 /// Emits the LLVM constant for an already-resolved `export immut` value.

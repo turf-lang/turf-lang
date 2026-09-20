@@ -1856,7 +1856,6 @@ SourceLocation GetNodeDebugLoc(const ExprAST *E) {
   TRY_LOC(SizeOfExprAST)
   TRY_LOC(CompareExprAST)
   TRY_LOC(NullExprAST)
-  TRY_LOC(DefaultInitExprAST)
   TRY_LOC(CastExprAST)
   TRY_LOC(FuncCallExprAST)
   TRY_LOC(ScopeAccessExprAST)

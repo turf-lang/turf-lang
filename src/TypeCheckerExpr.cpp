@@ -125,22 +125,6 @@ void TypeChecker::visitNull(NullExprAST &Node) {
 }
 
 
-void TypeChecker::visitDefaultInit(DefaultInitExprAST &Node) {
-  auto DeclTy = Node.getTypePtr();
-#ifndef TYPECHECKER_NO_ERRORS
-  if (auto *NT = dynamic_cast<const NamedType *>(DeclTy.get())) {
-    if (GlobalSymbolTable) {
-      if (auto StructTy = GlobalSymbolTable->LookupType(NT->getName())) {
-        DeclTy = StructTy;
-        Node.setTypePtr(StructTy);
-      }
-    }
-  }
-#endif
-  setType(&Node, DeclTy);
-}
-
-
 // ─── Variables & declarations ─────────────────────────────────────────────────
 
 void TypeChecker::visitVariable(VariableExprAST &Node) {

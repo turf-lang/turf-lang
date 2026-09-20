@@ -1,4 +1,5 @@
-// Stress test: deeply nested struct (4 levels) — all fields default-initialized
+// Stress test: deeply nested struct (4 levels) — all fields zero-
+// initialized via explicit A::default() (SEM-004: no more eager zero-init).
 import io;
 
 import test;
@@ -22,7 +23,7 @@ struct A {
 }
 
 fn main(): int {
-    mut a: A;
+    mut a: A = A::default();
     test::assert(a.name == "", "A.name default empty");
     test::assert(a.child.active == false, "A.child.active default false");
     test::assert(a.child.data.count == 0.0, "A.child.data.count default 0.0");

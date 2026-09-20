@@ -49,7 +49,6 @@ public:
   }
   TURF_EXTRACT_LOC(visitNumber, NumberExprAST)
   TURF_EXTRACT_LOC(visitNull, NullExprAST)
-  TURF_EXTRACT_LOC(visitDefaultInit, DefaultInitExprAST)
   TURF_EXTRACT_LOC(visitVariable, VariableExprAST)
   TURF_EXTRACT_LOC(visitVarDecl, VarDeclExprAST)
   TURF_EXTRACT_LOC(visitBinary, BinaryExprAST)

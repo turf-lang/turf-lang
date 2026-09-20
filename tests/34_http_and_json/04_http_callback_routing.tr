@@ -43,7 +43,7 @@ fn echoPathHandler(req: http::Request, res: http::Response): void {
 }
 
 fn main(): int {
-    mut app: http::Server;
+    mut app: http::Server = http::Server::default();
     app.get("/", homeHandler);
     app.get("/echo", echoPathHandler);
 
@@ -64,7 +64,7 @@ fn main(): int {
     client.write("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
 
     mut req: http::Request = http::parse_request(serverConn);
-    mut res: http::Response;
+    mut res: http::Response = http::Response::default();
     res.conn = serverConn;
     test::assert(app.has_route(req.path), "route '/' should have been registered");
     mut handler: fn(http::Request, http::Response): void = app.get_route(req.path);
@@ -89,7 +89,7 @@ fn main(): int {
     client2.write("GET /echo HTTP/1.1\r\nHost: localhost\r\n\r\n");
 
     mut req2: http::Request = http::parse_request(serverConn2);
-    mut res2: http::Response;
+    mut res2: http::Response = http::Response::default();
     res2.conn = serverConn2;
     test::assert(app.has_route(req2.path), "route '/echo' should have been registered");
     mut handler2: fn(http::Request, http::Response): void = app.get_route(req2.path);

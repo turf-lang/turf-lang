@@ -205,7 +205,6 @@ public:
   void visitChar(CharExprAST &Node) override { (void)Node; }
   void visitString(StringExprAST &Node) override { (void)Node; }
   void visitNull(NullExprAST &Node) override { (void)Node; }
-  void visitDefaultInit(DefaultInitExprAST &Node) override { (void)Node; }
 
   void visitBinary(BinaryExprAST &Node) override;
   void visitUnary(UnaryExprAST &Node) override;

@@ -757,22 +757,6 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       OtherLoc);
 }
 
-static std::unique_ptr<ExprAST> SynthesizeDefault(SourceLocation Loc, TurfTypePtr Type) {
-  if (Type->isInt()) {
-    return std::make_unique<NumberExprAST>(0LL);
-  } else if (Type->isDouble()) {
-    return std::make_unique<NumberExprAST>(0.0);
-  } else if (Type->isBool()) {
-    return std::make_unique<BoolExprAST>(false);
-  } else if (Type->isString()) {
-    return std::make_unique<StringExprAST>("");
-  } else if (Type->isPointer() || Type->isNamed("ptr") || Type->isNamed("void*")) {
-    return std::make_unique<NullExprAST>(Loc);
-  } else {
-    return std::make_unique<DefaultInitExprAST>(Loc, Type);
-  }
-}
-
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat mutable or immutable
@@ -829,20 +813,15 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
       return std::make_unique<ArrayDeclExprAST>(NameLoc, Name, ElemType, ArraySize, std::vector<std::unique_ptr<ExprAST>>(), nullptr, IsImmutable);
     }
 
+    // SEM-004 (F-INIT-1, FREEZE.md §6.4): no synthesized default for ANY
+    // type, uniformly. A declaration without an initializer leaves the
+    // variable statically unassigned; DefiniteAssignmentPass (Analysis.cpp)
+    // is what catches a read before it's assigned, for every type, not just
+    // the primitives Mechanism A already covered. `guess` still has nothing
+    // to infer from here regardless -- TypeChecker::visitVarDecl raises that
+    // diagnostic ("'guess' needs an initializer to infer from.", SEM-003
+    // §11.6) against this same null-Init declaration.
     std::unique_ptr<ExprAST> Init = nullptr;
-    // `guess` is excluded here even though none of the primitive predicates
-    // below match it (same shape as a struct name) -- SynthesizeDefault()
-    // has no default for a placeholder that isn't a real type yet. Leaving
-    // Init null and HasExplicitInit false lets TypeChecker::visitVarDecl
-    // raise the real diagnostic ("'guess' needs an initializer to infer
-    // from.", §11.6) against the actual initializer-less declaration,
-    // instead of this function guessing at a default for a type that
-    // doesn't exist yet.
-    if (!Type->isGuess() &&
-        !Type->isInt() && !Type->isDouble() && !Type->isBool() && !Type->isString() &&
-        !Type->isPointer() && !Type->isNamed("ptr") && !Type->isNamed("void*") && !Type->isNull()) {
-      Init = SynthesizeDefault(Loc, Type);
-    }
     if (CurTok != ';') {
       LogErrorAt(CurLoc, "Expected ';' after variable declaration.", SLM::ErrorCategory::DECLARATION);
       return nullptr;

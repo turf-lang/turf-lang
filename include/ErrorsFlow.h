@@ -322,11 +322,32 @@ public:
 };
 // Use-before-assignment error
 class DefiniteAssignmentError : public TurfError {
+  static std::string buildHint(const std::string &Name, const std::string &TypeName,
+                                bool SuggestDefault) {
+    std::string Hint = "Make sure every path assigns to '" + Name + "' before you use it.";
+    if (SuggestDefault) {
+      // SEM-004 (§8, FREEZE.md §6.4): the mechanical migration off the
+      // removed eager-default mechanism is always the same shape, so name
+      // it directly rather than making every caller rediscover it.
+      Hint += " Or give it an explicit default right away: 'mut " + Name +
+              ": " + TypeName + " = " + TypeName + "::default();'.";
+    }
+    return Hint;
+  }
+
 public:
-  DefiniteAssignmentError(SourceLocation Loc, const std::string &Name)
+  // TypeName/SuggestDefault are optional so every pre-existing call site
+  // (this error long predates SEM-004) keeps compiling unchanged; SEM-004's
+  // own call site (Analysis.cpp) is the only one that passes them.
+  DefiniteAssignmentError(SourceLocation Loc, const std::string &Name,
+                           const std::string &TypeName = "",
+                           bool SuggestDefault = false)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Oops! You're using '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' before it has a value." + Colors::RESET,
-                  "Make sure every path assigns to '" + Name + "' before you use it.") {
+                  Colors::BRIGHT_RED + "Oops! You're using '" + Colors::CYAN + Name +
+                      Colors::BRIGHT_RED + "'" +
+                      (TypeName.empty() ? "" : " (type '" + TypeName + "')") +
+                      " before it has a value." + Colors::RESET,
+                  buildHint(Name, TypeName, SuggestDefault)) {
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
   }
 };

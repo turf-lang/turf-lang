@@ -1,4 +1,6 @@
-// Test: 3-level deep struct nesting — all fields default-initialized recursively
+// Test: 3-level deep struct nesting — all fields zero-initialized
+// recursively via explicit Outer::default() (SEM-004: no more eager
+// zero-init on a bare declaration).
 import io;
 
 import test;
@@ -18,7 +20,7 @@ struct Outer {
 }
 
 fn main(): int {
-    mut o: Outer;
+    mut o: Outer = Outer::default();
     test::assert(o.label == "", "Outer.label default empty string");
     test::assert(o.mid.score == 0.0, "Outer.mid.score default 0.0");
     test::assert(o.mid.inner.val == 0, "Outer.mid.inner.val default 0");

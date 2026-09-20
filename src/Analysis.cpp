@@ -55,6 +55,30 @@ public:
     if (auto *L = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {
       if (L->ResolvedSymbol)
         onDef(Node.getLoc(), L->ResolvedSymbol.get());
+    } else if (auto *AA = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS())) {
+      // SEM-004 (§12.6): an element write (`arr[i] = v`) counts as assigning
+      // the WHOLE array -- elements are not tracked individually, the same
+      // granularity ConstructorFieldAssignmentPass already uses for
+      // `self.<field>`. This ONLY applies when the base is a genuine
+      // fixed-size T[N] local: its storage IS the alloca (no separate
+      // pointer value gets read to compute the element address), so the
+      // write is purely a definition, same as writing a struct field. A
+      // `string`/`ptr`/`T*`/unsized-`T[]` base is representationally a
+      // pointer -- indexing it genuinely READS the pointer value stored in
+      // the base variable to compute the target address, so those must fall
+      // through to the ordinary read treatment below (required: `mut buf:
+      // string; buf[0] = 'x';` must still be E008, not a silent write
+      // through an unassigned pointer).
+      visitChild(AA->getIndex());
+      const auto *BaseVar = dynamic_cast<const VariableExprAST *>(AA->getBase());
+      const auto *BaseArrTy = (BaseVar && BaseVar->ResolvedSymbol)
+          ? dynamic_cast<const ::ArrayType *>(BaseVar->ResolvedSymbol->Type.get())
+          : nullptr;
+      if (BaseArrTy && BaseArrTy->getSize() > 0) {
+        onDef(Node.getLoc(), BaseVar->ResolvedSymbol.get());
+      } else {
+        visitChild(AA->getBase());
+      }
     } else {
       visitChild(Node.getLHS());
     }
@@ -166,13 +190,16 @@ public:
       visitChild(Init.get());
     if (Node.getInitExpr())
       visitChild(Node.getInitExpr().get());
-    // Arrays always get storage allocated — treat as defined immediately.
-    if (Node.ResolvedSymbol)
+    // SEM-004 (§12.6, FREEZE.md §6.4): storage is always zero-filled
+    // (ArrayDeclExprAST::codegen() memsets unconditionally), but that's a
+    // runtime guarantee, not a static one -- an array declared with NEITHER
+    // an init list nor a general initializer is statically unassigned, same
+    // as any other body-declared local. It only becomes "defined" here, at
+    // declaration, when an initializer was actually given; an element write
+    // (`arr[0] = 1`) is the other way to assign it, handled in
+    // visitAssignment below.
+    if ((!Node.getInitList().empty() || Node.getInitExpr()) && Node.ResolvedSymbol)
       onDef(Node.getLoc(), Node.ResolvedSymbol.get());
-  }
-
-  void visitDefaultInit(DefaultInitExprAST &Node) override {
-    (void)Node;
   }
 };
 
@@ -339,7 +366,19 @@ void DefiniteAssignmentPass::runOnCFG(CFG &Cfg,
       collectReadsAndDefs(Stmt,
         [&](SourceLocation Loc, const VariableSymbol *Sym) {
           if (AllBodyDeclared.count(Sym) && !cur.count(Sym)) {
-            DefiniteAssignmentError err(Loc, Sym->Name);
+            // SEM-004 (§8): name the type in the message, and suggest
+            // 'T::default()' specifically for a struct -- the mechanical
+            // migration this group's own breaking change calls for. Only
+            // structs actually have a callable '::default()'
+            // (ResolverCall.cpp's DefaultConstruct dispatch is gated on
+            // SymTable_.isKnownStruct()); an enum/array/generic local's
+            // fix is an ordinary explicit initializer instead, so
+            // suggesting '::default()' for those would name a construct
+            // that doesn't parse.
+            const std::string TypeName = Sym->Type ? Sym->Type->getName() : "";
+            const bool SuggestDefault =
+                Sym->Type && dynamic_cast<const TurfStructType *>(Sym->Type.get());
+            DefiniteAssignmentError err(Loc, Sym->Name, TypeName, SuggestDefault);
             err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col},
                             "declared here");
             err.raise();

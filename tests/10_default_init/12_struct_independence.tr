@@ -1,4 +1,5 @@
-// Stress test: multiple struct instances — each independently default-initialized,
+// Stress test: multiple struct instances, each independently
+// Counter::default()-initialized (SEM-004: no more eager zero-init) —
 // mutations to one don't affect the other
 import io;
 
@@ -9,8 +10,8 @@ struct Counter {
 }
 
 fn main(): int {
-    mut a: Counter;
-    mut b: Counter;
+    mut a: Counter = Counter::default();
+    mut b: Counter = Counter::default();
 
     // Both start at zero
     test::assert(a.value == 0, "a.value initially 0");

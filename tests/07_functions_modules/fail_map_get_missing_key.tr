@@ -5,7 +5,7 @@ import map::Map;
 
 import test;
 fn main(): int {
-    mut m: Map<string, int>;
+    mut m: Map<string, int> = Map::default();
     m.put("a", 1);
     m.get("nope");
     return 0;

@@ -160,9 +160,10 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   // Resolver::visitForEach ("placeholder now, refine later").
   if (DeclTy && DeclTy->isGuess()) {
     if (!Node.getInitializer()) {
-      // ParseLetStatement() deliberately never calls SynthesizeDefault()
-      // for `guess` (it isn't a real type yet), so this is the only place
-      // 'mut x: guess;' is ever caught.
+      // ParseLetStatement() leaves Init null for EVERY no-initializer
+      // declaration now (SEM-004, F-INIT-1 -- no type-specific default is
+      // ever synthesized there any more), so this is the only place
+      // 'mut x: guess;' is ever caught: nothing to infer the type from.
       reportError(Node.getLoc(), "'guess' needs an initializer to infer from.",
                   {}, "", "Missing initializer!");
       setType(&Node, nullptr);

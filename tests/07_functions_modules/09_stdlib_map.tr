@@ -7,7 +7,7 @@ import io;
 
 import test;
 fn main(): int {
-    mut m: Map<string, int>;
+    mut m: Map<string, int> = Map::default();
     m.put("a", 1);
     m.put("b", 2);
     m.put("c", 3);
@@ -29,7 +29,7 @@ fn main(): int {
 
     // Force growth past the initial capacity (8) -- a separate int-keyed
     // map, since `m` above is string-keyed.
-    mut ints: Map<int, int>;
+    mut ints: Map<int, int> = Map::default();
     mut i: int = 0;
     while i < 20 {
         ints.put(i, i * 2);
@@ -41,7 +41,7 @@ fn main(): int {
     // int -> double instantiation, exercising the double-erasure argument-
     // passing path (see 10_generic_double_erasure.tr for the dedicated,
     // narrower regression covering the exact bug this once crashed on).
-    mut prices: Map<int, double>;
+    mut prices: Map<int, double> = Map::default();
     prices.put(1, 1.5);
     prices.put(2, 2.75);
     test::assert(prices.get(1) == 1.5, "");

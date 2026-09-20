@@ -100,40 +100,40 @@ struct JsonValue {
 // ─── constructors ──────────────────────────────────────────────────────────
 
 fn JsonValue.null_value() static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Null;
     return v;
 }
 
 fn JsonValue.from_bool(b: bool) static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Bool;
     v.bool_val = b;
     return v;
 }
 
 fn JsonValue.from_number(n: double) static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Number;
     v.num_val = n;
     return v;
 }
 
 fn JsonValue.from_string(s: string) static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::String;
     v.str_val = s;
     return v;
 }
 
 fn JsonValue.new_array() static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Array;
     return v;
 }
 
 fn JsonValue.new_object() static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Object;
     return v;
 }
@@ -581,7 +581,7 @@ fn Parser.parse_object(): !JsonValue {
 // bug: this parser is meant for "parse the one JSON value a request/
 // response body contains", not for validating a whole document stream.
 fn parse(s: string): !JsonValue {
-    mut p: Parser;
+    mut p: Parser = Parser::default();
     p.s = s;
     p.pos = 0;
     p.len = strings::length(s);
