@@ -15,6 +15,7 @@ record does; `status` tracks the record, not the branch.
 | HYG-001 | Compiler hygiene and diagnostic-rendering consistency | landed | 2026-09-18 | 2026-09-18 | build headers, CFG diagnostics | [HYG-001](changes/HYG-001.md) |
 | LANG-004 | Small language and FFI ergonomics | landed | 2026-09-18 | 2026-09-18 | Parser, Resolver, TypeChecker | [LANG-004](changes/LANG-004.md) |
 | SEM-002 | Numeric semantics: representability, conversion, overflow | landed | 2026-09-19 | 2026-09-19 | TypeChecker, Codegen, diagnostics | [SEM-002](changes/SEM-002.md) |
+| SEM-003 | `guess` (initializer type inference) | landed | 2026-09-20 | 2026-09-20 | Lexer, Parser, Types, TypeChecker, symbol tables | [SEM-003](changes/SEM-003.md) |
 
 ## How to use this directory
 
