@@ -322,7 +322,7 @@ TurfTypePtr ParseType() {
       CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
       CurTok != TOK_TYPE_CHAR &&
       CurTok != TOK_TYPE_STRING && CurTok != TOK_TYPE_VOID &&
-      CurTok != TOK_PTR) {
+      CurTok != TOK_PTR && CurTok != TOK_GUESS) {
     SyntaxError(CurLoc, "Expected a type name").raise();
     return nullptr;
   }
@@ -346,6 +346,15 @@ TurfTypePtr ParseType() {
     // `ptr` is a terminal type — no generics, no arrays (for now)
     getNextToken(); // consume 'ptr'
     return TurfPtr();
+  }
+  else if (CurTok == TOK_GUESS) {
+    // `guess` is a terminal type-position placeholder (SEM-003, §11.2) —
+    // never composed with generics/arrays/pointers, exactly like `ptr`
+    // above. TypeChecker::visitVarDecl replaces it with the initializer's
+    // real type; nothing between here and there ever inspects it beyond
+    // the isGuess() checks ParseLetStatement/Resolver/TypeChecker add.
+    getNextToken(); // consume 'guess'
+    return TurfGuess();
   }
   else
     BaseName = IdentifierStr; // user-defined

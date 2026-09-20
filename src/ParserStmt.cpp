@@ -786,15 +786,21 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   SourceLocation NameLoc = CurLoc;
   getNextToken();
 
-  if (CurTok != TOK_COLON) {
-    LogErrorAt(CurLoc, "Expected ':' after variable name.", SLM::ErrorCategory::DECLARATION);
-    return nullptr;
-  }
-  getNextToken();
-
+  // SEM-003 (§11.2, FREEZE.md §6.3): omitting the ': Type' annotation
+  // entirely is defined as EXACTLY 'mut x: guess = 5;', not a separate
+  // grammar rule -- both spellings must produce the identical AST (a
+  // TurfGuess()-typed VarDeclExprAST) so TypeChecker::visitVarDecl never
+  // needs to know which spelling was used.
   SourceLocation TypeLoc = CurLoc; // points at the type token itself, for a precise caret below
-  TurfTypePtr Type = ParseType();
-  if (!Type) return nullptr;
+  TurfTypePtr Type;
+  if (CurTok == TOK_COLON) {
+    getNextToken();
+    TypeLoc = CurLoc;
+    Type = ParseType();
+    if (!Type) return nullptr;
+  } else {
+    Type = TurfGuess();
+  }
 
   // 'void' has no meaning as a variable's type (see isDisallowedVoidType's
   // doc comment for why this must be caught here rather than left to a
@@ -824,7 +830,16 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
     }
 
     std::unique_ptr<ExprAST> Init = nullptr;
-    if (!Type->isInt() && !Type->isDouble() && !Type->isBool() && !Type->isString() &&
+    // `guess` is excluded here even though none of the primitive predicates
+    // below match it (same shape as a struct name) -- SynthesizeDefault()
+    // has no default for a placeholder that isn't a real type yet. Leaving
+    // Init null and HasExplicitInit false lets TypeChecker::visitVarDecl
+    // raise the real diagnostic ("'guess' needs an initializer to infer
+    // from.", §11.6) against the actual initializer-less declaration,
+    // instead of this function guessing at a default for a type that
+    // doesn't exist yet.
+    if (!Type->isGuess() &&
+        !Type->isInt() && !Type->isDouble() && !Type->isBool() && !Type->isString() &&
         !Type->isPointer() && !Type->isNamed("ptr") && !Type->isNamed("void*") && !Type->isNull()) {
       Init = SynthesizeDefault(Loc, Type);
     }

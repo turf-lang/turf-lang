@@ -165,7 +165,8 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"produce", TOK_PRODUCE},
                                        {"run", TOK_RUN},
                                        {"as", TOK_AS},
-                                       {"unsafe", TOK_UNSAFE}};
+                                       {"unsafe", TOK_UNSAFE},
+                                       {"guess", TOK_GUESS}};
 
 /**
  * @brief True if @p Msg looks like a warning rather than a hard error.

@@ -32,7 +32,99 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
+
+namespace {
+// True if Ty is, after unwrapping any number of pointer/reference/array
+// layers, an uninstantiated generic type parameter -- i.e. built directly
+// from a generic template's own type parameter (FREEZE.md §6.1).
+// Deliberately does NOT unwrap a TurfStructType -- that is
+// containsUninstantiatedGenericParam()'s job, kept as a separate,
+// non-recursive-into-structs function below specifically so THIS function
+// can be called on a struct's own field types without risking the
+// unbounded recursion a self/mutually-referential struct field would
+// otherwise cause (see that function's comment).
+//
+// A bare `TurfGenericParamType` never actually appears here in practice:
+// Resolver::visitStructDecl() rewrites NamedType("T") -> TurfGenericParamType
+// on the STRUCT DECLARATION AST NODE's own field list (Node.getFieldsMut()),
+// but GlobalSymbolTable's registered TurfStructType for that struct is a
+// SEPARATE object, built from a snapshot of the fields at PARSE time
+// (ParserDecl.cpp, before that substitution ever runs) and never updated
+// afterward -- so a generic struct's globally-registered field types
+// permanently stay plain NamedType(paramName), e.g. List<T>'s `data: T*`
+// is TurfPointerType(NamedType("T")) here, not TurfPointerType
+// (TurfGenericParamType("T")). The NamedType branch below is therefore the
+// one that actually fires for every real-world generic struct field;
+// checking for TurfGenericParamType directly is defensive only, in case a
+// future architectural change (e.g. TYPE-002 monomorphization) changes
+// which of the two representations reaches this specific lookup path.
+bool isOrWrapsGenericParam(const TurfType *Ty) {
+  if (!Ty)
+    return false;
+  if (dynamic_cast<const TurfGenericParamType *>(Ty))
+    return true;
+  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty))
+    return isOrWrapsGenericParam(PT->getPointee().get());
+  if (const auto *AT = dynamic_cast<const ::ArrayType *>(Ty))
+    return isOrWrapsGenericParam(AT->getElementTypePtr().get());
+  if (const auto *NT = dynamic_cast<const NamedType *>(Ty)) {
+    // Resolver::validateNamedType() already guarantees, for every field of
+    // an already-declared struct, that a bare field NamedType's name is
+    // exactly one of: a known primitive, a registered struct/enum/error
+    // type, or one of the enclosing struct's OWN generic type parameters
+    // (anything else is already a compile error at struct-declaration
+    // time, long before a `guess` inference could ever see it) -- so a
+    // name that is neither a primitive nor globally registered can only be
+    // the third case.
+    static const std::unordered_set<std::string> KnownPrimitives = {
+        "int", "int32", "double", "bool", "char", "string", "void", "null", "ptr", "void*"};
+    if (KnownPrimitives.count(NT->getName()))
+      return false;
+    if (GlobalSymbolTable && GlobalSymbolTable->LookupType(NT->getName()))
+      return false;
+    return true;
+  }
+  return false;
+}
+
+// True if Ty is an uninstantiated generic template instance: either the
+// bare TurfGenericParamType itself (pointer/array-wrapped or not), or a
+// struct at least one of whose OWN fields is declared directly against a
+// type parameter (e.g. List<T>'s `data: T*`, ParserDecl.cpp's "fields use
+// TurfGenericParamType" comment). Used by SEM-003's `guess` inference to
+// reject `mut l = List::default();` (§11.6): the call's own type is a bare
+// NamedType("List") with no type arguments at all, and even once resolved
+// to List's registered (type-erased) TurfStructType, that struct's fields
+// still carry the raw TurfGenericParamType('T') -- there is genuinely
+// nothing to infer T from, unlike an ordinary `Point::default()` whose
+// resolved StructTy has no generic-typed fields at all.
+//
+// Checks each field with isOrWrapsGenericParam() -- NOT a recursive call
+// to this function -- and deliberately does not descend into a nested
+// TurfStructType field's OWN fields at all. A field of struct type only
+// says something about THAT struct's genericity, and TYPE-001 explicitly
+// permits a struct to reference itself (or another struct that references
+// it back) through a pointer field -- a linked-list node's `next: Node*`
+// is the textbook case. Recursing into struct fields transitively here,
+// unlike the bounded pointer/array unwrapping above, has no depth limit
+// tied to the type's own structure, so it would stack-overflow on exactly
+// that ordinary, already-legal shape the moment it was named as a
+// `guess`-inferred variable's default-constructor target.
+bool containsUninstantiatedGenericParam(const TurfType *Ty) {
+  if (!Ty)
+    return false;
+  if (isOrWrapsGenericParam(Ty))
+    return true;
+  if (const auto *ST = dynamic_cast<const TurfStructType *>(Ty)) {
+    for (const auto &F : ST->getFields())
+      if (isOrWrapsGenericParam(F.Type.get()))
+        return true;
+  }
+  return false;
+}
+} // namespace
 
 void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   if (Node.isImmutable() && !Node.hasExplicitInit()) {
@@ -50,6 +142,102 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
   }
 
   TurfTypePtr DeclTy = Node.getTypePtr();
+
+  // SEM-003 (§11.8): `guess` is resolved HERE, not the Parser. ParseType()/
+  // ParseLetStatement() only ever produce the TurfGuess() placeholder (for
+  // both spellings, §11.2); Resolver::visitVarDecl declares the variable
+  // with that same placeholder (it does no type inference itself -- see
+  // its own comment). Inference happens now, from the initializer's type
+  // just computed above, and is written back onto BOTH the AST node
+  // (setTypePtr(), which Codegen reads directly) and the declaration's own
+  // VariableSymbol (ResolvedSymbol->Type) so every later reference to this
+  // variable -- resolved by the Resolver to the SAME shared_ptr, but not
+  // yet visited by the TypeChecker at this point in the file, since the
+  // Resolver finishes the whole AST before the TypeChecker starts --
+  // reads the real, concrete type once the TypeChecker does reach it.
+  // Mirrors the pre-existing NamedType -> TurfStructType fixup immediately
+  // below, and ForEachExprAST's loop-variable placeholder in
+  // Resolver::visitForEach ("placeholder now, refine later").
+  if (DeclTy && DeclTy->isGuess()) {
+    if (!Node.getInitializer()) {
+      // ParseLetStatement() deliberately never calls SynthesizeDefault()
+      // for `guess` (it isn't a real type yet), so this is the only place
+      // 'mut x: guess;' is ever caught.
+      reportError(Node.getLoc(), "'guess' needs an initializer to infer from.",
+                  {}, "", "Missing initializer!");
+      setType(&Node, nullptr);
+      return;
+    }
+
+    TurfTypePtr InitTy = getType(Node.getInitializer());
+    // A general expression's type is never auto-resolved from NamedType ->
+    // TurfStructType the way a VarDecl's own annotation is (the block just
+    // below only ever runs against DeclTy) -- `StructName::default()`
+    // (TypeCheckerCall.cpp's DefaultConstruct branch) sets its own type to
+    // a bare NamedType(StructName), so it must be resolved here too before
+    // the generic-template check and the ordinary mismatch/representability
+    // checks below can see the real struct type.
+#ifndef TYPECHECKER_NO_ERRORS
+    if (auto *InitNT = dynamic_cast<const NamedType *>(InitTy.get())) {
+      if (GlobalSymbolTable) {
+        if (auto InitStructTy = GlobalSymbolTable->LookupType(InitNT->getName()))
+          InitTy = InitStructTy;
+      }
+    }
+#endif
+
+    if (!InitTy) {
+      // The initializer's own visit already reported whatever is wrong
+      // with it -- don't cascade a second, less specific error on top.
+      setType(&Node, nullptr);
+      return;
+    }
+    if (InitTy->isVoid()) {
+      reportError(Node.getLoc(), "Cannot infer a type from a 'void' expression.",
+                  {},
+                  "'guess' needs a value to infer a type from -- give '" +
+                      Node.getName() + "' an explicit type annotation instead.",
+                  "Nothing to infer!");
+      setType(&Node, nullptr);
+      return;
+    }
+    if (InitTy->isNull()) {
+      reportError(Node.getLoc(), "Cannot infer a type from 'null'.",
+                  {},
+                  "Annotate the reference type explicitly, e.g. 'mut " +
+                      Node.getName() + ": &?Point = null;'.",
+                  "Nothing to infer!");
+      setType(&Node, nullptr);
+      return;
+    }
+    if (containsUninstantiatedGenericParam(InitTy.get())) {
+      reportError(Node.getLoc(),
+                  "Cannot infer the type arguments of a generic type.",
+                  {},
+                  "'guess' has nothing to infer the type argument from here "
+                  "-- annotate it explicitly instead, e.g. 'mut " +
+                      Node.getName() + ": List<int> = ...;'.",
+                  "Nothing to infer!");
+      setType(&Node, nullptr);
+      return;
+    }
+
+    // §11.6's whole defaulting story ("integer -> int, float -> double, ...,
+    // the default is chosen first, THEN representability is checked")
+    // requires no extra code here: every literal's own visit (visitNumber/
+    // visitBool/visitChar/visitString) already assigns that same default
+    // type unconditionally, regardless of any destination -- InitTy IS
+    // already that default. Setting DeclTy = InitTy and falling through to
+    // the ordinary mismatch/checkLiteralRepresentable() block below (they
+    // now trivially agree) performs the representability check in exactly
+    // that order for free.
+    DeclTy = InitTy;
+    Node.setTypePtr(InitTy);
+    if (Node.ResolvedSymbol) {
+      Node.ResolvedSymbol->Type = InitTy;
+      Node.ResolvedSymbol->WasGuessInferred = true;
+    }
+  }
 
 #ifndef TYPECHECKER_NO_ERRORS
   // Resolve NamedType -> TurfStructType

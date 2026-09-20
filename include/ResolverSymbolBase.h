@@ -85,6 +85,16 @@ struct VariableSymbol {
   /// declareVariable() call site (ordinary locals, loop vars, catch-bound
   /// error names, …) is unaffected.
   bool                   IsParameter = false;
+  /// True once TypeChecker::visitVarDecl has replaced this symbol's `guess`
+  /// placeholder Type with its inferred concrete type (SEM-003, §11.8).
+  /// Declared here rather than derived from Type itself because by the
+  /// time anything reads this flag, Type is already the concrete inferred
+  /// type -- indistinguishable from an explicitly-annotated variable of the
+  /// same type. Lets a later assignment type-mismatch note (visitAssignment,
+  /// TypeCheckerExpr.cpp) say "'x' was inferred as 'int' here" instead of
+  /// the generic "declared here" specifically for a `guess`-inferred
+  /// variable, per §11.6's own worked example.
+  bool                   WasGuessInferred = false;
 
   VariableSymbol() = default;
   VariableSymbol(std::string Name, TurfTypePtr Type,

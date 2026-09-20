@@ -85,6 +85,18 @@ public:
   virtual bool isVoid()   const { return false; }
   virtual bool isNull()   const { return false; }
 
+  /// True for the `guess` placeholder (SEM-003) -- the type ParseType()
+  /// produces for `: guess` or an omitted annotation, before the
+  /// TypeChecker replaces it with the initializer's real type
+  /// (VarDeclExprAST::setTypePtr()). A `guess`-typed node reaching Codegen
+  /// would mean the TypeChecker skipped inference (a compiler bug); unlike
+  /// F-GEN-2's TurfGenericParamType, this has no dedicated Codegen assert
+  /// because a `guess` that failed to resolve always already raised a hard
+  /// TypeChecker error first, and main.cpp aborts before Codegen runs on
+  /// any errored program (see main.cpp's own comment above its TypeChecker
+  /// pass, "Codegen must never run on" an errored compile).
+  virtual bool isGuess()  const { return false; }
+
   /// True for any numeric type (int, double, bool).
   virtual bool isNumeric() const { return isInt() || isDouble() || isBool(); }
 
@@ -272,6 +284,32 @@ class VoidType : public TurfType {
 public:
   std::string getName() const override { return "void"; }
   bool isVoid() const override { return true; }
+};
+
+// ─── GuessType (SEM-003) ────────────────────────────────────────────────────
+
+/**
+ * @brief Placeholder type for `: guess` / an omitted variable-declaration
+ * annotation (ARCHITECTURE_OVERHAUL.md §11).
+ *
+ * ParseType() and ParseLetStatement() produce this singleton for both
+ * spellings (`mut x: guess = 5;` and `mut x = 5;`) so they parse to the
+ * identical AST shape (§11.2). It is a pure placeholder, never a real type
+ * for anything downstream of the TypeChecker: `TypeChecker::visitVarDecl`
+ * infers the real type from the (already-checked) initializer and
+ * overwrites both `VarDeclExprAST::Type` (via `setTypePtr()`) and the
+ * declaration's own `VariableSymbol::Type` in place -- the same
+ * "placeholder now, refine later" contract `ForEachExprAST`'s loop
+ * variable and a plain-variable-declaration's `NamedType` already use
+ * (see `Resolver::visitForEach`'s and `TypeChecker::visitVarDecl`'s own
+ * comments). `Resolver::visitVarDecl` declares the variable with this
+ * placeholder type -- never a null type -- so no other Resolver code path
+ * needs to special-case an unset type.
+ */
+class GuessType : public TurfType {
+public:
+  std::string getName() const override { return "guess"; }
+  bool isGuess() const override { return true; }
 };
 
 // ─── Null type ────────────────────────────────────────────────────────────────
@@ -805,6 +843,8 @@ TurfTypePtr TurfPtr();
 /// The type of `err` inside `recover as err run { ... }` -- see
 /// `AnyErrorType`'s doc comment.
 TurfTypePtr TurfAnyError();
+/// The `guess` placeholder singleton (SEM-003) -- see `GuessType`'s doc comment.
+TurfTypePtr TurfGuess();
 /** @} */
 
 // ─── Array helper functions ───────────────────────────────────────────────────

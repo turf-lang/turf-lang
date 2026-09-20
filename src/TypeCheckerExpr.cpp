@@ -453,8 +453,17 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
     if (!typesCompatible(RhsTy.get(), LhsTy.get())) {
       std::vector<RelatedLocation> Related;
       if (LHSIsBareVariable && LHSVar && LHSVar->ResolvedSymbol) {
+        // SEM-003 (§11.6's worked example): a `guess`-inferred variable's
+        // declaration doesn't show its type in the source the way an
+        // explicit annotation does, so the generic "declared here" note
+        // would leave a reader to go re-read the initializer themselves --
+        // name the inferred type directly instead.
+        std::string Note = LHSVar->ResolvedSymbol->WasGuessInferred
+            ? "'" + LHSVar->getName() + "' was inferred as '" +
+                  LhsTy->getName() + "' here"
+            : "declared here";
         Related.push_back({toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
-                           "declared here"});
+                           Note});
       }
       reportError(Node.getLoc(),
                   "Cannot assign value of type '" + RhsTy->getName() +
