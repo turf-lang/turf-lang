@@ -169,7 +169,15 @@ fn<T> Pool.track(item: T): void {
         } else {
             self.cap = self.cap * 2;
         }
-        immut byteSize: int = self.cap * 8;
+        // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure. In
+        // practice `Pool<T>` is always instantiated at a pointer type (see
+        // free_pool()'s own comment below -- a pool tracks allocations, so
+        // T is always some *T/void*), and every pointer is 8 bytes anyway,
+        // so this was latent rather than live -- fixed for correctness and
+        // consistency with every other collection's identical fix
+        // (list.tr/stack.tr/queue.tr/set.tr/map.tr) rather than because a
+        // live corruption was reproduced here.
+        immut byteSize: int = self.cap * sizeof(T);
         if self.items == null {
             self.items = malloc(byteSize) to T*;
         } else {

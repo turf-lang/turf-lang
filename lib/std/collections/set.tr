@@ -72,8 +72,12 @@ fn<T> Set.add(item: T): void {
       self.cap = self.cap * 2;
     }
 
-    // In Type Erasure, all T are 64 bits (pointers, int, double).
-    immutable byteSize: int = self.cap * 8;
+    // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure -- wrong for
+    // a T over 8 bytes, which under-allocated this buffer and silently
+    // overran it a few adds later. sizeof(T) is correct per instantiation
+    // (monomorphized, TYPE-002) -- see list.tr's identical fix, S14b, for
+    // the first instance of this.
+    immutable byteSize: int = self.cap * sizeof(T);
 
     if (self.items == null) {
       self.items = mem::malloc(byteSize) to T*;

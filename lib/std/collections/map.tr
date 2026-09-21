@@ -88,15 +88,23 @@ fn<K, V> Map.put(key: K, value: V): void {
       self.cap = self.cap * 2;
     }
 
-    // In Type Erasure, all K/V are 64 bits (pointers, int, double).
-    immutable byteSize: int = self.cap * 8;
+    // TYPE-002 (S15/D3): was one shared `self.cap * 8` under Type Erasure,
+    // used for BOTH arrays -- wrong the moment K and V aren't both exactly
+    // 8 bytes (and wrong independently of each other even when neither is,
+    // since K and V can be different sizes). Two separate byte sizes now:
+    // sizeof(K) for keys, sizeof(V) for values. Sharing one `byteSize`
+    // would silently under- or over-allocate whichever of the two arrays
+    // has the larger element -- see list.tr's identical single-array fix,
+    // S14b, for the first instance of this class of bug.
+    immutable keyByteSize: int = self.cap * sizeof(K);
+    immutable valueByteSize: int = self.cap * sizeof(V);
 
     if (self.keys == null) {
-      self.keys = mem::malloc(byteSize) to K*;
-      self.values = mem::malloc(byteSize) to V*;
+      self.keys = mem::malloc(keyByteSize) to K*;
+      self.values = mem::malloc(valueByteSize) to V*;
     } else {
-      self.keys = mem::realloc(self.keys, byteSize) to K*;
-      self.values = mem::realloc(self.values, byteSize) to V*;
+      self.keys = mem::realloc(self.keys, keyByteSize) to K*;
+      self.values = mem::realloc(self.values, valueByteSize) to V*;
     }
   }
 

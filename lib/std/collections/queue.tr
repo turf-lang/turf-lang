@@ -31,13 +31,18 @@ fn<T> Queue.enqueue(item: T): void {
       }
       self.head = 0;
     } else {
-      // Buffer is full and already at front — grow it
+      // Buffer is full and already at front — grow it.
+      // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure -- wrong
+      // for a T over 8 bytes, which under-allocated this buffer and
+      // silently overran it a few enqueues later. sizeof(T) is correct per
+      // instantiation (monomorphized, TYPE-002) -- see list.tr's identical
+      // fix, S14b, for the first instance of this.
       if (self.cap == 0) {
         self.cap = 8;
-        self.data = mem::malloc(self.cap * 8) to T*;
+        self.data = mem::malloc(self.cap * sizeof(T)) to T*;
       } else {
         self.cap = self.cap * 2;
-        self.data = mem::realloc(self.data, self.cap * 8) to T*;
+        self.data = mem::realloc(self.data, self.cap * sizeof(T)) to T*;
       }
     }
   }

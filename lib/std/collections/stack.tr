@@ -21,8 +21,15 @@ fn<T> Stack.push(item: T): void {
       self.cap = self.cap * 2;
     }
 
-    // Type Erasure: all T are 64-bit values (int, double, pointers)
-    immutable byteSize: int = self.cap * 8;
+    // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure, where every
+    // T was assumed to fit in one uniform 8-byte slot -- wrong for a T over
+    // 8 bytes (a real by-value struct element), which under-allocated this
+    // buffer and silently overran it a few pushes later (glibc
+    // "realloc(): invalid next size" once the heap's own metadata got
+    // corrupted). sizeof(T) is correct per instantiation (monomorphized,
+    // TYPE-002) -- see list.tr's identical fix, S14b, for the first
+    // instance of this.
+    immutable byteSize: int = self.cap * sizeof(T);
 
     if (self.data == null) {
       self.data = mem::malloc(byteSize) to T*;
