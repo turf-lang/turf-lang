@@ -203,6 +203,12 @@ public:
         TypeParams(std::move(TypeParams)), IsStaticDecl(IsStaticDecl) {}
 
   const std::string &getName() const { return Name; }
+  /// TYPE-002 (S12a): renames a monomorphized clone to its unique,
+  /// collision-free internal name (Monomorphize::instantiatedDeclName())
+  /// BEFORE it is (re-)resolved -- see drainFreeFunctionRequests()'s doc
+  /// comment for why this must happen before Resolver::resolve() runs on
+  /// the clone. Never used on an ordinary (non-cloned) declaration.
+  void setName(std::string N) { Name = std::move(N); }
   bool isStaticDecl() const { return IsStaticDecl; }
   const SourceLocation &getLoc() const { return Loc; }
   const SourceLocation &getNameLoc() const { return NameLoc; }
@@ -224,6 +230,17 @@ public:
   /// Mutable return-type setter, used alongside getParamsMut() for the same
   /// generic-parameter substitution.
   void setReturnType(TurfTypePtr T) { ReturnType = std::move(T); }
+  /// TYPE-002 (S12a): once drainFreeFunctionRequests() has substituted
+  /// every TurfGenericParamType in this clone's Params/ReturnType/body
+  /// with a concrete type, this is no longer generic -- clearing
+  /// TypeParams makes that true structurally, not just in effect: it stops
+  /// Resolver::visitFuncDef()'s own substituteTypeParams() call from
+  /// re-applying the (now-inapplicable) name->TurfGenericParamType
+  /// transform when the clone is re-resolved, and is what sub-pass
+  /// 2c/3a/3b's template-skip check (main.cpp) uses to tell a genuine,
+  /// still-uninstantiated template apart from a finished clone. Never used
+  /// on an ordinary (non-cloned) declaration.
+  void clearTypeParams() { TypeParams.clear(); }
 
   /// Populated by the Resolver after registering the function symbol.
   /// clone() returns a fresh node, so this is nullptr in cloned trees.
@@ -396,6 +413,10 @@ public:
   const std::string &getName() const { return Name; }
   const TurfType *getElementType() const { return ElementType.get(); }
   TurfTypePtr getElementTypePtr() const { return ElementType; }
+  /// TYPE-002 (S12a): lets the monomorphizer rewrite a generic function
+  /// body's own `T[N] arr;` declaration to a concrete element type on a
+  /// clone -- mirrors VarDeclExprAST::setTypePtr()'s existing contract.
+  void setElementTypePtr(TurfTypePtr T) { ElementType = std::move(T); }
   int getSize() const { return Size; }
   const std::vector<std::unique_ptr<ExprAST>> &getInitList() const {
     return InitList;

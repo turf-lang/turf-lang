@@ -907,13 +907,37 @@ static int runCompilerMain(int argc, char **argv) {
         // change whenever the flag is absent -- MonoCollector is never
         // attached, so every record() call site stays a no-op.
         Monomorphize::InstantiationCollector MonoCollector;
-        if (opts.DumpInstantiations)
-          PreTC.setMonomorphizationCollector(&MonoCollector);
+        // TYPE-002 (S12a): always attached now, not just under
+        // --dump-instantiations -- the collector's record() calls are what
+        // SEED sub-pass 2b.5's drain below; S11b's opt-in gate only made
+        // sense while nothing consumed the worklist.
+        PreTC.setMonomorphizationCollector(&MonoCollector);
         g_recoverActive = true;
         if (setjmp(g_recoverJmp) == 0) {
           PreTC.checkAll(PrePassASTs);
         } else {
           PreTCClean = false;
+        }
+        // ── Pre-pass sub-pass 2b.5: Monomorphize ──────────────────────────
+        // U-4's answer (U-4', docs/development/changes/TYPE-002.md), acted
+        // on here: drains every FreeFunction-kind instantiation request
+        // sub-pass 2b's TypeChecker run just seeded, to a fixed point
+        // (clone/substitute/re-resolve/re-typecheck/register each one,
+        // appending it to PrePassASTs so 2c/3a/3b below codegen it like any
+        // other declaration -- see drainFreeFunctionRequests()'s own doc
+        // comment, Monomorphize.h). Gated on PreTCClean for the identical
+        // reason 2c/3a/3b already are just below: a program the ordinary
+        // TypeChecker already rejected has no business being monomorphized
+        // either (the SAME error would just recur, confusingly, inside a
+        // clone). Method/Struct-kind requests are left on the worklist,
+        // undrained -- S12b/S13a.
+        if (PreTCClean) {
+          g_recoverActive = true;
+          if (setjmp(g_recoverJmp) == 0) {
+            Monomorphize::drainFreeFunctionRequests(PrePassASTs, MonoCollector, PreR);
+          } else {
+            PreTCClean = false;
+          }
         }
         if (opts.DumpInstantiations)
           MonoCollector.report(std::cerr);
@@ -983,6 +1007,32 @@ static int runCompilerMain(int argc, char **argv) {
       // We set a global flag to stop after prototype creation.
       g_protoOnlyPass = true;
       for (auto &AST : PrePassASTs) {
+        // TYPE-002 (S12a): a FuncDefExprAST that STILL has a non-empty
+        // TypeParams list AND is NOT struct-bound (no "self" first param)
+        // is an uninstantiated FREE-function template -- the monomorphizer
+        // (sub-pass 2b.5, above) only ever appends a fully-concrete CLONE
+        // to PrePassASTs (TypeParams cleared) for exactly this population,
+        // and rewrites every call site to it; the template itself is never
+        // meant to reach Codegen with an open TurfGenericParamType anywhere
+        // in it (F-GEN-2, INV-GEN-1, planned). A STRUCT-BOUND generic
+        // (method or constructor) is deliberately excluded from this skip:
+        // S12a's drain leaves it un-monomorphized on purpose
+        // (drainFreeFunctionRequests()'s own doc comment, Monomorphize.cpp,
+        // explains why -- self carries no type argument, so a struct
+        // method's body can't be correctly substituted without S13a's
+        // per-instantiation struct layout) -- it still needs the ORDINARY,
+        // erasure-era codegen path this session, unchanged. Getting this
+        // condition wrong in either direction is exactly the kind of bug
+        // this group's own risk list warned about: too broad (plain
+        // `!TypeParams.empty()`) silently drops every generic struct
+        // method's codegen with no replacement, producing the identical
+        // "LLVM function not found" ICE this fix itself was written to
+        // chase down; too narrow re-introduces the double-codegen risk
+        // INV-CG-1 already names.
+        if (auto *FD = dynamic_cast<FuncDefExprAST *>(AST.get()))
+          if (!FD->getTypeParams().empty() &&
+              (FD->getParams().empty() || FD->getParams()[0].Name != "self"))
+            continue;
         if (dynamic_cast<FuncDefExprAST *>(AST.get()) ||
             dynamic_cast<EnumDeclExprAST *>(AST.get()) ||
             dynamic_cast<ExternFuncDeclExprAST *>(AST.get()) ||
@@ -1014,6 +1064,12 @@ static int runCompilerMain(int argc, char **argv) {
         for (auto &AST : PrePassASTs) {
           if (dynamic_cast<StructDeclExprAST *>(AST.get()))
             continue;
+          // TYPE-002 (S12a): same template-skip as sub-pass 3a above --
+          // struct-bound generics deliberately excluded, see that comment.
+          if (auto *FD = dynamic_cast<FuncDefExprAST *>(AST.get()))
+            if (!FD->getTypeParams().empty() &&
+                (FD->getParams().empty() || FD->getParams()[0].Name != "self"))
+              continue;
           // `export immut` constants have no real LLVM storage at all --
           // Resolver Pass 1 (hoistExportedConstant) already extracted their
           // literal value into the symbol table, and every reference site

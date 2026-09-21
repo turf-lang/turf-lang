@@ -386,6 +386,9 @@ public:
 
   const SourceLocation &getLoc() const { return Loc; }
   TurfTypePtr getTypeArg() const { return TypeArg; }
+  /// TYPE-002 (S12a): lets the monomorphizer rewrite `sizeof(T)` to
+  /// `sizeof(int)` (etc.) on a clone -- mirrors VarDeclExprAST::setTypePtr().
+  void setTypeArg(TurfTypePtr T) { TypeArg = std::move(T); }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitSizeOf(*this); }
@@ -527,6 +530,9 @@ public:
 
   const TurfType *getDestType() const { return DestType.get(); }
   TurfTypePtr getDestTypePtr() const { return DestType; }
+  /// TYPE-002 (S12a): lets the monomorphizer rewrite `x to T` to `x to int`
+  /// (etc.) on a clone -- mirrors VarDeclExprAST::setTypePtr().
+  void setDestType(TurfTypePtr T) { DestType = std::move(T); }
   const ExprAST *getOperand() const { return Operand.get(); }
 
   llvm::Value *codegen() override;

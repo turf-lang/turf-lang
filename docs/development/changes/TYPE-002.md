@@ -5,7 +5,7 @@
 | **Status** | in-progress |
 | **Dates** | started 2026-09-21 · landed — |
 | **Commits** | (added at the end of each sub-session) |
-| **Sessions** | 2 of 8 (S11a, S11b done; S12a, S12b, S13a, S13b, S14a, S14b remain) |
+| **Sessions** | 3 of 8 (S11a, S11b, S12a done; S12b, S13a, S13b, S14a, S14b remain) |
 | **Depends on** | TYPE-001 (landed 2026-09-18), SEM-001 (landed 2026-09-18); strongly benefits from OPT-001 (landed 2026-09-18) |
 | **Frozen decisions relied on** | F-GEN-1, F-GEN-2, F-GEN-3, F-OP-1 (unaffected but adjacent — see §9.8) |
 
@@ -61,14 +61,30 @@ is a single opaque pointer; the `int` `5` is stored as the raw pointer value
 `0x5` via `CreateIntToPtr`, never dereferenced, and read back via
 `CreatePtrToInt`. `GlobalSymbolTable` only ever holds `"Box"`.
 
-### New behaviour (target — not yet implemented)
+### New behaviour (struct case still target-only; free-function case landed S12a)
 
-Same program, same output. But `Box<int>` compiles to its own,
+Same program, same output. `Box<int>` will compile to its own,
 fully-specialized `TurfStructType` with a real `i64` field (not a pointer),
 registered under an extended mangled name; a second `Box<Point>`
 instantiation elsewhere in the same program gets its own, independent
-layout and compiled methods. `TurfGenericParamType` never reaches Codegen
-(INV-GEN-1).
+layout and compiled methods (S13a/S13b, not yet true). `TurfGenericParamType`
+never reaches Codegen (INV-GEN-1, still `planned` — true today only for the
+FREE-function subset S12a lands; a struct-bound generic still erases, on
+purpose, until S13a).
+
+**What's real as of S12a**, for a genuinely free function (no `self`):
+```turf
+fn<T> identity(x: T): T { return x; }
+fn main(): int {
+    immut a: int = identity(42);
+    immut b: double = identity(3.5);
+    ...
+```
+compiles `identity<int>` and `identity<double>` to two separate, real LLVM
+functions (verified live: `turf_identity_gen1_int_int` and
+`turf_identity_gen1_double_double`, zero `inttoptr`/`ptrtoint` in either) —
+not the shared, erased body every generic function still got before this
+session.
 
 ### Is this breaking?
 
@@ -141,6 +157,88 @@ struct codegen (sub-pass 2c). See U-4′ below for the full justification.
 - `tests/38_monomorphization/README.md` — the folder exists; empty of
   `.tr` files until S12a (nothing to test yet).
 
+**S12a made free-function instantiation real** (behaviour change, gated
+entirely on whether a call is to a genuinely free — non-`self` — generic
+function; every existing generic STRUCT/METHOD call is bit-for-bit
+unaffected, still erasure, still S12b/S13a). Verified live end to end:
+`identity<int>`/`identity<double>` compile to two separate real functions
+with zero `inttoptr`/`ptrtoint`; `sizeof(T)` inside a generic free function
+now reports the true size (8 for `int`/`double`, 1 for `bool`); a nested
+generic call (`outer<T>` calling `inner<T>`) discovers and drains the
+nested instantiation correctly; a genuinely unbounded recursive generic
+(`fn<T> wrap(x: &T): int { return wrap(&x); }`) is rejected with E079, not
+run to memory exhaustion. Full suite green at 680/680 (676 + 4 new tests)
+at both the default and `-O2` optimization levels; `lib/std`/`showcase`/
+prelude sweep clean.
+
+**What S12a added, concretely:**
+- `Monomorphize::substituteConcreteTypes()` — S11a's plan said to
+  "generalize `substituteTypeParams()`" for this; on actually building it,
+  S11b's own `substituteReturnType()` (TypeCheckerCall.cpp) turned out to
+  already BE that concrete-map walk, complete with the reference-before-
+  pointer ordering fix. Relocated here as the real, callable, non-static
+  entry point; `TypeCheckerCall.cpp`'s own `substituteReturnType()` is now
+  a one-line delegating wrapper, so its existing call sites and behaviour
+  are unchanged, verbatim. See *Removed assumptions*.
+- `Monomorphize::instantiatedDeclName()` — the pure function of (base name,
+  type arguments) that names a clone (e.g. `identity` + `[int]` →
+  `identity_gen1_int`). Used as BOTH the clone's `FuncDefExprAST::Name`
+  and (via the ordinary, UNMODIFIED `mangledName()`) its LLVM symbol —
+  S11b's `ResolverFunctionSymbol::mangledNameForInstantiation()` is
+  retired, unused; renaming the declaration once, up front, turned out
+  simpler than teaching every Codegen call site a second mangling
+  function. The method stays in `ResolverSymbolBase.h` as dead code this
+  session (harmless; removing it is a trivial follow-up, not urgent).
+- The body type-substitution walker (`substituteTypesInBody()`,
+  `Monomorphize.cpp`, anonymous namespace) — walks a freshly-cloned
+  function body substituting `TurfGenericParamType`/`NamedType`
+  occurrences on the four node kinds that carry an explicit, parse-time
+  `TurfTypePtr` (`VarDeclExprAST`, `CastExprAST`, `SizeOfExprAST`,
+  `ArrayDeclExprAST` — each gained a new setter, `ASTDecl.h`/`ASTExpr.h`,
+  for this). Every other node kind is walked purely for recursion,
+  mirroring `ASTDiff.h`'s `CollectAllNodeIDsInternal()`. See *Known
+  pitfalls* for the risk class this carries and why it's an accepted one.
+- `FuncDefExprAST::setName()`/`::clearTypeParams()` (`ASTDecl.h`) — lets a
+  clone be renamed and marked "no longer generic" before it's re-resolved.
+- `Monomorphize::drainFreeFunctionRequests()` — the driver. Builds a
+  declaration registry `(SourceModule, Name) -> FuncDefExprAST*` by walking
+  `PrePassASTs` and recursing into every `ModuleImportExprAST`'s own body
+  (confirmed live: an import's body is a real, walkable `BlockExprAST`
+  subtree, not just a symbol-table registration); drains the worklist to a
+  fixed point (a nested generic call discovered while re-typechecking one
+  clone lands on the SAME worklist this loop is already draining); for
+  each FreeFunction-kind entry: **skips it (leaves it recorded, undrained)
+  if the declaration is struct-bound** (`Params[0].Name == "self"` —
+  covers both ordinary methods and a constructor called via
+  `Box::new(...)`, which resolves through this same free-function path —
+  see *Removed assumptions*, this was found live, not anticipated);
+  otherwise clones, substitutes Params/ReturnType/body, renames, clears
+  `TypeParams`, re-resolves via `Resolver::resolve()` (the SAME `Resolver`
+  instance that already ran `resolveAll()` over the whole program — its
+  single-node, Pass-2-only entry point, reused rather than a new one built
+  — this was this group's #1 named risk, S11a's plan, and turned out to be
+  exactly this reusable already), re-typechecks with a custom error
+  handler that captures a failure and re-raises it anchored at the
+  instantiation site with a `withRelated()` note at the template
+  declaration (§9.5's "where errors are reported" — see *Known pitfalls*
+  for why this mechanism currently has very little to actually catch),
+  appends the clone to `PrePassASTs` (picked up by the ordinary,
+  UNMODIFIED sub-pass 2c/3a/3b codegen loops — no Codegen change needed
+  for the free-function case at all), and rewrites every requesting call
+  site's `ResolvedCallTarget` to the clone's own symbol.
+- `main.cpp` sub-pass 2b.5 now actually calls
+  `drainFreeFunctionRequests()`, gated on `PreTCClean` (same reason 2c/3a/
+  3b already are). The collector is now attached UNCONDITIONALLY (not just
+  under `--dump-instantiations` — S11b's opt-in gate only made sense while
+  nothing consumed the worklist).
+- Sub-pass 3a/3b's codegen loops gained a template-skip guard: a
+  `FuncDefExprAST` with non-empty `TypeParams` AND no `self`-first-param is
+  skipped (its own clone, not itself, gets codegenned) — **precisely** this
+  population, not "any generic decl": getting this too broad silently
+  drops every struct-bound generic's codegen with no replacement,
+  reproducing the exact "LLVM function not found" ICE this fix chases (see
+  *Removed assumptions*).
+
 ## Runtime changes
 
 None. Eventually none in this group either — TYPE-002 is what makes
@@ -154,12 +252,17 @@ anything else).
 
 ## New invariants
 
-None moved to `holds` this session. `INVARIANTS.md` already carries
-`INV-GEN-1` and `INV-TYPE-2` as `planned — TYPE-002`, and `INV-TEST-1` as
+None moved to `holds` this session — `INV-GEN-1` is still `planned` even
+though S12a's free-function clones already individually satisfy it (a
+partial, undeclared property isn't the same as the compiler-wide guarantee
+the invariant names; that only becomes true, and gets a debug-build
+assertion, in S14a). `INVARIANTS.md` already carries `INV-GEN-1` and
+`INV-TYPE-2` as `planned — TYPE-002`, and `INV-TEST-1` as
 `planned — TYPE-002's tests`; `INV-CG-1` (`planned`) is directly relevant to
-U-4′ below. None move to `holds` until S14a/S14b actually build the
-enforcing mechanism. `E079` (a new *diagnostic*, not an invariant) is
-registered but dormant — see *Compiler architecture* above.
+U-4′ below. `E079` (a new *diagnostic*, not an invariant) is registered and,
+as of S12a, actually enforced — verified live (see *Compiler architecture*
+above) — but it guards a total-instantiation-count approximation, not the
+literal chain-depth measurement §9.5 describes; see *Known pitfalls*.
 
 ## Removed assumptions
 
@@ -226,6 +329,67 @@ registered but dormant — see *Compiler architecture* above.
   (`collectGenericParamNameOrder()`, `TypeCheckerCall.cpp`) that recovers
   first-seen declaration order independently of `Subst`'s own iteration
   order, mirroring `collectGenericSubstitution()`'s recursive shape.
+- **S11b's `InstantiationRequest.DeclKey` alone couldn't distinguish two
+  different modules' same-named generics.** Fixed in S12a by adding
+  `SourceModule` to the struct and its `sameInstantiationAs()` comparison,
+  populated at every `record()` call site from data already in hand
+  (`Best->SourceModule` / `GenericType::getModule()`) — not deferred as a
+  disclosed gap, since the fix was cheap once actually building the thing
+  that needed the precision.
+- **`InstantiationCache` genuinely needed to be a `std::deque`, not a
+  `std::vector`, and this was found live, not anticipated.** S11b's plan
+  called it a "linear-scan dedup, not a hash map" and left the container
+  choice at that. `drainFreeFunctionRequests()` holds an
+  `InstantiationEntry&` across the re-typecheck of one clone's body — and
+  that re-typecheck can itself discover a NESTED generic call and record a
+  brand new entry on the SAME cache. A `vector` reallocating on that
+  `push_back` silently dangled the held reference; the `outer(7)` nested-
+  call test (`tests/38_monomorphization/03_nested_generic_call.tr`) failed
+  with "LLVM function 'turf_outer_T' not found" — the REWRITE step read
+  garbage `Sites` off the dangling reference and never fired, so the call
+  site kept pointing at the un-codegenned template. Switched to `deque`
+  (stable references across `push_back`, unlike `vector`); no other change
+  needed.
+- **A struct-bound declaration reached through the free-function call path
+  (`Box::new(...)`) is not a valid S12a target, and this was NOT
+  anticipated in S11a's plan.** `Resolver::visitFuncCall`'s "self-stripped
+  candidate" design means a constructor call is type-checked through the
+  exact same machinery as an ordinary free-function call — so it arrives
+  at `drainFreeFunctionRequests()` looking identical to a real free
+  function. It isn't one: every struct-bound declaration takes an
+  implicit `self: StructName*` with **no type argument of its own**
+  (`self` is declared as a bare pointer, never `GenericType`), so a body
+  referencing `self.<field>` (which a constructor always does) resolves
+  that field's type from `GlobalSymbolTable`'s SHARED, never-per-
+  instantiation-substituted struct registration — substituting the
+  clone's own `Params`/body cannot fix that; only S13a's real
+  per-instantiation struct layout can. Found live via
+  `tests/06_structs/27_generic_struct_literal_field.tr`'s `Box::new(42)`:
+  re-typechecking the naively-cloned `Box.new` failed with "Cannot assign
+  value of type 'int' to variable of type 'T'" — `self.val`'s type stayed
+  literally `NamedType("T")` no matter what `v`'s own type became. Fixed
+  by excluding any `FreeFunction`-kind entry whose declaration has
+  `Params[0].Name == "self"` from the drain (left recorded, undrained,
+  same treatment as `Method`/`Struct` kinds) — S12b/S13a's job. Also
+  caught, along the way: the `MonoCollector_->record()` call site in
+  `visitFuncCall` was keying `Box::new`'s request by `CalleeName`
+  ("new", the user-facing spelled callee) instead of `Best->BaseName`
+  ("Box.new", the real declaration name) — for an ordinary free function
+  the two always agree, so this only surfaced once a constructor call was
+  actually exercised; fixed alongside the exclusion above.
+- **`main.cpp`'s template-skip guard (sub-pass 3a/3b) needed to be
+  narrower than "any generic `FuncDefExprAST`," and getting this wrong
+  reproduced the exact bug it was meant to prevent.** The first version
+  skipped codegen for every `FuncDefExprAST` with non-empty `TypeParams` —
+  correct for the free functions S12a actually replaces with a clone, but
+  it ALSO silently skipped every struct-bound generic (`Box.new`,
+  ordinary methods), which S12a does NOT replace and which therefore still
+  needs its ordinary, erasure-era codegen this session. The result was the
+  identical "LLVM function ... not found. This is a compiler bug." ICE the
+  DeclKey fix above was chasing, just from a different cause. Fixed by
+  narrowing the guard to `!TypeParams.empty() && Params[0].Name != "self"`
+  — exactly the population `drainFreeFunctionRequests()` itself acts on,
+  kept in sync by comment cross-reference in both places.
 - **Directly `--resolve`-ing a bare `lib/std/**` file "fails" for two
   different, unrelated reasons, only one of which is real.** Confirmed
   against the untouched baseline (stashed this session's changes and
@@ -243,8 +407,30 @@ registered but dormant — see *Compiler architecture* above.
 
 ## Tests
 
-`tests/38_monomorphization/README.md` added (INV-TEST-1 stated). No `.tr`
-tests yet — nothing to exercise until S12a.
+`tests/38_monomorphization/README.md` added S11b. S12a adds the folder's
+first four real tests, all passing (680/680 full suite, default and `-O2`):
+- `01_free_function_multi_instantiation.tr` — `identity<int>`/`<double>`/
+  `<string>` coexisting correctly in one program.
+- `02_sizeof_t_in_generic_body.tr` — `sizeof(T)` reports a real value
+  (8/8/1 for int/double/bool), not a hardcoded stand-in. Free-function-only
+  half of completion criterion 4; the struct-field half is S13a/S14a's.
+- `03_nested_generic_call.tr` — a generic calling another generic using
+  its own `T`; this is also the regression test for the `InstantiationCache`
+  dangling-reference bug (see *Removed assumptions*) — it failed before
+  that fix and passes after, with no other change.
+- `fail_generic_recursion_depth.tr` — genuinely unbounded generic
+  recursion (`fn<T> wrap(x: &T): int { return wrap(&x); }`) rejected with
+  E079, not run to memory exhaustion. Verified live: fires at exactly the
+  configured `kMaxInstantiationDepth` (64), reports a (long, includes
+  unrelated prelude instantiations — see *Known pitfalls*) chain.
+
+**Not added this session, and why:** `fail_generic_requires_operator.tr`
+(planned in S11a/S11b, "if exercisable already"). It is not exercisable
+yet — see *Known pitfalls*'s new entry on instantiation-site diagnostics
+currently having very little to catch. Deferred to S13a/S13b, where
+`Map<K,V>`'s real `self.keys[i] == key` dispatch bug
+(`tests/99_known_bugs/set_string_dedup_broken.tr`) is the natural, already-
+scheduled test for this mechanism once struct-bound generics are handled.
 
 ## Known pitfalls
 
@@ -274,6 +460,56 @@ tests yet — nothing to exercise until S12a.
   `identity<int>` would mangle identically to a hand-written
   `identity(x: int)`. Must be fixed in S11b before any instantiation is
   registered under a real symbol name.
+- **Instantiation-site diagnostics (§9.5's "where errors are reported")
+  currently have almost nothing to catch, for free functions.** The
+  mechanism S12a built (a custom `TypeChecker` error handler on the clone,
+  re-raised anchored at the instantiation site with a `withRelated()` note
+  at the template) is real, wired, and exercised by the depth-cap test —
+  but a NATURALLY-occurring "generic template type-checks fine, generically
+  — but THIS concrete instantiation doesn't" case turned out to not exist
+  yet for a free function, in THIS compiler's current state. Every
+  operation beyond bare pass-through/assignment on a `TurfGenericParamType`
+  (an operator: `a + b` where both are `T`; a `to`-cast: `x to double`
+  where `x: T`; a method call: `x.foo()` where `x: T`) is ALREADY rejected
+  at the TEMPLATE's own ordinary type-check (sub-pass 2b's plain
+  `PreTC.checkAll(PrePassASTs)`, which walks the un-substituted template
+  too, unconditionally, before the monomorphizer ever runs) — confirmed
+  live with both `a + b` (`E066`, "cannot apply '+' to 'T' and 'T'") and
+  `x to double` (`E066`, "Cannot explicitly cast 'T' to 'double'"),
+  neither of which ever reached my clone's re-typecheck at all. This is
+  not a bug in S12a; it's §9.8's own interaction table being literally
+  true one session early ("LANG-001 then adds the operators the
+  collections want" — operators inside a generic body don't work at ALL
+  yet, generically OR concretely, until LANG-001, which is explicitly
+  sequenced AFTER this whole group). The mechanism will get its first
+  REAL exercise in S13a/S13b, where a generic STRUCT method's body
+  becomes concrete for the first time and things like `Map<K,V>`'s
+  `self.keys[i] == key` (`LIMITATIONS.md` §1) start actually dispatching
+  through real per-instantiation operator resolution — the point where a
+  concrete-only failure can finally occur that the template's own generic
+  check couldn't have already caught. Until then, do not assume this
+  mechanism is dead code because nothing exercises it — it is wired and
+  correct, just ahead of the feature (real generic-body operator support)
+  that would give it something new to say.
+- **The depth cap is a total-instantiation-count cap, not the literal
+  parent-chain-depth measurement §9.5 describes, and the reported "chain"
+  is not filtered to the actual offending chain.** `Monomorphize.h`'s own
+  doc comment on `kMaxInstantiationDepth` already discloses the
+  approximation (no per-request parent pointer is tracked); what's worth
+  recording here is the CONCRETE effect, seen live: triggering it with a
+  minimal, unrelated program still produced a "chain" naming ~70 entries,
+  several of which were `List`/`List.push`/`List.length` instantiations
+  from an unrelated prelude import, interleaved with the real `wrap`
+  chain — because `GenericInstantiationDepthError`'s chain is built from
+  `Collector.cache().all()` (every request recorded so far, in discovery
+  order), not a walk of the specific parent-to-child chain that actually
+  grew past the cap. Still correctly PREVENTS runaway compilation (the
+  cap fires, the compile stops, no OOM) and still names the real offender
+  among the noise — just noisier than the doc's own "like a C++ template
+  backtrace" framing implies. A future session wanting a clean chain
+  would need to add a parent-request pointer to `InstantiationRequest` and
+  walk it backward from the request that tripped the cap, instead of
+  dumping the whole cache.
 
 ## Handbook impact
 

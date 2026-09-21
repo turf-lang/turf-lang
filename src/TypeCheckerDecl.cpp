@@ -294,8 +294,9 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
     if (auto *DeclGT = dynamic_cast<const GenericType *>(DeclTy.get())) {
       if (isFullyConcreteType(DeclGT))
         MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
-                               DeclGT->getBaseName(), DeclGT->getTypeArgs(),
-                               Node.getLoc()});
+                               DeclGT->getBaseName(), DeclGT->getModule(),
+                               DeclGT->getTypeArgs(), Node.getLoc()},
+                              &Node);
     }
   }
 

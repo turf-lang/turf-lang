@@ -227,85 +227,18 @@ static std::vector<TurfTypePtr> orderedTypeArgs(
  * "Cannot compare 'T' with 'int'" even though the call was perfectly valid.
  * A type parameter with no corresponding entry in Subst (never appeared in
  * any parameter position, e.g. a return-only phantom type) is left as-is.
+ *
+ * TYPE-002 (S12a): this is now a thin wrapper. The real logic moved to
+ * Monomorphize::substituteConcreteTypes() -- it turned out to already BE
+ * the "concrete-map variant" the monomorphizer needs (S11a's plan named
+ * the wrong function to generalize; see the change record's *Removed
+ * assumptions*). Delegating keeps every existing call site in this file
+ * (and its behaviour) unchanged, verbatim.
  */
 static TurfTypePtr substituteReturnType(
     const TurfTypePtr &Ty,
     const std::unordered_map<std::string, TurfTypePtr> &Subst) {
-  if (!Ty || Subst.empty())
-    return Ty;
-
-  if (const auto *GP = dynamic_cast<const TurfGenericParamType *>(Ty.get())) {
-    auto It = Subst.find(GP->getName());
-    return It != Subst.end() ? It->second : Ty;
-  }
-  // A generic STRUCT's own field types are also matched here as NamedType,
-  // not TurfGenericParamType -- GlobalSymbolTable's registered TurfStructType
-  // for a generic struct is built once at PARSE time directly from the
-  // as-parsed Fields, a SEPARATE object from the StructDeclExprAST node that
-  // Resolver::visitStructDecl() mutates in place (NamedType("T") ->
-  // TurfGenericParamType("T")); that mutation never propagates back into
-  // GlobalSymbolTable's copy, so its fields stay NamedType("T") forever (see
-  // the identical note a few hundred lines below, in visitMethodCall's Subst-
-  // building code, which discovered this same fact for method return types).
-  // Subst's keys are always genuine type-parameter names, never a real
-  // struct/enum name (every Subst-building call site excludes names that
-  // resolve via GlobalSymbolTable), so matching NamedType here is safe.
-  if (const auto *NT = dynamic_cast<const NamedType *>(Ty.get())) {
-    auto It = Subst.find(NT->getName());
-    return It != Subst.end() ? It->second : Ty;
-  }
-  // Checked BEFORE the plain TurfPointerType branch below -- same reason as
-  // the identical guard in ResolverCore.cpp's substituteTypeParams():
-  // TurfReferenceType (&T, issue #238) IS-A TurfPointerType, so the more
-  // general dynamic_cast below matches it too, and without this earlier
-  // check would silently rebuild it as a plain TurfPointerType, turning a
-  // substituted `&T` into `T*`.
-  if (const auto *RT = dynamic_cast<const TurfReferenceType *>(Ty.get())) {
-    TurfTypePtr NewPointee = substituteReturnType(RT->getPointee(), Subst);
-    return NewPointee == RT->getPointee()
-              ? Ty
-              : std::make_shared<TurfReferenceType>(NewPointee);
-  }
-  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty.get())) {
-    TurfTypePtr NewPointee = substituteReturnType(PT->getPointee(), Subst);
-    return NewPointee == PT->getPointee()
-              ? Ty
-              : std::make_shared<TurfPointerType>(NewPointee);
-  }
-  if (isArrayType(Ty.get())) {
-    const auto *AT = dynamic_cast<const ArrayType *>(Ty.get());
-    TurfTypePtr NewElem = substituteReturnType(AT->getElementTypePtr(), Subst);
-    return NewElem == AT->getElementTypePtr()
-              ? Ty
-              : makeArrayType(NewElem, AT->getSize());
-  }
-  if (const auto *GT = dynamic_cast<const GenericType *>(Ty.get())) {
-    std::vector<TurfTypePtr> NewArgs;
-    bool Changed = false;
-    for (const auto &Arg : GT->getTypeArgs()) {
-      TurfTypePtr NewArg = substituteReturnType(Arg, Subst);
-      Changed |= (NewArg != Arg);
-      NewArgs.push_back(std::move(NewArg));
-    }
-    return Changed ? std::make_shared<GenericType>(GT->getBaseName(),
-                                                    std::move(NewArgs))
-                   : Ty;
-  }
-  // `!T` (docs/architecture/errors_and_recover.md) where T is itself the
-  // generic function's own type parameter (e.g. `fn<T> firstOrFail(arr: T[],
-  // len: int): !T`) -- without this branch, `recover`'s success type stayed the
-  // raw, unsubstituted TurfGenericParamType("T") forever, so e.g.
-  // `firstOrFail(intArray, n) recover produce -1` failed to typecheck
-  // ("'recover produce int' doesn't match this call's success type 'T'")
-  // even though the concrete instantiation is genuinely `!int`. Found live
-  // while looking for a generic Map::tryGet<K,V>(): !V candidate.
-  if (const auto *EU = dynamic_cast<const TurfErrorUnionType *>(Ty.get())) {
-    TurfTypePtr NewSuccess = substituteReturnType(EU->getSuccessTypePtr(), Subst);
-    return NewSuccess == EU->getSuccessTypePtr()
-              ? Ty
-              : std::make_shared<TurfErrorUnionType>(NewSuccess);
-  }
-  return Ty;
+  return Monomorphize::substituteConcreteTypes(Ty, Subst);
 }
 
 
@@ -529,9 +462,20 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         std::vector<std::string> Order;
         for (int i = 0; i < SubstCheckCount; ++i)
           collectGenericParamNameOrder(Best->Params[i].Type, Order);
+        // Best->BaseName, not CalleeName: for an ordinary free function
+        // call the two always agree, but for `Box::new(...)` (a
+        // constructor call routed through this same free-function path --
+        // see the Resolver's "self-stripped candidate" comment above)
+        // CalleeName is the user-facing spelled name "new" while the real
+        // declaration Best resolved to is named "Box.new" -- the ONLY name
+        // the monomorphizer's declaration registry (built from
+        // FuncDefExprAST::getName(), Monomorphize.cpp) can ever find it
+        // under. Found live: `Box::new(42)` failed with "no generic
+        // declaration found for 'new'" before this fix.
         MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
-                               CalleeName, orderedTypeArgs(Order, Subst),
-                               Node.getLoc()});
+                               Best->BaseName, Best->SourceModule,
+                               orderedTypeArgs(Order, Subst), Node.getLoc()},
+                              &Node);
       }
     }
 
@@ -1187,11 +1131,14 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
                       getType(Node.getBase()).get())) {
                 std::vector<TurfTypePtr> TypeArgsCopy = BaseGT->getTypeArgs();
                 MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
-                                       BaseGT->getBaseName(), TypeArgsCopy,
-                                       Node.getLoc()});
+                                       BaseGT->getBaseName(), BaseGT->getModule(),
+                                       TypeArgsCopy, Node.getLoc()},
+                                      &Node);
                 MonoCollector_->record({Monomorphize::InstantiationKind::Method,
                                        StructName + "." + MethodName,
-                                       std::move(TypeArgsCopy), Node.getLoc()});
+                                       Best->SourceModule, std::move(TypeArgsCopy),
+                                       Node.getLoc()},
+                                      &Node);
               }
             }
             setType(&Node, substituteReturnType(Best->ReturnType, Subst));
