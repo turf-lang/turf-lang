@@ -1,0 +1,2 @@
+// See dup_generic_fn_amod_module.tr's own comment.
+fn<T> tag(x: T): int { return 2; }

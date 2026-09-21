@@ -108,8 +108,10 @@ TurfTypePtr substituteConcreteTypes(
 }
 
 std::string instantiatedDeclName(const std::string &BaseName,
-                                 const std::vector<TurfTypePtr> &TypeArgs) {
-  std::string S = BaseName + "_gen" + std::to_string(TypeArgs.size());
+                                 const std::vector<TurfTypePtr> &TypeArgs,
+                                 const std::string &Module) {
+  std::string S = Module.empty() ? "" : Module + "_";
+  S += BaseName + "_gen" + std::to_string(TypeArgs.size());
   for (const auto &A : TypeArgs)
     if (A) S += "_" + A->getMangledName();
   return S;
@@ -391,11 +393,23 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   // would either silently add a second, indistinguishable overload
   // candidate for every ordinary, unrelated call to "identity" elsewhere
   // in the program, or collide outright. instantiatedDeclName() is a
-  // pure function of (base name, type arguments) (§9.5), so every call
-  // site rewritten to the SAME instantiation independently agrees on
-  // this name -- not that anything else needs to independently compute
-  // it: every rewrite below reads it directly off Clone->ResolvedDef.
-  Clone->setName(instantiatedDeclName(Entry.Request.DeclKey, Entry.Request.TypeArgs));
+  // pure function of (base name, type arguments, source module) (§9.5),
+  // so every call site rewritten to the SAME instantiation independently
+  // agrees on this name -- not that anything else needs to independently
+  // compute it: every rewrite below reads it directly off Clone->ResolvedDef.
+  //
+  // TYPE-002 (S15/D5): Entry.Request.SourceModule is passed here -- two
+  // DIFFERENT modules declaring the same-named generic free function
+  // (`fn<T> tag(x: T): int` in both amod.tr and bmod.tr) are correctly
+  // distinct InstantiationCache entries (sameInstantiationAs() already
+  // keys on SourceModule) but used to produce ONE shared, colliding
+  // declared name ("tag_gen1_int") once cloned -- "Duplicate function
+  // definition" on a program the pre-TYPE-002 compiler accepted (it
+  // mangled each module's own "tag" independently). Struct instantiation
+  // naming (drainStructRequests(), below) deliberately does NOT do this --
+  // struct names are already globally unique by language rule (E034).
+  Clone->setName(instantiatedDeclName(Entry.Request.DeclKey, Entry.Request.TypeArgs,
+                                      Entry.Request.SourceModule));
   // No longer generic: every TurfGenericParamType in Params/ReturnType/
   // body has already been replaced with a concrete type by the caller.
   // Clearing TypeParams makes that true structurally too (visitFuncDef's

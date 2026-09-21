@@ -264,8 +264,28 @@ TurfTypePtr substituteConcreteTypes(
 /// LLVM symbol from it -- no separate mangling entry point needed at
 /// Codegen call sites. (S11b's mangledNameForInstantiation() is retired;
 /// see the change record.)
+///
+/// TYPE-002 (S15/D5): @p Module, when non-empty, is prepended
+/// ("<module>_<name>_gen<N>_..."). Only finishInstantiation() (Monomorphize.cpp)
+/// passes it, using the request's own SourceModule -- a FreeFunction/Method-
+/// kind InstantiationRequest's SourceModule comes from the already-resolved
+/// symbol (Best->SourceModule), reliable regardless of how the call site
+/// spelled the reference (buildDeclRegistry()'s own doc comment). Without
+/// this, two DIFFERENT modules declaring the same-named generic free
+/// function (`fn<T> tag(x: T): int` in both `amod.tr` and `bmod.tr`) both
+/// produced the identically-named clone "tag_gen1_int" -- correctly
+/// distinct INSTANTIATION-CACHE entries (InstantiationRequest::
+/// sameInstantiationAs() already keys on SourceModule), but ONE shared,
+/// colliding declared NAME once cloned -- "Duplicate function definition:
+/// 'tag_gen1_int'", a regression against the pre-TYPE-002 compiler, which
+/// mangled each module's own "tag" independently. Every OTHER call site
+/// (struct instantiation naming, all in CodegenCore.cpp/CodegenStruct.cpp/
+/// CodegenFunc.cpp) leaves this unset -- struct names are already globally
+/// unique by language rule (E034), so folding a module in there would only
+/// add noise, not fix anything real.
 std::string instantiatedDeclName(const std::string &BaseName,
-                                 const std::vector<TurfTypePtr> &TypeArgs);
+                                 const std::vector<TurfTypePtr> &TypeArgs,
+                                 const std::string &Module = "");
 
 /// TYPE-002 (S12a): drain every un-drained FreeFunction-kind entry in
 /// @p Collector to a fixed point (re-sweeping on growth -- see

@@ -1,0 +1,6 @@
+// Companion module for 23_duplicate_generic_free_function_across_modules.tr
+// (D5, docs/development/changes/TYPE-002.md, S15) -- deliberately declares
+// a generic free function with the SAME name as
+// dup_generic_fn_bmod_module.tr's own `tag`, to prove two different
+// modules' same-named generics no longer collide once monomorphized.
+fn<T> tag(x: T): int { return 1; }
