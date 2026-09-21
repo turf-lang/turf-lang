@@ -173,6 +173,65 @@ bool containsUninstantiatedGenericParam(const TurfType *Ty) {
   }
   return false;
 }
+
+/// TYPE-002 (S15/D2): record a Struct-kind instantiation request for every
+/// concrete GenericType occurrence reachable from a struct FIELD's declared
+/// type -- through any number of pointer/reference/array wrappers, and
+/// recursively into a GenericType's OWN type arguments (so `struct Holder {
+/// items: List<List<Big>> }` requests both List<Big> and List<List<Big>>,
+/// not just the outer one).
+///
+/// Why this was missing: visitVarDecl (below) already records a Struct-kind
+/// request for a bare `mut b: Box<int> = ...;`, and visitMethodCall/
+/// visitFieldAccess (TypeCheckerCall.cpp) record one for a method call or
+/// field read on a GenericType-typed value -- but nothing ever walked a
+/// STRUCT DECLARATION's own field list, so `struct Holder { items:
+/// List<Big>, n: int }` with no `Holder` variable ever instantiated
+/// anywhere in the program left `List<Big>` completely invisible to the
+/// census: drainStructRequests() never saw it, its per-instantiation
+/// TurfStructType never got created, and getLLVMType()'s GenericType branch
+/// fell into its forward-declared opaque-stub fallback -- silently wrong
+/// layout (sizeof(Holder) == 8, not 32) whenever nothing else in the
+/// program happened to force List<Big> into existence some other way, and
+/// an "Internal compiler error: generated LLVM IR is invalid" the moment a
+/// real `Holder` variable's own alloca/GEP needed the real (unsized-stub)
+/// layout.
+///
+/// A no-op whenever @p Collector is null (every ordinary compile) --
+/// matches every other MonoCollector_->record() call site's own gate.
+/// isFullyConcreteType() (not isOrWrapsGenericParam()) is the correct
+/// concreteness check here, same reasoning as visitVarDecl's own DeclGT
+/// gate just below: a generic STRUCT's own declaration (Resolver::
+/// visitStructDecl() already rewrote its field types to
+/// TurfGenericParamType, per this file's own comment above) must NOT record
+/// a bogus non-concrete request for its own still-open type parameter (the
+/// S14a "inner<T>" bug this predicate exists to prevent -- see
+/// isFullyConcreteType()'s own doc comment).
+void recordGenericFieldInstantiations(const TurfTypePtr &Ty, SourceLocation Loc,
+                                      ExprAST *Site,
+                                      Monomorphize::InstantiationCollector *Collector) {
+  if (!Ty || !Collector)
+    return;
+  if (const auto *GT = dynamic_cast<const GenericType *>(Ty.get())) {
+    if (isFullyConcreteType(GT)) {
+      Collector->record({Monomorphize::InstantiationKind::Struct,
+                         GT->getBaseName(), GT->getModule(),
+                         GT->getTypeArgs(), Loc},
+                        Site);
+      for (const auto &Arg : GT->getTypeArgs())
+        recordGenericFieldInstantiations(Arg, Loc, Site, Collector);
+    }
+    return;
+  }
+  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty.get())) {
+    recordGenericFieldInstantiations(PT->getPointee(), Loc, Site, Collector);
+    return;
+  }
+  if (const auto *AT = dynamic_cast<const ::ArrayType *>(Ty.get())) {
+    recordGenericFieldInstantiations(AT->getElementTypePtr(), Loc, Site, Collector);
+    return;
+  }
+}
 } // namespace
 
 void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
@@ -442,6 +501,18 @@ void TypeChecker::visitStructDecl(StructDeclExprAST &Node) {
       break; // one diagnostic per struct is enough
     }
   }
+
+  // TYPE-002 (S15/D2): a generic type used only as a struct FIELD (no
+  // variable of that type, no method called on it, anywhere in the
+  // program) was never recorded as an instantiation request -- see
+  // recordGenericFieldInstantiations()'s own doc comment for the full
+  // story. Recorded here, once per struct declaration TypeChecker visits
+  // (every struct in the program, generic templates included -- the
+  // concreteness gate inside the helper skips a template's own
+  // still-open type parameters).
+  for (const auto &Field : Node.getFields())
+    recordGenericFieldInstantiations(Field.Type, Node.getLoc(), &Node, MonoCollector_);
+
   setType(&Node, TurfVoid());
 }
 

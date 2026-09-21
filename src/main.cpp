@@ -50,6 +50,7 @@
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -1478,6 +1479,45 @@ static int runCompilerMain(int argc, char **argv) {
   // passed (DBuilder is null).
   if (DBuilder)
     DBuilder->finalize();
+
+  // TYPE-002 (S15/D2, secondary): a monomorphized struct instantiation whose
+  // request was never recorded/drained leaves getLLVMType()'s GenericType
+  // branch's forward-declared opaque stub (CodegenCore.cpp) permanently
+  // unfilled -- nothing ever calls setBody() on it, because that only
+  // happens when drainStructRequests() (Monomorphize.cpp) appends the real
+  // clone to PrePassASTs and main.cpp's sub-pass 2c codegens it. D2 closed
+  // the one known gap that produced this (a GenericType used only as a
+  // struct FIELD, never a variable/method-call/field-access site), but if
+  // erasure's old silent-stub tolerance were ever reintroduced or a future
+  // recording site is missed the same way, the previous behaviour was a
+  // raw, low-level "Cannot allocate unsized type"/"GEP into unsized type"
+  // dump from verifyModule() below -- technically correct, but it names an
+  // LLVM struct, not a TurfLang instantiation, and gives no hint that a
+  // monomorphization request went missing. Scanned BEFORE verifyModule()
+  // so this diagnostic (naming the actual instantiation) fires instead of
+  // -- not in addition to -- the generic LLVM-verifier dump. A struct type
+  // is a monomorphized instantiation's if its name contains the "_gen<N>_"
+  // marker Monomorphize::instantiatedDeclName() always inserts right after
+  // the base name -- no ordinary, hand-written Turf struct name can contain
+  // that (identifiers can't start a segment with a digit after "_gen").
+  for (llvm::StructType *ST : TheModule->getIdentifiedStructTypes()) {
+    if (!ST->isOpaque())
+      continue;
+    const std::string Name = ST->getName().str();
+    size_t GenPos = Name.find("_gen");
+    if (GenPos == std::string::npos ||
+        GenPos + 4 >= Name.size() || !isdigit((unsigned char)Name[GenPos + 4]))
+      continue; // Not a monomorphized-instantiation name -- an ordinary
+                // forward-declared struct not yet codegenned is expected
+                // and harmless here (ordinary main.cpp iteration order).
+    std::cerr << "Internal error: monomorphized struct instantiation '"
+              << Name
+              << "' was never given a real layout (its instantiation "
+                 "request was recorded but never drained/codegenned). "
+                 "This is a compiler bug, not a mistake in your Turf "
+                 "code -- please report it.\n";
+    return 1;
+  }
 
   // Verify the generated IR for the WHOLE module (not just main -- a bug in
   // any function's codegen can produce broken IR that crashes or misbehaves
