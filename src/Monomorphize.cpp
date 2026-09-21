@@ -8,6 +8,7 @@
 #include "SymbolTable.h" // GlobalSymbolTable -- RegisterType()'s target, distinct from Resolver's own SymTable_
 #include "TypeChecker.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 
@@ -337,12 +338,19 @@ buildDeclRegistry(const std::vector<std::unique_ptr<ExprAST>> &PrePassASTs) {
   return Registry;
 }
 
-/// TYPE-002 (S14a): true if @p Name is a struct declared with its OWN
-/// `<...>` type-parameter list anywhere in @p PrePassASTs (top level or
-/// inside an imported module's body) -- used to decide whether a self-bound
-/// clone's `self` parameter needs GenericType wrapping
-/// (cloneAndSubstituteSelfBound()'s own doc comment) or should stay a bare
-/// `StructName*`. Needed because, as of this session, a Method-kind
+/// TYPE-002 (S14a, extended S15/D6): the number of type parameters struct
+/// @p Name declares in its OWN `<...>` list, found anywhere in
+/// @p PrePassASTs (top level or inside an imported module's body); 0 if
+/// @p Name isn't declared generic (or isn't found at all) -- used to decide
+/// whether a self-bound clone's `self` parameter needs GenericType wrapping
+/// (cloneAndSubstituteSelfBound()'s own doc comment: `> 0` is the old
+/// isKnownGenericStructName() boolean) AND, when it does, exactly how many
+/// of the REQUEST's own TypeArgs belong to the struct itself, as opposed to
+/// the METHOD's own additional type parameters (D6: `fn<T, U> Wrap.pick`
+/// declares TWO, but Wrap<T> itself only owns one -- self must wrap as
+/// `Wrap<T>*`, never `Wrap<T,U>*`, or its per-instantiation struct lookup
+/// (a name built from ONLY the struct's own args, drainStructRequests())
+/// misses entirely). Needed at all because, as of S14a, a Method-kind
 /// InstantiationRequest's TypeArgs can come from TWO structurally different
 /// sources that share no other distinguishing field: the RECEIVER's own
 /// GenericType (`l: List<int>` -> self must become `List<int>*`) or the
@@ -351,15 +359,18 @@ buildDeclRegistry(const std::vector<std::unique_ptr<ExprAST>> &PrePassASTs) {
 /// `Box*`, since wrapping it as `GenericType("Box", [int])*` would be
 /// wrapping a non-generic struct's name with an unrelated type argument
 /// that has nothing to do with Box itself).
-bool isKnownGenericStructName(const std::string &Name,
-                              const std::vector<std::unique_ptr<ExprAST>> &PrePassASTs) {
+size_t genericStructOwnTypeParamCount(
+    const std::string &Name,
+    const std::vector<std::unique_ptr<ExprAST>> &PrePassASTs) {
+  size_t Count = 0;
   bool Found = false;
   std::function<void(const std::vector<std::unique_ptr<ExprAST>> &)> Walk =
       [&](const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
     if (Found) return;
     for (const auto &N : Nodes) {
       if (auto *SD = dynamic_cast<StructDeclExprAST *>(N.get())) {
-        if (SD->getName() == Name && !SD->getTypeParams().empty()) {
+        if (SD->getName() == Name) {
+          Count = SD->getTypeParams().size();
           Found = true;
           return;
         }
@@ -371,7 +382,7 @@ bool isKnownGenericStructName(const std::string &Name,
     }
   };
   Walk(PrePassASTs);
-  return Found;
+  return Count;
 }
 
 /// Shared tail of both drain paths, once the caller has produced a clone
@@ -776,15 +787,20 @@ namespace {
 /// assumptions* -- the fix there was to exclude constructors entirely,
 /// since S12a predates S13a's per-instantiation struct layout; S14a's job
 /// is to stop excluding them now that the layout exists).
-/// @param WrapSelfAsGeneric true when @p Request.TypeArgs are the STRUCT's
-///        own type arguments (self becomes `StructName<TypeArgs>*`); false
-///        when they're the METHOD's OWN type arguments, unified against its
-///        call arguments, on a struct that isn't itself generic (self stays
-///        a bare `StructName*` -- see isKnownGenericStructName()'s own doc
-///        comment for why these need to be told apart).
+/// @param StructOwnParamCount how many of @p Request.TypeArgs's LEADING
+///        entries are the STRUCT's own type arguments (self becomes
+///        `StructName<Request.TypeArgs[0, StructOwnParamCount)>*`) -- 0
+///        means the struct isn't itself generic, so self stays a bare
+///        `StructName*` even if @p Request.TypeArgs is non-empty (the
+///        METHOD's own type parameters, unified against its call
+///        arguments -- see genericStructOwnTypeParamCount()'s own doc
+///        comment for why these need to be told apart, and D6/S15 for why
+///        a non-zero count can still be SMALLER than Request.TypeArgs.size()
+///        -- a method redeclaring the struct's own parameter(s) alongside
+///        ones of its own, e.g. `fn<T, U> Wrap.pick(other: U): U`).
 std::unique_ptr<ExprAST> cloneAndSubstituteSelfBound(
     FuncDefExprAST *Template, const InstantiationRequest &Request,
-    bool WrapSelfAsGeneric) {
+    size_t StructOwnParamCount) {
   std::unordered_map<std::string, TurfTypePtr> Subst;
   const auto &TypeParams = Template->getTypeParams();
   for (size_t i = 0; i < TypeParams.size() && i < Request.TypeArgs.size(); ++i)
@@ -803,11 +819,23 @@ std::unique_ptr<ExprAST> cloneAndSubstituteSelfBound(
   Clone->setReturnType(substituteConcreteTypes(Clone->getReturnTypePtr(), Subst));
   substituteTypesInBody(Clone->getBody(), Subst);
 
-  if (WrapSelfAsGeneric && !Params.empty() && Params[0].Name == "self") {
+  if (StructOwnParamCount > 0 && !Params.empty() && Params[0].Name == "self") {
     const std::string &DK = Request.DeclKey; // "StructName.Method"/"StructName.new"
     size_t Dot = DK.find('.');
     std::string StructName = Dot == std::string::npos ? DK : DK.substr(0, Dot);
-    auto SelfInner = std::make_shared<GenericType>(StructName, Request.TypeArgs);
+    // TYPE-002 (S15/D6): self must wrap ONLY the struct's own type
+    // arguments -- Request.TypeArgs[0, StructOwnParamCount) -- never the
+    // full request, which can carry MORE entries when the method declares
+    // type parameters of its own beyond the struct's (`fn<T, U>
+    // Wrap.pick(other: U): U`, StructOwnParamCount == 1, Request.TypeArgs
+    // == [T's value, U's value]). Wrapping self as `Wrap<T,U>*` would name
+    // an instantiation drainStructRequests() never registers (it only ever
+    // uses the STRUCT's own args) -- self's per-instantiation struct
+    // lookup would miss entirely.
+    size_t N = std::min(StructOwnParamCount, Request.TypeArgs.size());
+    std::vector<TurfTypePtr> StructOwnArgs(Request.TypeArgs.begin(),
+                                           Request.TypeArgs.begin() + N);
+    auto SelfInner = std::make_shared<GenericType>(StructName, std::move(StructOwnArgs));
     Params[0].Type = std::make_shared<TurfPointerType>(std::move(SelfInner));
   }
   return ClonedUP;
@@ -887,16 +915,16 @@ bool drainMethodRequests(
     // RECEIVER's own GenericType (struct is generic -- self needs
     // GenericType wrapping) OR from the METHOD's own type parameters,
     // unified against its call arguments, on a struct that ISN'T generic
-    // (self stays bare) -- see isKnownGenericStructName()'s own doc
+    // (self stays bare) -- see genericStructOwnTypeParamCount()'s own doc
     // comment for the full story. DeclKey is "StructName.MethodName"
     // either way.
     {
       const std::string &DK = Entry.Request.DeclKey;
       size_t Dot = DK.find('.');
       std::string StructName = Dot == std::string::npos ? DK : DK.substr(0, Dot);
-      bool WrapSelfAsGeneric = isKnownGenericStructName(StructName, PrePassASTs);
+      size_t StructOwnParamCount = genericStructOwnTypeParamCount(StructName, PrePassASTs);
 
-      auto ClonedUP = cloneAndSubstituteSelfBound(Template, Entry.Request, WrapSelfAsGeneric);
+      auto ClonedUP = cloneAndSubstituteSelfBound(Template, Entry.Request, StructOwnParamCount);
       auto *Clone = static_cast<FuncDefExprAST *>(ClonedUP.get());
 
       auto ClonedSymbol = finishInstantiation(Template, Clone, std::move(ClonedUP),
@@ -1010,14 +1038,14 @@ bool drainConstructorRequests(
     // itself is declared generic. Most of the time the two coincide by
     // NAMING CONVENTION (`struct Box<T> { ... } fn<T> Box.new(v: T)`
     // reuses "T" for both), but self must only be GenericType-wrapped when
-    // Box ACTUALLY is one -- see isKnownGenericStructName()'s own doc
+    // Box ACTUALLY is one -- see genericStructOwnTypeParamCount()'s own doc
     // comment.
     const std::string &DK = Entry.Request.DeclKey;
     size_t Dot = DK.find('.');
     std::string StructName = Dot == std::string::npos ? DK : DK.substr(0, Dot);
-    bool WrapSelfAsGeneric = isKnownGenericStructName(StructName, PrePassASTs);
+    size_t StructOwnParamCount = genericStructOwnTypeParamCount(StructName, PrePassASTs);
 
-    auto ClonedUP = cloneAndSubstituteSelfBound(Template, Entry.Request, WrapSelfAsGeneric);
+    auto ClonedUP = cloneAndSubstituteSelfBound(Template, Entry.Request, StructOwnParamCount);
     auto *Clone = static_cast<FuncDefExprAST *>(ClonedUP.get());
 
     auto ClonedSymbol = finishInstantiation(Template, Clone, std::move(ClonedUP),

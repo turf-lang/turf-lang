@@ -277,6 +277,22 @@ struct ResolverFunctionSymbol {
   /// registered (Pass 2).
   std::vector<std::string> PossibleErrorTypeNames;
 
+  /// TYPE-002 (S15/D6): this declaration's OWN `fn<...>` type-parameter
+  /// list, in declaration order (e.g. ["T", "U"] for `fn<T, U> Wrap.pick`).
+  /// Empty for a non-generic declaration. Populated by
+  /// Resolver::buildFunctionSymbol() straight from
+  /// FuncDefExprAST::getTypeParams() -- this symbol has no other way to see
+  /// it, and TypeCheckerCall.cpp's visitMethodCall() needs it to build a
+  /// Method-kind InstantiationRequest's TypeArgs in the SAME order
+  /// Monomorphize.cpp's drainMethodRequests() pairs them against at drain
+  /// time (`Template->getTypeParams()`, positionally). Before this field
+  /// existed, a struct-generic method's own request only ever carried the
+  /// RECEIVER's type arguments (e.g. just [int] for Wrap<int>), silently
+  /// dropping any type parameter the METHOD declares in its own right
+  /// alongside the struct's (`fn<T, U> Wrap.pick(other: U): U` -- T
+  /// redeclares Wrap's own, U is pick's own) -- see D6 in the change record.
+  std::vector<std::string> TypeParams;
+
   /// Arity of this overload.
   /// For variadic functions, this is the number of *named* (declared) params.
   /// Callers should use isVarArg() to determine if extra args are accepted.

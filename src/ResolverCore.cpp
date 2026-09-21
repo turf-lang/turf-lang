@@ -322,6 +322,7 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
         {Param.Name, substituteTypeParams(Param.Type, TypeParams)});
   }
   Sym.ReturnType = substituteTypeParams(Node.getReturnTypePtr(), TypeParams);
+  Sym.TypeParams = TypeParams;
   ResolverSourceLocation DeclLoc;
   // getNameLoc(), not getLoc() -- getLoc() is the 'fn'/'operator' keyword's
   // own position (see FuncDefExprAST's doc comment in ASTDecl.h), which

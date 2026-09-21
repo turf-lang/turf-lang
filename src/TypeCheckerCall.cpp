@@ -1208,11 +1208,49 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
                                          BaseGT->getBaseName(), BaseGT->getModule(),
                                          TypeArgsCopy, Node.getLoc()},
                                         &Node);
-                  MonoCollector_->record({Monomorphize::InstantiationKind::Method,
-                                         StructName + "." + MethodName,
-                                         Best->SourceModule, std::move(TypeArgsCopy),
-                                         Node.getLoc()},
-                                        &Node);
+
+                  // TYPE-002 (S15/D6): the METHOD-kind request's TypeArgs
+                  // must be positioned to match Best->TypeParams -- exactly
+                  // how Monomorphize.cpp's drainMethodRequests()/
+                  // cloneAndSubstituteSelfBound() pairs them against
+                  // Template->getTypeParams() at drain time -- not just the
+                  // RECEIVER's own struct type arguments. A method that
+                  // declares type parameters of its own IN ADDITION to
+                  // redeclaring the struct's (`fn<T, U> Wrap.pick(other: U):
+                  // U`) has MORE TypeParams than the struct alone provides;
+                  // using TypeArgsCopy verbatim there silently dropped every
+                  // extra one (U stayed an un-substituted
+                  // TurfGenericParamType, tripping INV-GEN-1's assertion at
+                  // drain time -- see the change record's D6 entry). Falls
+                  // back to the struct-only TypeArgsCopy when TypeParams
+                  // doesn't name anything beyond what BaseGT already
+                  // provides (the common case, unchanged behaviour) or if
+                  // CombinedSubst is somehow missing a name (defensive; the
+                  // struct/method Subst maps built above are the ONLY
+                  // sources CombinedSubst is assembled from, so every name
+                  // in Best->TypeParams is expected to be present).
+                  std::vector<TurfTypePtr> MethodTypeArgs = TypeArgsCopy;
+                  if (Best->TypeParams.size() > TypeArgsCopy.size()) {
+                    std::vector<TurfTypePtr> Extended;
+                    Extended.reserve(Best->TypeParams.size());
+                    bool AllFound = true;
+                    for (const auto &Name : Best->TypeParams) {
+                      auto It = CombinedSubst.find(Name);
+                      if (It == CombinedSubst.end()) { AllFound = false; break; }
+                      Extended.push_back(It->second);
+                    }
+                    if (AllFound)
+                      MethodTypeArgs = std::move(Extended);
+                  }
+                  bool MethodArgsConcrete = true;
+                  for (const auto &A : MethodTypeArgs)
+                    if (!isFullyConcreteType(A.get())) { MethodArgsConcrete = false; break; }
+                  if (MethodArgsConcrete)
+                    MonoCollector_->record({Monomorphize::InstantiationKind::Method,
+                                           StructName + "." + MethodName,
+                                           Best->SourceModule, std::move(MethodTypeArgs),
+                                           Node.getLoc()},
+                                          &Node);
                 }
               } else if (!MethodOwnSubst.empty()) {
                 // New case (S14a): the receiver ISN'T a GenericType (Box
