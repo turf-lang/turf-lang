@@ -1,0 +1,28 @@
+// Regression test: D4's same-shape bug over the real stdlib `List<T>`
+// (docs/development/changes/TYPE-002.md, S15) --
+// `struct Holder<T> { items: List<T> }` then `self.items.push(x)` inside a
+// `Holder<T>` method hits the identical Subst-recovery gap
+// 21_nested_generic_struct_same_t.tr covers with a local, toy struct.
+import list::List;
+import test;
+
+struct Holder<T> { items: List<T> }
+fn<T> Holder.add(x: T): void { self.items.push(x); }
+fn<T> Holder.count(): int { return self.items.length(); }
+
+fn main(): int {
+    mut h: Holder<int> = Holder::default();
+    h.items = List::default();
+    h.add(1);
+    h.add(2);
+    h.add(3);
+    test::assert(h.count() == 3, "Holder<int>.count() should reflect 3 pushed items");
+
+    mut hs: Holder<string> = Holder::default();
+    hs.items = List::default();
+    hs.add("a");
+    hs.add("b");
+    test::assert(hs.count() == 2, "Holder<string> must independently coexist with Holder<int>");
+
+    return 0;
+}

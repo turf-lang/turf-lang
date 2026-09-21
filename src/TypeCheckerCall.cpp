@@ -983,6 +983,17 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
               Scan(PT->getPointee());
             } else if (isArrayType(FTy.get())) {
               Scan(dynamic_cast<const ArrayType *>(FTy.get())->getElementTypePtr());
+            } else if (auto *NestedGT = dynamic_cast<const GenericType *>(FTy.get())) {
+              // TYPE-002 (S15/D4): a field whose OWN declared type is
+              // ANOTHER generic instantiation at the same type parameter
+              // (`struct Outer<T> { inner: Inner<T> }`) was invisible to
+              // this scan -- none of the branches above match a bare
+              // GenericType, so `self.inner`'s own T never got recovered
+              // and Inner's genuinely-substituted type argument was lost.
+              // Recurse into its own type-argument list the same way a
+              // pointer/array wrapper already does.
+              for (const auto &NestedArg : NestedGT->getTypeArgs())
+                Scan(NestedArg);
             }
           };
           for (const auto &F : STy->getFields())
@@ -1529,6 +1540,13 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
             Scan(PT->getPointee());
           } else if (isArrayType(FTy.get())) {
             Scan(dynamic_cast<const ArrayType *>(FTy.get())->getElementTypePtr());
+          } else if (auto *NestedGT = dynamic_cast<const GenericType *>(FTy.get())) {
+            // TYPE-002 (S15/D4): see visitMethodCall()'s identical fix --
+            // a field declared as ANOTHER generic instantiation
+            // (`struct Outer<T> { inner: Inner<T> }`) was invisible to this
+            // scan, so `self.inner`'s own T never got recovered here either.
+            for (const auto &NestedArg : NestedGT->getTypeArgs())
+              Scan(NestedArg);
           }
         };
         for (const auto &F : STy->getFields())
