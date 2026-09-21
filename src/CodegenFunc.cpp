@@ -31,6 +31,7 @@
 #include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
+#include "Monomorphize.h" // Monomorphize::instantiatedDeclName() -- ConstructedType lookup, TYPE-002 S13b
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Verifier.h"
 #include <algorithm>
@@ -844,7 +845,23 @@ Value *FuncCallExprAST::codegen() {
       (ScopeCallee->ResolvedKind == ScopeAccessKind::ConstructorCall ||
        ScopeCallee->ResolvedKind == ScopeAccessKind::DefaultConstruct)) {
     const std::string &StructName = ScopeCallee->getLeftName();
-    TurfTypePtr T = GlobalSymbolTable ? GlobalSymbolTable->LookupType(StructName) : nullptr;
+    // TYPE-002 (S13b): if TypeChecker::visitVarDecl() determined this
+    // construction call is building a SPECIFIC generic instantiation (e.g.
+    // `mut b: Box<Big> = Box::default();`), look up that instantiation's
+    // OWN per-instantiation TurfStructType (drainStructRequests(), S13a)
+    // instead of always the shared, erasure-era base struct -- see
+    // ConstructedType's own doc comment (ASTAccess.h) for why the call
+    // itself has no other way to know which instantiation it's building.
+    TurfTypePtr T;
+    if (ConstructedType) {
+      if (auto *CGT = dynamic_cast<const GenericType *>(ConstructedType.get())) {
+        std::string MangledName =
+            Monomorphize::instantiatedDeclName(CGT->getBaseName(), CGT->getTypeArgs());
+        T = GlobalSymbolTable ? GlobalSymbolTable->LookupType(MangledName) : nullptr;
+      }
+    }
+    if (!T)
+      T = GlobalSymbolTable ? GlobalSymbolTable->LookupType(StructName) : nullptr;
     auto *SType = dynamic_cast<TurfStructType *>(T.get());
     if (!SType) {
       SemanticError(Loc, "Internal error: unknown struct type '" + StructName +

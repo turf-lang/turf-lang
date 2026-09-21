@@ -52,14 +52,35 @@ public:
   /// clone-semantics contract as ResolvedCallTarget.
   std::unordered_map<std::string, TurfTypePtr> GenericSubstitution;
 
+  /// TYPE-002 (S13b): for a `StructName::default()`/`StructName::new(...)`
+  /// construction call (ScopeAccessKind::DefaultConstruct/ConstructorCall)
+  /// whose result is being bound to a GenericType-typed declaration (e.g.
+  /// `mut b: Box<Big> = Box::default();`), the CONCRETE instantiation type
+  /// (`Box<Big>`, not the bare `Box` this call's own getType() is always
+  /// stuck at -- see U-5, docs/development/changes/TYPE-002.md: a
+  /// construction call structurally CANNOT carry its own type argument,
+  /// only the enclosing declared type can). Set by
+  /// TypeChecker::visitVarDecl() when it discovers this exact shape,
+  /// nullptr otherwise (the overwhelming majority of calls). Read by
+  /// FuncCallExprAST::codegen()'s DefaultConstruct/ConstructorCall branch
+  /// (CodegenFunc.cpp) so the alloca it builds uses the per-instantiation
+  /// TurfStructType (drainStructRequests(), S13a) instead of always the
+  /// shared, erasure-era base struct -- without this, `Box<Big>`'s
+  /// declared-type alloca (VarDeclExprAST, sized correctly) and its
+  /// initializer's OWN alloca (this call, sized from the WRONG, shared
+  /// "Box" layout) silently disagree.
+  /// clone() returns a fresh node, so this is null in cloned trees — same
+  /// clone-semantics contract as ResolvedCallTarget.
+  TurfTypePtr ConstructedType;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
                                              CloneExprList(Args));
-    // Note: ResolvedCandidates, ResolvedCallTarget, and GenericSubstitution
-    // are intentionally NOT copied — cloned ASTs are stale until
-    // re-resolved. ✓
+    // Note: ResolvedCandidates, ResolvedCallTarget, GenericSubstitution, and
+    // ConstructedType are intentionally NOT copied — cloned ASTs are stale
+    // until re-resolved. ✓
   }
 };
 

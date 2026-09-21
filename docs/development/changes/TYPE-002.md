@@ -5,7 +5,7 @@
 | **Status** | in-progress |
 | **Dates** | started 2026-09-21 · landed — |
 | **Commits** | (added at the end of each sub-session) |
-| **Sessions** | 5 of 8 (S11a, S11b, S12a, S12b, S13a done; S13b, S14a, S14b remain) |
+| **Sessions** | 6 of 8 (S11a, S11b, S12a, S12b, S13a, S13b done; S14a, S14b remain) |
 | **Depends on** | TYPE-001 (landed 2026-09-18), SEM-001 (landed 2026-09-18); strongly benefits from OPT-001 (landed 2026-09-18) |
 | **Frozen decisions relied on** | F-GEN-1, F-GEN-2, F-GEN-3, F-OP-1 (unaffected but adjacent — see §9.8) |
 
@@ -136,6 +136,45 @@ session. That's S13b's job (see its own session-plan entry, below) — this
 is why S13a changes *zero* observable program behaviour (confirmed by the
 full suite staying byte-for-byte unchanged, 682/682, at both optimization
 levels) despite adding real, independent type identity underneath.
+
+**What's ALSO real as of S13b — completion criterion 2**:
+```turf
+struct Big { a: int, b: int, c: int }   // 24 bytes
+mut l: List<Big> = List::default();
+l.push(Big::new(1, 2, 3));
+```
+compiles, runs, and produces correct results — verified live via
+`--emit-llvm`: `List<Big>`'s monomorphized `push`/`pop` clones take/return a
+genuine `%Big` aggregate (`define internal void
+@turf_List.push_gen1_Big...(ptr %self, %Big %item)`, `define internal %Big
+@turf_List.pop_gen1_Big...(ptr %self)`), not an erased pointer. Before this
+session, the identical program ICEd with "Invalid bitcast: bitcast %Big
+%x4 to ptr" (§9.2's own measured consequence #1). This is S13b's whole
+point: it makes Codegen actually CONSUME the per-instantiation
+`TurfStructType`/layout S13a built but deliberately left unused — every
+`GenericType`→base-name collapse S13a explicitly left alone is now gone
+(`FieldAccessExprAST`'s two copies, `getLLVMType()`'s own GenericType
+branch, `CastToType()`'s struct-passthrough and implicit-deref branches),
+plus one new mechanism S13a's own scope didn't anticipate needing
+(`FuncCallExprAST::ConstructedType` — see *Compiler architecture*). Also
+verified: a >8-byte struct round-trips correctly through a generic FREE
+function (`fn<T> identity(x: T): T` called with a `Big` argument — this
+half was already real since S12a, confirmed rather than assumed) and
+through another struct's own field (`struct Holder { items: List<Big> }`).
+
+**Still NOT covered, disclosed rather than silently left** (see *Removed
+assumptions*): `StructName::new(...)` — an EXPLICIT, hand-written
+constructor — on a >8-byte generic instantiation. `Box.new`'s own body/
+signature (`fn<T> Box.new(v: T): void { self.val = v; }`) is still
+completely unmonomorphized (S12a's own, still-standing exclusion — struct-
+bound declarations reached via the free-function call path are deliberately
+left un-drained), so passing a >8-byte argument to it still round-trips
+through the erasure `CastToType` branches, which cannot represent a >8-byte
+value in one pointer-sized slot. Real, live gap; not yet hit by anything in
+`lib/std` (no stdlib generic struct has an explicit `.new`) or this
+session's own tests (deliberately scoped to `::default()`-constructed
+instantiations, which is what `List<T>` and every other stdlib collection
+actually uses).
 
 ### Is this breaking?
 
@@ -426,6 +465,72 @@ new test) at both the default and `-O2` optimization levels;
   TypeChecker-only candidate-matching rule never has to choose BETWEEN
   layouts and stays correct regardless of how many distinct layouts exist
   by the time Codegen runs.
+
+**S13b kills the base-name collapse — the >8-byte ICE dies here**, making
+Codegen actually consume the per-instantiation registration S13a built.
+Full suite green at 683/683 (682 + 1 new test) at both the default and
+`-O2` optimization levels; `lib/std`/`showcase`/prelude sweep clean (same
+pre-existing E034/warning items S13a already confirmed on the baseline,
+nothing new); `tests/08_e2e_stress/`/`tests/09_boss_fights/` canaries and a
+full `tests/06_structs/` sweep all pass (covered by the same full-suite
+run — `test_runner.sh` walks all of `tests/`).
+
+**What S13b added, concretely:**
+- `TypeCheckerCall.cpp`'s `visitFieldAccess()` gained its OWN Struct-kind
+  `MonoCollector_->record()` call, mirroring `visitMethodCall()`'s existing
+  one — found live, not anticipated by S13a's plan: a GenericType-typed
+  value that's field-accessed directly, with NO method ever called on it
+  and NO separate matching `VarDeclExprAST` elsewhere (e.g. `struct Holder
+  { items: List<int> } ... h.items.data`), was never recorded as an
+  instantiation request at all under S13a alone, so `drainStructRequests()`
+  never drained it and this session's now-per-instantiation field access
+  found nothing registered under its mangled name.
+- `getLLVMType()`'s `GenericType` branch (`CodegenCore.cpp`) rewritten:
+  looks up the per-instantiation LLVM type by
+  `Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs())`
+  instead of the shared base name, with a forward-declared opaque-stub
+  fallback for the identical forward-reference reason the prior, base-name
+  version already needed one (a struct field referencing an instantiation
+  whose own struct decl hasn't codegenned yet in `main.cpp`'s sub-pass 2c
+  iteration order) — same mechanism, re-keyed.
+- `FieldAccessExprAST::codegenLValue()`/`::codegen()`'s two
+  `GenericType`→base-name collapse points (`CodegenStruct.cpp`) — the
+  session's headline deletion target — both now resolve to the
+  per-instantiation `TurfStructType` via the same
+  `instantiatedDeclName()`-based lookup, so `GEP`/`Load` compute offsets
+  against the REAL, correctly-sized layout.
+- `CastToType()` (`CodegenCore.cpp`) gained two fixes found live while
+  testing, both flagged as likely by S13a's own plan ("expect CastToType's
+  struct passthrough... to need attention too"): (1) the struct-to-struct
+  passthrough (`ValTy->isStructTy()` check) now also recognizes a
+  `GenericType` `DestType`, not just `NamedType`/`TurfStructType` — without
+  this, a by-value generic struct result (now genuinely `isStructTy()`,
+  not an erased pointer) fell through toward the string-error guard; (2)
+  the "implicit self-dereference" branch's `ResolvedDest` resolution
+  (`fn Holder.get(): List<Big> { return self.items; }`-shaped code) now
+  also resolves a `GenericType` destination to its per-instantiation type,
+  for the identical reason `FieldAccessExprAST` needed to.
+- `FuncCallExprAST::ConstructedType` (new field, `ASTAccess.h`) — the one
+  genuinely NEW mechanism this session needed, not just a collapse
+  deletion. Found live: `StructName::default()`/`StructName::new(...)`'s
+  OWN static type is ALWAYS the bare `NamedType(StructName)` (U-5: a
+  construction call structurally cannot carry a type argument), so
+  `FuncCallExprAST::codegen()`'s construction branch (`CodegenFunc.cpp`)
+  had no way to know it was building `Box<Big>` specifically rather than
+  the shared, erasure-era `Box` — meaning `mut b: Box<Big> =
+  Box::default();`'s LHS alloca (correctly sized, via the `getLLVMType()`
+  fix above) and its RHS construction's OWN alloca (still the shared,
+  wrong-sized one) silently disagreed. Fixed by having
+  `TypeChecker::visitVarDecl()` (`TypeCheckerDecl.cpp`) — the one place
+  that already knows both the declared GenericType AND that the
+  initializer is exactly a construction call — write the concrete type
+  onto the call node itself; `CodegenFunc.cpp`'s construction branch reads
+  it back to look up the per-instantiation `TurfStructType` instead of the
+  bare struct name, falling back to the old bare-name lookup when unset
+  (every ordinary, non-generic construction). `GetDefaultValue()`
+  (`CodegenCore.cpp`) needed NO change at all -- it already recurses
+  through whatever `TurfStructType*` it's handed via `getFields()`, so
+  passing it the per-instantiation type was sufficient on its own.
 
 ## Runtime changes
 
@@ -722,6 +827,43 @@ literal chain-depth measurement §9.5 describes; see *Known pitfalls*.
   registry's own recorded TRUE declaring module
   (`StructRegistryEntry::Module`), not `Entry.Request.SourceModule`, for the
   identical reason.
+- **A direct field access on a GenericType-typed value that never went
+  through a `VarDeclExprAST` or a method call was invisible to the
+  instantiation collector, and this was found live while testing S13b, not
+  anticipated by S13a's plan.** S11b/S13a's two record() call sites
+  (`visitVarDecl`, `visitMethodCall`) cover "a variable declared with this
+  type" and "a method called on this type," but not "a field of this
+  GenericType read directly" — e.g. `struct Holder { items: List<int> }`
+  then `h.items.data` with no method call and no separate `List<int>`
+  variable anywhere else in the program. Under S13a alone this was harmless
+  (nothing consumed Struct-kind registrations yet); the moment S13b made
+  `FieldAccessExprAST` require the per-instantiation type to exist, this
+  became a real, reachable "Cannot access field on non-struct type"
+  regression waiting to happen on any program shaped this way. Fixed by
+  adding the identical recording call to `TypeCheckerCall.cpp`'s
+  `visitFieldAccess()`.
+- **`StructName::new(...)` (an explicit, hand-written constructor) on a
+  >8-byte generic instantiation is NOT fixed by S13b, and this is a
+  disclosed, not silently missed, gap.** S12a's drain functions
+  deliberately exclude every struct-bound declaration reached through the
+  free-function call path (`Box::new(...)`'s "self-stripped candidate") —
+  `self` carries no type argument of its own, so its body can't be
+  correctly substituted without per-instantiation struct layout. S13a
+  built that layout; nothing in S12a-S13b actually goes back and drains
+  these excluded constructor declarations. Concretely: `fn<T> Box.new(v: T):
+  void { self.val = v; }`'s OWN parameter `v: T` is still erased to `ptr`
+  (Type Erasure, unmonomorphized) — for `v: Big` (24 bytes), the call site
+  would need `CastToType()`'s erase-to-generic-param branch to stuff a
+  24-byte struct into one pointer-sized slot, which it structurally cannot
+  do (this is the literal "Invalid bitcast" failure mode, just at the
+  CALL site instead of the field-access site S13b actually fixed). Not hit
+  by anything in `lib/std` today (no stdlib generic struct declares an
+  explicit `.new`) or by this session's own tests (deliberately scoped to
+  `::default()`-constructed instantiations). Left for a future session —
+  extending S12b's drainMethodRequests()-style monomorphization to cover
+  constructor declarations specifically, now that S13a's per-instantiation
+  struct layout exists to make it correct (S12a's own reason for excluding
+  them no longer applies, but nothing has gone back to un-exclude them).
 
 ## Tests
 
@@ -781,6 +923,23 @@ S13a adds one more test, all passing (682/682 full suite, default and
   closing `>>` (`List<List<int> >`) — this parser lexes `>>` as a single
   right-shift token with no generic-context disambiguation, a pre-existing,
   unrelated limitation this session doesn't touch.
+
+S13b adds one more test, all passing (683/683 full suite, default and
+`-O2`):
+- `06_generic_struct_over_8_bytes.tr` — **completion criterion 2**:
+  `List<Big>` (`struct Big { a: int, b: int, c: int }`, 24 bytes) via
+  `push`/`pop`/`length`/direct `data[i]` indexing, all with real, concrete
+  struct-by-value parameter/return types (not erased pointers) in the
+  monomorphized clones. This is the exact program shape that ICEd with
+  "Invalid bitcast: bitcast %Big %x4 to ptr" before this session (§9.2's
+  measured consequence #1) — now compiles, runs, and asserts correctly.
+  Also covers the other two shapes bullet 5 of S13a's own plan named: a
+  >8-byte struct round-tripping through a generic FREE function
+  (`identity<Big>`) and through another struct's own field (`struct Holder
+  { items: List<Big> }`). Deliberately constructed via `::default()` only
+  (never `Big::new(...)`-as-a-GENERIC-struct's-own-constructor) — see
+  *Removed assumptions* for the disclosed `StructName::new(...)` gap this
+  doesn't cover.
 
 ## Known pitfalls
 

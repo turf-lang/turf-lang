@@ -31,6 +31,7 @@
 #include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
+#include "Monomorphize.h" // Monomorphize::instantiatedDeclName() -- getLLVMType()'s GenericType branch, TYPE-002 S13b
 #include "llvm/ADT/SmallString.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Verifier.h"
@@ -429,38 +430,47 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
   }
 
-  // GenericType instantiations (e.g. List<int>) — look up the base struct.
-  // The base struct (e.g. "List") was registered in LLVMTypeCache by
-  // StructDeclExprAST::codegen(). Use that layout for the generic instance.
+  // GenericType instantiations (e.g. List<int>) — TYPE-002 (S13b): look up
+  // the SPECIFIC per-instantiation struct, registered in GlobalSymbolTable/
+  // LLVMTypeCache under its own mangled name by
+  // Monomorphize::drainStructRequests() (S13a) and codegenned for real by
+  // the ordinary, unmodified StructDeclExprAST::codegen() once its clone
+  // reaches main.cpp's sub-pass 2c. This REPLACES the erasure-era version
+  // of this branch, which collapsed every instantiation of the same base
+  // struct onto ONE shared layout (correct only because Type Erasure made
+  // every T/K/V a uniform 8-byte slot) -- see the change record's *Removed
+  // assumptions* for why that collapse is gone and what it takes with it
+  // (the >8-byte `Invalid bitcast` ICE).
   if (auto *GT = dynamic_cast<const GenericType *>(T)) {
-    auto BaseIt = LLVMTypeCache.find(GT->getBaseName());
-    if (BaseIt != LLVMTypeCache.end())
-      return LLVMTypeCache[Key] = BaseIt->second;
-    // Base struct not yet seen (e.g. a top-level struct field like
-    // `headers: Map<string, string>` gets codegenned in main.cpp's
-    // sub-pass 2c, before `import map;` has run map.tr's own `struct
-    // Map<K, V>` through StructDeclExprAST::codegen() in sub-pass 3a) —
-    // create a forward-declared opaque stub, EXACTLY like
-    // StructDeclExprAST::codegen()'s own Step 1 does for a self-
-    // referential field (issue #176). Critically, register it under the
-    // BASE name ("Map") too, not just the mangled per-instantiation key
-    // ("Map_string_string") — StructDeclExprAST::codegen() looks up
-    // LLVMTypeCache[Name] by that same bare base name (its own Step 1),
-    // so caching only under `Key` here left that lookup missing the stub,
-    // making it create a SECOND, disconnected StructType and fill THAT
-    // one in via setBody() while every field that had already resolved
-    // to this orphaned stub stayed permanently opaque -- the exact "GEP
-    // into unsized type" / "storing unsized types" crash confirmed live
-    // for any struct embedding a generic collection field. One shared
-    // stub, filled in exactly once when the real generic struct decl
-    // codegens, is correct for every instantiation of the same base
-    // struct anyway (Type Erasure already makes every T/K/V a uniform
-    // 8-byte slot, so List<int> and List<string> were always meant to
-    // share one physical LLVM layout — see the `BaseIt != end()` branch
-    // just above, which already does exactly that once the base type is
-    // real).
-    llvm::StructType *Stub = llvm::StructType::create(*TheContext, GT->getBaseName());
-    LLVMTypeCache[GT->getBaseName()] = Stub;
+    std::string MangledName =
+        Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
+    auto InstIt = LLVMTypeCache.find(MangledName);
+    if (InstIt != LLVMTypeCache.end())
+      return LLVMTypeCache[Key] = InstIt->second;
+    // Not yet seen under its own mangled name -- create a forward-declared
+    // opaque stub, EXACTLY like StructDeclExprAST::codegen()'s own Step 1
+    // does for a self-referential field (issue #176), and like this
+    // branch's OWN prior version did for the shared base name. Critically,
+    // register it under the MANGLED name too, not just the outer `Key` --
+    // StructDeclExprAST::codegen() looks up LLVMTypeCache[Name] by that
+    // SAME mangled name for a monomorphized clone (its own Step 1, Name is
+    // already the clone's mangled instantiatedDeclName() -- see
+    // FuncDefExprAST's identical rename-before-resolve contract,
+    // Monomorphize.cpp), so caching only under `Key` here would leave that
+    // lookup missing the stub, creating a SECOND, disconnected StructType
+    // and leaving every field that already resolved to this orphaned stub
+    // permanently opaque -- the exact "GEP into unsized type" crash the
+    // prior, base-name version of this comment already described, just for
+    // a different key. Reaching this fallback for an instantiation that
+    // will NEVER be codegenned (not merely "not yet") would mean some
+    // GenericType occurrence's instantiation request was never recorded/
+    // drained -- TypeChecker's recording sites (visitVarDecl, visitMethodCall,
+    // visitFieldAccess) are meant to make that unreachable; if it happens
+    // anyway, this stub at least isolates the damage to ONE instantiation's
+    // own (permanently opaque) type instead of corrupting a DIFFERENT
+    // instantiation's real layout the way sharing the base name used to.
+    llvm::StructType *Stub = llvm::StructType::create(*TheContext, MangledName);
+    LLVMTypeCache[MangledName] = Stub;
     return LLVMTypeCache[Key] = Stub;
   }
 
@@ -1488,6 +1498,21 @@ Value *CastToType(Value *Val, const TurfType *DestType,
             ResolvedDest = R.get();
         }
       }
+      // TYPE-002 (S13b): a GenericType destination (e.g. `fn Holder.get():
+      // List<Big> { return self.items; }`, self's own field returned by
+      // value) resolves to its OWN per-instantiation TurfStructType, not
+      // the shared base -- mirrors FieldAccessExprAST's identical fix
+      // (CodegenStruct.cpp), needed so getLLVMType(ResolvedDest) below
+      // loads the CORRECT (possibly >8-byte) shape, not the erasure-era
+      // shared one.
+      if (const auto *GT = dynamic_cast<const GenericType *>(DestType)) {
+        if (GlobalSymbolTable) {
+          std::string MangledName =
+              Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
+          if (auto R = GlobalSymbolTable->LookupType(MangledName))
+            ResolvedDest = R.get();
+        }
+      }
       if (dynamic_cast<const TurfStructType *>(ResolvedDest)) {
         return Builder->CreateLoad(getLLVMType(ResolvedDest), Val, "derefstruct");
       }
@@ -1499,12 +1524,16 @@ Value *CastToType(Value *Val, const TurfType *DestType,
   if (isPointerLike(SrcType.get()) && isPointerLike(DestType))
     return Val;
 
-  // Struct-to-struct: if DestType is a struct (NamedType or TurfStructType) and
-  // the LLVM types already match (e.g. inner struct init), pass through without
-  // casting. Without this, CastToType would hit the string-error guard below.
+  // Struct-to-struct: if DestType is a struct (NamedType, TurfStructType, or
+  // -- TYPE-002 S13b -- a GenericType instantiation, e.g. a >8-byte generic
+  // struct value now genuinely arriving here as a real ValTy->isStructTy()
+  // aggregate instead of an erased pointer) and the LLVM types already
+  // match (e.g. inner struct init), pass through without casting. Without
+  // this, CastToType would hit the string-error guard below.
   if (ValTy->isStructTy()) {
     if (dynamic_cast<const TurfStructType *>(DestType) ||
-        dynamic_cast<const NamedType *>(DestType))
+        dynamic_cast<const NamedType *>(DestType) ||
+        dynamic_cast<const GenericType *>(DestType))
       return Val;
   }
 

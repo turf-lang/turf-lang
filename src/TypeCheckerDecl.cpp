@@ -300,6 +300,28 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
     }
   }
 
+  // TYPE-002 (S13b): `mut b: Box<Big> = Box::default();` -- tell the
+  // construction call which CONCRETE instantiation it's building, since it
+  // structurally cannot know on its own (U-5: `Box::default()`'s own type
+  // is always the bare NamedType("Box"), never a GenericType -- see
+  // TypeCheckerCall.cpp's DefaultConstruct branch). Only set when DeclTy is
+  // a real GenericType and the initializer is exactly a construction call
+  // (`StructName::default()`/`StructName::new(...)`) -- every other
+  // initializer shape is unaffected. Read back by FuncCallExprAST::codegen()'s
+  // DefaultConstruct/ConstructorCall branch (CodegenFunc.cpp) so its own
+  // alloca uses the per-instantiation TurfStructType (drainStructRequests(),
+  // S13a), not the shared, erasure-era base struct.
+  if (dynamic_cast<const GenericType *>(DeclTy.get())) {
+    if (auto *FC = dynamic_cast<FuncCallExprAST *>(
+            const_cast<ExprAST *>(Node.getInitializer()))) {
+      if (auto *SC = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee())) {
+        if (SC->ResolvedKind == ScopeAccessKind::DefaultConstruct ||
+            SC->ResolvedKind == ScopeAccessKind::ConstructorCall)
+          FC->ConstructedType = DeclTy;
+      }
+    }
+  }
+
   // `unsafe { }` gate (issue #238): declaring a raw ptr/T*-typed variable
   // is one of the three explicitly-gated "uses" (declaration, cast,
   // dereference -- see FINAL_SPRINT.md's Track A). Checked after

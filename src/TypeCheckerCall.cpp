@@ -1348,6 +1348,29 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
     if (auto *GT0 = dynamic_cast<const GenericType *>(BaseTy.get()))
       GenericTypeArgs = GT0->getTypeArgs();
   }
+  // TYPE-002 (S13b): a direct field access on a GenericType-typed base is
+  // ALSO a struct instantiation request, not just a VarDeclExprAST's own
+  // declared type (TypeCheckerDecl.cpp's visitVarDecl) or a method call's
+  // receiver (visitMethodCall, just above) -- e.g. `struct Holder { items:
+  // List<int> }` then `h.items.data` with NO method ever called on `items`
+  // and no separate `List<int>`-typed variable declared anywhere else.
+  // Without this, drainStructRequests() (S13a) never drains this specific
+  // instantiation, so CodegenStruct.cpp's now-per-instantiation field
+  // access (this session, below) finds nothing registered under its
+  // mangled name and falls through to the "Cannot access field on
+  // non-struct type" diagnostic on a program that used to compile fine.
+  // Mirrors visitMethodCall()'s identical recording just above -- same
+  // absorb-a-duplicate-into-the-existing-entry behaviour via
+  // InstantiationCollector::record(), so this costs nothing when the SAME
+  // instantiation was already requested elsewhere.
+  if (MonoCollector_ && BaseTy) {
+    if (auto *GT0 = dynamic_cast<const GenericType *>(BaseTy.get())) {
+      MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
+                             GT0->getBaseName(), GT0->getModule(),
+                             GT0->getTypeArgs(), Node.getLoc()},
+                            &Node);
+    }
+  }
   if (BaseTy) {
     if (auto *GT = dynamic_cast<const GenericType *>(BaseTy.get())) {
       if (GlobalSymbolTable)

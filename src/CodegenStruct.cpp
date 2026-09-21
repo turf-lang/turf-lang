@@ -31,6 +31,7 @@
 #include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
+#include "Monomorphize.h" // Monomorphize::instantiatedDeclName() -- FieldAccessExprAST's per-instantiation lookup, TYPE-002 S13b
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Verifier.h"
 #include <algorithm>
@@ -713,15 +714,22 @@ Value *FieldAccessExprAST::codegenLValue() {
     }
   }
   // Resolve a GenericType base (e.g. a `Box<int>`-typed variable) to its
-  // underlying TurfStructType via the base name. Under this compiler's
-  // type-erasure model there is exactly one registered TurfStructType per
-  // generic struct declaration (see typesCompatible()'s "Struct-literal /
-  // generic-struct compatibility" comment in Types.cpp for why a single
-  // layout is correct for every instantiation) -- GlobalSymbolTable only
-  // ever has "Box" registered, never "Box<int>" specifically.
+  // OWN per-instantiation TurfStructType, via its mangled instantiation
+  // name -- TYPE-002 (S13b): this REPLACES the erasure-era base-name
+  // collapse (every instantiation used to share ONE registered
+  // TurfStructType, correct only because Type Erasure made every T/K/V a
+  // uniform 8-byte slot). drainStructRequests() (S13a) registers a real,
+  // distinct TurfStructType per instantiation in GlobalSymbolTable under
+  // exactly this mangled name -- see the change record's *Removed
+  // assumptions* for the two real bugs found live wiring this up (a
+  // FieldAccessExprAST that never went through a VarDecl or method call
+  // needed its OWN instantiation-request recording site, TypeCheckerCall.cpp's
+  // visitFieldAccess).
   if (auto *GT = dynamic_cast<const GenericType *>(BaseType)) {
     if (GlobalSymbolTable) {
-      if (auto R = GlobalSymbolTable->LookupType(GT->getBaseName()))
+      std::string MangledName =
+          Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
+      if (auto R = GlobalSymbolTable->LookupType(MangledName))
         BaseType = R.get();
     }
   }
@@ -767,9 +775,12 @@ Value *FieldAccessExprAST::codegen() {
   // Resolve a GenericType base (e.g. `Box<int>`) the same way -- see the
   // matching comment in codegenLValue() just above.
   if (auto *GT = dynamic_cast<const GenericType *>(BaseType)) {
-    if (GlobalSymbolTable)
-      if (auto R = GlobalSymbolTable->LookupType(GT->getBaseName()))
+    if (GlobalSymbolTable) {
+      std::string MangledName =
+          Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
+      if (auto R = GlobalSymbolTable->LookupType(MangledName))
         BaseType = R.get();
+    }
   }
 
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
