@@ -464,6 +464,26 @@ public:
   std::vector<StructField> &getFieldsMut() { return Fields; }
   const std::vector<std::string> &getTypeParams() const { return TypeParams; }
 
+  /// TYPE-002 (S13a): rename a monomorphized clone to its unique mangled
+  /// name (Monomorphize::instantiatedDeclName()) -- same contract as
+  /// FuncDefExprAST::setName() (S12a): must run BEFORE the clone is
+  /// re-resolved, since Resolver::visitStructDecl() registers whatever
+  /// name the node currently has.
+  void setName(std::string NewName) { Name = std::move(NewName); }
+  /// TYPE-002 (S13a): mark a clone "no longer generic" once every field's
+  /// TurfGenericParamType has been substituted with a concrete type -- makes
+  /// Resolver::visitStructDecl()'s own field-substitution loop a documented
+  /// no-op (it only fires when getTypeParams() is non-empty) when the clone
+  /// is re-resolved. Unlike FuncDefExprAST, main.cpp's sub-pass 2c codegens
+  /// every StructDeclExprAST unconditionally (no TypeParams-empty skip guard
+  /// exists or is needed for structs -- StructDeclExprAST::codegen()'s own
+  /// by-NAME early-return guard already makes running it twice for the same
+  /// name safe, and a generic TEMPLATE's own struct decl is deliberately
+  /// left in PrePassASTs and still codegens the shared, erasure-era layout
+  /// every existing (non-monomorphized) reference still needs -- see
+  /// drainStructRequests()'s own doc comment, Monomorphize.cpp).
+  void clearTypeParams() { TypeParams.clear(); }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitStructDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {

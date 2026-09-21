@@ -207,19 +207,28 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   // `Box { val: null }` always produces the bare NamedType("Box") -- this
   // language has no syntax for `Box<int> { val: null }` (an explicit
   // type-argument list on a brace literal), so TypeChecker::visitStructInit()
-  // can never produce a GenericType itself. Under this compiler's
-  // type-erasure model, a generic struct's LLVM layout does not actually
-  // vary per type argument -- every field typed with the struct's own type
-  // parameter is itself always a pointer, which erases to an opaque pointer
-  // regardless of what it points to (see getLLVMType()'s TurfGenericParamType/
-  // GenericType handling) -- so there is no real information lost by
-  // treating bare "Box" as compatible with "Box<AnyTypeArg>": the concrete
-  // type argument is carried entirely by the DECLARED variable/parameter
-  // type, and Codegen never needs to pick between different underlying
-  // layouts for different instantiations. Without this,
-  // `mut b: Box<int> = Box { val: null };` was flatly rejected ("Cannot
-  // initialise 'Box<int>' variable 'b' with value of type 'Box'"), making
-  // generic structs impossible to construct under ANY existing syntax.
+  // can never produce a GenericType itself. Without this, `mut b: Box<int> =
+  // Box { val: null };` was flatly rejected ("Cannot initialise 'Box<int>'
+  // variable 'b' with value of type 'Box'"), making generic structs
+  // impossible to construct under ANY existing syntax.
+  //
+  // TYPE-002 (S13a): this leniency's justification is NOT the type-erasure
+  // model -- it was originally written that way, but that stopped being
+  // accurate once S13a gave each concrete instantiation (`Box<int>`,
+  // `Box<double>`, ...) its own real, independent TurfStructType/LLVM
+  // layout (see Monomorphize.cpp's drainStructRequests()). The real reason
+  // this rule is safe, unconditionally, at every stage of TYPE-002 including
+  // after monomorphization fully lands (S14a-S14b), is U-5
+  // (docs/development/changes/TYPE-002.md): a generic struct instantiation's
+  // concrete type arguments are determined ENTIRELY by the DECLARED type at
+  // the binding site (the variable/parameter/field/return-type annotation),
+  // NEVER by the initializer expression -- which structurally CANNOT carry
+  // them, since no brace-literal syntax exists to write them. This function
+  // is a TypeChecker-only CANDIDATE-MATCHING rule (typesCompatible()'s own
+  // Rule 1 framing, §9.6) that runs strictly BEFORE the monomorphizer picks
+  // which concrete instantiation a use-site actually needs -- it never has
+  // to choose BETWEEN layouts, so it remains correct regardless of how many
+  // distinct layouts exist by the time Codegen runs.
   {
     const auto *FromGen = dynamic_cast<const GenericType *>(From);
     const auto *ToGen = dynamic_cast<const GenericType *>(To);

@@ -762,13 +762,19 @@ const StructField *findField(const StructDeclExprAST *Decl,
   return nullptr;
 }
 
-} // namespace
-
-void Resolver::checkStructLayoutAcyclicity() {
-  std::unordered_map<std::string, const StructDeclExprAST *> ByName;
-  for (const auto *Decl : HoistedStructDecls_)
-    ByName[Decl->getName()] = Decl;
-
+/// Shared DFS core of both checkStructLayoutAcyclicity() (Pass-1, every
+/// hoisted TEMPLATE) and checkStructLayoutAcyclicityForClone() (TYPE-002
+/// S13a, one freshly-substituted instantiation) -- extracted verbatim, no
+/// behaviour change, so both callers stay correct by construction rather
+/// than by keeping two copies in sync. @p ByName is the full universe of
+/// structs a field edge may name; @p StartNames is which of them to run a
+/// fresh DFS from (every hoisted struct for the Pass-1 sweep; just the one
+/// new clone for the per-instantiation check -- see checkStructLayoutAcyclicityForClone()'s
+/// own doc comment, Resolver.h, for why the rest of the graph doesn't need
+/// re-walking).
+void detectStructLayoutCycles(
+    const std::unordered_map<std::string, const StructDeclExprAST *> &ByName,
+    const std::vector<std::string> &StartNames) {
   std::unordered_map<std::string, DFSColor> Color;
   // The current DFS path: PathNames[i] is a struct name on the path;
   // PathFields[i] is the name of the FIELD in PathNames[i] whose type is
@@ -840,10 +846,34 @@ void Resolver::checkStructLayoutAcyclicity() {
     Color[Name] = DFSColor::Black;
   };
 
-  for (const auto *Decl : HoistedStructDecls_) {
-    if (Color.find(Decl->getName()) == Color.end())
-      Visit(Decl->getName());
+  for (const auto &Name : StartNames) {
+    if (Color.find(Name) == Color.end())
+      Visit(Name);
   }
+}
+
+} // namespace
+
+void Resolver::checkStructLayoutAcyclicity() {
+  std::unordered_map<std::string, const StructDeclExprAST *> ByName;
+  std::vector<std::string> StartNames;
+  for (const auto *Decl : HoistedStructDecls_) {
+    ByName[Decl->getName()] = Decl;
+    StartNames.push_back(Decl->getName());
+  }
+  detectStructLayoutCycles(ByName, StartNames);
+}
+
+void Resolver::checkStructLayoutAcyclicityForClone(const StructDeclExprAST *Clone) {
+  std::unordered_map<std::string, const StructDeclExprAST *> ByName;
+  for (const auto *Decl : HoistedStructDecls_)
+    ByName[Decl->getName()] = Decl;
+  // Register the clone itself under its own (already-mangled) name so a
+  // field edge naming it (a nested self-reference through this specific
+  // instantiation) resolves correctly -- see this function's own doc
+  // comment (Resolver.h) for why only THIS one node needs to be a DFS root.
+  ByName[Clone->getName()] = Clone;
+  detectStructLayoutCycles(ByName, {Clone->getName()});
 }
 
 

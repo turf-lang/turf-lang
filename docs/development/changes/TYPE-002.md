@@ -5,7 +5,7 @@
 | **Status** | in-progress |
 | **Dates** | started 2026-09-21 · landed — |
 | **Commits** | (added at the end of each sub-session) |
-| **Sessions** | 4 of 8 (S11a, S11b, S12a, S12b done; S13a, S13b, S14a, S14b remain) |
+| **Sessions** | 5 of 8 (S11a, S11b, S12a, S12b, S13a done; S13b, S14a, S14b remain) |
 | **Depends on** | TYPE-001 (landed 2026-09-18), SEM-001 (landed 2026-09-18); strongly benefits from OPT-001 (landed 2026-09-18) |
 | **Frozen decisions relied on** | F-GEN-1, F-GEN-2, F-GEN-3, F-OP-1 (unaffected but adjacent — see §9.8) |
 
@@ -108,6 +108,34 @@ S12b: a method that is generic IN ITS OWN RIGHT on a NON-generic struct
 (`fn<T> Box.echo(x: T): T` where `Box` itself has no type parameters) is
 never even recorded as an instantiation request today — see *Known
 pitfalls*.
+
+**What's ALSO real as of S13a**: every generic STRUCT instantiation
+(`List<int>`, `List<string>`, `List<double>`, `List<Point>`, `List<Point*>`,
+even nested `List<List<int>>`) now gets its own real, independently-
+registered `TurfStructType` (`GlobalSymbolTable`, keyed by its mangled
+instantiation name — e.g. `List_gen1_int`) and, once that clone reaches
+Codegen, its own real, distinct `llvm::StructType` — verified live via a
+temporary debug print during this session (see *Compiler architecture*):
+```
+[S13a-debug] registering List_gen1_int with 3 fields: data:int* len:int cap:int
+[S13a-debug] registering List_gen1_string with 3 fields: data:string* len:int cap:int
+[S13a-debug] registering List_gen1_double with 3 fields: data:double* len:int cap:int
+[S13a-debug] registering List_gen1_Point with 3 fields: data:Point* len:int cap:int
+[S13a-debug] registering List_gen1_Point_ptr with 3 fields: data:Point** len:int cap:int
+[S13a-debug] registering List_gen1_List_int with 3 fields: data:List<int>* len:int cap:int
+```
+each correctly substituted, distinct from every other instantiation and
+from the shared template. **This session is deliberately additive only**:
+nothing yet REDIRECTS any consumer (`self`'s own LLVM pointee type via
+`getLLVMType()`'s `GenericType` branch, or `FieldAccessExprAST`'s two
+`GenericType`→base-name collapse points) to use these new per-instantiation
+types — they exist, are independently verifiable, and are acyclicity-
+checked, but every actual field access and `self` pointer still resolves
+through the shared, erasure-era base-name layout, exactly as before this
+session. That's S13b's job (see its own session-plan entry, below) — this
+is why S13a changes *zero* observable program behaviour (confirmed by the
+full suite staying byte-for-byte unchanged, 682/682, at both optimization
+levels) despite adding real, independent type identity underneath.
 
 ### Is this breaking?
 
@@ -320,6 +348,84 @@ sweep clean.
   vice versa), and that nested request needs the OTHER drain function to
   act on it. This is what the non-destructive collector redesign above
   makes possible at all.
+
+**S13a gives each struct instantiation its own real `TurfStructType` and
+LLVM layout** — deliberately additive (see *New behaviour* above for what
+this does and does NOT yet change). Full suite green at 682/682 (681 + 1
+new test) at both the default and `-O2` optimization levels;
+`lib/std`/`showcase`/prelude sweep clean; both plan-named regression tests
+(`tests/06_structs/25_generic_struct_construction.tr`,
+`tests/10_default_init/17_generic_list_default_then_use.tr`) still pass.
+
+**What S13a added, concretely:**
+- `StructDeclExprAST::setName()`/`::clearTypeParams()` (`ASTDecl.h`) — the
+  struct counterpart of `FuncDefExprAST`'s S12a-era setters, same contract:
+  rename to the mangled instantiation name and mark "no longer generic"
+  before the clone is re-resolved. Unlike `FuncDefExprAST`, no codegen
+  template-skip guard needed adding for structs — `main.cpp`'s sub-pass 2c
+  already codegens every `StructDeclExprAST` it finds unconditionally (no
+  `TypeParams`-empty check exists there at all), so a clone with
+  `TypeParams` already cleared is picked up automatically, and the
+  TEMPLATE's own struct decl node is deliberately left in `PrePassASTs` and
+  keeps codegenning the shared, erasure-era layout every EXISTING
+  (non-monomorphized) reference still needs.
+- `Resolver::checkStructLayoutAcyclicityForClone()` (`Resolver.h`/
+  `ResolverCore.cpp`) — the per-instantiation acyclicity check the plan
+  called for, built by REFACTORING (not duplicating) the Pass-1 template-
+  level `checkStructLayoutAcyclicity()`: its DFS/`byValueEdgeTarget()` core
+  is now a shared free function, `detectStructLayoutCycles(ByName,
+  StartNames)`, parameterized over which names to start a fresh DFS from.
+  The Pass-1 caller starts from every hoisted struct; this new one starts
+  from just the one freshly-substituted clone, registered into a COPY of
+  `ByName` under its own already-mangled name. See *Known pitfalls* for a
+  real limitation found while implementing this, not the plan's own
+  framing: `byValueEdgeTarget()` always resolves a `GenericType`-typed field
+  to its BASE name, never a specific instantiation, which means this
+  per-clone check provably cannot catch any cycle the Pass-1 template-level
+  check doesn't already catch, for any input reachable through this
+  language's actual (finite) type syntax — see that section for the full
+  argument and the one cross-struct cycle shape it still misses.
+- `Monomorphize::drainStructRequests()` — the Struct-kind driver, following
+  the same clone/substitute/register/re-resolve shape as the other two
+  drain functions, with two real differences from both, found live while
+  testing this session (see *Removed assumptions*): (1) its own registry
+  (`buildStructDeclRegistry()`) is keyed by BARE STRUCT NAME ONLY, not
+  `(SourceModule, DeclKey)` the way `buildDeclRegistry()` (functions) is —
+  a Struct-kind request's own `SourceModule` field turned out to be
+  unreliable (read off the receiver's PARSED `GenericType::getModule()`,
+  which reflects use-site spelling, not the struct's real declaring
+  module); (2) for the SAME reason, `resolveMonomorphizedClone()`'s module
+  argument is the registry's OWN recorded true declaring module
+  (`StructRegistryEntry::Module`, captured while walking `PrePassASTs`),
+  never `Entry.Request.SourceModule`. Registers the new `TurfStructType`
+  directly into `GlobalSymbolTable` (bullet 1 of S13a's own plan) and runs
+  `checkStructLayoutAcyclicityForClone()` on the clone BEFORE registering it
+  (bullet 2) — both wrapped in the same style of nested `setjmp`/`longjmp`
+  harness `finishInstantiation()` already established for the resolve step,
+  for the identical defensive reason (an unexpected failure here means a
+  compiler bug, not a user error, since every substituted field type
+  already passed this exact validation once at its original call site).
+  Deliberately does NOT rewrite anything at the requesting call sites — see
+  this function's own doc comment (`Monomorphize.h`) for why nothing needs
+  to be repointed at the new type yet this session.
+- `main.cpp`'s sub-pass 2b.5 loop now calls `drainStructRequests()` as a
+  THIRD participant in the same alternating fixed-point loop, for the
+  identical reason methods/free-functions already do: a struct request can
+  be discovered mid-sweep by either of the other two drain functions (a
+  method clone's own `self` type, or a nested generic call's
+  `VarDeclExprAST`).
+- `Types.cpp:206-222`'s bare-name↔`GenericType` compatibility comment
+  rewritten (bullet 3 of S13a's own plan) — the LOGIC is unchanged (still
+  needed: U-5 already established there is no `Box<int> { ... }` literal
+  syntax, so this leniency is a syntactic necessity, not an erasure-model
+  convenience), but its OWN justification no longer appeals to "the
+  type-erasure model, no information lost" (no longer true the moment this
+  session's per-instantiation types exist) — rewritten to cite U-5 directly:
+  a generic struct instantiation's type arguments come ENTIRELY from the
+  declared type at the binding site, never the initializer, so this
+  TypeChecker-only candidate-matching rule never has to choose BETWEEN
+  layouts and stays correct regardless of how many distinct layouts exist
+  by the time Codegen runs.
 
 ## Runtime changes
 
@@ -584,6 +690,38 @@ literal chain-depth measurement §9.5 describes; see *Known pitfalls*.
   deferred to a later session rather than attempted under this session's
   time pressure. Disclosed here rather than silently left for someone to
   rediscover.
+- **A Struct-kind `InstantiationRequest`'s own `SourceModule` field is
+  unreliable as a registry key, unlike a FreeFunction/Method one, and this
+  was found live, not anticipated by S13a's plan.** `drainFreeFunctionRequests()`/
+  `drainMethodRequests()` both key their template registry by
+  `(SourceModule, DeclKey)`, and it works because their `SourceModule` comes
+  from the already-RESOLVED symbol's own `SourceModule` field
+  (`Best->SourceModule`) — reliable regardless of how the call site spelled
+  the reference. A Struct-kind request's `SourceModule`
+  (`TypeCheckerDecl.cpp`'s `visitVarDecl`, `TypeCheckerCall.cpp`'s
+  `visitMethodCall`) instead comes from the receiver's own PARSED
+  `GenericType::getModule()` — which reflects how the type was SPELLED at
+  its use site (empty unless written with an explicit `mod::` qualifier),
+  not the struct's actual declaring module. Confirmed live:
+  `lib/std/collections/list.tr`'s own `list_sort(l: List<int>, ...)` refers
+  to `List` completely unqualified (declared in the same file) —
+  `BaseGT->getModule()` is `""`, but a registry keyed the
+  `buildDeclRegistry()` way would only ever have `"list::List"` registered
+  (from recursing into `list.tr`'s own `ModuleImportExprAST` body), never
+  `"::List"` — a guaranteed miss for EVERY unqualified use of a generic
+  struct anywhere, not just this one, surfacing as "Internal error: no
+  generic struct declaration found for 'List'." Fixed by keying
+  `buildStructDeclRegistry()` by BARE NAME ONLY, which loses no real
+  disambiguating power here specifically because structs, unlike free
+  functions, are ALREADY flat/globally-namespaced everywhere else in this
+  compiler: `GlobalSymbolTable::RegisterType()`/`LookupType()`
+  (`SymbolTable.h`) take no module argument at all — two different modules
+  cannot legally declare two different structs sharing one name today
+  regardless of what this registry does. The SAME fix applies to
+  `resolveMonomorphizedClone()`'s own module argument: it now reads the
+  registry's own recorded TRUE declaring module
+  (`StructRegistryEntry::Module`), not `Entry.Request.SourceModule`, for the
+  identical reason.
 
 ## Tests
 
@@ -623,6 +761,26 @@ S12b adds one more test, all passing (681/681 full suite, default and
   (see *Removed assumptions*). This test failed with "Internal compiler
   error: ... does not have terminator! label %or.merge" before that fix
   and passes cleanly after, with no other change.
+
+S13a adds one more test, all passing (682/682 full suite, default and
+`-O2`):
+- `05_struct_multi_instantiation.tr` — `List<int>`, `List<double>`,
+  `List<string>`, `List<Point>` (a generic struct instantiated with a
+  user-defined struct as its type argument, BY VALUE), `List<Point*>` (the
+  SAME base struct instantiated with a pointer type argument instead — a
+  genuinely different instantiation that must coexist independently of the
+  by-value one), and a nested `List<List<int>>`, all coexisting correctly
+  in one program with independently-asserted behaviour, plus a final
+  coexistence check confirming the FIRST instantiation (`List<int>`) is
+  still uncorrupted after every later one has been created and used. Not a
+  test of NEW observable behaviour (S13a is deliberately additive — see
+  *New behaviour*) — this is a regression/coverage test proving every one
+  of these instantiations still compiles and runs correctly with the new
+  per-instantiation `TurfStructType`/registry machinery sitting underneath,
+  unused but present. `List<List<int>>` is written with a space before the
+  closing `>>` (`List<List<int> >`) — this parser lexes `>>` as a single
+  right-shift token with no generic-context disambiguation, a pre-existing,
+  unrelated limitation this session doesn't touch.
 
 ## Known pitfalls
 
@@ -702,6 +860,39 @@ S12b adds one more test, all passing (681/681 full suite, default and
   would need to add a parent-request pointer to `InstantiationRequest` and
   walk it backward from the request that tripped the cap, instead of
   dumping the whole cache.
+- **`checkStructLayoutAcyclicityForClone()` (S13a) provably cannot catch
+  any cycle the Pass-1 template-level check doesn't already catch, for any
+  program reachable through this language's actual (finite) type syntax —
+  found by careful analysis while implementing it, not something the plan's
+  own "reuse, do NOT write a second checker" framing flagged in advance.**
+  The reused `byValueEdgeTarget()` (`ResolverCore.cpp`) always resolves a
+  `GenericType`-typed field to its BASE name (`GT->getBaseName()`), never a
+  specific mangled instantiation — this is true whether it's called from
+  the Pass-1 template sweep or this session's new per-clone check. A DIRECT
+  self-reference (`struct Node<T> { next: Node<T> }`) is ALREADY caught at
+  Pass-1, template level, before monomorphization ever runs (the template's
+  own field already names "Node", regardless of what `T` substitutes to) —
+  confirmed by the ResolverCore.cpp doc comment this session's work is
+  built on top of. The genuinely NEW case per-clone substitution could in
+  principle expose — a type parameter substituted to a concrete struct that
+  itself, transitively, embeds the SAME instantiation back (e.g.
+  `struct A<T> { val: T }` + `struct B { back: A<B> }`, instantiated via
+  `mut x: A<B> = ...;`) — is NOT caught either: `A<B>`'s clone's own
+  substituted field `val: B` correctly finds the edge to `B` (this edge
+  genuinely didn't exist at template level, where `A`'s own `val: T` field
+  has no edge at all), but `B`'s OWN field `back: A<B>` resolves via
+  `byValueEdgeTarget()`'s `GenericType` branch to the BASE name `"A"` (the
+  TEMPLATE), never back to the specific clone `"A_gen1_B"` the DFS actually
+  started from — so the walk terminates at the template's own dead-end
+  `val: T` field instead of closing the cycle. No FALSE NEGATIVE risk
+  exists for any of `lib/std`'s real generic structs today (none embed a
+  user-supplied type argument by value at all — every one uses `T*`), so
+  this is a real, disclosed gap in COVERAGE, not a live correctness bug —
+  closing it in general would need `byValueEdgeTarget()` itself to resolve
+  a `GenericType` field to a SPECIFIC already-registered clone's mangled
+  name when one exists, instead of always the base name, which is a
+  genuinely different (and larger) change than "reuse the existing
+  mechanism," left to a future session if this gap is ever hit for real.
 
 ## Handbook impact
 

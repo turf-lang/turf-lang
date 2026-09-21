@@ -1,0 +1,93 @@
+// Regression test: TYPE-002 S13a -- "one real TurfStructType and one real
+// LLVM layout per struct instantiation." List<int>, List<double>,
+// List<string>, List<Point>, List<Point*>, and a nested List<List<int>>
+// all coexist in the same program, each getting its own registered
+// TurfStructType (GlobalSymbolTable, keyed by mangled instantiation name)
+// and its own distinct llvm::StructType (Monomorphize.cpp's
+// drainStructRequests()) -- struct FIELD ACCESS still resolves through the
+// shared, erasure-era base-name layout this session (S13b's job, not
+// S13a's -- see the change record), so this test's job is to prove
+// COEXISTENCE and correctness, not to prove independent field layouts
+// (that's S13b/S14a's headline: the >8-byte ICE).
+import list::List;
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+fn main(): int {
+    mut ints: List<int> = List::default();
+    ints.push(1);
+    ints.push(2);
+    ints.push(3);
+    test::assert(ints.length() == 3, "List<int> length wrong");
+    test::assert(ints.pop() == 3, "List<int> pop wrong");
+
+    mut dbls: List<double> = List::default();
+    dbls.push(1.5);
+    dbls.push(2.5);
+    test::assert(dbls.length() == 2, "List<double> length wrong");
+    test::assert(dbls.pop() == 2.5, "List<double> pop wrong");
+
+    mut strs: List<string> = List::default();
+    strs.push("a");
+    strs.push("b");
+    strs.push("c");
+    test::assert(strs.length() == 3, "List<string> length wrong");
+    test::assert(strs.pop() == "c", "List<string> pop wrong");
+
+    // Generic struct instantiation, by value.
+    mut pts: List<Point> = List::default();
+    pts.push(Point::new(1, 2));
+    pts.push(Point::new(3, 4));
+    test::assert(pts.length() == 2, "List<Point> length wrong");
+    mut p: Point = pts.pop();
+    test::assert(p.x == 3 && p.y == 4, "List<Point> pop wrong");
+
+    // Same base struct, instantiated via a pointer type argument instead --
+    // a DIFFERENT instantiation (List<Point*> != List<Point>) that must
+    // coexist independently of the by-value one above.
+    unsafe {
+        mut pt1: Point = Point::new(5, 6);
+        mut ptrs: List<Point*> = List::default();
+        ptrs.push(&pt1 to Point*);
+        test::assert(ptrs.length() == 1, "List<Point*> length wrong");
+        mut pp: Point* = ptrs.pop();
+        test::assert(pp != null && pp == (&pt1 to Point*),
+                    "List<Point*> pop wrong");
+        // Direct field reads (not just address-of) -- see Lint.cpp's own
+        // known VarDecl gap (docs/development, not this session's job):
+        // AddressOf-only use of a variable doesn't register as a "read"
+        // for the unused-variable/dead-store lint.
+        test::assert(pt1.x == 5 && pt1.y == 6, "pt1 fields wrong");
+    }
+
+    // Nested generics: List<List<int>> -- the OUTER instantiation's own
+    // type argument is itself a generic-struct instantiation. Written with
+    // a space before the closing '>>' -- this parser lexes ">>" as a single
+    // right-shift token with no generic-context disambiguation, a
+    // pre-existing, unrelated limitation, not something S13a touches.
+    mut nested: List<List<int> > = List::default();
+    mut inner: List<int> = List::default();
+    inner.push(42);
+    nested.push(inner);
+    test::assert(nested.length() == 1, "List<List<int>> length wrong");
+    mut got: List<int> = nested.pop();
+    test::assert(got.length() == 1 && got.data[0] == 42,
+                "List<List<int>> pop wrong");
+
+    // Coexistence sanity: List<int> from earlier is still correct after
+    // every other instantiation above has been created and used.
+    test::assert(ints.length() == 2, "List<int> corrupted by later instantiations");
+    test::assert(ints.data[0] == 1 && ints.data[1] == 2,
+                "List<int> contents corrupted by later instantiations");
+
+    return 0;
+}

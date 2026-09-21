@@ -286,6 +286,33 @@ bool drainMethodRequests(
     std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
     InstantiationCollector &Collector, Resolver &PreR);
 
+/// TYPE-002 (S13a): the Struct-kind counterpart to
+/// drainFreeFunctionRequests()/drainMethodRequests() -- gives each generic
+/// struct instantiation (e.g. `List<int>`, `List<string>`) its own real
+/// `TurfStructType` (registered in GlobalSymbolTable under its mangled
+/// instantiation name) and, once the clone is appended to @p PrePassASTs,
+/// its own real, distinct `llvm::StructType` (main.cpp's ordinary sub-pass
+/// 2c struct-codegen loop already codegens every StructDeclExprAST it finds
+/// unconditionally -- no template-skip guard exists or is needed for
+/// structs, unlike functions -- see this function's .cpp doc comment).
+///
+/// Deliberately does NOT rewrite anything at the requesting call sites
+/// (Entry.Sites): unlike a FreeFunction/Method instantiation, nothing reads
+/// a "which struct type did this site resolve to" field yet -- Codegen's
+/// two existing GenericType->base-name collapse points
+/// (FieldAccessExprAST::codegenLValue()/::codegen(), CodegenStruct.cpp) and
+/// getLLVMType()'s own GenericType branch (CodegenCore.cpp) are ALL left
+/// exactly as they are this session, on purpose: this is S13b's job. The
+/// per-instantiation type this function creates EXISTS and is independently
+/// verifiable (its own registration, its own acyclicity check, its own LLVM
+/// layout) but is not yet CONSUMED by anything -- purely additive, zero risk
+/// of changing any existing program's compiled behaviour, matching this
+/// session's "same program, same output" mandate (TYPE-002.md's own "Is
+/// this breaking?" section). Returns true if it drained at least one entry.
+bool drainStructRequests(
+    std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
+    InstantiationCollector &Collector, Resolver &PreR);
+
 } // namespace Monomorphize
 
 #endif // MONOMORPHIZE_H

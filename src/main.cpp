@@ -952,6 +952,17 @@ static int runCompilerMain(int argc, char **argv) {
               Progress = false;
               Progress |= Monomorphize::drainFreeFunctionRequests(PrePassASTs, MonoCollector, PreR);
               Progress |= Monomorphize::drainMethodRequests(PrePassASTs, MonoCollector, PreR);
+              // TYPE-002 (S13a): a third, independent consumer of the SAME
+              // non-destructive collector -- a struct instantiation request
+              // can be discovered mid-sweep by either of the other two (a
+              // method clone's own `self` type, or a nested generic call's
+              // VarDeclExprAST), and this one, in turn, never discovers a
+              // NEW FreeFunction/Method request itself (a struct decl has no
+              // body/call sites of its own) -- but it still participates in
+              // the SAME fixed-point loop rather than running once after,
+              // since ordering between the three is not guaranteed by
+              // discovery order alone.
+              Progress |= Monomorphize::drainStructRequests(PrePassASTs, MonoCollector, PreR);
             }
           } else {
             PreTCClean = false;

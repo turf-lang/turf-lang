@@ -5,6 +5,7 @@
 #include "Errors.h"
 #include "ErrorsMonomorphize.h"
 #include "Resolver.h"
+#include "SymbolTable.h" // GlobalSymbolTable -- RegisterType()'s target, distinct from Resolver's own SymTable_
 #include "TypeChecker.h"
 
 #include <cstring>
@@ -768,6 +769,231 @@ bool drainMethodRequests(
       if (auto *MC = dynamic_cast<MethodCallExprAST *>(Site))
         MC->ResolvedCallTarget = ClonedSymbol;
     }
+    Entry.Drained = true;
+    DidWork = true;
+  }
+  return DidWork;
+}
+
+// ─── Drain: structs ──────────────────────────────────────────────────────────
+
+namespace {
+
+/// Struct counterpart of buildDeclRegistry(): walks PrePassASTs (recursing
+/// into every ModuleImportExprAST's own body, same traversal) collecting
+/// every StructDeclExprAST with a non-empty TypeParams list.
+///
+/// Keyed by BARE NAME ONLY -- deliberately NOT (SourceModule, Name) the way
+/// buildDeclRegistry() (functions/methods) is, even though
+/// InstantiationRequest carries a SourceModule field for every Kind. Found
+/// live while testing this session: a Struct-kind request's SourceModule
+/// (TypeCheckerDecl.cpp's visitVarDecl, TypeCheckerCall.cpp's
+/// visitMethodCall) is read off the receiver's own parsed GenericType::getModule()
+/// -- which reflects how the type was SPELLED at its use site (empty unless
+/// written with an explicit `mod::` qualifier), NOT the struct's actual
+/// declaring module. A FreeFunction/Method request's SourceModule, by
+/// contrast, is read off the already-RESOLVED symbol's own SourceModule
+/// field (Best->SourceModule) -- reliable regardless of call-site spelling.
+/// Confirmed live: `lib/std/collections/list.tr`'s OWN `list_sort(l:
+/// List<int>, ...)` refers to `List` completely unqualified (it's declared
+/// in the SAME file) -- BaseGT->getModule() is "", but a registry keyed
+/// (SourceModule, Name) the way buildDeclRegistry() is would only have
+/// "list::List" registered (from recursing into list.tr's own
+/// ModuleImportExprAST body), never "::List" -- a guaranteed miss for
+/// EVERY unqualified use of a generic struct anywhere, not just this one.
+/// This is safe here specifically because structs, UNLIKE free functions,
+/// are already flat/globally-namespaced everywhere else in this compiler:
+/// GlobalSymbolTable::RegisterType()/LookupType() (SymbolTable.h) take no
+/// module argument at all -- two different modules cannot legally declare
+/// two different structs sharing one name today regardless of what this
+/// registry does, so bare-name keying loses no real disambiguating power.
+///
+/// The Module string carried alongside each entry is the struct's own TRUE
+/// declaring module (where the Walk actually found it), independent of
+/// Entry.Request.SourceModule -- resolveMonomorphizedClone() (below) needs
+/// THIS one, not the request's, for the identical reason the lookup itself
+/// can't use the request's: a clone must resolve as if declared in the
+/// module it actually came from, regardless of how the REQUESTING site
+/// happened to spell the reference to it.
+struct StructRegistryEntry {
+  StructDeclExprAST *Decl;
+  std::string Module;
+};
+
+std::unordered_map<std::string, StructRegistryEntry>
+buildStructDeclRegistry(const std::vector<std::unique_ptr<ExprAST>> &PrePassASTs) {
+  std::unordered_map<std::string, StructRegistryEntry> Registry;
+  std::function<void(const std::vector<std::unique_ptr<ExprAST>> &, const std::string &)>
+      Walk = [&](const std::vector<std::unique_ptr<ExprAST>> &Nodes,
+                const std::string &Module) {
+    for (const auto &N : Nodes) {
+      if (auto *SD = dynamic_cast<StructDeclExprAST *>(N.get())) {
+        if (!SD->getTypeParams().empty())
+          Registry[SD->getName()] = {SD, Module};
+      } else if (auto *MI = dynamic_cast<ModuleImportExprAST *>(N.get())) {
+        if (auto *Body = dynamic_cast<const BlockExprAST *>(MI->getBody()))
+          Walk(Body->getExpressions(), MI->getModuleName());
+      }
+    }
+  };
+  Walk(PrePassASTs, "");
+  return Registry;
+}
+
+} // namespace
+
+bool drainStructRequests(
+    std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
+    InstantiationCollector &Collector, Resolver &PreR) {
+  std::unordered_map<std::string, StructRegistryEntry> Registry =
+      buildStructDeclRegistry(PrePassASTs);
+
+  int TotalDrained = 0;
+  bool DidWork = false;
+
+  for (size_t Idx = 0; Idx < Collector.cache().size(); ++Idx) {
+    InstantiationEntry &Entry = Collector.entryAt(Idx);
+
+    if (Entry.Drained)
+      continue;
+    if (Entry.Request.Kind != InstantiationKind::Struct)
+      continue; // FreeFunction/Method: the other two drain functions.
+
+    if (Entry.Sites.empty())
+      continue; // Defensive -- record() always pushes at least one site.
+
+    // Bare-name lookup, NOT registryKey(SourceModule, DeclKey) -- see
+    // buildStructDeclRegistry()'s own doc comment for why a Struct-kind
+    // request's SourceModule can't be trusted as a registry key the way a
+    // FreeFunction/Method one can.
+    auto RegIt = Registry.find(Entry.Request.DeclKey);
+    if (RegIt == Registry.end()) {
+      // Should be unreachable: every Struct-kind request's DeclKey came from
+      // a real GenericType's own base name at a point (VarDeclExprAST's
+      // declared type, or a method call's receiver, TypeCheckerCall.cpp/
+      // TypeCheckerDecl.cpp) that only ever produces a GenericType for an
+      // already-resolved, real struct declaration.
+      SemanticError(Entry.Request.Site,
+                    "Internal error: no generic struct declaration found "
+                    "for '" + Entry.Request.DeclKey +
+                        "' during monomorphization. This is a compiler bug.")
+          .raise();
+      return DidWork;
+    }
+    StructDeclExprAST *Template = RegIt->second.Decl;
+    const std::string &TemplateModule = RegIt->second.Module;
+
+    if (++TotalDrained > kMaxInstantiationDepth) {
+      std::vector<std::string> Chain;
+      for (const auto &E : Collector.cache().all())
+        Chain.push_back(E.Request.DeclKey);
+      GenericInstantiationDepthError(Entry.Request.Site, Chain).raise();
+      return DidWork;
+    }
+
+    // Build the name->concrete substitution map from the struct's OWN
+    // TypeParams (declared order, e.g. `struct Map<K, V>` -> ["K", "V"])
+    // paired positionally with the request's own ordered TypeArgs.
+    std::unordered_map<std::string, TurfTypePtr> Subst;
+    const auto &TypeParams = Template->getTypeParams();
+    for (size_t i = 0; i < TypeParams.size() && i < Entry.Request.TypeArgs.size(); ++i)
+      Subst[TypeParams[i]] = Entry.Request.TypeArgs[i];
+
+    // Clone, then substitute every field's type concretely. The template's
+    // OWN Fields already carry TurfGenericParamType uniformly (the whole
+    // program's ordinary resolveAll() already ran Resolver::visitStructDecl()
+    // over it before sub-pass 2b.5 starts, the same way a FuncDefExprAST
+    // template's Params/body already do -- see drainFreeFunctionRequests()'s
+    // own comment), so substituteConcreteTypes() (its first branch already
+    // handles TurfGenericParamType directly) is all that's needed -- no
+    // separate body walker: a struct has no body, only a flat field list.
+    auto ClonedUP = CloneExprAST(Template);
+    auto *Clone = static_cast<StructDeclExprAST *>(ClonedUP.get());
+    for (auto &Field : Clone->getFieldsMut())
+      Field.Type = substituteConcreteTypes(Field.Type, Subst);
+
+    // Rename to the SAME mangling scheme drainFreeFunctionRequests()/
+    // drainMethodRequests() already use (§9.5) -- "List" + [int] ->
+    // "List_gen1_int" -- BEFORE anything below reads Clone->getName(), and
+    // clear TypeParams so a later Resolver::visitStructDecl() call on this
+    // clone (below) treats it as fully concrete, same contract as
+    // FuncDefExprAST::clearTypeParams() (S12a).
+    Clone->setName(instantiatedDeclName(Entry.Request.DeclKey, Entry.Request.TypeArgs));
+    Clone->clearTypeParams();
+
+    // Per-instantiation acyclicity -- BEFORE registering the new type, so a
+    // genuinely cyclic instantiation never reaches GlobalSymbolTable/Codegen
+    // at all. Raises StructLayoutCycleError directly (propagates to
+    // main.cpp's own sub-pass-2b.5-level setjmp, the SAME already-verified
+    // path GenericInstantiationDepthError above already relies on -- see
+    // Monomorphize.h's own doc comment on this function for why no extra
+    // nested catch is needed here, unlike finishInstantiation()'s TypeChecker
+    // re-raise).
+    PreR.checkStructLayoutAcyclicityForClone(Clone);
+
+    // Register the new, distinct TurfStructType -- GlobalSymbolTable (the
+    // codegen/typechecker-facing type registry), NOT Resolver's own
+    // SymTable_ (a different, name-existence-only registry -- see
+    // resolveMonomorphizedClone() below for that one). This is bullet 1 of
+    // S13a's own plan (TYPE-002.md): "one real TurfStructType ... per struct
+    // instantiation," registered "under extended mangled names."
+    if (GlobalSymbolTable)
+      GlobalSymbolTable->RegisterType(
+          Clone->getName(),
+          std::make_shared<TurfStructType>(Clone->getName(), Clone->getFields()));
+
+    // Re-resolve: registers the clone's own name into Resolver's SymTable_
+    // (ResolverTypeRegistry) via Resolver::visitStructDecl(), reused
+    // completely unchanged -- StructDeclExprAST::accept() dispatches through
+    // the exact same visitor entry point resolveMonomorphizedClone() already
+    // uses for a FuncDefExprAST clone (S12b) -- and validates every
+    // (already-concrete) field type is visible from Entry.Request.SourceModule's
+    // scope, fixing the identical two real bugs that method resolved for:
+    // module-scope ("List" needs to resolve as local from list.tr's own
+    // context) and substituted-type visibility (a field type naming a
+    // struct from a module the template's own declaring module never
+    // imports, e.g. Map<string, JsonValue>'s V=JsonValue). Wrapped in the
+    // same nested setjmp/longjmp harness finishInstantiation() uses for the
+    // identical defensive reason: this should never legitimately fail for a
+    // field type that already passed this exact check once, at the original
+    // call site -- if it does, that is a compiler bug, not a user error.
+    bool ResolveFailed = false;
+    {
+      const bool SavedRecoverActive = g_recoverActive;
+      jmp_buf SavedJmpBuf;
+      std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
+      g_recoverActive = true;
+      if (setjmp(g_recoverJmp) == 0) {
+        // TemplateModule, NOT Entry.Request.SourceModule -- see
+        // buildStructDeclRegistry()'s own doc comment (StructRegistryEntry)
+        // for why the request's own SourceModule is unreliable here.
+        PreR.resolveMonomorphizedClone(Clone, TemplateModule);
+      } else {
+        ResolveFailed = true;
+      }
+      g_recoverActive = SavedRecoverActive;
+      std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
+    }
+    if (ResolveFailed) {
+      SemanticError(Entry.Request.Site,
+                    "Internal error: monomorphized instantiation of '" +
+                        Entry.Request.DeclKey +
+                        "' failed to re-resolve. This is a compiler bug.")
+          .raise();
+      return DidWork;
+    }
+
+    // Register: append to PrePassASTs so main.cpp's ORDINARY sub-pass 2c
+    // struct-codegen loop picks this up -- unconditionally, exactly like
+    // every other StructDeclExprAST it finds, since that loop carries no
+    // TypeParams-empty skip guard at all (unlike sub-pass 3a/3b's function
+    // guard) -- producing a real, distinct llvm::StructType under this
+    // clone's own mangled name, independent of the shared, erasure-era one
+    // the TEMPLATE's own (still-present, still-codegenned) struct decl node
+    // keeps producing. No call-site rewrite: see this function's own doc
+    // comment (Monomorphize.h) for why nothing needs to be pointed at the
+    // new type yet this session.
+    PrePassASTs.push_back(std::move(ClonedUP));
     Entry.Drained = true;
     DidWork = true;
   }

@@ -151,6 +151,43 @@ public:
   }
 
   /**
+   * @brief TYPE-002 (S13a): per-instantiation acyclicity check for one
+   *        freshly-cloned, freshly-substituted generic struct.
+   *
+   * checkStructLayoutAcyclicity() (private, below) is the Pass-1, TEMPLATE-
+   * level check: it walks every hoisted struct's fields as-declared, where a
+   * generic struct's own type-parameter-typed field (`val: T`) carries no
+   * edge at all (byValueEdgeTarget() finds no NamedType/GenericType/
+   * TurfStructType to match). That check is already sufficient for every
+   * generic struct in this language's stdlib today, because a direct BY-
+   * VALUE self-reference (`struct Node<T> { next: Node<T> }`) is flagged
+   * there directly, AS a self-edge, regardless of what T ends up being. What
+   * the template-level check CANNOT see is a cycle that only exists once a
+   * SPECIFIC type argument is substituted in -- e.g. `struct A<T> { val: T }`
+   * instantiated as `A<B>` where `struct B { val: A<B> }`: at the template
+   * level, A's own field is `val: T` (no edge), so the cycle through B is
+   * invisible; only after substituting T -> B does `val: T` become
+   * `val: B` and the DFS below correctly finds A_B -> B -> A_B.
+   *
+   * Reuses the exact same DFS/byValueEdgeTarget() machinery
+   * (ResolverCore.cpp, anonymous namespace) as checkStructLayoutAcyclicity()
+   * -- not a second checker -- scoped to a SINGLE new node (@p Clone, whose
+   * OWN Name is already its unique mangled instantiation name and whose
+   * Fields are already fully substituted to concrete types by the caller):
+   * every OTHER struct already known to this Resolver (HoistedStructDecls_)
+   * is trusted to already be acyclic (Pass 1 already proved that), so only
+   * @p Clone itself needs to be walked as a DFS root.
+   *
+   * Raises StructLayoutCycleError directly (like the Pass-1 check already
+   * does) if @p Clone's OWN fields close a cycle -- not re-wrapped in a
+   * monomorphizer "in this instantiation" note, unlike a TypeChecker
+   * failure (finishInstantiation(), Monomorphize.cpp): the diagnostic this
+   * raises already names the concrete offending field chain directly, which
+   * a generic re-wrapping would only make less precise.
+   */
+  void checkStructLayoutAcyclicityForClone(const StructDeclExprAST *Clone);
+
+  /**
    * @brief Resolve an entire program (list of top-level nodes).
    *
    * Convenience wrapper that iterates over a vector of unique_ptr<ExprAST>
