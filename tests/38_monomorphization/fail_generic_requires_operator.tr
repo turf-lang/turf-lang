@@ -1,0 +1,40 @@
+// Regression test: D7 (docs/development/changes/TYPE-002.md, S15) -- the
+// plan's own testing scope (ARCHITECTURE_OVERHAUL.md §8's TYPE-002 entry)
+// named `fail_generic_requires_operator.tr`, deferred twice (S12a -> S13a/
+// S13b) on the grounds it "is not exercisable yet". That reasoning went
+// stale once struct-bound generics were monomorphized (S13a/S13b): a `T`
+// lacking an operation its generic body needs is now a real, reachable
+// instantiation-site error.
+//
+// `Set<T>` requires `T` to support `==` (`Set.indexOf()`'s own
+// `self.items[i] == item`) -- a plain struct doesn't, by design (no
+// trait/constraint system, F-GEN-3 frozen; struct `==` requires an
+// explicit `operator ==` overload, tests/18_operator_overload/
+// 02_struct_operator_eq.tr). `s.add(...)` on a `Set<Big>` (no operator==
+// overload for Big) must be rejected, not silently miscompiled.
+//
+// KNOWN, DISCLOSED GAP (not asserted here -- see
+// ARCHITECTURE_OVERHAUL.md §27.2 item D25 and TYPE-002.md's own D7 entry):
+// the plan's stated requirement is that this error "points at the
+// instantiation site" -- today it does not. The primary diagnostic anchors
+// at `lib/std/collections/set.tr`'s own `Set.contains()` (the innermost
+// REQUESTER of `Set.indexOf<Big>`, itself called by `Set.add()`), one hop
+// short of naming this file's own `s.add(...)` call that actually started
+// the chain. `InstantiationRequest` tracks no parent pointer to walk
+// backward through, so there is no chain to anchor at the true outermost
+// site with. Fixing this is a real feature addition (also fixes the E079
+// chain-noise issue TYPE-002.md's own *Known pitfalls* already discloses),
+// deliberately not bundled into this defect-fix session -- this test
+// asserts only that the mechanism correctly REJECTS the program, which the
+// runner's `fail_*.tr` convention already covers (a reported diagnostic,
+// not a hang or an internal-compiler-error).
+import set::Set;
+
+struct Big { a: int, b: int, c: int }
+fn Big.new(x: int, y: int, z: int): void { self.a = x; self.b = y; self.c = z; }
+
+fn main(): int {
+    mut s: Set<Big> = Set::default();
+    s.add(Big::new(1, 2, 3));
+    return 0;
+}
