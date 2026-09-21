@@ -580,6 +580,27 @@ Value *ScopeAccessExprAST::codegen() {
 
 
 Value *StructDeclExprAST::codegen() {
+  // TYPE-002 (S14a): a StructDeclExprAST with non-empty TypeParams is an
+  // uninstantiated generic TEMPLATE -- drainStructRequests() (S13a) always
+  // appends a fully-concrete CLONE elsewhere in PrePassASTs for every
+  // instantiation the program actually needs, so the template's own shared,
+  // erasure-era layout (S13a/S13b deliberately left it codegenning
+  // unconditionally, coexisting with per-instantiation clones, while
+  // erasure still existed to make an open TurfGenericParamType field safe
+  // to lower) is now genuinely dead: nothing resolves a GenericType to it
+  // any more (getLLVMType()'s GenericType branch and FieldAccessExprAST's
+  // two collapse points were both redirected to the per-instantiation
+  // mangled name in S13b). Found live: even `Box<T> { val: T }`'s bare
+  // TEMPLATE field reaching getLLVMType(TurfGenericParamType) trips
+  // INV-GEN-1 the moment erasure's tolerant fallback is gone. Checked here,
+  // not just in main.cpp's sub-pass 2c loop, for the identical
+  // single-real-entry-point reason FuncDefExprAST::codegen() checks its own
+  // TypeParams internally (CodegenFunc.cpp) -- a struct declared inside an
+  // imported module is ALSO reached via ModuleImportExprAST::codegen()'s
+  // own recursive body walk, which has no equivalent guard of its own.
+  if (!TypeParams.empty())
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+
   // ── Fix for issue #176: Two-step struct creation ──────────────────────────
   // Step 1: Create (or reuse) an opaque StructType and register it in
   // LLVMTypeCache *before* evaluating any field types.  This ensures that a

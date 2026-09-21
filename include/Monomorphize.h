@@ -286,6 +286,24 @@ bool drainMethodRequests(
     std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
     InstantiationCollector &Collector, Resolver &PreR);
 
+/// TYPE-002 (S14a): the constructor counterpart of drainMethodRequests() --
+/// `fn<T> StructName.new(...)` called as `StructName::new(...)`. Still a
+/// FreeFunction-kind request (TypeCheckerCall.cpp's visitFuncCall records
+/// it that way, unchanged since S11b/S12a), so this shares
+/// drainFreeFunctionRequests()'s registry/Sites shape (FuncCallExprAST),
+/// not drainMethodRequests()'s (MethodCallExprAST) -- only the CLONE-
+/// BUILDING step (self-type-rewrite) is shared with methods. S12a
+/// deliberately excluded every struct-bound FreeFunction-kind entry from
+/// drainFreeFunctionRequests() because no per-instantiation struct layout
+/// existed yet for a substituted `self.<field>` reference to resolve
+/// against; S13a built that layout, and this function is what actually
+/// drains the requests S12a left recorded but permanently untouched. See
+/// the .cpp doc comment for the full mechanism and why it's safe. Returns
+/// true if it drained at least one entry.
+bool drainConstructorRequests(
+    std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
+    InstantiationCollector &Collector, Resolver &PreR);
+
 /// TYPE-002 (S13a): the Struct-kind counterpart to
 /// drainFreeFunctionRequests()/drainMethodRequests() -- gives each generic
 /// struct instantiation (e.g. `List<int>`, `List<string>`) its own real

@@ -952,16 +952,22 @@ static int runCompilerMain(int argc, char **argv) {
               Progress = false;
               Progress |= Monomorphize::drainFreeFunctionRequests(PrePassASTs, MonoCollector, PreR);
               Progress |= Monomorphize::drainMethodRequests(PrePassASTs, MonoCollector, PreR);
-              // TYPE-002 (S13a): a third, independent consumer of the SAME
+              // TYPE-002 (S14a): drains the struct-bound FreeFunction-kind
+              // entries drainFreeFunctionRequests() deliberately skips
+              // (`StructName::new(...)` constructors) -- see its own doc
+              // comment (Monomorphize.h/.cpp) for why this needed S13a's
+              // per-instantiation struct layout to exist first.
+              Progress |= Monomorphize::drainConstructorRequests(PrePassASTs, MonoCollector, PreR);
+              // TYPE-002 (S13a): a fourth, independent consumer of the SAME
               // non-destructive collector -- a struct instantiation request
-              // can be discovered mid-sweep by either of the other two (a
-              // method clone's own `self` type, or a nested generic call's
-              // VarDeclExprAST), and this one, in turn, never discovers a
-              // NEW FreeFunction/Method request itself (a struct decl has no
-              // body/call sites of its own) -- but it still participates in
-              // the SAME fixed-point loop rather than running once after,
-              // since ordering between the three is not guaranteed by
-              // discovery order alone.
+              // can be discovered mid-sweep by any of the other three (a
+              // method/constructor clone's own `self` type, or a nested
+              // generic call's VarDeclExprAST), and this one, in turn, never
+              // discovers a NEW FreeFunction/Method request itself (a struct
+              // decl has no body/call sites of its own) -- but it still
+              // participates in the SAME fixed-point loop rather than
+              // running once after, since ordering between all four is not
+              // guaranteed by discovery order alone.
               Progress |= Monomorphize::drainStructRequests(PrePassASTs, MonoCollector, PreR);
             }
           } else {
@@ -1036,31 +1042,34 @@ static int runCompilerMain(int argc, char **argv) {
       // We set a global flag to stop after prototype creation.
       g_protoOnlyPass = true;
       for (auto &AST : PrePassASTs) {
-        // TYPE-002 (S12a): a FuncDefExprAST that STILL has a non-empty
-        // TypeParams list AND is NOT struct-bound (no "self" first param)
-        // is an uninstantiated FREE-function template -- the monomorphizer
-        // (sub-pass 2b.5, above) only ever appends a fully-concrete CLONE
-        // to PrePassASTs (TypeParams cleared) for exactly this population,
-        // and rewrites every call site to it; the template itself is never
-        // meant to reach Codegen with an open TurfGenericParamType anywhere
-        // in it (F-GEN-2, INV-GEN-1, planned). A STRUCT-BOUND generic
-        // (method or constructor) is deliberately excluded from this skip:
-        // S12a's drain leaves it un-monomorphized on purpose
-        // (drainFreeFunctionRequests()'s own doc comment, Monomorphize.cpp,
-        // explains why -- self carries no type argument, so a struct
-        // method's body can't be correctly substituted without S13a's
-        // per-instantiation struct layout) -- it still needs the ORDINARY,
-        // erasure-era codegen path this session, unchanged. Getting this
-        // condition wrong in either direction is exactly the kind of bug
-        // this group's own risk list warned about: too broad (plain
-        // `!TypeParams.empty()`) silently drops every generic struct
-        // method's codegen with no replacement, producing the identical
-        // "LLVM function not found" ICE this fix itself was written to
-        // chase down; too narrow re-introduces the double-codegen risk
-        // INV-CG-1 already names.
+        // TYPE-002 (S12a-S14a): a FuncDefExprAST that STILL has a non-empty
+        // TypeParams list is an uninstantiated GENERIC TEMPLATE -- the
+        // monomorphizer (sub-pass 2b.5, above) only ever appends a fully-
+        // concrete CLONE to PrePassASTs (TypeParams cleared) and rewrites
+        // every call site to it; the template itself is never meant to
+        // reach Codegen with an open TurfGenericParamType anywhere in it
+        // (F-GEN-2, INV-GEN-1). Originally (S12a) this only covered NON-
+        // struct-bound (free-function) templates -- a struct-bound generic
+        // (method or constructor) was deliberately left un-skipped, because
+        // S12a's drain left it un-monomorphized on purpose (no
+        // per-instantiation struct layout existed yet to substitute
+        // `self.<field>` against). S13a built that layout and S14a's own
+        // drainConstructorRequests()/visitMethodCall fix now monomorphize
+        // EVERY struct-bound generic too, so the exemption is gone: ANY
+        // FuncDefExprAST with non-empty TypeParams is now always a
+        // template with a real clone elsewhere in PrePassASTs, regardless
+        // of self-binding -- skipping all of them uniformly is what makes
+        // erasure's deletion (below, this session) safe: a template's body
+        // can still literally contain a TurfGenericParamType occurrence
+        // with no monomorphized equivalent operation to fall back on if it
+        // ever reached Codegen. Getting this too NARROW (the old,
+        // self-bound-exempting condition) reintroduces exactly the
+        // "Invalid bitcast"/erasure-branch-missing crash class this session
+        // deletes erasure specifically to get away from -- for a template
+        // whose body Codegen would now hit with no erasure branch left to
+        // catch it.
         if (auto *FD = dynamic_cast<FuncDefExprAST *>(AST.get()))
-          if (!FD->getTypeParams().empty() &&
-              (FD->getParams().empty() || FD->getParams()[0].Name != "self"))
+          if (!FD->getTypeParams().empty())
             continue;
         if (dynamic_cast<FuncDefExprAST *>(AST.get()) ||
             dynamic_cast<EnumDeclExprAST *>(AST.get()) ||
@@ -1093,11 +1102,11 @@ static int runCompilerMain(int argc, char **argv) {
         for (auto &AST : PrePassASTs) {
           if (dynamic_cast<StructDeclExprAST *>(AST.get()))
             continue;
-          // TYPE-002 (S12a): same template-skip as sub-pass 3a above --
-          // struct-bound generics deliberately excluded, see that comment.
+          // TYPE-002 (S12a-S14a): same template-skip as sub-pass 3a above --
+          // see that comment for the full history of why this now covers
+          // EVERY generic template uniformly, struct-bound or not.
           if (auto *FD = dynamic_cast<FuncDefExprAST *>(AST.get()))
-            if (!FD->getTypeParams().empty() &&
-                (FD->getParams().empty() || FD->getParams()[0].Name != "self"))
+            if (!FD->getTypeParams().empty())
               continue;
           // `export immut` constants have no real LLVM storage at all --
           // Resolver Pass 1 (hoistExportedConstant) already extracted their

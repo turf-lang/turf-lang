@@ -8,6 +8,7 @@
 #include "SymbolTable.h" // GlobalSymbolTable -- RegisterType()'s target, distinct from Resolver's own SymTable_
 #include "TypeChecker.h"
 
+#include <cassert>
 #include <cstring>
 
 namespace Monomorphize {
@@ -334,6 +335,43 @@ buildDeclRegistry(const std::vector<std::unique_ptr<ExprAST>> &PrePassASTs) {
   return Registry;
 }
 
+/// TYPE-002 (S14a): true if @p Name is a struct declared with its OWN
+/// `<...>` type-parameter list anywhere in @p PrePassASTs (top level or
+/// inside an imported module's body) -- used to decide whether a self-bound
+/// clone's `self` parameter needs GenericType wrapping
+/// (cloneAndSubstituteSelfBound()'s own doc comment) or should stay a bare
+/// `StructName*`. Needed because, as of this session, a Method-kind
+/// InstantiationRequest's TypeArgs can come from TWO structurally different
+/// sources that share no other distinguishing field: the RECEIVER's own
+/// GenericType (`l: List<int>` -> self must become `List<int>*`) or the
+/// METHOD's own type parameters unified against its call arguments
+/// (`b.echo(42)` where `b: Box`, Box NOT generic -- self must stay a bare
+/// `Box*`, since wrapping it as `GenericType("Box", [int])*` would be
+/// wrapping a non-generic struct's name with an unrelated type argument
+/// that has nothing to do with Box itself).
+bool isKnownGenericStructName(const std::string &Name,
+                              const std::vector<std::unique_ptr<ExprAST>> &PrePassASTs) {
+  bool Found = false;
+  std::function<void(const std::vector<std::unique_ptr<ExprAST>> &)> Walk =
+      [&](const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
+    if (Found) return;
+    for (const auto &N : Nodes) {
+      if (auto *SD = dynamic_cast<StructDeclExprAST *>(N.get())) {
+        if (SD->getName() == Name && !SD->getTypeParams().empty()) {
+          Found = true;
+          return;
+        }
+      } else if (auto *MI = dynamic_cast<ModuleImportExprAST *>(N.get())) {
+        if (auto *Body = dynamic_cast<const BlockExprAST *>(MI->getBody()))
+          Walk(Body->getExpressions());
+        if (Found) return;
+      }
+    }
+  };
+  Walk(PrePassASTs);
+  return Found;
+}
+
 /// Shared tail of both drain paths, once the caller has produced a clone
 /// whose Params/ReturnType/body are ALREADY fully substituted (and, for a
 /// method, self's own type already rewritten -- see drainMethodRequests()):
@@ -489,6 +527,25 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     return nullptr;
   }
 
+  // TYPE-002 (S14a): INV-GEN-1, asserted HERE too (not just in Codegen's
+  // getLLVMType()/CastToType()) -- completion criterion 1's own "at the
+  // monomorphizer's final step" half. Checks the clone's own Params/
+  // ReturnType (the body is covered independently and exhaustively by the
+  // Codegen-side asserts, which fire at actual use rather than needing a
+  // second full-body walk here) -- if substituteConcreteTypes() somehow
+  // missed a TurfGenericParamType, this fails immediately, at the exact
+  // clone that produced it, rather than later and further away at whatever
+  // Codegen call site first happens to touch it.
+  for (const auto &P : Clone->getParams())
+    assert(!dynamic_cast<const TurfGenericParamType *>(P.Type.get()) &&
+          "INV-GEN-1 violated: a monomorphized clone's own parameter is "
+          "still a TurfGenericParamType after substitution. This is a "
+          "compiler bug.");
+  assert(!dynamic_cast<const TurfGenericParamType *>(Clone->getReturnType()) &&
+        "INV-GEN-1 violated: a monomorphized clone's own return type is "
+        "still a TurfGenericParamType after substitution. This is a "
+        "compiler bug.");
+
   // Register: append to PrePassASTs so main.cpp's ORDINARY sub-pass
   // 2c/3a/3b codegen loops pick this up exactly like any other top-level
   // declaration -- no Codegen change needed at all, since the clone is, by
@@ -563,8 +620,11 @@ bool drainFreeFunctionRequests(
     // can. Found live: `Box::new(42)` re-typechecked as "Cannot assign
     // value of type 'int' to variable of type 'T'" before this exclusion
     // (self.val's type stayed literally NamedType("T"), un-substituted, no
-    // matter what v's own type became). Left recorded, undrained -- same
-    // treatment as Method/Struct kinds; S12b/S13a act on it.
+    // matter what v's own type became). Left recorded, undrained here --
+    // drainConstructorRequests() (S14a, once S13a's per-instantiation
+    // struct layout existed to make it correct) drains it instead, sharing
+    // this function's own registry/Sites-rewrite shape but the METHOD-style
+    // self-substitution technique (cloneAndSubstituteSelfBound()).
     if (!Template->getParams().empty() && Template->getParams()[0].Name == "self")
       continue;
 
@@ -620,6 +680,87 @@ bool drainFreeFunctionRequests(
 
 // ─── Drain: methods ──────────────────────────────────────────────────────────
 
+namespace {
+
+/// Shared by drainMethodRequests() and drainConstructorRequests() (S14a):
+/// clone @p Template, substitute every param EXCEPT self (index 0) plus the
+/// return type and body using @p Request's TypeArgs paired positionally
+/// with the declaration's OWN TypeParams, and give self a REAL type
+/// argument -- `StructName*` becomes `StructName<TypeArgs>*`. Correct as
+/// long as a method/constructor's own type-parameter spelling/order
+/// matches its struct's -- true of every generic struct in this language's
+/// stdlib today (all single-type-parameter); a multi-parameter struct whose
+/// method/constructor reorders its own type parameters relative to the
+/// struct's own declaration is a known, disclosed gap -- see the change
+/// record.
+///
+/// This is safe DESPITE struct layout staying fully erased/shared until
+/// S13a/S13b landed (originally verified for methods, S12b; nothing about
+/// the reasoning is method-specific), for two independently verified
+/// reasons:
+///
+/// 1. self's LLVM REPRESENTATION is unaffected by which struct-bound kind
+///    this is -- getLLVMType(GenericType(StructName, Args)) resolves to
+///    the per-instantiation TurfStructType (S13b) either way.
+///    FieldAccessExprAST's own GEP-index computation is field-POSITION-
+///    based, not field-KIND-based, so self.<field>'s ADDRESS computation
+///    doesn't care whether self's own declaration was a method or a
+///    constructor.
+///
+/// 2. CastToType's erasure/un-erasure branches (CodegenCore.cpp, still
+///    live for anything NOT yet monomorphized) are driven by the VALUE's
+///    actual LLVM shape and the DECLARED DESTINATION type, never by
+///    whether the declaring function is a method or a constructor.
+///
+/// What this DOES change, and is the actual point of it: giving self a
+/// real GenericType lets TypeChecker::visitFieldAccess's ALREADY-EXISTING
+/// GenericTypeArgs substitution (TypeCheckerCall.cpp) correctly resolve
+/// `self.<field>`'s TYPE for THIS instantiation during re-typecheck --
+/// e.g. `self.data: int*`, not the un-substituted `self.data: T*` that
+/// made a naive first attempt at this fail TYPE-CHECKING (not codegen) in
+/// S12a's own history with `Box.new` (see that session's *Removed
+/// assumptions* -- the fix there was to exclude constructors entirely,
+/// since S12a predates S13a's per-instantiation struct layout; S14a's job
+/// is to stop excluding them now that the layout exists).
+/// @param WrapSelfAsGeneric true when @p Request.TypeArgs are the STRUCT's
+///        own type arguments (self becomes `StructName<TypeArgs>*`); false
+///        when they're the METHOD's OWN type arguments, unified against its
+///        call arguments, on a struct that isn't itself generic (self stays
+///        a bare `StructName*` -- see isKnownGenericStructName()'s own doc
+///        comment for why these need to be told apart).
+std::unique_ptr<ExprAST> cloneAndSubstituteSelfBound(
+    FuncDefExprAST *Template, const InstantiationRequest &Request,
+    bool WrapSelfAsGeneric) {
+  std::unordered_map<std::string, TurfTypePtr> Subst;
+  const auto &TypeParams = Template->getTypeParams();
+  for (size_t i = 0; i < TypeParams.size() && i < Request.TypeArgs.size(); ++i)
+    Subst[TypeParams[i]] = Request.TypeArgs[i];
+
+  auto ClonedUP = CloneExprAST(Template);
+  auto *Clone = static_cast<FuncDefExprAST *>(ClonedUP.get());
+  auto &Params = Clone->getParamsMut();
+
+  // Substitute every param EXCEPT self (index 0) -- self's OWN type is
+  // handled separately, below, and differently (never through Subst: a
+  // bare "StructName*" contains no TurfGenericParamType/NamedType for
+  // Subst to find in the first place).
+  for (size_t i = 1; i < Params.size(); ++i)
+    Params[i].Type = substituteConcreteTypes(Params[i].Type, Subst);
+  Clone->setReturnType(substituteConcreteTypes(Clone->getReturnTypePtr(), Subst));
+  substituteTypesInBody(Clone->getBody(), Subst);
+
+  if (WrapSelfAsGeneric && !Params.empty() && Params[0].Name == "self") {
+    const std::string &DK = Request.DeclKey; // "StructName.Method"/"StructName.new"
+    size_t Dot = DK.find('.');
+    std::string StructName = Dot == std::string::npos ? DK : DK.substr(0, Dot);
+    auto SelfInner = std::make_shared<GenericType>(StructName, Request.TypeArgs);
+    Params[0].Type = std::make_shared<TurfPointerType>(std::move(SelfInner));
+  }
+  return ClonedUP;
+}
+
+} // namespace
+
 bool drainMethodRequests(
     std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
     InstantiationCollector &Collector, Resolver &PreR) {
@@ -635,7 +776,7 @@ bool drainMethodRequests(
     if (Entry.Drained)
       continue;
     if (Entry.Request.Kind != InstantiationKind::Method)
-      continue; // FreeFunction/Struct: the other drain function / S13a.
+      continue; // FreeFunction/Struct: the other drain functions.
 
     if (Entry.Sites.empty())
       continue; // Defensive -- record() always pushes at least one site.
@@ -681,81 +822,131 @@ bool drainMethodRequests(
       return DidWork;
     }
 
-    // Build the name->concrete substitution map from the METHOD's OWN
-    // TypeParams (declared order, e.g. `fn<T> List.push(...)` -> ["T"])
-    // paired positionally with the request's TypeArgs -- which came from
-    // the STRUCT's own GenericType at the call site (`l: List<int>` ->
-    // [int], TypeCheckerCall.cpp's visitMethodCall). Correct as long as a
-    // method's own type-parameter spelling/order matches its struct's --
-    // true of every generic struct in this language's stdlib today (all
-    // single-type-parameter); a multi-parameter struct whose method
-    // reorders its own type parameters relative to the struct's own
-    // declaration is a known, disclosed gap -- see the change record.
-    std::unordered_map<std::string, TurfTypePtr> Subst;
-    const auto &TypeParams = Template->getTypeParams();
-    for (size_t i = 0; i < TypeParams.size() && i < Entry.Request.TypeArgs.size(); ++i)
-      Subst[TypeParams[i]] = Entry.Request.TypeArgs[i];
-
-    auto ClonedUP = CloneExprAST(Template);
-    auto *Clone = static_cast<FuncDefExprAST *>(ClonedUP.get());
-    auto &Params = Clone->getParamsMut();
-
-    // Substitute every param EXCEPT self (index 0) -- self's OWN type is
-    // handled separately, below, and differently (never through Subst: a
-    // bare "StructName*" contains no TurfGenericParamType/NamedType for
-    // Subst to find in the first place).
-    for (size_t i = 1; i < Params.size(); ++i)
-      Params[i].Type = substituteConcreteTypes(Params[i].Type, Subst);
-    Clone->setReturnType(substituteConcreteTypes(Clone->getReturnTypePtr(), Subst));
-    substituteTypesInBody(Clone->getBody(), Subst);
-
-    // Give self a REAL type argument -- `StructName*` becomes
-    // `StructName<TypeArgs>*`. This is the one genuinely NEW piece of
-    // S12b, and it is safe DESPITE struct layout staying fully
-    // erased/shared this session (S13a's job), for two independently
-    // verified reasons:
-    //
-    // 1. self's LLVM REPRESENTATION is completely unchanged either way --
-    //    getLLVMType(GenericType(StructName, Args)) already collapses to
-    //    the SAME shared opaque-based struct type as bare StructName
-    //    (Types.cpp's own comment: "a generic struct's LLVM layout does
-    //    not actually vary per type argument"). FieldAccessExprAST's own
-    //    GEP-index computation is field-POSITION-based, not field-TYPE-
-    //    based, so self.<field>'s ADDRESS computation is unaffected too.
-    //
-    // 2. CastToType's existing erasure/un-erasure branches
-    //    (CodegenCore.cpp) are driven by the VALUE's actual LLVM shape (is
-    //    it a raw pointer?) and the DECLARED DESTINATION type, never by
-    //    whether the AST source-side type annotation says "generic" --
-    //    confirmed by reading the un-erase branch's own comment: "What
-    //    actually identifies 'this pointer is an erased generic value' at
-    //    this point is that it's a raw pointer being cast to a genuinely
-    //    numeric DestType." So a concrete parameter value flowing INTO a
-    //    still-erased self.<field> slot gets erased correctly, and a
-    //    still-erased self.<field> value flowing OUT (e.g. as this
-    //    method's now-concrete return type) gets un-erased correctly, by
-    //    the SAME mechanism that already bridges the erasure-era template
-    //    today -- unchanged, untouched, not re-derived here.
-    //
-    // What this DOES change, and is the actual point of it: giving self a
-    // real GenericType lets TypeChecker::visitFieldAccess's ALREADY-
-    // EXISTING GenericTypeArgs substitution (TypeCheckerCall.cpp, the same
-    // mechanism an ORDINARY caller's `someList.data[0]` already relies on)
-    // correctly resolve `self.<field>`'s TYPE for THIS instantiation
-    // during re-typecheck -- e.g. `self.data: int*`, not the un-
-    // substituted `self.data: T*` that made a naive first attempt at this
-    // fail TYPE-CHECKING (not codegen) in S12a's own history with
-    // `Box.new` (see that session's *Removed assumptions* -- the fix there
-    // was to exclude constructors; the fix here, for method calls where
-    // the RECEIVER already carries a real GenericType, is to propagate it
-    // onto self instead of excluding).
-    if (!Params.empty() && Params[0].Name == "self") {
-      const std::string &DK = Entry.Request.DeclKey; // "StructName.Method"
+    // TYPE-002 (S14a): a Method-kind request's TypeArgs can come from the
+    // RECEIVER's own GenericType (struct is generic -- self needs
+    // GenericType wrapping) OR from the METHOD's own type parameters,
+    // unified against its call arguments, on a struct that ISN'T generic
+    // (self stays bare) -- see isKnownGenericStructName()'s own doc
+    // comment for the full story. DeclKey is "StructName.MethodName"
+    // either way.
+    {
+      const std::string &DK = Entry.Request.DeclKey;
       size_t Dot = DK.find('.');
       std::string StructName = Dot == std::string::npos ? DK : DK.substr(0, Dot);
-      auto SelfInner = std::make_shared<GenericType>(StructName, Entry.Request.TypeArgs);
-      Params[0].Type = std::make_shared<TurfPointerType>(std::move(SelfInner));
+      bool WrapSelfAsGeneric = isKnownGenericStructName(StructName, PrePassASTs);
+
+      auto ClonedUP = cloneAndSubstituteSelfBound(Template, Entry.Request, WrapSelfAsGeneric);
+      auto *Clone = static_cast<FuncDefExprAST *>(ClonedUP.get());
+
+      auto ClonedSymbol = finishInstantiation(Template, Clone, std::move(ClonedUP),
+                                              Entry, PrePassASTs, Collector, PreR);
+      if (!ClonedSymbol)
+        return DidWork; // finishInstantiation already raised a diagnostic.
+
+      // Rewrite every requesting call site to the clone. Every site in
+      // Entry.Sites is a MethodCallExprAST (Method kind is only ever
+      // recorded from TypeCheckerCall.cpp's visitMethodCall).
+      for (ExprAST *Site : Entry.Sites) {
+        if (auto *MC = dynamic_cast<MethodCallExprAST *>(Site))
+          MC->ResolvedCallTarget = ClonedSymbol;
+      }
     }
+    Entry.Drained = true;
+    DidWork = true;
+  }
+  return DidWork;
+}
+
+// ─── Drain: constructors ─────────────────────────────────────────────────────
+
+/// TYPE-002 (S14a): the constructor counterpart of drainMethodRequests() --
+/// `fn<T> StructName.new(...)` called as `StructName::new(...)`. S12a
+/// deliberately excluded every struct-bound declaration reached through the
+/// free-function call path (`Box::new(...)`'s "self-stripped candidate",
+/// ResolverCall.cpp) from drainFreeFunctionRequests() -- at the time, no
+/// per-instantiation struct layout existed for a substituted `self.<field>`
+/// reference to resolve against (S12a's own *Removed assumptions*: `Box::new(42)`
+/// re-typechecked as "Cannot assign value of type 'int' to variable of type
+/// 'T'"). S13a built that layout; this function is what actually drains
+/// the constructor requests S12a left recorded but untouched, using the
+/// exact same self-type-rewrite technique drainMethodRequests() already
+/// uses (cloneAndSubstituteSelfBound(), above) -- self carrying a real
+/// GenericType now correctly resolves `self.<field>` during re-typecheck
+/// for a constructor's body exactly as it already does for an ordinary
+/// method's.
+///
+/// Still a FreeFunction-kind request (S12a's own recording never changed --
+/// TypeCheckerCall.cpp's visitFuncCall records `Box::new(...)` as
+/// FreeFunction, keyed "Box.new"), so this function shares
+/// drainFreeFunctionRequests()'s registry/lookup/Sites-rewrite shape
+/// (FuncCallExprAST, not MethodCallExprAST), not drainMethodRequests()'s --
+/// only the CLONE-BUILDING step (self-rewrite) is shared with methods.
+bool drainConstructorRequests(
+    std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
+    InstantiationCollector &Collector, Resolver &PreR) {
+  std::unordered_map<std::string, FuncDefExprAST *> Registry =
+      buildDeclRegistry(PrePassASTs);
+
+  int TotalDrained = 0;
+  bool DidWork = false;
+
+  for (size_t Idx = 0; Idx < Collector.cache().size(); ++Idx) {
+    InstantiationEntry &Entry = Collector.entryAt(Idx);
+
+    if (Entry.Drained)
+      continue;
+    if (Entry.Request.Kind != InstantiationKind::FreeFunction)
+      continue; // Method/Struct: the other two drain functions.
+
+    if (Entry.Sites.empty())
+      continue; // Defensive -- record() always pushes at least one site.
+
+    auto RegIt = Registry.find(
+        registryKey(Entry.Request.SourceModule, Entry.Request.DeclKey));
+    if (RegIt == Registry.end()) {
+      // A genuinely missing declaration is drainFreeFunctionRequests()'s
+      // error to raise (it runs the identical lookup against the SAME
+      // registry for every FreeFunction-kind entry, struct-bound or not,
+      // before this function ever gets a chance to) -- reaching this means
+      // that function already raised and this call is unreachable in
+      // practice. Kept for defensive symmetry with the other two drain
+      // functions, not because a different outcome is expected here.
+      SemanticError(Entry.Request.Site,
+                    "Internal error: no generic declaration found for '" +
+                        Entry.Request.DeclKey +
+                        "' during monomorphization. This is a compiler bug.")
+          .raise();
+      return DidWork;
+    }
+    FuncDefExprAST *Template = RegIt->second;
+
+    if (Template->getParams().empty() || Template->getParams()[0].Name != "self")
+      continue; // Not struct-bound -- drainFreeFunctionRequests()'s job.
+
+    if (++TotalDrained > kMaxInstantiationDepth) {
+      std::vector<std::string> Chain;
+      for (const auto &E : Collector.cache().all())
+        Chain.push_back(E.Request.DeclKey);
+      GenericInstantiationDepthError(Entry.Request.Site, Chain).raise();
+      return DidWork;
+    }
+
+    // TYPE-002 (S14a): `Box::new(...)`'s TypeArgs come from unifying the
+    // constructor's OWN params against its call arguments (visitFuncCall,
+    // TypeCheckerCall.cpp -- the SAME free-function-style unification an
+    // ordinary generic function call uses), regardless of whether `Box`
+    // itself is declared generic. Most of the time the two coincide by
+    // NAMING CONVENTION (`struct Box<T> { ... } fn<T> Box.new(v: T)`
+    // reuses "T" for both), but self must only be GenericType-wrapped when
+    // Box ACTUALLY is one -- see isKnownGenericStructName()'s own doc
+    // comment.
+    const std::string &DK = Entry.Request.DeclKey;
+    size_t Dot = DK.find('.');
+    std::string StructName = Dot == std::string::npos ? DK : DK.substr(0, Dot);
+    bool WrapSelfAsGeneric = isKnownGenericStructName(StructName, PrePassASTs);
+
+    auto ClonedUP = cloneAndSubstituteSelfBound(Template, Entry.Request, WrapSelfAsGeneric);
+    auto *Clone = static_cast<FuncDefExprAST *>(ClonedUP.get());
 
     auto ClonedSymbol = finishInstantiation(Template, Clone, std::move(ClonedUP),
                                             Entry, PrePassASTs, Collector, PreR);
@@ -763,11 +954,18 @@ bool drainMethodRequests(
       return DidWork; // finishInstantiation already raised a diagnostic.
 
     // Rewrite every requesting call site to the clone. Every site in
-    // Entry.Sites is a MethodCallExprAST (Method kind is only ever
-    // recorded from TypeCheckerCall.cpp's visitMethodCall).
+    // Entry.Sites is a FuncCallExprAST whose callee is a ScopeAccessExprAST
+    // with ResolvedKind == ConstructorCall (`StructName::new(...)`) --
+    // FreeFunction kind is only ever recorded from TypeCheckerCall.cpp's
+    // visitFuncCall. CodegenFunc.cpp's ConstructorCall branch reads
+    // ResolvedCallTarget->Params[0].Name == "self" to tell a monomorphized
+    // clone (self present, ordinary mangledName()) apart from the
+    // still-self-STRIPPED candidate every non-generic constructor's
+    // ResolvedCallTarget remains (stripSelf() runs unconditionally for
+    // every `::new(...)` call, generic or not).
     for (ExprAST *Site : Entry.Sites) {
-      if (auto *MC = dynamic_cast<MethodCallExprAST *>(Site))
-        MC->ResolvedCallTarget = ClonedSymbol;
+      if (auto *FC = dynamic_cast<FuncCallExprAST *>(Site))
+        FC->ResolvedCallTarget = ClonedSymbol;
     }
     Entry.Drained = true;
     DidWork = true;

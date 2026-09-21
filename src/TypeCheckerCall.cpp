@@ -462,20 +462,40 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         std::vector<std::string> Order;
         for (int i = 0; i < SubstCheckCount; ++i)
           collectGenericParamNameOrder(Best->Params[i].Type, Order);
-        // Best->BaseName, not CalleeName: for an ordinary free function
-        // call the two always agree, but for `Box::new(...)` (a
-        // constructor call routed through this same free-function path --
-        // see the Resolver's "self-stripped candidate" comment above)
-        // CalleeName is the user-facing spelled name "new" while the real
-        // declaration Best resolved to is named "Box.new" -- the ONLY name
-        // the monomorphizer's declaration registry (built from
-        // FuncDefExprAST::getName(), Monomorphize.cpp) can ever find it
-        // under. Found live: `Box::new(42)` failed with "no generic
-        // declaration found for 'new'" before this fix.
-        MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
-                               Best->BaseName, Best->SourceModule,
-                               orderedTypeArgs(Order, Subst), Node.getLoc()},
-                              &Node);
+        std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
+        // TYPE-002 (S14a): only a FULLY CONCRETE substitution is a real
+        // instantiation request -- found live, not anticipated: a generic
+        // function calling ANOTHER generic function through its own STILL-
+        // OPEN type parameter (`fn<T> outer(x: T): T { return inner(x); }`,
+        // checked as part of `outer`'s own un-substituted TEMPLATE body,
+        // before outer is ever cloned) unifies inner's T against outer's
+        // OWN T -- a non-empty but NOT concrete "substitution" (one open
+        // parameter mapped to another). Harmless under erasure (the
+        // resulting bogus "inner<T>" clone was dead code nothing called,
+        // and getLLVMType(TurfGenericParamType) silently returned ptr) --
+        // but a hard INV-GEN-1 assertion failure once erasure is deleted,
+        // since that bogus clone's own literal TurfGenericParamType
+        // parameter now reaches Codegen for real. See
+        // isFullyConcreteType()'s own doc comment (TypeCheckerInternal.h).
+        bool AllConcrete = true;
+        for (const auto &A : TypeArgs)
+          if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }
+        if (AllConcrete) {
+          // Best->BaseName, not CalleeName: for an ordinary free function
+          // call the two always agree, but for `Box::new(...)` (a
+          // constructor call routed through this same free-function path --
+          // see the Resolver's "self-stripped candidate" comment above)
+          // CalleeName is the user-facing spelled name "new" while the real
+          // declaration Best resolved to is named "Box.new" -- the ONLY name
+          // the monomorphizer's declaration registry (built from
+          // FuncDefExprAST::getName(), Monomorphize.cpp) can ever find it
+          // under. Found live: `Box::new(42)` failed with "no generic
+          // declaration found for 'new'" before this fix.
+          MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
+                                 Best->BaseName, Best->SourceModule,
+                                 std::move(TypeArgs), Node.getLoc()},
+                                &Node);
+        }
       }
     }
 
@@ -1110,38 +1130,106 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // stdlib today (all single-type-parameter), though not fully
           // general for a hypothetical multi-parameter struct whose fields
           // don't happen to mention every parameter in declaration order.
-          if (!Subst.empty()) {
+          // TYPE-002 (S14a): a method generic IN ITS OWN RIGHT
+          // (`fn<T> Box.echo(x: T): T`) needs a SEPARATE substitution from
+          // Subst above -- Subst only ever recovers the STRUCT's own
+          // generic parameter(s) from the receiver's GenericType (empty
+          // for a non-generic struct like Box). This unifies the METHOD's
+          // OWN parameter types (already TurfGenericParamType-typed by the
+          // SAME substituteTypeParams() pass every fn<T> declaration goes
+          // through, struct-bound or not -- ResolverCore.cpp) against the
+          // ACTUAL call arguments, exactly mirroring how visitFuncCall()
+          // does this for an ordinary free function. Disclosed live in
+          // S12b as a gap this session closes: `b.echo(42)` where
+          // `b: Box` (not `Box<...>`) previously fell straight through to
+          // the plain `setType(&Node, Best->ReturnType)` path below with
+          // NO substitution at all, reporting the call's type as the
+          // literal, un-substituted TurfGenericParamType("T") instead of
+          // `int` -- a real type-checking gap, not just a monomorphization
+          // one.
+          std::unordered_map<std::string, TurfTypePtr> MethodOwnSubst;
+          {
+            int ParamOffset = IsStaticMethod ? 0 : 1;
+            for (int i = 0; i < ArgCount; ++i)
+              collectGenericSubstitution(Best->Params[i + ParamOffset].Type,
+                                         ArgTypes[i], MethodOwnSubst);
+          }
+
+          std::unordered_map<std::string, TurfTypePtr> CombinedSubst = Subst;
+          for (const auto &KV : MethodOwnSubst)
+            CombinedSubst.insert(KV);
+
+          if (!CombinedSubst.empty()) {
             // TYPE-002 (S11b): persist onto the node -- see
             // MethodCallExprAST::GenericSubstitution's doc comment
-            // (ASTAccess.h). Already guarded by the same !Subst.empty()
-            // this block is inside, so no redundant emptiness check needed.
-            Node.GenericSubstitution = Subst;
+            // (ASTAccess.h).
+            Node.GenericSubstitution = CombinedSubst;
             // Report-only: feed the (opt-in) collector, a no-op when null.
-            // Two requests, not one: the RECEIVER's struct instantiation
-            // (e.g. List<int> itself must exist) and the specific method
-            // being called on it (e.g. List.push<int>) -- S12b/S13a act on
-            // these independently (methods land before struct layout
-            // does), so both are worth recording now. TypeArgs is
-            // re-derived from the base expression's GenericType rather
-            // than threaded out of the `if (auto *GT = ...)` scope above
-            // it went out of scope in -- cheap, and keeps this addition
-            // from having to restructure already-working code.
             if (MonoCollector_) {
               if (auto *BaseGT = dynamic_cast<const GenericType *>(
                       getType(Node.getBase()).get())) {
+                // Existing case (S12b/S13a): the RECEIVER's struct is
+                // itself generic. Two requests, not one: the RECEIVER's
+                // struct instantiation (e.g. List<int> itself must exist)
+                // and the specific method being called on it (e.g.
+                // List.push<int>) -- methods land before struct layout
+                // does, so both are worth recording now. TypeArgs is
+                // re-derived from the base expression's GenericType rather
+                // than threaded out of the `if (auto *GT = ...)` scope
+                // above it went out of scope in -- cheap, and keeps this
+                // addition from having to restructure already-working code.
+                //
+                // TYPE-002 (S14a): only recorded when FULLY CONCRETE --
+                // found live: a generic function's own body calling a
+                // method on a `List<T>`-typed value (T the FUNCTION's own,
+                // still-open type parameter) hits this same code path
+                // during the TEMPLATE's own un-substituted type-check,
+                // recording a bogus "List<T>"/"List.push<T>" request
+                // otherwise -- see isFullyConcreteType()'s own doc comment
+                // (TypeCheckerInternal.h) for the identical free-function
+                // bug this mirrors.
                 std::vector<TurfTypePtr> TypeArgsCopy = BaseGT->getTypeArgs();
-                MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
-                                       BaseGT->getBaseName(), BaseGT->getModule(),
-                                       TypeArgsCopy, Node.getLoc()},
-                                      &Node);
-                MonoCollector_->record({Monomorphize::InstantiationKind::Method,
-                                       StructName + "." + MethodName,
-                                       Best->SourceModule, std::move(TypeArgsCopy),
-                                       Node.getLoc()},
-                                      &Node);
+                bool AllConcrete = true;
+                for (const auto &A : TypeArgsCopy)
+                  if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }
+                if (AllConcrete) {
+                  MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
+                                         BaseGT->getBaseName(), BaseGT->getModule(),
+                                         TypeArgsCopy, Node.getLoc()},
+                                        &Node);
+                  MonoCollector_->record({Monomorphize::InstantiationKind::Method,
+                                         StructName + "." + MethodName,
+                                         Best->SourceModule, std::move(TypeArgsCopy),
+                                         Node.getLoc()},
+                                        &Node);
+                }
+              } else if (!MethodOwnSubst.empty()) {
+                // New case (S14a): the receiver ISN'T a GenericType (Box
+                // isn't generic), but the METHOD has its own type
+                // parameters -- record using the METHOD's OWN ordered
+                // TypeArgs (collectGenericParamNameOrder() recovers
+                // declaration order the same way visitFuncCall() does for
+                // an ordinary free function). No Struct-kind request: Box
+                // itself needs no per-instantiation layout, only its
+                // method does. Same concreteness gate as above, same reason.
+                std::vector<std::string> Order;
+                int ParamOffset = IsStaticMethod ? 0 : 1;
+                for (int i = 0; i < ArgCount; ++i)
+                  collectGenericParamNameOrder(Best->Params[i + ParamOffset].Type, Order);
+                std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, MethodOwnSubst);
+                bool AllConcrete = true;
+                for (const auto &A : TypeArgs)
+                  if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }
+                if (AllConcrete) {
+                  MonoCollector_->record({Monomorphize::InstantiationKind::Method,
+                                         StructName + "." + MethodName,
+                                         Best->SourceModule, std::move(TypeArgs),
+                                         Node.getLoc()},
+                                        &Node);
+                }
               }
             }
-            setType(&Node, substituteReturnType(Best->ReturnType, Subst));
+            setType(&Node, substituteReturnType(Best->ReturnType, CombinedSubst));
             return;
           }
 
@@ -1365,9 +1453,18 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   // instantiation was already requested elsewhere.
   if (MonoCollector_ && BaseTy) {
     if (auto *GT0 = dynamic_cast<const GenericType *>(BaseTy.get())) {
-      MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
-                             GT0->getBaseName(), GT0->getModule(),
-                             GT0->getTypeArgs(), Node.getLoc()},
+      // TYPE-002 (S14a): only recorded when FULLY CONCRETE -- see
+      // isFullyConcreteType()'s own doc comment (TypeCheckerInternal.h) for
+      // why a non-concrete "substitution" (a still-open type parameter,
+      // reached while type-checking a generic template's own body before
+      // it's ever cloned) must never be recorded as a real instantiation.
+      bool AllConcrete = true;
+      for (const auto &A : GT0->getTypeArgs())
+        if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }
+      if (AllConcrete)
+        MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
+                               GT0->getBaseName(), GT0->getModule(),
+                               GT0->getTypeArgs(), Node.getLoc()},
                             &Node);
     }
   }

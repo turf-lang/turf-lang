@@ -117,7 +117,26 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   if (!From || !To)
     return false;
 
-  // Type Erasure: Generic Type Parameters are compatible with anything.
+  // Rule 1 (§9.6, ARCHITECTURE_OVERHAUL.md): an unresolved generic type
+  // parameter is compatible with anything.
+  //
+  // TYPE-002 (S14a): this is a CANDIDATE-MATCHING convenience for
+  // type-checking a generic TEMPLATE's own, still-unsubstituted body --
+  // NOT an erasure-model leniency (that framing stopped being accurate the
+  // moment monomorphization landed, S12a-S14a). It stays correct, and
+  // stays in the code UNCHANGED, at every later stage of this group,
+  // because it is now structurally UNREACHABLE outside that one context:
+  // a TurfGenericParamType never appears in any typesCompatible() call
+  // once a declaration is either ordinarily concrete (never generic) or a
+  // monomorphized clone (every TurfGenericParamType already substituted to
+  // a concrete type before the clone is re-typechecked, Monomorphize.cpp)
+  // -- INV-GEN-1 (INVARIANTS.md, `holds` as of S14a) is precisely the
+  // invariant that guarantees this. Deleting this rule would break
+  // ordinary template type-checking (a generic function/method/
+  // constructor's own body, checked once, generically, as part of the
+  // whole program's ordinary resolveAll()/checkAll() BEFORE the
+  // monomorphizer ever clones it) -- it is not dead code, just narrower in
+  // scope than its old name implied.
   //
   // Checked FIRST -- before both the array rule and the general exact-match
   // check below -- so an unresolved generic parameter keeps matching against
@@ -185,8 +204,10 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
     return FromElem->isEquivalent(ToElem);
   }
 
-  // Pointer-to-generic-parameter compatibility -- same type-erasure leniency
-  // as the bare-T and array-of-T rules above: `T*` (a generic function's own
+  // Pointer-to-generic-parameter compatibility -- same Rule 1 candidate-
+  // matching leniency (TYPE-002 S14a: NOT a type-erasure leniency, see that
+  // rule's own updated comment above) as the bare-T and array-of-T rules
+  // above: `T*` (a generic function's own
   // type parameter behind a pointer, e.g. `fn<T> identityPtr(x: T*): T*`)
   // must match a concrete pointer of ANY pointee type (int*, double*, a
   // struct pointer, ...), not just a pointer whose pointee's getName()

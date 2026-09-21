@@ -459,6 +459,31 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
     }
   }
 
+  // TYPE-002 (S14a): `h.items = List::default();` -- an ASSIGNMENT, not a
+  // VarDeclExprAST initializer -- needs the identical ConstructedType
+  // hand-off TypeChecker::visitVarDecl() already does (TypeCheckerDecl.cpp),
+  // for the same reason: `List::default()`'s own static type is always the
+  // bare NamedType("List") (U-5), so FuncCallExprAST::codegen()'s
+  // construction branch has no other way to know it's building `List<int>`
+  // specifically. Found live: this exact assignment shape (S12b/S13a's own
+  // `Holder.items = List::default();` test pattern) crashed with "Cannot
+  // allocate unsized type %List" once the shared template struct's own
+  // codegen was skipped (S14a, this session) -- the construction fell back
+  // to the now-permanently-opaque bare "List" struct instead of the real,
+  // per-instantiation one.
+  if (LhsTy) {
+    if (dynamic_cast<const GenericType *>(LhsTy.get())) {
+      if (auto *FC = dynamic_cast<FuncCallExprAST *>(
+              const_cast<ExprAST *>(Node.getRHS()))) {
+        if (auto *SC = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee())) {
+          if (SC->ResolvedKind == ScopeAccessKind::DefaultConstruct ||
+              SC->ResolvedKind == ScopeAccessKind::ConstructorCall)
+            FC->ConstructedType = LhsTy;
+        }
+      }
+    }
+  }
+
   // The assignment expression type is the RHS type
   setType(&Node, RhsTy);
 

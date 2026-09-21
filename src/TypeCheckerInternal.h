@@ -25,4 +25,17 @@
 // matching) as well as TypeCheckerCall.cpp's own UFCS receiver matching.
 bool sameTypeExact(const TurfType *A, const TurfType *B);
 
+// TYPE-002: defined in TypeCheckerDecl.cpp, next to their only ORIGINAL
+// caller (visitVarDecl's `guess`-inference gate). isFullyConcreteType() is
+// ALSO used by TypeCheckerCall.cpp's visitFuncCall/visitMethodCall as of
+// S14a, to gate their own MonoCollector_->record() calls on the computed
+// substitution being genuinely concrete, not just non-empty -- see
+// isFullyConcreteType()'s own doc comment for the real bug this fixes
+// (a generic function calling another generic function through its own
+// still-open type parameter used to record a bogus, non-concrete
+// instantiation request, harmless under erasure but a hard INV-GEN-1
+// assertion failure once erasure is gone).
+bool isOrWrapsGenericParam(const TurfType *Ty);
+bool isFullyConcreteType(const TurfType *Ty);
+
 #endif

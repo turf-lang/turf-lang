@@ -5,7 +5,7 @@
 | **Status** | in-progress |
 | **Dates** | started 2026-09-21 · landed — |
 | **Commits** | (added at the end of each sub-session) |
-| **Sessions** | 6 of 8 (S11a, S11b, S12a, S12b, S13a, S13b done; S14a, S14b remain) |
+| **Sessions** | 7 of 8 (S11a, S11b, S12a, S12b, S13a, S13b, S14a done; S14b remains) |
 | **Depends on** | TYPE-001 (landed 2026-09-18), SEM-001 (landed 2026-09-18); strongly benefits from OPT-001 (landed 2026-09-18) |
 | **Frozen decisions relied on** | F-GEN-1, F-GEN-2, F-GEN-3, F-OP-1 (unaffected but adjacent — see §9.8) |
 
@@ -162,19 +162,39 @@ function (`fn<T> identity(x: T): T` called with a `Big` argument — this
 half was already real since S12a, confirmed rather than assumed) and
 through another struct's own field (`struct Holder { items: List<Big> }`).
 
-**Still NOT covered, disclosed rather than silently left** (see *Removed
-assumptions*): `StructName::new(...)` — an EXPLICIT, hand-written
+**Was NOT covered as of S13b, closed by S14a** (see that session's own
+entry below): `StructName::new(...)` — an EXPLICIT, hand-written
 constructor — on a >8-byte generic instantiation. `Box.new`'s own body/
-signature (`fn<T> Box.new(v: T): void { self.val = v; }`) is still
-completely unmonomorphized (S12a's own, still-standing exclusion — struct-
-bound declarations reached via the free-function call path are deliberately
-left un-drained), so passing a >8-byte argument to it still round-trips
-through the erasure `CastToType` branches, which cannot represent a >8-byte
-value in one pointer-sized slot. Real, live gap; not yet hit by anything in
-`lib/std` (no stdlib generic struct has an explicit `.new`) or this
-session's own tests (deliberately scoped to `::default()`-constructed
-instantiations, which is what `List<T>` and every other stdlib collection
-actually uses).
+signature (`fn<T> Box.new(v: T): void { self.val = v; }`) was completely
+unmonomorphized through S13b (S12a's own exclusion, standing until S14a
+extended monomorphization to cover constructors too, now that S13a's
+per-instantiation struct layout makes it correct).
+
+**What's real as of S14a — completion criteria 1 and (the struct-field
+half of) 4**: `INV-GEN-1` now `holds` (`INVARIANTS.md`) — erasure is
+deleted outright, not left dead, and `Box<Big>::new(...)` (an explicit
+constructor call, not just `::default()`) now works correctly:
+```turf
+struct Box<T> { val: T }
+fn<T> Box.new(v: T): void { self.val = v; }
+...
+mut b: Box<Big> = Box::new(Big::new(1, 2, 3));   // real %Big by-value ctor arg
+```
+and `sizeof(T)` now tells the truth inside a generic STRUCT method too
+(not just a free function, S12a's own scope), including for a >8-byte `T`:
+```turf
+fn<T> Box.sizeOfT(): int { return sizeof(T); }
+...
+test::assert(Box<Big>::default().sizeOfT() == 24, "...");  // was always 8 under erasure
+```
+Getting to a SAFE, assertable `INV-GEN-1` required closing two more real,
+previously-disclosed-or-latent gaps first (constructors, and a method
+generic in its own right on a non-generic struct) plus two genuinely new
+discoveries this session made along the way (a non-concrete "substitution"
+that used to be silently recorded and harmlessly ignored under erasure, and
+generic TEMPLATES reaching Codegen through a second path main.cpp's own
+guard never covered) — see this session's own *Compiler architecture* and
+*Removed assumptions* entries below for the full story of each.
 
 ### Is this breaking?
 
@@ -532,6 +552,103 @@ run — `test_runner.sh` walks all of `tests/`).
   through whatever `TurfStructType*` it's handed via `getFields()`, so
   passing it the per-instantiation type was sufficient on its own.
 
+**S14a closes the two remaining monomorphization gaps, then deletes
+erasure and asserts `INV-GEN-1`.** By far the largest single-session scope
+change in this group: the user explicitly asked, correctly, why S14a's
+original "just delete erasure" framing (written in S11a, before either gap
+existed as a known fact) made sense at all if two real code paths still
+depended on it — the answer is it didn't, and this session's real job
+turned out to be "close both gaps, THEN delete," not "delete." Full suite
+green at 684/684 (683 + 1 new test) at both the default and `-O2`
+optimization levels; `lib/std`/`showcase`/prelude sweep clean (same
+pre-existing E034/warning items every prior session already confirmed on
+the baseline).
+
+**What S14a added, concretely:**
+- `Monomorphize::drainConstructorRequests()` — the constructor counterpart
+  of `drainMethodRequests()`, draining the struct-bound `FreeFunction`-kind
+  entries `drainFreeFunctionRequests()` has always deliberately skipped
+  (S12a's own exclusion) now that S13a's per-instantiation struct layout
+  makes it safe. Shares `drainFreeFunctionRequests()`'s registry/Sites-
+  rewrite shape (a constructor call is still recorded as `FreeFunction`-kind,
+  `TypeCheckerCall.cpp`'s `visitFuncCall` never changed how it records
+  this), but the CLONE-BUILDING step reuses `drainMethodRequests()`'s
+  self-type-rewrite technique — extracted into a new shared helper,
+  `cloneAndSubstituteSelfBound()` (`Monomorphize.cpp`, anonymous
+  namespace), used by both drain functions now.
+- `isKnownGenericStructName()` (`Monomorphize.cpp`) — a new helper both
+  `drainMethodRequests()`/`drainConstructorRequests()` call to decide
+  whether a self-bound clone's `self` parameter needs `GenericType`
+  wrapping (the struct itself is generic, e.g. `List<T>`) or should stay a
+  bare `StructName*` (only the METHOD/CONSTRUCTOR has its own type
+  parameters, e.g. `fn<T> Box.echo(x: T): T` on a non-generic `Box`) --
+  `cloneAndSubstituteSelfBound()` takes this as an explicit
+  `WrapSelfAsGeneric` parameter now, rather than always wrapping.
+- `TypeCheckerCall.cpp`'s `visitMethodCall()` gained a whole new
+  substitution path: alongside the EXISTING struct-level `Subst` (recovered
+  from the receiver's own `GenericType`, empty for a non-generic struct), it
+  now ALSO unifies the METHOD's OWN parameter types against the actual call
+  arguments (`MethodOwnSubst`, mirroring `visitFuncCall()`'s
+  `collectGenericSubstitution()` call for an ordinary free function) --
+  closing S12b's own disclosed gap ("a method generic in its own right on a
+  non-generic struct... never gets an instantiation request recorded in the
+  first place"). This was a genuine TYPE-CHECKING gap, not just a
+  monomorphization one: before this fix, `b.echo(42)` (`b: Box`, not
+  `Box<...>`) reported the call's own type as the literal, un-substituted
+  `TurfGenericParamType("T")` instead of `int`.
+- `FuncCallExprAST::ConstructedType`'s hand-off (S13b) is now ALSO written
+  by `TypeChecker::visitAssignment()` (`TypeCheckerExpr.cpp`), not just
+  `visitVarDecl()` -- found live (see *Removed assumptions*): `h.items =
+  List::default();` (an ASSIGNMENT, not a `VarDeclExprAST` initializer) is
+  the exact shape S12b's/S13a's own `Holder.items = List::default();` test
+  pattern uses, and it crashed once the shared template struct's own
+  codegen was skipped (below) with no `ConstructedType` to fall back on.
+- `FuncDefExprAST::codegen()` and `StructDeclExprAST::codegen()`
+  (`CodegenFunc.cpp`/`CodegenStruct.cpp`) both gained an internal, single-
+  source-of-truth guard: `if (!TypeParams.empty()) return <sentinel>;` at
+  the very top, BEFORE any of their own body runs. `main.cpp`'s own sub-pass
+  3a/3b template-skip guards for functions are widened to match (the old
+  guard exempted self-bound declarations; nothing is exempt now that
+  constructors AND methods are both monomorphized) -- but the REAL fix is
+  the internal guard, found live: `ModuleImportExprAST::codegen()`
+  (`CodegenStruct.cpp`) walks an imported module's own body via
+  `BlockExprAST::codegen()`, calling `FuncDefExprAST`/`StructDeclExprAST`
+  `::codegen()` directly, completely bypassing main.cpp's flat-loop guard.
+  Confirmed live: even a trivial `fn main(): int { return 0; }` crashed,
+  because the auto-imported PRELUDE itself is walked this second way.
+- `getLLVMType()`'s `TurfGenericParamType` erasure branch (`CodegenCore.cpp`)
+  is now a debug-build `assert()` (INV-GEN-1) instead of `return ptr` --
+  falls through to the function's own "unknown/future types" catch-all
+  (`getDoubleTy`) in a release build rather than crash outright.
+- `CastToType()` (`CodegenCore.cpp`): the "cast TO generic parameter" branch
+  (IntToPtr/bitcast erase) is deleted outright and replaced with the same
+  style of `assert()`; the numeric half of "cast FROM generic parameter"
+  (PtrToInt/bitcast un-erase to int/bool/double) is deleted with NO
+  replacement needed -- the surrounding `if (ValTy->isPointerTy())` block's
+  other two branches (`isPointerLike` passthrough, the `self`-by-value
+  implicit-dereference block) are untouched, exactly as the original S11a
+  plan specified ("do NOT touch" those two).
+- `CodegenFunc.cpp`'s per-call-site PRE-unerase (a redundant manual
+  PtrToInt/bitcast done before even calling `CastToType()`) is deleted --
+  it existed only to feed `CastToType()`'s own erase branch a value it
+  could already handle; with that branch gone, feeding it pre-converted
+  values would be silently pointless, not just redundant.
+- `Monomorphize.cpp`'s `finishInstantiation()` gained its OWN `assert()`
+  (INV-GEN-1, completion criterion 1's "at the monomorphizer's final step"
+  half) -- checks a freshly-produced clone's own Params/ReturnType
+  immediately after substitution, catching a bug at the exact clone that
+  produced it rather than later, at whatever Codegen call site first
+  happens to touch it. The clone's body is covered independently by the two
+  Codegen-side asserts above, which fire at actual use.
+- `Types.cpp`'s `typesCompatible()` Rule 1 (§9.6) and its `T*`-pointer
+  sibling: logic UNCHANGED, comments rewritten to stop citing "type erasure"
+  as the justification (no longer accurate) and instead frame the rule as a
+  candidate-matching convenience for a generic TEMPLATE's own,
+  still-unsubstituted body -- now provably UNREACHABLE for anything else,
+  precisely because `INV-GEN-1` holds.
+- `INVARIANTS.md`: `INV-GEN-1` and `INV-TYPE-2` both moved to `holds`, with
+  a live demonstration recorded, not just a claim.
+
 ## Runtime changes
 
 None. Eventually none in this group either — TYPE-002 is what makes
@@ -859,11 +976,128 @@ literal chain-depth measurement §9.5 describes; see *Known pitfalls*.
   CALL site instead of the field-access site S13b actually fixed). Not hit
   by anything in `lib/std` today (no stdlib generic struct declares an
   explicit `.new`) or by this session's own tests (deliberately scoped to
-  `::default()`-constructed instantiations). Left for a future session —
-  extending S12b's drainMethodRequests()-style monomorphization to cover
-  constructor declarations specifically, now that S13a's per-instantiation
-  struct layout exists to make it correct (S12a's own reason for excluding
-  them no longer applies, but nothing has gone back to un-exclude them).
+  `::default()`-constructed instantiations). **Closed by S14a** — see that
+  session's own entry, below.
+- **The user directly asked why S14a's OWN original scope ("delete
+  erasure") made sense if the constructor gap above, and a SECOND gap S12b
+  disclosed, both still depended on it — and was right that it didn't.**
+  S14a's session plan was written in S11a, before either gap was a known
+  fact. Deleting `CastToType()`/`getLLVMType()`'s erasure branches while
+  `Box.new` (constructors) and `fn<T> Box.echo(x: T): T` (a method generic
+  in its own right on a non-generic struct) still relied on them to move a
+  value into/out of a still-open `TurfGenericParamType` slot would have
+  been an IMMEDIATE regression on real, already-passing tests
+  (`tests/06_structs/27_generic_struct_literal_field.tr`'s `Box::new(42)`).
+  S14a's real scope became "close both gaps, verify erasure is genuinely
+  unused by anything, THEN delete it" — confirmed, not assumed, precisely
+  because deleting it first and finding out what broke would have been
+  strictly worse than closing the gaps up front.
+- **A method generic in its own right on a NON-generic struct — S12b's own
+  disclosed gap — was closed by S14a, and turned out to be a genuine
+  TYPE-CHECKING bug, not just a missing monomorphization step.**
+  `TypeCheckerCall.cpp`'s `visitMethodCall()` only ever built a
+  substitution map (`Subst`) from the RECEIVER's own `GenericType` — for
+  `b.echo(42)` where `b: Box` (not `Box<...>`), `Subst` stayed empty and
+  the call fell straight through to `setType(&Node, Best->ReturnType)`
+  with NO substitution at all, reporting the call's own type as the
+  literal, un-substituted `TurfGenericParamType("T")` instead of `int` --
+  independent of monomorphization entirely; this was already wrong under
+  plain erasure too, just never surfaced because nothing downstream
+  happened to need the precise type. Fixed by unifying the METHOD's OWN
+  parameter types against the actual call arguments
+  (`collectGenericSubstitution()`, the same mechanism `visitFuncCall()`
+  already uses for an ordinary free function), merged with the existing
+  struct-level `Subst`. Closing this ALSO required a new decision at
+  monomorphization time: whether a self-bound clone's `self` parameter
+  needs `GenericType` wrapping (the STRUCT is generic) or must stay bare
+  (only the method/constructor has its own type parameters) --
+  `isKnownGenericStructName()` (`Monomorphize.cpp`) makes this call by
+  checking whether the struct name is actually declared with its own
+  `<...>` list anywhere in `PrePassASTs`, since the two cases are
+  indistinguishable from `InstantiationRequest.TypeArgs` alone (both are
+  just "a Method-kind request with some TypeArgs").
+- **A generic function calling ANOTHER generic function through its own
+  STILL-OPEN type parameter recorded a bogus, non-concrete "instantiation
+  request" — harmless under erasure, a hard crash once `INV-GEN-1` is
+  asserted, and found only by actually turning the assertion on and running
+  the full suite.** `fn<T> outer(x: T): T { return inner(x); }` — when
+  `outer`'s own, still-UNSUBSTITUTED template body is type-checked (as part
+  of the whole program's ordinary `resolveAll()`/`checkAll()`, which the
+  monomorphization collector is attached to UNCONDITIONALLY since S12a),
+  `inner(x)`'s own `collectGenericSubstitution()` call unifies `inner`'s
+  `T` against `x`'s type — which, in the TEMPLATE, is `outer`'s OWN, still-
+  open `TurfGenericParamType("T")`, not a concrete type. The resulting
+  `Subst` is non-empty (`{"T": TurfGenericParamType("T")}`) but NOT
+  concrete, and every existing `MonoCollector_->record()` call site
+  (`visitFuncCall`, both of `visitMethodCall`'s paths, `visitFieldAccess`)
+  only ever gated on `!Subst.empty()`, never on every resulting type
+  argument being fully concrete — recording a bogus `"inner<T>"` request
+  that `drainFreeFunctionRequests()` dutifully cloned into a REAL,
+  permanently dead LLVM function nothing ever called, but whose own
+  parameter was STILL a literal `TurfGenericParamType`. Completely
+  invisible under erasure (`getLLVMType(TurfGenericParamType)` silently
+  returned `ptr`, no complaint) — confirmed live via
+  `tests/38_monomorphization/03_nested_generic_call.tr` crashing the new
+  `getLLVMType()` assertion the moment erasure's tolerant fallback was
+  gone. Fixed by extracting `isOrWrapsGenericParam()`/`isFullyConcreteType()`
+  out of `TypeCheckerDecl.cpp`'s anonymous namespace into
+  `TypeCheckerInternal.h` (external linkage, shared across the
+  TypeChecker*.cpp split) and gating EVERY `MonoCollector_->record()` call
+  site in `TypeCheckerCall.cpp` on every resulting `TypeArgs` entry being
+  fully concrete, not just the map being non-empty --
+  `TypeCheckerDecl.cpp`'s own `visitVarDecl()` already had this gate since
+  S11b; the other four call sites (all added S12a-S14a) never did.
+- **`ModuleImportExprAST::codegen()`'s own recursive body walk is a SECOND,
+  completely independent path to `FuncDefExprAST`/`StructDeclExprAST`
+  `::codegen()`, invisible to main.cpp's flat sub-pass 3a/3b template-skip
+  loops, and this was found live via the single most surprising crash of
+  the whole session: a completely trivial `fn main(): int { return 0; }`
+  tripped the brand-new `getLLVMType()` assertion.** `main.cpp`'s own
+  guards only ever examine top-level `PrePassASTs` entries directly; a
+  module's OWN body (walked by `ModuleImportExprAST::codegen()` via
+  `BlockExprAST::codegen()`, itself invoked once per import, including
+  every auto-imported PRELUDE module) calls `FuncDefExprAST::codegen()`
+  directly on each of its own declarations with no equivalent guard at all
+  — meaning ANY still-generic template declared inside ANY imported module
+  (the prelude included) reached Codegen regardless of how carefully
+  main.cpp's own loops were guarded. Fixed at the actual source rather than
+  by duplicating the guard at every call site: `FuncDefExprAST::codegen()`/
+  `StructDeclExprAST::codegen()` now check their OWN `TypeParams` at the
+  very top, unconditionally, so EVERY caller — main.cpp's two loops, this
+  module-body walk, and any future one — is correctly covered by
+  construction, not by remembering to duplicate a check.
+- **Skipping a generic STRUCT template's own codegen entirely (mirroring
+  the function-template fix) broke construction contexts S13b's own
+  `ConstructedType` mechanism didn't cover, and this was found live as a
+  SEPARATE crash from the ones above, with a different signature entirely
+  ("Cannot allocate unsized type").** S13a/S13b deliberately left the
+  shared, erasure-era struct TEMPLATE's own codegen running unconditionally
+  (main.cpp's sub-pass 2c has no `TypeParams`-empty guard for structs at
+  all), reasoning that it coexists harmlessly with per-instantiation clones
+  while erasure still exists to make an open `TurfGenericParamType` field
+  safe to lower. The moment that reasoning stopped being true (erasure
+  deleted, this session) and struct templates were ALSO skipped
+  (mirroring functions), `CodegenFunc.cpp`'s `DefaultConstruct`/
+  `ConstructorCall` branch's own fallback (`if (!T) T =
+  GlobalSymbolTable->LookupType(StructName);`, S13b) started resolving to
+  a struct that would NEVER get `setBody()` called on it again —
+  permanently opaque, zero-sized — for every construction context
+  `ConstructedType` doesn't cover. Found live via
+  `tests/38_monomorphization/04_method_on_generic_struct.tr`'s own
+  `h.items = List::default();` (an ASSIGNMENT, not a `VarDeclExprAST`
+  initializer — the ONE context S13b's `ConstructedType` hand-off
+  originally covered). Fixed by extending the SAME hand-off to
+  `TypeChecker::visitAssignment()` (`TypeCheckerExpr.cpp`). Disclosed,
+  not silently assumed complete: a construction call used directly as a
+  function ARGUMENT or in a `return` statement is still NOT covered by
+  `ConstructedType` — neither is hit by `lib/std`, `showcase/`, or this
+  group's own tests, but a future program writing
+  `someFn(List::default())` or `return List::default();` for a GENERIC
+  struct instantiation would hit the identical "Cannot allocate unsized
+  type" crash. Left for a future session to extend `ConstructedType`'s
+  hand-off to cover argument/return-position construction too, following
+  the exact same pattern established here for `VarDeclExprAST`/
+  `AssignmentExprAST`.
 
 ## Tests
 
@@ -940,6 +1174,29 @@ S13b adds one more test, all passing (683/683 full suite, default and
   (never `Big::new(...)`-as-a-GENERIC-struct's-own-constructor) — see
   *Removed assumptions* for the disclosed `StructName::new(...)` gap this
   doesn't cover.
+
+S14a adds three more tests, all passing (686/686 full suite, default and
+`-O2`):
+- `07_sizeof_t_in_struct_method.tr` — **completion criterion 4's struct-
+  field half**: `sizeof(T)` inside a generic STRUCT's own method
+  (`fn<T> Box.sizeOfT(): int { return sizeof(T); }`), asserting REAL
+  values for `int`/`double`/a >8-byte `Big` (24) in the same program, not
+  just a successful compile — `02_sizeof_t_in_generic_body.tr` (S12a)
+  already covered the free-function half; this is the half that could only
+  ever be asked correctly once S13a/S13b gave each instantiation its own
+  real layout.
+- `08_generic_constructor.tr` — the `StructName::new(...)` gap disclosed
+  through S13b, closed this session: `Box<Big>::new(...)` (an explicit
+  constructor call, not `::default()`) with a real, concrete `%Big`
+  by-value constructor argument, verified live via `--emit-llvm`
+  (`turf_Box.new_gen1_Big...(ptr %self, %Big %v)`), alongside a same-file
+  `Box<int>::new(...)` coexistence check.
+- `09_method_generic_on_nongeneric_struct.tr` — S12b's own disclosed gap,
+  closed this session: `fn<T> Box.echo(x: T): T` where `Box` declares no
+  type parameters of its own at all. Covers `int`/`string`/a >8-byte `Big`
+  all dispatching correctly to three separate, concrete clones with `self`
+  correctly staying a bare `Box*` (never `GenericType`-wrapped, since `Box`
+  itself isn't generic) — verified live via `--emit-llvm`.
 
 ## Known pitfalls
 

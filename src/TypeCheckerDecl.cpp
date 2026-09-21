@@ -37,7 +37,6 @@
 #include <unordered_set>
 
 
-namespace {
 // True if Ty is, after unwrapping any number of pointer/reference/array
 // layers, an uninstantiated generic type parameter -- i.e. built directly
 // from a generic template's own type parameter (FREEZE.md §6.1).
@@ -62,6 +61,10 @@ namespace {
 // checking for TurfGenericParamType directly is defensive only, in case a
 // future architectural change (e.g. TYPE-002 monomorphization) changes
 // which of the two representations reaches this specific lookup path.
+//
+// External linkage (TypeCheckerInternal.h), not anonymous-namespace-local:
+// TypeCheckerCall.cpp's visitFuncCall/visitMethodCall need this too, as of
+// S14a -- see isFullyConcreteType()'s own doc comment just below for why.
 bool isOrWrapsGenericParam(const TurfType *Ty) {
   if (!Ty)
     return false;
@@ -91,6 +94,50 @@ bool isOrWrapsGenericParam(const TurfType *Ty) {
   return false;
 }
 
+/// TYPE-002 (S11b): true when @p Ty has no open generic parameter ANYWHERE
+/// in its shape -- unlike isOrWrapsGenericParam() above, this recurses
+/// into a GenericType's own type-argument list too (needed to tell
+/// `Box<int>` apart from `Box<T>` inside a still-uninstantiated template,
+/// which isOrWrapsGenericParam() alone can't do -- it has no GenericType
+/// case at all, since its one existing caller never needed one). Used only
+/// to decide whether a declared variable's type is a real instantiation
+/// request worth recording, never to change any type-checking outcome.
+///
+/// External linkage (TypeCheckerInternal.h): TypeCheckerCall.cpp's
+/// visitFuncCall/visitMethodCall gate their own MonoCollector_->record()
+/// calls on this too, as of S14a -- found live, not anticipated: neither
+/// call site originally checked whether its OWN computed Subst was fully
+/// concrete before recording, only whether it was non-empty. A generic
+/// function calling ANOTHER generic function using its own still-open type
+/// parameter (`fn<T> outer(x: T): T { return inner(x); }`, `inner`'s OWN
+/// call site inside OUTER's un-substituted TEMPLATE body) unifies
+/// `inner`'s `T` against `outer`'s OWN (still-generic) `T` -- a non-empty
+/// but NOT concrete "substitution" (mapping one open parameter to another)
+/// -- and recorded a bogus instantiation request like "inner<T>" anyway.
+/// Completely harmless under erasure (the resulting bogus clone was dead
+/// code nothing ever called, and getLLVMType(TurfGenericParamType) just
+/// returned ptr without complaint) -- but once S14a asserts INV-GEN-1 in
+/// getLLVMType()/CastToType(), this bogus clone's own literal
+/// TurfGenericParamType parameter trips the assertion the moment it
+/// reaches Codegen. Confirmed live via
+/// tests/38_monomorphization/03_nested_generic_call.tr.
+bool isFullyConcreteType(const TurfType *Ty) {
+  if (!Ty || isOrWrapsGenericParam(Ty))
+    return false;
+  if (const auto *GT = dynamic_cast<const GenericType *>(Ty)) {
+    for (const auto &A : GT->getTypeArgs())
+      if (!isFullyConcreteType(A.get()))
+        return false;
+    return true;
+  }
+  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty))
+    return isFullyConcreteType(PT->getPointee().get());
+  if (const auto *AT = dynamic_cast<const ::ArrayType *>(Ty))
+    return isFullyConcreteType(AT->getElementTypePtr().get());
+  return true;
+}
+
+namespace {
 // True if Ty is an uninstantiated generic template instance: either the
 // bare TurfGenericParamType itself (pointer/array-wrapped or not), or a
 // struct at least one of whose OWN fields is declared directly against a
@@ -125,30 +172,6 @@ bool containsUninstantiatedGenericParam(const TurfType *Ty) {
         return true;
   }
   return false;
-}
-
-/// TYPE-002 (S11b): true when @p Ty has no open generic parameter ANYWHERE
-/// in its shape -- unlike isOrWrapsGenericParam() above, this recurses
-/// into a GenericType's own type-argument list too (needed to tell
-/// `Box<int>` apart from `Box<T>` inside a still-uninstantiated template,
-/// which isOrWrapsGenericParam() alone can't do -- it has no GenericType
-/// case at all, since its one existing caller never needed one). Used only
-/// to decide whether a declared variable's type is a real instantiation
-/// request worth recording, never to change any type-checking outcome.
-bool isFullyConcreteType(const TurfType *Ty) {
-  if (!Ty || isOrWrapsGenericParam(Ty))
-    return false;
-  if (const auto *GT = dynamic_cast<const GenericType *>(Ty)) {
-    for (const auto &A : GT->getTypeArgs())
-      if (!isFullyConcreteType(A.get()))
-        return false;
-    return true;
-  }
-  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty))
-    return isFullyConcreteType(PT->getPointee().get());
-  if (const auto *AT = dynamic_cast<const ::ArrayType *>(Ty))
-    return isFullyConcreteType(AT->getElementTypePtr().get());
-  return true;
 }
 } // namespace
 

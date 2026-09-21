@@ -196,6 +196,26 @@ static void EnsureArgvHelpers() {
 // Calling codegen() twice is what makes forward calls work: main.cpp's
 // pre-pass creates prototypes, then the normal loop fills bodies.
 Value *FuncDefExprAST::codegen() {
+  // TYPE-002 (S14a): a FuncDefExprAST with non-empty TypeParams is an
+  // uninstantiated generic TEMPLATE -- the monomorphizer (Monomorphize.cpp)
+  // always appends a fully-concrete CLONE elsewhere in PrePassASTs and
+  // rewrites every call site to it, so the template itself is dead code by
+  // the time Codegen runs and must never be codegenned (F-GEN-2, INV-GEN-1).
+  // main.cpp's sub-pass 3a/3b loops already skip a template found directly
+  // in PrePassASTs -- but a template declared INSIDE an imported module is
+  // ALSO reached a SECOND way, via ModuleImportExprAST::codegen()'s own
+  // recursive walk of that module's body (CodegenStruct.cpp), which has no
+  // equivalent check of its own. Found live: even a completely trivial
+  // `fn main(): int { return 0; }` hit this, because the auto-imported
+  // prelude itself is walked this way. Checked HERE, at the single real
+  // entry point every caller eventually goes through, instead of
+  // duplicating the same guard at every call site (main.cpp's two loops
+  // plus this one, and any future caller). Same "processed, nothing to
+  // return" sentinel convention VarDeclExprAST's IsExported early-return
+  // already uses.
+  if (!TypeParams.empty())
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+
   std::string MangledName = Name;
   std::string Prefix = "";
   if (GlobalSymbolTable && GlobalSymbolTable->IsInModule()) {
@@ -898,14 +918,31 @@ Value *FuncCallExprAST::codegen() {
       return nullptr;
     }
 
-    std::string CtorMangledName = "turf_";
-    if (!Target->SourceModule.empty())
-      CtorMangledName += Target->SourceModule + "_";
-    CtorMangledName += Target->BaseName;      // "StructName.new"
-    CtorMangledName += "_" + StructName + "_ptr"; // self, reinserted
-    for (const auto &P : Target->Params)
-      if (P.Type)
-        CtorMangledName += "_" + P.Type->getMangledName();
+    // TYPE-002 (S14a): a GENERIC constructor (`fn<T> Box.new(v: T): void`)
+    // is now monomorphized (Monomorphize.cpp's drainConstructorRequests())
+    // -- its clone's OWN ResolvedDef has self back in Params[0] (never
+    // stripped; the clone is an ordinary, ResolvedDef-driven declaration,
+    // not a temporary overload-resolution candidate), so its
+    // mangledName() is ALREADY correct and complete the ordinary way,
+    // exactly like any other resolved call target. Params[0].Name=="self"
+    // is what distinguishes this case from the STILL-self-stripped
+    // candidate every NON-generic constructor's Target remains (stripSelf()
+    // in ResolverCall.cpp runs unconditionally for every `::new(...)` call,
+    // generic or not) -- that path still needs the manual reconstruction
+    // below, since its own Params never included self to begin with.
+    std::string CtorMangledName;
+    if (!Target->Params.empty() && Target->Params[0].Name == "self") {
+      CtorMangledName = Target->mangledName();
+    } else {
+      CtorMangledName = "turf_";
+      if (!Target->SourceModule.empty())
+        CtorMangledName += Target->SourceModule + "_";
+      CtorMangledName += Target->BaseName;      // "StructName.new"
+      CtorMangledName += "_" + StructName + "_ptr"; // self, reinserted
+      for (const auto &P : Target->Params)
+        if (P.Type)
+          CtorMangledName += "_" + P.Type->getMangledName();
+    }
 
     Function *CtorF = TheModule->getFunction(CtorMangledName);
     if (!CtorF) {
@@ -1102,40 +1139,14 @@ Value *FuncCallExprAST::codegen() {
       // exercising it. Using DeclaredType directly routes through that
       // intended path.
       //
-      // This previously special-cased away from DeclaredType whenever it
-      // WAS a TurfGenericParamType (the T in `fn<T> foo(x: T)`), substituting
-      // getTurfTypeFromLLVM(Arg.getType()) (== TurfPtr()) instead, on the
-      // theory that a type-erased parameter has no single "real" type to
-      // use. That reasoning no longer applies now that Resolver::
-      // substituteTypeParams() (see Resolver.cpp) mutates the shared AST
-      // node so DeclaredType really is a genuine, meaningful
-      // TurfGenericParamType instance here -- and CastToType() has a
-      // purpose-built erasure branch keyed on exactly that dynamic_cast
-      // (`if (dynamic_cast<const TurfGenericParamType *>(DestType))`,
-      // further down in this file). Substituting TurfPtr() instead skipped
-      // right past that branch the same way the struct case above did:
-      // TurfPtr() doesn't match any of CastToType()'s numeric-conversion
-      // branches either, so the scalar argument value (e.g. a bare `i1` for
-      // `identity(true)`) was returned completely unconverted and stored
-      // into an opaque-pointer-typed slot with no cast at all -- confirmed
-      // to segfault for a bool argument and silently corrupt a double
-      // argument. Using DeclaredType directly here fixes both.
+      // TYPE-002 (S14a): the redundant PRE-unerase this block used to do
+      // before even calling CastToType() (manually PtrToInt/bitcasting a
+      // pointer-shaped value into int/bool/double whenever DeclaredType was
+      // numeric) is deleted -- CastToType()'s OWN matching branch is gone
+      // too (INV-GEN-1: DeclaredType can no longer legitimately be a
+      // TurfGenericParamType here at all, so there is no "erased" value
+      // left to un-erase). See the change record's *Removed assumptions*.
       TurfTypePtr ExpectedType = DeclaredType;
-
-      // Type-erasure un-erase: if the value is a pointer (erased generic T)
-      // and the expected type is numeric, convert via PtrToInt/bitcast.
-      if (V->getType()->isPointerTy() &&
-          (ExpectedType->isNamed("int") || ExpectedType->isNamed("bool") ||
-           ExpectedType->isNamed("double"))) {
-        Value *IntVal = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext), "unerase_arg");
-        if (ExpectedType->isNamed("bool"))
-          V = Builder->CreateICmpNE(IntVal, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), "unerase_bool");
-        else if (ExpectedType->isNamed("double"))
-          V = Builder->CreateBitCast(IntVal, Type::getDoubleTy(*TheContext), "unerase_dbl");
-        else
-          V = IntVal;
-      }
-
       V = CastToType(V, ExpectedType, "argcast", Loc);
     }
 

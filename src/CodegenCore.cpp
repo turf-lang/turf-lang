@@ -38,6 +38,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include <algorithm>
+#include <cassert>
 #include <iostream>
 #include <set>
 #include <unordered_map>
@@ -425,10 +426,21 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, Key);
   }
 
-  // Type Erasure: Generic Type Parameters are compiled as void* 
-  if (dynamic_cast<const TurfGenericParamType *>(T)) {
-    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
-  }
+  // TYPE-002 (S14a): erasure is gone -- INV-GEN-1 (INVARIANTS.md): after
+  // the monomorphizer runs, no TurfGenericParamType may reach Codegen.
+  // Every occurrence in the whole program is either inside a generic
+  // TEMPLATE (excluded from Codegen entirely by main.cpp's sub-pass 3a/3b
+  // template-skip guard, widened this session to cover every generic
+  // declaration, struct-bound or not) or has already been substituted to a
+  // concrete type by the monomorphizer (Monomorphize.cpp) before its clone
+  // ever reaches here. Debug-build assertion, never removed (the plan's
+  // own "Completion criterion 1"); a release build that somehow still hits
+  // this falls through to the function's own "unknown/future types"
+  // catch-all at the bottom (getDoubleTy) rather than crash outright.
+  assert(!dynamic_cast<const TurfGenericParamType *>(T) &&
+        "INV-GEN-1 violated: a TurfGenericParamType reached getLLVMType() "
+        "-- an un-monomorphized generic template reached Codegen. This is "
+        "a compiler bug.");
 
   // GenericType instantiations (e.g. List<int>) — TYPE-002 (S13b): look up
   // the SPECIFIC per-instantiation struct, registered in GlobalSymbolTable/
@@ -1434,48 +1446,21 @@ Value *CastToType(Value *Val, const TurfType *DestType,
       dynamic_cast<const TurfPointerType *>(SrcType.get()))
     return Val;
 
-  // Type Erasure: cast to generic parameter (stored as void*)
-  if (dynamic_cast<const TurfGenericParamType *>(DestType)) {
-    Type *VoidPtrTy = PointerType::get(*TheContext, 0);
-    if (ValTy->isPointerTy())
-      return Val; // already a pointer
-    if (ValTy->isDoubleTy())
-      Val = Builder->CreateBitCast(Val, Type::getInt64Ty(*TheContext), "dbl_to_i64");
-    if (Val->getType()->isIntegerTy())
-      return Builder->CreateIntToPtr(Val, VoidPtrTy, "erased_ptr");
-    return Builder->CreateBitCast(Val, VoidPtrTy, "erased_ptr");
-  }
+  // TYPE-002 (S14a): erasure is gone -- INV-GEN-1: DestType can no longer
+  // legitimately be a TurfGenericParamType here (every occurrence either
+  // lives inside a generic template Codegen never reaches, or was already
+  // substituted to a concrete type by the monomorphizer before this clone's
+  // body was codegenned). The old "cast TO generic parameter" branch
+  // (IntToPtr/bitcast into a void* slot) and the numeric half of "cast FROM
+  // generic parameter" (PtrToInt/bitcast back to int/bool/double) are both
+  // deleted outright, not left dead -- see the change record's *Removed
+  // assumptions* for the completion-criterion verification this rested on.
+  assert(!dynamic_cast<const TurfGenericParamType *>(DestType) &&
+        "INV-GEN-1 violated: CastToType() received a TurfGenericParamType "
+        "DestType -- an un-monomorphized generic template reached Codegen. "
+        "This is a compiler bug.");
 
-  // Type Erasure: cast from generic parameter (void*) back to actual type.
-  //
-  // Gated on `ValTy->isPointerTy()`, NOT on `dynamic_cast<TurfGenericParamType>
-  // (SrcType.get())` (the condition this replaced) -- SrcType a few lines up
-  // is always produced by getTurfTypeFromLLVM(ValTy), which only ever
-  // returns TurfDouble/TurfInt/TurfBool/TurfPtr/TurfVoid: it can NEVER
-  // itself construct a TurfGenericParamType, so the old condition could
-  // never match and this whole branch was dead code. What actually
-  // identifies "this pointer is an erased generic value" at this point is
-  // that it's a raw pointer being cast to a genuinely numeric DestType --
-  // by the time Codegen runs, TypeChecker's typesCompatible() type-erasure
-  // fast path is the only reason a pointer-typed value would ever be
-  // assignment-compatible with int/bool/double in the first place, so this
-  // combination cannot arise from anything else. Confirmed via
-  // `fn<T> identity(x: T): T` returning a bool or double: with the old dead
-  // condition, `identity(true)` segfaulted (a bare i1 was stored into an
-  // opaque-pointer-typed alloca with no conversion at all) and
-  // `identity(3.5)` silently returned garbage -- both are fixed by this
-  // branch actually running.
   if (ValTy->isPointerTy()) {
-    if (DestType->isNamed("int") || DestType->isNamed("bool")) {
-      Value *IntVal = Builder->CreatePtrToInt(Val, Type::getInt64Ty(*TheContext), "unerased_int");
-      if (DestType->isNamed("bool"))
-        return Builder->CreateICmpNE(IntVal, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), "unerased_bool");
-      return IntVal;
-    }
-    if (DestType->isNamed("double")) {
-      Value *IntVal = Builder->CreatePtrToInt(Val, Type::getInt64Ty(*TheContext), "unerased_int");
-      return Builder->CreateBitCast(IntVal, Type::getDoubleTy(*TheContext), "unerased_dbl");
-    }
     if (isPointerLike(DestType)) {
       return Val; // already pointer
     }
