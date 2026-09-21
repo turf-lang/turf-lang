@@ -334,6 +334,36 @@ struct ResolverFunctionSymbol {
       if (P.Type) S += "_" + P.Type->getMangledName();
     return S;
   }
+
+  /// TYPE-002 (docs/development/changes/TYPE-002.md, S11b): the mangled
+  /// name for a MONOMORPHIZED instantiation of this (generic) symbol --
+  /// additive, not yet called anywhere (S12a wires it in when it first
+  /// registers a real specialization). Not simply mangledName() called
+  /// after substituting Params: once a generic parameter is substituted
+  /// with a concrete type, Params alone is indistinguishable from a
+  /// hand-written, genuinely non-generic overload with the same name and
+  /// the same concrete parameter types -- e.g. `fn<T> identity(x: T): T`
+  /// instantiated with T=int has Params=[int], mangling to the exact same
+  /// "turf_identity_int" a hand-written `fn identity(x: int): int` would
+  /// also produce. §9.5's own requirement ("a pure function of (module,
+  /// base name, type arguments, parameter types)") is read literally here:
+  /// the explicit type-argument tuple is embedded via a "_gen<N>_" marker
+  /// no ordinary mangledName() call ever produces, so a monomorphized
+  /// instantiation's symbol can never collide with an ordinary
+  /// declaration's, regardless of what the substituted parameter types
+  /// happen to be.
+  std::string
+  mangledNameForInstantiation(const std::vector<TurfTypePtr> &TypeArgs) const {
+    std::string S = "turf_";
+    if (!SourceModule.empty()) S += SourceModule + "_";
+    S += sanitizeSymbolName(BaseName);
+    S += "_gen" + std::to_string(TypeArgs.size());
+    for (const auto &A : TypeArgs)
+      if (A) S += "_" + A->getMangledName();
+    for (const auto &P : Params)
+      if (P.Type) S += "_" + P.Type->getMangledName();
+    return S;
+  }
 };
 
 /**

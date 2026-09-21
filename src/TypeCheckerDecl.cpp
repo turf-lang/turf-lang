@@ -25,6 +25,8 @@
 
 #include "TypeCheckerInternal.h"
 
+#include "Monomorphize.h" // TYPE-002 (S11b): report-only instantiation collector
+
 #include <cassert>
 #include <functional>
 #include <iostream>
@@ -123,6 +125,30 @@ bool containsUninstantiatedGenericParam(const TurfType *Ty) {
         return true;
   }
   return false;
+}
+
+/// TYPE-002 (S11b): true when @p Ty has no open generic parameter ANYWHERE
+/// in its shape -- unlike isOrWrapsGenericParam() above, this recurses
+/// into a GenericType's own type-argument list too (needed to tell
+/// `Box<int>` apart from `Box<T>` inside a still-uninstantiated template,
+/// which isOrWrapsGenericParam() alone can't do -- it has no GenericType
+/// case at all, since its one existing caller never needed one). Used only
+/// to decide whether a declared variable's type is a real instantiation
+/// request worth recording, never to change any type-checking outcome.
+bool isFullyConcreteType(const TurfType *Ty) {
+  if (!Ty || isOrWrapsGenericParam(Ty))
+    return false;
+  if (const auto *GT = dynamic_cast<const GenericType *>(Ty)) {
+    for (const auto &A : GT->getTypeArgs())
+      if (!isFullyConcreteType(A.get()))
+        return false;
+    return true;
+  }
+  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty))
+    return isFullyConcreteType(PT->getPointee().get());
+  if (const auto *AT = dynamic_cast<const ::ArrayType *>(Ty))
+    return isFullyConcreteType(AT->getElementTypePtr().get());
+  return true;
 }
 } // namespace
 
@@ -256,6 +282,22 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
 #endif
 
   setType(&Node, DeclTy);
+
+  // TYPE-002 (S11b, report-only): a declared type is a struct
+  // instantiation request even with no method call anywhere on it -- e.g.
+  // `mut b: Box<int> = Box { val: 5 }; return b.val;` never calls a
+  // method, but Box<int> must still exist as its own real type/layout
+  // once monomorphization lands (S13a). Recorded here, not just at method
+  // call sites, so this case isn't invisible to the census. A no-op
+  // whenever MonoCollector_ is null (every ordinary compile).
+  if (MonoCollector_) {
+    if (auto *DeclGT = dynamic_cast<const GenericType *>(DeclTy.get())) {
+      if (isFullyConcreteType(DeclGT))
+        MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
+                               DeclGT->getBaseName(), DeclGT->getTypeArgs(),
+                               Node.getLoc()});
+    }
+  }
 
   // `unsafe { }` gate (issue #238): declaring a raw ptr/T*-typed variable
   // is one of the three explicitly-gated "uses" (declaration, cast,

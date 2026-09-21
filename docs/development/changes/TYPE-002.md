@@ -5,7 +5,7 @@
 | **Status** | in-progress |
 | **Dates** | started 2026-09-21 · landed — |
 | **Commits** | (added at the end of each sub-session) |
-| **Sessions** | 1 of 8 (S11a done; S11b, S12a, S12b, S13a, S13b, S14a, S14b remain) |
+| **Sessions** | 2 of 8 (S11a, S11b done; S12a, S12b, S13a, S13b, S14a, S14b remain) |
 | **Depends on** | TYPE-001 (landed 2026-09-18), SEM-001 (landed 2026-09-18); strongly benefits from OPT-001 (landed 2026-09-18) |
 | **Frozen decisions relied on** | F-GEN-1, F-GEN-2, F-GEN-3, F-OP-1 (unaffected but adjacent — see §9.8) |
 
@@ -80,36 +80,86 @@ grown each sub-session.
 
 ## Compiler architecture
 
-No pass exists yet. Planned (§9.5 of the blueprint, confirmed against
-source this session — see *Unresolved questions*, U-4′):
+**S11a** planned this; **S11b** built the skeleton (report-only, zero
+behaviour change — verified by the full suite staying at 676/676 and a
+direct `lib/std`/`showcase`/prelude sweep finding no new diagnostic
+anywhere):
 
 ```
 Lexer → Parser → Resolver(2) → TypeChecker → Monomorphizer → Codegen
 ```
 
 concretely inserted as a **new pre-pass sub-pass 2b.5**, between the
-pre-pass's own `TypeChecker` run (sub-pass 2b, `main.cpp:882-916`) and its
-struct codegen (sub-pass 2c, `main.cpp:918-955`). See U-4′ below for the
-full justification. Nothing in `src/` changed this session.
+pre-pass's own `TypeChecker` run (sub-pass 2b, `main.cpp:892-901`) and its
+struct codegen (sub-pass 2c). See U-4′ below for the full justification.
+
+**What S11b actually added:**
+- `include/Monomorphize.h` + `src/Monomorphize.cpp` (new `turfcore` source,
+  added to `CMakeLists.txt`): `InstantiationKind` (FreeFunction/Method/
+  Struct), `InstantiationRequest`, `InstantiationCache` (deliberately
+  linear-scan, not hashed — see the header's own comment: U-2's census
+  found ~18-20 real instantiations, so an O(n²) worst case over the whole
+  program's `insert()` calls costs nothing, and it lets every comparison go
+  through `isEquivalent()` pairwise instead of inventing a `TurfTypePtr`
+  hash function that would risk falling back to identity-by-`getName()`,
+  INV-TYPE-1), and `InstantiationCollector` (`record()`/`report()`). The
+  `Worklist` member is populated but **not drained** this session — S12a's
+  job; the shape exists now so S12a's "pop, clone, substitute, push new
+  requests" loop (§9.5 steps 2-3) doesn't have to be reworked into it later.
+- `FuncCallExprAST::GenericSubstitution` and
+  `MethodCallExprAST::GenericSubstitution` (`include/ASTAccess.h`): the
+  substitution map `collectGenericSubstitution()` already built and used to
+  discard (see *Removed assumptions*) is now persisted on the node, empty
+  for the overwhelming majority of (non-generic) calls, never copied by
+  `clone()` — same contract as `ResolvedCallTarget`.
+- `ResolverFunctionSymbol::mangledNameForInstantiation()`
+  (`include/ResolverSymbolBase.h`) — purely additive, not called by
+  anything yet. See *Removed assumptions* for why this replaced the
+  originally-planned `TurfGenericParamType::getMangledName()` override.
+- `TypeChecker::setMonomorphizationCollector()` + a nullable
+  `MonoCollector_` member (`include/TypeChecker.h`): every `record()` call
+  site (`TypeCheckerCall.cpp`'s `visitFuncCall`/`visitMethodCall`,
+  `TypeCheckerDecl.cpp`'s `visitVarDecl`) is guarded on this being
+  non-null, so an ordinary compile that never sets it is unaffected.
+  `visitVarDecl` also records a **Struct**-kind request for a bare
+  `mut b: Box<int> = ...;` with no method ever called on `b` — needed
+  because a plain field read (`b.val`) needs `Box<int>`'s own layout to
+  exist eventually, and would otherwise be invisible to a collector fed
+  only from call sites.
+- `GenericInstantiationDepthError` (`include/ErrorsMonomorphize.h`) + `E079`
+  (`include/ErrorCodes.h`, `docs/errors/codes/E079.txt`,
+  `docs/slm/codes/E079.txt`) and `Monomorphize::kMaxInstantiationDepth = 64`
+  — registered and documented, **not yet raised anywhere**: nothing drains
+  the worklist this session, so nothing can exceed the cap it would guard.
+- `--dump-instantiations` (`src/main.cpp`): attaches the collector to the
+  pre-pass's own `TypeChecker` (`PreTC`) for that one `checkAll()` call and
+  prints the census to stderr afterward. Verified live against
+  `showcase/text_toolkit.tr`: 11 distinct requests, correctly deduplicated
+  (`List<string>` reported once as a `[struct]` request despite three
+  separate method calls on it) — see this file's own git history for the
+  full sample output.
+- `tests/38_monomorphization/README.md` — the folder exists; empty of
+  `.tr` files until S12a (nothing to test yet).
 
 ## Runtime changes
 
-None (this session). Eventually none in this group either — TYPE-002 is
-what makes RT-001's type descriptors possible, not a runtime change itself.
+None. Eventually none in this group either — TYPE-002 is what makes
+RT-001's type descriptors possible, not a runtime change itself.
 
 ## Standard-library changes
 
-None (this session). Planned, later sessions only (§8's TYPE-002 entry):
-`list.tr`'s `cap * 8` → `cap * sizeof(T)` (S14b only — explicitly not
-bundled with anything else).
+None. Planned, later sessions only (§8's TYPE-002 entry): `list.tr`'s
+`cap * 8` → `cap * sizeof(T)` (S14b only — explicitly not bundled with
+anything else).
 
 ## New invariants
 
-None added this session. `INVARIANTS.md` already carries `INV-GEN-1` and
-`INV-TYPE-2` as `planned — TYPE-002`, and `INV-TEST-1` as
+None moved to `holds` this session. `INVARIANTS.md` already carries
+`INV-GEN-1` and `INV-TYPE-2` as `planned — TYPE-002`, and `INV-TEST-1` as
 `planned — TYPE-002's tests`; `INV-CG-1` (`planned`) is directly relevant to
 U-4′ below. None move to `holds` until S14a/S14b actually build the
-enforcing mechanism.
+enforcing mechanism. `E079` (a new *diagnostic*, not an invariant) is
+registered but dormant — see *Compiler architecture* above.
 
 ## Removed assumptions
 
@@ -137,11 +187,64 @@ enforcing mechanism.
 - **A generic struct's type arguments never come from its constructor
   expression.** `Types.cpp:206-222`'s own comment says so directly: there is
   no `Box<int> { val: null }` syntax anywhere in the grammar. See U-5.
+- **S11a's own plan for the mangling collision fix was slightly wrong,
+  corrected in S11b.** S11a's session plan said the fix was
+  "`TurfGenericParamType`'s explicit `getMangledName()` override." On
+  actually implementing it: mangling only ever happens on a symbol whose
+  `Params` are already **concrete** (post-substitution) — a
+  `TurfGenericParamType` is never present at the point anything calls
+  `mangledName()` on a real, about-to-be-codegenned instantiation.
+  Overriding `TurfGenericParamType::getMangledName()` would only affect the
+  *template's own* (still erasure-era, still actively used until S13b/S14a)
+  mangled name — a change to a hot path this session's zero-behaviour-
+  change mandate forbids touching without much more testing than a
+  skeleton session warrants. The real fix (implemented instead, purely
+  additive): a new `mangledNameForInstantiation()` method that embeds an
+  explicit `_gen<N>_<typeargs>_` segment no ordinary `mangledName()` call
+  can ever produce, so a monomorphized instantiation's symbol can never
+  collide with a hand-written declaration's, regardless of what the
+  substituted parameter types happen to be. S12a wires it in when it first
+  registers a real specialization; `TurfGenericParamType::getMangledName()`
+  is deferred to that session too, to be decided (if it's even still
+  needed once the template stops being directly codegenned) with the real
+  monomorphization pipeline available to test against, not blind against
+  still-active erasure.
+- **This repo has no C++-level unit test framework** (no gtest/Catch2 found
+  anywhere under `external/` or `CMakeLists.txt`) — "unit-test the mangler"
+  from S11a's plan is not literally achievable the way a C++ project with
+  gtest would do it. `mangledNameForInstantiation()` is exercised instead
+  by inspection (its logic is small and mirrors the already-relied-upon
+  `mangledName()`) and will get real, live exercise once S12a calls it for
+  the first time and the full suite either stays green or doesn't.
+- **`std::unordered_map` iteration order is not declaration order.** The
+  existing `Subst` map (`collectGenericSubstitution()`'s output) is keyed
+  by type-parameter name with no ordering guarantee — fine for its
+  original job (looking up one name at a time to substitute a return
+  type), but an `InstantiationRequest`'s `TypeArgs` needs an **ordered**,
+  index-comparable vector so two requests for the same instantiation
+  produce comparable tuples. Fixed by a second small walk
+  (`collectGenericParamNameOrder()`, `TypeCheckerCall.cpp`) that recovers
+  first-seen declaration order independently of `Subst`'s own iteration
+  order, mirroring `collectGenericSubstitution()`'s recursive shape.
+- **Directly `--resolve`-ing a bare `lib/std/**` file "fails" for two
+  different, unrelated reasons, only one of which is real.** Confirmed
+  against the untouched baseline (stashed this session's changes and
+  re-tested) before concluding either was pre-existing: (a) "No entry
+  point found" for every non-prelude module file with no `main()` — this
+  is **expected and benign**, not a regression signal, since these files
+  were never meant to compile standalone into a binary; AGENTS.md's own
+  sweep guidance means "no *new* diagnostic," not "produces a binary." (b)
+  `list.tr` and `mem.tr` specifically report `E034` ("struct already
+  declared") when compiled bare and standalone — reproduced identically on
+  the pre-S11b baseline, so **pre-existing**, not introduced by this
+  session, and out of scope to fix here. A future session sweeping
+  `lib/std` should grep for a real error code/ICE/"Ambiguous", not treat
+  "No entry point found" or this specific E034 as a failure.
 
 ## Tests
 
-None added this session (no compiler behavior to test yet). `S11b` is where
-`tests/38_monomorphization/` is first created.
+`tests/38_monomorphization/README.md` added (INV-TEST-1 stated). No `.tr`
+tests yet — nothing to exercise until S12a.
 
 ## Known pitfalls
 

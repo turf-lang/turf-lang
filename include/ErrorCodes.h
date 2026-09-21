@@ -142,6 +142,13 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E076", "IntegerLiteralOutOfRangeError", "Integer literal out of range", SLM::ErrorCategory::ARITHMETIC},
     {"E077", "IntegerLiteralNotExactAsDoubleError", "Integer literal not exact as double", SLM::ErrorCategory::ARITHMETIC},
     {"E078", "FloatLiteralOverflowError", "Float literal overflow", SLM::ErrorCategory::ARITHMETIC},
+    // TYPE-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §9.5 step 4): the
+    // monomorphizer's instantiation worklist is depth-capped, not run to
+    // real exhaustion. Registered in S11b alongside the class and the
+    // depth constant it guards (Monomorphize::kMaxInstantiationDepth) even
+    // though nothing raises it until S12a's worklist actually drains --
+    // see docs/development/changes/TYPE-002.md.
+    {"E079", "GenericInstantiationDepthError", "Generic instantiation depth exceeded", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

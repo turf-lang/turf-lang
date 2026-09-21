@@ -182,6 +182,7 @@ add_library(turfcore STATIC
   src/Formatter.cpp
   src/Lexer.cpp
   src/Lint.cpp
+  src/Monomorphize.cpp
   src/ParserCore.cpp
   src/ParserLiteral.cpp
   src/ParserStmt.cpp

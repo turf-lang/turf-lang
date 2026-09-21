@@ -1,0 +1,47 @@
+TURF E079 -- GENERIC INSTANTIATION DEPTH EXCEEDED:
+
+CAUSE:
+  Turf's generics are monomorphized (TYPE-002): a distinct compiled copy
+  is generated per distinct tuple of concrete type arguments a generic
+  function/method/struct is ever used with. The monomorphizer's worklist
+  (ARCHITECTURE_OVERHAUL.md §9.5) is depth-capped at
+  Monomorphize::kMaxInstantiationDepth (default 64) rather than run to real
+  exhaustion.
+
+  This fires when a chain of instantiation requests never bottoms out --
+  each request asks for a new, distinct type-argument tuple, so the
+  monomorphizer never reaches a cache hit and keeps cloning + substituting
+  forever. Concretely: a generic that calls/constructs itself with a type
+  that strictly grows at every level, e.g.:
+
+    fn<T> wrap(x: T) {
+        wrap(Box { val: x });   // wrap<T> -> wrap<Box<T>> -> wrap<Box<Box<T>>> -> ...
+    }
+
+  Each instantiation is a genuinely DIFFERENT type tuple (Box<T> != T), so
+  InstantiationCache::contains() (Monomorphize.h) never returns true for
+  it, and the request never resolves to an already-compiled copy the way a
+  finite, cache-hitting recursive generic would.
+
+DIAGNOSTIC SHAPE:
+  The full chain is rendered in traversal order (`chain: wrap<int> ->
+  wrap<Box<int>> -> wrap<Box<Box<int>>> -> ...`), the same convention as
+  E069 (StructLayoutCycleError)'s cycle path -- show the whole chain, not
+  just where the cap was hit, since the interesting fact is usually near
+  the START of the chain (which type first started growing), not the end.
+
+FIX:
+  Almost always: the recursive call/construction should hold the
+  recursive value behind a pointer or reference (`T*`/`&T`), which keeps
+  the generic's OWN type argument fixed across the recursion -- only the
+  runtime VALUE recurses, not the type being monomorphized. If the growing
+  type is genuinely intentional (a type-level Peano/depth count), it is
+  past what this compiler is designed to monomorphize; restructure it to
+  stop growing the type at some fixed, concrete depth instead.
+
+STATUS (S11b, docs/development/changes/TYPE-002.md):
+  The class and this E079 registration exist as of S11b, alongside the
+  depth constant they guard. Nothing raises this yet -- the worklist it
+  would guard isn't drained until S12a starts actually processing
+  instantiation requests. Do not treat "no S11b test reproduces E079" as
+  a gap; there is deliberately nothing to trigger it against yet.

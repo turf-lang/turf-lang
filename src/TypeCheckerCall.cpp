@@ -25,6 +25,9 @@
 
 #include "TypeCheckerInternal.h"
 
+#include "Monomorphize.h" // TYPE-002 (S11b): report-only instantiation collector
+
+#include <algorithm>
 #include <cassert>
 #include <functional>
 #include <iostream>
@@ -149,6 +152,65 @@ static void collectGenericSubstitution(
     }
     return;
   }
+}
+
+/**
+ * @brief TYPE-002 (S11b): recover a CANONICAL, declaration-order list of
+ *        generic type-parameter names from a declared parameter type,
+ *        mirroring collectGenericSubstitution()'s own recursive walk.
+ *
+ * Subst (built by collectGenericSubstitution(), above) is an
+ * unordered_map -- its iteration order is not the declaration order and is
+ * not even guaranteed stable across equivalent runs. An instantiation
+ * request needs a canonical, ORDERED type-argument tuple (two requests for
+ * the same instantiation must produce index-comparable vectors, not just
+ * the same set of pairs), so this walks the same param-type shape a
+ * second time purely to recover the order names were first seen in --
+ * exactly how collectGenericSubstitution() itself decided insertion order,
+ * just captured explicitly instead of thrown away.
+ */
+static void collectGenericParamNameOrder(const TurfTypePtr &ParamTy,
+                                         std::vector<std::string> &Order) {
+  if (!ParamTy)
+    return;
+  if (const auto *GP = dynamic_cast<const TurfGenericParamType *>(ParamTy.get())) {
+    if (std::find(Order.begin(), Order.end(), GP->getName()) == Order.end())
+      Order.push_back(GP->getName());
+    return;
+  }
+  if (const auto *PPtr = dynamic_cast<const TurfPointerType *>(ParamTy.get())) {
+    collectGenericParamNameOrder(PPtr->getPointee(), Order);
+    return;
+  }
+  if (isArrayType(ParamTy.get())) {
+    if (const auto *Arr = dynamic_cast<const ArrayType *>(ParamTy.get()))
+      collectGenericParamNameOrder(Arr->getElementTypePtr(), Order);
+    return;
+  }
+  if (const auto *PGen = dynamic_cast<const GenericType *>(ParamTy.get())) {
+    for (const auto &A : PGen->getTypeArgs())
+      collectGenericParamNameOrder(A, Order);
+    return;
+  }
+}
+
+/// TYPE-002 (S11b): turn a (possibly partial) Subst map into the ordered
+/// TypeArgs vector an InstantiationRequest needs, using CanonicalOrder
+/// (from collectGenericParamNameOrder() above) to fix the index order. A
+/// name in CanonicalOrder with no Subst entry (a return-only phantom type
+/// parameter that never appeared in any argument position) is skipped --
+/// the request is still meaningful over the parameters that DID resolve.
+static std::vector<TurfTypePtr> orderedTypeArgs(
+    const std::vector<std::string> &CanonicalOrder,
+    const std::unordered_map<std::string, TurfTypePtr> &Subst) {
+  std::vector<TurfTypePtr> Args;
+  Args.reserve(CanonicalOrder.size());
+  for (const auto &Name : CanonicalOrder) {
+    auto It = Subst.find(Name);
+    if (It != Subst.end())
+      Args.push_back(It->second);
+  }
+  return Args;
 }
 
 
@@ -454,6 +516,24 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     int SubstCheckCount = std::min(ArgCount, Best->arity());
     for (int i = 0; i < SubstCheckCount; ++i)
       collectGenericSubstitution(Best->Params[i].Type, ArgTypes[i], Subst);
+
+    // TYPE-002 (S11b): persist onto the node instead of letting Subst go
+    // out of scope unread -- see FuncCallExprAST::GenericSubstitution's
+    // doc comment (ASTAccess.h). Only when non-empty: an empty map means
+    // this call isn't generic at all, and is not an instantiation request.
+    if (!Subst.empty()) {
+      Node.GenericSubstitution = Subst;
+      // Report-only: feed the (opt-in, --dump-instantiations) collector.
+      // A no-op whenever MonoCollector_ is null -- every ordinary compile.
+      if (MonoCollector_) {
+        std::vector<std::string> Order;
+        for (int i = 0; i < SubstCheckCount; ++i)
+          collectGenericParamNameOrder(Best->Params[i].Type, Order);
+        MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
+                               CalleeName, orderedTypeArgs(Order, Subst),
+                               Node.getLoc()});
+      }
+    }
 
     setType(&Node, substituteReturnType(Best->ReturnType, Subst));
     return;
@@ -1087,6 +1167,33 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // general for a hypothetical multi-parameter struct whose fields
           // don't happen to mention every parameter in declaration order.
           if (!Subst.empty()) {
+            // TYPE-002 (S11b): persist onto the node -- see
+            // MethodCallExprAST::GenericSubstitution's doc comment
+            // (ASTAccess.h). Already guarded by the same !Subst.empty()
+            // this block is inside, so no redundant emptiness check needed.
+            Node.GenericSubstitution = Subst;
+            // Report-only: feed the (opt-in) collector, a no-op when null.
+            // Two requests, not one: the RECEIVER's struct instantiation
+            // (e.g. List<int> itself must exist) and the specific method
+            // being called on it (e.g. List.push<int>) -- S12b/S13a act on
+            // these independently (methods land before struct layout
+            // does), so both are worth recording now. TypeArgs is
+            // re-derived from the base expression's GenericType rather
+            // than threaded out of the `if (auto *GT = ...)` scope above
+            // it went out of scope in -- cheap, and keeps this addition
+            // from having to restructure already-working code.
+            if (MonoCollector_) {
+              if (auto *BaseGT = dynamic_cast<const GenericType *>(
+                      getType(Node.getBase()).get())) {
+                std::vector<TurfTypePtr> TypeArgsCopy = BaseGT->getTypeArgs();
+                MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
+                                       BaseGT->getBaseName(), TypeArgsCopy,
+                                       Node.getLoc()});
+                MonoCollector_->record({Monomorphize::InstantiationKind::Method,
+                                       StructName + "." + MethodName,
+                                       std::move(TypeArgsCopy), Node.getLoc()});
+              }
+            }
             setType(&Node, substituteReturnType(Best->ReturnType, Subst));
             return;
           }

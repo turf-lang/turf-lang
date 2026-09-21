@@ -89,6 +89,14 @@ struct SourceLocation;
 // and is included only in TypeChecker.cpp.
 class ExprAST;
 
+// TYPE-002 (docs/development/changes/TYPE-002.md, S11b): forward-declared
+// for the same reason as ExprAST above -- TypeChecker only ever stores a
+// pointer to one and calls record(), so the full Monomorphize.h definition
+// (LLVM-free, but a separate concern) doesn't need to be pulled in here.
+namespace Monomorphize {
+class InstantiationCollector;
+}
+
 // ─── TypeChecker ─────────────────────────────────────────────────────────────
 
 /**
@@ -160,6 +168,16 @@ public:
   /// Replace the error handler after construction (useful in tests).
   void setErrorHandler(ErrorHandler Handler) {
     ErrorHandler_ = std::move(Handler);
+  }
+
+  /// TYPE-002 (S11b): opt in to feeding every generic call/declaration
+  /// this TypeChecker resolves into an instantiation-request collector.
+  /// Null (the default) is a complete no-op -- every record() call site is
+  /// guarded on this being non-null, so an ordinary compile that never
+  /// passes --dump-instantiations pays no cost and sees no behaviour
+  /// change. @p Collector must outlive this TypeChecker.
+  void setMonomorphizationCollector(Monomorphize::InstantiationCollector *Collector) {
+    MonoCollector_ = Collector;
   }
 
   // ── Entry points ──────────────────────────────────────────────────────────
@@ -502,6 +520,10 @@ private:
 
   /// Pluggable error reporter (default = TypeError::raise()).
   ErrorHandler ErrorHandler_;
+
+  /// TYPE-002 (S11b): null unless setMonomorphizationCollector() was
+  /// called. See that method's doc comment.
+  Monomorphize::InstantiationCollector *MonoCollector_ = nullptr;
 
   /// Stack of expected return types for nested function definitions.
   /// Empty when we are at the top level.

@@ -3,6 +3,8 @@
 
 #include "AST.h"
 
+#include <unordered_map>
+
 
 // Call to a user-defined function: name(arg1, arg2, ...)
 class FuncCallExprAST : public ExprAST {
@@ -38,13 +40,26 @@ public:
     return ResolvedCallTarget.get();
   }
 
+  /// TYPE-002 (docs/development/changes/TYPE-002.md, S11b): the concrete
+  /// type-parameter-name -> concrete-type map TypeChecker::visitFuncCall()
+  /// builds via collectGenericSubstitution() to resolve this call's return
+  /// type (TypeCheckerCall.cpp). Previously computed and immediately
+  /// discarded, function-local; persisted here so the monomorphizer can
+  /// read it back as an instantiation request without recomputing it.
+  /// Empty for the overwhelming majority of calls, which aren't generic at
+  /// all -- an empty map is not itself an instantiation request.
+  /// clone() returns a fresh node, so this is empty in cloned trees — same
+  /// clone-semantics contract as ResolvedCallTarget.
+  std::unordered_map<std::string, TurfTypePtr> GenericSubstitution;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
                                              CloneExprList(Args));
-    // Note: ResolvedCandidates and ResolvedCallTarget are intentionally NOT
-    // copied — cloned ASTs are stale until re-resolved. ✓
+    // Note: ResolvedCandidates, ResolvedCallTarget, and GenericSubstitution
+    // are intentionally NOT copied — cloned ASTs are stale until
+    // re-resolved. ✓
   }
 };
 
@@ -280,14 +295,25 @@ public:
   /// zero-cost store, since the transition's validity is already proven.
   bool TransitionCompileTimeProven = false;
 
+  /// TYPE-002 (docs/development/changes/TYPE-002.md, S11b): mirrors
+  /// FuncCallExprAST::GenericSubstitution, but built from a different
+  /// source for a method call -- the RECEIVER's own GenericType (e.g.
+  /// `l: List<int>` => T=int), recovered by scanning the struct's fields
+  /// (TypeChecker::visitMethodCall, TypeCheckerCall.cpp), not by
+  /// unifying arguments against declared parameter types. Empty for a
+  /// non-generic method call or a call on a non-generic struct.
+  /// clone() returns a fresh node, so this is empty in cloned trees — same
+  /// clone-semantics contract as ResolvedCallTarget.
+  std::unordered_map<std::string, TurfTypePtr> GenericSubstitution;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitMethodCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()),
                                                Method, NameLoc, CloneExprList(Args));
-    // Note: ResolvedCallTarget, ResolvedViaUFCS, IsMachineTransition, and
-    // TransitionCompileTimeProven intentionally NOT
-    // copied — cloned ASTs are stale until re-resolved. ✓
+    // Note: ResolvedCallTarget, ResolvedViaUFCS, IsMachineTransition,
+    // TransitionCompileTimeProven, and GenericSubstitution intentionally
+    // NOT copied — cloned ASTs are stale until re-resolved. ✓
   }
 };
 

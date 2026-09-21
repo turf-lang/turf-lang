@@ -25,6 +25,7 @@
 #include "Lint.h"
 #include "Parser.h"
 #include "CFG.h"
+#include "Monomorphize.h" // TYPE-002 (S11b): --dump-instantiations
 #include "Resolver.h"
 #include "TypeChecker.h"
 #include "SLMEngine.h"
@@ -89,6 +90,7 @@ struct CompilerOptions {
   bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
   bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
   bool DumpModules = false;           // --dump-modules: print full module-system introspection
+  bool DumpInstantiations = false;    // --dump-instantiations: TYPE-002 (S11b) report-only census
   bool Format = false;                // --format: print the formatted source to stdout and exit
   bool FormatWrite = false;           // --write (with --format): rewrite the file in place instead
   std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
@@ -251,6 +253,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.AIEnabled = true;
     } else if (arg == "--dump-ast") {
       opts.DumpAST = true;
+    } else if (arg == "--dump-instantiations") {
+      opts.DumpInstantiations = true;
     } else if (arg == "--resolve") {
       opts.RunResolver = true;
     } else if (arg == "--dump-resolver-symbols") {
@@ -320,7 +324,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
         << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] "
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
-           "[--dump-modules] [--link <libname>] "
+           "[--dump-modules] [--dump-instantiations] [--link <libname>] "
            "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
            "       turf --format [--write] <filename.tr>\n"
            "       turf --explain E0NN\n";
@@ -892,12 +896,27 @@ static int runCompilerMain(int argc, char **argv) {
       bool PreTCClean = true;
       {
         TypeChecker PreTC(PreR.symbolTable());
+        // TYPE-002 (docs/development/changes/TYPE-002.md, S11b): this is
+        // U-4's answer (U-4') in practice -- the real monomorphizer will
+        // hook in here too, as sub-pass 2b.5, immediately after this
+        // TypeChecker run and before sub-pass 2c's struct codegen just
+        // below. For now, report-only: --dump-instantiations feeds a
+        // collector during this SAME checkAll() call (TypeChecker's
+        // visitFuncCall/visitMethodCall/visitVarDecl record into it when
+        // set) and prints the census once it finishes. Zero behaviour
+        // change whenever the flag is absent -- MonoCollector is never
+        // attached, so every record() call site stays a no-op.
+        Monomorphize::InstantiationCollector MonoCollector;
+        if (opts.DumpInstantiations)
+          PreTC.setMonomorphizationCollector(&MonoCollector);
         g_recoverActive = true;
         if (setjmp(g_recoverJmp) == 0) {
           PreTC.checkAll(PrePassASTs);
         } else {
           PreTCClean = false;
         }
+        if (opts.DumpInstantiations)
+          MonoCollector.report(std::cerr);
         // Errors in the pre-pass TC are informational only in the sense that
         // the main-pass TC (below, after the whole pre-pass finishes) is what
         // actually PRINTS them with full diagnostics and is authoritative for
