@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | in-progress |
-| **Dates** | started 2026-09-21 · landed — |
+| **Status** | landed |
+| **Dates** | started 2026-09-21 · landed 2026-09-21 |
 | **Commits** | (added at the end of each sub-session) |
-| **Sessions** | 7 of 8 (S11a, S11b, S12a, S12b, S13a, S13b, S14a done; S14b remains) |
+| **Sessions** | 8 of 8 (S11a, S11b, S12a, S12b, S13a, S13b, S14a, S14b — all done) |
 | **Depends on** | TYPE-001 (landed 2026-09-18), SEM-001 (landed 2026-09-18); strongly benefits from OPT-001 (landed 2026-09-18) |
 | **Frozen decisions relied on** | F-GEN-1, F-GEN-2, F-GEN-3, F-OP-1 (unaffected but adjacent — see §9.8) |
 
@@ -649,6 +649,68 @@ the baseline).
 - `INVARIANTS.md`: `INV-GEN-1` and `INV-TYPE-2` both moved to `holds`, with
   a live demonstration recorded, not just a claim.
 
+**S14b closes the group.** All six of §8's TYPE-002 completion criteria
+individually demonstrated by a command whose output was actually looked at
+(see *Unresolved questions* → *Completion criteria, demonstrated*, below,
+for all six in one place). `INV-TEST-1` moves to `holds`. Full suite green
+at 689/689 (686 + 3 new tests) at both the default and `-O2` optimization
+levels; `lib/std`/`showcase`/prelude sweep clean.
+
+**What S14b added, concretely:**
+- **Completion criterion 3**:
+  `tests/99_known_bugs/set_string_dedup_broken.tr` moved into
+  `tests/38_monomorphization/10_set_string_dedup.tr`, rewritten to assert
+  the now-correct outcome instead of the old bug (confirmed live BEFORE
+  moving it: running the file completely unchanged already printed "Set
+  \<string\> dedup is FIXED"). A second, new test,
+  `11_map_string_key_equality.tr`, covers the plan's own explicit ask for
+  a `Map<string,int>` content-equality test built at runtime (verified
+  live: `m.put(dup, 99)` where `dup` is a `strings::trim()`-built
+  duplicate of an existing key correctly UPDATES that key's value instead
+  of inserting a second entry). `INV-TEST-1` moves to `holds`
+  (`INVARIANTS.md`).
+- `lib/std/collections/list.tr`'s `cap * 8` → `cap * sizeof(T)` (see
+  *Standard-library changes*) plus a new regression test,
+  `12_list_growth_over_8_bytes.tr`, proving the fix at a scale
+  (100 pushes) the existing `06_generic_struct_over_8_bytes.tr` (S13b)
+  never exercised.
+- Two new tests committed properly rather than left as session-only
+  scratch reproductions (see S14a's own *Removed assumptions*, which
+  originally described these as verified-but-uncommitted):
+  `08_generic_constructor.tr` (`Box<Big>::new(...)`, a real, concrete
+  by-value constructor argument) and
+  `09_method_generic_on_nongeneric_struct.tr` (`Box.echo`-style dispatch
+  on a non-generic struct).
+- `lib/std/collections/set.tr`'s `Set.indexOf()` and
+  `lib/std/collections/map.tr`'s `Map.indexOf()` doc comments rewritten
+  from "KNOWN LIMITATION" to "FIXED" (see *Standard-library changes*).
+- `docs/planning/LIMITATIONS.md` items 1 and 2 updated directly (not
+  queued via the handbook-sync process, since this file is an
+  actively-maintained bug tracker, not part of the paused handbook/
+  reference) — item 1 (`Map`/`Set` generic string equality) marked
+  `Status: FIXED`, with the old "Confirmed-broken repro" retitled as
+  historical; item 2 (generic comparator/sort) marked "underlying
+  mechanism unblocked, actual stdlib conversion still deferred" (the
+  conversion itself — making `list_sort`/`list_binary_search`/`list_find`
+  real generic methods — is explicitly out of scope, `S24b`/`STD-003`).
+- **Completion criterion 6**: compile-time/binary-size measurements taken
+  against S11a's own baseline table (recorded below, in *Unresolved
+  questions* → *Completion criteria, demonstrated*) — no regression in
+  either dimension despite the full monomorphization pipeline now being
+  active end to end; if anything, both measurements came back slightly
+  BETTER than the pre-TYPE-002 baseline, consistent with OPT-001's
+  `Internalize`+`GlobalDCE` stripping the now-genuinely-dead generic
+  TEMPLATE code (S14a) that erasure used to leave permanently reachable.
+- `docs/development/handbook-sync/PENDING.md` gained five new rows: full
+  rewrites owed for `docs/architecture/compiler_pipeline.md` §7,
+  `docs/architecture/memory_model.md` §2.7,
+  `docs/reference/generics_and_operators.md`'s two erasure-era sections,
+  and `docs/reference/stdlib/collections.md`'s shared-design section —
+  plus one row explicitly recording that `LIMITATIONS.md` was NOT queued
+  here, since it was already fixed directly (above).
+- `INDEX.md`: `TYPE-002` flipped to `landed`. This file's own header:
+  `Sessions: 8 of 8`, `Status: landed`.
+
 ## Runtime changes
 
 None. Eventually none in this group either — TYPE-002 is what makes
@@ -656,9 +718,30 @@ RT-001's type descriptors possible, not a runtime change itself.
 
 ## Standard-library changes
 
-None. Planned, later sessions only (§8's TYPE-002 entry): `list.tr`'s
-`cap * 8` → `cap * sizeof(T)` (S14b only — explicitly not bundled with
-anything else).
+**S14b's own, one permitted functional change** (§8's TYPE-002 entry,
+explicitly not bundled with anything else): `lib/std/collections/list.tr`'s
+`List.push()` growth allocation, `self.cap * 8` → `self.cap * sizeof(T)`.
+`data: T*` is a pointer field (always 8 bytes regardless of `T`), so this
+line computes the byte size of the *array* `data` points at — for a T over
+8 bytes, `cap * 8` silently under-allocated that array, a real, previously
+unreachable-to-fix heap-overflow bug (there was no `sizeof(T)` to compute
+the right number with, before monomorphization). Verified live:
+`tests/38_monomorphization/12_list_growth_over_8_bytes.tr` pushes 100
+`Big` (24-byte) elements through multiple growth reallocations and reads
+every one back uncorrupted — this specific shape (more than ~2 elements)
+would have silently corrupted memory under the old `cap * 8` even after
+S13b/S14a's own fixes made `List<Big>` compile and run at all, since
+`06_generic_struct_over_8_bytes.tr` (S13b) only ever pushes 2 elements,
+which happens to fit inside the old, wrong allocation by coincidence.
+
+**Comment-only fixes, not functional changes** (see *Removed assumptions*
+for why these are in scope despite the "one permitted change" rule — they
+correct now-actively-misleading documentation, not behavior):
+`lib/std/collections/set.tr`'s `Set.indexOf()` and
+`lib/std/collections/map.tr`'s `Map.indexOf()` both carried a long,
+detailed "KNOWN LIMITATION" doc comment describing the exact bug §9.2
+names as measured consequence #2 ("No per-`T` operator dispatch") — both
+rewritten to say "FIXED", with the mechanism explanation updated to match.
 
 ## New invariants
 
@@ -1098,6 +1181,27 @@ literal chain-depth measurement §9.5 describes; see *Known pitfalls*.
   hand-off to cover argument/return-position construction too, following
   the exact same pattern established here for `VarDeclExprAST`/
   `AssignmentExprAST`.
+- **S14b confirmed, by direct testing, that BOTH bugs `docs/planning/LIMITATIONS.md`
+  items 1–2 describe are the SAME root cause §9.2 (this record's own *Why*
+  section) named as measured consequence #2, and that fixing it needed
+  NOTHING beyond what S12b–S14a already built.** Not assumed from the
+  group's own stated goals — verified live by compiling
+  `tests/99_known_bugs/set_string_dedup_broken.tr` completely UNCHANGED
+  and observing it print "Set\<string\> dedup is FIXED" (the file's own,
+  deliberately loud self-check for exactly this), and independently for
+  `Map<string, V>` via a fresh scratch reproduction, BEFORE writing any
+  new code this session. This is why S14b's own scope for this item was
+  pure verification + moving/rewriting a test + fixing now-actively-wrong
+  documentation (`set.tr`/`map.tr`'s own doc comments, `LIMITATIONS.md`)
+  — not a code fix, since none was needed. Correcting those comments (not
+  behavior) is judged in scope despite the "one permitted stdlib change"
+  rule (§8's TYPE-002 entry, about `list.tr`'s `sizeof(T)` fix
+  specifically): leaving a doc comment insisting a bug is still present,
+  in the SHIPPED stdlib, describing a mechanism that no longer exists,
+  would be actively misleading in a way plain staleness elsewhere in this
+  record's own *Handbook impact* queue isn't — those files are already
+  known-paused and queued; `set.tr`/`map.tr` are live, always-compiled
+  source a reader has no reason to expect is behind.
 
 ## Tests
 
@@ -1197,6 +1301,27 @@ S14a adds three more tests, all passing (686/686 full suite, default and
   all dispatching correctly to three separate, concrete clones with `self`
   correctly staying a bare `Box*` (never `GenericType`-wrapped, since `Box`
   itself isn't generic) — verified live via `--emit-llvm`.
+
+S14b adds three more tests, all passing (689/689 full suite, default and
+`-O2`) — **`INV-TEST-1` (INVARIANTS.md) moves to `holds`**:
+- `10_set_string_dedup.tr` — **completion criterion 3**. Moved and
+  rewritten from `tests/99_known_bugs/set_string_dedup_broken.tr`, which
+  this record's own `docs/planning/LIMITATIONS.md` cross-references
+  described as confirmed-broken since before TYPE-002 existed. Same
+  runtime-built (`strings::trim()`) duplicate the original file used —
+  INV-TEST-1's own worked example, now asserting the CORRECT outcome
+  (`s.length() == 2`) instead of the old bug.
+- `11_map_string_key_equality.tr` — the plan's own explicit ask alongside
+  completion criterion 3: a `Map<string,int>` content-equality test built
+  at runtime, never a literal. `m.put(dup, 99)` (`dup` a
+  `strings::trim()`-built duplicate of an already-`put()` key) correctly
+  UPDATES the existing entry instead of inserting a second one.
+- `12_list_growth_over_8_bytes.tr` — proves `list.tr`'s `cap * 8` →
+  `cap * sizeof(T)` fix (this session's one permitted stdlib change) at a
+  scale (100 pushes, multiple growth reallocations) `06_generic_struct_over_8_bytes.tr`
+  (S13b, which only ever pushes 2 elements) never exercised — reads every
+  element back and confirms none were corrupted by the fixed allocation
+  size.
 
 ## Known pitfalls
 
@@ -1312,12 +1437,18 @@ S14a adds three more tests, all passing (686/686 full suite, default and
 
 ## Handbook impact
 
-Deferred to S14b in full (this session only records that it exists):
-`docs/architecture/compiler_pipeline.md` §7 ("Generic type erasure",
-`compiler_pipeline.md:884-945`) is entirely about the old model and will be
-rewritten; `docs/architecture/memory_model.md` §2.7 (`memory_model.md:572-668`)
-likewise; `docs/planning/LIMITATIONS.md` items 1-3; `docs/reference/generics_and_operators.md`;
-`docs/reference/stdlib/collections.md`.
+**Filed, S14b** — `docs/development/handbook-sync/PENDING.md` gained five
+rows: `docs/architecture/compiler_pipeline.md` §7 ("Generic type erasure",
+`compiler_pipeline.md:884-945`, entirely about the old model, needs a full
+rewrite and probably a section rename); `docs/architecture/memory_model.md`
+§2.7 (`memory_model.md:572-668`, all three subsections, including deleted-
+code quotes at now-wrong line numbers); `docs/reference/generics_and_operators.md`'s
+"Type-erasure model" and "`List<T*>` workaround" sections;
+`docs/reference/stdlib/collections.md`'s shared-design section — plus a
+fifth row explicitly recording that `docs/planning/LIMITATIONS.md` items
+1-3 were NOT queued there, since S14b updated them directly this session
+(see *Standard-library changes*/*Removed assumptions* for why that file is
+treated differently from the paused handbook/`docs/reference/`).
 
 ## Unresolved questions
 
@@ -1466,6 +1597,63 @@ problem TYPE-002 introduces — it is already exactly how the erasure-era
 TypeChecker's already-resolved declared-type `GenericType` become the
 monomorphizer's worklist seed, in place of being silently erased the way it
 is today.
+
+### Completion criteria, demonstrated (S14b)
+
+§8's TYPE-002 entry (`ARCHITECTURE_OVERHAUL.md`) names six completion
+criteria for this group. All six, each demonstrated live by a command
+whose output was actually looked at, not merely claimed:
+
+1. **`INV-GEN-1` holds, with a live demonstration.** `assert()`s in three
+   places (`getLLVMType()`, `CastToType()`, `Monomorphize.cpp`'s
+   `finishInstantiation()`) — confirmed to actually fire, not just exist,
+   by the S14a session's own debugging history (`tests/38_monomorphization/
+   03_nested_generic_call.tr` genuinely tripped `getLLVMType()`'s assertion
+   before the concreteness-gating fix landed). Full suite green with the
+   assertions compiled in (an ordinary, non-`NDEBUG` `cmake --build`).
+2. **`List<Big>` (a 24-byte struct) compiles, runs, and prints correctly.**
+   `tests/38_monomorphization/06_generic_struct_over_8_bytes.tr` (S13b) and
+   `12_list_growth_over_8_bytes.tr` (S14b, 100 pushes/multiple growth
+   reallocations) both pass. Verified live via `--emit-llvm` (S13b) that
+   the monomorphized `push`/`pop` clones carry a genuine `%Big` aggregate
+   parameter/return type.
+3. **`tests/99_known_bugs/set_string_dedup_broken.tr` moved into
+   `tests/38_monomorphization/`, passing, plus a runtime-built
+   `Map<string,int>` content-equality test.** Done this session:
+   `10_set_string_dedup.tr`/`11_map_string_key_equality.tr`, both passing.
+4. **`sizeof(T)` reports a real value.** Free-function case:
+   `02_sizeof_t_in_generic_body.tr` (S12a). Struct-method case, including a
+   >8-byte `T`: `07_sizeof_t_in_struct_method.tr` (S14a) — `Box<Big>.sizeOfT()
+   == 24`, not the old, always-8 erasure answer.
+5. **The `>8-byte` ICE is gone, replaced by a diagnostic if any erasure
+   path survives.** No erasure path survives at all (deleted outright,
+   S14a) — the original "Invalid bitcast: bitcast %Big %x4 to ptr" ICE
+   this whole group exists to fix cannot occur, structurally, since nothing
+   left in Codegen attempts the erase/unerase cast that produced it.
+6. **Compile-time/binary-size deltas measured against S11a's own baseline,
+   recorded, not asserted in a test.** Same three programs, same
+   methodology (S14b, this session):
+
+   | Program | S11a baseline (wall / size) | S14b, post-landing (wall / size) |
+   |---|---:|---:|
+   | Empty `main` | 0.40s / 16 KB | ~0.26s / 15.4 KB |
+   | `showcase/text_toolkit.tr` (`List<string>`) | 0.44s / 17 KB | ~0.40s / 16.4 KB |
+   | `showcase/kv_store_server.tr` (`Map`/collections) | 0.46s / 17 KB | ~0.40s / 16.9 KB |
+
+   No regression in either dimension across all three programs — if
+   anything, both compile time and binary size came back slightly BETTER
+   than the pre-TYPE-002 baseline, despite the full clone/substitute/
+   re-resolve/re-typecheck/register monomorphization pipeline now running
+   on every compile. Consistent with two things confirmed earlier in this
+   group rather than assumed now: U-2's own census (S11a) found only
+   ~18-20 real instantiations in the whole corpus (no combinatorial
+   blowup risk), and OPT-001's `Internalize`+`GlobalDCE` now has
+   genuinely-dead generic TEMPLATE code (S14a's widened skip guards) to
+   strip that erasure used to leave permanently reachable and compiled.
+   Wall-clock figures are single-machine, informal timings (`/usr/bin/time`,
+   three runs each, this session's own dev environment) — expect ordinary
+   machine-to-machine variance, not a rigorous benchmark; the comparison
+   that matters is the RELATIVE one (no growth), not the absolute numbers.
 
 ## Related records
 

@@ -26,43 +26,25 @@ struct Set<T> {
   cap: int
 }
 
-// KNOWN LIMITATION: `self.items[i] == item` below is a raw pointer/bit
-// comparison for T = string, NOT a content comparison -- the exact same
-// gap map.tr's own Map.indexOf() doc comment explains in full mechanical
-// detail (read that one first) and the same class of issue list.tr's
-// list_sort()/list_binary_search() comment documents for List<T>: from
-// INSIDE this generic method body, both operands have the STATIC type
-// TurfGenericParamType("T"), never the real concrete "string", because a
-// generic method's body is checked and codegenned exactly ONCE, shared
-// across every instantiation -- no operator-overload candidate can ever
-// exact-match a bare "T", so `strings.tr`'s real `operator==(string,
-// string)` never gets a chance to run, and the same-name-fallback lets a
-// raw pointer-identity comparison through instead. Correct for T =
-// int/double/bool/pointer (bit-exact identity genuinely is `==` there);
-// wrong for T = string. Confirmed live -- but NOTE the duplicate has to be
-// a genuinely SEPARATE allocation (e.g. via strings::trim/substring), not
-// a second occurrence of the same string literal in one source file: the
-// linker merges identical read-only string constants into one address, so
-// two literal "hello"s can end up pointer-equal by sheer coincidence and
-// mask the bug entirely (this is also why tests/07_functions_modules/
-// 09_stdlib_map.tr's all-literal Map<string, int> keys "happened" to
-// work correctly despite Map having this identical gap -- see map.tr):
-//   mut s: Set<string> = Set::default();
-//   s.add("hello"); s.add("world");
-//   immut dup: string = strings::trim(" hello "); // separate allocation
-//   s.add(dup);
-//   // s.length() is 3, should be 2 -- add(dup) didn't dedup against the
-//   // first "hello", because indexOf() never found it.
-// No general fix exists without either per-instantiation codegen (this
-// compiler shares one generic-method body across every instantiation, by
-// design) or a trait/constraint system, neither of which exists yet. If
-// you need a deduping Set<string> today, the one proven-working pattern
-// (see map.tr's comment) is to embed `items: T*`-shaped storage as a field
-// of your OWN concrete (non-generic) struct and write your own plain
-// (non-generic) method doing the linear scan -- a field access from a
-// non-generic method resolves fully concretely, so `==` there correctly
-// reaches the real string operator. `tests/99_known_bugs/` tracks this as
-// an accepted, deferred limitation, not a live regression.
+// FIXED (TYPE-002, S12b/S14a, 2026-09-21): `self.items[i] == item` below
+// used to be a raw pointer/bit comparison for T = string, not a content
+// comparison, because this generic method's body used to be checked and
+// codegenned exactly ONCE, shared across every instantiation (Type
+// Erasure) -- both operands had the STATIC type TurfGenericParamType("T")
+// inside the body, so no operator-overload candidate could ever
+// exact-match it and `strings.tr`'s real `operator==(string, string)`
+// never got a chance to run. Monomorphization (TYPE-002) gives
+// `Set<string>.indexOf()` its own real, separately-codegenned clone, with
+// `item`/`self.items[i]` concretely typed as `string` during that clone's
+// own re-typecheck -- overload resolution now correctly dispatches to the
+// real content-comparing `operator==(string, string)`. Verified live:
+// `tests/38_monomorphization/10_set_string_dedup.tr` (moved and rewritten
+// from `tests/99_known_bugs/set_string_dedup_broken.tr`, which this
+// comment used to describe) asserts the now-correct dedup behavior,
+// including the genuinely-separate-allocation duplicate
+// (`strings::trim()`-built, not a second string literal, since the linker
+// merges identical literal constants and would mask a real regression
+// here).
 fn<T> Set.indexOf(item: T): int {
   mut i: int = 0;
   while i < self.len {

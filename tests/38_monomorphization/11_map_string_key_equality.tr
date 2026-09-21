@@ -1,0 +1,34 @@
+// Regression test: TYPE-002 -- completion criterion 3's other half (the
+// plan's own explicit ask: "Add a Map<string,int> content-equality test
+// built at runtime, never a literal"). Same underlying bug as
+// `10_set_string_dedup.tr`, on `Map<K, V>` instead of `Set<T>` --
+// `Map<string, V>.indexOf()`'s `self.keys[i] == key` used to compare by
+// raw pointer identity for K = string, not content, for the identical
+// reason (see map.tr's own `Map.indexOf()` doc comment, now updated to
+// say "FIXED", not "KNOWN LIMITATION").
+//
+// INV-TEST-1 (INVARIANTS.md): the duplicate key is built at RUNTIME via
+// strings::trim(), never a second occurrence of the same string literal --
+// see `10_set_string_dedup.tr`'s identical comment for why a literal
+// duplicate cannot reliably test this (linker literal-merging can make
+// even the OLD, broken pointer-identity comparison accidentally pass).
+import test;
+import map::Map;
+import strings;
+
+fn main(): int {
+    mut m: Map<string, int> = Map::default();
+    m.put("hello", 1);
+    m.put("world", 2);
+
+    immut dup: string = strings::trim(" hello "); // content-equal to "hello", separate allocation
+    m.put(dup, 99); // must UPDATE the existing "hello" entry, not add a new one
+
+    test::assert(m.length() == 2,
+                "Map<string,int>: put() with a content-equal key should update, not insert");
+    test::assert(m.get("hello") == 99,
+                "Map<string,int>: put(dup, 99) should have updated 'hello''s value");
+    test::assert(m.contains(dup), "Map<string,int> should recognize dup as an existing key");
+
+    return 0;
+}

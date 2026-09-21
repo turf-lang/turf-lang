@@ -24,8 +24,15 @@ fn<T> List.push(item: T): void {
       self.cap = self.cap * 2;
     }
 
-    // In Type Erasure, all T are 64 bits (pointers, int, double)
-    immutable byteSize: int = self.cap * 8;
+    // TYPE-002 (S14b): was `self.cap * 8` under Type Erasure, where every T
+    // was assumed to fit in one uniform 8-byte slot -- wrong for a T over
+    // 8 bytes (a real by-value struct element, S13b/S14a's own completion
+    // criterion 2), which would under-allocate this buffer and silently
+    // overflow it a few pushes later. sizeof(T) is now correct per
+    // instantiation (monomorphized, S12a's own completion criterion 4) --
+    // this is the ONE stdlib change this whole group permits itself
+    // (ARCHITECTURE_OVERHAUL.md §8's TYPE-002 entry).
+    immutable byteSize: int = self.cap * sizeof(T);
 
     if (self.data == null) {
       self.data = mem::malloc(byteSize) to T*;
@@ -140,11 +147,15 @@ fn<T> List.length(): int {
 // call site" case that already works, e.g. Map<K,V>'s own tests reading
 // `m.get("a")` as `int`), and `cmp`'s declared type has no `T` in it to
 // begin with. This also happens to be the ONLY element type sort/search
-// could ever be numerically correct for anyway: "In Type Erasure, all T
-// are 64 bits" (this file's opening comment) means a hypothetical
-// `List<double>` sort would need to compare each element's raw IEEE-754
-// bit pattern as if it were an integer, which does not preserve numeric
-// ordering -- not something worth chasing given the deeper blockers above.
+// could ever be numerically correct for anyway: under Type Erasure (the
+// model this whole historical writeup was written against -- TYPE-002
+// later replaced it with monomorphization, S11a-S14b, though this trio is
+// deliberately NOT converted to real generic methods as part of that group,
+// see docs/planning/LIMITATIONS.md item 2), every T erased to one uniform
+// 8-byte slot, so a hypothetical `List<double>` sort would have needed to
+// compare each element's raw IEEE-754 bit pattern as if it were an integer,
+// which does not preserve numeric ordering -- not something worth chasing
+// given the deeper blockers above.
 //
 // Insertion sort: O(n^2), but simple, obviously-correct, and stable -- fine
 // for the small lists this stdlib deals with (see map.tr's identical
