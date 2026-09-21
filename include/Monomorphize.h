@@ -44,6 +44,7 @@
 
 class ExprAST;
 class Resolver;
+struct ResolverFunctionSymbol;
 
 namespace Monomorphize {
 
@@ -124,6 +125,26 @@ struct InstantiationEntry {
   /// See InstantiationCollector's own doc comment for why this replaced a
   /// destructive worklist queue.
   bool Drained = false;
+
+  /// TYPE-002 (S15/D1): the clone's registered symbol, once Drained is set
+  /// for a FreeFunction/Method-kind entry (null for Struct-kind, which
+  /// never rewrites a call site at all -- see drainStructRequests()). Kept
+  /// on the entry, not just handed to the immediate caller, so a call site
+  /// discovered AFTER this entry was drained (record()'s existing-entry
+  /// branch keeps appending to Sites forever, with no Drained check of its
+  /// own) can still be rewritten later instead of silently left pointing at
+  /// the un-codegenned template. See SitesRewritten below and the change
+  /// record's D1 entry for why Drained alone used to mean BOTH "don't clone
+  /// again" and "don't rewrite new sites again" -- two different questions
+  /// that need two different answers once instantiation order isn't
+  /// guaranteed to discover every call site before the entry drains.
+  std::shared_ptr<ResolverFunctionSymbol> ClonedSymbol;
+
+  /// TYPE-002 (S15/D1): how many of Sites have already had their
+  /// ResolvedCallTarget rewritten to ClonedSymbol. A drain function that
+  /// finds Drained already true for an entry of the Kind it owns rewrites
+  /// only Sites[SitesRewritten..) instead of skipping the entry outright.
+  size_t SitesRewritten = 0;
 };
 
 /// Deliberately linear-scan dedup, not a hash map: S11a's U-2 census found
@@ -157,7 +178,9 @@ public:
     return nullptr;
   }
   InstantiationEntry &insert(InstantiationRequest Req) {
-    Entries_.push_back({std::move(Req), {}});
+    InstantiationEntry NewEntry;
+    NewEntry.Request = std::move(Req);
+    Entries_.push_back(std::move(NewEntry));
     return Entries_.back();
   }
   size_t size() const { return Entries_.size(); }

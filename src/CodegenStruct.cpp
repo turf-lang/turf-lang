@@ -387,8 +387,33 @@ Value *MethodCallExprAST::codegen() {
     Function *CalleeF = nullptr;
     if (!MangledName.empty()) {
       CalleeF = TheModule->getFunction(MangledName);
+      // TYPE-002 (S15/D1): a non-empty MangledName means the TypeChecker
+      // already resolved this call to a real declaration (ResolvedCallTarget
+      // is set) -- if the LLVM module has no function under that name, the
+      // monomorphizer (or ordinary codegen) failed to emit it, not the user.
+      // This used to return nullptr here with NO diagnostic at all: a
+      // missed monomorphization rewrite (D1) silently dropped the call
+      // entirely, and if this call sat on the RHS of a `||`/`&&`
+      // short-circuit, BinaryExprAST::codegen()'s own `if (!R) return
+      // nullptr;` early-return skipped emitting the merge-block branch,
+      // producing a confusing, badly-misattributed "does not have
+      // terminator! label %or.merge" LLVM-verifier error nowhere near the
+      // real cause -- see TYPE-002.md's own *Removed assumptions* for the
+      // %or.merge story this mirrors. Matches the wording
+      // FuncCallExprAST's own equivalent miss already uses
+      // (CodegenFunc.cpp).
+      if (!CalleeF) {
+        SemanticError(Loc, "Internal error: LLVM function '" + MangledName +
+                               "' not found after successful name resolution. "
+                               "This is a compiler bug.")
+            .raise();
+        return nullptr;
+      }
     }
 
+    // ResolvedCallTarget itself null (MangledName empty): overload
+    // resolution already failed and the TypeChecker emitted a real
+    // diagnostic elsewhere -- propagate nullptr quietly, as before.
     if (!CalleeF) {
       return nullptr;
     }

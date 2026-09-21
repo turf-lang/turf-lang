@@ -558,6 +558,37 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   return ClonedSymbol;
 }
 
+/// TYPE-002 (S15/D1): rewrite Entry.Sites[Entry.SitesRewritten..) to
+/// Entry.ClonedSymbol, for a FuncCallExprAST-keyed entry (FreeFunction or
+/// constructor kind). Called both right after an entry is first drained
+/// (SitesRewritten starts at 0, so this rewrites everything known so far)
+/// and again on every later sweep for an ALREADY-drained entry that has
+/// gained new Sites since -- record()'s existing-entry branch keeps
+/// appending to Sites regardless of Drained, so a call site discovered
+/// while re-typechecking a LATER clone in the same fixed-point sweep must
+/// still be rewritten once this entry's own ClonedSymbol exists. See D1 in
+/// the change record: before this, Drained alone gated BOTH "don't clone
+/// again" and "don't rewrite again," so a late-discovered site was recorded
+/// but its ResolvedCallTarget silently stayed null/stale forever.
+void rewriteNewFuncCallSites(InstantiationEntry &Entry) {
+  for (size_t i = Entry.SitesRewritten; i < Entry.Sites.size(); ++i) {
+    if (auto *FC = dynamic_cast<FuncCallExprAST *>(Entry.Sites[i]))
+      FC->ResolvedCallTarget = Entry.ClonedSymbol;
+  }
+  Entry.SitesRewritten = Entry.Sites.size();
+}
+
+/// Method-call counterpart of rewriteNewFuncCallSites() -- see its doc
+/// comment. Used by drainMethodRequests() (Entry.Sites are
+/// MethodCallExprAST there, never FuncCallExprAST).
+void rewriteNewMethodCallSites(InstantiationEntry &Entry) {
+  for (size_t i = Entry.SitesRewritten; i < Entry.Sites.size(); ++i) {
+    if (auto *MC = dynamic_cast<MethodCallExprAST *>(Entry.Sites[i]))
+      MC->ResolvedCallTarget = Entry.ClonedSymbol;
+  }
+  Entry.SitesRewritten = Entry.Sites.size();
+}
+
 } // namespace
 
 bool drainFreeFunctionRequests(
@@ -578,10 +609,19 @@ bool drainFreeFunctionRequests(
   for (size_t Idx = 0; Idx < Collector.cache().size(); ++Idx) {
     InstantiationEntry &Entry = Collector.entryAt(Idx);
 
-    if (Entry.Drained)
-      continue;
     if (Entry.Request.Kind != InstantiationKind::FreeFunction)
       continue; // Method/Struct: drainMethodRequests()/S13a's job.
+
+    if (Entry.Drained) {
+      // TYPE-002 (S15/D1): already cloned -- but a call site discovered
+      // AFTER this entry drained (e.g. while draining a LATER entry in this
+      // same sweep) still needs rewriting to the clone we already have.
+      // Constructor-kind (self-bound) entries never get a ClonedSymbol here
+      // -- drainConstructorRequests() owns those -- so guard on it being set.
+      if (Entry.ClonedSymbol)
+        rewriteNewFuncCallSites(Entry);
+      continue;
+    }
 
     if (Entry.Sites.empty())
       continue; // Defensive -- record() always pushes at least one site.
@@ -667,11 +707,11 @@ bool drainFreeFunctionRequests(
 
     // Rewrite every requesting call site to the clone. Every site in
     // Entry.Sites is a FuncCallExprAST (FreeFunction kind is only ever
-    // recorded from TypeCheckerCall.cpp's visitFuncCall).
-    for (ExprAST *Site : Entry.Sites) {
-      if (auto *FC = dynamic_cast<FuncCallExprAST *>(Site))
-        FC->ResolvedCallTarget = ClonedSymbol;
-    }
+    // recorded from TypeCheckerCall.cpp's visitFuncCall). Stored on the
+    // entry itself (not just applied here) so a site discovered LATER, after
+    // Drained is set, can still be rewritten -- see D1/rewriteNewFuncCallSites().
+    Entry.ClonedSymbol = ClonedSymbol;
+    rewriteNewFuncCallSites(Entry);
     Entry.Drained = true;
     DidWork = true;
   }
@@ -773,10 +813,17 @@ bool drainMethodRequests(
   for (size_t Idx = 0; Idx < Collector.cache().size(); ++Idx) {
     InstantiationEntry &Entry = Collector.entryAt(Idx);
 
-    if (Entry.Drained)
-      continue;
     if (Entry.Request.Kind != InstantiationKind::Method)
       continue; // FreeFunction/Struct: the other drain functions.
+
+    if (Entry.Drained) {
+      // TYPE-002 (S15/D1): see drainFreeFunctionRequests()'s identical
+      // check -- a call site discovered after this entry drained still
+      // needs rewriting to the clone this entry already produced.
+      if (Entry.ClonedSymbol)
+        rewriteNewMethodCallSites(Entry);
+      continue;
+    }
 
     if (Entry.Sites.empty())
       continue; // Defensive -- record() always pushes at least one site.
@@ -845,11 +892,11 @@ bool drainMethodRequests(
 
       // Rewrite every requesting call site to the clone. Every site in
       // Entry.Sites is a MethodCallExprAST (Method kind is only ever
-      // recorded from TypeCheckerCall.cpp's visitMethodCall).
-      for (ExprAST *Site : Entry.Sites) {
-        if (auto *MC = dynamic_cast<MethodCallExprAST *>(Site))
-          MC->ResolvedCallTarget = ClonedSymbol;
-      }
+      // recorded from TypeCheckerCall.cpp's visitMethodCall). Stored on the
+      // entry (not just applied here) so a later-discovered site can still
+      // be rewritten after Drained is set -- see D1/rewriteNewMethodCallSites().
+      Entry.ClonedSymbol = ClonedSymbol;
+      rewriteNewMethodCallSites(Entry);
     }
     Entry.Drained = true;
     DidWork = true;
@@ -893,10 +940,21 @@ bool drainConstructorRequests(
   for (size_t Idx = 0; Idx < Collector.cache().size(); ++Idx) {
     InstantiationEntry &Entry = Collector.entryAt(Idx);
 
-    if (Entry.Drained)
-      continue;
     if (Entry.Request.Kind != InstantiationKind::FreeFunction)
       continue; // Method/Struct: the other two drain functions.
+
+    if (Entry.Drained) {
+      // TYPE-002 (S15/D1): see drainFreeFunctionRequests()'s identical
+      // check -- a constructor call site discovered after this entry
+      // drained still needs rewriting. drainFreeFunctionRequests()'s own
+      // sweep also catches this (it doesn't filter Drained entries by
+      // self-boundness), but rewriting here too keeps each drain function
+      // responsible for the entries it owns rather than relying on a
+      // sibling to clean up after it.
+      if (Entry.ClonedSymbol)
+        rewriteNewFuncCallSites(Entry);
+      continue;
+    }
 
     if (Entry.Sites.empty())
       continue; // Defensive -- record() always pushes at least one site.
@@ -963,10 +1021,8 @@ bool drainConstructorRequests(
     // still-self-STRIPPED candidate every non-generic constructor's
     // ResolvedCallTarget remains (stripSelf() runs unconditionally for
     // every `::new(...)` call, generic or not).
-    for (ExprAST *Site : Entry.Sites) {
-      if (auto *FC = dynamic_cast<FuncCallExprAST *>(Site))
-        FC->ResolvedCallTarget = ClonedSymbol;
-    }
+    Entry.ClonedSymbol = ClonedSymbol;
+    rewriteNewFuncCallSites(Entry);
     Entry.Drained = true;
     DidWork = true;
   }

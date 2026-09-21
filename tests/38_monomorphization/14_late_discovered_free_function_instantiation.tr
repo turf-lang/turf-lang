@@ -1,0 +1,24 @@
+// Regression test: D1 (docs/development/changes/TYPE-002.md, S15), the
+// FreeFunction-kind counterpart of 13_late_discovered_method_instantiation.tr.
+//
+// inner<int> is drained FIRST (inner(7) is typechecked before outer(9),
+// textual order in main()). Only afterward does outer<int> get requested
+// and drained -- and re-typechecking outer<int>'s clone body discovers a
+// SECOND call site to inner<int> (`return inner(x);`), on an entry that is
+// already Drained. Before the D1 fix this compiled to
+// "Internal error: LLVM function 'turf_inner_T' not found after successful
+// name resolution. This is a compiler bug." -- the call inside outer<int>'s
+// clone kept pointing at the never-codegenned TEMPLATE (`inner_T`, with
+// TypeParams still populated, skipped by main.cpp's template-skip guard),
+// not the instantiated inner_gen1_int clone.
+import io;
+import test;
+
+fn<T> inner(x: T): T { return x; }
+fn<T> outer(x: T): T { return inner(x); }
+
+fn main(): int {
+  test::assert(inner(7) == 7, "inner(7) directly should still work");
+  test::assert(outer(9) == 9, "outer(9)'s nested inner(x) call, discovered after inner<int> already drained, must still dispatch");
+  return 0;
+}
