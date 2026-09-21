@@ -1,0 +1,52 @@
+// Regression test: TYPE-002 S12b -- a generic METHOD on a generic STRUCT
+// (lib/std/collections/list.tr's `fn<T> List.push`/`fn<T> List.length`)
+// must be monomorphized per instantiation, with struct LAYOUT still fully
+// erased/shared (S13a's job, not this session's) -- both List<int> and
+// List<string> coexisting correctly in one program is the behavioural
+// proof; the IR-level proof (separate, concrete `i64`/`ptr`-typed clones,
+// zero inttoptr/ptrtoint in either) was verified live during the S12b
+// session and is recorded in the change record's own git history.
+//
+// This is also the regression test for a real bug found live: List<T>'s
+// method clones, once renamed, disagreed with their own codegen()'s
+// mangled name (GlobalSymbolTable::GetCurrentModule() vs
+// ResolverFunctionSymbol::SourceModule -- see the change record's
+// *Removed assumptions*), which made `TheModule->getFunction(...)` miss
+// silently and corrupted a `||` short-circuit's basic block. Deliberately
+// exercises a call to a generic method INSIDE a `||` condition, inside
+// ANOTHER struct's own (non-generic) method body, matching the shape that
+// caught it.
+
+import list::List;
+import test;
+
+struct Holder {
+    items: List<int>
+}
+
+fn Holder.boundsOk(index: int): bool {
+    return index >= 0 && index < self.items.length();
+}
+
+fn main(): int {
+    mut ints: List<int> = List::default();
+    ints.push(10);
+    ints.push(20);
+    ints.push(30);
+    test::assert(ints.length() == 3, "List<int>.length() wrong");
+    test::assert(ints.pop() == 30, "List<int>.pop() wrong");
+
+    mut strs: List<string> = List::default();
+    strs.push("a");
+    strs.push("b");
+    test::assert(strs.length() == 2, "List<string>.length() wrong");
+    test::assert(strs.pop() == "b", "List<string>.pop() wrong");
+
+    mut h: Holder = Holder::default();
+    h.items = List::default();
+    h.items.push(1);
+    test::assert(h.boundsOk(0), "boundsOk(0) should be true");
+    test::assert(!h.boundsOk(5), "boundsOk(5) should be false");
+
+    return 0;
+}

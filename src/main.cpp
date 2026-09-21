@@ -920,21 +920,39 @@ static int runCompilerMain(int argc, char **argv) {
         }
         // ── Pre-pass sub-pass 2b.5: Monomorphize ──────────────────────────
         // U-4's answer (U-4', docs/development/changes/TYPE-002.md), acted
-        // on here: drains every FreeFunction-kind instantiation request
-        // sub-pass 2b's TypeChecker run just seeded, to a fixed point
+        // on here: drains every FreeFunction- and Method-kind instantiation
+        // request sub-pass 2b's TypeChecker run seeded, to a fixed point
         // (clone/substitute/re-resolve/re-typecheck/register each one,
         // appending it to PrePassASTs so 2c/3a/3b below codegen it like any
-        // other declaration -- see drainFreeFunctionRequests()'s own doc
-        // comment, Monomorphize.h). Gated on PreTCClean for the identical
-        // reason 2c/3a/3b already are just below: a program the ordinary
-        // TypeChecker already rejected has no business being monomorphized
-        // either (the SAME error would just recur, confusingly, inside a
-        // clone). Method/Struct-kind requests are left on the worklist,
-        // undrained -- S12b/S13a.
+        // other declaration -- see drainFreeFunctionRequests()'s and
+        // drainMethodRequests()'s own doc comments, Monomorphize.h). Gated
+        // on PreTCClean for the identical reason 2c/3a/3b already are just
+        // below: a program the ordinary TypeChecker already rejected has no
+        // business being monomorphized either. Struct-kind requests are
+        // left recorded, undrained -- S13a.
+        //
+        // TYPE-002 (S12b): the two drain functions are called in an
+        // ALTERNATING loop, not once each in sequence, because they are
+        // NOT independent -- re-typechecking a method's clone can discover
+        // a nested call to a generic FREE function (or vice versa: a free
+        // function constructing/calling into a generic struct's method),
+        // and that nested request needs the OTHER drain function to act on
+        // it. Each function reports (via its bool return) whether it did
+        // any work THIS call; looping while EITHER one still is guarantees
+        // the true cross-kind fixed point, not just each function's own
+        // internal one. Terminates because every successful drain either
+        // marks an entry Drained (never revisited) or exits via
+        // GenericInstantiationDepthError (E079) if a truly unbounded chain
+        // keeps discovering brand-new work forever.
         if (PreTCClean) {
           g_recoverActive = true;
           if (setjmp(g_recoverJmp) == 0) {
-            Monomorphize::drainFreeFunctionRequests(PrePassASTs, MonoCollector, PreR);
+            bool Progress = true;
+            while (Progress) {
+              Progress = false;
+              Progress |= Monomorphize::drainFreeFunctionRequests(PrePassASTs, MonoCollector, PreR);
+              Progress |= Monomorphize::drainMethodRequests(PrePassASTs, MonoCollector, PreR);
+            }
           } else {
             PreTCClean = false;
           }

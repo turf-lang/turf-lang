@@ -298,54 +298,238 @@ void substituteTypesInBody(const ExprAST *Node,
 
 // ─── Drain: free functions ───────────────────────────────────────────────────
 
-void drainFreeFunctionRequests(
-    std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
-    InstantiationCollector &Collector, Resolver &PreR) {
-  // Registry: (SourceModule, Name) -> template declaration. Built once,
-  // lazily, from PrePassASTs -- both current-file top-level declarations
-  // AND every imported module's own body (ModuleImportExprAST::getBody(),
-  // a BlockExprAST holding that module's own top-level declarations --
-  // confirmed live: imports are parsed into real AST subtrees, not just
-  // registered as symbol-table signatures with no body). Only functions
-  // with a non-empty TypeParams() are registered -- an ordinary
-  // (non-generic) declaration is never a clone target.
+namespace {
+
+std::string registryKey(const std::string &Module, const std::string &Name) {
+  return Module + "::" + Name;
+}
+
+/// Shared by both drain paths (S12a free functions, S12b methods): builds
+/// the (SourceModule, Name) -> template declaration registry by walking
+/// PrePassASTs and recursing into every ModuleImportExprAST's own body
+/// (confirmed live: an import's body is a real, walkable BlockExprAST
+/// subtree, not just a symbol-table registration). Only declarations with
+/// a non-empty TypeParams() are registered -- keyed by
+/// FuncDefExprAST::getName(), which is already "StructName.MethodName" for
+/// a struct-bound declaration (ParserDecl.cpp), so this one registry
+/// serves free functions AND methods with no special-casing.
+std::unordered_map<std::string, FuncDefExprAST *>
+buildDeclRegistry(const std::vector<std::unique_ptr<ExprAST>> &PrePassASTs) {
   std::unordered_map<std::string, FuncDefExprAST *> Registry;
-  auto RegistryKey = [](const std::string &Module, const std::string &Name) {
-    return Module + "::" + Name;
-  };
   std::function<void(const std::vector<std::unique_ptr<ExprAST>> &, const std::string &)>
-      BuildRegistry = [&](const std::vector<std::unique_ptr<ExprAST>> &Nodes,
-                          const std::string &Module) {
+      Walk = [&](const std::vector<std::unique_ptr<ExprAST>> &Nodes,
+                const std::string &Module) {
     for (const auto &N : Nodes) {
       if (auto *FD = dynamic_cast<FuncDefExprAST *>(N.get())) {
         if (!FD->getTypeParams().empty())
-          Registry[RegistryKey(Module, FD->getName())] = FD;
+          Registry[registryKey(Module, FD->getName())] = FD;
       } else if (auto *MI = dynamic_cast<ModuleImportExprAST *>(N.get())) {
         if (auto *Body = dynamic_cast<const BlockExprAST *>(MI->getBody()))
-          BuildRegistry(Body->getExpressions(), MI->getModuleName());
+          Walk(Body->getExpressions(), MI->getModuleName());
       }
     }
   };
-  BuildRegistry(PrePassASTs, "");
+  Walk(PrePassASTs, "");
+  return Registry;
+}
+
+/// Shared tail of both drain paths, once the caller has produced a clone
+/// whose Params/ReturnType/body are ALREADY fully substituted (and, for a
+/// method, self's own type already rewritten -- see drainMethodRequests()):
+/// rename to a unique internal name, clear TypeParams, re-resolve,
+/// re-typecheck with instantiation-site error capture, and append to
+/// PrePassASTs. Returns the registered symbol on success, or nullptr if a
+/// diagnostic was already raised (caller must stop, not retry).
+std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
+    FuncDefExprAST *Template, FuncDefExprAST *Clone,
+    std::unique_ptr<ExprAST> ClonedUP, const InstantiationEntry &Entry,
+    std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
+    InstantiationCollector &Collector, Resolver &PreR) {
+  // Rename to a unique, collision-free internal name (§9.5's mangling
+  // requirement) BEFORE resolving -- Resolver::visitFuncDef() (called
+  // below) registers whatever name the node currently has into the
+  // ordinary function-signature table; leaving it as e.g. "identity"
+  // would either silently add a second, indistinguishable overload
+  // candidate for every ordinary, unrelated call to "identity" elsewhere
+  // in the program, or collide outright. instantiatedDeclName() is a
+  // pure function of (base name, type arguments) (§9.5), so every call
+  // site rewritten to the SAME instantiation independently agrees on
+  // this name -- not that anything else needs to independently compute
+  // it: every rewrite below reads it directly off Clone->ResolvedDef.
+  Clone->setName(instantiatedDeclName(Entry.Request.DeclKey, Entry.Request.TypeArgs));
+  // No longer generic: every TurfGenericParamType in Params/ReturnType/
+  // body has already been replaced with a concrete type by the caller.
+  // Clearing TypeParams makes that true structurally too (visitFuncDef's
+  // own substituteTypeParams() call becomes a documented no-op, and
+  // sub-pass 2c/3a/3b's template-skip check, main.cpp, stops treating this
+  // clone as an uncompiled template).
+  Clone->clearTypeParams();
+
+  // Re-resolve the clone against the REAL, already-hoisted program symbol
+  // table. PreR is the SAME Resolver instance whose resolveAll() already
+  // ran Pass 1 (hoisting) over the whole program -- calling its
+  // single-node resolve() entry point (Pass 2 behaviour only) on this one
+  // clone is safe for exactly that reason: hoisting doesn't need to run
+  // again, and resolve()'s own scope enter/exit is self-contained per
+  // call. This was flagged as this group's #1 named risk (S11a plan) --
+  // resolved by reusing the existing single-node entry point rather than
+  // inventing a new one.
+  bool ResolveFailed = false;
+  {
+    const bool SavedRecoverActive = g_recoverActive;
+    jmp_buf SavedJmpBuf;
+    std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      // resolveMonomorphizedClone(), not resolve(): the clone must resolve
+      // its own struct-name references (self's type) the same way the
+      // ORIGINAL declaration did, AND accept substituted type arguments
+      // from modules the template's own declaring module never imports --
+      // see that method's own doc comment (Resolver.h) for the two real
+      // bugs this fixes.
+      PreR.resolveMonomorphizedClone(Clone, Entry.Request.SourceModule);
+    } else {
+      ResolveFailed = true;
+    }
+    g_recoverActive = SavedRecoverActive;
+    std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
+  }
+  if (ResolveFailed) {
+    SemanticError(Entry.Request.Site,
+                  "Internal error: monomorphized instantiation of '" +
+                      Entry.Request.DeclKey +
+                      "' failed to re-resolve. This is a compiler bug.")
+        .raise();
+    return nullptr;
+  }
+
+  // Clear the just-registered symbol's SourceModule -- resolveMonomorphizedClone()
+  // needed "list" (say) as the MODULE CONTEXT for VALIDATION (self's type,
+  // above), but the clone must NOT carry that module forward into its own
+  // registered symbol. Two independent mangling computations exist in this
+  // compiler and normally agree only because both are derived from "which
+  // module is this declaration actually inside," computed at each pass's own
+  // natural traversal point:
+  //   - ResolverFunctionSymbol::mangledName() (ResolverSymbolBase.h) prepends
+  //     Sym.SourceModule.
+  //   - FuncDefExprAST::codegen() (CodegenFunc.cpp) prepends
+  //     GlobalSymbolTable::GetCurrentModule() instead -- a CODEGEN-TIME
+  //     GLOBAL, normally set/cleared around a ModuleImportExprAST's own
+  //     codegen() traversal of that module's body.
+  // The clone is appended directly to PrePassASTs (finishInstantiation,
+  // below) and codegenned from THAT flat loop, never from inside any
+  // module-import traversal -- GlobalSymbolTable::IsInModule() is false the
+  // whole time. Leaving Sym.SourceModule as "list" would make the CALL
+  // SITE's mangledName() (which reads Sym.SourceModule) disagree with what
+  // the clone's OWN codegen() actually registers the LLVM function under
+  // (no module prefix at all) -- `TheModule->getFunction(MangledName)`
+  // silently misses, MethodCallExprAST::codegen() returns nullptr with no
+  // diagnostic, and a `||`/`&&` short-circuit whose RHS was that call emits
+  // an orphaned merge block with no terminator ("does not have terminator!
+  // label %or.merge") -- found live, not a hypothetical. instantiatedDeclName()
+  // already makes the clone's OWN name globally unique (Monomorphize.h), so
+  // it needs no module qualifier at all once renamed.
+  if (Clone->ResolvedDef)
+    Clone->ResolvedDef->SourceModule.clear();
+
+  // Re-typecheck the clone -- THIS is where an instantiation-site error
+  // (§9.5, "where errors are reported") is discovered. A custom error
+  // handler captures the inner failure instead of letting it longjmp past
+  // this whole function, so it can be re-raised anchored at the
+  // INSTANTIATION SITE (every requesting call, via withRelated()), not at
+  // the clone's own copied-from-the-template location.
+  bool CheckFailed = false;
+  SourceLocation InnerLoc;
+  std::string InnerMsg, InnerHint;
+  TypeChecker CloneTC(PreR.symbolTable(),
+                      [&](SourceLocation Loc, const std::string &Msg,
+                          const std::vector<RelatedLocation> &,
+                          const std::string &Hint, const std::string &) {
+                        if (!CheckFailed) {
+                          CheckFailed = true;
+                          InnerLoc = Loc;
+                          InnerMsg = Msg;
+                          InnerHint = Hint;
+                        }
+                        longjmp(g_recoverJmp, 1);
+                      });
+  // The collector must keep collecting through this second, nested
+  // TypeChecker instance -- a generic call INSIDE this clone's body needs
+  // to reach the SAME Collector.record() so its own request lands on the
+  // SAME worklist this loop is draining (§9.5 step 3, "push any new
+  // requests its body produced" -- the fixed point the caller's while loop
+  // already provides, for free, once this line wires it through).
+  CloneTC.setMonomorphizationCollector(&Collector);
+  {
+    const bool SavedRecoverActive = g_recoverActive;
+    jmp_buf SavedJmpBuf;
+    std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
+    g_recoverActive = true;
+    if (setjmp(g_recoverJmp) == 0) {
+      CloneTC.check(Clone);
+    }
+    g_recoverActive = SavedRecoverActive;
+    std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
+  }
+  if (CheckFailed) {
+    std::string FullMsg = "In this instantiation: " + InnerMsg;
+    if (!InnerHint.empty())
+      FullMsg += " (" + InnerHint + ")";
+    SemanticError Err(Entry.Request.Site, FullMsg);
+    Err.withRelated(Template->getNameLoc(),
+                    "in generic declaration '" + Entry.Request.DeclKey + "'");
+    for (size_t i = 1; i < Entry.Sites.size(); ++i) {
+      if (auto *FC = dynamic_cast<FuncCallExprAST *>(Entry.Sites[i]))
+        Err.withRelated(FC->getLoc(), "also instantiated here");
+      else if (auto *MC = dynamic_cast<MethodCallExprAST *>(Entry.Sites[i]))
+        Err.withRelated(MC->getLoc(), "also instantiated here");
+    }
+    Err.raise();
+    return nullptr;
+  }
+
+  // Register: append to PrePassASTs so main.cpp's ORDINARY sub-pass
+  // 2c/3a/3b codegen loops pick this up exactly like any other top-level
+  // declaration -- no Codegen change needed at all, since the clone is, by
+  // this point, structurally indistinguishable from a hand-written
+  // concrete function/method. Safe to append while the caller's loop keeps
+  // running (nothing else iterates PrePassASTs until 2c starts, strictly
+  // after sub-pass 2b.5 returns).
+  auto ClonedSymbol = Clone->ResolvedDef; // set by PreR.resolve() above
+  PrePassASTs.push_back(std::move(ClonedUP));
+  return ClonedSymbol;
+}
+
+} // namespace
+
+bool drainFreeFunctionRequests(
+    std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
+    InstantiationCollector &Collector, Resolver &PreR) {
+  std::unordered_map<std::string, FuncDefExprAST *> Registry =
+      buildDeclRegistry(PrePassASTs);
 
   int TotalDrained = 0;
+  bool DidWork = false;
 
-  while (!Collector.worklistEmpty()) {
-    size_t Idx = Collector.popWorklist();
-    // entryAt() indexes into the SAME growing cache draining itself keeps
-    // appending to (a nested generic call discovered while typechecking a
-    // fresh clone calls Collector.record() again) -- Idx stays valid since
-    // InstantiationCache only ever appends, never reorders or erases.
+  // Index-based full-cache sweep, not a destructive worklist pop (S12b
+  // correction -- InstantiationCollector's own doc comment) --
+  // Collector.cache().size() is RE-READ every iteration, so a nested
+  // discovery appended mid-sweep (re-typechecking one clone finds another
+  // FreeFunction-kind call) is picked up in the SAME sweep without a
+  // separate outer loop.
+  for (size_t Idx = 0; Idx < Collector.cache().size(); ++Idx) {
     InstantiationEntry &Entry = Collector.entryAt(Idx);
 
+    if (Entry.Drained)
+      continue;
     if (Entry.Request.Kind != InstantiationKind::FreeFunction)
-      continue; // Method/Struct: S12b/S13a's job. Stays recorded, undrained.
+      continue; // Method/Struct: drainMethodRequests()/S13a's job.
 
     if (Entry.Sites.empty())
       continue; // Defensive -- record() always pushes at least one site.
 
     auto RegIt = Registry.find(
-        RegistryKey(Entry.Request.SourceModule, Entry.Request.DeclKey));
+        registryKey(Entry.Request.SourceModule, Entry.Request.DeclKey));
     if (RegIt == Registry.end()) {
       // Should be unreachable: every FreeFunction request's DeclKey/
       // SourceModule came from a real, already-resolved ResolvedCallTarget
@@ -358,7 +542,7 @@ void drainFreeFunctionRequests(
                         Entry.Request.DeclKey +
                         "' during monomorphization. This is a compiler bug.")
           .raise();
-      return;
+      return DidWork;
     }
     FuncDefExprAST *Template = RegIt->second;
 
@@ -388,7 +572,7 @@ void drainFreeFunctionRequests(
       for (const auto &E : Collector.cache().all())
         Chain.push_back(E.Request.DeclKey);
       GenericInstantiationDepthError(Entry.Request.Site, Chain).raise();
-      return;
+      return DidWork;
     }
 
     // Build the name->concrete substitution map from TypeParams (declared
@@ -415,130 +599,10 @@ void drainFreeFunctionRequests(
     Clone->setReturnType(substituteConcreteTypes(Clone->getReturnTypePtr(), Subst));
     substituteTypesInBody(Clone->getBody(), Subst);
 
-    // Rename to a unique, collision-free internal name (§9.5's mangling
-    // requirement) BEFORE resolving -- Resolver::visitFuncDef() (called
-    // below) registers whatever name the node currently has into the
-    // ordinary function-signature table; leaving it as e.g. "identity"
-    // would either silently add a second, indistinguishable overload
-    // candidate for every ordinary, unrelated call to "identity" elsewhere
-    // in the program, or collide outright. instantiatedDeclName() is a
-    // pure function of (base name, type arguments) (§9.5), so every call
-    // site rewritten to the SAME instantiation independently agrees on
-    // this name -- not that anything else needs to independently compute
-    // it: every rewrite below reads it directly off Clone->ResolvedDef.
-    Clone->setName(instantiatedDeclName(Entry.Request.DeclKey,
-                                        Entry.Request.TypeArgs));
-    // No longer generic: every TurfGenericParamType in Params/ReturnType/
-    // body has already been replaced with a concrete type above. Clearing
-    // TypeParams makes that true structurally too (visitFuncDef's own
-    // substituteTypeParams() call becomes a documented no-op, and
-    // sub-pass 2c/3a/3b's template-skip check, below and in main.cpp,
-    // stops treating this clone as an uncompiled template).
-    Clone->clearTypeParams();
-
-    // Re-resolve the clone against the REAL, already-hoisted program
-    // symbol table. PreR is the SAME Resolver instance whose resolveAll()
-    // already ran Pass 1 (hoisting) over the whole program -- calling its
-    // single-node resolve() entry point (Pass 2 behaviour only) on this
-    // one clone is safe for exactly that reason: hoisting doesn't need to
-    // run again (nothing new needs to be forward-referenceable), and
-    // resolve()'s own scope enter/exit is self-contained per call, the
-    // same guarantee visitBlock/visitFuncDef already give any nested
-    // scope. This was flagged as this group's #1 named risk (S11a plan) --
-    // resolved by reusing the existing single-node entry point rather than
-    // inventing a new one; clone()'s own contract ("resolved fields
-    // deliberately not copied; cloned ASTs must be re-resolved") is
-    // exactly what this satisfies.
-    bool ResolveFailed = false;
-    {
-      const bool SavedRecoverActive = g_recoverActive;
-      jmp_buf SavedJmpBuf;
-      std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
-      g_recoverActive = true;
-      if (setjmp(g_recoverJmp) == 0) {
-        PreR.resolve(Clone);
-      } else {
-        ResolveFailed = true;
-      }
-      g_recoverActive = SavedRecoverActive;
-      std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
-    }
-    if (ResolveFailed) {
-      SemanticError(Entry.Request.Site,
-                    "Internal error: monomorphized instantiation of '" +
-                        Entry.Request.DeclKey +
-                        "' failed to re-resolve. This is a compiler bug.")
-          .raise();
-      return;
-    }
-
-    // Re-typecheck the clone -- THIS is where an instantiation-site error
-    // (§9.5, "where errors are reported") is discovered: a concrete T that
-    // doesn't support an operation the body needs fails HERE, generically,
-    // for the first time (the template itself, checked once generically
-    // under Rule 1's "matches anything," could never catch this). A custom
-    // error handler captures the inner failure instead of letting it
-    // longjmp past this whole function, so it can be re-raised anchored at
-    // the INSTANTIATION SITE (every requesting call, via withRelated()),
-    // not at the clone's own copied-from-the-template location, which
-    // would read as an error in code the user never wrote at that line.
-    bool CheckFailed = false;
-    SourceLocation InnerLoc;
-    std::string InnerMsg, InnerHint;
-    TypeChecker CloneTC(PreR.symbolTable(),
-                        [&](SourceLocation Loc, const std::string &Msg,
-                            const std::vector<RelatedLocation> &,
-                            const std::string &Hint, const std::string &) {
-                          if (!CheckFailed) {
-                            CheckFailed = true;
-                            InnerLoc = Loc;
-                            InnerMsg = Msg;
-                            InnerHint = Hint;
-                          }
-                          longjmp(g_recoverJmp, 1);
-                        });
-    // S12a's own instantiation collector must keep collecting through this
-    // second, nested TypeChecker instance -- a generic call INSIDE this
-    // clone's body (e.g. `wrap<T>` calling `wrap(Box{val:x})`) needs to
-    // reach the SAME Collector.record() so its own request lands on the
-    // SAME worklist this very loop is draining (§9.5 step 3, "push any new
-    // requests its body produced" -- the fixed point this while loop
-    // already provides, for free, once this line wires it through).
-    CloneTC.setMonomorphizationCollector(&Collector);
-    {
-      const bool SavedRecoverActive = g_recoverActive;
-      jmp_buf SavedJmpBuf;
-      std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
-      g_recoverActive = true;
-      if (setjmp(g_recoverJmp) == 0) {
-        CloneTC.check(Clone);
-      }
-      g_recoverActive = SavedRecoverActive;
-      std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
-    }
-    if (CheckFailed) {
-      std::string FullMsg = "In this instantiation: " + InnerMsg;
-      if (!InnerHint.empty())
-        FullMsg += " (" + InnerHint + ")";
-      SemanticError Err(Entry.Request.Site, FullMsg);
-      Err.withRelated(Template->getNameLoc(),
-                      "in generic declaration '" + Entry.Request.DeclKey + "'");
-      for (size_t i = 1; i < Entry.Sites.size(); ++i)
-        if (auto *FC = dynamic_cast<FuncCallExprAST *>(Entry.Sites[i]))
-          Err.withRelated(FC->getLoc(), "also instantiated here");
-      Err.raise();
-      return;
-    }
-
-    // Register: append to PrePassASTs so main.cpp's ORDINARY sub-pass
-    // 2c/3a/3b codegen loops pick this up exactly like any other top-level
-    // declaration -- no Codegen change needed at all, since the clone is,
-    // by this point, structurally indistinguishable from a hand-written
-    // concrete function. Safe to append while this same loop keeps running
-    // (nothing else iterates PrePassASTs until 2c starts, strictly after
-    // sub-pass 2b.5 -- this whole function -- returns).
-    auto ClonedSymbol = Clone->ResolvedDef; // set by PreR.resolve() above
-    PrePassASTs.push_back(std::move(ClonedUP));
+    auto ClonedSymbol = finishInstantiation(Template, Clone, std::move(ClonedUP),
+                                            Entry, PrePassASTs, Collector, PreR);
+    if (!ClonedSymbol)
+      return DidWork; // finishInstantiation already raised a diagnostic.
 
     // Rewrite every requesting call site to the clone. Every site in
     // Entry.Sites is a FuncCallExprAST (FreeFunction kind is only ever
@@ -547,7 +611,167 @@ void drainFreeFunctionRequests(
       if (auto *FC = dynamic_cast<FuncCallExprAST *>(Site))
         FC->ResolvedCallTarget = ClonedSymbol;
     }
+    Entry.Drained = true;
+    DidWork = true;
   }
+  return DidWork;
+}
+
+// ─── Drain: methods ──────────────────────────────────────────────────────────
+
+bool drainMethodRequests(
+    std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
+    InstantiationCollector &Collector, Resolver &PreR) {
+  std::unordered_map<std::string, FuncDefExprAST *> Registry =
+      buildDeclRegistry(PrePassASTs);
+
+  int TotalDrained = 0;
+  bool DidWork = false;
+
+  for (size_t Idx = 0; Idx < Collector.cache().size(); ++Idx) {
+    InstantiationEntry &Entry = Collector.entryAt(Idx);
+
+    if (Entry.Drained)
+      continue;
+    if (Entry.Request.Kind != InstantiationKind::Method)
+      continue; // FreeFunction/Struct: the other drain function / S13a.
+
+    if (Entry.Sites.empty())
+      continue; // Defensive -- record() always pushes at least one site.
+
+    auto RegIt = Registry.find(
+        registryKey(Entry.Request.SourceModule, Entry.Request.DeclKey));
+    if (RegIt == Registry.end()) {
+      // Should be unreachable: every Method-kind request's DeclKey came
+      // from visitMethodCall's own struct-instance branch resolving a
+      // real candidate (TypeCheckerCall.cpp) -- see CodegenFunc.cpp's
+      // identical "should be unreachable if the Resolver ran correctly"
+      // defensive diagnostic.
+      SemanticError(Entry.Request.Site,
+                    "Internal error: no generic method declaration found "
+                    "for '" + Entry.Request.DeclKey +
+                        "' during monomorphization. This is a compiler bug.")
+          .raise();
+      return DidWork;
+    }
+    FuncDefExprAST *Template = RegIt->second;
+
+    if (Template->getParams().empty() || Template->getParams()[0].Name != "self") {
+      // Should be unreachable: a Method-kind request is only ever recorded
+      // from visitMethodCall's struct-INSTANCE branch (TypeCheckerCall.cpp),
+      // which only ever resolves to a real, non-static struct method --
+      // every one of those has an implicit self (ParseFuncDef). A static
+      // method called via `StructName::method(...)` is a DIFFERENT syntax
+      // routed through visitFuncCall (FreeFunction-kind, self-STRIPPED) --
+      // see drainFreeFunctionRequests()'s own struct-bound exclusion.
+      SemanticError(Entry.Request.Site,
+                    "Internal error: '" + Entry.Request.DeclKey +
+                        "' resolved as a Method-kind instantiation request "
+                        "but has no 'self' parameter. This is a compiler bug.")
+          .raise();
+      return DidWork;
+    }
+
+    if (++TotalDrained > kMaxInstantiationDepth) {
+      std::vector<std::string> Chain;
+      for (const auto &E : Collector.cache().all())
+        Chain.push_back(E.Request.DeclKey);
+      GenericInstantiationDepthError(Entry.Request.Site, Chain).raise();
+      return DidWork;
+    }
+
+    // Build the name->concrete substitution map from the METHOD's OWN
+    // TypeParams (declared order, e.g. `fn<T> List.push(...)` -> ["T"])
+    // paired positionally with the request's TypeArgs -- which came from
+    // the STRUCT's own GenericType at the call site (`l: List<int>` ->
+    // [int], TypeCheckerCall.cpp's visitMethodCall). Correct as long as a
+    // method's own type-parameter spelling/order matches its struct's --
+    // true of every generic struct in this language's stdlib today (all
+    // single-type-parameter); a multi-parameter struct whose method
+    // reorders its own type parameters relative to the struct's own
+    // declaration is a known, disclosed gap -- see the change record.
+    std::unordered_map<std::string, TurfTypePtr> Subst;
+    const auto &TypeParams = Template->getTypeParams();
+    for (size_t i = 0; i < TypeParams.size() && i < Entry.Request.TypeArgs.size(); ++i)
+      Subst[TypeParams[i]] = Entry.Request.TypeArgs[i];
+
+    auto ClonedUP = CloneExprAST(Template);
+    auto *Clone = static_cast<FuncDefExprAST *>(ClonedUP.get());
+    auto &Params = Clone->getParamsMut();
+
+    // Substitute every param EXCEPT self (index 0) -- self's OWN type is
+    // handled separately, below, and differently (never through Subst: a
+    // bare "StructName*" contains no TurfGenericParamType/NamedType for
+    // Subst to find in the first place).
+    for (size_t i = 1; i < Params.size(); ++i)
+      Params[i].Type = substituteConcreteTypes(Params[i].Type, Subst);
+    Clone->setReturnType(substituteConcreteTypes(Clone->getReturnTypePtr(), Subst));
+    substituteTypesInBody(Clone->getBody(), Subst);
+
+    // Give self a REAL type argument -- `StructName*` becomes
+    // `StructName<TypeArgs>*`. This is the one genuinely NEW piece of
+    // S12b, and it is safe DESPITE struct layout staying fully
+    // erased/shared this session (S13a's job), for two independently
+    // verified reasons:
+    //
+    // 1. self's LLVM REPRESENTATION is completely unchanged either way --
+    //    getLLVMType(GenericType(StructName, Args)) already collapses to
+    //    the SAME shared opaque-based struct type as bare StructName
+    //    (Types.cpp's own comment: "a generic struct's LLVM layout does
+    //    not actually vary per type argument"). FieldAccessExprAST's own
+    //    GEP-index computation is field-POSITION-based, not field-TYPE-
+    //    based, so self.<field>'s ADDRESS computation is unaffected too.
+    //
+    // 2. CastToType's existing erasure/un-erasure branches
+    //    (CodegenCore.cpp) are driven by the VALUE's actual LLVM shape (is
+    //    it a raw pointer?) and the DECLARED DESTINATION type, never by
+    //    whether the AST source-side type annotation says "generic" --
+    //    confirmed by reading the un-erase branch's own comment: "What
+    //    actually identifies 'this pointer is an erased generic value' at
+    //    this point is that it's a raw pointer being cast to a genuinely
+    //    numeric DestType." So a concrete parameter value flowing INTO a
+    //    still-erased self.<field> slot gets erased correctly, and a
+    //    still-erased self.<field> value flowing OUT (e.g. as this
+    //    method's now-concrete return type) gets un-erased correctly, by
+    //    the SAME mechanism that already bridges the erasure-era template
+    //    today -- unchanged, untouched, not re-derived here.
+    //
+    // What this DOES change, and is the actual point of it: giving self a
+    // real GenericType lets TypeChecker::visitFieldAccess's ALREADY-
+    // EXISTING GenericTypeArgs substitution (TypeCheckerCall.cpp, the same
+    // mechanism an ORDINARY caller's `someList.data[0]` already relies on)
+    // correctly resolve `self.<field>`'s TYPE for THIS instantiation
+    // during re-typecheck -- e.g. `self.data: int*`, not the un-
+    // substituted `self.data: T*` that made a naive first attempt at this
+    // fail TYPE-CHECKING (not codegen) in S12a's own history with
+    // `Box.new` (see that session's *Removed assumptions* -- the fix there
+    // was to exclude constructors; the fix here, for method calls where
+    // the RECEIVER already carries a real GenericType, is to propagate it
+    // onto self instead of excluding).
+    if (!Params.empty() && Params[0].Name == "self") {
+      const std::string &DK = Entry.Request.DeclKey; // "StructName.Method"
+      size_t Dot = DK.find('.');
+      std::string StructName = Dot == std::string::npos ? DK : DK.substr(0, Dot);
+      auto SelfInner = std::make_shared<GenericType>(StructName, Entry.Request.TypeArgs);
+      Params[0].Type = std::make_shared<TurfPointerType>(std::move(SelfInner));
+    }
+
+    auto ClonedSymbol = finishInstantiation(Template, Clone, std::move(ClonedUP),
+                                            Entry, PrePassASTs, Collector, PreR);
+    if (!ClonedSymbol)
+      return DidWork; // finishInstantiation already raised a diagnostic.
+
+    // Rewrite every requesting call site to the clone. Every site in
+    // Entry.Sites is a MethodCallExprAST (Method kind is only ever
+    // recorded from TypeCheckerCall.cpp's visitMethodCall).
+    for (ExprAST *Site : Entry.Sites) {
+      if (auto *MC = dynamic_cast<MethodCallExprAST *>(Site))
+        MC->ResolvedCallTarget = ClonedSymbol;
+    }
+    Entry.Drained = true;
+    DidWork = true;
+  }
+  return DidWork;
 }
 
 } // namespace Monomorphize

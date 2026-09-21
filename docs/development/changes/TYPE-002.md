@@ -5,7 +5,7 @@
 | **Status** | in-progress |
 | **Dates** | started 2026-09-21 · landed — |
 | **Commits** | (added at the end of each sub-session) |
-| **Sessions** | 3 of 8 (S11a, S11b, S12a done; S12b, S13a, S13b, S14a, S14b remain) |
+| **Sessions** | 4 of 8 (S11a, S11b, S12a, S12b done; S13a, S13b, S14a, S14b remain) |
 | **Depends on** | TYPE-001 (landed 2026-09-18), SEM-001 (landed 2026-09-18); strongly benefits from OPT-001 (landed 2026-09-18) |
 | **Frozen decisions relied on** | F-GEN-1, F-GEN-2, F-GEN-3, F-OP-1 (unaffected but adjacent — see §9.8) |
 
@@ -61,16 +61,17 @@ is a single opaque pointer; the `int` `5` is stored as the raw pointer value
 `0x5` via `CreateIntToPtr`, never dereferenced, and read back via
 `CreatePtrToInt`. `GlobalSymbolTable` only ever holds `"Box"`.
 
-### New behaviour (struct case still target-only; free-function case landed S12a)
+### New behaviour (struct LAYOUT still target-only; free functions AND methods land S12a/S12b)
 
 Same program, same output. `Box<int>` will compile to its own,
 fully-specialized `TurfStructType` with a real `i64` field (not a pointer),
 registered under an extended mangled name; a second `Box<Point>`
 instantiation elsewhere in the same program gets its own, independent
-layout and compiled methods (S13a/S13b, not yet true). `TurfGenericParamType`
+layout (S13a/S13b, not yet true — struct LAYOUT itself is still one
+shared, erasure-based type this session, by design). `TurfGenericParamType`
 never reaches Codegen (INV-GEN-1, still `planned` — true today only for the
-FREE-function subset S12a lands; a struct-bound generic still erases, on
-purpose, until S13a).
+FREE-function and METHOD subset S12a/S12b land; the STRUCT's own field
+storage still erases, on purpose, until S13a).
 
 **What's real as of S12a**, for a genuinely free function (no `self`):
 ```turf
@@ -85,6 +86,28 @@ functions (verified live: `turf_identity_gen1_int_int` and
 `turf_identity_gen1_double_double`, zero `inttoptr`/`ptrtoint` in either) —
 not the shared, erased body every generic function still got before this
 session.
+
+**What's ALSO real as of S12b**, for a generic METHOD ON a generic
+STRUCT (`lib/std/collections/list.tr`'s real, production `List<T>`):
+```turf
+mut ints: List<int> = List::default();
+ints.push(10);
+ints.push(20);
+mut strs: List<string> = List::default();
+strs.push("a");
+```
+`List<int>.push`/`.length`/`.pop` and `List<string>.push`/`.length`/`.pop`
+compile to SIX separate, real LLVM functions (verified live at `-O0`:
+`turf_List.push_gen1_int_List_int_ptr_int` takes a genuine `i64 %item`
+parameter, not `ptr`; `turf_List.length_gen1_int_List_int_ptr` returns a
+genuine `i64`) — with `List<T>`'s own STRUCT LAYOUT still the single,
+shared, erasure-based `%List` LLVM type both instantiations' `self`
+pointers point at (deliberate — S13a/S13b give each instantiation its own
+layout). One narrower case is a disclosed, deferred gap, not covered by
+S12b: a method that is generic IN ITS OWN RIGHT on a NON-generic struct
+(`fn<T> Box.echo(x: T): T` where `Box` itself has no type parameters) is
+never even recorded as an instantiation request today — see *Known
+pitfalls*.
 
 ### Is this breaking?
 
@@ -239,6 +262,65 @@ prelude sweep clean.
   reproducing the exact "LLVM function not found" ICE this fix chases (see
   *Removed assumptions*).
 
+**S12b extended this to generic methods on generic structs** — the real,
+production case (`List<T>`, `Map<K,V>`, `Stack<T>`, `Queue<T>`), not just
+the free-function subset. Verified live end to end against `List<T>`:
+`push`/`length`/`pop` on both `List<int>` and `List<string>` compile to six
+separate, concrete LLVM functions with struct LAYOUT still fully shared
+(by design — S13a). Full suite green at 681/681 (680 + 1 new test) at both
+the default and `-O2` optimization levels; `lib/std`/`showcase`/prelude
+sweep clean.
+
+**What S12b added, concretely:**
+- `InstantiationCollector`/`InstantiationCache` redesigned (S12b
+  correction — see *Removed assumptions*): the destructive FIFO
+  `Worklist_` (pop an index, act on it or drop it forever) is gone,
+  replaced by a `Drained` flag per `InstantiationEntry` and a non-
+  destructive full-cache index sweep (`Collector.cache().size()` re-read
+  every loop iteration, so growth mid-sweep is picked up automatically).
+  Needed the moment a SECOND drain function (methods) existed alongside
+  S12a's free-function one — a destructive shared queue meant whichever
+  function ran first silently discarded every entry the OTHER function was
+  responsible for.
+- `buildDeclRegistry()` and `finishInstantiation()` (`Monomorphize.cpp`,
+  anonymous namespace) — the rename/clear-TypeParams/re-resolve/re-
+  typecheck/register tail extracted out of `drainFreeFunctionRequests()`
+  (unchanged behaviour, verified by the full suite staying green
+  immediately after the extraction, before any new method-specific code
+  was added) so `drainMethodRequests()` doesn't duplicate ~150 lines.
+- `Resolver::resolveMonomorphizedClone()` (`Resolver.h`) — a new, small,
+  additive Resolver entry point fixing two real bugs found live (see
+  *Removed assumptions*): (1) `currentModuleName()` needs to be told which
+  module a clone's TEMPLATE was actually declared in, for `self`'s own
+  struct-name validation to succeed; (2) a NEW
+  `SuppressUnqualifiedVisibilityCheck_` flag on `Resolver`, read by
+  `validateNamedType()`'s two `isTypeVisibleUnqualified()` call sites
+  (`ResolverDecl.cpp`), lets a clone's SUBSTITUTED type arguments name a
+  struct from ANY module the ORIGINAL call site could see — not just what
+  the template's own declaring module imports.
+- `Monomorphize::drainMethodRequests()` — the Method-kind driver. Finds
+  the method's template the same way `drainFreeFunctionRequests()` does
+  (shared registry); substitutes every param EXCEPT `self` (index 0) plus
+  the return type, the same way; ALSO rewrites `self`'s OWN declared type,
+  from bare `StructName*` to `StructName<TypeArgs>*` — the one genuinely
+  new mechanism S12b needed, safe despite struct layout staying fully
+  erased this session for two independently-verified reasons (both in the
+  function's own doc comment, `Monomorphize.cpp`): self's LLVM
+  representation is unaffected either way (`getLLVMType()` already
+  collapses a `GenericType`-typed struct pointer to the same shared opaque
+  type as a bare one), and `CastToType()`'s existing erasure/un-erasure
+  branches are driven by the VALUE's actual LLVM shape and the DESTINATION
+  type, never by whether the AST source-side annotation says "generic" —
+  confirmed by reading `CodegenCore.cpp`'s own comment on the un-erase
+  branch, not assumed.
+- `main.cpp`'s sub-pass 2b.5 now calls BOTH drain functions in an
+  ALTERNATING loop (`while (Progress) { Progress = drainFreeFunctionRequests(...) | drainMethodRequests(...); }`),
+  not once each in sequence — they are not independent: re-typechecking a
+  method's clone can discover a nested call to a generic free function (or
+  vice versa), and that nested request needs the OTHER drain function to
+  act on it. This is what the non-destructive collector redesign above
+  makes possible at all.
+
 ## Runtime changes
 
 None. Eventually none in this group either — TYPE-002 is what makes
@@ -253,11 +335,11 @@ anything else).
 ## New invariants
 
 None moved to `holds` this session — `INV-GEN-1` is still `planned` even
-though S12a's free-function clones already individually satisfy it (a
-partial, undeclared property isn't the same as the compiler-wide guarantee
-the invariant names; that only becomes true, and gets a debug-build
-assertion, in S14a). `INVARIANTS.md` already carries `INV-GEN-1` and
-`INV-TYPE-2` as `planned — TYPE-002`, and `INV-TEST-1` as
+though S12a/S12b's free-function and method clones already individually
+satisfy it (a partial, undeclared property isn't the same as the
+compiler-wide guarantee the invariant names; that only becomes true, and
+gets a debug-build assertion, in S14a). `INVARIANTS.md` already carries
+`INV-GEN-1` and `INV-TYPE-2` as `planned — TYPE-002`, and `INV-TEST-1` as
 `planned — TYPE-002's tests`; `INV-CG-1` (`planned`) is directly relevant to
 U-4′ below. `E079` (a new *diagnostic*, not an invariant) is registered and,
 as of S12a, actually enforced — verified live (see *Compiler architecture*
@@ -404,6 +486,104 @@ literal chain-depth measurement §9.5 describes; see *Known pitfalls*.
   session, and out of scope to fix here. A future session sweeping
   `lib/std` should grep for a real error code/ICE/"Ambiguous", not treat
   "No entry point found" or this specific E034 as a failure.
+- **A destructive shared worklist cannot serve two independent drain
+  functions, and this was found live, not anticipated.** S11b/S12a's
+  `Worklist_` was a FIFO of indices; `popWorklist()` removed an entry
+  whether or not the caller actually acted on it (a Method/Struct-kind
+  entry seen by `drainFreeFunctionRequests()` was `continue`-d past but
+  still permanently gone from the queue). The moment `drainMethodRequests()`
+  existed as a SECOND consumer, this broke silently: whichever drain
+  function ran first exhausted the shared queue, discarding every entry of
+  the KIND it doesn't handle before the function actually responsible for
+  that kind ever got a chance to look. Fixed by replacing the destructive
+  queue with a `Drained` flag per entry plus a non-destructive, re-read-
+  each-iteration index sweep over the append-only cache (`InstantiationCache`
+  is a `std::deque`, so indices and references both stay valid across
+  growth) — see `InstantiationCollector`'s own doc comment (Monomorphize.h)
+  for the full explanation.
+- **`Resolver::resolve()` alone is not "the right scope" for a clone
+  originally declared inside an imported module — this needed a real fix,
+  not just documentation, and it was two DIFFERENT bugs, found in
+  sequence.** (1) `currentModuleName()` (used by `validateNamedType()` to
+  decide whether a bare struct name like "List" is "local," no
+  `module::` qualification needed) reads `ModuleStack_`, which is empty
+  for a bare `resolve()` call issued from OUTSIDE any import's own body
+  traversal — exactly the monomorphizer's position. Confirmed live: a
+  clone of `List.push` failed re-resolving its own `self: List*` parameter
+  with "'List' isn't visible here without qualification." Fixed by pushing
+  the template's own declaring module onto `ModuleStack_` for the duration
+  (`Resolver::resolveMonomorphizedClone()`, replacing a plain
+  `resolve()` call). (2) Fixing (1) immediately surfaced a SECOND, deeper
+  failure: a clone's SUBSTITUTED type arguments can name a struct from ANY
+  module the ORIGINAL call site could see, not just what the template's
+  own declaring module imports — `List<JsonValue>.push`'s clone (declared
+  in `list.tr`) needs to reference `JsonValue` (`json.tr`), which
+  `list.tr` correctly never imports (an ordinary, non-generic `List` never
+  needs to). There is no way to re-derive "was this specific substituted
+  value already valid somewhere" from a bare `TurfTypePtr` with no
+  back-pointer to where it was written, so the check is suppressed for the
+  clone's own resolve() call instead of attempted incorrectly (trusting
+  the substituted value, which only ever came from an already-successful
+  type-check at a real call site elsewhere in the program) — a new
+  `SuppressUnqualifiedVisibilityCheck_` flag on `Resolver`, scoped to
+  exactly this one call.
+- **Two independent mangling computations that normally agree — because
+  both are derived from "which module is this declaration actually
+  inside," computed at each pass's own natural traversal point — silently
+  disagreed for a clone, and this was the hardest bug this session found**
+  (reproduced with a minimal, ~15-line test before being understood at
+  all). `ResolverFunctionSymbol::mangledName()` (`ResolverSymbolBase.h`)
+  prepends `Sym.SourceModule`. `FuncDefExprAST::codegen()`
+  (`CodegenFunc.cpp`) prepends `GlobalSymbolTable::GetCurrentModule()`
+  instead — a CODEGEN-TIME GLOBAL, normally set/cleared around a
+  `ModuleImportExprAST`'s own `codegen()` traversal of that module's body.
+  A monomorphized clone is appended directly to `PrePassASTs`
+  (`finishInstantiation`) and codegenned from that flat sub-pass 3a/3b
+  loop, never from inside any module-import traversal —
+  `GlobalSymbolTable::IsInModule()` is false the whole time. Leaving the
+  clone's registered symbol with `SourceModule = "list"` (needed for
+  `resolveMonomorphizedClone()`'s OWN validation, per the entry above) made
+  the CALL SITE's `mangledName()` (which reads `Sym.SourceModule`) compute
+  a DIFFERENT string than what the clone's OWN `codegen()` actually
+  registered the LLVM function under (no module prefix at all, since
+  `IsInModule()` is false). `TheModule->getFunction(MangledName)` then
+  silently misses — `MethodCallExprAST::codegen()` returns `nullptr` with
+  **no diagnostic at all** — and when that call sat on the RHS of a
+  `||`/`&&` short-circuit, `BinaryExprAST::codegen()`'s own
+  `if (!R) return nullptr;` early-return skipped emitting the branch to
+  the merge block, leaving an orphaned, empty basic block: "Internal
+  compiler error: ... Basic Block ... does not have terminator! label
+  %or.merge" — a confusing, badly-misattributed diagnostic pointing at
+  LLVM-verifier internals, nowhere near the real cause. Fixed by clearing
+  `Clone->ResolvedDef->SourceModule` immediately after
+  `resolveMonomorphizedClone()` succeeds: `instantiatedDeclName()` already
+  makes the clone's own name globally unique, so it needs no module
+  qualifier for mangling at all once renamed — the module context was
+  only ever needed for validation, not for the registered symbol going
+  forward. Regression test: `tests/38_monomorphization/04_method_on_generic_struct.tr`
+  deliberately exercises a generic method call inside a `||` condition,
+  inside another struct's own method body, matching the exact shape that
+  caught this.
+- **A method that is generic in its own right, on a NON-generic struct,
+  is not covered by S12b at all — found live while writing this session's
+  own tests, not something the plan anticipated.** `fn<T> Box.echo(x: T): T`
+  called as `b.echo(42)` where `b: Box` (not `Box<...>`) never gets an
+  instantiation request recorded in the first place:
+  `TypeCheckerCall.cpp`'s `visitMethodCall` only ever builds `Subst` (and
+  therefore only ever calls `MonoCollector_->record()`) when the RECEIVER's
+  own type is a `GenericType` — for a non-generic struct, it never is, so
+  the whole `if (auto *BaseGT = ...)` block guarding `record()` never
+  runs. The call is silently still handled by the OLD, unmodified erasure
+  path end to end (confirmed live: it still produces correct results,
+  since erasure itself is completely untouched by this group so far — the
+  gap is "not yet monomorphized," not "broken"). Closing it needs NEW
+  Subst-building logic in `visitMethodCall` — arg-vs-parameter unification
+  for the METHOD's own type parameters, mirroring
+  `collectGenericSubstitution()`'s existing free-function logic — which is
+  real, additional TypeChecker work, not just drain-function wiring;
+  deferred to a later session rather than attempted under this session's
+  time pressure. Disclosed here rather than silently left for someone to
+  rediscover.
 
 ## Tests
 
@@ -424,13 +604,25 @@ first four real tests, all passing (680/680 full suite, default and `-O2`):
   configured `kMaxInstantiationDepth` (64), reports a (long, includes
   unrelated prelude instantiations — see *Known pitfalls*) chain.
 
-**Not added this session, and why:** `fail_generic_requires_operator.tr`
+**Not added in S12a, and why:** `fail_generic_requires_operator.tr`
 (planned in S11a/S11b, "if exercisable already"). It is not exercisable
-yet — see *Known pitfalls*'s new entry on instantiation-site diagnostics
+yet — see *Known pitfalls*'s entry on instantiation-site diagnostics
 currently having very little to catch. Deferred to S13a/S13b, where
 `Map<K,V>`'s real `self.keys[i] == key` dispatch bug
 (`tests/99_known_bugs/set_string_dedup_broken.tr`) is the natural, already-
 scheduled test for this mechanism once struct-bound generics are handled.
+
+S12b adds one more test, all passing (681/681 full suite, default and
+`-O2`):
+- `04_method_on_generic_struct.tr` — `List<int>` and `List<string>`
+  (real, production `lib/std/collections/list.tr`, not a toy stand-in)
+  coexisting correctly in one program, exercising `push`/`length`/`pop` on
+  both, PLUS a non-generic struct's own (non-generic) method calling a
+  generic method inside a `||` short-circuit condition — deliberately
+  reproducing the exact shape that caught the mangling-disagreement bug
+  (see *Removed assumptions*). This test failed with "Internal compiler
+  error: ... does not have terminator! label %or.merge" before that fix
+  and passes cleanly after, with no other change.
 
 ## Known pitfalls
 

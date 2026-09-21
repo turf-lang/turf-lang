@@ -331,7 +331,7 @@ void Resolver::validateNamedType(
       UnknownTypeError(Loc, BaseName, Suggestions).raise();
     } else if (!GT->getModule().empty()) {
       validateModuleQualifier(GT->getModule(), BaseName, Loc);
-    } else if (!BaseIsOwnTypeParam &&
+    } else if (!BaseIsOwnTypeParam && !SuppressUnqualifiedVisibilityCheck_ &&
                !SymTable_.isTypeVisibleUnqualified(currentModuleName(), BaseName)) {
       UnqualifiedTypeNotVisibleError(Loc, BaseName,
                                      SymTable_.getTypeOwningModule(BaseName))
@@ -388,7 +388,8 @@ void Resolver::validateNamedType(
     } else if (!IsOwnTypeParam && !KnownPrimitives.count(TypeName)) {
       if (!NT->getModule().empty()) {
         validateModuleQualifier(NT->getModule(), TypeName, Loc);
-      } else if (!SymTable_.isTypeVisibleUnqualified(currentModuleName(), TypeName)) {
+      } else if (!SuppressUnqualifiedVisibilityCheck_ &&
+                 !SymTable_.isTypeVisibleUnqualified(currentModuleName(), TypeName)) {
         UnqualifiedTypeNotVisibleError(Loc, TypeName,
                                        SymTable_.getTypeOwningModule(TypeName))
             .raise();

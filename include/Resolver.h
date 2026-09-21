@@ -97,6 +97,60 @@ public:
   void resolve(ExprAST *Node);
 
   /**
+   * @brief TYPE-002 (S12b): resolve() a monomorphized clone -- as if it
+   *        were declared inside module @p Module (ModuleStack_ carries
+   *        that name for the duration, exactly as a real declaration
+   *        hoisted from inside that module's own ModuleImportExprAST body
+   *        would see), AND with validateNamedType()'s module-qualified-
+   *        visibility check (isTypeVisibleUnqualified()) suppressed.
+   *
+   * Two independent fixes for two real bugs found live, both needed
+   * together:
+   *
+   * 1. currentModuleName() -- used by validateNamedType() to decide
+   *    whether a bare struct name like "List" is "local" and needs no
+   *    `module::` qualification -- reads ModuleStack_, which is empty for
+   *    an ordinary resolve() call issued from OUTSIDE any import's own
+   *    body traversal (exactly the monomorphizer's position, sub-pass
+   *    2b.5, main.cpp). Without pushing @p Module first, a clone of e.g.
+   *    lib/std/collections/list.tr's `fn<T> List.push` fails re-resolving
+   *    its own `self: List*` parameter with "'List' isn't visible here
+   *    without qualification".
+   *
+   * 2. Once (1) is fixed, a DIFFERENT failure appears: a clone's
+   *    SUBSTITUTED type arguments can name a struct from ANY module the
+   *    ORIGINAL call site could see -- not just what the template's own
+   *    declaring module imports. `List<JsonValue>.push`'s clone (declared
+   *    in list.tr) needs to reference JsonValue (json.tr) -- something
+   *    list.tr itself never imports, correctly, since an ordinary,
+   *    non-generic List never needs to. The substituted VALUE is trusted
+   *    instead of re-validated: it came from an already-resolved,
+   *    already-successfully-typechecked expression at the ORIGINAL call
+   *    site (TypeCheckerCall.cpp's collectGenericSubstitution() output),
+   *    which only ever succeeds against a type that already passed this
+   *    exact check once, in ITS OWN correct scope -- re-deriving that
+   *    scope here, from a bare TurfTypePtr with no back-pointer to where
+   *    it was written, is not possible, so the check is suppressed for
+   *    the substituted parts instead of attempted incorrectly.
+   */
+  void resolveMonomorphizedClone(ExprAST *Node, const std::string &Module) {
+    if (!Module.empty()) ModuleStack_.push_back(Module);
+    bool SavedSuppress = SuppressUnqualifiedVisibilityCheck_;
+    SuppressUnqualifiedVisibilityCheck_ = true;
+    resolve(Node);
+    SuppressUnqualifiedVisibilityCheck_ = SavedSuppress;
+    if (!Module.empty()) ModuleStack_.pop_back();
+  }
+
+  /// See resolveMonomorphizedClone()'s doc comment, fix (2). Read by
+  /// validateNamedType() (ResolverDecl.cpp) at both isTypeVisibleUnqualified()
+  /// call sites. False for every ordinary resolve()/resolveAll() call --
+  /// only resolveMonomorphizedClone() ever sets this, scoped to its own call.
+  bool suppressUnqualifiedVisibilityCheck() const {
+    return SuppressUnqualifiedVisibilityCheck_;
+  }
+
+  /**
    * @brief Resolve an entire program (list of top-level nodes).
    *
    * Convenience wrapper that iterates over a vector of unique_ptr<ExprAST>
@@ -288,6 +342,9 @@ private:
   ResolverSymbolTable SymTable_;
   int FunctionNestingDepth_ = 0;
   std::vector<std::string> ModuleStack_;
+  // TYPE-002 (S12b): see resolveMonomorphizedClone()'s doc comment. Always
+  // false outside that one method's own scoped set/restore.
+  bool SuppressUnqualifiedVisibilityCheck_ = false;
   // The enclosing function's own `fn<...>` type parameter names, set for the
   // duration of visitFuncDef()'s body traversal and cleared on exit (a plain
   // member, not a stack, is safe since FunctionNestingDepth_ already forbids

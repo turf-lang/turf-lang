@@ -117,6 +117,13 @@ inline constexpr int kMaxInstantiationDepth = 64;
 struct InstantiationEntry {
   InstantiationRequest Request;
   std::vector<ExprAST *> Sites;
+  /// TYPE-002 (S12b): set once a drain function has actually processed
+  /// this entry (cloned/substituted/registered it, or deliberately left it
+  /// for a LATER drain function to own -- see Monomorphize.cpp's
+  /// per-Kind drain functions for what "processed" means for each kind).
+  /// See InstantiationCollector's own doc comment for why this replaced a
+  /// destructive worklist queue.
+  bool Drained = false;
 };
 
 /// Deliberately linear-scan dedup, not a hash map: S11a's U-2 census found
@@ -160,24 +167,37 @@ public:
 
 /// Collector: TypeChecker feeds it via record() during sub-pass 2b (report-
 /// only there -- the actual clone/resolve/typecheck work never happens
-/// from inside TypeChecker's own traversal, only from
-/// drainFreeFunctionRequests() afterward, sub-pass 2b.5). A drain function
-/// that discovers a NESTED generic call while re-typechecking a fresh
-/// clone calls record() again (same collector, same Worklist_), which is
-/// what gives §9.5 step 3's "push any new requests its body produced" for
-/// free -- no separate recursion-tracking needed beyond the worklist loop
-/// itself already draining until empty.
+/// from inside TypeChecker's own traversal, only from a drain function
+/// afterward, sub-pass 2b.5).
+///
+/// TYPE-002 (S12b correction -- see the change record's *Removed
+/// assumptions*): S11b/S12a used a destructive FIFO `Worklist_` (pop an
+/// index, act on it or drop it forever). That broke the moment a SECOND
+/// drain function existed (S12b's `drainMethodRequests()`, alongside
+/// S12a's `drainFreeFunctionRequests()`): each Kind a function doesn't
+/// handle gets `continue`-d past, but `popWorklist()` already REMOVED it
+/// from the queue -- so whichever drain function runs first silently
+/// discards every OTHER kind's entries before the function actually
+/// responsible for them ever gets a chance to look at the queue. Replaced
+/// with a non-destructive design: entries live in `Cache_` (append-only,
+/// see InstantiationCache) forever, each with its own `Drained` flag; a
+/// drain function does its own full index sweep via `cache().size()`
+/// (re-read each iteration, so it naturally picks up entries a NESTED
+/// discovery appends mid-sweep) and sets `Drained` on exactly the entries
+/// it acted on. A NESTED discovery of a DIFFERENT kind (a method calling a
+/// generic free function, or vice versa) is what `main.cpp`'s alternating
+/// drain loop is for -- see its own comment for why one function's own
+/// internal fixed point isn't the whole story.
 class InstantiationCollector {
   InstantiationCache Cache_;
-  std::deque<size_t> Worklist_; // indices into Cache_'s entries
 
 public:
   /// Record one instantiation request from one call/decl site. A
   /// duplicate (same sameInstantiationAs()) is absorbed into the existing
-  /// entry's Sites list rather than creating a second worklist item --
-  /// this IS §9.5 step 2's "rewrite the requesting site to point at the
-  /// cached instantiation" (the rewrite itself happens once, in the drain
-  /// loop, once the cached instantiation exists).
+  /// entry's Sites list -- this IS §9.5 step 2's "rewrite the requesting
+  /// site to point at the cached instantiation" (the rewrite itself
+  /// happens once, in a drain function, once the cached instantiation
+  /// exists).
   void record(InstantiationRequest Req, ExprAST *Site) {
     if (auto *Existing = Cache_.find(Req)) {
       if (Site) Existing->Sites.push_back(Site);
@@ -185,18 +205,6 @@ public:
     }
     auto &NewEntry = Cache_.insert(std::move(Req));
     if (Site) NewEntry.Sites.push_back(Site);
-    Worklist_.push_back(Cache_.size() - 1);
-  }
-
-  bool worklistEmpty() const { return Worklist_.empty(); }
-  /// Pop the next pending entry's index. Caller (drainFreeFunctionRequests)
-  /// is responsible for skipping an index whose Kind it doesn't act on yet
-  /// (Method/Struct, S12b/S13a) -- those stay recorded but undrained, same
-  /// as S11b's report-only behaviour for them.
-  size_t popWorklist() {
-    size_t Idx = Worklist_.front();
-    Worklist_.pop_front();
-    return Idx;
   }
 
   /// The returned reference stays valid across further record() calls
@@ -236,20 +244,45 @@ TurfTypePtr substituteConcreteTypes(
 std::string instantiatedDeclName(const std::string &BaseName,
                                  const std::vector<TurfTypePtr> &TypeArgs);
 
-/// TYPE-002 (S12a): drain every FreeFunction-kind request currently on
-/// @p Collector's worklist to a fixed point, cloning, substituting,
+/// TYPE-002 (S12a): drain every un-drained FreeFunction-kind entry in
+/// @p Collector to a fixed point (re-sweeping on growth -- see
+/// InstantiationCollector's own doc comment), cloning, substituting,
 /// re-resolving, re-typechecking, and registering each one, appending the
 /// resulting concrete FuncDefExprAST clones onto @p PrePassASTs so
-/// main.cpp's ordinary sub-pass 2c/3a/3b codegen loops pick them up with
-/// no Codegen changes at all. Rewrites every requesting call site's
-/// ResolvedCallTarget to the clone. Method/Struct-kind worklist entries
-/// are left untouched (popped and silently skipped -- S12b/S13a drain
-/// those). @p PreR is the SAME Resolver instance that already ran
-/// resolveAll() over the whole program -- reused (not a fresh instance) so
-/// the clone resolves against the real, already-hoisted program symbol
-/// table; see this function's .cpp doc comment for why Resolver::resolve()
-/// (the single-node Pass-2-only entry point) is safe to call again here.
-void drainFreeFunctionRequests(
+/// main.cpp's ordinary sub-pass 2c/3a/3b codegen loops pick them up with no
+/// Codegen changes at all. Rewrites every requesting call site's
+/// ResolvedCallTarget to the clone. A struct-bound declaration (Params[0]
+/// is "self") is excluded even though it arrives as a FreeFunction-kind
+/// request (`Box::new(...)`'s "self-stripped candidate") -- see the .cpp
+/// doc comment. Method/Struct-kind entries are left un-drained (S12b's
+/// drainMethodRequests()/S13a act on them). @p PreR is the SAME Resolver
+/// instance that already ran resolveAll() over the whole program -- reused
+/// so the clone resolves against the real, already-hoisted program symbol
+/// table. Returns true if it drained at least one entry (main.cpp's
+/// alternating drain loop uses this to detect a fixed point across BOTH
+/// this function and drainMethodRequests()).
+bool drainFreeFunctionRequests(
+    std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
+    InstantiationCollector &Collector, Resolver &PreR);
+
+/// TYPE-002 (S12b): the Method-kind counterpart to
+/// drainFreeFunctionRequests() -- a generic method's OWN Params (except
+/// `self`, index 0) and ReturnType are substituted to concrete types the
+/// same way; `self`'s OWN declared type is ALSO rewritten, from
+/// `StructName*` to `StructName<TypeArgs>*`, so TypeChecker's ALREADY-
+/// EXISTING field-substitution mechanism (visitFieldAccess's
+/// GenericTypeArgs scan, TypeCheckerCall.cpp) correctly resolves
+/// `self.<field>`'s type for this specific instantiation during
+/// re-typecheck -- see the .cpp doc comment for why this is safe even
+/// though struct LAYOUT stays fully erased/shared this session (S13a's
+/// job): `self`'s LLVM representation is completely unchanged either way
+/// (a GenericType-typed struct pointer erases identically to a bare one),
+/// and CastToType's existing erasure/un-erasure branches are driven by the
+/// VALUE's actual LLVM shape and the DESTINATION type, never by whether
+/// the AST source-side annotation says "generic" -- confirmed by reading,
+/// not assumed; see the change record. Returns true if it drained at
+/// least one entry.
+bool drainMethodRequests(
     std::vector<std::unique_ptr<ExprAST>> &PrePassASTs,
     InstantiationCollector &Collector, Resolver &PreR);
 
