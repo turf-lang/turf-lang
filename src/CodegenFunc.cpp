@@ -971,18 +971,26 @@ Value *FuncCallExprAST::codegen() {
       Value *V = EvaluatedArgs[Idx];
       Type *ExpectedTy = ArgIt->getType();
       if (V->getType() != ExpectedTy) {
-        if (ExpectedTy->isPointerTy() && V->getType()->isIntegerTy())
-          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_ptr");
-        else if (ExpectedTy->isIntegerTy() && V->getType()->isPointerTy())
-          V = Builder->CreatePtrToInt(V, ExpectedTy, "argcast_int");
-        else if (ExpectedTy->isDoubleTy() && V->getType()->isPointerTy()) {
-          V = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext));
-          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_dbl");
-        } else if (ExpectedTy->isPointerTy() && V->getType()->isDoubleTy()) {
-          V = Builder->CreateBitCast(V, Type::getInt64Ty(*TheContext), "argcast_dbl_to_i64");
-          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_erase_dbl");
-        } else
-          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_bit");
+        // TYPE-002 (S15/D8): see CodegenStruct.cpp's identical fix on
+        // MethodCallExprAST::codegen() for the full story -- this block
+        // used to erase/un-erase a constructor argument INTO/OUT OF a
+        // generic parameter's opaque Type-Erasure slot, dead ever since
+        // monomorphization gives every constructor call site a real,
+        // concrete callee signature. Verified live, this session:
+        // instrumented with an `fprintf` probe, zero hits compiling every
+        // file under tests/, lib/std/, and showcase/.
+        SemanticError(Loc,
+                      "Internal error: constructor call argument type "
+                      "mismatch (expected '" +
+                          std::string(ExpectedTy->isPointerTy() ? "pointer" :
+                                      ExpectedTy->isDoubleTy() ? "double" :
+                                      ExpectedTy->isIntegerTy() ? "integer" : "?") +
+                          "'-shaped LLVM type, got a different shape). "
+                          "This is a compiler bug -- every call site should "
+                          "reach a fully-monomorphized, concretely-typed "
+                          "callee.")
+            .raise();
+        return nullptr;
       }
       ArgVals.push_back(V);
     }

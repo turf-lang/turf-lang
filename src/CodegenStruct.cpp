@@ -470,29 +470,34 @@ Value *MethodCallExprAST::codegen() {
       Value *V = EvaluatedArgs[Idx];
       Type *ExpectedTy = ArgIt->getType();
       if (V->getType() != ExpectedTy) {
-        if (ExpectedTy->isPointerTy() && V->getType()->isIntegerTy())
-          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_ptr");
-        else if (ExpectedTy->isIntegerTy() && V->getType()->isPointerTy())
-          V = Builder->CreatePtrToInt(V, ExpectedTy, "argcast_int");
-        else if (ExpectedTy->isDoubleTy() && V->getType()->isPointerTy()) {
-          V = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext));
-          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_dbl");
-        }
-        // The reverse direction (erasing a `double` argument INTO an opaque
-        // generic-parameter slot, e.g. calling Map<K,V>.put(key, 1.5) where
-        // V is type-erased to `ptr`) was missing entirely -- confirmed via a
-        // real crash: `bitcast double to ptr` is illegal LLVM IR (bitcast
-        // never converts between float and pointer types, only same-size
-        // int-like/pointer-like ones), which the catch-all `else` branch
-        // below produced unconditionally for this combination. Fixed by
-        // mirroring CastToType()'s own generic-erasure branch exactly:
-        // double -> i64 (bitcast, same width) -> ptr (inttoptr).
-        else if (ExpectedTy->isPointerTy() && V->getType()->isDoubleTy()) {
-          V = Builder->CreateBitCast(V, Type::getInt64Ty(*TheContext), "argcast_dbl_to_i64");
-          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_erase_dbl");
-        }
-        else
-          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_bit");
+        // TYPE-002 (S15/D8): this whole mismatch block used to erase/
+        // un-erase an argument INTO/OUT OF a generic parameter's opaque
+        // Type-Erasure slot (IntToPtr/PtrToInt/bitcast) -- dead ever since
+        // monomorphization gives every call site a REAL, concrete callee
+        // signature (S12a-S14a; INV-GEN-1 holds). Verified live, this
+        // session: all four branches (plus the double<->pointer pair)
+        // instrumented with an `fprintf` probe, zero hits compiling every
+        // file under tests/, lib/std/, and showcase/ -- the enclosing
+        // `if` itself never fires any more. Kept as a hybrid "erasure path
+        // for compatibility" was exactly the ambiguity this whole group's
+        // Must-NOT-reinterpret list forbids, and a silent bitcast here
+        // would paper over a future monomorphization miss instead of
+        // failing loudly (the theme of D1's identical fix, above) --
+        // replaced with a diagnostic rather than deleted outright, so a
+        // regression here is a clear compiler-bug report, not a
+        // resurrected `bitcast double to ptr`-style illegal-IR crash.
+        SemanticError(Loc,
+                      "Internal error: struct method call argument type "
+                      "mismatch (expected '" +
+                          std::string(ExpectedTy->isPointerTy() ? "pointer" :
+                                      ExpectedTy->isDoubleTy() ? "double" :
+                                      ExpectedTy->isIntegerTy() ? "integer" : "?") +
+                          "'-shaped LLVM type, got a different shape). "
+                          "This is a compiler bug -- every call site should "
+                          "reach a fully-monomorphized, concretely-typed "
+                          "callee.")
+            .raise();
+        return nullptr;
       }
       ArgVals.push_back(V);
     }

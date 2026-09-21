@@ -1630,6 +1630,22 @@ whose output was actually looked at, not merely claimed:
    S14a) — the original "Invalid bitcast: bitcast %Big %x4 to ptr" ICE
    this whole group exists to fix cannot occur, structurally, since nothing
    left in Codegen attempts the erase/unerase cast that produced it.
+   **Correction (S15/D8):** this claim was NOT literally true between S14a
+   and S15 — `CodegenStruct.cpp`'s method-call argument adaptation and
+   `CodegenFunc.cpp`'s constructor-call argument adaptation each still had
+   a full `argcast_ptr`/`argcast_int`/`argcast_erase_dbl`/`argcast_bit`
+   erase/unerase branch set, S14a's own deletion pass having covered only
+   `CodegenCore.cpp`'s `getLLVMType()`/`CastToType()` and the *per-call-site
+   PRE-unerase* in `CodegenFunc.cpp` (a different mechanism, see S14a's own
+   entry above), not these two call-argument-adaptation sites. Verifiably
+   dead (an `fprintf` probe on all four branches in both files, zero hits
+   compiling every file under `tests/`, `lib/std/`, and `showcase/`) but
+   still present in source, and therefore exactly the "hybrid erasure path
+   kept for compatibility" this group's own *Must NOT reinterpret* list
+   forbids — closed by S15/D8, which replaces the whole mismatch block in
+   both files with a raised internal-error diagnostic instead of deleting
+   it silently, so a future regression here reports loudly rather than
+   resurrecting an illegal-IR crash.
 6. **Compile-time/binary-size deltas measured against S11a's own baseline,
    recorded, not asserted in a test.** Same three programs, same
    methodology (S14b, this session):
