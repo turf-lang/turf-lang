@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | landed |
-| **Dates** | started 2026-09-21 · landed 2026-09-21 |
-| **Commits** | (added at the end of each sub-session) |
-| **Sessions** | 8 of 8 (S11a, S11b, S12a, S12b, S13a, S13b, S14a, S14b — all done) |
+| **Status** | landed (reopened 2026-09-22 for S15, six real defects against the "landed" claim; re-closed 2026-09-22 once all were fixed/scoped and postflight passed) |
+| **Dates** | started 2026-09-21 · landed 2026-09-21 · reopened 2026-09-22 (S15) · re-landed 2026-09-22 |
+| **Commits** | S15: `d8e167a` (D1), `d5cf0f8` (D2), `730d1ae` (D3), `c2f46ea` (D4), `5a9b1a7` (D5), `7ef9869` (D6), `aab2421` (D7 test), `da85f2a` (D8) |
+| **Sessions** | 8 of 8 (S11a, S11b, S12a, S12b, S13a, S13b, S14a, S14b — all done); **S15 reopened the group** (independent review found 6 defects, 4 regressions against pre-TYPE-002, 1 silent wrong-code bug — see that session's own entry below) |
 | **Depends on** | TYPE-001 (landed 2026-09-18), SEM-001 (landed 2026-09-18); strongly benefits from OPT-001 (landed 2026-09-18) |
 | **Frozen decisions relied on** | F-GEN-1, F-GEN-2, F-GEN-3, F-OP-1 (unaffected but adjacent — see §9.8) |
 
@@ -711,6 +711,225 @@ levels; `lib/std`/`showcase`/prelude sweep clean.
 - `INDEX.md`: `TYPE-002` flipped to `landed`. This file's own header:
   `Sessions: 8 of 8`, `Status: landed`.
 
+**S15 reopens the group.** An independent review of the "landed" state found
+six real defects, verified live BEFORE any fix (each repro run against the
+S14b baseline, not assumed from the review's own writeup) — four regressions
+against the pre-TYPE-002 compiler (`c4696c3`), one silent wrong-code bug, one
+already-broken-before-TYPE-002 gap the plan itself asked for. All fixed or
+explicitly, recordedly scoped out; full suite green at 702/702 (689 + 13 new
+tests: 2 for D1, 2 for D2, 4 for D3, 2 for D4, 1 for D5 (+2 companion
+modules), 1 for D6, 1 for D7) at both the default and `-O2` optimization
+levels; `lib/std`/`showcase`/prelude sweep clean throughout, re-checked after
+every single fix, not just at the end.
+
+**D1 — instantiation sites discovered after an entry is drained were never
+rewritten (silent wrong code, order-dependent).** `InstantiationCollector::
+record()` (`Monomorphize.h`) has always appended new call sites to an
+existing cache entry regardless of `Drained` — every drain function skipped
+a `Drained` entry outright, so a call site discovered while re-typechecking
+a LATER clone in the same fixed-point sweep (e.g. `c.set(raw)` inside
+`Wrap.makeFrom<int>`'s own clone body, on an entry `w.set(1)` had already
+drained earlier in the same `main()`) never had its `ResolvedCallTarget`
+rewritten. `MethodCallExprAST::codegen()`'s `TheModule->getFunction()` miss
+then silently returned `nullptr` — no diagnostic, the call simply vanished
+(`makeFrom(42)` printed `0`). The free-function equivalent was louder but
+still a compiler-bug message: "LLVM function 'turf_inner_T' not found ...
+This is a compiler bug." Root cause confirmed exactly as hypothesized:
+`Drained` conflated two questions — "don't clone this again" and "don't
+rewrite new sites again" — that need different answers once instantiation
+order isn't guaranteed to discover every call site before an entry drains.
+Fixed by giving `InstantiationEntry` its own `ClonedSymbol`/`SitesRewritten`
+fields (`Monomorphize.h`): every drain function's sweep, on finding an
+ALREADY-drained entry of the kind it owns, now rewrites
+`Sites[SitesRewritten..)` instead of skipping the entry outright.
+`Drained` still means, exclusively, "don't clone again." **Also required**
+(the single most valuable fix in this session, per the plan's own framing):
+`MethodCallExprAST::codegen()`'s `TheModule->getFunction()` miss now raises
+"Internal error: LLVM function '...' not found after successful name
+resolution" (`CodegenStruct.cpp`), matching `FuncCallExprAST`'s existing
+behavior — a monomorphization miss can no longer delete a call silently.
+Tests: `13_late_discovered_method_instantiation.tr`,
+`14_late_discovered_free_function_instantiation.tr` — both confirmed to
+fail (wrong output / ICE) before the fix, pass after.
+
+**D2 — a generic type used only as a struct field was never instantiated
+(ICE or silently wrong layout, regression).** `struct Holder { items:
+List<Big>, n: int }` with no `Holder`/`List<Big>` variable anywhere ICE'd
+("Cannot allocate unsized type") the moment a `Holder` variable existed, or
+silently reported `sizeof(Holder) == 8` (not 32) when it didn't — confirmed
+live, both shapes, before any fix. Root cause: `visitVarDecl`/
+`visitMethodCall`/`visitFieldAccess` (`TypeCheckerCall.cpp`/
+`TypeCheckerDecl.cpp`) record a Struct-kind instantiation request at THEIR
+OWN site, but nothing ever walked a STRUCT DECLARATION's own field list.
+Fixed by `recordGenericFieldInstantiations()`, called from `visitStructDecl`
+(`TypeCheckerDecl.cpp`) for every field, recursing through pointer/array
+wrapping AND into a `GenericType`'s own type arguments (so `List<List<Big>>`
+requests both instantiations, verified live via `--dump-instantiations`).
+Gated on `isFullyConcreteType()`, the same predicate S14a's identical
+"inner<T>" bug uses, so a generic struct's own still-open field
+(`Holder<T> { items: List<T> }`) is never recorded as a bogus non-concrete
+request. **Secondary fix**: `getLLVMType()`'s GenericType opaque-stub
+fallback (`CodegenCore.cpp`) stays reachable in general (a legitimate
+forward-reference mechanism, confirmed by reading `StructDeclExprAST::
+codegen()`'s own Step-1 stub-reuse logic) — but a stub still opaque once the
+WHOLE module has finished codegenning can only mean a request was recorded
+but never drained. `main.cpp` now scans for exactly that, right before
+`verifyModule()`, and raises "monomorphized struct instantiation ... was
+never given a real layout" instead of letting the raw LLVM-verifier dump be
+the only signal. Tests: `15_generic_struct_field_only.tr` (asserts
+`sizeof(Holder) == 32`, both with and without a `Holder` variable in the
+program's history — the no-variable case verified via a throwaway
+`--dump-instantiations` run before writing the test proper),
+`16_nested_generic_struct_field.tr`.
+
+**D3 — four stdlib collections still allocated `cap * 8`, corrupting the
+heap for any T over one machine word (memory corruption, regression: a safe
+compile-time ICE pre-TYPE-002 traded for an unsafe runtime one).** S14b
+fixed `list.tr` and called it "the ONE stdlib change this whole group
+permits itself" — `stack.tr`, `queue.tr`, `set.tr`, `map.tr` (both its
+`keys` and `values` arrays, independently), and `mem.tr`'s `Pool<T>` all had
+the identical line, untouched. Confirmed live, before any fix: pushing/
+enqueuing/putting 20 24-byte `Big` values through `Stack<Big>`/
+`Queue<Big>`/`Map<int,Big>` aborted with glibc `realloc(): invalid next
+size` or `Fatal glibc error: malloc.c:2199 (sysmalloc): assertion failed`.
+Fixed identically to `list.tr`'s own S14b fix: `cap * sizeof(T)`
+(`map.tr` needs TWO separate sizes, `sizeof(K)`/`sizeof(V)`, not one shared
+`byteSize` — a real, independent bug beyond the shared-line description
+this defect started from). `mem.tr`'s `Pool<T>` is latent, not live (always
+instantiated at a pointer type in every real use), fixed for consistency
+anyway. Tests: `17_stack_growth_over_8_bytes.tr`,
+`18_queue_growth_over_8_bytes.tr`, `19_map_growth_over_8_bytes.tr`,
+`20_set_growth_over_8_bytes.tr` (`Set<T>` needed an explicit `operator ==`
+overload on `Big`, since `T` must support `==` — D7's own gap) — all four
+push 20 elements (multiple growth reallocations) and read every value back,
+not just check for a crash; all four confirmed to abort on the pre-fix
+stdlib and pass after.
+
+**D4 — a generic struct containing another generic struct at the same `T`
+failed to compile (regression: worked pre-TYPE-002, now a compile error).**
+`struct Outer<T> { inner: Inner<T> }` then `self.inner.set(x)` inside
+`Outer`'s own method reported "No overload of 'Inner.set' matches argument
+types (int)" — confirmed live before any fix, both a local toy-struct shape
+and the real stdlib shape (`Holder<T> { items: List<T> }`). Root cause,
+confirmed exactly as hypothesized: `visitMethodCall`'s/`visitFieldAccess`'s
+(`TypeCheckerCall.cpp`) shared "recover this struct's own generic
+substitution by scanning its fields for a name to match" `Scan` lambda
+handled a field type that is directly a `TurfGenericParamType`/`NamedType`,
+or wrapped in a pointer/array — but never recursed into a field whose OWN
+type is ANOTHER `GenericType`. `self.inner`'s type stayed the literal,
+un-substituted `Inner<T>` instead of `Inner<int>`. Fixed by adding a
+`GenericType` case to both duplicated `Scan` lambdas, recursing into the
+nested type's own type arguments exactly like the existing pointer/array
+cases already do. Tests: `21_nested_generic_struct_same_t.tr` (local toy
+struct), `22_nested_generic_struct_over_stdlib_list.tr` (real `List<T>`) —
+both confirmed to fail to compile before the fix, pass after.
+
+**D5 — two modules declaring the same generic free function collided
+(regression: compiled fine pre-TYPE-002).** `fn<T> tag(x: T): int` declared
+identically in two different modules (`amod`/`bmod`), both called as
+`tag(5)` from a third file, reported "Duplicate function definition:
+'tag_gen1_int'" — confirmed live before any fix.
+`InstantiationRequest::sameInstantiationAs()` DOES key on `SourceModule`
+(correctly distinct cache entries), but `instantiatedDeclName()` (the
+function that names the CLONE) only ever used (base name, type arguments) —
+both instantiations produced the identically-spelled clone name regardless.
+Fixed by giving `instantiatedDeclName()` an optional `Module` parameter,
+passed only from `finishInstantiation()` using the request's own
+`SourceModule` (reliable for FreeFunction/Method-kind requests — comes from
+the already-resolved symbol, per `buildDeclRegistry()`'s own doc comment).
+Every struct-naming call site is left unchanged — struct names are already
+globally unique by language rule (E034), confirmed live (a duplicate struct
+declaration across two modules is rejected independently of anything this
+group touches). `Clone->ResolvedDef->SourceModule` is still cleared after
+resolving (unchanged, load-bearing per the existing `%or.merge`-bug
+comment) — the name itself is now module-qualified, so it no longer needs
+to carry the module forward for mangling. Test:
+`23_duplicate_generic_free_function_across_modules.tr` plus two companion
+modules (`dup_generic_fn_amod_module.tr`/`dup_generic_fn_bmod_module.tr`) —
+confirmed to fail to compile before the fix, pass after.
+
+**D6 — `INV-GEN-1` did not hold for a method's own type params on a generic
+struct (not a functional regression — broken before TYPE-002 too, with a
+different, safer failure mode — but the invariant's `holds` claim was
+false for this shape).** `fn<T, U> Wrap.pick(other: U): U` on `struct
+Wrap<T>` — the method redeclaring the struct's own `T` alongside a new `U`
+of its own, this language's standard idiom for the shape (`fn<T> List.push`
+does exactly this) — aborted a debug build's `finishInstantiation()` own
+`INV-GEN-1` assertion; a release build produced invalid LLVM IR. Root cause
+confirmed exactly as hypothesized: the recorded Method-kind
+`InstantiationRequest` only ever carried the RECEIVER's own type arguments
+(`[int]` for `Wrap<int>`), never `U`'s value — `drainMethodRequests()`
+pairs `TypeArgs` positionally against the template's FULL `TypeParams`
+(`[T, U]`), so with only one entry, `U` was never substituted. **Chose the
+preferred outcome (make it work), not the fallback (reject with a
+diagnostic)** — this is exactly `List<T>`'s own idiom, rejecting it would
+reject a shape the stdlib itself relies on for every single-parameter
+generic struct method. Fixed by: (1) `ResolverFunctionSymbol` gains a
+`TypeParams` field (a declaration's own `fn<...>` list, in order,
+`ResolverSymbolBase.h`/`ResolverCore.cpp`) so `visitMethodCall`
+(`TypeCheckerCall.cpp`) can build the request's `TypeArgs` positioned to
+match `Best->TypeParams` via `CombinedSubst` (struct-level `Subst` +
+`MethodOwnSubst`), not just the receiver's own `GenericType` args; (2)
+`self`'s own wrapping needed a SEPARATE fix, found while building (1):
+wrapping `self` as `Wrap<int,int>*` (the FULL extended `TypeArgs`) instead
+of `Wrap<int>*` (just the struct's own) would misname its per-instantiation
+struct lookup and miss the real registration — fixed by
+`genericStructOwnTypeParamCount()` (replacing the old boolean
+`isKnownGenericStructName()`), which slices `Request.TypeArgs[0,
+StructOwnParamCount)` for `self`'s wrapping specifically, while the FULL
+list still flows into `cloneAndSubstituteSelfBound()`'s own `Subst`-building
+for the clone's body. `INVARIANTS.md`'s INV-GEN-1 row corrected: briefly,
+unknowingly false for this specific shape between S14a and this fix. Test:
+`24_method_own_type_param_on_generic_struct.tr` — confirmed to abort the
+assertion before the fix, pass after (including mixed T/U types and
+multiple coexisting instantiations, verified live via a throwaway scratch
+program before writing the committed test).
+
+**D7 — the planned `fail_generic_requires_operator.tr` was added; its own
+stated requirement (anchor at the instantiation site) is not met, and this
+is a recorded scope decision, not a silent gap.** `Set<Big>` (no
+`operator==` overload) correctly rejects `s.add(...)` with "Cannot compare
+struct values with '=='.", confirming the mechanism fires for a real
+T-lacking-an-operator case — the S12a/S13a deferral reasoning ("not
+exercisable yet") is now stale, corrected in this file's own *Tests*
+section below. **Scope decision**: the plan's own stated requirement — the
+diagnostic must point at the instantiation site — is NOT met (it anchors at
+`set.tr`'s own `Set.contains()`, the innermost requester, one hop short of
+the user's own `s.add(...)` call). Fixing this properly needs a parent-
+request pointer on `InstantiationRequest` and a backward walk at both this
+diagnostic's primary anchor and E079's own chain (two birds, per the
+existing *Known pitfalls* entry on E079's chain noise) — a real feature
+addition, not a defect fix, filed as **D25** in
+`ARCHITECTURE_OVERHAUL.md` §27.2 rather than bundled into this session.
+
+**D8 — dead erasure call-site casts in two files (hygiene only, no
+behavior change).** `ARCHITECTURE_OVERHAUL.md` §8 named `CodegenFunc`'s
+per-call-site un-erase cast for deletion (done, S14a) but missed two
+siblings: `CodegenStruct.cpp`'s method-call argument adaptation and
+`CodegenFunc.cpp`'s constructor-call argument adaptation each still had a
+full `argcast_ptr`/`argcast_int`/`argcast_erase_dbl`/`argcast_bit`
+erase/unerase branch set. Verified dead, not assumed: instrumented all four
+branches (plus the double<->pointer pair) with an `fprintf` probe in both
+files and compiled every file under `tests/`, `lib/std/`, and `showcase/` —
+zero hits, confirming the enclosing `if (V->getType() != ExpectedTy)` never
+fires at all any more. Exactly the "hybrid erasure path kept for
+compatibility" this group's own *Must NOT reinterpret* list forbids.
+Replaced (not silently deleted) with a raised internal-error diagnostic in
+both files, so a future regression here reports clearly instead of
+resurrecting an illegal-IR crash. Completion criterion 5's own claim ("no
+erasure path survives ... nothing left in Codegen attempts the
+erase/unerase cast") corrected in this file's own *Unresolved questions*
+section — it was not literally true between S14a and this fix.
+
+**D9 — documentation corrections, folded into the fixes above rather than
+a separate pass**: `docs/development/handbook-sync/PENDING.md`'s
+`collections.md` row corrected to say the ">8 bytes is no longer a hard
+limit" claim was false for five of six collections until D3 landed, not
+true since S14b as the row previously implied. `INVARIANTS.md`'s INV-GEN-1
+row corrected under D6, above. `docs/planning/LIMITATIONS.md` item 1's
+`Status: FIXED` banner re-verified correct and left untouched, per the
+plan's own instruction.
+
 ## Runtime changes
 
 None. Eventually none in this group either — TYPE-002 is what makes
@@ -1323,6 +1542,33 @@ S14b adds three more tests, all passing (689/689 full suite, default and
   element back and confirms none were corrupted by the fixed allocation
   size.
 
+S15 adds thirteen more tests plus two companion modules, all passing
+(702/702 full suite, default and `-O2`) — each one confirmed to **fail
+before its own fix and pass after**, verified live via `git stash` on just
+that defect's own source changes, not merely asserted:
+- `13_late_discovered_method_instantiation.tr` /
+  `14_late_discovered_free_function_instantiation.tr` — **D1**. The method
+  case failed silently (wrong printed value, no diagnostic) before the fix;
+  the free-function case failed loudly ("LLVM function ... not found").
+- `15_generic_struct_field_only.tr` / `16_nested_generic_struct_field.tr` —
+  **D2**. Both ICE'd ("Cannot allocate unsized type") before the fix.
+- `17_stack_growth_over_8_bytes.tr` / `18_queue_growth_over_8_bytes.tr` /
+  `19_map_growth_over_8_bytes.tr` / `20_set_growth_over_8_bytes.tr` — **D3**.
+  All four aborted (glibc `realloc()`/`malloc.c` errors) before the fix.
+- `21_nested_generic_struct_same_t.tr` /
+  `22_nested_generic_struct_over_stdlib_list.tr` — **D4**. Both failed to
+  compile ("No overload of '...' matches argument types") before the fix.
+- `23_duplicate_generic_free_function_across_modules.tr` (plus
+  `dup_generic_fn_amod_module.tr`/`dup_generic_fn_bmod_module.tr`) — **D5**.
+  Failed to compile ("Duplicate function definition") before the fix.
+- `24_method_own_type_param_on_generic_struct.tr` — **D6**. Aborted an
+  `INV-GEN-1` assertion (debug build) before the fix.
+- `fail_generic_requires_operator.tr` — **D7**. Newly added (not a
+  fail-before/pass-after pair — this test's whole point is that the
+  mechanism ALREADY correctly rejects the program; see this defect's own
+  entry above for the anchoring-quality gap deliberately left open,
+  D25).
+
 ## Known pitfalls
 
 - **The pre-pass's own TypeChecker errors are informational-only and
@@ -1449,6 +1695,15 @@ fifth row explicitly recording that `docs/planning/LIMITATIONS.md` items
 1-3 were NOT queued there, since S14b updated them directly this session
 (see *Standard-library changes*/*Removed assumptions* for why that file is
 treated differently from the paused handbook/`docs/reference/`).
+
+**Corrected, S15/D9** — the `collections.md` row's own claim (">8 bytes is
+no longer a hard limit") was retroactively false for five of the six
+collections between when it was written (S14b) and D3 landing (S15): only
+`list.tr` had actually been fixed at S14b. The row now says so explicitly,
+naming D3 and the live corruption repros that proved it. `INVARIANTS.md`'s
+INV-GEN-1 row corrected under D6 (its own entry, above) rather than queued
+here — like `LIMITATIONS.md`, `INVARIANTS.md` is an actively-maintained
+tracker, not part of the paused handbook.
 
 ## Unresolved questions
 

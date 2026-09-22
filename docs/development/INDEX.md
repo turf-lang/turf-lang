@@ -17,7 +17,7 @@ record does; `status` tracks the record, not the branch.
 | SEM-002 | Numeric semantics: representability, conversion, overflow | landed | 2026-09-19 | 2026-09-19 | TypeChecker, Codegen, diagnostics | [SEM-002](changes/SEM-002.md) |
 | SEM-003 | `guess` (initializer type inference) | landed | 2026-09-20 | 2026-09-20 | Lexer, Parser, Types, TypeChecker, symbol tables | [SEM-003](changes/SEM-003.md) |
 | SEM-004 | Unified initialization | landed | 2026-09-20 | 2026-09-20 | Parser, AST, Analysis (CFG), diagnostics, stdlib, tests | [SEM-004](changes/SEM-004.md) |
-| TYPE-002 | Monomorphization (the keystone) | landed | 2026-09-21 | 2026-09-21 | Resolver, TypeChecker, new Monomorphizer pass, Codegen, symbol tables, driver | [TYPE-002](changes/TYPE-002.md) |
+| TYPE-002 | Monomorphization (the keystone) | landed | 2026-09-21 | 2026-09-22 | Resolver, TypeChecker, new Monomorphizer pass, Codegen, symbol tables, driver, stdlib | [TYPE-002](changes/TYPE-002.md) |
 
 ## How to use this directory
 
