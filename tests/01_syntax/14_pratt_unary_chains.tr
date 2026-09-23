@@ -16,9 +16,11 @@
 // with spaces between the individual operators on purpose: `--`/`++`
 // tokenize as single ATOMIC tokens (prefix decrement/increment) when
 // written adjacent with no space, which is a completely different
-// operator (and requires a bare identifier immediately after it, not an
-// arbitrary sub-expression) -- `---x` is `--` followed by `-x`, not three
-// separate unary minuses.
+// operator -- `---x` is `--` followed by `-x`, not three separate unary
+// minuses. (LANG-001 follow-up: prefix `++`/`--` now accepts any
+// assignable lvalue operand, e.g. `++arr[0]`, not just a bare identifier
+// -- that restriction is gone, but the tokenization fact above is not
+// affected by it either way.)
 
 import test;
 
