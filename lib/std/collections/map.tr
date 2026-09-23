@@ -1,3 +1,5 @@
+unsafe module;
+
 // map.tr — Map<K, V>: a simple key/value association (linear-scan, not
 // hashed -- see the design note below for why).
 // Usage:

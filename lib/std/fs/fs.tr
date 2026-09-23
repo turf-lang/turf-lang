@@ -1,3 +1,5 @@
+unsafe module;
+
 // ─── fs.tr ─────────────────────────────────────────────────────────────────
 // Path manipulation and directory/filesystem operations for TurfLang.
 //

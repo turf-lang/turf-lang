@@ -1,3 +1,5 @@
+unsafe module;
+
 // Queue<T> — FIFO (First In, First Out) collection.
 // Usage:
 //   import queue::Queue;   // (or `import queue;` + spell it `queue::Queue<int>` below)

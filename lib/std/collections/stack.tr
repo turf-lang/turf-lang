@@ -1,3 +1,5 @@
+unsafe module;
+
 // Stack<T> — LIFO (Last In, First Out) collection.
 // Usage:
 //   import stack::Stack;   // (or `import stack;` + spell it `stack::Stack<int>` below)

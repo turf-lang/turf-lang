@@ -1,3 +1,5 @@
+unsafe module;
+
 // list.tr — List<T>: a dynamically-growing array.
 // Usage:
 //   import list::List;   // (or `import list;` + spell it `list::List<int>` below)

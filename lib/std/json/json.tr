@@ -1,3 +1,5 @@
+unsafe module;
+
 // ─── json.tr ─────────────────────────────────────────────────────────────
 // A small, hand-rolled JSON parser/serializer for TurfLang.
 //

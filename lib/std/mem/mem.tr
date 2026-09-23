@@ -1,3 +1,5 @@
+unsafe module;
+
 // ─── mem.tr ──────────────────────────────────────────────────────────────────
 // Low-level memory management for TurfLang.
 //

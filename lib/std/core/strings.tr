@@ -1,3 +1,5 @@
+unsafe module;
+
 // ─── strings.tr ──────────────────────────────────────────────────────────────
 // String utility library for TurfLang.
 //
