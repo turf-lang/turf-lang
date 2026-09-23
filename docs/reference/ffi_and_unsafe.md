@@ -1,8 +1,10 @@
 # FFI, `unsafe {}`, and Pointers
 
 This page covers calling into C libraries with `extern fn`, the `unsafe {}`
-block, safe references (`&T`), and raw pointers (`ptr` / `T*`) — Turflang's
-whole low-level/interop surface.
+block, safe references (`&T` / `&?T`), and raw pointers (`ptr` / `T*`) —
+Turflang's whole low-level/interop surface. In a hurry? Jump straight to
+[§5, "Which pointer type do I use?"](#5-which-pointer-type-do-i-use) for a
+quick decision guide.
 
 See also: `docs/architecture/pointers_and_references.md` for the
 compiler-internals view (TypeChecker gate implementation, LLVM
@@ -242,7 +244,7 @@ fn sum_list(head: &?Node): int {
 }
 ```
 
-`raw`/`T*` still work for this too (see §5's `Node*` version below), but
+`raw`/`T*` still work for this too (see the `Node*` version just below), but
 `&?T` is the safe, checked, idiomatic choice — reach for `T*` only when a
 raw, unchecked pointer is genuinely what you need (usually: FFI).
 
@@ -373,9 +375,10 @@ the function body under `unsafe {}` if you need to.
 Raw pointers are allowed with no `unsafe {}` at all in exactly three
 places:
 
-1. **Anywhere under the standard library** (`lib/std`) — the standard
-   library is exempt from the gate entirely, since it's where the raw
-   FFI/pointer plumbing has to live.
+1. **A file that has declared the raw-pointer capability** (§4a) —
+   `lib/std`'s own modules all do this now (`unsafe module;` as their first
+   line), which is why they read as if raw pointers were unconditionally
+   exempt there; the exemption is really the declaration, not the path.
 2. **`extern fn` declarations** — an FFI binding's own parameter/return
    types can freely use `ptr`/`T*`/`void*` (see [§1](#1-extern-fn--calling-c-functions)).
    Only *binding a call's result to a variable* in ordinary user code is
@@ -393,3 +396,57 @@ places:
 - Indexing through a raw pointer (`p[0]` where `p: int*`) is not gated.
 - Calling a method through a raw pointer receiver is not gated — only
   reading/writing a *field* through one is.
+
+---
+
+## 5. Which pointer type do I use?
+
+A quick decision guide, now that there are four. All four compile to the
+*identical* LLVM value (an opaque pointer) — the differences below are
+purely frontend bookkeeping, zero runtime cost.
+
+| Type | Nullable? | Checked? | Needs `unsafe`/capability? | Reach for it when... |
+|---|---|---|---|---|
+| `&T` | no, ever | — (guaranteed) | no | **Default choice.** Any "pass by reference" where you know it's never "nothing" — ordinary reference parameters, `self`, returning a reference into something the caller owns. |
+| `&?T` | yes | yes | no | Something might legitimately be "nothing" — a linked list's `next`, a tree's `left`/`right`, an optional back-reference. This is almost always the right answer for "I need a nullable pointer" now. |
+| `T*` | yes | no | yes | Genuine low-level/unchecked work: wrapping a C API directly (`lib/std/mem.tr`, `net.tr`), or a C callback's own parameters (`fn cmpints(a: ptr, b: ptr): int32` for `qsort`). Reach for it only when you specifically need *unchecked*, not just *nullable*. |
+| `ptr` | yes | no | yes | The untyped boundary of a C API that itself deals in `void*` (`malloc`'s return, a generic handle) — cast to a concrete `T*` with `to` as soon as you know what it actually is. |
+
+**Rule of thumb:** start with `&T`. The moment you need "or nothing," reach
+for `&?T`, not `T*` — `&?T` gives you the same nullability with compile-time
+checking and no `unsafe {}` ceremony anywhere. Only drop to `T*`/`ptr` for
+real FFI/C-interop, or a rare case where you need something unchecked for
+performance and know exactly what you're doing.
+
+### How they convert into each other
+
+Things only ever get **more permissive** (safer → rawer) for free; going
+the other way (rawer → safer) always needs an explicit `to` cast, gated by
+*something* — `unsafe {}` if the source is genuinely raw, or
+`NullabilityPass` proving you narrowed it if the source is `&?T`:
+
+```
+&T  ──implicit──▶ &?T   (a non-null ref is trivially valid as "maybe null")
+&T  ──implicit──▶ T*    (widening to raw is always sound)
+&?T ──implicit──▶ T*    (same — the LLVM value never changes)
+&?T ──implicit──▶ ptr   (same)
+&?T ──explicit, checked──▶ &T   (`p to &T`, but ONLY where narrowed — E082 otherwise)
+T*  ──explicit, unsafe──▶ &T    (`p to &T` inside `unsafe {}` — the compiler can't prove it)
+ptr ──explicit, unsafe──▶ T*    (`p to SomeType*` inside `unsafe {}`)
+```
+
+### Do I need `--allow-unsafe-modules`?
+
+**No, almost certainly not.** It's only relevant to §4a's capability
+declaration, and only in one specific case:
+
+| What you're doing | Need the flag? |
+|---|---|
+| Using `&T` / `&?T` anywhere | No, never |
+| Wrapping a raw-pointer use in `unsafe {}` locally | No |
+| Writing code that lives under the compiler's install root (e.g. `lib/std`) | No — the capability is free there |
+| **Your own file** declares `unsafe module;` to get raw pointers file-wide | **Yes** |
+| Running an already-compiled binary | No — this is a compile-time flag only |
+
+If you're not writing `unsafe module;` yourself, this flag simply never
+comes up.
