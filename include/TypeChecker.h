@@ -326,12 +326,16 @@ private:
 
   /// True for a raw, GATED pointer type -- `ptr` (OpaquePointerType) or a
   /// concrete `T*` (TurfPointerType) -- and false for everything else,
-  /// including a `&T` safe reference (TurfReferenceType), which is a
-  /// TurfPointerType SUBCLASS (isPointer() is true for it too) but is
-  /// deliberately exempt from the gate -- see TurfReferenceType's own doc
+  /// including a `&T` safe reference (TurfReferenceType) and a `&?T`
+  /// nullable reference (TurfNullableReferenceType, LANG-002), both of
+  /// which are TurfPointerType SUBCLASSES (isPointer() is true for both)
+  /// but are deliberately exempt from THIS gate -- see each class's own doc
   /// comment (Types.h) for why the inheritance is structured that way.
+  /// `&?T`'s own safety is enforced by a SEPARATE mechanism entirely
+  /// (NullabilityPass, Analysis.h) -- it is not "safe like &T", it is
+  /// "checked instead of gated".
   static bool isRawPointer(const TurfType *T) {
-    return T && T->isPointer() && !T->isReference();
+    return T && T->isPointer() && !T->isReference() && !T->isNullableReference();
   }
 
   /// True when a raw pointer type's use at @p Loc is authorized: either

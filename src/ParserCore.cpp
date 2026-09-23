@@ -258,18 +258,28 @@ TurfTypePtr ParseType() {
     return std::make_shared<TurfErrorUnionType>(std::move(SuccessType));
   }
 
-  // `&T` -- a compiler-guaranteed non-null safe reference (issue #238).
-  // Symmetric to the `!T` branch just above: its own leading-token branch,
-  // ahead of the primitive/identifier dispatch below, recursing into
-  // ParseType() for the pointee. Unambiguous with the binary bitwise-AND
-  // operator ('&') and the unary address-of operator (also '&') since both
-  // of those are parsed entirely inside EXPRESSION parsing -- ParseType()
-  // is a wholly separate function only ever called from type positions.
+  // `&T` -- a compiler-guaranteed non-null safe reference (issue #238) --
+  // and `&?T` -- a nullable, NullabilityPass-checked safe reference
+  // (LANG-002). Symmetric to the `!T` branch just above: its own
+  // leading-token branch, ahead of the primitive/identifier dispatch below,
+  // recursing into ParseType() for the pointee. Unambiguous with the binary
+  // bitwise-AND operator ('&') and the unary address-of operator (also '&')
+  // since both of those are parsed entirely inside EXPRESSION parsing --
+  // ParseType() is a wholly separate function only ever called from type
+  // positions. The one-token '?' lookahead right after '&' is similarly
+  // unambiguous: '?' has no other meaning anywhere in this grammar.
   if (CurTok == '&') {
     getNextToken(); // consume '&'
+    bool IsNullable = false;
+    if (CurTok == '?') {
+      IsNullable = true;
+      getNextToken(); // consume '?'
+    }
     TurfTypePtr Pointee = ParseType();
     if (!Pointee)
       return nullptr;
+    if (IsNullable)
+      return std::make_shared<TurfNullableReferenceType>(std::move(Pointee));
     return std::make_shared<TurfReferenceType>(std::move(Pointee));
   }
 

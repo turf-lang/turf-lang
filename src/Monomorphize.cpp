@@ -74,6 +74,18 @@ TurfTypePtr substituteConcreteTypes(
               ? Ty
               : std::make_shared<TurfReferenceType>(NewPointee);
   }
+  // Same bug class, same fix, for `&?T` (LANG-002). TurfNullableReferenceType
+  // is a SIBLING of TurfReferenceType (both direct TurfPointerType
+  // subclasses -- see its own doc comment, Types.h), so the check just above
+  // does not catch it; without this it would fall through to the generic
+  // TurfPointerType branch below and silently turn every substituted
+  // generic `&?T` into `T*`.
+  if (const auto *NRT = dynamic_cast<const TurfNullableReferenceType *>(Ty.get())) {
+    TurfTypePtr NewPointee = substituteConcreteTypes(NRT->getPointee(), Subst);
+    return NewPointee == NRT->getPointee()
+              ? Ty
+              : std::make_shared<TurfNullableReferenceType>(NewPointee);
+  }
   if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty.get())) {
     TurfTypePtr NewPointee = substituteConcreteTypes(PT->getPointee(), Subst);
     return NewPointee == PT->getPointee()

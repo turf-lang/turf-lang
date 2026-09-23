@@ -301,11 +301,15 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
     return true;
 
   // Rule 1: null is only compatible with pointer-like types (ptr,
-  // void*, T*). It must NEVER be compatible with plain numerics, bool, or
-  // string. A `&T` safe reference (issue #238) is deliberately EXCLUDED
+  // void*, T*, &?T). It must NEVER be compatible with plain numerics, bool,
+  // or string. A `&T` safe reference (issue #238) is deliberately EXCLUDED
   // here even though isPointer() is true for it (inherited from
   // TurfPointerType) -- `&T`'s whole point is a compiler-guaranteed
-  // non-null contract, so `null` must never be assignable to it.
+  // non-null contract, so `null` must never be assignable to it. `&?T`
+  // (LANG-002) is the opposite case -- nullability IS its whole point --
+  // and needs no separate clause here: it's `isPointer() && !isReference()`
+  // (isReference() stays false for it, see TurfNullableReferenceType's own
+  // doc comment), so this existing check already accepts it unchanged.
   auto isPointerLikeStrict = [](const TurfType *T) {
     return (T->isPointer() && !T->isReference()) ||
            T->isNamed("ptr") || T->isNamed("void*");
@@ -347,6 +351,28 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
     if (!To->isReference()) {
       if (const auto *ToPtr = dynamic_cast<const TurfPointerType *>(To)) {
         if (FromRef->getPointee()->isEquivalent(ToPtr->getPointee().get()))
+          return true;
+      }
+    }
+  }
+
+  // Rule 2.6 (LANG-002): a NULLABLE safe reference (&?T) also widens
+  // implicitly into a concrete raw pointer of an equivalent pointee type --
+  // this is Rule 2.5's identical reasoning (the LLVM value never changes,
+  // widening to raw is always sound) applied to the OTHER safe-reference
+  // kind. Needs its OWN rule rather than falling under Rule 2.5 above
+  // because TurfNullableReferenceType is a SIBLING of TurfReferenceType, not
+  // a subclass of it (see that class's own doc comment, Types.h) --
+  // `dynamic_cast<const TurfReferenceType *>` does NOT match a `&?T` value.
+  // `&T -> &?T` (the OTHER new direction LANG-002 introduces) needs no rule
+  // here at all: `&?T` is itself `!isReference()`, so it already satisfies
+  // Rule 2.5's existing `!To->isReference()` guard as a target, and
+  // `dynamic_cast<TurfPointerType*>(To)` already matches it (TurfPointerType
+  // is `&?T`'s own base) -- Rule 2.5 widens `&T -> &?T` correctly, unchanged.
+  if (const auto *FromNRef = dynamic_cast<const TurfNullableReferenceType *>(From)) {
+    if (!To->isReference() && !To->isNullableReference()) {
+      if (const auto *ToPtr = dynamic_cast<const TurfPointerType *>(To)) {
+        if (FromNRef->getPointee()->isEquivalent(ToPtr->getPointee().get()))
           return true;
       }
     }

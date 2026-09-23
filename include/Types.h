@@ -21,6 +21,8 @@
  *   ├─ NamedType              — user-defined struct names and legacy fallback
  *   ├─ ArrayType              — T[]  /  T[N]
  *   ├─ TurfPointerType        — T*   (pass-by-reference / self)
+ *   │   ├─ TurfReferenceType         — &T   (compiler-guaranteed non-null)
+ *   │   └─ TurfNullableReferenceType — &?T  (nullable, NullabilityPass-checked; LANG-002)
  *   ├─ TurfGenericParamType   — open generic parameter (e.g. T in fn<T>)
  *   ├─ GenericType            — closed generic instantiation (e.g. map<K,V>)
  *   ├─ TurfStructType         — user-defined aggregate type
@@ -118,6 +120,20 @@ public:
   /// that need to tell the two apart (typesCompatible(), the `unsafe`
   /// gate) do so without dynamic_cast.
   virtual bool isReference() const { return false; }
+
+  /// True if this type is a `TurfNullableReferenceType` (`&?T`, LANG-002).
+  /// Deliberately a SIBLING of TurfReferenceType (both direct
+  /// TurfPointerType subclasses), not a further subclass of it -- `&?T`
+  /// does NOT carry `&T`'s non-null contract, so isReference() stays FALSE
+  /// for it (see TurfNullableReferenceType's own doc comment for why this
+  /// makes the existing `&T`-widening typesCompatible() rules, and the
+  /// `unsafe` gate's raw-pointer exemption, apply to `&?T` for free without
+  /// implying a false non-null guarantee). Consulted by typesCompatible()
+  /// (null-compatibility, the `&?T -> T*` widening rule) and by
+  /// TypeChecker::isRawPointer() (both safe reference kinds are exempt from
+  /// the `unsafe` gate -- `&?T`'s own safety is enforced by a SEPARATE
+  /// mechanism, NullabilityPass, not the raw-pointer gate).
+  virtual bool isNullableReference() const { return false; }
 
   /// True if this type is a `TurfStructType`.
   virtual bool isStruct() const { return false; }
@@ -485,6 +501,70 @@ public:
   }
 
   bool isReference() const override { return true; }
+};
+
+// ─── TurfNullableReferenceType ───────────────────────────────────────────────
+
+/**
+ * @brief Compiler-checked NULLABLE reference: `&?T` (LANG-002).
+ *
+ * Closes the gap `&T` deliberately leaves open: a `&T` can never be null,
+ * so it cannot represent "no next node" and user code had no safe way to
+ * write a linked list (only `T*`, gated behind `unsafe { }` and banned
+ * outright from ordinary function signatures). `&?T` is the answer --
+ * `null` is assignable to it, and a `NullabilityPass` (Analysis.h) requires
+ * a direct-comparison null check (`p != null` / `p == null`) before a
+ * `&?T`-typed variable may be field-accessed, tracked per-variable over the
+ * function's CFG.
+ *
+ * A SIBLING of TurfReferenceType, not a subclass of it -- both are direct
+ * TurfPointerType subclasses. This is deliberate: `&?T` does NOT carry
+ * `&T`'s "always non-null" contract, so `isReference()` stays FALSE for it
+ * (only `isNullableReference()` is true). That single choice makes the
+ * EXISTING pointer-widening rules apply to `&?T` correctly with no further
+ * changes:
+ *   - typesCompatible()'s null-compatibility rule (`isPointer() &&
+ *     !isReference()`) already accepts `&?T` as a null target, unchanged.
+ *   - typesCompatible()'s Rule 2 (`ptr`/`void*` <-> `T*` coercion) already
+ *     treats `&?T` like a plain raw pointer for widening TO opaque, unchanged.
+ *   - typesCompatible()'s Rule 2.5 (`&T` widens to a concrete `T2*`) already
+ *     matches `&?T` as a valid TARGET (its `!To->isReference()` guard is
+ *     true for `&?T`), so `&T -> &?T` widens implicitly for free.
+ * Only ONE new typesCompatible() rule is needed: `&?T -> T2*` (widening a
+ * nullable reference to a concrete raw pointer, always sound -- the LLVM
+ * value doesn't change), mirroring Rule 2.5 but keyed on
+ * TurfNullableReferenceType instead of TurfReferenceType, since `dynamic_
+ * cast<TurfReferenceType*>` does NOT match a sibling class.
+ *
+ * The reverse, narrowing direction (`&?T -> &T`) is deliberately NEVER
+ * granted by typesCompatible() -- LANG-002's own "Must NOT reinterpret"
+ * list: "`&T` stays non-null -- do not merge the two types." The ONLY way
+ * to bridge that direction is an explicit `p to &T` cast (already
+ * syntactically legal via the existing pointer-like cast bucket in
+ * TypeCheckerExpr.cpp's visitCast(), no `unsafe` required since neither
+ * side is a raw pointer), whose SOUNDNESS -- was `p` actually narrowed
+ * non-null at this exact cast site -- is verified by NullabilityPass at
+ * Codegen time, not by the TypeChecker (which has no flow information).
+ *
+ * At the LLVM level `&?T` is representationally IDENTICAL to `&T`/`T*`
+ * (an opaque pointer) -- `isPointer()` is inherited (true), so every
+ * existing Codegen `dynamic_cast<TurfPointerType*>` call site (auto-deref
+ * field access, argument passing, GEP) handles it for free, zero Codegen
+ * changes, same as `&T` before it.
+ */
+class TurfNullableReferenceType : public TurfPointerType {
+public:
+  explicit TurfNullableReferenceType(TurfTypePtr Pointee)
+      : TurfPointerType(std::move(Pointee)) {}
+
+  std::string getName() const override {
+    return "&?" + getPointee()->getName();
+  }
+  std::string getMangledName() const override {
+    return getPointee()->getMangledName() + "_nref";
+  }
+
+  bool isNullableReference() const override { return true; }
 };
 
 // ─── TurfGenericParamType ────────────────────────────────────────────────────
