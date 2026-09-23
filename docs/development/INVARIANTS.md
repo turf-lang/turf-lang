@@ -60,7 +60,14 @@ built the thing enforcing it, and that session demonstrates it — per
 
 | ID | Invariant | Enforced by | Status |
 |---|---|---|---|
-| **INV-CAP-1** | No capability is granted by file path. | A declared module-level capability + `--allow-unsafe-modules` (LANG-002/STD-001) | `planned` — **LANG-002/STD-001**. Today `isUnsafeGateExempt()` returns true for anything under `lib/std`. |
+| **INV-CAP-1** | No capability is granted by file path. | A declared module-level capability (`unsafe module;`) + `--allow-unsafe-modules` outside the install root (LANG-002/STD-001) | `holds` — **LANG-002**, landed 2026-09-23. `IsPathUnderLibStd()` no longer exists; `HasRawPointerCapability()` (`ParserModule.cpp`) requires the file to have parsed a leading `unsafe module;` pragma, full stop — location only decides whether `--allow-unsafe-modules` is ALSO required. Verified live: temporarily removing `unsafe module;` from `mem.tr` during development reproduced the raw-pointer-signature error on `alloc`'s `void*` return, confirming the old blanket path-based exemption is genuinely gone. See `docs/development/changes/LANG-002.md`'s *Known pitfalls* for one caveat on testing the location half of this from inside this repo's own checkout. |
+
+## Nullable references
+
+| ID | Invariant | Enforced by | Status |
+|---|---|---|---|
+| **INV-NREF-1** | A `&?T`'s field/member access is never gated by `unsafe { }` (it isn't a raw pointer); its safety is checked, not merely permitted-or-not. | `isRawPointer()` (`TypeChecker.h`) excludes `isNullableReference()` unconditionally; `NullabilityPass` (`Analysis.cpp`) is the sole enforcement point for whether a SPECIFIC access is sound | `holds` — **LANG-002**, landed 2026-09-23. Verified live: `tests/39_nullable_references/fail_deref_without_check.tr` (E081, rejected) vs. `01_linked_list.tr`/`03_narrowing_shapes.tr` (narrowed, compiles and runs). |
+| **INV-NREF-2** | `&?T -> &T` is never implicit, in either direction, permanently. | `typesCompatible()` (`Types.cpp`) has no rule for this pair; the only bridge is an explicit `p to &T` cast, itself checked by `NullabilityPass`, not `checkUnsafeGate` | `holds` — **LANG-002**, landed 2026-09-23. Verified live: `mut r: &T = p;` (bare assignment, `p: &?T`) is `E066` regardless of narrowing; `fail_cast_without_narrowing.tr` (E082) vs. `04_narrowed_cast.tr` (narrowed cast, compiles and runs). |
 
 ## Code generation
 

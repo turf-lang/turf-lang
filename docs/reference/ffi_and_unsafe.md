@@ -220,8 +220,33 @@ mutable ref: &int = &val; // &expr always produces &T
 
 ### A realistic example — linked list
 
-`&T` can't represent a genuinely-nullable "next" pointer, which is exactly
-why `T*` still exists alongside it:
+`&T` can't represent a genuinely-nullable "next" pointer — that's what
+`&?T` (LANG-002) is for, and it needs no `unsafe {}` at all:
+
+```turflang
+struct Node { val: int, next: &?Node } // next is genuinely nullable
+
+fn Node.new(val: int): void {
+    self.val = val;
+    self.next = null;   // plain field write
+}
+
+fn sum_list(head: &?Node): int {
+    mutable current: &?Node = head;
+    mutable total: int = 0;
+    while (current != null) {          // narrows `current` to non-null...
+        total = total + current.val;   // ...so this compiles
+        current = current.next;
+    }
+    return total;
+}
+```
+
+`raw`/`T*` still work for this too (see §5's `Node*` version below), but
+`&?T` is the safe, checked, idiomatic choice — reach for `T*` only when a
+raw, unchecked pointer is genuinely what you need (usually: FFI).
+
+### Raw-pointer version, for comparison
 
 ```turflang
 unsafe {
@@ -253,9 +278,29 @@ fn sum_list(head: &Node): int {
 
 | Type | Spelling | Nullable | Pointee known | Legal where |
 |---|---|---|---|---|
-| Opaque pointer | `ptr` | yes | no | inside `unsafe {}`, or anywhere under the standard library |
-| Typed raw pointer | `T*` | yes | yes | inside `unsafe {}`, or anywhere under the standard library |
+| Opaque pointer | `ptr` | yes | no | inside `unsafe {}`, or in a file that declares the raw-pointer capability (§4a) |
+| Typed raw pointer | `T*` | yes | yes | inside `unsafe {}`, or in a file that declares the raw-pointer capability (§4a) |
 | Safe reference | `&T` | no | yes | anywhere |
+| Nullable safe reference | `&?T` | yes, checked | yes | anywhere |
+
+### §4a. The raw-pointer capability (LANG-002/STD-001)
+
+A file's own first top-level statement may be:
+
+```turflang
+unsafe module;
+```
+
+This grants the file every raw-pointer use §4's table lists, without
+wrapping each one in `unsafe {}` — exactly what `lib/std`'s own modules do.
+It's honored unconditionally for files under the compiler's resolved
+install root (that's how `lib/std` gets it for free); anywhere else, it
+also needs the `--allow-unsafe-modules` CLI flag, so a plain `turf
+myfile.tr` never silently grants a capability nobody asked for. This is
+also what makes a C callback possible from user code — `fn cmpints(a: ptr,
+b: ptr): int32` (what `qsort`'s comparator needs) is otherwise rejected in
+*any* non-`extern` function's signature, unconditionally, `unsafe {}` or
+not.
 
 ### The four gated uses
 

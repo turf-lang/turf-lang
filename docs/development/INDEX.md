@@ -19,6 +19,7 @@ record does; `status` tracks the record, not the branch.
 | SEM-004 | Unified initialization | landed | 2026-09-20 | 2026-09-20 | Parser, AST, Analysis (CFG), diagnostics, stdlib, tests | [SEM-004](changes/SEM-004.md) |
 | TYPE-002 | Monomorphization (the keystone) | landed | 2026-09-21 | 2026-09-22 | Resolver, TypeChecker, new Monomorphizer pass, Codegen, symbol tables, driver, stdlib | [TYPE-002](changes/TYPE-002.md) |
 | LANG-001 | Operator system completion | landed | 2026-09-23 | 2026-09-23 | Lexer, Parser, Resolver, TypeChecker, Codegen, stdlib | [LANG-001](changes/LANG-001.md) |
+| LANG-002 | Nullable references `&?T` and declared capabilities | landed | 2026-09-23 | 2026-09-23 | Parser, Types, Resolver, Monomorphize, TypeChecker, Analysis (CFG), driver, stdlib | [LANG-002](changes/LANG-002.md) |
 
 ## How to use this directory
 
