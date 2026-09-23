@@ -75,6 +75,13 @@ built the thing enforcing it, and that session demonstrates it — per
 |---|---|---|---|
 | **INV-CG-1** | No GEP is built against a struct type whose `setBody()` has not run. | An assertion at GEP construction in `CodegenStruct.cpp` — **not** by relying on `main.cpp`'s pre-pass ordering | `planned` — the original bug is fixed, but the hazard is still only prevented by pass ordering. |
 
+## Cleanup and `defer`
+
+| ID | Invariant | Enforced by | Status |
+|---|---|---|---|
+| **INV-DEFER-1** | A panic (an out-of-bounds access, division by zero, an integer overflow trap, a failed `test::assert`, …) never runs a pending `defer` — TurfLang has no unwinding. | Structural: every panic path lowers via `abort()`/a runtime trap call, never through `ReturnExprAST`/`BreakExprAST`/`ContinueExprAST::codegen()` — the only three places `FlushPendingDefers()` (`CodegenControlFlow.cpp`) is ever called | `holds` — **LANG-003**, landed 2026-09-24. Verified live: `tests/40_defer/fail_defer_skipped_on_panic.tr` — a `defer io::printline("DEFERRED_RAN");` registered before a deliberately-failing `test::assert()` — compiles, then aborts (exit 134) printing only the assertion's own failure message, never `DEFERRED_RAN`. |
+| **INV-DEFER-2** | A deferred statement may never itself `return`, `break`, or `continue` past the `defer` — such a jump always escapes to the enclosing function/loop, never "just" the defer, so it is rejected outright at compile time. A `break`/`continue` absorbed by a loop that itself begins INSIDE the deferred statement is unaffected (it never escapes the defer to begin with). | `FindEscapingControlFlow()` (`ResolverStmt.cpp`), raising `DeferControlFlowError` (E083) from `Resolver::visitDefer()` | `holds` — **LANG-003**, landed 2026-09-24. Verified live: `tests/40_defer/fail_return_in_defer.tr`/`fail_break_in_defer.tr` (both rejected, E083) vs. `tests/40_defer/06_defer_wraps_loop_break_absorbed.tr` (a `break` inside a `while` that itself is the deferred statement — compiles and runs). |
+
 ## Optimization
 
 | ID | Invariant | Enforced by | Status |

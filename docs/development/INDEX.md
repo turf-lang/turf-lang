@@ -20,6 +20,7 @@ record does; `status` tracks the record, not the branch.
 | TYPE-002 | Monomorphization (the keystone) | landed | 2026-09-21 | 2026-09-22 | Resolver, TypeChecker, new Monomorphizer pass, Codegen, symbol tables, driver, stdlib | [TYPE-002](changes/TYPE-002.md) |
 | LANG-001 | Operator system completion | landed | 2026-09-23 | 2026-09-23 | Lexer, Parser, Resolver, TypeChecker, Codegen, stdlib | [LANG-001](changes/LANG-001.md) |
 | LANG-002 | Nullable references `&?T` and declared capabilities | landed | 2026-09-23 | 2026-09-23 | Parser, Types, Resolver, Monomorphize, TypeChecker, Analysis (CFG), driver, stdlib | [LANG-002](changes/LANG-002.md) |
+| LANG-003 | `defer` | landed | 2026-09-24 | 2026-09-24 | Lexer, Parser, AST, Resolver, TypeChecker, Analysis (CFG), Codegen, diagnostics | [LANG-003](changes/LANG-003.md) |
 
 ## How to use this directory
 

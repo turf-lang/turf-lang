@@ -1,6 +1,6 @@
 # Control Flow
 
-Reference for Turflang's control-flow constructs: `if`/`elseif`/`else`, the `give`/`otherwise` ternary, `while`, `do`/`while`, `for` (range and for-each forms), `break`/`continue`, and `compare`/`matches`/`otherwise`.
+Reference for Turflang's control-flow constructs: `if`/`elseif`/`else`, the `give`/`otherwise` ternary, `while`, `do`/`while`, `for` (range and for-each forms), `break`/`continue`, `defer`, and `compare`/`matches`/`otherwise`.
 
 Conditions in every construct below are bare expressions — no parentheses required (though parentheses are accepted for grouping, e.g. `while (x > 0)`).
 
@@ -198,6 +198,62 @@ for i in 0..10 step i += 1 {
 ```
 
 `break`/`continue` work identically inside for-each loops, including nested combinations of range-`for`, for-each, `while`, and `do`/`while`.
+
+---
+
+## `defer`
+
+`defer <statement>;` registers a statement to run when the **enclosing `{ }` block** exits — not the enclosing function. It runs on every exit path out of that block: falling off the end normally, `return`, `break`, and `continue` alike.
+
+```turflang
+fn readConfig(path: string): int {
+    mut f: File = fs::open(path);
+    defer fs::close(f);
+
+    if (!fs::exists(path)) {
+        return -1;   // fs::close(f) still runs before this return completes
+    }
+
+    return fs::readInt(f);
+}
+```
+
+This is Turflang's mechanism for deterministic cleanup of things a garbage collector must never manage on its own — file descriptors, sockets, manual allocations (`mem::free`).
+
+- **Block-scoped, not function-scoped.** A `defer` inside a loop body's `{ }` runs once **per iteration**, not once for the whole function:
+
+  ```turflang
+  mut i: int = 0;
+  while (i < 3) {
+      defer io::printline("iteration end");   // prints 3 times, once per pass through the loop body
+      i = i + 1;
+  }
+  ```
+
+- **Reverse (LIFO) order.** Multiple `defer` statements in the same block run in the opposite order they were registered — the last one written runs first:
+
+  ```turflang
+  defer io::printline("1");
+  defer io::printline("2");
+  defer io::printline("3");
+  // prints: 3, 2, 1
+  ```
+
+- **Nesting.** Exiting several nested blocks at once (e.g. a `return` three blocks deep) runs every enclosing block's own pending `defer`s, innermost block first.
+
+- **A deferred statement may not itself `return`, `break`, or `continue`.** There is no way for such a jump to target "just the defer" — it would always escape to the enclosing function or loop, which is never what it looks like from the call site. This is rejected at compile time:
+
+  ```turflang
+  defer return 5;   // ERROR: a deferred statement can't 'return'
+  ```
+
+  A `break`/`continue` **inside a loop that itself begins inside the deferred statement** is fine — it's absorbed by that inner loop and never escapes the `defer` at all:
+
+  ```turflang
+  defer while (cond) { if (done) { break; } };   // OK -- the break only exits this inner while
+  ```
+
+- **A panic does not run deferred statements.** Turflang has no unwinding — a panic (an out-of-bounds access, a division by zero, an integer overflow trap, a failed `test::assert`, …) aborts the process immediately. This is the main semantic difference from Go's `defer`, where a reader familiar with that language should not assume cleanup runs on a crash path here.
 
 ---
 

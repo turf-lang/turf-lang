@@ -9,7 +9,7 @@ For internals — how the compiler actually implements any of this (stack vs. he
 **Core language**
 1. [Variables & Types](variables_and_types.md) — declarations, primitive types, literals, casting
 2. [Operators](operators.md) — arithmetic, comparison, logical, bitwise, the `give`/`otherwise` ternary
-3. [Control Flow](control_flow.md) — `if`, `while`, `do`/`while`, `for`, `compare`
+3. [Control Flow](control_flow.md) — `if`, `while`, `do`/`while`, `for`, `defer`, `compare`
 4. [Error Handling](error_handling.md) — `error` types, `!T` unions, `recover`, `assert`/`fail`
 
 **Structuring programs**
