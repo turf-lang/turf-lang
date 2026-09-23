@@ -60,13 +60,20 @@ std::unique_ptr<ExprAST> Parse();
 // to load (these are compiler-shipped files expected to always exist).
 std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc);
 
-// True if @p Path (canonicalized) falls under this install's `lib/std`
-// tree -- the `unsafe { }` gate's trust boundary (issue #238). See its
-// definition in ParserModule.cpp for the full rationale; exported here
-// (rather than kept file-local like TurfInstallRoot()) specifically so
-// TypeChecker.cpp's gate checks can call it without linking against
-// llvm::sys::fs directly.
-bool IsPathUnderLibStd(const std::string &Path);
+// LANG-002/STD-001: true if @p Path declared the raw-pointer capability
+// (`unsafe module;`) AND that declaration is actually honored -- the
+// `unsafe { }` gate's trust boundary, replacing the old, purely path-based
+// IsPathUnderLibStd() (issue #238). See its definition in ParserModule.cpp
+// for the full rationale; exported here (rather than kept file-local like
+// TurfInstallRoot()) specifically so TypeChecker.cpp's gate checks can call
+// it without linking against llvm::sys::fs directly.
+bool HasRawPointerCapability(const std::string &Path);
+
+// LANG-002: checks for and consumes a leading `unsafe module;` capability
+// pragma at the current token position. See its definition in
+// ParserModule.cpp for the full contract (when to call it, and what to do
+// with @p OutBlock when it returns false).
+bool ParseLeadingUnsafeModuleDecl(std::unique_ptr<ExprAST> &OutBlock);
 
 // Resolves a bare module name (e.g. "net") to the physical `.tr` file a real
 // `import net;` would load -- the same stdlib -> usr-package ->

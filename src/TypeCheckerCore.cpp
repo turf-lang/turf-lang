@@ -148,7 +148,7 @@ bool TypeChecker::isUnsafeGateExempt(const SourceLocation &Loc,
     return true;
   if (Node && WasDeclaredInsideTopLevelUnsafe(Node))
     return true;
-  return IsPathUnderLibStd(Loc.Filename);
+  return HasRawPointerCapability(Loc.Filename);
 }
 
 
@@ -177,7 +177,7 @@ bool TypeChecker::checkUnsafeGate(const TurfType *T, SourceLocation Loc,
 
 
 void TypeChecker::checkNoRawPointersInSignature(const FuncDefExprAST &Node) {
-  if (IsPathUnderLibStd(Node.getLoc().Filename))
+  if (HasRawPointerCapability(Node.getLoc().Filename))
     return;
   for (const auto &Param : Node.getParams()) {
     // The implicit `self` parameter (ParserDecl.cpp's ParseFuncDef()) is

@@ -193,6 +193,14 @@ struct ParseRecursionGuard {
 // When true, the SLM is loaded and AI suggestions are generated for errors.
 // Controlled by the --smart CLI flag. Default is off for deterministic output.
 extern bool g_AIEnabled;
+// LANG-002: when true, a file OUTSIDE the resolved install root may still
+// declare the raw-pointer capability (`unsafe module;`, HasRawPointerCapability()
+// in ParserModule.cpp) -- controlled by the --allow-unsafe-modules CLI flag.
+// A file UNDER the install root never needs this flag: see
+// HasRawPointerCapability()'s own doc comment for the full rule. Default off,
+// same reasoning as g_AIEnabled -- a capability that broadens what raw
+// pointers can do must be an explicit, visible opt-in, never ambient.
+extern bool g_AllowUnsafeModules;
 extern std::string SourceFilename;
 // The original top-level file passed to the compiler -- see its definition
 // in Lexer.cpp for why this is distinct from SourceFilename.

@@ -260,10 +260,15 @@ std::unique_ptr<ExprAST> ParseWhileExpr() {
 // calls this directly and then FLATTENS the result -- see that call site's
 // own comment for why a top-level unsafe-wrapped struct/fn decl can't stay
 // wrapped in a real nested AST node.
-std::unique_ptr<ExprAST> ParseUnsafeExpr() {
-  SourceLocation KeywordLoc = CurLoc;
-  getNextToken(); // consume 'unsafe'
-
+// The part of ParseUnsafeExpr() that runs AFTER 'unsafe' has already been
+// consumed -- split out so ParseLeadingUnsafeModuleDecl() (ParserModule.cpp,
+// LANG-002) can share it. That function has to consume 'unsafe' itself (this
+// parser only ever has one token of lookahead, so telling `unsafe module;`
+// apart from `unsafe { ... }` requires looking PAST 'unsafe' first) and,
+// once it determines this ISN'T the `unsafe module;` capability pragma,
+// needs to finish parsing an ordinary block from exactly this point without
+// re-consuming 'unsafe' a second time.
+std::unique_ptr<ExprAST> ParseUnsafeBlockBody(SourceLocation KeywordLoc) {
   if (CurTok != '{') {
     LogErrorAt(KeywordLoc,
                "Expected '{' to open an unsafe block."
@@ -276,6 +281,12 @@ std::unique_ptr<ExprAST> ParseUnsafeExpr() {
     return nullptr;
 
   return std::make_unique<UnsafeBlockExprAST>(KeywordLoc, std::move(Body));
+}
+
+std::unique_ptr<ExprAST> ParseUnsafeExpr() {
+  SourceLocation KeywordLoc = CurLoc;
+  getNextToken(); // consume 'unsafe'
+  return ParseUnsafeBlockBody(KeywordLoc);
 }
 
 // ParseDoWhileExpr - parses:

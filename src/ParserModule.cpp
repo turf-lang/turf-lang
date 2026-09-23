@@ -386,6 +386,17 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
 
   std::vector<std::unique_ptr<ExprAST>> Exprs;
 
+  // LANG-002: a file's very first top-level statement may be the
+  // `unsafe module;` capability pragma -- must be checked here, before the
+  // ordinary loop below, since it's the ONLY point in this function that
+  // sees this file's first real token (see ParseLeadingUnsafeModuleDecl()'s
+  // own doc comment).
+  {
+    std::unique_ptr<ExprAST> LeadingUnsafeBlock;
+    if (!ParseLeadingUnsafeModuleDecl(LeadingUnsafeBlock) && LeadingUnsafeBlock)
+      AppendFlattenedTopLevelDecl(std::move(LeadingUnsafeBlock), Exprs, false);
+  }
+
   // Parse the file
   while (true) {
     if (CurTok == TOK_EOF)
@@ -496,46 +507,122 @@ static std::string TurfInstallRoot() {
   return Root.str().str();
 }
 
-// The `unsafe { }` gate's trust boundary (issue #238, FINAL_SPRINT.md's
-// Track A "Resolved" section): the entire `lib/std` tree is exempt --
-// mem.tr/net.tr/list.tr/etc. keep using ptr/T*/void* exactly as they do
-// today, no migration needed. Used by TypeChecker::isUnsafeGateExempt()
-// via this exported wrapper so the TypeChecker doesn't need to depend on
-// llvm::sys::fs itself (its header is deliberately kept LLVM-free -- see
-// TypeChecker.h's own doc comment). Reuses the exact same
-// TurfInstallRoot()/real_path() primitives ParsePreludeImports()'s
-// self-import-skip check above already relies on, so this can't disagree
-// with real module resolution about where `lib/std` physically lives.
-//
-// A path that can't be resolved (e.g. a synthesized AST node with an empty
-// SourceLocation.Filename) is conservatively NOT considered lib/std --
-// correct, since only a real, on-disk lib/std/*.tr file should ever be
-// exempt from the gate. The prefix check requires a path-separator
-// boundary right after the lib/std root so a sibling directory that merely
-// STARTS WITH the same characters (e.g. a hypothetical "lib/std2") can
-// never false-match.
-bool IsPathUnderLibStd(const std::string &Path) {
+// True if canonicalized `Path` falls under canonicalized `Root` -- shared
+// prefix-match helper behind both IsPathUnderInstallRoot() below and (until
+// LANG-002 replaced it) the old lib/std-specific IsPathUnderLibStd(). A path
+// that can't be resolved (e.g. a synthesized AST node with an empty
+// SourceLocation.Filename) is conservatively NOT considered a match. The
+// prefix check requires a path-separator boundary right after `Root` so a
+// sibling directory that merely STARTS WITH the same characters (e.g. a
+// hypothetical "lib/std2") can never false-match.
+static bool IsPathUnderDir(const std::string &Path, const std::string &Root) {
   if (Path.empty())
     return false;
-
   llvm::SmallString<256> CanonicalPath;
   if (llvm::sys::fs::real_path(Path, CanonicalPath))
     return false;
-
-  llvm::SmallString<256> StdDir(TurfInstallRoot());
-  llvm::sys::path::append(StdDir, "lib", "std");
-  llvm::SmallString<256> CanonicalStdDir;
-  if (llvm::sys::fs::real_path(StdDir, CanonicalStdDir))
+  llvm::SmallString<256> CanonicalRoot;
+  if (llvm::sys::fs::real_path(Root, CanonicalRoot))
     return false;
-
   std::string P = CanonicalPath.str().str();
-  std::string S = CanonicalStdDir.str().str();
-  if (P.size() < S.size() || P.compare(0, S.size(), S) != 0)
+  std::string R = CanonicalRoot.str().str();
+  if (P.size() < R.size() || P.compare(0, R.size(), R) != 0)
     return false;
-  if (P.size() == S.size())
+  if (P.size() == R.size())
     return true;
-  char Sep = P[S.size()];
+  char Sep = P[R.size()];
   return Sep == '/' || Sep == '\\';
+}
+
+// LANG-002 (STD-001): true if `Path` (canonicalized) falls under this
+// install's resolved root (`TurfInstallRoot()` -- the same anchor `import`
+// already uses). Generalizes the old, lib/std-SPECIFIC IsPathUnderLibStd():
+// the raw-pointer capability is no longer a `lib/std`-only privilege (any
+// file under the install root, e.g. a future `lib/usr` package, may declare
+// it too), and -- unlike the mechanism it replaces -- being under the
+// install root is no longer SUFFICIENT on its own; see
+// HasRawPointerCapability() below for the actual gate.
+static bool IsPathUnderInstallRoot(const std::string &Path) {
+  return IsPathUnderDir(Path, TurfInstallRoot());
+}
+
+// LANG-002/STD-001: files that parsed a leading `unsafe module;` capability
+// pragma (ParseLeadingUnsafeModuleDecl() below), keyed by the SAME
+// real_path()-canonicalized form HasRawPointerCapability() queries with, so
+// registration and lookup can never disagree over path spelling
+// (relative-vs-absolute, symlinks, "./"). Re-registering the same file
+// across the pre-pass/main-pass/import re-parses this compiler does is
+// harmless (std::set::insert on an existing key is a no-op) -- see
+// ParseFile()'s own comment on why a file's content can be parsed more than
+// once in a single compile.
+static std::set<std::string> UnsafeModuleFiles;
+
+static std::string CanonicalOrOriginal(const std::string &Path) {
+  llvm::SmallString<256> Canonical;
+  if (llvm::sys::fs::real_path(Path, Canonical))
+    return Path; // unresolvable (e.g. a synthesized node) -- fall back as-is
+  return Canonical.str().str();
+}
+
+// LANG-002 (STD-001): the raw-pointer capability's trust boundary, replacing
+// the old, purely path-based IsPathUnderLibStd() (issue #238). A privilege
+// that used to be invisible in the file that used it, ungreppable, and
+// unavailable to a user writing legitimate FFI bindings is now: DECLARED IN
+// SOURCE (a first-line `unsafe module;`, ParseLeadingUnsafeModuleDecl()
+// below) and, for that declaration to actually be honored, EITHER the file
+// is under the resolved install root (lib/std/**, unconditionally -- a
+// plain dev build needs no extra flag) OR the `--allow-unsafe-modules` CLI
+// flag was passed (g_AllowUnsafeModules, Lexer.h) -- a user's own FFI
+// bindings get the identical capability lib/std has, just opt-in rather
+// than ambient. Consulted by TypeChecker::isUnsafeGateExempt() and
+// checkNoRawPointersInSignature() (TypeCheckerCore.cpp) via this exported
+// wrapper so the TypeChecker doesn't need to depend on llvm::sys::fs itself
+// (its header is deliberately kept LLVM-free).
+bool HasRawPointerCapability(const std::string &Path) {
+  if (Path.empty())
+    return false;
+  if (!UnsafeModuleFiles.count(CanonicalOrOriginal(Path)))
+    return false;
+  return IsPathUnderInstallRoot(Path) || g_AllowUnsafeModules;
+}
+
+// LANG-002: called as the very first thing after a top-level parse loop's
+// initial getNextToken() (ParseFile() below; main.cpp's two mirrored
+// loops), i.e. only ever sees a file's FIRST real token. Checks for and
+// consumes a leading `unsafe module;` capability pragma.
+//
+// This parser has exactly one token of lookahead, so telling `unsafe
+// module;` apart from an ordinary top-level `unsafe { ... }` block requires
+// consuming 'unsafe' FIRST and looking at what follows -- there's no way to
+// peek past it non-destructively. Two outcomes follow:
+//   - It WAS `unsafe module;`: consumes 'module' and ';', registers the
+//     capability for the CURRENT SourceFilename, and returns true. The
+//     caller's own top-level loop should just proceed -- there's no AST
+//     node to append for a pragma.
+//   - CurTok was TOK_UNSAFE but this ISN'T that shape (a genuine top-level
+//     `unsafe { struct/fn/... }`): 'unsafe' has already been consumed, so
+//     this finishes parsing the block itself via the shared
+//     ParseUnsafeBlockBody() helper (see its own doc comment,
+//     ParserStmt.cpp) and hands the result back through `OutBlock`, exactly
+//     as if the caller had called ParseExpression() itself. Returns false.
+//   - CurTok is anything else: no-op. Returns false, `OutBlock` untouched.
+bool ParseLeadingUnsafeModuleDecl(std::unique_ptr<ExprAST> &OutBlock) {
+  if (CurTok != TOK_UNSAFE)
+    return false;
+  SourceLocation KeywordLoc = CurLoc;
+  getNextToken(); // consume 'unsafe'
+  if (CurTok == TOK_IDENTIFIER && IdentifierStr == "module") {
+    getNextToken(); // consume 'module'
+    if (CurTok != ';') {
+      SyntaxError(CurLoc, "Expected ';' after 'unsafe module'").raise();
+      return true; // still: not a real unsafe-block AST for the caller
+    }
+    getNextToken(); // consume ';'
+    UnsafeModuleFiles.insert(CanonicalOrOriginal(SourceFilename));
+    return true;
+  }
+  OutBlock = ParseUnsafeBlockBody(KeywordLoc);
+  return false;
 }
 
 // Recursively indexes every "<name>.tr" file under <Root>/lib/<SubdirName>

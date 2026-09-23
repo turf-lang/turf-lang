@@ -75,6 +75,7 @@ int g_parseRecursionDepth = 0;
 
 // AI/SLM flag: only true when --smart is passed on the CLI.
 bool g_AIEnabled = false;
+bool g_AllowUnsafeModules = false;
 
 // Tracks if the SLM has generated a diagnostic this pass to suppress
 // analysis of subsequent cascading errors.

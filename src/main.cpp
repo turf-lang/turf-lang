@@ -84,6 +84,7 @@ struct CompilerOptions {
   std::string OutputName;             // default derived from input later
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
+  bool AllowUnsafeModules = false;    // --allow-unsafe-modules: LANG-002, honor `unsafe module;` outside the install root
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
   bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
   bool DumpResolverSymbols = false;   // --dump-resolver-symbols: print symbol table after resolution
@@ -252,6 +253,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.EmitLLVM = true;
     } else if (arg == "--smart") {
       opts.AIEnabled = true;
+    } else if (arg == "--allow-unsafe-modules") {
+      opts.AllowUnsafeModules = true;
     } else if (arg == "--dump-ast") {
       opts.DumpAST = true;
     } else if (arg == "--dump-instantiations") {
@@ -326,6 +329,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
            "[--dump-modules] [--dump-instantiations] [--link <libname>] "
+           "[--allow-unsafe-modules] "
            "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
            "       turf --format [--write] <filename.tr>\n"
            "       turf --explain E0NN\n";
@@ -702,6 +706,10 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
+  // LANG-002: must be set before any parsing happens -- HasRawPointerCapability()
+  // (ParserModule.cpp) consults it for every `unsafe module;` pragma outside
+  // the install root.
+  g_AllowUnsafeModules = opts.AllowUnsafeModules;
 
   // TOOL-001: must be set before InitializeModule() runs (below) -- that's
   // the one call site that decides whether DBuilder/DebugCU get built at
@@ -786,6 +794,16 @@ static int runCompilerMain(int argc, char **argv) {
       // we attempt to codegen any call sites (Issue #9: Codegen reads
       // ResolvedCallTarget blindly, so Resolver must run first).
       std::vector<std::unique_ptr<ExprAST>> PrePassASTs;
+
+      // LANG-002: the entry file's own leading `unsafe module;` capability
+      // pragma, if any -- must be checked here, immediately after the token
+      // stream reset above, the only point that sees this file's first real
+      // token (see ParseLeadingUnsafeModuleDecl()'s own doc comment).
+      {
+        std::unique_ptr<ExprAST> LeadingUnsafeBlock;
+        if (!ParseLeadingUnsafeModuleDecl(LeadingUnsafeBlock) && LeadingUnsafeBlock)
+          AppendFlattenedTopLevelDecl(std::move(LeadingUnsafeBlock), PrePassASTs, true);
+      }
 
       // Prelude auto-import (STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 6):
       // inject `import int; import double; ...` as if they were the literal
@@ -1169,6 +1187,21 @@ static int runCompilerMain(int argc, char **argv) {
   // every warning a second time for the same source line.
   std::vector<std::unique_ptr<ExprAST>> TopLevelASTs; // non-fn: lint + codegen
   std::vector<std::unique_ptr<ExprAST>> FnASTs;       // fn:     kept for Resolver/TypeChecker re-validation only
+
+  // LANG-002: re-consume the entry file's own leading `unsafe module;`
+  // pragma (if any) here too -- this is a FRESH token stream (resetLexer()
+  // above), so it sees the file's first token again just like the pre-pass
+  // did. Idempotent re-registration (see UnsafeModuleFiles' own doc
+  // comment, ParserModule.cpp); a genuine top-level unsafe BLOCK, if that's
+  // what this turns out to be instead, is pushed into FnASTs to mirror how
+  // the ordinary per-statement loop below categorizes one for this pass
+  // (already codegenned in the pre-pass; re-parsed here purely for
+  // Resolver/TypeChecker re-validation).
+  {
+    std::unique_ptr<ExprAST> LeadingUnsafeBlock;
+    if (!ParseLeadingUnsafeModuleDecl(LeadingUnsafeBlock) && LeadingUnsafeBlock)
+      AppendFlattenedTopLevelDecl(std::move(LeadingUnsafeBlock), FnASTs, true);
+  }
 
   // Prelude auto-import, main-pass side -- mirrors the pre-pass injection
   // above exactly (same ParsePreludeImports() call, same rationale). Pushed

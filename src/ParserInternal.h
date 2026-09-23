@@ -37,6 +37,10 @@ std::unique_ptr<ExprAST> ParseCompareExpr();
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
 std::unique_ptr<ExprAST> ParseReturnExpr();
 std::unique_ptr<ExprAST> ParseUnsafeExpr();
+// The post-'unsafe' half of ParseUnsafeExpr() -- see its own doc comment
+// (ParserStmt.cpp) for why this is split out (LANG-002's capability-pragma
+// lookahead in ParserModule.cpp needs it too).
+std::unique_ptr<ExprAST> ParseUnsafeBlockBody(SourceLocation KeywordLoc);
 
 // Defined in ParserDecl.cpp
 std::unique_ptr<ExprAST> ParseStructDecl();
