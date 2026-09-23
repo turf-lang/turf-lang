@@ -106,3 +106,24 @@ fn<T> Set.remove(item: T): bool {
 fn<T> Set.length(): int {
   return self.len;
 }
+
+// ─── operator[] (LANG-001) ───────────────────────────────────────────────────
+//
+// `s[i]` -- positional read of the i-th stored element (insertion order is
+// NOT preserved across remove(), see Set.remove()'s swap-with-last comment,
+// so "positional" means "whatever slot i currently holds", same caveat
+// List<int>'s own operator[] doesn't have to make). Declared for the
+// CONCRETE `Set<int>` only -- see list.tr's operator[] doc comment for why
+// `operator` declarations can't be generic over T at all.
+//
+// Deliberately NO `operator[]=` for Set<T>: unlike List/Map, a set's
+// invariant is uniqueness -- `s[i] = v` would let a caller silently
+// overwrite one element with a value that duplicates another slot,
+// corrupting that invariant with no check at all. add()/remove() stay the
+// only way to mutate a Set's contents.
+operator [](s: Set<int>, i: int): int {
+  if (i < 0 || i >= s.len) {
+    sys::panic("Set[]: index out of bounds");
+  }
+  return s.items[i];
+}
