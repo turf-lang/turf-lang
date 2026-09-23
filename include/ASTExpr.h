@@ -287,6 +287,19 @@ public:
 };
 
 // Postfix Node, represents things like "x++" or "x--"
+// Increment/decrement, both directions: `x++`/`x--` (IsPrefix=false) and
+// `++x`/`--x` (IsPrefix=true). LANG-001 follow-up: prefix used to be a
+// SEPARATE parse-time desugaring straight to `x = x + 1`
+// (AssignmentExprAST(BinaryExprAST)), which only ever accepted a bare
+// TOK_IDENTIFIER operand -- `++arr[0]`/`++obj.field` were parse errors,
+// asymmetric with postfix (parsed as part of the general postfix chain, so
+// `arr[0]++` already worked). Unified onto this ONE node for both
+// directions instead: the operand is parsed the same way postfix's always
+// was (`ParsePrimary()` -- primary + the full `[]`/`.`/`()` postfix chain),
+// its LOCATION is evaluated exactly once (via codegenLValue()), and IsPrefix
+// only changes (a) which value the expression evaluates to (old vs. new)
+// and (b) nothing else -- the overload-resolution/immutability/scope-
+// boundary logic is completely shared between both directions now.
 class PostfixExprAST : public ExprAST {
   SourceLocation Loc;
   int Opcode;
@@ -294,31 +307,31 @@ class PostfixExprAST : public ExprAST {
 
 public:
   PostfixExprAST(SourceLocation Loc, int Opcode,
-                 std::unique_ptr<ExprAST> Operand)
-      : Loc(Loc), Opcode(Opcode), Operand(std::move(Operand)) {}
+                 std::unique_ptr<ExprAST> Operand, bool IsPrefix = false)
+      : Loc(Loc), Opcode(Opcode), Operand(std::move(Operand)),
+        IsPrefix(IsPrefix) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   int getOpcode() const { return Opcode; }
   const ExprAST *getOperand() const { return Operand.get(); }
 
-  /// LANG-001/D21: postfix `++`/`--` does NOT desugar at parse time the way
-  /// prefix does (see ParserCore.cpp's prefix handling, which literally
-  /// builds `x = x + 1` and so inherits `operator+` for free through the
-  /// ordinary BinaryExprAST path with zero extra code) -- it needs its own
-  /// old-value-preserving lowering, so it needs its own operator-overload
-  /// hookup too. Gathered by Resolver::visitPostfixExpr() against
-  /// "operator+"/"operator-" (arity 2), mirroring BinaryExprAST's fields
-  /// exactly. Empty for a numeric operand (falls through to the builtin
-  /// +1/-1 path unchanged).
+  /// See the class doc comment above. Prefix's result is the NEW value;
+  /// postfix's is the OLD value -- everything else about resolution and
+  /// lowering is shared.
+  bool IsPrefix;
+
+  /// `operator+`/`operator-` candidates (arity 2), matched against
+  /// (OperandType, int) -- the implicit "+1"/"-1" is always a plain `int`,
+  /// for EITHER direction. Gathered by Resolver::visitPostfixExpr().
+  /// Empty for a numeric operand (falls through to the builtin +1/-1 path
+  /// unchanged).
   std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedOperatorCandidates;
   const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &
   getResolvedOperatorCandidates() const {
     return ResolvedOperatorCandidates;
   }
 
-  /// The single overload selected by exact match against (OperandType,
-  /// int) -- the postfix's implicit "+1"/"-1" is always a plain `int`, same
-  /// as prefix's desugared literal. Not copied by clone().
+  /// The single overload selected by exact match. Not copied by clone().
   std::shared_ptr<ResolverFunctionSymbol> ResolvedOperatorTarget;
   const ResolverFunctionSymbol *getResolvedOperatorTarget() const {
     return ResolvedOperatorTarget.get();
@@ -328,7 +341,8 @@ public:
   void accept(ASTVisitor &V) override { V.visitPostfixExpr(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<PostfixExprAST>(Loc, Opcode,
-                                            CloneExprAST(Operand.get()));
+                                            CloneExprAST(Operand.get()),
+                                            IsPrefix);
   }
 };
 

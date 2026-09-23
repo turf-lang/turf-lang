@@ -186,7 +186,8 @@ public:
 
   void visitPostfixExpr(PostfixExprAST &N) override {
     printIndent(Depth_);
-    std::cout << "PostfixExpr(op:'" << (char)N.getOpcode() << "')\n";
+    std::cout << (N.IsPrefix ? "PrefixExpr(op:'" : "PostfixExpr(op:'")
+              << (char)N.getOpcode() << "')\n";
     descend();
     print(const_cast<ExprAST *>(N.getOperand()), Depth_);
     ascend();

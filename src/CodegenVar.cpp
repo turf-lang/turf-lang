@@ -572,8 +572,8 @@ Value *PostfixExprAST::codegen() {
   // ── Operator overload dispatch (D21) ─────────────────────────────────────
   // TypeChecker::visitPostfixExpr() already resolved ResolvedOperatorTarget
   // (if any) via exact match against (OperandType, int). Postfix returns
-  // the OLD value regardless of which path is taken -- only how the NEW
-  // value is computed and stored back differs.
+  // the OLD value, prefix the NEW one -- everything about computing and
+  // storing the new value is otherwise identical between the two.
   if (ResolvedOperatorTarget) {
     std::string MangledName = ResolvedOperatorTarget->mangledName();
     Function *CalleeF = TheModule->getFunction(MangledName);
@@ -586,7 +586,7 @@ Value *PostfixExprAST::codegen() {
     Value *DeltaOne = ConstantInt::get(*TheContext, APInt(64, 1, true));
     Value *NewVal = Builder->CreateCall(CalleeF, {OldVal, DeltaOne}, "postfix.optmp");
     Builder->CreateStore(NewVal, Ptr);
-    return OldVal;
+    return IsPrefix ? NewVal : OldVal;
   }
 
   bool isDouble = OpTy->isNamed("double");
@@ -606,5 +606,5 @@ Value *PostfixExprAST::codegen() {
   }
 
   Builder->CreateStore(NewVal, Ptr);
-  return OldVal; // Postfix returns the old value
+  return IsPrefix ? NewVal : OldVal;
 }

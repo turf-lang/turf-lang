@@ -836,37 +836,57 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
   if (Node.getOperand())
     const_cast<ExprAST *>(Node.getOperand())->accept(*this);
 
+  const char *Dir = Node.IsPrefix ? "prefix" : "postfix";
+
+  // LANG-001 follow-up: both directions now parse ANY assignable lvalue
+  // (see PostfixExprAST's own doc comment, ASTExpr.h, and ParserCore.cpp's
+  // prefix handling for why) instead of prefix being restricted to a bare
+  // identifier at parse time -- so a non-lvalue operand (`++(a + b)`,
+  // `(f())++`) is no longer caught by the parser and needs the same check
+  // assignment/compound assignment already run, here instead.
+  if (!isAssignableLValue(Node.getOperand())) {
+#ifndef TYPECHECKER_NO_ERRORS
+    InvalidAssignmentTargetError(Node.getLoc(),
+                                 describeNonLValue(Node.getOperand()))
+        .raise();
+#else
+    throw std::runtime_error("InvalidAssignmentTargetError");
+#endif
+    setType(&Node, nullptr);
+    return;
+  }
+
   TurfTypePtr OpTy = getType(Node.getOperand());
   std::string OpSpelling(1, static_cast<char>(Node.getOpcode()));
 
-  // LANG-001 scope boundary: postfix `++`/`--` THROUGH `operator[]`
-  // (`box[i]++`) is deliberately not supported, same reasoning as compound
+  // LANG-001 scope boundary: `++`/`--` THROUGH `operator[]` (`box[i]++`,
+  // `++box[i]`) is deliberately not supported, same reasoning as compound
   // assignment through `operator[]` just above visitCompoundAssignment()'s
   // identical guard -- it would need operator[]/operator[]= chained
   // together, and PostfixExprAST::codegen() calls Operand->codegenLValue()
   // unconditionally, which would otherwise hit the same "Internal error:
   // Base is not an array or pointer" ICE for a struct base with no
-  // physical address.
+  // physical address. A BUILTIN array/pointer/string base (needsOperator
+  // Index() is false for those) is completely unaffected -- `++arr[0]` on
+  // a plain `int[N]` works exactly like `arr[0]++` always did.
   if (const auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(Node.getOperand())) {
     TurfTypePtr ArrBaseTy = getType(ArrAcc->getBase());
     if (ArrBaseTy && needsOperatorIndex(ArrBaseTy.get())) {
       reportError(Node.getLoc(),
-                  "Postfix '" + OpSpelling + OpSpelling + "' through "
-                  "'operator[]' is not supported -- write 'x[i] = x[i] " +
-                      OpSpelling + " 1' explicitly instead.");
+                  std::string(Dir) + " '" + OpSpelling + OpSpelling +
+                      "' through 'operator[]' is not supported -- write "
+                      "'x[i] = x[i] " + OpSpelling + " 1' explicitly instead.");
       setType(&Node, OpTy);
       return;
     }
   }
 
   // ── Operator overload resolution (D21) ───────────────────────────────────
-  // Postfix `++`/`--` doesn't desugar the way prefix does (see
-  // PostfixExprAST::ResolvedOperatorCandidates's own doc comment, ASTExpr.h)
-  // -- exact match against (OperandType, int), mirroring prefix's own
-  // implicit `+ 1`/`- 1` desugared literal. The expression's OWN type stays
-  // OpTy either way (postfix returns the OLD value, per Codegen), but the
-  // overload's return type must match OpTy exactly for the implicit
-  // store-back to be sound.
+  // Exact match against (OperandType, int), for EITHER direction -- the
+  // implicit "+1"/"-1" is always a plain `int`. The expression's OWN type
+  // stays OpTy either way (only WHICH value -- old or new -- Codegen
+  // returns differs by direction), but the overload's return type must
+  // match OpTy exactly for the implicit store-back to be sound.
   bool HandledViaOperator = false;
   if (!Node.ResolvedOperatorCandidates.empty() && OpTy) {
     TurfTypePtr IntTy = TurfInt();
@@ -877,7 +897,7 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
           sameTypeExact(C->Params[1].Type.get(), IntTy.get())) {
         if (Node.ResolvedOperatorTarget) {
           reportError(Node.getLoc(),
-                      "Ambiguous postfix 'operator " + OpSpelling + "(" +
+                      "Ambiguous " + std::string(Dir) + " 'operator " + OpSpelling + "(" +
                           OpTy->getName() +
                           ", int)' call: more than one visible overload "
                           "matches at this call site.");
@@ -893,7 +913,7 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
                     "'operator " + OpSpelling + "' returns '" +
                         OpResultTy->getName() +
                         "', which cannot be stored back into '" +
-                        OpTy->getName() + "' for postfix '" + OpSpelling +
+                        OpTy->getName() + "' for " + Dir + " '" + OpSpelling +
                         OpSpelling + "'.");
       }
       HandledViaOperator = true;
@@ -902,7 +922,7 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
 
   if (!HandledViaOperator && OpTy && !OpTy->isNumeric()) {
     reportError(Node.getLoc(),
-                "Postfix operator requires a numeric operand, got '" +
+                (std::string(Dir) + " operator requires a numeric operand, got '") +
                     OpTy->getName() + "'.");
   }
 

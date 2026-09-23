@@ -1151,28 +1151,38 @@ std::unique_ptr<ExprAST> ParseUnary() {
       return nullptr;
     return std::make_unique<UnaryExprAST>(Loc, '~', std::move(Operand));
   }
+  // Prefix ++/-- -- LANG-001 follow-up: used to require a BARE
+  // TOK_IDENTIFIER and desugar straight to `x = x + 1`/`x = x - 1`
+  // (AssignmentExprAST(BinaryExprAST)), which made `++arr[0]`/`++obj.field`
+  // a parse error even though the equivalent POSTFIX form (`arr[0]++`)
+  // already worked -- postfix parses its operand through the general
+  // primary+postfix-chain path (ParsePostfixExpression(), ParserLiteral.cpp)
+  // and was never restricted to a bare identifier. Unified onto the exact
+  // same PostfixExprAST node postfix already uses (see its own doc comment,
+  // ASTExpr.h) with IsPrefix=true: the operand is parsed via ParsePrimary()
+  // -- the identical primary+postfix-chain parse a bare `arr[0]` or
+  // `obj.field` standing alone would get -- so `++arr[0]` now parses (and,
+  // for a builtin array, codegens) exactly like `arr[0]++` does, just
+  // returning the NEW value instead of the old one. A non-lvalue operand
+  // (`++(a + b)`) is no longer a PARSE error the way "expected identifier"
+  // was; it becomes a clean InvalidAssignmentTargetError at TypeCheck time
+  // instead, via the same isAssignableLValue() check assignment/compound
+  // assignment already use (TypeChecker::visitPostfixExpr(),
+  // TypeCheckerExpr.cpp) -- postfix already had this exposure for a
+  // non-lvalue operand with no dedicated check at all before this follow-up;
+  // both directions get the real diagnostic now.
   if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
     int OpType = CurTok;
     SourceLocation Loc = CurLoc;
     getNextToken();
 
-    if (CurTok != TOK_IDENTIFIER) {
-      LogErrorAt(Loc, "Expected identifier after prefix ++ or --", SLM::ErrorCategory::SYNTAX_ERROR);
+    auto Operand = ParsePrimary();
+    if (!Operand)
       return nullptr;
-    }
-
-    std::string IdName = IdentifierStr;
-    getNextToken();
 
     char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
-    auto LHSVarBin = std::make_unique<VariableExprAST>(Loc, IdName);
-    auto OneNum = std::make_unique<NumberExprAST>(1LL);
-    auto RHS = std::make_unique<BinaryExprAST>(CurLoc, Op, std::move(LHSVarBin),
-                                               std::move(OneNum));
-
-    auto LHSVarAssign = std::make_unique<VariableExprAST>(Loc, IdName);
-    return std::make_unique<AssignmentExprAST>(Loc, std::move(LHSVarAssign),
-                                               std::move(RHS));
+    return std::make_unique<PostfixExprAST>(Loc, Op, std::move(Operand),
+                                            /*IsPrefix=*/true);
   }
 
   // Address-of: &expr — takes the address of an lvalue.

@@ -229,10 +229,12 @@ void Resolver::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
 void Resolver::visitPostfixExpr(PostfixExprAST &Node) {
   visitChild(Node.getOperand());
 
-  // D21 (docs/development/changes/LANG-001.md): postfix `++`/`--` picks up
-  // `operator+`/`operator-` the same way prefix's desugaring does, matched
-  // against (OperandType, int) -- see the field's own doc comment (ASTExpr.h)
-  // for why this needs its own gathering rather than reusing BinaryExprAST's.
+  // D21 (docs/development/changes/LANG-001.md): both `x++`/`x--` and
+  // `++x`/`--x` (one shared node, see PostfixExprAST's own doc comment,
+  // ASTExpr.h) pick up `operator+`/`operator-`, matched against
+  // (OperandType, int) -- gathered here rather than reusing BinaryExprAST's
+  // candidates since neither direction is a real BinaryExprAST any more
+  // (the old prefix desugaring to `x = x + 1` is gone, LANG-001 follow-up).
   Node.ResolvedOperatorCandidates.clear();
   const std::string Key = operatorFunctionName(Node.getOpcode());
   for (const auto *S : SymTable_.lookupCurrentFileFunctions(Key))
