@@ -1,0 +1,15 @@
+// Negative test: '~' has no binary form (it is unary-only per §13.1's
+// matrix) -- declaring it with 2 parameters must be a clean arity error,
+// not silently accepted as if '~' had a binary meaning.
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+operator ~(a: Vec2, b: Vec2): Vec2 {
+    return a;
+}
+
+fn main(): int {
+    return 0;
+}

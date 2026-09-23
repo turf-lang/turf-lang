@@ -1,0 +1,23 @@
+// LANG-001 stdlib: Map<string, int> gains operator[]/operator[]= (lib/std/
+// collections/map.tr), wrapping get()/put(). Self is by-reference internally
+// (&Map<string, int>) because put() can reallocate/grow the map -- proven
+// here by starting from an EMPTY map and growing it purely through []=.
+import map::Map;
+import test;
+
+fn main(): int {
+    mut m: Map<string, int> = Map::default();
+
+    m["a"] = 1;
+    m["b"] = 2;
+    test::assert(m.length() == 2, "Map[]= should grow the map from empty");
+
+    test::assert(m["a"] == 1, "Map[] should read key 'a'");
+    test::assert(m["b"] == 2, "Map[] should read key 'b'");
+
+    m["a"] = 99;
+    test::assert(m["a"] == 99, "Map[]= should overwrite an existing key");
+    test::assert(m.length() == 2, "Map[]= on an existing key should not grow length");
+
+    return 0;
+}
