@@ -1,0 +1,33 @@
+// LANG-003: "a deferred statement may not return, break, or continue out of
+// itself" only forbids a jump that would ESCAPE the defer. A `break`/
+// `continue` inside a loop that itself begins INSIDE the deferred
+// statement is absorbed by that inner loop -- it can never reach past the
+// defer at all -- so it's legal, unlike fail_break_in_defer.tr's bare
+// `break`. This exercises FindEscapingControlFlow()'s `InLoop` tracking
+// (ResolverStmt.cpp) directly.
+import test;
+
+struct Trail {
+    count: int
+}
+
+fn Trail.new(): void {
+    self.count = 0;
+}
+
+fn deferredLoopWithBreak(t: &Trail): void {
+    defer while (t.count < 5) {
+        t.count = t.count + 1;
+        if (t.count == 2) {
+            break;
+        }
+    };
+}
+
+fn main(): int {
+    mut t: Trail = Trail::new();
+    deferredLoopWithBreak(&t);
+    test::assert(t.count == 2,
+        "a break inside a loop that's part of the deferred statement is absorbed, and the loop runs to its own completion when the defer fires");
+    return 0;
+}

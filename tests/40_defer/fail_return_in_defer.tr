@@ -1,0 +1,10 @@
+// LANG-003 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): "a deferred
+// statement may not return, break, or continue out of itself" -- a
+// `return` inside `defer` always escapes to the enclosing function, never
+// "just" the defer, which is never what a reader expects from something
+// spelled as ordinary cleanup code. Rejected at compile time
+// (DeferControlFlowError, E083), raised by Resolver::visitDefer().
+fn main(): int {
+    defer return 5;
+    return 0;
+}

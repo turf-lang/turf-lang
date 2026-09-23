@@ -1,0 +1,28 @@
+// LANG-003 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): `defer` runs in
+// reverse (LIFO) order relative to other `defer`s registered earlier in the
+// SAME block. Observed through a struct passed by reference -- a deferred
+// statement mutates the caller's own state, visible once the callee
+// returns (the deferred statements run as part of the callee's own return,
+// before control passes back to the caller).
+import test;
+
+struct Trail {
+    log: string
+}
+
+fn Trail.new(): void {
+    self.log = "";
+}
+
+fn appendThree(t: &Trail): void {
+    defer t.log = t.log + "1";
+    defer t.log = t.log + "2";
+    defer t.log = t.log + "3";
+}
+
+fn main(): int {
+    mut t: Trail = Trail::new();
+    appendThree(&t);
+    test::assert(t.log == "321", "defers run LIFO: the last one registered runs first");
+    return 0;
+}

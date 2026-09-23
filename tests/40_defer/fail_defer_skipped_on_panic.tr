@@ -1,0 +1,21 @@
+// RUNTIME_ABORT_EXPECTED
+// LANG-003: TurfLang has no unwinding -- a panic aborts WITHOUT running any
+// deferred statements. This is the main semantic difference from Go's
+// `defer`, and is deliberate (docs/planning/ARCHITECTURE_OVERHAUL.md §8).
+//
+// This file's automated pass/fail contract (compiles, then aborts at
+// runtime) only proves the "aborts" half. The "does NOT run the defer"
+// half was verified live during development: running this binary directly
+// prints only test::assert's own failure message, never "DEFERRED_RAN" --
+// see docs/development/changes/LANG-003.md's Known pitfalls section. There
+// is currently no test-runner support for asserting on a specific
+// program's stdout content, so that half isn't mechanically re-checked by
+// `./scripts/test_runner.sh` on every run.
+import test;
+import io;
+
+fn main(): int {
+    defer io::printline("DEFERRED_RAN");
+    test::assert(1 == 2, "deliberately false, to trigger a panic/abort");
+    return 0;
+}
