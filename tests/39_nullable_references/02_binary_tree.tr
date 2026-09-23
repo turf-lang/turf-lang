@@ -1,0 +1,65 @@
+// LANG-002: a binary search tree, the other canonical "genuinely needs a
+// nullable pointer" data structure -- same proof as 01_linked_list.tr,
+// different shape (two nullable children instead of one nullable next).
+import test;
+
+struct TreeNode {
+    val: int,
+    left: &?TreeNode,
+    right: &?TreeNode
+}
+
+fn insert(root: &?TreeNode, n: &TreeNode): &?TreeNode {
+    if (root == null) {
+        return n;
+    }
+    if (n.val < root.val) {
+        root.left = insert(root.left, n);
+    } else {
+        root.right = insert(root.right, n);
+    }
+    return root;
+}
+
+fn contains(root: &?TreeNode, target: int): bool {
+    mut current: &?TreeNode = root;
+    while (current != null) {
+        if (current.val == target) {
+            return true;
+        }
+        if (target < current.val) {
+            current = current.left;
+        } else {
+            current = current.right;
+        }
+    }
+    return false;
+}
+
+fn countNodes(root: &?TreeNode): int {
+    if (root == null) {
+        return 0;
+    }
+    return 1 + countNodes(root.left) + countNodes(root.right);
+}
+
+fn main(): int {
+    mut n1: TreeNode = TreeNode::default();
+    mut n2: TreeNode = TreeNode::default();
+    mut n3: TreeNode = TreeNode::default();
+    mut n4: TreeNode = TreeNode::default();
+    n1.val = 5; n2.val = 3; n3.val = 8; n4.val = 1;
+
+    mut root: &?TreeNode = null;
+    root = insert(root, &n1);
+    root = insert(root, &n2);
+    root = insert(root, &n3);
+    root = insert(root, &n4);
+
+    test::assert(countNodes(root) == 4, "all four inserted nodes are reachable");
+    test::assert(contains(root, 8), "8 was inserted and should be found");
+    test::assert(contains(root, 1), "1 was inserted and should be found");
+    test::assert(!contains(root, 99), "99 was never inserted");
+
+    return 0;
+}

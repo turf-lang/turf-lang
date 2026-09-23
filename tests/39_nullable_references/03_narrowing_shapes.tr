@@ -1,0 +1,87 @@
+// LANG-002: NullabilityPass's narrowing sources, one shape per function --
+// see include/Analysis.h's NullabilityPass class doc comment for the exact
+// dataflow this exercises (edge-sensitive meet at `if`/`while` condition
+// blocks, short-circuit-aware `&&` chaining).
+import test;
+
+struct Box {
+    val: int
+}
+
+// if/else: narrowed to non-null in the `then` branch, still nullable (and
+// therefore un-dereferenced) in the `else` branch.
+fn ifElse(b: &?Box): int {
+    if (b != null) {
+        return b.val;
+    } else {
+        return -1;
+    }
+}
+
+// Early return: the ONLY narrowing source that isn't a direct `if (x !=
+// null) { deref }` shape -- the guard clause idiom.
+fn earlyReturn(b: &?Box): int {
+    if (b == null) {
+        return -1;
+    }
+    return b.val;
+}
+
+// while condition: the block-level dataflow must carry the "b != null"
+// narrowing from the condition block into the loop body block.
+fn whileLoop(b: &?Box, times: int): int {
+    mut total: int = 0;
+    mut i: int = 0;
+    while (b != null && i < times) {
+        total = total + b.val;
+        i = i + 1;
+    }
+    return total;
+}
+
+// && chain: the RHS of `&&` only evaluates once the LHS is true (real
+// short-circuit semantics), so `b.val` here must be permitted using the
+// LHS's own narrowing, not the narrowing from BEFORE the whole condition.
+fn andChain(b: &?Box): bool {
+    if (b != null && b.val > 0) {
+        return true;
+    }
+    return false;
+}
+
+// Reassignment resets narrowed state: after `b = other`, the PREVIOUS
+// narrowing of `b` no longer applies -- `other` might itself be null.
+fn reassignResetsNarrowing(b: &?Box, other: &?Box): int {
+    if (b != null) {
+        b = other;
+        if (b != null) {
+            return b.val;
+        }
+    }
+    return -1;
+}
+
+fn main(): int {
+    mut box: Box = Box::default();
+    box.val = 42;
+    mut none: &?Box = null;
+
+    test::assert(ifElse(&box) == 42, "if-branch narrowing permits the deref");
+    test::assert(ifElse(none) == -1, "else-branch takes the non-narrowed path");
+
+    test::assert(earlyReturn(&box) == 42, "code after an early-return guard is narrowed");
+    test::assert(earlyReturn(none) == -1, "the guard itself fires on null");
+
+    test::assert(whileLoop(&box, 3) == 126, "while-condition narrowing holds across the loop body");
+    test::assert(whileLoop(none, 3) == 0, "a null start never enters the loop body");
+
+    test::assert(andChain(&box), "&& chain: RHS sees the LHS's own narrowing");
+    test::assert(!andChain(none), "&& chain: LHS false short-circuits before any deref");
+
+    mut other: Box = Box::default();
+    other.val = 7;
+    test::assert(reassignResetsNarrowing(&box, &other) == 7, "narrowing survives re-narrowing after reassignment");
+    test::assert(reassignResetsNarrowing(&box, none) == -1, "reassigning to null re-nullifies the state");
+
+    return 0;
+}

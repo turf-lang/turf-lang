@@ -1,0 +1,16 @@
+// LANG-002: the `p to &T` narrowing cast is syntactically legal (no
+// `unsafe` needed -- see TurfNullableReferenceType's doc comment, Types.h)
+// but must still be REJECTED (E082) when NullabilityPass can't prove the
+// operand non-null at this exact program point -- this is the ONLY
+// mechanism `&?T -> &T` conversion exists at all, so an unguarded one must
+// fail here, not fall through as if it were sound.
+struct Box { val: int }
+
+fn bad(b: &?Box): int {
+    mut safe: &Box = b to &Box;
+    return safe.val;
+}
+
+fn main(): int {
+    return bad(null);
+}

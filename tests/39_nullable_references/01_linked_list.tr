@@ -1,0 +1,71 @@
+// LANG-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): the proof this
+// group's whole reason for existing is closed -- a linked list written
+// ENTIRELY in safe TurfLang, no `unsafe { }` anywhere. Before &?T existed,
+// `struct Node { next: Node* }` required a top-level `unsafe { }` around the
+// struct decl, and no plain function could take/return a raw pointer at
+// all -- see docs/architecture/pointers_and_references.md §1.5's OLD
+// `unsafe`-wrapped version of this exact same list for comparison.
+import test;
+
+struct Node {
+    val: int,
+    next: &?Node
+}
+
+fn push(head: &?Node, n: &Node): &?Node {
+    n.next = head;
+    return n;
+}
+
+fn sum(head: &?Node): int {
+    mut total: int = 0;
+    mut current: &?Node = head;
+    while (current != null) {
+        total = total + current.val;
+        current = current.next;
+    }
+    return total;
+}
+
+fn length(head: &?Node): int {
+    mut count: int = 0;
+    mut current: &?Node = head;
+    while (current != null) {
+        count = count + 1;
+        current = current.next;
+    }
+    return count;
+}
+
+// "pop": returns the head's own value and the new head (the old head's
+// `next`) -- there's no heap allocator in this test, so "pop" here means
+// "detach and report", not "free".
+fn popVal(head: &?Node): int {
+    if (head == null) {
+        return -1;
+    }
+    return head.val;
+}
+
+fn main(): int {
+    mut a: Node = Node::default();
+    mut b: Node = Node::default();
+    mut c: Node = Node::default();
+    a.val = 1;
+    b.val = 2;
+    c.val = 3;
+
+    mut head: &?Node = null;
+    test::assert(length(head) == 0, "empty list has length 0");
+    test::assert(sum(head) == 0, "empty list sums to 0");
+
+    head = push(head, &a);
+    head = push(head, &b);
+    head = push(head, &c);
+
+    test::assert(length(head) == 3, "list grew to 3 nodes via push");
+    test::assert(sum(head) == 6, "sum traverses every pushed node");
+    test::assert(popVal(head) == 3, "the most recently pushed node is now the head");
+
+    return 0;
+}

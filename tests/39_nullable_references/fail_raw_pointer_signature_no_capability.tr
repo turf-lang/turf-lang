@@ -1,0 +1,12 @@
+// LANG-002/STD-001: a plain function may never take a raw `ptr`/`T*`
+// parameter (even inside `unsafe { }`) unless its file declared the
+// raw-pointer capability (`unsafe module;`) -- this file deliberately does
+// NOT, so this must be rejected exactly as it always was before LANG-002
+// (checkNoRawPointersInSignature(), TypeCheckerCore.cpp).
+fn takesRaw(p: ptr): int {
+    return 0;
+}
+
+fn main(): int {
+    return 0;
+}
