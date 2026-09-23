@@ -367,17 +367,88 @@ void Resolver::validateOperatorDecl(const ResolverFunctionSymbol &Sym) const {
                  T->isChar() || T->isPointer());
   };
 
-  if (Sym.Params.size() != 2)
-    return; // arity mismatch is caught elsewhere (parser); nothing to check here
+  const bool IsIndexGet = Sym.BaseName == OperatorIndexGetName();
+  const bool IsIndexSet = Sym.BaseName == OperatorIndexSetName();
+  const std::string OpSpelling = Sym.BaseName.substr(8); // strip "operator" prefix
 
-  const TurfType *LhsTy = Sym.Params[0].Type.get();
-  const TurfType *RhsTy = Sym.Params[1].Type.get();
-  if (!IsBuiltinOperandType(LhsTy) || !IsBuiltinOperandType(RhsTy))
+  // Collect the operand(s) the two checks below apply to. `operator[]`/
+  // `operator[]=` only ever check the SELF operand (Params[0]) -- indexing
+  // is inherently asymmetric (the index/value types don't define what is
+  // being indexed), unlike a symmetric binary operator where either operand
+  // could be the "foreign" one being redefined.
+  std::vector<const TurfType *> Operands;
+  if (IsIndexGet || IsIndexSet) {
+    if (Sym.Params.empty())
+      return; // arity mismatch is caught elsewhere (parser)
+    Operands.push_back(Sym.Params[0].Type.get());
+  } else if (Sym.Params.size() == 1 || Sym.Params.size() == 2) {
+    for (const auto &P : Sym.Params)
+      Operands.push_back(P.Type.get());
+  } else {
+    return; // arity mismatch is caught elsewhere (parser)
+  }
+
+  // All-primitive rejection (existing behaviour, §13.4) -- skipped for
+  // operator[]/[]=: there is no second "pairing" operand for this rule to
+  // compare against, so a nonsensical `operator[](a: int, i: int): int` is
+  // left to the orphan rule below instead (it has no struct/enum operand at
+  // all, so it fails that check).
+  if (!IsIndexGet && !IsIndexSet) {
+    bool AllBuiltin = true;
+    for (const auto *T : Operands)
+      if (!IsBuiltinOperandType(T)) { AllBuiltin = false; break; }
+    if (AllBuiltin) {
+      OperatorBuiltinPairError(
+          toSourceLocation(Sym.DeclLoc), OpSpelling, Operands[0]->getName(),
+          (Operands.size() > 1 ? Operands[1] : Operands[0])->getName())
+          .raise();
+      return;
+    }
+  }
+
+  // Orphan rule (LANG-001, §13.4): at least one operand that IS a declared
+  // struct/enum must be owned by the SAME module this operator is declared
+  // in -- otherwise a third module could redefine the operator's meaning on
+  // two types it doesn't own, and the result would depend on import order.
+  // A builtin/`string` operand is never "declared" anywhere (no
+  // registerStruct()/registerEnumType() call ever runs for it), so it can
+  // neither satisfy nor violate this rule by itself: if NONE of the
+  // operands is a struct/enum at all (e.g. `strings.tr`'s existing
+  // `operator +(string, string)`), the rule is vacuously satisfied rather
+  // than flagged -- there is no "foreign type" for any module to be
+  // redefining behaviour on. Checked against `lib/std` before landing (see
+  // the change record) -- confirmed to introduce zero regressions there.
+  // NOTE: an operand's TurfType is very likely still a NamedType("A") here,
+  // not yet resolved to the real TurfStructType/TurfEnumType -- Pass 1
+  // hoisting (which calls registerFunctionSignature(), this function's only
+  // caller) runs before the type-resolution pass that would replace it.
+  // isStruct()/isEnum() only return true on the ALREADY-RESOLVED classes
+  // (confirmed live: checking those two predicates directly here let a
+  // cross-module orphan declaration through silently, since every operand
+  // was still a NamedType at this point and NamedType overrides neither
+  // predicate) -- so a struct/enum operand is identified by NAME against
+  // the type registry instead, which is populated by hoisting itself and
+  // therefore already has both this file's own structs/enums AND every
+  // directly-imported module's (imports are hoisted before this file's own
+  // body, per the existing hoisting order) by the time this runs.
+  std::vector<const TurfType *> NamedOperands;
+  for (const auto *T : Operands)
+    if (T && (T->isStruct() || T->isEnum() ||
+              SymTable_.isKnownStruct(T->getName()) ||
+              SymTable_.isEnumName(T->getName())))
+      NamedOperands.push_back(T);
+
+  if (NamedOperands.empty())
     return;
 
-  std::string OpSpelling = Sym.BaseName.substr(8); // strip "operator" prefix
-  OperatorBuiltinPairError(toSourceLocation(Sym.DeclLoc), OpSpelling,
-                           LhsTy->getName(), RhsTy->getName())
+  for (const auto *T : NamedOperands)
+    if (SymTable_.getTypeOwningModule(T->getName()) == Sym.SourceModule)
+      return; // at least one operand IS owned by this module -- satisfied
+
+  const TurfType *Culprit = NamedOperands[0];
+  OperatorOrphanRuleError(toSourceLocation(Sym.DeclLoc), OpSpelling,
+                          Sym.SourceModule, Culprit->getName(),
+                          SymTable_.getTypeOwningModule(Culprit->getName()))
       .raise();
 }
 

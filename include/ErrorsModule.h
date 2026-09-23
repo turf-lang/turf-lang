@@ -73,6 +73,36 @@ public:
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
+// LANG-001's orphan rule (ARCHITECTURE_OVERHAUL.md §13.4): at least one
+// operand of a declared operator must be a struct/enum declared in the SAME
+// module as the operator itself. Without this, module C could declare
+// `operator +(a: ModuleA::Foo, b: ModuleB::Bar)` -- redefining what `+`
+// means between two types it doesn't own -- and the result would silently
+// depend on which modules happen to be imported, in what order. A builtin/
+// `string` operand (never itself "declared" anywhere) doesn't count toward
+// satisfying the rule, but also can't violate it by itself -- see
+// Resolver::validateOperatorDecl()'s own comment for the exact reasoning.
+class OperatorOrphanRuleError : public TurfError {
+public:
+  OperatorOrphanRuleError(SourceLocation Loc, const std::string &OpSpelling,
+                          const std::string &DeclaringModule,
+                          const std::string &OperandTypeName,
+                          const std::string &OperandOwningModule)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'operator " + OpSpelling +
+                           "' does not own any of its operand types." +
+                           Colors::RESET,
+                  "'" + OperandTypeName + "' is declared in " +
+                      (OperandOwningModule.empty() ? "the main file"
+                                                   : "module '" + OperandOwningModule + "'") +
+                      ", not in " +
+                      (DeclaringModule.empty() ? "the main file" : "module '" + DeclaringModule + "'") +
+                      " -- at least one operand of an operator declaration "
+                      "must be a struct or enum declared in the same "
+                      "module/file as the operator itself, so an operator's "
+                      "meaning never depends on import order.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
 // Two `extern fn` declarations for the same raw C name with genuinely
 // different signatures (arity, parameter types, return type, or variadic-
 // ness). Extern mangled names are just the bare C symbol name (not

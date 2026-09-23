@@ -149,6 +149,12 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // though nothing raises it until S12a's worklist actually drains --
     // see docs/development/changes/TYPE-002.md.
     {"E079", "GenericInstantiationDepthError", "Generic instantiation depth exceeded", SLM::ErrorCategory::DECLARATION},
+    // LANG-001 (docs/development/changes/LANG-001.md, §13.4's orphan rule):
+    // an operator declaration where no operand is a struct/enum declared in
+    // the SAME module as the operator. Prevents a third-party module from
+    // redefining an operator's meaning on two types it does not own, which
+    // would make the operator's behavior depend on import order.
+    {"E080", "OperatorOrphanRuleError", "Operator orphan rule violation", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

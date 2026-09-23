@@ -51,6 +51,44 @@ bool sameTypeExact(const TurfType *A, const TurfType *B) {
 
 
 /**
+ * @brief LANG-001: does @p ParamTy (operator[]/operator[]='s declared SELF
+ *        parameter type) match @p BaseTy (the actual base expression's
+ *        type), for the purpose of `arr[i]`/`arr[i] = v`?
+ *
+ * Unlike every OTHER operand of every other overloadable operator, the self
+ * operand of `operator[]`/`operator[]=` is allowed to match either BY VALUE
+ * (sameTypeExact()) or BY REFERENCE (ParamTy == "&" + BaseTy's own name) --
+ * the ordinary binary/unary operator rule (byte-for-byte exact match, no
+ * implicit &) is deliberately relaxed here, ONLY for the self position, for
+ * a concrete reason: `operator[]=` is USELESS as a mutation mechanism if its
+ * self parameter is passed by value (writing through a copy that's
+ * discarded the moment the call returns), and requiring every CALL SITE to
+ * spell `(&box)[i] = v` instead of the natural `box[i] = v` would make the
+ * feature unusable for its own stated purpose (closing `LIMITATIONS.md`
+ * §4's `List<T>`/`Map`/`Set` `get`/`set` gap). A `.`-method's own implicit
+ * `self` gets exactly this treatment for free (auto-address-of at the call
+ * site, §6.6's documented exemption) -- `operator[]`/`operator[]=` aren't
+ * `.`-methods (they're plain top-level `operator` declarations, see
+ * ParseOperatorDecl()'s own doc comment on why), so they don't inherit that
+ * mechanism automatically; this function is what extends the same
+ * convenience to them specifically for the self position. The index and
+ * value operands get NO such relaxation -- they still go through plain
+ * sameTypeExact(), same as every other operator.
+ */
+bool operatorSelfOperandMatches(const TurfType *ParamTy,
+                                const TurfType *BaseTy) {
+  if (sameTypeExact(ParamTy, BaseTy))
+    return true;
+  if (ParamTy && ParamTy->isReference()) {
+    const auto *RefTy = dynamic_cast<const TurfReferenceType *>(ParamTy);
+    if (RefTy && sameTypeExact(RefTy->getPointee().get(), BaseTy))
+      return true;
+  }
+  return false;
+}
+
+
+/**
  * @brief Like sameTypeExact(), but for arrays, mirrors typesCompatible()'s
  *        existing size-erasure rule: a declared "unsized" array parameter
  *        (`int[]`, Size == -1) matches a receiver of ANY concrete size of
@@ -1785,6 +1823,37 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
 
   // Result is the element type of the base array
   TurfTypePtr BaseTy = getType(Node.getBase());
+  TurfTypePtr IndexTy = getType(Node.getIndex());
+
+  // ── operator[] overload resolution (LANG-001) ────────────────────────────
+  // Checked BEFORE the builtin array/string/pointer dispatch below, mirrors
+  // visitBinary()'s identical ordering rationale: a struct base can never
+  // ALSO be a real array/pointer/string, so there is no ambiguity to
+  // resolve between the two paths -- exactly one of them can ever apply to
+  // a given BaseTy. Exact-type-match only (F-OP-1).
+  if (!Node.ResolvedIndexGetCandidates.empty() && BaseTy && IndexTy) {
+    for (const auto &C : Node.ResolvedIndexGetCandidates) {
+      if (!C || C->arity() != 2)
+        continue;
+      if (operatorSelfOperandMatches(C->Params[0].Type.get(), BaseTy.get()) &&
+          sameTypeExact(C->Params[1].Type.get(), IndexTy.get())) {
+        if (Node.ResolvedIndexGetTarget) {
+          reportError(Node.getLoc(),
+                      "Ambiguous 'operator[](" + BaseTy->getName() + ", " +
+                          IndexTy->getName() +
+                          ")' call: more than one visible overload matches "
+                          "at this call site.");
+          break;
+        }
+        Node.ResolvedIndexGetTarget = C;
+      }
+    }
+    if (Node.ResolvedIndexGetTarget) {
+      setType(&Node, Node.ResolvedIndexGetTarget->ReturnType);
+      return;
+    }
+  }
+
   if (BaseTy && BaseTy->isArray()) {
     const auto *ArrTy = dynamic_cast<const ArrayType *>(BaseTy.get());
     TurfTypePtr ElemTy = ArrTy ? ArrTy->getElementTypePtr() : nullptr;

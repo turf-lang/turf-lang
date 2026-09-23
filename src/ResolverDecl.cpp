@@ -523,6 +523,33 @@ void Resolver::visitArrayLiteral(ArrayLiteralExprAST &Node) {
 void Resolver::visitArrayAccess(ArrayAccessExprAST &Node) {
   visitChild(Node.getBase());
   visitChild(Node.getIndex());
+
+  // LANG-001: gather BOTH `operator[]` and `operator[]=` candidates
+  // unconditionally, here, regardless of whether this particular access
+  // turns out to be a read or an assignment target -- the Resolver has no
+  // type information yet (that's the TypeChecker's job) and, symmetrically,
+  // no syntactic way to know if this node sits on the LHS of '=' until
+  // TypeChecker::visitAssignment() looks at it. Mirrors visitBinary()'s own
+  // "gather everything visible by name, let TypeChecker's exact-match
+  // narrow it" split. A plain array/pointer/string base simply never
+  // matches anything here (no `operator[]` is ever declared with a
+  // primitive self type -- see validateOperatorDecl()'s all-primitive/
+  // orphan checks), so these stay empty and TypeChecker's existing builtin
+  // indexing path is completely unaffected.
+  Node.ResolvedIndexGetCandidates.clear();
+  Node.ResolvedIndexSetCandidates.clear();
+  for (const auto *S : SymTable_.lookupCurrentFileFunctions(OperatorIndexGetName()))
+    Node.ResolvedIndexGetCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*S));
+  for (const auto &M : SymTable_.findInModules(OperatorIndexGetName()))
+    Node.ResolvedIndexGetCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*M.Symbol));
+  for (const auto *S : SymTable_.lookupCurrentFileFunctions(OperatorIndexSetName()))
+    Node.ResolvedIndexSetCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*S));
+  for (const auto &M : SymTable_.findInModules(OperatorIndexSetName()))
+    Node.ResolvedIndexSetCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*M.Symbol));
 }
 
 

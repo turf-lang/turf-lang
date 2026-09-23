@@ -842,6 +842,20 @@ const TurfType *getExprType(const ExprAST *E) {
     }
   }
   if (auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(E)) {
+    // LANG-001: `operator[]` -- checked before the array/pointer/string
+    // paths below for the identical reason TypeChecker::visitArrayAccess()
+    // checks it first: a struct base is never ALSO a real array/pointer/
+    // string, so there is no ambiguity between the two.
+    if (ArrAcc->ResolvedIndexGetTarget && ArrAcc->ResolvedIndexGetTarget->ReturnType) {
+      const TurfType *RetTy = ArrAcc->ResolvedIndexGetTarget->ReturnType.get();
+      if (GlobalSymbolTable) {
+        if (const auto *NT = dynamic_cast<const NamedType *>(RetTy)) {
+          if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+            return Resolved.get();
+        }
+      }
+      return RetTy;
+    }
     const TurfType *BaseTy = getExprType(ArrAcc->getBase());
     if (BaseTy) {
       if (BaseTy->isString())

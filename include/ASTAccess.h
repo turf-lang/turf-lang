@@ -250,6 +250,26 @@ public:
   const ExprAST *getBase() const { return Base.get(); }
   const ExprAST *getIndex() const { return Index.get(); }
 
+  /// LANG-001: `operator[]` (read) candidates -- gathered by
+  /// Resolver::visitArrayAccess() whenever the base ISN'T already a real
+  /// array/pointer/string (those keep their existing builtin indexing
+  /// unchanged; a struct base is the only case an `operator[]` overload can
+  /// apply to at all, since builtins can't declare one -- see
+  /// Resolver::validateOperatorDecl()'s all-primitive rejection, which
+  /// still runs for `operator[]`'s self type via the ordinary struct/enum
+  /// check). Mirrors BinaryExprAST's ResolvedOperatorCandidates/Target
+  /// pattern exactly. Empty/null in cloned trees.
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedIndexGetCandidates;
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedIndexGetTarget;
+
+  /// `operator[]=` (write) candidates -- gathered alongside the read
+  /// candidates above (the Resolver can't yet know whether THIS particular
+  /// access will end up as an assignment target; that's decided later, in
+  /// TypeChecker::visitAssignment(), by exact-matching (BaseType, IndexType,
+  /// RHSType) against these). Never consulted by an ordinary read.
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedIndexSetCandidates;
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedIndexSetTarget;
+
   llvm::Value *codegen() override;
   llvm::Value *codegenLValue() override;
   void accept(ASTVisitor &V) override { V.visitArrayAccess(*this); }

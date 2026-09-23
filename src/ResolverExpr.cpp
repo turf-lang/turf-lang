@@ -151,11 +151,42 @@ void Resolver::visitBinary(BinaryExprAST &Node) {
   // has none and must fall through to the builtin arithmetic path. The
   // TypeChecker decides whether the absence of a candidate is actually an
   // error (no builtin match either).
+
+  // LANG-001: this node's LHS is the REAL operand of a user-written `!x`
+  // (see ResolvedNotOperatorCandidates's own doc comment, ASTExpr.h) --
+  // gather unary `operator!` candidates against it too, same two-source
+  // visibility as above. Harmless/empty for an ordinary literal `a != b`
+  // (IsDesugaredNot is false there).
+  Node.ResolvedNotOperatorCandidates.clear();
+  if (Node.IsDesugaredNot) {
+    const std::string NotKey = operatorFunctionName('!');
+    for (const auto *S : SymTable_.lookupCurrentFileFunctions(NotKey))
+      Node.ResolvedNotOperatorCandidates.push_back(
+          std::make_shared<ResolverFunctionSymbol>(*S));
+    for (const auto &M : SymTable_.findInModules(NotKey))
+      Node.ResolvedNotOperatorCandidates.push_back(
+          std::make_shared<ResolverFunctionSymbol>(*M.Symbol));
+  }
 }
 
 
 void Resolver::visitUnary(UnaryExprAST &Node) {
   visitChild(Node.getOperand());
+
+  Node.ResolvedOperatorCandidates.clear();
+  if (!isOverloadableUnaryOp(Node.getOpcode()))
+    return; // unary '+' (and anything else) never goes through operator resolution
+
+  const std::string Key = operatorFunctionName(Node.getOpcode());
+
+  // Same two-source visibility as visitBinary() above (self-file, then
+  // every other known module) -- see its comment for the reasoning.
+  for (const auto *S : SymTable_.lookupCurrentFileFunctions(Key))
+    Node.ResolvedOperatorCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*S));
+  for (const auto &M : SymTable_.findInModules(Key))
+    Node.ResolvedOperatorCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*M.Symbol));
 }
 
 
@@ -180,11 +211,36 @@ void Resolver::visitCast(CastExprAST &Node) {
 void Resolver::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
   visitChild(Node.getRHS());
   visitChild(Node.getLHS());
+
+  Node.ResolvedOperatorCandidates.clear();
+  if (!isOverloadableBinaryOp(Node.getOpcode()))
+    return; // bitwise/`**` compound forms have their own builtin-only rules
+
+  const std::string Key = operatorFunctionName(Node.getOpcode());
+  for (const auto *S : SymTable_.lookupCurrentFileFunctions(Key))
+    Node.ResolvedOperatorCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*S));
+  for (const auto &M : SymTable_.findInModules(Key))
+    Node.ResolvedOperatorCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*M.Symbol));
 }
 
 
 void Resolver::visitPostfixExpr(PostfixExprAST &Node) {
   visitChild(Node.getOperand());
+
+  // D21 (docs/development/changes/LANG-001.md): postfix `++`/`--` picks up
+  // `operator+`/`operator-` the same way prefix's desugaring does, matched
+  // against (OperandType, int) -- see the field's own doc comment (ASTExpr.h)
+  // for why this needs its own gathering rather than reusing BinaryExprAST's.
+  Node.ResolvedOperatorCandidates.clear();
+  const std::string Key = operatorFunctionName(Node.getOpcode());
+  for (const auto *S : SymTable_.lookupCurrentFileFunctions(Key))
+    Node.ResolvedOperatorCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*S));
+  for (const auto &M : SymTable_.findInModules(Key))
+    Node.ResolvedOperatorCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*M.Symbol));
 }
 
 

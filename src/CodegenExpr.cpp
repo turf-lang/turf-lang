@@ -194,6 +194,27 @@ Value *BinaryExprAST::codegen() {
   if (!L || !R)
     return nullptr;
 
+  // ── Unary `operator!` dispatch (LANG-001) ────────────────────────────────
+  // TypeChecker::visitBinary() already picked ResolvedNotOperatorTarget over
+  // the ordinary operator!=/builtin path when this node is a user-written
+  // `!x` whose operand type declares a unary `operator!` -- see that
+  // field's doc comment (ASTExpr.h). Only L (the real operand) is passed;
+  // R is the synthetic `true` literal, already evaluated above for no
+  // reason other than every other branch of this function unconditionally
+  // evaluating both sides first (harmless -- a BoolExprAST::codegen() is a
+  // single constant, not a side effect).
+  if (ResolvedNotOperatorTarget) {
+    std::string MangledName = ResolvedNotOperatorTarget->mangledName();
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: operator overload '" +
+                          MangledName + "' was resolved but never codegenned."));
+      return nullptr;
+    }
+    return Builder->CreateCall(CalleeF, {L}, "nottmp");
+  }
+
   // ── Operator overload dispatch ──────────────────────────────────────────
   // TypeChecker::visitBinary() already resolved ResolvedOperatorTarget (if
   // any) via exact operand-type match against ResolvedOperatorCandidates --
@@ -462,6 +483,25 @@ Value *UnaryExprAST::codegen() {
   Value *OperandV = Operand->codegen();
   if (!OperandV)
     return nullptr;
+
+  // ── Operator overload dispatch (LANG-001) ────────────────────────────────
+  // TypeChecker::visitUnary() already resolved ResolvedOperatorTarget (if
+  // any) via exact operand-type match -- mirrors BinaryExprAST::codegen()'s
+  // identical dispatch. Checked BEFORE getTurfTypeFromLLVM() below: that
+  // function is the erasure-era LLVM-type-guessing fallback (§9.7/D18) and
+  // has no reliable answer for a struct operand anyway -- irrelevant once a
+  // real operator overload applies.
+  if (ResolvedOperatorTarget) {
+    std::string MangledName = ResolvedOperatorTarget->mangledName();
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: operator overload '" +
+                          MangledName + "' was resolved but never codegenned."));
+      return nullptr;
+    }
+    return Builder->CreateCall(CalleeF, {OperandV}, "unaryoptmp");
+  }
 
   TurfTypePtr OperandType = getTurfTypeFromLLVM(OperandV->getType());
   if (OperandType->isNamed("bool"))

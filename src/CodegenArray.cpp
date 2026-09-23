@@ -256,6 +256,38 @@ Value *ArrayAccessExprAST::codegenLValue() {
 
 
 Value *ArrayAccessExprAST::codegen() {
+  // ── operator[] dispatch (LANG-001) ───────────────────────────────────────
+  // TypeChecker::visitArrayAccess() already resolved ResolvedIndexGetTarget
+  // (if any) via exact (BaseType, IndexType) match. A struct base has no
+  // physical memory layout `codegenLValue()` could GEP into for this at
+  // all -- this is an ordinary function call returning T BY VALUE, so it is
+  // checked first and never touches codegenLValue()/the array/pointer/
+  // string paths below (mirrors BinaryExprAST::codegen()'s ResolvedOperator
+  // Target dispatch).
+  if (ResolvedIndexGetTarget) {
+    // Self is passed BY ADDRESS when the overload declared it `&T`
+    // (operatorSelfOperandMatches()'s deliberate relaxation,
+    // TypeCheckerCall.cpp) -- BY VALUE otherwise.
+    const bool SelfByRef = !ResolvedIndexGetTarget->Params.empty() &&
+        ResolvedIndexGetTarget->Params[0].Type &&
+        ResolvedIndexGetTarget->Params[0].Type->isReference();
+    Value *BaseVal = SelfByRef ? Base->codegenLValue() : Base->codegen();
+    if (!BaseVal)
+      return nullptr;
+    Value *IndexVal = Index->codegen();
+    if (!IndexVal)
+      return nullptr;
+    std::string MangledName = ResolvedIndexGetTarget->mangledName();
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: operator overload '" +
+                          MangledName + "' was resolved but never codegenned."));
+      return nullptr;
+    }
+    return Builder->CreateCall(CalleeF, {BaseVal, IndexVal}, "idxoptmp");
+  }
+
   const TurfType *BaseTy = getExprType(Base.get());
   if (BaseTy && BaseTy->isString()) {
     Value *StrVal = Base->codegen();

@@ -181,6 +181,25 @@ public:
     return ResolvedOperatorTarget.get();
   }
 
+  /// LANG-001: unary `operator!` candidates -- ONLY ever populated when
+  /// IsDesugaredNot is true (i.e. this node is really a user-written `!x`,
+  /// not a literal `x != true`). Kept SEPARATE from
+  /// ResolvedOperatorCandidates/ResolvedOperatorTarget above (which, for
+  /// this same node, hold the BINARY `operator!=` candidates matching
+  /// TOK_NEQ) rather than reusing them, because the two are genuinely
+  /// different operators (unary `!` vs. binary `!=`) that happen to share
+  /// one synthesized AST node for the `!x` shape -- see
+  /// docs/development/changes/LANG-001.md for why `!x` is handled this way
+  /// instead of becoming a real UnaryExprAST('!', ...) at parse time (in
+  /// short: ParseUnary() has no type information yet, so it can't decide
+  /// at parse time whether a given `!x` will end up wanting `operator!` or
+  /// the builtin `x != true` comparison -- keeping the existing desugared
+  /// shape and layering unary resolution ONTO it, checked first, preserves
+  /// the builtin path's exact existing runtime semantics with zero risk of
+  /// silently changing what `!5`/`!someBool` compute).
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedNotOperatorCandidates;
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedNotOperatorTarget;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitBinary(*this); }
   std::unique_ptr<ExprAST> clone() const override {
@@ -188,8 +207,9 @@ public:
                                                    CloneExprAST(LHS.get()),
                                                    CloneExprAST(RHS.get()));
     Cloned->IsDesugaredNot = IsDesugaredNot;
-    // Note: ResolvedOperatorCandidates and ResolvedOperatorTarget are
-    // intentionally NOT copied — cloned ASTs are stale until re-resolved.
+    // Note: ResolvedOperatorCandidates/Target and ResolvedNotOperator
+    // Candidates/Target are intentionally NOT copied — cloned ASTs are
+    // stale until re-resolved.
     return Cloned;
   }
 };
@@ -235,6 +255,29 @@ public:
   const ExprAST *getLHS() const { return LHS.get(); }
   const ExprAST *getRHS() const { return RHS.get(); }
 
+  /// LANG-001/F-OP-2: compound assignment DESUGARS (`a op= b` ≡ `a = a op
+  /// b`) -- there is no `operator+=`. Rather than literally rewriting the
+  /// AST into an Assignment(Binary(...)) (which would evaluate the LHS
+  /// LOCATION twice if it were ever a call/index expression -- explicitly
+  /// disallowed by §13.5), this node keeps its single existing LHS
+  /// evaluation and instead consults the underlying binary operator's own
+  /// overload table, exactly like BinaryExprAST does. Gathered by
+  /// Resolver::visitCompoundAssignment() keyed on `operatorFunctionName(
+  /// Opcode)` (empty for a non-overloadable Opcode, e.g. the bitwise
+  /// compound forms already reject non-int operands their own way).
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedOperatorCandidates;
+  const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &
+  getResolvedOperatorCandidates() const {
+    return ResolvedOperatorCandidates;
+  }
+
+  /// The single overload selected by exact match against (LHSType,
+  /// RHSType). Not copied by clone().
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedOperatorTarget;
+  const ResolverFunctionSymbol *getResolvedOperatorTarget() const {
+    return ResolvedOperatorTarget.get();
+  }
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitCompoundAssignment(*this); }
   std::unique_ptr<ExprAST> clone() const override {
@@ -257,6 +300,29 @@ public:
   const SourceLocation &getLoc() const { return Loc; }
   int getOpcode() const { return Opcode; }
   const ExprAST *getOperand() const { return Operand.get(); }
+
+  /// LANG-001/D21: postfix `++`/`--` does NOT desugar at parse time the way
+  /// prefix does (see ParserCore.cpp's prefix handling, which literally
+  /// builds `x = x + 1` and so inherits `operator+` for free through the
+  /// ordinary BinaryExprAST path with zero extra code) -- it needs its own
+  /// old-value-preserving lowering, so it needs its own operator-overload
+  /// hookup too. Gathered by Resolver::visitPostfixExpr() against
+  /// "operator+"/"operator-" (arity 2), mirroring BinaryExprAST's fields
+  /// exactly. Empty for a numeric operand (falls through to the builtin
+  /// +1/-1 path unchanged).
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedOperatorCandidates;
+  const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &
+  getResolvedOperatorCandidates() const {
+    return ResolvedOperatorCandidates;
+  }
+
+  /// The single overload selected by exact match against (OperandType,
+  /// int) -- the postfix's implicit "+1"/"-1" is always a plain `int`, same
+  /// as prefix's desugared literal. Not copied by clone().
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedOperatorTarget;
+  const ResolverFunctionSymbol *getResolvedOperatorTarget() const {
+    return ResolvedOperatorTarget.get();
+  }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitPostfixExpr(*this); }
@@ -343,6 +409,29 @@ public:
   const SourceLocation &getLoc() const { return Loc; }
   int getOpcode() const { return Opcode; }
   const ExprAST *getOperand() const { return Operand.get(); }
+
+  /// LANG-001: `operator<sym>` overloads (arity 1) whose name matches this
+  /// node's opcode, gathered by Resolver::visitUnary() -- mirrors
+  /// BinaryExprAST::ResolvedOperatorCandidates exactly (empty for a
+  /// non-overloadable opcode, e.g. unary '+', and for an overloadable one
+  /// with no visible declaration -- plain `-5` on a numeric literal has
+  /// none). clone() returns a fresh node, so this is empty in cloned trees.
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedOperatorCandidates;
+  const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &
+  getResolvedOperatorCandidates() const {
+    return ResolvedOperatorCandidates;
+  }
+
+  /// The single overload TypeChecker::visitUnary() selected from
+  /// ResolvedOperatorCandidates by EXACT operand-type match (F-OP-1 -- no
+  /// numeric coercion). Null means "no operator overload applies" --
+  /// Codegen falls through to the builtin unary switch, exactly as it
+  /// always has. Not copied by clone() -- same contract as
+  /// BinaryExprAST::ResolvedOperatorTarget.
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedOperatorTarget;
+  const ResolverFunctionSymbol *getResolvedOperatorTarget() const {
+    return ResolvedOperatorTarget.get();
+  }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitUnary(*this); }

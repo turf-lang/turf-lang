@@ -280,6 +280,49 @@ Value *VariableExprAST::codegenLValue() {
 
 
 Value *AssignmentExprAST::codegen() {
+  // ── operator[]= dispatch (LANG-001) ──────────────────────────────────────
+  // TypeChecker::visitAssignment() already resolved ArrayAccessExprAST::
+  // ResolvedIndexSetTarget (if any) via exact (BaseType, IndexType,
+  // ValueType) match, for a struct LHS base with no physical address
+  // codegenLValue() could ever GEP into. Checked first and returns early --
+  // an operator[]= write is an ordinary 3-argument function call, not a
+  // store, so none of the getExprType()/CastToType()/codegenLValue()
+  // machinery below applies to it at all.
+  if (const auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(LHS.get())) {
+    if (ArrAcc->ResolvedIndexSetTarget) {
+      // Self is passed BY ADDRESS when the overload declared it `&T`
+      // (operatorSelfOperandMatches()'s deliberate relaxation,
+      // TypeCheckerCall.cpp) -- BY VALUE otherwise, exactly matching
+      // whichever form the exact-match check actually accepted.
+      const bool SelfByRef = !ArrAcc->ResolvedIndexSetTarget->Params.empty() &&
+          ArrAcc->ResolvedIndexSetTarget->Params[0].Type &&
+          ArrAcc->ResolvedIndexSetTarget->Params[0].Type->isReference();
+      Value *BaseVal = SelfByRef
+          ? const_cast<ExprAST *>(ArrAcc->getBase())->codegenLValue()
+          : const_cast<ExprAST *>(ArrAcc->getBase())->codegen();
+      if (!BaseVal)
+        return nullptr;
+      Value *IndexVal = const_cast<ExprAST *>(ArrAcc->getIndex())->codegen();
+      if (!IndexVal)
+        return nullptr;
+      Value *ValueVal = RHS->codegen();
+      if (!ValueVal)
+        return nullptr;
+      std::string MangledName = ArrAcc->ResolvedIndexSetTarget->mangledName();
+      Function *CalleeF = TheModule->getFunction(MangledName);
+      if (!CalleeF) {
+        llvm::report_fatal_error(
+            llvm::StringRef("Internal error: operator overload '" +
+                            MangledName + "' was resolved but never codegenned."));
+        return nullptr;
+      }
+      Builder->CreateCall(CalleeF, {BaseVal, IndexVal, ValueVal});
+      // Assignment expressions usually return the value assigned (allows
+      // x = arr[i] = 5) -- same convention as the ordinary store path below.
+      return ValueVal;
+    }
+  }
+
   // Generate code for the RHS first
   Value *Val = RHS->codegen();
   if (!Val)
@@ -362,6 +405,28 @@ Value *CompoundAssignmentExprAST::codegen() {
 
   Type *LLVMTy = getLLVMType(LHSTy);
   Value *LHSVal = Builder->CreateLoad(LLVMTy, Ptr, "compassign.load");
+
+  // ── Operator overload dispatch (F-OP-2's desugaring) ─────────────────────
+  // TypeChecker::visitCompoundAssignment() already resolved
+  // ResolvedOperatorTarget (if any) via exact (LHSType, RHSType) match.
+  // LHSVal/Ptr above are already the CORRECT struct-typed load/address (no
+  // getTurfTypeFromLLVM() round-trip needed for this path, unlike the
+  // builtin numeric branches below) -- call the overload directly and
+  // store its result back through the SAME Ptr, so the LHS location is
+  // still only ever evaluated once (§13.5's explicit requirement).
+  if (ResolvedOperatorTarget) {
+    std::string MangledName = ResolvedOperatorTarget->mangledName();
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: operator overload '" +
+                          MangledName + "' was resolved but never codegenned."));
+      return nullptr;
+    }
+    Value *Result = Builder->CreateCall(CalleeF, {LHSVal, Val}, "compassign.optmp");
+    Builder->CreateStore(Result, Ptr);
+    return Result;
+  }
 
   TurfTypePtr VarType = getTurfTypeFromLLVM(LLVMTy);
 
@@ -503,6 +568,26 @@ Value *PostfixExprAST::codegen() {
 
   Type *LLVMTy = getLLVMType(OpTy);
   Value *OldVal = Builder->CreateLoad(LLVMTy, Ptr, "postfix.load");
+
+  // ── Operator overload dispatch (D21) ─────────────────────────────────────
+  // TypeChecker::visitPostfixExpr() already resolved ResolvedOperatorTarget
+  // (if any) via exact match against (OperandType, int). Postfix returns
+  // the OLD value regardless of which path is taken -- only how the NEW
+  // value is computed and stored back differs.
+  if (ResolvedOperatorTarget) {
+    std::string MangledName = ResolvedOperatorTarget->mangledName();
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: operator overload '" +
+                          MangledName + "' was resolved but never codegenned."));
+      return nullptr;
+    }
+    Value *DeltaOne = ConstantInt::get(*TheContext, APInt(64, 1, true));
+    Value *NewVal = Builder->CreateCall(CalleeF, {OldVal, DeltaOne}, "postfix.optmp");
+    Builder->CreateStore(NewVal, Ptr);
+    return OldVal;
+  }
 
   bool isDouble = OpTy->isNamed("double");
   Value *One = isDouble ? static_cast<Value *>(ConstantFP::get(*TheContext, APFloat(1.0)))

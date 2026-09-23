@@ -67,6 +67,22 @@ bool isAssignableLValue(const ExprAST *E) {
          dynamic_cast<const FieldAccessExprAST *>(E);
 }
 
+// LANG-001: true for an ArrayAccessExprAST base type that can ONLY ever be
+// indexed through `operator[]`/`operator[]=` -- i.e. everything except the
+// three builtin-indexable kinds (real array, pointer, string). Deliberately
+// NOT `T->isStruct() || T->isEnum()`: a monomorphized generic instantiation
+// like `List<int>`/`Set<int>`/`Map<string, int>` is a GenericType (Types.h),
+// a SIBLING of TurfStructType, not a subclass of it -- isStruct() is false
+// for one, so that narrower check silently let a struct/enum-shaped
+// diagnostic here miss every stdlib collection type entirely (confirmed
+// live: fail_stdlib_set_no_index_set.tr crashed with Codegen's "Internal
+// error: Base is not an array or pointer" ICE instead of raising the clean
+// error this function exists to produce, until this widened to "not a
+// builtin-indexable kind" instead of "is one of these two specific kinds").
+bool needsOperatorIndex(const TurfType *T) {
+  return T && !T->isArray() && !T->isPointer() && !T->isString();
+}
+
 // A short, human-readable description of what non-lvalue expression kind
 // was found on the LHS of '=', for InvalidAssignmentTargetError's message.
 std::string describeNonLValue(const ExprAST *E) {
@@ -198,6 +214,35 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
   const TurfType *RhsTy = getType(Node.getRHS()).get();
   int Op = Node.getOp();
 
+  // ── Unary `operator!` resolution (LANG-001) ──────────────────────────────
+  // Checked BEFORE the ordinary `operator!=`/builtin '!=' handling below --
+  // if this node is a user-written `!x` (IsDesugaredNot) and the operand's
+  // type declares a unary `operator!`, that ALWAYS takes it: `!x` means
+  // "apply unary not", never "compare x to the literal true" once a type
+  // opts into its own unary-not meaning. See ResolvedNotOperatorCandidates's
+  // doc comment (ASTExpr.h) for why this is layered onto the existing
+  // desugared shape instead of a real UnaryExprAST('!', ...) node.
+  if (Node.IsDesugaredNot && !Node.ResolvedNotOperatorCandidates.empty() && LhsTy) {
+    for (const auto &C : Node.ResolvedNotOperatorCandidates) {
+      if (!C || C->arity() != 1)
+        continue;
+      if (sameTypeExact(C->Params[0].Type.get(), LhsTy)) {
+        if (Node.ResolvedNotOperatorTarget) {
+          reportError(Node.getLoc(),
+                      "Ambiguous 'operator!(" + LhsTy->getName() +
+                          ")' call: more than one visible overload matches "
+                          "at this call site.");
+          break;
+        }
+        Node.ResolvedNotOperatorTarget = C;
+      }
+    }
+    if (Node.ResolvedNotOperatorTarget) {
+      setType(&Node, Node.ResolvedNotOperatorTarget->ReturnType);
+      return;
+    }
+  }
+
   // ── Operator overload resolution ─────────────────────────────────────────
   // Checked BEFORE the builtin bitwise/relational/exponent/arithmetic
   // dispatch below, for every whitelisted operator token. Safe to check
@@ -320,6 +365,35 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
   TurfTypePtr OperandTy = getType(Node.getOperand());
   int Op = Node.getOpcode();
 
+  // ── Operator overload resolution ─────────────────────────────────────────
+  // Mirrors visitBinary()'s identical block above -- checked BEFORE the
+  // builtin numeric/bool/bitwise dispatch below, for the same reason:
+  // Resolver::validateOperatorDecl() already hard-rejects an all-builtin
+  // operand, so a user overload can never shadow a builtin match here.
+  // Exact-type-match only (F-OP-1, sameTypeExact, no numeric coercion).
+  if (isOverloadableUnaryOp(Op) && !Node.ResolvedOperatorCandidates.empty() &&
+      OperandTy) {
+    for (const auto &C : Node.ResolvedOperatorCandidates) {
+      if (!C || C->arity() != 1)
+        continue;
+      if (sameTypeExact(C->Params[0].Type.get(), OperandTy.get())) {
+        if (Node.ResolvedOperatorTarget) {
+          reportError(Node.getLoc(),
+                      "Ambiguous 'operator " + OpToDisplayString(Op) + "(" +
+                          OperandTy->getName() +
+                          ")' call: more than one visible overload matches "
+                          "at this call site.");
+          break;
+        }
+        Node.ResolvedOperatorTarget = C;
+      }
+    }
+    if (Node.ResolvedOperatorTarget) {
+      setType(&Node, Node.ResolvedOperatorTarget->ReturnType);
+      return;
+    }
+  }
+
   if (Op == '-' || Op == '+') {
     // Negation / unary plus: operand must be numeric. Unary '+' is a no-op
     // on every numeric type (added purely for symmetry with '-' -- e.g.
@@ -417,7 +491,60 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   const bool LHSIsBareVariable =
       dynamic_cast<const VariableExprAST *>(Node.getLHS()) != nullptr;
 
-  if (LhsTy && RhsTy) {
+  // ── operator[]= overload resolution (LANG-001) ───────────────────────────
+  // If the LHS is an `arr[i]` shape whose base is a struct (LhsTy is null
+  // here for a write-only container -- see visitArrayAccess(), which only
+  // ever gives ArrayAccessExprAST a real type via a matching `operator[]`
+  // READ candidate or a builtin array/pointer/string), look for an exact
+  // match against `operator[]=`'s own (self, index, value) signature using
+  // the base/index's REAL types (not LhsTy, which doesn't describe this at
+  // all) plus the RHS's type as the value operand. A genuine array/pointer/
+  // string LHS never has any ResolvedIndexSetCandidates to begin with (no
+  // `operator[]=` can ever be declared with a builtin self type -- see
+  // validateOperatorDecl()), so this is a pure no-op for every existing
+  // (non-operator) assignment shape.
+  bool HandledViaOperatorIndexSet = false;
+  if (const auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS())) {
+    auto *MutableArrAcc = const_cast<ArrayAccessExprAST *>(ArrAcc);
+    TurfTypePtr ArrBaseTy = getType(ArrAcc->getBase());
+    TurfTypePtr ArrIndexTy = getType(ArrAcc->getIndex());
+    if (!ArrAcc->ResolvedIndexSetCandidates.empty() && ArrBaseTy && ArrIndexTy && RhsTy) {
+      for (const auto &C : ArrAcc->ResolvedIndexSetCandidates) {
+        if (!C || C->arity() != 3)
+          continue;
+        if (operatorSelfOperandMatches(C->Params[0].Type.get(), ArrBaseTy.get()) &&
+            sameTypeExact(C->Params[1].Type.get(), ArrIndexTy.get()) &&
+            sameTypeExact(C->Params[2].Type.get(), RhsTy.get())) {
+          if (MutableArrAcc->ResolvedIndexSetTarget) {
+            reportError(Node.getLoc(),
+                        "Ambiguous 'operator[]=(" + ArrBaseTy->getName() +
+                            ", " + ArrIndexTy->getName() + ", " +
+                            RhsTy->getName() +
+                            ")' call: more than one visible overload "
+                            "matches at this call site.");
+            break;
+          }
+          MutableArrAcc->ResolvedIndexSetTarget = C;
+        }
+      }
+      HandledViaOperatorIndexSet = MutableArrAcc->ResolvedIndexSetTarget != nullptr;
+    }
+    // A struct/enum base with no matching `operator[]=` (either none
+    // declared, or none with this exact (base, index, value) signature) is
+    // a clean type error here, not the "Internal error: Base is not an
+    // array or pointer" ICE Codegen's codegenLValue() would otherwise hit --
+    // same "clean error, not an ICE" bar fail_operator_not_visible.tr holds
+    // ordinary binary operators to (tests/18_operator_overload/).
+    if (!HandledViaOperatorIndexSet && ArrBaseTy &&
+        needsOperatorIndex(ArrBaseTy.get())) {
+      reportError(Node.getLoc(),
+                  "No 'operator[]=' overload matches '" + ArrBaseTy->getName() +
+                      "[" + (ArrIndexTy ? ArrIndexTy->getName() : "?") +
+                      "] = " + (RhsTy ? RhsTy->getName() : "?") + "'.");
+    }
+  }
+
+  if (LhsTy && RhsTy && !HandledViaOperatorIndexSet) {
     if (RhsTy->isNull()) {
       if (!LhsTy->isPointer() && !LhsTy->isNamed("ptr") && !LhsTy->isNamed("void*")) {
         std::string VarName = LHSVar ? LHSVar->getName() : "";
@@ -536,6 +663,84 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
   TurfTypePtr ResultTy;
   int Op = Node.getOpcode();
 
+  // ── Operator overload resolution (F-OP-2's desugaring) ───────────────────
+  // `a op= b` = `a = a op b` -- checked BEFORE the bitwise/`**`/arithmetic
+  // builtin dispatch below for the identical reason visitBinary() checks
+  // first: validateOperatorDecl() already hard-rejects an all-builtin
+  // operand pair, so a user overload can never shadow a builtin match.
+  // Exact-type-match only (F-OP-1). The LHS location was evaluated exactly
+  // ONCE, above (`Node.getLHS())->accept(*this)`), same as every other
+  // branch of this function -- there is no second evaluation to worry
+  // about, unlike a literal `a = a op b` AST rewrite would have caused
+  // (§13.5's explicit concern) if this had chosen that route instead.
+  if (isOverloadableBinaryOp(Op) && !Node.ResolvedOperatorCandidates.empty() &&
+      LhsTy && RhsTy) {
+    for (const auto &C : Node.ResolvedOperatorCandidates) {
+      if (!C || C->arity() != 2)
+        continue;
+      if (sameTypeExact(C->Params[0].Type.get(), LhsTy.get()) &&
+          sameTypeExact(C->Params[1].Type.get(), RhsTy.get())) {
+        if (Node.ResolvedOperatorTarget) {
+          reportError(Node.getLoc(),
+                      "Ambiguous 'operator " + OpToDisplayString(Op) + "=(" +
+                          LhsTy->getName() + ", " + RhsTy->getName() +
+                          ")' call: more than one visible overload matches "
+                          "at this call site.");
+          break;
+        }
+        Node.ResolvedOperatorTarget = C;
+      }
+    }
+    if (Node.ResolvedOperatorTarget) {
+      // F-OP-2: `a op= b` desugars to `a = a op b` -- the ASSIGNED type is
+      // therefore the operator's OWN return type, not necessarily LhsTy
+      // (mirrors ordinary compound assignment's own typesCompatible(
+      // ResultTy, LhsTy) check further below, except an operator overload's
+      // result must match the LHS's declared type exactly, the same "no
+      // coercion" rule every other operator-overload call site enforces).
+      TurfTypePtr OpResultTy = Node.ResolvedOperatorTarget->ReturnType;
+      if (OpResultTy && !sameTypeExact(OpResultTy.get(), LhsTy.get())) {
+        reportError(Node.getLoc(),
+                    "'operator " + OpToDisplayString(Op) + "' returns '" +
+                        OpResultTy->getName() + "', which cannot be "
+                        "assigned back to '" + LhsTy->getName() +
+                        "' without an explicit cast.");
+      }
+      setType(&Node, LhsTy);
+      return;
+    }
+  }
+
+  // LANG-001 scope boundary: compound assignment THROUGH `operator[]`
+  // (`myMap[k] += 1`) is deliberately not supported by this pass -- it would
+  // need a read-modify-write through both `operator[]` and `operator[]=`
+  // together, a genuinely separate feature from plain index read/write.
+  // Caught here as a clean diagnostic rather than reaching Codegen's
+  // CompoundAssignmentExprAST::codegen(), which calls LHS->codegenLValue()
+  // unconditionally and would hit ArrayAccessExprAST::codegenLValue()'s
+  // "Internal error: Base is not an array or pointer" ICE for a struct base
+  // with no PHYSICAL address (see docs/development/changes/LANG-001.md's
+  // Known pitfalls).
+  if (const auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS())) {
+    TurfTypePtr ArrBaseTy = getType(ArrAcc->getBase());
+    // Struct/enum base means this access is ALWAYS operator[]-mediated
+    // (never a real array/pointer/string) -- checked directly on the
+    // base's type, not on whether LhsTy came back null, because a
+    // container that declares BOTH operator[] and operator[]= (the
+    // common, symmetric case -- see 10_operator_index_get_set.tr) gives
+    // LhsTy a perfectly real type (operator[]'s return type) here, which
+    // would otherwise defeat a "LhsTy is null" check entirely.
+    if (ArrBaseTy && needsOperatorIndex(ArrBaseTy.get())) {
+      reportError(Node.getLoc(),
+                  "Compound assignment through 'operator[]' is not "
+                  "supported -- write 'x[i] = x[i] " + OpToDisplayString(Op) +
+                      " " + (RhsTy ? RhsTy->getName() : "value") +
+                      "' explicitly instead.");
+      setType(&Node, RhsTy);
+      return;
+    }
+  }
+
   // Bitwise compound-assign (&=, |=, ^=, <<=, >>=) -- same "int operands
   // only" rule as the plain binary form (visitBinary()'s isBitwise branch).
   // Skipping this and falling into the generic inferArithmeticType() call
@@ -632,8 +837,70 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
     const_cast<ExprAST *>(Node.getOperand())->accept(*this);
 
   TurfTypePtr OpTy = getType(Node.getOperand());
+  std::string OpSpelling(1, static_cast<char>(Node.getOpcode()));
 
-  if (OpTy && !OpTy->isNumeric()) {
+  // LANG-001 scope boundary: postfix `++`/`--` THROUGH `operator[]`
+  // (`box[i]++`) is deliberately not supported, same reasoning as compound
+  // assignment through `operator[]` just above visitCompoundAssignment()'s
+  // identical guard -- it would need operator[]/operator[]= chained
+  // together, and PostfixExprAST::codegen() calls Operand->codegenLValue()
+  // unconditionally, which would otherwise hit the same "Internal error:
+  // Base is not an array or pointer" ICE for a struct base with no
+  // physical address.
+  if (const auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(Node.getOperand())) {
+    TurfTypePtr ArrBaseTy = getType(ArrAcc->getBase());
+    if (ArrBaseTy && needsOperatorIndex(ArrBaseTy.get())) {
+      reportError(Node.getLoc(),
+                  "Postfix '" + OpSpelling + OpSpelling + "' through "
+                  "'operator[]' is not supported -- write 'x[i] = x[i] " +
+                      OpSpelling + " 1' explicitly instead.");
+      setType(&Node, OpTy);
+      return;
+    }
+  }
+
+  // ── Operator overload resolution (D21) ───────────────────────────────────
+  // Postfix `++`/`--` doesn't desugar the way prefix does (see
+  // PostfixExprAST::ResolvedOperatorCandidates's own doc comment, ASTExpr.h)
+  // -- exact match against (OperandType, int), mirroring prefix's own
+  // implicit `+ 1`/`- 1` desugared literal. The expression's OWN type stays
+  // OpTy either way (postfix returns the OLD value, per Codegen), but the
+  // overload's return type must match OpTy exactly for the implicit
+  // store-back to be sound.
+  bool HandledViaOperator = false;
+  if (!Node.ResolvedOperatorCandidates.empty() && OpTy) {
+    TurfTypePtr IntTy = TurfInt();
+    for (const auto &C : Node.ResolvedOperatorCandidates) {
+      if (!C || C->arity() != 2)
+        continue;
+      if (sameTypeExact(C->Params[0].Type.get(), OpTy.get()) &&
+          sameTypeExact(C->Params[1].Type.get(), IntTy.get())) {
+        if (Node.ResolvedOperatorTarget) {
+          reportError(Node.getLoc(),
+                      "Ambiguous postfix 'operator " + OpSpelling + "(" +
+                          OpTy->getName() +
+                          ", int)' call: more than one visible overload "
+                          "matches at this call site.");
+          break;
+        }
+        Node.ResolvedOperatorTarget = C;
+      }
+    }
+    if (Node.ResolvedOperatorTarget) {
+      TurfTypePtr OpResultTy = Node.ResolvedOperatorTarget->ReturnType;
+      if (OpResultTy && !sameTypeExact(OpResultTy.get(), OpTy.get())) {
+        reportError(Node.getLoc(),
+                    "'operator " + OpSpelling + "' returns '" +
+                        OpResultTy->getName() +
+                        "', which cannot be stored back into '" +
+                        OpTy->getName() + "' for postfix '" + OpSpelling +
+                        OpSpelling + "'.");
+      }
+      HandledViaOperator = true;
+    }
+  }
+
+  if (!HandledViaOperator && OpTy && !OpTy->isNumeric()) {
     reportError(Node.getLoc(),
                 "Postfix operator requires a numeric operand, got '" +
                     OpTy->getName() + "'.");

@@ -134,19 +134,28 @@ struct FunctionParam {
 // function it calls must already be declared earlier in the file.
 
 /// The fixed, whitelisted set of binary operator tokens that `operator`
-/// declarations may overload (RFC §8's assumed whitelist, minus []/[]= and
-/// unary -/! -- both explicitly out of scope for this pass; see the RFC's
-/// build-order notes). Deliberately excludes `%`, `**`, bitwise (`& | ^ <<
-/// >>`), `&&`/`||`, and every assignment form -- none of those go through
-/// operator resolution at all, so e.g. `a & b` on a struct with no bitwise
-/// meaning stays a plain, unambiguous type error rather than silently
-/// searching an overload table that was never meant to apply to it.
+/// declarations may overload (LANG-001, ARCHITECTURE_OVERHAUL.md §13.1 --
+/// supersedes the original STRING_UFCS_OPERATOR_CHAR_RFC.md §8 whitelist,
+/// which additionally deferred these). Deliberately still excludes `&&`/`||`
+/// (F-OP-4 -- short-circuit evaluation cannot survive a function call) and
+/// every assignment form (compound assignment DESUGARS to the underlying
+/// binary op instead of having its own `operator+=`, see §13.5) -- those
+/// never go through operator resolution at all, so e.g. `a && b` on a struct
+/// stays a plain, unambiguous type error rather than silently searching an
+/// overload table that was never meant to apply to it.
 inline bool isOverloadableBinaryOp(int Tok) {
   switch (Tok) {
   case '+':
   case '-':
   case '*':
   case '/':
+  case '%':
+  case TOK_POWER:
+  case '&':
+  case '|':
+  case '^':
+  case TOK_LSHIFT:
+  case TOK_RSHIFT:
   case TOK_EQ:
   case TOK_NEQ:
   case '<':
@@ -159,30 +168,81 @@ inline bool isOverloadableBinaryOp(int Tok) {
   }
 }
 
+/// The fixed set of unary operator tokens that `operator` declarations may
+/// overload (LANG-001, §13.1): `-` (negation), `!` (logical not), `~`
+/// (bitwise not). Deliberately excludes unary `+` -- it has no dedicated
+/// spelling distinct from binary `+` at the declaration site in a way that
+/// would carry independent meaning (unary `+` is already a numeric-only
+/// no-op, see TypeChecker::visitUnary()), and the frozen decision this
+/// session confirmed with the user scopes LANG-001's unary set to exactly
+/// these three, matching §13.1's table.
+inline bool isOverloadableUnaryOp(int Tok) {
+  switch (Tok) {
+  case '-':
+  case '!':
+  case '~':
+    return true;
+  default:
+    return false;
+  }
+}
+
 /// Synthesizes the overload-table key / FuncDefExprAST name for an
 /// `operator` declaration or use, e.g. '+' -> "operator+", TOK_EQ ->
 /// "operator==". This can never collide with a real user identifier --
 /// `operator` is a keyword token (TOK_OPERATOR) and no legal TOK_IDENTIFIER
-/// spelling can contain '+ - * / = < >' -- so storing operator overloads in
-/// the same name-keyed overload map ordinary `fn`s use (ResolverModule::
-/// Functions / TurfModule::Functions) is safe and requires no new map.
-/// Returns "" for a non-overloadable token (callers should have already
-/// checked isOverloadableBinaryOp() first).
+/// spelling can contain '+ - * / = < > % * & | ^'  -- so storing operator
+/// overloads in the same name-keyed overload map ordinary `fn`s use
+/// (ResolverModule::Functions / TurfModule::Functions) is safe and requires
+/// no new map.
+///
+/// Unary and binary forms of the SAME spelling (`-`) share this one name
+/// deliberately -- §13.2's "key by (spelling, arity), not by inventing a
+/// second name" decision. The ordinary overload map is already arity-aware
+/// (ResolverFunctionSymbol::arity()), so `operator-(a: Vec2): Vec2` (unary
+/// negation) and `operator-(a: Vec2, b: Vec2): Vec2` (subtraction) coexist
+/// as two differently-aritied overloads of the identical name "operator-",
+/// exactly the way a free function's own overloads do.
+///
+/// Returns "" for a token that is neither an overloadable binary nor unary
+/// operator (callers should have already checked isOverloadableBinaryOp()/
+/// isOverloadableUnaryOp() first).
 inline std::string operatorFunctionName(int Tok) {
   switch (Tok) {
   case '+': return "operator+";
   case '-': return "operator-";
   case '*': return "operator*";
   case '/': return "operator/";
+  case '%': return "operator%";
+  case TOK_POWER: return "operator**";
+  case '&': return "operator&";
+  case '|': return "operator|";
+  case '^': return "operator^";
+  case TOK_LSHIFT: return "operator<<";
+  case TOK_RSHIFT: return "operator>>";
   case TOK_EQ: return "operator==";
   case TOK_NEQ: return "operator!=";
   case '<': return "operator<";
   case '>': return "operator>";
   case TOK_LEQ: return "operator<=";
   case TOK_GEQ: return "operator>=";
+  case '!': return "operator!";
+  case '~': return "operator~";
   default: return "";
   }
 }
+
+/// Fixed key for `operator[]` (read) and `operator[]=` (write) -- these have
+/// no single Lexer token to switch on (the declaration syntax is
+/// `operator[](self: T, index: I): E { ... }` / `operator[]=(self: T, index:
+/// I, value: E): void { ... }`, parsed as a dedicated ParseOperatorDecl()
+/// branch rather than going through isOverloadableBinaryOp()'s token
+/// dispatch), so these two names are synthesized directly by the Parser
+/// instead of via operatorFunctionName(). Declared here so every consumer
+/// (Resolver's ArrayAccessExprAST candidate gathering, TypeChecker,
+/// sanitizeSymbolName()) shares the exact same literal spelling.
+inline const char *OperatorIndexGetName() { return "operator[]"; }
+inline const char *OperatorIndexSetName() { return "operator[]="; }
 
 /// Maps a synthesized operator function name (e.g. "operator+",
 /// "operator==") to a symbol-safe spelling for LLVM mangled names, so the
@@ -191,13 +251,24 @@ inline std::string operatorFunctionName(int Tok) {
 /// contains characters no linker/assembler is guaranteed to accept in a
 /// symbol name). Every non-operator name (the overwhelming majority of
 /// calls) passes through completely unchanged via the map-miss fallback.
+///
+/// Unary vs. binary `-` (and any other shared spelling) need no separate
+/// entry here: mangledName() appends every PARAMETER's own mangled type
+/// after this sanitized base, so "operator_minus_Vec2" (unary) and
+/// "operator_minus_Vec2_Vec2" (binary) already differ by arity alone.
 inline std::string sanitizeSymbolName(const std::string &Name) {
   static const std::unordered_map<std::string, std::string> Map = {
       {"operator+", "operator_plus"},   {"operator-", "operator_minus"},
       {"operator*", "operator_star"},   {"operator/", "operator_slash"},
+      {"operator%", "operator_mod"},    {"operator**", "operator_pow"},
+      {"operator&", "operator_band"},   {"operator|", "operator_bor"},
+      {"operator^", "operator_bxor"},   {"operator<<", "operator_shl"},
+      {"operator>>", "operator_shr"},
       {"operator==", "operator_eq"},    {"operator!=", "operator_ne"},
       {"operator<", "operator_lt"},     {"operator>", "operator_gt"},
       {"operator<=", "operator_le"},    {"operator>=", "operator_ge"},
+      {"operator!", "operator_not"},    {"operator~", "operator_bnot"},
+      {"operator[]", "operator_index"}, {"operator[]=", "operator_index_set"},
   };
   auto It = Map.find(Name);
   return It != Map.end() ? It->second : Name;

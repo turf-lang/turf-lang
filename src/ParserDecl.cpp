@@ -1011,21 +1011,49 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
 // every downstream pass (hoisting, Resolver, TypeChecker, Codegen mangling)
 // therefore needs zero changes to handle the DECLARATION side of an operator
 // at all; it's just a function with a funny name. See
-// STRING_UFCS_OPERATOR_CHAR_RFC.md §4 and §7 step 3.
+// STRING_UFCS_OPERATOR_CHAR_RFC.md §4 and §7 step 3, and LANG-001
+// (docs/development/changes/LANG-001.md) for the binary-set extension,
+// unary support, and `[]`/`[]=` addition below.
 std::unique_ptr<ExprAST> ParseOperatorDecl() {
   SourceLocation OpLoc = CurLoc;
   getNextToken(); // consume 'operator'
 
-  if (!isOverloadableBinaryOp(CurTok)) {
+  // `operator[]` / `operator[]=` -- no single Lexer token to switch on (`[`
+  // is also array-literal/array-access syntax elsewhere), so this is a
+  // dedicated branch ahead of the ordinary spelling-token dispatch below.
+  // Arity (2 for read, 3 for write) is validated after the parameter list,
+  // same as every other operator -- see OperatorIndexGetName()'s doc
+  // comment (ResolverSymbolBase.h) for why these two names aren't produced
+  // by operatorFunctionName().
+  bool IsIndexGet = false, IsIndexSet = false;
+  int OpTok = 0;
+  std::string FuncName;
+  if (CurTok == '[') {
+    getNextToken(); // eat '['
+    if (CurTok != ']') {
+      LogErrorAt(OpLoc, "Expected ']' to close 'operator['.", SLM::ErrorCategory::DECLARATION);
+      return nullptr;
+    }
+    getNextToken(); // eat ']'
+    if (CurTok == TOK_ASSIGN) {
+      getNextToken(); // eat '='
+      IsIndexSet = true;
+      FuncName = OperatorIndexSetName();
+    } else {
+      IsIndexGet = true;
+      FuncName = OperatorIndexGetName();
+    }
+  } else if (isOverloadableBinaryOp(CurTok) || isOverloadableUnaryOp(CurTok)) {
+    OpTok = CurTok;
+    FuncName = operatorFunctionName(OpTok);
+    getNextToken(); // consume the operator token
+  } else {
     LogErrorAt(OpLoc,
                "Expected an overloadable operator after 'operator'."
-               "\n  Hint: only + - * / == != < > <= >= may be overloaded "
-               "right now ([]/[]= and unary -/! are not supported yet).", SLM::ErrorCategory::DECLARATION);
+               "\n  Hint: binary + - * / % ** & | ^ << >> == != < > <= >=, "
+               "unary - ! ~, and [] / []= may be overloaded.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
-  int OpTok = CurTok;
-  std::string FuncName = operatorFunctionName(OpTok);
-  getNextToken(); // consume the operator token
 
   // Expect '('
   if (CurTok != '(') {
@@ -1088,24 +1116,56 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
   }
   getNextToken(); // eat ')'
 
-  // Arity check: this pass only supports binary operator overloading ([]/[]=
-  // and unary -/! are explicitly deferred, see STRING_UFCS_OPERATOR_CHAR_RFC.md
-  // §7's build order). A 1-param declaration is almost certainly someone
-  // trying to write a unary overload (`operator -(a: Vec2): Vec2`), which
-  // deserves a specific "not yet" message rather than a generic arity error.
-  if (Params.size() == 1) {
-    LogErrorAt(OpLoc,
-               "Unary operator overloading is not supported yet."
-               "\n  Hint: 'operator " + FuncName.substr(8) +
-                   "' must take exactly 2 parameters (a binary overload).", SLM::ErrorCategory::DECLARATION);
-    return nullptr;
-  }
-  if (Params.size() != 2) {
-    LogErrorAt(OpLoc,
-               "'operator " + FuncName.substr(8) +
-                   "' must take exactly 2 parameters, got " +
-                   std::to_string(Params.size()) + ".", SLM::ErrorCategory::DECLARATION);
-    return nullptr;
+  // Arity check -- LANG-001 generalizes this from "always exactly 2" to
+  // depend on which operator was named:
+  //   operator[]   (read)  -- exactly 2 (self, index)
+  //   operator[]=  (write) -- exactly 3 (self, index, value)
+  //   spelling-based, unary-capable only (! ~)      -- exactly 1
+  //   spelling-based, binary-capable only            -- exactly 2
+  //   spelling-based, BOTH unary and binary capable (-) -- 1 or 2; arity
+  //     alone (not a separate name) is what distinguishes negation from
+  //     subtraction, per operatorFunctionName()'s doc comment.
+  if (IsIndexGet) {
+    if (Params.size() != 2) {
+      LogErrorAt(OpLoc, "'operator[]' must take exactly 2 parameters "
+                        "(self, index), got " + std::to_string(Params.size()) + ".",
+                SLM::ErrorCategory::DECLARATION);
+      return nullptr;
+    }
+  } else if (IsIndexSet) {
+    if (Params.size() != 3) {
+      LogErrorAt(OpLoc, "'operator[]=' must take exactly 3 parameters "
+                        "(self, index, value), got " + std::to_string(Params.size()) + ".",
+                SLM::ErrorCategory::DECLARATION);
+      return nullptr;
+    }
+  } else {
+    bool CanUnary = isOverloadableUnaryOp(OpTok);
+    bool CanBinary = isOverloadableBinaryOp(OpTok);
+    std::string OpSpelling = FuncName.substr(8);
+    if (Params.size() == 1) {
+      if (!CanUnary) {
+        LogErrorAt(OpLoc,
+                   "'operator " + OpSpelling +
+                       "' has no unary form -- it must take exactly 2 "
+                       "parameters (a binary overload).", SLM::ErrorCategory::DECLARATION);
+        return nullptr;
+      }
+    } else if (Params.size() == 2) {
+      if (!CanBinary) {
+        LogErrorAt(OpLoc,
+                   "'operator " + OpSpelling +
+                       "' has no binary form -- it must take exactly 1 "
+                       "parameter (a unary overload).", SLM::ErrorCategory::DECLARATION);
+        return nullptr;
+      }
+    } else {
+      std::string Arities = CanUnary && CanBinary ? "1 or 2" : (CanUnary ? "1" : "2");
+      LogErrorAt(OpLoc,
+                 "'operator " + OpSpelling + "' must take " + Arities +
+                     " parameter(s), got " + std::to_string(Params.size()) + ".", SLM::ErrorCategory::DECLARATION);
+      return nullptr;
+    }
   }
 
   // Expect ':' then return type -- identical shape to ParseFuncDef()'s.
