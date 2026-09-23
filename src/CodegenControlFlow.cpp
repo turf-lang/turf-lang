@@ -46,6 +46,64 @@ using namespace llvm;
 // (While/DoWhile/For/ForEach), all in this same file.
 std::vector<std::pair<llvm::BasicBlock *, llvm::BasicBlock *>> LoopBlocks;
 
+// LANG-003 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): `defer`'s entire
+// lowering lives in this file, as three pieces of shared state plus one
+// helper, rather than in the separate CFG.cpp static-analysis subsystem --
+// CFGBuilder (CFG.cpp) never needs to know about `defer` at all, since a
+// `defer <stmt>;` never itself branches: from the CFG's point of view it's
+// an ordinary "regular statement" leaf (CFGBuilder::visitExpr()'s fallback
+// case already handles it correctly with zero changes there), and its
+// runtime effect is purely a matter of WHEN its wrapped statement's own
+// codegen() actually runs -- a pure AST-recursive-Codegen lowering problem.
+//
+// One frame per currently-open `{ }` scope (pushed/popped by
+// BlockExprAST::codegen() itself, below), holding the raw ExprAST* each
+// `defer <stmt>;` registers into it (DeferExprAST::codegen() never codegens
+// its own wrapped statement -- it just appends to the innermost open
+// frame). Reusing the SAME raw ExprAST* pointer across every exit edge that
+// flushes it is deliberate, not an aliasing bug: `defer` re-runs the
+// statement AS WRITTEN against whatever variable state exists at each exit
+// point (no argument-snapshotting the way Go's `defer f(x)` evaluates `x`
+// immediately) -- codegen()-ing the same node once per reached exit edge is
+// exactly what that requires, and every ExprAST::codegen() implementation
+// in this compiler already tolerates being called more than once on the
+// same node (e.g. the "after_ret" dead-block duplicate-flush case
+// FlushPendingDefers()/BlockExprAST::codegen() below rely on).
+static std::vector<std::vector<ExprAST *>> PendingDeferFrames;
+
+// Parallel to LoopBlocks: PendingDeferFrames.size() at the moment each
+// loop's OWN body starts (i.e. before that body's BlockExprAST::codegen()
+// pushes its own frame) -- lets BreakExprAST/ContinueExprAST bound how many
+// of the currently-open frames belong to blocks INSIDE this loop (which
+// must run) versus frames belonging to blocks enclosing the loop itself
+// (which break/continue must never touch -- only `return` exits those).
+static std::vector<size_t> LoopDeferDepth;
+
+// Runs every deferred statement in every currently-open frame from
+// `FromDepth` (inclusive) to the top of the stack: innermost frame first,
+// each frame's own statements in reverse (LIFO) registration order -- the
+// exact ordering LANG-003 specifies for `defer` firing on any exit edge.
+// Deliberately does NOT pop anything: the block(s) that own these frames
+// are still lexically open (control is merely leaving them EARLY, via a
+// return/break/continue reachable from somewhere inside); each block still
+// pops its own frame exactly once, itself, when its own
+// BlockExprAST::codegen() call returns (same "owner does its own cleanup"
+// discipline GlobalSymbolTable::EnterScope()/ExitScope() already follows
+// around this identical early-exit machinery). A block whose own natural
+// end is never reached at runtime because this function already flushed
+// and returned/broke/continued through it still calls FlushPendingDefers()
+// a second time on itself when Codegen reaches that now-dead code position
+// (BlockExprAST::codegen()'s own post-loop check can't statically tell "no
+// terminator yet" apart from "definitely reachable") -- harmless: nothing
+// branches into that position, so LLVM never executes the duplicate.
+static void FlushPendingDefers(size_t FromDepth) {
+  for (size_t i = PendingDeferFrames.size(); i-- > FromDepth;) {
+    std::vector<ExprAST *> &Frame = PendingDeferFrames[i];
+    for (auto It = Frame.rbegin(); It != Frame.rend(); ++It)
+      (*It)->codegen();
+  }
+}
+
 
 Value *IfExprAST::codegen() {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
@@ -150,6 +208,13 @@ Value *BlockExprAST::codegen() {
     GlobalSymbolTable->EnterScope();
   }
 
+  // LANG-003: this block's own `defer` frame. Pushed/popped here regardless
+  // of which OTHER construct this BlockExprAST happens to be (a function
+  // body, an if/while/for body, a `recover run { }` block, ...) -- every
+  // one of those already routes through this exact function for its body,
+  // so `defer` support falls out uniformly with no per-construct plumbing.
+  PendingDeferFrames.emplace_back();
+
   // A statement whose codegen() returns nullptr without having raised its
   // own diagnostic first is a genuine, silent compiler failure -- stop
   // processing the rest of this block instead of quietly dropping the
@@ -181,12 +246,34 @@ Value *BlockExprAST::codegen() {
     SetDebugLoc(GetNodeDebugLoc(Expr.get()));
     LastVal = Expr->codegen();
     if (!LastVal) {
+      PendingDeferFrames.pop_back();
       if (GlobalSymbolTable) {
         GlobalSymbolTable->ExitScope();
       }
       return nullptr;
     }
   }
+
+  // LANG-003: this block's own natural (non-early-exit) fallthrough to its
+  // end -- run its pending defers now, LIFO. Skipped when the current
+  // insert block already has a terminator: every path through this block
+  // already exited early (return/break/continue), each of which already
+  // ran these same defers itself via FlushPendingDefers() before its own
+  // terminator (see that function's doc comment for why this position, if
+  // reached at all in that case, is provably dead code and a harmless
+  // no-op to re-flush into).
+  //
+  // GetInsertBlock() can genuinely be null here: a MODULE's own top-level
+  // body is a BlockExprAST too (ModuleImportExprAST::codegen() calls
+  // Body->codegen() directly, CodegenStruct.cpp), with no enclosing
+  // function and therefore no current insert point -- a `defer` can't
+  // legally appear there anyway (nothing but declarations do), but this
+  // function still runs the push/pop bookkeeping unconditionally, so the
+  // flush decision has to tolerate it instead of dereferencing a null
+  // BasicBlock*.
+  if (Builder->GetInsertBlock() && !Builder->GetInsertBlock()->getTerminator())
+    FlushPendingDefers(PendingDeferFrames.size() - 1);
+  PendingDeferFrames.pop_back();
 
   // Exit scope
   if (GlobalSymbolTable) {
@@ -200,6 +287,27 @@ Value *BlockExprAST::codegen() {
     LastVal = Constant::getNullValue(Type::getInt64Ty(*TheContext));
 
   return LastVal;
+}
+
+
+// LANG-003: registers Stmt into the innermost currently-open block's defer
+// frame -- does NOT codegen Stmt itself. That happens later, once per exit
+// edge that actually reaches it (FlushPendingDefers(), called from this
+// same file's BlockExprAST::codegen() for the natural-fallthrough case and
+// from Break/Continue/ReturnExprAST::codegen() below for early exits).
+Value *DeferExprAST::codegen() {
+  if (PendingDeferFrames.empty()) {
+    // Can't happen from a valid parse: `defer` only ever reaches Codegen as
+    // a statement inside SOME `{ }` body, and a function/if/while/...  body
+    // is always a BlockExprAST, which always pushes a frame before any of
+    // its own children codegen (immediately above). Kept as a defensive
+    // diagnostic rather than a crash, mirroring BreakExprAST/
+    // ContinueExprAST's identical "used outside of a loop" shape below.
+    ControlFlowError(Loc, "'defer' used outside of any block").raise();
+    return nullptr;
+  }
+  PendingDeferFrames.back().push_back(Stmt.get());
+  return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }
 
 
@@ -239,13 +347,16 @@ Value *WhileExprAST::codegen() {
   Builder->SetInsertPoint(LoopBodyBB);
 
   LoopBlocks.push_back({LoopCondBB, AfterBB});
+  LoopDeferDepth.push_back(PendingDeferFrames.size());
 
   if (!Body->codegen()) {
     LoopBlocks.pop_back();
+    LoopDeferDepth.pop_back();
     return nullptr;
   }
 
   LoopBlocks.pop_back();
+  LoopDeferDepth.pop_back();
 
   // Jump back to the condition to loop again
   if (!Builder->GetInsertBlock()->getTerminator()) {
@@ -275,13 +386,16 @@ Value *DoWhileExprAST::codegen() {
 
   // continue -> re-check the condition; break -> after the loop.
   LoopBlocks.push_back({LoopCondBB, AfterBB});
+  LoopDeferDepth.push_back(PendingDeferFrames.size());
 
   if (!Body->codegen()) {
     LoopBlocks.pop_back();
+    LoopDeferDepth.pop_back();
     return nullptr;
   }
 
   LoopBlocks.pop_back();
+  LoopDeferDepth.pop_back();
 
   // Fall through to the condition check if the body didn't already terminate.
   if (!Builder->GetInsertBlock()->getTerminator()) {
@@ -420,14 +534,17 @@ Value *ForExprAST::codegen() {
 
   // Push {StepBB, AfterBB} so 'continue' jumps to step, 'break' jumps to after
   LoopBlocks.push_back({LoopStepBB, AfterBB});
+  LoopDeferDepth.push_back(PendingDeferFrames.size());
 
   if (!Body->codegen()) {
     LoopBlocks.pop_back();
+    LoopDeferDepth.pop_back();
     if (GlobalSymbolTable) GlobalSymbolTable->ExitScope();
     return nullptr;
   }
 
   LoopBlocks.pop_back();
+  LoopDeferDepth.pop_back();
 
   // Fall through to step block
   if (!Builder->GetInsertBlock()->getTerminator()) {
@@ -598,14 +715,17 @@ Value *ForEachExprAST::codegen() {
 
   // Push {StepBB, AfterBB} so 'continue' jumps to step, 'break' jumps to after.
   LoopBlocks.push_back({StepBB, AfterBB});
+  LoopDeferDepth.push_back(PendingDeferFrames.size());
 
   if (!Body->codegen()) {
     LoopBlocks.pop_back();
+    LoopDeferDepth.pop_back();
     if (GlobalSymbolTable) GlobalSymbolTable->ExitScope();
     return nullptr;
   }
 
   LoopBlocks.pop_back();
+  LoopDeferDepth.pop_back();
 
   // Fall through to step block.
   if (!Builder->GetInsertBlock()->getTerminator()) {
@@ -849,6 +969,13 @@ Value *BreakExprAST::codegen() {
     return nullptr;
   }
 
+  // LANG-003: run every pending defer belonging to a block INSIDE this
+  // loop (down to, and including, the loop body's own frame) before
+  // jumping out -- but none belonging to a block enclosing the loop, which
+  // `break` never exits. LoopDeferDepth.back() is exactly that boundary
+  // (see its own doc comment above).
+  FlushPendingDefers(LoopDeferDepth.back());
+
   Builder->CreateBr(LoopBlocks.back().second);
 
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
@@ -865,6 +992,11 @@ Value *ContinueExprAST::codegen() {
     ControlFlowError(Loc, "'continue' used outside of a loop").raise();
     return nullptr;
   }
+
+  // LANG-003: same reasoning as BreakExprAST::codegen() just above -- a
+  // `defer` inside a loop body runs per iteration, and `continue` ending
+  // one iteration early is exactly one of the exit edges that must run it.
+  FlushPendingDefers(LoopDeferDepth.back());
 
   Builder->CreateBr(LoopBlocks.back().first);
 
@@ -900,6 +1032,13 @@ Value *ReturnExprAST::codegen() {
   if (!Val) {
     // empty return; TypeChecker has verified this is a void (or `!void`)
     // function.
+    //
+    // LANG-003: run every pending defer, in every currently-open block
+    // frame, before actually leaving -- `return` exits the WHOLE function,
+    // so unlike break/continue (bounded to the innermost loop), this always
+    // flushes down to depth 0. No return value exists on this path to
+    // protect the ordering of, so it's safe to flush right here.
+    FlushPendingDefers(0);
     if (IsFallibleReturn)
       Builder->CreateRet(WrapFallibleValue(nullptr, /*IsError=*/false));
     else
@@ -909,6 +1048,16 @@ Value *ReturnExprAST::codegen() {
     Value *RetVal = Val->codegen();
     if (!RetVal)
       return nullptr;
+
+    // LANG-003: RetVal is deliberately computed BEFORE flushing (matching
+    // ordinary defer semantics elsewhere: the return value is fixed before
+    // cleanup runs, not re-derived after it) -- a `defer` that mutates a
+    // variable the return expression already read must not retroactively
+    // change what gets returned. Wrapping/casting RetVal below is a pure
+    // value transformation with no further variable reads, so flushing
+    // here is equivalent to flushing immediately before the eventual
+    // CreateRet() call further down.
+    FlushPendingDefers(0);
 
     // Type validation and compatibility are handled by the TypeChecker.
 

@@ -92,6 +92,23 @@ public:
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
+// LANG-003 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): "a deferred
+// statement may not return, break, or continue out of itself" -- there is
+// no way for such a jump to target only the defer statement and stop, it
+// always escapes to the enclosing function/loop, which a reader would never
+// expect from something spelled as ordinary cleanup code. Raised by
+// Resolver::visitDefer() (ResolverStmt.cpp) via FindEscapingControlFlow().
+class DeferControlFlowError : public TurfError {
+public:
+  DeferControlFlowError(SourceLocation Loc, const std::string &Kind)
+      : TurfError(Loc, Colors::BRIGHT_RED + "A deferred statement can't '" +
+                           Kind + "'!" + Colors::RESET,
+                  "'" + Kind + "' inside a 'defer' would jump out of the "
+                  "enclosing function or loop, not just the deferred "
+                  "statement -- move it out of the 'defer'.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
 // Lint Warnings - Reviewer-style heuristic pattern warnings
 // Redundant comparison: x == true, x != false, etc.
 class RedundantComparisonWarning : public TurfWarning {

@@ -347,4 +347,41 @@ public:
     }
 };
 
+// `defer <statement>;` -- registers Stmt to run when the ENCLOSING `{ }`
+// BLOCK exits, by any path (fallthrough, return, break, continue) except a
+// panic (TurfLang has no unwinding -- a panic aborts, LANG-003,
+// ARCHITECTURE_OVERHAUL.md §8), in reverse (LIFO) order relative to any
+// other `defer` registered earlier in the SAME block. Deliberately
+// block-scoped, not function-scoped: a `defer` inside a loop body's `{ }`
+// runs once per iteration, since that block's own basic blocks are simply
+// re-executed by the loop's own back edge -- see Codegen.cpp's
+// PendingDeferFrames/FlushPendingDefers for how this falls out of ordinary
+// straight-line lowering with no extra runtime bookkeeping.
+//
+// `Stmt` is parsed via the ordinary ParsePrimaryBase() dispatch (like
+// return/break/continue alongside it, ParserCore.cpp), so it can itself BE
+// a return/break/continue -- that's syntactically legal and is exactly the
+// shape the Resolver's dedicated check (FindEscapingControlFlow(),
+// ResolverStmt.cpp) exists to reject: "a deferred statement may not return,
+// break, or continue out of itself" (there is no way for such a jump to
+// target only "the defer statement" and stop -- it always escapes to the
+// enclosing function/loop, which is never what a reader expects here).
+class DeferExprAST : public ExprAST {
+  SourceLocation Loc;
+  std::unique_ptr<ExprAST> Stmt;
+
+public:
+  DeferExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Stmt)
+      : Loc(Loc), Stmt(std::move(Stmt)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  ExprAST *getStmt() const { return Stmt.get(); }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitDefer(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<DeferExprAST>(Loc, CloneExprAST(Stmt.get()));
+  }
+};
+
 #endif

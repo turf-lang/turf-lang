@@ -877,6 +877,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     getNextToken();
     return std::make_unique<ContinueExprAST>(KeywordLoc);
   }
+
+  case TOK_DEFER:
+    return ParseDeferStmt();
   }
 }
 

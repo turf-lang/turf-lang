@@ -379,10 +379,13 @@ enum Token {
   TOK_MACHINE  = -100, ///< `machine` keyword — state-machine declaration (enum + transition graph)
   TOK_ARROW    = -101, ///< `->`      token   — transition edge separator in a `machine` block
   TOK_UNSAFE   = -102, ///< `unsafe`  keyword — lexical gate for raw pointer types (issue #238)
-  TOK_GUESS    = -103  ///< `guess`   keyword — type-position placeholder for initializer type
+  TOK_GUESS    = -103, ///< `guess`   keyword — type-position placeholder for initializer type
                         ///< inference (SEM-003, ARCHITECTURE_OVERHAUL.md §11). Omitting a
                         ///< declaration's `: Type` annotation entirely is sugar for `: guess`;
                         ///< see ParseLetStatement().
+  TOK_DEFER    = -104  ///< `defer`   keyword — registers a statement to run when the enclosing
+                        ///< `{ }` block exits, by any path except a panic (LANG-003,
+                        ///< ARCHITECTURE_OVERHAUL.md §8). See ASTStmt.h's DeferExprAST.
 };
 
 int gettok();

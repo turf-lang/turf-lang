@@ -909,3 +909,27 @@ std::unique_ptr<ExprAST> ParseReturnExpr() {
     return nullptr;
   return std::make_unique<ReturnExprAST>(RetLoc, std::move(Val));
 }
+
+// ParseDeferStmt - called when CurTok == TOK_DEFER.
+// Parses: defer <statement>
+// Dispatched from ParsePrimaryBase() at the same level as
+// TOK_RETURN/TOK_BREAK/TOK_CONTINUE (LANG-003, ARCHITECTURE_OVERHAUL.md §8)
+// -- deliberately NOT its own statement-loop special case in ParseBlock(),
+// unlike TOK_MUTABLE/TOK_EXPORT/TOK_EXTERN just above. Those need their own
+// branch because they consume their own trailing ';' internally; `defer`
+// doesn't need to (its wrapped statement is a single ParseExpression() call,
+// same shape return/break/continue already have), so it can ride the SAME
+// generic ParseExpression()-then-';' fallback every ordinary statement uses.
+// That, in turn, is what makes a stray top-level `defer ...;` get rejected
+// by main.cpp's existing "statements are not allowed outside of a function"
+// check with zero extra plumbing -- the same protection return/break/
+// continue already get there.
+std::unique_ptr<ExprAST> ParseDeferStmt() {
+  SourceLocation KeywordLoc = CurLoc;
+  getNextToken(); // eat 'defer'
+
+  auto Stmt = ParseExpression();
+  if (!Stmt)
+    return nullptr;
+  return std::make_unique<DeferExprAST>(KeywordLoc, std::move(Stmt));
+}

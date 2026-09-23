@@ -60,6 +60,7 @@ class MachineDeclExprAST;
 class ScopeAccessExprAST;
 class ErrorDeclExprAST;
 class RecoverExprAST;
+class DeferExprAST;
 class StructDeclExprAST;
 class ModuleImportExprAST;
 class SizeOfExprAST;
@@ -125,6 +126,7 @@ public:
   virtual void visitContinue(ContinueExprAST &Node) {}
   virtual void visitReturn(ReturnExprAST &Node) {}
   virtual void visitCompare(CompareExprAST &Node) {}
+  virtual void visitDefer(DeferExprAST &Node) {}
 
 
   // ── Functions & Calls ─────────────────────────────────────────────────────

@@ -150,6 +150,20 @@ public:
 
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
 
+  // LANG-003: without this, a variable read or defined ONLY inside a
+  // `defer <statement>;` would be invisible to DefiniteAssignmentPass/
+  // LivenessAnalysisPass (both built on this visitor via
+  // collectReadsAndDefs()) -- ASTVisitor's default visitDefer() is a no-op,
+  // so a deferred read of an uninitialized local would go uncaught, and a
+  // local only ever read via `defer` would be falsely flagged
+  // UnusedVariableWarning/DeadStoreWarning. The defer's registration point
+  // (this textual position, not whenever it actually runs later) is
+  // exactly where the read/def dataflow-wise needs to be recorded: the
+  // deferred value doesn't exist yet, but the SYMBOL must already be
+  // assigned by here for the eventual deferred use to be sound, which is
+  // precisely what "treat it as an ordinary read/def right here" checks.
+  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
+
   void visitFuncCall(FuncCallExprAST &Node) override {
     // First-class functions: `f(x)` where `f` is a local variable/parameter
     // of fn(...):... type is a genuine READ of `f` -- unlike an ordinary
@@ -258,6 +272,11 @@ public:
   void visitBinary(BinaryExprAST &Node) override {
     visitChild(Node.getLHS()); visitChild(Node.getRHS());
   }
+  // LANG-003: a `defer` could (rarely) wrap a nested loop whose body
+  // declares its own local (e.g. `defer for (i in 0..n) { mut x = ...; }`)
+  // -- recurse in so DefiniteAssignmentPass's "AllBodyDeclared" set still
+  // sees it, same reasoning as AnalysisVisitor::visitDefer() above.
+  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
 };
 
 } // namespace
@@ -691,6 +710,11 @@ public:
 
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
 
+  // LANG-003: a `self.field = ...` cleanup line is exactly the sort of
+  // thing a constructor might reasonably `defer` -- recurse in so
+  // ConstructorFieldAssignmentPass still sees it as a real field def.
+  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
+
   void visitFuncCall(FuncCallExprAST &Node) override {
     for (const auto &Arg : Node.getArgs())
       visitChild(Arg.get());
@@ -920,6 +944,11 @@ public:
     visitChild(Node.getBody());
   }
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
+  // LANG-003: discovers every &?T-typed symbol the function touches AT ALL
+  // (see this class's own doc comment above) -- one only ever read/assigned
+  // inside a `defer` must still end up Tracked, or NullabilityPass would
+  // silently skip checking it everywhere else too.
+  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
   void visitAssignment(AssignmentExprAST &Node) override {
     visitChild(Node.getLHS());
     visitChild(Node.getRHS());

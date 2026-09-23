@@ -280,6 +280,7 @@ public:
   void visitContinue(ContinueExprAST &Node) override;
   void visitReturn(ReturnExprAST &Node) override;
   void visitCompare(CompareExprAST &Node) override;
+  void visitDefer(DeferExprAST &Node) override;
 
   // ── Functions & calls ─────────────────────────────────────────────────────
   void visitFuncDef(FuncDefExprAST &Node) override;

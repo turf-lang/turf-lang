@@ -36,6 +36,7 @@ std::unique_ptr<ExprAST> ParseForExpr();
 std::unique_ptr<ExprAST> ParseCompareExpr();
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
 std::unique_ptr<ExprAST> ParseReturnExpr();
+std::unique_ptr<ExprAST> ParseDeferStmt();
 std::unique_ptr<ExprAST> ParseUnsafeExpr();
 // The post-'unsafe' half of ParseUnsafeExpr() -- see its own doc comment
 // (ParserStmt.cpp) for why this is split out (LANG-002's capability-pragma

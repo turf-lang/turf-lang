@@ -161,6 +161,13 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // casting one to `&T` under the same condition.
     {"E081", "PossibleNullDereferenceError", "Possible null dereference", SLM::ErrorCategory::MEMORY_ERROR},
     {"E082", "UnnarrowedNullableCastError", "Unnarrowed nullable-to-safe-reference cast", SLM::ErrorCategory::TYPE_MISMATCH},
+    // LANG-003 (docs/development/changes/LANG-003.md): a `return`/`break`/
+    // `continue` found anywhere inside a `defer <statement>;`'s own
+    // statement -- always illegal, since it can only ever escape to the
+    // enclosing function/loop, never "just" the defer. Routed to the
+    // existing CONTROL_FLOW category, per §8's explicit instruction not to
+    // add a new SLM::ErrorCategory for these.
+    {"E083", "DeferControlFlowError", "Defer control flow", SLM::ErrorCategory::CONTROL_FLOW},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

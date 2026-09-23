@@ -373,3 +373,21 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
 
   setType(&Node, RetTy ? RetTy : TurfVoid());
 }
+
+void TypeChecker::visitDefer(DeferExprAST &Node) {
+  // Type-check the wrapped statement exactly as if it appeared directly in
+  // the enclosing block -- a `defer` is a lowering/scheduling detail, not a
+  // new typing context (LANG-003, ARCHITECTURE_OVERHAUL.md §8). Without
+  // this override, ASTVisitor's default no-op visitDefer() would mean a
+  // deferred statement's own expressions never went through the TypeChecker
+  // at all (every visit*() call is a DIRECT `Node->accept(*this)` from the
+  // parent, not an implicit recursive walk -- see visitBlock() just above).
+  if (Node.getStmt())
+    const_cast<ExprAST *>(Node.getStmt())->accept(*this);
+
+  // A `defer` statement is always used in statement position (parsed via
+  // the same generic ParseExpression()-then-';' path as any other
+  // statement, ParserStmt.cpp's ParseDeferStmt()) -- its own "value" is
+  // never read by anything, same as return/break/continue alongside it.
+  setType(&Node, TurfVoid());
+}

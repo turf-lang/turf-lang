@@ -314,6 +314,7 @@ public:
   void visitContinue(ContinueExprAST &Node) override { (void)Node; }
   void visitReturn(ReturnExprAST &Node) override;
   void visitCompare(CompareExprAST &Node) override;
+  void visitDefer(DeferExprAST &Node) override;
 
   void visitFuncDef(FuncDefExprAST &Node) override;
   void visitFuncCall(FuncCallExprAST &Node) override;
