@@ -155,6 +155,12 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // redefining an operator's meaning on two types it does not own, which
     // would make the operator's behavior depend on import order.
     {"E080", "OperatorOrphanRuleError", "Operator orphan rule violation", SLM::ErrorCategory::DECLARATION},
+    // LANG-002 (docs/development/changes/LANG-002.md): NullabilityPass's two
+    // checks, raised at Codegen time from the same CFG dataflow state --
+    // field-accessing a `&?T` that isn't proven non-null on this path, and
+    // casting one to `&T` under the same condition.
+    {"E081", "PossibleNullDereferenceError", "Possible null dereference", SLM::ErrorCategory::MEMORY_ERROR},
+    {"E082", "UnnarrowedNullableCastError", "Unnarrowed nullable-to-safe-reference cast", SLM::ErrorCategory::TYPE_MISMATCH},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

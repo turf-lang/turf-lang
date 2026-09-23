@@ -520,6 +520,15 @@ Value *FuncDefExprAST::codegen() {
     AliasAnalysisPass AAP;
     AAP.runOnCFG(*CfgPtr, ParamIDs);
 
+    // LANG-002: nullable-reference (&?T) dereference/narrowing analysis.
+    // Same pipeline position as every other CFG pass here -- after the
+    // TypeChecker has already validated the STATIC shape of every &?T use
+    // (typesCompatible()'s rules, Types.cpp), this pass is what verifies the
+    // FLOW-sensitive half: was a `p != null`/`p == null` check actually
+    // proven on the path reaching each `.field` access or `to &T` cast.
+    NullabilityPass NP;
+    NP.runOnCFG(*CfgPtr);
+
     // CFG Phase 2 (Issue #186): Liveness analysis (dead stores & unused vars).
     // Collect parameter VariableSymbol* pointers to exclude from warnings.
     {

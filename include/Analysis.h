@@ -63,4 +63,49 @@ public:
                 SourceLocation ConstructorLoc);
 };
 
+// LANG-002: a forward dataflow analysis over the CFG, structurally the same
+// shape as DefiniteAssignmentPass just above (a std::unordered_set<const
+// VariableSymbol*> per block, meet = intersection at merge points), tracking
+// which `&?T`-typed local/parameter variables are PROVEN non-null at each
+// program point. Two-state, not the three-state (NonNull/Nullable/Null)
+// lattice DESIGN_NOTES.md sketches: "proven non-null, or not" is all either
+// check below needs, and the simpler set-membership shape lets this reuse
+// DefiniteAssignmentPass's exact meet/fixed-point code, unchanged in
+// structure. (A symbol absent from the current set means "not proven" --
+// covers both "still nullable" and "just compared equal to null", which
+// this pass never needs to tell apart.)
+//
+// Narrowing sources (docs/architecture/pointers_and_references.md-adjacent,
+// this group's own change record has the full list): a direct comparison
+// `var != null` / `var == null` against a tracked variable, threaded through
+// `&&`/`||` short-circuit chains the same way the language actually
+// evaluates them (see EvalNarrow() in Analysis.cpp). Deliberately
+// intraprocedural and direct-comparison-only -- a field access, a method
+// call, or a comparison against anything other than the literal `null`
+// keyword narrows nothing (§8 LANG-002's own "start deliberately local"
+// guidance). Re-assigning a tracked variable resets its state from the
+// assigned expression's own shape (an address-of always narrows to
+// non-null; a bare `null` literal or an opaque call result never does).
+//
+// Two independent checks share this one dataflow, because both ask the
+// identical question ("is this &?T expression proven non-null right here")
+// of a different AST node kind:
+//   1. Field access through a `&?T` base not proven non-null --
+//      PossibleNullDereferenceError (E081).
+//   2. An explicit `p to &T` cast whose operand is a `&?T` not proven
+//      non-null -- UnnarrowedNullableCastError (E082). This is the ONLY
+//      way a `&?T` ever becomes a `&T` (typesCompatible() never grants it
+//      implicitly -- see TurfNullableReferenceType's doc comment, Types.h),
+//      so this is where "&?T -> &T only after narrowing" is actually
+//      enforced.
+class NullabilityPass {
+public:
+  // Run the pass on `Cfg`. Parameters need no separate initial-set argument
+  // (unlike DefiniteAssignmentPass's InitialAssigned) -- every `&?T`-typed
+  // parameter starts life correctly absent from the entry set (i.e.
+  // "not proven non-null"), which is exactly right: the caller might have
+  // passed `null`.
+  void runOnCFG(CFG &Cfg);
+};
+
 #endif
