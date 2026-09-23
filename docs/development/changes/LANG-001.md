@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | landed |
-| **Dates** | started 2026-09-23 · landed 2026-09-23 |
-| **Commits** | `00bd327` (compiler core), `16f9b28` (stdlib), `243f426` (tests) |
-| **Sessions** | 1 of 1 (S15) |
+| **Status** | landed (follow-up same day: prefix `++`/`--` unified with postfix onto any lvalue) |
+| **Dates** | started 2026-09-23 · landed 2026-09-23 · follow-up 2026-09-23 |
+| **Commits** | `00bd327` (compiler core), `16f9b28` (stdlib), `243f426` (tests), `236888b` (docs); follow-up: `d6b32bc` (unify prefix/postfix), `6382b98` (tests) |
+| **Sessions** | 1 of 1 (S15), plus one same-day follow-up (user-requested: `++arr[0]` should work, matching postfix) |
 | **Depends on** | TYPE-002 (landed 2026-09-22) |
 | **Frozen decisions relied on** | F-OP-1, F-OP-2, F-OP-3, F-OP-4 |
 
@@ -329,14 +329,16 @@ pre-existing and untouched by this session.
   know this gap exists and is intentional, not silently reintroduce it by
   "fixing" one of the two guard checks without also building the
   read-modify-write chain.
-- **Prefix `++`/`--` only accepts a bare identifier operand
-  (`++box[0]` is a pre-existing "Expected identifier after prefix ++ or
-  --" PARSE error, for a builtin array too, not just an `operator[]`-based
-  one)** — confirmed pre-existing (unrelated to this session — the same
-  restriction applies to `++arr[0]` on a plain `int[3]`) via direct
-  testing, not fixed here (out of scope; this session's postfix/compound-
-  assignment work is about OPERATOR RESOLUTION, not about widening what
-  prefix's own parser accepts as an operand).
+- **FIXED in the same-day follow-up, not left as a documented gap**: prefix
+  `++`/`--` used to accept only a bare identifier operand (`++box[0]` was
+  "Expected identifier after prefix ++ or --" even for a plain builtin
+  array). The original landing of this session recorded this here as a
+  confirmed pre-existing, out-of-scope limitation — that framing turned out
+  to be wrong to leave standing: prefix and postfix are the same feature
+  from a user's perspective, and shipping one half of it ("finishing" the
+  operator work, in the user's own words when asking for this) was the
+  actual bar, not "operator RESOLUTION only, parser scope is separate."
+  See the Follow-up section below for the fix.
 - **A Lint false positive ("assigned but the value is never read (dead
   store)") fires on a plain `mut x: int = 5; x += 1;` with NO operators
   involved at all** — confirmed pre-existing (reproduces without any
@@ -350,6 +352,91 @@ pre-existing and untouched by this session.
   future operator-related Codegen change should check whether this
   function needs a parallel update, the same way this session's
   `visitArrayAccess()`/`getExprType()` pair did.
+- **A pre-existing AST-consumer sweep after adding a field to a widely-
+  matched node type must check every `dynamic_cast<const PostfixExprAST*>`
+  site, not just the ones in files this feature's own "Relevant files"
+  list names.** Unifying prefix onto `PostfixExprAST` touched 10 files
+  outside the original list (`Analysis.cpp` x2, `Lint.cpp` x3,
+  `Monomorphize.cpp`, `ValueRange.cpp`, `ResolverCore.cpp`, `ASTPrinter.h`,
+  `ASTDiff.h`) via `grep -rn "PostfixExprAST" src include`. Nine of the ten
+  needed no change at all (their logic was already direction-agnostic —
+  "recurse into the operand" doesn't care whether it's prefix or postfix).
+  One, `ASTDiff.h`'s SLM-sandbox change-detection diff, DID need a fix and
+  would have silently missed a suggested fix that swapped `x++` for `++x`
+  (same `Opcode`, same operand, different `IsPrefix` — the diff compared
+  only `Opcode`) — found by this sweep, not by any test, since nothing in
+  the suite exercises the SLM sandbox's diff logic directly.
+
+## Follow-up (2026-09-23, same day): prefix `++`/`--` on any lvalue
+
+**Why.** User-reported: `++arr[0]` failed to parse ("Expected identifier
+after prefix ++ or --") while the equivalent postfix form (`arr[0]++`)
+already worked — an asymmetry the original landing above recorded as a
+confirmed, out-of-scope limitation. Told directly: "if we have come to
+operators, we will be finishing it, not leaving it in between." Re-scoped
+as in-scope for this same feature group rather than a separate deferred
+item.
+
+**Root cause.** Prefix `++x`/`--x` was never really part of the operator
+system at all before this follow-up — it was a PARSE-TIME desugaring
+straight to `x = x + 1` (`AssignmentExprAST(BinaryExprAST(...))`), built
+long before LANG-001, which only ever accepted a bare `TOK_IDENTIFIER`.
+Postfix, by contrast, was always parsed as part of the general primary+
+postfix-chain loop (`ParsePostfixExpression()`, alongside `[]`/`.`/`()`),
+so it was never restricted that way.
+
+**Fix.** Unified both directions onto ONE node: `PostfixExprAST` gained an
+`IsPrefix` flag (default `false`, so every existing 3-arg construction
+site — `ParserLiteral.cpp`'s postfix parsing, `ParserStmt.cpp`'s implicit
+`step <var>++` synthesis — is unaffected). Prefix's parser handling
+(`ParserCore.cpp`) now parses its operand via `ParsePrimary()` (the exact
+same primary+postfix-chain parse a bare `arr[0]`/`obj.field` standing
+alone would get) instead of requiring `TOK_IDENTIFIER`, and constructs a
+`PostfixExprAST(..., IsPrefix=true)` instead of the old
+`AssignmentExprAST(BinaryExprAST(...))`. The old prefix desugaring is
+DELETED, not kept as a fallback — there are no longer two representations
+of "increment this lvalue" to keep in sync.
+
+`TypeChecker::visitPostfixExpr()` gained an `isAssignableLValue()` check
+up front (mirroring `visitAssignment`'s identical check) — a non-lvalue
+operand (`++(a + b)`) is now a clean `InvalidAssignmentTargetError` instead
+of the old parser's blunter "Expected identifier" (which also used to
+reject perfectly valid non-identifier lvalues like `++arr[0]` with the
+same message, conflating two genuinely different problems). Every other
+check in that function (overload resolution, the `operator[]`
+scope-boundary guard, the numeric-operand requirement, immutability) was
+ALREADY written generically against "the operand," not "a bare
+identifier," so it needed no change — it now simply also runs for prefix.
+`Codegen::PostfixExprAST::codegen()` gained one branch:
+`return IsPrefix ? NewVal : OldVal;` (twice, once per dispatch path) in
+place of the old unconditional `return OldVal;`.
+
+**Consequence for existing claims.** LANG-001's original landing (and its
+own test `11_postfix_and_compound_assign.tr`) documented prefix as
+inheriting `operator+`/`operator-` "for free" via its `x = x + 1`
+desugaring, going through `BinaryExprAST`'s resolution path — that
+mechanism no longer exists. Prefix now goes through the SAME
+`ResolvedOperatorCandidates`/`ResolvedOperatorTarget` overload-matching
+`PostfixExprAST` already had for postfix (D21). The OBSERVABLE behavior for
+every case that worked before (bare-identifier prefix, on both a numeric
+and a struct type) is unchanged — re-verified live, not just assumed
+(`11_postfix_and_compound_assign.tr` still passes unmodified) — but the
+"why" in the change record above (Compiler architecture's `operator!`
+bullet cross-references this mechanism) is now describing removed code;
+this section is the correction.
+
+**Tests.** `15_prefix_on_any_lvalue.tr` (array element, struct field, and
+prefix+postfix composed in one expression), `16_chained_incdec_expression.tr`
+(the user's own reported expression, `x++ + ++x - ++x - x-- - --x`, hand-
+traced to a deterministic `-10` and verified live — unlike C, where this
+exact shape is undefined behavior from multiple unsequenced modifications,
+Turf's strict left-to-right recursive evaluation gives it exactly one
+well-defined answer), `fail_prefix_non_lvalue.tr` (the new
+`InvalidAssignmentTargetError` path). `14_pratt_unary_chains.tr`'s stale
+"requires a bare identifier" comment corrected in place (the test's own
+assertions were unaffected — comment-only staleness). Full suite:
+715 → 718, all green. `lib/std`/`showcase` re-swept clean (same two
+pre-existing, unrelated `list.tr`/`mem.tr` self-import failures as before).
 
 ## Handbook impact
 
