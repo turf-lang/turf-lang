@@ -1,0 +1,45 @@
+TURF E080 -- OPERATOR ORPHAN RULE VIOLATION:
+
+CAUSE:
+  `operator OP(a: T1, b: T2): R { ... }` (or a unary/index form) was
+  declared, but NEITHER operand is a struct or enum declared in the SAME
+  module (or main file) as the operator declaration itself.
+
+  LANG-001's orphan rule (ARCHITECTURE_OVERHAUL.md §13.4) requires at
+  least one operand to be "owned" by the declaring module -- otherwise a
+  third module could redefine an operator's meaning between two types it
+  doesn't own, and the result would silently depend on which modules
+  happen to be imported, and in what order.
+
+  A builtin/`string` operand is never "declared" anywhere (no
+  registerStruct()/registerEnumType() call runs for it), so it can
+  neither satisfy nor violate this rule by itself: an operator with NO
+  struct/enum operand at all (e.g. `strings.tr`'s own `operator
+  +(string, string)`) is unaffected -- there is no "foreign type" for the
+  rule to be concerned about.
+
+CORRECT (declared in the SAME module that owns one of the operands):
+    // geometry.tr:
+    struct Vec2 { x: int, y: int }
+    operator +(a: Vec2, b: Vec2): Vec2 { ... }
+
+INCORRECT (declared somewhere that owns neither type):
+    import a_module::A;
+    import b_module::B;
+    operator +(a: A, b: B): A { ... }
+    // ERROR: 'operator +' does not own any of its operand types.
+
+FIX:
+  Move the operator declaration into the module that declares A or B, or
+  write the behavior as an ordinary named function instead of an operator
+  overload if you genuinely don't own either type.
+
+RELATED: E028 (OperatorBuiltinPairError) -- the other operator-declaration
+  rejection, for the opposite shape (BOTH operands already builtin,
+  nothing to do with module ownership).
+
+STATUS (LANG-001, docs/development/changes/LANG-001.md):
+  New as of LANG-001. Checked against all of `lib/std` before landing --
+  zero violations found; the only pre-existing operator overloads anywhere
+  in the tree are `strings.tr`'s `string`-only ones, which have no
+  struct/enum operand and so are unaffected by construction.
