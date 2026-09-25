@@ -25,6 +25,7 @@ record does; `status` tracks the record, not the branch.
 | MEM-001 | Route managed allocations through the runtime | landed | 2026-09-25 | 2026-09-25 | `runtime/` (C), Builtins, Resolver, TypeChecker, Codegen, stdlib | [MEM-001](changes/MEM-001.md) |
 | MEM-002 | The collector | landed | 2026-09-25 | 2026-09-25 | `runtime/` (C, new `turfrt_gc.c`), Builtins, Resolver, TypeChecker, Codegen, stdlib | [MEM-002](changes/MEM-002.md) |
 | STD-001 | Boundary formalization | landed | 2026-09-25 | 2026-09-25 | documentation, tooling (Parser doc comments, new `boundary.md`, new `check_boundary.sh`) | [STD-001](changes/STD-001.md) |
+| STD-002 | Standard-library diagnostics | landed | 2026-09-25 | 2026-09-25 | Lexer, Parser, AST, Resolver, TypeChecker, Codegen, diagnostics, stdlib | [STD-002](changes/STD-002.md) |
 
 ## How to use this directory
 
