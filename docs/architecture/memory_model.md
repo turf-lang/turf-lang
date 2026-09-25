@@ -130,27 +130,41 @@ behavior/likely to crash at runtime, not a supported operation.)
 **A string produced by concatenation (`a + b`), or by almost any stdlib
 string function** (`to_upper`, `to_lower`, `substring`, `trim`, `replace`,
 `repeat`, ...) is a **fresh heap allocation**, sized exactly for its
-contents and obtained via the same C allocator FFI everything else in this
-document goes through (`malloc`, `lib/std/core/strings.tr:57`). Every one of
-these functions mallocs a new buffer, copies bytes into it, and returns it —
-**and none of them ever frees the operand(s) they were given.** The
-`strings.tr` source is explicit about this being a known, deliberate
-tradeoff:
+contents. As of **MEM-001** (`docs/planning/ARCHITECTURE_OVERHAUL.md` §8),
+this is a real allocation on the **GC heap**, not the manual one: every
+buffer-returning function in `lib/std/core/strings.tr` calls the bare
+`gc_alloc(n)` intrinsic (`include/Intrinsics.h` category 1), which lowers to
+`libturfrt`'s `turf_rt_alloc()` (`runtime/turfrt.h`) — never `malloc`
+directly. `io::input()`/`io::read_to_string()` and
+`net::TcpConnection.read()` use the zero-filling sibling,
+`gc_alloc_zeroed(n)`, for the same reason `calloc` used to be chosen over
+`malloc` there (see §2.4/§2.6). Every one of these functions allocates a new
+buffer, copies bytes into it, and returns it — **and none of them ever frees
+the operand(s) they were given.** The `strings.tr` source is explicit about
+this being a known, deliberate tradeoff:
 
 > `operator +`'s body mirrors exactly what used to be Codegen's hardcoded
-> EmitStringConcat, including the same TURF-MEMLEAK tradeoff: the malloc'd
-> buffer is intentionally never freed (Turf has no GC yet); future work is
-> an arena allocator or a Boehm GC sweep.
-> — `lib/std/core/strings.tr:50-53`
+> EmitStringConcat, including the same TURF-MEMLEAK tradeoff: the
+> gc_alloc'd buffer is intentionally never freed. As of MEM-001 this is now
+> a real GC-heap allocation (`turf_rt_alloc`, not `malloc`) — it still leaks
+> today because nothing collects yet (MEM-002 is what stops that), not
+> because of anything specific to this function.
+> — `lib/std/core/strings.tr` (`operator +`'s own doc comment)
 
 Concretely: `result = result + s;` inside a loop (as `strings::repeat` and
 `strings::replace` both do internally) leaks one buffer's worth of memory
 per iteration, on top of whatever the original operands already cost. A
 `string`'s representation is pointer-identical to `ptr`/`void*`
-(`CodegenCore.cpp`'s `isPointerLike()`, §2.4), so a leaked buffer *can* in
-principle be freed manually via `mem::free` once cast — but nothing in the
-standard library does this today, and there's no reference count or any
-other bookkeeping that would tell you it's safe to.
+(`CodegenCore.cpp`'s `isPointerLike()`, §2.4), but as of MEM-001 that
+pointer-representation identity is no longer license to treat it like any
+other raw pointer: a `string` returned by concatenation or a stdlib string
+function now lives on the **GC heap**, and `mem::free`ing a GC-heap pointer
+is exactly the cross-heap mistake F-MEM-3 exists to prevent (the two heaps
+"do not merge" — MEM-001's own "Must NOT reinterpret" list). Nothing
+diagnoses this misuse yet (that diagnostic doesn't exist until MEM-002
+gives the GC heap a real block table to check a pointer against), so it is
+merely unsupported today rather than rejected — but it is no longer merely
+"untried", the way the pre-MEM-001 text here implied.
 
 ### 1.5 Structs
 
@@ -215,7 +229,7 @@ stands on its own:
   a `&T` that outlives the stack frame it pointed into, exactly as with a
   raw pointer in C. "Safe" here means "can't be null," not "can't dangle."
 
-### 1.7 What manages any of this? Nothing, automatically.
+### 1.7 What manages any of this? Nothing, automatically — yet.
 
 To say it as plainly as possible: **Turflang has no automatic memory
 management today** — no garbage collector, no reference counting, no
@@ -224,28 +238,44 @@ allocation is reclaimed automatically the instant its function returns (that
 part is free, and unavoidable, the way it is in any compiled language) —
 but every *heap* allocation, anywhere in a Turf program, is freed only if
 some line of code explicitly calls `free`/`mem::free` on it, and nothing
-currently does that on your behalf:
+currently does that on your behalf. As of **MEM-001**
+(`docs/planning/ARCHITECTURE_OVERHAUL.md` §8), the heap itself is now split
+into two disjoint categories in preparation for a future collector — but
+nothing collects yet, so both still leak identically to before:
 
-- `mem::alloc`/`mem::alloc_zeroed`/`mem::grow`/`mem::dup`/`mem::alloc_aligned`
-  (`lib/std/mem/mem.tr`) are thin, fail-fast wrappers around
-  `malloc`/`calloc`/`realloc`/`posix_memalign` — you own whatever they
-  return, exactly as in C.
-- `List<T>`, `Stack<T>`, `Queue<T>`, `Map<K,V>`, and `mem::Pool<T>` each grow
-  a `malloc`/`realloc`-backed buffer internally (`lib/std/collections/list.tr:31-33`,
-  and the shared growth policy documented in `docs/reference/stdlib/collections.md`)
-  — but **none of them frees that buffer for you**, ever, including when the
-  collection variable itself goes out of scope. There is no destructor
-  mechanism in the language that could even hook that. `mem::Pool<T>` exists
-  specifically to make *manual* bulk-freeing less tedious (track every
-  allocation, then `mem::free_pool()` them all in one call) — it is a
-  bookkeeping convenience, not automatic management.
-- String concatenation and most `strings::*` functions heap-allocate and
-  leak by design today (§1.4).
+- **The manual heap.** `mem::alloc`/`mem::alloc_zeroed`/`mem::grow`/
+  `mem::dup`/`mem::alloc_aligned` (`lib/std/mem/mem.tr`) are thin, fail-fast
+  wrappers around `malloc`/`calloc`/`realloc`/`posix_memalign` — you own
+  whatever they return, exactly as in C. `mem::Pool<T>` (also `mem.tr`)
+  grows its own `malloc`/`realloc`-backed backing array the same way — it
+  exists specifically to make *manual* bulk-freeing less tedious (track
+  every allocation, then `mem::free_pool()` them all in one call), so its
+  own bookkeeping array stays on the manual heap right alongside what it
+  tracks. Nothing on this heap is ever touched by MEM-001 or any future
+  collector (F-MEM-3, FREEZE.md §6.5 — "the two heaps do not merge").
+- **The GC heap** (MEM-001; not yet collected — MEM-002 is what adds that).
+  `List<T>`, `Stack<T>`, `Queue<T>`, `Set<T>`, and `Map<K,V>` each grow a
+  backing buffer internally via the `gc_alloc(n)`/`gc_realloc(p, n)` bare
+  intrinsics (`include/Intrinsics.h` category 1, `lib/std/collections/*.tr`,
+  and the shared growth policy documented in
+  `docs/reference/stdlib/collections.md`) — but **none of them frees that
+  buffer for you**, ever, including when the collection variable itself
+  goes out of scope. There is no destructor mechanism in the language that
+  could even hook that. String concatenation and most `strings::*`
+  functions allocate on this same heap and leak by design today (§1.4).
+
+Both categories leak identically today — MEM-001 is deliberately
+behaviour-preserving (its own completion criterion: "full suite green with
+identical behaviour"). The split exists so a future collector has a single,
+already-correct answer to "what is it allowed to trace and reclaim" (the GC
+heap, and *only* the GC heap) without having to first go classify every
+`malloc` call site in the standard library itself.
 
 A future automatic-reference-counting (ARC) design exists only as a
 proposal — `docs/planning/FUTURE.md` §5 — and is explicitly gated behind
 other, unrelated work; nothing described in this document should be read as
-already having that safety net.
+already having that safety net. The mark-sweep collector actually planned
+for the GC heap (FREEZE.md §6.5) is tracked as MEM-002, not this proposal.
 
 ---
 
@@ -397,10 +427,12 @@ trailing NUL via `strcpy`/`strcat`/manual `buf[len] = 0`).
 
 `isPointerLike()` (`CodegenCore.cpp`, used throughout `CastToType()`)
 explicitly groups `string` with `ptr`/`T*`/`void*` as sharing one LLVM
-representation — this is the single fact that makes §1.4's "a leaked
-string buffer could in principle be `mem::free`d like any other pointer"
-claim true at the representation level, independent of whether any
-call site in the standard library actually exercises that path today.
+representation — this is why a `gc_alloc(n)`/`gc_alloc_zeroed(n)` call
+(returning a raw `void*`) can be cast `to string` with no representation
+change at all, just a compile-time relabeling. It's also why a leaked
+string buffer's bytes are physically indistinguishable from a manual-heap
+`void*`'s — but as of MEM-001 that no longer means they're safe to treat
+the same way; see §1.4's note on `mem::free` and the GC heap.
 
 **Concatenation moved out of Codegen entirely.** `src/CodegenExpr.cpp:82-94`
 documents that `EmitStringConcat`/`EmitStrcmp`/`EmitStrcmpRelational` used to
@@ -409,30 +441,39 @@ be hand-rolled directly in this file; `+`/`==`/`!=`/`<`/`>`/`<=`/`>=` on two
 (`lib/std/core/strings.tr:55-85`), resolved through the exact same
 operator-overload machinery any user-defined `operator` would go through.
 `operator +`'s body is what actually performs the heap allocation
-(`strings.tr:55-61`):
+(`strings.tr`, `operator +`):
 
 ```turf
 operator +(a: string, b: string): string {
     mut n: int = strlen(a) + strlen(b) + 1;
-    mut buf: string = malloc(n) to string;
+    mut buf: string = gc_alloc(n) to string;
     strcpy(buf, a);
     strcat(buf, b);
     return buf;
 }
 ```
 
-`malloc(n)` — sized exactly for the concatenated result plus a NUL
+`gc_alloc(n)` — sized exactly for the concatenated result plus a NUL
 terminator, nothing more — is the entire allocation; there is no
-over-allocation/capacity headroom the way a growable collection has. The
-function's own doc comment (`strings.tr:50-53`, quoted in full in §1.4)
-names this the "TURF-MEMLEAK tradeoff" explicitly: the returned buffer is
-never freed by this function, by its caller, or by anything else in the
-standard library. Every other buffer-returning function in the same file
-(`to_upper`, `to_lower`, `substring`, `trim`, `replace`, `repeat`) follows
-the identical shape — `malloc`, fill, return, never free — `replace` and
-`repeat` additionally call `operator +` (via plain `+`) in a loop, so each
-one leaks once per concatenation performed internally, on top of its own
-final result.
+over-allocation/capacity headroom the way a growable collection has. Before
+**MEM-001** this called `malloc(n)` directly; the intrinsic lowers to
+`libturfrt`'s `turf_rt_alloc(n, NULL)` instead (`runtime/turfrt.h`) — same
+underlying `malloc` today (MEM-002 hasn't given the GC heap its own
+allocator yet), but now reachable by a real collector once one exists,
+which a bare `malloc` call baked into stdlib source never would have been.
+The function's own doc comment (quoted in full in §1.4) names this the
+"TURF-MEMLEAK tradeoff" explicitly: the returned buffer is never freed by
+this function, by its caller, or by anything else in the standard library.
+Every other buffer-returning function in the same file (`to_upper`,
+`to_lower`, `substring`, `trim`, `replace`, `repeat`, `pad_left`,
+`pad_right`) follows the identical shape — `gc_alloc`, fill, return, never
+free — `replace` and `repeat` additionally call `operator +` (via plain `+`)
+in a loop, so each one leaks once per concatenation performed internally, on
+top of its own final result. `io::input()`/`io::read_to_string()`
+(`lib/std/io/io.tr`) and `net::TcpConnection.read()`
+(`lib/std/io/net.tr`) follow the same shape with `gc_alloc_zeroed(n)`
+instead — see §2.6's MEM-001 subsection for the full site-by-site
+allocation classification.
 
 ### 2.5 Structs
 
@@ -517,9 +558,25 @@ of the caller's own struct rather than a no-op mutation of a throwaway copy.
 
 ### 2.6 Heap allocation: what exists, and what's built on it
 
-Every heap allocation reachable from a Turf program funnels through one of
-a small number of C allocator FFI bindings, all declared with `extern fn` —
-never a compiler intrinsic, never hidden Codegen logic:
+Before **MEM-001** (`docs/planning/ARCHITECTURE_OVERHAUL.md` §8), every heap
+allocation reachable from a Turf program funneled through one of a small
+number of C allocator FFI bindings, with no distinction between a
+programmer's own allocation and one the language itself produces on the
+program's behalf. MEM-001 draws that line explicitly — **two disjoint
+heaps** (FREEZE.md §6.5): the **manual heap** (`mem::alloc` and friends,
+still `extern fn`-declared `malloc`/`calloc`/`realloc`, exactly as before)
+and the **GC heap** (the `gc_alloc`/`gc_alloc_zeroed`/`gc_realloc` bare
+intrinsics, lowering to `libturfrt`'s `turf_rt_alloc`/`turf_rt_alloc_zeroed`/
+`turf_rt_realloc` — `runtime/turfrt.h`). Both still ultimately call `malloc`/
+`calloc`/`realloc` under the hood today (MEM-002 is what gives the GC heap
+its own real allocator), so nothing about *how* memory is obtained changes
+observable behaviour yet — what changes is that every GC-heap-bound
+allocation now goes through a single, closed, change-recorded entrypoint
+(`include/Intrinsics.h` category 3) instead of a bare `malloc` call
+indistinguishable from any other.
+
+**The manual heap** — unchanged by MEM-001, and explicitly not its
+concern (F-MEM-3):
 
 ```turf
 // lib/std/mem/mem.tr:31-34
@@ -533,10 +590,15 @@ extern fn free(p: void*): void;
 (`mem.tr:64-116`) are thin, fail-fast (`sys::panic` on a null/OOM result)
 wrappers around these — no additional bookkeeping, no metadata prepended to
 the allocation, nothing beyond what raw `malloc`/`calloc`/`realloc` already
-give you.
+give you. `mem::Pool<T>` (`mem.tr:155-214`) also stays entirely on this
+heap, including its own `items: T*` bookkeeping array — it exists to batch
+a set of *manual* allocations for one-call bulk freeing (`mem::free_pool()`),
+so the array holding those pointers has to be freeable the same ordinary
+way, not traced by a future collector.
 
-Every generic collection in `lib/std/collections/` is, at the storage
-level, the identical three-field shape:
+**The GC heap** (MEM-001) — where every generic collection's backing
+buffer now lives. Every collection in `lib/std/collections/` is, at the
+storage level, the identical shape:
 
 ```turf
 // lib/std/collections/list.tr:13-17
@@ -547,27 +609,40 @@ struct List<T> {
 }
 ```
 
-`data` is a heap pointer, grown via `malloc`/`realloc` exactly like a
-hand-written dynamic array in C (`list.tr:19-39`'s `List.push`: doubling
-growth starting at capacity 8, `mem::malloc`/`mem::realloc` when the backing
-buffer needs to grow). The **struct itself** — the three-word header
-`{data, len, cap}` — lives wherever the `List<T>` variable holding it lives
-(stack, by default, per §1.5); only the buffer `data` points at is ever on
-the heap. `mem::Pool<T>` (`mem.tr:155-214`) is a deliberately independent,
-minimal reimplementation of the identical growth logic — its own comment
-explains why it can't just `import list` and reuse `List<T>` (this
-language doesn't support circular imports, and `list.tr` already imports
-`mem.tr`) — used specifically to batch-free a set of unrelated allocations
-in one call (`mem::free_pool()`) rather than tracking each `free()`
-individually; it is a manual-bookkeeping convenience, not a different
-memory-management model.
+`data` is a heap pointer, grown via the `gc_alloc(n)`/`gc_realloc(p, n)`
+bare intrinsics exactly like a hand-written dynamic array in C
+(`list.tr`'s `List.push`: doubling growth starting at capacity 8) — before
+MEM-001 this called `mem::malloc`/`mem::realloc` (the manual heap) directly;
+`Stack<T>`/`Queue<T>`/`Set<T>`/`Map<K,V>` (the last with *two* backing
+arrays, `keys`/`values`, each independently `gc_alloc`/`gc_realloc`'d) all
+follow the identical pattern. The **struct itself** — the small, fixed
+header (`{data, len, cap}` for `List<T>`/`Stack<T>`/`Set<T>`; `Queue<T>`
+adds a `head` field; `Map<K,V>` has two backing pointers instead of one) —
+lives wherever the collection variable holding it lives (stack, by default,
+per §1.5); only the buffer(s) it points at are ever on the heap.
+`strings.tr`'s buffer-returning functions (§2.4) and
+`io::input()`/`io::read_to_string()`/`net::TcpConnection.read()` (which use
+`gc_alloc_zeroed`, since each relies on the returned buffer's untouched
+tail already being zero as a NUL terminator) are on this same heap, even
+though none of them is a "collection" in the struct-with-a-backing-array
+sense — what puts something here is "the language produced this value and
+is nominally responsible for it" (F-MEM-3), not any particular shape.
 
-**Nothing frees any of this automatically.** There is no destructor concept
-in the language — no code runs when a `List<T>` (or any struct) goes out of
-scope, so a `List<T>`'s `data` buffer is leaked unless some line of code
-explicitly frees it (which, notably, `List<T>` itself provides no method to
-do — the closest analog is `mem::free_pool()`, and that only works for a
-`Pool<void*>` specifically, per its own doc comment in `mem.tr:188-204`).
+**Nothing frees any of this automatically, on EITHER heap, today.** There
+is no destructor concept in the language — no code runs when a `List<T>`
+(or any struct) goes out of scope, so a `List<T>`'s `data` buffer is leaked
+unless some line of code explicitly frees it (which, notably, `List<T>`
+itself provides no method to do — nor could it: freeing a GC-heap pointer
+through the manual heap's `free`/`mem::free` is precisely the cross-heap
+mistake F-MEM-3 forbids, so there is no supported way to free a collection's
+backing buffer manually even in principle. Manual-heap allocations, by
+contrast, remain exactly as freeable as before — `mem::free_pool()` still
+works, `mem::free(mem::alloc(...))` still works). MEM-001 is deliberately
+**behaviour-preserving**: every allocation on both heaps still leaks
+identically to before this group landed, until MEM-002 gives the GC heap an
+actual collector. See `docs/development/changes/MEM-001.md` for the
+complete, function-by-function classification of every allocation site this
+group touched or deliberately left alone.
 
 ### 2.7 Generics and type erasure
 
