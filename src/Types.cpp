@@ -296,6 +296,43 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
     }
   }
 
+  // FuncType candidate-matching leniency (STD-003) -- same shape as the
+  // pointer/array/GenericType rules above, for a callback parameter like
+  // `cmp: fn(T, T): int`. Before this, a candidate's `FuncType` parameter
+  // was only ever compared via the plain getName() exact-match check below,
+  // which correctly matches two fully CONCRETE function types (how
+  // first-class function values already worked, tests/24_first_class_functions/)
+  // but can never match a still-generic `fn(T, T): int` against a caller's
+  // concrete `fn(int, int): int` argument, since their getName() strings
+  // differ and nothing recurses INTO the parameter/return list to apply the
+  // same generic-param leniency Rule 1 already grants a bare `T`. Checked
+  // before the exact-match fallback, mirroring where every other structural
+  // leniency rule above sits. Same arity required; each parameter position
+  // and the return type recurse through typesCompatible() itself (not
+  // isEquivalent()), so a generic parameter anywhere inside the signature
+  // matches like Rule 1 already does for a bare `T`, and ordinary numeric
+  // widening still applies to any already-concrete position exactly like it
+  // would for a plain argument.
+  if (const auto *FromFT = dynamic_cast<const FuncType *>(From)) {
+    if (const auto *ToFT = dynamic_cast<const FuncType *>(To)) {
+      const auto &FP = FromFT->getParamTypes();
+      const auto &TP = ToFT->getParamTypes();
+      if (FP.size() == TP.size()) {
+        bool AllParamsOk = true;
+        for (size_t i = 0; i < FP.size(); ++i) {
+          if (!typesCompatible(FP[i].get(), TP[i].get())) {
+            AllParamsOk = false;
+            break;
+          }
+        }
+        if (AllParamsOk &&
+            typesCompatible(FromFT->getReturnType().get(),
+                            ToFT->getReturnType().get()))
+          return true;
+      }
+    }
+  }
+
   // Exact match
   if (From->getName() == To->getName())
     return true;

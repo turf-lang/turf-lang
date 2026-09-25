@@ -117,6 +117,28 @@ TurfTypePtr substituteConcreteTypes(
               ? Ty
               : std::make_shared<TurfErrorUnionType>(NewSuccess);
   }
+  // STD-003: a callback parameter's own signature (`cmp: fn(T, T): int`)
+  // never got substituted at CLONE time either -- without this, a monomorphized
+  // clone's `cmp` parameter would still be `fn(T, T): int` with a live
+  // TurfGenericParamType inside it after "substitution," tripping
+  // finishInstantiation()'s own INV-GEN-1 assert (Monomorphize.cpp) the
+  // moment a caller actually used this shape, since nothing else in this
+  // function had a FuncType case. Same shape as every other wrapper case
+  // above.
+  if (const auto *FT = dynamic_cast<const FuncType *>(Ty.get())) {
+    std::vector<TurfTypePtr> NewParams;
+    bool Changed = false;
+    for (const auto &P : FT->getParamTypes()) {
+      TurfTypePtr NewP = substituteConcreteTypes(P, Subst);
+      Changed |= (NewP != P);
+      NewParams.push_back(std::move(NewP));
+    }
+    TurfTypePtr NewRet = substituteConcreteTypes(FT->getReturnType(), Subst);
+    Changed |= (NewRet != FT->getReturnType());
+    return Changed ? std::make_shared<FuncType>(std::move(NewRet),
+                                                std::move(NewParams))
+                   : Ty;
+  }
   return Ty;
 }
 

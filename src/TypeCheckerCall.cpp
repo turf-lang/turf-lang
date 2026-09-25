@@ -190,6 +190,23 @@ static void collectGenericSubstitution(
     }
     return;
   }
+  // STD-003: a callback parameter's own signature (`cmp: fn(T, T): int`)
+  // never recursed into here either -- see Types.cpp's identical FuncType
+  // addition to typesCompatible() (this function's sibling: that one
+  // decides IF a candidate matches, this one decides what T ACTUALLY WAS at
+  // this call site once a candidate is accepted). Each parameter position
+  // and the return type recurse the same way pointer/array/generic-argument
+  // wrapping already does above.
+  if (const auto *PFunc = dynamic_cast<const FuncType *>(ParamTy.get())) {
+    if (const auto *AFunc = dynamic_cast<const FuncType *>(ArgTy.get())) {
+      const auto &PParams = PFunc->getParamTypes();
+      const auto &AParams = AFunc->getParamTypes();
+      for (size_t i = 0; i < PParams.size() && i < AParams.size(); ++i)
+        collectGenericSubstitution(PParams[i], AParams[i], Subst);
+      collectGenericSubstitution(PFunc->getReturnType(), AFunc->getReturnType(), Subst);
+    }
+    return;
+  }
 }
 
 /**
@@ -228,6 +245,12 @@ static void collectGenericParamNameOrder(const TurfTypePtr &ParamTy,
   if (const auto *PGen = dynamic_cast<const GenericType *>(ParamTy.get())) {
     for (const auto &A : PGen->getTypeArgs())
       collectGenericParamNameOrder(A, Order);
+    return;
+  }
+  if (const auto *PFunc = dynamic_cast<const FuncType *>(ParamTy.get())) {
+    for (const auto &P : PFunc->getParamTypes())
+      collectGenericParamNameOrder(P, Order);
+    collectGenericParamNameOrder(PFunc->getReturnType(), Order);
     return;
   }
 }

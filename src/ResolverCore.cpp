@@ -206,6 +206,30 @@ TurfTypePtr substituteTypeParams(const TurfTypePtr &Ty,
                                                     std::move(NewArgs))
                    : Ty;
   }
+  // STD-003: a callback parameter's own signature (`cmp: fn(T, T): int`)
+  // never had its inner `T`s substituted here -- FuncType simply had no
+  // case, so `T` inside `fn(...)` stayed the bare, unresolved NamedType("T")
+  // forever, invisible to every downstream consumer that dynamic_casts
+  // specifically for TurfGenericParamType (typesCompatible(),
+  // collectGenericSubstitution(), Monomorphize::substituteConcreteTypes() --
+  // all fixed alongside this one, same root cause). This is the first of
+  // those fixes to run, at declaration time, so every one downstream sees a
+  // real TurfGenericParamType the same way a bare `x: T` parameter already
+  // does.
+  if (const auto *FT = dynamic_cast<const FuncType *>(Ty.get())) {
+    std::vector<TurfTypePtr> NewParams;
+    bool Changed = false;
+    for (const auto &P : FT->getParamTypes()) {
+      TurfTypePtr NewP = substituteTypeParams(P, TypeParams);
+      Changed |= (NewP != P);
+      NewParams.push_back(std::move(NewP));
+    }
+    TurfTypePtr NewRet = substituteTypeParams(FT->getReturnType(), TypeParams);
+    Changed |= (NewRet != FT->getReturnType());
+    return Changed ? std::make_shared<FuncType>(std::move(NewRet),
+                                                std::move(NewParams))
+                   : Ty;
+  }
   return Ty;
 }
 
