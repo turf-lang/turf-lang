@@ -1,0 +1,59 @@
+// tests/41_gc/04_ffi_crossing.tr
+// MEM-002's own Testing scope: "An FFI-crossing test: pass a GC string to
+// strlen/write around a collection." A GC-heap string handed to a raw C
+// function is, at that moment, live only in whatever register or stack
+// slot the call passed it through -- conservative scanning must find it
+// there exactly as it would find any other TurfLang-level local, and the
+// collector must never move it (non-moving is FROZEN, FREEZE.md §6.5 --
+// `write`/`strlen` are handed the real address and it must stay valid for
+// the whole call).
+//
+// strlen() itself is called AFTER a forced collection with the string as
+// its only surviving reference, and a second string is built and passed to
+// libc's real write(2) (via extern fn, matching net.tr's own FFI-heavy
+// style) to prove a GC string's bytes survive a real cross-process-boundary
+// syscall unchanged.
+
+import strings;
+import test;
+import io;
+
+extern fn strlen(s: string): int;
+extern fn write(fd: int, buf: string, count: int): int;
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 7;
+        i = i + 1;
+    }
+    mut sum: int = 0;
+    i = 0;
+    while i < 64 {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    test::assert(sum == 14112, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn main(): int {
+    mut s: string = strings::repeat("q", 300);
+
+    churn(24);
+    gc_collect();
+    churn(24);
+
+    test::assert(strlen(s) == 300, "GC string's length is unchanged after a forced collection, read via a raw libc call");
+
+    mut line: string = "41/04 PASS: GC string crosses FFI (strlen, write) correctly around a forced collection\n";
+    gc_collect();
+    immut n: int = write(1, line, strings::length(line));
+    test::assert(n == strings::length(line), "write(2) wrote every byte of a GC string");
+
+    return 0;
+}

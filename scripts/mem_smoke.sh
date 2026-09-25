@@ -109,7 +109,14 @@ if "$TURF" "$WORKDIR/alloc_count.tr" -o "$WORKDIR/alloc_count" > "$WORKDIR/alloc
   # reroute regressed (a call site silently reverted to mem::malloc/raw
   # malloc, which turf_rt_stats() cannot see at all).
   OUT=$(TURF_RT_STATS_DUMP=1 "$WORKDIR/alloc_count" 2>&1 >/dev/null)
-  if echo "$OUT" | grep -qE '^TURF_RT_STATS alloc_count=1 realloc_count=2 bytes_requested=[0-9]+$'; then
+  # MEM-002 extends the dump line with collect_count/live_count/live_bytes/
+  # freed_count -- this check only cares about the three MEM-001 fields it
+  # already named, so the pattern is left open-ended after bytes_requested
+  # rather than re-anchored to an exact MEM-002 collection count (which
+  # legitimately varies -- whether this specific 20-push program crosses
+  # the 1 MiB collection threshold is an implementation detail of the
+  # threshold constant, not something this test should pin down).
+  if echo "$OUT" | grep -qE '^TURF_RT_STATS alloc_count=1 realloc_count=2 bytes_requested=[0-9]+ '; then
     pass "TURF_RT_STATS_DUMP shows exactly 1 alloc + 2 reallocs for 20 pushes"
   else
     fail "unexpected stats line: '$OUT'"
