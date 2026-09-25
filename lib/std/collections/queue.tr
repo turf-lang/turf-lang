@@ -11,6 +11,15 @@ unsafe module;
 //   - dequeue reads from data[head] and advances head
 //   - when (head + len == cap): if head > 0 compact elements to front,
 //     otherwise double the capacity
+//
+// `unsafe module;` stays -- STD-003 item 8 (making `data` a safe `&T`)
+// considered and rejected for the identical reason across every collection
+// module in this directory: `T` is genuinely unconstrained, a caller can
+// legally instantiate `Queue<SomeStruct*>`, and the raw-pointer capability
+// is then required by the SUBSTITUTED parameter type of `enqueue(item:
+// T)` itself, not by anything `data`'s own field type or a scoped
+// `unsafe { }` block around the body could avoid. See list.tr's own note
+// (this directory) for the full investigation and live repro.
 
 import sys;
 

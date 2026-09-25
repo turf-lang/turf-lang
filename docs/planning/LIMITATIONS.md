@@ -1,6 +1,20 @@
 # Known Limitations (post-v1.0.0 fix list)
 
-Everything in this document is a **real, confirmed, still-open** gap in the
+**CLOSED as of STD-003** (`docs/development/changes/STD-003.md`,
+`docs/planning/ARCHITECTURE_OVERHAUL.md` §8) — every item below is now
+FIXED. Item 2 is the interesting case: this document's own working
+assumption (that TYPE-002/monomorphization had already unblocked it) was
+WRONG, discovered only by attempting the conversion live during STD-003 --
+it was a real, separate, genuinely still-open compiler gap, fixed directly
+in the compiler as part of this same group rather than deferred further.
+Kept in place, not deleted, as the historical record of what Type Erasure
+used to cost and exactly how each item was actually resolved — a future
+session should treat this file as archived history, not as a live tracker;
+new gaps get their own change record or `tests/99_known_bugs/` entry
+instead of a new item here.
+
+Everything in this document was originally a **real, confirmed, then-open**
+gap in the
 compiler's generics support — not a bug in any individual stdlib module.
 Every item below traces back to the same root cause: **Type Erasure with no
 monomorphization**. A generic function/method's body is type-checked and
@@ -123,30 +137,50 @@ hoped.)**
 
 ## 2. The same generic-equality gap blocks a generic comparator/sort over `T`
 
-**Status: underlying mechanism unblocked by TYPE-002 (monomorphization),
-actual stdlib conversion still NOT done — deliberately out of this
-group's scope** (`ARCHITECTURE_OVERHAUL.md` §8's TYPE-002 entry: "generic
-`list_sort`... all later, S24b/STD-003"). A genuinely generic
-`fn<T> List.sort(cmp: fn(T, T): int)` would now type-check and dispatch
-correctly per-instantiation, the same way `Set<string>`/`Map<string,V>`'s
-own methods now do (item 1) — but `list_sort`/`list_binary_search`/
-`list_find` themselves are still the concrete, `List<int>`-only free
-functions described below; converting them to real generic methods is
-stdlib cleanup, not a compiler fix, and is left for a future session.
+**Status: FIXED (STD-003), after first being RE-CONFIRMED STILL BLOCKED
+earlier in the same session.** This document's own working assumption
+through STD-003's own §8 entry ("generic `list_sort`... all later,
+S24b/STD-003") was that monomorphization had already unblocked the
+underlying mechanism and only the stdlib conversion itself remained. That
+assumption was initially found to be WRONG by actually attempting the
+conversion live: a comparator parameter typed `fn(T, T): int` inside a
+generic method failed to type-check correctly at the call site (`No
+matching overload`), because `collectGenericSubstitution()`/
+`typesCompatible()` never recursed into a `FuncType`'s own parameter/return
+types — a real, independent gap from the `Map`/`Set` equality bug item 1
+fixed, which TYPE-002 never touched.
 
-**Where:** `lib/std/collections/list.tr`'s own header comment on
-`list_sort`/`list_binary_search`/`list_find` (see that file — the full
-four-attempts-tried writeup already lives there and isn't duplicated here).
+Unlike item 1 (fixed by TYPE-002, a prerequisite this group only
+consumed), this gap was fixed **directly in the compiler as part of
+STD-003 itself**, on the reasoning that a comparator callback --
+`self.otherMethod(concreteArg)`-shaped code more generally -- is ordinary
+code any Turf program might write, not an inconvenience specific to this
+stdlib file; leaving a real, silently-broken language feature in place
+because fixing it happened to fall slightly outside one session's original
+ticket was judged the wrong tradeoff. Five call sites needed the identical
+missing case (a `FuncType` branch, exactly like the existing pointer/
+array/`GenericType` branches each already had):
+`Resolver::substituteTypeParams()` (`src/ResolverCore.cpp`),
+`typesCompatible()` (`src/Types.cpp`), `collectGenericSubstitution()`/
+`collectGenericParamNameOrder()` (`src/TypeCheckerCall.cpp`), and
+`Monomorphize::substituteConcreteTypes()` (`src/Monomorphize.cpp`). See
+`docs/development/changes/STD-003.md` for the full root-cause writeup,
+live repro, and the fix itself.
 
-Summary: a genuinely generic `fn<T> List.sort(cmp: fn(T, T): int)` (or any
-of three other approaches tried) cannot be made to work for the same root
-cause as item 1 — `T` never carries a concrete type into either overload
-resolution *or* a `to`-cast/coercion from inside the generic body itself.
-`list_sort`/`list_binary_search`/`list_find` are therefore concrete,
-non-generic free functions over `List<int>` specifically, not generic
-methods — the established, deliberate design response to this exact class
-of limitation, and the model item 1's `Request.get_header()`-style
-workaround follows.
+The bare-`<`/`>`-comparison fallback (`TypeChecker::inferRelationalType()`'s
+generic-name bypass, which covers `==`/`!=` but not ordering operators)
+remains genuinely unfixed — not needed, since the comparator-callback
+approach above is now the working design and was always the more
+general/idiomatic one (a `qsort`-style callback, not requiring `T` to
+support native `<`).
+
+**Where:** `lib/std/collections/list.tr`'s `List.sort`/`binary_search`/
+`find` are now real `fn<T> List....` methods, verified across `int`/
+`double`/`string`/a plain-data struct
+(`tests/38_monomorphization/27_generic_list_sort_and_search.tr`).
+`list_sort`/`list_binary_search`/`list_find` remain as thin, **deprecated**
+wrappers over the concrete `List<int>` case for one cycle (STD-003's own
+"prefer keeping wrappers" guidance), not removed outright.
 
 ---
 
@@ -181,34 +215,23 @@ Regression test: `tests/07_functions_modules/generic_partial_type_arg_match.tr`.
 
 ## 4. `List<T>` has no `get(i)`/`set(i, val)` indexing methods
 
-**Where:** `lib/std/collections/list.tr`.
+**Status: FIXED — LANG-001.** `operator[]`/`operator[]=` (declared for the
+concrete `List<int>`, matching `operator` declarations' general inability
+to be generic — see `list.tr`'s own comment) give `l[i]`/`l[i] = v` with
+bounds checking, the "better form of this request" LANG-001's own stdlib
+commit message names directly. For any other element type, `l.data[i]`
+direct field access remains the way to index — never generic, for the same
+`operator` declarations aren't generic reason.
 
-`List<T>` exposes `push`/`pop`/`length` only. There is no
-`List.get(i: int): T` or `List.set(i: int, val: T): void` method — every
-caller (inside the stdlib and out) reaches into the public `data: T*`
-field directly (`l.data[i]`, `l.data[i] = x`) to read or write by index.
-This works today (the field is public and `T*` indexing is ordinary
-pointer arithmetic), but it's an ergonomic/encapsulation gap, not a design
-decision documented anywhere: a real `List<T>` should have `get`/`set` (or
-an `operator[]`-style subscript, if that ever becomes a language feature)
-so callers don't need to know `data`/`len`/`cap` are the backing fields at
-all. Likely straightforward to add (unlike items 1–2, `get`/`set` don't
-need cross-element comparison, so they don't hit the generic-equality gap
-at all) — probably just hasn't been done yet because every internal caller
-so far has been fine reaching into `.data[i]` directly.
+**Where the gap used to be (kept for history):**
+`lib/std/collections/list.tr` used to expose `push`/`pop`/`length` only,
+with every caller reaching into the public `data: T*` field directly.
 
 ---
 
-## Priority for the post-v1.0.0 pass
+## Priority for the post-v1.0.0 pass (historical — all items above are now closed)
 
-1. Item 4 (`List.get`/`set`) — no known blocker, purely additive, do it
-   first.
-2. Item 1 (`Map`/`Set` string equality) — the highest-value fix; blocks
-   `Map<string, V>`/`Set<string>` from being trustworthy off-the-shelf
-   collections, which is a real, common shape (string-keyed lookups,
-   string sets) most programs eventually want. A trait/constraint system
-   (`fn<T: Eq> ...`) is probably the right long-term shape, since it also
-   directly unblocks item 2.
-3. Item 2 (generic comparator/sort over `T`) — same underlying fix as
-   item 1 would likely unblock this too; revisit once item 1's approach is
-   chosen.
+1. ~~Item 4 (`List.get`/`set`)~~ — done, LANG-001.
+2. ~~Item 1 (`Map`/`Set` string equality)~~ — done, TYPE-002.
+3. ~~Item 2 (generic comparator/sort over `T`)~~ — done, STD-003 (a real
+   compiler fix, not a stdlib workaround; see that item's own entry above).

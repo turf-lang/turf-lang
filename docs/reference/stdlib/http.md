@@ -49,17 +49,16 @@ if req.has_header("Content-Type") {
 }
 ```
 
-> **Why these exist instead of `req.headers.get(name)`/`.contains(name)`
-> directly.** `headers` is a real, directly-accessible `Map<string,
-> string>` field, but `Map<K, V>`'s own generic accessors are content-
-> **incorrect** for `K = string` — see
-> [`collections.md`](collections.md)'s `Map<K, V>` section for the full
-> mechanism. `Request` itself isn't generic, though, so a plain method
-> here sees `self.headers`'s field type fully concretely, and
-> `self.headers.keys[i] == name` correctly reaches `strings.tr`'s real
-> `operator==(string, string)` — sidestepping the generic-erasure gap
-> entirely. Always use `get_header`/`has_header`, never `req.headers.get(...)`
-> directly.
+> **Why these exist as their own methods, not just `req.headers.get(name)`/
+> `.contains(name)` inline at the call site.** `headers` is a real,
+> directly-accessible `Map<string, string>` field, and since STD-003
+> (`docs/development/changes/STD-003.md`) `Map<K, V>`'s own generic
+> `.get()`/`.contains()` are content-correct for `K = string` too — see
+> [`collections.md`](collections.md)'s `Map<K, V>` section. `get_header`/
+> `has_header` are kept as thin, named wrappers over `self.headers.tryGet(name)`/
+> `.contains(name)` purely for readability (`req.get_header(name)` reads
+> better than `req.headers.get(name)`) and for `get_header`'s own more
+> specific panic message (naming the missing header).
 
 ---
 
@@ -124,13 +123,10 @@ app.get("/", home);
 ### `Server.has_route(path: string): bool` / `Server.get_route(path: string): fn(Request, Response): void`
 
 Look up the handler registered for `path`. `get_route` panics if `path`
-isn't registered — check `has_route` first (exactly the same
-`Request.get_header`/`has_header` pattern, and for the identical reason:
-`self.routes.tryGet(path)`/`.contains(path)` would compare the parsed
-request path against a registered path by raw identity, not content, and
-(confirmed live) never match even the exact same path text. `Server` isn't
-generic, so these plain methods resolve `self.routes`'s field type fully
-concretely and correctly reach the real string `operator==`.
+isn't registered — check `has_route` first. Both are thin wrappers around
+`self.routes.indexOf(path)` (see `Request.get_header`'s identical note,
+above, for why these exist as named methods at all rather than inlining
+`Map<K, V>`'s own accessors at every call site).
 
 ### `Server.listen(port: int): void`
 

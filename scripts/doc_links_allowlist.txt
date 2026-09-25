@@ -21,7 +21,6 @@ docs/detailed/modules_and_stdlib.md :: docs/architecture/modules_and_scope_resol
 # --- Change records the overhaul plans but has not written yet. Each line dies
 # --- when its session lands, which is the point: the blueprint's forward
 # --- references stay honest without stub files pretending to be records.
-docs/development/changes/STD-003.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: planned by §8 STD-003 (session S24b).
 
 # --- Retired paths named by the change record that re-pointed them. A record's
 # --- job is to say exactly which citation moved where, so it necessarily spells
