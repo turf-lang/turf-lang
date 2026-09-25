@@ -33,8 +33,11 @@
 #include "CodegenInternal.h"
 #include "Monomorphize.h" // Monomorphize::instantiatedDeclName() -- FieldAccessExprAST's per-instantiation lookup, TYPE-002 S13b
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h" // appendToCompilerUsed -- RT-001 TurfTypeDesc globals
 #include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <set>
 #include <unordered_map>
@@ -608,6 +611,152 @@ Value *ScopeAccessExprAST::codegen() {
   return ConstantInt::get(LLVMTy, ET->getVariantValue(RightName));
 }
 
+// ─── RT-001: TurfTypeDesc emission ─────────────────────────────────────────
+// See runtime/turfrt.h's TurfTypeDesc doc comment for the full contract.
+// The LLVM layout built here ({i64, ptr, i64}) must match that C struct
+// field-for-field -- nothing enforces this automatically across the
+// C/LLVM-IR boundary, so a change to one requires the matching change here.
+
+// Registers (or reuses) the identified LLVM struct type mirroring C's
+// `TurfTypeDesc` -- one shared type definition for every descriptor global,
+// not synthesized fresh per struct.
+static llvm::StructType *getOrCreateTurfTypeDescType() {
+  if (auto *Existing = llvm::StructType::getTypeByName(*TheContext, "TurfTypeDesc"))
+    return Existing;
+  llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
+  llvm::Type *PtrTy = llvm::PointerType::getUnqual(*TheContext);
+  return llvm::StructType::create(*TheContext, {I64Ty, PtrTy, I64Ty},
+                                  "TurfTypeDesc");
+}
+
+// Recursively ORs pointer-word bits for `T`'s layout into `Bitmap`, starting
+// at `ByteOffset`. Conservative, not GC-vs-manual precise (nothing before
+// MEM-001/MEM-002 tags a pointer field with which heap it points into) --
+// see runtime/turfrt.h's doc comment on TurfTypeDesc::pointer_word_bitmap
+// for why over-marking here is sound rather than merely convenient. By the
+// time a struct field's LLVM type reaches here it is always fully built
+// (StructDeclExprAST::codegen()'s own comment on embedded, non-recursive
+// struct fields -- a self-referential/recursive field is always a raw
+// POINTER, never embedded by value, so the isOpaque() branch below is
+// unreachable in practice and exists only as a defensive bound, not a
+// silently-accepted case).
+static void collectPointerWordBits(llvm::Type *T, const llvm::DataLayout &DL,
+                                   uint64_t ByteOffset, uint64_t &Bitmap) {
+  if (T->isPointerTy()) {
+    uint64_t Word = ByteOffset / 8;
+    if (Word < 64)
+      Bitmap |= (1ULL << Word);
+    return;
+  }
+  if (auto *NestedST = llvm::dyn_cast<llvm::StructType>(T)) {
+    if (NestedST->isOpaque())
+      return;
+    const llvm::StructLayout *SL = DL.getStructLayout(NestedST);
+    for (unsigned i = 0; i < NestedST->getNumElements(); ++i) {
+      collectPointerWordBits(NestedST->getElementType(i), DL,
+                             ByteOffset + SL->getElementOffset(i), Bitmap);
+    }
+    return;
+  }
+  if (auto *AT = llvm::dyn_cast<llvm::ArrayType>(T)) {
+    llvm::Type *ElemTy = AT->getElementType();
+    uint64_t ElemSize = DL.getTypeAllocSize(ElemTy).getFixedValue();
+    for (uint64_t i = 0; i < AT->getNumElements(); ++i)
+      collectPointerWordBits(ElemTy, DL, ByteOffset + i * ElemSize, Bitmap);
+    return;
+  }
+  // Scalar (int/int32/double/bool/char): contributes no pointer bits.
+}
+
+// Emits a constant TurfTypeDesc global for one already-fully-built (non-
+// opaque) `ST`, and keeps it alive across OPT-001's Internalize/GlobalDCE
+// via @llvm.compiler.used -- the forward hazard OPT-001's own text already
+// records (ARCHITECTURE_OVERHAUL.md §8 RT-001: "Internalize/GlobalDCE must
+// not delete a descriptor referenced only from metadata"). Referencing it
+// from a real turf_rt_alloc call site instead (the design's other option)
+// isn't available in THIS group -- nothing calls turf_rt_alloc yet
+// (MEM-001 wires that up) -- so `llvm.compiler.used` is what keeps every
+// descriptor observable (via --emit-llvm) at every optimization level for
+// this group's own completion criterion ("descriptors are emitted and
+// verifiably correct").
+static void emitTurfTypeDesc(llvm::StructType *ST) {
+  std::string Name = ST->getName().str();
+  const llvm::DataLayout &DL = TheModule->getDataLayout();
+  uint64_t Size = DL.getTypeAllocSize(ST).getFixedValue();
+
+  uint64_t Bitmap = 0;
+  collectPointerWordBits(ST, DL, 0, Bitmap);
+
+  // Same Builder-independent global-string-constant idiom this file's own
+  // ScopeAccessExprAST "NAMES" case above uses -- this runs at the very end
+  // of codegen (see EmitAllTurfTypeDescs() below), well past any point
+  // Builder's insertion point is meaningful for a fresh global.
+  llvm::Constant *NameStrConst =
+      llvm::ConstantDataArray::getString(*TheContext, Name, true);
+  auto *NameGV = new llvm::GlobalVariable(
+      *TheModule, NameStrConst->getType(), /*isConstant=*/true,
+      llvm::GlobalValue::PrivateLinkage, NameStrConst,
+      "__turf_typedesc_name." + Name);
+  llvm::Constant *ZeroIdx =
+      llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
+  llvm::Constant *Indices[] = {ZeroIdx, ZeroIdx};
+  llvm::Constant *NamePtr = llvm::ConstantExpr::getInBoundsGetElementPtr(
+      NameStrConst->getType(), NameGV, Indices);
+
+  llvm::StructType *DescTy = getOrCreateTurfTypeDescType();
+  llvm::Constant *DescInit = llvm::ConstantStruct::get(
+      DescTy,
+      {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), Size),
+       NamePtr,
+       llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), Bitmap)});
+
+  auto *DescGV = new llvm::GlobalVariable(
+      *TheModule, DescTy, /*isConstant=*/true,
+      llvm::GlobalValue::InternalLinkage, DescInit,
+      "__turf_typedesc_" + Name);
+  llvm::appendToCompilerUsed(*TheModule, {DescGV});
+}
+
+// RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, point 3): emits a
+// TurfTypeDesc for every real (fully-built) aggregate type in the module.
+// Declared in include/Codegen.h; called exactly once from main.cpp,
+// deliberately LATE -- immediately before verifyModule(), well after both
+// the struct pre-pass (main.cpp sub-pass 2c) AND every import-triggered
+// struct build (sub-passes 3a/3b) have finished, i.e. the same point
+// main.cpp's own pre-existing "scan for a lingering opaque monomorphized
+// stub" check already treats as "every struct that will ever be built now
+// is."
+//
+// This does NOT run per-struct, inline in StructDeclExprAST::codegen(),
+// despite that being the more obvious place -- found live, via a genuine
+// crash, why that doesn't work: `struct Holder { items: List<int> }`
+// codegens BEFORE `List<int>`'s own monomorphized clone (monomorphized
+// clones are APPENDED to PrePassASTs, so they codegen LATER than an
+// original top-level struct declared earlier in the source). Computing
+// Holder's own DataLayout::getTypeAllocSize() at THAT point forces LLVM to
+// also compute (and PERMANENTLY CACHE, keyed by StructType* -- LLVM's
+// DataLayout has no cache-invalidation hook) a StructLayout for the
+// still-opaque `List<int>` field, treating it as zero-sized. When
+// `List<int>`'s own clone is codegenned moments later and setBody() gives
+// it its real fields, DataLayout::getStructLayout() for that exact
+// StructType* returns the SAME stale, zero-element cached layout --
+// `StructLayout::getElementOffset(0)` then asserts
+// ("Idx < NumElements failed"), a real, reproducible compiler crash
+// (confirmed live against tests/38_monomorphization/04_method_on_generic_struct.tr
+// and four sibling tests in that folder, all embedding a generic
+// instantiation by value). Waiting until every struct in the module is
+// unconditionally fully built removes the ordering dependency entirely:
+// `DL.getStructLayout()` is never called on any StructType before its own
+// `setBody()` has run.
+void EmitAllTurfTypeDescs() {
+  for (llvm::StructType *ST : TheModule->getIdentifiedStructTypes()) {
+    if (ST->isOpaque())
+      continue; // A genuinely unfilled stub -- main.cpp's own scan (run
+                // just before this) already diagnosed it as a compiler bug;
+                // nothing more for this pass to do with it.
+    emitTurfTypeDesc(ST);
+  }
+}
 
 Value *StructDeclExprAST::codegen() {
   // TYPE-002 (S14a): a StructDeclExprAST with non-empty TypeParams is an
@@ -713,6 +862,12 @@ Value *StructDeclExprAST::codegen() {
 
   // Step 3: Fill in the body now that all field types are resolved.
   ST->setBody(LLVMFieldTypes);
+
+  // RT-001: TurfTypeDesc emission does NOT happen here -- see
+  // EmitAllTurfTypeDescs()'s own doc comment (below) for why emitting it
+  // eagerly, per struct, at THIS point crashed on a real, live case (a
+  // struct embedding a monomorphized generic instantiation by value before
+  // that instantiation's own clone has been codegenned).
 
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }

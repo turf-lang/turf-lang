@@ -89,52 +89,52 @@ static void ensure_builtins_registered() {
 // typeof's arity check -- only the Codegen-side generator function is gone.
 
 /**
- * @brief Emits the compiler's own internal panic sequence: print MsgVal to
- *        stderr, then abort. SOLELY for the compiler's own runtime safety
- *        guards (division/modulo by zero, bad string->int/enum casts, array
- *        bounds checks) -- not reachable from Turf source under any name.
+ * @brief Emits the compiler's own internal panic sequence: call
+ *        libturfrt's turf_rt_panic(kind, msg, file, line), which prints a
+ *        consistently-formatted message to stderr and abort()s. SOLELY for
+ *        the compiler's own runtime safety guards (division/modulo by
+ *        zero, bad string->int/enum casts, array bounds checks, integer
+ *        overflow) -- not reachable from Turf source under any name.
  *        `fail`/`assert` used to share this exact IR shape as compiler
  *        intrinsics; now that they're ordinary Turf functions in
  *        lib/std/test.tr (built on lib/std/sys.tr's own, separate
  *        write(2,...)-based sys::panic()), this is purely an internal C++
  *        helper with no user-facing name at all.
+ *
+ * @details RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): this used to
+ *          build the fprintf(stderr, "%s\n", MsgVal) + abort() sequence
+ *          directly, inline, per call site. Every one of the 9 call sites
+ *          (grep CodegenPanic() across src/Codegen*.cpp) still passes just
+ *          one pre-built message string, so `kind` here is a single fixed
+ *          literal, not a distinct value per call site -- the specific
+ *          classification ("Division by zero", "Integer overflow", ...)
+ *          stays exactly where it already was, inside MsgVal. Widening
+ *          CodegenPanic()'s own signature to carry a distinct kind per call
+ *          site would touch all 9 sites for no behavioral change (the
+ *          printed message is unchanged either way) -- out of RT-001's
+ *          scope (§25: no drive-by refactors of code this group only
+ *          needed to reroute, not redesign).
  */
 llvm::Value *CodegenPanic(llvm::Value *MsgVal, SourceLocation Loc) {
-  (void)Loc;
-
-  // Get or declare fprintf
-  Function *FPrintFFunc = TheModule->getFunction("fprintf");
-  if (!FPrintFFunc) {
-    FunctionType *FT =
-        FunctionType::get(Type::getInt32Ty(*TheContext),
-                          {PointerType::getUnqual(*TheContext), PointerType::getUnqual(*TheContext)}, true);
-    FPrintFFunc = Function::Create(FT, Function::ExternalLinkage, "fprintf",
-                                   TheModule.get());
+  // turf_rt_panic(const char *kind, const char *msg, const char *file, int line)
+  Function *PanicFunc = TheModule->getFunction("turf_rt_panic");
+  if (!PanicFunc) {
+    Type *PtrTy = PointerType::getUnqual(*TheContext);
+    FunctionType *FT = FunctionType::get(
+        Type::getVoidTy(*TheContext),
+        {PtrTy, PtrTy, PtrTy, Type::getInt32Ty(*TheContext)},
+        /*isVarArg=*/false);
+    PanicFunc = Function::Create(FT, Function::ExternalLinkage,
+                                 "turf_rt_panic", TheModule.get());
   }
 
-  // Get or declare abort
-  Function *AbortFunc = TheModule->getFunction("abort");
-  if (!AbortFunc) {
-    FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext), false);
-    AbortFunc = Function::Create(FT, Function::ExternalLinkage, "abort", TheModule.get());
-  }
+  Value *KindVal = Builder->CreateGlobalString("runtime check", "panickind");
+  Value *FileVal =
+      Builder->CreateGlobalString(Loc.Filename.empty() ? "<unknown>" : Loc.Filename,
+                                  "panicfile");
+  Value *LineVal = ConstantInt::get(Type::getInt32Ty(*TheContext), Loc.Line);
 
-  // Get stderr
-  std::string StderrSymbol = "stderr";
-#ifdef __APPLE__
-  StderrSymbol = "__stderrp";
-#endif
-  GlobalVariable *StderrGV = TheModule->getNamedGlobal(StderrSymbol);
-  if (!StderrGV) {
-    StderrGV = new GlobalVariable(*TheModule, PointerType::getUnqual(*TheContext), false,
-                                  GlobalValue::ExternalLinkage, nullptr, StderrSymbol);
-  }
-  Value *StderrVal = Builder->CreateLoad(PointerType::getUnqual(*TheContext), StderrGV, "stderr_val");
-
-  // Print message to stderr and abort
-  Value *Fmt = Builder->CreateGlobalString("%s\n", "panicfmt");
-  Builder->CreateCall(FPrintFFunc, {StderrVal, Fmt, MsgVal});
-  Builder->CreateCall(AbortFunc, {});
+  Builder->CreateCall(PanicFunc, {KindVal, MsgVal, FileVal, LineVal});
   Builder->CreateUnreachable();
 
   // Mirrors ReturnExprAST::codegen(): CreateUnreachable() is a terminator,

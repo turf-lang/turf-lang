@@ -496,7 +496,13 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
 // removed so CI/local dev builds don't all need TURF_HOME exported just to
 // run the test suite). See docs/architecture/modules_and_scope_resolution.md
 // Part 2.4 for the full rationale.
-static std::string TurfInstallRoot() {
+// RT-001: exported (no longer file-local) so main.cpp's linkObject() can
+// anchor `-lturfrt`'s search path at the exact same root `import` already
+// resolves lib/std against, without duplicating this env-var/fallback logic
+// a second time -- same reasoning HasRawPointerCapability() further down
+// this file gives for its own export (include/Parser.h's declaration site
+// has the full note).
+std::string TurfInstallRoot() {
   if (const char *Env = std::getenv("TURF_HOME")) {
     if (*Env)
       return std::string(Env);

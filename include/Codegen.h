@@ -60,4 +60,40 @@ llvm::Type *getLLVMType(const TurfType *Type);
 extern TurfTypePtr CurrentFuncReturnType;
 extern llvm::Function *CurrentFunction;
 
+// RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, F-MEM-4): wraps the
+// already-fully-codegenned LLVM function literally named "main" (built by
+// FuncDefExprAST::codegen()'s existing `Name == "main"` special-casing,
+// untouched by this) with a process bootstrap: renames it out of the way,
+// keeps it internal, and emits a NEW function named "main" (the real,
+// external C-ABI entry point) that calls turf_rt_init(), then the
+// renamed user body (forwarding argc/argv unchanged), then
+// turf_rt_shutdown(), then returns the user body's own result.
+//
+// Defined in CodegenFunc.cpp (the file that already owns every other
+// `Name == "main"` special case) but declared here, in the PUBLIC header,
+// specifically so main.cpp's driver can call it -- src/CodegenInternal.h
+// (where a helper like this would ordinarily go) is private to the 7
+// Codegen*.cpp split files and not visible from main.cpp.
+//
+// Must be called AFTER every function (pre-pass and main-pass alike) has
+// finished codegen -- main.cpp calls it immediately after confirming
+// `TheModule->getFunction("main")` exists and has a body, and BEFORE
+// runOptimizationPipeline() -- so the module still has exactly one
+// external symbol named "main" (OPT-001's Internalize must-preserve set is
+// exactly {"main"}, ARCHITECTURE_OVERHAUL.md §8 OPT-001) by the time
+// Internalize/GlobalDCE run: the renamed user body keeps its own liveness
+// through the wrapper's ordinary in-module call to it, needing no separate
+// preserve-set entry.
+void WrapMainWithRuntimeBootstrap();
+
+// RT-001: emits a TurfTypeDesc constant global (runtime/turfrt.h) for every
+// real, fully-built aggregate type in the module. Defined in
+// CodegenStruct.cpp; declared here (not CodegenInternal.h) for the same
+// main.cpp-visibility reason as WrapMainWithRuntimeBootstrap() above. Call
+// exactly once, from main.cpp, immediately before verifyModule() -- see
+// this function's own doc comment at its definition for why emitting a
+// struct's descriptor any earlier (inline in StructDeclExprAST::codegen())
+// is unsafe in general, not just inconvenient.
+void EmitAllTurfTypeDescs();
+
 #endif

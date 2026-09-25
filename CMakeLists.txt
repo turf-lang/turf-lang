@@ -258,6 +258,44 @@ target_link_libraries(turfcore PUBLIC
   m
 )
 
+# ─── libturfrt (runtime library, RT-001) ─────────────────────────────────────
+# A small, standalone C static library -- NOT linked into the `turf`
+# compiler binary itself (turfcore/turf never call into it). It is linked
+# into every COMPILED TURF PROGRAM instead, via `-lturfrt` at
+# src/main.cpp's linkObject() -- see that function's own comment for why the
+# library must land where TurfInstallRoot() (exported from
+# src/ParserModule.cpp, the same anchor `import` uses for lib/std) can find
+# it with zero setup in a plain dev build: TurfInstallRoot()'s fallback
+# (no TURF_HOME set) resolves to `<binary-dir>/..`, i.e. this repo's own
+# root for a `build/turf` dev build -- so the archive's own output directory
+# is pointed at `<repo-root>/lib/` below, the exact sibling of `lib/std/`
+# that anchor already resolves to. `*.a` is already git-ignored
+# (.gitignore), so this build artifact living inside the otherwise
+# source-controlled `lib/` tree is never accidentally committed. The
+# release packaging action (.github/actions/package-release/action.yml)
+# needs no separate change for this: it already does a blanket `cp -r lib`
+# into the release archive, which picks up `lib/libturfrt.a` automatically
+# once it exists there post-build -- verified live in the RT-001 change
+# record.
+#
+# Static, not shared: every compiled Turf program is meant to be a
+# standalone binary (matching how `-lm` is used today) -- a shared
+# libturfrt.so would need every compiled program to carry an rpath or
+# LD_LIBRARY_PATH setup on top of `import`'s own TURF_HOME-anchored search,
+# for no benefit RT-001 needs.
+add_library(turfrt STATIC
+  runtime/turfrt_alloc.c
+  runtime/turfrt_panic.c
+  runtime/turfrt_types.c
+)
+target_include_directories(turfrt PRIVATE runtime)
+set_target_properties(turfrt PROPERTIES
+  C_STANDARD 11
+  C_STANDARD_REQUIRED ON
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/lib"
+)
+target_compile_options(turfrt PRIVATE -Wall -Wextra)
+
 # ─── Executable ──────────────────────────────────────────────────────────────
 add_executable(turf src/main.cpp)
 

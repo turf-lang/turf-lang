@@ -579,12 +579,24 @@ static int linkObject(const std::string &ObjFile,
   std::set<std::string> AllLibs(g_RequiredLibs);
   for (const auto &L : ExtraLibs) AllLibs.insert(L);
 
+  // RT-001: every compiled Turf binary links libturfrt (F-MEM-4). The
+  // search path is anchored at TurfInstallRoot() -- the exact same root
+  // `import` already resolves lib/std against (Parser.h/ParserModule.cpp)
+  // -- so a plain dev build (`build/turf`, no TURF_HOME set) finds
+  // `<repo-root>/lib/libturfrt.a` with zero setup, the same "no setup
+  // needed" property lib/std already has. `-L` before `-l` on the linker
+  // line is what makes cc/gcc search this exact directory FIRST, ahead of
+  // any system default; the flag order below is deliberate.
+  std::string TurfLibDir = TurfInstallRoot() + "/lib";
+
 #ifdef _WIN32
   std::string FinalOutput = OutputName + ".exe";
-  std::vector<std::string> Args = {"gcc", ObjFile, "-o", FinalOutput, "-lm"};
+  std::vector<std::string> Args = {"gcc",       ObjFile, "-o", FinalOutput,
+                                    "-L" + TurfLibDir, "-lturfrt", "-lm"};
 #else
   std::string FinalOutput = OutputName;
-  std::vector<std::string> Args = {"cc", ObjFile, "-o", FinalOutput, "-lm"};
+  std::vector<std::string> Args = {"cc",        ObjFile, "-o", FinalOutput,
+                                    "-L" + TurfLibDir, "-lturfrt", "-lm"};
 #endif
   for (const auto &L : AllLibs) Args.push_back("-l" + L);
 
@@ -1504,6 +1516,16 @@ static int runCompilerMain(int argc, char **argv) {
     return 1;
   }
 
+  // RT-001: wrap the user's compiled main with the turf_rt_init/
+  // turf_rt_shutdown process bootstrap (see include/Codegen.h's doc comment
+  // on WrapMainWithRuntimeBootstrap() for the full contract). Must run
+  // AFTER every function is codegenned (true here -- this is already past
+  // both the pre-pass and the mandatory main pass) and BEFORE
+  // runOptimizationPipeline() below, whose Internalize must-preserve set is
+  // exactly {"main"} (that function's own comment) -- this call is what
+  // makes that symbol the wrapper rather than the user's own body.
+  WrapMainWithRuntimeBootstrap();
+
   // TOOL-001: resolve any still-outstanding forward-declared debug-info
   // metadata (getDebugType()'s struct branch, CodegenCore.cpp) before
   // verifyModule() below -- a temporary MDNode left unresolved is invalid
@@ -1551,6 +1573,17 @@ static int runCompilerMain(int argc, char **argv) {
                  "code -- please report it.\n";
     return 1;
   }
+
+  // RT-001: TurfTypeDesc emission (see EmitAllTurfTypeDescs()'s own doc
+  // comment, CodegenStruct.cpp, for why this must run here -- after every
+  // struct in the module is guaranteed fully built, INCLUDING the
+  // just-finished lingering-opaque-stub scan above -- rather than inline,
+  // per struct, during StructDeclExprAST::codegen()). Still before
+  // verifyModule(): a descriptor is an ordinary constant global like any
+  // other, so there's no reason to build it after IR verification, and
+  // every reason (this exact call site already exists as "the point every
+  // struct is done") to build it before.
+  EmitAllTurfTypeDescs();
 
   // Verify the generated IR for the WHOLE module (not just main -- a bug in
   // any function's codegen can produce broken IR that crashes or misbehaves

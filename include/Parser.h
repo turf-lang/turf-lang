@@ -60,6 +60,16 @@ std::unique_ptr<ExprAST> Parse();
 // to load (these are compiler-shipped files expected to always exist).
 std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc);
 
+// RT-001: this install's resolved root -- TURF_HOME if set and non-empty,
+// else <compiler-binary-dir>/.. (so a plain `build/turf` dev build finds
+// the sibling lib/ directory, lib/std included, with zero setup). Exported
+// (was file-local in ParserModule.cpp until RT-001) specifically so
+// main.cpp's linkObject() can anchor `-lturfrt`'s search path at the same
+// root `import` already resolves lib/std against, without a second,
+// independently-maintained copy of this logic. See its definition in
+// ParserModule.cpp for the full rationale.
+std::string TurfInstallRoot();
+
 // LANG-002/STD-001: true if @p Path declared the raw-pointer capability
 // (`unsafe module;`) AND that declaration is actually honored -- the
 // `unsafe { }` gate's trust boundary, replacing the old, purely path-based

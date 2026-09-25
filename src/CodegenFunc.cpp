@@ -189,6 +189,73 @@ static void EnsureArgvHelpers() {
   ArgvBuilder.CreateRet(ArgvBuilder.CreateGlobalStringPtr(""));
 }
 
+// RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, F-MEM-4): see
+// include/Codegen.h's doc comment on WrapMainWithRuntimeBootstrap() for the
+// full contract and call-ordering requirement (must run after every
+// function is codegenned, before runOptimizationPipeline()). Implemented
+// here, not main.cpp, because it operates purely on the already-built LLVM
+// Function object for "main" -- it does not need, and deliberately does not
+// touch, any of the argc/argv-stashing IR EnsureArgvHelpers() above already
+// built inside that function's body (this is exactly why a pure
+// post-processing rename+wrapper approach was chosen over threading
+// turf_rt_init/turf_rt_shutdown calls into FuncDefExprAST::codegen()'s own
+// `Name == "main"` branches: that delicate, already-tested argc/argv
+// machinery needs no changes at all this way).
+void WrapMainWithRuntimeBootstrap() {
+  Function *UserMain = TheModule->getFunction("main");
+  if (!UserMain || UserMain->empty())
+    return; // main.cpp's own caller already checked this; defensive only.
+
+  FunctionType *FT = UserMain->getFunctionType();
+
+  // Rename the user's compiled main out of the way and demote it to
+  // internal linkage -- it keeps its liveness through the wrapper's own
+  // in-module call below, needing no entry in OPT-001's Internalize
+  // must-preserve set (which stays exactly {"main"}, main.cpp's own
+  // comment on MustPreserveGV).
+  UserMain->setName("__turf_user_main");
+  UserMain->setLinkage(GlobalValue::InternalLinkage);
+
+  Function *InitFn = TheModule->getFunction("turf_rt_init");
+  if (!InitFn) {
+    FunctionType *InitFT =
+        FunctionType::get(Type::getVoidTy(*TheContext), false);
+    InitFn = Function::Create(InitFT, Function::ExternalLinkage,
+                              "turf_rt_init", TheModule.get());
+  }
+  Function *ShutdownFn = TheModule->getFunction("turf_rt_shutdown");
+  if (!ShutdownFn) {
+    FunctionType *ShutdownFT =
+        FunctionType::get(Type::getVoidTy(*TheContext), false);
+    ShutdownFn = Function::Create(ShutdownFT, Function::ExternalLinkage,
+                                  "turf_rt_shutdown", TheModule.get());
+  }
+
+  Function *Wrapper =
+      Function::Create(FT, Function::ExternalLinkage, "main", TheModule.get());
+  BasicBlock *EntryBB = BasicBlock::Create(*TheContext, "entry", Wrapper);
+  IRBuilder<> WB(EntryBB);
+
+  WB.CreateCall(InitFn, {});
+
+  std::vector<Value *> ForwardedArgs;
+  for (Argument &A : Wrapper->args())
+    ForwardedArgs.push_back(&A);
+  Value *Result = WB.CreateCall(UserMain, ForwardedArgs, "user_main_result");
+
+  WB.CreateCall(ShutdownFn, {});
+  // Nothing in the Resolver actually requires `fn main(): int` (only that
+  // it declare no params -- ResolverDecl.cpp's own comment on the `main`
+  // check above this file), so a void return is reachable even though
+  // every current test declares `int`. CreateRet() on a void-typed Value
+  // is invalid IR ("Found return instr that returns non-void in Function
+  // of void return type" is the mirror-image verifier failure this avoids).
+  if (FT->getReturnType()->isVoidTy())
+    WB.CreateRetVoid();
+  else
+    WB.CreateRet(Result);
+}
+
 // FuncDefExprAST::codegen
 // Two-pass strategy:
 //   Pass 1 (prototype): if no LLVM Function yet, create it (no body).
