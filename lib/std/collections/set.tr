@@ -1,9 +1,9 @@
 unsafe module;
 
-// set.tr — Set<T>: a collection of unique, unordered values.
+// set.tr — Set<T>: a collection of unique values.
 // Usage:
 //   import set::Set;
-//   mut s: Set<int>;   // default-initialized -- no need to write out the fields
+//   mut s: Set<int> = Set::default();
 //   s.add(1);
 //   s.add(2);
 //   s.add(1);                  // no-op, already present
@@ -11,50 +11,122 @@ unsafe module;
 //   mut n: int = s.length();        // 2
 //   mut removed: bool = s.remove(2); // true, and length() drops to 1
 //
-// Design:
-//   Same rationale as map.tr's Map<K, V> (see that file's comment for the
-//   full explanation): there is no generic `hash(T)` in the language yet,
-//   so this is a LINEAR SCAN over a single type-erased array, not a hash
-//   set. Set<T> is really just Map<K, V> with the value array dropped --
-//   presence in the `items` array *is* the membership -- grown exactly like
-//   list.tr's List<T>.push() (every T assumed to fit in one 8-byte slot).
+// Design: `Set<T>` is `Map<K, V>` with the value array dropped -- presence
+// in `items` *is* the membership. See map.tr's own header comment for the
+// full design story (STD-003, item 6): a dense, insertion-ordered `items`
+// array (unchanged storage, so `operator[]`'s insertion-order positional
+// read below keeps working exactly as before) plus a separate
+// open-addressing hash index (`buckets`/`bcap`) that makes add()/
+// contains()/remove() O(1) average instead of the old O(n) linear scan.
+// `hashing::hash()` (`hashing.tr`, this same directory) is what makes a
+// generic hash function possible at all now (TYPE-002/monomorphization) --
+// see that file's own header.
+//
+// `unsafe module;` stays -- STD-003 item 8 considered and rejected here
+// too, for the identical reason as `map.tr`'s own note (this directory):
+// `T` is genuinely unconstrained (`Set<SomeStruct*>` is legal), and the
+// raw-pointer capability is required by `add(item: T)`'s and
+// `hashing::hash`'s own substituted parameter types regardless of `items`'
+// field type.
 
 import sys;
+import hashing;
 
 struct Set<T> {
   items: T*,
   len: int,
-  cap: int
+  cap: int,
+  buckets: int*,
+  bcap: int
 }
 
-// FIXED (TYPE-002, S12b/S14a, 2026-09-21): `self.items[i] == item` below
-// used to be a raw pointer/bit comparison for T = string, not a content
-// comparison, because this generic method's body used to be checked and
-// codegenned exactly ONCE, shared across every instantiation (Type
-// Erasure) -- both operands had the STATIC type TurfGenericParamType("T")
-// inside the body, so no operator-overload candidate could ever
-// exact-match it and `strings.tr`'s real `operator==(string, string)`
-// never got a chance to run. Monomorphization (TYPE-002) gives
-// `Set<string>.indexOf()` its own real, separately-codegenned clone, with
-// `item`/`self.items[i]` concretely typed as `string` during that clone's
-// own re-typecheck -- overload resolution now correctly dispatches to the
-// real content-comparing `operator==(string, string)`. Verified live:
-// `tests/38_monomorphization/10_set_string_dedup.tr` (moved and rewritten
-// from `tests/99_known_bugs/set_string_dedup_broken.tr`, which this
-// comment used to describe) asserts the now-correct dedup behavior,
-// including the genuinely-separate-allocation duplicate
-// (`strings::trim()`-built, not a second string literal, since the linker
-// merges identical literal constants and would mask a real regression
-// here).
-fn<T> Set.indexOf(item: T): int {
-  mut i: int = 0;
-  while i < self.len {
-    if (self.items[i] == item) {
-      return i;
+// ─── hash index (internal) ──────────────────────────────────────────────
+// Identical shape to Map's own (map.tr) with `items` standing in for
+// `keys` and no parallel `values` array to keep in sync. See that file's
+// header for the full design rationale.
+
+fn<T> Set.bucketFind(item: T): int {
+  if (self.bcap == 0) {
+    return -1;
+  }
+  mut slot: int = hashing::hash(item) & (self.bcap - 1);
+  mut probes: int = 0;
+  while probes < self.bcap {
+    immutable b: int = self.buckets[slot];
+    if (b == -1) {
+      return -1;
     }
-    i = i + 1;
+    if (b != -2 && self.items[b] == item) {
+      return slot;
+    }
+    slot = (slot + 1) & (self.bcap - 1);
+    probes = probes + 1;
   }
   return -1;
+}
+
+fn<T> Set.bucketInsertSlot(item: T): int {
+  mut slot: int = hashing::hash(item) & (self.bcap - 1);
+  mut tomb: int = -1;
+  mut probes: int = 0;
+  while probes < self.bcap {
+    immutable b: int = self.buckets[slot];
+    if (b == -1) {
+      if (tomb >= 0) {
+        return tomb;
+      }
+      return slot;
+    }
+    if (b == -2 && tomb < 0) {
+      tomb = slot;
+    }
+    slot = (slot + 1) & (self.bcap - 1);
+    probes = probes + 1;
+  }
+  return tomb;
+}
+
+// Grows+rehashes the bucket index once occupancy would exceed a 70% load
+// factor (or on first use, from `bcap == 0`). See map.tr's identical
+// `Map.bucketRehash()` for the full rationale (can't be a realloc -- every
+// entry's bucket slot depends on `bcap` itself).
+fn<T> Set.bucketRehash(newBcap: int): void {
+  self.buckets = gc_alloc(newBcap * sizeof(int)) to int*;
+  mut z: int = 0;
+  while z < newBcap {
+    self.buckets[z] = -1;
+    z = z + 1;
+  }
+  self.bcap = newBcap;
+
+  mut i: int = 0;
+  while i < self.len {
+    immutable slot: int = self.bucketInsertSlot(self.items[i]);
+    self.buckets[slot] = i;
+    i = i + 1;
+  }
+}
+
+fn<T> Set.bucketMaybeGrow(): void {
+  if (self.bcap == 0) {
+    self.bucketRehash(8);
+    return;
+  }
+  if ((self.len + 1) * 10 >= self.bcap * 7) {
+    self.bucketRehash(self.bcap * 2);
+  }
+}
+
+// ─── public API ──────────────────────────────────────────────────────────
+
+// Returns the DENSE-array index of `item`, or -1 if absent. O(1) average
+// (was O(n) before this group, see this file's header).
+fn<T> Set.indexOf(item: T): int {
+  immutable slot: int = self.bucketFind(item);
+  if (slot < 0) {
+    return -1;
+  }
+  return self.buckets[slot];
 }
 
 fn<T> Set.contains(item: T): bool {
@@ -73,11 +145,8 @@ fn<T> Set.add(item: T): void {
       self.cap = self.cap * 2;
     }
 
-    // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure -- wrong for
-    // a T over 8 bytes, which under-allocated this buffer and silently
-    // overran it a few adds later. sizeof(T) is correct per instantiation
-    // (monomorphized, TYPE-002) -- see list.tr's identical fix, S14b, for
-    // the first instance of this.
+    // TYPE-002 (S15/D3): real per-instantiation byte size -- see
+    // list.tr's identical fix for the first instance of this class of fix.
     immutable byteSize: int = self.cap * sizeof(T);
 
     if (self.items == null) {
@@ -86,21 +155,35 @@ fn<T> Set.add(item: T): void {
       self.items = gc_realloc(self.items, byteSize) to T*;
     }
   }
+  self.bucketMaybeGrow();
 
+  immutable insertSlot: int = self.bucketInsertSlot(item);
+  self.buckets[insertSlot] = self.len;
   self.items[self.len] = item;
   self.len = self.len + 1;
 }
 
+// Removal: tombstone item's bucket entry, then swap-with-last on the dense
+// array exactly like before -- but if the swap moves a DIFFERENT item (the
+// one that used to be last) into the removed slot, that item's own bucket
+// entry must be retargeted to the new dense index (mirrors Map.remove()'s
+// identical concern; see that file's doc comment for the full reasoning).
 fn<T> Set.remove(item: T): bool {
-  immutable idx: int = self.indexOf(item);
-  if (idx < 0) {
+  immutable bslot: int = self.bucketFind(item);
+  if (bslot < 0) {
     return false;
   }
+  immutable idx: int = self.buckets[bslot];
+  self.buckets[bslot] = -2;
 
-  // Swap-with-last removal -- O(1), doesn't preserve insertion order
-  // (mirrors Map.remove()'s identical tradeoff).
   self.len = self.len - 1;
-  self.items[idx] = self.items[self.len];
+  if (idx != self.len) {
+    immutable movedSlot: int = self.bucketFind(self.items[self.len]);
+    if (movedSlot >= 0) {
+      self.buckets[movedSlot] = idx;
+    }
+    self.items[idx] = self.items[self.len];
+  }
   return true;
 }
 
@@ -110,17 +193,19 @@ fn<T> Set.length(): int {
 
 // ─── operator[] (LANG-001) ───────────────────────────────────────────────────
 //
-// `s[i]` -- positional read of the i-th stored element (insertion order is
-// NOT preserved across remove(), see Set.remove()'s swap-with-last comment,
-// so "positional" means "whatever slot i currently holds", same caveat
-// List<int>'s own operator[] doesn't have to make). Declared for the
-// CONCRETE `Set<int>` only -- see list.tr's operator[] doc comment for why
-// `operator` declarations can't be generic over T at all.
+// `s[i]` -- positional read of the i-th INSERTION-ORDER element (see this
+// file's header: the dense `items` array is unchanged storage, so this
+// keeps working exactly as before -- `tests/18_operator_overload/
+// 14_stdlib_set_index.tr` requires this ordering guarantee explicitly).
+// Declared for the CONCRETE `Set<int>` only -- see list.tr's operator[]
+// doc comment for why `operator` declarations can't be generic over T at
+// all.
 //
 // Deliberately NO `operator[]=` for Set<T>: unlike List/Map, a set's
 // invariant is uniqueness -- `s[i] = v` would let a caller silently
 // overwrite one element with a value that duplicates another slot,
-// corrupting that invariant with no check at all. add()/remove() stay the
+// corrupting that invariant with no check at all (and would leave the
+// hash index pointing at stale data besides). add()/remove() stay the
 // only way to mutate a Set's contents.
 operator [](s: Set<int>, i: int): int {
   if (i < 0 || i >= s.len) {

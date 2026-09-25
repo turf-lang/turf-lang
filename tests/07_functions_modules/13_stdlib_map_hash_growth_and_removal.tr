@@ -1,0 +1,80 @@
+// Regression test: STD-003's Map<K, V> hash-index rewrite
+// (lib/std/collections/map.tr, docs/development/changes/STD-003.md) --
+// correctness under real stress the older, smaller 09_stdlib_map.tr
+// doesn't exercise: many entries (several bucket-table rehash rounds, not
+// just the dense array's own growth), a removal that swaps a DIFFERENT key
+// into the removed slot (the bucket-index retarget path), and string keys
+// built at RUNTIME (INV-TEST-1, docs/development/INVARIANTS.md --
+// concatenating an index onto a literal defeats the linker's identical-
+// literal merging that would otherwise mask an identity-not-content bug).
+import map::Map;
+import test;
+
+fn main(): int {
+    // Enough entries to force multiple bucket-table rehash rounds (starts
+    // at 8, doubles on a 70% load factor -- 200 entries crosses that
+    // threshold several times over).
+    mut m: Map<string, int> = Map::default();
+    mut i: int = 0;
+    while i < 200 {
+        immutable key: string = "key_" + (i to string);
+        m.put(key, i * 3);
+        i = i + 1;
+    }
+    test::assert(m.length() == 200, "200 distinct runtime-built keys");
+
+    i = 0;
+    while i < 200 {
+        immutable key: string = "key_" + (i to string);
+        test::assert(m.contains(key), "every inserted key must be found");
+        test::assert(m.get(key) == i * 3, "every value must read back correctly");
+        i = i + 1;
+    }
+    test::assert(!m.contains("key_9999"), "a never-inserted key must not be found");
+
+    // Overwrite every key with a runtime-built duplicate (a SEPARATE
+    // allocation, never the same literal) -- proves the hash index finds
+    // the EXISTING entry (via real content equality) rather than treating
+    // it as a fresh collision and silently growing the map.
+    i = 0;
+    while i < 200 {
+        immutable key: string = "key_" + (i to string);
+        m.put(key, i * 100);
+        i = i + 1;
+    }
+    test::assert(m.length() == 200, "overwriting every key must not grow the map");
+    test::assert(m.get("key_" + (50 to string)) == 5000, "overwrite took effect");
+
+    // Remove a key that is NOT the last dense entry -- forces the
+    // swap-with-last compaction to move a DIFFERENT key into the removed
+    // slot, which must retarget that moved key's own bucket entry (see
+    // Map.remove()'s doc comment). Verify both the removed key is gone AND
+    // the key that used to be last is still found at its NEW dense
+    // position.
+    immutable lastKey: string = "key_" + (199 to string);
+    m.remove("key_" + (0 to string));
+    test::assert(m.length() == 199, "length drops by one after removal");
+    test::assert(!m.contains("key_" + (0 to string)), "removed key is gone");
+    test::assert(m.contains(lastKey), "the moved-into-place key must still be found");
+    test::assert(m.get(lastKey) == 19900, "the moved-into-place key's value must be intact");
+
+    // Remove every remaining key one at a time (each one, at some point,
+    // forces another swap) -- the map must end up genuinely empty, not
+    // just report length() == 0 while still containing stale entries.
+    i = 1;
+    while i < 200 {
+        m.remove("key_" + (i to string));
+        i = i + 1;
+    }
+    test::assert(m.length() == 0, "map is empty after removing every key");
+    test::assert(!m.contains(lastKey), "no key survives after removing all of them");
+
+    // Re-insert after emptying -- proves tombstones left behind by the
+    // removals above are correctly reused by later inserts, not treated as
+    // permanently poisoning the probe chain.
+    m.put("fresh", 42);
+    test::assert(m.length() == 1, "map usable again after being fully emptied");
+    test::assert(m.get("fresh") == 42, "");
+
+    return 0;
+}
