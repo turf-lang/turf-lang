@@ -215,4 +215,34 @@ SourceLocation GetNodeDebugLoc(const ExprAST *E);
 /// than pointing it at line 0).
 void SetDebugLoc(const SourceLocation &Loc);
 
+// ── MEM-002: the collector ───────────────────────────────────────────────
+// Defined in CodegenStruct.cpp (alongside RT-001's struct-instance
+// EmitAllTurfTypeDescs()/emitTurfTypeDesc(), which this shares its
+// pointer-word-bitmap-building logic with).
+
+/// Returns (memoized, by raw llvm::Type* identity) a per-ELEMENT
+/// TurfTypeDesc constant global describing one element of @p ElemTy --
+/// runtime/turfrt.h's TurfTypeDesc doc comment explains how the collector
+/// repeats this across a block's real length. Needed by CodegenExpr.cpp's
+/// CastExprAST::codegen(), which recognizes a `gc_alloc(...)`/
+/// `gc_alloc_zeroed(...)`/`gc_realloc(...)` operand being cast `to T*` and
+/// injects this descriptor in place of MEM-001's literal NULL.
+llvm::GlobalVariable *getOrCreateElementTurfTypeDesc(llvm::Type *ElemTy);
+
+/// Set by CastExprAST::codegen() immediately before it calls codegen() on a
+/// `gc_alloc`/`gc_alloc_zeroed`/`gc_realloc` operand it recognizes as
+/// `to T*`-cast, and consumed (read once, then reset to nullptr) by
+/// FuncCallExprAST::codegen()'s own dispatch for those three names
+/// (CodegenFunc.cpp) in place of the literal null pointer MEM-001 always
+/// passed. nullptr in every other context (an ordinary `gc_alloc(n) to
+/// string` string-buffer site, or any call not immediately wrapped in a
+/// recognized cast) -- MEM-002 defines a NULL desc as "opaque, no pointer
+/// words traced", which is correct, not merely a fallback, for those sites
+/// (see turfrt.h's turf_rt_alloc doc comment). A single file-scope Value*
+/// rather than a parameter threaded through codegen()'s fixed virtual
+/// signature -- the same "can't change a virtual codegen() signature for
+/// one caller" constraint SetDebugLoc()'s CurrentDebugScope above already
+/// works around the identical way.
+extern llvm::Value *PendingGCAllocDescOverride;
+
 #endif

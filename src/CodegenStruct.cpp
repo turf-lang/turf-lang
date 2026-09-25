@@ -717,6 +717,87 @@ static void emitTurfTypeDesc(llvm::StructType *ST) {
   llvm::appendToCompilerUsed(*TheModule, {DescGV});
 }
 
+// ─── MEM-002: per-ELEMENT TurfTypeDesc for a collection's backing buffer ──
+// See runtime/turfrt.h's TurfTypeDesc doc comment for the repeating-stride
+// semantics this reuses (deliberately no new C struct field): a collection
+// growth call site (list/stack/queue/set/map.tr, each writing
+// `gc_alloc(byteSize) to T*`) allocates N elements of T, not one instance of
+// a struct -- this builds the descriptor for ONE element of T (whatever
+// concrete LLVM type T monomorphized to at this call site), the same way
+// emitTurfTypeDesc() above builds one for a whole struct instance, and lets
+// the collector's mark phase (turfrt_gc.c) repeat it across the block's
+// real length. Called from CastExprAST::codegen()'s MEM-002 special case
+// (CodegenExpr.cpp) -- see that call site for how `ElemTy` is determined
+// (the cast's own destination type, `T*`, at a `gc_alloc(...) to T*` site).
+//
+// Memoized by the raw llvm::Type* pointer -- every LLVM type this compiler
+// ever hands here (a primitive, an opaque pointer, or a specific
+// llvm::StructType*) is already uniqued/interned within *TheContext, so
+// pointer identity is a correct, and much simpler, cache key than deriving
+// a string name to dedupe on.
+static std::map<llvm::Type *, llvm::GlobalVariable *> ElementTypeDescCache;
+
+llvm::GlobalVariable *getOrCreateElementTurfTypeDesc(llvm::Type *ElemTy) {
+  auto It = ElementTypeDescCache.find(ElemTy);
+  if (It != ElementTypeDescCache.end())
+    return It->second;
+
+  // A struct element must already be fully built (setBody() run) before its
+  // layout can be queried -- exactly INV-RT-3's own condition, restated
+  // here because this call site is NOT EmitAllTurfTypeDescs()'s deliberately
+  // late single pass, it runs interleaved with ordinary function-body
+  // codegen. Safe in practice: every struct sub-pass (2c/3a/3b) finishes
+  // before "the main pass" codegens any function body, and this helper is
+  // only ever reached from inside a function body (a gc_alloc/gc_realloc
+  // call site) -- an opaque struct reaching here would mean that ordering
+  // guarantee broke, which is a compiler bug worth crashing loudly on in a
+  // debug build (an under-reported bitmap is a MISSED ROOT, §14's own
+  // "catastrophic" risk category) rather than silently emitting an unsound
+  // descriptor in release.
+  if (auto *ST = llvm::dyn_cast<llvm::StructType>(ElemTy)) {
+    assert(!ST->isOpaque() &&
+           "MEM-002: getOrCreateElementTurfTypeDesc() called on an opaque "
+           "struct element type -- see this function's own comment");
+  }
+
+  const llvm::DataLayout &DL = TheModule->getDataLayout();
+  uint64_t Size = DL.getTypeAllocSize(ElemTy).getFixedValue();
+
+  uint64_t Bitmap = 0;
+  collectPointerWordBits(ElemTy, DL, 0, Bitmap);
+
+  std::string Name;
+  llvm::raw_string_ostream OS(Name);
+  ElemTy->print(OS);
+
+  llvm::Constant *NameStrConst =
+      llvm::ConstantDataArray::getString(*TheContext, Name, true);
+  auto *NameGV = new llvm::GlobalVariable(
+      *TheModule, NameStrConst->getType(), /*isConstant=*/true,
+      llvm::GlobalValue::PrivateLinkage, NameStrConst,
+      "__turf_elemdesc_name");
+  llvm::Constant *ZeroIdx =
+      llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
+  llvm::Constant *Indices[] = {ZeroIdx, ZeroIdx};
+  llvm::Constant *NamePtr = llvm::ConstantExpr::getInBoundsGetElementPtr(
+      NameStrConst->getType(), NameGV, Indices);
+
+  llvm::StructType *DescTy = getOrCreateTurfTypeDescType();
+  llvm::Constant *DescInit = llvm::ConstantStruct::get(
+      DescTy,
+      {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), Size),
+       NamePtr,
+       llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), Bitmap)});
+
+  auto *DescGV = new llvm::GlobalVariable(
+      *TheModule, DescTy, /*isConstant=*/true,
+      llvm::GlobalValue::InternalLinkage, DescInit, "__turf_elemdesc");
+  llvm::appendToCompilerUsed(*TheModule, {DescGV});
+
+  ElementTypeDescCache[ElemTy] = DescGV;
+  return DescGV;
+}
+
 // RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, point 3): emits a
 // TurfTypeDesc for every real (fully-built) aggregate type in the module.
 // Declared in include/Codegen.h; called exactly once from main.cpp,

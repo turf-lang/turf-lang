@@ -285,6 +285,7 @@ target_link_libraries(turfcore PUBLIC
 # for no benefit RT-001 needs.
 add_library(turfrt STATIC
   runtime/turfrt_alloc.c
+  runtime/turfrt_gc.c
   runtime/turfrt_panic.c
   runtime/turfrt_types.c
 )

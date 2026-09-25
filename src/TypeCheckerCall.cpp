@@ -371,6 +371,24 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         return;
       }
 
+      // ── gc_collect() → void / gc_is_managed(p) → bool ──────────────────────
+      // MEM-002. gc_collect() forces one mark-sweep cycle (turf_rt_collect);
+      // gc_is_managed(p) is the exact-block-start query lib/std/mem/mem.tr's
+      // checked free() uses to diagnose a cross-heap mem::free() call. Same
+      // minimal-validation convention as gc_alloc's own branch above.
+      if (CalleeName == "gc_collect") {
+        setType(&Node, TurfVoid());
+        return;
+      }
+      if (CalleeName == "gc_is_managed") {
+        setType(&Node, TurfBool());
+        return;
+      }
+      if (CalleeName == "gc_checked_free") {
+        setType(&Node, TurfVoid());
+        return;
+      }
+
       // assert/fail used to have bespoke branches here (assert needed a
       // special Arity == -1 sentinel to express its 1-or-2-arg signature,
       // since it isn't a single fixed count the generic check above can

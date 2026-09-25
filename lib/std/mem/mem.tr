@@ -33,7 +33,18 @@ import sys;
 extern fn malloc(size: int): void*;
 extern fn calloc(count: int, size: int): void*;
 extern fn realloc(p: void*, new_size: int): void*;
-extern fn free(p: void*): void;
+
+// MEM-002: there used to be a plain `extern fn free(p: void*): void;` here,
+// bound straight to libc. It's gone -- Turf's `extern fn` has no alias
+// syntax (the declared Turf-level name IS the linked C symbol name,
+// verified live: `src/ParserDecl.cpp`'s ExternFuncDeclExprAST has exactly
+// one `Name_` field, used for both), so a checked wrapper could not also be
+// named `free` in this same file without colliding with it (the same
+// redeclaration conflict tests/21_extern_conflict/ exists to catch).
+// `gc_checked_free(p)` (a bare intrinsic, same mechanism as `gc_alloc`)
+// is the actual libc `free()` call now -- see its own doc comment in
+// runtime/turfrt.h (`turf_rt_checked_free`) -- with the cross-heap check
+// this file's own free() (below) wraps it in.
 
 // posix_memalign's first parameter is genuinely a `void**` (an out-param:
 // the C function writes the allocated address INTO the location this
@@ -113,8 +124,21 @@ fn alloc_aligned(alignment: int, size: int): void* {
     }
     mut iSlot: int* = outSlot to int*;
     mut allocated: void* = iSlot[0] to void*;
-    free(outSlot);
+    gc_checked_free(outSlot);
     return allocated;
+}
+
+// free: releases a manual-heap allocation obtained from alloc()/
+// alloc_zeroed()/alloc_aligned()/grow()/dup(), or any other pointer the
+// PROGRAMMER owns (F-MEM-3). Freeing a GC-heap pointer here instead -- a
+// `string`, or a collection's backing buffer -- is the exact cross-heap
+// mistake F-MEM-3 forbids ("the two heaps do not merge" -- MEM-001's own
+// "Must NOT reinterpret" entry); gc_checked_free() (a bare intrinsic,
+// runtime/turfrt.h's turf_rt_checked_free) is what turns that from
+// undiagnosed corruption into a diagnosable runtime panic naming the
+// mistake. Usage is unchanged from before this group: `mem::free(buf)`.
+fn free(p: void*): void {
+    gc_checked_free(p);
 }
 
 // usable_size: how many bytes are ACTUALLY available at `p` (often more

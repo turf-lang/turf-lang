@@ -74,6 +74,14 @@ std::map<std::string, TurfTypePtr> FuncReturnTypes;
 // Type cache for Monomorphization: maps type name -> LLVM type
 std::map<std::string, llvm::Type *> LLVMTypeCache;
 
+// MEM-002: see CodegenInternal.h's own doc comment. Reset to nullptr at the
+// top of InitializeModule() below for the identical reason ResetArgvHelpers()
+// exists -- a fresh compile must never carry a stale Value* left over from a
+// previous TheModule (relevant for the compiler's own multi-file/REPL-like
+// invocations, not a single ordinary `turf file.tr` run, but cheap to get
+// right unconditionally).
+llvm::Value *PendingGCAllocDescOverride = nullptr;
+
 void InitializeModule() {
   // Holds types and constants
   TheContext = std::make_unique<LLVMContext>();
@@ -87,6 +95,7 @@ void InitializeModule() {
   // See CodegenInternal.h's doc comment: CodegenFunc.cpp's main argv/argc
   // plumbing globals must not survive into a fresh TheModule.
   ResetArgvHelpers();
+  PendingGCAllocDescOverride = nullptr;
 
   // TOOL-001: `-g` DWARF debug info. g_EmitDebugInfo is set by main.cpp
   // (from the `-g` flag) strictly BEFORE this function runs, so it's already
@@ -680,6 +689,16 @@ const TurfType *getExprType(const ExprAST *E) {
           CalleeName == "gc_realloc") {
         static const TurfPointerType VoidPtrTy(TurfVoid());
         return &VoidPtrTy;
+      }
+
+      // MEM-002: gc_is_managed(p) always evaluates to `bool`, for the
+      // identical short-circuit reason as gc_alloc's own branch above.
+      // gc_collect() returns void, which needs no branch here at all --
+      // getExprType() is only ever asked about a VALUE-producing
+      // expression, and a bare `gc_collect();` statement is never one.
+      if (CalleeName == "gc_is_managed") {
+        static const BoolType BoolTy;
+        return &BoolTy;
       }
 
       // `StructName::new(...)` / `StructName::default()` -- both evaluate to

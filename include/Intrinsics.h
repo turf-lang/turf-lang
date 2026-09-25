@@ -68,12 +68,32 @@
 //                  GC-heap call sites that rely on zero-initialization,
 //                  not just convenience -- see turf_rt_alloc_zeroed's own
 //                  doc comment.
-//   gc_realloc(p, n) -- MEM-001. `p` any pointer-shaped value, `n: int`
-//                  new byte count, returns `void*`. Calls
-//                  turf_rt_realloc(p, n, NULL) -- exists specifically so
+//   gc_realloc(p, n) -- MEM-001/MEM-002. `p` any pointer-shaped value,
+//                  `n: int` new byte count, returns `void*`. Calls
+//                  turf_rt_realloc(p, n, desc) -- `desc` is a real
+//                  per-element TurfTypeDesc when CastExprAST::codegen()
+//                  recognizes a `gc_realloc(...) to T*`-shaped call site
+//                  (MEM-002), NULL otherwise. Exists specifically so
 //                  MEM-001's collection-growth call sites keep realloc's
 //                  in-place-extend behavior instead of degrading to
 //                  always-allocate-fresh-and-copy. Arity 2.
+//   gc_collect() -- MEM-002. Forces one turf_rt_collect() mark-sweep
+//                  cycle (also run automatically on allocation pressure).
+//                  Registered in Builtins.cpp's g_builtins (Arity 0);
+//                  dispatched alongside gc_alloc.
+//   gc_is_managed(p) -- MEM-002. `bool`: true iff `p` is exactly a live
+//                  GC-heap block's own start address (turf_rt_is_gc_pointer).
+//                  Registered in Builtins.cpp's g_builtins (Arity 1).
+//   gc_checked_free(p) -- MEM-002. Frees a manual-heap `p`
+//                  (turf_rt_checked_free) -- panics instead if `p` is a
+//                  GC-heap pointer. `lib/std/mem/mem.tr`'s own `free()` is
+//                  its one caller: Turf's `extern fn` binds a declared name
+//                  directly to an identically-named C symbol with no alias
+//                  syntax, so mem.tr's checked wrapper could not itself be
+//                  named `free` while an `extern fn free` still existed in
+//                  the same file -- this bare intrinsic is what replaced
+//                  that extern binding. Registered in Builtins.cpp's
+//                  g_builtins (Arity 1).
 //
 // Reserved, NOT yet implemented -- do not add a matching enum/keyword
 // anywhere else in the compiler as a side effect of an unrelated change
@@ -144,9 +164,26 @@
 //                           this, never reachable from Turf source under
 //                           any name.
 //   turf_rt_typedesc_is_pointer_word(desc, word_index) -- descriptor
-//                           accessor; MEM-002's mark phase is its intended
-//                           long-term caller, scripts/runtime_smoke.sh its
-//                           only caller in RT-001.
+//                           accessor; MEM-002's mark phase (turfrt_gc.c) is
+//                           its real, intended caller as of this group
+//                           (scripts/runtime_smoke.sh was its only caller
+//                           in RT-001).
+//   turf_rt_collect() -- MEM-002. Runs one mark-sweep cycle. Reached from
+//                           Codegen via the `gc_collect()` bare intrinsic
+//                           above; also called internally (turf_gc_note_alloc,
+//                           turfrt_gc.c) on allocation pressure.
+//   turf_rt_add_global_root(slot) / turf_rt_remove_global_root(slot) --
+//                           MEM-002. Registers/unregisters a `void**`
+//                           precise root. No current Codegen call site --
+//                           TurfLang has no mutable global/static storage
+//                           today -- so this is genuine, tested runtime API
+//                           (scripts/gc_smoke.sh) with no reachable-from-
+//                           Turf-source surface yet; see
+//                           docs/development/changes/MEM-002.md.
+//   turf_rt_is_gc_pointer(p) -- MEM-002. Reached via `gc_is_managed(p)`
+//                           above.
+//   turf_rt_checked_free(p) -- MEM-002. Reached via `gc_checked_free(p)`
+//                           above.
 //
 // TurfTypeDesc (the {size, name, pointer_word_bitmap} struct these
 // functions traffic in) is NOT itself a callable intrinsic, but every

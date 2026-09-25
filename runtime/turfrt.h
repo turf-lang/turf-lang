@@ -68,6 +68,27 @@ typedef struct TurfTypeDesc {
 } TurfTypeDesc;
 
 /*
+ * MEM-002's reuse of this exact struct for an ARRAY of elements (a
+ * collection's backing buffer), rather than widening the C layout with a
+ * new field: the collector's mark phase (turfrt_gc.c) walks a traced
+ * block's bytes in `desc->size`-byte STRIDES, re-applying
+ * `pointer_word_bitmap` at every stride, until the stride count reaches the
+ * block's own actual allocated length (tracked by the block table, not by
+ * this struct). A single-instance struct allocation is the special case
+ * where the block's length exactly equals `desc->size` -- one stride, no
+ * repetition -- so RT-001's original struct descriptors need no change at
+ * all to keep meaning exactly what they always meant; only a genuinely
+ * multi-element block (built by passing an element-sized `desc` to
+ * turf_rt_alloc/turf_rt_realloc for a block many times that size) exercises
+ * the repeating behavior. See `docs/development/changes/MEM-002.md` for why
+ * this reuse was chosen over adding an `is_array` field: this codebase's own
+ * "verify claims live" rule caught that adding a field would silently
+ * require re-deriving `getOrCreateTurfTypeDescType()`'s LLVM layout AND
+ * every existing consumer, for a distinction the block's own recorded
+ * length already lets the mark phase infer without being told.
+ */
+
+/*
  * turf_rt_init / turf_rt_shutdown -- process bootstrap, called from the
  * compiler-emitted wrapper Codegen builds around the user's `main` (see
  * src/CodegenFunc.cpp's WrapMainWithRuntimeBootstrap(), invoked from
@@ -89,26 +110,32 @@ void turf_rt_init(void);
 void turf_rt_shutdown(void);
 
 /*
- * turf_rt_alloc -- the typed allocation entrypoint (F-MEM-4). In this group
- * it is a thin, fail-fast malloc wrapper that records nothing about `desc`
- * beyond using it for a panic message on OOM -- MEM-002 gives it a real
- * heap. `desc` may be NULL (an untyped/raw allocation has no descriptor);
- * callers that always have one should still pass it so OOM diagnostics
- * name the type being allocated.
+ * turf_rt_alloc -- the typed allocation entrypoint (F-MEM-4). As of MEM-002
+ * this is a real, collected allocation: the returned block is registered
+ * with the collector's block table (turfrt_gc.c) and reclaimed by
+ * turf_rt_collect() once nothing reachable from a root still points into
+ * it. `desc` may be NULL, which MEM-002 defines as "opaque -- this block
+ * holds no outgoing GC-heap pointers anywhere in its bytes" (correct, not
+ * merely permitted, for a raw byte run like a string buffer: nothing in
+ * TurfLang ever stores a pointer INSIDE a string's own bytes). A non-NULL
+ * `desc` is now an ARRAY-ELEMENT descriptor, not only a single-instance one
+ * -- see this header's own TurfTypeDesc doc comment below for the repeating
+ * semantics MEM-002 gives `size`/`pointer_word_bitmap` when the block is
+ * longer than one `size`-sized stride. `desc` is also still used for a
+ * panic message on OOM.
  *
- * As of MEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8), this is called
- * from Codegen for the Turf-level `gc_alloc(n)` bare intrinsic
- * (FuncCallExprAST::codegen(), src/CodegenFunc.cpp) -- every GC-heap-bound
+ * As of MEM-001/MEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8), this is
+ * called from Codegen for the Turf-level `gc_alloc(n)` bare intrinsic
+ * (FuncCallExprAST::codegen(), src/CodegenFunc.cpp). Every GC-heap-bound
  * allocation classified in `docs/development/changes/MEM-001.md` (string
- * results, collection backing buffers) reaches this function with `desc`
- * always NULL: none of them are single instances of a monomorphized
- * aggregate the way EmitAllTurfTypeDescs()'s per-struct descriptors are
- * (a string is a raw byte run; a `List<T>` backing buffer is N elements,
- * not one), so there is no existing TurfTypeDesc that correctly describes
- * "N u8s" or "N Ts" -- an array-shaped descriptor is explicitly MEM-002
- * territory (RT-001's own `pointer_word_bitmap` doc comment), not
- * invented speculatively here. `desc == NULL` degrades OOM diagnostics to
- * "<raw>" (see turf_rt_alloc's own body) but is otherwise fully correct.
+ * results, collection backing buffers) reaches this function; a raw byte
+ * buffer (strings.tr/io.tr/net.tr) still passes `desc == NULL`, but a
+ * collection's backing-buffer growth (list/stack/queue/set/map.tr, each
+ * writing `gc_alloc(n) to T*`) now has a REAL per-instantiation array
+ * descriptor injected by Codegen (`CastExprAST::codegen()`'s MEM-002
+ * special case, src/CodegenExpr.cpp) -- see `docs/development/changes/
+ * MEM-002.md`'s *Removed assumptions* for why MEM-001 could not have done
+ * this itself (no array-shaped descriptor existed yet).
  */
 void *turf_rt_alloc(size_t bytes, const TurfTypeDesc *desc);
 
@@ -145,6 +172,89 @@ void *turf_rt_alloc_zeroed(size_t bytes, const TurfTypeDesc *desc);
 void *turf_rt_realloc(void *p, size_t new_size, const TurfTypeDesc *desc);
 
 /*
+ * turf_rt_collect -- MEM-002. Runs one full stop-the-world mark-sweep cycle
+ * over the GC heap: mark (conservative over the stack and callee-saved
+ * registers, precise over registered global roots and every already-marked
+ * block's own declared pointer words) then sweep (free() every unmarked
+ * block, compact the block table). Safe to call at any point after
+ * turf_rt_init() -- in particular, safe to call from INSIDE
+ * turf_rt_alloc()/turf_rt_alloc_zeroed()/turf_rt_realloc() themselves (this
+ * is exactly what "also called on allocation pressure" means): the block
+ * those functions are about to return is already registered before the
+ * pressure check runs, and its address is still live on the C stack/in a
+ * register at that point, so conservative scanning retains it correctly --
+ * see turfrt_gc.c's own top comment for the full ordering argument. Manual
+ * (`mem::alloc`) memory is never touched -- the collector has no block-table
+ * entry for it at all (F-MEM-3).
+ */
+void turf_rt_collect(void);
+
+/*
+ * turf_rt_add_global_root / turf_rt_remove_global_root -- MEM-002, §14.6
+ * point 2. Registers/unregisters a `void**` STORAGE LOCATION (not a
+ * pointer value) as a precise root: the collector reads `*slot` fresh at
+ * the start of every mark phase, so a slot's contents may change between
+ * collections and the collector always sees the current value. As of this
+ * group, verified live: TurfLang has no mutable global/static storage of
+ * any kind (`export immut` constants are inlined literal values with no
+ * storage -- FREEZE.md §6.5/§14.6 point 2's own text already says so), so
+ * Codegen has no real call site that needs this today -- it exists as
+ * genuine, tested runtime API (`scripts/gc_smoke.sh` exercises it directly
+ * against `lib/libturfrt.a`, the same direct-C-linkage precedent
+ * `scripts/mem_smoke.sh`/`scripts/runtime_smoke.sh` already use) so that a
+ * FUTURE feature adding global/static storage (closures' captured
+ * environments, say) needs no second runtime change to plug into it. See
+ * `docs/development/changes/MEM-002.md`'s *Known pitfalls* before assuming
+ * a Codegen-side caller is "missing" -- it is deliberately absent, not
+ * forgotten.
+ */
+void turf_rt_add_global_root(void **slot);
+void turf_rt_remove_global_root(void **slot);
+
+/*
+ * turf_rt_is_gc_pointer -- MEM-002. Exact-match block-table lookup: true iff
+ * `p` is precisely the address turf_rt_alloc/turf_rt_alloc_zeroed/
+ * turf_rt_realloc returned for some still-live GC-heap block (an interior
+ * address, one that merely points INTO a block, returns false -- this is
+ * deliberately narrower than the mark phase's own containment check, which
+ * treats an interior pointer as retaining its object; this function answers
+ * "is this exactly a block start", the question `mem::free`'s cross-heap
+ * diagnostic needs). Reached from Turf source via the `gc_is_managed(p)`
+ * bare intrinsic (`include/Intrinsics.h` category 1) -- `lib/std/mem/mem.tr`
+ * `free()`'s own new cross-heap check is its one caller (MEM-002's
+ * "Breaking changes": freeing a GC-heap pointer through `mem::free` must be
+ * a diagnosable runtime error, not undefined behaviour, per MEM-001's own
+ * "Must NOT reinterpret" list). O(1) amortized against the pending-alloc
+ * buffer plus O(log n) against the indexed block table -- deliberately does
+ * NOT require a full index rebuild/collection, so calling it on every
+ * `mem::free()` in a hot path stays cheap.
+ */
+int turf_rt_is_gc_pointer(const void *p);
+
+/*
+ * turf_rt_checked_free -- MEM-002. The actual `free(3)` call for the manual
+ * heap, reached from Turf source via the `gc_checked_free(p)` bare
+ * intrinsic -- `lib/std/mem/mem.tr`'s own `free()` is the one caller,
+ * wrapping this to keep `mem::free(p)`'s public name/signature unchanged.
+ * Panics (turf_rt_panic, "cross-heap free") instead of calling libc's
+ * free() when `p` is a live GC-heap block's own start address -- the
+ * cross-heap mistake F-MEM-3 forbids, previously undiagnosed (MEM-001's own
+ * "Must NOT reinterpret": "the two heaps do not merge", but nothing checked
+ * it until this block table existed). `p == NULL` is the ordinary,
+ * already-safe C free(NULL) no-op, unchanged.
+ *
+ * Named distinctly from turf_rt_is_gc_pointer's own bare-intrinsic
+ * surface (gc_is_managed) rather than composed from it in Turf source --
+ * `lib/std/mem/mem.tr` has no `extern fn free` to call any more (Turf's
+ * `extern fn` binds a declared name directly to an identically-named C
+ * symbol, with no alias syntax, so a checked wrapper could not itself be
+ * named `free` in the same file without colliding with that extern
+ * declaration -- see this group's own change record for the full reasoning
+ * once this comment is landed).
+ */
+void turf_rt_checked_free(void *p);
+
+/*
  * TurfRtStats / turf_rt_stats -- MEM-001's allocation-accounting hook
  * (ARCHITECTURE_OVERHAUL.md §8 MEM-001, stage 3: "turf_rt_stats()"),
  * explicitly built to become MEM-002's own regression harness: once a real
@@ -163,11 +273,24 @@ void *turf_rt_realloc(void *p, size_t new_size, const TurfTypeDesc *desc);
  * being set to anything non-empty, specifically so it stays silent (no
  * output/behavior change) for every one of the hundreds of existing
  * compiled Turf programs that do not set it.
+ *
+ * MEM-002 adds the four `collect_count`/`live_count`/`live_bytes`/
+ * `freed_count` fields below -- exactly the "before/after a collection"
+ * comparison MEM-001's own doc comment (this struct, pre-MEM-002 version)
+ * predicted this hook would need. Unlike the three original fields, these
+ * are POINT-IN-TIME as of the most recent turf_rt_collect() (0 for all four
+ * before the first collection ever runs), not cumulative-since-start --
+ * `live_count`/`live_bytes` answer "how much survived the last sweep",
+ * which a monotonically-increasing counter cannot express.
  */
 typedef struct TurfRtStats {
   uint64_t alloc_count;      /* turf_rt_alloc + turf_rt_alloc_zeroed calls */
   uint64_t realloc_count;    /* turf_rt_realloc calls */
   uint64_t bytes_requested;  /* cumulative bytes across all of the above */
+  uint64_t collect_count;    /* MEM-002: turf_rt_collect() cycles run so far */
+  uint64_t live_count;       /* MEM-002: blocks alive after the most recent sweep */
+  uint64_t live_bytes;       /* MEM-002: bytes alive after the most recent sweep */
+  uint64_t freed_count;      /* MEM-002: blocks reclaimed, cumulative across all cycles */
 } TurfRtStats;
 
 TurfRtStats turf_rt_stats(void);

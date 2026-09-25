@@ -589,7 +589,46 @@ Value *SizeOfExprAST::codegen() {
 
 Value *CastExprAST::codegen() {
   const TurfType *ExprTy = getExprType(Operand.get());
-  
+
+  // ─── MEM-002 ────────────────────────────────────────────────────────────
+  // `gc_alloc(n)`/`gc_alloc_zeroed(n)`/`gc_realloc(p, n)` cast directly
+  // `to T*` -- every collection-growth call site in list/stack/queue/set/
+  // map.tr is written exactly this way, inside a monomorphized clone where
+  // T is now a concrete type (TYPE-002). Inject a real per-element
+  // TurfTypeDesc here (instead of MEM-001's literal NULL) so the collector
+  // can trace T-shaped pointer words inside the allocated block -- see
+  // docs/development/changes/MEM-001.md's *Removed assumptions* for why
+  // this couldn't be done before this group existed (no array-shaped
+  // descriptor was designed yet). Must run BEFORE `Operand->codegen()`
+  // below: that call is what actually dispatches into
+  // FuncCallExprAST::codegen()'s gc_alloc/gc_alloc_zeroed/gc_realloc
+  // branch (CodegenFunc.cpp), which reads and consumes
+  // PendingGCAllocDescOverride while building the call -- there is no
+  // other hook point between "we know the destination element type" and
+  // "the call is built" for a bare intrinsic with no ResolvedCallTarget to
+  // attach this to (CodegenInternal.h's own doc comment on the override).
+  // A `gc_alloc(n) to string` site (strings.tr/io.tr/net.tr) is NOT this
+  // shape (`string` is its own StringType, never a TurfPointerType, so the
+  // dynamic_cast below simply fails to match) and correctly falls through
+  // to the original NULL-desc path -- MEM-002 defines that as "opaque, no
+  // pointer words", which is precise, not a fallback, for a raw byte
+  // buffer.
+  if (auto *FC = dynamic_cast<const FuncCallExprAST *>(Operand.get())) {
+    std::string GCCalleeName;
+    if (auto *VarCallee =
+            dynamic_cast<const VariableExprAST *>(FC->getCallee()))
+      GCCalleeName = VarCallee->getName();
+    if (GCCalleeName == "gc_alloc" || GCCalleeName == "gc_alloc_zeroed" ||
+        GCCalleeName == "gc_realloc") {
+      if (auto *DestPtr = dynamic_cast<const TurfPointerType *>(DestType.get())) {
+        llvm::Type *ElemTy = getLLVMType(DestPtr->getPointee().get());
+        if (ElemTy && !ElemTy->isVoidTy()) {
+          PendingGCAllocDescOverride = getOrCreateElementTurfTypeDesc(ElemTy);
+        }
+      }
+    }
+  }
+
   Value *Val = Operand->codegen();
   if (!Val)
     return nullptr;

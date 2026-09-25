@@ -1124,19 +1124,27 @@ Value *FuncCallExprAST::codegen() {
   }
 
   // ── gc_alloc(n) / gc_alloc_zeroed(n) / gc_realloc(p, n) ──────────────────
-  // MEM-001 (ARCHITECTURE_OVERHAUL.md §8): the Turf-visible surface for
-  // libturfrt's typed-allocation entrypoints (runtime/turfrt.h). Handled
+  // MEM-001/MEM-002 (ARCHITECTURE_OVERHAUL.md §8): the Turf-visible surface
+  // for libturfrt's typed-allocation entrypoints (runtime/turfrt.h). Handled
   // here, alongside typeof, for the same reason -- these are bare
   // intrinsics with no ResolvedCallTarget/MangledName, so they must be
   // dispatched before the "Issue #9: Codegen trusts the Resolver" path
-  // below, which assumes both exist. `desc` is always a literal null
-  // pointer -- see turf_rt_alloc's own doc comment in runtime/turfrt.h for
-  // why none of MEM-001's call sites have a real TurfTypeDesc to pass.
+  // below, which assumes both exist. As of MEM-002, `desc` is
+  // PendingGCAllocDescOverride when CastExprAST::codegen() set one (a real
+  // per-element TurfTypeDesc for a `gc_alloc(...) to T*`-shaped site,
+  // CodegenExpr.cpp), consumed here and reset to nullptr immediately so it
+  // never leaks into an unrelated later call; otherwise still a literal
+  // null pointer -- MEM-002 defines that as "opaque, no pointer words
+  // traced", correct (not a fallback) for a raw byte buffer like a string
+  // (see turf_rt_alloc's own doc comment in runtime/turfrt.h).
   if (CalleeName == "gc_alloc" || CalleeName == "gc_alloc_zeroed" ||
       CalleeName == "gc_realloc") {
     PointerType *PtrTy = PointerType::getUnqual(*TheContext);
     Type *I64Ty = Type::getInt64Ty(*TheContext);
-    Value *NullDesc = ConstantPointerNull::get(PtrTy);
+    Value *DescArg = PendingGCAllocDescOverride
+                          ? PendingGCAllocDescOverride
+                          : (Value *)ConstantPointerNull::get(PtrTy);
+    PendingGCAllocDescOverride = nullptr;
 
     if (CalleeName == "gc_realloc") {
       Value *PVal = Args[0]->codegen();
@@ -1150,7 +1158,7 @@ Value *FuncCallExprAST::codegen() {
         ReallocFunc = Function::Create(FT, Function::ExternalLinkage,
                                         "turf_rt_realloc", TheModule.get());
       }
-      return Builder->CreateCall(ReallocFunc, {PVal, NVal, NullDesc});
+      return Builder->CreateCall(ReallocFunc, {PVal, NVal, DescArg});
     }
 
     Value *NVal = Args[0]->codegen();
@@ -1165,7 +1173,54 @@ Value *FuncCallExprAST::codegen() {
       AllocFunc = Function::Create(FT, Function::ExternalLinkage, RtFuncName,
                                     TheModule.get());
     }
-    return Builder->CreateCall(AllocFunc, {NVal, NullDesc});
+    return Builder->CreateCall(AllocFunc, {NVal, DescArg});
+  }
+
+  // ── gc_collect() / gc_is_managed(p) ───────────────────────────────────────
+  // MEM-002. Same dispatch shape as gc_alloc above -- bare intrinsics, no
+  // ResolvedCallTarget/MangledName.
+  if (CalleeName == "gc_collect") {
+    Function *CollectFunc = TheModule->getFunction("turf_rt_collect");
+    if (!CollectFunc) {
+      FunctionType *FT =
+          FunctionType::get(Type::getVoidTy(*TheContext), {}, /*isVarArg=*/false);
+      CollectFunc = Function::Create(FT, Function::ExternalLinkage,
+                                      "turf_rt_collect", TheModule.get());
+    }
+    return Builder->CreateCall(CollectFunc, {});
+  }
+  if (CalleeName == "gc_is_managed") {
+    PointerType *PtrTy = PointerType::getUnqual(*TheContext);
+    Value *PVal = Args[0]->codegen();
+    if (!PVal)
+      return nullptr;
+    Function *IsManagedFunc = TheModule->getFunction("turf_rt_is_gc_pointer");
+    if (!IsManagedFunc) {
+      FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext),
+                                            {PtrTy}, /*isVarArg=*/false);
+      IsManagedFunc = Function::Create(FT, Function::ExternalLinkage,
+                                        "turf_rt_is_gc_pointer",
+                                        TheModule.get());
+    }
+    Value *IntResult = Builder->CreateCall(IsManagedFunc, {PVal});
+    return Builder->CreateICmpNE(
+        IntResult, ConstantInt::get(Type::getInt32Ty(*TheContext), 0),
+        "gc_is_managed");
+  }
+  if (CalleeName == "gc_checked_free") {
+    PointerType *PtrTy = PointerType::getUnqual(*TheContext);
+    Value *PVal = Args[0]->codegen();
+    if (!PVal)
+      return nullptr;
+    Function *CheckedFreeFunc = TheModule->getFunction("turf_rt_checked_free");
+    if (!CheckedFreeFunc) {
+      FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext),
+                                            {PtrTy}, /*isVarArg=*/false);
+      CheckedFreeFunc = Function::Create(FT, Function::ExternalLinkage,
+                                          "turf_rt_checked_free",
+                                          TheModule.get());
+    }
+    return Builder->CreateCall(CheckedFreeFunc, {PVal});
   }
 
   std::vector<Value *> EvaluatedArgs;

@@ -85,6 +85,16 @@ static void ensure_builtins_registered() {
   RegisterBuiltin("gc_alloc",        {1, "Allocate n bytes on the GC heap"});
   RegisterBuiltin("gc_alloc_zeroed", {1, "Allocate n zero-filled bytes on the GC heap"});
   RegisterBuiltin("gc_realloc",      {2, "Resize a GC-heap allocation to n bytes"});
+
+  // MEM-002 (ARCHITECTURE_OVERHAUL.md §8/§14): the collector's own Turf-
+  // visible surface. gc_collect() forces one mark-sweep cycle (also run
+  // automatically on allocation pressure -- see turf_rt_collect's own doc
+  // comment in runtime/turfrt.h); gc_is_managed(p) is what MEM-002's own
+  // "Breaking changes" cross-heap diagnostic (lib/std/mem/mem.tr's checked
+  // free()) is built on. Both bare intrinsics, same mechanism as gc_alloc.
+  RegisterBuiltin("gc_collect",      {0, "Force one GC mark-sweep cycle"});
+  RegisterBuiltin("gc_is_managed",   {1, "True iff p is a live GC-heap block's own start address"});
+  RegisterBuiltin("gc_checked_free", {1, "Free a manual-heap pointer, panicking on a GC-heap one"});
 }
 
 // CodegenIntrinsic() used to live here -- the Codegen-side implementation
