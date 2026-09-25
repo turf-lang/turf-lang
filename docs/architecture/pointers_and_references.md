@@ -651,7 +651,13 @@ void checkNoRawPointersInSignature(const FuncDefExprAST &Node);
 
 1. `UnsafeDepth_ > 0` — lexically inside a (nested) `unsafe { }` block.
 2. `Node` was spliced from a top-level `unsafe { }` (`WasDeclaredInsideTopLevelUnsafe(Node)`).
-3. The declaring file is under `lib/std` (`IsPathUnderLibStd(Loc.Filename)`).
+3. The declaring file has the raw-pointer capability
+   (`HasRawPointerCapability(Loc.Filename)`, 1.7/2.8 below) — **not** a
+   `lib/std` path check; this paragraph described the pre-LANG-002
+   mechanism (`IsPathUnderLibStd()`) and was left stale after that group
+   replaced it. `HasRawPointerCapability()` requires the file to have
+   parsed a leading `unsafe module;` pragma, honored unconditionally under
+   the install root and only with `--allow-unsafe-modules` elsewhere.
 
 `checkUnsafeGate()` (`TypeCheckerCore.cpp:150`) is the actual enforcement
 point: if `T` `isRawPointer()` and the location isn't exempt, it raises a

@@ -32,6 +32,11 @@
  *             (ARCHITECTURE_OVERHAUL.md §3.3): the runtime is not a
  *             capability a Turf program requests, it's infrastructure every
  *             compiled binary already links.
+ *          4. The prelude module list: not a callable symbol at all, but
+ *             the other half of "what does the compiler know about by
+ *             name" (STD-001, ARCHITECTURE_OVERHAUL.md §8/§15.3) -- which
+ *             module names get auto-imported into every top-level compile
+ *             with no `import` statement.
  *
  * @copyright Copyright (c) 2026 TurfLang contributors. Licensed under the
  * Apache License.
@@ -191,5 +196,34 @@
 // constant global (src/CodegenStruct.cpp, right after StructDeclExprAST's
 // ST->setBody() call) -- listed here because it's the other half of the
 // closed vocabulary this header exists to name.
+
+// ─── 4. The prelude module list (STD-001) ──────────────────────────────────
+// int, double, bool, char, strings, array -- auto-imported into every
+// top-level compile (as if the user's file began with `import int; import
+// double; ...`), by ParsePreludeImports() (src/ParserModule.cpp), reading
+// the array PreludeModuleNames right above it in the same file.
+//
+// This is a SPECIFICATION, not an arbitrary hardcode: these six names are
+// exactly the `.tr` files under lib/std/core/ -- see
+// docs/architecture/boundary.md's "Prelude module specification" section
+// for why that correspondence is deliberate (core/ is what the target
+// boundary diagram, ARCHITECTURE_OVERHAUL.md §3.2, labels "core
+// (prelude)"), not incidental. scripts/check_boundary.sh's check 2 enforces
+// the correspondence mechanically -- a future session adding a 7th core/
+// module (or removing one) must update PreludeModuleNames in the same
+// change, or the check fails.
+//
+// Deliberately NOT derived from a directory listing at compile time: the
+// rest of lib/std's subfolder structure (collections/, io/, mem/, math/,
+// ...) is explicitly documented (AGENTS.md, modules_and_scope_resolution.md
+// Part 2.4) as invisible to `import` -- purely organizational. Making
+// core/ additionally drive real compiler behavior (auto-import) at
+// runtime would make that one subfolder secretly load-bearing in a way
+// none of the others are, and would let a purely-organizational file move
+// silently change what gets auto-imported into every compile. Keeping
+// PreludeModuleNames an explicit, named list -- checked against core/'s
+// contents rather than generated from them -- keeps that change visible
+// and deliberate (the same "explicit, change-recorded act" F-STD-2 asks of
+// the intrinsic list above).
 
 #endif // TURF_INTRINSICS_H

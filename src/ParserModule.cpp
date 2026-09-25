@@ -863,6 +863,13 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
 // lib/std/prelude.tr file the compiler reads. Scoped to the top-level file
 // only (see main.cpp's two call sites) -- library modules importing each
 // other still explicitly import what they need, exactly like today.
+//
+// STD-001: this is a SPECIFIED list, not an arbitrary hardcode -- it must
+// name exactly the `.tr` files under lib/std/core/, no more, no fewer (see
+// include/Intrinsics.h §4 and docs/architecture/boundary.md for why that
+// correspondence is deliberate). scripts/check_boundary.sh's check 2
+// enforces this mechanically; update both this array and lib/std/core/
+// together, in the same change, or that script fails.
 static const char *const PreludeModuleNames[] = {
     "int", "double", "bool", "char", "strings", "array"};
 
