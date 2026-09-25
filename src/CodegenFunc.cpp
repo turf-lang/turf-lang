@@ -1123,6 +1123,51 @@ Value *FuncCallExprAST::codegen() {
     return Builder->CreateGlobalString(TypeNameStr, "typename");
   }
 
+  // ── gc_alloc(n) / gc_alloc_zeroed(n) / gc_realloc(p, n) ──────────────────
+  // MEM-001 (ARCHITECTURE_OVERHAUL.md §8): the Turf-visible surface for
+  // libturfrt's typed-allocation entrypoints (runtime/turfrt.h). Handled
+  // here, alongside typeof, for the same reason -- these are bare
+  // intrinsics with no ResolvedCallTarget/MangledName, so they must be
+  // dispatched before the "Issue #9: Codegen trusts the Resolver" path
+  // below, which assumes both exist. `desc` is always a literal null
+  // pointer -- see turf_rt_alloc's own doc comment in runtime/turfrt.h for
+  // why none of MEM-001's call sites have a real TurfTypeDesc to pass.
+  if (CalleeName == "gc_alloc" || CalleeName == "gc_alloc_zeroed" ||
+      CalleeName == "gc_realloc") {
+    PointerType *PtrTy = PointerType::getUnqual(*TheContext);
+    Type *I64Ty = Type::getInt64Ty(*TheContext);
+    Value *NullDesc = ConstantPointerNull::get(PtrTy);
+
+    if (CalleeName == "gc_realloc") {
+      Value *PVal = Args[0]->codegen();
+      Value *NVal = Args[1]->codegen();
+      if (!PVal || !NVal)
+        return nullptr;
+      Function *ReallocFunc = TheModule->getFunction("turf_rt_realloc");
+      if (!ReallocFunc) {
+        FunctionType *FT =
+            FunctionType::get(PtrTy, {PtrTy, I64Ty, PtrTy}, /*isVarArg=*/false);
+        ReallocFunc = Function::Create(FT, Function::ExternalLinkage,
+                                        "turf_rt_realloc", TheModule.get());
+      }
+      return Builder->CreateCall(ReallocFunc, {PVal, NVal, NullDesc});
+    }
+
+    Value *NVal = Args[0]->codegen();
+    if (!NVal)
+      return nullptr;
+    const char *RtFuncName =
+        (CalleeName == "gc_alloc") ? "turf_rt_alloc" : "turf_rt_alloc_zeroed";
+    Function *AllocFunc = TheModule->getFunction(RtFuncName);
+    if (!AllocFunc) {
+      FunctionType *FT =
+          FunctionType::get(PtrTy, {I64Ty, PtrTy}, /*isVarArg=*/false);
+      AllocFunc = Function::Create(FT, Function::ExternalLinkage, RtFuncName,
+                                    TheModule.get());
+    }
+    return Builder->CreateCall(AllocFunc, {NVal, NullDesc});
+  }
+
   std::vector<Value *> EvaluatedArgs;
   for (auto &Arg : Args) {
     Value *V = Arg->codegen();

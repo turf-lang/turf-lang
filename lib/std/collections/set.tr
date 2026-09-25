@@ -19,7 +19,6 @@ unsafe module;
 //   presence in the `items` array *is* the membership -- grown exactly like
 //   list.tr's List<T>.push() (every T assumed to fit in one 8-byte slot).
 
-import mem;
 import sys;
 
 struct Set<T> {
@@ -82,9 +81,9 @@ fn<T> Set.add(item: T): void {
     immutable byteSize: int = self.cap * sizeof(T);
 
     if (self.items == null) {
-      self.items = mem::malloc(byteSize) to T*;
+      self.items = gc_alloc(byteSize) to T*;
     } else {
-      self.items = mem::realloc(self.items, byteSize) to T*;
+      self.items = gc_realloc(self.items, byteSize) to T*;
     }
   }
 

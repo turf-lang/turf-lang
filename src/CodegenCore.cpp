@@ -670,6 +670,18 @@ const TurfType *getExprType(const ExprAST *E) {
       if (CalleeName == "typeof")
         return TurfString().get();
 
+      // MEM-001: gc_alloc/gc_alloc_zeroed/gc_realloc always evaluate to a
+      // raw `void*`, exactly like typeof always evaluates to `string` above
+      // -- short-circuit here for the same reason (these are bare
+      // intrinsics with no ResolverFunctionSymbol/FuncReturnTypes entry, so
+      // falling through to the mangled-name reconstruction below would just
+      // fail to find one and return nullptr instead of the real answer).
+      if (CalleeName == "gc_alloc" || CalleeName == "gc_alloc_zeroed" ||
+          CalleeName == "gc_realloc") {
+        static const TurfPointerType VoidPtrTy(TurfVoid());
+        return &VoidPtrTy;
+      }
+
       // `StructName::new(...)` / `StructName::default()` -- both evaluate to
       // the constructed struct, looked up the same way the removed
       // StructInitExprAST branch (further below) used to for the old

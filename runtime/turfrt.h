@@ -16,8 +16,13 @@
  * not a place to move stdlib functionality into (F-STD-3, Rule B3 --
  * ARCHITECTURE_OVERHAUL.md §3.3/§15). lib/std/mem/mem.tr's malloc/free
  * bindings are untouched by this file and stay on the manual heap
- * (F-MEM-3) -- nothing here is reachable from ordinary Turf source yet;
- * MEM-001 is what routes real allocations through turf_rt_alloc.
+ * (F-MEM-3) -- none of these functions are reachable from ordinary Turf
+ * source AS extern fn bindings (Rule B2/B3); MEM-001 (the group that added
+ * turf_rt_alloc_zeroed/turf_rt_realloc/turf_rt_stats alongside RT-001's
+ * original turf_rt_alloc) instead reaches this file's alloc functions via
+ * three new bare LANGUAGE intrinsics -- gc_alloc/gc_alloc_zeroed/
+ * gc_realloc, category 1 in include/Intrinsics.h, same mechanism as
+ * `sizeof`/`typeof` -- never a module-qualified call.
  */
 
 #ifndef TURFRT_H
@@ -91,11 +96,81 @@ void turf_rt_shutdown(void);
  * callers that always have one should still pass it so OOM diagnostics
  * name the type being allocated.
  *
- * Nothing calls this yet as of RT-001 -- lib/std/mem/mem.tr's malloc/free
- * bindings are deliberately untouched (F-MEM-3); MEM-001 is what reroutes
- * GC-heap-bound allocations here.
+ * As of MEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8), this is called
+ * from Codegen for the Turf-level `gc_alloc(n)` bare intrinsic
+ * (FuncCallExprAST::codegen(), src/CodegenFunc.cpp) -- every GC-heap-bound
+ * allocation classified in `docs/development/changes/MEM-001.md` (string
+ * results, collection backing buffers) reaches this function with `desc`
+ * always NULL: none of them are single instances of a monomorphized
+ * aggregate the way EmitAllTurfTypeDescs()'s per-struct descriptors are
+ * (a string is a raw byte run; a `List<T>` backing buffer is N elements,
+ * not one), so there is no existing TurfTypeDesc that correctly describes
+ * "N u8s" or "N Ts" -- an array-shaped descriptor is explicitly MEM-002
+ * territory (RT-001's own `pointer_word_bitmap` doc comment), not
+ * invented speculatively here. `desc == NULL` degrades OOM diagnostics to
+ * "<raw>" (see turf_rt_alloc's own body) but is otherwise fully correct.
  */
 void *turf_rt_alloc(size_t bytes, const TurfTypeDesc *desc);
+
+/*
+ * turf_rt_alloc_zeroed -- like turf_rt_alloc, but the returned block is
+ * zero-filled (a calloc()-equivalent, not malloc()+memset() bolted on
+ * separately, for the same "no separate write needed" reason
+ * lib/std/mem/mem.tr's alloc_zeroed() wraps calloc() instead of alloc()).
+ *
+ * MEM-001 needs this because two of the GC-heap call sites it reroutes
+ * genuinely rely on zero-initialization, not just convenience:
+ * `io::read_to_string()` (lib/std/io/io.tr) and
+ * `net::TcpConnection.read()` (lib/std/io/net.tr) both allocate a buffer
+ * sized one byte larger than the maximum they will read into, and rely on
+ * that trailing byte (and, on a short read, everything past what was
+ * actually written) already being 0 as the buffer's NUL terminator -- see
+ * each function's own doc comment for why. Using turf_rt_alloc() (malloc,
+ * uninitialized) for either would read that terminator byte as garbage.
+ */
+void *turf_rt_alloc_zeroed(size_t bytes, const TurfTypeDesc *desc);
+
+/*
+ * turf_rt_realloc -- resizes an existing turf_rt_alloc/turf_rt_alloc_zeroed
+ * block to `new_size` bytes, exactly like C's realloc() (may extend in
+ * place or move; `p` must be a pointer this API returned, or NULL). Exists
+ * so MEM-001's collection-growth call sites (List<T>/Stack<T>/Queue<T>/
+ * Set<T>/Map<K,V>, all of which grow their backing buffer with a plain
+ * realloc() today) keep IDENTICAL growth behavior after rerouting --
+ * without this, growth would have to become "always allocate fresh +
+ * memcpy", which never reuses an allocator's in-place-extend fast path and
+ * is a real (if currently unobservable) peak-memory regression relative to
+ * today. Fail-fast on OOM via turf_rt_panic(), matching turf_rt_alloc().
+ */
+void *turf_rt_realloc(void *p, size_t new_size, const TurfTypeDesc *desc);
+
+/*
+ * TurfRtStats / turf_rt_stats -- MEM-001's allocation-accounting hook
+ * (ARCHITECTURE_OVERHAUL.md §8 MEM-001, stage 3: "turf_rt_stats()"),
+ * explicitly built to become MEM-002's own regression harness: once a real
+ * collector exists, a test can compare turf_rt_stats() before/after a
+ * collection to prove it actually reclaimed something. In THIS group
+ * nothing collects, so these counters are monotonically increasing for
+ * the life of the process -- "total ever requested through this API", NOT
+ * "currently live" (there is no way to know what's still live without a
+ * collector). `bytes_requested` sums every `bytes`/`new_size` argument
+ * across all three alloc functions above, including every intermediate
+ * size passed to turf_rt_realloc as a buffer grows repeatedly -- it is a
+ * cumulative request total, not a high-water mark or a live-byte count.
+ * Not reachable from Turf source under any name (Rule B2/B3) -- read
+ * directly from C (scripts/mem_smoke.sh) or via turf_rt_shutdown()'s
+ * opt-in stderr dump, gated on the TURF_RT_STATS_DUMP environment variable
+ * being set to anything non-empty, specifically so it stays silent (no
+ * output/behavior change) for every one of the hundreds of existing
+ * compiled Turf programs that do not set it.
+ */
+typedef struct TurfRtStats {
+  uint64_t alloc_count;      /* turf_rt_alloc + turf_rt_alloc_zeroed calls */
+  uint64_t realloc_count;    /* turf_rt_realloc calls */
+  uint64_t bytes_requested;  /* cumulative bytes across all of the above */
+} TurfRtStats;
+
+TurfRtStats turf_rt_stats(void);
 
 /*
  * turf_rt_panic -- replaces every inline fprintf+abort CodegenPanic() used

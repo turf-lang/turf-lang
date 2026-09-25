@@ -6,7 +6,6 @@ unsafe module;
 //   mut s: Stack<int>;   // default-initialized -- no need to write out the fields
 //   s.push(1)  s.pop()  s.peek()  s.length()
 
-import mem;
 import sys;
 
 struct Stack<T> {
@@ -34,9 +33,9 @@ fn<T> Stack.push(item: T): void {
     immutable byteSize: int = self.cap * sizeof(T);
 
     if (self.data == null) {
-      self.data = mem::malloc(byteSize) to T*;
+      self.data = gc_alloc(byteSize) to T*;
     } else {
-      self.data = mem::realloc(self.data, byteSize) to T*;
+      self.data = gc_realloc(self.data, byteSize) to T*;
     }
   }
 

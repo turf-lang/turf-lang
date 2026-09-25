@@ -426,8 +426,11 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     // bare intrinsic — one that is callable WITHOUT a module qualifier AND has no
     // module home in the standard library.
     //
-    // As of now there is exactly one such intrinsic:
-    //   - typeof(x)   — compile-time type name, no module
+    // As of now these are the bare intrinsics:
+    //   - typeof(x)             — compile-time type name, no module
+    //   - gc_alloc(n)           — MEM-001, typed-allocation surface for
+    //   - gc_alloc_zeroed(n)      turf_rt_alloc/_zeroed/turf_rt_realloc
+    //   - gc_realloc(p, n)        (include/Intrinsics.h category 1)
     //
     // Everything else comes from lib/std:
     //   - print / printline / input  → io.tr   (call as io.printline(...))
@@ -447,7 +450,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     // lib/std, resolved through the exact same module-function path as
     // everything else in this comment.
     static const std::unordered_set<std::string> BareIntrinsics = {
-        "typeof",
+        "typeof", "gc_alloc", "gc_alloc_zeroed", "gc_realloc",
     };
     if (BareIntrinsics.count(CalleeName)) {
       // True bare intrinsic — skip error, TypeChecker validates arity/types.

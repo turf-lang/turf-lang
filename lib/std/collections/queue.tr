@@ -12,7 +12,6 @@ unsafe module;
 //   - when (head + len == cap): if head > 0 compact elements to front,
 //     otherwise double the capacity
 
-import mem;
 import sys;
 
 struct Queue<T> {
@@ -41,10 +40,10 @@ fn<T> Queue.enqueue(item: T): void {
       // fix, S14b, for the first instance of this.
       if (self.cap == 0) {
         self.cap = 8;
-        self.data = mem::malloc(self.cap * sizeof(T)) to T*;
+        self.data = gc_alloc(self.cap * sizeof(T)) to T*;
       } else {
         self.cap = self.cap * 2;
-        self.data = mem::realloc(self.data, self.cap * sizeof(T)) to T*;
+        self.data = gc_realloc(self.data, self.cap * sizeof(T)) to T*;
       }
     }
   }

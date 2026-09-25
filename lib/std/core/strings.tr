@@ -5,7 +5,13 @@ unsafe module;
 //
 // Design:
 //   - All C functions are declared via `extern fn` (FFI), not @intrinsic.
-//   - malloc is declared directly here to avoid inter-stdlib import issues.
+//   - Every buffer-returning function below allocates via the `gc_alloc`
+//     bare intrinsic (MEM-001, ARCHITECTURE_OVERHAUL.md §8), not `malloc`
+//     -- a returned string is a value the LANGUAGE is responsible for
+//     (F-MEM-3/FREEZE.md §6.5), so it belongs on the GC heap, not the
+//     manual one. No `extern fn malloc` is declared in this file anymore
+//     for exactly that reason -- see docs/development/changes/MEM-001.md
+//     for the full site-by-site classification.
 //   - High-level functions are implemented in Turf on top of the C bindings.
 //   - String ordering uses byte-by-byte strcmp (Decision D2). Unicode-aware
 //     sorting belongs in a future `unicode` module.
@@ -27,7 +33,6 @@ import list::List;
 
 // ─── C bindings ───────────────────────────────────────────────────────────────
 
-extern fn malloc(size: int): void*;
 extern fn strlen(s: string): int;
 extern fn strstr(haystack: string, needle: string): string;
 extern fn strncpy(dst: string, src: string, n: int): string;
@@ -56,12 +61,14 @@ extern fn tolower(c: int32): int32;
 // themselves) -- doing so would try to resolve against these same
 // definitions recursively. `operator +`'s body mirrors exactly what used to
 // be Codegen's hardcoded EmitStringConcat, including the same TURF-MEMLEAK
-// tradeoff: the malloc'd buffer is intentionally never freed (Turf has no
-// GC yet); future work is an arena allocator or a Boehm GC sweep.
+// tradeoff: the gc_alloc'd buffer is intentionally never freed. As of
+// MEM-001 this is now a real GC-heap allocation (`turf_rt_alloc`, not
+// `malloc`) -- it still leaks today because nothing collects yet (MEM-002
+// is what stops that), not because of anything specific to this function.
 
 operator +(a: string, b: string): string {
     mut n: int = strlen(a) + strlen(b) + 1;
-    mut buf: string = malloc(n) to string;
+    mut buf: string = gc_alloc(n) to string;
     strcpy(buf, a);
     strcat(buf, b);
     return buf;
@@ -216,7 +223,7 @@ fn substring(s: string, start: int, end: int): string {
     }
     mut len: int = end - start;
     // Allocate len+1 bytes (for null terminator)
-    mut buf: string = malloc(len + 1) to string;
+    mut buf: string = gc_alloc(len + 1) to string;
     mut i: int = 0;
     while i < len {
         buf[i] = s[start + i];
@@ -257,7 +264,7 @@ fn replace(s: string, old: string, new_str: string): string {
             i = i + oldlen;
         } else {
             // Append single character as a 2-byte heap buffer
-            mut chbuf: string = malloc(2) to string;
+            mut chbuf: string = gc_alloc(2) to string;
             chbuf[0] = s[i];
             chbuf[1] = 0;
             result = result + chbuf;
@@ -272,7 +279,7 @@ fn replace(s: string, old: string, new_str: string): string {
 // to_upper: returns a copy of `s` with all ASCII lowercase letters uppercased.
 fn to_upper(s: string): string {
     mut n: int = strlen(s);
-    mut buf: string = malloc(n + 1) to string;
+    mut buf: string = gc_alloc(n + 1) to string;
     mut i: int = 0;
     while i < n {
         buf[i] = toupper(s[i] to int32);
@@ -287,7 +294,7 @@ fn to_upper(s: string): string {
 // to_lower: returns a copy of `s` with all ASCII uppercase letters lowercased.
 fn to_lower(s: string): string {
     mut n: int = strlen(s);
-    mut buf: string = malloc(n + 1) to string;
+    mut buf: string = gc_alloc(n + 1) to string;
     mut i: int = 0;
     while i < n {
         buf[i] = tolower(s[i] to int32);
@@ -419,7 +426,7 @@ fn pad_left(s: string, target_len: int, pad_char: char): string {
         return s;
     }
     mut pad_count: int = target_len - n;
-    mut buf: string = malloc(target_len + 1) to string;
+    mut buf: string = gc_alloc(target_len + 1) to string;
     mut i: int = 0;
     while i < pad_count {
         buf[i] = pad_char to int;
@@ -442,7 +449,7 @@ fn pad_right(s: string, target_len: int, pad_char: char): string {
     if n >= target_len {
         return s;
     }
-    mut buf: string = malloc(target_len + 1) to string;
+    mut buf: string = gc_alloc(target_len + 1) to string;
     mut i: int = 0;
     while i < n {
         buf[i] = s[i];

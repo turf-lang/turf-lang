@@ -34,7 +34,6 @@ import strings;
 extern fn printf(fmt: string, ...): int;
 extern fn scanf(fmt: string, ...): int;
 extern fn getchar(): int;
-extern fn calloc(count: int, size: int): void*;
 
 // Buffered file I/O (fopen/fclose/fseek/ftell/fread/fwrite/fflush) --
 // `string` and `void*` are the same opaque pointer at the LLVM level in
@@ -108,12 +107,13 @@ fn printline(val: string): void {
 // ─── input ────────────────────────────────────────────────────────────────
 
 // Reads one line (up to 4095 chars) from stdin. Mirrors the old @intrinsic
-// implementation exactly: calloc a zeroed buffer, scanf a bracket-expression
-// that stops at '\n' (so the delimiter itself is left in the stream), then
-// getchar() to consume that leftover '\n' so it doesn't leak into the next
-// input() call.
+// implementation exactly: allocate a zeroed buffer (MEM-001: gc_alloc_zeroed,
+// not calloc -- a `string` result is GC-heap, F-MEM-3), scanf a bracket-
+// expression that stops at '\n' (so the delimiter itself is left in the
+// stream), then getchar() to consume that leftover '\n' so it doesn't leak
+// into the next input() call.
 fn input(): string {
-    mut buf: void* = calloc(4096, 1);
+    mut buf: void* = gc_alloc_zeroed(4096);
     scanf("%4095[^\n]", buf);
     getchar();
     return buf to string;
@@ -142,19 +142,21 @@ error FileError {
 //
 // Opens in binary mode ("rb") and seeks to the end to find the size before
 // reading, rather than growing a buffer incrementally -- simplest correct
-// approach for "read the whole file in one shot". Allocates with calloc
-// (zero-initialised), not malloc, specifically so the byte one past the
-// last byte actually read is already 0 -- a free, always-correct null
-// terminator with no separate write needed, even on a short read.
+// approach for "read the whole file in one shot". Allocates zero-initialized
+// (MEM-001: gc_alloc_zeroed, not calloc -- a `string` result is GC-heap,
+// F-MEM-3), specifically so the byte one past the last byte actually read is
+// already 0 -- a free, always-correct null terminator with no separate write
+// needed, even on a short read.
 //
 // Deliberately does NOT free the buffer before returning: `string` and
 // `void*` are the same opaque pointer at the LLVM level, so `buf to
 // string` does not copy -- the returned string IS the buffer. This matches
 // the exact convention io.tr's own input() and net.tr's TcpConnection.read()
 // already established -- ownership of the heap buffer transfers to the
-// caller, who is never expected to free it either (this language has no GC
-// yet; small leaks like this are an accepted, documented tradeoff, see
-// EmitStringConcat's own TURF-MEMLEAK comment in Codegen.cpp).
+// caller, who is never expected to free it either (MEM-001 puts it on the
+// GC heap, but nothing collects yet -- MEM-002 is what stops the leak, not
+// this function; see EmitStringConcat's own TURF-MEMLEAK comment history in
+// strings.tr).
 fn read_to_string(path: string): !string {
     mut stream: void* = fopen(path, "rb");
     if stream == null {
@@ -165,7 +167,7 @@ fn read_to_string(path: string): !string {
     immut size: int = ftell(stream);
     fseek(stream, 0, 0); // SEEK_SET
 
-    mut buf: void* = calloc(size + 1, 1);
+    mut buf: void* = gc_alloc_zeroed(size + 1);
     immut readCount: int = fread(buf, 1, size, stream);
     fclose(stream);
 

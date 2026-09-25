@@ -76,6 +76,15 @@ static void ensure_builtins_registered() {
   // STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7 deleted it in favor of
   // strings::length(s).
   RegisterBuiltin("typeof",   {1, "Compile-time type name of an expression"});
+
+  // MEM-001 (ARCHITECTURE_OVERHAUL.md §8): the typed-allocation intrinsic
+  // surface a .tr file uses to reach libturfrt's turf_rt_alloc family
+  // without a module-qualified `extern fn` (Rule B2/B3 -- the runtime is
+  // infrastructure every binary already links, not a capability a program
+  // imports). See include/Intrinsics.h category 1 for the full contract.
+  RegisterBuiltin("gc_alloc",        {1, "Allocate n bytes on the GC heap"});
+  RegisterBuiltin("gc_alloc_zeroed", {1, "Allocate n zero-filled bytes on the GC heap"});
+  RegisterBuiltin("gc_realloc",      {2, "Resize a GC-heap allocation to n bytes"});
 }
 
 // CodegenIntrinsic() used to live here -- the Codegen-side implementation

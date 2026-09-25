@@ -56,6 +56,24 @@
 //                  Codegen handles it inline at its one call site
 //                  (FuncCallExprAST::codegen(), CodegenCore.cpp) rather
 //                  than through a shared dispatcher.
+//   gc_alloc(n)  -- MEM-001. `n: int` byte count, returns `void*`. Calls
+//                  turf_rt_alloc(n, NULL) -- always an untyped/raw
+//                  allocation (see turf_rt_alloc's own doc comment in
+//                  runtime/turfrt.h for why no TurfTypeDesc is passed).
+//                  Registered in Builtins.cpp's g_builtins (Arity 1);
+//                  dispatched the same way as typeof, immediately
+//                  alongside it in FuncCallExprAST::codegen().
+//   gc_alloc_zeroed(n) -- MEM-001. Like gc_alloc(n), but the block is
+//                  zero-filled (turf_rt_alloc_zeroed). For the handful of
+//                  GC-heap call sites that rely on zero-initialization,
+//                  not just convenience -- see turf_rt_alloc_zeroed's own
+//                  doc comment.
+//   gc_realloc(p, n) -- MEM-001. `p` any pointer-shaped value, `n: int`
+//                  new byte count, returns `void*`. Calls
+//                  turf_rt_realloc(p, n, NULL) -- exists specifically so
+//                  MEM-001's collection-growth call sites keep realloc's
+//                  in-place-extend behavior instead of degrading to
+//                  always-allocate-fresh-and-copy. Arity 2.
 //
 // Reserved, NOT yet implemented -- do not add a matching enum/keyword
 // anywhere else in the compiler as a side effect of an unrelated change
@@ -100,10 +118,24 @@
 //                           WrapMainWithRuntimeBootstrap()).
 //   turf_rt_shutdown()  -- process teardown; called from the same wrapper,
 //                           after the user's `main` body returns.
-//   turf_rt_alloc(bytes, desc) -- the typed allocation entrypoint. Not yet
-//                           called from Codegen anywhere as of RT-001 --
-//                           MEM-001 is what reroutes GC-heap-bound
-//                           allocations here.
+//   turf_rt_alloc(bytes, desc) -- the typed allocation entrypoint. As of
+//                           MEM-001, reached from Codegen via the
+//                           `gc_alloc(n)` bare intrinsic above -- every
+//                           GC-heap call site classified in
+//                           docs/development/changes/MEM-001.md reroutes
+//                           here, always with desc == NULL (see its own
+//                           doc comment in runtime/turfrt.h).
+//   turf_rt_alloc_zeroed(bytes, desc) -- MEM-001. Zero-filling counterpart
+//                           to turf_rt_alloc, reached via `gc_alloc_zeroed`.
+//   turf_rt_realloc(p, new_size, desc) -- MEM-001. Reached via
+//                           `gc_realloc`, used by every rerouted
+//                           collection-growth call site.
+//   turf_rt_stats() -- MEM-001's allocation-accounting hook. Never reached
+//                           from Codegen/Turf source at all (no intrinsic
+//                           calls it) -- read directly from C, either
+//                           scripts/mem_smoke.sh (linked straight against
+//                           lib/libturfrt.a) or turf_rt_shutdown()'s
+//                           TURF_RT_STATS_DUMP-gated stderr dump.
 //   turf_rt_panic(kind, msg, file, line) -- replaces CodegenPanic()'s old
 //                           inline fprintf+abort (src/Builtins.cpp). Every
 //                           one of the compiler's own runtime safety guards

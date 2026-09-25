@@ -9,7 +9,6 @@ unsafe module;
 //   mut x: int = l.pop();   // 2
 //   mut n: int = l.length(); // 1
 
-import mem;
 import sys;
 
 struct List<T> {
@@ -37,9 +36,9 @@ fn<T> List.push(item: T): void {
     immutable byteSize: int = self.cap * sizeof(T);
 
     if (self.data == null) {
-      self.data = mem::malloc(byteSize) to T*;
+      self.data = gc_alloc(byteSize) to T*;
     } else {
-      self.data = mem::realloc(self.data, byteSize) to T*;
+      self.data = gc_realloc(self.data, byteSize) to T*;
     }
   }
 

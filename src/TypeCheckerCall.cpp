@@ -354,6 +354,23 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         return;
       }
 
+      // ── gc_alloc(n) / gc_alloc_zeroed(n) / gc_realloc(p, n) → void* ────────
+      // MEM-001. All three always evaluate to a raw `void*` -- exactly the
+      // same "untyped result, caller casts" contract mem::alloc()/
+      // mem::realloc() already have (see e.g. list.tr's
+      // `mem::malloc(byteSize) to T*`, the pattern every rerouted call site
+      // keeps using with gc_alloc/gc_realloc in its place). No argument-type
+      // validation beyond the arity check above -- same minimal-validation
+      // convention typeof already uses; a non-int byte-count argument would
+      // simply codegen with whatever LLVM width Args[0]->codegen() produces
+      // (both runtime parameters are already-64-bit size_t, matching Turf's
+      // 64-bit `int`).
+      if (CalleeName == "gc_alloc" || CalleeName == "gc_alloc_zeroed" ||
+          CalleeName == "gc_realloc") {
+        setType(&Node, std::make_shared<TurfPointerType>(TurfVoid()));
+        return;
+      }
+
       // assert/fail used to have bespoke branches here (assert needed a
       // special Arity == -1 sentinel to express its 1-or-2-arg signature,
       // since it isn't a single fixed count the generic check above can

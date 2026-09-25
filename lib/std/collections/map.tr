@@ -29,7 +29,6 @@ unsafe module;
 //   - get() on a missing key fails() (mirrors List.pop()'s empty-list
 //     behavior) -- check contains() first if a miss is expected.
 
-import mem;
 import sys;
 
 struct Map<K, V> {
@@ -102,11 +101,11 @@ fn<K, V> Map.put(key: K, value: V): void {
     immutable valueByteSize: int = self.cap * sizeof(V);
 
     if (self.keys == null) {
-      self.keys = mem::malloc(keyByteSize) to K*;
-      self.values = mem::malloc(valueByteSize) to V*;
+      self.keys = gc_alloc(keyByteSize) to K*;
+      self.values = gc_alloc(valueByteSize) to V*;
     } else {
-      self.keys = mem::realloc(self.keys, keyByteSize) to K*;
-      self.values = mem::realloc(self.values, valueByteSize) to V*;
+      self.keys = gc_realloc(self.keys, keyByteSize) to K*;
+      self.values = gc_realloc(self.values, valueByteSize) to V*;
     }
   }
 
