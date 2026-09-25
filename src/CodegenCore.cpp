@@ -181,6 +181,68 @@ static llvm::StructType *getFallibleValueType() {
 }
 
 
+/// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `{ i8* tag, i8* message }`
+/// -- cached, built once. An error value's runtime representation, UNIFORM
+/// across every occurrence (a bare `ErrorType::Variant` reference and an
+/// `ErrorType::Variant("msg")` construction produce the exact same SHAPE,
+/// differing only in what `message` points to) -- deliberately not a
+/// discriminated union, since telling the two cases apart at runtime
+/// without a discriminant would mean reading an arbitrary number of bytes
+/// past a bare tag string's own NUL terminator. `errorPayload` in
+/// FallibleValue above, and `err`'s own alloca (RecoverExprAST::codegen(),
+/// this file, further down), both still just hold an OPAQUE i8*/ptr to one
+/// of these -- neither needed any change, since LLVM pointers carry no
+/// static type at that level.
+static llvm::StructType *getErrorValueType() {
+  static llvm::StructType *Ty = nullptr;
+  if (!Ty) {
+    Ty = llvm::StructType::create(*TheContext, "TurfErrorValue");
+    Ty->setBody({PointerType::get(*TheContext, 0),
+                PointerType::get(*TheContext, 0)});
+  }
+  return Ty;
+}
+
+
+/// Builds a global, private-linkage NUL-terminated C string constant and
+/// returns a `Constant*` pointer to its first byte -- usable as a field
+/// initializer inside another constant (e.g. `ConstantStruct::get()`),
+/// which `Builder->CreateGlobalString()` elsewhere in this file is NOT (it
+/// returns a `Value*`/`GlobalVariable*` suitable for ordinary runtime use,
+/// but building the POINTER-typed, already-decayed constant a
+/// ConstantStruct field needs takes one more step). Mirrors
+/// CodegenStruct.cpp's `emitTurfTypeDesc()`/NameGV+NamePtr idiom exactly
+/// (RT-001) -- the only other place in this codebase that already builds a
+/// global constant struct holding a string pointer field.
+static llvm::Constant *BuildGlobalCStringPtr(const std::string &S,
+                                             const std::string &GVName) {
+  llvm::Constant *StrConst =
+      llvm::ConstantDataArray::getString(*TheContext, S, /*AddNull=*/true);
+  auto *GV = new llvm::GlobalVariable(
+      *TheModule, StrConst->getType(), /*isConstant=*/true,
+      llvm::GlobalValue::PrivateLinkage, StrConst, GVName);
+  llvm::Constant *ZeroIdx =
+      llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
+  llvm::Constant *Indices[] = {ZeroIdx, ZeroIdx};
+  return llvm::ConstantExpr::getInBoundsGetElementPtr(StrConst->getType(), GV,
+                                                       Indices);
+}
+
+
+/// Builds the BARE tag string (i8*, e.g. "MathError::DivisionByZero") for a
+/// declared error variant -- no message, no struct wrapping. This is the
+/// entire pre-STD-002 `BuildErrorTag()`, kept as its own helper (renamed)
+/// because it is still exactly what an equality comparison needs
+/// (GetErrorTagValue() below): comparing WHICH VARIANT occurred never needs
+/// to look at a message, so this stays the cheap, direct, no-allocation
+/// path it always was.
+static llvm::Constant *BuildBareTagString(const std::string &ErrorTypeName,
+                                          const std::string &VariantName) {
+  return llvm::dyn_cast<llvm::Constant>(
+      Builder->CreateGlobalString(ErrorTypeName + "::" + VariantName, "errtag"));
+}
+
+
 /// Declares (once) or looks up the C `malloc` used to heap-box a success
 /// value that doesn't fit in a FallibleValue's 64-bit successBits slot (see
 /// BoxToI64Slot()'s struct branch) -- same lookup-or-create pattern already
@@ -281,20 +343,78 @@ Function *getOrCreateStrcmpFn() {
 }
 
 
-/// Builds the runtime value of an `ErrorType::Variant` reference
-/// (docs/architecture/errors_and_recover.md): a global string constant uniquely
-/// identifying the (error type, variant) pair, e.g.
-/// "MathError::DivisionByZero". Variants are bare names only (no payload fields
-/// -- deferred, see errors_and_recover.md §5.1), so this tag string IS the
-/// whole runtime representation of an error value: no heap allocation, no
-/// wrapping struct, just an i8*. Comparing two error values
-/// (BinaryExprAST::codegen()'s equality branch) is then a plain strcmp on this
-/// string, which is also why a single global string constant works as identity
-/// with no whole-program variant-ID registry needed -- it's already unique by
-/// construction.
+/// Builds the runtime value of a BARE `ErrorType::Variant` reference
+/// (docs/architecture/errors_and_recover.md), e.g. `return
+/// MathError::DivisionByZero;` -- a pointer to a global constant
+/// `TurfErrorValue{tag, message=""}` (STD-002: see getErrorValueType()'s
+/// own doc comment for why this is the UNIFORM shape every error value now
+/// has, message-carrying or not). No heap allocation is needed here
+/// specifically -- everything is compile-time-known -- unlike
+/// ErrorVariantConstructWithMessage's own Codegen branch
+/// (FuncCallExprAST::codegen(), CodegenFunc.cpp), which mallocs because its
+/// message is, in general, a runtime-computed value.
 Value *BuildErrorTag(const std::string &ErrorTypeName,
                             const std::string &VariantName) {
-  return Builder->CreateGlobalString(ErrorTypeName + "::" + VariantName, "errtag");
+  llvm::StructType *EVTy = getErrorValueType();
+  llvm::Constant *TagPtr =
+      BuildBareTagString(ErrorTypeName, VariantName);
+  llvm::Constant *MsgPtr = BuildGlobalCStringPtr("", "errmsg_empty");
+  llvm::Constant *EVConst = llvm::ConstantStruct::get(EVTy, {TagPtr, MsgPtr});
+  auto *GV = new llvm::GlobalVariable(
+      *TheModule, EVTy, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      EVConst, "errval");
+  return GV;
+}
+
+
+/// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
+/// messageExpr)` -- the message-carrying construction. Unlike BuildErrorTag()
+/// (fully compile-time-known, a global constant suffices), @p MessageVal is
+/// in general a RUNTIME value (e.g. built from string concatenation), so
+/// this heap-allocates -- same "the value must outlive the function that
+/// returns it" reasoning BoxToI64Slot() already uses for an oversized
+/// success value, just for the error side. Called from
+/// FuncCallExprAST::codegen() (CodegenFunc.cpp), which evaluates the
+/// message argument and passes the resulting Value* in.
+Value *CodegenErrorVariantConstructWithMessage(const std::string &ErrorTypeName,
+                                               const std::string &VariantName,
+                                               Value *MessageVal) {
+  llvm::StructType *EVTy = getErrorValueType();
+  llvm::DataLayout DL = TheModule->getDataLayout();
+  uint64_t Size = DL.getTypeAllocSize(EVTy).getFixedValue();
+  Value *HeapSlot = Builder->CreateCall(
+      getOrCreateMallocFn(), {ConstantInt::get(Type::getInt64Ty(*TheContext), Size)},
+      "errval_msg");
+  Value *TagFieldPtr = Builder->CreateStructGEP(EVTy, HeapSlot, 0, "tag");
+  Builder->CreateStore(BuildBareTagString(ErrorTypeName, VariantName), TagFieldPtr);
+  Value *MsgFieldPtr = Builder->CreateStructGEP(EVTy, HeapSlot, 1, "message");
+  Builder->CreateStore(MessageVal, MsgFieldPtr);
+  return HeapSlot;
+}
+
+
+/// Reads field @p FieldIdx (0 = tag, 1 = message) out of a runtime
+/// `TurfErrorValue*` value -- shared by GetErrorTagValue() (field 0, for
+/// `==`/`!=`) and FieldAccessExprAST::codegen()'s `err.message` special
+/// case (field 1, CodegenStruct.cpp).
+Value *LoadErrorValueField(Value *ErrValPtr, unsigned FieldIdx, const char *Name) {
+  llvm::StructType *EVTy = getErrorValueType();
+  Value *FieldPtr = Builder->CreateStructGEP(EVTy, ErrValPtr, FieldIdx, Name);
+  return Builder->CreateLoad(PointerType::get(*TheContext, 0), FieldPtr,
+                             std::string(Name) + ".val");
+}
+
+
+/// STD-002: see this function's own declaration (CodegenInternal.h) for the
+/// full forward-or-stamp contract.
+Value *BuildCallerLocationValue(const SourceLocation &StampLoc) {
+  auto It = NamedValues.find("caller_location");
+  if (It != NamedValues.end())
+    return Builder->CreateLoad(getLLVMType(TurfString().get()), It->second.Alloca,
+                               "loc_fwd");
+  std::string LocStr = (StampLoc.Filename.empty() ? "<unknown>" : StampLoc.Filename) +
+                        ":" + std::to_string(StampLoc.Line);
+  return Builder->CreateGlobalString(LocStr, "caller_loc");
 }
 
 
@@ -308,6 +428,16 @@ Value *BuildErrorTag(const std::string &ErrorTypeName,
 bool IsErrorTagExpr(const ExprAST *E) {
   if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E))
     return SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
+  // STD-002: `ErrorType::Variant("msg")` -- a FuncCallExprAST wrapping the
+  // same ScopeAccessExprAST callee shape, mirroring how ConstructorCall/
+  // DefaultConstruct are ALSO FuncCallExprAST-wrapped (§2.8.1a of
+  // modules_and_scope_resolution.md). `err == SomeError::Variant("msg")`
+  // is unusual (comparing against a fresh construction rather than a bare
+  // reference) but not illegal -- handled here rather than left to crash.
+  if (auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
+    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()))
+      return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage;
+  }
   if (auto *Var = dynamic_cast<const VariableExprAST *>(E)) {
     if (const auto *Sym = Var->getResolvedSymbol())
       return Sym->Type && (Sym->Type->isAnyError() || Sym->Type->isUserError());
@@ -316,36 +446,55 @@ bool IsErrorTagExpr(const ExprAST *E) {
 }
 
 
-/// Returns the tag string (i8*) for an error-tag-shaped `==`/`!=` operand.
-/// A bare `ErrorType::Variant` reference's tag is compile-time-known, so
-/// it's built directly via BuildErrorTag() instead of going through its
-/// ordinary ScopeAccessExprAST::codegen() (which would do the exact same
-/// thing anyway, just less directly) -- everything else (`err`, or any other
-/// AnyErrorType/TurfUserErrorType-typed expression) already codegens
-/// straight to its tag string, since that IS an error value's whole runtime
-/// representation now.
+/// Returns the BARE TAG string (i8*, field 0 of TurfErrorValue) for an
+/// error-tag-shaped `==`/`!=` operand -- comparing WHICH VARIANT occurred
+/// never needs to look at a message (STD-002: see getErrorValueType()'s
+/// own doc comment). A bare `ErrorType::Variant` reference or an
+/// `ErrorType::Variant("msg")` construction both have a compile-time-known
+/// tag, so it's built directly via BuildBareTagString() rather than
+/// evaluating the whole construction (and, for the "msg" form, the message
+/// expression itself, which may have side effects -- comparing `err ==
+/// SomeError::Variant("msg")` must not ALSO re-run whatever produced
+/// "msg"). Everything else (`err`, or any other AnyErrorType/
+/// TurfUserErrorType-typed expression) codegens normally to a
+/// `TurfErrorValue*` now, so its tag needs an actual field read.
 Value *GetErrorTagValue(const ExprAST *E) {
   if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E)) {
     if (SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef)
-      return BuildErrorTag(SA->getLeftName(), SA->getRightName());
+      return BuildBareTagString(SA->getLeftName(), SA->getRightName());
   }
-  return const_cast<ExprAST *>(E)->codegen();
+  if (auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
+    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee())) {
+      if (SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage)
+        return BuildBareTagString(SA->getLeftName(), SA->getRightName());
+    }
+  }
+  Value *ErrVal = const_cast<ExprAST *>(E)->codegen();
+  if (!ErrVal)
+    return nullptr;
+  return LoadErrorValueField(ErrVal, /*FieldIdx=*/0, "tag");
 }
 
 
-/// True if `E` is exactly the `ErrorType::Variant` reference shape
-/// (docs/architecture/errors_and_recover.md) -- mirrors Resolver's
-/// CollectReturnedErrorTypeNames' identical structural recognition, used
-/// here to decide whether a `return`ed value is an error tag (i8*) or a
-/// genuine success value, since Codegen can't rely on TypeChecker's inferred
-/// types (this compiler resolves/typechecks/codegens function bodies in a
-/// pre-pass that runs its own full pipeline on its own AST instance --
-/// see main.cpp's "Pre-pass sub-pass 2b" comment -- so only structural
-/// info set directly on the AST node by the Resolver, like ResolvedKind, is
-/// safe to depend on here).
+/// True if `E` is a value-producing `ErrorType::Variant` shape
+/// (docs/architecture/errors_and_recover.md) -- either the bare reference
+/// or STD-002's `ErrorType::Variant("msg")` construction -- mirrors
+/// Resolver's CollectReturnedErrorTypeNames' identical structural
+/// recognition, used here to decide whether a `return`ed value is an error
+/// tag or a genuine success value, since Codegen can't rely on
+/// TypeChecker's inferred types (this compiler resolves/typechecks/
+/// codegens function bodies in a pre-pass that runs its own full pipeline
+/// on its own AST instance -- see main.cpp's "Pre-pass sub-pass 2b"
+/// comment -- so only structural info set directly on the AST node by the
+/// Resolver, like ResolvedKind, is safe to depend on here).
 bool IsErrorConstructionExpr(const ExprAST *E) {
-  auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E);
-  return SA && SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
+  if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E))
+    return SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
+  if (auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
+    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()))
+      return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage;
+  }
+  return false;
 }
 
 

@@ -335,6 +335,20 @@ Value *FuncDefExprAST::codegen() {
         ParamTypes.push_back(getLLVMType(P.Type.get()));
         ArgNames.push_back(P.Name);
       }
+      // STD-002: `@caller_location` appends ONE hidden extra parameter at
+      // the very end of the REAL LLVM signature -- deliberately never added
+      // to `Params` itself (see FuncDefExprAST's own doc comment, ASTDecl.h,
+      // for why keeping it out of the Turf-level, arity-checked signature
+      // is the whole point). The alloca-binding loop below iterates
+      // `TheFunc->args()` (not `Params`) precisely so this extra argument
+      // gets allocated/stored/registered into NamedValues via the exact
+      // same generic code every ordinary parameter already goes through --
+      // it only needs one special case there, for its TYPE (TurfString(),
+      // since it has no matching `Params` entry to read a type from).
+      if (hasCallerLocation()) {
+        ParamTypes.push_back(getLLVMType(TurfString().get()));
+        ArgNames.push_back("caller_location");
+      }
       Linkage = Function::InternalLinkage;
     }
 
@@ -363,6 +377,12 @@ Value *FuncDefExprAST::codegen() {
       ParamDebugTypes.push_back(getDebugType(ReturnType.get()));
       for (const auto &P : Params)
         ParamDebugTypes.push_back(getDebugType(P.Type.get()));
+      // STD-002: keep this list's length matching the REAL LLVM signature
+      // (ParamTypes above), which already got the hidden extra parameter --
+      // a DISubroutineType describing fewer parameters than the function
+      // actually has would be internally inconsistent DWARF (INV-DEBUG-2).
+      if (hasCallerLocation())
+        ParamDebugTypes.push_back(getDebugType(TurfString().get()));
       DISubroutineType *SubTy = DBuilder->createSubroutineType(
           DBuilder->getOrCreateTypeArray(ParamDebugTypes));
 
@@ -477,11 +497,19 @@ Value *FuncDefExprAST::codegen() {
     for (auto &Arg : TheFunc->args()) {
       TurfTypePtr ParamTurfType = TurfInt(); // fallback
       SourceLocation ParamDeclLoc = Loc; // fallback: the 'fn' keyword itself
-      for (const auto &P : Params)
-        if (P.Name == Arg.getName()) {
-          ParamTurfType = P.Type;
-          ParamDeclLoc = P.Loc;
-        }
+      // STD-002: the hidden `caller_location` argument (appended above,
+      // never a real `Params` entry) would otherwise silently fall through
+      // to the `TurfInt()` fallback above -- checked BEFORE the `Params`
+      // scan since no entry there could ever match it by name anyway.
+      if (Arg.getName() == "caller_location" && hasCallerLocation()) {
+        ParamTurfType = TurfString();
+      } else {
+        for (const auto &P : Params)
+          if (P.Name == Arg.getName()) {
+            ParamTurfType = P.Type;
+            ParamDeclLoc = P.Loc;
+          }
+      }
 
       AllocaInst *Alloca = CreateEntryBlockAlloca(
           TheFunc, std::string(Arg.getName()), ParamTurfType.get());
@@ -922,10 +950,20 @@ Value *FuncCallExprAST::codegen() {
     return Builder->CreateCall(FnLLVMType, CalleeVal, ArgVals, "calltmp");
   }
 
-  // NOTE: `ErrorType::Variant(...)` (call syntax) never reaches Codegen at
-  // all -- Resolver::visitFuncCall rejects it with a TypeError ("is an
-  // error variant, not a function") before this point, exactly like a
-  // plain `enum` variant. No branch is needed here.
+  // `ErrorType::Variant(messageExpr)` -- STD-002's message-carrying
+  // construction (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)). Every OTHER call
+  // arity on an error variant still never reaches Codegen at all --
+  // Resolver::visitFuncCall rejects it with a TypeError ("is an error
+  // variant, not a function") before this point, exactly like a plain
+  // `enum` variant.
+  if (ScopeCallee &&
+      ScopeCallee->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage) {
+    Value *MsgVal = Args[0]->codegen();
+    if (!MsgVal)
+      return nullptr;
+    return CodegenErrorVariantConstructWithMessage(
+        ScopeCallee->getLeftName(), ScopeCallee->getRightName(), MsgVal);
+  }
 
   // `StructName::default()` / `StructName::new(...)` -- construction.
   // Neither reaches the ordinary ResolvedCallTarget->mangledName() lookup
@@ -1276,6 +1314,15 @@ Value *FuncCallExprAST::codegen() {
     ParamTypeIt = FuncParamTypes.find(CalleeName);
 
   for (auto &Arg : CalleeF->args()) {
+    // STD-002: a `@caller_location` callee's REAL LLVM arg count is one
+    // more than `EvaluatedArgs.size()` (the ordinary, Turf-level, written
+    // argument list) -- its hidden trailing argument is appended
+    // separately, below, never read from EvaluatedArgs (there is nothing
+    // there to read: the user never writes it). Bounding this loop here,
+    // rather than letting it run over the extra LLVM argument too, is what
+    // keeps `EvaluatedArgs[Idx]` from indexing out of bounds.
+    if (Idx >= EvaluatedArgs.size())
+      break;
     Value *V = EvaluatedArgs[Idx];
 
     // Determine declared TurfTypePtr for this param
@@ -1337,6 +1384,13 @@ Value *FuncCallExprAST::codegen() {
     ArgVals.push_back(V);
     Idx++;
   }
+
+  // STD-002: auto-supply the hidden trailing argument a `@caller_location`
+  // callee's REAL signature has but its Turf-level `Args` never wrote --
+  // see BuildCallerLocationValue()'s own doc comment (CodegenInternal.h)
+  // for the forward-vs-stamp decision this makes.
+  if (ResolvedCallTarget && ResolvedCallTarget->HasCallerLocation)
+    ArgVals.push_back(BuildCallerLocationValue(Loc));
 
   // For variadic functions, append any extra arguments beyond the declared
   // parameter count. These are passed raw per the C vararg ABI — no casting.

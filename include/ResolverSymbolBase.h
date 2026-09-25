@@ -314,6 +314,15 @@ struct ResolverFunctionSymbol {
   /// that was never actually registered anywhere.
   bool                     IsExtern    = false;
 
+  /// STD-002: true when this declaration was written `@caller_location
+  /// fn ...` (FuncDefExprAST::hasCallerLocation()). Read by Codegen
+  /// (FuncCallExprAST::codegen(), CodegenFunc.cpp) via ResolvedCallTarget to
+  /// decide whether a call to this function needs one extra, hidden
+  /// argument appended -- never affects arity/overload matching, since this
+  /// flag intentionally has no corresponding entry in Params above (see
+  /// FuncDefExprAST's own doc comment, ASTDecl.h, for why).
+  bool                     HasCallerLocation = false;
+
   /// True if this is a struct instance method (Params[0].Name == "self")
   /// whose body directly assigns to a `self.<field>` somewhere. Computed
   /// once by Resolver::buildFunctionSymbol() via a conservative, non-

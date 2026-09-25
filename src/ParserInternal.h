@@ -50,7 +50,7 @@ std::unique_ptr<ExprAST> ParseMachineDecl();
 std::unique_ptr<ExprAST> ParseErrorDecl();
 std::unique_ptr<ExprAST> ParseExternDecl();
 std::unique_ptr<ExprAST> ParseExportDecl();
-std::unique_ptr<ExprAST> ParseFuncDef();
+std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation = false);
 std::unique_ptr<ExprAST> ParseOperatorDecl();
 
 // Defined in ParserModule.cpp

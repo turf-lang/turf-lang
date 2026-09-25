@@ -67,6 +67,22 @@ llvm::Value *BuildErrorTag(const std::string &ErrorTypeName,
 /// error-tag operand).
 llvm::Function *getOrCreateStrcmpFn();
 
+/// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)): the value a
+/// `@caller_location` function's hidden extra argument gets, either at a
+/// literal expression-level read (CallerLocationExprAST::codegen()) or at
+/// a call site that needs to auto-supply the hidden argument
+/// (FuncCallExprAST::codegen(), CodegenFunc.cpp). If NamedValues currently
+/// has a "caller_location" entry (i.e. Codegen is inside the body of a
+/// function ALSO declared `@caller_location`), forwards that function's
+/// own inherited value unchanged -- this is the whole propagation
+/// mechanism, with no separate bookkeeping needed (NamedValues is already
+/// saved/restored per function by FuncDefExprAST::codegen()). Otherwise
+/// (ordinary code, or a non-`@caller_location` function), stamps a
+/// compile-time string constant built from @p StampLoc -- the call
+/// expression's own location, so the ROOT of a propagation chain always
+/// names the true, textual call site, never a placeholder.
+llvm::Value *BuildCallerLocationValue(const SourceLocation &StampLoc);
+
 /// True if @p E is an error-tag-shaped operand for `==`/`!=`. Needed by
 /// CodegenExpr.cpp (BinaryExprAST).
 bool IsErrorTagExpr(const ExprAST *E);
@@ -79,6 +95,19 @@ llvm::Value *GetErrorTagValue(const ExprAST *E);
 /// by CodegenControlFlow.cpp (ReturnExprAST, to decide whether a returned
 /// value is an error tag or a genuine success value).
 bool IsErrorConstructionExpr(const ExprAST *E);
+
+/// STD-002: builds a message-carrying error value
+/// (`ErrorType::Variant(messageExpr)`). Needed by CodegenFunc.cpp
+/// (FuncCallExprAST::codegen()'s ErrorVariantConstructWithMessage branch).
+llvm::Value *CodegenErrorVariantConstructWithMessage(
+    const std::string &ErrorTypeName, const std::string &VariantName,
+    llvm::Value *MessageVal);
+
+/// STD-002: reads field @p FieldIdx (0 = tag, 1 = message) out of a runtime
+/// `TurfErrorValue*` value. Needed by CodegenStruct.cpp
+/// (FieldAccessExprAST::codegen()'s `err.message` special case, field 1).
+llvm::Value *LoadErrorValueField(llvm::Value *ErrValPtr, unsigned FieldIdx,
+                                 const char *Name);
 
 /// Wraps a raw success value (or, if IsError, an error payload i8*) into a
 /// `!T` FallibleValue for a `return` inside a `!T`-declared function.

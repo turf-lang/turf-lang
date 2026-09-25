@@ -1042,6 +1042,24 @@ Value *FieldAccessExprAST::codegenLValue() {
 
 
 Value *FieldAccessExprAST::codegen() {
+  // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `err.message` is not an
+  // ordinary struct field -- `err`'s VALUE (not its address) is already a
+  // pointer to the {tag, message} TurfErrorValue struct (BuildErrorTag()'s
+  // own doc comment, CodegenCore.cpp), so this reads through the base's
+  // ORDINARY codegen(), never codegenLValue() below (there is no struct to
+  // take the ADDRESS OF a field within here -- `err` itself already IS the
+  // pointer). Checked BEFORE calling codegenLValue() at all, which would
+  // otherwise try (and fail) to treat `err` as an addressable struct base.
+  if (FieldName == "message") {
+    const TurfType *BaseType = getExprType(Base.get());
+    if (BaseType && BaseType->isAnyError()) {
+      Value *ErrVal = Base->codegen();
+      if (!ErrVal)
+        return nullptr;
+      return LoadErrorValueField(ErrVal, /*FieldIdx=*/1, "message");
+    }
+  }
+
   Value *Ptr = codegenLValue();
   if (!Ptr)
     return nullptr;

@@ -383,9 +383,19 @@ enum Token {
                         ///< inference (SEM-003, ARCHITECTURE_OVERHAUL.md §11). Omitting a
                         ///< declaration's `: Type` annotation entirely is sugar for `: guess`;
                         ///< see ParseLetStatement().
-  TOK_DEFER    = -104  ///< `defer`   keyword — registers a statement to run when the enclosing
+  TOK_DEFER    = -104, ///< `defer`   keyword — registers a statement to run when the enclosing
                         ///< `{ }` block exits, by any path except a panic (LANG-003,
                         ///< ARCHITECTURE_OVERHAUL.md §8). See ASTStmt.h's DeferExprAST.
+  TOK_CALLER_LOCATION = -105
+                        ///< `caller_location` keyword — a bare, non-callable expression of type
+                        ///< `string`, legal only inside a function declared `@caller_location`
+                        ///< (STD-002, ARCHITECTURE_OVERHAUL.md §8/§15.6(a)). Reserved as a real
+                        ///< keyword (like `self`, TOK_SELF above) rather than an ordinary
+                        ///< identifier specifically so a user can never declare a variable or
+                        ///< parameter with this exact name -- see CallerLocationExprAST
+                        ///< (ASTExpr.h) and ParserDecl.cpp's ParseFuncDef() for how the implicit
+                        ///< hidden parameter this keyword reads is threaded through Codegen only
+                        ///< (never through Params_ / the ordinary arity-checked signature).
 };
 
 int gettok();

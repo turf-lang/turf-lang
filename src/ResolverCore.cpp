@@ -281,10 +281,19 @@ static bool MutatesSelfField(const ExprAST *E) {
  * rationale as MutatesSelfField() just above (mirrors its exact recursion
  * shape).
  *
- * Recognizes `return ErrorType::Variant;` (a bare ScopeAccessExprAST -- error
- * variants are always bare, non-callable references, exactly like `enum`
- * variants; there's no `ErrorType::Variant(...)` call shape to also check
- * for), collecting `Left` (e.g. "MathError").
+ * Recognizes `return ErrorType::Variant;` (a bare ScopeAccessExprAST) AND,
+ * since STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)), `return
+ * ErrorType::Variant(messageExpr);` (a FuncCallExprAST whose Callee is a
+ * ScopeAccessExprAST -- the exact same generic `Left::Right(args)` call
+ * shape `StructName::new(...)`/`Module::func(...)` also parse as), either
+ * way collecting `Left` (e.g. "MathError"). The call-shape branch is
+ * UNFILTERED the identical way the bare-reference branch already is --
+ * `ResolvedKind` isn't set yet at this point (Pass 1 hoisting, before Pass
+ * 2's visitFuncCall runs), so this can't yet tell an error-variant call
+ * apart from a struct constructor or module-function call by anything
+ * other than shape; every consumer already re-filters through
+ * isErrorTypeName() before drawing any conclusion (see this function's own
+ * doc comment above).
  */
 static void CollectReturnedErrorTypeNames(const ExprAST *E,
                                           std::vector<std::string> &Out) {
@@ -292,8 +301,12 @@ static void CollectReturnedErrorTypeNames(const ExprAST *E,
     return;
 
   if (auto *Ret = dynamic_cast<const ReturnExprAST *>(E)) {
-    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(Ret->getVal()))
+    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(Ret->getVal())) {
       Out.push_back(SA->getLeftName());
+    } else if (auto *FC = dynamic_cast<const FuncCallExprAST *>(Ret->getVal())) {
+      if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()))
+        Out.push_back(SA->getLeftName());
+    }
     return;
   }
   if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
@@ -336,6 +349,7 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   }
   Sym.ReturnType = substituteTypeParams(Node.getReturnTypePtr(), TypeParams);
   Sym.TypeParams = TypeParams;
+  Sym.HasCallerLocation = Node.hasCallerLocation();
   ResolverSourceLocation DeclLoc;
   // getNameLoc(), not getLoc() -- getLoc() is the 'fn'/'operator' keyword's
   // own position (see FuncDefExprAST's doc comment in ASTDecl.h), which

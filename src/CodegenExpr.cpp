@@ -587,6 +587,16 @@ Value *SizeOfExprAST::codegen() {
 }
 
 
+// STD-002: TypeChecker::visitCallerLocation() already guaranteed this node
+// is lexically inside a `@caller_location` function's body, so
+// BuildCallerLocationValue() always takes its "forward" branch here --
+// never its "stamp a literal" branch, which exists for the call-site
+// injection case instead (FuncCallExprAST::codegen(), CodegenFunc.cpp).
+Value *CallerLocationExprAST::codegen() {
+  return BuildCallerLocationValue(Loc);
+}
+
+
 Value *CastExprAST::codegen() {
   const TurfType *ExprTy = getExprType(Operand.get());
 

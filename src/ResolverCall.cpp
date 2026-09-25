@@ -152,16 +152,43 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     }
 
     if (SymTable_.isErrorTypeName(LeftName)) {
+      // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
+      // messageExpr)` -- exactly ONE argument -- is now a legal
+      // construction form carrying a message, NOT a general reopening of
+      // §5.1's deferred per-variant-fields gap. Checked BEFORE the
+      // unconditional "not callable" rejection below, which still applies
+      // to every other arity (0 args, or 2+). Args are already resolved
+      // (visitChild() at the top of this function) -- only variant
+      // EXISTENCE needs checking here, mirroring visitScopeAccess()'s bare-
+      // reference branch below exactly (same NoSuchVariantError, same
+      // suggestion mechanism).
+      if (Node.getArgs().size() == 1) {
+        auto ET = SymTable_.lookupErrorType(LeftName);
+        if (ET && !ET->hasVariant(CalleeName)) {
+          RankedSuggestions Suggestions;
+          Suggestions.Local =
+              SuggestionIndex::suggestVisible(CalleeName, ET->getVariantNames());
+          NoSuchVariantError(ScopeCallee->getRightLoc(), "error", LeftName,
+                             CalleeName, Suggestions)
+              .raise();
+          return;
+        }
+        ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantConstructWithMessage;
+        return;
+      }
       // e.g. `MathError::DivisionByZero(...)` -- a real error type, but
       // variants are bare, non-callable names, exactly like a plain `enum`
       // variant just above (docs/architecture/errors_and_recover.md -- payload
-      // fields on a variant are deferred, see errors_and_recover.md §5.1).
+      // fields on a variant are deferred, see errors_and_recover.md §5.1),
+      // for every arity OTHER than the one-message-argument form above.
       ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantRef;
       TypeError(Node.getLoc(), "'" + LeftName + "::" + CalleeName +
                                    "' is an error variant, not a function -- "
                                    "it can't be called.",
                 "Drop the '(...)' -- '" + LeftName + "::" + CalleeName +
-                    "' is already a complete value on its own.",
+                    "' is already a complete value on its own, or pass "
+                    "exactly one 'string' message: '" + LeftName + "::" +
+                    CalleeName + "(\"...\")'.",
                 "Not callable!")
           .raise();
       return;

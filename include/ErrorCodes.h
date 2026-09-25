@@ -168,6 +168,12 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // existing CONTROL_FLOW category, per §8's explicit instruction not to
     // add a new SLM::ErrorCategory for these.
     {"E083", "DeferControlFlowError", "Defer control flow", SLM::ErrorCategory::CONTROL_FLOW},
+
+    // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)): `caller_location`
+    // read outside a function declared `@caller_location`. DECLARATION,
+    // matching StaticOutsideStructError's identical "this construct is
+    // only valid in one specific declaration context" shape.
+    {"E084", "CallerLocationOutsideMarkedFunctionError", "Caller location outside a marked function", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

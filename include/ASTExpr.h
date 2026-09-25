@@ -500,6 +500,38 @@ public:
   }
 };
 
+/// `caller_location` (STD-002, ARCHITECTURE_OVERHAUL.md §8/§15.6(a)) -- a
+/// bare, non-callable expression of type `string`, legal only inside a
+/// function declared `@caller_location` (FuncDefExprAST::HasCallerLocation).
+/// Deliberately its OWN tiny node type rather than an ordinary
+/// VariableExprAST("caller_location"): the value it reads is never a real
+/// declared Turf-level parameter (it never appears in Params -- see
+/// FuncDefExprAST's own doc comment for why: keeping it out of Params is
+/// what keeps overload arity/mangling completely untouched by this feature),
+/// so it has no ResolvedSymbol, is never assignable, and must not be
+/// reachable through any of the generic VariableExprAST machinery
+/// (LValue codegen, `self`-name special-casing, etc.) that assumes a real
+/// declared symbol exists. TypeChecker::visitCallerLocation() is the sole
+/// gate deciding whether this is legal at all (mirrors the unsafe-gate's
+/// TypeChecker-only enforcement, docs/architecture/pointers_and_references.md
+/// §2.5); Codegen reads the enclosing function's own hidden parameter
+/// directly out of NamedValues (CodegenCore.cpp's BuildCallerLocationValue(),
+/// shared with the call-site injection logic in CodegenFunc.cpp).
+class CallerLocationExprAST : public ExprAST {
+  SourceLocation Loc;
+
+public:
+  explicit CallerLocationExprAST(SourceLocation Loc) : Loc(Loc) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitCallerLocation(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<CallerLocationExprAST>(Loc);
+  }
+};
+
 // ── Compare / Matches / Done ─────────────────────────────────────────────────
 // A single arm in a compare statement.
 // 'Values' holds all the stacked patterns:

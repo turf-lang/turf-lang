@@ -191,16 +191,25 @@ class FuncDefExprAST : public ExprAST {
   // !IsStaticDecl are kept in lockstep by the Parser (ParseFuncDef()), so
   // every OTHER call site can keep using self-presence alone, unchanged.
   bool IsStaticDecl = false;
+  // STD-002: `@caller_location` written immediately before `fn` (parsed by
+  // ParserCore.cpp's TOK_AT case). Deliberately NOT a Params entry -- see
+  // CallerLocationExprAST's own doc comment (ASTExpr.h) for why keeping it
+  // out of Params is what keeps this feature's footprint confined to
+  // Codegen alone (arity checking, overload resolution, and mangling all
+  // stay completely unaware this flag exists).
+  bool HasCallerLocation = false;
 
 public:
   FuncDefExprAST(SourceLocation Loc, std::string Name, SourceLocation NameLoc,
                  TurfTypePtr ReturnType,
                  std::vector<ParamDecl> Params, std::unique_ptr<ExprAST> Body,
                  std::vector<std::string> TypeParams = {},
-                 bool IsStaticDecl = false)
+                 bool IsStaticDecl = false,
+                 bool HasCallerLocation = false)
       : Loc(Loc), NameLoc(NameLoc), Name(std::move(Name)), ReturnType(std::move(ReturnType)),
         Params(std::move(Params)), Body(std::move(Body)),
-        TypeParams(std::move(TypeParams)), IsStaticDecl(IsStaticDecl) {}
+        TypeParams(std::move(TypeParams)), IsStaticDecl(IsStaticDecl),
+        HasCallerLocation(HasCallerLocation) {}
 
   const std::string &getName() const { return Name; }
   /// TYPE-002 (S12a): renames a monomorphized clone to its unique,
@@ -210,6 +219,7 @@ public:
   /// the clone. Never used on an ordinary (non-cloned) declaration.
   void setName(std::string N) { Name = std::move(N); }
   bool isStaticDecl() const { return IsStaticDecl; }
+  bool hasCallerLocation() const { return HasCallerLocation; }
   const SourceLocation &getLoc() const { return Loc; }
   const SourceLocation &getNameLoc() const { return NameLoc; }
   const TurfType *getReturnType() const { return ReturnType.get(); }
@@ -254,7 +264,7 @@ public:
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncDefExprAST>(
         Loc, Name, NameLoc, ReturnType, Params, CloneExprAST(Body.get()), TypeParams,
-        IsStaticDecl);
+        IsStaticDecl, HasCallerLocation);
     // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. The default-constructed field is nullptr.
   }

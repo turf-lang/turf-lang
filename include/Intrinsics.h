@@ -99,20 +99,20 @@
 //                  the same file -- this bare intrinsic is what replaced
 //                  that extern binding. Registered in Builtins.cpp's
 //                  g_builtins (Arity 1).
-//
-// Reserved, NOT yet implemented -- do not add a matching enum/keyword
-// anywhere else in the compiler as a side effect of an unrelated change
-// (F-STD-2's "explicit, change-recorded act"). Listed here only so this
-// registry is the first place a future session checks before wiring it up:
-//
-//   caller_location -- named in RT-001's own spec text
-//                  (ARCHITECTURE_OVERHAUL.md §8) as a symbol Intrinsics.h
-//                  should eventually enumerate. Verified live as of RT-001:
-//                  no TOK_CALLER_LOCATION, no Lexer keyword-table entry, no
-//                  Resolver/TypeChecker/Codegen handling exists anywhere in
-//                  the tree. STD-002 (§8) is the group that actually builds
-//                  it (`@caller_location`, error payloads); this line is a
-//                  placeholder for that session, not a claim it works today.
+//   caller_location -- STD-002. Unlike every other bare intrinsic above, a
+//                  real reserved LEXER KEYWORD (TOK_CALLER_LOCATION,
+//                  include/Lexer.h), not a g_builtins entry -- it's a
+//                  zero-argument, non-callable VALUE read (mirroring `self`,
+//                  TOK_SELF), not a call. Legal only inside a function
+//                  declared `@caller_location` (the one legal use of `@` in
+//                  this language -- ParsePrimaryBase()'s TOK_AT case,
+//                  src/ParserCore.cpp); reads that function's own hidden,
+//                  Codegen-only trailing parameter (never a real `Params`
+//                  entry -- see docs/architecture/caller_location.md §3.3
+//                  for why keeping it out of the arity-checked signature is
+//                  the whole design). Full contract, worked examples, and
+//                  the transitive forward-vs-stamp propagation rule:
+//                  docs/architecture/caller_location.md.
 
 // ─── 2. LLVM-level intrinsics ──────────────────────────────────────────────
 // Requested via llvm::Intrinsic::getOrInsertDeclaration() (LLVM >= 19) /

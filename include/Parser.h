@@ -26,13 +26,18 @@ void InitializePrecedence();
 void InitializeCompilerGlobals();
 
 // A token that legitimately starts a new top-level declaration (or ends the
-// previous statement). TOK_AT is deliberately excluded: '@' can never
-// successfully start anything any more (the decorator syntax it used to
-// introduce is gone, see ParsePrimaryBase()'s TOK_AT case), so a failed
-// construct is guaranteed to have made ZERO progress past its own leading
-// '@' -- treating '@' as a safe place to stop would make the "already at a
-// boundary, don't skip further" guard in SkipToNextTopLevelBoundary() fire
-// before any token is ever consumed, looping forever on the very same '@'.
+// previous statement). TOK_AT is deliberately excluded: STD-002 added back
+// exactly one legal use of '@' (`@caller_location fn ...`,
+// ParsePrimaryBase()'s TOK_AT case), but every FAILURE path through that
+// case still consumes at least the '@' token itself before returning
+// nullptr (either immediately, for any other '@word', or after also
+// consuming 'caller_location' when the token after it isn't 'fn') -- so a
+// failed construct starting with '@' is still guaranteed to make forward
+// progress, just not necessarily "zero tokens consumed" any more. Treating
+// '@' as a safe place to stop would make the "already at a boundary, don't
+// skip further" guard in SkipToNextTopLevelBoundary() fire before that
+// progress happens on the SUCCESS path (a legal `@caller_location fn ...`
+// itself), which is the actual reason '@' stays excluded from this set.
 bool IsTopLevelBoundaryToken(int Tok);
 
 // Panic-mode recovery: after a top-level statement's parse fails, skip

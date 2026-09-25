@@ -109,6 +109,27 @@ public:
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
+
+// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)): `caller_location` reads a
+// hidden value that only exists because the ENCLOSING function was declared
+// `@caller_location` (Codegen appends it as a real extra LLVM parameter --
+// see CallerLocationExprAST's own doc comment, ASTExpr.h). Used anywhere
+// else, there is nothing to read. Raised by
+// TypeChecker::visitCallerLocation() (TypeCheckerDecl.cpp).
+class CallerLocationOutsideMarkedFunctionError : public TurfError {
+public:
+  explicit CallerLocationOutsideMarkedFunctionError(SourceLocation Loc)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "'" + Colors::CYAN + "caller_location" +
+                      Colors::BRIGHT_RED +
+                      "' can only be used inside a function declared '" +
+                      Colors::CYAN + "@caller_location" + Colors::BRIGHT_RED +
+                      "'." + Colors::RESET,
+                  "Add '@caller_location' immediately before this "
+                  "function's 'fn' keyword, or remove this use.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
 // Lint Warnings - Reviewer-style heuristic pattern warnings
 // Redundant comparison: x == true, x != false, etc.
 class RedundantComparisonWarning : public TurfWarning {

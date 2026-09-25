@@ -324,6 +324,32 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     return;
   }
 
+  // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
+  // messageExpr)` -- exactly one `string` argument, the message attached to
+  // this specific error occurrence. Short-circuited here for the identical
+  // reason DefaultConstruct is just above: Resolver::visitFuncCall never
+  // populates ResolvedCandidates for this kind either (ResolverCall.cpp's
+  // isErrorTypeName() branch), so the ordinary candidate-matching path
+  // below would treat it as unresolved. Result type is the SAME
+  // TurfUserErrorType a bare `ErrorType::Variant` reference already gets
+  // (visitScopeAccess()'s ErrorVariantRef branch) -- constructing WITH a
+  // message doesn't change what kind of value this is, only what runtime
+  // data it carries (Codegen's ErrorVariantConstructWithMessage branch,
+  // CodegenFunc.cpp).
+  if (ScopeCallee &&
+      ScopeCallee->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage) {
+    if (ArgCount == 1 && ArgTypes[0] && !ArgTypes[0]->isNamed("string")) {
+      reportError(Node.getLoc(),
+                  "'" + ScopeCallee->getLeftName() + "::" + CalleeName +
+                      "(...)' expects a 'string' message, got '" +
+                      ArgTypes[0]->getName() + "'.",
+                  {}, "Pass a 'string' expression as the error's message.",
+                  "Wrong message type!");
+    }
+    setType(&Node, std::make_shared<NamedType>(ScopeCallee->getLeftName()));
+    return;
+  }
+
   // ── Bare language intrinsic path ─────────────────────────────────────────
   // Only 'typeof' is a true bare intrinsic (callable without a module
   // qualifier and not registered as user functions).
@@ -1527,6 +1553,30 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
     IsSelfBase = BaseVar->getName() == "self";
   if (!IsSelfBase)
     checkUnsafeGate(BaseTy.get(), Node.getLoc(), &Node);
+
+  // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `err.message` --
+  // `err`'s type (AnyErrorType) is never a struct, so this must be checked
+  // BEFORE the struct-field machinery below, which would otherwise fall
+  // through to "Cannot access field on non-struct type". Deliberately
+  // scoped to AnyErrorType ONLY (not TurfUserErrorType) -- `err` inside
+  // `recover as err run { ... }` is the sole way a user ever gets a value
+  // to inspect (errors_and_recover.md §1.4.3); reading `.message` directly
+  // off a bare `ErrorType::Variant("msg")` construction, with no `err`
+  // binding involved, is not part of this scope.
+  if (BaseTy && BaseTy->isAnyError()) {
+    if (Node.getFieldName() == "message") {
+      setType(&Node, TurfString());
+    } else {
+      reportError(Node.getNameLoc(),
+                  "An error value has no field '" + Node.getFieldName() +
+                      "' -- only 'message' is readable.",
+                  {}, "Use '.message' to read the string attached at "
+                      "'ErrorType::Variant(\"...\")' construction.",
+                  "No such field on an error value!");
+      setType(&Node, TurfString());
+    }
+    return;
+  }
 
   // Unwrap pointer-to-struct (e.g. self in method bodies)
   if (BaseTy) {

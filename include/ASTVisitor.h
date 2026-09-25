@@ -64,6 +64,7 @@ class DeferExprAST;
 class StructDeclExprAST;
 class ModuleImportExprAST;
 class SizeOfExprAST;
+class CallerLocationExprAST;
 class ExternFuncDeclExprAST;
 class AddressOfExprAST;
 class CompareExprAST;
@@ -150,6 +151,7 @@ public:
   // ── Modules & misc ────────────────────────────────────────────────────────
   virtual void visitModuleImport(ModuleImportExprAST &Node) {}
   virtual void visitSizeOf(SizeOfExprAST &Node) {}
+  virtual void visitCallerLocation(CallerLocationExprAST &Node) {}
 
   // ── FFI ────────────────────────────────────────────────────────────────────
   virtual void visitExternFuncDecl(ExternFuncDeclExprAST &Node) {}

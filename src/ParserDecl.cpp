@@ -762,7 +762,12 @@ std::unique_ptr<ExprAST> ParseExportDecl() {
 
 // ParseFuncDef - called when CurTok == TOK_FN.
 // Parses: fn <rettype> <name>(<type> <param>, ...) { body }
-std::unique_ptr<ExprAST> ParseFuncDef() {
+// HasCallerLocation (STD-002): true when the '@caller_location' decorator
+// (ParserCore.cpp's TOK_AT case) immediately preceded this 'fn' -- threaded
+// through as a plain parameter rather than a global/thread-local flag so
+// this function stays reentrant-safe the same way every other parameter
+// here already is (matters for Sandbox.cpp's incremental reparse passes).
+std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   SourceLocation FnLoc = CurLoc;
   getNextToken(); // consume TOK_FN
 
@@ -979,7 +984,7 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
     getNextToken(); // eat ';'
     return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, NameLoc, RetType, Params,
                                             nullptr, TypeParams,
-                                            IsStaticMethodDecl);
+                                            IsStaticMethodDecl, HasCallerLocation);
   }
 
   // Expect '{' to open function body
@@ -995,7 +1000,7 @@ std::unique_ptr<ExprAST> ParseFuncDef() {
 
   return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, NameLoc, RetType, Params,
                                           std::move(Body), TypeParams,
-                                          IsStaticMethodDecl);
+                                          IsStaticMethodDecl, HasCallerLocation);
 }
 
 // ParseOperatorDecl -- called when CurTok == TOK_OPERATOR.

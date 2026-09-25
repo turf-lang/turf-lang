@@ -596,6 +596,20 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     return std::make_unique<SizeOfExprAST>(Loc, Ty);
   }
 
+  case TOK_CALLER_LOCATION: {
+    // Bare keyword, no arguments -- see CallerLocationExprAST's own doc
+    // comment (ASTExpr.h) for why this is a dedicated node rather than
+    // falling through to the ordinary identifier/VariableExprAST path
+    // TOK_SELF shares below. Legality (must be lexically inside a function
+    // declared '@caller_location') is entirely TypeChecker's job
+    // (visitCallerLocation()), not checked here -- mirrors how ParseType()'s
+    // '&'/'!' branches and this file's TOK_UNSAFE case never validate
+    // context either.
+    SourceLocation Loc = CurLoc;
+    getNextToken(); // eat 'caller_location'
+    return std::make_unique<CallerLocationExprAST>(Loc);
+  }
+
   case TOK_SELF:
   case TOK_IDENTIFIER: {
     // Snapshot the identifier, then advance so CurTok reflects what follows.
@@ -835,10 +849,28 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // The @intrinsic("name") decorator (used to bind print/printline/input
     // to compiler-native codegen) has been removed -- those functions are
     // now ordinary Turf code delegating to `extern fn` FFI bindings, see
-    // lib/std/io.tr. No decorator syntax is currently supported at all.
-    LogErrorAt(CurLoc,
-               "'@' is not valid here.\n  Hint: Turf has no decorator syntax "
-               "right now.", SLM::ErrorCategory::SYNTAX_ERROR);
+    // lib/std/io.tr. STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)) adds
+    // back exactly ONE decorator, `@caller_location fn ...` -- not a
+    // general decorator syntax; any other `@word` still falls through to
+    // the rejection below.
+    SourceLocation AtLoc = CurLoc;
+    getNextToken(); // eat '@'
+    if (CurTok == TOK_CALLER_LOCATION) {
+      getNextToken(); // eat 'caller_location'
+      if (CurTok != TOK_FN) {
+        LogErrorAt(CurLoc,
+                   "Expected 'fn' after '@caller_location'."
+                   "\n  Hint: '@caller_location' only decorates a function "
+                   "declaration, e.g. '@caller_location\\nfn foo(...): T "
+                   "{ ... }'.", SLM::ErrorCategory::SYNTAX_ERROR);
+        return nullptr;
+      }
+      return ParseFuncDef(/*HasCallerLocation=*/true);
+    }
+    LogErrorAt(AtLoc,
+               "'@' is not valid here.\n  Hint: the only supported decorator "
+               "is '@caller_location', immediately before a function "
+               "declaration.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 

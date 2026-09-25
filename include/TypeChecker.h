@@ -230,6 +230,11 @@ public:
     // NOT inside unsafe but a prior recovery already left this non-zero,
     // wrongly gated) for the rest of the compile.
     UnsafeDepth_ = 0;
+    // STD-002: same reasoning as UnsafeDepth_ immediately above -- a
+    // TypeError raised mid-body inside a `@caller_location` function skips
+    // visitFuncDef()'s own restore of InCallerLocationFunc_ on the way out
+    // via longjmp.
+    InCallerLocationFunc_ = false;
   }
 
   // ── Type query ────────────────────────────────────────────────────────────
@@ -303,6 +308,7 @@ public:
   // ── Modules & misc ────────────────────────────────────────────────────────
   void visitModuleImport(ModuleImportExprAST &Node) override;
   void visitSizeOf(SizeOfExprAST &Node) override;
+  void visitCallerLocation(CallerLocationExprAST &Node) override;
 
   // ── FFI ───────────────────────────────────────────────────────────────────
   void visitExternFuncDecl(ExternFuncDeclExprAST &Node) override;
@@ -564,6 +570,18 @@ private:
   /// (Resolver.h) -- incremented/decremented bracketing visitUnsafeBlock()'s
   /// body traversal. Consulted by isUnsafeGateExempt().
   int UnsafeDepth_ = 0;
+
+  /// STD-002: true while visiting the body of a function declared
+  /// `@caller_location`. A plain bool, not a counter like UnsafeDepth_ --
+  /// this language has no nested `fn` bodies visited WHILE another one is
+  /// still open the way `unsafe { unsafe { } }` nests (a block-nested `fn`,
+  /// see docs/architecture/pointers_and_references.md §2.2's "top-level
+  /// unsafe struct" note for the general shape, is still a SEPARATE
+  /// visitFuncDef() call with its own save/restore bracket, never entered
+  /// while the outer one's bracket is still on the call stack). Consulted
+  /// by visitCallerLocation(); save/restored around visitFuncDef()'s body
+  /// traversal exactly like UnsafeDepth_ is for visitUnsafeBlock().
+  bool InCallerLocationFunc_ = false;
 
   /// Whether we had at least one error during this pass.
   bool HadError_ = false;

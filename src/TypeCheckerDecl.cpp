@@ -459,11 +459,41 @@ void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
   // Push the declared return type so visitReturn() can validate it
   ReturnTypeStack_.push_back(Node.getReturnTypePtr());
 
+  // STD-002: save/restore rather than a blind push/pop pair, since a `fn`
+  // CAN be declared lexically inside another function's body block in this
+  // language (ParseBlock() accepts a nested `fn`/`struct`/`enum`/`machine`
+  // declaration as an ordinary statement) -- an inner, non-`@caller_location`
+  // function nested inside an outer `@caller_location` one must not leak
+  // the outer function's InCallerLocationFunc_ = true into its own body.
+  bool SavedInCallerLocationFunc = InCallerLocationFunc_;
+  InCallerLocationFunc_ = Node.hasCallerLocation();
+
   if (Node.getBody())
     const_cast<ExprAST *>(Node.getBody())->accept(*this);
 
+  InCallerLocationFunc_ = SavedInCallerLocationFunc;
   ReturnTypeStack_.pop_back();
   setType(&Node, TurfVoid());
+}
+
+
+void TypeChecker::visitCallerLocation(CallerLocationExprAST &Node) {
+  // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)): mirrors the unsafe
+  // gate's enforcement shape (TypeChecker is the sole gate; Resolver and
+  // Codegen barely know this expression exists, see
+  // docs/architecture/pointers_and_references.md §2.5's "Resolver and
+  // Codegen barely know unsafe{} exists" precedent). Codegen's own
+  // guarantee (BuildCallerLocationValue() always finding a live
+  // NamedValues["caller_location"] entry to forward, CodegenCore.cpp) rests
+  // entirely on this check having already rejected every other case.
+  if (!InCallerLocationFunc_) {
+#ifndef TYPECHECKER_NO_ERRORS
+    CallerLocationOutsideMarkedFunctionError(Node.getLoc()).raise();
+#else
+    throw std::runtime_error("CallerLocationOutsideMarkedFunctionError");
+#endif
+  }
+  setType(&Node, TurfString());
 }
 
 

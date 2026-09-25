@@ -109,6 +109,18 @@ enum class ScopeAccessKind {
     // participate in `!T`/`recover`/AnyErrorType comparisons that plain enums
     // don't.
     ErrorVariantRef,
+    // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
+    // messageExpr)` -- exactly ONE argument, a `string`-typed message
+    // attached to this specific error occurrence. NOT a general reopening
+    // of §5.1's deferred payload-fields gap: a variant still carries no
+    // PER-VARIANT-DECLARED fields, and this is not callable with any other
+    // arity (0 args stays ErrorVariantRef's ordinary "not a function"
+    // rejection; 2+ args is also rejected -- see
+    // Resolver::visitFuncCall()'s isErrorTypeName() branch,
+    // ResolverCall.cpp). Reuses `Left::Right(args)`'s existing generic call
+    // parsing (§2.3/§2.5 of errors_and_recover.md) with zero new grammar,
+    // exactly like ConstructorCall/DefaultConstruct above.
+    ErrorVariantConstructWithMessage,
 };
 
 // `Left::Right` -- the general namespace-resolution operator. Originally
