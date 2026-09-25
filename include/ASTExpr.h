@@ -200,6 +200,20 @@ public:
   std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedNotOperatorCandidates;
   std::shared_ptr<ResolverFunctionSymbol> ResolvedNotOperatorTarget;
 
+  /// OPT-002: set by `ValueRangePass::markElidableChecks()` (see
+  /// ArrayAccessExprAST::ProvenInBounds's identical contract) when this is a
+  /// checked `+`/`-`/`*`/`<<` on `int` (SEM-002, FREEZE.md §6.2 row 7) whose
+  /// operands both resolve to the same known constants on every path
+  /// reaching this node, and the exact result is provably representable
+  /// (`+`/`-`/`*`: `llvm::APInt::s{add,sub,mul}_ov`; `<<`: shift amount in
+  /// [0,64) and the shift round-trips -- mirrors `EmitCheckedShl()`'s own
+  /// check exactly). Codegen (CodegenExpr.cpp) then emits plain `nsw`
+  /// arithmetic instead of calling `EmitCheckedIntArith`/`EmitCheckedShl` --
+  /// nsw is sound here specifically BECAUSE the trap was already proved
+  /// unreachable, not attached speculatively (§17.3's own warning: "a
+  /// faster miscompilation is not an optimization"). Not copied by clone().
+  bool ProvenNoOverflow = false;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitBinary(*this); }
   std::unique_ptr<ExprAST> clone() const override {
@@ -278,6 +292,14 @@ public:
     return ResolvedOperatorTarget.get();
   }
 
+  /// OPT-002: same contract as BinaryExprAST::ProvenNoOverflow, for the
+  /// checked `+=`/`-=`/`*=`/`<<=` shapes -- SEM-002's own doc comment on
+  /// `EmitCheckedIntArith()` (CodegenCore.cpp) names this as one of three
+  /// independent codegen paths needing identical overflow behavior, since
+  /// compound assignment has never desugared to a literal BinaryExprAST
+  /// re-walk at the Codegen layer. Not copied by clone().
+  bool ProvenNoOverflow = false;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitCompoundAssignment(*this); }
   std::unique_ptr<ExprAST> clone() const override {
@@ -336,6 +358,13 @@ public:
   const ResolverFunctionSymbol *getResolvedOperatorTarget() const {
     return ResolvedOperatorTarget.get();
   }
+
+  /// OPT-002: same contract as BinaryExprAST::ProvenNoOverflow, for the
+  /// checked `x++`/`x--`/`++x`/`--x` shapes (arithmetically `x +/- 1`, per
+  /// this class's own doc comment) -- the third of the three independent
+  /// codegen paths `EmitCheckedIntArith()`'s doc comment names. Not copied
+  /// by clone().
+  bool ProvenNoOverflow = false;
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitPostfixExpr(*this); }
@@ -446,6 +475,12 @@ public:
   const ResolverFunctionSymbol *getResolvedOperatorTarget() const {
     return ResolvedOperatorTarget.get();
   }
+
+  /// OPT-002: same contract as BinaryExprAST::ProvenNoOverflow, for a
+  /// checked unary `-` (SEM-002) whose operand resolves to the same known
+  /// constant on every path reaching this node and isn't `INT64_MIN` (the
+  /// one input `EmitCheckedIntNegate()` traps on). Not copied by clone().
+  bool ProvenNoOverflow = false;
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitUnary(*this); }

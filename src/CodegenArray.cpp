@@ -28,7 +28,6 @@
 #include "ValueRange.h"
 #include "Lint.h"
 #include "SymbolTable.h"
-#include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
 #include "llvm/IR/CFG.h"
@@ -236,7 +235,12 @@ Value *ArrayAccessExprAST::codegenLValue() {
         Err.raise();
         return nullptr;
       }
-    } else {
+    } else if (!ProvenInBounds) {
+      // OPT-002: ProvenInBounds is set by ValueRangePass::markElidableChecks()
+      // (ValueRange.cpp), which runs on a throwaway CFG BEFORE Body->codegen()
+      // -- see that call site's own comment (CodegenFunc.cpp). F-OPT-2
+      // (ARCHITECTURE_OVERHAUL.md §17.3): removal by proof only, independent
+      // of `-O` level -- this is not gated on any optimization flag.
       EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
     }
   }
@@ -361,7 +365,16 @@ Value *ArrayAccessExprAST::codegen() {
       AllocaInst *TempAlloca = CreateEntryBlockAlloca(TheFunction, "tmparr", BaseTy);
       Builder->CreateStore(BaseVal, TempAlloca);
 
-      EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
+      // OPT-002: see codegenLValue()'s identical guard's comment. In
+      // practice ProvenInBounds is never true on THIS path -- markNode()
+      // (ValueRange.cpp) only sets it when the base is a plain array
+      // variable, and a plain array variable's base always succeeds via
+      // codegenLValue() above, which never reaches this R-value fallback --
+      // but the guard is kept here too rather than assumed, for the same
+      // reason the compile-time-constant check just above is duplicated
+      // rather than shared between the two branches.
+      if (!ProvenInBounds)
+        EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
 
       Type *ElemTy = getLLVMType(ElemType);
       llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);

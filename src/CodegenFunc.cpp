@@ -28,7 +28,6 @@
 #include "ValueRange.h"
 #include "Lint.h"
 #include "SymbolTable.h"
-#include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
 #include "Monomorphize.h" // Monomorphize::instantiatedDeclName() -- ConstructedType lookup, TYPE-002 S13b
@@ -555,28 +554,28 @@ Value *FuncDefExprAST::codegen() {
   // Lint the function body before codegen
   LintExpression(Body.get());
 
+  // OPT-002 (ARCHITECTURE_OVERHAUL.md §8, §17.3): a THROWAWAY, EARLY CFG,
+  // built and analyzed here purely so Codegen (about to run, right below)
+  // can consult its results while emitting THIS function's bounds/overflow
+  // checks. The "real" CFG build + full analysis suite a few dozen lines
+  // below (ValueRangePass::runOnCFG() included) necessarily runs AFTER
+  // Body->codegen() -- it needs the LLVM IR nowhere near ready yet -- which
+  // means its own constant-propagation results always arrive one compile
+  // too late to suppress anything: by the time it runs, every runtime
+  // check for this function is already baked into the IR. Building a
+  // second CFG from the same (not-yet-codegenned) Body AST costs a cheap
+  // AST walk, is thrown away immediately after, and is the only way this
+  // group's proofs can actually reach Codegen in time. ValueRangePass::
+  // markElidableChecks() never raises a diagnostic (see its own doc
+  // comment, ValueRange.cpp) -- the LATER runOnCFG() call remains the only
+  // place ArrayBoundsError fires, completely unaffected by this.
+  if (Body) {
+    auto ElisionCFG = CFGBuilder().buildCFG(Name, ReturnType, Body.get(), Loc, MangledName);
+    ValueRangePass().markElidableChecks(*ElisionCFG, ParamIDs);
+  }
+
   // Codegen the body
   Body->codegen();
-
-  // Collect call edges from the AST for this function (safer than scanning CFGs)
-  if (Body) {
-    std::function<void(const ExprAST*)> scanCalls = [&](const ExprAST *N) {
-      if (!N) return;
-      if (auto FC = dynamic_cast<const FuncCallExprAST*>(N)) {
-        if (auto CalleeVar = dynamic_cast<const VariableExprAST*>(FC->getCallee())) {
-          std::string callee = CalleeVar->getName();
-          AddCallEdge(Name, callee);
-        }
-      }
-      if (auto B = dynamic_cast<const BinaryExprAST*>(N)) { scanCalls(B->getLHS()); scanCalls(B->getRHS()); }
-      else if (auto U = dynamic_cast<const UnaryExprAST*>(N)) scanCalls(U->getOperand());
-      else if (auto As = dynamic_cast<const AssignmentExprAST*>(N)) { scanCalls(As->getLHS()); scanCalls(As->getRHS()); }
-      else if (auto Vd = dynamic_cast<const VarDeclExprAST*>(N)) scanCalls(Vd->getInitializer());
-      else if (auto Bl = dynamic_cast<const BlockExprAST*>(N)) for (const auto &e : Bl->getExpressions()) scanCalls(e.get());
-      else if (auto If = dynamic_cast<const IfExprAST*>(N)) { for (const auto &Br : If->getBranches()) { scanCalls(Br.Cond.get()); scanCalls(Br.Body.get()); } scanCalls(If->getElse()); }
-    };
-    scanCalls(Body.get());
-  }
 
   // Build and analyze CFG for flow diagnostics
   if (Body) {

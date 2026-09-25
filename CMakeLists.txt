@@ -170,7 +170,6 @@ add_library(turfcore STATIC
   src/Analysis.cpp
   src/Builtins.cpp
   src/CFG.cpp
-  src/CallGraph.cpp
   src/CodegenCore.cpp
   src/CodegenExpr.cpp
   src/CodegenVar.cpp

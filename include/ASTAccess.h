@@ -282,6 +282,21 @@ public:
   std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedIndexSetCandidates;
   std::shared_ptr<ResolverFunctionSymbol> ResolvedIndexSetTarget;
 
+  /// OPT-002: set by a `ValueRangePass::markElidableChecks()` pre-pass that
+  /// runs BEFORE `Body->codegen()` (FuncDefExprAST::codegen(), CodegenFunc.cpp)
+  /// when the index provably resolves to the same in-range constant on every
+  /// path reaching this access -- the same constant-propagation dataflow the
+  /// EXISTING post-codegen `ValueRangePass::runOnCFG()` invocation already
+  /// uses to raise `ArrayBoundsError` for the out-of-range case (that call
+  /// site is untouched: a provably-OOB access still gets that diagnostic,
+  /// at the same point, exactly as before this field existed). Codegen
+  /// (CodegenArray.cpp) skips `EmitRuntimeBoundsCheck` when this is true --
+  /// F-OPT-2 (ARCHITECTURE_OVERHAUL.md §17.3): removal by proof only, never
+  /// by `-O` level. Not copied by clone() -- same contract as
+  /// ResolvedIndexGetTarget; a cloned (e.g. monomorphized) tree is
+  /// re-analyzed by its own FuncDefExprAST::codegen() call.
+  bool ProvenInBounds = false;
+
   llvm::Value *codegen() override;
   llvm::Value *codegenLValue() override;
   void accept(ASTVisitor &V) override { V.visitArrayAccess(*this); }

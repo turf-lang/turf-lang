@@ -28,7 +28,6 @@
 #include "ValueRange.h"
 #include "Lint.h"
 #include "SymbolTable.h"
-#include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
 #include "llvm/IR/CFG.h"
@@ -276,12 +275,19 @@ Value *BinaryExprAST::codegen() {
     // above, so NumericType->isNamed("int") is naturally false for it --
     // no separate exclusion needed (see §8 SEM-002's own "Generic
     // interactions" note on why this group must not touch that case).
+  // OPT-002: ProvenNoOverflow is set by ValueRangePass::markElidableChecks()
+  // (ValueRange.cpp) BEFORE Body->codegen() runs, when both operands proved
+  // to be the same known constants on every path reaching this node, AND
+  // the exact checked result is representable -- so `nsw` is sound here
+  // specifically BECAUSE the trap was already proved unreachable (F-OPT-2,
+  // §17.3), never attached speculatively.
   case '+':
     CastBoth(NumericType);
     if (NumericType->isNamed("double"))
       return Builder->CreateFAdd(L, R, "addtmp");
     if (NumericType->isNamed("int"))
-      return EmitCheckedIntArith('+', L, R, Loc);
+      return ProvenNoOverflow ? Builder->CreateNSWAdd(L, R, "addtmp")
+                              : EmitCheckedIntArith('+', L, R, Loc);
     return Builder->CreateAdd(L, R, "addtmp");
 
   case '-':
@@ -289,7 +295,8 @@ Value *BinaryExprAST::codegen() {
     if (NumericType->isNamed("double"))
       return Builder->CreateFSub(L, R, "subtmp");
     if (NumericType->isNamed("int"))
-      return EmitCheckedIntArith('-', L, R, Loc);
+      return ProvenNoOverflow ? Builder->CreateNSWSub(L, R, "subtmp")
+                              : EmitCheckedIntArith('-', L, R, Loc);
     return Builder->CreateSub(L, R, "subtmp");
 
   case '*':
@@ -297,7 +304,8 @@ Value *BinaryExprAST::codegen() {
     if (NumericType->isNamed("double"))
       return Builder->CreateFMul(L, R, "multmp");
     if (NumericType->isNamed("int"))
-      return EmitCheckedIntArith('*', L, R, Loc);
+      return ProvenNoOverflow ? Builder->CreateNSWMul(L, R, "multmp")
+                              : EmitCheckedIntArith('*', L, R, Loc);
     return Builder->CreateMul(L, R, "multmp");
 
   case '/': {
@@ -452,7 +460,11 @@ Value *BinaryExprAST::codegen() {
   // gate is needed here the way +/-/* need one (those also accept
   // double).
   case TOK_LSHIFT:
-    return EmitCheckedShl(L, R, Loc);
+    // OPT-002: see the '+'/'-'/'*' cases above for ProvenNoOverflow's
+    // contract. Shl has no `with.overflow` intrinsic to build a plain
+    // variant from -- the checked-safe result IS a plain CreateShl.
+    return ProvenNoOverflow ? Builder->CreateShl(L, R, "lshifttmp")
+                            : EmitCheckedShl(L, R, Loc);
 
   // Bitwise right shift (arithmetic, preserves sign)
   case TOK_RSHIFT:
@@ -542,7 +554,10 @@ Value *UnaryExprAST::codegen() {
       // Checked (FREEZE.md §6.2 row 7 names negation alongside +/-/*):
       // negating a genuine runtime INT64_MIN value is the one input with
       // no representable int64 result -- see EmitCheckedIntNegate()'s own
-      // doc comment.
+      // doc comment. OPT-002: ProvenNoOverflow (see BinaryExprAST's cases,
+      // CodegenExpr.cpp) means the operand is already known != INT64_MIN.
+      if (ProvenNoOverflow)
+        return Builder->CreateNSWNeg(OperandV, "negtmp");
       return EmitCheckedIntNegate(OperandV, Loc);
     }
     llvm::report_fatal_error("Internal error: Unknown unary operand type");

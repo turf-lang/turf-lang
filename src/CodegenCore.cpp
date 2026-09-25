@@ -28,7 +28,6 @@
 #include "ValueRange.h"
 #include "Lint.h"
 #include "SymbolTable.h"
-#include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
 #include "Monomorphize.h" // Monomorphize::instantiatedDeclName() -- getLLVMType()'s GenericType branch, TYPE-002 S13b

@@ -34,7 +34,6 @@
 #include "ASTPrinter.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/LegacyPassManager.h"
-#include "CallGraph.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/FileSystem.h"
@@ -730,7 +729,7 @@ static int runCompilerMain(int argc, char **argv) {
 
   // --format needs none of the lex/parse/resolve/typecheck/codegen
   // pipeline below -- just the raw source text -- so it short-circuits
-  // before any of that global state (GlobalSymbolTable, CallGraph, LLVM
+  // before any of that global state (GlobalSymbolTable, LLVM
   // module, ...) gets initialized at all.
   if (opts.Format) {
     std::ifstream FormatInput(opts.InputFile);
@@ -773,8 +772,6 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Builtin registry removed
   InitializeModule(); // Initialize LLVM Context, Module, Builder
-  // Clear any previous call graph state
-  ClearCallGraph();
   ClearGlobalCFGs();
   InitializeCompilerGlobals(); // GlobalSymbolTable + BinopPrecedence -- see Parser.h
 
@@ -1497,10 +1494,6 @@ static int runCompilerMain(int argc, char **argv) {
     }
     g_recoverActive = false;
   }
-
-  // Build cross-function call graph and print summary (run before flushing diagnostics)
-  CallGraphPass CGP;
-  CGP.runGlobal();
 
   // Flush all collected diagnostics (sorted by line).  If any errors were
   // recorded, stop here: do not attempt further IR generation or linking.
