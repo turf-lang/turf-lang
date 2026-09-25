@@ -935,6 +935,40 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           BaseTy = GlobalSymbolTable->LookupType(NT->getName());
       }
     }
+    // Snapshot BaseTy here, BEFORE the bare-name GenericType->TurfStructType
+    // lookup just below replaces it with the un-parameterized template type
+    // -- this is the last point where BaseTy can still be a genuine
+    // `GenericType` carrying real type arguments. The struct-generic-
+    // substitution recovery further down (`Subst`) needs exactly this value
+    // for a `self`-based call: `self`'s OWN declared/registered type is
+    // always `TurfPointerType(GenericType(StructName, Args))` (see the
+    // pointer-unwrap just above), never a bare GenericType, so re-deriving
+    // it there via a second, independent `getType(Node.getBase())` call (as
+    // this used to do) dynamic_casts a POINTER type to GenericType and
+    // always fails silently -- `Subst` came back permanently empty for
+    // every `self.method(...)` call specifically (an ordinary variable like
+    // `b: Box<int>` was never affected: its own type already IS a bare
+    // GenericType with no pointer wrapper to strip). This stayed invisible
+    // whenever the CALLEE's own parameters happened to independently
+    // mention the struct's type parameter (`MethodOwnSubst`, built below
+    // from matching the callee's declared param types against the caller's
+    // already-concrete arguments, filled the exact same map entries through
+    // an unrelated path) -- it only surfaced as a real, user-reachable bug
+    // for a generic-struct method whose parameters DON'T mention the
+    // struct's type parameter at all (e.g. `fn<T> Box.bar(x: int): int`)
+    // called via `self.bar(...)` from a sibling method: both substitution
+    // sources came back empty, `CombinedSubst` was empty, the Method-kind
+    // instantiation request was never recorded, no clone was ever
+    // generated, and Codegen failed with "Internal error: LLVM function
+    // '...' not found after successful name resolution" trying to call a
+    // function that was never built. Minimal repro:
+    // `struct Box<T> { v: T } fn<T> Box.bar(x: int): int { return 0; }
+    // fn<T> Box.foo(x: int): int { return self.bar(x); }` -- confirmed to
+    // reproduce with a non-generic-struct comparison
+    // (`lib/std/json/json.tr`'s `Parser.skip_ws()`, called the identical
+    // way from a sibling method, unaffected) ruling out every other
+    // explanation first.
+    TurfTypePtr UnwrappedGenericBaseTy = BaseTy;
     // Resolve GenericType (e.g. a `Box<int>`-typed variable) to its
     // underlying TurfStructType via the base name -- mirrors the NamedType
     // resolution just above. Without this, calling a method on a generic
@@ -1066,7 +1100,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         // doc comment below Subst's use for the full story on why this
         // scan-the-fields recovery technique is needed at all.
         std::unordered_map<std::string, TurfTypePtr> Subst;
-        if (auto *GT = dynamic_cast<const GenericType *>(getType(Node.getBase()).get())) {
+        if (auto *GT = dynamic_cast<const GenericType *>(UnwrappedGenericBaseTy.get())) {
           const auto &TypeArgs = GT->getTypeArgs();
           std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
             if (!FTy || Subst.size() >= TypeArgs.size()) return;
@@ -1276,8 +1310,17 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
             Node.GenericSubstitution = CombinedSubst;
             // Report-only: feed the (opt-in) collector, a no-op when null.
             if (MonoCollector_) {
+              // UnwrappedGenericBaseTy, not a fresh getType(Node.getBase())
+              // -- see that variable's own doc comment above (where BaseTy
+              // is unwrapped from self's pointer type) for why a second,
+              // independent re-fetch here used to silently miss a `self`-
+              // based call's real GenericType too, which -- for a callee
+              // whose own parameters don't separately reintroduce the
+              // struct's type parameter -- meant this whole request never
+              // got recorded even once CombinedSubst above was fixed to be
+              // non-empty.
               if (auto *BaseGT = dynamic_cast<const GenericType *>(
-                      getType(Node.getBase()).get())) {
+                      UnwrappedGenericBaseTy.get())) {
                 // Existing case (S12b/S13a): the RECEIVER's struct is
                 // itself generic. Two requests, not one: the RECEIVER's
                 // struct instantiation (e.g. List<int> itself must exist)
