@@ -2,9 +2,10 @@
 // finding a present value in an already-sorted List<int>, and correctly
 // returning -1 for an absent one.
 //
-// A free function taking a concrete `List<int>` -- see list_sort()'s doc
-// comment in list.tr for why a generic `fn<T> List.binary_search(...)`
-// method can't compile here.
+// Since STD-003, a thin DEPRECATED wrapper over the real generic
+// `fn<T> List.binary_search(target: T, cmp: fn(T, T): int): int` method --
+// see list.tr's own doc comment. New code should prefer
+// `l.binary_search(target, cmp_int)` directly.
 import list::List;
 import list::list_binary_search;
 import test;

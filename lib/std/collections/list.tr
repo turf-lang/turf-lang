@@ -8,6 +8,28 @@ unsafe module;
 //   l.push(2);
 //   mut x: int = l.pop();   // 2
 //   mut n: int = l.length(); // 1
+//
+// STD-003 item 8 considered (ARCHITECTURE_OVERHAUL.md §8) and DELIBERATELY
+// NOT DONE: making `data` a safe `&T` instead of a raw `T*` looked
+// straightforward in isolation, but `T` is genuinely unconstrained here --
+// a caller can instantiate `List<SomeStruct*>` (item 2's own documented
+// >8-byte-workaround pattern, still fully supported, not removed by this
+// group) -- and once `T` is itself a raw pointer type, `List.push(item:
+// T)` substitutes to a raw-pointer-typed PARAMETER
+// (`checkNoRawPointersInSignature`, TypeCheckerCore.cpp), which requires
+// the DECLARING FILE to hold the raw-pointer capability regardless of
+// what `data`'s own field type is -- confirmed live:
+// `List<Point*>.push(&pt1 to Point*)` failed with "cannot use raw pointer
+// type 'Point*' for parameter 'item' ... even inside 'unsafe { }'" the
+// moment `unsafe module;` was removed here. A scoped `unsafe { }` block
+// around just the alloc/realloc calls (which is otherwise all this file
+// would need) cannot satisfy that check, because the check runs against
+// the FUNCTION'S OWN DECLARED SIGNATURE, not anything about how its body
+// is written. This is a real, load-bearing reason item 8 doesn't apply to
+// a module generic over an unconstrained `T` (see also map.tr/set.tr/
+// stack.tr/queue.tr, all identically affected, and hashing.tr, which hit
+// the exact same failure through its own `fn<T> hash(x: T): int` -- see
+// each file's own note and this group's change record, *Known pitfalls*).
 
 import sys;
 
@@ -98,138 +120,59 @@ operator []=(l: List<int>, i: int, value: int): void {
 
 // ─── sort / search ──────────────────────────────────────────────────────────
 //
-// sort()/binary_search()/list_find() below are for `List<int>` SPECIFICALLY
-// -- not `fn<T> List.sort(...)` / a generic `List<T>` as originally
-// intended. This is a deliberate, forced design change, not a shortcut:
-// every genuinely-generic-in-T shape was tried first and each one hits a
-// real, confirmed compiler limitation (worth recording in full so nobody
-// "fixes" this back to the more obvious generic spelling later and
-// silently reintroduces a compile break across THE ENTIRE STDLIB --
-// see the last paragraph for why the blast radius is that large):
-//
-//   1. `cmp: fn(T, T): int` (a comparator parameter, as the task's first
-//      choice) -- overload/call-site matching substitutes a generic
-//      struct's type parameter (e.g. `List<int>` => T=int) into a
-//      candidate's OWN parameter types before comparing against the
-//      argument's type (TypeCheckerCall.cpp's Subst machinery), but that
-//      substitution -- and the earlier "is this candidate even a match"
-//      filter, which runs typesCompatible() BEFORE substitution ever
-//      happens -- never recurses INTO a FuncType's parameter/return types
-//      (collectGenericSubstitution(), substituteReturnType(), and
-//      typesCompatible() in src/TypeCheckerCall.cpp/src/Types.cpp all
-//      special-case pointers/arrays/GenericType, but none of them has a
-//      FuncType branch). A callback type that mentions T anywhere inside
-//      `fn(...)` therefore stays the literal, unresolved `fn(T, T): int`
-//      forever, which can never equal a real caller's concrete
-//      `fn(int, int): int` -- confirmed empirically ("No matching
-//      overload"). Property of the METHOD DEFINITION, not the call site,
-//      so it fails identically for every instantiation.
-//   2. Comparing `self.data[j] < key` directly (bare `T < T`), forgoing a
-//      callback entirely (the task's documented fallback) -- also
-//      confirmed to fail, with "Cannot compare 'T' with 'T' using '<'.",
-//      because TypeChecker::inferRelationalType() has a generic-name
-//      bypass for `==`/`!=` (two same-named types, e.g. two T's, are
-//      accepted) but NOT for ordering operators -- and a generic method's
-//      body is type-checked ONCE, generically, with T left abstract (no
-//      per-instantiation re-checking, no trait/constraint system), so this
-//      can't be fixed by calling from a concrete instantiation either.
-//      Both of the task's two suggested options are therefore blocked by
-//      essentially the same root cause: generics here support storage and
-//      equality on a bare T, and nothing else.
-//   3. `cmp: fn(ptr, ptr): int` (pass element ADDRESSES, exactly like C's
-//      real `int (*)(const void*, const void*)` qsort comparator) --
-//      concrete, no `T` inside the FuncType at all, so it sidesteps
-//      problem 1 above entirely... but `checkNoRawPointersInSignature()`
-//      (TypeCheckerCore.cpp) rejects ANY ordinary function declaring a raw
-//      `ptr`/`T*` parameter outside `lib/std` -- unconditionally, even
-//      inside `unsafe { }` (confirmed) -- so a comparator a caller writes
-//      in their OWN file could never be given this exact signature in the
-//      first place.
-//   4. Keep `cmp: fn(int, int): int` (concrete, no raw-pointer issue) and
-//      read each element as `int` from INSIDE a still-generic
-//      `fn<T> List.sort(...)`, via `self.data[i] to int` or an
-//      intermediate `int`-typed local -- also confirmed broken, and this
-//      is the one that matters most to remember, because it doesn't fail
-//      loudly at the call site the way (1)-(3) do: it fails to
-//      TYPE-CHECK THE METHOD DEFINITION ITSELF. `self.data[i] to int`
-//      (explicit `to`) fails because CastExprAST::codegen() derives its
-//      source-type name from the STATIC declared type ("T"), which has no
-//      case at all in that function -- "Cannot explicitly cast 'T' to
-//      'int'". `immutable x: int = self.data[i];` (implicit coercion)
-//      fails too, "Cannot initialise 'int' variable 'x' with value of
-//      type 'T'" -- because inside the struct's OWN method, `self`'s
-//      static type never carries concrete type-args to substitute with
-//      (that substitution machinery -- TypeCheckerCall.cpp's Subst-scan --
-//      only has something to substitute FROM at an external call site
-//      like `someList.data[0]` where someList: List<int>; from INSIDE
-//      List's own generic method, self.data[i]'s field type resolves to
-//      NamedType("T") -- a placeholder, not a real TurfGenericParamType --
-//      and typesCompatible()'s type-erasure bypass only special-cases the
-//      latter). Since this compiler eagerly type-checks every file under
-//      lib/std/** on EVERY compile (to build the cross-file "known
-//      anywhere" UFCS/operator visibility table, per
-//      docs/reference/functions_and_modules.md §3) regardless of whether
-//      the current program imports `list` at all, a `fn<T> List.sort`
-//      left in this broken state doesn't just fail its own tests -- it
-//      breaks compiling EVERY `.tr` file in the entire repo, including
-//      ones with no relation to List whatsoever. Confirmed live during
-//      this file's own development: a trivial `fn main(): int { return
-//      0; }` with zero imports failed with this exact list.tr error.
-//
-// Given all four are dead ends for genuine `T`, the design that actually
-// works: drop genericity for JUST this trio, and take `List<int>` as an
-// ordinary, CONCRETE parameter to plain (non-generic) free functions. This
-// sidesteps every problem above -- `l: List<int>` is a real, concrete
-// GenericType argument to an ordinary function, so `l.data[i]` resolves to
-// a genuine `int` with no substitution gap at all (exactly the "external
-// call site" case that already works, e.g. Map<K,V>'s own tests reading
-// `m.get("a")` as `int`), and `cmp`'s declared type has no `T` in it to
-// begin with. This also happens to be the ONLY element type sort/search
-// could ever be numerically correct for anyway: under Type Erasure (the
-// model this whole historical writeup was written against -- TYPE-002
-// later replaced it with monomorphization, S11a-S14b, though this trio is
-// deliberately NOT converted to real generic methods as part of that group,
-// see docs/planning/LIMITATIONS.md item 2), every T erased to one uniform
-// 8-byte slot, so a hypothetical `List<double>` sort would have needed to
-// compare each element's raw IEEE-754 bit pattern as if it were an integer,
-// which does not preserve numeric ordering -- not something worth chasing
-// given the deeper blockers above.
+// Genuinely generic `List<T>` methods (STD-003, ARCHITECTURE_OVERHAUL.md
+// §8, item 3) -- NOT possible until this group. `sort`/`binary_search`/
+// `find` used to be concrete, `List<int>`-only FREE functions
+// (`list_sort`/`list_binary_search`/`list_find`, kept below as thin
+// deprecated wrappers over these methods, for one cycle, per this group's
+// own "prefer keeping wrappers" guidance) because a comparator parameter
+// typed `fn(T, T): int` never type-checked correctly at the call site:
+// nothing in the substitution machinery recursed into a `FuncType`'s own
+// parameter/return types (`collectGenericSubstitution()`/
+// `typesCompatible()` in `src/TypeCheckerCall.cpp`/`src/Types.cpp`,
+// `Monomorphize::substituteConcreteTypes()`, and
+// `Resolver::substituteTypeParams()` all special-cased pointers/arrays/
+// `GenericType`, but none had a `FuncType` case). Fixed directly in the
+// compiler as part of this group (all five call sites above), on the
+// reasoning that `self.otherMethod(concreteArg)`-shaped code -- or, as
+// here, a comparator callback -- is ordinary code any Turf program might
+// write, not an internal-to-this-group inconvenience; see this group's own
+// change record for the full root-cause writeup and live repro. The dead-
+// end history that used to live here (four approaches tried, each
+// confirmed broken) is preserved in that change record instead of
+// duplicated in this file, now that the actual fix makes it historical
+// rather than a live warning against "fixing this back."
 //
 // Insertion sort: O(n^2), but simple, obviously-correct, and stable -- fine
 // for the small lists this stdlib deals with (see map.tr's identical
 // "small collections, correctness over cleverness" reasoning for its own
-// linear scan). `l: List<int>` is taken BY VALUE, not by reference/pointer
-// -- that's fine for in-place mutation because `data` is a heap pointer:
-// copying the `List<int>` header (data/len/cap) still shares the same
-// backing buffer, so writes through `l.data[i]` are visible to the
-// caller's own list, exactly like push()/pop() already rely on for their
-// own self-mutation.
-fn list_sort(l: List<int>, cmp: fn(int, int): int): void {
+// hash-collision handling).
+fn<T> List.sort(cmp: fn(T, T): int): void {
   mut i: int = 1;
-  while i < l.length() {
-    immutable key: int = l.data[i];
+  while i < self.length() {
+    immutable key: T = self.data[i];
     mut j: int = i - 1;
-    while j >= 0 && cmp(l.data[j], key) > 0 {
-      l.data[j + 1] = l.data[j];
+    while j >= 0 && cmp(self.data[j], key) > 0 {
+      self.data[j + 1] = self.data[j];
       j = j - 1;
     }
-    l.data[j + 1] = key;
+    self.data[j + 1] = key;
     i = i + 1;
   }
 }
 
-// Binary search for `target` using the same `fn(int, int): int` comparator
-// convention as list_sort() above (see its doc comment for the full design
-// story). PRECONDITION: the list must already be sorted (ascending, by the
-// same `cmp`) -- this function does not check or enforce that, it only
-// assumes it, exactly like a `qsort`-then-`bsearch` pairing in C. Returns
-// the index of a matching element if found, -1 otherwise.
-fn list_binary_search(l: List<int>, target: int, cmp: fn(int, int): int): int {
+// Binary search for `target` using the same `fn(T, T): int` comparator
+// convention as sort() above. PRECONDITION: the list must already be
+// sorted (ascending, by the same `cmp`) -- this method does not check or
+// enforce that, it only assumes it, exactly like a `qsort`-then-`bsearch`
+// pairing in C. Returns the index of a matching element if found, -1
+// otherwise.
+fn<T> List.binary_search(target: T, cmp: fn(T, T): int): int {
   mut lo: int = 0;
-  mut hi: int = l.length() - 1;
+  mut hi: int = self.length() - 1;
   while lo <= hi {
     immutable mid: int = lo + (hi - lo) / 2;
-    immutable c: int = cmp(l.data[mid], target);
+    immutable c: int = cmp(self.data[mid], target);
     if (c == 0) {
       return mid;
     } else if (c < 0) {
@@ -241,21 +184,40 @@ fn list_binary_search(l: List<int>, target: int, cmp: fn(int, int): int): int {
   return -1;
 }
 
-// Linear search over an unsorted (or sorted, doesn't matter) List<int> for
+// Linear search over an unsorted (or sorted, doesn't matter) List<T> for
 // the first element matching an arbitrary predicate -- for lookups that
-// aren't simple equality/ordering (list_sort()/list_binary_search() above
-// cover that case). A free function, not a method, matching the task's
-// original intent (and, incidentally, still necessary: a generic
-// `fn<T> List.find` bound method is exactly as blocked as `fn<T> List.sort`
-// was -- see list_sort()'s doc comment). `l: List<int>`, concrete, for the
-// same reasons documented there.
-fn list_find(l: List<int>, predicate: fn(int): bool): int {
+// aren't simple equality/ordering (sort()/binary_search() above cover
+// that case).
+fn<T> List.find(predicate: fn(T): bool): int {
   mut i: int = 0;
-  while i < l.length() {
-    if (predicate(l.data[i])) {
+  while i < self.length() {
+    if (predicate(self.data[i])) {
       return i;
     }
     i = i + 1;
   }
   return -1;
+}
+
+// ─── deprecated free-function wrappers ───────────────────────────────────
+//
+// `list_sort`/`list_binary_search`/`list_find` are the pre-STD-003 concrete
+// `List<int>`-only free functions this file used to have no alternative
+// to. Kept as thin wrappers over the real generic methods above, for one
+// cycle, per this group's own "Breaking changes" guidance (prefer keeping
+// wrappers over removing outright) -- existing callers
+// (`tests/32_set_and_sort_stdlib/02_list_sort.tr` and siblings) keep
+// working unchanged. Prefer `l.sort(cmp)`/`l.binary_search(target, cmp)`/
+// `l.find(predicate)` directly in new code; these three may be removed in
+// a future cycle.
+fn list_sort(l: List<int>, cmp: fn(int, int): int): void {
+  l.sort(cmp);
+}
+
+fn list_binary_search(l: List<int>, target: int, cmp: fn(int, int): int): int {
+  return l.binary_search(target, cmp);
+}
+
+fn list_find(l: List<int>, predicate: fn(int): bool): int {
+  return l.find(predicate);
 }
