@@ -21,6 +21,7 @@ record does; `status` tracks the record, not the branch.
 | LANG-001 | Operator system completion | landed | 2026-09-23 | 2026-09-23 | Lexer, Parser, Resolver, TypeChecker, Codegen, stdlib | [LANG-001](changes/LANG-001.md) |
 | LANG-002 | Nullable references `&?T` and declared capabilities | landed | 2026-09-23 | 2026-09-23 | Parser, Types, Resolver, Monomorphize, TypeChecker, Analysis (CFG), driver, stdlib | [LANG-002](changes/LANG-002.md) |
 | LANG-003 | `defer` | landed | 2026-09-24 | 2026-09-24 | Lexer, Parser, AST, Resolver, TypeChecker, Analysis (CFG), Codegen, diagnostics | [LANG-003](changes/LANG-003.md) |
+| RT-001 | `libturfrt`: the runtime library | landed | 2026-09-25 | 2026-09-25 | new `runtime/` (C), Codegen, driver, build, CMake, release packaging | [RT-001](changes/RT-001.md) |
 
 ## How to use this directory
 
