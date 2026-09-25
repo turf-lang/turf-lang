@@ -1027,57 +1027,63 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   // in place as a defensive, should-be-unreachable fallback (see this
   // group's change record's Known pitfalls on why it isn't deleted).
   if (OperandTy) {
-    const std::string SrcName = OperandTy->getName();
-    const std::string DstName = DestTy->getName();
+    bool EitherSideIsGenericParam =
+        dynamic_cast<const TurfGenericParamType *>(OperandTy.get()) ||
+        dynamic_cast<const TurfGenericParamType *>(DestTy.get());
 
-    // Resolve OperandTy through GlobalSymbolTable too, mirroring DestTy's
-    // own resolution above -- an enum-typed operand is otherwise still a
-    // bare NamedType at this point (same root cause as the enum-literal
-    // check above).
-    TurfTypePtr ResolvedOperandTy = OperandTy;
-    if (auto *NT2 = dynamic_cast<const NamedType *>(OperandTy.get())) {
-      if (GlobalSymbolTable) {
-        if (auto Resolved = GlobalSymbolTable->LookupType(NT2->getName()))
-          ResolvedOperandTy = Resolved;
+    if (!EitherSideIsGenericParam) {
+      const std::string SrcName = OperandTy->getName();
+      const std::string DstName = DestTy->getName();
+
+      // Resolve OperandTy through GlobalSymbolTable too, mirroring DestTy's
+      // own resolution above -- an enum-typed operand is otherwise still a
+      // bare NamedType at this point (same root cause as the enum-literal
+      // check above).
+      TurfTypePtr ResolvedOperandTy = OperandTy;
+      if (auto *NT2 = dynamic_cast<const NamedType *>(OperandTy.get())) {
+        if (GlobalSymbolTable) {
+          if (auto Resolved = GlobalSymbolTable->LookupType(NT2->getName()))
+            ResolvedOperandTy = Resolved;
+        }
       }
-    }
-    bool SrcIsEnum = dynamic_cast<const TurfEnumType *>(ResolvedOperandTy.get()) != nullptr;
-    bool DstIsEnum = dynamic_cast<const TurfEnumType *>(DestTy.get()) != nullptr;
-    bool SrcIsPtrLike = dynamic_cast<const TurfPointerType *>(OperandTy.get()) != nullptr ||
-                        SrcName == "ptr" || SrcName == "string";
-    bool DstIsPtrLike = dynamic_cast<const TurfPointerType *>(DestTy.get()) != nullptr ||
-                        DstName == "ptr" || DstName == "string";
+      bool SrcIsEnum = dynamic_cast<const TurfEnumType *>(ResolvedOperandTy.get()) != nullptr;
+      bool DstIsEnum = dynamic_cast<const TurfEnumType *>(DestTy.get()) != nullptr;
+      bool SrcIsPtrLike = dynamic_cast<const TurfPointerType *>(OperandTy.get()) != nullptr ||
+                          SrcName == "ptr" || SrcName == "string";
+      bool DstIsPtrLike = dynamic_cast<const TurfPointerType *>(DestTy.get()) != nullptr ||
+                          DstName == "ptr" || DstName == "string";
 
-    bool Legal =
-        SrcName == DstName ||
-        (SrcName == "int" && DstName == "double") ||
-        (SrcName == "double" && DstName == "int") ||
-        (SrcName == "int32" && DstName == "int") ||
-        (SrcName == "int" && DstName == "int32") ||
-        (SrcName == "int32" && DstName == "double") ||
-        (SrcName == "double" && DstName == "int32") ||
-        (SrcName == "char" && DstName == "int") ||
-        (SrcName == "int" && DstName == "char") ||
-        (SrcIsEnum && DstName == "int") ||
-        (SrcName == "int" && DstIsEnum) ||
-        (SrcName == "string" && DstName == "int") ||
-        (SrcName == "string" && DstName == "double") ||
-        (SrcName == "int" && DstName == "string") ||
-        (SrcName == "double" && DstName == "string") ||
-        (SrcName == "bool" && DstName == "string") ||
-        (SrcIsEnum && DstName == "string") ||
-        (SrcName == "string" && DstIsEnum) ||
-        (SrcName == "int" && dynamic_cast<const TurfPointerType *>(DestTy.get()) != nullptr) ||
-        (SrcIsPtrLike && DstIsPtrLike);
+      bool Legal =
+          SrcName == DstName ||
+          (SrcName == "int" && DstName == "double") ||
+          (SrcName == "double" && DstName == "int") ||
+          (SrcName == "int32" && DstName == "int") ||
+          (SrcName == "int" && DstName == "int32") ||
+          (SrcName == "int32" && DstName == "double") ||
+          (SrcName == "double" && DstName == "int32") ||
+          (SrcName == "char" && DstName == "int") ||
+          (SrcName == "int" && DstName == "char") ||
+          (SrcIsEnum && DstName == "int") ||
+          (SrcName == "int" && DstIsEnum) ||
+          (SrcName == "string" && DstName == "int") ||
+          (SrcName == "string" && DstName == "double") ||
+          (SrcName == "int" && DstName == "string") ||
+          (SrcName == "double" && DstName == "string") ||
+          (SrcName == "bool" && DstName == "string") ||
+          (SrcIsEnum && DstName == "string") ||
+          (SrcName == "string" && DstIsEnum) ||
+          (SrcName == "int" && dynamic_cast<const TurfPointerType *>(DestTy.get()) != nullptr) ||
+          (SrcIsPtrLike && DstIsPtrLike);
 
-    if (!Legal) {
+      if (!Legal) {
 #ifndef TYPECHECKER_NO_ERRORS
-      TypeError(Node.getLoc(), "Cannot explicitly cast '" + SrcName +
-                                    "' to '" + DstName + "'")
-          .raise();
+        TypeError(Node.getLoc(), "Cannot explicitly cast '" + SrcName +
+                                      "' to '" + DstName + "'")
+            .raise();
 #else
-      throw std::runtime_error("TypeError: Cannot explicitly cast");
+        throw std::runtime_error("TypeError: Cannot explicitly cast");
 #endif
+      }
     }
   }
 
