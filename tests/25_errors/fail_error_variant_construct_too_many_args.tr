@@ -1,0 +1,12 @@
+// STD-002: exactly ONE argument is the only legal call arity on an error
+// variant -- two arguments stays rejected the same "not a function" way
+// zero arguments already does (fail_error_variant_not_callable.tr), not
+// silently accepted or arity-mismatched against some imagined overload.
+error MathError {
+    DivisionByZero,
+}
+
+fn main(): int {
+    mut e: MathError = MathError::DivisionByZero("a", "b");
+    return 0;
+}

@@ -1,0 +1,11 @@
+// STD-002: `ErrorType::Variant(messageExpr)` requires messageExpr to be a
+// 'string' -- a non-string argument is a type mismatch, not silently
+// coerced.
+error MathError {
+    DivisionByZero,
+}
+
+fn main(): int {
+    mut e: MathError = MathError::DivisionByZero(42);
+    return 0;
+}
