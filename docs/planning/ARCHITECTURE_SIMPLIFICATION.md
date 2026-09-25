@@ -64,6 +64,77 @@ concrete reason `turf-lsp` is fragile and now broken.
   for a hobby-scale LSP and stops holding the moment `turf-fmt`, a
   package-manager doing semantic checks, or concurrent LSP requests exist.
 
+**Evidence, gathered live during a 2026-09-26 session (STD-003,
+`docs/development/changes/STD-003.md`) — a live, demonstrated consequence
+of the "split-brain" issue §6 already names, not a new problem:**
+
+- **`GlobalSymbolTable`'s registered `TurfStructType` for a generic struct
+  is a permanently-stale snapshot, and it silently breaks real code, not
+  just tooling.** `src/TypeCheckerDecl.cpp`'s own `isOrWrapsGenericParam()`
+  doc comment already diagnoses the mechanism in full: `Resolver::
+  visitStructDecl()` rewrites a generic struct's own AST node's field
+  types from `NamedType("T")` to `TurfGenericParamType("T")` in place, but
+  `GlobalSymbolTable`'s registered `TurfStructType` for that same struct is
+  a *separate object*, built from a parse-time snapshot, and never
+  receives that rewrite — so every consumer that resolves a generic
+  struct's field type by looking it up in `GlobalSymbolTable` (rather than
+  reading the Resolver-mutated AST node directly) sees the stale
+  `NamedType("T")` forever, indistinguishable by name from an ordinary,
+  unrelated struct field.
+- **Concrete failure this caused, found while trying to convert
+  `mem::Pool<T>`'s `free_pool` into a real generic method
+  (`fn<T> Pool.free_all(): void`):** `self.items[i]`, a field access
+  reached via `self` inside a generic method body, resolves through this
+  exact stale `GlobalSymbolTable` copy — so its computed type is
+  `NamedType("T")`, not `TurfGenericParamType("T")`. Passing it to
+  `free(p: void*)` then fails candidate matching (`No overload of 'free'
+  matches argument types (T)`), because `typesCompatible()`'s Rule 1 ("an
+  unresolved generic type parameter is compatible with anything") only
+  ever checks for `TurfGenericParamType`, never for the `NamedType`
+  representation a real generic struct's own fields actually carry outside
+  the Resolver-mutated AST. The identical gap independently blocked an
+  explicit cast (`self.items[i] to void*`) for the same underlying reason,
+  fixed narrowly for `TypeCheckerExpr.cpp::visitCast` (STD-003's own "Fix
+  3") but — deliberately, on a scope judgment call at the time — not
+  chased into `typesCompatible()` itself, since the true fix looked like
+  it would mean touching field-type resolution more broadly.
+- **That judgment call may have been more pessimistic than necessary, on
+  a second look while writing this up.** `isOrWrapsGenericParam()`
+  (`TypeCheckerDecl.cpp`, external linkage via `TypeCheckerInternal.h`,
+  already consumed by `TypeCheckerCall.cpp`'s own `visitFuncCall`/
+  `visitMethodCall`) *already* correctly recognizes both representations —
+  it treats a `NamedType` whose name is neither a known primitive nor
+  anything registered in `GlobalSymbolTable` as "is-or-wraps a generic
+  parameter," the exact test `typesCompatible()`'s Rule 1 (and Fix 3's own
+  new bypass) would need. Reusing that existing helper in both places,
+  rather than each independently re-deriving its own `dynamic_cast
+  <TurfGenericParamType*>`-only check, is a small, targeted, already-
+  scoped candidate fix — not investigated live, not implemented, flagged
+  here specifically so the next session doesn't have to re-derive this
+  starting point. See §7's new first item, below.
+- **Three separate, independent compiler bugs were found and fixed in the
+  same session** (STD-003's Fix 1/Fix 2/Fix 3 — `TypeCheckerCall.cpp`'s
+  self-call `Subst` recovery, five call sites missing a `FuncType`
+  substitution case, and `visitCast`'s missing generic-parameter cast-
+  legality bypass), each independently reachable by ordinary Turf code
+  with no relation to this document's own ambient-globals framing. Taken
+  together with the `Pool<T>` finding above, the pattern worth naming:
+  this compiler's notion of "what a generic type parameter looks like, and
+  where it might be hiding" is implemented independently, by hand, in at
+  least seven different recursive functions across four files
+  (`Resolver::substituteTypeParams`, `typesCompatible()`,
+  `collectGenericSubstitution()`/`collectGenericParamNameOrder()`,
+  `Monomorphize::substituteConcreteTypes()`, `visitCast`'s legality
+  whitelist, and `isOrWrapsGenericParam()`/`isFullyConcreteType()`) — none
+  of them delegating to a shared, single source of truth for "does this
+  type contain an open generic parameter, and if so substitute it." Three
+  of those seven were independently, silently incomplete, discovered only
+  by hitting them in practice, across TYPE-002's 8 sessions plus
+  everything built since. This is the same root shape as §4.2's Bound/Typed
+  IR argument (a decision re-derived by hand, independently, every place
+  it's needed, instead of made once and trusted) — evidence for the
+  general thesis, not just for phase 3's own scope.
+
 **One clarification, so this isn't overstated:** the AST classes having no
 single `AST.cpp` is *not* part of this problem. AST nodes are deliberately
 pure data + a virtual-dispatch declaration, with each pass (`Codegen`,
@@ -292,10 +363,16 @@ Dependency layering this enables:
 
 Sequenced so each phase's output is what the next phase needs, and so the
 compiler stays shippable (`test_runner.sh` green) after every phase, mirroring
-how `ARCHITECTURE_OVERHAUL.md`'s own groups are sequenced by dependency:
+how `ARCHITECTURE_OVERHAUL.md`'s own groups are sequenced by dependency.
+
+**The first thing to do, ahead of phase 0 below, is smaller and more
+concrete than any of them** — §1's 2026-09-26 evidence already diagnosed
+it down to a candidate fix, unlike phases 0-5, which are still design
+sketches:
 
 | Phase | Change | Unlocks | Risk |
 |---|---|---|---|
+| **0★. Stop `typesCompatible()`/`visitCast()` missing the stale-`NamedType` generic-parameter case** | `typesCompatible()`'s Rule 1 and `visitCast`'s STD-003 "Fix 3" bypass both currently test only `dynamic_cast<TurfGenericParamType*>`. `isOrWrapsGenericParam()` (`TypeCheckerDecl.cpp`) already correctly recognizes the OTHER representation a generic struct's own field carries outside the Resolver-mutated AST (a `NamedType` whose name is neither a known primitive nor anything `GlobalSymbolTable` has registered) — reuse it in both places instead of each re-deriving its own narrower check. | Unblocks `self.<field>`-typed values (not just plain parameters) flowing through candidate matching and casts inside a generic method body — directly fixes the `mem::Pool<T>.free_all()` case §1 documents, and likely others never hit yet for the same reason those three were only found this session. | Low — two call sites, reusing an existing, already-tested helper; not a new mechanism. **Not yet verified live — the next session must confirm with a real repro before trusting this description**, per this document's and `AGENTS.md`'s own "verify claims live" rule. |
 | **0. Lexer → `LexerState`** | Wrap `CurLine`/`CurCol`/`IdentifierStr`/etc. in an owned struct; `gettok()` takes it explicitly instead of touching 18 externs. | Concurrent tokenization of multiple open buffers; a real formatter's foundation. | Low — smallest, most self-contained stage. |
 | **1. Parser → `ParserState`** | Owns `CurTok`/`g_braceDepth`/recursion depth; parse functions take it explicitly. | Safe concurrent parsing of multiple editor buffers; syntax-only tooling (highlighting, a formatter) without touching semantics. | Low-medium. |
 | **2. Drop `GlobalSymbolTable` as a singleton** | An explicit, constructed `SymbolTable`/session object, passed in — this is `turf-lsp`'s own already-named, already-deferred item F. | Multiple concurrent analyses; the actual prerequisite for phase 3. | Medium. |
@@ -362,3 +439,8 @@ three times instead of once.
 - `docs/planning/ARCHITECTURE_OVERHAUL.md` §27 (Deferred Work Register) —
   D11 is the adjacent, currently-tracked "build more tooling" item; this
   document is the missing "why the compiler's shape makes that hard" half.
+- `docs/development/changes/STD-003.md` — the 2026-09-26 session §1/§7
+  point to. Its own *Known pitfalls* has the full repro for the three
+  compiler bugs found that session (self-call `Subst` recovery, `FuncType`
+  substitution, cast legality) and for the `mem::Pool<T>.free_all()` case
+  that surfaced phase 0★'s starting point.
