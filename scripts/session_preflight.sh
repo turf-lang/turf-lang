@@ -20,7 +20,7 @@ CYAN="\033[0;36m"; RESET="\033[0m"
 FEATURE="${1:-}"
 if [ -z "$FEATURE" ]; then
   echo "Usage: $0 <FEATURE-ID> [--no-build] [--no-tests]"
-  echo "Feature IDs: docs/planning/ARCHITECTURE_OVERHAUL.md Appendix B."
+  echo "Feature IDs: ARCHITECTURE_OVERHAUL.md Appendix B; OVH-NNN in OVERHAUL_REMAINING_WORK.md; FDN/LEC/REL/SMP-NNN in ROADMAP_v2.0.0.md (all docs/planning/)."
   exit 1
 fi
 shift
@@ -33,7 +33,21 @@ for a in "$@"; do
   esac
 done
 
+# The spec a feature ID lives in. Overhaul groups (ARCH-001 ... SLM-001) are
+# in ARCHITECTURE_OVERHAUL.md §8; the overhaul-closure fixes (OVH-NNN) are in
+# the temporary handoff OVERHAUL_REMAINING_WORK.md; the 2.0 milestones
+# (FDN-/LEC-/REL-/SMP-NNN) are in ROADMAP_v2.0.0.md. First file with a
+# matching "### <ID> — " heading wins; the overhaul blueprint stays the
+# fallback so an unknown ID still fails against the familiar file.
 BLUEPRINT="docs/planning/ARCHITECTURE_OVERHAUL.md"
+for CANDIDATE in docs/planning/ARCHITECTURE_OVERHAUL.md \
+                 docs/planning/OVERHAUL_REMAINING_WORK.md \
+                 docs/planning/ROADMAP_v2.0.0.md; do
+  if [ -f "$CANDIDATE" ] && grep -q "^### $FEATURE — " "$CANDIDATE"; then
+    BLUEPRINT="$CANDIDATE"
+    break
+  fi
+done
 FAILED=0
 
 echo -e "${BOLD}Session preflight — $FEATURE${RESET}\n"
@@ -47,7 +61,7 @@ echo -e "   ${CYAN}$BLUEPRINT${RESET}"
 
 SECTION_LINE=$(grep -n "^### $FEATURE — " "$BLUEPRINT" | head -1 | cut -d: -f1)
 if [ -n "$SECTION_LINE" ]; then
-  echo -e "      └─ §8's ${BOLD}$FEATURE${RESET} section, at line ${BOLD}$SECTION_LINE${RESET}, including its \"Must NOT reinterpret\" list"
+  echo -e "      └─ the ${BOLD}$FEATURE${RESET} section, at line ${BOLD}$SECTION_LINE${RESET}, including its \"Must NOT reinterpret\" list"
   # The architecture docs that section actually names, rather than a guess.
   END_LINE=$(awk -v s="$SECTION_LINE" 'NR>s && /^### [A-Z]+-[0-9]+ — / {print NR; exit}' "$BLUEPRINT")
   [ -z "$END_LINE" ] && END_LINE=$(wc -l < "$BLUEPRINT")
@@ -62,11 +76,11 @@ if [ -n "$SECTION_LINE" ]; then
   fi
 else
   echo -e "   ${RED}No \"### $FEATURE — \" section found in $BLUEPRINT.${RESET}"
-  echo -e "   Check the ID against Appendix B — a typo here means you read the wrong spec."
+  echo -e "   Check the ID against the index of the file it should live in — a typo here means you read the wrong spec."
   FAILED=$((FAILED + 1))
 fi
 echo
-echo -e "   Also ${CYAN}$BLUEPRINT${RESET} §25 — the changes that look"
+echo -e "   Also ${CYAN}docs/planning/ARCHITECTURE_OVERHAUL.md${RESET} §25 — the changes that look"
 echo -e "   tempting from inside a feature group and are wrong."
 echo
 
