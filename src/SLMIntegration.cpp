@@ -23,12 +23,15 @@
 #include <SLMEngine.h>
 #include "AST.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <regex>
 #include <sstream>
@@ -430,6 +433,130 @@ static float finalizeConfidence(float structuralPrior, bool sandboxValidated) {
   return std::min(structuralPrior, 0.5f);
 }
 
+// ── Item 4: on-disk suggestion cache (~/.cache/turf/slm/) ───────────────────
+//
+// Keyed on (error code, normalized message, hash of the pinned context) --
+// exactly the tuple §16.3 item 4 names -- so an IDENTICAL diagnostic (same
+// code, same message text, same surrounding source) on a later compile skips
+// the model call entirely. "Normalized message" here means exactly
+// cleanError (already ANSI-code-stripped by stripAnsiCodes() before this
+// ever runs): no further whitespace/number normalization is attempted, since
+// a TurfError's message is already deterministic text for a given
+// (construct, names, types) tuple with no built-in noise (timestamps,
+// addresses, ...) that would need stripping first.
+//
+// Invalidation: item 4 says "on compiler version", but this project tracks
+// no literal version string -- confirmed via grep, CMakeLists.txt has no
+// CMAKE_PROJECT_VERSION or embedded git hash. The compiler BINARY's own
+// size+mtime is used as the version fingerprint instead: a real rebuild
+// always changes at least one of the two (a no-op `cmake --build` that
+// touches nothing doesn't relink, so this doesn't over-invalidate either),
+// and it costs nothing extra to maintain in lockstep. An ordinary
+// engineering judgment call (SESSION_PROTOCOL.md §6.0 rule 2), not a
+// FREEZE.md decision -- recorded here and in the SLM-001 change record.
+static std::string fnv1aHex(const std::string &Data) {
+  uint64_t Hash = 1469598103934665603ULL; // FNV-1a 64-bit offset basis
+  for (unsigned char C : Data) {
+    Hash ^= C;
+    Hash *= 1099511628211ULL; // FNV-1a 64-bit prime
+  }
+  std::ostringstream Out;
+  Out << std::hex << std::setfill('0') << std::setw(16) << Hash;
+  return Out.str();
+}
+
+static std::string slmCacheKey(const std::string &ErrorCode,
+                               const std::string &NormalizedMessage,
+                               const std::string &CodeContext) {
+  // '\x1f' (ASCII unit separator) as the join delimiter -- never appears in
+  // any of the three inputs (error codes are "E0NN", messages/context are
+  // printable source text), so no input can be crafted to collide two
+  // otherwise-different keys by shifting a delimiter.
+  return fnv1aHex(ErrorCode + "\x1f" + NormalizedMessage + "\x1f" + CodeContext);
+}
+
+static std::string slmCacheDir() {
+  const char *Home = std::getenv("HOME");
+  if (!Home || !*Home)
+    return ""; // no HOME -- caching is a pure optimization, disable cleanly
+  return std::string(Home) + "/.cache/turf/slm";
+}
+
+// See this section's own top comment for why the compiler binary's
+// size+mtime (rather than a version string this project doesn't have) is
+// the invalidation fingerprint. Computed fresh per call rather than once
+// per process: fetchSuggestion() is never hot enough for one extra stat()
+// to matter, and this keeps the cache free of its own global init-order
+// state.
+static std::string slmCompilerFingerprint() {
+  llvm::sys::fs::file_status Status;
+  if (llvm::sys::fs::status(CompilerExecutablePath, Status))
+    return ""; // stat() failed -- never matches a real cache entry below
+  auto Mtime = Status.getLastModificationTime().time_since_epoch().count();
+  return std::to_string(Status.getSize()) + ":" + std::to_string(Mtime);
+}
+
+static bool readSlmCache(const std::string &Key, AISuggestion &Out) {
+  std::string Dir = slmCacheDir();
+  if (Dir.empty())
+    return false;
+  std::ifstream File(Dir + "/" + Key + ".json");
+  if (!File.is_open())
+    return false;
+  std::string FingerprintLine;
+  if (!std::getline(File, FingerprintLine))
+    return false;
+  if (FingerprintLine != slmCompilerFingerprint())
+    return false; // stale -- the compiler binary changed since this was written
+  std::ostringstream Rest;
+  Rest << File.rdbuf();
+  std::string Json = Rest.str();
+  if (Json.empty())
+    return false;
+  Out.explanation = extractJsonFieldString(Json, "explanation");
+  Out.fix_mode = extractJsonFieldString(Json, "fix_mode");
+  Out.suggested_comment = extractJsonFieldString(Json, "suggested_comment");
+  Out.code_patch = extractJsonFieldString(Json, "code_patch");
+  Out.replacement_line = extractJsonFieldString(Json, "replacement_line");
+  Out.target_line = extractJsonFieldInt(Json, "target_line");
+  Out.end_line = extractJsonFieldInt(Json, "end_line");
+  Out.warning = extractJsonFieldString(Json, "warning");
+  Out.self_reported_category = extractJsonFieldString(Json, "self_reported_category");
+  if (Out.fix_mode.empty())
+    Out.fix_mode = "NONE";
+  Out.valid = true;
+  // Deliberately NOT cached: confidence, sandbox_validated. "Confidence
+  // cannot be faked" (§16.1) -- finalizeConfidence() always recomputes both
+  // fresh from THIS run's structural prior and THIS run's sandbox result,
+  // exactly as if the model had just been called. A cache hit skips only the
+  // expensive, purely-a-function-of-the-prompt model inference step, never
+  // the cheap, must-stay-live trust computation downstream.
+  return true;
+}
+
+static void writeSlmCache(const std::string &Key, const AISuggestion &S) {
+  std::string Dir = slmCacheDir();
+  if (Dir.empty())
+    return;
+  if (llvm::sys::fs::create_directories(Dir))
+    return; // couldn't create the cache dir -- skip caching this run
+  std::ofstream File(Dir + "/" + Key + ".json", std::ios::trunc);
+  if (!File.is_open())
+    return;
+  File << slmCompilerFingerprint() << "\n"
+       << "{"
+       << "\"explanation\":\"" << escapeJsonString(S.explanation) << "\","
+       << "\"fix_mode\":\"" << escapeJsonString(S.fix_mode) << "\","
+       << "\"suggested_comment\":\"" << escapeJsonString(S.suggested_comment) << "\","
+       << "\"code_patch\":\"" << escapeJsonString(S.code_patch) << "\","
+       << "\"replacement_line\":\"" << escapeJsonString(S.replacement_line) << "\","
+       << "\"target_line\":" << S.target_line << ","
+       << "\"end_line\":" << S.end_line << ","
+       << "\"warning\":\"" << escapeJsonString(S.warning) << "\","
+       << "\"self_reported_category\":\"" << escapeJsonString(S.self_reported_category)
+       << "\"}\n";
+}
+
 /**
  * @brief Fetches and parses an AI suggestion for a given compilation error.
  *
@@ -445,7 +572,9 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
                              const std::string &hint,
                              const std::vector<RelatedLocation> &related,
                              ErrorCategory category,
-                             const std::string &previousAttemptFailed) {
+                             const std::string &previousAttemptFailed,
+                             const DiagnosticHints &hints,
+                             const std::string &errorCode) {
   AISuggestion suggestion;
   std::string cleanError = stripAnsiCodes(errorMessage);
 
@@ -465,6 +594,38 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   // as a fallback: it silently drifted out of sync with reworded messages
   // and had no way to recover once a real category was already known.
   bool categoryWasDeterministic = (category != ErrorCategory::GENERAL);
+
+  // Context window + pinned lines, computed BEFORE the model/grammar load
+  // below (moved up from "Step 3" further down -- see that step's own
+  // comment for what each call does) so a cache lookup (item 4) can use the
+  // same codeContext string as its key WITHOUT first paying the cost of
+  // loading the GGUF model into RAM, which is the single most expensive
+  // part of this function on a cold cache miss and pure waste on a hit.
+  int contextSize = contextSizeForCategory(category);
+  std::string codeContext = related.empty()
+      ? getCodeContext(errorLine, contextSize)
+      : getCodeContextWithPinnedLines(errorLine, contextSize, related);
+  std::string categoryName = getCategoryName(category);
+
+  // Item 4 (caching): key on (error code, normalized message, hash of the
+  // pinned context) -> the model's raw JSON fields, persisted under
+  // ~/.cache/turf/slm/, invalidated whenever the compiler binary itself
+  // changes. Only consulted on a FIRST attempt (previousAttemptFailed
+  // empty) -- a retry exists specifically because the last suggestion (quite
+  // possibly this exact cached one) already failed sandbox validation, so
+  // serving it again would just reproduce the same failure forever instead
+  // of letting the retry reach the model with real feedback. See
+  // slmCacheKey()/readSlmCache()/writeSlmCache() below for the on-disk
+  // format and the version-fingerprint invalidation rule.
+  if (previousAttemptFailed.empty()) {
+    AISuggestion cached;
+    if (readSlmCache(slmCacheKey(errorCode, cleanError, codeContext), cached)) {
+      if (std::getenv("TURF_SLM_DEBUG")) {
+        std::cerr << "[SLM] Cache hit -- skipping model load entirely.\n";
+      }
+      return cached;
+    }
+  }
 
   llvm::SmallString<128> ModelPath(CompilerExecutablePath);
   llvm::sys::path::remove_filename(ModelPath);
@@ -498,35 +659,15 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
   // This eliminates the second model call in exchange for less
   // category-tailored context on GENERAL-class errors.
 
-  // Step 3: dynamic context window
-  // Size the context window based on the deterministic category.
-  // If deterministic classification failed, GENERAL gives ±8 lines (broadest
-  // window), which is already the most generous fallback we have.
-  int contextSize = contextSizeForCategory(category);
+  // Step 3: dynamic context window -- contextSize/codeContext/categoryName
+  // are computed further up now (see the comment above the cache-lookup
+  // block), before the model/grammar load, so a cache hit can skip that
+  // load entirely. Debug echo kept here, at the point they're actually used.
   if (std::getenv("TURF_SLM_DEBUG")) {
     std::cerr << "[SLM] Context window: ±" << contextSize
-              << " lines (category: " << getCategoryName(category) << ")\n";
-  }
-
-  std::string codeContext;
-
-  // Smart context: pin relevant definitions outside the window
-  //
-  // Pinning is now data-driven: RelatedLocations are populated by the
-  // compiler's own Resolver/TypeChecker at the exact point each error fires,
-  // carrying structurally correct locations from real symbol-table entries.
-  // Zero category branching, zero hardcoded syntax, zero scanner functions.
-  // If `related` is empty (error classes that don't yet populate it), this
-  // naturally falls back to plain sliding-window context — same as before.
-  codeContext = related.empty()
-      ? getCodeContext(errorLine, contextSize)
-      : getCodeContextWithPinnedLines(errorLine, contextSize, related);
-
-  if (std::getenv("TURF_SLM_DEBUG")) {
+              << " lines (category: " << categoryName << ")\n";
     std::cerr << "--- PINNED CONTEXT ---\n" << codeContext << "\n----------------------\n";
   }
-
-  std::string categoryName = getCategoryName(category);
 
   // 3. Get the most specific documentation available
   std::string docPath = getCategoryDocPath(category, contextKeyword);
@@ -669,6 +810,22 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "  \"error\": \"" + escapeJsonString(cleanError) + "\",\n"
       "  \"hint\": \"" + escapeJsonString(hint) + "\",\n"
       "  \"code\": \"" + escapeJsonString(codeContext) + "\"";
+  // Item 3: known concrete types the type checker already computed that are
+  // NOT visible just by reading the code above (see DiagnosticHints's doc
+  // comment, ErrorCategory.h, for exactly which facts qualify and why --
+  // currently a `guess`-inferred local's resolved type, the one piece of
+  // type information a Turf-Lang source line can never spell out itself).
+  // A structured field, not folded into the free-text "code"/"error"
+  // strings above, so the model doesn't have to parse it back out of prose.
+  if (!hints.KnownTypes.empty()) {
+    std::string knownTypes;
+    for (size_t i = 0; i < hints.KnownTypes.size(); ++i) {
+      if (i)
+        knownTypes += " ";
+      knownTypes += hints.KnownTypes[i];
+    }
+    userPrompt += ",\n  \"known_types\": \"" + escapeJsonString(knownTypes) + "\"";
+  }
   if (!previousAttemptFailed.empty()) {
     userPrompt += ",\n  \"previous_attempt_failed\": \"" +
                   escapeJsonString(previousAttemptFailed) + "\"";
@@ -701,6 +858,14 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       "<|im_end|>\n"
       "<|im_start|>assistant\n";
 
+  if (std::getenv("TURF_SLM_DEBUG")) {
+    // Full user prompt, including the "known_types" field (item 3) when
+    // present -- verified live during SLM-001 that this is exactly what a
+    // guess-inferred operand's resolved type looks like once it reaches the
+    // model, distinct from "Clean Error"/"PINNED CONTEXT" above (which show
+    // the error text and source window, not this structured JSON payload).
+    std::cerr << "--- USER PROMPT ---\n" << userPrompt << "\n-------------------\n";
+  }
   std::string rawResponse =
       SLMEngine::getInstance().generateSuggestion(systemPrompt, userPrompt, grammarStr);
 
@@ -776,6 +941,17 @@ AISuggestion fetchSuggestion(const std::string &errorMessage, int errorLine,
       suggestion.fix_mode = "NONE";
     }
     suggestion.valid = true;
+
+    // Item 4: persist this fresh, first-attempt model result so an
+    // IDENTICAL future diagnostic (same key -- see the cache-lookup comment
+    // above) can skip the model entirely. Only on a first attempt: a retry
+    // exists because a prior cached-or-not suggestion already failed
+    // sandbox validation, and this attempt's own result is conditioned on
+    // `previousAttemptFailed`, so it isn't a valid answer for the FIRST-
+    // attempt cache key at all.
+    if (previousAttemptFailed.empty()) {
+      writeSlmCache(slmCacheKey(errorCode, cleanError, codeContext), suggestion);
+    }
   }
 
   return suggestion;
@@ -967,6 +1143,90 @@ bool verifySuggestion(const AISuggestion &suggestion, int errorLine,
   return ok;
 }
 
+// ── Item 1: deterministic-fix layer ─────────────────────────────────────────
+//
+// Given an unambiguous rename candidate (DeterministicOldName/NewName -- see
+// DiagnosticHints's own doc comment, ErrorCategory.h, for exactly which
+// call sites earn one and why "unambiguous" is required), synthesize a
+// word-boundary search/replace patch on the error's own line and
+// sandbox-verify it through verifySuggestion() -- the EXACT SAME path every
+// model-produced suggestion goes through. A wrong guess here is therefore
+// exactly as safe as a wrong model guess: it can only fail sandbox
+// validation, never apply bad code. Returns an invalid (default-constructed)
+// AISuggestion when there's no hint to try or the sandboxed replace didn't
+// validate -- either way the caller (validateAndApplySuggestion()) falls
+// through to the ordinary model path, unaffected.
+static AISuggestion tryDeterministicFix(int errorLine,
+                                        const DiagnosticHints &Hints,
+                                        ErrorCategory category) {
+  AISuggestion result;
+  if (Hints.DeterministicOldName.empty() || Hints.DeterministicNewName.empty())
+    return result;
+  if (errorLine < 1 || errorLine > static_cast<int>(SourceLines.size()))
+    return result;
+
+  const std::string &Line = SourceLines[errorLine - 1];
+  const std::string &OldName = Hints.DeterministicOldName;
+  std::string Patched;
+  Patched.reserve(Line.size());
+  size_t Pos = 0;
+  bool ReplacedAny = false;
+  while (Pos < Line.size()) {
+    size_t Found = Line.find(OldName, Pos);
+    if (Found == std::string::npos) {
+      Patched += Line.substr(Pos);
+      break;
+    }
+    Patched += Line.substr(Pos, Found - Pos);
+    // Word-boundary check on both sides, same shape as
+    // computeStructuralPrior()'s keyword-boundary check above -- a bare
+    // substring match would wrongly rewrite e.g. "cnt" inside "recnt" for an
+    // OldName of "cnt".
+    bool LeftOk = (Found == 0) ||
+        (!std::isalnum(static_cast<unsigned char>(Line[Found - 1])) &&
+         Line[Found - 1] != '_');
+    size_t After = Found + OldName.size();
+    bool RightOk = (After >= Line.size()) ||
+        (!std::isalnum(static_cast<unsigned char>(Line[After])) &&
+         Line[After] != '_');
+    if (LeftOk && RightOk) {
+      Patched += Hints.DeterministicNewName;
+      ReplacedAny = true;
+    } else {
+      Patched += OldName;
+    }
+    Pos = After;
+  }
+  if (!ReplacedAny)
+    return result; // OldName never appeared as a real token on this line
+
+  result.fix_mode = "MODIFY";
+  result.replacement_line = Patched;
+  // target_line/end_line left at 0 ("same line as the error, single line") --
+  // verifySuggestion() already treats that as the common case.
+  result.code_patch = "Replaced '" + OldName + "' with '" +
+                      Hints.DeterministicNewName + "'.";
+  result.suggested_comment = "Looks like a typo -- I replaced '" + OldName +
+                             "' with '" + Hints.DeterministicNewName + "'.";
+  result.explanation = "'" + OldName + "' isn't declared anywhere visible, "
+                       "but '" + Hints.DeterministicNewName + "' is an exact, "
+                       "unambiguous match nearby, so this is almost "
+                       "certainly a typo.";
+  result.self_reported_category = getCategoryName(category);
+
+  if (!verifySuggestion(result, errorLine, nullptr)) {
+    return AISuggestion{}; // didn't validate -- not this rename, try the model
+  }
+  // Sandbox-proven, same as a validated model suggestion: finalizeConfidence()
+  // clamps to >= 0.9 regardless of the structural-prior argument once
+  // sandboxValidated is true (see its own doc comment above), so the exact
+  // prior value here doesn't matter.
+  result.confidence = finalizeConfidence(1.0f, /*sandboxValidated=*/true);
+  result.sandbox_validated = true;
+  result.valid = true;
+  return result;
+}
+
 // High-Level Auto-Fix API
 
 // Retry cap for the loop below -- matches the roadmap wording exactly
@@ -993,13 +1253,31 @@ static constexpr int kMaxSlmAttempts = 3;
 AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
                                         int errorLine, const std::string &hint,
                                         const std::vector<RelatedLocation> &related,
-                                        ErrorCategory category) {
+                                        ErrorCategory category,
+                                        const DiagnosticHints &hints,
+                                        const std::string &errorCode) {
+  // Item 1: try the deterministic-fix layer FIRST -- fetchSuggestion() (and
+  // therefore the model) is never called at all if this validates. See
+  // tryDeterministicFix()'s own doc comment for the safety argument.
+  if (!hints.DeterministicOldName.empty()) {
+    AISuggestion detFix = tryDeterministicFix(errorLine, hints, category);
+    if (detFix.valid) {
+      std::cerr << Colors::BRIGHT_GREEN << "[Deterministic Fix] ✓ '"
+                << hints.DeterministicOldName << "' -> '"
+                << hints.DeterministicNewName
+                << "' validated -- the model was never called."
+                << Colors::RESET << "\n";
+      return detFix;
+    }
+  }
+
   AISuggestion suggestion;
   std::string previousAttemptFailed; // empty on attempt 1
 
   for (int attempt = 1; attempt <= kMaxSlmAttempts; ++attempt) {
     suggestion = fetchSuggestion(errorMessage, errorLine, hint, related,
-                                 category, previousAttemptFailed);
+                                 category, previousAttemptFailed, hints,
+                                 errorCode);
 
     if (!suggestion.valid) {
       // The SLM itself failed/timed out/produced unparsable JSON -- not a

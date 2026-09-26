@@ -140,7 +140,8 @@ public:
   using ErrorHandler =
       std::function<void(SourceLocation, const std::string &,
                          const std::vector<RelatedLocation> &,
-                         const std::string &, const std::string &)>;
+                         const std::string &, const std::string &,
+                         const SLM::DiagnosticHints &)>;
 
   // ── Constructors ──────────────────────────────────────────────────────────
 
@@ -323,11 +324,17 @@ private:
   /// CustomHint, when non-empty, overrides the default TypeError hint
   /// instead of stacking alongside it; CustomBanner, when non-empty,
   /// overrides the default "Type mismatch!" header -- see ErrorHandler's
-  /// doc comment for why that header isn't always accurate.
+  /// doc comment for why that header isn't always accurate. Hints (SLM-001
+  /// §16.3 item 3), when non-empty, is forwarded to the raised TypeError via
+  /// TurfError::withKnownType() for each entry -- see DiagnosticHints's own
+  /// doc comment (ErrorCategory.h). Empty for the overwhelming majority of
+  /// call sites, which is a complete no-op, identical to before this param
+  /// existed.
   void reportError(SourceLocation Loc, const std::string &Msg,
                    const std::vector<RelatedLocation> &Related = {},
                    const std::string &CustomHint = "",
-                   const std::string &CustomBanner = "");
+                   const std::string &CustomBanner = "",
+                   const SLM::DiagnosticHints &Hints = {});
 
   // ── `unsafe { }` gate (issue #238) ──────────────────────────────────────
 

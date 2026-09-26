@@ -20,6 +20,7 @@ public:
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check the spelling against the built-in "
       "functions like 'printline' or 'typeof'.");
+    trySetDeterministicRename(Name, Suggestions);
   }
 };
 // Arithmetic Error : Math issues
@@ -35,6 +36,7 @@ public:
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check the spelling or import the module that "
       "defines it.");
+    trySetDeterministicRename(Name, Suggestions);
   }
 };
 /// Emitted by the Resolver's Pass 2 when a struct field's NamedType reference
@@ -50,6 +52,7 @@ public:
     Hint_ = suggestionsOrFallback(Suggestions,
       "Make sure the struct '" + TypeName +
       "' is declared before it is used, or check the spelling.");
+    trySetDeterministicRename(TypeName, Suggestions);
   }
 };
 /// Emitted when the function name is known but the argument count is wrong.
@@ -98,9 +101,20 @@ public:
       "Did you forget to create this variable? You have to "
       "create it before you can use it, like this: `mut " +
       Name + ": int = 5;`");
+    trySetDeterministicRename(Name, Suggestions);
   }
 };
 // Semantic Error : Symbol binding issues
+//
+// Deliberately NOT given a deterministic-fix rename (SLM-001 item 1), unlike
+// every other RankedSuggestions-based class in this file: `Name` here is NOT
+// a typo -- it is a real, correctly-spelled identifier declared LATER in the
+// same scope. A rename to some OTHER visible candidate would silently
+// reference the wrong variable instead of fixing the actual problem (move
+// the declaration earlier), and could easily still pass sandbox validation
+// (same category, source line still compiles) while being semantically
+// wrong -- exactly the "compiles but changes behaviour" risk §16.4's
+// semantic-correctness metric exists to catch. Left to the model/user.
 class UseBeforeDeclarationError : public TurfError {
 public:
   UseBeforeDeclarationError(SourceLocation UseLoc, const std::string &Name,
@@ -223,6 +237,7 @@ public:
     Category_ = SLM::ErrorCategory::DECLARATION;
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check the spelling against " + TypeName + "'s declared variants.");
+    trySetDeterministicRename(VariantName, Suggestions);
   }
 };
 

@@ -236,6 +236,12 @@ public:
     // Empty for the raw, untyped LogErrorAt() path and for warnings -- both
     // print without a "[E0NN]" tag in printDiag().
     std::string Code;
+    // SLM-001: structured hints (deterministic-fix candidate, known types)
+    // from the raising TurfError, if any -- see DiagnosticHints's doc
+    // comment (SLMIntegration.h). Always empty for a warning (the SLM path
+    // is gated on !IsWarning, same as Category) and for the raw LogErrorAt()
+    // path (which has no TurfError instance to carry one).
+    SLM::DiagnosticHints Hints;
   };
 
   // Record a diagnostic. Errors on a line that already has an error are
@@ -244,7 +250,8 @@ public:
                   const std::string &Hint, bool IsWarning = false,
                   const std::vector<RelatedLocation> &Related = {},
                   SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL,
-                  const std::string &Code = "");
+                  const std::string &Code = "",
+                  const SLM::DiagnosticHints &Hints = {});
 
   static void add(SourceLocation Loc, const std::string &Msg,
                   bool IsWarning = false,

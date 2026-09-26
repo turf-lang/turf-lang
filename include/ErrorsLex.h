@@ -51,6 +51,12 @@ public:
       }
       sug += "?";
       Hint_ = sug;
+      // SLM-001 item 1: unlike every other deterministic-fix site (Errors
+      // Scope.h/Struct.h/Module.h), this isn't RankedSuggestions-shaped
+      // (suggestKeywords() returns a plain vector, no module-symbol half) --
+      // unambiguous here just means exactly one candidate.
+      if (Candidates.size() == 1)
+        withDeterministicFix(Name, Candidates[0]);
     } else {
       Hint_ = "Check if you spelled the keyword correctly.";
     }

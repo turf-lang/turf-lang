@@ -343,7 +343,8 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                            const std::string &Hint, bool IsWarning,
                            const std::vector<RelatedLocation> &Related,
                            SLM::ErrorCategory Category,
-                           const std::string &Code) {
+                           const std::string &Code,
+                           const SLM::DiagnosticHints &Hints) {
   // If there is already an error on this line, suppress everything else
   // (both additional errors and warnings) to avoid cascading noise -- unless
   // an embedder opted into CollectAllDiagnostics (see its doc comment),
@@ -366,7 +367,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           "fresh analysis." +
           Colors::RESET;
     } else {
-      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint, Related, Category);
+      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint, Related, Category, Hints, Code);
 
       if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
         // Replace compiler message with high-confidence AI suggestion.
@@ -402,7 +403,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   std::string Filename = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
 
   Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning, Related, Category,
-                         Filename, Code});
+                         Filename, Code, Hints});
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);

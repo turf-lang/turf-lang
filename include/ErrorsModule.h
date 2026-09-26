@@ -210,6 +210,7 @@ public:
         "module name (io::printline), or a struct type name for a static "
         "method (StructName::method). Double-check the spelling, or make "
         "sure you've imported the module.");
+    trySetDeterministicRename(LeftName, Suggestions);
   }
 };
 // Raised when '::' -- reserved for namespace-resolution (enum/module/
@@ -253,6 +254,7 @@ public:
     Hint_ = suggestionsOrFallback(
         Suggestions, "Double-check the spelling, or check " + ModuleName +
                          ".tr for its actual exported names.");
+    trySetDeterministicRename(SymbolName, Suggestions);
   }
 };
 // Raised when two on-demand imports (import module::[...];) in the SAME
@@ -332,6 +334,7 @@ public:
     // class in this file, which passes no prefix and reads cleanly.
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check your spelling, or maybe you need to define it?");
+    trySetDeterministicRename(MethodName, Suggestions);
   }
 };
 // Phase 2: Module-scoped argument type mismatch error

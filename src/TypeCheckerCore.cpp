@@ -47,10 +47,13 @@ namespace {
 void productionErrorHandler(SourceLocation Loc, const std::string &Msg,
                             const std::vector<RelatedLocation> &Related,
                             const std::string &CustomHint,
-                            const std::string &CustomBanner) {
+                            const std::string &CustomBanner,
+                            const SLM::DiagnosticHints &Hints) {
   TypeError Err(Loc, Msg, CustomHint, CustomBanner);
   for (const auto &R : Related)
     Err.withRelated(R.Loc, R.Description);
+  for (const auto &Fact : Hints.KnownTypes)
+    Err.withKnownType(Fact);
   Err.raise();
 }
 #else
@@ -58,7 +61,8 @@ void productionErrorHandler(SourceLocation Loc, const std::string &Msg,
 /// Throws std::runtime_error so tests can catch it with EXPECT_THROWS.
 void unitTestErrorHandler(SourceLocation, const std::string &Msg,
                           const std::vector<RelatedLocation> &,
-                          const std::string &, const std::string &) {
+                          const std::string &, const std::string &,
+                          const SLM::DiagnosticHints &) {
   throw std::runtime_error("TypeError: " + Msg);
 }
 #endif
@@ -133,10 +137,11 @@ void TypeChecker::setType(const ExprAST *Node, TurfTypePtr Ty) {
 void TypeChecker::reportError(SourceLocation Loc, const std::string &Msg,
                               const std::vector<RelatedLocation> &Related,
                               const std::string &CustomHint,
-                              const std::string &CustomBanner) {
+                              const std::string &CustomBanner,
+                              const SLM::DiagnosticHints &Hints) {
   HadError_ = true;
   if (ErrorHandler_)
-    ErrorHandler_(Loc, Msg, Related, CustomHint, CustomBanner);
+    ErrorHandler_(Loc, Msg, Related, CustomHint, CustomBanner, Hints);
 }
 
 

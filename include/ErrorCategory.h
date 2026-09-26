@@ -3,8 +3,46 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace SLM {
+
+// SLM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §16.3 items 1 and 3):
+// structured facts a diagnostic's own raising site already knows, attached
+// via TurfError::withKnownType()/withDeterministicFix()/
+// trySetDeterministicRename() (Errors.h) and threaded through
+// DiagnosticEngine::add() (Lexer.h) unchanged -- never re-derived from
+// message text (the exact anti-pattern DIAG-001 removed for ErrorCategory
+// above; see that record's "Removed assumptions"). A default-constructed
+// (empty) instance is the common case and changes nothing about the
+// existing pipeline. Lives here (rather than SLMIntegration.h, where
+// AISuggestion lives) specifically so Lexer.h -- which cannot include
+// SLMIntegration.h without a cycle (SLMIntegration.h includes Lexer.h for
+// RelatedLocation) -- can still store one by value in DiagnosticEngine::Diag.
+struct DiagnosticHints {
+  // Item 3: short, human-readable facts about the concrete types involved
+  // in this diagnostic that are NOT already visible by reading the pinned
+  // source lines -- e.g. a `guess`-inferred local's resolved type, which the
+  // declaration line itself never spells out. Sourced directly from
+  // TypeChecker::NodeTypes_/VariableSymbol::WasGuessInferred at the call
+  // site that already computed them, not re-inferred here.
+  std::vector<std::string> KnownTypes;
+
+  // Item 1 (deterministic-fix layer): an unambiguous, single-candidate
+  // rename already computed by a RankedSuggestions-based "did you mean"
+  // lookup at the raising site (exactly one local candidate, zero module
+  // candidates -- see TurfError::trySetDeterministicRename()). When both are
+  // non-empty, SLM::tryDeterministicFix() (SLMIntegration.cpp) attempts a
+  // sandboxed search/replace of DeterministicOldName -> DeterministicNewName
+  // on the error's own line BEFORE ever invoking the model; the model is
+  // never called at all if that sandbox validation succeeds.
+  std::string DeterministicOldName;
+  std::string DeterministicNewName;
+
+  bool empty() const {
+    return KnownTypes.empty() && DeterministicOldName.empty();
+  }
+};
 
 enum class ErrorCategory {
   TYPE_MISMATCH,

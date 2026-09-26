@@ -576,10 +576,31 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
         Related.push_back({toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
                            Note});
       }
+      // SLM-001 §16.3 item 3: surface a `guess`-inferred operand's resolved
+      // type as a structured fact for the SLM prompt. Deliberately narrower
+      // than "every operand's type" -- an EXPLICITLY annotated declaration's
+      // type is already spelled out on its own source line (which the
+      // pinned-context mechanism above already shows), so restating it here
+      // would just be the same fact twice. A `guess`-inferred local is
+      // different: the concrete type WasGuessInferred names is never written
+      // anywhere in the source at all, so it is otherwise invisible to the
+      // model no matter how much surrounding context it is shown.
+      SLM::DiagnosticHints Hints;
+      const auto *RHSVar = dynamic_cast<const VariableExprAST *>(Node.getRHS());
+      if (LHSIsBareVariable && LHSVar && LHSVar->ResolvedSymbol &&
+          LHSVar->ResolvedSymbol->WasGuessInferred)
+        Hints.KnownTypes.push_back(
+            "'" + LHSVar->getName() + "' (assignment target) was declared "
+            "with 'guess' and inferred as '" + LhsTy->getName() + "'.");
+      if (RHSVar && RHSVar->ResolvedSymbol &&
+          RHSVar->ResolvedSymbol->WasGuessInferred)
+        Hints.KnownTypes.push_back(
+            "'" + RHSVar->getName() + "' (assigned value) was declared "
+            "with 'guess' and inferred as '" + RhsTy->getName() + "'.");
       reportError(Node.getLoc(),
                   "Cannot assign value of type '" + RhsTy->getName() +
                       "' to variable of type '" + LhsTy->getName() + "'.",
-                  Related);
+                  Related, "", "", Hints);
     } else {
       // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
       checkLiteralRepresentable(Node.getRHS(), LhsTy.get(), Node.getLoc());

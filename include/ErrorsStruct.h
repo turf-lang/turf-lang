@@ -39,6 +39,7 @@ public:
       "method, called as `x." + MethodName + "(...)`) or `fn " + StructName +
       "." + MethodName + "(...) static: ReturnType` (static method, called "
       "as `" + StructName + "::" + MethodName + "(...)`).");
+    trySetDeterministicRename(MethodName, Suggestions);
   }
 };
 /**
@@ -78,6 +79,7 @@ public:
         Suggestions, "Double-check the spelling, or make sure '" +
                          FieldName + "' is declared as a field on '" +
                          StructName + "'.");
+    trySetDeterministicRename(FieldName, Suggestions);
   }
 };
 // `StructName::new(...)` was called but `StructName` has no `.new`
