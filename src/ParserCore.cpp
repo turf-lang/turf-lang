@@ -404,6 +404,34 @@ TurfTypePtr ParseType() {
         getNextToken(); // consume '>'
         break;
       }
+      // OVH-009: the lexer's maximal munch (INV-LEX-1 -- never special-
+      // cased there) fuses adjacent '>'-family characters into one token
+      // whenever a nested generic argument list closes with no space
+      // (`List<List<int>>` -> TOK_RSHIFT) or the close is immediately
+      // followed by '=' (`List<T>=`/`Map<K, List<V>>=` -> TOK_GEQ/
+      // TOK_RSHIFT_ASSIGN). The PARSER splits one '>' off such a token
+      // here by replacing CurTok with whatever is left over -- crucially,
+      // WITHOUT calling getNextToken(), which would ask the lexer for a
+      // brand new token and silently skip the leftover instead of handing
+      // it to whichever level of nesting (or the ordinary '=' this type
+      // annotation is followed by) actually owns it next. `break`ing with
+      // the replaced CurTok, rather than looping again, mirrors the real
+      // '>' branch just above: this level's own list is closed either way,
+      // real or split.
+      if (CurTok == TOK_RSHIFT) {        // '>>' -> '>' then '>'
+        CurTok = '>';
+        break;
+      }
+      if (CurTok == TOK_RSHIFT_ASSIGN) { // '>>=' -> '>' then '>='
+        CurTok = TOK_GEQ;
+        break;
+      }
+      if (CurTok == TOK_GEQ) {           // '>=' -> '>' then '=' -- reached
+                                          // directly (`List<T>=`) or as the
+                                          // second split of a '>>=' above
+        CurTok = TOK_ASSIGN;
+        break;
+      }
       if (CurTok != ',') {
         SyntaxError(CurLoc, "Expected '>' or ',' in generic type").raise();
         return nullptr;
