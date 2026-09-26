@@ -37,6 +37,7 @@ record does; `status` tracks the record, not the branch.
 | OVH-005 | `int32`: `++`/`--` ICE; untyped literal rejected; wrong-reason test | landed | 2026-09-26 | 2026-09-26 | TypeChecker (`TypeCheckerCore.cpp`, `TypeCheckerDecl.cpp`, `TypeCheckerExpr.cpp`, `TypeCheckerStmt.cpp`, `TypeCheckerCall.cpp`), Codegen (`CodegenVar.cpp` — debug assertion), tests, documentation | [OVH-005](changes/OVH-005.md) |
 | OVH-006 | Generic type-parameter names captured by user type names | landed | 2026-09-26 | 2026-09-26 | Resolver (`ResolverDecl.cpp` — `visitStructDecl()`), TypeChecker/Codegen doc comments (`TypeCheckerDecl.cpp`, `TypeCheckerCall.cpp`), tests, documentation | [OVH-006](changes/OVH-006.md) |
 | OVH-007 | Chained field access through a nested generic struct field fails | landed | 2026-09-26 | 2026-09-26 | Codegen (`CodegenCore.cpp` — `getExprType()`'s `FieldAccessExprAST` Subst-recovery), tests, documentation | [OVH-007](changes/OVH-007.md) |
+| OVH-008 | `&T` → `&?T` widening missing in generic candidate matching | landed | 2026-09-26 | 2026-09-26 | Types (`Types.cpp` — `typesCompatible()` Rule 2.5/2.6), tests, documentation | [OVH-008](changes/OVH-008.md) |
 
 ## How to use this directory
 
