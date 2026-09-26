@@ -833,6 +833,17 @@ static int runCompilerMain(int argc, char **argv) {
       for (auto &PreludeAST : ParsePreludeImports(CurLoc))
         PrePassASTs.push_back(std::move(PreludeAST));
 
+      // OVH-011: if a transitive import inside the prelude just injected
+      // above (e.g. `strings`'s own `import list::List;`) already resolved
+      // to this exact entry file's own path -- true whenever the file being
+      // compiled directly IS the lib/std module some prelude module
+      // transitively imports -- skip re-parsing this file's own top-level
+      // declarations entirely: they are already fully present, correctly
+      // registered under whatever module name reached them. See
+      // ClaimEntryFileImportSlot()'s own doc comment (ParserModule.cpp) for
+      // the full rationale and why this call must sit exactly here (after
+      // prelude injection, before this loop).
+      if (!ClaimEntryFileImportSlot(SourceFilename)) {
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') { getNextToken(); continue; }
         if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
@@ -900,6 +911,7 @@ static int runCompilerMain(int argc, char **argv) {
           getNextToken();
         }
       }
+      } // OVH-011: end of "if (!ClaimEntryFileImportSlot(...))"
 
       // ── Pre-pass sub-pass 2a: Resolve ─────────────────────────────────────
       // Run the Resolver over everything parsed so far (user fns only -- no
@@ -1225,6 +1237,13 @@ static int runCompilerMain(int argc, char **argv) {
   for (auto &PreludeAST : ParsePreludeImports(CurLoc))
     FnASTs.push_back(std::move(PreludeAST));
 
+  // OVH-011: mandatory-pass side of the same skip the pre-pass applies
+  // above -- ImportedFiles was cleared by ClearParsedTopLevelASTs() between
+  // passes, so this pass's own prelude injection just above re-populates it
+  // from scratch, and this call must re-check/re-claim against THIS pass's
+  // fresh cache. See ClaimEntryFileImportSlot()'s own doc comment
+  // (ParserModule.cpp).
+  if (!ClaimEntryFileImportSlot(SourceFilename)) {
   while (true) {
     if (CurTok == TOK_EOF)
       break;
@@ -1340,6 +1359,7 @@ static int runCompilerMain(int argc, char **argv) {
     }
     g_recoverActive = false;
   }
+  } // OVH-011: end of "if (!ClaimEntryFileImportSlot(...))"
 
   // Phase Separation: Lint All
   // Only TopLevelASTs (non-fn statements) are linted here. FnASTs are

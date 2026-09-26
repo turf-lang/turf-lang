@@ -873,6 +873,83 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
 static const char *const PreludeModuleNames[] = {
     "int", "double", "bool", "char", "strings", "array"};
 
+// OVH-011 (docs/planning/OVERHAUL_REMAINING_WORK.md): the entry file's own
+// top-level parse (main.cpp's own token-consuming loop, further down this
+// same file's call chain -- NOT ParseFile()) never participated in the
+// ImportedFiles cache/ImportStack machinery every OTHER file's content goes
+// through. So a transitive import that happens to resolve to the exact
+// physical file currently being compiled AS the entry point gets a SECOND,
+// completely independent full parse of identical content, registering
+// every struct/function a second time -- E034 "already declared". The
+// concrete, verified case: `strings` (an always-injected prelude module)
+// does `import list::List;`; compiling lib/std/collections/list.tr
+// directly means that transitive import resolves to the entry file's own
+// path.
+//
+// Called once per parse pass (main.cpp's pre-pass AND its separate
+// mandatory pass -- ImportedFiles is cleared between them by
+// ClearParsedTopLevelASTs(), so each pass needs its own claim), immediately
+// after that pass's own ParsePreludeImports() call and BEFORE the entry
+// file's own top-level declaration loop starts. Two outcomes:
+//
+//   - The entry path is ALREADY in ImportedFiles: a transitive import
+//     during THIS PASS's prelude injection already reached it and parsed
+//     it for real, exactly like any ordinary first-time import (nothing
+//     about that parse changes). Returns true -- the caller must SKIP its
+//     own top-level loop entirely: every declaration this file has is
+//     already present, correctly registered under whatever module name
+//     reached it (e.g. "list"); re-parsing here would only duplicate them.
+//   - The entry path is NOT yet in ImportedFiles (the ordinary case: an
+//     arbitrary user program, or a lib/std module whose prelude chain
+//     never happens to reach it). Registers it now, before the caller's
+//     own top-level loop runs, so a LATER self-reference introduced by one
+//     of the entry file's OWN import statements (a companion module
+//     importing the entry back -- see tests/22_prelude/
+//     entry_file_reimported_transitively.tr) becomes an ordinary
+//     already-imported cache hit too, instead of a second, independent
+//     re-parse from within that companion's own ParseFile() call. Returns
+//     false -- the caller proceeds normally.
+//
+// Also registers the same physical file's stdlib/usr-index alias (e.g.
+// StdIndex["list"]) when one exists and matches by real_path -- a
+// transitive import reaches this file through the MODULE SEARCH PATH, not
+// by repeating the entry's own command-line spelling, so the two strings
+// essentially never match as plain text without this (mirrors
+// ParsePreludeImports()'s own self-check just below, which needs the
+// identical canonicalization for the identical reason).
+bool ClaimEntryFileImportSlot(const std::string &EntryPath) {
+  if (EntryPath.empty())
+    return false;
+
+  std::string StdlibAlias;
+  llvm::SmallString<256> CanonicalEntry;
+  if (!llvm::sys::fs::real_path(EntryPath, CanonicalEntry)) {
+    std::string ModuleGuess = llvm::sys::path::stem(EntryPath).str();
+    std::string Root = TurfInstallRoot();
+    for (const char *Subdir : {"std", "usr"}) {
+      const auto &Index = IndexModuleDir(Root, Subdir);
+      auto It = Index.find(ModuleGuess);
+      if (It == Index.end())
+        continue;
+      llvm::SmallString<256> CanonicalCandidate;
+      if (!llvm::sys::fs::real_path(It->second, CanonicalCandidate) &&
+          CanonicalCandidate == CanonicalEntry) {
+        StdlibAlias = It->second;
+        break;
+      }
+    }
+  }
+
+  if (ImportedFiles.count(EntryPath) ||
+      (!StdlibAlias.empty() && ImportedFiles.count(StdlibAlias)))
+    return true;
+
+  ImportedFiles.insert(EntryPath);
+  if (!StdlibAlias.empty())
+    ImportedFiles.insert(StdlibAlias);
+  return false;
+}
+
 // Synthesizes a `ModuleImportExprAST` for each prelude module, as if the
 // user had written `import int; import double; ...` as the literal first
 // lines of their file -- reuses ParseModuleImportByName() (the exact same

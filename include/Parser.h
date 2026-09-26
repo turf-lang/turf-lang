@@ -65,6 +65,20 @@ std::unique_ptr<ExprAST> Parse();
 // to load (these are compiler-shipped files expected to always exist).
 std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc);
 
+// OVH-011 (docs/planning/OVERHAUL_REMAINING_WORK.md): called by main.cpp
+// once per parse pass, right after that pass's own ParsePreludeImports()
+// call and before the entry file's own top-level declaration loop starts.
+// Returns true if @p EntryPath was already fully parsed via a transitive
+// import reached during prelude injection (the caller must SKIP its own
+// top-level loop entirely -- re-parsing would duplicate every declaration);
+// false otherwise, having registered @p EntryPath so a LATER self-reference
+// (one of the entry file's own imports importing it back) becomes an
+// ordinary cache hit too. See its definition in ParserModule.cpp for the
+// full rationale and the concrete bug this closes (lib/std/collections/
+// list.tr, transitively re-imported by the always-injected `strings`
+// prelude module's own `import list::List;`).
+bool ClaimEntryFileImportSlot(const std::string &EntryPath);
+
 // RT-001: this install's resolved root -- TURF_HOME if set and non-empty,
 // else <compiler-binary-dir>/.. (so a plain `build/turf` dev build finds
 // the sibling lib/ directory, lib/std included, with zero setup). Exported
