@@ -28,16 +28,38 @@
  * always searching an already-sorted, already-merged array.
  *
  * ─── Root discovery ─────────────────────────────────────────────────────
- * 1. Callee-saved registers (rbx/rbp/r12-r15, x86-64 System V) -- spilled
- *    to memory by `gc_capture_callee_saved`'s inline asm, NOT via
- *    setjmp(): glibc's setjmp/longjmp XOR-obfuscate saved pointer values
- *    with a per-process secret (PTR_MANGLE) since glibc 2.4, which would
- *    make every register's saved bit pattern fail to resemble a real heap
- *    address -- verified against glibc's own jmp_buf implementation before
- *    choosing inline asm over the more obvious setjmp()-based approach the
- *    roadmap's own text describes generically as "the standard Boehm
- *    technique". Boehm's own GC_push_regs avoids the identical trap the
- *    same way, for the same reason, on this same platform.
+ * 1. Callee-saved registers -- spilled to memory by
+ *    `gc_capture_callee_saved`'s inline asm, NOT via setjmp(): glibc's
+ *    setjmp/longjmp XOR-obfuscate saved pointer values with a per-process
+ *    secret (PTR_MANGLE) since glibc 2.4, which would make every register's
+ *    saved bit pattern fail to resemble a real heap address -- verified
+ *    against glibc's own jmp_buf implementation before choosing inline asm
+ *    over the more obvious setjmp()-based approach the roadmap's own text
+ *    describes generically as "the standard Boehm technique". Boehm's own
+ *    GC_push_regs avoids the identical trap the same way, for the same
+ *    reason, on the platforms it targets. OVH-013
+ *    (docs/planning/OVERHAUL_REMAINING_WORK.md) widened this from
+ *    "x86-64 System V only" to three concrete ABIs, selected at compile
+ *    time (see the `TURF_GC_REGCAP_*` dispatch below the includes):
+ *      - x86-64 System V (Linux, and any other non-Windows x86-64 target):
+ *        rbx/rbp/r12-r15 -- the original RT-001/MEM-002 implementation.
+ *      - x86-64 Win64 (Windows, MinGW-w64): the SysV set PLUS rdi/rsi
+ *        (callee-saved under Win64, volatile under SysV) and xmm6-xmm15
+ *        (Win64's calling convention makes the full 128 bits of each
+ *        nonvolatile; SysV has no callee-saved XMM registers at all).
+ *      - AArch64 AAPCS64 (macOS arm64, and any other AAPCS64 target such
+ *        as Linux arm64): x19-x28, the frame-pointer register x29, and the
+ *        low 64 bits of d8-d15 (AAPCS64 only requires the bottom half of
+ *        v8-v15 preserved, not the full 128-bit q-register).
+ *    Every set follows the identical technique this file always used: a
+ *    `noinline` leaf function reads the CURRENT contents of exactly those
+ *    registers, on the strength of the calling convention's own callee-saved
+ *    contract (any frame between the true root and this read that needed one
+ *    of these registers for itself must have already spilled the original
+ *    value to ITS OWN stack frame before reusing it -- and that frame is
+ *    covered by root 2 below). Porting to a fourth ABI means adding a fourth
+ *    `TURF_GC_REGCAP_*` branch with THAT ABI's own callee-saved register
+ *    list, not a configuration flag.
  * 2. The stack range [current SP, stack base) -- conservative, word-by-word.
  *    `g_stack_base` is captured once, in `turf_gc_record_stack_base()`
  *    (called from turf_rt_init(), before a single line of Turf-level `main`
@@ -62,10 +84,13 @@
  * ─── Why a value found in a register/stack word during the FIRST pass
  * (the just-allocated block still only live in turf_rt_alloc's own local,
  * see turf_rt_collect()'s allocation-pressure ordering, turfrt.h) survives
- * correctly: by the x86-64 SysV ABI, calling a function (turf_rt_collect())
- * obligates the CALLER to have already spilled to the stack, or kept in a
- * callee-saved register, anything it needs to survive that call -- either
- * way this file's own scan (stack range + callee-saved registers) finds it.
+ * correctly: by the target's own calling convention, calling a function
+ * (turf_rt_collect()) obligates the CALLER to have already spilled to the
+ * stack, or kept in a callee-saved register, anything it needs to survive
+ * that call -- either way this file's own scan (stack range + callee-saved
+ * registers) finds it. True of every ABI this file implements, not only
+ * x86-64 SysV -- the argument only depends on "callee-saved register
+ * contents survive an intervening call", which every one of them promises.
  */
 
 #include "turfrt.h"
@@ -76,10 +101,58 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if !defined(__x86_64__)
-#error "turfrt_gc.c's register-scanning path (gc_capture_callee_saved) is \
-implemented for x86-64 System V only -- porting notes in \
-docs/development/changes/MEM-002.md's Known pitfalls."
+/*
+ * ─── Platform dispatch (OVH-013) ───────────────────────────────────────
+ * Two independent axes, each resolved once here and used by name (never by
+ * re-testing the underlying macro) for the rest of the file:
+ *   - TURF_GC_REGCAP_* picks gc_capture_callee_saved()'s register set/asm
+ *     and TURF_GC_REGCAP_WORDS, its output size in `uintptr_t` words.
+ *   - TURF_GC_STACKBASE_* picks turf_gc_record_stack_base()'s OS query.
+ * A target this file has no branch for is a hard #error, not a silent
+ * fallback -- an unported architecture must fail to BUILD, never build and
+ * silently under-scan (a use-after-free, exactly OVH-001's failure mode).
+ */
+#if defined(_WIN32)
+#define TURF_GC_STACKBASE_WIN32 1
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602 /* Windows 8+: GetCurrentThreadStackLimits */
+#endif
+#include <windows.h>
+#if defined(__x86_64__) || defined(_M_X64)
+#define TURF_GC_REGCAP_WIN64 1
+#define TURF_GC_REGCAP_WORDS 28 /* 8 GPRs + 10 xmm x 2 words each */
+#else
+#error "turfrt_gc.c's register-scanning path has no Windows implementation \
+for this architecture (Win64/x86-64 only) -- see \
+docs/planning/OVERHAUL_REMAINING_WORK.md OVH-013."
+#endif
+#elif defined(__APPLE__)
+#define TURF_GC_STACKBASE_APPLE 1
+#include <pthread.h>
+#if defined(__aarch64__)
+#define TURF_GC_REGCAP_AAPCS64 1
+#define TURF_GC_REGCAP_WORDS 19 /* x19-x28, x29, d8-d15 */
+#else
+#error "turfrt_gc.c's register-scanning path has no macOS implementation \
+for this architecture (arm64/AAPCS64 only) -- see \
+docs/planning/OVERHAUL_REMAINING_WORK.md OVH-013."
+#endif
+#else
+#define TURF_GC_STACKBASE_PROCFS 1
+#if defined(__x86_64__)
+#define TURF_GC_REGCAP_SYSV64 1
+#define TURF_GC_REGCAP_WORDS 6 /* rbx, rbp, r12-r15 */
+#elif defined(__aarch64__)
+#define TURF_GC_REGCAP_AAPCS64 1
+#define TURF_GC_REGCAP_WORDS 19 /* x19-x28, x29, d8-d15 */
+#else
+#error "turfrt_gc.c's register-scanning path (gc_capture_callee_saved) has \
+no implementation for this architecture/OS combination -- porting notes in \
+docs/planning/OVERHAUL_REMAINING_WORK.md's OVH-013."
+#endif
 #endif
 
 /* ─── Block table ────────────────────────────────────────────────────── */
@@ -168,13 +241,31 @@ static void gc_arr_grow(void **arr, size_t *cap, size_t elem_size,
  * no stale-capture hazard there, only here, where the value is captured
  * exactly ONCE for the whole process.)
  *
- * The fix: query the OS for the thread's REAL stack region (Linux-
- * specific -- this codebase already targets glibc/Linux primarily, e.g.
- * net.tr's Linux-numbered socket constants, mem.tr's
- * malloc_usable_size()), which is fixed at thread-creation time and stays
- * correct regardless of current call depth.
+ * The fix: query the OS for the thread's REAL stack region, which is fixed
+ * at thread-creation time and stays correct regardless of current call
+ * depth. OVH-013 (docs/planning/OVERHAUL_REMAINING_WORK.md) added the
+ * `TURF_GC_STACKBASE_APPLE`/`TURF_GC_STACKBASE_WIN32` branches below
+ * alongside the original Linux `/proc/self/maps` query -- each queries the
+ * one OS API that answers this same question on its own platform:
+ * `pthread_get_stackaddr_np` (macOS) and `GetCurrentThreadStackLimits`
+ * (Windows) are that platform's own stated way to get a thread's stack
+ * bounds, the same relationship `/proc/self/maps`'s "[stack]" mapping has
+ * to Linux.
  */
 void turf_gc_record_stack_base(void) {
+#if defined(TURF_GC_STACKBASE_APPLE)
+  /* Highest address of the CURRENT thread's stack -- the stack grows down
+   * from here, exactly the semantics `g_stack_base` needs (same convention
+   * as the Linux "[stack]" mapping's high end, below). */
+  g_stack_base = (uintptr_t)pthread_get_stackaddr_np(pthread_self());
+#elif defined(TURF_GC_STACKBASE_WIN32)
+  ULONG_PTR low_limit = 0, high_limit = 0;
+  GetCurrentThreadStackLimits(&low_limit, &high_limit);
+  /* HighLimit is the stack's base (its highest address, since the stack
+   * grows down toward LowLimit) -- MSDN's own naming for exactly the value
+   * this function returns everywhere else. */
+  g_stack_base = (uintptr_t)high_limit;
+#else
   FILE *f = fopen("/proc/self/maps", "r");
   if (f) {
     char line[512];
@@ -189,11 +280,13 @@ void turf_gc_record_stack_base(void) {
     }
     fclose(f);
   }
+#endif
   if (g_stack_base == 0) {
-    /* /proc unavailable (a minimal container/sandbox without procfs) --
-     * degrade to the call-depth-dependent local-variable capture rather
-     * than scanning nothing at all. Known pitfall, not silently accepted
-     * as equivalent: see docs/development/changes/MEM-002.md. */
+    /* The platform query above found nothing (e.g. /proc unavailable in a
+     * minimal container/sandbox without procfs) -- degrade to the
+     * call-depth-dependent local-variable capture rather than scanning
+     * nothing at all. Known pitfall, not silently accepted as equivalent:
+     * see docs/development/changes/MEM-002.md. */
     int marker;
     g_stack_base = (uintptr_t)&marker;
   }
@@ -407,9 +500,14 @@ void turf_rt_unpin(void *p) {
 }
 
 /* See this file's top comment: NOT setjmp-based, because glibc's jmp_buf
- * pointer-mangles saved registers on this platform. */
+ * (and the Microsoft/Apple libc equivalents) pointer-mangle or otherwise
+ * transform saved register values in ways that defeat treating them as
+ * plain addresses. One branch per `TURF_GC_REGCAP_*` selected above --
+ * each writes exactly that ABI's own callee-saved register set into
+ * `regs[0 .. TURF_GC_REGCAP_WORDS)`, nothing more. */
 __attribute__((noinline)) static void
-gc_capture_callee_saved(uintptr_t regs[6]) {
+gc_capture_callee_saved(uintptr_t regs[TURF_GC_REGCAP_WORDS]) {
+#if defined(TURF_GC_REGCAP_SYSV64)
   __asm__ volatile("movq %%rbx, %0\n\t"
                     "movq %%rbp, %1\n\t"
                     "movq %%r12, %2\n\t"
@@ -420,6 +518,84 @@ gc_capture_callee_saved(uintptr_t regs[6]) {
                       "=m"(regs[3]), "=m"(regs[4]), "=m"(regs[5])
                     :
                     : "memory");
+#elif defined(TURF_GC_REGCAP_WIN64)
+  /* Win64's callee-saved set is SysV's PLUS rdi/rsi (volatile under SysV,
+   * nonvolatile here) PLUS the full 128 bits of xmm6-xmm15 (SysV has no
+   * callee-saved XMM registers at all) -- see this file's top comment. */
+  __asm__ volatile("movq %%rbx, %0\n\t"
+                    "movq %%rbp, %1\n\t"
+                    "movq %%rdi, %2\n\t"
+                    "movq %%rsi, %3\n\t"
+                    "movq %%r12, %4\n\t"
+                    "movq %%r13, %5\n\t"
+                    "movq %%r14, %6\n\t"
+                    "movq %%r15, %7\n\t"
+                    : "=m"(regs[0]), "=m"(regs[1]), "=m"(regs[2]),
+                      "=m"(regs[3]), "=m"(regs[4]), "=m"(regs[5]),
+                      "=m"(regs[6]), "=m"(regs[7])
+                    :
+                    : "memory");
+  /* `movq`/`movhps` extract an xmm register's low/high 64 bits -- both
+   * baseline SSE1/SSE2 instructions guaranteed on any x86-64 CPU, chosen
+   * over SSE4.1's `pextrq` specifically so this does not silently require
+   * a newer CPU feature than Win64 itself already mandates. */
+  __asm__ volatile("movq   %%xmm6,  %0\n\t"  "movhps %%xmm6,  %1\n\t"
+                    "movq   %%xmm7,  %2\n\t"  "movhps %%xmm7,  %3\n\t"
+                    "movq   %%xmm8,  %4\n\t"  "movhps %%xmm8,  %5\n\t"
+                    "movq   %%xmm9,  %6\n\t"  "movhps %%xmm9,  %7\n\t"
+                    "movq   %%xmm10, %8\n\t"  "movhps %%xmm10, %9\n\t"
+                    "movq   %%xmm11, %10\n\t" "movhps %%xmm11, %11\n\t"
+                    "movq   %%xmm12, %12\n\t" "movhps %%xmm12, %13\n\t"
+                    "movq   %%xmm13, %14\n\t" "movhps %%xmm13, %15\n\t"
+                    "movq   %%xmm14, %16\n\t" "movhps %%xmm14, %17\n\t"
+                    "movq   %%xmm15, %18\n\t" "movhps %%xmm15, %19\n\t"
+                    : "=m"(regs[8]),  "=m"(regs[9]),
+                      "=m"(regs[10]), "=m"(regs[11]),
+                      "=m"(regs[12]), "=m"(regs[13]),
+                      "=m"(regs[14]), "=m"(regs[15]),
+                      "=m"(regs[16]), "=m"(regs[17]),
+                      "=m"(regs[18]), "=m"(regs[19]),
+                      "=m"(regs[20]), "=m"(regs[21]),
+                      "=m"(regs[22]), "=m"(regs[23]),
+                      "=m"(regs[24]), "=m"(regs[25]),
+                      "=m"(regs[26]), "=m"(regs[27])
+                    :
+                    : "memory");
+#elif defined(TURF_GC_REGCAP_AAPCS64)
+  __asm__ volatile("str x19, %0\n\t"
+                    "str x20, %1\n\t"
+                    "str x21, %2\n\t"
+                    "str x22, %3\n\t"
+                    "str x23, %4\n\t"
+                    "str x24, %5\n\t"
+                    "str x25, %6\n\t"
+                    "str x26, %7\n\t"
+                    "str x27, %8\n\t"
+                    "str x28, %9\n\t"
+                    "str x29, %10\n\t"
+                    : "=m"(regs[0]), "=m"(regs[1]), "=m"(regs[2]),
+                      "=m"(regs[3]), "=m"(regs[4]), "=m"(regs[5]),
+                      "=m"(regs[6]), "=m"(regs[7]), "=m"(regs[8]),
+                      "=m"(regs[9]), "=m"(regs[10])
+                    :
+                    : "memory");
+  /* AAPCS64 only requires the LOW 64 bits of v8-v15 preserved (the "d"
+   * register view), not the full 128-bit "q"/"v" view -- storing more
+   * would read bits the callee is free to have clobbered. */
+  __asm__ volatile("str d8,  %0\n\t"
+                    "str d9,  %1\n\t"
+                    "str d10, %2\n\t"
+                    "str d11, %3\n\t"
+                    "str d12, %4\n\t"
+                    "str d13, %5\n\t"
+                    "str d14, %6\n\t"
+                    "str d15, %7\n\t"
+                    : "=m"(regs[11]), "=m"(regs[12]), "=m"(regs[13]),
+                      "=m"(regs[14]), "=m"(regs[15]), "=m"(regs[16]),
+                      "=m"(regs[17]), "=m"(regs[18])
+                    :
+                    : "memory");
+#endif
 }
 
 typedef struct Worklist {
@@ -487,9 +663,9 @@ static void gc_mark(void) {
 
   Worklist wl = {0};
 
-  uintptr_t regs[6];
+  uintptr_t regs[TURF_GC_REGCAP_WORDS];
   gc_capture_callee_saved(regs);
-  for (int i = 0; i < 6; i++)
+  for (int i = 0; i < TURF_GC_REGCAP_WORDS; i++)
     gc_consider_root(regs[i], &wl);
 
   int marker;
