@@ -1,0 +1,72 @@
+// Regression test: OVH-006 (docs/planning/OVERHAUL_REMAINING_WORK.md), the
+// `mem::Pool<T>.free_all()` shape STD-003 (docs/development/changes/STD-003.md,
+// "What this fix does NOT reach") disclosed as unfixable at the time.
+//
+// STD-003 tried making `mem::Pool<T>`'s free_pool a genuine generic method
+// (`fn<T> Pool.free_all(): void { free(self.items[i]); }`, using the
+// original file's bare, unqualified `free` -- this test instead qualifies
+// every call as `mem::free`/`mem::malloc` since it imports `mem` by name,
+// not by path, and picks up no bare aliases) and found it rejected with
+// "No overload of 'free' matches argument types (T)" --
+// NOT a cast-legality problem (STD-003's own fix), but because
+// `self.items`'s type, inside a generic method's template body, resolved
+// through GlobalSymbolTable's registered TurfStructType for the struct: a
+// SEPARATE, stale copy of the struct's fields that never got the
+// NamedType("T") -> TurfGenericParamType("T") substitution
+// Resolver::visitStructDecl() applies to the AST node itself. `free(p:
+// void*)`'s ordinary argument-compatibility check has the Rule 1 bypass
+// for a genuine TurfGenericParamType (typesCompatible(), Types.cpp) --
+// but never got the chance to apply it, because the argument type it saw
+// was the stale NamedType("T") instead. Deliberately self-contained (a
+// user-defined struct, not `mem::Pool<T>` itself) -- see this session's
+// own change record for why `mem.tr` isn't touched.
+unsafe module;
+
+import test;
+import mem;
+
+struct MiniPool<T> {
+    items: T*,
+    len: int,
+    cap: int
+}
+
+fn<T> MiniPool.track(item: T): void {
+    if self.len == self.cap {
+        self.cap = 4;
+        self.items = mem::malloc(self.cap * sizeof(T)) to T*;
+    }
+    self.items[self.len] = item;
+    self.len = self.len + 1;
+}
+
+// The exact shape STD-003 tried and found rejected: a generic method
+// freeing every tracked (pointer-typed) element through the ordinary,
+// concrete `free(p: void*)`, with no explicit cast.
+fn<T> MiniPool.free_all(): void {
+    mut i: int = 0;
+    while i < self.len {
+        mem::free(self.items[i]);
+        i = i + 1;
+    }
+    if self.items != null {
+        mem::free(self.items to void*);
+    }
+    self.items = null;
+    self.len = 0;
+    self.cap = 0;
+}
+
+fn main(): int {
+    mut p: MiniPool<void*> = MiniPool::default();
+    mut a: void* = mem::malloc(8);
+    mut b: void* = mem::malloc(8);
+    p.track(a);
+    p.track(b);
+    test::assert(p.len == 2, "MiniPool<void*> should be tracking 2 allocations");
+
+    p.free_all();
+    test::assert(p.len == 0, "MiniPool<void*>.free_all() should reset len to 0");
+
+    return 0;
+}

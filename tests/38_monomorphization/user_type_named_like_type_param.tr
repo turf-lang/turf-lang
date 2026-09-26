@@ -1,0 +1,98 @@
+// Regression test: OVH-006 (docs/planning/OVERHAUL_REMAINING_WORK.md) --
+// a user struct named the same as a stdlib generic's own type parameter
+// (`T`, `K`, `V`, `U`) used to break EVERY generic in the program, not just
+// the colliding one.
+//
+// Root cause: GlobalSymbolTable's registered TurfStructType for a generic
+// struct (e.g. List<T>) is built once at PARSE time, directly from the
+// as-parsed fields -- a SEPARATE object from the StructDeclExprAST AST node
+// Resolver::visitStructDecl() rewrites in place (NamedType("T") ->
+// TurfGenericParamType("T")). Before this fix, nothing propagated that
+// rewrite back into GlobalSymbolTable, so the registered struct's fields
+// stayed permanently NamedType("T") -- and every consumer that needed to
+// tell "T is this struct's own open type parameter" apart from "T is some
+// registered type" did so with a name-lookup heuristic ("not registered =>
+// must be a generic param"), which broke the instant an unrelated struct
+// happened to be declared under that exact name. Confirmed live before this
+// fix: `struct T { x: int }` alongside `import list::List;` made
+// `l.pop()` on a `List<int>` report its own return type as the user's
+// struct `T`, not `int` ("Return type mismatch: function declares 'int'
+// but returns 'T'", raised INSIDE list.tr, at the library's own `return
+// self.data[i];`).
+//
+// This test declares a colliding user struct for every single-letter name
+// this codebase's generic collections actually use (T, K, V, U) and drives
+// every affected collection plus a user-defined generic free function and
+// a user-defined generic method through them, in the SAME program.
+import list::List;
+import map::Map;
+import set::Set;
+import stack::Stack;
+import queue::Queue;
+import test;
+import strings;
+
+struct T { x: int }
+struct K { y: int }
+struct V { z: int }
+struct U { w: int }
+
+fn<T> identity(v: T): T { return v; }
+
+struct Box<T> { v: T }
+fn<T> Box.get(): T { return self.v; }
+
+fn main(): int {
+    // Struct T colliding with List<T>/Stack<T>/Queue<T>/Set<T>'s own "T".
+    mut l: List<int> = List::default();
+    l.push(5);
+    l.push(7);
+    test::assert(l.pop() == 7, "List<int>.pop() should return 7, not the user struct 'T'");
+    test::assert(l.pop() == 5, "List<int>.pop() should return 5 after the first pop");
+
+    mut s: Stack<int> = Stack::default();
+    s.push(11);
+    test::assert(s.pop() == 11, "Stack<int>.pop() should return 11, not the user struct 'T'");
+
+    mut q: Queue<int> = Queue::default();
+    q.enqueue(13);
+    test::assert(q.dequeue() == 13, "Queue<int>.dequeue() should return 13, not the user struct 'T'");
+
+    mut st: Set<int> = Set::default();
+    st.add(17);
+    test::assert(st.contains(17), "Set<int>.contains(17) should still be true");
+
+    // Struct K and V colliding with Map<K, V>'s own type parameters.
+    // Key built at runtime (INV-TEST-1, tests/38_monomorphization/README.md):
+    // never compare two identical string literals, since the linker may
+    // fold them to the same pointer and hide the K==K dispatch this test
+    // exists to exercise.
+    mut m: Map<string, int> = Map::default();
+    m.put("hello", 42);
+    immut key: string = strings::trim(" hello "); // content-equal to "hello", separate allocation (INV-TEST-1)
+    test::assert(m.get(key) == 42, "Map<string, int>.get() should return 42, not the user struct 'V'");
+
+    // Struct U colliding with a user-defined generic free function's own
+    // type parameter.
+    test::assert(identity(9) == 9, "identity<int>(9) should return 9, not the user struct 'U'");
+    test::assert(identity("hi") == "hi", "identity<string>(\"hi\") should return \"hi\"");
+
+    // A user-defined generic struct + method, same collision shape as the
+    // stdlib collections above, to prove this isn't stdlib-specific.
+    mut b: Box<int> = Box::default();
+    b.v = 100;
+    test::assert(b.get() == 100, "Box<int>.get() should return 100, not the user struct 'T'");
+
+    // The colliding structs themselves must still work as ordinary structs.
+    mut tv: T = T::default();
+    tv.x = 1;
+    mut kv: K = K::default();
+    kv.y = 2;
+    mut vv: V = V::default();
+    vv.z = 3;
+    mut uv: U = U::default();
+    uv.w = 4;
+    test::assert(tv.x + kv.y + vv.z + uv.w == 10, "the colliding structs T/K/V/U must still work as ordinary structs");
+
+    return 0;
+}
