@@ -1,9 +1,9 @@
 // A tiny in-memory key-value store, served over TCP -- a miniature
-// Redis-shaped service written entirely in Turf. Combines four separate
-// stdlib pieces (net, list, strings, mem) the way a real small service
-// would: state held in a generic collection, a hand-rolled text protocol
-// parsed with string primitives, network I/O via the net module, entries
-// heap-allocated via the mem module. No `extern fn` anywhere in this file.
+// Redis-shaped service written entirely in Turf. Combines three separate
+// stdlib pieces (net, list, strings) the way a real small service would:
+// state held in a generic collection, a hand-rolled text protocol parsed
+// with string primitives, network I/O via the net module. No `extern fn`
+// anywhere in this file.
 //
 // Protocol: one command per connection (connect, send one line, get one
 // line back, connection closes) -- kept simple deliberately; see
@@ -19,48 +19,42 @@
 //   ./kv_store_client SET name Turf
 //   ./kv_store_client GET name
 //
-// Two things worth knowing if you're using this file as a reference for
+// One thing worth knowing if you're using this file as a reference for
 // your own generic-collection-of-structs code:
 //
-// 1. The store is `List<Entry*>` (a list of POINTERS to heap-allocated
-//    Entry structs), not `List<Entry>` directly. Turf's generics use type
-//    erasure -- every element of a `List<T>` is assumed to fit in one
-//    8-byte slot (an int, a double, a pointer). `Entry` itself is 16 bytes
-//    (two string fields), which doesn't fit that assumption; a pointer to
-//    one always does, regardless of the pointee's size. Confirmed live:
-//    `List<Entry>` (by value) crashed the whole compiler trying to pass a
-//    16-byte struct value into `push(item: T)`'s type-erased (8-byte,
-//    pointer-shaped) parameter.
+// The per-connection handling is inlined directly in main()'s accept loop
+// instead of factored into its own `handle(conn, store)` function. Passing
+// `store: List<Entry>` to a helper function would pass the LIST STRUCT
+// itself by value, so a `.push()` inside that helper (which can reallocate
+// the list's backing buffer and update its own `len`/`cap`/`data` fields)
+// would only mutate the helper's own copy -- the very next connection
+// would see the store exactly as it was before that push, silently losing
+// every write. Confirmed live while first writing this file with a
+// `handle()` helper. Keeping the mutation in the same scope as the `mut
+// store` declaration sidesteps the whole problem. (`&store` -- the safe-
+// reference operator -- doesn't fix this either: `.push()` needs a
+// genuinely mutable receiver to persist a reallocation, which this
+// language's method-call ABI already gives `self` for an ordinary by-value
+// struct parameter passed to a method; the constraint here is about a
+// HELPER FUNCTION's own by-value parameter losing later mutations, an
+// unrelated shape.)
 //
-// 2. The per-connection handling is inlined directly in main()'s accept
-//    loop instead of factored into its own `handle(conn, store)` function.
-//    Passing `store: List<Entry*>` to a helper function would pass the
-//    LIST STRUCT itself by value, so a `.push()` inside that helper (which
-//    can reallocate the list's backing buffer and update its own
-//    `len`/`cap`/`data` fields) would only mutate the helper's own copy --
-//    the very next connection would see the store exactly as it was
-//    before that push, silently losing every write. Confirmed live while
-//    first writing this file with a `handle()` helper. Keeping the
-//    mutation in the same scope as the `mut store` declaration sidesteps
-//    the whole problem. (`&store` -- issue #238's safe-reference operator
-//    -- doesn't fix this either: `.push()` needs a genuinely mutable
-//    receiver to persist a reallocation, which this language's method-call
-//    ABI already gives `self` for an ordinary by-value struct parameter
-//    passed to a method; the constraint here is about a HELPER FUNCTION's
-//    own by-value parameter losing later mutations, an unrelated shape.)
-//
-// 3. Every `Entry*`/raw-pointer access below (`store.data[i]`, `mem::alloc`)
-//    is wrapped in `unsafe { }` per issue #238 -- Entry* is a genuinely
-//    nullable raw pointer (List<Entry*> stores pointers precisely because
-//    Entry doesn't fit the type-erased 8-byte element slot, see point 1
-//    above), and `&T` can't replace it here for the same reason a linked
-//    list's `next` field can't become `&T` (see
-//    tests/06_structs/12_address_of_operator.tr's comment).
+// `store` is `List<Entry>` **by value**, not `List<Entry*>` (OVH-002,
+// `docs/planning/OVERHAUL_REMAINING_WORK.md`) -- an earlier version of
+// this file individually heap-boxed each `Entry` with `mem::alloc(16)`,
+// under the same stale "structs over 8 bytes can't go in a generic
+// collection by value" belief `lib/std/json/json.tr`'s own OVH-002 comment
+// describes and corrects (monomorphization made it false; the box was
+// also a live GC-safety gap, since each boxed Entry's `key`/`value`
+// GC-heap string pointers lived only inside untraced manual memory,
+// F-MEM-3). No `unsafe { }` is needed anywhere in this file any more
+// either: `store.data[idx]` now yields an `Entry` by value directly, so
+// `.key`/`.value` field access on it is ordinary struct field access, not
+// a dereference through a raw `Entry*` base.
 
 import io;
 import net;
 import strings;
-import mem;
 import list::List;
 
 struct Entry {
@@ -74,12 +68,10 @@ struct Entry {
 // actually needs. There's no Map<K,V> in the standard library yet (see
 // docs/planning/STDLIB_ROADMAP.md) -- this linear scan is the honest
 // current alternative for a small store like this one.
-fn findIndex(store: List<Entry*>, key: string): int {
+fn findIndex(store: List<Entry>, key: string): int {
     mut i: int = 0;
     while i < store.length() {
-        // store.data[i] is a raw Entry*; `.key` through it is a gated
-        // "dereference" (issue #238).
-        if unsafe { store.data[i].key; } == key {
+        if store.data[i].key == key {
             return i;
         }
         i = i + 1;
@@ -88,7 +80,7 @@ fn findIndex(store: List<Entry*>, key: string): int {
 }
 
 fn main(): int {
-    mut store: List<Entry*> = List::default();
+    mut store: List<Entry> = List::default();
     mut server: net::TcpListener = net::TcpListener::bind(8181) recover run {
         io::printline("Could not start the store -- is port 8181 already in use?");
         return 1;
@@ -115,9 +107,7 @@ fn main(): int {
             if cmd == "GET" {
                 immut idx: int = findIndex(store, rest);
                 if idx >= 0 {
-                    // store.data[idx] is a raw Entry*; `.value` through it
-                    // is a gated "dereference" (issue #238).
-                    conn.write(unsafe { store.data[idx].value; } + "\n");
+                    conn.write(store.data[idx].value + "\n");
                 } else {
                     conn.write("NOT_FOUND\n");
                 }
@@ -130,20 +120,12 @@ fn main(): int {
                     immut value: string = strings::substring(rest, secondSpace + 1, strings::length(rest));
                     immut idx: int = findIndex(store, key);
                     if idx >= 0 {
-                        unsafe {
-                            store.data[idx].value = value;
-                        }
+                        store.data[idx].value = value;
                     } else {
-                        // mem::alloc()'s raw pointer result needs
-                        // `unsafe { }` to bind to a caller-side local, and
-                        // writing `.key`/`.value` THROUGH the raw `Entry*`
-                        // base `e` is the same gated dereference as above.
-                        unsafe {
-                            mut e: Entry* = mem::alloc(16) to Entry*;
-                            e.key = key;
-                            e.value = value;
-                            store.push(e);
-                        }
+                        mut e: Entry = Entry::default();
+                        e.key = key;
+                        e.value = value;
+                        store.push(e);
                     }
                     conn.write("OK\n");
                 }
