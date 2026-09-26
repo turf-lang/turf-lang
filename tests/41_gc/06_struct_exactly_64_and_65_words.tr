@@ -1,0 +1,85 @@
+// tests/41_gc/06_struct_exactly_64_and_65_words.tr
+// OVH-001 (docs/planning/OVERHAUL_REMAINING_WORK.md): the exact boundary of
+// the OLD (now-removed) fixed 64-word TurfTypeDesc bitmap cap. The old
+// `gc_scan_block_precise()` loop capped `max_word` at 64, so word index 63
+// (`w < 64` still includes 63) was always traced correctly, but word index
+// 64 (the FIRST index the old `w < 64` loop never reached) was always
+// silently dropped -- a one-word-wide blind spot exactly at the boundary.
+//
+// `At63` (64 words total, pointer field last, at word 63) is therefore a
+// POSITIVE CONTROL: it must keep passing even under the old cap, so if this
+// test alone regressed while 05_large_struct_element_tracing.tr also
+// regressed, that would point at a general tracing break, not specifically
+// the cap. `At64` (65 words total, pointer field last, at word 64) is the
+// actual boundary reproducer -- it is the smallest possible struct that the
+// old cap ever silently mis-traced.
+
+import list::List;
+import strings;
+import test;
+import io;
+
+struct At63 {
+    f0: int, f1: int, f2: int, f3: int, f4: int, f5: int, f6: int, f7: int, f8: int, f9: int, f10: int, f11: int, f12: int, f13: int, f14: int, f15: int, f16: int, f17: int, f18: int, f19: int, f20: int, f21: int, f22: int, f23: int, f24: int, f25: int, f26: int, f27: int, f28: int, f29: int, f30: int, f31: int, f32: int, f33: int, f34: int, f35: int, f36: int, f37: int, f38: int, f39: int, f40: int, f41: int, f42: int, f43: int, f44: int, f45: int, f46: int, f47: int, f48: int, f49: int, f50: int, f51: int, f52: int, f53: int, f54: int, f55: int, f56: int, f57: int, f58: int, f59: int, f60: int, f61: int, f62: int,
+    tail: string
+}
+
+struct At64 {
+    f0: int, f1: int, f2: int, f3: int, f4: int, f5: int, f6: int, f7: int, f8: int, f9: int, f10: int, f11: int, f12: int, f13: int, f14: int, f15: int, f16: int, f17: int, f18: int, f19: int, f20: int, f21: int, f22: int, f23: int, f24: int, f25: int, f26: int, f27: int, f28: int, f29: int, f30: int, f31: int, f32: int, f33: int, f34: int, f35: int, f36: int, f37: int, f38: int, f39: int, f40: int, f41: int, f42: int, f43: int, f44: int, f45: int, f46: int, f47: int, f48: int, f49: int, f50: int, f51: int, f52: int, f53: int, f54: int, f55: int, f56: int, f57: int, f58: int, f59: int, f60: int, f61: int, f62: int, f63: int,
+    tail: string
+}
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 11;
+        i = i + 1;
+    }
+    mut sum: int = 0;
+    i = 0;
+    while i < 64 {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    test::assert(sum == 22176, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn build63(): List<At63> {
+    mut l: List<At63> = List::default();
+    mut a: At63 = At63::default();
+    a.tail = strings::repeat("x", 40);
+    l.push(a);
+    return l;
+}
+
+fn build64(): List<At64> {
+    mut l: List<At64> = List::default();
+    mut a: At64 = At64::default();
+    a.tail = strings::repeat("y", 40);
+    l.push(a);
+    return l;
+}
+
+fn main(): int {
+    mut l63: List<At63> = build63();
+    mut l64: List<At64> = build64();
+
+    churn(24);
+    gc_collect();
+    churn(24);
+    gc_collect();
+
+    test::assert(strings::length(l63.data[0].tail) == 40, "At63 (pointer at word 63): survives with correct length");
+    test::assert(strings::starts_with(l63.data[0].tail, "x"), "At63: content survives");
+
+    test::assert(strings::length(l64.data[0].tail) == 40, "At64 (pointer at word 64, the old cap's boundary): survives with correct length");
+    test::assert(strings::starts_with(l64.data[0].tail, "y"), "At64: content survives -- OVH-001's boundary reproducer");
+
+    io::printline("41/06 PASS: struct with a pointer field exactly at word 63 and exactly at word 64 both traced correctly");
+    return 0;
+}
