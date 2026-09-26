@@ -33,6 +33,7 @@ record does; `status` tracks the record, not the branch.
 | OVH-002 | GC pointers hidden in untraced manual-heap memory | landed | 2026-09-26 | 2026-09-26 | stdlib (`json.tr`), showcase (`kv_store_server.tr`), Codegen (`CodegenCore.cpp`, `CodegenStruct.cpp`, `CodegenExpr.cpp`), new `scripts/check_boundary.sh` checks, tests, documentation | [OVH-002](changes/OVH-002.md) |
 | OVH-003 | Raw-pointer indexing is ungated in safe code; no safe generic element access | landed | 2026-09-26 | 2026-09-26 | TypeChecker (`TypeCheckerCall.cpp`), Codegen (`CodegenStruct.cpp`, `CodegenCore.cpp` — two independent latent bugs found+fixed), stdlib (`list.tr`, `json.tr`, `http.tr`), showcase (`kv_store_server.tr`), tests, documentation | [OVH-003](changes/OVH-003.md) |
 | OVH-004 | By-value cycle through a generic instantiation segfaults the compiler | landed | 2026-09-26 | 2026-09-26 | Resolver (`ResolverCore.cpp` — `byValueEdgeTarget()`), tests, documentation | [OVH-004](changes/OVH-004.md) |
+| OVH-009 | `>>` closing nested generic arguments is a parse error | landed | 2026-09-26 | 2026-09-26 | Parser (`ParserCore.cpp` — `ParseType()`), tests, documentation | [OVH-009](changes/OVH-009.md) |
 
 ## How to use this directory
 
