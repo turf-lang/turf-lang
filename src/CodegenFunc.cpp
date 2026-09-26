@@ -87,7 +87,7 @@ void ResetArgvHelpers() {
 // Looks up an already-declared `extern fn Name` (os.tr's TurfRuntimeGetArgc/
 // TurfRuntimeGetArgv, created bodyless during the pre-pass) and reuses it,
 // or creates a fresh prototype if none exists yet -- same lookup-or-create
-// shape as getOrCreateMallocFn()/getOrCreateStrcmpFn() (CodegenCore.cpp),
+// shape as getOrCreateTurfRtAllocFn()/getOrCreateStrcmpFn() (CodegenCore.cpp),
 // specialized here because these two also need the conflicting-signature
 // guard below (mirrors ExternFuncDeclExprAST::codegen()'s own check, just
 // against Codegen's own synthesized definition instead of another extern).

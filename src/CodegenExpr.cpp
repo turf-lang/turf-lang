@@ -815,15 +815,24 @@ Value *CastExprAST::codegen() {
     return Builder->CreateCall(StrtodF, {Val, NullPtr}, "strtod_res");
   }
 
-  // int → string : snprintf into a heap-allocated buffer.
+  // int → string : snprintf into a GC-heap-allocated buffer.
   //
   // BUG FIX (was: TmpB.CreateAlloca):
   //   The previous implementation used alloca which places the buffer on the
   //   current function's stack frame. When this value is returned from a
   //   function (e.g. `fn make_label(n: int): string { return n to string; }`)
   //   the caller receives a pointer into a dead stack frame — silent UB.
-  //   We now use malloc(32) so the buffer lives on the heap and survives the
-  //   function return. The caller is responsible for freeing (no GC yet).
+  //   We now use turf_rt_alloc(32, NULL) so the buffer lives on the GC heap
+  //   and survives the function return.
+  //
+  // OVH-002 follow-up (docs/planning/OVERHAUL_REMAINING_WORK.md): this used
+  // to be a bare `malloc(32)` -- never registered with the collector, so a
+  // `string` this cast produced was permanently invisible to gc_collect(),
+  // contradicting FREEZE.md §6.5 ("string values produced by any operation"
+  // belong on the GC heap) and leaking forever rather than being reclaimed
+  // once unreachable. `desc == NULL` is correct here, not a placeholder --
+  // this buffer holds raw formatted digits, never an outgoing pointer,
+  // exactly like strings.tr's/io.tr's own raw byte buffers.
   if (SrcName == "int" && DstName == "string") {
     Function *SnprintfF = TheModule->getFunction("snprintf");
     if (!SnprintfF) {
@@ -834,26 +843,22 @@ Value *CastExprAST::codegen() {
       SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
                                    TheModule.get());
     }
-    Function *MallocF = TheModule->getFunction("malloc");
-    if (!MallocF) {
-      FunctionType *FT =
-          FunctionType::get(PointerType::get(*TheContext, 0),
-                            {Type::getInt64Ty(*TheContext)}, false);
-      MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
-                                 TheModule.get());
-    }
     Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
-    Value *Buf = Builder->CreateCall(MallocF, {BufSize}, "int_to_str_buf");
+    Value *NullDesc = ConstantPointerNull::get(PointerType::get(*TheContext, 0));
+    Value *Buf = Builder->CreateCall(getOrCreateTurfRtAllocFn(), {BufSize, NullDesc}, "int_to_str_buf");
     Value *Fmt = Builder->CreateGlobalString("%lld", "intfmt");
     Builder->CreateCall(SnprintfF, {Buf, BufSize, Fmt, Val}, "snprintf_int");
     return Buf;
   }
 
-  // double → string : snprintf into a heap-allocated buffer.
+  // double → string : snprintf into a GC-heap-allocated buffer.
   //
   // BUG FIX (was: TmpB.CreateAlloca):
   //   Same root cause as int → string above. Stack alloca returns dangling
-  //   pointer when the result escapes the function. Fixed with malloc(32).
+  //   pointer when the result escapes the function. Fixed with
+  //   turf_rt_alloc(32, NULL) -- see the int → string branch's own comment
+  //   (OVH-002) for why a bare `malloc` here was a real bug, not just a
+  //   style inconsistency.
   if (SrcName == "double" && DstName == "string") {
     Function *SnprintfF = TheModule->getFunction("snprintf");
     if (!SnprintfF) {
@@ -864,16 +869,9 @@ Value *CastExprAST::codegen() {
       SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
                                    TheModule.get());
     }
-    Function *MallocF = TheModule->getFunction("malloc");
-    if (!MallocF) {
-      FunctionType *FT =
-          FunctionType::get(PointerType::get(*TheContext, 0),
-                            {Type::getInt64Ty(*TheContext)}, false);
-      MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
-                                 TheModule.get());
-    }
     Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
-    Value *Buf = Builder->CreateCall(MallocF, {BufSize}, "dbl_to_str_buf");
+    Value *NullDesc = ConstantPointerNull::get(PointerType::get(*TheContext, 0));
+    Value *Buf = Builder->CreateCall(getOrCreateTurfRtAllocFn(), {BufSize, NullDesc}, "dbl_to_str_buf");
     Value *Fmt = Builder->CreateGlobalString("%g", "dblfmt");
     Builder->CreateCall(SnprintfF, {Buf, BufSize, Fmt, Val}, "snprintf_dbl");
     return Buf;
