@@ -56,7 +56,7 @@ completely separate mechanism, `NullabilityPass`, see 1.6) are checked:
 |---|---|---|
 | **Declaration** | `mutable p: ptr = ...;` | Yes |
 | **Cast** | `raw to int*` (either direction) | Yes |
-| **Dereference** (field/member access through a raw pointer base) | `p.field` where `p: Node*` | Yes |
+| **Dereference** (field/member access, or indexing, through a raw pointer base) | `p.field` where `p: Node*`; `l.data[i]` where `data: T*` (OVH-003) | Yes |
 | **Struct field** | `struct Node { next: Node* }` | Yes — the *entire* `struct { }` decl, not just later dereferences |
 
 A fifth kind of use is checked **unconditionally**, and `unsafe { }` does
@@ -681,13 +681,14 @@ top-level declaration in the same file wrongly gated (or exempt).
 `visitBlock()`'s identical "last expression's type, or void if empty"
 rule.
 
-#### 2.5.2 The four gate call sites
+#### 2.5.2 The five gate call sites
 
 | Gate | Site | What's checked |
 |---|---|---|
 | Declaration | `visitVarDecl` (`TypeCheckerDecl.cpp:76`) | The declared type |
 | Cast | `visitCast` (`TypeCheckerExpr.cpp:693-694`) | Destination type first, then operand type |
-| Dereference | `visitFieldAccess` (`TypeCheckerCall.cpp:1223`) | The base expression's type |
+| Dereference (field access) | `visitFieldAccess` (`TypeCheckerCall.cpp:1223`) | The base expression's type |
+| Dereference (indexing) | `visitArrayAccess` (`TypeCheckerCall.cpp`, OVH-003) | The base expression's type — same `self`-exemption reasoning as `visitFieldAccess`, verbatim |
 | Struct field | `visitStructDecl` (`TypeCheckerDecl.cpp:158`) | Any field's type; the struct's own `Loc` is what gets checked for exemption |
 
 The cast site is worth spelling out since it's the one place a
@@ -856,12 +857,6 @@ exactly like the `BlockExprAST` case right next to it:
 
 ### 2.7 Known gaps / deliberately out of scope
 
-- **Array-indexing through a raw pointer isn't gated.** `p[0]` where
-  `p: int*` is not treated as a "dereference" by `visitArrayAccess()` the
-  way `p.field` is by `visitFieldAccess()` — indexing into a raw
-  pointer-as-array (a common idiom, e.g. `int*` from `malloc`) works
-  identically inside or outside `unsafe { }`. Only field/member access
-  through a raw pointer base is gated.
 - **Calling a method through a raw pointer receiver isn't gated either** —
   only reading/writing a *field* through one is. `visitMethodCall()` has
   no equivalent check.
