@@ -1,0 +1,14 @@
+// OVH-005: `++`/`--` on an 'int32' lvalue must be a clean compile error,
+// never the internal-compiler-error it used to be. int32 is never itself
+// an arithmetic result type (docs/reference/variables_and_types.md
+// §int32) -- `c++` desugars to exactly the `c = c + 1` shape that
+// implicit int -> int32 narrowing already forbids, so PostfixExprAST
+// needs its own dedicated rejection rather than falling through to
+// Codegen, which used to emit an i64-width overflow-check intrinsic call
+// against a genuinely i32-typed operand (invalid LLVM IR, exit via
+// `llvm::report_fatal_error`, not a diagnosable error).
+fn main(): int {
+    mut c: int32 = 5 to int32;
+    c++;
+    return c to int;
+}
