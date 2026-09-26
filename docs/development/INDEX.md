@@ -30,6 +30,7 @@ record does; `status` tracks the record, not the branch.
 | OPT-002 | Check elimination and frontend specialization | landed | 2026-09-26 | 2026-09-26 | CFG/analysis (new `ValueRangePass::markElidableChecks()`), Codegen, AST, tests, build (`CallGraphPass` deleted) | [OPT-002](changes/OPT-002.md) |
 | SLM-001 | Diagnostic-assistant architecture | landed | 2026-09-26 | 2026-09-26 | diagnostics, SLM (deterministic-fix layer, type-context hints, on-disk cache), TypeChecker, Errors, new `scripts/slm_benchmark/`, tests | [SLM-001](changes/SLM-001.md) |
 | OVH-001 | GC type-descriptor bitmap silently truncated at 64 words | landed | 2026-09-26 | 2026-09-26 | `runtime/` (C, `turfrt.h`/`turfrt_types.c`/`turfrt_gc.c`), Codegen (`CodegenStruct.cpp`), tests, `scripts/runtime_smoke.sh`, documentation | [OVH-001](changes/OVH-001.md) |
+| OVH-002 | GC pointers hidden in untraced manual-heap memory | landed | 2026-09-26 | 2026-09-26 | stdlib (`json.tr`), showcase (`kv_store_server.tr`), Codegen (`CodegenCore.cpp`, `CodegenStruct.cpp`, `CodegenExpr.cpp`), new `scripts/check_boundary.sh` checks, tests, documentation | [OVH-002](changes/OVH-002.md) |
 
 ## How to use this directory
 

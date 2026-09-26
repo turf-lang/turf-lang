@@ -169,7 +169,74 @@ of `lib/std/core/*.tr` and fails on any drift in either direction — a
 module added to `core/` without updating the array, or vice versa, is
 caught immediately rather than sitting as a silent inconsistency.
 
-## 5. What this document deliberately does not claim
+## 5. A `mem::alloc` result may never hold a GC-heap pointer
+
+OVH-002 (`docs/planning/OVERHAUL_REMAINING_WORK.md`): F-MEM-3 (FREEZE.md
+§6.5) says the two heaps never merge and the collector never traces into
+manual memory — the corollary this rule makes explicit is that nothing may
+rely on the collector doing so implicitly, either. A `mem::alloc`/
+`mem::alloc_zeroed`/`malloc`/`calloc`/`realloc` result (the manual heap,
+by definition) must never be the ONLY thing holding a reference to a
+GC-heap value (a `string`, a collection's backing buffer, any struct
+containing either) — such a pointer is invisible to the collector's mark
+phase no matter how reachable it looks from Turf source, so the value it
+points at can be freed out from under it the moment nothing else roots it.
+
+This was found live at four sites (`lib/std/json/json.tr`'s per-element
+boxing, `showcase/kv_store_server.tr`'s per-entry boxing, and two
+compiler-emitted allocations — a message-carrying error value, an
+oversized `!T` success box — in `src/CodegenCore.cpp`), all four now fixed:
+the two stdlib/showcase sites moved the boxed value into its containing
+`List<T>` by value instead (a `List<T>`'s own backing buffer is precisely
+traced, `docs/architecture/memory_model.md` §2.6), and the two
+compiler-emitted sites moved from a bare `malloc` to `turf_rt_alloc` with a
+real descriptor.
+
+**Enforcement.** `scripts/check_boundary.sh`:
+- Check 4: `getOrCreateMallocFn()` (the bare-`malloc` helper both
+  compiler-emitted sites used before this fix) has no remaining definition
+  or caller anywhere in `src/Codegen*.cpp` — deleted outright once its last
+  caller was migrated, so a reintroduction under any name calling `malloc`
+  directly for a GC-heap-bound value is the thing to watch for if this
+  check ever needs updating.
+- Check 5: a best-effort textual scan of `lib/std`/`showcase` for
+  `mem::alloc(sizeof(SomeType))` where `SomeType` has a `string` or
+  collection-typed field — exactly the shape both stdlib/showcase sites
+  had. Best-effort, not exhaustive (see this check's own comment in the
+  script): it does not catch a numeric-literal-sized `mem::alloc(N) to
+  T*` box (the exact shape `kv_store_server.tr` used before this fix), a
+  box built through an intermediate helper function, or `mem::Pool<T>`
+  (§6 below) — those remain a human-reviewed judgment call, the same
+  "best-effort, not total" posture §2's closed-intrinsic-list check
+  already takes.
+
+## 6. `mem::Pool<T>` — a known, disclosed, unfixed gap
+
+`mem::Pool<T>` (`lib/std/mem/mem.tr`) exists to batch a set of *manual*
+allocations for one-call bulk freeing — its own doc comment describes `T`
+as "always some `*T`/`void*`" (a pointer the pool takes ownership of), the
+intended, correct usage: `Pool<T>.items` (a `malloc`/`realloc`'d array)
+holding manual-heap pointers is manual memory holding manual memory,
+no cross-heap issue at all.
+
+**Verified live (OVH-002): `Pool<T>` is not actually restricted to a
+pointer-shaped `T`.** `T` is an ordinary, unconstrained generic parameter
+(F-GEN-3: no trait/constraint system exists to express "T must be a raw
+pointer" even if this project wanted to) — `mut pool: mem::Pool<string> =
+mem::Pool::default(); pool.track(someString);` compiles and runs today,
+storing a GC-heap `string` pointer inside `Pool<T>.items`'s manual-heap
+array, invisible to the collector by construction — precisely §5's
+forbidden shape, reachable through the public standard library with no
+special effort. Left unfixed here deliberately: `Pool<T>` has no non-goal
+naming it as OVH-002's business specifically, fixing it would need either
+a constraint system (rejected, F-GEN-3) or a runtime check with no
+precedent elsewhere in this stdlib, and nothing in `tests/`, `lib/std`, or
+`showcase` actually instantiates `Pool<T>` at a GC-heap-backed `T` today.
+Recorded here, rather than silently discovered again later, as a disclosed
+gap — the same posture MEM-002's own "a GC pointer stored only in manual
+memory is not a root" unsoundness note already takes.
+
+## 7. What this document deliberately does not claim
 
 Per `ARCHITECTURE_OVERHAUL.md` §25 item 24 ("do not clean up
 `docs/architecture/`") and item 4 (do not unify Codegen's own duplicate
@@ -177,4 +244,7 @@ type-inference engine): this document names the one known exception in §2
 rather than pretending the closed-intrinsic-list claim is unconditionally
 total, and changes no behavior anywhere in the compiler — STD-001's own
 scope is enforcement and specification of an already-landed boundary
-(LANG-002, RT-001), not a redesign of it.
+(LANG-002, RT-001), not a redesign of it. §5/§6 (OVH-002) are additive to
+that same posture: a best-effort mechanical check plus an honestly
+disclosed, unfixed gap, not a claim that every possible cross-heap mistake
+is now caught.
