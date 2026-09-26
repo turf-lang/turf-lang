@@ -1,0 +1,28 @@
+// RUNTIME_ABORT_EXPECTED
+// tests/41_gc/fail_mem_unroot_unpinned.tr
+// OVH-010 (docs/planning/OVERHAUL_REMAINING_WORK.md): mem::unroot()'s own
+// required behaviour -- "unroot of an unpinned object panics with a named
+// message." Compiles fine (mem::unroot(p: void*) accepts any
+// pointer-shaped value; there is nothing for the TYPE CHECKER to reject
+// here), then aborts the moment it actually runs, naming the mistake
+// instead of silently doing nothing or corrupting the pin table -- the
+// same "diagnosable runtime error, not undefined behaviour" shape MEM-002
+// already established for mem::free()'s cross-heap check
+// (fail_free_gc_pointer.tr, this same directory).
+//
+// `s` genuinely IS a GC-heap pointer (turf_rt_pin/unpin's no-op case is
+// reserved for a `p` that is not a GC pointer at all -- see
+// mem::root()/mem::unroot()'s own doc comments in lib/std/mem/mem.tr) --
+// it was simply never mem::root()'d, so the pin table has no outstanding
+// pin to release.
+
+import strings;
+import mem;
+
+fn main(): int {
+    mut s: string = strings::repeat("q", 4);
+    unsafe {
+        mem::unroot(s to void*);
+    }
+    return 0;
+}

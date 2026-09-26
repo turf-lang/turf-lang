@@ -19,6 +19,18 @@
 #      it is genuine, tested runtime API reached directly, the same
 #      precedent mem_smoke.sh's check 1 already sets for
 #      Turf-source-unreachable libturfrt entrypoints.
+#   3. OVH-010 (docs/planning/OVERHAUL_REMAINING_WORK.md): turf_rt_pin()/
+#      turf_rt_unpin() -- specifically the "unroot() actually lets the
+#      collector reclaim it" direction, which `tests/41_gc/
+#      11_mem_root_pins_manual_heap_reference.tr`'s own top comment
+#      explains is NOT reliably provable as a compiled-Turf `.tr` test:
+#      that file only proves the "survives while pinned" direction (which
+#      a conservative collector can never get wrong by accident), the same
+#      way check 2's own comment below explains for global-root removal.
+#      This check compiles with no `-O` flag at all (this script's own
+#      `cc` invocations below), so nothing keeps the checked address alive
+#      in a register across the collection the way an optimizing build of
+#      a single Turf function legitimately might.
 #
 # Usage: scripts/gc_smoke.sh
 # Exit:  0 = every check passed; 1 = at least one failed.
@@ -170,6 +182,79 @@ if cc -std=c11 -I runtime "$WORKDIR/root_test.c" "$LIBTURFRT" -o "$WORKDIR/root_
   fi
 else
   fail "failed to compile against libturfrt.a"; cat "$WORKDIR/root_test.compile.log"
+fi
+
+echo -e "${BOLD}3. turf_rt_pin/turf_rt_unpin${RESET}"
+cat > "$WORKDIR/pin_test.c" <<'EOF'
+#include "turfrt.h"
+#include <assert.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static void churn(int depth) {
+    volatile long buf[64];
+    for (int i = 0; i < 64; i++) buf[i] = i * 3;
+    if (depth > 0) churn(depth - 1);
+}
+
+int main(void) {
+    turf_rt_init();
+
+    /* `manual_slot` stands in for "a GC pointer reachable only through
+     * manual-heap memory" (a C library's own struct, a mem::alloc buffer)
+     * -- mem::root()'s own motivating shape (lib/std/mem/mem.tr). An
+     * INTERIOR pointer (`p + 4`, not the block's own start address) is
+     * pinned deliberately, exercising the "interior pointers allowed"
+     * half of the contract the same way stack/register roots already do. */
+    void *manual_slot = malloc(sizeof(void *));
+    void *p = turf_rt_alloc(64, NULL);
+    memcpy(p, "pinned-object-content-check!!!!", 32);
+    memcpy(manual_slot, &p, sizeof(void *));
+    p = NULL;
+
+    turf_rt_pin((char *)*(void **)manual_slot + 4);
+
+    churn(24);
+    turf_rt_collect();
+
+    void *pinned = *(void **)manual_slot;
+    assert(turf_rt_is_gc_pointer(pinned));
+    assert(memcmp(pinned, "pinned-object-content-check!!!!", 32) == 0);
+    printf("pinned object survived a collection with correct content\n");
+
+    turf_rt_unpin((char *)pinned + 4);
+    pinned = NULL; /* the only remaining C-level reference to the old block */
+    memset(manual_slot, 0, sizeof(void *)); /* drop the manual-heap reference too */
+    churn(64);
+    turf_rt_collect();
+
+    TurfRtStats s = turf_rt_stats();
+    printf("after unpin (nothing else references it) + collect: live_count=%llu\n",
+           (unsigned long long)s.live_count);
+    /* Same conservative-scanning caveat as check 2's own removal
+     * assertion: this only asserts the now-unpinned, now-unreferenced
+     * block is gone, not that pinning could never coincide with
+     * incidental stack retention in general. */
+    assert(s.live_count == 0);
+
+    free(manual_slot);
+    turf_rt_shutdown();
+    return 0;
+}
+EOF
+if cc -std=c11 -I runtime "$WORKDIR/pin_test.c" "$LIBTURFRT" -o "$WORKDIR/pin_test" > "$WORKDIR/pin_test.compile.log" 2>&1; then
+  pass "compiled against libturfrt.a directly"
+  OUT=$("$WORKDIR/pin_test" 2>&1)
+  RC=$?
+  if [ $RC -eq 0 ]; then
+    pass "ran, all assertions held"
+    echo "$OUT" | sed 's/^/    /'
+  else
+    fail "assertion failed at runtime: $OUT"
+  fi
+else
+  fail "failed to compile against libturfrt.a"; cat "$WORKDIR/pin_test.compile.log"
 fi
 
 echo
