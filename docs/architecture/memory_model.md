@@ -668,6 +668,19 @@ block table answers "which block, if any, contains this address," not
 just "is this address exactly a block's start"
 (`tests/41_gc/03_interior_pointer_retention.tr`).
 
+**A `TurfTypeDesc`'s bitmap covers the type's ENTIRE layout, at any size**
+(OVH-001, `docs/planning/OVERHAUL_REMAINING_WORK.md`) — `word_count`
+(`ceil(size / 8)`) plus a `pointer_words` array of `ceil(word_count / 64)`
+`uint64_t`s, not the single inline `uint64_t` RT-001 originally shipped.
+That original version silently stopped tracing past word 63 (byte 512) of
+a type's layout, which MEM-002's collector then depended on for
+correctness — a pointer field past that point in a GC-heap struct or
+collection element was never marked, and got freed out from under a
+still-live object the next collection.
+`tests/41_gc/05_large_struct_element_tracing.tr` and
+`06_struct_exactly_64_and_65_words.tr` are this fix's own regression
+tests — see `docs/architecture/runtime.md` §4 for the emitted-IR shape.
+
 **What is NOT reclaimed automatically:** the manual heap, still and
 always (F-MEM-3) — `mem::free_pool()`/`mem::free(mem::alloc(...))` work
 exactly as before. And, on the GC heap specifically, a pointer that exists

@@ -145,17 +145,24 @@ level) is what proves inlining never changes observable behaviour here.
 ## 4. Type descriptors
 
 For every real, fully-built LLVM aggregate type in the module, the compiler
-emits a constant global mirroring `TurfTypeDesc { size, name,
-pointer_word_bitmap }` (`runtime/turfrt.h`'s own doc comment has the exact
-field semantics, including the 64-word/512-byte bitmap coverage limit).
-This is forward infrastructure for MEM-002's precise heap tracing
-(F-MEM-1: "precise on the heap" — a per-type pointer bitmap the compiler
-emits is exactly what that requires) landed now, while TYPE-002's
-per-instantiation struct layouts are fresh, rather than retrofitted later.
-**Nothing reads a descriptor's bitmap yet** — the only consumer as of
-RT-001 is `scripts/runtime_smoke.sh`'s own `--emit-llvm`-and-grep check,
-exactly the verification method `ARCHITECTURE_OVERHAUL.md` §8 RT-001
-prescribes for this group.
+emits a constant global mirroring `TurfTypeDesc { size, name, word_count,
+pointer_words }` (`runtime/turfrt.h`'s own doc comment has the exact field
+semantics). This is the infrastructure MEM-002's precise heap tracing reads
+from every collection (F-MEM-1: "precise on the heap" — a per-type pointer
+bitmap the compiler emits is exactly what that requires), landed by RT-001
+while TYPE-002's per-instantiation struct layouts were fresh, rather than
+retrofitted later.
+
+`word_count`/`pointer_words` (widened by **OVH-001**,
+`docs/planning/OVERHAUL_REMAINING_WORK.md`) replace RT-001's original
+single inline `uint64_t pointer_word_bitmap` field, which could only
+represent the first 64 eight-byte words (512 bytes) of a type's layout — a
+documented limitation at the time (nothing read it yet), which became a
+live use-after-free once MEM-002's collector started depending on it: any
+GC-heap struct or per-element collection descriptor with a pointer field
+past byte 512 was silently untraced, so the object it pointed at could be
+swept while the containing struct was still reachable. §4.3 below covers
+the fix's emitted-IR shape.
 
 ### 4.1 Why emission is a separate, late pass — `EmitAllTurfTypeDescs()`
 
@@ -211,6 +218,47 @@ this alive through the optimizer without giving it real external linkage."
 Verified live (`scripts/opt_levels_smoke.sh` and a direct `--emit-llvm`
 diff): every descriptor is present, byte-identical, at every optimization
 level.
+
+### 4.3 OVH-001: the bitmap widened past 64 words
+
+`buildTurfTypeDescInit()` (`src/CodegenStruct.cpp`, shared by
+`emitTurfTypeDesc()` and `getOrCreateElementTurfTypeDesc()` — the old
+per-copy inline-bitmap logic was duplicated across both, which is why the
+original 64-word cap needed two independent fixes instead of one) computes
+`word_count = ceil(size / 8)` and emits a second, out-of-line private
+constant global — a `[N x i64]` array, `N = ceil(word_count / 64)` — that
+`pointer_words` points at, alongside the existing `name`-string global.
+For a type whose layout fits in one 64-bit word (`N == 1`), this looks
+almost exactly like the old inline field:
+
+```llvm
+@__turf_typedesc_bitmap.WithPointer = private constant [1 x i64] [i64 4]
+@__turf_typedesc_WithPointer = internal constant %TurfTypeDesc
+    { i64 24, ptr @__turf_typedesc_name.WithPointer, i64 3,
+      ptr @__turf_typedesc_bitmap.WithPointer }
+```
+
+For a type wider than 512 bytes (`N > 1`, the case the old field could not
+represent at all), the array simply grows — the ABI has no size limit:
+
+```llvm
+@__turf_typedesc_bitmap.Big70 = private constant [2 x i64] [i64 0, i64 64]
+@__turf_typedesc_Big70 = internal constant %TurfTypeDesc
+    { i64 568, ptr @__turf_typedesc_name.Big70, i64 71,
+      ptr @__turf_typedesc_bitmap.Big70 }
+```
+
+(`Big70` has 70 `int` fields then a `string` — word 70 lands in the
+bitmap's *second* `i64`, at bit `70 % 64 = 6`, hence `64`.) A hard
+assertion at emission (`word_count * 8 >= size`, plus the built bitmap
+vector's own length matching `N`) makes a future re-introduction of any
+fixed cap fail loudly in a debug build rather than silently truncate
+again — see `runtime/turfrt_gc.c`'s `gc_scan_block_precise()` and
+`runtime/turfrt_types.c`'s `turf_rt_typedesc_is_pointer_word()` for the
+runtime side of the same fix, and `scripts/runtime_smoke.sh` §4 for the
+`--emit-llvm` check this shape is verified against (including a >64-word
+type, which RT-001's original version of this check could not exercise at
+all).
 
 ## 5. Build and distribution
 
