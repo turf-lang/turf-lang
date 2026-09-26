@@ -59,35 +59,28 @@ fi
 #
 # test_runner.sh covers tests/ ONLY. A stdlib or showcase file left on removed
 # syntax sits broken indefinitely with the full suite green -- AGENTS.md
-# records a confirmed instance. Two stdlib modules cannot be compiled directly
-# today for a reason that has nothing to do with the file under test: the
-# prelude module `strings` does `import list::List`, so compiling list.tr (or
-# mem.tr, which list.tr imports) as an entry point re-declares its own type
-# through the prelude chain and raises E034. That is the known
-# prelude-self-import bug class, fixed only for the six prelude modules
-# against themselves (AGENTS.md). They are checked for "E034 and nothing
-# else" rather than skipped, so a NEW breakage in them still fails here.
+# records a confirmed instance. Every lib/std module must resolve with no
+# error at all (other than the expected "No entry point found" a pure
+# library file always reports). Until OVH-011
+# (docs/planning/OVERHAUL_REMAINING_WORK.md), list.tr and mem.tr could not
+# clear this bar: the prelude module `strings` does `import list::List`, so
+# compiling list.tr (or mem.tr, which list.tr imports) as an entry point
+# re-declared its own type through the transitively-reimported prelude
+# chain and raised E034 -- ClaimEntryFileImportSlot() (ParserModule.cpp)
+# closes that gap by recognizing when a transitive import resolves back to
+# the entry file's own path, so no per-file exemption belongs here any more
+# (a REGRESSION of OVH-011 must fail this check like any other).
 echo -e "\n${BOLD}2. lib/std and showcase compiled directly${RESET}"
 if [ ! -x build/turf ]; then
   fail "build/turf missing — cannot compile-check lib/std or showcase"
 else
-  KNOWN_SELF_IMPORT="lib/std/collections/list.tr lib/std/mem/mem.tr"
   STD_BAD=0
   while IFS= read -r f; do
     out=$(./build/turf --resolve "$f" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     errs=$(echo "$out" | grep -E '^── error|^Error:' | grep -v 'No entry point found')
     [ -z "$errs" ] && continue
-    if [[ " $KNOWN_SELF_IMPORT " == *" $f "* ]]; then
-      other=$(echo "$errs" | grep -v '\[E034\]')
-      if [ -z "$other" ]; then
-        continue
-      fi
-      fail "$f fails with more than the known E034 self-import:"
-      echo "$other" | head -3 | sed 's/^/       /'
-    else
-      fail "$f does not resolve:"
-      echo "$errs" | head -3 | sed 's/^/       /'
-    fi
+    fail "$f does not resolve:"
+    echo "$errs" | head -3 | sed 's/^/       /'
     STD_BAD=$((STD_BAD + 1))
   done < <(find lib/std -name '*.tr' | sort)
   [ $STD_BAD -eq 0 ] && pass "every lib/std module resolves ($(find lib/std -name '*.tr' | wc -l) files)"
