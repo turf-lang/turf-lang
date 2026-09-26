@@ -34,6 +34,7 @@ record does; `status` tracks the record, not the branch.
 | OVH-003 | Raw-pointer indexing is ungated in safe code; no safe generic element access | landed | 2026-09-26 | 2026-09-26 | TypeChecker (`TypeCheckerCall.cpp`), Codegen (`CodegenStruct.cpp`, `CodegenCore.cpp` — two independent latent bugs found+fixed), stdlib (`list.tr`, `json.tr`, `http.tr`), showcase (`kv_store_server.tr`), tests, documentation | [OVH-003](changes/OVH-003.md) |
 | OVH-004 | By-value cycle through a generic instantiation segfaults the compiler | landed | 2026-09-26 | 2026-09-26 | Resolver (`ResolverCore.cpp` — `byValueEdgeTarget()`), tests, documentation | [OVH-004](changes/OVH-004.md) |
 | OVH-009 | `>>` closing nested generic arguments is a parse error | landed | 2026-09-26 | 2026-09-26 | Parser (`ParserCore.cpp` — `ParseType()`), tests, documentation | [OVH-009](changes/OVH-009.md) |
+| OVH-005 | `int32`: `++`/`--` ICE; untyped literal rejected; wrong-reason test | landed | 2026-09-26 | 2026-09-26 | TypeChecker (`TypeCheckerCore.cpp`, `TypeCheckerDecl.cpp`, `TypeCheckerExpr.cpp`, `TypeCheckerStmt.cpp`, `TypeCheckerCall.cpp`), Codegen (`CodegenVar.cpp` — debug assertion), tests, documentation | [OVH-005](changes/OVH-005.md) |
 
 ## How to use this directory
 
