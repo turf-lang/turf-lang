@@ -85,6 +85,7 @@ struct CompilerOptions {
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
   std::string SmartFixOutPath;        // --smart-write-fix=<path>: write the first validated --smart fix's full patched source here (SLM-001 follow-up)
   bool AllowUnsafeModules = false;    // --allow-unsafe-modules: LANG-002, honor `unsafe module;` outside the install root
+  bool ShowStdlibWarnings = false;    // --stdlib-warnings: OVH-012, print warnings anchored inside lib/std instead of hiding them
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
   bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
   bool DumpResolverSymbols = false;   // --dump-resolver-symbols: print symbol table after resolution
@@ -257,6 +258,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.SmartFixOutPath = arg.substr(std::string("--smart-write-fix=").size());
     } else if (arg == "--allow-unsafe-modules") {
       opts.AllowUnsafeModules = true;
+    } else if (arg == "--stdlib-warnings") {
+      opts.ShowStdlibWarnings = true;
     } else if (arg == "--dump-ast") {
       opts.DumpAST = true;
     } else if (arg == "--dump-instantiations") {
@@ -332,7 +335,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
            "[--dump-modules] [--dump-instantiations] [--link <libname>] "
-           "[--allow-unsafe-modules] "
+           "[--allow-unsafe-modules] [--stdlib-warnings] "
            "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
            "       turf --format [--write] <filename.tr>\n"
            "       turf --explain E0NN\n";
@@ -726,6 +729,10 @@ static int runCompilerMain(int argc, char **argv) {
   // (ParserModule.cpp) consults it for every `unsafe module;` pragma outside
   // the install root.
   g_AllowUnsafeModules = opts.AllowUnsafeModules;
+  // OVH-012: consulted only by DiagnosticEngine::flushAll() at print time,
+  // so it's fine to set this any time before that runs -- unlike
+  // g_AllowUnsafeModules just above, nothing during parsing/resolving reads it.
+  g_ShowStdlibWarnings = opts.ShowStdlibWarnings;
 
   // TOOL-001: must be set before InitializeModule() runs (below) -- that's
   // the one call site that decides whether DBuilder/DebugCU get built at

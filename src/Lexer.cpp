@@ -23,6 +23,8 @@
                        // ErrorsLex.h's own top comment for why Lexer.cpp,
                        // alone among the lexer/parser split, includes a
                        // TurfError header directly
+#include "Parser.h"    // OVH-012: IsLibStdWarningLocation() -- flushAll()'s
+                       // system-module-warning gate
 #include "SLMIntegration.h"
 
 #include <algorithm>
@@ -78,6 +80,7 @@ int g_parseRecursionDepth = 0;
 bool g_AIEnabled = false;
 std::string g_SmartFixOutPath;
 bool g_AllowUnsafeModules = false;
+bool g_ShowStdlibWarnings = false;
 
 // Tracks if the SLM has generated a diagnostic this pass to suppress
 // analysis of subsequent cascading errors.
@@ -441,8 +444,19 @@ void DiagnosticEngine::flushAll() {
                      (A.Loc.Line == B.Loc.Line && A.Loc.Col < B.Loc.Col);
             });
 
-  for (const auto &D : Diagnostics)
+  for (const auto &D : Diagnostics) {
+    // OVH-012: a warning anchored inside the standard library itself (e.g.
+    // `NeverReturnsErrorWarning`/`InfiniteLoopWarning` on stdlib code a
+    // user merely `import`ed, never wrote) is a "system-module warning" --
+    // suppressed at PRINT time only (Diagnostics itself, getDiagnostics(),
+    // and getDiagnosticCount() are untouched, so nothing that inspects
+    // diagnostics directly -- Sandbox.cpp, ParserModule.cpp's speculative-
+    // parse retry, CompileBuffer.cpp -- changes behavior). An error is
+    // never filtered here: only IsWarning diagnostics reach this check.
+    if (D.IsWarning && !g_ShowStdlibWarnings && IsLibStdWarningLocation(D.Filename))
+      continue;
     printDiag(D);
+  }
 
   Diagnostics.clear();
 }

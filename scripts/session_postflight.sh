@@ -109,6 +109,25 @@ else
   done < <(find showcase -name '*.tr' | sort)
   rm -f /tmp/turf_postflight_showcase.out
   [ $SHOW_BAD -eq 0 ] && pass "every showcase program compiles ($(find showcase -name '*.tr' | wc -l) files)"
+
+  # OVH-012: a plain 'import io; import json; import http;' ("hello world")
+  # must print NO warning by default. A warning anchored inside lib/std is a
+  # "system-module warning" -- recorded but not printed unless
+  # --stdlib-warnings is passed (DiagnosticEngine::flushAll(), Lexer.cpp). A
+  # failure here means either a lib/std source change reintroduced a warning
+  # class OVH-012 fixed (NeverReturnsErrorWarning/UnusedVariableWarning/
+  # DeadStoreWarning blind to `recover` blocks) or the print-time suppression
+  # itself regressed.
+  HELLO_SRC="/tmp/turf_postflight_hello.tr"
+  printf 'import io;\nimport json;\nimport http;\nfn main(): int { return 0; }\n' > "$HELLO_SRC"
+  HELLO_OUT=$(./build/turf --resolve "$HELLO_SRC" -o /tmp/turf_postflight_hello.out 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+  rm -f "$HELLO_SRC" /tmp/turf_postflight_hello.out
+  if echo "$HELLO_OUT" | grep -qi 'warning'; then
+    fail "'import io; import json; import http;' prints a warning by default (OVH-012 regression):"
+    echo "$HELLO_OUT" | grep -i 'warning' | head -3 | sed 's/^/       /'
+  else
+    pass "hello-world stdlib imports (io/json/http) produce no warning by default"
+  fi
 fi
 
 # ── 3. The _module.tr naming sweep, both directions ─────────────────────────

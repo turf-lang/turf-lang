@@ -213,6 +213,17 @@ extern std::string g_SmartFixOutPath;
 // same reasoning as g_AIEnabled -- a capability that broadens what raw
 // pointers can do must be an explicit, visible opt-in, never ambient.
 extern bool g_AllowUnsafeModules;
+// OVH-012: when false (the default), a warning whose diagnostic location
+// falls inside the install root's `lib/std` is a "system-module warning" --
+// recorded (still counts toward getDiagnosticCount(), still visible to
+// CollectAllDiagnostics-based tooling like the sandbox) but never printed by
+// flushAll(), matching `-isystem` practice: a normal user program that
+// merely `import`s a stdlib module (`import io; import json; import http;`)
+// must never see a warning whose primary location is code it didn't write
+// and can't fix. Controlled by the --stdlib-warnings CLI flag (main.cpp).
+// Errors are never suppressed by this -- only DiagnosticEngine::add()'s
+// IsWarning branch consults it (Lexer.cpp).
+extern bool g_ShowStdlibWarnings;
 extern std::string SourceFilename;
 // The original top-level file passed to the compiler -- see its definition
 // in Lexer.cpp for why this is distinct from SourceFilename.

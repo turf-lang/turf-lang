@@ -552,6 +552,26 @@ static bool IsPathUnderInstallRoot(const std::string &Path) {
   return IsPathUnderDir(Path, TurfInstallRoot());
 }
 
+// OVH-012: exported (Parser.h) so Lexer.cpp's DiagnosticEngine::flushAll()
+// can decide whether a warning's location is inside the standard library
+// itself, without linking against llvm::sys::fs directly -- same reasoning
+// HasRawPointerCapability()'s own export note gives. Deliberately narrower
+// than IsPathUnderInstallRoot() (this file, static): a `lib/usr` user
+// package lives under the same install root but is the USER's own code, not
+// the standard library, so it must never have its warnings hidden by
+// default the way a `lib/std` warning is. Named IsLibStdWarningLocation(),
+// NOT IsPathUnderLibStd() -- see that name's own history two functions
+// above (HasRawPointerCapability()'s doc comment) and Parser.h's doc
+// comment on this function for why reusing it would be a mistake:
+// scripts/check_boundary.sh greps for that exact identifier as a dedicated
+// regression guard, and this function is not the capability check it
+// guards against.
+bool IsLibStdWarningLocation(const std::string &Path) {
+  llvm::SmallString<160> LibStd(TurfInstallRoot());
+  llvm::sys::path::append(LibStd, "lib", "std");
+  return IsPathUnderDir(Path, LibStd.str().str());
+}
+
 // LANG-002/STD-001: files that parsed a leading `unsafe module;` capability
 // pragma (ParseLeadingUnsafeModuleDecl() below), keyed by the SAME
 // real_path()-canonicalized form HasRawPointerCapability() queries with, so

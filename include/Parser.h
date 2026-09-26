@@ -98,6 +98,24 @@ std::string TurfInstallRoot();
 // it without linking against llvm::sys::fs directly.
 bool HasRawPointerCapability(const std::string &Path);
 
+// OVH-012: true if @p Path (canonicalized) falls under THIS install's
+// `lib/std` specifically -- a strict subset of TurfInstallRoot() (excludes
+// a sibling `lib/usr` user package, which is not "stdlib" for this check's
+// purpose even though it lives under the same install root). Purely
+// path-based, unlike HasRawPointerCapability() just above -- and
+// DELIBERATELY named differently from the old, removed `IsPathUnderLibStd()`
+// (issue #238) that function replaced: `scripts/check_boundary.sh` greps
+// for that exact identifier as a regression guard against a path-based
+// CAPABILITY check ever reappearing (F-STD-1, FREEZE.md §6.8 -- privileges
+// must be declared in source, never inferred from a file path). This
+// function grants no capability at all; it only answers "is this
+// diagnostic's location code the user didn't write," backing
+// DiagnosticEngine::flushAll()'s "system-module warning" print-time gate
+// (see Lexer.cpp) -- reusing the old name here would be confusing at best
+// and would trip that guard at worst. See its definition in ParserModule.cpp
+// for the full rationale.
+bool IsLibStdWarningLocation(const std::string &Path);
+
 // LANG-002: checks for and consumes a leading `unsafe module;` capability
 // pragma at the current token position. See its definition in
 // ParserModule.cpp for the full contract (when to call it, and what to do
