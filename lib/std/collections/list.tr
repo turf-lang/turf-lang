@@ -81,6 +81,36 @@ fn<T> List.length(): int {
   return self.len;
 }
 
+// ─── get / set (OVH-003) ─────────────────────────────────────────────────────
+//
+// Bounds-checked, GENUINELY generic (unlike operator[]/[]= above, which are
+// declared for the concrete List<int> only -- ParseOperatorDecl() parses no
+// `<T>` block at all, see that declaration's own doc comment) element
+// access for any T. Exists because `l.data[i]` -- the only way to read/
+// write an element of a List<T> for T != int before this fix -- is a raw
+// T* dereference, and OVH-003 (docs/planning/OVERHAUL_REMAINING_WORK.md)
+// closed the gap where TypeChecker::visitArrayAccess() never gated that:
+// `l.data[100000] = 42;` compiled with no `unsafe { }` and no capability,
+// an out-of-bounds write reachable from ordinary safe code. `@caller_location`
+// (STD-002) so the panic names the CALLER's line, not this one -- matching
+// operator[]'s own message text, just with a location a caller-heavy stdlib
+// consumer (json.tr, http.tr, ...) actually benefits from.
+@caller_location
+fn<T> List.get(i: int): T {
+  if (i < 0 || i >= self.len) {
+    sys::panic(caller_location + ": List.get: index out of bounds");
+  }
+  return self.data[i];
+}
+
+@caller_location
+fn<T> List.set(i: int, value: T): void {
+  if (i < 0 || i >= self.len) {
+    sys::panic(caller_location + ": List.set: index out of bounds");
+  }
+  self.data[i] = value;
+}
+
 // ─── operator[] / operator[]= (LANG-001) ────────────────────────────────────
 //
 // The better form of the `get`/`set` this file's own LIMITATIONS.md §4 entry
