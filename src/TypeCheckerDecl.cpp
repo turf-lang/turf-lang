@@ -47,20 +47,21 @@
 // unbounded recursion a self/mutually-referential struct field would
 // otherwise cause (see that function's comment).
 //
-// A bare `TurfGenericParamType` never actually appears here in practice:
-// Resolver::visitStructDecl() rewrites NamedType("T") -> TurfGenericParamType
-// on the STRUCT DECLARATION AST NODE's own field list (Node.getFieldsMut()),
-// but GlobalSymbolTable's registered TurfStructType for that struct is a
-// SEPARATE object, built from a snapshot of the fields at PARSE time
-// (ParserDecl.cpp, before that substitution ever runs) and never updated
-// afterward -- so a generic struct's globally-registered field types
-// permanently stay plain NamedType(paramName), e.g. List<T>'s `data: T*`
-// is TurfPointerType(NamedType("T")) here, not TurfPointerType
-// (TurfGenericParamType("T")). The NamedType branch below is therefore the
-// one that actually fires for every real-world generic struct field;
-// checking for TurfGenericParamType directly is defensive only, in case a
-// future architectural change (e.g. TYPE-002 monomorphization) changes
-// which of the two representations reaches this specific lookup path.
+// A bare `TurfGenericParamType` DOES reach here for a generic struct's own
+// field, as of OVH-006: Resolver::visitStructDecl() rewrites
+// NamedType("T") -> TurfGenericParamType("T") on the STRUCT DECLARATION AST
+// NODE's own field list (Node.getFieldsMut()) AND re-registers the
+// corrected field list into GlobalSymbolTable at the same moment -- before
+// that fix, GlobalSymbolTable's registered TurfStructType was a SEPARATE
+// object, built from a snapshot of the fields at PARSE time (ParserDecl.cpp,
+// before the substitution ever ran) and never updated afterward, so a
+// generic struct's globally-registered field types stayed plain
+// NamedType(paramName) forever -- e.g. List<T>'s `data: T*` read back as
+// TurfPointerType(NamedType("T")), not TurfPointerType
+// (TurfGenericParamType("T")). That NamedType branch below still exists as
+// a defensive fallback (see OVH-006's change record, *Known pitfalls*, for
+// why it was kept rather than deleted), but it is no longer the one that
+// fires for an ordinary generic struct field.
 //
 // External linkage (TypeCheckerInternal.h), not anonymous-namespace-local:
 // TypeCheckerCall.cpp's visitFuncCall/visitMethodCall need this too, as of

@@ -481,6 +481,32 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
   if (!TypeParams.empty()) {
     for (auto &Field : Node.getFieldsMut())
       Field.Type = substituteTypeParams(Field.Type, TypeParams);
+
+    // OVH-006: GlobalSymbolTable's registered TurfStructType for this name
+    // (ParseStructDecl(), built at PARSE time, directly from the as-parsed
+    // Fields) is a SEPARATE object from this AST node -- the substitution
+    // two lines up only ever updated the node's OWN field list, so every
+    // downstream consumer that resolves a field type by looking the struct
+    // back up via GlobalSymbolTable->LookupType(Name) (TypeCheckerCall.cpp's
+    // visitFieldAccess/visitMethodCall, CodegenCore.cpp's mirrors) saw the
+    // stale, unsubstituted NamedType("T") forever, never a real
+    // TurfGenericParamType. That NamedType then had to be told apart from an
+    // ordinary struct reference by a name-lookup heuristic ("not a
+    // registered type => must be a generic param") -- which silently broke
+    // the moment a real, unrelated struct happened to be declared under the
+    // same name as the type parameter (`struct T { x: int }` alongside
+    // `List<T>`, confirmed live: `l.pop()` on a `List<int>` resolved to the
+    // user's own struct `T`, not `int`, because "T" WAS registered
+    // elsewhere the instant that struct existed). Re-registering here, with
+    // the just-substituted field list, makes the registered type agree with
+    // the AST node: one representation, not two, and every one of those
+    // NamedType-vs-registered-type heuristics simply never fires for a
+    // struct's own type parameter again, regardless of what else in the
+    // program happens to be named the same.
+    if (GlobalSymbolTable)
+      GlobalSymbolTable->RegisterType(
+          Node.getName(),
+          std::make_shared<TurfStructType>(Node.getName(), Node.getFields()));
   }
 
   // In Pass 2 (here) we validate every field's type via validateNamedType().

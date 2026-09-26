@@ -1295,20 +1295,22 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // wrapping) in declaration order and pairing each distinct name
           // found with GT's type args positionally.
           //
-          // NamedType, not TurfGenericParamType: GlobalSymbolTable's
-          // registered TurfStructType for a generic struct is constructed
-          // once, at PARSE time (ParseStructDecl), directly from the
-          // as-parsed Fields -- it is a SEPARATE object from the
-          // StructDeclExprAST AST node that Resolver::visitStructDecl()
-          // later mutates in place (substituting NamedType("T") ->
-          // TurfGenericParamType("T")). That mutation updates the AST
-          // node's own copy only; nothing propagates it back into
-          // GlobalSymbolTable's already-constructed TurfStructType, so its
-          // fields are permanently stuck with the original NamedType("T").
-          // This is exact for every generic struct in this language's
-          // stdlib today (all single-type-parameter), though not fully
-          // general for a hypothetical multi-parameter struct whose fields
-          // don't happen to mention every parameter in declaration order.
+          // TurfGenericParamType, as of OVH-006 -- Resolver::visitStructDecl()
+          // now re-registers GlobalSymbolTable's TurfStructType for this
+          // struct with the same substituted field list it writes onto the
+          // AST node, so the Scan below hits the `GP` branch directly for an
+          // ordinary generic struct field. (Before that fix, the registered
+          // type was a SEPARATE object, built once at PARSE time directly
+          // from the as-parsed Fields and never updated, so its fields were
+          // permanently stuck as NamedType("T") -- the `NT` branch below,
+          // which survives as a defensive fallback, used to be the one that
+          // actually fired; see OVH-006's change record for the live bug
+          // that produced and the fix.) Positional pairing (declaration
+          // order, first-occurrence-per-name) is exact for every generic
+          // struct in this language's stdlib today (all single-type-
+          // parameter), though not fully general for a hypothetical
+          // multi-parameter struct whose fields don't happen to mention
+          // every parameter in declaration order.
           // TYPE-002 (S14a): a method generic IN ITS OWN RIGHT
           // (`fn<T> Box.echo(x: T): T`) needs a SEPARATE substitution from
           // Subst above -- Subst only ever recovers the STRUCT's own
@@ -1752,11 +1754,10 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
       // field's declared type -- e.g. `data: T*` on a List<Entry>-typed
       // base must report `Entry*`, not the bare, unsubstituted `T*`.
       // Mirrors visitMethodCall()'s identical Subst-recovery technique
-      // (scan every field for a NamedType/TurfGenericParamType name that
-      // isn't a known struct/enum elsewhere -- see that function's own
-      // doc comment for why GlobalSymbolTable's copy of a generic
-      // struct's fields is permanently stuck unsubstituted). Without
-      // this, `someList.data[0].value`'s type came back as the generic
+      // (scan every field for a TurfGenericParamType/NamedType name --
+      // see that function's own doc comment for why the NamedType branch
+      // is a defensive fallback, not the common case, since OVH-006).
+      // Without this, `someList.data[0].value`'s type came back as the generic
       // placeholder instead of the real field type, and something
       // depending on the real type downstream (e.g. `printline`'s
       // overload pick) silently chose the wrong one instead of erroring
