@@ -427,7 +427,21 @@ Value *MethodCallExprAST::codegen() {
     }
 
     // Arity is guaranteed by the TypeChecker — if it's wrong here, it's a bug.
+    // OVH-003: a `@caller_location` callee's REAL LLVM arg count is one MORE
+    // than its Turf-level signature (self + Args) suggests -- its hidden
+    // trailing parameter (caller_location.md §3.5) is never written by the
+    // caller, so it doesn't appear in `Args` at all. Missing this in the
+    // arity check let a mismatched callee slip past an `assert()` that's
+    // compiled out in a release build, straight into the arg-binding loop
+    // below indexing `EvaluatedArgs[Idx]` one past its end -- a real,
+    // previously-undiscovered segfault (confirmed live: any `@caller_location`
+    // struct method, generic or not, crashed the compiler; this call path
+    // had simply never been exercised with one before -- FuncCallExprAST::
+    // codegen()'s sibling free-function path already handles this correctly,
+    // see its own matching comment, CodegenFunc.cpp).
     int ExpectedArity = IsStaticMethod ? Args.size() : (Args.size() + 1);
+    if (ResolvedCallTarget && ResolvedCallTarget->HasCallerLocation)
+      ExpectedArity += 1;
     assert(CalleeF->arg_size() == ExpectedArity &&
            "Struct method arity mismatch after TypeChecker — compiler bug");
 
@@ -470,6 +484,11 @@ Value *MethodCallExprAST::codegen() {
     unsigned Idx = 0;
     auto ArgIt = IsStaticMethod ? CalleeF->arg_begin() : std::next(CalleeF->arg_begin());
     for (; ArgIt != CalleeF->arg_end(); ++ArgIt, ++Idx) {
+      // OVH-003: stop before the hidden trailing `caller_location` LLVM
+      // parameter (see the arity-check comment above) -- there is nothing
+      // in `EvaluatedArgs` for it to read; it's supplied separately, below.
+      if (Idx >= EvaluatedArgs.size())
+        break;
       Value *V = EvaluatedArgs[Idx];
       Type *ExpectedTy = ArgIt->getType();
       if (V->getType() != ExpectedTy) {
@@ -504,6 +523,13 @@ Value *MethodCallExprAST::codegen() {
       }
       ArgVals.push_back(V);
     }
+
+    // OVH-003: auto-supply the hidden trailing argument a `@caller_location`
+    // callee's REAL signature has but its Turf-level `Args` never wrote --
+    // mirrors FuncCallExprAST::codegen()'s identical, already-correct fix
+    // (CodegenFunc.cpp) for the free-function call path.
+    if (ResolvedCallTarget && ResolvedCallTarget->HasCallerLocation)
+      ArgVals.push_back(BuildCallerLocationValue(Loc));
 
     // void functions must not be given a name (LLVM requirement) -- see the
     // matching fix/comment on the module-call path above for the full story.
