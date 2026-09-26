@@ -164,6 +164,26 @@ public:
   // precisely what "treat it as an ordinary read/def right here" checks.
   void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
 
+  // OVH-012: without this, a variable read ONLY as the operand of a
+  // `recover` expression's WRAPPED call (`immut numStr: string = ...;
+  // strings::parse_double(numStr) recover run { ... };`, lib/std/json/
+  // json.tr) was invisible to both DefiniteAssignmentPass and
+  // LivenessAnalysisPass -- ASTVisitor's default visitRecoverExpr() is a
+  // no-op, so `numStr` was falsely flagged BOTH UnusedVariableWarning
+  // ("declared but never used") and DeadStoreWarning ("assigned but never
+  // read"), confirmed live. Same reasoning as visitDefer() just above (LANG-003).
+  // Wrapped is always visited (it's evaluated unconditionally); ProduceExpr
+  // only runs on the failure path of `recover produce`, Block only on the
+  // failure path of `recover run`/`recover as err run` -- mutually
+  // exclusive per RecoverKind, so exactly one of the two is ever non-null.
+  void visitRecoverExpr(RecoverExprAST &Node) override {
+    visitChild(Node.getWrapped());
+    if (Node.getKind() == RecoverKind::Produce)
+      visitChild(Node.getProduceExpr());
+    else
+      visitChild(Node.getBlock());
+  }
+
   void visitFuncCall(FuncCallExprAST &Node) override {
     // First-class functions: `f(x)` where `f` is a local variable/parameter
     // of fn(...):... type is a genuine READ of `f` -- unlike an ordinary
