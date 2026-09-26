@@ -5,16 +5,17 @@
  * compiler (src/CodegenStruct.cpp), never constructed at runtime -- this
  * file exists only to give the runtime (and its own smoke test,
  * scripts/runtime_smoke.sh) a single, shared place to read one back out,
- * rather than every reader re-deriving the bit-shift arithmetic. MEM-002's
- * collector will call turf_rt_typedesc_is_pointer_word() from its mark
- * phase; RT-001's own runtime_smoke.sh is this function's only caller today.
+ * rather than every reader re-deriving the bit-shift arithmetic.
+ * turfrt_gc.c's mark phase is this function's real, load-bearing caller
+ * (OVH-001) -- runtime_smoke.sh also exercises it directly.
  */
 
 #include "turfrt.h"
 
 int turf_rt_typedesc_is_pointer_word(const TurfTypeDesc *desc,
                                       uint64_t word_index) {
-  if (!desc || word_index >= 64)
+  if (!desc || word_index >= desc->word_count)
     return 0;
-  return (desc->pointer_word_bitmap >> word_index) & 1u;
+  uint64_t bitmap_word = desc->pointer_words[word_index / 64];
+  return (bitmap_word >> (word_index % 64)) & 1u;
 }

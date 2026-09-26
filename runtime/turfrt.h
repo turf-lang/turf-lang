@@ -41,30 +41,33 @@ extern "C" {
  * shadow). Emitted as a constant global by CodegenStruct.cpp's
  * StructDeclExprAST::codegen(), immediately after the LLVM StructType's
  * setBody() call -- see that function's own comment for why the emitted
- * LLVM struct layout ({i64, ptr, i64}) must match this C struct's layout
- * field-for-field.
+ * LLVM struct layout ({i64, ptr, i64, ptr}) must match this C struct's
+ * layout field-for-field.
  *
- * In THIS group nothing ever reads `pointer_word_bitmap` -- MEM-002's
- * collector is what traces it. Kept here now (rather than deferred to
- * MEM-002) because emitting it while TYPE-002's per-instantiation layouts
- * are still fresh is far cheaper than retrofitting it once code depends on
- * struct layout elsewhere (ARCHITECTURE_OVERHAUL.md §8 RT-001, point 3).
- *
- * `pointer_word_bitmap` covers only the first 64 eight-byte words (512
- * bytes) of a type's layout -- bit i set means "byte range [8i, 8i+8) may
- * hold a pointer" (conservative: it marks every pointer-SHAPED word, not
- * only ones proven to point into the GC heap specifically, since nothing
- * before MEM-001/MEM-002 tags a pointer field with its heap of origin).
- * A struct whose alloc size exceeds 512 bytes has bits 64+ silently
- * unrepresented -- a known, documented limitation for MEM-002 to widen if
- * it ever becomes a real constraint (see the RT-001 change record's Known
- * pitfalls). No TurfLang struct in tests/, lib/std/, or showcase/ is
- * anywhere near this size as of this writing.
+ * OVH-001 (docs/planning/OVERHAUL_REMAINING_WORK.md): the original RT-001
+ * version of this struct held the bitmap inline as a single `uint64_t`,
+ * covering only the first 64 eight-byte words (512 bytes) of a type's
+ * layout -- any pointer field past that point was silently untraced, which
+ * MEM-002's collector then depended on for correctness, turning a
+ * documented limitation into a live use-after-free (a `string` field past
+ * byte 512 of a GC-heap struct got freed out from under a still-live
+ * object). `word_count`/`pointer_words` replace it with a variable-length
+ * bitmap covering the type's ENTIRE layout, at any size: `word_count` is
+ * `ceil(size / 8)` (every 8-byte word of the allocation, including a
+ * trailing partial one), and `pointer_words` points at a
+ * `ceil(word_count / 64)`-element array of `uint64_t`, static storage,
+ * never freed -- bit `i % 64` of `pointer_words[i / 64]` set means "byte
+ * range [8i, 8i+8) may hold a pointer" (conservative: it marks every
+ * pointer-SHAPED word, not only ones proven to point into the GC heap
+ * specifically, since nothing before MEM-001/MEM-002 tags a pointer field
+ * with its heap of origin). See `turf_rt_typedesc_is_pointer_word()`'s own
+ * doc comment for the accessor that hides the two-level indexing.
  */
 typedef struct TurfTypeDesc {
-  uint64_t size;                /* allocation size in bytes (DataLayout::getTypeAllocSize) */
-  const char *name;             /* the struct's Turf-level name; static storage, never freed */
-  uint64_t pointer_word_bitmap; /* bit i set => word i (bytes [8i, 8i+8)) may hold a pointer */
+  uint64_t size;                    /* allocation size in bytes (DataLayout::getTypeAllocSize) */
+  const char *name;                 /* the struct's Turf-level name; static storage, never freed */
+  uint64_t word_count;              /* number of traced 8-byte words = ceil(size / 8) */
+  const uint64_t *pointer_words;    /* ceil(word_count / 64)-element bitmap array; static storage */
 } TurfTypeDesc;
 
 /*
@@ -72,7 +75,7 @@ typedef struct TurfTypeDesc {
  * collection's backing buffer), rather than widening the C layout with a
  * new field: the collector's mark phase (turfrt_gc.c) walks a traced
  * block's bytes in `desc->size`-byte STRIDES, re-applying
- * `pointer_word_bitmap` at every stride, until the stride count reaches the
+ * `pointer_words` at every stride, until the stride count reaches the
  * block's own actual allocated length (tracked by the block table, not by
  * this struct). A single-instance struct allocation is the special case
  * where the block's length exactly equals `desc->size` -- one stride, no
@@ -316,11 +319,14 @@ void turf_rt_panic(const char *kind, const char *msg, const char *file,
 
 /*
  * turf_rt_typedesc_is_pointer_word -- reads one bit back out of a
- * TurfTypeDesc's pointer_word_bitmap. See runtime/turfrt_types.c's own doc
- * comment: nothing but scripts/runtime_smoke.sh calls this in RT-001;
- * MEM-002's mark phase is the real, intended long-term caller. Returns 0
- * (never a diagnostic) for a NULL desc or an out-of-range word_index --
- * `pointer_word_bitmap` only ever covers words [0, 64).
+ * TurfTypeDesc's `pointer_words` array, hiding the two-level
+ * word_index/64, word_index%64 indexing (OVH-001) from every caller --
+ * turfrt_gc.c's mark phase is the real, intended caller (the collector's
+ * only consumer of a descriptor's bitmap). Returns 0 (never a diagnostic)
+ * for a NULL desc or a `word_index >= desc->word_count` -- unlike the old
+ * fixed 64-word cap this replaced, `word_count` is the type's REAL word
+ * count at any size, so this is a genuine bounds check, not a silent
+ * truncation.
  */
 int turf_rt_typedesc_is_pointer_word(const TurfTypeDesc *desc,
                                       uint64_t word_index);

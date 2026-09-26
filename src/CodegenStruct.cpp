@@ -40,6 +40,7 @@
 #include <iostream>
 #include <set>
 #include <unordered_map>
+#include <vector>
 
 using namespace llvm;
 
@@ -618,33 +619,46 @@ Value *ScopeAccessExprAST::codegen() {
 
 // Registers (or reuses) the identified LLVM struct type mirroring C's
 // `TurfTypeDesc` -- one shared type definition for every descriptor global,
-// not synthesized fresh per struct.
+// not synthesized fresh per struct. OVH-001: widened from
+// `{i64, ptr, i64}` (a single inline `uint64_t` bitmap, capped at 64
+// words/512 bytes -- MEM-002's mark loop silently stopped tracing past
+// that point, a live use-after-free) to `{i64, ptr, i64, ptr}` --
+// `word_count` plus a pointer to an out-of-line `[N x i64]` bitmap array,
+// covering a type's entire layout at any size. This is a compiler<->
+// runtime ABI change (F-MEM-4: lock-step, no compatibility shim) -- see
+// runtime/turfrt.h's matching `TurfTypeDesc` definition.
 static llvm::StructType *getOrCreateTurfTypeDescType() {
   if (auto *Existing = llvm::StructType::getTypeByName(*TheContext, "TurfTypeDesc"))
     return Existing;
   llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
   llvm::Type *PtrTy = llvm::PointerType::getUnqual(*TheContext);
-  return llvm::StructType::create(*TheContext, {I64Ty, PtrTy, I64Ty},
+  return llvm::StructType::create(*TheContext, {I64Ty, PtrTy, I64Ty, PtrTy},
                                   "TurfTypeDesc");
 }
 
-// Recursively ORs pointer-word bits for `T`'s layout into `Bitmap`, starting
-// at `ByteOffset`. Conservative, not GC-vs-manual precise (nothing before
-// MEM-001/MEM-002 tags a pointer field with which heap it points into) --
-// see runtime/turfrt.h's doc comment on TurfTypeDesc::pointer_word_bitmap
-// for why over-marking here is sound rather than merely convenient. By the
-// time a struct field's LLVM type reaches here it is always fully built
-// (StructDeclExprAST::codegen()'s own comment on embedded, non-recursive
-// struct fields -- a self-referential/recursive field is always a raw
-// POINTER, never embedded by value, so the isOpaque() branch below is
-// unreachable in practice and exists only as a defensive bound, not a
-// silently-accepted case).
+// Recursively ORs pointer-word bits for `T`'s layout into `Bitmap`
+// (pre-sized to cover every word of `T`'s own alloc size -- see
+// buildTurfTypeDescInit() below), starting at `ByteOffset`. Conservative,
+// not GC-vs-manual precise (nothing before MEM-001/MEM-002 tags a pointer
+// field with which heap it points into) -- see runtime/turfrt.h's doc
+// comment on TurfTypeDesc for why over-marking here is sound rather than
+// merely convenient. By the time a struct field's LLVM type reaches here
+// it is always fully built (StructDeclExprAST::codegen()'s own comment on
+// embedded, non-recursive struct fields -- a self-referential/recursive
+// field is always a raw POINTER, never embedded by value, so the
+// isOpaque() branch below is unreachable in practice and exists only as a
+// defensive bound, not a silently-accepted case).
 static void collectPointerWordBits(llvm::Type *T, const llvm::DataLayout &DL,
-                                   uint64_t ByteOffset, uint64_t &Bitmap) {
+                                   uint64_t ByteOffset,
+                                   std::vector<uint64_t> &Bitmap) {
   if (T->isPointerTy()) {
     uint64_t Word = ByteOffset / 8;
-    if (Word < 64)
-      Bitmap |= (1ULL << Word);
+    uint64_t Idx = Word / 64;
+    assert(Idx < Bitmap.size() &&
+           "OVH-001: pointer word falls outside the sized bitmap -- "
+           "buildTurfTypeDescInit()'s word-count computation is wrong");
+    if (Idx < Bitmap.size())
+      Bitmap[Idx] |= (1ULL << (Word % 64));
     return;
   }
   if (auto *NestedST = llvm::dyn_cast<llvm::StructType>(T)) {
@@ -667,6 +681,73 @@ static void collectPointerWordBits(llvm::Type *T, const llvm::DataLayout &DL,
   // Scalar (int/int32/double/bool/char): contributes no pointer bits.
 }
 
+// Shared by emitTurfTypeDesc() and getOrCreateElementTurfTypeDesc() (OVH-001
+// -- the old per-copy inline-bitmap logic was duplicated across both, which
+// is exactly how the 64-word cap ended up needing two independent fixes
+// instead of one): builds the `{size, name, word_count, pointer_words}`
+// constant for one LLVM type `T`. `NameStr` is the human-readable name
+// stored in the descriptor; `NameGVName`/`BitmapGVName` name the two
+// out-of-line globals the descriptor's `name`/`pointer_words` fields point
+// into (callers keep their own pre-existing naming for the first so
+// scripts/runtime_smoke.sh's --emit-llvm greps keep matching).
+static llvm::Constant *buildTurfTypeDescInit(llvm::Type *T,
+                                              const std::string &NameStr,
+                                              const std::string &NameGVName,
+                                              const std::string &BitmapGVName) {
+  const llvm::DataLayout &DL = TheModule->getDataLayout();
+  llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
+  uint64_t Size = DL.getTypeAllocSize(T).getFixedValue();
+
+  // Every 8-byte word of the type's own alloc size, including a trailing
+  // partial one -- OVH-001's replacement for the old fixed 64-word cap.
+  uint64_t WordCount = (Size + 7) / 8;
+  uint64_t NumBitmapWords = std::max<uint64_t>(1, (WordCount + 63) / 64);
+
+  std::vector<uint64_t> Bits(NumBitmapWords, 0);
+  collectPointerWordBits(T, DL, 0, Bits);
+
+  // The emitter's own length assertion (OVERHAUL_REMAINING_WORK.md OVH-001,
+  // strategy point 5) -- a future truncation of either quantity is loud in
+  // a debug build, not a silent missed root.
+  assert(WordCount * 8 >= Size &&
+         "OVH-001: word_count must cover every byte of the type's alloc size");
+  assert(Bits.size() == NumBitmapWords &&
+         "OVH-001: bitmap array length must match the computed word count");
+
+  // Same Builder-independent global-string-constant idiom this file's own
+  // ScopeAccessExprAST "NAMES" case above uses -- this runs at the very end
+  // of codegen (see EmitAllTurfTypeDescs() below), well past any point
+  // Builder's insertion point is meaningful for a fresh global.
+  llvm::Constant *NameStrConst =
+      llvm::ConstantDataArray::getString(*TheContext, NameStr, true);
+  auto *NameGV = new llvm::GlobalVariable(
+      *TheModule, NameStrConst->getType(), /*isConstant=*/true,
+      llvm::GlobalValue::PrivateLinkage, NameStrConst, NameGVName);
+  llvm::Constant *ZeroIdx =
+      llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
+  llvm::Constant *Indices[] = {ZeroIdx, ZeroIdx};
+  llvm::Constant *NamePtr = llvm::ConstantExpr::getInBoundsGetElementPtr(
+      NameStrConst->getType(), NameGV, Indices);
+
+  llvm::ArrayType *BitmapArrTy = llvm::ArrayType::get(I64Ty, NumBitmapWords);
+  std::vector<llvm::Constant *> BitmapWordConsts;
+  BitmapWordConsts.reserve(NumBitmapWords);
+  for (uint64_t W : Bits)
+    BitmapWordConsts.push_back(llvm::ConstantInt::get(I64Ty, W));
+  llvm::Constant *BitmapArrConst =
+      llvm::ConstantArray::get(BitmapArrTy, BitmapWordConsts);
+  auto *BitmapGV = new llvm::GlobalVariable(
+      *TheModule, BitmapArrTy, /*isConstant=*/true,
+      llvm::GlobalValue::PrivateLinkage, BitmapArrConst, BitmapGVName);
+  llvm::Constant *BitmapPtr = llvm::ConstantExpr::getInBoundsGetElementPtr(
+      BitmapArrTy, BitmapGV, Indices);
+
+  llvm::StructType *DescTy = getOrCreateTurfTypeDescType();
+  return llvm::ConstantStruct::get(
+      DescTy, {llvm::ConstantInt::get(I64Ty, Size), NamePtr,
+               llvm::ConstantInt::get(I64Ty, WordCount), BitmapPtr});
+}
+
 // Emits a constant TurfTypeDesc global for one already-fully-built (non-
 // opaque) `ST`, and keeps it alive across OPT-001's Internalize/GlobalDCE
 // via @llvm.compiler.used -- the forward hazard OPT-001's own text already
@@ -680,35 +761,11 @@ static void collectPointerWordBits(llvm::Type *T, const llvm::DataLayout &DL,
 // verifiably correct").
 static void emitTurfTypeDesc(llvm::StructType *ST) {
   std::string Name = ST->getName().str();
-  const llvm::DataLayout &DL = TheModule->getDataLayout();
-  uint64_t Size = DL.getTypeAllocSize(ST).getFixedValue();
-
-  uint64_t Bitmap = 0;
-  collectPointerWordBits(ST, DL, 0, Bitmap);
-
-  // Same Builder-independent global-string-constant idiom this file's own
-  // ScopeAccessExprAST "NAMES" case above uses -- this runs at the very end
-  // of codegen (see EmitAllTurfTypeDescs() below), well past any point
-  // Builder's insertion point is meaningful for a fresh global.
-  llvm::Constant *NameStrConst =
-      llvm::ConstantDataArray::getString(*TheContext, Name, true);
-  auto *NameGV = new llvm::GlobalVariable(
-      *TheModule, NameStrConst->getType(), /*isConstant=*/true,
-      llvm::GlobalValue::PrivateLinkage, NameStrConst,
-      "__turf_typedesc_name." + Name);
-  llvm::Constant *ZeroIdx =
-      llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
-  llvm::Constant *Indices[] = {ZeroIdx, ZeroIdx};
-  llvm::Constant *NamePtr = llvm::ConstantExpr::getInBoundsGetElementPtr(
-      NameStrConst->getType(), NameGV, Indices);
+  llvm::Constant *DescInit =
+      buildTurfTypeDescInit(ST, Name, "__turf_typedesc_name." + Name,
+                             "__turf_typedesc_bitmap." + Name);
 
   llvm::StructType *DescTy = getOrCreateTurfTypeDescType();
-  llvm::Constant *DescInit = llvm::ConstantStruct::get(
-      DescTy,
-      {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), Size),
-       NamePtr,
-       llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), Bitmap)});
-
   auto *DescGV = new llvm::GlobalVariable(
       *TheModule, DescTy, /*isConstant=*/true,
       llvm::GlobalValue::InternalLinkage, DescInit,
@@ -759,35 +816,14 @@ llvm::GlobalVariable *getOrCreateElementTurfTypeDesc(llvm::Type *ElemTy) {
            "struct element type -- see this function's own comment");
   }
 
-  const llvm::DataLayout &DL = TheModule->getDataLayout();
-  uint64_t Size = DL.getTypeAllocSize(ElemTy).getFixedValue();
-
-  uint64_t Bitmap = 0;
-  collectPointerWordBits(ElemTy, DL, 0, Bitmap);
-
   std::string Name;
   llvm::raw_string_ostream OS(Name);
   ElemTy->print(OS);
 
-  llvm::Constant *NameStrConst =
-      llvm::ConstantDataArray::getString(*TheContext, Name, true);
-  auto *NameGV = new llvm::GlobalVariable(
-      *TheModule, NameStrConst->getType(), /*isConstant=*/true,
-      llvm::GlobalValue::PrivateLinkage, NameStrConst,
-      "__turf_elemdesc_name");
-  llvm::Constant *ZeroIdx =
-      llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
-  llvm::Constant *Indices[] = {ZeroIdx, ZeroIdx};
-  llvm::Constant *NamePtr = llvm::ConstantExpr::getInBoundsGetElementPtr(
-      NameStrConst->getType(), NameGV, Indices);
+  llvm::Constant *DescInit = buildTurfTypeDescInit(
+      ElemTy, Name, "__turf_elemdesc_name", "__turf_elemdesc_bitmap");
 
   llvm::StructType *DescTy = getOrCreateTurfTypeDescType();
-  llvm::Constant *DescInit = llvm::ConstantStruct::get(
-      DescTy,
-      {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), Size),
-       NamePtr,
-       llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), Bitmap)});
-
   auto *DescGV = new llvm::GlobalVariable(
       *TheModule, DescTy, /*isConstant=*/true,
       llvm::GlobalValue::InternalLinkage, DescInit, "__turf_elemdesc");

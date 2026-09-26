@@ -370,9 +370,10 @@ static void gc_scan_block_precise(GcBlock *b, Worklist *wl) {
     return; /* opaque: no outgoing pointer word anywhere in this block */
   uint64_t stride = b->desc->size;
   for (uint64_t off = 0; off + stride <= b->size; off += stride) {
-    uint64_t max_word = stride / 8;
-    if (max_word > 64)
-      max_word = 64; /* pointer_word_bitmap's own documented 64-word limit */
+    /* OVH-001: word_count is the descriptor's REAL word count, at any
+     * size -- no fixed cap here any more (the old 64-word cap silently
+     * dropped every pointer field past byte 512, a live use-after-free). */
+    uint64_t max_word = b->desc->word_count;
     for (uint64_t w = 0; w < max_word; w++) {
       if (!turf_rt_typedesc_is_pointer_word(b->desc, w))
         continue;

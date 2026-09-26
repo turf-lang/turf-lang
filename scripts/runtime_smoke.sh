@@ -19,10 +19,13 @@
 #      exit code -- the exact contract test_runner.sh's own
 #      RUNTIME_ABORT_EXPECTED convention checks for `fail_*.tr` tests.
 #   4. A handful of representative struct types get a TurfTypeDesc with the
-#      correct size and pointer_word_bitmap, read back out of --emit-llvm
-#      output (the compiler's own recommended verification method for this
-#      group -- nothing YET reads the bitmap at runtime; MEM-002 is the
-#      first real consumer).
+#      correct size/word_count and pointer-words bitmap array, read back out
+#      of --emit-llvm output (the compiler's own recommended verification
+#      method for this group) -- including a type with more than 64 words
+#      (OVH-001: the original single-uint64_t bitmap silently truncated
+#      anything past word 63/byte 512, which MEM-002's collector then
+#      depended on for correctness -- a live use-after-free for any struct
+#      that size or larger).
 #   5. libturfrt's own C API (turf_rt_alloc/turf_rt_panic/
 #      turf_rt_typedesc_is_pointer_word), called directly from a small C
 #      program linked straight against lib/libturfrt.a -- no Turf compiler
@@ -119,7 +122,9 @@ else
 fi
 
 echo -e "${BOLD}4. TurfTypeDesc bitmaps for representative types${RESET}"
-cat > "$WORKDIR/types.tr" <<'EOF'
+BIG70_FIELDS=""
+for i in $(seq 0 69); do BIG70_FIELDS="${BIG70_FIELDS}f${i}: int, "; done
+cat > "$WORKDIR/types.tr" <<EOF
 import list::List;
 
 struct Plain {
@@ -132,34 +137,64 @@ struct WithPointer {
     tag: string
 }
 
+// OVH-001: 70 int fields (words 0-69) then a pointer field at word 70 --
+// past the old fixed 64-word bitmap cap.
+struct Big70 {
+    ${BIG70_FIELDS}name: string
+}
+
 fn main(): int {
     mut pl: Plain = Plain::default();
     mut wp: WithPointer = WithPointer::default();
     mut l: List<int> = List::default();
     l.push(1);
-    return pl.a + wp.p.a + l.length();
+    mut big: Big70 = Big70::default();
+    return pl.a + wp.p.a + l.length() + big.f0;
 }
 EOF
 if "$TURF" "$WORKDIR/types.tr" --emit-llvm -o "$WORKDIR/types" > /dev/null 2>&1; then
   IR="$WORKDIR/types.ll"
+  # `want_bitmap_words` is a comma-separated list of the expected [N x i64]
+  # bitmap array's own elements, e.g. "0,64" for a 2-word array.
   check_desc() {
-    local name="$1" want_size="$2" want_bitmap="$3"
-    local line
-    line=$(grep "@__turf_typedesc_${name} = " "$IR")
-    if echo "$line" | grep -qE "i64 ${want_size}, ptr @__turf_typedesc_name\.${name}, i64 ${want_bitmap} }"; then
-      pass "$name: size=$want_size bitmap=$want_bitmap"
+    local name="$1" want_size="$2" want_word_count="$3" want_bitmap_words="$4"
+    local desc_line bitmap_line n
+    desc_line=$(grep "@__turf_typedesc_${name} = " "$IR")
+    if echo "$desc_line" | grep -qE "i64 ${want_size}, ptr @__turf_typedesc_name\.${name}, i64 ${want_word_count}, ptr @__turf_typedesc_bitmap\.${name} }"; then
+      pass "$name: size=$want_size word_count=$want_word_count"
     else
-      fail "$name: expected size=$want_size bitmap=$want_bitmap, got: $line"
+      fail "$name: expected size=$want_size word_count=$want_word_count, got: $desc_line"
+    fi
+    n=$(( $(echo "$want_bitmap_words" | tr -cd ',' | wc -c) + 1 ))
+    bitmap_line=$(grep "@__turf_typedesc_bitmap\.${name} = " "$IR")
+    # LLVM's own printer collapses an all-zero constant array to the
+    # `zeroinitializer` sigil rather than spelling out every `i64 0`.
+    local want_array_lit
+    if echo "$want_bitmap_words" | grep -qE "^0(,0)*$"; then
+      want_array_lit="[${n} x i64] zeroinitializer"
+    else
+      want_array_lit="[${n} x i64] [$(echo "$want_bitmap_words" | sed 's/^/i64 /; s/,/, i64 /g')]"
+    fi
+    if echo "$bitmap_line" | grep -qF "$want_array_lit"; then
+      pass "$name: bitmap=[$want_bitmap_words] ($n word(s))"
+    else
+      fail "$name: expected bitmap literal '$want_array_lit', got: $bitmap_line"
     fi
   }
   # Plain { a: int (8B @0), b: double (8B @8) } -- no pointer words.
-  check_desc "Plain" 16 0
+  check_desc "Plain" 16 2 "0"
   # WithPointer { p: Plain (16B @0, no pointers), tag: string (8B @16, a
   # pointer) } -- bit 2 (word 16/8) set => 4.
-  check_desc "WithPointer" 24 4
+  check_desc "WithPointer" 24 3 "4"
   # List<int> { data: T* (@0, a pointer), len: int (@8), cap: int (@16) }
   # -- bit 0 set => 1.
-  check_desc "List_gen1_int" 24 1
+  check_desc "List_gen1_int" 24 3 "1"
+  # OVH-001: Big70 { f0..f69: int (70 * 8B = 560B), name: string (8B @560,
+  # a pointer) } -- word_count = ceil(568/8) = 71, so the bitmap array has
+  # ceil(71/64) = 2 words. `name`'s word index is 560/8 = 70, which falls
+  # in the SECOND array word (70/64 = 1) at bit 70%64 = 6 => value 64. The
+  # old fixed-64-word bitmap could not represent this bit at all.
+  check_desc "Big70" 568 71 "0,64"
 else
   fail "types.tr failed to compile"
 fi
@@ -176,12 +211,23 @@ int main(void) {
     void *p = turf_rt_alloc(64, NULL);
     assert(p != NULL);
 
-    TurfTypeDesc desc = {24, "WithPointer", 4}; /* bit 2 set */
+    uint64_t bits[1] = {4}; /* bit 2 set */
+    TurfTypeDesc desc = {24, "WithPointer", 3, bits};
     assert(turf_rt_typedesc_is_pointer_word(&desc, 0) == 0);
     assert(turf_rt_typedesc_is_pointer_word(&desc, 1) == 0);
     assert(turf_rt_typedesc_is_pointer_word(&desc, 2) == 1);
-    assert(turf_rt_typedesc_is_pointer_word(&desc, 64) == 0); /* out of range */
+    assert(turf_rt_typedesc_is_pointer_word(&desc, 3) == 0); /* out of range (word_count=3) */
     assert(turf_rt_typedesc_is_pointer_word(NULL, 0) == 0);
+
+    /* OVH-001: a descriptor wider than the old fixed 64-word cap -- word
+     * 128 (array index 128/64=2, bit 0) must still be traced correctly. */
+    uint64_t big_bits[3] = {0, 0, 1};
+    TurfTypeDesc big_desc = {1040, "Big", 130, big_bits};
+    assert(turf_rt_typedesc_is_pointer_word(&big_desc, 63) == 0);
+    assert(turf_rt_typedesc_is_pointer_word(&big_desc, 64) == 0);
+    assert(turf_rt_typedesc_is_pointer_word(&big_desc, 128) == 1);
+    assert(turf_rt_typedesc_is_pointer_word(&big_desc, 129) == 0);
+    assert(turf_rt_typedesc_is_pointer_word(&big_desc, 130) == 0); /* out of range */
 
     turf_rt_shutdown();
     return 0;
