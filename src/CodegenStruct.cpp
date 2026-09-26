@@ -748,28 +748,47 @@ static llvm::Constant *buildTurfTypeDescInit(llvm::Type *T,
                llvm::ConstantInt::get(I64Ty, WordCount), BitmapPtr});
 }
 
+// OVH-002 (docs/planning/OVERHAUL_REMAINING_WORK.md): a function body may
+// need to reference a NAMED struct type's own descriptor (e.g. to pass it
+// to `turf_rt_alloc` when heap-allocating an instance of that struct) at a
+// point in codegen that runs BEFORE `EmitAllTurfTypeDescs()` -- which is
+// deliberately the LAST thing to run (INV-RT-3). `getOrInsertGlobal()` is
+// the standard LLVM idiom for exactly this: if nothing has referenced this
+// name yet, it creates a plain external declaration (no initializer) that
+// `emitTurfTypeDesc()` (below) later fills in when it reaches this same
+// struct type in its own sweep; if `emitTurfTypeDesc()` already ran first,
+// this simply returns the real definition. Either order produces the same
+// single global -- never two, never a forward reference left dangling.
+llvm::GlobalVariable *getOrForwardDeclareTurfTypeDescGlobal(
+    llvm::StructType *ST) {
+  std::string Name = ST->getName().str();
+  llvm::StructType *DescTy = getOrCreateTurfTypeDescType();
+  return llvm::cast<llvm::GlobalVariable>(
+      TheModule->getOrInsertGlobal("__turf_typedesc_" + Name, DescTy));
+}
+
 // Emits a constant TurfTypeDesc global for one already-fully-built (non-
 // opaque) `ST`, and keeps it alive across OPT-001's Internalize/GlobalDCE
 // via @llvm.compiler.used -- the forward hazard OPT-001's own text already
 // records (ARCHITECTURE_OVERHAUL.md §8 RT-001: "Internalize/GlobalDCE must
-// not delete a descriptor referenced only from metadata"). Referencing it
-// from a real turf_rt_alloc call site instead (the design's other option)
-// isn't available in THIS group -- nothing calls turf_rt_alloc yet
-// (MEM-001 wires that up) -- so `llvm.compiler.used` is what keeps every
-// descriptor observable (via --emit-llvm) at every optimization level for
-// this group's own completion criterion ("descriptors are emitted and
-// verifiably correct").
+// not delete a descriptor referenced only from metadata"). Routed through
+// `getOrForwardDeclareTurfTypeDescGlobal()` (OVH-002) rather than an
+// unconditional `new GlobalVariable(...)` so that a call site elsewhere in
+// Codegen (`CodegenCore.cpp`'s `turf_rt_alloc` sites) that already forward-
+// referenced this exact struct's descriptor gets its definition filled in
+// on the SAME global, instead of silently receiving a renamed ".1"
+// duplicate while the real definition sits under the original name,
+// referenced by nothing.
 static void emitTurfTypeDesc(llvm::StructType *ST) {
   std::string Name = ST->getName().str();
   llvm::Constant *DescInit =
       buildTurfTypeDescInit(ST, Name, "__turf_typedesc_name." + Name,
                              "__turf_typedesc_bitmap." + Name);
 
-  llvm::StructType *DescTy = getOrCreateTurfTypeDescType();
-  auto *DescGV = new llvm::GlobalVariable(
-      *TheModule, DescTy, /*isConstant=*/true,
-      llvm::GlobalValue::InternalLinkage, DescInit,
-      "__turf_typedesc_" + Name);
+  llvm::GlobalVariable *DescGV = getOrForwardDeclareTurfTypeDescGlobal(ST);
+  DescGV->setInitializer(DescInit);
+  DescGV->setConstant(true);
+  DescGV->setLinkage(llvm::GlobalValue::InternalLinkage);
   llvm::appendToCompilerUsed(*TheModule, {DescGV});
 }
 

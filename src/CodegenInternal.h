@@ -67,6 +67,13 @@ llvm::Value *BuildErrorTag(const std::string &ErrorTypeName,
 /// error-tag operand).
 llvm::Function *getOrCreateStrcmpFn();
 
+/// Declares (once) or looks up `libturfrt`'s `turf_rt_alloc` -- see this
+/// function's own definition (CodegenCore.cpp) for the OVH-002 reasoning.
+/// Needed by CodegenExpr.cpp (`int`/`double` -> `string` cast, which built
+/// its result buffer with a bare `malloc` before OVH-002 -- a `string`
+/// value produced by any operation belongs on the GC heap, FREEZE.md §6.5).
+llvm::Function *getOrCreateTurfRtAllocFn();
+
 /// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)): the value a
 /// `@caller_location` function's hidden extra argument gets, either at a
 /// literal expression-level read (CallerLocationExprAST::codegen()) or at
@@ -257,6 +264,20 @@ void SetDebugLoc(const SourceLocation &Loc);
 /// `gc_alloc_zeroed(...)`/`gc_realloc(...)` operand being cast `to T*` and
 /// injects this descriptor in place of MEM-001's literal NULL.
 llvm::GlobalVariable *getOrCreateElementTurfTypeDesc(llvm::Type *ElemTy);
+
+/// OVH-002: returns (forward-declaring if necessary) the
+/// "__turf_typedesc_<Name>" global holding @p ST's own whole-struct
+/// TurfTypeDesc -- the SAME descriptor `EmitAllTurfTypeDescs()` emits for
+/// every named struct type in the module, just referenceable from a call
+/// site that runs before that late pass does. Needed by CodegenCore.cpp's
+/// `turf_rt_alloc` call sites (a message-carrying error value, an oversized
+/// `!T` box) so they can pass a real descriptor instead of `NULL`, for a
+/// struct type that is ALREADY fully built (INV-RT-3's own guarantee) by
+/// the time any function body codegens -- see this function's own
+/// definition (CodegenStruct.cpp) for why `emitTurfTypeDesc()` must fill in
+/// the SAME global object this returns, not a fresh one.
+llvm::GlobalVariable *getOrForwardDeclareTurfTypeDescGlobal(
+    llvm::StructType *ST);
 
 /// Set by CastExprAST::codegen() immediately before it calls codegen() on a
 /// `gc_alloc`/`gc_alloc_zeroed`/`gc_realloc` operand it recognizes as

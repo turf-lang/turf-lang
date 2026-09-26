@@ -242,22 +242,29 @@ static llvm::Constant *BuildBareTagString(const std::string &ErrorTypeName,
 }
 
 
-/// Declares (once) or looks up the C `malloc` used to heap-box a success
-/// value that doesn't fit in a FallibleValue's 64-bit successBits slot (see
-/// BoxToI64Slot()'s struct branch) -- same lookup-or-create pattern already
-/// used for string conversion buffers (see CastToType()'s int/double ->
-/// string branches), needed here for the identical reason: the boxed value
-/// must outlive the function that returns it.
-static Function *getOrCreateMallocFn() {
-  Function *MallocF = TheModule->getFunction("malloc");
-  if (!MallocF) {
+/// Declares (once) or looks up `libturfrt`'s `turf_rt_alloc` -- the typed,
+/// COLLECTED GC-heap allocation entrypoint (`runtime/turfrt.h`), used to
+/// heap-box a success value that doesn't fit in a FallibleValue's 64-bit
+/// successBits slot (BoxToI64Slot()'s struct branch) and a message-carrying
+/// error value (CodegenErrorVariantConstructWithMessage(), below). OVH-002
+/// (docs/planning/OVERHAUL_REMAINING_WORK.md): both call sites used to
+/// reach a bare `malloc` instead -- correct before MEM-002's collector
+/// existed, a live use-after-free once it did, because a GC-heap pointer
+/// (a `string` field inside the boxed value, the error value's own message
+/// pointer) stored ONLY inside that manual-heap block was invisible to the
+/// collector's mark phase (F-MEM-3: manual memory is never traced). Same
+/// lookup-or-create pattern `getOrCreateStrcmpFn()`/the gc_alloc dispatch
+/// in `CodegenFunc.cpp` already use for a bare libturfrt entrypoint.
+Function *getOrCreateTurfRtAllocFn() {
+  Function *AllocF = TheModule->getFunction("turf_rt_alloc");
+  if (!AllocF) {
+    PointerType *PtrTy = PointerType::get(*TheContext, 0);
     llvm::FunctionType *FT = llvm::FunctionType::get(
-        PointerType::get(*TheContext, 0),
-        {llvm::Type::getInt64Ty(*TheContext)}, false);
-    MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
-                               TheModule.get());
+        PtrTy, {llvm::Type::getInt64Ty(*TheContext), PtrTy}, false);
+    AllocF = Function::Create(FT, Function::ExternalLinkage, "turf_rt_alloc",
+                              TheModule.get());
   }
-  return MallocF;
+  return AllocF;
 }
 
 
@@ -271,9 +278,11 @@ static Function *getOrCreateMallocFn() {
 /// live while converting net.tr's TcpConnection::connect() to `!T` (a
 /// single-field `{fd: int}` struct is still a real LLVM struct, not a bare
 /// i64, so returning it silently truncated to zero bits before this branch
-/// existed). Heap-allocates space, stores the struct there, and boxes the
-/// POINTER instead -- same "must outlive the function" reasoning as an
-/// error tag string, just for the success side.
+/// existed). Heap-allocates space on the GC HEAP (OVH-002: not a bare
+/// `malloc` -- see getOrCreateTurfRtAllocFn()'s own doc comment), stores
+/// the struct there, and boxes the POINTER instead -- same "must outlive
+/// the function" reasoning as an error tag string, just for the success
+/// side.
 static Value *BoxToI64Slot(Value *Val) {
   llvm::Type *Ty = Val->getType();
   llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
@@ -294,9 +303,21 @@ static Value *BoxToI64Slot(Value *Val) {
     // callers never read successBits back for a void T anyway.
     return llvm::ConstantInt::get(I64Ty, 0);
   // Anything else (structs, fixed-size arrays by value): too wide for the
-  // inline slot, so heap-box it instead.
+  // inline slot, so heap-box it instead, on the GC heap, with a real
+  // descriptor -- a NAMED struct type's own descriptor (the SAME one
+  // EmitAllTurfTypeDescs() emits for it, referenced before that late pass
+  // runs, OVH-002) if `Ty` is one, else the general per-element-type
+  // descriptor (getOrCreateElementTurfTypeDesc(), already handles an
+  // anonymous type like a fixed-size array). Primitive `T` never reaches
+  // this branch (every scalar case above returns first), so only
+  // aggregates ever need this.
   Value *Size = ConstantInt::get(I64Ty, TheModule->getDataLayout().getTypeAllocSize(Ty));
-  Value *HeapSlot = Builder->CreateCall(getOrCreateMallocFn(), {Size}, "box_slot");
+  Value *DescArg;
+  if (auto *ST = llvm::dyn_cast<llvm::StructType>(Ty))
+    DescArg = getOrForwardDeclareTurfTypeDescGlobal(ST);
+  else
+    DescArg = getOrCreateElementTurfTypeDesc(Ty);
+  Value *HeapSlot = Builder->CreateCall(getOrCreateTurfRtAllocFn(), {Size, DescArg}, "box_slot");
   Builder->CreateStore(Val, HeapSlot);
   return Builder->CreatePtrToInt(HeapSlot, I64Ty, "box_ptr_wide");
 }
@@ -350,8 +371,8 @@ Function *getOrCreateStrcmpFn() {
 /// has, message-carrying or not). No heap allocation is needed here
 /// specifically -- everything is compile-time-known -- unlike
 /// ErrorVariantConstructWithMessage's own Codegen branch
-/// (FuncCallExprAST::codegen(), CodegenFunc.cpp), which mallocs because its
-/// message is, in general, a runtime-computed value.
+/// (FuncCallExprAST::codegen(), CodegenFunc.cpp), which GC-heap-allocates
+/// (OVH-002) because its message is, in general, a runtime-computed value.
 Value *BuildErrorTag(const std::string &ErrorTypeName,
                             const std::string &VariantName) {
   llvm::StructType *EVTy = getErrorValueType();
@@ -370,9 +391,16 @@ Value *BuildErrorTag(const std::string &ErrorTypeName,
 /// messageExpr)` -- the message-carrying construction. Unlike BuildErrorTag()
 /// (fully compile-time-known, a global constant suffices), @p MessageVal is
 /// in general a RUNTIME value (e.g. built from string concatenation), so
-/// this heap-allocates -- same "the value must outlive the function that
-/// returns it" reasoning BoxToI64Slot() already uses for an oversized
-/// success value, just for the error side. Called from
+/// this heap-allocates on the GC HEAP (OVH-002: was a bare `malloc` before
+/// MEM-002's collector existed to trace into it -- `message` is a GC-heap
+/// `string` pointer, and a `TurfErrorValue` reachable only through manual
+/// memory made it invisible to the collector's mark phase, F-MEM-3) --
+/// same "the value must outlive the function that returns it" reasoning
+/// BoxToI64Slot() already uses for an oversized success value, just for
+/// the error side. `TurfErrorValue`'s own descriptor (both fields are
+/// pointers) is the SAME one `EmitAllTurfTypeDescs()` emits for it as an
+/// ordinary named struct type, referenced here before that late pass runs
+/// (getOrForwardDeclareTurfTypeDescGlobal(), OVH-002). Called from
 /// FuncCallExprAST::codegen() (CodegenFunc.cpp), which evaluates the
 /// message argument and passes the resulting Value* in.
 Value *CodegenErrorVariantConstructWithMessage(const std::string &ErrorTypeName,
@@ -381,8 +409,10 @@ Value *CodegenErrorVariantConstructWithMessage(const std::string &ErrorTypeName,
   llvm::StructType *EVTy = getErrorValueType();
   llvm::DataLayout DL = TheModule->getDataLayout();
   uint64_t Size = DL.getTypeAllocSize(EVTy).getFixedValue();
+  Value *DescArg = getOrForwardDeclareTurfTypeDescGlobal(EVTy);
   Value *HeapSlot = Builder->CreateCall(
-      getOrCreateMallocFn(), {ConstantInt::get(Type::getInt64Ty(*TheContext), Size)},
+      getOrCreateTurfRtAllocFn(),
+      {ConstantInt::get(Type::getInt64Ty(*TheContext), Size), DescArg},
       "errval_msg");
   Value *TagFieldPtr = Builder->CreateStructGEP(EVTy, HeapSlot, 0, "tag");
   Builder->CreateStore(BuildBareTagString(ErrorTypeName, VariantName), TagFieldPtr);
