@@ -28,6 +28,20 @@
 #      docs/architecture/boundary.md's "One documented exception" section
 #      for the one known, pre-existing, out-of-scope exception this script
 #      deliberately does not flag).
+#   4. OVH-002 (docs/planning/OVERHAUL_REMAINING_WORK.md): no Codegen call
+#      site reaches a bare `malloc` under the name `getOrCreateMallocFn()`
+#      any more -- both of its former callers now GC-heap-allocate via
+#      `turf_rt_alloc` with a real descriptor instead (F-MEM-1's precise
+#      tracing depends on every GC-heap-bound allocation going through it).
+#   5. OVH-002, `docs/architecture/boundary.md` §5: a best-effort scan for
+#      `mem::alloc(sizeof(SomeType))` in `lib/std`/`showcase` where
+#      `SomeType` has a `string`/collection field -- exactly the "hide a
+#      GC pointer inside untraced manual memory" shape this group fixed at
+#      its two known stdlib/showcase sites (json.tr, kv_store_server.tr).
+#      Best-effort, not exhaustive: it only recognizes the textual
+#      `mem::alloc(sizeof(...))` shape and a same-repo `struct Name { ... }`
+#      declaration to check fields against -- see boundary.md for why a
+#      fully general check isn't attempted.
 #
 # Usage: scripts/check_boundary.sh
 # Exit:  0 = every check passed; 1 = at least one failed.
@@ -94,6 +108,35 @@ if [ -n "$MISSING" ]; then
   fail "name(s) registered as a bare intrinsic but undocumented in include/Intrinsics.h:$MISSING"
 else
   pass "every RegisterBuiltin() name, plus sizeof/typeof, is documented in include/Intrinsics.h"
+fi
+
+# ── 4. getOrCreateMallocFn() has no remaining Codegen caller ────────────────
+echo -e "\n${BOLD}4. No Codegen call site reaches a bare malloc via getOrCreateMallocFn()${RESET}"
+MALLOC_HITS=$(grep -rn "getOrCreateMallocFn" src/Codegen*.cpp 2>/dev/null)
+if [ -n "$MALLOC_HITS" ]; then
+  fail "getOrCreateMallocFn() is referenced again in Codegen -- a GC-heap allocation may be silently bypassing turf_rt_alloc:"
+  echo "$MALLOC_HITS" | sed 's/^/       /'
+else
+  pass "getOrCreateMallocFn() has no remaining definition or caller in src/Codegen*.cpp"
+fi
+
+# ── 5. mem::alloc(sizeof(SomeType)) never boxes a GC-pointer-holding type ──
+echo -e "\n${BOLD}5. mem::alloc(sizeof(...)) in lib/std/showcase never boxes a string/collection field${RESET}"
+BOXED_TYPES=$(grep -rohE 'mem::alloc\(sizeof\([A-Za-z_][A-Za-z0-9_]*\)\)' lib/std showcase 2>/dev/null \
+              | grep -oE '\(sizeof\([A-Za-z_][A-Za-z0-9_]*\)\)' \
+              | grep -oE '[A-Za-z_][A-Za-z0-9_]*' | grep -v '^sizeof$' | sort -u)
+BOUNDARY5_FAILED=0
+for t in $BOXED_TYPES; do
+  FIELDS=$(grep -rhozE "struct[[:space:]]+$t([[:space:]]*<[^>]*>)?[[:space:]]*\{[^}]*\}" lib/std showcase 2>/dev/null \
+           | tr -d '\0')
+  if echo "$FIELDS" | grep -qE ':[[:space:]]*(string|List<|Map<|Set<|Stack<|Queue<)'; then
+    fail "mem::alloc(sizeof($t)) boxes '$t', which has a string/collection field:"
+    echo "$FIELDS" | sed 's/^/       /'
+    BOUNDARY5_FAILED=1
+  fi
+done
+if [ "$BOUNDARY5_FAILED" -eq 0 ]; then
+  pass "no mem::alloc(sizeof(...)) site boxes a type with a string/collection field"
 fi
 
 echo
