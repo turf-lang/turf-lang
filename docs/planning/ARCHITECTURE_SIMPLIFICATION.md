@@ -135,6 +135,49 @@ of the "split-brain" issue §6 already names, not a new problem:**
   it's needed, instead of made once and trusted) — evidence for the
   general thesis, not just for phase 3's own scope.
 
+**Evidence, gathered live during a 2026-09-26 session (SLM-001,
+`docs/development/changes/SLM-001.md`) — a second, independent tool
+(`Sandbox`, not `turf-lsp`) hitting the identical ambient-state shape §1
+already names, this time from INSIDE the compiler's own codebase, not an
+external consumer of it:**
+
+- **`Sandbox::validate()` (`src/Sandbox.cpp`) is a hand-written save/restore
+  dance around `SourceLines`/`DiagnosticEngine`'s global diagnostics list —
+  structurally the same workaround `CompileBuffer.cpp`'s first ~40 lines
+  already do for `turf-lsp`**, just inside the main compiler binary instead
+  of an external tool: `auto savedSourceLines = SourceLines; ... SourceLines
+  = Snapshot.SourceCode; ... runFullSemanticPass(...); ... SourceLines =
+  savedSourceLines;` (`Sandbox.cpp:427-445`). This exists because there is no
+  "compile this text, get a value back" function anywhere in the compiler —
+  the only way to run the Lexer/Parser/Resolver/TypeChecker pipeline at all
+  is to point the ambient globals at your text, run the pipeline for its
+  side effects, and put the globals back before anyone notices. `--smart`'s
+  own sandbox verification (§16 of `ARCHITECTURE_OVERHAUL.md`, load-bearing —
+  it's the only thing between a model hallucination and a user's source)
+  is built entirely on top of this workaround, meaning the ambient-state
+  problem isn't just costing `turf-lsp` external maintenance burden — it's
+  already inside the one piece of the compiler that most needs to run
+  the pipeline repeatedly, in isolation, without cross-contaminating global
+  state.
+- **Concrete cost this imposed on a real feature, not a hypothetical one:**
+  extending SLM-001 to measure "did an accepted `--smart` fix actually
+  preserve the program's meaning, not just clear the compile error"
+  (`ARCHITECTURE_OVERHAUL.md` §16.4's semantic-correctness rate) needed a NEW
+  CLI flag (`--smart-write-fix=<path>`) that writes the Sandbox's validated
+  in-memory text out to a real file, plus a benchmark tool
+  (`scripts/slm_benchmark/run_benchmark.py`) that then shells out to `turf`
+  **two more times** as a subprocess — once to actually compile the written
+  file through real Codegen and linking (`Sandbox::validate()` never reaches
+  Codegen at all; it only re-runs Lex/Parse/Resolve/TypeCheck/Lint), once
+  more to execute the resulting binary and read its exit code as the oracle.
+  With a real `Compilation`/`SemanticModel`+lowering API (§5's target shape),
+  this would have been: take the already-validated `BoundProgram`, lower and
+  JIT it in-process, run it, read the result — no subprocess, no temp files,
+  no second full re-parse of a file already fully understood one call
+  earlier. The workaround was successfully built (three subprocess hops
+  instead of zero), but it's a direct, measured illustration of exactly the
+  tax §1 already predicted this architecture would keep charging.
+
 **One clarification, so this isn't overstated:** the AST classes having no
 single `AST.cpp` is *not* part of this problem. AST nodes are deliberately
 pure data + a virtual-dispatch declaration, with each pass (`Codegen`,
