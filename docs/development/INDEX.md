@@ -40,6 +40,7 @@ record does; `status` tracks the record, not the branch.
 | [`TEMPLATE.md`](TEMPLATE.md) | The change-record template. Copy it at the *start* of a session. |
 | [`changes/`](changes/) | One record per feature group. |
 | [`handbook-sync/`](handbook-sync/) | The queue of handbook/reference edits owed, and the archive of completed ones. |
+| [`OVERHAUL_CLOSURE_AUDIT.md`](OVERHAUL_CLOSURE_AUDIT.md) | The 2026-09-26 final audit of the Overhaul: what passed, what failed (with reproducers), and why closure is pending on `docs/planning/OVERHAUL_REMAINING_WORK.md`. |
 
 `docs/planning/` (roadmap, design notes, limitations) and `docs/architecture/`
 (subsystem internals) keep their existing roles unchanged. This directory is
