@@ -1,5 +1,16 @@
 # Architecture Simplification — killing ambient state, giving the frontend a real product
 
+> **Assessed 2026-09-26** (`docs/planning/ROADMAP_v2.0.0.md` Part III). The
+> diagnosis stands and was strengthened: phase 0★'s split brain now has a
+> user-visible reproducer (a user `struct T` breaks `List<int>` —
+> `docs/planning/OVERHAUL_REMAINING_WORK.md` OVH-006). Proposed placement:
+> 0★'s correctness fix in OVH-006; the shared generic type walker as
+> **SMP-002** and a compiler query facade (phase 2's user-visible half) as
+> **SMP-001**, both before 2.0; phases 0, 1, 2 (full), 3, 4, 5 after 2.0 as a
+> tracked initiative (`docs/planning/FUTURE.md` §B, F-S0 … F-S5). Everything
+> below is unchanged and still discussion until each phase gets its own
+> change record.
+
 **Status: discussion, not a decision.** Nothing here is frozen. This document
 exists so the conversation that produced it isn't lost, and so a future
 session (human or AI) has a starting point instead of re-deriving it. Turning

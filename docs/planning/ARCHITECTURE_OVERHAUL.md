@@ -1,8 +1,18 @@
 # TurfLang Compiler & Language Architecture Overhaul
 
-> **Status:** architectural blueprint. Nothing in this document has been
-> implemented. It is written to be consumed one feature group at a time by
-> independent implementation sessions.
+> **Status (2026-09-26): implemented, closure pending.** All 23 feature
+> groups have landed (`docs/development/INDEX.md`). The final closure audit,
+> `docs/development/OVERHAUL_CLOSURE_AUDIT.md`, found remaining defects that
+> must be fixed before the Overhaul is closed; they are specified in
+> `docs/planning/OVERHAUL_REMAINING_WORK.md` (items OVH-001 … OVH-015). §27's
+> Deferred Work Register has been reclassified into
+> `docs/planning/ROADMAP_v2.0.0.md` (Part II) and `docs/planning/FUTURE.md`.
+> This document stays the historical specification; `docs/development/FREEZE.md`
+> stays authoritative for the frozen decisions.
+>
+> *Original status line:* architectural blueprint. Nothing in this document
+> has been implemented. It is written to be consumed one feature group at a
+> time by independent implementation sessions.
 >
 > **Written:** 2026-09-17, against commit `74e9225` (branch
 > `book/turflang-textbook`), verified live against a `--release` build of
@@ -5267,6 +5277,12 @@ number is the point.
 ---
 
 ## 27. Deferred Work Register
+
+> **Reclassified 2026-09-26.** Every row below now has a decision (2.0 /
+> FUTURE / superseded) in `docs/planning/ROADMAP_v2.0.0.md` Part II; the
+> post-2.0 rows, with the rationale below preserved, live in
+> `docs/planning/FUTURE.md`. The table is kept unchanged as the historical
+> record.
 
 Everything this audit identified that is **real** but **not scheduled in this
 milestone**, in one place, so nothing is lost by being called "out of scope".
