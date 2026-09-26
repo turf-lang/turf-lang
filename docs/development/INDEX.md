@@ -28,6 +28,7 @@ record does; `status` tracks the record, not the branch.
 | STD-002 | Standard-library diagnostics | landed | 2026-09-25 | 2026-09-25 | Lexer, Parser, AST, Resolver, TypeChecker, Codegen, diagnostics, stdlib | [STD-002](changes/STD-002.md) |
 | STD-003 | Post-monomorphization standard-library modernization | landed | 2026-09-26 | 2026-09-26 | stdlib (new `hashing.tr`, `map.tr`/`set.tr` hash-index rewrite, `http.tr` simplification, `list.tr` generic sort/search), Resolver, TypeChecker, Monomorphizer (THREE independent compiler-bug fixes, see change record), documentation | [STD-003](changes/STD-003.md) |
 | OPT-002 | Check elimination and frontend specialization | landed | 2026-09-26 | 2026-09-26 | CFG/analysis (new `ValueRangePass::markElidableChecks()`), Codegen, AST, tests, build (`CallGraphPass` deleted) | [OPT-002](changes/OPT-002.md) |
+| SLM-001 | Diagnostic-assistant architecture | landed | 2026-09-26 | 2026-09-26 | diagnostics, SLM (deterministic-fix layer, type-context hints, on-disk cache), TypeChecker, Errors, new `scripts/slm_benchmark/`, tests | [SLM-001](changes/SLM-001.md) |
 
 ## How to use this directory
 
