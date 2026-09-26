@@ -36,6 +36,7 @@ record does; `status` tracks the record, not the branch.
 | OVH-009 | `>>` closing nested generic arguments is a parse error | landed | 2026-09-26 | 2026-09-26 | Parser (`ParserCore.cpp` — `ParseType()`), tests, documentation | [OVH-009](changes/OVH-009.md) |
 | OVH-005 | `int32`: `++`/`--` ICE; untyped literal rejected; wrong-reason test | landed | 2026-09-26 | 2026-09-26 | TypeChecker (`TypeCheckerCore.cpp`, `TypeCheckerDecl.cpp`, `TypeCheckerExpr.cpp`, `TypeCheckerStmt.cpp`, `TypeCheckerCall.cpp`), Codegen (`CodegenVar.cpp` — debug assertion), tests, documentation | [OVH-005](changes/OVH-005.md) |
 | OVH-006 | Generic type-parameter names captured by user type names | landed | 2026-09-26 | 2026-09-26 | Resolver (`ResolverDecl.cpp` — `visitStructDecl()`), TypeChecker/Codegen doc comments (`TypeCheckerDecl.cpp`, `TypeCheckerCall.cpp`), tests, documentation | [OVH-006](changes/OVH-006.md) |
+| OVH-007 | Chained field access through a nested generic struct field fails | landed | 2026-09-26 | 2026-09-26 | Codegen (`CodegenCore.cpp` — `getExprType()`'s `FieldAccessExprAST` Subst-recovery), tests, documentation | [OVH-007](changes/OVH-007.md) |
 
 ## How to use this directory
 
