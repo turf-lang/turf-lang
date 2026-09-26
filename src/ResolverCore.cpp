@@ -19,6 +19,7 @@
 #include "Builtins.h"        // LookupBuiltin — for skipping bare intrinsics in visitFuncCall
 #include "Errors.h"          // ReferenceError, DuplicateDeclarationError
 #include "ErrorsStruct.h"    // StructLayoutCycleError
+#include "Monomorphize.h"    // Monomorphize::instantiatedDeclName() -- byValueEdgeTarget()'s clone-name resolution, OVH-004
 #include "ResolverSymbolTable.h"
 #include "ResolverInternal.h"
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
@@ -836,12 +837,32 @@ enum class DFSColor { Grey, Black };
  * is deliberately NOT unwrapped further -- what it points to is irrelevant
  * to ITS OWN size.
  *
+ * OVH-004: a `GenericType` field first tries its CONCRETE instantiation --
+ * `Monomorphize::instantiatedDeclName(BaseName, TypeArgs)`, the exact same
+ * mangled name `drainStructRequests()` gives the clone it registers into
+ * @p KnownStructs under `Clone->getName()` before calling
+ * `checkStructLayoutAcyclicityForClone()` -- before falling back to the bare
+ * base name. Without this, `struct A<T> { val: T }` + `struct B { back:
+ * A<B> }` silently escaped detection: the base-name fallback always points
+ * at the shared TEMPLATE decl for "A", whose own field is still the
+ * unsubstituted `TurfGenericParamType` placeholder `T` (no further edges),
+ * so the walk into `A<B>` from `B` never reached back to the concrete clone
+ * `A_gen1_B` that is actually on the DFS path -- the cycle closed only in
+ * reality, never in this graph. The mangled lookup is a pure "is this exact
+ * instantiation already a known node" query: it costs nothing when it
+ * misses (every Pass-1 template-only call, where no clone has ever been
+ * registered) and cannot fabricate a false edge, since @p KnownStructs only
+ * ever contains real, already-hoisted-or-cloned struct decls.
+ *
  * @param KnownStructs Every struct name reached so far (HoistedStructDecls_
- *                     keyed by name) -- an edge target that isn't in this
- *                     set is either a primitive/generic-param placeholder
- *                     or a genuinely unknown name (Pass 2's validateNamedType()
- *                     raises UnknownTypeError for the latter; this check
- *                     runs before that and simply finds no edge either way).
+ *                     keyed by name, plus -- for the per-clone call -- the
+ *                     one new clone under its own mangled name) -- an edge
+ *                     target that isn't in this set is either a
+ *                     primitive/generic-param placeholder, a not-yet-drained
+ *                     instantiation, or a genuinely unknown name (Pass 2's
+ *                     validateNamedType() raises UnknownTypeError for the
+ *                     last case; this check runs before that and simply
+ *                     finds no edge either way).
  */
 std::string byValueEdgeTarget(
     const TurfType *T,
@@ -853,6 +874,10 @@ std::string byValueEdgeTarget(
     return byValueEdgeTarget(getArrayElementType(T), KnownStructs);
 
   if (const auto *GT = dynamic_cast<const GenericType *>(T)) {
+    std::string Mangled =
+        Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
+    if (KnownStructs.count(Mangled))
+      return Mangled;
     auto It = KnownStructs.find(GT->getBaseName());
     return It != KnownStructs.end() ? GT->getBaseName() : "";
   }
