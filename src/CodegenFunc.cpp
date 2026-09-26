@@ -1259,6 +1259,22 @@ Value *FuncCallExprAST::codegen() {
     }
     return Builder->CreateCall(CheckedFreeFunc, {PVal});
   }
+  if (CalleeName == "gc_pin" || CalleeName == "gc_unpin") {
+    PointerType *PtrTy = PointerType::getUnqual(*TheContext);
+    Value *PVal = Args[0]->codegen();
+    if (!PVal)
+      return nullptr;
+    const char *RtFuncName =
+        (CalleeName == "gc_pin") ? "turf_rt_pin" : "turf_rt_unpin";
+    Function *PinFunc = TheModule->getFunction(RtFuncName);
+    if (!PinFunc) {
+      FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext),
+                                            {PtrTy}, /*isVarArg=*/false);
+      PinFunc = Function::Create(FT, Function::ExternalLinkage, RtFuncName,
+                                  TheModule.get());
+    }
+    return Builder->CreateCall(PinFunc, {PVal});
+  }
 
   std::vector<Value *> EvaluatedArgs;
   for (auto &Arg : Args) {

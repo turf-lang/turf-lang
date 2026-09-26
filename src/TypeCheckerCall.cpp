@@ -438,6 +438,14 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         return;
       }
 
+      // ── gc_pin(p) / gc_unpin(p) → void ──────────────────────────────────
+      // OVH-010. Same minimal-validation convention as gc_checked_free's
+      // own branch just above.
+      if (CalleeName == "gc_pin" || CalleeName == "gc_unpin") {
+        setType(&Node, TurfVoid());
+        return;
+      }
+
       // assert/fail used to have bespoke branches here (assert needed a
       // special Arity == -1 sentinel to express its 1-or-2-arg signature,
       // since it isn't a single fixed count the generic check above can

@@ -479,6 +479,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     static const std::unordered_set<std::string> BareIntrinsics = {
         "typeof", "gc_alloc", "gc_alloc_zeroed", "gc_realloc",
         "gc_collect", "gc_is_managed", "gc_checked_free",
+        "gc_pin", "gc_unpin",
     };
     if (BareIntrinsics.count(CalleeName)) {
       // True bare intrinsic — skip error, TypeChecker validates arity/types.

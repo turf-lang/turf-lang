@@ -95,6 +95,14 @@ static void ensure_builtins_registered() {
   RegisterBuiltin("gc_collect",      {0, "Force one GC mark-sweep cycle"});
   RegisterBuiltin("gc_is_managed",   {1, "True iff p is a live GC-heap block's own start address"});
   RegisterBuiltin("gc_checked_free", {1, "Free a manual-heap pointer, panicking on a GC-heap one"});
+
+  // OVH-010 (docs/planning/OVERHAUL_REMAINING_WORK.md): the pinning surface
+  // F-MEM-3's own documented unsoundness calls for -- a GC pointer stored
+  // only inside manual-heap memory needs a way to become a precise root.
+  // lib/std/mem/mem.tr's mem::root()/mem::unroot() are the one caller each,
+  // same shape as gc_checked_free/mem::free above.
+  RegisterBuiltin("gc_pin",   {1, "Pin the GC object containing p against collection"});
+  RegisterBuiltin("gc_unpin", {1, "Release one pin gc_pin placed on the GC object containing p"});
 }
 
 // CodegenIntrinsic() used to live here -- the Codegen-side implementation

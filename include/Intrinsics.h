@@ -99,6 +99,16 @@
 //                  the same file -- this bare intrinsic is what replaced
 //                  that extern binding. Registered in Builtins.cpp's
 //                  g_builtins (Arity 1).
+//   gc_pin(p) / gc_unpin(p) -- OVH-010
+//                  (docs/planning/OVERHAUL_REMAINING_WORK.md). Pins/unpins
+//                  the GC object containing `p` against collection
+//                  (turf_rt_pin/turf_rt_unpin) -- an interior pointer is
+//                  fine, pins nest, and `p` need not be a GC pointer at all
+//                  (a documented no-op). `lib/std/mem/mem.tr`'s
+//                  `mem::root()`/`mem::unroot()` are their one caller each,
+//                  the same one-bare-intrinsic-one-stdlib-wrapper shape
+//                  `gc_checked_free`/`mem::free` already use. Both Arity 1,
+//                  registered in Builtins.cpp's g_builtins.
 //   caller_location -- STD-002. Unlike every other bare intrinsic above, a
 //                  real reserved LEXER KEYWORD (TOK_CALLER_LOCATION,
 //                  include/Lexer.h), not a g_builtins entry -- it's a
@@ -189,6 +199,8 @@
 //                           above.
 //   turf_rt_checked_free(p) -- MEM-002. Reached via `gc_checked_free(p)`
 //                           above.
+//   turf_rt_pin(p) / turf_rt_unpin(p) -- OVH-010. Reached via `gc_pin(p)`/
+//                           `gc_unpin(p)` above.
 //
 // TurfTypeDesc (the {size, name, pointer_word_bitmap} struct these
 // functions traffic in) is NOT itself a callable intrinsic, but every

@@ -150,6 +150,37 @@ fn usable_size(p: void*): int {
     return malloc_usable_size(p);
 }
 
+// root: pins the GC object containing `p` so the collector never reclaims
+// it, until a matching unroot(p) -- OVH-010
+// (docs/planning/OVERHAUL_REMAINING_WORK.md), the answer §14.3/§14.6
+// promised to F-MEM-3's own documented unsoundness: a GC pointer (a
+// runtime-built `string`, a collection's backing buffer) stored ONLY
+// inside a manual-heap struct (a `mem::alloc`'d buffer, a C library's own
+// bookkeeping) is invisible to every other root-finding path -- it is not
+// on the stack, not in a register, not behind a global root, and no other
+// GC-heap block's own declared pointer words reach it either -- so the
+// collector frees it out from under whoever's holding it in manual memory.
+// `p` may be an interior pointer (e.g. `buf + k`, not only a block's exact
+// start), exactly like a stack/register root; the whole object it points
+// into is what gets pinned. Pins nest: two independent root(p) calls need
+// two matching unroot(p) calls. A `p` that is not a GC-heap pointer at all
+// is a documented no-op, not an error -- C memory (an `int` cast to
+// `void*`, an FFI buffer) is legitimately passed through here too, and
+// pinning it would be meaningless.
+fn root(p: void*): void {
+    gc_pin(p);
+}
+
+// unroot: releases one pin root(p) placed on the GC object containing `p`.
+// Panics if that object currently has no outstanding pin at all -- an
+// unbalanced unroot() (never rooted, or already fully unrooted) is treated
+// as a programmer error worth surfacing, unlike root()'s own silent no-op
+// for a `p` that was never a GC pointer to begin with (see root()'s own
+// doc comment just above for that asymmetry's reasoning).
+fn unroot(p: void*): void {
+    gc_unpin(p);
+}
+
 // ─── Pool<T>: bulk-free allocation tracking ─────────────────────────────────
 //
 // Not a true bump-pointer arena: Turf has neither an address-of operator
