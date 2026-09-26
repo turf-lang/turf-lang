@@ -33,7 +33,7 @@ fn handle(conn: net::TcpConnection): void {
     io::printline("--- request ---");
     io::printline(request);
 
-    mut body: string = "";
+    mut body: string;
     mut status: string = "200 OK";
 
     if strings::starts_with(request, "GET / ") {
