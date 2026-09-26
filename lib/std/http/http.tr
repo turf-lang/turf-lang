@@ -193,11 +193,11 @@ fn parse_request(conn: net::TcpConnection): Request {
         return req;
     }
 
-    immut requestLine: string = strings::trim_end(lines.data[0]);
+    immut requestLine: string = strings::trim_end(lines.get(0));
     mut parts: List<string> = strings::split(requestLine, " ");
     if parts.length() >= 2 {
-        req.method = parts.data[0];
-        req.path = parts.data[1];
+        req.method = parts.get(0);
+        req.path = parts.get(1);
     } else {
         req.method = "";
         req.path = "";
@@ -205,7 +205,7 @@ fn parse_request(conn: net::TcpConnection): Request {
 
     mut i: int = 1;
     while i < lines.length() {
-        immut line: string = strings::trim_end(lines.data[i]);
+        immut line: string = strings::trim_end(lines.get(i));
         immut colonIdx: int = strings::index_of(line, ":");
         if colonIdx >= 0 {
             immut key: string = strings::trim(strings::substring(line, 0, colonIdx));
@@ -327,7 +327,16 @@ fn Server.get_route(path: string): fn(Request, Response): void {
     if idx < 0 {
         sys::panic("Server.get_route: no such route '" + path + "'");
     }
-    return self.routes.values[idx];
+    // `Map<K, V>.values` is a raw `V*` (map.tr), not a `List<V>` -- OVH-003
+    // gated raw-pointer indexing outside `unsafe { }`/a capability module,
+    // and this file holds neither (deliberately -- see this file's header
+    // comment, "No raw sockets, `ptr`, or manual memory management is ever
+    // visible to a caller of this module"). `idx` is already bounds-proven
+    // by `route_index()` (a `Map.indexOf()` result checked above), so this
+    // is exactly the single-expression inline gate the raw-pointer docs
+    // recommend (docs/architecture/pointers_and_references.md §1.4) rather
+    // than granting the whole file raw-pointer capability for one read.
+    return unsafe { self.routes.values[idx]; };
 }
 
 // Binds `port` and serves forever, dispatching each accepted connection to

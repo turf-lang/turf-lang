@@ -1,5 +1,3 @@
-unsafe module;
-
 // ─── json.tr ─────────────────────────────────────────────────────────────
 // A small, hand-rolled JSON parser/serializer for TurfLang.
 //
@@ -157,14 +155,14 @@ fn JsonValue.set(key: string, value: JsonValue): void {
     mut idx: int = 0 - 1;
     mut i: int = 0;
     while i < self.obj_keys.length() {
-        if self.obj_keys.data[i] == key {
+        if self.obj_keys.get(i) == key {
             idx = i;
         }
         i = i + 1;
     }
 
     if idx >= 0 {
-        self.obj_vals.data[idx] = value;
+        self.obj_vals.set(idx, value);
     } else {
         self.obj_keys.push(key);
         self.obj_vals.push(value);
@@ -179,8 +177,8 @@ fn JsonValue.set(key: string, value: JsonValue): void {
 fn JsonValue.get(key: string): JsonValue {
     mut i: int = 0;
     while i < self.obj_keys.length() {
-        if self.obj_keys.data[i] == key {
-            return self.obj_vals.data[i];
+        if self.obj_keys.get(i) == key {
+            return self.obj_vals.get(i);
         }
         i = i + 1;
     }
@@ -192,7 +190,7 @@ fn JsonValue.get(key: string): JsonValue {
 fn JsonValue.has(key: string): bool {
     mut i: int = 0;
     while i < self.obj_keys.length() {
-        if self.obj_keys.data[i] == key {
+        if self.obj_keys.get(i) == key {
             return true;
         }
         i = i + 1;
@@ -222,7 +220,7 @@ fn JsonValue.at(index: int): JsonValue {
     if index < 0 || index >= self.arr_val.length() {
         sys::panic("JsonValue.at: index out of bounds");
     }
-    return self.arr_val.data[index];
+    return self.arr_val.get(index);
 }
 
 // Element count for an Array or key count for an Object; 0 for any other
@@ -270,7 +268,7 @@ fn stringify_array(v: JsonValue): string {
         if i > 0 {
             result = result + ",";
         }
-        result = result + stringify(v.arr_val.data[i]);
+        result = result + stringify(v.arr_val.get(i));
         i = i + 1;
     }
     result = result + "]";
@@ -285,7 +283,7 @@ fn stringify_object(v: JsonValue): string {
         if i > 0 {
             result = result + ",";
         }
-        result = result + "\"" + escape_string(v.obj_keys.data[i]) + "\":" + stringify(v.obj_vals.data[i]);
+        result = result + "\"" + escape_string(v.obj_keys.get(i)) + "\":" + stringify(v.obj_vals.get(i));
         i = i + 1;
     }
     result = result + "}";
