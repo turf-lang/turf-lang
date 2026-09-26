@@ -215,6 +215,40 @@ void turf_rt_add_global_root(void **slot);
 void turf_rt_remove_global_root(void **slot);
 
 /*
+ * turf_rt_pin / turf_rt_unpin -- OVH-010
+ * (docs/planning/OVERHAUL_REMAINING_WORK.md), §14.3/§14.6's own documented
+ * answer to F-MEM-3's disclosed unsoundness: a GC pointer stored ONLY
+ * inside manually-managed (malloc/mem::alloc) memory is invisible to
+ * every root-finding path above it (stack, registers, global roots,
+ * another GC-heap block's own declared pointer words) and gets reclaimed
+ * out from under it. `turf_rt_pin(p)` marks the GC object CONTAINING `p`
+ * (an interior pointer is fine -- `List<T>.data + k` is the documented,
+ * common case, exactly like a conservative stack/register root) as a
+ * precise, always-retained root until a matching `turf_rt_unpin(p)`;
+ * pins NEST (an internal per-object count, not a boolean), so two
+ * independent callers pinning the same object don't race to unpin it out
+ * from under each other. `p == NULL`, or a `p` that is not a GC-heap
+ * pointer at all (no containing block found), is a documented NO-OP for
+ * BOTH functions -- C memory is legitimately passed around, and pinning
+ * or unpinning it would be meaningless, not an error. `turf_rt_unpin(p)`
+ * on a GC object that IS real but currently has no outstanding pin (never
+ * pinned, or already fully unpinned) panics ("unpin of unpinned object")
+ * -- an unbalanced unroot() is a programmer error worth surfacing, unlike
+ * the deliberately-silent non-GC-pointer case above. A pin survives a
+ * `turf_rt_realloc()` that moves the pinned block (`turf_gc_reregister_block`,
+ * turfrt_gc.c, carries it to the new address) -- correct for a growing
+ * collection buffer, though nothing in the standard library pins one
+ * today (strings, the motivating case, are immutable and never move).
+ * Reached from Turf source via the `gc_pin(p)`/`gc_unpin(p)` bare
+ * intrinsics (`include/Intrinsics.h` category 1); `lib/std/mem/mem.tr`'s
+ * `mem::root()`/`mem::unroot()` are their one caller each, the same
+ * one-bare-intrinsic-one-stdlib-wrapper shape `gc_checked_free`/
+ * `mem::free` already use.
+ */
+void turf_rt_pin(void *p);
+void turf_rt_unpin(void *p);
+
+/*
  * turf_rt_is_gc_pointer -- MEM-002. Exact-match block-table lookup: true iff
  * `p` is precisely the address turf_rt_alloc/turf_rt_alloc_zeroed/
  * turf_rt_realloc returned for some still-live GC-heap block (an interior

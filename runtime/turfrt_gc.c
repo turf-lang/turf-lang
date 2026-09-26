@@ -49,7 +49,13 @@
  *    it is correct, not merely convenient.
  * 3. Registered global roots (`turf_rt_add_global_root`) -- precise:
  *    dereferenced fresh at the start of every mark phase.
- * 4. Once conservative/precise roots mark a block, ITS OWN contents are
+ * 4. Pinned objects (`turf_rt_pin`/`turf_rt_unpin`, OVH-010) -- precise:
+ *    every block with an outstanding pin is marked directly, independent
+ *    of whether anything above still points at it. This is the answer to
+ *    F-MEM-3's own disclosed unsoundness (a GC pointer stored ONLY inside
+ *    manual-heap memory is invisible to 1-3 above); see turfrt.h's own doc
+ *    comment on turf_rt_pin for the full contract.
+ * 5. Once conservative/precise roots mark a block, ITS OWN contents are
  *    traced PRECISELY via its TurfTypeDesc (an explicit worklist, not
  *    recursion -- a long `List<Node*>` chain must not blow the C stack).
  *
@@ -93,6 +99,19 @@ static size_t g_pending_count = 0, g_pending_cap = 0;
 
 static void **g_roots = NULL;
 static size_t g_root_count = 0, g_root_cap = 0;
+
+/* OVH-010: pins, keyed by the CONTAINING BLOCK's start address (stable for
+ * life -- the collector is non-moving, F-MEM-1), not by whatever pointer
+ * value was actually passed to turf_rt_pin() -- an interior pointer pins
+ * the whole block, matching how a stack/register root already treats one
+ * (gc_find_containing/gc_consider_root below). `count` lets pins nest. */
+typedef struct GcPin {
+  uintptr_t block_start;
+  size_t count;
+} GcPin;
+
+static GcPin *g_pins = NULL;
+static size_t g_pin_count = 0, g_pin_cap = 0;
 
 static uintptr_t g_stack_base = 0;
 
@@ -180,6 +199,13 @@ void turf_gc_record_stack_base(void) {
   }
 }
 
+static long find_pin(uintptr_t block_start) {
+  for (size_t i = 0; i < g_pin_count; i++)
+    if (g_pins[i].block_start == block_start)
+      return (long)i;
+  return -1;
+}
+
 static long find_exact_in_pending(uintptr_t addr) {
   for (size_t i = 0; i < g_pending_count; i++)
     if (g_pending[i].start == addr)
@@ -220,7 +246,16 @@ void turf_gc_register_block(void *p, size_t size, const TurfTypeDesc *desc) {
 void turf_gc_reregister_block(uintptr_t old_addr, void *new_p,
                                size_t new_size, const TurfTypeDesc *desc) {
   long idx;
+  long pin_idx = -1;
   if (old_addr != 0) {
+    /* OVH-010: a pin is keyed by the OLD block's start address -- if
+     * realloc() moved it, carry the pin forward to the new address below,
+     * rather than silently stranding it on a now-freed block (which would
+     * make gc_consider_root's later lookup find nothing and the object
+     * collect out from under an outstanding root(), or -- if the address
+     * happened to be reused for something else entirely -- accidentally
+     * pin the wrong object under the old key). */
+    pin_idx = find_pin(old_addr);
     if ((idx = find_exact_in_pending(old_addr)) >= 0) {
       /* Unsorted array -- swap-with-last removal is fine. */
       g_pending[idx] = g_pending[--g_pending_count];
@@ -234,6 +269,9 @@ void turf_gc_reregister_block(uintptr_t old_addr, void *new_p,
      * turfrt_internal.h -- degrade to a fresh registration. */
   }
   turf_gc_register_block(new_p, new_size, desc);
+  if (pin_idx >= 0) {
+    g_pins[pin_idx].block_start = (uintptr_t)new_p;
+  }
 }
 
 int turf_gc_is_registered(const void *p) {
@@ -310,6 +348,62 @@ static GcBlock *gc_find_containing(uintptr_t addr) {
   if (addr >= cand->start && addr < cand->start + cand->size)
     return cand;
   return NULL;
+}
+
+/* Containment lookup usable OUTSIDE a collection -- gc_find_containing()
+ * above only searches the sorted g_blocks, and its own comment says it is
+ * "only ever called during a collection, against the just-rebuilt, fully-
+ * sorted array." turf_rt_pin()/turf_rt_unpin() can run at any time, so this
+ * also linearly scans g_pending (small in practice: a block sits there only
+ * until the next collection's gc_rebuild_index() merges it in). */
+static GcBlock *gc_find_containing_any(uintptr_t addr) {
+  GcBlock *b = gc_find_containing(addr);
+  if (b)
+    return b;
+  for (size_t i = 0; i < g_pending_count; i++) {
+    GcBlock *cand = &g_pending[i];
+    if (addr >= cand->start && addr < cand->start + cand->size)
+      return cand;
+  }
+  return NULL;
+}
+
+/* OVH-010: see turfrt.h's own doc comment on turf_rt_pin/turf_rt_unpin for
+ * the full contract (interior pointers, nesting, the no-op/panic split). */
+void turf_rt_pin(void *p) {
+  if (!p)
+    return;
+  GcBlock *b = gc_find_containing_any((uintptr_t)p);
+  if (!b)
+    return; /* not a GC pointer at all -- documented no-op (F-MEM-3: C
+              * memory is legitimately passed around). */
+  long idx = find_pin(b->start);
+  if (idx >= 0) {
+    g_pins[idx].count++;
+    return;
+  }
+  gc_arr_grow((void **)&g_pins, &g_pin_cap, sizeof(GcPin), g_pin_count + 1);
+  g_pins[g_pin_count].block_start = b->start;
+  g_pins[g_pin_count].count = 1;
+  g_pin_count++;
+}
+
+void turf_rt_unpin(void *p) {
+  if (!p)
+    return;
+  GcBlock *b = gc_find_containing_any((uintptr_t)p);
+  if (!b)
+    return; /* symmetric with turf_rt_pin's own no-op on non-GC memory */
+  long idx = find_pin(b->start);
+  if (idx < 0) {
+    turf_rt_panic("unpin of unpinned object",
+                  "mem::unroot() was called on an object with no matching "
+                  "mem::root() pin outstanding",
+                  "<mem::unroot>", 0);
+  }
+  if (--g_pins[idx].count == 0) {
+    g_pins[idx] = g_pins[--g_pin_count];
+  }
 }
 
 /* See this file's top comment: NOT setjmp-based, because glibc's jmp_buf
@@ -406,6 +500,17 @@ static void gc_mark(void) {
   for (size_t i = 0; i < g_root_count; i++) {
     void **slot = (void **)g_roots[i];
     gc_consider_root((uintptr_t)*slot, &wl);
+  }
+
+  /* OVH-010: every pinned object is an always-retained root, regardless of
+   * whether anything on the stack/in a register/in global storage still
+   * points at it -- that is the entire point of mem::root(), a GC object
+   * reachable only through manual-heap memory (invisible to every scan
+   * above) staying alive anyway. g_blocks is already rebuilt at this point
+   * (gc_rebuild_index() above), so every pin's block_start is guaranteed to
+   * resolve here even if the pin was placed before this cycle's merge. */
+  for (size_t i = 0; i < g_pin_count; i++) {
+    gc_consider_root(g_pins[i].block_start, &wl);
   }
 
   while (wl.count > 0) {
