@@ -113,6 +113,54 @@ TurfTypePtr makeArrayType(TurfTypePtr ElemType, int Size) {
 
 // ─── Type coercion helper ───────────────────────────────────────────────────
 
+/**
+ * @brief OVH-008: pointee compatibility for the `&T`/`&?T` reference-
+ *        widening rules below (2.5/2.6) -- exact structural match, OR the
+ *        SAME candidate-matching generic-parameter leniency this file
+ *        already grants a bare, unwrapped type pairing a few lines down
+ *        (a lone `T`, or two `GenericType`s of the same base name with a
+ *        per-argument generic-parameter skip -- see that block's own doc
+ *        comment). Needed because Rule 2.5/2.6 compare POINTEES directly
+ *        with `isEquivalent()`, which never runs any part of
+ *        `typesCompatible()` itself, so a pointee shaped like
+ *        `Node<T>`/`Node<int>` never got that leniency at all: `&Node<int>`
+ *        (a call site's concrete argument) failed to match a declared
+ *        `&?Node<T>` parameter, even though the exact same pairing,
+ *        UNWRAPPED, already matches via the block below.
+ *
+ * Deliberately NOT a full recursive `typesCompatible()` call on the
+ * pointees: that would also ride along on the numeric-widening rule
+ * further down this function, silently permitting `&int` to widen into
+ * `double*` -- a reference's POINTEE type is never itself widened, only
+ * its pointer-kind/nullability is (see Rule 2.5's own doc comment for the
+ * precedent this preserves). This helper only ever recurses through the
+ * two shapes an open type parameter can actually appear in a pointee: bare
+ * (`T` itself) or nested one level inside a matching `GenericType`
+ * (`Node<T>`) -- recursively, so `Node<Pair<T, T>>` also works.
+ */
+static bool referencePointeeGenericMatch(const TurfType *A, const TurfType *B) {
+  if (!A || !B)
+    return false;
+  if (A->isEquivalent(B))
+    return true;
+  if (dynamic_cast<const TurfGenericParamType *>(A) ||
+      dynamic_cast<const TurfGenericParamType *>(B))
+    return true;
+  const auto *AGen = dynamic_cast<const GenericType *>(A);
+  const auto *BGen = dynamic_cast<const GenericType *>(B);
+  if (AGen && BGen && AGen->getBaseName() == BGen->getBaseName()) {
+    const auto &AArgs = AGen->getTypeArgs();
+    const auto &BArgs = BGen->getTypeArgs();
+    if (AArgs.size() != BArgs.size())
+      return false;
+    for (size_t i = 0; i < AArgs.size(); ++i)
+      if (!referencePointeeGenericMatch(AArgs[i].get(), BArgs[i].get()))
+        return false;
+    return true;
+  }
+  return false;
+}
+
 bool typesCompatible(const TurfType *From, const TurfType *To) {
   if (!From || !To)
     return false;
@@ -380,14 +428,17 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   // gates separately). The reverse (raw T*/ptr -> &T) is deliberately NOT
   // handled here -- with no matching rule anywhere above, it correctly
   // falls through to `false` below, forcing an explicit `to`-cast inside
-  // `unsafe { }`. Pointee comparison uses isEquivalent(), not a recursive
-  // typesCompatible() call, so this doesn't accidentally also permit
-  // unsound pointee widening (e.g. &int -> double* through int->double's
-  // numeric-widening rule below) -- only a genuinely equivalent pointee.
+  // `unsafe { }`. Pointee comparison uses referencePointeeGenericMatch()
+  // (isEquivalent() plus the SAME narrow generic-parameter leniency this
+  // file's own candidate-matching rules already grant elsewhere, OVH-008)
+  // -- not a full recursive typesCompatible() call, so this still doesn't
+  // accidentally also permit unsound pointee widening (e.g. &int ->
+  // double* through int->double's numeric-widening rule below).
   if (const auto *FromRef = dynamic_cast<const TurfReferenceType *>(From)) {
     if (!To->isReference()) {
       if (const auto *ToPtr = dynamic_cast<const TurfPointerType *>(To)) {
-        if (FromRef->getPointee()->isEquivalent(ToPtr->getPointee().get()))
+        if (referencePointeeGenericMatch(FromRef->getPointee().get(),
+                                         ToPtr->getPointee().get()))
           return true;
       }
     }
@@ -409,7 +460,8 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   if (const auto *FromNRef = dynamic_cast<const TurfNullableReferenceType *>(From)) {
     if (!To->isReference() && !To->isNullableReference()) {
       if (const auto *ToPtr = dynamic_cast<const TurfPointerType *>(To)) {
-        if (FromNRef->getPointee()->isEquivalent(ToPtr->getPointee().get()))
+        if (referencePointeeGenericMatch(FromNRef->getPointee().get(),
+                                         ToPtr->getPointee().get()))
           return true;
       }
     }
