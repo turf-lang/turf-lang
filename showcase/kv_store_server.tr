@@ -48,7 +48,9 @@
 // also a live GC-safety gap, since each boxed Entry's `key`/`value`
 // GC-heap string pointers lived only inside untraced manual memory,
 // F-MEM-3). No `unsafe { }` is needed anywhere in this file any more
-// either: `store.data[idx]` now yields an `Entry` by value directly, so
+// either: `store.get(idx)` (OVH-003 -- `List<T>.get()`/`.set()`, the
+// bounds-checked generic replacement for reading/writing an element via
+// the raw `data: T*` field directly) yields an `Entry` by value, so
 // `.key`/`.value` field access on it is ordinary struct field access, not
 // a dereference through a raw `Entry*` base.
 
@@ -62,16 +64,16 @@ struct Entry {
     value: string
 }
 
-// List<T>'s own public `data`/`len` fields (see lib/std/list.tr) give
-// direct indexed access -- List.push()/pop()/length() alone would only
-// support stack-shaped access, not the "find by key" scan a KV store
-// actually needs. There's no Map<K,V> in the standard library yet (see
+// List<T>'s own `get(i)` (OVH-003) gives direct indexed access --
+// List.push()/pop()/length() alone would only support stack-shaped access,
+// not the "find by key" scan a KV store actually needs. There's no
+// Map<K,V> in the standard library yet (see
 // docs/planning/STDLIB_ROADMAP.md) -- this linear scan is the honest
 // current alternative for a small store like this one.
 fn findIndex(store: List<Entry>, key: string): int {
     mut i: int = 0;
     while i < store.length() {
-        if store.data[i].key == key {
+        if store.get(i).key == key {
             return i;
         }
         i = i + 1;
@@ -107,7 +109,7 @@ fn main(): int {
             if cmd == "GET" {
                 immut idx: int = findIndex(store, rest);
                 if idx >= 0 {
-                    conn.write(store.data[idx].value + "\n");
+                    conn.write(store.get(idx).value + "\n");
                 } else {
                     conn.write("NOT_FOUND\n");
                 }
@@ -120,7 +122,14 @@ fn main(): int {
                     immut value: string = strings::substring(rest, secondSpace + 1, strings::length(rest));
                     immut idx: int = findIndex(store, key);
                     if idx >= 0 {
-                        store.data[idx].value = value;
+                        // A read-modify-write, not a through-pointer field
+                        // write: List.get() returns Entry BY VALUE (OVH-003
+                        // -- there's no `.data[idx].value = ...` any more to
+                        // write through in the first place), so the mutated
+                        // copy has to go back in via List.set().
+                        mut e: Entry = store.get(idx);
+                        e.value = value;
+                        store.set(idx, e);
                     } else {
                         mut e: Entry = Entry::default();
                         e.key = key;
