@@ -63,6 +63,34 @@ otherwise each answer differently, producing an incoherent language.
   honest `extern fn` ABI declarations. **No further integer widths, and no
   unsigned types, are to be added.**
 - Semantics **never** vary with optimization level.
+- **Two accepted narrowings** (OVH-014, `docs/development/changes/OVH-014.md`
+  — recorded 2026-09-27, per this file's own §6.0 point 3: an explicit
+  request, not a session's own initiative). Both only *reject* a program this row's
+  literal wording would accept; neither ever accepts something wrong or
+  miscompiles:
+  - Row 6's "only the *final* value is checked" is not literal: a >int64
+    literal *leaf* nested inside a larger untyped-literal-arithmetic
+    expression (`BIG - BIG2 + 1`, where `BIG`/`BIG2` individually overflow
+    `int` but the true sum does not) is rejected at the leaf, immediately,
+    not deferred to the expression's actual final value. Reason: Codegen
+    truncates every integer literal through a 64-bit `int` before any
+    arithmetic runs (SEM-001) — accepting the fully general reading would
+    require Codegen-side exact constant folding this compiler does not
+    build, for a shape no test or stdlib/showcase program needs (full
+    account: `docs/development/changes/SEM-002.md`, *Known pitfalls*,
+    second bullet).
+  - An untyped integer literal assigned directly to `double`
+    (`docs/planning/ARCHITECTURE_OVERHAUL.md` §10.5's "must be exactly
+    representable" as a `double`) is checked against `int64` representability
+    FIRST, not double-exactness directly — so a literal wider than `int64`
+    but exactly representable as a `double` (one significant bit, e.g. 2^100
+    written out in decimal) is rejected, citing `int`, not accepted as the
+    literal §10.5 wording would allow. Reason: Codegen converts an integer
+    literal to `double` by first truncating it through a 64-bit `int`, so
+    accepting such a literal without also teaching Codegen to convert
+    directly from the exact arbitrary-precision value would silently produce
+    the WRONG `double` (full account:
+    `docs/development/changes/SEM-002.md`, *Known pitfalls*, third bullet).
 
 ### 6.3 `guess` / inference — FROZEN
 
