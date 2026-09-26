@@ -1280,6 +1280,35 @@ const TurfType *getExprType(const ExprAST *E) {
         return RetTy;
       };
 
+      // OVH-003: `ResolvedCallTarget` (TypeCheckerCall.cpp's visitMethodCall(),
+      // set for every successfully-resolved BOUND struct method call) already
+      // names the exact candidate this specific call resolved to -- reuse it
+      // directly instead of falling through to the MangledName-based lookup
+      // below, whose Prefix/Suffix scan matches on `MethodName` alone
+      // (`BaseTy->getName()` has already been collapsed to the shared
+      // generic TEMPLATE name a few lines up, e.g. "List", never the concrete
+      // per-instantiation name "List_gen1_At64"). That ambiguity is silent
+      // and load-bearing-wrong the moment two DIFFERENT instantiations of
+      // the same generic method coexist: confirmed live with `List<At63>`
+      // and `List<At64>` (structs differing by exactly one field) both in
+      // scope -- `l64.get(0)` resolved its return type via WHICHEVER
+      // instantiation's entry the (unordered_map-iteration-order-dependent)
+      // scan happened to hit first, silently reusing At63's struct layout
+      // for an At64 value and reading `.tail` at the wrong byte offset (an
+      // out-of-bounds/misinterpreted-field read -- `strlen()` on garbage,
+      // SIGSEGV). `ResolvedCallTarget->ReturnType` is still the TEMPLATE's
+      // own un-substituted declared type (e.g. literal `T`) -- TypeChecker
+      // sets `ResolvedCallTarget` before its own substitution step runs --
+      // so `ApplySubst` above (built from THIS call's own concrete
+      // `GenericTypeArgs`, captured earlier from the un-collapsed BaseTy)
+      // still does the real work; this just removes the ambiguous NAME
+      // re-derivation neither TypeChecker's own resolution nor this call's
+      // `Subst` map ever needed in the first place.
+      if (const auto *RCT = MethodCall->getResolvedCallTarget()) {
+        if (RCT->ReturnType)
+          return ApplySubst(RCT->ReturnType.get());
+      }
+
       auto It = FuncReturnTypes.find(MangledName);
       if (It != FuncReturnTypes.end())
         return ApplySubst(It->second.get());
