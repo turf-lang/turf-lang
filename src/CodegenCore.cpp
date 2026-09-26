@@ -1411,6 +1411,17 @@ const TurfType *getExprType(const ExprAST *E) {
             Scan(PT->getPointee());
           } else if (isArrayType(FTy.get())) {
             Scan(dynamic_cast<const ::ArrayType *>(FTy.get())->getElementTypePtr());
+          } else if (auto *NestedGT = dynamic_cast<const GenericType *>(FTy.get())) {
+            // OVH-007: a field whose OWN declared type is ANOTHER generic
+            // instantiation at the same type parameter (`struct Box<T> {
+            // inner: Pair<T, T> }`) was invisible to this scan -- none of
+            // the branches above match a bare GenericType, so `b.inner`'s
+            // own T never got recovered here, even though
+            // TypeCheckerCall.cpp's visitFieldAccess/visitMethodCall
+            // already recurse into this exact shape (their own "NestedGT"
+            // branch, TYPE-002 S15/D4). Mirror it here.
+            for (const auto &NestedArg : NestedGT->getTypeArgs())
+              Scan(NestedArg);
           }
         };
         for (const auto &F : STy->getFields())
@@ -1446,6 +1457,32 @@ const TurfType *getExprType(const ExprAST *E) {
                 auto NewPtr = std::make_shared<TurfPointerType>(NewPointee);
                 FieldSubstCache[Key] = NewPtr;
                 return NewPtr;
+              }
+            } else if (auto *NestedGT = dynamic_cast<const GenericType *>(FTy.get())) {
+              // OVH-007: the rebuild side of the NestedGT scan above -- a
+              // field declared as `Pair<T, T>` must come back as
+              // `Pair<int, int>` here, not the literal, still-open
+              // `Pair<T, T>` -- so codegenLValue()'s own mangled-clone
+              // lookup (Monomorphize::instantiatedDeclName()) resolves to
+              // the REAL registered clone instead of a name nothing ever
+              // requested. Same cache-and-key idiom as the pointer branch
+              // just above, since this can construct a fresh GenericType.
+              std::vector<TurfTypePtr> NewArgs;
+              bool Changed = false;
+              for (const auto &Arg : NestedGT->getTypeArgs()) {
+                TurfTypePtr NewArg = Apply(Arg);
+                Changed |= (NewArg.get() != Arg.get());
+                NewArgs.push_back(std::move(NewArg));
+              }
+              if (Changed) {
+                auto NewGT = std::make_shared<GenericType>(NestedGT->getBaseName(),
+                                                            NewArgs);
+                std::string Key = "fieldsubst_gen_" + NewGT->getMangledName();
+                auto CacheIt = FieldSubstCache.find(Key);
+                if (CacheIt != FieldSubstCache.end())
+                  return CacheIt->second;
+                FieldSubstCache[Key] = NewGT;
+                return NewGT;
               }
             }
             return FTy;
