@@ -56,8 +56,7 @@ Useful compiler introspection flags, beyond ordinary compilation: `--dump-ast`, 
 
 ## Installation
 
-No package-manager distribution yet. Build from source (see [Building from Source](#building-from-source)), or use a pre-built binary from the [Releases page](../../releases) if one exists for your platform — CI currently builds for Linux (x86_64, Arch x86_64), macOS (Apple Silicon
-and Intel), and Windows (x86_64). Release archives bundle `lib/` alongside the binary, so extracting one and running the binary from inside the extracted folder works with no further setup.
+No package-manager distribution yet. Build from source (see [Building from Source](#building-from-source)), or use a pre-built binary from the [Releases page](../../releases) if one exists for your platform — CI currently builds for Linux (x86_64, Arch x86_64), macOS (Apple Silicon only — Intel Mac releases were dropped, see `release.yml`'s own comment), and Windows (x86_64). Release archives bundle `lib/` alongside the binary, so extracting one and running the binary from inside the extracted folder works with no further setup.
 
 ### Setting up `TURF_HOME`
 
