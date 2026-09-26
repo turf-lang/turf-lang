@@ -76,6 +76,12 @@ jobs:
       - name: Install ccache
         run: sudo apt-get install -y ccache
 
+      # debuginfo_smoke.sh drives an actual debugger against a compiled
+      # binary (TOOL-001) -- the only one of the smoke scripts below with an
+      # extra system dependency beyond the compiler build itself.
+      - name: Install gdb
+        run: sudo apt-get install -y gdb
+
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -118,3 +124,33 @@ jobs:
 
       - name: Optimization-level smoke test (cross-level output equality)
         run: ./scripts/opt_levels_smoke.sh
+
+      # OVH-015: the smoke scripts below already existed as each named
+      # feature group's own regression coverage for behaviour test_runner.sh
+      # cannot express as an ordinary `.tr` program (libturfrt's C API and
+      # link wiring, a TurfTypeDesc's exact bitmap, GC retention/pinning
+      # across a forced collection, RSS staying bounded, a debugger's view of
+      # -g output, @caller_location's exact message, the deterministic-fix
+      # layer never loading the SLM) -- none were wired into CI until now.
+      # All run against the same build above; none need anything this job
+      # doesn't already have except gdb (installed above for the one that
+      # does). Deliberately NOT included: scripts/test_ai.sh, which drives
+      # the real model against tests/custom/aggressive/ and needs the
+      # multi-gigabyte GGUF weights this repo's .gitignore deliberately
+      # keeps out of a checkout -- a manual/local sanity script, not a CI gate.
+      - name: Runtime smoke test (libturfrt link wiring, descriptors, panics)
+        run: ./scripts/runtime_smoke.sh
+      - name: Manual-heap allocation smoke test (mem:: accounting)
+        run: ./scripts/mem_smoke.sh
+      - name: GC smoke test (retention, pinning, collection)
+        run: ./scripts/gc_smoke.sh
+      - name: GC RSS-bounded smoke test
+        run: ./scripts/gc_rss_smoke.sh
+      - name: Manual/GC heap boundary checks
+        run: ./scripts/check_boundary.sh
+      - name: Debug info smoke test (gdb against -g output)
+        run: ./scripts/debuginfo_smoke.sh
+      - name: "@caller_location smoke test"
+        run: ./scripts/std002_caller_location_smoke.sh
+      - name: SLM deterministic-fix layer smoke test (never loads the model)
+        run: ./scripts/slm_deterministic_fix_smoke.sh
