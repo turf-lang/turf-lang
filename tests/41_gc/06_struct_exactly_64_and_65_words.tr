@@ -74,11 +74,11 @@ fn main(): int {
     churn(24);
     gc_collect();
 
-    test::assert(strings::length(l63.data[0].tail) == 40, "At63 (pointer at word 63): survives with correct length");
-    test::assert(strings::starts_with(l63.data[0].tail, "x"), "At63: content survives");
+    test::assert(strings::length(l63.get(0).tail) == 40, "At63 (pointer at word 63): survives with correct length");
+    test::assert(strings::starts_with(l63.get(0).tail, "x"), "At63: content survives");
 
-    test::assert(strings::length(l64.data[0].tail) == 40, "At64 (pointer at word 64, the old cap's boundary): survives with correct length");
-    test::assert(strings::starts_with(l64.data[0].tail, "y"), "At64: content survives -- OVH-001's boundary reproducer");
+    test::assert(strings::length(l64.get(0).tail) == 40, "At64 (pointer at word 64, the old cap's boundary): survives with correct length");
+    test::assert(strings::starts_with(l64.get(0).tail, "y"), "At64: content survives -- OVH-001's boundary reproducer");
 
     io::printline("41/06 PASS: struct with a pointer field exactly at word 63 and exactly at word 64 both traced correctly");
     return 0;

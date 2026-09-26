@@ -12,43 +12,43 @@ fn main(): int {
     // Basic split
     mut parts: List<string> = strings::split("a,b,c", ",");
     test::assert_eq(parts.length(), 3, "split: 'a,b,c' on ',' -> 3 parts");
-    test::assert(parts.data[0] == "a", "split: part 0 == 'a'");
-    test::assert(parts.data[1] == "b", "split: part 1 == 'b'");
-    test::assert(parts.data[2] == "c", "split: part 2 == 'c'");
+    test::assert(parts.get(0) == "a", "split: part 0 == 'a'");
+    test::assert(parts.get(1) == "b", "split: part 1 == 'b'");
+    test::assert(parts.get(2) == "c", "split: part 2 == 'c'");
 
     // Multi-byte delimiter
     mut parts2: List<string> = strings::split("one::two::three", "::");
     test::assert_eq(parts2.length(), 3, "split: multi-byte delimiter -> 3 parts");
-    test::assert(parts2.data[0] == "one", "split: multi-byte part 0");
-    test::assert(parts2.data[1] == "two", "split: multi-byte part 1");
-    test::assert(parts2.data[2] == "three", "split: multi-byte part 2");
+    test::assert(parts2.get(0) == "one", "split: multi-byte part 0");
+    test::assert(parts2.get(1) == "two", "split: multi-byte part 1");
+    test::assert(parts2.get(2) == "three", "split: multi-byte part 2");
 
     // No match at all -> single-element list containing the whole string
     mut noMatch: List<string> = strings::split("hello", ",");
     test::assert_eq(noMatch.length(), 1, "split: no delimiter present -> 1 part");
-    test::assert(noMatch.data[0] == "hello", "split: no delimiter present -> whole string");
+    test::assert(noMatch.get(0) == "hello", "split: no delimiter present -> whole string");
 
     // Empty delimiter -> single-element list containing the whole string
     mut emptyDelim: List<string> = strings::split("hello", "");
     test::assert_eq(emptyDelim.length(), 1, "split: empty delimiter -> 1 part (no-op)");
-    test::assert(emptyDelim.data[0] == "hello", "split: empty delimiter -> whole string");
+    test::assert(emptyDelim.get(0) == "hello", "split: empty delimiter -> whole string");
 
     // Empty string input
     mut emptyInput: List<string> = strings::split("", ",");
     test::assert_eq(emptyInput.length(), 1, "split: empty input -> 1 (empty) part");
-    test::assert(emptyInput.data[0] == "", "split: empty input -> empty part");
+    test::assert(emptyInput.get(0) == "", "split: empty input -> empty part");
 
     // Adjacent delimiters produce empty pieces
     mut adjacent: List<string> = strings::split("a,,b", ",");
     test::assert_eq(adjacent.length(), 3, "split: adjacent delimiters -> 3 parts");
-    test::assert(adjacent.data[0] == "a", "split: adjacent part 0");
-    test::assert(adjacent.data[1] == "", "split: adjacent part 1 empty");
-    test::assert(adjacent.data[2] == "b", "split: adjacent part 2");
+    test::assert(adjacent.get(0) == "a", "split: adjacent part 0");
+    test::assert(adjacent.get(1) == "", "split: adjacent part 1 empty");
+    test::assert(adjacent.get(2) == "b", "split: adjacent part 2");
 
     // Leading/trailing delimiter
     mut leading: List<string> = strings::split(",a,b", ",");
     test::assert_eq(leading.length(), 3, "split: leading delimiter -> 3 parts");
-    test::assert(leading.data[0] == "", "split: leading delimiter -> first part empty");
+    test::assert(leading.get(0) == "", "split: leading delimiter -> first part empty");
 
     // join: inverse of split
     test::assert(strings::join(parts, ",") == "a,b,c", "join: inverse of split");

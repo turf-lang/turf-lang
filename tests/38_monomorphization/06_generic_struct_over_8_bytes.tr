@@ -51,9 +51,9 @@ fn main(): int {
     mut popped: Big = l.pop();
     test::assert(popped.a == 4 && popped.b == 5 && popped.c == 6,
                 "List<Big>.pop() wrong");
-    mut first: Big = l.data[0];
+    mut first: Big = l.get(0);
     test::assert(first.a == 1 && first.b == 2 && first.c == 3,
-                "List<Big>.data[0] wrong");
+                "List<Big>.get(0) wrong");
 
     // Generic free function, >8-byte struct argument/return.
     mut echoed: Big = identity(Big::new(7, 8, 9));
@@ -65,9 +65,9 @@ fn main(): int {
     h.items = List::default();
     h.items.push(Big::new(10, 20, 30));
     test::assert(h.items.length() == 1, "Holder.items (List<Big>) wrong");
-    mut fromField: Big = h.items.data[0];
+    mut fromField: Big = h.items.get(0);
     test::assert(fromField.a == 10 && fromField.b == 20 && fromField.c == 30,
-                "Holder.items.data[0] wrong");
+                "Holder.items.get(0) wrong");
 
     return 0;
 }

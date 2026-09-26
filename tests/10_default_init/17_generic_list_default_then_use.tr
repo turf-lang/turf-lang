@@ -17,6 +17,6 @@ fn main(): int {
     mut l: List<int> = List::default();
     l.push(5);
     test::assert(l.length() == 1, "generic list: default() then use");
-    test::assert(l.data[0] == 5, "generic list: pushed value readable");
+    test::assert(l.get(0) == 5, "generic list: pushed value readable");
     return 0;
 }

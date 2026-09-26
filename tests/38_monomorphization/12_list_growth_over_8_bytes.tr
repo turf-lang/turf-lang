@@ -37,7 +37,7 @@ fn main(): int {
 
     mut j: int = 0;
     while j < 100 {
-        immut item: Big = l.data[j];
+        immut item: Big = l.get(j);
         test::assert(item.a == j && item.b == j * 2 && item.c == j * 3,
                     "List<Big> element " + (j to string) +
                     " corrupted -- growth under-allocation regression");

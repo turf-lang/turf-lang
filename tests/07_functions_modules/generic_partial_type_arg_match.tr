@@ -29,7 +29,14 @@ import test;
 fn<V> mapContainsStrKey(m: Map<string, V>, key: string): bool {
     mut i: int = 0;
     while i < m.length() {
-        if m.keys[i] == key {
+        // `Map<K, V>.keys` is a raw `K*` (map.tr), not a `List<K>` --
+        // OVH-003 gated raw-pointer indexing outside `unsafe { }`/a
+        // capability module, and this free function holds neither
+        // (deliberately: it's testing typesCompatible()'s own generic
+        // substitution recursion, unrelated to OVH-003, see this file's
+        // header comment). Single-expression inline gate, matching
+        // docs/architecture/pointers_and_references.md §1.4.
+        if unsafe { m.keys[i]; } == key {
             return true;
         }
         i = i + 1;

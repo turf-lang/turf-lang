@@ -47,8 +47,10 @@ fn churn(depth: int): void {
 
 // Builds each Big via runtime-constructed (never-literal) strings, so
 // tag1/name are genuinely fresh, separately gc_alloc'd buffers --
-// reachable, after this function returns, ONLY through List<Big>.data[i],
-// never through a surviving local of their own.
+// reachable, after this function returns, ONLY through List<Big>'s own
+// backing buffer (read back via `.get(i)`, OVH-003's bounds-checked
+// accessor over the identical `data: T*` field this comment used to name
+// directly), never through a surviving local of their own.
 fn build(): List<Big> {
     mut l: List<Big> = List::default();
     mut i: int = 0;
@@ -71,11 +73,11 @@ fn main(): int {
     gc_collect();
 
     test::assert(l.length() == 3, "List<Big> keeps its length");
-    test::assert(strings::length(l.data[0].tag1) == 40, "element 0's word-0 pointer field (tag1) survives with correct length");
-    test::assert(strings::starts_with(l.data[0].tag1, "t"), "element 0's tag1 content survives");
-    test::assert(strings::length(l.data[0].name) == 40, "element 0's word-70 pointer field (name) survives with correct length -- OVH-001's actual reproducer");
-    test::assert(strings::starts_with(l.data[0].name, "n"), "element 0's name content survives");
-    test::assert(strings::starts_with(l.data[2].name, "n"), "element 2's name content survives too");
+    test::assert(strings::length(l.get(0).tag1) == 40, "element 0's word-0 pointer field (tag1) survives with correct length");
+    test::assert(strings::starts_with(l.get(0).tag1, "t"), "element 0's tag1 content survives");
+    test::assert(strings::length(l.get(0).name) == 40, "element 0's word-70 pointer field (name) survives with correct length -- OVH-001's actual reproducer");
+    test::assert(strings::starts_with(l.get(0).name, "n"), "element 0's name content survives");
+    test::assert(strings::starts_with(l.get(2).name, "n"), "element 2's name content survives too");
 
     io::printline("41/05 PASS: struct >64 words, both pointer fields (in-range and widened) precisely traced through a forced collection");
     return 0;

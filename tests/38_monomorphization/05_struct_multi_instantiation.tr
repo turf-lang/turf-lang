@@ -80,13 +80,13 @@ fn main(): int {
     nested.push(inner);
     test::assert(nested.length() == 1, "List<List<int>> length wrong");
     mut got: List<int> = nested.pop();
-    test::assert(got.length() == 1 && got.data[0] == 42,
+    test::assert(got.length() == 1 && got.get(0) == 42,
                 "List<List<int>> pop wrong");
 
     // Coexistence sanity: List<int> from earlier is still correct after
     // every other instantiation above has been created and used.
     test::assert(ints.length() == 2, "List<int> corrupted by later instantiations");
-    test::assert(ints.data[0] == 1 && ints.data[1] == 2,
+    test::assert(ints.get(0) == 1 && ints.get(1) == 2,
                 "List<int> contents corrupted by later instantiations");
 
     return 0;

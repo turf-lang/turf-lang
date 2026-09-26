@@ -46,8 +46,8 @@ fn main(): int {
   mut li: List<int> = List::default();
   li.push(5); li.push(1); li.push(4); li.push(2); li.push(3);
   li.sort(cmpInt);
-  test::assert(li.data[0] == 1 && li.data[1] == 2 && li.data[2] == 3 &&
-              li.data[3] == 4 && li.data[4] == 5, "List<int>.sort");
+  test::assert(li.get(0) == 1 && li.get(1) == 2 && li.get(2) == 3 &&
+              li.get(3) == 4 && li.get(4) == 5, "List<int>.sort");
   test::assert(li.binary_search(4, cmpInt) == 3, "List<int>.binary_search found");
   test::assert(li.binary_search(99, cmpInt) == -1, "List<int>.binary_search absent");
   test::assert(li.find(isEven) == 1, "List<int>.find (value 2, index 1)");
@@ -56,7 +56,7 @@ fn main(): int {
   mut ld: List<double> = List::default();
   ld.push(3.5); ld.push(1.5); ld.push(2.5);
   ld.sort(cmpDouble);
-  test::assert(ld.data[0] == 1.5 && ld.data[1] == 2.5 && ld.data[2] == 3.5,
+  test::assert(ld.get(0) == 1.5 && ld.get(1) == 2.5 && ld.get(2) == 3.5,
               "List<double>.sort");
   test::assert(ld.binary_search(2.5, cmpDouble) == 1, "List<double>.binary_search");
 
@@ -64,8 +64,8 @@ fn main(): int {
   mut ls: List<string> = List::default();
   ls.push("banana"); ls.push("apple"); ls.push("cherry");
   ls.sort(cmpString);
-  test::assert(ls.data[0] == "apple" && ls.data[1] == "banana" &&
-              ls.data[2] == "cherry", "List<string>.sort");
+  test::assert(ls.get(0) == "apple" && ls.get(1) == "banana" &&
+              ls.get(2) == "cherry", "List<string>.sort");
   test::assert(ls.binary_search("banana", cmpString) == 1,
               "List<string>.binary_search");
 
@@ -78,7 +78,7 @@ fn main(): int {
   mut p3: Point = Point::default(); p3.x = 0; p3.y = 5;   // dist^2 = 25
   lp.push(p1); lp.push(p2); lp.push(p3);
   lp.sort(cmpPointByDistance);
-  test::assert(lp.data[0].x == 1 && lp.data[0].y == 1, "List<Point>.sort: nearest first");
+  test::assert(lp.get(0).x == 1 && lp.get(0).y == 1, "List<Point>.sort: nearest first");
 
   return 0;
 }
