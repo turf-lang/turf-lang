@@ -193,6 +193,18 @@ struct ParseRecursionGuard {
 // When true, the SLM is loaded and AI suggestions are generated for errors.
 // Controlled by the --smart CLI flag. Default is off for deterministic output.
 extern bool g_AIEnabled;
+// SLM-001 follow-up: when non-empty, the FULL patched source of the first
+// --smart suggestion that clears the display gate (confidence >= 0.8) this
+// compile is written here verbatim, instead of only ever being shown as a
+// rendered diagnostic. Controlled by --smart-write-fix=<path>; empty (the
+// default) means "don't write anything" -- an ordinary --smart run's
+// behavior is completely unchanged. Exists so a caller (a benchmark tool, a
+// future editor integration) can get the corrected PROGRAM as a real,
+// compilable file, not just a description of the fix -- see
+// scripts/slm_benchmark/run_benchmark.py, which uses this to actually
+// recompile and RUN a fixed program and check whether it still does what
+// the pre-mutation original did (§16.4's "semantic-correctness rate").
+extern std::string g_SmartFixOutPath;
 // LANG-002: when true, a file OUTSIDE the resolved install root may still
 // declare the raw-pointer capability (`unsafe module;`, HasRawPointerCapability()
 // in ParserModule.cpp) -- controlled by the --allow-unsafe-modules CLI flag.

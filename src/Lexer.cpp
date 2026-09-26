@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <map>
 
@@ -75,6 +76,7 @@ int g_parseRecursionDepth = 0;
 
 // AI/SLM flag: only true when --smart is passed on the CLI.
 bool g_AIEnabled = false;
+std::string g_SmartFixOutPath;
 bool g_AllowUnsafeModules = false;
 
 // Tracks if the SLM has generated a diagnostic this pass to suppress
@@ -389,6 +391,16 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
         if (!ai.warning.empty()) {
           finalMessage +=
               "\n  " + Colors::YELLOW + "Note: " + Colors::RESET + ai.warning;
+        }
+
+        // SLM-001 follow-up: write the full patched source out, if asked.
+        // Deliberately gated on the SAME confidence/fix_mode check as the
+        // display above -- this must never write a fix a user wouldn't
+        // also have been shown as validated.
+        if (!g_SmartFixOutPath.empty() && !ai.appliedSource.empty()) {
+          std::ofstream fixOut(g_SmartFixOutPath, std::ios::trunc);
+          if (fixOut.is_open())
+            fixOut << ai.appliedSource;
         }
       }
     }

@@ -83,6 +83,7 @@ struct CompilerOptions {
   std::string OutputName;             // default derived from input later
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
+  std::string SmartFixOutPath;        // --smart-write-fix=<path>: write the first validated --smart fix's full patched source here (SLM-001 follow-up)
   bool AllowUnsafeModules = false;    // --allow-unsafe-modules: LANG-002, honor `unsafe module;` outside the install root
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
   bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
@@ -252,6 +253,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.EmitLLVM = true;
     } else if (arg == "--smart") {
       opts.AIEnabled = true;
+    } else if (arg.rfind("--smart-write-fix=", 0) == 0) {
+      opts.SmartFixOutPath = arg.substr(std::string("--smart-write-fix=").size());
     } else if (arg == "--allow-unsafe-modules") {
       opts.AllowUnsafeModules = true;
     } else if (arg == "--dump-ast") {
@@ -325,6 +328,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   if (opts.InputFile.empty()) {
     std::cerr
         << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] "
+           "[--smart-write-fix=<path>] "
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
            "[--dump-modules] [--dump-instantiations] [--link <libname>] "
@@ -717,6 +721,7 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
+  g_SmartFixOutPath = opts.SmartFixOutPath;
   // LANG-002: must be set before any parsing happens -- HasRawPointerCapability()
   // (ParserModule.cpp) consults it for every `unsafe module;` pragma outside
   // the install root.

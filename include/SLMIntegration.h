@@ -39,6 +39,15 @@ struct AISuggestion {
   std::string self_reported_category; // Model's own assessment of error category
   bool valid = false;
   bool sandbox_validated = false; // Whether sandbox validation passed
+  // SLM-001 follow-up: the FULL patched source (every line, '\n'-joined),
+  // populated by verifySuggestion() only when sandbox_validated is true --
+  // empty otherwise, including for a suggestion that was never sandbox-
+  // checked at all (fix_mode == NONE). This is what --smart-write-fix=<path>
+  // (Lexer.h's g_SmartFixOutPath) writes to disk, and what lets a tool
+  // outside the compiler (scripts/slm_benchmark/run_benchmark.py) actually
+  // recompile and RUN the corrected program instead of only ever reading a
+  // description of the fix.
+  std::string appliedSource;
 };
 
 // Extracts +/- `contextSize` lines around the given error line.
@@ -93,12 +102,16 @@ AISuggestion validateAndApplySuggestion(const std::string &errorMessage,
 
 // Applies `suggestion.replacement_line` in a fresh Sandbox and validates it
 // (parse + semantic check + confirms the original error is actually gone).
+// `suggestion` is a non-const reference (not just read from) because a
+// SUCCESSFUL validation writes the full patched source back into
+// `suggestion.appliedSource` (SLM-001 follow-up) -- every other field is
+// read-only here, same as before.
 // If validation fails and `outDiagnostics` is non-null, it's filled with the
 // sandbox's own compiler diagnostics for the failed attempt (joined into one
 // string) -- validateAndApplySuggestion()'s retry loop feeds this back into
 // the next fetchSuggestion() call as `previousAttemptFailed` so a retry has
 // the real reason the last patch didn't compile, not just "try again".
-bool verifySuggestion(const AISuggestion &suggestion, int errorLine,
+bool verifySuggestion(AISuggestion &suggestion, int errorLine,
                       std::string *outDiagnostics = nullptr);
 
 } // namespace SLM

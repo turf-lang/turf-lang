@@ -1053,7 +1053,7 @@ static bool inferBlockRange(const std::string &replacement, int targetLine,
   return true;
 }
 
-bool verifySuggestion(const AISuggestion &suggestion, int errorLine,
+bool verifySuggestion(AISuggestion &suggestion, int errorLine,
                       std::string *outDiagnostics) {
   // Create a sandbox from the current compiler state
   auto sandbox = CreateSandbox();
@@ -1125,6 +1125,21 @@ bool verifySuggestion(const AISuggestion &suggestion, int errorLine,
 
   bool ok = ApplyAndValidateFix(*sandbox, errorLine, applyLine, applyEndLine,
                                 fixLine, suggestion);
+
+  // SLM-001 follow-up: on success, capture the FULL patched source -- not
+  // just the one line that changed -- so a caller can write out (or
+  // recompile+run) the whole corrected program, not just read a
+  // description of the fix. `sandbox` (and its Snapshot.SourceCode) is
+  // about to go out of scope, so this is the only point this data is
+  // available at all.
+  if (ok) {
+    std::string joined;
+    for (const auto &line : sandbox->getModifiedSource()) {
+      joined += line;
+      joined += "\n";
+    }
+    suggestion.appliedSource = std::move(joined);
+  }
 
   // On failure, hand the sandbox's own compiler diagnostics back to the
   // caller (validateAndApplySuggestion()'s retry loop) so the next

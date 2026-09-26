@@ -9,29 +9,31 @@ the outcome from the compiler's own stdout, then reports the metrics table
     Deterministic-fix rate       | % fixed with no model invocation
     Sandbox-validation rate      | % of model suggestions that compile and
                                     clear the original error
-    Semantic-correctness rate    | NOT computed by this tool -- see below
+    Semantic-correctness rate    | of validated fixes, % where the mutated
+                                    test's own asserts still pass
     No-suggestion rate           | % where nothing is shown
-    False-confidence rate        | NOT computed by this tool -- see below
+    False-confidence rate        | % of *displayed* suggestions that were
+                                    actually wrong
     p50 / p95 latency            | wall clock per diagnostic
     Cache hit rate               | among model-path attempts only
 
-Deliberately NOT computed here, and why:
-  - Semantic-correctness rate needs the accepted patch re-applied to a real
-    copy of the file and that file's OWN test::assert() calls re-run, to
-    confirm the fix restored MEANING, not just compilability. `--smart`
-    itself never writes a fix back to disk (confirmed live: exit code is 1
-    either way, even when a suggestion displays) -- the corrected line only
-    ever exists as the in-memory Sandbox-committed text this script would
-    have to scrape back out of the rendered diagnostic's pinned-context
-    display. That scraper is a real, separate piece of tooling, not a
-    natural extension of this script, and was deliberately left unbuilt
-    this session -- see docs/development/changes/SLM-001.md's Known
-    pitfalls.
-  - False-confidence rate needs an ORACLE (a human, or the semantic-
-    correctness check above) to judge whether a *displayed* (i.e. already
-    sandbox-validated, confidence >= 0.8) suggestion was actually wrong.
-    Sandbox validation proves "compiles and the original error is gone", not
-    "is correct" -- the same gap semantic-correctness exists to close.
+How semantic-correctness/false-confidence are measured (the SLM-001 follow-up
+this script originally shipped without -- see docs/development/changes/
+SLM-001.md's own history): every corpus case is a MECHANICALLY MUTATED,
+otherwise-passing test that calls test::assert(...) to check its own
+behavior. `--smart-write-fix=<path>` (a small compiler addition made
+specifically for this) writes the FULL patched source -- not just a
+description of the fix -- to a real file once a suggestion clears the
+display gate. This script then does what `--smart` itself deliberately never
+does on its own: takes that written file, compiles it FOR REAL (through
+Codegen and the linker, not just the Sandbox's Lex/Parse/Resolve/TypeCheck/
+Lint-only recheck), runs the resulting binary, and treats its exit code as
+the oracle -- 0 means every test::assert() in the ORIGINAL program still
+held after the fix (semantically correct, not just compilable); nonzero
+means the fix compiled and cleared the diagnosed error but broke what the
+program actually does (semantically wrong despite validating) or didn't even
+survive Codegen/linking (a distinct, more surprising failure -- the sandbox's
+own recheck is semantic-only and has never covered Codegen at all).
 
 Usage:
     python3 scripts/slm_benchmark/run_benchmark.py
@@ -48,7 +50,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import statistics
 import subprocess
 import sys
 import time
@@ -58,15 +59,18 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TURF = REPO_ROOT / "build" / "turf"
 CORPUS_PATH = Path(__file__).resolve().parent / "corpus.json"
 SCRATCH = Path("/tmp/turf_slm_benchmark_run.tr")
+FIXED_OUT = Path("/tmp/turf_slm_benchmark_fixed.tr")
+FIXED_BIN = Path("/tmp/turf_slm_benchmark_fixed_bin")
 
 
 def run_one(mutated_source: str) -> tuple[str, float]:
     SCRATCH.write_text(mutated_source)
+    FIXED_OUT.unlink(missing_ok=True)
     env = dict(os.environ)
     env["TURF_SLM_DEBUG"] = "1"  # needed to observe "[SLM] Cache hit" lines
     start = time.monotonic()
     proc = subprocess.run(
-        [str(TURF), "--smart", str(SCRATCH)],
+        [str(TURF), "--smart", f"--smart-write-fix={FIXED_OUT}", str(SCRATCH)],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -82,6 +86,28 @@ def classify(output: str) -> str:
     if "[AI Suggestion]" in output:
         return "model_fix"
     return "no_suggestion"
+
+
+def check_semantic_outcome() -> str:
+    """Compiles and runs FIXED_OUT (already written by run_one() for a
+    validated fix). Returns "semantic_correct" (compiled, ran, exit 0 --
+    every test::assert() in the original program still holds),
+    "semantic_incorrect" (compiled and ran, but a nonzero exit -- an assert
+    the pre-mutation original satisfied now fails), or "recompile_failed"
+    (didn't even survive a real compile+link -- the Sandbox's own recheck
+    never covers Codegen, only Lex/Parse/Resolve/TypeCheck/Lint, so this is
+    a genuinely distinct, real gap the semantic check surfaces)."""
+    if not FIXED_OUT.exists() or not FIXED_OUT.read_text().strip():
+        return "recompile_failed"
+    compile_proc = subprocess.run(
+        [str(TURF), str(FIXED_OUT), "-o", str(FIXED_BIN)],
+        cwd=REPO_ROOT, capture_output=True, text=True,
+    )
+    if compile_proc.returncode != 0 or not FIXED_BIN.exists():
+        return "recompile_failed"
+    run_proc = subprocess.run([str(FIXED_BIN)], capture_output=True, text=True)
+    FIXED_BIN.unlink(missing_ok=True)
+    return "semantic_correct" if run_proc.returncode == 0 else "semantic_incorrect"
 
 
 def percentile(values: list[float], pct: float) -> float:
@@ -109,6 +135,9 @@ def main() -> int:
         return 1
 
     outcomes: dict[str, int] = {"deterministic_fix": 0, "model_fix": 0, "no_suggestion": 0}
+    semantic_outcomes: dict[str, int] = {
+        "semantic_correct": 0, "semantic_incorrect": 0, "recompile_failed": 0,
+    }
     latencies: list[float] = []
     cache_hits = 0
     model_path_attempts = 0
@@ -119,6 +148,11 @@ def main() -> int:
         outcomes[outcome] += 1
         latencies.append(elapsed)
 
+        semantic = None
+        if outcome in ("deterministic_fix", "model_fix"):
+            semantic = check_semantic_outcome()
+            semantic_outcomes[semantic] += 1
+
         is_cache_hit = "[SLM] Cache hit" in output
         if outcome != "deterministic_fix":
             model_path_attempts += 1
@@ -126,9 +160,11 @@ def main() -> int:
                 cache_hits += 1
 
         print(f"{case['id']:32s} {outcome:18s} {elapsed:7.2f}s"
-              f"{'  (cache hit)' if is_cache_hit else ''}")
+              f"{'  (cache hit)' if is_cache_hit else ''}"
+              f"{'  [' + semantic + ']' if semantic else ''}")
 
     total = len(corpus)
+    validated = outcomes["deterministic_fix"] + outcomes["model_fix"]
     print()
     print("=== SLM-001 §16.4 benchmark report ===")
     print(f"Corpus size: {total}")
@@ -136,14 +172,25 @@ def main() -> int:
     print(f"{'Metric':30s} {'Value':>10s}")
     print(f"{'Deterministic-fix rate':30s} "
           f"{100 * outcomes['deterministic_fix'] / total:9.1f}%")
-    validated = outcomes["deterministic_fix"] + outcomes["model_fix"]
     print(f"{'Sandbox-validation rate':30s} {100 * validated / total:9.1f}%")
-    print(f"{'Semantic-correctness rate':30s} {'N/A':>10s}  (not computed -- see this "
-          f"script's own doc comment)")
+    if validated:
+        semrate = 100 * semantic_outcomes["semantic_correct"] / validated
+        falserate = 100 * (semantic_outcomes["semantic_incorrect"]
+                            + semantic_outcomes["recompile_failed"]) / validated
+        print(f"{'Semantic-correctness rate':30s} {semrate:9.1f}%  "
+              f"({semantic_outcomes['semantic_correct']}/{validated} validated fixes)")
+    else:
+        print(f"{'Semantic-correctness rate':30s} {'N/A':>10s}  (no fix was validated)")
+        falserate = None
     print(f"{'No-suggestion rate':30s} "
           f"{100 * outcomes['no_suggestion'] / total:9.1f}%")
-    print(f"{'False-confidence rate':30s} {'N/A':>10s}  (not computed -- needs an "
-          f"oracle, see doc comment)")
+    if falserate is not None:
+        print(f"{'False-confidence rate':30s} {falserate:9.1f}%  "
+              f"({semantic_outcomes['semantic_incorrect']} wrong + "
+              f"{semantic_outcomes['recompile_failed']} didn't even recompile, "
+              f"of {validated} displayed)")
+    else:
+        print(f"{'False-confidence rate':30s} {'N/A':>10s}  (no fix was validated)")
     print(f"{'p50 latency':30s} {percentile(latencies, 0.50):9.2f}s")
     print(f"{'p95 latency':30s} {percentile(latencies, 0.95):9.2f}s")
     if model_path_attempts:

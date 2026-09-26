@@ -24,9 +24,18 @@
 # still "pass" on message content alone but blow through the timing ceiling
 # here, which is exactly the failure mode this script exists to catch.
 #
+# Also covers the SLM-001 follow-up: `--smart-write-fix=<path>` writes the
+# full, validated, patched source to a real file (not just a rendered
+# diagnostic) -- this script confirms that written file actually compiles
+# AND runs to exit 0 for both fixtures, i.e. is a genuine, working program,
+# not merely something that satisfied the Sandbox's own (Codegen-free)
+# recheck.
+#
 # Usage: scripts/slm_deterministic_fix_smoke.sh
-# Exit:  0 = every fixture resolved deterministically, with no model call;
-#        1 = at least one fixture didn't validate or fell through to the model.
+# Exit:  0 = every fixture resolved deterministically, with no model call,
+#            and the written fix compiles and runs correctly;
+#        1 = at least one fixture didn't validate, fell through to the
+#            model, or its written fix didn't compile/run.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -74,8 +83,12 @@ for fixture in "${FIXTURES[@]}"; do
     continue
   fi
 
+  fixed_out="/tmp/turf_slm_smoke_fixed_$$.tr"
+  fixed_bin="/tmp/turf_slm_smoke_fixed_bin_$$"
+  rm -f "$fixed_out" "$fixed_bin"
+
   start=$(date +%s.%N)
-  output=$("$TURF" --smart "$file" 2>&1)
+  output=$("$TURF" --smart "--smart-write-fix=$fixed_out" "$file" 2>&1)
   end=$(date +%s.%N)
   elapsed=$(awk -v a="$start" -v b="$end" 'BEGIN { printf "%.3f", b - a }')
 
@@ -97,8 +110,27 @@ for fixture in "${FIXTURES[@]}"; do
     ok=0
   fi
 
+  # Deliberately NOT grepping the written file's text for "$old"/"$new":
+  # this fixture's own doc comment names both words in prose (describing
+  # what it tests), so a naive substring check false-positives on the
+  # COMMENT, not the code -- found live while writing this check. Whether
+  # the fix is real is instead proven the strong way: the written file
+  # must actually compile and run to completion, which a stray uncorrected
+  # '$old' token in the live code could never do.
+  if [ ! -s "$fixed_out" ]; then
+    echo -e "${RED}✗${RESET} $file -- --smart-write-fix didn't write a (non-empty) fixed file"
+    ok=0
+  elif ! "$TURF" "$fixed_out" -o "$fixed_bin" > /dev/null 2>&1 || [ ! -x "$fixed_bin" ]; then
+    echo -e "${RED}✗${RESET} $file -- written fix does not compile"
+    ok=0
+  elif ! "$fixed_bin" > /dev/null 2>&1; then
+    echo -e "${RED}✗${RESET} $file -- written fix compiled but exited non-zero when run"
+    ok=0
+  fi
+  rm -f "$fixed_out" "$fixed_bin"
+
   if [ "$ok" -eq 1 ]; then
-    echo -e "${GREEN}✓${RESET} $file -- '$old' -> '$new' in ${elapsed}s, model never called"
+    echo -e "${GREEN}✓${RESET} $file -- '$old' -> '$new' in ${elapsed}s, model never called, written fix compiles and runs"
   else
     FAILED=$((FAILED + 1))
     echo "$output" | sed 's/^/    /'
