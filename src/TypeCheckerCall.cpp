@@ -496,8 +496,14 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       for (int i = 0; i < CheckCount; ++i) {
         const TurfType *ParamTy = Cand->Params[i].Type.get();
         const TurfType *ArgTy   = ArgTypes[i].get();
+        // OVH-005: an untyped literal argument acquires 'int32' directly --
+        // see untypedLiteralAcquiresInt32()'s own doc comment. Matters most
+        // here since int32 exists specifically for `extern fn` ABI
+        // declarations (F-NUM-5), the overwhelmingly common place a
+        // parameter is actually declared int32.
         if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
-            !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy))) {
+            !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy)) &&
+            !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy)) {
           AllOk = false;
           break;
         }
@@ -728,7 +734,9 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
     for (int i = 0; i < ArgCount; ++i) {
       const TurfType *ParamTy = C->Params[i + 1].Type.get();
       const TurfType *ArgTy = ArgTypes[i].get();
-      if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy)) {
+      // OVH-005: see the identical exception in visitFuncCall() above.
+      if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
+          !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy)) {
         AllOk = false;
         break;
       }
@@ -860,8 +868,10 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       for (int i = 0; i < ArgCount; ++i) {
         const TurfType *ParamTy = Cand->Params[i].Type.get();
         const TurfType *ArgTy   = ArgTypes[i].get();
+        // OVH-005: see the identical exception in visitFuncCall() above.
         if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
-            !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy))) {
+            !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy)) &&
+            !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy)) {
           AllOk = false;
           break;
         }
@@ -1183,7 +1193,9 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
             TurfTypePtr ParamTy = C->Params[i + ParamOffset].Type;
             if (!Subst.empty())
               ParamTy = substituteReturnType(ParamTy, Subst);
-            if (ParamTy && ArgTypes[i] && !typesCompatible(ArgTypes[i].get(), ParamTy.get())) {
+            // OVH-005: see the identical exception in visitFuncCall() above.
+            if (ParamTy && ArgTypes[i] && !typesCompatible(ArgTypes[i].get(), ParamTy.get()) &&
+                !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy.get())) {
               AllOk = false;
               break;
             }

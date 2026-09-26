@@ -561,7 +561,10 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
 #endif
       }
     }
-    if (!typesCompatible(RhsTy.get(), LhsTy.get())) {
+    // OVH-005: an untyped literal (`n = 5;` for an 'int32' n) acquires
+    // 'int32' directly -- see untypedLiteralAcquiresInt32()'s doc comment.
+    if (!typesCompatible(RhsTy.get(), LhsTy.get()) &&
+        !untypedLiteralAcquiresInt32(Node.getRHS(), LhsTy.get())) {
       std::vector<RelatedLocation> Related;
       if (LHSIsBareVariable && LHSVar && LHSVar->ResolvedSymbol) {
         // SEM-003 (§11.6's worked example): a `guess`-inferred variable's
@@ -809,6 +812,28 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     }
     // LhsTy is set on Node below (unconditionally, same as every other
     // branch) -- nothing further to do here.
+  } else if (LhsTy && RhsTy && LhsTy->isInt32()) {
+    // OVH-005 (docs/reference/variables_and_types.md §int32): int32 is
+    // never itself an arithmetic result type -- inferArithmeticType()
+    // always promotes an int32 operand to plain 'int' (the same
+    // "int/bool arithmetic -> int" branch every other integer compound
+    // assignment takes), so falling through to the generic path below
+    // would report "Cannot assign value of type 'int' to variable of type
+    // 'int32'" -- technically true, but it reads like an ordinary type
+    // mismatch a wider RHS type could fix, when none ever could. Caught
+    // here, before inferArithmeticType() runs at all, with a message that
+    // says why and a concrete rewrite.
+    const VariableExprAST *LHSVar_i32 = findRootVariable(Node.getLHS());
+    std::string VarSpelling = LHSVar_i32 ? LHSVar_i32->getName() : "x";
+    reportError(Node.getLoc(),
+                "Compound assignment '" + OpToDisplayString(Op) +
+                    "=' is not supported on 'int32' -- int32 is never "
+                    "itself an arithmetic result type.",
+                {},
+                "Write '" + VarSpelling + " = (" + VarSpelling + " " +
+                    OpToDisplayString(Op) + " " +
+                    (RhsTy ? RhsTy->getName() : "value") +
+                    ") to int32;' explicitly instead.");
   } else if (LhsTy && RhsTy) {
     if (inferArithmeticType(Node.getLoc(), Op, LhsTy.get(), RhsTy.get(), ResultTy)) {
       if (!typesCompatible(ResultTy.get(), LhsTy.get())) {
@@ -939,6 +964,30 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
       }
       HandledViaOperator = true;
     }
+  }
+
+  // OVH-005 (docs/reference/variables_and_types.md §int32): int32 is never
+  // itself an arithmetic result type, so `++`/`--` (exactly `x = x +/- 1`)
+  // has no legal lowering for it -- checked BEFORE the generic "requires a
+  // numeric operand" rejection just below (int32 IS numeric, so that check
+  // would silently pass it through) and, critically, BEFORE any Codegen is
+  // reached at all: PostfixExprAST::codegen() (CodegenVar.cpp) unconditionally
+  // builds its overflow-checked-add intrinsic call assuming an i64 operand,
+  // and a genuinely i32-typed OldVal there produced invalid LLVM IR -- a
+  // real internal compiler error, not a diagnosable one -- before this
+  // check existed.
+  if (!HandledViaOperator && OpTy && OpTy->isInt32()) {
+    const VariableExprAST *OperandVar = findRootVariable(Node.getOperand());
+    std::string VarSpelling = OperandVar ? OperandVar->getName() : "x";
+    reportError(Node.getLoc(),
+                std::string(Dir) + " '" + OpSpelling + OpSpelling +
+                    "' is not supported on 'int32' -- int32 is never itself "
+                    "an arithmetic result type.",
+                {},
+                "Write '" + VarSpelling + " = (" + VarSpelling + " " +
+                    OpSpelling + " 1) to int32;' explicitly instead.");
+    setType(&Node, OpTy);
+    return;
   }
 
   if (!HandledViaOperator && OpTy && !OpTy->isNumeric()) {

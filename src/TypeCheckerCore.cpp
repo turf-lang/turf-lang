@@ -374,6 +374,13 @@ void TypeChecker::checkLiteralRepresentable(const ExprAST *ValueExpr,
 }
 
 
+bool TypeChecker::untypedLiteralAcquiresInt32(const ExprAST *Val, const TurfType *Dest) {
+  if (!Val || !Dest || !Dest->isInt32())
+    return false;
+  return tryFoldUntypedIntConstant(Val, /*IsTopLevel=*/true).has_value();
+}
+
+
 void TypeChecker::checkCallArgsRepresentable(
     const std::vector<std::unique_ptr<ExprAST>> &Args,
     const std::vector<FunctionParam> &Params, SourceLocation Loc,

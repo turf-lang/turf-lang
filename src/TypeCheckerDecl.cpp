@@ -432,7 +432,11 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
         }
       }
       // Mismatch check: use unified typesCompatible logic
-      if (!typesCompatible(InitTy.get(), DeclTy.get())) {
+      // OVH-005: an untyped literal (`mut n: int32 = 5;`) acquires 'int32'
+      // directly rather than being rejected as an 'int -> int32' narrowing
+      // -- see untypedLiteralAcquiresInt32()'s own doc comment.
+      if (!typesCompatible(InitTy.get(), DeclTy.get()) &&
+          !untypedLiteralAcquiresInt32(Node.getInitializer(), DeclTy.get())) {
         reportError(Node.getLoc(),
                     "Cannot initialise '" + DeclTy->getName() +
                         "' variable '" + Node.getName() + "' with value of type '" +

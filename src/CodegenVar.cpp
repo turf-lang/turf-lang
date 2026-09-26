@@ -596,6 +596,21 @@ Value *PostfixExprAST::codegen() {
   }
 
   bool isDouble = OpTy->isNamed("double");
+  // OVH-005: the non-double path below unconditionally builds an i64 '1'
+  // and (through EmitCheckedIntArith()) an i64-typed overflow-check
+  // intrinsic call -- sound only when OldVal is genuinely i64. A
+  // non-double, non-'int' numeric type (concretely: 'int32') reaching here
+  // would load an i32 OldVal and emit a call with mismatched operand
+  // widths -- invalid LLVM IR, a real internal-compiler-error, not a
+  // diagnosable one. TypeChecker::visitPostfixExpr() now rejects exactly
+  // that case before Codegen is ever reached (a dedicated error, not this
+  // assertion) -- this exists so a FUTURE gap of the same shape (e.g. a new
+  // numeric type added without updating that gate) fails loudly here
+  // instead of silently emitting bad IR again.
+  assert((isDouble || OpTy->isNamed("int")) &&
+        "PostfixExprAST::codegen(): non-double operand must be 'int' -- "
+        "TypeChecker::visitPostfixExpr() must reject any other numeric "
+        "type (e.g. 'int32') before Codegen is reached.");
   Value *One = isDouble ? static_cast<Value *>(ConstantFP::get(*TheContext, APFloat(1.0)))
                         : static_cast<Value *>(ConstantInt::get(*TheContext, APInt(64, 1, true)));
 

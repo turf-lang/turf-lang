@@ -513,10 +513,8 @@ private:
 
   /// Applies checkLiteralRepresentable() to each argument against its
   /// matching resolved parameter's type, once a call's final candidate is
-  /// chosen (NOT during multi-candidate overload filtering, which only
-  /// has TurfTypePtr on hand, not the argument ExprAST nodes themselves).
-  /// @p Loc is the call's own location -- reused for every argument since
-  /// ExprAST has no virtual getLoc() (see docs/architecture/
+  /// chosen. @p Loc is the call's own location -- reused for every argument
+  /// since ExprAST has no virtual getLoc() (see docs/architecture/
   /// compiler_pipeline.md §6's identical note for CFG diagnostics), the
   /// same convention visitArrayDecl() already uses for its own per-element
   /// mismatch diagnostic. @p ParamOffset skips a UFCS candidate's own
@@ -525,6 +523,23 @@ private:
   void checkCallArgsRepresentable(const std::vector<std::unique_ptr<ExprAST>> &Args,
                                   const std::vector<FunctionParam> &Params,
                                   SourceLocation Loc, size_t ParamOffset = 0);
+
+  /// OVH-005 (FREEZE.md §6.2 row 3, F-NUM-1): true when @p Dest is `int32`
+  /// and @p Val is exactly the kind of untyped-literal-only expression
+  /// tryFoldUntypedIntConstant() folds (a bare literal, or +/-/* of pure
+  /// literals). `typesCompatible()` (Types.cpp) sees such a value as plain
+  /// `int` -- visitNumber() always types an integer literal `int`, with no
+  /// way to record "still untyped" in a TurfTypePtr -- so it correctly
+  /// rejects `int -> int32` as the narrowing conversion that IS for a
+  /// genuinely `int`-typed value, but wrongly rejects it for a literal that
+  /// was never actually typed `int` to begin with and should acquire
+  /// `int32` directly instead, exactly like `guess`'s own literal-
+  /// defaulting rule (§6.3) or the existing 'double' destination case
+  /// (checkLiteralRepresentable() above). Every type-fixing call site
+  /// (VarDecl init, assignment, argument, return) checks this explicitly
+  /// alongside typesCompatible() before treating a mismatch as real, since
+  /// typesCompatible() itself has no ExprAST access to tell the two apart.
+  bool untypedLiteralAcquiresInt32(const ExprAST *Val, const TurfType *Dest);
 
   // ── State ─────────────────────────────────────────────────────────────────
 

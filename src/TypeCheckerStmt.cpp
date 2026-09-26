@@ -321,12 +321,18 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
       // unlike e.g. Rust's `Result<T, E>`, so there's no specific error type to
       // check RetTy against here; only "is this some declared error value
       // at all" matters.
+      // OVH-005: an untyped literal (`return 5;` for a declared 'int32'
+      // success type) acquires 'int32' directly rather than being rejected
+      // as an 'int -> int32' narrowing -- see
+      // untypedLiteralAcquiresInt32()'s own doc comment.
       if (Declared->isErrorUnion()) {
         const auto *EU = static_cast<const TurfErrorUnionType *>(Declared);
         Compatible = typesCompatible(RetTy.get(), EU->getSuccessType()) ||
-                     isDeclaredErrorTypeValue(RetTy.get());
+                     isDeclaredErrorTypeValue(RetTy.get()) ||
+                     untypedLiteralAcquiresInt32(Node.getVal(), EU->getSuccessType());
       } else {
-        Compatible = typesCompatible(RetTy.get(), Declared);
+        Compatible = typesCompatible(RetTy.get(), Declared) ||
+                     untypedLiteralAcquiresInt32(Node.getVal(), Declared);
       }
 
       // Special-case: a pointer-to-struct value whose pointee is exactly
