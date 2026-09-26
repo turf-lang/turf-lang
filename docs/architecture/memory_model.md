@@ -256,7 +256,21 @@ answers to "who reclaims this":
   heaps do not merge"); a pointer that lives ONLY inside manually-managed
   memory is not a root, even if it points at a GC-heap object (a real,
   documented, deliberately-accepted unsoundness — see MEM-002's own change
-  record, *Known pitfalls*).
+  record, *Known pitfalls*). **OVH-010**
+  (`docs/planning/OVERHAUL_REMAINING_WORK.md`) gives this its escape hatch:
+  `mem::root(p)`/`mem::unroot(p)` (`lib/std/mem/mem.tr`, `gc_pin`/`gc_unpin`
+  bare intrinsics, `turf_rt_pin`/`turf_rt_unpin` in `runtime/turfrt_gc.c`)
+  let a program mark the GC object *containing* `p` — an interior pointer
+  is fine, matching how a stack/register root is already treated — as an
+  always-retained root for as long as a matching `unroot()` hasn't released
+  it (pins nest: an internal per-object count, not a boolean). This does
+  not change the unsoundness above by default: nothing pins anything
+  automatically, and a `mem::alloc` buffer holding a GC pointer with no
+  `mem::root()` call anywhere is exactly as unsound as before — `root()` is
+  an opt-in fix a program applies at the specific spot it needs it, not a
+  blanket scan of manual memory (which F-MEM-3 forbids: the two heaps still
+  never merge, and the collector still has no block-table entry for
+  manually-managed memory at all).
 - **The GC heap.** `List<T>`, `Stack<T>`, `Queue<T>`, `Set<T>`, and
   `Map<K,V>` each grow a backing buffer internally via the
   `gc_alloc(n)`/`gc_realloc(p, n)` bare intrinsics (`include/Intrinsics.h`
@@ -276,8 +290,9 @@ answers to "who reclaims this":
   deliberately does not attempt — no finalizers, F-MEM-2).
 
 Root discovery (§2.6 has the full compiler-side mechanism) is precise for
-registered global roots and for a GC-heap block's own declared pointer
-fields (a compiler-emitted `TurfTypeDesc` bitmap), and conservative for the
+registered global roots, pinned objects (`mem::root()`, OVH-010, just
+above), and a GC-heap block's own declared pointer fields (a
+compiler-emitted `TurfTypeDesc` bitmap), and conservative for the
 stack and callee-saved registers — the standard Boehm-style technique,
 chosen specifically because it needs zero Codegen changes for root finding
 (`ARCHITECTURE_OVERHAUL.md` §14.3). Conservative scanning can over-retain
@@ -819,8 +834,8 @@ language.
 | `src/CodegenControlFlow.cpp` | `ReturnExprAST::codegen()` — the generic return-value path (§2.3.3, §2.5.3) |
 | `src/CodegenStruct.cpp` | `StructDeclExprAST::codegen()` — inline field layout (§2.5.1); `EmitAllTurfTypeDescs()`/`getOrCreateElementTurfTypeDesc()` — struct-instance and per-element `TurfTypeDesc` emission (§2.6) |
 | `runtime/turfrt_gc.c` | The collector itself — block table, mark, sweep, root discovery (§2.6). Full design in `docs/development/changes/MEM-002.md` |
-| `runtime/turfrt.h` | The public `libturfrt` C ABI: `turf_rt_alloc`/`turf_rt_collect`/`turf_rt_add_global_root`/`turf_rt_is_gc_pointer`/`turf_rt_checked_free`, `TurfTypeDesc` (§2.6) |
-| `lib/std/mem/mem.tr` | The C allocator FFI bindings and their checked Turf wrappers; `Pool<T>`; `free()`'s cross-heap `gc_checked_free` check (§2.6) |
+| `runtime/turfrt.h` | The public `libturfrt` C ABI: `turf_rt_alloc`/`turf_rt_collect`/`turf_rt_add_global_root`/`turf_rt_is_gc_pointer`/`turf_rt_checked_free`/`turf_rt_pin`/`turf_rt_unpin`, `TurfTypeDesc` (§2.6, §1.7) |
+| `lib/std/mem/mem.tr` | The C allocator FFI bindings and their checked Turf wrappers; `Pool<T>`; `free()`'s cross-heap `gc_checked_free` check; `root()`/`unroot()`'s `gc_pin`/`gc_unpin` pinning (§2.6, §1.7) |
 | `lib/std/collections/list.tr` | The canonical `data: T*, len: int, cap: int` collection shape (§2.6, §2.7.1) |
 | `lib/std/core/strings.tr` | String `operator` overloads and their GC-heap allocations (§2.4) |
 | `docs/reference/arrays.md` | User-facing array semantics, verified against implementation in §2.3 |
