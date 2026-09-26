@@ -529,7 +529,12 @@ fn Parser.parse_array(): !JsonValue {
             return JsonError::ExpectedComma;
         }
     }
-    return arr;
+    // No trailing `return arr;` here: every path through the loop above
+    // ends in `return` (success on `']'`, failure on anything else), so
+    // falling off the end of `while true` is unreachable -- OVH-012, a
+    // genuine UnreachableCodeWarning confirmed live on the line this used
+    // to be; the compiler accepts a `!T` function ending in an unbreakable
+    // `while true` with no further statement.
 }
 
 fn Parser.parse_object(): !JsonValue {
@@ -565,7 +570,8 @@ fn Parser.parse_object(): !JsonValue {
             return JsonError::ExpectedComma;
         }
     }
-    return obj;
+    // No trailing `return obj;` here -- same unreachable-`while true`-tail
+    // reasoning as parse_array() above (OVH-012).
 }
 
 // Parses `s` as a single JSON text (object, array, string, number,
