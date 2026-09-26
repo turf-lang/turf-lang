@@ -357,6 +357,22 @@ struct ResolverFunctionSymbol {
   /// registered (Pass 2).
   std::vector<std::string> PossibleErrorTypeNames;
 
+  /// OVH-012: true if some `return <name>;` in this function's body
+  /// re-throws the bound error variable of an ENCLOSING `recover as err run
+  /// { ... }` (e.g. `json::parse`'s `p.parse_value() recover as err run {
+  /// return err; };`). This is unconditionally "returns a real error" --
+  /// `err`'s static type is `AnyErrorType` (type-erased, §2.4), so there is
+  /// no type NAME to add to PossibleErrorTypeNames above, but propagating
+  /// whatever error the wrapped call produced is exactly as much "this
+  /// function can fail" as naming a concrete variant would be. Computed
+  /// alongside PossibleErrorTypeNames by the same
+  /// CollectReturnedErrorTypeNames() scan (Resolver.cpp), which threads the
+  /// innermost enclosing AsRun's BoundName down through the recursion to
+  /// recognize exactly this shape (and no other bare-variable return, which
+  /// stays unclassified -- consistent with this whole scan's conservative,
+  /// non-interprocedural nature).
+  bool ReturnsReboundError = false;
+
   /// TYPE-002 (S15/D6): this declaration's OWN `fn<...>` type-parameter
   /// list, in declaration order (e.g. ["T", "U"] for `fn<T, U> Wrap.pick`).
   /// Empty for a non-generic declaration. Populated by

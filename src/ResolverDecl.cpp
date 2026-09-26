@@ -194,7 +194,13 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   // in Codegen (which only runs once), which only runs once per function;
   // this is the first Resolver-level warning, so it's the first to hit it.
   if (Node.getReturnType() && Node.getReturnType()->isErrorUnion()) {
-    bool ReturnsRealError = false;
+    // OVH-012: Sym->ReturnsReboundError (`json::parse`'s `recover as err
+    // run { return err; };` shape -- see its own doc comment,
+    // ResolverSymbolBase.h) is just as real a "this function can fail" as
+    // any name in PossibleErrorTypeNames -- it names no specific error type
+    // (there is none to name, `err` is type-erased AnyErrorType), so it
+    // can't go through the isErrorTypeName() filter below at all.
+    bool ReturnsRealError = Sym->ReturnsReboundError;
     for (const auto &Name : Sym->PossibleErrorTypeNames) {
       if (SymTable_.isErrorTypeName(Name)) {
         ReturnsRealError = true;

@@ -319,9 +319,39 @@ static bool MutatesSelfField(const ExprAST *E) {
  * other than shape; every consumer already re-filters through
  * isErrorTypeName() before drawing any conclusion (see this function's own
  * doc comment above).
+ *
+ * OVH-012: also descends into a `recover run { ... }` / `recover as err run
+ * { ... }` block's `return`s -- `immut x: T = call() recover run { return
+ * ErrorType::Variant; };` is the idiomatic way a `!T` function surfaces a
+ * DIFFERENT error than whatever `call()` itself failed with (every stdlib
+ * example: `io::read_lines`, `json::parse_number`/`parse_array`/
+ * `parse_object`), and this scan previously had no case for `RecoverExprAST`
+ * (nor for the `VarDeclExprAST`/`AssignmentExprAST` that typically wrap one
+ * as an initializer/RHS) -- confirmed live: `NeverReturnsErrorWarning` fired
+ * on every one of those functions even though each genuinely returns an
+ * error on some path. `recover produce`'s `ProduceExpr` is scanned too, for
+ * the same structural reason (it's an ordinary sub-expression, just never
+ * containing a `return` in the shapes seen so far); `Wrapped` is scanned
+ * for symmetry, though a `return` inside the wrapped fallible call itself
+ * would belong to a DIFFERENT function, not this one, and so can never
+ * actually contribute here.
+ *
+ * `BoundErrNames` is the stack of `recover as err run` bound names currently
+ * enclosing `E` (innermost last; usually at most one, but nothing stops a
+ * nested `recover as err run` naming its own binding). When a `return` names
+ * a bare variable matching one of these, it is `json::parse`'s
+ * `p.parse_value() recover as err run { return err; };` shape -- re-throwing
+ * whatever error the wrapped call actually produced. There is no type NAME
+ * to collect (`err`'s static type is the type-erased `AnyErrorType`), so
+ * this sets `FoundReboundError` instead of pushing into `Out` --
+ * ResolverFunctionSymbol::ReturnsReboundError's own doc comment (
+ * ResolverSymbolBase.h) has the consumer side. A bare-variable `return` that
+ * DOESN'T match any bound name is left unclassified, same as before this
+ * case existed (it may be the function's own ordinary success value).
  */
-static void CollectReturnedErrorTypeNames(const ExprAST *E,
-                                          std::vector<std::string> &Out) {
+static void CollectReturnedErrorTypeNames(
+    const ExprAST *E, std::vector<std::string> &Out, bool &FoundReboundError,
+    const std::vector<std::string> &BoundErrNames = {}) {
   if (!E)
     return;
 
@@ -331,30 +361,54 @@ static void CollectReturnedErrorTypeNames(const ExprAST *E,
     } else if (auto *FC = dynamic_cast<const FuncCallExprAST *>(Ret->getVal())) {
       if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()))
         Out.push_back(SA->getLeftName());
+    } else if (auto *Var = dynamic_cast<const VariableExprAST *>(Ret->getVal())) {
+      if (std::find(BoundErrNames.begin(), BoundErrNames.end(),
+                    Var->getName()) != BoundErrNames.end())
+        FoundReboundError = true;
     }
     return;
   }
   if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
     for (const auto &Child : Blk->getExpressions())
-      CollectReturnedErrorTypeNames(Child.get(), Out);
+      CollectReturnedErrorTypeNames(Child.get(), Out, FoundReboundError, BoundErrNames);
     return;
   }
   if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
     for (const auto &B : If->getBranches())
-      CollectReturnedErrorTypeNames(B.Body.get(), Out);
-    CollectReturnedErrorTypeNames(If->getElseBody(), Out);
+      CollectReturnedErrorTypeNames(B.Body.get(), Out, FoundReboundError, BoundErrNames);
+    CollectReturnedErrorTypeNames(If->getElseBody(), Out, FoundReboundError, BoundErrNames);
     return;
   }
   if (auto *W = dynamic_cast<const WhileExprAST *>(E)) {
-    CollectReturnedErrorTypeNames(W->getBody(), Out);
+    CollectReturnedErrorTypeNames(W->getBody(), Out, FoundReboundError, BoundErrNames);
     return;
   }
   if (auto *F = dynamic_cast<const ForExprAST *>(E)) {
-    CollectReturnedErrorTypeNames(F->getBody(), Out);
+    CollectReturnedErrorTypeNames(F->getBody(), Out, FoundReboundError, BoundErrNames);
     return;
   }
   if (auto *FE = dynamic_cast<const ForEachExprAST *>(E)) {
-    CollectReturnedErrorTypeNames(FE->getBody(), Out);
+    CollectReturnedErrorTypeNames(FE->getBody(), Out, FoundReboundError, BoundErrNames);
+    return;
+  }
+  if (auto *VD = dynamic_cast<const VarDeclExprAST *>(E)) {
+    CollectReturnedErrorTypeNames(VD->getInitializer(), Out, FoundReboundError, BoundErrNames);
+    return;
+  }
+  if (auto *Assign = dynamic_cast<const AssignmentExprAST *>(E)) {
+    CollectReturnedErrorTypeNames(Assign->getRHS(), Out, FoundReboundError, BoundErrNames);
+    return;
+  }
+  if (auto *Rec = dynamic_cast<const RecoverExprAST *>(E)) {
+    CollectReturnedErrorTypeNames(Rec->getWrapped(), Out, FoundReboundError, BoundErrNames);
+    if (Rec->getKind() == RecoverKind::Produce) {
+      CollectReturnedErrorTypeNames(Rec->getProduceExpr(), Out, FoundReboundError, BoundErrNames);
+    } else {
+      std::vector<std::string> InnerBound = BoundErrNames;
+      if (Rec->getKind() == RecoverKind::AsRun)
+        InnerBound.push_back(Rec->getBoundName());
+      CollectReturnedErrorTypeNames(Rec->getBlock(), Out, FoundReboundError, InnerBound);
+    }
     return;
   }
 }
@@ -393,7 +447,8 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   // default false.
   if (!Sym.Params.empty() && Sym.Params[0].Name == "self")
     Sym.MutatesSelf = MutatesSelfField(Node.getBody());
-  CollectReturnedErrorTypeNames(Node.getBody(), Sym.PossibleErrorTypeNames);
+  CollectReturnedErrorTypeNames(Node.getBody(), Sym.PossibleErrorTypeNames,
+                                Sym.ReturnsReboundError);
   return Sym;
 }
 
