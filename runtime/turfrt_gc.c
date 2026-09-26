@@ -538,29 +538,39 @@ gc_capture_callee_saved(uintptr_t regs[TURF_GC_REGCAP_WORDS]) {
   /* `movq`/`movhps` extract an xmm register's low/high 64 bits -- both
    * baseline SSE1/SSE2 instructions guaranteed on any x86-64 CPU, chosen
    * over SSE4.1's `pextrq` specifically so this does not silently require
-   * a newer CPU feature than Win64 itself already mandates. */
-  __asm__ volatile("movq   %%xmm6,  %0\n\t"  "movhps %%xmm6,  %1\n\t"
-                    "movq   %%xmm7,  %2\n\t"  "movhps %%xmm7,  %3\n\t"
-                    "movq   %%xmm8,  %4\n\t"  "movhps %%xmm8,  %5\n\t"
-                    "movq   %%xmm9,  %6\n\t"  "movhps %%xmm9,  %7\n\t"
-                    "movq   %%xmm10, %8\n\t"  "movhps %%xmm10, %9\n\t"
-                    "movq   %%xmm11, %10\n\t" "movhps %%xmm11, %11\n\t"
-                    "movq   %%xmm12, %12\n\t" "movhps %%xmm12, %13\n\t"
-                    "movq   %%xmm13, %14\n\t" "movhps %%xmm13, %15\n\t"
-                    "movq   %%xmm14, %16\n\t" "movhps %%xmm14, %17\n\t"
-                    "movq   %%xmm15, %18\n\t" "movhps %%xmm15, %19\n\t"
-                    : "=m"(regs[8]),  "=m"(regs[9]),
-                      "=m"(regs[10]), "=m"(regs[11]),
-                      "=m"(regs[12]), "=m"(regs[13]),
-                      "=m"(regs[14]), "=m"(regs[15]),
-                      "=m"(regs[16]), "=m"(regs[17]),
-                      "=m"(regs[18]), "=m"(regs[19]),
-                      "=m"(regs[20]), "=m"(regs[21]),
-                      "=m"(regs[22]), "=m"(regs[23]),
-                      "=m"(regs[24]), "=m"(regs[25]),
-                      "=m"(regs[26]), "=m"(regs[27])
-                    :
-                    : "memory");
+   * a newer CPU feature than Win64 itself already mandates.
+   *
+   * One `asm` statement PER register, not one statement for all ten --
+   * found live via a MinGW cross-compile (`x86_64-w64-mingw32-gcc -O0`):
+   * a single statement with all 20 memory outputs failed to assemble at
+   * all ("asm operand has impossible constraints or there are not enough
+   * registers") because GCC could not simultaneously solve the address
+   * computation for 20 output operands at -O0's reduced register-allocator
+   * freedom -- it built fine at -O2 (more freedom to share address
+   * arithmetic), which would have shipped a debug-build-only compile
+   * failure on Windows undetected by this project's own Release-only CI.
+   * Splitting into ten independent two-operand statements removes the
+   * register pressure entirely and compiles clean at every `-O` level. */
+  __asm__ volatile("movq %%xmm6, %0\n\t" "movhps %%xmm6, %1\n\t"
+                    : "=m"(regs[8]), "=m"(regs[9]) :: "memory");
+  __asm__ volatile("movq %%xmm7, %0\n\t" "movhps %%xmm7, %1\n\t"
+                    : "=m"(regs[10]), "=m"(regs[11]) :: "memory");
+  __asm__ volatile("movq %%xmm8, %0\n\t" "movhps %%xmm8, %1\n\t"
+                    : "=m"(regs[12]), "=m"(regs[13]) :: "memory");
+  __asm__ volatile("movq %%xmm9, %0\n\t" "movhps %%xmm9, %1\n\t"
+                    : "=m"(regs[14]), "=m"(regs[15]) :: "memory");
+  __asm__ volatile("movq %%xmm10, %0\n\t" "movhps %%xmm10, %1\n\t"
+                    : "=m"(regs[16]), "=m"(regs[17]) :: "memory");
+  __asm__ volatile("movq %%xmm11, %0\n\t" "movhps %%xmm11, %1\n\t"
+                    : "=m"(regs[18]), "=m"(regs[19]) :: "memory");
+  __asm__ volatile("movq %%xmm12, %0\n\t" "movhps %%xmm12, %1\n\t"
+                    : "=m"(regs[20]), "=m"(regs[21]) :: "memory");
+  __asm__ volatile("movq %%xmm13, %0\n\t" "movhps %%xmm13, %1\n\t"
+                    : "=m"(regs[22]), "=m"(regs[23]) :: "memory");
+  __asm__ volatile("movq %%xmm14, %0\n\t" "movhps %%xmm14, %1\n\t"
+                    : "=m"(regs[24]), "=m"(regs[25]) :: "memory");
+  __asm__ volatile("movq %%xmm15, %0\n\t" "movhps %%xmm15, %1\n\t"
+                    : "=m"(regs[26]), "=m"(regs[27]) :: "memory");
 #elif defined(TURF_GC_REGCAP_AAPCS64)
   __asm__ volatile("str x19, %0\n\t"
                     "str x20, %1\n\t"
