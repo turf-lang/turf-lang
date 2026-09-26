@@ -1976,6 +1976,24 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
   TurfTypePtr BaseTy = getType(Node.getBase());
   TurfTypePtr IndexTy = getType(Node.getIndex());
 
+  // `unsafe { }` gate (OVH-003): indexing into a raw ptr/T* base is a
+  // "dereference" exactly like visitFieldAccess()'s `p.field` gate below it
+  // -- there was no equivalent check here at all before this fix (2.7's own
+  // "Known gaps" list named it explicitly), so `someList.data[i] = v;`
+  // compiled with no `unsafe { }` and no capability, silently reaching an
+  // out-of-bounds write from ordinary safe code the moment `i` was bad.
+  // Mirrors visitFieldAccess()'s self-exemption verbatim: `self` is always
+  // non-null by construction and a reserved token, so a VariableExprAST
+  // base literally named "self" unambiguously is the method receiver, not
+  // a name collision to worry about. A struct/string/array base never
+  // `isRawPointer()`, so this is a no-op for every non-pointer case above
+  // and below (operator[] overloads, T[N] arrays, string indexing).
+  bool IsSelfBase = false;
+  if (const auto *BaseVar = dynamic_cast<const VariableExprAST *>(Node.getBase()))
+    IsSelfBase = BaseVar->getName() == "self";
+  if (!IsSelfBase)
+    checkUnsafeGate(BaseTy.get(), Node.getLoc(), &Node);
+
   // ── operator[] overload resolution (LANG-001) ────────────────────────────
   // Checked BEFORE the builtin array/string/pointer dispatch below, mirrors
   // visitBinary()'s identical ordering rationale: a struct base can never
