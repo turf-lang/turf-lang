@@ -1,0 +1,14 @@
+// OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md §6.2 row 6.
+// The `export immut` twin of fail_immut_constant_reference_arithmetic_
+// overflow.tr in this same folder: an `export immut int` constant's exact
+// value is already carried as a decimal string on its ResolverConstantSymbol
+// (SEM-001) specifically so Codegen can inline it -- this fix reads that
+// same string back as the TypeChecker's own folded value, so a reference to
+// one inside further literal arithmetic is now caught at compile time too,
+// not just a bare `immut` local's.
+export immut MAXV: int = 9223372036854775807;
+
+fn main(): int {
+    immut b = MAXV + 1;
+    return b to int;
+}

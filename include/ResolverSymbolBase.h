@@ -95,6 +95,24 @@ struct VariableSymbol {
   /// the generic "declared here" specifically for a `guess`-inferred
   /// variable, per §11.6's own worked example.
   bool                   WasGuessInferred = false;
+  /// OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md §6.2 row 6
+  /// ("Compile-time on typed constants: error"). Set by
+  /// TypeChecker::visitVarDecl, only for an `immut` local of declared type
+  /// exactly `int` whose initializer TypeChecker::tryFoldUntypedIntConstant()
+  /// already proved is a pure literal-arithmetic tree -- its EXACT decimal
+  /// value, so a LATER reference to this local inside another
+  /// literal-arithmetic expression (`immut a: int = 9223372036854775807;
+  /// immut b = a + 1;`) can be folded too and its overflow caught at compile
+  /// time, instead of silently deferring to the runtime-checked-arithmetic
+  /// trap SEM-002 already built for the non-foldable case. A plain decimal
+  /// string, not an llvm::APSInt, for the same LLVM-free reason
+  /// ResolverConstantSymbol::IntVal (this file, below) is a string -- see
+  /// that field's own doc comment for the exact parsing pattern
+  /// (TypeChecker::tryFoldUntypedIntConstant()'s VariableExprAST case uses
+  /// the identical one). Empty/false for every other symbol (mut, a
+  /// non-`int` type, or an initializer that isn't pure literal arithmetic).
+  bool                   HasFoldedIntConstant = false;
+  std::string            FoldedIntConstant;
 
   VariableSymbol() = default;
   VariableSymbol(std::string Name, TurfTypePtr Type,

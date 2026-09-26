@@ -27,6 +27,8 @@
 
 #include "Monomorphize.h" // TYPE-002 (S11b): report-only instantiation collector
 
+#include "llvm/ADT/SmallString.h" // OVH-014: folded-immut-constant decimal rendering
+
 #include <cassert>
 #include <functional>
 #include <iostream>
@@ -448,6 +450,30 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
         // exact value -- this is the destination-representability check
         // FREEZE.md §6.2 rows 3/6/9 add on top.
         checkLiteralRepresentable(Node.getInitializer(), DeclTy.get(), Node.getLoc());
+
+        // OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md
+        // §6.2 row 6: an `immut int` whose initializer just passed the
+        // representability check above, IF that initializer is itself pure
+        // literal arithmetic, records its exact value on the shared
+        // VariableSymbol -- see VariableSymbol::HasFoldedIntConstant's own
+        // doc comment (ResolverSymbolBase.h) for why -- so a LATER
+        // reference to this local (`immut b = a + 1;`) can be folded and
+        // checked here too, at compile time, instead of only ever being
+        // caught by the runtime-checked-arithmetic trap. `checkLiteralRepresentable()`
+        // itself has already exited the process (raise()) on any failure
+        // above, so reaching this line means the fold below (if it
+        // succeeds) is a value already proven to fit `int`. Only for
+        // exactly `int` -- `int32`/`double` locals are never referenced as
+        // an operand of further int literal arithmetic.
+        if (Node.isImmutable() && DeclTy->isNamed("int") && Node.ResolvedSymbol) {
+          if (auto Folded = tryFoldUntypedIntConstant(Node.getInitializer(),
+                                                       /*IsTopLevel=*/true)) {
+            llvm::SmallString<48> S;
+            Folded->toString(S, 10, /*Signed=*/true);
+            Node.ResolvedSymbol->HasFoldedIntConstant = true;
+            Node.ResolvedSymbol->FoldedIntConstant = S.str().str();
+          }
+        }
       }
     }
   }

@@ -314,6 +314,41 @@ TypeChecker::tryFoldUntypedIntConstant(const ExprAST *E, bool IsTopLevel) {
     return llvm::APSInt(std::move(Result), /*isUnsigned=*/false);
   }
 
+  // OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md §6.2 row 6:
+  // a reference to an `int`-typed compile-time constant (a local `immut`
+  // this same fold already proved literal-arithmetic when IT was declared
+  // -- VariableSymbol::HasFoldedIntConstant, ResolverSymbolBase.h -- or an
+  // `export immut` constant, ResolverConstantSymbol::IntVal) folds exactly
+  // like the literal it was initialized from, so `immut a: int =
+  // 9223372036854775807; immut b = a + 1;` is now caught HERE at compile
+  // time instead of only at runtime (EmitCheckedIntArith). Both fields are
+  // plain decimal strings, never an llvm::APSInt, because ResolverSymbolBase.h
+  // is deliberately LLVM-free (see either field's own doc comment) -- this
+  // is the one place that string gets turned back into a real APSInt for
+  // the TypeChecker, the identical getBitsNeeded()-then-APInt(bits, digits,
+  // 10) pattern CodegenConstantValue() (CodegenCore.cpp) already uses to do
+  // the same conversion at Codegen time.
+  if (const auto *VE = dynamic_cast<const VariableExprAST *>(E)) {
+    const std::string *Digits = nullptr;
+    if (VE->ResolvedConstant && VE->ResolvedConstant->Type &&
+        VE->ResolvedConstant->Type->isNamed("int")) {
+      Digits = &VE->ResolvedConstant->IntVal;
+    } else if (const VariableSymbol *VS = VE->getResolvedSymbol()) {
+      if (VS->IsImmutable && VS->HasFoldedIntConstant)
+        Digits = &VS->FoldedIntConstant;
+    }
+    if (!Digits)
+      return std::nullopt;
+    bool Negative = !Digits->empty() && (*Digits)[0] == '-';
+    llvm::StringRef Magnitude = Negative ? llvm::StringRef(*Digits).drop_front()
+                                          : llvm::StringRef(*Digits);
+    unsigned Bits = llvm::APInt::getBitsNeeded(Magnitude, 10) + 1;
+    llvm::APInt Value(Bits, Magnitude, 10);
+    if (Negative)
+      Value = -Value;
+    return llvm::APSInt(std::move(Value), /*isUnsigned=*/false);
+  }
+
   return std::nullopt;
 }
 

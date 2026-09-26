@@ -1,0 +1,17 @@
+// OVH-014 positive twin of fail_immut_constant_reference_arithmetic_
+// overflow.tr: an `immut` chain that does NOT overflow must still compile
+// and compute the ordinary runtime value correctly -- this fix only adds a
+// compile-time CHECK (tryFoldUntypedIntConstant()'s new VariableExprAST
+// case); it must never change what a non-overflowing expression actually
+// computes at runtime. Chains two levels deep (`c` folds through `b`, which
+// itself folds through `a`) to prove the folded value is recorded and
+// re-readable, not just usable once.
+import test;
+
+fn main(): int {
+    immut a: int = 100;
+    immut b = a + 1;
+    immut c = b + 1;
+    test::assert(c == 102, "chained immut constant arithmetic should still compute the right runtime value");
+    return 0;
+}
