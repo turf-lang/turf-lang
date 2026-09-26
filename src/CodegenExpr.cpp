@@ -825,7 +825,7 @@ Value *CastExprAST::codegen() {
   //   We now use turf_rt_alloc(32, NULL) so the buffer lives on the GC heap
   //   and survives the function return.
   //
-  // OVH-002 follow-up (docs/planning/OVERHAUL_REMAINING_WORK.md): this used
+  // OVH-002 follow-up (docs/development/changes/OVH-002.md): this used
   // to be a bare `malloc(32)` -- never registered with the collector, so a
   // `string` this cast produced was permanently invisible to gc_collect(),
   // contradicting FREEZE.md §6.5 ("string values produced by any operation"

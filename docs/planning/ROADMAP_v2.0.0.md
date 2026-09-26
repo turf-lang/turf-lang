@@ -1,17 +1,22 @@
 # TurfLang 2.0.0 — Release Roadmap
 
 > **Status:** plan of record, written 2026-09-26 by the Architecture Overhaul
-> closure audit, against `refactor/architecture` @ `cde1d30`. Nothing here is
-> implemented. Items marked **DECISION** need an explicit answer from the
-> project owner before their session starts; each carries a recommendation so
-> the default is never ambiguous.
+> closure audit, against `refactor/architecture` @ `cde1d30`. **Phase 0
+> (Overhaul closure) is now done** — see
+> `docs/development/changes/OVH-CLOSE.md` (landed 2026-09-27); Phases 1+
+> (2.0 Foundation milestones onward) remain unimplemented. Items marked
+> **DECISION** need an explicit answer from the project owner before their
+> session starts; each carries a recommendation so the default is never
+> ambiguous.
 >
 > **Reading order:** Part 0 (rules) → Part I (sequence) → the milestone you
 > are implementing in Part IV → Parts V–IX as referenced.
 >
 > **Companion documents:**
 > `docs/development/OVERHAUL_CLOSURE_AUDIT.md` (evidence) ·
-> `docs/planning/OVERHAUL_REMAINING_WORK.md` (Phase 0, temporary) ·
+> `docs/development/changes/OVH-CLOSE.md` (Phase 0's closure record — the
+> temporary `docs/planning/OVERHAUL_REMAINING_WORK.md` handoff it closed out
+> is deleted as of that record) ·
 > `docs/planning/FUTURE.md` (everything deliberately after 2.0) ·
 > `docs/planning/ARCHITECTURE_OVERHAUL.md` (historical specification) ·
 > `docs/planning/ARCHITECTURE_SIMPLIFICATION.md` (discussion document; its
@@ -79,8 +84,8 @@ change record in its first session, as TYPE-002 did.
 ## Part I — Sequence
 
 ```
-PHASE 0  Overhaul closure            OVH-001 … OVH-015   (OVERHAUL_REMAINING_WORK.md)
-   │                                  gate: OVH closure gate §4 of that file
+PHASE 0  Overhaul closure            OVH-001 … OVH-015   DONE (OVH-CLOSE.md, 2026-09-27)
+   │                                  gate: closure gate demonstrated clean
    ▼
 PHASE 1  Foundation                   SMP-002  one generic type walker
    │                                  FDN-003  module-scoped type identity
@@ -234,12 +239,15 @@ are both bounded, incremental and shippable after each session.
 Each milestone uses the same template. "Stages" are the session plan; an L/XL
 milestone refines them in its change record before writing code.
 
-### Phase 0 — Overhaul closure
+### Phase 0 — Overhaul closure — **DONE** (2026-09-27)
 
-`OVH-001` … `OVH-015`, specified in `docs/planning/OVERHAUL_REMAINING_WORK.md`
-and gated by that file's §4. Phase 1 does not start until the closure record
-(`OVH-CLOSE`) says the Overhaul is closed and the audit's DoD-8
-reclassification decision is recorded.
+`OVH-001` … `OVH-015` were specified in the temporary handoff
+`docs/planning/OVERHAUL_REMAINING_WORK.md` (deleted on closure) and gated by
+that file's §4. The closure record,
+[`docs/development/changes/OVH-CLOSE.md`](../development/changes/OVH-CLOSE.md),
+says the Overhaul is closed, lists the gate evidence, and records the
+audit's DoD-8 reclassification (into FDN-001/FDN-002 below). Phase 1 is
+unblocked.
 
 ---
 

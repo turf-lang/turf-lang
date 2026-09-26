@@ -774,7 +774,7 @@ static llvm::Constant *buildTurfTypeDescInit(llvm::Type *T,
                llvm::ConstantInt::get(I64Ty, WordCount), BitmapPtr});
 }
 
-// OVH-002 (docs/planning/OVERHAUL_REMAINING_WORK.md): a function body may
+// OVH-002 (docs/development/changes/OVH-002.md): a function body may
 // need to reference a NAMED struct type's own descriptor (e.g. to pass it
 // to `turf_rt_alloc` when heap-allocating an instance of that struct) at a
 // point in codegen that runs BEFORE `EmitAllTurfTypeDescs()` -- which is

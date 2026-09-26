@@ -62,7 +62,7 @@ fi
 # records a confirmed instance. Every lib/std module must resolve with no
 # error at all (other than the expected "No entry point found" a pure
 # library file always reports). Until OVH-011
-# (docs/planning/OVERHAUL_REMAINING_WORK.md), list.tr and mem.tr could not
+# (docs/development/changes/OVH-011.md), list.tr and mem.tr could not
 # clear this bar: the prelude module `strings` does `import list::List`, so
 # compiling list.tr (or mem.tr, which list.tr imports) as an entry point
 # re-declared its own type through the transitively-reimported prelude
@@ -177,11 +177,11 @@ elif [ $TOUCHED_BAD -eq 0 ]; then
   pass "${#TOUCHED[@]} test file(s) added/renamed by this session, all correctly named"
 fi
 
-# Whole-tree state, informational. Known pre-existing hit as of ARCH-001
-# (2026-09-17): tests/07_functions_modules/export_qualified_cross_module.tr
-# ends in the substring `_module.tr`, so the runner skips it, though it
-# compiles and passes when run directly. Renaming it belongs to whoever owns
-# that folder, not to a passing sweep in an unrelated feature group.
+# Whole-tree state, informational. The long-standing pre-existing hit here
+# (tests/07_functions_modules/export_qualified_cross_module.tr, ending in the
+# substring `_module.tr` though it has a main()) was renamed to
+# export_qualified_across_modules.tr by OVH-015 (2026-09-27); this sweep is
+# now expected to be clean on a healthy tree.
 PRE_SKIPPED=$(find tests -name "*_module.tr" -not -path 'tests/99_known_bugs/*' -not -path 'tests/custom/*' \
               | xargs grep -lE '\bfn\s+(int\s+)?main\s*\(' 2>/dev/null)
 PRE_INCLUDED=$(find tests -name "*.tr" -not -name "*_module.tr" -not -name "fail_*" \

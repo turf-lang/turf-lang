@@ -20,7 +20,7 @@ CYAN="\033[0;36m"; RESET="\033[0m"
 FEATURE="${1:-}"
 if [ -z "$FEATURE" ]; then
   echo "Usage: $0 <FEATURE-ID> [--no-build] [--no-tests]"
-  echo "Feature IDs: ARCHITECTURE_OVERHAUL.md Appendix B; OVH-NNN in OVERHAUL_REMAINING_WORK.md; FDN/LEC/REL/SMP-NNN in ROADMAP_v2.0.0.md (all docs/planning/)."
+  echo "Feature IDs: ARCHITECTURE_OVERHAUL.md Appendix B; FDN/LEC/REL/SMP-NNN in ROADMAP_v2.0.0.md (all docs/planning/). OVH-NNN (the Overhaul closure items) lived in the now-deleted OVERHAUL_REMAINING_WORK.md -- see docs/development/changes/OVH-CLOSE.md, all landed."
   exit 1
 fi
 shift
@@ -34,14 +34,16 @@ for a in "$@"; do
 done
 
 # The spec a feature ID lives in. Overhaul groups (ARCH-001 ... SLM-001) are
-# in ARCHITECTURE_OVERHAUL.md §8; the overhaul-closure fixes (OVH-NNN) are in
-# the temporary handoff OVERHAUL_REMAINING_WORK.md; the 2.0 milestones
-# (FDN-/LEC-/REL-/SMP-NNN) are in ROADMAP_v2.0.0.md. First file with a
-# matching "### <ID> — " heading wins; the overhaul blueprint stays the
-# fallback so an unknown ID still fails against the familiar file.
+# in ARCHITECTURE_OVERHAUL.md §8; the 2.0 milestones (FDN-/LEC-/REL-/SMP-NNN)
+# are in ROADMAP_v2.0.0.md. The overhaul-closure fixes (OVH-NNN) used to live
+# in the temporary handoff OVERHAUL_REMAINING_WORK.md -- OVH-015 deleted that
+# file on closure (docs/development/changes/OVH-CLOSE.md); an OVH-NNN ID now
+# only resolves via that item's own change record under docs/development/changes/.
+# First file with a matching "### <ID> — " heading wins; the overhaul
+# blueprint stays the fallback so an unknown ID still fails against the
+# familiar file.
 BLUEPRINT="docs/planning/ARCHITECTURE_OVERHAUL.md"
 for CANDIDATE in docs/planning/ARCHITECTURE_OVERHAUL.md \
-                 docs/planning/OVERHAUL_REMAINING_WORK.md \
                  docs/planning/ROADMAP_v2.0.0.md; do
   if [ -f "$CANDIDATE" ] && grep -q "^### $FEATURE — " "$CANDIDATE"; then
     BLUEPRINT="$CANDIDATE"

@@ -314,7 +314,7 @@ TypeChecker::tryFoldUntypedIntConstant(const ExprAST *E, bool IsTopLevel) {
     return llvm::APSInt(std::move(Result), /*isUnsigned=*/false);
   }
 
-  // OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md §6.2 row 6:
+  // OVH-014 (docs/development/changes/OVH-014.md), FREEZE.md §6.2 row 6:
   // a reference to an `int`-typed compile-time constant (a local `immut`
   // this same fold already proved literal-arithmetic when IT was declared
   // -- VariableSymbol::HasFoldedIntConstant, ResolverSymbolBase.h -- or an

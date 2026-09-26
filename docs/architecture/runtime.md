@@ -154,7 +154,7 @@ while TYPE-002's per-instantiation struct layouts were fresh, rather than
 retrofitted later.
 
 `word_count`/`pointer_words` (widened by **OVH-001**,
-`docs/planning/OVERHAUL_REMAINING_WORK.md`) replace RT-001's original
+`docs/development/changes/OVH-001.md`) replace RT-001's original
 single inline `uint64_t pointer_word_bitmap` field, which could only
 represent the first 64 eight-byte words (512 bytes) of a type's layout — a
 documented limitation at the time (nothing read it yet), which became a

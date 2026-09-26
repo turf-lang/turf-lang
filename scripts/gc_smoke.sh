@@ -19,7 +19,7 @@
 #      it is genuine, tested runtime API reached directly, the same
 #      precedent mem_smoke.sh's check 1 already sets for
 #      Turf-source-unreachable libturfrt entrypoints.
-#   3. OVH-010 (docs/planning/OVERHAUL_REMAINING_WORK.md): turf_rt_pin()/
+#   3. OVH-010 (docs/development/changes/OVH-010.md): turf_rt_pin()/
 #      turf_rt_unpin() -- specifically the "unroot() actually lets the
 #      collector reclaim it" direction, which `tests/41_gc/
 #      11_mem_root_pins_manual_heap_reference.tr`'s own top comment

@@ -257,7 +257,7 @@ answers to "who reclaims this":
   memory is not a root, even if it points at a GC-heap object (a real,
   documented, deliberately-accepted unsoundness — see MEM-002's own change
   record, *Known pitfalls*). **OVH-010**
-  (`docs/planning/OVERHAUL_REMAINING_WORK.md`) gives this its escape hatch:
+  (`docs/development/changes/OVH-010.md`) gives this its escape hatch:
   `mem::root(p)`/`mem::unroot(p)` (`lib/std/mem/mem.tr`, `gc_pin`/`gc_unpin`
   bare intrinsics, `turf_rt_pin`/`turf_rt_unpin` in `runtime/turfrt_gc.c`)
   let a program mark the GC object *containing* `p` — an interior pointer
@@ -684,7 +684,7 @@ just "is this address exactly a block's start"
 (`tests/41_gc/03_interior_pointer_retention.tr`).
 
 **A `TurfTypeDesc`'s bitmap covers the type's ENTIRE layout, at any size**
-(OVH-001, `docs/planning/OVERHAUL_REMAINING_WORK.md`) — `word_count`
+(OVH-001, `docs/development/changes/OVH-001.md`) — `word_count`
 (`ceil(size / 8)`) plus a `pointer_words` array of `ceil(word_count / 64)`
 `uint64_t`s, not the single inline `uint64_t` RT-001 originally shipped.
 That original version silently stopped tracing past word 63 (byte 512) of
@@ -705,101 +705,95 @@ memory is not a root"), not a bug; see MEM-002's own change record, *Known
 pitfalls*, for how this was rediscovered live while measuring this
 group's own performance numbers.
 
-### 2.7 Generics and type erasure
+### 2.7 Generics and monomorphization
 
-#### 2.7.1 Every type parameter erases to one 64-bit slot
+#### 2.7.1 Every distinct instantiation gets its own real layout
 
-`getLLVMType()`'s handling of an open generic parameter is unconditional and
-has nothing to do with what the parameter is eventually instantiated with:
+`getLLVMType()`'s handling of a `GenericType`-typed reference (`List<int>`,
+`Box<Player>`, …) looks up the **per-instantiation** LLVM struct type by its
+mangled instantiation name, not a single shared type standing in for every
+concrete use:
 
 ```cpp
-// Type Erasure: Generic Type Parameters are compiled as void*
-if (dynamic_cast<const TurfGenericParamType *>(T)) {
-  return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);   // CodegenCore.cpp:352-354
+// CodegenCore.cpp:643 — GenericType branch
+if (auto *GT = dynamic_cast<const GenericType *>(T)) {
+  std::string InstName = Monomorphize::instantiatedDeclName(
+      GT->getBaseName(), GT->getTypeArgs());
+  // ... look up (or forward-declare) the StructType registered under InstName
 }
 ```
 
-A generic function/struct is compiled **once**, generically — there is no
-per-instantiation monomorphization the way C++ templates or Rust generics
-work. `List<int>` and `List<string>` are, at the machine level, the
-*identical* compiled code and the *identical* struct layout; the only
-difference between them is which concrete type the TypeChecker validated at
-each call site before Codegen ever ran. This is precisely what `list.tr`'s
-own comment states directly:
+`List<int>` and `List<string>` are, at the machine level, **two entirely
+distinct** `llvm::StructType`s with two distinct sets of compiled methods
+(`turf_List.push_gen1_int_...` takes a genuine `i64`; `turf_List.push_gen1_string_...`
+takes a genuine string handle) — not one shared implementation reached
+through a cast. This is produced by the **Monomorphizer**
+(`docs/architecture/compiler_pipeline.md` §7): every generic struct
+declaration is a template that never itself reaches Codegen; each concrete
+type-argument tuple actually used in the program gets its own cloned
+`StructDeclExprAST`, substituted field-by-field with concrete types, and
+registered in `GlobalSymbolTable` under its own mangled name (e.g.
+`List_gen1_int`). Reaching Codegen with an unsubstituted `TurfGenericParamType`
+anywhere is a compiler bug, enforced by a debug-build `assert()` at three
+sites (`Monomorphize.cpp`'s `finishInstantiation()`, and `CodegenCore.cpp`'s
+`getLLVMType()`/`CastToType()`) — `docs/development/INVARIANTS.md` **INV-GEN-1**.
 
-> // In Type Erasure, all T are 64 bits (pointers, int, double)
-> — `lib/std/collections/list.tr:27`
+This replaced an earlier type-erasure implementation, in which every open
+generic parameter compiled unconditionally to an opaque pointer
+(`llvm::PointerType::get`) regardless of what it was eventually instantiated
+with, and a scalar value was smuggled through that pointer-shaped slot by
+reinterpreting its raw bits (`CreateIntToPtr`/`CreatePtrToInt` — a `double`
+first bitcast to its 64-bit integer representation, then to a pointer
+carrying that same bit pattern, never dereferenced as an address). That
+erasure branch is deleted outright, not merely unused — `CastToType()` has
+no "cast to/from generic parameter" case left; the only code that ever
+touches a `TurfGenericParamType` post-Monomorphizer is the three assertions
+above, confirming one never reached them.
 
-An opaque pointer is one machine word — 8 bytes on the 64-bit targets this
-compiler builds for — which is why `List<T>.push()` computes its buffer
-size as `self.cap * 8` (`list.tr:28`) rather than anything derived from a
-real `sizeof(T)`: there is no such thing as `sizeof(T)` here, because `T`'s
-erased representation is always exactly one word, regardless of what `T`
-actually is.
+#### 2.7.2 There is no pointer-sized "erased slot" any more
 
-#### 2.7.2 How a scalar `T` fits into a pointer-sized slot
+Because a generic struct's fields carry their real, substituted concrete
+types after cloning, a `T`-typed field's storage is whatever `T` actually
+is — a real `i64` for `int`, a real 8-byte string handle for `string`, a
+real inline aggregate for a struct type, laid out exactly as it would be if
+the struct had been hand-written for that one concrete type
+(`checkStructLayoutAcyclicityForClone()`, run per clone before it is
+registered, guarantees the layout is finite the same way §1.5/§2.5's
+ordinary acyclicity check does for a non-generic struct — see
+`docs/development/changes/TYPE-002.md`'s S13a entry). There is no
+reinterpretation step at a `push`/`get` call boundary any more: `self.data[i]
+= item;` where `item: T` is an ordinary, type-specific store into a
+concretely-typed array, exactly like any other struct field assignment.
 
-Storing an `int`/`double`/`bool` value into a generic-parameter-typed slot
-(e.g. `self.data[self.len] = item;` in `List<T>.push`, where `item: T`) has
-to reconcile a genuinely numeric value with a slot whose LLVM type is an
-opaque pointer. `CastToType()`'s type-erasure branch does this by
-**reinterpreting the value's raw bits as a pointer**, not by boxing it in a
-separate heap allocation:
+#### 2.7.3 A struct-typed `T` larger than one machine word works directly
 
-```cpp
-// CodegenCore.cpp:1177-1187
-if (dynamic_cast<const TurfGenericParamType *>(DestType)) {
-  Type *VoidPtrTy = PointerType::get(*TheContext, 0);
-  if (ValTy->isPointerTy())
-    return Val; // already a pointer
-  if (ValTy->isDoubleTy())
-    Val = Builder->CreateBitCast(Val, Type::getInt64Ty(*TheContext), "dbl_to_i64");
-  if (Val->getType()->isIntegerTy())
-    return Builder->CreateIntToPtr(Val, VoidPtrTy, "erased_ptr");
-  return Builder->CreateBitCast(Val, VoidPtrTy, "erased_ptr");
-}
-```
+Under the old erasure scheme, a struct value larger than 8 bytes could not
+be losslessly round-tripped through a single erased pointer-sized slot at
+all — an unconditional ICE. This is fixed as of `TYPE-002` (S13b/S14a/S14b,
+`docs/development/changes/TYPE-002.md`'s own D3 entry): every stdlib
+collection's growth arithmetic now computes its buffer size from a genuine
+`sizeof(T)` (`self.cap * sizeof(T)` — `lib/std/collections/list.tr`,
+mirrored in `stack.tr`/`queue.tr`/`set.tr`/`map.tr`/`mem.tr`'s `Pool<T>`,
+each once), which reports the real, concrete size for any instantiation,
+including a multi-field struct — verified live: `List<Big>` (a 24-byte,
+three-`int`-field struct) compiles `push`/`pop` clones that take/return a
+genuine `%Big` aggregate by value (`define internal %Big
+@turf_List.pop_gen1_Big...(ptr %self)`), grows its backing buffer correctly
+across repeated pushes, and reads every value back correctly
+(`tests/38_monomorphization/12_list_growth_over_8_bytes.tr`,
+`17_stack_growth_over_8_bytes.tr` through `20_...`).
 
-A `double` is first reinterpreted as a 64-bit integer bit pattern (not
-converted numerically — the same 8 bytes, just relabeled), and any integer
-width (`int`, `int32` after its own widening, `bool`, `char`) is then
-turned into a pointer value carrying that same bit pattern as its address —
-`CreateIntToPtr` performs no dereference, it's purely a type-level
-relabeling at the LLVM level with zero runtime cost. Reading a value back
-out of a generic-parameter slot (`CodegenCore.cpp:1208-1221`) reverses this
-exactly: `CreatePtrToInt` extracts the pointer's bit pattern back into an
-integer, then bitcasts to `double` if that's what the concrete
-instantiation calls for. **No heap allocation, no wrapper object, and no
-per-instantiation code exists anywhere in this mechanism** — a `List<int>`
-storing the value `5` literally stores the pointer value `0x5` in its
-backing array, never dereferenced as an address, always immediately
-reinterpreted back into an `int` on read.
-
-#### 2.7.3 Why this breaks down above 8 bytes, precisely
-
-This mechanism only works because every scalar Turflang currently exposes
-to generics — `int`, `int32` (widened), `double`, `bool`, any pointer type —
-fits in 64 bits with room to spare. A **struct value larger than 8 bytes**
-categorically cannot be reinterpreted this way: there is no single 64-bit
-bit pattern that round-trips back into (for example) a 16-byte
-two-`double`-field struct, and `CastToType()`'s generic-erasure branch above
-has no case at all for a struct-typed source or destination — a struct
-passed by value into a generic-parameter-typed slot simply isn't a shape
-this mechanism was built to handle.
-
-The practical consequence, stated in `docs/reference/stdlib/collections.md`
-and consistent with every collection sharing the `list.tr` design (§2.6):
-**a struct larger than 8 bytes can't practically be used as `T` in
-`List<T>` (or `Stack<T>`/`Queue<T>`/`Map<K,V>`/`mem::Pool<T>`) directly.**
-The documented workaround is to instantiate with a *pointer* to the struct
-instead — `List<MyStruct*>` — since a pointer, whatever it points at, is
-always exactly one word and fits the erasure scheme regardless of the
-pointee's size. This is a real, currently-unfixed architectural gap (not a
-deliberate language restriction with a principled justification) — closing
-it would require either real per-instantiation monomorphization (a much
-larger compiler change) or a redesigned erasure scheme that boxes
-oversized values on the heap instead of inlining their bits, and no such
-work is scheduled.
+The `List<MyStruct*>` pattern (instantiating with a *pointer* to the struct
+instead of the struct itself) still compiles and is not being removed —
+`lib/std/collections/list.tr`'s own header comment documents it as "still
+fully supported" — but it is now a caller's ordinary choice about aliasing
+and mutation-through-reference, the same choice a Turf programmer has for
+any struct-valued collection, not a workaround required to avoid an ICE.
+The one genuinely load-bearing reason a `List<T>`-shaped module can't
+simply switch `data` from a raw `T*` to a safe `&T` (`checkNoRawPointersInSignature`
+rejecting a signature substituted to a raw-pointer parameter when `T` is
+itself instantiated as a pointer type) is unrelated to monomorphization and
+is documented in that same comment.
 
 ### 2.8 Pointers and `&T`: representation only
 

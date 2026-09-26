@@ -2,7 +2,12 @@
 
 Turf is a statically-typed, LLVM-backed programming language. It compiles directly to native binaries, supports structs, enums, generics, state machines, modules, pointers, and native FFI, ships with a real standard library (strings, collections, file I/O, JSON, time, randomness, filesystem paths, networking), and includes an integrated compiler-diagnostics system built around a locally-run language model.
 
-Current version: **v1.0.0**.
+Current version: **v1.0.0** is the last tagged release. This branch
+(`refactor/architecture`) is unreleased, in-development work on the
+Architecture Overhaul — real generics (monomorphization), a tracing garbage
+collector for the heap, `&?T` nullable safe references, and a numeric/memory
+semantic freeze — targeting the first public release, **v2.0.0**. See
+`docs/planning/ROADMAP_v2.0.0.md` for what's left before that tag.
 
 ## Table of Contents
 
@@ -125,6 +130,18 @@ immut pi: double = 3.14159;
 mut flag: bool = true;
 mut name: string = "Turf";
 ```
+
+### Type inference (`guess`)
+
+An initializer's type can be inferred instead of written out — either by omitting the `: Type` annotation entirely, or by spelling it explicitly as `guess`:
+
+```
+mut a = 5;              // infers int
+mut b: guess = 5.5;     // infers double (explicit spelling is equivalent)
+immut name = "Turf";    // infers string
+```
+
+The inferred type is fixed permanently at the declaration — a `mut` variable can be reassigned, but only with a value of that same inferred type. `typeof(x)` returns the inferred type's name as a string.
 
 ### Casting
 
@@ -329,6 +346,19 @@ writeFile("a.txt", "hi") recover run {
 
 `recover as err run { ... }` requires the callee to declare a real `error` type — a bare `error GeneralError;` type (no variants beyond the implicit `GeneralError::DEFAULT`) can still use `recover produce`/`recover run`, just not `recover as`. See `docs/architecture/errors_and_recover.md` for the full spec.
 
+### `defer`
+
+A `defer`'d statement runs when the enclosing function returns, regardless of which `return` triggered it — the deterministic-cleanup answer for OS resources (file handles, sockets, manual-heap buffers) that a tracing garbage collector's mark-sweep pass can't help with, since it has no destructor concept. Multiple `defer`s in the same block run in reverse (LIFO) order:
+
+```
+fn appendThree(t: &Trail): void {
+    defer t.log = t.log + "1";
+    defer t.log = t.log + "2";
+    defer t.log = t.log + "3";
+    // on return, these run in order 3, 2, 1 -- t.log ends up "321"
+}
+```
+
 ### First-class functions
 
 An unqualified `fn` name is a value — it can be passed as an argument, stored in a variable, and called indirectly:
@@ -419,9 +449,23 @@ fn main(): int {
 }
 ```
 
-### `unsafe { }` and safe references (`&T`)
+A file with several `extern fn`s that all need to pass raw pointers around (a C callback signature, a struct of raw fields) can declare itself exempt from `unsafe { }` once, file-wide, instead of wrapping each use — see the capability declaration below.
 
-Raw pointer types (`ptr`, `T*`) are gated behind `unsafe { }` everywhere outside `lib/std` — declaring a raw-pointer-typed variable, casting to/from one, or accessing a field through one (there's no explicit dereference operator; field access through a raw pointer base is the closest thing) all require lexically being inside `unsafe { }`. A struct with a raw pointer field needs its *entire declaration* wrapped, not just the code that dereferences it later. An ordinary (non-`extern`) function's parameters and return type may never be raw pointers at all, even inside `unsafe { }` — `extern fn` bindings (the FFI surface itself) and anything under `lib/std` are exempt from all of this.
+### `unsafe { }` and safe references (`&T`, `&?T`)
+
+Raw pointer types (`ptr`, `T*`) are gated behind `unsafe { }` by default — declaring a raw-pointer-typed variable, casting to/from one, or accessing a field through one (there's no explicit dereference operator; field access through a raw pointer base is the closest thing) all require lexically being inside `unsafe { }`. A struct with a raw pointer field needs its *entire declaration* wrapped, not just the code that dereferences it later. An ordinary (non-`extern`) function's parameters and return type may never be raw pointers at all, even inside `unsafe { }` — `extern fn` bindings (the FFI surface itself) are exempt from all of this, and so is any file that declares itself exempt (see the capability declaration below).
+
+A file can grant itself blanket use of raw pointers — the same privilege `lib/std` itself uses — with a declaration as its own first top-level statement:
+
+```
+unsafe module;
+
+fn cmpints(a: ptr, b: ptr): int32 {   // legal here, and not gated per-use
+    return 0;
+}
+```
+
+Honored unconditionally for a file under the Turf install root (`lib/std`/`lib/usr`); anywhere else it needs the `--allow-unsafe-modules` CLI flag, so a plain `turf myfile.tr` never silently grants it. See `docs/architecture/pointers_and_references.md` §1.7 for the full mechanism.
 
 `&T` is a compiler-guaranteed non-null reference — `&expr` (address-of) always produces one:
 
@@ -438,6 +482,27 @@ unsafe {
     mutable safe: &Node = p to &Node;   // asserts p isn't null
 }
 ```
+
+`&?T` is `&T`'s **nullable** counterpart — a safe reference that can be `null`, checked by a real compile-time nullability analysis instead of trusting the programmer. It's the type that makes a safe self-referential struct (a linked list, a tree) possible without `unsafe { }` anywhere in the declaration:
+
+```
+struct Node {
+    val: int,
+    next: &?Node   // no unsafe { } needed anywhere in this struct decl
+}
+
+fn sum(head: &?Node): int {
+    mutable total: int = 0;
+    mutable current: &?Node = head;
+    while (current != null) {          // narrows `current` to non-null...
+        total = total + current.val;   // ...so this field access is legal
+        current = current.next;
+    }
+    return total;
+}
+```
+
+Field access on a `&?T` compiles only where the compiler has proven it non-null on every path reaching that access; an unguarded access is a compile error (`E081`). `&?T -> &T` needs an explicit, narrowing-checked `to` cast — never implicit. See `docs/architecture/pointers_and_references.md` §1.8 for the full narrowing rules.
 
 ### State machines
 
@@ -482,7 +547,7 @@ Every module is an ordinary `.tr` file under `lib/std/` — no compiler special-
 |---|---|
 | `strings` | length/contains/index_of/starts_with/ends_with/repeat/substring/replace/to_upper/to_lower/trim(_start/_end), `split`/`join`, `pad_left`/`pad_right`, `parse_int`/`parse_double` |
 | `io` | `print`/`printline`/`input`, plus file I/O: `read_to_string`, `read_lines`, `write_string`, `exists`, `eprint`/`eprintline`, `flush` |
-| `list` / `stack` / `queue` / `map` / `collections::set` | `List<T>`/`Stack<T>`/`Queue<T>`/`Map<K,V>`/`Set<T>`, plus `list_sort`/`list_binary_search`/`list_find` free functions over `List<int>` |
+| `list` / `stack` / `queue` / `map` / `set` | `List<T>`/`Stack<T>`/`Queue<T>`/`Map<K,V>`/`Set<T>`, plus `list_sort`/`list_binary_search`/`list_find` free functions over `List<int>` |
 | `mem` | checked `alloc`/`alloc_zeroed`/`grow`/`dup`/`zero` wrappers over `malloc`/`calloc`/`realloc`/`free`, plus `Pool<T>` |
 | `math` | `abs`/`power`/`min`/`max`/`clamp`, libm bindings (`sqrt`, `sin`, `pow`, ...), `PI`/`E` |
 | `time` | `now_seconds()` (wall clock), `clock_ticks()`/`elapsed_ms()` (CPU time — not wall time, see the module's own doc comment), `sleep_seconds`/`sleep_ms` |
@@ -495,8 +560,6 @@ Every module is an ordinary `.tr` file under `lib/std/` — no compiler special-
 | `sys` / `test` | `panic`/`exit`/`abort`; `assert`/`fail`/`assert_eq` |
 
 Full per-function reference for every module: [`docs/reference/stdlib/`](docs/reference/stdlib/).
-
-> **Known limitation**: `Map<K, V>`/`Set<T>` lookups compare keys/items by raw identity, not content, when `K`/`T` = `string` (correct for `int`/`double`/`bool`/pointer) — a generic method body is checked and codegenned once, shared across every instantiation, so it can never see the concrete `string` type to dispatch `strings.tr`'s real `operator==` through. `Set<string>` dedup and `Map<string, V>`'s own `.get()`/`.contains()`/`.tryGet()` are affected; see `docs/reference/stdlib/collections.md` for the full mechanism and the working non-generic-method pattern `http.tr`'s `Request`/`Server` use instead.
 
 ## Examples
 
@@ -715,7 +778,7 @@ What's next is tracked in **[`docs/planning/FUTURE.md`](docs/planning/FUTURE.md)
 - Developer tooling: an LSP server, `turf fmt`, `turf test`, a package manager.
 - `@slm { }` in-source syntax (Prompt-Oriented Programming) — the `--smart` error-healing pipeline is live today; writing natural-language blocks that generate real code is not.
 - LoRA fine-tuning for the local SLM.
-- A hashed `HashMap<K, V>` (today's `map`/`collections::set` are linear-scan association lists — see the Standard Library section above) and, ideally, a trait/constraint system that would let `Map<K, V>`/`Set<T>` dispatch `==` correctly for `K`/`T = string` (documented limitation, see `docs/reference/stdlib/collections.md`).
-- The proposed memory-architecture RFC (automatic reference counting) — today's model is entirely manual: raw pointers gated behind `unsafe { }`, `&T` giving a non-null guarantee only, no GC.
+- A hashed `HashMap<K, V>` (today's `map`/`set` are linear-scan association lists — see the Standard Library section above; a struct key can supply its own `hash()` now that generics are monomorphized, see `docs/reference/stdlib/collections.md`).
+- Two disjoint heaps: `mem::alloc`/`mem::alloc_zeroed`/`mem::grow`/`mem::Pool<T>` (`lib/std/mem/`) are entirely manual, C-style — no automatic reclamation of that memory. Every collection (`List<T>`, `Map<K,V>`, `string` concatenation, ...) allocates on a separate, garbage-collected heap instead: a real non-moving mark-sweep collector (`libturfrt`) traces reachability precisely through declared pointer fields and conservatively through the stack/registers, running automatically on allocation pressure or on demand via `gc_collect()`. `mem::root(p)`/`mem::unroot(p)` pin a GC object reachable only through manual memory. An automatic-reference-counting design was considered and explicitly rejected in favor of this tracing collector (cycles, FFI-boundary pinning, and per-assignment retain/release cost were the deciding factors) — see `docs/architecture/memory_model.md` §1.7 for the full model.
 
 **Turflang 2.0.0** is reserved for self-hosting — writing the compiler in Turf itself, once the above has landed.

@@ -247,7 +247,7 @@ static llvm::Constant *BuildBareTagString(const std::string &ErrorTypeName,
 /// heap-box a success value that doesn't fit in a FallibleValue's 64-bit
 /// successBits slot (BoxToI64Slot()'s struct branch) and a message-carrying
 /// error value (CodegenErrorVariantConstructWithMessage(), below). OVH-002
-/// (docs/planning/OVERHAUL_REMAINING_WORK.md): both call sites used to
+/// (docs/development/changes/OVH-002.md): both call sites used to
 /// reach a bare `malloc` instead -- correct before MEM-002's collector
 /// existed, a live use-after-free once it did, because a GC-heap pointer
 /// (a `string` field inside the boxed value, the error value's own message
@@ -952,19 +952,27 @@ const TurfType *getExprType(const ExprAST *E) {
               }
             }
             if (Compatible) {
-              // Same class of gap as the struct-method case just above:
-              // a generic FREE function is type-erased to ONE compiled
-              // version, registered here under its bare declared return
-              // type (e.g. TurfGenericParamType("T") for `fn<T>
-              // firstElem(arr: T[]): T`) -- returning it unsubstituted
-              // meant `firstElem(intArray) to string` failed with "I
-              // can't convert 'T' to a string!" even though
-              // TypeChecker's OWN (separate) inference already correctly
-              // resolves this call's type as int. Recover T -> int by
-              // unifying each DECLARED parameter type against the
-              // ACTUAL argument type at this call site (recursing
-              // through pointer/array wrapping, e.g. T[] vs int[] ->
-              // T=int), then substitute it into the declared return type.
+              // Same class of gap as the struct-method case just above
+              // (getExprType() is a completely separate, independent
+              // type-inference pass from TypeChecker/the Monomorphizer --
+              // it never consults either one's results): the exact-mangled-
+              // name lookups above only hit `FuncReturnTypes` when this
+              // function's `getMangledName()` reconstruction of the call
+              // matches how the Monomorphizer actually named the clone it
+              // generated. When it doesn't -- or when nothing here has
+              // registered a per-instantiation entry at all -- this falls
+              // through to the generic TEMPLATE's own declared signature
+              // (still registered under its bare name, e.g.
+              // TurfGenericParamType("T") for `fn<T> firstElem(arr: T[]):
+              // T`), which is unsubstituted. Returning it as-is meant
+              // `firstElem(intArray) to string` failed with "I can't
+              // convert 'T' to a string!" even though TypeChecker had
+              // already correctly resolved this call's type as int.
+              // Recover T -> int by unifying each DECLARED parameter type
+              // against the ACTUAL argument type at this call site
+              // (recursing through pointer/array wrapping, e.g. T[] vs
+              // int[] -> T=int), then substitute it into the declared
+              // return type.
               std::unordered_map<std::string, TurfTypePtr> Subst;
               std::function<void(const TurfTypePtr &, const TurfType *)> Unify =
                   [&](const TurfTypePtr &ParamTy, const TurfType *ArgTy) {

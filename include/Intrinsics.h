@@ -100,7 +100,7 @@
 //                  that extern binding. Registered in Builtins.cpp's
 //                  g_builtins (Arity 1).
 //   gc_pin(p) / gc_unpin(p) -- OVH-010
-//                  (docs/planning/OVERHAUL_REMAINING_WORK.md). Pins/unpins
+//                  (docs/development/changes/OVH-010.md). Pins/unpins
 //                  the GC object containing `p` against collection
 //                  (turf_rt_pin/turf_rt_unpin) -- an interior pointer is
 //                  fine, pins nest, and `p` need not be a GC pointer at all

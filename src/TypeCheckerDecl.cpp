@@ -451,7 +451,7 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
         // FREEZE.md §6.2 rows 3/6/9 add on top.
         checkLiteralRepresentable(Node.getInitializer(), DeclTy.get(), Node.getLoc());
 
-        // OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md
+        // OVH-014 (docs/development/changes/OVH-014.md), FREEZE.md
         // §6.2 row 6: an `immut int` whose initializer just passed the
         // representability check above, IF that initializer is itself pure
         // literal arithmetic, records its exact value on the shared

@@ -28,7 +28,7 @@
 #      docs/architecture/boundary.md's "One documented exception" section
 #      for the one known, pre-existing, out-of-scope exception this script
 #      deliberately does not flag).
-#   4. OVH-002 (docs/planning/OVERHAUL_REMAINING_WORK.md): no Codegen call
+#   4. OVH-002 (docs/development/changes/OVH-002.md): no Codegen call
 #      site reaches a bare `malloc` under the name `getOrCreateMallocFn()`
 #      any more -- both of its former callers now GC-heap-allocate via
 #      `turf_rt_alloc` with a real descriptor instead (F-MEM-1's precise

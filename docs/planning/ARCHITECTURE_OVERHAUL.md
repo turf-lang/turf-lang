@@ -1,14 +1,17 @@
 # TurfLang Compiler & Language Architecture Overhaul
 
-> **Status (2026-09-26): implemented, closure pending.** All 23 feature
-> groups have landed (`docs/development/INDEX.md`). The final closure audit,
-> `docs/development/OVERHAUL_CLOSURE_AUDIT.md`, found remaining defects that
-> must be fixed before the Overhaul is closed; they are specified in
-> `docs/planning/OVERHAUL_REMAINING_WORK.md` (items OVH-001 … OVH-015). §27's
-> Deferred Work Register has been reclassified into
-> `docs/planning/ROADMAP_v2.0.0.md` (Part II) and `docs/planning/FUTURE.md`.
-> This document stays the historical specification; `docs/development/FREEZE.md`
-> stays authoritative for the frozen decisions.
+> **Status (2026-09-27): closed.** All 23 feature groups landed
+> (`docs/development/INDEX.md`), the final closure audit
+> (`docs/development/OVERHAUL_CLOSURE_AUDIT.md`) found 15 remaining defects
+> (OVH-001 … OVH-015), and all 15 are now landed too — see
+> `docs/development/changes/OVH-CLOSE.md` for the closure gate evidence and
+> the DoD-8 reclassification (into `docs/planning/ROADMAP_v2.0.0.md`'s
+> FDN-001/FDN-002). `docs/planning/OVERHAUL_REMAINING_WORK.md`, the temporary
+> closure handoff, is deleted as of that same record. §27's Deferred Work
+> Register has been reclassified into `docs/planning/ROADMAP_v2.0.0.md`
+> (Part II) and `docs/planning/FUTURE.md`. This document stays the historical
+> specification; `docs/development/FREEZE.md` stays authoritative for the
+> frozen decisions.
 >
 > *Original status line:* architectural blueprint. Nothing in this document
 > has been implemented. It is written to be consumed one feature group at a

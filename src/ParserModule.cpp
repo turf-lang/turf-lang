@@ -893,7 +893,7 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
 static const char *const PreludeModuleNames[] = {
     "int", "double", "bool", "char", "strings", "array"};
 
-// OVH-011 (docs/planning/OVERHAUL_REMAINING_WORK.md): the entry file's own
+// OVH-011 (docs/development/changes/OVH-011.md): the entry file's own
 // top-level parse (main.cpp's own token-consuming loop, further down this
 // same file's call chain -- NOT ParseFile()) never participated in the
 // ImportedFiles cache/ImportStack machinery every OTHER file's content goes

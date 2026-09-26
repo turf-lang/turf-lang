@@ -171,7 +171,7 @@ caught immediately rather than sitting as a silent inconsistency.
 
 ## 5. A `mem::alloc` result may never hold a GC-heap pointer
 
-OVH-002 (`docs/planning/OVERHAUL_REMAINING_WORK.md`): F-MEM-3 (FREEZE.md
+OVH-002 (`docs/development/changes/OVH-002.md`): F-MEM-3 (FREEZE.md
 §6.5) says the two heaps never merge and the collector never traces into
 manual memory — the corollary this rule makes explicit is that nothing may
 rely on the collector doing so implicitly, either. A `mem::alloc`/

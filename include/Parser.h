@@ -65,7 +65,7 @@ std::unique_ptr<ExprAST> Parse();
 // to load (these are compiler-shipped files expected to always exist).
 std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc);
 
-// OVH-011 (docs/planning/OVERHAUL_REMAINING_WORK.md): called by main.cpp
+// OVH-011 (docs/development/changes/OVH-011.md): called by main.cpp
 // once per parse pass, right after that pass's own ParsePreludeImports()
 // call and before the entry file's own top-level declaration loop starts.
 // Returns true if @p EntryPath was already fully parsed via a transitive

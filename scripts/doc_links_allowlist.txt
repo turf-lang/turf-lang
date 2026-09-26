@@ -12,6 +12,10 @@
 # check. Delete the line -- that is the intended maintenance.
 
 # --- Retired planning docs, named by the documents that record their removal.
+docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/development/changes/*.md :: the temporary Overhaul-closure handoff (deleted by OVH-015/OVH-CLOSE, 2026-09-27); every OVH-NNN record legitimately cites the spec it implemented at landing time.
+docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/development/OVERHAUL_CLOSURE_AUDIT.md :: the 2026-09-26 audit that wrote the handoff names its own deliverable; frozen historical record, not edited retroactively.
+docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: the status header narrates the handoff's existence and deletion on closure (OVH-CLOSE, 2026-09-27).
+docs/planning/OVERHAUL_REMAINING_WORK.md :: docs/planning/ROADMAP_v2.0.0.md :: Phase 0's own section and the companion-documents header narrate the handoff's existence and deletion on closure (OVH-CLOSE, 2026-09-27).
 docs/planning/Errors.md :: docs/architecture/errors_and_recover.md :: names the design brief it superseded (removed 2026-08-04); the 43 source citations were re-pointed here by ARCH-001.
 docs/planning/Errors.md :: docs/planning/ARCHITECTURE_OVERHAUL.md :: §5 C-8 uses this exact path as the worked example of a dangling reference -- the citation is the point.
 docs/planning/COMPILER_MODULE_BREAKDOWN.md :: docs/architecture/compiler_pipeline.md :: records that the 2026-08 module-split plan was retired once the split landed, and that this document replaced it.
@@ -25,7 +29,6 @@ docs/detailed/modules_and_stdlib.md :: docs/architecture/modules_and_scope_resol
 # --- Documents the overhaul-closure handoff and the 2.0 roadmap plan but have
 # --- not been written yet (2026-09-26 closure audit). Same rule as above: each
 # --- line dies, and must be deleted, when the milestone that writes it lands.
-docs/development/changes/OVH-CLOSE.md :: docs/planning/OVERHAUL_REMAINING_WORK.md :: the Overhaul's closure record, written by the session that passes the handoff's §4 gate.
 docs/reference/projects_and_packages.md :: docs/planning/ROADMAP_v2.0.0.md :: written by LEC-001 (projects, dependencies, builds).
 docs/reference/memory_and_safety.md :: docs/planning/ROADMAP_v2.0.0.md :: written by REL-006 (the 2.0 memory-safety statement).
 docs/development/BENCHMARKS.md :: docs/planning/ROADMAP_v2.0.0.md :: written by REL-005 (performance baseline).

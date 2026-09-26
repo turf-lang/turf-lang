@@ -95,7 +95,7 @@ struct VariableSymbol {
   /// the generic "declared here" specifically for a `guess`-inferred
   /// variable, per §11.6's own worked example.
   bool                   WasGuessInferred = false;
-  /// OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md §6.2 row 6
+  /// OVH-014 (docs/development/changes/OVH-014.md), FREEZE.md §6.2 row 6
   /// ("Compile-time on typed constants: error"). Set by
   /// TypeChecker::visitVarDecl, only for an `immut` local of declared type
   /// exactly `int` whose initializer TypeChecker::tryFoldUntypedIntConstant()

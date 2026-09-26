@@ -96,7 +96,7 @@ static void ensure_builtins_registered() {
   RegisterBuiltin("gc_is_managed",   {1, "True iff p is a live GC-heap block's own start address"});
   RegisterBuiltin("gc_checked_free", {1, "Free a manual-heap pointer, panicking on a GC-heap one"});
 
-  // OVH-010 (docs/planning/OVERHAUL_REMAINING_WORK.md): the pinning surface
+  // OVH-010 (docs/development/changes/OVH-010.md): the pinning surface
   // F-MEM-3's own documented unsoundness calls for -- a GC pointer stored
   // only inside manual-heap memory needs a way to become a precise root.
   // lib/std/mem/mem.tr's mem::root()/mem::unroot() are the one caller each,
