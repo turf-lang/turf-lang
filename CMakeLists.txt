@@ -206,6 +206,7 @@ add_library(turfcore STATIC
   src/TypeCheckerDecl.cpp
   src/TypeCheckerCall.cpp
   src/Types.cpp
+  src/TypeWalk.cpp
   src/ValueRange.cpp
 )
 
