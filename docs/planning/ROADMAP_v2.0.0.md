@@ -3,8 +3,10 @@
 > **Status:** plan of record, written 2026-09-26 by the Architecture Overhaul
 > closure audit, against `refactor/architecture` @ `cde1d30`. **Phase 0
 > (Overhaul closure) is now done** — see
-> `docs/development/changes/OVH-CLOSE.md` (landed 2026-09-27); Phases 1+
-> (2.0 Foundation milestones onward) remain unimplemented. Items marked
+> `docs/development/changes/OVH-CLOSE.md` (landed 2026-09-27). **Phase 1's
+> `SMP-002` (one generic type walker) is also done** — see
+> `docs/development/changes/SMP-002.md` (landed 2026-09-27); the rest of
+> Phase 1 and all of Phases 2+ remain unimplemented. Items marked
 > **DECISION** need an explicit answer from the project owner before their
 > session starts; each carries a recommendation so the default is never
 > ambiguous.
@@ -87,7 +89,7 @@ change record in its first session, as TYPE-002 did.
 PHASE 0  Overhaul closure            OVH-001 … OVH-015   DONE (OVH-CLOSE.md, 2026-09-27)
    │                                  gate: closure gate demonstrated clean
    ▼
-PHASE 1  Foundation                   SMP-002  one generic type walker
+PHASE 1  Foundation                   SMP-002  one generic type walker      DONE (SMP-002.md, 2026-09-27)
    │                                  FDN-003  module-scoped type identity
    │                                  FDN-001  safe heap allocation of user types
    │                                  FDN-002  reference & array escape rules

@@ -972,6 +972,36 @@ case by `OPT-001`'s dead-code stripping of now-genuinely-unreachable
 generic template bodies (which erasure, by design, always kept
 reachable).
 
+**One shared type walker, not seven hand-written ones (`SMP-002`).**
+Substituting a generic type parameter and detecting whether a type still
+has an open one are used by every pass in this section, and used to be
+implemented independently, by hand, in at least eight separate recursive
+functions across four files — `Resolver::substituteTypeParams`,
+`typesCompatible()`'s per-position generic-parameter leniency,
+`TypeCheckerCall.cpp`'s call-site substitution recovery and its companion
+declaration-order recovery, `TypeCheckerCall.cpp`'s two generic-struct
+field-substitution scans, `Monomorphize::substituteConcreteTypes`, and
+`visitCast`'s cast-legality bypass. Three of those eight were
+independently, silently incomplete (`ARCHITECTURE_SIMPLIFICATION.md` §1;
+`docs/development/changes/SMP-002.md`'s own *Removed assumptions* names a
+fourth, found live during the unification itself). `include/TypeWalk.h`/
+`src/TypeWalk.cpp` now hold the one implementation: `containsOpenParam()`
+(parameterized by how far to look — a bare check, through pointer/array/
+reference wrapping, or also through a `GenericType`'s own argument list,
+since the eight original functions deliberately did not all look equally
+far), `substitute()` (a name → replacement-type map walk, serving both the
+declaration direction and the instantiation direction with the same code),
+`unify()` (the call-site binder `collectGenericSubstitution()` used to be),
+and two smaller companions for the two shapes above that don't fit a plain
+`unify()` (`collectParamOrder()`, `collectOrderedFieldSubstitution()`).
+Every consumer in the Resolver/TypeChecker/Monomorphizer now calls into
+this file rather than re-deriving its own notion of "what a generic type
+parameter looks like, and where it might be hiding." Codegen's own,
+separate `getExprType()` type-inference engine (`CodegenCore.cpp`)
+independently reimplements the same pattern in at least two more places
+and was deliberately left out of this unification — see the change
+record's *Unresolved questions* for why.
+
 ---
 
 ## Summary: file map
@@ -985,4 +1015,5 @@ reachable).
 | Codegen | `src/CodegenCore.cpp`, `CodegenFunc.cpp`, `CodegenExpr.cpp`, `CodegenStruct.cpp`, `CodegenVar.cpp`, `CodegenArray.cpp`, `CodegenControlFlow.cpp` |
 | CFG subsystem | `include/CFG.h`, `src/CFG.cpp`; `include/Analysis.h`, `src/Analysis.cpp`; `src/AliasAnalysis.cpp`; `include/ValueRange.h`, `src/ValueRange.cpp`; `include/CallGraph.h`, `src/CallGraph.cpp` |
 | Type system | `include/Types.h`, `src/Types.cpp` |
+| Generic type walker | `include/TypeWalk.h`, `src/TypeWalk.cpp` |
 | Driver | `src/main.cpp` |
