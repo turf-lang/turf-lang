@@ -71,6 +71,42 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
       ConstructorCannotBeStaticError(Node.getLoc(), FullName.substr(0, Dot)).raise();
       return;
     }
+
+    // An instance method (anything with `self`, `new` included) on a
+    // GENERIC struct must be generic itself: `self`'s layout depends on the
+    // struct's type arguments, so the method needs one monomorphized copy
+    // per instantiation, and only a declaration with type parameters is a
+    // template the monomorphizer can clone. `fn Box.count()` on `struct
+    // Box<T>` used to parse, resolve and typecheck, then die at its first
+    // call as "Internal error: no generic method declaration found for
+    // 'Box.count' during monomorphization" -- in the struct's own file or
+    // on an imported struct alike. Rejected here with the exact fix rather
+    // than inferred: silently giving the method the struct's parameter
+    // names would re-bind any `T` its body already uses to mean a real
+    // type. Static methods have no `self` and work as ordinary functions.
+    // Skipped while resolving a monomorphized clone
+    // (SuppressUnqualifiedVisibilityCheck_ is set only then --
+    // resolveMonomorphizedClone(), Resolver.h): a clone is a concrete copy
+    // of a generic method whose TypeParams were cleared on purpose.
+    if (IsStructBound && !Node.isStaticDecl() && Node.getTypeParams().empty() &&
+        !SuppressUnqualifiedVisibilityCheck_) {
+      auto Generic = GenericStructIdentities_.find(FullName.substr(0, Dot));
+      if (Generic != GenericStructIdentities_.end()) {
+        const std::string Bare = TypeIdentity::bareName(Generic->first);
+        std::string Params;
+        for (size_t i = 0; i < Generic->second.size(); ++i)
+          Params += (i ? ", " : "") + Generic->second[i];
+        TypeError(Node.getNameLoc(),
+                  "'" + Bare + "' is generic, so its method '" + MethodPart +
+                      "' must declare its type parameters too.",
+                  "Declare it as 'fn<" + Params + "> " + Bare + "." +
+                      MethodPart + "(...)' -- the same parameters as 'struct " +
+                      Bare + "<" + Params + ">'.",
+                  "Missing type parameters!")
+            .raise();
+        return;
+      }
+    }
   }
 
   // `main` is always compiled as the real C-ABI entry point with a fixed

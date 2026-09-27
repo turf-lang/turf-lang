@@ -52,6 +52,7 @@
 
 #include <functional>
 #include <memory>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -413,14 +414,16 @@ private:
   // participate in a cycle check that runs after a later one.
   std::vector<const StructDeclExprAST *> HoistedStructDecls_;
 
-  // FDN-003: identities of every generic struct TEMPLATE hoisted so far
-  // (`struct Box<T>`). validateNamedType() rejects one written without type
-  // arguments (`mut b: Box = ...`) -- which otherwise reached Codegen as the
-  // unsized template and failed as "generated LLVM IR is invalid". The
-  // Parser used to catch this for exactly one spelling, a hardcoded bare
-  // `List`, which also made a user's own non-generic `struct List`
-  // unusable; this is the general rule that replaced it.
-  std::unordered_set<std::string> GenericStructIdentities_;
+  // FDN-003: every generic struct TEMPLATE hoisted so far (`struct Box<T>`),
+  // identity -> its own type-parameter names. Two rules read it:
+  // validateNamedType() rejects one written without type arguments (`mut b:
+  // Box = ...`) -- which otherwise reached Codegen as the unsized template
+  // and failed as "generated LLVM IR is invalid" (the Parser used to catch
+  // this for exactly one spelling, a hardcoded bare `List`, which also made
+  // a user's own non-generic `struct List` unusable); and visitFuncDef()
+  // rejects an instance method on one that declares no type parameters of
+  // its own (see there).
+  std::unordered_map<std::string, std::vector<std::string>> GenericStructIdentities_;
 
   // ── Internal helpers ───────────────────────────────────────────────────────
 

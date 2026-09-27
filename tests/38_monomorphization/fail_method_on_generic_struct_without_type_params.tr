@@ -1,0 +1,28 @@
+// An instance method on a generic struct must declare the struct's type
+// parameters (`fn<T> Box.count()`): `self`'s layout depends on T, so the
+// method is a template cloned per instantiation. Declared without them it
+// used to parse, resolve and typecheck, then crash at its first call
+// ("Internal error: no generic method declaration found for 'Box.count'
+// during monomorphization"). Now rejected at the declaration with the exact
+// fix in the hint ("Missing type parameters!"). A STATIC method needs no
+// type parameters and still works -- no `self`, no layout dependence.
+
+struct Box<T> {
+    v: T,
+    n: int
+}
+
+fn<T> Box.put(x: T): void {
+    self.v = x;
+    self.n = 1;
+}
+
+fn Box.count(): int {
+    return self.n;
+}
+
+fn main(): int {
+    mut b: Box<int> = Box::default();
+    b.put(3);
+    return b.count() - 1;
+}

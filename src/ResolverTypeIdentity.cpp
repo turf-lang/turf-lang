@@ -66,7 +66,7 @@ void Resolver::hoistTypesIn(const ExprAST *Node, const std::string &ModuleName) 
     // needs the actual field types, which ResolverTypeRegistry never stores.
     HoistedStructDecls_.push_back(Struct);
     if (!Struct->getTypeParams().empty())
-      GenericStructIdentities_.insert(Struct->getName());
+      GenericStructIdentities_[Struct->getName()] = Struct->getTypeParams();
     return;
   }
 
