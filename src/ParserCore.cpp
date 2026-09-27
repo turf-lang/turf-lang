@@ -497,11 +497,7 @@ TurfTypePtr ParseType() {
     Base = TurfString();
   else if (BaseName == "void")
     Base = TurfVoid();
-  else if (BaseName == "List") {
-    // "list" without <T> is an error — give a helpful message
-    SyntaxError(CurLoc, "Expected '<' after 'list' — e.g. list<int>").raise();
-    return nullptr;
-  } else {
+  else {
     Base = std::make_shared<NamedType>(BaseName, ModuleQualifier);
   }
 

@@ -1,0 +1,17 @@
+// A generic struct named without type arguments in a type annotation is
+// rejected in the Resolver ("Missing type arguments!"). Before FDN-003 this
+// shape compiled all the way to Codegen and failed there as "Internal
+// compiler error: generated LLVM IR is invalid" (the uninstantiated
+// template's unsized struct) -- for every generic EXCEPT the stdlib's
+// `List`, which the Parser special-cased by spelling. That special case is
+// gone (it also made a user's own non-generic `struct List` unusable --
+// type_identity_struct_list_no_imports.tr); this is the general rule.
+
+struct Box<T> {
+    val: T
+}
+
+fn main(): int {
+    mut b: Box = Box::default();
+    return 0;
+}

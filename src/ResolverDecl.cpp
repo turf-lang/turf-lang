@@ -127,7 +127,8 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   // since validateNamedType() is shared with visitStructDecl, where it is
   // not.)
   for (const auto &Param : Node.getParams())
-    validateNamedType(Param.Type, Node.getLoc(), Node.getTypeParams());
+    validateNamedType(Param.Type, Node.getLoc(), Node.getTypeParams(),
+                      /*AllowBareGeneric=*/Param.Name == "self");
   validateNamedType(Node.getReturnTypePtr(), Node.getLoc(),
                     Node.getTypeParams());
 
@@ -277,7 +278,7 @@ void Resolver::visitErrorDecl(ErrorDeclExprAST &Node) {
  */
 void Resolver::validateNamedType(
     const TurfTypePtr &Ty, SourceLocation Loc,
-    const std::vector<std::string> &TypeParams) const {
+    const std::vector<std::string> &TypeParams, bool AllowBareGeneric) const {
   if (!Ty)
     return;
 
@@ -420,8 +421,26 @@ void Resolver::validateNamedType(
         NT->getModule().empty() &&
         std::find(TypeParams.begin(), TypeParams.end(), TypeName) !=
         TypeParams.end();
-    if (NT->isResolvedIdentity() || IsOwnTypeParam || KnownPrimitives.count(TypeName))
+    if (IsOwnTypeParam || KnownPrimitives.count(TypeName))
       return;
+    // See GenericStructIdentities_'s doc comment (Resolver.h). `self` is the
+    // one legitimate bare spelling (AllowBareGeneric): ParseFuncDef() builds
+    // it from the receiver name alone, and the monomorphizer rewrites it to
+    // the instantiation on every clone.
+    auto RejectBareGeneric = [&](const std::string &Id) {
+      if (AllowBareGeneric || !GenericStructIdentities_.count(Id))
+        return;
+      const std::string Bare = TypeIdentity::bareName(Id);
+      TypeError(Loc,
+                "'" + Bare + "' is generic -- it needs type arguments here.",
+                "Write the instantiation you mean, e.g. '" + Bare + "<int>'.",
+                "Missing type arguments!")
+          .raise();
+    };
+    if (NT->isResolvedIdentity()) {
+      RejectBareGeneric(TypeName);
+      return;
+    }
     // Candidates must cover every name this function actually accepts, not
     // just struct names -- a primitive typo (e.g. "itn" for "int") could
     // otherwise never surface a suggestion. TypeParams is included too (the
@@ -436,8 +455,10 @@ void Resolver::validateNamedType(
       Candidates.push_back(TypeIdentity::bareName(Id));
     Candidates.insert(Candidates.end(), KnownPrimitives.begin(), KnownPrimitives.end());
     Candidates.insert(Candidates.end(), TypeParams.begin(), TypeParams.end());
-    if (auto Id = ResolveOrReport(NT->getModule(), TypeName, Candidates))
+    if (auto Id = ResolveOrReport(NT->getModule(), TypeName, Candidates)) {
       NT->resolveTo(*Id);
+      RejectBareGeneric(*Id);
+    }
   }
 }
 

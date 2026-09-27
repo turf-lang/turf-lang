@@ -52,6 +52,7 @@
 
 #include <functional>
 #include <memory>
+#include <unordered_set>
 #include <vector>
 
 /**
@@ -412,6 +413,15 @@ private:
   // participate in a cycle check that runs after a later one.
   std::vector<const StructDeclExprAST *> HoistedStructDecls_;
 
+  // FDN-003: identities of every generic struct TEMPLATE hoisted so far
+  // (`struct Box<T>`). validateNamedType() rejects one written without type
+  // arguments (`mut b: Box = ...`) -- which otherwise reached Codegen as the
+  // unsized template and failed as "generated LLVM IR is invalid". The
+  // Parser used to catch this for exactly one spelling, a hardcoded bare
+  // `List`, which also made a user's own non-generic `struct List`
+  // unusable; this is the general rule that replaced it.
+  std::unordered_set<std::string> GenericStructIdentities_;
+
   // ── Internal helpers ───────────────────────────────────────────────────────
 
   std::string currentModuleName() const {
@@ -471,7 +481,8 @@ private:
    *                   own (currently visitExternFuncDecl).
    */
   void validateNamedType(const TurfTypePtr &Ty, SourceLocation Loc,
-                         const std::vector<std::string> &TypeParams = {}) const;
+                         const std::vector<std::string> &TypeParams = {},
+                         bool AllowBareGeneric = false) const;
 
   /// Validates an explicit `Module::TypeName` qualifier (from NamedType::
   /// getModule()/GenericType::getModule(), or a qualified struct-literal's

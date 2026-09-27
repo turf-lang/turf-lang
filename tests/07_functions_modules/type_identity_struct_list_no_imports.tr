@@ -1,0 +1,34 @@
+// FDN-003: a program with NO imports can declare its own `struct List`.
+// Before FDN-003 it could not: the prelude's `strings` module imports
+// `list::List`, and type names were one program-wide namespace, so this
+// file's `List` collided with a type it never asked for
+// (DuplicateTypeNameError). The Parser also rejected any bare `List`
+// annotation outright ("Expected '<' after 'list'") -- a hardcoded check for
+// the stdlib's generic List that made a user's non-generic one unusable.
+//
+// The prelude's own List<string> (strings::split) keeps working alongside.
+// Checks use exit codes rather than test::assert so the file stays
+// genuinely import-free.
+
+struct List {
+    first: int,
+    second: int
+}
+
+fn List.sum(): int {
+    return self.first + self.second;
+}
+
+fn main(): int {
+    mut l: List = List::default();
+    l.first = 2;
+    l.second = 3;
+    if (l.sum() != 5) { return 1; }             // the file's own List
+    if (typeof(l) != "List") { return 2; }      // a main-file type's typeof() is bare
+
+    mut s: string = "a,b,c";
+    mut parts = s.split(",");
+    if (parts.length() != 3) { return 3; }                    // the prelude's List<string> still works
+    if (typeof(parts) != "list::List<string>") { return 4; }  // ...and is list::List
+    return 0;
+}

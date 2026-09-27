@@ -65,6 +65,8 @@ void Resolver::hoistTypesIn(const ExprAST *Node, const std::string &ModuleName) 
     // Keep the AST node itself, not just its name -- checkStructLayoutAcyclicity()
     // needs the actual field types, which ResolverTypeRegistry never stores.
     HoistedStructDecls_.push_back(Struct);
+    if (!Struct->getTypeParams().empty())
+      GenericStructIdentities_.insert(Struct->getName());
     return;
   }
 
