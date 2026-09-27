@@ -347,6 +347,41 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
         return;
       }
 
+      // ── heap(expr) → &T ──────────────────────────────────────────────────
+      // FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5): the only safe way
+      // for ordinary Turf code to obtain a &T pointing at a GC-heap block --
+      // previously the only safe &T came from &localVar, so a dynamically-
+      // sized linked list/tree/graph was unbuildable without `unsafe`
+      // (audit F-16). Unlike every other bare intrinsic above, the return
+      // type is data-dependent: &T, where T is the OPERAND's own inferred
+      // type, not a fixed signature -- so it's computed here from ArgTypes[0]
+      // rather than a single setType(&Node, TurfXxx()) call.
+      if (CalleeName == "heap") {
+        TurfTypePtr ArgTy = ArgTypes.empty() ? nullptr : ArgTypes[0];
+        if (!ArgTy) {
+          setType(&Node, nullptr);
+          return;
+        }
+        // void has no bits to copy onto the heap -- every other sized type
+        // (struct, fixed array, primitive) is accepted with no further
+        // validation, matching gc_alloc's own minimal-validation convention
+        // above. A &U field inside T that itself dangles into a stack frame
+        // is FDN-002's escape-analysis rule to catch (not yet implemented),
+        // not this milestone's -- see FDN-001's own "Design" note in the
+        // roadmap and FDN-002's Prereqs row.
+        if (ArgTy->isVoid()) {
+          reportError(Node.getLoc(),
+                      "'heap(...)' cannot allocate a 'void' value -- there "
+                      "is nothing to copy onto the heap.",
+                      {}, "Pass an expression that produces a real value.",
+                      "Cannot heap-allocate 'void'!");
+          setType(&Node, nullptr);
+          return;
+        }
+        setType(&Node, std::make_shared<TurfReferenceType>(ArgTy));
+        return;
+      }
+
       // assert/fail used to have bespoke branches here (assert needed a
       // special Arity == -1 sentinel to express its 1-or-2-arg signature,
       // since it isn't a single fixed count the generic check above can

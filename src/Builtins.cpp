@@ -103,6 +103,14 @@ static void ensure_builtins_registered() {
   // same shape as gc_checked_free/mem::free above.
   RegisterBuiltin("gc_pin",   {1, "Pin the GC object containing p against collection"});
   RegisterBuiltin("gc_unpin", {1, "Release one pin gc_pin placed on the GC object containing p"});
+
+  // FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5): the safe-heap-
+  // allocation surface -- the only way for safe Turf code to obtain a &T
+  // pointing at a GC-heap block, closing the gap where the only safe &T
+  // came from &localVar (making a dynamically-sized linked list/tree/graph
+  // unbuildable without `unsafe`). See include/Intrinsics.h category 1 for
+  // the full contract.
+  RegisterBuiltin("heap", {1, "Allocate a copy of a value on the GC heap, returning &T"});
 }
 
 // CodegenIntrinsic() used to live here -- the Codegen-side implementation

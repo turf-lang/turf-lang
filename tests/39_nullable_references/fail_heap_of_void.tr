@@ -1,0 +1,12 @@
+// FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5): `heap(expr)` copies
+// `expr`'s value onto the GC heap -- a `void` expression has no value to
+// copy, so this must be rejected at compile time, not silently allocate a
+// zero-byte/garbage block.
+fn nothing(): void {
+    return;
+}
+
+fn main(): int {
+    heap(nothing());
+    return 0;
+}

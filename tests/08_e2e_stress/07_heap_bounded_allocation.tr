@@ -1,0 +1,59 @@
+// tests/08_e2e_stress/07_heap_bounded_allocation.tr
+// FDN-001's own completion criterion (docs/planning/ROADMAP_v2.0.0.md):
+// "gc_rss_smoke.sh-style bounded-RSS check for a loop that builds and
+// drops lists" -- mirrors 06_gc_bounded_allocation.tr exactly, but for
+// `heap()`-allocated linked-list nodes instead of a List<int>'s backing
+// buffer, since heap() reaches turf_rt_alloc through an entirely different
+// Codegen path (HeapAllocateValue(), a real per-type TurfTypeDesc) that
+// 06's own workload never exercises at all. scripts/gc_rss_smoke.sh is
+// what actually measures peak RSS around this file -- see that script.
+//
+// Each build_list() call builds its own 1000-node singly-linked list
+// (~16 bytes/node: an 8-byte int + an 8-byte pointer) via heap(), sums it,
+// and returns only the sum -- the list itself, and every node in it, is
+// unreachable the instant the function returns. Run 5000 times, total
+// GC-heap allocation REQUESTS sum to roughly 5000 * 1000 * 16 bytes =~
+// 80MB. If nothing collected, peak RSS would approach that figure; if the
+// collector traces heap()'s own per-type descriptor correctly, peak RSS
+// stays close to a small, constant number of lists' worth.
+import test;
+
+struct Node {
+    val: int,
+    next: &?Node
+}
+
+fn cons(v: int, next: &?Node): &Node {
+    mut n: Node = Node::default();
+    n.val = v;
+    n.next = next;
+    return heap(n);
+}
+
+fn build_list(n: int): int {
+    mut head: &?Node = null;
+    mut i: int = 0;
+    while i < n {
+        head = cons(i, head);
+        i = i + 1;
+    }
+    mut total: int = 0;
+    mut current: &?Node = head;
+    while (current != null) {
+        total = total + current.val;
+        current = current.next;
+    }
+    return total;
+}
+
+fn main(): int {
+    mut total: int = 0;
+    mut iter: int = 0;
+    while iter < 5000 {
+        total = total + build_list(1000);
+        iter = iter + 1;
+    }
+    // Each build_list(1000) call sums 0..999 == 499500.
+    test::assert(total == 5000 * 499500, "heap()-bounded-allocation stress: total sum correct");
+    return 0;
+}

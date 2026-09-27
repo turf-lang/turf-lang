@@ -74,6 +74,22 @@ llvm::Function *getOrCreateStrcmpFn();
 /// value produced by any operation belongs on the GC heap, FREEZE.md §6.5).
 llvm::Function *getOrCreateTurfRtAllocFn();
 
+/// FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5): the codegen for the
+/// `heap(expr): &T` bare intrinsic. Allocates `sizeof(Val's LLVM type)`
+/// bytes on the GC heap with that type's REAL TurfTypeDesc (a named
+/// struct's own whole-instance descriptor via
+/// getOrForwardDeclareTurfTypeDescGlobal(), or
+/// getOrCreateElementTurfTypeDesc()'s general per-LLVM-type descriptor for
+/// anything else -- primitive or fixed array), stores @p Val's already-
+/// evaluated bits into the fresh block, and returns its address. Reuses the
+/// exact size/descriptor-selection shape BoxToI64Slot()'s aggregate branch
+/// already established (CodegenCore.cpp) for the identical reason
+/// (`!T`'s oversized success-value boxing) -- the only difference is the
+/// return value: heap() hands back the real pointer, never an i64-boxed
+/// slot. Needed by CodegenFunc.cpp (FuncCallExprAST::codegen()'s `heap`
+/// dispatch branch).
+llvm::Value *HeapAllocateValue(llvm::Value *Val);
+
 /// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)): the value a
 /// `@caller_location` function's hidden extra argument gets, either at a
 /// literal expression-level read (CallerLocationExprAST::codegen()) or at

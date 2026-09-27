@@ -103,6 +103,29 @@ The operand must be an addressable lvalue (a named variable, a struct
 field, an array element) — `&(x + 1)` is rejected the same way it always
 was, unrelated to this issue.
 
+**`heap(expr)` is the other source of a `&T`** (FDN-001,
+`docs/planning/ROADMAP_v2.0.0.md`, DEC-5) — and the only one whose pointee
+outlives the current stack frame. `&expr` above always points into
+whatever stack storage `expr` names, so a `&Node` obtained that way dangles
+the moment its frame pops; `heap(expr): &T` instead copies `expr`'s value
+onto the GC heap and returns a `&T` pointing there, safe to return, store
+in a struct field, or hold in a collection for as long as anything keeps
+it reachable:
+
+```turflang
+fn cons(v: int, next: &?Node): &Node {
+    mut n: Node = Node::default();
+    n.val = v;
+    n.next = next;
+    return heap(n);   // n's stack copy is about to pop; this one won't
+}
+```
+
+No `unsafe { }` needed — `heap()` returns exactly the same `&T` `&expr`
+does, just backed by GC-heap storage instead of the stack. Full mechanism
+(the real per-type `TurfTypeDesc`, why `void` is rejected):
+`docs/architecture/memory_model.md` §1.5, §2.6.1.
+
 **Auto-deref.** `&T` supports `.field`/`.method()` with no explicit
 dereference, identically to `T*` — there is no `*ref` syntax in this
 language at all, for either pointer kind.

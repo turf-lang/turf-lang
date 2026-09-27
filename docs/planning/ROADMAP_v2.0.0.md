@@ -8,7 +8,10 @@
 > `docs/development/changes/SMP-002.md` (landed 2026-09-27). **`FDN-003`
 > (module-scoped type identity) is done** — see
 > `docs/development/changes/FDN-003.md` (landed 2026-09-27; its stage-1
-> decision is frozen as `FREEZE.md` §6.11, DEC-13 answered `main`); the rest
+> decision is frozen as `FREEZE.md` §6.11, DEC-13 answered `main`).
+> **`FDN-001` (safe heap allocation of user types) is also done** — see
+> `docs/development/changes/FDN-001.md` (landed 2026-09-27; DEC-5 answered
+> `heap(expr): &T` intrinsic, frozen as `FREEZE.md` §6.12); the rest
 > of Phase 1 and all of Phases 2+ remain unimplemented. Items marked
 > **DECISION** need an explicit answer from the project owner before their
 > session starts; each carries a recommendation so the default is never
@@ -94,7 +97,7 @@ PHASE 0  Overhaul closure            OVH-001 … OVH-015   DONE (OVH-CLOSE.md, 2
    ▼
 PHASE 1  Foundation                   SMP-002  one generic type walker      DONE (SMP-002.md, 2026-09-27)
    │                                  FDN-003  module-scoped type identity  DONE (FDN-003.md, 2026-09-27)
-   │                                  FDN-001  safe heap allocation of user types
+   │                                  FDN-001  safe heap allocation         DONE (FDN-001.md, 2026-09-27)
    │                                  FDN-002  reference & array escape rules
    │                                  FDN-004  string indexing: bounds + `char` (D17)
    │                                  FDN-006  runtime contract (stack overflow, OOM, ABI stamp)
@@ -1455,7 +1458,7 @@ TurfLang 2.0.0 ships only when every line is demonstrated:
 | DEC-2 | Platforms for the next release (OVH-013) and for 2.0 (REL-003) | Linux x86-64 Tier 1; macOS arm64 Tier 2 only if ported; Windows FUTURE | OVH-013, REL-003 |
 | DEC-3 | FREEZE narrowings (OVH-014) | Record rows 2–3; implement row 1; row 4 → LEC-005 | OVH-014 |
 | DEC-4 | Suppress `lib/std`-origin warnings by default | Yes, with `--stdlib-warnings` | OVH-012 / LEC-005 |
-| DEC-5 | Heap allocation surface (FDN-001) | `heap(expr): &T` intrinsic | FDN-001 |
+| DEC-5 | Heap allocation surface (FDN-001) | `heap(expr): &T` intrinsic — **decided 2026-09-27** (`FREEZE.md` §6.12) | FDN-001 |
 | DEC-6 | `s[i]` becomes `char` (D17) | Yes, with bounds checks | FDN-004 |
 | DEC-7 | Visibility default and keyword (LEC-002) | Private by default, `pub` | LEC-002 |
 | DEC-8 | Project tool ownership (LEC-001) | Compiler driver subcommands; `turf-cli` not shipped | LEC-001 |

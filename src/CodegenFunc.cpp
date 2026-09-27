@@ -1276,6 +1276,19 @@ Value *FuncCallExprAST::codegen() {
     return Builder->CreateCall(PinFunc, {PVal});
   }
 
+  // ── heap(expr) → &T ───────────────────────────────────────────────────────
+  // FDN-001 (DEC-5): the safe-heap-allocation intrinsic. Same dispatch shape
+  // as every other bare intrinsic above -- no ResolvedCallTarget/MangledName
+  // -- but the actual allocation logic (size + real TurfTypeDesc selection +
+  // turf_rt_alloc + store) is shared with BoxToI64Slot()'s identical
+  // aggregate-boxing need, via HeapAllocateValue() (CodegenCore.cpp).
+  if (CalleeName == "heap") {
+    Value *ArgVal = Args[0]->codegen();
+    if (!ArgVal)
+      return nullptr;
+    return HeapAllocateValue(ArgVal);
+  }
+
   std::vector<Value *> EvaluatedArgs;
   for (auto &Arg : Args) {
     Value *V = Arg->codegen();

@@ -109,6 +109,20 @@
 //                  the same one-bare-intrinsic-one-stdlib-wrapper shape
 //                  `gc_checked_free`/`mem::free` already use. Both Arity 1,
 //                  registered in Builtins.cpp's g_builtins.
+//   heap(expr) -- FDN-001 (docs/planning/ROADMAP_v2.0.0.md, DEC-5). `expr: T`
+//                  for any sized T (struct, fixed array, primitive), returns
+//                  `&T`. Copies expr's evaluated value into a fresh
+//                  turf_rt_alloc(sizeof(T), desc_T) block and returns its
+//                  address -- `desc_T` is the SAME per-type TurfTypeDesc
+//                  global emitTurfTypeDesc()/getOrForwardDeclareTurfTypeDescGlobal()
+//                  already builds for T when T is a named struct (OVH-002),
+//                  or getOrCreateElementTurfTypeDesc()'s general per-LLVM-type
+//                  descriptor otherwise -- so the collector traces a heap()ed
+//                  value's own pointer fields exactly as it would a
+//                  stack-resident T. Rejects `void` (nothing to copy).
+//                  Registered in Builtins.cpp's g_builtins (Arity 1);
+//                  dispatched in FuncCallExprAST::codegen() via the shared
+//                  HeapAllocateValue() helper (CodegenCore.cpp).
 //   caller_location -- STD-002. Unlike every other bare intrinsic above, a
 //                  real reserved LEXER KEYWORD (TOK_CALLER_LOCATION,
 //                  include/Lexer.h), not a g_builtins entry -- it's a

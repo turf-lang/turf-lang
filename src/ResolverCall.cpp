@@ -463,6 +463,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     //   - gc_alloc(n)           — MEM-001, typed-allocation surface for
     //   - gc_alloc_zeroed(n)      turf_rt_alloc/_zeroed/turf_rt_realloc
     //   - gc_realloc(p, n)        (include/Intrinsics.h category 1)
+    //   - heap(expr)            — FDN-001, safe-heap-allocation: heap(expr): &T
     //
     // Everything else comes from lib/std:
     //   - print / printline / input  → io.tr   (call as io.printline(...))
@@ -485,6 +486,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
         "typeof", "gc_alloc", "gc_alloc_zeroed", "gc_realloc",
         "gc_collect", "gc_is_managed", "gc_checked_free",
         "gc_pin", "gc_unpin",
+        "heap", // FDN-001 (DEC-5) -- safe-heap-allocation intrinsic, heap(expr): &T
     };
     if (BareIntrinsics.count(CalleeName)) {
       // True bare intrinsic — skip error, TypeChecker validates arity/types.

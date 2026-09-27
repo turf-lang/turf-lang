@@ -265,6 +265,31 @@ request, not a session's own initiative. Full account:
 - LLVM struct names, GC type-descriptor names and DWARF type names spell a
   module-owned type **`m.Name`**.
 
+### 6.12 Safe heap allocation — FROZEN (FDN-001, 2026-09-27)
+
+Recorded on the project owner's explicit approval of `ROADMAP_v2.0.0.md`
+FDN-001's DEC-5 (`heap(expr): &T` intrinsic, over a `new T`-style keyword) —
+§6.0 rule 3's explicit request, not a session's own initiative. Full
+account: `docs/development/changes/FDN-001.md`.
+
+- `heap(expr)` is a closed-list bare intrinsic (`include/Intrinsics.h`
+  category 1), not new grammar: `heap(e: T): &T` for any sized `T` (struct,
+  fixed array, primitive) whose static type is known at the call site.
+  `void` is rejected (nothing to copy).
+- Copies `e`'s evaluated value into a fresh GC-heap block sized
+  `sizeof(T)`, allocated with `T`'s own real `TurfTypeDesc` (a named
+  struct's whole-instance descriptor, or the general per-LLVM-type
+  descriptor for anything else) — never `NULL`/opaque — so the collector
+  traces a `heap()`ed value's own pointer fields exactly as it would a
+  stack-resident `T`.
+- No `unsafe { }` gate: `&T` is legal anywhere (FREEZE.md §6.6), and
+  `heap()` produces exactly that — a compiler-checked non-null reference,
+  never a raw `T*`.
+- Does **not** by itself close the general "a `&U` field inside `T` may
+  point at a stack frame that has since popped" hazard — that is FDN-002's
+  escape-analysis rule, applied to `heap()`'s own operand like any other
+  expression; FDN-001 does not gate on it.
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -311,6 +336,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-OPT-2** | Bounds/overflow/div-by-zero checks may be *removed by proof*, never by flag. | §17 |
 | **F-TRACK-1** | Every implementation session updates a change record under `docs/development/`. | §18 |
 | **F-TYPE-1** | A named type's identity is (owning module, name); the main file's module is `main`, never spelled. Bare-spelling ambiguity is an error, not "local wins". | §6.11 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-003, not `ARCHITECTURE_OVERHAUL.md` §4) |
+| **F-HEAP-1** | `heap(expr): &T` is the closed-list intrinsic for safe heap allocation — no `new T` keyword, no grammar change. Always allocates with `T`'s real `TurfTypeDesc`, never `NULL`. | §6.12 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-001) |
 
 ---
 

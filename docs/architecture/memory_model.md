@@ -199,11 +199,15 @@ local (`mut p: Point = Point::new(1, 2);`) lives on the stack, popped
 automatically when its enclosing function returns — including a struct
 constructed via `Point::new(...)`/`Point::default()`, which allocates its
 own temporary on the **stack**, not the heap, before returning a copy of it
-(verified in §2.5.2). There is no way to construct a struct directly on the
-heap; if you want one there, you allocate raw bytes yourself
-(`mem::alloc(sizeof-equivalent-byte-count)`, cast to `T*`) and manage it
-exactly like any other manual allocation from that point on — the struct
-*type* itself carries no opinion about where its bytes live.
+(verified in §2.5.2). The struct *type* itself carries no opinion about
+where its bytes live — a stack local is the default, but two other
+placements exist: `mem::alloc(sizeof-equivalent-byte-count)` cast to `T*`
+(the **manual** heap, entirely your own bookkeeping from that point on,
+§1.7), or, as of **FDN-001** (`docs/planning/ROADMAP_v2.0.0.md`),
+`heap(structValue): &T` (the **GC** heap, §1.7, §2.6) — the only safe way
+to get a `&T` pointing at a heap-resident value at all, since the sole
+other source of a `&T` is `&localVar`, whose pointee is still exactly the
+originating stack frame's storage (§2.5, §1.6 below).
 
 #### 1.5.1 `self` is the one exception to "structs are copied"
 
@@ -277,6 +281,14 @@ answers to "who reclaims this":
   category 1, `lib/std/collections/*.tr`, and the shared growth policy
   documented in `docs/reference/stdlib/collections.md`); string
   concatenation and most `strings::*` functions allocate here too (§1.4).
+  As of **FDN-001** (`docs/planning/ROADMAP_v2.0.0.md`), ordinary user code
+  can put an arbitrary value here directly, too: `heap(expr): &T` copies
+  `expr`'s value (a struct, a fixed array, or a primitive) into a fresh
+  `turf_rt_alloc()` block and returns its address as a `&T` — the intrinsic
+  that makes a *dynamically*-sized linked structure (list, tree, graph)
+  writable in safe TurfLang at all, since the only other source of a `&T`
+  is `&localVar`, whose pointee is a stack frame that pops on return (§1.6,
+  §2.6).
   **A real, non-moving mark-sweep collector reclaims every one of these
   once nothing reachable still points to it** — `libturfrt`'s
   `turf_rt_collect()` (`runtime/turfrt.h`/`runtime/turfrt_gc.c`), run
@@ -705,6 +717,45 @@ memory is not a root"), not a bug; see MEM-002's own change record, *Known
 pitfalls*, for how this was rediscovered live while measuring this
 group's own performance numbers.
 
+#### 2.6.1 `heap(expr)`: a user value, GC-heap-allocated with a real descriptor
+
+**FDN-001** (`docs/planning/ROADMAP_v2.0.0.md`, DEC-5) is the bare
+intrinsic `heap(e: T): &T` — no grammar change, `include/Intrinsics.h`
+category 1, dispatched in `FuncCallExprAST::codegen()` (`CodegenFunc.cpp`)
+alongside `gc_alloc`/`gc_pin`/etc. The actual allocation logic is
+`HeapAllocateValue()` (`CodegenCore.cpp`, declared in the internal
+`CodegenInternal.h`): given `e`'s already-evaluated LLVM value,
+
+1. compute `sizeof` from the value's own LLVM type
+   (`DataLayout::getTypeAllocSize()`);
+2. pick the real descriptor — `getOrForwardDeclareTurfTypeDescGlobal()`
+   (the SAME whole-instance `TurfTypeDesc` `EmitAllTurfTypeDescs()` emits
+   for that struct, §2.6 above) if `T` is a named struct, or
+   `getOrCreateElementTurfTypeDesc()`'s general per-LLVM-type descriptor
+   otherwise (a fixed array or a primitive — the identical helper
+   MEM-002's collection-growth call sites already use for a backing
+   buffer's per-element descriptor);
+3. call `turf_rt_alloc(size, desc)` and store `e`'s value into the
+   returned block whole, then return the pointer.
+
+This is the exact size/descriptor-selection shape `BoxToI64Slot()`
+(`CodegenCore.cpp`) already used for an oversized `!T` success value or a
+message-carrying error value (OVH-002) — `HeapAllocateValue()` factors it
+out as a shared helper rather than duplicating it a third time, differing
+only in the return value (a real pointer, not an `i64`-boxed slot).
+Never `NULL`/opaque: unlike the bare `gc_alloc(n)` intrinsic (§1.4, no
+static type at that call site to build a descriptor from at all),
+`heap()`'s operand always has a known static type, so the collector traces
+a `heap()`ed value's own pointer fields precisely, exactly as it would the
+same value sitting on the stack.
+`tests/39_nullable_references/05_dynamic_linked_list.tr`/
+`06_dynamic_binary_tree.tr`/`07_graph_adjacency.tr` are the correctness
+regression coverage (a dynamically-sized list/tree/cyclic graph, each
+surviving a forced collection while retained);
+`tests/08_e2e_stress/07_heap_bounded_allocation.tr` +
+`scripts/gc_rss_smoke.sh` prove the reclaim side (peak RSS bounded, not
+proportional to cumulative `heap()` calls).
+
 ### 2.7 Generics and monomorphization
 
 #### 2.7.1 Every distinct instantiation gets its own real layout
@@ -820,11 +871,11 @@ language.
 |---|---|
 | `include/Types.h` | The type hierarchy: primitive classes (`IntType`/`Int32Type`/`DoubleType`/`BoolType`/`CharType`), `ArrayType`, `TurfPointerType`/`TurfReferenceType`, `TurfGenericParamType`/`GenericType`, `TurfStructType` |
 | `src/Types.cpp` | `typesCompatible()` — the array-size/element-type compatibility rule (§2.3), the string/void/bool exclusions from numeric coercion |
-| `src/CodegenCore.cpp` | `getLLVMType()` (§2.2, §2.3.1, §2.7.1, §2.8), `CastToType()`'s generic-erasure box/unbox branches (§2.7.2), `GetDefaultValue()` (§2.5.2) |
+| `src/CodegenCore.cpp` | `getLLVMType()` (§2.2, §2.3.1, §2.7.1, §2.8), `CastToType()`'s generic-erasure box/unbox branches (§2.7.2), `GetDefaultValue()` (§2.5.2), `HeapAllocateValue()` — `heap(expr)`'s allocation logic (§2.6.1) |
 | `src/CodegenExpr.cpp` | Literal codegen for every primitive and `string` (§2.2, §2.4); the removed-`EmitStringConcat` comment |
 | `src/CodegenArray.cpp` | `ArrayDeclExprAST`/`ArrayLiteralExprAST`/`ArrayAccessExprAST` codegen (§2.3.1, §2.3.3) |
 | `src/CodegenVar.cpp` | `VarDeclExprAST::codegen()` — the general copy-on-assignment path shared by every type, plus the struct-construction-alloca-reuse optimization (§2.5.2, §2.5.3) |
-| `src/CodegenFunc.cpp` | Parameter passing (§2.3.2, §2.5.3), `::new`/`::default` construction (§2.5.2) |
+| `src/CodegenFunc.cpp` | Parameter passing (§2.3.2, §2.5.3), `::new`/`::default` construction (§2.5.2), `heap(expr)` dispatch (§2.6.1) |
 | `src/CodegenControlFlow.cpp` | `ReturnExprAST::codegen()` — the generic return-value path (§2.3.3, §2.5.3) |
 | `src/CodegenStruct.cpp` | `StructDeclExprAST::codegen()` — inline field layout (§2.5.1); `EmitAllTurfTypeDescs()`/`getOrCreateElementTurfTypeDesc()` — struct-instance and per-element `TurfTypeDesc` emission (§2.6) |
 | `runtime/turfrt_gc.c` | The collector itself — block table, mark, sweep, root discovery (§2.6). Full design in `docs/development/changes/MEM-002.md` |

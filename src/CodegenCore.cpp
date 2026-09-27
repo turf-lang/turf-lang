@@ -323,6 +323,31 @@ static Value *BoxToI64Slot(Value *Val) {
 }
 
 
+/// FDN-001 (DEC-5): codegen for the `heap(expr): &T` bare intrinsic --
+/// see this function's own declaration (CodegenInternal.h) for the full
+/// contract. Shares BoxToI64Slot()'s aggregate-boxing size/descriptor logic
+/// above verbatim (both need "sizeof(T) bytes on the GC heap, with T's real
+/// descriptor"); the only difference is the return value, a real pointer
+/// rather than a ptrtoint'd i64 slot, since heap()'s whole point is handing
+/// back a genuine &T, not smuggling an oversized value through a fixed-width
+/// scalar slot.
+Value *HeapAllocateValue(Value *Val) {
+  llvm::Type *Ty = Val->getType();
+  llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
+  Value *Size = ConstantInt::get(
+      I64Ty, TheModule->getDataLayout().getTypeAllocSize(Ty));
+  Value *DescArg;
+  if (auto *ST = llvm::dyn_cast<llvm::StructType>(Ty))
+    DescArg = getOrForwardDeclareTurfTypeDescGlobal(ST);
+  else
+    DescArg = getOrCreateElementTurfTypeDesc(Ty);
+  Value *HeapSlot =
+      Builder->CreateCall(getOrCreateTurfRtAllocFn(), {Size, DescArg}, "heap_slot");
+  Builder->CreateStore(Val, HeapSlot);
+  return HeapSlot;
+}
+
+
 /// Reverse of BoxToI64Slot(): reinterpret a FallibleValue's successBits back
 /// to the real LLVM representation of Turf type `T`.
 Value *UnboxFromI64Slot(Value *Slot, const TurfType *T) {
@@ -870,6 +895,38 @@ const TurfType *getExprType(const ExprAST *E) {
           CalleeName == "gc_realloc") {
         static const TurfPointerType VoidPtrTy(TurfVoid());
         return &VoidPtrTy;
+      }
+
+      // FDN-001 (DEC-5): heap(expr) → &T, where T is the OPERAND's own
+      // type -- data-dependent, unlike every fixed-signature bare intrinsic
+      // above. Mirrors AddressOfExprAST's own caching approach further down
+      // in this function for the identical reason: the returned &T must
+      // stay valid for the caller's lifetime without leaking a fresh
+      // TurfReferenceType per call, and without assuming ownership over a
+      // pointee type this function doesn't itself own (InnerTy here is
+      // already whatever a NESTED getExprType() call returned -- itself
+      // either a function-local `static const`/`TurfXxx().get()` singleton
+      // or a long-lived GlobalSymbolTable/ResolvedSymbol entry, per every
+      // branch in this function -- so aliasing it with a no-op deleter is
+      // safe: nothing here ever outlives what InnerTy already points at).
+      if (CalleeName == "heap") {
+        const TurfType *InnerTy = getExprType(FuncCall->getArgs()[0].get());
+        if (!InnerTy)
+          return nullptr;
+        static std::map<std::string, TurfTypePtr> HeapRefTypeCache;
+        std::string Key = InnerTy->getMangledName();
+        auto It = HeapRefTypeCache.find(Key);
+        if (It == HeapRefTypeCache.end()) {
+          TurfTypePtr InnerCopy;
+          if (InnerTy->isNamed("int"))         InnerCopy = TurfInt();
+          else if (InnerTy->isNamed("double"))  InnerCopy = TurfDouble();
+          else if (InnerTy->isNamed("bool"))    InnerCopy = TurfBool();
+          else
+            InnerCopy = TurfTypePtr(const_cast<TurfType *>(InnerTy), [](TurfType *) {});
+          HeapRefTypeCache[Key] =
+              std::make_shared<TurfReferenceType>(std::move(InnerCopy));
+        }
+        return HeapRefTypeCache[Key].get();
       }
 
       // MEM-002: gc_is_managed(p) always evaluates to `bool`, for the
