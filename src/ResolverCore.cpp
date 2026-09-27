@@ -65,6 +65,12 @@ void Resolver::resolveAll(
   // see this parameter's own doc comment (Resolver.h) for why a Pass 1
   // failure must still abort the whole resolveAll() call.
   // ─────────────────────────────────────────────────────────────────────────
+  // FDN-003: types first (1a), then every declaration-level type spelling
+  // turned into its identity (1b), THEN functions (below) -- a function
+  // signature captured before 1b would carry spellings, not identities, and
+  // compare unequal to every argument type later. See Resolver.h.
+  hoistTypes(Nodes);
+  resolveDeclarationSpellings(Nodes);
   hoistTopLevel(Nodes);
 
   // Every struct name this call just hoisted (plus every one hoisted by an
@@ -288,12 +294,20 @@ static void CollectReturnedErrorTypeNames(
   if (!E)
     return;
 
+  // FDN-003: a `Q::Err::Variant` spelling is recorded as `Q::Err` -- which is
+  // exactly Err's TypeIdentity when Q really owns it -- so buildFunctionSymbol()
+  // can map every entry to an identity without the qualifier being lost here.
+  auto Spelling = [](const ScopeAccessExprAST *SA) {
+    return SA->getModuleQualifier().empty() || SA->isLeftTypeIdentity()
+               ? SA->getLeftName()
+               : TypeIdentity::make(SA->getModuleQualifier(), SA->getLeftName());
+  };
   if (auto *Ret = dynamic_cast<const ReturnExprAST *>(E)) {
     if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(Ret->getVal())) {
-      Out.push_back(SA->getLeftName());
+      Out.push_back(Spelling(SA));
     } else if (auto *FC = dynamic_cast<const FuncCallExprAST *>(Ret->getVal())) {
       if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()))
-        Out.push_back(SA->getLeftName());
+        Out.push_back(Spelling(SA));
     } else if (auto *Var = dynamic_cast<const VariableExprAST *>(Ret->getVal())) {
       if (std::find(BoundErrNames.begin(), BoundErrNames.end(),
                     Var->getName()) != BoundErrNames.end())
@@ -382,6 +396,21 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
     Sym.MutatesSelf = MutatesSelfField(Node.getBody());
   CollectReturnedErrorTypeNames(Node.getBody(), Sym.PossibleErrorTypeNames,
                                 Sym.ReturnsReboundError);
+  // FDN-003: in Pass 1 the body's `Err::Variant` nodes are still spellings;
+  // consumers (isErrorTypeName()/lookupErrorType(), visitRecoverExpr and
+  // visitFuncDef) key on identities. Same resolution rule as the `Left` of
+  // any `Left::Right` (resolveScopeLeftType()): visible bare first, else the
+  // one type anywhere spelled that way. A name that resolves to nothing is
+  // kept as-is -- the list is documented as unfiltered.
+  for (auto &Name : Sym.PossibleErrorTypeNames) {
+    if (auto Id = tryResolveTypeSpelling("", Name, ModuleName)) {
+      Name = *Id;
+    } else if (!TypeIdentity::isModuleQualified(Name)) {
+      auto All = SymTable_.identitiesWithBareName(Name);
+      if (All.size() == 1)
+        Name = All.front();
+    }
+  }
   return Sym;
 }
 
@@ -567,72 +596,13 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
   if (!Node)
     return;
 
-  // Hoist struct declarations: register the name so NamedType("MyStruct")
-  // references in other struct fields or function signatures resolve in Pass 2.
-  if (const auto *Struct = dynamic_cast<const StructDeclExprAST *>(Node)) {
-    SourceLocation Loc = Struct->getLoc();
-    if (auto PrevLoc = SymTable_.registerStruct(
-            Struct->getName(), {Loc.Line, Loc.Col})) {
-      DuplicateTypeNameError(Loc, Struct->getName(), "struct",
-                             {PrevLoc->Line, PrevLoc->Col})
-          .raise();
-    }
-    // Keep the AST node itself, not just its name -- checkStructLayoutAcyclicity()
-    // needs the actual field types, which ResolverTypeRegistry never stores.
-    HoistedStructDecls_.push_back(Struct);
+  // Struct/enum/machine/error declarations were registered by hoistTypes()
+  // (Pass 1a, FDN-003) before this runs -- nothing left to do for them here.
+  if (dynamic_cast<const StructDeclExprAST *>(Node) ||
+      dynamic_cast<const EnumDeclExprAST *>(Node) ||
+      dynamic_cast<const MachineDeclExprAST *>(Node) ||
+      dynamic_cast<const ErrorDeclExprAST *>(Node))
     return;
-  }
-
-  // Hoist enum declarations: register the name and variants.
-  if (const auto *Enum = dynamic_cast<const EnumDeclExprAST *>(Node)) {
-    auto ET = std::make_shared<TurfEnumType>(Enum->getName(), Enum->getVariants(), Enum->getUnderlyingType());
-    SourceLocation Loc = Enum->getLoc();
-    if (auto PrevLoc = SymTable_.registerEnumType(
-            Enum->getName(), {Loc.Line, Loc.Col}, ET)) {
-      DuplicateTypeNameError(Loc, Enum->getName(), "enum",
-                             {PrevLoc->Line, PrevLoc->Col})
-          .raise();
-    }
-    return;
-  }
-
-  // Hoist `machine` declarations: register the name/states/edges through the
-  // SAME registerEnumType() enums use (a TurfMachineType IS-A TurfEnumType,
-  // see its doc comment in include/Types.h) -- this one decision is what
-  // lets MachineName::State access, `compare`/`matches` exhaustiveness, and
-  // Codegen's constant-inlining all work on a machine subject with zero
-  // further code anywhere in those paths.
-  if (const auto *Machine = dynamic_cast<const MachineDeclExprAST *>(Node)) {
-    std::map<std::string, std::set<std::string>> Edges;
-    for (const auto &E : Machine->getEdges())
-      Edges[E.From].insert(E.To);
-    auto MT = std::make_shared<TurfMachineType>(Machine->getName(),
-                                                Machine->getStates(), Edges);
-    SourceLocation Loc = Machine->getLoc();
-    if (auto PrevLoc = SymTable_.registerEnumType(
-            Machine->getName(), {Loc.Line, Loc.Col}, MT)) {
-      DuplicateTypeNameError(Loc, Machine->getName(), "state machine",
-                             {PrevLoc->Line, PrevLoc->Col})
-          .raise();
-    }
-    return;
-  }
-
-  // Hoist `error` type declarations (docs/architecture/errors_and_recover.md):
-  // register the name and variants so NamedType/ScopeAccess references resolve
-  // in Pass 2.
-  if (const auto *ErrDecl = dynamic_cast<const ErrorDeclExprAST *>(Node)) {
-    auto ET = std::make_shared<TurfUserErrorType>(
-        ErrDecl->getName(), ErrDecl->getVariants(), ErrDecl->isBareForm());
-    SourceLocation Loc = ErrDecl->getLoc();
-    if (auto PrevLoc = SymTable_.registerErrorType(
-            ErrDecl->getName(), {Loc.Line, Loc.Col}, ET)) {
-      DuplicateTypeNameError(Loc, ErrDecl->getName(), "error",
-                             {PrevLoc->Line, PrevLoc->Col})
-          .raise();
-    }
-    return;
-  }
 
   // Hoist function definitions: register the signature (NOT the body).
   if (const auto *Func = dynamic_cast<const FuncDefExprAST *>(Node)) {
@@ -689,6 +659,8 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
   // registerModule()'s doc comment for the real bug this fixes.
   SymTable_.registerModule(ModuleName);
 
+  // Struct/enum/machine/error declarations are not handled here: hoistTypes()
+  // (Pass 1a, FDN-003) already registered every one, in every module body.
   for (const auto &Expr : Block->getExpressions()) {
     if (const auto *Func = dynamic_cast<const FuncDefExprAST *>(Expr.get())) {
       registerFunctionSignature(*Func, ModuleName);
@@ -703,68 +675,6 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
       for (const auto &[PName, PType] : Extern->getParams())
         Sym.Params.push_back({PName, PType});
       SymTable_.registerModuleFunction(ModuleName, Sym);
-    } else if (const auto *Struct =
-                   dynamic_cast<const StructDeclExprAST *>(Expr.get())) {
-      SourceLocation Loc = Struct->getLoc();
-      if (auto PrevLoc = SymTable_.registerStruct(
-              Struct->getName(), {Loc.Line, Loc.Col}, ModuleName)) {
-        DuplicateTypeNameError(Loc, Struct->getName(), "struct",
-                               {PrevLoc->Line, PrevLoc->Col})
-            .raise();
-      }
-      // See the identical comment on the hoistTopLevel() struct branch above.
-      HoistedStructDecls_.push_back(Struct);
-    } else if (const auto *Enum =
-                   dynamic_cast<const EnumDeclExprAST *>(Expr.get())) {
-      // Previously MISSING entirely: an enum declared inside an imported
-      // module's body was never hoisted at all (only structs/functions/
-      // externs were handled here), so it would silently fail to resolve
-      // anywhere it was referenced -- e.g. "I can't find anything named
-      // 'X'" for a perfectly real enum, just because it happened to live
-      // inside a module instead of the top-level file. No stdlib module
-      // declares an enum yet, so this had never been exercised.
-      auto ET = std::make_shared<TurfEnumType>(
-          Enum->getName(), Enum->getVariants(), Enum->getUnderlyingType());
-      SourceLocation Loc = Enum->getLoc();
-      if (auto PrevLoc = SymTable_.registerEnumType(
-              Enum->getName(), {Loc.Line, Loc.Col}, ET, ModuleName)) {
-        DuplicateTypeNameError(Loc, Enum->getName(), "enum",
-                               {PrevLoc->Line, PrevLoc->Col})
-            .raise();
-      }
-    } else if (const auto *Machine =
-                   dynamic_cast<const MachineDeclExprAST *>(Expr.get())) {
-      // Hoisted here too, not just in hoistTopLevel() -- the enum branch
-      // just above was ONCE missing from this function entirely (see its own
-      // comment), silently breaking any enum declared inside an imported
-      // module's body. Don't repeat that gap for `machine` declarations.
-      std::map<std::string, std::set<std::string>> Edges;
-      for (const auto &E : Machine->getEdges())
-        Edges[E.From].insert(E.To);
-      auto MT = std::make_shared<TurfMachineType>(
-          Machine->getName(), Machine->getStates(), Edges);
-      SourceLocation Loc = Machine->getLoc();
-      if (auto PrevLoc = SymTable_.registerEnumType(
-              Machine->getName(), {Loc.Line, Loc.Col}, MT, ModuleName)) {
-        DuplicateTypeNameError(Loc, Machine->getName(), "state machine",
-                               {PrevLoc->Line, PrevLoc->Col})
-            .raise();
-      }
-    } else if (const auto *ErrDecl =
-                   dynamic_cast<const ErrorDeclExprAST *>(Expr.get())) {
-      // Hoisted here too, not just in hoistTopLevel() -- the enum branch
-      // just above was ONCE missing from this function entirely (see its own
-      // comment), silently breaking any enum declared inside an imported
-      // module's body. Don't repeat that gap for `error` types.
-      auto ET = std::make_shared<TurfUserErrorType>(
-          ErrDecl->getName(), ErrDecl->getVariants(), ErrDecl->isBareForm());
-      SourceLocation Loc = ErrDecl->getLoc();
-      if (auto PrevLoc = SymTable_.registerErrorType(
-              ErrDecl->getName(), {Loc.Line, Loc.Col}, ET, ModuleName)) {
-        DuplicateTypeNameError(Loc, ErrDecl->getName(), "error",
-                               {PrevLoc->Line, PrevLoc->Col})
-            .raise();
-      }
     } else if (const auto *Import =
                    dynamic_cast<const ModuleImportExprAST *>(Expr.get())) {
       // Nested module imports (unusual but possible)
@@ -1024,7 +934,7 @@ void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
   // into ContextLabel. Returns true if Name was found there at all (as a
   // function) -- the caller uses this to decide whether an explicit
   // Symbol/SymbolList request also needs to fall back to checking the
-  // (already-flat, module-blind) struct/enum registry before giving up.
+  // type registry (RegisterTypeIfOwned below) before giving up.
   auto RegisterFunctionIfPresent = [&](const std::string &Name,
                                        SourceLocation Loc) -> bool {
     bool Found = false;
@@ -1049,14 +959,16 @@ void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
   };
 
   // Registers Name as flat-type-imported into ContextLabel IF SourceModule
-  // actually owns it (per TypeOwningModule_, not the flat/module-blind
-  // isKnownStruct()/isEnumName() existence check -- a name that merely
-  // exists SOMEWHERE in the program, declared by a totally different
-  // module, must not satisfy `import SourceModule::Name;`). Returns
-  // whether Name is a real struct/enum owned by SourceModule at all.
+  // actually owns it -- a type spelled Name that merely exists in some OTHER
+  // module must not satisfy `import SourceModule::Name;`. FDN-003: "does
+  // SourceModule own a type spelled Name" is exactly "is SourceModule::Name
+  // a registered identity". Already registered once by
+  // registerOnDemandTypeImports() in Pass 1a; re-registering the same
+  // (context, name, module) triple below is a no-op. Returns whether Name is
+  // a real type owned by SourceModule at all.
   auto RegisterTypeIfOwned = [&](const std::string &Name,
                                  SourceLocation Loc) -> bool {
-    if (SymTable_.getTypeOwningModule(Name) != SourceModule)
+    if (!SymTable_.isKnownTypeIdentity(TypeIdentity::make(SourceModule, Name)))
       return false;
     ResolverSymbolTable::FlatImportedSymbol Sym{SourceModule, {Loc.Line, Loc.Col}};
     if (auto Prev = SymTable_.registerFlatTypeImport(ContextLabel, Name, Sym)) {

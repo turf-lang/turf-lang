@@ -204,10 +204,47 @@ public:
    * whether the qualifier is correct, not whether it was on-demand-imported.
    */
   bool isTypeVisibleUnqualified(const std::string &ContextLabel,
-                                const std::string &Name) const {
-    if (TypeRegistry_.getTypeOwningModule(Name) == ContextLabel)
-      return true;
-    return ModuleTable_.hasFlatTypeImport(ContextLabel, Name);
+                                const std::string &Identity) const {
+    // FDN-003: @p Identity is a TypeIdentity. Visible bare iff it is
+    // ContextLabel's own type, or ContextLabel flat-imported ITS bare name
+    // from ITS owning module -- a flat import of some other module's
+    // same-spelled type does not make this one visible.
+    const std::string Owner = TypeIdentity::owningModule(Identity);
+    if (Owner == ContextLabel)
+      return TypeRegistry_.isKnownTypeIdentity(Identity);
+    const auto *Flat = ModuleTable_.lookupFlatTypeImport(
+        ContextLabel, TypeIdentity::bareName(Identity));
+    return Flat && Flat->SourceModule == Owner;
+  }
+
+  /**
+   * @brief FDN-003: every type a BARE spelling @p Name can mean from
+   * @p ContextLabel -- ContextLabel's own `Name`, and whatever ContextLabel
+   * flat-imported under that name. More than one entry is an ambiguous
+   * reference (AmbiguousTypeReferenceError); none means the spelling is not
+   * visible here (it may still exist qualified elsewhere --
+   * identitiesWithBareName()).
+   */
+  std::vector<std::string> unqualifiedTypeCandidates(const std::string &ContextLabel,
+                                                     const std::string &Name) const {
+    std::vector<std::string> Out;
+    std::string Own = TypeIdentity::make(ContextLabel, Name);
+    if (TypeRegistry_.isKnownTypeIdentity(Own))
+      Out.push_back(Own);
+    if (const auto *Flat = ModuleTable_.lookupFlatTypeImport(ContextLabel, Name)) {
+      std::string Imported = TypeIdentity::make(Flat->SourceModule, Name);
+      if (Imported != Own && TypeRegistry_.isKnownTypeIdentity(Imported))
+        Out.push_back(Imported);
+    }
+    return Out;
+  }
+
+  bool isKnownTypeIdentity(const std::string &Identity) const {
+    return TypeRegistry_.isKnownTypeIdentity(Identity);
+  }
+
+  std::vector<std::string> identitiesWithBareName(const std::string &BareName) const {
+    return TypeRegistry_.identitiesWithBareName(BareName);
   }
 
   std::vector<std::string> getModuleTypeNames(const std::string &ModuleName) const {

@@ -55,6 +55,65 @@
 class TurfType;
 using TurfTypePtr = std::shared_ptr<TurfType>;
 
+// ─── Type identity (FDN-003) ─────────────────────────────────────────────────
+
+/**
+ * @brief The one encoding of a struct/enum/machine/error type's identity,
+ *        (owning module, name), as the string every name-keyed table in the
+ *        compiler already uses.
+ *
+ * A type declared in an imported module `M` is `M::Name`; a type declared in
+ * the main program file is its bare `Name` (its module is `main` -- DEC-13 --
+ * but that qualifier is never spelled, so every main-file program's type
+ * names, `typeof()` output and LLVM names are what they were before FDN-003).
+ * `::` can never appear in an identifier, so `M::Name` cannot collide with a
+ * main-file type, and two modules' `Node`s cannot collide with each other.
+ *
+ * INV-TYPE-3: identity is only ever produced by make() from a (module, name)
+ * pair the Resolver or Parser actually knows owns the declaration -- never by
+ * pasting a spelling together, and never by stripping a qualifier off for
+ * comparison. bareName() exists for display-adjacent uses only (a
+ * "did you mean" candidate, an import-list lookup); comparing two bareName()s
+ * to decide whether two types are the same is exactly the pre-FDN-003 bug.
+ */
+namespace TypeIdentity {
+inline std::string make(const std::string &Module, const std::string &Name) {
+  return Module.empty() ? Name : Module + "::" + Name;
+}
+/// The module part of @p Id ("" for a main-file type). Splits at the FIRST
+/// `::` -- a generic clone's identity (`a::Box_gen1_b::Item`) carries its
+/// type arguments' identities after the base, and belongs to the base's module.
+inline std::string owningModule(const std::string &Id) {
+  auto P = Id.find("::");
+  return P == std::string::npos ? "" : Id.substr(0, P);
+}
+inline std::string bareName(const std::string &Id) {
+  auto P = Id.find("::");
+  return P == std::string::npos ? Id : Id.substr(P + 2);
+}
+/// True for a string that can only be an identity, never a source spelling
+/// (a spelling's qualifier lives in NamedType/GenericType::getModule(), never
+/// inside the name itself).
+inline bool isModuleQualified(const std::string &Id) {
+  return Id.find("::") != std::string::npos;
+}
+/// The spelling used for LLVM struct names, GC descriptor symbols and DWARF
+/// type names: `M.Name` (owner-approved FDN-003 stage 1). Never used as a key.
+inline std::string llvmName(const std::string &Id) {
+  std::string S;
+  S.reserve(Id.size());
+  for (size_t i = 0; i < Id.size(); ++i) {
+    if (Id[i] == ':' && i + 1 < Id.size() && Id[i + 1] == ':') {
+      S += '.';
+      ++i;
+    } else {
+      S += Id[i];
+    }
+  }
+  return S;
+}
+} // namespace TypeIdentity
+
 // ─── Base class ───────────────────────────────────────────────────────────────
 
 /**
@@ -373,16 +432,18 @@ public:
  */
 class NamedType : public TurfType {
   std::string Name;
-  // The `Module` in `Module::Name` (empty if unqualified). Deliberately NOT
-  // part of getName()/isNamed()'s identity -- struct/enum names are still
-  // one flat, module-blind namespace (a name is globally unique once
-  // declared), so two NamedTypes for the same bare Name must still compare
-  // equal for ordinary type-compatibility purposes regardless of whether
-  // one spelling happened to be qualified. This field exists ONLY so the
-  // Resolver can validate the qualifier (real module? does IT own this
-  // type?) once, at the point the type reference is first resolved -- see
-  // Resolver::validateModuleQualifier().
+  // The `Module` in `Module::Name` as SPELLED (empty if unqualified). Not
+  // part of identity by itself: once the Resolver has resolved this
+  // reference (resolveTo()), Name holds the full TypeIdentity and this field
+  // is kept only as a record of what the source wrote.
   std::string Module;
+  // FDN-003: set once the Resolver has turned the spelling into a
+  // TypeIdentity. Needed because a main-file type's identity is its bare
+  // name, indistinguishable by text from an unresolved spelling -- and a
+  // monomorphized clone is re-resolved in its TEMPLATE's module, where a
+  // substituted main-file `Node` must not be re-read as that module's own
+  // `Node` (resolveMonomorphizedClone(), Resolver.h).
+  bool Resolved = false;
 
 public:
   explicit NamedType(std::string N, std::string M = "")
@@ -391,7 +452,29 @@ public:
   const std::string &getModule() const { return Module; }
   bool isNamed(const std::string &N) const override { return Name == N; }
   bool isVoid() const override { return Name == "void"; }
+
+  bool isResolvedIdentity() const {
+    return Resolved || TypeIdentity::isModuleQualified(Name);
+  }
+  /// Mutates in place: a parsed NamedType is owned by exactly one source
+  /// occurrence (ParseType() never shares one), and every holder of this
+  /// pointer -- the AST node, the parse-time TurfStructType copy of a field
+  /// list, a ResolverFunctionSymbol's captured signature -- must see the
+  /// identity, not just the one the Resolver happened to reach it through.
+  void resolveTo(std::string Identity) {
+    Name = std::move(Identity);
+    Resolved = true;
+  }
 };
+
+/// A NamedType that already holds a TypeIdentity -- for types synthesized
+/// after resolution (a `Type::new(...)` call's result type, a monomorphized
+/// `self`), which must never be re-resolved against a different module.
+inline std::shared_ptr<NamedType> makeResolvedNamedType(std::string Identity) {
+  auto NT = std::make_shared<NamedType>(Identity);
+  NT->resolveTo(std::move(Identity));
+  return NT;
+}
 
 // ─── ArrayType ────────────────────────────────────────────────────────────────
 
@@ -597,16 +680,37 @@ class GenericType : public TurfType {
 protected:
   std::string            BaseName;   ///< "list", "map", etc.
   std::vector<TurfTypePtr> TypeArgs; ///< [int], [string, int], etc.
-  // The `Module` in `Module::BaseName<...>` (empty if unqualified) -- same
-  // purpose and same "not part of type identity" rule as NamedType::Module,
-  // see its doc comment.
+  // The `Module` in `Module::BaseName<...>` as spelled (empty if
+  // unqualified) -- same role as NamedType::Module, see its doc comment.
   std::string Module;
+  // FDN-003: BaseName holds a TypeIdentity -- same role as
+  // NamedType::Resolved, see its doc comment.
+  bool BaseResolved = false;
 
 public:
   GenericType(std::string Base, std::vector<TurfTypePtr> Args, std::string Mod = "")
       : BaseName(std::move(Base)), TypeArgs(std::move(Args)), Module(std::move(Mod)) {}
 
   const std::string &getModule() const { return Module; }
+
+  bool isBaseResolved() const {
+    return BaseResolved || TypeIdentity::isModuleQualified(BaseName);
+  }
+  /// In place, for the same reason as NamedType::resolveTo().
+  void resolveBaseTo(std::string Identity) {
+    BaseName = std::move(Identity);
+    BaseResolved = true;
+  }
+  /// The same instantiation with different type arguments. Every rebuild of
+  /// a GenericType from an existing one goes through here so the resolved
+  /// base identity is never dropped on the floor (a rebuilt base that lost
+  /// it would be re-resolved -- possibly to another module's same-named
+  /// type -- the next time a clone is resolved).
+  std::shared_ptr<GenericType> withTypeArgs(std::vector<TurfTypePtr> NewArgs) const {
+    auto GT = std::make_shared<GenericType>(BaseName, std::move(NewArgs), Module);
+    GT->BaseResolved = BaseResolved;
+    return GT;
+  }
 
   std::string getName() const override {
     std::string S = BaseName + "<";

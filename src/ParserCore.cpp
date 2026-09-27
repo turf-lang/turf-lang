@@ -657,7 +657,10 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // this check, which is fine, since the ordinary parse failure that
     // follows is still a real, if less specific, diagnostic.
     if (CurTok == '{' && GlobalSymbolTable) {
-      if (auto T = GlobalSymbolTable->LookupType(IdName)) {
+      // FDN-003: a struct declared earlier in THIS module is registered
+      // under its identity (`M::IdName`), not its bare spelling.
+      if (auto T = GlobalSymbolTable->LookupType(
+              TypeIdentity::make(CurrentParseModule(), IdName))) {
         if (dynamic_cast<TurfStructType *>(T.get())) {
           LogErrorAt(IdLoc, "'" + IdName + " { ... }' is no longer valid syntax "
                              "for constructing a struct."
@@ -689,12 +692,12 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       getNextToken(); // eat right-hand name
 
       // Same removed-syntax hint as the bare form above, for the qualified
-      // `Module::StructName { ... }` spelling -- RightName is checked
-      // (structs/enums stay flat and module-blind, see 2.6 in
-      // modules_and_scope_resolution.md, so a bare LookupType is correct
-      // here too even though IdName is the module, not the struct).
+      // `Module::StructName { ... }` spelling -- looked up by the identity
+      // the qualifier names (FDN-003: `IdName::RightName` IS that identity
+      // when IdName is the owning module).
       if (CurTok == '{' && GlobalSymbolTable) {
-        if (auto T = GlobalSymbolTable->LookupType(RightName)) {
+        if (auto T = GlobalSymbolTable->LookupType(
+                TypeIdentity::make(IdName, RightName))) {
           if (dynamic_cast<TurfStructType *>(T.get())) {
             LogErrorAt(IdLoc, "'" + IdName + "::" + RightName + " { ... }' is no "
                                "longer valid syntax for constructing a struct."

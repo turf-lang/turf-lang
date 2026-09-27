@@ -15,11 +15,15 @@
  * table (split out of the original monolithic ResolverSymbolTable -- see
  * docs/architecture/compiler_pipeline.md). Tracks every struct, enum,
  * and `error` type name declared in the current file or any transitively-
- * imported module, plus which module owns each one -- struct/enum/error
- * names live in ONE flat namespace shared by the current file and every
- * transitively-imported module (unlike functions, which are namespaced
- * per-module), so this is what powers `Module::TypeName` qualifier
- * validation without involving the TypeChecker or LLVM.
+ * imported module, plus which module owns each one.
+ *
+ * FDN-003: every key is a TypeIdentity (Types.h) -- `M::Name` for a type
+ * declared in module M, bare `Name` for the main file's -- so two modules'
+ * same-named types are two entries, never a collision. Registration checks
+ * the key really is (ModuleName, name)'s identity (INV-TYPE-3). What a bare
+ * SPELLING means from some file is not this registry's question: that is
+ * ResolverSymbolTable::unqualifiedTypeCandidates() (own type + on-demand
+ * imports) and the Resolver's spelling -> identity step on top of it.
  */
 class ResolverTypeRegistry {
 public:
@@ -61,10 +65,10 @@ public:
 
   // ── Enum registry ─────────────────────────────────────────────────────────
 
-  // Same flat, module-blind namespace concern as registerStruct() above
-  // applies to enums (they share the type namespace with structs at the
-  // Codegen/LLVM layer too). Returns the original declaration's location on
-  // a duplicate name, std::nullopt on a fresh registration.
+  // Keyed by TypeIdentity, same as registerStruct() above (enums share the
+  // type namespace with structs at the Codegen/LLVM layer too). Returns the
+  // original declaration's location on a duplicate identity -- a
+  // same-MODULE redeclaration -- std::nullopt on a fresh registration.
   std::optional<ResolverSourceLocation>
   registerEnumType(const std::string& Name, ResolverSourceLocation Loc,
                    std::shared_ptr<TurfEnumType> ET,
@@ -76,10 +80,10 @@ public:
   // ── User-declared `error` type registry ───────────────────────────────────
   // (docs/architecture/errors_and_recover.md)
 
-  // Same shape as the enum registry above -- a flat, module-blind namespace,
-  // own duplicate-name map (not cross-checked against structs/enums, same as
-  // struct vs. enum today). Returns the original declaration's location on a
-  // duplicate name, std::nullopt on a fresh registration.
+  // Same shape as the enum registry above -- keyed by TypeIdentity, own
+  // duplicate map (not cross-checked against structs/enums, same as struct
+  // vs. enum today). Returns the original declaration's location on a
+  // duplicate identity, std::nullopt on a fresh registration.
   std::optional<ResolverSourceLocation>
   registerErrorType(const std::string& Name, ResolverSourceLocation Loc,
                     std::shared_ptr<TurfUserErrorType> ET,
@@ -89,11 +93,10 @@ public:
   std::vector<std::string> getAllErrorTypeNames() const;
 
   /**
-   * @brief Which module declares @p Name ("" for the main file, or if
-   * @p Name isn't a known struct/enum at all). Struct/enum names are
-   * globally unique once declared (see registerStruct()'s doc comment on
-   * the flat-namespace collision rule), so there is always exactly one
-   * owner to report.
+   * @brief Which module declares type identity @p Name ("" for the main
+   * file, or if @p Name isn't a known type identity at all). Always equal
+   * to TypeIdentity::owningModule(Name) for a registered identity --
+   * registration enforces it (INV-TYPE-3).
    */
   std::string getTypeOwningModule(const std::string &Name) const;
 
@@ -102,12 +105,24 @@ public:
    * transitively -- a nested import inside that module doesn't count).
    * Used by registerOnDemandImports()'s Wildcard branch to flat-import
    * every type a module owns, mirroring ResolverModuleTable::
-   * getModuleFunctionNames(). Operates purely on TypeOwningModule_ below,
+   * getModuleFunctionNames(). Returns BARE names (FDN-003) -- what an
+   * import list or a "did you mean" suggestion spells, not identities. Operates purely on TypeOwningModule_ below,
    * same as getTypeOwningModule() -- kept here rather than on
    * ResolverModuleTable for that reason, even though it's queried "by
    * module name" the way several ResolverModuleTable methods are.
    */
   std::vector<std::string> getModuleTypeNames(const std::string &ModuleName) const;
+
+  /// FDN-003: true if @p Identity (a TypeIdentity -- `M::Name`, or a bare
+  /// main-file name) is a registered struct/enum/machine/error type.
+  bool isKnownTypeIdentity(const std::string &Identity) const;
+
+  /// FDN-003: every registered type identity whose bare name is
+  /// @p BareName, sorted -- one per module that declares a type spelled that
+  /// way. Answers "does this spelling name a type ANYWHERE" (for "isn't
+  /// visible here" vs "unknown type" diagnostics) and "which ones" (for an
+  /// ambiguity note); never used to pick one of them as THE type.
+  std::vector<std::string> identitiesWithBareName(const std::string &BareName) const;
 
   /// Emits the "Registered Struct Names (Pass 1 Hoist)" section of
   /// ResolverSymbolTable::dump().

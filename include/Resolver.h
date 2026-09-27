@@ -332,7 +332,12 @@ public:
   void visitArrayLiteral(ArrayLiteralExprAST &Node) override;
   void visitArrayAccess(ArrayAccessExprAST &Node) override;
   void visitModuleImport(ModuleImportExprAST &Node) override;
-  void visitSizeOf(SizeOfExprAST &Node) override { (void)Node; }
+  void visitSizeOf(SizeOfExprAST &Node) override {
+    // FDN-003: `sizeof(Node)` names a type -- same silent resolution as a
+    // cast's destination (visitCast).
+    resolveTypeSpellingsSilently(Node.getTypeArg(), currentModuleName(),
+                                 CurrentFuncTypeParams_);
+  }
 
   // ── FFI ────────────────────────────────────────────────────────────────────
   void visitExternFuncDecl(ExternFuncDeclExprAST &Node) override;
@@ -497,6 +502,64 @@ private:
   // ── Pass 1: Hoisting ───────────────────────────────────────────────────────
   // Walk only the top-level list, registering struct names and function
   // signatures.  No bodies are visited in this pass.
+
+  // ── Pass 1a/1b: type identity (FDN-003) ─────────────────────────────────
+  //
+  // A type's identity is (owning module, name) -- TypeIdentity, Types.h.
+  // Every struct/enum/machine/error declaration in every module is
+  // registered FIRST (1a, hoistTypes), so that 1b can turn every
+  // declaration-level type SPELLING (struct fields, function and extern
+  // signatures, a method's receiver) into an identity before anything --
+  // function-signature registration, the struct-layout cycle check --
+  // captures or compares one. Pass 2 (validateNamedType() and the `Left::`
+  // handling in visitFuncCall/visitScopeAccess) does the same for every
+  // spelling inside a body, with diagnostics.
+
+  /// 1a: register every type declared in @p Nodes (recursing into module
+  /// bodies), plus every on-demand import's TYPE names.
+  void hoistTypes(const std::vector<std::unique_ptr<ExprAST>> &Nodes);
+  void hoistTypesIn(const ExprAST *Node, const std::string &ModuleName);
+  /// The type half of registerOnDemandImports(), run in 1a so on-demand-
+  /// imported types are already visible to 1b.
+  void registerOnDemandTypeImports(const ModuleImportExprAST &Import,
+                                   const std::string &ContextLabel);
+
+  /// 1b: resolve declaration-level type spellings in place, silently -- an
+  /// unresolvable spelling is left alone for Pass 2 to report with a real
+  /// diagnostic (Pass 1 aborts the whole resolveAll() on its first error).
+  void resolveDeclarationSpellings(const std::vector<std::unique_ptr<ExprAST>> &Nodes);
+  void resolveDeclarationSpellingsIn(ExprAST *Node, const std::string &Module);
+
+  /// The TypeIdentity a spelling (`Qualifier::Name`, or bare `Name` when
+  /// @p Qualifier is empty) means from @p Context, or nullopt if it is
+  /// unknown, not visible bare, ambiguous, or wrongly qualified. Silent;
+  /// the diagnosing counterparts are validateNamedType() and
+  /// resolveScopeLeftType().
+  std::optional<std::string> tryResolveTypeSpelling(const std::string &Qualifier,
+                                                    const std::string &Name,
+                                                    const std::string &Context) const;
+
+  /// Walks every shape @p Ty can take (pointer, reference, array, generic
+  /// arguments, error union, function type) and resolves each still-
+  /// unresolved NamedType/GenericType base in place via
+  /// tryResolveTypeSpelling(). Names in @p TypeParams are never touched.
+  void resolveTypeSpellingsSilently(const TurfTypePtr &Ty, const std::string &Context,
+                                    const std::vector<std::string> &TypeParams) const;
+
+  /// `Left` of a `[Q::]Left::Right` expression, as a TypeIdentity, if it
+  /// names a type -- rewriting the node's LeftName to that identity in
+  /// place so every later reader (the rest of this pass, the TypeChecker,
+  /// Codegen) sees the identity. Returns "" when Left names no type (a
+  /// module, a variable, or nothing). Raises AmbiguousTypeReferenceError
+  /// when a bare Left could mean two types.
+  ///
+  /// A bare Left that is not visible unqualified still resolves when
+  /// exactly one type anywhere is spelled that way: `Vec2::zero()` never
+  /// required `Vec2` to be bare-imported (static calls and enum variants
+  /// are existence-checked, not visibility-gated -- 2.8.1 in
+  /// modules_and_scope_resolution.md); construction keeps its own
+  /// isTypeVisibleUnqualified() gate on top of this.
+  std::string resolveScopeLeftType(ScopeAccessExprAST &Node, SourceLocation Loc);
 
   /// Hoist a single top-level node (struct name or function signature).
   void hoistTopLevel(const ExprAST *Node);

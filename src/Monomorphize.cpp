@@ -787,6 +787,10 @@ std::unique_ptr<ExprAST> cloneAndSubstituteSelfBound(
     std::vector<TurfTypePtr> StructOwnArgs(Request.TypeArgs.begin(),
                                            Request.TypeArgs.begin() + N);
     auto SelfInner = std::make_shared<GenericType>(StructName, std::move(StructOwnArgs));
+    // DeclKey's struct part is the receiver's TypeIdentity (the Resolver
+    // renamed the method in Pass 1b, FDN-003) -- mark it so, since this
+    // clone is about to be re-resolved in the template's module.
+    SelfInner->resolveBaseTo(StructName);
     Params[0].Type = std::make_shared<TurfPointerType>(std::move(SelfInner));
   }
   return ClonedUP;
@@ -1030,30 +1034,20 @@ namespace {
 /// into every ModuleImportExprAST's own body, same traversal) collecting
 /// every StructDeclExprAST with a non-empty TypeParams list.
 ///
-/// Keyed by BARE NAME ONLY -- deliberately NOT (SourceModule, Name) the way
-/// buildDeclRegistry() (functions/methods) is, even though
-/// InstantiationRequest carries a SourceModule field for every Kind. Found
-/// live while testing this session: a Struct-kind request's SourceModule
-/// (TypeCheckerDecl.cpp's visitVarDecl, TypeCheckerCall.cpp's
-/// visitMethodCall) is read off the receiver's own parsed GenericType::getModule()
-/// -- which reflects how the type was SPELLED at its use site (empty unless
-/// written with an explicit `mod::` qualifier), NOT the struct's actual
-/// declaring module. A FreeFunction/Method request's SourceModule, by
-/// contrast, is read off the already-RESOLVED symbol's own SourceModule
-/// field (Best->SourceModule) -- reliable regardless of call-site spelling.
-/// Confirmed live: `lib/std/collections/list.tr`'s OWN `list_sort(l:
-/// List<int>, ...)` refers to `List` completely unqualified (it's declared
-/// in the SAME file) -- BaseGT->getModule() is "", but a registry keyed
-/// (SourceModule, Name) the way buildDeclRegistry() is would only have
-/// "list::List" registered (from recursing into list.tr's own
-/// ModuleImportExprAST body), never "::List" -- a guaranteed miss for
-/// EVERY unqualified use of a generic struct anywhere, not just this one.
-/// This is safe here specifically because structs, UNLIKE free functions,
-/// are already flat/globally-namespaced everywhere else in this compiler:
-/// GlobalSymbolTable::RegisterType()/LookupType() (SymbolTable.h) take no
-/// module argument at all -- two different modules cannot legally declare
-/// two different structs sharing one name today regardless of what this
-/// registry does, so bare-name keying loses no real disambiguating power.
+/// Keyed by the struct's TypeIdentity (FDN-003) -- the declaration's own
+/// getName(), which the Parser already built from (module, name), and which
+/// is exactly what every GenericType's base name holds once the Resolver
+/// has resolved it (`list::List`, or a bare main-file `Box`). Two modules'
+/// same-named generic structs are therefore two registry entries.
+///
+/// History: this used to be keyed by BARE name on the argument that struct
+/// names were one program-wide namespace (GlobalSymbolTable::RegisterType()
+/// took no module), so a bare key lost nothing -- and because a Struct-kind
+/// request's SourceModule was then read off the use site's SPELLED
+/// qualifier (empty for an unqualified `List<int>` inside list.tr itself),
+/// not the declaring module, so a (SourceModule, Name) key would miss. Both
+/// premises are gone: requests now record TypeIdentity::owningModule() of
+/// the resolved base, and the key needs no module part at all.
 ///
 /// The Module string carried alongside each entry is the struct's own TRUE
 /// declaring module (where the Walk actually found it), independent of

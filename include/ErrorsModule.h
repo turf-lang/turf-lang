@@ -308,6 +308,48 @@ public:
             "::" + TypeName + ";`.";
   }
 };
+// FDN-003: a BARE type spelling that could mean two different types from
+// here -- this file's/module's own `Name` and an on-demand-imported one, or
+// (defensively) two imports. Before FDN-003 this situation could not arise:
+// type names were one program-wide namespace, so declaring the second type
+// was already an error (DuplicateTypeNameError). Neither declaration is wrong
+// on its own now; only the unqualified USE is, so this is raised at the use.
+// Deliberately NOT resolved by "the local one wins": a rule that is too
+// strict can be relaxed after 2.0 without breaking anyone, the reverse cannot.
+class AmbiguousTypeReferenceError : public TurfError {
+public:
+  static std::string describe(const std::string &Identity) {
+    auto P = Identity.find("::");
+    return P == std::string::npos
+               ? "'" + Identity + "' declared in this program's main file"
+               : "'" + Identity + "' from module '" + Identity.substr(0, P) + "'";
+  }
+
+  AmbiguousTypeReferenceError(SourceLocation Loc, const std::string &Spelling,
+                              const std::vector<std::string> &Identities)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'" + Colors::CYAN + Spelling +
+                           Colors::BRIGHT_RED +
+                           "' is ambiguous here -- it could mean more than "
+                           "one type." + Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    for (const auto &Id : Identities)
+      Message += "\n  " + Colors::BRIGHT_BLUE + "Note: could be " +
+                 describe(Id) + Colors::RESET;
+    std::string Qualified;
+    for (const auto &Id : Identities)
+      if (Id.find("::") != std::string::npos) {
+        Qualified = Id;
+        break;
+      }
+    Hint_ = Qualified.empty()
+                ? "Rename one of them, or import only the names you need "
+                  "instead of the one that clashes."
+                : "Write the imported one qualified (`" + Qualified +
+                      "`) and leave '" + Spelling + "' out of the `import` "
+                      "(list the names you need instead of `[*]`), so '" +
+                      Spelling + "' means just one type.";
+  }
+};
 // Phase 2: Module-scoped method lookup error
 // Raised when a user types e.g. io.pritn() — wrong function name in a known
 // module. Suggestions are sourced from that module's function registry.

@@ -11,13 +11,36 @@
 
 #include "ResolverTypeRegistry.h"
 
+#include "Types.h" // TypeIdentity
+
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
+
+// INV-TYPE-3 (FDN-003): every registration's key must be exactly the
+// TypeIdentity of (ModuleName, bare name). A mismatch means some caller built
+// the key from a spelling, or registered a module's type under the main
+// file's namespace -- the precise shape of the pre-FDN-003 global-namespace
+// bug. Always on (not an assert(): the release build defines NDEBUG, and a
+// registry keyed wrongly produces silent wrong-type lookups, not a crash).
+static void checkIdentityKey(const std::string &Identity,
+                             const std::string &ModuleName, const char *Kind) {
+  if (TypeIdentity::owningModule(Identity) == ModuleName)
+    return;
+  std::fprintf(stderr,
+               "Internal compiler error: %s type '%s' registered as owned by "
+               "module '%s' (INV-TYPE-3). This is a compiler bug.\n",
+               Kind, Identity.c_str(),
+               ModuleName.empty() ? "(main file)" : ModuleName.c_str());
+  std::abort();
+}
 
 std::optional<ResolverSourceLocation>
 ResolverTypeRegistry::registerStruct(const std::string &Name,
                                      ResolverSourceLocation Loc,
                                      const std::string &ModuleName) {
+  checkIdentityKey(Name, ModuleName, "struct");
   auto It = RegisteredStructs_.find(Name);
   if (It != RegisteredStructs_.end())
     return It->second; // duplicate -- caller raises DuplicateTypeNameError
@@ -49,9 +72,23 @@ ResolverTypeRegistry::getModuleTypeNames(const std::string &ModuleName) const {
   std::vector<std::string> Names;
   for (const auto &Pair : TypeOwningModule_)
     if (Pair.second == ModuleName)
-      Names.push_back(Pair.first);
+      Names.push_back(TypeIdentity::bareName(Pair.first));
   std::sort(Names.begin(), Names.end());
   return Names;
+}
+
+bool ResolverTypeRegistry::isKnownTypeIdentity(const std::string &Identity) const {
+  return TypeOwningModule_.count(Identity) > 0;
+}
+
+std::vector<std::string>
+ResolverTypeRegistry::identitiesWithBareName(const std::string &BareName) const {
+  std::vector<std::string> Ids;
+  for (const auto &Pair : TypeOwningModule_)
+    if (TypeIdentity::bareName(Pair.first) == BareName)
+      Ids.push_back(Pair.first);
+  std::sort(Ids.begin(), Ids.end());
+  return Ids;
 }
 
 std::optional<ResolverSourceLocation>
@@ -59,6 +96,7 @@ ResolverTypeRegistry::registerEnumType(const std::string &Name,
                                        ResolverSourceLocation Loc,
                                        std::shared_ptr<TurfEnumType> ET,
                                        const std::string &ModuleName) {
+  checkIdentityKey(Name, ModuleName, "enum");
   auto LocIt = EnumDeclLocs_.find(Name);
   if (LocIt != EnumDeclLocs_.end())
     return LocIt->second; // duplicate -- caller raises DuplicateTypeNameError
@@ -95,6 +133,7 @@ ResolverTypeRegistry::registerErrorType(const std::string &Name,
                                         ResolverSourceLocation Loc,
                                         std::shared_ptr<TurfUserErrorType> ET,
                                         const std::string &ModuleName) {
+  checkIdentityKey(Name, ModuleName, "error");
   auto LocIt = ErrorDeclLocs_.find(Name);
   if (LocIt != ErrorDeclLocs_.end())
     return LocIt->second; // duplicate -- caller raises DuplicateTypeNameError

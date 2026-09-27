@@ -54,6 +54,14 @@ struct ImportStackFrame {
 };
 static std::vector<ImportStackFrame> ImportStack;
 
+// FDN-003: the module whose file is being parsed right now ("" for the main
+// program file). ImportStack's top frame IS that module for the whole of its
+// own ParseFile() call -- the frame is pushed before the file's first token
+// is read and popped only after its last -- so this needs no state of its own.
+std::string CurrentParseModule() {
+  return ImportStack.empty() ? std::string() : ImportStack.back().ModuleName;
+}
+
 // Cache of every top-level AST node codegenned so far in this compile
 // (used by the sandbox to rebuild a full-program AST for diffing/retrying
 // -- see BuildProgramASTFromCache() below). Lives here alongside

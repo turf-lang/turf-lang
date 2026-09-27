@@ -1,0 +1,12 @@
+// FDN-003 keeps one half of the old duplicate-type rule: two declarations of
+// the same type name inside ONE module (here, an imported one -- the main
+// file's own case is tests/06_structs/fail_duplicate_empty_struct.tr) still
+// share one identity, `dup_struct_twice_module::Point`, and are rejected
+// with DuplicateTypeNameError (E034). Only same names in DIFFERENT modules
+// became legal -- see same_struct_name_across_modules.tr.
+
+import dup_struct_twice_module;
+
+fn main(): int {
+    return 0;
+}

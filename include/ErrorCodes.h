@@ -174,6 +174,11 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // matching StaticOutsideStructError's identical "this construct is
     // only valid in one specific declaration context" shape.
     {"E084", "CallerLocationOutsideMarkedFunctionError", "Caller location outside a marked function", SLM::ErrorCategory::DECLARATION},
+
+    // FDN-003 (docs/development/changes/FDN-003.md): a bare type name that
+    // could mean two visible types (the file's own and an imported one) now
+    // that type identity is (module, name) rather than one global namespace.
+    {"E085", "AmbiguousTypeReferenceError", "Ambiguous type reference", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

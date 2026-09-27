@@ -225,6 +225,12 @@ public:
   bool hasFlatTypeImport(const std::string &ContextLabel,
                         const std::string &Name) const;
 
+  /// FDN-003: the flat type import of bare @p Name into @p ContextLabel, or
+  /// nullptr -- its SourceModule is what turns the bare spelling into a
+  /// TypeIdentity (TypeIdentity::make(SourceModule, Name)).
+  const FlatImportedSymbol *lookupFlatTypeImport(const std::string &ContextLabel,
+                                                 const std::string &Name) const;
+
   /**
    * @brief Register that `export immut` constant @p Name is on-demand-
    * imported from @p Sym.SourceModule into @p ContextLabel's flat namespace.

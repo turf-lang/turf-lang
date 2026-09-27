@@ -208,7 +208,8 @@ void recordGenericFieldInstantiations(const TurfTypePtr &Ty, SourceLocation Loc,
   if (const auto *GT = dynamic_cast<const GenericType *>(Ty.get())) {
     if (isFullyConcreteType(GT)) {
       Collector->record({Monomorphize::InstantiationKind::Struct,
-                         GT->getBaseName(), GT->getModule(),
+                         GT->getBaseName(),
+                         TypeIdentity::owningModule(GT->getBaseName()),
                          GT->getTypeArgs(), Loc},
                         Site);
       for (const auto &Arg : GT->getTypeArgs())
@@ -369,7 +370,8 @@ void TypeChecker::visitVarDecl(VarDeclExprAST &Node) {
     if (auto *DeclGT = dynamic_cast<const GenericType *>(DeclTy.get())) {
       if (isFullyConcreteType(DeclGT))
         MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
-                               DeclGT->getBaseName(), DeclGT->getModule(),
+                               DeclGT->getBaseName(),
+                               TypeIdentity::owningModule(DeclGT->getBaseName()),
                                DeclGT->getTypeArgs(), Node.getLoc()},
                               &Node);
     }

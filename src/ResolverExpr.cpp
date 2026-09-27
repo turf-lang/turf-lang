@@ -205,6 +205,11 @@ void Resolver::visitAssignment(AssignmentExprAST &Node) {
 
 void Resolver::visitCast(CastExprAST &Node) {
   visitChild(Node.getOperand());
+  // FDN-003: `x to Node` -- the destination is a type spelling like any
+  // annotation. Silent (never validated here before FDN-003; an unknown
+  // destination is still the TypeChecker's cast-legality error).
+  resolveTypeSpellingsSilently(Node.getDestTypePtr(), currentModuleName(),
+                               CurrentFuncTypeParams_);
 }
 
 

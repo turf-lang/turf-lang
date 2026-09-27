@@ -150,6 +150,11 @@ class ScopeAccessExprAST : public ExprAST {
     // meaningful when ResolvedKind == EnumVariant; validated the same way
     // as a qualified type/struct-literal (Resolver::validateModuleQualifier()).
     std::string ModuleQualifier;
+    // FDN-003: LeftName has been rewritten from a spelling to a
+    // TypeIdentity by the Resolver (resolveScopeLeftType()). Needed for the
+    // same reason as NamedType's own flag (Types.h): a main-file type's
+    // identity is its bare spelling, so the text alone can't say "done".
+    bool LeftIsTypeIdentity = false;
 public:
     // Set by the Resolver (visitScopeAccess / visitFuncCall for the call
     // form) once it decides what this node actually refers to. A future
@@ -180,6 +185,12 @@ public:
     const SourceLocation& getRightLoc() const { return RightLoc; }
     const SourceLocation& getLoc()   const { return Loc; }
     const std::string& getModuleQualifier() const { return ModuleQualifier; }
+    bool isLeftTypeIdentity() const { return LeftIsTypeIdentity; }
+    /// FDN-003: the Resolver's one write -- see LeftIsTypeIdentity.
+    void resolveLeftTypeTo(std::string Identity) {
+        LeftName = std::move(Identity);
+        LeftIsTypeIdentity = true;
+    }
     // Pre-existing call sites written against the enum-only meaning of this
     // node (TypeChecker's compare/matches exhaustiveness checks, Codegen's
     // enum-variant codegen) keep working unchanged via these aliases.
@@ -191,6 +202,7 @@ public:
         auto Cloned = std::make_unique<ScopeAccessExprAST>(Loc, LeftName, LeftLoc,
                                                             RightName, RightLoc,
                                                             ModuleQualifier);
+        Cloned->LeftIsTypeIdentity = LeftIsTypeIdentity;
         return Cloned;
     }
 };

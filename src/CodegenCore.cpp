@@ -1483,8 +1483,7 @@ const TurfType *getExprType(const ExprAST *E) {
                 NewArgs.push_back(std::move(NewArg));
               }
               if (Changed) {
-                auto NewGT = std::make_shared<GenericType>(NestedGT->getBaseName(),
-                                                            NewArgs);
+                auto NewGT = NestedGT->withTypeArgs(NewArgs);
                 std::string Key = "fieldsubst_gen_" + NewGT->getMangledName();
                 auto CacheIt = FieldSubstCache.find(Key);
                 if (CacheIt != FieldSubstCache.end())

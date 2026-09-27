@@ -136,6 +136,10 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
   } else {
     // ScopeCallee: an explicit `Left::Right(args)` call.
     CalleeName = ScopeCallee->getRightName();
+    // FDN-003: if Left names a type, LeftName becomes its TypeIdentity from
+    // here on (and for the TypeChecker and Codegen) -- every registry below
+    // is keyed by identity.
+    resolveScopeLeftType(*ScopeCallee, ScopeCallee->getLeftLoc());
     const std::string &LeftName = ScopeCallee->getLeftName();
 
     if (SymTable_.isEnumName(LeftName)) {
@@ -217,7 +221,8 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       if (CalleeName == "new" || CalleeName == "default") {
         if (ScopeCallee->getModuleQualifier().empty()) {
           if (!SymTable_.isTypeVisibleUnqualified(currentModuleName(), LeftName)) {
-            UnqualifiedTypeNotVisibleError(Node.getLoc(), LeftName,
+            UnqualifiedTypeNotVisibleError(Node.getLoc(),
+                                           TypeIdentity::bareName(LeftName),
                                            SymTable_.getTypeOwningModule(LeftName))
                 .raise();
             return;
@@ -275,7 +280,7 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
           auto Copy = std::make_shared<ResolverFunctionSymbol>(Sym);
           if (!Copy->Params.empty())
             Copy->Params.erase(Copy->Params.begin());
-          Copy->ReturnType = std::make_shared<NamedType>(LeftName);
+          Copy->ReturnType = makeResolvedNamedType(LeftName);
           return Copy;
         };
 
@@ -655,7 +660,11 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
           .raise();
       return;
     }
-    if (SymTable_.isKnownStruct(BaseVar->getName())) {
+    // FDN-003: BaseVar is a spelling; "is it a struct type name" means "is
+    // any struct, in any module, spelled this way".
+    const auto SpelledTypes = SymTable_.identitiesWithBareName(BaseVar->getName());
+    if (std::any_of(SpelledTypes.begin(), SpelledTypes.end(),
+                    [&](const std::string &Id) { return SymTable_.isKnownStruct(Id); })) {
       // Base is a bare struct TYPE name used with '.' -- same rule as the
       // module case just above: only '::' can invoke a static method
       // (StructName::method(...)), never '.'. This used to silently
@@ -765,6 +774,8 @@ void Resolver::visitRecoverExpr(RecoverExprAST &Node) {
 //     "First-class functions are not supported yet" internal error for
 //     exactly this shape once it gets that far un-rejected).
 void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
+  // FDN-003: see the identical call in visitFuncCall().
+  resolveScopeLeftType(Node, Node.getLeftLoc());
   const std::string &LeftName = Node.getLeftName();
   const std::string &RightName = Node.getRightName();
 

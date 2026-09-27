@@ -126,8 +126,9 @@ extractContextKeyword(const std::string &msg,
   // Module/import construct keywords -- checked AFTER struct/enum above
   // (struct/enum must win first: DuplicateTypeNameError's own message, for
   // a plain same-file struct-name collision with nothing module-related
-  // about it, contains the substring "every module you import" in its Note
-  // text -- checking "module" before "struct"/"enum" would misroute that
+  // about it, contains the substring "module" in its Note text ("another
+  // file or module may reuse it", FDN-003) -- checking "module" before
+  // "struct"/"enum" would misroute that
   // error to modules.txt instead of structs.txt/enums.txt, exactly the
   // ordering trap this function's struct/enum-before-controlKeywords
   // reordering already fixed once for "for enum"/"for"). Still checked

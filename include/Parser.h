@@ -49,6 +49,11 @@ bool IsTopLevelBoundaryToken(int Tok);
 // that can drift apart.
 void SkipToNextTopLevelBoundary();
 
+// FDN-003: the module whose file is currently being parsed ("" for the main
+// program file) -- the owning module every struct/enum/machine/error
+// declaration's TypeIdentity is built from. Defined in ParserModule.cpp.
+std::string CurrentParseModule();
+
 std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
                                    const std::string &ModuleName = "",
                                    SourceLocation ImportLoc = SourceLocation{});

@@ -240,7 +240,11 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
   // so it flows through the ordinary "User-defined / Resolver-registered
   // call path" below completely unmodified.
   if (ScopeCallee && ScopeCallee->ResolvedKind == ScopeAccessKind::DefaultConstruct) {
-    setType(&Node, std::make_shared<NamedType>(ScopeCallee->getLeftName()));
+    // LeftName is already the struct's TypeIdentity (Resolver::
+    // resolveScopeLeftType(), FDN-003) -- marked resolved so that, flowing
+    // into a generic call as an inferred `T`, it is never re-read as a
+    // spelling in the template's own module.
+    setType(&Node, makeResolvedNamedType(ScopeCallee->getLeftName()));
     return;
   }
 
@@ -266,7 +270,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
                   {}, "Pass a 'string' expression as the error's message.",
                   "Wrong message type!");
     }
-    setType(&Node, std::make_shared<NamedType>(ScopeCallee->getLeftName()));
+    setType(&Node, makeResolvedNamedType(ScopeCallee->getLeftName()));
     return;
   }
 
@@ -1266,7 +1270,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
                   if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }
                 if (AllConcrete) {
                   MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
-                                         BaseGT->getBaseName(), BaseGT->getModule(),
+                                         BaseGT->getBaseName(),
+                                         TypeIdentity::owningModule(BaseGT->getBaseName()),
                                          TypeArgsCopy, Node.getLoc()},
                                         &Node);
 
@@ -1597,7 +1602,8 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
         if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }
       if (AllConcrete)
         MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
-                               GT0->getBaseName(), GT0->getModule(),
+                               GT0->getBaseName(),
+                               TypeIdentity::owningModule(GT0->getBaseName()),
                                GT0->getTypeArgs(), Node.getLoc()},
                             &Node);
     }

@@ -150,23 +150,17 @@ public:
   }
 };
 /**
- * @brief A struct or enum name collides with one already declared -- either
- *        in the same file, or in a DIFFERENT (possibly unrelated) module
- *        pulled in transitively via 'import'.
+ * @brief A struct/enum/machine/error name declared twice in the SAME file or
+ *        module.
  *
- * Unlike functions (which are namespaced per-module: `io.printline()` vs.
- * `math.printline()` can coexist), struct and enum names share ONE flat
- * namespace across the current file and every transitively-imported module
- * -- this is also why `List<int>` works without a `list.` prefix in the
- * first place (see list.tr). The tradeoff is that two unrelated modules
- * declaring a same-named struct/enum silently collide: before this class
- * existed, the collision went undetected all the way to Codegen, where
- * LLVM's `StructType::create` refuses two distinct opaque types sharing one
- * name and renames the second to "Name.1" -- producing a crash reported as
- * "Internal compiler error: generated LLVM IR is invalid... this is a
- * compiler bug, please report it," which is both alarming and wrong: it's a
- * legitimate, avoidable naming collision, not a compiler bug. Confirmed via
- * two modules each declaring `struct Point`, imported together.
+ * FDN-003 narrowed this: a type is identified by (module, name), so two
+ * DIFFERENT modules each declaring `struct Point` is legal (two types,
+ * `a::Point` and `b::Point`); only a same-module redeclaration shares an
+ * identity and reaches here. History: when type names were one program-wide
+ * namespace this also fired across modules, and before THAT the collision
+ * went undetected until Codegen, where LLVM renamed the second struct
+ * "Point.1" and code emitted against "Point" used the wrong layout
+ * ("Internal compiler error: generated LLVM IR is invalid").
  */
 class DuplicateTypeNameError : public TurfError {
 public:
@@ -185,14 +179,16 @@ public:
                       Kind + " named '" + Colors::CYAN + Name +
                       Colors::BRIGHT_RED + "' is already declared.") {
     Category_ = SLM::ErrorCategory::DECLARATION;
+    // FDN-003: only a SAME-module duplicate reaches here -- two modules
+    // may each declare a type of the same name (type identity is
+    // (module, name)), so the old "shared across every module you import"
+    // note no longer describes the rule.
     Message += "\n  " + Colors::BRIGHT_BLUE +
-               "Note: struct/enum names are shared across your file and "
-               "every module you import (unlike functions, which are "
-               "namespaced per-module), so this name can only be used once." +
+               "Note: a type name can only be declared once per file; "
+               "another file or module may reuse it." +
                Colors::RESET;
-    Hint_ = "Rename one of the two '" + Name +
-            "' declarations, or rename the import (not yet supported) to "
-            "tell them apart.";
+    Hint_ = "Rename one of the two '" + TypeIdentity::bareName(Name) +
+            "' declarations.";
     RelatedLocations_.push_back({PrevLoc, "first declared here"});
   }
 };

@@ -243,10 +243,19 @@ ResolverModuleTable::registerFlatTypeImport(const std::string &ContextLabel,
 
 bool ResolverModuleTable::hasFlatTypeImport(
     const std::string &ContextLabel, const std::string &Name) const {
+  return lookupFlatTypeImport(ContextLabel, Name) != nullptr;
+}
+
+const ResolverModuleTable::FlatImportedSymbol *
+ResolverModuleTable::lookupFlatTypeImport(const std::string &ContextLabel,
+                                          const std::string &Name) const {
   auto ContextIt = FlatImportedTypes_.find(ContextLabel);
   if (ContextIt == FlatImportedTypes_.end())
-    return false;
-  return ContextIt->second.count(Name) > 0;
+    return nullptr;
+  auto It = ContextIt->second.find(Name);
+  if (It == ContextIt->second.end())
+    return nullptr;
+  return &It->second;
 }
 
 // ─── Two-tier diagnostic helpers ─────────────────────────────────────────────

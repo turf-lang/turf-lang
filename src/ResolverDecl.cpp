@@ -285,15 +285,31 @@ void Resolver::validateNamedType(
   static const std::unordered_set<std::string> KnownPrimitives = {
       "int", "double", "bool", "string", "void", "null", "ptr", "void*"};
 
-  const TurfType *BaseType = Ty.get();
+  // FDN-003: whatever this function checks, it also RESOLVES -- the checked
+  // spelling is rewritten in place to its TypeIdentity (NamedType::
+  // resolveTo()), so the TypeChecker and Codegen only ever see identities.
+  // The positions this function does not itself descend into (a second
+  // pointer level, an error union's success type) are resolved silently by
+  // the walk at the end, so no spelling survives Pass 2 unresolved just
+  // because its position was never validated.
+  struct ResolveRest {
+    const Resolver &R;
+    const TurfTypePtr &Ty;
+    const std::vector<std::string> &TypeParams;
+    ~ResolveRest() {
+      R.resolveTypeSpellingsSilently(Ty, R.currentModuleName(), TypeParams);
+    }
+  } Rest{*this, Ty, TypeParams};
+
+  TurfType *BaseType = Ty.get();
 
   // Unwrap one level of pointer (e.g. Node* -> check "Node").
-  if (const auto *PT = dynamic_cast<const TurfPointerType *>(BaseType))
+  if (auto *PT = dynamic_cast<TurfPointerType *>(BaseType))
     BaseType = PT->getPointee().get();
 
   // Unwrap any number of array dimensions (e.g. User[5][2] -> check "User").
-  while (isArrayType(BaseType))
-    BaseType = getArrayElementType(BaseType);
+  while (auto *AT = dynamic_cast<ArrayType *>(BaseType))
+    BaseType = AT->getElementTypePtr().get();
 
   // Recurse into a function type's own parameter/return types (e.g.
   // `fn(NoSuchStruct): int`) -- same reasoning as the GenericType case just
@@ -307,41 +323,77 @@ void Resolver::validateNamedType(
     return;
   }
 
+  // Spelling -> identity, with the diagnostic for each way that can fail.
+  // `Candidates` feeds the "did you mean" of an UnknownTypeError only.
+  auto ResolveOrReport = [&](const std::string &Qualifier, const std::string &Spelling,
+                             const std::vector<std::string> &Candidates)
+      -> std::optional<std::string> {
+    const std::vector<std::string> Everywhere = SymTable_.identitiesWithBareName(Spelling);
+    if (!Qualifier.empty()) {
+      std::string Id = TypeIdentity::make(Qualifier, Spelling);
+      if (SymTable_.hasModule(Qualifier) && SymTable_.isKnownTypeIdentity(Id))
+        return Id;
+      if (Everywhere.empty()) {
+        RankedSuggestions Suggestions;
+        Suggestions.Local = SuggestionIndex::suggestVisible(Spelling, Candidates);
+        UnknownTypeError(Loc, Spelling, Suggestions).raise();
+      } else {
+        validateModuleQualifier(Qualifier, Spelling, Loc);
+      }
+      return std::nullopt;
+    }
+    // A monomorphized clone (resolveMonomorphizedClone()): every spelling its
+    // TEMPLATE wrote was resolved when the template itself was resolved; an
+    // unresolved bare name here can only be a SUBSTITUTED type argument from
+    // the call site's module (e.g. main's `Node` inside `list`'s clone), and
+    // re-reading it in the template's module could silently turn it into
+    // that module's own, unrelated `Node`. Leave it exactly as it is.
+    if (SuppressUnqualifiedVisibilityCheck_ && !Everywhere.empty())
+      return std::nullopt;
+    auto Visible = SymTable_.unqualifiedTypeCandidates(currentModuleName(), Spelling);
+    if (Visible.size() == 1)
+      return Visible.front();
+    if (Visible.size() > 1) {
+      AmbiguousTypeReferenceError(Loc, Spelling, Visible).raise();
+      return std::nullopt;
+    }
+    if (Everywhere.empty()) {
+      RankedSuggestions Suggestions;
+      Suggestions.Local = SuggestionIndex::suggestVisible(Spelling, Candidates);
+      UnknownTypeError(Loc, Spelling, Suggestions).raise();
+      return std::nullopt;
+    }
+    UnqualifiedTypeNotVisibleError(Loc, Spelling,
+                                   TypeIdentity::owningModule(Everywhere.front()))
+        .raise();
+    return std::nullopt;
+  };
+
   // Recurse into a generic type's own type arguments (e.g. List<NoSuchType>)
   // -- this function never used to look inside GenericType at all, so an
   // unknown type argument slipped through validation entirely and only
   // surfaced later as a confusing, misattributed error far from the real
   // cause (e.g. "No overload of 'List.push' matches argument types (int)",
   // blaming the call's argument instead of the undeclared type argument).
-  if (const auto *GT = dynamic_cast<const GenericType *>(BaseType)) {
-    // The generic's OWN base name (e.g. "List" in List<int>) was never
-    // validated here either, only its type arguments -- confirmed live:
-    // `mut x: NonExistentGeneric<int> = 5;` produced an unrelated type-
-    // mismatch error ("Cannot initialise... with value of type 'int'"),
-    // never "unknown type", because nothing checked BaseName existed at
-    // all. Found and fixed alongside the module-qualifier validation below
-    // since both need the exact same isKnownStruct/isEnumName groundwork.
-    const std::string &BaseName = GT->getBaseName();
+  if (auto *GT = dynamic_cast<GenericType *>(BaseType)) {
+    // The generic's OWN base name (e.g. "List" in List<int>) is validated
+    // too -- confirmed live, before it was: `mut x: NonExistentGeneric<int>
+    // = 5;` produced an unrelated type-mismatch error, never "unknown type".
+    const std::string BaseName = GT->getBaseName();
     bool BaseIsOwnTypeParam =
+        GT->getModule().empty() &&
         std::find(TypeParams.begin(), TypeParams.end(), BaseName) != TypeParams.end();
-    if (!BaseIsOwnTypeParam &&
-        !SymTable_.isKnownStruct(BaseName) && !SymTable_.isEnumName(BaseName)) {
-      RankedSuggestions Suggestions;
-      // Candidates match exactly what the check above accepts as a valid
-      // generic base (struct or enum name) -- see the NamedType branch
-      // below for why primitives/errors are excluded here specifically.
-      std::vector<std::string> Candidates = SymTable_.getAllStructNames();
-      std::vector<std::string> EnumNames = SymTable_.getAllEnumNames();
-      Candidates.insert(Candidates.end(), EnumNames.begin(), EnumNames.end());
-      Suggestions.Local = SuggestionIndex::suggestVisible(BaseName, Candidates);
-      UnknownTypeError(Loc, BaseName, Suggestions).raise();
-    } else if (!GT->getModule().empty()) {
-      validateModuleQualifier(GT->getModule(), BaseName, Loc);
-    } else if (!BaseIsOwnTypeParam && !SuppressUnqualifiedVisibilityCheck_ &&
-               !SymTable_.isTypeVisibleUnqualified(currentModuleName(), BaseName)) {
-      UnqualifiedTypeNotVisibleError(Loc, BaseName,
-                                     SymTable_.getTypeOwningModule(BaseName))
-          .raise();
+    if (!GT->isBaseResolved() && !BaseIsOwnTypeParam) {
+      // Candidates match exactly what is a valid generic base (a struct or
+      // enum) -- see the NamedType branch below for why primitives/errors
+      // are excluded here specifically.
+      std::vector<std::string> Candidates;
+      for (const auto &Id : SymTable_.getAllStructNames())
+        Candidates.push_back(TypeIdentity::bareName(Id));
+      for (const auto &Id : SymTable_.getAllEnumNames())
+        Candidates.push_back(TypeIdentity::bareName(Id));
+      if (auto Id = ResolveOrReport(GT->getModule(), BaseName, Candidates))
+        GT->resolveBaseTo(*Id);
     }
     for (const auto &Arg : GT->getTypeArgs())
       validateNamedType(Arg, Loc, TypeParams);
@@ -356,51 +408,36 @@ void Resolver::validateNamedType(
   // Codegen-facing registration does), so the caller-supplied TypeParams
   // list below is what actually exempts `T` in `fn<T> f(x: T)`.
   //
-  // isKnownStruct()/isEnumName() below check the GLOBAL, module-blind
-  // struct/enum EXISTENCE registry (does this name exist ANYWHERE) --
-  // that's a separate question from whether it's VISIBLE UNQUALIFIED from
-  // the current file/module, which isTypeVisibleUnqualified() below
-  // answers (own declaration, or an on-demand `import Module::Type;` /
-  // `Module::[Type,...]` / `Module::[*]`). A plain `import Module;` alone
-  // grants qualified access (`Module::Type`) but not bare access, exactly
-  // mirroring how bare function-call visibility already worked before this
-  // gate existed for types too.
-  if (const auto *NT = dynamic_cast<const NamedType *>(BaseType)) {
-    const std::string &TypeName = NT->getName();
+  // Visibility (FDN-003 wording of the pre-existing rule): a bare spelling
+  // means the current file's/module's own type of that name, or one it
+  // on-demand-imported (`import Module::Type;` / `Module::[Type,...]` /
+  // `Module::[*]`). A plain `import Module;` alone grants qualified access
+  // (`Module::Type`) but not bare access, exactly mirroring bare
+  // function-call visibility.
+  if (auto *NT = dynamic_cast<NamedType *>(BaseType)) {
+    const std::string TypeName = NT->getName();
     bool IsOwnTypeParam =
+        NT->getModule().empty() &&
         std::find(TypeParams.begin(), TypeParams.end(), TypeName) !=
         TypeParams.end();
-    if (!IsOwnTypeParam && !KnownPrimitives.count(TypeName) &&
-        !SymTable_.isKnownStruct(TypeName) &&
-        !SymTable_.isEnumName(TypeName) &&
-        !SymTable_.isErrorTypeName(TypeName)) {
-      RankedSuggestions Suggestions;
-      // Candidates must cover every name the check just above actually
-      // accepts, not just struct names -- this used to be
-      // getAllStructNames() alone, so a primitive typo (e.g. "itn" for
-      // "int") could never surface a suggestion no matter how close the
-      // spelling: the correct name simply wasn't in the search space.
-      // TypeParams is included too (the enclosing fn<T>/struct<T>'s own
-      // generic parameters, valid here but not a global registry entry).
-      std::vector<std::string> Candidates = SymTable_.getAllStructNames();
-      std::vector<std::string> EnumNames = SymTable_.getAllEnumNames();
-      Candidates.insert(Candidates.end(), EnumNames.begin(), EnumNames.end());
-      std::vector<std::string> ErrorNames = SymTable_.getAllErrorTypeNames();
-      Candidates.insert(Candidates.end(), ErrorNames.begin(), ErrorNames.end());
-      Candidates.insert(Candidates.end(), KnownPrimitives.begin(), KnownPrimitives.end());
-      Candidates.insert(Candidates.end(), TypeParams.begin(), TypeParams.end());
-      Suggestions.Local = SuggestionIndex::suggestVisible(TypeName, Candidates);
-      UnknownTypeError(Loc, TypeName, Suggestions).raise();
-    } else if (!IsOwnTypeParam && !KnownPrimitives.count(TypeName)) {
-      if (!NT->getModule().empty()) {
-        validateModuleQualifier(NT->getModule(), TypeName, Loc);
-      } else if (!SuppressUnqualifiedVisibilityCheck_ &&
-                 !SymTable_.isTypeVisibleUnqualified(currentModuleName(), TypeName)) {
-        UnqualifiedTypeNotVisibleError(Loc, TypeName,
-                                       SymTable_.getTypeOwningModule(TypeName))
-            .raise();
-      }
-    }
+    if (NT->isResolvedIdentity() || IsOwnTypeParam || KnownPrimitives.count(TypeName))
+      return;
+    // Candidates must cover every name this function actually accepts, not
+    // just struct names -- a primitive typo (e.g. "itn" for "int") could
+    // otherwise never surface a suggestion. TypeParams is included too (the
+    // enclosing fn<T>/struct<T>'s own generic parameters, valid here but
+    // not a registry entry).
+    std::vector<std::string> Candidates;
+    for (const auto &Id : SymTable_.getAllStructNames())
+      Candidates.push_back(TypeIdentity::bareName(Id));
+    for (const auto &Id : SymTable_.getAllEnumNames())
+      Candidates.push_back(TypeIdentity::bareName(Id));
+    for (const auto &Id : SymTable_.getAllErrorTypeNames())
+      Candidates.push_back(TypeIdentity::bareName(Id));
+    Candidates.insert(Candidates.end(), KnownPrimitives.begin(), KnownPrimitives.end());
+    Candidates.insert(Candidates.end(), TypeParams.begin(), TypeParams.end());
+    if (auto Id = ResolveOrReport(NT->getModule(), TypeName, Candidates))
+      NT->resolveTo(*Id);
   }
 }
 
@@ -442,12 +479,18 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
     return false;
   }
 
-  std::string Owner = SymTable_.getTypeOwningModule(TypeName);
-  if (Owner != Qualifier) {
+  // FDN-003: @p TypeName may be a spelling (`List` in `list::List`) or an
+  // identity the caller already resolved (`list::List`); either way the
+  // question is "is Qualifier::<bare name> a registered type".
+  const std::string Bare = TypeIdentity::bareName(TypeName);
+  if (!SymTable_.isKnownTypeIdentity(TypeIdentity::make(Qualifier, Bare))) {
     RankedSuggestions Suggestions;
-    if (!Owner.empty())
-      Suggestions.Module[Owner].push_back(TypeName);
-    UnknownModuleSymbolError(Loc, Qualifier, TypeName, Suggestions).raise();
+    for (const auto &Id : SymTable_.identitiesWithBareName(Bare)) {
+      const std::string Owner = TypeIdentity::owningModule(Id);
+      if (!Owner.empty())
+        Suggestions.Module[Owner].push_back(Bare);
+    }
+    UnknownModuleSymbolError(Loc, Qualifier, Bare, Suggestions).raise();
     return false;
   }
 
@@ -522,6 +565,10 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
 
 
 void Resolver::visitArrayDecl(ArrayDeclExprAST &Node) {
+  // FDN-003: `mut a: Node[4];`'s element type is a spelling too.
+  resolveTypeSpellingsSilently(Node.getElementTypePtr(), currentModuleName(),
+                               CurrentFuncTypeParams_);
+
   // Resolve the initializer list expressions.
   for (const auto &Init : Node.getInitList())
     visitChild(Init.get());

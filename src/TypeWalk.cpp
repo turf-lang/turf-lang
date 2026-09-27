@@ -80,6 +80,11 @@ TurfTypePtr substitute(const TurfTypePtr &Ty, const SubstMap &Subst) {
   // see this function's own doc comment (TypeWalk.h) for why both
   // representations must be handled in one pass.
   if (const auto *NT = dynamic_cast<const NamedType *>(Ty.get())) {
+    // FDN-003: a resolved NamedType names a real struct/enum, never a type
+    // parameter -- a main-file `struct T` must not be substituted away just
+    // because a generic in scope also calls its parameter `T`.
+    if (NT->isResolvedIdentity())
+      return Ty;
     auto It = Subst.find(NT->getName());
     return It != Subst.end() ? It->second : Ty;
   }
@@ -124,9 +129,7 @@ TurfTypePtr substitute(const TurfTypePtr &Ty, const SubstMap &Subst) {
       Changed |= (NewArg != Arg);
       NewArgs.push_back(std::move(NewArg));
     }
-    return Changed ? std::make_shared<GenericType>(GT->getBaseName(),
-                                                    std::move(NewArgs))
-                   : Ty;
+    return Changed ? GT->withTypeArgs(std::move(NewArgs)) : Ty;
   }
   // Not one of the seven original functions' shared cases: this compiler's
   // `Monomorphize::substituteConcreteTypes()` already had it,

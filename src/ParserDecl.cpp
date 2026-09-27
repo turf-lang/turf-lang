@@ -190,12 +190,18 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   // even though the struct had just been declared. Non-generic structs
   // (empty TypeParams, Guard's SymbolScopeGuard is a no-op) were never
   // affected by this.
-  auto SType = std::make_shared<TurfStructType>(Name, Fields);
+  //
+  // FDN-003: registered (and the node named) under the TYPE IDENTITY, not
+  // the spelling -- `json`'s `Parser` is `json::Parser`, a main-file
+  // `Parser` stays `Parser`, and the two no longer overwrite each other
+  // here. See TypeIdentity (Types.h).
+  std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
+  auto SType = std::make_shared<TurfStructType>(Identity, Fields);
   if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterType(Name, SType);
+    GlobalSymbolTable->RegisterType(Identity, SType);
   }
 
-  return std::make_unique<StructDeclExprAST>(Loc, Name, NameLoc, Fields, TypeParams);
+  return std::make_unique<StructDeclExprAST>(Loc, Identity, NameLoc, Fields, TypeParams);
 }
 
 // ParseEnumDecl - called when CurTok == TOK_ENUM.
@@ -268,12 +274,14 @@ std::unique_ptr<ExprAST> ParseEnumDecl() {
   // Register the enum type in GlobalSymbolTable so that codegen can look it up
   // via GlobalSymbolTable->LookupType(Name), mirroring how struct types are
   // registered during ParseStructDecl.
-  auto EType = std::make_shared<TurfEnumType>(Name, Variants, TurfInt());
+  // FDN-003: under the type identity -- see ParseStructDecl().
+  std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
+  auto EType = std::make_shared<TurfEnumType>(Identity, Variants, TurfInt());
   if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterType(Name, EType);
+    GlobalSymbolTable->RegisterType(Identity, EType);
   }
 
-  return std::make_unique<EnumDeclExprAST>(Loc, Name, Variants);
+  return std::make_unique<EnumDeclExprAST>(Loc, Identity, Variants);
 }
 
 // ParseMachineDecl - called when CurTok == TOK_MACHINE.
@@ -385,12 +393,14 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
   // Register the machine type in GlobalSymbolTable so that a parse-time
   // lookup elsewhere in the same file already sees it -- mirrors
   // ParseEnumDecl()'s identical registration just above.
-  auto MType = std::make_shared<TurfMachineType>(Name, States, EdgeSet);
+  // FDN-003: under the type identity -- see ParseStructDecl().
+  std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
+  auto MType = std::make_shared<TurfMachineType>(Identity, States, EdgeSet);
   if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterType(Name, MType);
+    GlobalSymbolTable->RegisterType(Identity, MType);
   }
 
-  return std::make_unique<MachineDeclExprAST>(Loc, Name, States, Edges);
+  return std::make_unique<MachineDeclExprAST>(Loc, Identity, States, Edges);
 }
 
 // ParseErrorDecl - called when CurTok == TOK_ERROR
@@ -500,12 +510,14 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
 
   // Register the error type in GlobalSymbolTable, mirroring how struct/enum
   // types are registered during ParseStructDecl/ParseEnumDecl.
-  auto ErrType = std::make_shared<TurfUserErrorType>(Name, Variants, IsBareForm);
+  // FDN-003: under the type identity -- see ParseStructDecl().
+  std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
+  auto ErrType = std::make_shared<TurfUserErrorType>(Identity, Variants, IsBareForm);
   if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterType(Name, ErrType);
+    GlobalSymbolTable->RegisterType(Identity, ErrType);
   }
 
-  return std::make_unique<ErrorDeclExprAST>(Loc, Name, Variants, IsBareForm);
+  return std::make_unique<ErrorDeclExprAST>(Loc, Identity, Variants, IsBareForm);
 }
 
 // ParseExternDecl - called when CurTok == TOK_EXTERN.

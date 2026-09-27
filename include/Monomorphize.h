@@ -280,9 +280,9 @@ TurfTypePtr substituteConcreteTypes(
 /// 'tag_gen1_int'", a regression against the pre-TYPE-002 compiler, which
 /// mangled each module's own "tag" independently. Every OTHER call site
 /// (struct instantiation naming, all in CodegenCore.cpp/CodegenStruct.cpp/
-/// CodegenFunc.cpp) leaves this unset -- struct names are already globally
-/// unique by language rule (E034), so folding a module in there would only
-/// add noise, not fix anything real.
+/// CodegenFunc.cpp) leaves this unset -- a struct's BaseName is already its
+/// TypeIdentity (`list::List`, FDN-003), which carries the owning module, so
+/// folding it in again would only add noise, not fix anything real.
 std::string instantiatedDeclName(const std::string &BaseName,
                                  const std::vector<TurfTypePtr> &TypeArgs,
                                  const std::string &Module = "");
