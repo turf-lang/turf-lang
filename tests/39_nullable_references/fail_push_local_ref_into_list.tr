@@ -1,0 +1,16 @@
+// FDN-002 (docs/planning/ROADMAP_v2.0.0.md; docs/development/changes/
+// FDN-002.md): pushing a Stack-provenance reference into a List -- the
+// List's own backing buffer lives on the GC heap and outlives this call,
+// but `local` does not.
+import list::List;
+
+struct Node {
+    val: int
+}
+
+fn main(): int {
+    mut lst: List<&Node> = List::default();
+    mut local: Node = Node::default();
+    lst.push(&local);
+    return 0;
+}

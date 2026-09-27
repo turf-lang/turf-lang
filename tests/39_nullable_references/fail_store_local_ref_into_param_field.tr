@@ -1,0 +1,20 @@
+// FDN-002 (docs/planning/ROADMAP_v2.0.0.md; docs/development/changes/
+// FDN-002.md): storing a Stack-provenance reference into a field reached
+// through a Param-provenance base -- `p` outlives this call (it's the
+// caller's own `a`), but `local` does not, so `p.next` would dangle the
+// moment setNext() returns.
+struct Node {
+    next: &?Node,
+    val: int
+}
+
+fn setNext(p: &Node): void {
+    mut local: Node = Node::default();
+    p.next = &local;
+}
+
+fn main(): int {
+    mut a: Node = Node::default();
+    setNext(&a);
+    return 0;
+}
