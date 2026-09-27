@@ -78,8 +78,10 @@ DECLARATION
       error)
     - Duplicate struct field name, duplicate enum variant name, or
       duplicate function parameter name
-    - Two different modules (or a file and an imported module) declaring a
-      same-named struct or enum -- these share one flat namespace
+    - Declaring the same struct/enum/error name twice in ONE file (two
+      DIFFERENT modules may each declare it -- they are separate types)
+    - A bare type name that could mean two types (the file's own and an
+      on-demand-imported one) -- ambiguous, qualify the imported one
     - Referencing an unknown/misspelled type name in a variable
       declaration, struct field, function signature, or generic type
       argument (e.g. `List<NoSuchType>`)

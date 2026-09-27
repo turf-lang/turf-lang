@@ -113,6 +113,21 @@ Circular import detected -- these modules are waiting on each other.
 
 A **diamond** (two modules both importing the same third module) is not a cycle and compiles fine — only a genuine loop back to a module already being loaded triggers this (Part 2.8).
 
+**Types belong to their module** (FDN-003, `FREEZE.md` §6.11). A struct, enum, machine or `error` type is identified by *(owning module, name)*: two modules may each declare `Node`, and a program may declare its own `struct List` or `struct Parser` whatever it imports — they are distinct types (`a::Node`, `b::Node`, `List`). Only declaring one name twice in the *same* file is an error (`DuplicateTypeNameError`, E034). `typeof()` prints the identity: `"json::JsonValue"` for an imported type, bare `"Node"` for one declared in the main program file (whose module, `main`, is never spelled).
+
+A bare type name that could mean two types is rejected **at the use**, naming both — no "the local one wins":
+
+```turf
+import shapes::[*];        // shapes declares `struct Point`
+struct Point { x: int }    // ...and so does this file -- both legal
+
+mut p: Point = ...;        // AmbiguousTypeReferenceError (E085): write
+                           // `shapes::Point` for theirs, and leave Point
+                           // out of the import
+```
+
+Two on-demand imports that both bring in a `Point` are still rejected at the second import (`ImportSymbolCollisionError`), exactly as for functions.
+
 ### 1.7 Exporting constants: `export immut`
 
 Functions, structs, and enums are exportable with no keyword at all — anything declared at a file or module's top level is automatically visible to importers per the visibility rules above. Plain variables are different: a bare `mut`/`immut` declaration only ever makes sense *inside* a function (it's destroyed when that scope ends), so there is no existing top-level-variable syntax to piggyback on. `export` fills exactly that gap, and **only** that gap:
@@ -162,7 +177,9 @@ VERSION                 // bare access -- only after an on-demand import (or sel
 | `DotOperatorOnNonInstanceError` | `.` used with a base that names a module (`io.printline(...)`) or a bare struct type (`StructName.method(...)`, no instance) instead of `::` |
 | `UnqualifiedTypeNotVisibleError` | A real struct/enum type referenced bare, but not visible from this file/module (2.7.1) |
 | `UnknownTypeError` | A type name (bare or generic base name) that doesn't exist as a struct/enum/primitive anywhere |
-| `TypeError` (several shapes) | Calling an enum variant as a function; using a module or static-method reference as a bare value; a module name nonsensically qualified by another module name (`Module::Module2::func(...)`) |
+| `AmbiguousTypeReferenceError` (E085) | A bare type name that could mean two visible types — this file's own and an on-demand-imported one (FDN-003) |
+| `DuplicateTypeNameError` (E034) | The same type name declared twice in ONE file or module (two different modules may each declare it — FDN-003) |
+| `TypeError` (several shapes) | Calling an enum variant as a function; using a module or static-method reference as a bare value; a module name nonsensically qualified by another module name (`Module::Module2::func(...)`); a generic struct named without type arguments in a type annotation (`mut b: Box = ...` — "Missing type arguments!") |
 | `ExportOutsideTopLevelError` | `export` used inside a function body |
 | `ExportMutNotSupportedError` | `export mut` — only `export immut` is supported today |
 | `ExportNonConstantInitializerError` | `export immut X = <non-literal>;` — the initializer isn't a literal the compiler can fold at compile time |
@@ -226,7 +243,7 @@ class ModuleImportExprAST : public ExprAST {
 
 **Struct construction** (`StructName::new(...)`/`StructName::default()`) needed no new AST node or field at all -- it parses as an ordinary `ScopeAccessExprAST` callee (see 2.3 above) with `RightName` "new"/"default", reusing the SAME `ModuleQualifier` field the enum/static-method paths already had. The Resolver sets `ResolvedKind` to the new `ConstructorCall`/`DefaultConstruct` enum values and validates the qualifier via the same `validateModuleQualifier()` a qualified type annotation goes through (2.7) -- see 2.8.1a. (The former `StructInitExprAST` node, which backed the old brace-literal form `StructName { field: val, ... }`, was deleted entirely as part of this -- there is no brace-literal construction anymore.)
 
-**`NamedType` / `GenericType`** (`include/Types.h:226-241`, `341-395`) each gained a `Module` field. Deliberately **not** part of `getName()`/type identity — struct/enum names are still one flat, globally-unique namespace (2.6), so two `NamedType`s for the same bare name must compare equal for type-compatibility purposes regardless of whether one spelling happened to be qualified. The field exists solely so the Resolver can validate the qualifier once, at first reference.
+**`NamedType` / `GenericType`** (`include/Types.h:226-241`, `341-395`) each gained a `Module` field: the qualifier as SPELLED. Since FDN-003 (2.6) the Resolver rewrites the name itself to the type's identity (`list::List`), so `getName()` — not this field — carries the module for every later pass; the field only records what the source wrote, for validating the qualifier once, at first reference.
 
 ### 2.4 Parser layer
 
@@ -284,8 +301,11 @@ FlatImportedFunctions_ : unordered_map<ContextLabel, unordered_map<Name, FlatImp
                           overload resolution still goes back through findInModules(),
                           filtered to SourceModule, exactly like self-reference does.
 
-RegisteredStructs_,     : FLAT, module-blind. One name -> one declaration site, globally,
-RegisteredEnums_          across the whole program (see 2.6 for why this is intentional).
+RegisteredStructs_,     : Keyed by TYPE IDENTITY (FDN-003, 2.6): `M::Name` for a type
+RegisteredEnums_,         declared in module M, bare `Name` for the main file's. Two
+RegisteredErrorTypes_     modules' same-named types are two entries. Registration aborts
+                          (INV-TYPE-3) unless the key's module part matches the declaring
+                          module passed with it.
 
 CurrentFileConstants_, : Same shape/keying as the *Functions_ registries above, but for
 Modules_[M].Variables,   `export immut` constants -- a Name -> ResolverConstantSymbol map,
@@ -304,26 +324,43 @@ FlatImportedConstants_   never a vector (constants don't overload). ResolverCons
                           (IsExported), since it's reached from multiple blind top-level/
                           module-body codegen loops that assume a valid insertion point.
 
-TypeOwningModule_       : unordered_map<TypeName, ModuleName>
-                          WHICH module actually declared each struct/enum ("" = main
-                          file) -- distinct from the flat registries above, which only
-                          ever answer "does this name exist ANYWHERE". Populated at the
-                          exact point registerStruct()/registerEnumType() run. Backs
-                          validateModuleQualifier() (2.7): "is Module a real module" is
-                          a hasModule() check against Modules_; "does Module actually own
-                          this type" is a TypeOwningModule_ lookup.
+TypeOwningModule_       : unordered_map<TypeIdentity, ModuleName>
+                          WHICH module declared each type ("" = main file) -- always
+                          equal to TypeIdentity::owningModule(key). "Does module M own
+                          a type spelled N" is isKnownTypeIdentity(M::N); "what types
+                          are spelled N anywhere" is identitiesWithBareName(N).
 ```
 
-### 2.6 Why structs/enums stay flat (and functions don't)
+### 2.6 Type identity is (module, name) — FDN-003
 
-This is a **deliberate, load-bearing design choice**, not an oversight: LLVM type identity (`LLVMTypeCache[Name]` in `SymbolTable.h`, keyed by bare name with no module prefix) is not a source-visibility concern, and two modules declaring the same struct name is a genuine, permanent conflict regardless of import mode — `DuplicateTypeNameError` already rejects it unconditionally. `isKnownStruct()`/`isEnumName()` answer "does this name exist anywhere in the whole program" — that's an EXISTENCE question and stays flat/global. *Visibility* (can THIS file/module reference the name unqualified) is a separate question, answered by `isTypeVisibleUnqualified()` — see 2.7/2.8.
+Until FDN-003 (`docs/development/changes/FDN-003.md`, frozen as `FREEZE.md` §6.11) this section explained why struct/enum names were deliberately one flat, program-wide namespace: `LLVMTypeCache` and `GlobalSymbolTable` were keyed by bare name, so two modules declaring `Point` were a permanent conflict (`DuplicateTypeNameError`). That made every type name in every dependency — public or private — reserved for the whole program: a program with no imports could not declare `struct List` (the prelude's `strings` pulls in `list::List`), and `struct Parser` collided with `json`'s internal helper.
+
+Now every name-keyed type table — the Resolver's registry, `GlobalSymbolTable`, `LLVMTypeCache`, method and constructor keys (`"<identity>.method"`), monomorphized clone names — is keyed by the **type identity**, one string per (module, name) pair, built only by `TypeIdentity::make()` (`include/Types.h`):
+
+| Declared in | Identity | LLVM / descriptor / DWARF name |
+|---|---|---|
+| module `json` | `json::Parser` | `json.Parser` |
+| main program file (module `main`, never spelled) | `Parser` | `Parser` |
+| generic clone | `list::List_gen1_int` | `list.List_gen1_int` |
+
+`::` cannot occur in an identifier, so no identity can collide with another. Keeping the identity as a plain string (rather than a (module, name) struct) is what let every existing name-keyed table become module-aware without changing its key type; the price is the rule that makes it safe — **a spelling is never used as a key**. Two things produce identities:
+
+- **Declarations** are named by the Parser from the module being parsed (`CurrentParseModule()` — `ImportStack`'s top frame, `src/ParserModule.cpp`), so a `StructDeclExprAST`'s `getName()` *is* its identity from the moment it exists.
+- **References** (`Node`, `m::Node`, `Node::new(...)`, `fn Node.method()`) are spellings until the Resolver resolves them — rewriting the AST in place (`NamedType::resolveTo()`, `GenericType::resolveBaseTo()`, `ScopeAccessExprAST::resolveLeftTypeTo()`, a method's `FuncDefExprAST` name). The TypeChecker and Codegen only ever see identities.
+
+A resolved reference is also *marked* resolved (the `Resolved` flags): a main-file type's identity is its bare spelling, so text alone cannot say "already resolved" — and a monomorphized clone is re-resolved in its template's module, where a substituted main-file `Node` must not be re-read as that module's own `Node` (2.8, `resolveMonomorphizedClone()`).
+
+"Does this name exist ANYWHERE" (`identitiesWithBareName()`) still exists, but only to choose between "unknown type" and "not visible here without qualification" diagnostics — never to pick a type.
 
 ### 2.7 Resolver layer — Pass 1 (hoisting)
 
-`hoistTopLevel()` (main file) and `hoistModuleBody()` (recursive, one call per `ModuleImportExprAST`, `src/Resolver.cpp:233-360`) walk top-level declarations only (no function bodies) and register:
-- `FuncDefExprAST`/`ExternFuncDeclExprAST` → `Modules_[ModuleName]` (module context) or `CurrentFileFunctions_` (main file, `ModuleName.empty()`), via `registerFunctionSignature()`.
-- `StructDeclExprAST`/`EnumDeclExprAST` → `RegisteredStructs_`/`RegisteredEnums_` **and** `TypeOwningModule_[Name] = ModuleName`.
-- Nested `ModuleImportExprAST` → recurse.
+Pass 1 runs in three steps (`Resolver::resolveAll()`, `src/ResolverCore.cpp`), in this order because each needs the previous one complete (FDN-003):
+
+1. **1a — `hoistTypes()`** (`src/ResolverTypeIdentity.cpp`): every `StructDeclExprAST`/`EnumDeclExprAST`/`MachineDeclExprAST`/`ErrorDeclExprAST` in the main file and every module body → the registry under its identity, plus `registerModule()` for each import and `registerOnDemandTypeImports()` — the type half of on-demand imports — so bare type visibility is complete before anything is resolved.
+2. **1b — `resolveDeclarationSpellings()`**: every declaration-level type spelling — struct field types, function/extern parameter and return types, a method's receiver (`fn Recv.m` → `<Recv's identity>.m`, found by visibility, since a file may declare a method on an imported struct) — resolved in place, *silently*: an unresolvable spelling is left for Pass 2 to report (Pass 1 aborts the whole `resolveAll()` on its first error). This must precede 3, because a captured signature compares types by name, and precede `checkStructLayoutAcyclicity()`, whose edges are field types' names.
+3. `hoistTopLevel()` (main file) and `hoistModuleBody()` (recursive) walk top-level declarations only (no function bodies) and register:
+   - `FuncDefExprAST`/`ExternFuncDeclExprAST` → `Modules_[ModuleName]` (module context) or `CurrentFileFunctions_` (main file, `ModuleName.empty()`), via `registerFunctionSignature()`.
+   - Nested `ModuleImportExprAST` → recurse. (Type declarations: already done in 1a.)
 
 `hoistModuleBody()` also unconditionally calls `SymTable_.registerModule(ModuleName)` up front, before iterating the body at all. This matters for a module that declares **only** structs/enums and no functions at all: `Modules_[ModuleName]` used to only ever get created lazily, inside `registerModuleFunction()` — a function-less module therefore never got an entry, and `hasModule()` (which, before this fix, additionally required `!Functions.empty()`) reported it as unknown even though it had imported successfully. Every `::`-qualified reference into such a module — `Module::Type` in type position, `Module::Type { ... }` construction, `Module::EnumName::Variant` — routed through `validateModuleQualifier()`'s `hasModule()` check and was rejected with "isn't a known enum or module", even though the qualifier was completely correct. `registerModule()` is now idempotent and called unconditionally so module *existence* is decoupled from module *function count*; `hasModule()` is now a pure `Modules_.count(...)` check.
 
@@ -335,11 +372,11 @@ Immediately after each `ModuleImportExprAST`'s body is hoisted, **`registerOnDem
 
 Struct/enum type **visibility** (as opposed to existence, 2.6) now follows the identical rule bare function-call visibility already did: a plain `import Module;` grants QUALIFIED access to its types (`Module::Type`) but not bare access; bare access requires either declaring the type in the SAME file/module, or an explicit on-demand import (`import Module::Type;` / `Module::[Type,...]` / `Module::[*]`).
 
-`ResolverSymbolTable::isTypeVisibleUnqualified(ContextLabel, Name)` answers this: true if `getTypeOwningModule(Name) == ContextLabel` (own declaration — the same rule the function self-reference check already used), or if `FlatImportedTypes_[ContextLabel]` contains `Name` (on-demand import). `FlatImportedTypes_` is a second, parallel map to `FlatImportedFunctions_` (same shape, same `registerFlatFunctionImport`-style collision handling) rather than folded into it, since a struct/enum name and a function name legally occupy different syntactic positions (type position vs. call position) and can coexist under one bare spelling without colliding.
+`ResolverSymbolTable::unqualifiedTypeCandidates(ContextLabel, Name)` answers what a bare spelling can mean (FDN-003): `ContextLabel::Name` if that is a registered identity (own declaration — the same rule the function self-reference check already used), plus `SourceModule::Name` if `FlatImportedTypes_[ContextLabel]` maps `Name` to `SourceModule` (on-demand import). One candidate resolves; two is `AmbiguousTypeReferenceError`; none is "not visible" (if `identitiesWithBareName(Name)` is non-empty) or "unknown". `isTypeVisibleUnqualified(ContextLabel, Identity)` is the same question asked of an already-resolved identity (used by `Name::new(...)`'s visibility gate). `FlatImportedTypes_` is a second, parallel map to `FlatImportedFunctions_` (same shape, same `registerFlatFunctionImport`-style collision handling) rather than folded into it, since a struct/enum name and a function name legally occupy different syntactic positions (type position vs. call position) and can coexist under one bare spelling without colliding.
 
 Enforced at the same three call sites `validateModuleQualifier()` already covered: `validateNamedType()`'s `NamedType` branch, its `GenericType` branch (base name), and `visitStructInit()`. Each follows the same shape: if a qualifier is present, validate it via `validateModuleQualifier()` as before (qualified access is **never** gated by this — only bare/unqualified references are); if no qualifier and the name is a real, known struct/enum, check `isTypeVisibleUnqualified(currentModuleName(), Name)` and raise `UnqualifiedTypeNotVisibleError` if false. Type params (`T` in `fn<T> f(x: T)`) are exempted the same way they already were from the existence check.
 
-A related bug was found and fixed alongside this: `registerOnDemandImports()`'s `Symbol`/`SymbolList` branch used to accept ANY struct/enum name that existed ANYWHERE in the program as satisfying `import Module::TypeName;`, never checking that `Module` actually owns it (only `isKnownStruct`/`isEnumName`, the flat existence check — see 2.6). `import mem::List;` (List actually lives in `list`) incorrectly succeeded as long as `list` had been imported by *something* in the program. Fixed by checking `getTypeOwningModule(Name) == SourceModule` (ownership) instead, mirroring `validateModuleQualifier()`'s own ownership check for qualified type annotations.
+A related bug was found and fixed alongside this: `registerOnDemandImports()`'s `Symbol`/`SymbolList` branch used to accept ANY struct/enum name that existed ANYWHERE in the program as satisfying `import Module::TypeName;`, never checking that `Module` actually owns it (only `isKnownStruct`/`isEnumName`, the flat existence check — see 2.6). `import mem::List;` (List actually lives in `list`) incorrectly succeeded as long as `list` had been imported by *something* in the program. Fixed by checking ownership instead — today (FDN-003) literally `isKnownTypeIdentity(SourceModule::Name)` — mirroring `validateModuleQualifier()`'s own ownership check for qualified type annotations.
 - Flat-registration collisions (`registerFlatFunctionImport()` returning a previous, *different*-module entry) raise `ImportSymbolCollisionError`.
 - The `ContextLabel` passed in is `""` for a main-file import, or the *enclosing* module's own name for an on-demand import written inside another module's file (the outer `hoistModuleBody()` call's own `ModuleName` parameter — not the module being imported).
 
@@ -430,7 +467,9 @@ Both were found by direct testing (not inferred from the fact that every test fi
 
 ### 2.10 Codegen layer
 
-**Name mangling**: a module function's real LLVM name is always `turf_<module>_<name>_<paramtype>_<paramtype>...`, regardless of how many files import it or by which mode — Codegen only ever compiles it once, under its true owning module. Only Resolver-side *source lookup* changes with import mode; Codegen is essentially untouched by the whole on-demand-import feature.
+**Name mangling**: a module function's real LLVM name is always `turf_<module>_<name>_<paramtype>_<paramtype>...`, regardless of how many files import it or by which mode — Codegen only ever compiles it once, under its true owning module. Only Resolver-side *source lookup* changes with import mode; Codegen is essentially untouched by the whole on-demand-import feature. A parameter type's mangled component and a method's name carry the type's identity verbatim (`turf_json_json::Parser.parse_json::Parser_ptr`) — `::` is legal in an LLVM/ELF symbol and cannot occur in a spelling, so it cannot collide.
+
+**Type names (FDN-003)**: an LLVM struct, its GC type descriptor (`__turf_typedesc_<name>`, and the name string the runtime sees) and its DWARF type are all named `TypeIdentity::llvmName(identity)` — `json.Parser`, `list.List_gen1_int`; a main-file type keeps its bare name. `LLVMTypeCache` is keyed by the identity itself, never by the LLVM name.
 
 **Struct codegen idempotency**: `StructDeclExprAST::codegen()` (`src/Codegen.cpp:3769-...`) can genuinely be invoked more than once for the SAME struct declared inside a module — `main.cpp`'s pre-pass calls `ModuleImportExprAST::codegen()` twice (once during its prototype-only sub-pass, again during its body sub-pass), and that function unconditionally re-walks the entire module body, including any nested `StructDeclExprAST` nodes, on every call. A second call now detects the cached `llvm::StructType` is already non-opaque (fully built) and returns immediately, rather than falling through to `StructType::create()` again — which used to silently produce a second, LLVM-renamed `Name.0` type and corrupt `LLVMTypeCache` for every reference already built against the original (see 5.4 for the crash this caused before the guard existed).
 
@@ -444,7 +483,7 @@ Both were found by direct testing (not inferred from the fact that every test fi
 
 ### 2.11 Diagnostics / SLM routing
 
-New error classes (`include/Errors.h`) all reuse the existing `SLM::ErrorCategory::DECLARATION` value — none were judged to warrant a new category. `include/ErrorCategory.h`'s `extractContextKeyword()` gained a `"module"`/`"import"` substring check, routing to `docs/slm/modules.txt` via the same `constructDocs` mechanism `structs.txt`/`enums.txt` already use. Ordering matters: this check runs **after** the struct/enum check, not before — `DuplicateTypeNameError`'s own message (for a plain, non-module-related struct-name collision) contains the substring "every module you import" in its explanatory note, which would have misrouted it ahead of `structs.txt` had the module check been checked first. (The exact same class of trap the struct/enum-before-`controlKeywords` ordering already solved once, for `"for enum"` vs. the control-flow keyword `"for"`.)
+New error classes (`include/Errors.h`) all reuse the existing `SLM::ErrorCategory::DECLARATION` value — none were judged to warrant a new category. `include/ErrorCategory.h`'s `extractContextKeyword()` gained a `"module"`/`"import"` substring check, routing to `docs/slm/modules.txt` via the same `constructDocs` mechanism `structs.txt`/`enums.txt` already use. Ordering matters: this check runs **after** the struct/enum check, not before — `DuplicateTypeNameError`'s own message (for a plain, non-module-related struct-name collision) contains the substring "module" in its explanatory note ("another file or module may reuse it", since FDN-003), which would have misrouted it ahead of `structs.txt` had the module check been checked first. (The exact same class of trap the struct/enum-before-`controlKeywords` ordering already solved once, for `"for enum"` vs. the control-flow keyword `"for"`.)
 
 ---
 

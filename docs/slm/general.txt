@@ -209,11 +209,11 @@ STRUCTS:
     }
     c.increment().increment();   // chained calls
 
-  Struct (and enum) names live in ONE flat namespace shared by the current
-  file and every imported module -- unlike functions, they are NOT
-  namespaced per-module, so `List<int>` works without a `list::` prefix
-  (though `list::List<int>` also works, identically -- see modules.txt).
-  Two different modules declaring a same-named struct is a compile error.
+  Struct (and enum) names belong to their declaring module, like
+  functions: `list::List<int>` always works; bare `List<int>` needs
+  `import list::List;` (or `list::[*]`) -- see modules.txt. Two different
+  modules may each declare a same-named struct (two separate types);
+  declaring one name twice in the same file is a compile error.
 
   Generic structs: `struct Box<T> { val: T }`, instantiated as `Box<int>`.
 

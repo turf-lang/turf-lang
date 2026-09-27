@@ -1,0 +1,38 @@
+A type name you used could mean more than one type
+
+    import shapes::[*];          // shapes declares a `struct Point`
+
+    struct Point { x: int }      // ...and so does this file
+
+    fn main(): int {
+        mut p: Point = Point::default();
+        // ERROR: 'Point' is ambiguous here -- it could mean more than one type.
+        //   Note: could be 'Point' declared in this program's main file
+        //   Note: could be 'shapes::Point' from module 'shapes'
+        return 0;
+    }
+
+A struct, enum, or error type belongs to the file or module that declares
+it, so two files can each have their own `Point` -- they're separate types,
+and neither declaration is a mistake. The problem is only the bare name:
+`import shapes::[*];` (or `import shapes::Point;`) asked for shapes' `Point`
+to be usable without the `shapes::` prefix, and this file declares a
+`Point` of its own, so plain `Point` could mean either one. Turf won't
+guess -- a program that silently picked "the local one" would change
+meaning the day someone added an import.
+
+To fix it, keep the bare name for one of them. Usually that's your own:
+write the imported one qualified, `shapes::Point`, and leave `Point` out of
+the import -- list the names you actually use instead of `[*]`:
+
+    import shapes::[Circle, area];   // everything you need except Point
+
+    struct Point { x: int }
+
+    fn main(): int {
+        mut mine: Point = Point::default();
+        mut theirs: shapes::Point = shapes::origin();
+        return 0;
+    }
+
+(Or rename your own type, if you'd rather use theirs bare.)

@@ -85,15 +85,24 @@ IMPORT FORMS -- exactly four, all starting with `import <module-name>`:
 
 ---
 
-WHAT'S STILL FLAT REGARDLESS OF IMPORT FORM
+TYPE NAMES BELONG TO THEIR MODULE
 
-  Struct and enum TYPE NAMES (not their methods) share one global,
-  module-blind namespace for EXISTENCE purposes: two different modules
-  declaring a same-named struct or enum is a compile error
-  (DuplicateTypeNameError) regardless of import form.
+  A struct/enum/error/machine type belongs to the module that declares
+  it: two different modules may each declare a `Node` (or a module and
+  your own file may), and they are two unrelated types -- `a::Node` and
+  `b::Node`. Only declaring the same name twice in ONE file is an error
+  (DuplicateTypeNameError). typeof() of an imported type is qualified
+  ("json::JsonValue"); typeof() of your own file's type is bare ("Node").
 
-  Bare (unqualified) VISIBILITY of a type, however, follows the exact
-  same rule bare function-call visibility does: a plain bare
+  If a bare name could mean two types -- your own `Node` plus one brought
+  in by `import m::[*];` or `import m::Node;` -- using it bare is an error
+  (AmbiguousTypeReferenceError, E085): write the imported one qualified
+  (`m::Node`) and leave `Node` out of the import. Two on-demand imports
+  that both bring in a `Node` are rejected at the second import
+  (ImportSymbolCollisionError), same as for functions.
+
+  Bare (unqualified) VISIBILITY of a type follows the exact same rule
+  bare function-call visibility does: a plain bare
   `import list;` alone only grants QUALIFIED access (`list::List<int>`).
   Writing bare `List<int>` after only `import list;` is a compile error
   (UnqualifiedTypeNotVisibleError) -- you need `import list::List;` (or

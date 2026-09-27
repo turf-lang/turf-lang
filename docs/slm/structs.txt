@@ -79,11 +79,12 @@ GENERICS: `struct Box<T> { val: T }`, instantiated as `Box<int>`,
   parse error: Turf-Lang has no `<...>` after a function name at a call
   site, only in a type ANNOTATION like `List<int>`).
 
-NAMESPACE: struct and enum names live in ONE flat namespace shared by the
-current file and every imported module -- unlike functions, they are NOT
-namespaced per module. This is why `List<int>` works without a `list.`
-prefix. The tradeoff: two different modules (or a file and an imported
-module) declaring a same-named struct is a compile-time error:
+NAMESPACE: a struct/enum belongs to the module that declares it. Two
+different modules (or a module and your own file) may each declare a
+`Point` -- they are two separate types, `a::Point` and `b::Point`. Bare
+`Point` means your own file's type, or one you imported by name
+(`import m::Point;` / `import m::[*];`); if it could mean both, qualify the
+imported one. Declaring the same name twice in ONE file is an error:
   "A struct named 'Point' is already declared." -- rename one of them.
 Field names must also be unique WITHIN one struct:
   "Struct 'Point' already has a field named 'x'."

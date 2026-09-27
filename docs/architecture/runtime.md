@@ -260,6 +260,19 @@ runtime side of the same fix, and `scripts/runtime_smoke.sh` §4 for the
 type, which RT-001's original version of this check could not exercise at
 all).
 
+### 4.4 FDN-003: descriptor names carry the owning module
+
+A descriptor is named after its LLVM struct, and a module-owned type's LLVM
+struct is named `module.Name` (`TypeIdentity::llvmName()`, `include/Types.h`)
+— so `list`'s `List<int>` clone is `@__turf_typedesc_list.List_gen1_int`, and
+the `name` string the runtime can print is `"list.List_gen1_int"`. A type
+declared in the main program file keeps its bare name
+(`@__turf_typedesc_WithPointer` above is unchanged). The point is not
+cosmetic: two modules may each declare a `Node` since FDN-003, and before
+this change their descriptors would have been two definitions of one
+`@__turf_typedesc_Node` symbol. Nothing in the runtime parses the name; it
+is for diagnostics only.
+
 ## 5. Build and distribution
 
 `CMakeLists.txt`'s `turfrt` target output is pointed at `<repo-root>/lib/`

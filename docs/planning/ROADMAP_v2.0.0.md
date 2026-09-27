@@ -5,8 +5,11 @@
 > (Overhaul closure) is now done** — see
 > `docs/development/changes/OVH-CLOSE.md` (landed 2026-09-27). **Phase 1's
 > `SMP-002` (one generic type walker) is also done** — see
-> `docs/development/changes/SMP-002.md` (landed 2026-09-27); the rest of
-> Phase 1 and all of Phases 2+ remain unimplemented. Items marked
+> `docs/development/changes/SMP-002.md` (landed 2026-09-27). **`FDN-003`
+> (module-scoped type identity) is done** — see
+> `docs/development/changes/FDN-003.md` (landed 2026-09-27; its stage-1
+> decision is frozen as `FREEZE.md` §6.11, DEC-13 answered `main`); the rest
+> of Phase 1 and all of Phases 2+ remain unimplemented. Items marked
 > **DECISION** need an explicit answer from the project owner before their
 > session starts; each carries a recommendation so the default is never
 > ambiguous.
@@ -90,7 +93,7 @@ PHASE 0  Overhaul closure            OVH-001 … OVH-015   DONE (OVH-CLOSE.md, 2
    │                                  gate: closure gate demonstrated clean
    ▼
 PHASE 1  Foundation                   SMP-002  one generic type walker      DONE (SMP-002.md, 2026-09-27)
-   │                                  FDN-003  module-scoped type identity
+   │                                  FDN-003  module-scoped type identity  DONE (FDN-003.md, 2026-09-27)
    │                                  FDN-001  safe heap allocation of user types
    │                                  FDN-002  reference & array escape rules
    │                                  FDN-004  string indexing: bounds + `char` (D17)
@@ -1460,7 +1463,7 @@ TurfLang 2.0.0 ships only when every line is demonstrated:
 | DEC-10 | Pattern syntax (LEC-003) | Top-level `matches expr` unchanged; destructuring forms bind | LEC-003 |
 | DEC-11 | Propagation keyword (LEC-004) | Prefix `try` | LEC-004 |
 | DEC-12 | Payload + message coexistence (LEC-004) | N fields or N+1 with trailing message | LEC-004 |
-| DEC-13 | Main-file module name for qualified type identity (FDN-003) | `main` | FDN-003 |
+| DEC-13 | Main-file module name for qualified type identity (FDN-003) | `main` — **decided 2026-09-27** (`FREEZE.md` §6.11; never spelled: a main-file type's identity is its bare name) | FDN-003 |
 
 ---
 
