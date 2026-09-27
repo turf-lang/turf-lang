@@ -25,6 +25,7 @@
 #include "Lint.h"
 #include "Parser.h"
 #include "CFG.h"
+#include "Monomorphize.h" // TYPE-002 (S11b): --dump-instantiations
 #include "Resolver.h"
 #include "TypeChecker.h"
 #include "SLMEngine.h"
@@ -33,7 +34,6 @@
 #include "ASTPrinter.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/LegacyPassManager.h"
-#include "CallGraph.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/FileSystem.h"
@@ -43,10 +43,13 @@
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Host.h"
 #include "llvm/TargetParser/Triple.h"
-#include "llvm/Transforms/InstCombine/InstCombine.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Scalar/GVN.h"
-#include "llvm/Transforms/Utils.h"
+#include "llvm/Transforms/IPO/GlobalDCE.h"
+#include "llvm/Transforms/IPO/Internalize.h"
+#include "llvm/Analysis/CGSCCPassManager.h"
+#include "llvm/Analysis/LoopAnalysisManager.h"
+#include "llvm/IR/PassManager.h"
+#include "llvm/Passes/PassBuilder.h"
+#include <cctype>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -66,12 +69,23 @@ using namespace llvm;
 
 std::string CompilerExecutablePath;
 
+// OPT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §17.2): the five levels
+// the CLI's `-O` flag selects. Os is not "O1 through O3 plus one more" --
+// it is `PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel::Os)`,
+// a genuinely different pipeline tuned for size over throughput -- so this
+// is its own enum, not an int a caller could accidentally compare/clamp as
+// if the levels were totally ordered by "more optimization."
+enum class OptLevelKind { O0, O1, O2, O3, Os };
+
 // CLI helpers
 struct CompilerOptions {
   std::string InputFile;
   std::string OutputName;             // default derived from input later
   bool EmitLLVM = false;              // --emit-llvm: write .ll instead
   bool AIEnabled = false;             // --smart: enable SLM AI suggestions
+  std::string SmartFixOutPath;        // --smart-write-fix=<path>: write the first validated --smart fix's full patched source here (SLM-001 follow-up)
+  bool AllowUnsafeModules = false;    // --allow-unsafe-modules: LANG-002, honor `unsafe module;` outside the install root
+  bool ShowStdlibWarnings = false;    // --stdlib-warnings: OVH-012, print warnings anchored inside lib/std instead of hiding them
   bool DumpAST = false;               // --dump-ast: print AST via ASTPrinter
   bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
   bool DumpResolverSymbols = false;   // --dump-resolver-symbols: print symbol table after resolution
@@ -79,9 +93,17 @@ struct CompilerOptions {
   bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
   bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
   bool DumpModules = false;           // --dump-modules: print full module-system introspection
+  bool DumpInstantiations = false;    // --dump-instantiations: TYPE-002 (S11b) report-only census
   bool Format = false;                // --format: print the formatted source to stdout and exit
   bool FormatWrite = false;           // --write (with --format): rewrite the file in place instead
   std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
+  // OPT-001: `-O2` is the FROZEN default (FREEZE.md §6.10/§17.2) so a user
+  // who never passes `-O` at all sees the exact optimization behavior this
+  // milestone shipped as its baseline, not the weakest level.
+  OptLevelKind OptLevel = OptLevelKind::O2;      // -O0/-O1/-O2/-O3/-Os
+  std::string TargetTriple;           // --target=<triple>; empty = host
+  std::string MCPU;                   // -mcpu=<cpu>; empty = "generic" (unchanged default)
+  bool DebugInfo = false;             // -g: emit DWARF debug info (TOOL-001)
 };
 
 // `turf --explain E0NN` is the HUMAN-facing side of error-code
@@ -232,8 +254,16 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.EmitLLVM = true;
     } else if (arg == "--smart") {
       opts.AIEnabled = true;
+    } else if (arg.rfind("--smart-write-fix=", 0) == 0) {
+      opts.SmartFixOutPath = arg.substr(std::string("--smart-write-fix=").size());
+    } else if (arg == "--allow-unsafe-modules") {
+      opts.AllowUnsafeModules = true;
+    } else if (arg == "--stdlib-warnings") {
+      opts.ShowStdlibWarnings = true;
     } else if (arg == "--dump-ast") {
       opts.DumpAST = true;
+    } else if (arg == "--dump-instantiations") {
+      opts.DumpInstantiations = true;
     } else if (arg == "--resolve") {
       opts.RunResolver = true;
     } else if (arg == "--dump-resolver-symbols") {
@@ -268,6 +298,28 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.OutputName = argv[++i];
     } else if (arg == "--link" && i + 1 < argc) {
       opts.LinkLibs.push_back(argv[++i]);
+    } else if (arg.rfind("--target=", 0) == 0) {
+      opts.TargetTriple = arg.substr(std::string("--target=").size());
+    } else if (arg.rfind("-mcpu=", 0) == 0) {
+      opts.MCPU = arg.substr(std::string("-mcpu=").size());
+    } else if (arg == "-g") {
+      opts.DebugInfo = true;
+    } else if (arg.size() >= 2 && arg[0] == '-' && arg[1] == 'O') {
+      // F-OPT semantics (FREEZE.md §6.10): an unrecognized level is a hard
+      // error, never a silent fallback to some default -- a typo like
+      // `-O4`/`-Ox` must not quietly compile at `-O2` and let a user believe
+      // they got the level they asked for.
+      std::string Level = arg.substr(2);
+      if (Level == "0") opts.OptLevel = OptLevelKind::O0;
+      else if (Level == "1") opts.OptLevel = OptLevelKind::O1;
+      else if (Level == "2") opts.OptLevel = OptLevelKind::O2;
+      else if (Level == "3") opts.OptLevel = OptLevelKind::O3;
+      else if (Level == "s") opts.OptLevel = OptLevelKind::Os;
+      else {
+        std::cerr << "Error: unknown optimization level '" << arg
+                  << "' (expected one of -O0, -O1, -O2, -O3, -Os).\n";
+        std::exit(1);
+      }
     } else if (arg[0] == '-') {
       std::cerr << "Unknown option: " << arg << "\n";
       std::exit(1);
@@ -279,9 +331,12 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   if (opts.InputFile.empty()) {
     std::cerr
         << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] "
+           "[--smart-write-fix=<path>] "
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
-           "[--dump-modules] [--link <libname>]\n"
+           "[--dump-modules] [--dump-instantiations] [--link <libname>] "
+           "[--allow-unsafe-modules] [--stdlib-warnings] "
+           "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
            "       turf --format [--write] <filename.tr>\n"
            "       turf --explain E0NN\n";
     std::exit(1);
@@ -304,16 +359,57 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   return opts;
 }
 
-// Emit native object file via LLVM TargetMachine
-static int emitObjectFile(Module &M, const std::string &ObjFilename) {
-  // Initialise all targets so we can produce code for the host machine.
+// OPT-001: `-O0`/`-O1`/`-O2`/`-O3` map onto LLVM's own `CodeGenOptLevel`
+// (backend instruction selection/scheduling), while `-Os` shares `-O2`'s
+// backend level -- LLVM has no "smaller code" CodeGenOptLevel; the size
+// tuning for `-Os` happens entirely in the IR-level pipeline
+// (`OptimizationLevel::Os`, see runOptimizationPipeline() below), matching
+// how every other `PassBuilder`-based frontend (e.g. clang) maps it.
+static CodeGenOptLevel toCodeGenOptLevel(OptLevelKind Level) {
+  switch (Level) {
+  case OptLevelKind::O0: return CodeGenOptLevel::None;
+  case OptLevelKind::O1: return CodeGenOptLevel::Less;
+  case OptLevelKind::O2: return CodeGenOptLevel::Default;
+  case OptLevelKind::O3: return CodeGenOptLevel::Aggressive;
+  case OptLevelKind::Os: return CodeGenOptLevel::Default;
+  }
+  llvm_unreachable("unhandled OptLevelKind");
+}
+
+// Builds the ONE TargetMachine shared by both the optimization pipeline
+// (runOptimizationPipeline(), which needs it to enable target-aware
+// transforms) and native object emission (emitObjectFile()). Before
+// OPT-001 these were two independent, unsynchronized constructions:
+// Phase 5's FunctionPassManager ran with no TargetMachine at all (a
+// PassBuilder-based pipeline needs one to run any target-aware pass), and
+// emitObjectFile() built its own from a hardcoded host triple and
+// CPU="generic", invisible to `--target`/`-mcpu` (§8 OPT-001's own CLI
+// additions) if those had been threaded through separately. Constructing it
+// once here is what makes `--target`/`-mcpu`/`-O` agree between the two
+// phases by construction rather than by two call sites happening to be
+// kept in sync by hand.
+//
+// Returned pointer is intentionally leaked (never `delete`d) -- this
+// mirrors the pre-OPT-001 code's own lifetime (a `TargetMachine` built by
+// `createTargetMachine` was never freed either), and the process is a
+// short-lived CLI invocation that exits immediately after linking. Fixing
+// that leak is out of scope for this change (§25's scope discipline).
+static TargetMachine *createTurfTargetMachine(const CompilerOptions &opts,
+                                              Module &M) {
+  // Initialise all targets so we can produce code for the host machine (or,
+  // with --target, a different one -- see D20 in §27: a `--target` binary
+  // still links the HOST's libturfrt/libc, so cross-compilation is not a
+  // supported end-to-end path yet. This flag exists so OPT-001's own IR
+  // pipeline and object emission are target-correct; RT-001 is where
+  // "produces a binary you can actually run elsewhere" gets decided.).
   InitializeAllTargetInfos();
   InitializeAllTargets();
   InitializeAllTargetMCs();
   InitializeAllAsmParsers();
   InitializeAllAsmPrinters();
 
-  Triple TargetTriple(sys::getDefaultTargetTriple());
+  Triple TargetTriple(opts.TargetTriple.empty() ? sys::getDefaultTargetTriple()
+                                                 : opts.TargetTriple);
 
   // LLVM 20+ changed setTargetTriple to accept Triple; older versions take
   // StringRef. arch is so much better :((
@@ -324,27 +420,126 @@ static int emitObjectFile(Module &M, const std::string &ObjFilename) {
 #endif
 
   std::string Error;
-  auto Target = TargetRegistry::lookupTarget(TargetTriple.str(), Error);
+  auto Target = TargetRegistry::lookupTarget(TargetTriple, Error);
   if (!Target) {
     std::cerr << "Error: " << Error << "\n";
-    return 1;
+    return nullptr;
   }
 
-  auto CPU = "generic";
+  std::string CPU = opts.MCPU.empty() ? "generic" : opts.MCPU;
   auto Features = "";
-  TargetOptions opt;
+  TargetOptions TO;
+  CodeGenOptLevel CGOptLevel = toCodeGenOptLevel(opts.OptLevel);
 
   // LLVM 20+ also changed createTargetMachine to accept Triple.
 #if LLVM_VERSION_MAJOR >= 20
-  auto TM = Target->createTargetMachine(TargetTriple, CPU, Features, opt,
-                                        Reloc::PIC_);
+  auto TM = Target->createTargetMachine(TargetTriple, CPU, Features, TO,
+                                        Reloc::PIC_, std::nullopt, CGOptLevel);
 #else
-  auto TM = Target->createTargetMachine(TargetTriple.str(), CPU, Features, opt,
-                                        Reloc::PIC_);
+  auto TM = Target->createTargetMachine(TargetTriple.str(), CPU, Features, TO,
+                                        Reloc::PIC_, std::nullopt, CGOptLevel);
 #endif
+  if (TM)
+    M.setDataLayout(TM->createDataLayout());
+  return TM;
+}
 
-  M.setDataLayout(TM->createDataLayout());
+// OPT-001 (§17.1/§17.2): the module-level optimization pipeline, replacing
+// the pre-existing `legacy::FunctionPassManager` running a fixed 5-pass
+// sequence with no module-level view (could not see across functions, so
+// nothing could ever be deleted -- an empty `main` shipped 84 unused
+// `turf_*` functions, §1.9's measured baseline). `TM` may be null (target
+// lookup failed) -- the pipeline still runs target-INDEPENDENT passes in
+// that case rather than skipping optimization entirely; emitObjectFile()
+// is what actually fails the compile when `TM` is null.
+static void runOptimizationPipeline(Module &M, OptLevelKind Level,
+                                    TargetMachine *TM) {
+  LoopAnalysisManager LAM;
+  FunctionAnalysisManager FAM;
+  CGSCCAnalysisManager CGAM;
+  ModuleAnalysisManager MAM;
 
+  PassBuilder PB(TM);
+  PB.registerModuleAnalyses(MAM);
+  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerFunctionAnalyses(FAM);
+  PB.registerLoopAnalyses(LAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+  // F-OPT-1/F-OPT-2 (FREEZE.md §6.10): internalizing anything the linker
+  // still needs breaks the link. TurfLang never separately compiles (every
+  // import is re-parsed and re-codegenned into THIS module, §27 D7), so the
+  // only symbol anything outside this translation unit can still reach by
+  // name is `main` (the C runtime's own entry point, invoked by name, not
+  // by an in-module reference GlobalDCE could see) -- every `extern fn` is a
+  // DECLARATION with no body to internalize, and every genuinely
+  // Turf-defined function this module calls is already a normal in-module
+  // use that keeps it live without needing external linkage at all. This is
+  // why the "must-preserve" set is exactly {main}, not something derived
+  // from `g_RequiredLibs` (§8 OPT-001's own text names that set as the
+  // starting point, but g_RequiredLibs is a list of *external C libraries
+  // to link against*, e.g. "m", not a list of Turf symbol names -- there is
+  // nothing in it to preserve BY). Verified live against
+  // showcase/llvm_ffi_selfhost_demo.tr (the most FFI-dense program in the
+  // tree, per §8's own risk note) at every level below.
+  auto MustPreserveGV = [](const GlobalValue &GV) {
+    return GV.getName() == "main";
+  };
+
+  switch (Level) {
+  case OptLevelKind::O0: {
+    // "verify only; AlwaysInliner; nothing else" (§17.2). LLVM's own
+    // buildO0DefaultPipeline() IS that pipeline for a coroutine-free,
+    // non-instrumented, non-LTO module (which every TurfLang module is) --
+    // using the real API here instead of hand-assembling the equivalent
+    // means it stays correct if a future LLVM upgrade changes what O0
+    // requires, rather than silently drifting from what "O0" means upstream.
+    ModulePassManager MPM = PB.buildO0DefaultPipeline(OptimizationLevel::O0);
+    MPM.run(M, MAM);
+    break;
+  }
+  case OptLevelKind::O1:
+  case OptLevelKind::O2:
+  case OptLevelKind::O3:
+  case OptLevelKind::Os: {
+    // `-O1` used to run a small hand-picked 6-pass subset (the pre-OPT-001
+    // 5-pass sequence ported to the new PM, plus EarlyCSE) rather than
+    // LLVM's own `default<O1>` pipeline -- a deliberate reading of §17.2's
+    // table at the time, but a real gap once measured: LLVM's actual O1
+    // pipeline runs ~109 pass invocations (confirmed live via `opt
+    // -passes="default<O1>" -print-pipeline-passes`), not ~6. Folded into
+    // this same branch on request so `-O1` gets LLVM's real, full O1
+    // pipeline like every other non-O0 level, rather than a curated
+    // subset nobody was asking for specifically.
+    //
+    // Internalize FIRST, in its own pass-manager run, strictly before
+    // handing off to LLVM's own default pipeline: buildPerModuleDefaultPipeline()
+    // runs its own GlobalDCE internally, but GlobalDCE only deletes a
+    // definition that is BOTH unreferenced AND not externally visible --
+    // without Internalize running first, every `turf_*` function still has
+    // external linkage (nothing in Codegen ever marks one internal), so the
+    // default pipeline's own DCE would see all 84 dead functions in the
+    // empty-main baseline as "externally visible, therefore keep" and
+    // delete none of them -- confirmed live while implementing this: the
+    // -O2 binary was NOT smaller than -O0's until this ordering was fixed.
+    ModulePassManager InternalizeMPM;
+    InternalizeMPM.addPass(InternalizePass(MustPreserveGV));
+    InternalizeMPM.run(M, MAM);
+
+    OptimizationLevel LLVMLevel = Level == OptLevelKind::O1 ? OptimizationLevel::O1
+                                 : Level == OptLevelKind::O2 ? OptimizationLevel::O2
+                                 : Level == OptLevelKind::O3 ? OptimizationLevel::O3
+                                                              : OptimizationLevel::Os;
+    ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(LLVMLevel);
+    MPM.run(M, MAM);
+    break;
+  }
+  }
+}
+
+// Emit native object file via the shared TargetMachine (createTurfTargetMachine()).
+static int emitObjectFile(Module &M, TargetMachine &TM,
+                          const std::string &ObjFilename) {
   std::error_code EC;
   raw_fd_ostream dest(ObjFilename, EC, sys::fs::OF_None);
   if (EC) {
@@ -354,7 +549,7 @@ static int emitObjectFile(Module &M, const std::string &ObjFilename) {
 
   legacy::PassManager pass;
   auto FileType = CodeGenFileType::ObjectFile;
-  if (TM->addPassesToEmitFile(pass, dest, nullptr, FileType)) {
+  if (TM.addPassesToEmitFile(pass, dest, nullptr, FileType)) {
     std::cerr << "Target machine can't emit a file of this type\n";
     return 1;
   }
@@ -390,12 +585,24 @@ static int linkObject(const std::string &ObjFile,
   std::set<std::string> AllLibs(g_RequiredLibs);
   for (const auto &L : ExtraLibs) AllLibs.insert(L);
 
+  // RT-001: every compiled Turf binary links libturfrt (F-MEM-4). The
+  // search path is anchored at TurfInstallRoot() -- the exact same root
+  // `import` already resolves lib/std against (Parser.h/ParserModule.cpp)
+  // -- so a plain dev build (`build/turf`, no TURF_HOME set) finds
+  // `<repo-root>/lib/libturfrt.a` with zero setup, the same "no setup
+  // needed" property lib/std already has. `-L` before `-l` on the linker
+  // line is what makes cc/gcc search this exact directory FIRST, ahead of
+  // any system default; the flag order below is deliberate.
+  std::string TurfLibDir = TurfInstallRoot() + "/lib";
+
 #ifdef _WIN32
   std::string FinalOutput = OutputName + ".exe";
-  std::vector<std::string> Args = {"gcc", ObjFile, "-o", FinalOutput, "-lm"};
+  std::vector<std::string> Args = {"gcc",       ObjFile, "-o", FinalOutput,
+                                    "-L" + TurfLibDir, "-lturfrt", "-lm"};
 #else
   std::string FinalOutput = OutputName;
-  std::vector<std::string> Args = {"cc", ObjFile, "-o", FinalOutput, "-lm"};
+  std::vector<std::string> Args = {"cc",        ObjFile, "-o", FinalOutput,
+                                    "-L" + TurfLibDir, "-lturfrt", "-lm"};
 #endif
   for (const auto &L : AllLibs) Args.push_back("-l" + L);
 
@@ -517,10 +724,24 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;
+  g_SmartFixOutPath = opts.SmartFixOutPath;
+  // LANG-002: must be set before any parsing happens -- HasRawPointerCapability()
+  // (ParserModule.cpp) consults it for every `unsafe module;` pragma outside
+  // the install root.
+  g_AllowUnsafeModules = opts.AllowUnsafeModules;
+  // OVH-012: consulted only by DiagnosticEngine::flushAll() at print time,
+  // so it's fine to set this any time before that runs -- unlike
+  // g_AllowUnsafeModules just above, nothing during parsing/resolving reads it.
+  g_ShowStdlibWarnings = opts.ShowStdlibWarnings;
+
+  // TOOL-001: must be set before InitializeModule() runs (below) -- that's
+  // the one call site that decides whether DBuilder/DebugCU get built at
+  // all for this compile.
+  g_EmitDebugInfo = opts.DebugInfo;
 
   // --format needs none of the lex/parse/resolve/typecheck/codegen
   // pipeline below -- just the raw source text -- so it short-circuits
-  // before any of that global state (GlobalSymbolTable, CallGraph, LLVM
+  // before any of that global state (GlobalSymbolTable, LLVM
   // module, ...) gets initialized at all.
   if (opts.Format) {
     std::ifstream FormatInput(opts.InputFile);
@@ -563,8 +784,6 @@ static int runCompilerMain(int argc, char **argv) {
 
   // Builtin registry removed
   InitializeModule(); // Initialize LLVM Context, Module, Builder
-  // Clear any previous call graph state
-  ClearCallGraph();
   ClearGlobalCFGs();
   InitializeCompilerGlobals(); // GlobalSymbolTable + BinopPrecedence -- see Parser.h
 
@@ -597,6 +816,16 @@ static int runCompilerMain(int argc, char **argv) {
       // ResolvedCallTarget blindly, so Resolver must run first).
       std::vector<std::unique_ptr<ExprAST>> PrePassASTs;
 
+      // LANG-002: the entry file's own leading `unsafe module;` capability
+      // pragma, if any -- must be checked here, immediately after the token
+      // stream reset above, the only point that sees this file's first real
+      // token (see ParseLeadingUnsafeModuleDecl()'s own doc comment).
+      {
+        std::unique_ptr<ExprAST> LeadingUnsafeBlock;
+        if (!ParseLeadingUnsafeModuleDecl(LeadingUnsafeBlock) && LeadingUnsafeBlock)
+          AppendFlattenedTopLevelDecl(std::move(LeadingUnsafeBlock), PrePassASTs, true);
+      }
+
       // Prelude auto-import (STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 6):
       // inject `import int; import double; ...` as if they were the literal
       // first lines of the TOP-LEVEL file only (not library modules
@@ -611,6 +840,17 @@ static int runCompilerMain(int argc, char **argv) {
       for (auto &PreludeAST : ParsePreludeImports(CurLoc))
         PrePassASTs.push_back(std::move(PreludeAST));
 
+      // OVH-011: if a transitive import inside the prelude just injected
+      // above (e.g. `strings`'s own `import list::List;`) already resolved
+      // to this exact entry file's own path -- true whenever the file being
+      // compiled directly IS the lib/std module some prelude module
+      // transitively imports -- skip re-parsing this file's own top-level
+      // declarations entirely: they are already fully present, correctly
+      // registered under whatever module name reached them. See
+      // ClaimEntryFileImportSlot()'s own doc comment (ParserModule.cpp) for
+      // the full rationale and why this call must sit exactly here (after
+      // prelude injection, before this loop).
+      if (!ClaimEntryFileImportSlot(SourceFilename)) {
       while (CurTok != TOK_EOF) {
         if (CurTok == ';') { getNextToken(); continue; }
         if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
@@ -622,7 +862,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseExpression();
             if (AST) {
               if (CurTok == ';') {
-                LogErrorAt(CurLoc, "Unexpected ';'");
+                LogErrorAt(CurLoc, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
               }
               // NOTE: no LintExpression() call here (deliberately -- see the
               // "Phase Separation: Lint All" comment near FnASTs' declaration
@@ -659,7 +899,7 @@ static int runCompilerMain(int argc, char **argv) {
             auto AST = ParseExpression();
             if (AST) {
               if (CurTok != ';') {
-                LogErrorAt(CurLoc, "Expected ';' after statement");
+                LogErrorAt(CurLoc, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
               } else {
                 getNextToken(); // eat ';'
               }
@@ -678,6 +918,7 @@ static int runCompilerMain(int argc, char **argv) {
           getNextToken();
         }
       }
+      } // OVH-011: end of "if (!ClaimEntryFileImportSlot(...))"
 
       // ── Pre-pass sub-pass 2a: Resolve ─────────────────────────────────────
       // Run the Resolver over everything parsed so far (user fns only -- no
@@ -707,12 +948,86 @@ static int runCompilerMain(int argc, char **argv) {
       bool PreTCClean = true;
       {
         TypeChecker PreTC(PreR.symbolTable());
+        // TYPE-002 (docs/development/changes/TYPE-002.md, S11b): this is
+        // U-4's answer (U-4') in practice -- the real monomorphizer will
+        // hook in here too, as sub-pass 2b.5, immediately after this
+        // TypeChecker run and before sub-pass 2c's struct codegen just
+        // below. For now, report-only: --dump-instantiations feeds a
+        // collector during this SAME checkAll() call (TypeChecker's
+        // visitFuncCall/visitMethodCall/visitVarDecl record into it when
+        // set) and prints the census once it finishes. Zero behaviour
+        // change whenever the flag is absent -- MonoCollector is never
+        // attached, so every record() call site stays a no-op.
+        Monomorphize::InstantiationCollector MonoCollector;
+        // TYPE-002 (S12a): always attached now, not just under
+        // --dump-instantiations -- the collector's record() calls are what
+        // SEED sub-pass 2b.5's drain below; S11b's opt-in gate only made
+        // sense while nothing consumed the worklist.
+        PreTC.setMonomorphizationCollector(&MonoCollector);
         g_recoverActive = true;
         if (setjmp(g_recoverJmp) == 0) {
           PreTC.checkAll(PrePassASTs);
         } else {
           PreTCClean = false;
         }
+        // ── Pre-pass sub-pass 2b.5: Monomorphize ──────────────────────────
+        // U-4's answer (U-4', docs/development/changes/TYPE-002.md), acted
+        // on here: drains every FreeFunction- and Method-kind instantiation
+        // request sub-pass 2b's TypeChecker run seeded, to a fixed point
+        // (clone/substitute/re-resolve/re-typecheck/register each one,
+        // appending it to PrePassASTs so 2c/3a/3b below codegen it like any
+        // other declaration -- see drainFreeFunctionRequests()'s and
+        // drainMethodRequests()'s own doc comments, Monomorphize.h). Gated
+        // on PreTCClean for the identical reason 2c/3a/3b already are just
+        // below: a program the ordinary TypeChecker already rejected has no
+        // business being monomorphized either. Struct-kind requests are
+        // left recorded, undrained -- S13a.
+        //
+        // TYPE-002 (S12b): the two drain functions are called in an
+        // ALTERNATING loop, not once each in sequence, because they are
+        // NOT independent -- re-typechecking a method's clone can discover
+        // a nested call to a generic FREE function (or vice versa: a free
+        // function constructing/calling into a generic struct's method),
+        // and that nested request needs the OTHER drain function to act on
+        // it. Each function reports (via its bool return) whether it did
+        // any work THIS call; looping while EITHER one still is guarantees
+        // the true cross-kind fixed point, not just each function's own
+        // internal one. Terminates because every successful drain either
+        // marks an entry Drained (never revisited) or exits via
+        // GenericInstantiationDepthError (E079) if a truly unbounded chain
+        // keeps discovering brand-new work forever.
+        if (PreTCClean) {
+          g_recoverActive = true;
+          if (setjmp(g_recoverJmp) == 0) {
+            bool Progress = true;
+            while (Progress) {
+              Progress = false;
+              Progress |= Monomorphize::drainFreeFunctionRequests(PrePassASTs, MonoCollector, PreR);
+              Progress |= Monomorphize::drainMethodRequests(PrePassASTs, MonoCollector, PreR);
+              // TYPE-002 (S14a): drains the struct-bound FreeFunction-kind
+              // entries drainFreeFunctionRequests() deliberately skips
+              // (`StructName::new(...)` constructors) -- see its own doc
+              // comment (Monomorphize.h/.cpp) for why this needed S13a's
+              // per-instantiation struct layout to exist first.
+              Progress |= Monomorphize::drainConstructorRequests(PrePassASTs, MonoCollector, PreR);
+              // TYPE-002 (S13a): a fourth, independent consumer of the SAME
+              // non-destructive collector -- a struct instantiation request
+              // can be discovered mid-sweep by any of the other three (a
+              // method/constructor clone's own `self` type, or a nested
+              // generic call's VarDeclExprAST), and this one, in turn, never
+              // discovers a NEW FreeFunction/Method request itself (a struct
+              // decl has no body/call sites of its own) -- but it still
+              // participates in the SAME fixed-point loop rather than
+              // running once after, since ordering between all four is not
+              // guaranteed by discovery order alone.
+              Progress |= Monomorphize::drainStructRequests(PrePassASTs, MonoCollector, PreR);
+            }
+          } else {
+            PreTCClean = false;
+          }
+        }
+        if (opts.DumpInstantiations)
+          MonoCollector.report(std::cerr);
         // Errors in the pre-pass TC are informational only in the sense that
         // the main-pass TC (below, after the whole pre-pass finishes) is what
         // actually PRINTS them with full diagnostics and is authoritative for
@@ -779,6 +1094,35 @@ static int runCompilerMain(int argc, char **argv) {
       // We set a global flag to stop after prototype creation.
       g_protoOnlyPass = true;
       for (auto &AST : PrePassASTs) {
+        // TYPE-002 (S12a-S14a): a FuncDefExprAST that STILL has a non-empty
+        // TypeParams list is an uninstantiated GENERIC TEMPLATE -- the
+        // monomorphizer (sub-pass 2b.5, above) only ever appends a fully-
+        // concrete CLONE to PrePassASTs (TypeParams cleared) and rewrites
+        // every call site to it; the template itself is never meant to
+        // reach Codegen with an open TurfGenericParamType anywhere in it
+        // (F-GEN-2, INV-GEN-1). Originally (S12a) this only covered NON-
+        // struct-bound (free-function) templates -- a struct-bound generic
+        // (method or constructor) was deliberately left un-skipped, because
+        // S12a's drain left it un-monomorphized on purpose (no
+        // per-instantiation struct layout existed yet to substitute
+        // `self.<field>` against). S13a built that layout and S14a's own
+        // drainConstructorRequests()/visitMethodCall fix now monomorphize
+        // EVERY struct-bound generic too, so the exemption is gone: ANY
+        // FuncDefExprAST with non-empty TypeParams is now always a
+        // template with a real clone elsewhere in PrePassASTs, regardless
+        // of self-binding -- skipping all of them uniformly is what makes
+        // erasure's deletion (below, this session) safe: a template's body
+        // can still literally contain a TurfGenericParamType occurrence
+        // with no monomorphized equivalent operation to fall back on if it
+        // ever reached Codegen. Getting this too NARROW (the old,
+        // self-bound-exempting condition) reintroduces exactly the
+        // "Invalid bitcast"/erasure-branch-missing crash class this session
+        // deletes erasure specifically to get away from -- for a template
+        // whose body Codegen would now hit with no erasure branch left to
+        // catch it.
+        if (auto *FD = dynamic_cast<FuncDefExprAST *>(AST.get()))
+          if (!FD->getTypeParams().empty())
+            continue;
         if (dynamic_cast<FuncDefExprAST *>(AST.get()) ||
             dynamic_cast<EnumDeclExprAST *>(AST.get()) ||
             dynamic_cast<ExternFuncDeclExprAST *>(AST.get()) ||
@@ -810,6 +1154,12 @@ static int runCompilerMain(int argc, char **argv) {
         for (auto &AST : PrePassASTs) {
           if (dynamic_cast<StructDeclExprAST *>(AST.get()))
             continue;
+          // TYPE-002 (S12a-S14a): same template-skip as sub-pass 3a above --
+          // see that comment for the full history of why this now covers
+          // EVERY generic template uniformly, struct-bound or not.
+          if (auto *FD = dynamic_cast<FuncDefExprAST *>(AST.get()))
+            if (!FD->getTypeParams().empty())
+              continue;
           // `export immut` constants have no real LLVM storage at all --
           // Resolver Pass 1 (hoistExportedConstant) already extracted their
           // literal value into the symbol table, and every reference site
@@ -871,6 +1221,21 @@ static int runCompilerMain(int argc, char **argv) {
   std::vector<std::unique_ptr<ExprAST>> TopLevelASTs; // non-fn: lint + codegen
   std::vector<std::unique_ptr<ExprAST>> FnASTs;       // fn:     kept for Resolver/TypeChecker re-validation only
 
+  // LANG-002: re-consume the entry file's own leading `unsafe module;`
+  // pragma (if any) here too -- this is a FRESH token stream (resetLexer()
+  // above), so it sees the file's first token again just like the pre-pass
+  // did. Idempotent re-registration (see UnsafeModuleFiles' own doc
+  // comment, ParserModule.cpp); a genuine top-level unsafe BLOCK, if that's
+  // what this turns out to be instead, is pushed into FnASTs to mirror how
+  // the ordinary per-statement loop below categorizes one for this pass
+  // (already codegenned in the pre-pass; re-parsed here purely for
+  // Resolver/TypeChecker re-validation).
+  {
+    std::unique_ptr<ExprAST> LeadingUnsafeBlock;
+    if (!ParseLeadingUnsafeModuleDecl(LeadingUnsafeBlock) && LeadingUnsafeBlock)
+      AppendFlattenedTopLevelDecl(std::move(LeadingUnsafeBlock), FnASTs, true);
+  }
+
   // Prelude auto-import, main-pass side -- mirrors the pre-pass injection
   // above exactly (same ParsePreludeImports() call, same rationale). Pushed
   // into FnASTs, matching how a real `import X;` is categorized in this
@@ -879,6 +1244,13 @@ static int runCompilerMain(int argc, char **argv) {
   for (auto &PreludeAST : ParsePreludeImports(CurLoc))
     FnASTs.push_back(std::move(PreludeAST));
 
+  // OVH-011: mandatory-pass side of the same skip the pre-pass applies
+  // above -- ImportedFiles was cleared by ClearParsedTopLevelASTs() between
+  // passes, so this pass's own prelude injection just above re-populates it
+  // from scratch, and this call must re-check/re-claim against THIS pass's
+  // fresh cache. See ClaimEntryFileImportSlot()'s own doc comment
+  // (ParserModule.cpp).
+  if (!ClaimEntryFileImportSlot(SourceFilename)) {
   while (true) {
     if (CurTok == TOK_EOF)
       break;
@@ -905,7 +1277,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseExpression();
         if (AST) {
           if (CurTok == ';') {
-            LogErrorAt(CurLoc, "Unexpected ';'");
+            LogErrorAt(CurLoc, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
           }
           // lint only — not re-codegenned. Also transparently flattens a
           // top-level `unsafe { }` block -- see AppendFlattenedTopLevelDecl()'s
@@ -932,7 +1304,7 @@ static int runCompilerMain(int argc, char **argv) {
         auto AST = ParseExpression();
         if (AST) {
           if (CurTok != ';') {
-            LogErrorAt(CurLoc, "Expected ';' after statement");
+            LogErrorAt(CurLoc, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
           } else {
             getNextToken(); // eat ';'
           }
@@ -953,7 +1325,7 @@ static int runCompilerMain(int argc, char **argv) {
       auto AST = ParseExpression();
       if (AST) {
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, "Expected ';' after statement");
+          LogErrorAt(CurLoc, "Expected ';' after statement", SLM::ErrorCategory::SYNTAX_ERROR);
         } else {
           getNextToken(); // eat ';'
         }
@@ -994,6 +1366,7 @@ static int runCompilerMain(int argc, char **argv) {
     }
     g_recoverActive = false;
   }
+  } // OVH-011: end of "if (!ClaimEntryFileImportSlot(...))"
 
   // Phase Separation: Lint All
   // Only TopLevelASTs (non-fn statements) are linted here. FnASTs are
@@ -1154,10 +1527,6 @@ static int runCompilerMain(int argc, char **argv) {
     g_recoverActive = false;
   }
 
-  // Build cross-function call graph and print summary (run before flushing diagnostics)
-  CallGraphPass CGP;
-  CGP.runGlobal();
-
   // Flush all collected diagnostics (sorted by line).  If any errors were
   // recorded, stop here: do not attempt further IR generation or linking.
   DiagnosticEngine::flushAll();
@@ -1171,6 +1540,75 @@ static int runCompilerMain(int argc, char **argv) {
                  "in your file.\n";
     return 1;
   }
+
+  // RT-001: wrap the user's compiled main with the turf_rt_init/
+  // turf_rt_shutdown process bootstrap (see include/Codegen.h's doc comment
+  // on WrapMainWithRuntimeBootstrap() for the full contract). Must run
+  // AFTER every function is codegenned (true here -- this is already past
+  // both the pre-pass and the mandatory main pass) and BEFORE
+  // runOptimizationPipeline() below, whose Internalize must-preserve set is
+  // exactly {"main"} (that function's own comment) -- this call is what
+  // makes that symbol the wrapper rather than the user's own body.
+  WrapMainWithRuntimeBootstrap();
+
+  // TOOL-001: resolve any still-outstanding forward-declared debug-info
+  // metadata (getDebugType()'s struct branch, CodegenCore.cpp) before
+  // verifyModule() below -- a temporary MDNode left unresolved is invalid
+  // IR, and this is the one point every function's codegen (pre-pass AND
+  // main pass) is guaranteed to have already run. A no-op when `-g` wasn't
+  // passed (DBuilder is null).
+  if (DBuilder)
+    DBuilder->finalize();
+
+  // TYPE-002 (S15/D2, secondary): a monomorphized struct instantiation whose
+  // request was never recorded/drained leaves getLLVMType()'s GenericType
+  // branch's forward-declared opaque stub (CodegenCore.cpp) permanently
+  // unfilled -- nothing ever calls setBody() on it, because that only
+  // happens when drainStructRequests() (Monomorphize.cpp) appends the real
+  // clone to PrePassASTs and main.cpp's sub-pass 2c codegens it. D2 closed
+  // the one known gap that produced this (a GenericType used only as a
+  // struct FIELD, never a variable/method-call/field-access site), but if
+  // erasure's old silent-stub tolerance were ever reintroduced or a future
+  // recording site is missed the same way, the previous behaviour was a
+  // raw, low-level "Cannot allocate unsized type"/"GEP into unsized type"
+  // dump from verifyModule() below -- technically correct, but it names an
+  // LLVM struct, not a TurfLang instantiation, and gives no hint that a
+  // monomorphization request went missing. Scanned BEFORE verifyModule()
+  // so this diagnostic (naming the actual instantiation) fires instead of
+  // -- not in addition to -- the generic LLVM-verifier dump. A struct type
+  // is a monomorphized instantiation's if its name contains the "_gen<N>_"
+  // marker Monomorphize::instantiatedDeclName() always inserts right after
+  // the base name -- no ordinary, hand-written Turf struct name can contain
+  // that (identifiers can't start a segment with a digit after "_gen").
+  for (llvm::StructType *ST : TheModule->getIdentifiedStructTypes()) {
+    if (!ST->isOpaque())
+      continue;
+    const std::string Name = ST->getName().str();
+    size_t GenPos = Name.find("_gen");
+    if (GenPos == std::string::npos ||
+        GenPos + 4 >= Name.size() || !isdigit((unsigned char)Name[GenPos + 4]))
+      continue; // Not a monomorphized-instantiation name -- an ordinary
+                // forward-declared struct not yet codegenned is expected
+                // and harmless here (ordinary main.cpp iteration order).
+    std::cerr << "Internal error: monomorphized struct instantiation '"
+              << Name
+              << "' was never given a real layout (its instantiation "
+                 "request was recorded but never drained/codegenned). "
+                 "This is a compiler bug, not a mistake in your Turf "
+                 "code -- please report it.\n";
+    return 1;
+  }
+
+  // RT-001: TurfTypeDesc emission (see EmitAllTurfTypeDescs()'s own doc
+  // comment, CodegenStruct.cpp, for why this must run here -- after every
+  // struct in the module is guaranteed fully built, INCLUDING the
+  // just-finished lingering-opaque-stub scan above -- rather than inline,
+  // per struct, during StructDeclExprAST::codegen()). Still before
+  // verifyModule(): a descriptor is an ordinary constant global like any
+  // other, so there's no reason to build it after IR verification, and
+  // every reason (this exact call site already exists as "the point every
+  // struct is done") to build it before.
+  EmitAllTurfTypeDescs();
 
   // Verify the generated IR for the WHOLE module (not just main -- a bug in
   // any function's codegen can produce broken IR that crashes or misbehaves
@@ -1200,27 +1638,35 @@ static int runCompilerMain(int argc, char **argv) {
     }
   }
 
-  // Phase 5: LLVM Optimization Passes
-  // Run LLVM's standard optimization pipeline over every function in the
-  // module. This turns our Alloca/Load/Store pattern into register-based SSA
-  // (mem2reg), folds constants, eliminates dead code, and simplifies the CFG,
-  // reaching near-C-level performance without any extra compiler work.
-  {
-    legacy::FunctionPassManager FPM(TheModule.get());
-    // Promote memory to registers (eliminates alloca/load/store overhead)
-    FPM.add(createPromoteMemoryToRegisterPass());
-    // Fold redundant instructions (x + 0 => x, etc.)
-    FPM.add(createInstructionCombiningPass());
-    // Reassociate expressions for better constant folding
-    FPM.add(createReassociatePass());
-    // Eliminate common sub-expressions
-    FPM.add(createGVNPass());
-    // Simplify the control-flow graph (remove unreachable blocks, etc.)
-    FPM.add(createCFGSimplificationPass());
-    FPM.doInitialization();
-    for (auto &F : *TheModule)
-      FPM.run(F);
+  // Phase 5: OPT-001 optimization pipeline (runOptimizationPipeline() above).
+  //
+  // The TargetMachine is built here, BEFORE optimization runs, and shared
+  // with object emission below -- previously it was built entirely inside
+  // emitObjectFile(), strictly AFTER this phase, so the optimizer ran with
+  // no target triple/data layout set on the module at all. Building it
+  // first (when it's needed) means SROA/vectorization-adjacent passes now
+  // see the real target's pointer size/alignment instead of LLVM's
+  // triple-less defaults -- a correctness improvement, not an observable
+  // behavior change (F-OPT-1): the host target this module already linked
+  // against unconditionally is the same host emitObjectFile() always used.
+  //
+  // `--emit-llvm` never had a real TargetMachine before this change either
+  // (M.setTargetTriple()/setDataLayout() were only ever reached from inside
+  // emitObjectFile(), which that flag skips entirely) -- preserved as-is:
+  // PassBuilder(nullptr) is well-defined and simply runs no target-aware
+  // transform, which is what "just show me the IR" has always meant here.
+  TargetMachine *TM = nullptr;
+  if (!opts.EmitLLVM) {
+    TM = createTurfTargetMachine(opts, *TheModule);
+    if (!TM) {
+      std::cerr << "Error: could not create a target machine for '"
+                << (opts.TargetTriple.empty() ? sys::getDefaultTargetTriple()
+                                               : opts.TargetTriple)
+                << "'.\n";
+      return 1;
+    }
   }
+  runOptimizationPipeline(*TheModule, opts.OptLevel, TM);
 
   // Output stage: either emit LLVM IR text or compile to native binary
   if (opts.EmitLLVM) {
@@ -1239,7 +1685,7 @@ static int runCompilerMain(int argc, char **argv) {
     // New default: emit native object code and link
     std::string ObjFile = opts.OutputName + ".o";
 
-    if (emitObjectFile(*TheModule, ObjFile) != 0)
+    if (emitObjectFile(*TheModule, *TM, ObjFile) != 0)
       return 1;
 
     std::cout << "Compiled to " << ObjFile << "\n";

@@ -1,0 +1,31 @@
+This block of code can never run
+
+Turf builds a map of every possible path your function's control flow can take, then checks which parts of your code that map can actually reach. This warning fires when it finds a whole block -- not just one statement, the entire block -- that no path leads to at all.
+
+The classic way to end up here is a loop that always returns before it can exit normally:
+
+    fn pick(): int {
+        while true {
+            return 1;
+        }
+        return 2;   // unreachable -- the loop above never exits any other way
+    }
+
+Since `while true` has no `break` and the only way out is the `return` inside it, control can never fall through to `return 2;`. That whole tail of the function is dead weight.
+
+The fix depends on what you actually meant. If the second `return` should be reachable, give the loop a real exit:
+
+    fn pick(): int {
+        mut i: int = 0;
+        while true {
+            i += 1;
+            if i > 10 {
+                break;
+            }
+        }
+        return 2;
+    }
+
+If the loop really is meant to run forever (or always return from inside), the trailing code is just leftover and safe to delete.
+
+This is a warning, not an error -- Turf still compiles your program -- but unreachable code is almost always a sign the logic doesn't do what you think it does, so it's worth tracking down rather than ignoring.

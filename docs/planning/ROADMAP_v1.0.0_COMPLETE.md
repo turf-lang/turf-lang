@@ -43,7 +43,7 @@ mutable r: int = x > 0 give x otherwise -x;  // ternary: give...otherwise
 - [x] **#20: `assert(cond)` & `fail(msg)`**
 - [x] **#12: Variables to `mutable`/`mut` and `immutable`/`immut`**
 - [x] **#13: Functions to `fn name(arg: type): returnType {}`**
-- [x] **#14: Struct Named-Field Syntax and `StructName { field: val }` Init**
+- [x] **#14: Struct Named-Field Syntax and `StructName { field: val }` Init**  — **superseded**: `StructName { field: val }` is rejected by the compiler today ("'Point { ... }' is no longer valid syntax for constructing a struct", verified 2026-09-17), and `StructName::new(...)`/`::default()` are the only construction forms — so the `Point { x: 10, y: 20 }` line in the "Final Syntax (locked in)" block above is stale history, kept as written for the record. `docs/reference/structs_and_enums.md` is correct and authoritative; the language is not changing here (`ARCHITECTURE_OVERHAUL.md` §5 C-3, `docs/development/changes/ARCH-001.md`).
 - [x] **#15: Cast Syntax `x to type`**
 - [x] **#16: Unify `if` and Add Ternary `cond give a otherwise b`**
 - [x] **#19: Remove `try/onError/raise`**

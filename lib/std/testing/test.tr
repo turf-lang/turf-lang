@@ -44,16 +44,36 @@ import strings;
 // ─── fail ──────────────────────────────────────────────────────────────────
 
 // fail: print `msg` to stderr and terminate immediately. Never returns.
+//
+// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)): `@caller_location` makes
+// this report the ORIGINAL caller's file/line, not this file's own --
+// before this, a failing test::assert() printed nothing but the message
+// text, giving no clue which test (of possibly hundreds importing this
+// same module) actually failed. `caller_location` is built into the
+// message HERE, once, so sys::panic() itself needs no changes at all --
+// every OTHER sys::panic() call site across lib/std (mem.tr, net.tr,
+// list.tr, ...) is completely unaffected by this change; retrofitting
+// those is explicitly out of this group's scope (see
+// docs/development/changes/STD-002.md's own *Removed assumptions*).
+@caller_location
 fn fail(msg: string): void {
-    sys::panic(msg);
+    sys::panic(caller_location + ": " + msg);
 }
 
 // ─── assert ────────────────────────────────────────────────────────────────
 
+// Both overloads are `@caller_location` -- the 1-arg form's own internal
+// call to the 2-arg form (below) is itself a call FROM a `@caller_location`
+// function, so it forwards the ORIGINAL caller's location rather than
+// stamping its own line inside this file (see include/Intrinsics.h §1's
+// caller_location entry, and docs/architecture/boundary.md, for the
+// forward-vs-stamp mechanism this relies on).
+@caller_location
 fn assert(cond: bool): void {
     assert(cond, "Oops! An assertion failed here.\nHint: Assertions are checks that make sure your code is running exactly as you expect. This one didn't pass.");
 }
 
+@caller_location
 fn assert(cond: bool, msg: string): void {
     if !cond {
         fail(msg);

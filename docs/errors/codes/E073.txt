@@ -1,0 +1,24 @@
+An exponent marker with nothing after it
+
+A `double` literal can use scientific-notation shorthand -- an `e` or `E`
+followed by the power of ten to multiply by:
+
+    mut avogadro: double = 6.022e23;
+    mut tiny: double = 1.5e-3;      // 0.0015
+    mut big: double = 1E+10;        // 10000000000.0
+
+The letter `e`/`E` always has to be followed by an actual exponent: an
+optional `+` or `-`, then at least one digit. Once Turf sees `e`/`E` right
+after a number, it commits to reading an exponent -- it will never quietly
+reinterpret it as something else, so leaving it unfinished is always an
+error rather than the number just ending early:
+
+    mut x: double = 1.5e;    // ERROR: nothing after 'e'
+    mut y: double = 1.5e+;   // ERROR: '+' with no digit after it
+    mut z: double = 1e_5;    // ERROR: '_' can't be the first thing after 'e' either
+
+The fix is to either finish the exponent:
+
+    mut x: double = 1.5e3;   // 1500.0
+
+...or, if you didn't mean to write an exponent at all, remove the `e`.

@@ -1,0 +1,35 @@
+You declared an operator between two types your module doesn't own
+
+    // In module "geometry":
+    struct Vec2 { x: int, y: int }
+    operator +(a: Vec2, b: Vec2): Vec2 { ... }   // fine -- geometry owns Vec2
+
+    // In some OTHER, unrelated module:
+    operator +(a: SomeoneElsesType, b: AnotherModulesType): SomeoneElsesType {
+        ...
+    }
+    // ERROR: this module owns neither SomeoneElsesType nor AnotherModulesType
+
+An operator declaration needs at least one of its operands to be a struct
+or enum declared in the SAME module (or main file) as the `operator`
+itself. Without this rule, a third module could quietly redefine what `+`
+(or any other operator) means between two types it has nothing to do with
+-- and whether that redefinition took effect would depend on whether that
+third module happened to be imported anywhere in the program, and in what
+order. That's the kind of thing that works fine while you're writing the
+code and then breaks mysteriously six months later when someone adds an
+unrelated import.
+
+To fix it, do one of:
+
+  - Move the operator declaration into the module that actually declares
+    one of the two types.
+  - If you don't own either type and still need this behavior, write it as
+    an ordinary named function instead (`fn addVecs(a: Vec2, b: Vec2):
+    Vec2`) -- there's no rule against that, only against redefining an
+    OPERATOR on types you don't own.
+
+This check doesn't apply to a builtin/`string` operand at all -- `string`
+isn't "declared" by any one module the way a struct or enum is, so
+`lib/std/core/strings.tr`'s own `operator +(a: string, b: string): string`
+and friends are unaffected by this rule.

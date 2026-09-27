@@ -72,7 +72,10 @@
 #include "ResolverSymbolTable.h"
 #include "Types.h"
 
+#include "llvm/ADT/APSInt.h"
+
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -85,6 +88,14 @@ struct SourceLocation;
 // hasType queries.  The full definition lives in AST.h (which is LLVM-dependent)
 // and is included only in TypeChecker.cpp.
 class ExprAST;
+
+// TYPE-002 (docs/development/changes/TYPE-002.md, S11b): forward-declared
+// for the same reason as ExprAST above -- TypeChecker only ever stores a
+// pointer to one and calls record(), so the full Monomorphize.h definition
+// (LLVM-free, but a separate concern) doesn't need to be pulled in here.
+namespace Monomorphize {
+class InstantiationCollector;
+}
 
 // ─── TypeChecker ─────────────────────────────────────────────────────────────
 
@@ -129,7 +140,8 @@ public:
   using ErrorHandler =
       std::function<void(SourceLocation, const std::string &,
                          const std::vector<RelatedLocation> &,
-                         const std::string &, const std::string &)>;
+                         const std::string &, const std::string &,
+                         const SLM::DiagnosticHints &)>;
 
   // ── Constructors ──────────────────────────────────────────────────────────
 
@@ -157,6 +169,16 @@ public:
   /// Replace the error handler after construction (useful in tests).
   void setErrorHandler(ErrorHandler Handler) {
     ErrorHandler_ = std::move(Handler);
+  }
+
+  /// TYPE-002 (S11b): opt in to feeding every generic call/declaration
+  /// this TypeChecker resolves into an instantiation-request collector.
+  /// Null (the default) is a complete no-op -- every record() call site is
+  /// guarded on this being non-null, so an ordinary compile that never
+  /// passes --dump-instantiations pays no cost and sees no behaviour
+  /// change. @p Collector must outlive this TypeChecker.
+  void setMonomorphizationCollector(Monomorphize::InstantiationCollector *Collector) {
+    MonoCollector_ = Collector;
   }
 
   // ── Entry points ──────────────────────────────────────────────────────────
@@ -209,6 +231,11 @@ public:
     // NOT inside unsafe but a prior recovery already left this non-zero,
     // wrongly gated) for the rest of the compile.
     UnsafeDepth_ = 0;
+    // STD-002: same reasoning as UnsafeDepth_ immediately above -- a
+    // TypeError raised mid-body inside a `@caller_location` function skips
+    // visitFuncDef()'s own restore of InCallerLocationFunc_ on the way out
+    // via longjmp.
+    InCallerLocationFunc_ = false;
   }
 
   // ── Type query ────────────────────────────────────────────────────────────
@@ -233,7 +260,6 @@ public:
   void visitChar(CharExprAST &Node) override;
   void visitString(StringExprAST &Node) override;
   void visitNull(NullExprAST &Node) override;
-  void visitDefaultInit(DefaultInitExprAST &Node) override;
 
   // ── Variables & declarations ──────────────────────────────────────────────
   void visitVariable(VariableExprAST &Node) override;
@@ -260,6 +286,7 @@ public:
   void visitContinue(ContinueExprAST &Node) override;
   void visitReturn(ReturnExprAST &Node) override;
   void visitCompare(CompareExprAST &Node) override;
+  void visitDefer(DeferExprAST &Node) override;
 
   // ── Functions & calls ─────────────────────────────────────────────────────
   void visitFuncDef(FuncDefExprAST &Node) override;
@@ -282,6 +309,7 @@ public:
   // ── Modules & misc ────────────────────────────────────────────────────────
   void visitModuleImport(ModuleImportExprAST &Node) override;
   void visitSizeOf(SizeOfExprAST &Node) override;
+  void visitCallerLocation(CallerLocationExprAST &Node) override;
 
   // ── FFI ───────────────────────────────────────────────────────────────────
   void visitExternFuncDecl(ExternFuncDeclExprAST &Node) override;
@@ -296,22 +324,32 @@ private:
   /// CustomHint, when non-empty, overrides the default TypeError hint
   /// instead of stacking alongside it; CustomBanner, when non-empty,
   /// overrides the default "Type mismatch!" header -- see ErrorHandler's
-  /// doc comment for why that header isn't always accurate.
+  /// doc comment for why that header isn't always accurate. Hints (SLM-001
+  /// §16.3 item 3), when non-empty, is forwarded to the raised TypeError via
+  /// TurfError::withKnownType() for each entry -- see DiagnosticHints's own
+  /// doc comment (ErrorCategory.h). Empty for the overwhelming majority of
+  /// call sites, which is a complete no-op, identical to before this param
+  /// existed.
   void reportError(SourceLocation Loc, const std::string &Msg,
                    const std::vector<RelatedLocation> &Related = {},
                    const std::string &CustomHint = "",
-                   const std::string &CustomBanner = "");
+                   const std::string &CustomBanner = "",
+                   const SLM::DiagnosticHints &Hints = {});
 
   // ── `unsafe { }` gate (issue #238) ──────────────────────────────────────
 
   /// True for a raw, GATED pointer type -- `ptr` (OpaquePointerType) or a
   /// concrete `T*` (TurfPointerType) -- and false for everything else,
-  /// including a `&T` safe reference (TurfReferenceType), which is a
-  /// TurfPointerType SUBCLASS (isPointer() is true for it too) but is
-  /// deliberately exempt from the gate -- see TurfReferenceType's own doc
+  /// including a `&T` safe reference (TurfReferenceType) and a `&?T`
+  /// nullable reference (TurfNullableReferenceType, LANG-002), both of
+  /// which are TurfPointerType SUBCLASSES (isPointer() is true for both)
+  /// but are deliberately exempt from THIS gate -- see each class's own doc
   /// comment (Types.h) for why the inheritance is structured that way.
+  /// `&?T`'s own safety is enforced by a SEPARATE mechanism entirely
+  /// (NullabilityPass, Analysis.h) -- it is not "safe like &T", it is
+  /// "checked instead of gated".
   static bool isRawPointer(const TurfType *T) {
-    return T && T->isPointer() && !T->isReference();
+    return T && T->isPointer() && !T->isReference() && !T->isNullableReference();
   }
 
   /// True when a raw pointer type's use at @p Loc is authorized: either
@@ -423,6 +461,86 @@ private:
   /// string — string + string is valid; mixed is not).
   static bool areArithCompatible(const TurfType *A, const TurfType *B);
 
+  // ── SEM-002: literal-representability checking ─────────────────────────
+  // (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 rows 3/6/9)
+
+  /// Recursive fold of a compile-time integer constant built ONLY from
+  /// untyped literals via unary '-' and binary '+'/'-'/'*' (row 6).
+  /// Returns std::nullopt for anything else (a variable, a call, '/'/'%'/
+  /// '**', a typed constant reference, ...) without raising anything --
+  /// those are left to runtime overflow trapping instead (Codegen), or,
+  /// for a typed-constant reference specifically, are a disclosed,
+  /// deferred gap (see this group's change record).
+  ///
+  /// @p IsTopLevel is true only for the ORIGINAL call (from
+  /// checkLiteralRepresentable()) and propagates through a unary '-'
+  /// (folding "-BIG" is still conceptually the same single literal, just
+  /// negated -- FREEZE.md's own `-9223372036854775808` example), but is
+  /// always false for a BinaryExprAST's own LHS/RHS: those become genuine
+  /// independent leaves that Codegen (NumberExprAST::codegen(),
+  /// unconditionally since SEM-001) must truncate to 64 bits BEFORE any
+  /// arithmetic runs, so a leaf that doesn't independently fit int64 is
+  /// rejected immediately, from here, citing 'int' -- deferring to "maybe
+  /// the whole expression's final value still fits" is a check Codegen
+  /// could not actually honor for that leaf regardless of what the
+  /// surrounding expression's value turns out to be. Only a bare
+  /// top-level literal (this function called directly on a NumberExprAST)
+  /// defers instead to checkLiteralRepresentable()'s own
+  /// destination-aware message.
+  std::optional<llvm::APSInt> tryFoldUntypedIntConstant(const ExprAST *E,
+                                                         bool IsTopLevel);
+
+  /// Checks @p ValueExpr (an untyped-literal-only expression, per
+  /// tryFoldUntypedIntConstant() above) against @p DestType's
+  /// representable range, when @p DestType is 'int', 'int32', or 'double'
+  /// -- a no-op for every other destination (bool/char/string/struct/
+  /// enum/pointer either can't receive a NumberExprAST-shaped initializer
+  /// at all, or has no numeric range to violate) and a no-op when
+  /// @p ValueExpr isn't a pure literal-arithmetic tree.
+  ///
+  /// The 'double' destination case is narrower than FREEZE.md §6.2 row 9's
+  /// literal wording ("must be exactly representable"): this requires the
+  /// exact value to ALSO independently fit int64 first, because Codegen
+  /// (NumberExprAST::codegen()) truncates every literal through a 64-bit
+  /// int before any int-to-double conversion runs, regardless of the
+  /// literal's true magnitude -- a literal that's exactly representable
+  /// as a double but exceeds int64 (e.g. 2^100) would silently codegen a
+  /// WRONG value today if this check let it through. A disclosed, narrow
+  /// implementation constraint, not a reinterpretation of the frozen rule
+  /// -- see this group's change record's Known pitfalls.
+  void checkLiteralRepresentable(const ExprAST *ValueExpr, const TurfType *DestType,
+                                 SourceLocation Loc);
+
+  /// Applies checkLiteralRepresentable() to each argument against its
+  /// matching resolved parameter's type, once a call's final candidate is
+  /// chosen. @p Loc is the call's own location -- reused for every argument
+  /// since ExprAST has no virtual getLoc() (see docs/architecture/
+  /// compiler_pipeline.md §6's identical note for CFG diagnostics), the
+  /// same convention visitArrayDecl() already uses for its own per-element
+  /// mismatch diagnostic. @p ParamOffset skips a UFCS candidate's own
+  /// implicit receiver slot (Params[0]), whose type never corresponds to
+  /// any entry in @p Args at all (tryUFCSFallback()'s own call site).
+  void checkCallArgsRepresentable(const std::vector<std::unique_ptr<ExprAST>> &Args,
+                                  const std::vector<FunctionParam> &Params,
+                                  SourceLocation Loc, size_t ParamOffset = 0);
+
+  /// OVH-005 (FREEZE.md §6.2 row 3, F-NUM-1): true when @p Dest is `int32`
+  /// and @p Val is exactly the kind of untyped-literal-only expression
+  /// tryFoldUntypedIntConstant() folds (a bare literal, or +/-/* of pure
+  /// literals). `typesCompatible()` (Types.cpp) sees such a value as plain
+  /// `int` -- visitNumber() always types an integer literal `int`, with no
+  /// way to record "still untyped" in a TurfTypePtr -- so it correctly
+  /// rejects `int -> int32` as the narrowing conversion that IS for a
+  /// genuinely `int`-typed value, but wrongly rejects it for a literal that
+  /// was never actually typed `int` to begin with and should acquire
+  /// `int32` directly instead, exactly like `guess`'s own literal-
+  /// defaulting rule (§6.3) or the existing 'double' destination case
+  /// (checkLiteralRepresentable() above). Every type-fixing call site
+  /// (VarDecl init, assignment, argument, return) checks this explicitly
+  /// alongside typesCompatible() before treating a mismatch as real, since
+  /// typesCompatible() itself has no ExprAST access to tell the two apart.
+  bool untypedLiteralAcquiresInt32(const ExprAST *Val, const TurfType *Dest);
+
   // ── State ─────────────────────────────────────────────────────────────────
 
   /// Reference to the symbol table filled by the Resolver.
@@ -435,6 +553,10 @@ private:
 
   /// Pluggable error reporter (default = TypeError::raise()).
   ErrorHandler ErrorHandler_;
+
+  /// TYPE-002 (S11b): null unless setMonomorphizationCollector() was
+  /// called. See that method's doc comment.
+  Monomorphize::InstantiationCollector *MonoCollector_ = nullptr;
 
   /// Stack of expected return types for nested function definitions.
   /// Empty when we are at the top level.
@@ -470,6 +592,18 @@ private:
   /// (Resolver.h) -- incremented/decremented bracketing visitUnsafeBlock()'s
   /// body traversal. Consulted by isUnsafeGateExempt().
   int UnsafeDepth_ = 0;
+
+  /// STD-002: true while visiting the body of a function declared
+  /// `@caller_location`. A plain bool, not a counter like UnsafeDepth_ --
+  /// this language has no nested `fn` bodies visited WHILE another one is
+  /// still open the way `unsafe { unsafe { } }` nests (a block-nested `fn`,
+  /// see docs/architecture/pointers_and_references.md §2.2's "top-level
+  /// unsafe struct" note for the general shape, is still a SEPARATE
+  /// visitFuncDef() call with its own save/restore bracket, never entered
+  /// while the outer one's bracket is still on the call stack). Consulted
+  /// by visitCallerLocation(); save/restored around visitFuncDef()'s body
+  /// traversal exactly like UnsafeDepth_ is for visitUnsafeBlock().
+  bool InCallerLocationFunc_ = false;
 
   /// Whether we had at least one error during this pass.
   bool HadError_ = false;

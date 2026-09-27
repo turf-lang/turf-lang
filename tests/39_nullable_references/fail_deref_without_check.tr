@@ -1,0 +1,11 @@
+// LANG-002: NullabilityPass's dereference gate -- field-accessing a `&?T`
+// with NO null check anywhere on the path must be rejected (E081).
+struct Box { val: int }
+
+fn bad(b: &?Box): int {
+    return b.val;
+}
+
+fn main(): int {
+    return bad(null);
+}

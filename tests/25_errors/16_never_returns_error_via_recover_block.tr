@@ -1,0 +1,61 @@
+// OVH-012: NeverReturnsErrorWarning must look inside a `recover run { ... }`
+// / `recover as err run { ... }` block's `return`s, not just a function's
+// own top-level `return`s. Every stdlib repro of this false positive
+// (io::read_lines, json::parse_number/parse_array/parse_object/parse) has
+// its ONLY `return <ErrorType>` (or, for `parse`, `return err;`) nested
+// inside exactly one of these blocks -- confirmed live: before the fix,
+// `turf --resolve --stdlib-warnings` on any of those files printed
+// NeverReturnsErrorWarning even though each function genuinely fails on
+// some path. This file exercises both shapes:
+//   1. `maybeDouble`'s only failing `return` is a bare `ErrorType::Variant`
+//      nested inside `recover run { ... }` (the `io::read_lines` shape).
+//   2. `rethrough`'s only failing `return` re-throws the bound `err`
+//      variable from `recover as err run { ... }` (the `json::parse` shape
+//      -- no error type NAME to collect at all, since `err`'s static type
+//      is the type-erased AnyErrorType).
+// Manually verified: `turf --resolve --stdlib-warnings
+// tests/25_errors/16_never_returns_error_via_recover_block.tr` prints no
+// warning for either function.
+
+import test;
+
+error MyError {
+    Bad,
+}
+
+fn risky(x: int): !int {
+    if x < 0 {
+        return MyError::Bad;
+    }
+    return x * 2;
+}
+
+fn maybeDouble(x: int): !int {
+    immut y: int = risky(x) recover run {
+        return MyError::Bad;
+    };
+    return y;
+}
+
+fn rethrough(x: int): !int {
+    immut y: int = risky(x) recover as err run {
+        return err;
+    };
+    return y;
+}
+
+fn main(): int {
+    immut ok: int = maybeDouble(5) recover produce -1;
+    test::assert_eq(ok, 10, "maybeDouble(5) should succeed via risky()");
+
+    immut recovered: int = maybeDouble(-1) recover produce -1;
+    test::assert_eq(recovered, -1, "maybeDouble(-1) should recover through its own recover-run block");
+
+    immut ok2: int = rethrough(5) recover produce -1;
+    test::assert_eq(ok2, 10, "rethrough(5) should succeed via risky()");
+
+    immut recovered2: int = rethrough(-1) recover produce -1;
+    test::assert_eq(recovered2, -1, "rethrough(-1) should propagate risky()'s error via 'return err;'");
+
+    return 0;
+}

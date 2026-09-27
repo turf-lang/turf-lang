@@ -54,15 +54,26 @@ protected:
   // (e.g. `Category_ = SLM::ErrorCategory::TYPE_MISMATCH;`). This is the
   // error's own C++ type telling the SLM layer what it is, directly --
   // replacing the old approach of re-deriving a category by pattern-matching
-  // the final rendered message text (SLM::classifyError()), which silently
-  // drifted out of sync every time a message was reworded and left several
-  // real, commonly-hit error classes (ImmutableAssignmentError,
-  // NullAssignmentError, DefiniteAssignmentError, UseAfterFreeError,
-  // DoubleFreeError) permanently misclassified as GENERAL. classifyError()
-  // is NOT removed -- it remains the correct fallback for the raw,
-  // untyped LogErrorAt() path (parser-level errors with no TurfError
-  // instance at all) and for any subclass left untagged (default GENERAL).
+  // the final rendered message text (formerly `SLM::classifyError()`, DELETED
+  // in DIAG-001), which silently drifted out of sync every time a message
+  // was reworded and left several real, commonly-hit error classes
+  // (ImmutableAssignmentError, NullAssignmentError, DefiniteAssignmentError,
+  // UseAfterFreeError, DoubleFreeError) permanently misclassified as GENERAL
+  // -- confirmed live, several of classifyError()'s own LogErrorAt-targeted
+  // substring patterns no longer matched ANY current message at all (the
+  // exact drift this comment used to warn about, caught only once it was
+  // actually verified: see docs/development/changes/DIAG-001.md). Every
+  // subclass here is individually audited (a class left at the GENERAL
+  // default is a deliberate judgment call, documented at that class -- see
+  // e.g. SemanticError, ModuleMethodNotFoundError); the raw, untyped
+  // LogErrorAt() path (Lexer.h) takes an explicit SLM::ErrorCategory
+  // argument at every call site instead of falling back to text matching.
   SLM::ErrorCategory Category_ = SLM::ErrorCategory::GENERAL;
+  // SLM-001 §16.3 items 1/3: structured facts for the SLM pipeline (a
+  // deterministic rename candidate, known-but-not-visible-in-source types).
+  // Empty by default -- see DiagnosticHints's own doc comment
+  // (SLMIntegration.h) for what each field means and who populates it.
+  SLM::DiagnosticHints Hints_;
 
 public:
   TurfError(SourceLocation Loc, const std::string &Msg,
@@ -98,9 +109,47 @@ public:
     return *this;
   }
 
+  // SLM-001 item 3: attach a known-type fact not visible in the pinned
+  // source lines (see DiagnosticHints::KnownTypes). Chainable, same shape as
+  // withRelated().
+  TurfError &withKnownType(const std::string &Fact) {
+    Hints_.KnownTypes.push_back(Fact);
+    return *this;
+  }
+
+  // SLM-001 item 1: record an unambiguous rename candidate directly, for a
+  // call site that already knows both the wrong and right spelling without
+  // going through a RankedSuggestions lookup at all.
+  TurfError &withDeterministicFix(const std::string &OldName,
+                                  const std::string &NewName) {
+    Hints_.DeterministicOldName = OldName;
+    Hints_.DeterministicNewName = NewName;
+    return *this;
+  }
+
+  // Convenience for the common "unknown name" shape: every RankedSuggestions-
+  // based error class (LookupError, ReferenceError, UnknownStructFieldError,
+  // ...) calls this right after computing its Hint_, passing the exact name
+  // that failed to resolve. Sets a deterministic-fix candidate only when the
+  // lookup was genuinely UNAMBIGUOUS -- exactly one local candidate and zero
+  // module candidates -- so a genuinely ambiguous typo (multiple equally
+  // plausible corrections) is deliberately left to the model/user instead of
+  // guessing. Never re-derives anything from message text: Suggestions is
+  // the same structured RankedSuggestions object the constructor's own Hint_
+  // was built from moments earlier.
+  TurfError &trySetDeterministicRename(const std::string &OldName,
+                                       const RankedSuggestions &Suggestions) {
+    if (Suggestions.Local.size() == 1 && Suggestions.Module.empty() &&
+        !OldName.empty() && Suggestions.Local[0] != OldName) {
+      Hints_.DeterministicOldName = OldName;
+      Hints_.DeterministicNewName = Suggestions.Local[0];
+    }
+    return *this;
+  }
+
   void raise() const {
     DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/false,
-                          RelatedLocations_, Category_, getCode());
+                          RelatedLocations_, Category_, getCode(), Hints_);
 
     if (g_recoverActive) {
       // longjmp() skips C++ destructors between here and the setjmp() point
@@ -213,10 +262,22 @@ public:
     return *this;
   }
 
+  // Mirrors TurfError::getCode() exactly (see its own doc comment) -- added
+  // for HYG-001, the first warning classes (UnreachableBlockWarning,
+  // DeadBranchWarning) to register a real "E0NN" code. Every other warning
+  // class predates this and has no registry entry, so this still returns ""
+  // for them, same as before this method existed (printDiag() only prints
+  // a "[E0NN]" tag when Code is non-empty).
+  std::string getCode() const {
+    const ErrorCodeEntry *Entry =
+        ErrorCodes::lookupByClassName(demangleTypeName(typeid(*this).name()));
+    return Entry ? Entry->Code : "";
+  }
+
   // NEVER interrupts compilation flow — always returns normally.
   void emit() const {
     DiagnosticEngine::add(Loc, Message, Hint_, /*IsWarning=*/true,
-                          RelatedLocations_, Category_);
+                          RelatedLocations_, Category_, getCode());
   }
 
   void warn() const { emit(); }

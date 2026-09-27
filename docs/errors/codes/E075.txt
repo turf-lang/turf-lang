@@ -1,0 +1,19 @@
+There's a branch inside your code that can never actually be taken
+
+This is a close cousin of "unreachable block" (E074): Turf found an `if` (or similar branch point) sitting inside code that's already dead, so the branch itself -- along with every path it could lead to -- can never run either.
+
+It almost always shows up alongside E074, on the same piece of dead code:
+
+    fn pick(x: int): int {
+        while true {
+            return 1;
+        }
+        if x > 0 {      // dead branch -- everything after the loop is unreachable
+            return 2;
+        }
+        return 3;
+    }
+
+Because `while true` never exits any way other than its own `return`, nothing after the loop -- including the `if x > 0` check -- is ever reached. Turf reports the unreachable block itself (E074) and, separately, that the branch inside it is dead (E075), since a conditional that can never be evaluated is worth calling out on its own.
+
+The fix is the same as for E074: either make the loop exit somewhere (a `break`, or a condition that isn't a literal `true`), or delete the code after it if it was never meant to run.

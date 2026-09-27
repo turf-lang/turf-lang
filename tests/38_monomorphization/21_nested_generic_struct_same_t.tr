@@ -1,0 +1,35 @@
+// Regression test: D4 (docs/development/changes/TYPE-002.md, S15) -- a
+// generic struct containing ANOTHER generic struct at the SAME type
+// parameter (`struct Outer<T> { inner: Inner<T> }`) failed to compile:
+// `o.put(42)` (Outer<int>) reported "No overload of 'Inner.set' matches
+// argument types (int)" inside Outer.put's own instantiation.
+//
+// Root cause: visitMethodCall()/visitFieldAccess()'s (TypeCheckerCall.cpp)
+// shared "recover this struct's own generic substitution by scanning its
+// fields" technique never recursed into a field whose OWN declared type is
+// itself a GenericType -- so `self.inner`'s type stayed the literal,
+// un-substituted `Inner<T>` instead of `Inner<int>`, and `self.inner.set(x)`
+// (x: int) had no matching overload against Inner.set's still-generic `T`
+// parameter. Both compiled and ran correctly pre-TYPE-002 (erasure never
+// needed to substitute anything, since every T was one shared 8-byte slot).
+import test;
+
+struct Inner<T> { v: T }
+fn<T> Inner.set(x: T): void { self.v = x; }
+fn<T> Inner.get(): T { return self.v; }
+
+struct Outer<T> { inner: Inner<T> }
+fn<T> Outer.put(x: T): void { self.inner.set(x); }
+fn<T> Outer.take(): T { return self.inner.get(); }
+
+fn main(): int {
+    mut o: Outer<int> = Outer::default();
+    o.put(42);
+    test::assert(o.take() == 42, "Outer<int>.take() should round-trip through Inner<int>.set/get");
+
+    mut os: Outer<string> = Outer::default();
+    os.put("hello");
+    test::assert(os.take() == "hello", "Outer<string> must independently coexist with Outer<int>");
+
+    return 0;
+}

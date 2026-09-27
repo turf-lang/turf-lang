@@ -1,0 +1,73 @@
+// Regression test: MEM-001's bare `gc_alloc`/`gc_alloc_zeroed`/`gc_realloc`
+// intrinsics (docs/planning/ARCHITECTURE_OVERHAUL.md §8, include/Intrinsics.h
+// category 1) -- the Turf-visible surface for libturfrt's
+// turf_rt_alloc/turf_rt_alloc_zeroed/turf_rt_realloc, exercised directly
+// here rather than only indirectly through the stdlib call sites (strings.tr,
+// list.tr, etc.) that were rerouted onto them. Every stdlib collection/string
+// test already covers "does the reroute preserve behavior"; this file's job
+// is "do the three intrinsics themselves do what their contract says",
+// which nothing else specifically pins down.
+//
+// A `void*` local needs an `unsafe { }` block outside lib/std (the same
+// caller-side-locals rule 17_mem_pool_and_aligned_alloc.tr's `aligned`
+// local already exercises) -- these intrinsics are bare language keywords,
+// not module-qualified calls, but their RESULT is still an ordinary raw
+// `void*`, so the same gate applies to where it's bound.
+
+import test;
+
+fn main(): int {
+    unsafe {
+        // gc_alloc: a fresh, writable block of exactly the requested size.
+        mut p: void* = gc_alloc(16);
+        test::assert(p != null, "gc_alloc must return a non-null block");
+        mut ip: int* = p to int*;
+        ip[0] = 111;
+        ip[1] = 222;
+        test::assert(ip[0] == 111 && ip[1] == 222, "gc_alloc's block must be writable for its full requested size");
+
+        // gc_alloc_zeroed: every byte starts at 0, unlike gc_alloc (which
+        // makes no such promise). Checked via `string` indexing (a byte
+        // view), matching how io::read_to_string()/net::TcpConnection.read()
+        // actually consume this guarantee -- one already-nonzero byte
+        // written into the LAST slot proves this isn't accidentally passing
+        // because the allocator happened to hand back fresh, already-zero
+        // pages (glibc frequently does for a first-ever large calloc, which
+        // would make this assertion pass even from a non-zeroing gc_alloc).
+        mut z: string = gc_alloc_zeroed(8) to string;
+        z[7] = 9; // poison the last byte so an all-zero pass can't be coincidental
+        mut allZeroExceptLast: bool = true;
+        mut i: int = 0;
+        while i < 7 {
+            if z[i] != 0 {
+                allZeroExceptLast = false;
+            }
+            i = i + 1;
+        }
+        test::assert(allZeroExceptLast, "gc_alloc_zeroed must zero-fill every byte it returns");
+        test::assert(z[7] == 9, "writing into a gc_alloc_zeroed block must actually persist");
+
+        // gc_realloc: preserves existing contents up to the smaller of the
+        // two sizes, and the grown tail is genuinely usable (not just
+        // "doesn't crash") -- exactly the contract list.tr/map.tr/etc.'s
+        // growth call sites depend on.
+        mut small: void* = gc_alloc(4 * 8); // room for 4 ints
+        mut smallInts: int* = small to int*;
+        smallInts[0] = 1;
+        smallInts[1] = 2;
+        smallInts[2] = 3;
+        smallInts[3] = 4;
+
+        mut grown: void* = gc_realloc(small, 8 * 8); // room for 8 ints
+        mut grownInts: int* = grown to int*;
+        test::assert(grownInts[0] == 1 && grownInts[1] == 2 && grownInts[2] == 3 && grownInts[3] == 4,
+            "gc_realloc must preserve every byte of the original allocation");
+        grownInts[4] = 5;
+        grownInts[5] = 6;
+        grownInts[6] = 7;
+        grownInts[7] = 8;
+        test::assert(grownInts[4] == 5 && grownInts[7] == 8, "gc_realloc's grown tail must be genuinely writable");
+    }
+
+    return 0;
+}

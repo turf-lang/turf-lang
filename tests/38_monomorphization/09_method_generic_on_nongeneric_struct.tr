@@ -1,0 +1,55 @@
+// Regression test: TYPE-002 S14a -- a method generic IN ITS OWN RIGHT on a
+// NON-generic struct (disclosed as a gap by S12b, closed this session).
+// `fn<T> Box.echo(x: T): T` where `Box` itself declares no `<...>` type
+// parameters at all is a genuinely different shape from every other test
+// in this folder: TypeCheckerCall.cpp's visitMethodCall() only ever
+// recovered a substitution from the RECEIVER's own GenericType before this
+// session, so this call was never even given the right TYPE (not just
+// left un-monomorphized) -- `b.echo(42)` used to report its own call
+// expression's type as the literal, un-substituted TurfGenericParamType("T")
+// instead of `int`.
+import test;
+
+struct Box {
+    dummy: int
+}
+
+fn Box.new(): void {
+    self.dummy = 0;
+}
+
+fn<T> Box.echo(x: T): T {
+    return x;
+}
+
+struct Big {
+    a: int,
+    b: int,
+    c: int
+}
+
+fn Big.new(a: int, b: int, c: int): void {
+    self.a = a;
+    self.b = b;
+    self.c = c;
+}
+
+fn main(): int {
+    mut b: Box = Box::new();
+
+    // Verified live via --emit-llvm during this session: three separate,
+    // concrete clones (turf_Box.echo_gen1_int/_string/_Big), each with
+    // `self: ptr` staying a BARE Box* (never wrapped as a GenericType --
+    // Box itself has no type parameters, only the method does).
+    mut r: int = b.echo(42);
+    test::assert(r == 42, "Box.echo<int> wrong");
+
+    mut s: string = b.echo("hello");
+    test::assert(s == "hello", "Box.echo<string> wrong");
+
+    // >8-byte T, same method -- coexists correctly with the two above.
+    mut big: Big = b.echo(Big::new(1, 2, 3));
+    test::assert(big.a == 1 && big.b == 2 && big.c == 3, "Box.echo<Big> wrong");
+
+    return 0;
+}

@@ -4,7 +4,7 @@
  * @details Part of the Resolver name-resolution pass (Issue #18), split from
  *          the original monolithic Resolver.cpp by category (mirrors
  *          AST.h's ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -152,16 +152,43 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     }
 
     if (SymTable_.isErrorTypeName(LeftName)) {
+      // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
+      // messageExpr)` -- exactly ONE argument -- is now a legal
+      // construction form carrying a message, NOT a general reopening of
+      // §5.1's deferred per-variant-fields gap. Checked BEFORE the
+      // unconditional "not callable" rejection below, which still applies
+      // to every other arity (0 args, or 2+). Args are already resolved
+      // (visitChild() at the top of this function) -- only variant
+      // EXISTENCE needs checking here, mirroring visitScopeAccess()'s bare-
+      // reference branch below exactly (same NoSuchVariantError, same
+      // suggestion mechanism).
+      if (Node.getArgs().size() == 1) {
+        auto ET = SymTable_.lookupErrorType(LeftName);
+        if (ET && !ET->hasVariant(CalleeName)) {
+          RankedSuggestions Suggestions;
+          Suggestions.Local =
+              SuggestionIndex::suggestVisible(CalleeName, ET->getVariantNames());
+          NoSuchVariantError(ScopeCallee->getRightLoc(), "error", LeftName,
+                             CalleeName, Suggestions)
+              .raise();
+          return;
+        }
+        ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantConstructWithMessage;
+        return;
+      }
       // e.g. `MathError::DivisionByZero(...)` -- a real error type, but
       // variants are bare, non-callable names, exactly like a plain `enum`
-      // variant just above (docs/planning/Errors.md -- payload fields on a
-      // variant are deferred, see Errors.md's own note on why).
+      // variant just above (docs/architecture/errors_and_recover.md -- payload
+      // fields on a variant are deferred, see errors_and_recover.md §5.1),
+      // for every arity OTHER than the one-message-argument form above.
       ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantRef;
       TypeError(Node.getLoc(), "'" + LeftName + "::" + CalleeName +
                                    "' is an error variant, not a function -- "
                                    "it can't be called.",
                 "Drop the '(...)' -- '" + LeftName + "::" + CalleeName +
-                    "' is already a complete value on its own.",
+                    "' is already a complete value on its own, or pass "
+                    "exactly one 'string' message: '" + LeftName + "::" +
+                    CalleeName + "(\"...\")'.",
                 "Not callable!")
           .raise();
       return;
@@ -426,8 +453,11 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     // bare intrinsic — one that is callable WITHOUT a module qualifier AND has no
     // module home in the standard library.
     //
-    // As of now there is exactly one such intrinsic:
-    //   - typeof(x)   — compile-time type name, no module
+    // As of now these are the bare intrinsics:
+    //   - typeof(x)             — compile-time type name, no module
+    //   - gc_alloc(n)           — MEM-001, typed-allocation surface for
+    //   - gc_alloc_zeroed(n)      turf_rt_alloc/_zeroed/turf_rt_realloc
+    //   - gc_realloc(p, n)        (include/Intrinsics.h category 1)
     //
     // Everything else comes from lib/std:
     //   - print / printline / input  → io.tr   (call as io.printline(...))
@@ -447,7 +477,9 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     // lib/std, resolved through the exact same module-function path as
     // everything else in this comment.
     static const std::unordered_set<std::string> BareIntrinsics = {
-        "typeof",
+        "typeof", "gc_alloc", "gc_alloc_zeroed", "gc_realloc",
+        "gc_collect", "gc_is_managed", "gc_checked_free",
+        "gc_pin", "gc_unpin",
     };
     if (BareIntrinsics.count(CalleeName)) {
       // True bare intrinsic — skip error, TypeChecker validates arity/types.
@@ -659,8 +691,8 @@ void Resolver::visitFieldAccess(FieldAccessExprAST &Node) {
 }
 
 
-// `<expr> recover ...` (docs/planning/Errors.md). Resolves the wrapped `!T`
-// expression first (populating its callee's ResolvedCandidates/
+// `<expr> recover ...` (docs/architecture/errors_and_recover.md). Resolves the
+// wrapped `!T` expression first (populating its callee's ResolvedCandidates/
 // ResolvedCallTarget, needed below), then dispatches on which of the three
 // forms this is.
 void Resolver::visitRecoverExpr(RecoverExprAST &Node) {
@@ -676,9 +708,9 @@ void Resolver::visitRecoverExpr(RecoverExprAST &Node) {
   SymTable_.enterScope();
 
   if (Node.getKind() == RecoverKind::AsRun) {
-    // Bare-error restriction (docs/planning/Errors.md): `recover as err run`
-    // is rejected when every error type this call can actually fail with
-    // (per the callee's PossibleErrorTypeNames, computed by
+    // Bare-error restriction (docs/architecture/errors_and_recover.md):
+    // `recover as err run` is rejected when every error type this call can
+    // actually fail with (per the callee's PossibleErrorTypeNames, computed by
     // CollectReturnedErrorTypeNames -- see its own doc comment on why it's
     // unfiltered) is bare-form (`error Name;`, sugar for one informationless
     // DEFAULT variant, nothing to discriminate on). If the callee is
@@ -757,11 +789,12 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
   }
 
   if (SymTable_.isErrorTypeName(LeftName)) {
-    // Bare `ErrorType::Variant` reference (docs/planning/Errors.md) -- e.g.
-    // `return MathError::DivisionByZero;` or `err == MathError::
-    // DivisionByZero`. Mirrors the EnumVariant branch above exactly: a
-    // variant is always a bare name, never callable (payload fields are
-    // deferred, see Errors.md's own note on why).
+    // Bare `ErrorType::Variant` reference
+    // (docs/architecture/errors_and_recover.md) -- e.g. `return
+    // MathError::DivisionByZero;` or `err == MathError:: DivisionByZero`.
+    // Mirrors the EnumVariant branch above exactly: a variant is always a bare
+    // name, never callable (payload fields are deferred, see
+    // errors_and_recover.md §5.1).
     Node.ResolvedKind = ScopeAccessKind::ErrorVariantRef;
     auto ET = SymTable_.lookupErrorType(LeftName);
     if (!ET)

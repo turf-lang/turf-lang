@@ -1,0 +1,47 @@
+// LANG-001: bitwise operators (& | ^) are now overloadable on a struct --
+// this used to be a fail_* test ("bitwise operators are not in the
+// overloadable whitelist"); the whitelist grew and this is now legal.
+import test;
+
+struct Flags {
+    bits: int
+}
+
+operator &(a: Flags, b: Flags): Flags {
+    mut r: Flags = Flags::default();
+    r.bits = a.bits & b.bits;
+    return r;
+}
+
+operator |(a: Flags, b: Flags): Flags {
+    mut r: Flags = Flags::default();
+    r.bits = a.bits | b.bits;
+    return r;
+}
+
+operator ^(a: Flags, b: Flags): Flags {
+    mut r: Flags = Flags::default();
+    r.bits = a.bits ^ b.bits;
+    return r;
+}
+
+fn main(): int {
+    mut a: Flags = Flags::default();
+    a.bits = 0b1100;
+    mut b: Flags = Flags::default();
+    b.bits = 0b1010;
+
+    mut andR: Flags = a & b;
+    mut orR: Flags = a | b;
+    mut xorR: Flags = a ^ b;
+
+    test::assert(andR.bits == 0b1000, "Flags & Flags should AND the bits");
+    test::assert(orR.bits == 0b1110, "Flags | Flags should OR the bits");
+    test::assert(xorR.bits == 0b0110, "Flags ^ Flags should XOR the bits");
+
+    // Builtin int bitwise ops are completely unaffected by the struct
+    // overloads existing.
+    test::assert((0b1100 & 0b1010) == 0b1000, "builtin int & still works");
+
+    return 0;
+}

@@ -39,6 +39,7 @@ public:
       "method, called as `x." + MethodName + "(...)`) or `fn " + StructName +
       "." + MethodName + "(...) static: ReturnType` (static method, called "
       "as `" + StructName + "::" + MethodName + "(...)`).");
+    trySetDeterministicRename(MethodName, Suggestions);
   }
 };
 /**
@@ -78,6 +79,7 @@ public:
         Suggestions, "Double-check the spelling, or make sure '" +
                          FieldName + "' is declared as a field on '" +
                          StructName + "'.");
+    trySetDeterministicRename(FieldName, Suggestions);
   }
 };
 // `StructName::new(...)` was called but `StructName` has no `.new`
@@ -260,6 +262,67 @@ public:
     Hint_ = "'" + StructName + "." + MethodName + "' takes no implicit "
             "'self' (it's declared 'static'). Call it as '" + StructName +
             "::" + MethodName + "(...)' instead.";
+  }
+};
+
+/**
+ * @brief A struct contains itself by value, either directly (`struct A { me:
+ *        A }`) or through a chain of other structs/arrays/generic
+ *        instantiations (`struct A { b: B } struct B { a: A }`) -- an
+ *        infinitely-sized type. TYPE-001
+ *        (docs/planning/ARCHITECTURE_OVERHAUL.md §8, INV-LAYOUT-1).
+ *
+ * Before this check existed, BOTH of the examples above compiled with zero
+ * diagnostics. The declaration alone never crashed anything (no layout is
+ * computed just from registering a name), but the moment anything tried to
+ * INSTANTIATE the type (`mut x: A;`) the compiler itself segfaulted --
+ * confirmed live: exit 139, no output at all, reproducible as early as
+ * `turf --resolve` on `struct A { me: A }` alone. Raising this at the end
+ * of Resolver Pass 1 -- after every struct name is registered, before
+ * anything downstream (layout, default-value construction, Codegen) ever
+ * looks at a field -- turns that native crash into an ordinary diagnostic,
+ * and is the one thing every later layout/default/GC-descriptor computation
+ * in this compiler is allowed to assume never needs to happen (INV-LAYOUT-1).
+ *
+ * A *pointer* field (`next: Node*`, `prev: &Node`) is deliberately never an
+ * edge in this check -- see checkStructLayoutAcyclicity()'s doc comment for
+ * the full non-edge list. Recursive data structures written with a pointer
+ * field remain completely unaffected; only by-value self-containment (which
+ * has no finite size, and never worked beyond declaration anyway) is
+ * rejected.
+ */
+class StructLayoutCycleError : public TurfError {
+public:
+  /**
+   * @param Loc        Where the diagnostic points -- the declaration of the
+   *                    struct at which the cycle was detected (CyclePath[0]).
+   * @param StructName  Same struct's name, repeated for the headline message
+   *                    (CyclePath[0], kept as a separate parameter rather
+   *                    than re-indexing CyclePath so the constructor reads
+   *                    correctly even if CyclePath's shape ever changes).
+   * @param CyclePath   The full cycle, in traversal order, WITH the closing
+   *                    repeat of CyclePath[0] at the end -- e.g. {"A", "B",
+   *                    "A"} for a mutual A/B cycle, or {"A", "A"} for a
+   *                    direct self-cycle. Rendered verbatim as "A -> B -> A".
+   */
+  StructLayoutCycleError(SourceLocation Loc, const std::string &StructName,
+                         const std::vector<std::string> &CyclePath)
+      : TurfError(Loc, Colors::BRIGHT_RED + "struct '" + Colors::CYAN +
+                           StructName + Colors::BRIGHT_RED +
+                           "' cannot contain itself by value." +
+                           Colors::RESET) {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    std::string Path;
+    for (size_t i = 0; i < CyclePath.size(); ++i) {
+      if (i) Path += Colors::BRIGHT_GREEN + " -> " + Colors::CYAN;
+      Path += CyclePath[i];
+    }
+    Message += "\n  " + Colors::BRIGHT_GREEN + "cycle: " + Colors::CYAN +
+               Path + Colors::RESET;
+    Hint_ = "Make one of these fields a reference or pointer ('&" +
+            StructName + "', '&?" + StructName + "', '" + StructName +
+            "*') instead of holding the struct by value -- a struct that "
+            "contains itself by value has no finite size.";
   }
 };
 

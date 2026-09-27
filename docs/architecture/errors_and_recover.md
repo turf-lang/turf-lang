@@ -4,7 +4,7 @@ Technical reference for Turflang's recoverable-error system, as implemented. Thi
 
 The original design brief was `docs/planning/Errors.md`, a first-draft proposal doc removed 2026-08-04 once the feature shipped and this document (its precise technical reference) superseded it — see git history if the original prose motivation/worked-examples version is ever needed. This document defines exact contracts (what type each construct has, when each diagnostic fires, what each pass does) and traces the implementation.
 
-**Scope note**: error variants are bare names only, carrying no payload fields (no `FileNotFound(path: string)`-style data) — see §5.1 below for why this is a deliberate, not-yet-filled gap, not an oversight.
+**Scope note**: error variants are bare names, carrying no PER-VARIANT-DECLARED fields (no `FileNotFound(path: string)`-style data with a different shape per variant) — see §5.1 below for why that specific gap remains deliberate. STD-002 (`ARCHITECTURE_OVERHAUL.md` §8/§15.6(c)) added one narrower, fixed-shape exception on top of that: every variant, of every error type, may optionally carry ONE `string` message, attached at construction (§1.2a) and read back via `err.message` (§1.4.3). This is not a reopening of §5.1's gap — there is still no per-variant field *declaration* syntax, and no destructuring.
 
 ---
 
@@ -36,7 +36,7 @@ Equivalent to `error GeneralError { DEFAULT }`. Constructed as `GeneralError::DE
 MathError::DivisionByZero
 ```
 
-A bare, **non-callable** reference — identical in spirit to `Color::Red` for a plain `enum`. `MathError::DivisionByZero()` (call syntax, even with zero arguments) is rejected the same way `Color::Red()` already is: an error variant is a value, not a function.
+A bare, **non-callable** reference — identical in spirit to `Color::Red` for a plain `enum`. `MathError::DivisionByZero()` (call syntax, with zero arguments) is rejected the same way `Color::Red()` already is: an error variant is a value, not a function — **except** for the one message-carrying construction form §1.2a describes next. Any OTHER arity (two or more arguments) is rejected the identical way.
 
 ```turf
 fn divide(a: int, b: int): !int {
@@ -46,6 +46,21 @@ fn divide(a: int, b: int): !int {
     return a / b;
 }
 ```
+
+### 1.2a Constructing a variant with a message (STD-002)
+
+```turf
+fn divide(a: int, b: int): !int {
+    if (b == 0) {
+        return MathError::DivisionByZero("division by " + (a to string) + "/0");
+    }
+    return a / b;
+}
+```
+
+Exactly **one** `string` argument — `ErrorType::Variant(messageExpr)` — attaches a message to this specific error *occurrence*. `messageExpr` need not be a compile-time constant; it may be built at runtime (string concatenation, a formatted value, …), unlike the variant's own tag, which is always compile-time-known. The variant must still genuinely exist (`NoSuchVariantError` on a typo, exactly like the bare form); any arity other than exactly one is still rejected as "not a function" (§1.2's own rejection).
+
+This is **not** a general reopening of §5.1's deferred payload-fields gap: every variant of every error type gets the exact same one `message: string` slot — there is no per-variant field *declaration*, no differently-shaped variants, and no destructuring. Reading the message back is via `err.message` (§1.4.3) — a special, narrow field read on an `AnyErrorType`-typed value, not general struct field access. A bare `ErrorType::Variant` reference (no message) still works exactly as before; `err.message` on one simply reads back as `""`, never garbage or a crash.
 
 ### 1.3 `!T`: fallible return types
 
@@ -119,7 +134,17 @@ mut x: int = divide(10, 0) recover as err run {
 };
 ```
 
-Equality compares **variant identity only** — since a variant carries no payload (the scope note at the top of this document), this comparison is exact and total; there is no partial/field-level comparison to worry about.
+Equality compares **variant identity only**, never the message (STD-002, §1.2a) — `err == MathError::DivisionByZero` is `true` regardless of what message `err` happens to be carrying, exact and total, no partial/field-level comparison to worry about.
+
+**`err.message`** reads the `string` attached at construction (§1.2a), or `""` if the error was a bare (message-less) reference:
+
+```turf
+divide(10, 0) recover as err run {
+    io::printline(err.message);   // "division by 10/0"
+};
+```
+
+This is the *only* field `err` has — `err.message` is a special-cased read on `AnyErrorType`, not general struct field access (`err` is not a struct); any other field name is rejected with a dedicated diagnostic.
 
 ### 1.5 The divergence rule, precisely
 
@@ -164,9 +189,11 @@ A `!T`-declared function is *permitted*, not *obliged*, to fail — `!T` widens 
 
 | Diagnostic | Raised when |
 |---|---|
-| `TypeError` ("is an error variant, not a function") | An error variant is called, even with zero arguments |
-| `TypeError` ("has fields and must be constructed...") | Historical message text; no variant has fields anymore, so this specific wording is currently unreachable — see §5.1 |
-| `LogErrorAt` ("Error type '...' has no variant '...'") | A reference (bare or as a call target) to an unknown variant name, with Damerau-Levenshtein suggestions |
+| `TypeError` ("is an error variant, not a function") | An error variant is called with any arity other than exactly one `string` argument (0, 2+) |
+| `TypeError` ("has fields and must be constructed...") | Historical message text; no variant has PER-VARIANT-DECLARED fields, so this specific wording is currently unreachable — see §5.1 |
+| `TypeError` ("expects a 'string' message, got '...'") | STD-002 (§1.2a): `ErrorType::Variant(messageExpr)`'s one argument isn't a `string` |
+| `LogErrorAt` ("Error type '...' has no variant '...'") | A reference (bare, a call target, or STD-002's message-carrying construction) to an unknown variant name, with Damerau-Levenshtein suggestions |
+| `TypeError` ("has no field '...' -- only 'message' is readable") | STD-002 (§1.4.3): a field access on an `AnyErrorType`-typed value (`err`) other than `.message` |
 | `DuplicateTypeNameError` | Two `error` (or `error`/`struct`/`enum`) declarations share one name |
 | `TypeError` ("'recover' can only be used on a fallible...") | `recover` applied to an expression whose type is not `!T` |
 | `TypeError` ("doesn't match this call's success type") | `recover produce value` where `value`'s type isn't exactly `T` |
@@ -216,7 +243,9 @@ class ErrorDeclExprAST : public ExprAST {
 };
 ```
 
-**`ScopeAccessKind::ErrorVariantRef`** (`include/AST.h:1033`) — added to the existing `ScopeAccessKind` enum (the same node type that already represents `EnumName::Variant`, `Module::func`, `StructName::method`, etc.). Set on a `ScopeAccessExprAST` whenever `Left` names a declared error type; always non-callable, mirroring `EnumVariant`'s existing non-callable rule. Kept as its own enum value (rather than reusing `EnumVariant`) because error values lower differently in Codegen (a tag string, not an integer ordinal, §2.8) and participate in `!T`/`recover`/`AnyErrorType` comparisons that plain enums don't.
+**`ScopeAccessKind::ErrorVariantRef`** (`include/AST.h:1033`) — added to the existing `ScopeAccessKind` enum (the same node type that already represents `EnumName::Variant`, `Module::func`, `StructName::method`, etc.). Set on a `ScopeAccessExprAST` whenever `Left` names a declared error type; always non-callable, mirroring `EnumVariant`'s existing non-callable rule. Kept as its own enum value (rather than reusing `EnumVariant`) because error values lower differently in Codegen (a tag+message struct, not an integer ordinal, §2.8) and participate in `!T`/`recover`/`AnyErrorType` comparisons that plain enums don't.
+
+**`ScopeAccessKind::ErrorVariantConstructWithMessage`** (`include/ASTAccess.h`, STD-002) — the *callable* sibling: set when `Left::Right(...)` names a declared error type's variant AND the call has exactly one argument (§1.2a). Kept as its own kind rather than a flag on `ErrorVariantRef` because the two dispatch completely differently downstream (Resolver's arity gate, TypeChecker's short-circuit, Codegen's GC-heap-allocate-and-store construction (OVH-002 — a bare `malloc` before it) vs. a compile-time-only global) — see §2.6/§2.7/§2.8.
 
 **`RecoverKind`** (`include/AST.h:1111`):
 
@@ -240,7 +269,7 @@ public:
 
 `Block` reuses the ordinary `BlockExprAST` every `{ ... }` body in the language already uses (if/while/function bodies) — no new block-representation node was needed.
 
-`ErrorType::Variant` construction needed **no new expression node at all**: `Left::Right(args)` already parses generically as `FuncCallExprAST(Callee=ScopeAccessExprAST(...))` regardless of what `Left` is (the same mechanism `StructName::new(...)` uses) — but since a variant is never callable (§1.2), this shape is only ever reached to be *rejected* (§2.6), not to construct anything.
+`ErrorType::Variant` construction needed **no new expression node at all**: `Left::Right(args)` already parses generically as `FuncCallExprAST(Callee=ScopeAccessExprAST(...))` regardless of what `Left` is (the same mechanism `StructName::new(...)` uses). Before STD-002, a variant was never callable (§1.2), so this shape was only ever reached to be *rejected* (§2.6). STD-002 gives it a real, accepted meaning for exactly one arity (§1.2a) — Resolver dispatches on `Node.getArgs().size()` to tell the two cases apart (§2.6), still with zero new grammar or AST nodes.
 
 ### 2.4 Types
 
@@ -308,11 +337,13 @@ if (CurTok == '!') {
 
 **Registry** (`include/ResolverSymbolTable.h`) — `registerErrorType`/`isErrorTypeName`/`lookupErrorType`/`getAllErrorTypeNames`, a registry parallel in shape to the existing enum registry, populated during Pass 1 hoisting (`hoistTopLevel`/`hoistModuleBody`, mirroring the enum branches there exactly, including inside imported module bodies).
 
-**`visitFuncCall()`**'s error-type branch (`src/Resolver.cpp:1212`) — when `Left` names a known error type, `ResolvedKind = ErrorVariantRef` and a `TypeError` is raised unconditionally: an error variant is never callable, mirroring the pre-existing `EnumVariant` rejection immediately above it in the same function.
+**`visitFuncCall()`**'s error-type branch (`src/ResolverCall.cpp`) — when `Left` names a known error type: if the call has exactly one argument (STD-002, §1.2a), validates the variant exists (mirroring `visitScopeAccess()`'s bare-reference check just below) and sets `ResolvedKind = ErrorVariantConstructWithMessage` — no rejection, this is now a legitimate construction. For every OTHER arity, `ResolvedKind = ErrorVariantRef` and a `TypeError` is raised unconditionally: an error variant is never callable at any other arity, mirroring the pre-existing `EnumVariant` rejection immediately above it in the same function. Args are resolved (`visitChild()`) unconditionally at the top of `visitFuncCall()`, before this dispatch, so the message expression is name-resolved either way.
 
 **`visitScopeAccess()`**'s error-type branch (`src/Resolver.cpp:1815`) — the bare (non-call) reference case: `ResolvedKind = ErrorVariantRef`, validates the variant exists (with suggestions on a near-miss), otherwise a no-op — there are no fields to validate anymore (§5.1).
 
-**`CollectReturnedErrorTypeNames()`** (`src/Resolver.cpp:208`) — a conservative, non-interprocedural structural scan of a function body's `return` statements for a bare `ErrorType::Variant` shape, collecting the left-hand name. Mirrors `MutatesSelfField()`'s exact recursion shape (only descends through `Block`/`If`/`While`/`For`). Feeds `ResolverFunctionSymbol::PossibleErrorTypeNames` (`ResolverSymbolTable.h:251`), computed once inside `buildFunctionSymbol()`.
+**`CollectReturnedErrorTypeNames()`** (`src/ResolverCore.cpp`) — a conservative, non-interprocedural structural scan of a function body's `return` statements for a bare `ErrorType::Variant` shape, collecting the left-hand name. Descends through `Block`/`If`/`While`/`For`/`ForEach` (mirroring `MutatesSelfField()`'s recursion shape) and, since OVH-012, also `VarDecl`/`Assignment` (into the initializer/RHS) and `RecoverExpr` (into `Wrapped`, and `ProduceExpr` or `Block` depending on `RecoverKind`) — needed because the idiomatic way a `!T` function surfaces a *different* error than whatever it called failed with is `immut x: T = call() recover run { return ErrorType::Variant; };` (`io::read_lines`, `json::parse_number`/`parse_array`/`parse_object`), and the scan previously had no case for any of those three node kinds at all, so a `return` reachable only through a `recover` block was invisible to it. Feeds `ResolverFunctionSymbol::PossibleErrorTypeNames` (`ResolverSymbolBase.h`), computed once inside `buildFunctionSymbol()`.
+
+Also since OVH-012: when the scan is inside a `recover as err run { ... }` block's `Block` and a `return` names a bare variable matching that block's own `BoundName` (`json::parse`'s `p.parse_value() recover as err run { return err; };` — re-throwing whatever error the wrapped call actually produced), there is no error type *name* to collect at all (`err`'s static type is the type-erased `AnyErrorType`). This sets `ResolverFunctionSymbol::ReturnsReboundError` instead — a separate boolean, `NeverReturnsErrorWarning`'s check below now treats it as "returns a real error" unconditionally, bypassing the `isErrorTypeName()` filter (there is nothing to filter).
 
 This list is **deliberately unfiltered** at collection time: `buildFunctionSymbol()` runs during Pass 1 hoisting, when a later-declared error type might not be registered yet, and a `Left::Right` shape could just as easily name a struct/enum/module reference that has nothing to do with errors. Every consumer filters it through `isErrorTypeName()` at its own, later point (Pass 2, by which point every error type in the program is guaranteed registered) before drawing any conclusion from it. Two consumers:
 
@@ -320,11 +351,17 @@ This list is **deliberately unfiltered** at collection time: `buildFunctionSymbo
 
 2. **The bare-error restriction** (§1.7) — `Resolver::visitRecoverExpr()` (`src/Resolver.cpp:1720`), only for `Kind == AsRun`: reads the wrapped call's resolved candidate's `PossibleErrorTypeNames`, filters through `isErrorTypeName()`, and — if the resulting set is non-empty and *every* entry is bare-form (`isBareForm()`) — raises `BareErrorAsBindingError`. If the callee is ambiguous (an unresolved overload, no unique `ResolvedCallTarget`) or its filtered set is empty, the check is skipped rather than guessed at — conservative under-flagging, the same posture `MutatesSelfField()` already takes for a hard-error gate.
 
-**`visitRecoverExpr()`**'s dispatch, in full: resolves the wrapped expression first (populating its callee's `ResolvedCandidates`, needed above). For `Produce`, resolves the produce expression in the current scope. For `Run`/`AsRun`, the block gets its own scope (mirroring if/while/function bodies); `AsRun` additionally declares the bound name as an `AnyErrorType`-typed variable *before* resolving the block, so ordinary variable lookup inside it (including the equality check in §1.4.3) works with no special-casing.
+**`visitRecoverExpr()`**'s dispatch, in full: resolves the wrapped expression first (populating its callee's `ResolvedCandidates`, needed above). For `Produce`, resolves the produce expression in the current scope. For `Run`/`AsRun`, the block gets its own scope (mirroring if/while/function bodies); `AsRun` additionally declares the bound name as an `AnyErrorType`-typed variable *before* resolving the block, so ordinary variable lookup inside it (including the equality check in §1.4.3, and STD-002's `.message` field read) works with no special-casing.
+
+**`CollectReturnedErrorTypeNames()`** (STD-002 update) also recognizes a `return`ed `FuncCallExprAST` whose callee is a `ScopeAccessExprAST` — the message-carrying construction's shape — collecting `Left` the identical unfiltered way the bare-reference branch already does. Without this, a function that only ever fails via `return ErrorType::Variant("msg");` (never a bare reference) was wrongly flagged with `NeverReturnsErrorWarning` (§1.8) — confirmed live before this fix.
 
 ### 2.7 TypeChecker
 
 **`visitScopeAccess()`**'s `ErrorVariantRef` branch (`src/TypeChecker.cpp`, alongside the existing `EnumVariant` branch) — sets the node's type via `GlobalSymbolTable->LookupType(LeftName)`, the real `TurfUserErrorType`.
+
+**`visitFuncCall()`**'s `ErrorVariantConstructWithMessage` branch (`src/TypeCheckerCall.cpp`, STD-002) — short-circuited immediately after the pre-existing `DefaultConstruct` short-circuit, for the identical reason: Resolver never populates `ResolvedCandidates` for this kind either. Checks the one argument's type is `string` (`TypeError` if not), then sets the whole call's type to `NamedType(LeftName)` — the SAME type a bare reference gets (`visitScopeAccess()`'s `ErrorVariantRef` branch just above); constructing WITH a message doesn't change what KIND of value this is, only what runtime data it carries (§2.8).
+
+**`visitFieldAccess()`**'s `AnyErrorType` branch (`src/TypeCheckerCall.cpp`, STD-002) — checked before the ordinary struct-field machinery (an `AnyErrorType` base is never a struct): `.message` types as `string`; any other field name is a dedicated `TypeError`.
 
 **`visitReturn()`**'s `!T` compatibility rule (`src/TypeChecker.cpp:1109`) — a genuinely different rule from ordinary `typesCompatible()`: a function declared `!T` may return either something compatible with `T`, or a value of *any* declared error type (§1.3 — there is no single specific type to check the return value against). `isDeclaredErrorTypeValue()` (`TypeChecker.cpp:1095`) resolves a bare `NamedType` (the shape a would-be constructed variant's type would take, following the same convention `StructName::new(...)` uses) through `GlobalSymbolTable` when needed. The canonical forbidden example (`fn foo(): int { return divide(10, 0); }`, `divide` returning `!int`) is rejected by the ordinary generic fallback with no extra code at all — `!int` and `int` simply aren't the same or a compatible type by any existing rule.
 
@@ -367,20 +404,34 @@ Recognizes exactly `return`/`break`/`continue` — not e.g. a call to `sys::exit
 
 Built once, cached. This means a function's LLVM return type never varies per success type — `getLLVMType()` needs no per-`T` specialization for `!T` at all (`Codegen.cpp:393`, `if (T->isErrorUnion()) return getFallibleValueType();`).
 
-**`BoxToI64Slot()` / `UnboxFromI64Slot()`** (`Codegen.cpp:141`, `170`) — the success value is boxed into the 64-bit `successBits` slot: bitcast for same-width types (`double`), `[sz]ext`/`trunc` for narrower integers (`bool`, `char`, `int32`), `ptrtoint`/`inttoptr` for pointers (`string`, generic type parameters). For anything wider than 64 bits — a struct or fixed-size array by value — the value is heap-allocated (malloc) and the *pointer* is boxed into the slot instead, then loaded back symmetrically on unboxing. This is the same "value must outlive the function that returns it" reasoning already used for error tag strings (below), applied to the success side.
+**`BoxToI64Slot()` / `UnboxFromI64Slot()`** (`Codegen.cpp:141`, `170`) — the success value is boxed into the 64-bit `successBits` slot: bitcast for same-width types (`double`), `[sz]ext`/`trunc` for narrower integers (`bool`, `char`, `int32`), `ptrtoint`/`inttoptr` for pointers (`string`, generic type parameters). For anything wider than 64 bits — a struct or fixed-size array by value — the value is heap-allocated **on the GC heap** (`turf_rt_alloc`, with `T`'s own real descriptor — OVH-002, `docs/development/changes/OVH-002.md`; a bare, unregistered `malloc` before it, which left any GC-heap pointer INSIDE that boxed `T` — e.g. a `string` field — untraced and at risk of being freed by a collection between the box's construction and its later unboxing, `tests/41_gc/09_boxed_fallible_success_survives_collection.tr`) and the *pointer* is boxed into the slot instead, then loaded back symmetrically on unboxing. This is the same "value must outlive the function that returns it" reasoning already used for an error value (below, and STD-002's own message-carrying construction), applied to the success side.
 
-**`BuildErrorTag()`** (`Codegen.cpp:216`) — an error value's **entire runtime representation** is a global string constant uniquely identifying `ErrorType::Variant`, e.g. `"MathError::DivisionByZero"`. Since a variant carries no payload (scope note, top of document), no heap allocation or wrapping struct is needed at all — the tag string *is* the value, an `i8*` like any other string. This is also why `err == MathError::DivisionByZero` (§1.4.3) lowers to a plain `strcmp` on two tag strings (`getOrCreateStrcmpFn()`), rather than needing any whole-program variant-ID registry: a string is already unique per declared variant with zero cross-compilation-unit coordination.
+**`getErrorValueType()`** (`CodegenCore.cpp`, STD-002) — an error value's runtime representation, since STD-002 (§1.2a), is **one fixed LLVM struct regardless of whether a message was attached**, the exact same "one shape, no discriminated union" design `getFallibleValueType()` already uses for `!T` itself:
 
-`GetErrorTagValue()` builds a bare `ErrorType::Variant` reference's tag directly as a compile-time constant (skipping its ordinary `ScopeAccessExprAST::codegen()` path, which would do the same thing less directly); any other error-tag-shaped expression (`err`, or any other `AnyErrorType`/`isUserError()`-typed value) is simply codegenned normally, since its value already *is* the tag string.
+```
+%TurfErrorValue = { i8* tag, i8* message }
+```
 
-`IsErrorTagExpr()` / `IsErrorConstructionExpr()` are the structural recognizers used to dispatch on this: `IsErrorTagExpr` for `BinaryExprAST`'s equality special-case (`Codegen.cpp:1370`), `IsErrorConstructionExpr` for deciding a `return`ed value's wrap direction (below). Both check `ScopeAccessKind::ErrorVariantRef` (or, for a variable, its Resolver-set `ResolvedSymbol->Type`) rather than any TypeChecker-derived information, per the pre-pass/main-pass tree-duplication reasoning in §2.1.
+Before STD-002, an error value's entire runtime representation WAS the bare tag string directly (no wrapping struct at all) — a plain `i8*`. That is no longer true in general: `errorPayload`/`err`'s alloca are still an opaque `i8*`/`ptr` at the LLVM level (neither needed any change — pointers carry no static shape), but what that pointer now POINTS TO is always a `TurfErrorValue`, uniformly, whether the error came from a bare reference (`message = ""`, a global constant, §1.2a's compatibility note) or a message-carrying construction. A discriminated union (bare tag string OR struct pointer, told apart at runtime) was deliberately rejected: nothing distinguishes the two shapes without a discriminant, and reading an arbitrary number of bytes past a bare tag string's own NUL terminator to check would be a real memory-safety hazard.
+
+**`BuildErrorTag()`** (`CodegenCore.cpp`) builds a BARE `ErrorType::Variant` reference's runtime value: a pointer to a global constant `TurfErrorValue{tag, message=""}`. Fully compile-time-known, so no heap allocation is needed — mirrors `BuildBareTagString()`'s (see next paragraph) own no-allocation global-constant approach, just wrapped in the struct. `BuildGlobalCStringPtr()` is the shared helper (mirroring RT-001's `emitTurfTypeDesc()`/`NameGV`+`NamePtr` idiom, CodegenStruct.cpp — the only other place in this codebase already builds a global constant struct holding a string-pointer field) that builds a `Constant*`-typed string pointer suitable as a `ConstantStruct::get()` field initializer.
+
+**`CodegenErrorVariantConstructWithMessage()`** (`CodegenCore.cpp`, STD-002) — `ErrorType::Variant(messageExpr)`'s construction (§1.2a). Unlike the bare case, `messageExpr` is in general a RUNTIME value (string concatenation, …), so this GC-heap-allocates (`turf_rt_alloc`, with `TurfErrorValue`'s own real two-pointer-word descriptor — OVH-002; a bare `malloc` before it, which left `message`'s GC-heap `string` pointer untraced, `tests/41_gc/08_error_message_survives_collection.tr`) a `TurfErrorValue`-sized block and stores `{tag, message}` into it — the same "the value must outlive the function that returns it" reasoning `BoxToI64Slot()` already uses for an oversized success value, just for the error side. Dispatched from `FuncCallExprAST::codegen()`'s `ErrorVariantConstructWithMessage` branch (CodegenFunc.cpp), evaluating the one argument first.
+
+**`BuildBareTagString()`** (`CodegenCore.cpp`, STD-002 — this IS the pre-STD-002 `BuildErrorTag()`'s exact body, renamed) builds JUST the tag `i8*` — "MathError::DivisionByZero" — with no struct wrapping. Comparing WHICH VARIANT occurred (equality, next paragraph) never needs to look at a message, so this stays the cheap direct path it always was.
+
+`GetErrorTagValue()` extracts a TAG STRING (field 0) for an equality operand, from whichever shape the operand is: a bare reference or a message-carrying construction both have a compile-time-known tag, built directly via `BuildBareTagString()` (skipping evaluation of the message expression entirely — `err == SomeError::Variant("msg")` must not re-run whatever produced `"msg"` just to compare identities). Anything else (`err`, or any other `AnyErrorType`/`isUserError()`-typed expression) is codegenned normally now — giving a `TurfErrorValue*` — then `LoadErrorValueField()` (shared with `err.message`'s own read, below) GEPs+loads field 0. This is also why `err == MathError::DivisionByZero` (§1.4.3) still lowers to a plain `strcmp` on two TAG strings (`getOrCreateStrcmpFn()`), never a struct-level comparison — a string is already unique per declared variant with zero whole-program variant-ID registry needed.
+
+**`err.message`** (`FieldAccessExprAST::codegen()`, CodegenStruct.cpp, STD-002) — checked before the ordinary struct-field path (`err` is never an addressable struct base; its VALUE, not its address, already IS the `TurfErrorValue*`): codegens the base normally, then `LoadErrorValueField(ErrVal, /*FieldIdx=*/1, ...)`.
+
+`IsErrorTagExpr()` / `IsErrorConstructionExpr()` are the structural recognizers used to dispatch on all of this: `IsErrorTagExpr` for `BinaryExprAST`'s equality special-case (below), `IsErrorConstructionExpr` for deciding a `return`ed value's wrap direction (below). Both now check `ScopeAccessKind::ErrorVariantRef` (bare) OR — STD-002 — a `FuncCallExprAST` whose callee is a `ScopeAccessExprAST` with `ResolvedKind == ErrorVariantConstructWithMessage` (or, for a variable, its Resolver-set `ResolvedSymbol->Type`) rather than any TypeChecker-derived information, per the pre-pass/main-pass tree-duplication reasoning in §2.1.
 
 **`ReturnExprAST::codegen()`** (`Codegen.cpp:3455`) — inside a `!T`-declared function, *every* `return` — including a bare `return;` for `!void`'s success case — wraps its value into a `%FallibleValue` via `WrapFallibleValue(RawVal, IsError)` before emitting `ret`, where `IsError = IsErrorConstructionExpr(Val)`. A bare `return;` when `T` is `void` wraps `{isOk=true, successBits=0, errorPayload=null}` — the function's actual LLVM return type is never bare `void` once its declared type is `!void`, so a plain `CreateRetVoid()` would be invalid here.
 
 **`RecoverExprAST::codegen()`** (`Codegen.cpp:4547`) — the control-flow lowering:
 1. Codegens the wrapped expression, extracts `isOk`, branches to a success block and a failure block.
 2. Success block: extracts `successBits`, unboxes to `T`'s real representation (skipped when `T` is `void`), branches to a merge block.
-3. Failure block: extracts `errorPayload` (the tag string). For `Produce`, codegens the produce expression and branches to merge. For `Run`/`AsRun`, `AsRun` first binds the bound name to an `AnyErrorType`-typed alloca holding `errorPayload` (the same save/restore-`NamedValues` + `GlobalSymbolTable` scope-push/pop idiom the for-loop variable already uses), then codegens the block.
+3. Failure block: extracts `errorPayload` -- STD-002: a `TurfErrorValue*`, not a bare tag string directly (§2.8's `getErrorValueType()` paragraph) -- unchanged at THIS extraction step either way, since it's still just an opaque `i8*`/`ptr` at the LLVM level. For `Produce`, codegens the produce expression and branches to merge. For `Run`/`AsRun`, `AsRun` first binds the bound name to an `AnyErrorType`-typed alloca holding `errorPayload` (the same save/restore-`NamedValues` + `GlobalSymbolTable` scope-push/pop idiom the for-loop variable already uses), then codegens the block -- this is what makes `err.message`/`err == Variant` inside that block work, both reading back through the SAME pointer.
 4. After the block: if the current insert block still lacks a terminator, branch to merge (this is the live, legitimate path for the `void`-success non-diverging case, §1.6). If it already has one (a `return`/`break`/`continue` fired inside the block, leaving one of those constructs' own "dead block after the diverging statement" as the current insert point, §2.3's cross-reference to how `ReturnExprAST`/`BreakExprAST`/`ContinueExprAST` codegen all behave), **branching that dead block to merge anyway is deliberate, not a missed case**: it is provably unreachable at runtime (nothing can reach a block positioned immediately after an unconditional terminator), so it becomes a harmless extra predecessor on the merge block's `PHINode` rather than a correctness problem — this avoids re-implementing `AllPathsDiverge`'s own analysis a second time here, in a form that could drift out of sync with it.
 5. Merge block: for a `void` success type, returns a dummy value (never used, by definition — nothing has a `void`-typed variable to receive it). Otherwise, a `PHINode` combines whichever paths actually reached the merge block — the success path always contributes one incoming edge; the failure path contributes one only if it didn't diverge.
 
@@ -398,7 +449,9 @@ New diagnostics (`include/Errors.h:1625`, `1647`) follow this codebase's existin
 2. **Hoist (Pass 1)**: `math::divide`'s signature (`(int, int): !int`) is registered like any ordinary function; `MathError`'s `DivisionByZero` variant is registered into the error-type registry (§2.6) wherever `math.tr`'s own `error MathError { DivisionByZero }` declaration is hoisted.
 3. **Resolve (Pass 2)**: the call resolves normally (ordinary overload/arity matching — nothing error-specific). `Resolver::visitRecoverExpr()` resolves the wrapped call, then the produce expression (`Kind == Produce`, so no block/bound-name handling applies).
 4. **TypeCheck**: the call's type is `!int` (`TurfErrorUnionType(TurfInt())`). `TypeChecker::visitRecoverExpr()` unwraps to `SuccessTy = int`, stashes it on `Node.ResolvedSuccessType`, type-checks `-1` against `int` (matches), and sets the whole `RecoverExprAST`'s type to `int`.
-5. **Codegen**: `math::divide`'s body, on its `b == 0` path, constructs `MathError::DivisionByZero` as a tag string and wraps it into `{isOk=false, successBits=0, errorPayload="MathError::DivisionByZero"}` for its `return`. At the call site, `RecoverExprAST::codegen()` extracts `isOk` (false), takes the failure branch, codegens `-1` as the produce value, and merges — the whole expression's runtime value is the `i64` constant `-1`.
+5. **Codegen**: `math::divide`'s body, on its `b == 0` path, constructs `MathError::DivisionByZero` as a `TurfErrorValue{tag="MathError::DivisionByZero", message=""}` (STD-002: a pointer to a global constant, §2.8) and wraps that pointer into `{isOk=false, successBits=0, errorPayload=<TurfErrorValue*>}` for its `return`. At the call site, `RecoverExprAST::codegen()` extracts `isOk` (false), takes the failure branch, codegens `-1` as the produce value, and merges — the whole expression's runtime value is the `i64` constant `-1`.
+
+A message-carrying variant (`return MathError::DivisionByZero("division by " + (a to string) + "/0");`) differs only in step 5: `CodegenErrorVariantConstructWithMessage()` GC-heap-allocates the `TurfErrorValue` instead of using a global constant, since the message is runtime-computed — everything else in this walkthrough (Resolve/TypeCheck/the `recover` side) is identical either way, since both shapes produce the exact same `TurfErrorValue*`-typed value.
 
 ---
 
@@ -407,14 +460,17 @@ New diagnostics (`include/Errors.h:1625`, `1647`) follow this codebase's existin
 | File | Role |
 |---|---|
 | `include/Lexer.h`, `src/Lexer.cpp` | `TOK_ERROR`/`TOK_RECOVER`/`TOK_PRODUCE`/`TOK_RUN`/`TOK_AS` |
-| `include/AST.h` | `ErrorDeclExprAST`, `RecoverExprAST`, `RecoverKind`, `ScopeAccessKind::ErrorVariantRef` |
+| `include/AST.h`, `include/ASTAccess.h` | `ErrorDeclExprAST`, `RecoverExprAST`, `RecoverKind`, `ScopeAccessKind::ErrorVariantRef` / `ErrorVariantConstructWithMessage` (STD-002) |
 | `include/Types.h` | `TurfUserErrorType`, `TurfErrorUnionType`, `AnyErrorType`, `isUserError()`/`isErrorUnion()`/`isAnyError()` |
 | `src/Parser.cpp` | `ParseErrorDecl()`, `ParseType()`'s `!` branch, `ParseExpression()`'s `recover` dispatch |
-| `include/Resolver.h`, `src/Resolver.cpp` | Error-type hoisting, `visitFuncCall`/`visitScopeAccess`'s error-type branches, `CollectReturnedErrorTypeNames`, `visitFuncDef`'s `NeverReturnsErrorWarning`, `visitRecoverExpr` (incl. the bare-error restriction) |
+| `include/Resolver.h`, `src/Resolver.cpp`, `src/ResolverCore.cpp`, `src/ResolverCall.cpp` | Error-type hoisting, `visitFuncCall`/`visitScopeAccess`'s error-type branches (incl. STD-002's one-message-argument construction), `CollectReturnedErrorTypeNames`, `visitFuncDef`'s `NeverReturnsErrorWarning`, `visitRecoverExpr` (incl. the bare-error restriction) |
 | `include/ResolverSymbolTable.h`, `src/ResolverSymbolTable.cpp` | The error-type registry, `ResolverFunctionSymbol::PossibleErrorTypeNames` |
-| `include/TypeChecker.h`, `src/TypeChecker.cpp` | `visitScopeAccess`'s `ErrorVariantRef` branch, `visitReturn`'s `!T` rule, `inferRelationalType`'s `AnyErrorType` branch, `visitRecoverExpr`, `AllPathsDiverge`, `substituteReturnType`'s `TurfErrorUnionType` branch |
-| `src/Codegen.cpp` | `getFallibleValueType`, `BoxToI64Slot`/`UnboxFromI64Slot`, `BuildErrorTag`/`GetErrorTagValue`, `ReturnExprAST::codegen()`'s wrap logic, `RecoverExprAST::codegen()`, `BinaryExprAST::codegen()`'s equality dispatch |
-| `include/Errors.h` | `NeverReturnsErrorWarning`, `BareErrorAsBindingError` |
+| `include/TypeChecker.h`, `src/TypeCheckerCall.cpp` | `visitScopeAccess`'s `ErrorVariantRef` branch, `visitFuncCall`'s `ErrorVariantConstructWithMessage` branch (STD-002), `visitFieldAccess`'s `AnyErrorType`/`.message` branch (STD-002), `visitReturn`'s `!T` rule, `inferRelationalType`'s `AnyErrorType` branch, `visitRecoverExpr`, `AllPathsDiverge`, `substituteReturnType`'s `TurfErrorUnionType` branch |
+| `src/CodegenCore.cpp` | `getFallibleValueType`, `getErrorValueType` (STD-002), `BoxToI64Slot`/`UnboxFromI64Slot`, `BuildErrorTag`/`BuildBareTagString`/`BuildGlobalCStringPtr`/`CodegenErrorVariantConstructWithMessage`/`LoadErrorValueField` (STD-002), `GetErrorTagValue`, `IsErrorTagExpr`/`IsErrorConstructionExpr` |
+| `src/CodegenControlFlow.cpp`, `src/CodegenFunc.cpp` | `ReturnExprAST::codegen()`'s wrap logic, `RecoverExprAST::codegen()`, `FuncCallExprAST::codegen()`'s `ErrorVariantConstructWithMessage` branch (STD-002) |
+| `src/CodegenStruct.cpp` | `FieldAccessExprAST::codegen()`'s `err.message` branch (STD-002) |
+| `src/CodegenExpr.cpp` | `BinaryExprAST::codegen()`'s equality dispatch |
+| `include/Errors.h`, `include/ErrorsFlow.h` | `NeverReturnsErrorWarning`, `BareErrorAsBindingError` |
 | `lib/std/io/net.tr`, `lib/std/math/math.tr`, `lib/std/collections/map.tr` | Real stdlib usage: `NetworkError` (`connect`/`bind`/`accept`), `MathError` (`divide`), `MapError` (`tryGet`) |
 | `tests/25_errors/` | The full regression suite for this feature |
 
@@ -422,9 +478,11 @@ New diagnostics (`include/Errors.h:1625`, `1647`) follow this codebase's existin
 
 ## Part 5 — Known limitations, deliberately deferred
 
-### 5.1 No payload fields
+### 5.1 No PER-VARIANT payload fields (narrowed by STD-002)
 
-An error variant carries no data (§1.1's scope note). This was a deliberate simplification made after the feature's initial implementation already supported typed payload fields end to end (construction, arity/type-checking, a heap-allocated tagged-payload runtime representation) — removed because no real program built against it ever needed to *read* a payload back, and doing so safely requires a real destructuring syntax (different variants of the same error type can carry different fields) that does not exist yet. Re-adding payload support is real future work with its own design pass, most likely as an extension of this language's existing `compare`/`matches` pattern-matching construct (already used for `enum` values) rather than direct field access, given the "which variant, therefore which fields" problem that implies.
+An error variant still carries no fields *declared as part of the variant itself* — no `FileNotFound(path: string)`-style shape that differs from one variant to the next. This was a deliberate simplification made after the feature's initial implementation already supported typed payload fields end to end (construction, arity/type-checking, a heap-allocated tagged-payload runtime representation) — removed because no real program built against it ever needed to *read* a payload back, and doing so safely requires a real destructuring syntax (different variants of the same error type can carry different fields) that does not exist yet.
+
+STD-002 (`ARCHITECTURE_OVERHAUL.md` §8/§15.6(c)) narrowed this gap without reopening it: every variant, of every error type, may now carry exactly ONE `string` message (§1.2a), attached at construction and read via `err.message` (§1.4.3). This sidesteps the destructuring problem entirely — there is nothing to discriminate, since the slot's presence, name, and type never vary by variant. **What remains deferred**: per-variant, differently-typed, differently-named fields, and any destructuring syntax to read them back. `ARCHITECTURE_OVERHAUL.md` §27's deferred register tracks this as **D15** ("Error payloads beyond a message string"), explicitly scoped alongside **D14** (richer `compare`/`matches` pattern matching) — re-adding general payload support is still real future work with its own design pass, most likely as an extension of `compare`/`matches` (already used for `enum` values) rather than direct field access, given the "which variant, therefore which fields" problem that implies.
 
 ### 5.2 No error-type propagation shorthand
 

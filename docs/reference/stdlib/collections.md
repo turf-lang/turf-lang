@@ -1,4 +1,4 @@
-# Collections: `List`, `Stack`, `Queue`, `Map`
+# Collections: `List`, `Stack`, `Queue`, `Map`, `Set`
 
 Generic collection types. None of these are prelude — each requires an
 explicit import naming the type, e.g. `import list::List;`, or a plain
@@ -9,35 +9,43 @@ import list::List;
 import stack::Stack;
 import queue::Queue;
 import map::Map;
+import set::Set;
 ```
 
-All four are default-constructible with no field initialization required —
-`mut l: List<int>;` or `List::default()` both give you an empty, valid
-collection.
+All five are default-constructible via `T::default()` — `mut l: List<int> =
+List::default();` gives you an empty, valid collection. (A bare `mut l:
+List<int>;` with no initializer no longer works, since SEM-004 removed the
+old eager-zero-init mechanism that used to make it equivalent — see
+`docs/reference/variables_and_types.md`'s initialization chapter.)
 
-## Shared design: type erasure and growth policy
+## Shared design: real per-instantiation storage, real growth
 
-Every collection in this module — `List<T>`, `Stack<T>`, `Queue<T>`,
-`Map<K, V>`, and [`mem::Pool<T>`](./mem.md) — is built on the identical
-underlying scheme, so it's worth understanding once instead of per-type:
+Every collection in this module — `List<T>`, `Stack<T>`, `Queue<T>`, `Map<K,
+V>`, `Set<T>`, and [`mem::Pool<T>`](./mem.md) — shares the same underlying
+growth scheme, so it's worth understanding once instead of per-type:
 
-- **8-byte-per-element type erasure.** Generic storage is a raw pointer
-  (`T*`) sized in bytes as `cap * 8` — every `T` occupies exactly one 64-bit
-  slot, whether it's an `int`, a `double`, or any pointer type. This is what
-  makes the generic storage possible without real monomorphization, but it
-  also means **`T` can't practically be a struct passed by value larger than
-  8 bytes** — such a struct wouldn't fit in one slot. Use a pointer type
-  (`MyStruct*`) as the element type instead if your struct is larger.
+- **Real per-instantiation element sizes.** Generic storage is a raw
+  pointer (`T*`) sized in bytes as `cap * sizeof(T)` — `sizeof(T)` is a
+  genuine, monomorphized per-instantiation byte count (TYPE-002), not a
+  hardcoded assumption. **`T` can be any type, including a struct larger
+  than one machine word** — `List<Big>` (a real, multi-field struct, by
+  value) works directly; see `tests/38_monomorphization/
+  06_generic_struct_over_8_bytes.tr`. Before TYPE-002 landed, every `T` was
+  assumed to fit in one 8-byte slot and a struct over 8 bytes had to be
+  worked around by instantiating with a pointer instead (`List<MyStruct*>`)
+  — that workaround is no longer *necessary*, though it's still legal if
+  you want it (a pointer element is always exactly one word regardless of
+  what it points at).
 - **Doubling-from-8 growth.** Every push-like operation follows the same
   rule: if the backing array is at capacity, grow it — `cap == 0` becomes
-  `cap = 8`, otherwise `cap *= 2` — via `mem::malloc`/`mem::realloc`. This
-  is the same growth logic in `List.push`, `Stack.push`, `Queue.enqueue`
-  (when it can't compact instead — see below), `Map.put`, and
-  `mem::Pool.track`.
+  `cap = 8`, otherwise `cap *= 2` — via `gc_alloc`/`gc_realloc`. This is the
+  same growth logic in `List.push`, `Stack.push`, `Queue.enqueue` (when it
+  can't compact instead — see below), `Map.put`, and `Set.add`.
 
-Bugs to know about: none reported for `List`/`Stack`; `Queue` and `Map` each
-have one documented behavioral quirk below (compaction order, and
-non-insertion-ordered removal, respectively).
+Bugs to know about: none reported for `List`/`Stack`; `Queue` has one
+documented behavioral quirk below (compaction order); `Map`/`Set` no longer
+preserve insertion order once a `remove()` happens (see below — true since
+before this group too, just for a different underlying reason now).
 
 ---
 
@@ -48,7 +56,7 @@ struct List<T> { data: T*, len: int, cap: int }
 ```
 
 A dynamically-growing array — the general-purpose sequence type. Internally
-`import mem; import sys;`.
+`import sys;`.
 
 ### `List.push(item: T): void`
 
@@ -78,34 +86,45 @@ test::assert(l.pop() == 30, "");
 
 Returns the current element count (`self.len`) — not the backing capacity.
 
-`List<T>` has no random-access `get`/`set` — `push`/`pop`/`length` are the
-entire public surface. To visit every element, pop in a loop until the list
-is empty (this is the idiom the standard library and its own tests use).
+`List<T>` has no genuinely generic `get`/`set` — reach into the public
+`data: T*` field directly (`l.data[i]`, `l.data[i] = x`) for any element
+type. `operator[]`/`operator[]=` below cover the common `List<int>` case
+with bounds checking instead.
 
-### `list::list_sort(l: List<int>, cmp: fn(int, int): int): void` / `list::list_binary_search(l: List<int>, target: int, cmp: fn(int, int): int): int` / `list::list_find(l: List<int>, predicate: fn(int): bool): int`
+### `operator [](l: List<int>, i: int): int` / `operator []=(l: List<int>, i: int, value: int): void`
 
-Sort and search, as free functions in `list.tr` rather than generic
-`List<T>` methods.
+`l[i]` / `l[i] = v` — bounds-checked (`sys::panic` out of range), declared
+for the concrete `List<int>` only (`operator` declarations can't be generic
+— see the file's own comment). For any other element type, use `l.data[i]`
+directly (unchecked, like any other raw-pointer indexing).
 
-> **Why free functions, and why `List<int>` only.** This isn't a stylistic
-> choice — it's a real, confirmed compiler limitation. A comparator
-> parameter typed `fn(T, T): int` inside a generic method never
-> type-checks correctly (`FuncType` parameters are never substituted
-> through generic instantiation anywhere in the compiler), and the
-> fallback of comparing `T` values with a bare `<`/`>` operator inside a
-> generic body doesn't work either (ordering operators aren't resolved
-> generically the way `==`/`!=` are). Both dead ends are documented
-> directly in `lib/std/collections/list.tr` so they aren't "fixed" back to
-> the broken shape later. Plain functions taking a concrete `List<int>`
-> sidestep the problem entirely, and `int` is the only element type this
-> could be numerically meaningful for anyway — `List<double>` sorted this
-> way would compare raw IEEE-754 bit patterns as integers.
+```turflang
+mut l: List<int> = List::default();
+l.push(1);
+test::assert(l[0] == 1, "");
+l[0] = 99;
+test::assert(l[0] == 99, "");
+```
 
-- **`list_sort`** — in-place insertion sort. `cmp(a, b)` should return
+### `List.sort(cmp: fn(T, T): int): void` / `List.binary_search(target: T, cmp: fn(T, T): int): int` / `List.find(predicate: fn(T): bool): int`
+
+Genuinely generic `List<T>` methods (STD-003) — sort, search, and find,
+over any element type, not just `int`.
+
+> **This used to be `List<int>`-only.** A comparator parameter typed
+> `fn(T, T): int` used to fail to type-check correctly at the call site,
+> because the compiler's generic substitution machinery didn't recurse
+> into a `FuncType`'s own parameter/return types. Fixed directly in the
+> compiler (STD-003, `docs/development/changes/STD-003.md`) — not a
+> stdlib workaround, a real fix across five call sites in the type
+> checker/resolver/monomorphizer, since a comparator callback is ordinary
+> code any Turf program might write, not something specific to this file.
+
+- **`sort`** — in-place insertion sort. `cmp(a, b)` should return
   negative/zero/positive, matching C's `qsort` convention.
-- **`list_binary_search`** — only meaningful on an already-sorted list
+- **`binary_search`** — only meaningful on an already-sorted list
   (not checked/enforced); returns the index if found, `-1` otherwise.
-- **`list_find`** — linear search with an arbitrary predicate, for
+- **`find`** — linear search with an arbitrary predicate, for
   unsorted lists or non-equality lookups; returns the first matching
   index or `-1`.
 
@@ -120,9 +139,11 @@ nums.push(3);
 nums.push(1);
 nums.push(2);
 
-list::list_sort(nums, byValue);
-test::assert(list::list_find(nums, isEven) >= 0, "found an even number");
+nums.sort(byValue);
+test::assert(nums.find(isEven) >= 0, "found an even number");
 ```
+
+`list::list_sort(l: List<int>, cmp: fn(int, int): int): void` / `list::list_binary_search(...)` / `list::list_find(...)` still exist as thin, **deprecated** wrappers over the concrete `List<int>` case, kept for one cycle so existing callers keep working unchanged — prefer the methods above in new code.
 
 ---
 
@@ -133,7 +154,7 @@ struct Stack<T> { data: T*, len: int, cap: int }
 ```
 
 LIFO. Structurally identical growth logic to `List<T>` — same
-doubling-from-8 scheme, same 8-byte-slot type erasure.
+doubling-from-8 scheme, same real per-instantiation element sizes.
 
 ### `Stack.push(item: T): void`
 
@@ -182,7 +203,7 @@ buffer.
   front of the buffer (an `O(len)` loop-based shift) and resets `head` to
   `0`, reusing existing capacity instead of allocating more.
 - Only if `head == 0` (truly full — nothing to reclaim) does it actually
-  double `cap` via `malloc`/`realloc`, per the shared growth policy.
+  double `cap`, per the shared growth policy.
 
 ### `Queue.enqueue(item: T): void`
 
@@ -224,44 +245,42 @@ Current element count (`self.len` — not `cap`, and not `head + len`).
 ## `Map<K, V>` (`collections/map.tr`)
 
 ```turflang
-struct Map<K, V> { keys: K*, values: V*, len: int, cap: int }
+struct Map<K, V> { keys: K*, values: V*, len: int, cap: int, buckets: int*, bcap: int }
 ```
 
-A **linear-scan association list, not a hash table.** There's no generic
-`hash(T)` in the language yet, so this is the honest, simple version — fine
-for small maps. A hashed `HashMap<K, V>` is a distinct, deferred future
-addition. Storage is two parallel type-erased arrays (`keys`, `values`),
-grown exactly like `List<T>.push()`.
+A **real hash table, O(1) average lookup** — not the linear scan this type
+used to be. Two parts:
 
-Because lookups use `==` on `K`, your key type must support equality.
+- `keys`/`values`/`len`/`cap` are a dense, insertion-ordered pair of arrays
+  (exactly as before) — grown the same way `List<T>.push()` is.
+- `buckets`/`bcap` are a separate open-addressing hash INDEX layered on top
+  — `hash(key)` picks a bucket, which stores the DENSE ARRAY INDEX of that
+  key (or an empty/tombstone sentinel). `indexOf()`/`get()`/`contains()`/
+  `put()`/`remove()` all probe this index instead of scanning `keys`
+  linearly.
 
-> **Known limitation: `K = string` lookups compare by identity, not
-> content.** `indexOf`'s `self.keys[i] == key` is a raw pointer/bit
-> comparison here, not a call into `strings.tr`'s real content-comparing
-> `operator==(string, string)` — a generic method body is type-checked and
-> codegenned exactly once, shared across every instantiation (every `K`/`V`
-> erases to one uniform 8-byte slot), so `self.keys[i]`/`key` never carry
-> the concrete type `string` for overload resolution to match against. This
-> is correct (bit-exact identity genuinely is `==`) for `K` = `int`/
-> `double`/`bool`/pointer, but wrong for `K` = `string`: two content-equal
-> keys built from different allocations (e.g. one from `strings::trim()`,
-> the other a literal) compare unequal. A same-file literal-to-literal
-> comparison (`m.put("a", 1); m.contains("a")`) can appear to work by
-> coincidence — the linker merges identical string-literal constants into
-> one address — which is why this went unnoticed until a real, non-literal
-> key surfaced it. No general fix exists without per-instantiation codegen
-> or a trait/constraint system, neither of which this compiler has. If your
-> struct embedding a `Map<string, V>` is itself non-generic, you can write
-> your own plain (non-generic) method on it doing the linear scan directly
-> instead of calling `.get()`/`.contains()`/`.tryGet()` — a field access
-> from a non-generic method resolves fully concretely, so `==` there
-> correctly reaches the real string operator. See `http.tr`'s
-> `Request.get_header()`/`has_header()` and `Server.route_index()` for a
-> real, working example of exactly this pattern.
+This split (rather than storing entries directly in hash-bucket order) is
+deliberate: `Set<int>`'s own `operator[]` (below) needs INSERTION-ORDER
+positional access, which a pure open-addressing table can't provide at all
+— see `docs/development/changes/STD-003.md` for the full investigation.
+`hash(K)` is `hashing::hash()` (`collections/hashing.tr`) — a real, general
+`hash(T)` only became possible with monomorphization (TYPE-002); see that
+file's own header for its design (one concrete `string` overload, one
+generic byte-hash fallback covering everything else).
+
+Because lookups need both `==` (to disambiguate a hash collision) and
+`hash()` (to pick a bucket) on `K`, your key type must support both. `int`
+and `string` are covered directly by `hashing.tr`'s own overloads; any other
+struct key needs its own `operator==` (as before) and gets `hash()` for free
+via the generic byte-hash fallback — see that file's header for the one
+caveat (a struct whose `operator==` compares a pointer-shaped field, e.g.
+another string, by content rather than identity, isn't guaranteed to hash
+consistently with it; not a concern for any plain-data key).
 
 ### `Map.indexOf(key: K): int`
 
-Linear scan; returns the index of `key`, or `-1` if not present.
+O(1) average; returns the dense-array index of `key`, or `-1` if not
+present.
 
 ### `Map.contains(key: K): bool`
 
@@ -278,7 +297,8 @@ test::assert(m.contains("z") == false, "");
 
 If `key` already exists, **overwrites the value in place** and does *not*
 grow the map (`len` unchanged). Otherwise appends a new key/value pair,
-growing both parallel arrays together.
+growing both the dense arrays and (independently, on its own load factor)
+the bucket index as needed.
 
 ```turflang
 m.put("a", 1);
@@ -336,14 +356,14 @@ mut y: int = m.tryGet("nope") recover produce -1;   // recovers -> -1
 
 ### `Map.remove(key: K): void`
 
-Removes `key` in O(1) by **swapping the removed entry with the last one** in
-the backing arrays, then shrinking `len`. No-op if `key` is not present.
+Removes `key` in O(1) average by **swapping the removed entry with the
+last one** in the dense arrays, then shrinking `len`, and retargeting the
+hash index for whichever key just moved. No-op if `key` is not present.
 
-> **Gotcha: does not preserve insertion order.** Unlike `List`/`Stack`/
-> `Queue`, which all preserve strict insertion/access order end to end,
-> `Map<K, V>` stops being insertion-ordered the moment any `remove()` call
-> happens — the entry that used to be last silently moves into the removed
-> slot. Don't rely on iteration order after a removal.
+> **Gotcha: does not preserve insertion order.** `Map<K, V>` stops being
+> insertion-ordered the moment any `remove()` call happens — the entry that
+> used to be last silently moves into the removed slot. Don't rely on
+> iteration order after a removal.
 
 ```turflang
 m.remove("b");
@@ -354,26 +374,35 @@ test::assert(m.contains("b") == false, "");
 
 Current key/value pair count.
 
+### `operator [](m: Map<string, int>, key: string): int` / `operator []=(m: &Map<string, int>, key: string, value: int): void`
+
+`m[key]` / `m[key] = v`, wrapping `get()`/`put()`. Declared for the
+concrete `Map<string, int>` only (`operator` declarations can't be generic).
+
 ---
 
 ## `Set<T>` (`collections/set.tr`)
 
-Same underlying need as `Map<K, V>` — same type-erasure/linear-scan model
-(see the top of this page), but with a single array instead of two, since a
-set only stores presence, not an associated value.
+```turflang
+struct Set<T> { items: T*, len: int, cap: int, buckets: int*, bcap: int }
+```
+
+Same underlying design as `Map<K, V>` — a real hash-index lookup layered
+over a dense, insertion-ordered `items` array — but with a single array
+instead of two, since a set only stores presence, not an associated value.
 
 ### `Set.add(item: T): void`
 
-Adds `item` if it isn't already present (checked via `indexOf`, a linear
-scan); a no-op if it is — no duplicate entries.
+Adds `item` if it isn't already present (checked via the hash index, O(1)
+average); a no-op if it is — no duplicate entries.
 
 ### `Set.contains(item: T): bool`
 
 ### `Set.remove(item: T): bool`
 
-Removes `item` if present (swap-with-last, same O(1)-removal/order-breaking
-tradeoff as `Map.remove` above). Returns whether it was actually present
-and removed.
+Removes `item` if present (swap-with-last on the dense array, same O(1)-
+average-removal/insertion-order-breaking tradeoff as `Map.remove` above).
+Returns whether it was actually present and removed.
 
 ### `Set.length(): int`
 
@@ -388,22 +417,20 @@ test::assert(seen.length() == 2, "");
 test::assert(seen.contains(2), "");
 ```
 
-> **Known limitation: dedup doesn't work correctly for `T = string`.**
-> Root cause fully identified — the identical `K = string` gap `Map<K, V>`
-> documents above, on `Set<T>`'s own `indexOf`. `self.items[i] == item`
-> inside `Set.indexOf`'s single, shared generic-method body compares by raw
-> pointer identity for `T = string`, not content, so adding `"hello"`,
-> then a *separately-allocated* string that's content-equal to `"hello"`
-> (e.g. via `strings::trim(" hello ")` — not a second occurrence of the
-> same string literal, which the linker can merge to the same address by
-> coincidence and mask the bug) produces a length one higher than
-> expected — the second add never found the first. Correct for `T` =
-> `int`/`double`/`bool`/pointer. No general fix exists without per-
-> instantiation codegen or a trait/constraint system, neither of which this
-> compiler has yet — prefer `Set<int>`/`Set<double>`, and don't rely on
-> `Set<string>` deduplicating correctly. If you need one today, embed
-> `items: T*`-shaped storage as a field of your own concrete (non-generic)
-> struct and write a plain (non-generic) method doing the linear scan
-> yourself (see `Map<K, V>`'s callout above for why that sidesteps the
-> issue). Tracked as an accepted, deferred limitation in
-> `tests/99_known_bugs/`, not a live regression.
+### `operator [](s: Set<int>, i: int): int`
+
+`s[i]` — positional read of the i-th element **in insertion order** (the
+dense `items` array is unaffected by hash-bucket order; only a `remove()`
+breaks strict insertion order, exactly like `Map`'s own gotcha above).
+Bounds-checked (`sys::panic` out of range). Declared for the concrete
+`Set<int>` only. Deliberately no `operator[]=` — a set's invariant is
+uniqueness, and positional overwrite could silently violate it; `add()`/
+`remove()` stay the only way to mutate a `Set`'s contents.
+
+```turflang
+mut s: Set<int> = Set::default();
+s.add(10);
+s.add(20);
+test::assert(s[0] == 10, "");
+test::assert(s[1] == 20, "");
+```

@@ -1,0 +1,22 @@
+// Regression test (OVH-003, docs/planning/OVERHAUL_REMAINING_WORK.md):
+// indexing a raw pointer-typed base (`someList.data[i]`, where `data: T*`)
+// must be rejected outside `unsafe { }`/a raw-pointer-capability module,
+// exactly like field/member access through one already is. Before this
+// fix, TypeChecker::visitArrayAccess() never called checkUnsafeGate() at
+// all -- `l.data[100000] = 42;` compiled with no `unsafe { }` and no
+// capability declared anywhere in this file, an out-of-bounds write
+// reachable from ordinary safe code (F-PTR-1's "raw pointers are
+// FFI-only" promise silently didn't apply to indexing). See
+// raw_pointer_index_inside_unsafe_ok.tr for the corresponding passing
+// case, and list_get_set_generic.tr for the safe, bounds-checked
+// replacement (`List<T>.get()`/`.set()`) this file's uses should migrate
+// to instead of reaching for `unsafe { }`.
+
+import list::List;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(1);
+    l.data[100000] = 42;
+    return 0;
+}

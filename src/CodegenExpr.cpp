@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -28,7 +28,6 @@
 #include "ValueRange.h"
 #include "Lint.h"
 #include "SymbolTable.h"
-#include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
 #include "llvm/IR/CFG.h"
@@ -41,13 +40,29 @@
 using namespace llvm;
 
 
-// Turns a number to LLVM Number constant
+// Turns a number to LLVM Number constant. SEM-001
+// (docs/planning/ARCHITECTURE_OVERHAUL.md §8): builds the LLVM constant
+// directly from the node's own exact APSInt/APFloat rather than round-
+// tripping through the narrow getIntVal()/getDoubleVal() convenience
+// accessors -- see NumberExprAST's own doc comment (ASTExpr.h).
+//
+// `int` is a fixed 64-bit LLVM type regardless of how many bits IntVal_
+// actually needed to hold the literal exactly (a wider-than-64-bit literal,
+// e.g. the 48-digit example in §10.2, is representationally impossible to
+// avoid narrowing here) -- extOrTrunc(64) makes that narrowing explicit and
+// well-defined (never UB) rather than relying on getIntVal()'s own
+// already-safe-but-indirect truncation. Out-of-range representability is
+// deliberately NOT checked here or anywhere else in SEM-001 (SEM-002's
+// job, per §8's completion criteria: an out-of-range literal must still
+// compile in this group, carrying its exact value up to this exact point).
 Value *NumberExprAST::codegen() {
   if (isInteger())
-    return ConstantInt::get(*TheContext, APInt(64, getIntVal(), true));
+    return ConstantInt::get(*TheContext, getIntValExact().extOrTrunc(64));
 
-  // APFloat is how LLVM represents floating point numbers internally
-  return ConstantFP::get(*TheContext, APFloat(getDoubleVal()));
+  // APFloat is how LLVM represents floating point numbers internally --
+  // getFloatValExact() already IS one (IEEEdouble semantics), so this is a
+  // direct pass-through, not a re-derivation from a plain C++ double.
+  return ConstantFP::get(*TheContext, getFloatValExact());
 }
 
 
@@ -74,11 +89,6 @@ Value *NullExprAST::codegen() {
 }
 
 
-Value *DefaultInitExprAST::codegen() {
-  return GetDefaultValue(Type.get());
-}
-
-
 // EmitStringConcat/EmitStrcmp/EmitStrcmpRelational used to live here,
 // hand-rolling String's `+`/`==`/`!=`/`< > <= >=` directly in Codegen.
 // Deleted: this behavior now lives in lib/std/strings.tr as ordinary
@@ -94,15 +104,16 @@ Value *DefaultInitExprAST::codegen() {
 // cleanup, RFC §1, not done here).
 
 Value *BinaryExprAST::codegen() {
-  // `err == MathError::DivisionByZero` (docs/planning/Errors.md) --
-  // compares error-tag identity via strcmp, since every error-type value
-  // (constructed or type-erased as AnyErrorType) lowers to an opaque i8*
-  // payload pointer that's meaningless to compare by raw pointer identity
-  // (two logically-equal error references never share one malloc'd
-  // payload). Checked before operand codegen (not just before the generic
-  // fallback further down) specifically so a bare `ErrorType::Variant`
-  // operand can skip its ordinary ScopeAccessExprAST::codegen() path
-  // entirely -- see GetErrorTagValue()'s doc comment.
+  // `err == MathError::DivisionByZero`
+  // (docs/architecture/errors_and_recover.md) -- compares error-tag identity
+  // via strcmp, since every error-type value (constructed or type-erased as
+  // AnyErrorType) lowers to an opaque i8* payload pointer that's meaningless to
+  // compare by raw pointer identity (two logically-equal error references never
+  // share one malloc'd payload). Checked before operand codegen (not just
+  // before the generic fallback further down) specifically so a bare
+  // `ErrorType::Variant` operand can skip its ordinary
+  // ScopeAccessExprAST::codegen() path entirely -- see GetErrorTagValue()'s doc
+  // comment.
   if ((Op == TOK_EQ || Op == TOK_NEQ) &&
       (IsErrorTagExpr(LHS.get()) || IsErrorTagExpr(RHS.get()))) {
     Value *LTag = GetErrorTagValue(LHS.get());
@@ -182,6 +193,27 @@ Value *BinaryExprAST::codegen() {
   if (!L || !R)
     return nullptr;
 
+  // ── Unary `operator!` dispatch (LANG-001) ────────────────────────────────
+  // TypeChecker::visitBinary() already picked ResolvedNotOperatorTarget over
+  // the ordinary operator!=/builtin path when this node is a user-written
+  // `!x` whose operand type declares a unary `operator!` -- see that
+  // field's doc comment (ASTExpr.h). Only L (the real operand) is passed;
+  // R is the synthetic `true` literal, already evaluated above for no
+  // reason other than every other branch of this function unconditionally
+  // evaluating both sides first (harmless -- a BoolExprAST::codegen() is a
+  // single constant, not a side effect).
+  if (ResolvedNotOperatorTarget) {
+    std::string MangledName = ResolvedNotOperatorTarget->mangledName();
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: operator overload '" +
+                          MangledName + "' was resolved but never codegenned."));
+      return nullptr;
+    }
+    return Builder->CreateCall(CalleeF, {L}, "nottmp");
+  }
+
   // ── Operator overload dispatch ──────────────────────────────────────────
   // TypeChecker::visitBinary() already resolved ResolvedOperatorTarget (if
   // any) via exact operand-type match against ResolvedOperatorCandidates --
@@ -232,21 +264,49 @@ Value *BinaryExprAST::codegen() {
   // Create the instruction based on the operator
   switch (Op) {
 
-    // Arithmetic
+    // Arithmetic. int (never int32/double) gets runtime overflow trapping
+    // -- FREEZE.md §6.2 row 7 ("Runtime, signed integer: trap"). int32 is
+    // deliberately excluded: it exists solely for extern-fn ABI honesty
+    // (§6.2), and arithmetic on it isn't named anywhere in SEM-002's own
+    // scope -- see this group's change record for the explicit scoping
+    // note. A `TurfGenericParamType`-typed operand never reaches this
+    // branch at all: before TYPE-002, its erased runtime representation
+    // resolves to something other than "int" via getTurfTypeFromLLVM()
+    // above, so NumericType->isNamed("int") is naturally false for it --
+    // no separate exclusion needed (see §8 SEM-002's own "Generic
+    // interactions" note on why this group must not touch that case).
+  // OPT-002: ProvenNoOverflow is set by ValueRangePass::markElidableChecks()
+  // (ValueRange.cpp) BEFORE Body->codegen() runs, when both operands proved
+  // to be the same known constants on every path reaching this node, AND
+  // the exact checked result is representable -- so `nsw` is sound here
+  // specifically BECAUSE the trap was already proved unreachable (F-OPT-2,
+  // §17.3), never attached speculatively.
   case '+':
     CastBoth(NumericType);
-    return NumericType->isNamed("double") ? Builder->CreateFAdd(L, R, "addtmp")
-                                          : Builder->CreateAdd(L, R, "addtmp");
+    if (NumericType->isNamed("double"))
+      return Builder->CreateFAdd(L, R, "addtmp");
+    if (NumericType->isNamed("int"))
+      return ProvenNoOverflow ? Builder->CreateNSWAdd(L, R, "addtmp")
+                              : EmitCheckedIntArith('+', L, R, Loc);
+    return Builder->CreateAdd(L, R, "addtmp");
 
   case '-':
     CastBoth(NumericType);
-    return NumericType->isNamed("double") ? Builder->CreateFSub(L, R, "subtmp")
-                                          : Builder->CreateSub(L, R, "subtmp");
+    if (NumericType->isNamed("double"))
+      return Builder->CreateFSub(L, R, "subtmp");
+    if (NumericType->isNamed("int"))
+      return ProvenNoOverflow ? Builder->CreateNSWSub(L, R, "subtmp")
+                              : EmitCheckedIntArith('-', L, R, Loc);
+    return Builder->CreateSub(L, R, "subtmp");
 
   case '*':
     CastBoth(NumericType);
-    return NumericType->isNamed("double") ? Builder->CreateFMul(L, R, "multmp")
-                                          : Builder->CreateMul(L, R, "multmp");
+    if (NumericType->isNamed("double"))
+      return Builder->CreateFMul(L, R, "multmp");
+    if (NumericType->isNamed("int"))
+      return ProvenNoOverflow ? Builder->CreateNSWMul(L, R, "multmp")
+                              : EmitCheckedIntArith('*', L, R, Loc);
+    return Builder->CreateMul(L, R, "multmp");
 
   case '/': {
     CastBoth(NumericType);
@@ -274,6 +334,12 @@ Value *BinaryExprAST::codegen() {
       Builder->CreateUnreachable();
 
     Builder->SetInsertPoint(DivContBB);
+
+    // The one signed-division overflow case (INT64_MIN / -1) -- see
+    // EmitSignedDivOverflowGuard()'s own doc comment. int32/double are
+    // scoped out for the same reason noted above the '+' case.
+    if (NumericType->isNamed("int"))
+      EmitSignedDivOverflowGuard(L, R, Loc);
 
     return NumericType->isNamed("double") ? Builder->CreateFDiv(L, R, "divtmp")
                                           : Builder->CreateSDiv(L, R, "divtmp");
@@ -388,9 +454,17 @@ Value *BinaryExprAST::codegen() {
   case '|':
     return Builder->CreateOr(L, R, "bitormp");
 
-  // Bitwise left shift
+  // Bitwise left shift -- checked (FREEZE.md §6.2 row 7 names '<<'
+  // explicitly alongside +/-/*). Both operands are already 'int' by the
+  // time TypeChecker::visitBinary() accepts a shift, so no NumericType
+  // gate is needed here the way +/-/* need one (those also accept
+  // double).
   case TOK_LSHIFT:
-    return Builder->CreateShl(L, R, "lshifttmp");
+    // OPT-002: see the '+'/'-'/'*' cases above for ProvenNoOverflow's
+    // contract. Shl has no `with.overflow` intrinsic to build a plain
+    // variant from -- the checked-safe result IS a plain CreateShl.
+    return ProvenNoOverflow ? Builder->CreateShl(L, R, "lshifttmp")
+                            : EmitCheckedShl(L, R, Loc);
 
   // Bitwise right shift (arithmetic, preserves sign)
   case TOK_RSHIFT:
@@ -422,6 +496,25 @@ Value *UnaryExprAST::codegen() {
   if (!OperandV)
     return nullptr;
 
+  // ── Operator overload dispatch (LANG-001) ────────────────────────────────
+  // TypeChecker::visitUnary() already resolved ResolvedOperatorTarget (if
+  // any) via exact operand-type match -- mirrors BinaryExprAST::codegen()'s
+  // identical dispatch. Checked BEFORE getTurfTypeFromLLVM() below: that
+  // function is the erasure-era LLVM-type-guessing fallback (§9.7/D18) and
+  // has no reliable answer for a struct operand anyway -- irrelevant once a
+  // real operator overload applies.
+  if (ResolvedOperatorTarget) {
+    std::string MangledName = ResolvedOperatorTarget->mangledName();
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: operator overload '" +
+                          MangledName + "' was resolved but never codegenned."));
+      return nullptr;
+    }
+    return Builder->CreateCall(CalleeF, {OperandV}, "unaryoptmp");
+  }
+
   TurfTypePtr OperandType = getTurfTypeFromLLVM(OperandV->getType());
   if (OperandType->isNamed("bool"))
     OperandV = CastToType(OperandV, TurfInt(), "boolneg");
@@ -432,8 +525,41 @@ Value *UnaryExprAST::codegen() {
   case '-':
     if (OperandType->isNamed("double"))
       return Builder->CreateFNeg(OperandV);
-    if (OperandType->isNamed("int"))
-      return Builder->CreateNeg(OperandV);
+    if (OperandType->isNamed("int")) {
+      // Unary '-' applied DIRECTLY to an untyped integer literal folds
+      // into the literal itself, before any runtime check -- FREEZE.md
+      // §6.2's `-9223372036854775808` example (ARCHITECTURE_OVERHAUL.md
+      // §10.2), explicitly deferred here by SEM-001 (see ParserLiteral.cpp's
+      // own doc comment on ParseNumberExpr). Without this special case,
+      // negating the ALREADY-64-BIT-TRUNCATED magnitude via the ordinary
+      // checked-negate path below would incorrectly TRAP for exactly this
+      // one legitimate input: NumberExprAST::codegen() truncates the
+      // literal `9223372036854775808` (2^63) to a 64-bit value whose bit
+      // pattern is indistinguishable from a genuine INT64_MIN, so
+      // EmitCheckedIntNegate() would (wrongly) read it as "negating
+      // INT64_MIN" and panic. TypeChecker::checkLiteralRepresentable()
+      // (SEM-002) is what actually enforces representability for this
+      // shape; this is purely correct bit-level construction of an
+      // already-validated (or, for a stray unchecked occurrence, honestly
+      // truncated -- mirroring NumberExprAST::codegen()'s own contract)
+      // literal value, never a runtime-checked operation.
+      if (const auto *NE = dynamic_cast<const NumberExprAST *>(Operand.get())) {
+        if (NE->isInteger() && NE->isUntyped()) {
+          const llvm::APSInt &Exact = NE->getIntValExact();
+          llvm::APInt Widened = llvm::APInt(Exact).sext(Exact.getBitWidth() + 1);
+          llvm::APInt Negated = -Widened;
+          return ConstantInt::get(*TheContext, Negated.sextOrTrunc(64));
+        }
+      }
+      // Checked (FREEZE.md §6.2 row 7 names negation alongside +/-/*):
+      // negating a genuine runtime INT64_MIN value is the one input with
+      // no representable int64 result -- see EmitCheckedIntNegate()'s own
+      // doc comment. OPT-002: ProvenNoOverflow (see BinaryExprAST's cases,
+      // CodegenExpr.cpp) means the operand is already known != INT64_MIN.
+      if (ProvenNoOverflow)
+        return Builder->CreateNSWNeg(OperandV, "negtmp");
+      return EmitCheckedIntNegate(OperandV, Loc);
+    }
     llvm::report_fatal_error("Internal error: Unknown unary operand type");
     return nullptr;
   case '+':
@@ -460,7 +586,7 @@ Value *AddressOfExprAST::codegen() {
   if (!LVal) {
     LogErrorAt(Loc, "Cannot take the address of a non-addressable expression."
                     "\n  Hint: Only variables, struct fields, and array elements"
-                    " are addressable.");
+                    " are addressable.", SLM::ErrorCategory::GENERAL);
     return nullptr;
   }
   return LVal;
@@ -476,9 +602,58 @@ Value *SizeOfExprAST::codegen() {
 }
 
 
+// STD-002: TypeChecker::visitCallerLocation() already guaranteed this node
+// is lexically inside a `@caller_location` function's body, so
+// BuildCallerLocationValue() always takes its "forward" branch here --
+// never its "stamp a literal" branch, which exists for the call-site
+// injection case instead (FuncCallExprAST::codegen(), CodegenFunc.cpp).
+Value *CallerLocationExprAST::codegen() {
+  return BuildCallerLocationValue(Loc);
+}
+
+
 Value *CastExprAST::codegen() {
   const TurfType *ExprTy = getExprType(Operand.get());
-  
+
+  // ─── MEM-002 ────────────────────────────────────────────────────────────
+  // `gc_alloc(n)`/`gc_alloc_zeroed(n)`/`gc_realloc(p, n)` cast directly
+  // `to T*` -- every collection-growth call site in list/stack/queue/set/
+  // map.tr is written exactly this way, inside a monomorphized clone where
+  // T is now a concrete type (TYPE-002). Inject a real per-element
+  // TurfTypeDesc here (instead of MEM-001's literal NULL) so the collector
+  // can trace T-shaped pointer words inside the allocated block -- see
+  // docs/development/changes/MEM-001.md's *Removed assumptions* for why
+  // this couldn't be done before this group existed (no array-shaped
+  // descriptor was designed yet). Must run BEFORE `Operand->codegen()`
+  // below: that call is what actually dispatches into
+  // FuncCallExprAST::codegen()'s gc_alloc/gc_alloc_zeroed/gc_realloc
+  // branch (CodegenFunc.cpp), which reads and consumes
+  // PendingGCAllocDescOverride while building the call -- there is no
+  // other hook point between "we know the destination element type" and
+  // "the call is built" for a bare intrinsic with no ResolvedCallTarget to
+  // attach this to (CodegenInternal.h's own doc comment on the override).
+  // A `gc_alloc(n) to string` site (strings.tr/io.tr/net.tr) is NOT this
+  // shape (`string` is its own StringType, never a TurfPointerType, so the
+  // dynamic_cast below simply fails to match) and correctly falls through
+  // to the original NULL-desc path -- MEM-002 defines that as "opaque, no
+  // pointer words", which is precise, not a fallback, for a raw byte
+  // buffer.
+  if (auto *FC = dynamic_cast<const FuncCallExprAST *>(Operand.get())) {
+    std::string GCCalleeName;
+    if (auto *VarCallee =
+            dynamic_cast<const VariableExprAST *>(FC->getCallee()))
+      GCCalleeName = VarCallee->getName();
+    if (GCCalleeName == "gc_alloc" || GCCalleeName == "gc_alloc_zeroed" ||
+        GCCalleeName == "gc_realloc") {
+      if (auto *DestPtr = dynamic_cast<const TurfPointerType *>(DestType.get())) {
+        llvm::Type *ElemTy = getLLVMType(DestPtr->getPointee().get());
+        if (ElemTy && !ElemTy->isVoidTy()) {
+          PendingGCAllocDescOverride = getOrCreateElementTurfTypeDesc(ElemTy);
+        }
+      }
+    }
+  }
+
   Value *Val = Operand->codegen();
   if (!Val)
     return nullptr;
@@ -640,15 +815,24 @@ Value *CastExprAST::codegen() {
     return Builder->CreateCall(StrtodF, {Val, NullPtr}, "strtod_res");
   }
 
-  // int → string : snprintf into a heap-allocated buffer.
+  // int → string : snprintf into a GC-heap-allocated buffer.
   //
   // BUG FIX (was: TmpB.CreateAlloca):
   //   The previous implementation used alloca which places the buffer on the
   //   current function's stack frame. When this value is returned from a
   //   function (e.g. `fn make_label(n: int): string { return n to string; }`)
   //   the caller receives a pointer into a dead stack frame — silent UB.
-  //   We now use malloc(32) so the buffer lives on the heap and survives the
-  //   function return. The caller is responsible for freeing (no GC yet).
+  //   We now use turf_rt_alloc(32, NULL) so the buffer lives on the GC heap
+  //   and survives the function return.
+  //
+  // OVH-002 follow-up (docs/development/changes/OVH-002.md): this used
+  // to be a bare `malloc(32)` -- never registered with the collector, so a
+  // `string` this cast produced was permanently invisible to gc_collect(),
+  // contradicting FREEZE.md §6.5 ("string values produced by any operation"
+  // belong on the GC heap) and leaking forever rather than being reclaimed
+  // once unreachable. `desc == NULL` is correct here, not a placeholder --
+  // this buffer holds raw formatted digits, never an outgoing pointer,
+  // exactly like strings.tr's/io.tr's own raw byte buffers.
   if (SrcName == "int" && DstName == "string") {
     Function *SnprintfF = TheModule->getFunction("snprintf");
     if (!SnprintfF) {
@@ -659,26 +843,22 @@ Value *CastExprAST::codegen() {
       SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
                                    TheModule.get());
     }
-    Function *MallocF = TheModule->getFunction("malloc");
-    if (!MallocF) {
-      FunctionType *FT =
-          FunctionType::get(PointerType::get(*TheContext, 0),
-                            {Type::getInt64Ty(*TheContext)}, false);
-      MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
-                                 TheModule.get());
-    }
     Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
-    Value *Buf = Builder->CreateCall(MallocF, {BufSize}, "int_to_str_buf");
+    Value *NullDesc = ConstantPointerNull::get(PointerType::get(*TheContext, 0));
+    Value *Buf = Builder->CreateCall(getOrCreateTurfRtAllocFn(), {BufSize, NullDesc}, "int_to_str_buf");
     Value *Fmt = Builder->CreateGlobalString("%lld", "intfmt");
     Builder->CreateCall(SnprintfF, {Buf, BufSize, Fmt, Val}, "snprintf_int");
     return Buf;
   }
 
-  // double → string : snprintf into a heap-allocated buffer.
+  // double → string : snprintf into a GC-heap-allocated buffer.
   //
   // BUG FIX (was: TmpB.CreateAlloca):
   //   Same root cause as int → string above. Stack alloca returns dangling
-  //   pointer when the result escapes the function. Fixed with malloc(32).
+  //   pointer when the result escapes the function. Fixed with
+  //   turf_rt_alloc(32, NULL) -- see the int → string branch's own comment
+  //   (OVH-002) for why a bare `malloc` here was a real bug, not just a
+  //   style inconsistency.
   if (SrcName == "double" && DstName == "string") {
     Function *SnprintfF = TheModule->getFunction("snprintf");
     if (!SnprintfF) {
@@ -689,16 +869,9 @@ Value *CastExprAST::codegen() {
       SnprintfF = Function::Create(FT, Function::ExternalLinkage, "snprintf",
                                    TheModule.get());
     }
-    Function *MallocF = TheModule->getFunction("malloc");
-    if (!MallocF) {
-      FunctionType *FT =
-          FunctionType::get(PointerType::get(*TheContext, 0),
-                            {Type::getInt64Ty(*TheContext)}, false);
-      MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
-                                 TheModule.get());
-    }
     Value *BufSize = ConstantInt::get(Type::getInt64Ty(*TheContext), 32);
-    Value *Buf = Builder->CreateCall(MallocF, {BufSize}, "dbl_to_str_buf");
+    Value *NullDesc = ConstantPointerNull::get(PointerType::get(*TheContext, 0));
+    Value *Buf = Builder->CreateCall(getOrCreateTurfRtAllocFn(), {BufSize, NullDesc}, "dbl_to_str_buf");
     Value *Fmt = Builder->CreateGlobalString("%g", "dblfmt");
     Builder->CreateCall(SnprintfF, {Buf, BufSize, Fmt, Val}, "snprintf_dbl");
     return Buf;

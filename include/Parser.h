@@ -26,13 +26,18 @@ void InitializePrecedence();
 void InitializeCompilerGlobals();
 
 // A token that legitimately starts a new top-level declaration (or ends the
-// previous statement). TOK_AT is deliberately excluded: '@' can never
-// successfully start anything any more (the decorator syntax it used to
-// introduce is gone, see ParsePrimaryBase()'s TOK_AT case), so a failed
-// construct is guaranteed to have made ZERO progress past its own leading
-// '@' -- treating '@' as a safe place to stop would make the "already at a
-// boundary, don't skip further" guard in SkipToNextTopLevelBoundary() fire
-// before any token is ever consumed, looping forever on the very same '@'.
+// previous statement). TOK_AT is deliberately excluded: STD-002 added back
+// exactly one legal use of '@' (`@caller_location fn ...`,
+// ParsePrimaryBase()'s TOK_AT case), but every FAILURE path through that
+// case still consumes at least the '@' token itself before returning
+// nullptr (either immediately, for any other '@word', or after also
+// consuming 'caller_location' when the token after it isn't 'fn') -- so a
+// failed construct starting with '@' is still guaranteed to make forward
+// progress, just not necessarily "zero tokens consumed" any more. Treating
+// '@' as a safe place to stop would make the "already at a boundary, don't
+// skip further" guard in SkipToNextTopLevelBoundary() fire before that
+// progress happens on the SUCCESS path (a legal `@caller_location fn ...`
+// itself), which is the actual reason '@' stays excluded from this set.
 bool IsTopLevelBoundaryToken(int Tok);
 
 // Panic-mode recovery: after a top-level statement's parse fails, skip
@@ -60,13 +65,62 @@ std::unique_ptr<ExprAST> Parse();
 // to load (these are compiler-shipped files expected to always exist).
 std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc);
 
-// True if @p Path (canonicalized) falls under this install's `lib/std`
-// tree -- the `unsafe { }` gate's trust boundary (issue #238). See its
-// definition in ParserModule.cpp for the full rationale; exported here
-// (rather than kept file-local like TurfInstallRoot()) specifically so
-// TypeChecker.cpp's gate checks can call it without linking against
-// llvm::sys::fs directly.
-bool IsPathUnderLibStd(const std::string &Path);
+// OVH-011 (docs/development/changes/OVH-011.md): called by main.cpp
+// once per parse pass, right after that pass's own ParsePreludeImports()
+// call and before the entry file's own top-level declaration loop starts.
+// Returns true if @p EntryPath was already fully parsed via a transitive
+// import reached during prelude injection (the caller must SKIP its own
+// top-level loop entirely -- re-parsing would duplicate every declaration);
+// false otherwise, having registered @p EntryPath so a LATER self-reference
+// (one of the entry file's own imports importing it back) becomes an
+// ordinary cache hit too. See its definition in ParserModule.cpp for the
+// full rationale and the concrete bug this closes (lib/std/collections/
+// list.tr, transitively re-imported by the always-injected `strings`
+// prelude module's own `import list::List;`).
+bool ClaimEntryFileImportSlot(const std::string &EntryPath);
+
+// RT-001: this install's resolved root -- TURF_HOME if set and non-empty,
+// else <compiler-binary-dir>/.. (so a plain `build/turf` dev build finds
+// the sibling lib/ directory, lib/std included, with zero setup). Exported
+// (was file-local in ParserModule.cpp until RT-001) specifically so
+// main.cpp's linkObject() can anchor `-lturfrt`'s search path at the same
+// root `import` already resolves lib/std against, without a second,
+// independently-maintained copy of this logic. See its definition in
+// ParserModule.cpp for the full rationale.
+std::string TurfInstallRoot();
+
+// LANG-002/STD-001: true if @p Path declared the raw-pointer capability
+// (`unsafe module;`) AND that declaration is actually honored -- the
+// `unsafe { }` gate's trust boundary, replacing the old, purely path-based
+// IsPathUnderLibStd() (issue #238). See its definition in ParserModule.cpp
+// for the full rationale; exported here (rather than kept file-local like
+// TurfInstallRoot()) specifically so TypeChecker.cpp's gate checks can call
+// it without linking against llvm::sys::fs directly.
+bool HasRawPointerCapability(const std::string &Path);
+
+// OVH-012: true if @p Path (canonicalized) falls under THIS install's
+// `lib/std` specifically -- a strict subset of TurfInstallRoot() (excludes
+// a sibling `lib/usr` user package, which is not "stdlib" for this check's
+// purpose even though it lives under the same install root). Purely
+// path-based, unlike HasRawPointerCapability() just above -- and
+// DELIBERATELY named differently from the old, removed `IsPathUnderLibStd()`
+// (issue #238) that function replaced: `scripts/check_boundary.sh` greps
+// for that exact identifier as a regression guard against a path-based
+// CAPABILITY check ever reappearing (F-STD-1, FREEZE.md §6.8 -- privileges
+// must be declared in source, never inferred from a file path). This
+// function grants no capability at all; it only answers "is this
+// diagnostic's location code the user didn't write," backing
+// DiagnosticEngine::flushAll()'s "system-module warning" print-time gate
+// (see Lexer.cpp) -- reusing the old name here would be confusing at best
+// and would trip that guard at worst. See its definition in ParserModule.cpp
+// for the full rationale.
+bool IsLibStdWarningLocation(const std::string &Path);
+
+// LANG-002: checks for and consumes a leading `unsafe module;` capability
+// pragma at the current token position. See its definition in
+// ParserModule.cpp for the full contract (when to call it, and what to do
+// with @p OutBlock when it returns false).
+bool ParseLeadingUnsafeModuleDecl(std::unique_ptr<ExprAST> &OutBlock);
 
 // Resolves a bare module name (e.g. "net") to the physical `.tr` file a real
 // `import net;` would load -- the same stdlib -> usr-package ->

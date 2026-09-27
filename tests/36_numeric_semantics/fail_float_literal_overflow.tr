@@ -1,0 +1,8 @@
+// SEM-002 (FREEZE.md §6.2 row 8): a float literal whose decimal->binary
+// rounding overflows to +inf is a hard error, unconditionally -- before
+// this group: silently became `inf` with zero diagnostics
+// (ARCHITECTURE_OVERHAUL.md §0.2's own verified finding).
+fn main(): int {
+    mut d: double = 1e400;
+    return 0;
+}

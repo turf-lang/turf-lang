@@ -1,0 +1,65 @@
+// Regression test: a generic struct method calling ANOTHER method of the
+// SAME struct via `self.` used to silently fail monomorphization discovery
+// whenever the CALLEE's own parameter list contained no occurrence of the
+// struct's type parameter(s) -- e.g. `fn<T> Box.grow(newCap: int): void`
+// called as `self.grow(n)` from another method on `Box<T>`. Found live
+// while building STD-003's Map<K,V>/Set<T> hash index (a bucket-table
+// growth helper needs a plain `int` capacity argument, unrelated to K/V).
+//
+// Root cause (src/TypeCheckerCall.cpp, TypeChecker::visitMethodCall): the
+// "recover the struct's own generic-parameter substitution" scan (`Subst`)
+// re-derived the receiver's type via a fresh `getType(Node.getBase())`
+// instead of reusing the ALREADY POINTER-UNWRAPPED `BaseTy` computed a
+// little earlier in the same function. `self`'s own declared/registered
+// type is always `TurfPointerType(GenericType(StructName, Args))` -- never
+// a bare GenericType -- so `dynamic_cast<GenericType*>` on that fresh,
+// still-wrapped fetch always failed, and `Subst` came back permanently
+// empty for every `self.method(...)` call. This stayed invisible whenever
+// the CALLEE's own parameters happened to independently reference the
+// struct's type parameter (a SEPARATE substitution source,
+// `MethodOwnSubst`, filled the same map entries via matching the callee's
+// declared param types against the caller's already-concrete arguments)
+// -- it only broke monomorphization discovery entirely (and therefore
+// Codegen, with an "Internal error: LLVM function ... not found" a normal
+// user could hit with no warning) when NEITHER source had anything to
+// contribute, i.e. exactly the shape below.
+//
+// Fixed by capturing the pointer-unwrapped receiver type into its own
+// variable right after the unwrap, and reusing THAT at both places that
+// used to re-fetch `getType(Node.getBase())` directly (the `Subst` scan,
+// and the Method-kind instantiation-request recording just after it).
+import test;
+
+struct Box<T> {
+  v: T
+}
+
+// Deliberately takes a CONCRETE `int`, not `T` -- the exact shape that used
+// to break. `Box.grow` exists purely to be called from `Box.fill` below,
+// mirroring map.tr/set.tr's real `bucketRehash(newCap: int)` shape.
+fn<T> Box.grow(extra: int): int {
+  return extra * 2;
+}
+
+fn<T> Box.fill(x: T, extra: int): int {
+  self.v = x;
+  immutable grown: int = self.grow(extra);
+  return grown;
+}
+
+fn main(): int {
+  mut b: Box<int> = Box::default();
+  immutable r1: int = b.fill(5, 3);
+  test::assert(r1 == 6, "Box<int>.fill -> grow(3) should be 6");
+  test::assert(b.v == 5, "Box<int>.fill should still set v");
+
+  // A second, DIFFERENT instantiation (Box<string>) exercising the same
+  // self-call shape, to prove the fix isn't accidentally specific to one
+  // concrete type argument.
+  mut sb: Box<string> = Box::default();
+  immutable r2: int = sb.fill("hello", 10);
+  test::assert(r2 == 20, "Box<string>.fill -> grow(10) should be 20");
+  test::assert(sb.v == "hello", "Box<string>.fill should still set v");
+
+  return 0;
+}

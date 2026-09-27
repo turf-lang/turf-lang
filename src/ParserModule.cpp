@@ -4,7 +4,7 @@
  * @details Part of the recursive-descent parser for TurfLang, split from the
  *          original monolithic Parser.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -289,7 +289,9 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     int SavedLastChar, SavedCurTok, SavedCurLine, SavedCurCol;
     SourceLocation SavedCurLoc;
     std::string SavedFilename, SavedIdentifierStr, SavedStringVal;
-    double SavedNumVal; long long SavedIntVal; bool SavedBoolVal;
+    std::string SavedNumLitSpelling, SavedNumLitClean;
+    int SavedNumLitRadix;
+    bool SavedBoolVal;
     // SourceLines is what printDiag()'s caret snippet is snapshotted from
     // (see DiagnosticEngine::add() in Lexer.cpp) -- without saving/restoring
     // it here alongside SourceFilename, it never got populated for the
@@ -314,8 +316,9 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       SavedCurLine = CurLine;
       SavedCurCol = CurCol;
       SavedFilename = SourceFilename;
-      SavedNumVal = NumVal;
-      SavedIntVal = IntVal;
+      SavedNumLitSpelling = NumLitSpelling;
+      SavedNumLitClean = NumLitClean;
+      SavedNumLitRadix = NumLitRadix;
       SavedBoolVal = BoolVal;
       SavedIdentifierStr = IdentifierStr;
       SavedStringVal = StringVal;
@@ -330,8 +333,9 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       CurLine = SavedCurLine;
       CurCol = SavedCurCol;
       SourceFilename = SavedFilename;
-      NumVal = SavedNumVal;
-      IntVal = SavedIntVal;
+      NumLitSpelling = SavedNumLitSpelling;
+      NumLitClean = SavedNumLitClean;
+      NumLitRadix = SavedNumLitRadix;
       BoolVal = SavedBoolVal;
       IdentifierStr = SavedIdentifierStr;
       StringVal = SavedStringVal;
@@ -382,6 +386,17 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
 
   std::vector<std::unique_ptr<ExprAST>> Exprs;
 
+  // LANG-002: a file's very first top-level statement may be the
+  // `unsafe module;` capability pragma -- must be checked here, before the
+  // ordinary loop below, since it's the ONLY point in this function that
+  // sees this file's first real token (see ParseLeadingUnsafeModuleDecl()'s
+  // own doc comment).
+  {
+    std::unique_ptr<ExprAST> LeadingUnsafeBlock;
+    if (!ParseLeadingUnsafeModuleDecl(LeadingUnsafeBlock) && LeadingUnsafeBlock)
+      AppendFlattenedTopLevelDecl(std::move(LeadingUnsafeBlock), Exprs, false);
+  }
+
   // Parse the file
   while (true) {
     if (CurTok == TOK_EOF)
@@ -398,7 +413,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok == ';') {
-          LogErrorAt(CurLoc, "Unexpected ';'");
+          LogErrorAt(CurLoc, "Unexpected ';'", SLM::ErrorCategory::SYNTAX_ERROR);
           return nullptr;
         }
         // Flattens Expr first if it's a top-level `unsafe { }` block -- see
@@ -434,7 +449,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok != ';') {
-          LogErrorAt(CurLoc, "Expected ';' after statement.");
+          LogErrorAt(CurLoc, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
           return nullptr;
         }
         getNextToken(); // eat ';'
@@ -450,7 +465,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     auto Expr = ParseExpression();
     if (Expr) {
       if (CurTok != ';') {
-        LogErrorAt(CurLoc, "Expected ';' after statement.");
+        LogErrorAt(CurLoc, "Expected ';' after statement.", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
       getNextToken(); // eat ';'
@@ -481,7 +496,13 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
 // removed so CI/local dev builds don't all need TURF_HOME exported just to
 // run the test suite). See docs/architecture/modules_and_scope_resolution.md
 // Part 2.4 for the full rationale.
-static std::string TurfInstallRoot() {
+// RT-001: exported (no longer file-local) so main.cpp's linkObject() can
+// anchor `-lturfrt`'s search path at the exact same root `import` already
+// resolves lib/std against, without duplicating this env-var/fallback logic
+// a second time -- same reasoning HasRawPointerCapability() further down
+// this file gives for its own export (include/Parser.h's declaration site
+// has the full note).
+std::string TurfInstallRoot() {
   if (const char *Env = std::getenv("TURF_HOME")) {
     if (*Env)
       return std::string(Env);
@@ -492,46 +513,142 @@ static std::string TurfInstallRoot() {
   return Root.str().str();
 }
 
-// The `unsafe { }` gate's trust boundary (issue #238, FINAL_SPRINT.md's
-// Track A "Resolved" section): the entire `lib/std` tree is exempt --
-// mem.tr/net.tr/list.tr/etc. keep using ptr/T*/void* exactly as they do
-// today, no migration needed. Used by TypeChecker::isUnsafeGateExempt()
-// via this exported wrapper so the TypeChecker doesn't need to depend on
-// llvm::sys::fs itself (its header is deliberately kept LLVM-free -- see
-// TypeChecker.h's own doc comment). Reuses the exact same
-// TurfInstallRoot()/real_path() primitives ParsePreludeImports()'s
-// self-import-skip check above already relies on, so this can't disagree
-// with real module resolution about where `lib/std` physically lives.
-//
-// A path that can't be resolved (e.g. a synthesized AST node with an empty
-// SourceLocation.Filename) is conservatively NOT considered lib/std --
-// correct, since only a real, on-disk lib/std/*.tr file should ever be
-// exempt from the gate. The prefix check requires a path-separator
-// boundary right after the lib/std root so a sibling directory that merely
-// STARTS WITH the same characters (e.g. a hypothetical "lib/std2") can
-// never false-match.
-bool IsPathUnderLibStd(const std::string &Path) {
+// True if canonicalized `Path` falls under canonicalized `Root` -- shared
+// prefix-match helper behind both IsPathUnderInstallRoot() below and (until
+// LANG-002 replaced it) the old lib/std-specific IsPathUnderLibStd(). A path
+// that can't be resolved (e.g. a synthesized AST node with an empty
+// SourceLocation.Filename) is conservatively NOT considered a match. The
+// prefix check requires a path-separator boundary right after `Root` so a
+// sibling directory that merely STARTS WITH the same characters (e.g. a
+// hypothetical "lib/std2") can never false-match.
+static bool IsPathUnderDir(const std::string &Path, const std::string &Root) {
   if (Path.empty())
     return false;
-
   llvm::SmallString<256> CanonicalPath;
   if (llvm::sys::fs::real_path(Path, CanonicalPath))
     return false;
-
-  llvm::SmallString<256> StdDir(TurfInstallRoot());
-  llvm::sys::path::append(StdDir, "lib", "std");
-  llvm::SmallString<256> CanonicalStdDir;
-  if (llvm::sys::fs::real_path(StdDir, CanonicalStdDir))
+  llvm::SmallString<256> CanonicalRoot;
+  if (llvm::sys::fs::real_path(Root, CanonicalRoot))
     return false;
-
   std::string P = CanonicalPath.str().str();
-  std::string S = CanonicalStdDir.str().str();
-  if (P.size() < S.size() || P.compare(0, S.size(), S) != 0)
+  std::string R = CanonicalRoot.str().str();
+  if (P.size() < R.size() || P.compare(0, R.size(), R) != 0)
     return false;
-  if (P.size() == S.size())
+  if (P.size() == R.size())
     return true;
-  char Sep = P[S.size()];
+  char Sep = P[R.size()];
   return Sep == '/' || Sep == '\\';
+}
+
+// LANG-002 (STD-001): true if `Path` (canonicalized) falls under this
+// install's resolved root (`TurfInstallRoot()` -- the same anchor `import`
+// already uses). Generalizes the old, lib/std-SPECIFIC IsPathUnderLibStd():
+// the raw-pointer capability is no longer a `lib/std`-only privilege (any
+// file under the install root, e.g. a future `lib/usr` package, may declare
+// it too), and -- unlike the mechanism it replaces -- being under the
+// install root is no longer SUFFICIENT on its own; see
+// HasRawPointerCapability() below for the actual gate.
+static bool IsPathUnderInstallRoot(const std::string &Path) {
+  return IsPathUnderDir(Path, TurfInstallRoot());
+}
+
+// OVH-012: exported (Parser.h) so Lexer.cpp's DiagnosticEngine::flushAll()
+// can decide whether a warning's location is inside the standard library
+// itself, without linking against llvm::sys::fs directly -- same reasoning
+// HasRawPointerCapability()'s own export note gives. Deliberately narrower
+// than IsPathUnderInstallRoot() (this file, static): a `lib/usr` user
+// package lives under the same install root but is the USER's own code, not
+// the standard library, so it must never have its warnings hidden by
+// default the way a `lib/std` warning is. Named IsLibStdWarningLocation(),
+// NOT IsPathUnderLibStd() -- see that name's own history two functions
+// above (HasRawPointerCapability()'s doc comment) and Parser.h's doc
+// comment on this function for why reusing it would be a mistake:
+// scripts/check_boundary.sh greps for that exact identifier as a dedicated
+// regression guard, and this function is not the capability check it
+// guards against.
+bool IsLibStdWarningLocation(const std::string &Path) {
+  llvm::SmallString<160> LibStd(TurfInstallRoot());
+  llvm::sys::path::append(LibStd, "lib", "std");
+  return IsPathUnderDir(Path, LibStd.str().str());
+}
+
+// LANG-002/STD-001: files that parsed a leading `unsafe module;` capability
+// pragma (ParseLeadingUnsafeModuleDecl() below), keyed by the SAME
+// real_path()-canonicalized form HasRawPointerCapability() queries with, so
+// registration and lookup can never disagree over path spelling
+// (relative-vs-absolute, symlinks, "./"). Re-registering the same file
+// across the pre-pass/main-pass/import re-parses this compiler does is
+// harmless (std::set::insert on an existing key is a no-op) -- see
+// ParseFile()'s own comment on why a file's content can be parsed more than
+// once in a single compile.
+static std::set<std::string> UnsafeModuleFiles;
+
+static std::string CanonicalOrOriginal(const std::string &Path) {
+  llvm::SmallString<256> Canonical;
+  if (llvm::sys::fs::real_path(Path, Canonical))
+    return Path; // unresolvable (e.g. a synthesized node) -- fall back as-is
+  return Canonical.str().str();
+}
+
+// LANG-002 (STD-001): the raw-pointer capability's trust boundary, replacing
+// the old, purely path-based IsPathUnderLibStd() (issue #238). A privilege
+// that used to be invisible in the file that used it, ungreppable, and
+// unavailable to a user writing legitimate FFI bindings is now: DECLARED IN
+// SOURCE (a first-line `unsafe module;`, ParseLeadingUnsafeModuleDecl()
+// below) and, for that declaration to actually be honored, EITHER the file
+// is under the resolved install root (lib/std/**, unconditionally -- a
+// plain dev build needs no extra flag) OR the `--allow-unsafe-modules` CLI
+// flag was passed (g_AllowUnsafeModules, Lexer.h) -- a user's own FFI
+// bindings get the identical capability lib/std has, just opt-in rather
+// than ambient. Consulted by TypeChecker::isUnsafeGateExempt() and
+// checkNoRawPointersInSignature() (TypeCheckerCore.cpp) via this exported
+// wrapper so the TypeChecker doesn't need to depend on llvm::sys::fs itself
+// (its header is deliberately kept LLVM-free).
+bool HasRawPointerCapability(const std::string &Path) {
+  if (Path.empty())
+    return false;
+  if (!UnsafeModuleFiles.count(CanonicalOrOriginal(Path)))
+    return false;
+  return IsPathUnderInstallRoot(Path) || g_AllowUnsafeModules;
+}
+
+// LANG-002: called as the very first thing after a top-level parse loop's
+// initial getNextToken() (ParseFile() below; main.cpp's two mirrored
+// loops), i.e. only ever sees a file's FIRST real token. Checks for and
+// consumes a leading `unsafe module;` capability pragma.
+//
+// This parser has exactly one token of lookahead, so telling `unsafe
+// module;` apart from an ordinary top-level `unsafe { ... }` block requires
+// consuming 'unsafe' FIRST and looking at what follows -- there's no way to
+// peek past it non-destructively. Two outcomes follow:
+//   - It WAS `unsafe module;`: consumes 'module' and ';', registers the
+//     capability for the CURRENT SourceFilename, and returns true. The
+//     caller's own top-level loop should just proceed -- there's no AST
+//     node to append for a pragma.
+//   - CurTok was TOK_UNSAFE but this ISN'T that shape (a genuine top-level
+//     `unsafe { struct/fn/... }`): 'unsafe' has already been consumed, so
+//     this finishes parsing the block itself via the shared
+//     ParseUnsafeBlockBody() helper (see its own doc comment,
+//     ParserStmt.cpp) and hands the result back through `OutBlock`, exactly
+//     as if the caller had called ParseExpression() itself. Returns false.
+//   - CurTok is anything else: no-op. Returns false, `OutBlock` untouched.
+bool ParseLeadingUnsafeModuleDecl(std::unique_ptr<ExprAST> &OutBlock) {
+  if (CurTok != TOK_UNSAFE)
+    return false;
+  SourceLocation KeywordLoc = CurLoc;
+  getNextToken(); // consume 'unsafe'
+  if (CurTok == TOK_IDENTIFIER && IdentifierStr == "module") {
+    getNextToken(); // consume 'module'
+    if (CurTok != ';') {
+      SyntaxError(CurLoc, "Expected ';' after 'unsafe module'").raise();
+      return true; // still: not a real unsafe-block AST for the caller
+    }
+    getNextToken(); // consume ';'
+    UnsafeModuleFiles.insert(CanonicalOrOriginal(SourceFilename));
+    return true;
+  }
+  OutBlock = ParseUnsafeBlockBody(KeywordLoc);
+  return false;
 }
 
 // Recursively indexes every "<name>.tr" file under <Root>/lib/<SubdirName>
@@ -766,8 +883,92 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
 // lib/std/prelude.tr file the compiler reads. Scoped to the top-level file
 // only (see main.cpp's two call sites) -- library modules importing each
 // other still explicitly import what they need, exactly like today.
+//
+// STD-001: this is a SPECIFIED list, not an arbitrary hardcode -- it must
+// name exactly the `.tr` files under lib/std/core/, no more, no fewer (see
+// include/Intrinsics.h §4 and docs/architecture/boundary.md for why that
+// correspondence is deliberate). scripts/check_boundary.sh's check 2
+// enforces this mechanically; update both this array and lib/std/core/
+// together, in the same change, or that script fails.
 static const char *const PreludeModuleNames[] = {
     "int", "double", "bool", "char", "strings", "array"};
+
+// OVH-011 (docs/development/changes/OVH-011.md): the entry file's own
+// top-level parse (main.cpp's own token-consuming loop, further down this
+// same file's call chain -- NOT ParseFile()) never participated in the
+// ImportedFiles cache/ImportStack machinery every OTHER file's content goes
+// through. So a transitive import that happens to resolve to the exact
+// physical file currently being compiled AS the entry point gets a SECOND,
+// completely independent full parse of identical content, registering
+// every struct/function a second time -- E034 "already declared". The
+// concrete, verified case: `strings` (an always-injected prelude module)
+// does `import list::List;`; compiling lib/std/collections/list.tr
+// directly means that transitive import resolves to the entry file's own
+// path.
+//
+// Called once per parse pass (main.cpp's pre-pass AND its separate
+// mandatory pass -- ImportedFiles is cleared between them by
+// ClearParsedTopLevelASTs(), so each pass needs its own claim), immediately
+// after that pass's own ParsePreludeImports() call and BEFORE the entry
+// file's own top-level declaration loop starts. Two outcomes:
+//
+//   - The entry path is ALREADY in ImportedFiles: a transitive import
+//     during THIS PASS's prelude injection already reached it and parsed
+//     it for real, exactly like any ordinary first-time import (nothing
+//     about that parse changes). Returns true -- the caller must SKIP its
+//     own top-level loop entirely: every declaration this file has is
+//     already present, correctly registered under whatever module name
+//     reached it (e.g. "list"); re-parsing here would only duplicate them.
+//   - The entry path is NOT yet in ImportedFiles (the ordinary case: an
+//     arbitrary user program, or a lib/std module whose prelude chain
+//     never happens to reach it). Registers it now, before the caller's
+//     own top-level loop runs, so a LATER self-reference introduced by one
+//     of the entry file's OWN import statements (a companion module
+//     importing the entry back -- see tests/22_prelude/
+//     entry_file_reimported_transitively.tr) becomes an ordinary
+//     already-imported cache hit too, instead of a second, independent
+//     re-parse from within that companion's own ParseFile() call. Returns
+//     false -- the caller proceeds normally.
+//
+// Also registers the same physical file's stdlib/usr-index alias (e.g.
+// StdIndex["list"]) when one exists and matches by real_path -- a
+// transitive import reaches this file through the MODULE SEARCH PATH, not
+// by repeating the entry's own command-line spelling, so the two strings
+// essentially never match as plain text without this (mirrors
+// ParsePreludeImports()'s own self-check just below, which needs the
+// identical canonicalization for the identical reason).
+bool ClaimEntryFileImportSlot(const std::string &EntryPath) {
+  if (EntryPath.empty())
+    return false;
+
+  std::string StdlibAlias;
+  llvm::SmallString<256> CanonicalEntry;
+  if (!llvm::sys::fs::real_path(EntryPath, CanonicalEntry)) {
+    std::string ModuleGuess = llvm::sys::path::stem(EntryPath).str();
+    std::string Root = TurfInstallRoot();
+    for (const char *Subdir : {"std", "usr"}) {
+      const auto &Index = IndexModuleDir(Root, Subdir);
+      auto It = Index.find(ModuleGuess);
+      if (It == Index.end())
+        continue;
+      llvm::SmallString<256> CanonicalCandidate;
+      if (!llvm::sys::fs::real_path(It->second, CanonicalCandidate) &&
+          CanonicalCandidate == CanonicalEntry) {
+        StdlibAlias = It->second;
+        break;
+      }
+    }
+  }
+
+  if (ImportedFiles.count(EntryPath) ||
+      (!StdlibAlias.empty() && ImportedFiles.count(StdlibAlias)))
+    return true;
+
+  ImportedFiles.insert(EntryPath);
+  if (!StdlibAlias.empty())
+    ImportedFiles.insert(StdlibAlias);
+  return false;
+}
 
 // Synthesizes a `ModuleImportExprAST` for each prelude module, as if the
 // user had written `import int; import double; ...` as the literal first
@@ -864,7 +1065,7 @@ std::unique_ptr<ExprAST> ParseImport() {
   } else if (CurTok == TOK_TYPE_CHAR) {
     ModuleName = "char";
   } else {
-    LogErrorAt(CurLoc, "Expected module name after 'import'");
+    LogErrorAt(CurLoc, "Expected module name after 'import'", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   getNextToken();
@@ -885,7 +1086,7 @@ std::unique_ptr<ExprAST> ParseImport() {
       if (CurTok == '*') {
         getNextToken(); // eat '*'
         if (CurTok != ']') {
-          LogErrorAt(CurLoc, "Expected ']' after '*' in import list");
+          LogErrorAt(CurLoc, "Expected ']' after '*' in import list", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         getNextToken(); // eat ']'
@@ -894,7 +1095,7 @@ std::unique_ptr<ExprAST> ParseImport() {
         Mode = ImportMode::SymbolList;
         while (CurTok != ']' && CurTok != TOK_EOF) {
           if (CurTok != TOK_IDENTIFIER) {
-            LogErrorAt(CurLoc, "Expected a symbol name in import list");
+            LogErrorAt(CurLoc, "Expected a symbol name in import list", SLM::ErrorCategory::DECLARATION);
             return nullptr;
           }
           RequestedSymbols.push_back({IdentifierStr, CurLoc});
@@ -906,12 +1107,12 @@ std::unique_ptr<ExprAST> ParseImport() {
           }
         }
         if (CurTok != ']') {
-          LogErrorAt(CurLoc, "Expected ']' to close import list");
+          LogErrorAt(CurLoc, "Expected ']' to close import list", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         getNextToken(); // eat ']'
         if (RequestedSymbols.empty()) {
-          LogErrorAt(CurLoc, "Expected at least one symbol name in import list");
+          LogErrorAt(CurLoc, "Expected at least one symbol name in import list", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
       }
@@ -921,7 +1122,7 @@ std::unique_ptr<ExprAST> ParseImport() {
       getNextToken();
     } else {
       LogErrorAt(CurLoc,
-                 "Expected a symbol name or '[' after '::' in import");
+                 "Expected a symbol name or '[' after '::' in import", SLM::ErrorCategory::DECLARATION);
       return nullptr;
     }
   }

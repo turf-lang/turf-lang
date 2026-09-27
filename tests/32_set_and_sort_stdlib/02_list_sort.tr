@@ -1,12 +1,12 @@
 // Regression test: list_sort() (lib/std/collections/list.tr), sorting a
 // List<int> of unsorted values in place using a comparator function.
 //
-// A free function `list_sort(l: List<int>, cmp: fn(int, int): int): void`,
-// NOT a generic `fn<T> List.sort(...)` method -- see list_sort()'s doc
-// comment in list.tr for the full story on why every genuinely-generic
-// shape (comparator-with-T, bare `<`/`>` on T, pointer-based comparator)
-// is a confirmed dead end in this compiler, and why a concrete
-// `List<int>` free function is the design that actually compiles.
+// Since STD-003, `list_sort` is a thin, DEPRECATED wrapper over the real
+// generic `fn<T> List.sort(cmp: fn(T, T): int): void` method -- kept for
+// one cycle so this exact call shape keeps working unchanged (see
+// list.tr's own doc comment). New code should prefer `l.sort(cmp_int)`
+// directly; see tests/38_monomorphization/27_generic_list_sort_and_search.tr
+// for coverage of the generic method itself across multiple element types.
 import list::List;
 import list::list_sort;
 import test;
@@ -16,7 +16,7 @@ fn cmp_int(a: int, b: int): int {
 }
 
 fn main(): int {
-    mut l: List<int>;
+    mut l: List<int> = List::default();
     l.push(5);
     l.push(1);
     l.push(4);

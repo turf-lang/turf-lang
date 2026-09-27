@@ -1,0 +1,14 @@
+// Negative test: indexing a struct with no operator[]= overload declared
+// at all must be a clean type error, not the "Internal error: Base is not
+// an array or pointer" ICE ArrayAccessExprAST::codegenLValue() would
+// otherwise hit.
+struct Vec2 {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    mut v: Vec2 = Vec2::default();
+    v[0] = 5;
+    return 0;
+}

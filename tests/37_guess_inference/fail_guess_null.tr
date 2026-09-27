@@ -1,0 +1,8 @@
+// SEM-003 (§11.6): `guess` from a bare `null` literal has no reference type
+// to infer -- `null` alone names no target type, so this must be a hard
+// error asking for an explicit annotation instead of guessing at, say,
+// `&?void` or some other meaningless placeholder.
+fn main(): int {
+    mut x = null;
+    return 0;
+}

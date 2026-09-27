@@ -4,7 +4,7 @@
  * @details Part of the TypeChecker pass (Issue #7), split from the original
  *          monolithic TypeChecker.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -26,6 +26,11 @@
 #include "TypeCheckerInternal.h"
 #include "Parser.h"
 
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/SmallString.h"
+
+#include <algorithm>
+
 #include <cassert>
 #include <cstring>
 #include <functional>
@@ -42,10 +47,13 @@ namespace {
 void productionErrorHandler(SourceLocation Loc, const std::string &Msg,
                             const std::vector<RelatedLocation> &Related,
                             const std::string &CustomHint,
-                            const std::string &CustomBanner) {
+                            const std::string &CustomBanner,
+                            const SLM::DiagnosticHints &Hints) {
   TypeError Err(Loc, Msg, CustomHint, CustomBanner);
   for (const auto &R : Related)
     Err.withRelated(R.Loc, R.Description);
+  for (const auto &Fact : Hints.KnownTypes)
+    Err.withKnownType(Fact);
   Err.raise();
 }
 #else
@@ -53,7 +61,8 @@ void productionErrorHandler(SourceLocation Loc, const std::string &Msg,
 /// Throws std::runtime_error so tests can catch it with EXPECT_THROWS.
 void unitTestErrorHandler(SourceLocation, const std::string &Msg,
                           const std::vector<RelatedLocation> &,
-                          const std::string &, const std::string &) {
+                          const std::string &, const std::string &,
+                          const SLM::DiagnosticHints &) {
   throw std::runtime_error("TypeError: " + Msg);
 }
 #endif
@@ -128,10 +137,11 @@ void TypeChecker::setType(const ExprAST *Node, TurfTypePtr Ty) {
 void TypeChecker::reportError(SourceLocation Loc, const std::string &Msg,
                               const std::vector<RelatedLocation> &Related,
                               const std::string &CustomHint,
-                              const std::string &CustomBanner) {
+                              const std::string &CustomBanner,
+                              const SLM::DiagnosticHints &Hints) {
   HadError_ = true;
   if (ErrorHandler_)
-    ErrorHandler_(Loc, Msg, Related, CustomHint, CustomBanner);
+    ErrorHandler_(Loc, Msg, Related, CustomHint, CustomBanner, Hints);
 }
 
 
@@ -143,7 +153,7 @@ bool TypeChecker::isUnsafeGateExempt(const SourceLocation &Loc,
     return true;
   if (Node && WasDeclaredInsideTopLevelUnsafe(Node))
     return true;
-  return IsPathUnderLibStd(Loc.Filename);
+  return HasRawPointerCapability(Loc.Filename);
 }
 
 
@@ -172,7 +182,7 @@ bool TypeChecker::checkUnsafeGate(const TurfType *T, SourceLocation Loc,
 
 
 void TypeChecker::checkNoRawPointersInSignature(const FuncDefExprAST &Node) {
-  if (IsPathUnderLibStd(Node.getLoc().Filename))
+  if (HasRawPointerCapability(Node.getLoc().Filename))
     return;
   for (const auto &Param : Node.getParams()) {
     // The implicit `self` parameter (ParserDecl.cpp's ParseFuncDef()) is
@@ -240,6 +250,184 @@ bool TypeChecker::areArithCompatible(const TurfType *A, const TurfType *B) {
   if (A->isNumeric() && B->isNumeric())
     return true;
   return false;
+}
+
+
+// ─── SEM-002: literal-representability checking ──────────────────────────────
+// (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 rows 3/6/9) --
+// see each method's own doc comment (TypeChecker.h) for the full contract.
+
+std::optional<llvm::APSInt>
+TypeChecker::tryFoldUntypedIntConstant(const ExprAST *E, bool IsTopLevel) {
+  if (const auto *NE = dynamic_cast<const NumberExprAST *>(E)) {
+    if (!NE->isInteger() || !NE->isUntyped())
+      return std::nullopt;
+    if (!IsTopLevel && !NE->getIntValExact().isSignedIntN(64)) {
+      llvm::SmallString<48> S;
+      NE->getIntValExact().toString(S, 10, /*Signed=*/true);
+#ifndef TYPECHECKER_NO_ERRORS
+      IntegerLiteralOutOfRangeError(NE->getLoc(), S.str().str(), "int",
+                                    "-9223372036854775808 .. 9223372036854775807")
+          .raise();
+#else
+      throw std::runtime_error("IntegerLiteralOutOfRangeError");
+#endif
+      return std::nullopt;
+    }
+    return NE->getIntValExact();
+  }
+
+  if (const auto *UE = dynamic_cast<const UnaryExprAST *>(E)) {
+    if (UE->getOpcode() != '-')
+      return std::nullopt;
+    // Propagates IsTopLevel: folding "-BIG" is still the same single
+    // literal (just negated), per FREEZE.md's own `-9223372036854775808`
+    // example -- see this method's own doc comment.
+    auto Operand = tryFoldUntypedIntConstant(UE->getOperand(), IsTopLevel);
+    if (!Operand)
+      return std::nullopt;
+    llvm::APInt Widened = llvm::APInt(*Operand).sext(Operand->getBitWidth() + 1);
+    llvm::APInt Negated = -Widened;
+    return llvm::APSInt(std::move(Negated), /*isUnsigned=*/false);
+  }
+
+  if (const auto *BE = dynamic_cast<const BinaryExprAST *>(E)) {
+    int Op = BE->getOp();
+    if (Op != '+' && Op != '-' && Op != '*')
+      return std::nullopt;
+    // Always false: a binary operator's own operands are independent
+    // leaves, not "the same literal" -- see this method's own doc comment.
+    auto L = tryFoldUntypedIntConstant(BE->getLHS(), false);
+    if (!L)
+      return std::nullopt;
+    auto R = tryFoldUntypedIntConstant(BE->getRHS(), false);
+    if (!R)
+      return std::nullopt;
+    // Generous headroom (never itself a source of overflow -- only the
+    // FINAL destination check, in checkLiteralRepresentable(), is allowed
+    // to reject a value) so the fold itself is exact arbitrary-precision
+    // arithmetic, per FREEZE.md §6.2 row 6.
+    unsigned FoldWidth = std::max(L->getBitWidth(), R->getBitWidth()) * 2 + 8;
+    llvm::APInt LW = llvm::APInt(*L).sext(FoldWidth);
+    llvm::APInt RW = llvm::APInt(*R).sext(FoldWidth);
+    llvm::APInt Result = Op == '+' ? (LW + RW) : Op == '-' ? (LW - RW) : (LW * RW);
+    return llvm::APSInt(std::move(Result), /*isUnsigned=*/false);
+  }
+
+  // OVH-014 (docs/development/changes/OVH-014.md), FREEZE.md §6.2 row 6:
+  // a reference to an `int`-typed compile-time constant (a local `immut`
+  // this same fold already proved literal-arithmetic when IT was declared
+  // -- VariableSymbol::HasFoldedIntConstant, ResolverSymbolBase.h -- or an
+  // `export immut` constant, ResolverConstantSymbol::IntVal) folds exactly
+  // like the literal it was initialized from, so `immut a: int =
+  // 9223372036854775807; immut b = a + 1;` is now caught HERE at compile
+  // time instead of only at runtime (EmitCheckedIntArith). Both fields are
+  // plain decimal strings, never an llvm::APSInt, because ResolverSymbolBase.h
+  // is deliberately LLVM-free (see either field's own doc comment) -- this
+  // is the one place that string gets turned back into a real APSInt for
+  // the TypeChecker, the identical getBitsNeeded()-then-APInt(bits, digits,
+  // 10) pattern CodegenConstantValue() (CodegenCore.cpp) already uses to do
+  // the same conversion at Codegen time.
+  if (const auto *VE = dynamic_cast<const VariableExprAST *>(E)) {
+    const std::string *Digits = nullptr;
+    if (VE->ResolvedConstant && VE->ResolvedConstant->Type &&
+        VE->ResolvedConstant->Type->isNamed("int")) {
+      Digits = &VE->ResolvedConstant->IntVal;
+    } else if (const VariableSymbol *VS = VE->getResolvedSymbol()) {
+      if (VS->IsImmutable && VS->HasFoldedIntConstant)
+        Digits = &VS->FoldedIntConstant;
+    }
+    if (!Digits)
+      return std::nullopt;
+    bool Negative = !Digits->empty() && (*Digits)[0] == '-';
+    llvm::StringRef Magnitude = Negative ? llvm::StringRef(*Digits).drop_front()
+                                          : llvm::StringRef(*Digits);
+    unsigned Bits = llvm::APInt::getBitsNeeded(Magnitude, 10) + 1;
+    llvm::APInt Value(Bits, Magnitude, 10);
+    if (Negative)
+      Value = -Value;
+    return llvm::APSInt(std::move(Value), /*isUnsigned=*/false);
+  }
+
+  return std::nullopt;
+}
+
+
+void TypeChecker::checkLiteralRepresentable(const ExprAST *ValueExpr,
+                                            const TurfType *DestType,
+                                            SourceLocation Loc) {
+  if (!ValueExpr || !DestType)
+    return;
+
+  bool IsInt = DestType->isNamed("int");
+  bool IsInt32 = DestType->isNamed("int32");
+  bool IsDouble = DestType->isNamed("double");
+  if (!IsInt && !IsInt32 && !IsDouble)
+    return;
+
+  auto Folded = tryFoldUntypedIntConstant(ValueExpr, /*IsTopLevel=*/true);
+  if (!Folded)
+    return; // not a pure literal-arithmetic tree -- nothing to check here
+
+  const llvm::APSInt &V = *Folded;
+  llvm::SmallString<48> S;
+  V.toString(S, 10, /*Signed=*/true);
+  std::string ExactStr = S.str().str();
+
+#ifndef TYPECHECKER_NO_ERRORS
+  if (IsInt) {
+    if (!V.isSignedIntN(64))
+      IntegerLiteralOutOfRangeError(Loc, ExactStr, "int",
+                                    "-9223372036854775808 .. 9223372036854775807")
+          .raise();
+  } else if (IsInt32) {
+    if (!V.isSignedIntN(32))
+      IntegerLiteralOutOfRangeError(Loc, ExactStr, "int32",
+                                    "-2147483648 .. 2147483647")
+          .raise();
+  } else if (IsDouble) {
+    // See TypeChecker.h's own doc comment on why this requires fitting
+    // int64 FIRST, rather than checking double-exactness against the
+    // literal's true (possibly wider) value directly.
+    if (!V.isSignedIntN(64)) {
+      IntegerLiteralOutOfRangeError(Loc, ExactStr, "int",
+                                    "-9223372036854775808 .. 9223372036854775807")
+          .raise();
+      return;
+    }
+    llvm::APFloat AsDouble(0.0);
+    llvm::APFloat::opStatus St =
+        AsDouble.convertFromAPInt(V, /*IsSigned=*/true, llvm::APFloat::rmNearestTiesToEven);
+    if (St & llvm::APFloat::opInexact)
+      IntegerLiteralNotExactAsDoubleError(Loc, ExactStr).raise();
+  }
+#else
+  (void)ExactStr;
+  if ((IsInt && !V.isSignedIntN(64)) || (IsInt32 && !V.isSignedIntN(32)))
+    throw std::runtime_error("IntegerLiteralOutOfRangeError");
+#endif
+}
+
+
+bool TypeChecker::untypedLiteralAcquiresInt32(const ExprAST *Val, const TurfType *Dest) {
+  if (!Val || !Dest || !Dest->isInt32())
+    return false;
+  return tryFoldUntypedIntConstant(Val, /*IsTopLevel=*/true).has_value();
+}
+
+
+void TypeChecker::checkCallArgsRepresentable(
+    const std::vector<std::unique_ptr<ExprAST>> &Args,
+    const std::vector<FunctionParam> &Params, SourceLocation Loc,
+    size_t ParamOffset) {
+  if (ParamOffset >= Params.size())
+    return;
+  size_t Count = std::min(Args.size(), Params.size() - ParamOffset);
+  for (size_t i = 0; i < Count; ++i) {
+    const TurfType *ParamTy = Params[i + ParamOffset].Type.get();
+    if (ParamTy)
+      checkLiteralRepresentable(Args[i].get(), ParamTy, Loc);
+  }
 }
 
 
@@ -379,9 +567,9 @@ TurfTypePtr TypeChecker::inferRelationalType(SourceLocation Loc, int Op,
       return TurfBool();
     }
     // `err == MathError::DivisionByZero` inside `recover as err run { ... }`
-    // (docs/planning/Errors.md): `err`'s type is AnyErrorType (its real
-    // concrete error type isn't knowable at compile time -- `!T` doesn't
-    // restrict which declared error type a call can fail with), so the
+    // (docs/architecture/errors_and_recover.md): `err`'s type is AnyErrorType
+    // (its real concrete error type isn't knowable at compile time -- `!T`
+    // doesn't restrict which declared error type a call can fail with), so the
     // ordinary "same getName()" check below can never match it against a
     // real TurfUserErrorType. Allowed specifically (and only) when one side
     // is AnyErrorType and the other is a genuine declared error-type value.

@@ -1,0 +1,12 @@
+// OPT-002 must not disturb ValueRangePass::runOnCFG()'s existing
+// compile-time ArrayBoundsError (E001) diagnostic. markElidableChecks()
+// runs on a completely SEPARATE, earlier throwaway CFG and never raises a
+// diagnostic itself (see its own doc comment, ValueRange.cpp) -- this
+// proves the diagnostic still fires exactly as it did before this group
+// existed, for the identical provably-out-of-range-constant shape.
+fn main(): int {
+    mut arr: int[5];
+    mut i: int = 9;
+    arr[i] = 1;
+    return 0;
+}

@@ -4,7 +4,7 @@
  * @details Part of the Resolver name-resolution pass (Issue #18), split from
  *          the original monolithic Resolver.cpp by category (mirrors
  *          AST.h's ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -263,4 +263,70 @@ void Resolver::visitForEach(ForEachExprAST &Node) {
 
 void Resolver::visitReturn(ReturnExprAST &Node) {
   visitChild(Node.getVal());
+}
+
+namespace {
+// Structural scan for a `return`/`break`/`continue` that would escape PAST
+// a deferred statement (LANG-003, ARCHITECTURE_OVERHAUL.md §8: "a deferred
+// statement may not return, break, or continue out of itself"). Same
+// non-interprocedural recursion shape as MutatesSelfField()/
+// CollectReturnedErrorTypeNames() (ResolverCore.cpp) -- descends through
+// the same handful of AST shapes that can nest a statement (Block/If/
+// While/For/ForEach; DoWhile/Compare deliberately excluded, matching that
+// exact precedent).
+//
+// `InLoop` tracks whether the recursion has already descended into a
+// While/For/ForEach body that itself began INSIDE the deferred statement --
+// a break/continue found there is absorbed by that inner loop (it can
+// never reach past the defer at all) and must NOT be flagged. A `return`,
+// by contrast, always escapes even through an arbitrary number of nested
+// loops, since nothing in this language can catch it early -- so `return`
+// is never absorbed, regardless of `InLoop`.
+const ExprAST *FindEscapingControlFlow(const ExprAST *E, bool InLoop) {
+  if (!E)
+    return nullptr;
+
+  if (dynamic_cast<const ReturnExprAST *>(E))
+    return E;
+  if (dynamic_cast<const BreakExprAST *>(E) ||
+      dynamic_cast<const ContinueExprAST *>(E))
+    return InLoop ? nullptr : E;
+
+  if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
+    for (const auto &Child : Blk->getExpressions())
+      if (const ExprAST *Found = FindEscapingControlFlow(Child.get(), InLoop))
+        return Found;
+    return nullptr;
+  }
+  if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
+    for (const auto &B : If->getBranches())
+      if (const ExprAST *Found = FindEscapingControlFlow(B.Body.get(), InLoop))
+        return Found;
+    return FindEscapingControlFlow(If->getElseBody(), InLoop);
+  }
+  if (auto *W = dynamic_cast<const WhileExprAST *>(E))
+    return FindEscapingControlFlow(W->getBody(), /*InLoop=*/true);
+  if (auto *F = dynamic_cast<const ForExprAST *>(E))
+    return FindEscapingControlFlow(F->getBody(), /*InLoop=*/true);
+  if (auto *FE = dynamic_cast<const ForEachExprAST *>(E))
+    return FindEscapingControlFlow(FE->getBody(), /*InLoop=*/true);
+  return nullptr;
+}
+} // namespace
+
+void Resolver::visitDefer(DeferExprAST &Node) {
+  visitChild(Node.getStmt());
+
+  if (const ExprAST *Bad = FindEscapingControlFlow(Node.getStmt(), false)) {
+    // ExprAST has no virtual getLoc() (every concrete node type defines its
+    // own, non-polymorphically -- docs/architecture/compiler_pipeline.md
+    // §6), so the three candidate kinds FindEscapingControlFlow() can ever
+    // return have to be re-distinguished here to read their location back.
+    if (auto *Ret = dynamic_cast<const ReturnExprAST *>(Bad))
+      DeferControlFlowError(Ret->getLoc(), "return").raise();
+    else if (auto *Brk = dynamic_cast<const BreakExprAST *>(Bad))
+      DeferControlFlowError(Brk->getLoc(), "break").raise();
+    else if (auto *Cont = dynamic_cast<const ContinueExprAST *>(Bad))
+      DeferControlFlowError(Cont->getLoc(), "continue").raise();
+  }
 }

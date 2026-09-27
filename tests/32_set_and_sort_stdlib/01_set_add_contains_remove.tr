@@ -5,7 +5,7 @@ import set::Set;
 import test;
 
 fn main(): int {
-    mut s: Set<int>;
+    mut s: Set<int> = Set::default();
     test::assert(s.length() == 0, "new set starts empty");
 
     s.add(1);
@@ -32,7 +32,7 @@ fn main(): int {
     test::assert(s.length() == 2, "removing an absent item must not change length");
 
     // Force growth past the initial capacity (8).
-    mut big: Set<int>;
+    mut big: Set<int> = Set::default();
     mut i: int = 0;
     while i < 20 {
         big.add(i);

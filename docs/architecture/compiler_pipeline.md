@@ -28,12 +28,15 @@ Related docs:
 - `docs/architecture/memory_model.md` — heap/stack layout and the runtime
   representation generics compile down to (companion doc, written
   alongside this one — see §7 below for where the two meet).
-- `docs/planning/COMPILER_MODULE_BREAKDOWN.md` — the 2026-08 split of the
-  original monolithic `Parser.cpp`/`Resolver.cpp`/`TypeChecker.cpp` into
-  the per-category files (`ParserCore.cpp`, `ResolverDecl.cpp`,
-  `TypeCheckerCall.cpp`, ...) cited throughout this document. The split
-  changed file organization only — every pass's actual algorithm is
-  unchanged from before it.
+- The 2026-08 split of the original monolithic
+  `Parser.cpp`/`Resolver.cpp`/`TypeChecker.cpp` into the per-category files
+  (`ParserCore.cpp`, `ResolverDecl.cpp`, `TypeCheckerCall.cpp`, ...) cited
+  throughout this document. The split changed file organization only — every
+  pass's actual algorithm is unchanged from before it. Its plan doc,
+  `docs/planning/COMPILER_MODULE_BREAKDOWN.md`, was retired once the split
+  landed (same convention as `PHASE_2_ISSUES.md`/`FINAL_SPRINT.md`; the text
+  is in git history) — **this document is where the per-pass file layout is
+  now described**, and every split file's own header doc comment points here.
 
 ---
 
@@ -230,9 +233,8 @@ noise from one bad statement.
 
 `src/ParserCore.cpp`, `src/ParserDecl.cpp`, `src/ParserStmt.cpp`,
 `src/ParserLiteral.cpp`, `src/ParserModule.cpp` (split by category from a
-single monolithic `Parser.cpp`, per `docs/planning/
-COMPILER_MODULE_BREAKDOWN.md` — every file's top doc comment says so
-explicitly). Classic **recursive-descent** parsing: each grammar
+single monolithic `Parser.cpp` in the 2026-08 module split — every file's top
+doc comment says so explicitly). Classic **recursive-descent** parsing: each grammar
 production is one C++ function (`ParseIfStmt()`, `ParseStructDecl()`,
 `ParseType()`, ...) that consumes tokens via the shared `CurTok`/
 `getNextToken()` cursor and recursively calls the functions for whatever
@@ -545,7 +547,8 @@ Two places the TypeChecker specifically understands this shape:
 - **`visitRecoverExpr()`** (`src/TypeCheckerCall.cpp:1389-1457`) type-
   checks Turf's three `recover` forms (`recover produce <value>`,
   `recover run { }`, `recover as x run { }` — see
-  `docs/planning/Errors.md` for the full language-level design). It first
+  `docs/architecture/errors_and_recover.md` for the full language-level
+  design). It first
   rejects `recover` on anything whose type isn't actually an error union
   (`!WrappedTy->isErrorUnion()`, `src/TypeCheckerCall.cpp:1394-1404`);
   for `recover produce`, checks the produced value against the success
@@ -665,22 +668,36 @@ single connected component), counted over *every* block including the
 virtual exit block and its incoming edges. `src/CodegenFunc.cpp:405-407`
 warns (`CyclomaticComplexityWarning`, non-fatal) when `M > 15`.
 
-### Unreachable code / dead branches — a real inconsistency worth documenting plainly
+### Unreachable code / dead branches — was a real inconsistency, fixed by HYG-001
 
-`reportFlowDiagnostics()` (`src/CFG.cpp:375-400`) also calls
+`reportFlowDiagnostics()` (`src/CFG.cpp:375-...`) calls
 `getUnreachableBlocks()` (any non-exit, non-empty block the entry-block
 BFS never reached) and `getDeadBranches()` (unreachable blocks whose
-terminator is `Branch`). **Both are printed as plain, uncolored
-`std::cerr <<` strings** (`src/CFG.cpp:381-383, 396-397`), *not* routed
-through `DiagnosticEngine`/`TurfWarning` like every other diagnostic in
-this document — confirmed live (compiling a `while true { return 1; }
-return 2;` function prints exactly `Warning: Unreachable code in block
-'while.end' of function 'main'` with no `[E0NN]` code, no color, no hint,
-no source snippet, and compilation still succeeds). Dedicated
-`UnreachableBlockWarning`/`DeadBranchWarning` classes exist
-(`include/ErrorsFlow.h:58-82`) but `reportFlowDiagnostics()` never
-constructs either of them — this looks like a real, live gap between
-intent and implementation, not a subtlety to paper over.
+terminator is `Branch`). **This used to print both as plain, uncolored
+`std::cerr <<` strings**, *not* routed through `DiagnosticEngine`/
+`TurfWarning` like every other diagnostic in this document — confirmed
+live at the time (compiling a `while true { return 1; } return 2;`
+function printed exactly `Warning: Unreachable code in block 'while.end'
+of function 'main'` with no `[E0NN]` code, no color, no hint, no source
+snippet, and compilation still succeeded), even though the dedicated
+`UnreachableBlockWarning`/`DeadBranchWarning` classes already existed in
+`include/ErrorsFlow.h` and were simply never constructed by anything.
+
+Fixed by HYG-001 (`docs/development/changes/HYG-001.md`,
+2026-09-18): `reportFlowDiagnostics()` now constructs
+`UnreachableBlockWarning(BB->getTerminatorLoc(), FunctionName,
+BB->getName())`/`DeadBranchWarning(BB->getTerminatorLoc(), FunctionName)`
+and calls `.warn()`, same as every other warning in this pass. Both
+render with a real `[E0NN]` code (`E074`/`E075`), color, caret, source
+snippet, and hint, and both participate in `DiagnosticEngine`'s
+one-primary-error-per-line cap like everything else. Anchored at the
+unreachable block's own *terminator* location, not its first statement's
+— `ExprAST` has no virtual `getLoc()` (every concrete node type defines
+its own, non-polymorphically), so there is no generic way to read a
+location off an arbitrary statement here; this mirrors
+`StatementAfterTerminatorError`'s identical precedent earlier in this
+document rather than inventing new AST-wide dispatch. *When* the warnings
+fire did not change — only how they render.
 
 ### Use-before-initialization — `DefiniteAssignmentPass`
 
@@ -864,66 +881,96 @@ analysis exists.
 
 ---
 
-## 7. Generic type erasure
+## 7. Generic monomorphization
 
-Turf's generics are implemented as **type erasure**, not
-**monomorphization** — a genuine compiler-design trade-off worth naming
-explicitly, since the two headline doc comments in `include/Types.h`
-(`TurfGenericParamType`: *"replaced with concrete types during
-monomorphization"*; `GenericType`: *"the core of monomorphization"*) use
-the word "monomorphization" in a way that doesn't match what the
-implementation actually does — worth flagging as a real, current
-documentation/implementation mismatch rather than repeating it here as
-fact.
+Turf's generics are implemented as **monomorphization**: one fully
+specialized, independently-compiled clone of a generic function, method,
+or struct per distinct tuple of concrete type arguments actually used in
+the program (`docs/development/FREEZE.md` §6.1, frozen). This is the
+result of the Architecture Overhaul's `TYPE-002` feature group
+(`docs/development/changes/TYPE-002.md`), which replaced an earlier type-erasure
+implementation outright — the two headline doc comments in
+`include/Types.h` (`TurfGenericParamType`: *"replaced with concrete types
+during monomorphization"*; `GenericType`: *"the core of monomorphization"*)
+now describe the actual implementation, not an aspiration.
 
-**What actually happens**: a generic struct declaration produces exactly
-**one** registered `TurfStructType`, regardless of how many concrete
-instantiations (`Box<int>`, `Box<string>`, `Box<Player>`, ...) appear in
-the program. `GlobalSymbolTable` only ever has `"Box"` registered — never
-`"Box<int>"` specifically. `FieldAccessExprAST::codegenLValue()`
-(`src/CodegenStruct.cpp:714-726`) resolves a `GenericType`-typed base
-straight back to its shared base-name struct type before doing anything
-else, with the code's own comment stating the reasoning directly: *"a
-single layout is correct for every instantiation."* Generic function
-parameters follow the identical pattern at the value level: a
-`TurfGenericParamType`-typed argument is passed as a single erased,
-pointer-sized runtime representation, and each call site inserts its own
-un-erase cast back to the concrete type it actually needs
-(`src/CodegenFunc.cpp:1013-1027` — a pointer value re-interpreted via
-`PtrToInt`/bitcast back into `int`/`bool`/`double` as needed, keyed off
-the *declared*, `TurfGenericParamType`-bearing parameter type rather than
-the call's own argument type). See `docs/architecture/memory_model.md`
-for the actual bit-level runtime representation this settles on; this
-document only covers the *why* of the design choice, not its storage
-layout.
+**What actually happens**: a new pass, the **Monomorphizer**
+(`include/Monomorphize.h`/`src/Monomorphize.cpp`), sits between the
+TypeChecker and Codegen as pre-pass sub-pass 2b.5:
 
-**Why erasure over monomorphization**: true monomorphization —
-generating one fully specialized copy of a generic function/struct's
-compiled code per concrete instantiation, the strategy C++ templates and
-Rust generics both use — trades compile time and binary size for
-per-instantiation optimization opportunities (each specialized copy can
-be optimized as if it were hand-written for that exact type, and there's
-no runtime representation-erasure cost). Type erasure inverts that trade:
-one shared compiled implementation per generic declaration, at the cost
-of a small amount of per-call-site cast/reinterpret overhead and the loss
-of any type-specific optimization inside the generic body itself. For a
-from-scratch, single-person-scale AOT compiler, this is the classic
-engineering trade: monomorphization means every additional concrete
-instantiation of a generic type anywhere in a program adds its own
-compiled copy of every method — genuine, unbounded code-size growth as a
-program's use of generics grows, and a proportional increase in what the
-compiler has to type-check and lower. Type erasure keeps compiled code
-size proportional to the number of *generic declarations* written, not
-the number of instantiations used, at the cost of the un-erase-cast
-machinery described above and (documented as a known, currently-unfixed
-architectural gap elsewhere in the project's own notes) a real
-correctness limit: a struct larger than one machine word can't be
-losslessly round-tripped through a single erased pointer-sized slot,
-which is why some generic-collection-of-large-struct code in the standard
-library currently works around the limitation with an explicit `List<T*>`
-pattern instead. That limitation is a `memory_model.md`-level concern,
-not a pipeline-stage one — mentioned here only so the trade-off doesn't
-read as free.
+```
+Lexer → Parser → Resolver(2) → TypeChecker → Monomorphizer → Codegen
+```
+
+While the pre-pass TypeChecker runs, every generic call site
+(`visitFuncCall`/`visitMethodCall`, `TypeCheckerCall.cpp`) and every
+generic-typed variable declaration or field
+(`visitVarDecl`/`visitStructDecl`, `TypeCheckerDecl.cpp`) records an
+`InstantiationRequest` — the generic declaration plus the concrete type
+arguments the call site or declaration actually needs — into an
+`InstantiationCollector`. The Monomorphizer then drains this worklist to a
+fixed point: for each still-undrained request it clones the generic
+declaration's AST, substitutes every occurrence of its `TurfGenericParamType`
+type parameters with the concrete types the request names, renames the
+clone via `Monomorphize::instantiatedDeclName()` (a pure function of base
+name and type arguments — e.g. `identity` + `[int]` → `identity_gen1_int`,
+`List` + `[int]` → `List_gen1_int`), clears its type parameters so it is no
+longer generic, and re-resolves/re-typechecks it exactly like an ordinary,
+already-concrete declaration. Draining is a fixed point rather than a
+single sweep because re-typechecking one clone's body can discover *new*
+generic call sites (a nested generic call, a generic struct field) that
+themselves need draining — the collector's cache is scanned non-destructively
+each iteration so growth mid-sweep is picked up automatically. A generic
+declaration's own **template** AST node is left untouched in the tree —
+`FuncDefExprAST::codegen()`/`StructDeclExprAST::codegen()` both refuse to
+emit code for a node that still has type parameters — so only clones ever
+reach Codegen.
+
+The result is genuine, independent compiled code and layout per
+instantiation: `List<int>` and `List<string>` are two distinct
+`llvm::StructType`s with two distinct sets of compiled methods
+(`turf_List.push_gen1_int_...`, `turf_List.push_gen1_string_...`), not one
+shared implementation reached through a cast. `GlobalSymbolTable` holds a
+separate registration for each concrete instantiation actually used,
+keyed by its mangled name — never a single shared `"List"` entry standing
+in for all of them. See `docs/architecture/memory_model.md` §2.7 for the
+storage-layout consequences (in particular: there is no pointer-sized
+"erased slot" any more, so a struct-typed `T` larger than one machine word
+is not a special case).
+
+**Instantiation depth is capped.** A genuinely unbounded recursive generic
+instantiation (a generic function whose body calls itself through its own
+still-open type parameter in a way that would keep generating new,
+distinct concrete instantiations forever) is rejected with a dedicated
+diagnostic (`E079`, `GenericInstantiationDepthError`) once the worklist's
+drain depth exceeds `Monomorphize::kMaxInstantiationDepth` (64, FREEZE.md
+§6.1) — a compile-time error naming the instantiation chain, not an
+unbounded compile or a stack overflow in the compiler itself. `TYPE-002`'s
+own `Known pitfalls`/`OVH-014` document the diagnostic's one remaining
+rough edge (it currently names the whole instantiation cache rather than
+just the offending chain — tracked as roadmap `LEC-005`, not a soundness gap).
+
+**Why monomorphization over type erasure**: the project's earlier
+erasure-based implementation traded away real correctness, not just
+optimization opportunity — every type parameter erased to one opaque
+64-bit slot, so a struct-typed `T` larger than one machine word could not
+be losslessly represented at all (an ICE on any attempt), no per-`T`
+operator dispatch was possible (an equality check on a generic `K`
+silently compared raw pointer bits instead of calling `operator==` for the
+concrete type), and `sizeof(T)` inside a generic body had no correct
+answer to give. Most importantly, a precise garbage collector (F-MEM-1)
+cannot trace a heap where a `T`-typed field is sometimes a real pointer
+and sometimes a scalar value stored in a pointer-shaped slot purely by
+convention — monomorphization, which gives every field a real, distinct,
+statically-known type, is F-MEM-1's own explicit prerequisite
+(`docs/development/FREEZE.md` §6.5). The real cost monomorphization pays
+instead is compile-time and code-size growth proportional to the number of
+*distinct concrete instantiations* a program actually uses, not just the
+number of generic declarations written — bounded in practice by the depth
+cap above and, per `TYPE-002`'s own measurements, offset in this compiler's
+case by `OPT-001`'s dead-code stripping of now-genuinely-unreachable
+generic template bodies (which erasure, by design, always kept
+reachable).
 
 ---
 

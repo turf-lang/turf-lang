@@ -55,6 +55,30 @@ public:
     if (auto *L = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {
       if (L->ResolvedSymbol)
         onDef(Node.getLoc(), L->ResolvedSymbol.get());
+    } else if (auto *AA = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS())) {
+      // SEM-004 (§12.6): an element write (`arr[i] = v`) counts as assigning
+      // the WHOLE array -- elements are not tracked individually, the same
+      // granularity ConstructorFieldAssignmentPass already uses for
+      // `self.<field>`. This ONLY applies when the base is a genuine
+      // fixed-size T[N] local: its storage IS the alloca (no separate
+      // pointer value gets read to compute the element address), so the
+      // write is purely a definition, same as writing a struct field. A
+      // `string`/`ptr`/`T*`/unsized-`T[]` base is representationally a
+      // pointer -- indexing it genuinely READS the pointer value stored in
+      // the base variable to compute the target address, so those must fall
+      // through to the ordinary read treatment below (required: `mut buf:
+      // string; buf[0] = 'x';` must still be E008, not a silent write
+      // through an unassigned pointer).
+      visitChild(AA->getIndex());
+      const auto *BaseVar = dynamic_cast<const VariableExprAST *>(AA->getBase());
+      const auto *BaseArrTy = (BaseVar && BaseVar->ResolvedSymbol)
+          ? dynamic_cast<const ::ArrayType *>(BaseVar->ResolvedSymbol->Type.get())
+          : nullptr;
+      if (BaseArrTy && BaseArrTy->getSize() > 0) {
+        onDef(Node.getLoc(), BaseVar->ResolvedSymbol.get());
+      } else {
+        visitChild(AA->getBase());
+      }
     } else {
       visitChild(Node.getLHS());
     }
@@ -126,6 +150,40 @@ public:
 
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
 
+  // LANG-003: without this, a variable read or defined ONLY inside a
+  // `defer <statement>;` would be invisible to DefiniteAssignmentPass/
+  // LivenessAnalysisPass (both built on this visitor via
+  // collectReadsAndDefs()) -- ASTVisitor's default visitDefer() is a no-op,
+  // so a deferred read of an uninitialized local would go uncaught, and a
+  // local only ever read via `defer` would be falsely flagged
+  // UnusedVariableWarning/DeadStoreWarning. The defer's registration point
+  // (this textual position, not whenever it actually runs later) is
+  // exactly where the read/def dataflow-wise needs to be recorded: the
+  // deferred value doesn't exist yet, but the SYMBOL must already be
+  // assigned by here for the eventual deferred use to be sound, which is
+  // precisely what "treat it as an ordinary read/def right here" checks.
+  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
+
+  // OVH-012: without this, a variable read ONLY as the operand of a
+  // `recover` expression's WRAPPED call (`immut numStr: string = ...;
+  // strings::parse_double(numStr) recover run { ... };`, lib/std/json/
+  // json.tr) was invisible to both DefiniteAssignmentPass and
+  // LivenessAnalysisPass -- ASTVisitor's default visitRecoverExpr() is a
+  // no-op, so `numStr` was falsely flagged BOTH UnusedVariableWarning
+  // ("declared but never used") and DeadStoreWarning ("assigned but never
+  // read"), confirmed live. Same reasoning as visitDefer() just above (LANG-003).
+  // Wrapped is always visited (it's evaluated unconditionally); ProduceExpr
+  // only runs on the failure path of `recover produce`, Block only on the
+  // failure path of `recover run`/`recover as err run` -- mutually
+  // exclusive per RecoverKind, so exactly one of the two is ever non-null.
+  void visitRecoverExpr(RecoverExprAST &Node) override {
+    visitChild(Node.getWrapped());
+    if (Node.getKind() == RecoverKind::Produce)
+      visitChild(Node.getProduceExpr());
+    else
+      visitChild(Node.getBlock());
+  }
+
   void visitFuncCall(FuncCallExprAST &Node) override {
     // First-class functions: `f(x)` where `f` is a local variable/parameter
     // of fn(...):... type is a genuine READ of `f` -- unlike an ordinary
@@ -166,13 +224,16 @@ public:
       visitChild(Init.get());
     if (Node.getInitExpr())
       visitChild(Node.getInitExpr().get());
-    // Arrays always get storage allocated — treat as defined immediately.
-    if (Node.ResolvedSymbol)
+    // SEM-004 (§12.6, FREEZE.md §6.4): storage is always zero-filled
+    // (ArrayDeclExprAST::codegen() memsets unconditionally), but that's a
+    // runtime guarantee, not a static one -- an array declared with NEITHER
+    // an init list nor a general initializer is statically unassigned, same
+    // as any other body-declared local. It only becomes "defined" here, at
+    // declaration, when an initializer was actually given; an element write
+    // (`arr[0] = 1`) is the other way to assign it, handled in
+    // visitAssignment below.
+    if ((!Node.getInitList().empty() || Node.getInitExpr()) && Node.ResolvedSymbol)
       onDef(Node.getLoc(), Node.ResolvedSymbol.get());
-  }
-
-  void visitDefaultInit(DefaultInitExprAST &Node) override {
-    (void)Node;
   }
 };
 
@@ -231,6 +292,11 @@ public:
   void visitBinary(BinaryExprAST &Node) override {
     visitChild(Node.getLHS()); visitChild(Node.getRHS());
   }
+  // LANG-003: a `defer` could (rarely) wrap a nested loop whose body
+  // declares its own local (e.g. `defer for (i in 0..n) { mut x = ...; }`)
+  // -- recurse in so DefiniteAssignmentPass's "AllBodyDeclared" set still
+  // sees it, same reasoning as AnalysisVisitor::visitDefer() above.
+  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
 };
 
 } // namespace
@@ -339,7 +405,19 @@ void DefiniteAssignmentPass::runOnCFG(CFG &Cfg,
       collectReadsAndDefs(Stmt,
         [&](SourceLocation Loc, const VariableSymbol *Sym) {
           if (AllBodyDeclared.count(Sym) && !cur.count(Sym)) {
-            DefiniteAssignmentError err(Loc, Sym->Name);
+            // SEM-004 (§8): name the type in the message, and suggest
+            // 'T::default()' specifically for a struct -- the mechanical
+            // migration this group's own breaking change calls for. Only
+            // structs actually have a callable '::default()'
+            // (ResolverCall.cpp's DefaultConstruct dispatch is gated on
+            // SymTable_.isKnownStruct()); an enum/array/generic local's
+            // fix is an ordinary explicit initializer instead, so
+            // suggesting '::default()' for those would name a construct
+            // that doesn't parse.
+            const std::string TypeName = Sym->Type ? Sym->Type->getName() : "";
+            const bool SuggestDefault =
+                Sym->Type && dynamic_cast<const TurfStructType *>(Sym->Type.get());
+            DefiniteAssignmentError err(Loc, Sym->Name, TypeName, SuggestDefault);
             err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col},
                             "declared here");
             err.raise();
@@ -652,6 +730,11 @@ public:
 
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
 
+  // LANG-003: a `self.field = ...` cleanup line is exactly the sort of
+  // thing a constructor might reasonably `defer` -- recurse in so
+  // ConstructorFieldAssignmentPass still sees it as a real field def.
+  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
+
   void visitFuncCall(FuncCallExprAST &Node) override {
     for (const auto &Arg : Node.getArgs())
       visitChild(Arg.get());
@@ -788,4 +871,514 @@ void ConstructorFieldAssignmentPass::runOnCFG(
 
   if (!Missing.empty())
     IncompleteConstructorError(ConstructorLoc, StructName, Missing).raise();
+}
+
+// ─── NullabilityPass (LANG-002) ──────────────────────────────────────────────
+// See include/Analysis.h's class doc comment for the overall shape (a
+// DefiniteAssignmentPass-style forward dataflow, but two-state: a symbol is
+// either in the current NonNullSet ("proven non-null here") or it isn't
+// ("not proven" -- covers both "still nullable" and "just compared null").
+
+using NonNullSet = std::unordered_set<const VariableSymbol *>;
+
+namespace {
+
+// Set intersection -- the meet operation at a CFG merge point. A symbol
+// proven non-null along only ONE of two incoming paths is NOT proven
+// non-null at the merge (FREEZE-adjacent §8 LANG-002 wording: "meet =
+// join-to-Nullable on disagreement" -- absence from the intersection IS
+// that join, under this pass's two-state simplification).
+NonNullSet meetNonNull(const NonNullSet &A, const NonNullSet &B) {
+  NonNullSet R;
+  for (const VariableSymbol *S : A)
+    if (B.count(S))
+      R.insert(S);
+  return R;
+}
+
+bool isTrackedNullableRef(const VariableSymbol *Sym) {
+  return Sym && Sym->Type && Sym->Type->isNullableReference();
+}
+
+// Collects every &?T-typed VariableSymbol* touched anywhere in the function
+// -- both body-declared locals (VarDeclExprAST) and PARAMETERS, discovered
+// the same way AnalysisVisitor discovers parameter reads elsewhere in this
+// file: a parameter never gets its own VarDeclExprAST in the body, but any
+// VariableExprAST read of it still carries a Resolver-attached
+// ResolvedSymbol, so scanning reads finds it too. A &?T parameter that is
+// never read anywhere has nothing to narrow or check, so missing it here is
+// harmless by construction.
+class NullableRefCollector : public ASTVisitor {
+  void visitChild(const ExprAST *Node) {
+    if (Node)
+      const_cast<ExprAST *>(Node)->accept(*this);
+  }
+  void addIfTracked(const VariableSymbol *Sym) {
+    if (isTrackedNullableRef(Sym))
+      Tracked.insert(Sym);
+  }
+
+public:
+  std::unordered_set<const VariableSymbol *> Tracked;
+
+  void visitVariable(VariableExprAST &Node) override {
+    addIfTracked(Node.getResolvedSymbol());
+  }
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    addIfTracked(Node.getResolvedSymbol());
+    visitChild(Node.getInitializer());
+  }
+  void visitArrayDecl(ArrayDeclExprAST &Node) override {
+    for (const auto &I : Node.getInitList())
+      visitChild(I.get());
+    if (Node.getInitExpr())
+      visitChild(Node.getInitExpr().get());
+  }
+  void visitBlock(BlockExprAST &Node) override {
+    for (const auto &E : Node.getExpressions())
+      visitChild(E.get());
+  }
+  void visitIf(IfExprAST &Node) override {
+    for (const auto &Br : Node.getBranches()) {
+      visitChild(Br.Cond.get());
+      visitChild(Br.Body.get());
+    }
+    visitChild(Node.getElse());
+  }
+  void visitWhile(WhileExprAST &Node) override {
+    visitChild(Node.getCond());
+    visitChild(Node.getBody());
+  }
+  void visitDoWhile(DoWhileExprAST &Node) override {
+    visitChild(Node.getCond());
+    visitChild(Node.getBody());
+  }
+  void visitFor(ForExprAST &Node) override {
+    visitChild(Node.getStart());
+    visitChild(Node.getEnd());
+    visitChild(Node.getStep());
+    visitChild(Node.getBody());
+  }
+  void visitForEach(ForEachExprAST &Node) override {
+    visitChild(Node.getIterable());
+    visitChild(Node.getBody());
+  }
+  void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
+  // LANG-003: discovers every &?T-typed symbol the function touches AT ALL
+  // (see this class's own doc comment above) -- one only ever read/assigned
+  // inside a `defer` must still end up Tracked, or NullabilityPass would
+  // silently skip checking it everywhere else too.
+  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
+  void visitAssignment(AssignmentExprAST &Node) override {
+    visitChild(Node.getLHS());
+    visitChild(Node.getRHS());
+  }
+  void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override {
+    visitChild(Node.getLHS());
+    visitChild(Node.getRHS());
+  }
+  void visitPostfixExpr(PostfixExprAST &Node) override { visitChild(Node.getOperand()); }
+  void visitBinary(BinaryExprAST &Node) override {
+    visitChild(Node.getLHS());
+    visitChild(Node.getRHS());
+  }
+  void visitUnary(UnaryExprAST &Node) override { visitChild(Node.getOperand()); }
+  void visitAddressOf(AddressOfExprAST &Node) override { visitChild(Node.getOperand()); }
+  void visitCast(CastExprAST &Node) override { visitChild(Node.getOperand()); }
+  void visitFieldAccess(FieldAccessExprAST &Node) override { visitChild(Node.getBase()); }
+  void visitArrayAccess(ArrayAccessExprAST &Node) override {
+    visitChild(Node.getBase());
+    visitChild(Node.getIndex());
+  }
+  void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
+    for (const auto &E : Node.getElements())
+      visitChild(E.get());
+  }
+  void visitFuncCall(FuncCallExprAST &Node) override {
+    visitChild(Node.getCallee());
+    for (const auto &A : Node.getArgs())
+      visitChild(A.get());
+  }
+  void visitMethodCall(MethodCallExprAST &Node) override {
+    visitChild(Node.getBase());
+    for (const auto &A : Node.getArgs())
+      visitChild(A.get());
+  }
+  void visitCompare(CompareExprAST &Node) override {
+    visitChild(Node.getSubject());
+    for (const auto &Arm : Node.getArms()) {
+      for (const auto &V : Arm.Values)
+        visitChild(V.get());
+      visitChild(Arm.Body.get());
+    }
+    visitChild(Node.getOtherBody());
+  }
+};
+
+// If exactly one of LHS/RHS is a literal `null` and the other is a bare,
+// TRACKED variable reference, returns that variable's symbol -- the only
+// shape this pass narrows on (direct comparison), per LANG-002's own
+// "deliberately intraprocedural... narrowing from direct comparisons only"
+// scoping (§8's Risks paragraph). Anything else (a field access compared to
+// null, a function call's result, two variables compared to each other)
+// returns nullptr -- correctly falls through to "no narrowing", never a
+// false claim of safety.
+const VariableSymbol *nullNarrowCandidate(
+    const ExprAST *LHS, const ExprAST *RHS,
+    const std::unordered_set<const VariableSymbol *> &Tracked) {
+  const ExprAST *VarSide = nullptr;
+  if (dynamic_cast<const NullExprAST *>(RHS))
+    VarSide = LHS;
+  else if (dynamic_cast<const NullExprAST *>(LHS))
+    VarSide = RHS;
+  else
+    return nullptr;
+  const auto *VE = dynamic_cast<const VariableExprAST *>(VarSide);
+  if (!VE)
+    return nullptr;
+  const VariableSymbol *Sym = VE->getResolvedSymbol();
+  if (!Sym || !Tracked.count(Sym))
+    return nullptr;
+  return Sym;
+}
+
+// Is `RHS`'s VALUE provably non-null, given the CURRENT NonNullSet `In`, for
+// the purpose of updating a tracked &?T variable's own state at a
+// VarDecl/Assignment? Three shapes are recognized -- anything else is
+// conservatively Nullable:
+//   - a literal `null`                          -> never non-null
+//   - `&expr` (AddressOfExprAST)                 -> always non-null (&T)
+//   - a bare variable reference, either another
+//     TRACKED &?T (copy its current state) or a
+//     plain `&T` (always non-null, widening in)  -> as described
+// A function call, field access, or any other expression shape defaults to
+// Nullable -- this pass only ever tracks VARIABLE state (DESIGN_NOTES.md
+// §1's own framing), never a general expression's provenance.
+bool classifyRHSNonNull(const ExprAST *RHS, const NonNullSet &In,
+                        const std::unordered_set<const VariableSymbol *> &Tracked) {
+  if (!RHS)
+    return false;
+  if (dynamic_cast<const NullExprAST *>(RHS))
+    return false;
+  if (dynamic_cast<const AddressOfExprAST *>(RHS))
+    return true;
+  if (const auto *VE = dynamic_cast<const VariableExprAST *>(RHS)) {
+    const VariableSymbol *Sym = VE->getResolvedSymbol();
+    if (!Sym)
+      return false;
+    if (Tracked.count(Sym))
+      return In.count(Sym) != 0;
+    if (Sym->Type && Sym->Type->isReference() && !Sym->Type->isNullableReference())
+      return true; // a plain &T widening in is always non-null
+    return false;
+  }
+  return false;
+}
+
+/**
+ * @brief Evaluates ONE statement/expression against an incoming NonNullSet,
+ *        both (a) computing the narrowed sets that hold when it evaluates
+ *        true/false (only meaningful for a genuine branch CONDITION -- every
+ *        other statement kind sets OnTrue == OnFalse == its own single
+ *        resulting map) and (b) -- when DoReport is true -- raising
+ *        PossibleNullDereferenceError/UnnarrowedNullableCastError for any
+ *        unguarded `&?T` use found along the way.
+ *
+ * Mirrors AnalysisVisitor's own shape exactly (a plain ASTVisitor subclass,
+ * one instance per sub-expression, recursing via `Node.accept(*this)`) --
+ * NOT the dynamic_cast-chain style CFG.cpp itself uses -- so this reuses the
+ * codebase's existing tree-walking idiom for a pass instead of introducing
+ * a second one. `checkOnly()` is the recursion helper for an operand that
+ * ISN'T itself a condition (an ordinary sub-expression, e.g. a function
+ * call's arguments): it still needs full recursive checking, but its own
+ * narrowing outcome is irrelevant to the caller and discarded.
+ *
+ * DoReport is threaded through so this SAME logic can run twice per block,
+ * exactly like DefiniteAssignmentPass's own two-step shape (Analysis.cpp,
+ * `runOnCFG` above): once silently, during fixed-point dataflow (an
+ * intermediate, not-yet-converged IN set must never raise a real user-
+ * facing diagnostic), and once for real after convergence, using the final
+ * fixed-point IN sets.
+ */
+class NarrowingVisitor : public ASTVisitor {
+  const std::unordered_set<const VariableSymbol *> &Tracked;
+  bool DoReport;
+
+  static void checkOnly(const ExprAST *E, const NonNullSet &In,
+                        const std::unordered_set<const VariableSymbol *> &Tracked,
+                        bool DoReport) {
+    if (!E)
+      return;
+    NarrowingVisitor V(In, Tracked, DoReport);
+    const_cast<ExprAST *>(E)->accept(V);
+  }
+
+public:
+  NonNullSet OnTrue, OnFalse;
+
+  NarrowingVisitor(const NonNullSet &In,
+                   const std::unordered_set<const VariableSymbol *> &Tracked,
+                   bool DoReport)
+      : Tracked(Tracked), DoReport(DoReport), OnTrue(In), OnFalse(In) {}
+
+  void visitBinary(BinaryExprAST &Node) override {
+    if (Node.getOp() == TOK_AND) {
+      NarrowingVisitor L(OnTrue, Tracked, DoReport);
+      const_cast<ExprAST *>(Node.getLHS())->accept(L);
+      NarrowingVisitor R(L.OnTrue, Tracked, DoReport); // RHS runs only if LHS true
+      const_cast<ExprAST *>(Node.getRHS())->accept(R);
+      OnTrue = R.OnTrue;
+      OnFalse = meetNonNull(L.OnFalse, R.OnFalse);
+      return;
+    }
+    if (Node.getOp() == TOK_OR) {
+      NarrowingVisitor L(OnTrue, Tracked, DoReport);
+      const_cast<ExprAST *>(Node.getLHS())->accept(L);
+      NarrowingVisitor R(L.OnFalse, Tracked, DoReport); // RHS runs only if LHS false
+      const_cast<ExprAST *>(Node.getRHS())->accept(R);
+      OnFalse = R.OnFalse;
+      OnTrue = meetNonNull(L.OnTrue, R.OnTrue);
+      return;
+    }
+    if (Node.getOp() == TOK_EQ || Node.getOp() == TOK_NEQ) {
+      if (const VariableSymbol *Sym =
+              nullNarrowCandidate(Node.getLHS(), Node.getRHS(), Tracked)) {
+        NonNullSet T = OnTrue, F = OnTrue;
+        if (Node.getOp() == TOK_NEQ) { T.insert(Sym); F.erase(Sym); }
+        else                          { T.erase(Sym);  F.insert(Sym); }
+        OnTrue = std::move(T);
+        OnFalse = std::move(F);
+        return;
+      }
+    }
+    checkOnly(Node.getLHS(), OnTrue, Tracked, DoReport);
+    checkOnly(Node.getRHS(), OnTrue, Tracked, DoReport);
+  }
+
+  void visitFieldAccess(FieldAccessExprAST &Node) override {
+    checkOnly(Node.getBase(), OnTrue, Tracked, DoReport);
+    if (const auto *BaseVar = dynamic_cast<const VariableExprAST *>(Node.getBase())) {
+      const VariableSymbol *Sym = BaseVar->getResolvedSymbol();
+      if (Sym && Tracked.count(Sym) && !OnTrue.count(Sym) && DoReport) {
+        PossibleNullDereferenceError Err(Node.getLoc(), BaseVar->getName(),
+                                         Node.getFieldName());
+        Err.withRelated({Sym->DeclLoc.Line, Sym->DeclLoc.Col}, "declared here");
+        Err.raise();
+      }
+    }
+  }
+
+  void visitCast(CastExprAST &Node) override {
+    checkOnly(Node.getOperand(), OnTrue, Tracked, DoReport);
+    const TurfType *Dest = Node.getDestType();
+    if (Dest && Dest->isReference() && !Dest->isNullableReference()) {
+      if (const auto *BaseVar =
+              dynamic_cast<const VariableExprAST *>(Node.getOperand())) {
+        const VariableSymbol *Sym = BaseVar->getResolvedSymbol();
+        if (Sym && Tracked.count(Sym) && !OnTrue.count(Sym) && DoReport)
+          UnnarrowedNullableCastError(Node.getLoc(), BaseVar->getName()).raise();
+      }
+    }
+  }
+
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    checkOnly(Node.getInitializer(), OnTrue, Tracked, DoReport);
+    const VariableSymbol *Sym = Node.getResolvedSymbol();
+    if (Sym && Tracked.count(Sym) && Node.getInitializer()) {
+      NonNullSet Updated = OnTrue;
+      if (classifyRHSNonNull(Node.getInitializer(), OnTrue, Tracked))
+        Updated.insert(Sym);
+      else
+        Updated.erase(Sym);
+      OnTrue = OnFalse = std::move(Updated);
+    }
+  }
+
+  void visitAssignment(AssignmentExprAST &Node) override {
+    checkOnly(Node.getRHS(), OnTrue, Tracked, DoReport);
+    if (const auto *LV = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {
+      const VariableSymbol *Sym = LV->getResolvedSymbol();
+      if (Sym && Tracked.count(Sym)) {
+        NonNullSet Updated = OnTrue;
+        if (classifyRHSNonNull(Node.getRHS(), OnTrue, Tracked))
+          Updated.insert(Sym);
+        else
+          Updated.erase(Sym);
+        OnTrue = OnFalse = std::move(Updated);
+        return;
+      }
+    }
+    checkOnly(Node.getLHS(), OnTrue, Tracked, DoReport);
+  }
+
+  void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override {
+    checkOnly(Node.getLHS(), OnTrue, Tracked, DoReport);
+    checkOnly(Node.getRHS(), OnTrue, Tracked, DoReport);
+  }
+  void visitPostfixExpr(PostfixExprAST &Node) override {
+    checkOnly(Node.getOperand(), OnTrue, Tracked, DoReport);
+  }
+  void visitUnary(UnaryExprAST &Node) override {
+    checkOnly(Node.getOperand(), OnTrue, Tracked, DoReport);
+  }
+  void visitAddressOf(AddressOfExprAST &Node) override {
+    checkOnly(Node.getOperand(), OnTrue, Tracked, DoReport);
+  }
+  void visitReturn(ReturnExprAST &Node) override {
+    checkOnly(Node.getVal(), OnTrue, Tracked, DoReport);
+  }
+  void visitFuncCall(FuncCallExprAST &Node) override {
+    checkOnly(Node.getCallee(), OnTrue, Tracked, DoReport);
+    for (const auto &A : Node.getArgs())
+      checkOnly(A.get(), OnTrue, Tracked, DoReport);
+  }
+  void visitMethodCall(MethodCallExprAST &Node) override {
+    checkOnly(Node.getBase(), OnTrue, Tracked, DoReport);
+    for (const auto &A : Node.getArgs())
+      checkOnly(A.get(), OnTrue, Tracked, DoReport);
+  }
+  void visitArrayAccess(ArrayAccessExprAST &Node) override {
+    checkOnly(Node.getBase(), OnTrue, Tracked, DoReport);
+    checkOnly(Node.getIndex(), OnTrue, Tracked, DoReport);
+  }
+  void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
+    for (const auto &E : Node.getElements())
+      checkOnly(E.get(), OnTrue, Tracked, DoReport);
+  }
+  void visitArrayDecl(ArrayDeclExprAST &Node) override {
+    for (const auto &I : Node.getInitList())
+      checkOnly(I.get(), OnTrue, Tracked, DoReport);
+    if (Node.getInitExpr())
+      checkOnly(Node.getInitExpr().get(), OnTrue, Tracked, DoReport);
+  }
+  void visitCompare(CompareExprAST &Node) override {
+    checkOnly(Node.getSubject(), OnTrue, Tracked, DoReport);
+  }
+};
+
+struct NarrowedStatement {
+  NonNullSet OnTrue, OnFalse;
+};
+
+NarrowedStatement evalStatement(const ExprAST *Stmt, const NonNullSet &In,
+                                const std::unordered_set<const VariableSymbol *> &Tracked,
+                                bool DoReport) {
+  if (!Stmt)
+    return {In, In};
+  NarrowingVisitor V(In, Tracked, DoReport);
+  const_cast<ExprAST *>(Stmt)->accept(V);
+  return {V.OnTrue, V.OnFalse};
+}
+
+} // namespace
+
+void NullabilityPass::runOnCFG(CFG &Cfg) {
+  const auto &Blocks = Cfg.getBlocks();
+  size_t N = Blocks.size();
+  if (N == 0)
+    return;
+
+  // Discover every &?T-typed symbol the function touches at all, across
+  // every block -- the SAME approach DefiniteAssignmentPass uses for its own
+  // "AllBodyDeclared" set (Step 0 above), just keyed on type instead of "was
+  // this declared here" (see NullableRefCollector's own doc comment).
+  NullableRefCollector Collector;
+  for (size_t b = 0; b < N; ++b)
+    for (ExprAST *Stmt : Blocks[b]->getStatements())
+      if (Stmt) const_cast<ExprAST *>(static_cast<const ExprAST *>(Stmt))->accept(Collector);
+  const auto &Tracked = Collector.Tracked;
+  if (Tracked.empty())
+    return; // nothing this pass could possibly flag -- skip the walk entirely
+
+  std::unordered_map<const TurfBasicBlock *, size_t> index;
+  for (size_t i = 0; i < N; ++i)
+    index[Blocks[i].get()] = i;
+
+  // ── Step 1: silent dataflow (no diagnostics) ──────────────────────────────
+  // Transfer: process a block's statements sequentially from IN[b], threading
+  // OnTrue through every statement but the last (an intermediate statement
+  // is never itself a branch condition). The LAST statement's OnTrue/OnFalse
+  // become this block's two EDGE-specific outputs when it ends in a genuine
+  // 2-way Branch (an `if`/`while`/elseif condition, per CFG.cpp's own
+  // construction -- see NullabilityPass's class doc comment for why a
+  // >2-successor Branch, e.g. `compare`, is safe to treat the same way: its
+  // own condition/subject never narrows, so both slots end up identical
+  // regardless of which one a given successor index actually reads).
+  // Meet at merge points: set intersection (meetNonNull), same shape as
+  // DefiniteAssignmentPass's own fixed point above.
+  TurfBasicBlock *Entry = Cfg.getEntryBlock();
+  size_t entryIdx = Entry ? index[Entry] : 0;
+
+  std::vector<NonNullSet> IN(N);
+  std::vector<NonNullSet> SingleOut(N), TrueOut(N), FalseOut(N);
+  std::vector<bool> HasEdgeSplit(N, false);
+
+  auto computeBlockOutputs = [&](size_t b, bool DoReport) {
+    NonNullSet Cur = IN[b];
+    const auto &Stmts = Blocks[b]->getStatements();
+    for (size_t s = 0; s < Stmts.size(); ++s) {
+      bool IsLast = (s + 1 == Stmts.size());
+      auto Result = evalStatement(Stmts[s], Cur, Tracked, DoReport);
+      if (IsLast) {
+        SingleOut[b] = Result.OnTrue;
+        bool Split = Blocks[b]->getTerminator() == TerminatorKind::Branch &&
+                     Blocks[b]->getSuccessors().size() == 2;
+        HasEdgeSplit[b] = Split;
+        if (Split) {
+          TrueOut[b] = Result.OnTrue;
+          FalseOut[b] = Result.OnFalse;
+        }
+      }
+      Cur = Result.OnTrue;
+    }
+    if (Stmts.empty()) {
+      SingleOut[b] = Cur;
+      HasEdgeSplit[b] = false;
+    }
+  };
+
+  for (size_t i = 0; i < N; ++i)
+    computeBlockOutputs(i, /*DoReport=*/false);
+
+  auto edgeSetFor = [&](size_t p, size_t succIdx) -> const NonNullSet & {
+    if (HasEdgeSplit[p])
+      return succIdx == 0 ? TrueOut[p] : FalseOut[p];
+    return SingleOut[p];
+  };
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t b = 0; b < N; ++b) {
+      if (b == entryIdx)
+        continue;
+
+      NonNullSet newIN;
+      bool hasPred = false;
+      bool first = true;
+      for (size_t p = 0; p < N; ++p) {
+        const auto &Succs = Blocks[p]->getSuccessors();
+        for (size_t si = 0; si < Succs.size(); ++si) {
+          if (!index.count(Succs[si]) || index.at(Succs[si]) != b)
+            continue;
+          hasPred = true;
+          const NonNullSet &Contribution = edgeSetFor(p, si);
+          newIN = first ? Contribution : meetNonNull(newIN, Contribution);
+          first = false;
+        }
+      }
+      if (!hasPred)
+        continue;
+
+      if (newIN != IN[b]) {
+        IN[b] = std::move(newIN);
+        computeBlockOutputs(b, /*DoReport=*/false);
+        changed = true;
+      }
+    }
+  }
+
+  // ── Step 2: report, using the fixed-point IN sets ─────────────────────────
+  for (size_t b = 0; b < N; ++b)
+    computeBlockOutputs(b, /*DoReport=*/true);
 }

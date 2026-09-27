@@ -191,19 +191,35 @@ class FuncDefExprAST : public ExprAST {
   // !IsStaticDecl are kept in lockstep by the Parser (ParseFuncDef()), so
   // every OTHER call site can keep using self-presence alone, unchanged.
   bool IsStaticDecl = false;
+  // STD-002: `@caller_location` written immediately before `fn` (parsed by
+  // ParserCore.cpp's TOK_AT case). Deliberately NOT a Params entry -- see
+  // CallerLocationExprAST's own doc comment (ASTExpr.h) for why keeping it
+  // out of Params is what keeps this feature's footprint confined to
+  // Codegen alone (arity checking, overload resolution, and mangling all
+  // stay completely unaware this flag exists).
+  bool HasCallerLocation = false;
 
 public:
   FuncDefExprAST(SourceLocation Loc, std::string Name, SourceLocation NameLoc,
                  TurfTypePtr ReturnType,
                  std::vector<ParamDecl> Params, std::unique_ptr<ExprAST> Body,
                  std::vector<std::string> TypeParams = {},
-                 bool IsStaticDecl = false)
+                 bool IsStaticDecl = false,
+                 bool HasCallerLocation = false)
       : Loc(Loc), NameLoc(NameLoc), Name(std::move(Name)), ReturnType(std::move(ReturnType)),
         Params(std::move(Params)), Body(std::move(Body)),
-        TypeParams(std::move(TypeParams)), IsStaticDecl(IsStaticDecl) {}
+        TypeParams(std::move(TypeParams)), IsStaticDecl(IsStaticDecl),
+        HasCallerLocation(HasCallerLocation) {}
 
   const std::string &getName() const { return Name; }
+  /// TYPE-002 (S12a): renames a monomorphized clone to its unique,
+  /// collision-free internal name (Monomorphize::instantiatedDeclName())
+  /// BEFORE it is (re-)resolved -- see drainFreeFunctionRequests()'s doc
+  /// comment for why this must happen before Resolver::resolve() runs on
+  /// the clone. Never used on an ordinary (non-cloned) declaration.
+  void setName(std::string N) { Name = std::move(N); }
   bool isStaticDecl() const { return IsStaticDecl; }
+  bool hasCallerLocation() const { return HasCallerLocation; }
   const SourceLocation &getLoc() const { return Loc; }
   const SourceLocation &getNameLoc() const { return NameLoc; }
   const TurfType *getReturnType() const { return ReturnType.get(); }
@@ -224,6 +240,17 @@ public:
   /// Mutable return-type setter, used alongside getParamsMut() for the same
   /// generic-parameter substitution.
   void setReturnType(TurfTypePtr T) { ReturnType = std::move(T); }
+  /// TYPE-002 (S12a): once drainFreeFunctionRequests() has substituted
+  /// every TurfGenericParamType in this clone's Params/ReturnType/body
+  /// with a concrete type, this is no longer generic -- clearing
+  /// TypeParams makes that true structurally, not just in effect: it stops
+  /// Resolver::visitFuncDef()'s own substituteTypeParams() call from
+  /// re-applying the (now-inapplicable) name->TurfGenericParamType
+  /// transform when the clone is re-resolved, and is what sub-pass
+  /// 2c/3a/3b's template-skip check (main.cpp) uses to tell a genuine,
+  /// still-uninstantiated template apart from a finished clone. Never used
+  /// on an ordinary (non-cloned) declaration.
+  void clearTypeParams() { TypeParams.clear(); }
 
   /// Populated by the Resolver after registering the function symbol.
   /// clone() returns a fresh node, so this is nullptr in cloned trees.
@@ -237,7 +264,7 @@ public:
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncDefExprAST>(
         Loc, Name, NameLoc, ReturnType, Params, CloneExprAST(Body.get()), TypeParams,
-        IsStaticDecl);
+        IsStaticDecl, HasCallerLocation);
     // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. The default-constructed field is nullptr.
   }
@@ -343,14 +370,14 @@ public:
     }
 };
 
-// `error Name { Variant, ... }` (docs/planning/Errors.md). Named
-// ErrorDeclExprAST (not e.g. ErrorExprAST) deliberately to stay well clear
-// of TurfError (include/Errors.h), the compiler's own internal diagnostic
+// `error Name { Variant, ... }` (docs/architecture/errors_and_recover.md).
+// Named ErrorDeclExprAST (not e.g. ErrorExprAST) deliberately to stay well
+// clear of TurfError (include/Errors.h), the compiler's own internal diagnostic
 // base class -- an unrelated concept that happens to share the English word
 // "error". `IsBareForm` distinguishes the sugar `error Name;` (a single
 // implicit `DEFAULT` variant) from the full braced form. Variants are bare
 // names only, exactly like EnumDeclExprAST -- no payload fields (deferred,
-// see Errors.md's own note on why).
+// see errors_and_recover.md §5.1).
 class ErrorDeclExprAST : public ExprAST {
     std::string              Name;
     std::vector<std::string> Variants;
@@ -396,6 +423,10 @@ public:
   const std::string &getName() const { return Name; }
   const TurfType *getElementType() const { return ElementType.get(); }
   TurfTypePtr getElementTypePtr() const { return ElementType; }
+  /// TYPE-002 (S12a): lets the monomorphizer rewrite a generic function
+  /// body's own `T[N] arr;` declaration to a concrete element type on a
+  /// clone -- mirrors VarDeclExprAST::setTypePtr()'s existing contract.
+  void setElementTypePtr(TurfTypePtr T) { ElementType = std::move(T); }
   int getSize() const { return Size; }
   const std::vector<std::unique_ptr<ExprAST>> &getInitList() const {
     return InitList;
@@ -442,6 +473,26 @@ public:
   /// identical rationale on FuncDefExprAST::getParamsMut().
   std::vector<StructField> &getFieldsMut() { return Fields; }
   const std::vector<std::string> &getTypeParams() const { return TypeParams; }
+
+  /// TYPE-002 (S13a): rename a monomorphized clone to its unique mangled
+  /// name (Monomorphize::instantiatedDeclName()) -- same contract as
+  /// FuncDefExprAST::setName() (S12a): must run BEFORE the clone is
+  /// re-resolved, since Resolver::visitStructDecl() registers whatever
+  /// name the node currently has.
+  void setName(std::string NewName) { Name = std::move(NewName); }
+  /// TYPE-002 (S13a): mark a clone "no longer generic" once every field's
+  /// TurfGenericParamType has been substituted with a concrete type -- makes
+  /// Resolver::visitStructDecl()'s own field-substitution loop a documented
+  /// no-op (it only fires when getTypeParams() is non-empty) when the clone
+  /// is re-resolved. Unlike FuncDefExprAST, main.cpp's sub-pass 2c codegens
+  /// every StructDeclExprAST unconditionally (no TypeParams-empty skip guard
+  /// exists or is needed for structs -- StructDeclExprAST::codegen()'s own
+  /// by-NAME early-return guard already makes running it twice for the same
+  /// name safe, and a generic TEMPLATE's own struct decl is deliberately
+  /// left in PrePassASTs and still codegens the shared, erasure-era layout
+  /// every existing (non-monomorphized) reference still needs -- see
+  /// drainStructRequests()'s own doc comment, Monomorphize.cpp).
+  void clearTypeParams() { TypeParams.clear(); }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitStructDecl(*this); }

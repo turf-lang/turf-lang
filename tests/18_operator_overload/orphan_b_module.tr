@@ -1,0 +1,6 @@
+// Companion module (no main()) -- named *_module.tr so scripts/test_runner.sh
+// skips it as a standalone test (see AGENTS.md's documented convention).
+// Declares struct B, owned by THIS module, for fail_operator_orphan_rule.tr.
+struct B {
+    v: int
+}

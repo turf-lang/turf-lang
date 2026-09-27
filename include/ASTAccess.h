@@ -3,6 +3,8 @@
 
 #include "AST.h"
 
+#include <unordered_map>
+
 
 // Call to a user-defined function: name(arg1, arg2, ...)
 class FuncCallExprAST : public ExprAST {
@@ -38,13 +40,47 @@ public:
     return ResolvedCallTarget.get();
   }
 
+  /// TYPE-002 (docs/development/changes/TYPE-002.md, S11b): the concrete
+  /// type-parameter-name -> concrete-type map TypeChecker::visitFuncCall()
+  /// builds via collectGenericSubstitution() to resolve this call's return
+  /// type (TypeCheckerCall.cpp). Previously computed and immediately
+  /// discarded, function-local; persisted here so the monomorphizer can
+  /// read it back as an instantiation request without recomputing it.
+  /// Empty for the overwhelming majority of calls, which aren't generic at
+  /// all -- an empty map is not itself an instantiation request.
+  /// clone() returns a fresh node, so this is empty in cloned trees — same
+  /// clone-semantics contract as ResolvedCallTarget.
+  std::unordered_map<std::string, TurfTypePtr> GenericSubstitution;
+
+  /// TYPE-002 (S13b): for a `StructName::default()`/`StructName::new(...)`
+  /// construction call (ScopeAccessKind::DefaultConstruct/ConstructorCall)
+  /// whose result is being bound to a GenericType-typed declaration (e.g.
+  /// `mut b: Box<Big> = Box::default();`), the CONCRETE instantiation type
+  /// (`Box<Big>`, not the bare `Box` this call's own getType() is always
+  /// stuck at -- see U-5, docs/development/changes/TYPE-002.md: a
+  /// construction call structurally CANNOT carry its own type argument,
+  /// only the enclosing declared type can). Set by
+  /// TypeChecker::visitVarDecl() when it discovers this exact shape,
+  /// nullptr otherwise (the overwhelming majority of calls). Read by
+  /// FuncCallExprAST::codegen()'s DefaultConstruct/ConstructorCall branch
+  /// (CodegenFunc.cpp) so the alloca it builds uses the per-instantiation
+  /// TurfStructType (drainStructRequests(), S13a) instead of always the
+  /// shared, erasure-era base struct -- without this, `Box<Big>`'s
+  /// declared-type alloca (VarDeclExprAST, sized correctly) and its
+  /// initializer's OWN alloca (this call, sized from the WRONG, shared
+  /// "Box" layout) silently disagree.
+  /// clone() returns a fresh node, so this is null in cloned trees — same
+  /// clone-semantics contract as ResolvedCallTarget.
+  TurfTypePtr ConstructedType;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<FuncCallExprAST>(Loc, CloneExprAST(Callee.get()),
                                              CloneExprList(Args));
-    // Note: ResolvedCandidates and ResolvedCallTarget are intentionally NOT
-    // copied — cloned ASTs are stale until re-resolved. ✓
+    // Note: ResolvedCandidates, ResolvedCallTarget, GenericSubstitution, and
+    // ConstructedType are intentionally NOT copied — cloned ASTs are stale
+    // until re-resolved. ✓
   }
 };
 
@@ -63,15 +99,28 @@ enum class ScopeAccessKind {
     ConstructorCall,   // StructName::new(...) (as a call target)
     DefaultConstruct,  // StructName::default() (as a call target)
     // ErrorType::Variant -- a bare, non-callable reference to a user-
-    // declared `error` type's variant (docs/planning/Errors.md), e.g. the
+    // declared `error` type's variant
+    // (docs/architecture/errors_and_recover.md), e.g. the
     // `MathError::DivisionByZero` in `err == MathError::DivisionByZero` or
     // `return MathError::DivisionByZero;`. Semantically identical to
     // EnumVariant (bare name, no payload, rejected if called) -- kept as a
-    // separate kind rather than reusing EnumVariant only because error
-    // types lower differently in Codegen (a tag string, not an integer
-    // ordinal) and participate in `!T`/`recover`/AnyErrorType comparisons
-    // that plain enums don't.
+    // separate kind rather than reusing EnumVariant only because error types
+    // lower differently in Codegen (a tag string, not an integer ordinal) and
+    // participate in `!T`/`recover`/AnyErrorType comparisons that plain enums
+    // don't.
     ErrorVariantRef,
+    // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
+    // messageExpr)` -- exactly ONE argument, a `string`-typed message
+    // attached to this specific error occurrence. NOT a general reopening
+    // of §5.1's deferred payload-fields gap: a variant still carries no
+    // PER-VARIANT-DECLARED fields, and this is not callable with any other
+    // arity (0 args stays ErrorVariantRef's ordinary "not a function"
+    // rejection; 2+ args is also rejected -- see
+    // Resolver::visitFuncCall()'s isErrorTypeName() branch,
+    // ResolverCall.cpp). Reuses `Left::Right(args)`'s existing generic call
+    // parsing (§2.3/§2.5 of errors_and_recover.md) with zero new grammar,
+    // exactly like ConstructorCall/DefaultConstruct above.
+    ErrorVariantConstructWithMessage,
 };
 
 // `Left::Right` -- the general namespace-resolution operator. Originally
@@ -213,6 +262,41 @@ public:
   const ExprAST *getBase() const { return Base.get(); }
   const ExprAST *getIndex() const { return Index.get(); }
 
+  /// LANG-001: `operator[]` (read) candidates -- gathered by
+  /// Resolver::visitArrayAccess() whenever the base ISN'T already a real
+  /// array/pointer/string (those keep their existing builtin indexing
+  /// unchanged; a struct base is the only case an `operator[]` overload can
+  /// apply to at all, since builtins can't declare one -- see
+  /// Resolver::validateOperatorDecl()'s all-primitive rejection, which
+  /// still runs for `operator[]`'s self type via the ordinary struct/enum
+  /// check). Mirrors BinaryExprAST's ResolvedOperatorCandidates/Target
+  /// pattern exactly. Empty/null in cloned trees.
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedIndexGetCandidates;
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedIndexGetTarget;
+
+  /// `operator[]=` (write) candidates -- gathered alongside the read
+  /// candidates above (the Resolver can't yet know whether THIS particular
+  /// access will end up as an assignment target; that's decided later, in
+  /// TypeChecker::visitAssignment(), by exact-matching (BaseType, IndexType,
+  /// RHSType) against these). Never consulted by an ordinary read.
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedIndexSetCandidates;
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedIndexSetTarget;
+
+  /// OPT-002: set by a `ValueRangePass::markElidableChecks()` pre-pass that
+  /// runs BEFORE `Body->codegen()` (FuncDefExprAST::codegen(), CodegenFunc.cpp)
+  /// when the index provably resolves to the same in-range constant on every
+  /// path reaching this access -- the same constant-propagation dataflow the
+  /// EXISTING post-codegen `ValueRangePass::runOnCFG()` invocation already
+  /// uses to raise `ArrayBoundsError` for the out-of-range case (that call
+  /// site is untouched: a provably-OOB access still gets that diagnostic,
+  /// at the same point, exactly as before this field existed). Codegen
+  /// (CodegenArray.cpp) skips `EmitRuntimeBoundsCheck` when this is true --
+  /// F-OPT-2 (ARCHITECTURE_OVERHAUL.md §17.3): removal by proof only, never
+  /// by `-O` level. Not copied by clone() -- same contract as
+  /// ResolvedIndexGetTarget; a cloned (e.g. monomorphized) tree is
+  /// re-analyzed by its own FuncDefExprAST::codegen() call.
+  bool ProvenInBounds = false;
+
   llvm::Value *codegen() override;
   llvm::Value *codegenLValue() override;
   void accept(ASTVisitor &V) override { V.visitArrayAccess(*this); }
@@ -279,14 +363,25 @@ public:
   /// zero-cost store, since the transition's validity is already proven.
   bool TransitionCompileTimeProven = false;
 
+  /// TYPE-002 (docs/development/changes/TYPE-002.md, S11b): mirrors
+  /// FuncCallExprAST::GenericSubstitution, but built from a different
+  /// source for a method call -- the RECEIVER's own GenericType (e.g.
+  /// `l: List<int>` => T=int), recovered by scanning the struct's fields
+  /// (TypeChecker::visitMethodCall, TypeCheckerCall.cpp), not by
+  /// unifying arguments against declared parameter types. Empty for a
+  /// non-generic method call or a call on a non-generic struct.
+  /// clone() returns a fresh node, so this is empty in cloned trees — same
+  /// clone-semantics contract as ResolvedCallTarget.
+  std::unordered_map<std::string, TurfTypePtr> GenericSubstitution;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitMethodCall(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<MethodCallExprAST>(Loc, CloneExprAST(Base.get()),
                                                Method, NameLoc, CloneExprList(Args));
-    // Note: ResolvedCallTarget, ResolvedViaUFCS, IsMachineTransition, and
-    // TransitionCompileTimeProven intentionally NOT
-    // copied — cloned ASTs are stale until re-resolved. ✓
+    // Note: ResolvedCallTarget, ResolvedViaUFCS, IsMachineTransition,
+    // TransitionCompileTimeProven, and GenericSubstitution intentionally
+    // NOT copied — cloned ASTs are stale until re-resolved. ✓
   }
 };
 

@@ -1,0 +1,13 @@
+// Regression test: OVH-004, two-parameter variant. The same by-value cycle
+// as fail_generic_instantiation_by_value_cycle.tr, but through the SECOND
+// type parameter of a two-parameter generic struct, to prove the fix
+// (matching the field's own instantiation name, not just the base name) does
+// not depend on which parameter position carries the cyclic argument.
+
+struct P<X, Y> { x: X, y: Y }
+struct Q { p: P<int, Q> }
+
+fn main(): int {
+    mut q: Q = Q::default();
+    return 0;
+}

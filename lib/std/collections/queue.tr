@@ -1,3 +1,5 @@
+unsafe module;
+
 // Queue<T> — FIFO (First In, First Out) collection.
 // Usage:
 //   import queue::Queue;   // (or `import queue;` + spell it `queue::Queue<int>` below)
@@ -9,8 +11,16 @@
 //   - dequeue reads from data[head] and advances head
 //   - when (head + len == cap): if head > 0 compact elements to front,
 //     otherwise double the capacity
+//
+// `unsafe module;` stays -- STD-003 item 8 (making `data` a safe `&T`)
+// considered and rejected for the identical reason across every collection
+// module in this directory: `T` is genuinely unconstrained, a caller can
+// legally instantiate `Queue<SomeStruct*>`, and the raw-pointer capability
+// is then required by the SUBSTITUTED parameter type of `enqueue(item:
+// T)` itself, not by anything `data`'s own field type or a scoped
+// `unsafe { }` block around the body could avoid. See list.tr's own note
+// (this directory) for the full investigation and live repro.
 
-import mem;
 import sys;
 
 struct Queue<T> {
@@ -31,13 +41,18 @@ fn<T> Queue.enqueue(item: T): void {
       }
       self.head = 0;
     } else {
-      // Buffer is full and already at front — grow it
+      // Buffer is full and already at front — grow it.
+      // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure -- wrong
+      // for a T over 8 bytes, which under-allocated this buffer and
+      // silently overran it a few enqueues later. sizeof(T) is correct per
+      // instantiation (monomorphized, TYPE-002) -- see list.tr's identical
+      // fix, S14b, for the first instance of this.
       if (self.cap == 0) {
         self.cap = 8;
-        self.data = mem::malloc(self.cap * 8) to T*;
+        self.data = gc_alloc(self.cap * sizeof(T)) to T*;
       } else {
         self.cap = self.cap * 2;
-        self.data = mem::realloc(self.data, self.cap * 8) to T*;
+        self.data = gc_realloc(self.data, self.cap * sizeof(T)) to T*;
       }
     }
   }

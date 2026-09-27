@@ -1,0 +1,26 @@
+// Regression test: two structs that hold each other by value, closing a
+// cycle across BOTH declarations rather than within a single one, must be
+// rejected the same as a direct self-cycle (TYPE-001, see
+// fail_self_containing_struct.tr for the full rationale). Neither `A` nor
+// `B` is individually self-referential here -- the cycle only exists once
+// both declarations are considered together, which is exactly why the
+// acyclicity check has to run once every struct name is hoisted (end of
+// Resolver Pass 1), not inline inside each struct's own visitStructDecl().
+//
+// Also exercises that the cycle is found regardless of DECLARATION ORDER:
+// `A` (which contains `B`) is declared before `B` (which contains `A`),
+// so this only works because Pass 1 hoists every struct name before this
+// check runs -- a forward reference from `A` to the not-yet-declared `B`
+// must still resolve for the cycle to be seen at all.
+
+struct A {
+    b: B
+}
+
+struct B {
+    a: A
+}
+
+fn main(): int {
+    return 0;
+}

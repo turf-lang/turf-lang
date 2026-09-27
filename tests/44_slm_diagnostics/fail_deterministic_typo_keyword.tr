@@ -1,0 +1,14 @@
+// SLM-001 §16.3 item 1: fixture for the deterministic-fix layer's
+// KeywordError path (ErrorsLex.h -- distinct from the RankedSuggestions
+// classes ErrorsScope.h/Struct.h/Module.h use, since SuggestionIndex::
+// suggestKeywords() returns a plain vector, not a RankedSuggestions). A
+// single-candidate keyword typo ('retrun' -> 'return', edit distance 1) must
+// fail an ORDINARY compile exactly like any other unknown-word error --
+// proven here under the normal test runner, with no --smart involved.
+//
+// scripts/slm_deterministic_fix_smoke.sh separately compiles this SAME file
+// with --smart and asserts the deterministic-fix layer resolves it without
+// ever calling the model.
+fn main(): int {
+    retrun 0;
+}

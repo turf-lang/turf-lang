@@ -2,7 +2,7 @@
  * @file ResolverScopeTable.cpp
  * @brief Lexical-scope half of the Resolver's symbol table (Issue #2), split
  *        from the original monolithic ResolverSymbolTable.cpp -- see
- *        docs/planning/COMPILER_MODULE_BREAKDOWN.md.
+ *        docs/architecture/compiler_pipeline.md.
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.

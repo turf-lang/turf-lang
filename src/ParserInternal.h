@@ -3,7 +3,7 @@
 
 // Private, implementation-only forward declarations shared across the 5
 // ParserCore/Literal/Stmt/Decl/Module.cpp files (the split of the original
-// monolithic Parser.cpp -- see docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+// monolithic Parser.cpp -- see docs/architecture/compiler_pipeline.md).
 // NOT part of the compiler's public interface (that's Parser.h) -- these
 // exist only so the mutually-recursive descent parser can call across the
 // 5 translation units it's now spread across. Mirrors the forward-decl
@@ -36,7 +36,12 @@ std::unique_ptr<ExprAST> ParseForExpr();
 std::unique_ptr<ExprAST> ParseCompareExpr();
 std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable);
 std::unique_ptr<ExprAST> ParseReturnExpr();
+std::unique_ptr<ExprAST> ParseDeferStmt();
 std::unique_ptr<ExprAST> ParseUnsafeExpr();
+// The post-'unsafe' half of ParseUnsafeExpr() -- see its own doc comment
+// (ParserStmt.cpp) for why this is split out (LANG-002's capability-pragma
+// lookahead in ParserModule.cpp needs it too).
+std::unique_ptr<ExprAST> ParseUnsafeBlockBody(SourceLocation KeywordLoc);
 
 // Defined in ParserDecl.cpp
 std::unique_ptr<ExprAST> ParseStructDecl();
@@ -45,7 +50,7 @@ std::unique_ptr<ExprAST> ParseMachineDecl();
 std::unique_ptr<ExprAST> ParseErrorDecl();
 std::unique_ptr<ExprAST> ParseExternDecl();
 std::unique_ptr<ExprAST> ParseExportDecl();
-std::unique_ptr<ExprAST> ParseFuncDef();
+std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation = false);
 std::unique_ptr<ExprAST> ParseOperatorDecl();
 
 // Defined in ParserModule.cpp

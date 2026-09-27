@@ -289,8 +289,8 @@ public:
 };
 
 // Which of the three `recover` forms this expression uses
-// (docs/planning/Errors.md): `recover produce value`, `recover run { ... }`,
-// or `recover as err run { ... }`.
+// (docs/architecture/errors_and_recover.md): `recover produce value`, `recover
+// run { ... }`, or `recover as err run { ... }`.
 enum class RecoverKind {
     Produce, // recover produce <expr>
     Run,     // recover run { ... }
@@ -298,11 +298,11 @@ enum class RecoverKind {
 };
 
 // `<expr> recover ...` -- handles the failure case of a `!T`-typed call
-// expression at the call site (docs/planning/Errors.md). `Wrapped` is the
-// `!T` expression being recovered; `Block` (Run/AsRun) is a `BlockExprAST`,
-// same as any other `{ ... }` body in this language (if/while/function
-// bodies). `BoundName` (AsRun only) names the variable the failing error
-// value is bound to inside `Block` (e.g. `err`).
+// expression at the call site (docs/architecture/errors_and_recover.md).
+// `Wrapped` is the `!T` expression being recovered; `Block` (Run/AsRun) is a
+// `BlockExprAST`, same as any other `{ ... }` body in this language
+// (if/while/function bodies). `BoundName` (AsRun only) names the variable the
+// failing error value is bound to inside `Block` (e.g. `err`).
 class RecoverExprAST : public ExprAST {
     std::unique_ptr<ExprAST> Wrapped;
     RecoverKind              Kind;
@@ -325,14 +325,15 @@ public:
     ExprAST*             getBlock()       const { return Block.get(); }
     const SourceLocation& getLoc()         const { return Loc; }
 
-    /// The wrapped expression's success type T (docs/planning/Errors.md),
-    /// set by TypeChecker::visitRecoverExpr and read by Codegen -- needed
-    /// there to know how to unbox the FallibleValue's boxed successBits
-    /// slot back to T's real LLVM representation (Codegen can't derive this
-    /// from the runtime value alone, since every `!T` lowers to the SAME
-    /// FallibleValue struct regardless of T; see getFallibleValueType()'s
-    /// doc comment in Codegen.cpp). Same cross-pass-communication pattern
-    /// as ResolvedKind/ResolvedCandidates elsewhere in this file. Nulled by
+    /// The wrapped expression's success type T
+    /// (docs/architecture/errors_and_recover.md), set by
+    /// TypeChecker::visitRecoverExpr and read by Codegen -- needed there to
+    /// know how to unbox the FallibleValue's boxed successBits slot back to T's
+    /// real LLVM representation (Codegen can't derive this from the runtime
+    /// value alone, since every `!T` lowers to the SAME FallibleValue struct
+    /// regardless of T; see getFallibleValueType()'s doc comment in
+    /// Codegen.cpp). Same cross-pass-communication pattern as
+    /// ResolvedKind/ResolvedCandidates elsewhere in this file. Nulled by
     /// clone() (a cloned tree is stale until re-typechecked).
     TurfTypePtr ResolvedSuccessType;
 
@@ -344,6 +345,43 @@ public:
             ProduceExpr ? ProduceExpr->clone() : nullptr, BoundName,
             Block ? Block->clone() : nullptr);
     }
+};
+
+// `defer <statement>;` -- registers Stmt to run when the ENCLOSING `{ }`
+// BLOCK exits, by any path (fallthrough, return, break, continue) except a
+// panic (TurfLang has no unwinding -- a panic aborts, LANG-003,
+// ARCHITECTURE_OVERHAUL.md §8), in reverse (LIFO) order relative to any
+// other `defer` registered earlier in the SAME block. Deliberately
+// block-scoped, not function-scoped: a `defer` inside a loop body's `{ }`
+// runs once per iteration, since that block's own basic blocks are simply
+// re-executed by the loop's own back edge -- see Codegen.cpp's
+// PendingDeferFrames/FlushPendingDefers for how this falls out of ordinary
+// straight-line lowering with no extra runtime bookkeeping.
+//
+// `Stmt` is parsed via the ordinary ParsePrimaryBase() dispatch (like
+// return/break/continue alongside it, ParserCore.cpp), so it can itself BE
+// a return/break/continue -- that's syntactically legal and is exactly the
+// shape the Resolver's dedicated check (FindEscapingControlFlow(),
+// ResolverStmt.cpp) exists to reject: "a deferred statement may not return,
+// break, or continue out of itself" (there is no way for such a jump to
+// target only "the defer statement" and stop -- it always escapes to the
+// enclosing function/loop, which is never what a reader expects here).
+class DeferExprAST : public ExprAST {
+  SourceLocation Loc;
+  std::unique_ptr<ExprAST> Stmt;
+
+public:
+  DeferExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Stmt)
+      : Loc(Loc), Stmt(std::move(Stmt)) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  ExprAST *getStmt() const { return Stmt.get(); }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitDefer(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<DeferExprAST>(Loc, CloneExprAST(Stmt.get()));
+  }
 };
 
 #endif

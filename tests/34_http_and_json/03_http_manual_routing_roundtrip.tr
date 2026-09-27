@@ -58,7 +58,7 @@ fn main(): int {
     test::assert(!req.has_header("Nonexistent"), "has_header rejects an absent header");
     test::assert_eq(req.body, "", "GET request has no body");
 
-    mut res: http::Response;
+    mut res: http::Response = http::Response::default();
     res.conn = serverConn;
     if req.path == "/hello" {
         res.send_text(200, "hello from turf");
@@ -90,7 +90,7 @@ fn main(): int {
     mut req2: http::Request = http::parse_request(serverConn2);
     test::assert_eq(req2.path, "/nope", "parsed path for second request");
 
-    mut res2: http::Response;
+    mut res2: http::Response = http::Response::default();
     res2.conn = serverConn2;
     if req2.path == "/hello" {
         res2.send_text(200, "hello from turf");

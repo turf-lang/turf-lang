@@ -3,26 +3,128 @@
 
 #include "AST.h"
 
-// Number Node (Leaf)
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APSInt.h"
+
+/**
+ * @brief A numeric literal. SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md
+ * §8, FREEZE.md §6.2 row 2): before this shape existed, an integer literal
+ * was collapsed into a `long long` at LEX time (`strtoll`, `errno`
+ * unchecked -- a 48-digit literal silently became `9223372036854775807`)
+ * and a `double Val` copy was populated even when `IsInteger` was true, for
+ * no consumer that ever needed it. Now the literal's value is carried
+ * EXACTLY -- `llvm::APSInt` (arbitrary-precision, until SEM-002 checks it
+ * against a destination type) for an integer, `llvm::APFloat` (the
+ * exactly-rounded IEEE double, plus an explicit overflow flag) for a float
+ * -- as a genuine tagged union: only one of IntVal_/FloatVal_ is ever
+ * meaningful, selected by IsInteger_.
+ *
+ * `getIntVal()`/`getDoubleVal()` remain as narrow, TRUNCATING convenience
+ * accessors (matching the pre-SEM-001 `long long`/`double` surface almost
+ * every existing consumer only ever needed -- lint heuristics, debug
+ * printing guarded by isInteger(), a compile-time array-bounds pass that
+ * only ever deals in `int`-range indices) so this reshape did not force
+ * every one of those call sites to become bignum-aware. A consumer that
+ * genuinely needs the untruncated value (constant folding across a wide
+ * literal, `--dump-ast`'s own round-trip proof, sandbox AST diffing) uses
+ * getIntValExact()/getFloatValExact() instead -- see each call site's own
+ * comment for which one it needed and why.
+ */
 class NumberExprAST : public ExprAST {
-  double Val;       // Actual value, like "5", "5.0", etc.
-  long long IntVal; // Exact integer value when IsInteger is true
-  bool IsInteger = false;
+  llvm::APSInt IntVal_;    // exact, arbitrary-precision; meaningful iff IsInteger_
+  llvm::APFloat FloatVal_; // exact rounded double; meaningful iff !IsInteger_
+  bool IsInteger_;
+  // True for a literal actually written in the source; false for a
+  // compiler-synthesized constant (e.g. the desugared `1` in `x++`,
+  // ParserStmt.cpp's default range bounds). SEM-002/later passes will use
+  // this to decide whether a representability error should cite the
+  // user's own source text or stay silent about an internal synthesis --
+  // not consulted by anything in SEM-001 itself.
+  bool IsUntyped_;
+  // Float-only: true if decimal->binary rounding overflowed to +/-inf
+  // (FREEZE.md §6.2 row 2's explicit "plus a flag" requirement). Always
+  // false for a compiler-synthesized float and for any integer.
+  bool Overflowed_ = false;
+  // The literal's exact original source text (e.g. "0x1_000", "1.5e-3"),
+  // empty for a compiler-synthesized constant. For diagnostics and for
+  // --dump-ast's round-trip proof -- NOT necessarily reproducible from
+  // IntVal_/FloatVal_ alone (radix, separators, and trailing zeros are all
+  // lost once parsed into a value).
+  std::string Spelling_;
+  SourceLocation Loc_;
+
+  // Full-fidelity constructor: every OTHER constructor below (and clone())
+  // delegates here so there is exactly one place that initializes all
+  // seven fields together -- see clone()'s own comment for why this
+  // matters (a naive clone() built from the two "public convenience"
+  // constructors alone silently lost IsUntyped_/Spelling_/Loc_).
+  NumberExprAST(llvm::APSInt IV, llvm::APFloat FV, bool IsInteger,
+               bool IsUntyped, bool Overflowed, std::string Spelling,
+               SourceLocation Loc)
+      : IntVal_(std::move(IV)), FloatVal_(std::move(FV)), IsInteger_(IsInteger),
+        IsUntyped_(IsUntyped), Overflowed_(Overflowed),
+        Spelling_(std::move(Spelling)), Loc_(Loc) {}
 
 public:
-  explicit NumberExprAST(double Val) : Val(Val), IntVal(0), IsInteger(false) {}
+  // Compiler-synthesized integer/float constants (IsUntyped_ = false, no
+  // source spelling, a default-constructed {0,0,""} location) -- every
+  // pre-existing call site that built a NumberExprAST directly
+  // (ParserStmt.cpp's desugared range bounds, ParserCore.cpp's `x++`/`x--`
+  // desugaring) keeps compiling unchanged through these two.
+  explicit NumberExprAST(double Val)
+      : NumberExprAST(llvm::APSInt::get(0), llvm::APFloat(Val), false, false,
+                      false, "", SourceLocation{}) {}
   explicit NumberExprAST(long long Val)
-      : Val(static_cast<double>(Val)), IntVal(Val), IsInteger(true) {}
+      : NumberExprAST(llvm::APSInt::get(Val), llvm::APFloat::IEEEdouble(), true,
+                      false, false, "", SourceLocation{}) {}
 
-  bool isInteger() const { return IsInteger; }
-  long long getIntVal() const { return IntVal; }
-  double getDoubleVal() const { return Val; }
+  // A real source literal, built by ParseNumberExpr (ParserLiteral.cpp)
+  // from the lexer's own exact scan (NumLitSpelling/NumLitClean/
+  // NumLitRadix, Lexer.h) -- IsUntyped_ = true.
+  NumberExprAST(llvm::APSInt Val, std::string Spelling, SourceLocation Loc)
+      : NumberExprAST(std::move(Val), llvm::APFloat::IEEEdouble(), true, true,
+                      false, std::move(Spelling), Loc) {}
+  NumberExprAST(llvm::APFloat Val, bool Overflowed, std::string Spelling,
+               SourceLocation Loc)
+      : NumberExprAST(llvm::APSInt::get(0), std::move(Val), false, true,
+                      Overflowed, std::move(Spelling), Loc) {}
+
+  bool isInteger() const { return IsInteger_; }
+  bool isUntyped() const { return IsUntyped_; }
+  bool overflowed() const { return Overflowed_; }
+  const std::string &getSpelling() const { return Spelling_; }
+  const SourceLocation &getLoc() const { return Loc_; }
+
+  /// Exact, arbitrary-precision value. Only meaningful when isInteger().
+  const llvm::APSInt &getIntValExact() const { return IntVal_; }
+  /// Exact rounded value (see overflowed() for whether rounding it FROM the
+  /// source text hit +/-inf). Only meaningful when !isInteger().
+  const llvm::APFloat &getFloatValExact() const { return FloatVal_; }
+
+  /// Narrow, truncating convenience accessor -- see the class doc comment.
+  /// Safe against a wider-than-64-bit IntVal_ (never asserts/UB): widens or
+  /// truncates to exactly 64 bits first, THEN extracts, so a literal like
+  /// the 48-digit example in §10.2 returns a well-defined (if meaningless)
+  /// value here instead of crashing -- exactness for that case lives only
+  /// in getIntValExact().
+  long long getIntVal() const { return IntVal_.extOrTrunc(64).getSExtValue(); }
+  /// Only meaningful when !isInteger() -- every existing call site already
+  /// guards with isInteger() before calling this (Lint.cpp, ASTPrinter).
+  double getDoubleVal() const { return FloatVal_.convertToDouble(); }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitNumber(*this); }
+  // Uses the private full-fidelity constructor directly (legal from a
+  // member function regardless of access) so a clone of a
+  // compiler-synthesized node stays compiler-synthesized (IsUntyped_
+  // false) and a clone of a real source literal keeps its exact spelling
+  // and location -- going through either public convenience constructor
+  // instead would have silently reset IsUntyped_ to the wrong value for
+  // one of the two cases.
   std::unique_ptr<ExprAST> clone() const override {
-    return IsInteger ? std::make_unique<NumberExprAST>(IntVal)
-                     : std::make_unique<NumberExprAST>(Val);
+    return std::unique_ptr<NumberExprAST>(new NumberExprAST(
+        IntVal_, FloatVal_, IsInteger_, IsUntyped_, Overflowed_, Spelling_,
+        Loc_));
   }
 };
 
@@ -79,6 +181,39 @@ public:
     return ResolvedOperatorTarget.get();
   }
 
+  /// LANG-001: unary `operator!` candidates -- ONLY ever populated when
+  /// IsDesugaredNot is true (i.e. this node is really a user-written `!x`,
+  /// not a literal `x != true`). Kept SEPARATE from
+  /// ResolvedOperatorCandidates/ResolvedOperatorTarget above (which, for
+  /// this same node, hold the BINARY `operator!=` candidates matching
+  /// TOK_NEQ) rather than reusing them, because the two are genuinely
+  /// different operators (unary `!` vs. binary `!=`) that happen to share
+  /// one synthesized AST node for the `!x` shape -- see
+  /// docs/development/changes/LANG-001.md for why `!x` is handled this way
+  /// instead of becoming a real UnaryExprAST('!', ...) at parse time (in
+  /// short: ParseUnary() has no type information yet, so it can't decide
+  /// at parse time whether a given `!x` will end up wanting `operator!` or
+  /// the builtin `x != true` comparison -- keeping the existing desugared
+  /// shape and layering unary resolution ONTO it, checked first, preserves
+  /// the builtin path's exact existing runtime semantics with zero risk of
+  /// silently changing what `!5`/`!someBool` compute).
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedNotOperatorCandidates;
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedNotOperatorTarget;
+
+  /// OPT-002: set by `ValueRangePass::markElidableChecks()` (see
+  /// ArrayAccessExprAST::ProvenInBounds's identical contract) when this is a
+  /// checked `+`/`-`/`*`/`<<` on `int` (SEM-002, FREEZE.md §6.2 row 7) whose
+  /// operands both resolve to the same known constants on every path
+  /// reaching this node, and the exact result is provably representable
+  /// (`+`/`-`/`*`: `llvm::APInt::s{add,sub,mul}_ov`; `<<`: shift amount in
+  /// [0,64) and the shift round-trips -- mirrors `EmitCheckedShl()`'s own
+  /// check exactly). Codegen (CodegenExpr.cpp) then emits plain `nsw`
+  /// arithmetic instead of calling `EmitCheckedIntArith`/`EmitCheckedShl` --
+  /// nsw is sound here specifically BECAUSE the trap was already proved
+  /// unreachable, not attached speculatively (§17.3's own warning: "a
+  /// faster miscompilation is not an optimization"). Not copied by clone().
+  bool ProvenNoOverflow = false;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitBinary(*this); }
   std::unique_ptr<ExprAST> clone() const override {
@@ -86,8 +221,9 @@ public:
                                                    CloneExprAST(LHS.get()),
                                                    CloneExprAST(RHS.get()));
     Cloned->IsDesugaredNot = IsDesugaredNot;
-    // Note: ResolvedOperatorCandidates and ResolvedOperatorTarget are
-    // intentionally NOT copied — cloned ASTs are stale until re-resolved.
+    // Note: ResolvedOperatorCandidates/Target and ResolvedNotOperator
+    // Candidates/Target are intentionally NOT copied — cloned ASTs are
+    // stale until re-resolved.
     return Cloned;
   }
 };
@@ -133,6 +269,37 @@ public:
   const ExprAST *getLHS() const { return LHS.get(); }
   const ExprAST *getRHS() const { return RHS.get(); }
 
+  /// LANG-001/F-OP-2: compound assignment DESUGARS (`a op= b` ≡ `a = a op
+  /// b`) -- there is no `operator+=`. Rather than literally rewriting the
+  /// AST into an Assignment(Binary(...)) (which would evaluate the LHS
+  /// LOCATION twice if it were ever a call/index expression -- explicitly
+  /// disallowed by §13.5), this node keeps its single existing LHS
+  /// evaluation and instead consults the underlying binary operator's own
+  /// overload table, exactly like BinaryExprAST does. Gathered by
+  /// Resolver::visitCompoundAssignment() keyed on `operatorFunctionName(
+  /// Opcode)` (empty for a non-overloadable Opcode, e.g. the bitwise
+  /// compound forms already reject non-int operands their own way).
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedOperatorCandidates;
+  const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &
+  getResolvedOperatorCandidates() const {
+    return ResolvedOperatorCandidates;
+  }
+
+  /// The single overload selected by exact match against (LHSType,
+  /// RHSType). Not copied by clone().
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedOperatorTarget;
+  const ResolverFunctionSymbol *getResolvedOperatorTarget() const {
+    return ResolvedOperatorTarget.get();
+  }
+
+  /// OPT-002: same contract as BinaryExprAST::ProvenNoOverflow, for the
+  /// checked `+=`/`-=`/`*=`/`<<=` shapes -- SEM-002's own doc comment on
+  /// `EmitCheckedIntArith()` (CodegenCore.cpp) names this as one of three
+  /// independent codegen paths needing identical overflow behavior, since
+  /// compound assignment has never desugared to a literal BinaryExprAST
+  /// re-walk at the Codegen layer. Not copied by clone().
+  bool ProvenNoOverflow = false;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitCompoundAssignment(*this); }
   std::unique_ptr<ExprAST> clone() const override {
@@ -142,6 +309,19 @@ public:
 };
 
 // Postfix Node, represents things like "x++" or "x--"
+// Increment/decrement, both directions: `x++`/`x--` (IsPrefix=false) and
+// `++x`/`--x` (IsPrefix=true). LANG-001 follow-up: prefix used to be a
+// SEPARATE parse-time desugaring straight to `x = x + 1`
+// (AssignmentExprAST(BinaryExprAST)), which only ever accepted a bare
+// TOK_IDENTIFIER operand -- `++arr[0]`/`++obj.field` were parse errors,
+// asymmetric with postfix (parsed as part of the general postfix chain, so
+// `arr[0]++` already worked). Unified onto this ONE node for both
+// directions instead: the operand is parsed the same way postfix's always
+// was (`ParsePrimary()` -- primary + the full `[]`/`.`/`()` postfix chain),
+// its LOCATION is evaluated exactly once (via codegenLValue()), and IsPrefix
+// only changes (a) which value the expression evaluates to (old vs. new)
+// and (b) nothing else -- the overload-resolution/immutability/scope-
+// boundary logic is completely shared between both directions now.
 class PostfixExprAST : public ExprAST {
   SourceLocation Loc;
   int Opcode;
@@ -149,18 +329,49 @@ class PostfixExprAST : public ExprAST {
 
 public:
   PostfixExprAST(SourceLocation Loc, int Opcode,
-                 std::unique_ptr<ExprAST> Operand)
-      : Loc(Loc), Opcode(Opcode), Operand(std::move(Operand)) {}
+                 std::unique_ptr<ExprAST> Operand, bool IsPrefix = false)
+      : Loc(Loc), Opcode(Opcode), Operand(std::move(Operand)),
+        IsPrefix(IsPrefix) {}
 
   const SourceLocation &getLoc() const { return Loc; }
   int getOpcode() const { return Opcode; }
   const ExprAST *getOperand() const { return Operand.get(); }
 
+  /// See the class doc comment above. Prefix's result is the NEW value;
+  /// postfix's is the OLD value -- everything else about resolution and
+  /// lowering is shared.
+  bool IsPrefix;
+
+  /// `operator+`/`operator-` candidates (arity 2), matched against
+  /// (OperandType, int) -- the implicit "+1"/"-1" is always a plain `int`,
+  /// for EITHER direction. Gathered by Resolver::visitPostfixExpr().
+  /// Empty for a numeric operand (falls through to the builtin +1/-1 path
+  /// unchanged).
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedOperatorCandidates;
+  const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &
+  getResolvedOperatorCandidates() const {
+    return ResolvedOperatorCandidates;
+  }
+
+  /// The single overload selected by exact match. Not copied by clone().
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedOperatorTarget;
+  const ResolverFunctionSymbol *getResolvedOperatorTarget() const {
+    return ResolvedOperatorTarget.get();
+  }
+
+  /// OPT-002: same contract as BinaryExprAST::ProvenNoOverflow, for the
+  /// checked `x++`/`x--`/`++x`/`--x` shapes (arithmetically `x +/- 1`, per
+  /// this class's own doc comment) -- the third of the three independent
+  /// codegen paths `EmitCheckedIntArith()`'s doc comment names. Not copied
+  /// by clone().
+  bool ProvenNoOverflow = false;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitPostfixExpr(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<PostfixExprAST>(Loc, Opcode,
-                                            CloneExprAST(Operand.get()));
+                                            CloneExprAST(Operand.get()),
+                                            IsPrefix);
   }
 };
 
@@ -242,6 +453,35 @@ public:
   int getOpcode() const { return Opcode; }
   const ExprAST *getOperand() const { return Operand.get(); }
 
+  /// LANG-001: `operator<sym>` overloads (arity 1) whose name matches this
+  /// node's opcode, gathered by Resolver::visitUnary() -- mirrors
+  /// BinaryExprAST::ResolvedOperatorCandidates exactly (empty for a
+  /// non-overloadable opcode, e.g. unary '+', and for an overloadable one
+  /// with no visible declaration -- plain `-5` on a numeric literal has
+  /// none). clone() returns a fresh node, so this is empty in cloned trees.
+  std::vector<std::shared_ptr<ResolverFunctionSymbol>> ResolvedOperatorCandidates;
+  const std::vector<std::shared_ptr<ResolverFunctionSymbol>> &
+  getResolvedOperatorCandidates() const {
+    return ResolvedOperatorCandidates;
+  }
+
+  /// The single overload TypeChecker::visitUnary() selected from
+  /// ResolvedOperatorCandidates by EXACT operand-type match (F-OP-1 -- no
+  /// numeric coercion). Null means "no operator overload applies" --
+  /// Codegen falls through to the builtin unary switch, exactly as it
+  /// always has. Not copied by clone() -- same contract as
+  /// BinaryExprAST::ResolvedOperatorTarget.
+  std::shared_ptr<ResolverFunctionSymbol> ResolvedOperatorTarget;
+  const ResolverFunctionSymbol *getResolvedOperatorTarget() const {
+    return ResolvedOperatorTarget.get();
+  }
+
+  /// OPT-002: same contract as BinaryExprAST::ProvenNoOverflow, for a
+  /// checked unary `-` (SEM-002) whose operand resolves to the same known
+  /// constant on every path reaching this node and isn't `INT64_MIN` (the
+  /// one input `EmitCheckedIntNegate()` traps on). Not copied by clone().
+  bool ProvenNoOverflow = false;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitUnary(*this); }
   std::unique_ptr<ExprAST> clone() const override {
@@ -284,11 +524,46 @@ public:
 
   const SourceLocation &getLoc() const { return Loc; }
   TurfTypePtr getTypeArg() const { return TypeArg; }
+  /// TYPE-002 (S12a): lets the monomorphizer rewrite `sizeof(T)` to
+  /// `sizeof(int)` (etc.) on a clone -- mirrors VarDeclExprAST::setTypePtr().
+  void setTypeArg(TurfTypePtr T) { TypeArg = std::move(T); }
 
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitSizeOf(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     return std::make_unique<SizeOfExprAST>(Loc, TypeArg);
+  }
+};
+
+/// `caller_location` (STD-002, ARCHITECTURE_OVERHAUL.md §8/§15.6(a)) -- a
+/// bare, non-callable expression of type `string`, legal only inside a
+/// function declared `@caller_location` (FuncDefExprAST::HasCallerLocation).
+/// Deliberately its OWN tiny node type rather than an ordinary
+/// VariableExprAST("caller_location"): the value it reads is never a real
+/// declared Turf-level parameter (it never appears in Params -- see
+/// FuncDefExprAST's own doc comment for why: keeping it out of Params is
+/// what keeps overload arity/mangling completely untouched by this feature),
+/// so it has no ResolvedSymbol, is never assignable, and must not be
+/// reachable through any of the generic VariableExprAST machinery
+/// (LValue codegen, `self`-name special-casing, etc.) that assumes a real
+/// declared symbol exists. TypeChecker::visitCallerLocation() is the sole
+/// gate deciding whether this is legal at all (mirrors the unsafe-gate's
+/// TypeChecker-only enforcement, docs/architecture/pointers_and_references.md
+/// §2.5); Codegen reads the enclosing function's own hidden parameter
+/// directly out of NamedValues (CodegenCore.cpp's BuildCallerLocationValue(),
+/// shared with the call-site injection logic in CodegenFunc.cpp).
+class CallerLocationExprAST : public ExprAST {
+  SourceLocation Loc;
+
+public:
+  explicit CallerLocationExprAST(SourceLocation Loc) : Loc(Loc) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitCallerLocation(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<CallerLocationExprAST>(Loc);
   }
 };
 
@@ -412,25 +687,6 @@ public:
   }
 };
 
-class DefaultInitExprAST : public ExprAST {
-  SourceLocation Loc;
-  TurfTypePtr Type;
-
-public:
-  DefaultInitExprAST(SourceLocation Loc, TurfTypePtr Type)
-      : Loc(Loc), Type(std::move(Type)) {}
-
-  const SourceLocation &getLoc() const { return Loc; }
-  TurfTypePtr getTypePtr() const { return Type; }
-  void setTypePtr(TurfTypePtr NewType) { Type = std::move(NewType); }
-
-  llvm::Value *codegen() override;
-  void accept(ASTVisitor &V) override { V.visitDefaultInit(*this); }
-  std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<DefaultInitExprAST>(Loc, Type);
-  }
-};
-
 // Explicit type conversion: int(expr) / double(expr)
 class CastExprAST : public ExprAST {
   TurfTypePtr DestType;
@@ -444,6 +700,9 @@ public:
 
   const TurfType *getDestType() const { return DestType.get(); }
   TurfTypePtr getDestTypePtr() const { return DestType; }
+  /// TYPE-002 (S12a): lets the monomorphizer rewrite `x to T` to `x to int`
+  /// (etc.) on a clone -- mirrors VarDeclExprAST::setTypePtr().
+  void setDestType(TurfTypePtr T) { DestType = std::move(T); }
   const ExprAST *getOperand() const { return Operand.get(); }
 
   llvm::Value *codegen() override;

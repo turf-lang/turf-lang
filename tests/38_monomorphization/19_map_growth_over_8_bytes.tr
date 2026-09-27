@@ -1,0 +1,34 @@
+// Regression test: D3's map.tr counterpart of
+// 17_stack_growth_over_8_bytes.tr -- map.tr's Map<K,V>.put() used ONE
+// shared `self.cap * 8` for BOTH the keys and values arrays, wrong the
+// moment either K or V is over 8 bytes. Confirmed live before this fix:
+// putting 20 `int -> Big` (24-byte value) entries aborted with a glibc
+// "Fatal glibc error: malloc.c:2199 (sysmalloc): assertion failed" (the
+// undersized `values` array's overflow corrupted heap metadata used by a
+// LATER, unrelated allocation).
+import map::Map;
+import test;
+
+struct Big { a: int, b: int, c: int }
+fn Big.new(x: int, y: int, z: int): void { self.a = x; self.b = y; self.c = z; }
+
+fn main(): int {
+    mut m: Map<int, Big> = Map::default();
+    mut i: int = 0;
+    while i < 20 {
+        m.put(i, Big::new(i, i * 2, i * 3));
+        i = i + 1;
+    }
+    test::assert(m.length() == 20, "Map<int, Big> should hold 20 entries after growth");
+
+    i = 0;
+    while i < 20 {
+        mut b: Big = m.get(i);
+        test::assert(b.a == i, "Big.a corrupted after Map<int, Big> growth");
+        test::assert(b.b == i * 2, "Big.b corrupted after Map<int, Big> growth");
+        test::assert(b.c == i * 3, "Big.c corrupted after Map<int, Big> growth");
+        i = i + 1;
+    }
+
+    return 0;
+}

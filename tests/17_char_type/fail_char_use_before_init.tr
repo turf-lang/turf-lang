@@ -1,0 +1,13 @@
+// SEM-004 (F-INIT-1): a `char` local declared without an initializer is
+// statically unassigned, same as int/double/bool/string -- reading it
+// before any assignment is DefiniteAssignmentError (E008). Before SEM-004,
+// `char` was one of the Mechanism-B types Codegen eagerly zeroed, so this
+// compiled; see 05_char_default_init.tr for the still-legal assign-then-use
+// shape.
+fn main(): int {
+    mut c: char;
+    if (c to int) == 0 {
+        return 1;
+    }
+    return 0;
+}

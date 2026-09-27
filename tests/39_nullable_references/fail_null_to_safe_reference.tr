@@ -1,0 +1,10 @@
+// LANG-002's own "Must NOT reinterpret" list: "&T stays non-null -- do not
+// merge the two types." `null` must never be assignable to a plain `&T`,
+// even in a codebase that now also has `&?T` -- the two stay maximally
+// distinct.
+struct Box { val: int }
+
+fn main(): int {
+    mut r: &Box = null;
+    return 0;
+}

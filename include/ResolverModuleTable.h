@@ -48,7 +48,7 @@ public:
 /**
  * @brief Module/import half of the Resolver's symbol table (split out of the
  * original monolithic ResolverSymbolTable -- see
- * docs/planning/COMPILER_MODULE_BREAKDOWN.md). Owns every imported module's
+ * docs/architecture/compiler_pipeline.md). Owns every imported module's
  * function/constant registry, the current file's own top-level function/
  * constant registry, and the on-demand ("flat") import bookkeeping. Owns no
  * struct/enum/error-type or lexical-scope state at all (see

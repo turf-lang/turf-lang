@@ -4,7 +4,7 @@
  * @details Part of the TypeChecker pass (Issue #7), split from the original
  *          monolithic TypeChecker.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -201,9 +201,10 @@ void TypeChecker::visitForEach(ForEachExprAST &Node) {
   const auto *ArrTy = dynamic_cast<const ArrayType *>(IterableTy.get());
   if (ArrTy->getSize() < 0) {
     // Unsized array parameter (`T[]`) -- no runtime length to bound the
-    // loop with. See docs/planning/PHASE_3_ISSUES.md Issue #192's status
-    // note and ArrayType's getSize() doc comment for why this genuinely
-    // can't be made to work without a much bigger calling-convention change.
+    // loop with. See ArrayType's getSize() doc comment for why this genuinely
+    // can't be made to work without a much bigger calling-convention change
+    // (originally tracked as Issue #192, whose spec doc was retired in
+    // 2026-08 -- git history).
     ForEachUnsizedArrayError(Node.getLoc(), IterableTy->getName()).raise();
     setType(&Node, TurfVoid());
     return;
@@ -255,14 +256,14 @@ void TypeChecker::visitContinue(ContinueExprAST &Node) {
 
 
 // True if `T` is (or, if an unresolved NamedType, names) a declared `error`
-// type (docs/planning/Errors.md). A bare `error` variant reference
-// (TypeChecker::visitScopeAccess) already resolves directly to the real
-// TurfUserErrorType, but a CONSTRUCTED variant (`IOError::FileNotFound(...)`)
-// gets its type from the Resolver's synthetic candidate, which -- like
-// StructName::new(...) -- deliberately returns a bare NamedType(LeftName)
-// (see Resolver::visitFuncCall's struct-constructor branch for why: the
-// exact-getName()-match fallback in typesCompatible() already makes
-// NamedType("MathError") interchangeable with the real TurfUserErrorType
+// type (docs/architecture/errors_and_recover.md). A bare `error` variant
+// reference (TypeChecker::visitScopeAccess) already resolves directly to the
+// real TurfUserErrorType, but a CONSTRUCTED variant
+// (`IOError::FileNotFound(...)`) gets its type from the Resolver's synthetic
+// candidate, which -- like StructName::new(...) -- deliberately returns a bare
+// NamedType(LeftName) (see Resolver::visitFuncCall's struct-constructor branch
+// for why: the exact-getName()-match fallback in typesCompatible() already
+// makes NamedType("MathError") interchangeable with the real TurfUserErrorType
 // everywhere else, so nothing but THIS specific check -- "is this actually
 // an error type at all," which name-equality alone can't answer -- needs the
 // real lookup).
@@ -271,8 +272,8 @@ static bool isDeclaredErrorTypeValue(const TurfType *T) {
     return false;
   if (T->isUserError())
     return true;
-  // AnyErrorType (docs/planning/Errors.md) -- the type `err` is bound to
-  // inside `recover as err run { ... }` (Resolver::visitRecoverExpr,
+  // AnyErrorType (docs/architecture/errors_and_recover.md) -- the type `err` is
+  // bound to inside `recover as err run { ... }` (Resolver::visitRecoverExpr,
   // `SymTable_.declareVariable(Node.getBoundName(), TurfAnyError(), ...)`).
   // Without this, propagating a caught error straight out of an outer
   // `!T`-returning function (`inner() recover as err run { return err; }`)
@@ -314,18 +315,24 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
     const TurfType *Declared = ReturnTypeStack_.back().get();
     if (RetTy) {
       bool Compatible;
-      // `!T` (docs/planning/Errors.md): a function declared to return `!T`
-      // may return either something compatible with T, OR a value of ANY
-      // declared error type -- `!T` is an open/unenumerated union, unlike
-      // e.g. Rust's `Result<T, E>`, so there's no specific error type to
+      // `!T` (docs/architecture/errors_and_recover.md): a function declared to
+      // return `!T` may return either something compatible with T, OR a value
+      // of ANY declared error type -- `!T` is an open/unenumerated union,
+      // unlike e.g. Rust's `Result<T, E>`, so there's no specific error type to
       // check RetTy against here; only "is this some declared error value
       // at all" matters.
+      // OVH-005: an untyped literal (`return 5;` for a declared 'int32'
+      // success type) acquires 'int32' directly rather than being rejected
+      // as an 'int -> int32' narrowing -- see
+      // untypedLiteralAcquiresInt32()'s own doc comment.
       if (Declared->isErrorUnion()) {
         const auto *EU = static_cast<const TurfErrorUnionType *>(Declared);
         Compatible = typesCompatible(RetTy.get(), EU->getSuccessType()) ||
-                     isDeclaredErrorTypeValue(RetTy.get());
+                     isDeclaredErrorTypeValue(RetTy.get()) ||
+                     untypedLiteralAcquiresInt32(Node.getVal(), EU->getSuccessType());
       } else {
-        Compatible = typesCompatible(RetTy.get(), Declared);
+        Compatible = typesCompatible(RetTy.get(), Declared) ||
+                     untypedLiteralAcquiresInt32(Node.getVal(), Declared);
       }
 
       // Special-case: a pointer-to-struct value whose pointee is exactly
@@ -355,9 +362,38 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
                     "Return type mismatch: function declares '" +
                         Declared->getName() + "' but returns '" +
                         RetTy->getName() + "'.");
+      } else {
+        // SEM-002 -- see visitVarDecl()'s identical comment
+        // (TypeCheckerDecl.cpp). For a '!T'-declared function, the
+        // relevant destination is the success type T, not the error union
+        // itself (an error-tag value never has a NumberExprAST shape
+        // anyway, so this is a no-op on that path regardless).
+        const TurfType *EffectiveDest =
+            Declared->isErrorUnion()
+                ? static_cast<const TurfErrorUnionType *>(Declared)->getSuccessType()
+                : Declared;
+        checkLiteralRepresentable(Node.getVal(), EffectiveDest, Node.getLoc());
       }
     }
   }
 
   setType(&Node, RetTy ? RetTy : TurfVoid());
+}
+
+void TypeChecker::visitDefer(DeferExprAST &Node) {
+  // Type-check the wrapped statement exactly as if it appeared directly in
+  // the enclosing block -- a `defer` is a lowering/scheduling detail, not a
+  // new typing context (LANG-003, ARCHITECTURE_OVERHAUL.md §8). Without
+  // this override, ASTVisitor's default no-op visitDefer() would mean a
+  // deferred statement's own expressions never went through the TypeChecker
+  // at all (every visit*() call is a DIRECT `Node->accept(*this)` from the
+  // parent, not an implicit recursive walk -- see visitBlock() just above).
+  if (Node.getStmt())
+    const_cast<ExprAST *>(Node.getStmt())->accept(*this);
+
+  // A `defer` statement is always used in statement position (parsed via
+  // the same generic ParseExpression()-then-';' path as any other
+  // statement, ParserStmt.cpp's ParseDeferStmt()) -- its own "value" is
+  // never read by anything, same as return/break/continue alongside it.
+  setType(&Node, TurfVoid());
 }

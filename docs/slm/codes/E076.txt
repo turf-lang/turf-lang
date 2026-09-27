@@ -1,0 +1,30 @@
+TURF E076 -- INTEGER LITERAL OUT OF RANGE:
+
+CAUSE:
+  An untyped integer literal's EXACT value (held with arbitrary precision
+  until it acquires a type, FREEZE.md §6.2 row 2) does not fit the
+  destination type it's being given -- 'int' (64-bit signed,
+  -9223372036854775808 .. 9223372036854775807) or 'int32' (32-bit signed,
+  -2147483648 .. 2147483647).
+
+  Also fires for a compile-time constant expression built ONLY from
+  untyped literals combined via unary '-' and binary '+'/'-'/'*'
+  (FREEZE.md §6.2 row 6): the expression is folded with arbitrary
+  precision and the FINAL value is checked, so `9223372036854775807 + 1`
+  errors even though each literal individually fits.
+
+CORRECT:
+    mut x: int = 9223372036854775807;   // fits exactly
+    mut y: int32 = 2147483647;          // fits exactly
+
+INCORRECT:
+    mut x: int = 999999999999999999999999999999999999999999999999;
+    // ERROR: too big for 'int' [E076]
+    mut c: int = 9223372036854775807 + 1;
+    // ERROR: the sum overflows 'int' [E076]
+
+FIX:
+  Use a literal (or literal expression) that fits the destination type's
+  range, or change the destination type. There is no wider integer type
+  than 'int' in TurfLang (F-NUM-5) -- arbitrary precision needs a library
+  type, not a primitive.

@@ -1,11 +1,24 @@
 name: Turf Test Suites
 on:
   push:
-    branches: ["master", "dev"]
+    branches: ["master", "dev", "refactor/architecture"]
   pull_request:
-    branches: ["master", "dev"]
+    branches: ["master", "dev", "refactor/architecture"]
   workflow_dispatch:
 jobs:
+  # Documentation cross-references. Deliberately its own job: it needs neither
+  # LLVM nor a build, so a dangling `docs/....md` citation is reported in
+  # seconds rather than after a full compiler build. See
+  # docs/planning/ARCHITECTURE_OVERHAUL.md §5 C-8 for the failure this catches.
+  doc_links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check documentation cross-references
+        run: |
+          chmod +x scripts/check_doc_links.sh
+          ./scripts/check_doc_links.sh
+
   build_and_test:
     runs-on: ubuntu-latest
     steps:
@@ -63,6 +76,12 @@ jobs:
       - name: Install ccache
         run: sudo apt-get install -y ccache
 
+      # debuginfo_smoke.sh drives an actual debugger against a compiled
+      # binary (TOOL-001) -- the only one of the smoke scripts below with an
+      # extra system dependency beyond the compiler build itself.
+      - name: Install gdb
+        run: sudo apt-get install -y gdb
+
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -78,5 +97,60 @@ jobs:
           export CXX="ccache g++"
           ./scripts/cmake_build.sh --release
 
-      - name: Run Test Suites
+      - name: Run Test Suites (default level)
         run: ./scripts/test_runner.sh
+
+      # OPT-001 (docs/development/changes/OPT-001.md, INV-OPT-1): optimization
+      # levels must never change a program's observable behaviour. The default
+      # run above already exercises the compiler's default level (-O2); these
+      # five re-run the SAME 624-test suite once per level, unmodified, via
+      # test_runner.sh's optional level argument -- this is what proves
+      # INV-OPT-1 across the whole suite, not just opt_levels_smoke.sh's
+      # smaller representative program set (which deliberately can't byte-diff
+      # every showcase/server program -- see that script's own comment).
+      # Sequential, not a matrix: the build above (LLVM + llama.cpp + turf) is
+      # the expensive, cached part, and a matrix job would each pay for its
+      # own fresh checkout/build instead of reusing this one.
+      - name: Run Test Suites (-O0)
+        run: ./scripts/test_runner.sh -O0
+      - name: Run Test Suites (-O1)
+        run: ./scripts/test_runner.sh -O1
+      - name: Run Test Suites (-O2)
+        run: ./scripts/test_runner.sh -O2
+      - name: Run Test Suites (-O3)
+        run: ./scripts/test_runner.sh -O3
+      - name: Run Test Suites (-Os)
+        run: ./scripts/test_runner.sh -Os
+
+      - name: Optimization-level smoke test (cross-level output equality)
+        run: ./scripts/opt_levels_smoke.sh
+
+      # OVH-015: the smoke scripts below already existed as each named
+      # feature group's own regression coverage for behaviour test_runner.sh
+      # cannot express as an ordinary `.tr` program (libturfrt's C API and
+      # link wiring, a TurfTypeDesc's exact bitmap, GC retention/pinning
+      # across a forced collection, RSS staying bounded, a debugger's view of
+      # -g output, @caller_location's exact message, the deterministic-fix
+      # layer never loading the SLM) -- none were wired into CI until now.
+      # All run against the same build above; none need anything this job
+      # doesn't already have except gdb (installed above for the one that
+      # does). Deliberately NOT included: scripts/test_ai.sh, which drives
+      # the real model against tests/custom/aggressive/ and needs the
+      # multi-gigabyte GGUF weights this repo's .gitignore deliberately
+      # keeps out of a checkout -- a manual/local sanity script, not a CI gate.
+      - name: Runtime smoke test (libturfrt link wiring, descriptors, panics)
+        run: ./scripts/runtime_smoke.sh
+      - name: "Manual-heap allocation smoke test (mem:: accounting)"
+        run: ./scripts/mem_smoke.sh
+      - name: GC smoke test (retention, pinning, collection)
+        run: ./scripts/gc_smoke.sh
+      - name: GC RSS-bounded smoke test
+        run: ./scripts/gc_rss_smoke.sh
+      - name: Manual/GC heap boundary checks
+        run: ./scripts/check_boundary.sh
+      - name: Debug info smoke test (gdb against -g output)
+        run: ./scripts/debuginfo_smoke.sh
+      - name: "@caller_location smoke test"
+        run: ./scripts/std002_caller_location_smoke.sh
+      - name: SLM deterministic-fix layer smoke test (never loads the model)
+        run: ./scripts/slm_deterministic_fix_smoke.sh

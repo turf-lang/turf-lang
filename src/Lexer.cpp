@@ -19,11 +19,18 @@
 #include "Lexer.h"
 #include "Colors.h"
 #include "ErrorCodes.h"
+#include "ErrorsLex.h" // MalformedRadixPrefixError and friends (SEM-001) -- see
+                       // ErrorsLex.h's own top comment for why Lexer.cpp,
+                       // alone among the lexer/parser split, includes a
+                       // TurfError header directly
+#include "Parser.h"    // OVH-012: IsLibStdWarningLocation() -- flushAll()'s
+                       // system-module-warning gate
 #include "SLMIntegration.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <map>
 
@@ -71,6 +78,9 @@ int g_parseRecursionDepth = 0;
 
 // AI/SLM flag: only true when --smart is passed on the CLI.
 bool g_AIEnabled = false;
+std::string g_SmartFixOutPath;
+bool g_AllowUnsafeModules = false;
+bool g_ShowStdlibWarnings = false;
 
 // Tracks if the SLM has generated a diagnostic this pass to suppress
 // analysis of subsequent cascading errors.
@@ -102,8 +112,9 @@ void CloseSourceFile() {
 }
 
 void SetSourceBuffer(std::istream &Buffer) { SourceFile = &Buffer; }
-double NumVal;
-long long IntVal;
+std::string NumLitSpelling;
+std::string NumLitClean;
+int NumLitRadix = 10;
 bool BoolVal;
 char CharVal;
 std::string IdentifierStr;
@@ -160,7 +171,10 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"produce", TOK_PRODUCE},
                                        {"run", TOK_RUN},
                                        {"as", TOK_AS},
-                                       {"unsafe", TOK_UNSAFE}};
+                                       {"unsafe", TOK_UNSAFE},
+                                       {"guess", TOK_GUESS},
+                                       {"defer", TOK_DEFER},
+                                       {"caller_location", TOK_CALLER_LOCATION}};
 
 /**
  * @brief True if @p Msg looks like a warning rather than a hard error.
@@ -334,7 +348,8 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
                            const std::string &Hint, bool IsWarning,
                            const std::vector<RelatedLocation> &Related,
                            SLM::ErrorCategory Category,
-                           const std::string &Code) {
+                           const std::string &Code,
+                           const SLM::DiagnosticHints &Hints) {
   // If there is already an error on this line, suppress everything else
   // (both additional errors and warnings) to avoid cascading noise -- unless
   // an embedder opted into CollectAllDiagnostics (see its doc comment),
@@ -357,7 +372,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           "fresh analysis." +
           Colors::RESET;
     } else {
-      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint, Related, Category);
+      SLM::AISuggestion ai = SLM::validateAndApplySuggestion(Msg, Loc.Line, Hint, Related, Category, Hints, Code);
 
       if (ai.valid && ai.confidence >= 0.8f && ai.fix_mode != "NONE") {
         // Replace compiler message with high-confidence AI suggestion.
@@ -380,6 +395,16 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
           finalMessage +=
               "\n  " + Colors::YELLOW + "Note: " + Colors::RESET + ai.warning;
         }
+
+        // SLM-001 follow-up: write the full patched source out, if asked.
+        // Deliberately gated on the SAME confidence/fix_mode check as the
+        // display above -- this must never write a fix a user wouldn't
+        // also have been shown as validated.
+        if (!g_SmartFixOutPath.empty() && !ai.appliedSource.empty()) {
+          std::ofstream fixOut(g_SmartFixOutPath, std::ios::trunc);
+          if (fixOut.is_open())
+            fixOut << ai.appliedSource;
+        }
       }
     }
   }
@@ -393,7 +418,7 @@ void DiagnosticEngine::add(SourceLocation Loc, const std::string &Msg,
   std::string Filename = Loc.Filename.empty() ? SourceFilename : Loc.Filename;
 
   Diagnostics.push_back({Loc, finalMessage, Hint, IsWarning, Related, Category,
-                         Filename, Code});
+                         Filename, Code, Hints});
 
   if (!IsWarning)
     ErrorLines.insert(Loc.Line);
@@ -419,8 +444,19 @@ void DiagnosticEngine::flushAll() {
                      (A.Loc.Line == B.Loc.Line && A.Loc.Col < B.Loc.Col);
             });
 
-  for (const auto &D : Diagnostics)
+  for (const auto &D : Diagnostics) {
+    // OVH-012: a warning anchored inside the standard library itself (e.g.
+    // `NeverReturnsErrorWarning`/`InfiniteLoopWarning` on stdlib code a
+    // user merely `import`ed, never wrote) is a "system-module warning" --
+    // suppressed at PRINT time only (Diagnostics itself, getDiagnostics(),
+    // and getDiagnosticCount() are untouched, so nothing that inspects
+    // diagnostics directly -- Sandbox.cpp, ParserModule.cpp's speculative-
+    // parse retry, CompileBuffer.cpp -- changes behavior). An error is
+    // never filtered here: only IsWarning diagnostics reach this check.
+    if (D.IsWarning && !g_ShowStdlibWarnings && IsLibStdWarningLocation(D.Filename))
+      continue;
     printDiag(D);
+  }
 
   Diagnostics.clear();
 }
@@ -442,9 +478,15 @@ void DiagnosticEngine::restoreDiagnostics(const std::vector<Diag> &Saved) {
   }
 }
 
-// Emits and collects a generic diagnostic message at the given source location.
-void LogErrorAt(SourceLocation Loc, const std::string &Msg) {
-  DiagnosticEngine::add(Loc, Msg, isMessageWarning(Msg));
+// Emits and collects a generic diagnostic message at the given source
+// location. `Category` (see Lexer.h's doc comment on the declaration) is
+// forwarded to DiagnosticEngine::add() unconditionally -- inert for a
+// warning message (the SLM path is gated on !IsWarning, same as
+// TurfWarning::Category_), same as every other diagnostic sink in the
+// compiler.
+void LogErrorAt(SourceLocation Loc, const std::string &Msg,
+                SLM::ErrorCategory Category) {
+  DiagnosticEngine::add(Loc, Msg, "", isMessageWarning(Msg), {}, Category);
 }
 
 void resetLexer() {
@@ -575,7 +617,7 @@ static int gettokScan() {
                          "' in string literal.\n  Hint: Recognized escapes "
                          "are \\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'. "
                          "Did you mean to write a literal backslash? Use "
-                         "'\\\\' instead.");
+                         "'\\\\' instead.", SLM::ErrorCategory::SYNTAX_ERROR);
           StringVal += LastChar;
         }
       } else {
@@ -604,7 +646,7 @@ static int gettokScan() {
       // truly nothing left to lex, so end the token stream here exactly as
       // the pre-existing behavior did.
       LogErrorAt(CurLoc, std::string("Unterminated string literal") +
-                             UnterminatedStringHint);
+                             UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_EOF;
     }
 
@@ -618,7 +660,7 @@ static int gettokScan() {
       // CurCol -- so lexing (and line tracking) of the rest of the file
       // recovers cleanly instead of desyncing for every line that follows.
       LogErrorAt(CurLoc, std::string("Unterminated string literal") +
-                             UnterminatedStringHint);
+                             UnterminatedStringHint, SLM::ErrorCategory::SYNTAX_ERROR);
       return TOK_STRING_LITERAL;
     }
 
@@ -646,7 +688,7 @@ static int gettokScan() {
       // desync, report, and recover with a placeholder value.
       LogErrorAt(CurLoc,
                  "Empty char literal.\n  Hint: A char literal must contain "
-                 "exactly one character, e.g. 'a'.");
+                 "exactly one character, e.g. 'a'.", SLM::ErrorCategory::SYNTAX_ERROR);
       LastChar = SourceFile->get();
       CurCol++;
       CharVal = '\0';
@@ -659,7 +701,7 @@ static int gettokScan() {
       // line tracking cleanly instead of desyncing for the rest of the file.
       LogErrorAt(CurLoc,
                  std::string("Unterminated char literal") +
-                     "\n  Hint: Add a closing ''' after the character.");
+                     "\n  Hint: Add a closing ''' after the character.", SLM::ErrorCategory::SYNTAX_ERROR);
       return LastChar == EOF ? TOK_EOF : TOK_CHAR_LITERAL;
     }
 
@@ -694,7 +736,7 @@ static int gettokScan() {
                    std::string("Unknown escape sequence '\\") +
                        static_cast<char>(LastChar) +
                        "' in char literal.\n  Hint: Recognized escapes are "
-                       "\\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'.");
+                       "\\n \\t \\r \\0 \\a \\b \\f \\v \\\\ \\\" \\'.", SLM::ErrorCategory::SYNTAX_ERROR);
         CharVal = static_cast<char>(LastChar);
       }
     } else {
@@ -713,7 +755,7 @@ static int gettokScan() {
       LogErrorAt(CurLoc,
                  "Char literal must contain exactly one character.\n  Hint: "
                  "Use a string literal (\"ab\") for multiple characters, or "
-                 "check for a missing closing '.");
+                 "check for a missing closing '.", SLM::ErrorCategory::SYNTAX_ERROR);
       while (LastChar != '\'' && LastChar != EOF && LastChar != '\n') {
         LastChar = SourceFile->get();
         CurCol++;
@@ -748,27 +790,150 @@ static int gettokScan() {
     return TOK_RANGE;
   }
 
-  // Numbers: [0-9.]+ (a leading '.' only starts a number if followed by a
-  // digit)
+  // Numbers (SEM-001, docs/planning/ARCHITECTURE_OVERHAUL.md §8;
+  // FREEZE.md §6.2 row 1). Four integer forms -- plain decimal (`[0-9_]+`),
+  // hex (`0x…`/`0X…`), binary (`0b…`/`0B…`), octal (`0o…`/`0O…`) -- and two
+  // float forms -- dotted (an optional integer part, a mandatory `.`, a
+  // mandatory fractional digit, an optional exponent) or dotless-exponent
+  // (digits then a MANDATORY exponent, no dot at all, e.g. `1e6`; FREEZE's
+  // grammar originally only listed the dotted form -- corrected 2026-09-18
+  // once SEM-001's own testing scope showed the omission, see FREEZE.md's
+  // row 1 for the full note). `_` is a separator anywhere BETWEEN two
+  // digits, in any digit run below, never leading or trailing one.
+  //
+  // This whole branch reports its own lexical errors directly, as real
+  // TurfError subclasses (ErrorsLex.h) -- unlike every other diagnostic in
+  // this file, which goes through the raw, code-less LogErrorAt() (see
+  // ErrorsLex.h's own top comment for why that's safe to do from here).
+  // NumLitSpelling/NumLitClean/NumLitRadix (Lexer.h) carry the exact result
+  // back to ParseNumberExpr (ParserLiteral.cpp), which builds the real
+  // llvm::APSInt/llvm::APFloat -- kept out of this file so Lexer.h/
+  // Lexer.cpp stay LLVM-free, as they always have been.
   if (isdigit(LastChar) || (LastChar == '.' && isdigit(SourceFile->peek()))) {
-    std::string NumStr;
-    bool SeenDot = false;
-    do {
-      if (LastChar == '.') SeenDot = true;
-      NumStr += LastChar;
-      LastChar = SourceFile->get();
-      CurCol++;
-    } while (isdigit(LastChar) ||
-             (!SeenDot && LastChar == '.' && SourceFile->peek() != '.'));
+    SourceLocation NumLoc = CurLoc; // stamped at the top of gettokScan()
+    std::string Spelling; // exact original text, prefix + separators intact
+    std::string Clean;    // same text with the prefix and every '_' removed
 
-    bool IsFloat = NumStr.find('.') != std::string::npos;
-    if (IsFloat) {
-      NumVal = strtod(NumStr.c_str(), 0);
-      return TOK_NUMBER;
+    // Consumes a run of IsDigit(c)-or-'_' characters, appending each to
+    // Spelling (always) and Clean (real digits only). Raises
+    // MisplacedSeparatorError if the FIRST or LAST character THIS CALL
+    // actually consumes is '_' -- a run this call consumes nothing from
+    // (Spelling unchanged) is never flagged, which is what lets the
+    // leading-dot ('.5') and dotless-integer ('5') entry points share this
+    // same helper safely. Returns how many real digits (excluding any '_')
+    // were consumed.
+    auto ScanDigitRun = [&](auto IsDigit) -> size_t {
+      size_t RunStart = Spelling.size();
+      size_t CleanStart = Clean.size();
+      while (IsDigit(LastChar) || LastChar == '_') {
+        if (LastChar != '_')
+          Clean += static_cast<char>(LastChar);
+        Spelling += static_cast<char>(LastChar);
+        LastChar = SourceFile->get();
+        CurCol++;
+      }
+      if (Spelling.size() > RunStart) {
+        if (Spelling[RunStart] == '_')
+          MisplacedSeparatorError(NumLoc, Spelling, /*Leading=*/true).raise();
+        if (Spelling.back() == '_')
+          MisplacedSeparatorError(NumLoc, Spelling, /*Leading=*/false).raise();
+      }
+      return Clean.size() - CleanStart;
+    };
+    auto IsDecDigit = [](int c) { return isdigit(c) != 0; };
+
+    // Radix-prefixed integer. Only recognized when the token starts with
+    // exactly '0' followed immediately by one of these six letters -- '0'
+    // alone, or '0' followed by an ORDINARY digit (the legacy-octal-
+    // looking `0755`), falls through to the plain-decimal path below
+    // instead, per FREEZE's deliberate "no bare-leading-zero octal" rule:
+    // `0755` stays decimal `755`.
+    if (LastChar == '0' &&
+        (SourceFile->peek() == 'x' || SourceFile->peek() == 'X' ||
+         SourceFile->peek() == 'b' || SourceFile->peek() == 'B' ||
+         SourceFile->peek() == 'o' || SourceFile->peek() == 'O')) {
+      Spelling += '0';
+      LastChar = SourceFile->get(); CurCol++; // consume '0'
+      char RadixChar = static_cast<char>(LastChar);
+      Spelling += RadixChar;
+      LastChar = SourceFile->get(); CurCol++; // consume x/X/b/B/o/O
+      bool IsHex = (RadixChar == 'x' || RadixChar == 'X');
+      bool IsBin = (RadixChar == 'b' || RadixChar == 'B');
+      NumLitRadix = IsHex ? 16 : IsBin ? 2 : 8;
+
+      size_t DigitsConsumed =
+          IsHex ? ScanDigitRun([](int c) { return isxdigit(c) != 0; })
+          : IsBin ? ScanDigitRun([](int c) { return c == '0' || c == '1'; })
+                 : ScanDigitRun([](int c) { return c >= '0' && c <= '7'; });
+
+      // A character that looks like it was meant to continue this literal
+      // (alphanumeric) takes priority over "bare prefix" -- e.g. `0b012`'s
+      // '2' and `0xG5`'s 'G' are both a wrong-for-this-radix DIGIT, a more
+      // specific and more useful diagnosis than "no digit at all". Only a
+      // truly empty continuation (whitespace/operator/EOF right after the
+      // prefix, or right after the last valid digit) is the bare-prefix
+      // case.
+      if (isalnum(LastChar))
+        InvalidRadixDigitError(NumLoc, static_cast<char>(LastChar),
+                               NumLitRadix, Spelling)
+            .raise();
+      else if (DigitsConsumed == 0)
+        MalformedRadixPrefixError(NumLoc, Spelling).raise();
+
+      NumLitSpelling = Spelling;
+      NumLitClean = Clean;
+      return TOK_INT_LITERAL;
     }
 
-    IntVal = strtoll(NumStr.c_str(), nullptr, 10);
-    return TOK_INT_LITERAL;
+    // Plain decimal: an integer (`[0-9_]+`), or one of the two float forms.
+    NumLitRadix = 10;
+    ScanDigitRun(IsDecDigit); // integer part -- legitimately empty only via
+                              // the leading-dot entry ('.5'), where LastChar
+                              // is '.' and this call safely consumes nothing
+    bool IsFloat = false;
+
+    // Dotted form: only commit to '.' as this literal's decimal point when
+    // a digit immediately follows it (mirrors this whole branch's own
+    // leading-dot entry check above) -- a bare trailing dot like `5.` with
+    // no digit after it is therefore NOT part of the number at all; `5` is
+    // returned as a plain integer and `.` is left for the next token
+    // (FREEZE's dotted-float grammar requires at least one fractional
+    // digit, so `5.` was never a valid float form to begin with). The
+    // `peek() != '.'` guard additionally keeps this from eating into the
+    // START of the `..` range / `...` ellipsis operators (`1..5` must
+    // still lex as NUMBER, RANGE, NUMBER).
+    if (LastChar == '.' && SourceFile->peek() != '.' &&
+        isdigit(SourceFile->peek())) {
+      IsFloat = true;
+      Spelling += '.';
+      Clean += '.';
+      LastChar = SourceFile->get(); CurCol++;
+      ScanDigitRun(IsDecDigit); // at least one digit guaranteed by the peek() above
+    }
+
+    // Exponent: optional after the dotted form, but it's what makes the
+    // DOTLESS form a float at all (if we reach EOF/an operator here with
+    // IsFloat still false, this is just a plain decimal integer). Once
+    // 'e'/'E' appears immediately here, it is ALWAYS committed to as an
+    // exponent marker -- never silently reinterpreted as a separate
+    // following token -- see MalformedExponentError's own doc comment.
+    if (LastChar == 'e' || LastChar == 'E') {
+      IsFloat = true;
+      Spelling += static_cast<char>(LastChar);
+      Clean += static_cast<char>(LastChar);
+      LastChar = SourceFile->get(); CurCol++;
+      if (LastChar == '+' || LastChar == '-') {
+        Spelling += static_cast<char>(LastChar);
+        Clean += static_cast<char>(LastChar);
+        LastChar = SourceFile->get(); CurCol++;
+      }
+      if (ScanDigitRun(IsDecDigit) == 0)
+        MalformedExponentError(NumLoc, Spelling).raise();
+    }
+
+    NumLitSpelling = Spelling;
+    NumLitClean = Clean;
+    return IsFloat ? TOK_NUMBER : TOK_INT_LITERAL;
   }
 
   if (LastChar == '=') {

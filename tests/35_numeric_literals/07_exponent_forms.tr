@@ -1,0 +1,28 @@
+// SEM-001: float exponent forms -- both the dotted form (`1.5e-3`) and the
+// dotless form (`1e6`), which FREEZE.md's own grammar originally omitted
+// until this group's testing scope showed the gap (see FREEZE.md §6.2
+// row 1's own note on the 2026-09-18 correction).
+
+import test;
+
+fn main(): int {
+    mut a: double = 1e6;
+    test::assert(a == 1000000.0, "dotless exponent, no sign");
+
+    mut b: double = 1.5e-3;
+    test::assert(b == 0.0015, "dotted exponent, negative");
+
+    mut c: double = 1E+10;
+    test::assert(c == 10000000000.0, "uppercase E, explicit plus sign");
+
+    mut d: double = 2.5e2;
+    test::assert(d == 250.0, "dotted exponent, positive, no sign");
+
+    mut e: double = 1_0e1_0;
+    test::assert(e == 100000000000.0, "separators in both the mantissa and the exponent");
+
+    mut f: double = 0e0;
+    test::assert(f == 0.0, "zero mantissa, zero exponent");
+
+    return 0;
+}

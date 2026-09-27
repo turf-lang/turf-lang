@@ -1,0 +1,9 @@
+// RUNTIME_ABORT_EXPECTED
+// SEM-002 (FREEZE.md §6.2 row 7): runtime signed integer '*' traps on
+// overflow.
+fn main(): int {
+    mut a: int = 4611686018427387904; // 2^62
+    mut b: int = 4;
+    mut c: int = a * b; // 2^64 -- overflows int64
+    return 0;
+}

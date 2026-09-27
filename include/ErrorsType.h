@@ -133,6 +133,83 @@ public:
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
+// SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 row 3):
+// an untyped integer literal (or a compile-time constant expression built
+// only from untyped literals via unary '-' and binary + - *, FREEZE.md
+// §6.2 row 6) whose EXACT value doesn't fit the type it's acquiring --
+// `int`'s or `int32`'s signed range, or (for an implicit int-literal ->
+// double conversion, row 9) int64 at all (see TypeChecker::
+// checkLiteralRepresentable()'s own doc comment for why that's the actual
+// gating condition Codegen can honor today, not the pure "exactly
+// representable as a double" ideal FREEZE.md states). `RangeDescription`
+// is pre-formatted by the caller (e.g. "-9223372036854775808 ..
+// 9223372036854775807") rather than derived here, since the two
+// destination types this fires for have different widths and this class
+// has no reason to know either literally.
+class IntegerLiteralOutOfRangeError : public TurfError {
+public:
+  IntegerLiteralOutOfRangeError(SourceLocation Loc, const std::string &ExactValue,
+                                const std::string &DestTypeName,
+                                const std::string &RangeDescription)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED + "Integer literal is not representable in type '" +
+                Colors::CYAN + DestTypeName + Colors::BRIGHT_RED + "'.\n" +
+                Colors::RESET + "  The literal's value is " + Colors::CYAN +
+                ExactValue + Colors::RESET + ".\n  '" + DestTypeName +
+                "' holds " + RangeDescription + ".",
+            DestTypeName == "int"
+                ? "'int' is TurfLang's only general-purpose integer type; "
+                  "there is no wider one. If you need arbitrary precision, "
+                  "use a library type."
+                : "Use 'int' instead, or an explicit 'to " + DestTypeName +
+                      "' cast if truncation is actually what you want.") {
+    Category_ = SLM::ErrorCategory::ARITHMETIC;
+  }
+};
+// SEM-002, FREEZE.md §6.2 row 9: an untyped integer literal directly
+// initializing a 'double' whose exact value can't be rounded to that
+// double WITHOUT loss (e.g. 9223372036854775807 -- INT64_MAX itself isn't
+// exactly representable in a double). Distinct from
+// IntegerLiteralOutOfRangeError above: the literal DOES fit int64 (that's
+// checked first, separately -- see checkLiteralRepresentable()'s own
+// comment), it just can't be rounded exactly.
+class IntegerLiteralNotExactAsDoubleError : public TurfError {
+public:
+  IntegerLiteralNotExactAsDoubleError(SourceLocation Loc, const std::string &ExactValue)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED +
+                "Integer literal cannot be represented EXACTLY as a 'double'.\n" +
+                Colors::RESET + "  The literal's value is " + Colors::CYAN +
+                ExactValue + Colors::RESET +
+                "; converting it to 'double' would silently lose precision.",
+            "Use 'int' instead, or write the value as a float literal "
+            "('" + ExactValue + ".0') if the rounded value is what you "
+            "actually want.") {
+    Category_ = SLM::ErrorCategory::ARITHMETIC;
+  }
+};
+// SEM-002, FREEZE.md §6.2 row 2/3/8: a float literal whose decimal->binary
+// rounding overflowed to +/-inf (NumberExprAST::overflowed(), set by
+// ParseNumberExpr -- SEM-001). Unlike the two classes above, this is
+// destination-independent: an inf-rounded literal is never valid,
+// regardless of what it's being assigned to (row 8: "In a literal: hard
+// error" -- no destination check needed first).
+class FloatLiteralOverflowError : public TurfError {
+public:
+  FloatLiteralOverflowError(SourceLocation Loc, const std::string &Spelling)
+      : TurfError(
+            Loc,
+            Colors::BRIGHT_RED +
+                "Float literal is too large to represent -- it rounds to infinity.\n" +
+                Colors::RESET + "  '" + Colors::CYAN + Spelling + Colors::RESET +
+                "' overflows 'double's range.",
+            "'double' (IEEE-754) can represent roughly up to 1.8e308. "
+            "Did you mean a smaller value, or a different unit?") {
+    Category_ = SLM::ErrorCategory::ARITHMETIC;
+  }
+};
 class ArithmeticError : public TurfError {
 public:
   ArithmeticError(SourceLocation Loc, const std::string &Msg)

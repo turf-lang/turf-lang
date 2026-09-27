@@ -3,7 +3,7 @@
 
 // Private, implementation-only forward declarations shared across the 5
 // ResolverCore/Expr/Stmt/Decl/Call.cpp files (the split of the original
-// monolithic Resolver.cpp -- see docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+// monolithic Resolver.cpp -- see docs/architecture/compiler_pipeline.md).
 // NOT part of the compiler's public interface (that's Resolver.h) -- these
 // are free functions (not Resolver:: methods, which are already all visible
 // across files via the class declaration in Resolver.h) that used to be

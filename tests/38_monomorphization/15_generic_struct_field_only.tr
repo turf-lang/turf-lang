@@ -1,0 +1,27 @@
+// Regression test: D2 (docs/development/changes/TYPE-002.md, S15) -- a
+// generic type used ONLY as a struct FIELD (no variable of that type, no
+// method call on it, anywhere in the program) was never recorded as an
+// instantiation request. `struct Holder { items: List<Big>, n: int }` (Big
+// is 24 bytes, over one machine word) with no `List<Big>` variable ever
+// declared compiled to "Internal compiler error: generated LLVM IR is
+// invalid ... Cannot allocate unsized type" -- List<Big>'s own layout never
+// existed because nothing ever asked for it. Also asserts the SILENT half
+// of the bug directly: sizeof(Holder) must be 32 (8 (List's data ptr) + 8
+// (len) + 8 (cap) + 8 (n)), not 8 -- the opaque-stub fallback used to make
+// this silently wrong with no diagnostic at all whenever nothing else in
+// the program happened to force List<Big> into existence.
+import list::List;
+import test;
+
+struct Big { a: int, b: int, c: int }
+struct Holder { items: List<Big>, n: int }
+
+fn main(): int {
+    test::assert(sizeof(Holder) == 32, "Holder's List<Big> field must get its own real 24-byte layout, not the opaque stub");
+
+    mut h: Holder = Holder::default();
+    h.n = 7;
+    test::assert(h.n == 7, "Holder must still construct and behave correctly");
+
+    return 0;
+}

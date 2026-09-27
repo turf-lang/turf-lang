@@ -1,0 +1,15 @@
+// Regression test (LANG-004 item 1): `step` is now optional on a range
+// `for`, but WHEN the `step` keyword is written, it must still be followed
+// by a real step expression -- `step { ... }` (the body's opening brace
+// immediately after `step`, no expression in between) must still be
+// rejected, not silently treated the same as omitting `step` entirely.
+
+import test;
+
+fn main(): int {
+    mut sum: int = 0;
+    for i in 0..5 step {
+        sum = sum + i;
+    }
+    return 0;
+}

@@ -18,9 +18,9 @@ fn main(): int {
     };
 
     test::assert_eq(lines.length(), 3, "read_lines: trailing newline should not produce a spurious 4th empty line");
-    test::assert(lines.data[0] == "alpha", "read_lines: line 0");
-    test::assert(lines.data[1] == "beta", "read_lines: line 1");
-    test::assert(lines.data[2] == "gamma", "read_lines: line 2");
+    test::assert(lines.get(0) == "alpha", "read_lines: line 0");
+    test::assert(lines.get(1) == "beta", "read_lines: line 1");
+    test::assert(lines.get(2) == "gamma", "read_lines: line 2");
 
     // A genuine trailing blank line (two '\n' in a row at the end) must
     // survive -- only ONE spurious trailing empty element (caused by the
@@ -32,8 +32,8 @@ fn main(): int {
         return 1;
     };
     test::assert_eq(lines2.length(), 2, "read_lines: a genuine blank line before EOF is preserved");
-    test::assert(lines2.data[0] == "one", "read_lines: blank-line case, line 0");
-    test::assert(lines2.data[1] == "", "read_lines: blank-line case, line 1 is the genuine blank line");
+    test::assert(lines2.get(0) == "one", "read_lines: blank-line case, line 0");
+    test::assert(lines2.get(1) == "", "read_lines: blank-line case, line 1 is the genuine blank line");
 
     remove(path);
     remove(path2);

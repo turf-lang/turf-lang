@@ -1,3 +1,5 @@
+unsafe module;
+
 // ─── net.tr ────────────────────────────────────────────────────────────────
 // TCP networking for TurfLang.
 //
@@ -253,11 +255,16 @@ fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: !Tcp
 // caller received corrupted/garbage bytes instead of the real response
 // before this was fixed). Matches the exact convention io.tr's input()
 // already established -- ownership of the heap buffer transfers to the
-// caller, who is never expected to free it either (this language has no
-// GC yet; small leaks like this are an accepted, documented tradeoff, see
-// EmitStringConcat's own TURF-MEMLEAK comment in Codegen.cpp).
+// caller, who is never expected to free it either (MEM-001 puts this on
+// the GC heap -- gc_alloc_zeroed, not mem::alloc_zeroed, since a returned
+// `string` is a language-owned result, F-MEM-3 -- but nothing collects
+// yet, so it still leaks exactly as before; see EmitStringConcat's own
+// TURF-MEMLEAK comment history in strings.tr). Zero-filled, not just
+// malloc'd, for the same reason io::read_to_string() is: recv() may write
+// fewer than maxBytes bytes, and the untouched tail needs to already be 0
+// to serve as the string's NUL terminator.
 fn TcpConnection.read(maxBytes: int): string {
-    mut buf: void* = mem::alloc_zeroed(1, maxBytes + 1);
+    mut buf: void* = gc_alloc_zeroed(maxBytes + 1);
     recv(self.fd, buf, maxBytes, 0);
     return buf to string;
 }

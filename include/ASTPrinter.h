@@ -26,6 +26,8 @@
 #include "ASTVisitor.h"
 #include "TypeChecker.h"
 
+#include "llvm/ADT/SmallString.h" // visitNumber()'s exact-value printing
+
 #include <cctype>
 #include <iostream>
 #include <string>
@@ -56,10 +58,22 @@ public:
   // ── Literals ────────────────────────────────────────────────────────────────
   void visitNumber(NumberExprAST &N) override {
     printIndent(Depth_);
-    if (N.isInteger())
-      std::cout << "NumberExpr(int:" << N.getIntVal() << ")";
-    else
-      std::cout << "NumberExpr(double:" << N.getDoubleVal() << ")";
+    // Exact accessors, not getIntVal()/getDoubleVal() -- this is SEM-001's
+    // own completion-criteria proof (docs/planning/ARCHITECTURE_OVERHAUL.md
+    // §8: "a 48-digit literal still compiles ... now carries its exact
+    // value, provable via --dump-ast"). getIntVal() truncates to 64 bits,
+    // which would silently defeat that proof for exactly the literals it
+    // matters most for.
+    if (N.isInteger()) {
+      llvm::SmallString<32> Digits;
+      N.getIntValExact().toString(Digits, 10);
+      std::cout << "NumberExpr(int:" << Digits.str().str() << ")";
+    } else {
+      std::cout << "NumberExpr(double:" << N.getDoubleVal();
+      if (N.overflowed())
+        std::cout << ", OVERFLOWED-TO-INF";
+      std::cout << ")";
+    }
     printTypeBadge(&N);
     std::cout << "\n";
   }
@@ -88,13 +102,6 @@ public:
   void visitNull(NullExprAST &N) override {
     printIndent(Depth_);
     std::cout << "NullExpr";
-    printTypeBadge(&N);
-    std::cout << "\n";
-  }
-
-  void visitDefaultInit(DefaultInitExprAST &N) override {
-    printIndent(Depth_);
-    std::cout << "DefaultInit(" << (N.getTypePtr() ? N.getTypePtr()->getName() : "?") << ")";
     printTypeBadge(&N);
     std::cout << "\n";
   }
@@ -179,7 +186,8 @@ public:
 
   void visitPostfixExpr(PostfixExprAST &N) override {
     printIndent(Depth_);
-    std::cout << "PostfixExpr(op:'" << (char)N.getOpcode() << "')\n";
+    std::cout << (N.IsPrefix ? "PrefixExpr(op:'" : "PostfixExpr(op:'")
+              << (char)N.getOpcode() << "')\n";
     descend();
     print(const_cast<ExprAST *>(N.getOperand()), Depth_);
     ascend();

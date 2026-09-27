@@ -1,0 +1,32 @@
+// Regression test: TYPE-002 S14a -- completion criterion 4's struct-field
+// half. `02_sizeof_t_in_generic_body.tr` (S12a) already covers `sizeof(T)`
+// inside a generic FREE function; this covers the same mechanism inside a
+// generic STRUCT's own method, including a >8-byte T (Big, 24 bytes) --
+// which only became possible to even ASK correctly once S13a/S13b gave
+// each instantiation its own real per-instantiation struct layout instead
+// of Type Erasure's uniform "every T is 8 bytes" assumption.
+import test;
+
+struct Big {
+    a: int,
+    b: int,
+    c: int
+}
+
+struct Box<T> {
+    val: T
+}
+
+fn<T> Box.sizeOfT(): int {
+    return sizeof(T);
+}
+
+fn main(): int {
+    mut bi: Box<int> = Box::default();
+    mut bd: Box<double> = Box::default();
+    mut bbig: Box<Big> = Box::default();
+    test::assert(bi.sizeOfT() == 8, "sizeof(T) in Box<int>.sizeOfT() wrong");
+    test::assert(bd.sizeOfT() == 8, "sizeof(T) in Box<double>.sizeOfT() wrong");
+    test::assert(bbig.sizeOfT() == 24, "sizeof(T) in Box<Big>.sizeOfT() wrong");
+    return 0;
+}

@@ -1,0 +1,10 @@
+// STD-002: `caller_location` is legal ONLY inside a function declared
+// `@caller_location` -- CallerLocationOutsideMarkedFunctionError (E084).
+fn notMarked(): string {
+    return caller_location;
+}
+
+fn main(): int {
+    notMarked();
+    return 0;
+}

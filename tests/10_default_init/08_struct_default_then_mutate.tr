@@ -1,4 +1,5 @@
-// Test: declare struct, mutate fields, re-read — mutation works after default init
+// Test: Vec2::default(), mutate fields, re-read — mutation works after
+// default init (SEM-004: the default now requires this explicit call).
 import io;
 
 import test;
@@ -8,7 +9,7 @@ struct Vec2 {
 }
 
 fn main(): int {
-    mut v: Vec2;
+    mut v: Vec2 = Vec2::default();
     test::assert(v.x == 0.0, "initial x = 0.0");
     test::assert(v.y == 0.0, "initial y = 0.0");
 

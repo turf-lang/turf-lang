@@ -1,0 +1,93 @@
+// tests/41_gc/09_boxed_fallible_success_survives_collection.tr
+// OVH-002 (docs/planning/OVERHAUL_REMAINING_WORK.md): `BoxToI64Slot()`
+// (src/CodegenCore.cpp) heap-boxes a `!T` success value wider than 64 bits
+// (a struct, here `Rec`) so it can outlive the function that returns it --
+// the box's ADDRESS is stashed in the `FallibleValue`'s `successBits`
+// slot, which sits on the stack as an ordinary `!Rec`-typed local
+// (`held`), so the box itself is always found correctly by the collector's
+// conservative stack scan.
+//
+// The bug this test reproduces: before this fix, the box was a bare
+// `malloc()` block -- never registered with the collector's block table
+// at all (`turf_gc_register_block` is only called by `turf_rt_alloc`/
+// `turf_rt_alloc_zeroed`/`turf_rt_realloc`), so even though the BOX's own
+// address survived conservative scanning, the collector's mark phase had
+// no reason to ever walk INTO an unregistered block looking for further
+// pointers. `Rec.name` -- a GC-heap `string` living ONLY inside that box
+// -- therefore had no root of its own the moment nothing else pointed at
+// it, and got swept by the very next collection, corrupting `r.name` when
+// finally read back after `recover`. Now the box is `turf_rt_alloc`'d with
+// `Rec`'s own real descriptor, so it is both a registered, root-findable
+// block AND precisely traced into.
+//
+// `junk()` between the two collections allocates a few thousand throwaway
+// strings (docs/planning/OVERHAUL_REMAINING_WORK.md §1's own guidance) so
+// a freed block is actually REUSED with different content, not merely
+// freed-but-still-readable-by-luck.
+
+import strings;
+import test;
+import io;
+
+struct Rec {
+    name: string,
+    other: int
+}
+
+fn makeRec(): !Rec {
+    mut r: Rec = Rec::default();
+    r.name = strings::repeat("z", 40);
+    r.other = 42;
+    return r;
+}
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 13;
+        i = i + 1;
+    }
+    mut sum: int = 0;
+    i = 0;
+    while i < 64 {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    test::assert(sum == 26208, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn junk(n: int): void {
+    mut i: int = 0;
+    while i < n {
+        strings::repeat("j", 40);
+        i = i + 1;
+    }
+}
+
+fn main(): int {
+    // Hold the fallible value itself (still boxed -- the box is only
+    // unboxed by the `recover` below) across a forced collection, exactly
+    // per OVH-002's own testing scope: "hold a !Rec in a local across a
+    // collection, then recover."
+    mut held: !Rec = makeRec();
+
+    churn(24);
+    gc_collect();
+    junk(2000);
+    churn(24);
+    gc_collect();
+
+    mut r: Rec = held recover produce Rec::default();
+
+    test::assert(r.other == 42, "boxed struct's plain-int field survives a forced collection");
+    test::assert(strings::length(r.name) == 40, "boxed struct's string field survives with correct length -- OVH-002's actual reproducer");
+    test::assert(strings::starts_with(r.name, "z"), "boxed struct's string field content survives");
+
+    io::printline("41/09 PASS: a boxed oversized !T success value's own GC-heap contents are precisely traced through a forced collection");
+    return 0;
+}

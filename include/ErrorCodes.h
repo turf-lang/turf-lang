@@ -116,6 +116,64 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // Appended after the initial 67-entry generation (see this file's own
     // doc comment on why new entries go at the end, not resorted in).
     {"E068", "UnknownStructFieldError", "Unknown struct field", SLM::ErrorCategory::UNDECLARED_VAR},
+    {"E069", "StructLayoutCycleError", "Struct layout cycle", SLM::ErrorCategory::DECLARATION, true},
+    // SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): four new lexical
+    // errors raised directly from the Lexer's own number-scanning branch
+    // (see ErrorsLex.h's own top comment for why that's safe). Routed to
+    // the existing SYNTAX_ERROR category, per §8's explicit instruction not
+    // to add a new SLM::ErrorCategory for these.
+    {"E070", "MalformedRadixPrefixError", "Malformed radix prefix", SLM::ErrorCategory::SYNTAX_ERROR},
+    {"E071", "InvalidRadixDigitError", "Invalid radix digit", SLM::ErrorCategory::SYNTAX_ERROR},
+    {"E072", "MisplacedSeparatorError", "Misplaced separator", SLM::ErrorCategory::SYNTAX_ERROR},
+    {"E073", "MalformedExponentError", "Malformed exponent", SLM::ErrorCategory::SYNTAX_ERROR},
+    // HYG-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): these two classes
+    // already existed, fully written, but were never constructed --
+    // CFG::reportFlowDiagnostics() wrote directly to std::cerr instead,
+    // bypassing DiagnosticEngine entirely (no code, no color, no caret, no
+    // hint). Routed through the existing classes; routed to the existing
+    // CONTROL_FLOW category, per §8's explicit instruction not to add a new
+    // SLM::ErrorCategory for these.
+    {"E074", "UnreachableBlockWarning", "Unreachable block", SLM::ErrorCategory::CONTROL_FLOW},
+    {"E075", "DeadBranchWarning", "Dead branch", SLM::ErrorCategory::CONTROL_FLOW},
+    // SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): destination/
+    // literal-representability diagnostics (FREEZE.md §6.2 rows 3/6/8/9).
+    // Routed to the existing ARITHMETIC category, per §8's explicit
+    // instruction not to add a new SLM::ErrorCategory for these.
+    {"E076", "IntegerLiteralOutOfRangeError", "Integer literal out of range", SLM::ErrorCategory::ARITHMETIC},
+    {"E077", "IntegerLiteralNotExactAsDoubleError", "Integer literal not exact as double", SLM::ErrorCategory::ARITHMETIC},
+    {"E078", "FloatLiteralOverflowError", "Float literal overflow", SLM::ErrorCategory::ARITHMETIC},
+    // TYPE-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §9.5 step 4): the
+    // monomorphizer's instantiation worklist is depth-capped, not run to
+    // real exhaustion. Registered in S11b alongside the class and the
+    // depth constant it guards (Monomorphize::kMaxInstantiationDepth) even
+    // though nothing raises it until S12a's worklist actually drains --
+    // see docs/development/changes/TYPE-002.md.
+    {"E079", "GenericInstantiationDepthError", "Generic instantiation depth exceeded", SLM::ErrorCategory::DECLARATION},
+    // LANG-001 (docs/development/changes/LANG-001.md, §13.4's orphan rule):
+    // an operator declaration where no operand is a struct/enum declared in
+    // the SAME module as the operator. Prevents a third-party module from
+    // redefining an operator's meaning on two types it does not own, which
+    // would make the operator's behavior depend on import order.
+    {"E080", "OperatorOrphanRuleError", "Operator orphan rule violation", SLM::ErrorCategory::DECLARATION},
+    // LANG-002 (docs/development/changes/LANG-002.md): NullabilityPass's two
+    // checks, raised at Codegen time from the same CFG dataflow state --
+    // field-accessing a `&?T` that isn't proven non-null on this path, and
+    // casting one to `&T` under the same condition.
+    {"E081", "PossibleNullDereferenceError", "Possible null dereference", SLM::ErrorCategory::MEMORY_ERROR},
+    {"E082", "UnnarrowedNullableCastError", "Unnarrowed nullable-to-safe-reference cast", SLM::ErrorCategory::TYPE_MISMATCH},
+    // LANG-003 (docs/development/changes/LANG-003.md): a `return`/`break`/
+    // `continue` found anywhere inside a `defer <statement>;`'s own
+    // statement -- always illegal, since it can only ever escape to the
+    // enclosing function/loop, never "just" the defer. Routed to the
+    // existing CONTROL_FLOW category, per §8's explicit instruction not to
+    // add a new SLM::ErrorCategory for these.
+    {"E083", "DeferControlFlowError", "Defer control flow", SLM::ErrorCategory::CONTROL_FLOW},
+
+    // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)): `caller_location`
+    // read outside a function declared `@caller_location`. DECLARATION,
+    // matching StaticOutsideStructError's identical "this construct is
+    // only valid in one specific declaration context" shape.
+    {"E084", "CallerLocationOutsideMarkedFunctionError", "Caller location outside a marked function", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

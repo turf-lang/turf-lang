@@ -1,3 +1,5 @@
+unsafe module;
+
 // ─── mem.tr ──────────────────────────────────────────────────────────────────
 // Low-level memory management for TurfLang.
 //
@@ -31,7 +33,18 @@ import sys;
 extern fn malloc(size: int): void*;
 extern fn calloc(count: int, size: int): void*;
 extern fn realloc(p: void*, new_size: int): void*;
-extern fn free(p: void*): void;
+
+// MEM-002: there used to be a plain `extern fn free(p: void*): void;` here,
+// bound straight to libc. It's gone -- Turf's `extern fn` has no alias
+// syntax (the declared Turf-level name IS the linked C symbol name,
+// verified live: `src/ParserDecl.cpp`'s ExternFuncDeclExprAST has exactly
+// one `Name_` field, used for both), so a checked wrapper could not also be
+// named `free` in this same file without colliding with it (the same
+// redeclaration conflict tests/21_extern_conflict/ exists to catch).
+// `gc_checked_free(p)` (a bare intrinsic, same mechanism as `gc_alloc`)
+// is the actual libc `free()` call now -- see its own doc comment in
+// runtime/turfrt.h (`turf_rt_checked_free`) -- with the cross-heap check
+// this file's own free() (below) wraps it in.
 
 // posix_memalign's first parameter is genuinely a `void**` (an out-param:
 // the C function writes the allocated address INTO the location this
@@ -111,8 +124,21 @@ fn alloc_aligned(alignment: int, size: int): void* {
     }
     mut iSlot: int* = outSlot to int*;
     mut allocated: void* = iSlot[0] to void*;
-    free(outSlot);
+    gc_checked_free(outSlot);
     return allocated;
+}
+
+// free: releases a manual-heap allocation obtained from alloc()/
+// alloc_zeroed()/alloc_aligned()/grow()/dup(), or any other pointer the
+// PROGRAMMER owns (F-MEM-3). Freeing a GC-heap pointer here instead -- a
+// `string`, or a collection's backing buffer -- is the exact cross-heap
+// mistake F-MEM-3 forbids ("the two heaps do not merge" -- MEM-001's own
+// "Must NOT reinterpret" entry); gc_checked_free() (a bare intrinsic,
+// runtime/turfrt.h's turf_rt_checked_free) is what turns that from
+// undiagnosed corruption into a diagnosable runtime panic naming the
+// mistake. Usage is unchanged from before this group: `mem::free(buf)`.
+fn free(p: void*): void {
+    gc_checked_free(p);
 }
 
 // usable_size: how many bytes are ACTUALLY available at `p` (often more
@@ -122,6 +148,37 @@ fn alloc_aligned(alignment: int, size: int): void* {
 // glibc-specific caveat.
 fn usable_size(p: void*): int {
     return malloc_usable_size(p);
+}
+
+// root: pins the GC object containing `p` so the collector never reclaims
+// it, until a matching unroot(p) -- OVH-010
+// (docs/planning/OVERHAUL_REMAINING_WORK.md), the answer §14.3/§14.6
+// promised to F-MEM-3's own documented unsoundness: a GC pointer (a
+// runtime-built `string`, a collection's backing buffer) stored ONLY
+// inside a manual-heap struct (a `mem::alloc`'d buffer, a C library's own
+// bookkeeping) is invisible to every other root-finding path -- it is not
+// on the stack, not in a register, not behind a global root, and no other
+// GC-heap block's own declared pointer words reach it either -- so the
+// collector frees it out from under whoever's holding it in manual memory.
+// `p` may be an interior pointer (e.g. `buf + k`, not only a block's exact
+// start), exactly like a stack/register root; the whole object it points
+// into is what gets pinned. Pins nest: two independent root(p) calls need
+// two matching unroot(p) calls. A `p` that is not a GC-heap pointer at all
+// is a documented no-op, not an error -- C memory (an `int` cast to
+// `void*`, an FFI buffer) is legitimately passed through here too, and
+// pinning it would be meaningless.
+fn root(p: void*): void {
+    gc_pin(p);
+}
+
+// unroot: releases one pin root(p) placed on the GC object containing `p`.
+// Panics if that object currently has no outstanding pin at all -- an
+// unbalanced unroot() (never rooted, or already fully unrooted) is treated
+// as a programmer error worth surfacing, unlike root()'s own silent no-op
+// for a `p` that was never a GC pointer to begin with (see root()'s own
+// doc comment just above for that asymmetry's reasoning).
+fn unroot(p: void*): void {
+    gc_unpin(p);
 }
 
 // ─── Pool<T>: bulk-free allocation tracking ─────────────────────────────────
@@ -169,7 +226,15 @@ fn<T> Pool.track(item: T): void {
         } else {
             self.cap = self.cap * 2;
         }
-        immut byteSize: int = self.cap * 8;
+        // TYPE-002 (S15/D3): was `self.cap * 8` under Type Erasure. In
+        // practice `Pool<T>` is always instantiated at a pointer type (see
+        // free_pool()'s own comment below -- a pool tracks allocations, so
+        // T is always some *T/void*), and every pointer is 8 bytes anyway,
+        // so this was latent rather than live -- fixed for correctness and
+        // consistency with every other collection's identical fix
+        // (list.tr/stack.tr/queue.tr/set.tr/map.tr) rather than because a
+        // live corruption was reproduced here.
+        immut byteSize: int = self.cap * sizeof(T);
         if self.items == null {
             self.items = malloc(byteSize) to T*;
         } else {

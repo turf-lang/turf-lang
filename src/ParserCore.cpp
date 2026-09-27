@@ -4,7 +4,7 @@
  * @details Part of the recursive-descent parser for TurfLang, split from the
  *          original monolithic Parser.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -238,17 +238,18 @@ TurfTypePtr ParseType() {
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(CurLoc,
                "Type nested too deeply to parse."
-               "\n  Hint: check for unbalanced '<', '[', or '!'.");
+               "\n  Hint: check for unbalanced '<', '[', or '!'.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
-  // `!T` -- a fallible/error-union type (docs/planning/Errors.md): T on
-  // success, or any declared `error` type value on failure. Unambiguous with
-  // the unary logical-not operator ('!' desugars to `x != true` -- see
-  // ParseUnary()) since that's parsed entirely inside EXPRESSION parsing;
-  // ParseType() is a wholly separate function only ever called from type
-  // positions (return types, parameter types, var-decl annotations, struct/
-  // error-variant fields), which previously rejected a leading '!' outright.
+  // `!T` -- a fallible/error-union type
+  // (docs/architecture/errors_and_recover.md): T on success, or any declared
+  // `error` type value on failure. Unambiguous with the unary logical-not
+  // operator ('!' desugars to `x != true` -- see ParseUnary()) since that's
+  // parsed entirely inside EXPRESSION parsing; ParseType() is a wholly
+  // separate function only ever called from type positions (return types,
+  // parameter types, var-decl annotations, struct/error-variant fields),
+  // which previously rejected a leading '!' outright.
   if (CurTok == '!') {
     getNextToken(); // consume '!'
     TurfTypePtr SuccessType = ParseType();
@@ -257,18 +258,28 @@ TurfTypePtr ParseType() {
     return std::make_shared<TurfErrorUnionType>(std::move(SuccessType));
   }
 
-  // `&T` -- a compiler-guaranteed non-null safe reference (issue #238).
-  // Symmetric to the `!T` branch just above: its own leading-token branch,
-  // ahead of the primitive/identifier dispatch below, recursing into
-  // ParseType() for the pointee. Unambiguous with the binary bitwise-AND
-  // operator ('&') and the unary address-of operator (also '&') since both
-  // of those are parsed entirely inside EXPRESSION parsing -- ParseType()
-  // is a wholly separate function only ever called from type positions.
+  // `&T` -- a compiler-guaranteed non-null safe reference (issue #238) --
+  // and `&?T` -- a nullable, NullabilityPass-checked safe reference
+  // (LANG-002). Symmetric to the `!T` branch just above: its own
+  // leading-token branch, ahead of the primitive/identifier dispatch below,
+  // recursing into ParseType() for the pointee. Unambiguous with the binary
+  // bitwise-AND operator ('&') and the unary address-of operator (also '&')
+  // since both of those are parsed entirely inside EXPRESSION parsing --
+  // ParseType() is a wholly separate function only ever called from type
+  // positions. The one-token '?' lookahead right after '&' is similarly
+  // unambiguous: '?' has no other meaning anywhere in this grammar.
   if (CurTok == '&') {
     getNextToken(); // consume '&'
+    bool IsNullable = false;
+    if (CurTok == '?') {
+      IsNullable = true;
+      getNextToken(); // consume '?'
+    }
     TurfTypePtr Pointee = ParseType();
     if (!Pointee)
       return nullptr;
+    if (IsNullable)
+      return std::make_shared<TurfNullableReferenceType>(std::move(Pointee));
     return std::make_shared<TurfReferenceType>(std::move(Pointee));
   }
 
@@ -321,7 +332,7 @@ TurfTypePtr ParseType() {
       CurTok != TOK_TYPE_DOUBLE && CurTok != TOK_TYPE_BOOL &&
       CurTok != TOK_TYPE_CHAR &&
       CurTok != TOK_TYPE_STRING && CurTok != TOK_TYPE_VOID &&
-      CurTok != TOK_PTR) {
+      CurTok != TOK_PTR && CurTok != TOK_GUESS) {
     SyntaxError(CurLoc, "Expected a type name").raise();
     return nullptr;
   }
@@ -345,6 +356,15 @@ TurfTypePtr ParseType() {
     // `ptr` is a terminal type — no generics, no arrays (for now)
     getNextToken(); // consume 'ptr'
     return TurfPtr();
+  }
+  else if (CurTok == TOK_GUESS) {
+    // `guess` is a terminal type-position placeholder (SEM-003, §11.2) —
+    // never composed with generics/arrays/pointers, exactly like `ptr`
+    // above. TypeChecker::visitVarDecl replaces it with the initializer's
+    // real type; nothing between here and there ever inspects it beyond
+    // the isGuess() checks ParseLetStatement/Resolver/TypeChecker add.
+    getNextToken(); // consume 'guess'
+    return TurfGuess();
   }
   else
     BaseName = IdentifierStr; // user-defined
@@ -384,6 +404,34 @@ TurfTypePtr ParseType() {
         getNextToken(); // consume '>'
         break;
       }
+      // OVH-009: the lexer's maximal munch (INV-LEX-1 -- never special-
+      // cased there) fuses adjacent '>'-family characters into one token
+      // whenever a nested generic argument list closes with no space
+      // (`List<List<int>>` -> TOK_RSHIFT) or the close is immediately
+      // followed by '=' (`List<T>=`/`Map<K, List<V>>=` -> TOK_GEQ/
+      // TOK_RSHIFT_ASSIGN). The PARSER splits one '>' off such a token
+      // here by replacing CurTok with whatever is left over -- crucially,
+      // WITHOUT calling getNextToken(), which would ask the lexer for a
+      // brand new token and silently skip the leftover instead of handing
+      // it to whichever level of nesting (or the ordinary '=' this type
+      // annotation is followed by) actually owns it next. `break`ing with
+      // the replaced CurTok, rather than looping again, mirrors the real
+      // '>' branch just above: this level's own list is closed either way,
+      // real or split.
+      if (CurTok == TOK_RSHIFT) {        // '>>' -> '>' then '>'
+        CurTok = '>';
+        break;
+      }
+      if (CurTok == TOK_RSHIFT_ASSIGN) { // '>>=' -> '>' then '>='
+        CurTok = TOK_GEQ;
+        break;
+      }
+      if (CurTok == TOK_GEQ) {           // '>=' -> '>' then '=' -- reached
+                                          // directly (`List<T>=`) or as the
+                                          // second split of a '>>=' above
+        CurTok = TOK_ASSIGN;
+        break;
+      }
       if (CurTok != ',') {
         SyntaxError(CurLoc, "Expected '>' or ',' in generic type").raise();
         return nullptr;
@@ -402,7 +450,18 @@ TurfTypePtr ParseType() {
       getNextToken();
       int Size = -1;
       if (CurTok == TOK_INT_LITERAL) {
-        Size = static_cast<int>(IntVal);
+        // A best-effort (saturating) reading of the literal, same as this
+        // whole file did before SEM-001 -- an array size is always a small
+        // positive int in practice, and NumLitClean/NumLitRadix (not the
+        // exact llvm::APSInt NumberExprAST itself carries, since no
+        // NumberExprAST node exists for a type-position literal like this
+        // one at all) is all that's needed here; representability of an
+        // array SIZE is unrelated to SEM-001/002's literal-representability
+        // work, which is about literals used as VALUES, not this compile-
+        // time-only dimension. See ParseNumberExpr's own comment
+        // (ParserLiteral.cpp) for the exact-value path a real
+        // value-position literal takes instead.
+        Size = static_cast<int>(strtoll(NumLitClean.c_str(), nullptr, NumLitRadix));
         if (Size <= 0) {
           SyntaxError(CurLoc, "Array size must be positive").raise();
           return nullptr;
@@ -458,7 +517,10 @@ TurfTypePtr ParseType() {
     getNextToken(); // eat '['
     int Size = -1;
     if (CurTok == TOK_INT_LITERAL) {
-      Size = static_cast<int>(IntVal);
+      // See the identical comment on the other array-size site above (this
+      // file, `T[N]` in a generic base type) for why the best-effort
+      // NumLitClean/NumLitRadix reading is the right choice here too.
+      Size = static_cast<int>(strtoll(NumLitClean.c_str(), nullptr, NumLitRadix));
       if (Size <= 0) {
         SyntaxError(CurLoc,
                     "Array size must be a positive integer (greater than 0)")
@@ -540,14 +602,14 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     LogErrorAt(CurLoc, "Unexpected token — expected a value, variable name, or "
                        "expression here."
                        "\n  Hint: Check for stray characters, a missing "
-                       "operator, or an incomplete statement.");
+                       "operator, or an incomplete statement.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
 
   case TOK_SIZEOF: {
     SourceLocation Loc = CurLoc;
     getNextToken(); // eat sizeof
     if (CurTok != '(') {
-      LogErrorAt(CurLoc, "Expected '(' after sizeof");
+      LogErrorAt(CurLoc, "Expected '(' after sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
     getNextToken(); // eat '('
@@ -555,11 +617,25 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     if (!Ty)
       return nullptr;
     if (CurTok != ')') {
-      LogErrorAt(CurLoc, "Expected ')' to close sizeof");
+      LogErrorAt(CurLoc, "Expected ')' to close sizeof", SLM::ErrorCategory::SYNTAX_ERROR);
       return nullptr;
     }
     getNextToken(); // eat ')'
     return std::make_unique<SizeOfExprAST>(Loc, Ty);
+  }
+
+  case TOK_CALLER_LOCATION: {
+    // Bare keyword, no arguments -- see CallerLocationExprAST's own doc
+    // comment (ASTExpr.h) for why this is a dedicated node rather than
+    // falling through to the ordinary identifier/VariableExprAST path
+    // TOK_SELF shares below. Legality (must be lexically inside a function
+    // declared '@caller_location') is entirely TypeChecker's job
+    // (visitCallerLocation()), not checked here -- mirrors how ParseType()'s
+    // '&'/'!' branches and this file's TOK_UNSAFE case never validate
+    // context either.
+    SourceLocation Loc = CurLoc;
+    getNextToken(); // eat 'caller_location'
+    return std::make_unique<CallerLocationExprAST>(Loc);
   }
 
   case TOK_SELF:
@@ -587,7 +663,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                              "for constructing a struct."
                              "\n  Hint: use '" + IdName + "::new(...)' (if '" +
                              IdName + "' declares a constructor) or '" + IdName +
-                             "::default()' instead.");
+                             "::default()' instead.", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
       }
@@ -605,7 +681,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     if (CurTok == TOK_SCOPE) {
       getNextToken(); // eat '::'
       if (CurTok != TOK_IDENTIFIER) {
-        LogErrorAt(CurLoc, "Expected a name after '::'");
+        LogErrorAt(CurLoc, "Expected a name after '::'", SLM::ErrorCategory::DECLARATION);
         return nullptr;
       }
       std::string RightName = IdentifierStr;
@@ -624,7 +700,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                                "longer valid syntax for constructing a struct."
                                "\n  Hint: use '" + IdName + "::" + RightName +
                                "::new(...)' or '" + IdName + "::" + RightName +
-                               "::default()' instead.");
+                               "::default()' instead.", SLM::ErrorCategory::DECLARATION);
             return nullptr;
           }
         }
@@ -640,7 +716,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       if (CurTok == TOK_SCOPE) {
         getNextToken(); // eat second '::'
         if (CurTok != TOK_IDENTIFIER) {
-          LogErrorAt(CurLoc, "Expected a variant name after '::'");
+          LogErrorAt(CurLoc, "Expected a variant name after '::'", SLM::ErrorCategory::DECLARATION);
           return nullptr;
         }
         std::string VariantName = IdentifierStr;
@@ -730,12 +806,12 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       if (CurTok == ',') {
         getNextToken(); // eat ','
       } else if (CurTok != ']') {
-        LogErrorAt(CurLoc, "Expected ',' or ']' in array literal");
+        LogErrorAt(CurLoc, "Expected ',' or ']' in array literal", SLM::ErrorCategory::ARRAY_ERROR);
         return nullptr;
       }
     }
     if (CurTok != ']') {
-      LogErrorAt(CurLoc, "Expected ']' to close array literal");
+      LogErrorAt(CurLoc, "Expected ']' to close array literal", SLM::ErrorCategory::ARRAY_ERROR);
       return nullptr;
     }
     getNextToken(); // eat ']'
@@ -773,7 +849,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                    "\n  Hint: '" +
                    IdName +
                    "' is a control-flow keyword; it can't appear standalone in "
-                   "an expression.");
+                   "an expression.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
 
@@ -783,7 +859,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_TYPE_STRING:
   case TOK_TYPE_BOOL:
   case TOK_TYPE_CHAR:
-    LogErrorAt(CurLoc, "Expected 'mutable' or 'immutable' to begin a declaration.");
+    LogErrorAt(CurLoc, "Expected 'mutable' or 'immutable' to begin a declaration.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
 
   case TOK_TYPE_VOID:
@@ -801,10 +877,28 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // The @intrinsic("name") decorator (used to bind print/printline/input
     // to compiler-native codegen) has been removed -- those functions are
     // now ordinary Turf code delegating to `extern fn` FFI bindings, see
-    // lib/std/io.tr. No decorator syntax is currently supported at all.
-    LogErrorAt(CurLoc,
-               "'@' is not valid here.\n  Hint: Turf has no decorator syntax "
-               "right now.");
+    // lib/std/io.tr. STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)) adds
+    // back exactly ONE decorator, `@caller_location fn ...` -- not a
+    // general decorator syntax; any other `@word` still falls through to
+    // the rejection below.
+    SourceLocation AtLoc = CurLoc;
+    getNextToken(); // eat '@'
+    if (CurTok == TOK_CALLER_LOCATION) {
+      getNextToken(); // eat 'caller_location'
+      if (CurTok != TOK_FN) {
+        LogErrorAt(CurLoc,
+                   "Expected 'fn' after '@caller_location'."
+                   "\n  Hint: '@caller_location' only decorates a function "
+                   "declaration, e.g. '@caller_location\\nfn foo(...): T "
+                   "{ ... }'.", SLM::ErrorCategory::SYNTAX_ERROR);
+        return nullptr;
+      }
+      return ParseFuncDef(/*HasCallerLocation=*/true);
+    }
+    LogErrorAt(AtLoc,
+               "'@' is not valid here.\n  Hint: the only supported decorator "
+               "is '@caller_location', immediately before a function "
+               "declaration.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -843,6 +937,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     getNextToken();
     return std::make_unique<ContinueExprAST>(KeywordLoc);
   }
+
+  case TOK_DEFER:
+    return ParseDeferStmt();
   }
 }
 
@@ -971,7 +1068,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(CurLoc,
                "Expression nested too deeply to parse."
-               "\n  Hint: check for unbalanced '(', '[', or '{'.");
+               "\n  Hint: check for unbalanced '(', '[', or '{'.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -990,7 +1087,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
     if (!ThenExpr)
       return nullptr;
     if (CurTok != TOK_OTHERWISE) {
-      LogErrorAt(CurLoc, "Expected 'otherwise' after 'give' expression in ternary");
+      LogErrorAt(CurLoc, "Expected 'otherwise' after 'give' expression in ternary", SLM::ErrorCategory::CONTROL_FLOW);
       return nullptr;
     }
     SourceLocation ElseLoc = CurLoc;
@@ -1005,11 +1102,11 @@ std::unique_ptr<ExprAST> ParseExpression() {
   }
 
   // `<expr> recover ...` -- handles the failure case of a `!T`-typed call
-  // expression at the call site (docs/planning/Errors.md). Bound to the
-  // whole expression parsed so far (same "loosest binding" position as the
-  // give/otherwise ternary just above), since every example in Errors.md
-  // attaches `recover` directly to a call expression, not to some inner
-  // sub-term of a larger arithmetic expression.
+  // expression at the call site (docs/architecture/errors_and_recover.md).
+  // Bound to the whole expression parsed so far (same "loosest binding"
+  // position as the give/otherwise ternary just above), since every example in
+  // errors_and_recover.md attaches `recover` directly to a call expression,
+  // not to some inner sub-term of a larger arithmetic expression.
   if (CurTok == TOK_RECOVER) {
     SourceLocation RecoverLoc = CurLoc;
     getNextToken(); // consume 'recover'
@@ -1039,7 +1136,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
       if (CurTok != TOK_IDENTIFIER) {
         LogErrorAt(CurLoc, "Expected an identifier after 'recover as' to "
                            "bind the failing error value."
-                           "\n  Hint: `recover as err run { ... }`.");
+                           "\n  Hint: `recover as err run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
       }
       std::string BoundName = IdentifierStr;
@@ -1049,7 +1146,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
         LogErrorAt(CurLoc, "Expected 'run' after 'recover as " + BoundName +
                                "'."
                                "\n  Hint: `recover as " +
-                               BoundName + " run { ... }`.");
+                               BoundName + " run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
         return nullptr;
       }
       getNextToken(); // consume 'run'
@@ -1065,7 +1162,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
     LogErrorAt(CurLoc, "Expected 'produce', 'run', or 'as' after 'recover'."
                        "\n  Hint: `recover produce value`, "
                        "`recover run { ... }`, or "
-                       "`recover as err run { ... }`.");
+                       "`recover as err run { ... }`.", SLM::ErrorCategory::CONTROL_FLOW);
     return nullptr;
   }
 
@@ -1095,7 +1192,7 @@ std::unique_ptr<ExprAST> ParseUnary() {
   if (RecursionGuard.tooDeep()) {
     LogErrorAt(CurLoc,
                "Expression nested too deeply to parse."
-               "\n  Hint: check for a runaway chain of unary operators.");
+               "\n  Hint: check for a runaway chain of unary operators.", SLM::ErrorCategory::SYNTAX_ERROR);
     return nullptr;
   }
 
@@ -1127,28 +1224,38 @@ std::unique_ptr<ExprAST> ParseUnary() {
       return nullptr;
     return std::make_unique<UnaryExprAST>(Loc, '~', std::move(Operand));
   }
+  // Prefix ++/-- -- LANG-001 follow-up: used to require a BARE
+  // TOK_IDENTIFIER and desugar straight to `x = x + 1`/`x = x - 1`
+  // (AssignmentExprAST(BinaryExprAST)), which made `++arr[0]`/`++obj.field`
+  // a parse error even though the equivalent POSTFIX form (`arr[0]++`)
+  // already worked -- postfix parses its operand through the general
+  // primary+postfix-chain path (ParsePostfixExpression(), ParserLiteral.cpp)
+  // and was never restricted to a bare identifier. Unified onto the exact
+  // same PostfixExprAST node postfix already uses (see its own doc comment,
+  // ASTExpr.h) with IsPrefix=true: the operand is parsed via ParsePrimary()
+  // -- the identical primary+postfix-chain parse a bare `arr[0]` or
+  // `obj.field` standing alone would get -- so `++arr[0]` now parses (and,
+  // for a builtin array, codegens) exactly like `arr[0]++` does, just
+  // returning the NEW value instead of the old one. A non-lvalue operand
+  // (`++(a + b)`) is no longer a PARSE error the way "expected identifier"
+  // was; it becomes a clean InvalidAssignmentTargetError at TypeCheck time
+  // instead, via the same isAssignableLValue() check assignment/compound
+  // assignment already use (TypeChecker::visitPostfixExpr(),
+  // TypeCheckerExpr.cpp) -- postfix already had this exposure for a
+  // non-lvalue operand with no dedicated check at all before this follow-up;
+  // both directions get the real diagnostic now.
   if (CurTok == TOK_PLUS_PLUS || CurTok == TOK_MINUS_MINUS) {
     int OpType = CurTok;
     SourceLocation Loc = CurLoc;
     getNextToken();
 
-    if (CurTok != TOK_IDENTIFIER) {
-      LogErrorAt(Loc, "Expected identifier after prefix ++ or --");
+    auto Operand = ParsePrimary();
+    if (!Operand)
       return nullptr;
-    }
-
-    std::string IdName = IdentifierStr;
-    getNextToken();
 
     char Op = (OpType == TOK_PLUS_PLUS) ? '+' : '-';
-    auto LHSVarBin = std::make_unique<VariableExprAST>(Loc, IdName);
-    auto OneNum = std::make_unique<NumberExprAST>(1LL);
-    auto RHS = std::make_unique<BinaryExprAST>(CurLoc, Op, std::move(LHSVarBin),
-                                               std::move(OneNum));
-
-    auto LHSVarAssign = std::make_unique<VariableExprAST>(Loc, IdName);
-    return std::make_unique<AssignmentExprAST>(Loc, std::move(LHSVarAssign),
-                                               std::move(RHS));
+    return std::make_unique<PostfixExprAST>(Loc, Op, std::move(Operand),
+                                            /*IsPrefix=*/true);
   }
 
   // Address-of: &expr — takes the address of an lvalue.

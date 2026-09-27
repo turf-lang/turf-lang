@@ -92,6 +92,44 @@ public:
     Category_ = SLM::ErrorCategory::CONTROL_FLOW;
   }
 };
+// LANG-003 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): "a deferred
+// statement may not return, break, or continue out of itself" -- there is
+// no way for such a jump to target only the defer statement and stop, it
+// always escapes to the enclosing function/loop, which a reader would never
+// expect from something spelled as ordinary cleanup code. Raised by
+// Resolver::visitDefer() (ResolverStmt.cpp) via FindEscapingControlFlow().
+class DeferControlFlowError : public TurfError {
+public:
+  DeferControlFlowError(SourceLocation Loc, const std::string &Kind)
+      : TurfError(Loc, Colors::BRIGHT_RED + "A deferred statement can't '" +
+                           Kind + "'!" + Colors::RESET,
+                  "'" + Kind + "' inside a 'defer' would jump out of the "
+                  "enclosing function or loop, not just the deferred "
+                  "statement -- move it out of the 'defer'.") {
+    Category_ = SLM::ErrorCategory::CONTROL_FLOW;
+  }
+};
+
+// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(a)): `caller_location` reads a
+// hidden value that only exists because the ENCLOSING function was declared
+// `@caller_location` (Codegen appends it as a real extra LLVM parameter --
+// see CallerLocationExprAST's own doc comment, ASTExpr.h). Used anywhere
+// else, there is nothing to read. Raised by
+// TypeChecker::visitCallerLocation() (TypeCheckerDecl.cpp).
+class CallerLocationOutsideMarkedFunctionError : public TurfError {
+public:
+  explicit CallerLocationOutsideMarkedFunctionError(SourceLocation Loc)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED + "'" + Colors::CYAN + "caller_location" +
+                      Colors::BRIGHT_RED +
+                      "' can only be used inside a function declared '" +
+                      Colors::CYAN + "@caller_location" + Colors::BRIGHT_RED +
+                      "'." + Colors::RESET,
+                  "Add '@caller_location' immediately before this "
+                  "function's 'fn' keyword, or remove this use.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
 // Lint Warnings - Reviewer-style heuristic pattern warnings
 // Redundant comparison: x == true, x != false, etc.
 class RedundantComparisonWarning : public TurfWarning {
@@ -322,15 +360,37 @@ public:
 };
 // Use-before-assignment error
 class DefiniteAssignmentError : public TurfError {
+  static std::string buildHint(const std::string &Name, const std::string &TypeName,
+                                bool SuggestDefault) {
+    std::string Hint = "Make sure every path assigns to '" + Name + "' before you use it.";
+    if (SuggestDefault) {
+      // SEM-004 (§8, FREEZE.md §6.4): the mechanical migration off the
+      // removed eager-default mechanism is always the same shape, so name
+      // it directly rather than making every caller rediscover it.
+      Hint += " Or give it an explicit default right away: 'mut " + Name +
+              ": " + TypeName + " = " + TypeName + "::default();'.";
+    }
+    return Hint;
+  }
+
 public:
-  DefiniteAssignmentError(SourceLocation Loc, const std::string &Name)
+  // TypeName/SuggestDefault are optional so every pre-existing call site
+  // (this error long predates SEM-004) keeps compiling unchanged; SEM-004's
+  // own call site (Analysis.cpp) is the only one that passes them.
+  DefiniteAssignmentError(SourceLocation Loc, const std::string &Name,
+                           const std::string &TypeName = "",
+                           bool SuggestDefault = false)
       : TurfError(Loc,
-                  Colors::BRIGHT_RED + "Oops! You're using '" + Colors::CYAN + Name + Colors::BRIGHT_RED + "' before it has a value." + Colors::RESET,
-                  "Make sure every path assigns to '" + Name + "' before you use it.") {
+                  Colors::BRIGHT_RED + "Oops! You're using '" + Colors::CYAN + Name +
+                      Colors::BRIGHT_RED + "'" +
+                      (TypeName.empty() ? "" : " (type '" + TypeName + "')") +
+                      " before it has a value." + Colors::RESET,
+                  buildHint(Name, TypeName, SuggestDefault)) {
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
   }
 };
-// ─── `error`/`!T`/`recover` diagnostics (docs/planning/Errors.md) ────────────
+// ─── `error`/`!T`/`recover` diagnostics ──────────────────────────────────────
+// (docs/architecture/errors_and_recover.md)
 // Named `...Error : public TurfError` / `...Warning : public TurfWarning`
 // like every other diagnostic in this file -- this is the COMPILER's own
 // diagnostic machinery reporting on the user-facing `error` keyword feature,
@@ -339,8 +399,9 @@ public:
 // `TurfError` itself).
 
 // A `!T`-declared function whose body never actually returns a value of any
-// declared error type -- a warning (not a hard error, per Errors.md), since
-// `!T` doesn't OBLIGE a function to fail, only permits it to.
+// declared error type -- a warning (not a hard error, per
+// errors_and_recover.md), since `!T` doesn't OBLIGE a function to fail, only
+// permits it to.
 class NeverReturnsErrorWarning : public TurfWarning {
 public:
   NeverReturnsErrorWarning(SourceLocation Loc, const std::string &FuncName)

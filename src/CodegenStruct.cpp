@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -28,15 +28,19 @@
 #include "ValueRange.h"
 #include "Lint.h"
 #include "SymbolTable.h"
-#include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
+#include "Monomorphize.h" // Monomorphize::instantiatedDeclName() -- FieldAccessExprAST's per-instantiation lookup, TYPE-002 S13b
 #include "llvm/IR/CFG.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Transforms/Utils/ModuleUtils.h" // appendToCompilerUsed -- RT-001 TurfTypeDesc globals
 #include <algorithm>
+#include <cstdint>
 #include <iostream>
 #include <set>
 #include <unordered_map>
+#include <vector>
 
 using namespace llvm;
 
@@ -180,7 +184,7 @@ Value *MethodCallExprAST::codegen() {
       // propagate nullptr so Codegen can bail out cleanly.
       if (!ResolvedCallTarget) {
         LogErrorAt(Loc, "No matching overload found for '" + ModuleName + "." +
-                            Method + "' (see type-mismatch error above)");
+                            Method + "' (see type-mismatch error above)", SLM::ErrorCategory::FUNCTION_SIGNATURE);
         return nullptr;
       }
       std::string MangledName = ResolvedCallTarget->mangledName();
@@ -386,8 +390,33 @@ Value *MethodCallExprAST::codegen() {
     Function *CalleeF = nullptr;
     if (!MangledName.empty()) {
       CalleeF = TheModule->getFunction(MangledName);
+      // TYPE-002 (S15/D1): a non-empty MangledName means the TypeChecker
+      // already resolved this call to a real declaration (ResolvedCallTarget
+      // is set) -- if the LLVM module has no function under that name, the
+      // monomorphizer (or ordinary codegen) failed to emit it, not the user.
+      // This used to return nullptr here with NO diagnostic at all: a
+      // missed monomorphization rewrite (D1) silently dropped the call
+      // entirely, and if this call sat on the RHS of a `||`/`&&`
+      // short-circuit, BinaryExprAST::codegen()'s own `if (!R) return
+      // nullptr;` early-return skipped emitting the merge-block branch,
+      // producing a confusing, badly-misattributed "does not have
+      // terminator! label %or.merge" LLVM-verifier error nowhere near the
+      // real cause -- see TYPE-002.md's own *Removed assumptions* for the
+      // %or.merge story this mirrors. Matches the wording
+      // FuncCallExprAST's own equivalent miss already uses
+      // (CodegenFunc.cpp).
+      if (!CalleeF) {
+        SemanticError(Loc, "Internal error: LLVM function '" + MangledName +
+                               "' not found after successful name resolution. "
+                               "This is a compiler bug.")
+            .raise();
+        return nullptr;
+      }
     }
 
+    // ResolvedCallTarget itself null (MangledName empty): overload
+    // resolution already failed and the TypeChecker emitted a real
+    // diagnostic elsewhere -- propagate nullptr quietly, as before.
     if (!CalleeF) {
       return nullptr;
     }
@@ -398,7 +427,21 @@ Value *MethodCallExprAST::codegen() {
     }
 
     // Arity is guaranteed by the TypeChecker — if it's wrong here, it's a bug.
+    // OVH-003: a `@caller_location` callee's REAL LLVM arg count is one MORE
+    // than its Turf-level signature (self + Args) suggests -- its hidden
+    // trailing parameter (caller_location.md §3.5) is never written by the
+    // caller, so it doesn't appear in `Args` at all. Missing this in the
+    // arity check let a mismatched callee slip past an `assert()` that's
+    // compiled out in a release build, straight into the arg-binding loop
+    // below indexing `EvaluatedArgs[Idx]` one past its end -- a real,
+    // previously-undiscovered segfault (confirmed live: any `@caller_location`
+    // struct method, generic or not, crashed the compiler; this call path
+    // had simply never been exercised with one before -- FuncCallExprAST::
+    // codegen()'s sibling free-function path already handles this correctly,
+    // see its own matching comment, CodegenFunc.cpp).
     int ExpectedArity = IsStaticMethod ? Args.size() : (Args.size() + 1);
+    if (ResolvedCallTarget && ResolvedCallTarget->HasCallerLocation)
+      ExpectedArity += 1;
     assert(CalleeF->arg_size() == ExpectedArity &&
            "Struct method arity mismatch after TypeChecker — compiler bug");
 
@@ -441,35 +484,52 @@ Value *MethodCallExprAST::codegen() {
     unsigned Idx = 0;
     auto ArgIt = IsStaticMethod ? CalleeF->arg_begin() : std::next(CalleeF->arg_begin());
     for (; ArgIt != CalleeF->arg_end(); ++ArgIt, ++Idx) {
+      // OVH-003: stop before the hidden trailing `caller_location` LLVM
+      // parameter (see the arity-check comment above) -- there is nothing
+      // in `EvaluatedArgs` for it to read; it's supplied separately, below.
+      if (Idx >= EvaluatedArgs.size())
+        break;
       Value *V = EvaluatedArgs[Idx];
       Type *ExpectedTy = ArgIt->getType();
       if (V->getType() != ExpectedTy) {
-        if (ExpectedTy->isPointerTy() && V->getType()->isIntegerTy())
-          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_ptr");
-        else if (ExpectedTy->isIntegerTy() && V->getType()->isPointerTy())
-          V = Builder->CreatePtrToInt(V, ExpectedTy, "argcast_int");
-        else if (ExpectedTy->isDoubleTy() && V->getType()->isPointerTy()) {
-          V = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext));
-          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_dbl");
-        }
-        // The reverse direction (erasing a `double` argument INTO an opaque
-        // generic-parameter slot, e.g. calling Map<K,V>.put(key, 1.5) where
-        // V is type-erased to `ptr`) was missing entirely -- confirmed via a
-        // real crash: `bitcast double to ptr` is illegal LLVM IR (bitcast
-        // never converts between float and pointer types, only same-size
-        // int-like/pointer-like ones), which the catch-all `else` branch
-        // below produced unconditionally for this combination. Fixed by
-        // mirroring CastToType()'s own generic-erasure branch exactly:
-        // double -> i64 (bitcast, same width) -> ptr (inttoptr).
-        else if (ExpectedTy->isPointerTy() && V->getType()->isDoubleTy()) {
-          V = Builder->CreateBitCast(V, Type::getInt64Ty(*TheContext), "argcast_dbl_to_i64");
-          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_erase_dbl");
-        }
-        else
-          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_bit");
+        // TYPE-002 (S15/D8): this whole mismatch block used to erase/
+        // un-erase an argument INTO/OUT OF a generic parameter's opaque
+        // Type-Erasure slot (IntToPtr/PtrToInt/bitcast) -- dead ever since
+        // monomorphization gives every call site a REAL, concrete callee
+        // signature (S12a-S14a; INV-GEN-1 holds). Verified live, this
+        // session: all four branches (plus the double<->pointer pair)
+        // instrumented with an `fprintf` probe, zero hits compiling every
+        // file under tests/, lib/std/, and showcase/ -- the enclosing
+        // `if` itself never fires any more. Kept as a hybrid "erasure path
+        // for compatibility" was exactly the ambiguity this whole group's
+        // Must-NOT-reinterpret list forbids, and a silent bitcast here
+        // would paper over a future monomorphization miss instead of
+        // failing loudly (the theme of D1's identical fix, above) --
+        // replaced with a diagnostic rather than deleted outright, so a
+        // regression here is a clear compiler-bug report, not a
+        // resurrected `bitcast double to ptr`-style illegal-IR crash.
+        SemanticError(Loc,
+                      "Internal error: struct method call argument type "
+                      "mismatch (expected '" +
+                          std::string(ExpectedTy->isPointerTy() ? "pointer" :
+                                      ExpectedTy->isDoubleTy() ? "double" :
+                                      ExpectedTy->isIntegerTy() ? "integer" : "?") +
+                          "'-shaped LLVM type, got a different shape). "
+                          "This is a compiler bug -- every call site should "
+                          "reach a fully-monomorphized, concretely-typed "
+                          "callee.")
+            .raise();
+        return nullptr;
       }
       ArgVals.push_back(V);
     }
+
+    // OVH-003: auto-supply the hidden trailing argument a `@caller_location`
+    // callee's REAL signature has but its Turf-level `Args` never wrote --
+    // mirrors FuncCallExprAST::codegen()'s identical, already-correct fix
+    // (CodegenFunc.cpp) for the free-function call path.
+    if (ResolvedCallTarget && ResolvedCallTarget->HasCallerLocation)
+      ArgVals.push_back(BuildCallerLocationValue(Loc));
 
     // void functions must not be given a name (LLVM requirement) -- see the
     // matching fix/comment on the module-call path above for the full story.
@@ -513,15 +573,16 @@ Value *ScopeAccessExprAST::codegen() {
   // first since every other branch below assumes LeftName names an enum.
   if (ResolvedKind == ScopeAccessKind::ModuleConstantRef) {
     if (!ResolvedConstant) {
-      LogErrorAt(Loc, "Internal error: exported constant not resolved in codegen");
+      LogErrorAt(Loc, "Internal error: exported constant not resolved in codegen", SLM::ErrorCategory::GENERAL);
       return nullptr;
     }
     return CodegenConstantValue(*ResolvedConstant);
   }
 
-  // `ErrorType::Variant` (docs/planning/Errors.md) -- always a bare,
-  // non-callable reference (variants have no payload, see BuildErrorTag()'s
-  // doc comment). Returns the (error type, variant)'s tag string.
+  // `ErrorType::Variant` (docs/architecture/errors_and_recover.md) -- always a
+  // bare, non-callable reference (variants have no payload, see
+  // BuildErrorTag()'s doc comment). Returns the (error type, variant)'s tag
+  // string.
   if (ResolvedKind == ScopeAccessKind::ErrorVariantRef) {
     return BuildErrorTag(LeftName, RightName);
   }
@@ -529,7 +590,7 @@ Value *ScopeAccessExprAST::codegen() {
   auto EnumTy = GlobalSymbolTable->LookupType(LeftName);
   auto *ET = dynamic_cast<const TurfEnumType *>(EnumTy.get());
   if (!ET) {
-    LogErrorAt(Loc, "Internal error: enum type not found in codegen");
+    LogErrorAt(Loc, "Internal error: enum type not found in codegen", SLM::ErrorCategory::GENERAL);
     return nullptr;
   }
 
@@ -576,8 +637,310 @@ Value *ScopeAccessExprAST::codegen() {
   return ConstantInt::get(LLVMTy, ET->getVariantValue(RightName));
 }
 
+// ─── RT-001: TurfTypeDesc emission ─────────────────────────────────────────
+// See runtime/turfrt.h's TurfTypeDesc doc comment for the full contract.
+// The LLVM layout built here ({i64, ptr, i64}) must match that C struct
+// field-for-field -- nothing enforces this automatically across the
+// C/LLVM-IR boundary, so a change to one requires the matching change here.
+
+// Registers (or reuses) the identified LLVM struct type mirroring C's
+// `TurfTypeDesc` -- one shared type definition for every descriptor global,
+// not synthesized fresh per struct. OVH-001: widened from
+// `{i64, ptr, i64}` (a single inline `uint64_t` bitmap, capped at 64
+// words/512 bytes -- MEM-002's mark loop silently stopped tracing past
+// that point, a live use-after-free) to `{i64, ptr, i64, ptr}` --
+// `word_count` plus a pointer to an out-of-line `[N x i64]` bitmap array,
+// covering a type's entire layout at any size. This is a compiler<->
+// runtime ABI change (F-MEM-4: lock-step, no compatibility shim) -- see
+// runtime/turfrt.h's matching `TurfTypeDesc` definition.
+static llvm::StructType *getOrCreateTurfTypeDescType() {
+  if (auto *Existing = llvm::StructType::getTypeByName(*TheContext, "TurfTypeDesc"))
+    return Existing;
+  llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
+  llvm::Type *PtrTy = llvm::PointerType::getUnqual(*TheContext);
+  return llvm::StructType::create(*TheContext, {I64Ty, PtrTy, I64Ty, PtrTy},
+                                  "TurfTypeDesc");
+}
+
+// Recursively ORs pointer-word bits for `T`'s layout into `Bitmap`
+// (pre-sized to cover every word of `T`'s own alloc size -- see
+// buildTurfTypeDescInit() below), starting at `ByteOffset`. Conservative,
+// not GC-vs-manual precise (nothing before MEM-001/MEM-002 tags a pointer
+// field with which heap it points into) -- see runtime/turfrt.h's doc
+// comment on TurfTypeDesc for why over-marking here is sound rather than
+// merely convenient. By the time a struct field's LLVM type reaches here
+// it is always fully built (StructDeclExprAST::codegen()'s own comment on
+// embedded, non-recursive struct fields -- a self-referential/recursive
+// field is always a raw POINTER, never embedded by value, so the
+// isOpaque() branch below is unreachable in practice and exists only as a
+// defensive bound, not a silently-accepted case).
+static void collectPointerWordBits(llvm::Type *T, const llvm::DataLayout &DL,
+                                   uint64_t ByteOffset,
+                                   std::vector<uint64_t> &Bitmap) {
+  if (T->isPointerTy()) {
+    uint64_t Word = ByteOffset / 8;
+    uint64_t Idx = Word / 64;
+    assert(Idx < Bitmap.size() &&
+           "OVH-001: pointer word falls outside the sized bitmap -- "
+           "buildTurfTypeDescInit()'s word-count computation is wrong");
+    if (Idx < Bitmap.size())
+      Bitmap[Idx] |= (1ULL << (Word % 64));
+    return;
+  }
+  if (auto *NestedST = llvm::dyn_cast<llvm::StructType>(T)) {
+    if (NestedST->isOpaque())
+      return;
+    const llvm::StructLayout *SL = DL.getStructLayout(NestedST);
+    for (unsigned i = 0; i < NestedST->getNumElements(); ++i) {
+      collectPointerWordBits(NestedST->getElementType(i), DL,
+                             ByteOffset + SL->getElementOffset(i), Bitmap);
+    }
+    return;
+  }
+  if (auto *AT = llvm::dyn_cast<llvm::ArrayType>(T)) {
+    llvm::Type *ElemTy = AT->getElementType();
+    uint64_t ElemSize = DL.getTypeAllocSize(ElemTy).getFixedValue();
+    for (uint64_t i = 0; i < AT->getNumElements(); ++i)
+      collectPointerWordBits(ElemTy, DL, ByteOffset + i * ElemSize, Bitmap);
+    return;
+  }
+  // Scalar (int/int32/double/bool/char): contributes no pointer bits.
+}
+
+// Shared by emitTurfTypeDesc() and getOrCreateElementTurfTypeDesc() (OVH-001
+// -- the old per-copy inline-bitmap logic was duplicated across both, which
+// is exactly how the 64-word cap ended up needing two independent fixes
+// instead of one): builds the `{size, name, word_count, pointer_words}`
+// constant for one LLVM type `T`. `NameStr` is the human-readable name
+// stored in the descriptor; `NameGVName`/`BitmapGVName` name the two
+// out-of-line globals the descriptor's `name`/`pointer_words` fields point
+// into (callers keep their own pre-existing naming for the first so
+// scripts/runtime_smoke.sh's --emit-llvm greps keep matching).
+static llvm::Constant *buildTurfTypeDescInit(llvm::Type *T,
+                                              const std::string &NameStr,
+                                              const std::string &NameGVName,
+                                              const std::string &BitmapGVName) {
+  const llvm::DataLayout &DL = TheModule->getDataLayout();
+  llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
+  uint64_t Size = DL.getTypeAllocSize(T).getFixedValue();
+
+  // Every 8-byte word of the type's own alloc size, including a trailing
+  // partial one -- OVH-001's replacement for the old fixed 64-word cap.
+  uint64_t WordCount = (Size + 7) / 8;
+  uint64_t NumBitmapWords = std::max<uint64_t>(1, (WordCount + 63) / 64);
+
+  std::vector<uint64_t> Bits(NumBitmapWords, 0);
+  collectPointerWordBits(T, DL, 0, Bits);
+
+  // The emitter's own length assertion (OVERHAUL_REMAINING_WORK.md OVH-001,
+  // strategy point 5) -- a future truncation of either quantity is loud in
+  // a debug build, not a silent missed root.
+  assert(WordCount * 8 >= Size &&
+         "OVH-001: word_count must cover every byte of the type's alloc size");
+  assert(Bits.size() == NumBitmapWords &&
+         "OVH-001: bitmap array length must match the computed word count");
+
+  // Same Builder-independent global-string-constant idiom this file's own
+  // ScopeAccessExprAST "NAMES" case above uses -- this runs at the very end
+  // of codegen (see EmitAllTurfTypeDescs() below), well past any point
+  // Builder's insertion point is meaningful for a fresh global.
+  llvm::Constant *NameStrConst =
+      llvm::ConstantDataArray::getString(*TheContext, NameStr, true);
+  auto *NameGV = new llvm::GlobalVariable(
+      *TheModule, NameStrConst->getType(), /*isConstant=*/true,
+      llvm::GlobalValue::PrivateLinkage, NameStrConst, NameGVName);
+  llvm::Constant *ZeroIdx =
+      llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
+  llvm::Constant *Indices[] = {ZeroIdx, ZeroIdx};
+  llvm::Constant *NamePtr = llvm::ConstantExpr::getInBoundsGetElementPtr(
+      NameStrConst->getType(), NameGV, Indices);
+
+  llvm::ArrayType *BitmapArrTy = llvm::ArrayType::get(I64Ty, NumBitmapWords);
+  std::vector<llvm::Constant *> BitmapWordConsts;
+  BitmapWordConsts.reserve(NumBitmapWords);
+  for (uint64_t W : Bits)
+    BitmapWordConsts.push_back(llvm::ConstantInt::get(I64Ty, W));
+  llvm::Constant *BitmapArrConst =
+      llvm::ConstantArray::get(BitmapArrTy, BitmapWordConsts);
+  auto *BitmapGV = new llvm::GlobalVariable(
+      *TheModule, BitmapArrTy, /*isConstant=*/true,
+      llvm::GlobalValue::PrivateLinkage, BitmapArrConst, BitmapGVName);
+  llvm::Constant *BitmapPtr = llvm::ConstantExpr::getInBoundsGetElementPtr(
+      BitmapArrTy, BitmapGV, Indices);
+
+  llvm::StructType *DescTy = getOrCreateTurfTypeDescType();
+  return llvm::ConstantStruct::get(
+      DescTy, {llvm::ConstantInt::get(I64Ty, Size), NamePtr,
+               llvm::ConstantInt::get(I64Ty, WordCount), BitmapPtr});
+}
+
+// OVH-002 (docs/development/changes/OVH-002.md): a function body may
+// need to reference a NAMED struct type's own descriptor (e.g. to pass it
+// to `turf_rt_alloc` when heap-allocating an instance of that struct) at a
+// point in codegen that runs BEFORE `EmitAllTurfTypeDescs()` -- which is
+// deliberately the LAST thing to run (INV-RT-3). `getOrInsertGlobal()` is
+// the standard LLVM idiom for exactly this: if nothing has referenced this
+// name yet, it creates a plain external declaration (no initializer) that
+// `emitTurfTypeDesc()` (below) later fills in when it reaches this same
+// struct type in its own sweep; if `emitTurfTypeDesc()` already ran first,
+// this simply returns the real definition. Either order produces the same
+// single global -- never two, never a forward reference left dangling.
+llvm::GlobalVariable *getOrForwardDeclareTurfTypeDescGlobal(
+    llvm::StructType *ST) {
+  std::string Name = ST->getName().str();
+  llvm::StructType *DescTy = getOrCreateTurfTypeDescType();
+  return llvm::cast<llvm::GlobalVariable>(
+      TheModule->getOrInsertGlobal("__turf_typedesc_" + Name, DescTy));
+}
+
+// Emits a constant TurfTypeDesc global for one already-fully-built (non-
+// opaque) `ST`, and keeps it alive across OPT-001's Internalize/GlobalDCE
+// via @llvm.compiler.used -- the forward hazard OPT-001's own text already
+// records (ARCHITECTURE_OVERHAUL.md §8 RT-001: "Internalize/GlobalDCE must
+// not delete a descriptor referenced only from metadata"). Routed through
+// `getOrForwardDeclareTurfTypeDescGlobal()` (OVH-002) rather than an
+// unconditional `new GlobalVariable(...)` so that a call site elsewhere in
+// Codegen (`CodegenCore.cpp`'s `turf_rt_alloc` sites) that already forward-
+// referenced this exact struct's descriptor gets its definition filled in
+// on the SAME global, instead of silently receiving a renamed ".1"
+// duplicate while the real definition sits under the original name,
+// referenced by nothing.
+static void emitTurfTypeDesc(llvm::StructType *ST) {
+  std::string Name = ST->getName().str();
+  llvm::Constant *DescInit =
+      buildTurfTypeDescInit(ST, Name, "__turf_typedesc_name." + Name,
+                             "__turf_typedesc_bitmap." + Name);
+
+  llvm::GlobalVariable *DescGV = getOrForwardDeclareTurfTypeDescGlobal(ST);
+  DescGV->setInitializer(DescInit);
+  DescGV->setConstant(true);
+  DescGV->setLinkage(llvm::GlobalValue::InternalLinkage);
+  llvm::appendToCompilerUsed(*TheModule, {DescGV});
+}
+
+// ─── MEM-002: per-ELEMENT TurfTypeDesc for a collection's backing buffer ──
+// See runtime/turfrt.h's TurfTypeDesc doc comment for the repeating-stride
+// semantics this reuses (deliberately no new C struct field): a collection
+// growth call site (list/stack/queue/set/map.tr, each writing
+// `gc_alloc(byteSize) to T*`) allocates N elements of T, not one instance of
+// a struct -- this builds the descriptor for ONE element of T (whatever
+// concrete LLVM type T monomorphized to at this call site), the same way
+// emitTurfTypeDesc() above builds one for a whole struct instance, and lets
+// the collector's mark phase (turfrt_gc.c) repeat it across the block's
+// real length. Called from CastExprAST::codegen()'s MEM-002 special case
+// (CodegenExpr.cpp) -- see that call site for how `ElemTy` is determined
+// (the cast's own destination type, `T*`, at a `gc_alloc(...) to T*` site).
+//
+// Memoized by the raw llvm::Type* pointer -- every LLVM type this compiler
+// ever hands here (a primitive, an opaque pointer, or a specific
+// llvm::StructType*) is already uniqued/interned within *TheContext, so
+// pointer identity is a correct, and much simpler, cache key than deriving
+// a string name to dedupe on.
+static std::map<llvm::Type *, llvm::GlobalVariable *> ElementTypeDescCache;
+
+llvm::GlobalVariable *getOrCreateElementTurfTypeDesc(llvm::Type *ElemTy) {
+  auto It = ElementTypeDescCache.find(ElemTy);
+  if (It != ElementTypeDescCache.end())
+    return It->second;
+
+  // A struct element must already be fully built (setBody() run) before its
+  // layout can be queried -- exactly INV-RT-3's own condition, restated
+  // here because this call site is NOT EmitAllTurfTypeDescs()'s deliberately
+  // late single pass, it runs interleaved with ordinary function-body
+  // codegen. Safe in practice: every struct sub-pass (2c/3a/3b) finishes
+  // before "the main pass" codegens any function body, and this helper is
+  // only ever reached from inside a function body (a gc_alloc/gc_realloc
+  // call site) -- an opaque struct reaching here would mean that ordering
+  // guarantee broke, which is a compiler bug worth crashing loudly on in a
+  // debug build (an under-reported bitmap is a MISSED ROOT, §14's own
+  // "catastrophic" risk category) rather than silently emitting an unsound
+  // descriptor in release.
+  if (auto *ST = llvm::dyn_cast<llvm::StructType>(ElemTy)) {
+    assert(!ST->isOpaque() &&
+           "MEM-002: getOrCreateElementTurfTypeDesc() called on an opaque "
+           "struct element type -- see this function's own comment");
+  }
+
+  std::string Name;
+  llvm::raw_string_ostream OS(Name);
+  ElemTy->print(OS);
+
+  llvm::Constant *DescInit = buildTurfTypeDescInit(
+      ElemTy, Name, "__turf_elemdesc_name", "__turf_elemdesc_bitmap");
+
+  llvm::StructType *DescTy = getOrCreateTurfTypeDescType();
+  auto *DescGV = new llvm::GlobalVariable(
+      *TheModule, DescTy, /*isConstant=*/true,
+      llvm::GlobalValue::InternalLinkage, DescInit, "__turf_elemdesc");
+  llvm::appendToCompilerUsed(*TheModule, {DescGV});
+
+  ElementTypeDescCache[ElemTy] = DescGV;
+  return DescGV;
+}
+
+// RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, point 3): emits a
+// TurfTypeDesc for every real (fully-built) aggregate type in the module.
+// Declared in include/Codegen.h; called exactly once from main.cpp,
+// deliberately LATE -- immediately before verifyModule(), well after both
+// the struct pre-pass (main.cpp sub-pass 2c) AND every import-triggered
+// struct build (sub-passes 3a/3b) have finished, i.e. the same point
+// main.cpp's own pre-existing "scan for a lingering opaque monomorphized
+// stub" check already treats as "every struct that will ever be built now
+// is."
+//
+// This does NOT run per-struct, inline in StructDeclExprAST::codegen(),
+// despite that being the more obvious place -- found live, via a genuine
+// crash, why that doesn't work: `struct Holder { items: List<int> }`
+// codegens BEFORE `List<int>`'s own monomorphized clone (monomorphized
+// clones are APPENDED to PrePassASTs, so they codegen LATER than an
+// original top-level struct declared earlier in the source). Computing
+// Holder's own DataLayout::getTypeAllocSize() at THAT point forces LLVM to
+// also compute (and PERMANENTLY CACHE, keyed by StructType* -- LLVM's
+// DataLayout has no cache-invalidation hook) a StructLayout for the
+// still-opaque `List<int>` field, treating it as zero-sized. When
+// `List<int>`'s own clone is codegenned moments later and setBody() gives
+// it its real fields, DataLayout::getStructLayout() for that exact
+// StructType* returns the SAME stale, zero-element cached layout --
+// `StructLayout::getElementOffset(0)` then asserts
+// ("Idx < NumElements failed"), a real, reproducible compiler crash
+// (confirmed live against tests/38_monomorphization/04_method_on_generic_struct.tr
+// and four sibling tests in that folder, all embedding a generic
+// instantiation by value). Waiting until every struct in the module is
+// unconditionally fully built removes the ordering dependency entirely:
+// `DL.getStructLayout()` is never called on any StructType before its own
+// `setBody()` has run.
+void EmitAllTurfTypeDescs() {
+  for (llvm::StructType *ST : TheModule->getIdentifiedStructTypes()) {
+    if (ST->isOpaque())
+      continue; // A genuinely unfilled stub -- main.cpp's own scan (run
+                // just before this) already diagnosed it as a compiler bug;
+                // nothing more for this pass to do with it.
+    emitTurfTypeDesc(ST);
+  }
+}
 
 Value *StructDeclExprAST::codegen() {
+  // TYPE-002 (S14a): a StructDeclExprAST with non-empty TypeParams is an
+  // uninstantiated generic TEMPLATE -- drainStructRequests() (S13a) always
+  // appends a fully-concrete CLONE elsewhere in PrePassASTs for every
+  // instantiation the program actually needs, so the template's own shared,
+  // erasure-era layout (S13a/S13b deliberately left it codegenning
+  // unconditionally, coexisting with per-instantiation clones, while
+  // erasure still existed to make an open TurfGenericParamType field safe
+  // to lower) is now genuinely dead: nothing resolves a GenericType to it
+  // any more (getLLVMType()'s GenericType branch and FieldAccessExprAST's
+  // two collapse points were both redirected to the per-instantiation
+  // mangled name in S13b). Found live: even `Box<T> { val: T }`'s bare
+  // TEMPLATE field reaching getLLVMType(TurfGenericParamType) trips
+  // INV-GEN-1 the moment erasure's tolerant fallback is gone. Checked here,
+  // not just in main.cpp's sub-pass 2c loop, for the identical
+  // single-real-entry-point reason FuncDefExprAST::codegen() checks its own
+  // TypeParams internally (CodegenFunc.cpp) -- a struct declared inside an
+  // imported module is ALSO reached via ModuleImportExprAST::codegen()'s
+  // own recursive body walk, which has no equivalent guard of its own.
+  if (!TypeParams.empty())
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+
   // ── Fix for issue #176: Two-step struct creation ──────────────────────────
   // Step 1: Create (or reuse) an opaque StructType and register it in
   // LLVMTypeCache *before* evaluating any field types.  This ensures that a
@@ -634,7 +997,7 @@ Value *StructDeclExprAST::codegen() {
     // Brand-new opaque struct — no body yet.
     ST = StructType::create(*TheContext, Name);
     if (!ST) {
-      LogErrorAt(Loc, "Failed to create LLVM StructType for '" + Name + "'");
+      LogErrorAt(Loc, "Failed to create LLVM StructType for '" + Name + "'", SLM::ErrorCategory::GENERAL);
       return nullptr;
     }
   }
@@ -652,7 +1015,7 @@ Value *StructDeclExprAST::codegen() {
   for (const auto &Field : Fields) {
     Type *LLVMType = getLLVMType(Field.Type.get());
     if (!LLVMType) {
-      LogErrorAt(Loc, "Unknown type for field '" + Field.Name + "'");
+      LogErrorAt(Loc, "Unknown type for field '" + Field.Name + "'", SLM::ErrorCategory::GENERAL);
       return nullptr;
     }
     LLVMFieldTypes.push_back(LLVMType);
@@ -660,6 +1023,12 @@ Value *StructDeclExprAST::codegen() {
 
   // Step 3: Fill in the body now that all field types are resolved.
   ST->setBody(LLVMFieldTypes);
+
+  // RT-001: TurfTypeDesc emission does NOT happen here -- see
+  // EmitAllTurfTypeDescs()'s own doc comment (below) for why emitting it
+  // eagerly, per struct, at THIS point crashed on a real, live case (a
+  // struct embedding a monomorphized generic instantiation by value before
+  // that instantiation's own clone has been codegenned).
 
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }
@@ -712,28 +1081,35 @@ Value *FieldAccessExprAST::codegenLValue() {
     }
   }
   // Resolve a GenericType base (e.g. a `Box<int>`-typed variable) to its
-  // underlying TurfStructType via the base name. Under this compiler's
-  // type-erasure model there is exactly one registered TurfStructType per
-  // generic struct declaration (see typesCompatible()'s "Struct-literal /
-  // generic-struct compatibility" comment in Types.cpp for why a single
-  // layout is correct for every instantiation) -- GlobalSymbolTable only
-  // ever has "Box" registered, never "Box<int>" specifically.
+  // OWN per-instantiation TurfStructType, via its mangled instantiation
+  // name -- TYPE-002 (S13b): this REPLACES the erasure-era base-name
+  // collapse (every instantiation used to share ONE registered
+  // TurfStructType, correct only because Type Erasure made every T/K/V a
+  // uniform 8-byte slot). drainStructRequests() (S13a) registers a real,
+  // distinct TurfStructType per instantiation in GlobalSymbolTable under
+  // exactly this mangled name -- see the change record's *Removed
+  // assumptions* for the two real bugs found live wiring this up (a
+  // FieldAccessExprAST that never went through a VarDecl or method call
+  // needed its OWN instantiation-request recording site, TypeCheckerCall.cpp's
+  // visitFieldAccess).
   if (auto *GT = dynamic_cast<const GenericType *>(BaseType)) {
     if (GlobalSymbolTable) {
-      if (auto R = GlobalSymbolTable->LookupType(GT->getBaseName()))
+      std::string MangledName =
+          Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
+      if (auto R = GlobalSymbolTable->LookupType(MangledName))
         BaseType = R.get();
     }
   }
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
   if (!SType) {
-    LogErrorAt(Loc, "Cannot access field on non-struct type");
+    LogErrorAt(Loc, "Cannot access field on non-struct type", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
 
   int FieldIdx = SType->getFieldIndex(FieldName);
   if (FieldIdx < 0) {
     LogErrorAt(Loc, "Struct '" + SType->getName() + "' has no field named '" +
-                        FieldName + "'");
+                        FieldName + "'", SLM::ErrorCategory::UNDECLARED_VAR);
     return nullptr;
   }
 
@@ -746,6 +1122,24 @@ Value *FieldAccessExprAST::codegenLValue() {
 
 
 Value *FieldAccessExprAST::codegen() {
+  // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `err.message` is not an
+  // ordinary struct field -- `err`'s VALUE (not its address) is already a
+  // pointer to the {tag, message} TurfErrorValue struct (BuildErrorTag()'s
+  // own doc comment, CodegenCore.cpp), so this reads through the base's
+  // ORDINARY codegen(), never codegenLValue() below (there is no struct to
+  // take the ADDRESS OF a field within here -- `err` itself already IS the
+  // pointer). Checked BEFORE calling codegenLValue() at all, which would
+  // otherwise try (and fail) to treat `err` as an addressable struct base.
+  if (FieldName == "message") {
+    const TurfType *BaseType = getExprType(Base.get());
+    if (BaseType && BaseType->isAnyError()) {
+      Value *ErrVal = Base->codegen();
+      if (!ErrVal)
+        return nullptr;
+      return LoadErrorValueField(ErrVal, /*FieldIdx=*/1, "message");
+    }
+  }
+
   Value *Ptr = codegenLValue();
   if (!Ptr)
     return nullptr;
@@ -766,14 +1160,17 @@ Value *FieldAccessExprAST::codegen() {
   // Resolve a GenericType base (e.g. `Box<int>`) the same way -- see the
   // matching comment in codegenLValue() just above.
   if (auto *GT = dynamic_cast<const GenericType *>(BaseType)) {
-    if (GlobalSymbolTable)
-      if (auto R = GlobalSymbolTable->LookupType(GT->getBaseName()))
+    if (GlobalSymbolTable) {
+      std::string MangledName =
+          Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
+      if (auto R = GlobalSymbolTable->LookupType(MangledName))
         BaseType = R.get();
+    }
   }
 
   auto *SType = dynamic_cast<const TurfStructType *>(BaseType);
   if (!SType) {
-    LogErrorAt(Loc, "Cannot load field on non-struct type");
+    LogErrorAt(Loc, "Cannot load field on non-struct type", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
   TurfTypePtr FieldType = SType->getFieldType(FieldName);

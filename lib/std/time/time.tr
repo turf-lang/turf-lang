@@ -1,3 +1,5 @@
+unsafe module;
+
 // ─── time.tr ─────────────────────────────────────────────────────────────
 // Wall-clock and CPU-time utilities for TurfLang: reading the current Unix
 // timestamp, measuring elapsed CPU time via clock(), and sleeping.

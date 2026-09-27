@@ -3,8 +3,46 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace SLM {
+
+// SLM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §16.3 items 1 and 3):
+// structured facts a diagnostic's own raising site already knows, attached
+// via TurfError::withKnownType()/withDeterministicFix()/
+// trySetDeterministicRename() (Errors.h) and threaded through
+// DiagnosticEngine::add() (Lexer.h) unchanged -- never re-derived from
+// message text (the exact anti-pattern DIAG-001 removed for ErrorCategory
+// above; see that record's "Removed assumptions"). A default-constructed
+// (empty) instance is the common case and changes nothing about the
+// existing pipeline. Lives here (rather than SLMIntegration.h, where
+// AISuggestion lives) specifically so Lexer.h -- which cannot include
+// SLMIntegration.h without a cycle (SLMIntegration.h includes Lexer.h for
+// RelatedLocation) -- can still store one by value in DiagnosticEngine::Diag.
+struct DiagnosticHints {
+  // Item 3: short, human-readable facts about the concrete types involved
+  // in this diagnostic that are NOT already visible by reading the pinned
+  // source lines -- e.g. a `guess`-inferred local's resolved type, which the
+  // declaration line itself never spells out. Sourced directly from
+  // TypeChecker::NodeTypes_/VariableSymbol::WasGuessInferred at the call
+  // site that already computed them, not re-inferred here.
+  std::vector<std::string> KnownTypes;
+
+  // Item 1 (deterministic-fix layer): an unambiguous, single-candidate
+  // rename already computed by a RankedSuggestions-based "did you mean"
+  // lookup at the raising site (exactly one local candidate, zero module
+  // candidates -- see TurfError::trySetDeterministicRename()). When both are
+  // non-empty, SLM::tryDeterministicFix() (SLMIntegration.cpp) attempts a
+  // sandboxed search/replace of DeterministicOldName -> DeterministicNewName
+  // on the error's own line BEFORE ever invoking the model; the model is
+  // never called at all if that sandbox validation succeeds.
+  std::string DeterministicOldName;
+  std::string DeterministicNewName;
+
+  bool empty() const {
+    return KnownTypes.empty() && DeterministicOldName.empty();
+  }
+};
 
 enum class ErrorCategory {
   TYPE_MISMATCH,
@@ -125,109 +163,6 @@ extractContextKeyword(const std::string &msg,
   }
 
   return "";
-}
-
-// Deterministic classifier: pattern-matches the (ANSI-stripped) error message
-// to determine which language construct caused the error.
-// The optional `contextKeyword` (extracted from the error message or code
-// context) allows more precise classification when the error message itself
-// is generic (e.g. "unknown token when expecting an expression").
-inline ErrorCategory classifyError(const std::string &msg,
-                                   const std::string &contextKeyword = "") {
-  // Keyword-based sub-classification (highest priority)
-  // If we know which construct triggered the error, use that directly.
-  // Only TRUE intrinsics (see extractContextKeyword's doc comment) map to
-  // BUILTIN_FUNCTION -- printline/print/input/assert/fail used to be
-  // included here too, but they're ordinary lib/std stdlib functions, not
-  // intrinsics; an error calling one of those now falls through to the
-  // generic pattern-based classification below, same as any other
-  // stdlib/user function.
-  if (!contextKeyword.empty()) {
-    if (contextKeyword == "typeof" || contextKeyword == "sizeof")
-      return ErrorCategory::BUILTIN_FUNCTION;
-  }
-
-  // Pattern-based classification
-  // Order matters: more specific patterns first.
-
-  // Array errors
-  if (msg.find("Array index") != std::string::npos ||
-      msg.find("Array size") != std::string::npos ||
-      msg.find("Array element") != std::string::npos ||
-      msg.find("array") != std::string::npos)
-    return ErrorCategory::ARRAY_ERROR;
-
-  // Type mismatch
-  if (msg.find("Type mismatch") != std::string::npos ||
-      msg.find("Wrong return type") != std::string::npos)
-    return ErrorCategory::TYPE_MISMATCH;
-
-  // Undeclared / use-before-declaration
-  if (msg.find("can't find anything named") != std::string::npos ||
-      msg.find("before telling me what it is") != std::string::npos)
-    return ErrorCategory::UNDECLARED_VAR;
-
-  // Control flow
-  if (msg.find("Control flow error") != std::string::npos ||
-      msg.find("promises to give back a result") != std::string::npos ||
-      msg.find("will never happen") != std::string::npos ||
-      msg.find("impossible to reach") != std::string::npos)
-    return ErrorCategory::CONTROL_FLOW;
-
-  // String conversion / builtin arg types
-  if (msg.find("can't convert") != std::string::npos ||
-      msg.find("'abs' only works") != std::string::npos ||
-      msg.find("'power' only works") != std::string::npos)
-    return ErrorCategory::STRING_CONVERSION;
-
-  // Arithmetic
-  if (msg.find("Math trouble") != std::string::npos ||
-      msg.find("with zero") != std::string::npos)
-    return ErrorCategory::ARITHMETIC;
-
-  // Syntax / keyword
-  if (msg.find("tiny mistake") != std::string::npos ||
-      msg.find("don't know the word") != std::string::npos ||
-      msg.find("Expected '") != std::string::npos ||
-      msg.find("unknown token") != std::string::npos)
-    return ErrorCategory::SYNTAX_ERROR;
-
-  // Declaration issues
-  if (msg.find("already created a variable") != std::string::npos ||
-      msg.find("hides an older one") != std::string::npos)
-    return ErrorCategory::DECLARATION;
-
-  // Void value misuse
-  if (msg.find("void value") != std::string::npos)
-    return ErrorCategory::FUNCTION_SIGNATURE;
-
-  // Unknown / misspelled function name.
-  // SemanticError wraps these as "Oops! Something doesn't add up: Unknown
-  // function: 'x'" so we match the inner text. Must be checked here, after
-  // SYNTAX_ERROR, because SemanticError does NOT produce "Expected '" or "tiny
-  // mistake".
-  if (msg.find("Unknown function") != std::string::npos ||
-      msg.find("Unknown builtin function") != std::string::npos)
-    return ErrorCategory::BUILTIN_FUNCTION;
-
-  // For-loop structural errors -- all produced by ParseForExpr in Parser.cpp
-  // via LogErrorAt (no SyntaxError class wrapper), so they don't match
-  // "Expected '" above.
-  if (msg.find("for loop range") != std::string::npos ||
-      msg.find("Expected 'in' after loop variable") != std::string::npos ||
-      msg.find("Expected 'step' after range") != std::string::npos ||
-      msg.find("Expected '{' after step expression") != std::string::npos ||
-      msg.find("Expected identifier after 'for'") != std::string::npos)
-    return ErrorCategory::CONTROL_FLOW;
-
-  // While / if structural errors produced via LogErrorAt (no SyntaxError
-  // wrapper)
-  if (msg.find("Expected '{' after while condition") != std::string::npos ||
-      msg.find("Expected 'then' or '{'") != std::string::npos ||
-      msg.find("Expected '{' after elseif condition") != std::string::npos)
-    return ErrorCategory::CONTROL_FLOW;
-
-  return ErrorCategory::GENERAL;
 }
 
 inline ErrorCategory categoryFromString(const std::string &str) {

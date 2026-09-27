@@ -97,6 +97,97 @@ public:
   void resolve(ExprAST *Node);
 
   /**
+   * @brief TYPE-002 (S12b): resolve() a monomorphized clone -- as if it
+   *        were declared inside module @p Module (ModuleStack_ carries
+   *        that name for the duration, exactly as a real declaration
+   *        hoisted from inside that module's own ModuleImportExprAST body
+   *        would see), AND with validateNamedType()'s module-qualified-
+   *        visibility check (isTypeVisibleUnqualified()) suppressed.
+   *
+   * Two independent fixes for two real bugs found live, both needed
+   * together:
+   *
+   * 1. currentModuleName() -- used by validateNamedType() to decide
+   *    whether a bare struct name like "List" is "local" and needs no
+   *    `module::` qualification -- reads ModuleStack_, which is empty for
+   *    an ordinary resolve() call issued from OUTSIDE any import's own
+   *    body traversal (exactly the monomorphizer's position, sub-pass
+   *    2b.5, main.cpp). Without pushing @p Module first, a clone of e.g.
+   *    lib/std/collections/list.tr's `fn<T> List.push` fails re-resolving
+   *    its own `self: List*` parameter with "'List' isn't visible here
+   *    without qualification".
+   *
+   * 2. Once (1) is fixed, a DIFFERENT failure appears: a clone's
+   *    SUBSTITUTED type arguments can name a struct from ANY module the
+   *    ORIGINAL call site could see -- not just what the template's own
+   *    declaring module imports. `List<JsonValue>.push`'s clone (declared
+   *    in list.tr) needs to reference JsonValue (json.tr) -- something
+   *    list.tr itself never imports, correctly, since an ordinary,
+   *    non-generic List never needs to. The substituted VALUE is trusted
+   *    instead of re-validated: it came from an already-resolved,
+   *    already-successfully-typechecked expression at the ORIGINAL call
+   *    site (TypeCheckerCall.cpp's collectGenericSubstitution() output),
+   *    which only ever succeeds against a type that already passed this
+   *    exact check once, in ITS OWN correct scope -- re-deriving that
+   *    scope here, from a bare TurfTypePtr with no back-pointer to where
+   *    it was written, is not possible, so the check is suppressed for
+   *    the substituted parts instead of attempted incorrectly.
+   */
+  void resolveMonomorphizedClone(ExprAST *Node, const std::string &Module) {
+    if (!Module.empty()) ModuleStack_.push_back(Module);
+    bool SavedSuppress = SuppressUnqualifiedVisibilityCheck_;
+    SuppressUnqualifiedVisibilityCheck_ = true;
+    resolve(Node);
+    SuppressUnqualifiedVisibilityCheck_ = SavedSuppress;
+    if (!Module.empty()) ModuleStack_.pop_back();
+  }
+
+  /// See resolveMonomorphizedClone()'s doc comment, fix (2). Read by
+  /// validateNamedType() (ResolverDecl.cpp) at both isTypeVisibleUnqualified()
+  /// call sites. False for every ordinary resolve()/resolveAll() call --
+  /// only resolveMonomorphizedClone() ever sets this, scoped to its own call.
+  bool suppressUnqualifiedVisibilityCheck() const {
+    return SuppressUnqualifiedVisibilityCheck_;
+  }
+
+  /**
+   * @brief TYPE-002 (S13a): per-instantiation acyclicity check for one
+   *        freshly-cloned, freshly-substituted generic struct.
+   *
+   * checkStructLayoutAcyclicity() (private, below) is the Pass-1, TEMPLATE-
+   * level check: it walks every hoisted struct's fields as-declared, where a
+   * generic struct's own type-parameter-typed field (`val: T`) carries no
+   * edge at all (byValueEdgeTarget() finds no NamedType/GenericType/
+   * TurfStructType to match). That check is already sufficient for every
+   * generic struct in this language's stdlib today, because a direct BY-
+   * VALUE self-reference (`struct Node<T> { next: Node<T> }`) is flagged
+   * there directly, AS a self-edge, regardless of what T ends up being. What
+   * the template-level check CANNOT see is a cycle that only exists once a
+   * SPECIFIC type argument is substituted in -- e.g. `struct A<T> { val: T }`
+   * instantiated as `A<B>` where `struct B { val: A<B> }`: at the template
+   * level, A's own field is `val: T` (no edge), so the cycle through B is
+   * invisible; only after substituting T -> B does `val: T` become
+   * `val: B` and the DFS below correctly finds A_B -> B -> A_B.
+   *
+   * Reuses the exact same DFS/byValueEdgeTarget() machinery
+   * (ResolverCore.cpp, anonymous namespace) as checkStructLayoutAcyclicity()
+   * -- not a second checker -- scoped to a SINGLE new node (@p Clone, whose
+   * OWN Name is already its unique mangled instantiation name and whose
+   * Fields are already fully substituted to concrete types by the caller):
+   * every OTHER struct already known to this Resolver (HoistedStructDecls_)
+   * is trusted to already be acyclic (Pass 1 already proved that), so only
+   * @p Clone itself needs to be walked as a DFS root.
+   *
+   * Raises StructLayoutCycleError directly (like the Pass-1 check already
+   * does) if @p Clone's OWN fields close a cycle -- not re-wrapped in a
+   * monomorphizer "in this instantiation" note, unlike a TypeChecker
+   * failure (finishInstantiation(), Monomorphize.cpp): the diagnostic this
+   * raises already names the concrete offending field chain directly, which
+   * a generic re-wrapping would only make less precise.
+   */
+  void checkStructLayoutAcyclicityForClone(const StructDeclExprAST *Clone);
+
+  /**
    * @brief Resolve an entire program (list of top-level nodes).
    *
    * Convenience wrapper that iterates over a vector of unique_ptr<ExprAST>
@@ -205,7 +296,6 @@ public:
   void visitChar(CharExprAST &Node) override { (void)Node; }
   void visitString(StringExprAST &Node) override { (void)Node; }
   void visitNull(NullExprAST &Node) override { (void)Node; }
-  void visitDefaultInit(DefaultInitExprAST &Node) override { (void)Node; }
 
   void visitBinary(BinaryExprAST &Node) override;
   void visitUnary(UnaryExprAST &Node) override;
@@ -224,6 +314,7 @@ public:
   void visitContinue(ContinueExprAST &Node) override { (void)Node; }
   void visitReturn(ReturnExprAST &Node) override;
   void visitCompare(CompareExprAST &Node) override;
+  void visitDefer(DeferExprAST &Node) override;
 
   void visitFuncDef(FuncDefExprAST &Node) override;
   void visitFuncCall(FuncCallExprAST &Node) override;
@@ -289,6 +380,9 @@ private:
   ResolverSymbolTable SymTable_;
   int FunctionNestingDepth_ = 0;
   std::vector<std::string> ModuleStack_;
+  // TYPE-002 (S12b): see resolveMonomorphizedClone()'s doc comment. Always
+  // false outside that one method's own scoped set/restore.
+  bool SuppressUnqualifiedVisibilityCheck_ = false;
   // The enclosing function's own `fn<...>` type parameter names, set for the
   // duration of visitFuncDef()'s body traversal and cleared on exit (a plain
   // member, not a stack, is safe since FunctionNestingDepth_ already forbids
@@ -297,6 +391,21 @@ private:
   // parameter used as a local variable's declared type (`fn<T> f() { mut x:
   // T = ...; }`) isn't wrongly flagged as an unknown type.
   std::vector<std::string> CurrentFuncTypeParams_;
+
+  // Every struct hoisted so far by hoistTopLevel()/hoistModuleBody() (main
+  // file plus every transitively-imported module), in hoist order. Neither
+  // of those functions keeps the AST node around once the NAME is
+  // registered in SymTable_ (ResolverTypeRegistry only stores name ->
+  // declaration location, never the fields -- see its own doc comment), so
+  // checkStructLayoutAcyclicity() needs its own record of "which
+  // StructDeclExprAST does this struct name mean" to walk field types at
+  // all. Never cleared: a Resolver instance may run resolveAll() more than
+  // once (main.cpp calls it once for FnASTs, once for TopLevelASTs, on the
+  // SAME Resolver -- structs only ever appear in the former, but nothing
+  // stops a future caller from splitting differently), and accumulating
+  // across calls is what makes a struct declared in an earlier call still
+  // participate in a cycle check that runs after a later one.
+  std::vector<const StructDeclExprAST *> HoistedStructDecls_;
 
   // ── Internal helpers ───────────────────────────────────────────────────────
 
@@ -399,6 +508,45 @@ private:
   /// Register all function signatures found inside an imported module body.
   /// Called by hoistTopLevel when it encounters a ModuleImportExprAST.
   void hoistModuleBody(const ExprAST *Body, const std::string &ModuleName);
+
+  /**
+   * @brief Reject a struct that contains itself by value, directly or
+   *        through a chain of other structs (TYPE-001,
+   *        docs/planning/ARCHITECTURE_OVERHAUL.md §8, INV-LAYOUT-1).
+   *
+   * Runs a grey/black-coloured DFS over the by-value containment graph
+   * built from HoistedStructDecls_ (every struct hoisted so far, from the
+   * main file and every transitively-imported module) and raises
+   * StructLayoutCycleError on the first cycle found, naming the full path.
+   * Reports one diagnostic per strongly-connected component, not per node
+   * in it (a black-coloured node is never re-explored), so a cycle
+   * touching several structs does not produce a diagnostic for each one.
+   *
+   * Called from resolveAll() right after hoistTopLevel(Nodes) -- i.e. at
+   * the end of Pass 1, once every struct name in this call's node list is
+   * registered, and strictly before Pass 2 (or anything else) ever
+   * computes a layout, a default value, or a GC descriptor for one. Must
+   * NOT run any earlier: a struct declared later in the same file/module
+   * still needs to be in HoistedStructDecls_ for a forward-referencing
+   * cycle (`struct A { b: B } struct B { a: A }`, B declared after A) to
+   * be found at all.
+   *
+   * Edges in the graph: a field whose type is a struct (by name, via the
+   * registry -- a field's parsed type is a NamedType placeholder, never
+   * yet a resolved TurfStructType, at this point in the pipeline), an
+   * array of a struct (`B[4]` contains 4 copies of `B`), or a GenericType
+   * whose OWN base name is a registered struct (`Box<T>`'s `inner: Box<T>`
+   * field is an edge to `Box` regardless of what `T` is -- see this
+   * function's .cpp doc comment for why type arguments themselves are not
+   * separately recursed into here). Deliberately NOT an edge: any pointer-
+   * shaped field (`T*`, `&T`, `&?T`, `ptr` -- TurfType::isPointer() covers
+   * all four via TurfReferenceType's inheritance from TurfPointerType, see
+   * docs/architecture/pointers_and_references.md §2.1) -- a pointer field
+   * is a fixed one word regardless of its pointee, which is exactly why it
+   * is the correct, intended way to write a real recursive data structure
+   * and must never be treated as containment.
+   */
+  void checkStructLayoutAcyclicity();
 
   /// Processes an on-demand import's requested symbols (ImportMode::Symbol/
   /// SymbolList/Wildcard) against the already-hoisted target module,

@@ -1,6 +1,20 @@
 # Known Limitations (post-v1.0.0 fix list)
 
-Everything in this document is a **real, confirmed, still-open** gap in the
+**CLOSED as of STD-003** (`docs/development/changes/STD-003.md`,
+`docs/planning/ARCHITECTURE_OVERHAUL.md` §8) — every item below is now
+FIXED. Item 2 is the interesting case: this document's own working
+assumption (that TYPE-002/monomorphization had already unblocked it) was
+WRONG, discovered only by attempting the conversion live during STD-003 --
+it was a real, separate, genuinely still-open compiler gap, fixed directly
+in the compiler as part of this same group rather than deferred further.
+Kept in place, not deleted, as the historical record of what Type Erasure
+used to cost and exactly how each item was actually resolved — a future
+session should treat this file as archived history, not as a live tracker;
+new gaps get their own change record or `tests/99_known_bugs/` entry
+instead of a new item here.
+
+Everything in this document was originally a **real, confirmed, then-open**
+gap in the
 compiler's generics support — not a bug in any individual stdlib module.
 Every item below traces back to the same root cause: **Type Erasure with no
 monomorphization**. A generic function/method's body is type-checked and
@@ -27,7 +41,26 @@ anything in the shipped stdlib surface. Fix after v1.0.0.
 
 ## 1. `Map<K, V>` / `Set<T>` generic equality doesn't dispatch to `operator==` for `string`
 
-**Where:** `lib/std/collections/map.tr`'s `Map.indexOf()`, `lib/std/collections/set.tr`'s `Set.indexOf()`.
+**Status: FIXED** — **TYPE-002** (monomorphization), S12b (methods) through
+S14a (erasure deleted), landed 2026-09-21. `Map<string, V>.indexOf()`/
+`Set<string>.indexOf()` each now get their own real, separately-codegenned
+clone per instantiation, so `self.keys[i]`/`item` are concretely typed as
+`string` during that clone's own re-typecheck — overload resolution
+correctly dispatches to `strings.tr`'s real, content-comparing
+`operator==(string, string)`. Verified live (S14b), with a genuinely
+runtime-built duplicate key/item (never a literal, see the trap noted
+below): `tests/38_monomorphization/10_set_string_dedup.tr` and
+`11_map_string_key_equality.tr` (moved and rewritten from
+`tests/99_known_bugs/set_string_dedup_broken.tr`, which this section used
+to describe as confirmed-broken). `Map<K,V>`'s/`Set<T>`'s existing generic
+`.get()`/`.contains()`/`.tryGet()`/`indexOf()`/`add()` methods are correct
+directly now, as this section originally hoped a real fix would achieve —
+no caller-side workaround needed any more, though `http.tr`'s own
+non-generic workaround (below) is left in place, since simplifying it back
+is optional stdlib cleanup explicitly deferred out of the TYPE-002 group.
+
+**Where the bug used to be (kept for history):**
+`lib/std/collections/map.tr`'s `Map.indexOf()`, `lib/std/collections/set.tr`'s `Set.indexOf()`.
 
 `self.keys[i] == key` (Map) / `self.items[i] == item` (Set) inside these
 generic method bodies compares by raw pointer/bit identity, not content,
@@ -62,15 +95,18 @@ Never trust a same-literal repro to prove this class of bug fixed or
 absent — use a value built at runtime (`strings::trim`/`substring`/
 concat/anything parsed) for a real test.
 
-**Confirmed-broken repro** (`tests/99_known_bugs/set_string_dedup_broken.tr`):
+**Historical repro (no longer reproduces — TYPE-002 fixed this, see the
+`Status: FIXED` banner above; kept so the shape of the original bug stays
+legible)**, now `tests/38_monomorphization/10_set_string_dedup.tr`,
+asserting the opposite (correct) outcome:
 
 ```turflang
 mut s: Set<string> = Set::default();
 s.add("hello");
 s.add("world");
 immut dup: string = strings::trim(" hello "); // separate allocation, same content
-s.add(dup); // should be a no-op -- isn't
-// s.length() == 3, should be 2
+s.add(dup); // used to NOT be a no-op; now correctly is
+// s.length() is now 2, as it always should have been
 ```
 
 **Working non-generic workaround** (proven live in `lib/std/http/http.tr`):
@@ -90,29 +126,61 @@ type arguments works the same way — see item 3 below, which is what makes
 compare correctly (`K` is pinned concrete to `string` in the signature,
 only `V` stays generic).
 
-**No general fix without monomorphization or a trait/constraint system**
-(see this document's intro). If a real fix lands, it should make both
-`Map<K, V>`'s and `Set<T>`'s existing generic `.get()`/`.contains()`/
-`.tryGet()`/`indexOf()`/`add()` methods correct directly, rather than
-requiring every caller to hand-roll a wrapper.
+**(Historical: this used to say "no general fix without monomorphization or
+a trait/constraint system, see this document's intro" — monomorphization
+is exactly what landed, TYPE-002, and it does make both `Map<K, V>`'s and
+`Set<T>`'s existing generic `.get()`/`.contains()`/`.tryGet()`/`indexOf()`/
+`add()` methods correct directly, with no caller-side wrapper needed, as
+hoped.)**
 
 ---
 
 ## 2. The same generic-equality gap blocks a generic comparator/sort over `T`
 
-**Where:** `lib/std/collections/list.tr`'s own header comment on
-`list_sort`/`list_binary_search`/`list_find` (see that file — the full
-four-attempts-tried writeup already lives there and isn't duplicated here).
+**Status: FIXED (STD-003), after first being RE-CONFIRMED STILL BLOCKED
+earlier in the same session.** This document's own working assumption
+through STD-003's own §8 entry ("generic `list_sort`... all later,
+S24b/STD-003") was that monomorphization had already unblocked the
+underlying mechanism and only the stdlib conversion itself remained. That
+assumption was initially found to be WRONG by actually attempting the
+conversion live: a comparator parameter typed `fn(T, T): int` inside a
+generic method failed to type-check correctly at the call site (`No
+matching overload`), because `collectGenericSubstitution()`/
+`typesCompatible()` never recursed into a `FuncType`'s own parameter/return
+types — a real, independent gap from the `Map`/`Set` equality bug item 1
+fixed, which TYPE-002 never touched.
 
-Summary: a genuinely generic `fn<T> List.sort(cmp: fn(T, T): int)` (or any
-of three other approaches tried) cannot be made to work for the same root
-cause as item 1 — `T` never carries a concrete type into either overload
-resolution *or* a `to`-cast/coercion from inside the generic body itself.
-`list_sort`/`list_binary_search`/`list_find` are therefore concrete,
-non-generic free functions over `List<int>` specifically, not generic
-methods — the established, deliberate design response to this exact class
-of limitation, and the model item 1's `Request.get_header()`-style
-workaround follows.
+Unlike item 1 (fixed by TYPE-002, a prerequisite this group only
+consumed), this gap was fixed **directly in the compiler as part of
+STD-003 itself**, on the reasoning that a comparator callback --
+`self.otherMethod(concreteArg)`-shaped code more generally -- is ordinary
+code any Turf program might write, not an inconvenience specific to this
+stdlib file; leaving a real, silently-broken language feature in place
+because fixing it happened to fall slightly outside one session's original
+ticket was judged the wrong tradeoff. Five call sites needed the identical
+missing case (a `FuncType` branch, exactly like the existing pointer/
+array/`GenericType` branches each already had):
+`Resolver::substituteTypeParams()` (`src/ResolverCore.cpp`),
+`typesCompatible()` (`src/Types.cpp`), `collectGenericSubstitution()`/
+`collectGenericParamNameOrder()` (`src/TypeCheckerCall.cpp`), and
+`Monomorphize::substituteConcreteTypes()` (`src/Monomorphize.cpp`). See
+`docs/development/changes/STD-003.md` for the full root-cause writeup,
+live repro, and the fix itself.
+
+The bare-`<`/`>`-comparison fallback (`TypeChecker::inferRelationalType()`'s
+generic-name bypass, which covers `==`/`!=` but not ordering operators)
+remains genuinely unfixed — not needed, since the comparator-callback
+approach above is now the working design and was always the more
+general/idiomatic one (a `qsort`-style callback, not requiring `T` to
+support native `<`).
+
+**Where:** `lib/std/collections/list.tr`'s `List.sort`/`binary_search`/
+`find` are now real `fn<T> List....` methods, verified across `int`/
+`double`/`string`/a plain-data struct
+(`tests/38_monomorphization/27_generic_list_sort_and_search.tr`).
+`list_sort`/`list_binary_search`/`list_find` remain as thin, **deprecated**
+wrappers over the concrete `List<int>` case for one cycle (STD-003's own
+"prefer keeping wrappers" guidance), not removed outright.
 
 ---
 
@@ -147,34 +215,23 @@ Regression test: `tests/07_functions_modules/generic_partial_type_arg_match.tr`.
 
 ## 4. `List<T>` has no `get(i)`/`set(i, val)` indexing methods
 
-**Where:** `lib/std/collections/list.tr`.
+**Status: FIXED — LANG-001.** `operator[]`/`operator[]=` (declared for the
+concrete `List<int>`, matching `operator` declarations' general inability
+to be generic — see `list.tr`'s own comment) give `l[i]`/`l[i] = v` with
+bounds checking, the "better form of this request" LANG-001's own stdlib
+commit message names directly. For any other element type, `l.data[i]`
+direct field access remains the way to index — never generic, for the same
+`operator` declarations aren't generic reason.
 
-`List<T>` exposes `push`/`pop`/`length` only. There is no
-`List.get(i: int): T` or `List.set(i: int, val: T): void` method — every
-caller (inside the stdlib and out) reaches into the public `data: T*`
-field directly (`l.data[i]`, `l.data[i] = x`) to read or write by index.
-This works today (the field is public and `T*` indexing is ordinary
-pointer arithmetic), but it's an ergonomic/encapsulation gap, not a design
-decision documented anywhere: a real `List<T>` should have `get`/`set` (or
-an `operator[]`-style subscript, if that ever becomes a language feature)
-so callers don't need to know `data`/`len`/`cap` are the backing fields at
-all. Likely straightforward to add (unlike items 1–2, `get`/`set` don't
-need cross-element comparison, so they don't hit the generic-equality gap
-at all) — probably just hasn't been done yet because every internal caller
-so far has been fine reaching into `.data[i]` directly.
+**Where the gap used to be (kept for history):**
+`lib/std/collections/list.tr` used to expose `push`/`pop`/`length` only,
+with every caller reaching into the public `data: T*` field directly.
 
 ---
 
-## Priority for the post-v1.0.0 pass
+## Priority for the post-v1.0.0 pass (historical — all items above are now closed)
 
-1. Item 4 (`List.get`/`set`) — no known blocker, purely additive, do it
-   first.
-2. Item 1 (`Map`/`Set` string equality) — the highest-value fix; blocks
-   `Map<string, V>`/`Set<string>` from being trustworthy off-the-shelf
-   collections, which is a real, common shape (string-keyed lookups,
-   string sets) most programs eventually want. A trait/constraint system
-   (`fn<T: Eq> ...`) is probably the right long-term shape, since it also
-   directly unblocks item 2.
-3. Item 2 (generic comparator/sort over `T`) — same underlying fix as
-   item 1 would likely unblock this too; revisit once item 1's approach is
-   chosen.
+1. ~~Item 4 (`List.get`/`set`)~~ — done, LANG-001.
+2. ~~Item 1 (`Map`/`Set` string equality)~~ — done, TYPE-002.
+3. ~~Item 2 (generic comparator/sort over `T`)~~ — done, STD-003 (a real
+   compiler fix, not a stdlib workaround; see that item's own entry above).

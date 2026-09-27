@@ -1,0 +1,62 @@
+Your struct contains itself by value, and that has no finite size
+
+Every struct's size has to be computable just from its own declaration --
+the compiler needs to know exactly how many bytes to reserve for it before
+it can ever create one. A struct that holds ITSELF as a plain field breaks
+that completely: to know how big `A` is, the compiler would first need to
+know how big `A` is, forever, with no base case. There's no such thing as a
+struct that's "infinitely big", so this is rejected before your program can
+ever try to create one.
+
+The simplest version of this mistake:
+
+    struct Node {
+        me: Node   // ERROR: Node can't hold a Node by value
+    }
+
+The same problem shows up in a less obvious form when two or more structs
+hold each other:
+
+    struct A {
+        b: B       // A holds a B by value
+    }
+    struct B {
+        a: A       // ...and B holds an A by value -- the cycle closes here
+    }
+
+Neither struct is individually self-referential, but computing A's size
+requires knowing B's size, which requires knowing A's size again. The
+compiler reports the whole chain (`cycle: A -> B -> A`) so you can see
+exactly which fields form the loop, not just the first struct it happened
+to notice while checking.
+
+An array of a struct counts the same way, since an array's size is just its
+element size times its length:
+
+    struct A {
+        bs: B[2]   // still by value -- 2 copies of B live directly inside A
+    }
+
+The fix is almost always the same: change ONE of the fields in the cycle
+from holding the struct directly to holding a pointer or reference to it
+instead. A pointer is always the same size (one machine word) no matter
+what it points to, so it breaks the "I need to know your size to know my
+size" chain completely -- and this is also the normal, intended way to
+write a self-referential data structure like a linked list or a tree:
+
+    struct Node {
+        value: int,
+        next: Node*    // fixed-size pointer -- this is fine
+    }
+
+    struct A {
+        b: &B          // a safe reference works just as well here
+    }
+    struct B {
+        a: A
+    }
+
+Any one of `Node*` (raw pointer), `&Node` (non-null safe reference), or
+`&?Node` (nullable safe reference) fixes this -- pick whichever fits how
+the field is actually used elsewhere in your code. You only need to change
+ONE field in the cycle; the others can stay exactly as they are.

@@ -235,13 +235,24 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
     return ChangedIDs;
   }
 
-  // NumberExprAST: Compare numeric values
+  // NumberExprAST: Compare numeric values. Exact accessors, not
+  // getIntVal()/getDoubleVal() -- this pass exists specifically to decide
+  // whether a subtree needs re-checking, and the narrow, TRUNCATING
+  // getIntVal() could make two genuinely DIFFERENT wide literals (e.g. two
+  // distinct 48-digit numbers that happen to share the same low 64 bits)
+  // compare as unchanged, silently skipping the re-check a real edit needs
+  // (SEM-001, docs/planning/ARCHITECTURE_OVERHAUL.md §8 -- see this
+  // group's own Risks note calling out ASTDiff/clone() as a ripple point).
+  // llvm::APSInt::operator== compares by VALUE across differing bit
+  // widths, so this is correct even when Orig/Mod happen to have been
+  // stored at different widths for the same true value.
   if (auto *OrigNum = dynamic_cast<const NumberExprAST *>(OriginalAST)) {
     auto *ModNum = dynamic_cast<const NumberExprAST *>(ModifiedAST);
     if (OrigNum->isInteger() != ModNum->isInteger() ||
-        (OrigNum->isInteger() && OrigNum->getIntVal() != ModNum->getIntVal()) ||
+        (OrigNum->isInteger() &&
+         OrigNum->getIntValExact() != ModNum->getIntValExact()) ||
         (!OrigNum->isInteger() &&
-         OrigNum->getDoubleVal() != ModNum->getDoubleVal())) {
+         !OrigNum->getFloatValExact().bitwiseIsEqual(ModNum->getFloatValExact()))) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
     }
@@ -295,7 +306,13 @@ CollectChangedNodeIDsInternal(const ExprAST *OriginalAST,
 
   if (auto *OrigPost = dynamic_cast<const PostfixExprAST *>(OriginalAST)) {
     auto *ModPost = dynamic_cast<const PostfixExprAST *>(ModifiedAST);
-    if (OrigPost->getOpcode() != ModPost->getOpcode()) {
+    // LANG-001 follow-up: IsPrefix, not just Opcode, since `x++` and `++x`
+    // now share this one node type (see its own doc comment) but are
+    // observably different code (old value vs. new value) -- comparing
+    // Opcode alone would miss a suggested fix that silently swapped one
+    // for the other.
+    if (OrigPost->getOpcode() != ModPost->getOpcode() ||
+        OrigPost->IsPrefix != ModPost->IsPrefix) {
       ChangedIDs.insert(OriginalAST->getNodeID());
       ChangedIDs.insert(ModifiedAST->getNodeID());
     }

@@ -1,0 +1,22 @@
+// SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8's own explicit
+// Testing scope item): `0755` must equal `755` -- FREEZE.md §6.2's
+// deliberate "no bare-leading-zero octal" rule. A leading zero followed by
+// an ORDINARY digit (not x/X/b/B/o/O) is NOT a radix prefix; it falls
+// straight through to the plain-decimal path, same as any other digit
+// run -- a silent-octal interpretation (the classic C footgun) is exactly
+// what this rule exists to avoid.
+
+import test;
+
+fn main(): int {
+    mut a: int = 0755;
+    test::assert(a == 755, "leading zero does not trigger octal");
+
+    mut b: int = 007;
+    test::assert(b == 7, "multiple leading zeros still decimal");
+
+    mut c: int = 0;
+    test::assert(c == 0, "bare zero, obviously not a radix prefix");
+
+    return 0;
+}

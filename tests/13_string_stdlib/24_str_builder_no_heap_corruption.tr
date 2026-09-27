@@ -34,8 +34,8 @@ fn main(): int {
 
     mut parts: List<string> = strings::split(line, ", ");
     test::assert(parts.length() == 2, "split: two pieces on a mid-string delimiter");
-    test::assert(parts.data[0] == "Turf compiles directly to native code", "split: first piece exact");
-    test::assert(parts.data[1] == "with no VM or runtime in the loop", "split: second piece exact");
+    test::assert(parts.get(0) == "Turf compiles directly to native code", "split: first piece exact");
+    test::assert(parts.get(1) == "with no VM or runtime in the loop", "split: second piece exact");
 
     // Padded strings write one byte at a time too (pad_left/pad_right) --
     // same write path, same corruption risk, checked here for good measure.

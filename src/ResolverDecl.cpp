@@ -4,7 +4,7 @@
  * @details Part of the Resolver name-resolution pass (Issue #18), split from
  *          the original monolithic Resolver.cpp by category (mirrors
  *          AST.h's ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -173,9 +173,9 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   visitChild(Node.getBody());
   CurrentFuncTypeParams_.clear();
 
-  // "Never returns an error" warning (docs/planning/Errors.md): a `!T`-
-  // declared function is PERMITTED, not obliged, to fail -- so this is a
-  // warning, not a hard error. Checked here (once per function, after the
+  // "Never returns an error" warning (docs/architecture/errors_and_recover.md):
+  // a `!T`- declared function is PERMITTED, not obliged, to fail -- so this is
+  // a warning, not a hard error. Checked here (once per function, after the
   // body is fully resolved) rather than inside buildFunctionSymbol() itself,
   // which runs multiple times per function (Pass 1 hoisting, then again
   // here) and would otherwise emit this warning 2-3x for the same function.
@@ -194,7 +194,13 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   // in Codegen (which only runs once), which only runs once per function;
   // this is the first Resolver-level warning, so it's the first to hit it.
   if (Node.getReturnType() && Node.getReturnType()->isErrorUnion()) {
-    bool ReturnsRealError = false;
+    // OVH-012: Sym->ReturnsReboundError (`json::parse`'s `recover as err
+    // run { return err; };` shape -- see its own doc comment,
+    // ResolverSymbolBase.h) is just as real a "this function can fail" as
+    // any name in PossibleErrorTypeNames -- it names no specific error type
+    // (there is none to name, `err` is type-erased AnyErrorType), so it
+    // can't go through the isErrorTypeName() filter below at all.
+    bool ReturnsRealError = Sym->ReturnsReboundError;
     for (const auto &Name : Sym->PossibleErrorTypeNames) {
       if (SymTable_.isErrorTypeName(Name)) {
         ReturnsRealError = true;
@@ -331,7 +337,7 @@ void Resolver::validateNamedType(
       UnknownTypeError(Loc, BaseName, Suggestions).raise();
     } else if (!GT->getModule().empty()) {
       validateModuleQualifier(GT->getModule(), BaseName, Loc);
-    } else if (!BaseIsOwnTypeParam &&
+    } else if (!BaseIsOwnTypeParam && !SuppressUnqualifiedVisibilityCheck_ &&
                !SymTable_.isTypeVisibleUnqualified(currentModuleName(), BaseName)) {
       UnqualifiedTypeNotVisibleError(Loc, BaseName,
                                      SymTable_.getTypeOwningModule(BaseName))
@@ -388,7 +394,8 @@ void Resolver::validateNamedType(
     } else if (!IsOwnTypeParam && !KnownPrimitives.count(TypeName)) {
       if (!NT->getModule().empty()) {
         validateModuleQualifier(NT->getModule(), TypeName, Loc);
-      } else if (!SymTable_.isTypeVisibleUnqualified(currentModuleName(), TypeName)) {
+      } else if (!SuppressUnqualifiedVisibilityCheck_ &&
+                 !SymTable_.isTypeVisibleUnqualified(currentModuleName(), TypeName)) {
         UnqualifiedTypeNotVisibleError(Loc, TypeName,
                                        SymTable_.getTypeOwningModule(TypeName))
             .raise();
@@ -480,6 +487,32 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
   if (!TypeParams.empty()) {
     for (auto &Field : Node.getFieldsMut())
       Field.Type = substituteTypeParams(Field.Type, TypeParams);
+
+    // OVH-006: GlobalSymbolTable's registered TurfStructType for this name
+    // (ParseStructDecl(), built at PARSE time, directly from the as-parsed
+    // Fields) is a SEPARATE object from this AST node -- the substitution
+    // two lines up only ever updated the node's OWN field list, so every
+    // downstream consumer that resolves a field type by looking the struct
+    // back up via GlobalSymbolTable->LookupType(Name) (TypeCheckerCall.cpp's
+    // visitFieldAccess/visitMethodCall, CodegenCore.cpp's mirrors) saw the
+    // stale, unsubstituted NamedType("T") forever, never a real
+    // TurfGenericParamType. That NamedType then had to be told apart from an
+    // ordinary struct reference by a name-lookup heuristic ("not a
+    // registered type => must be a generic param") -- which silently broke
+    // the moment a real, unrelated struct happened to be declared under the
+    // same name as the type parameter (`struct T { x: int }` alongside
+    // `List<T>`, confirmed live: `l.pop()` on a `List<int>` resolved to the
+    // user's own struct `T`, not `int`, because "T" WAS registered
+    // elsewhere the instant that struct existed). Re-registering here, with
+    // the just-substituted field list, makes the registered type agree with
+    // the AST node: one representation, not two, and every one of those
+    // NamedType-vs-registered-type heuristics simply never fires for a
+    // struct's own type parameter again, regardless of what else in the
+    // program happens to be named the same.
+    if (GlobalSymbolTable)
+      GlobalSymbolTable->RegisterType(
+          Node.getName(),
+          std::make_shared<TurfStructType>(Node.getName(), Node.getFields()));
   }
 
   // In Pass 2 (here) we validate every field's type via validateNamedType().
@@ -522,6 +555,33 @@ void Resolver::visitArrayLiteral(ArrayLiteralExprAST &Node) {
 void Resolver::visitArrayAccess(ArrayAccessExprAST &Node) {
   visitChild(Node.getBase());
   visitChild(Node.getIndex());
+
+  // LANG-001: gather BOTH `operator[]` and `operator[]=` candidates
+  // unconditionally, here, regardless of whether this particular access
+  // turns out to be a read or an assignment target -- the Resolver has no
+  // type information yet (that's the TypeChecker's job) and, symmetrically,
+  // no syntactic way to know if this node sits on the LHS of '=' until
+  // TypeChecker::visitAssignment() looks at it. Mirrors visitBinary()'s own
+  // "gather everything visible by name, let TypeChecker's exact-match
+  // narrow it" split. A plain array/pointer/string base simply never
+  // matches anything here (no `operator[]` is ever declared with a
+  // primitive self type -- see validateOperatorDecl()'s all-primitive/
+  // orphan checks), so these stay empty and TypeChecker's existing builtin
+  // indexing path is completely unaffected.
+  Node.ResolvedIndexGetCandidates.clear();
+  Node.ResolvedIndexSetCandidates.clear();
+  for (const auto *S : SymTable_.lookupCurrentFileFunctions(OperatorIndexGetName()))
+    Node.ResolvedIndexGetCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*S));
+  for (const auto &M : SymTable_.findInModules(OperatorIndexGetName()))
+    Node.ResolvedIndexGetCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*M.Symbol));
+  for (const auto *S : SymTable_.lookupCurrentFileFunctions(OperatorIndexSetName()))
+    Node.ResolvedIndexSetCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*S));
+  for (const auto &M : SymTable_.findInModules(OperatorIndexSetName()))
+    Node.ResolvedIndexSetCandidates.push_back(
+        std::make_shared<ResolverFunctionSymbol>(*M.Symbol));
 }
 
 
@@ -532,15 +592,52 @@ void Resolver::visitModuleImport(ModuleImportExprAST &Node) {
 }
 
 
-// ExternFuncDeclExprAST: hoistTopLevel already registered the symbol in Pass 1.
-// The only work left for Pass 2 is validating that the parameter and return
-// type names are real -- see validateNamedType()'s doc comment. This used to
-// be a complete no-op, meaning an extern fn parameter or return type
-// referencing an unknown struct name was never checked anywhere in the
-// compiler; ordinary `fn` definitions had the same gap until visitFuncDef()
-// was updated alongside this.
+// ExternFuncDeclExprAST: for a FILE-LEVEL extern, hoistTopLevel already
+// registered the symbol in Pass 1, so the only work left here is validating
+// that the parameter and return type names are real -- see
+// validateNamedType()'s doc comment. This used to be a complete no-op,
+// meaning an extern fn parameter or return type referencing an unknown
+// struct name was never checked anywhere in the compiler; ordinary `fn`
+// definitions had the same gap until visitFuncDef() was updated alongside
+// this.
+//
+// A FUNCTION-LOCAL extern (LANG-004 item 3, `extern fn` now legal inside a
+// function body -- see ParseBlock()'s TOK_EXTERN branch) is a genuinely
+// different case: hoistTopLevel() never enters a function body (see its own
+// doc comment; that's the whole reason Pass 1/Pass 2 are split), so a
+// function-local extern's symbol is NEVER registered before this visit --
+// unlike every other declaration this function handles. It must be
+// registered here instead, the moment Pass 2's sequential walk reaches it,
+// mirroring hoistTopLevel()'s own ExternFuncDeclExprAST branch verbatim.
+// `FunctionNestingDepth_ > 0` (incremented only while visiting a function
+// body, see visitFuncDef()) is what distinguishes the two cases -- at depth
+// 0 this is the ordinary top-level extern already hoisted, and registering
+// it again here would be redundant (registerCurrentFileFunction() dedups by
+// arity+param-types so it's harmless, but there's no reason to pay for it).
+//
+// Known limitation, not fixed here: `CurrentFileFunctions_` is a flat,
+// file-wide registry with no block-scoping concept (nothing in this
+// compiler's declaration model has one -- a nested `fn` is rejected
+// outright, see NestedFunctionError above). A function-local extern
+// therefore becomes callable from anywhere later in the file's sequential
+// Pass-2 walk, not just from within its own enclosing function -- genuine
+// lexical scoping would need a real scoped-function-symbol mechanism, which
+// is out of scope for this item (see docs/planning/ARCHITECTURE_OVERHAUL.md
+// §8 LANG-004: "Low value, but it is one switch case").
 void Resolver::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
   for (const auto &[ParamName, ParamType] : Node.getParams())
     validateNamedType(ParamType, Node.getLoc());
   validateNamedType(Node.getReturnType(), Node.getLoc());
+
+  if (FunctionNestingDepth_ > 0) {
+    ResolverFunctionSymbol Sym;
+    Sym.BaseName = Node.getName();
+    Sym.SourceModule = ""; // extern fns are in the global (file) namespace
+    Sym.ReturnType = Node.getReturnType();
+    Sym.IsExtern = true; // see IsExtern's doc comment in ResolverSymbolTable.h
+    Sym.IsVarArg = Node.isVarArg();
+    for (const auto &[PName, PType] : Node.getParams())
+      Sym.Params.push_back({PName, PType});
+    SymTable_.registerCurrentFileFunction(Sym);
+  }
 }

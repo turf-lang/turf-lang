@@ -90,8 +90,29 @@ void CloseSourceFile();
 // buffer conceptually represents (its unsaved editor path, say), same as a
 // real file would.
 void SetSourceBuffer(std::istream &Buffer);
-extern double NumVal;
-extern long long IntVal;
+// SEM-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): the lexer used to
+// collapse every integer literal into a `long long` (via strtoll, silently
+// saturating on overflow) and every float literal into a `double` (via
+// strtod, silently rounding to `inf` on overflow) -- destroying the
+// literal's exact written value before the parser ever saw it. These three
+// globals replace `NumVal`/`IntVal` and carry the RAW, exact information
+// instead, deliberately kept LLVM-free (plain string/int, no APSInt/APFloat)
+// so Lexer.h itself stays free of an LLVM/AST dependency, same as it always
+// has been -- the caller (ParseNumberExpr, ParserLiteral.cpp, which already
+// needs LLVM for other reasons) is what actually builds the exact
+// llvm::APSInt/llvm::APFloat from these.
+//   NumLitSpelling -- the literal's exact original source text, including
+//     its radix prefix and every '_' separator, verbatim. For diagnostics
+//     and NumberExprAST::getSpelling() (round-trip proof).
+//   NumLitClean -- the same literal with the radix prefix and every '_'
+//     stripped: just the digits (int) or the digits/'.'/exponent (float),
+//     ready to hand directly to llvm::APInt's or llvm::APFloat's own
+//     string-parsing constructor with no further cleanup.
+//   NumLitRadix -- 10, 16, 2, or 8. Meaningful only when the token just
+//     returned was TOK_INT_LITERAL; unspecified (not reset) otherwise.
+extern std::string NumLitSpelling;
+extern std::string NumLitClean;
+extern int NumLitRadix;
 extern bool BoolVal;
 extern char CharVal;
 extern std::string IdentifierStr;
@@ -172,6 +193,37 @@ struct ParseRecursionGuard {
 // When true, the SLM is loaded and AI suggestions are generated for errors.
 // Controlled by the --smart CLI flag. Default is off for deterministic output.
 extern bool g_AIEnabled;
+// SLM-001 follow-up: when non-empty, the FULL patched source of the first
+// --smart suggestion that clears the display gate (confidence >= 0.8) this
+// compile is written here verbatim, instead of only ever being shown as a
+// rendered diagnostic. Controlled by --smart-write-fix=<path>; empty (the
+// default) means "don't write anything" -- an ordinary --smart run's
+// behavior is completely unchanged. Exists so a caller (a benchmark tool, a
+// future editor integration) can get the corrected PROGRAM as a real,
+// compilable file, not just a description of the fix -- see
+// scripts/slm_benchmark/run_benchmark.py, which uses this to actually
+// recompile and RUN a fixed program and check whether it still does what
+// the pre-mutation original did (§16.4's "semantic-correctness rate").
+extern std::string g_SmartFixOutPath;
+// LANG-002: when true, a file OUTSIDE the resolved install root may still
+// declare the raw-pointer capability (`unsafe module;`, HasRawPointerCapability()
+// in ParserModule.cpp) -- controlled by the --allow-unsafe-modules CLI flag.
+// A file UNDER the install root never needs this flag: see
+// HasRawPointerCapability()'s own doc comment for the full rule. Default off,
+// same reasoning as g_AIEnabled -- a capability that broadens what raw
+// pointers can do must be an explicit, visible opt-in, never ambient.
+extern bool g_AllowUnsafeModules;
+// OVH-012: when false (the default), a warning whose diagnostic location
+// falls inside the install root's `lib/std` is a "system-module warning" --
+// recorded (still counts toward getDiagnosticCount(), still visible to
+// CollectAllDiagnostics-based tooling like the sandbox) but never printed by
+// flushAll(), matching `-isystem` practice: a normal user program that
+// merely `import`s a stdlib module (`import io; import json; import http;`)
+// must never see a warning whose primary location is code it didn't write
+// and can't fix. Controlled by the --stdlib-warnings CLI flag (main.cpp).
+// Errors are never suppressed by this -- only DiagnosticEngine::add()'s
+// IsWarning branch consults it (Lexer.cpp).
+extern bool g_ShowStdlibWarnings;
 extern std::string SourceFilename;
 // The original top-level file passed to the compiler -- see its definition
 // in Lexer.cpp for why this is distinct from SourceFilename.
@@ -190,10 +242,11 @@ public:
     bool IsWarning;
     std::vector<RelatedLocation> RelatedLocations; // structural context for SLM
     // Ground-truth category, set by the raising TurfError subclass's own
-    // constructor (see Errors.h) -- NOT re-derived from message text. Stays
-    // GENERAL for diagnostics with no TurfError instance (the raw
-    // LogErrorAt() path), which the SLM layer falls back to classifyError()
-    // for, same as before this field existed.
+    // constructor (see Errors.h), or by the explicit argument a raw
+    // LogErrorAt() call site passes (see this file's own LogErrorAt()
+    // declaration) -- NOT re-derived from message text (DIAG-001 deleted
+    // that fallback, formerly SLM::classifyError()). GENERAL is a real,
+    // audited answer for a site, not "unclassified."
     SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL;
     // Which file Loc's Line/Col are relative to -- defaulted at add()-time
     // from Loc.Filename, falling back to the current SourceFilename if Loc
@@ -206,6 +259,12 @@ public:
     // Empty for the raw, untyped LogErrorAt() path and for warnings -- both
     // print without a "[E0NN]" tag in printDiag().
     std::string Code;
+    // SLM-001: structured hints (deterministic-fix candidate, known types)
+    // from the raising TurfError, if any -- see DiagnosticHints's doc
+    // comment (SLMIntegration.h). Always empty for a warning (the SLM path
+    // is gated on !IsWarning, same as Category) and for the raw LogErrorAt()
+    // path (which has no TurfError instance to carry one).
+    SLM::DiagnosticHints Hints;
   };
 
   // Record a diagnostic. Errors on a line that already has an error are
@@ -214,7 +273,8 @@ public:
                   const std::string &Hint, bool IsWarning = false,
                   const std::vector<RelatedLocation> &Related = {},
                   SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL,
-                  const std::string &Code = "");
+                  const std::string &Code = "",
+                  const SLM::DiagnosticHints &Hints = {});
 
   static void add(SourceLocation Loc, const std::string &Msg,
                   bool IsWarning = false,
@@ -333,7 +393,8 @@ enum Token {
   TOK_CHAR_LITERAL = -85, ///< `'x'`    token   — single-quoted char literal
   TOK_OPERATOR     = -86, ///< `operator` keyword — top-level operator overload declaration
   TOK_TYPE_INT32   = -87, ///< `int32`   keyword — honest 32-bit extern-fn ABI declaration type
-  TOK_ERROR   = -88, ///< `error`   keyword — user-defined error type declaration (docs/planning/Errors.md)
+  TOK_ERROR   = -88, ///< `error`   keyword — user-defined error type
+                     ///< declaration (docs/architecture/errors_and_recover.md)
   TOK_RECOVER = -89, ///< `recover` keyword — handles a `!T` call site's failure
   TOK_PRODUCE = -90, ///< `produce` keyword — `recover produce value` form
   TOK_RUN     = -91, ///< `run`     keyword — `recover run {}` / `recover as x run {}` block form
@@ -347,12 +408,38 @@ enum Token {
   TOK_POWER_ASSIGN  = -99, ///< `**=` token — exponentiation compound assignment
   TOK_MACHINE  = -100, ///< `machine` keyword — state-machine declaration (enum + transition graph)
   TOK_ARROW    = -101, ///< `->`      token   — transition edge separator in a `machine` block
-  TOK_UNSAFE   = -102  ///< `unsafe`  keyword — lexical gate for raw pointer types (issue #238)
+  TOK_UNSAFE   = -102, ///< `unsafe`  keyword — lexical gate for raw pointer types (issue #238)
+  TOK_GUESS    = -103, ///< `guess`   keyword — type-position placeholder for initializer type
+                        ///< inference (SEM-003, ARCHITECTURE_OVERHAUL.md §11). Omitting a
+                        ///< declaration's `: Type` annotation entirely is sugar for `: guess`;
+                        ///< see ParseLetStatement().
+  TOK_DEFER    = -104, ///< `defer`   keyword — registers a statement to run when the enclosing
+                        ///< `{ }` block exits, by any path except a panic (LANG-003,
+                        ///< ARCHITECTURE_OVERHAUL.md §8). See ASTStmt.h's DeferExprAST.
+  TOK_CALLER_LOCATION = -105
+                        ///< `caller_location` keyword — a bare, non-callable expression of type
+                        ///< `string`, legal only inside a function declared `@caller_location`
+                        ///< (STD-002, ARCHITECTURE_OVERHAUL.md §8/§15.6(a)). Reserved as a real
+                        ///< keyword (like `self`, TOK_SELF above) rather than an ordinary
+                        ///< identifier specifically so a user can never declare a variable or
+                        ///< parameter with this exact name -- see CallerLocationExprAST
+                        ///< (ASTExpr.h) and ParserDecl.cpp's ParseFuncDef() for how the implicit
+                        ///< hidden parameter this keyword reads is threaded through Codegen only
+                        ///< (never through Params_ / the ordinary arity-checked signature).
 };
 
 int gettok();
 void resetLexer();
-void LogErrorAt(SourceLocation Loc, const std::string &Msg);
+// `Category` is the ground-truth SLM::ErrorCategory for this diagnostic,
+// same role as TurfError::Category_ (Errors.h) plays for a typed error --
+// LogErrorAt() is the untyped path (no TurfError subclass instance exists to
+// read one from), used throughout the Parser/Lexer/Codegen for messages that
+// don't warrant their own class. Every call site names its own category
+// explicitly (DIAG-001 audit); GENERAL is a deliberate choice for a site,
+// never an unaudited default. See ErrorCategory.h's removed classifyError()
+// -- category is no longer re-derived from message text.
+void LogErrorAt(SourceLocation Loc, const std::string &Msg,
+                SLM::ErrorCategory Category = SLM::ErrorCategory::GENERAL);
 int GetLastChar();
 void SetLastChar(int c);
 

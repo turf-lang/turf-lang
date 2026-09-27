@@ -1,0 +1,40 @@
+// LANG-001 follow-up: prefix ++/-- used to require a BARE identifier
+// operand (parse error otherwise) even though postfix already accepted any
+// assignable lvalue -- `++arr[0]`/`++obj.field` are now legal, parsed
+// through the exact same primary+postfix-chain path a standalone `arr[0]`/
+// `obj.field` would get. Both directions now share one AST node
+// (PostfixExprAST, IsPrefix flag) with fully shared overload-resolution/
+// immutability/scope-boundary logic -- see its own doc comment (ASTExpr.h).
+import test;
+
+struct Point {
+    x: int,
+    y: int
+}
+
+fn main(): int {
+    // Prefix on an array element.
+    mut arr: int[3] = [1, 2, 3];
+    mut incremented: int = ++arr[0];
+    test::assert(arr[0] == 2, "prefix ++ on an array element should mutate in place");
+    test::assert(incremented == 2, "prefix ++ should evaluate to the NEW value");
+
+    mut decremented: int = --arr[1];
+    test::assert(arr[1] == 1, "prefix -- on an array element should mutate in place");
+    test::assert(decremented == 1, "prefix -- should evaluate to the NEW value");
+
+    // Prefix on a struct field.
+    mut p: Point = Point::default();
+    p.x = 10;
+    ++p.x;
+    test::assert(p.x == 11, "prefix ++ on a struct field should mutate in place");
+
+    // Prefix and postfix on the SAME array element compose correctly.
+    mut arr2: int[2] = [5, 5];
+    mut sum: int = arr2[0]++ + ++arr2[1];   // (5, old) + (6, new) == 11
+    test::assert(sum == 11, "prefix/postfix on array elements should compose in one expression");
+    test::assert(arr2[0] == 6, "postfix ++ should still have incremented arr2[0]");
+    test::assert(arr2[1] == 6, "prefix ++ should still have incremented arr2[1]");
+
+    return 0;
+}

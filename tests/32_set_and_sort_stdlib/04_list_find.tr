@@ -2,9 +2,9 @@
 // search over an unsorted List<int> for the first element matching an
 // arbitrary predicate.
 //
-// A free function taking a concrete `List<int>` -- see list_sort()'s doc
-// comment in list.tr for why a generic `fn<T> List.find(...)` can't
-// compile here.
+// Since STD-003, a thin DEPRECATED wrapper over the real generic
+// `fn<T> List.find(predicate: fn(T): bool): int` method -- see list.tr's
+// own doc comment. New code should prefer `l.find(predicate)` directly.
 import list::List;
 import list::list_find;
 import test;
@@ -18,7 +18,7 @@ fn is_negative(x: int): bool {
 }
 
 fn main(): int {
-    mut l: List<int>;
+    mut l: List<int> = List::default();
     l.push(7);
     l.push(3);
     l.push(9);

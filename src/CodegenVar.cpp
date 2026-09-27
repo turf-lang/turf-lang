@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -28,7 +28,6 @@
 #include "ValueRange.h"
 #include "Lint.h"
 #include "SymbolTable.h"
-#include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
 #include "llvm/IR/CFG.h"
@@ -65,8 +64,8 @@ Value *VarDeclExprAST::codegen() {
   // their own "processed, nothing to return" codegen paths. Confirmed
   // live: returning nullptr here made BlockExprAST::codegen() (once
   // hardened to stop at the first null statement -- see this file's
-  // history and git history for the now-removed
-  // docs/planning/CODE_REVIEW_GAPS_2026-07.md's original writeup) silently
+  // history, and git history for the retired 2026-07 code-review-gaps
+  // audit's original writeup) silently
   // abandon the rest of a module's body the moment it reached an
   // `export immut` constant -- e.g. sys.tr's `export immut STDERR_FD`
   // sits right before `fn panic(...)`, so `panic` never got a prototype
@@ -151,6 +150,32 @@ Value *VarDeclExprAST::codegen() {
   AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Name, Type.get());
 
   Builder->CreateStore(Init, Alloca);
+
+  // TOOL-001: `-g` local-variable debug info. NameLoc (the variable's own
+  // NAME token, distinct from Loc -- the 'mutable'/'immutable' keyword,
+  // see this class's own field doc comments in ASTDecl.h) is what a
+  // debugger should point at for "where is this local declared", matching
+  // what DuplicateDeclarationError/ShadowingWarning above already use
+  // NameLoc for. Flat function-level scoping (CurrentDebugScope is always
+  // the enclosing DISubprogram, never a nested DILexicalBlock per `{ }`) is
+  // a deliberate simplification -- see docs/development/changes/TOOL-001.md's
+  // Known pitfalls: correct for TOOL-001's own completion criteria (a
+  // breakpoint, a backtrace, printing a local by name), imprecise only for
+  // a debugger's *scope-based* view of two same-named locals in sibling
+  // blocks shadowing each other.
+  if (DBuilder && CurrentDebugScope) {
+    DIFile *File = getOrCreateDebugFile(NameLoc.Filename.empty()
+                                            ? Loc.Filename
+                                            : NameLoc.Filename);
+    unsigned DeclLine = NameLoc.Line > 0 ? NameLoc.Line : Loc.Line;
+    DILocalVariable *LV = DBuilder->createAutoVariable(
+        CurrentDebugScope, Name, File, DeclLine, getDebugType(Type.get()),
+        /*AlwaysPreserve=*/true);
+    DBuilder->insertDeclare(
+        Alloca, LV, DBuilder->createExpression(),
+        DILocation::get(*TheContext, DeclLine, 0, CurrentDebugScope),
+        Builder->GetInsertBlock());
+  }
 
   // Register in symbol table
   if (GlobalSymbolTable) {
@@ -254,6 +279,49 @@ Value *VariableExprAST::codegenLValue() {
 
 
 Value *AssignmentExprAST::codegen() {
+  // ── operator[]= dispatch (LANG-001) ──────────────────────────────────────
+  // TypeChecker::visitAssignment() already resolved ArrayAccessExprAST::
+  // ResolvedIndexSetTarget (if any) via exact (BaseType, IndexType,
+  // ValueType) match, for a struct LHS base with no physical address
+  // codegenLValue() could ever GEP into. Checked first and returns early --
+  // an operator[]= write is an ordinary 3-argument function call, not a
+  // store, so none of the getExprType()/CastToType()/codegenLValue()
+  // machinery below applies to it at all.
+  if (const auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(LHS.get())) {
+    if (ArrAcc->ResolvedIndexSetTarget) {
+      // Self is passed BY ADDRESS when the overload declared it `&T`
+      // (operatorSelfOperandMatches()'s deliberate relaxation,
+      // TypeCheckerCall.cpp) -- BY VALUE otherwise, exactly matching
+      // whichever form the exact-match check actually accepted.
+      const bool SelfByRef = !ArrAcc->ResolvedIndexSetTarget->Params.empty() &&
+          ArrAcc->ResolvedIndexSetTarget->Params[0].Type &&
+          ArrAcc->ResolvedIndexSetTarget->Params[0].Type->isReference();
+      Value *BaseVal = SelfByRef
+          ? const_cast<ExprAST *>(ArrAcc->getBase())->codegenLValue()
+          : const_cast<ExprAST *>(ArrAcc->getBase())->codegen();
+      if (!BaseVal)
+        return nullptr;
+      Value *IndexVal = const_cast<ExprAST *>(ArrAcc->getIndex())->codegen();
+      if (!IndexVal)
+        return nullptr;
+      Value *ValueVal = RHS->codegen();
+      if (!ValueVal)
+        return nullptr;
+      std::string MangledName = ArrAcc->ResolvedIndexSetTarget->mangledName();
+      Function *CalleeF = TheModule->getFunction(MangledName);
+      if (!CalleeF) {
+        llvm::report_fatal_error(
+            llvm::StringRef("Internal error: operator overload '" +
+                            MangledName + "' was resolved but never codegenned."));
+        return nullptr;
+      }
+      Builder->CreateCall(CalleeF, {BaseVal, IndexVal, ValueVal});
+      // Assignment expressions usually return the value assigned (allows
+      // x = arr[i] = 5) -- same convention as the ordinary store path below.
+      return ValueVal;
+    }
+  }
+
   // Generate code for the RHS first
   Value *Val = RHS->codegen();
   if (!Val)
@@ -337,6 +405,28 @@ Value *CompoundAssignmentExprAST::codegen() {
   Type *LLVMTy = getLLVMType(LHSTy);
   Value *LHSVal = Builder->CreateLoad(LLVMTy, Ptr, "compassign.load");
 
+  // ── Operator overload dispatch (F-OP-2's desugaring) ─────────────────────
+  // TypeChecker::visitCompoundAssignment() already resolved
+  // ResolvedOperatorTarget (if any) via exact (LHSType, RHSType) match.
+  // LHSVal/Ptr above are already the CORRECT struct-typed load/address (no
+  // getTurfTypeFromLLVM() round-trip needed for this path, unlike the
+  // builtin numeric branches below) -- call the overload directly and
+  // store its result back through the SAME Ptr, so the LHS location is
+  // still only ever evaluated once (§13.5's explicit requirement).
+  if (ResolvedOperatorTarget) {
+    std::string MangledName = ResolvedOperatorTarget->mangledName();
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: operator overload '" +
+                          MangledName + "' was resolved but never codegenned."));
+      return nullptr;
+    }
+    Value *Result = Builder->CreateCall(CalleeF, {LHSVal, Val}, "compassign.optmp");
+    Builder->CreateStore(Result, Ptr);
+    return Result;
+  }
+
   TurfTypePtr VarType = getTurfTypeFromLLVM(LLVMTy);
 
   // `**=` handled separately, BEFORE the generic `CastRHS = CastToType(Val,
@@ -373,17 +463,28 @@ Value *CompoundAssignmentExprAST::codegen() {
   bool isDouble = LHSTy->isNamed("double");
 
   switch (Opcode) {
+  // Checked for int (never double) -- SEM-002 (FREEZE.md §6.2 row 7). This
+  // duplicates BinaryExprAST::codegen()'s own +/-/* handling rather than
+  // sharing it because CompoundAssignmentExprAST has never desugared to a
+  // literal re-walk of BinaryExprAST at the Codegen layer (each already had
+  // its own div-by-zero check, above/below, before this group) -- see
+  // EmitCheckedIntArith()'s own doc comment (CodegenCore.cpp). OPT-002:
+  // ProvenNoOverflow -- see BinaryExprAST::codegen()'s identical cases
+  // (CodegenExpr.cpp) for the contract.
   case '+':
     Result = isDouble ? Builder->CreateFAdd(LHSVal, CastRHS, "addtmp")
-                      : Builder->CreateAdd(LHSVal, CastRHS, "addtmp");
+             : ProvenNoOverflow ? Builder->CreateNSWAdd(LHSVal, CastRHS, "addtmp")
+                                : EmitCheckedIntArith('+', LHSVal, CastRHS, Loc);
     break;
   case '-':
     Result = isDouble ? Builder->CreateFSub(LHSVal, CastRHS, "subtmp")
-                      : Builder->CreateSub(LHSVal, CastRHS, "subtmp");
+             : ProvenNoOverflow ? Builder->CreateNSWSub(LHSVal, CastRHS, "subtmp")
+                                : EmitCheckedIntArith('-', LHSVal, CastRHS, Loc);
     break;
   case '*':
     Result = isDouble ? Builder->CreateFMul(LHSVal, CastRHS, "multmp")
-                      : Builder->CreateMul(LHSVal, CastRHS, "multmp");
+             : ProvenNoOverflow ? Builder->CreateNSWMul(LHSVal, CastRHS, "multmp")
+                                : EmitCheckedIntArith('*', LHSVal, CastRHS, Loc);
     break;
   case '/': {
     Function *TheFunction = Builder->GetInsertBlock()->getParent();
@@ -402,6 +503,10 @@ Value *CompoundAssignmentExprAST::codegen() {
       Builder->CreateUnreachable();
 
     Builder->SetInsertPoint(DivContBB);
+    // The one signed-division overflow case (INT64_MIN / -1) -- see
+    // EmitSignedDivOverflowGuard()'s own doc comment.
+    if (!isDouble)
+      EmitSignedDivOverflowGuard(LHSVal, CastRHS, Loc);
     Result = isDouble ? Builder->CreateFDiv(LHSVal, CastRHS, "divtmp")
                       : Builder->CreateSDiv(LHSVal, CastRHS, "divtmp");
     break;
@@ -440,7 +545,10 @@ Value *CompoundAssignmentExprAST::codegen() {
     Result = Builder->CreateOr(LHSVal, CastRHS, "orassigntmp");
     break;
   case TOK_LSHIFT:
-    Result = Builder->CreateShl(LHSVal, CastRHS, "lshiftassigntmp");
+    // Checked -- see EmitCheckedShl()'s own doc comment (CodegenCore.cpp).
+    // OPT-002: ProvenNoOverflow, same contract as the '+'/'-'/'*' cases above.
+    Result = ProvenNoOverflow ? Builder->CreateShl(LHSVal, CastRHS, "lshiftassigntmp")
+                              : EmitCheckedShl(LHSVal, CastRHS, Loc);
     break;
   case TOK_RSHIFT:
     Result = Builder->CreateAShr(LHSVal, CastRHS, "rshiftassigntmp");
@@ -467,19 +575,61 @@ Value *PostfixExprAST::codegen() {
   Type *LLVMTy = getLLVMType(OpTy);
   Value *OldVal = Builder->CreateLoad(LLVMTy, Ptr, "postfix.load");
 
+  // ── Operator overload dispatch (D21) ─────────────────────────────────────
+  // TypeChecker::visitPostfixExpr() already resolved ResolvedOperatorTarget
+  // (if any) via exact match against (OperandType, int). Postfix returns
+  // the OLD value, prefix the NEW one -- everything about computing and
+  // storing the new value is otherwise identical between the two.
+  if (ResolvedOperatorTarget) {
+    std::string MangledName = ResolvedOperatorTarget->mangledName();
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: operator overload '" +
+                          MangledName + "' was resolved but never codegenned."));
+      return nullptr;
+    }
+    Value *DeltaOne = ConstantInt::get(*TheContext, APInt(64, 1, true));
+    Value *NewVal = Builder->CreateCall(CalleeF, {OldVal, DeltaOne}, "postfix.optmp");
+    Builder->CreateStore(NewVal, Ptr);
+    return IsPrefix ? NewVal : OldVal;
+  }
+
   bool isDouble = OpTy->isNamed("double");
+  // OVH-005: the non-double path below unconditionally builds an i64 '1'
+  // and (through EmitCheckedIntArith()) an i64-typed overflow-check
+  // intrinsic call -- sound only when OldVal is genuinely i64. A
+  // non-double, non-'int' numeric type (concretely: 'int32') reaching here
+  // would load an i32 OldVal and emit a call with mismatched operand
+  // widths -- invalid LLVM IR, a real internal-compiler-error, not a
+  // diagnosable one. TypeChecker::visitPostfixExpr() now rejects exactly
+  // that case before Codegen is ever reached (a dedicated error, not this
+  // assertion) -- this exists so a FUTURE gap of the same shape (e.g. a new
+  // numeric type added without updating that gate) fails loudly here
+  // instead of silently emitting bad IR again.
+  assert((isDouble || OpTy->isNamed("int")) &&
+        "PostfixExprAST::codegen(): non-double operand must be 'int' -- "
+        "TypeChecker::visitPostfixExpr() must reject any other numeric "
+        "type (e.g. 'int32') before Codegen is reached.");
   Value *One = isDouble ? static_cast<Value *>(ConstantFP::get(*TheContext, APFloat(1.0)))
                         : static_cast<Value *>(ConstantInt::get(*TheContext, APInt(64, 1, true)));
 
   Value *NewVal = nullptr;
   if (Opcode == '+') {
+    // Checked for int (never double) -- `x++`/`x--` is arithmetically
+    // `x = x +/- 1`, so it gets the same SEM-002 overflow trap as any other
+    // '+'/'-' -- see EmitCheckedIntArith()'s own doc comment (CodegenCore.cpp).
+    // OPT-002: ProvenNoOverflow, same contract as BinaryExprAST's cases
+    // (CodegenExpr.cpp).
     NewVal = isDouble ? Builder->CreateFAdd(OldVal, One, "inctmp")
-                      : Builder->CreateAdd(OldVal, One, "inctmp");
+             : ProvenNoOverflow ? Builder->CreateNSWAdd(OldVal, One, "inctmp")
+                                : EmitCheckedIntArith('+', OldVal, One, Loc);
   } else {
     NewVal = isDouble ? Builder->CreateFSub(OldVal, One, "dectmp")
-                      : Builder->CreateSub(OldVal, One, "dectmp");
+             : ProvenNoOverflow ? Builder->CreateNSWSub(OldVal, One, "dectmp")
+                                : EmitCheckedIntArith('-', OldVal, One, Loc);
   }
 
   Builder->CreateStore(NewVal, Ptr);
-  return OldVal; // Postfix returns the old value
+  return IsPrefix ? NewVal : OldVal;
 }

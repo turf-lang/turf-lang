@@ -4,7 +4,7 @@
  *        the foundation ResolverScopeTable/ResolverModuleTable/
  *        ResolverTypeRegistry/ResolverSymbolTable (split out of the
  *        original monolithic ResolverSymbolTable.h -- see
- *        docs/planning/COMPILER_MODULE_BREAKDOWN.md) all build on.
+ *        docs/architecture/compiler_pipeline.md) all build on.
  *
  * Issue #2 of the monolith → multi-pass migration.
  *
@@ -85,6 +85,34 @@ struct VariableSymbol {
   /// declareVariable() call site (ordinary locals, loop vars, catch-bound
   /// error names, …) is unaffected.
   bool                   IsParameter = false;
+  /// True once TypeChecker::visitVarDecl has replaced this symbol's `guess`
+  /// placeholder Type with its inferred concrete type (SEM-003, §11.8).
+  /// Declared here rather than derived from Type itself because by the
+  /// time anything reads this flag, Type is already the concrete inferred
+  /// type -- indistinguishable from an explicitly-annotated variable of the
+  /// same type. Lets a later assignment type-mismatch note (visitAssignment,
+  /// TypeCheckerExpr.cpp) say "'x' was inferred as 'int' here" instead of
+  /// the generic "declared here" specifically for a `guess`-inferred
+  /// variable, per §11.6's own worked example.
+  bool                   WasGuessInferred = false;
+  /// OVH-014 (docs/development/changes/OVH-014.md), FREEZE.md §6.2 row 6
+  /// ("Compile-time on typed constants: error"). Set by
+  /// TypeChecker::visitVarDecl, only for an `immut` local of declared type
+  /// exactly `int` whose initializer TypeChecker::tryFoldUntypedIntConstant()
+  /// already proved is a pure literal-arithmetic tree -- its EXACT decimal
+  /// value, so a LATER reference to this local inside another
+  /// literal-arithmetic expression (`immut a: int = 9223372036854775807;
+  /// immut b = a + 1;`) can be folded too and its overflow caught at compile
+  /// time, instead of silently deferring to the runtime-checked-arithmetic
+  /// trap SEM-002 already built for the non-foldable case. A plain decimal
+  /// string, not an llvm::APSInt, for the same LLVM-free reason
+  /// ResolverConstantSymbol::IntVal (this file, below) is a string -- see
+  /// that field's own doc comment for the exact parsing pattern
+  /// (TypeChecker::tryFoldUntypedIntConstant()'s VariableExprAST case uses
+  /// the identical one). Empty/false for every other symbol (mut, a
+  /// non-`int` type, or an initializer that isn't pure literal arithmetic).
+  bool                   HasFoldedIntConstant = false;
+  std::string            FoldedIntConstant;
 
   VariableSymbol() = default;
   VariableSymbol(std::string Name, TurfTypePtr Type,
@@ -124,19 +152,28 @@ struct FunctionParam {
 // function it calls must already be declared earlier in the file.
 
 /// The fixed, whitelisted set of binary operator tokens that `operator`
-/// declarations may overload (RFC §8's assumed whitelist, minus []/[]= and
-/// unary -/! -- both explicitly out of scope for this pass; see the RFC's
-/// build-order notes). Deliberately excludes `%`, `**`, bitwise (`& | ^ <<
-/// >>`), `&&`/`||`, and every assignment form -- none of those go through
-/// operator resolution at all, so e.g. `a & b` on a struct with no bitwise
-/// meaning stays a plain, unambiguous type error rather than silently
-/// searching an overload table that was never meant to apply to it.
+/// declarations may overload (LANG-001, ARCHITECTURE_OVERHAUL.md §13.1 --
+/// supersedes the original STRING_UFCS_OPERATOR_CHAR_RFC.md §8 whitelist,
+/// which additionally deferred these). Deliberately still excludes `&&`/`||`
+/// (F-OP-4 -- short-circuit evaluation cannot survive a function call) and
+/// every assignment form (compound assignment DESUGARS to the underlying
+/// binary op instead of having its own `operator+=`, see §13.5) -- those
+/// never go through operator resolution at all, so e.g. `a && b` on a struct
+/// stays a plain, unambiguous type error rather than silently searching an
+/// overload table that was never meant to apply to it.
 inline bool isOverloadableBinaryOp(int Tok) {
   switch (Tok) {
   case '+':
   case '-':
   case '*':
   case '/':
+  case '%':
+  case TOK_POWER:
+  case '&':
+  case '|':
+  case '^':
+  case TOK_LSHIFT:
+  case TOK_RSHIFT:
   case TOK_EQ:
   case TOK_NEQ:
   case '<':
@@ -149,30 +186,81 @@ inline bool isOverloadableBinaryOp(int Tok) {
   }
 }
 
+/// The fixed set of unary operator tokens that `operator` declarations may
+/// overload (LANG-001, §13.1): `-` (negation), `!` (logical not), `~`
+/// (bitwise not). Deliberately excludes unary `+` -- it has no dedicated
+/// spelling distinct from binary `+` at the declaration site in a way that
+/// would carry independent meaning (unary `+` is already a numeric-only
+/// no-op, see TypeChecker::visitUnary()), and the frozen decision this
+/// session confirmed with the user scopes LANG-001's unary set to exactly
+/// these three, matching §13.1's table.
+inline bool isOverloadableUnaryOp(int Tok) {
+  switch (Tok) {
+  case '-':
+  case '!':
+  case '~':
+    return true;
+  default:
+    return false;
+  }
+}
+
 /// Synthesizes the overload-table key / FuncDefExprAST name for an
 /// `operator` declaration or use, e.g. '+' -> "operator+", TOK_EQ ->
 /// "operator==". This can never collide with a real user identifier --
 /// `operator` is a keyword token (TOK_OPERATOR) and no legal TOK_IDENTIFIER
-/// spelling can contain '+ - * / = < >' -- so storing operator overloads in
-/// the same name-keyed overload map ordinary `fn`s use (ResolverModule::
-/// Functions / TurfModule::Functions) is safe and requires no new map.
-/// Returns "" for a non-overloadable token (callers should have already
-/// checked isOverloadableBinaryOp() first).
+/// spelling can contain '+ - * / = < > % * & | ^'  -- so storing operator
+/// overloads in the same name-keyed overload map ordinary `fn`s use
+/// (ResolverModule::Functions / TurfModule::Functions) is safe and requires
+/// no new map.
+///
+/// Unary and binary forms of the SAME spelling (`-`) share this one name
+/// deliberately -- §13.2's "key by (spelling, arity), not by inventing a
+/// second name" decision. The ordinary overload map is already arity-aware
+/// (ResolverFunctionSymbol::arity()), so `operator-(a: Vec2): Vec2` (unary
+/// negation) and `operator-(a: Vec2, b: Vec2): Vec2` (subtraction) coexist
+/// as two differently-aritied overloads of the identical name "operator-",
+/// exactly the way a free function's own overloads do.
+///
+/// Returns "" for a token that is neither an overloadable binary nor unary
+/// operator (callers should have already checked isOverloadableBinaryOp()/
+/// isOverloadableUnaryOp() first).
 inline std::string operatorFunctionName(int Tok) {
   switch (Tok) {
   case '+': return "operator+";
   case '-': return "operator-";
   case '*': return "operator*";
   case '/': return "operator/";
+  case '%': return "operator%";
+  case TOK_POWER: return "operator**";
+  case '&': return "operator&";
+  case '|': return "operator|";
+  case '^': return "operator^";
+  case TOK_LSHIFT: return "operator<<";
+  case TOK_RSHIFT: return "operator>>";
   case TOK_EQ: return "operator==";
   case TOK_NEQ: return "operator!=";
   case '<': return "operator<";
   case '>': return "operator>";
   case TOK_LEQ: return "operator<=";
   case TOK_GEQ: return "operator>=";
+  case '!': return "operator!";
+  case '~': return "operator~";
   default: return "";
   }
 }
+
+/// Fixed key for `operator[]` (read) and `operator[]=` (write) -- these have
+/// no single Lexer token to switch on (the declaration syntax is
+/// `operator[](self: T, index: I): E { ... }` / `operator[]=(self: T, index:
+/// I, value: E): void { ... }`, parsed as a dedicated ParseOperatorDecl()
+/// branch rather than going through isOverloadableBinaryOp()'s token
+/// dispatch), so these two names are synthesized directly by the Parser
+/// instead of via operatorFunctionName(). Declared here so every consumer
+/// (Resolver's ArrayAccessExprAST candidate gathering, TypeChecker,
+/// sanitizeSymbolName()) shares the exact same literal spelling.
+inline const char *OperatorIndexGetName() { return "operator[]"; }
+inline const char *OperatorIndexSetName() { return "operator[]="; }
 
 /// Maps a synthesized operator function name (e.g. "operator+",
 /// "operator==") to a symbol-safe spelling for LLVM mangled names, so the
@@ -181,13 +269,24 @@ inline std::string operatorFunctionName(int Tok) {
 /// contains characters no linker/assembler is guaranteed to accept in a
 /// symbol name). Every non-operator name (the overwhelming majority of
 /// calls) passes through completely unchanged via the map-miss fallback.
+///
+/// Unary vs. binary `-` (and any other shared spelling) need no separate
+/// entry here: mangledName() appends every PARAMETER's own mangled type
+/// after this sanitized base, so "operator_minus_Vec2" (unary) and
+/// "operator_minus_Vec2_Vec2" (binary) already differ by arity alone.
 inline std::string sanitizeSymbolName(const std::string &Name) {
   static const std::unordered_map<std::string, std::string> Map = {
       {"operator+", "operator_plus"},   {"operator-", "operator_minus"},
       {"operator*", "operator_star"},   {"operator/", "operator_slash"},
+      {"operator%", "operator_mod"},    {"operator**", "operator_pow"},
+      {"operator&", "operator_band"},   {"operator|", "operator_bor"},
+      {"operator^", "operator_bxor"},   {"operator<<", "operator_shl"},
+      {"operator>>", "operator_shr"},
       {"operator==", "operator_eq"},    {"operator!=", "operator_ne"},
       {"operator<", "operator_lt"},     {"operator>", "operator_gt"},
       {"operator<=", "operator_le"},    {"operator>=", "operator_ge"},
+      {"operator!", "operator_not"},    {"operator~", "operator_bnot"},
+      {"operator[]", "operator_index"}, {"operator[]=", "operator_index_set"},
   };
   auto It = Map.find(Name);
   return It != Map.end() ? It->second : Name;
@@ -233,6 +332,15 @@ struct ResolverFunctionSymbol {
   /// that was never actually registered anywhere.
   bool                     IsExtern    = false;
 
+  /// STD-002: true when this declaration was written `@caller_location
+  /// fn ...` (FuncDefExprAST::hasCallerLocation()). Read by Codegen
+  /// (FuncCallExprAST::codegen(), CodegenFunc.cpp) via ResolvedCallTarget to
+  /// decide whether a call to this function needs one extra, hidden
+  /// argument appended -- never affects arity/overload matching, since this
+  /// flag intentionally has no corresponding entry in Params above (see
+  /// FuncDefExprAST's own doc comment, ASTDecl.h, for why).
+  bool                     HasCallerLocation = false;
+
   /// True if this is a struct instance method (Params[0].Name == "self")
   /// whose body directly assigns to a `self.<field>` somewhere. Computed
   /// once by Resolver::buildFunctionSymbol() via a conservative, non-
@@ -248,7 +356,7 @@ struct ResolverFunctionSymbol {
 
   /// Candidate scope-qualifier names (`Left` in every `Left::Right` or
   /// `Left::Right(...)` shape) found among this function's own `return`
-  /// statements (docs/planning/Errors.md), computed once by
+  /// statements (docs/architecture/errors_and_recover.md), computed once by
   /// Resolver::buildFunctionSymbol() via a conservative, non-interprocedural
   /// scan (CollectReturnedErrorTypeNames() in Resolver.cpp) -- same
   /// conservatism/limitations as MutatesSelf above (no nested-call
@@ -266,6 +374,38 @@ struct ResolverFunctionSymbol {
   /// lookupErrorType() themselves, once ALL error types are guaranteed
   /// registered (Pass 2).
   std::vector<std::string> PossibleErrorTypeNames;
+
+  /// OVH-012: true if some `return <name>;` in this function's body
+  /// re-throws the bound error variable of an ENCLOSING `recover as err run
+  /// { ... }` (e.g. `json::parse`'s `p.parse_value() recover as err run {
+  /// return err; };`). This is unconditionally "returns a real error" --
+  /// `err`'s static type is `AnyErrorType` (type-erased, §2.4), so there is
+  /// no type NAME to add to PossibleErrorTypeNames above, but propagating
+  /// whatever error the wrapped call produced is exactly as much "this
+  /// function can fail" as naming a concrete variant would be. Computed
+  /// alongside PossibleErrorTypeNames by the same
+  /// CollectReturnedErrorTypeNames() scan (Resolver.cpp), which threads the
+  /// innermost enclosing AsRun's BoundName down through the recursion to
+  /// recognize exactly this shape (and no other bare-variable return, which
+  /// stays unclassified -- consistent with this whole scan's conservative,
+  /// non-interprocedural nature).
+  bool ReturnsReboundError = false;
+
+  /// TYPE-002 (S15/D6): this declaration's OWN `fn<...>` type-parameter
+  /// list, in declaration order (e.g. ["T", "U"] for `fn<T, U> Wrap.pick`).
+  /// Empty for a non-generic declaration. Populated by
+  /// Resolver::buildFunctionSymbol() straight from
+  /// FuncDefExprAST::getTypeParams() -- this symbol has no other way to see
+  /// it, and TypeCheckerCall.cpp's visitMethodCall() needs it to build a
+  /// Method-kind InstantiationRequest's TypeArgs in the SAME order
+  /// Monomorphize.cpp's drainMethodRequests() pairs them against at drain
+  /// time (`Template->getTypeParams()`, positionally). Before this field
+  /// existed, a struct-generic method's own request only ever carried the
+  /// RECEIVER's type arguments (e.g. just [int] for Wrap<int>), silently
+  /// dropping any type parameter the METHOD declares in its own right
+  /// alongside the struct's (`fn<T, U> Wrap.pick(other: U): U` -- T
+  /// redeclares Wrap's own, U is pick's own) -- see D6 in the change record.
+  std::vector<std::string> TypeParams;
 
   /// Arity of this overload.
   /// For variadic functions, this is the number of *named* (declared) params.
@@ -324,6 +464,36 @@ struct ResolverFunctionSymbol {
       if (P.Type) S += "_" + P.Type->getMangledName();
     return S;
   }
+
+  /// TYPE-002 (docs/development/changes/TYPE-002.md, S11b): the mangled
+  /// name for a MONOMORPHIZED instantiation of this (generic) symbol --
+  /// additive, not yet called anywhere (S12a wires it in when it first
+  /// registers a real specialization). Not simply mangledName() called
+  /// after substituting Params: once a generic parameter is substituted
+  /// with a concrete type, Params alone is indistinguishable from a
+  /// hand-written, genuinely non-generic overload with the same name and
+  /// the same concrete parameter types -- e.g. `fn<T> identity(x: T): T`
+  /// instantiated with T=int has Params=[int], mangling to the exact same
+  /// "turf_identity_int" a hand-written `fn identity(x: int): int` would
+  /// also produce. §9.5's own requirement ("a pure function of (module,
+  /// base name, type arguments, parameter types)") is read literally here:
+  /// the explicit type-argument tuple is embedded via a "_gen<N>_" marker
+  /// no ordinary mangledName() call ever produces, so a monomorphized
+  /// instantiation's symbol can never collide with an ordinary
+  /// declaration's, regardless of what the substituted parameter types
+  /// happen to be.
+  std::string
+  mangledNameForInstantiation(const std::vector<TurfTypePtr> &TypeArgs) const {
+    std::string S = "turf_";
+    if (!SourceModule.empty()) S += SourceModule + "_";
+    S += sanitizeSymbolName(BaseName);
+    S += "_gen" + std::to_string(TypeArgs.size());
+    for (const auto &A : TypeArgs)
+      if (A) S += "_" + A->getMangledName();
+    for (const auto &P : Params)
+      if (P.Type) S += "_" + P.Type->getMangledName();
+    return S;
+  }
 };
 
 /**
@@ -353,7 +523,20 @@ struct ResolverConstantSymbol {
   // Exactly one of these is meaningful, selected by Type->isInt()/
   // isDouble()/isBool()/isString() -- `export immut` only supports these 4
   // primitive literal kinds today (see ParseExportDecl()'s validation).
-  long long IntVal = 0;
+  //
+  // IntVal is the literal's EXACT value as a decimal string (SEM-001,
+  // docs/planning/ARCHITECTURE_OVERHAUL.md §8), not a `long long` -- this
+  // header is explicitly, deliberately LLVM/AST-free (see the struct's own
+  // doc comment just above), so it cannot hold an llvm::APSInt directly the
+  // way NumberExprAST now does. A plain decimal string preserves the same
+  // exactness (NumberExprAST::getIntValExact().toString(10, true), written
+  // by hoistExportedConstant, ResolverCore.cpp) without pulling in LLVM --
+  // CodegenConstantValue (CodegenCore.cpp), which already needs LLVM for
+  // everything else it does, is what actually reconstructs an APInt from
+  // this string, the same getBitsNeeded()-then-extOrTrunc(64) pattern
+  // ParseNumberExpr (ParserLiteral.cpp) and NumberExprAST::codegen()
+  // (CodegenExpr.cpp) both already use.
+  std::string IntVal = "0";
   double DoubleVal = 0.0;
   bool BoolVal = false;
   std::string StringVal;

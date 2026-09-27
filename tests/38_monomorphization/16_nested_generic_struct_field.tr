@@ -1,0 +1,17 @@
+// Regression test: D2's nested case (docs/development/changes/TYPE-002.md,
+// S15) -- `struct Holder { items: List<List<Big>> }` must record BOTH the
+// outer List<List<Big>> instantiation AND the inner List<Big> one, not just
+// the outer. recordGenericFieldInstantiations() (TypeCheckerDecl.cpp)
+// recurses into a GenericType's own type arguments specifically to cover
+// this shape.
+import list::List;
+import test;
+
+struct Big { a: int, b: int, c: int }
+struct Holder { items: List<List<Big> >, n: int }
+
+fn main(): int {
+    // Holder = { items: List<List<Big>> (24 bytes: data ptr + len + cap), n: int (8 bytes) } = 32
+    test::assert(sizeof(Holder) == 32, "nested List<List<Big>> field must get a real layout too");
+    return 0;
+}

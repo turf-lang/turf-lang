@@ -4,7 +4,7 @@
  * @details Part of the TypeChecker pass (Issue #7), split from the original
  *          monolithic TypeChecker.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -24,6 +24,8 @@
 #include "Builtins.h"
 
 #include "TypeCheckerInternal.h"
+
+#include "llvm/ADT/SmallString.h" // `compare` pattern-key exact-value fingerprinting
 
 #include <cassert>
 #include <functional>
@@ -65,6 +67,22 @@ bool isAssignableLValue(const ExprAST *E) {
          dynamic_cast<const FieldAccessExprAST *>(E);
 }
 
+// LANG-001: true for an ArrayAccessExprAST base type that can ONLY ever be
+// indexed through `operator[]`/`operator[]=` -- i.e. everything except the
+// three builtin-indexable kinds (real array, pointer, string). Deliberately
+// NOT `T->isStruct() || T->isEnum()`: a monomorphized generic instantiation
+// like `List<int>`/`Set<int>`/`Map<string, int>` is a GenericType (Types.h),
+// a SIBLING of TurfStructType, not a subclass of it -- isStruct() is false
+// for one, so that narrower check silently let a struct/enum-shaped
+// diagnostic here miss every stdlib collection type entirely (confirmed
+// live: fail_stdlib_set_no_index_set.tr crashed with Codegen's "Internal
+// error: Base is not an array or pointer" ICE instead of raising the clean
+// error this function exists to produce, until this widened to "not a
+// builtin-indexable kind" instead of "is one of these two specific kinds").
+bool needsOperatorIndex(const TurfType *T) {
+  return T && !T->isArray() && !T->isPointer() && !T->isString();
+}
+
 // A short, human-readable description of what non-lvalue expression kind
 // was found on the LHS of '=', for InvalidAssignmentTargetError's message.
 std::string describeNonLValue(const ExprAST *E) {
@@ -87,6 +105,18 @@ std::string describeNonLValue(const ExprAST *E) {
 // ─── Literal visitors ─────────────────────────────────────────────────────────
 
 void TypeChecker::visitNumber(NumberExprAST &Node) {
+  // SEM-002 (FREEZE.md §6.2 row 8): a float literal whose decimal->binary
+  // rounding overflowed to +/-inf is a hard error UNCONDITIONALLY --
+  // unlike the int-literal-range checks (checkLiteralRepresentable()),
+  // this doesn't depend on what destination the literal is acquiring, so
+  // it belongs here rather than at each acquires-a-type call site.
+  if (!Node.isInteger() && Node.overflowed()) {
+#ifndef TYPECHECKER_NO_ERRORS
+    FloatLiteralOverflowError(Node.getLoc(), Node.getSpelling()).raise();
+#else
+    throw std::runtime_error("FloatLiteralOverflowError");
+#endif
+  }
   setType(&Node, Node.isInteger() ? TurfInt() : TurfDouble());
 }
 
@@ -108,22 +138,6 @@ void TypeChecker::visitString(StringExprAST &Node) {
 
 void TypeChecker::visitNull(NullExprAST &Node) {
   setType(&Node, TurfNull());
-}
-
-
-void TypeChecker::visitDefaultInit(DefaultInitExprAST &Node) {
-  auto DeclTy = Node.getTypePtr();
-#ifndef TYPECHECKER_NO_ERRORS
-  if (auto *NT = dynamic_cast<const NamedType *>(DeclTy.get())) {
-    if (GlobalSymbolTable) {
-      if (auto StructTy = GlobalSymbolTable->LookupType(NT->getName())) {
-        DeclTy = StructTy;
-        Node.setTypePtr(StructTy);
-      }
-    }
-  }
-#endif
-  setType(&Node, DeclTy);
 }
 
 
@@ -199,6 +213,35 @@ void TypeChecker::visitBinary(BinaryExprAST &Node) {
   const TurfType *LhsTy = getType(Node.getLHS()).get();
   const TurfType *RhsTy = getType(Node.getRHS()).get();
   int Op = Node.getOp();
+
+  // ── Unary `operator!` resolution (LANG-001) ──────────────────────────────
+  // Checked BEFORE the ordinary `operator!=`/builtin '!=' handling below --
+  // if this node is a user-written `!x` (IsDesugaredNot) and the operand's
+  // type declares a unary `operator!`, that ALWAYS takes it: `!x` means
+  // "apply unary not", never "compare x to the literal true" once a type
+  // opts into its own unary-not meaning. See ResolvedNotOperatorCandidates's
+  // doc comment (ASTExpr.h) for why this is layered onto the existing
+  // desugared shape instead of a real UnaryExprAST('!', ...) node.
+  if (Node.IsDesugaredNot && !Node.ResolvedNotOperatorCandidates.empty() && LhsTy) {
+    for (const auto &C : Node.ResolvedNotOperatorCandidates) {
+      if (!C || C->arity() != 1)
+        continue;
+      if (sameTypeExact(C->Params[0].Type.get(), LhsTy)) {
+        if (Node.ResolvedNotOperatorTarget) {
+          reportError(Node.getLoc(),
+                      "Ambiguous 'operator!(" + LhsTy->getName() +
+                          ")' call: more than one visible overload matches "
+                          "at this call site.");
+          break;
+        }
+        Node.ResolvedNotOperatorTarget = C;
+      }
+    }
+    if (Node.ResolvedNotOperatorTarget) {
+      setType(&Node, Node.ResolvedNotOperatorTarget->ReturnType);
+      return;
+    }
+  }
 
   // ── Operator overload resolution ─────────────────────────────────────────
   // Checked BEFORE the builtin bitwise/relational/exponent/arithmetic
@@ -322,6 +365,35 @@ void TypeChecker::visitUnary(UnaryExprAST &Node) {
   TurfTypePtr OperandTy = getType(Node.getOperand());
   int Op = Node.getOpcode();
 
+  // ── Operator overload resolution ─────────────────────────────────────────
+  // Mirrors visitBinary()'s identical block above -- checked BEFORE the
+  // builtin numeric/bool/bitwise dispatch below, for the same reason:
+  // Resolver::validateOperatorDecl() already hard-rejects an all-builtin
+  // operand, so a user overload can never shadow a builtin match here.
+  // Exact-type-match only (F-OP-1, sameTypeExact, no numeric coercion).
+  if (isOverloadableUnaryOp(Op) && !Node.ResolvedOperatorCandidates.empty() &&
+      OperandTy) {
+    for (const auto &C : Node.ResolvedOperatorCandidates) {
+      if (!C || C->arity() != 1)
+        continue;
+      if (sameTypeExact(C->Params[0].Type.get(), OperandTy.get())) {
+        if (Node.ResolvedOperatorTarget) {
+          reportError(Node.getLoc(),
+                      "Ambiguous 'operator " + OpToDisplayString(Op) + "(" +
+                          OperandTy->getName() +
+                          ")' call: more than one visible overload matches "
+                          "at this call site.");
+          break;
+        }
+        Node.ResolvedOperatorTarget = C;
+      }
+    }
+    if (Node.ResolvedOperatorTarget) {
+      setType(&Node, Node.ResolvedOperatorTarget->ReturnType);
+      return;
+    }
+  }
+
   if (Op == '-' || Op == '+') {
     // Negation / unary plus: operand must be numeric. Unary '+' is a no-op
     // on every numeric type (added purely for symmetry with '-' -- e.g.
@@ -419,7 +491,60 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   const bool LHSIsBareVariable =
       dynamic_cast<const VariableExprAST *>(Node.getLHS()) != nullptr;
 
-  if (LhsTy && RhsTy) {
+  // ── operator[]= overload resolution (LANG-001) ───────────────────────────
+  // If the LHS is an `arr[i]` shape whose base is a struct (LhsTy is null
+  // here for a write-only container -- see visitArrayAccess(), which only
+  // ever gives ArrayAccessExprAST a real type via a matching `operator[]`
+  // READ candidate or a builtin array/pointer/string), look for an exact
+  // match against `operator[]=`'s own (self, index, value) signature using
+  // the base/index's REAL types (not LhsTy, which doesn't describe this at
+  // all) plus the RHS's type as the value operand. A genuine array/pointer/
+  // string LHS never has any ResolvedIndexSetCandidates to begin with (no
+  // `operator[]=` can ever be declared with a builtin self type -- see
+  // validateOperatorDecl()), so this is a pure no-op for every existing
+  // (non-operator) assignment shape.
+  bool HandledViaOperatorIndexSet = false;
+  if (const auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS())) {
+    auto *MutableArrAcc = const_cast<ArrayAccessExprAST *>(ArrAcc);
+    TurfTypePtr ArrBaseTy = getType(ArrAcc->getBase());
+    TurfTypePtr ArrIndexTy = getType(ArrAcc->getIndex());
+    if (!ArrAcc->ResolvedIndexSetCandidates.empty() && ArrBaseTy && ArrIndexTy && RhsTy) {
+      for (const auto &C : ArrAcc->ResolvedIndexSetCandidates) {
+        if (!C || C->arity() != 3)
+          continue;
+        if (operatorSelfOperandMatches(C->Params[0].Type.get(), ArrBaseTy.get()) &&
+            sameTypeExact(C->Params[1].Type.get(), ArrIndexTy.get()) &&
+            sameTypeExact(C->Params[2].Type.get(), RhsTy.get())) {
+          if (MutableArrAcc->ResolvedIndexSetTarget) {
+            reportError(Node.getLoc(),
+                        "Ambiguous 'operator[]=(" + ArrBaseTy->getName() +
+                            ", " + ArrIndexTy->getName() + ", " +
+                            RhsTy->getName() +
+                            ")' call: more than one visible overload "
+                            "matches at this call site.");
+            break;
+          }
+          MutableArrAcc->ResolvedIndexSetTarget = C;
+        }
+      }
+      HandledViaOperatorIndexSet = MutableArrAcc->ResolvedIndexSetTarget != nullptr;
+    }
+    // A struct/enum base with no matching `operator[]=` (either none
+    // declared, or none with this exact (base, index, value) signature) is
+    // a clean type error here, not the "Internal error: Base is not an
+    // array or pointer" ICE Codegen's codegenLValue() would otherwise hit --
+    // same "clean error, not an ICE" bar fail_operator_not_visible.tr holds
+    // ordinary binary operators to (tests/18_operator_overload/).
+    if (!HandledViaOperatorIndexSet && ArrBaseTy &&
+        needsOperatorIndex(ArrBaseTy.get())) {
+      reportError(Node.getLoc(),
+                  "No 'operator[]=' overload matches '" + ArrBaseTy->getName() +
+                      "[" + (ArrIndexTy ? ArrIndexTy->getName() : "?") +
+                      "] = " + (RhsTy ? RhsTy->getName() : "?") + "'.");
+    }
+  }
+
+  if (LhsTy && RhsTy && !HandledViaOperatorIndexSet) {
     if (RhsTy->isNull()) {
       if (!LhsTy->isPointer() && !LhsTy->isNamed("ptr") && !LhsTy->isNamed("void*")) {
         std::string VarName = LHSVar ? LHSVar->getName() : "";
@@ -436,16 +561,77 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
 #endif
       }
     }
-    if (!typesCompatible(RhsTy.get(), LhsTy.get())) {
+    // OVH-005: an untyped literal (`n = 5;` for an 'int32' n) acquires
+    // 'int32' directly -- see untypedLiteralAcquiresInt32()'s doc comment.
+    if (!typesCompatible(RhsTy.get(), LhsTy.get()) &&
+        !untypedLiteralAcquiresInt32(Node.getRHS(), LhsTy.get())) {
       std::vector<RelatedLocation> Related;
       if (LHSIsBareVariable && LHSVar && LHSVar->ResolvedSymbol) {
+        // SEM-003 (§11.6's worked example): a `guess`-inferred variable's
+        // declaration doesn't show its type in the source the way an
+        // explicit annotation does, so the generic "declared here" note
+        // would leave a reader to go re-read the initializer themselves --
+        // name the inferred type directly instead.
+        std::string Note = LHSVar->ResolvedSymbol->WasGuessInferred
+            ? "'" + LHSVar->getName() + "' was inferred as '" +
+                  LhsTy->getName() + "' here"
+            : "declared here";
         Related.push_back({toSourceLocation(LHSVar->ResolvedSymbol->DeclLoc),
-                           "declared here"});
+                           Note});
       }
+      // SLM-001 §16.3 item 3: surface a `guess`-inferred operand's resolved
+      // type as a structured fact for the SLM prompt. Deliberately narrower
+      // than "every operand's type" -- an EXPLICITLY annotated declaration's
+      // type is already spelled out on its own source line (which the
+      // pinned-context mechanism above already shows), so restating it here
+      // would just be the same fact twice. A `guess`-inferred local is
+      // different: the concrete type WasGuessInferred names is never written
+      // anywhere in the source at all, so it is otherwise invisible to the
+      // model no matter how much surrounding context it is shown.
+      SLM::DiagnosticHints Hints;
+      const auto *RHSVar = dynamic_cast<const VariableExprAST *>(Node.getRHS());
+      if (LHSIsBareVariable && LHSVar && LHSVar->ResolvedSymbol &&
+          LHSVar->ResolvedSymbol->WasGuessInferred)
+        Hints.KnownTypes.push_back(
+            "'" + LHSVar->getName() + "' (assignment target) was declared "
+            "with 'guess' and inferred as '" + LhsTy->getName() + "'.");
+      if (RHSVar && RHSVar->ResolvedSymbol &&
+          RHSVar->ResolvedSymbol->WasGuessInferred)
+        Hints.KnownTypes.push_back(
+            "'" + RHSVar->getName() + "' (assigned value) was declared "
+            "with 'guess' and inferred as '" + RhsTy->getName() + "'.");
       reportError(Node.getLoc(),
                   "Cannot assign value of type '" + RhsTy->getName() +
                       "' to variable of type '" + LhsTy->getName() + "'.",
-                  Related);
+                  Related, "", "", Hints);
+    } else {
+      // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
+      checkLiteralRepresentable(Node.getRHS(), LhsTy.get(), Node.getLoc());
+    }
+  }
+
+  // TYPE-002 (S14a): `h.items = List::default();` -- an ASSIGNMENT, not a
+  // VarDeclExprAST initializer -- needs the identical ConstructedType
+  // hand-off TypeChecker::visitVarDecl() already does (TypeCheckerDecl.cpp),
+  // for the same reason: `List::default()`'s own static type is always the
+  // bare NamedType("List") (U-5), so FuncCallExprAST::codegen()'s
+  // construction branch has no other way to know it's building `List<int>`
+  // specifically. Found live: this exact assignment shape (S12b/S13a's own
+  // `Holder.items = List::default();` test pattern) crashed with "Cannot
+  // allocate unsized type %List" once the shared template struct's own
+  // codegen was skipped (S14a, this session) -- the construction fell back
+  // to the now-permanently-opaque bare "List" struct instead of the real,
+  // per-instantiation one.
+  if (LhsTy) {
+    if (dynamic_cast<const GenericType *>(LhsTy.get())) {
+      if (auto *FC = dynamic_cast<FuncCallExprAST *>(
+              const_cast<ExprAST *>(Node.getRHS()))) {
+        if (auto *SC = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee())) {
+          if (SC->ResolvedKind == ScopeAccessKind::DefaultConstruct ||
+              SC->ResolvedKind == ScopeAccessKind::ConstructorCall)
+            FC->ConstructedType = LhsTy;
+        }
+      }
     }
   }
 
@@ -501,6 +687,84 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
   TurfTypePtr ResultTy;
   int Op = Node.getOpcode();
 
+  // ── Operator overload resolution (F-OP-2's desugaring) ───────────────────
+  // `a op= b` = `a = a op b` -- checked BEFORE the bitwise/`**`/arithmetic
+  // builtin dispatch below for the identical reason visitBinary() checks
+  // first: validateOperatorDecl() already hard-rejects an all-builtin
+  // operand pair, so a user overload can never shadow a builtin match.
+  // Exact-type-match only (F-OP-1). The LHS location was evaluated exactly
+  // ONCE, above (`Node.getLHS())->accept(*this)`), same as every other
+  // branch of this function -- there is no second evaluation to worry
+  // about, unlike a literal `a = a op b` AST rewrite would have caused
+  // (§13.5's explicit concern) if this had chosen that route instead.
+  if (isOverloadableBinaryOp(Op) && !Node.ResolvedOperatorCandidates.empty() &&
+      LhsTy && RhsTy) {
+    for (const auto &C : Node.ResolvedOperatorCandidates) {
+      if (!C || C->arity() != 2)
+        continue;
+      if (sameTypeExact(C->Params[0].Type.get(), LhsTy.get()) &&
+          sameTypeExact(C->Params[1].Type.get(), RhsTy.get())) {
+        if (Node.ResolvedOperatorTarget) {
+          reportError(Node.getLoc(),
+                      "Ambiguous 'operator " + OpToDisplayString(Op) + "=(" +
+                          LhsTy->getName() + ", " + RhsTy->getName() +
+                          ")' call: more than one visible overload matches "
+                          "at this call site.");
+          break;
+        }
+        Node.ResolvedOperatorTarget = C;
+      }
+    }
+    if (Node.ResolvedOperatorTarget) {
+      // F-OP-2: `a op= b` desugars to `a = a op b` -- the ASSIGNED type is
+      // therefore the operator's OWN return type, not necessarily LhsTy
+      // (mirrors ordinary compound assignment's own typesCompatible(
+      // ResultTy, LhsTy) check further below, except an operator overload's
+      // result must match the LHS's declared type exactly, the same "no
+      // coercion" rule every other operator-overload call site enforces).
+      TurfTypePtr OpResultTy = Node.ResolvedOperatorTarget->ReturnType;
+      if (OpResultTy && !sameTypeExact(OpResultTy.get(), LhsTy.get())) {
+        reportError(Node.getLoc(),
+                    "'operator " + OpToDisplayString(Op) + "' returns '" +
+                        OpResultTy->getName() + "', which cannot be "
+                        "assigned back to '" + LhsTy->getName() +
+                        "' without an explicit cast.");
+      }
+      setType(&Node, LhsTy);
+      return;
+    }
+  }
+
+  // LANG-001 scope boundary: compound assignment THROUGH `operator[]`
+  // (`myMap[k] += 1`) is deliberately not supported by this pass -- it would
+  // need a read-modify-write through both `operator[]` and `operator[]=`
+  // together, a genuinely separate feature from plain index read/write.
+  // Caught here as a clean diagnostic rather than reaching Codegen's
+  // CompoundAssignmentExprAST::codegen(), which calls LHS->codegenLValue()
+  // unconditionally and would hit ArrayAccessExprAST::codegenLValue()'s
+  // "Internal error: Base is not an array or pointer" ICE for a struct base
+  // with no PHYSICAL address (see docs/development/changes/LANG-001.md's
+  // Known pitfalls).
+  if (const auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS())) {
+    TurfTypePtr ArrBaseTy = getType(ArrAcc->getBase());
+    // Struct/enum base means this access is ALWAYS operator[]-mediated
+    // (never a real array/pointer/string) -- checked directly on the
+    // base's type, not on whether LhsTy came back null, because a
+    // container that declares BOTH operator[] and operator[]= (the
+    // common, symmetric case -- see 10_operator_index_get_set.tr) gives
+    // LhsTy a perfectly real type (operator[]'s return type) here, which
+    // would otherwise defeat a "LhsTy is null" check entirely.
+    if (ArrBaseTy && needsOperatorIndex(ArrBaseTy.get())) {
+      reportError(Node.getLoc(),
+                  "Compound assignment through 'operator[]' is not "
+                  "supported -- write 'x[i] = x[i] " + OpToDisplayString(Op) +
+                      " " + (RhsTy ? RhsTy->getName() : "value") +
+                      "' explicitly instead.");
+      setType(&Node, RhsTy);
+      return;
+    }
+  }
+
   // Bitwise compound-assign (&=, |=, ^=, <<=, >>=) -- same "int operands
   // only" rule as the plain binary form (visitBinary()'s isBitwise branch).
   // Skipping this and falling into the generic inferArithmeticType() call
@@ -548,6 +812,28 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     }
     // LhsTy is set on Node below (unconditionally, same as every other
     // branch) -- nothing further to do here.
+  } else if (LhsTy && RhsTy && LhsTy->isInt32()) {
+    // OVH-005 (docs/reference/variables_and_types.md §int32): int32 is
+    // never itself an arithmetic result type -- inferArithmeticType()
+    // always promotes an int32 operand to plain 'int' (the same
+    // "int/bool arithmetic -> int" branch every other integer compound
+    // assignment takes), so falling through to the generic path below
+    // would report "Cannot assign value of type 'int' to variable of type
+    // 'int32'" -- technically true, but it reads like an ordinary type
+    // mismatch a wider RHS type could fix, when none ever could. Caught
+    // here, before inferArithmeticType() runs at all, with a message that
+    // says why and a concrete rewrite.
+    const VariableExprAST *LHSVar_i32 = findRootVariable(Node.getLHS());
+    std::string VarSpelling = LHSVar_i32 ? LHSVar_i32->getName() : "x";
+    reportError(Node.getLoc(),
+                "Compound assignment '" + OpToDisplayString(Op) +
+                    "=' is not supported on 'int32' -- int32 is never "
+                    "itself an arithmetic result type.",
+                {},
+                "Write '" + VarSpelling + " = (" + VarSpelling + " " +
+                    OpToDisplayString(Op) + " " +
+                    (RhsTy ? RhsTy->getName() : "value") +
+                    ") to int32;' explicitly instead.");
   } else if (LhsTy && RhsTy) {
     if (inferArithmeticType(Node.getLoc(), Op, LhsTy.get(), RhsTy.get(), ResultTy)) {
       if (!typesCompatible(ResultTy.get(), LhsTy.get())) {
@@ -596,11 +882,117 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
   if (Node.getOperand())
     const_cast<ExprAST *>(Node.getOperand())->accept(*this);
 
-  TurfTypePtr OpTy = getType(Node.getOperand());
+  const char *Dir = Node.IsPrefix ? "prefix" : "postfix";
 
-  if (OpTy && !OpTy->isNumeric()) {
+  // LANG-001 follow-up: both directions now parse ANY assignable lvalue
+  // (see PostfixExprAST's own doc comment, ASTExpr.h, and ParserCore.cpp's
+  // prefix handling for why) instead of prefix being restricted to a bare
+  // identifier at parse time -- so a non-lvalue operand (`++(a + b)`,
+  // `(f())++`) is no longer caught by the parser and needs the same check
+  // assignment/compound assignment already run, here instead.
+  if (!isAssignableLValue(Node.getOperand())) {
+#ifndef TYPECHECKER_NO_ERRORS
+    InvalidAssignmentTargetError(Node.getLoc(),
+                                 describeNonLValue(Node.getOperand()))
+        .raise();
+#else
+    throw std::runtime_error("InvalidAssignmentTargetError");
+#endif
+    setType(&Node, nullptr);
+    return;
+  }
+
+  TurfTypePtr OpTy = getType(Node.getOperand());
+  std::string OpSpelling(1, static_cast<char>(Node.getOpcode()));
+
+  // LANG-001 scope boundary: `++`/`--` THROUGH `operator[]` (`box[i]++`,
+  // `++box[i]`) is deliberately not supported, same reasoning as compound
+  // assignment through `operator[]` just above visitCompoundAssignment()'s
+  // identical guard -- it would need operator[]/operator[]= chained
+  // together, and PostfixExprAST::codegen() calls Operand->codegenLValue()
+  // unconditionally, which would otherwise hit the same "Internal error:
+  // Base is not an array or pointer" ICE for a struct base with no
+  // physical address. A BUILTIN array/pointer/string base (needsOperator
+  // Index() is false for those) is completely unaffected -- `++arr[0]` on
+  // a plain `int[N]` works exactly like `arr[0]++` always did.
+  if (const auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(Node.getOperand())) {
+    TurfTypePtr ArrBaseTy = getType(ArrAcc->getBase());
+    if (ArrBaseTy && needsOperatorIndex(ArrBaseTy.get())) {
+      reportError(Node.getLoc(),
+                  std::string(Dir) + " '" + OpSpelling + OpSpelling +
+                      "' through 'operator[]' is not supported -- write "
+                      "'x[i] = x[i] " + OpSpelling + " 1' explicitly instead.");
+      setType(&Node, OpTy);
+      return;
+    }
+  }
+
+  // ── Operator overload resolution (D21) ───────────────────────────────────
+  // Exact match against (OperandType, int), for EITHER direction -- the
+  // implicit "+1"/"-1" is always a plain `int`. The expression's OWN type
+  // stays OpTy either way (only WHICH value -- old or new -- Codegen
+  // returns differs by direction), but the overload's return type must
+  // match OpTy exactly for the implicit store-back to be sound.
+  bool HandledViaOperator = false;
+  if (!Node.ResolvedOperatorCandidates.empty() && OpTy) {
+    TurfTypePtr IntTy = TurfInt();
+    for (const auto &C : Node.ResolvedOperatorCandidates) {
+      if (!C || C->arity() != 2)
+        continue;
+      if (sameTypeExact(C->Params[0].Type.get(), OpTy.get()) &&
+          sameTypeExact(C->Params[1].Type.get(), IntTy.get())) {
+        if (Node.ResolvedOperatorTarget) {
+          reportError(Node.getLoc(),
+                      "Ambiguous " + std::string(Dir) + " 'operator " + OpSpelling + "(" +
+                          OpTy->getName() +
+                          ", int)' call: more than one visible overload "
+                          "matches at this call site.");
+          break;
+        }
+        Node.ResolvedOperatorTarget = C;
+      }
+    }
+    if (Node.ResolvedOperatorTarget) {
+      TurfTypePtr OpResultTy = Node.ResolvedOperatorTarget->ReturnType;
+      if (OpResultTy && !sameTypeExact(OpResultTy.get(), OpTy.get())) {
+        reportError(Node.getLoc(),
+                    "'operator " + OpSpelling + "' returns '" +
+                        OpResultTy->getName() +
+                        "', which cannot be stored back into '" +
+                        OpTy->getName() + "' for " + Dir + " '" + OpSpelling +
+                        OpSpelling + "'.");
+      }
+      HandledViaOperator = true;
+    }
+  }
+
+  // OVH-005 (docs/reference/variables_and_types.md §int32): int32 is never
+  // itself an arithmetic result type, so `++`/`--` (exactly `x = x +/- 1`)
+  // has no legal lowering for it -- checked BEFORE the generic "requires a
+  // numeric operand" rejection just below (int32 IS numeric, so that check
+  // would silently pass it through) and, critically, BEFORE any Codegen is
+  // reached at all: PostfixExprAST::codegen() (CodegenVar.cpp) unconditionally
+  // builds its overflow-checked-add intrinsic call assuming an i64 operand,
+  // and a genuinely i32-typed OldVal there produced invalid LLVM IR -- a
+  // real internal compiler error, not a diagnosable one -- before this
+  // check existed.
+  if (!HandledViaOperator && OpTy && OpTy->isInt32()) {
+    const VariableExprAST *OperandVar = findRootVariable(Node.getOperand());
+    std::string VarSpelling = OperandVar ? OperandVar->getName() : "x";
     reportError(Node.getLoc(),
-                "Postfix operator requires a numeric operand, got '" +
+                std::string(Dir) + " '" + OpSpelling + OpSpelling +
+                    "' is not supported on 'int32' -- int32 is never itself "
+                    "an arithmetic result type.",
+                {},
+                "Write '" + VarSpelling + " = (" + VarSpelling + " " +
+                    OpSpelling + " 1) to int32;' explicitly instead.");
+    setType(&Node, OpTy);
+    return;
+  }
+
+  if (!HandledViaOperator && OpTy && !OpTy->isNumeric()) {
+    reportError(Node.getLoc(),
+                (std::string(Dir) + " operator requires a numeric operand, got '") +
                     OpTy->getName() + "'.");
   }
 
@@ -692,6 +1084,78 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   TurfTypePtr OperandTy = Node.getOperand() ? getType(Node.getOperand()) : nullptr;
   if (!checkUnsafeGate(Node.getDestTypePtr().get(), Node.getLoc(), &Node))
     checkUnsafeGate(OperandTy.get(), Node.getLoc(), &Node);
+
+  // SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): 'to'-cast
+  // legality, Rule B1 -- moved here from Codegen (CastExprAST::codegen(),
+  // CodegenExpr.cpp) so an illegal cast is caught at the TypeChecker
+  // layer, like every other type rule, instead of Codegen being the only
+  // thing standing between it and a diagnostic (docs/architecture/
+  // compiler_pipeline.md §0's own stated pipeline invariant: Codegen only
+  // ever runs on an AST that has ALREADY passed the TypeChecker cleanly).
+  // Mirrors CodegenExpr.cpp's own pairwise dispatch pair-for-pair --
+  // Codegen's own final "Everything else is unsupported" TypeError stays
+  // in place as a defensive, should-be-unreachable fallback (see this
+  // group's change record's Known pitfalls on why it isn't deleted).
+  if (OperandTy) {
+    bool EitherSideIsGenericParam =
+        dynamic_cast<const TurfGenericParamType *>(OperandTy.get()) ||
+        dynamic_cast<const TurfGenericParamType *>(DestTy.get());
+
+    if (!EitherSideIsGenericParam) {
+      const std::string SrcName = OperandTy->getName();
+      const std::string DstName = DestTy->getName();
+
+      // Resolve OperandTy through GlobalSymbolTable too, mirroring DestTy's
+      // own resolution above -- an enum-typed operand is otherwise still a
+      // bare NamedType at this point (same root cause as the enum-literal
+      // check above).
+      TurfTypePtr ResolvedOperandTy = OperandTy;
+      if (auto *NT2 = dynamic_cast<const NamedType *>(OperandTy.get())) {
+        if (GlobalSymbolTable) {
+          if (auto Resolved = GlobalSymbolTable->LookupType(NT2->getName()))
+            ResolvedOperandTy = Resolved;
+        }
+      }
+      bool SrcIsEnum = dynamic_cast<const TurfEnumType *>(ResolvedOperandTy.get()) != nullptr;
+      bool DstIsEnum = dynamic_cast<const TurfEnumType *>(DestTy.get()) != nullptr;
+      bool SrcIsPtrLike = dynamic_cast<const TurfPointerType *>(OperandTy.get()) != nullptr ||
+                          SrcName == "ptr" || SrcName == "string";
+      bool DstIsPtrLike = dynamic_cast<const TurfPointerType *>(DestTy.get()) != nullptr ||
+                          DstName == "ptr" || DstName == "string";
+
+      bool Legal =
+          SrcName == DstName ||
+          (SrcName == "int" && DstName == "double") ||
+          (SrcName == "double" && DstName == "int") ||
+          (SrcName == "int32" && DstName == "int") ||
+          (SrcName == "int" && DstName == "int32") ||
+          (SrcName == "int32" && DstName == "double") ||
+          (SrcName == "double" && DstName == "int32") ||
+          (SrcName == "char" && DstName == "int") ||
+          (SrcName == "int" && DstName == "char") ||
+          (SrcIsEnum && DstName == "int") ||
+          (SrcName == "int" && DstIsEnum) ||
+          (SrcName == "string" && DstName == "int") ||
+          (SrcName == "string" && DstName == "double") ||
+          (SrcName == "int" && DstName == "string") ||
+          (SrcName == "double" && DstName == "string") ||
+          (SrcName == "bool" && DstName == "string") ||
+          (SrcIsEnum && DstName == "string") ||
+          (SrcName == "string" && DstIsEnum) ||
+          (SrcName == "int" && dynamic_cast<const TurfPointerType *>(DestTy.get()) != nullptr) ||
+          (SrcIsPtrLike && DstIsPtrLike);
+
+      if (!Legal) {
+#ifndef TYPECHECKER_NO_ERRORS
+        TypeError(Node.getLoc(), "Cannot explicitly cast '" + SrcName +
+                                      "' to '" + DstName + "'")
+            .raise();
+#else
+        throw std::runtime_error("TypeError: Cannot explicitly cast");
+#endif
+      }
+    }
+  }
 
   // Explicit cast always succeeds at the TypeChecker level; result is DestType.
   setType(&Node, Node.getDestTypePtr());
@@ -786,8 +1250,17 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
       if (auto *EA = dynamic_cast<ScopeAccessExprAST *>(PatExpr.get())) {
         PatternKey = "enum:" + EA->getVariant();
       } else if (auto *Num = dynamic_cast<NumberExprAST *>(PatExpr.get())) {
-        if (Num->isInteger())
-          PatternKey = "int:" + std::to_string(Num->getIntVal());
+        if (Num->isInteger()) {
+          // Exact accessor, not getIntVal() -- this key is what makes two
+          // `compare` arms with the same literal a real
+          // DuplicateOtherwiseArmError-style diagnostic (SEM-001,
+          // docs/planning/ARCHITECTURE_OVERHAUL.md §8's own Risks note).
+          // getIntVal()'s 64-bit truncation could make two DIFFERENT wide
+          // literals collide into a false "duplicate arm".
+          llvm::SmallString<32> Digits;
+          Num->getIntValExact().toString(Digits, 10);
+          PatternKey = "int:" + Digits.str().str();
+        }
       } else if (auto *Str = dynamic_cast<StringExprAST *>(PatExpr.get())) {
         PatternKey = "str:" + Str->getValue();
       }

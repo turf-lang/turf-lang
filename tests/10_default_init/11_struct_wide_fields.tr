@@ -1,4 +1,6 @@
-// Stress test: struct with many fields of various types — all default-initialized
+// Stress test: struct with many fields of various types — all default-
+// initialized via explicit BigStruct::default() (SEM-004: no more eager
+// zero-init).
 import io;
 
 import test;
@@ -14,7 +16,7 @@ struct BigStruct {
 }
 
 fn main(): int {
-    mut s: BigStruct;
+    mut s: BigStruct = BigStruct::default();
     test::assert(s.a == 0, "a=0");
     test::assert(s.b == 0, "b=0");
     test::assert(s.c == 0, "c=0");

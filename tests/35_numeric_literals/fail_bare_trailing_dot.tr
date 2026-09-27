@@ -1,0 +1,16 @@
+// SEM-001: a bare trailing dot (`5.`, nothing -- not even a digit -- after
+// it) is NOT part of the number at all. FREEZE.md's dotted-float grammar
+// requires at least one fractional digit after '.', so `5.` was never a
+// valid float form; the lexer only commits to '.' as a literal's decimal
+// point when a digit immediately follows it (see the "Dotted form" comment
+// in Lexer.cpp's number-scanning branch). `5` is returned as a plain int
+// literal and '.' is left for the next token -- which is why this fails
+// with a generic, PRE-EXISTING parser diagnostic ("Expected a method name
+// after '.'", '.' being read as instance-member access on the int `5`),
+// not one of SEM-001's four new lexical-error classes. This test locks in
+// that deliberate boundary decision rather than exercising new machinery.
+
+fn main(): int {
+    mut x: double = 5.;
+    return 0;
+}

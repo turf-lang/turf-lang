@@ -1,0 +1,10 @@
+// Regression test (DIAG-001): same VarDeclExprAST lint gap as
+// 37_lint_vardecl_div_by_zero.tr, exercised for RedundantComparisonWarning
+// instead of DivisionByZeroLiteralWarning -- a different LintBinaryExpr
+// check, same missing recursion into a declaration's initializer.
+// Emits RedundantComparisonWarning. Compilation must still succeed.
+fn main(): int {
+    mutable flag: bool = true;
+    mutable z: bool = flag == true;
+    return 0;
+}

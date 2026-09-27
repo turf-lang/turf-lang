@@ -45,15 +45,15 @@ pointers (`T*`) rather than by value.
 
 ### Self-referential structs
 
-A field may hold a pointer to the struct's own type — this is how you build
-linked structures:
+A field may hold a reference to the struct's own type — this is how you
+build linked structures. Use `&?T`, the **nullable safe reference**: no
+`unsafe { }` needed anywhere, for the field, the struct declaration, or any
+function that takes or returns one.
 
 ```turflang
-unsafe {
-    struct Node {
-        val: int,
-        next: Node*
-    }
+struct Node {
+    val: int,
+    next: &?Node
 }
 ```
 
@@ -61,26 +61,46 @@ This works with no special forward-declaration step; a struct name may be
 referenced by its own fields (or by any struct declared earlier or later in
 the file) freely.
 
+`null` is assignable to `&?Node` (it's the only safe reference type that
+accepts it), and a plain `&Node` widens into it implicitly:
+
+```turflang
+fn Node.new(val: int): void {
+    self.val = val;
+    self.next = null;   // plain field write, no unsafe { } needed
+}
+```
+
+**Reading a `&?T` field requires a null check first** — the compiler tracks
+whether you've proven it non-null on the path to each use:
+
+```turflang
+fn sum(head: &?Node): int {
+    mut total: int = 0;
+    mut current: &?Node = head;
+    while (current != null) {          // narrows `current` to non-null...
+        total = total + current.val;   // ...so this compiles
+        current = current.next;
+    }
+    return total;
+}
+```
+
+Accessing `current.val` with no preceding `current != null` (or
+`current == null` with an early return, or a `&&` chain, or any other
+direct comparison) is a compile error — see
+`docs/architecture/pointers_and_references.md` §1.8 for the full narrowing
+rules, and `tests/39_nullable_references/` for a complete linked-list and
+binary-tree example.
+
 > [!NOTE]
-> A raw pointer field such as `next: Node*` is a genuinely nullable pointer,
-> which the safe `&T` reference type can never represent. Per Turflang's
-> `unsafe` pointer gating, the entire `struct` declaration containing a raw
-> pointer field must be wrapped in `unsafe { }`.
->
-> Also note that **no function — including a struct method — may ever take a
-> raw `T*` parameter**, even inside `unsafe { }`. This means a
-> self-referential field like `next` cannot be a constructor parameter. The
-> usual pattern is to construct the struct first and then assign the
-> pointer field directly, inside `unsafe { }`:
->
-> ```turflang
-> fn Node.new(val: int): void {
->     self.val = val;
->     unsafe {
->         self.next = null;
->     }
-> }
-> ```
+> A raw `T*` field (rather than `&?T`) is still legal, but requires the
+> entire `struct` declaration to be wrapped in `unsafe { }`, and — unlike
+> `&?T` — no function may ever take a raw `T*` parameter, even inside
+> `unsafe { }`. There is no longer a good reason to reach for `T*` here:
+> `&?T` is the safe, checked, ergonomic way to write a self-referential
+> struct. See `docs/architecture/pointers_and_references.md` §1.2 for when
+> `T*`/`ptr` are still the right choice (FFI bindings, mostly).
 
 ### Construction: `::new()` and `::default()`
 

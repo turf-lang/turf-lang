@@ -1,0 +1,22 @@
+A generic instantiation chain never bottoms out
+
+    fn<T> wrap(x: T) {
+        wrap(Box { val: x });   // ERROR: every call asks for a NEW, bigger
+    }                            // instantiation of wrap -- this never ends
+
+Turf's generics are monomorphized: calling a generic function or
+constructing a generic struct with a new combination of concrete types
+compiles a brand new specialized copy of it. That's normally invisible --
+`List<int>` and `List<string>` just work, each with its own compiled code.
+
+But a generic that calls itself with a type that keeps growing (here,
+`wrap<T>` always calls `wrap<Box<T>>`) would need an infinite number of
+distinct compiled copies: wrap<int>, wrap<Box<int>>, wrap<Box<Box<int>>>,
+forever. The compiler stops after 64 levels rather than exhausting memory
+trying to finish, and reports the whole chain so you can see exactly which
+call keeps growing the type.
+
+This is almost never what you actually want. If you're trying to write a
+recursive data structure or algorithm, use a pointer/reference
+(`T*`/`&T`) so the TYPE stays fixed across the recursion -- only the VALUE
+recurses, not the instantiation.

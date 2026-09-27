@@ -132,8 +132,10 @@ Tracks a set of allocations so they can all be freed with one call.
 > self-contained — it does not `import list;`/reuse `List<T>`, which would
 > create a circular import since `list.tr` itself imports `mem.tr`. Its
 > `track()` is a direct copy of `List.push()`'s growth logic, and shares
-> the same 8-byte-slot / doubling-from-8 policy described in
-> [`collections.md`](./collections.md).
+> the same real-per-instantiation-`sizeof(T)` / doubling-from-8 policy
+> described in [`collections.md`](./collections.md). This duplication is
+> deliberate and explicitly out of scope to "fix" — see
+> `docs/development/changes/STD-003.md`, item 7.
 
 ### `Pool.track(item: T): void`
 

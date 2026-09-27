@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -28,12 +28,16 @@
 #include "ValueRange.h"
 #include "Lint.h"
 #include "SymbolTable.h"
-#include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
+#include "Monomorphize.h" // Monomorphize::instantiatedDeclName() -- getLLVMType()'s GenericType branch, TYPE-002 S13b
+#include "llvm/ADT/SmallString.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Path.h"
 #include <algorithm>
+#include <cassert>
 #include <iostream>
 #include <set>
 #include <unordered_map>
@@ -43,6 +47,16 @@ using namespace llvm;
 std::unique_ptr<LLVMContext> TheContext;
 std::unique_ptr<IRBuilder<>> Builder;
 std::unique_ptr<Module> TheModule;
+
+// TOOL-001 debug-info state (declared in Codegen.h -- see its own doc
+// comment). g_EmitDebugInfo is the ONLY one of these four set from outside
+// InitializeModule(): main.cpp sets it from the `-g` flag before calling
+// InitializeModule(), which is what decides whether DBuilder/DebugCU get
+// built at all.
+bool g_EmitDebugInfo = false;
+std::unique_ptr<DIBuilder> DBuilder;
+DICompileUnit *DebugCU = nullptr;
+DISubprogram *CurrentDebugScope = nullptr;
 
 std::map<std::string, VarInfo> NamedValues;
 
@@ -59,6 +73,14 @@ std::map<std::string, TurfTypePtr> FuncReturnTypes;
 // Type cache for Monomorphization: maps type name -> LLVM type
 std::map<std::string, llvm::Type *> LLVMTypeCache;
 
+// MEM-002: see CodegenInternal.h's own doc comment. Reset to nullptr at the
+// top of InitializeModule() below for the identical reason ResetArgvHelpers()
+// exists -- a fresh compile must never carry a stale Value* left over from a
+// previous TheModule (relevant for the compiler's own multi-file/REPL-like
+// invocations, not a single ordinary `turf file.tr` run, but cheap to get
+// right unconditionally).
+llvm::Value *PendingGCAllocDescOverride = nullptr;
+
 void InitializeModule() {
   // Holds types and constants
   TheContext = std::make_unique<LLVMContext>();
@@ -72,10 +94,72 @@ void InitializeModule() {
   // See CodegenInternal.h's doc comment: CodegenFunc.cpp's main argv/argc
   // plumbing globals must not survive into a fresh TheModule.
   ResetArgvHelpers();
+  PendingGCAllocDescOverride = nullptr;
+
+  // TOOL-001: `-g` DWARF debug info. g_EmitDebugInfo is set by main.cpp
+  // (from the `-g` flag) strictly BEFORE this function runs, so it's already
+  // final by the time we get here. DBuilder/DebugCU are rebuilt fresh
+  // alongside TheContext/TheModule above -- there is exactly one
+  // InitializeModule() call per compiler invocation (a single `.tr` file
+  // per process), so no stale-pointer-into-a-torn-down-Module hazard exists
+  // here the way ResetArgvHelpers() guards against for ArgcStorageGV/
+  // ArgvStorageGV.
+  DBuilder.reset();
+  DebugCU = nullptr;
+  CurrentDebugScope = nullptr;
+  if (g_EmitDebugInfo) {
+    DBuilder = std::make_unique<DIBuilder>(*TheModule);
+
+    // Both module flags are required for a DWARF-emitting backend to treat
+    // this module's debug metadata as well-formed at all -- omitting either
+    // one is silently accepted by LLVM (no verifier error) but produces an
+    // object file with no .debug_* sections whatsoever, which is a much
+    // harder failure to notice than a verifier error would be. Warning (not
+    // Error) behavior matches every other frontend that sets these (clang
+    // included): a conflicting flag from a differently-compiled object this
+    // one might someday link against should warn, not hard-fail the link.
+    TheModule->addModuleFlag(Module::Warning, "Debug Info Version",
+                             DEBUG_METADATA_VERSION);
+    TheModule->addModuleFlag(Module::Warning, "Dwarf Version", 4);
+
+    // MainSourceFilename (Lexer.h) is set by main.cpp strictly before this
+    // call (right after OpenSourceFile(), before InitializeModule()) -- see
+    // that assignment's own comment for why it's kept distinct from the
+    // transient, per-imported-module SourceFilename.
+    SmallString<256> AbsPath(MainSourceFilename);
+    // Failure here just means AbsPath stays relative (e.g. a filesystem
+    // that can't report a current working directory) -- DW_AT_comp_dir
+    // still gets SOME directory string either way, so there's no fallback
+    // branch worth writing for an error this narrow.
+    (void)sys::fs::make_absolute(AbsPath);
+    StringRef Dir = sys::path::parent_path(AbsPath);
+    StringRef Base = sys::path::filename(AbsPath);
+    DIFile *MainFile = DBuilder->createFile(Base, Dir);
+
+    // DW_LANG_C99: there is no assigned DWARF language code for TurfLang
+    // (it isn't one of the languages DWARF standardizes), and every
+    // DWARF-consuming debugger falls back to C-like expression evaluation
+    // for an unrecognized/generic code anyway -- picking the closest
+    // structurally-similar standardized code (like C's) is the same choice
+    // most small/custom-language compilers make, rather than inventing a
+    // vendor extension code nothing downstream would recognize.
+    // isOptimized=false unconditionally, not from opts.OptLevel: main.cpp
+    // sets g_EmitDebugInfo/calls InitializeModule() before it ever looks at
+    // -O, and INV-OPT-1 (INVARIANTS.md) is exactly the structural fact that
+    // Codegen never receives an opt level at all -- threading it in here
+    // just for this one cosmetic DWARF producer flag would be a real,
+    // if narrow, crack in that invariant for zero behavioral benefit (the
+    // flag only affects how a debugger prints "was this optimized", it
+    // changes no code generation).
+    DebugCU = DBuilder->createCompileUnit(
+        dwarf::DW_LANG_C99, MainFile, "turf", /*isOptimized=*/false, "",
+        /*RV=*/0);
+  }
 }
 
 
-// ─── `!T` / `error` runtime representation (docs/planning/Errors.md) ────────
+// ─── `!T` / `error` runtime representation ───────────────────────────────────
+// (docs/architecture/errors_and_recover.md)
 //
 // See getLLVMType()'s TurfErrorUnionType/TurfUserErrorType/AnyErrorType
 // branches just below for the overall design: `!T` is one fixed struct type
@@ -96,22 +180,91 @@ static llvm::StructType *getFallibleValueType() {
 }
 
 
-/// Declares (once) or looks up the C `malloc` used to heap-box a success
-/// value that doesn't fit in a FallibleValue's 64-bit successBits slot (see
-/// BoxToI64Slot()'s struct branch) -- same lookup-or-create pattern already
-/// used for string conversion buffers (see CastToType()'s int/double ->
-/// string branches), needed here for the identical reason: the boxed value
-/// must outlive the function that returns it.
-static Function *getOrCreateMallocFn() {
-  Function *MallocF = TheModule->getFunction("malloc");
-  if (!MallocF) {
-    llvm::FunctionType *FT = llvm::FunctionType::get(
-        PointerType::get(*TheContext, 0),
-        {llvm::Type::getInt64Ty(*TheContext)}, false);
-    MallocF = Function::Create(FT, Function::ExternalLinkage, "malloc",
-                               TheModule.get());
+/// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `{ i8* tag, i8* message }`
+/// -- cached, built once. An error value's runtime representation, UNIFORM
+/// across every occurrence (a bare `ErrorType::Variant` reference and an
+/// `ErrorType::Variant("msg")` construction produce the exact same SHAPE,
+/// differing only in what `message` points to) -- deliberately not a
+/// discriminated union, since telling the two cases apart at runtime
+/// without a discriminant would mean reading an arbitrary number of bytes
+/// past a bare tag string's own NUL terminator. `errorPayload` in
+/// FallibleValue above, and `err`'s own alloca (RecoverExprAST::codegen(),
+/// this file, further down), both still just hold an OPAQUE i8*/ptr to one
+/// of these -- neither needed any change, since LLVM pointers carry no
+/// static type at that level.
+static llvm::StructType *getErrorValueType() {
+  static llvm::StructType *Ty = nullptr;
+  if (!Ty) {
+    Ty = llvm::StructType::create(*TheContext, "TurfErrorValue");
+    Ty->setBody({PointerType::get(*TheContext, 0),
+                PointerType::get(*TheContext, 0)});
   }
-  return MallocF;
+  return Ty;
+}
+
+
+/// Builds a global, private-linkage NUL-terminated C string constant and
+/// returns a `Constant*` pointer to its first byte -- usable as a field
+/// initializer inside another constant (e.g. `ConstantStruct::get()`),
+/// which `Builder->CreateGlobalString()` elsewhere in this file is NOT (it
+/// returns a `Value*`/`GlobalVariable*` suitable for ordinary runtime use,
+/// but building the POINTER-typed, already-decayed constant a
+/// ConstantStruct field needs takes one more step). Mirrors
+/// CodegenStruct.cpp's `emitTurfTypeDesc()`/NameGV+NamePtr idiom exactly
+/// (RT-001) -- the only other place in this codebase that already builds a
+/// global constant struct holding a string pointer field.
+static llvm::Constant *BuildGlobalCStringPtr(const std::string &S,
+                                             const std::string &GVName) {
+  llvm::Constant *StrConst =
+      llvm::ConstantDataArray::getString(*TheContext, S, /*AddNull=*/true);
+  auto *GV = new llvm::GlobalVariable(
+      *TheModule, StrConst->getType(), /*isConstant=*/true,
+      llvm::GlobalValue::PrivateLinkage, StrConst, GVName);
+  llvm::Constant *ZeroIdx =
+      llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
+  llvm::Constant *Indices[] = {ZeroIdx, ZeroIdx};
+  return llvm::ConstantExpr::getInBoundsGetElementPtr(StrConst->getType(), GV,
+                                                       Indices);
+}
+
+
+/// Builds the BARE tag string (i8*, e.g. "MathError::DivisionByZero") for a
+/// declared error variant -- no message, no struct wrapping. This is the
+/// entire pre-STD-002 `BuildErrorTag()`, kept as its own helper (renamed)
+/// because it is still exactly what an equality comparison needs
+/// (GetErrorTagValue() below): comparing WHICH VARIANT occurred never needs
+/// to look at a message, so this stays the cheap, direct, no-allocation
+/// path it always was.
+static llvm::Constant *BuildBareTagString(const std::string &ErrorTypeName,
+                                          const std::string &VariantName) {
+  return llvm::dyn_cast<llvm::Constant>(
+      Builder->CreateGlobalString(ErrorTypeName + "::" + VariantName, "errtag"));
+}
+
+
+/// Declares (once) or looks up `libturfrt`'s `turf_rt_alloc` -- the typed,
+/// COLLECTED GC-heap allocation entrypoint (`runtime/turfrt.h`), used to
+/// heap-box a success value that doesn't fit in a FallibleValue's 64-bit
+/// successBits slot (BoxToI64Slot()'s struct branch) and a message-carrying
+/// error value (CodegenErrorVariantConstructWithMessage(), below). OVH-002
+/// (docs/development/changes/OVH-002.md): both call sites used to
+/// reach a bare `malloc` instead -- correct before MEM-002's collector
+/// existed, a live use-after-free once it did, because a GC-heap pointer
+/// (a `string` field inside the boxed value, the error value's own message
+/// pointer) stored ONLY inside that manual-heap block was invisible to the
+/// collector's mark phase (F-MEM-3: manual memory is never traced). Same
+/// lookup-or-create pattern `getOrCreateStrcmpFn()`/the gc_alloc dispatch
+/// in `CodegenFunc.cpp` already use for a bare libturfrt entrypoint.
+Function *getOrCreateTurfRtAllocFn() {
+  Function *AllocF = TheModule->getFunction("turf_rt_alloc");
+  if (!AllocF) {
+    PointerType *PtrTy = PointerType::get(*TheContext, 0);
+    llvm::FunctionType *FT = llvm::FunctionType::get(
+        PtrTy, {llvm::Type::getInt64Ty(*TheContext), PtrTy}, false);
+    AllocF = Function::Create(FT, Function::ExternalLinkage, "turf_rt_alloc",
+                              TheModule.get());
+  }
+  return AllocF;
 }
 
 
@@ -125,9 +278,11 @@ static Function *getOrCreateMallocFn() {
 /// live while converting net.tr's TcpConnection::connect() to `!T` (a
 /// single-field `{fd: int}` struct is still a real LLVM struct, not a bare
 /// i64, so returning it silently truncated to zero bits before this branch
-/// existed). Heap-allocates space, stores the struct there, and boxes the
-/// POINTER instead -- same "must outlive the function" reasoning as an
-/// error tag string, just for the success side.
+/// existed). Heap-allocates space on the GC HEAP (OVH-002: not a bare
+/// `malloc` -- see getOrCreateTurfRtAllocFn()'s own doc comment), stores
+/// the struct there, and boxes the POINTER instead -- same "must outlive
+/// the function" reasoning as an error tag string, just for the success
+/// side.
 static Value *BoxToI64Slot(Value *Val) {
   llvm::Type *Ty = Val->getType();
   llvm::Type *I64Ty = llvm::Type::getInt64Ty(*TheContext);
@@ -148,9 +303,21 @@ static Value *BoxToI64Slot(Value *Val) {
     // callers never read successBits back for a void T anyway.
     return llvm::ConstantInt::get(I64Ty, 0);
   // Anything else (structs, fixed-size arrays by value): too wide for the
-  // inline slot, so heap-box it instead.
+  // inline slot, so heap-box it instead, on the GC heap, with a real
+  // descriptor -- a NAMED struct type's own descriptor (the SAME one
+  // EmitAllTurfTypeDescs() emits for it, referenced before that late pass
+  // runs, OVH-002) if `Ty` is one, else the general per-element-type
+  // descriptor (getOrCreateElementTurfTypeDesc(), already handles an
+  // anonymous type like a fixed-size array). Primitive `T` never reaches
+  // this branch (every scalar case above returns first), so only
+  // aggregates ever need this.
   Value *Size = ConstantInt::get(I64Ty, TheModule->getDataLayout().getTypeAllocSize(Ty));
-  Value *HeapSlot = Builder->CreateCall(getOrCreateMallocFn(), {Size}, "box_slot");
+  Value *DescArg;
+  if (auto *ST = llvm::dyn_cast<llvm::StructType>(Ty))
+    DescArg = getOrForwardDeclareTurfTypeDescGlobal(ST);
+  else
+    DescArg = getOrCreateElementTurfTypeDesc(Ty);
+  Value *HeapSlot = Builder->CreateCall(getOrCreateTurfRtAllocFn(), {Size, DescArg}, "box_slot");
   Builder->CreateStore(Val, HeapSlot);
   return Builder->CreatePtrToInt(HeapSlot, I64Ty, "box_ptr_wide");
 }
@@ -196,31 +363,110 @@ Function *getOrCreateStrcmpFn() {
 }
 
 
-/// Builds the runtime value of an `ErrorType::Variant` reference
-/// (docs/planning/Errors.md): a global string constant uniquely identifying
-/// the (error type, variant) pair, e.g. "MathError::DivisionByZero". Variants
-/// are bare names only (no payload fields -- deferred, see Errors.md's own
-/// note on why), so this tag string IS the whole runtime representation of
-/// an error value: no heap allocation, no wrapping struct, just an i8*.
-/// Comparing two error values (BinaryExprAST::codegen()'s equality branch)
-/// is then a plain strcmp on this string, which is also why a single global
-/// string constant works as identity with no whole-program variant-ID
-/// registry needed -- it's already unique by construction.
+/// Builds the runtime value of a BARE `ErrorType::Variant` reference
+/// (docs/architecture/errors_and_recover.md), e.g. `return
+/// MathError::DivisionByZero;` -- a pointer to a global constant
+/// `TurfErrorValue{tag, message=""}` (STD-002: see getErrorValueType()'s
+/// own doc comment for why this is the UNIFORM shape every error value now
+/// has, message-carrying or not). No heap allocation is needed here
+/// specifically -- everything is compile-time-known -- unlike
+/// ErrorVariantConstructWithMessage's own Codegen branch
+/// (FuncCallExprAST::codegen(), CodegenFunc.cpp), which GC-heap-allocates
+/// (OVH-002) because its message is, in general, a runtime-computed value.
 Value *BuildErrorTag(const std::string &ErrorTypeName,
                             const std::string &VariantName) {
-  return Builder->CreateGlobalString(ErrorTypeName + "::" + VariantName, "errtag");
+  llvm::StructType *EVTy = getErrorValueType();
+  llvm::Constant *TagPtr =
+      BuildBareTagString(ErrorTypeName, VariantName);
+  llvm::Constant *MsgPtr = BuildGlobalCStringPtr("", "errmsg_empty");
+  llvm::Constant *EVConst = llvm::ConstantStruct::get(EVTy, {TagPtr, MsgPtr});
+  auto *GV = new llvm::GlobalVariable(
+      *TheModule, EVTy, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
+      EVConst, "errval");
+  return GV;
+}
+
+
+/// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
+/// messageExpr)` -- the message-carrying construction. Unlike BuildErrorTag()
+/// (fully compile-time-known, a global constant suffices), @p MessageVal is
+/// in general a RUNTIME value (e.g. built from string concatenation), so
+/// this heap-allocates on the GC HEAP (OVH-002: was a bare `malloc` before
+/// MEM-002's collector existed to trace into it -- `message` is a GC-heap
+/// `string` pointer, and a `TurfErrorValue` reachable only through manual
+/// memory made it invisible to the collector's mark phase, F-MEM-3) --
+/// same "the value must outlive the function that returns it" reasoning
+/// BoxToI64Slot() already uses for an oversized success value, just for
+/// the error side. `TurfErrorValue`'s own descriptor (both fields are
+/// pointers) is the SAME one `EmitAllTurfTypeDescs()` emits for it as an
+/// ordinary named struct type, referenced here before that late pass runs
+/// (getOrForwardDeclareTurfTypeDescGlobal(), OVH-002). Called from
+/// FuncCallExprAST::codegen() (CodegenFunc.cpp), which evaluates the
+/// message argument and passes the resulting Value* in.
+Value *CodegenErrorVariantConstructWithMessage(const std::string &ErrorTypeName,
+                                               const std::string &VariantName,
+                                               Value *MessageVal) {
+  llvm::StructType *EVTy = getErrorValueType();
+  llvm::DataLayout DL = TheModule->getDataLayout();
+  uint64_t Size = DL.getTypeAllocSize(EVTy).getFixedValue();
+  Value *DescArg = getOrForwardDeclareTurfTypeDescGlobal(EVTy);
+  Value *HeapSlot = Builder->CreateCall(
+      getOrCreateTurfRtAllocFn(),
+      {ConstantInt::get(Type::getInt64Ty(*TheContext), Size), DescArg},
+      "errval_msg");
+  Value *TagFieldPtr = Builder->CreateStructGEP(EVTy, HeapSlot, 0, "tag");
+  Builder->CreateStore(BuildBareTagString(ErrorTypeName, VariantName), TagFieldPtr);
+  Value *MsgFieldPtr = Builder->CreateStructGEP(EVTy, HeapSlot, 1, "message");
+  Builder->CreateStore(MessageVal, MsgFieldPtr);
+  return HeapSlot;
+}
+
+
+/// Reads field @p FieldIdx (0 = tag, 1 = message) out of a runtime
+/// `TurfErrorValue*` value -- shared by GetErrorTagValue() (field 0, for
+/// `==`/`!=`) and FieldAccessExprAST::codegen()'s `err.message` special
+/// case (field 1, CodegenStruct.cpp).
+Value *LoadErrorValueField(Value *ErrValPtr, unsigned FieldIdx, const char *Name) {
+  llvm::StructType *EVTy = getErrorValueType();
+  Value *FieldPtr = Builder->CreateStructGEP(EVTy, ErrValPtr, FieldIdx, Name);
+  return Builder->CreateLoad(PointerType::get(*TheContext, 0), FieldPtr,
+                             std::string(Name) + ".val");
+}
+
+
+/// STD-002: see this function's own declaration (CodegenInternal.h) for the
+/// full forward-or-stamp contract.
+Value *BuildCallerLocationValue(const SourceLocation &StampLoc) {
+  auto It = NamedValues.find("caller_location");
+  if (It != NamedValues.end())
+    return Builder->CreateLoad(getLLVMType(TurfString().get()), It->second.Alloca,
+                               "loc_fwd");
+  std::string LocStr = (StampLoc.Filename.empty() ? "<unknown>" : StampLoc.Filename) +
+                        ":" + std::to_string(StampLoc.Line);
+  return Builder->CreateGlobalString(LocStr, "caller_loc");
 }
 
 
 /// True if `E` is an error-tag-shaped operand for `==`/`!=`
-/// (docs/planning/Errors.md): either a bare `ErrorType::Variant` reference,
-/// or a variable already known (via its Resolver-set ResolvedSymbol, not
-/// TypeChecker's type map -- see IsErrorConstructionExpr's doc comment for
-/// why) to hold an error tag -- `err` inside `recover as err run { ... }`
-/// being the only way such a variable is ever created today.
+/// (docs/architecture/errors_and_recover.md): either a bare
+/// `ErrorType::Variant` reference, or a variable already known (via its
+/// Resolver-set ResolvedSymbol, not TypeChecker's type map -- see
+/// IsErrorConstructionExpr's doc comment for why) to hold an error tag -- `err`
+/// inside `recover as err run { ... }` being the only way such a variable is
+/// ever created today.
 bool IsErrorTagExpr(const ExprAST *E) {
   if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E))
     return SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
+  // STD-002: `ErrorType::Variant("msg")` -- a FuncCallExprAST wrapping the
+  // same ScopeAccessExprAST callee shape, mirroring how ConstructorCall/
+  // DefaultConstruct are ALSO FuncCallExprAST-wrapped (§2.8.1a of
+  // modules_and_scope_resolution.md). `err == SomeError::Variant("msg")`
+  // is unusual (comparing against a fresh construction rather than a bare
+  // reference) but not illegal -- handled here rather than left to crash.
+  if (auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
+    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()))
+      return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage;
+  }
   if (auto *Var = dynamic_cast<const VariableExprAST *>(E)) {
     if (const auto *Sym = Var->getResolvedSymbol())
       return Sym->Type && (Sym->Type->isAnyError() || Sym->Type->isUserError());
@@ -229,36 +475,55 @@ bool IsErrorTagExpr(const ExprAST *E) {
 }
 
 
-/// Returns the tag string (i8*) for an error-tag-shaped `==`/`!=` operand.
-/// A bare `ErrorType::Variant` reference's tag is compile-time-known, so
-/// it's built directly via BuildErrorTag() instead of going through its
-/// ordinary ScopeAccessExprAST::codegen() (which would do the exact same
-/// thing anyway, just less directly) -- everything else (`err`, or any other
-/// AnyErrorType/TurfUserErrorType-typed expression) already codegens
-/// straight to its tag string, since that IS an error value's whole runtime
-/// representation now.
+/// Returns the BARE TAG string (i8*, field 0 of TurfErrorValue) for an
+/// error-tag-shaped `==`/`!=` operand -- comparing WHICH VARIANT occurred
+/// never needs to look at a message (STD-002: see getErrorValueType()'s
+/// own doc comment). A bare `ErrorType::Variant` reference or an
+/// `ErrorType::Variant("msg")` construction both have a compile-time-known
+/// tag, so it's built directly via BuildBareTagString() rather than
+/// evaluating the whole construction (and, for the "msg" form, the message
+/// expression itself, which may have side effects -- comparing `err ==
+/// SomeError::Variant("msg")` must not ALSO re-run whatever produced
+/// "msg"). Everything else (`err`, or any other AnyErrorType/
+/// TurfUserErrorType-typed expression) codegens normally to a
+/// `TurfErrorValue*` now, so its tag needs an actual field read.
 Value *GetErrorTagValue(const ExprAST *E) {
   if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E)) {
     if (SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef)
-      return BuildErrorTag(SA->getLeftName(), SA->getRightName());
+      return BuildBareTagString(SA->getLeftName(), SA->getRightName());
   }
-  return const_cast<ExprAST *>(E)->codegen();
+  if (auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
+    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee())) {
+      if (SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage)
+        return BuildBareTagString(SA->getLeftName(), SA->getRightName());
+    }
+  }
+  Value *ErrVal = const_cast<ExprAST *>(E)->codegen();
+  if (!ErrVal)
+    return nullptr;
+  return LoadErrorValueField(ErrVal, /*FieldIdx=*/0, "tag");
 }
 
 
-/// True if `E` is exactly the `ErrorType::Variant` reference shape
-/// (docs/planning/Errors.md) -- mirrors Resolver's
-/// CollectReturnedErrorTypeNames' identical structural recognition, used
-/// here to decide whether a `return`ed value is an error tag (i8*) or a
-/// genuine success value, since Codegen can't rely on TypeChecker's inferred
-/// types (this compiler resolves/typechecks/codegens function bodies in a
-/// pre-pass that runs its own full pipeline on its own AST instance --
-/// see main.cpp's "Pre-pass sub-pass 2b" comment -- so only structural
-/// info set directly on the AST node by the Resolver, like ResolvedKind, is
-/// safe to depend on here).
+/// True if `E` is a value-producing `ErrorType::Variant` shape
+/// (docs/architecture/errors_and_recover.md) -- either the bare reference
+/// or STD-002's `ErrorType::Variant("msg")` construction -- mirrors
+/// Resolver's CollectReturnedErrorTypeNames' identical structural
+/// recognition, used here to decide whether a `return`ed value is an error
+/// tag or a genuine success value, since Codegen can't rely on
+/// TypeChecker's inferred types (this compiler resolves/typechecks/
+/// codegens function bodies in a pre-pass that runs its own full pipeline
+/// on its own AST instance -- see main.cpp's "Pre-pass sub-pass 2b"
+/// comment -- so only structural info set directly on the AST node by the
+/// Resolver, like ResolvedKind, is safe to depend on here).
 bool IsErrorConstructionExpr(const ExprAST *E) {
-  auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E);
-  return SA && SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
+  if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(E))
+    return SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
+  if (auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
+    if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()))
+      return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage;
+  }
+  return false;
 }
 
 
@@ -348,43 +613,63 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, Key);
   }
 
-  // Type Erasure: Generic Type Parameters are compiled as void* 
-  if (dynamic_cast<const TurfGenericParamType *>(T)) {
-    return LLVMTypeCache[Key] = llvm::PointerType::get(*TheContext, 0);
-  }
+  // TYPE-002 (S14a): erasure is gone -- INV-GEN-1 (INVARIANTS.md): after
+  // the monomorphizer runs, no TurfGenericParamType may reach Codegen.
+  // Every occurrence in the whole program is either inside a generic
+  // TEMPLATE (excluded from Codegen entirely by main.cpp's sub-pass 3a/3b
+  // template-skip guard, widened this session to cover every generic
+  // declaration, struct-bound or not) or has already been substituted to a
+  // concrete type by the monomorphizer (Monomorphize.cpp) before its clone
+  // ever reaches here. Debug-build assertion, never removed (the plan's
+  // own "Completion criterion 1"); a release build that somehow still hits
+  // this falls through to the function's own "unknown/future types"
+  // catch-all at the bottom (getDoubleTy) rather than crash outright.
+  assert(!dynamic_cast<const TurfGenericParamType *>(T) &&
+        "INV-GEN-1 violated: a TurfGenericParamType reached getLLVMType() "
+        "-- an un-monomorphized generic template reached Codegen. This is "
+        "a compiler bug.");
 
-  // GenericType instantiations (e.g. List<int>) — look up the base struct.
-  // The base struct (e.g. "List") was registered in LLVMTypeCache by
-  // StructDeclExprAST::codegen(). Use that layout for the generic instance.
+  // GenericType instantiations (e.g. List<int>) — TYPE-002 (S13b): look up
+  // the SPECIFIC per-instantiation struct, registered in GlobalSymbolTable/
+  // LLVMTypeCache under its own mangled name by
+  // Monomorphize::drainStructRequests() (S13a) and codegenned for real by
+  // the ordinary, unmodified StructDeclExprAST::codegen() once its clone
+  // reaches main.cpp's sub-pass 2c. This REPLACES the erasure-era version
+  // of this branch, which collapsed every instantiation of the same base
+  // struct onto ONE shared layout (correct only because Type Erasure made
+  // every T/K/V a uniform 8-byte slot) -- see the change record's *Removed
+  // assumptions* for why that collapse is gone and what it takes with it
+  // (the >8-byte `Invalid bitcast` ICE).
   if (auto *GT = dynamic_cast<const GenericType *>(T)) {
-    auto BaseIt = LLVMTypeCache.find(GT->getBaseName());
-    if (BaseIt != LLVMTypeCache.end())
-      return LLVMTypeCache[Key] = BaseIt->second;
-    // Base struct not yet seen (e.g. a top-level struct field like
-    // `headers: Map<string, string>` gets codegenned in main.cpp's
-    // sub-pass 2c, before `import map;` has run map.tr's own `struct
-    // Map<K, V>` through StructDeclExprAST::codegen() in sub-pass 3a) —
-    // create a forward-declared opaque stub, EXACTLY like
-    // StructDeclExprAST::codegen()'s own Step 1 does for a self-
-    // referential field (issue #176). Critically, register it under the
-    // BASE name ("Map") too, not just the mangled per-instantiation key
-    // ("Map_string_string") — StructDeclExprAST::codegen() looks up
-    // LLVMTypeCache[Name] by that same bare base name (its own Step 1),
-    // so caching only under `Key` here left that lookup missing the stub,
-    // making it create a SECOND, disconnected StructType and fill THAT
-    // one in via setBody() while every field that had already resolved
-    // to this orphaned stub stayed permanently opaque -- the exact "GEP
-    // into unsized type" / "storing unsized types" crash confirmed live
-    // for any struct embedding a generic collection field. One shared
-    // stub, filled in exactly once when the real generic struct decl
-    // codegens, is correct for every instantiation of the same base
-    // struct anyway (Type Erasure already makes every T/K/V a uniform
-    // 8-byte slot, so List<int> and List<string> were always meant to
-    // share one physical LLVM layout — see the `BaseIt != end()` branch
-    // just above, which already does exactly that once the base type is
-    // real).
-    llvm::StructType *Stub = llvm::StructType::create(*TheContext, GT->getBaseName());
-    LLVMTypeCache[GT->getBaseName()] = Stub;
+    std::string MangledName =
+        Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
+    auto InstIt = LLVMTypeCache.find(MangledName);
+    if (InstIt != LLVMTypeCache.end())
+      return LLVMTypeCache[Key] = InstIt->second;
+    // Not yet seen under its own mangled name -- create a forward-declared
+    // opaque stub, EXACTLY like StructDeclExprAST::codegen()'s own Step 1
+    // does for a self-referential field (issue #176), and like this
+    // branch's OWN prior version did for the shared base name. Critically,
+    // register it under the MANGLED name too, not just the outer `Key` --
+    // StructDeclExprAST::codegen() looks up LLVMTypeCache[Name] by that
+    // SAME mangled name for a monomorphized clone (its own Step 1, Name is
+    // already the clone's mangled instantiatedDeclName() -- see
+    // FuncDefExprAST's identical rename-before-resolve contract,
+    // Monomorphize.cpp), so caching only under `Key` here would leave that
+    // lookup missing the stub, creating a SECOND, disconnected StructType
+    // and leaving every field that already resolved to this orphaned stub
+    // permanently opaque -- the exact "GEP into unsized type" crash the
+    // prior, base-name version of this comment already described, just for
+    // a different key. Reaching this fallback for an instantiation that
+    // will NEVER be codegenned (not merely "not yet") would mean some
+    // GenericType occurrence's instantiation request was never recorded/
+    // drained -- TypeChecker's recording sites (visitVarDecl, visitMethodCall,
+    // visitFieldAccess) are meant to make that unreachable; if it happens
+    // anyway, this stub at least isolates the damage to ONE instantiation's
+    // own (permanently opaque) type instead of corrupting a DIFFERENT
+    // instantiation's real layout the way sharing the base name used to.
+    llvm::StructType *Stub = llvm::StructType::create(*TheContext, MangledName);
+    LLVMTypeCache[MangledName] = Stub;
     return LLVMTypeCache[Key] = Stub;
   }
 
@@ -393,8 +678,8 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = llvm::Type::getInt64Ty(*TheContext);
   }
 
-  // User-declared `error` type value (docs/planning/Errors.md) -- a global
-  // string constant identifying (error type, variant), e.g.
+  // User-declared `error` type value (docs/architecture/errors_and_recover.md)
+  // -- a global string constant identifying (error type, variant), e.g.
   // "MathError::DivisionByZero" (see BuildErrorTag()) -- variants are bare
   // names with no payload, so this tag string IS the whole value, an i8*
   // like any other string. AnyErrorType (the type of `err` inside
@@ -404,10 +689,10 @@ llvm::Type *getLLVMType(const TurfType *T) {
     return LLVMTypeCache[Key] = PointerType::get(*TheContext, 0);
   }
 
-  // `!T` (docs/planning/Errors.md) -- uniformly `{ i1 isOk, i64 successBits,
-  // i8* errorPayload }` regardless of what T is: the success value is boxed
-  // into the i64 slot (see BoxToI64Slot()/UnboxFromI64Slot()) exactly like
-  // this compiler already boxes a generic type parameter into a void*
+  // `!T` (docs/architecture/errors_and_recover.md) -- uniformly `{ i1 isOk, i64
+  // successBits, i8* errorPayload }` regardless of what T is: the success value
+  // is boxed into the i64 slot (see BoxToI64Slot()/UnboxFromI64Slot()) exactly
+  // like this compiler already boxes a generic type parameter into a void*
   // (CastToType()'s "Type Erasure" branches) -- same idea, fixed-width slot
   // instead of a pointer. This keeps ONE concrete LLVM type for every `!T`
   // no matter what T is, so a function's LLVM return type/a variable's LLVM
@@ -572,6 +857,28 @@ const TurfType *getExprType(const ExprAST *E) {
       if (CalleeName == "typeof")
         return TurfString().get();
 
+      // MEM-001: gc_alloc/gc_alloc_zeroed/gc_realloc always evaluate to a
+      // raw `void*`, exactly like typeof always evaluates to `string` above
+      // -- short-circuit here for the same reason (these are bare
+      // intrinsics with no ResolverFunctionSymbol/FuncReturnTypes entry, so
+      // falling through to the mangled-name reconstruction below would just
+      // fail to find one and return nullptr instead of the real answer).
+      if (CalleeName == "gc_alloc" || CalleeName == "gc_alloc_zeroed" ||
+          CalleeName == "gc_realloc") {
+        static const TurfPointerType VoidPtrTy(TurfVoid());
+        return &VoidPtrTy;
+      }
+
+      // MEM-002: gc_is_managed(p) always evaluates to `bool`, for the
+      // identical short-circuit reason as gc_alloc's own branch above.
+      // gc_collect() returns void, which needs no branch here at all --
+      // getExprType() is only ever asked about a VALUE-producing
+      // expression, and a bare `gc_collect();` statement is never one.
+      if (CalleeName == "gc_is_managed") {
+        static const BoolType BoolTy;
+        return &BoolTy;
+      }
+
       // `StructName::new(...)` / `StructName::default()` -- both evaluate to
       // the constructed struct, looked up the same way the removed
       // StructInitExprAST branch (further below) used to for the old
@@ -645,19 +952,27 @@ const TurfType *getExprType(const ExprAST *E) {
               }
             }
             if (Compatible) {
-              // Same class of gap as the struct-method case just above:
-              // a generic FREE function is type-erased to ONE compiled
-              // version, registered here under its bare declared return
-              // type (e.g. TurfGenericParamType("T") for `fn<T>
-              // firstElem(arr: T[]): T`) -- returning it unsubstituted
-              // meant `firstElem(intArray) to string` failed with "I
-              // can't convert 'T' to a string!" even though
-              // TypeChecker's OWN (separate) inference already correctly
-              // resolves this call's type as int. Recover T -> int by
-              // unifying each DECLARED parameter type against the
-              // ACTUAL argument type at this call site (recursing
-              // through pointer/array wrapping, e.g. T[] vs int[] ->
-              // T=int), then substitute it into the declared return type.
+              // Same class of gap as the struct-method case just above
+              // (getExprType() is a completely separate, independent
+              // type-inference pass from TypeChecker/the Monomorphizer --
+              // it never consults either one's results): the exact-mangled-
+              // name lookups above only hit `FuncReturnTypes` when this
+              // function's `getMangledName()` reconstruction of the call
+              // matches how the Monomorphizer actually named the clone it
+              // generated. When it doesn't -- or when nothing here has
+              // registered a per-instantiation entry at all -- this falls
+              // through to the generic TEMPLATE's own declared signature
+              // (still registered under its bare name, e.g.
+              // TurfGenericParamType("T") for `fn<T> firstElem(arr: T[]):
+              // T`), which is unsubstituted. Returning it as-is meant
+              // `firstElem(intArray) to string` failed with "I can't
+              // convert 'T' to a string!" even though TypeChecker had
+              // already correctly resolved this call's type as int.
+              // Recover T -> int by unifying each DECLARED parameter type
+              // against the ACTUAL argument type at this call site
+              // (recursing through pointer/array wrapping, e.g. T[] vs
+              // int[] -> T=int), then substitute it into the declared
+              // return type.
               std::unordered_map<std::string, TurfTypePtr> Subst;
               std::function<void(const TurfTypePtr &, const TurfType *)> Unify =
                   [&](const TurfTypePtr &ParamTy, const TurfType *ArgTy) {
@@ -744,6 +1059,20 @@ const TurfType *getExprType(const ExprAST *E) {
     }
   }
   if (auto *ArrAcc = dynamic_cast<const ArrayAccessExprAST *>(E)) {
+    // LANG-001: `operator[]` -- checked before the array/pointer/string
+    // paths below for the identical reason TypeChecker::visitArrayAccess()
+    // checks it first: a struct base is never ALSO a real array/pointer/
+    // string, so there is no ambiguity between the two.
+    if (ArrAcc->ResolvedIndexGetTarget && ArrAcc->ResolvedIndexGetTarget->ReturnType) {
+      const TurfType *RetTy = ArrAcc->ResolvedIndexGetTarget->ReturnType.get();
+      if (GlobalSymbolTable) {
+        if (const auto *NT = dynamic_cast<const NamedType *>(RetTy)) {
+          if (auto Resolved = GlobalSymbolTable->LookupType(NT->getName()))
+            return Resolved.get();
+        }
+      }
+      return RetTy;
+    }
     const TurfType *BaseTy = getExprType(ArrAcc->getBase());
     if (BaseTy) {
       if (BaseTy->isString())
@@ -959,6 +1288,35 @@ const TurfType *getExprType(const ExprAST *E) {
         return RetTy;
       };
 
+      // OVH-003: `ResolvedCallTarget` (TypeCheckerCall.cpp's visitMethodCall(),
+      // set for every successfully-resolved BOUND struct method call) already
+      // names the exact candidate this specific call resolved to -- reuse it
+      // directly instead of falling through to the MangledName-based lookup
+      // below, whose Prefix/Suffix scan matches on `MethodName` alone
+      // (`BaseTy->getName()` has already been collapsed to the shared
+      // generic TEMPLATE name a few lines up, e.g. "List", never the concrete
+      // per-instantiation name "List_gen1_At64"). That ambiguity is silent
+      // and load-bearing-wrong the moment two DIFFERENT instantiations of
+      // the same generic method coexist: confirmed live with `List<At63>`
+      // and `List<At64>` (structs differing by exactly one field) both in
+      // scope -- `l64.get(0)` resolved its return type via WHICHEVER
+      // instantiation's entry the (unordered_map-iteration-order-dependent)
+      // scan happened to hit first, silently reusing At63's struct layout
+      // for an At64 value and reading `.tail` at the wrong byte offset (an
+      // out-of-bounds/misinterpreted-field read -- `strlen()` on garbage,
+      // SIGSEGV). `ResolvedCallTarget->ReturnType` is still the TEMPLATE's
+      // own un-substituted declared type (e.g. literal `T`) -- TypeChecker
+      // sets `ResolvedCallTarget` before its own substitution step runs --
+      // so `ApplySubst` above (built from THIS call's own concrete
+      // `GenericTypeArgs`, captured earlier from the un-collapsed BaseTy)
+      // still does the real work; this just removes the ambiguous NAME
+      // re-derivation neither TypeChecker's own resolution nor this call's
+      // `Subst` map ever needed in the first place.
+      if (const auto *RCT = MethodCall->getResolvedCallTarget()) {
+        if (RCT->ReturnType)
+          return ApplySubst(RCT->ReturnType.get());
+      }
+
       auto It = FuncReturnTypes.find(MangledName);
       if (It != FuncReturnTypes.end())
         return ApplySubst(It->second.get());
@@ -1061,6 +1419,17 @@ const TurfType *getExprType(const ExprAST *E) {
             Scan(PT->getPointee());
           } else if (isArrayType(FTy.get())) {
             Scan(dynamic_cast<const ::ArrayType *>(FTy.get())->getElementTypePtr());
+          } else if (auto *NestedGT = dynamic_cast<const GenericType *>(FTy.get())) {
+            // OVH-007: a field whose OWN declared type is ANOTHER generic
+            // instantiation at the same type parameter (`struct Box<T> {
+            // inner: Pair<T, T> }`) was invisible to this scan -- none of
+            // the branches above match a bare GenericType, so `b.inner`'s
+            // own T never got recovered here, even though
+            // TypeCheckerCall.cpp's visitFieldAccess/visitMethodCall
+            // already recurse into this exact shape (their own "NestedGT"
+            // branch, TYPE-002 S15/D4). Mirror it here.
+            for (const auto &NestedArg : NestedGT->getTypeArgs())
+              Scan(NestedArg);
           }
         };
         for (const auto &F : STy->getFields())
@@ -1096,6 +1465,32 @@ const TurfType *getExprType(const ExprAST *E) {
                 auto NewPtr = std::make_shared<TurfPointerType>(NewPointee);
                 FieldSubstCache[Key] = NewPtr;
                 return NewPtr;
+              }
+            } else if (auto *NestedGT = dynamic_cast<const GenericType *>(FTy.get())) {
+              // OVH-007: the rebuild side of the NestedGT scan above -- a
+              // field declared as `Pair<T, T>` must come back as
+              // `Pair<int, int>` here, not the literal, still-open
+              // `Pair<T, T>` -- so codegenLValue()'s own mangled-clone
+              // lookup (Monomorphize::instantiatedDeclName()) resolves to
+              // the REAL registered clone instead of a name nothing ever
+              // requested. Same cache-and-key idiom as the pointer branch
+              // just above, since this can construct a fresh GenericType.
+              std::vector<TurfTypePtr> NewArgs;
+              bool Changed = false;
+              for (const auto &Arg : NestedGT->getTypeArgs()) {
+                TurfTypePtr NewArg = Apply(Arg);
+                Changed |= (NewArg.get() != Arg.get());
+                NewArgs.push_back(std::move(NewArg));
+              }
+              if (Changed) {
+                auto NewGT = std::make_shared<GenericType>(NestedGT->getBaseName(),
+                                                            NewArgs);
+                std::string Key = "fieldsubst_gen_" + NewGT->getMangledName();
+                auto CacheIt = FieldSubstCache.find(Key);
+                if (CacheIt != FieldSubstCache.end())
+                  return CacheIt->second;
+                FieldSubstCache[Key] = NewGT;
+                return NewGT;
               }
             }
             return FTy;
@@ -1163,6 +1558,156 @@ const TurfType *getExprType(const ExprAST *E) {
 }
 
 
+// SEM-002 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, FREEZE.md §6.2 row 7):
+// "Runtime, signed integer: trap (panic)" -- LLVM's llvm.s{add,sub,mul}.
+// with.overflow intrinsics already compute both the wrapped result and an
+// i1 overflow flag in one instruction, so this is the same
+// compute-then-branch-to-panic shape the pre-existing division-by-zero
+// check (BinaryExprAST::codegen(), CodegenExpr.cpp) already used -- just
+// with the overflow flag coming from the intrinsic instead of a separate
+// icmp. Shared (not inlined at each call site) because THREE independent
+// codegen paths need identical arithmetic-overflow behavior and don't
+// share a common codegen() call: BinaryExprAST (CodegenExpr.cpp),
+// CompoundAssignmentExprAST, and PostfixExprAST (both CodegenVar.cpp) --
+// compound assignment and `x++`/`x--` deliberately do NOT desugar to a
+// literal `x = x + 1`-shaped re-walk of BinaryExprAST at the Codegen layer
+// (see CodegenVar.cpp's own top-of-file framing), so each already
+// duplicates the divide-by-zero check independently; this duplicates the
+// same way rather than inventing new shared plumbing beyond this function.
+Value *EmitCheckedIntArith(char Op, Value *L, Value *R, SourceLocation Loc) {
+  llvm::Intrinsic::ID ID;
+  const char *Name;
+  switch (Op) {
+  case '+': ID = llvm::Intrinsic::sadd_with_overflow; Name = "addtmp"; break;
+  case '-': ID = llvm::Intrinsic::ssub_with_overflow; Name = "subtmp"; break;
+  case '*': ID = llvm::Intrinsic::smul_with_overflow; Name = "multmp"; break;
+  default:
+    llvm::report_fatal_error(
+        "Internal error: EmitCheckedIntArith called with non-arithmetic operator");
+    return nullptr;
+  }
+#if LLVM_VERSION_MAJOR >= 19
+  Function *IntrinsicF = llvm::Intrinsic::getOrInsertDeclaration(
+      TheModule.get(), ID, {Type::getInt64Ty(*TheContext)});
+#else
+  Function *IntrinsicF = llvm::Intrinsic::getDeclaration(
+      TheModule.get(), ID, {Type::getInt64Ty(*TheContext)});
+#endif
+  Value *CallRes = Builder->CreateCall(IntrinsicF, {L, R}, Name);
+  Value *Result = Builder->CreateExtractValue(CallRes, 0, std::string(Name) + ".val");
+  Value *Overflowed = Builder->CreateExtractValue(CallRes, 1, std::string(Name) + ".ov");
+
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  BasicBlock *OverflowBB = BasicBlock::Create(*TheContext, "int.overflow", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "int.overflow.cont", TheFunction);
+  Builder->CreateCondBr(Overflowed, OverflowBB, ContBB);
+
+  Builder->SetInsertPoint(OverflowBB);
+  CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  Builder->SetInsertPoint(ContBB);
+  return Result;
+}
+
+// Negation overflows for exactly one input: negating INT64_MIN, whose
+// magnitude (2^63) has no positive int64 representation -- the same
+// "one remaining case" shape as EmitSignedDivOverflowGuard() below, just
+// for unary '-' instead of '/'.
+Value *EmitCheckedIntNegate(Value *V, SourceLocation Loc) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Value *IsIntMin = Builder->CreateICmpEQ(
+      V, ConstantInt::get(Type::getInt64Ty(*TheContext),
+                          static_cast<uint64_t>(INT64_MIN), true),
+      "isintmin");
+
+  BasicBlock *OverflowBB = BasicBlock::Create(*TheContext, "neg.overflow", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "neg.cont", TheFunction);
+  Builder->CreateCondBr(IsIntMin, OverflowBB, ContBB);
+
+  Builder->SetInsertPoint(OverflowBB);
+  CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  Builder->SetInsertPoint(ContBB);
+  return Builder->CreateNeg(V, "negtmp");
+}
+
+// '<<' has no LLVM "with.overflow" intrinsic (unlike +/-/*), so overflow is
+// defined directly: the shift amount must be in [0, 64), AND shifting the
+// result back right by the same amount (arithmetic, sign-preserving) must
+// recover the original value -- if any set bit was pushed out past the
+// sign bit, the recovered value differs from the input. The shift-amount
+// range is checked FIRST, in its own branch, so the actual shl/ashr below
+// never executes with an out-of-range amount at all (LLVM's shl/ashr are
+// poison for a shift amount >= the operand's bit width, so computing them
+// speculatively and only checking afterward would itself be the exact kind
+// of UB this group exists to remove).
+Value *EmitCheckedShl(Value *L, Value *R, SourceLocation Loc) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Value *Zero64 = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+  Value *SixtyFour = ConstantInt::get(Type::getInt64Ty(*TheContext), 64);
+  Value *AmtBad = Builder->CreateOr(
+      Builder->CreateICmpSLT(R, Zero64, "shiftamt.neg"),
+      Builder->CreateICmpSGE(R, SixtyFour, "shiftamt.toobig"), "shiftamt.bad");
+
+  BasicBlock *OverflowBB = BasicBlock::Create(*TheContext, "shl.overflow", TheFunction);
+  BasicBlock *ShiftOkBB = BasicBlock::Create(*TheContext, "shl.amtok", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "shl.cont", TheFunction);
+  Builder->CreateCondBr(AmtBad, OverflowBB, ShiftOkBB);
+
+  Builder->SetInsertPoint(ShiftOkBB);
+  Value *ShlResult = Builder->CreateShl(L, R, "lshifttmp");
+  Value *Recovered = Builder->CreateAShr(ShlResult, R, "lshiftcheck");
+  Value *LostBits = Builder->CreateICmpNE(Recovered, L, "lshift.lost");
+  Builder->CreateCondBr(LostBits, OverflowBB, ContBB);
+
+  Builder->SetInsertPoint(OverflowBB);
+  CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  // ShlResult dominates ContBB: the only edge into ContBB is from ShiftOkBB,
+  // after ShlResult was already computed -- no PHI needed.
+  Builder->SetInsertPoint(ContBB);
+  return ShlResult;
+}
+
+// The one signed-division overflow case (ARCHITECTURE_OVERHAUL.md §10.2):
+// INT64_MIN / -1 has no representable int64 result (the mathematical
+// result, 2^63, overflows by exactly one past INT64_MAX). LLVM's `sdiv` is
+// poison for this input (mirrors hardware `idiv`, which traps on it) --
+// must be caught explicitly, same shape as the pre-existing divide-by-zero
+// check this always runs alongside. Call this AFTER the zero check (so the
+// insert point is already the "R != 0" continuation block) and BEFORE
+// emitting the actual CreateSDiv/CreateSRem.
+void EmitSignedDivOverflowGuard(Value *L, Value *R, SourceLocation Loc) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Value *IsIntMin = Builder->CreateICmpEQ(
+      L, ConstantInt::get(Type::getInt64Ty(*TheContext),
+                          static_cast<uint64_t>(INT64_MIN), true),
+      "isintmin");
+  Value *IsNegOne = Builder->CreateICmpEQ(
+      R, ConstantInt::get(Type::getInt64Ty(*TheContext),
+                          static_cast<uint64_t>(-1), true),
+      "isnegone");
+  Value *WillOverflow = Builder->CreateAnd(IsIntMin, IsNegOne, "sdiv.overflow.check");
+
+  BasicBlock *OverflowBB = BasicBlock::Create(*TheContext, "sdiv.overflow", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "sdiv.overflow.cont", TheFunction);
+  Builder->CreateCondBr(WillOverflow, OverflowBB, ContBB);
+
+  Builder->SetInsertPoint(OverflowBB);
+  CodegenPanic(Builder->CreateGlobalString("Integer overflow"), Loc);
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  Builder->SetInsertPoint(ContBB);
+}
+
+
 Value *CastToType(Value *Val, TurfTypePtr DestType,
                          const std::string &Name, SourceLocation Loc) {
   return CastToType(Val, DestType.get(), Name, Loc);
@@ -1198,48 +1743,21 @@ Value *CastToType(Value *Val, const TurfType *DestType,
       dynamic_cast<const TurfPointerType *>(SrcType.get()))
     return Val;
 
-  // Type Erasure: cast to generic parameter (stored as void*)
-  if (dynamic_cast<const TurfGenericParamType *>(DestType)) {
-    Type *VoidPtrTy = PointerType::get(*TheContext, 0);
-    if (ValTy->isPointerTy())
-      return Val; // already a pointer
-    if (ValTy->isDoubleTy())
-      Val = Builder->CreateBitCast(Val, Type::getInt64Ty(*TheContext), "dbl_to_i64");
-    if (Val->getType()->isIntegerTy())
-      return Builder->CreateIntToPtr(Val, VoidPtrTy, "erased_ptr");
-    return Builder->CreateBitCast(Val, VoidPtrTy, "erased_ptr");
-  }
+  // TYPE-002 (S14a): erasure is gone -- INV-GEN-1: DestType can no longer
+  // legitimately be a TurfGenericParamType here (every occurrence either
+  // lives inside a generic template Codegen never reaches, or was already
+  // substituted to a concrete type by the monomorphizer before this clone's
+  // body was codegenned). The old "cast TO generic parameter" branch
+  // (IntToPtr/bitcast into a void* slot) and the numeric half of "cast FROM
+  // generic parameter" (PtrToInt/bitcast back to int/bool/double) are both
+  // deleted outright, not left dead -- see the change record's *Removed
+  // assumptions* for the completion-criterion verification this rested on.
+  assert(!dynamic_cast<const TurfGenericParamType *>(DestType) &&
+        "INV-GEN-1 violated: CastToType() received a TurfGenericParamType "
+        "DestType -- an un-monomorphized generic template reached Codegen. "
+        "This is a compiler bug.");
 
-  // Type Erasure: cast from generic parameter (void*) back to actual type.
-  //
-  // Gated on `ValTy->isPointerTy()`, NOT on `dynamic_cast<TurfGenericParamType>
-  // (SrcType.get())` (the condition this replaced) -- SrcType a few lines up
-  // is always produced by getTurfTypeFromLLVM(ValTy), which only ever
-  // returns TurfDouble/TurfInt/TurfBool/TurfPtr/TurfVoid: it can NEVER
-  // itself construct a TurfGenericParamType, so the old condition could
-  // never match and this whole branch was dead code. What actually
-  // identifies "this pointer is an erased generic value" at this point is
-  // that it's a raw pointer being cast to a genuinely numeric DestType --
-  // by the time Codegen runs, TypeChecker's typesCompatible() type-erasure
-  // fast path is the only reason a pointer-typed value would ever be
-  // assignment-compatible with int/bool/double in the first place, so this
-  // combination cannot arise from anything else. Confirmed via
-  // `fn<T> identity(x: T): T` returning a bool or double: with the old dead
-  // condition, `identity(true)` segfaulted (a bare i1 was stored into an
-  // opaque-pointer-typed alloca with no conversion at all) and
-  // `identity(3.5)` silently returned garbage -- both are fixed by this
-  // branch actually running.
   if (ValTy->isPointerTy()) {
-    if (DestType->isNamed("int") || DestType->isNamed("bool")) {
-      Value *IntVal = Builder->CreatePtrToInt(Val, Type::getInt64Ty(*TheContext), "unerased_int");
-      if (DestType->isNamed("bool"))
-        return Builder->CreateICmpNE(IntVal, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), "unerased_bool");
-      return IntVal;
-    }
-    if (DestType->isNamed("double")) {
-      Value *IntVal = Builder->CreatePtrToInt(Val, Type::getInt64Ty(*TheContext), "unerased_int");
-      return Builder->CreateBitCast(IntVal, Type::getDoubleTy(*TheContext), "unerased_dbl");
-    }
     if (isPointerLike(DestType)) {
       return Val; // already pointer
     }
@@ -1262,6 +1780,21 @@ Value *CastToType(Value *Val, const TurfType *DestType,
             ResolvedDest = R.get();
         }
       }
+      // TYPE-002 (S13b): a GenericType destination (e.g. `fn Holder.get():
+      // List<Big> { return self.items; }`, self's own field returned by
+      // value) resolves to its OWN per-instantiation TurfStructType, not
+      // the shared base -- mirrors FieldAccessExprAST's identical fix
+      // (CodegenStruct.cpp), needed so getLLVMType(ResolvedDest) below
+      // loads the CORRECT (possibly >8-byte) shape, not the erasure-era
+      // shared one.
+      if (const auto *GT = dynamic_cast<const GenericType *>(DestType)) {
+        if (GlobalSymbolTable) {
+          std::string MangledName =
+              Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs());
+          if (auto R = GlobalSymbolTable->LookupType(MangledName))
+            ResolvedDest = R.get();
+        }
+      }
       if (dynamic_cast<const TurfStructType *>(ResolvedDest)) {
         return Builder->CreateLoad(getLLVMType(ResolvedDest), Val, "derefstruct");
       }
@@ -1273,12 +1806,16 @@ Value *CastToType(Value *Val, const TurfType *DestType,
   if (isPointerLike(SrcType.get()) && isPointerLike(DestType))
     return Val;
 
-  // Struct-to-struct: if DestType is a struct (NamedType or TurfStructType) and
-  // the LLVM types already match (e.g. inner struct init), pass through without
-  // casting. Without this, CastToType would hit the string-error guard below.
+  // Struct-to-struct: if DestType is a struct (NamedType, TurfStructType, or
+  // -- TYPE-002 S13b -- a GenericType instantiation, e.g. a >8-byte generic
+  // struct value now genuinely arriving here as a real ValTy->isStructTy()
+  // aggregate instead of an erased pointer) and the LLVM types already
+  // match (e.g. inner struct init), pass through without casting. Without
+  // this, CastToType would hit the string-error guard below.
   if (ValTy->isStructTy()) {
     if (dynamic_cast<const TurfStructType *>(DestType) ||
-        dynamic_cast<const NamedType *>(DestType))
+        dynamic_cast<const NamedType *>(DestType) ||
+        dynamic_cast<const GenericType *>(DestType))
       return Val;
   }
 
@@ -1404,5 +1941,274 @@ Value *CodegenConstantValue(const ResolverConstantSymbol &C) {
     return ConstantInt::get(Type::getInt1Ty(*TheContext), C.BoolVal ? 1 : 0);
   if (C.Type && C.Type->isString())
     return Builder->CreateGlobalString(C.StringVal, "str");
-  return ConstantInt::get(*TheContext, APInt(64, C.IntVal, true));
+  // C.IntVal is C.'s exact decimal string (SEM-001) -- see
+  // ResolverConstantSymbol::IntVal's own doc comment (ResolverSymbolBase.h)
+  // for why it's a string rather than a plain llvm::APSInt at the Resolver
+  // layer. Same getBitsNeeded()-then-extOrTrunc(64) pattern
+  // NumberExprAST::codegen() (CodegenExpr.cpp) and ParseNumberExpr
+  // (ParserLiteral.cpp) both already use to turn an exact, possibly-wider-
+  // than-64-bit value into the fixed 64-bit `int` LLVM constant this
+  // returns.
+  StringRef Digits = C.IntVal;
+  bool Negative = Digits.starts_with("-");
+  StringRef Magnitude = Negative ? Digits.drop_front() : Digits;
+  unsigned Bits = std::max(64u, APInt::getBitsNeeded(Magnitude, 10) + 1);
+  APInt Value(Bits, Magnitude, 10);
+  if (Negative)
+    Value = -Value;
+  return ConstantInt::get(*TheContext, Value.sextOrTrunc(64));
+}
+
+
+// ─── TOOL-001: `-g` debug info helpers ───────────────────────────────────────
+// (docs/planning/ARCHITECTURE_OVERHAUL.md §8 TOOL-001, docs/architecture/
+// compiler_pipeline.md). See CodegenInternal.h for each function's own doc
+// comment -- kept there (not here) since that's the header every other
+// Codegen*.cpp file actually reads to learn these exist.
+
+static std::map<std::string, DIFile *> DebugFileCache;
+
+DIFile *getOrCreateDebugFile(const std::string &Filename) {
+  if (!DBuilder)
+    return nullptr;
+  if (Filename.empty())
+    return DebugCU ? DebugCU->getFile() : nullptr;
+  auto It = DebugFileCache.find(Filename);
+  if (It != DebugFileCache.end())
+    return It->second;
+  SmallString<256> AbsPath(Filename);
+  (void)sys::fs::make_absolute(AbsPath);
+  StringRef Dir = sys::path::parent_path(AbsPath);
+  StringRef Base = sys::path::filename(AbsPath);
+  DIFile *F = DBuilder->createFile(Base, Dir);
+  return DebugFileCache[Filename] = F;
+}
+
+
+static std::map<std::string, DIType *> DebugTypeCache;
+
+DIType *getDebugType(const TurfType *T) {
+  if (!DBuilder)
+    return nullptr;
+  if (!T)
+    return DBuilder->createUnspecifiedType("void");
+
+  std::string Key = T->getMangledName();
+  auto CacheIt = DebugTypeCache.find(Key);
+  if (CacheIt != DebugTypeCache.end())
+    return CacheIt->second;
+
+  // Primitives -- sizes/encodings match getLLVMType()'s own primitive
+  // branches exactly (int -> i64, int32 -> i32, double -> double, bool ->
+  // i1, char -> i8) so a debugger's "sizeof this local" matches the real
+  // storage getLLVMType() actually allocated for it.
+  if (T->isNamed("int"))
+    return DebugTypeCache[Key] =
+              DBuilder->createBasicType("int", 64, dwarf::DW_ATE_signed);
+  if (T->isNamed("int32"))
+    return DebugTypeCache[Key] =
+              DBuilder->createBasicType("int32", 32, dwarf::DW_ATE_signed);
+  if (T->isNamed("double"))
+    return DebugTypeCache[Key] =
+              DBuilder->createBasicType("double", 64, dwarf::DW_ATE_float);
+  if (T->isNamed("bool"))
+    // LLVM stores `bool` as i1, but DWARF has no 1-bit integer -- 8 bits
+    // (the smallest DWARF/gdb actually prints sanely) is what every C
+    // frontend does for `_Bool`/`bool` too.
+    return DebugTypeCache[Key] =
+              DBuilder->createBasicType("bool", 8, dwarf::DW_ATE_boolean);
+  if (T->isNamed("char"))
+    return DebugTypeCache[Key] = DBuilder->createBasicType(
+              "char", 8, dwarf::DW_ATE_unsigned_char);
+  if (T->isNamed("void"))
+    return DebugTypeCache[Key] = nullptr; // DWARF: no DIType at all means void
+
+  // `string` (FREEZE.md §6.8: "stays a NUL-terminated byte pointer") --
+  // pointer to char, exactly what it actually is at the LLVM level.
+  if (T->isNamed("string")) {
+    DIType *CharTy =
+        DBuilder->createBasicType("char", 8, dwarf::DW_ATE_unsigned_char);
+    return DebugTypeCache[Key] =
+              DBuilder->createPointerType(CharTy, 64, 64, std::nullopt, "string");
+  }
+
+  // Fixed-size arrays (`T[N]`) -- getLLVMType() only gives a real
+  // llvm::ArrayType for a KNOWN positive size; an unsized `T[]` parameter
+  // is already an opaque pointer at the LLVM level (§27 D3: no escape
+  // analysis exists for it yet), so its debug type is just "pointer to T",
+  // same as any other opaque-pointer-shaped Turf type below.
+  if (isArrayType(T)) {
+    const auto *AT = dynamic_cast<const ::ArrayType *>(T);
+    if (AT && AT->getSize() > 0) {
+      DIType *ElemTy = getDebugType(AT->getElementTypePtr().get());
+      llvm::Type *ElemLLVMTy = getLLVMType(AT->getElementTypePtr().get());
+      uint64_t ElemBits =
+          TheModule->getDataLayout().getTypeSizeInBits(ElemLLVMTy).getFixedValue();
+      llvm::Metadata *Subscript =
+          DBuilder->getOrCreateSubrange(0, AT->getSize());
+      DINodeArray Subscripts =
+          DBuilder->getOrCreateArray({Subscript});
+      return DebugTypeCache[Key] = DBuilder->createArrayType(
+                ElemBits * AT->getSize(), 0, ElemTy, Subscripts);
+    }
+  }
+
+  // Pointer-shaped types (`T*`, `&T`, `&?T`, `ptr`, an unsized `T[]`) --
+  // all share the same opaque-pointer LLVM representation (getLLVMType()'s
+  // own comment on this), so they share the same debug-type shape too: a
+  // real DIDerivedType pointer to the pointee's own debug type when the
+  // pointee is known, or an unspecified "ptr" type when it isn't (`ptr`
+  // itself has no pointee at all).
+  if (const auto *PT = dynamic_cast<const TurfPointerType *>(T)) {
+    DIType *PointeeTy = getDebugType(PT->getPointee().get());
+    return DebugTypeCache[Key] = DBuilder->createPointerType(PointeeTy, 64);
+  }
+  if (T->isNamed("ptr") || dynamic_cast<const OpaquePointerType *>(T))
+    return DebugTypeCache[Key] = DBuilder->createUnspecifiedType("ptr");
+
+  // Enums -- always stored as their underlying integer type (getLLVMType()'s
+  // own comment), so their debug type is a real DW_TAG_enumeration_type
+  // over that underlying type rather than a plain typedef -- lets a
+  // debugger print a variant NAME instead of a bare ordinal.
+  if (const auto *ET = dynamic_cast<const TurfEnumType *>(T)) {
+    DIType *UnderlyingTy = getDebugType(ET->getUnderlyingType());
+    std::vector<Metadata *> Enumerators;
+    for (const auto &Variant : ET->getVariants())
+      Enumerators.push_back(
+          DBuilder->createEnumerator(Variant, ET->getVariantValue(Variant)));
+    DINodeArray Elements = DBuilder->getOrCreateArray(Enumerators);
+    DIFile *File = DebugCU ? DebugCU->getFile() : nullptr;
+    return DebugTypeCache[Key] = DBuilder->createEnumerationType(
+              DebugCU, ET->getName(), File, 0, 64, 0, Elements, UnderlyingTy);
+  }
+
+  // Structs -- built lazily here (not at struct-declaration Codegen time)
+  // from the already-registered TurfStructType + the already-`setBody()`'d
+  // llvm::StructType's real DataLayout offsets, deliberately mirroring
+  // getLLVMType()'s own "register the stub in the cache BEFORE resolving
+  // fields" idiom (CodegenStruct.cpp's own long comment on issue #176) to
+  // break a pointer-mediated struct cycle (`struct Node { next: Node* }`)
+  // the exact same way: a cycle can only be reached through a pointer field
+  // now (INV-LAYOUT-1/TYPE-001 already rejects a genuine by-value cycle
+  // before Codegen ever runs), and a pointer field only needs ITS pointee's
+  // debug type once this composite's stub is already sitting in
+  // DebugTypeCache -- so the recursive getDebugType(Pointee) call a few
+  // lines above (the TurfPointerType branch) finds the stub instead of
+  // recursing back into this same struct forever.
+  if (const auto *ST = dynamic_cast<const TurfStructType *>(T)) {
+    llvm::Type *LLVMTy = getLLVMType(T);
+    auto *LLVMStructTy = dyn_cast<llvm::StructType>(LLVMTy);
+    DIFile *File = DebugCU ? DebugCU->getFile() : nullptr;
+    DICompositeType *Stub = DBuilder->createReplaceableCompositeType(
+        dwarf::DW_TAG_structure_type, ST->getName(), DebugCU, File, 0);
+    DebugTypeCache[Key] = Stub;
+
+    if (!LLVMStructTy || LLVMStructTy->isOpaque()) {
+      // Struct decl hasn't codegenned yet (a forward reference Codegen
+      // itself hasn't resolved either) -- leave the forward declaration in
+      // place. main.cpp's DBuilder->finalize() call (before verifyModule())
+      // resolves it if it's still a dangling temporary by the time the
+      // whole module is done; a debugger sees an incomplete-type
+      // declaration for this struct in that case, same as it would for a
+      // genuinely-opaque C struct.
+      return Stub;
+    }
+
+    const llvm::StructLayout *Layout =
+        TheModule->getDataLayout().getStructLayout(LLVMStructTy);
+    std::vector<Metadata *> Members;
+    const auto &Fields = ST->getFields();
+    for (unsigned i = 0; i < Fields.size() && i < LLVMStructTy->getNumElements();
+        ++i) {
+      DIType *FieldTy = getDebugType(Fields[i].Type.get());
+      llvm::Type *FieldLLVMTy = LLVMStructTy->getElementType(i);
+      uint64_t FieldBits =
+          TheModule->getDataLayout().getTypeSizeInBits(FieldLLVMTy).getFixedValue();
+      uint64_t OffsetBits = Layout->getElementOffsetInBits(i).getFixedValue();
+      Members.push_back(DBuilder->createMemberType(
+          DebugCU, Fields[i].Name, File, 0, FieldBits, 0, OffsetBits,
+          DINode::FlagZero, FieldTy));
+    }
+    DINodeArray Elements = DBuilder->getOrCreateArray(Members);
+    uint64_t TotalBits = Layout->getSizeInBits().getFixedValue();
+    DICompositeType *Full = DBuilder->createStructType(
+        DebugCU, ST->getName(), File, 0, TotalBits, 0, DINode::FlagZero,
+        nullptr, Elements);
+    DBuilder->replaceTemporary(llvm::TempDICompositeType(Stub), Full);
+    return DebugTypeCache[Key] = Full;
+  }
+
+  // Everything else (an uninstantiated/erased generic parameter, a
+  // first-class function value, an `error`/`!T` value, ...) -- all
+  // pointer- or i64-erased at the LLVM level with no single "real" Turf
+  // type a debugger could usefully name; TOOL-001's own completion
+  // criteria (a breakpoint, a backtrace, printing an ordinary local) don't
+  // need more than "some plausibly-named thing" for these.
+  return DebugTypeCache[Key] = DBuilder->createUnspecifiedType(T->getName());
+}
+
+
+SourceLocation GetNodeDebugLoc(const ExprAST *E) {
+  if (!E)
+    return SourceLocation{};
+
+#define TRY_LOC(NodeType)                                                    \
+  if (auto *N = dynamic_cast<const NodeType *>(E))                          \
+    return N->getLoc();
+
+  TRY_LOC(NumberExprAST)
+  TRY_LOC(BinaryExprAST)
+  TRY_LOC(AssignmentExprAST)
+  TRY_LOC(CompoundAssignmentExprAST)
+  TRY_LOC(PostfixExprAST)
+  TRY_LOC(VariableExprAST)
+  TRY_LOC(UnaryExprAST)
+  TRY_LOC(AddressOfExprAST)
+  TRY_LOC(SizeOfExprAST)
+  TRY_LOC(CompareExprAST)
+  TRY_LOC(NullExprAST)
+  TRY_LOC(CastExprAST)
+  TRY_LOC(FuncCallExprAST)
+  TRY_LOC(ScopeAccessExprAST)
+  TRY_LOC(FieldAccessExprAST)
+  TRY_LOC(ArrayLiteralExprAST)
+  TRY_LOC(ArrayAccessExprAST)
+  TRY_LOC(MethodCallExprAST)
+  TRY_LOC(IfExprAST)
+  TRY_LOC(UnsafeBlockExprAST)
+  TRY_LOC(WhileExprAST)
+  TRY_LOC(DoWhileExprAST)
+  TRY_LOC(ForExprAST)
+  TRY_LOC(ForEachExprAST)
+  TRY_LOC(BreakExprAST)
+  TRY_LOC(ContinueExprAST)
+  TRY_LOC(ReturnExprAST)
+  TRY_LOC(RecoverExprAST)
+  TRY_LOC(ModuleImportExprAST)
+  TRY_LOC(VarDeclExprAST)
+  TRY_LOC(FuncDefExprAST)
+  TRY_LOC(ExternFuncDeclExprAST)
+  TRY_LOC(EnumDeclExprAST)
+  TRY_LOC(MachineDeclExprAST)
+  TRY_LOC(ErrorDeclExprAST)
+  TRY_LOC(ArrayDeclExprAST)
+  TRY_LOC(StructDeclExprAST)
+
+#undef TRY_LOC
+
+  // BlockExprAST (a container, no location of its own), BoolExprAST,
+  // CharExprAST, StringExprAST (bare literals -- never a useful breakpoint
+  // target on their own; they're always reached as part of a larger
+  // statement whose OWN location is already set by the time these codegen)
+  // and anything not listed above all fall through here.
+  return SourceLocation{};
+}
+
+
+void SetDebugLoc(const SourceLocation &Loc) {
+  if (!g_EmitDebugInfo || !CurrentDebugScope || Loc.Line <= 0)
+    return;
+  Builder->SetCurrentDebugLocation(
+      DILocation::get(*TheContext, Loc.Line, Loc.Col > 0 ? Loc.Col : 1,
+                      CurrentDebugScope));
 }

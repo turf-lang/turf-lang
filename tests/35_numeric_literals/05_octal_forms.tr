@@ -1,0 +1,19 @@
+// SEM-001: octal integer literals (0o/0O), with and without '_'.
+
+import test;
+
+fn main(): int {
+    mut a: int = 0o17;
+    test::assert(a == 15, "plain octal");
+
+    mut b: int = 0O777;
+    test::assert(b == 511, "uppercase prefix, three digits");
+
+    mut c: int = 0o1_7;
+    test::assert(c == 15, "octal with a separator");
+
+    mut d: int = 0o0;
+    test::assert(d == 0, "octal zero");
+
+    return 0;
+}

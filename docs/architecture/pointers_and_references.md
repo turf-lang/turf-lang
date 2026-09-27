@@ -4,16 +4,21 @@ Complete internal + external reference for Turflang's pointer system as it
 exists after issue #238 ("Track A" of the now-removed `FINAL_SPRINT.md`,
 folded into `docs/planning/ROADMAP_v1.0.0_COMPLETE.md` §6 once complete — the
 original design sketch, the 2026-08-17 resolved decisions, and the
-2026-08-18 implementation summary are retrievable from git history):
-the `unsafe { }` block, the `&T` safe-reference type, and the raw-pointer
-gate that ties them together. Like `docs/architecture/modules_and_scope_resolution.md`,
-this describes both **what a Turflang programmer observes** (Part 1) and
-**how the compiler actually implements it, pass by pass** (Part 2), with
-file:line references throughout.
+2026-08-18 implementation summary are retrievable from git history) **and**
+after LANG-002 (`docs/development/changes/LANG-002.md`): the `unsafe { }`
+block, the `&T` safe-reference type, the raw-pointer gate that ties them
+together, and — new in LANG-002 — the nullable `&?T` safe reference, the
+`NullabilityPass` that checks it, and the declared-capability system that
+replaced the old, purely path-based `lib/std` trust boundary. Like
+`docs/architecture/modules_and_scope_resolution.md`, this describes both
+**what a Turflang programmer observes** (Part 1) and **how the compiler
+actually implements it, pass by pass** (Part 2), with file:line references
+throughout.
 
 Related docs:
 - `docs/planning/ROADMAP_v1.0.0_COMPLETE.md` §6 — the shipped-feature summary this
   doc expands on.
+- `docs/development/changes/LANG-002.md` — the `&?T`/capability change record.
 - `README.md`'s "FFI" and "`unsafe { }` and safe references (`&T`)"
   sections — the short, example-driven version of Part 1 below.
 
@@ -21,32 +26,37 @@ Related docs:
 
 ## Part 1 — External reference (language semantics)
 
-### 1.1 The three pointer-shaped types
+### 1.1 The four pointer-shaped types
 
 | Type | Spelling | Nullable? | Pointee known? | Where it's legal |
 |---|---|---|---|---|
-| Opaque pointer | `ptr` | yes | no (maps to an untyped `i8*`/`ptr` in LLVM IR) | Inside `unsafe { }`, or anywhere under `lib/std` |
-| Typed raw pointer | `T*` | yes | yes | Inside `unsafe { }`, or anywhere under `lib/std` |
+| Opaque pointer | `ptr` | yes | no (maps to an untyped `i8*`/`ptr` in LLVM IR) | Inside `unsafe { }`, or in a file that declares the raw-pointer capability (1.2a) |
+| Typed raw pointer | `T*` | yes | yes | Inside `unsafe { }`, or in a file that declares the raw-pointer capability (1.2a) |
 | Safe reference | `&T` | **no** — compiler-guaranteed | yes | Anywhere — no `unsafe { }` needed |
+| Nullable safe reference | `&?T` | **yes** — but checked (1.6) | yes | Anywhere — no `unsafe { }` needed |
 
 `ptr` is the untyped FFI escape hatch (what `extern fn malloc(size: int): ptr;`
 returns) — you cast it to a concrete `T*` with `to` before using it for
-anything struct-shaped. `T*` and `&T` both know their pointee type and both
-support field/member access with no explicit dereference syntax (Turflang
-has no `*p` operator at all — see 1.3). The only thing distinguishing a
-`&T` from a `T*` at the *value* level is a compile-time promise: a `&T` can
-never be null. Both compile to the exact same LLVM value (see 2.6).
+anything struct-shaped. `T*`, `&T`, and `&?T` all know their pointee type and
+all support field/member access with no explicit dereference syntax
+(Turflang has no `*p` operator at all — see 1.3). What distinguishes the
+three at the *value* level is a compile-time promise, or the deliberate
+absence of one: a `&T` can never be null; a `&?T` might be, and the compiler
+checks every use; a `T*` might be, and nothing checks it at all (that's the
+FFI escape hatch's whole point). All four compile to the exact same LLVM
+value (see 2.6) — this is a purely frontend, zero-runtime-cost distinction.
 
 ### 1.2 The gate: where a raw pointer type is and isn't allowed
 
-Four kinds of "use" of a raw pointer type (`ptr` or `T*` — **not** `&T`,
-which is exempt from all of this) are checked:
+Four kinds of "use" of a raw pointer type (`ptr` or `T*` — **not** `&T` or
+`&?T`, both exempt from all of this — `&?T`'s own safety is enforced by a
+completely separate mechanism, `NullabilityPass`, see 1.6) are checked:
 
 | Use | Example | Needs `unsafe { }`? |
 |---|---|---|
 | **Declaration** | `mutable p: ptr = ...;` | Yes |
 | **Cast** | `raw to int*` (either direction) | Yes |
-| **Dereference** (field/member access through a raw pointer base) | `p.field` where `p: Node*` | Yes |
+| **Dereference** (field/member access, or indexing, through a raw pointer base) | `p.field` where `p: Node*`; `l.data[i]` where `data: T*` (OVH-003) | Yes |
 | **Struct field** | `struct Node { next: Node* }` | Yes — the *entire* `struct { }` decl, not just later dereferences |
 
 A fifth kind of use is checked **unconditionally**, and `unsafe { }` does
@@ -58,9 +68,10 @@ A fifth kind of use is checked **unconditionally**, and `unsafe { }` does
 
 Three things are exempt from the whole gate:
 
-1. **Anything under `lib/std`.** `mem.tr`/`net.tr`/`list.tr`/etc. keep
-   using `ptr`/`T*`/`void*` exactly as they always have — no migration,
-   no `unsafe { }` needed anywhere in the standard library.
+1. **A file that declares the raw-pointer capability (LANG-002/STD-001,
+   see 1.2a below).** `mem.tr`/`net.tr`/`list.tr`/etc. keep using
+   `ptr`/`T*`/`void*` exactly as they always have — they just now say so,
+   in source, on their own first line.
 2. **`extern fn` declarations.** An FFI binding's parameters/return type
    can be `ptr`/`void*`/`T*` freely — that's the whole point of FFI. Only
    *binding the call's result to a variable in your own code* is gated
@@ -287,6 +298,137 @@ live in `tests/05_arrays_pointers_ffi/fail_ptr_outside_unsafe.tr`,
 `fail_fn_signature_raw_pointer_disallowed.tr`, and
 `18_unsafe_block_and_safe_reference.tr`.
 
+### 1.7 The raw-pointer capability declaration (LANG-002/STD-001)
+
+Before LANG-002, "is this file allowed to use raw pointers freely?" was
+answered by a filesystem path check (`IsPathUnderLibStd()`): the entire
+`lib/std` tree was exempt from the `unsafe { }` gate, unconditionally, by
+virtue of *where the file lived on disk* — invisible in the file itself,
+ungreppable across the tree, and unavailable to a user writing perfectly
+legitimate FFI bindings for their own C library.
+
+That privilege is now **declared in source**, as the file's own first
+top-level statement:
+
+```turflang
+unsafe module;
+```
+
+A file that writes this line is granted the raw-pointer capability — every
+`ptr`/`T*` use in it (declarations, casts, dereferences, struct fields, and
+plain function signatures, i.e. every row in 1.2's tables) is exempt from
+the gate, *without* needing to wrap each one in `unsafe { }`. Two conditions
+decide whether the declaration is actually **honored**:
+
+1. **The file is under the resolved install root** (`TurfInstallRoot()` —
+   the same anchor `import` already uses to find `lib/std`/`lib/usr`). This
+   is unconditional: `lib/std`'s own files (now annotated with `unsafe
+   module;` themselves) need no extra flag, exactly as before.
+2. **Anywhere else**, only with the `--allow-unsafe-modules` CLI flag. A
+   user's own FFI bindings get the *identical* capability `lib/std` has —
+   just opt-in rather than ambient, so a plain `turf myfile.tr` never
+   silently grants it.
+
+```turflang
+unsafe module;
+
+fn cmpints(a: ptr, b: ptr): int32 {   // legal here (LANG-002's F1) --
+    return 0;                          // was flatly rejected before, even
+}                                       // inside unsafe { }
+```
+
+Compiled with `turf myfile.tr --allow-unsafe-modules` (outside the install
+root) or unconditionally (inside it, e.g. any `lib/std` module).
+
+This closes the FFI half of the same problem `&?T` (1.8) closes on the
+data-structure side: before LANG-002, no user file could write a C
+callback's comparator signature (`fn cmpints(a: ptr, b: ptr): int32`, what
+`qsort`/`bsearch`/a signal handler need) — `checkNoRawPointersInSignature()`
+rejected `ptr`/`T*` params in *any* non-`extern` function, everywhere,
+`unsafe { }` or not (1.2's fifth-row rule had no exception at all). The
+capability declaration is what makes an exception possible, auditably.
+
+### 1.8 `&?T`, in detail (LANG-002)
+
+`&?T` is a **nullable, compiler-checked** safe reference — the type that
+closes the audit's single most visible language gap: before it existed,
+user code had no safe way to write a linked list at all (`&T` can't
+represent "no next node"; `T*` could, but was gated behind `unsafe { }` and
+banned outright from ordinary function signatures).
+
+```turflang
+struct Node {
+    val: int,
+    next: &?Node   // no unsafe { } needed anywhere in this struct decl
+}
+```
+
+`null` is assignable to `&?T` (and to nothing else safe — 1.6's rule (5)
+still holds for plain `&T`). Widening is implicit and one-way, same
+asymmetric shape as `&T`/`T*` (1.3):
+
+```turflang
+mutable a: Node = Node::default();
+mutable p: &?Node = &a;        // &Node -> &?Node: always allowed (a &T is never null)
+mutable raw: Node* = p;         // &?Node -> Node*: always allowed (widening to raw is always sound)
+```
+
+**Field-accessing a `&?T` requires a null check first.** `p.val`/`p.next`
+compile only where `NullabilityPass` (2.5, `include/Analysis.h`) has proven
+`p` non-null on every path reaching that access — a direct `p != null` /
+`p == null` comparison, narrowed through `if`/`else`, an early return,
+a `while` condition, or a `&&` chain:
+
+```turflang
+fn sum(head: &?Node): int {
+    mutable total: int = 0;
+    mutable current: &?Node = head;
+    while (current != null) {          // narrows `current` to non-null...
+        total = total + current.val;   // ...so this is legal here
+        current = current.next;
+    }
+    return total;
+}
+```
+
+Field-accessing an unguarded `&?T` is `PossibleNullDereferenceError` (E081)
+— see `tests/39_nullable_references/fail_deref_without_check.tr` and the
+narrowing-shape tests in the same directory (`03_narrowing_shapes.tr`) for
+every supported narrowing source.
+
+**`&?T -> &T` needs an explicit, narrowing-checked cast.** Unlike every
+other widening direction above, this one is never granted implicitly
+(LANG-002's own "Must NOT reinterpret" rule: `&T` stays non-null, the two
+types are never merged) — `p to &T` is syntactically legal without
+`unsafe` (neither side is a raw pointer), but is rejected
+(`UnnarrowedNullableCastError`, E082) unless `p` is proven non-null at that
+exact cast site, by the same `NullabilityPass`:
+
+```turflang
+fn takesSafeRef(n: &Node): int { return n.val; }
+
+fn maybeSum(p: &?Node): int {
+    if (p != null) {
+        return takesSafeRef(p to &Node);   // legal: narrowed right above
+    }
+    return -1;
+}
+```
+
+See `tests/39_nullable_references/04_narrowed_cast.tr` (the passing
+counterpart) and `fail_cast_without_narrowing.tr`.
+
+**Known, deliberate limitations** (documented, not silently missing —
+matching this doc's own §2.7 precedent for the raw-pointer gate):
+narrowing is tracked **per-variable only**, never for a general expression
+(`p.field != null` narrows nothing; only a bare variable compared directly
+to `null` does) — and it is **intraprocedural**: a null check in one
+function tells a *different* function nothing about its own parameter.
+Function-call arguments and `return` values are **not** narrowing-checked
+against a `&T`-typed parameter/return type — only variable declarations and
+plain assignments are (see `docs/development/changes/LANG-002.md`'s *Known
+pitfalls* for the full list and the reasoning).
+
 ---
 
 ## Part 2 — Internal reference (compiler implementation)
@@ -509,7 +651,13 @@ void checkNoRawPointersInSignature(const FuncDefExprAST &Node);
 
 1. `UnsafeDepth_ > 0` — lexically inside a (nested) `unsafe { }` block.
 2. `Node` was spliced from a top-level `unsafe { }` (`WasDeclaredInsideTopLevelUnsafe(Node)`).
-3. The declaring file is under `lib/std` (`IsPathUnderLibStd(Loc.Filename)`).
+3. The declaring file has the raw-pointer capability
+   (`HasRawPointerCapability(Loc.Filename)`, 1.7/2.8 below) — **not** a
+   `lib/std` path check; this paragraph described the pre-LANG-002
+   mechanism (`IsPathUnderLibStd()`) and was left stale after that group
+   replaced it. `HasRawPointerCapability()` requires the file to have
+   parsed a leading `unsafe module;` pragma, honored unconditionally under
+   the install root and only with `--allow-unsafe-modules` elsewhere.
 
 `checkUnsafeGate()` (`TypeCheckerCore.cpp:150`) is the actual enforcement
 point: if `T` `isRawPointer()` and the location isn't exempt, it raises a
@@ -533,13 +681,14 @@ top-level declaration in the same file wrongly gated (or exempt).
 `visitBlock()`'s identical "last expression's type, or void if empty"
 rule.
 
-#### 2.5.2 The four gate call sites
+#### 2.5.2 The five gate call sites
 
 | Gate | Site | What's checked |
 |---|---|---|
 | Declaration | `visitVarDecl` (`TypeCheckerDecl.cpp:76`) | The declared type |
 | Cast | `visitCast` (`TypeCheckerExpr.cpp:693-694`) | Destination type first, then operand type |
-| Dereference | `visitFieldAccess` (`TypeCheckerCall.cpp:1223`) | The base expression's type |
+| Dereference (field access) | `visitFieldAccess` (`TypeCheckerCall.cpp:1223`) | The base expression's type |
+| Dereference (indexing) | `visitArrayAccess` (`TypeCheckerCall.cpp`, OVH-003) | The base expression's type — same `self`-exemption reasoning as `visitFieldAccess`, verbatim |
 | Struct field | `visitStructDecl` (`TypeCheckerDecl.cpp:158`) | Any field's type; the struct's own `Loc` is what gets checked for exemption |
 
 The cast site is worth spelling out since it's the one place a
@@ -708,12 +857,6 @@ exactly like the `BlockExprAST` case right next to it:
 
 ### 2.7 Known gaps / deliberately out of scope
 
-- **Array-indexing through a raw pointer isn't gated.** `p[0]` where
-  `p: int*` is not treated as a "dereference" by `visitArrayAccess()` the
-  way `p.field` is by `visitFieldAccess()` — indexing into a raw
-  pointer-as-array (a common idiom, e.g. `int*` from `malloc`) works
-  identically inside or outside `unsafe { }`. Only field/member access
-  through a raw pointer base is gated.
 - **Calling a method through a raw pointer receiver isn't gated either** —
   only reading/writing a *field* through one is. `visitMethodCall()` has
   no equivalent check.
@@ -737,3 +880,50 @@ exactly like the `BlockExprAST` case right next to it:
   correctly `true` either way), never about the safe/raw distinction — so
   the divergence is real but behaviorally inert. Flagged here in case a
   future change makes Codegen care about `isReference()` directly.
+
+### 2.8 LANG-002 additions, by pass
+
+Summary only — `docs/development/changes/LANG-002.md` has the full detail.
+
+- **Types (`include/Types.h`, `src/Types.cpp`).** `TurfNullableReferenceType`
+  is a SIBLING of `TurfReferenceType` (both direct `TurfPointerType`
+  subclasses), not a further subclass — `isReference()` stays `false` for
+  it (only `&T` is the "always non-null" contract), and a new
+  `isNullableReference()` predicate is the one place callers ask "is this
+  specifically `&?T`". That single choice makes almost every existing
+  pointer-widening `typesCompatible()` rule apply to `&?T` unchanged; only
+  one new rule (`&?T -> T2*`, mirroring the existing `&T -> T2*` rule) was
+  needed.
+- **Parser (`src/ParserCore.cpp`, `src/ParserModule.cpp`).** `ParseType()`
+  gets a one-token `?` lookahead right after `&`. The `unsafe module;`
+  capability pragma is parsed by `ParseLeadingUnsafeModuleDecl()`
+  (`ParserModule.cpp`) at the three places a file's first token is seen
+  (`ParseFile()` for imports; `main.cpp`'s pre-pass and main-pass entry-file
+  loops) — see that function's own doc comment for why one token of
+  lookahead forces it to consume `unsafe` before it can tell a pragma apart
+  from a genuine top-level `unsafe { }` block.
+- **TypeChecker (`include/TypeChecker.h`, `src/TypeCheckerCore.cpp`).**
+  `isRawPointer()` additionally excludes `isNullableReference()` — `&?T` is
+  exempt from the raw-pointer gate the same way `&T` is (its own safety is
+  a SEPARATE mechanism, NullabilityPass, not this gate).
+  `HasRawPointerCapability()` (`ParserModule.cpp`, exported via `Parser.h`)
+  replaces `IsPathUnderLibStd()` at both call sites
+  (`isUnsafeGateExempt()`, `checkNoRawPointersInSignature()`).
+- **CFG-based analysis (`include/Analysis.h`, `src/Analysis.cpp`).**
+  `NullabilityPass` — a forward dataflow pass over the CFG, structurally
+  copied from `DefiniteAssignmentPass` just above it in the same file
+  (a `std::unordered_set<const VariableSymbol*>` per block, meet =
+  intersection), but two-state rather than three (see its own doc comment
+  for why "proven non-null, or not" is enough). Run from
+  `FuncDefExprAST::codegen()` (`src/CodegenFunc.cpp`), the same pipeline
+  position as every other CFG pass — after the TypeChecker, before real
+  LLVM codegen.
+- **Generics (`src/ResolverCore.cpp`'s `substituteTypeParams()`,
+  `src/Monomorphize.cpp`'s `substituteConcreteTypes()`).** Both needed the
+  identical fix `&T` already required (2.4's own doc comment): a
+  `dynamic_cast<TurfNullableReferenceType*>` branch, checked BEFORE the
+  generic `TurfPointerType` fallback, so a substituted generic `&?T` field/
+  parameter/return type doesn't silently rebuild as a plain `T*`.
+- **Codegen.** Nothing — `getLLVMType()`'s existing
+  `dynamic_cast<TurfPointerType*>` branch already covers the new sibling
+  class for free, exactly as it did for `&T` (2.6).

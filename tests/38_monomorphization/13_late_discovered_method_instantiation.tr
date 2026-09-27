@@ -1,0 +1,35 @@
+// Regression test: D1 (docs/development/changes/TYPE-002.md, S15) -- an
+// instantiation site discovered AFTER its entry has already been drained
+// must still be rewritten to the clone's real symbol.
+//
+// Wrap<int>.makeFrom<int> and Wrap<int>.set<int> are both Method-kind
+// requests for the SAME instantiation (Wrap<int>). w.set(1) drains
+// Wrap.set<int> FIRST (main() runs before makeFrom's body is
+// re-typechecked). Only once main()'s own body finishes typechecking is
+// Wrap.makeFrom<int> itself recorded and drained -- and re-typechecking
+// makeFrom's clone body discovers a SECOND call site to Wrap.set<int>
+// (`c.set(raw)`), on an entry that is already Drained. Before the D1 fix,
+// InstantiationCollector::record() still appended this site to
+// Wrap.set<int>'s Sites list (record() has never checked Drained), but no
+// drain function ever revisited a Drained entry to rewrite it -- so
+// `c.set(raw)`'s ResolvedCallTarget stayed null/stale and
+// MethodCallExprAST::codegen() silently dropped the call (returned nullptr
+// with no diagnostic, the exact "delete a call silently" failure mode this
+// session's brief calls out). makeFrom(42) printed 0 instead of 42.
+import io;
+import test;
+
+struct Wrap<T> { v: T }
+fn<T> Wrap.set(x: T): void { self.v = x; }
+fn<T> Wrap.makeFrom(raw: T): T {
+  mut c: Wrap<T> = Wrap::default();
+  c.set(raw);
+  return c.v;
+}
+
+fn main(): int {
+  mut w: Wrap<int> = Wrap::default();
+  w.set(1); // drains Wrap.set<int> before Wrap.makeFrom<int> is even requested
+  test::assert(w.makeFrom(42) == 42, "late-discovered c.set(raw) call inside makeFrom's clone must still dispatch");
+  return 0;
+}

@@ -43,7 +43,7 @@ struct ResolverScope {
 /**
  * @brief Lexical-scope half of the Resolver's symbol table (split out of the
  * original monolithic ResolverSymbolTable -- see
- * docs/planning/COMPILER_MODULE_BREAKDOWN.md). Manages a stack of
+ * docs/architecture/compiler_pipeline.md). Manages a stack of
  * ResolverScope objects; owns no module/type-registry state at all.
  *
  * Error handling: lookup failures return nullptr (not exceptions) so that the

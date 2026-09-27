@@ -73,6 +73,36 @@ public:
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
+// LANG-001's orphan rule (ARCHITECTURE_OVERHAUL.md §13.4): at least one
+// operand of a declared operator must be a struct/enum declared in the SAME
+// module as the operator itself. Without this, module C could declare
+// `operator +(a: ModuleA::Foo, b: ModuleB::Bar)` -- redefining what `+`
+// means between two types it doesn't own -- and the result would silently
+// depend on which modules happen to be imported, in what order. A builtin/
+// `string` operand (never itself "declared" anywhere) doesn't count toward
+// satisfying the rule, but also can't violate it by itself -- see
+// Resolver::validateOperatorDecl()'s own comment for the exact reasoning.
+class OperatorOrphanRuleError : public TurfError {
+public:
+  OperatorOrphanRuleError(SourceLocation Loc, const std::string &OpSpelling,
+                          const std::string &DeclaringModule,
+                          const std::string &OperandTypeName,
+                          const std::string &OperandOwningModule)
+      : TurfError(Loc, Colors::BRIGHT_RED + "'operator " + OpSpelling +
+                           "' does not own any of its operand types." +
+                           Colors::RESET,
+                  "'" + OperandTypeName + "' is declared in " +
+                      (OperandOwningModule.empty() ? "the main file"
+                                                   : "module '" + OperandOwningModule + "'") +
+                      ", not in " +
+                      (DeclaringModule.empty() ? "the main file" : "module '" + DeclaringModule + "'") +
+                      " -- at least one operand of an operator declaration "
+                      "must be a struct or enum declared in the same "
+                      "module/file as the operator itself, so an operator's "
+                      "meaning never depends on import order.") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+};
 // Two `extern fn` declarations for the same raw C name with genuinely
 // different signatures (arity, parameter types, return type, or variadic-
 // ness). Extern mangled names are just the bare C symbol name (not
@@ -180,6 +210,7 @@ public:
         "module name (io::printline), or a struct type name for a static "
         "method (StructName::method). Double-check the spelling, or make "
         "sure you've imported the module.");
+    trySetDeterministicRename(LeftName, Suggestions);
   }
 };
 // Raised when '::' -- reserved for namespace-resolution (enum/module/
@@ -223,6 +254,7 @@ public:
     Hint_ = suggestionsOrFallback(
         Suggestions, "Double-check the spelling, or check " + ModuleName +
                          ".tr for its actual exported names.");
+    trySetDeterministicRename(SymbolName, Suggestions);
   }
 };
 // Raised when two on-demand imports (import module::[...];) in the SAME
@@ -290,9 +322,9 @@ public:
                       ModuleName + Colors::BRIGHT_RED +
                       "' has no function named '" + Colors::CYAN + MethodName +
                       Colors::BRIGHT_RED + "'." + Colors::RESET) {
-    // Left as the default GENERAL (a judgment call): could arguably be
-    // UNDECLARED_VAR, but the ranked suggestions already do the heavy
-    // lifting here, and classifyError()'s text match gets a fair shot too.
+    // Left as the default GENERAL (a judgment call, DIAG-001 audit): could
+    // arguably be UNDECLARED_VAR, but the ranked suggestions already do the
+    // heavy lifting here.
     // No explicit "Did you mean:\n" prefix -- suggestionsOrFallback()'s
     // formatted suggestion text already starts with its own lead-in
     // ("It may be from the current file: ..."), and stripping its leading
@@ -302,6 +334,7 @@ public:
     // class in this file, which passes no prefix and reads cleanly.
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check your spelling, or maybe you need to define it?");
+    trySetDeterministicRename(MethodName, Suggestions);
   }
 };
 // Phase 2: Module-scoped argument type mismatch error

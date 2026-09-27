@@ -1,0 +1,89 @@
+// tests/41_gc/08_error_message_survives_collection.tr
+// OVH-002 (docs/planning/OVERHAUL_REMAINING_WORK.md): `CodegenErrorVariantConstructWithMessage()`
+// (src/CodegenCore.cpp) heap-allocates the `TurfErrorValue{tag, message}`
+// struct a message-carrying error construction (`ErrorType::Variant(msg)`)
+// produces, since the message is in general a runtime value. Before this
+// fix that allocation was a bare `malloc()` -- never registered with the
+// collector's block table, so `err.message`'s GC-heap `string` pointer,
+// reachable ONLY through that unregistered block, had no root of its own.
+// A collection between the error's construction and the point `err` is
+// finally read (`recover as err run`'s own failure block, which runs
+// ordinary user code -- exactly where a collection legitimately could
+// happen) would sweep the message string, corrupting `err.message`.
+//
+// `makeError()` constructs the error in a deeper call frame than the one
+// that later reads it (mirroring 01/02's own "deeper frame" discipline);
+// the collection runs INSIDE `recover as err run`'s block, after `err` is
+// bound but before its message is read -- precisely the window OVH-002's
+// own testing scope names ("collect inside the `recover as err run`
+// block, compare `err.message` to a freshly rebuilt expected string").
+//
+// `junk()` between the two collections allocates a few thousand throwaway
+// strings (docs/planning/OVERHAUL_REMAINING_WORK.md §1's own guidance) so
+// a freed block is actually REUSED with different content, not merely
+// freed-but-still-readable-by-luck -- glibc's `free()` doesn't zero or
+// scramble memory on its own, so a bug that fails to keep `message` rooted
+// would otherwise still often read back correct-looking (stale, not yet
+// overwritten) bytes and falsely appear to pass.
+
+import strings;
+import test;
+import io;
+
+error MyError {
+    Bad
+}
+
+fn makeError(): !void {
+    return MyError::Bad(strings::repeat("m", 40));
+}
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 17;
+        i = i + 1;
+    }
+    mut sum: int = 0;
+    i = 0;
+    while i < 64 {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    test::assert(sum == 34272, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+fn junk(n: int): void {
+    mut i: int = 0;
+    while i < n {
+        strings::repeat("j", 40);
+        i = i + 1;
+    }
+}
+
+fn main(): int {
+    // T is `void` here (§1.6 of docs/architecture/errors_and_recover.md):
+    // the recover block is not required to diverge, so execution
+    // continues normally afterward -- letting this test assert AND still
+    // reach the PASS line below in the same run.
+    makeError() recover as err run {
+        churn(24);
+        gc_collect();
+        junk(2000);
+        churn(24);
+        gc_collect();
+
+        immut expected: string = strings::repeat("m", 40);
+        test::assert(err == MyError::Bad, "the error variant identity survives a forced collection");
+        test::assert(strings::length(err.message) == 40, "err.message survives with correct length -- OVH-002's actual reproducer");
+        test::assert(err.message == expected, "err.message content survives, compared against a freshly rebuilt expected string");
+    };
+
+    io::printline("41/08 PASS: a message-carrying error value's GC-heap message string is precisely traced through a forced collection");
+    return 0;
+}

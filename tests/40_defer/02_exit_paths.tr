@@ -1,0 +1,69 @@
+// LANG-003: `defer` fires on every exit edge -- fallthrough, return, break,
+// and continue -- not just the "normal" end of a block.
+import test;
+
+struct Trail {
+    log: string
+}
+
+fn Trail.new(): void {
+    self.log = "";
+}
+
+fn onFallthrough(t: &Trail): void {
+    defer t.log = t.log + "F";
+}
+
+fn onReturn(t: &Trail): void {
+    defer t.log = t.log + "R";
+    return;
+}
+
+// break on the very first iteration -- proves the defer registered THAT
+// iteration runs exactly once, via the break edge, not the (never-reached)
+// natural end of the loop body.
+fn onBreak(t: &Trail): void {
+    mut i: int = 0;
+    while (i < 5) {
+        defer t.log = t.log + "B";
+        if (i == 0) {
+            break;
+        }
+        i = i + 1;
+    }
+}
+
+// Two iterations, each ended early by `continue` -- proves the defer runs
+// once per iteration even when every iteration takes the continue edge
+// instead of the loop body's natural end.
+fn onContinue(t: &Trail): void {
+    mut i: int = 0;
+    while (i < 2) {
+        defer t.log = t.log + "C";
+        i = i + 1;
+        if (i >= 1) {
+            continue;
+        }
+    }
+}
+
+fn main(): int {
+    mut t: Trail = Trail::new();
+
+    onFallthrough(&t);
+    test::assert(t.log == "F", "defer runs on plain fallthrough");
+
+    t.log = "";
+    onReturn(&t);
+    test::assert(t.log == "R", "defer runs before an early return");
+
+    t.log = "";
+    onBreak(&t);
+    test::assert(t.log == "B", "defer runs exactly once when break exits on the first iteration");
+
+    t.log = "";
+    onContinue(&t);
+    test::assert(t.log == "CC", "defer runs once per continue-shortened iteration");
+
+    return 0;
+}

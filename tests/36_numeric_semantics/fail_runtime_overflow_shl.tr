@@ -1,0 +1,11 @@
+// RUNTIME_ABORT_EXPECTED
+// SEM-002 (FREEZE.md §6.2 row 7 names '<<' explicitly): traps when a set
+// bit is shifted out past the sign bit. See EmitCheckedShl()'s own doc
+// comment (CodegenCore.cpp) for the exact overflow definition used (LLVM
+// has no llvm.shl.with.overflow intrinsic, unlike +/-/*).
+fn main(): int {
+    mut a: int = 1;
+    mut s: int = 63;
+    mut b: int = a << s;
+    return 0;
+}

@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -28,7 +28,6 @@
 #include "ValueRange.h"
 #include "Lint.h"
 #include "SymbolTable.h"
-#include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
 #include "llvm/IR/CFG.h"
@@ -236,7 +235,12 @@ Value *ArrayAccessExprAST::codegenLValue() {
         Err.raise();
         return nullptr;
       }
-    } else {
+    } else if (!ProvenInBounds) {
+      // OPT-002: ProvenInBounds is set by ValueRangePass::markElidableChecks()
+      // (ValueRange.cpp), which runs on a throwaway CFG BEFORE Body->codegen()
+      // -- see that call site's own comment (CodegenFunc.cpp). F-OPT-2
+      // (ARCHITECTURE_OVERHAUL.md §17.3): removal by proof only, independent
+      // of `-O` level -- this is not gated on any optimization flag.
       EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
     }
   }
@@ -256,6 +260,38 @@ Value *ArrayAccessExprAST::codegenLValue() {
 
 
 Value *ArrayAccessExprAST::codegen() {
+  // ── operator[] dispatch (LANG-001) ───────────────────────────────────────
+  // TypeChecker::visitArrayAccess() already resolved ResolvedIndexGetTarget
+  // (if any) via exact (BaseType, IndexType) match. A struct base has no
+  // physical memory layout `codegenLValue()` could GEP into for this at
+  // all -- this is an ordinary function call returning T BY VALUE, so it is
+  // checked first and never touches codegenLValue()/the array/pointer/
+  // string paths below (mirrors BinaryExprAST::codegen()'s ResolvedOperator
+  // Target dispatch).
+  if (ResolvedIndexGetTarget) {
+    // Self is passed BY ADDRESS when the overload declared it `&T`
+    // (operatorSelfOperandMatches()'s deliberate relaxation,
+    // TypeCheckerCall.cpp) -- BY VALUE otherwise.
+    const bool SelfByRef = !ResolvedIndexGetTarget->Params.empty() &&
+        ResolvedIndexGetTarget->Params[0].Type &&
+        ResolvedIndexGetTarget->Params[0].Type->isReference();
+    Value *BaseVal = SelfByRef ? Base->codegenLValue() : Base->codegen();
+    if (!BaseVal)
+      return nullptr;
+    Value *IndexVal = Index->codegen();
+    if (!IndexVal)
+      return nullptr;
+    std::string MangledName = ResolvedIndexGetTarget->mangledName();
+    Function *CalleeF = TheModule->getFunction(MangledName);
+    if (!CalleeF) {
+      llvm::report_fatal_error(
+          llvm::StringRef("Internal error: operator overload '" +
+                          MangledName + "' was resolved but never codegenned."));
+      return nullptr;
+    }
+    return Builder->CreateCall(CalleeF, {BaseVal, IndexVal}, "idxoptmp");
+  }
+
   const TurfType *BaseTy = getExprType(Base.get());
   if (BaseTy && BaseTy->isString()) {
     Value *StrVal = Base->codegen();
@@ -329,7 +365,16 @@ Value *ArrayAccessExprAST::codegen() {
       AllocaInst *TempAlloca = CreateEntryBlockAlloca(TheFunction, "tmparr", BaseTy);
       Builder->CreateStore(BaseVal, TempAlloca);
 
-      EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
+      // OPT-002: see codegenLValue()'s identical guard's comment. In
+      // practice ProvenInBounds is never true on THIS path -- markNode()
+      // (ValueRange.cpp) only sets it when the base is a plain array
+      // variable, and a plain array variable's base always succeeds via
+      // codegenLValue() above, which never reaches this R-value fallback --
+      // but the guard is kept here too rather than assumed, for the same
+      // reason the compile-time-constant check just above is duplicated
+      // rather than shared between the two branches.
+      if (!ProvenInBounds)
+        EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
 
       Type *ElemTy = getLLVMType(ElemType);
       llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);

@@ -1,6 +1,16 @@
-// Negative test: int -> int32 narrowing must be rejected without an
-// explicit `to int32` cast, same as double -> int is rejected.
+// Negative test: a genuinely `int`-TYPED value narrowing to `int32` must
+// still be rejected without an explicit `to int32` cast, same as
+// double -> int is rejected -- OVH-005 only changes what happens to an
+// UNTYPED integer LITERAL reaching an `int32` destination (see
+// int32_untyped_literal_init.tr's positive `mut n: int32 = 5;` case,
+// tests/36_numeric_semantics/fail_implicit_narrow_int_to_int32.tr's
+// identical VarDecl-init case, and untypedLiteralAcquiresInt32()'s own doc
+// comment, TypeChecker.h) -- this file exercises the same rule at the
+// ARGUMENT type-fixing site instead, which VarDecl init does not cover.
+fn takesInt32(x: int32): int32 { return x; }
+
 fn main(): int {
-    mut n: int32 = 5;
+    mut existing: int = 5;
+    mut n: int32 = takesInt32(existing);
     return 0;
 }

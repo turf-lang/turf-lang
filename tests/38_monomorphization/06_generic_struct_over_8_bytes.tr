@@ -1,0 +1,73 @@
+// Regression test: TYPE-002 S13b -- completion criterion 2, "List<Big>
+// (24-byte struct) compiles, runs, prints correctly." Before this session,
+// this exact shape (a generic struct instantiated with a >8-byte struct
+// type argument) ICEd with "Invalid bitcast: bitcast %Big %x4 to ptr" --
+// Type Erasure could only ever stuff a value into one 8-byte pointer-sized
+// slot. S13a gave every instantiation its own real TurfStructType/LLVM
+// layout; S13b is what makes Codegen actually USE it (killing
+// FieldAccessExprAST's GenericType->base-name collapse, getLLVMType()'s
+// matching collapse, and CastToType's struct passthrough) instead of still
+// silently falling back to the shared, erasure-sized layout.
+import list::List;
+import test;
+
+struct Big {
+    a: int,
+    b: int,
+    c: int
+}
+
+fn Big.new(a: int, b: int, c: int): void {
+    self.a = a;
+    self.b = b;
+    self.c = c;
+}
+
+// A >8-byte struct round-tripping through a generic FREE function -- this
+// half was already real since S12a (free-function monomorphization doesn't
+// depend on struct LAYOUT at all, only on the argument/return TYPES being
+// substituted concretely), verified here rather than assumed.
+fn<T> identity(x: T): T {
+    return x;
+}
+
+// A generic struct instantiated as a >8-byte-carrying STRUCT FIELD of
+// another (non-generic) struct -- proves the round-trip works through
+// struct field storage too, not just a bare local variable.
+struct Holder {
+    items: List<Big>
+}
+
+fn main(): int {
+    // List<Big> itself: push/pop/length with a real, concrete 24-byte
+    // struct value and return type (verified live via --emit-llvm during
+    // this session: `turf_List.push_gen1_Big...(ptr %self, %Big %item)`
+    // and `turf_List.pop_gen1_Big...(ptr %self): %Big` -- genuinely
+    // struct-shaped LLVM types, not erased pointers).
+    mut l: List<Big> = List::default();
+    l.push(Big::new(1, 2, 3));
+    l.push(Big::new(4, 5, 6));
+    test::assert(l.length() == 2, "List<Big>.length() wrong");
+    mut popped: Big = l.pop();
+    test::assert(popped.a == 4 && popped.b == 5 && popped.c == 6,
+                "List<Big>.pop() wrong");
+    mut first: Big = l.get(0);
+    test::assert(first.a == 1 && first.b == 2 && first.c == 3,
+                "List<Big>.get(0) wrong");
+
+    // Generic free function, >8-byte struct argument/return.
+    mut echoed: Big = identity(Big::new(7, 8, 9));
+    test::assert(echoed.a == 7 && echoed.b == 8 && echoed.c == 9,
+                "identity<Big> wrong");
+
+    // Generic struct instantiation as ANOTHER struct's own field.
+    mut h: Holder = Holder::default();
+    h.items = List::default();
+    h.items.push(Big::new(10, 20, 30));
+    test::assert(h.items.length() == 1, "Holder.items (List<Big>) wrong");
+    mut fromField: Big = h.items.get(0);
+    test::assert(fromField.a == 10 && fromField.b == 20 && fromField.c == 30,
+                "Holder.items.get(0) wrong");
+
+    return 0;
+}

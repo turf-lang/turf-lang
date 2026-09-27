@@ -1,0 +1,20 @@
+// Regression test: OVH-004's positive twin. The same generic/concrete-type
+// shape as fail_generic_instantiation_by_value_cycle.tr (struct A<T> { val: T }
+// holding a struct B by value, and B holding A<B> back), but through a
+// nullable reference instead of by value -- `&?A<B>` is not a by-value edge
+// (byValueEdgeTarget() returns "" for any pointer-shaped field before it
+// ever looks at the mangled instantiation name), so this must compile and
+// run cleanly. Proves the OVH-004 fix didn't turn every generic self-
+// reference into a false-positive cycle error, only the genuinely
+// infinite-size ones.
+
+import test;
+
+struct A<T> { val: T }
+struct B { back: &?A<B> }
+
+fn main(): int {
+    mut x: A<B> = A::default();
+    test::assert(x.val.back == null, "freshly defaulted B.back should be null");
+    return 0;
+}

@@ -21,6 +21,8 @@
  *   ├─ NamedType              — user-defined struct names and legacy fallback
  *   ├─ ArrayType              — T[]  /  T[N]
  *   ├─ TurfPointerType        — T*   (pass-by-reference / self)
+ *   │   ├─ TurfReferenceType         — &T   (compiler-guaranteed non-null)
+ *   │   └─ TurfNullableReferenceType — &?T  (nullable, NullabilityPass-checked; LANG-002)
  *   ├─ TurfGenericParamType   — open generic parameter (e.g. T in fn<T>)
  *   ├─ GenericType            — closed generic instantiation (e.g. map<K,V>)
  *   ├─ TurfStructType         — user-defined aggregate type
@@ -85,6 +87,18 @@ public:
   virtual bool isVoid()   const { return false; }
   virtual bool isNull()   const { return false; }
 
+  /// True for the `guess` placeholder (SEM-003) -- the type ParseType()
+  /// produces for `: guess` or an omitted annotation, before the
+  /// TypeChecker replaces it with the initializer's real type
+  /// (VarDeclExprAST::setTypePtr()). A `guess`-typed node reaching Codegen
+  /// would mean the TypeChecker skipped inference (a compiler bug); unlike
+  /// F-GEN-2's TurfGenericParamType, this has no dedicated Codegen assert
+  /// because a `guess` that failed to resolve always already raised a hard
+  /// TypeChecker error first, and main.cpp aborts before Codegen runs on
+  /// any errored program (see main.cpp's own comment above its TypeChecker
+  /// pass, "Codegen must never run on" an errored compile).
+  virtual bool isGuess()  const { return false; }
+
   /// True for any numeric type (int, double, bool).
   virtual bool isNumeric() const { return isInt() || isDouble() || isBool(); }
 
@@ -106,6 +120,20 @@ public:
   /// that need to tell the two apart (typesCompatible(), the `unsafe`
   /// gate) do so without dynamic_cast.
   virtual bool isReference() const { return false; }
+
+  /// True if this type is a `TurfNullableReferenceType` (`&?T`, LANG-002).
+  /// Deliberately a SIBLING of TurfReferenceType (both direct
+  /// TurfPointerType subclasses), not a further subclass of it -- `&?T`
+  /// does NOT carry `&T`'s non-null contract, so isReference() stays FALSE
+  /// for it (see TurfNullableReferenceType's own doc comment for why this
+  /// makes the existing `&T`-widening typesCompatible() rules, and the
+  /// `unsafe` gate's raw-pointer exemption, apply to `&?T` for free without
+  /// implying a false non-null guarantee). Consulted by typesCompatible()
+  /// (null-compatibility, the `&?T -> T*` widening rule) and by
+  /// TypeChecker::isRawPointer() (both safe reference kinds are exempt from
+  /// the `unsafe` gate -- `&?T`'s own safety is enforced by a SEPARATE
+  /// mechanism, NullabilityPass, not the raw-pointer gate).
+  virtual bool isNullableReference() const { return false; }
 
   /// True if this type is a `TurfStructType`.
   virtual bool isStruct() const { return false; }
@@ -258,9 +286,9 @@ public:
  */
 /**
  * @brief The type of `err` inside `recover as err run { ... }`
- * (docs/planning/Errors.md). See `TurfType::isAnyError()`'s doc comment for
- * why this exists as its own type rather than any specific declared error
- * type.
+ * (docs/architecture/errors_and_recover.md). See `TurfType::isAnyError()`'s doc
+ * comment for why this exists as its own type rather than any specific declared
+ * error type.
  */
 class AnyErrorType : public TurfType {
 public:
@@ -272,6 +300,32 @@ class VoidType : public TurfType {
 public:
   std::string getName() const override { return "void"; }
   bool isVoid() const override { return true; }
+};
+
+// ─── GuessType (SEM-003) ────────────────────────────────────────────────────
+
+/**
+ * @brief Placeholder type for `: guess` / an omitted variable-declaration
+ * annotation (ARCHITECTURE_OVERHAUL.md §11).
+ *
+ * ParseType() and ParseLetStatement() produce this singleton for both
+ * spellings (`mut x: guess = 5;` and `mut x = 5;`) so they parse to the
+ * identical AST shape (§11.2). It is a pure placeholder, never a real type
+ * for anything downstream of the TypeChecker: `TypeChecker::visitVarDecl`
+ * infers the real type from the (already-checked) initializer and
+ * overwrites both `VarDeclExprAST::Type` (via `setTypePtr()`) and the
+ * declaration's own `VariableSymbol::Type` in place -- the same
+ * "placeholder now, refine later" contract `ForEachExprAST`'s loop
+ * variable and a plain-variable-declaration's `NamedType` already use
+ * (see `Resolver::visitForEach`'s and `TypeChecker::visitVarDecl`'s own
+ * comments). `Resolver::visitVarDecl` declares the variable with this
+ * placeholder type -- never a null type -- so no other Resolver code path
+ * needs to special-case an unset type.
+ */
+class GuessType : public TurfType {
+public:
+  std::string getName() const override { return "guess"; }
+  bool isGuess() const override { return true; }
 };
 
 // ─── Null type ────────────────────────────────────────────────────────────────
@@ -447,6 +501,70 @@ public:
   }
 
   bool isReference() const override { return true; }
+};
+
+// ─── TurfNullableReferenceType ───────────────────────────────────────────────
+
+/**
+ * @brief Compiler-checked NULLABLE reference: `&?T` (LANG-002).
+ *
+ * Closes the gap `&T` deliberately leaves open: a `&T` can never be null,
+ * so it cannot represent "no next node" and user code had no safe way to
+ * write a linked list (only `T*`, gated behind `unsafe { }` and banned
+ * outright from ordinary function signatures). `&?T` is the answer --
+ * `null` is assignable to it, and a `NullabilityPass` (Analysis.h) requires
+ * a direct-comparison null check (`p != null` / `p == null`) before a
+ * `&?T`-typed variable may be field-accessed, tracked per-variable over the
+ * function's CFG.
+ *
+ * A SIBLING of TurfReferenceType, not a subclass of it -- both are direct
+ * TurfPointerType subclasses. This is deliberate: `&?T` does NOT carry
+ * `&T`'s "always non-null" contract, so `isReference()` stays FALSE for it
+ * (only `isNullableReference()` is true). That single choice makes the
+ * EXISTING pointer-widening rules apply to `&?T` correctly with no further
+ * changes:
+ *   - typesCompatible()'s null-compatibility rule (`isPointer() &&
+ *     !isReference()`) already accepts `&?T` as a null target, unchanged.
+ *   - typesCompatible()'s Rule 2 (`ptr`/`void*` <-> `T*` coercion) already
+ *     treats `&?T` like a plain raw pointer for widening TO opaque, unchanged.
+ *   - typesCompatible()'s Rule 2.5 (`&T` widens to a concrete `T2*`) already
+ *     matches `&?T` as a valid TARGET (its `!To->isReference()` guard is
+ *     true for `&?T`), so `&T -> &?T` widens implicitly for free.
+ * Only ONE new typesCompatible() rule is needed: `&?T -> T2*` (widening a
+ * nullable reference to a concrete raw pointer, always sound -- the LLVM
+ * value doesn't change), mirroring Rule 2.5 but keyed on
+ * TurfNullableReferenceType instead of TurfReferenceType, since `dynamic_
+ * cast<TurfReferenceType*>` does NOT match a sibling class.
+ *
+ * The reverse, narrowing direction (`&?T -> &T`) is deliberately NEVER
+ * granted by typesCompatible() -- LANG-002's own "Must NOT reinterpret"
+ * list: "`&T` stays non-null -- do not merge the two types." The ONLY way
+ * to bridge that direction is an explicit `p to &T` cast (already
+ * syntactically legal via the existing pointer-like cast bucket in
+ * TypeCheckerExpr.cpp's visitCast(), no `unsafe` required since neither
+ * side is a raw pointer), whose SOUNDNESS -- was `p` actually narrowed
+ * non-null at this exact cast site -- is verified by NullabilityPass at
+ * Codegen time, not by the TypeChecker (which has no flow information).
+ *
+ * At the LLVM level `&?T` is representationally IDENTICAL to `&T`/`T*`
+ * (an opaque pointer) -- `isPointer()` is inherited (true), so every
+ * existing Codegen `dynamic_cast<TurfPointerType*>` call site (auto-deref
+ * field access, argument passing, GEP) handles it for free, zero Codegen
+ * changes, same as `&T` before it.
+ */
+class TurfNullableReferenceType : public TurfPointerType {
+public:
+  explicit TurfNullableReferenceType(TurfTypePtr Pointee)
+      : TurfPointerType(std::move(Pointee)) {}
+
+  std::string getName() const override {
+    return "&?" + getPointee()->getName();
+  }
+  std::string getMangledName() const override {
+    return getPointee()->getMangledName() + "_nref";
+  }
+
+  bool isNullableReference() const override { return true; }
 };
 
 // ─── TurfGenericParamType ────────────────────────────────────────────────────
@@ -638,13 +756,14 @@ public:
 
 /**
  * @brief A user-declared `error Name { Variant, ... }` type
- * (docs/planning/Errors.md). Deliberately NOT named `TurfErrorType` -- one
- * character away from `TurfError` (include/Errors.h), the compiler's own
- * internal diagnostic base class, which is an entirely unrelated concept.
+ * (docs/architecture/errors_and_recover.md). Deliberately NOT named
+ * `TurfErrorType` -- one character away from `TurfError` (include/Errors.h),
+ * the compiler's own internal diagnostic base class, which is an entirely
+ * unrelated concept.
  *
  * Variants are bare names only, exactly like `TurfEnumType` -- no payload
- * fields. This is a deliberate scope decision (see Errors.md's own note on
- * why): a variant with fields, and a real destructuring syntax to read them
+ * fields. This is a deliberate scope decision (see errors_and_recover.md
+ * §5.1): a variant with fields, and a real destructuring syntax to read them
  * back safely, is deferred until there's an actual need for it.
  */
 class TurfUserErrorType : public TurfType {
@@ -684,12 +803,13 @@ public:
 // ─── TurfErrorUnionType ───────────────────────────────────────────────────────
 
 /**
- * @brief The `!T` fallible-return type (docs/planning/Errors.md): T on
- * success, or a value of ANY declared `error` type on failure. Distinct from
- * `TurfUserErrorType` (the declared error TYPE itself) -- a `!T` function
- * doesn't name one specific error type, it can fail with any of the
- * program's declared error types. Also unrelated to `TurfError`
- * (include/Errors.h), the compiler's internal diagnostic base class.
+ * @brief The `!T` fallible-return type
+ * (docs/architecture/errors_and_recover.md): T on success, or a value of ANY
+ * declared `error` type on failure. Distinct from `TurfUserErrorType` (the
+ * declared error TYPE itself) -- a `!T` function doesn't name one specific
+ * error type, it can fail with any of the program's declared error types. Also
+ * unrelated to `TurfError` (include/Errors.h), the compiler's internal
+ * diagnostic base class.
  */
 class TurfErrorUnionType : public TurfType {
     TurfTypePtr SuccessType_;
@@ -803,6 +923,8 @@ TurfTypePtr TurfPtr();
 /// The type of `err` inside `recover as err run { ... }` -- see
 /// `AnyErrorType`'s doc comment.
 TurfTypePtr TurfAnyError();
+/// The `guess` placeholder singleton (SEM-003) -- see `GuessType`'s doc comment.
+TurfTypePtr TurfGuess();
 /** @} */
 
 // ─── Array helper functions ───────────────────────────────────────────────────

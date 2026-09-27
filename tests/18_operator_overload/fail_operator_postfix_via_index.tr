@@ -1,0 +1,22 @@
+// Negative test: LANG-001 scope boundary -- postfix '++'/'--' THROUGH
+// operator[] (`box[i]++`) is deliberately not supported, same reasoning as
+// fail_operator_compound_assign_via_index.tr. Must be a clean diagnostic,
+// not Codegen's "Internal error: Base is not an array or pointer" ICE.
+struct IntBox {
+    a: int
+}
+
+operator [](box: IntBox, index: int): int {
+    return box.a;
+}
+
+operator []=(box: &IntBox, index: int, value: int): void {
+    box.a = value;
+}
+
+fn main(): int {
+    mut box: IntBox = IntBox::default();
+    box.a = 1;
+    box[0]++;
+    return 0;
+}

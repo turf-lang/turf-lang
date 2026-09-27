@@ -84,6 +84,11 @@ TurfTypePtr TurfAnyError() {
   return T;
 }
 
+TurfTypePtr TurfGuess() {
+  static TurfTypePtr T = std::make_shared<GuessType>();
+  return T;
+}
+
 // ─── Array helpers ────────────────────────────────────────────────────────────
 
 bool isArrayType(const TurfType *T) {
@@ -108,11 +113,78 @@ TurfTypePtr makeArrayType(TurfTypePtr ElemType, int Size) {
 
 // ─── Type coercion helper ───────────────────────────────────────────────────
 
+/**
+ * @brief OVH-008: pointee compatibility for the `&T`/`&?T` reference-
+ *        widening rules below (2.5/2.6) -- exact structural match, OR the
+ *        SAME candidate-matching generic-parameter leniency this file
+ *        already grants a bare, unwrapped type pairing a few lines down
+ *        (a lone `T`, or two `GenericType`s of the same base name with a
+ *        per-argument generic-parameter skip -- see that block's own doc
+ *        comment). Needed because Rule 2.5/2.6 compare POINTEES directly
+ *        with `isEquivalent()`, which never runs any part of
+ *        `typesCompatible()` itself, so a pointee shaped like
+ *        `Node<T>`/`Node<int>` never got that leniency at all: `&Node<int>`
+ *        (a call site's concrete argument) failed to match a declared
+ *        `&?Node<T>` parameter, even though the exact same pairing,
+ *        UNWRAPPED, already matches via the block below.
+ *
+ * Deliberately NOT a full recursive `typesCompatible()` call on the
+ * pointees: that would also ride along on the numeric-widening rule
+ * further down this function, silently permitting `&int` to widen into
+ * `double*` -- a reference's POINTEE type is never itself widened, only
+ * its pointer-kind/nullability is (see Rule 2.5's own doc comment for the
+ * precedent this preserves). This helper only ever recurses through the
+ * two shapes an open type parameter can actually appear in a pointee: bare
+ * (`T` itself) or nested one level inside a matching `GenericType`
+ * (`Node<T>`) -- recursively, so `Node<Pair<T, T>>` also works.
+ */
+static bool referencePointeeGenericMatch(const TurfType *A, const TurfType *B) {
+  if (!A || !B)
+    return false;
+  if (A->isEquivalent(B))
+    return true;
+  if (dynamic_cast<const TurfGenericParamType *>(A) ||
+      dynamic_cast<const TurfGenericParamType *>(B))
+    return true;
+  const auto *AGen = dynamic_cast<const GenericType *>(A);
+  const auto *BGen = dynamic_cast<const GenericType *>(B);
+  if (AGen && BGen && AGen->getBaseName() == BGen->getBaseName()) {
+    const auto &AArgs = AGen->getTypeArgs();
+    const auto &BArgs = BGen->getTypeArgs();
+    if (AArgs.size() != BArgs.size())
+      return false;
+    for (size_t i = 0; i < AArgs.size(); ++i)
+      if (!referencePointeeGenericMatch(AArgs[i].get(), BArgs[i].get()))
+        return false;
+    return true;
+  }
+  return false;
+}
+
 bool typesCompatible(const TurfType *From, const TurfType *To) {
   if (!From || !To)
     return false;
 
-  // Type Erasure: Generic Type Parameters are compatible with anything.
+  // Rule 1 (§9.6, ARCHITECTURE_OVERHAUL.md): an unresolved generic type
+  // parameter is compatible with anything.
+  //
+  // TYPE-002 (S14a): this is a CANDIDATE-MATCHING convenience for
+  // type-checking a generic TEMPLATE's own, still-unsubstituted body --
+  // NOT an erasure-model leniency (that framing stopped being accurate the
+  // moment monomorphization landed, S12a-S14a). It stays correct, and
+  // stays in the code UNCHANGED, at every later stage of this group,
+  // because it is now structurally UNREACHABLE outside that one context:
+  // a TurfGenericParamType never appears in any typesCompatible() call
+  // once a declaration is either ordinarily concrete (never generic) or a
+  // monomorphized clone (every TurfGenericParamType already substituted to
+  // a concrete type before the clone is re-typechecked, Monomorphize.cpp)
+  // -- INV-GEN-1 (INVARIANTS.md, `holds` as of S14a) is precisely the
+  // invariant that guarantees this. Deleting this rule would break
+  // ordinary template type-checking (a generic function/method/
+  // constructor's own body, checked once, generically, as part of the
+  // whole program's ordinary resolveAll()/checkAll() BEFORE the
+  // monomorphizer ever clones it) -- it is not dead code, just narrower in
+  // scope than its old name implied.
   //
   // Checked FIRST -- before both the array rule and the general exact-match
   // check below -- so an unresolved generic parameter keeps matching against
@@ -180,8 +252,10 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
     return FromElem->isEquivalent(ToElem);
   }
 
-  // Pointer-to-generic-parameter compatibility -- same type-erasure leniency
-  // as the bare-T and array-of-T rules above: `T*` (a generic function's own
+  // Pointer-to-generic-parameter compatibility -- same Rule 1 candidate-
+  // matching leniency (TYPE-002 S14a: NOT a type-erasure leniency, see that
+  // rule's own updated comment above) as the bare-T and array-of-T rules
+  // above: `T*` (a generic function's own
   // type parameter behind a pointer, e.g. `fn<T> identityPtr(x: T*): T*`)
   // must match a concrete pointer of ANY pointee type (int*, double*, a
   // struct pointer, ...), not just a pointer whose pointee's getName()
@@ -202,19 +276,28 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   // `Box { val: null }` always produces the bare NamedType("Box") -- this
   // language has no syntax for `Box<int> { val: null }` (an explicit
   // type-argument list on a brace literal), so TypeChecker::visitStructInit()
-  // can never produce a GenericType itself. Under this compiler's
-  // type-erasure model, a generic struct's LLVM layout does not actually
-  // vary per type argument -- every field typed with the struct's own type
-  // parameter is itself always a pointer, which erases to an opaque pointer
-  // regardless of what it points to (see getLLVMType()'s TurfGenericParamType/
-  // GenericType handling) -- so there is no real information lost by
-  // treating bare "Box" as compatible with "Box<AnyTypeArg>": the concrete
-  // type argument is carried entirely by the DECLARED variable/parameter
-  // type, and Codegen never needs to pick between different underlying
-  // layouts for different instantiations. Without this,
-  // `mut b: Box<int> = Box { val: null };` was flatly rejected ("Cannot
-  // initialise 'Box<int>' variable 'b' with value of type 'Box'"), making
-  // generic structs impossible to construct under ANY existing syntax.
+  // can never produce a GenericType itself. Without this, `mut b: Box<int> =
+  // Box { val: null };` was flatly rejected ("Cannot initialise 'Box<int>'
+  // variable 'b' with value of type 'Box'"), making generic structs
+  // impossible to construct under ANY existing syntax.
+  //
+  // TYPE-002 (S13a): this leniency's justification is NOT the type-erasure
+  // model -- it was originally written that way, but that stopped being
+  // accurate once S13a gave each concrete instantiation (`Box<int>`,
+  // `Box<double>`, ...) its own real, independent TurfStructType/LLVM
+  // layout (see Monomorphize.cpp's drainStructRequests()). The real reason
+  // this rule is safe, unconditionally, at every stage of TYPE-002 including
+  // after monomorphization fully lands (S14a-S14b), is U-5
+  // (docs/development/changes/TYPE-002.md): a generic struct instantiation's
+  // concrete type arguments are determined ENTIRELY by the DECLARED type at
+  // the binding site (the variable/parameter/field/return-type annotation),
+  // NEVER by the initializer expression -- which structurally CANNOT carry
+  // them, since no brace-literal syntax exists to write them. This function
+  // is a TypeChecker-only CANDIDATE-MATCHING rule (typesCompatible()'s own
+  // Rule 1 framing, §9.6) that runs strictly BEFORE the monomorphizer picks
+  // which concrete instantiation a use-site actually needs -- it never has
+  // to choose BETWEEN layouts, so it remains correct regardless of how many
+  // distinct layouts exist by the time Codegen runs.
   {
     const auto *FromGen = dynamic_cast<const GenericType *>(From);
     const auto *ToGen = dynamic_cast<const GenericType *>(To);
@@ -261,16 +344,57 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
     }
   }
 
+  // FuncType candidate-matching leniency (STD-003) -- same shape as the
+  // pointer/array/GenericType rules above, for a callback parameter like
+  // `cmp: fn(T, T): int`. Before this, a candidate's `FuncType` parameter
+  // was only ever compared via the plain getName() exact-match check below,
+  // which correctly matches two fully CONCRETE function types (how
+  // first-class function values already worked, tests/24_first_class_functions/)
+  // but can never match a still-generic `fn(T, T): int` against a caller's
+  // concrete `fn(int, int): int` argument, since their getName() strings
+  // differ and nothing recurses INTO the parameter/return list to apply the
+  // same generic-param leniency Rule 1 already grants a bare `T`. Checked
+  // before the exact-match fallback, mirroring where every other structural
+  // leniency rule above sits. Same arity required; each parameter position
+  // and the return type recurse through typesCompatible() itself (not
+  // isEquivalent()), so a generic parameter anywhere inside the signature
+  // matches like Rule 1 already does for a bare `T`, and ordinary numeric
+  // widening still applies to any already-concrete position exactly like it
+  // would for a plain argument.
+  if (const auto *FromFT = dynamic_cast<const FuncType *>(From)) {
+    if (const auto *ToFT = dynamic_cast<const FuncType *>(To)) {
+      const auto &FP = FromFT->getParamTypes();
+      const auto &TP = ToFT->getParamTypes();
+      if (FP.size() == TP.size()) {
+        bool AllParamsOk = true;
+        for (size_t i = 0; i < FP.size(); ++i) {
+          if (!typesCompatible(FP[i].get(), TP[i].get())) {
+            AllParamsOk = false;
+            break;
+          }
+        }
+        if (AllParamsOk &&
+            typesCompatible(FromFT->getReturnType().get(),
+                            ToFT->getReturnType().get()))
+          return true;
+      }
+    }
+  }
+
   // Exact match
   if (From->getName() == To->getName())
     return true;
 
   // Rule 1: null is only compatible with pointer-like types (ptr,
-  // void*, T*). It must NEVER be compatible with plain numerics, bool, or
-  // string. A `&T` safe reference (issue #238) is deliberately EXCLUDED
+  // void*, T*, &?T). It must NEVER be compatible with plain numerics, bool,
+  // or string. A `&T` safe reference (issue #238) is deliberately EXCLUDED
   // here even though isPointer() is true for it (inherited from
   // TurfPointerType) -- `&T`'s whole point is a compiler-guaranteed
-  // non-null contract, so `null` must never be assignable to it.
+  // non-null contract, so `null` must never be assignable to it. `&?T`
+  // (LANG-002) is the opposite case -- nullability IS its whole point --
+  // and needs no separate clause here: it's `isPointer() && !isReference()`
+  // (isReference() stays false for it, see TurfNullableReferenceType's own
+  // doc comment), so this existing check already accepts it unchanged.
   auto isPointerLikeStrict = [](const TurfType *T) {
     return (T->isPointer() && !T->isReference()) ||
            T->isNamed("ptr") || T->isNamed("void*");
@@ -304,14 +428,40 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   // gates separately). The reverse (raw T*/ptr -> &T) is deliberately NOT
   // handled here -- with no matching rule anywhere above, it correctly
   // falls through to `false` below, forcing an explicit `to`-cast inside
-  // `unsafe { }`. Pointee comparison uses isEquivalent(), not a recursive
-  // typesCompatible() call, so this doesn't accidentally also permit
-  // unsound pointee widening (e.g. &int -> double* through int->double's
-  // numeric-widening rule below) -- only a genuinely equivalent pointee.
+  // `unsafe { }`. Pointee comparison uses referencePointeeGenericMatch()
+  // (isEquivalent() plus the SAME narrow generic-parameter leniency this
+  // file's own candidate-matching rules already grant elsewhere, OVH-008)
+  // -- not a full recursive typesCompatible() call, so this still doesn't
+  // accidentally also permit unsound pointee widening (e.g. &int ->
+  // double* through int->double's numeric-widening rule below).
   if (const auto *FromRef = dynamic_cast<const TurfReferenceType *>(From)) {
     if (!To->isReference()) {
       if (const auto *ToPtr = dynamic_cast<const TurfPointerType *>(To)) {
-        if (FromRef->getPointee()->isEquivalent(ToPtr->getPointee().get()))
+        if (referencePointeeGenericMatch(FromRef->getPointee().get(),
+                                         ToPtr->getPointee().get()))
+          return true;
+      }
+    }
+  }
+
+  // Rule 2.6 (LANG-002): a NULLABLE safe reference (&?T) also widens
+  // implicitly into a concrete raw pointer of an equivalent pointee type --
+  // this is Rule 2.5's identical reasoning (the LLVM value never changes,
+  // widening to raw is always sound) applied to the OTHER safe-reference
+  // kind. Needs its OWN rule rather than falling under Rule 2.5 above
+  // because TurfNullableReferenceType is a SIBLING of TurfReferenceType, not
+  // a subclass of it (see that class's own doc comment, Types.h) --
+  // `dynamic_cast<const TurfReferenceType *>` does NOT match a `&?T` value.
+  // `&T -> &?T` (the OTHER new direction LANG-002 introduces) needs no rule
+  // here at all: `&?T` is itself `!isReference()`, so it already satisfies
+  // Rule 2.5's existing `!To->isReference()` guard as a target, and
+  // `dynamic_cast<TurfPointerType*>(To)` already matches it (TurfPointerType
+  // is `&?T`'s own base) -- Rule 2.5 widens `&T -> &?T` correctly, unchanged.
+  if (const auto *FromNRef = dynamic_cast<const TurfNullableReferenceType *>(From)) {
+    if (!To->isReference() && !To->isNullableReference()) {
+      if (const auto *ToPtr = dynamic_cast<const TurfPointerType *>(To)) {
+        if (referencePointeeGenericMatch(FromNRef->getPointee().get(),
+                                         ToPtr->getPointee().get()))
           return true;
       }
     }

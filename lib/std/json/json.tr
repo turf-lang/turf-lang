@@ -9,8 +9,8 @@
 //     a machine that doesn't happen to have that specific shared library
 //     installed, which defeats "batteries included, works out of the box"
 //     for a language runtime. This file is pure Turf, using only the
-//     stdlib's own `strings`/`list`/`mem`/`sys` modules -- it always
-//     builds, everywhere this compiler already runs.
+//     stdlib's own `strings`/`list`/`sys` modules -- it always builds,
+//     everywhere this compiler already runs.
 //   - `JsonValue` is a tagged union in spirit, `struct` in practice --
 //     this language has no real tagged-union/`enum`-with-payload type, so
 //     it's one `JsonType` tag field plus one field per variant
@@ -19,27 +19,32 @@
 //     matching `.kind` are meaningful at any given time; the rest sit at
 //     their zero value.
 //   - Objects use TWO PARALLEL LISTS (`obj_keys: List<string>`,
-//     `obj_vals: List<JsonValue*>`) rather than `Map<string, JsonValue>`.
+//     `obj_vals: List<JsonValue>`) rather than `Map<string, JsonValue>`.
 //     `Map<string, string>` as a plain struct field genuinely works now
-//     (see http.tr's `Request.headers` and the monomorphization fix in
-//     this same commit) -- but `Map<string, JsonValue>` would additionally
-//     need `JsonValue` (the very struct being declared) to fit in a
-//     generic collection's single type-erased 8-byte slot, and JsonValue
-//     is far bigger than 8 bytes (a double, a string pointer, three
-//     List<T> fields, ...). Confirmed live: `List<JsonValue>` (by value)
-//     compiles the STRUCT fine but fails at any `.push()` call site with
-//     an "Invalid bitcast %JsonValue ... to ptr" internal error -- this is
-//     the exact, already-documented `List<T*>` workaround for structs over
-//     8 bytes in a generic slot (see list.tr's own comment on
-//     `List.sort`/`binary_search`'s int-only caveat for the same root
-//     cause: type erasure assumes one 64-bit slot per element). Every
-//     array element / object value is therefore individually
-//     heap-allocated (`mem::alloc(sizeof(JsonValue))`) and stored as a
-//     `JsonValue*`, mirroring exactly how `struct Node { next: Node* }`
-//     already has to work in this language (tests/06_structs/
-//     15_struct_heap.tr) -- never freed (no GC yet, same accepted
-//     small-leak tradeoff `strings.tr`'s `operator +` already documents
-//     via its own TURF-MEMLEAK comment).
+//     (see http.tr's `Request.headers`) -- but a generic `Map<K, JsonValue>`
+//     is unrelated to this choice; the two parallel lists predate that and
+//     stay for the linear-scan tradeoff `map.tr` itself documents, not a
+//     workaround.
+//   - `arr_val`/`obj_vals` are `List<JsonValue>` **by value**, not
+//     `List<JsonValue*>` (OVH-002,
+//     `docs/planning/OVERHAUL_REMAINING_WORK.md`): earlier versions of this
+//     file individually heap-boxed each element with `mem::alloc(sizeof(
+//     JsonValue))` because `List<JsonValue>` was believed to fail at
+//     `.push()` under type erasure. That belief was stale even before
+//     TYPE-002 monomorphization landed for real (`List<T>` holds `data: T*`,
+//     so `JsonValue` containing `List<JsonValue>` was never a by-value
+//     cycle to begin with) -- and the boxing was actively unsafe once
+//     MEM-002's collector existed: each box's `str_val`/`arr_val`/
+//     `obj_keys`/`obj_vals` GC-heap pointers lived ONLY inside that
+//     `mem::alloc` block, invisible to the collector (F-MEM-3 — manual
+//     memory is never traced), so a collection between building a
+//     `JsonValue` tree and reading it back could free a string or nested
+//     list still reachable only through the box. `List<JsonValue>` by
+//     value has no such gap: the collector traces a `List<T>` element the
+//     same precise way it traces anything else (`getOrCreateElementTurfTypeDesc()`,
+//     `docs/architecture/memory_model.md` §2.6). `tests/41_gc/
+//     07_json_values_survive_collection.tr` is this fix's own regression
+//     test.
 //   - `obj_keys`/`obj_vals` lookup is a LINEAR SCAN, matching map.tr's own
 //     "small collections, correctness over cleverness" tradeoff (no
 //     generic `hash(T)` in the language yet either way).
@@ -74,7 +79,6 @@ import io;
 import sys;
 import strings;
 import list::List;
-import mem;
 
 // ─── JsonValue ───────────────────────────────────────────────────────────
 
@@ -92,61 +96,57 @@ struct JsonValue {
     bool_val: bool,
     num_val: double,
     str_val: string,
-    arr_val: List<JsonValue*>,
+    arr_val: List<JsonValue>,
     obj_keys: List<string>,
-    obj_vals: List<JsonValue*>
+    obj_vals: List<JsonValue>
 }
 
 // ─── constructors ──────────────────────────────────────────────────────────
 
 fn JsonValue.null_value() static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Null;
     return v;
 }
 
 fn JsonValue.from_bool(b: bool) static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Bool;
     v.bool_val = b;
     return v;
 }
 
 fn JsonValue.from_number(n: double) static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Number;
     v.num_val = n;
     return v;
 }
 
 fn JsonValue.from_string(s: string) static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::String;
     v.str_val = s;
     return v;
 }
 
 fn JsonValue.new_array() static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Array;
     return v;
 }
 
 fn JsonValue.new_object() static: JsonValue {
-    mut v: JsonValue;
+    mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Object;
     return v;
 }
 
 // ─── mutators (building a value to stringify) ───────────────────────────────
 
-// Appends `item` to an Array-kind value. Heap-boxes `item` (see this
-// file's header comment on the List<T*> workaround) -- the box is never
-// freed, an accepted small leak, same tradeoff as string `+`.
+// Appends `item` to an Array-kind value.
 fn JsonValue.push(item: JsonValue): void {
-    mut boxed: JsonValue* = mem::alloc(sizeof(JsonValue)) to JsonValue*;
-    boxed[0] = item;
-    self.arr_val.push(boxed);
+    self.arr_val.push(item);
 }
 
 // Sets `key` to `value` on an Object-kind value, replacing any existing
@@ -155,20 +155,17 @@ fn JsonValue.set(key: string, value: JsonValue): void {
     mut idx: int = 0 - 1;
     mut i: int = 0;
     while i < self.obj_keys.length() {
-        if self.obj_keys.data[i] == key {
+        if self.obj_keys.get(i) == key {
             idx = i;
         }
         i = i + 1;
     }
 
-    mut boxed: JsonValue* = mem::alloc(sizeof(JsonValue)) to JsonValue*;
-    boxed[0] = value;
-
     if idx >= 0 {
-        self.obj_vals.data[idx] = boxed;
+        self.obj_vals.set(idx, value);
     } else {
         self.obj_keys.push(key);
-        self.obj_vals.push(boxed);
+        self.obj_vals.push(value);
     }
 }
 
@@ -180,9 +177,8 @@ fn JsonValue.set(key: string, value: JsonValue): void {
 fn JsonValue.get(key: string): JsonValue {
     mut i: int = 0;
     while i < self.obj_keys.length() {
-        if self.obj_keys.data[i] == key {
-            immut boxed: JsonValue* = self.obj_vals.data[i];
-            return boxed[0];
+        if self.obj_keys.get(i) == key {
+            return self.obj_vals.get(i);
         }
         i = i + 1;
     }
@@ -194,7 +190,7 @@ fn JsonValue.get(key: string): JsonValue {
 fn JsonValue.has(key: string): bool {
     mut i: int = 0;
     while i < self.obj_keys.length() {
-        if self.obj_keys.data[i] == key {
+        if self.obj_keys.get(i) == key {
             return true;
         }
         i = i + 1;
@@ -224,8 +220,7 @@ fn JsonValue.at(index: int): JsonValue {
     if index < 0 || index >= self.arr_val.length() {
         sys::panic("JsonValue.at: index out of bounds");
     }
-    immut boxed: JsonValue* = self.arr_val.data[index];
-    return boxed[0];
+    return self.arr_val.get(index);
 }
 
 // Element count for an Array or key count for an Object; 0 for any other
@@ -273,8 +268,7 @@ fn stringify_array(v: JsonValue): string {
         if i > 0 {
             result = result + ",";
         }
-        immut boxed: JsonValue* = v.arr_val.data[i];
-        result = result + stringify(boxed[0]);
+        result = result + stringify(v.arr_val.get(i));
         i = i + 1;
     }
     result = result + "]";
@@ -289,8 +283,7 @@ fn stringify_object(v: JsonValue): string {
         if i > 0 {
             result = result + ",";
         }
-        immut boxed: JsonValue* = v.obj_vals.data[i];
-        result = result + "\"" + escape_string(v.obj_keys.data[i]) + "\":" + stringify(boxed[0]);
+        result = result + "\"" + escape_string(v.obj_keys.get(i)) + "\":" + stringify(v.obj_vals.get(i));
         i = i + 1;
     }
     result = result + "}";
@@ -536,7 +529,12 @@ fn Parser.parse_array(): !JsonValue {
             return JsonError::ExpectedComma;
         }
     }
-    return arr;
+    // No trailing `return arr;` here: every path through the loop above
+    // ends in `return` (success on `']'`, failure on anything else), so
+    // falling off the end of `while true` is unreachable -- OVH-012, a
+    // genuine UnreachableCodeWarning confirmed live on the line this used
+    // to be; the compiler accepts a `!T` function ending in an unbreakable
+    // `while true` with no further statement.
 }
 
 fn Parser.parse_object(): !JsonValue {
@@ -572,7 +570,8 @@ fn Parser.parse_object(): !JsonValue {
             return JsonError::ExpectedComma;
         }
     }
-    return obj;
+    // No trailing `return obj;` here -- same unreachable-`while true`-tail
+    // reasoning as parse_array() above (OVH-012).
 }
 
 // Parses `s` as a single JSON text (object, array, string, number,
@@ -581,7 +580,7 @@ fn Parser.parse_object(): !JsonValue {
 // bug: this parser is meant for "parse the one JSON value a request/
 // response body contains", not for validating a whole document stream.
 fn parse(s: string): !JsonValue {
-    mut p: Parser;
+    mut p: Parser = Parser::default();
     p.s = s;
     p.pos = 0;
     p.len = strings::length(s);

@@ -1,0 +1,29 @@
+// SEM-001's own Testing scope item: "round-trip tests proving the exact
+// value survives (0xFFFFFFFFFFFFFFF etc. *within* range -- out-of-range is
+// SEM-002)". Each literal below is checked against its own independently-
+// computed decimal value, so a truncation/rounding bug anywhere between
+// the lexer and Codegen (not just "did it compile") would show up as a
+// failed assertion, not just a compile error.
+
+import test;
+
+fn main(): int {
+    // 15 hex F's = 16^15 - 1, well within int64 range (int64 max has 16
+    // hex F's, 0xFFFFFFFFFFFFFFF here is one hex digit short of that).
+    mut a: int = 0xFFFFFFFFFFFFFFF;
+    test::assert(a == 1152921504606846975, "15-F hex literal, exact value");
+
+    // int64 max itself, written in decimal.
+    mut b: int = 9223372036854775807;
+    test::assert(b == 9223372036854775807, "int64 max, exact value");
+
+    // A wide decimal literal that needed more than 64 bits to hold
+    // EXACTLY during lexing/parsing (INV-NUM-2's own concern) but is well
+    // within int64 range once you actually look at its value -- proves the
+    // arbitrary-precision storage doesn't corrupt an in-range value on its
+    // way down to the 64-bit LLVM constant Codegen emits.
+    mut c: int = 000000000000000000000000000000000000000000123456789;
+    test::assert(c == 123456789, "leading zeros don't change the value");
+
+    return 0;
+}

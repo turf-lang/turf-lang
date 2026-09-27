@@ -15,18 +15,22 @@ fn main(): int {
     x = 42;
     test::assert(x == 42, "assign after empty declaration");
 
-    // 2. Struct variables declared without "= value" are default-initialized.
-    mut p: Point;
+    // 2. SEM-004 (F-INIT-1, FREEZE.md §6.4): a struct declared without
+    //    "= value" is NOT default-initialized anymore -- that was Mechanism
+    //    B, now removed. `Point::default()` is the explicit opt-in, and it
+    //    zero-inits every field; fields set afterward override just that
+    //    field, leaving the rest at their defaults -- the replacement for
+    //    the old brace-literal's "missing fields default-initialize"
+    //    behavior (partial-field brace-literal construction no longer
+    //    exists at all). See fail_struct_use_before_init.tr for what
+    //    reading a field with no "::default()"/explicit initializer does
+    //    now.
+    mut p: Point = Point::default();
     test::assert(p.x == 0, "struct field default init x");
     test::assert(p.y == 0, "struct field default init y");
     test::assert(p.name == "", "struct field default init name");
     test::assert(p.z == 0.0, "struct field default init z");
 
-    // 3. ::default() zero-inits every field; fields set afterward override
-    //    just that field, leaving the rest at their defaults -- the
-    //    replacement for the old brace-literal's "missing fields
-    //    default-initialize" behavior (partial-field brace-literal
-    //    construction no longer exists at all).
     mut p2: Point = Point::default();
     p2.x = 5;
     test::assert(p2.x == 5, "explicit field init");

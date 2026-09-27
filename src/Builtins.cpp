@@ -76,6 +76,33 @@ static void ensure_builtins_registered() {
   // STRING_UFCS_OPERATOR_CHAR_RFC.md §7 step 7 deleted it in favor of
   // strings::length(s).
   RegisterBuiltin("typeof",   {1, "Compile-time type name of an expression"});
+
+  // MEM-001 (ARCHITECTURE_OVERHAUL.md §8): the typed-allocation intrinsic
+  // surface a .tr file uses to reach libturfrt's turf_rt_alloc family
+  // without a module-qualified `extern fn` (Rule B2/B3 -- the runtime is
+  // infrastructure every binary already links, not a capability a program
+  // imports). See include/Intrinsics.h category 1 for the full contract.
+  RegisterBuiltin("gc_alloc",        {1, "Allocate n bytes on the GC heap"});
+  RegisterBuiltin("gc_alloc_zeroed", {1, "Allocate n zero-filled bytes on the GC heap"});
+  RegisterBuiltin("gc_realloc",      {2, "Resize a GC-heap allocation to n bytes"});
+
+  // MEM-002 (ARCHITECTURE_OVERHAUL.md §8/§14): the collector's own Turf-
+  // visible surface. gc_collect() forces one mark-sweep cycle (also run
+  // automatically on allocation pressure -- see turf_rt_collect's own doc
+  // comment in runtime/turfrt.h); gc_is_managed(p) is what MEM-002's own
+  // "Breaking changes" cross-heap diagnostic (lib/std/mem/mem.tr's checked
+  // free()) is built on. Both bare intrinsics, same mechanism as gc_alloc.
+  RegisterBuiltin("gc_collect",      {0, "Force one GC mark-sweep cycle"});
+  RegisterBuiltin("gc_is_managed",   {1, "True iff p is a live GC-heap block's own start address"});
+  RegisterBuiltin("gc_checked_free", {1, "Free a manual-heap pointer, panicking on a GC-heap one"});
+
+  // OVH-010 (docs/development/changes/OVH-010.md): the pinning surface
+  // F-MEM-3's own documented unsoundness calls for -- a GC pointer stored
+  // only inside manual-heap memory needs a way to become a precise root.
+  // lib/std/mem/mem.tr's mem::root()/mem::unroot() are the one caller each,
+  // same shape as gc_checked_free/mem::free above.
+  RegisterBuiltin("gc_pin",   {1, "Pin the GC object containing p against collection"});
+  RegisterBuiltin("gc_unpin", {1, "Release one pin gc_pin placed on the GC object containing p"});
 }
 
 // CodegenIntrinsic() used to live here -- the Codegen-side implementation
@@ -89,52 +116,52 @@ static void ensure_builtins_registered() {
 // typeof's arity check -- only the Codegen-side generator function is gone.
 
 /**
- * @brief Emits the compiler's own internal panic sequence: print MsgVal to
- *        stderr, then abort. SOLELY for the compiler's own runtime safety
- *        guards (division/modulo by zero, bad string->int/enum casts, array
- *        bounds checks) -- not reachable from Turf source under any name.
+ * @brief Emits the compiler's own internal panic sequence: call
+ *        libturfrt's turf_rt_panic(kind, msg, file, line), which prints a
+ *        consistently-formatted message to stderr and abort()s. SOLELY for
+ *        the compiler's own runtime safety guards (division/modulo by
+ *        zero, bad string->int/enum casts, array bounds checks, integer
+ *        overflow) -- not reachable from Turf source under any name.
  *        `fail`/`assert` used to share this exact IR shape as compiler
  *        intrinsics; now that they're ordinary Turf functions in
  *        lib/std/test.tr (built on lib/std/sys.tr's own, separate
  *        write(2,...)-based sys::panic()), this is purely an internal C++
  *        helper with no user-facing name at all.
+ *
+ * @details RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8): this used to
+ *          build the fprintf(stderr, "%s\n", MsgVal) + abort() sequence
+ *          directly, inline, per call site. Every one of the 9 call sites
+ *          (grep CodegenPanic() across src/Codegen*.cpp) still passes just
+ *          one pre-built message string, so `kind` here is a single fixed
+ *          literal, not a distinct value per call site -- the specific
+ *          classification ("Division by zero", "Integer overflow", ...)
+ *          stays exactly where it already was, inside MsgVal. Widening
+ *          CodegenPanic()'s own signature to carry a distinct kind per call
+ *          site would touch all 9 sites for no behavioral change (the
+ *          printed message is unchanged either way) -- out of RT-001's
+ *          scope (§25: no drive-by refactors of code this group only
+ *          needed to reroute, not redesign).
  */
 llvm::Value *CodegenPanic(llvm::Value *MsgVal, SourceLocation Loc) {
-  (void)Loc;
-
-  // Get or declare fprintf
-  Function *FPrintFFunc = TheModule->getFunction("fprintf");
-  if (!FPrintFFunc) {
-    FunctionType *FT =
-        FunctionType::get(Type::getInt32Ty(*TheContext),
-                          {PointerType::getUnqual(*TheContext), PointerType::getUnqual(*TheContext)}, true);
-    FPrintFFunc = Function::Create(FT, Function::ExternalLinkage, "fprintf",
-                                   TheModule.get());
+  // turf_rt_panic(const char *kind, const char *msg, const char *file, int line)
+  Function *PanicFunc = TheModule->getFunction("turf_rt_panic");
+  if (!PanicFunc) {
+    Type *PtrTy = PointerType::getUnqual(*TheContext);
+    FunctionType *FT = FunctionType::get(
+        Type::getVoidTy(*TheContext),
+        {PtrTy, PtrTy, PtrTy, Type::getInt32Ty(*TheContext)},
+        /*isVarArg=*/false);
+    PanicFunc = Function::Create(FT, Function::ExternalLinkage,
+                                 "turf_rt_panic", TheModule.get());
   }
 
-  // Get or declare abort
-  Function *AbortFunc = TheModule->getFunction("abort");
-  if (!AbortFunc) {
-    FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext), false);
-    AbortFunc = Function::Create(FT, Function::ExternalLinkage, "abort", TheModule.get());
-  }
+  Value *KindVal = Builder->CreateGlobalString("runtime check", "panickind");
+  Value *FileVal =
+      Builder->CreateGlobalString(Loc.Filename.empty() ? "<unknown>" : Loc.Filename,
+                                  "panicfile");
+  Value *LineVal = ConstantInt::get(Type::getInt32Ty(*TheContext), Loc.Line);
 
-  // Get stderr
-  std::string StderrSymbol = "stderr";
-#ifdef __APPLE__
-  StderrSymbol = "__stderrp";
-#endif
-  GlobalVariable *StderrGV = TheModule->getNamedGlobal(StderrSymbol);
-  if (!StderrGV) {
-    StderrGV = new GlobalVariable(*TheModule, PointerType::getUnqual(*TheContext), false,
-                                  GlobalValue::ExternalLinkage, nullptr, StderrSymbol);
-  }
-  Value *StderrVal = Builder->CreateLoad(PointerType::getUnqual(*TheContext), StderrGV, "stderr_val");
-
-  // Print message to stderr and abort
-  Value *Fmt = Builder->CreateGlobalString("%s\n", "panicfmt");
-  Builder->CreateCall(FPrintFFunc, {StderrVal, Fmt, MsgVal});
-  Builder->CreateCall(AbortFunc, {});
+  Builder->CreateCall(PanicFunc, {KindVal, MsgVal, FileVal, LineVal});
   Builder->CreateUnreachable();
 
   // Mirrors ReturnExprAST::codegen(): CreateUnreachable() is a terminator,

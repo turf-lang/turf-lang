@@ -4,7 +4,7 @@
  * @details Part of LLVM IR generation for TurfLang, split from the original
  *          monolithic Codegen.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @author AaravTandon24
@@ -28,9 +28,9 @@
 #include "ValueRange.h"
 #include "Lint.h"
 #include "SymbolTable.h"
-#include "CallGraph.h"
 #include "Types.h"
 #include "CodegenInternal.h"
+#include "Monomorphize.h" // Monomorphize::instantiatedDeclName() -- ConstructedType lookup, TYPE-002 S13b
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Verifier.h"
 #include <algorithm>
@@ -87,7 +87,7 @@ void ResetArgvHelpers() {
 // Looks up an already-declared `extern fn Name` (os.tr's TurfRuntimeGetArgc/
 // TurfRuntimeGetArgv, created bodyless during the pre-pass) and reuses it,
 // or creates a fresh prototype if none exists yet -- same lookup-or-create
-// shape as getOrCreateMallocFn()/getOrCreateStrcmpFn() (CodegenCore.cpp),
+// shape as getOrCreateTurfRtAllocFn()/getOrCreateStrcmpFn() (CodegenCore.cpp),
 // specialized here because these two also need the conflicting-signature
 // guard below (mirrors ExternFuncDeclExprAST::codegen()'s own check, just
 // against Codegen's own synthesized definition instead of another extern).
@@ -188,6 +188,73 @@ static void EnsureArgvHelpers() {
   ArgvBuilder.CreateRet(ArgvBuilder.CreateGlobalStringPtr(""));
 }
 
+// RT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §8, F-MEM-4): see
+// include/Codegen.h's doc comment on WrapMainWithRuntimeBootstrap() for the
+// full contract and call-ordering requirement (must run after every
+// function is codegenned, before runOptimizationPipeline()). Implemented
+// here, not main.cpp, because it operates purely on the already-built LLVM
+// Function object for "main" -- it does not need, and deliberately does not
+// touch, any of the argc/argv-stashing IR EnsureArgvHelpers() above already
+// built inside that function's body (this is exactly why a pure
+// post-processing rename+wrapper approach was chosen over threading
+// turf_rt_init/turf_rt_shutdown calls into FuncDefExprAST::codegen()'s own
+// `Name == "main"` branches: that delicate, already-tested argc/argv
+// machinery needs no changes at all this way).
+void WrapMainWithRuntimeBootstrap() {
+  Function *UserMain = TheModule->getFunction("main");
+  if (!UserMain || UserMain->empty())
+    return; // main.cpp's own caller already checked this; defensive only.
+
+  FunctionType *FT = UserMain->getFunctionType();
+
+  // Rename the user's compiled main out of the way and demote it to
+  // internal linkage -- it keeps its liveness through the wrapper's own
+  // in-module call below, needing no entry in OPT-001's Internalize
+  // must-preserve set (which stays exactly {"main"}, main.cpp's own
+  // comment on MustPreserveGV).
+  UserMain->setName("__turf_user_main");
+  UserMain->setLinkage(GlobalValue::InternalLinkage);
+
+  Function *InitFn = TheModule->getFunction("turf_rt_init");
+  if (!InitFn) {
+    FunctionType *InitFT =
+        FunctionType::get(Type::getVoidTy(*TheContext), false);
+    InitFn = Function::Create(InitFT, Function::ExternalLinkage,
+                              "turf_rt_init", TheModule.get());
+  }
+  Function *ShutdownFn = TheModule->getFunction("turf_rt_shutdown");
+  if (!ShutdownFn) {
+    FunctionType *ShutdownFT =
+        FunctionType::get(Type::getVoidTy(*TheContext), false);
+    ShutdownFn = Function::Create(ShutdownFT, Function::ExternalLinkage,
+                                  "turf_rt_shutdown", TheModule.get());
+  }
+
+  Function *Wrapper =
+      Function::Create(FT, Function::ExternalLinkage, "main", TheModule.get());
+  BasicBlock *EntryBB = BasicBlock::Create(*TheContext, "entry", Wrapper);
+  IRBuilder<> WB(EntryBB);
+
+  WB.CreateCall(InitFn, {});
+
+  std::vector<Value *> ForwardedArgs;
+  for (Argument &A : Wrapper->args())
+    ForwardedArgs.push_back(&A);
+  Value *Result = WB.CreateCall(UserMain, ForwardedArgs, "user_main_result");
+
+  WB.CreateCall(ShutdownFn, {});
+  // Nothing in the Resolver actually requires `fn main(): int` (only that
+  // it declare no params -- ResolverDecl.cpp's own comment on the `main`
+  // check above this file), so a void return is reachable even though
+  // every current test declares `int`. CreateRet() on a void-typed Value
+  // is invalid IR ("Found return instr that returns non-void in Function
+  // of void return type" is the mirror-image verifier failure this avoids).
+  if (FT->getReturnType()->isVoidTy())
+    WB.CreateRetVoid();
+  else
+    WB.CreateRet(Result);
+}
+
 // FuncDefExprAST::codegen
 // Two-pass strategy:
 //   Pass 1 (prototype): if no LLVM Function yet, create it (no body).
@@ -195,6 +262,26 @@ static void EnsureArgvHelpers() {
 // Calling codegen() twice is what makes forward calls work: main.cpp's
 // pre-pass creates prototypes, then the normal loop fills bodies.
 Value *FuncDefExprAST::codegen() {
+  // TYPE-002 (S14a): a FuncDefExprAST with non-empty TypeParams is an
+  // uninstantiated generic TEMPLATE -- the monomorphizer (Monomorphize.cpp)
+  // always appends a fully-concrete CLONE elsewhere in PrePassASTs and
+  // rewrites every call site to it, so the template itself is dead code by
+  // the time Codegen runs and must never be codegenned (F-GEN-2, INV-GEN-1).
+  // main.cpp's sub-pass 3a/3b loops already skip a template found directly
+  // in PrePassASTs -- but a template declared INSIDE an imported module is
+  // ALSO reached a SECOND way, via ModuleImportExprAST::codegen()'s own
+  // recursive walk of that module's body (CodegenStruct.cpp), which has no
+  // equivalent check of its own. Found live: even a completely trivial
+  // `fn main(): int { return 0; }` hit this, because the auto-imported
+  // prelude itself is walked this way. Checked HERE, at the single real
+  // entry point every caller eventually goes through, instead of
+  // duplicating the same guard at every call site (main.cpp's two loops
+  // plus this one, and any future caller). Same "processed, nothing to
+  // return" sentinel convention VarDeclExprAST's IsExported early-return
+  // already uses.
+  if (!TypeParams.empty())
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+
   std::string MangledName = Name;
   std::string Prefix = "";
   if (GlobalSymbolTable && GlobalSymbolTable->IsInModule()) {
@@ -247,6 +334,20 @@ Value *FuncDefExprAST::codegen() {
         ParamTypes.push_back(getLLVMType(P.Type.get()));
         ArgNames.push_back(P.Name);
       }
+      // STD-002: `@caller_location` appends ONE hidden extra parameter at
+      // the very end of the REAL LLVM signature -- deliberately never added
+      // to `Params` itself (see FuncDefExprAST's own doc comment, ASTDecl.h,
+      // for why keeping it out of the Turf-level, arity-checked signature
+      // is the whole point). The alloca-binding loop below iterates
+      // `TheFunc->args()` (not `Params`) precisely so this extra argument
+      // gets allocated/stored/registered into NamedValues via the exact
+      // same generic code every ordinary parameter already goes through --
+      // it only needs one special case there, for its TYPE (TurfString(),
+      // since it has no matching `Params` entry to read a type from).
+      if (hasCallerLocation()) {
+        ParamTypes.push_back(getLLVMType(TurfString().get()));
+        ArgNames.push_back("caller_location");
+      }
       Linkage = Function::InternalLinkage;
     }
 
@@ -258,6 +359,52 @@ Value *FuncDefExprAST::codegen() {
     unsigned ArgIdx = 0;
     for (auto &Arg : TheFunc->args())
       Arg.setName(ArgNames[ArgIdx++]);
+
+    // TOOL-001: the DISubprogram is built once, right alongside the LLVM
+    // prototype -- this `if (!TheFunc)` block runs exactly once per
+    // function (the pre-pass's own proto-then-body two-call structure,
+    // §0's "double-parse wrinkle" doc comment above, finds the SAME
+    // llvm::Function* on its second call and skips this whole branch), so
+    // there's no risk of building a second, duplicate DISubprogram for the
+    // same function the way there would be if this lived down in the
+    // body-codegen section below. `TheFunc->getSubprogram()` (below, where
+    // body codegen starts) reads it back out regardless of which of the two
+    // calls actually created it.
+    if (DBuilder) {
+      DIFile *File = getOrCreateDebugFile(Loc.Filename);
+      std::vector<Metadata *> ParamDebugTypes;
+      ParamDebugTypes.push_back(getDebugType(ReturnType.get()));
+      for (const auto &P : Params)
+        ParamDebugTypes.push_back(getDebugType(P.Type.get()));
+      // STD-002: keep this list's length matching the REAL LLVM signature
+      // (ParamTypes above), which already got the hidden extra parameter --
+      // a DISubroutineType describing fewer parameters than the function
+      // actually has would be internally inconsistent DWARF (INV-DEBUG-2).
+      if (hasCallerLocation())
+        ParamDebugTypes.push_back(getDebugType(TurfString().get()));
+      DISubroutineType *SubTy = DBuilder->createSubroutineType(
+          DBuilder->getOrCreateTypeArray(ParamDebugTypes));
+
+      DISubprogram::DISPFlags SPFlags = DISubprogram::SPFlagDefinition;
+      if (Name == "main")
+        SPFlags |= DISubprogram::SPFlagMainSubprogram;
+
+      // No distinct DW_AT_linkage_name: every low_pc/high_pc range LLVM's
+      // own DWARF emission attaches to this DISubprogram already comes
+      // straight from `TheFunc` itself (via TheFunc->setSubprogram(SP)
+      // below), so a separate linkage name buys nothing for breakpoint/
+      // backtrace correctness -- and empirically, HURTS it: gdb 17.2
+      // (confirmed live) prefers `DW_AT_linkage_name` over `DW_AT_name`
+      // for frame/breakpoint display whenever both are present on a
+      // `DW_LANG_C99` subprogram, which would show the raw mangled
+      // "turf_add_int_int" instead of "add" at every breakpoint hit and
+      // backtrace line -- exactly backwards from TOOL-001's own "show a
+      // backtrace with TurfLang function names" completion criterion.
+      DISubprogram *SP = DBuilder->createFunction(
+          File, Name, /*LinkageName=*/"", File, Loc.Line, SubTy, Loc.Line,
+          DINode::FlagPrototyped, SPFlags);
+      TheFunc->setSubprogram(SP);
+    }
   } else {
     // If the function already has a body, this is a duplicate definition
     if (!TheFunc->empty()) {
@@ -309,12 +456,20 @@ Value *FuncDefExprAST::codegen() {
   auto SavedFunction = CurrentFunction;
   auto *SavedInsertBlock = Builder->GetInsertBlock();
   auto SavedInsertPoint = Builder->GetInsertPoint();
+  DISubprogram *SavedDebugScope = CurrentDebugScope;
+  DebugLoc SavedDebugLoc = Builder->getCurrentDebugLocation();
 
   // Switch to the new function
   Builder->SetInsertPoint(BB);
   NamedValues.clear();
   CurrentFuncReturnType = ReturnType;
   CurrentFunction = TheFunc;
+  // TOOL-001: `getSubprogram()` reads back whichever of the two codegen()
+  // calls actually built it (see the `if (!TheFunc)` block above) -- null
+  // when `-g` is off, which is also what makes SetDebugLoc()/getDebugType()/
+  // every dbg-var insertion below into no-ops for the rest of this function.
+  CurrentDebugScope = TheFunc->getSubprogram();
+  SetDebugLoc(Loc);
 
   // Enter a new scope for the function body
   if (GlobalSymbolTable) {
@@ -337,11 +492,23 @@ Value *FuncDefExprAST::codegen() {
     Builder->CreateStore(Argc64, ArgcStorageGV);
     Builder->CreateStore(&ArgvArg, ArgvStorageGV);
   } else {
+    unsigned ArgNo = 1; // DIBuilder::createParameterVariable's ArgNo is 1-based.
     for (auto &Arg : TheFunc->args()) {
       TurfTypePtr ParamTurfType = TurfInt(); // fallback
-      for (const auto &P : Params)
-        if (P.Name == Arg.getName())
-          ParamTurfType = P.Type;
+      SourceLocation ParamDeclLoc = Loc; // fallback: the 'fn' keyword itself
+      // STD-002: the hidden `caller_location` argument (appended above,
+      // never a real `Params` entry) would otherwise silently fall through
+      // to the `TurfInt()` fallback above -- checked BEFORE the `Params`
+      // scan since no entry there could ever match it by name anyway.
+      if (Arg.getName() == "caller_location" && hasCallerLocation()) {
+        ParamTurfType = TurfString();
+      } else {
+        for (const auto &P : Params)
+          if (P.Name == Arg.getName()) {
+            ParamTurfType = P.Type;
+            ParamDeclLoc = P.Loc;
+          }
+      }
 
       AllocaInst *Alloca = CreateEntryBlockAlloca(
           TheFunc, std::string(Arg.getName()), ParamTurfType.get());
@@ -358,34 +525,57 @@ Value *FuncDefExprAST::codegen() {
             std::string(Arg.getName()), RegisteredType, ParamLoc, Alloca);
         ParamIDs.push_back(id);
       }
+
+      // TOOL-001: `-g` parameter debug info -- a synthetic 'self' parameter
+      // has ParamDeclLoc == {0,0} (ParamDecl::Loc's own doc comment,
+      // ASTDecl.h), which SetDebugLoc()-style Line<=0 handling would treat
+      // as "keep the current location" if used for the dbg.declare's OWN
+      // location -- but createParameterVariable()'s LineNo just wants
+      // "where's a reasonable place to show this parameter", so a fallback
+      // to the function's own declaration line (ParamDeclLoc's default,
+      // already assigned above) is exactly right, not a bug to special-case.
+      if (CurrentDebugScope) {
+        DIFile *File = getOrCreateDebugFile(ParamDeclLoc.Filename.empty()
+                                                ? Loc.Filename
+                                                : ParamDeclLoc.Filename);
+        DILocalVariable *ParamVar = DBuilder->createParameterVariable(
+            CurrentDebugScope, std::string(Arg.getName()), ArgNo, File,
+            ParamDeclLoc.Line > 0 ? ParamDeclLoc.Line : Loc.Line,
+            getDebugType(ParamTurfType.get()), /*AlwaysPreserve=*/true);
+        DBuilder->insertDeclare(Alloca, ParamVar, DBuilder->createExpression(),
+                                DILocation::get(*TheContext, ParamVar->getLine(),
+                                                0, CurrentDebugScope),
+                                Builder->GetInsertBlock());
+      }
+      ++ArgNo;
     }
   }
 
   // Lint the function body before codegen
   LintExpression(Body.get());
 
+  // OPT-002 (ARCHITECTURE_OVERHAUL.md §8, §17.3): a THROWAWAY, EARLY CFG,
+  // built and analyzed here purely so Codegen (about to run, right below)
+  // can consult its results while emitting THIS function's bounds/overflow
+  // checks. The "real" CFG build + full analysis suite a few dozen lines
+  // below (ValueRangePass::runOnCFG() included) necessarily runs AFTER
+  // Body->codegen() -- it needs the LLVM IR nowhere near ready yet -- which
+  // means its own constant-propagation results always arrive one compile
+  // too late to suppress anything: by the time it runs, every runtime
+  // check for this function is already baked into the IR. Building a
+  // second CFG from the same (not-yet-codegenned) Body AST costs a cheap
+  // AST walk, is thrown away immediately after, and is the only way this
+  // group's proofs can actually reach Codegen in time. ValueRangePass::
+  // markElidableChecks() never raises a diagnostic (see its own doc
+  // comment, ValueRange.cpp) -- the LATER runOnCFG() call remains the only
+  // place ArrayBoundsError fires, completely unaffected by this.
+  if (Body) {
+    auto ElisionCFG = CFGBuilder().buildCFG(Name, ReturnType, Body.get(), Loc, MangledName);
+    ValueRangePass().markElidableChecks(*ElisionCFG, ParamIDs);
+  }
+
   // Codegen the body
   Body->codegen();
-
-  // Collect call edges from the AST for this function (safer than scanning CFGs)
-  if (Body) {
-    std::function<void(const ExprAST*)> scanCalls = [&](const ExprAST *N) {
-      if (!N) return;
-      if (auto FC = dynamic_cast<const FuncCallExprAST*>(N)) {
-        if (auto CalleeVar = dynamic_cast<const VariableExprAST*>(FC->getCallee())) {
-          std::string callee = CalleeVar->getName();
-          AddCallEdge(Name, callee);
-        }
-      }
-      if (auto B = dynamic_cast<const BinaryExprAST*>(N)) { scanCalls(B->getLHS()); scanCalls(B->getRHS()); }
-      else if (auto U = dynamic_cast<const UnaryExprAST*>(N)) scanCalls(U->getOperand());
-      else if (auto As = dynamic_cast<const AssignmentExprAST*>(N)) { scanCalls(As->getLHS()); scanCalls(As->getRHS()); }
-      else if (auto Vd = dynamic_cast<const VarDeclExprAST*>(N)) scanCalls(Vd->getInitializer());
-      else if (auto Bl = dynamic_cast<const BlockExprAST*>(N)) for (const auto &e : Bl->getExpressions()) scanCalls(e.get());
-      else if (auto If = dynamic_cast<const IfExprAST*>(N)) { for (const auto &Br : If->getBranches()) { scanCalls(Br.Cond.get()); scanCalls(Br.Body.get()); } scanCalls(If->getElse()); }
-    };
-    scanCalls(Body.get());
-  }
 
   // Build and analyze CFG for flow diagnostics
   if (Body) {
@@ -423,6 +613,15 @@ Value *FuncDefExprAST::codegen() {
     // Run alias/lifetime analysis (detect use-after-free, double-free)
     AliasAnalysisPass AAP;
     AAP.runOnCFG(*CfgPtr, ParamIDs);
+
+    // LANG-002: nullable-reference (&?T) dereference/narrowing analysis.
+    // Same pipeline position as every other CFG pass here -- after the
+    // TypeChecker has already validated the STATIC shape of every &?T use
+    // (typesCompatible()'s rules, Types.cpp), this pass is what verifies the
+    // FLOW-sensitive half: was a `p != null`/`p == null` check actually
+    // proven on the path reaching each `.field` access or `to &T` cast.
+    NullabilityPass NP;
+    NP.runOnCFG(*CfgPtr);
 
     // CFG Phase 2 (Issue #186): Liveness analysis (dead stores & unused vars).
     // Collect parameter VariableSymbol* pointers to exclude from warnings.
@@ -496,6 +695,22 @@ Value *FuncDefExprAST::codegen() {
 
   verifyFunction(*TheFunc);
 
+  // TOOL-001: this function's own DISubprogram is fully built now (every
+  // local/parameter dbg.declare it will ever get has already been inserted)
+  // -- finalizing it here, per-function, rather than waiting for the single
+  // whole-module DBuilder->finalize() call (main.cpp, right before
+  // verifyModule()) is what DIBuilder's own docs recommend for a subprogram
+  // whose body is fully emitted before the next one starts, and is needed
+  // for a RECURSIVE function: this function may call itself, but that
+  // self-call is reached through a call site's OWN scope resolution, not
+  // through this DISubprogram being temporary/unresolved, so there's no
+  // cycle finalizeSubprogram() here could break -- it only ever resolves
+  // outstanding forward references belonging to THIS subprogram (e.g. a
+  // local variable's type that was still a temporary composite type when
+  // its dbg.declare was inserted, see getDebugType()'s struct branch).
+  if (DBuilder && CurrentDebugScope)
+    DBuilder->finalizeSubprogram(CurrentDebugScope);
+
   // Exit function scope
   if (GlobalSymbolTable) {
     GlobalSymbolTable->ExitScope();
@@ -505,6 +720,8 @@ Value *FuncDefExprAST::codegen() {
   NamedValues = SavedNamedValues;
   CurrentFuncReturnType = SavedReturnType;
   CurrentFunction = SavedFunction;
+  CurrentDebugScope = SavedDebugScope;
+  Builder->SetCurrentDebugLocation(SavedDebugLoc);
   if (SavedInsertBlock)
     Builder->SetInsertPoint(SavedInsertBlock, SavedInsertPoint);
 
@@ -518,8 +735,8 @@ Value *FuncDefExprAST::codegen() {
   // the most common statement kind inside a module body, so returning a
   // literal nullptr here silently truncated EVERY imported module after
   // its first function once BlockExprAST::codegen() was hardened to stop
-  // at the first null statement (see git history for the now-removed
-  // docs/planning/CODE_REVIEW_GAPS_2026-07.md's original writeup).
+  // at the first null statement (see git history for the retired 2026-07
+  // code-review-gaps audit's original writeup).
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
 }
 
@@ -732,10 +949,20 @@ Value *FuncCallExprAST::codegen() {
     return Builder->CreateCall(FnLLVMType, CalleeVal, ArgVals, "calltmp");
   }
 
-  // NOTE: `ErrorType::Variant(...)` (call syntax) never reaches Codegen at
-  // all -- Resolver::visitFuncCall rejects it with a TypeError ("is an
-  // error variant, not a function") before this point, exactly like a
-  // plain `enum` variant. No branch is needed here.
+  // `ErrorType::Variant(messageExpr)` -- STD-002's message-carrying
+  // construction (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)). Every OTHER call
+  // arity on an error variant still never reaches Codegen at all --
+  // Resolver::visitFuncCall rejects it with a TypeError ("is an error
+  // variant, not a function") before this point, exactly like a plain
+  // `enum` variant.
+  if (ScopeCallee &&
+      ScopeCallee->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage) {
+    Value *MsgVal = Args[0]->codegen();
+    if (!MsgVal)
+      return nullptr;
+    return CodegenErrorVariantConstructWithMessage(
+        ScopeCallee->getLeftName(), ScopeCallee->getRightName(), MsgVal);
+  }
 
   // `StructName::default()` / `StructName::new(...)` -- construction.
   // Neither reaches the ordinary ResolvedCallTarget->mangledName() lookup
@@ -751,7 +978,23 @@ Value *FuncCallExprAST::codegen() {
       (ScopeCallee->ResolvedKind == ScopeAccessKind::ConstructorCall ||
        ScopeCallee->ResolvedKind == ScopeAccessKind::DefaultConstruct)) {
     const std::string &StructName = ScopeCallee->getLeftName();
-    TurfTypePtr T = GlobalSymbolTable ? GlobalSymbolTable->LookupType(StructName) : nullptr;
+    // TYPE-002 (S13b): if TypeChecker::visitVarDecl() determined this
+    // construction call is building a SPECIFIC generic instantiation (e.g.
+    // `mut b: Box<Big> = Box::default();`), look up that instantiation's
+    // OWN per-instantiation TurfStructType (drainStructRequests(), S13a)
+    // instead of always the shared, erasure-era base struct -- see
+    // ConstructedType's own doc comment (ASTAccess.h) for why the call
+    // itself has no other way to know which instantiation it's building.
+    TurfTypePtr T;
+    if (ConstructedType) {
+      if (auto *CGT = dynamic_cast<const GenericType *>(ConstructedType.get())) {
+        std::string MangledName =
+            Monomorphize::instantiatedDeclName(CGT->getBaseName(), CGT->getTypeArgs());
+        T = GlobalSymbolTable ? GlobalSymbolTable->LookupType(MangledName) : nullptr;
+      }
+    }
+    if (!T)
+      T = GlobalSymbolTable ? GlobalSymbolTable->LookupType(StructName) : nullptr;
     auto *SType = dynamic_cast<TurfStructType *>(T.get());
     if (!SType) {
       SemanticError(Loc, "Internal error: unknown struct type '" + StructName +
@@ -788,14 +1031,31 @@ Value *FuncCallExprAST::codegen() {
       return nullptr;
     }
 
-    std::string CtorMangledName = "turf_";
-    if (!Target->SourceModule.empty())
-      CtorMangledName += Target->SourceModule + "_";
-    CtorMangledName += Target->BaseName;      // "StructName.new"
-    CtorMangledName += "_" + StructName + "_ptr"; // self, reinserted
-    for (const auto &P : Target->Params)
-      if (P.Type)
-        CtorMangledName += "_" + P.Type->getMangledName();
+    // TYPE-002 (S14a): a GENERIC constructor (`fn<T> Box.new(v: T): void`)
+    // is now monomorphized (Monomorphize.cpp's drainConstructorRequests())
+    // -- its clone's OWN ResolvedDef has self back in Params[0] (never
+    // stripped; the clone is an ordinary, ResolvedDef-driven declaration,
+    // not a temporary overload-resolution candidate), so its
+    // mangledName() is ALREADY correct and complete the ordinary way,
+    // exactly like any other resolved call target. Params[0].Name=="self"
+    // is what distinguishes this case from the STILL-self-stripped
+    // candidate every NON-generic constructor's Target remains (stripSelf()
+    // in ResolverCall.cpp runs unconditionally for every `::new(...)` call,
+    // generic or not) -- that path still needs the manual reconstruction
+    // below, since its own Params never included self to begin with.
+    std::string CtorMangledName;
+    if (!Target->Params.empty() && Target->Params[0].Name == "self") {
+      CtorMangledName = Target->mangledName();
+    } else {
+      CtorMangledName = "turf_";
+      if (!Target->SourceModule.empty())
+        CtorMangledName += Target->SourceModule + "_";
+      CtorMangledName += Target->BaseName;      // "StructName.new"
+      CtorMangledName += "_" + StructName + "_ptr"; // self, reinserted
+      for (const auto &P : Target->Params)
+        if (P.Type)
+          CtorMangledName += "_" + P.Type->getMangledName();
+    }
 
     Function *CtorF = TheModule->getFunction(CtorMangledName);
     if (!CtorF) {
@@ -824,18 +1084,26 @@ Value *FuncCallExprAST::codegen() {
       Value *V = EvaluatedArgs[Idx];
       Type *ExpectedTy = ArgIt->getType();
       if (V->getType() != ExpectedTy) {
-        if (ExpectedTy->isPointerTy() && V->getType()->isIntegerTy())
-          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_ptr");
-        else if (ExpectedTy->isIntegerTy() && V->getType()->isPointerTy())
-          V = Builder->CreatePtrToInt(V, ExpectedTy, "argcast_int");
-        else if (ExpectedTy->isDoubleTy() && V->getType()->isPointerTy()) {
-          V = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext));
-          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_dbl");
-        } else if (ExpectedTy->isPointerTy() && V->getType()->isDoubleTy()) {
-          V = Builder->CreateBitCast(V, Type::getInt64Ty(*TheContext), "argcast_dbl_to_i64");
-          V = Builder->CreateIntToPtr(V, ExpectedTy, "argcast_erase_dbl");
-        } else
-          V = Builder->CreateBitCast(V, ExpectedTy, "argcast_bit");
+        // TYPE-002 (S15/D8): see CodegenStruct.cpp's identical fix on
+        // MethodCallExprAST::codegen() for the full story -- this block
+        // used to erase/un-erase a constructor argument INTO/OUT OF a
+        // generic parameter's opaque Type-Erasure slot, dead ever since
+        // monomorphization gives every constructor call site a real,
+        // concrete callee signature. Verified live, this session:
+        // instrumented with an `fprintf` probe, zero hits compiling every
+        // file under tests/, lib/std/, and showcase/.
+        SemanticError(Loc,
+                      "Internal error: constructor call argument type "
+                      "mismatch (expected '" +
+                          std::string(ExpectedTy->isPointerTy() ? "pointer" :
+                                      ExpectedTy->isDoubleTy() ? "double" :
+                                      ExpectedTy->isIntegerTy() ? "integer" : "?") +
+                          "'-shaped LLVM type, got a different shape). "
+                          "This is a compiler bug -- every call site should "
+                          "reach a fully-monomorphized, concretely-typed "
+                          "callee.")
+            .raise();
+        return nullptr;
       }
       ArgVals.push_back(V);
     }
@@ -892,6 +1160,122 @@ Value *FuncCallExprAST::codegen() {
     return Builder->CreateGlobalString(TypeNameStr, "typename");
   }
 
+  // ── gc_alloc(n) / gc_alloc_zeroed(n) / gc_realloc(p, n) ──────────────────
+  // MEM-001/MEM-002 (ARCHITECTURE_OVERHAUL.md §8): the Turf-visible surface
+  // for libturfrt's typed-allocation entrypoints (runtime/turfrt.h). Handled
+  // here, alongside typeof, for the same reason -- these are bare
+  // intrinsics with no ResolvedCallTarget/MangledName, so they must be
+  // dispatched before the "Issue #9: Codegen trusts the Resolver" path
+  // below, which assumes both exist. As of MEM-002, `desc` is
+  // PendingGCAllocDescOverride when CastExprAST::codegen() set one (a real
+  // per-element TurfTypeDesc for a `gc_alloc(...) to T*`-shaped site,
+  // CodegenExpr.cpp), consumed here and reset to nullptr immediately so it
+  // never leaks into an unrelated later call; otherwise still a literal
+  // null pointer -- MEM-002 defines that as "opaque, no pointer words
+  // traced", correct (not a fallback) for a raw byte buffer like a string
+  // (see turf_rt_alloc's own doc comment in runtime/turfrt.h).
+  if (CalleeName == "gc_alloc" || CalleeName == "gc_alloc_zeroed" ||
+      CalleeName == "gc_realloc") {
+    PointerType *PtrTy = PointerType::getUnqual(*TheContext);
+    Type *I64Ty = Type::getInt64Ty(*TheContext);
+    Value *DescArg = PendingGCAllocDescOverride
+                          ? PendingGCAllocDescOverride
+                          : (Value *)ConstantPointerNull::get(PtrTy);
+    PendingGCAllocDescOverride = nullptr;
+
+    if (CalleeName == "gc_realloc") {
+      Value *PVal = Args[0]->codegen();
+      Value *NVal = Args[1]->codegen();
+      if (!PVal || !NVal)
+        return nullptr;
+      Function *ReallocFunc = TheModule->getFunction("turf_rt_realloc");
+      if (!ReallocFunc) {
+        FunctionType *FT =
+            FunctionType::get(PtrTy, {PtrTy, I64Ty, PtrTy}, /*isVarArg=*/false);
+        ReallocFunc = Function::Create(FT, Function::ExternalLinkage,
+                                        "turf_rt_realloc", TheModule.get());
+      }
+      return Builder->CreateCall(ReallocFunc, {PVal, NVal, DescArg});
+    }
+
+    Value *NVal = Args[0]->codegen();
+    if (!NVal)
+      return nullptr;
+    const char *RtFuncName =
+        (CalleeName == "gc_alloc") ? "turf_rt_alloc" : "turf_rt_alloc_zeroed";
+    Function *AllocFunc = TheModule->getFunction(RtFuncName);
+    if (!AllocFunc) {
+      FunctionType *FT =
+          FunctionType::get(PtrTy, {I64Ty, PtrTy}, /*isVarArg=*/false);
+      AllocFunc = Function::Create(FT, Function::ExternalLinkage, RtFuncName,
+                                    TheModule.get());
+    }
+    return Builder->CreateCall(AllocFunc, {NVal, DescArg});
+  }
+
+  // ── gc_collect() / gc_is_managed(p) ───────────────────────────────────────
+  // MEM-002. Same dispatch shape as gc_alloc above -- bare intrinsics, no
+  // ResolvedCallTarget/MangledName.
+  if (CalleeName == "gc_collect") {
+    Function *CollectFunc = TheModule->getFunction("turf_rt_collect");
+    if (!CollectFunc) {
+      FunctionType *FT =
+          FunctionType::get(Type::getVoidTy(*TheContext), {}, /*isVarArg=*/false);
+      CollectFunc = Function::Create(FT, Function::ExternalLinkage,
+                                      "turf_rt_collect", TheModule.get());
+    }
+    return Builder->CreateCall(CollectFunc, {});
+  }
+  if (CalleeName == "gc_is_managed") {
+    PointerType *PtrTy = PointerType::getUnqual(*TheContext);
+    Value *PVal = Args[0]->codegen();
+    if (!PVal)
+      return nullptr;
+    Function *IsManagedFunc = TheModule->getFunction("turf_rt_is_gc_pointer");
+    if (!IsManagedFunc) {
+      FunctionType *FT = FunctionType::get(Type::getInt32Ty(*TheContext),
+                                            {PtrTy}, /*isVarArg=*/false);
+      IsManagedFunc = Function::Create(FT, Function::ExternalLinkage,
+                                        "turf_rt_is_gc_pointer",
+                                        TheModule.get());
+    }
+    Value *IntResult = Builder->CreateCall(IsManagedFunc, {PVal});
+    return Builder->CreateICmpNE(
+        IntResult, ConstantInt::get(Type::getInt32Ty(*TheContext), 0),
+        "gc_is_managed");
+  }
+  if (CalleeName == "gc_checked_free") {
+    PointerType *PtrTy = PointerType::getUnqual(*TheContext);
+    Value *PVal = Args[0]->codegen();
+    if (!PVal)
+      return nullptr;
+    Function *CheckedFreeFunc = TheModule->getFunction("turf_rt_checked_free");
+    if (!CheckedFreeFunc) {
+      FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext),
+                                            {PtrTy}, /*isVarArg=*/false);
+      CheckedFreeFunc = Function::Create(FT, Function::ExternalLinkage,
+                                          "turf_rt_checked_free",
+                                          TheModule.get());
+    }
+    return Builder->CreateCall(CheckedFreeFunc, {PVal});
+  }
+  if (CalleeName == "gc_pin" || CalleeName == "gc_unpin") {
+    PointerType *PtrTy = PointerType::getUnqual(*TheContext);
+    Value *PVal = Args[0]->codegen();
+    if (!PVal)
+      return nullptr;
+    const char *RtFuncName =
+        (CalleeName == "gc_pin") ? "turf_rt_pin" : "turf_rt_unpin";
+    Function *PinFunc = TheModule->getFunction(RtFuncName);
+    if (!PinFunc) {
+      FunctionType *FT = FunctionType::get(Type::getVoidTy(*TheContext),
+                                            {PtrTy}, /*isVarArg=*/false);
+      PinFunc = Function::Create(FT, Function::ExternalLinkage, RtFuncName,
+                                  TheModule.get());
+    }
+    return Builder->CreateCall(PinFunc, {PVal});
+  }
+
   std::vector<Value *> EvaluatedArgs;
   for (auto &Arg : Args) {
     Value *V = Arg->codegen();
@@ -945,6 +1329,15 @@ Value *FuncCallExprAST::codegen() {
     ParamTypeIt = FuncParamTypes.find(CalleeName);
 
   for (auto &Arg : CalleeF->args()) {
+    // STD-002: a `@caller_location` callee's REAL LLVM arg count is one
+    // more than `EvaluatedArgs.size()` (the ordinary, Turf-level, written
+    // argument list) -- its hidden trailing argument is appended
+    // separately, below, never read from EvaluatedArgs (there is nothing
+    // there to read: the user never writes it). Bounding this loop here,
+    // rather than letting it run over the extra LLVM argument too, is what
+    // keeps `EvaluatedArgs[Idx]` from indexing out of bounds.
+    if (Idx >= EvaluatedArgs.size())
+      break;
     Value *V = EvaluatedArgs[Idx];
 
     // Determine declared TurfTypePtr for this param
@@ -992,46 +1385,27 @@ Value *FuncCallExprAST::codegen() {
       // exercising it. Using DeclaredType directly routes through that
       // intended path.
       //
-      // This previously special-cased away from DeclaredType whenever it
-      // WAS a TurfGenericParamType (the T in `fn<T> foo(x: T)`), substituting
-      // getTurfTypeFromLLVM(Arg.getType()) (== TurfPtr()) instead, on the
-      // theory that a type-erased parameter has no single "real" type to
-      // use. That reasoning no longer applies now that Resolver::
-      // substituteTypeParams() (see Resolver.cpp) mutates the shared AST
-      // node so DeclaredType really is a genuine, meaningful
-      // TurfGenericParamType instance here -- and CastToType() has a
-      // purpose-built erasure branch keyed on exactly that dynamic_cast
-      // (`if (dynamic_cast<const TurfGenericParamType *>(DestType))`,
-      // further down in this file). Substituting TurfPtr() instead skipped
-      // right past that branch the same way the struct case above did:
-      // TurfPtr() doesn't match any of CastToType()'s numeric-conversion
-      // branches either, so the scalar argument value (e.g. a bare `i1` for
-      // `identity(true)`) was returned completely unconverted and stored
-      // into an opaque-pointer-typed slot with no cast at all -- confirmed
-      // to segfault for a bool argument and silently corrupt a double
-      // argument. Using DeclaredType directly here fixes both.
+      // TYPE-002 (S14a): the redundant PRE-unerase this block used to do
+      // before even calling CastToType() (manually PtrToInt/bitcasting a
+      // pointer-shaped value into int/bool/double whenever DeclaredType was
+      // numeric) is deleted -- CastToType()'s OWN matching branch is gone
+      // too (INV-GEN-1: DeclaredType can no longer legitimately be a
+      // TurfGenericParamType here at all, so there is no "erased" value
+      // left to un-erase). See the change record's *Removed assumptions*.
       TurfTypePtr ExpectedType = DeclaredType;
-
-      // Type-erasure un-erase: if the value is a pointer (erased generic T)
-      // and the expected type is numeric, convert via PtrToInt/bitcast.
-      if (V->getType()->isPointerTy() &&
-          (ExpectedType->isNamed("int") || ExpectedType->isNamed("bool") ||
-           ExpectedType->isNamed("double"))) {
-        Value *IntVal = Builder->CreatePtrToInt(V, Type::getInt64Ty(*TheContext), "unerase_arg");
-        if (ExpectedType->isNamed("bool"))
-          V = Builder->CreateICmpNE(IntVal, ConstantInt::get(Type::getInt64Ty(*TheContext), 0), "unerase_bool");
-        else if (ExpectedType->isNamed("double"))
-          V = Builder->CreateBitCast(IntVal, Type::getDoubleTy(*TheContext), "unerase_dbl");
-        else
-          V = IntVal;
-      }
-
       V = CastToType(V, ExpectedType, "argcast", Loc);
     }
 
     ArgVals.push_back(V);
     Idx++;
   }
+
+  // STD-002: auto-supply the hidden trailing argument a `@caller_location`
+  // callee's REAL signature has but its Turf-level `Args` never wrote --
+  // see BuildCallerLocationValue()'s own doc comment (CodegenInternal.h)
+  // for the forward-vs-stamp decision this makes.
+  if (ResolvedCallTarget && ResolvedCallTarget->HasCallerLocation)
+    ArgVals.push_back(BuildCallerLocationValue(Loc));
 
   // For variadic functions, append any extra arguments beyond the declared
   // parameter count. These are passed raw per the C vararg ABI — no casting.
@@ -1051,16 +1425,16 @@ Value *FuncCallExprAST::codegen() {
 // A declaration codegens to nothing meaningful, mirroring EnumDeclExprAST
 // above -- the real type info was already registered by the Parser/Resolver.
 // Runtime representation for `!T`/error variants lands in Stage 3
-// (docs/planning/Errors.md).
+// (docs/architecture/errors_and_recover.md).
 Value *ErrorDeclExprAST::codegen() {
   return ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
 }
 
 
-// `<expr> recover ...` (docs/planning/Errors.md) -- branches on the wrapped
-// FallibleValue's isOk bit, unboxes/produces/runs accordingly, and merges
-// back to a single value of the success type T (or, if T is void, no value
-// at all -- see the IsVoidSuccess early-return below).
+// `<expr> recover ...` (docs/architecture/errors_and_recover.md) -- branches on
+// the wrapped FallibleValue's isOk bit, unboxes/produces/runs accordingly, and
+// merges back to a single value of the success type T (or, if T is void, no
+// value at all -- see the IsVoidSuccess early-return below).
 //
 // A block that diverges (every `recover run`/`recover as err run` except the
 // void-success case -- enforced by TypeChecker's AllPathsDiverge check)

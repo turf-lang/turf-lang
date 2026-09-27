@@ -60,12 +60,13 @@ class MachineDeclExprAST;
 class ScopeAccessExprAST;
 class ErrorDeclExprAST;
 class RecoverExprAST;
+class DeferExprAST;
 class StructDeclExprAST;
 class ModuleImportExprAST;
 class SizeOfExprAST;
+class CallerLocationExprAST;
 class ExternFuncDeclExprAST;
 class AddressOfExprAST;
-class DefaultInitExprAST;
 class CompareExprAST;
 
 
@@ -100,7 +101,6 @@ public:
   virtual void visitChar(CharExprAST &Node) {}
   virtual void visitString(StringExprAST &Node) {}
   virtual void visitNull(NullExprAST &Node) {}
-  virtual void visitDefaultInit(DefaultInitExprAST &Node) {}
 
   // ── Variables & Declarations ──────────────────────────────────────────────
   virtual void visitVariable(VariableExprAST &Node) {}
@@ -127,6 +127,7 @@ public:
   virtual void visitContinue(ContinueExprAST &Node) {}
   virtual void visitReturn(ReturnExprAST &Node) {}
   virtual void visitCompare(CompareExprAST &Node) {}
+  virtual void visitDefer(DeferExprAST &Node) {}
 
 
   // ── Functions & Calls ─────────────────────────────────────────────────────
@@ -150,6 +151,7 @@ public:
   // ── Modules & misc ────────────────────────────────────────────────────────
   virtual void visitModuleImport(ModuleImportExprAST &Node) {}
   virtual void visitSizeOf(SizeOfExprAST &Node) {}
+  virtual void visitCallerLocation(CallerLocationExprAST &Node) {}
 
   // ── FFI ────────────────────────────────────────────────────────────────────
   virtual void visitExternFuncDecl(ExternFuncDeclExprAST &Node) {}

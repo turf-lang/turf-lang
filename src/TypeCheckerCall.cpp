@@ -4,7 +4,7 @@
  * @details Part of the TypeChecker pass (Issue #7), split from the original
  *          monolithic TypeChecker.cpp by category (mirrors AST.h's
  *          ASTExpr/ASTStmt/ASTDecl/ASTAccess split -- see
- *          docs/planning/COMPILER_MODULE_BREAKDOWN.md).
+ *          docs/architecture/compiler_pipeline.md).
  *
  * @author a2ys
  * @copyright Copyright (c) 2026 TurfLang contributors.  Apache License.
@@ -25,6 +25,9 @@
 
 #include "TypeCheckerInternal.h"
 
+#include "Monomorphize.h" // TYPE-002 (S11b): report-only instantiation collector
+
+#include <algorithm>
 #include <cassert>
 #include <functional>
 #include <iostream>
@@ -44,6 +47,44 @@
 // type. See STRING_UFCS_OPERATOR_CHAR_RFC.md §4.2.
 bool sameTypeExact(const TurfType *A, const TurfType *B) {
   return A && B && A->getName() == B->getName();
+}
+
+
+/**
+ * @brief LANG-001: does @p ParamTy (operator[]/operator[]='s declared SELF
+ *        parameter type) match @p BaseTy (the actual base expression's
+ *        type), for the purpose of `arr[i]`/`arr[i] = v`?
+ *
+ * Unlike every OTHER operand of every other overloadable operator, the self
+ * operand of `operator[]`/`operator[]=` is allowed to match either BY VALUE
+ * (sameTypeExact()) or BY REFERENCE (ParamTy == "&" + BaseTy's own name) --
+ * the ordinary binary/unary operator rule (byte-for-byte exact match, no
+ * implicit &) is deliberately relaxed here, ONLY for the self position, for
+ * a concrete reason: `operator[]=` is USELESS as a mutation mechanism if its
+ * self parameter is passed by value (writing through a copy that's
+ * discarded the moment the call returns), and requiring every CALL SITE to
+ * spell `(&box)[i] = v` instead of the natural `box[i] = v` would make the
+ * feature unusable for its own stated purpose (closing `LIMITATIONS.md`
+ * §4's `List<T>`/`Map`/`Set` `get`/`set` gap). A `.`-method's own implicit
+ * `self` gets exactly this treatment for free (auto-address-of at the call
+ * site, §6.6's documented exemption) -- `operator[]`/`operator[]=` aren't
+ * `.`-methods (they're plain top-level `operator` declarations, see
+ * ParseOperatorDecl()'s own doc comment on why), so they don't inherit that
+ * mechanism automatically; this function is what extends the same
+ * convenience to them specifically for the self position. The index and
+ * value operands get NO such relaxation -- they still go through plain
+ * sameTypeExact(), same as every other operator.
+ */
+bool operatorSelfOperandMatches(const TurfType *ParamTy,
+                                const TurfType *BaseTy) {
+  if (sameTypeExact(ParamTy, BaseTy))
+    return true;
+  if (ParamTy && ParamTy->isReference()) {
+    const auto *RefTy = dynamic_cast<const TurfReferenceType *>(ParamTy);
+    if (RefTy && sameTypeExact(RefTy->getPointee().get(), BaseTy))
+      return true;
+  }
+  return false;
 }
 
 
@@ -73,6 +114,31 @@ static bool ufcsReceiverTypeMatches(const TurfType *ParamTy,
            PArr->getSize() == AArr->getSize();
   }
   return sameTypeExact(ParamTy, ActualTy);
+}
+
+
+/**
+ * @brief LANG-004 item 2: does @p ArgTy (a `string`) coerce to @p ParamTy
+ *        (a raw-pointer parameter) at an `extern fn` call site?
+ *
+ * `string` and `ptr`/`T*`/`void*` already share the identical LLVM
+ * representation (`isPointerLike()`, CodegenCore.cpp), so this is purely a
+ * missing rule in argument matching, not a representation gap. Deliberately
+ * a standalone predicate, checked only where the candidate is a real
+ * `extern fn` (`Cand->IsExtern`) -- NOT folded into typesCompatible()
+ * (Types.cpp), which stays exact on this pair for ordinary Turf code.
+ * Widening typesCompatible() itself would let `string` silently bind to any
+ * raw-pointer parameter everywhere, undermining §6.2's frozen conversion
+ * matrix for the sake of one FFI convenience. See
+ * docs/planning/ARCHITECTURE_OVERHAUL.md §8 LANG-004, item 2 ("Must NOT
+ * reinterpret").
+ */
+static bool isExternStringToPtrCoercion(const TurfType *ArgTy,
+                                        const TurfType *ParamTy) {
+  if (!ArgTy || !ParamTy || !ArgTy->isString())
+    return false;
+  return (ParamTy->isPointer() && !ParamTy->isReference()) ||
+         ParamTy->isNamed("ptr") || ParamTy->isNamed("void*");
 }
 
 
@@ -124,6 +190,88 @@ static void collectGenericSubstitution(
     }
     return;
   }
+  // STD-003: a callback parameter's own signature (`cmp: fn(T, T): int`)
+  // never recursed into here either -- see Types.cpp's identical FuncType
+  // addition to typesCompatible() (this function's sibling: that one
+  // decides IF a candidate matches, this one decides what T ACTUALLY WAS at
+  // this call site once a candidate is accepted). Each parameter position
+  // and the return type recurse the same way pointer/array/generic-argument
+  // wrapping already does above.
+  if (const auto *PFunc = dynamic_cast<const FuncType *>(ParamTy.get())) {
+    if (const auto *AFunc = dynamic_cast<const FuncType *>(ArgTy.get())) {
+      const auto &PParams = PFunc->getParamTypes();
+      const auto &AParams = AFunc->getParamTypes();
+      for (size_t i = 0; i < PParams.size() && i < AParams.size(); ++i)
+        collectGenericSubstitution(PParams[i], AParams[i], Subst);
+      collectGenericSubstitution(PFunc->getReturnType(), AFunc->getReturnType(), Subst);
+    }
+    return;
+  }
+}
+
+/**
+ * @brief TYPE-002 (S11b): recover a CANONICAL, declaration-order list of
+ *        generic type-parameter names from a declared parameter type,
+ *        mirroring collectGenericSubstitution()'s own recursive walk.
+ *
+ * Subst (built by collectGenericSubstitution(), above) is an
+ * unordered_map -- its iteration order is not the declaration order and is
+ * not even guaranteed stable across equivalent runs. An instantiation
+ * request needs a canonical, ORDERED type-argument tuple (two requests for
+ * the same instantiation must produce index-comparable vectors, not just
+ * the same set of pairs), so this walks the same param-type shape a
+ * second time purely to recover the order names were first seen in --
+ * exactly how collectGenericSubstitution() itself decided insertion order,
+ * just captured explicitly instead of thrown away.
+ */
+static void collectGenericParamNameOrder(const TurfTypePtr &ParamTy,
+                                         std::vector<std::string> &Order) {
+  if (!ParamTy)
+    return;
+  if (const auto *GP = dynamic_cast<const TurfGenericParamType *>(ParamTy.get())) {
+    if (std::find(Order.begin(), Order.end(), GP->getName()) == Order.end())
+      Order.push_back(GP->getName());
+    return;
+  }
+  if (const auto *PPtr = dynamic_cast<const TurfPointerType *>(ParamTy.get())) {
+    collectGenericParamNameOrder(PPtr->getPointee(), Order);
+    return;
+  }
+  if (isArrayType(ParamTy.get())) {
+    if (const auto *Arr = dynamic_cast<const ArrayType *>(ParamTy.get()))
+      collectGenericParamNameOrder(Arr->getElementTypePtr(), Order);
+    return;
+  }
+  if (const auto *PGen = dynamic_cast<const GenericType *>(ParamTy.get())) {
+    for (const auto &A : PGen->getTypeArgs())
+      collectGenericParamNameOrder(A, Order);
+    return;
+  }
+  if (const auto *PFunc = dynamic_cast<const FuncType *>(ParamTy.get())) {
+    for (const auto &P : PFunc->getParamTypes())
+      collectGenericParamNameOrder(P, Order);
+    collectGenericParamNameOrder(PFunc->getReturnType(), Order);
+    return;
+  }
+}
+
+/// TYPE-002 (S11b): turn a (possibly partial) Subst map into the ordered
+/// TypeArgs vector an InstantiationRequest needs, using CanonicalOrder
+/// (from collectGenericParamNameOrder() above) to fix the index order. A
+/// name in CanonicalOrder with no Subst entry (a return-only phantom type
+/// parameter that never appeared in any argument position) is skipped --
+/// the request is still meaningful over the parameters that DID resolve.
+static std::vector<TurfTypePtr> orderedTypeArgs(
+    const std::vector<std::string> &CanonicalOrder,
+    const std::unordered_map<std::string, TurfTypePtr> &Subst) {
+  std::vector<TurfTypePtr> Args;
+  Args.reserve(CanonicalOrder.size());
+  for (const auto &Name : CanonicalOrder) {
+    auto It = Subst.find(Name);
+    if (It != Subst.end())
+      Args.push_back(It->second);
+  }
+  return Args;
 }
 
 
@@ -140,85 +288,18 @@ static void collectGenericSubstitution(
  * "Cannot compare 'T' with 'int'" even though the call was perfectly valid.
  * A type parameter with no corresponding entry in Subst (never appeared in
  * any parameter position, e.g. a return-only phantom type) is left as-is.
+ *
+ * TYPE-002 (S12a): this is now a thin wrapper. The real logic moved to
+ * Monomorphize::substituteConcreteTypes() -- it turned out to already BE
+ * the "concrete-map variant" the monomorphizer needs (S11a's plan named
+ * the wrong function to generalize; see the change record's *Removed
+ * assumptions*). Delegating keeps every existing call site in this file
+ * (and its behaviour) unchanged, verbatim.
  */
 static TurfTypePtr substituteReturnType(
     const TurfTypePtr &Ty,
     const std::unordered_map<std::string, TurfTypePtr> &Subst) {
-  if (!Ty || Subst.empty())
-    return Ty;
-
-  if (const auto *GP = dynamic_cast<const TurfGenericParamType *>(Ty.get())) {
-    auto It = Subst.find(GP->getName());
-    return It != Subst.end() ? It->second : Ty;
-  }
-  // A generic STRUCT's own field types are also matched here as NamedType,
-  // not TurfGenericParamType -- GlobalSymbolTable's registered TurfStructType
-  // for a generic struct is built once at PARSE time directly from the
-  // as-parsed Fields, a SEPARATE object from the StructDeclExprAST node that
-  // Resolver::visitStructDecl() mutates in place (NamedType("T") ->
-  // TurfGenericParamType("T")); that mutation never propagates back into
-  // GlobalSymbolTable's copy, so its fields stay NamedType("T") forever (see
-  // the identical note a few hundred lines below, in visitMethodCall's Subst-
-  // building code, which discovered this same fact for method return types).
-  // Subst's keys are always genuine type-parameter names, never a real
-  // struct/enum name (every Subst-building call site excludes names that
-  // resolve via GlobalSymbolTable), so matching NamedType here is safe.
-  if (const auto *NT = dynamic_cast<const NamedType *>(Ty.get())) {
-    auto It = Subst.find(NT->getName());
-    return It != Subst.end() ? It->second : Ty;
-  }
-  // Checked BEFORE the plain TurfPointerType branch below -- same reason as
-  // the identical guard in ResolverCore.cpp's substituteTypeParams():
-  // TurfReferenceType (&T, issue #238) IS-A TurfPointerType, so the more
-  // general dynamic_cast below matches it too, and without this earlier
-  // check would silently rebuild it as a plain TurfPointerType, turning a
-  // substituted `&T` into `T*`.
-  if (const auto *RT = dynamic_cast<const TurfReferenceType *>(Ty.get())) {
-    TurfTypePtr NewPointee = substituteReturnType(RT->getPointee(), Subst);
-    return NewPointee == RT->getPointee()
-              ? Ty
-              : std::make_shared<TurfReferenceType>(NewPointee);
-  }
-  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty.get())) {
-    TurfTypePtr NewPointee = substituteReturnType(PT->getPointee(), Subst);
-    return NewPointee == PT->getPointee()
-              ? Ty
-              : std::make_shared<TurfPointerType>(NewPointee);
-  }
-  if (isArrayType(Ty.get())) {
-    const auto *AT = dynamic_cast<const ArrayType *>(Ty.get());
-    TurfTypePtr NewElem = substituteReturnType(AT->getElementTypePtr(), Subst);
-    return NewElem == AT->getElementTypePtr()
-              ? Ty
-              : makeArrayType(NewElem, AT->getSize());
-  }
-  if (const auto *GT = dynamic_cast<const GenericType *>(Ty.get())) {
-    std::vector<TurfTypePtr> NewArgs;
-    bool Changed = false;
-    for (const auto &Arg : GT->getTypeArgs()) {
-      TurfTypePtr NewArg = substituteReturnType(Arg, Subst);
-      Changed |= (NewArg != Arg);
-      NewArgs.push_back(std::move(NewArg));
-    }
-    return Changed ? std::make_shared<GenericType>(GT->getBaseName(),
-                                                    std::move(NewArgs))
-                   : Ty;
-  }
-  // `!T` (docs/planning/Errors.md) where T is itself the generic function's
-  // own type parameter (e.g. `fn<T> firstOrFail(arr: T[], len: int): !T`) --
-  // without this branch, `recover`'s success type stayed the raw,
-  // unsubstituted TurfGenericParamType("T") forever, so e.g.
-  // `firstOrFail(intArray, n) recover produce -1` failed to typecheck
-  // ("'recover produce int' doesn't match this call's success type 'T'")
-  // even though the concrete instantiation is genuinely `!int`. Found live
-  // while looking for a generic Map::tryGet<K,V>(): !V candidate.
-  if (const auto *EU = dynamic_cast<const TurfErrorUnionType *>(Ty.get())) {
-    TurfTypePtr NewSuccess = substituteReturnType(EU->getSuccessTypePtr(), Subst);
-    return NewSuccess == EU->getSuccessTypePtr()
-              ? Ty
-              : std::make_shared<TurfErrorUnionType>(NewSuccess);
-  }
-  return Ty;
+  return Monomorphize::substituteConcreteTypes(Ty, Subst);
 }
 
 
@@ -266,6 +347,32 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     return;
   }
 
+  // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
+  // messageExpr)` -- exactly one `string` argument, the message attached to
+  // this specific error occurrence. Short-circuited here for the identical
+  // reason DefaultConstruct is just above: Resolver::visitFuncCall never
+  // populates ResolvedCandidates for this kind either (ResolverCall.cpp's
+  // isErrorTypeName() branch), so the ordinary candidate-matching path
+  // below would treat it as unresolved. Result type is the SAME
+  // TurfUserErrorType a bare `ErrorType::Variant` reference already gets
+  // (visitScopeAccess()'s ErrorVariantRef branch) -- constructing WITH a
+  // message doesn't change what kind of value this is, only what runtime
+  // data it carries (Codegen's ErrorVariantConstructWithMessage branch,
+  // CodegenFunc.cpp).
+  if (ScopeCallee &&
+      ScopeCallee->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage) {
+    if (ArgCount == 1 && ArgTypes[0] && !ArgTypes[0]->isNamed("string")) {
+      reportError(Node.getLoc(),
+                  "'" + ScopeCallee->getLeftName() + "::" + CalleeName +
+                      "(...)' expects a 'string' message, got '" +
+                      ArgTypes[0]->getName() + "'.",
+                  {}, "Pass a 'string' expression as the error's message.",
+                  "Wrong message type!");
+    }
+    setType(&Node, std::make_shared<NamedType>(ScopeCallee->getLeftName()));
+    return;
+  }
+
   // ── Bare language intrinsic path ─────────────────────────────────────────
   // Only 'typeof' is a true bare intrinsic (callable without a module
   // qualifier and not registered as user functions).
@@ -293,6 +400,49 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       // ── typeof(x) → string ───────────────────────────────────────────────
       if (CalleeName == "typeof") {
         setType(&Node, TurfString());
+        return;
+      }
+
+      // ── gc_alloc(n) / gc_alloc_zeroed(n) / gc_realloc(p, n) → void* ────────
+      // MEM-001. All three always evaluate to a raw `void*` -- exactly the
+      // same "untyped result, caller casts" contract mem::alloc()/
+      // mem::realloc() already have (see e.g. list.tr's
+      // `mem::malloc(byteSize) to T*`, the pattern every rerouted call site
+      // keeps using with gc_alloc/gc_realloc in its place). No argument-type
+      // validation beyond the arity check above -- same minimal-validation
+      // convention typeof already uses; a non-int byte-count argument would
+      // simply codegen with whatever LLVM width Args[0]->codegen() produces
+      // (both runtime parameters are already-64-bit size_t, matching Turf's
+      // 64-bit `int`).
+      if (CalleeName == "gc_alloc" || CalleeName == "gc_alloc_zeroed" ||
+          CalleeName == "gc_realloc") {
+        setType(&Node, std::make_shared<TurfPointerType>(TurfVoid()));
+        return;
+      }
+
+      // ── gc_collect() → void / gc_is_managed(p) → bool ──────────────────────
+      // MEM-002. gc_collect() forces one mark-sweep cycle (turf_rt_collect);
+      // gc_is_managed(p) is the exact-block-start query lib/std/mem/mem.tr's
+      // checked free() uses to diagnose a cross-heap mem::free() call. Same
+      // minimal-validation convention as gc_alloc's own branch above.
+      if (CalleeName == "gc_collect") {
+        setType(&Node, TurfVoid());
+        return;
+      }
+      if (CalleeName == "gc_is_managed") {
+        setType(&Node, TurfBool());
+        return;
+      }
+      if (CalleeName == "gc_checked_free") {
+        setType(&Node, TurfVoid());
+        return;
+      }
+
+      // ── gc_pin(p) / gc_unpin(p) → void ──────────────────────────────────
+      // OVH-010. Same minimal-validation convention as gc_checked_free's
+      // own branch just above.
+      if (CalleeName == "gc_pin" || CalleeName == "gc_unpin") {
+        setType(&Node, TurfVoid());
         return;
       }
 
@@ -354,7 +504,14 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       for (int i = 0; i < CheckCount; ++i) {
         const TurfType *ParamTy = Cand->Params[i].Type.get();
         const TurfType *ArgTy   = ArgTypes[i].get();
-        if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy)) {
+        // OVH-005: an untyped literal argument acquires 'int32' directly --
+        // see untypedLiteralAcquiresInt32()'s own doc comment. Matters most
+        // here since int32 exists specifically for `extern fn` ABI
+        // declarations (F-NUM-5), the overwhelmingly common place a
+        // parameter is actually declared int32.
+        if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
+            !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy)) &&
+            !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy)) {
           AllOk = false;
           break;
         }
@@ -415,6 +572,9 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
 
     Node.ResolvedCallTarget = Best;
 
+    // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
+    checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc());
+
     // If Best's return type mentions one of its own generic type parameters
     // (e.g. `fn<T> firstElem(arr: T[]): T`), report the CONCRETE type it was
     // instantiated to at this call site instead of the literal declared
@@ -425,6 +585,55 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     int SubstCheckCount = std::min(ArgCount, Best->arity());
     for (int i = 0; i < SubstCheckCount; ++i)
       collectGenericSubstitution(Best->Params[i].Type, ArgTypes[i], Subst);
+
+    // TYPE-002 (S11b): persist onto the node instead of letting Subst go
+    // out of scope unread -- see FuncCallExprAST::GenericSubstitution's
+    // doc comment (ASTAccess.h). Only when non-empty: an empty map means
+    // this call isn't generic at all, and is not an instantiation request.
+    if (!Subst.empty()) {
+      Node.GenericSubstitution = Subst;
+      // Report-only: feed the (opt-in, --dump-instantiations) collector.
+      // A no-op whenever MonoCollector_ is null -- every ordinary compile.
+      if (MonoCollector_) {
+        std::vector<std::string> Order;
+        for (int i = 0; i < SubstCheckCount; ++i)
+          collectGenericParamNameOrder(Best->Params[i].Type, Order);
+        std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
+        // TYPE-002 (S14a): only a FULLY CONCRETE substitution is a real
+        // instantiation request -- found live, not anticipated: a generic
+        // function calling ANOTHER generic function through its own STILL-
+        // OPEN type parameter (`fn<T> outer(x: T): T { return inner(x); }`,
+        // checked as part of `outer`'s own un-substituted TEMPLATE body,
+        // before outer is ever cloned) unifies inner's T against outer's
+        // OWN T -- a non-empty but NOT concrete "substitution" (one open
+        // parameter mapped to another). Harmless under erasure (the
+        // resulting bogus "inner<T>" clone was dead code nothing called,
+        // and getLLVMType(TurfGenericParamType) silently returned ptr) --
+        // but a hard INV-GEN-1 assertion failure once erasure is deleted,
+        // since that bogus clone's own literal TurfGenericParamType
+        // parameter now reaches Codegen for real. See
+        // isFullyConcreteType()'s own doc comment (TypeCheckerInternal.h).
+        bool AllConcrete = true;
+        for (const auto &A : TypeArgs)
+          if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }
+        if (AllConcrete) {
+          // Best->BaseName, not CalleeName: for an ordinary free function
+          // call the two always agree, but for `Box::new(...)` (a
+          // constructor call routed through this same free-function path --
+          // see the Resolver's "self-stripped candidate" comment above)
+          // CalleeName is the user-facing spelled name "new" while the real
+          // declaration Best resolved to is named "Box.new" -- the ONLY name
+          // the monomorphizer's declaration registry (built from
+          // FuncDefExprAST::getName(), Monomorphize.cpp) can ever find it
+          // under. Found live: `Box::new(42)` failed with "no generic
+          // declaration found for 'new'" before this fix.
+          MonoCollector_->record({Monomorphize::InstantiationKind::FreeFunction,
+                                 Best->BaseName, Best->SourceModule,
+                                 std::move(TypeArgs), Node.getLoc()},
+                                &Node);
+        }
+      }
+    }
 
     setType(&Node, substituteReturnType(Best->ReturnType, Subst));
     return;
@@ -533,7 +742,9 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
     for (int i = 0; i < ArgCount; ++i) {
       const TurfType *ParamTy = C->Params[i + 1].Type.get();
       const TurfType *ArgTy = ArgTypes[i].get();
-      if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy)) {
+      // OVH-005: see the identical exception in visitFuncCall() above.
+      if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
+          !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy)) {
         AllOk = false;
         break;
       }
@@ -579,6 +790,11 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
 
   Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
   Node.ResolvedViaUFCS = true;
+  // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
+  // ParamOffset=1 skips the receiver slot (Params[0]), which has no
+  // corresponding entry in Node.getArgs() -- the explicit args start at
+  // Params[1], per this function's own receiver-binding comments above.
+  checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc(), 1);
   setType(&Node, Best->ReturnType);
   return true;
 }
@@ -660,7 +876,10 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
       for (int i = 0; i < ArgCount; ++i) {
         const TurfType *ParamTy = Cand->Params[i].Type.get();
         const TurfType *ArgTy   = ArgTypes[i].get();
-        if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy)) {
+        // OVH-005: see the identical exception in visitFuncCall() above.
+        if (ParamTy && ArgTy && !typesCompatible(ArgTy, ParamTy) &&
+            !(Cand->IsExtern && isExternStringToPtrCoercion(ArgTy, ParamTy)) &&
+            !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy)) {
           AllOk = false;
           break;
         }
@@ -709,6 +928,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
     // deleter because the symbol is owned by the ResolverSymbolTable; we
     // just need an owning handle that Codegen can call ->mangledName() on.
     Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
+    // SEM-002 -- see visitVarDecl()'s identical comment (TypeCheckerDecl.cpp).
+    checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc());
     setType(&Node, Best->ReturnType);
     return;
   }
@@ -755,6 +976,40 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           BaseTy = GlobalSymbolTable->LookupType(NT->getName());
       }
     }
+    // Snapshot BaseTy here, BEFORE the bare-name GenericType->TurfStructType
+    // lookup just below replaces it with the un-parameterized template type
+    // -- this is the last point where BaseTy can still be a genuine
+    // `GenericType` carrying real type arguments. The struct-generic-
+    // substitution recovery further down (`Subst`) needs exactly this value
+    // for a `self`-based call: `self`'s OWN declared/registered type is
+    // always `TurfPointerType(GenericType(StructName, Args))` (see the
+    // pointer-unwrap just above), never a bare GenericType, so re-deriving
+    // it there via a second, independent `getType(Node.getBase())` call (as
+    // this used to do) dynamic_casts a POINTER type to GenericType and
+    // always fails silently -- `Subst` came back permanently empty for
+    // every `self.method(...)` call specifically (an ordinary variable like
+    // `b: Box<int>` was never affected: its own type already IS a bare
+    // GenericType with no pointer wrapper to strip). This stayed invisible
+    // whenever the CALLEE's own parameters happened to independently
+    // mention the struct's type parameter (`MethodOwnSubst`, built below
+    // from matching the callee's declared param types against the caller's
+    // already-concrete arguments, filled the exact same map entries through
+    // an unrelated path) -- it only surfaced as a real, user-reachable bug
+    // for a generic-struct method whose parameters DON'T mention the
+    // struct's type parameter at all (e.g. `fn<T> Box.bar(x: int): int`)
+    // called via `self.bar(...)` from a sibling method: both substitution
+    // sources came back empty, `CombinedSubst` was empty, the Method-kind
+    // instantiation request was never recorded, no clone was ever
+    // generated, and Codegen failed with "Internal error: LLVM function
+    // '...' not found after successful name resolution" trying to call a
+    // function that was never built. Minimal repro:
+    // `struct Box<T> { v: T } fn<T> Box.bar(x: int): int { return 0; }
+    // fn<T> Box.foo(x: int): int { return self.bar(x); }` -- confirmed to
+    // reproduce with a non-generic-struct comparison
+    // (`lib/std/json/json.tr`'s `Parser.skip_ws()`, called the identical
+    // way from a sibling method, unaffected) ruling out every other
+    // explanation first.
+    TurfTypePtr UnwrappedGenericBaseTy = BaseTy;
     // Resolve GenericType (e.g. a `Box<int>`-typed variable) to its
     // underlying TurfStructType via the base name -- mirrors the NamedType
     // resolution just above. Without this, calling a method on a generic
@@ -886,7 +1141,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         // doc comment below Subst's use for the full story on why this
         // scan-the-fields recovery technique is needed at all.
         std::unordered_map<std::string, TurfTypePtr> Subst;
-        if (auto *GT = dynamic_cast<const GenericType *>(getType(Node.getBase()).get())) {
+        if (auto *GT = dynamic_cast<const GenericType *>(UnwrappedGenericBaseTy.get())) {
           const auto &TypeArgs = GT->getTypeArgs();
           std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
             if (!FTy || Subst.size() >= TypeArgs.size()) return;
@@ -902,6 +1157,17 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
               Scan(PT->getPointee());
             } else if (isArrayType(FTy.get())) {
               Scan(dynamic_cast<const ArrayType *>(FTy.get())->getElementTypePtr());
+            } else if (auto *NestedGT = dynamic_cast<const GenericType *>(FTy.get())) {
+              // TYPE-002 (S15/D4): a field whose OWN declared type is
+              // ANOTHER generic instantiation at the same type parameter
+              // (`struct Outer<T> { inner: Inner<T> }`) was invisible to
+              // this scan -- none of the branches above match a bare
+              // GenericType, so `self.inner`'s own T never got recovered
+              // and Inner's genuinely-substituted type argument was lost.
+              // Recurse into its own type-argument list the same way a
+              // pointer/array wrapper already does.
+              for (const auto &NestedArg : NestedGT->getTypeArgs())
+                Scan(NestedArg);
             }
           };
           for (const auto &F : STy->getFields())
@@ -935,7 +1201,9 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
             TurfTypePtr ParamTy = C->Params[i + ParamOffset].Type;
             if (!Subst.empty())
               ParamTy = substituteReturnType(ParamTy, Subst);
-            if (ParamTy && ArgTypes[i] && !typesCompatible(ArgTypes[i].get(), ParamTy.get())) {
+            // OVH-005: see the identical exception in visitFuncCall() above.
+            if (ParamTy && ArgTypes[i] && !typesCompatible(ArgTypes[i].get(), ParamTy.get()) &&
+                !untypedLiteralAcquiresInt32(Node.getArgs()[i].get(), ParamTy.get())) {
               AllOk = false;
               break;
             }
@@ -978,6 +1246,11 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         if (!TypeMatches.empty()) {
           const ResolverFunctionSymbol *Best = TypeMatches[0];
           Node.ResolvedCallTarget = std::make_shared<ResolverFunctionSymbol>(*Best);
+          // SEM-002 -- see visitVarDecl()'s identical comment
+          // (TypeCheckerDecl.cpp). Same ParamOffset (skip 'self' for an
+          // instance method) as the type-compatibility filter just above.
+          checkCallArgsRepresentable(Node.getArgs(), Best->Params, Node.getLoc(),
+                                     IsStaticMethod ? 0 : 1);
 
           // Calling a method that mutates self through an immutable
           // variable was previously silently allowed -- direct field
@@ -1030,22 +1303,169 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // wrapping) in declaration order and pairing each distinct name
           // found with GT's type args positionally.
           //
-          // NamedType, not TurfGenericParamType: GlobalSymbolTable's
-          // registered TurfStructType for a generic struct is constructed
-          // once, at PARSE time (ParseStructDecl), directly from the
-          // as-parsed Fields -- it is a SEPARATE object from the
-          // StructDeclExprAST AST node that Resolver::visitStructDecl()
-          // later mutates in place (substituting NamedType("T") ->
-          // TurfGenericParamType("T")). That mutation updates the AST
-          // node's own copy only; nothing propagates it back into
-          // GlobalSymbolTable's already-constructed TurfStructType, so its
-          // fields are permanently stuck with the original NamedType("T").
-          // This is exact for every generic struct in this language's
-          // stdlib today (all single-type-parameter), though not fully
-          // general for a hypothetical multi-parameter struct whose fields
-          // don't happen to mention every parameter in declaration order.
-          if (!Subst.empty()) {
-            setType(&Node, substituteReturnType(Best->ReturnType, Subst));
+          // TurfGenericParamType, as of OVH-006 -- Resolver::visitStructDecl()
+          // now re-registers GlobalSymbolTable's TurfStructType for this
+          // struct with the same substituted field list it writes onto the
+          // AST node, so the Scan below hits the `GP` branch directly for an
+          // ordinary generic struct field. (Before that fix, the registered
+          // type was a SEPARATE object, built once at PARSE time directly
+          // from the as-parsed Fields and never updated, so its fields were
+          // permanently stuck as NamedType("T") -- the `NT` branch below,
+          // which survives as a defensive fallback, used to be the one that
+          // actually fired; see OVH-006's change record for the live bug
+          // that produced and the fix.) Positional pairing (declaration
+          // order, first-occurrence-per-name) is exact for every generic
+          // struct in this language's stdlib today (all single-type-
+          // parameter), though not fully general for a hypothetical
+          // multi-parameter struct whose fields don't happen to mention
+          // every parameter in declaration order.
+          // TYPE-002 (S14a): a method generic IN ITS OWN RIGHT
+          // (`fn<T> Box.echo(x: T): T`) needs a SEPARATE substitution from
+          // Subst above -- Subst only ever recovers the STRUCT's own
+          // generic parameter(s) from the receiver's GenericType (empty
+          // for a non-generic struct like Box). This unifies the METHOD's
+          // OWN parameter types (already TurfGenericParamType-typed by the
+          // SAME substituteTypeParams() pass every fn<T> declaration goes
+          // through, struct-bound or not -- ResolverCore.cpp) against the
+          // ACTUAL call arguments, exactly mirroring how visitFuncCall()
+          // does this for an ordinary free function. Disclosed live in
+          // S12b as a gap this session closes: `b.echo(42)` where
+          // `b: Box` (not `Box<...>`) previously fell straight through to
+          // the plain `setType(&Node, Best->ReturnType)` path below with
+          // NO substitution at all, reporting the call's type as the
+          // literal, un-substituted TurfGenericParamType("T") instead of
+          // `int` -- a real type-checking gap, not just a monomorphization
+          // one.
+          std::unordered_map<std::string, TurfTypePtr> MethodOwnSubst;
+          {
+            int ParamOffset = IsStaticMethod ? 0 : 1;
+            for (int i = 0; i < ArgCount; ++i)
+              collectGenericSubstitution(Best->Params[i + ParamOffset].Type,
+                                         ArgTypes[i], MethodOwnSubst);
+          }
+
+          std::unordered_map<std::string, TurfTypePtr> CombinedSubst = Subst;
+          for (const auto &KV : MethodOwnSubst)
+            CombinedSubst.insert(KV);
+
+          if (!CombinedSubst.empty()) {
+            // TYPE-002 (S11b): persist onto the node -- see
+            // MethodCallExprAST::GenericSubstitution's doc comment
+            // (ASTAccess.h).
+            Node.GenericSubstitution = CombinedSubst;
+            // Report-only: feed the (opt-in) collector, a no-op when null.
+            if (MonoCollector_) {
+              // UnwrappedGenericBaseTy, not a fresh getType(Node.getBase())
+              // -- see that variable's own doc comment above (where BaseTy
+              // is unwrapped from self's pointer type) for why a second,
+              // independent re-fetch here used to silently miss a `self`-
+              // based call's real GenericType too, which -- for a callee
+              // whose own parameters don't separately reintroduce the
+              // struct's type parameter -- meant this whole request never
+              // got recorded even once CombinedSubst above was fixed to be
+              // non-empty.
+              if (auto *BaseGT = dynamic_cast<const GenericType *>(
+                      UnwrappedGenericBaseTy.get())) {
+                // Existing case (S12b/S13a): the RECEIVER's struct is
+                // itself generic. Two requests, not one: the RECEIVER's
+                // struct instantiation (e.g. List<int> itself must exist)
+                // and the specific method being called on it (e.g.
+                // List.push<int>) -- methods land before struct layout
+                // does, so both are worth recording now. TypeArgs is
+                // re-derived from the base expression's GenericType rather
+                // than threaded out of the `if (auto *GT = ...)` scope
+                // above it went out of scope in -- cheap, and keeps this
+                // addition from having to restructure already-working code.
+                //
+                // TYPE-002 (S14a): only recorded when FULLY CONCRETE --
+                // found live: a generic function's own body calling a
+                // method on a `List<T>`-typed value (T the FUNCTION's own,
+                // still-open type parameter) hits this same code path
+                // during the TEMPLATE's own un-substituted type-check,
+                // recording a bogus "List<T>"/"List.push<T>" request
+                // otherwise -- see isFullyConcreteType()'s own doc comment
+                // (TypeCheckerInternal.h) for the identical free-function
+                // bug this mirrors.
+                std::vector<TurfTypePtr> TypeArgsCopy = BaseGT->getTypeArgs();
+                bool AllConcrete = true;
+                for (const auto &A : TypeArgsCopy)
+                  if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }
+                if (AllConcrete) {
+                  MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
+                                         BaseGT->getBaseName(), BaseGT->getModule(),
+                                         TypeArgsCopy, Node.getLoc()},
+                                        &Node);
+
+                  // TYPE-002 (S15/D6): the METHOD-kind request's TypeArgs
+                  // must be positioned to match Best->TypeParams -- exactly
+                  // how Monomorphize.cpp's drainMethodRequests()/
+                  // cloneAndSubstituteSelfBound() pairs them against
+                  // Template->getTypeParams() at drain time -- not just the
+                  // RECEIVER's own struct type arguments. A method that
+                  // declares type parameters of its own IN ADDITION to
+                  // redeclaring the struct's (`fn<T, U> Wrap.pick(other: U):
+                  // U`) has MORE TypeParams than the struct alone provides;
+                  // using TypeArgsCopy verbatim there silently dropped every
+                  // extra one (U stayed an un-substituted
+                  // TurfGenericParamType, tripping INV-GEN-1's assertion at
+                  // drain time -- see the change record's D6 entry). Falls
+                  // back to the struct-only TypeArgsCopy when TypeParams
+                  // doesn't name anything beyond what BaseGT already
+                  // provides (the common case, unchanged behaviour) or if
+                  // CombinedSubst is somehow missing a name (defensive; the
+                  // struct/method Subst maps built above are the ONLY
+                  // sources CombinedSubst is assembled from, so every name
+                  // in Best->TypeParams is expected to be present).
+                  std::vector<TurfTypePtr> MethodTypeArgs = TypeArgsCopy;
+                  if (Best->TypeParams.size() > TypeArgsCopy.size()) {
+                    std::vector<TurfTypePtr> Extended;
+                    Extended.reserve(Best->TypeParams.size());
+                    bool AllFound = true;
+                    for (const auto &Name : Best->TypeParams) {
+                      auto It = CombinedSubst.find(Name);
+                      if (It == CombinedSubst.end()) { AllFound = false; break; }
+                      Extended.push_back(It->second);
+                    }
+                    if (AllFound)
+                      MethodTypeArgs = std::move(Extended);
+                  }
+                  bool MethodArgsConcrete = true;
+                  for (const auto &A : MethodTypeArgs)
+                    if (!isFullyConcreteType(A.get())) { MethodArgsConcrete = false; break; }
+                  if (MethodArgsConcrete)
+                    MonoCollector_->record({Monomorphize::InstantiationKind::Method,
+                                           StructName + "." + MethodName,
+                                           Best->SourceModule, std::move(MethodTypeArgs),
+                                           Node.getLoc()},
+                                          &Node);
+                }
+              } else if (!MethodOwnSubst.empty()) {
+                // New case (S14a): the receiver ISN'T a GenericType (Box
+                // isn't generic), but the METHOD has its own type
+                // parameters -- record using the METHOD's OWN ordered
+                // TypeArgs (collectGenericParamNameOrder() recovers
+                // declaration order the same way visitFuncCall() does for
+                // an ordinary free function). No Struct-kind request: Box
+                // itself needs no per-instantiation layout, only its
+                // method does. Same concreteness gate as above, same reason.
+                std::vector<std::string> Order;
+                int ParamOffset = IsStaticMethod ? 0 : 1;
+                for (int i = 0; i < ArgCount; ++i)
+                  collectGenericParamNameOrder(Best->Params[i + ParamOffset].Type, Order);
+                std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, MethodOwnSubst);
+                bool AllConcrete = true;
+                for (const auto &A : TypeArgs)
+                  if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }
+                if (AllConcrete) {
+                  MonoCollector_->record({Monomorphize::InstantiationKind::Method,
+                                         StructName + "." + MethodName,
+                                         Best->SourceModule, std::move(TypeArgs),
+                                         Node.getLoc()},
+                                        &Node);
+                }
+              }
+            }
+            setType(&Node, substituteReturnType(Best->ReturnType, CombinedSubst));
             return;
           }
 
@@ -1222,6 +1642,30 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   if (!IsSelfBase)
     checkUnsafeGate(BaseTy.get(), Node.getLoc(), &Node);
 
+  // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `err.message` --
+  // `err`'s type (AnyErrorType) is never a struct, so this must be checked
+  // BEFORE the struct-field machinery below, which would otherwise fall
+  // through to "Cannot access field on non-struct type". Deliberately
+  // scoped to AnyErrorType ONLY (not TurfUserErrorType) -- `err` inside
+  // `recover as err run { ... }` is the sole way a user ever gets a value
+  // to inspect (errors_and_recover.md §1.4.3); reading `.message` directly
+  // off a bare `ErrorType::Variant("msg")` construction, with no `err`
+  // binding involved, is not part of this scope.
+  if (BaseTy && BaseTy->isAnyError()) {
+    if (Node.getFieldName() == "message") {
+      setType(&Node, TurfString());
+    } else {
+      reportError(Node.getNameLoc(),
+                  "An error value has no field '" + Node.getFieldName() +
+                      "' -- only 'message' is readable.",
+                  {}, "Use '.message' to read the string attached at "
+                      "'ErrorType::Variant(\"...\")' construction.",
+                  "No such field on an error value!");
+      setType(&Node, TurfString());
+    }
+    return;
+  }
+
   // Unwrap pointer-to-struct (e.g. self in method bodies)
   if (BaseTy) {
     if (auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy.get()))
@@ -1251,6 +1695,38 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   if (BaseTy) {
     if (auto *GT0 = dynamic_cast<const GenericType *>(BaseTy.get()))
       GenericTypeArgs = GT0->getTypeArgs();
+  }
+  // TYPE-002 (S13b): a direct field access on a GenericType-typed base is
+  // ALSO a struct instantiation request, not just a VarDeclExprAST's own
+  // declared type (TypeCheckerDecl.cpp's visitVarDecl) or a method call's
+  // receiver (visitMethodCall, just above) -- e.g. `struct Holder { items:
+  // List<int> }` then `h.items.data` with NO method ever called on `items`
+  // and no separate `List<int>`-typed variable declared anywhere else.
+  // Without this, drainStructRequests() (S13a) never drains this specific
+  // instantiation, so CodegenStruct.cpp's now-per-instantiation field
+  // access (this session, below) finds nothing registered under its
+  // mangled name and falls through to the "Cannot access field on
+  // non-struct type" diagnostic on a program that used to compile fine.
+  // Mirrors visitMethodCall()'s identical recording just above -- same
+  // absorb-a-duplicate-into-the-existing-entry behaviour via
+  // InstantiationCollector::record(), so this costs nothing when the SAME
+  // instantiation was already requested elsewhere.
+  if (MonoCollector_ && BaseTy) {
+    if (auto *GT0 = dynamic_cast<const GenericType *>(BaseTy.get())) {
+      // TYPE-002 (S14a): only recorded when FULLY CONCRETE -- see
+      // isFullyConcreteType()'s own doc comment (TypeCheckerInternal.h) for
+      // why a non-concrete "substitution" (a still-open type parameter,
+      // reached while type-checking a generic template's own body before
+      // it's ever cloned) must never be recorded as a real instantiation.
+      bool AllConcrete = true;
+      for (const auto &A : GT0->getTypeArgs())
+        if (!isFullyConcreteType(A.get())) { AllConcrete = false; break; }
+      if (AllConcrete)
+        MonoCollector_->record({Monomorphize::InstantiationKind::Struct,
+                               GT0->getBaseName(), GT0->getModule(),
+                               GT0->getTypeArgs(), Node.getLoc()},
+                            &Node);
+    }
   }
   if (BaseTy) {
     if (auto *GT = dynamic_cast<const GenericType *>(BaseTy.get())) {
@@ -1286,11 +1762,10 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
       // field's declared type -- e.g. `data: T*` on a List<Entry>-typed
       // base must report `Entry*`, not the bare, unsubstituted `T*`.
       // Mirrors visitMethodCall()'s identical Subst-recovery technique
-      // (scan every field for a NamedType/TurfGenericParamType name that
-      // isn't a known struct/enum elsewhere -- see that function's own
-      // doc comment for why GlobalSymbolTable's copy of a generic
-      // struct's fields is permanently stuck unsubstituted). Without
-      // this, `someList.data[0].value`'s type came back as the generic
+      // (scan every field for a TurfGenericParamType/NamedType name --
+      // see that function's own doc comment for why the NamedType branch
+      // is a defensive fallback, not the common case, since OVH-006).
+      // Without this, `someList.data[0].value`'s type came back as the generic
       // placeholder instead of the real field type, and something
       // depending on the real type downstream (e.g. `printline`'s
       // overload pick) silently chose the wrong one instead of erroring
@@ -1313,6 +1788,13 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
             Scan(PT->getPointee());
           } else if (isArrayType(FTy.get())) {
             Scan(dynamic_cast<const ArrayType *>(FTy.get())->getElementTypePtr());
+          } else if (auto *NestedGT = dynamic_cast<const GenericType *>(FTy.get())) {
+            // TYPE-002 (S15/D4): see visitMethodCall()'s identical fix --
+            // a field declared as ANOTHER generic instantiation
+            // (`struct Outer<T> { inner: Inner<T> }`) was invisible to this
+            // scan, so `self.inner`'s own T never got recovered here either.
+            for (const auto &NestedArg : NestedGT->getTypeArgs())
+              Scan(NestedArg);
           }
         };
         for (const auto &F : STy->getFields())
@@ -1341,8 +1823,8 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
 
 
 // True if every path through `E` diverges (ends in `return`/`break`/
-// `continue`) -- used to enforce Errors.md's "recover run { ... }` must not
-// silently fall through" rule. Deliberately a direct, non-interprocedural
+// `continue`) -- used to enforce errors_and_recover.md's "recover run { ... }`
+// must not silently fall through" rule. Deliberately a direct, non-interprocedural
 // structural check (same spirit/limitations as Resolver's MutatesSelfField
 // -- see its doc comment) rather than a full CFG reachability analysis:
 // only these three are recognized as diverging, so a block that only
@@ -1414,8 +1896,8 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
       const_cast<ExprAST *>(Node.getProduceExpr())->accept(*this);
     TurfTypePtr ProduceTy = getType(Node.getProduceExpr());
     // "A recover block must evaluate to the function's success type"
-    // (Errors.md) -- e.g. `writeFile(...) recover produce 42;` is invalid
-    // when writeFile's success type is void, exactly like the doc's own
+    // (errors_and_recover.md) -- e.g. `writeFile(...) recover produce 42;` is
+    // invalid when writeFile's success type is void, exactly like the doc's own
     // example: typesCompatible() already rejects int-vs-void generically,
     // no special-casing needed here.
     if (ProduceTy && SuccessTy && !typesCompatible(ProduceTy.get(), SuccessTy.get())) {
@@ -1425,12 +1907,12 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
                       SuccessTy->getName() + "'.");
     }
   } else {
-    // Run / AsRun: per docs/planning/Errors.md, a block that doesn't
-    // `produce` a value must diverge on every path instead -- otherwise
+    // Run / AsRun: per docs/architecture/errors_and_recover.md, a block that
+    // doesn't `produce` a value must diverge on every path instead -- otherwise
     // there's no value for the recovered expression to have. EXCEPT when the
-    // success type is `void`: Errors.md's own worked example shows a plain
-    // `writeFile(...) recover run { io::printline("Write failed."); };` (no
-    // 'return' at all) as explicitly VALID for a `!void` function -- there's
+    // success type is `void`: errors_and_recover.md's own worked example shows
+    // a plain `writeFile(...) recover run { io::printline("Write failed."); };`
+    // (no 'return' at all) as explicitly VALID for a `!void` function -- there's
     // no value needed in that case, so simply running the block and falling
     // through is fine; only a non-void success type actually needs a value
     // to come from somewhere.
@@ -1472,10 +1954,10 @@ void TypeChecker::visitScopeAccess(ScopeAccessExprAST &Node) {
     return;
   }
 
-  // `ErrorType::Variant` (docs/planning/Errors.md) -- covers both the bare,
-  // payload-less reference (this node visited directly as an expression)
-  // and this node as the callee of a FuncCallExprAST construction (the
-  // CALL's own type comes from ResolvedCandidates/ResolvedCallTarget
+  // `ErrorType::Variant` (docs/architecture/errors_and_recover.md) -- covers
+  // both the bare, payload-less reference (this node visited directly as an
+  // expression) and this node as the callee of a FuncCallExprAST construction
+  // (the CALL's own type comes from ResolvedCandidates/ResolvedCallTarget
   // instead, same as any other call -- this just gives the callee itself
   // SOME type too, harmlessly, exactly like the comment above already
   // describes for ModuleFunctionRef/StaticMethodRef).
@@ -1513,6 +1995,55 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
 
   // Result is the element type of the base array
   TurfTypePtr BaseTy = getType(Node.getBase());
+  TurfTypePtr IndexTy = getType(Node.getIndex());
+
+  // `unsafe { }` gate (OVH-003): indexing into a raw ptr/T* base is a
+  // "dereference" exactly like visitFieldAccess()'s `p.field` gate below it
+  // -- there was no equivalent check here at all before this fix (2.7's own
+  // "Known gaps" list named it explicitly), so `someList.data[i] = v;`
+  // compiled with no `unsafe { }` and no capability, silently reaching an
+  // out-of-bounds write from ordinary safe code the moment `i` was bad.
+  // Mirrors visitFieldAccess()'s self-exemption verbatim: `self` is always
+  // non-null by construction and a reserved token, so a VariableExprAST
+  // base literally named "self" unambiguously is the method receiver, not
+  // a name collision to worry about. A struct/string/array base never
+  // `isRawPointer()`, so this is a no-op for every non-pointer case above
+  // and below (operator[] overloads, T[N] arrays, string indexing).
+  bool IsSelfBase = false;
+  if (const auto *BaseVar = dynamic_cast<const VariableExprAST *>(Node.getBase()))
+    IsSelfBase = BaseVar->getName() == "self";
+  if (!IsSelfBase)
+    checkUnsafeGate(BaseTy.get(), Node.getLoc(), &Node);
+
+  // ── operator[] overload resolution (LANG-001) ────────────────────────────
+  // Checked BEFORE the builtin array/string/pointer dispatch below, mirrors
+  // visitBinary()'s identical ordering rationale: a struct base can never
+  // ALSO be a real array/pointer/string, so there is no ambiguity to
+  // resolve between the two paths -- exactly one of them can ever apply to
+  // a given BaseTy. Exact-type-match only (F-OP-1).
+  if (!Node.ResolvedIndexGetCandidates.empty() && BaseTy && IndexTy) {
+    for (const auto &C : Node.ResolvedIndexGetCandidates) {
+      if (!C || C->arity() != 2)
+        continue;
+      if (operatorSelfOperandMatches(C->Params[0].Type.get(), BaseTy.get()) &&
+          sameTypeExact(C->Params[1].Type.get(), IndexTy.get())) {
+        if (Node.ResolvedIndexGetTarget) {
+          reportError(Node.getLoc(),
+                      "Ambiguous 'operator[](" + BaseTy->getName() + ", " +
+                          IndexTy->getName() +
+                          ")' call: more than one visible overload matches "
+                          "at this call site.");
+          break;
+        }
+        Node.ResolvedIndexGetTarget = C;
+      }
+    }
+    if (Node.ResolvedIndexGetTarget) {
+      setType(&Node, Node.ResolvedIndexGetTarget->ReturnType);
+      return;
+    }
+  }
+
   if (BaseTy && BaseTy->isArray()) {
     const auto *ArrTy = dynamic_cast<const ArrayType *>(BaseTy.get());
     TurfTypePtr ElemTy = ArrTy ? ArrTy->getElementTypePtr() : nullptr;

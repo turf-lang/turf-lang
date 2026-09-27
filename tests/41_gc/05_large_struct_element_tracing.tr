@@ -1,0 +1,84 @@
+// tests/41_gc/05_large_struct_element_tracing.tr
+// OVH-001 (docs/planning/OVERHAUL_REMAINING_WORK.md): `Big`'s layout is
+// { tag1: string (word 0, a pointer field WITHIN the old fixed 64-word
+// cap), f0..f68: int (words 1-69), name: string (word 70, a pointer field
+// PAST the old cap -- byte offset 560, TurfTypeDesc.pointer_word_bitmap
+// was a single uint64_t that could never represent a bit past word 63).
+//
+// Before this fix, getOrCreateElementTurfTypeDesc()'s per-element
+// descriptor for `List<Big>`'s backing buffer silently dropped word 70's
+// bit, so gc_scan_block_precise() (turfrt_gc.c) never traced INTO `name`
+// -- the string it points at would be swept the moment nothing else roots
+// it, even though `tag1` (word 0, well inside the old cap) survived
+// correctly and gave no hint anything was wrong. Both pointer fields are
+// checked here so a regression that breaks EITHER half -- the in-range
+// one or the newly-widened one -- is caught.
+
+import list::List;
+import strings;
+import test;
+import io;
+
+struct Big {
+    tag1: string,
+    f0: int, f1: int, f2: int, f3: int, f4: int, f5: int, f6: int, f7: int, f8: int, f9: int, f10: int, f11: int, f12: int, f13: int, f14: int, f15: int, f16: int, f17: int, f18: int, f19: int, f20: int, f21: int, f22: int, f23: int, f24: int, f25: int, f26: int, f27: int, f28: int, f29: int, f30: int, f31: int, f32: int, f33: int, f34: int, f35: int, f36: int, f37: int, f38: int, f39: int, f40: int, f41: int, f42: int, f43: int, f44: int, f45: int, f46: int, f47: int, f48: int, f49: int, f50: int, f51: int, f52: int, f53: int, f54: int, f55: int, f56: int, f57: int, f58: int, f59: int, f60: int, f61: int, f62: int, f63: int, f64: int, f65: int, f66: int, f67: int, f68: int,
+    name: string
+}
+
+fn churn(depth: int): void {
+    mut buf: int[64];
+    buf[0] = 0;
+    mut i: int = 0;
+    while i < 64 {
+        buf[i] = i * 7;
+        i = i + 1;
+    }
+    mut sum: int = 0;
+    i = 0;
+    while i < 64 {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    test::assert(sum == 14112, "churn: stack buffer round-trips correctly");
+    if depth > 0 {
+        churn(depth - 1);
+    }
+}
+
+// Builds each Big via runtime-constructed (never-literal) strings, so
+// tag1/name are genuinely fresh, separately gc_alloc'd buffers --
+// reachable, after this function returns, ONLY through List<Big>'s own
+// backing buffer (read back via `.get(i)`, OVH-003's bounds-checked
+// accessor over the identical `data: T*` field this comment used to name
+// directly), never through a surviving local of their own.
+fn build(): List<Big> {
+    mut l: List<Big> = List::default();
+    mut i: int = 0;
+    while i < 3 {
+        mut b: Big = Big::default();
+        b.tag1 = strings::repeat("t", 40);
+        b.name = strings::repeat("n", 40);
+        l.push(b);
+        i = i + 1;
+    }
+    return l;
+}
+
+fn main(): int {
+    mut l: List<Big> = build();
+
+    churn(24);
+    gc_collect();
+    churn(24);
+    gc_collect();
+
+    test::assert(l.length() == 3, "List<Big> keeps its length");
+    test::assert(strings::length(l.get(0).tag1) == 40, "element 0's word-0 pointer field (tag1) survives with correct length");
+    test::assert(strings::starts_with(l.get(0).tag1, "t"), "element 0's tag1 content survives");
+    test::assert(strings::length(l.get(0).name) == 40, "element 0's word-70 pointer field (name) survives with correct length -- OVH-001's actual reproducer");
+    test::assert(strings::starts_with(l.get(0).name, "n"), "element 0's name content survives");
+    test::assert(strings::starts_with(l.get(2).name, "n"), "element 2's name content survives too");
+
+    io::printline("41/05 PASS: struct >64 words, both pointer fields (in-range and widened) precisely traced through a forced collection");
+    return 0;
+}

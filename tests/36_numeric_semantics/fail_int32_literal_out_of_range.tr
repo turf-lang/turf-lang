@@ -1,0 +1,20 @@
+// SEM-002 (FREEZE.md §6.2 row 3): the same representability check applies
+// to 'int32', not just 'int' -- a literal that fits 'int' comfortably but
+// exceeds int32's 32-bit signed range is still rejected, since it's
+// acquiring type 'int32' here, not 'int'.
+//
+// OVH-005 note: before that fix, this test passed for the WRONG reason --
+// `mut x: int32 = <literal>;` was unconditionally rejected as an
+// 'int -> int32' narrowing (E066, a plain type mismatch) no matter what the
+// literal's value was, so this file never actually exercised the E076
+// representability check its own comment claims. Confirmed live now: this
+// rejects with E076 ("Integer literal is not representable in type
+// 'int32'"), citing the exact value 99999999999 and int32's range -- the
+// test runner only checks "compilation failed", so this was verified
+// manually (`turf --resolve` on this file) rather than by any automated
+// per-code assertion; see the OVH-005 change record for the full before/
+// after transcript.
+fn main(): int {
+    mut x: int32 = 99999999999;
+    return 0;
+}
