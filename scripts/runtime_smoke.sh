@@ -187,8 +187,9 @@ if "$TURF" "$WORKDIR/types.tr" --emit-llvm -o "$WORKDIR/types" > /dev/null 2>&1;
   # pointer) } -- bit 2 (word 16/8) set => 4.
   check_desc "WithPointer" 24 3 "4"
   # List<int> { data: T* (@0, a pointer), len: int (@8), cap: int (@16) }
-  # -- bit 0 set => 1.
-  check_desc "List_gen1_int" 24 3 "1"
+  # -- bit 0 set => 1. Named `list.List_gen1_int`: a module-owned type's
+  # LLVM struct (and so its descriptor) is `module.Name` (FDN-003).
+  check_desc "list.List_gen1_int" 24 3 "1"
   # OVH-001: Big70 { f0..f69: int (70 * 8B = 560B), name: string (8B @560,
   # a pointer) } -- word_count = ceil(568/8) = 71, so the bitmap array has
   # ceil(71/64) = 2 words. `name`'s word index is 560/8 = 70, which falls

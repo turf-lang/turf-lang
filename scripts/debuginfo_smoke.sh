@@ -124,6 +124,58 @@ else
   echo "$GDB_OUT" | sed 's/^/       /'
 fi
 
+# FDN-003 (docs/development/changes/FDN-003.md): a type's identity is
+# (module, name), and its DWARF name is `module.Name` -- the same spelling
+# as its LLVM struct and GC descriptor (TypeIdentity::llvmName()). A
+# module-owned `Point` and a main-file `Point` must reach the debugger as two
+# differently-named types, or `ptype`/`print` would show one type's layout
+# for the other's values. Every local is initialized through a CALL: a local
+# initialized directly by `T::default()` currently gets no DWARF variable at
+# all (a pre-existing TOOL-001 gap, recorded in FDN-003.md), which would make
+# this check pass or fail for a reason unrelated to type names.
+echo -e "\n${BOLD}4. DWARF names of module-owned types (FDN-003)${RESET}"
+if [ -z "$DWARFDUMP" ]; then
+  note "no llvm-dwarfdump on PATH -- skipping, not a failure"
+else
+  cat > "$WORKDIR/shapes_module.tr" << 'EOF2'
+struct Point { x: int }
+enum Kind { A, B }
+fn origin(): Point { return Point::default(); }
+fn kind(): Kind { return Kind::B; }
+EOF2
+  cat > "$WORKDIR/names.tr" << 'EOF2'
+import shapes_module;
+struct Point { y: double }
+fn mine(): Point { return Point::default(); }
+fn main(): int {
+    mutable theirs: shapes_module::Point = shapes_module::origin();
+    mutable mine: Point = mine();
+    mutable k: shapes_module::Kind = shapes_module::kind();
+    theirs.x = 1;
+    mine.y = 2.0;
+    return theirs.x - 1;
+}
+EOF2
+  NAMES_BIN="$WORKDIR/names"
+  if ! "$TURF" "$WORKDIR/names.tr" -O0 -g -o "$NAMES_BIN" > "$WORKDIR/names.log" 2>&1; then
+    fail "FDN-003 fixture does not compile at -O0 -g:"; sed 's/^/       /' "$WORKDIR/names.log"
+  else
+    NAMES_OUT=$("$DWARFDUMP" --debug-info "$NAMES_BIN" 2>&1)
+    for want in 'shapes_module.Point' 'shapes_module.Kind' 'Point'; do
+      if echo "$NAMES_OUT" | grep -qF "DW_AT_name	(\"$want\")"; then
+        pass "DWARF names the type '$want'"
+      else
+        fail "no DWARF type named '$want'"
+      fi
+    done
+    if "$DWARFDUMP" --verify "$NAMES_BIN" 2>&1 | grep -q "No errors."; then
+      pass "$DWARFDUMP --verify: no errors with same-named types in two modules"
+    else
+      fail "$DWARFDUMP --verify found problems in the FDN-003 fixture"
+    fi
+  fi
+fi
+
 echo
 if [ $FAILED -eq 0 ]; then
   echo -e "${GREEN}${BOLD}debuginfo_smoke: clean.${RESET} -g output verifies and gdb can debug it."

@@ -994,8 +994,11 @@ Value *StructDeclExprAST::codegen() {
     }
   }
   if (!ST) {
-    // Brand-new opaque struct — no body yet.
-    ST = StructType::create(*TheContext, Name);
+    // Brand-new opaque struct — no body yet. Named `M.Name` for a module-
+    // owned type (FDN-003, TypeIdentity::llvmName()); LLVMTypeCache below
+    // stays keyed by the identity itself. The GC descriptor's symbol and
+    // runtime-visible name are both derived from this LLVM name.
+    ST = StructType::create(*TheContext, TypeIdentity::llvmName(Name));
     if (!ST) {
       LogErrorAt(Loc, "Failed to create LLVM StructType for '" + Name + "'", SLM::ErrorCategory::GENERAL);
       return nullptr;

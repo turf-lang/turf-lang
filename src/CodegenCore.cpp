@@ -610,7 +610,8 @@ llvm::Type *getLLVMType(const TurfType *T) {
   if (auto *ST = dynamic_cast<const TurfStructType *>(T)) {
     // If we reach here, StructDecl codegen hasn't happened or it failed.
     // We'll return an opaque struct to avoid crashing.
-    return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, Key);
+    return LLVMTypeCache[Key] = llvm::StructType::create(
+               *TheContext, TypeIdentity::llvmName(Key));
   }
 
   // TYPE-002 (S14a): erasure is gone -- INV-GEN-1 (INVARIANTS.md): after
@@ -668,7 +669,8 @@ llvm::Type *getLLVMType(const TurfType *T) {
     // anyway, this stub at least isolates the damage to ONE instantiation's
     // own (permanently opaque) type instead of corrupting a DIFFERENT
     // instantiation's real layout the way sharing the base name used to.
-    llvm::StructType *Stub = llvm::StructType::create(*TheContext, MangledName);
+    llvm::StructType *Stub =
+        llvm::StructType::create(*TheContext, TypeIdentity::llvmName(MangledName));
     LLVMTypeCache[MangledName] = Stub;
     return LLVMTypeCache[Key] = Stub;
   }
@@ -721,7 +723,8 @@ llvm::Type *getLLVMType(const TurfType *T) {
       return CacheIt->second;
     // Not yet registered — create a forward-declared opaque struct so the
     // function type can be built; StructDeclExprAST::codegen will fill it in.
-    return LLVMTypeCache[Key] = llvm::StructType::create(*TheContext, Key);
+    return LLVMTypeCache[Key] = llvm::StructType::create(
+               *TheContext, TypeIdentity::llvmName(Key));
   }
 
   // Unknown / future types
@@ -2078,7 +2081,8 @@ DIType *getDebugType(const TurfType *T) {
     DINodeArray Elements = DBuilder->getOrCreateArray(Enumerators);
     DIFile *File = DebugCU ? DebugCU->getFile() : nullptr;
     return DebugTypeCache[Key] = DBuilder->createEnumerationType(
-              DebugCU, ET->getName(), File, 0, 64, 0, Elements, UnderlyingTy);
+              DebugCU, TypeIdentity::llvmName(ET->getName()), File, 0, 64, 0,
+              Elements, UnderlyingTy);
   }
 
   // Structs -- built lazily here (not at struct-declaration Codegen time)
@@ -2098,8 +2102,11 @@ DIType *getDebugType(const TurfType *T) {
     llvm::Type *LLVMTy = getLLVMType(T);
     auto *LLVMStructTy = dyn_cast<llvm::StructType>(LLVMTy);
     DIFile *File = DebugCU ? DebugCU->getFile() : nullptr;
+    // FDN-003: `M.Name` for a module-owned type, the same spelling as its
+    // LLVM struct and GC descriptor (TypeIdentity::llvmName()).
+    const std::string DebugName = TypeIdentity::llvmName(ST->getName());
     DICompositeType *Stub = DBuilder->createReplaceableCompositeType(
-        dwarf::DW_TAG_structure_type, ST->getName(), DebugCU, File, 0);
+        dwarf::DW_TAG_structure_type, DebugName, DebugCU, File, 0);
     DebugTypeCache[Key] = Stub;
 
     if (!LLVMStructTy || LLVMStructTy->isOpaque()) {
@@ -2131,7 +2138,7 @@ DIType *getDebugType(const TurfType *T) {
     DINodeArray Elements = DBuilder->getOrCreateArray(Members);
     uint64_t TotalBits = Layout->getSizeInBits().getFixedValue();
     DICompositeType *Full = DBuilder->createStructType(
-        DebugCU, ST->getName(), File, 0, TotalBits, 0, DINode::FlagZero,
+        DebugCU, DebugName, File, 0, TotalBits, 0, DINode::FlagZero,
         nullptr, Elements);
     DBuilder->replaceTemporary(llvm::TempDICompositeType(Stub), Full);
     return DebugTypeCache[Key] = Full;
@@ -2143,7 +2150,8 @@ DIType *getDebugType(const TurfType *T) {
   // type a debugger could usefully name; TOOL-001's own completion
   // criteria (a breakpoint, a backtrace, printing an ordinary local) don't
   // need more than "some plausibly-named thing" for these.
-  return DebugTypeCache[Key] = DBuilder->createUnspecifiedType(T->getName());
+  return DebugTypeCache[Key] =
+             DBuilder->createUnspecifiedType(TypeIdentity::llvmName(T->getName()));
 }
 
 
