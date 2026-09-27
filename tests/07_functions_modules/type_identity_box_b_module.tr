@@ -1,0 +1,30 @@
+// Companion module for type_identity_generic_args_across_modules.tr -- see
+// type_identity_box_a_module.tr. Fields deliberately reordered and padded so
+// a mixed-up instantiation reads the wrong offsets.
+struct Box<T> {
+    tag: int,
+    val: T,
+    extra: int
+}
+
+fn<T> Box.new(v: T): void {
+    self.val = v;
+    self.tag = 2;
+    self.extra = 99;
+}
+
+fn<T> Box.get(): T {
+    return self.val;
+}
+
+struct Item {
+    s: string,
+    n: int
+}
+
+fn item(n: int): Item {
+    mut i: Item = Item::default();
+    i.n = n;
+    i.s = "b";
+    return i;
+}

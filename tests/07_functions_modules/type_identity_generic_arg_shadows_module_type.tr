@@ -1,0 +1,37 @@
+// FDN-003: a monomorphized clone is resolved in its TEMPLATE's module
+// (resolveMonomorphizedClone(), Resolver.h). This module declares its own
+// `Node`; this file declares a different `Node` and instantiates the
+// module's generics with it. Inside each clone, `T` must stay THIS file's
+// `Node` while the clone's own `Node` field/local stays the module's --
+// re-reading the substituted `T` in the module's scope would silently turn
+// it into the module's same-spelled, differently-laid-out `Node`.
+
+import test;
+import type_identity_holder_module;
+
+struct Node {
+    s: string
+}
+
+fn main(): int {
+    mut n: Node = Node::default();
+    n.s = "main";
+
+    mut h: type_identity_holder_module::Holder<Node> =
+        type_identity_holder_module::Holder::new(n);
+    test::assert(h.get().s == "main", "T stays the main file's Node");
+    test::assert(h.ownBig() == 42, "the clone's own field stays the module's Node");
+    test::assert(typeof(h.get()) == "Node", "typeof the substituted T");
+    test::assert(typeof(h) == "type_identity_holder_module::Holder<Node>", "typeof the instantiation");
+    test::assert(type_identity_holder_module::localMix(n) == 5, "generic fn: local module Node vs T");
+
+    // T inferred from a construction's result type -- a type the
+    // TypeChecker synthesizes, not one a source annotation spelled.
+    test::assert(type_identity_holder_module::localMix(Node::default()) == 5,
+                 "T inferred from Node::default()");
+    mut h2: type_identity_holder_module::Holder<Node> =
+        type_identity_holder_module::Holder::new(Node::default());
+    test::assert(h2.ownBig() == 42, "Holder::new(Node::default())");
+    test::assert(h2.get().s == "", "zero-initialized main Node string");
+    return 0;
+}

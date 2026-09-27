@@ -1,0 +1,26 @@
+// Companion module for type_identity_generic_args_across_modules.tr
+// (FDN-003): a generic `Box<T>` and a plain `Item`, both also declared --
+// with different layouts -- by type_identity_box_b_module.tr.
+struct Box<T> {
+    val: T,
+    tag: int
+}
+
+fn<T> Box.new(v: T): void {
+    self.val = v;
+    self.tag = 1;
+}
+
+fn<T> Box.get(): T {
+    return self.val;
+}
+
+struct Item {
+    n: int
+}
+
+fn item(n: int): Item {
+    mut i: Item = Item::default();
+    i.n = n;
+    return i;
+}

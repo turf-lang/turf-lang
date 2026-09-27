@@ -1,0 +1,12 @@
+// FDN-003 + INV-LAYOUT-1: the struct-layout cycle check runs in Pass 1 on
+// field types, and a module's field types must already be resolved to
+// identities by then (`Q` inside the module is `type_identity_cycle_module::Q`).
+// If they were still spellings, the edge `P -> Q` would look for a
+// main-file `Q`, find nothing, and the cycle would reach Codegen (where a
+// by-value cycle has no finite size). Rejected with E069.
+
+import type_identity_cycle_module;
+
+fn main(): int {
+    return 0;
+}

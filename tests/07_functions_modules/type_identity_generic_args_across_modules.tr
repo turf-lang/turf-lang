@@ -1,0 +1,29 @@
+// FDN-003: `a::Box<b::Item>` and `b::Box<a::Item>` are two different
+// instantiations of two different templates over two different argument
+// types -- each needs its own monomorphized struct and methods. The clone
+// names, LLVM struct names and GC descriptors are all derived from the
+// identities (`type_identity_box_a_module::Box_gen1_...`), so the four
+// same-spelled types can never share one.
+
+import test;
+import type_identity_box_a_module;
+import type_identity_box_b_module;
+
+fn main(): int {
+    mut x: type_identity_box_a_module::Box<type_identity_box_b_module::Item> =
+        type_identity_box_a_module::Box::new(type_identity_box_b_module::item(5));
+    mut y: type_identity_box_b_module::Box<type_identity_box_a_module::Item> =
+        type_identity_box_b_module::Box::new(type_identity_box_a_module::item(6));
+
+    test::assert(x.tag == 1, "a::Box layout");
+    test::assert(y.tag == 2, "b::Box layout");
+    test::assert(y.extra == 99, "b::Box extra field");
+    test::assert(x.get().n == 5, "a::Box<b::Item>.get()");
+    test::assert(x.get().s == "b", "b::Item string field through a::Box");
+    test::assert(y.get().n == 6, "b::Box<a::Item>.get()");
+    test::assert(typeof(x) == "type_identity_box_a_module::Box<type_identity_box_b_module::Item>",
+                 "typeof a::Box<b::Item>");
+    test::assert(typeof(y) == "type_identity_box_b_module::Box<type_identity_box_a_module::Item>",
+                 "typeof b::Box<a::Item>");
+    return 0;
+}

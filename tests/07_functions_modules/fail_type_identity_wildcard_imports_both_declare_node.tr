@@ -1,0 +1,12 @@
+// FDN-003: two wildcard imports whose modules BOTH declare `Node`, `Mode`
+// and `Oops` are rejected at the second import (E024
+// ImportSymbolCollisionError, the same rule as for two same-named
+// functions), naming both modules. The same-named types are distinct types
+// now, but a bare spelling in this file could still only mean one of them.
+
+import type_identity_node_a_module::[*];
+import type_identity_node_b_module::[*];
+
+fn main(): int {
+    return 0;
+}

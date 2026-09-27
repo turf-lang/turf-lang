@@ -1,0 +1,18 @@
+// FDN-003: E085 through an explicit single-symbol import rather than a
+// wildcard -- `import M::Node;` plus this file's own `Node` make the bare
+// spelling ambiguous exactly the same way (see
+// fail_type_identity_ambiguous_wildcard_vs_local.tr). Here the ambiguous use
+// is a construction, not a type annotation: `Node::default()`'s `Node` goes
+// through the Resolver's `Left::Right` path, a separate code path from
+// validateNamedType().
+
+import type_identity_node_a_module::Node;
+
+struct Node {
+    s: string
+}
+
+fn main(): int {
+    mut n = Node::default();
+    return 0;
+}
