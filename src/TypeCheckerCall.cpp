@@ -26,10 +26,10 @@
 #include "TypeCheckerInternal.h"
 
 #include "Monomorphize.h" // TYPE-002 (S11b): report-only instantiation collector
+#include "TypeWalk.h" // SMP-002: shared unify()/collectParamOrder() walkers
 
 #include <algorithm>
 #include <cassert>
-#include <functional>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -144,120 +144,17 @@ static bool isExternStringToPtrCoercion(const TurfType *ArgTy,
 
 // ─── Functions & calls ────────────────────────────────────────────────────────
 
-/**
- * @brief Walk a candidate's declared parameter type against the actual
- *        argument type passed at a call site, recording any bare
- *        TurfGenericParamType encountered into @p Subst (keyed by its name).
- *
- * Recurses through pointer/array wrapping on both sides in lockstep (T* vs
- * concrete*, T[] vs concrete[]) so a generic parameter used underneath a
- * wrapper still gets unified correctly. The first argument position that
- * mentions a given generic parameter name wins; later positions mentioning
- * the same name are not re-unified (good enough for this compiler's actual
- * generic surface, where a type parameter typically appears in exactly one
- * "shape" per signature — see Resolver::substituteTypeParams()'s doc
- * comment for the parallel, opposite-direction transform this mirrors).
- */
-static void collectGenericSubstitution(
-    const TurfTypePtr &ParamTy, const TurfTypePtr &ArgTy,
-    std::unordered_map<std::string, TurfTypePtr> &Subst) {
-  if (!ParamTy || !ArgTy)
-    return;
-
-  if (const auto *GP = dynamic_cast<const TurfGenericParamType *>(ParamTy.get())) {
-    Subst.emplace(GP->getName(), ArgTy);
-    return;
-  }
-  if (const auto *PPtr = dynamic_cast<const TurfPointerType *>(ParamTy.get())) {
-    if (const auto *APtr = dynamic_cast<const TurfPointerType *>(ArgTy.get()))
-      collectGenericSubstitution(PPtr->getPointee(), APtr->getPointee(), Subst);
-    return;
-  }
-  if (isArrayType(ParamTy.get()) && isArrayType(ArgTy.get())) {
-    const auto *PArr = dynamic_cast<const ArrayType *>(ParamTy.get());
-    const auto *AArr = dynamic_cast<const ArrayType *>(ArgTy.get());
-    if (PArr && AArr)
-      collectGenericSubstitution(PArr->getElementTypePtr(),
-                                 AArr->getElementTypePtr(), Subst);
-    return;
-  }
-  if (const auto *PGen = dynamic_cast<const GenericType *>(ParamTy.get())) {
-    if (const auto *AGen = dynamic_cast<const GenericType *>(ArgTy.get())) {
-      const auto &PArgs = PGen->getTypeArgs();
-      const auto &AArgs = AGen->getTypeArgs();
-      for (size_t i = 0; i < PArgs.size() && i < AArgs.size(); ++i)
-        collectGenericSubstitution(PArgs[i], AArgs[i], Subst);
-    }
-    return;
-  }
-  // STD-003: a callback parameter's own signature (`cmp: fn(T, T): int`)
-  // never recursed into here either -- see Types.cpp's identical FuncType
-  // addition to typesCompatible() (this function's sibling: that one
-  // decides IF a candidate matches, this one decides what T ACTUALLY WAS at
-  // this call site once a candidate is accepted). Each parameter position
-  // and the return type recurse the same way pointer/array/generic-argument
-  // wrapping already does above.
-  if (const auto *PFunc = dynamic_cast<const FuncType *>(ParamTy.get())) {
-    if (const auto *AFunc = dynamic_cast<const FuncType *>(ArgTy.get())) {
-      const auto &PParams = PFunc->getParamTypes();
-      const auto &AParams = AFunc->getParamTypes();
-      for (size_t i = 0; i < PParams.size() && i < AParams.size(); ++i)
-        collectGenericSubstitution(PParams[i], AParams[i], Subst);
-      collectGenericSubstitution(PFunc->getReturnType(), AFunc->getReturnType(), Subst);
-    }
-    return;
-  }
-}
-
-/**
- * @brief TYPE-002 (S11b): recover a CANONICAL, declaration-order list of
- *        generic type-parameter names from a declared parameter type,
- *        mirroring collectGenericSubstitution()'s own recursive walk.
- *
- * Subst (built by collectGenericSubstitution(), above) is an
- * unordered_map -- its iteration order is not the declaration order and is
- * not even guaranteed stable across equivalent runs. An instantiation
- * request needs a canonical, ORDERED type-argument tuple (two requests for
- * the same instantiation must produce index-comparable vectors, not just
- * the same set of pairs), so this walks the same param-type shape a
- * second time purely to recover the order names were first seen in --
- * exactly how collectGenericSubstitution() itself decided insertion order,
- * just captured explicitly instead of thrown away.
- */
-static void collectGenericParamNameOrder(const TurfTypePtr &ParamTy,
-                                         std::vector<std::string> &Order) {
-  if (!ParamTy)
-    return;
-  if (const auto *GP = dynamic_cast<const TurfGenericParamType *>(ParamTy.get())) {
-    if (std::find(Order.begin(), Order.end(), GP->getName()) == Order.end())
-      Order.push_back(GP->getName());
-    return;
-  }
-  if (const auto *PPtr = dynamic_cast<const TurfPointerType *>(ParamTy.get())) {
-    collectGenericParamNameOrder(PPtr->getPointee(), Order);
-    return;
-  }
-  if (isArrayType(ParamTy.get())) {
-    if (const auto *Arr = dynamic_cast<const ArrayType *>(ParamTy.get()))
-      collectGenericParamNameOrder(Arr->getElementTypePtr(), Order);
-    return;
-  }
-  if (const auto *PGen = dynamic_cast<const GenericType *>(ParamTy.get())) {
-    for (const auto &A : PGen->getTypeArgs())
-      collectGenericParamNameOrder(A, Order);
-    return;
-  }
-  if (const auto *PFunc = dynamic_cast<const FuncType *>(ParamTy.get())) {
-    for (const auto &P : PFunc->getParamTypes())
-      collectGenericParamNameOrder(P, Order);
-    collectGenericParamNameOrder(PFunc->getReturnType(), Order);
-    return;
-  }
-}
+// SMP-002: this file used to hand-roll its own pair of recursive walkers
+// here (collectGenericSubstitution()/collectGenericParamNameOrder()) --
+// now replaced everywhere below by the shared TypeWalk::unify()/
+// TypeWalk::collectParamOrder() (TypeWalk.h), same signatures, same
+// behaviour (first-occurrence-wins binding, no structural-mismatch error --
+// see TypeWalk::unify()'s own doc comment for why this is a best-effort
+// binder, not a second compatibility oracle).
 
 /// TYPE-002 (S11b): turn a (possibly partial) Subst map into the ordered
 /// TypeArgs vector an InstantiationRequest needs, using CanonicalOrder
-/// (from collectGenericParamNameOrder() above) to fix the index order. A
+/// (from TypeWalk::collectParamOrder() above) to fix the index order. A
 /// name in CanonicalOrder with no Subst entry (a return-only phantom type
 /// parameter that never appeared in any argument position) is skipped --
 /// the request is still meaningful over the parameters that DID resolve.
@@ -578,13 +475,13 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     // If Best's return type mentions one of its own generic type parameters
     // (e.g. `fn<T> firstElem(arr: T[]): T`), report the CONCRETE type it was
     // instantiated to at this call site instead of the literal declared
-    // TurfGenericParamType -- see collectGenericSubstitution()'s doc comment
+    // TurfGenericParamType -- see TypeWalk::unify()'s doc comment (TypeWalk.h)
     // for the gap this closes. A no-op (empty substitution map) for the
     // overwhelming majority of calls, which aren't generic at all.
     std::unordered_map<std::string, TurfTypePtr> Subst;
     int SubstCheckCount = std::min(ArgCount, Best->arity());
     for (int i = 0; i < SubstCheckCount; ++i)
-      collectGenericSubstitution(Best->Params[i].Type, ArgTypes[i], Subst);
+      TypeWalk::unify(Best->Params[i].Type, ArgTypes[i], Subst);
 
     // TYPE-002 (S11b): persist onto the node instead of letting Subst go
     // out of scope unread -- see FuncCallExprAST::GenericSubstitution's
@@ -597,7 +494,7 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
       if (MonoCollector_) {
         std::vector<std::string> Order;
         for (int i = 0; i < SubstCheckCount; ++i)
-          collectGenericParamNameOrder(Best->Params[i].Type, Order);
+          TypeWalk::collectParamOrder(Best->Params[i].Type, Order);
         std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, Subst);
         // TYPE-002 (S14a): only a FULLY CONCRETE substitution is a real
         // instantiation request -- found live, not anticipated: a generic
@@ -1143,35 +1040,12 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         std::unordered_map<std::string, TurfTypePtr> Subst;
         if (auto *GT = dynamic_cast<const GenericType *>(UnwrappedGenericBaseTy.get())) {
           const auto &TypeArgs = GT->getTypeArgs();
-          std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
-            if (!FTy || Subst.size() >= TypeArgs.size()) return;
-            if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
-              if (!Subst.count(GP->getName()))
-                Subst.emplace(GP->getName(), TypeArgs[Subst.size()]);
-            } else if (auto *NT = dynamic_cast<const NamedType *>(FTy.get())) {
-              bool KnownElsewhere = GlobalSymbolTable &&
-                                   GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
-              if (!KnownElsewhere && !Subst.count(NT->getName()))
-                Subst.emplace(NT->getName(), TypeArgs[Subst.size()]);
-            } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
-              Scan(PT->getPointee());
-            } else if (isArrayType(FTy.get())) {
-              Scan(dynamic_cast<const ArrayType *>(FTy.get())->getElementTypePtr());
-            } else if (auto *NestedGT = dynamic_cast<const GenericType *>(FTy.get())) {
-              // TYPE-002 (S15/D4): a field whose OWN declared type is
-              // ANOTHER generic instantiation at the same type parameter
-              // (`struct Outer<T> { inner: Inner<T> }`) was invisible to
-              // this scan -- none of the branches above match a bare
-              // GenericType, so `self.inner`'s own T never got recovered
-              // and Inner's genuinely-substituted type argument was lost.
-              // Recurse into its own type-argument list the same way a
-              // pointer/array wrapper already does.
-              for (const auto &NestedArg : NestedGT->getTypeArgs())
-                Scan(NestedArg);
-            }
-          };
           for (const auto &F : STy->getFields())
-            Scan(F.Type);
+            TypeWalk::collectOrderedFieldSubstitution(
+                F.Type, TypeArgs, Subst,
+                [](const std::string &Name) {
+                  return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
+                });
         }
 
         // Arity: struct methods have `self` as first param, user args = arity - 1 (unless static)
@@ -1289,7 +1163,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // `fn<T> List.pop(): T` must report `int`, not the literal
           // TurfGenericParamType("T"), the same call-site-inference gap
           // fixed for free functions in visitFuncCall() (see
-          // collectGenericSubstitution()/substituteReturnType() above), but
+          // TypeWalk::unify()/substituteReturnType() above), but
           // via a different substitution SOURCE: a struct method's `self`
           // parameter is declared as a bare `StructName*` with no type
           // arguments of its own (see ParseFuncDef's self-parameter
@@ -1340,8 +1214,8 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           {
             int ParamOffset = IsStaticMethod ? 0 : 1;
             for (int i = 0; i < ArgCount; ++i)
-              collectGenericSubstitution(Best->Params[i + ParamOffset].Type,
-                                         ArgTypes[i], MethodOwnSubst);
+              TypeWalk::unify(Best->Params[i + ParamOffset].Type,
+                              ArgTypes[i], MethodOwnSubst);
           }
 
           std::unordered_map<std::string, TurfTypePtr> CombinedSubst = Subst;
@@ -1443,7 +1317,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
                 // New case (S14a): the receiver ISN'T a GenericType (Box
                 // isn't generic), but the METHOD has its own type
                 // parameters -- record using the METHOD's OWN ordered
-                // TypeArgs (collectGenericParamNameOrder() recovers
+                // TypeArgs (TypeWalk::collectParamOrder() recovers
                 // declaration order the same way visitFuncCall() does for
                 // an ordinary free function). No Struct-kind request: Box
                 // itself needs no per-instantiation layout, only its
@@ -1451,7 +1325,7 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
                 std::vector<std::string> Order;
                 int ParamOffset = IsStaticMethod ? 0 : 1;
                 for (int i = 0; i < ArgCount; ++i)
-                  collectGenericParamNameOrder(Best->Params[i + ParamOffset].Type, Order);
+                  TypeWalk::collectParamOrder(Best->Params[i + ParamOffset].Type, Order);
                 std::vector<TurfTypePtr> TypeArgs = orderedTypeArgs(Order, MethodOwnSubst);
                 bool AllConcrete = true;
                 for (const auto &A : TypeArgs)
@@ -1774,31 +1648,12 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
       // helper visitMethodCall() already uses for return types.
       if (FieldTy && !GenericTypeArgs.empty()) {
         std::unordered_map<std::string, TurfTypePtr> Subst;
-        std::function<void(const TurfTypePtr &)> Scan = [&](const TurfTypePtr &FTy) {
-          if (!FTy || Subst.size() >= GenericTypeArgs.size()) return;
-          if (auto *GP = dynamic_cast<const TurfGenericParamType *>(FTy.get())) {
-            if (!Subst.count(GP->getName()))
-              Subst.emplace(GP->getName(), GenericTypeArgs[Subst.size()]);
-          } else if (auto *NT = dynamic_cast<const NamedType *>(FTy.get())) {
-            bool KnownElsewhere = GlobalSymbolTable &&
-                                 GlobalSymbolTable->LookupType(NT->getName()) != nullptr;
-            if (!KnownElsewhere && !Subst.count(NT->getName()))
-              Subst.emplace(NT->getName(), GenericTypeArgs[Subst.size()]);
-          } else if (auto *PT = dynamic_cast<const TurfPointerType *>(FTy.get())) {
-            Scan(PT->getPointee());
-          } else if (isArrayType(FTy.get())) {
-            Scan(dynamic_cast<const ArrayType *>(FTy.get())->getElementTypePtr());
-          } else if (auto *NestedGT = dynamic_cast<const GenericType *>(FTy.get())) {
-            // TYPE-002 (S15/D4): see visitMethodCall()'s identical fix --
-            // a field declared as ANOTHER generic instantiation
-            // (`struct Outer<T> { inner: Inner<T> }`) was invisible to this
-            // scan, so `self.inner`'s own T never got recovered here either.
-            for (const auto &NestedArg : NestedGT->getTypeArgs())
-              Scan(NestedArg);
-          }
-        };
         for (const auto &F : STy->getFields())
-          Scan(F.Type);
+          TypeWalk::collectOrderedFieldSubstitution(
+              F.Type, GenericTypeArgs, Subst,
+              [](const std::string &Name) {
+                return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
+              });
         if (!Subst.empty())
           FieldTy = substituteReturnType(FieldTy, Subst);
       }
