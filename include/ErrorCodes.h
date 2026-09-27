@@ -179,6 +179,16 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // could mean two visible types (the file's own and an imported one) now
     // that type identity is (module, name) rather than one global namespace.
     {"E085", "AmbiguousTypeReferenceError", "Ambiguous type reference", SLM::ErrorCategory::DECLARATION},
+
+    // FDN-002 (docs/development/changes/FDN-002.md): EscapePass's one
+    // diagnostic -- a Stack-provenance reference (points into the current
+    // function's own frame) proven to flow into a return, a field of a
+    // longer-lived object, a collection mutator/operator[]=, or heap()'s
+    // own operand. Marked Important: "why can't I return &local" is exactly
+    // the non-obvious-lifetime-rule case this flag exists for (same
+    // reasoning as the raw-pointer/recursion examples in this file's own
+    // header comment).
+    {"E086", "DanglingReferenceEscapeError", "Dangling reference escape", SLM::ErrorCategory::MEMORY_ERROR, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

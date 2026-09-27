@@ -108,4 +108,41 @@ public:
   void runOnCFG(CFG &Cfg);
 };
 
+// FDN-002 (docs/planning/ROADMAP_v2.0.0.md; FREEZE.md §6.13, F-MEM-5): an
+// intraprocedural, conservative FORWARD dataflow pass -- structurally the
+// same shape as NullabilityPass just above (one std::unordered_map per
+// block, meet = "keep an entry only where every predecessor agrees",
+// transfer = process a block's statements in order) -- that tracks, for
+// every reference-typed (&T/&?T/self/a raw pointer) or unsized-array (T[])
+// PARAMETER/local, WHERE the value it currently holds points to: its
+// provenance. A reference into THIS function's own stack storage must never
+// be smuggled out through a return, a field of a longer-lived (Param- or
+// Heap-owned) object, a collection mutator/`operator[]=`, or heap()'s own
+// operand -- each would silently dangle the moment this frame pops (the
+// audit's F-16).
+//
+// Three tracked states, in `RefProvenance` below; a symbol ABSENT from the
+// current block's map is the fourth, permissive default -- Unknown, exactly
+// like NonNullSet's "absence means not proven" convention. Unknown is NEVER
+// flagged: this pass only ever raises DanglingReferenceEscapeError for a
+// value it has POSITIVELY proven is Stack-provenance, never for one it
+// merely failed to classify (see EscapePass.cpp's classifyProvenance() doc
+// comment for the exact, deliberately small set of expression shapes this
+// covers, and docs/development/changes/FDN-002.md's "Known pitfalls" for
+// the residual gap this leaves: a reference smuggled out inside a by-value
+// struct copy, or through an intermediate function call, is NOT caught).
+//
+// A Param- or Heap-provenance value is always allowed to flow anywhere,
+// including a return -- this pass has no interprocedural summaries (a
+// deliberate Non-goal, Overhaul §0.6's "small language" constraint), so it
+// extends the SAME trust ordinary reference-parameter semantics already
+// grant (the caller is responsible for what it hands in) rather than trying
+// to verify further up the call chain.
+enum class RefProvenance { Stack, Param, Heap };
+
+class EscapePass {
+public:
+  void runOnCFG(CFG &Cfg);
+};
+
 #endif

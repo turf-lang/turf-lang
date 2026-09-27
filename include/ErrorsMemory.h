@@ -82,6 +82,36 @@ public:
 // binding `err` to compare it against anything is pointless. Determined by scanning the
 // callee's own `return` statements for which declared error types it can
 // actually produce (Resolver::CollectReturnedErrorTypeNames).
+// FDN-002 (docs/planning/ROADMAP_v2.0.0.md; FREEZE.md §6.13, F-MEM-5):
+// EscapePass's one diagnostic -- raised at each of the five sinks
+// (EscapePass's own doc comment, Analysis.h) when the value flowing in has
+// been POSITIVELY proven Stack-provenance (points into the current
+// function's own frame). `SinkDescription` names the specific sink in the
+// message ("returned", "stored into a field that outlives this function",
+// "pushed into a collection", "boxed with heap()") so the same class covers
+// every sink without a diagnostic subclass per sink -- mirrors how
+// UseAfterFreeError/DoubleFreeError just above share one MEMORY_ERROR
+// category for the same class of mistake (using a reference whose validity
+// this function cannot vouch for past its own return).
+class DanglingReferenceEscapeError : public TurfError {
+public:
+  DanglingReferenceEscapeError(SourceLocation Loc,
+                               const std::string &SinkDescription)
+      : TurfError(Loc,
+                  Colors::BRIGHT_RED +
+                      "A reference into this function's own local storage "
+                      "can't be " + Colors::CYAN + SinkDescription +
+                      Colors::BRIGHT_RED +
+                      " -- it would dangle the moment this function returns."
+                      + Colors::RESET,
+                  "heap(value) copies it onto the GC heap first and gives "
+                  "you back a reference that outlives this function; or "
+                  "return/store a reference you received as a parameter "
+                  "instead of a local's.") {
+    Category_ = SLM::ErrorCategory::MEMORY_ERROR;
+  }
+};
+
 class BareErrorAsBindingError : public TurfError {
 public:
   BareErrorAsBindingError(SourceLocation Loc, const std::string &BoundName)

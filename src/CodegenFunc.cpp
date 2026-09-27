@@ -623,6 +623,16 @@ Value *FuncDefExprAST::codegen() {
     NullabilityPass NP;
     NP.runOnCFG(*CfgPtr);
 
+    // FDN-002 (docs/development/changes/FDN-002.md; FREEZE.md §6.13,
+    // F-MEM-5): reference/array escape analysis -- a Stack-provenance
+    // reference (points into THIS frame) can't reach a return, a field of a
+    // longer-lived object, a collection mutator/operator[]=, or heap()'s
+    // own operand. Same pipeline position as NullabilityPass just above:
+    // after the TypeChecker has validated every reference's STATIC shape,
+    // this is the FLOW-sensitive half.
+    EscapePass EP;
+    EP.runOnCFG(*CfgPtr);
+
     // CFG Phase 2 (Issue #186): Liveness analysis (dead stores & unused vars).
     // Collect parameter VariableSymbol* pointers to exclude from warnings.
     {

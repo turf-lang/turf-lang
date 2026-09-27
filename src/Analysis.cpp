@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
+#include <optional>
 
 // Use raw VariableSymbol* as the definiteness key.
 // VariableSymbol objects are owned by shared_ptrs attached to AST nodes and
@@ -1381,4 +1382,425 @@ void NullabilityPass::runOnCFG(CFG &Cfg) {
   // ── Step 2: report, using the fixed-point IN sets ─────────────────────────
   for (size_t b = 0; b < N; ++b)
     computeBlockOutputs(b, /*DoReport=*/true);
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// FDN-002 -- EscapePass (docs/development/changes/FDN-002.md, FREEZE.md
+// §6.13/F-MEM-5). See EscapePass's own class doc comment, Analysis.h, for
+// the rule; this is the implementation.
+// ═════════════════════════════════════════════════════════════════════════
+namespace {
+
+using ProvMap = std::unordered_map<const VariableSymbol *, RefProvenance>;
+
+// A parameter (including `self`) or unsized-array (`T[]`) parameter is the
+// only kind of symbol this pass ever gives an IMPLICIT provenance to (Param)
+// when it has no explicit entry in the current map -- everything else
+// (an ordinary local that hasn't been assigned yet on this path) is
+// genuinely Unknown until something assigns it. `Type->isPointer()` covers
+// &T/&?T (TurfReferenceType/TurfNullableReferenceType both derive from
+// TurfPointerType) and `self`/raw T* (plain TurfPointerType) uniformly --
+// see TurfReferenceType's own doc comment, Types.h, for why that hierarchy
+// exists.
+bool isUnsizedArrayParam(const VariableSymbol *Sym) {
+  if (!Sym || !Sym->IsParameter)
+    return false;
+  const auto *AT = dynamic_cast<const ArrayType *>(Sym->Type.get());
+  return AT && AT->getSize() < 0;
+}
+
+bool isTrackableHandle(const VariableSymbol *Sym) {
+  if (!Sym || !Sym->Type)
+    return false;
+  if (Sym->Type->isPointer())
+    return true; // &T, &?T, self, raw T*
+  return isUnsizedArrayParam(Sym);
+}
+
+// A cast destination that "loses" the type system's memory of where a
+// pointer aliases -- `ptr` itself, or a raw `T*` (FREEZE.md §6.6 groups
+// both in the same "raw-and-gated" row). Never true for &T/&?T, which stay
+// tracked through a widening cast.
+bool isRawPointerDest(const TurfType *T) {
+  return T && T->isPointer() && !T->isReference() && !T->isNullableReference();
+}
+
+std::optional<RefProvenance> lookupProv(const VariableSymbol *Sym,
+                                        const ProvMap &Map) {
+  if (!Sym)
+    return std::nullopt;
+  auto It = Map.find(Sym);
+  if (It != Map.end())
+    return It->second;
+  if (Sym->IsParameter && isTrackableHandle(Sym))
+    return RefProvenance::Param; // untouched parameter -- still what the caller gave us
+  return std::nullopt;
+}
+
+std::optional<RefProvenance> classifyProvenance(const ExprAST *E, const ProvMap &Map);
+
+// The operand of `&expr`, where `expr` is a (possibly nested) field access
+// chain rooted at a plain variable. Two genuinely different cases:
+//   - the ROOT variable is itself a handle (&T/&?T/self/T[] param): the
+//     address lands inside whatever THAT handle already points to, so the
+//     result is the handle's OWN provenance (tracked, or its implicit
+//     Param default) -- `&param.field` through a `param: &Node` never
+//     touches this frame's storage at all.
+//   - the ROOT variable is a plain value (a local, or a BY-VALUE parameter
+//     with no `&`): its storage IS this frame's own stack slot, so `&`
+//     anything reached through it -- the variable itself, or one of its
+//     fields -- is Stack, full stop.
+// Anything whose root isn't a plain variable at all (e.g. `&f().field`) is
+// Unknown: this pass never chases through a call's return value.
+//
+// Deliberately does NOT recurse through ArrayAccessExprAST (`&expr[i]`),
+// unlike the FieldAccessExprAST case just above -- verified live while
+// sweeping lib/std/showcase for regressions (FDN-002.md's own account):
+// `&l.data[1]` (tests/41_gc/03_interior_pointer_retention.tr) indexes
+// `l.data`, a raw `T*` that is ALWAYS itself heap-allocated (every stdlib
+// collection's backing buffer) -- the '[i]' there is pointer arithmetic
+// through an already-dereferenced handle, not an address inside the ROOT
+// variable `l`'s own stack storage, but this pass has no per-field type
+// information to tell that apart from a genuine `&fixedArr[i]` on a plain
+// local `T[N]`. Rather than guess, `&expr[i]` for ANY base is Unknown --
+// the documented residual gap (INV-MEM-3): a dangling `&localFixedArr[i]`
+// returned directly is NOT caught by this milestone.
+std::optional<RefProvenance> classifyAddressOfProvenance(const ExprAST *E,
+                                                          const ProvMap &Map) {
+  if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(E))
+    return classifyAddressOfProvenance(FA->getBase(), Map);
+  if (const auto *VE = dynamic_cast<const VariableExprAST *>(E)) {
+    const VariableSymbol *Sym = VE->getResolvedSymbol();
+    if (!Sym)
+      return std::nullopt;
+    if (isTrackableHandle(Sym))
+      return lookupProv(Sym, Map);
+    return RefProvenance::Stack; // a plain value var's OWN storage is this frame's
+  }
+  return std::nullopt;
+}
+
+// Classifies the provenance of an arbitrary expression's VALUE, when that
+// value is itself reference-shaped (an &T/&?T/raw-pointer result, or an
+// unsized-array-to-ptr cast). Deliberately a small, closed set of shapes --
+// see EscapePass's class doc comment (Analysis.h) and FDN-002.md's "Known
+// pitfalls": anything not listed here is Unknown, on purpose, never a false
+// positive.
+std::optional<RefProvenance> classifyProvenance(const ExprAST *E,
+                                                 const ProvMap &Map) {
+  if (!E)
+    return std::nullopt;
+
+  if (const auto *AO = dynamic_cast<const AddressOfExprAST *>(E))
+    return classifyAddressOfProvenance(AO->getOperand(), Map);
+
+  if (const auto *VE = dynamic_cast<const VariableExprAST *>(E))
+    return lookupProv(VE->getResolvedSymbol(), Map);
+
+  if (const auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
+    if (const auto *Callee = dynamic_cast<const VariableExprAST *>(FC->getCallee()))
+      if (Callee->getName() == "heap")
+        return RefProvenance::Heap; // FDN-001: always a fresh GC-heap block
+    return std::nullopt; // no interprocedural summaries -- an ordinary call's result is Unknown
+  }
+
+  if (const auto *CE = dynamic_cast<const CastExprAST *>(E)) {
+    std::optional<RefProvenance> Inner = classifyProvenance(CE->getOperand(), Map);
+    bool ToRawPtr = isRawPointerDest(CE->getDestType());
+    // D23 (§27, absorbed into FDN-002): casting an unsized T[] parameter to
+    // a raw pointer loses the type system's only memory of where it
+    // aliases -- treat the CAST's own result as Stack (unsafe to let
+    // escape) even though the operand itself was Param. The one exception
+    // carved out of the "raw-pointer casts exit tracking" rule just below,
+    // because THIS conversion is exactly what erases the array's aliasing
+    // information in the first place.
+    if (ToRawPtr && Inner == RefProvenance::Param) {
+      if (const auto *InnerVE = dynamic_cast<const VariableExprAST *>(CE->getOperand()))
+        if (isUnsizedArrayParam(InnerVE->getResolvedSymbol()))
+          return RefProvenance::Stack;
+    }
+    // Every other cast INTO the raw/unsafe-gated pointer world (`to ptr`,
+    // `to T*`) exits this pass's tracking entirely, regardless of the
+    // operand's own provenance -- `unsafe` is the user's own explicit
+    // opt-out of the compiler's safety net (FREEZE.md §6.6's raw-pointer
+    // row is a separate, ungoverned category), not a hole for EscapePass
+    // to keep policing. Verified live: without this,
+    // `tests/38_monomorphization/05_struct_multi_instantiation.tr`'s
+    // `ptrs.push(&pt1 to Point*)` (inside `unsafe { }`, pt1 and ptrs both
+    // local to and fully consumed within the SAME frame) false-positived --
+    // a real regression this fix removes. An ordinary &T -> &?T widening
+    // (never raw) keeps the operand's real provenance via `return Inner`.
+    if (ToRawPtr)
+      return std::nullopt;
+    return Inner;
+  }
+
+  return std::nullopt;
+}
+
+// The fixed, curated allowlist FDN-002.md's "Known pitfalls" warns about --
+// a new stdlib collection or a new mutator on an existing one needs an
+// entry added here BY HAND, or this pass silently won't check it. Matched
+// by (receiver's struct/generic base name, method name), not SourceModule
+// -- verified live while writing this: struct-bound method calls (as
+// opposed to a UFCS free-function call) resolve through a per-type method
+// table that never populates ResolverFunctionSymbol::SourceModule at all
+// (it stays "" regardless of which module declared the method), so that
+// field is USELESS for this check. The self parameter's type IS reliable:
+// `fn<T> List.push(item: T)`'s `self` is always synthesized as a raw
+// pointer to the receiver's own type (self's own exemption, FREEZE.md
+// §6.6), and FDN-003 module-scoped identity means its GenericType's
+// BaseName is qualified ("list::List<&Node>*" for `lst.push(&local)` in
+// this pass's own test, confirmed by direct inspection) -- stripping the
+// "module::" prefix leaves exactly the receiver's bare struct name, stable
+// across ordinary calls AND monomorphized generic clones alike (the clone
+// keeps the same GenericType wrapper, just with concrete type arguments).
+std::string stripModuleQualifier(const std::string &Name) {
+  size_t Pos = Name.rfind("::");
+  return Pos == std::string::npos ? Name : Name.substr(Pos + 2);
+}
+
+bool isCollectionMutatorCall(const MethodCallExprAST &Node) {
+  const ResolverFunctionSymbol *Target = Node.getResolvedCallTarget();
+  if (!Target || Target->Params.empty() || !Target->Params[0].Type)
+    return false;
+  static const std::unordered_set<std::string> MutatorNames = {
+      "push", "set", "put", "add", "enqueue"};
+  if (!MutatorNames.count(Node.getMethod()))
+    return false;
+
+  const TurfType *SelfTy = Target->Params[0].Type.get();
+  if (const auto *PtrTy = dynamic_cast<const TurfPointerType *>(SelfTy))
+    SelfTy = PtrTy->getPointee().get();
+  const auto *GT = dynamic_cast<const GenericType *>(SelfTy);
+  if (!GT)
+    return false;
+
+  static const std::unordered_set<std::string> MutatorStructs = {
+      "List", "Map", "Set", "Stack", "Queue"};
+  return MutatorStructs.count(stripModuleQualifier(GT->getBaseName()));
+}
+
+// Walks every statement, both TRANSFERRING provenance (VarDecl/plain-
+// variable Assignment) and, when DoReport, checking every sink FDN-002.md
+// lists. A recursive ASTVisitor over one statement at a time -- same shape
+// NarrowingVisitor (LANG-002, above in this file) already uses for the
+// identical reason: this codebase's existing tree-walking idiom for a CFG
+// pass, not the dynamic_cast-chain style CFG.cpp itself uses.
+class EscapeCheckVisitor : public ASTVisitor {
+  ProvMap &Map;
+  bool DoReport;
+
+  void recurse(const ExprAST *E) {
+    if (!E)
+      return;
+    const_cast<ExprAST *>(E)->accept(*this);
+  }
+
+  void flagIfStack(const ExprAST *ValueExpr, SourceLocation Loc,
+                   const std::string &SinkDescription) {
+    if (!DoReport)
+      return;
+    if (classifyProvenance(ValueExpr, Map) == RefProvenance::Stack)
+      DanglingReferenceEscapeError(Loc, SinkDescription).raise();
+  }
+
+public:
+  EscapeCheckVisitor(ProvMap &Map, bool DoReport) : Map(Map), DoReport(DoReport) {}
+
+  void visitVarDecl(VarDeclExprAST &Node) override {
+    recurse(Node.getInitializer());
+    const VariableSymbol *Sym = Node.getResolvedSymbol();
+    if (Sym && isTrackableHandle(Sym) && Node.getInitializer()) {
+      auto P = classifyProvenance(Node.getInitializer(), Map);
+      if (P)
+        Map[Sym] = *P;
+      else
+        Map.erase(Sym);
+    }
+  }
+  void visitArrayDecl(ArrayDeclExprAST &Node) override {
+    for (const auto &I : Node.getInitList())
+      recurse(I.get());
+    if (Node.getInitExpr())
+      recurse(Node.getInitExpr().get());
+  }
+  void visitAssignment(AssignmentExprAST &Node) override {
+    recurse(Node.getLHS());
+    recurse(Node.getRHS());
+
+    if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(Node.getLHS())) {
+      // Sink: storing a Stack-provenance value into a field reached through
+      // a Param- or Heap-provenance base. A base this pass can't classify
+      // (Unknown) is NOT flagged -- see the class doc comment's residual
+      // gap (a field two hops deep is one such case).
+      auto BaseProv = classifyProvenance(FA->getBase(), Map);
+      if (BaseProv == RefProvenance::Param || BaseProv == RefProvenance::Heap)
+        flagIfStack(Node.getRHS(), Node.getLoc(),
+                    "stored into a field that outlives this function");
+      return;
+    }
+    if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS())) {
+      // Sink: a real `operator[]=` dispatch (LANG-001) -- unconditional,
+      // regardless of the collection's OWN provenance, for the same reason
+      // isCollectionMutatorCall() below is unconditional (its backing
+      // storage always outlives this one expression). An ordinary built-in
+      // array/fixed-array write (no ResolvedIndexSetTarget) is NOT a sink:
+      // a stack array that never itself escapes is not made unsafe by
+      // storing a same-frame reference into it.
+      if (AA->ResolvedIndexSetTarget)
+        flagIfStack(Node.getRHS(), Node.getLoc(), "pushed into a collection");
+      return;
+    }
+    if (const auto *VE = dynamic_cast<const VariableExprAST *>(Node.getLHS())) {
+      // Ordinary reassignment -- TRANSFER, not a sink.
+      const VariableSymbol *Sym = VE->getResolvedSymbol();
+      if (Sym && isTrackableHandle(Sym)) {
+        auto P = classifyProvenance(Node.getRHS(), Map);
+        if (P)
+          Map[Sym] = *P;
+        else
+          Map.erase(Sym);
+      }
+    }
+  }
+  void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override {
+    recurse(Node.getLHS());
+    recurse(Node.getRHS());
+  }
+  void visitReturn(ReturnExprAST &Node) override {
+    recurse(Node.getVal());
+    if (Node.getVal())
+      flagIfStack(Node.getVal(), Node.getLoc(), "returned");
+  }
+  void visitFuncCall(FuncCallExprAST &Node) override {
+    recurse(Node.getCallee());
+    for (const auto &A : Node.getArgs())
+      recurse(A.get());
+    // Sink: heap()'s own operand. Only ever fires when the operand is
+    // ITSELF reference-shaped (heap(&local), or heap(x) where x is already
+    // a &T/&?T/raw pointer) -- classifyProvenance() returns Unknown for a
+    // plain by-value struct/primitive operand, which is exactly right: this
+    // pass does not track provenance through a struct's OWN fields (the
+    // documented residual gap), so `heap(structWithADanglingField)` is not
+    // caught here.
+    if (DoReport) {
+      if (const auto *Callee = dynamic_cast<const VariableExprAST *>(Node.getCallee()))
+        if (Callee->getName() == "heap" && !Node.getArgs().empty())
+          flagIfStack(Node.getArgs()[0].get(), Node.getLoc(), "boxed with heap()");
+    }
+  }
+  void visitMethodCall(MethodCallExprAST &Node) override {
+    recurse(Node.getBase());
+    for (const auto &A : Node.getArgs())
+      recurse(A.get());
+    if (DoReport && isCollectionMutatorCall(Node)) {
+      for (const auto &A : Node.getArgs())
+        flagIfStack(A.get(), Node.getLoc(), "pushed into a collection");
+    }
+  }
+  void visitPostfixExpr(PostfixExprAST &Node) override { recurse(Node.getOperand()); }
+  void visitUnary(UnaryExprAST &Node) override { recurse(Node.getOperand()); }
+  void visitAddressOf(AddressOfExprAST &Node) override { recurse(Node.getOperand()); }
+  void visitCast(CastExprAST &Node) override { recurse(Node.getOperand()); }
+  void visitBinary(BinaryExprAST &Node) override {
+    recurse(Node.getLHS());
+    recurse(Node.getRHS());
+  }
+  void visitFieldAccess(FieldAccessExprAST &Node) override { recurse(Node.getBase()); }
+  void visitArrayAccess(ArrayAccessExprAST &Node) override {
+    recurse(Node.getBase());
+    recurse(Node.getIndex());
+  }
+  void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
+    for (const auto &E : Node.getElements())
+      recurse(E.get());
+  }
+  void visitCompare(CompareExprAST &Node) override {
+    recurse(Node.getSubject());
+    for (const auto &Arm : Node.getArms()) {
+      for (const auto &V : Arm.Values)
+        recurse(V.get());
+      recurse(Arm.Body.get());
+    }
+    recurse(Node.getOtherBody());
+  }
+};
+
+ProvMap meetProv(const ProvMap &A, const ProvMap &B) {
+  ProvMap R;
+  for (const auto &KV : A) {
+    auto It = B.find(KV.first);
+    if (It != B.end() && It->second == KV.second)
+      R.emplace(KV.first, KV.second);
+  }
+  return R;
+}
+
+} // namespace
+
+void EscapePass::runOnCFG(CFG &Cfg) {
+  const auto &Blocks = Cfg.getBlocks();
+  size_t N = Blocks.size();
+  if (N == 0)
+    return;
+
+  std::unordered_map<const TurfBasicBlock *, size_t> index;
+  for (size_t i = 0; i < N; ++i)
+    index[Blocks[i].get()] = i;
+
+  TurfBasicBlock *Entry = Cfg.getEntryBlock();
+  size_t entryIdx = Entry ? index[Entry] : 0;
+
+  std::vector<ProvMap> IN(N), OUT(N);
+
+  auto computeOut = [&](size_t b, bool DoReport) {
+    ProvMap Cur = IN[b];
+    for (ExprAST *Stmt : Blocks[b]->getStatements()) {
+      if (!Stmt)
+        continue;
+      EscapeCheckVisitor V(Cur, DoReport);
+      const_cast<ExprAST *>(static_cast<const ExprAST *>(Stmt))->accept(V);
+    }
+    OUT[b] = std::move(Cur);
+  };
+
+  // ── Step 1: silent dataflow to a fixed point ──────────────────────────────
+  for (size_t i = 0; i < N; ++i)
+    computeOut(i, /*DoReport=*/false);
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t b = 0; b < N; ++b) {
+      if (b == entryIdx)
+        continue;
+
+      ProvMap newIN;
+      bool first = true;
+      bool hasPred = false;
+      for (size_t p = 0; p < N; ++p) {
+        const auto &Succs = Blocks[p]->getSuccessors();
+        for (auto *S : Succs) {
+          if (!index.count(S) || index.at(S) != b)
+            continue;
+          hasPred = true;
+          newIN = first ? OUT[p] : meetProv(newIN, OUT[p]);
+          first = false;
+        }
+      }
+      if (!hasPred)
+        continue;
+
+      if (newIN != IN[b]) {
+        IN[b] = std::move(newIN);
+        computeOut(b, /*DoReport=*/false);
+        changed = true;
+      }
+    }
+  }
+
+  // ── Step 2: report, using the fixed-point IN sets ─────────────────────────
+  for (size_t b = 0; b < N; ++b)
+    computeOut(b, /*DoReport=*/true);
 }
