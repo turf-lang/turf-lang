@@ -26,6 +26,7 @@
 #include "TypeCheckerInternal.h"
 
 #include "Monomorphize.h" // TYPE-002 (S11b): report-only instantiation collector
+#include "TypeWalk.h" // SMP-002: shared containsOpenParam() walker
 
 #include "llvm/ADT/SmallString.h" // OVH-014: folded-immut-constant decimal rendering
 
@@ -68,33 +69,25 @@
 // External linkage (TypeCheckerInternal.h), not anonymous-namespace-local:
 // TypeCheckerCall.cpp's visitFuncCall/visitMethodCall need this too, as of
 // S14a -- see isFullyConcreteType()'s own doc comment just below for why.
+// SMP-002: thin wrapper over the shared walker (TypeWalk.h). The
+// NamedType-fallback logic (Resolver::validateNamedType() already
+// guarantees, for every field of an already-declared struct, that a bare
+// field NamedType's name is exactly one of: a known primitive, a registered
+// struct/enum/error type, or one of the enclosing struct's OWN generic type
+// parameters -- anything else is already a compile error at
+// struct-declaration time -- so a name that is neither a primitive nor
+// globally registered can only be the third case) now lives once, in
+// TypeWalk::containsOpenParam()'s own NamedType branch; this call site
+// supplies `GlobalSymbolTable->LookupType()` as the registry lookup.
+// ParamScope::ThroughWrappers is this function's exact original scope: it
+// never looked inside a GenericType's own argument list (see
+// isFullyConcreteType()'s own comment below for why that scope needs to).
 bool isOrWrapsGenericParam(const TurfType *Ty) {
-  if (!Ty)
-    return false;
-  if (dynamic_cast<const TurfGenericParamType *>(Ty))
-    return true;
-  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty))
-    return isOrWrapsGenericParam(PT->getPointee().get());
-  if (const auto *AT = dynamic_cast<const ::ArrayType *>(Ty))
-    return isOrWrapsGenericParam(AT->getElementTypePtr().get());
-  if (const auto *NT = dynamic_cast<const NamedType *>(Ty)) {
-    // Resolver::validateNamedType() already guarantees, for every field of
-    // an already-declared struct, that a bare field NamedType's name is
-    // exactly one of: a known primitive, a registered struct/enum/error
-    // type, or one of the enclosing struct's OWN generic type parameters
-    // (anything else is already a compile error at struct-declaration
-    // time, long before a `guess` inference could ever see it) -- so a
-    // name that is neither a primitive nor globally registered can only be
-    // the third case.
-    static const std::unordered_set<std::string> KnownPrimitives = {
-        "int", "int32", "double", "bool", "char", "string", "void", "null", "ptr", "void*"};
-    if (KnownPrimitives.count(NT->getName()))
-      return false;
-    if (GlobalSymbolTable && GlobalSymbolTable->LookupType(NT->getName()))
-      return false;
-    return true;
-  }
-  return false;
+  return TypeWalk::containsOpenParam(
+      Ty, TypeWalk::ParamScope::ThroughWrappers,
+      [](const std::string &Name) {
+        return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
+      });
 }
 
 /// TYPE-002 (S11b): true when @p Ty has no open generic parameter ANYWHERE
@@ -124,20 +117,17 @@ bool isOrWrapsGenericParam(const TurfType *Ty) {
 /// TurfGenericParamType parameter trips the assertion the moment it
 /// reaches Codegen. Confirmed live via
 /// tests/38_monomorphization/03_nested_generic_call.tr.
+// SMP-002: thin wrapper. ParamScope::ThroughGenericArgs is this function's
+// exact original scope -- everything ThroughWrappers already covers, plus a
+// GenericType's own type-argument list (see this function's doc comment
+// above for why that extra reach is needed).
 bool isFullyConcreteType(const TurfType *Ty) {
-  if (!Ty || isOrWrapsGenericParam(Ty))
-    return false;
-  if (const auto *GT = dynamic_cast<const GenericType *>(Ty)) {
-    for (const auto &A : GT->getTypeArgs())
-      if (!isFullyConcreteType(A.get()))
-        return false;
-    return true;
-  }
-  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty))
-    return isFullyConcreteType(PT->getPointee().get());
-  if (const auto *AT = dynamic_cast<const ::ArrayType *>(Ty))
-    return isFullyConcreteType(AT->getElementTypePtr().get());
-  return true;
+  return Ty && !TypeWalk::containsOpenParam(
+                   Ty, TypeWalk::ParamScope::ThroughGenericArgs,
+                   [](const std::string &Name) {
+                     return GlobalSymbolTable &&
+                            GlobalSymbolTable->LookupType(Name) != nullptr;
+                   });
 }
 
 namespace {
