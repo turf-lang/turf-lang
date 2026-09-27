@@ -129,10 +129,10 @@ fi
 # as its LLVM struct and GC descriptor (TypeIdentity::llvmName()). A
 # module-owned `Point` and a main-file `Point` must reach the debugger as two
 # differently-named types, or `ptype`/`print` would show one type's layout
-# for the other's values. Every local is initialized through a CALL: a local
-# initialized directly by `T::default()` currently gets no DWARF variable at
-# all (a pre-existing TOOL-001 gap, recorded in FDN-003.md), which would make
-# this check pass or fail for a reason unrelated to type names.
+# for the other's values. `mine` is initialized directly by `Point::default()`
+# on purpose: that path used to skip the DW_TAG_variable entirely, and a
+# local typed by struct NAME used to get an unspecified debug type (no
+# fields) -- the last check here prints it through gdb.
 echo -e "\n${BOLD}4. DWARF names of module-owned types (FDN-003)${RESET}"
 if [ -z "$DWARFDUMP" ]; then
   note "no llvm-dwarfdump on PATH -- skipping, not a failure"
@@ -146,14 +146,14 @@ EOF2
   cat > "$WORKDIR/names.tr" << 'EOF2'
 import shapes_module;
 struct Point { y: double }
-fn mine(): Point { return Point::default(); }
 fn main(): int {
     mutable theirs: shapes_module::Point = shapes_module::origin();
-    mutable mine: Point = mine();
+    mutable mine: Point = Point::default();
     mutable k: shapes_module::Kind = shapes_module::kind();
     theirs.x = 1;
     mine.y = 2.0;
-    return theirs.x - 1;
+    mutable result: int = theirs.x;
+    return result - 1;
 }
 EOF2
   NAMES_BIN="$WORKDIR/names"
@@ -172,6 +172,15 @@ EOF2
       pass "$DWARFDUMP --verify: no errors with same-named types in two modules"
     else
       fail "$DWARFDUMP --verify found problems in the FDN-003 fixture"
+    fi
+    NAMES_GDB=$(gdb --batch -ex "break names.tr:10" -ex "run" \
+      -ex "print mine" -ex "print theirs" "$NAMES_BIN" 2>&1)
+    if echo "$NAMES_GDB" | grep -qE '\$1 = \{y = 2\}' &&
+       echo "$NAMES_GDB" | grep -qE '\$2 = \{x = 1\}'; then
+      pass "gdb prints a T::default()-initialized local and a module struct field-by-field"
+    else
+      fail "gdb could not print 'mine'/'theirs' with their fields -- gdb output:"
+      echo "$NAMES_GDB" | sed 's/^/       /'
     fi
   fi
 fi

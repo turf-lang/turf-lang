@@ -6,6 +6,8 @@
 #include "ResolverSymbolTable.h" // VariableSymbol — LLVM-free, safe to include here
 #include "Types.h"
 #include "llvm/IR/Value.h"
+
+namespace llvm { class AllocaInst; }
 #include <memory>
 #include <set>
 #include <string>

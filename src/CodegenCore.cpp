@@ -2025,6 +2025,27 @@ DIType *getDebugType(const TurfType *T) {
   if (T->isNamed("void"))
     return DebugTypeCache[Key] = nullptr; // DWARF: no DIType at all means void
 
+  // A struct/enum referenced BY NAME (a local's declared `Point`, a
+  // `List<int>` instantiation) is only a NamedType/GenericType here; the
+  // layout lives on the registered TurfStructType/TurfEnumType. Without this
+  // every such local fell through to the "unspecified type" catch-all at the
+  // bottom -- visible by name in a debugger, but `print p` showed nothing
+  // (the TOOL-001 gap FDN-003 recorded). A generic instantiation's struct is
+  // registered under its monomorphized name, the same lookup getLLVMType()
+  // does.
+  if (GlobalSymbolTable) {
+    TurfTypePtr Registered;
+    if (const auto *NT = dynamic_cast<const NamedType *>(T))
+      Registered = GlobalSymbolTable->LookupType(NT->getName());
+    else if (const auto *GT = dynamic_cast<const GenericType *>(T))
+      Registered = GlobalSymbolTable->LookupType(
+          Monomorphize::instantiatedDeclName(GT->getBaseName(), GT->getTypeArgs()));
+    if (Registered && Registered.get() != T &&
+        (dynamic_cast<const TurfStructType *>(Registered.get()) ||
+         dynamic_cast<const TurfEnumType *>(Registered.get())))
+      return DebugTypeCache[Key] = getDebugType(Registered.get());
+  }
+
   // `string` (FREEZE.md §6.8: "stays a NUL-terminated byte pointer") --
   // pointer to char, exactly what it actually is at the LLVM level.
   if (T->isNamed("string")) {

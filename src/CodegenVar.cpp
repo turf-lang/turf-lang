@@ -40,6 +40,36 @@
 using namespace llvm;
 
 
+void VarDeclExprAST::emitLocalDebugVariable(AllocaInst *Alloca) const {
+  // TOOL-001: `-g` local-variable debug info. NameLoc (the variable's own
+  // NAME token, distinct from Loc -- the 'mutable'/'immutable' keyword,
+  // see this class's own field doc comments in ASTDecl.h) is what a
+  // debugger should point at for "where is this local declared", matching
+  // what DuplicateDeclarationError/ShadowingWarning already use NameLoc
+  // for. Flat function-level scoping (CurrentDebugScope is always the
+  // enclosing DISubprogram, never a nested DILexicalBlock per `{ }`) is a
+  // deliberate simplification -- see docs/development/changes/TOOL-001.md's
+  // Known pitfalls: correct for TOOL-001's own completion criteria (a
+  // breakpoint, a backtrace, printing a local by name), imprecise only for
+  // a debugger's *scope-based* view of two same-named locals in sibling
+  // blocks shadowing each other. Shared by both of codegen()'s alloca
+  // paths so neither can drift from the other again.
+  if (!DBuilder || !CurrentDebugScope)
+    return;
+  DIFile *File = getOrCreateDebugFile(NameLoc.Filename.empty()
+                                          ? Loc.Filename
+                                          : NameLoc.Filename);
+  unsigned DeclLine = NameLoc.Line > 0 ? NameLoc.Line : Loc.Line;
+  DILocalVariable *LV = DBuilder->createAutoVariable(
+      CurrentDebugScope, Name, File, DeclLine, getDebugType(Type.get()),
+      /*AlwaysPreserve=*/true);
+  DBuilder->insertDeclare(
+      Alloca, LV, DBuilder->createExpression(),
+      DILocation::get(*TheContext, DeclLine, 0, CurrentDebugScope),
+      Builder->GetInsertBlock());
+}
+
+
 Value *VarDeclExprAST::codegen() {
   // `export immut` constants have no real LLVM storage at all -- Resolver
   // Pass 1 (Resolver::hoistExportedConstant) already extracted their literal
@@ -132,6 +162,13 @@ Value *VarDeclExprAST::codegen() {
       if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(Init)) {
         if (auto *SrcAlloca = llvm::dyn_cast<AllocaInst>(LI->getPointerOperand())) {
           SrcAlloca->setName(Name);
+          // This early return used to skip the debug-variable emission
+          // below entirely: under `-g`, every local initialized by
+          // `T::new(...)`/`T::default()` -- the ordinary way to make a
+          // struct -- had no DW_TAG_variable, invisible to `print`/`info
+          // locals`, while the same local initialized by any other call was
+          // fine.
+          emitLocalDebugVariable(SrcAlloca);
           if (GlobalSymbolTable)
             GlobalSymbolTable->DeclareSymbol(Name, Type, Loc, SrcAlloca);
           NamedValues[Name] = {SrcAlloca, Type};
@@ -151,31 +188,7 @@ Value *VarDeclExprAST::codegen() {
 
   Builder->CreateStore(Init, Alloca);
 
-  // TOOL-001: `-g` local-variable debug info. NameLoc (the variable's own
-  // NAME token, distinct from Loc -- the 'mutable'/'immutable' keyword,
-  // see this class's own field doc comments in ASTDecl.h) is what a
-  // debugger should point at for "where is this local declared", matching
-  // what DuplicateDeclarationError/ShadowingWarning above already use
-  // NameLoc for. Flat function-level scoping (CurrentDebugScope is always
-  // the enclosing DISubprogram, never a nested DILexicalBlock per `{ }`) is
-  // a deliberate simplification -- see docs/development/changes/TOOL-001.md's
-  // Known pitfalls: correct for TOOL-001's own completion criteria (a
-  // breakpoint, a backtrace, printing a local by name), imprecise only for
-  // a debugger's *scope-based* view of two same-named locals in sibling
-  // blocks shadowing each other.
-  if (DBuilder && CurrentDebugScope) {
-    DIFile *File = getOrCreateDebugFile(NameLoc.Filename.empty()
-                                            ? Loc.Filename
-                                            : NameLoc.Filename);
-    unsigned DeclLine = NameLoc.Line > 0 ? NameLoc.Line : Loc.Line;
-    DILocalVariable *LV = DBuilder->createAutoVariable(
-        CurrentDebugScope, Name, File, DeclLine, getDebugType(Type.get()),
-        /*AlwaysPreserve=*/true);
-    DBuilder->insertDeclare(
-        Alloca, LV, DBuilder->createExpression(),
-        DILocation::get(*TheContext, DeclLine, 0, CurrentDebugScope),
-        Builder->GetInsertBlock());
-  }
+  emitLocalDebugVariable(Alloca);
 
   // Register in symbol table
   if (GlobalSymbolTable) {

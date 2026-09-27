@@ -129,6 +129,8 @@ public:
   const VariableSymbol *getResolvedSymbol() const { return ResolvedSymbol.get(); }
 
   llvm::Value *codegen() override;
+  /// `-g` only: the DW_TAG_variable for this local, at @p Alloca (CodegenVar.cpp).
+  void emitLocalDebugVariable(llvm::AllocaInst *Alloca) const;
   void accept(ASTVisitor &V) override { V.visitVarDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     auto Cloned = std::make_unique<VarDeclExprAST>(Loc, Name, NameLoc, Type,
