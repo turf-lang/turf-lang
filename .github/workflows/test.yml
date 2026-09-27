@@ -140,7 +140,7 @@ jobs:
       # keeps out of a checkout -- a manual/local sanity script, not a CI gate.
       - name: Runtime smoke test (libturfrt link wiring, descriptors, panics)
         run: ./scripts/runtime_smoke.sh
-      - name: Manual-heap allocation smoke test (mem:: accounting)
+      - name: "Manual-heap allocation smoke test (mem:: accounting)"
         run: ./scripts/mem_smoke.sh
       - name: GC smoke test (retention, pinning, collection)
         run: ./scripts/gc_smoke.sh
