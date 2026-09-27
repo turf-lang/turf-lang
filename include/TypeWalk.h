@@ -173,6 +173,23 @@ void unify(const TurfTypePtr &Pattern, const TurfTypePtr &Concrete,
 /// not just the same set of name/type pairs. Call this on the same
 /// `Pattern` a `unify()` call already walked to recover the order its names
 /// were first seen in.
+///
+/// SMP-002 REAL BUG FIX, not just a rename: the function this replaces
+/// (`collectGenericParamNameOrder()`, TypeCheckerCall.cpp) had NO
+/// `GenericType` case at all -- an asymmetry with its sibling
+/// `collectGenericSubstitution()` (now `unify()` above), which always did.
+/// Confirmed live: a generic free function taking a generic-struct-typed
+/// parameter (`fn<T> unwrap(b: Box<T>): T`) called at two different type
+/// arguments (`unwrap(boxOfInt)`, `unwrap(boxOfDouble)`) recovered an EMPTY
+/// `Order` for that parameter either way, so both calls' instantiation
+/// requests collapsed to the same bogus `unwrap<>` (empty type-argument
+/// list) -- one request merging two call sites that need two DIFFERENT
+/// clones, corrupting the monomorphizer's per-instantiation cache key
+/// (`Cannot access field on non-struct type` reproduced live against the
+/// pre-unification code). Restoring symmetry with `unify()` here is what
+/// fixes it -- see the change record's *Removed assumptions* and
+/// `tests/38_monomorphization/`'s SMP-002 regression test for the full
+/// repro.
 void collectParamOrder(const TurfTypePtr &Pattern,
                        std::vector<std::string> &Order);
 

@@ -224,6 +224,11 @@ void collectParamOrder(const TurfTypePtr &Pattern,
       collectParamOrder(Arr->getElementTypePtr(), Order);
     return;
   }
+  if (const auto *PGen = dynamic_cast<const GenericType *>(Pattern.get())) {
+    for (const auto &A : PGen->getTypeArgs())
+      collectParamOrder(A, Order);
+    return;
+  }
   if (const auto *PFunc = dynamic_cast<const FuncType *>(Pattern.get())) {
     for (const auto &P : PFunc->getParamTypes())
       collectParamOrder(P, Order);
