@@ -170,6 +170,12 @@ void SymbolTable::RegisterType(const std::string &Name, TurfTypePtr Type) {
   ScopeStack.back().Types[Name] = std::move(Type);
 }
 
+void SymbolTable::RegisterGlobalType(const std::string &Name, TurfTypePtr Type) {
+  if (ScopeStack.empty())
+    EnterScope();
+  ScopeStack.front().Types[Name] = std::move(Type);
+}
+
 TurfTypePtr SymbolTable::LookupType(const std::string &Name) const {
   for (auto It = ScopeStack.rbegin(); It != ScopeStack.rend(); ++It) {
     auto TypeIt = It->Types.find(Name);

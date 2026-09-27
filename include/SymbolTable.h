@@ -199,6 +199,16 @@ public:
 
   // Type registry
   void RegisterType(const std::string &Name, TurfTypePtr Type);
+  /// A DECLARED struct/enum/machine/error type: registered in the outermost
+  /// scope, whatever scope is current. A type's identity is (module, name)
+  /// with no lexical scope (FREEZE.md §6.11) -- registering it in the
+  /// current scope let a temporary scope take it down with it: a struct
+  /// declared inside a GENERIC function's body was registered into the
+  /// scope ParseFuncDef() pushes for that function's `<T>` names, popped at
+  /// the end of the function, and every later lookup (Codegen's
+  /// construction) failed as "unknown struct type ... this is a compiler
+  /// bug". RegisterType() stays for genuinely scoped names (type params).
+  void RegisterGlobalType(const std::string &Name, TurfTypePtr Type);
   TurfTypePtr LookupType(const std::string &Name) const;
 
   // Diagnostics helpers

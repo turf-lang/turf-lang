@@ -198,7 +198,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
   std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
   auto SType = std::make_shared<TurfStructType>(Identity, Fields);
   if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterType(Identity, SType);
+    GlobalSymbolTable->RegisterGlobalType(Identity, SType);
   }
 
   return std::make_unique<StructDeclExprAST>(Loc, Identity, NameLoc, Fields, TypeParams);
@@ -278,7 +278,7 @@ std::unique_ptr<ExprAST> ParseEnumDecl() {
   std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
   auto EType = std::make_shared<TurfEnumType>(Identity, Variants, TurfInt());
   if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterType(Identity, EType);
+    GlobalSymbolTable->RegisterGlobalType(Identity, EType);
   }
 
   return std::make_unique<EnumDeclExprAST>(Loc, Identity, Variants);
@@ -397,7 +397,7 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
   std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
   auto MType = std::make_shared<TurfMachineType>(Identity, States, EdgeSet);
   if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterType(Identity, MType);
+    GlobalSymbolTable->RegisterGlobalType(Identity, MType);
   }
 
   return std::make_unique<MachineDeclExprAST>(Loc, Identity, States, Edges);
@@ -514,7 +514,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
   std::string Identity = TypeIdentity::make(CurrentParseModule(), Name);
   auto ErrType = std::make_shared<TurfUserErrorType>(Identity, Variants, IsBareForm);
   if (GlobalSymbolTable) {
-    GlobalSymbolTable->RegisterType(Identity, ErrType);
+    GlobalSymbolTable->RegisterGlobalType(Identity, ErrType);
   }
 
   return std::make_unique<ErrorDeclExprAST>(Loc, Identity, Variants, IsBareForm);
