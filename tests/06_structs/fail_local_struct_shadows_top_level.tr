@@ -1,0 +1,21 @@
+// A function-local `struct P` with the same name as a top-level `struct P`
+// in the same file: E034, for the same reason as
+// fail_duplicate_local_struct_in_two_functions.tr -- the local one used to
+// silently replace the top-level layout for the WHOLE file, so `main`'s
+// `q.x` (the top-level P's own field) failed as "Struct 'P' has no field
+// named 'x'".
+
+struct P { x: int }
+
+fn a(): double {
+    struct P { y: double, z: double }
+    mut p: P = P::default();
+    p.z = 2.5;
+    return p.z;
+}
+
+fn main(): int {
+    mut q: P = P::default();
+    q.x = 3;
+    return q.x - 3;
+}

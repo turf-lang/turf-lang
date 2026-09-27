@@ -565,14 +565,31 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
   // never hoisted at all. Pass 2 visits statements in textual order, so by
   // the time THIS node is visited, it's still safe to register it here for
   // the first time -- any later statement in the same or a nested scope
-  // that references the name will see it correctly. Guarded on
-  // isKnownStruct() so a top-level struct (already registered by Pass 1)
-  // is never re-registered here, which would otherwise raise a spurious
-  // DuplicateTypeNameError against itself on every single struct in the
-  // file.
-  if (!SymTable_.isKnownStruct(Node.getName())) {
+  // that references the name will see it correctly.
+  //
+  // A registration that finds the name taken is a real duplicate only if
+  // it came from a DIFFERENT declaration. The same node is legitimately
+  // seen twice -- a top-level struct already hoisted by Pass 1, a local
+  // struct inside a generic function whose body is cloned per
+  // instantiation -- and both report the declaration's own location. This
+  // used to be `if (!isKnownStruct(name)) register`, which also silently
+  // skipped a genuinely SECOND declaration: two functions each declaring a
+  // local `struct P` (or a local `P` shadowing a top-level one) shared ONE
+  // registration and one layout, and whichever the Parser saw last won --
+  // the other function's `p.x` failed as "Struct 'P' has no field named
+  // 'x'", or read the wrong offset. A type's identity is (module, name)
+  // (FREEZE.md §6.11), with no function-level scope, so this is E034.
+  {
     SourceLocation Loc = Node.getLoc();
-    SymTable_.registerStruct(Node.getName(), {Loc.Line, Loc.Col}, currentModuleName());
+    if (auto Prev = SymTable_.registerStruct(Node.getName(), {Loc.Line, Loc.Col},
+                                             currentModuleName())) {
+      if (Prev->Line != Loc.Line || Prev->Col != Loc.Col) {
+        DuplicateTypeNameError(Loc, Node.getName(), "struct",
+                               {Prev->Line, Prev->Col})
+            .raise();
+        return;
+      }
+    }
   }
 
   // Rewrite any field NamedType("T") that names one of this struct's own
