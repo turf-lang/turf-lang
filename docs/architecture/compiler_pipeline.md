@@ -655,6 +655,8 @@ buildCFG()
   → DefiniteAssignmentPass
   → ValueRangePass
   → AliasAnalysisPass
+  → NullabilityPass                  (LANG-002: &?T dereference/narrowing)
+  → EscapePass                       (FDN-002: Stack-reference escape rules)
   → LivenessAnalysisPass
   → allPathsRecurse()                (infinite-recursion check)
   → ConstructorFieldAssignmentPass   (only for a StructName.new constructor)
@@ -821,6 +823,44 @@ same name, producing a false double-free. Produces `DoubleFreeError`
 (**E017**) / `UseAfterFreeError` (**E018**), both fatal and both flagged
 `Important`, each carrying a `withRelated()` note pointing at the earlier
 free.
+
+### Reference and array escape rules — `EscapePass` (FDN-002)
+
+`include/Analysis.h`, `src/Analysis.cpp` (appended after `NullabilityPass`
+in the same file). A forward dataflow pass, structurally the closest to
+`NullabilityPass` just above it: one `std::unordered_map<const
+VariableSymbol*, RefProvenance>` per block (`RefProvenance` = `Stack` /
+`Param` / `Heap`; absence from the map is the fourth, permissive default,
+`Unknown`), meet = "keep an entry only where every predecessor agrees on
+the exact same provenance" (`meetProv()`, `src/Analysis.cpp`), transfer =
+walk a block's statements in order via a recursive `ASTVisitor`
+(`EscapeCheckVisitor`) that both updates the map (a `VarDecl`/plain-variable
+`Assignment`) and — once, after the silent dataflow reaches a fixed point,
+same two-phase shape as `NullabilityPass` — checks every sink. `classify
+Provenance()`/`classifyAddressOfProvenance()` are a small, closed
+`dynamic_cast` dispatch over exactly the expression shapes FDN-002.md's own
+account lists (`AddressOfExprAST`, a bare variable read, a `heap()` call, a
+cast); anything else is `Unknown`, never a false positive.
+
+Five sinks, each raising `DanglingReferenceEscapeError` (**E086**, fatal,
+flagged `Important`) when the value classified is `Stack`: a `return`
+(`ReturnExprAST`); an assignment into a field (`FieldAccessExprAST`) whose
+BASE classifies as `Param`/`Heap`; a call to a known stdlib collection
+mutator (`push`/`set`/`put`/`add`/`enqueue`, matched by the receiver's
+`self` parameter's `GenericType::getBaseName()` — **not** `SourceModule`,
+which stays empty for every struct-bound method call, confirmed live while
+building this, see FDN-002.md) or a real `operator[]=` dispatch
+(`ArrayAccessExprAST::ResolvedIndexSetTarget`, LANG-001) — both
+unconditional, regardless of the collection's own provenance; the operand
+of a `heap()` call. `RefProvenance::Stack` also result from a narrow D23
+special case: casting an unsized `T[]` PARAMETER to a raw pointer (`ptr`/
+`T*`) turns its otherwise-safe `Param` provenance into `Stack`, since that
+one cast is what erases the array's own aliasing information. Every OTHER
+cast into a raw/unsafe-gated pointer type instead exits tracking entirely
+(returns `Unknown`) — verified live that without this exemption, ordinary
+`unsafe`-gated raw-pointer code (`&local to Point*`, stored and popped
+within the same frame) false-positived; `unsafe` is the user's own opt-out
+of this pass's safety net, not a hole for it to keep policing.
 
 ### Constant propagation and compile-time array-bounds checking — `ValueRangePass`
 

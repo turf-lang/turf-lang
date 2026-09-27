@@ -11,7 +11,11 @@
 > decision is frozen as `FREEZE.md` §6.11, DEC-13 answered `main`).
 > **`FDN-001` (safe heap allocation of user types) is also done** — see
 > `docs/development/changes/FDN-001.md` (landed 2026-09-27; DEC-5 answered
-> `heap(expr): &T` intrinsic, frozen as `FREEZE.md` §6.12); the rest
+> `heap(expr): &T` intrinsic, frozen as `FREEZE.md` §6.12). **`FDN-002`
+> (reference and array escape rules) is also done** — see
+> `docs/development/changes/FDN-002.md` (landed 2026-09-27; its design was
+> stated directly in this roadmap rather than needing a DEC- decision,
+> frozen as `FREEZE.md` §6.13); the rest
 > of Phase 1 and all of Phases 2+ remain unimplemented. Items marked
 > **DECISION** need an explicit answer from the project owner before their
 > session starts; each carries a recommendation so the default is never
@@ -98,7 +102,7 @@ PHASE 0  Overhaul closure            OVH-001 … OVH-015   DONE (OVH-CLOSE.md, 2
 PHASE 1  Foundation                   SMP-002  one generic type walker      DONE (SMP-002.md, 2026-09-27)
    │                                  FDN-003  module-scoped type identity  DONE (FDN-003.md, 2026-09-27)
    │                                  FDN-001  safe heap allocation         DONE (FDN-001.md, 2026-09-27)
-   │                                  FDN-002  reference & array escape rules
+   │                                  FDN-002  reference & array escape rules  DONE (FDN-002.md, 2026-09-27)
    │                                  FDN-004  string indexing: bounds + `char` (D17)
    │                                  FDN-006  runtime contract (stack overflow, OOM, ABI stamp)
    │                                  SMP-001  compiler query facade (parallel, any time in 1–2)

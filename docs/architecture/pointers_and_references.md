@@ -452,6 +452,73 @@ against a `&T`-typed parameter/return type — only variable declarations and
 plain assignments are (see `docs/development/changes/LANG-002.md`'s *Known
 pitfalls* for the full list and the reasoning).
 
+### 1.9 Reference and array escape rules (FDN-002)
+
+Every `&T`/`&?T` value above is guaranteed non-null (and, for `&?T`,
+null-checked before use) — but neither guarantee says anything about
+*where* the memory it points to lives, or how long that memory survives.
+FDN-002 (`docs/planning/ROADMAP_v2.0.0.md`; `docs/development/changes/
+FDN-002.md`; `FREEZE.md` §6.13/F-MEM-5) closes the one hazard that
+survived every earlier reference-safety milestone: a reference into the
+CURRENT function's own stack frame, smuggled out past the point where that
+frame is popped.
+
+```turflang
+struct Node { val: int }
+
+fn make(): &Node {
+    mut n: Node = Node::default();
+    n.val = 42;
+    return &n;              // E086: dangles the moment make() returns
+}
+```
+
+`EscapePass` (`include/Analysis.h`, `src/Analysis.cpp`) tracks, for every
+reference-typed/raw-pointer/unsized-array (`T[]`) parameter or local, one of
+three provenances — **Stack** (this frame's own storage), **Param** (came
+in from the caller, including `self`), **Heap** (from `heap()`, FDN-001) —
+and rejects a `Stack`-provenance value that flows into a `return`, a field
+of a `Param`-/`Heap`-owned object, a `List`/`Map`/`Set`/`Stack`/`Queue`
+mutator or `operator[]=`, or `heap()`'s own operand. The fix for the
+example above is exactly FDN-001's own intrinsic:
+
+```turflang
+fn make(): &Node {
+    mut n: Node = Node::default();
+    n.val = 42;
+    return heap(n);          // OK: a fresh, GC-heap-owned copy
+}
+```
+
+A reference reached through an ALREADY-reference-typed parameter is `Param`
+provenance and is never flagged, no matter how far it's passed along — this
+pass is intraprocedural only (no borrow checker, no lifetime syntax, no
+interprocedural summaries — Overhaul §0.6's "small language" constraint), so
+it extends the same trust ordinary reference-parameter semantics already
+grant, rather than trying to verify further up the call chain:
+
+```turflang
+fn firstFieldAddr(param: &Node): &int {
+    return &param.val;      // OK: Param provenance, not this frame's storage
+}
+```
+
+**Known, deliberate limitations**, in the same "documented, not silently
+missing" style as §1.8's own list just above (`docs/development/changes/
+FDN-002.md`'s *Known pitfalls* has the full account): tracking is
+**per-variable, one field/hop deep** — `p.next.field = &local` is not
+caught (`p.next`'s own provenance isn't derived from `p`'s); `&expr[i]`
+(any array-indexed address-of) is **not tracked at all**, since a raw
+pointer's own element indexing (`list.data[i]`, always heap-backed) can't
+be told apart from a genuine local fixed array's without per-field type
+information this pass doesn't have — a dangling `&fixedArr[i]` returned
+directly is a residual gap (`INV-MEM-6`, `docs/development/INVARIANTS.md`);
+and a reference smuggled out **inside a by-value struct copy**, or through
+an **intermediate function call**, is `Unknown` and silently allowed. Every
+one of these is a false-NEGATIVE gap, never a false positive — soundness
+improves monotonically, and this pass would rather miss a real bug than
+reject a program that was actually safe.
+
 ---
 
 ## Part 2 — Internal reference (compiler implementation)
@@ -950,3 +1017,28 @@ Summary only — `docs/development/changes/LANG-002.md` has the full detail.
 - **Codegen.** Nothing — `getLLVMType()`'s existing
   `dynamic_cast<TurfPointerType*>` branch already covers the new sibling
   class for free, exactly as it did for `&T` (2.6).
+
+### 2.9 FDN-002 additions, by pass
+
+Summary only — `docs/development/changes/FDN-002.md` has the full detail.
+
+- **CFG-based analysis (`include/Analysis.h`, `src/Analysis.cpp`).**
+  `EscapePass` — a forward dataflow pass over the CFG, beside
+  `NullabilityPass` in the same file: one `std::unordered_map<const
+  VariableSymbol*, RefProvenance>` per block, meet = "keep an entry only
+  where every predecessor agrees on the exact same provenance" (the same
+  shape as `NullabilityPass`'s `NonNullSet` intersection, generalized from
+  a boolean to a 3-value enum), transfer = process a block's statements in
+  order via a recursive `ASTVisitor` (`EscapeCheckVisitor`), same idiom as
+  `NarrowingVisitor` just above it. Run from `FuncDefExprAST::codegen()`
+  (`src/CodegenFunc.cpp`) immediately after `NullabilityPass`.
+- **Diagnostics (`include/ErrorsMemory.h`, `include/ErrorCodes.h`).** One
+  new class, `DanglingReferenceEscapeError` (E086, `MEMORY_ERROR` category
+  — no new SLM category, per F-DIAG-3), parameterized by a short sink
+  description string so one class covers all five sinks.
+- **No Lexer/Parser/AST/Types/Resolver/TypeChecker/Monomorphizer/Codegen
+  changes.** This is the one CFG pass in the whole milestone list that
+  needed nothing upstream — every fact it needs (a symbol's `IsParameter`,
+  its `Type->isPointer()`/array size, `ArrayAccessExprAST::
+  ResolvedIndexSetTarget` from LANG-001, `FuncCallExprAST`'s callee name for
+  `heap()`) already existed on the AST from earlier milestones.

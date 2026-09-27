@@ -234,11 +234,21 @@ stands on its own:
   purely a compile-time fiction the TypeChecker enforces (`&expr` can never
   produce `null`, and a `&T` can be widened to `T*` for free but never the
   reverse without an explicit `unsafe`-gated cast).
-- **Neither `T*` nor `&T` carries any lifetime information.** A `&T` being
-  non-null tells you nothing about whether the memory it points to is still
-  valid — it is entirely possible (and not gated by anything) to construct
-  a `&T` that outlives the stack frame it pointed into, exactly as with a
-  raw pointer in C. "Safe" here means "can't be null," not "can't dangle."
+- **Neither `T*` nor `&T` carries any lifetime information** as a TYPE —
+  but as of **FDN-002** (`docs/planning/ROADMAP_v2.0.0.md`;
+  `docs/development/changes/FDN-002.md`; `FREEZE.md` §6.13/F-MEM-5,
+  `INV-MEM-6`), a `&T` provably pointing into the CURRENT function's own
+  stack frame can no longer be returned, stored into a field of a
+  longer-lived object, pushed into a collection, or boxed with `heap()` —
+  `EscapePass` (`include/Analysis.h`) catches the syntactic shapes above
+  intraprocedurally, conservatively (never a false positive on code that
+  was actually safe), at compile time. It is **not** a general lifetime
+  system: a reference smuggled out inside a by-value struct copy, through
+  an intermediate function call, or via raw pointer arithmetic (`arr[i]`'s
+  own address, `unsafe`-gated) is still uncaught — see
+  `docs/architecture/pointers_and_references.md` §1.9 for the full rule and
+  its documented residual gap. "Safe" here still means "can't be null and
+  can't (in the cases above) provably dangle," never "carries a lifetime."
 
 ### 1.7 What manages any of this? Two heaps, one of them automatic.
 

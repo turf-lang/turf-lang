@@ -33,6 +33,7 @@ docs/reference/projects_and_packages.md :: docs/planning/ROADMAP_v2.0.0.md :: wr
 docs/reference/memory_and_safety.md :: docs/planning/ROADMAP_v2.0.0.md :: written by REL-006 (the 2.0 memory-safety statement).
 docs/development/BENCHMARKS.md :: docs/planning/ROADMAP_v2.0.0.md :: written by REL-005 (performance baseline).
 docs/MIGRATING_TO_2.md :: docs/planning/ROADMAP_v2.0.0.md :: written by REL-006 from Part V's compatibility table.
+docs/MIGRATING_TO_2.md :: docs/development/handbook-sync/PENDING.md :: FDN-002's breaking-change row is owed to this file once REL-006 writes it.
 
 # --- Retired paths named by the change record that re-pointed them. A record's
 # --- job is to say exactly which citation moved where, so it necessarily spells
