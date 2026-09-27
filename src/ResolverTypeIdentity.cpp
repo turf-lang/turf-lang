@@ -133,6 +133,47 @@ void Resolver::hoistTypesIn(const ExprAST *Node, const std::string &ModuleName) 
   }
 }
 
+void Resolver::registerLocalTypeDecl(const ExprAST &Node, SourceLocation Loc) {
+  // Same registration hoistTypesIn() does, but a name already taken is a
+  // duplicate only if it was taken by a DIFFERENT declaration: the same
+  // node is legitimately seen more than once (a top-level declaration
+  // hoisted by Pass 1 and visited again by Pass 2; a declaration inside a
+  // generic function's body, visited once per cloned instantiation) and
+  // always reports its own location -- the rule visitStructDecl() uses too.
+  const std::string Module = currentModuleName();
+  std::optional<ResolverSourceLocation> Prev;
+  std::string Name, Kind;
+  if (const auto *Enum = dynamic_cast<const EnumDeclExprAST *>(&Node)) {
+    Name = Enum->getName();
+    Kind = "enum";
+    Prev = SymTable_.registerEnumType(
+        Name, {Loc.Line, Loc.Col},
+        std::make_shared<TurfEnumType>(Name, Enum->getVariants(), Enum->getUnderlyingType()),
+        Module);
+  } else if (const auto *Machine = dynamic_cast<const MachineDeclExprAST *>(&Node)) {
+    std::map<std::string, std::set<std::string>> Edges;
+    for (const auto &E : Machine->getEdges())
+      Edges[E.From].insert(E.To);
+    Name = Machine->getName();
+    Kind = "state machine";
+    Prev = SymTable_.registerEnumType(
+        Name, {Loc.Line, Loc.Col},
+        std::make_shared<TurfMachineType>(Name, Machine->getStates(), Edges), Module);
+  } else if (const auto *ErrDecl = dynamic_cast<const ErrorDeclExprAST *>(&Node)) {
+    Name = ErrDecl->getName();
+    Kind = "error";
+    Prev = SymTable_.registerErrorType(
+        Name, {Loc.Line, Loc.Col},
+        std::make_shared<TurfUserErrorType>(Name, ErrDecl->getVariants(),
+                                            ErrDecl->isBareForm()),
+        Module);
+  } else {
+    return;
+  }
+  if (Prev && (Prev->Line != Loc.Line || Prev->Col != Loc.Col))
+    DuplicateTypeNameError(Loc, Name, Kind, {Prev->Line, Prev->Col}).raise();
+}
+
 void Resolver::registerOnDemandTypeImports(const ModuleImportExprAST &Import,
                                            const std::string &ContextLabel) {
   if (Import.getMode() == ImportMode::Bare)

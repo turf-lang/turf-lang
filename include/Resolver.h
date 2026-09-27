@@ -538,6 +538,11 @@ private:
   void registerOnDemandTypeImports(const ModuleImportExprAST &Import,
                                    const std::string &ContextLabel);
 
+  /// Pass 2: register an enum/machine/error type declared inside a function
+  /// body (Pass 1a only sees top-level ones), reporting a second
+  /// declaration of the same name as E034. See visitEnumDecl().
+  void registerLocalTypeDecl(const ExprAST &Node, SourceLocation Loc);
+
   /// 1b: resolve declaration-level type spellings in place, silently -- an
   /// unresolvable spelling is left alone for Pass 2 to report with a real
   /// diagnostic (Pass 1 aborts the whole resolveAll() on its first error).

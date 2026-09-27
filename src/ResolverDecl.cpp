@@ -257,24 +257,27 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
 }
 
 
+// Pass 1 hoists only TOP-LEVEL declarations (hoistTypes(), which never
+// enters a function body), so a type declared inside a function body is
+// first seen here -- registered now, exactly like a local struct
+// (visitStructDecl()). Before, these three visitors were no-ops on the
+// premise "Pass 1 already hoisted it", true only at the top level: a local
+// `enum E { A, B }` parsed fine and then its own `E::B` failed as "'E'
+// isn't a known enum, struct, or module". A top-level declaration reaching
+// here is already registered at this same location, which
+// registerLocalTypeDecl() recognizes (see there).
 void Resolver::visitEnumDecl(EnumDeclExprAST &Node) {
-  // Pass 1 already hoisted the enum to the registry.
+  registerLocalTypeDecl(Node, Node.getLoc());
 }
 
 
 void Resolver::visitMachineDecl(MachineDeclExprAST &Node) {
-  // Pass 1 already hoisted the machine (states + edges) to the registry,
-  // same as visitEnumDecl -- nothing left to do at Pass 2 for the
-  // DECLARATION itself.
+  registerLocalTypeDecl(Node, Node.getLoc());
 }
 
 
 void Resolver::visitErrorDecl(ErrorDeclExprAST &Node) {
-  // Pass 1 already hoisted the error type to the registry, same as
-  // visitEnumDecl -- nothing left to do at Pass 2 for the DECLARATION
-  // itself (variant field types were already fully specified/parsed; there
-  // are no generic type parameters on an error type to substitute, unlike
-  // visitStructDecl/visitFuncDef).
+  registerLocalTypeDecl(Node, Node.getLoc());
 }
 
 
