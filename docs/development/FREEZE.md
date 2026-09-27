@@ -236,6 +236,35 @@ otherwise each answer differently, producing an incoherent language.
   loop optimization, object emission, and DWARF encoding. TurfLang owns
   anything requiring TurfLang semantics.
 
+### 6.11 Type identity — FROZEN (FDN-003, 2026-09-27)
+
+Recorded on the project owner's explicit approval of `ROADMAP_v2.0.0.md`
+FDN-003 stage 1 ("Roadmap design, stable typeof") — §6.0 rule 3's explicit
+request, not a session's own initiative. Full account:
+`docs/development/changes/FDN-003.md`.
+
+- A struct/enum/machine/`error` type is identified by **(owning module,
+  name)**, never by its bare name. Two modules may each declare `Node`; a
+  program may declare `struct List` without importing `list`.
+- The main program file's module is named **`main`** (DEC-13). That
+  qualifier is never spelled: a main-file type's identity, `typeof()` output,
+  LLVM name and diagnostics are its bare name, exactly as before FDN-003.
+- **Spelling rules are unchanged.** Bare `Name` means the current file's or
+  module's own type, or one it on-demand-imported (`import m::Name;`,
+  `m::[...]`, `m::[*]`); `m::Name` is always allowed. The Resolver is the
+  single place a spelling becomes an identity.
+- A bare spelling that could mean **two** visible types is an error at the
+  use (E085), naming both. No "local wins" rule: a too-strict rule can be
+  relaxed after 2.0 without breaking anyone; the reverse cannot. Two
+  on-demand imports bringing in the same bare type name remain an error at
+  the import (E024), as for functions.
+- A duplicate declaration is an error only within **one** module (E034).
+- `typeof()` and diagnostics print the identity — `m::Name` for a
+  module-owned type, bare for a main-file type — the **same string wherever
+  `typeof` is called** (not "qualified only outside the declaring file").
+- LLVM struct names, GC type-descriptor names and DWARF type names spell a
+  module-owned type **`m.Name`**.
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -244,7 +273,8 @@ A change record's *Frozen decisions relied on* row cites these IDs
 (`docs/development/TEMPLATE.md`). They name the decisions above; the
 rationale for each lives in the `ARCHITECTURE_OVERHAUL.md` section named in
 the third column. This table is a copy of that document's §4 and adds
-nothing to the freeze.
+nothing to the freeze -- except rows for decisions frozen after the
+Overhaul (F-TYPE-1), whose third column points at their section above.
 
 |---|---|---|
 | **F-GEN-1** | Generics are **monomorphized**. Type erasure is removed entirely. | §9 |
@@ -280,6 +310,7 @@ nothing to the freeze.
 | **F-OPT-1** | Optimization levels change speed/size/debuggability only — never observable behaviour. | §17 |
 | **F-OPT-2** | Bounds/overflow/div-by-zero checks may be *removed by proof*, never by flag. | §17 |
 | **F-TRACK-1** | Every implementation session updates a change record under `docs/development/`. | §18 |
+| **F-TYPE-1** | A named type's identity is (owning module, name); the main file's module is `main`, never spelled. Bare-spelling ambiguity is an error, not "local wins". | §6.11 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-003, not `ARCHITECTURE_OVERHAUL.md` §4) |
 
 ---
 
