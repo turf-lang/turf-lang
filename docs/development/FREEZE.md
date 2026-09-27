@@ -290,6 +290,37 @@ account: `docs/development/changes/FDN-001.md`.
   escape-analysis rule, applied to `heap()`'s own operand like any other
   expression; FDN-001 does not gate on it.
 
+### 6.13 Reference and array escape rules — FROZEN (FDN-002, 2026-09-27)
+
+Recorded on the project owner's explicit approval of `ROADMAP_v2.0.0.md`
+FDN-002's own design (no numbered DEC- item — the roadmap states the design
+directly rather than a table of alternatives) — §6.0 rule 3's explicit
+request, not a session's own initiative. Full account:
+`docs/development/changes/FDN-002.md`.
+
+- Every reference-typed value (`&T`, `&?T`, a raw pointer including `self`)
+  and every unsized-array (`T[]`) parameter carries one of three tracked
+  provenances at each program point, computed by an intraprocedural,
+  conservative forward dataflow pass (`EscapePass`, beside `NullabilityPass`
+  in the same CFG-pass pipeline stage): **Stack** (points into the current
+  function's own frame), **Param** (came in from the caller, including
+  `self`), **Heap** (from `heap()`, or reached through a `Heap`-provenance
+  base). Anything the pass cannot classify is **Unknown** — never flagged.
+- It is an error for a `Stack`-provenance value to flow into: a `return`; the
+  RHS of an assignment into a field reached through a `Param`- or
+  `Heap`-provenance base; an argument to a `List`/`Map`/`Set`/`Stack`/`Queue`
+  mutator (`push`/`set`/`put`/`add`/`enqueue`) or a real `operator[]=`
+  dispatch; the operand of `heap()`.
+- An unsized `T[]` parameter is `Param` provenance, but converting it to
+  `ptr` (or any raw, non-reference pointer type) and returning that cast's
+  result is still an error — the cast itself discards the type system's only
+  memory of where the pointer aliases (§27 D23).
+- No lifetime annotations, no borrow checker, no interprocedural summaries.
+  `Param`- and `Heap`-provenance values are always allowed to flow anywhere
+  (including a `return`) — this pass trusts a reference the caller already
+  handed in for exactly as long as ordinary reference semantics already did,
+  and does not attempt to verify further up the call chain.
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -337,6 +368,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-TRACK-1** | Every implementation session updates a change record under `docs/development/`. | §18 |
 | **F-TYPE-1** | A named type's identity is (owning module, name); the main file's module is `main`, never spelled. Bare-spelling ambiguity is an error, not "local wins". | §6.11 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-003, not `ARCHITECTURE_OVERHAUL.md` §4) |
 | **F-HEAP-1** | `heap(expr): &T` is the closed-list intrinsic for safe heap allocation — no `new T` keyword, no grammar change. Always allocates with `T`'s real `TurfTypeDesc`, never `NULL`. | §6.12 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-001) |
+| **F-MEM-5** | A `Stack`-provenance reference (points into the current frame) can never flow into a `return`, a field of a `Param`/`Heap`-owned object, a collection mutator/`operator[]=`, or `heap()`'s own operand — enforced by `EscapePass`, intraprocedurally, with no lifetime syntax. | §6.13 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-002) |
 
 ---
 
