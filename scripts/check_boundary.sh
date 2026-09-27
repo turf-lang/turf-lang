@@ -42,6 +42,25 @@
 #      `mem::alloc(sizeof(...))` shape and a same-repo `struct Name { ... }`
 #      declaration to check fields against -- see boundary.md for why a
 #      fully general check isn't attempted.
+#   6. SMP-002 / INV-GEN-2 (docs/development/changes/SMP-002.md,
+#      docs/development/INVARIANTS.md): every generic-parameter query --
+#      does a type contain/wrap an open `TurfGenericParamType`, substitute
+#      it, unify it against a concrete type -- goes through the one shared
+#      walker, include/TypeWalk.h. A bare `dynamic_cast<const
+#      TurfGenericParamType` anywhere else in src/ or include/ is a hand-
+#      rolled re-derivation of exactly the pattern SMP-002 unified (three of
+#      the eight original instances were independently, silently
+#      incomplete -- see the change record). Two kinds of exception are
+#      excluded deliberately, not silently: the INV-GEN-1 assertion sites
+#      (`assert(!dynamic_cast<...>)` -- a different invariant, checking that
+#      NONE reaches Codegen, not deriving anything from one) and
+#      `CodegenCore.cpp`, whose own separate `getExprType()` type-inference
+#      engine independently reimplements this same pattern at several more
+#      sites using raw, non-owning `const TurfType*` throughout (not
+#      `TurfTypePtr`) -- deliberately left unmigrated this session,
+#      `ARCHITECTURE_OVERHAUL.md` §25 item 4's caution against casually
+#      touching that second engine. See INVARIANTS.md's INV-GEN-2 row for
+#      the full account of what this does and does not cover.
 #
 # Usage: scripts/check_boundary.sh
 # Exit:  0 = every check passed; 1 = at least one failed.
@@ -137,6 +156,20 @@ for t in $BOXED_TYPES; do
 done
 if [ "$BOUNDARY5_FAILED" -eq 0 ]; then
   pass "no mem::alloc(sizeof(...)) site boxes a type with a string/collection field"
+fi
+
+# ── 6. INV-GEN-2: every generic-parameter query goes through TypeWalk ──────
+echo -e "\n${BOLD}6. dynamic_cast<TurfGenericParamType> only in TypeWalk (INV-GEN-2)${RESET}"
+GEN_HITS=$(grep -rn "dynamic_cast<const TurfGenericParamType" src/ include/ 2>/dev/null \
+           | grep -vE ':\s*(//|\*)' \
+           | grep -v "^src/TypeWalk\.cpp:" | grep -v "^include/TypeWalk\.h:" \
+           | grep -v "^src/CodegenCore\.cpp:" \
+           | grep -v "assert(!dynamic_cast<const TurfGenericParamType")
+if [ -n "$GEN_HITS" ]; then
+  fail "dynamic_cast<const TurfGenericParamType found outside TypeWalk/CodegenCore/an INV-GEN-1 assertion -- route it through TypeWalk::containsOpenParam() instead:"
+  echo "$GEN_HITS" | sed 's/^/       /'
+else
+  pass "every dynamic_cast<const TurfGenericParamType is in TypeWalk, an INV-GEN-1 assertion, or the documented CodegenCore.cpp exception"
 fi
 
 echo
