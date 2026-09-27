@@ -24,6 +24,7 @@
 #include "ResolverInternal.h"
 #include "SuggestionIndex.h" // SuggestionIndex::suggestVisible
 #include "Types.h"           // RankedSuggestions
+#include "TypeWalk.h"         // SMP-002: shared substitute() walker
 
 #include "llvm/ADT/SmallString.h" // Num->getIntValExact().toString() below
 
@@ -143,95 +144,27 @@ void Resolver::resolveAll(
  *
  * Non-generic functions (empty TypeParams) and non-matching names return
  * @p Ty unchanged (structurally, the same shared_ptr).
+ *
+ * SMP-002: thin wrapper over the shared TypeWalk::substitute() walker
+ * (TypeWalk.h) -- this function's own recursive body, duplicated by hand in
+ * at least six other places across the compiler, is now the single one that
+ * exists. Building `Subst` fresh on every call (rather than caching it per
+ * declaration) costs one small map per generic declaration, once, at
+ * signature-capture time -- not a hot path. Picking up TypeWalk::substitute()'s
+ * TurfErrorUnionType case for free (this function never had one) closes a
+ * latent gap of the exact kind SMP-002 exists to close: a generic
+ * declaration's own `!T` return/parameter type now gets its `T` marked as an
+ * open parameter at declaration time too, not just at each instantiation
+ * site (see the change record's *Removed assumptions*).
  */
 TurfTypePtr substituteTypeParams(const TurfTypePtr &Ty,
                                  const std::vector<std::string> &TypeParams) {
   if (!Ty || TypeParams.empty())
     return Ty;
-
-  if (const auto *NT = dynamic_cast<const NamedType *>(Ty.get())) {
-    if (std::find(TypeParams.begin(), TypeParams.end(), NT->getName()) !=
-        TypeParams.end())
-      return std::make_shared<TurfGenericParamType>(NT->getName());
-    return Ty;
-  }
-  // Checked BEFORE the plain TurfPointerType branch below: TurfReferenceType
-  // (&T, issue #238) is a SUBCLASS of TurfPointerType (see its own doc
-  // comment, Types.h), so `dynamic_cast<const TurfPointerType *>` matches
-  // it too -- without this earlier, more specific check, substituting a
-  // generic function's own `&T` parameter/return/field type silently
-  // reconstructed a plain `TurfPointerType`, turning every `&T` into `T*`
-  // (confirmed live: `fn<T> Box.set(v: &T)` reported its own parameter as
-  // `T*` in the "raw pointer in function signature" diagnostic).
-  if (const auto *RT = dynamic_cast<const TurfReferenceType *>(Ty.get())) {
-    TurfTypePtr NewPointee = substituteTypeParams(RT->getPointee(), TypeParams);
-    return NewPointee == RT->getPointee()
-              ? Ty
-              : std::make_shared<TurfReferenceType>(NewPointee);
-  }
-  // Same bug class, same fix, for the OTHER safe-reference kind (LANG-002).
-  // TurfNullableReferenceType is a SIBLING of TurfReferenceType (both direct
-  // TurfPointerType subclasses -- see its own doc comment, Types.h), so the
-  // check just above does NOT catch it; without this it would fall through
-  // to the generic TurfPointerType branch below and silently turn every
-  // substituted generic `&?T` into `T*`, the identical failure this whole
-  // function's doc comment already documents for `&T`.
-  if (const auto *NRT = dynamic_cast<const TurfNullableReferenceType *>(Ty.get())) {
-    TurfTypePtr NewPointee = substituteTypeParams(NRT->getPointee(), TypeParams);
-    return NewPointee == NRT->getPointee()
-              ? Ty
-              : std::make_shared<TurfNullableReferenceType>(NewPointee);
-  }
-  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty.get())) {
-    TurfTypePtr NewPointee = substituteTypeParams(PT->getPointee(), TypeParams);
-    return NewPointee == PT->getPointee()
-              ? Ty
-              : std::make_shared<TurfPointerType>(NewPointee);
-  }
-  if (const auto *AT = dynamic_cast<const ArrayType *>(Ty.get())) {
-    TurfTypePtr NewElem =
-        substituteTypeParams(AT->getElementTypePtr(), TypeParams);
-    return NewElem == AT->getElementTypePtr()
-              ? Ty
-              : makeArrayType(NewElem, AT->getSize());
-  }
-  if (const auto *GT = dynamic_cast<const GenericType *>(Ty.get())) {
-    std::vector<TurfTypePtr> NewArgs;
-    bool Changed = false;
-    for (const auto &Arg : GT->getTypeArgs()) {
-      TurfTypePtr NewArg = substituteTypeParams(Arg, TypeParams);
-      Changed |= (NewArg != Arg);
-      NewArgs.push_back(std::move(NewArg));
-    }
-    return Changed ? std::make_shared<GenericType>(GT->getBaseName(),
-                                                    std::move(NewArgs))
-                   : Ty;
-  }
-  // STD-003: a callback parameter's own signature (`cmp: fn(T, T): int`)
-  // never had its inner `T`s substituted here -- FuncType simply had no
-  // case, so `T` inside `fn(...)` stayed the bare, unresolved NamedType("T")
-  // forever, invisible to every downstream consumer that dynamic_casts
-  // specifically for TurfGenericParamType (typesCompatible(),
-  // collectGenericSubstitution(), Monomorphize::substituteConcreteTypes() --
-  // all fixed alongside this one, same root cause). This is the first of
-  // those fixes to run, at declaration time, so every one downstream sees a
-  // real TurfGenericParamType the same way a bare `x: T` parameter already
-  // does.
-  if (const auto *FT = dynamic_cast<const FuncType *>(Ty.get())) {
-    std::vector<TurfTypePtr> NewParams;
-    bool Changed = false;
-    for (const auto &P : FT->getParamTypes()) {
-      TurfTypePtr NewP = substituteTypeParams(P, TypeParams);
-      Changed |= (NewP != P);
-      NewParams.push_back(std::move(NewP));
-    }
-    TurfTypePtr NewRet = substituteTypeParams(FT->getReturnType(), TypeParams);
-    Changed |= (NewRet != FT->getReturnType());
-    return Changed ? std::make_shared<FuncType>(std::move(NewRet),
-                                                std::move(NewParams))
-                   : Ty;
-  }
-  return Ty;
+  TypeWalk::SubstMap Subst;
+  for (const auto &Name : TypeParams)
+    Subst.emplace(Name, std::make_shared<TurfGenericParamType>(Name));
+  return TypeWalk::substitute(Ty, Subst);
 }
 
 

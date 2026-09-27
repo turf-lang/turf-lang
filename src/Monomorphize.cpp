@@ -7,6 +7,7 @@
 #include "Resolver.h"
 #include "SymbolTable.h" // GlobalSymbolTable -- RegisterType()'s target, distinct from Resolver's own SymTable_
 #include "TypeChecker.h"
+#include "TypeWalk.h" // SMP-002: shared substitute() walker
 
 #include <algorithm>
 #include <cassert>
@@ -46,100 +47,15 @@ void InstantiationCollector::report(std::ostream &OS) const {
 // Relocated verbatim from TypeCheckerCall.cpp's file-local
 // substituteReturnType() -- see Monomorphize.h's doc comment for why.
 
+// SMP-002: thin wrapper over the shared TypeWalk::substitute() walker
+// (TypeWalk.h) -- this function's own recursive body is now the single one
+// that exists, shared verbatim with Resolver::substituteTypeParams's
+// declaration-direction call (ResolverCore.cpp), which builds its own Subst
+// as `{name -> TurfGenericParamType(name)}` instead of a concrete map.
 TurfTypePtr substituteConcreteTypes(
     const TurfTypePtr &Ty,
     const std::unordered_map<std::string, TurfTypePtr> &Subst) {
-  if (!Ty || Subst.empty())
-    return Ty;
-
-  if (const auto *GP = dynamic_cast<const TurfGenericParamType *>(Ty.get())) {
-    auto It = Subst.find(GP->getName());
-    return It != Subst.end() ? It->second : Ty;
-  }
-  // A generic STRUCT's own field types are also matched here as NamedType,
-  // not TurfGenericParamType -- see this function's declaration comment
-  // (Monomorphize.h) and TypeCheckerCall.cpp's visitMethodCall for the full
-  // story on why both representations must be handled.
-  if (const auto *NT = dynamic_cast<const NamedType *>(Ty.get())) {
-    auto It = Subst.find(NT->getName());
-    return It != Subst.end() ? It->second : Ty;
-  }
-  // Checked BEFORE the plain TurfPointerType branch below -- TurfReferenceType
-  // (&T) IS-A TurfPointerType, so the more general dynamic_cast below matches
-  // it too; without this earlier check a substituted `&T` would silently
-  // rebuild as a plain `T*`.
-  if (const auto *RT = dynamic_cast<const TurfReferenceType *>(Ty.get())) {
-    TurfTypePtr NewPointee = substituteConcreteTypes(RT->getPointee(), Subst);
-    return NewPointee == RT->getPointee()
-              ? Ty
-              : std::make_shared<TurfReferenceType>(NewPointee);
-  }
-  // Same bug class, same fix, for `&?T` (LANG-002). TurfNullableReferenceType
-  // is a SIBLING of TurfReferenceType (both direct TurfPointerType
-  // subclasses -- see its own doc comment, Types.h), so the check just above
-  // does not catch it; without this it would fall through to the generic
-  // TurfPointerType branch below and silently turn every substituted
-  // generic `&?T` into `T*`.
-  if (const auto *NRT = dynamic_cast<const TurfNullableReferenceType *>(Ty.get())) {
-    TurfTypePtr NewPointee = substituteConcreteTypes(NRT->getPointee(), Subst);
-    return NewPointee == NRT->getPointee()
-              ? Ty
-              : std::make_shared<TurfNullableReferenceType>(NewPointee);
-  }
-  if (const auto *PT = dynamic_cast<const TurfPointerType *>(Ty.get())) {
-    TurfTypePtr NewPointee = substituteConcreteTypes(PT->getPointee(), Subst);
-    return NewPointee == PT->getPointee()
-              ? Ty
-              : std::make_shared<TurfPointerType>(NewPointee);
-  }
-  if (isArrayType(Ty.get())) {
-    const auto *AT = dynamic_cast<const ArrayType *>(Ty.get());
-    TurfTypePtr NewElem = substituteConcreteTypes(AT->getElementTypePtr(), Subst);
-    return NewElem == AT->getElementTypePtr()
-              ? Ty
-              : makeArrayType(NewElem, AT->getSize());
-  }
-  if (const auto *GT = dynamic_cast<const GenericType *>(Ty.get())) {
-    std::vector<TurfTypePtr> NewArgs;
-    bool Changed = false;
-    for (const auto &Arg : GT->getTypeArgs()) {
-      TurfTypePtr NewArg = substituteConcreteTypes(Arg, Subst);
-      Changed |= (NewArg != Arg);
-      NewArgs.push_back(std::move(NewArg));
-    }
-    return Changed ? std::make_shared<GenericType>(GT->getBaseName(),
-                                                    std::move(NewArgs))
-                   : Ty;
-  }
-  if (const auto *EU = dynamic_cast<const TurfErrorUnionType *>(Ty.get())) {
-    TurfTypePtr NewSuccess = substituteConcreteTypes(EU->getSuccessTypePtr(), Subst);
-    return NewSuccess == EU->getSuccessTypePtr()
-              ? Ty
-              : std::make_shared<TurfErrorUnionType>(NewSuccess);
-  }
-  // STD-003: a callback parameter's own signature (`cmp: fn(T, T): int`)
-  // never got substituted at CLONE time either -- without this, a monomorphized
-  // clone's `cmp` parameter would still be `fn(T, T): int` with a live
-  // TurfGenericParamType inside it after "substitution," tripping
-  // finishInstantiation()'s own INV-GEN-1 assert (Monomorphize.cpp) the
-  // moment a caller actually used this shape, since nothing else in this
-  // function had a FuncType case. Same shape as every other wrapper case
-  // above.
-  if (const auto *FT = dynamic_cast<const FuncType *>(Ty.get())) {
-    std::vector<TurfTypePtr> NewParams;
-    bool Changed = false;
-    for (const auto &P : FT->getParamTypes()) {
-      TurfTypePtr NewP = substituteConcreteTypes(P, Subst);
-      Changed |= (NewP != P);
-      NewParams.push_back(std::move(NewP));
-    }
-    TurfTypePtr NewRet = substituteConcreteTypes(FT->getReturnType(), Subst);
-    Changed |= (NewRet != FT->getReturnType());
-    return Changed ? std::make_shared<FuncType>(std::move(NewRet),
-                                                std::move(NewParams))
-                   : Ty;
-  }
-  return Ty;
+  return TypeWalk::substitute(Ty, Subst);
 }
 
 std::string instantiatedDeclName(const std::string &BaseName,
