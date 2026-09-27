@@ -24,6 +24,7 @@
  */
 
 #include "Types.h"
+#include "TypeWalk.h" // SMP-002: shared containsOpenParam() walker
 
 // ─── Primitive singleton accessors ────────────────────────────────────────────
 //
@@ -143,8 +144,8 @@ static bool referencePointeeGenericMatch(const TurfType *A, const TurfType *B) {
     return false;
   if (A->isEquivalent(B))
     return true;
-  if (dynamic_cast<const TurfGenericParamType *>(A) ||
-      dynamic_cast<const TurfGenericParamType *>(B))
+  if (TypeWalk::containsOpenParam(A, TypeWalk::ParamScope::Bare) ||
+      TypeWalk::containsOpenParam(B, TypeWalk::ParamScope::Bare))
     return true;
   const auto *AGen = dynamic_cast<const GenericType *>(A);
   const auto *BGen = dynamic_cast<const GenericType *>(B);
@@ -195,8 +196,8 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   // BOTH sides to be arrays -- a bare, unwrapped `T` on either side needs to
   // be caught here first, or it would incorrectly fall into "one side is an
   // array, the other isn't -> false".
-  if (dynamic_cast<const TurfGenericParamType *>(From) ||
-      dynamic_cast<const TurfGenericParamType *>(To))
+  if (TypeWalk::containsOpenParam(From, TypeWalk::ParamScope::Bare) ||
+      TypeWalk::containsOpenParam(To, TypeWalk::ParamScope::Bare))
     return true;
 
   // Array compatibility -- handled separately from the generic "exact match"
@@ -246,8 +247,8 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
     // lazy `self` type).
     const TurfType *FromElem = FromArr->getElementType();
     const TurfType *ToElem = ToArr->getElementType();
-    if (dynamic_cast<const TurfGenericParamType *>(FromElem) ||
-        dynamic_cast<const TurfGenericParamType *>(ToElem))
+    if (TypeWalk::containsOpenParam(FromElem, TypeWalk::ParamScope::Bare) ||
+        TypeWalk::containsOpenParam(ToElem, TypeWalk::ParamScope::Bare))
       return true;
     return FromElem->isEquivalent(ToElem);
   }
@@ -266,8 +267,8 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
   // check cares about.
   if (const auto *FromPtr = dynamic_cast<const TurfPointerType *>(From)) {
     if (const auto *ToPtr = dynamic_cast<const TurfPointerType *>(To)) {
-      if (dynamic_cast<const TurfGenericParamType *>(FromPtr->getPointee().get()) ||
-          dynamic_cast<const TurfGenericParamType *>(ToPtr->getPointee().get()))
+      if (TypeWalk::containsOpenParam(FromPtr->getPointee().get(), TypeWalk::ParamScope::Bare) ||
+          TypeWalk::containsOpenParam(ToPtr->getPointee().get(), TypeWalk::ParamScope::Bare))
         return true;
     }
   }
@@ -330,8 +331,8 @@ bool typesCompatible(const TurfType *From, const TurfType *To) {
       if (FA.size() == TA.size()) {
         bool AllArgsCompatible = true;
         for (size_t i = 0; i < FA.size(); ++i) {
-          if (dynamic_cast<const TurfGenericParamType *>(FA[i].get()) ||
-              dynamic_cast<const TurfGenericParamType *>(TA[i].get()))
+          if (TypeWalk::containsOpenParam(FA[i].get(), TypeWalk::ParamScope::Bare) ||
+              TypeWalk::containsOpenParam(TA[i].get(), TypeWalk::ParamScope::Bare))
             continue;
           if (!FA[i]->isEquivalent(TA[i].get())) {
             AllArgsCompatible = false;

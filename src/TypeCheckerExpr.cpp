@@ -24,6 +24,7 @@
 #include "Builtins.h"
 
 #include "TypeCheckerInternal.h"
+#include "TypeWalk.h" // SMP-002: shared containsOpenParam() walker
 
 #include "llvm/ADT/SmallString.h" // `compare` pattern-key exact-value fingerprinting
 
@@ -1097,9 +1098,14 @@ void TypeChecker::visitCast(CastExprAST &Node) {
   // in place as a defensive, should-be-unreachable fallback (see this
   // group's change record's Known pitfalls on why it isn't deleted).
   if (OperandTy) {
+    // SMP-002: TypeWalk::containsOpenParam(..., ParamScope::Bare) is exactly
+    // the bare `dynamic_cast<const TurfGenericParamType *>` this used to
+    // spell out inline -- no unwrapping, no NamedType fallback, mirroring
+    // typesCompatible()'s own Rule 1 top-level check (Types.cpp) which this
+    // bypass was always meant to shadow (STD-003's Fix 3).
     bool EitherSideIsGenericParam =
-        dynamic_cast<const TurfGenericParamType *>(OperandTy.get()) ||
-        dynamic_cast<const TurfGenericParamType *>(DestTy.get());
+        TypeWalk::containsOpenParam(OperandTy.get(), TypeWalk::ParamScope::Bare) ||
+        TypeWalk::containsOpenParam(DestTy.get(), TypeWalk::ParamScope::Bare);
 
     if (!EitherSideIsGenericParam) {
       const std::string SrcName = OperandTy->getName();
