@@ -100,6 +100,12 @@ jobs:
       - name: Run Test Suites (default level)
         run: ./scripts/test_runner.sh
 
+      # SMP-001: unit tests for the compiler query facade
+      # (include/turf/Analysis.h) -- a C++ binary built alongside `turf`,
+      # which test_runner.sh (.tr files only) never runs.
+      - name: Tool API tests (compiler query facade)
+        run: ./build/turf-api-tests
+
       # OPT-001 (docs/development/changes/OPT-001.md, INV-OPT-1): optimization
       # levels must never change a program's observable behaviour. The default
       # run above already exercises the compiler's default level (-O2); these

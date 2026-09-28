@@ -1,0 +1,414 @@
+// SMP-001: unit tests for the compiler query facade (include/turf/Analysis.h).
+//
+// Built as `turf-api-tests` next to `turf` (so the facade finds lib/std the
+// same way the compiler does) and run by CI and scripts/session_postflight.sh.
+// Not a `.tr` test: what is under test is a C++ API and the global state it
+// must leave untouched, neither of which a Turf program can observe.
+//
+// The isolation tests are the point. The facade exists because every tool
+// that drove the pipeline by hand forgot some piece of global state; the
+// only way to catch the next forgotten piece is to run different programs
+// back to back and compare against a clean run, and to check the host's
+// own state afterwards field by field.
+
+#include "turf/Analysis.h"
+
+#include "Lexer.h"
+#include "Parser.h"
+#include "SymbolTable.h"
+#include "Types.h"
+
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include <unistd.h>
+
+namespace fs = std::filesystem;
+
+static int Failures = 0;
+static const char *CurrentTest = "";
+
+#define CHECK(Cond)                                                            \
+  do {                                                                         \
+    if (!(Cond)) {                                                             \
+      ++Failures;                                                              \
+      std::cerr << "FAIL [" << CurrentTest << "] " << __FILE__ << ":"         \
+                << __LINE__ << ": " #Cond "\n";                                \
+    }                                                                          \
+  } while (0)
+
+#define CHECK_EQ(A, B)                                                         \
+  do {                                                                         \
+    auto ValA = (A);                                                           \
+    auto ValB = (B);                                                           \
+    if (!(ValA == ValB)) {                                                     \
+      ++Failures;                                                              \
+      std::cerr << "FAIL [" << CurrentTest << "] " << __FILE__ << ":"         \
+                << __LINE__ << ": " #A " == " #B "\n    got: " << ValA        \
+                << "\n    want: " << ValB << "\n";                             \
+    }                                                                          \
+  } while (0)
+
+static std::string render(const turf::AnalysisResult &R) {
+  std::ostringstream OS;
+  for (const auto &D : R.diagnostics())
+    OS << (D.Level == turf::Severity::Error ? "error" : "warning") << " "
+       << D.Code << " " << D.Where.Path << ":" << D.Where.Line << ":"
+       << D.Where.Col << " " << D.Message << "\n";
+  return OS.str();
+}
+
+static bool hasDiagnostic(const turf::AnalysisResult &R,
+                          const std::string &Fragment) {
+  for (const auto &D : R.diagnostics())
+    if (D.Message.find(Fragment) != std::string::npos)
+      return true;
+  return false;
+}
+
+static std::string typeName(const TurfType *T) {
+  return T ? T->getName() : std::string("<null>");
+}
+
+static const turf::SymbolInfo *findSymbol(const std::vector<turf::SymbolInfo> &S,
+                                          const std::string &Name) {
+  for (const auto &Sym : S)
+    if (Sym.Name == Name)
+      return &Sym;
+  return nullptr;
+}
+
+// A scratch directory for fixtures that must exist on disk (imports resolve
+// against real files). Removed on exit.
+struct ScratchDir {
+  fs::path Root;
+  ScratchDir() {
+    Root = fs::temp_directory_path() /
+           ("turf-api-tests-" + std::to_string(::getpid()));
+    fs::create_directories(Root);
+  }
+  ~ScratchDir() {
+    std::error_code EC;
+    fs::remove_all(Root, EC);
+  }
+  std::string write(const std::string &Name, const std::string &Text) const {
+    fs::path P = Root / Name;
+    std::ofstream(P) << Text;
+    return P.string();
+  }
+};
+
+static const char *CleanProgram = R"(fn add(a: int, b: int): int {
+    return a + b;
+}
+
+fn main(): int {
+    mut total: int = add(1, 2);
+    immut label: string = "x";
+    return total;
+}
+)";
+
+static const char *UndefinedVariable = R"(fn main(): int {
+    return missing;
+}
+)";
+
+static const char *NeverReturnsError = R"(fn f(x: int): !int {
+    return x;
+}
+
+fn main(): int {
+    return 0;
+}
+)";
+
+static void testCleanProgramQueries() {
+  CurrentTest = "clean program queries";
+  auto R = turf::analyze({{"clean.tr", CleanProgram}});
+  CHECK(R.succeeded());
+  CHECK_EQ(render(R), std::string());
+
+  // `return total;` -- line 8, `total` at col 12.
+  CHECK_EQ(typeName(R.typeAt("clean.tr", 8, 12)), std::string("int"));
+  CHECK_EQ(typeName(R.typeAt("clean.tr", 8, 16)), std::string("int"));
+  CHECK(R.typeAt("clean.tr", 8, 17) == nullptr); // just past the name
+  // `immut label: string` -- the declaration itself.
+  CHECK_EQ(typeName(R.typeAt("clean.tr", 7, 11)), std::string("string"));
+  // `add(1, 2)` -- the call's result.
+  CHECK_EQ(typeName(R.typeAt("clean.tr", 6, 22)), std::string("int"));
+
+  auto TotalDef = R.definitionOf("clean.tr", 8, 12);
+  CHECK(TotalDef.has_value());
+  if (TotalDef) {
+    CHECK_EQ(TotalDef->Path, std::string("clean.tr"));
+    CHECK_EQ(TotalDef->Line, 6u);
+  }
+  auto AddDef = R.definitionOf("clean.tr", 6, 22);
+  CHECK(AddDef.has_value());
+  if (AddDef) {
+    CHECK_EQ(AddDef->Path, std::string("clean.tr"));
+    CHECK_EQ(AddDef->Line, 1u);
+  }
+  // A parameter used in the body.
+  auto ParamDef = R.definitionOf("clean.tr", 2, 12);
+  CHECK(ParamDef.has_value());
+  if (ParamDef)
+    CHECK_EQ(ParamDef->Line, 1u);
+  // Whitespace has no definition.
+  CHECK(!R.definitionOf("clean.tr", 4, 1).has_value());
+
+  auto InMain = R.symbolsInScope("clean.tr", 8, 5);
+  const auto *Total = findSymbol(InMain, "total");
+  CHECK(Total && Total->Kind == turf::SymbolKind::Variable);
+  if (Total)
+    CHECK_EQ(typeName(Total->Type), std::string("int"));
+  CHECK(findSymbol(InMain, "label"));
+  const auto *Add = findSymbol(InMain, "add");
+  CHECK(Add && Add->Kind == turf::SymbolKind::Function);
+  CHECK(findSymbol(InMain, "strings")); // a prelude module
+  CHECK(!findSymbol(InMain, "a"));      // add's parameter, not in main
+
+  auto InAdd = R.symbolsInScope("clean.tr", 2, 5);
+  const auto *A = findSymbol(InAdd, "a");
+  CHECK(A && A->Kind == turf::SymbolKind::Parameter);
+  CHECK(!findSymbol(InAdd, "total"));
+
+  // The internal view: the prelude prefix, then the two functions.
+  CHECK_EQ(R.program().size(), R.preludeImportCount() + 2);
+}
+
+static void testErrorDiagnostic() {
+  CurrentTest = "error diagnostic";
+  auto R = turf::analyze({{"undef.tr", UndefinedVariable}});
+  CHECK(!R.succeeded());
+  CHECK_EQ(R.diagnostics().size(), 1u);
+  if (!R.diagnostics().empty()) {
+    const auto &D = R.diagnostics().front();
+    CHECK(D.Level == turf::Severity::Error);
+    CHECK(!D.Code.empty());
+    CHECK_EQ(D.Where.Path, std::string("undef.tr"));
+    CHECK_EQ(D.Where.Line, 2u);
+    CHECK(D.Message.find('\x1b') == std::string::npos);
+    CHECK(D.Hint.find('\x1b') == std::string::npos);
+  }
+}
+
+static void testTopLevelStatementIsADiagnostic() {
+  CurrentTest = "top-level statement";
+  // Parses fine, so it reaches the check (unlike `mut x: int = 1;`, which
+  // the parser already rejects as an unexpected token, CLI and facade
+  // alike).
+  auto R = turf::analyze({{"top.tr", "fn main(): int {\n    return 0;\n}\n"
+                                     "\nmain();\n"}});
+  CHECK(!R.succeeded());
+  CHECK(hasDiagnostic(R, "Statements are not allowed outside of a function"));
+  // The rest of the file is still analysed.
+  CHECK(R.definitionOf("top.tr", 1, 4).has_value());
+}
+
+// Different programs back to back, then the first again: the repeat must
+// match the first run exactly. Anything one analysis leaves behind shows up
+// as a difference here.
+static void testBackToBackAnalysesAreIndependent() {
+  CurrentTest = "back-to-back isolation";
+  std::string First = render(turf::analyze({{"undef.tr", UndefinedVariable}}));
+  std::string Clean = render(turf::analyze({{"clean.tr", CleanProgram}}));
+  std::string Warn = render(turf::analyze({{"warn.tr", NeverReturnsError}}));
+  std::string Again = render(turf::analyze({{"undef.tr", UndefinedVariable}}));
+  CHECK_EQ(Again, First);
+  CHECK_EQ(render(turf::analyze({{"clean.tr", CleanProgram}})), Clean);
+  CHECK_EQ(render(turf::analyze({{"warn.tr", NeverReturnsError}})), Warn);
+}
+
+// The Resolver's "never returns an error" warning was deduplicated through
+// a function-local static that nothing reset: the second analysis of the
+// same file in one process silently lost it.
+static void testWarningSurvivesReanalysis() {
+  CurrentTest = "warning survives re-analysis";
+  auto R1 = turf::analyze({{"warn.tr", NeverReturnsError}});
+  auto R2 = turf::analyze({{"warn.tr", NeverReturnsError}});
+  CHECK(hasDiagnostic(R1, "never actually returns an error"));
+  CHECK(hasDiagnostic(R2, "never actually returns an error"));
+  CHECK(R1.succeeded());
+}
+
+// `unsafe module;` registered its file in a set nothing reset: once a file
+// had been analysed with the pragma, deleting the pragma did not take the
+// capability away.
+static void testUnsafeCapabilityDoesNotOutliveThePragma() {
+  CurrentTest = "unsafe capability is per analysis";
+  const std::string Body = "fn takesRaw(a: ptr): int {\n    return 0;\n}\n\n"
+                           "fn main(): int {\n    return 0;\n}\n";
+  turf::AnalysisOptions Opts;
+  Opts.AllowUnsafeModules = true;
+  auto With = turf::analyze({{"raw.tr", "unsafe module;\n\n" + Body}}, Opts);
+  CHECK_EQ(render(With), std::string());
+  auto Without = turf::analyze({{"raw.tr", Body}}, Opts);
+  CHECK(!Without.succeeded());
+}
+
+// What an embedder had set up before calling analyze() -- a CLI compile in
+// progress, when the SLM Sandbox calls in -- must be exactly as it was.
+static void testHostStateIsRestored() {
+  CurrentTest = "host state restored";
+  InitializeCompilerGlobals();
+  SymbolTable *HostTable = GlobalSymbolTable.get();
+  SourceFilename = "host.tr";
+  MainSourceFilename = "host.tr";
+  SourceLines = {"host line 1", "host line 2"};
+  AllSourceLines["host.tr"] = SourceLines;
+  CurTok = TOK_IDENTIFIER;
+  IdentifierStr = "hostIdent";
+  CurLine = 41;
+  CurCol = 7;
+  g_braceDepth = 2;
+  g_recoverActive = true;
+  g_AllowUnsafeModules = false;
+  DiagnosticEngine::clearDiagnostics();
+  DiagnosticEngine::setCollectAllDiagnostics(false);
+  DiagnosticEngine::add({3, 4, "host.tr"}, "host diagnostic");
+  std::istringstream HostStream("fn host(): int { return 1; }");
+  SetSourceBuffer(HostStream);
+
+  turf::AnalysisOptions Opts;
+  Opts.AllowUnsafeModules = true;
+  auto R = turf::analyze({{"undef.tr", UndefinedVariable}}, Opts);
+  CHECK(!R.succeeded());
+
+  CHECK(GlobalSymbolTable.get() == HostTable);
+  CHECK_EQ(SourceFilename, std::string("host.tr"));
+  CHECK_EQ(MainSourceFilename, std::string("host.tr"));
+  CHECK_EQ(SourceLines.size(), 2u);
+  CHECK(AllSourceLines.count("host.tr") == 1);
+  CHECK(AllSourceLines.count("undef.tr") == 0);
+  CHECK_EQ(CurTok, static_cast<int>(TOK_IDENTIFIER));
+  CHECK_EQ(IdentifierStr, std::string("hostIdent"));
+  CHECK_EQ(CurLine, 41);
+  CHECK_EQ(CurCol, 7);
+  CHECK_EQ(g_braceDepth, 2);
+  CHECK(g_recoverActive);
+  CHECK(!g_AllowUnsafeModules);
+  CHECK(!DiagnosticEngine::getCollectAllDiagnostics());
+  CHECK_EQ(DiagnosticEngine::getDiagnosticCount(), 1u);
+  CHECK(DiagnosticEngine::hasErrorAt(3));
+  CHECK(SourceFile == &HostStream);
+  // The host's stream was not read by the analysis.
+  CHECK_EQ(gettok(), static_cast<int>(TOK_FN));
+
+  g_recoverActive = false;
+  DiagnosticEngine::clearDiagnostics();
+  AllSourceLines.clear();
+  SourceLines.clear();
+  SourceFilename.clear();
+  MainSourceFilename.clear();
+  g_braceDepth = 0;
+}
+
+// Buffers after the first replace the disk text of the file an import
+// loads; diagnostics and definitions inside it name that file.
+static void testImportedModuleOverlay(const ScratchDir &Dir) {
+  CurrentTest = "import overlay";
+  const std::string Main = Dir.write(
+      "main.tr", "import helper;\n\nfn main(): int {\n"
+                 "    return helper::value();\n}\n");
+  const std::string Helper =
+      Dir.write("helper.tr", "fn value(): int {\n    return 1;\n}\n");
+  const std::string MainText =
+      "import helper;\n\nfn main(): int {\n    return helper::value();\n}\n";
+
+  auto OnDisk = turf::analyze({{Main, MainText}});
+  CHECK_EQ(render(OnDisk), std::string());
+  auto Def = OnDisk.definitionOf(Main, 4, 20);
+  CHECK(Def.has_value());
+  if (Def) {
+    CHECK(fs::equivalent(Def->Path, Helper));
+    CHECK_EQ(Def->Line, 1u);
+  }
+
+  // The unsaved edit changes value()'s return type: main no longer checks.
+  auto Edited = turf::analyze(
+      {{Main, MainText},
+       {Helper, "fn value(): string {\n    return \"one\";\n}\n"}});
+  CHECK(!Edited.succeeded());
+
+  // An error inside the edited module is reported against that module.
+  auto Broken = turf::analyze(
+      {{Main, MainText},
+       {Helper, "fn value(): int {\n    return nothing;\n}\n"}});
+  bool InHelper = false;
+  for (const auto &D : Broken.diagnostics())
+    if (D.Level == turf::Severity::Error && fs::equivalent(D.Where.Path, Helper) &&
+        D.Where.Line == 2)
+      InHelper = true;
+  CHECK(InHelper);
+
+  // And the disk copy was never touched.
+  CHECK_EQ(render(turf::analyze({{Main, MainText}})), std::string());
+}
+
+// The same dedupe was keyed by line and column alone, so within ONE compile
+// a fallible function in an imported module hid the warning for the entry
+// file's function at the same line:col.
+static void testWarningDedupeIsPerFile(const ScratchDir &Dir) {
+  CurrentTest = "warning dedupe is per file";
+  const std::string Lib =
+      Dir.write("fallible.tr", "fn g(x: int): !int {\n    return x;\n}\n");
+  const std::string Main = Dir.write("usesfallible.tr", "");
+  auto R = turf::analyze(
+      {{Main, "import fallible;\n\nfn f(x: int): !int {\n    return x;\n}\n"
+              "\nfn main(): int {\n    return 0;\n}\n"},
+       {Lib, "\n\nfn g(x: int): !int {\n    return x;\n}\n"}});
+  int Warnings = 0;
+  for (const auto &D : R.diagnostics())
+    if (D.Message.find("never actually returns an error") != std::string::npos)
+      ++Warnings;
+  CHECK_EQ(Warnings, 2);
+}
+
+static void testLintIsOptIn() {
+  CurrentTest = "lint is opt-in";
+  const char *SelfCompare = "fn main(): int {\n    mut x: int = 1;\n"
+                            "    if x == x {\n        return 1;\n    }\n"
+                            "    return 0;\n}\n";
+  auto Plain = turf::analyze({{"lint.tr", SelfCompare}});
+  turf::AnalysisOptions Opts;
+  Opts.RunLint = true;
+  auto Linted = turf::analyze({{"lint.tr", SelfCompare}}, Opts);
+  CHECK(Linted.diagnostics().size() > Plain.diagnostics().size());
+}
+
+static void testEmptyInput() {
+  CurrentTest = "empty input";
+  auto R = turf::analyze({});
+  CHECK(R.diagnostics().empty());
+  CHECK(R.succeeded());
+  CHECK(R.typeAt("x.tr", 1, 1) == nullptr);
+  CHECK(R.symbolsInScope("x.tr", 1, 1).empty());
+}
+
+int main() {
+  ScratchDir Dir;
+  testCleanProgramQueries();
+  testErrorDiagnostic();
+  testTopLevelStatementIsADiagnostic();
+  testBackToBackAnalysesAreIndependent();
+  testWarningSurvivesReanalysis();
+  testUnsafeCapabilityDoesNotOutliveThePragma();
+  testHostStateIsRestored();
+  testImportedModuleOverlay(Dir);
+  testWarningDedupeIsPerFile(Dir);
+  testLintIsOptIn();
+  testEmptyInput();
+
+  if (Failures) {
+    std::cerr << Failures << " check(s) failed\n";
+    return 1;
+  }
+  std::cout << "turf-api-tests: all checks passed\n";
+  return 0;
+}

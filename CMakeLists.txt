@@ -304,3 +304,13 @@ target_compile_options(turfrt PRIVATE -Wall -Wextra)
 add_executable(turf src/main.cpp)
 
 target_link_libraries(turf PRIVATE turfcore)
+
+# ─── Tool API tests (SMP-001) ────────────────────────────────────────────────
+# Unit tests for the compiler query facade (include/turf/Analysis.h), run by
+# CI next to test_runner.sh. Placed beside `turf` so the facade finds lib/std
+# the way the compiler does. Top-level builds only: turf-lsp pulls this file
+# in with add_subdirectory() for `turfcore` and has no use for the tests.
+if(PROJECT_IS_TOP_LEVEL)
+  add_executable(turf-api-tests tests/api/analysis_test.cpp)
+  target_link_libraries(turf-api-tests PRIVATE turfcore)
+endif()

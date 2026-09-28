@@ -54,6 +54,18 @@ else
   fail "suite is RED — see /tmp/turf_postflight_tests.log"
   grep -E 'FAIL' /tmp/turf_postflight_tests.log | head -10 | sed 's/^/       /'
 fi
+# SMP-001: the tool API's own unit tests -- a C++ binary, not .tr files, so
+# test_runner.sh never sees them.
+if [ $DO_TESTS -eq 1 ]; then
+  if [ ! -x build/turf-api-tests ]; then
+    fail "build/turf-api-tests missing — build before running the postflight"
+  elif ./build/turf-api-tests > /tmp/turf_postflight_api.log 2>&1; then
+    pass "tool API tests (build/turf-api-tests) passing"
+  else
+    fail "tool API tests are RED — see /tmp/turf_postflight_api.log"
+    grep -E 'FAIL' /tmp/turf_postflight_api.log | head -10 | sed 's/^/       /'
+  fi
+fi
 
 # ── 2. lib/std and showcase, compiled directly ──────────────────────────────
 #

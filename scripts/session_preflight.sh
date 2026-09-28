@@ -124,6 +124,15 @@ if [ $DO_TESTS -eq 1 ]; then
       grep -E 'FAIL' /tmp/turf_preflight_tests.log | head -10 | sed 's/^/       /'
       FAILED=$((FAILED + 1))
     fi
+    # SMP-001: the tool API's unit tests (a C++ binary test_runner.sh never sees).
+    if [ -x build/turf-api-tests ]; then
+      if ./build/turf-api-tests > /tmp/turf_preflight_api.log 2>&1; then
+        echo -e "   ${GREEN}✓${RESET} Tool API tests (build/turf-api-tests) passing"
+      else
+        echo -e "   ${RED}✗${RESET} Tool API tests are RED before you have changed anything. See /tmp/turf_preflight_api.log"
+        FAILED=$((FAILED + 1))
+      fi
+    fi
   else
     echo -e "   ${RED}✗${RESET} build/turf missing — cannot run the suite"
     FAILED=$((FAILED + 1))
