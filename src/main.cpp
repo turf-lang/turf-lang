@@ -595,6 +595,23 @@ static int linkObject(const std::string &ObjFile,
   // any system default; the flag order below is deliberate.
   std::string TurfLibDir = TurfInstallRoot() + "/lib";
 
+  // FDN-006 stage 3 (docs/planning/ROADMAP_v2.0.0.md): a missing
+  // `libturfrt.a` used to surface only as `cc`'s own generic
+  // "-lturfrt: No such file" linker error, with no mention of TurfLang, a
+  // TURF_HOME misconfiguration, or what to do about it. Checked here,
+  // BEFORE `cc`/`gcc` is even invoked, so the failure is a TurfLang
+  // diagnostic that names the exact path it looked for -- not a linker
+  // error the user has to already know libturfrt exists to make sense of.
+  std::string TurfLibArchive = TurfLibDir + "/libturfrt.a";
+  if (!llvm::sys::fs::exists(TurfLibArchive)) {
+    std::cerr << "Error: TurfLang runtime library not found at '"
+              << TurfLibArchive << "'.\n";
+    std::cerr << "Check that TURF_HOME (or this compiler's install root, "
+                 "if TURF_HOME is unset) points at a complete TurfLang "
+                 "installation.\n";
+    return 1;
+  }
+
 #ifdef _WIN32
   std::string FinalOutput = OutputName + ".exe";
   std::vector<std::string> Args = {"gcc",       ObjFile, "-o", FinalOutput,

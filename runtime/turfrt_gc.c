@@ -292,6 +292,19 @@ void turf_gc_record_stack_base(void) {
   }
 }
 
+/*
+ * FDN-006 stage 1 (docs/planning/ROADMAP_v2.0.0.md): turfrt_signal.c's
+ * SIGSEGV handler needs `g_stack_base` (the high end of the stack this
+ * function just computed) to tell a guard-page fault near the stack's LOW
+ * end apart from an unrelated wild-pointer SIGSEGV elsewhere in the address
+ * space. Exposed as an accessor, not an `extern` global, for the same
+ * reason `turf_gc_snapshot_stats` is one (turfrt_internal.h's own doc
+ * comment on it) -- this file stays the only one that knows the real
+ * storage. Returns 0 if `turf_gc_record_stack_base()` has not run yet
+ * (should be unreachable: turf_rt_init() calls both, in that order).
+ */
+uintptr_t turf_gc_get_stack_base(void) { return g_stack_base; }
+
 static long find_pin(uintptr_t block_start) {
   for (size_t i = 0; i < g_pin_count; i++)
     if (g_pins[i].block_start == block_start)

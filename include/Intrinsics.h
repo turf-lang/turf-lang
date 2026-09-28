@@ -215,6 +215,13 @@
 //                           above.
 //   turf_rt_pin(p) / turf_rt_unpin(p) -- OVH-010. Reached via `gc_pin(p)`/
 //                           `gc_unpin(p)` above.
+//   turf_rt_abi_2_0() -- FDN-006 stage 3, the compiler/runtime ABI stamp
+//                           (runtime/turfrt_abi.c). Does nothing; called
+//                           once from the compiler-emitted `main` wrapper
+//                           (WrapMainWithRuntimeBootstrap(),
+//                           src/CodegenFunc.cpp) purely so a stale or
+//                           mismatched `libturfrt.a` fails to LINK, never
+//                           reachable from Turf source under any name.
 //
 // TurfTypeDesc (the {size, name, pointer_word_bitmap} struct these
 // functions traffic in) is NOT itself a callable intrinsic, but every

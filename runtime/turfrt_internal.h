@@ -79,6 +79,15 @@ int turf_gc_is_registered(const void *p);
 void turf_gc_record_stack_base(void);
 
 /*
+ * Returns the current thread's recorded stack base (the high address end --
+ * see turf_gc_record_stack_base()'s own doc comment) -- FDN-006's SIGSEGV
+ * handler (turfrt_signal.c) uses this together with RLIMIT_STACK to bound
+ * the guard-page region a stack-overflow fault should land in. 0 if
+ * turf_gc_record_stack_base() has not run yet.
+ */
+uintptr_t turf_gc_get_stack_base(void);
+
+/*
  * Reads the collector's own counters back out for turf_rt_stats() (turfrt.h)
  * to fold into its public TurfRtStats snapshot -- kept as an accessor,
  * rather than extern globals turfrt_alloc.c reads directly, so turfrt_gc.c
@@ -86,5 +95,15 @@ void turf_gc_record_stack_base(void);
  */
 void turf_gc_snapshot_stats(uint64_t *collect_count, uint64_t *live_count,
                              uint64_t *live_bytes, uint64_t *freed_count);
+
+/*
+ * Installs the SIGSEGV/sigaltstack handler (FDN-006 stage 1,
+ * runtime/turfrt_signal.c) that classifies a stack overflow and reports it
+ * through turf_rt_panic() instead of a bare crash. Called once from
+ * turf_rt_init(), AFTER turf_gc_record_stack_base() (the handler reads
+ * g_stack_base via turf_gc_get_stack_base() above). A no-op on a platform
+ * with no implementation (see turfrt_signal.c's own `_WIN32` branch).
+ */
+void turf_rt_install_segv_handler(void);
 
 #endif /* TURFRT_INTERNAL_H */

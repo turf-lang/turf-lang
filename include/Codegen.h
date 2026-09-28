@@ -65,7 +65,8 @@ extern llvm::Function *CurrentFunction;
 // FuncDefExprAST::codegen()'s existing `Name == "main"` special-casing,
 // untouched by this) with a process bootstrap: renames it out of the way,
 // keeps it internal, and emits a NEW function named "main" (the real,
-// external C-ABI entry point) that calls turf_rt_init(), then the
+// external C-ABI entry point) that calls turf_rt_abi_2_0() (FDN-006 stage 3
+// -- the ABI stamp, runtime/turfrt_abi.c), then turf_rt_init(), then the
 // renamed user body (forwarding argc/argv unchanged), then
 // turf_rt_shutdown(), then returns the user body's own result.
 //

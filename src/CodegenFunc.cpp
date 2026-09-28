@@ -199,7 +199,9 @@ static void EnsureArgvHelpers() {
 // post-processing rename+wrapper approach was chosen over threading
 // turf_rt_init/turf_rt_shutdown calls into FuncDefExprAST::codegen()'s own
 // `Name == "main"` branches: that delicate, already-tested argc/argv
-// machinery needs no changes at all this way).
+// machinery needs no changes at all this way). FDN-006 stage 3 added the
+// `turf_rt_abi_2_0()` call alongside `turf_rt_init()` -- see that symbol's
+// own doc comment (runtime/turfrt_abi.c) for why.
 void WrapMainWithRuntimeBootstrap() {
   Function *UserMain = TheModule->getFunction("main");
   if (!UserMain || UserMain->empty())
@@ -230,11 +232,27 @@ void WrapMainWithRuntimeBootstrap() {
                                   "turf_rt_shutdown", TheModule.get());
   }
 
+  // FDN-006 stage 3: the compiler/runtime ABI stamp
+  // (docs/planning/ROADMAP_v2.0.0.md, runtime/turfrt_abi.c). Every compiled
+  // binary's wrapper references this symbol so that linking against a
+  // `libturfrt.a` that predates it (or a hypothetical future ABI-breaking
+  // runtime that renamed it) fails at LINK TIME ("undefined reference to
+  // `turf_rt_abi_2_0`"), never silently at run time against a runtime this
+  // compiler no longer agrees with.
+  Function *AbiStampFn = TheModule->getFunction("turf_rt_abi_2_0");
+  if (!AbiStampFn) {
+    FunctionType *AbiStampFT =
+        FunctionType::get(Type::getVoidTy(*TheContext), false);
+    AbiStampFn = Function::Create(AbiStampFT, Function::ExternalLinkage,
+                                  "turf_rt_abi_2_0", TheModule.get());
+  }
+
   Function *Wrapper =
       Function::Create(FT, Function::ExternalLinkage, "main", TheModule.get());
   BasicBlock *EntryBB = BasicBlock::Create(*TheContext, "entry", Wrapper);
   IRBuilder<> WB(EntryBB);
 
+  WB.CreateCall(AbiStampFn, {});
   WB.CreateCall(InitFn, {});
 
   std::vector<Value *> ForwardedArgs;

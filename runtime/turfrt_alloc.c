@@ -7,7 +7,10 @@
  * before ANY Turf-level code does: recording the stack base conservative
  * scanning needs (turf_gc_record_stack_base(), turfrt_gc.c -- see that
  * file's own top comment for why "a local variable's address inside this
- * function" is the right thing to capture here). turf_rt_shutdown() is
+ * function" is the right thing to capture here), and then (FDN-006 stage 1)
+ * installing the SIGSEGV/sigaltstack handler (turf_rt_install_segv_handler(),
+ * turfrt_signal.c) -- AFTER the stack base is recorded, since the handler
+ * reads it to classify a fault as a stack overflow. turf_rt_shutdown() is
  * unchanged from RT-001/MEM-001 -- still just the opt-in TURF_RT_STATS_DUMP
  * dump; MEM-002 deliberately does NOT run a final collection at shutdown
  * (nothing in §14/§22.2 asks for one, and process exit reclaims everything
@@ -40,6 +43,7 @@ static TurfRtStats g_stats = {0, 0, 0, 0, 0, 0, 0};
 
 void turf_rt_init(void) {
   turf_gc_record_stack_base();
+  turf_rt_install_segv_handler();
 }
 
 void turf_rt_shutdown(void) {

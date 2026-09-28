@@ -365,6 +365,18 @@ void turf_rt_panic(const char *kind, const char *msg, const char *file,
 int turf_rt_typedesc_is_pointer_word(const TurfTypeDesc *desc,
                                       uint64_t word_index);
 
+/*
+ * turf_rt_abi_2_0 -- FDN-006 stage 3, the compiler/runtime ABI stamp
+ * (runtime/turfrt_abi.c has the full contract). Does nothing; every
+ * compiled Turf binary's `main` wrapper calls it
+ * (WrapMainWithRuntimeBootstrap(), src/CodegenFunc.cpp) purely so a stale
+ * or mismatched `libturfrt.a` fails at LINK time ("undefined reference to
+ * `turf_rt_abi_2_0`") instead of silently linking and misbehaving at run
+ * time. Never reachable from Turf source under any name (Rule B2/B3, like
+ * every other symbol in this header).
+ */
+void turf_rt_abi_2_0(void);
+
 #ifdef __cplusplus
 }
 #endif

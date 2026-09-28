@@ -1,0 +1,161 @@
+/*
+ * runtime/turfrt_signal.c -- FDN-006 stage 1
+ * (docs/planning/ROADMAP_v2.0.0.md): turns a stack overflow's bare SIGSEGV
+ * (audit F-20: exit 139, no message) into the same documented
+ * `panic: ...` / abort() (SIGABRT, exit 134) shape every other runtime
+ * safety check already produces, and gives every OTHER SIGSEGV (a real
+ * memory-safety bug in `unsafe` code, or in the compiler/runtime itself) a
+ * message that says so instead of a bare crash.
+ *
+ * Installed once, from turf_rt_init() (runtime/turfrt_alloc.c), before a
+ * single line of Turf-level `main` runs -- same ordering guarantee
+ * `turf_gc_record_stack_base()` already relies on (INV-RT-1).
+ *
+ * ─── Why an alternate signal stack ─────────────────────────────────────
+ * The whole point of this handler is to run WHILE the thread's normal stack
+ * has just been exhausted -- delivering SIGSEGV on that same, already-full
+ * stack would immediately fault again trying to push the handler's own
+ * frame, silently reverting to the bare crash this file exists to prevent.
+ * `sigaltstack()` gives the signal delivery mechanism a separate, small,
+ * always-available region to run the handler on, entirely independent of
+ * how exhausted the thread's real stack is.
+ *
+ * ─── Why the guard-page classification is a bounded WINDOW, not an exact
+ * boundary ─────────────────────────────────────────────────────────────
+ * `RLIMIT_STACK` gives the thread's configured stack size; combined with
+ * `g_stack_base` (turfrt_gc.c, the stack's high end) that gives a
+ * *computed* low limit. The real kernel-enforced guard region sits at or
+ * near that computed address, but a single stack frame that pushes far
+ * past the limit in one instruction (a large local array, deep inlining)
+ * can fault more than a few bytes beyond it -- `TURF_STACK_GUARD_WINDOW`
+ * below is a generous fixed margin on both sides of the computed limit,
+ * chosen the same way this codebase already treats every other
+ * classification pass that can't be made exact (EscapePass, FDN-002):
+ * never claim "stack overflow" for a fault this can't reasonably attribute
+ * to the stack limit (no false positive misdiagnosing a real memory-safety
+ * bug as "just recursion"), but be generous enough that a real overflow is
+ * not missed and misreported as a generic, unhelpful "segmentation fault"
+ * (a documented, honest false-negative-leaning gap, not a bug to "tighten"
+ * without re-testing `39_nullable_references`-style deep-recursion cases
+ * across the frame sizes this compiler actually generates).
+ *
+ * ─── Why `getrlimit`/`RLIM_INFINITY` degrades to "never classify as
+ * overflow" ─────────────────────────────────────────────────────────────
+ * A thread with an unlimited or unqueryable stack limit gives this file no
+ * address to compare against at all -- reporting EVERY SIGSEGV as "stack
+ * overflow" in that case would misdiagnose a real memory-safety bug just as
+ * badly as the reverse. Every SIGSEGV degrades to the generic
+ * "segmentation fault" message instead, which is still strictly better than
+ * this group's own starting point (a bare, message-less crash).
+ *
+ * ─── Signal-handler safety, disclosed ───────────────────────────────────
+ * Both branches below call functions (`turf_rt_panic`, `fprintf`) that are
+ * not on POSIX's async-signal-safe list -- `abort()` itself IS safe to call
+ * from a signal handler (POSIX.1-2008), but the stdio calls that build the
+ * message first are not, strictly. This is a deliberate, accepted trade-off
+ * the same way libturfrt's other panics already are: the process is about
+ * to terminate either way, and the alternative (a hand-rolled
+ * `write(2)`-only formatter, no floating-point/pointer-to-string via
+ * stdio) would need its own integer/pointer-to-hex formatter duplicated
+ * from nothing. The one real hazard this accepts: if the fault happened
+ * while the crashing thread already held stdio's internal FILE lock (mid
+ * `printf`), the handler's own `fprintf`/`turf_rt_panic` call could
+ * deadlock rather than print -- in which case the process still terminates
+ * (no output, but no worse than the pre-FDN-006 bare SIGSEGV), it simply
+ * loses the diagnostic message on that specific interleaving. Recorded here
+ * rather than silently assumed away; see FDN-006.md's *Known pitfalls*.
+ */
+
+#include "turfrt.h"
+#include "turfrt_internal.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#if !defined(_WIN32)
+#include <signal.h>
+#include <sys/resource.h>
+
+/* Well above MINSIGSTKSZ/SIGSTKSZ on every platform this project targets
+ * (Tier 1/2, ROADMAP_v2.0.0.md DEC-2) -- a fixed constant rather than the
+ * runtime `sysconf`-based SIGSTKSZ some libcs now define, so this is a
+ * plain static array, not a malloc'd buffer this file would need to
+ * remember to free (it never does; it lives for the process's whole
+ * life). */
+#define TURF_ALTSTACK_SIZE (64 * 1024)
+static unsigned char g_altstack[TURF_ALTSTACK_SIZE];
+
+#define TURF_STACK_GUARD_WINDOW ((uintptr_t)(256 * 1024))
+
+static void turf_rt_segv_handler(int sig, siginfo_t *info, void *ucontext) {
+  (void)sig;
+  (void)ucontext;
+
+  uintptr_t fault_addr = (uintptr_t)info->si_addr;
+  uintptr_t stack_base = turf_gc_get_stack_base();
+  int is_stack_overflow = 0;
+
+  if (stack_base != 0 && fault_addr != 0) {
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY &&
+        stack_base > (uintptr_t)rl.rlim_cur) {
+      uintptr_t stack_limit = stack_base - (uintptr_t)rl.rlim_cur;
+      uintptr_t window_lo = (stack_limit > TURF_STACK_GUARD_WINDOW)
+                                 ? stack_limit - TURF_STACK_GUARD_WINDOW
+                                 : 0;
+      uintptr_t window_hi = stack_limit + TURF_STACK_GUARD_WINDOW;
+      if (fault_addr >= window_lo && fault_addr <= window_hi)
+        is_stack_overflow = 1;
+    }
+  }
+
+  if (is_stack_overflow) {
+    turf_rt_panic("stack overflow",
+                  "the call stack exceeded its limit -- check for unbounded "
+                  "or missing-base-case recursion",
+                  "<runtime>", 0);
+  } else {
+    fprintf(stderr,
+            "panic: segmentation fault (this is a bug in unsafe code or in "
+            "TurfLang) at address %p\n",
+            info->si_addr);
+    fflush(stderr);
+    abort();
+  }
+}
+
+void turf_rt_install_segv_handler(void) {
+  stack_t ss;
+  ss.ss_sp = g_altstack;
+  ss.ss_size = sizeof(g_altstack);
+  ss.ss_flags = 0;
+  if (sigaltstack(&ss, NULL) != 0)
+    return; /* Best-effort: without an altstack the handler can't safely run
+              * on a stack that's already exhausted -- leave SIGSEGV at its
+              * default disposition (today's bare-crash behaviour) rather
+              * than risk a second fault delivering INSIDE the handler. */
+
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_sigaction = turf_rt_segv_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+  sigaction(SIGSEGV, &sa, NULL);
+}
+
+#else /* _WIN32 */
+
+/*
+ * FUTURE (ROADMAP_v2.0.0.md DEC-2: Windows is not Tier 1/2 for 2.0). A
+ * Windows stack overflow is not delivered as SIGSEGV at all -- it's a
+ * Structured Exception (STATUS_STACK_OVERFLOW), a completely different
+ * mechanism (a vectored exception handler, not sigaction/sigaltstack) --
+ * so there is nothing to wire up here without a real Windows port. A crash
+ * on Windows is unchanged from before FDN-006, exactly as it already is for
+ * `TURF_GC_STACKBASE_WIN32`'s own untested-on-real-hardware status
+ * (INVARIANTS.md INV-RT-4).
+ */
+void turf_rt_install_segv_handler(void) {}
+
+#endif
