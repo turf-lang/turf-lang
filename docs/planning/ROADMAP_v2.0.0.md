@@ -15,8 +15,12 @@
 > (reference and array escape rules) is also done** — see
 > `docs/development/changes/FDN-002.md` (landed 2026-09-27; its design was
 > stated directly in this roadmap rather than needing a DEC- decision,
-> frozen as `FREEZE.md` §6.13); the rest
-> of Phase 1 and all of Phases 2+ remain unimplemented. Items marked
+> frozen as `FREEZE.md` §6.13). **`SMP-001` (compiler query facade) is
+> in progress** — the facade and the Sandbox port landed 2026-09-28; the
+> `turf-lsp` port (stage 3, its own repository) remains — see
+> `docs/development/changes/SMP-001.md`. Part I's sequence has the
+> current state of every Phase 1 item; the rest of Phase 1 and all of
+> Phases 2+ remain unimplemented. Items marked
 > **DECISION** need an explicit answer from the project owner before their
 > session starts; each carries a recommendation so the default is never
 > ambiguous.
@@ -105,7 +109,7 @@ PHASE 1  Foundation                   SMP-002  one generic type walker      DONE
    │                                  FDN-002  reference & array escape rules  DONE (FDN-002.md, 2026-09-27)
    │                                  FDN-004  string indexing: bounds + `char` (D17)  DONE (FDN-004.md, 2026-09-28)
    │                                  FDN-006  runtime contract (stack overflow, OOM, ABI stamp)  DONE (FDN-006.md, 2026-09-28)
-   │                                  SMP-001  compiler query facade (parallel, any time in 1–2)
+   │                                  SMP-001  compiler query facade (parallel, any time in 1–2)  stages 1–2 DONE, turf-lsp port pending (SMP-001.md, 2026-09-28)
    │                                  FDN-005  GC hardening (starts here, runs to RC)
    ▼
 PHASE 2  Language & ecosystem         LEC-002  visibility — `pub` (D13)

@@ -1044,6 +1044,48 @@ record's *Unresolved questions* for why.
 
 ---
 
+## 8. Running the front end from a tool: the query facade
+
+Everything above runs inside `main.cpp`, once per process, on state that
+lives in process-wide globals: the lexer cursor, `GlobalSymbolTable`, the
+diagnostic list, the import caches, the `setjmp` recovery buffer. Anything
+that runs the front end a *second* time in the same process — an editor
+re-checking a buffer on every keystroke, the SLM Sandbox validating a fix
+while the compile that raised the diagnostic is still mid-flight — has to
+set those up fresh and put the originals back afterwards.
+
+`include/turf/Analysis.h` (SMP-001) is the one way to do that.
+`turf::analyze(buffers, options)` parses the first buffer as the entry
+file (the rest stand in for the disk text of any module an import loads),
+runs the Resolver and TypeChecker with per-declaration recovery, never runs
+Codegen, and returns an `AnalysisResult` that owns the AST, the Resolver,
+the TypeChecker's inferred types and the diagnostics, and answers
+`typeAt`/`definitionOf`/`symbolsInScope` from a position index built while
+the Resolver walked the program (its scope-snapshot callback). The
+save/restore itself is `GlobalStateScope` in `src/AnalysisFacade.cpp`,
+composed from one hook per subsystem that keeps state across calls:
+`PushParserCompileState()` (`Parser.h`), `PushResolverCompileState()`
+(`Resolver.h`), `DiagnosticEngine::saveState()` (`Lexer.h`). Those hooks
+have no other caller (`scripts/check_boundary.sh` check 7, INV-API-1): a
+second, hand-written save/restore is exactly what kept breaking before.
+
+Two consequences worth knowing before adding anything to the front end:
+
+- **New per-compile state needs a home in one of those hooks.** A global,
+  or a function-local `static`, that one compile fills and a later compile
+  reads will leak between analyses. `tests/api/analysis_test.cpp` (built as
+  `build/turf-api-tests`) runs different programs back to back and compares
+  against clean runs, which is how the three leaks SMP-001 fixed were
+  confirmed — see `docs/development/changes/SMP-001.md`.
+- **Diagnostics that come from Codegen are not in an analysis.** The CFG
+  passes (§6: definite assignment, escape rules, liveness, ...) and
+  instantiation-time errors from the monomorphizer (§7) run only in a real
+  compile, so a tool sees fewer diagnostics than `turf` prints for the same
+  file. `AnalysisOptions::RunLint` adds the linter, the one Codegen-time
+  check that does not need Codegen.
+
+---
+
 ## Summary: file map
 
 | Stage | Primary files |
@@ -1057,3 +1099,4 @@ record's *Unresolved questions* for why.
 | Type system | `include/Types.h`, `src/Types.cpp` |
 | Generic type walker | `include/TypeWalk.h`, `src/TypeWalk.cpp` |
 | Driver | `src/main.cpp` |
+| Query facade (tool API) | `include/turf/Analysis.h`, `src/AnalysisFacade.cpp`; tests in `tests/api/analysis_test.cpp` |
