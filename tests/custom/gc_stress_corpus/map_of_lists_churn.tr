@@ -1,0 +1,94 @@
+// tests/custom/gc_stress_corpus/map_of_lists_churn.tr
+// FDN-005 stage 1 (docs/planning/ROADMAP_v2.0.0.md): the roadmap's own
+// "a Map<string, List<string>> churned for 10^7 operations" item. Lives
+// under tests/custom/ (excluded from test_runner.sh, AGENTS.md) for the
+// same reason million_node_graph_churn.tr does -- run only by
+// scripts/gc_stress_corpus_smoke.sh, never under FDN-005 stage 2's
+// TURF_GC_STRESS=1 (a per-allocation-collection cost applied to this
+// file's own operation count would not finish in any CI-reasonable time,
+// for the identical reason documented in that file's own header).
+//
+// Every `put()` on an already-present key drops the OLD List<string>
+// value AND its two string elements as garbage (Map.put()'s own
+// dense-array overwrite, lib/std/collections/map.tr) -- a genuinely
+// different GC shape than million_node_graph_churn.tr's "one large graph
+// stays live" stress: this one is sustained, high-volume garbage
+// generation (a small live working set, a large cumulative allocation
+// count) through a data structure -- Map<K,V> -- that is itself a
+// stdlib-generic type built on List<K>/List<V>'s own growth machinery,
+// so it exercises precise tracing of a Map's dense arrays holding STRING
+// keys and List<string> VALUES (each of which is itself a GC object
+// holding two more GC-heap strings) all at once.
+import map::Map;
+import list::List;
+import strings;
+import test;
+import io;
+
+fn keyFor(i: int): string {
+    return i to string;
+}
+
+fn buildValues(tag: int): List<string> {
+    mut l: List<string> = List::default();
+    l.push("v" + (tag to string));
+    l.push("w" + (tag to string));
+    return l;
+}
+
+fn main(): int {
+    immut nKeys: int = 500;
+    immut ops: int = 10000000;
+
+    mut m: Map<string, List<string>> = Map::default();
+    mut expectedTag: List<int> = List::default();
+
+    // Seed: every key present once, tagged with its own index.
+    mut i: int = 0;
+    while i < nKeys {
+        m.put(keyFor(i), buildValues(i));
+        expectedTag.push(i);
+        i = i + 1;
+    }
+
+    // Churn: repeatedly overwrite a rotating key's value. Each overwrite
+    // drops the previous List<string> (and its two strings) as garbage;
+    // by the end, `ops` cumulative List<string>+2-string allocations have
+    // been made and dropped, while the map itself never grows past
+    // `nKeys` live entries.
+    mut op: int = 0;
+    while op < ops {
+        immut k: int = op % nKeys;
+        immut tag: int = k + op;
+        m.put(keyFor(k), buildValues(tag));
+        expectedTag.set(k, tag);
+        op = op + 1;
+
+        // Periodic forced collection, matching the roadmap's own "asserts
+        // content integrity at the end and bounded RSS" -- also proves
+        // the map's own live entries (each still reachable through `m`)
+        // survive a collection mid-churn, not just after the loop ends.
+        if op % 200000 == 0 {
+            gc_collect();
+        }
+    }
+
+    gc_collect();
+
+    // Final integrity: every key still present, mapped to the LAST value
+    // written for it.
+    i = 0;
+    while i < nKeys {
+        test::assert(m.contains(keyFor(i)), "key still present after churn");
+        mut vals: List<string> = m.get(keyFor(i));
+        immut tag: int = expectedTag.get(i);
+        test::assert(vals.length() == 2, "value list has exactly 2 elements after churn");
+        test::assert(vals.get(0) == "v" + (tag to string), "first element matches the last write for this key");
+        test::assert(vals.get(1) == "w" + (tag to string), "second element matches the last write for this key");
+        i = i + 1;
+    }
+    test::assert(m.length() == nKeys, "map never grew past nKeys live entries despite ops overwrites");
+
+    io::printline("gc_stress_corpus/map_of_lists_churn PASS: Map<string, List<string>> survives high-volume churn with correct final content");
+    return 0;
+}
