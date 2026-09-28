@@ -44,6 +44,8 @@ Thumbs.db
 # File Binary
 turf
 program
+# ...but not the tool API's header directory (include/turf/Analysis.h, SMP-001)
+!include/turf/
 
 # Models
 models/

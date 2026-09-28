@@ -1150,7 +1150,7 @@ bool verifySuggestion(AISuggestion &suggestion, int errorLine,
     for (const auto &diag : sandbox->getValidationDiagnostics()) {
       if (!joined.empty())
         joined += " | ";
-      joined += diag.Msg;
+      joined += diag.Message;
     }
     *outDiagnostics = joined;
   }

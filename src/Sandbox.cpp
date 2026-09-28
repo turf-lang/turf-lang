@@ -18,11 +18,11 @@
 #include "Sandbox.h"
 #include "Codegen.h"
 #include "Colors.h"
-#include "CompileBuffer.h"
 #include "Lexer.h"
 #include "Lint.h"
 #include "Parser.h"
 #include "SLMIntegration.h"
+#include "turf/Analysis.h"
 
 #include <algorithm>
 #include <cctype>
@@ -89,9 +89,8 @@ static std::vector<std::string> splitLines(const std::string &text) {
   return lines;
 }
 
-// Joins source lines back into a single buffer for CompileBufferBestEffort()
-// (CompileBuffer.h), which takes an in-memory buffer rather than a file path
-// -- no temp file needed.
+// Joins source lines back into a single buffer for turf::analyze(), which
+// takes in-memory text rather than a file path -- no temp file needed.
 static std::string joinSourceLines(const std::vector<std::string> &source) {
   std::string joined;
   for (const auto &line : source) {
@@ -101,12 +100,13 @@ static std::string joinSourceLines(const std::vector<std::string> &source) {
   return joined;
 }
 
-// Runs the real semantic pipeline (parse -> resolve -> typecheck, via
-// CompileBufferBestEffort()) over `source`, then additionally runs the
-// built-in Linter (shadowing/unreachable-code/void-assignment/etc.) over the
-// resulting AST -- CompileBufferBestEffort() deliberately does not lint (see
-// its own doc comment), so this is the one extra step needed to match what
-// a real compile of this buffer would actually report.
+// Runs the real semantic pipeline (parse -> resolve -> typecheck, plus the
+// built-in Linter a real compile runs during Codegen -- shadowing/
+// unreachable-code/void-assignment/etc.) over `source` through the query
+// facade (include/turf/Analysis.h), which owns every save/restore of global
+// compiler state this needs. That matters more here than for any other
+// caller: this runs from inside DiagnosticEngine::add() while the real
+// compile that raised the diagnostic is still mid-flight.
 //
 // This replaces what used to be TWO separate, much shallower passes here
 // (runParseOnlyPass()/runParseAndLintPass(), removed) that only ever
@@ -120,49 +120,30 @@ static std::string joinSourceLines(const std::vector<std::string> &source) {
 static bool runFullSemanticPass(const std::vector<std::string> &sourceLines,
                                 const std::string &asIfPath,
                                 std::unique_ptr<ExprAST> &parsedASTOut,
-                                std::vector<DiagnosticEngine::Diag> &diagsOut) {
-  CompileBufferResult Result =
-      CompileBufferBestEffort(joinSourceLines(sourceLines), asIfPath);
+                                std::vector<turf::Diagnostic> &diagsOut) {
+  turf::AnalysisOptions Options;
+  Options.AllowUnsafeModules = g_AllowUnsafeModules;
+  Options.RunLint = true;
+  turf::AnalysisResult Result =
+      turf::analyze({{asIfPath, joinSourceLines(sourceLines)}}, Options);
 
-  bool astOk = Result.AST != nullptr;
-  diagsOut = std::move(Result.Diagnostics);
-  parsedASTOut = std::move(Result.AST);
+  diagsOut = Result.diagnostics();
 
-  // Run the built-in Linter over the same AST CompileBufferBestEffort() just
-  // resolved/typechecked, so lint-level errors (e.g. void-function-result
-  // assignment) are still caught -- CompileBufferBestEffort() itself never
-  // lints. Guarded by the same per-call recovery pattern used everywhere
-  // else in this file: LintExpression() can raise a TurfError, which
-  // longjmps, and there is no other setjmp() active at this call site.
-  if (parsedASTOut) {
-    auto savedDiagnostics = DiagnosticEngine::getDiagnostics();
-    auto savedCollectAll = DiagnosticEngine::getCollectAllDiagnostics();
-    DiagnosticEngine::clearDiagnostics();
-    DiagnosticEngine::setCollectAllDiagnostics(true);
+  // The user's own declarations only -- the synthetic prelude imports ahead
+  // of them are not in the original program AST either (captureCompilerState()
+  // below), and computeChangedNodes() diffs the two.
+  std::vector<std::unique_ptr<ExprAST>> UserDecls;
+  const auto &Program = Result.program();
+  for (size_t i = Result.preludeImportCount(); i < Program.size(); ++i)
+    UserDecls.push_back(CloneExprAST(Program[i].get()));
+  parsedASTOut = std::make_unique<BlockExprAST>(std::move(UserDecls));
 
-    jmp_buf savedJmpBuf;
-    std::memcpy(savedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
-    bool savedRecoverActive = g_recoverActive;
-    g_recoverActive = true;
-    if (setjmp(g_recoverJmp) == 0) {
-      LintExpression(parsedASTOut.get());
-    }
-    g_recoverActive = savedRecoverActive;
-    std::memcpy(g_recoverJmp, savedJmpBuf, sizeof(jmp_buf));
-
-    auto lintDiags = DiagnosticEngine::getDiagnostics();
-    DiagnosticEngine::setCollectAllDiagnostics(savedCollectAll);
-    DiagnosticEngine::restoreDiagnostics(savedDiagnostics);
-
-    diagsOut.insert(diagsOut.end(), lintDiags.begin(), lintDiags.end());
-  }
-
-  // A fix is "valid" when it produces a parseable AST with no ERROR-level
-  // diagnostics. Warnings must NOT count as validation failures: they don't
-  // stop a real compile (`turf file.tr` emits the binary and exits 0 with
-  // warnings present), and a warning is frequently pre-existing in the
-  // original source rather than introduced by the fix. Counting warnings here
-  // was silently sinking otherwise-correct fixes -- found while benchmarking:
+  // A fix is "valid" when it produces no ERROR-level diagnostics. Warnings
+  // must NOT count as validation failures: they don't stop a real compile
+  // (`turf file.tr` emits the binary and exits 0 with warnings present), and
+  // a warning is frequently pre-existing in the original source rather than
+  // introduced by the fix. Counting warnings here was silently sinking
+  // otherwise-correct fixes -- found while benchmarking:
   // fail_machine_duplicate_edge.tr's correct fix (drop the duplicate edge)
   // re-parsed cleanly with zero errors but ONE warning ("Idle has no incoming
   // transitions", inherent to that machine and present in the original too),
@@ -171,17 +152,10 @@ static bool runFullSemanticPass(const std::vector<std::string> &sourceLines,
   // legitimately still warns (shadowing, unreachable code, a state machine
   // with a source/sink state, ...), not just this one case. The authoritative
   // "did we make things worse" check is isOriginalErrorResolved(), which
-  // already compares ERROR lines only (it filters `!IsWarning`) -- so leaving
-  // warnings in diagsOut here is correct: they stay visible to that check
-  // without falsely failing this one.
-  bool hasError = false;
-  for (const auto &d : diagsOut) {
-    if (!d.IsWarning) {
-      hasError = true;
-      break;
-    }
-  }
-  return astOk && !hasError;
+  // already compares ERROR lines only -- so leaving warnings in diagsOut here
+  // is correct: they stay visible to that check without falsely failing
+  // this one.
+  return Result.succeeded();
 }
 
 Sandbox::Sandbox(const std::vector<std::string> &SourceLines) {
@@ -416,33 +390,19 @@ void Sandbox::updateSymbolTableAfterFix(int lineNumber,
 
 bool Sandbox::validate() {
   // Clear any previous validation diagnostics
-  Snapshot.Diagnostics.clear();
+  ValidationDiagnostics.clear();
   ChangedNodeIDs.clear();
 
-  // Save the global state so we can restore it after validation
-  // (CompileBufferBestEffort() saves/restores everything it directly
-  // touches itself -- see its own doc comment -- but SourceLines and the
-  // diagnostics list are still ours to manage here since Snapshot.Diagnostics
-  // needs to observe the sandboxed compile's diagnostics specifically).
-  auto savedSourceLines = SourceLines;
-  auto savedDiagnostics = DiagnosticEngine::getDiagnostics();
-
-  SourceLines = Snapshot.SourceCode;
-  DiagnosticEngine::clearDiagnostics();
-
+  // Analysed as if it were the file being compiled: its own path is what
+  // its relative imports resolve against.
   bool validationSucceeded = runFullSemanticPass(
-      Snapshot.SourceCode, SourceFilename, Snapshot.AST, Snapshot.Diagnostics);
+      Snapshot.SourceCode, SourceFilename, Snapshot.AST, ValidationDiagnostics);
 
   // If validation succeeded, compute which AST nodes changed
   // This enables incremental semantic validation in future passes
   if (validationSucceeded) {
     computeChangedNodes();
   }
-
-  // Restore global state
-  SourceLines = savedSourceLines;
-  // Restore diagnostics without re-triggering SLM augmentation
-  DiagnosticEngine::restoreDiagnostics(savedDiagnostics);
 
   IsValid = validationSucceeded;
 
@@ -466,7 +426,6 @@ bool Sandbox::validateIncremental() {
   // call validate() directly) preserves the call sites' existing intent
   // ("something changed, please tell me if it's still broken") without
   // implying a semantic shortcut that no longer exists.
-  Snapshot.Diagnostics.clear();
   ChangedNodeIDs.clear();
   return validate();
 }
@@ -481,17 +440,19 @@ bool Sandbox::isOriginalErrorResolved(int errorLine) const {
   }
 
   // Check that the original error at errorLine is no longer present
-  for (const auto &diag : Snapshot.Diagnostics) {
-    if (diag.Loc.Line == errorLine && !diag.IsWarning) {
+  for (const auto &diag : ValidationDiagnostics) {
+    if (diag.Level == turf::Severity::Error &&
+        static_cast<int>(diag.Where.Line) == errorLine) {
       return false;
     }
   }
 
   // Check that no NEW error lines were introduced by the fix.
   // A new error line is one that has an error now but did not before the fix.
-  for (const auto &diag : Snapshot.Diagnostics) {
-    if (!diag.IsWarning &&
-        originalErrorLines.find(diag.Loc.Line) == originalErrorLines.end()) {
+  for (const auto &diag : ValidationDiagnostics) {
+    if (diag.Level == turf::Severity::Error &&
+        originalErrorLines.find(static_cast<int>(diag.Where.Line)) ==
+            originalErrorLines.end()) {
       return false;
     }
   }

@@ -450,8 +450,8 @@ void DiagnosticEngine::flushAll() {
     // user merely `import`ed, never wrote) is a "system-module warning" --
     // suppressed at PRINT time only (Diagnostics itself, getDiagnostics(),
     // and getDiagnosticCount() are untouched, so nothing that inspects
-    // diagnostics directly -- Sandbox.cpp, ParserModule.cpp's speculative-
-    // parse retry, CompileBuffer.cpp -- changes behavior). An error is
+    // diagnostics directly -- ParserModule.cpp's speculative-parse retry,
+    // the query facade (AnalysisFacade.cpp) -- changes behavior). An error is
     // never filtered here: only IsWarning diagnostics reach this check.
     if (D.IsWarning && !g_ShowStdlibWarnings && IsLibStdWarningLocation(D.Filename))
       continue;

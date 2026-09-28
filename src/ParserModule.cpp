@@ -33,6 +33,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -97,40 +98,96 @@ void ClearParsedTopLevelASTs() {
   UnsafeTopLevelDecls.clear();
 }
 
-std::vector<std::unique_ptr<ExprAST>> SwapParsedTopLevelASTs(std::vector<std::unique_ptr<ExprAST>> New) {
-  std::vector<std::unique_ptr<ExprAST>> Old = std::move(ParsedTopLevelASTs);
-  ParsedTopLevelASTs = std::move(New);
-  return Old;
-}
 
-// Saved (ImportedFiles, ImportStack) pairs, pushed/popped alongside
-// SwapParsedTopLevelASTs() by anything that runs a SECOND, isolated parse
-// pass in the same process as an already-in-progress or already-finished
-// compile (Sandbox.cpp's temp-file validation passes today; a future
-// buffer-compile library entry point tomorrow -- see issue #233). Without
-// this, a sandboxed pass ran with the REAL compile's ImportedFiles cache
-// still warm: re-`import`ing a module the real compile had already fully
-// parsed silently returned an empty block for the SANDBOXED buffer too
-// (ParseFile()'s cache-hit fast path, `include/Parser.h`), even though that
-// import is genuinely new work for this isolated pass. ImportStack is
-// included for symmetry/safety even though it should always be empty at
-// push/pop time in practice -- see ClearParsedTopLevelASTs()'s doc comment.
-// A vector-of-pairs (not a single saved slot) so nested save/restore is
-// safe, matching SwapParsedTopLevelASTs' own move-in/move-out shape.
-static std::vector<std::pair<std::unordered_set<std::string>, std::vector<ImportStackFrame>>>
-    SavedImportCycleStates;
+// LANG-002/STD-001: files that parsed a leading `unsafe module;` capability
+// pragma (ParseLeadingUnsafeModuleDecl() below), keyed by the SAME
+// real_path()-canonicalized form HasRawPointerCapability() queries with, so
+// registration and lookup can never disagree over path spelling
+// (relative-vs-absolute, symlinks, "./"). Re-registering the same file
+// across the pre-pass/main-pass/import re-parses this compiler does is
+// harmless (std::set::insert on an existing key is a no-op) -- see
+// ParseFile()'s own comment on why a file's content can be parsed more than
+// once in a single compile.
+static std::set<std::string> UnsafeModuleFiles;
 
-void PushImportCycleState() {
-  SavedImportCycleStates.emplace_back(std::move(ImportedFiles), std::move(ImportStack));
+// SMP-001: the source text of files an embedder has open but not saved,
+// keyed by CanonicalOrOriginal() path. Consulted by ParseFile() before
+// disk, so an import of an edited module sees the editor's text. Set only
+// by the query facade (src/AnalysisFacade.cpp), inside its own
+// PushParserCompileState()/PopParserCompileState() bracket -- empty for
+// every CLI compile.
+static std::map<std::string, std::string> SourceOverlays;
+
+// SMP-001: AnalysisOptions::InstallRoot. Empty means TurfInstallRoot()'s
+// ordinary TURF_HOME / executable-relative lookup.
+static std::string InstallRootOverride;
+
+static std::string CanonicalOrOriginal(const std::string &Path);
+
+// Everything in this file that one compile accumulates and a second,
+// isolated compile in the same process must neither see nor disturb. A
+// stack, not one saved slot, so an isolated compile can itself run inside
+// another (the SLM Sandbox validates a fix while the real compile that
+// raised the diagnostic is still mid-flight).
+//
+// UnsafeTopLevelDecls and UnsafeModuleFiles were once left out of the older
+// Push/PopImportCycleState() pair this replaces, and nothing else reset
+// them between compiles either: a file analysed once with `unsafe module;`
+// kept the raw-pointer capability in every later analysis after the pragma
+// was deleted, and UnsafeTopLevelDecls kept raw pointers to freed AST
+// nodes, which a later compile's nodes could be allocated on top of.
+struct ParserCompileState {
+  std::vector<std::unique_ptr<ExprAST>> ParsedTopLevelASTs;
+  std::unordered_set<std::string> ImportedFiles;
+  std::vector<ImportStackFrame> ImportStack;
+  std::unordered_set<const ExprAST *> UnsafeTopLevelDecls;
+  std::set<std::string> UnsafeModuleFiles;
+  std::map<std::string, std::string> SourceOverlays;
+  std::string InstallRootOverride;
+};
+static std::vector<ParserCompileState> SavedParserCompileStates;
+
+void PushParserCompileState() {
+  SavedParserCompileStates.push_back(
+      {std::move(ParsedTopLevelASTs), std::move(ImportedFiles),
+       std::move(ImportStack), std::move(UnsafeTopLevelDecls),
+       std::move(UnsafeModuleFiles), std::move(SourceOverlays),
+       std::move(InstallRootOverride)});
+  ParsedTopLevelASTs.clear();
   ImportedFiles.clear();
   ImportStack.clear();
+  UnsafeTopLevelDecls.clear();
+  UnsafeModuleFiles.clear();
+  SourceOverlays.clear();
+  InstallRootOverride.clear();
 }
 
-void PopImportCycleState() {
-  auto &Saved = SavedImportCycleStates.back();
-  ImportedFiles = std::move(Saved.first);
-  ImportStack = std::move(Saved.second);
-  SavedImportCycleStates.pop_back();
+void PopParserCompileState() {
+  auto &Saved = SavedParserCompileStates.back();
+  ParsedTopLevelASTs = std::move(Saved.ParsedTopLevelASTs);
+  ImportedFiles = std::move(Saved.ImportedFiles);
+  ImportStack = std::move(Saved.ImportStack);
+  UnsafeTopLevelDecls = std::move(Saved.UnsafeTopLevelDecls);
+  UnsafeModuleFiles = std::move(Saved.UnsafeModuleFiles);
+  SourceOverlays = std::move(Saved.SourceOverlays);
+  InstallRootOverride = std::move(Saved.InstallRootOverride);
+  SavedParserCompileStates.pop_back();
+}
+
+void SetSourceOverlay(const std::string &Path, const std::string &Text) {
+  SourceOverlays[CanonicalOrOriginal(Path)] = Text;
+}
+
+void SetInstallRootOverride(const std::string &Root) {
+  InstallRootOverride = Root;
+}
+
+// The overlay text for Path, or null when the file should be read from disk.
+static const std::string *FindSourceOverlay(const std::string &Path) {
+  if (SourceOverlays.empty())
+    return nullptr;
+  auto It = SourceOverlays.find(CanonicalOrOriginal(Path));
+  return It == SourceOverlays.end() ? nullptr : &It->second;
 }
 
 void RecordParsedTopLevelAST(const ExprAST *AST) {
@@ -257,9 +314,16 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
         std::vector<std::unique_ptr<ExprAST>>{});
   }
 
-  std::ifstream ImportFile(Path);
-  if (!ImportFile.is_open()) {
-    return nullptr;
+  // An embedder's unsaved buffer for this file wins over the disk copy
+  // (SetSourceOverlay(), SMP-001). Both streams live for the rest of this
+  // function, which is as long as LGuard keeps SourceFile pointed at one.
+  const std::string *Overlay = FindSourceOverlay(Path);
+  std::istringstream OverlayFile(Overlay ? *Overlay : std::string());
+  std::ifstream ImportFile;
+  if (!Overlay) {
+    ImportFile.open(Path);
+    if (!ImportFile.is_open())
+      return nullptr;
   }
 
   // NOTE (issue #242 follow-up, found via code review): NOT inserted into
@@ -353,7 +417,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   } LGuard;
 
   // Set new lexer state
-  SourceFile = &ImportFile;
+  SourceFile = Overlay ? static_cast<std::istream *>(&OverlayFile) : &ImportFile;
   SourceFilename = Path;
   CurLine = 1;
   CurCol = 0;
@@ -366,7 +430,12 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
   // main.cpp uses to populate SourceLines for the top-level input file.
   SourceLines.clear();
   {
-    std::ifstream LineReader(Path);
+    std::istringstream OverlayLines(Overlay ? *Overlay : std::string());
+    std::ifstream DiskLines;
+    if (!Overlay)
+      DiskLines.open(Path);
+    std::istream &LineReader =
+        Overlay ? static_cast<std::istream &>(OverlayLines) : DiskLines;
     std::string Line;
     while (std::getline(LineReader, Line))
       SourceLines.push_back(Line);
@@ -510,7 +579,15 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
 // a second time -- same reasoning HasRawPointerCapability() further down
 // this file gives for its own export (include/Parser.h's declaration site
 // has the full note).
+// Set by the embedding program's main() (the CLI's runCompilerMain(); the
+// query facade fills it in for any embedder that left it empty). Defined in
+// the library rather than in main.cpp, where it used to be: every other
+// program linking turfcore then had to define it itself or fail to link.
+std::string CompilerExecutablePath;
+
 std::string TurfInstallRoot() {
+  if (!InstallRootOverride.empty())
+    return InstallRootOverride;
   if (const char *Env = std::getenv("TURF_HOME")) {
     if (*Env)
       return std::string(Env);
@@ -580,16 +657,6 @@ bool IsLibStdWarningLocation(const std::string &Path) {
   return IsPathUnderDir(Path, LibStd.str().str());
 }
 
-// LANG-002/STD-001: files that parsed a leading `unsafe module;` capability
-// pragma (ParseLeadingUnsafeModuleDecl() below), keyed by the SAME
-// real_path()-canonicalized form HasRawPointerCapability() queries with, so
-// registration and lookup can never disagree over path spelling
-// (relative-vs-absolute, symlinks, "./"). Re-registering the same file
-// across the pre-pass/main-pass/import re-parses this compiler does is
-// harmless (std::set::insert on an existing key is a no-op) -- see
-// ParseFile()'s own comment on why a file's content can be parsed more than
-// once in a single compile.
-static std::set<std::string> UnsafeModuleFiles;
 
 static std::string CanonicalOrOriginal(const std::string &Path) {
   llvm::SmallString<256> Canonical;

@@ -67,8 +67,6 @@
 
 using namespace llvm;
 
-std::string CompilerExecutablePath;
-
 // OPT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §17.2): the five levels
 // the CLI's `-O` flag selects. Os is not "O1 through O3 plus one more" --
 // it is `PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel::Os)`,

@@ -202,7 +202,7 @@ public:
    * behavior for every existing caller (main.cpp's real compile pipeline,
    * which must never let a partially-checked AST reach Codegen); pass true
    * only for tooling that wants best-effort, multi-diagnostic results and
-   * will never codegen the result (e.g. CompileBufferBestEffort()).
+   * will never codegen the result (e.g. turf::analyze()).
    */
   void checkAll(const std::vector<std::unique_ptr<ExprAST>> &Nodes,
                bool RecoverPerDeclaration = false);

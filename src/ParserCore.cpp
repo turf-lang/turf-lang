@@ -149,8 +149,8 @@ bool IsTopLevelBoundaryToken(int Tok) {
 
 void SkipToNextTopLevelBoundary() {
   // Every call site of this function is a TOP-LEVEL per-statement recovery
-  // loop (main.cpp's pre-pass/main-pass, Sandbox.cpp's two incremental
-  // parse passes, CompileBufferBestEffort()) -- i.e. this is only ever
+  // loop (main.cpp's pre-pass/main-pass, the query facade's entry-file
+  // loop in AnalysisFacade.cpp) -- i.e. this is only ever
   // invoked at a point that logically SHOULD be top-level depth 0, even
   // when the ACTUAL g_braceDepth reading is wrong. It reads wrong whenever
   // the just-failed statement opened a '{'/'('/'[' it never got to close

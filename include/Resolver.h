@@ -212,7 +212,7 @@ public:
    *        DiagnosticEngine::add() path either way; only whether a single
    *        error aborts the WHOLE call changes. Intended for tooling that
    *        wants best-effort, multi-diagnostic results (e.g.
-   *        CompileBufferBestEffort(), CompileBuffer.h) and will never feed
+   *        turf::analyze(), include/turf/Analysis.h) and will never feed
    *        the result to Codegen, not for the CLI's own real compile.
    *
    * Applies only to Pass 2. Pass 1 (hoistTopLevel) always aborts the whole
@@ -370,9 +370,9 @@ public:
    * bodies, so there's nothing position-relevant to snapshot there.
    *
    * A caller wanting "what's visible at position (line, col)" builds this
-   * into a position -> names index themselves (see
-   * GetVisibleNamesAtPosition() in CompileBuffer.h for a ready-made
-   * implementation) -- the Resolver itself stays storage-agnostic and has
+   * into a position -> names index themselves (the query facade's
+   * AnalysisResult::symbolsInScope(), src/AnalysisFacade.cpp, is the
+   * in-tree one) -- the Resolver itself stays storage-agnostic and has
    * zero overhead when this isn't set.
    */
   using ScopeSnapshotCallback =

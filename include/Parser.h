@@ -153,17 +153,23 @@ std::vector<std::string> ListAvailableModules(const std::string &ImportingFile =
 
 // Top-level AST capture for sandbox diffing
 void ClearParsedTopLevelASTs();
-std::vector<std::unique_ptr<ExprAST>> SwapParsedTopLevelASTs(std::vector<std::unique_ptr<ExprAST>> New);
 
-// Save (push) / restore (pop) the module-import cache (ImportedFiles) and
-// in-progress import stack, so an isolated second parse pass in the same
-// process (Sandbox.cpp's temp-file validation; a future buffer-compile
-// entry point) doesn't see -- or leave behind -- another compile's import
-// state. Call PushImportCycleState() before an isolated pass and
-// PopImportCycleState() after, bracketing it the same way
-// SwapParsedTopLevelASTs({})/SwapParsedTopLevelASTs(std::move(saved)) do.
-void PushImportCycleState();
-void PopImportCycleState();
+// Save (push) / restore (pop) every piece of per-compile parser state: the
+// sandbox's top-level AST cache, the module-import cache and in-progress
+// import stack, the `unsafe` capability registrations, and the SMP-001
+// overlay/install-root settings below. Push leaves all of it empty, so the
+// compile that runs between the two calls starts exactly like a fresh
+// process would and leaves nothing behind. Only the query facade
+// (src/AnalysisFacade.cpp) calls these -- see its GlobalStateScope.
+void PushParserCompileState();
+void PopParserCompileState();
+
+// SMP-001: make ParseFile() read `Text` instead of the disk file at `Path`
+// (an embedder's unsaved buffer), and make TurfInstallRoot() return `Root`.
+// Both reset on PushParserCompileState(), so set them after pushing.
+void SetSourceOverlay(const std::string &Path, const std::string &Text);
+void SetInstallRootOverride(const std::string &Root);
+
 void RecordParsedTopLevelAST(const ExprAST *AST);
 std::unique_ptr<ExprAST> BuildProgramASTFromCache();
 

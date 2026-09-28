@@ -6,6 +6,7 @@
 #include "SLMIntegration.h"
 #include "SymbolTable.h"
 #include "Types.h"
+#include "turf/Analysis.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,7 +40,10 @@ public:
     std::vector<std::string> SourceCode;          // Deep copy of source lines
     std::unique_ptr<ExprAST> AST;                 // Deep copy of AST root
     std::unique_ptr<SymbolTable> SymbolTableCopy; // Deep copy of symbol table
-    std::vector<DiagnosticEngine::Diag> Diagnostics; // Captured diagnostics
+    // The host compile's diagnostics when the sandbox was created (only
+    // OriginalSnapshot's is ever filled; a validation's own go in
+    // ValidationDiagnostics).
+    std::vector<DiagnosticEngine::Diag> Diagnostics;
 
     CompilerStateSnapshot() = default;
     CompilerStateSnapshot(const CompilerStateSnapshot &) = delete;
@@ -91,8 +95,8 @@ public:
   }
 
   // Get diagnostics from the most recent validate() call
-  const std::vector<DiagnosticEngine::Diag> &getValidationDiagnostics() const {
-    return Snapshot.Diagnostics;
+  const std::vector<turf::Diagnostic> &getValidationDiagnostics() const {
+    return ValidationDiagnostics;
   }
 
   // Check if the original error at errorLine is still present after fix
@@ -168,6 +172,7 @@ private:
   int LastEditedLine = 0;
   std::string LastEditedLineText;
   bool LocalizedValidationOnly = false;
+  std::vector<turf::Diagnostic> ValidationDiagnostics; // last validate()'s
   std::set<uint64_t> ChangedNodeIDs; // Nodes that changed during fix (for
                                      // incremental validation)
   bool IsValid = false;              // Last validation result
