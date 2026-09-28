@@ -57,12 +57,13 @@ struct:
 | `turf_rt_panic(kind, msg, file, line)` | Formats a message to stderr, `abort()`s | Unchanged — this is already its final form |
 | `TurfTypeDesc` (not a function) | Emitted per aggregate type, read by nothing yet | MEM-002's mark-phase input |
 
-Three `.c` files, split by concern the same way the compiler's own Codegen
-split is: `runtime/turfrt_alloc.c` (bootstrap + allocation),
-`runtime/turfrt_panic.c` (panic formatting), `runtime/turfrt_types.c` (the
-one `TurfTypeDesc` accessor, `turf_rt_typedesc_is_pointer_word()`, whose
-only caller today is `scripts/runtime_smoke.sh`'s own C-level check — see
-that script for the currently-most-direct exercise of this library's API).
+Split by concern the same way the compiler's own Codegen split is:
+`runtime/turfrt_alloc.c` (bootstrap + allocation), `runtime/turfrt_gc.c` (the
+collector, MEM-002), `runtime/turfrt_panic.c` (panic formatting),
+`runtime/turfrt_types.c` (the one `TurfTypeDesc` accessor,
+`turf_rt_typedesc_is_pointer_word()`), `runtime/turfrt_abi.c` (the
+compiler/runtime ABI stamp, FDN-006 §7.3 below), `runtime/turfrt_signal.c`
+(the `SIGSEGV` handler, FDN-006 §7.1 below).
 
 Built as `CMakeLists.txt`'s `turfrt` target: a **static** library, built
 from plain C11, with **no dependency on `turfcore`/LLVM at all** — it is not
@@ -310,3 +311,116 @@ functionality into. Concretely, still true after this group:
   MEM-001/MEM-002 tags a pointer field with which heap it points into); the
   collector consuming it precisely is future work, not a correctness gap in
   what's emitted today.
+
+## 7. FDN-006: the runtime contract
+
+`docs/planning/ROADMAP_v2.0.0.md` FDN-006. Where §§1–6 above describe
+*what exists*, this section is about *what a user sees when something goes
+wrong*, and what stops a binary from silently running against the wrong
+runtime.
+
+### 7.1 Stack overflow
+
+Before this group, unbounded recursion was a bare `SIGSEGV` — exit 139, no
+message (the Overhaul closure audit's F-20). `turf_rt_install_segv_handler()`
+(`runtime/turfrt_signal.c`), called once from `turf_rt_init()` right after
+`turf_gc_record_stack_base()`, installs a `sigaltstack`-backed `SIGSEGV`
+handler:
+
+1. **Why an alternate stack at all** — the handler must run while the
+   thread's own stack has just been exhausted; delivering the signal on
+   that same, already-full stack would fault again just pushing the
+   handler's frame. `sigaltstack()` gives signal delivery a separate,
+   always-available region (a fixed 64 KiB static buffer — no `malloc`
+   this file would need to remember to free) to run on instead.
+2. **Classifying the fault** — `getrlimit(RLIMIT_STACK, ...)` combined with
+   `turf_gc_get_stack_base()` (the stack's high end, already computed for
+   conservative GC scanning — an accessor into `turfrt_gc.c`'s existing
+   `g_stack_base`, not a second, independently-tracked copy) gives a
+   *computed* low limit. A fault address within a generous fixed window of
+   that computed limit is classified a stack overflow; anything else — or
+   an unqueryable/unlimited `RLIMIT_STACK` — is a generic, unattributed
+   `SIGSEGV`. This mirrors how `EscapePass` (FDN-002) treats its own
+   unclassifiable cases: never a false positive (never call a real
+   memory-safety bug "just recursion"), a documented false-negative-leaning
+   window instead.
+3. **The message** — a classified stack overflow reports through
+   `turf_rt_panic()` itself (`"stack overflow"` kind), so it gets the exact
+   same `abort()`/exit-134 termination every other panic already has. Any
+   other `SIGSEGV` prints `panic: segmentation fault (this is a bug in
+   unsafe code or in TurfLang)` with the faulting address, then also
+   `abort()`s.
+
+Not signal-handler-safe in the strict POSIX sense — `turf_rt_panic()`/
+`fprintf` are not on the async-signal-safe list, only `abort()` itself is.
+Accepted deliberately (the process is terminating either way; the
+alternative is a hand-rolled `write(2)`-only formatter with its own
+integer/pointer-to-hex code, duplicated from nothing) — see
+`turfrt_signal.c`'s own top comment and `FDN-006.md`'s *Known pitfalls* for
+the one disclosed hazard this leaves (a fault arriving while the crashing
+thread already held stdio's internal lock).
+
+Not a Tier-1/2 concern on Windows (`ROADMAP_v2.0.0.md` DEC-2): a Windows
+stack overflow is a Structured Exception, not `SIGSEGV`, a different
+mechanism entirely (a vectored exception handler, not
+`sigaction`/`sigaltstack`) — `turf_rt_install_segv_handler()` is a no-op
+there, leaving a Windows crash exactly as it was before this group.
+
+### 7.2 Out-of-memory
+
+RT-001 already put the OOM policy "in one place": `turf_rt_alloc`/
+`turf_rt_alloc_zeroed`/`turf_rt_realloc` (`runtime/turfrt_alloc.c`) each
+`turf_rt_panic("out of memory", ...)` the moment the underlying
+`malloc`/`calloc`/`realloc` returns `NULL` — no caller anywhere ever sees a
+silent `NULL` from these three. What FDN-006 stage 2 adds is the first real
+test of that path: the Overhaul closure audit's own attempt to reach it
+spun forever inside `strings::repeat()`'s quadratic loop instead of ever
+triggering a real allocation failure. `tests/41_gc/fail_oom_huge_direct_allocation.tr`
+and `scripts/runtime_smoke.sh` §6 both go straight at a single `gc_alloc()`
+call sized at `i64` max — no allocator on any real machine can satisfy it,
+so the fail-fast path is exercised directly and quickly, not approached by
+attrition. `mem::alloc`'s own OOM path (`lib/std/mem/mem.tr`, `sys::panic()`)
+is untouched and independently implemented (F-MEM-3 — the two heaps'
+policies happen to fail the same way, loudly, but are not the same code).
+
+### 7.3 The compiler/runtime ABI stamp
+
+`runtime/turfrt_abi.c` defines one function, `turf_rt_abi_2_0(void)`, that
+does nothing. `WrapMainWithRuntimeBootstrap()` (`src/CodegenFunc.cpp`) calls
+it from every compiled binary's `main` wrapper, alongside `turf_rt_init()`.
+The point is entirely at LINK time: if a compiled object (built against
+this compiler version) is linked against a `libturfrt.a` that predates this
+symbol — or a hypothetical future ABI-breaking runtime that renamed it —
+the link fails with `undefined reference to 'turf_rt_abi_2_0'`, a symbol
+name that says exactly what's wrong, instead of linking successfully and
+producing undefined behaviour at run time against a runtime whose struct
+layouts (`TurfTypeDesc`) or calling conventions this compiler no longer
+agrees with. Bump the suffix (`_2_0` → `_2_1`, ...) — in both
+`runtime/turfrt_abi.c`'s definition and `WrapMainWithRuntimeBootstrap()`'s
+reference, together — the next time a change to this ABI would otherwise
+let an old runtime and a new compiler (or vice versa) silently
+miscommunicate.
+
+Separately, `src/main.cpp`'s `linkObject()` checks that
+`<TurfInstallRoot()>/lib/libturfrt.a` exists **before** invoking `cc`/`gcc`
+at all. A missing archive used to surface only as `cc`'s own generic
+`-lturfrt: No such file` error, with no mention of TurfLang or `TURF_HOME`;
+it is now a TurfLang diagnostic naming the exact path that was checked.
+
+### 7.4 Panic message shapes and exit codes, documented once
+
+| Termination | Message | Exit code |
+|---|---|---|
+| A compiler-inserted runtime check (division by zero, overflow, array bounds, ...) | `panic: runtime check: <msg> (<file>:<line>)` | 134 (`SIGABRT`) |
+| Stack overflow | `panic: stack overflow: <msg> (<runtime>:0)` | 134 (`SIGABRT`) |
+| Any other `SIGSEGV` | `panic: segmentation fault (this is a bug in unsafe code or in TurfLang) at address <addr>` | 134 (`SIGABRT`) |
+| Out of memory (GC heap or manual heap) | `panic: out of memory: <desc> (<site>:0)` (GC heap) or `sys::panic()`'s own format (manual heap) | 134 (`SIGABRT`) |
+| A cross-heap `mem::free()`, an unbalanced `mem::unroot()`, ... | `panic: <kind>: <msg> (<site>:0)` | 134 (`SIGABRT`) |
+| `lib/std/io/sys.tr`'s `panic()`/`assert`/`fail` | that function's own message | 134 (`SIGABRT`) |
+| `sys::exit(n)` | (none) | `n` |
+
+Every panic path — the compiler's own inline checks, the runtime's own
+`turf_rt_panic()` call sites, and `lib/std/io/sys.tr`'s separate
+`write(2)`-based path — terminates via `abort()`, hence the same `SIGABRT`/
+134 across the whole table. Only `sys::exit(n)` is a deliberate,
+non-panic process exit with a caller-chosen code.

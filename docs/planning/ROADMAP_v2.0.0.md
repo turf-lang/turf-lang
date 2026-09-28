@@ -104,7 +104,7 @@ PHASE 1  Foundation                   SMP-002  one generic type walker      DONE
    │                                  FDN-001  safe heap allocation         DONE (FDN-001.md, 2026-09-27)
    │                                  FDN-002  reference & array escape rules  DONE (FDN-002.md, 2026-09-27)
    │                                  FDN-004  string indexing: bounds + `char` (D17)  DONE (FDN-004.md, 2026-09-28)
-   │                                  FDN-006  runtime contract (stack overflow, OOM, ABI stamp)
+   │                                  FDN-006  runtime contract (stack overflow, OOM, ABI stamp)  DONE (FDN-006.md, 2026-09-28)
    │                                  SMP-001  compiler query facade (parallel, any time in 1–2)
    │                                  FDN-005  GC hardening (starts here, runs to RC)
    ▼
