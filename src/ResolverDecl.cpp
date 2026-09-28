@@ -28,6 +28,26 @@
 #include <unordered_set>
 
 
+// Functions already given NeverReturnsErrorWarning in this compile, by
+// "file:line:col". Per compile, not per Resolver: main.cpp resolves every
+// function with two Resolvers (see visitFuncDef()). It used to be a
+// function-local static keyed by line and column alone, so it never reset
+// -- a second analysis in one process (an editor re-checking the same file
+// on every keystroke) silently lost the warning -- and one file's function
+// at 10:1 hid the warning for another file's at 10:1.
+static std::unordered_set<std::string> NeverReturnsErrorWarned;
+static std::vector<std::unordered_set<std::string>> SavedResolverCompileStates;
+
+void PushResolverCompileState() {
+  SavedResolverCompileStates.push_back(std::move(NeverReturnsErrorWarned));
+  NeverReturnsErrorWarned.clear();
+}
+
+void PopResolverCompileState() {
+  NeverReturnsErrorWarned = std::move(SavedResolverCompileStates.back());
+  SavedResolverCompileStates.pop_back();
+}
+
 void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   if (FunctionNestingDepth_ > 0) {
     NestedFunctionError(Node.getLoc(), Node.getName()).raise();
@@ -221,15 +241,15 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   // 2, body fully walked) every error type in the program is registered, so
   // this filtering is finally safe to do.
   //
-  // Deduped by source location (process-lifetime static, same convention as
-  // ImportedFiles/ImportStack elsewhere in this file): this compiler parses
-  // and resolves every function TWICE on two entirely separate AST
-  // instances -- once in main.cpp's pre-pass (hoisting/self-reference/
-  // codegen), once again in its main pass (a fresh re-parse, used only for
-  // linting) -- confirmed live via this exact warning firing twice for one
-  // function. Every OTHER existing warning happens to dodge this by living
-  // in Codegen (which only runs once), which only runs once per function;
-  // this is the first Resolver-level warning, so it's the first to hit it.
+  // Deduped by source location across Resolver instances (see
+  // NeverReturnsErrorWarned below): this compiler parses and resolves
+  // every function TWICE on two entirely separate AST instances -- once in
+  // main.cpp's pre-pass (hoisting/self-reference/codegen), once again in
+  // its main pass (a fresh re-parse, used only for linting) -- confirmed
+  // live via this exact warning firing twice for one function. Every OTHER
+  // existing warning happens to dodge this by living in Codegen (which
+  // only runs once), which only runs once per function; this is the first
+  // Resolver-level warning, so it's the first to hit it.
   if (Node.getReturnType() && Node.getReturnType()->isErrorUnion()) {
     // OVH-012: Sym->ReturnsReboundError (`json::parse`'s `recover as err
     // run { return err; };` shape -- see its own doc comment,
@@ -244,11 +264,10 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
         break;
       }
     }
-    static std::unordered_set<long long> WarnedLocations;
     SourceLocation WarnLoc = Node.getLoc();
-    long long LocKey = (static_cast<long long>(WarnLoc.Line) << 32) |
-                       static_cast<unsigned>(WarnLoc.Col);
-    if (!ReturnsRealError && WarnedLocations.insert(LocKey).second)
+    std::string LocKey = WarnLoc.Filename + ":" + std::to_string(WarnLoc.Line) +
+                         ":" + std::to_string(WarnLoc.Col);
+    if (!ReturnsRealError && NeverReturnsErrorWarned.insert(LocKey).second)
       NeverReturnsErrorWarning(WarnLoc, Node.getName()).emit();
   }
 

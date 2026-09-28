@@ -689,4 +689,12 @@ private:
   }
 };
 
+// Save (push) / restore (pop) the Resolver's per-compile state that
+// outlives any one Resolver instance -- today only the set of functions
+// already warned about in visitFuncDef(). Push leaves it empty. Called only
+// by the query facade (src/AnalysisFacade.cpp), alongside
+// PushParserCompileState() (Parser.h).
+void PushResolverCompileState();
+void PopResolverCompileState();
+
 #endif // RESOLVER_H
