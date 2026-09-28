@@ -321,6 +321,37 @@ request, not a session's own initiative. Full account:
   handed in for exactly as long as ordinary reference semantics already did,
   and does not attempt to verify further up the call chain.
 
+### 6.14 String indexing — FROZEN (FDN-004, 2026-09-28)
+
+Recorded on the project owner's explicit approval of `ROADMAP_v2.0.0.md`
+FDN-004's own design (D17's own "— DECISION —" marker in that document) —
+§6.0 rule 3's explicit request, not a session's own initiative. Full
+account: `docs/development/changes/FDN-004.md`.
+
+- `s[i]` on a `string` has static type `char`, not `int`. `char` already
+  exists and is one byte (F-STD-3); returning `int` was the pre-existing
+  inconsistency this closes. Breaking (R1): after 2.0 this can only change
+  again in 3.0.
+- A **read** (`s[i]` used as a value) is bounds-checked at runtime against
+  `strlen(s)`: `i < 0` or `i >= strlen(s)` panics. There is no compile-time
+  elision for a string index (unlike a fixed-size array's `ValueRangePass`
+  constant folding) — every read pays a fresh `strlen()` call, which LLVM's
+  own loop-invariant code motion hoists out of a loop whose string base does
+  not change per iteration at `-O2`, but not at `-O0`.
+- A **write** (`s[i] = c;`) is checked for `i < 0` only. There is
+  deliberately **no** upper-bound check on a write — a `string`'s only
+  length signal is `strlen()`, which reads as 0 (or however many bytes
+  happen to precede the write cursor) for a buffer still being filled
+  before its NUL terminator is written, exactly how every `strings.tr`
+  string-building function works. This is a documented, permanent asymmetry
+  between the read and write sides, not a gap to close later — there is no
+  way to recover a `string` value's real allocated capacity to check
+  against instead (F-STD-3).
+- `strings::byte_at_unchecked(s, i): char` is the stdlib escape hatch for a
+  caller that has already established `i` is in range some other way and
+  cannot afford the repeated `strlen()` — unchecked, like any other raw
+  pointer read.
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -369,6 +400,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-TYPE-1** | A named type's identity is (owning module, name); the main file's module is `main`, never spelled. Bare-spelling ambiguity is an error, not "local wins". | §6.11 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-003, not `ARCHITECTURE_OVERHAUL.md` §4) |
 | **F-HEAP-1** | `heap(expr): &T` is the closed-list intrinsic for safe heap allocation — no `new T` keyword, no grammar change. Always allocates with `T`'s real `TurfTypeDesc`, never `NULL`. | §6.12 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-001) |
 | **F-MEM-5** | A `Stack`-provenance reference (points into the current frame) can never flow into a `return`, a field of a `Param`/`Heap`-owned object, a collection mutator/`operator[]=`, or `heap()`'s own operand — enforced by `EscapePass`, intraprocedurally, with no lifetime syntax. | §6.13 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-002) |
+| **F-STR-1** | `s[i]` on a `string` is `char`, bounds-checked against `strlen(s)` on read (`i < 0` or `i >= strlen(s)` panics); a write checks `i < 0` only, by design — no upper bound, since a `string` under construction has no recoverable capacity to check against. | §6.14 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-004) |
 
 ---
 
