@@ -317,6 +317,20 @@ public:
   static void setCollectAllDiagnostics(bool V) { CollectAllDiagnostics = V; }
   static bool getCollectAllDiagnostics() { return CollectAllDiagnostics; }
 
+  // Everything this class keeps between calls, for the query facade's
+  // isolated compiles (src/AnalysisFacade.cpp). Not restoreDiagnostics():
+  // that rebuilds ErrorLines from the list, but flushAll() empties the list
+  // and keeps ErrorLines, so after a flush the two disagree and only a
+  // verbatim copy puts hasErrors() back the way it was.
+  struct State {
+    std::vector<Diag> Diagnostics;
+    std::set<int> ErrorLines;
+    bool CollectAllDiagnostics = false;
+    bool SLMFiredThisPass = false;
+  };
+  static State saveState();
+  static void restoreState(State S);
+
 private:
   static std::vector<Diag> Diagnostics;
   static std::set<int> ErrorLines; // lines that already have an error

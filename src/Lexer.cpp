@@ -468,6 +468,17 @@ void DiagnosticEngine::reset() {
       false; // Reset cascade guard for the next compilation pass
 }
 
+DiagnosticEngine::State DiagnosticEngine::saveState() {
+  return {Diagnostics, ErrorLines, CollectAllDiagnostics, g_slmFiredThisPass};
+}
+
+void DiagnosticEngine::restoreState(State S) {
+  Diagnostics = std::move(S.Diagnostics);
+  ErrorLines = std::move(S.ErrorLines);
+  CollectAllDiagnostics = S.CollectAllDiagnostics;
+  g_slmFiredThisPass = S.SLMFiredThisPass;
+}
+
 void DiagnosticEngine::restoreDiagnostics(const std::vector<Diag> &Saved) {
   Diagnostics = Saved;
   ErrorLines.clear();
