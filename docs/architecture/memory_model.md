@@ -727,6 +727,51 @@ memory is not a root"), not a bug; see MEM-002's own change record, *Known
 pitfalls*, for how this was rediscovered live while measuring this
 group's own performance numbers.
 
+**Hardening and validation (FDN-005,
+`docs/development/changes/FDN-005.md`)** answers the two open questions
+MEM-002's own record left honestly unresolved — narrow real-world
+exercise, and no independent check on the register-scanning technique:
+
+- **`TURF_GC_STRESS=1`** (a testing-only environment variable, read once
+  and cached, same shape as `TURF_RT_STATS_DUMP`) forces `turf_rt_collect()`
+  on every single allocation instead of waiting for the heap-doubling
+  threshold — the single most effective way to surface a root the
+  conservative scan barely misses, run across the entire `tests/` suite in
+  CI at both `-O0` and `-O2`.
+  `tests/custom/gc_stress_corpus/` holds three long-running programs
+  (a heap()-allocated graph rewired repeatedly at 1,000,000 live nodes, a
+  `Map<string, List<string>>` churned for 10,000,000 operations, and the
+  `http_server` showcase shape driven by a real scripted client for
+  100,000 requests) that this project's own test suite had never exercised
+  at anything near this scale before — run by
+  `scripts/gc_stress_corpus_smoke.sh`, deliberately never under
+  `TURF_GC_STRESS` (an `O(n)`-allocation workload becomes
+  `O(n^2 log n)`-shaped under per-allocation collection; that file's own
+  header explains why the two stress dimensions are kept orthogonal).
+- **An ASan+UBSan-instrumented `libturfrt_asan.a`** (a separate CMake
+  target, `CMakeLists.txt`'s `TURF_RT_SANITIZE` option) that a `turf`
+  binary built with the same option links every COMPILED TURF PROGRAM
+  against instead of the ordinary `libturfrt.a` — turning the entire
+  existing `tests/` suite into independent validation for freed-block
+  reuse, not just the hand-written C harnesses `scripts/gc_smoke.sh`
+  already covers. Two real, GC/ASan-specific interactions were found and
+  fixed getting this running at all (a conservative stack scan reading
+  ASan's own inserted redzones; the "address of a local" idiom for
+  approximating the current stack pointer being silently relocated onto
+  ASan's heap-backed fake stack — now isolated into its own
+  ASan-exempted helper, `gc_approx_sp()`) — see the change record for
+  both.
+- **`TURF_GC_VALIDATE=1`** (Linux/glibc/x86-64 only, degrading to a
+  one-time notice everywhere else) captures a second, independent
+  register snapshot via glibc's `getcontext()` at the same instant as the
+  primary technique's own inline-asm read, and reports (never aborts) if
+  any register outside the documented callee-saved set points at a block
+  the production scan did not otherwise mark live — direct empirical
+  evidence for or against the "callee-saved registers survive a call" ABI
+  assumption the whole design leans on, run across the full suite in CI
+  (both opt levels verified live during this group's own session; the
+  default level is the standing CI gate) plus the stress corpus above.
+
 #### 2.6.1 `heap(expr)`: a user value, GC-heap-allocated with a real descriptor
 
 **FDN-001** (`docs/planning/ROADMAP_v2.0.0.md`, DEC-5) is the bare
