@@ -172,6 +172,23 @@ else
   pass "every dynamic_cast<const TurfGenericParamType is in TypeWalk, an INV-GEN-1 assertion, or the documented CodegenCore.cpp exception"
 fi
 
+# ── 7. INV-API-1: only the query facade isolates a compile ─────────────────
+# The per-subsystem save/restore hooks exist for GlobalStateScope
+# (src/AnalysisFacade.cpp) alone. A second caller is a second hand-written
+# save/restore dance -- the thing SMP-001 removed, which broke whenever the
+# pipeline gained a global the dance did not know about.
+echo -e "\n${BOLD}7. Front-end state save/restore only in the query facade (INV-API-1)${RESET}"
+API_HITS=$(grep -rnE "\b(Push|Pop)(Parser|Resolver)CompileState\(|DiagnosticEngine::(saveState|restoreState)\(|\bSetSourceOverlay\(|\bSetInstallRootOverride\(" src/ 2>/dev/null \
+           | grep -vE ':\s*(//|\*)' \
+           | grep -v "^src/AnalysisFacade\.cpp:" \
+           | grep -vE ":(void|DiagnosticEngine::State) [A-Za-z:]*(CompileState|saveState|restoreState|SetSourceOverlay|SetInstallRootOverride)\(")
+if [ -n "$API_HITS" ]; then
+  fail "front-end state save/restore called outside src/AnalysisFacade.cpp -- run the compile through turf::analyze() (include/turf/Analysis.h) instead:"
+  echo "$API_HITS" | sed 's/^/       /'
+else
+  pass "every front-end state save/restore hook is called only from the query facade"
+fi
+
 echo
 if [ $FAILED -eq 0 ]; then
   echo -e "${GREEN}${BOLD}Boundary checks clean.${RESET}"
