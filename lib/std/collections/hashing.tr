@@ -67,7 +67,9 @@ fn hash(x: string): int {
   immutable n: int = strings::strlen(x);
   mut i: int = 0;
   while i < n {
-    h = (h * 33 + x[i]) & 0xFFFFFFFF;
+    // FDN-004: `x[i]` is `char`; widen to `int` before the arithmetic (no
+    // implicit char<->numeric conversion, FREEZE.md §6.2 row 4).
+    h = (h * 33 + (x[i] to int)) & 0xFFFFFFFF;
     i = i + 1;
   }
   return h;

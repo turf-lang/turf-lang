@@ -298,7 +298,9 @@ fn escape_string(s: string): string {
     mut i: int = 0;
     mut n: int = strings::length(s);
     while i < n {
-        immut c: int = s[i];
+        // FDN-004: `s[i]` is `char`; widen to `int` here so every
+        // comparison below can stay unchanged.
+        immut c: int = s[i] to int;
         if c == 34 { // '"'
             result = result + "\\\"";
         } elseif c == 92 { // '\'
@@ -349,12 +351,15 @@ fn Parser.peek(): int {
     if self.pos >= self.len {
         return 0 - 1;
     }
-    return self.s[self.pos];
+    // FDN-004: `self.s[self.pos]` is `char`; this function's own return
+    // type stays `int` (the `-1` end-of-input sentinel below needs a value
+    // outside 0..255, which `char` can't represent).
+    return self.s[self.pos] to int;
 }
 
 fn Parser.skip_ws(): void {
     while self.pos < self.len {
-        immut c: int = self.s[self.pos];
+        immut c: int = self.s[self.pos] to int;
         if c == 32 || c == 9 || c == 10 || c == 13 {
             self.pos = self.pos + 1;
         } else {
@@ -428,7 +433,7 @@ fn Parser.parse_string(): !string {
     self.pos = self.pos + 1; // consume opening quote
     mut result: string = "";
     while self.pos < self.len {
-        immut c: int = self.s[self.pos];
+        immut c: int = self.s[self.pos] to int;
         if c == 34 { // closing quote
             self.pos = self.pos + 1;
             return result;
@@ -438,7 +443,7 @@ fn Parser.parse_string(): !string {
             if self.pos >= self.len {
                 return JsonError::UnterminatedString;
             }
-            immut esc: int = self.s[self.pos];
+            immut esc: int = self.s[self.pos] to int;
             if esc == 34 {
                 result = result + "\"";
             } elseif esc == 92 {
@@ -467,18 +472,22 @@ fn Parser.parse_string(): !string {
 }
 
 fn Parser.parse_number(): !JsonValue {
+    // FDN-004: `self.s[self.pos]` is `char`; every raw comparison below is
+    // cast to `int` at the point of use rather than through an intermediate
+    // variable, since this function reads a different position on almost
+    // every line.
     immut start: int = self.pos;
-    if self.pos < self.len && self.s[self.pos] == 45 { // '-'
+    if self.pos < self.len && (self.s[self.pos] to int) == 45 { // '-'
         self.pos = self.pos + 1;
     }
     mut sawDigit: bool = false;
-    while self.pos < self.len && self.s[self.pos] >= 48 && self.s[self.pos] <= 57 {
+    while self.pos < self.len && (self.s[self.pos] to int) >= 48 && (self.s[self.pos] to int) <= 57 {
         self.pos = self.pos + 1;
         sawDigit = true;
     }
-    if self.pos < self.len && self.s[self.pos] == 46 { // '.'
+    if self.pos < self.len && (self.s[self.pos] to int) == 46 { // '.'
         self.pos = self.pos + 1;
-        while self.pos < self.len && self.s[self.pos] >= 48 && self.s[self.pos] <= 57 {
+        while self.pos < self.len && (self.s[self.pos] to int) >= 48 && (self.s[self.pos] to int) <= 57 {
             self.pos = self.pos + 1;
             sawDigit = true;
         }
@@ -487,12 +496,12 @@ fn Parser.parse_number(): !JsonValue {
     // document, but see this file's header comment -- the resulting
     // NUMERIC VALUE is wrong (strings::parse_double doesn't understand
     // exponents), a documented gap.
-    if self.pos < self.len && (self.s[self.pos] == 101 || self.s[self.pos] == 69) { // 'e'/'E'
+    if self.pos < self.len && ((self.s[self.pos] to int) == 101 || (self.s[self.pos] to int) == 69) { // 'e'/'E'
         self.pos = self.pos + 1;
-        if self.pos < self.len && (self.s[self.pos] == 43 || self.s[self.pos] == 45) {
+        if self.pos < self.len && ((self.s[self.pos] to int) == 43 || (self.s[self.pos] to int) == 45) {
             self.pos = self.pos + 1;
         }
-        while self.pos < self.len && self.s[self.pos] >= 48 && self.s[self.pos] <= 57 {
+        while self.pos < self.len && (self.s[self.pos] to int) >= 48 && (self.s[self.pos] to int) <= 57 {
             self.pos = self.pos + 1;
         }
     }

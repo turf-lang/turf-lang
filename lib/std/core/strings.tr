@@ -108,6 +108,22 @@ fn length(s: string): int {
     return strlen(s);
 }
 
+// ─── byte_at_unchecked ──────────────────────────────────────────────────────
+
+// byte_at_unchecked: like `s[i]`, but skips the bounds check FDN-004 added to
+// plain string indexing (`s[i]` now calls `strlen(s)` on every access --
+// ROADMAP_v2.0.0.md FDN-004's own design notes: correct, but O(n) per access,
+// so a loop touching every byte is O(n^2)). An escape hatch for a caller that
+// has already established `i` is in range some other way (e.g. `i < n` from
+// its own prior `strings::length(s)` call) and cannot afford the repeated
+// `strlen`. Out-of-bounds `i` is undefined behaviour, same as any other raw
+// pointer read -- this file already declares the raw-pointer capability
+// (`unsafe module;`, line 1), so no `unsafe { }` block is needed here.
+fn byte_at_unchecked(s: string, i: int): char {
+    immut p: char* = s to char*;
+    return p[i];
+}
+
 // ─── contains ─────────────────────────────────────────────────────────────────
 
 // contains: returns true if `needle` occurs anywhere in `s`.
@@ -206,7 +222,10 @@ fn count_char(s: string, ch: int): int {
     mut i: int = 0;
     mut n: int = strlen(s);
     while i < n {
-        if s[i] == ch {
+        // FDN-004: `s[i]` is `char`; compare against the `int` parameter by
+        // widening the byte, not narrowing `ch` (no implicit char<->numeric
+        // conversion, FREEZE.md §6.2 row 4).
+        if (s[i] to int) == ch {
             count = count + 1;
         }
         i = i + 1;
@@ -231,7 +250,7 @@ fn substring(s: string, start: int, end: int): string {
         buf[i] = s[start + i];
         i = i + 1;
     }
-    buf[len] = 0;
+    buf[len] = 0 to char;
     return buf;
 }
 
@@ -268,7 +287,7 @@ fn replace(s: string, old: string, new_str: string): string {
             // Append single character as a 2-byte heap buffer
             mut chbuf: string = gc_alloc(2) to string;
             chbuf[0] = s[i];
-            chbuf[1] = 0;
+            chbuf[1] = 0 to char;
             result = result + chbuf;
             i = i + 1;
         }
@@ -284,10 +303,13 @@ fn to_upper(s: string): string {
     mut buf: string = gc_alloc(n + 1) to string;
     mut i: int = 0;
     while i < n {
-        buf[i] = toupper(s[i] to int32);
+        // FDN-004: `char` has no `int32` cast (only `char <-> int`,
+        // docs/reference/variables_and_types.md §"char") -- go through
+        // `int` on both sides of the C `toupper(int32): int32` call.
+        buf[i] = (toupper((s[i] to int) to int32) to int) to char;
         i = i + 1;
     }
-    buf[n] = 0;
+    buf[n] = 0 to char;
     return buf;
 }
 
@@ -299,10 +321,11 @@ fn to_lower(s: string): string {
     mut buf: string = gc_alloc(n + 1) to string;
     mut i: int = 0;
     while i < n {
-        buf[i] = tolower(s[i] to int32);
+        // FDN-004: see the identical cast chain's comment in to_upper() above.
+        buf[i] = (tolower((s[i] to int) to int32) to int) to char;
         i = i + 1;
     }
-    buf[n] = 0;
+    buf[n] = 0 to char;
     return buf;
 }
 
@@ -314,10 +337,13 @@ fn trim(s: string): string {
     mut n: int = strlen(s);
     mut start_idx: int = 0;
     mut end_idx: int = n;
-    while start_idx < n && (s[start_idx] == 32 || s[start_idx] == 9 || s[start_idx] == 10 || s[start_idx] == 13) {
+    // FDN-004: `s[i]` is `char` now; cast to `int` before comparing with
+    // the whitespace byte-code literals (no implicit char<->numeric
+    // conversion, FREEZE.md §6.2 row 4).
+    while start_idx < n && ((s[start_idx] to int) == 32 || (s[start_idx] to int) == 9 || (s[start_idx] to int) == 10 || (s[start_idx] to int) == 13) {
         start_idx = start_idx + 1;
     }
-    while end_idx > start_idx && (s[end_idx - 1] == 32 || s[end_idx - 1] == 9 || s[end_idx - 1] == 10 || s[end_idx - 1] == 13) {
+    while end_idx > start_idx && ((s[end_idx - 1] to int) == 32 || (s[end_idx - 1] to int) == 9 || (s[end_idx - 1] to int) == 10 || (s[end_idx - 1] to int) == 13) {
         end_idx = end_idx - 1;
     }
     return substring(s, start_idx, end_idx);
@@ -330,7 +356,8 @@ fn trim(s: string): string {
 fn trim_start(s: string): string {
     mut n: int = strlen(s);
     mut start_idx: int = 0;
-    while start_idx < n && (s[start_idx] == 32 || s[start_idx] == 9 || s[start_idx] == 10 || s[start_idx] == 13) {
+    // FDN-004: see trim()'s identical cast's comment above.
+    while start_idx < n && ((s[start_idx] to int) == 32 || (s[start_idx] to int) == 9 || (s[start_idx] to int) == 10 || (s[start_idx] to int) == 13) {
         start_idx = start_idx + 1;
     }
     return substring(s, start_idx, n);
@@ -341,7 +368,8 @@ fn trim_start(s: string): string {
 fn trim_end(s: string): string {
     mut n: int = strlen(s);
     mut end_idx: int = n;
-    while end_idx > 0 && (s[end_idx - 1] == 32 || s[end_idx - 1] == 9 || s[end_idx - 1] == 10 || s[end_idx - 1] == 13) {
+    // FDN-004: see trim()'s identical cast's comment above.
+    while end_idx > 0 && ((s[end_idx - 1] to int) == 32 || (s[end_idx - 1] to int) == 9 || (s[end_idx - 1] to int) == 10 || (s[end_idx - 1] to int) == 13) {
         end_idx = end_idx - 1;
     }
     return substring(s, 0, end_idx);
@@ -431,7 +459,10 @@ fn pad_left(s: string, target_len: int, pad_char: char): string {
     mut buf: string = gc_alloc(target_len + 1) to string;
     mut i: int = 0;
     while i < pad_count {
-        buf[i] = pad_char to int;
+        // FDN-004: `pad_char` is already `char` -- `buf[i]` is too now, so
+        // no cast is needed at all (the old `to int` here was only ever
+        // working around `buf[i]`'s previous, wrong `int` type).
+        buf[i] = pad_char;
         i = i + 1;
     }
     mut j: int = 0;
@@ -439,7 +470,7 @@ fn pad_left(s: string, target_len: int, pad_char: char): string {
         buf[pad_count + j] = s[j];
         j = j + 1;
     }
-    buf[target_len] = 0;
+    buf[target_len] = 0 to char;
     return buf;
 }
 
@@ -458,10 +489,11 @@ fn pad_right(s: string, target_len: int, pad_char: char): string {
         i = i + 1;
     }
     while i < target_len {
-        buf[i] = pad_char to int;
+        // FDN-004: see pad_left()'s identical comment above.
+        buf[i] = pad_char;
         i = i + 1;
     }
-    buf[target_len] = 0;
+    buf[target_len] = 0 to char;
     return buf;
 }
 
@@ -491,7 +523,9 @@ fn parse_int(s: string): !int {
     }
     mut i: int = 0;
     mut neg: bool = false;
-    if s[0] == 45 { // '-'
+    // FDN-004: `s[0]` is `char`; cast to `int` before comparing with the
+    // byte-code literal (no implicit char<->numeric conversion).
+    if (s[0] to int) == 45 { // '-'
         neg = true;
         i = 1;
     }
@@ -500,7 +534,7 @@ fn parse_int(s: string): !int {
     }
     mut result: int = 0;
     while i < n {
-        mut c: int = s[i];
+        mut c: int = s[i] to int;
         if c < 48 || c > 57 {
             return StringParseError::InvalidInt;
         }
@@ -524,7 +558,8 @@ fn parse_double(s: string): !double {
     }
     mut i: int = 0;
     mut neg: bool = false;
-    if s[0] == 45 { // '-'
+    // FDN-004: see parse_int()'s identical cast's comment above.
+    if (s[0] to int) == 45 { // '-'
         neg = true;
         i = 1;
     }
@@ -533,8 +568,8 @@ fn parse_double(s: string): !double {
     }
     mut saw_digit: bool = false;
     mut int_part: double = 0.0;
-    while i < n && s[i] != 46 { // '.'
-        mut c: int = s[i];
+    while i < n && (s[i] to int) != 46 { // '.'
+        mut c: int = s[i] to int;
         if c < 48 || c > 57 {
             return StringParseError::InvalidDouble;
         }
@@ -543,11 +578,11 @@ fn parse_double(s: string): !double {
         i = i + 1;
     }
     mut frac_part: double = 0.0;
-    if i < n && s[i] == 46 { // '.'
+    if i < n && (s[i] to int) == 46 { // '.'
         i = i + 1;
         mut frac_div: double = 1.0;
         while i < n {
-            mut c: int = s[i];
+            mut c: int = s[i] to int;
             if c < 48 || c > 57 {
                 return StringParseError::InvalidDouble;
             }

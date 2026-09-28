@@ -79,7 +79,9 @@ extern fn closedir(d: ptr): int32;
 fn last_index_of_char(s: string, ch: int): int {
     mut i: int = strings::length(s) - 1;
     while i >= 0 {
-        if s[i] == ch {
+        // FDN-004: `s[i]` is `char`; widen to `int` before comparing with
+        // the `int` parameter (no implicit char<->numeric conversion).
+        if (s[i] to int) == ch {
             return i;
         }
         i = i - 1;
