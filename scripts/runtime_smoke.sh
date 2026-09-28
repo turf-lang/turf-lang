@@ -30,6 +30,15 @@
 #      turf_rt_typedesc_is_pointer_word), called directly from a small C
 #      program linked straight against lib/libturfrt.a -- no Turf compiler
 #      involved at all, the most direct test this library gets.
+#   6. FDN-006 (docs/planning/ROADMAP_v2.0.0.md): deep, non-tail recursion
+#      prints "panic: stack overflow" (not a bare SIGSEGV, exit 139) and
+#      aborts (134); a direct huge allocation prints "panic: out of memory"
+#      (already existed since RT-001 -- this is its first real test, per
+#      FDN-006 stage 2's own instruction to test it against a direct large
+#      allocation rather than the Overhaul closure audit's quadratic-loop
+#      attempt, which never actually reached this path); linking with
+#      TURF_HOME pointing at a runtime-less tree gives a TurfLang
+#      diagnostic, not cc's own generic linker error.
 #
 # Usage: scripts/runtime_smoke.sh
 # Exit:  0 = every check passed; 1 = at least one failed.
@@ -244,6 +253,97 @@ if cc -std=c11 -I runtime "$WORKDIR/api_test.c" "$LIBTURFRT" -o "$WORKDIR/api_te
 else
   fail "failed to compile against libturfrt.a"; cat "$WORKDIR/api_test.compile.log"
 fi
+
+echo -e "${BOLD}6. FDN-006: stack overflow, OOM, and missing-runtime diagnostics${RESET}"
+
+# 6a. Deep, non-tail recursion -> "panic: stack overflow", exit 134 (not a
+# bare SIGSEGV/139). The recursive call feeds `+ buf[0]` after it returns,
+# so it is not in tail position -- no optimization level can turn this into
+# a loop that never grows the stack. `n > 2000000000` only satisfies the
+# compiler's own unconditional-infinite-recursion check (E010); the stack
+# overflows long before `n` could reach it.
+cat > "$WORKDIR/stack_overflow.tr" <<'EOF'
+fn recurse(n: int): int {
+    mut buf: int[8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    if n > 2000000000 {
+        return buf[0];
+    }
+    return recurse(n + 1) + buf[0];
+}
+fn main(): int {
+    return recurse(0);
+}
+EOF
+if "$TURF" "$WORKDIR/stack_overflow.tr" -o "$WORKDIR/stack_overflow" > /dev/null 2>&1; then
+  "$WORKDIR/stack_overflow" > "$WORKDIR/stack_overflow.out" 2>&1
+  STATUS=$?
+  if [ "$STATUS" -eq 134 ]; then
+    pass "deep recursion aborts with exit 134 (not a bare SIGSEGV/139)"
+  else
+    fail "expected exit 134, got $STATUS"; cat "$WORKDIR/stack_overflow.out"
+  fi
+  if grep -q "^panic: stack overflow" "$WORKDIR/stack_overflow.out"; then
+    pass "message starts 'panic: stack overflow'"
+  else
+    fail "unexpected message:"; cat "$WORKDIR/stack_overflow.out"
+  fi
+else
+  fail "stack_overflow.tr failed to compile"
+fi
+
+# 6b. A direct huge allocation -> "panic: out of memory", exit 134. Goes
+# straight at gc_alloc() with a size no allocator can satisfy, rather than
+# the audit's own quadratic-loop attempt (strings::repeat), which spun
+# forever without ever reaching this path.
+cat > "$WORKDIR/oom.tr" <<'EOF'
+fn main(): int {
+    unsafe {
+        mut p: void* = gc_alloc(9223372036854775807);
+    }
+    return 0;
+}
+EOF
+if "$TURF" "$WORKDIR/oom.tr" -o "$WORKDIR/oom" > /dev/null 2>&1; then
+  "$WORKDIR/oom" > "$WORKDIR/oom.out" 2>&1
+  STATUS=$?
+  if [ "$STATUS" -eq 134 ]; then
+    pass "huge direct allocation aborts with exit 134"
+  else
+    fail "expected exit 134, got $STATUS"; cat "$WORKDIR/oom.out"
+  fi
+  if grep -q "^panic: out of memory" "$WORKDIR/oom.out"; then
+    pass "message starts 'panic: out of memory'"
+  else
+    fail "unexpected message:"; cat "$WORKDIR/oom.out"
+  fi
+else
+  fail "oom.tr failed to compile"
+fi
+
+# 6c. TURF_HOME pointing at a runtime-less tree -> a TurfLang diagnostic
+# naming the missing libturfrt.a, reported BEFORE cc/gcc is ever invoked --
+# not cc's own generic "-lturfrt: No such file" linker error. `lib/std`
+# itself is COPIED in (real, complete), not symlinked: a symlink resolves
+# to the real repo's own path via real_path(), which would make
+# IsPathUnderInstallRoot()'s canonical-path check see the file as living
+# under the REAL install root instead of $FAKE_HOME, silently changing which
+# capability gates apply and breaking this check for an unrelated reason.
+FAKE_HOME=$(mktemp -d)
+mkdir -p "$FAKE_HOME/lib"
+cp -r lib/std "$FAKE_HOME/lib/std"
+if TURF_HOME="$FAKE_HOME" "$TURF" "$WORKDIR/hello.tr" -o "$WORKDIR/hello_fakehome" \
+     > "$WORKDIR/fakehome.out" 2>&1; then
+  fail "expected compilation to fail against a runtime-less TURF_HOME, it succeeded"
+else
+  if grep -q "TurfLang runtime library not found" "$WORKDIR/fakehome.out" \
+     && grep -qF "$FAKE_HOME/lib/libturfrt.a" "$WORKDIR/fakehome.out"; then
+    pass "missing libturfrt.a reported as a TurfLang diagnostic naming the path"
+  else
+    fail "expected a TurfLang diagnostic naming the missing path, got:"
+    cat "$WORKDIR/fakehome.out"
+  fi
+fi
+rm -rf "$FAKE_HOME"
 
 echo
 if [ "$FAIL" -eq 0 ]; then
