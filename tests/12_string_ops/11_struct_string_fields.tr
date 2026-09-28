@@ -31,9 +31,10 @@ fn main(): int {
     test::assert(b.author == "Ada Lovelace", "Author equality failed");
     test::assert(b.title != "C++", "Title inequality failed");
 
-    // Check character access on struct string field
-    mut initial: int = b.author[0];
-    test::assert(initial == 65, "Author first initial should be 65 ('A')");
+    // Check character access on struct string field -- FDN-004/D17:
+    // `b.author[0]` is `char`, widened here for the comparison.
+    mut initial: char = b.author[0];
+    test::assert((initial to int) == 65, "Author first initial should be 65 ('A')");
 
     io::printline("11_struct_string_fields passed!");
     return 0;

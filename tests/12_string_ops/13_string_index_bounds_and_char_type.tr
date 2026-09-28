@@ -1,0 +1,31 @@
+// tests/12_string_ops/13_string_index_bounds_and_char_type.tr
+// FDN-004 (D17, ROADMAP_v2.0.0.md): `s[i]` is `char`, bounds-checked
+// against `strlen()` semantics. This file's two `fail_*` siblings
+// (fail_string_index_oob_read_runtime.tr, fail_string_index_negative_
+// read_runtime.tr) cover the panic paths; this covers the "still works
+// correctly for every valid access" half.
+
+import strings;
+
+import test;
+fn main(): int {
+    immut s: string = "abc";
+
+    // Every in-range index, including the boundary (last valid byte).
+    test::assert(typeof(s[0]) == "char", "s[i] must have static type 'char'");
+    test::assert(s[0] == 'a', "s[0] must be 'a'");
+    test::assert(s[1] == 'b', "s[1] must be 'b'");
+    test::assert(s[2] == 'c', "s[2] (last valid index) must be 'c'");
+
+    // strings::byte_at_unchecked: the documented escape hatch from
+    // strings.tr -- must agree with checked `s[i]` for every in-range index.
+    test::assert(strings::byte_at_unchecked(s, 0) == 'a', "byte_at_unchecked(s, 0) must match s[0]");
+    test::assert(strings::byte_at_unchecked(s, 2) == 'c', "byte_at_unchecked(s, 2) must match s[2]");
+
+    // A freshly-built (non-literal) string goes through the exact same
+    // checked path -- not just string literals.
+    immut built: string = strings::to_upper("xyz");
+    test::assert(built[0] == 'X', "checked indexing must also work on a heap-allocated string");
+
+    return 0;
+}

@@ -1,0 +1,15 @@
+// RUNTIME_ABORT_EXPECTED
+// FDN-004 (D17, ROADMAP_v2.0.0.md): `s[i]` on a `string` is now bounds-
+// checked at runtime -- before this, `"abc"[5]` compiled and silently read
+// past the terminator, returning garbage (audit finding F-17). Unlike a
+// fixed-size Turf array, ValueRangePass has no compile-time constant-
+// folding path for a string index at all (markNode(), src/ValueRange.cpp,
+// only ever looks at `S->Type->isArray()`), so even this literal,
+// obviously-out-of-range index reaches the unconditional runtime
+// `strlen()`-based check every string read gets (EmitStringBoundsCheck(),
+// src/CodegenArray.cpp) rather than a compile-time diagnostic.
+fn main(): int {
+    immut s: string = "abc";
+    immut c: char = s[5];
+    return c to int;
+}

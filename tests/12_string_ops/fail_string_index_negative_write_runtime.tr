@@ -1,0 +1,19 @@
+// RUNTIME_ABORT_EXPECTED
+// FDN-004: the write side (`s[i] = c;`, ArrayAccessExprAST::codegenLValue())
+// only checks for a negative index -- it deliberately does NOT check the
+// `strlen()` upper bound a read gets, because the write target is very
+// often a `gc_alloc`'d buffer being filled one byte at a time BEFORE its
+// NUL terminator is written (every strings.tr function that builds a
+// string this way would panic on its own very first write otherwise -- see
+// EmitStringBoundsCheck()'s doc comment, src/CodegenArray.cpp, for the
+// confirmed-live failure this test's positive counterpart would be). A
+// negative index is unconditionally wrong regardless of that, so it still
+// panics on the write side too.
+fn main(): int {
+    unsafe {
+        mut buf: string = gc_alloc(4) to string;
+        immut i: int = 0 - 1;
+        buf[i] = 'x';
+    }
+    return 0;
+}

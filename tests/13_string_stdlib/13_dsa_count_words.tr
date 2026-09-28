@@ -13,7 +13,8 @@ fn count_words(s: string): int {
     mut in_word: bool = false;
     mut i: int = 0;
     while i < n {
-        mut c: int = s[i];
+        // FDN-004/D17: `s[i]` is `char`; widen to `int` before comparing.
+        mut c: int = s[i] to int;
         // space=32, tab=9, newline=10
         mut is_space: bool = (c == 32 || c == 9 || c == 10);
         if is_space {

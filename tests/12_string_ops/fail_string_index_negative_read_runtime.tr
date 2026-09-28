@@ -1,0 +1,11 @@
+// RUNTIME_ABORT_EXPECTED
+// FDN-004 (D17, ROADMAP_v2.0.0.md): a negative `s[i]` index must also panic
+// -- the "index < 0" half of EmitStringBoundsCheck() (src/CodegenArray.cpp),
+// distinct from the "index >= strlen(s)" half fail_string_index_oob_read_
+// runtime.tr (this folder) already covers.
+fn main(): int {
+    immut s: string = "abc";
+    immut i: int = 0 - 1;
+    immut c: char = s[i];
+    return c to int;
+}
