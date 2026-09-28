@@ -2,8 +2,17 @@
 
 # Configuration
 TEST_DIR="tests"
-# Get absolute path for compiler so we can run it from any directory
-COMPILER="$(pwd)/build/turf"
+# Get absolute path for compiler so we can run it from any directory.
+# Overridable via TURF_COMPILER -- FDN-005 stage 3 (docs/planning/
+# ROADMAP_v2.0.0.md): an ASan-instrumented `turf` (CMakeLists.txt's
+# TURF_RT_SANITIZE option) lives in its own build directory, never
+# build/turf, so CI/a local session can point this whole suite at it
+# without touching the ordinary dev build.
+if [ -n "${TURF_COMPILER:-}" ]; then
+    COMPILER="$TURF_COMPILER"
+else
+    COMPILER="$(pwd)/build/turf"
+fi
 
 # Colors for output
 BOLD="\033[1m"
@@ -63,6 +72,21 @@ fi
 # actually wrong with the compiler or the test. Halving default parallelism
 # on macOS cuts how many of these checks queue up at once; it doesn't
 # eliminate the per-test tax (see the timeout bump below for that).
+# Per-test wall-clock timeout in seconds, overridable via
+# TURF_TEST_TIMEOUT_SEC -- FDN-005 (docs/planning/ROADMAP_v2.0.0.md): a run
+# with TURF_GC_STRESS=1 set (forces a full mark-sweep collection on every
+# single allocation, runtime/turfrt_gc.c) makes an allocation-heavy program
+# like tests/08_e2e_stress/06_gc_bounded_allocation.tr / 07_heap_bounded_
+# allocation.tr take far longer than the same program collecting only on
+# the ordinary heap-doubling schedule -- confirmed live: 07 alone exceeds
+# the default 5s bound under stress mode at -O0. The default (5) is
+# unchanged for every existing caller that doesn't set this.
+if [ -n "$TURF_TEST_TIMEOUT_SEC" ]; then
+    RUN_TIMEOUT_SEC="$TURF_TEST_TIMEOUT_SEC"
+else
+    RUN_TIMEOUT_SEC=5
+fi
+
 if [ -n "$TURF_TEST_JOBS" ]; then
     JOBS="$TURF_TEST_JOBS"
 elif command -v nproc >/dev/null 2>&1; then
@@ -232,7 +256,7 @@ run_one_test() {
         # Pipe dummy values (e.g., name and age) to avoid blocking
         echo -e "TestUser\n25" | "$PROGRAM" > "$LOGFILE" 2>&1 &
         CMD_PID=$!
-        (sleep 5 && kill -9 $CMD_PID 2>/dev/null) &
+        (sleep "$RUN_TIMEOUT_SEC" && kill -9 $CMD_PID 2>/dev/null) &
         wait $CMD_PID 2>/dev/null
         RUN_STATUS=$?
         RUN_OUTPUT=$(cat "$LOGFILE")
@@ -240,7 +264,7 @@ run_one_test() {
         # Regular tests
         "$PROGRAM" > "$LOGFILE" 2>&1 &
         CMD_PID=$!
-        (sleep 5 && kill -9 $CMD_PID 2>/dev/null) &
+        (sleep "$RUN_TIMEOUT_SEC" && kill -9 $CMD_PID 2>/dev/null) &
         wait $CMD_PID 2>/dev/null
         RUN_STATUS=$?
         RUN_OUTPUT=$(cat "$LOGFILE")
@@ -248,7 +272,7 @@ run_one_test() {
 
     if [ $RUN_STATUS -eq 137 ] || [ $RUN_STATUS -eq 143 ] || [ $RUN_STATUS -eq 211 ]; then
         echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${YELLOW}TIMEOUT (Likely infinite loop)${RESET}"
-        { echo "STATUS=FAIL"; echo "DETAIL=$test_file (Timed out after 5s)"; } > "$RESULT_FILE"
+        { echo "STATUS=FAIL"; echo "DETAIL=$test_file (Timed out after ${RUN_TIMEOUT_SEC}s)"; } > "$RESULT_FILE"
     elif [ $RUN_STATUS -ne 0 ]; then
         echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${RED}RUNTIME FAILED${RESET} (Exit code $RUN_STATUS)"
         {
@@ -265,7 +289,7 @@ run_one_test() {
     rm -f "$PROGRAM" "$LOGFILE"
 }
 export -f run_one_test
-export RESULTS_DIR COMPILER TURF_OPT_FLAG
+export RESULTS_DIR COMPILER TURF_OPT_FLAG RUN_TIMEOUT_SEC
 export BOLD GREEN RED YELLOW CYAN RESET
 
 printf '%s\0' "${TEST_FILES[@]}" | xargs -0 -P "$JOBS" -I{} bash -c 'run_one_test "$@"' _ {}

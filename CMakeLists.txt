@@ -300,10 +300,59 @@ set_target_properties(turfrt PROPERTIES
 )
 target_compile_options(turfrt PRIVATE -Wall -Wextra)
 
+# ─── libturfrt_asan (FDN-005 stage 3, docs/planning/ROADMAP_v2.0.0.md) ───────
+# An independently-built, ASan+UBSan-instrumented twin of `turfrt` above,
+# same sources, existing ONLY to answer MEM-002's own disclosed open
+# question: "the register-scanning technique has not been cross-validated
+# ... before this collector is exercised under load." A hand-written C
+# harness compiled directly against `turfrt`'s own .a (scripts/gc_smoke.sh)
+# already gets ASan coverage informally (MEM-002's own change record
+# describes exactly this, ad hoc, during that group's development) -- this
+# target makes it a real, always-available, CI-exercised build product
+# instead, and (via TURF_RT_ASAN_BUILD below) lets `turf` itself produce
+# ASan-instrumented COMPILED TURF PROGRAMS, not just synthetic C repros, so
+# the entire existing `tests/` regression suite becomes independent
+# validation for free.
+#
+# A SEPARATE target, not a build-time flag on `turfrt` itself: both
+# archives are named distinctly (`libturfrt.a` / `libturfrt_asan.a`) and
+# land in the SAME lib/ directory (ARCHIVE_OUTPUT_DIRECTORY, unchanged from
+# `turfrt` above) rather than a parallel directory tree, specifically so an
+# ordinary dev build and an ASan-enabled one can coexist without either
+# clobbering the other's runtime archive -- `main.cpp`'s `linkObject()`
+# picks the archive name (and the `-fsanitize=` flags) by which macro this
+# COMPILER BINARY was itself built with, not by anything in the environment
+# at link time, so a `build/turf` and a separately-configured ASan `turf`
+# binary each always reach for their own runtime, permanently.
+option(TURF_RT_SANITIZE "Build libturfrt_asan and make this turf binary link every compiled Turf program against it with -fsanitize=address,undefined" OFF)
+if(TURF_RT_SANITIZE)
+  add_library(turfrt_asan STATIC
+    runtime/turfrt_abi.c
+    runtime/turfrt_alloc.c
+    runtime/turfrt_gc.c
+    runtime/turfrt_panic.c
+    runtime/turfrt_signal.c
+    runtime/turfrt_types.c
+  )
+  target_include_directories(turfrt_asan PRIVATE runtime)
+  set_target_properties(turfrt_asan PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED ON
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/lib"
+    OUTPUT_NAME turfrt_asan
+  )
+  target_compile_options(turfrt_asan PRIVATE -Wall -Wextra -g -fno-omit-frame-pointer
+    -fsanitize=address -fsanitize=undefined)
+endif()
+
 # ─── Executable ──────────────────────────────────────────────────────────────
 add_executable(turf src/main.cpp)
 
 target_link_libraries(turf PRIVATE turfcore)
+if(TURF_RT_SANITIZE)
+  target_compile_definitions(turf PRIVATE TURF_RT_ASAN_BUILD)
+  add_dependencies(turf turfrt_asan)
+endif()
 
 # ─── Tool API tests (SMP-001) ────────────────────────────────────────────────
 # Unit tests for the compiler query facade (include/turf/Analysis.h), run by

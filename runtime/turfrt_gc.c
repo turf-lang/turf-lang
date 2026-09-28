@@ -93,6 +93,23 @@
  * contents survive an intervening call", which every one of them promises.
  */
 
+/*
+ * FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): must be defined before
+ * ANY system header is included in this translation unit -- glibc's
+ * <features.h> latches __USE_GNU (and everything gated on it, including
+ * <ucontext.h>'s REG_RBX-style register-index macros gc_cross_validate_
+ * marks() below needs) the FIRST time it is pulled in, via its own header
+ * guard; a later #define _GNU_SOURCE right before #include <ucontext.h>
+ * is too late once any earlier header in this file has already dragged
+ * <features.h> in without it. Confirmed live: REG_RBX is undeclared under
+ * plain -std=gnu11 without this. Guarded to Linux only (the only platform
+ * this specific validation mode supports -- see TURF_GC_VALIDATE_SUPPORTED
+ * below) so it never affects the macOS/Windows builds of this same file.
+ */
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include "turfrt.h"
 #include "turfrt_internal.h"
 
@@ -100,6 +117,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/*
+ * FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): only defined when this
+ * translation unit is itself compiled with -fsanitize=address (CMakeLists.txt's
+ * `turfrt_asan` target). See gc_scan_range_conservative()'s own comment,
+ * below, for why the conservative stack scan specifically needs to know
+ * this -- found live the first time this collector ever ran under ASan
+ * (the whole point of this stage): a bare, unguarded stack-buffer-overflow
+ * abort on every single collection, not a real bug.
+ */
+#if defined(__SANITIZE_ADDRESS__)
+#define TURF_GC_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define TURF_GC_ASAN 1
+#endif
+#endif
+#ifdef TURF_GC_ASAN
+#include <sanitizer/asan_interface.h>
+#endif
 
 /*
  * ─── Platform dispatch (OVH-013) ───────────────────────────────────────
@@ -154,6 +191,86 @@ no implementation for this architecture/OS combination -- porting notes in \
 docs/planning/OVERHAUL_REMAINING_WORK.md's OVH-013."
 #endif
 #endif
+
+/*
+ * FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): MEM-002's own
+ * disclosed open question #2 (docs/development/changes/MEM-002.md,
+ * *Unresolved questions*) -- "the register-scanning technique (inline
+ * asm, not setjmp) has not been cross-validated against an independent
+ * conservative-GC implementation." gc_cross_check_extra_registers() (below)
+ * answers this with a SECOND, independently-implemented root capture:
+ * glibc's own getcontext() (<ucontext.h>), which snapshots the FULL
+ * general-purpose register file via the kernel's own signal-frame
+ * machinery -- a completely different code path than this file's
+ * hand-written inline asm, covering every GPR (caller-saved included),
+ * not just the callee-saved subset the primary scan relies on. Comparing
+ * the two passes' mark sets turns "the primary technique is modeled on
+ * Boehm GC's own reasoning" into "the primary technique's own output was
+ * checked against an independently-obtained register snapshot, on real
+ * runs, not just argued about."
+ *
+ * Scoped to Linux/glibc/x86-64 ONLY -- __GLIBC__ is not yet defined at
+ * this point in the file (it comes from <features.h>, pulled in by the
+ * very #include <ucontext.h> this guard controls), so it is checked
+ * again, after the include, before any of gc_cross_check_extra_registers()'s own
+ * code is compiled. musl (a common non-glibc Linux libc) does not shape
+ * ucontext_t/mcontext_t the same way at all; macOS's own ucontext.h is
+ * formally deprecated and shapes registers differently again; Win64 has
+ * no getcontext() at all. Each is a real, separate port, not a
+ * configuration flag -- exactly the same honesty this file's own
+ * TURF_GC_REGCAP_.../TURF_GC_STACKBASE_... dispatch already applies (a target
+ * with no branch here simply does not get this EXTRA validation, unlike
+ * the PRIMARY scan, which hard-#errors on an unported target -- this
+ * stage is additional, opt-in scrutiny, never a load-bearing part of an
+ * ordinary collection, so degrading to "unavailable" on an unported
+ * platform is correct, not a silent under-scan the way it would be for
+ * the primary path).
+ */
+#if defined(TURF_GC_REGCAP_SYSV64) && defined(__linux__)
+#include <ucontext.h>
+#if defined(__GLIBC__)
+#define TURF_GC_VALIDATE_SUPPORTED 1
+#endif
+#endif
+
+/*
+ * FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): "the address of a
+ * local variable in the current function" (this file's own top comment
+ * calls it "current SP") is, under ASan's default
+ * `detect_stack_use_after_return=1`, NOT guaranteed to be a real machine
+ * stack address at all -- ASan's fake-stack instrumentation may relocate
+ * an ordinary local's storage onto a HEAP-allocated "fake frame"
+ * specifically so it can detect a pointer to it outliving its function
+ * (the exact feature the name describes). Found live, the first time
+ * gc_mark()'s own SP approximation ran under ASan: `gc_scan_range_
+ * conservative()` was handed a genuine heap address as its LOWER bound
+ * and a real stack address as its upper bound, producing a scan range
+ * that walked mostly-unmapped memory and SEGV'd almost immediately --
+ * not the redzone false positive `__asan_region_is_poisoned` (below)
+ * already handles, a completely different failure mode.
+ *
+ * The fix is this tiny, `noinline`, ASan-EXEMPTED helper -- exempted from
+ * instrumentation ONLY here, in a function whose entire body is "take a
+ * local's address and return it", specifically so the compiler's
+ * fake-stack pass never gets the chance to relocate `marker`. Scoping the
+ * exemption to this one trivial function (rather than exempting
+ * `gc_mark()` itself, which was the first fix attempted) matters: `gc_
+ * mark()` also does real GC-heap block-table reads/writes that should
+ * stay fully ASan-checked, and a plain "return &local" body has no memory
+ * access worth checking anyway. Both existing call sites (gc_mark()'s own
+ * "current SP", and turf_gc_record_stack_base()'s /proc-unavailable
+ * fallback) now go through this instead of taking a local's address
+ * directly.
+ */
+__attribute__((noinline))
+#ifdef TURF_GC_ASAN
+__attribute__((no_sanitize("address")))
+#endif
+static uintptr_t
+gc_approx_sp(void) {
+  int marker;
+  return (uintptr_t)&marker;
+}
 
 /* ─── Block table ────────────────────────────────────────────────────── */
 
@@ -287,8 +404,7 @@ void turf_gc_record_stack_base(void) {
      * call-depth-dependent local-variable capture rather than scanning
      * nothing at all. Known pitfall, not silently accepted as equivalent:
      * see docs/development/changes/MEM-002.md. */
-    int marker;
-    g_stack_base = (uintptr_t)&marker;
+    g_stack_base = gc_approx_sp();
   }
 }
 
@@ -642,12 +758,34 @@ static void gc_consider_root(uintptr_t candidate, Worklist *wl) {
 /* Word-by-word conservative scan of [lo, hi) -- every aligned word is a
  * POSSIBLE pointer; gc_consider_root's own block-table lookup is what
  * actually decides, so over-scanning here costs false-retention risk, not
- * correctness (§14's own accepted tradeoff). */
+ * correctness (§14's own accepted tradeoff).
+ *
+ * FDN-005 stage 3: under ASan, [lo, hi) legitimately contains bytes ASan
+ * has poisoned -- the redzones it inserts around EVERY stack-allocated
+ * local/array in every frame between the true stack top and `hi` (a
+ * conservative scan walks frames that have already returned, on purpose;
+ * that's the entire technique). Found live the first time this collector
+ * ran under ASan at all: an unconditional read of every word in range
+ * aborted immediately on the very first collection, on a redzone byte
+ * belonging to `gc_mark()`'s own `marker` local, not a real bug. A
+ * poisoned byte is, by construction, never part of any Turf-visible
+ * value (it's padding ASan itself inserted, not memory this collector
+ * would ever need to trace a real pointer through), so skipping a
+ * poisoned word changes nothing about correctness -- it only stops this
+ * one, specific, well-known conservative-GC/ASan interaction from firing.
+ * Deliberately scoped to JUST this function: gc_scan_block_precise()'s
+ * own heap reads are NOT given this treatment, so a genuine
+ * freed-block-reuse bug reached through PRECISE tracing (the actual bug
+ * class this stage's ASan build exists to catch) still aborts normally. */
 static void gc_scan_range_conservative(uintptr_t lo, uintptr_t hi,
                                         Worklist *wl) {
   lo &= ~((uintptr_t)(sizeof(uintptr_t) - 1));
   for (uintptr_t a = lo; a + sizeof(uintptr_t) <= hi;
        a += sizeof(uintptr_t)) {
+#ifdef TURF_GC_ASAN
+    if (__asan_region_is_poisoned((void *)a, sizeof(uintptr_t)))
+      continue;
+#endif
     uintptr_t word = *(uintptr_t *)a;
     gc_consider_root(word, wl);
   }
@@ -679,6 +817,145 @@ static void gc_scan_block_precise(GcBlock *b, Worklist *wl) {
   }
 }
 
+#ifdef TURF_GC_VALIDATE_SUPPORTED
+/*
+ * FDN-005 stage 3: independent register capture via glibc's getcontext()
+ * -- a completely different mechanism than gc_capture_callee_saved()'s
+ * hand-written inline asm (the kernel fills a ucontext_t's mcontext_t
+ * during signal delivery; getcontext() is glibc's own wrapper around that
+ * same machinery, not code this file wrote). Deliberately captures the
+ * FULL general-purpose register file, not just the SysV64 callee-saved
+ * subset gc_capture_callee_saved() reads; RSP is omitted (the stack-range
+ * scan already covers it by definition) and RIP is omitted (a code
+ * address, never a heap pointer).
+ *
+ * Must be called from the SAME instant as gc_capture_callee_saved() --
+ * gc_mark() calls both back-to-back, before gc_rebuild_index() or any
+ * other work runs. This was NOT the first version of this function: an
+ * earlier draft called this from a SEPARATE helper invoked AFTER the
+ * primary mark/trace pass had already completed, and treated any block
+ * the primary pass marked but this one didn't as a hard error. That
+ * version false-positived on almost every test in tests/41_gc/, for a
+ * reason that took a live repro to see: by the time the primary pass
+ * finishes (gc_rebuild_index(), the full worklist trace, several mallocs
+ * for the worklist array), MANY function calls have run since
+ * gc_capture_callee_saved()'s own read -- every caller-saved register
+ * gc_capture_callee_saved() never even looks at could have been (and
+ * generally was) overwritten many times over by that unrelated
+ * intervening work, so a LATER getcontext() call is not reading "the same
+ * moment" at all, just whatever scratch data the most recent internal
+ * computation happened to leave behind. Comparing against literally
+ * unrelated register garbage is not a validation of anything -- hence
+ * capturing both at the same instant, before either pass has run.
+ */
+#define TURF_GC_VALIDATE_WORDS 15
+static size_t
+gc_capture_independent_regs(uintptr_t out[TURF_GC_VALIDATE_WORDS]) {
+  ucontext_t uc;
+  if (getcontext(&uc) != 0)
+    return 0;
+  const int regnums[TURF_GC_VALIDATE_WORDS] = {
+      REG_RAX, REG_RBX, REG_RCX, REG_RDX, REG_RDI, REG_RSI, REG_RBP,
+      REG_R8,  REG_R9,  REG_R10, REG_R11, REG_R12, REG_R13, REG_R14,
+      REG_R15,
+  };
+  for (size_t i = 0; i < TURF_GC_VALIDATE_WORDS; i++)
+    out[i] = (uintptr_t)uc.uc_mcontext.gregs[regnums[i]];
+  return TURF_GC_VALIDATE_WORDS;
+}
+
+/*
+ * Indices into gc_capture_independent_regs()'s own regnums[] table (just
+ * above) that duplicate gc_capture_callee_saved()'s SysV64 set (rbx, rbp,
+ * r12-r15) -- skipped here since the primary pass already traces them;
+ * checking them again would only ever produce a guaranteed, uninformative
+ * match. What's left (rax, rcx, rdx, rdi, rsi, r8-r11 -- 9 registers) is
+ * the genuinely NEW information this independent capture adds: every one
+ * of them is caller-saved under SysV64, meaning nothing in this file's
+ * own design ever claims they survive a call, and the primary scan never
+ * looks at them at all.
+ */
+static const int gc_validate_extra_idx[] = {0, 2, 3, 4, 5, 7, 8, 9, 10};
+#define TURF_GC_VALIDATE_EXTRA_COUNT \
+  (sizeof(gc_validate_extra_idx) / sizeof(gc_validate_extra_idx[0]))
+
+static uint64_t g_gc_validate_extra_findings = 0;
+
+/*
+ * Called AFTER the production trace has finished (so `marked` reflects
+ * everything the real collection considers reachable) with the register
+ * snapshot captured at the SAME instant as the primary capture. Reports
+ * (does not panic, does not mark, does not affect what gets swept) any
+ * caller-saved register that happens to point inside a block the
+ * production scan did NOT otherwise retain.
+ *
+ * Deliberately non-fatal, unlike the ASan build's own detections: a
+ * caller-saved register's content, at any given instant, is not
+ * guaranteed to be a live Turf-level value at all -- the C ABI places no
+ * obligation on what a caller-saved register holds across a call, so it
+ * may easily contain unrelated leftover computation that HAPPENS to
+ * alias a live block's address range (the exact same "over-scanning
+ * costs false-retention risk, not correctness" tradeoff this file's own
+ * top comment already accepts for the primary scan, just applied to a
+ * register range the primary scan intentionally excludes). A finding
+ * here is evidence worth collecting across many runs, not, on its own,
+ * proof that the primary scan missed a real root -- turning it into a
+ * hard abort would make TURF_GC_VALIDATE flaky in CI over pure coincidence,
+ * exactly the failure mode this stage exists to avoid introducing.
+ */
+static void
+gc_cross_check_extra_registers(const uintptr_t indep_regs[TURF_GC_VALIDATE_WORDS]) {
+  for (size_t k = 0; k < TURF_GC_VALIDATE_EXTRA_COUNT; k++) {
+    uintptr_t candidate = indep_regs[gc_validate_extra_idx[k]];
+    GcBlock *b = gc_find_containing(candidate);
+    if (b && !b->marked) {
+      g_gc_validate_extra_findings++;
+      fprintf(stderr,
+              "TURF_GC_VALIDATE: a caller-saved register (outside "
+              "gc_capture_callee_saved()'s own set) pointed at a block "
+              "(start=%p size=%zu) the production scan did not otherwise "
+              "mark live -- likely coincidental stale register content "
+              "(an accepted conservative-scanning risk), not necessarily "
+              "a missed root; see docs/development/changes/FDN-005.md. "
+              "(finding #%llu this process)\n",
+              (void *)b->start, b->size,
+              (unsigned long long)g_gc_validate_extra_findings);
+    }
+  }
+}
+#endif /* TURF_GC_VALIDATE_SUPPORTED */
+
+/*
+ * FDN-005 stage 3: a testing aid in exactly the same shape as
+ * TURF_GC_STRESS (turf_gc_note_alloc(), below) -- opt-in, read once and
+ * cached. On a platform this file has no independent-capture
+ * implementation for, setting this prints a one-time notice and is
+ * otherwise a no-op (never a silent "looked like it worked" -- the same
+ * honesty TURF_GC_REGCAP_*'s hard #error gives the PRIMARY scan; this is
+ * the OPTIONAL extra-scrutiny path, so degrading to "unavailable here"
+ * rather than failing to build is the correct choice for it specifically,
+ * not a double standard).
+ */
+static int g_gc_validate = -1;
+
+static int gc_validate_enabled(void) {
+  if (g_gc_validate < 0) {
+    const char *e = getenv("TURF_GC_VALIDATE");
+    g_gc_validate = (e != NULL && e[0] != '\0' && strcmp(e, "0") != 0) ? 1 : 0;
+#ifndef TURF_GC_VALIDATE_SUPPORTED
+    if (g_gc_validate) {
+      fprintf(stderr,
+              "TURF_GC_VALIDATE=1 was set, but this build has no "
+              "independent register-capture cross-validation for this "
+              "platform (Linux/glibc/x86-64 only, FDN-005 stage 3) -- "
+              "ignoring.\n");
+      g_gc_validate = 0;
+    }
+#endif
+  }
+  return g_gc_validate;
+}
+
 static void gc_mark(void) {
   gc_rebuild_index();
   for (size_t i = 0; i < g_block_count; i++)
@@ -688,11 +965,25 @@ static void gc_mark(void) {
 
   uintptr_t regs[TURF_GC_REGCAP_WORDS];
   gc_capture_callee_saved(regs);
+
+  /* FDN-005 stage 3: captured HERE, back-to-back with the primary read
+   * above, before gc_rebuild_index() or anything else runs -- see
+   * gc_capture_independent_regs()'s own comment for why the timing
+   * matters. `do_validate`/`indep_regs` are unused (and `-Wunused`-silenced
+   * as such) when this platform has no implementation. */
+#ifdef TURF_GC_VALIDATE_SUPPORTED
+  int do_validate = gc_validate_enabled();
+  uintptr_t indep_regs[TURF_GC_VALIDATE_WORDS];
+  if (do_validate)
+    (void)gc_capture_independent_regs(indep_regs);
+#else
+  (void)gc_validate_enabled(); /* still surfaces the one-time notice */
+#endif
+
   for (int i = 0; i < TURF_GC_REGCAP_WORDS; i++)
     gc_consider_root(regs[i], &wl);
 
-  int marker;
-  uintptr_t sp = (uintptr_t)&marker;
+  uintptr_t sp = gc_approx_sp();
   if (g_stack_base > sp)
     gc_scan_range_conservative(sp, g_stack_base, &wl);
 
@@ -718,6 +1009,14 @@ static void gc_mark(void) {
   }
 
   free(wl.items);
+
+#ifdef TURF_GC_VALIDATE_SUPPORTED
+  /* Checked AFTER the trace above completes, so `marked` reflects full
+   * production reachability -- see gc_cross_check_extra_registers()'s own
+   * comment for why this reports rather than aborts. */
+  if (do_validate)
+    gc_cross_check_extra_registers(indep_regs);
+#endif
 }
 
 static void gc_sweep(void) {
@@ -753,9 +1052,35 @@ void turf_rt_collect(void) {
   g_collect_count++;
 }
 
+/*
+ * FDN-005 stage 2 (docs/planning/ROADMAP_v2.0.0.md): a testing aid, exactly
+ * like TURF_RT_STATS_DUMP (runtime/turfrt_alloc.c) -- opt-in, read once and
+ * cached (this is checked on every single allocation, unlike the
+ * shutdown-only stats dump, so a fresh getenv() per call is not acceptable
+ * overhead even for the common case where it's unset), never changes a
+ * program's observable OUTPUT, only how often it collects. Forcing a
+ * collection on every allocation is the single most effective way to
+ * surface a "would-be-collected-too-early" bug: the heap-doubling
+ * heuristic's own threshold means most real programs only collect a
+ * handful of times over their whole run, so a root the primary scan barely
+ * misses (a narrow window between an allocation and the value being
+ * spilled somewhere a conservative scan would find it) can go unnoticed
+ * for a very long time under ordinary allocation pressure and get caught
+ * immediately once every single allocation is itself a collection point.
+ */
+static int g_gc_stress = -1; /* -1 = not yet queried */
+
+static int gc_stress_enabled(void) {
+  if (g_gc_stress < 0) {
+    const char *e = getenv("TURF_GC_STRESS");
+    g_gc_stress = (e != NULL && e[0] != '\0' && strcmp(e, "0") != 0) ? 1 : 0;
+  }
+  return g_gc_stress;
+}
+
 void turf_gc_note_alloc(size_t bytes) {
   g_bytes_since_collect += bytes;
-  if (g_bytes_since_collect >= g_gc_threshold) {
+  if (gc_stress_enabled() || g_bytes_since_collect >= g_gc_threshold) {
     turf_rt_collect();
   }
 }

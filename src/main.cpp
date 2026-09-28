@@ -593,6 +593,28 @@ static int linkObject(const std::string &ObjFile,
   // any system default; the flag order below is deliberate.
   std::string TurfLibDir = TurfInstallRoot() + "/lib";
 
+  // FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): TURF_RT_ASAN_BUILD is
+  // a COMPILE-TIME macro (CMakeLists.txt's `TURF_RT_SANITIZE` option), never
+  // an environment variable checked here -- a `turf` binary built with it
+  // always links every compiled Turf program against the separately-built,
+  // ASan+UBSan-instrumented `libturfrt_asan.a` (CMakeLists.txt) instead of
+  // the ordinary `libturfrt.a`, permanently. This is what turns the
+  // existing `tests/` regression suite into independent validation for
+  // MEM-002's own disclosed open question about the register-scanning
+  // technique (docs/development/changes/MEM-002.md, *Unresolved
+  // questions*): every real compiled Turf program's allocations, not just
+  // scripts/gc_smoke.sh's hand-written C harnesses, run through ASan's
+  // freed-block-reuse detection. An ordinary `build/turf` and a
+  // `-DTURF_RT_SANITIZE=ON` build never share a runtime archive (distinct
+  // names, same lib/ directory -- CMakeLists.txt's own comment on the
+  // `turfrt_asan` target explains why), so this branch is the only place
+  // that needs to know which one this specific binary was built for.
+#ifdef TURF_RT_ASAN_BUILD
+  const std::string RtLibName = "turfrt_asan";
+#else
+  const std::string RtLibName = "turfrt";
+#endif
+
   // FDN-006 stage 3 (docs/planning/ROADMAP_v2.0.0.md): a missing
   // `libturfrt.a` used to surface only as `cc`'s own generic
   // "-lturfrt: No such file" linker error, with no mention of TurfLang, a
@@ -600,7 +622,7 @@ static int linkObject(const std::string &ObjFile,
   // BEFORE `cc`/`gcc` is even invoked, so the failure is a TurfLang
   // diagnostic that names the exact path it looked for -- not a linker
   // error the user has to already know libturfrt exists to make sense of.
-  std::string TurfLibArchive = TurfLibDir + "/libturfrt.a";
+  std::string TurfLibArchive = TurfLibDir + "/lib" + RtLibName + ".a";
   if (!llvm::sys::fs::exists(TurfLibArchive)) {
     std::cerr << "Error: TurfLang runtime library not found at '"
               << TurfLibArchive << "'.\n";
@@ -613,11 +635,15 @@ static int linkObject(const std::string &ObjFile,
 #ifdef _WIN32
   std::string FinalOutput = OutputName + ".exe";
   std::vector<std::string> Args = {"gcc",       ObjFile, "-o", FinalOutput,
-                                    "-L" + TurfLibDir, "-lturfrt", "-lm"};
+                                    "-L" + TurfLibDir, "-l" + RtLibName, "-lm"};
 #else
   std::string FinalOutput = OutputName;
   std::vector<std::string> Args = {"cc",        ObjFile, "-o", FinalOutput,
-                                    "-L" + TurfLibDir, "-lturfrt", "-lm"};
+                                    "-L" + TurfLibDir, "-l" + RtLibName, "-lm"};
+#endif
+#ifdef TURF_RT_ASAN_BUILD
+  Args.push_back("-fsanitize=address");
+  Args.push_back("-fsanitize=undefined");
 #endif
   for (const auto &L : AllLibs) Args.push_back("-l" + L);
 

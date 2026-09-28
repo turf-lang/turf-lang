@@ -73,6 +73,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): same detection as
+ * turfrt_gc.c's own TURF_GC_ASAN (kept as an independent, duplicated
+ * three-line check rather than a shared header symbol -- this is a
+ * compiler-provided macro test, not a value either file computes, so
+ * there is nothing to keep "in sync" by sharing it). See
+ * turf_rt_install_segv_handler()'s own comment below for why this
+ * matters here specifically.
+ */
+#if defined(__SANITIZE_ADDRESS__)
+#define TURF_SIGNAL_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define TURF_SIGNAL_ASAN 1
+#endif
+#endif
+
 #if !defined(_WIN32)
 #include <signal.h>
 #include <sys/resource.h>
@@ -83,11 +100,18 @@
  * plain static array, not a malloc'd buffer this file would need to
  * remember to free (it never does; it lives for the process's whole
  * life). */
+#ifndef TURF_SIGNAL_ASAN
 #define TURF_ALTSTACK_SIZE (64 * 1024)
 static unsigned char g_altstack[TURF_ALTSTACK_SIZE];
+#endif
 
 #define TURF_STACK_GUARD_WINDOW ((uintptr_t)(256 * 1024))
 
+/* Never referenced under TURF_SIGNAL_ASAN (see
+ * turf_rt_install_segv_handler()'s own comment below) -- guarded out
+ * entirely rather than left as dead code a -Wunused-function build would
+ * otherwise flag. */
+#ifndef TURF_SIGNAL_ASAN
 static void turf_rt_segv_handler(int sig, siginfo_t *info, void *ucontext) {
   (void)sig;
   (void)ucontext;
@@ -124,8 +148,34 @@ static void turf_rt_segv_handler(int sig, siginfo_t *info, void *ucontext) {
     abort();
   }
 }
+#endif /* !TURF_SIGNAL_ASAN */
 
 void turf_rt_install_segv_handler(void) {
+#ifdef TURF_SIGNAL_ASAN
+  /*
+   * FDN-005 stage 3: under ASan, deliberately install NOTHING here, ever
+   * -- ASan's own runtime already installs its own, far more capable
+   * SIGSEGV handler (a real, per-fault stack-overflow AND generic
+   * invalid-access report, with a full stack trace and shadow-memory
+   * dump) from its process-startup constructor, which runs BEFORE
+   * turf_rt_init() ever gets a chance to call this function.
+   * sigaction(SIGSEGV, ...) unconditionally REPLACES whatever handler was
+   * previously installed for that signal -- there is no "chain to the
+   * previous handler" here, so installing ours would silently discard
+   * ASan's, turning every ASan-detected fault into this file's own
+   * generic "segmentation fault at address ..." line with none of ASan's
+   * own diagnostic detail. Found live, the first time an ASan-built
+   * runtime's SIGSEGV path was ever exercised: a real fault was caught
+   * and reported by THIS file's handler instead of ASan's, discarding
+   * exactly the extra detail an ASan build exists to provide. An
+   * ASan-built binary's stack-overflow/generic-SIGSEGV reporting is
+   * strictly a downgrade path relative to non-ASan (INV-RT-5 only
+   * "holds" for a non-ASan build -- see that invariant's own row), never
+   * an upgrade, so this is an accepted, documented trade-off of choosing
+   * to build with TURF_RT_SANITIZE, not a regression to fix.
+   */
+  return;
+#else
   stack_t ss;
   ss.ss_sp = g_altstack;
   ss.ss_size = sizeof(g_altstack);
@@ -142,6 +192,7 @@ void turf_rt_install_segv_handler(void) {
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
   sigaction(SIGSEGV, &sa, NULL);
+#endif
 }
 
 #else /* _WIN32 */
