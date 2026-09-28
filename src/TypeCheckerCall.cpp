@@ -1961,7 +1961,11 @@ void TypeChecker::visitArrayAccess(ArrayAccessExprAST &Node) {
 
     setType(&Node, ElemTy);
   } else if (BaseTy && BaseTy->isString()) {
-    setType(&Node, TurfInt());
+    // FDN-004 (D17, ROADMAP_v2.0.0.md): `s[i]` yields `char`, not `int`.
+    // `char` already exists and is one byte -- returning `int` was the
+    // recorded inconsistency (audit F-17/C-7). Breaking, so after 2.0 this
+    // can only change again in 3.0 (docs/development/changes/FDN-004.md).
+    setType(&Node, TurfChar());
   } else if (BaseTy) {
     if (const auto *PtrTy = dynamic_cast<const TurfPointerType *>(BaseTy.get())) {
       // Pointer-style indexing (`p[i]` on a `T*`, as opposed to a fixed-

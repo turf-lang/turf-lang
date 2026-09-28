@@ -1135,8 +1135,13 @@ const TurfType *getExprType(const ExprAST *E) {
     }
     const TurfType *BaseTy = getExprType(ArrAcc->getBase());
     if (BaseTy) {
+      // FDN-004: mirrors TypeChecker::visitArrayAccess()'s `char` result for
+      // `s[i]` -- Codegen's getExprType() is a separate, independent
+      // type-inference pass (see this function's other cross-references)
+      // and must agree or callers relying on it (e.g. a further `.method()`
+      // UFCS dispatch on `s[i]`) silently get the wrong answer.
       if (BaseTy->isString())
-        return TurfInt().get();
+        return TurfChar().get();
       const TurfType *ElemTy = nullptr;
       if (isArrayType(BaseTy)) {
         ElemTy = getArrayElementType(BaseTy);
@@ -1913,6 +1918,30 @@ Value *CastToType(Value *Val, const TurfType *DestType,
       return Builder->CreateFPToSI(Val, Type::getInt64Ty(*TheContext), Name);
     if (SrcType->isNamed("bool"))
       return Builder->CreateZExt(Val, Type::getInt64Ty(*TheContext), Name);
+    // FDN-004: a `char`-typed value used where Codegen needs a plain `int`
+    // (e.g. ArrayAccessExprAST forcing its own index to `int` before the
+    // GEP, regardless of what the TypeChecker inferred the index
+    // expression's type to be) -- zero-extends, matching `char -> int`'s
+    // documented semantics (docs/reference/variables_and_types.md
+    // "char") and CastExprAST::codegen()'s identical explicit-`to` case.
+    // Before FDN-004 no expression could ever produce a `char`-typed
+    // array/string index at all, so this path was unreachable; it is now
+    // hit by anything as ordinary as `freq[s[i]]` (a byte-histogram over a
+    // string). Confirmed live: without this, the index silently stayed an
+    // un-widened i8 all the way into the bounds check and the GEP, and
+    // `-Wverify` on LLVM caught it outright ("Both operands to ICmp
+    // instruction are not of the same type! ... icmp slt i8 ..., i64 0").
+    if (SrcType->isNamed("char"))
+      return Builder->CreateZExt(Val, Type::getInt64Ty(*TheContext), Name);
+  }
+  // FDN-004: the narrowing mirror of the widening case just above -- Codegen
+  // occasionally needs to force a value down to a struct/array field's
+  // declared `char` element type (e.g. ArrayLiteralExprAST/ArrayDeclExprAST
+  // casting each initializer element to ElementType). Truncates, matching
+  // `int -> char`'s documented semantics.
+  if (DestType->isNamed("char")) {
+    if (SrcType->isNamed("int"))
+      return Builder->CreateTrunc(Val, Type::getInt8Ty(*TheContext), Name);
   }
   if (DestType->isNamed("bool")) {
     if (SrcType->isNamed("double"))

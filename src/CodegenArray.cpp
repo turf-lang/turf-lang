@@ -168,6 +168,67 @@ static void EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
 }
 
 
+// FDN-004: bounds check for `s[i]` on a `string`. Unlike a Turf array, a
+// `string` carries no compile-time (or even cached runtime) length -- it is
+// a bare NUL-terminated `i8*` (F-STD-3, frozen) -- so the upper bound is a
+// fresh `strlen(s)` call at every access, not a constant. This is the
+// design doc's option (a) (ROADMAP_v2.0.0.md FDN-004 "Design notes"):
+// correct and O(n) per access; a loop that indexes every byte is therefore
+// O(n^2) unless the caller reaches for `strings::byte_at_unchecked()`
+// instead.
+//
+// `CheckUpperBound` is false on the write path (codegenLValue() below) and
+// true on the read path (codegen()): a write target is very often a
+// `gc_alloc`'d buffer being filled one byte at a time BEFORE its NUL
+// terminator is written (every strings.tr function that builds a string
+// this way -- substring/replace/to_upper/to_lower/pad_left/pad_right --
+// does exactly this), so `strlen(buf)` there reads however many
+// (zero-initialized, from gc_alloc) leading zero bytes happen to precede
+// the write cursor -- typically 0, which made EVERY first write into a
+// fresh buffer panic immediately (confirmed live: this is not a
+// hypothetical, the whole stdlib test suite failed this way the first time
+// this check applied to writes). There is no way to recover a buffer's
+// real allocated capacity from a bare `string` value to check against
+// instead -- F-STD-3 is frozen. The negative-index half of the check is
+// still meaningful and free of that problem, so it stays on both paths;
+// only the `strlen`-based upper bound is read-only. This is a documented,
+// intentional residual gap (see FDN-004's change record's *Known
+// pitfalls*), not an oversight: `s[huge_positive_i] = c;` on an
+// already-complete string is still unchecked, exactly as it always was.
+static void EmitStringBoundsCheck(Value *StrVal, Value *IndexVal,
+                                  SourceLocation Loc, bool CheckUpperBound) {
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+
+  Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
+  Value *OutOfBounds = Builder->CreateICmpSLT(IndexVal, Zero, "sidx_neg");
+
+  if (CheckUpperBound) {
+    FunctionType *StrlenTy = FunctionType::get(
+        Type::getInt64Ty(*TheContext), {PointerType::get(*TheContext, 0)},
+        /*isVarArg=*/false);
+    FunctionCallee StrlenFn = TheModule->getOrInsertFunction("strlen", StrlenTy);
+    Value *LenVal = Builder->CreateCall(StrlenFn, {StrVal}, "strlen_bc");
+    Value *TooBig = Builder->CreateICmpSGE(IndexVal, LenVal, "sidx_toobig");
+    OutOfBounds = Builder->CreateOr(OutOfBounds, TooBig, "soob");
+  }
+
+  BasicBlock *OobBB = BasicBlock::Create(*TheContext, "str_oob", TheFunction);
+  BasicBlock *ContBB = BasicBlock::Create(*TheContext, "str_ok");
+
+  Builder->CreateCondBr(OutOfBounds, OobBB, ContBB);
+
+  Builder->SetInsertPoint(OobBB);
+  CodegenPanic(Builder->CreateGlobalString(
+      "String index out of bounds"), Loc);
+
+  if (!Builder->GetInsertBlock()->getTerminator())
+    Builder->CreateUnreachable();
+
+  TheFunction->insert(TheFunction->end(), ContBB);
+  Builder->SetInsertPoint(ContBB);
+}
+
+
 Value *ArrayAccessExprAST::codegenLValue() {
   const TurfType *BaseTy = getExprType(Base.get());
   if (!BaseTy) {
@@ -184,6 +245,11 @@ Value *ArrayAccessExprAST::codegenLValue() {
     if (!IndexVal)
       return nullptr;
     IndexVal = CastToType(IndexVal, TurfInt(), "stridx", Loc);
+
+    // FDN-004: write-side -- negative-index check only. See
+    // EmitStringBoundsCheck()'s own doc comment for why the `strlen()`
+    // upper bound can't apply to a write.
+    EmitStringBoundsCheck(StrVal, IndexVal, Loc, /*CheckUpperBound=*/false);
 
     return Builder->CreateGEP(Type::getInt8Ty(*TheContext), StrVal, IndexVal,
                               "charptr");
@@ -303,12 +369,18 @@ Value *ArrayAccessExprAST::codegen() {
       return nullptr;
     IndexVal = CastToType(IndexVal, TurfInt(), "stridx", Loc);
 
+    // FDN-004: read-side bounds check -- see EmitStringBoundsCheck()'s own
+    // doc comment for why this can't be a fixed-size check like an array's.
+    EmitStringBoundsCheck(StrVal, IndexVal, Loc, /*CheckUpperBound=*/true);
+
     Value *CharPtr = Builder->CreateGEP(Type::getInt8Ty(*TheContext), StrVal,
                                         IndexVal, "charptr");
-    Value *CharVal = Builder->CreateLoad(Type::getInt8Ty(*TheContext), CharPtr,
-                                         "charval");
-    return Builder->CreateZExt(CharVal, Type::getInt64Ty(*TheContext),
-                               "charint");
+    // FDN-004 (D17): `s[i]` is `char`, not `int` -- no ZExt to i64 here
+    // anymore. `char` and its i8 storage are the exact same width, so the
+    // load result IS the value; widening it was only ever needed to match
+    // the old (wrong) `int` result type.
+    return Builder->CreateLoad(Type::getInt8Ty(*TheContext), CharPtr,
+                               "charval");
   }
 
   // First try to codegen the base as an L-value (e.g., a variable or another pointer-like access).
