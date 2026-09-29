@@ -56,7 +56,7 @@ import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TURF = REPO_ROOT / "build" / "turf"
+TURF = REPO_ROOT / "build" / "turfc"
 CORPUS_PATH = Path(__file__).resolve().parent / "corpus.json"
 SCRATCH = Path("/tmp/turf_slm_benchmark_run.tr")
 FIXED_OUT = Path("/tmp/turf_slm_benchmark_fixed.tr")

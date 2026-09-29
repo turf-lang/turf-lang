@@ -31,7 +31,7 @@ cd "$(dirname "$0")/.." || exit 1
 
 BOLD="\033[1m"; GREEN="\033[0;32m"; RED="\033[0;31m"; RESET="\033[0m"
 
-COMPILER="${TURF_COMPILER:-$(pwd)/build/turf}"
+COMPILER="${TURF_COMPILER:-$(pwd)/build/turfc}"
 LIBTURFRT="lib/libturfrt.a"
 FAIL=0
 WORKDIR=$(mktemp -d)

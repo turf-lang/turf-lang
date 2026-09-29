@@ -41,8 +41,11 @@ Thumbs.db
 # Debug
 *.dSYM/
 
-# File Binary
-turf
+# File Binary. Anchored to the repo root: an unanchored `turf` also matches the
+# DIRECTORY cli/cmd/turf/ (LEC-001), so `git add` would silently skip every new
+# file under it. `turfc` is the compiler's name since LEC-001.
+/turf
+/turfc
 program
 # ...but not the tool API's header directory (include/turf/Analysis.h, SMP-001)
 !include/turf/

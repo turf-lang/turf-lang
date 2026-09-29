@@ -61,7 +61,7 @@ jobs:
         uses: ./.github/actions/package-release
         with:
           platform-suffix: linux-x86_64
-          binary-path: build/turf
+          binary-path: build/turfc
           archive-format: tar.gz
 
       - name: Upload artifact
@@ -108,7 +108,7 @@ jobs:
         uses: ./.github/actions/package-release
         with:
           platform-suffix: linux-arch-x86_64
-          binary-path: build/turf
+          binary-path: build/turfc
           archive-format: tar.gz
 
       - name: Upload artifact
@@ -143,7 +143,7 @@ jobs:
         uses: ./.github/actions/package-release
         with:
           platform-suffix: macos-arm64
-          binary-path: build/turf
+          binary-path: build/turfc
           archive-format: tar.gz
 
       - name: Upload artifact
@@ -192,7 +192,7 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p dll_bundle
-          ldd build/turf.exe | grep -i '/mingw64/bin/' | awk '{print $3}' | sort -u | while read -r dll; do
+          ldd build/turfc.exe | grep -i '/mingw64/bin/' | awk '{print $3}' | sort -u | while read -r dll; do
             cp "$dll" dll_bundle/
           done
           # Format as newline-separated Windows paths for the composite action input
@@ -207,7 +207,7 @@ jobs:
         uses: ./.github/actions/package-release
         with:
           platform-suffix: windows-x86_64
-          binary-path: build/turf.exe
+          binary-path: build/turfc.exe
           archive-format: zip
           extra-files: ${{ steps.dlls.outputs.list }}
 

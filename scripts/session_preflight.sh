@@ -116,7 +116,7 @@ else
 fi
 
 if [ $DO_TESTS -eq 1 ]; then
-  if [ -x build/turf ]; then
+  if [ -x build/turfc ]; then
     if ./scripts/test_runner.sh > /tmp/turf_preflight_tests.log 2>&1; then
       echo -e "   ${GREEN}✓${RESET} $(grep -oE 'Total Tests: [0-9]+' /tmp/turf_preflight_tests.log | head -1) — all passing"
     else
@@ -134,7 +134,7 @@ if [ $DO_TESTS -eq 1 ]; then
       fi
     fi
   else
-    echo -e "   ${RED}✗${RESET} build/turf missing — cannot run the suite"
+    echo -e "   ${RED}✗${RESET} build/turfc missing — cannot run the suite"
     FAILED=$((FAILED + 1))
   fi
 else

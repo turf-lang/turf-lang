@@ -37,7 +37,7 @@ you know them:
   exercised by it and can sit broken indefinitely with the suite green.
   `AGENTS.md` records a confirmed instance of exactly that.
 - Compiling one of the six prelude modules directly
-  (`turf --resolve lib/std/core/char.tr`) is the **only** regression coverage
+  (`turfc --resolve lib/std/core/char.tr`) is the **only** regression coverage
   for the prelude-self-import bug class.
 
 ## Step 2 — Read `docs/development/FREEZE.md`

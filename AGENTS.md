@@ -12,7 +12,7 @@ An LLVM-backed, statically-typed, AOT-compiled language. Pipeline: `Lexer → Pa
 ./scripts/cmake_build.sh --release   # first run also builds the vendored llama.cpp submodule — slow once, fast after
 ```
 
-Binary lands at `build/turf`. Rebuild after any `src/`/`include/` change with `cmake --build build -j$(nproc)` (no need to re-run the full `cmake_build.sh` script unless `CMakeLists.txt` itself changed).
+The compiler binary lands at `build/turfc`. Rebuild after any `src/`/`include/` change with `cmake --build build -j$(nproc)` (no need to re-run the full `cmake_build.sh` script unless `CMakeLists.txt` itself changed).
 
 ## Test
 
@@ -30,7 +30,7 @@ Runs every `.tr` file under `tests/`. Takes an optional `-O0`/`-O1`/`-O2`/`-O3`/
 - `TURF_GC_STRESS=1` — collect on every allocation. The most effective way to surface a missed root; slow on allocation-heavy tests (raise `TURF_TEST_TIMEOUT_SEC`).
 - `TURF_GC_VALIDATE=1` (Linux/glibc/x86-64) — runs an independent full-stack mark phase and panics (`GC root missed`) if the production scan missed a block it reaches; also reports stray caller-saved register hits. Pair it with `TURF_GC_STRESS=1` to compare mark sets on every allocation.
 - `TURF_GC_NO_PROCFS=1` — pretend `/proc/self/maps` is unreadable, exercising the stack-base fallback a procfs-less container takes (`scripts/gc_no_procfs_smoke.sh`).
-- An ASan runtime: configure a separate `build_asan/` with `-DTURF_RT_SANITIZE=ON`, then `TURF_COMPILER=$(pwd)/build_asan/turf ASAN_OPTIONS=detect_leaks=0 ./scripts/test_runner.sh`. Both build trees write the plain `lib/libturfrt.a`, so don't build one while a suite runs against the other.
+- An ASan runtime: configure a separate `build_asan/` with `-DTURF_RT_SANITIZE=ON`, then `TURF_COMPILER=$(pwd)/build_asan/turfc ASAN_OPTIONS=detect_leaks=0 ./scripts/test_runner.sh`. Both build trees write the plain `lib/libturfrt.a`, so don't build one while a suite runs against the other.
 
 `scripts/gc_stress_corpus_smoke.sh` runs the long-running programs in `tests/custom/gc_stress_corpus/`, which `test_runner.sh` never touches.
 
@@ -53,7 +53,7 @@ Also watch for names that end in `_module.tr` as a plain SUBSTRING coincidence (
 
 **`scripts/test_runner.sh` only covers `tests/`.** For any change to language syntax or semantics, also grep/compile-check `lib/std/**/*.tr` and `showcase/*.tr` directly — neither is exercised by the test runner (the stdlib is only pulled in by whichever tests happen to `import` it, and showcase programs aren't run by it at all), so a stdlib or showcase file using old syntax can sit broken indefinitely with the full suite reporting green. Confirmed live: a language-syntax change once left two `lib/std/net.tr` (now `lib/std/io/net.tr`) methods on removed syntax, caught only by directly compiling the showcase programs that import `net`.
 
-Compiling one of the 6 prelude modules (`int`/`double`/`bool`/`char`/`strings`/`array` — see `PreludeModuleNames` in `Parser.cpp`, all under `lib/std/core/`) *directly* used to be a false positive: `ParsePreludeImports()` auto-imports all 6 into every top-level file unconditionally, which meant compiling e.g. `lib/std/core/char.tr` itself imported `char` into `char.tr`, registering every one of its own functions twice (once as an ordinary top-level function, once again under its own module namespace) — any internal UFCS/operator self-call (`isAlpha()` calling `c.isUpper()`) then falsely reported "Ambiguous ... call", even though the identical code compiled and ran correctly as a real `import char;`-ing user program. Fixed by having `ParsePreludeImports()` skip a prelude name whose resolved stdlib path is the same file currently being compiled as the entry point (resolved via the same `TurfInstallRoot()`/`IndexModuleDir()` lookup a real import uses, so it can't disagree about where a prelude module actually lives). This direct-compile check (`turf --resolve lib/std/core/char.tr`, etc.) IS this bug class's only regression coverage — `test_runner.sh` can't exercise it since none of the 6 prelude files have a `main()`.
+Compiling one of the 6 prelude modules (`int`/`double`/`bool`/`char`/`strings`/`array` — see `PreludeModuleNames` in `Parser.cpp`, all under `lib/std/core/`) *directly* used to be a false positive: `ParsePreludeImports()` auto-imports all 6 into every top-level file unconditionally, which meant compiling e.g. `lib/std/core/char.tr` itself imported `char` into `char.tr`, registering every one of its own functions twice (once as an ordinary top-level function, once again under its own module namespace) — any internal UFCS/operator self-call (`isAlpha()` calling `c.isUpper()`) then falsely reported "Ambiguous ... call", even though the identical code compiled and ran correctly as a real `import char;`-ing user program. Fixed by having `ParsePreludeImports()` skip a prelude name whose resolved stdlib path is the same file currently being compiled as the entry point (resolved via the same `TurfInstallRoot()`/`IndexModuleDir()` lookup a real import uses, so it can't disagree about where a prelude module actually lives). This direct-compile check (`turfc --resolve lib/std/core/char.tr`, etc.) IS this bug class's only regression coverage — `test_runner.sh` can't exercise it since none of the 6 prelude files have a `main()`.
 
 ## Repo map
 

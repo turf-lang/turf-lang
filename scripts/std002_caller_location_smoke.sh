@@ -24,7 +24,7 @@ cd "$(dirname "$0")/.." || exit 1
 
 BOLD="\033[1m"; GREEN="\033[0;32m"; RED="\033[0;31m"; RESET="\033[0m"
 
-TURF="./build/turf"
+TURF="./build/turfc"
 FAIL=0
 WORKDIR=$(mktemp -d)
 trap 'rm -rf "$WORKDIR"' EXIT
@@ -33,7 +33,7 @@ pass() { echo -e "  ${GREEN}✓${RESET} $1"; }
 fail() { echo -e "  ${RED}✗${RESET} $1"; FAIL=1; }
 
 if [ ! -x "$TURF" ]; then
-  echo -e "${RED}build/turf missing -- build before running this smoke test.${RESET}"
+  echo -e "${RED}build/turfc missing -- build before running this smoke test.${RESET}"
   exit 1
 fi
 

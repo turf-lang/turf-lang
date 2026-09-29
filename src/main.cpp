@@ -108,7 +108,7 @@ struct CompilerOptions {
   bool DebugInfo = false;             // -g: emit DWARF debug info (TOOL-001)
 };
 
-// `turf --explain E0NN` is the HUMAN-facing side of error-code
+// `turfc --explain E0NN` is the HUMAN-facing side of error-code
 // documentation -- read straight in a terminal, so it's rendered with
 // actual colors/structure instead of a flat file dump (see
 // printHumanExplainDoc() below). It is NOT what a future
@@ -204,7 +204,7 @@ static void printHumanExplainDoc(std::istream &Doc) {
   }
 }
 
-/// `turf --migrate=pub [--write] <module.tr>...` (LEC-002 stage 6): put `pub`
+/// `turfc --migrate=pub [--write] <module.tr>...` (LEC-002 stage 6): put `pub`
 /// on every top-level declaration and struct field of each file, so a module
 /// written for 1.x -- where everything was visible to importers -- keeps
 /// exactly that surface under 2.0's private-by-default rule. Without
@@ -215,7 +215,7 @@ static void printHumanExplainDoc(std::istream &Doc) {
 /// written; "there was something to migrate" is not a failure.
 static int runMigratePub(const std::vector<std::string> &Files, bool Write) {
   if (Files.empty()) {
-    std::cerr << "Usage: turf --migrate=pub [--write] <module.tr>...\n"
+    std::cerr << "Usage: turfc --migrate=pub [--write] <module.tr>...\n"
                  "  Adds `pub` to every top-level fn/struct/enum/error/machine/extern fn and\n"
                  "  every struct field, i.e. the exact 1.x behaviour, as a starting point.\n"
                  "  Without --write it only reports what it would change.\n";
@@ -299,7 +299,7 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
       continue;
 
     if (i + 1 >= argc) {
-      std::cerr << "Usage: turf --explain E0NN\n";
+      std::cerr << "Usage: turfc --explain E0NN\n";
       std::exit(1);
     }
 
@@ -439,16 +439,16 @@ static CompilerOptions parseArgs(int argc, char **argv) {
 
   if (opts.InputFile.empty()) {
     std::cerr
-        << "Usage: turf <filename.tr> [-o output] [--emit-llvm] [--smart] "
+        << "Usage: turfc <filename.tr> [-o output] [--emit-llvm] [--smart] "
            "[--smart-write-fix=<path>] "
            "[--dump-ast] [--resolve] [--dump-resolver-symbols] "
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
            "[--dump-modules] [--dump-instantiations] [--link <libname>] "
            "[--allow-unsafe-modules] [--stdlib-warnings] "
            "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
-           "       turf --format [--write] <filename.tr>\n"
-           "       turf --migrate=pub [--write] <module.tr>...\n"
-           "       turf --explain E0NN\n";
+           "       turfc --format [--write] <filename.tr>\n"
+           "       turfc --migrate=pub [--write] <module.tr>...\n"
+           "       turfc --explain E0NN\n";
     std::exit(1);
   }
 
@@ -682,7 +682,7 @@ extern std::set<std::string> g_RequiredLibs;
 // input. The previous std::system("cc \"" + ObjFile + "\" -o \"" +
 // OutputName + "\" ...") only quoted against spaces; a filename containing
 // a `"`, `` ` ``, `$(...)`, or `;` would break out of the quoting and run as
-// shell syntax (e.g. `turf prog.tr -o 'x"; rm -rf ~; echo "'`). Passing
+// shell syntax (e.g. `turfc prog.tr -o 'x"; rm -rf ~; echo "'`). Passing
 // argv entries directly to exec*/_spawnvp means the OS never re-parses them
 // through a shell, so no argument can ever be interpreted as shell syntax
 // regardless of its contents.
@@ -698,7 +698,7 @@ static int linkObject(const std::string &ObjFile,
   // RT-001: every compiled Turf binary links libturfrt (F-MEM-4). The
   // search path is anchored at TurfInstallRoot() -- the exact same root
   // `import` already resolves lib/std against (Parser.h/ParserModule.cpp)
-  // -- so a plain dev build (`build/turf`, no TURF_HOME set) finds
+  // -- so a plain dev build (`build/turfc`, no TURF_HOME set) finds
   // `<repo-root>/lib/libturfrt.a` with zero setup, the same "no setup
   // needed" property lib/std already has. `-L` before `-l` on the linker
   // line is what makes cc/gcc search this exact directory FIRST, ahead of
@@ -707,7 +707,7 @@ static int linkObject(const std::string &ObjFile,
 
   // FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): TURF_RT_ASAN_BUILD is
   // a COMPILE-TIME macro (CMakeLists.txt's `TURF_RT_SANITIZE` option), never
-  // an environment variable checked here -- a `turf` binary built with it
+  // an environment variable checked here -- a `turfc` binary built with it
   // always links every compiled Turf program against the separately-built,
   // ASan+UBSan-instrumented `libturfrt_asan.a` (CMakeLists.txt) instead of
   // the ordinary `libturfrt.a`, permanently. This is what turns the
@@ -716,7 +716,7 @@ static int linkObject(const std::string &ObjFile,
   // technique (docs/development/changes/MEM-002.md, *Unresolved
   // questions*): every real compiled Turf program's allocations, not just
   // scripts/gc_smoke.sh's hand-written C harnesses, run through ASan's
-  // freed-block-reuse detection. An ordinary `build/turf` and a
+  // freed-block-reuse detection. An ordinary `build/turfc` and a
   // `-DTURF_RT_SANITIZE=ON` build never share a runtime archive (distinct
   // names, same lib/ directory -- CMakeLists.txt's own comment on the
   // `turfrt_asan` target explains why), so this branch is the only place

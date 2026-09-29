@@ -85,7 +85,7 @@ std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc);
 bool ClaimEntryFileImportSlot(const std::string &EntryPath);
 
 // RT-001: this install's resolved root -- TURF_HOME if set and non-empty,
-// else <compiler-binary-dir>/.. (so a plain `build/turf` dev build finds
+// else <compiler-binary-dir>/.. (so a plain `build/turfc` dev build finds
 // the sibling lib/ directory, lib/std included, with zero setup). Exported
 // (was file-local in ParserModule.cpp until RT-001) specifically so
 // main.cpp's linkObject() can anchor `-lturfrt`'s search path at the same

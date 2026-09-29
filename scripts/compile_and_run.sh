@@ -25,15 +25,15 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 SCRIPT_DIR="$(dirname "$0")"
-# Resolve the turf compiler binary in either layout:
-#   - packaged release:  <dir>/turf, <dir>/scripts/compile_and_run.sh  (sibling of scripts/)
-#   - dev repo:          <repo>/build/turf[.exe], <repo>/scripts/compile_and_run.sh
+# Resolve the turfc compiler binary in either layout:
+#   - packaged release:  <dir>/turfc, <dir>/scripts/compile_and_run.sh  (sibling of scripts/)
+#   - dev repo:          <repo>/build/turfc[.exe], <repo>/scripts/compile_and_run.sh
 COMPILER_PATH=""
 for candidate in \
-  "$SCRIPT_DIR/../turf" \
-  "$SCRIPT_DIR/../turf.exe" \
-  "$SCRIPT_DIR/../build/turf" \
-  "$SCRIPT_DIR/../build/turf.exe"
+  "$SCRIPT_DIR/../turfc" \
+  "$SCRIPT_DIR/../turfc.exe" \
+  "$SCRIPT_DIR/../build/turfc" \
+  "$SCRIPT_DIR/../build/turfc.exe"
 do
   if [ -f "$candidate" ]; then
     COMPILER_PATH="$candidate"
@@ -42,7 +42,7 @@ do
 done
 
 if [ -z "$COMPILER_PATH" ]; then
-  echo -e "${RED}Error: could not find turf compiler binary (looked next to this script and in build/).${RESET}"
+  echo -e "${RED}Error: could not find turfc compiler binary (looked next to this script and in build/).${RESET}"
   exit 1
 fi
 

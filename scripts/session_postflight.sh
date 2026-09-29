@@ -46,8 +46,8 @@ echo -e "${BOLD}Session postflight — $FEATURE${RESET}\n"
 echo -e "${BOLD}1. Test suite${RESET}"
 if [ $DO_TESTS -eq 0 ]; then
   note "skipped (--no-tests) — the suite still has to be green before you are done"
-elif [ ! -x build/turf ]; then
-  fail "build/turf missing — build before running the postflight"
+elif [ ! -x build/turfc ]; then
+  fail "build/turfc missing — build before running the postflight"
 elif ./scripts/test_runner.sh > /tmp/turf_postflight_tests.log 2>&1; then
   pass "$(grep -oE 'Total Tests: [0-9]+' /tmp/turf_postflight_tests.log | head -1) — all passing"
 else
@@ -83,12 +83,12 @@ fi
 # the entry file's own path, so no per-file exemption belongs here any more
 # (a REGRESSION of OVH-011 must fail this check like any other).
 echo -e "\n${BOLD}2. lib/std and showcase compiled directly${RESET}"
-if [ ! -x build/turf ]; then
-  fail "build/turf missing — cannot compile-check lib/std or showcase"
+if [ ! -x build/turfc ]; then
+  fail "build/turfc missing — cannot compile-check lib/std or showcase"
 else
   STD_BAD=0
   while IFS= read -r f; do
-    out=$(./build/turf --resolve "$f" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+    out=$(./build/turfc --resolve "$f" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     errs=$(echo "$out" | grep -E '^── error|^Error:' | grep -v 'No entry point found')
     [ -z "$errs" ] && continue
     fail "$f does not resolve:"
@@ -103,7 +103,7 @@ else
   PRELUDE_BAD=0
   for m in int double bool char strings array; do
     f="lib/std/core/$m.tr"
-    out=$(./build/turf --resolve "$f" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+    out=$(./build/turfc --resolve "$f" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
     if echo "$out" | grep -qi 'ambiguous'; then
       fail "prelude self-import regression in $f (ambiguous call — see AGENTS.md)"
       PRELUDE_BAD=$((PRELUDE_BAD + 1))
@@ -113,7 +113,7 @@ else
 
   SHOW_BAD=0
   while IFS= read -r f; do
-    if ! ./build/turf "$f" -o /tmp/turf_postflight_showcase.out > /tmp/turf_postflight_showcase.log 2>&1; then
+    if ! ./build/turfc "$f" -o /tmp/turf_postflight_showcase.out > /tmp/turf_postflight_showcase.log 2>&1; then
       fail "$f does not compile:"
       sed 's/\x1b\[[0-9;]*m//g' /tmp/turf_postflight_showcase.log | grep -E '^── error|^Error:' | head -3 | sed 's/^/       /'
       SHOW_BAD=$((SHOW_BAD + 1))
@@ -132,7 +132,7 @@ else
   # itself regressed.
   HELLO_SRC="/tmp/turf_postflight_hello.tr"
   printf 'import io;\nimport json;\nimport http;\nfn main(): int { return 0; }\n' > "$HELLO_SRC"
-  HELLO_OUT=$(./build/turf --resolve "$HELLO_SRC" -o /tmp/turf_postflight_hello.out 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
+  HELLO_OUT=$(./build/turfc --resolve "$HELLO_SRC" -o /tmp/turf_postflight_hello.out 2>&1 | sed 's/\x1b\[[0-9;]*m//g')
   rm -f "$HELLO_SRC" /tmp/turf_postflight_hello.out
   if echo "$HELLO_OUT" | grep -qi 'warning'; then
     fail "'import io; import json; import http;' prints a warning by default (OVH-012 regression):"

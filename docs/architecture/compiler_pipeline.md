@@ -1,6 +1,6 @@
 # The Compiler Pipeline: Lexer to Codegen
 
-Deep internals reference for how `turf` actually turns a `.tr` file into a
+Deep internals reference for how `turfc` actually turns a `.tr` file into a
 native binary — aimed at contributors and technically curious readers, not
 at people looking for Turf language syntax. Like
 `docs/architecture/modules_and_scope_resolution.md` (read that first if
@@ -1080,7 +1080,7 @@ Two consequences worth knowing before adding anything to the front end:
 - **Diagnostics that come from Codegen are not in an analysis.** The CFG
   passes (§6: definite assignment, escape rules, liveness, ...) and
   instantiation-time errors from the monomorphizer (§7) run only in a real
-  compile, so a tool sees fewer diagnostics than `turf` prints for the same
+  compile, so a tool sees fewer diagnostics than `turfc` prints for the same
   file. `AnalysisOptions::RunLint` adds the linter, the one Codegen-time
   check that does not need Codegen.
 

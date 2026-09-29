@@ -568,7 +568,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
 // somewhere, or a dev checkout of this repo pointed at by hand -- and is
 // authoritative. Without it, fall back to deriving the root from the
 // compiler binary's own location (<binary>/..), so a freshly-built
-// `build/turf` still finds the sibling `lib/` directory with zero setup
+// `build/turfc` still finds the sibling `lib/` directory with zero setup
 // (this is the previous, only, behavior -- kept as a fallback rather than
 // removed so CI/local dev builds don't all need TURF_HOME exported just to
 // run the test suite). See docs/architecture/modules_and_scope_resolution.md
@@ -593,7 +593,7 @@ std::string TurfInstallRoot() {
       return std::string(Env);
   }
   llvm::SmallString<128> Root(CompilerExecutablePath);
-  llvm::sys::path::remove_filename(Root); // strip the "turf"/"turf.exe" itself
+  llvm::sys::path::remove_filename(Root); // strip the "turfc"/"turfc.exe" itself
   llvm::sys::path::append(Root, "..");
   return Root.str().str();
 }

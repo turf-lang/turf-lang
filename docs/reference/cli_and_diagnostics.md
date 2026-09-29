@@ -52,7 +52,7 @@ turf --explain E001
 
 A separate mode, handled before normal argument parsing — it takes no `.tr` input file at all.
 
-- Missing code argument → `Usage: turf --explain E0NN`, exit 1.
+- Missing code argument → `Usage: turfc --explain E0NN`, exit 1.
 - Unknown code → `Unknown error code: E0NN`, exit 1.
 - On success: prints a bold-cyan `E0NN  ClassName (CATEGORY)` header, then the explanation text, then exits 0.
 

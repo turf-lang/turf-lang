@@ -3,7 +3,7 @@
 set -u
 
 TEST_DIR="tests/custom/aggressive"
-COMPILER="./turf"
+COMPILER="./turfc"
 RUN_ROOT="ai_outputs/runs"
 STAMP=$(date +%Y%m%d_%H%M%S)
 RUN_DIR="$RUN_ROOT/$STAMP"

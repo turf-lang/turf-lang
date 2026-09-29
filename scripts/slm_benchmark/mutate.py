@@ -25,7 +25,7 @@ live while building this corpus that `math::power(2, 3)` -> `math::power(3,
 2)` is exactly that trap: still (int, int), still compiles, just wrong at
 runtime, which is useless as a DIAGNOSTIC benchmark case). A future session
 growing the corpus should verify a candidate mutation the same way: run it
-through `build/turf` with NO --smart first and confirm it actually fails to
+through `build/turfc` with NO --smart first and confirm it actually fails to
 compile before adding it here.
 
 Usage:
@@ -43,7 +43,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-TURF = REPO_ROOT / "build" / "turf"
+TURF = REPO_ROOT / "build" / "turfc"
 CORPUS_PATH = Path(__file__).resolve().parent / "corpus.json"
 
 

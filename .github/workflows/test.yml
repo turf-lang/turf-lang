@@ -101,7 +101,7 @@ jobs:
         run: ./scripts/test_runner.sh
 
       # SMP-001: unit tests for the compiler query facade
-      # (include/turf/Analysis.h) -- a C++ binary built alongside `turf`,
+      # (include/turf/Analysis.h) -- a C++ binary built alongside `turfc`,
       # which test_runner.sh (.tr files only) never runs.
       - name: Tool API tests (compiler query facade)
         run: ./build/turf-api-tests
@@ -114,7 +114,7 @@ jobs:
       # INV-OPT-1 across the whole suite, not just opt_levels_smoke.sh's
       # smaller representative program set (which deliberately can't byte-diff
       # every showcase/server program -- see that script's own comment).
-      # Sequential, not a matrix: the build above (LLVM + llama.cpp + turf) is
+      # Sequential, not a matrix: the build above (LLVM + llama.cpp + turfc) is
       # the expensive, cached part, and a matrix job would each pay for its
       # own fresh checkout/build instead of reusing this one.
       - name: Run Test Suites (-O0)
@@ -208,12 +208,12 @@ jobs:
       # the real model against tests/custom/aggressive/ and needs the
       # multi-gigabyte GGUF weights this repo's .gitignore deliberately
       # keeps out of a checkout -- a manual/local sanity script, not a CI gate.
-      # LEC-002 stage 6: `turf --migrate=pub` turns a 1.x-style project (no
+      # LEC-002 stage 6: `turfc --migrate=pub` turns a 1.x-style project (no
       # `pub` anywhere) into one that compiles and runs under 2.0's
       # private-by-default rule, reports-only without --write, and is
       # idempotent. test_runner.sh cannot express this (it needs to rewrite
       # source and re-run the compiler on the result).
-      - name: "Migration tool smoke test (turf --migrate=pub)"
+      - name: "Migration tool smoke test (turfc --migrate=pub)"
         run: ./scripts/migrate_pub_smoke.sh
       - name: Runtime smoke test (libturfrt link wiring, descriptors, panics)
         run: ./scripts/runtime_smoke.sh
@@ -236,7 +236,7 @@ jobs:
 
   # FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): independent validation
   # of the collector via an ASan+UBSan-instrumented libturfrt
-  # (CMakeLists.txt's TURF_RT_SANITIZE option) -- a SEPARATE `turf` build in
+  # (CMakeLists.txt's TURF_RT_SANITIZE option) -- a SEPARATE `turfc` build in
   # its own directory/CMake cache (never build/), so an ordinary dev build and
   # this one never share or clobber each other's runtime archive (`main.cpp`'s
   # linkObject() comment explains why). Every compiled Turf program this
@@ -335,9 +335,9 @@ jobs:
       # AddressSanitizer's actual bug-finding (freed-block reuse, wild
       # pointers, buffer overflows) is unaffected by this flag.
       - name: Run Test Suites under ASan -- (default level)
-        run: TURF_COMPILER="$(pwd)/build_asan/turf" ASAN_OPTIONS=detect_leaks=0 ./scripts/test_runner.sh
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0 ./scripts/test_runner.sh
       - name: Run Test Suites under ASan -- (-O0)
-        run: TURF_COMPILER="$(pwd)/build_asan/turf" ASAN_OPTIONS=detect_leaks=0 ./scripts/test_runner.sh -O0
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0 ./scripts/test_runner.sh -O0
 
       # FDN-005's own roadmap completion criterion names this exact
       # combination explicitly: "the whole suite green under
@@ -352,11 +352,11 @@ jobs:
       # seconds either way, so this one step's wall time is dominated
       # entirely by that single file, not a general slowdown.
       - name: GC stress test under ASan -- collect on every allocation (-O0)
-        run: TURF_COMPILER="$(pwd)/build_asan/turf" ASAN_OPTIONS=detect_leaks=0 TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O0
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0 TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O0
       # The roadmap's criterion names -O2 as well; the FDN-005 landing ran
       # only -O0 under this combination.
       - name: GC stress test under ASan -- collect on every allocation (-O2)
-        run: TURF_COMPILER="$(pwd)/build_asan/turf" ASAN_OPTIONS=detect_leaks=0 TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O2
+        run: TURF_COMPILER="$(pwd)/build_asan/turfc" ASAN_OPTIONS=detect_leaks=0 TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O2
 
       - name: Tool API tests (compiler query facade) under ASan
         run: ./build_asan/turf-api-tests

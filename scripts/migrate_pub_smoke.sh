@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# migrate_pub_smoke.sh -- LEC-002 stage 6: `turf --migrate=pub` round-trips a
+# migrate_pub_smoke.sh -- LEC-002 stage 6: `turfc --migrate=pub` round-trips a
 # 1.x-style project.
 #
 # Before 2.0 everything a module declared was visible to every importer; from
@@ -19,13 +19,13 @@
 # docs/development/changes/LEC-002.md; this script is the part that can run
 # anywhere, in CI.
 #
-# Usage: scripts/migrate_pub_smoke.sh        (after building build/turf)
+# Usage: scripts/migrate_pub_smoke.sh        (after building build/turfc)
 # Exit:  0 = all checks pass; 1 = one failed (which one is printed).
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
 
-TURF="${TURF_COMPILER:-./build/turf}"
+TURF="${TURF_COMPILER:-./build/turfc}"
 [ -x "$TURF" ] || { echo "FAIL: $TURF not built"; exit 1; }
 # Absolute, because the script cd's into a scratch directory below.
 TURF="$(cd "$(dirname "$TURF")" && pwd)/$(basename "$TURF")"

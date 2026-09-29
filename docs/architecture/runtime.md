@@ -67,7 +67,7 @@ compiler/runtime ABI stamp, FDN-006 §7.3 below), `runtime/turfrt_signal.c`
 
 Built as `CMakeLists.txt`'s `turfrt` target: a **static** library, built
 from plain C11, with **no dependency on `turfcore`/LLVM at all** — it is not
-linked into the `turf` compiler binary itself. It is linked into every
+linked into the `turfc` compiler binary itself. It is linked into every
 *compiled Turf program*, the same relationship `-lm` already has to a
 compiled binary. Static rather than shared: every compiled Turf program is
 meant to be a standalone executable (this is also why `libturfrt.a`'s build
@@ -282,7 +282,7 @@ under. This is deliberate, not incidental: `TurfInstallRoot()`
 (`src/ParserModule.cpp`, exported for this purpose — previously file-local)
 is the one function both `import` and `linkObject()` (`src/main.cpp`) use to
 find "this install's root" — `TURF_HOME` if set, else
-`<compiler-binary-dir>/..`. A plain dev build (`build/turf`, no `TURF_HOME`
+`<compiler-binary-dir>/..`. A plain dev build (`build/turfc`, no `TURF_HOME`
 set) resolves that to the repo root, so `lib/libturfrt.a` is found with the
 same zero-setup property `lib/std/` already has. `linkObject()` passes
 `-L<TurfInstallRoot()>/lib -lturfrt` ahead of every other link flag.

@@ -30,7 +30,7 @@ set(LLAMA_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/llama.cpp/build")
 # local `set()` never reaches) keeps the ordinary `libllama.a` name on
 # every platform, Windows included. Confirmed live: a release-workflow
 # dry run's Windows build produced `ggml\src\ggml-base.a` (no prefix) but
-# still failed at turf's own link step looking for the Linux/macOS-style
+# still failed at turfc's own link step looking for the Linux/macOS-style
 # `libggml.a` name specifically.
 if(WIN32)
   set(GGML_LIB_PREFIX "")
@@ -56,7 +56,7 @@ if(NOT EXISTS "${LIBLLAMA}" OR NOT EXISTS "${LIBGGML}")
       # this always is, per -S above) and pulls in BOTH llama.cpp's
       # `common/` utils library AND vendor/cpp-httplib (see llama.cpp's
       # own CMakeLists.txt -- httplib is gated on LLAMA_BUILD_COMMON, not
-      # LLAMA_BUILD_SERVER/EXAMPLES/TOOLS, all already OFF above). turf
+      # LLAMA_BUILD_SERVER/EXAMPLES/TOOLS, all already OFF above). turfc
       # only ever links libllama/libggml* (see LLAMA_STATIC_LIBS below) --
       # never anything from `common` -- so this has always been dead
       # weight, and on MinGW/Windows it's actively broken: cpp-httplib's
@@ -79,14 +79,14 @@ if(NOT EXISTS "${LIBLLAMA}" OR NOT EXISTS "${LIBGGML}")
   # Explicit --target list, not a plain default-target build. A plain
   # default build (`cmake --build <dir> -- -jN`, no --target) was
   # confirmed LIVE to leave `ggml/src/libggml.a` unbuilt on the Windows/
-  # MinGW/Ninja release job specifically (turf's own link step then failed
+  # MinGW/Ninja release job specifically (turfc's own link step then failed
   # with "libggml.a ... missing and no known rule to make it") -- Linux
   # and macOS builds with the identical LLAMA_BUILD_COMMON=OFF configure
   # were NOT observed to have this problem, so the exact platform-specific
   # mechanism (a generator/dependency-graph quirk somewhere in ggml's own
   # CMakeLists, not fully root-caused here) isn't the same as whatever
   # used to paper over it when LLAMA_BUILD_COMMON defaulted ON. Rather
-  # than chase that further, requesting exactly the targets turf actually
+  # than chase that further, requesting exactly the targets turfc actually
   # needs (LLAMA_STATIC_LIBS below) sidesteps the question of what is or
   # isn't in the default set on any given platform/generator entirely.
   execute_process(
@@ -160,9 +160,10 @@ endif()
 # NOTE: local/uncommitted addition -- see
 # https://github.com/turf-lang/turf-lang/issues/229. turf-lsp's CMakeLists.txt
 # already assumes a `turfcore` target exists for it to link against; upstream
-# only ever defined the monolithic `turf` executable. Added here, additively,
+# only ever defined the monolithic compiler executable (then named `turf`, now
+# `turfc`). Added here, additively,
 # so external tooling (turf-lsp) can build against the real compiler frontend
-# instead of duplicating it. `turf` itself now links this instead of
+# instead of duplicating it. `turfc` itself now links this instead of
 # recompiling the same sources a second time.
 add_library(turfcore STATIC
   src/Algorithms.cpp
@@ -263,15 +264,15 @@ target_link_libraries(turfcore PUBLIC
 )
 
 # ─── libturfrt (runtime library, RT-001) ─────────────────────────────────────
-# A small, standalone C static library -- NOT linked into the `turf`
-# compiler binary itself (turfcore/turf never call into it). It is linked
+# A small, standalone C static library -- NOT linked into the `turfc`
+# compiler binary itself (turfcore/turfc never call into it). It is linked
 # into every COMPILED TURF PROGRAM instead, via `-lturfrt` at
 # src/main.cpp's linkObject() -- see that function's own comment for why the
 # library must land where TurfInstallRoot() (exported from
 # src/ParserModule.cpp, the same anchor `import` uses for lib/std) can find
 # it with zero setup in a plain dev build: TurfInstallRoot()'s fallback
 # (no TURF_HOME set) resolves to `<binary-dir>/..`, i.e. this repo's own
-# root for a `build/turf` dev build -- so the archive's own output directory
+# root for a `build/turfc` dev build -- so the archive's own output directory
 # is pointed at `<repo-root>/lib/` below, the exact sibling of `lib/std/`
 # that anchor already resolves to. `*.a` is already git-ignored
 # (.gitignore), so this build artifact living inside the otherwise
@@ -312,7 +313,7 @@ target_compile_options(turfrt PRIVATE -Wall -Wextra)
 # already gets ASan coverage informally (MEM-002's own change record
 # describes exactly this, ad hoc, during that group's development) -- this
 # target makes it a real, always-available, CI-exercised build product
-# instead, and (via TURF_RT_ASAN_BUILD below) lets `turf` itself produce
+# instead, and (via TURF_RT_ASAN_BUILD below) lets `turfc` itself produce
 # ASan-instrumented COMPILED TURF PROGRAMS, not just synthetic C repros, so
 # the entire existing `tests/` regression suite becomes independent
 # validation for free.
@@ -325,9 +326,9 @@ target_compile_options(turfrt PRIVATE -Wall -Wextra)
 # clobbering the other's runtime archive -- `main.cpp`'s `linkObject()`
 # picks the archive name (and the `-fsanitize=` flags) by which macro this
 # COMPILER BINARY was itself built with, not by anything in the environment
-# at link time, so a `build/turf` and a separately-configured ASan `turf`
+# at link time, so a `build/turfc` and a separately-configured ASan `turfc`
 # binary each always reach for their own runtime, permanently.
-option(TURF_RT_SANITIZE "Build libturfrt_asan and make this turf binary link every compiled Turf program against it with -fsanitize=address,undefined" OFF)
+option(TURF_RT_SANITIZE "Build libturfrt_asan and make this turfc binary link every compiled Turf program against it with -fsanitize=address,undefined" OFF)
 if(TURF_RT_SANITIZE)
   add_library(turfrt_asan STATIC
     runtime/turfrt_abi.c
@@ -349,17 +350,20 @@ if(TURF_RT_SANITIZE)
 endif()
 
 # ─── Executable ──────────────────────────────────────────────────────────────
-add_executable(turf src/main.cpp)
+# `turfc` is the compiler. The name `turf` belongs to the Go front end under
+# cli/ (LEC-001, FREEZE.md 6.16 F-PKG-1); the two are built into the same
+# directory, so they cannot share a name.
+add_executable(turfc src/main.cpp)
 
-target_link_libraries(turf PRIVATE turfcore)
+target_link_libraries(turfc PRIVATE turfcore)
 if(TURF_RT_SANITIZE)
-  target_compile_definitions(turf PRIVATE TURF_RT_ASAN_BUILD)
-  add_dependencies(turf turfrt_asan)
+  target_compile_definitions(turfc PRIVATE TURF_RT_ASAN_BUILD)
+  add_dependencies(turfc turfrt_asan)
 endif()
 
 # ─── Tool API tests (SMP-001) ────────────────────────────────────────────────
 # Unit tests for the compiler query facade (include/turf/Analysis.h), run by
-# CI next to test_runner.sh. Placed beside `turf` so the facade finds lib/std
+# CI next to test_runner.sh. Placed beside `turfc` so the facade finds lib/std
 # the way the compiler does. Top-level builds only: turf-lsp pulls this file
 # in with add_subdirectory() for `turfcore` and has no use for the tests.
 if(PROJECT_IS_TOP_LEVEL)

@@ -4,14 +4,16 @@
 TEST_DIR="tests"
 # Get absolute path for compiler so we can run it from any directory.
 # Overridable via TURF_COMPILER -- FDN-005 stage 3 (docs/planning/
-# ROADMAP_v2.0.0.md): an ASan-instrumented `turf` (CMakeLists.txt's
+# ROADMAP_v2.0.0.md): an ASan-instrumented `turfc` (CMakeLists.txt's
 # TURF_RT_SANITIZE option) lives in its own build directory, never
-# build/turf, so CI/a local session can point this whole suite at it
-# without touching the ordinary dev build.
+# build/turfc, so CI/a local session can point this whole suite at it
+# without touching the ordinary dev build. Runs the compiler directly,
+# never build/turf (the Go front end), so the suite needs no Go toolchain
+# (LEC-001, FREEZE.md 6.16).
 if [ -n "${TURF_COMPILER:-}" ]; then
     COMPILER="$TURF_COMPILER"
 else
-    COMPILER="$(pwd)/build/turf"
+    COMPILER="$(pwd)/build/turfc"
 fi
 
 # Colors for output

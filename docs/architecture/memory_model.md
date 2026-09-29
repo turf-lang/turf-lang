@@ -749,7 +749,7 @@ exercise, and no independent check on the register-scanning technique:
   `O(n^2 log n)`-shaped under per-allocation collection; that file's own
   header explains why the two stress dimensions are kept orthogonal).
 - **An ASan+UBSan-instrumented `libturfrt_asan.a`** (a separate CMake
-  target, `CMakeLists.txt`'s `TURF_RT_SANITIZE` option) that a `turf`
+  target, `CMakeLists.txt`'s `TURF_RT_SANITIZE` option) that a `turfc`
   binary built with the same option links every COMPILED TURF PROGRAM
   against instead of the ordinary `libturfrt.a` — turning the entire
   existing `tests/` suite into independent validation for freed-block

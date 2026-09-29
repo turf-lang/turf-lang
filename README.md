@@ -54,7 +54,7 @@ When a diagnostic fires with `--smart` enabled, this is what actually happens, i
 Runs the pipeline above on error only — no cost, no model inference, nothing happens on a clean compile — entirely locally via a small quantized model loaded through `llama.cpp`. No network call, no external dependency.
 
 ```bash
-turf my_program.tr --smart -o my_program
+turfc my_program.tr --smart -o my_program
 ```
 
 Useful compiler introspection flags, beyond ordinary compilation: `--dump-ast`, `--dump-resolved`, `--dump-typechecked`, `--dump-modules` (everything the compiler knows about the current program's modules — every imported module's functions, struct/enum type ownership, and every on-demand import), `--emit-llvm`.
@@ -112,7 +112,7 @@ fn main(): int {
 ```
 
 ```bash
-turf hello.tr -o hello
+turfc hello.tr -o hello
 ./hello
 ```
 
@@ -465,7 +465,7 @@ fn cmpints(a: ptr, b: ptr): int32 {   // legal here, and not gated per-use
 }
 ```
 
-Honored unconditionally for a file under the Turf install root (`lib/std`/`lib/usr`); anywhere else it needs the `--allow-unsafe-modules` CLI flag, so a plain `turf myfile.tr` never silently grants it. See `docs/architecture/pointers_and_references.md` §1.7 for the full mechanism.
+Honored unconditionally for a file under the Turf install root (`lib/std`/`lib/usr`); anywhere else it needs the `--allow-unsafe-modules` CLI flag, so a plain `turfc myfile.tr` never silently grants it. See `docs/architecture/pointers_and_references.md` §1.7 for the full mechanism.
 
 `&T` is a compiler-guaranteed non-null reference — `&expr` (address-of) always produces one:
 
@@ -753,7 +753,7 @@ chmod +x scripts/cmake_build.sh
 ./scripts/cmake_build.sh --release
 ```
 
-`cmake_build.sh` detects available CPU cores and builds in parallel; the resulting binary is placed at `build/turf`. On first run, if `llama.cpp`'s static libraries aren't already built, CMake builds them automatically before building Turf itself — this can take a while the first time.
+`cmake_build.sh` detects available CPU cores and builds in parallel; the resulting compiler binary is placed at `build/turfc`. On first run, if `llama.cpp`'s static libraries aren't already built, CMake builds them automatically before building Turf itself — this can take a while the first time.
 
 ### Compile and run a file directly
 

@@ -33,14 +33,16 @@ echo -e "${GREEN}[2 / 3]${RESET} ${BOLD}Building...${RESET}"
 NPROC=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 2)
 cmake --build "$BUILD_DIR" --config "$BUILD_TYPE" -- -j"$NPROC"
 echo -e "${GREEN}[3 / 3]${RESET} ${BOLD}Verifying build...${RESET}"
-# On Windows/MinGW the output binary is turf.exe, not turf.
-# Also check multi-config generator layouts (build/<Config>/turf[.exe]).
+# On Windows/MinGW the output binary is turfc.exe, not turfc. This verifies the
+# compiler, not build/turf (the Go front end), which is optional: it is only
+# built when Go is installed.
+# Also check multi-config generator layouts (build/<Config>/turfc[.exe]).
 BIN=""
 for candidate in \
-  "$BUILD_DIR/turf" \
-  "$BUILD_DIR/turf.exe" \
-  "$BUILD_DIR/$BUILD_TYPE/turf.exe" \
-  "$BUILD_DIR/$BUILD_TYPE/turf"
+  "$BUILD_DIR/turfc" \
+  "$BUILD_DIR/turfc.exe" \
+  "$BUILD_DIR/$BUILD_TYPE/turfc.exe" \
+  "$BUILD_DIR/$BUILD_TYPE/turfc"
 do
   if [ -f "$candidate" ]; then
     BIN="$candidate"

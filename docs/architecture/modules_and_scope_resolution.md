@@ -258,7 +258,7 @@ class ModuleImportExprAST : public ExprAST {
 
 **Module search order and `TURF_HOME`** (2026-08 rewrite — `TurfInstallRoot()`/`IndexModuleDir()`/`ParseModuleImportByName()`, `src/Parser.cpp`): four steps, in order, stopping at the first hit:
 
-1. **Installation stdlib** — `$TURF_HOME/lib/std/**/<module>.tr` if the `TURF_HOME` environment variable is set (and non-empty), else `<compiler-binary-dir>/../lib/std/**/<module>.tr` as a zero-config fallback so a freshly built `build/turf` still finds the sibling `lib/` directory with nothing exported. `TurfInstallRoot()` decides which of the two applies; everything downstream (both this step and the next) is relative to that one root.
+1. **Installation stdlib** — `$TURF_HOME/lib/std/**/<module>.tr` if the `TURF_HOME` environment variable is set (and non-empty), else `<compiler-binary-dir>/../lib/std/**/<module>.tr` as a zero-config fallback so a freshly built `build/turfc` still finds the sibling `lib/` directory with nothing exported. `TurfInstallRoot()` decides which of the two applies; everything downstream (both this step and the next) is relative to that one root.
 2. **Installed user package** — `$TURF_HOME/lib/usr/**/<module>.tr` (or the binary-relative fallback root, same rule as above). No package manager/installer exists yet — this is the *search* half of that story only, ready for whenever one lands. A future installer's contract: one subfolder per module name under `lib/usr/`, e.g. `lib/usr/http/http.tr`.
 3. Same directory as the source file being compiled (Issue #19 — lets `turf path/to/file.tr` find sibling modules without a `cd` first).
 4. Current working directory.

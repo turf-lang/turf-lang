@@ -33,9 +33,9 @@ cd "$(dirname "$0")/.." || exit 1
 BOLD="\033[1m"; GREEN="\033[0;32m"; RED="\033[0;31m"; YELLOW="\033[0;33m"
 RESET="\033[0m"
 
-TURF="./build/turf"
+TURF="./build/turfc"
 if [ ! -x "$TURF" ]; then
-  echo -e "${RED}build/turf missing -- build before running this smoke test.${RESET}"
+  echo -e "${RED}build/turfc missing -- build before running this smoke test.${RESET}"
   exit 1
 fi
 
