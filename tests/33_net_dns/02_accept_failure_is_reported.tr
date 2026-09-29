@@ -1,0 +1,31 @@
+// Regression test: a failing accept() must surface as NetworkError, not a
+// "connection" with a garbage fd.
+//
+// accept()/socket()/bind()/listen()/connect()/close()/setsockopt() return a
+// 32-bit C `int`. net.tr used to declare them as returning Turf's 64-bit
+// `int`, and on x86-64 and AArch64 a callee that writes -1 to the 32-bit
+// return register leaves the upper half ZERO -- the caller read 4294967295,
+// so `fd >= 0` accepted every failure (the same bug strings.tr's strcmp()
+// hit earlier; see Int32Type in Types.h). Accepting on a listener that has
+// already been closed fails with EBADF on every POSIX system, so it is a
+// deterministic way to reach the failure path.
+import io;
+import net;
+import test;
+
+fn main(): int {
+    // Port 0: the kernel picks a free ephemeral port, so this never
+    // collides with another test.
+    mut listener: net::TcpListener = net::TcpListener::bind(0) recover run {
+        test::fail("could not bind an ephemeral port");
+        return 1;
+    };
+    listener.close();
+
+    mut conn: net::TcpConnection = listener.accept() recover run {
+        io::printline("33/02 PASS: accept() on a closed listener reports AcceptFailed");
+        return 0;
+    };
+    test::fail("accept() on a closed listener returned a connection (fd " + (conn.fd to string) + ")");
+    return 1;
+}
