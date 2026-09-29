@@ -119,6 +119,32 @@ mapfile -d '' -t TEST_FILES < <(
         -print0
 )
 
+# Waits for background process $1, killing it (-9) if it is still running
+# after $2 seconds; returns its exit status (137 if killed). Polls rather
+# than spawning a `(sleep N && kill -9 $pid) &` watchdog: that watchdog was
+# never cleaned up, so every test left a `sleep $RUN_TIMEOUT_SEC` behind
+# that held any pipe reading this script's output open (CI's own step
+# capture, `| tee`) for the full timeout after the suite had finished --
+# up to 700s per TURF_GC_STRESS step -- and later ran `kill -9` on a PID
+# that may by then have been reused by an unrelated process. Killing the
+# watchdog afterwards races its own fork of `sleep` under a fully loaded
+# parallel run (measured: 494 of 838 left behind), and `wait -n` needs a
+# newer bash than macOS ships. Bash reaps a finished background child on
+# its own, so `kill -0` stops succeeding as soon as the test exits.
+wait_with_timeout() {
+    local pid=$1 ticks=0 limit=$(( $2 * 10 ))
+    while kill -0 "$pid" 2>/dev/null; do
+        if [ "$ticks" -ge "$limit" ]; then
+            kill -9 "$pid" 2>/dev/null
+            break
+        fi
+        sleep 0.1
+        ticks=$(( ticks + 1 ))
+    done
+    wait "$pid" 2>/dev/null
+}
+export -f wait_with_timeout
+
 # Runs exactly one test file end to end (compile, classify, execute, judge)
 # and writes its outcome to $RESULTS_DIR. This is the SAME logic the old
 # sequential loop body had, unchanged test-classification-wise (fail_*
@@ -182,8 +208,7 @@ run_one_test() {
         fi
         "$PROGRAM" > "$LOGFILE" 2>&1 &
         CMD_PID=$!
-        (sleep 5 && kill -9 $CMD_PID 2>/dev/null) &
-        wait $CMD_PID 2>/dev/null
+        wait_with_timeout $CMD_PID 5
         RUN_STATUS=$?
         RUN_OUTPUT=$(cat "$LOGFILE")
         rm -f "$PROGRAM" "$LOGFILE"
@@ -256,16 +281,14 @@ run_one_test() {
         # Pipe dummy values (e.g., name and age) to avoid blocking
         echo -e "TestUser\n25" | "$PROGRAM" > "$LOGFILE" 2>&1 &
         CMD_PID=$!
-        (sleep "$RUN_TIMEOUT_SEC" && kill -9 $CMD_PID 2>/dev/null) &
-        wait $CMD_PID 2>/dev/null
+        wait_with_timeout $CMD_PID "$RUN_TIMEOUT_SEC"
         RUN_STATUS=$?
         RUN_OUTPUT=$(cat "$LOGFILE")
     else
         # Regular tests
         "$PROGRAM" > "$LOGFILE" 2>&1 &
         CMD_PID=$!
-        (sleep "$RUN_TIMEOUT_SEC" && kill -9 $CMD_PID 2>/dev/null) &
-        wait $CMD_PID 2>/dev/null
+        wait_with_timeout $CMD_PID "$RUN_TIMEOUT_SEC"
         RUN_STATUS=$?
         RUN_OUTPUT=$(cat "$LOGFILE")
     fi
