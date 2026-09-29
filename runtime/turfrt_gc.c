@@ -230,6 +230,14 @@ docs/planning/OVERHAUL_REMAINING_WORK.md's OVH-013."
 #include <ucontext.h>
 #if defined(__GLIBC__)
 #define TURF_GC_VALIDATE_SUPPORTED 1
+#include <pthread.h>
+/* Weak so libturfrt adds no link-time dependency for a testing-only path:
+ * before glibc 2.34 these lived in libpthread, which linkObject() does not
+ * pass. Unresolved, they are NULL and the mark-set comparison reports
+ * itself unavailable instead of failing every Turf program's link. */
+#pragma weak pthread_getattr_np
+#pragma weak pthread_attr_getstack
+#pragma weak pthread_attr_destroy
 #endif
 #endif
 
@@ -884,8 +892,8 @@ static void gc_scan_block_precise(GcBlock *b, Worklist *wl) {
  * address, never a heap pointer).
  *
  * Must be called from the SAME instant as gc_capture_callee_saved() --
- * gc_mark() calls both back-to-back, before gc_rebuild_index() or any
- * other work runs. This was NOT the first version of this function: an
+ * gc_mark() calls the two back-to-back with nothing in between (after
+ * gc_rebuild_index(), which is fine: only the adjacency matters). This was NOT the first version of this function: an
  * earlier draft called this from a SEPARATE helper invoked AFTER the
  * primary mark/trace pass had already completed, and treated any block
  * the primary pass marked but this one didn't as a hard error. That
@@ -977,6 +985,121 @@ gc_cross_check_extra_registers(const uintptr_t indep_regs[TURF_GC_VALIDATE_WORDS
     }
   }
 }
+
+/*
+ * FDN-005 stage 3, second half -- ROADMAP_v2.0.0.md asks for a mode that
+ * "scans the full stack range conservatively *and* compares mark sets".
+ * The register check above cannot catch a wrong STACK BOUND, which is the
+ * failure mode that actually shipped: the pre-FDN-005 no-procfs fallback
+ * in turf_gc_record_stack_base() under-scanned and freed live objects in
+ * nearly every tests/41_gc program. This pass derives every conservative
+ * root from sources the primary pass never touches:
+ *   - registers: getcontext() (not gc_capture_callee_saved()'s inline asm),
+ *     taken in turf_rt_collect(), an ANCESTOR frame of gc_mark();
+ *   - stack low end: that snapshot's own RSP (not gc_approx_sp());
+ *   - stack high end: glibc's pthread_getattr_np() (not g_stack_base),
+ *     i.e. the whole [stack] mapping.
+ *
+ * Why a block marked here but not by the primary pass is a real missed
+ * root, never noise -- so it panics rather than reports:
+ *   - [snapshot RSP, top) is a subset of the primary's [approx SP, base)
+ *     whenever the primary's base is right (approx SP lies in a frame
+ *     below gc_mark(), the snapshot RSP in turf_rt_collect(), above it),
+ *     and nothing writes to turf_rt_collect()'s frame or its ancestors'
+ *     between the two scans -- both see the same words;
+ *   - only the CALLEE-saved registers of the snapshot are used; any value
+ *     they held was either still in the register at the primary capture or
+ *     spilled by an intervening prologue into a frame the primary scans.
+ * The caller-saved registers are deliberately left to the report-only
+ * check above: their contents at a call boundary are not roots at all.
+ */
+static ucontext_t g_validate_ctx;
+static int g_validate_ctx_valid = 0;
+static uintptr_t g_validate_stack_top = 0;
+
+/* Called once, the first time TURF_GC_VALIDATE is seen set. */
+static void gc_validate_init_stack_top(void) {
+  if (!pthread_getattr_np || !pthread_attr_getstack || !pthread_attr_destroy)
+    return;
+  pthread_attr_t attr;
+  if (pthread_getattr_np(pthread_self(), &attr) != 0)
+    return;
+  void *addr = NULL;
+  size_t size = 0;
+  if (pthread_attr_getstack(&attr, &addr, &size) == 0)
+    g_validate_stack_top = (uintptr_t)addr + size;
+  pthread_attr_destroy(&attr);
+}
+
+/*
+ * Runs the whole independent mark (roots + precise trace) using the
+ * blocks' own `marked` bits, copies the result out, and clears the bits
+ * again so the primary pass starts from the same all-clear state it
+ * always does. Returns a malloc'd byte per g_blocks entry, or NULL if no
+ * snapshot/stack top is available for this collection.
+ */
+static unsigned char *gc_independent_mark(void) {
+  if (!g_validate_ctx_valid || g_validate_stack_top == 0)
+    return NULL;
+  const greg_t *g = g_validate_ctx.uc_mcontext.gregs;
+  static const int callee_saved[] = {REG_RBX, REG_RBP, REG_R12,
+                                     REG_R13, REG_R14, REG_R15};
+  Worklist wl = {0};
+  for (size_t i = 0; i < sizeof(callee_saved) / sizeof(callee_saved[0]); i++)
+    gc_consider_root((uintptr_t)g[callee_saved[i]], &wl);
+  uintptr_t lo = (uintptr_t)g[REG_RSP];
+  if (g_validate_stack_top > lo)
+    gc_scan_range_conservative(lo, g_validate_stack_top, &wl);
+  for (size_t i = 0; i < g_root_count; i++) {
+    void **slot = (void **)g_roots[i];
+    gc_consider_root((uintptr_t)*slot, &wl);
+  }
+  for (size_t i = 0; i < g_pin_count; i++)
+    gc_consider_root(g_pins[i].block_start, &wl);
+  while (wl.count > 0)
+    gc_scan_block_precise(wl.items[--wl.count], &wl);
+  free(wl.items);
+
+  unsigned char *marks = malloc(g_block_count ? g_block_count : 1);
+  if (!marks)
+    turf_rt_panic("out of memory", "<gc validate mark set>", "<turfrt_gc.c>",
+                  0);
+  for (size_t i = 0; i < g_block_count; i++) {
+    marks[i] = g_blocks[i].marked;
+    g_blocks[i].marked = 0;
+  }
+  return marks;
+}
+
+/* After the primary trace: every block the independent pass reached must
+ * also be marked by the primary one. Lists the first 16 misses and the
+ * total, then panics -- sweeping would free a live object. */
+static void gc_compare_mark_sets(const unsigned char *indep) {
+  size_t missed = 0;
+  for (size_t i = 0; i < g_block_count; i++) {
+    if (indep[i] && !g_blocks[i].marked) {
+      if (missed < 16)
+        fprintf(stderr,
+                "TURF_GC_VALIDATE: mark-set mismatch -- block start=%p "
+                "size=%zu is reachable from the independent full-stack "
+                "scan but the production scan did not mark it\n",
+                (void *)g_blocks[i].start, g_blocks[i].size);
+      missed++;
+    }
+  }
+  if (missed) {
+    fprintf(stderr,
+            "TURF_GC_VALIDATE: %zu missed block(s) at collection #%llu "
+            "(production stack base %p, independent stack top %p)\n",
+            missed, (unsigned long long)g_collect_count + 1,
+            (void *)g_stack_base, (void *)g_validate_stack_top);
+    turf_rt_panic("GC root missed",
+                  "TURF_GC_VALIDATE: the production root scan missed a "
+                  "block the independent scan reaches -- sweeping would "
+                  "free a live object",
+                  "<runtime>", 0);
+  }
+}
 #endif /* TURF_GC_VALIDATE_SUPPORTED */
 
 /*
@@ -1005,26 +1128,45 @@ static int gc_validate_enabled(void) {
               "ignoring.\n");
       g_gc_validate = 0;
     }
+#else
+    if (g_gc_validate) {
+      gc_validate_init_stack_top();
+      if (g_validate_stack_top == 0)
+        fprintf(stderr,
+                "TURF_GC_VALIDATE=1: pthread_getattr_np() is unavailable, "
+                "so the full-stack mark-set comparison is skipped; only the "
+                "register cross-check runs.\n");
+    }
 #endif
   }
   return g_gc_validate;
 }
 
-static void gc_mark(void) {
+/* noinline: gc_independent_mark()'s no-false-positive argument needs
+ * gc_mark()'s frame to sit strictly BELOW turf_rt_collect()'s getcontext()
+ * snapshot RSP -- inlined, gc_mark()'s own locals would share that frame
+ * and change between the independent scan and the primary one. */
+__attribute__((noinline)) static void gc_mark(void) {
   gc_rebuild_index();
   for (size_t i = 0; i < g_block_count; i++)
     g_blocks[i].marked = 0;
+
+#ifdef TURF_GC_VALIDATE_SUPPORTED
+  unsigned char *indep_marks =
+      gc_validate_enabled() ? gc_independent_mark() : NULL;
+#endif
 
   Worklist wl = {0};
 
   uintptr_t regs[TURF_GC_REGCAP_WORDS];
   gc_capture_callee_saved(regs);
 
-  /* FDN-005 stage 3: captured HERE, back-to-back with the primary read
-   * above, before gc_rebuild_index() or anything else runs -- see
-   * gc_capture_independent_regs()'s own comment for why the timing
-   * matters. `do_validate`/`indep_regs` are unused (and `-Wunused`-silenced
-   * as such) when this platform has no implementation. */
+  /* FDN-005 stage 3: the report-only caller-saved check's snapshot, taken
+   * immediately after the primary register read with nothing in between
+   * (gc_rebuild_index() and the independent mark above both run BEFORE
+   * the pair, never between them) -- see gc_capture_independent_regs()'s
+   * own comment for why the two must be adjacent. `do_validate`/
+   * `indep_regs` do not exist when this platform has no implementation. */
 #ifdef TURF_GC_VALIDATE_SUPPORTED
   int do_validate = gc_validate_enabled();
   uintptr_t indep_regs[TURF_GC_VALIDATE_WORDS];
@@ -1070,6 +1212,10 @@ static void gc_mark(void) {
    * comment for why this reports rather than aborts. */
   if (do_validate)
     gc_cross_check_extra_registers(indep_regs);
+  if (indep_marks) {
+    gc_compare_mark_sets(indep_marks);
+    free(indep_marks);
+  }
 #endif
 }
 
@@ -1100,6 +1246,13 @@ static void gc_sweep(void) {
 }
 
 void turf_rt_collect(void) {
+#ifdef TURF_GC_VALIDATE_SUPPORTED
+  /* The independent mark's snapshot -- taken here, in gc_mark()'s caller,
+   * so its RSP bounds a range that excludes every collector frame below
+   * (gc_independent_mark()'s own comment). */
+  g_validate_ctx_valid =
+      gc_validate_enabled() && getcontext(&g_validate_ctx) == 0;
+#endif
   gc_mark();
   gc_sweep();
   g_bytes_since_collect = 0;
