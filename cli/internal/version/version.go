@@ -1,17 +1,23 @@
-// Package version holds the toolchain version the `turf` front end reports and
-// checks the compiler against.
+// Package version holds the `turf` front end's own release version and the
+// compiler driver interface it needs.
 package version
 
-// Version is stamped at build time, never edited here:
-//
-//	-ldflags "-X github.com/turf-lang/turf-lang/cli/internal/version.Version=<v>"
-//
-// CMake passes the contents of the repo-root VERSION file, the same value it
-// compiles into `turfc`, so the two binaries cannot disagree by construction.
-// The "unknown" default is deliberate: a plain `go build` has no stamp, and a
-// front end that guessed a version could pass the compiler handshake against
-// the wrong compiler. driver.Handshake refuses to run while it is "unknown".
-var Version = Unstamped
+// Version is turf's release version. It is independent of the compiler's:
+// turf and turfc are released on their own schedules (FREEZE.md 6.16,
+// F-PKG-1), and `turf version` prints both. It is a plain constant, so a
+// plain `go build` produces a correctly versioned binary.
+const Version = "1.0.0-dev"
 
-// Unstamped is the value Version has when nothing set it.
-const Unstamped = "unknown"
+// Interface is a turfc driver-interface version, `major.minor`, as printed on
+// line 2 of `turfc --version`.
+type Interface struct {
+	Major, Minor int
+}
+
+// Required is the driver interface this turf speaks. A compiler is usable if
+// it has the same Major and at least this Minor (turfc bumps Minor for
+// additive changes and Major for anything removed or changed). Raise Minor
+// here when turf starts passing something a newer turfc added, such as the
+// LEC-001 stage 4 package graph; raise Major only together with a turfc
+// that raised its own.
+var Required = Interface{Major: 1, Minor: 0}

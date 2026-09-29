@@ -1,12 +1,16 @@
 #!/bin/bash
 #
-# dev_install.sh -- put this checkout's `turf` and `turfc` on your PATH.
+# dev_install.sh -- put this checkout's `turf` on your PATH.
 #
-# Symlinks <prefix>/bin/turf -> build/turf and <prefix>/bin/turfc ->
-# build/turfc (prefix default: ~/.local). After that, `turf file.tr`,
-# `turf run file.tr` and `turfc file.tr` work from any directory with no
-# environment variables at all, and every rebuild is picked up immediately,
-# since the links point at the build tree rather than at a copy.
+# Symlinks <prefix>/bin/turf -> build/turf (prefix default: ~/.local). After
+# that, `turf file.tr`, `turf run file.tr` and `turf check file.tr` work from
+# any directory with no environment variables at all, and every rebuild is
+# picked up immediately, since the link points at the build tree rather than
+# at a copy. `turf` finds build/turfc by itself.
+#
+# `turfc` is the tooling interface, not the user's command (FREEZE.md 6.16,
+# F-PKG-1), so it is only linked with --with-turfc: for tool authors who want
+# to call the compiler directly from any directory.
 #
 # Why symlinks are enough, and why TURF_HOME is not needed: `turfc` finds its
 # install root (lib/std, lib/libturfrt.a) from its own REAL path, <bin>/..
@@ -20,7 +24,7 @@
 # This is a developer convenience, not the release install. A real install
 # is an unpacked release archive (REL-003).
 #
-# Usage: scripts/dev_install.sh [--prefix DIR] [--uninstall]
+# Usage: scripts/dev_install.sh [--prefix DIR] [--with-turfc] [--uninstall]
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -28,11 +32,13 @@ REPO=$(pwd -P)
 
 PREFIX="$HOME/.local"
 UNINSTALL=0
+NAMES="turf"
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) PREFIX="${2:?--prefix needs a directory}"; shift 2 ;;
+    --with-turfc) NAMES="turf turfc"; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
-    -h|--help) sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "dev_install.sh: unknown option '$1' (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -56,13 +62,14 @@ if [ ! -x "$REPO/build/turfc" ]; then
 fi
 
 mkdir -p "$BIN" || exit 1
-for name in turf turfc; do
+for name in $NAMES; do
   target="$REPO/build/$name"
   link="$BIN/$name"
   if [ ! -x "$target" ]; then
-    # build/turf is optional: it only exists when Go was found at configure
-    # time. turfc alone is a complete compiler.
-    echo "skipped $name: $target not built (Go not installed?)"
+    # build/turf only exists when Go was found at configure time. Without it
+    # there is nothing user-facing to link; --with-turfc still links the
+    # compiler for tool authors.
+    echo "skipped $name: $target not built (Go not installed? then use --with-turfc)"
     continue
   fi
   if [ -e "$link" ] && [ ! -L "$link" ]; then

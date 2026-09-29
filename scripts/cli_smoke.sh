@@ -7,8 +7,9 @@
 # discovery order and the handshake's parsing in isolation. What only a real
 # build can show is the end-to-end contract of docs/development/FREEZE.md 6.16
 # (F-PKG-1): `turf <args>` is `turfc <args>` byte for byte (stdout, stderr and
-# exit status), every compiler mode is reachable as a subcommand, the version
-# handshake refuses a mismatched compiler, and the CLI writes no file the
+# exit status), every compiler mode is reachable as a subcommand, the
+# driver-interface handshake refuses a compiler that does not fit (and accepts
+# one whose release version merely differs), and the CLI writes no file the
 # compiler would not. Each case checks the exact exit code, and byte-identity
 # against running turfc directly wherever the spec says so.
 #
@@ -38,7 +39,11 @@ fi
 # pointing at another checkout) must not decide the result.
 unset TURF_COMPILER TURF_HOME
 
+# The two release versions are independent (FREEZE.md 6.16, F-PKG-1): the
+# compiler's is the root VERSION file, turf's is a constant in its own source.
 V=$(head -1 VERSION)
+CLI_V=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' cli/internal/version/version.go)
+[ -n "$CLI_V" ] || { echo "FAIL: cannot read turf's version from cli/internal/version/version.go"; exit 1; }
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$WORK/tmp"
@@ -248,18 +253,45 @@ expect_err "run (no file)" rn.turf "stage 5"
 # --- version and the handshake ------------------------------------------------
 capture v.turf "$TURF" version
 expect_rc "version" v.turf 0
-[ "$(head -1 "$WORK/v.turf.out")" = "turf $V" ] || fail "version: line 1 is '$(head -1 "$WORK/v.turf.out")', expected 'turf $V'"
+head -1 "$WORK/v.turf.out" | grep -q "^turf $CLI_V " || fail "version: line 1 is '$(head -1 "$WORK/v.turf.out")', expected 'turf $CLI_V ...'"
 grep -qF "turfc $V" "$WORK/v.turf.out" || fail "version: output lacks 'turfc $V'"
+grep -qF "interface" "$WORK/v.turf.out" || fail "version: output does not show the driver interface"
 capture v2.turf "$TURF" --version
 identical "--version vs version" v.turf v2.turf
+"$TURFC" --version | sed -n 2p | grep -qE '^interface [0-9]+\.[0-9]+$' || fail "turfc --version line 2 is not 'interface M.m'"
 
-printf '#!/bin/sh\necho "turfc 0.0.0"\n' > "$WORK/fake_turfc"
+# A different RELEASE version is fine when the interface fits: the pairing
+# F-PKG-1's amendment exists for (TurfLang 2.0.0 driven by CLI 1.0.0). The fake
+# forwards everything but --version to the real compiler, so the compile must
+# actually succeed through it.
+IFACE=$("$TURFC" --version | sed -n 2p)
+cat > "$WORK/fake_other_release" <<EOF
+#!/bin/sh
+if [ "\$1" = "--version" ]; then printf 'turfc 9.9.9\n$IFACE\n'; exit 0; fi
+exec "$TURFC" "\$@"
+EOF
+chmod +x "$WORK/fake_other_release"
+d=$(fresh pass.tr)
+TURF_COMPILER="$WORK/fake_other_release" capture_in "$d" or.turf "$TURF" check pass.tr
+expect_rc "compiler with another release version, same interface" or.turf 0
+
+# An interface this turf does not speak is refused, naming both sides.
+printf '#!/bin/sh\nprintf "turfc 0.0.0\\ninterface 99.0\\n"\n' > "$WORK/fake_turfc"
 chmod +x "$WORK/fake_turfc"
 TURF_COMPILER="$WORK/fake_turfc" capture mm.turf "$TURF" pass.tr
-expect_rc "mismatched compiler" mm.turf 1
-expect_err "mismatched compiler" mm.turf "version mismatch"
-expect_err "mismatched compiler" mm.turf "$V"
-expect_err "mismatched compiler" mm.turf "0.0.0"
+expect_rc "incompatible compiler" mm.turf 1
+expect_err "incompatible compiler" mm.turf "does not speak the interface"
+expect_err "incompatible compiler" mm.turf "$CLI_V"
+expect_err "incompatible compiler" mm.turf "0.0.0"
+expect_err "incompatible compiler" mm.turf "interface 99.0"
+expect_err "incompatible compiler" mm.turf "upgrade turf"
+
+# A compiler from before the interface existed prints only line 1.
+printf '#!/bin/sh\necho "turfc 0.0.0"\n' > "$WORK/fake_old_turfc"
+chmod +x "$WORK/fake_old_turfc"
+TURF_COMPILER="$WORK/fake_old_turfc" capture old.turf "$TURF" pass.tr
+expect_rc "pre-interface compiler" old.turf 1
+expect_err "pre-interface compiler" old.turf "reports no driver interface"
 
 TURF_COMPILER=/nonexistent capture nc.turf "$TURF" pass.tr
 expect_rc "TURF_COMPILER=/nonexistent" nc.turf 1

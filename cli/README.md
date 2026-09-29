@@ -1,9 +1,12 @@
 # turf, the TurfLang front end
 
-`turf` is the command-line front end of the TurfLang toolchain. It drives
-`turfc`, the compiler in this repository's `src/`; both are built from the same
-tree, carry the same version (the root `VERSION` file) and ship in the same
-release archive.
+`turf` is the TurfLang command-line tool, the one users type. It drives
+`turfc`, the compiler in this repository's `src/`, which is the interface for
+tools rather than for people. The two are versioned independently: turf's
+version is the constant in `internal/version/version.go`, the compiler's is the
+root `VERSION` file, and `turf version` prints both. What they must agree on is
+the **driver interface**, `major.minor`, which `turfc --version` prints on line
+2 and `version.Required` names.
 
 The design is frozen in [`docs/development/FREEZE.md`](../docs/development/FREEZE.md)
 §6.16 (F-PKG-1); the record of how it was built is
@@ -38,9 +41,12 @@ remove,update,publish}.go`) are kept unused for stages 5 and 6 to rework.
 ## Finding the compiler
 
 First match wins: `$TURF_COMPILER`, then `turfc` beside the running `turf`
-(symlinks resolved), then `$TURF_HOME/bin/turfc`, then `turfc` on `PATH`. Before
-driving it, `turf` runs `turfc --version` and refuses a compiler whose version
-differs from its own, whichever way it was found.
+(symlinks resolved), then `$TURF_HOME/bin/turfc`, then `turfc` on `PATH`.
+`$TURF_HOME/bin` is how a separately installed turf and turfc find each other.
+Before driving it, `turf` runs `turfc --version` and refuses a compiler whose
+driver interface does not fit: a different major, or an older minor than
+`version.Required`. However it was found, a differing *release* version is
+fine.
 
 ## Building and testing
 
@@ -50,6 +56,9 @@ cd cli && go vet ./... && go test ./...
 ./scripts/cli_smoke.sh         # the front end against the real compiler
 ```
 
-Build it through CMake, not a bare `go build`: CMake stamps the version, and an
-unstamped `turf` refuses to run. Go is optional; without it only `build/turf` is
-skipped.
+A plain `go build ./cmd/turf` works too, since nothing is stamped at build time.
+CMake just puts the result at `build/turf`, beside `build/turfc`, where it finds
+the compiler with no setup. Go is optional; without it only `build/turf` is
+skipped. When turfc gains something turf will use (a new flag, the stage 4
+package graph), turfc bumps its interface minor and turf raises
+`version.Required` to it.

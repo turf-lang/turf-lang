@@ -54,7 +54,7 @@ When a diagnostic fires with `--smart` enabled, this is what actually happens, i
 Runs the pipeline above on error only — no cost, no model inference, nothing happens on a clean compile — entirely locally via a small quantized model loaded through `llama.cpp`. No network call, no external dependency.
 
 ```bash
-turfc my_program.tr --smart -o my_program
+turf my_program.tr --smart -o my_program
 ```
 
 Useful compiler introspection flags, beyond ordinary compilation: `--dump-ast`, `--dump-resolved`, `--dump-typechecked`, `--dump-modules` (everything the compiler knows about the current program's modules — every imported module's functions, struct/enum type ownership, and every on-demand import), `--emit-llvm`.
@@ -112,12 +112,11 @@ fn main(): int {
 ```
 
 ```bash
-build/turf hello.tr -o hello     # through the front end: forwarded to turfc unchanged
-build/turfc hello.tr -o hello    # or run the compiler directly, same result
+turf hello.tr -o hello     # or `turf run hello.tr` to compile, run and clean up in one step
 ./hello
 ```
 
-`turf` is the toolchain's front end and `turfc` is the compiler it drives; a release archive ships both side by side (`turf file.tr [flags]` is exactly `turfc file.tr [flags]`). `turf run hello.tr` compiles to a temporary file, runs it and cleans up; `turf check hello.tr` reports diagnostics without writing anything; `turf help` lists the rest. `turf` is optional if you build from source without Go — the compiler on its own is complete.
+`turf` is the tool you use. `turf check hello.tr` reports diagnostics without writing anything, `turf explain E090` explains an error code, and `turf help` lists the rest. Behind it is `turfc`, the compiler, which `turf` drives. `turfc` is the interface for tools (editor integrations, build systems); you don't need to call it yourself. The two are versioned independently, and `turf version` shows both. Building from source puts both in `build/`; `scripts/dev_install.sh` puts `turf` on your `PATH`.
 
 I/O lives in the standard library's `io` module. `::` is Turf's namespace-resolution operator — `io::printline`, not a bare global and not `io.printline` (`.` is reserved for instance-member access; see [Modules & Imports](#modules--imports)).
 
@@ -468,7 +467,7 @@ fn cmpints(a: ptr, b: ptr): int32 {   // legal here, and not gated per-use
 }
 ```
 
-Honored unconditionally for a file under the Turf install root (`lib/std`/`lib/usr`); anywhere else it needs the `--allow-unsafe-modules` CLI flag, so a plain `turfc myfile.tr` never silently grants it. See `docs/architecture/pointers_and_references.md` §1.7 for the full mechanism.
+Honored unconditionally for a file under the Turf install root (`lib/std`/`lib/usr`); anywhere else it needs the `--allow-unsafe-modules` CLI flag, so a plain `turf myfile.tr` never silently grants it. See `docs/architecture/pointers_and_references.md` §1.7 for the full mechanism.
 
 `&T` is a compiler-guaranteed non-null reference — `&expr` (address-of) always produces one:
 

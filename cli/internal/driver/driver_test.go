@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/turf-lang/turf-lang/cli/internal/version"
 )
 
 // fakeTurfc writes an executable shell script that prints out for any
@@ -166,49 +168,86 @@ func TestDiscoverFollowsSymlinks(t *testing.T) {
 	}
 }
 
+// withRequired runs fn with version.Required temporarily set to need, so the
+// compatibility rule can be exercised without depending on today's value.
+func withRequired(t *testing.T, need version.Interface) {
+	t.Helper()
+	saved := version.Required
+	version.Required = need
+	t.Cleanup(func() { version.Required = saved })
+}
+
 func TestHandshake(t *testing.T) {
 	dir := t.TempDir()
 
-	t.Run("match", func(t *testing.T) {
-		c := fakeTurfc(t, dir, "turfc 2.0.0-dev\nLLVM 22\n")
-		if err := Handshake(c, "/x/turf", "2.0.0-dev"); err != nil {
+	// The point of F-PKG-1's amendment: release versions are independent.
+	t.Run("a different release version with a fitting interface is accepted", func(t *testing.T) {
+		withRequired(t, version.Interface{Major: 1, Minor: 0})
+		c := fakeTurfc(t, dir, "turfc 7.3.1\ninterface 1.0\nLLVM 22\n")
+		if err := Handshake(c, "/x/turf"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
-	t.Run("later lines are ignored", func(t *testing.T) {
-		c := fakeTurfc(t, dir, "turfc 2.0.0-dev\nsomething else entirely\n")
-		if err := Handshake(c, "/x/turf", "2.0.0-dev"); err != nil {
+	t.Run("a newer minor is accepted", func(t *testing.T) {
+		withRequired(t, version.Interface{Major: 1, Minor: 2})
+		c := fakeTurfc(t, dir, "turfc 2.0.0\ninterface 1.5\n")
+		if err := Handshake(c, "/x/turf"); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
-	t.Run("mismatch names both versions and both paths", func(t *testing.T) {
-		c := fakeTurfc(t, dir, "turfc 0.0.0\n")
-		err := Handshake(c, "/x/turf", "2.0.0-dev")
+	t.Run("an older minor is refused and says to upgrade turfc", func(t *testing.T) {
+		withRequired(t, version.Interface{Major: 1, Minor: 2})
+		c := fakeTurfc(t, dir, "turfc 2.0.0\ninterface 1.1\n")
+		err := Handshake(c, "/x/turf")
 		if err == nil {
-			t.Fatal("expected a mismatch error")
+			t.Fatal("expected an interface error")
 		}
 		msg := err.Error()
-		for _, want := range []string{"compiler version mismatch", "2.0.0-dev", "0.0.0", "/x/turf", c, "hint:"} {
+		for _, want := range []string{"does not speak the interface", "needs interface 1.2", "speaks interface 1.1",
+			"2.0.0", version.Version, "/x/turf", c, "upgrade turfc"} {
 			if !strings.Contains(msg, want) {
 				t.Errorf("error lacks %q:\n%s", want, msg)
 			}
 		}
 	})
 
-	t.Run("unstamped turf is refused before running anything", func(t *testing.T) {
-		// The compiler path does not even exist: the refusal must not need it.
-		err := Handshake("/nonexistent/turfc", "/x/turf", "unknown")
-		if err == nil || !strings.Contains(err.Error(), "without a version stamp") ||
-			!strings.Contains(err.Error(), "--target turf-cli") {
+	t.Run("a newer major is refused and says to upgrade turf", func(t *testing.T) {
+		withRequired(t, version.Interface{Major: 1, Minor: 0})
+		c := fakeTurfc(t, dir, "turfc 3.0.0\ninterface 2.0\n")
+		err := Handshake(c, "/x/turf")
+		if err == nil || !strings.Contains(err.Error(), "upgrade turf:") {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	t.Run("an older major is refused", func(t *testing.T) {
+		withRequired(t, version.Interface{Major: 2, Minor: 0})
+		c := fakeTurfc(t, dir, "turfc 2.0.0\ninterface 1.9\n")
+		if err := Handshake(c, "/x/turf"); err == nil || !strings.Contains(err.Error(), "upgrade turfc") {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	t.Run("a turfc with no interface line predates the interface", func(t *testing.T) {
+		c := fakeTurfc(t, dir, "turfc 2.0.0-dev\n")
+		err := Handshake(c, "/x/turf")
+		if err == nil || !strings.Contains(err.Error(), "reports no driver interface") {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	t.Run("a malformed interface line", func(t *testing.T) {
+		c := fakeTurfc(t, dir, "turfc 2.0.0\ninterface one\n")
+		if err := Handshake(c, "/x/turf"); err == nil || !strings.Contains(err.Error(), "reports no driver interface") {
 			t.Fatalf("got %v", err)
 		}
 	})
 
 	t.Run("empty output", func(t *testing.T) {
 		c := fakeTurfc(t, dir, "")
-		err := Handshake(c, "/x/turf", "2.0.0-dev")
+		err := Handshake(c, "/x/turf")
 		if err == nil || !strings.Contains(err.Error(), "printed nothing") || !strings.Contains(err.Error(), c) {
 			t.Fatalf("got %v", err)
 		}
@@ -216,24 +255,24 @@ func TestHandshake(t *testing.T) {
 
 	t.Run("output that is not a turfc version line", func(t *testing.T) {
 		c := fakeTurfc(t, dir, "GNU bash 5.2\n")
-		err := Handshake(c, "/x/turf", "2.0.0-dev")
-		if err == nil || !strings.Contains(err.Error(), "does not look like turfc") {
+		if err := Handshake(c, "/x/turf"); err == nil || !strings.Contains(err.Error(), "does not look like turfc") {
 			t.Fatalf("got %v", err)
 		}
 	})
 
 	t.Run("a compiler that will not run", func(t *testing.T) {
-		err := Handshake(filepath.Join(dir, "no-such-file"), "/x/turf", "2.0.0-dev")
+		err := Handshake(filepath.Join(dir, "no-such-file"), "/x/turf")
 		if err == nil || !strings.Contains(err.Error(), "no-such-file") {
 			t.Fatalf("got %v", err)
 		}
 	})
 }
 
-func TestVersionLine(t *testing.T) {
-	c := fakeTurfc(t, t.TempDir(), "turfc 2.0.0-dev\nextra\n")
-	got, err := VersionLine(c)
-	if err != nil || got != "turfc 2.0.0-dev" {
-		t.Fatalf("got %q, %v", got, err)
+func TestProbe(t *testing.T) {
+	c := fakeTurfc(t, t.TempDir(), "turfc 2.0.0-dev\r\ninterface 1.4\r\nextra\n")
+	got, err := Probe(c)
+	want := CompilerInfo{Release: "2.0.0-dev", Interface: version.Interface{Major: 1, Minor: 4}}
+	if err != nil || got != want {
+		t.Fatalf("got %+v, %v; want %+v", got, err, want)
 	}
 }

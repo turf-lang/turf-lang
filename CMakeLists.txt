@@ -10,9 +10,10 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # ─── Version ─────────────────────────────────────────────────────────────────
-# One source for the whole toolchain: `turfc --version` prints it and the Go
-# front end (cli/) is stamped with it, so the two can never be built at
-# different versions (FREEZE.md 6.16, F-PKG-1). CMAKE_CURRENT_SOURCE_DIR, not
+# The compiler's release version, printed by `turfc --version` (line 1). The
+# `turf` front end has its own, independent version (FREEZE.md 6.16, F-PKG-1);
+# what the two must agree on is the driver interface in src/main.cpp, not
+# this. CMAKE_CURRENT_SOURCE_DIR, not
 # CMAKE_SOURCE_DIR: turf-lsp consumes this file through add_subdirectory(),
 # where CMAKE_SOURCE_DIR is turf-lsp's own root and has no VERSION file.
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" TURF_VERSION LIMIT_COUNT 1)
@@ -374,9 +375,11 @@ if(TURF_RT_SANITIZE)
 endif()
 
 # ─── The `turf` front end (LEC-001, FREEZE.md 6.16 F-PKG-1) ──────────────────
-# The Go program under cli/, built into build/turf beside build/turfc, stamped
-# with the same TURF_VERSION the compiler was (its handshake refuses a turfc of
-# a different version). Optional on purpose: the compiler and the whole test
+# The Go program under cli/, built into build/turf beside build/turfc (which is
+# how it finds the compiler with no setup). It is versioned independently of
+# TURF_VERSION -- its own version is a constant in cli/internal/version -- and
+# checks the compiler's driver interface, not its release version, so nothing
+# is stamped in here. Optional on purpose: the compiler and the whole test
 # suite must build with no Go toolchain, so a missing `go` only skips this.
 # Top-level builds only, so turf-lsp's add_subdirectory() never needs Go.
 #
@@ -391,7 +394,6 @@ if(TURF_BUILD_CLI AND PROJECT_IS_TOP_LEVEL)
     add_custom_target(turf-cli ALL
       COMMAND ${CMAKE_COMMAND} -E env CGO_ENABLED=0
         ${TURF_GO} build -trimpath
-        -ldflags "-X github.com/turf-lang/turf-lang/cli/internal/version.Version=${TURF_VERSION}"
         -o "${CMAKE_BINARY_DIR}/turf${CMAKE_EXECUTABLE_SUFFIX}" ./cmd/turf
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/cli"
       COMMENT "Building the turf front end (Go)"

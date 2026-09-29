@@ -6,7 +6,6 @@ import (
 	"sort"
 
 	"github.com/turf-lang/turf-lang/cli/internal/driver"
-	"github.com/turf-lang/turf-lang/cli/internal/version"
 )
 
 // Exit codes for the CLI's own failures: 2 for usage, 1 for everything else.
@@ -90,12 +89,12 @@ func failf(format string, a ...any) int {
 	return exitFailure
 }
 
-// withCompiler finds turfc and runs the version handshake before fn drives it.
+// withCompiler finds turfc and runs the interface handshake before fn drives it.
 // Every command that runs the compiler goes through here; a command that runs
 // nothing (a stub, `publish`) deliberately does not, since demanding a
 // compiler for a command that will not use it only hides the real message.
 func withCompiler(fn func(compiler string) int) int {
-	c, err := driver.Locate(version.Version)
+	c, err := driver.Locate()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "turf: %v\n", err)
 		return exitFailure

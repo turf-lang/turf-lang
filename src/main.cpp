@@ -77,6 +77,26 @@ using namespace llvm;
 #error "TURF_VERSION must be defined by the build (CMakeLists.txt reads it from VERSION)"
 #endif
 
+// The driver interface (FREEZE.md 6.16, F-PKG-1): what the `turf` front end,
+// or any tool driving this binary, may rely on. turfc and turf are released
+// independently, so the RELEASE version above says nothing about whether they
+// work together. This does, and `turf` refuses a compiler whose interface it
+// does not speak.
+//
+// Covered: the flags a driver passes (--check, --module, --dump-*, --format,
+// --write, --migrate=, --explain, -o; the package-graph input from LEC-001
+// stage 4), the two-line `--version` format, exit statuses (0 success, 1 a
+// reported error), and every other argument being accepted exactly as a
+// direct invocation accepts it.
+//
+// Bump MINOR for anything additive (a new flag, a new input); a driver that
+// needs it asks for the new minor, and older drivers keep working. Bump MAJOR,
+// and reset MINOR, when anything covered is removed or changes meaning --
+// that is what makes every existing driver refuse this compiler instead of
+// misbehaving with it.
+static constexpr int TurfcInterfaceMajor = 1;
+static constexpr int TurfcInterfaceMinor = 0;
+
 // OPT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §17.2): the five levels
 // the CLI's `-O` flag selects. Os is not "O1 through O3 plus one more" --
 // it is `PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel::Os)`,
@@ -894,15 +914,17 @@ static int linkObject(const std::string &ObjFile,
  */
 static int runCompilerMain(int argc, char **argv) {
   // The `turf` front end runs `turfc --version` before EVERY compile to check
-  // it is driving the compiler it shipped with (FREEZE.md 6.16, F-PKG-1), so
+  // it speaks this compiler's driver interface (FREEZE.md 6.16, F-PKG-1), so
   // this answers before anything else that costs time or touches global
   // state (the SLM engine, source files, the install-root lookup).
-  // Line 1 is a contract -- the handshake parses exactly `turfc <version>`;
-  // any later line (LLVM version, runtime ABI, ...) may be added, but never
-  // by changing this one.
+  // Lines 1 and 2 are a contract: `turfc <release version>`, then
+  // `interface <major>.<minor>`. Later lines (LLVM version, runtime ABI, ...)
+  // may be added, but never by changing these two.
   for (int i = 1; i < argc; ++i) {
     if (std::string(argv[i]) == "--version") {
-      std::cout << "turfc " << TURF_VERSION << "\n";
+      std::cout << "turfc " << TURF_VERSION << "\n"
+                << "interface " << TurfcInterfaceMajor << "."
+                << TurfcInterfaceMinor << "\n";
       return 0;
     }
   }

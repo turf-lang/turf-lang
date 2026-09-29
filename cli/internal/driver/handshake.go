@@ -4,80 +4,111 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/turf-lang/turf-lang/cli/internal/version"
 )
 
-// Handshake checks that compiler is the turfc built alongside this turf, by
-// comparing line 1 of `turfc --version` with "turfc <turfVersion>". A
-// hand-assembled pair from different builds is refused, not tolerated:
-// the two share one version because they are built from one tree, and a
-// mismatch is how a stale binary left behind by a partial rebuild shows up.
-//
-// TURF_COMPILER does not bypass this (FREEZE.md 6.16), and neither does an
-// unstamped turf: with no version of its own there is nothing to compare, and
-// guessing would defeat the check.
-//
-// Only line 1 is read. The compiler may print more lines later (LLVM version,
-// runtime ABI, install root) without breaking older front ends.
-func Handshake(compiler, turfPath, turfVersion string) error {
-	if turfVersion == version.Unstamped {
-		return &Error{
-			Msg: "turf was built without a version stamp; build it with 'cmake --build build --target turf-cli'",
-		}
-	}
+// CompilerInfo is what `turfc --version` reports: line 1 is
+// `turfc <release version>`, line 2 is `interface <major>.<minor>`.
+type CompilerInfo struct {
+	Release   string
+	Interface version.Interface
+}
 
+// Probe runs `compiler --version` and parses its first two lines. Later lines
+// are ignored, so the compiler may add more (LLVM version, runtime ABI)
+// without breaking this turf.
+func Probe(compiler string) (CompilerInfo, error) {
 	out, err := exec.Command(compiler, "--version").Output()
 	if err != nil {
-		return &Error{
+		return CompilerInfo{}, &Error{
 			Msg:  fmt.Sprintf("cannot run %s --version: %v", compiler, err),
 			Hint: envHint,
 		}
 	}
-	line := strings.TrimRight(strings.SplitN(string(out), "\n", 2)[0], "\r")
-	if line == "" {
-		return &Error{
+	lines := strings.Split(strings.ReplaceAll(string(out), "\r", ""), "\n")
+	if lines[0] == "" {
+		return CompilerInfo{}, &Error{
 			Msg:  fmt.Sprintf("%s printed nothing for --version, so it does not look like turfc", compiler),
 			Hint: envHint,
 		}
 	}
-	got, ok := strings.CutPrefix(line, "turfc ")
+	release, ok := strings.CutPrefix(lines[0], "turfc ")
 	if !ok {
-		return &Error{
-			Msg:  fmt.Sprintf("%s does not look like turfc: --version printed %q", compiler, line),
+		return CompilerInfo{}, &Error{
+			Msg:  fmt.Sprintf("%s does not look like turfc: --version printed %q", compiler, lines[0]),
 			Hint: envHint,
 		}
 	}
-	if got == turfVersion {
+	info := CompilerInfo{Release: release}
+	if len(lines) < 2 || !parseInterface(lines[1], &info.Interface) {
+		return info, &Error{
+			Msg: fmt.Sprintf("turfc %s (%s) reports no driver interface, so it predates this turf "+
+				"(turf %s needs interface %d.%d or a later %d.x)",
+				release, compiler, version.Version, version.Required.Major,
+				version.Required.Minor, version.Required.Major),
+			Hint: "upgrade turfc, or point TURF_COMPILER at a newer one",
+		}
+	}
+	return info, nil
+}
+
+func parseInterface(line string, into *version.Interface) bool {
+	rest, ok := strings.CutPrefix(line, "interface ")
+	if !ok {
+		return false
+	}
+	maj, min, ok := strings.Cut(rest, ".")
+	if !ok {
+		return false
+	}
+	var err1, err2 error
+	into.Major, err1 = strconv.Atoi(maj)
+	into.Minor, err2 = strconv.Atoi(min)
+	return err1 == nil && err2 == nil
+}
+
+// Handshake checks that compiler speaks the driver interface this turf needs:
+// the same major, and at least the required minor (FREEZE.md 6.16, F-PKG-1).
+// Release versions are deliberately not compared -- turf and turfc are
+// released independently, and a TurfLang 2.0.0 compiler driven by CLI 1.0.0
+// is a supported pairing. TURF_COMPILER does not bypass the check.
+func Handshake(compiler, turfPath string) error {
+	info, err := Probe(compiler)
+	if err != nil {
+		return err
+	}
+	need, got := version.Required, info.Interface
+	if got.Major == need.Major && got.Minor >= need.Minor {
 		return nil
 	}
+	// Which side to upgrade follows from which one is behind.
+	hint := "upgrade turfc, or point TURF_COMPILER at one that speaks the interface above"
+	if got.Major > need.Major {
+		hint = "upgrade turf: this compiler's interface is newer than this turf understands"
+	}
 	return &Error{
-		Msg: fmt.Sprintf("compiler version mismatch\n  turf  %s  (%s)\n  turfc %s  (%s)",
-			turfVersion, turfPath, got, compiler),
-		Hint: "turf and turfc must come from the same build; rebuild with `cmake --build build`, or point TURF_COMPILER at the matching turfc",
+		Msg: fmt.Sprintf("this compiler does not speak the interface this turf needs\n"+
+			"  turf  %s  needs interface %d.%d or a later %d.x  (%s)\n"+
+			"  turfc %s  speaks interface %d.%d  (%s)",
+			version.Version, need.Major, need.Minor, need.Major, turfPath,
+			info.Release, got.Major, got.Minor, compiler),
+		Hint: hint,
 	}
 }
 
 // Locate finds turfc and runs the handshake, the two steps every command that
 // drives the compiler starts with.
-func Locate(turfVersion string) (string, error) {
+func Locate() (string, error) {
 	compiler, err := Discover()
 	if err != nil {
 		return "", err
 	}
 	turfPath, _ := os.Executable()
-	if err := Handshake(compiler, turfPath, turfVersion); err != nil {
+	if err := Handshake(compiler, turfPath); err != nil {
 		return "", err
 	}
 	return compiler, nil
-}
-
-// VersionLine returns line 1 of `compiler --version`, for `turf version`.
-func VersionLine(compiler string) (string, error) {
-	out, err := exec.Command(compiler, "--version").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimRight(strings.SplitN(string(out), "\n", 2)[0], "\r"), nil
 }
