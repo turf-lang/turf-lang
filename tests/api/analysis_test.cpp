@@ -851,6 +851,51 @@ static void testAmbiguousModuleImport(const ScratchDir &Dir) {
   fs::current_path(SavedCwd);
 }
 
+// LEC-001 stage 5 (FREEZE.md 6.16's one exception to "turfc never looks for a
+// manifest"): E027 inside a turf.toml project names `turf build`; outside one
+// it is unchanged. The manifest is never read, so an EMPTY turf.toml is enough
+// to prove the compiler only checks existence.
+static void testModuleNotFoundHintsAtProject(const ScratchDir &Dir) {
+  CurrentTest = "E027 project hint";
+  fs::create_directories(Dir.Root / "proj" / "src" / "deep");
+  fs::create_directories(Dir.Root / "loose");
+  Dir.write("proj/turf.toml", "");
+  const std::string InProject = Dir.write("proj/src/deep/main.tr", "");
+  const std::string Loose = Dir.write("loose/main.tr", "");
+  const std::string Source = "import geometry;\nfn main(): int { return 0; }\n";
+  auto FindE027 = [](const turf::AnalysisResult &R) -> const turf::Diagnostic * {
+    for (const auto &D : R.diagnostics())
+      if (D.Code == "E027")
+        return &D;
+    return nullptr;
+  };
+  {
+    auto R = turf::analyze({{InProject, Source}});
+    const turf::Diagnostic *D = FindE027(R);
+    CHECK(D != nullptr);
+    if (D) {
+      // The ancestor search starts at the importing file's own directory and
+      // walks up, so a manifest two levels above is found.
+      CHECK(D->Hint.find("This file is inside a TurfLang project") != std::string::npos);
+      CHECK(D->Hint.find("turf.toml") != std::string::npos);
+      CHECK(D->Hint.find("only visible to `turf build`") != std::string::npos);
+      // The standard hint is kept, in front of the new sentence.
+      CHECK(D->Hint.find("Make sure the file 'geometry.tr' exists") != std::string::npos);
+    } else {
+      std::cerr << render(R);
+    }
+  }
+  {
+    auto R = turf::analyze({{Loose, Source}});
+    const turf::Diagnostic *D = FindE027(R);
+    CHECK(D != nullptr);
+    if (D)
+      CHECK(D->Hint.find("turf build") == std::string::npos);
+    else
+      std::cerr << render(R);
+  }
+}
+
 int main() {
   ScratchDir Dir;
   testCleanProgramQueries();
@@ -869,6 +914,7 @@ int main() {
   testPrivateInPublic(Dir);
   testMigratePub(Dir);
   testAmbiguousModuleImport(Dir);
+  testModuleNotFoundHintsAtProject(Dir);
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

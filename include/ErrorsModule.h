@@ -164,10 +164,22 @@ public:
 class ModuleNotFoundError : public TurfError {
 public:
   ModuleNotFoundError(SourceLocation Loc, const std::string &ModuleName)
+      : ModuleNotFoundError(Loc, ModuleName, "") {}
+
+  // @p ExtraHint is appended to the standard hint. LEC-001 stage 5: a
+  // single-file compile of a file that lives inside a turf.toml project fails
+  // on an import of one of the project's dependencies, which only a package
+  // build can see; the standard hint ("make sure the file exists in the
+  // standard library or your current directory") would send the user looking
+  // for a file that is not the problem. Keeping the base message unchanged
+  // means every existing E027 expectation still holds.
+  ModuleNotFoundError(SourceLocation Loc, const std::string &ModuleName,
+                      const std::string &ExtraHint)
       : TurfError(Loc, Colors::BRIGHT_RED + "Could not find module '" +
                            Colors::CYAN + ModuleName + Colors::BRIGHT_RED +
                            "'." + Colors::RESET,
-                  "Make sure the file '" + ModuleName + ".tr' exists in the standard library or your current directory.") {
+                  "Make sure the file '" + ModuleName + ".tr' exists in the standard library or your current directory." +
+                      (ExtraHint.empty() ? "" : " " + ExtraHint)) {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };

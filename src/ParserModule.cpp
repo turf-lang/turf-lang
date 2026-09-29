@@ -1140,6 +1140,36 @@ std::vector<std::string> ListAvailableModules(const std::string &ImportingFile) 
   return Result;
 }
 
+// LEC-001 stage 5 (FREEZE.md 6.16, "the one exception to `turfc never looks for
+// a manifest`"): when a single-file import fails and the importing file sits
+// inside a turf.toml project, name `turf build` in the hint. A project's
+// dependencies are visible only to a package build, so the plain "not found"
+// message is misleading: the module exists, just not for this invocation.
+//
+// Existence only: the manifest is never opened, read or parsed here -- what it
+// says is turf's business, and a compiler that parsed it would be a second
+// manifest reader to keep in step with the CLI's. Returns "" outside a project.
+static std::string ProjectManifestHint(const std::string &ImportingFile) {
+  llvm::SmallString<256> Dir;
+  if (llvm::sys::fs::real_path(ImportingFile, Dir))
+    return ""; // unresolvable (e.g. a synthesized node): no location to search from
+  llvm::sys::path::remove_filename(Dir);
+  while (true) {
+    llvm::SmallString<256> Manifest(Dir);
+    llvm::sys::path::append(Manifest, "turf.toml");
+    llvm::sys::fs::file_status Status;
+    if (!llvm::sys::fs::status(Manifest, Status) &&
+        Status.type() != llvm::sys::fs::file_type::directory_file)
+      return "This file is inside a TurfLang project (" + Manifest.str().str() +
+             "). Its dependencies are only visible to `turf build`, which "
+             "compiles the project with its package graph.";
+    llvm::StringRef Parent = llvm::sys::path::parent_path(Dir);
+    if (Parent.empty() || Parent == Dir.str())
+      return "";
+    Dir = Parent;
+  }
+}
+
 // Module-name -> file-search -> ParseFile() -> ModuleImportExprAST tail,
 // shared by ParseImport() (real, source-text `import X;`/`import X::[...];`
 // statements) and ParsePreludeImports() (synthetic prelude imports injected
@@ -1177,7 +1207,11 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
         if (ExplainUnreachableModule(ModuleName, *P, NameLoc.Line > 0 ? NameLoc : Loc))
           return nullptr;
     }
-    ModuleNotFoundError(Loc, ModuleName).raise();
+    // Single-file mode only: in a package build the graph already decided what
+    // is reachable, so a manifest somewhere above is beside the point.
+    ModuleNotFoundError(Loc, ModuleName,
+                        g_PackageGraph.Active ? "" : ProjectManifestHint(ImportingFile))
+        .raise();
     return nullptr;
   }
   if (Candidates.size() > 1) {
