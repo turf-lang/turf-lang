@@ -12,7 +12,11 @@ An LLVM-backed, statically-typed, AOT-compiled language. Pipeline: `Lexer → Pa
 ./scripts/cmake_build.sh --release   # first run also builds the vendored llama.cpp submodule — slow once, fast after
 ```
 
-The compiler binary lands at `build/turfc`. Rebuild after any `src/`/`include/` change with `cmake --build build -j$(nproc)` (no need to re-run the full `cmake_build.sh` script unless `CMakeLists.txt` itself changed).
+The build produces **two binaries** (LEC-001, `docs/development/FREEZE.md` §6.16, F-PKG-1):
+- `build/turfc` is the compiler. Everything in this file that says "the compiler" means it: the test runner, the smoke scripts and CI run it directly, and `TURF_COMPILER` (the override the runner reads) points at `turfc`, never at `turf`.
+- `build/turf` is the Go front end under `cli/` (it finds `turfc`, checks its version, and forwards; `turf file.tr` is `turfc file.tr`). **Go is optional**: it is only needed for `build/turf`, and without `go` on `PATH` CMake prints `Go not found: build/turf ... will not be built; build/turfc is unaffected` and the compiler and the whole test suite build and run as usual. `-DTURF_BUILD_CLI=OFF` skips it explicitly.
+
+Rebuild after any `src/`/`include/` change with `cmake --build build -j$(nproc)` (no need to re-run the full `cmake_build.sh` script unless `CMakeLists.txt` itself changed). `build/turf` and `build/turfc` must come from the same build: `turf` refuses a `turfc` of a different version, and both are stamped from the root `VERSION` file. The front end's own checks are `cd cli && go vet ./... && go test ./...` and `./scripts/cli_smoke.sh` (SKIP if `build/turf` is absent, unless `CI` is set).
 
 ## Test
 
@@ -57,14 +61,15 @@ Compiling one of the 6 prelude modules (`int`/`double`/`bool`/`char`/`strings`/`
 
 ## Repo map
 
-- `src/`, `include/` — the compiler itself (Lexer, Parser, Resolver, TypeChecker, Codegen, Errors, SLM integration).
+- `src/`, `include/` — the compiler itself (Lexer, Parser, Resolver, TypeChecker, Codegen, Errors, SLM integration); builds to `turfc`.
+- `cli/` — the `turf` front end, a standalone Go module (`github.com/turf-lang/turf-lang/cli`, standard library only). It never parses TurfLang source and never rewrites a compiler diagnostic; see `cli/README.md`.
 - `lib/std/` — the standard library, written in Turf itself, grouped into logical subfolders purely for browsing (`core/` — `int`/`double`/`bool`/`char`/`array`/`strings`; `collections/` — `list`/`stack`/`queue`/`map`/`set`; `io/` — `io`/`net`/`sys`; `mem/`, `math/`, `time/`, `random/`, `fs/`, `json/`, `http/`, `testing/` — `test`). No compiler special-casing; ordinary `.tr` files. A module's subfolder is invisible to `import` — `import list;` doesn't care that `list.tr` lives under `collections/`; the compiler resolves a bare module name by recursively indexing `lib/std/**` once per compile (`IndexModuleDir()` in `src/Parser.cpp`), so moving a module between subfolders never requires touching an import statement anywhere. See `docs/architecture/modules_and_scope_resolution.md` Part 2.4 for the full search order and the `TURF_HOME` environment variable that anchors it (points at a Turf installation root — `$TURF_HOME/lib/std`/`lib/usr`; falls back to the compiler binary's own location if unset, so a plain dev build needs no setup).
 - `include/turf/Analysis.h` — the compiler query facade (SMP-001): the stable 2.x API a tool (turf-lsp, the SLM Sandbox) uses to analyse source in-process. Never drive the Lexer/Parser/Resolver/TypeChecker directly from a tool; `docs/architecture/compiler_pipeline.md` §8 says why.
 - `tests/` — the regression suite, organized by numbered topic folders (`06_structs`, `07_functions_modules`, etc.) plus `tests/99_known_bugs/` (excluded from the runner — documents accepted/deferred limitations, not live regressions) and `tests/custom/` (also excluded).
 - `docs/reference/` — the user-facing language reference (one topic per file, `stdlib/` for the standard library), rewritten from scratch 2026-08-21 against the live compiler + test suite. Start at `docs/reference/README.md`. This is what a language-website "docs" section would be built from.
 - `docs/architecture/` — deep internals references for specific subsystems, kept accurate and updated alongside the code they describe (e.g. `modules_and_scope_resolution.md` for the `::`/import system, `memory_model.md` for stack/heap/lifetime, `compiler_pipeline.md` for the Lexer→Parser→Resolver→TypeChecker→Codegen pass structure and CFG static analysis, both explained in CS terms rather than LLVM-specific ones). Read the relevant one before making non-trivial changes to that subsystem — don't re-derive from scratch.
 - `docs/planning/` — roadmap and planning docs. `ROADMAP_v2.0.0.md` is the plan of record for what remains before the first public release; `FUTURE.md` is the post-2.0 backlog; `ROADMAP_v1.0.0_COMPLETE.md` and `ARCHITECTURE_OVERHAUL.md` are historical records (the Architecture Overhaul closed 2026-09-27 — `docs/development/changes/OVH-CLOSE.md`).
-- `scripts/` — `cmake_build.sh` (build), `test_runner.sh` (test), `compile_and_run.sh` (compile+run+cleanup one file).
+- `scripts/` — `cmake_build.sh` (build), `test_runner.sh` (test), `compile_and_run.sh` (compile+run+cleanup one file), `cli_smoke.sh` (the `turf` front end against the real `turfc`).
 - `docs/development/` — **if your task is one of the architecture-overhaul feature groups (`ARCH-001`, `TYPE-001`, `SEM-001`, … — `docs/planning/ARCHITECTURE_OVERHAUL.md` Appendix B), read `docs/development/SESSION_PROTOCOL.md` and follow it**; it adds a freeze document, a change record per feature group, and `scripts/session_{pre,post}flight.sh` on top of everything in this file. This file stays the source of truth for build and test conventions.
 
 ## Conventions this project holds firmly to

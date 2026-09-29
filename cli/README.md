@@ -1,158 +1,55 @@
-# Turf CLI
+# turf, the TurfLang front end
 
-The official command-line interface for the Turflang ecosystem.
+`turf` is the command-line front end of the TurfLang toolchain. It drives
+`turfc`, the compiler in this repository's `src/`; both are built from the same
+tree, carry the same version (the root `VERSION` file) and ship in the same
+release archive.
 
-Turf CLI is responsible for project creation, dependency management, package publishing, compilation, formatting, testing, and future tooling across the Turflang platform.
+The design is frozen in [`docs/development/FREEZE.md`](../docs/development/FREEZE.md)
+§6.16 (F-PKG-1); the record of how it was built is
+[`docs/development/changes/LEC-001.md`](../docs/development/changes/LEC-001.md).
+The rule that shapes everything here: the compiler owns whatever depends on
+TurfLang source, and `turf` owns files, network and reproducibility. `turf`
+never parses TurfLang and never rewrites a compiler diagnostic.
 
-## Vision
+## What works today
 
-The long-term goal of Turf CLI is to provide a complete developer experience similar to what Cargo provides for Rust or what Go provides through its standard tooling.
+`turf <file.tr> [flags]` is `turfc <file.tr> [flags]`: stdout, stderr and exit
+status are the compiler's, unchanged. Every other argument that starts with `-`
+is forwarded the same way.
 
-A Turflang project should be manageable through a single tool.
+| Command | Does |
+|---|---|
+| `turf compile <file.tr> [flags]` | `turfc <file.tr> [flags]`, spelled out; `turf compile --help` lists the flags |
+| `turf run <file.tr> [flags] [-- args]` | compile to a temporary executable, run it, delete it; exits with the program's status |
+| `turf check <file.tr>` | every diagnostic a compile would print, no output file (`turfc --check`) |
+| `turf dump <what> <file.tr>` | `ast`, `resolved`, `typechecked`, `modules`, `symbols` or `instantiations`, no output file |
+| `turf fmt [--write] <files...>` | `turfc --format` |
+| `turf explain <code>` | `turfc --explain` |
+| `turf migrate <name> [--write] <files...>` | `turfc --migrate=<name>` (`pub`) |
+| `turf version`, `turf help [command]` | |
 
-```bash
-turf init
-turf install
-turf build
-turf run
-turf test
-turf fmt
-turf publish
-```
+The project commands (`new`, `init`, `build`, `test`, `clean`, `fetch`, `add`,
+`remove`, `update`) have their names reserved but are not implemented; each says
+which stage of LEC-001 builds it. `publish` is reserved: there is no registry in
+2.0. The pre-2.0 registry-model command files (`cmd/turf/{init,install,add,
+remove,update,publish}.go`) are kept unused for stages 5 and 6 to rework.
 
-## Current Features
+## Finding the compiler
 
-* Project initialization
-* Package manifest management
-* Build orchestration
-* Compiler integration
-* Cross-platform support
+First match wins: `$TURF_COMPILER`, then `turfc` beside the running `turf`
+(symlinks resolved), then `$TURF_HOME/bin/turfc`, then `turfc` on `PATH`. Before
+driving it, `turf` runs `turfc --version` and refuses a compiler whose version
+differs from its own, whichever way it was found.
 
-## Planned Features
-
-### Package Management
-
-Install, update, and remove packages from the Turf Registry.
-
-```bash
-turf install math
-turf remove math
-turf update
-```
-
-### Registry Integration
-
-Publish packages directly to the official registry.
-
-```bash
-turf publish
-```
-
-### Dependency Resolution
-
-Automatic dependency graph construction and version resolution.
-
-```toml
-[dependencies]
-math = "^1.2.0"
-utils = "~0.8.0"
-```
-
-### Lockfiles
-
-Deterministic builds through version locking.
+## Building and testing
 
 ```bash
-turf.lock
+cmake --build build            # builds build/turfc and, if Go is installed, build/turf
+cd cli && go vet ./... && go test ./...
+./scripts/cli_smoke.sh         # the front end against the real compiler
 ```
 
-### Package Verification
-
-Integrity verification using cryptographic checksums.
-
-```text
-SHA256 verification
-Package integrity checks
-Tamper detection
-```
-
-### Build System
-
-Unified project builds.
-
-```bash
-turf build
-turf run
-turf clean
-```
-
-### Testing Framework
-
-Built-in test execution.
-
-```bash
-turf test
-```
-
-### Formatter
-
-Official code formatter.
-
-```bash
-turf fmt
-```
-
-### Language Server Integration
-
-Tooling support for editors and IDEs.
-
-```bash
-turf lsp
-```
-
-### Documentation Generation
-
-Generate project documentation directly from source code.
-
-```bash
-turf docs
-```
-
-### Workspace Support
-
-Manage multi-package repositories.
-
-```bash
-turf workspace init
-```
-
-### Local Package Development
-
-Develop packages locally before publishing.
-
-```bash
-turf install ../my-package
-```
-
-### Caching
-
-Package and build caching for faster iteration.
-
-```text
-~/.turf/cache
-```
-
-## Long-Term Roadmap
-
-The Turf ecosystem aims to include:
-
-* Turf Compiler
-* Turf CLI
-* Turf Registry
-* Turf Package Manager
-* Turf Formatter
-* Turf Language Server
-* Turf Documentation Generator
-* Turf Testing Framework
-* Turf Build System
-
+Build it through CMake, not a bare `go build`: CMake stamps the version, and an
+unstamped `turf` refuses to run. Go is optional; without it only `build/turf` is
+skipped.

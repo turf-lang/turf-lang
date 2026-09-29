@@ -112,9 +112,12 @@ fn main(): int {
 ```
 
 ```bash
-turfc hello.tr -o hello
+build/turf hello.tr -o hello     # through the front end: forwarded to turfc unchanged
+build/turfc hello.tr -o hello    # or run the compiler directly, same result
 ./hello
 ```
+
+`turf` is the toolchain's front end and `turfc` is the compiler it drives; a release archive ships both side by side (`turf file.tr [flags]` is exactly `turfc file.tr [flags]`). `turf run hello.tr` compiles to a temporary file, runs it and cleans up; `turf check hello.tr` reports diagnostics without writing anything; `turf help` lists the rest. `turf` is optional if you build from source without Go — the compiler on its own is complete.
 
 I/O lives in the standard library's `io` module. `::` is Turf's namespace-resolution operator — `io::printline`, not a bare global and not `io.printline` (`.` is reserved for instance-member access; see [Modules & Imports](#modules--imports)).
 
