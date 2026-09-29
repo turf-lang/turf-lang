@@ -52,6 +52,9 @@ std::unique_ptr<ExprAST> ParseExternDecl();
 std::unique_ptr<ExprAST> ParseExportDecl();
 std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation = false);
 std::unique_ptr<ExprAST> ParseOperatorDecl();
+std::unique_ptr<ExprAST> ParseVisibilityPrefixed();
+// LEC-002: true (after reporting) if CurTok is `pub`/`public` where a name is expected.
+bool RejectVisibilityKeywordAsName();
 
 // Defined in ParserModule.cpp
 std::unique_ptr<ExprAST> ParseImport();

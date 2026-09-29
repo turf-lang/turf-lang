@@ -58,11 +58,11 @@ unsafe module;
 
 // ─── libc bindings ────────────────────────────────────────────────────────
 
-extern fn time(t: ptr): int;
-extern fn clock(): int;
+pub extern fn time(t: ptr): int;
+pub extern fn clock(): int;
 // usleep genuinely takes/returns a 32-bit C `int` (`useconds_t`/`int` under
 // POSIX), not Turf's 64-bit `int` -- see this file's own design note above.
-extern fn usleep(usec: int32): int32;
+pub extern fn usleep(usec: int32): int32;
 
 // ─── Turf-level constants ──────────────────────────────────────────────────
 
@@ -80,7 +80,7 @@ export immut MAX_USLEEP_USEC: int = 1000000;
 
 // now_seconds: the current wall-clock time, in whole seconds since the Unix
 // epoch (1970-01-01 00:00:00 UTC) -- exactly libc's `time(NULL)`.
-fn now_seconds(): int {
+pub fn now_seconds(): int {
     return time(null);
 }
 
@@ -88,20 +88,20 @@ fn now_seconds(): int {
 // (CLOCKS_PER_SEC ticks per second of CPU time -- NOT wall-clock time; see
 // this file's design note above). Meant to be paired with elapsed_ms()/
 // elapsed_seconds() below, not read as an absolute timestamp on its own.
-fn clock_ticks(): int {
+pub fn clock_ticks(): int {
     return clock();
 }
 
 // elapsed_ms: CPU milliseconds elapsed since `start_clock_ticks` (a value
 // previously returned by clock_ticks()).
-fn elapsed_ms(start_clock_ticks: int): int {
+pub fn elapsed_ms(start_clock_ticks: int): int {
     immut delta: int = clock_ticks() - start_clock_ticks;
     return (delta * 1000) / CLOCKS_PER_SEC;
 }
 
 // elapsed_seconds: CPU seconds elapsed since `start_clock_ticks` (a value
 // previously returned by clock_ticks()), rounded down.
-fn elapsed_seconds(start_clock_ticks: int): int {
+pub fn elapsed_seconds(start_clock_ticks: int): int {
     return elapsed_ms(start_clock_ticks) / 1000;
 }
 
@@ -109,7 +109,7 @@ fn elapsed_seconds(start_clock_ticks: int): int {
 // Implemented as `n` separate 1-second usleep() calls rather than one
 // `usleep(n * 1_000_000)` call -- see this file's design note above on why
 // a single call that large is unsafe.
-fn sleep_seconds(n: int): void {
+pub fn sleep_seconds(n: int): void {
     mut i: int = 0;
     while i < n {
         usleep(MAX_USLEEP_USEC to int32);
@@ -121,7 +121,7 @@ fn sleep_seconds(n: int): void {
 // Chunks into <= 1-second usleep() calls exactly like sleep_seconds(), for
 // the same reason -- large `n` does not overflow a single unsafe usleep()
 // call.
-fn sleep_ms(n: int): void {
+pub fn sleep_ms(n: int): void {
     mut remainingUsec: int = n * 1000;
     while remainingUsec >= MAX_USLEEP_USEC {
         usleep(MAX_USLEEP_USEC to int32);

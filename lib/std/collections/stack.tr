@@ -17,13 +17,13 @@ unsafe module;
 
 import sys;
 
-struct Stack<T> {
-  data: T*,
-  len: int,
-  cap: int
+pub struct Stack<T> {
+  pub data: T*,
+  pub len: int,
+  pub cap: int
 }
 
-fn<T> Stack.push(item: T): void {
+pub fn<T> Stack.push(item: T): void {
   if (self.len == self.cap) {
     if (self.cap == 0) {
       self.cap = 8;
@@ -52,7 +52,7 @@ fn<T> Stack.push(item: T): void {
   self.len = self.len + 1;
 }
 
-fn<T> Stack.pop(): T {
+pub fn<T> Stack.pop(): T {
   if (self.len == 0) {
     sys::panic("Stack.pop: pop on empty stack");
   }
@@ -61,7 +61,7 @@ fn<T> Stack.pop(): T {
   return self.data[self.len];
 }
 
-fn<T> Stack.peek(): T {
+pub fn<T> Stack.peek(): T {
   if (self.len == 0) {
     sys::panic("Stack.peek: peek on empty stack");
   }
@@ -69,6 +69,6 @@ fn<T> Stack.peek(): T {
   return self.data[self.len - 1];
 }
 
-fn<T> Stack.length(): int {
+pub fn<T> Stack.length(): int {
   return self.len;
 }

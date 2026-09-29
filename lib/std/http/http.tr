@@ -119,11 +119,11 @@ import map::Map;
 
 // ─── Request ─────────────────────────────────────────────────────────────
 
-struct Request {
-    method: string,
-    path: string,
-    headers: Map<string, string>,
-    body: string
+pub struct Request {
+    pub method: string,
+    pub path: string,
+    pub headers: Map<string, string>,
+    pub body: string
 }
 
 // get_header/has_header exist as thin, named wrappers over
@@ -143,7 +143,7 @@ struct Request {
 // scan is no longer needed here; see docs/development/changes/STD-003.md
 // and docs/planning/LIMITATIONS.md's (now closed) item 1 for the full
 // history.
-fn Request.get_header(name: string): string {
+pub fn Request.get_header(name: string): string {
     return self.headers.tryGet(name) recover run {
         sys::panic("Request.get_header: no such header '" + name + "'");
         return ""; // unreachable (sys::panic never returns) -- see
@@ -152,7 +152,7 @@ fn Request.get_header(name: string): string {
     };
 }
 
-fn Request.has_header(name: string): bool {
+pub fn Request.has_header(name: string): bool {
     return self.headers.contains(name);
 }
 
@@ -166,7 +166,7 @@ fn Request.has_header(name: string): bool {
 // chain to the 404 branch) instead of introducing a `!Request` error path
 // this module's only real caller (a request-per-connection accept loop)
 // has no natural way to act on differently anyway.
-fn parse_request(conn: net::TcpConnection): Request {
+pub fn parse_request(conn: net::TcpConnection): Request {
     immut raw: string = conn.read(8192);
     mut req: Request = Request::default();
 
@@ -221,13 +221,13 @@ fn parse_request(conn: net::TcpConnection): Request {
 
 // ─── Response ────────────────────────────────────────────────────────────
 
-struct Response {
-    conn: net::TcpConnection
+pub struct Response {
+    pub conn: net::TcpConnection
 }
 
 // A small, deliberately incomplete status-text table -- see this file's
 // header comment for why only these five codes are covered.
-fn status_text(status: int): string {
+pub fn status_text(status: int): string {
     if status == 200 {
         return "200 OK";
     }
@@ -249,7 +249,7 @@ fn status_text(status: int): string {
 // Shared response-building/writing logic for send_text/send_json below --
 // the two only differ in Content-Type, exactly like DESIGN_NOTES.md's
 // original sketch says they should.
-fn Response.send_raw(status: int, contentType: string, body: string): void {
+pub fn Response.send_raw(status: int, contentType: string, body: string): void {
     immut bodyLen: int = strings::length(body);
     immut response: string = "HTTP/1.1 " + status_text(status) + "\r\n" +
         "Content-Type: " + contentType + "\r\n" +
@@ -260,11 +260,11 @@ fn Response.send_raw(status: int, contentType: string, body: string): void {
     self.conn.write(response);
 }
 
-fn Response.send_text(status: int, body: string): void {
+pub fn Response.send_text(status: int, body: string): void {
     self.send_raw(status, "text/plain", body);
 }
 
-fn Response.send_json(status: int, body: string): void {
+pub fn Response.send_json(status: int, body: string): void {
     self.send_raw(status, "application/json", body);
 }
 
@@ -287,15 +287,15 @@ fn Response.send_json(status: int, body: string): void {
 // documented, accepted tradeoff for a small stdlib collection (see
 // map.tr's own design note), and a real path-pattern matcher is a
 // separate, bigger feature this module doesn't attempt.
-struct Server {
-    listener: net::TcpListener,
-    routes: Map<string, fn(Request, Response): void>
+pub struct Server {
+    pub listener: net::TcpListener,
+    pub routes: Map<string, fn(Request, Response): void>
 }
 
 // Registers `handler` to run for an exact-match request to `path`.
 // Re-registering the same path replaces the previous handler (Map.put's
 // own "update in place" behavior for an existing key).
-fn Server.get(path: string, handler: fn(Request, Response): void): void {
+pub fn Server.get(path: string, handler: fn(Request, Response): void): void {
     self.routes.put(path, handler);
 }
 
@@ -314,15 +314,15 @@ fn Server.get(path: string, handler: fn(Request, Response): void): void {
 // scan is no longer needed here; see docs/development/changes/STD-003.md
 // and docs/planning/LIMITATIONS.md's (now closed) item 1 for the full
 // history.
-fn Server.route_index(path: string): int {
+pub fn Server.route_index(path: string): int {
     return self.routes.indexOf(path);
 }
 
-fn Server.has_route(path: string): bool {
+pub fn Server.has_route(path: string): bool {
     return self.route_index(path) >= 0;
 }
 
-fn Server.get_route(path: string): fn(Request, Response): void {
+pub fn Server.get_route(path: string): fn(Request, Response): void {
     immut idx: int = self.route_index(path);
     if idx < 0 {
         sys::panic("Server.get_route: no such route '" + path + "'");
@@ -346,7 +346,7 @@ fn Server.get_route(path: string): fn(Request, Response): void {
 // doc comment describes for TcpListener::bind's `!TcpListener` -- and a
 // single bad accept() is logged and skipped rather than killing the whole
 // server, matching showcase/http_server.tr's own accept-loop.
-fn Server.listen(port: int): void {
+pub fn Server.listen(port: int): void {
     mut listener: net::TcpListener = net::TcpListener::bind(port) recover run {
         io::printline("http::Server.listen: could not bind port " + (port to string) + ".");
         sys::exit(1);

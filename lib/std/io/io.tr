@@ -31,22 +31,22 @@ import strings;
 
 // ─── libc bindings ────────────────────────────────────────────────────────
 
-extern fn printf(fmt: string, ...): int;
-extern fn scanf(fmt: string, ...): int;
-extern fn getchar(): int;
+pub extern fn printf(fmt: string, ...): int;
+pub extern fn scanf(fmt: string, ...): int;
+pub extern fn getchar(): int;
 
 // Buffered file I/O (fopen/fclose/fseek/ftell/fread/fwrite/fflush) --
 // `string` and `void*` are the same opaque pointer at the LLVM level in
 // this compiler (confirmed by net.tr's TcpConnection.read()), so a `string`
 // buffer is passed wherever a C function wants a `char*`/`void*` and back,
 // exactly like net.tr/strings.tr already do.
-extern fn fopen(path: string, mode: string): void*;
-extern fn fclose(stream: void*): int;
-extern fn fseek(stream: void*, offset: int, whence: int): int;
-extern fn ftell(stream: void*): int;
-extern fn fread(buf: void*, size: int, count: int, stream: void*): int;
-extern fn fwrite(buf: string, size: int, count: int, stream: void*): int;
-extern fn fflush(stream: void*): int;
+pub extern fn fopen(path: string, mode: string): void*;
+pub extern fn fclose(stream: void*): int;
+pub extern fn fseek(stream: void*, offset: int, whence: int): int;
+pub extern fn ftell(stream: void*): int;
+pub extern fn fread(buf: void*, size: int, count: int, stream: void*): int;
+pub extern fn fwrite(buf: string, size: int, count: int, stream: void*): int;
+pub extern fn fflush(stream: void*): int;
 
 // A raw POSIX write(2) syscall, not buffered stdio -- eprint/eprintline use
 // this instead of an fprintf+FILE* stream, mirroring sys.tr's own panic()
@@ -57,50 +57,50 @@ extern fn fflush(stream: void*): int;
 // only `export immut` constants exist at module scope, not mutable
 // globals). A raw write() to the well-known stderr fd sidesteps both
 // problems entirely.
-extern fn write(fd: int, buf: string, count: int): int;
-extern fn strlen(s: string): int;
+pub extern fn write(fd: int, buf: string, count: int): int;
+pub extern fn strlen(s: string): int;
 
 // ─── print ────────────────────────────────────────────────────────────────
 
-fn print(val: int): void {
+pub fn print(val: int): void {
     printf("%lld", val);
 }
 
-fn print(val: double): void {
+pub fn print(val: double): void {
     printf("%g", val);
 }
 
-fn print(val: bool): void {
+pub fn print(val: bool): void {
     printf("%d", val);
 }
 
-fn print(val: char): void {
+pub fn print(val: char): void {
     printf("%c", val);
 }
 
-fn print(val: string): void {
+pub fn print(val: string): void {
     printf("%s", val);
 }
 
 // ─── printline ────────────────────────────────────────────────────────────
 
-fn printline(val: int): void {
+pub fn printline(val: int): void {
     printf("%lld\n", val);
 }
 
-fn printline(val: double): void {
+pub fn printline(val: double): void {
     printf("%g\n", val);
 }
 
-fn printline(val: bool): void {
+pub fn printline(val: bool): void {
     printf("%d\n", val);
 }
 
-fn printline(val: char): void {
+pub fn printline(val: char): void {
     printf("%c\n", val);
 }
 
-fn printline(val: string): void {
+pub fn printline(val: string): void {
     printf("%s\n", val);
 }
 
@@ -112,7 +112,7 @@ fn printline(val: string): void {
 // expression that stops at '\n' (so the delimiter itself is left in the
 // stream), then getchar() to consume that leftover '\n' so it doesn't leak
 // into the next input() call.
-fn input(): string {
+pub fn input(): string {
     mut buf: void* = gc_alloc_zeroed(4096);
     scanf("%4095[^\n]", buf);
     getchar();
@@ -127,7 +127,7 @@ fn input(): string {
 // can still tell "the file isn't there" apart from "it's there but
 // something went wrong reading/writing it", mirroring net.tr's
 // NetworkError split.
-error FileError {
+pub error FileError {
     NotFound,
     ReadFailed,
 }
@@ -157,7 +157,7 @@ error FileError {
 // GC heap, but nothing collects yet -- MEM-002 is what stops the leak, not
 // this function; see EmitStringConcat's own TURF-MEMLEAK comment history in
 // strings.tr).
-fn read_to_string(path: string): !string {
+pub fn read_to_string(path: string): !string {
     mut stream: void* = fopen(path, "rb");
     if stream == null {
         return FileError::NotFound;
@@ -194,7 +194,7 @@ fn read_to_string(path: string): !string {
 // blank one. A trailing empty line from a genuine blank line (two '\n' in
 // a row at the end, "a\n\n") is intentionally left alone -- only ONE
 // trailing empty element is ever dropped.
-fn read_lines(path: string): !List<string> {
+pub fn read_lines(path: string): !List<string> {
     immut content: string = read_to_string(path) recover run {
         return FileError::NotFound;
     };
@@ -217,7 +217,7 @@ fn read_lines(path: string): !List<string> {
 // rather than `!void`, since "did the write succeed" is a simple binary
 // outcome here, not something callers typically need to distinguish
 // further.
-fn write_string(path: string, content: string): bool {
+pub fn write_string(path: string, content: string): bool {
     mut stream: void* = fopen(path, "wb");
     if stream == null {
         return false;
@@ -233,7 +233,7 @@ fn write_string(path: string, content: string): bool {
 // ─── exists ────────────────────────────────────────────────────────────────
 
 // exists: true if the file at `path` can be opened for reading.
-fn exists(path: string): bool {
+pub fn exists(path: string): bool {
     mut stream: void* = fopen(path, "rb");
     if stream == null {
         return false;
@@ -247,13 +247,13 @@ fn exists(path: string): bool {
 // eprint: like print(val: string), but writes to stderr (fd 2) instead of
 // stdout. See the `write`/`strlen` extern bindings' doc comment above for
 // why this is a raw write(2) syscall rather than buffered stdio.
-fn eprint(val: string): void {
+pub fn eprint(val: string): void {
     write(2, val, strlen(val));
 }
 
 // eprintline: like printline(val: string), but writes to stderr (fd 2)
 // instead of stdout.
-fn eprintline(val: string): void {
+pub fn eprintline(val: string): void {
     write(2, val, strlen(val));
     write(2, "\n", 1);
 }
@@ -268,6 +268,6 @@ fn eprintline(val: string): void {
 // wanted here since there's no way to obtain stdout's own FILE* handle
 // directly (same reasoning as eprint/eprintline above -- no `extern`-able
 // libc global, and no persistent handle to cache one in).
-fn flush(): void {
+pub fn flush(): void {
     fflush(null);
 }

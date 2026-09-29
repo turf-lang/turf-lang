@@ -48,6 +48,20 @@ void PopResolverCompileState() {
   SavedResolverCompileStates.pop_back();
 }
 
+/// LEC-002: a declaration inside a function body is local to it -- no other
+/// module can ever name it -- so `pub` there means nothing and is an error
+/// (FREEZE.md §6.15), not a silently ignored bit. Done here rather than in the
+/// Parser for the same reason `export` is (ExportOutsideTopLevelError): the
+/// Parser cannot cheaply tell "inside a function body" from "inside a
+/// top-level `unsafe { }` block that is about to be flattened", and the
+/// Resolver's FunctionNestingDepth_ already can.
+static void rejectLocalVisibility(const VisibleDecl &D, int FunctionNestingDepth) {
+  if (FunctionNestingDepth > 0 && D.isPublic())
+    MisplacedVisibilityError(D.getVisibility().Loc,
+                             MisplacedVisibilityError::Where::InsideFunction)
+        .raise();
+}
+
 void Resolver::visitFuncDef(FuncDefExprAST &Node) {
   if (FunctionNestingDepth_ > 0) {
     NestedFunctionError(Node.getLoc(), Node.getName()).raise();
@@ -286,16 +300,19 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
 // here is already registered at this same location, which
 // registerLocalTypeDecl() recognizes (see there).
 void Resolver::visitEnumDecl(EnumDeclExprAST &Node) {
+  rejectLocalVisibility(Node, FunctionNestingDepth_);
   registerLocalTypeDecl(Node, Node.getLoc());
 }
 
 
 void Resolver::visitMachineDecl(MachineDeclExprAST &Node) {
+  rejectLocalVisibility(Node, FunctionNestingDepth_);
   registerLocalTypeDecl(Node, Node.getLoc());
 }
 
 
 void Resolver::visitErrorDecl(ErrorDeclExprAST &Node) {
+  rejectLocalVisibility(Node, FunctionNestingDepth_);
   registerLocalTypeDecl(Node, Node.getLoc());
 }
 
@@ -578,6 +595,13 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
 
 
 void Resolver::visitStructDecl(StructDeclExprAST &Node) {
+  rejectLocalVisibility(Node, FunctionNestingDepth_);
+  if (FunctionNestingDepth_ > 0)
+    for (const auto &F : Node.getFields())
+      if (F.Vis.IsPublic)
+        MisplacedVisibilityError(F.Vis.Loc,
+                                 MisplacedVisibilityError::Where::InsideFunction)
+            .raise();
   // Pass 1 (hoistTopLevel) already registered this struct's name -- but ONLY
   // for a struct declared at the TOP LEVEL of a file or an imported module's
   // body. hoistTopLevel() never recurses into a FUNCTION BODY looking for
@@ -768,6 +792,7 @@ void Resolver::visitModuleImport(ModuleImportExprAST &Node) {
 // is out of scope for this item (see docs/planning/ARCHITECTURE_OVERHAUL.md
 // §8 LANG-004: "Low value, but it is one switch case").
 void Resolver::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
+  rejectLocalVisibility(Node, FunctionNestingDepth_);
   for (const auto &[ParamName, ParamType] : Node.getParams())
     validateNamedType(ParamType, Node.getLoc());
   validateNamedType(Node.getReturnType(), Node.getLoc());

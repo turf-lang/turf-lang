@@ -23,14 +23,14 @@ unsafe module;
 
 import sys;
 
-struct Queue<T> {
-  data: T*,
-  len: int,
-  cap: int,
-  head: int
+pub struct Queue<T> {
+  pub data: T*,
+  pub len: int,
+  pub cap: int,
+  pub head: int
 }
 
-fn<T> Queue.enqueue(item: T): void {
+pub fn<T> Queue.enqueue(item: T): void {
   if (self.head + self.len == self.cap) {
     if (self.head > 0) {
       // Compact: shift live elements to the front of the buffer
@@ -61,7 +61,7 @@ fn<T> Queue.enqueue(item: T): void {
   self.len = self.len + 1;
 }
 
-fn<T> Queue.dequeue(): T {
+pub fn<T> Queue.dequeue(): T {
   if (self.len == 0) {
     sys::panic("Queue.dequeue: dequeue on empty queue");
   }
@@ -72,7 +72,7 @@ fn<T> Queue.dequeue(): T {
   return item;
 }
 
-fn<T> Queue.peek(): T {
+pub fn<T> Queue.peek(): T {
   if (self.len == 0) {
     sys::panic("Queue.peek: peek on empty queue");
   }
@@ -80,6 +80,6 @@ fn<T> Queue.peek(): T {
   return self.data[self.head];
 }
 
-fn<T> Queue.length(): int {
+pub fn<T> Queue.length(): int {
   return self.len;
 }

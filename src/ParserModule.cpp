@@ -486,7 +486,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     if (CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM ||
         CurTok == TOK_MACHINE || CurTok == TOK_AT ||
         CurTok == TOK_EXTERN || CurTok == TOK_EXPORT || CurTok == TOK_OPERATOR ||
-        CurTok == TOK_ERROR || CurTok == TOK_UNSAFE) {
+        CurTok == TOK_ERROR || CurTok == TOK_UNSAFE || CurTok == TOK_PUB) {
       auto Expr = ParseExpression();
       if (Expr) {
         if (CurTok == ';') {

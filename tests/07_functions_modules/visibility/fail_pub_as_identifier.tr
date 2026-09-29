@@ -1,0 +1,6 @@
+// LEC-002: E087 -- `pub` and `public` are now reserved words; using one as a
+// name is rejected with a hint suggesting a rename.
+fn main(): int {
+    mut public: int = 1;
+    return public;
+}

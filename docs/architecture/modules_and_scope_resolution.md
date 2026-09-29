@@ -39,6 +39,8 @@ A module is **always fully parsed** regardless of form — even a single-symbol 
 
 ### 1.3 Visibility rules
 
+> **LEC-002 in progress (stage 2 of 6).** `pub`/`public` (synonyms) now parse before every declaration form and struct field and are stored on the AST, but **nothing is enforced yet** — everything below still describes actual behaviour. Stage 3 flips the default to private-unless-`pub`; see `docs/development/changes/LEC-002.md` and `FREEZE.md` §6.15. `pub` in a meaningless place is already an error, `E087`.
+
 **Bare calls to functions** resolve only to:
 1. Something declared directly in the current file, or
 2. If the call is textually inside a module's own body, another function declared in that **same** module (self-reference — e.g. `math.tr`'s `power()` calling its own `pow()` bare, no import needed, since this is same-file visibility, not a module feature), or
@@ -180,6 +182,7 @@ VERSION                 // bare access -- only after an on-demand import (or sel
 | `AmbiguousTypeReferenceError` (E085) | A bare type name that could mean two visible types — this file's own and an on-demand-imported one (FDN-003) |
 | `DuplicateTypeNameError` (E034) | The same type name declared twice in ONE file or module (two different modules may each declare it — FDN-003) |
 | `TypeError` (several shapes) | Calling an enum variant as a function; using a module or static-method reference as a bare value; a module name nonsensically qualified by another module name (`Module::Module2::func(...)`); a generic struct named without type arguments in a type annotation (`mut b: Box = ...` — "Missing type arguments!") |
+| `MisplacedVisibilityError` (E087) | `pub`/`public` where visibility means nothing — on an operator/import/variable, on a variant or parameter, inside a function, with `export`, before a decorator, or as a name (LEC-002; each shape's hint is in `docs/errors/codes/E087.txt`) |
 | `ExportOutsideTopLevelError` | `export` used inside a function body |
 | `ExportMutNotSupportedError` | `export mut` — only `export immut` is supported today |
 | `ExportNonConstantInitializerError` | `export immut X = <non-literal>;` — the initializer isn't a literal the compiler can fold at compile time |

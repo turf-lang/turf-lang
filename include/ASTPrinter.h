@@ -332,7 +332,8 @@ public:
     printIndent(Depth_);
     std::cout << "FuncDef(" << N.getName() << " -> "
               << (N.getReturnType() ? N.getReturnType()->getName() : "?")
-              << ", params=" << N.getParams().size() << ")";
+              << ", params=" << N.getParams().size()
+              << (N.isPublic() ? ", pub" : "") << ")";
     printFuncDefBadge(N.ResolvedDef.get());
     std::cout << "\n";
     descend();
@@ -377,12 +378,14 @@ public:
   void visitStructDecl(StructDeclExprAST &N) override {
     printIndent(Depth_);
     std::cout << "StructDecl(" << N.getName()
-              << ", fields=" << N.getFields().size() << ")\n";
+              << ", fields=" << N.getFields().size()
+              << (N.isPublic() ? ", pub" : "") << ")\n";
     descend();
     for (const auto &F : N.getFields()) {
       printIndent(Depth_);
       std::cout << "Field(" << F.Name << " : "
-                << (F.Type ? F.Type->getName() : "?") << ")\n";
+                << (F.Type ? F.Type->getName() : "?")
+                << (F.Vis.IsPublic ? ", pub" : "") << ")\n";
     }
     ascend();
   }

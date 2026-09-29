@@ -430,6 +430,9 @@ enum Token {
   TOK_DEFER    = -104, ///< `defer`   keyword — registers a statement to run when the enclosing
                         ///< `{ }` block exits, by any path except a panic (LANG-003,
                         ///< ARCHITECTURE_OVERHAUL.md §8). See ASTStmt.h's DeferExprAST.
+  TOK_PUB = -106,  ///< `pub`/`public` keyword (synonyms, one token, exactly like `mut`/`mutable`
+                   ///< share TOK_MUTABLE) -- a declaration's visibility prefix (LEC-002,
+                   ///< FREEZE.md §6.15). Reserved: no identifier may be spelled either way.
   TOK_CALLER_LOCATION = -105
                         ///< `caller_location` keyword — a bare, non-callable expression of type
                         ///< `string`, legal only inside a function declared `@caller_location`

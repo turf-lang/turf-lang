@@ -82,13 +82,13 @@ unsafe module;
 import sys;
 import hashing;
 
-struct Map<K, V> {
-  keys: K*,
-  values: V*,
-  len: int,
-  cap: int,
-  buckets: int*,
-  bcap: int
+pub struct Map<K, V> {
+  pub keys: K*,
+  pub values: V*,
+  pub len: int,
+  pub cap: int,
+  pub buckets: int*,
+  pub bcap: int
 }
 
 // ─── hash index (internal) ──────────────────────────────────────────────
@@ -98,7 +98,7 @@ struct Map<K, V> {
 // the first EMPTY slot (which can only mean "never inserted here," since
 // every occupied-then-removed slot leaves a TOMBSTONE, not an EMPTY, so a
 // real probe chain is never broken by a deletion elsewhere on it).
-fn<K, V> Map.bucketFind(key: K): int {
+pub fn<K, V> Map.bucketFind(key: K): int {
   if (self.bcap == 0) {
     return -1;
   }
@@ -124,7 +124,7 @@ fn<K, V> Map.bucketFind(key: K): int {
 // accumulates tombstones). Caller must already know `key` isn't present
 // (a fresh `bucketFind()` returned -1) and that `self.bcap > 0`
 // (`bucketMaybeGrow()` runs first in every caller below).
-fn<K, V> Map.bucketInsertSlot(key: K): int {
+pub fn<K, V> Map.bucketInsertSlot(key: K): int {
   mut slot: int = hashing::hash(key) & (self.bcap - 1);
   mut tomb: int = -1;
   mut probes: int = 0;
@@ -150,7 +150,7 @@ fn<K, V> Map.bucketInsertSlot(key: K): int {
 // realloc -- every entry's bucket slot is a function of
 // `hash(key) & (bcap - 1)`, which changes the moment `bcap` does, so every
 // entry must be re-probed into its new home slot, not merely copied.
-fn<K, V> Map.bucketRehash(newBcap: int): void {
+pub fn<K, V> Map.bucketRehash(newBcap: int): void {
   self.buckets = gc_alloc(newBcap * sizeof(int)) to int*;
   mut z: int = 0;
   while z < newBcap {
@@ -169,7 +169,7 @@ fn<K, V> Map.bucketRehash(newBcap: int): void {
 
 // Grows the bucket index once occupancy would exceed a 70% load factor (or
 // on first use).
-fn<K, V> Map.bucketMaybeGrow(): void {
+pub fn<K, V> Map.bucketMaybeGrow(): void {
   if (self.bcap == 0) {
     self.bucketRehash(8);
     return;
@@ -183,7 +183,7 @@ fn<K, V> Map.bucketMaybeGrow(): void {
 
 // Returns the DENSE-array index of `key`, or -1 if absent. O(1) average
 // (was O(n) before this group, see this file's header).
-fn<K, V> Map.indexOf(key: K): int {
+pub fn<K, V> Map.indexOf(key: K): int {
   immutable slot: int = self.bucketFind(key);
   if (slot < 0) {
     return -1;
@@ -191,11 +191,11 @@ fn<K, V> Map.indexOf(key: K): int {
   return self.buckets[slot];
 }
 
-fn<K, V> Map.contains(key: K): bool {
+pub fn<K, V> Map.contains(key: K): bool {
   return self.indexOf(key) >= 0;
 }
 
-fn<K, V> Map.put(key: K, value: V): void {
+pub fn<K, V> Map.put(key: K, value: V): void {
   immutable existingSlot: int = self.bucketFind(key);
   if (existingSlot >= 0) {
     self.values[self.buckets[existingSlot]] = value;
@@ -231,7 +231,7 @@ fn<K, V> Map.put(key: K, value: V): void {
   self.len = self.len + 1;
 }
 
-fn<K, V> Map.get(key: K): V {
+pub fn<K, V> Map.get(key: K): V {
   immutable idx: int = self.indexOf(key);
   if (idx < 0) {
     sys::panic("Map.get: no such key");
@@ -246,11 +246,11 @@ fn<K, V> Map.get(key: K): V {
 // `recover run { ... }` lets the caller decide, instead of get()'s
 // unconditional abort. get() itself is left as-is (unchanged behavior,
 // still the right choice when a missing key really would be a bug).
-error MapError {
+pub error MapError {
   KeyNotFound,
 }
 
-fn<K, V> Map.tryGet(key: K): !V {
+pub fn<K, V> Map.tryGet(key: K): !V {
   immutable idx: int = self.indexOf(key);
   if (idx < 0) {
     return MapError::KeyNotFound;
@@ -265,7 +265,7 @@ fn<K, V> Map.tryGet(key: K): !V {
 // new one, or a later lookup for it would return stale/wrong data (or,
 // worse, the bucket for the just-removed key could be found first and
 // mistakenly matched against the moved-in key at the same dense index).
-fn<K, V> Map.remove(key: K): void {
+pub fn<K, V> Map.remove(key: K): void {
   immutable bslot: int = self.bucketFind(key);
   if (bslot < 0) {
     return;
@@ -284,7 +284,7 @@ fn<K, V> Map.remove(key: K): void {
   }
 }
 
-fn<K, V> Map.length(): int {
+pub fn<K, V> Map.length(): int {
   return self.len;
 }
 

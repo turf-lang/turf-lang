@@ -39,12 +39,12 @@
 
 // ─── libc bindings ────────────────────────────────────────────────────────
 
-extern fn getenv(name: string): string;
+pub extern fn getenv(name: string): string;
 // setenv returns a real (32-bit) C `int`, not Turf's 64-bit `int` -- same
 // reasoning as strings.tr's strcmp binding (see its own comment): declaring
 // it as Turf `int` would read the full 64-bit return register, whose upper
 // 32 bits a 32-bit C return value never defines.
-extern fn setenv(name: string, value: string, overwrite: int): int32;
+pub extern fn setenv(name: string, value: string, overwrite: int): int32;
 
 // ─── compiler-synthesized argv/argc bindings ───────────────────────────────
 // These two symbols exist only because main's own codegen synthesizes them
@@ -52,13 +52,13 @@ extern fn setenv(name: string, value: string, overwrite: int): int32;
 // from a program whose `main` the compiler didn't itself compile (i.e.
 // anywhere outside this pipeline) would be undefined.
 
-extern fn TurfRuntimeGetArgc(): int;
-extern fn TurfRuntimeGetArgv(index: int): string;
+pub extern fn TurfRuntimeGetArgc(): int;
+pub extern fn TurfRuntimeGetArgv(index: int): string;
 
 // ─── Turf-level helpers ────────────────────────────────────────────────────
 
 // env: read an environment variable, or "" if it isn't set.
-fn env(name: string): string {
+pub fn env(name: string): string {
     immut result: string = getenv(name);
     if result == null {
         return "";
@@ -68,18 +68,18 @@ fn env(name: string): string {
 
 // set_env: set (or, if `overwrite` is nonzero, overwrite) an environment
 // variable for the current process. Returns true on success.
-fn set_env(name: string, value: string, overwrite: int): bool {
+pub fn set_env(name: string, value: string, overwrite: int): bool {
     return setenv(name, value, overwrite) == 0;
 }
 
 // argc: the number of command-line arguments, including argv(0) (the
 // program's own invocation path) -- matches C's argc convention exactly.
-fn argc(): int {
+pub fn argc(): int {
     return TurfRuntimeGetArgc();
 }
 
 // argv: the command-line argument at `index` (0 is the program's own
 // invocation path), or "" if `index` is out of range.
-fn argv(index: int): string {
+pub fn argv(index: int): string {
     return TurfRuntimeGetArgv(index);
 }

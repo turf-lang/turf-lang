@@ -82,7 +82,7 @@ import list::List;
 
 // ─── JsonValue ───────────────────────────────────────────────────────────
 
-enum JsonType {
+pub enum JsonType {
     Null,
     Bool,
     Number,
@@ -91,52 +91,52 @@ enum JsonType {
     Object
 }
 
-struct JsonValue {
-    kind: JsonType,
-    bool_val: bool,
-    num_val: double,
-    str_val: string,
-    arr_val: List<JsonValue>,
-    obj_keys: List<string>,
-    obj_vals: List<JsonValue>
+pub struct JsonValue {
+    pub kind: JsonType,
+    pub bool_val: bool,
+    pub num_val: double,
+    pub str_val: string,
+    pub arr_val: List<JsonValue>,
+    pub obj_keys: List<string>,
+    pub obj_vals: List<JsonValue>
 }
 
 // ─── constructors ──────────────────────────────────────────────────────────
 
-fn JsonValue.null_value() static: JsonValue {
+pub fn JsonValue.null_value() static: JsonValue {
     mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Null;
     return v;
 }
 
-fn JsonValue.from_bool(b: bool) static: JsonValue {
+pub fn JsonValue.from_bool(b: bool) static: JsonValue {
     mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Bool;
     v.bool_val = b;
     return v;
 }
 
-fn JsonValue.from_number(n: double) static: JsonValue {
+pub fn JsonValue.from_number(n: double) static: JsonValue {
     mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Number;
     v.num_val = n;
     return v;
 }
 
-fn JsonValue.from_string(s: string) static: JsonValue {
+pub fn JsonValue.from_string(s: string) static: JsonValue {
     mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::String;
     v.str_val = s;
     return v;
 }
 
-fn JsonValue.new_array() static: JsonValue {
+pub fn JsonValue.new_array() static: JsonValue {
     mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Array;
     return v;
 }
 
-fn JsonValue.new_object() static: JsonValue {
+pub fn JsonValue.new_object() static: JsonValue {
     mut v: JsonValue = JsonValue::default();
     v.kind = JsonType::Object;
     return v;
@@ -145,13 +145,13 @@ fn JsonValue.new_object() static: JsonValue {
 // ─── mutators (building a value to stringify) ───────────────────────────────
 
 // Appends `item` to an Array-kind value.
-fn JsonValue.push(item: JsonValue): void {
+pub fn JsonValue.push(item: JsonValue): void {
     self.arr_val.push(item);
 }
 
 // Sets `key` to `value` on an Object-kind value, replacing any existing
 // value for the same key (linear scan, same tradeoff as map.tr's Map.put).
-fn JsonValue.set(key: string, value: JsonValue): void {
+pub fn JsonValue.set(key: string, value: JsonValue): void {
     mut idx: int = 0 - 1;
     mut i: int = 0;
     while i < self.obj_keys.length() {
@@ -174,7 +174,7 @@ fn JsonValue.set(key: string, value: JsonValue): void {
 // Looks up `key` on an Object-kind value. Aborts if the key is missing --
 // mirrors map.tr's Map.get()'s identical "missing key is a programming
 // bug" default; check `.has(key)` first if a miss is expected input.
-fn JsonValue.get(key: string): JsonValue {
+pub fn JsonValue.get(key: string): JsonValue {
     mut i: int = 0;
     while i < self.obj_keys.length() {
         if self.obj_keys.get(i) == key {
@@ -187,7 +187,7 @@ fn JsonValue.get(key: string): JsonValue {
 }
 
 // True if an Object-kind value has `key`.
-fn JsonValue.has(key: string): bool {
+pub fn JsonValue.has(key: string): bool {
     mut i: int = 0;
     while i < self.obj_keys.length() {
         if self.obj_keys.get(i) == key {
@@ -198,25 +198,25 @@ fn JsonValue.has(key: string): bool {
     return false;
 }
 
-fn JsonValue.get_string(key: string): string {
+pub fn JsonValue.get_string(key: string): string {
     return self.get(key).str_val;
 }
 
-fn JsonValue.get_number(key: string): double {
+pub fn JsonValue.get_number(key: string): double {
     return self.get(key).num_val;
 }
 
-fn JsonValue.get_int(key: string): int {
+pub fn JsonValue.get_int(key: string): int {
     return self.get_number(key) to int;
 }
 
-fn JsonValue.get_bool(key: string): bool {
+pub fn JsonValue.get_bool(key: string): bool {
     return self.get(key).bool_val;
 }
 
 // Indexes an Array-kind value. Aborts on an out-of-bounds index, mirroring
 // strings.tr's substring()'s identical "this is a programming bug" abort.
-fn JsonValue.at(index: int): JsonValue {
+pub fn JsonValue.at(index: int): JsonValue {
     if index < 0 || index >= self.arr_val.length() {
         sys::panic("JsonValue.at: index out of bounds");
     }
@@ -225,7 +225,7 @@ fn JsonValue.at(index: int): JsonValue {
 
 // Element count for an Array or key count for an Object; 0 for any other
 // kind (a scalar has no length, rather than treating that as an error).
-fn JsonValue.length(): int {
+pub fn JsonValue.length(): int {
     if self.kind == JsonType::Array {
         return self.arr_val.length();
     }
@@ -238,7 +238,7 @@ fn JsonValue.length(): int {
 // ─── stringify ───────────────────────────────────────────────────────────
 
 // Serializes `v` to compact JSON text (no extra whitespace).
-fn stringify(v: JsonValue): string {
+pub fn stringify(v: JsonValue): string {
     if v.kind == JsonType::Null {
         return "null";
     }
@@ -260,7 +260,7 @@ fn stringify(v: JsonValue): string {
     return stringify_object(v);
 }
 
-fn stringify_array(v: JsonValue): string {
+pub fn stringify_array(v: JsonValue): string {
     mut result: string = "[";
     mut i: int = 0;
     mut n: int = v.arr_val.length();
@@ -275,7 +275,7 @@ fn stringify_array(v: JsonValue): string {
     return result;
 }
 
-fn stringify_object(v: JsonValue): string {
+pub fn stringify_object(v: JsonValue): string {
     mut result: string = "{";
     mut i: int = 0;
     mut n: int = v.obj_keys.length();
@@ -293,7 +293,7 @@ fn stringify_object(v: JsonValue): string {
 // Escapes the handful of bytes JSON strings require escaped (`"`, `\`, and
 // the common control characters) -- see this file's header comment for
 // what's NOT handled (\uXXXX round-tripping).
-fn escape_string(s: string): string {
+pub fn escape_string(s: string): string {
     mut result: string = "";
     mut i: int = 0;
     mut n: int = strings::length(s);
@@ -327,7 +327,7 @@ fn escape_string(s: string): string {
 // itself carries no payload/position (a documented simplification -- a
 // real "line/column of the error" would need SourceLocation-style
 // tracking this hand-rolled parser doesn't attempt).
-error JsonError {
+pub error JsonError {
     UnexpectedEnd,
     UnexpectedChar,
     InvalidNumber,
@@ -341,13 +341,13 @@ error JsonError {
 // List<T>/Map<K,V>'s own methods mutate `self.len` in place -- see
 // list.tr's own design note on why this compiler's generic collections
 // already rely on that same "self is mutated in place" method semantics.
-struct Parser {
-    s: string,
-    pos: int,
-    len: int
+pub struct Parser {
+    pub s: string,
+    pub pos: int,
+    pub len: int
 }
 
-fn Parser.peek(): int {
+pub fn Parser.peek(): int {
     if self.pos >= self.len {
         return 0 - 1;
     }
@@ -357,7 +357,7 @@ fn Parser.peek(): int {
     return self.s[self.pos] to int;
 }
 
-fn Parser.skip_ws(): void {
+pub fn Parser.skip_ws(): void {
     while self.pos < self.len {
         immut c: int = self.s[self.pos] to int;
         if c == 32 || c == 9 || c == 10 || c == 13 {
@@ -368,7 +368,7 @@ fn Parser.skip_ws(): void {
     }
 }
 
-fn Parser.parse_value(): !JsonValue {
+pub fn Parser.parse_value(): !JsonValue {
     self.skip_ws();
     immut c: int = self.peek();
     if c == (0 - 1) {
@@ -414,7 +414,7 @@ fn Parser.parse_value(): !JsonValue {
     return JsonError::UnexpectedChar;
 }
 
-fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
+pub fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
     immut n: int = strings::length(lit);
     mut i: int = 0;
     while i < n {
@@ -427,7 +427,7 @@ fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
     return value;
 }
 
-fn Parser.parse_string(): !string {
+pub fn Parser.parse_string(): !string {
     // Precondition: self.peek() == '"' (only ever called from a context
     // that already checked this).
     self.pos = self.pos + 1; // consume opening quote
@@ -471,7 +471,7 @@ fn Parser.parse_string(): !string {
     return JsonError::UnterminatedString;
 }
 
-fn Parser.parse_number(): !JsonValue {
+pub fn Parser.parse_number(): !JsonValue {
     // FDN-004: `self.s[self.pos]` is `char`; every raw comparison below is
     // cast to `int` at the point of use rather than through an intermediate
     // variable, since this function reads a different position on almost
@@ -515,7 +515,7 @@ fn Parser.parse_number(): !JsonValue {
     return JsonValue::from_number(n);
 }
 
-fn Parser.parse_array(): !JsonValue {
+pub fn Parser.parse_array(): !JsonValue {
     self.pos = self.pos + 1; // consume '['
     mut arr: JsonValue = JsonValue::new_array();
     self.skip_ws();
@@ -546,7 +546,7 @@ fn Parser.parse_array(): !JsonValue {
     // `while true` with no further statement.
 }
 
-fn Parser.parse_object(): !JsonValue {
+pub fn Parser.parse_object(): !JsonValue {
     self.pos = self.pos + 1; // consume '{'
     mut obj: JsonValue = JsonValue::new_object();
     self.skip_ws();
@@ -588,7 +588,7 @@ fn Parser.parse_object(): !JsonValue {
 // rather than rejected -- a deliberate simplification, not a correctness
 // bug: this parser is meant for "parse the one JSON value a request/
 // response body contains", not for validating a whole document stream.
-fn parse(s: string): !JsonValue {
+pub fn parse(s: string): !JsonValue {
     mut p: Parser = Parser::default();
     p.s = s;
     p.pos = 0;

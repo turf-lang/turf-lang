@@ -21,27 +21,27 @@ export immut E: double = 2.71828182845904523536;
 
 // ─── libm bindings ────────────────────────────────────────────────────────────
 
-extern from "m" fn pow(base: double, exp: double): double;
-extern from "m" fn sqrt(val: double): double;
-extern from "m" fn sin(val: double): double;
-extern from "m" fn cos(val: double): double;
-extern from "m" fn tan(val: double): double;
-extern from "m" fn floor(val: double): double;
-extern from "m" fn ceil(val: double): double;
-extern from "m" fn round(val: double): double;
-extern from "m" fn fabs(val: double): double;
-extern from "m" fn log(val: double): double;
-extern from "m" fn log2(val: double): double;
-extern from "m" fn log10(val: double): double;
-extern from "m" fn exp(val: double): double;
+pub extern from "m" fn pow(base: double, exp: double): double;
+pub extern from "m" fn sqrt(val: double): double;
+pub extern from "m" fn sin(val: double): double;
+pub extern from "m" fn cos(val: double): double;
+pub extern from "m" fn tan(val: double): double;
+pub extern from "m" fn floor(val: double): double;
+pub extern from "m" fn ceil(val: double): double;
+pub extern from "m" fn round(val: double): double;
+pub extern from "m" fn fabs(val: double): double;
+pub extern from "m" fn log(val: double): double;
+pub extern from "m" fn log2(val: double): double;
+pub extern from "m" fn log10(val: double): double;
+pub extern from "m" fn exp(val: double): double;
 
 // ─── abs ─────────────────────────────────────────────────────────────────────
 
-fn abs(val: double): double {
+pub fn abs(val: double): double {
     return fabs(val);
 }
 
-fn abs(val: int): int {
+pub fn abs(val: int): int {
     if val < 0 {
         return 0 - val;
     }
@@ -50,46 +50,46 @@ fn abs(val: int): int {
 
 // ─── power (four overloads, mirrors previous @intrinsic behaviour) ────────────
 
-fn power(base: double, exp: double): double {
+pub fn power(base: double, exp: double): double {
     return pow(base, exp);
 }
 
-fn power(base: int, exp: int): int {
+pub fn power(base: int, exp: int): int {
     return pow(base to double, exp to double) to int;
 }
 
-fn power(base: int, exp: double): double {
+pub fn power(base: int, exp: double): double {
     return pow(base to double, exp);
 }
 
-fn power(base: double, exp: int): double {
+pub fn power(base: double, exp: int): double {
     return pow(base, exp to double);
 }
 
 // ─── min / max ────────────────────────────────────────────────────────────────
 
-fn min(a: int, b: int): int {
+pub fn min(a: int, b: int): int {
     if a < b {
         return a;
     }
     return b;
 }
 
-fn min(a: double, b: double): double {
+pub fn min(a: double, b: double): double {
     if a < b {
         return a;
     }
     return b;
 }
 
-fn max(a: int, b: int): int {
+pub fn max(a: int, b: int): int {
     if a > b {
         return a;
     }
     return b;
 }
 
-fn max(a: double, b: double): double {
+pub fn max(a: double, b: double): double {
     if a > b {
         return a;
     }
@@ -98,7 +98,7 @@ fn max(a: double, b: double): double {
 
 // ─── clamp ────────────────────────────────────────────────────────────────────
 
-fn clamp(val: int, min_val: int, max_val: int): int {
+pub fn clamp(val: int, min_val: int, max_val: int): int {
     if val < min_val {
         return min_val;
     }
@@ -108,7 +108,7 @@ fn clamp(val: int, min_val: int, max_val: int): int {
     return val;
 }
 
-fn clamp(val: double, min_val: double, max_val: double): double {
+pub fn clamp(val: double, min_val: double, max_val: double): double {
     if val < min_val {
         return min_val;
     }
@@ -128,18 +128,18 @@ fn clamp(val: double, min_val: double, max_val: double): double {
 // or a full `recover as err run { ... }` if the caller wants to react to the
 // failure specifically, instead of a program-ending abort.
 
-error MathError {
+pub error MathError {
     DivisionByZero,
 }
 
-fn divide(a: int, b: int): !int {
+pub fn divide(a: int, b: int): !int {
     if b == 0 {
         return MathError::DivisionByZero;
     }
     return a / b;
 }
 
-fn divide(a: double, b: double): !double {
+pub fn divide(a: double, b: double): !double {
     if b == 0.0 {
         return MathError::DivisionByZero;
     }

@@ -29,6 +29,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include <cassert>
 #include <cstdlib>
 #include <map>
 #include <memory>
@@ -60,6 +61,8 @@ struct SymbolScopeGuard {
 std::unique_ptr<ExprAST> ParseStructDecl() {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat 'struct'
+  if (RejectVisibilityKeywordAsName())
+    return nullptr;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(CurLoc, "Expected identifier after 'struct'", SLM::ErrorCategory::DECLARATION);
     return nullptr;
@@ -108,6 +111,14 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
     getNextToken(); // eat '{'
 
     while (CurTok != '}' && CurTok != TOK_EOF) {
+    // LEC-002: `pub x: int` / `public x: int`. A field is private unless it
+    // says so, even inside a `pub struct` (FREEZE.md §6.15) -- that is what
+    // lets `List<T>.data` be hidden while the struct itself is public.
+    VisibilityMark FieldVis;
+    if (CurTok == TOK_PUB) {
+      FieldVis = {true, CurLoc};
+      getNextToken(); // eat 'pub'/'public'
+    }
     // New syntax: name: type
     if (CurTok != TOK_IDENTIFIER) {
       LogErrorAt(CurLoc, "Expected field name in struct definition", SLM::ErrorCategory::DECLARATION);
@@ -158,7 +169,7 @@ std::unique_ptr<ExprAST> ParseStructDecl() {
       return nullptr;
     }
 
-    Fields.push_back({FieldName, std::move(FieldType), FieldNameLoc, FieldTypeLoc});
+    Fields.push_back({FieldName, std::move(FieldType), FieldNameLoc, FieldTypeLoc, FieldVis});
 
     if (CurTok == ',') {
       getNextToken();
@@ -209,6 +220,8 @@ std::unique_ptr<ExprAST> ParseEnumDecl() {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat 'enum'
   
+  if (RejectVisibilityKeywordAsName())
+    return nullptr;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(CurLoc, "Expected identifier after 'enum'", SLM::ErrorCategory::DECLARATION);
     return nullptr;
@@ -224,6 +237,11 @@ std::unique_ptr<ExprAST> ParseEnumDecl() {
 
   std::vector<std::string> Variants;
   while (CurTok != '}' && CurTok != TOK_EOF) {
+    if (CurTok == TOK_PUB) {
+      // A variant is public exactly when its enum is (FREEZE.md §6.15).
+      MisplacedVisibilityError(CurLoc, MisplacedVisibilityError::Where::OnEnumVariant).raise();
+      return nullptr;
+    }
     if (CurTok != TOK_IDENTIFIER) {
       LogErrorAt(CurLoc, "Expected variant name in enum definition", SLM::ErrorCategory::DECLARATION);
       return nullptr;
@@ -294,6 +312,8 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat 'machine'
 
+  if (RejectVisibilityKeywordAsName())
+    return nullptr;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(CurLoc, "Expected identifier after 'machine'", SLM::ErrorCategory::DECLARATION);
     return nullptr;
@@ -312,6 +332,10 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
   std::map<std::string, std::set<std::string>> EdgeSet; // adjacency, also used for duplicate-edge detection
 
   while (CurTok != '}' && CurTok != TOK_EOF) {
+    if (CurTok == TOK_PUB) {
+      MisplacedVisibilityError(CurLoc, MisplacedVisibilityError::Where::OnMachineState).raise();
+      return nullptr;
+    }
     if (CurTok != TOK_IDENTIFIER) {
       LogErrorAt(CurLoc, "Expected state name in machine definition", SLM::ErrorCategory::DECLARATION);
       return nullptr;
@@ -414,6 +438,8 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat 'error'
 
+  if (RejectVisibilityKeywordAsName())
+    return nullptr;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(CurLoc, "Expected identifier after 'error'", SLM::ErrorCategory::DECLARATION);
     return nullptr;
@@ -463,6 +489,10 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
     // destructuring syntax to read it back safely is deferred rather than
     // half-built now).
     while (CurTok != '}' && CurTok != TOK_EOF) {
+      if (CurTok == TOK_PUB) {
+        MisplacedVisibilityError(CurLoc, MisplacedVisibilityError::Where::OnErrorVariant).raise();
+        return nullptr;
+      }
       if (CurTok != TOK_IDENTIFIER) {
         LogErrorAt(CurLoc, "Expected variant name in error type definition", SLM::ErrorCategory::DECLARATION);
         return nullptr;
@@ -811,6 +841,8 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   }
 
   // Expect TOK_IDENTIFIER → save as FuncName
+  if (RejectVisibilityKeywordAsName())
+    return nullptr;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(FnLoc, "Expected a function name after 'fn'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
@@ -863,6 +895,10 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   // Parse parameter list: each param is: Identifier TOK_COLON ParseType()
   // Params separated by ','
   while (CurTok != ')' && CurTok != TOK_EOF) {
+    if (CurTok == TOK_PUB) {
+      MisplacedVisibilityError(CurLoc, MisplacedVisibilityError::Where::OnParameter).raise();
+      return nullptr;
+    }
     if (CurTok != TOK_IDENTIFIER) {
       LogErrorAt(CurLoc,
                  "Expected a parameter name in the parameter list of '" +
@@ -1217,4 +1253,90 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
   return std::make_unique<FuncDefExprAST>(OpLoc, FuncName, OpLoc, RetType, Params,
                                           std::move(Body), std::vector<std::string>{},
                                           /*IsStaticMethodDecl=*/false);
+}
+
+// ParseVisibilityPrefixed - called when CurTok == TOK_PUB (`pub`/`public`).
+//
+// The ONE place a declaration's visibility mark is set, so "pub on something
+// that is not a declaration" cannot be parsed by accident anywhere else:
+// every declaration form is reached through here or not at all (struct fields
+// are the one exception -- they are not expressions and ParseStructDecl()
+// reads their `pub` itself). The token after `pub` is checked BEFORE it is
+// parsed, so a misplacement is reported at the `pub` with a hint naming the
+// fix, not as a confusing failure somewhere inside the wrong construct.
+//
+// `pub extern fn` is accepted: an extern fn is a named top-level function and
+// the freeze's rule is "every named declaration" (LEC-002.md, Unresolved
+// question 1).
+std::unique_ptr<ExprAST> ParseVisibilityPrefixed() {
+  using Where = MisplacedVisibilityError::Where;
+  VisibilityMark Mark{true, CurLoc};
+  getNextToken(); // eat 'pub'/'public'
+
+  std::unique_ptr<ExprAST> Decl;
+  switch (CurTok) {
+  case TOK_FN:
+    Decl = ParseFuncDef();
+    break;
+  case TOK_STRUCT:
+    Decl = ParseStructDecl();
+    break;
+  case TOK_ENUM:
+    Decl = ParseEnumDecl();
+    break;
+  case TOK_MACHINE:
+    Decl = ParseMachineDecl();
+    break;
+  case TOK_ERROR:
+    Decl = ParseErrorDecl();
+    break;
+  case TOK_EXTERN:
+    Decl = ParseExternDecl();
+    break;
+  case TOK_EXPORT:
+    MisplacedVisibilityError(Mark.Loc, Where::WithExport).raise();
+    return nullptr;
+  case TOK_OPERATOR:
+    MisplacedVisibilityError(Mark.Loc, Where::OnOperator).raise();
+    return nullptr;
+  case TOK_IMPORT:
+    MisplacedVisibilityError(Mark.Loc, Where::OnImport).raise();
+    return nullptr;
+  case TOK_MUTABLE:
+  case TOK_IMMUTABLE:
+    MisplacedVisibilityError(Mark.Loc, Where::OnVariable).raise();
+    return nullptr;
+  case TOK_UNSAFE:
+    MisplacedVisibilityError(Mark.Loc, Where::OnUnsafeBlock).raise();
+    return nullptr;
+  case TOK_AT:
+    MisplacedVisibilityError(Mark.Loc, Where::BeforeDecorator).raise();
+    return nullptr;
+  default:
+    MisplacedVisibilityError(Mark.Loc, Where::NotFollowedByDeclaration).raise();
+    return nullptr;
+  }
+  if (!Decl)
+    return nullptr;
+
+  // Every declaration node this switch can produce derives from VisibleDecl
+  // (ASTDecl.h). A failed cast would mean a declaration form was added above
+  // without giving it the mixin -- fail loudly rather than drop the `pub`.
+  auto *Visible = dynamic_cast<VisibleDecl *>(Decl.get());
+  assert(Visible && "declaration parsed under 'pub' cannot carry a visibility");
+  if (Visible)
+    Visible->setVisibility(Mark);
+  return Decl;
+}
+
+// RejectVisibilityKeywordAsName - call where a NAME is expected and the token
+// is not an identifier. `pub`/`public` became reserved words in LEC-002, so
+// `mut pub: int` used to be a valid program and is now a rejected one; the
+// bare "Expected a variable name" would leave the writer guessing why, so this
+// names the cause and suggests a rename. Returns true if it reported.
+bool RejectVisibilityKeywordAsName() {
+  if (CurTok != TOK_PUB)
+    return false;
+  MisplacedVisibilityError(CurLoc, MisplacedVisibilityError::Where::UsedAsName).raise();
+  return true;
 }

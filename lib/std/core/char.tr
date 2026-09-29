@@ -8,46 +8,46 @@
 // Arithmetic on char values requires an explicit `to int` cast first (char
 // has no built-in arithmetic) -- every helper below does that internally.
 
-fn isDigit(c: char): bool {
+pub fn isDigit(c: char): bool {
     return (c to int) >= 48 && (c to int) <= 57; // '0'..'9'
 }
 
-fn isUpper(c: char): bool {
+pub fn isUpper(c: char): bool {
     return (c to int) >= 65 && (c to int) <= 90; // 'A'..'Z'
 }
 
-fn isLower(c: char): bool {
+pub fn isLower(c: char): bool {
     return (c to int) >= 97 && (c to int) <= 122; // 'a'..'z'
 }
 
-fn isAlpha(c: char): bool {
+pub fn isAlpha(c: char): bool {
     return c.isUpper() || c.isLower();
 }
 
-fn isAlphaNumeric(c: char): bool {
+pub fn isAlphaNumeric(c: char): bool {
     return c.isAlpha() || c.isDigit();
 }
 
 // isPunctuation: printable ASCII (33..126) that's neither a letter nor a
 // digit -- e.g. '.', ',', '!', '('.
-fn isPunctuation(c: char): bool {
+pub fn isPunctuation(c: char): bool {
     mut n: int = c to int;
     return n >= 33 && n <= 126 && !c.isAlphaNumeric();
 }
 
-fn isWhitespace(c: char): bool {
+pub fn isWhitespace(c: char): bool {
     mut n: int = c to int;
     return n == 32 || n == 9 || n == 10 || n == 13; // space, tab, \n, \r
 }
 
-fn toUpper(c: char): char {
+pub fn toUpper(c: char): char {
     if c.isLower() {
         return ((c to int) - 32) to char;
     }
     return c;
 }
 
-fn toLower(c: char): char {
+pub fn toLower(c: char): char {
     if c.isUpper() {
         return ((c to int) + 32) to char;
     }

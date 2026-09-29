@@ -1,0 +1,7 @@
+// LEC-002: E087 -- a declaration inside a function is local to it, so `pub`
+// there is rejected rather than silently ignored.
+fn main(): int {
+    pub struct Point { x: int }
+    mut p: Point = Point::default();
+    return p.x;
+}

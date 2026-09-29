@@ -745,6 +745,22 @@ public:
 // ─── TurfStructType ───────────────────────────────────────────────────────────
 
 /// A single field in a struct declaration.
+/**
+ * @brief Whether a declaration was written with the `pub`/`public` prefix
+ *        (LEC-002, FREEZE.md §6.15), and where.
+ *
+ * Kept as a mark on each declaration rather than a bare bool so a later
+ * diagnostic can point at the exact `pub` token (or, for a private item, name
+ * where one WOULD go -- the declaration's own keyword) and so the two
+ * spellings, `pub` and `public`, stay indistinguishable downstream: only the
+ * token's location survives the parse, never which word was typed.
+ * Default-constructed means "private" -- the frozen default.
+ */
+struct VisibilityMark {
+  bool IsPublic = false;
+  SourceLocation Loc; ///< of the `pub`/`public` token; {0,0} when not written
+};
+
 struct StructField {
   std::string Name;
   TurfTypePtr Type;
@@ -758,6 +774,10 @@ struct StructField {
   // Parser::ParseStructDecl(), if any exist).
   SourceLocation NameLoc;
   SourceLocation TypeLoc;
+  /// LEC-002: private unless written `pub` -- even inside a `pub struct`
+  /// (FREEZE.md §6.15). Trailing member with a default, so every existing
+  /// aggregate-initialised StructField still compiles as private.
+  VisibilityMark Vis;
 };
 
 /**

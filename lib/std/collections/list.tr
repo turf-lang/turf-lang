@@ -33,13 +33,13 @@ unsafe module;
 
 import sys;
 
-struct List<T> {
-  data: T*,
-  len: int,
-  cap: int
+pub struct List<T> {
+  pub data: T*,
+  pub len: int,
+  pub cap: int
 }
 
-fn<T> List.push(item: T): void {
+pub fn<T> List.push(item: T): void {
   if (self.len == self.cap) {
     if (self.cap == 0) {
       self.cap = 8;
@@ -68,7 +68,7 @@ fn<T> List.push(item: T): void {
   self.len = self.len + 1;
 }
 
-fn<T> List.pop(): T {
+pub fn<T> List.pop(): T {
   if (self.len == 0) {
     sys::panic("List.pop: pop on empty list");
   }
@@ -77,7 +77,7 @@ fn<T> List.pop(): T {
   return self.data[self.len];
 }
 
-fn<T> List.length(): int {
+pub fn<T> List.length(): int {
   return self.len;
 }
 
@@ -96,7 +96,7 @@ fn<T> List.length(): int {
 // operator[]'s own message text, just with a location a caller-heavy stdlib
 // consumer (json.tr, http.tr, ...) actually benefits from.
 @caller_location
-fn<T> List.get(i: int): T {
+pub fn<T> List.get(i: int): T {
   if (i < 0 || i >= self.len) {
     sys::panic(caller_location + ": List.get: index out of bounds");
   }
@@ -104,7 +104,7 @@ fn<T> List.get(i: int): T {
 }
 
 @caller_location
-fn<T> List.set(i: int, value: T): void {
+pub fn<T> List.set(i: int, value: T): void {
   if (i < 0 || i >= self.len) {
     sys::panic(caller_location + ": List.set: index out of bounds");
   }
@@ -177,7 +177,7 @@ operator []=(l: List<int>, i: int, value: int): void {
 // for the small lists this stdlib deals with (see map.tr's identical
 // "small collections, correctness over cleverness" reasoning for its own
 // hash-collision handling).
-fn<T> List.sort(cmp: fn(T, T): int): void {
+pub fn<T> List.sort(cmp: fn(T, T): int): void {
   mut i: int = 1;
   while i < self.length() {
     immutable key: T = self.data[i];
@@ -197,7 +197,7 @@ fn<T> List.sort(cmp: fn(T, T): int): void {
 // enforce that, it only assumes it, exactly like a `qsort`-then-`bsearch`
 // pairing in C. Returns the index of a matching element if found, -1
 // otherwise.
-fn<T> List.binary_search(target: T, cmp: fn(T, T): int): int {
+pub fn<T> List.binary_search(target: T, cmp: fn(T, T): int): int {
   mut lo: int = 0;
   mut hi: int = self.length() - 1;
   while lo <= hi {
@@ -218,7 +218,7 @@ fn<T> List.binary_search(target: T, cmp: fn(T, T): int): int {
 // the first element matching an arbitrary predicate -- for lookups that
 // aren't simple equality/ordering (sort()/binary_search() above cover
 // that case).
-fn<T> List.find(predicate: fn(T): bool): int {
+pub fn<T> List.find(predicate: fn(T): bool): int {
   mut i: int = 0;
   while i < self.length() {
     if (predicate(self.data[i])) {
@@ -240,14 +240,14 @@ fn<T> List.find(predicate: fn(T): bool): int {
 // working unchanged. Prefer `l.sort(cmp)`/`l.binary_search(target, cmp)`/
 // `l.find(predicate)` directly in new code; these three may be removed in
 // a future cycle.
-fn list_sort(l: List<int>, cmp: fn(int, int): int): void {
+pub fn list_sort(l: List<int>, cmp: fn(int, int): int): void {
   l.sort(cmp);
 }
 
-fn list_binary_search(l: List<int>, target: int, cmp: fn(int, int): int): int {
+pub fn list_binary_search(l: List<int>, target: int, cmp: fn(int, int): int): int {
   return l.binary_search(target, cmp);
 }
 
-fn list_find(l: List<int>, predicate: fn(int): bool): int {
+pub fn list_find(l: List<int>, predicate: fn(int): bool): int {
   return l.find(predicate);
 }

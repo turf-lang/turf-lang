@@ -409,4 +409,124 @@ public:
   }
 };
 
+// LEC-002 (docs/development/changes/LEC-002.md, FREEZE.md §6.15): `pub` /
+// `public` written where visibility means nothing. Deliberately an error and
+// not a silently ignored modifier -- a `pub` that does nothing is how a typo
+// becomes a belief ("I exported that") that only fails once another module
+// imports it. One class for every misplacement, with the WHAT in the message
+// and the FIX in the hint, so each shape tells the writer exactly what to
+// write instead rather than merely that they were wrong.
+class MisplacedVisibilityError : public TurfError {
+public:
+  enum class Where {
+    NotFollowedByDeclaration, ///< `pub` then something that is not a declaration
+    WithExport,               ///< `pub export immut ...`
+    OnOperator,               ///< `pub operator ...`
+    OnImport,                 ///< `pub import ...`
+    OnVariable,               ///< `pub mut x` / `pub immut X`
+    OnEnumVariant,            ///< `pub` before an enum variant
+    OnErrorVariant,           ///< `pub` before an `error` type's variant
+    OnMachineState,           ///< `pub` before a machine state/transition
+    OnParameter,              ///< `pub` before a function parameter
+    OnUnsafeBlock,            ///< `pub unsafe { ... }`
+    InsideFunction,           ///< `pub` on a declaration local to a function body
+    BeforeDecorator,          ///< `pub @caller_location fn ...`
+    UsedAsName,               ///< `pub`/`public` where a variable/function/type name is expected
+  };
+
+  MisplacedVisibilityError(SourceLocation Loc, Where W)
+      : TurfError(Loc, "") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    const std::string Pub = Colors::CYAN + "pub" + Colors::BRIGHT_RED;
+    std::string What;
+    switch (W) {
+    case Where::NotFollowedByDeclaration:
+      What = "'" + Pub + "' has to be followed by a declaration.";
+      Hint_ = "Put `pub` right before `fn`, `struct`, `enum`, `error`, "
+              "`machine` or `extern fn`, or before a struct field -- e.g. "
+              "`pub fn area(r: int): int { ... }` or `pub struct Point { pub "
+              "x: int }`. (`public` is accepted as a synonym.)";
+      break;
+    case Where::WithExport:
+      What = "'" + Pub + "' can't be combined with 'export'.";
+      Hint_ = "`export immut NAME: T = value;` is already visible to every "
+              "module that imports this one -- `export` is its `pub`. Just "
+              "remove `pub`.";
+      break;
+    case Where::OnOperator:
+      What = "'" + Pub + "' can't be applied to an operator.";
+      Hint_ = "An operator is visible wherever its operand types are, so "
+              "there is nothing to export. Remove `pub` from the `operator` "
+              "declaration; to let another module use `a + b` on your type, "
+              "make the type itself `pub`.";
+      break;
+    case Where::OnImport:
+      What = "'" + Pub + "' can't be applied to an import.";
+      Hint_ = "An `import` only affects the file that writes it -- imports "
+              "are never re-exported. Remove `pub`, and have any module that "
+              "needs the imported names write its own `import`.";
+      break;
+    case Where::OnVariable:
+      What = "'" + Pub + "' can't be applied to a variable.";
+      Hint_ = "A top-level constant is declared `export immut NAME: T = "
+              "value;` -- `export` already makes it visible to importers. A "
+              "local variable is never visible outside its function, so "
+              "just remove `pub`.";
+      break;
+    case Where::OnEnumVariant:
+      What = "'" + Pub + "' can't be applied to an enum variant.";
+      Hint_ = "A variant is public exactly when its enum is. Remove `pub` "
+              "here and write `pub enum Name { ... }` instead -- every "
+              "variant then becomes visible to importers.";
+      break;
+    case Where::OnErrorVariant:
+      What = "'" + Pub + "' can't be applied to an error variant.";
+      Hint_ = "A variant is public exactly when its `error` type is. Remove "
+              "`pub` here and write `pub error Name { ... }` instead.";
+      break;
+    case Where::OnMachineState:
+      What = "'" + Pub + "' can't be applied to a machine state or "
+             "transition.";
+      Hint_ = "States and transitions are public exactly when their machine "
+              "is. Remove `pub` here and write `pub machine Name { ... }` "
+              "instead.";
+      break;
+    case Where::OnParameter:
+      What = "'" + Pub + "' can't appear in a parameter list.";
+      Hint_ = "Parameters are local to their function, so there is nothing "
+              "for `pub` to export -- and `pub`/`public` are reserved words, "
+              "so neither can be a parameter's name. To make the function "
+              "itself visible to importers, put `pub` before `fn`: `pub fn "
+              "name(x: int): int`.";
+      break;
+    case Where::OnUnsafeBlock:
+      What = "'" + Pub + "' can't be applied to an `unsafe` block.";
+      Hint_ = "`pub` belongs on the declarations inside the block -- write "
+              "`unsafe { pub fn f(...) ... }`, not `pub unsafe { ... }`.";
+      break;
+    case Where::InsideFunction:
+      What = "'" + Pub + "' can't be used on a declaration inside a "
+             "function.";
+      Hint_ = "A declaration inside a function is local to it -- no other "
+              "module can ever see it, so there is nothing for `pub` to "
+              "do. Remove `pub`, or move the declaration to the top level "
+              "of the file if it should be shared.";
+      break;
+    case Where::UsedAsName:
+      What = "'" + Pub + "' is a reserved word and can't be used as a name.";
+      Hint_ = "`pub` and `public` are keywords -- they mark a declaration as "
+              "visible to other modules -- so they can't name a variable, "
+              "function or type. Pick another name, e.g. `is_public` or "
+              "`published`.";
+      break;
+    case Where::BeforeDecorator:
+      What = "'" + Pub + "' has to come after a decorator, not before it.";
+      Hint_ = "Write the decorator first, then `pub`: `@caller_location` on "
+              "its own line, followed by `pub fn name(...)`.";
+      break;
+    }
+    Message = Colors::BRIGHT_RED + What + Colors::RESET;
+  }
+};
+
 #endif

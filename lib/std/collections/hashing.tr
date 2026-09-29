@@ -62,7 +62,7 @@ unsafe module;
 
 import strings;
 
-fn hash(x: string): int {
+pub fn hash(x: string): int {
   mut h: int = 5381;
   immutable n: int = strings::strlen(x);
   mut i: int = 0;
@@ -75,7 +75,7 @@ fn hash(x: string): int {
   return h;
 }
 
-fn<T> hash(x: T): int {
+pub fn<T> hash(x: T): int {
   mut h: int = 5381;
   unsafe {
     immutable p: char* = &x to char*;

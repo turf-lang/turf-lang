@@ -1,0 +1,7 @@
+// LEC-002: E087 -- `export immut` is already its own `pub`; combining the
+// two is rejected rather than ignored (hint: just remove `pub`).
+pub export immut LIMIT: int = 10;
+
+fn main(): int {
+    return 0;
+}

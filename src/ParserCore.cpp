@@ -142,7 +142,7 @@ void InitializeCompilerGlobals() {
 bool IsTopLevelBoundaryToken(int Tok) {
   return Tok == TOK_EOF || Tok == ';' || Tok == TOK_FN || Tok == TOK_STRUCT ||
          Tok == TOK_ENUM || Tok == TOK_MACHINE || Tok == TOK_EXTERN ||
-         Tok == TOK_EXPORT ||
+         Tok == TOK_EXPORT || Tok == TOK_PUB ||
          Tok == TOK_OPERATOR || Tok == TOK_ERROR || Tok == TOK_IMPORT ||
          Tok == TOK_UNSAFE;
 }
@@ -884,6 +884,14 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     getNextToken(); // eat '@'
     if (CurTok == TOK_CALLER_LOCATION) {
       getNextToken(); // eat 'caller_location'
+      // LEC-002: `@caller_location` then `pub fn` -- the decorator comes
+      // first, like an attribute before its modifiers (`pub @caller_location`
+      // is rejected in ParseVisibilityPrefixed() with a hint saying so).
+      VisibilityMark DecoratedVis;
+      if (CurTok == TOK_PUB) {
+        DecoratedVis = {true, CurLoc};
+        getNextToken(); // eat 'pub'/'public'
+      }
       if (CurTok != TOK_FN) {
         LogErrorAt(CurLoc,
                    "Expected 'fn' after '@caller_location'."
@@ -892,7 +900,10 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
                    "{ ... }'.", SLM::ErrorCategory::SYNTAX_ERROR);
         return nullptr;
       }
-      return ParseFuncDef(/*HasCallerLocation=*/true);
+      auto Fn = ParseFuncDef(/*HasCallerLocation=*/true);
+      if (Fn && DecoratedVis.IsPublic)
+        static_cast<FuncDefExprAST *>(Fn.get())->setVisibility(DecoratedVis);
+      return Fn;
     }
     LogErrorAt(AtLoc,
                "'@' is not valid here.\n  Hint: the only supported decorator "
@@ -921,6 +932,9 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
 
   case TOK_EXPORT:
     return ParseExportDecl();
+
+  case TOK_PUB:
+    return ParseVisibilityPrefixed();
 
 
   case TOK_RETURN:

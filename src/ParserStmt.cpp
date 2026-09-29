@@ -173,7 +173,8 @@ std::unique_ptr<ExprAST> ParseBlock() {
     }
     if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
         CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_MACHINE ||
-        CurTok == TOK_COMPARE || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE) {
+        CurTok == TOK_COMPARE || CurTok == TOK_ERROR || CurTok == TOK_UNSAFE ||
+        CurTok == TOK_PUB) {
       auto Expr = ParseExpression();
       if (!Expr) return nullptr;
       if (CurTok == ';') {
@@ -579,7 +580,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
         }
         if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
             CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_MACHINE ||
-            CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
+            CurTok == TOK_COMPARE || CurTok == TOK_ERROR || CurTok == TOK_PUB) {
           auto E = ParseExpression();
           if (!E) return nullptr;
           OtherStmts.push_back(std::move(E));
@@ -717,7 +718,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       }
       if (CurTok == TOK_IF || CurTok == TOK_WHILE || CurTok == TOK_DO || CurTok == TOK_FOR ||
           CurTok == TOK_FN || CurTok == TOK_STRUCT || CurTok == TOK_ENUM || CurTok == TOK_MACHINE ||
-          CurTok == TOK_COMPARE || CurTok == TOK_ERROR) {
+          CurTok == TOK_COMPARE || CurTok == TOK_ERROR || CurTok == TOK_PUB) {
         auto E = ParseExpression();
         if (!E) return nullptr;
         ArmStmts.push_back(std::move(E));
@@ -773,6 +774,8 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   getNextToken(); // eat mutable or immutable
 
   if (CurTok != TOK_IDENTIFIER) {
+    if (RejectVisibilityKeywordAsName())
+      return nullptr;
     LogErrorAt(CurLoc, "Expected a variable name after 'mutable' or 'immutable'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }

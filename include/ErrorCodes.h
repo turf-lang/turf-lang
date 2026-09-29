@@ -189,6 +189,12 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // reasoning as the raw-pointer/recursion examples in this file's own
     // header comment).
     {"E086", "DanglingReferenceEscapeError", "Dangling reference escape", SLM::ErrorCategory::MEMORY_ERROR, true},
+
+    // LEC-002 (docs/development/changes/LEC-002.md): `pub`/`public` written
+    // where visibility means nothing (on an operator, an import, a variable,
+    // an enum variant, a parameter, inside a function, ...). Rejected rather
+    // than ignored; the hint names what to write instead.
+    {"E087", "MisplacedVisibilityError", "Misplaced visibility modifier", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

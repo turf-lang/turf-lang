@@ -1,0 +1,9 @@
+// LEC-002: E087 -- write the decorator first, then `pub`.
+pub @caller_location
+fn where_am_i(): string {
+    return caller_location;
+}
+
+fn main(): int {
+    return 0;
+}

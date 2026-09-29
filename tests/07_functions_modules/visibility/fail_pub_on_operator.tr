@@ -1,0 +1,13 @@
+// LEC-002: E087 -- an operator is visible wherever its operand types are, so
+// `pub` on one is meaningless and rejected (hint: make the TYPE pub).
+struct Money { cents: int }
+
+pub operator +(a: Money, b: Money): Money {
+    mut r: Money = Money::default();
+    r.cents = a.cents + b.cents;
+    return r;
+}
+
+fn main(): int {
+    return 0;
+}

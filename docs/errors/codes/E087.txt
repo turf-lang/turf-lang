@@ -1,0 +1,69 @@
+`pub` (or `public`) was written where it does nothing
+
+    pub operator +(a: Money, b: Money): Money { ... }
+    // ERROR: 'pub' can't be applied to an operator.
+    //   Hint: An operator is visible wherever its operand types are, so
+    //   there is nothing to export. Remove `pub` from the `operator`
+    //   declaration; to let another module use `a + b` on your type, make
+    //   the type itself `pub`.
+
+`pub` (and its synonym `public`, spelled exactly like `mut`/`mutable`) marks
+a declaration as visible to other modules. A `pub` that could never change
+who can see something is rejected instead of quietly ignored -- an ignored
+`pub` is how a typo turns into the belief "I exported that", which only
+fails much later, in a different module.
+
+Each place it can go wrong has its own message and its own fix:
+
+    pub export immut LIMIT: int = 10;
+        // `export` already IS the `pub` of a constant. Just remove `pub`.
+
+    pub operator +(a: Money, b: Money): Money { ... }
+        // Operators are visible wherever their operand types are. Remove
+        // `pub`; make the TYPE `pub` if other modules should use it.
+
+    pub import io;
+        // Imports only affect the file that writes them and are never
+        // re-exported. Remove `pub`; the other module writes its own import.
+
+    pub immut LIMIT: int = 10;
+        // A top-level constant is `export immut NAME: T = value;`.
+
+    enum Color { Red, pub Green }
+    error Oops { pub Bad }
+    machine Light { pub Red -> Green }
+        // A variant/state is public exactly when its type is:
+        //     pub enum Color { Red, Green }
+
+    fn add(pub a: int, b: int): int { ... }
+        // Parameters are local to the function. To export the function,
+        // put `pub` before `fn`:  pub fn add(a: int, b: int): int
+
+    pub unsafe { ... }
+        // Put `pub` on the declarations INSIDE the block:
+        //     unsafe { pub fn f(): int { ... } }
+
+    fn main(): int {
+        pub struct Point { x: int }
+        ...
+    }
+        // A declaration inside a function is local to it -- no other module
+        // can ever see it. Remove `pub`, or move it to the top level.
+
+    pub @caller_location
+    fn here(): string { ... }
+        // The decorator comes first, then `pub`:
+        //     @caller_location
+        //     pub fn here(): string { ... }
+
+    mut pub: int = 1;
+    fn public(): int { ... }
+        // `pub` and `public` are reserved words now and can't be names.
+        // Pick another, e.g. `is_public` or `published`.
+
+Where `pub` IS meaningful: right before `fn`, `struct`, `enum`, `error`,
+`machine` or `extern fn` at the top level of a file, and before a field
+inside a struct body:
+
+    pub struct Point { pub x: int, pub y: int, cache: int }
+    pub fn Point.len(): int { ... }

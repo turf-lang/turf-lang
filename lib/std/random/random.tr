@@ -61,8 +61,8 @@ import time;
 // C return value never defines. srand()'s parameter is `unsigned int` in
 // C; int32 round-trips it exactly the same way (bit pattern only, no sign
 // meaning is ever relied on below).
-extern fn rand(): int32;
-extern fn srand(seed: int32): void;
+pub extern fn rand(): int32;
+pub extern fn srand(seed: int32): void;
 
 // ─── constants ──────────────────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ export immut RAND_MAX: int = 2147483647;
 // seed. Not exported -- every public function below calls this itself, so
 // there is no separate seeding step for callers to remember. See this
 // file's own design note above for exactly what tradeoff that implies.
-fn reseed(): void {
+pub fn reseed(): void {
     srand((time::now_seconds() + time::clock_ticks()) to int32);
 }
 
@@ -90,7 +90,7 @@ fn reseed(): void {
 // slight bias toward the low end of the range whenever `range` doesn't
 // evenly divide RAND_MAX + 1 -- fine for games/tests/sampling, not for
 // anything that needs a provably uniform distribution.
-fn random_int(min: int, max: int): int {
+pub fn random_int(min: int, max: int): int {
     reseed();
     immut range: int = max - min + 1;
     immut r: int = rand();
@@ -100,13 +100,13 @@ fn random_int(min: int, max: int): int {
 // random_double: a pseudo-random value in [0.0, 1.0) -- never exactly
 // 1.0, since rand()'s maximum possible output (RAND_MAX) is divided by
 // RAND_MAX + 1, not RAND_MAX itself.
-fn random_double(): double {
+pub fn random_double(): double {
     reseed();
     immut r: int = rand();
     return (r to double) / ((RAND_MAX to double) + 1.0);
 }
 
 // random_bool: a coin flip -- true or false, each roughly 50% of the time.
-fn random_bool(): bool {
+pub fn random_bool(): bool {
     return random_int(0, 1) == 1;
 }

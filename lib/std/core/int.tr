@@ -5,28 +5,28 @@
 // Arithmetic helpers already covered by lib/std/math.tr (abs/min/max/clamp/
 // power) are not duplicated here.
 
-fn is_even(n: int): bool {
+pub fn is_even(n: int): bool {
     return n % 2 == 0;
 }
 
-fn is_odd(n: int): bool {
+pub fn is_odd(n: int): bool {
     return n % 2 != 0;
 }
 
-fn is_positive(n: int): bool {
+pub fn is_positive(n: int): bool {
     return n > 0;
 }
 
-fn is_negative(n: int): bool {
+pub fn is_negative(n: int): bool {
     return n < 0;
 }
 
-fn is_zero(n: int): bool {
+pub fn is_zero(n: int): bool {
     return n == 0;
 }
 
 // gcd/lcm: not provided anywhere else in the stdlib. gcd(0, 0) returns 0.
-fn gcd(a: int, b: int): int {
+pub fn gcd(a: int, b: int): int {
     mut x: int = a;
     mut y: int = b;
     if x < 0 {
@@ -43,7 +43,7 @@ fn gcd(a: int, b: int): int {
     return x;
 }
 
-fn lcm(a: int, b: int): int {
+pub fn lcm(a: int, b: int): int {
     if a == 0 || b == 0 {
         return 0;
     }

@@ -391,6 +391,80 @@ static void testEmptyInput() {
   CHECK(R.symbolsInScope("x.tr", 1, 1).empty());
 }
 
+// LEC-002: `pub`/`public` in a place where visibility means nothing must be
+// rejected with E087 AND a hint that names the fix. `test_runner.sh` only
+// checks that a `fail_*.tr` fails to compile, not why -- so a case that
+// started failing for an unrelated reason (a typo in the test, a later
+// unrelated diagnostic) would keep passing there. Asserting the code and a
+// fragment of the hint here is what keeps each shape failing for the right
+// reason and keeps the hints from silently degrading into generic text.
+static void testVisibilityModifierPlacement() {
+  CurrentTest = "visibility modifier placement";
+  struct Case {
+    const char *Label;
+    const char *Source;
+    const char *HintFragment; // must appear in the hint
+  };
+  const std::string Main = "\nfn main(): int { return 0; }\n";
+  const std::vector<std::pair<std::string, Case>> Rejected = {
+      {"pub export", {"", "pub export immut X: int = 1;", "Just remove `pub`"}},
+      {"pub operator", {"", "pub operator +(a: string, b: int): string { return a; }", "make the type itself `pub`"}},
+      {"pub import", {"", "pub import io;", "never re-exported"}},
+      {"pub immut", {"", "pub immut X: int = 1;", "export immut NAME"}},
+      {"enum variant", {"", "enum E { pub A, B }", "pub enum Name"}},
+      {"error variant", {"", "error E { pub A }", "pub error Name"}},
+      {"machine state", {"", "machine M { pub A -> B }", "pub machine Name"}},
+      {"parameter", {"", "fn f(pub x: int): int { return x; }", "before `fn`"}},
+      {"pub unsafe", {"", "pub unsafe { }", "declarations inside the block"}},
+      {"before decorator", {"", "pub @caller_location\nfn f(): string { return caller_location; }", "decorator first"}},
+      {"not a declaration", {"", "pub 5;", "right before `fn`"}},
+      {"public spelling", {"", "public export immut X: int = 1;", "Just remove `pub`"}},
+      {"reserved as variable", {"", "fn g(): int { mut pub: int = 1; return pub; }", "is_public"}},
+      {"reserved as function", {"", "fn public(): int { return 1; }", "is_public"}},
+      {"reserved as type", {"", "struct pub { x: int }", "is_public"}},
+      {"local struct", {"", "fn g(): int { pub struct S { x: int } return 0; }", "top level"}},
+      {"local enum", {"", "fn g(): int { public enum E { A } return 0; }", "top level"}},
+      {"local struct field", {"", "fn g(): int { struct S { pub x: int } return 0; }", "top level"}},
+  };
+  for (const auto &[Label, C] : Rejected) {
+    auto R = turf::analyze({{"vis.tr", std::string(C.Source) + Main}});
+    CHECK(!R.succeeded());
+    bool Found = false;
+    for (const auto &D : R.diagnostics()) {
+      if (D.Code != "E087")
+        continue;
+      Found = true;
+      CHECK(D.Hint.find(C.HintFragment) != std::string::npos);
+      if (D.Hint.find(C.HintFragment) == std::string::npos)
+        std::cerr << "    case '" << Label << "': hint was: " << D.Hint << "\n";
+      CHECK(D.Message.find('\x1b') == std::string::npos);
+      break;
+    }
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << Label << "' produced:\n" << render(R);
+  }
+
+  // Accepted: every declaration form, both spellings, field-level `pub`,
+  // `pub` after a decorator, and `pub` on the main file's own declarations
+  // (a single-file program never needs it, and it must not be an error).
+  const char *Accepted = R"(pub struct Box { pub value: int, public other: int, cache: int }
+public enum Color { Red, Green }
+pub error Oops { A, B }
+pub machine M { A -> B }
+pub extern fn abs(x: int32): int32;
+@caller_location
+pub fn here(): string { return caller_location; }
+pub fn Box.get(): int { return self.value; }
+fn helper(): int { return 1; }
+public fn main(): int { return helper(); }
+)";
+  auto R = turf::analyze({{"ok.tr", Accepted}});
+  CHECK(R.succeeded());
+  if (!R.succeeded())
+    std::cerr << render(R);
+}
+
 int main() {
   ScratchDir Dir;
   testCleanProgramQueries();
@@ -404,6 +478,7 @@ int main() {
   testWarningDedupeIsPerFile(Dir);
   testLintIsOptIn();
   testEmptyInput();
+  testVisibilityModifierPlacement();
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

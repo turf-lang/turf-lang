@@ -30,16 +30,16 @@
 
 // ─── libc bindings ────────────────────────────────────────────────────────
 
-extern fn abort(): void;
-extern fn exit(code: int): void;
-extern fn write(fd: int, buf: string, count: int): int;
+pub extern fn abort(): void;
+pub extern fn exit(code: int): void;
+pub extern fn write(fd: int, buf: string, count: int): int;
 // A local strlen extern, not `import strings;` -- strings.tr itself needs
 // sys.tr for panics (see panic()'s own doc comment below on the circular-
 // import constraint this avoids). Safe to declare independently: this is
 // the same identical-signature-across-modules pattern strlen/malloc/calloc
 // already use elsewhere in the stdlib (RFC step 5's extern-conflict fix
 // explicitly allows this, rejecting only genuinely conflicting signatures).
-extern fn strlen(s: string): int;
+pub extern fn strlen(s: string): int;
 
 // ─── Turf-level helpers ───────────────────────────────────────────────────
 
@@ -56,7 +56,7 @@ export immut STDERR_FD: int = 2;
 // (e.g. substring's bounds check) -- sys.tr importing strings.tr back would
 // be a circular import. Avoiding string arithmetic here entirely breaks
 // that cycle without sys.tr needing any operator overload at all.
-fn panic(msg: string): void {
+pub fn panic(msg: string): void {
     write(STDERR_FD, msg, strlen(msg));
     write(STDERR_FD, "\n", 1);
     abort();

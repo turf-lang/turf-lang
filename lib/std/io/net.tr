@@ -62,21 +62,21 @@ import mem;
 // failure (tests/33_net_dns/02_accept_failure_is_reported.tr). recv()/send()
 // return a 64-bit ssize_t, so `int` is right for those.
 
-extern fn socket(domain: int, socktype: int, protocol: int): int32;
-extern fn bind(fd: int, addr: void*, len: int): int32;
-extern fn listen(fd: int, backlog: int): int32;
-extern fn accept(fd: int, addr: void*, len: void*): int32;
-extern fn connect(fd: int, addr: void*, len: int): int32;
-extern fn recv(fd: int, buf: void*, len: int, flags: int): int;
-extern fn send(fd: int, buf: string, len: int, flags: int): int;
-extern fn close(fd: int): int32;
-extern fn setsockopt(fd: int, level: int, optname: int, optval: void*, optlen: int): int32;
-extern fn strlen(s: string): int;
+pub extern fn socket(domain: int, socktype: int, protocol: int): int32;
+pub extern fn bind(fd: int, addr: void*, len: int): int32;
+pub extern fn listen(fd: int, backlog: int): int32;
+pub extern fn accept(fd: int, addr: void*, len: void*): int32;
+pub extern fn connect(fd: int, addr: void*, len: int): int32;
+pub extern fn recv(fd: int, buf: void*, len: int, flags: int): int;
+pub extern fn send(fd: int, buf: string, len: int, flags: int): int;
+pub extern fn close(fd: int): int32;
+pub extern fn setsockopt(fd: int, level: int, optname: int, optval: void*, optlen: int): int32;
+pub extern fn strlen(s: string): int;
 
 // The classic (deprecated, but still universally present and ABI-stable on
 // Linux glibc) hostname-lookup call -- see resolve_hostname() below for the
 // full explanation of why this one, and how its result is read.
-extern fn gethostbyname(name: string): ptr;
+pub extern fn gethostbyname(name: string): ptr;
 
 // Named POSIX constants, exported so callers of net.tr could reference them
 // too if they ever needed to (e.g. a future UdpSocket built the same way).
@@ -91,7 +91,7 @@ export immut SO_REUSEADDR: int = 2;
 // still tell them apart (e.g. ConnectionRefused vs. a local socket() failure
 // are very different things to react to), even though a variant itself
 // carries no payload/message.
-error NetworkError {
+pub error NetworkError {
     SocketCreationFailed,
     ConnectionRefused,
     BindFailed,
@@ -153,7 +153,7 @@ error NetworkError {
 // time -- byte 0 of that 4-byte address is the first octet ("a" in
 // "a.b.c.d"), since network byte order for a dotted-decimal address is
 // just left-to-right, same as buildSockAddr()'s own addrPart comment notes.
-fn resolve_hostname(host: string): !string {
+pub fn resolve_hostname(host: string): !string {
     mut h: ptr = gethostbyname(host);
     if h == null {
         return NetworkError::ResolutionFailed;
@@ -198,7 +198,7 @@ fn resolve_hostname(host: string): !string {
 // image as one packed little-endian integer and writes it through a
 // `void* to int*` indexed store -- the same pointer-indexing idiom
 // list.tr/stack.tr already use for their own `data: T*` fields.
-fn buildSockAddr(a: int, b: int, c: int, d: int, port: int): void* {
+pub fn buildSockAddr(a: int, b: int, c: int, d: int, port: int): void* {
     mut addr: void* = mem::alloc_zeroed(1, 16);
     mut iaddr: int* = addr to int*;
 
@@ -222,18 +222,18 @@ fn buildSockAddr(a: int, b: int, c: int, d: int, port: int): void* {
 // TcpConnection::connect()). Symmetric once connected: both sides just
 // read()/write().
 
-struct TcpConnection {
-    fd: int
+pub struct TcpConnection {
+    pub fd: int
 }
 
-fn TcpConnection.new(fd: int): void {
+pub fn TcpConnection.new(fd: int): void {
     self.fd = fd;
 }
 
 // Dial out to a.b.c.d:port. Returns `!TcpConnection`: a refused connection
 // (nothing listening) or a local socket() failure are both ordinary,
 // expected outcomes -- the caller decides how to recover.
-fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: !TcpConnection {
+pub fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: !TcpConnection {
     mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
     if !(fd >= 0) {
         return NetworkError::SocketCreationFailed;
@@ -268,31 +268,31 @@ fn TcpConnection.connect(a: int, b: int, c: int, d: int, port: int) static: !Tcp
 // malloc'd, for the same reason io::read_to_string() is: recv() may write
 // fewer than maxBytes bytes, and the untouched tail needs to already be 0
 // to serve as the string's NUL terminator.
-fn TcpConnection.read(maxBytes: int): string {
+pub fn TcpConnection.read(maxBytes: int): string {
     mut buf: void* = gc_alloc_zeroed(maxBytes + 1);
     recv(self.fd, buf, maxBytes, 0);
     return buf to string;
 }
 
 // Writes the entirety of `data` to the connection.
-fn TcpConnection.write(data: string): void {
+pub fn TcpConnection.write(data: string): void {
     send(self.fd, data, strlen(data), 0);
 }
 
 // Closes the connection. Safe to call once; the underlying fd is not
 // reusable afterward.
-fn TcpConnection.close(): void {
+pub fn TcpConnection.close(): void {
     close(self.fd);
 }
 
 // ─── TcpListener ─────────────────────────────────────────────────────────
 // A server-side listening socket, bound to all local interfaces.
 
-struct TcpListener {
-    fd: int
+pub struct TcpListener {
+    pub fd: int
 }
 
-fn TcpListener.new(fd: int): void {
+pub fn TcpListener.new(fd: int): void {
     self.fd = fd;
 }
 
@@ -303,7 +303,7 @@ fn TcpListener.new(fd: int): void {
 // failure, is an ordinary startup condition the caller decides how to
 // handle (most programs will just treat it as fatal via `recover run {
 // sys::exit(1); }`, but that's the caller's call, not this function's).
-fn TcpListener.bind(port: int) static: !TcpListener {
+pub fn TcpListener.bind(port: int) static: !TcpListener {
     mut fd: int = socket(AF_INET, SOCK_STREAM, 0);
     if !(fd >= 0) {
         return NetworkError::SocketCreationFailed;
@@ -334,7 +334,7 @@ fn TcpListener.bind(port: int) static: !TcpListener {
 // Returns `!TcpConnection`: a single bad accept() shouldn't necessarily
 // bring down a whole server -- the caller decides (commonly
 // `recover run { continue; }` to just keep serving).
-fn TcpListener.accept(): !TcpConnection {
+pub fn TcpListener.accept(): !TcpConnection {
     mut clientFd: int = accept(self.fd, null, null);
     if !(clientFd >= 0) {
         return NetworkError::AcceptFailed;
@@ -343,6 +343,6 @@ fn TcpListener.accept(): !TcpConnection {
 }
 
 // Stops listening and closes the socket.
-fn TcpListener.close(): void {
+pub fn TcpListener.close(): void {
     close(self.fd);
 }

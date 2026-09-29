@@ -30,9 +30,9 @@ import sys;
 
 // ─── C allocator bindings ─────────────────────────────────────────────────────
 
-extern fn malloc(size: int): void*;
-extern fn calloc(count: int, size: int): void*;
-extern fn realloc(p: void*, new_size: int): void*;
+pub extern fn malloc(size: int): void*;
+pub extern fn calloc(count: int, size: int): void*;
+pub extern fn realloc(p: void*, new_size: int): void*;
 
 // MEM-002: there used to be a plain `extern fn free(p: void*): void;` here,
 // bound straight to libc. It's gone -- Turf's `extern fn` has no alias
@@ -55,26 +55,26 @@ extern fn realloc(p: void*, new_size: int): void*;
 // real result back out of that slot via an `int*` cast (the same
 // pointer-indexed-read/write idiom net.tr's sockaddr_in construction and
 // this file's own posix_memalign wrapper both already use).
-extern fn posix_memalign(memptr: void*, alignment: int, size: int): int;
+pub extern fn posix_memalign(memptr: void*, alignment: int, size: int): int;
 
 // glibc-specific (this codebase already targets glibc/Linux primarily --
 // see e.g. net.tr's Linux-numbered socket constants). Reports how many
 // bytes are ACTUALLY usable at `p`, which is often more than what was
 // requested (malloc rounds up internally) -- useful for code that wants to
 // opportunistically use any slack space without a realloc.
-extern fn malloc_usable_size(p: void*): int;
+pub extern fn malloc_usable_size(p: void*): int;
 
 // ─── Memory primitive bindings ────────────────────────────────────────────────
 
-extern fn memcpy(dst: void*, src: void*, n: int): void*;
-extern fn memmove(dst: void*, src: void*, n: int): void*;
-extern fn memset(p: void*, val: int, n: int): void*;
-extern fn memcmp(a: void*, b: void*, n: int): int;
+pub extern fn memcpy(dst: void*, src: void*, n: int): void*;
+pub extern fn memmove(dst: void*, src: void*, n: int): void*;
+pub extern fn memset(p: void*, val: int, n: int): void*;
+pub extern fn memcmp(a: void*, b: void*, n: int): int;
 
 // ─── Turf-level safe helpers ──────────────────────────────────────────────────
 
 // alloc: allocate `size` bytes. Aborts on OOM.
-fn alloc(size: int): void* {
+pub fn alloc(size: int): void* {
     mut result: void* = malloc(size);
     if result == null {
         sys::panic("mem.alloc: out of memory");
@@ -83,7 +83,7 @@ fn alloc(size: int): void* {
 }
 
 // alloc_zeroed: allocate `count * elem_size` zero-initialised bytes. Aborts on OOM.
-fn alloc_zeroed(count: int, elem_size: int): void* {
+pub fn alloc_zeroed(count: int, elem_size: int): void* {
     mut result: void* = calloc(count, elem_size);
     if result == null {
         sys::panic("mem.alloc_zeroed: out of memory");
@@ -92,7 +92,7 @@ fn alloc_zeroed(count: int, elem_size: int): void* {
 }
 
 // grow: reallocate `p` to `new_size` bytes. Aborts on OOM.
-fn grow(p: void*, new_size: int): void* {
+pub fn grow(p: void*, new_size: int): void* {
     mut result: void* = realloc(p, new_size);
     if result == null {
         sys::panic("mem.grow: out of memory");
@@ -101,14 +101,14 @@ fn grow(p: void*, new_size: int): void* {
 }
 
 // dup: copy `n` bytes from `src` into a fresh heap buffer. Aborts on OOM.
-fn dup(src: void*, n: int): void* {
+pub fn dup(src: void*, n: int): void* {
     mut dst: void* = alloc(n);
     memcpy(dst, src, n);
     return dst;
 }
 
 // zero: write `n` zero bytes starting at `p`.
-fn zero(p: void*, n: int): void {
+pub fn zero(p: void*, n: int): void {
     memset(p, 0, n);
 }
 
@@ -116,7 +116,7 @@ fn zero(p: void*, n: int): void {
 // (`alignment` must be a power of two and a multiple of `sizeof(void*)`,
 // same requirement as the underlying posix_memalign()). Aborts on OOM or a
 // bad alignment argument, matching every other checked helper in this file.
-fn alloc_aligned(alignment: int, size: int): void* {
+pub fn alloc_aligned(alignment: int, size: int): void* {
     mut outSlot: void* = malloc(8);
     immut result: int = posix_memalign(outSlot, alignment, size);
     if result != 0 {
@@ -137,7 +137,7 @@ fn alloc_aligned(alignment: int, size: int): void* {
 // runtime/turfrt.h's turf_rt_checked_free) is what turns that from
 // undiagnosed corruption into a diagnosable runtime panic naming the
 // mistake. Usage is unchanged from before this group: `mem::free(buf)`.
-fn free(p: void*): void {
+pub fn free(p: void*): void {
     gc_checked_free(p);
 }
 
@@ -146,7 +146,7 @@ fn free(p: void*): void {
 // internally). Lets code opportunistically use slack space without a
 // realloc. See malloc_usable_size()'s own doc comment above for the
 // glibc-specific caveat.
-fn usable_size(p: void*): int {
+pub fn usable_size(p: void*): int {
     return malloc_usable_size(p);
 }
 
@@ -167,7 +167,7 @@ fn usable_size(p: void*): int {
 // is a documented no-op, not an error -- C memory (an `int` cast to
 // `void*`, an FFI buffer) is legitimately passed through here too, and
 // pinning it would be meaningless.
-fn root(p: void*): void {
+pub fn root(p: void*): void {
     gc_pin(p);
 }
 
@@ -177,7 +177,7 @@ fn root(p: void*): void {
 // as a programmer error worth surfacing, unlike root()'s own silent no-op
 // for a `p` that was never a GC pointer to begin with (see root()'s own
 // doc comment just above for that asymmetry's reasoning).
-fn unroot(p: void*): void {
+pub fn unroot(p: void*): void {
     gc_unpin(p);
 }
 
@@ -209,17 +209,17 @@ fn unroot(p: void*): void {
 //   // ... use buf, and any number of other pool.track()'d allocations ...
 //   mem::free_pool(pool);         // frees every tracked allocation
 
-struct Pool<T> {
-    items: T*,
-    len: int,
-    cap: int
+pub struct Pool<T> {
+    pub items: T*,
+    pub len: int,
+    pub cap: int
 }
 
 // Registers `item` with this pool -- does NOT allocate anything itself;
 // call mem::alloc()/alloc_zeroed()/alloc_aligned() (or any pointer-typed
 // value you already own) and pass the result here to hand its lifetime to
 // the pool.
-fn<T> Pool.track(item: T): void {
+pub fn<T> Pool.track(item: T): void {
     if self.len == self.cap {
         if self.cap == 0 {
             self.cap = 8;
@@ -246,7 +246,7 @@ fn<T> Pool.track(item: T): void {
 }
 
 // How many allocations this pool is currently tracking.
-fn<T> Pool.length(): int {
+pub fn<T> Pool.length(): int {
     return self.len;
 }
 
@@ -267,7 +267,7 @@ fn<T> Pool.length(): int {
 // `Pool<void*>` specifically (or any other single concrete pointer type,
 // via your own equivalent free function) -- not a general `Pool<T>`
 // operation.
-fn free_pool(pool: Pool<void*>): void {
+pub fn free_pool(pool: Pool<void*>): void {
     mut i: int = 0;
     while i < pool.len {
         free(pool.items[i]);

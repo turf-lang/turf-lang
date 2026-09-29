@@ -174,6 +174,8 @@ std::map<std::string, int> Keywords = {{"if", TOK_IF},
                                        {"unsafe", TOK_UNSAFE},
                                        {"guess", TOK_GUESS},
                                        {"defer", TOK_DEFER},
+                                       {"pub", TOK_PUB},
+                                       {"public", TOK_PUB},
                                        {"caller_location", TOK_CALLER_LOCATION}};
 
 /**

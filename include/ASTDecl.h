@@ -169,8 +169,29 @@ struct ParamDecl {
 };
 
 
+/**
+ * @brief Mixin carried by every declaration that can be `pub`/`public`
+ *        (LEC-002, FREEZE.md §6.15): function/method, extern fn, struct,
+ *        enum, error, machine.
+ *
+ * A mixin instead of a field on ExprAST so an expression node cannot even
+ * express "public" -- the parser's only way to set one is through a
+ * declaration node, which is what keeps `pub` on a non-declaration a parse
+ * error rather than a silently ignored bit. Private by default; clone() of
+ * each declaration must copy it (a monomorphized clone is resolved in its
+ * template's module and must keep the template's visibility).
+ */
+class VisibleDecl {
+  VisibilityMark Vis_;
+
+public:
+  const VisibilityMark &getVisibility() const { return Vis_; }
+  bool isPublic() const { return Vis_.IsPublic; }
+  void setVisibility(VisibilityMark M) { Vis_ = M; }
+};
+
 // fn RetType Name<T>(params...) { body }
-class FuncDefExprAST : public ExprAST {
+class FuncDefExprAST : public ExprAST, public VisibleDecl {
   std::string Name;
   TurfTypePtr ReturnType;
   std::vector<ParamDecl> Params;
@@ -264,9 +285,11 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitFuncDef(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<FuncDefExprAST>(
+    auto Cloned = std::make_unique<FuncDefExprAST>(
         Loc, Name, NameLoc, ReturnType, Params, CloneExprAST(Body.get()), TypeParams,
         IsStaticDecl, HasCallerLocation);
+    Cloned->setVisibility(getVisibility());
+    return Cloned;
     // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. The default-constructed field is nullptr.
   }
@@ -275,7 +298,7 @@ public:
 // extern fn Name(param: type, ...): ReturnType;
 // Declares a C external function visible to this compilation unit.
 // No function body is generated — only an LLVM ExternalLinkage prototype.
-class ExternFuncDeclExprAST : public ExprAST {
+class ExternFuncDeclExprAST : public ExprAST, public VisibleDecl {
   std::string Name_;
   std::vector<std::pair<std::string, TurfTypePtr>> Params_;
   TurfTypePtr ReturnType_;
@@ -306,13 +329,14 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitExternFuncDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<ExternFuncDeclExprAST>(Loc_, Name_, NameLoc_, Params_,
-                                                   ReturnType_, IsVarArg_,
-                                                   LibName_);
+    auto Cloned = std::make_unique<ExternFuncDeclExprAST>(
+        Loc_, Name_, NameLoc_, Params_, ReturnType_, IsVarArg_, LibName_);
+    Cloned->setVisibility(getVisibility());
+    return Cloned;
   }
 };
 
-class EnumDeclExprAST : public ExprAST {
+class EnumDeclExprAST : public ExprAST, public VisibleDecl {
     std::string              Name;
     std::vector<std::string> Variants;
     TurfTypePtr              UnderlyingType;  // nullptr = TurfInt32 default
@@ -330,7 +354,9 @@ public:
     llvm::Value* codegen() override;
     void accept(ASTVisitor& V) override { V.visitEnumDecl(*this); }
     std::unique_ptr<ExprAST> clone() const override {
-        return std::make_unique<EnumDeclExprAST>(Loc, Name, Variants, UnderlyingType);
+        auto Cloned = std::make_unique<EnumDeclExprAST>(Loc, Name, Variants, UnderlyingType);
+        Cloned->setVisibility(getVisibility());
+        return Cloned;
     }
 };
 
@@ -350,7 +376,7 @@ struct MachineEdge {
 // separate node, even though `MachineName::State` access downstream reuses
 // the ordinary enum-variant machinery unchanged (TurfMachineType subclasses
 // TurfEnumType -- see include/Types.h).
-class MachineDeclExprAST : public ExprAST {
+class MachineDeclExprAST : public ExprAST, public VisibleDecl {
     std::string               Name;
     std::vector<std::string>  States;   // first-appearance order = ordinal, same role as EnumDeclExprAST::Variants
     std::vector<MachineEdge>  Edges;    // declared transitions, in source order
@@ -368,7 +394,9 @@ public:
     llvm::Value* codegen() override;
     void accept(ASTVisitor& V) override { V.visitMachineDecl(*this); }
     std::unique_ptr<ExprAST> clone() const override {
-        return std::make_unique<MachineDeclExprAST>(Loc, Name, States, Edges);
+        auto Cloned = std::make_unique<MachineDeclExprAST>(Loc, Name, States, Edges);
+        Cloned->setVisibility(getVisibility());
+        return Cloned;
     }
 };
 
@@ -380,7 +408,7 @@ public:
 // implicit `DEFAULT` variant) from the full braced form. Variants are bare
 // names only, exactly like EnumDeclExprAST -- no payload fields (deferred,
 // see errors_and_recover.md §5.1).
-class ErrorDeclExprAST : public ExprAST {
+class ErrorDeclExprAST : public ExprAST, public VisibleDecl {
     std::string              Name;
     std::vector<std::string> Variants;
     bool                     IsBareForm;
@@ -397,7 +425,9 @@ public:
     llvm::Value* codegen() override;
     void accept(ASTVisitor& V) override { V.visitErrorDecl(*this); }
     std::unique_ptr<ExprAST> clone() const override {
-        return std::make_unique<ErrorDeclExprAST>(Loc, Name, Variants, IsBareForm);
+        auto Cloned = std::make_unique<ErrorDeclExprAST>(Loc, Name, Variants, IsBareForm);
+        Cloned->setVisibility(getVisibility());
+        return Cloned;
     }
 };
 
@@ -453,7 +483,7 @@ public:
 };
 
 // struct StructName<T> { type field1, type field2 }
-class StructDeclExprAST : public ExprAST {
+class StructDeclExprAST : public ExprAST, public VisibleDecl {
   std::string Name;
   std::vector<StructField> Fields;
   std::vector<std::string> TypeParams;
@@ -499,7 +529,9 @@ public:
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitStructDecl(*this); }
   std::unique_ptr<ExprAST> clone() const override {
-    return std::make_unique<StructDeclExprAST>(Loc, Name, NameLoc, Fields, TypeParams);
+    auto Cloned = std::make_unique<StructDeclExprAST>(Loc, Name, NameLoc, Fields, TypeParams);
+    Cloned->setVisibility(getVisibility());
+    return Cloned;
   }
 };
 

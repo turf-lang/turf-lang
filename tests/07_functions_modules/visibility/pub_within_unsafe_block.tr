@@ -1,0 +1,15 @@
+// LEC-002 stage 2: a top-level `unsafe { }` block is flattened into the file,
+// so a `pub` declaration inside it is a top-level declaration like any other
+// (NOT a "declaration inside a function", which is rejected).
+import test;
+
+unsafe {
+    pub fn doubled(x: int): int {
+        return x * 2;
+    }
+}
+
+fn main(): int {
+    test::assert(doubled(21) == 42, "pub fn declared inside a top-level unsafe block");
+    return 0;
+}
