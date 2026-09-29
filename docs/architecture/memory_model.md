@@ -771,6 +771,28 @@ exercise, and no independent check on the register-scanning technique:
   assumption the whole design leans on, run across the full suite in CI
   (both opt levels verified live during this group's own session; the
   default level is the standing CI gate) plus the stress corpus above.
+  The same variable also runs a **full-stack mark-set comparison**: a
+  second, complete mark phase whose conservative roots come only from
+  sources the production scan never uses (a `getcontext()` snapshot taken
+  in `turf_rt_collect()`, an ancestor of `gc_mark()`, for the
+  callee-saved registers and the low end of the stack; glibc's
+  `pthread_getattr_np()` for the whole `[stack]` mapping's high end). That
+  range is a subset of the production scan's range whenever the
+  production stack base is right, so a block only the independent pass
+  marks is a real missed root, and it **panics** (`GC root missed`)
+  instead of sweeping a live object. It is the check that catches a wrong
+  stack bound, which the register check cannot.
+- **The stack base without `/proc`.** `turf_gc_record_stack_base()` reads
+  the `[stack]` mapping's top from `/proc/self/maps`; when that is
+  unreadable (a container or sandbox without procfs) it falls back to
+  glibc's `__libc_stack_end` (the stack pointer at process entry), or on
+  non-glibc Linux to `pthread_getattr_np()`, and panics if neither is
+  available. Before FDN-005's follow-up it fell back to the address of a
+  local in `turf_rt_init()`'s frame, a *sibling* of the user's `main`, and
+  freed live objects in 11 of 12 `tests/41_gc` programs under
+  `TURF_GC_STRESS`. **`TURF_GC_NO_PROCFS=1`** (testing aid) skips the
+  `/proc` read so the fallback runs on an ordinary machine;
+  `scripts/gc_no_procfs_smoke.sh` is its regression coverage.
 
 #### 2.6.1 `heap(expr)`: a user value, GC-heap-allocated with a real descriptor
 

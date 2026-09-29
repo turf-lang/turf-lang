@@ -26,6 +26,14 @@ Runs every `.tr` file under `tests/`. Takes an optional `-O0`/`-O1`/`-O2`/`-O3`/
 
 **GC regression tests (`tests/41_gc/`) must be run at `-O0` as well as the default level.** Conservative stack/register scanning can mask a real tracing-collector bug at `-O2` purely by register-allocation luck — a value that would otherwise be the only surviving reference to a GC object happens to still sit in a scanned register or stack slot. `./scripts/test_runner.sh -O0` is the only way to catch that class of bug; it's already part of CI, but a session iterating locally on `runtime/turfrt_gc.c` or its Codegen counterpart should run it directly rather than relying on the default-level run alone.
 
+**GC testing aids (FDN-005)** — runtime environment variables, read by every compiled Turf program, combinable with each other and with any `-O` level:
+- `TURF_GC_STRESS=1` — collect on every allocation. The most effective way to surface a missed root; slow on allocation-heavy tests (raise `TURF_TEST_TIMEOUT_SEC`).
+- `TURF_GC_VALIDATE=1` (Linux/glibc/x86-64) — runs an independent full-stack mark phase and panics (`GC root missed`) if the production scan missed a block it reaches; also reports stray caller-saved register hits. Pair it with `TURF_GC_STRESS=1` to compare mark sets on every allocation.
+- `TURF_GC_NO_PROCFS=1` — pretend `/proc/self/maps` is unreadable, exercising the stack-base fallback a procfs-less container takes (`scripts/gc_no_procfs_smoke.sh`).
+- An ASan runtime: configure a separate `build_asan/` with `-DTURF_RT_SANITIZE=ON`, then `TURF_COMPILER=$(pwd)/build_asan/turf ASAN_OPTIONS=detect_leaks=0 ./scripts/test_runner.sh`. Both build trees write the plain `lib/libturfrt.a`, so don't build one while a suite runs against the other.
+
+`scripts/gc_stress_corpus_smoke.sh` runs the long-running programs in `tests/custom/gc_stress_corpus/`, which `test_runner.sh` never touches.
+
 Two conventions the runner enforces:
 - A file named `fail_*.tr` is expected to **fail to compile**. A plain-named `.tr` file is expected to **compile and run successfully** (use `assert(cond, "message")` inside `main()` for behavioral checks).
 - A `fail_*.tr` file containing the marker comment `// RUNTIME_ABORT_EXPECTED` instead means: must compile successfully, then abort at runtime (non-zero exit) — for stdlib guards that fail at runtime, not compile time, e.g. bounds checks.

@@ -18,7 +18,14 @@
 > frozen as `FREEZE.md` §6.13). **`SMP-001` (compiler query facade) is
 > in progress** — the facade and the Sandbox port landed 2026-09-28; the
 > `turf-lsp` port (stage 3, its own repository) remains — see
-> `docs/development/changes/SMP-001.md`. Part I's sequence has the
+> `docs/development/changes/SMP-001.md`. **`FDN-004` and `FDN-006` are
+> done** (both landed 2026-09-28). **`FDN-005` (GC hardening) is done
+> pending one CI confirmation** — see `docs/development/changes/FDN-005.md`
+> (landed 2026-09-28, follow-up 2026-09-29: the full-stack mark-set
+> comparison and the no-`/proc` fallback, which was freeing live objects
+> and is now fixed). The one criterion item not yet observed complete is
+> `TURF_GC_STRESS` + ASan at `-O2`, now a CI step. Its CI jobs stay on
+> through RC as a gate. Part I's sequence has the
 > current state of every Phase 1 item; the rest of Phase 1 and all of
 > Phases 2+ remain unimplemented. Items marked
 > **DECISION** need an explicit answer from the project owner before their
@@ -110,7 +117,7 @@ PHASE 1  Foundation                   SMP-002  one generic type walker      DONE
    │                                  FDN-004  string indexing: bounds + `char` (D17)  DONE (FDN-004.md, 2026-09-28)
    │                                  FDN-006  runtime contract (stack overflow, OOM, ABI stamp)  DONE (FDN-006.md, 2026-09-28)
    │                                  SMP-001  compiler query facade (parallel, any time in 1–2)  stages 1–2 DONE, turf-lsp port pending (SMP-001.md, 2026-09-28)
-   │                                  FDN-005  GC hardening (starts here, runs to RC)
+   │                                  FDN-005  GC hardening  stages 1–4 DONE (FDN-005.md, 2026-09-28/29); runs on to RC as a CI gate
    ▼
 PHASE 2  Language & ecosystem         LEC-002  visibility — `pub` (D13)
    │                                  LEC-001  projects, dependencies, build (D7)
@@ -1161,7 +1168,13 @@ download, install, `turf new`, `turf build`, run); (2) the D20 diagnostic;
 (3) optional macOS port; (4) packaging recipes.
 **Tests** `scripts/release_smoke.sh` in CI on a tag build. **Risks** the
 runtime's Linux-specific stack discovery (`/proc/self/maps`) inside minimal
-containers (it has a fallback; FDN-005 must test the fallback path too).
+containers (it has a fallback; FDN-005 must test the fallback path too —
+**done 2026-09-29**: the fallback was freeing live objects and is fixed,
+`scripts/gc_no_procfs_smoke.sh`). The known stdlib/driver blockers for
+macOS and Windows (a glibc-only `malloc_usable_size` that breaks `-O0`
+links, the Linux-only `sockaddr_in` layout and socket constants, no
+Winsock, 32-bit `long` returns) are tabled in `FDN-005.md` *Portability
+review*.
 **Completion** the clean-machine walkthrough of Part IX passes on every
 shipped platform.
 
