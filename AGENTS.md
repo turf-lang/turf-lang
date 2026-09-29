@@ -41,7 +41,7 @@ Runs every `.tr` file under `tests/`. Takes an optional `-O0`/`-O1`/`-O2`/`-O3`/
 `scripts/gc_stress_corpus_smoke.sh` runs the long-running programs in `tests/custom/gc_stress_corpus/`, which `test_runner.sh` never touches.
 
 Two conventions the runner enforces:
-- A file named `fail_*.tr` is expected to **fail to compile**. A plain-named `.tr` file is expected to **compile and run successfully** (use `assert(cond, "message")` inside `main()` for behavioral checks).
+- A file named `fail_*.tr` is expected to **fail to compile**. A plain-named `.tr` file is expected to **compile and run successfully** (for behavioral checks, `import test;` and call `test::assert(cond, "message")` inside `main()`; a bare `assert(...)` is E041 "Unknown function", because `assert` lives in the stdlib's `test` module, not in the prelude).
 - A `fail_*.tr` file containing the marker comment `// RUNTIME_ABORT_EXPECTED` instead means: must compile successfully, then abort at runtime (non-zero exit) — for stdlib guards that fail at runtime, not compile time, e.g. bounds checks.
 
 **The one trap everyone hits repeatedly on this project**: `scripts/test_runner.sh` silently *excludes* any file whose name ends in `_module.tr` (`grep -v "_module.tr"`), treating it as a companion/helper file with no `main()`. This means:
