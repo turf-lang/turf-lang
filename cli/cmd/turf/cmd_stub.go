@@ -6,10 +6,6 @@ import "fmt"
 // stage table in docs/development/changes/LEC-001.md. `test` is REL-002's, not
 // LEC-001's. None of these runs the compiler, so none runs the handshake.
 var stubWhen = map[string]string{
-	"new":    "LEC-001 stage 5",
-	"init":   "LEC-001 stage 5",
-	"add":    "LEC-001 stage 5",
-	"remove": "LEC-001 stage 5",
 	"fetch":  "LEC-001 stage 6",
 	"update": "LEC-001 stage 6",
 	"test":   "REL-002",
@@ -19,8 +15,8 @@ var stubWhen = map[string]string{
 // behaviour is not built yet. It says so and exits 2, rather than being left
 // out (which would make the name look free to reuse) or half-working.
 //
-// The pre-2.0 turf-cli implementations of init/add/remove/update are still in
-// this package, unused: stages 5 and 6 rework them, so they are not wired in.
+// The pre-2.0 turf-cli implementations of install/update/publish are still in
+// this package, unused: stage 6 reworks them, so they are not wired in.
 func stubCmd(name string) func([]string) int {
 	return func([]string) int {
 		return usagef("'%s' is not implemented yet (%s)", name, stubWhen[name])

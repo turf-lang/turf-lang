@@ -305,6 +305,12 @@ func (g *Graph) CheckCompilerVersion(release, compiler string) error {
 	return nil
 }
 
+// ReleaseMajorMinor reads the "major.minor" out of a release version such as
+// "2.0.0-dev", for `turf new` to write the `turf = "M.m"` pin.
+func ReleaseMajorMinor(release string) (major, minor int, err error) {
+	return parseRelease(release)
+}
+
 func parseRelease(s string) (major, minor int, err error) {
 	if i := strings.IndexAny(s, "-+"); i >= 0 {
 		s = s[:i]

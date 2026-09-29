@@ -44,14 +44,14 @@ func init() {
 		{"migrate", groupAny, "migrate source across a language change", helpMigrate, cmdMigrate},
 		{"dump", groupAny, "print an intermediate form (ast, resolved, ...)", helpDump, cmdDump},
 
-		{"new", groupProject, "create a project", stubHelp("new"), stubCmd("new")},
-		{"init", groupProject, "make the current directory a project", stubHelp("init"), stubCmd("init")},
+		{"new", groupProject, "create a project", helpNew, cmdNew},
+		{"init", groupProject, "make the current directory a project", helpInit, cmdInit},
 		{"build", groupProject, "build the project", helpBuild, cmdBuild},
 		{"test", groupProject, "run the project's tests", stubHelp("test"), stubCmd("test")},
 		{"clean", groupProject, "remove build output", helpClean, cmdClean},
 		{"fetch", groupProject, "download dependencies", stubHelp("fetch"), stubCmd("fetch")},
-		{"add", groupProject, "add a dependency", stubHelp("add"), stubCmd("add")},
-		{"remove", groupProject, "remove a dependency", stubHelp("remove"), stubCmd("remove")},
+		{"add", groupProject, "add a dependency", helpAdd, cmdAdd},
+		{"remove", groupProject, "remove a dependency", helpRemove, cmdRemove},
 		{"update", groupProject, "update dependencies", stubHelp("update"), stubCmd("update")},
 
 		{"publish", groupOther, "reserved: there is no registry in 2.0", helpPublish, cmdPublish},
