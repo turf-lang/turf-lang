@@ -1181,11 +1181,15 @@ F-11c), REPL.
 | Cross-compilation (D20) | `--target` produces an **object file** for any LLVM triple; linking for a non-host triple fails with a TurfLang diagnostic ("cross-linking is not supported in 2.0; the runtime is built for <host>") instead of a host-linker error. Full cross-linking needs per-target runtime archives — FUTURE F-20. |
 | Install layout | `turf-<ver>-<platform>/{bin/turf, bin/turfc, lib/libturfrt.a, lib/std/**, share/turf/examples/**, LICENSE, README.md}`; `TURF_HOME` optional (binary-relative discovery already works); `lib/usr` is retired in favour of LEC-001's cache. |
 | Channels | GitHub release archives + SHA-256 (exists); an `install.sh` that verifies the checksum; Homebrew/Scoop/AUR recipes updated only for shipped platforms (their repos are at v0.6.0 today). |
+| **Compiler self-containment** (found 2026-09-30, LEC-001) | **`turfc` is not self-contained today, and the clean-VM smoke in stage 1 would fail on it.** It links LLVM *dynamically* (target `LLVM` = `libLLVM.so.22.1`) and drags in that library's own dependencies. `ldd build/turfc` shows `libLLVM.so.22.1`, `libgomp.so.1`, `libstdc++`, `libffi.so.8`, `libedit`, `libz`, `libzstd`, `libxml2.so.16`, `libncursesw`, `libicuuc.so.78`/`libicudata`. So a user of a release archive would need exactly LLVM 22's shared library and matching versions of the rest — no better than building from source. What is already fine: the Go `turf` is fully static, and a *compiled program* needs only libc/libm (`libturfrt` is linked in statically). **Recommendation:** release builds link LLVM's static component libraries (`llvm_map_components_to_libnames(...)` over the components Codegen uses, instead of the `LLVM` dylib; `llvm-22-dev` ships the `.a` archives) plus `-static-libstdc++ -static-libgcc`, and are built with `-DTURF_SMART=OFF` or a static OpenMP, so that `ldd bin/turfc` lists only libc, libm, libz and the dynamic loader. Keep dev builds on the dylib (link time). Gate it with a CI check that runs `ldd` on the release binary against an allowlist. |
+| **`--smart` in a release** (found 2026-09-30) | The archive has never contained the GGUF model (~1 GB, `models/` is git-ignored), so `--smart` in any release so far silently falls back to plain diagnostics. It is optional at build time since LEC-001 (`-DTURF_SMART=OFF`, `scripts/cmake_build.sh --no-smart`; `src/SLMEngineDisabled.cpp` prints why). **Decide** one of: (a) release builds without it (`TURF_SMART=OFF`, smallest and self-contained, `--smart` says it is not built in); (b) ship the runtime and fetch the model on demand (a future `turf smart install` into the cache, with a checksum); (c) a separate "with model" archive. Recommendation: (a) for 2.0, and (b) as FUTURE. A release must never ship a runtime that silently does nothing. |
 
-**Stages** (1) Tier-1 archive in the new layout + `install.sh` + a clean-VM
-smoke (`docker run ubuntu:24.04` / `debian:stable` with only `cc` installed:
-download, install, `turf new`, `turf build`, run); (2) the D20 diagnostic;
-(3) optional macOS port; (4) packaging recipes.
+**Stages** (1) Tier-1 archive in the new layout, with a **self-contained
+`turfc`** (row above) + `install.sh` + a clean-VM smoke (`docker run
+ubuntu:24.04` / `debian:stable` with only `cc` installed: download, install,
+`turf new`, `turf build`, run — this is the test that catches a dynamic
+`libLLVM`); (2) the D20 diagnostic; (3) optional macOS port; (4) packaging
+recipes.
 **Tests** `scripts/release_smoke.sh` in CI on a tag build. **Risks** the
 runtime's Linux-specific stack discovery (`/proc/self/maps`) inside minimal
 containers (it has a fallback; FDN-005 must test the fallback path too —
