@@ -113,7 +113,6 @@ static unsigned char g_altstack[TURF_ALTSTACK_SIZE];
  * otherwise flag. */
 #ifndef TURF_SIGNAL_ASAN
 static void turf_rt_segv_handler(int sig, siginfo_t *info, void *ucontext) {
-  (void)sig;
   (void)ucontext;
 
   uintptr_t fault_addr = (uintptr_t)info->si_addr;
@@ -141,8 +140,9 @@ static void turf_rt_segv_handler(int sig, siginfo_t *info, void *ucontext) {
                   "<runtime>", 0);
   } else {
     fprintf(stderr,
-            "panic: segmentation fault (this is a bug in unsafe code or in "
-            "TurfLang) at address %p\n",
+            "panic: %s (this is a bug in unsafe code or in TurfLang) at "
+            "address %p\n",
+            sig == SIGBUS ? "bus error" : "segmentation fault",
             info->si_addr);
     fflush(stderr);
     abort();
@@ -192,6 +192,14 @@ void turf_rt_install_segv_handler(void) {
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
   sigaction(SIGSEGV, &sa, NULL);
+  /* macOS reports many protection faults -- including, depending on the
+   * version, a hit on the main thread's stack guard -- as SIGBUS rather
+   * than SIGSEGV (Rust's and Go's runtimes handle both for this reason).
+   * Without this, a stack overflow there would still be a bare
+   * "Bus error: 10" crash, the exact F-20 shape FDN-006 removed on Linux.
+   * Linux raises SIGBUS only for things like a truncated mmap'd file,
+   * which the generic branch reports as "bus error". */
+  sigaction(SIGBUS, &sa, NULL);
 #endif
 }
 

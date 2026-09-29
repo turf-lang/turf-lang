@@ -345,6 +345,41 @@ else
 fi
 rm -rf "$FAKE_HOME"
 
+# SIGBUS gets the same handler as SIGSEGV: macOS reports protection faults,
+# stack-guard hits among them, as SIGBUS, so a SIGSEGV-only handler left
+# them as bare crashes. Linux raises a real SIGBUS on touching an mmap'd page
+# past a file's (truncated) end -- that is what this does.
+echo -e "${BOLD}7. a SIGBUS is reported like a SIGSEGV, not a bare crash${RESET}"
+cat > "$WORKDIR/bus.c" <<'EOF'
+#include "turfrt.h"
+#include <fcntl.h>
+#include <stdlib.h>
+#include <sys/mman.h>
+#include <unistd.h>
+int main(void) {
+  turf_rt_init();
+  char path[] = "/tmp/turfrt_busXXXXXX";
+  int fd = mkstemp(path);
+  if (fd < 0 || ftruncate(fd, 4096) != 0) return 2;
+  volatile char *p = mmap(NULL, 4096, PROT_READ, MAP_SHARED, fd, 0);
+  if (p == MAP_FAILED) return 3;
+  if (ftruncate(fd, 0) != 0) return 4;
+  unlink(path);
+  return p[0];
+}
+EOF
+if cc -std=gnu11 -I runtime "$WORKDIR/bus.c" "$LIBTURFRT" -o "$WORKDIR/bus" > "$WORKDIR/bus.compile.log" 2>&1; then
+  "$WORKDIR/bus" > "$WORKDIR/bus.out" 2>&1
+  STATUS=$?
+  if [ "$STATUS" -eq 134 ] && grep -q "^panic: bus error" "$WORKDIR/bus.out"; then
+    pass "SIGBUS -> 'panic: bus error ...', exit 134"
+  else
+    fail "expected 'panic: bus error' and exit 134, got exit $STATUS:"; cat "$WORKDIR/bus.out"
+  fi
+else
+  fail "bus.c failed to compile:"; cat "$WORKDIR/bus.compile.log"
+fi
+
 echo
 if [ "$FAIL" -eq 0 ]; then
   echo -e "${GREEN}${BOLD}All runtime smoke checks passed.${RESET}"

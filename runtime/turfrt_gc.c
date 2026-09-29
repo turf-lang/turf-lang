@@ -109,6 +109,15 @@
 #if defined(__linux__) && !defined(_GNU_SOURCE)
 #define _GNU_SOURCE
 #endif
+/* Same "before any header" rule, for Windows: MinGW's own <_mingw.h>
+ * (pulled in by <stdint.h>, via turfrt.h) defines _WIN32_WINNT to the
+ * toolchain's default if it is still unset, so a define placed next to
+ * <windows.h> below never takes effect. Modern mingw-w64 defaults to 0xA00;
+ * older ones to 0x502, which hides GetCurrentThreadStackLimits (Windows 8+)
+ * and fails the build. */
+#if defined(_WIN32) && !defined(_WIN32_WINNT)
+#define _WIN32_WINNT 0x0602 /* Windows 8+: GetCurrentThreadStackLimits */
+#endif
 
 #include "turfrt.h"
 #include "turfrt_internal.h"
@@ -154,9 +163,6 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0602 /* Windows 8+: GetCurrentThreadStackLimits */
-#endif
 #include <windows.h>
 #if defined(__x86_64__) || defined(_M_X64)
 #define TURF_GC_REGCAP_WIN64 1
@@ -177,7 +183,7 @@ docs/planning/OVERHAUL_REMAINING_WORK.md OVH-013."
 for this architecture (arm64/AAPCS64 only) -- see \
 docs/planning/OVERHAUL_REMAINING_WORK.md OVH-013."
 #endif
-#else
+#elif defined(__linux__) /* glibc, musl and bionic alike -- not libc-specific */
 #define TURF_GC_STACKBASE_PROCFS 1
 #if defined(__x86_64__)
 #define TURF_GC_REGCAP_SYSV64 1
@@ -190,6 +196,16 @@ docs/planning/OVERHAUL_REMAINING_WORK.md OVH-013."
 no implementation for this architecture/OS combination -- porting notes in \
 docs/planning/OVERHAUL_REMAINING_WORK.md's OVH-013."
 #endif
+#else
+/* FreeBSD/OpenBSD/NetBSD/...: the register capture above would work on
+ * x86-64/AArch64, but the stack base would not -- no /proc/self/maps, no
+ * glibc __libc_stack_end. Until FDN-005 these fell into the Linux branch
+ * and silently under-scanned (a use-after-free). A port needs a
+ * TURF_GC_STACKBASE_* branch using that OS's own query:
+ * pthread_attr_get_np() + pthread_attr_getstack() (FreeBSD),
+ * pthread_stackseg_np() (OpenBSD), pthread_getattr_np() (NetBSD). */
+#error "turfrt_gc.c has no stack-base discovery for this OS (Linux, macOS \
+and Windows only) -- see the comment above this #error."
 #endif
 
 /*
@@ -277,7 +293,17 @@ __attribute__((no_sanitize("address")))
 static uintptr_t
 gc_approx_sp(void) {
   int marker;
+  /* Returning a local's address is this helper's entire purpose (only the
+   * address is used, never dereferenced); clang -- macOS's only compiler --
+   * flags it under -Wall. */
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wreturn-stack-address"
+#endif
   return (uintptr_t)&marker;
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 }
 
 /* ─── Block table ────────────────────────────────────────────────────── */
