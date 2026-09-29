@@ -83,12 +83,12 @@ import sys;
 import hashing;
 
 pub struct Map<K, V> {
-  pub keys: K*,
-  pub values: V*,
-  pub len: int,
-  pub cap: int,
-  pub buckets: int*,
-  pub bcap: int
+  keys: K*,
+  values: V*,
+  len: int,
+  cap: int,
+  buckets: int*,
+  bcap: int
 }
 
 // ─── hash index (internal) ──────────────────────────────────────────────
@@ -98,7 +98,7 @@ pub struct Map<K, V> {
 // the first EMPTY slot (which can only mean "never inserted here," since
 // every occupied-then-removed slot leaves a TOMBSTONE, not an EMPTY, so a
 // real probe chain is never broken by a deletion elsewhere on it).
-pub fn<K, V> Map.bucketFind(key: K): int {
+fn<K, V> Map.bucketFind(key: K): int {
   if (self.bcap == 0) {
     return -1;
   }
@@ -124,7 +124,7 @@ pub fn<K, V> Map.bucketFind(key: K): int {
 // accumulates tombstones). Caller must already know `key` isn't present
 // (a fresh `bucketFind()` returned -1) and that `self.bcap > 0`
 // (`bucketMaybeGrow()` runs first in every caller below).
-pub fn<K, V> Map.bucketInsertSlot(key: K): int {
+fn<K, V> Map.bucketInsertSlot(key: K): int {
   mut slot: int = hashing::hash(key) & (self.bcap - 1);
   mut tomb: int = -1;
   mut probes: int = 0;
@@ -150,7 +150,7 @@ pub fn<K, V> Map.bucketInsertSlot(key: K): int {
 // realloc -- every entry's bucket slot is a function of
 // `hash(key) & (bcap - 1)`, which changes the moment `bcap` does, so every
 // entry must be re-probed into its new home slot, not merely copied.
-pub fn<K, V> Map.bucketRehash(newBcap: int): void {
+fn<K, V> Map.bucketRehash(newBcap: int): void {
   self.buckets = gc_alloc(newBcap * sizeof(int)) to int*;
   mut z: int = 0;
   while z < newBcap {
@@ -169,7 +169,7 @@ pub fn<K, V> Map.bucketRehash(newBcap: int): void {
 
 // Grows the bucket index once occupancy would exceed a 70% load factor (or
 // on first use).
-pub fn<K, V> Map.bucketMaybeGrow(): void {
+fn<K, V> Map.bucketMaybeGrow(): void {
   if (self.bcap == 0) {
     self.bucketRehash(8);
     return;

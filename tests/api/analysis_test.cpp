@@ -481,7 +481,14 @@ static void testPrivateSymbolAccess(const ScratchDir &Dir) {
 fn helper(): int { return 1; }
 pub fn pick(x: int): int { return x; }
 fn pick(x: string): int { return 0; }
-pub struct Shown { v: int }
+pub struct Shown { pub v: int, secret: int }
+pub fn Shown.get(): int { return self.secret; }
+fn Shown.hidden(): int { return 1; }
+pub fn Shown.make() static: Shown { return Shown::default(); }
+fn Shown.make_private() static: Shown { return Shown::default(); }
+fn secret_twice(x: Shown): int { return 2; }
+pub struct Guarded { pub v: int }
+fn Guarded.new(v: int): void { self.v = v; }
 struct Hidden { v: int }
 enum HiddenColor { A }
 extern fn strlen(s: string): int;
@@ -503,12 +510,32 @@ extern fn strlen(s: string): int;
        "fn main(): int { mut h: vislib::Hidden = vislib::Hidden::default(); return 0; }",
        "`pub struct Hidden`"},
       {"type import", "import vislib::Hidden;\nfn main(): int { return 0; }",
-       "public types: Shown"},
+       "public types: Guarded, Shown"},
       {"enum variant",
        "fn main(): int { immut x: int = vislib::HiddenColor::A to int; return x; }",
        "`pub enum HiddenColor`"},
       {"extern fn", "fn main(): int { return vislib::strlen(\"a\"); }",
        "`pub extern fn strlen(...)`"},
+      // Stage 4: members. A private FIELD's hint names the public METHODS
+      // (the way to get at the data), a private method's names its siblings.
+      {"field read",
+       "fn main(): int { mut s: vislib::Shown = vislib::Shown::default(); return s.secret; }",
+       "`pub secret: ...` inside `struct Shown`. Otherwise, 'Shown' offers these public methods: get, make"},
+      {"field write",
+       "fn main(): int { mut s: vislib::Shown = vislib::Shown::default(); s.secret = 1; return 0; }",
+       "`pub secret: ...`"},
+      {"instance method",
+       "fn main(): int { mut s: vislib::Shown = vislib::Shown::default(); return s.hidden(); }",
+       "`pub fn Shown.hidden(...)`"},
+      {"static method",
+       "fn main(): int { mut s: vislib::Shown = vislib::Shown::make_private(); return s.v; }",
+       "`pub fn Shown.make_private(...)`"},
+      {"constructor",
+       "fn main(): int { mut g: vislib::Guarded = vislib::Guarded::new(1); return g.v; }",
+       "`pub fn Guarded.new(...)`"},
+      {"UFCS candidate",
+       "fn main(): int { mut s: vislib::Shown = vislib::Shown::default(); return s.secret_twice(); }",
+       "`pub fn secret_twice(...)`"},
   };
   for (const auto &C : Cases) {
     const std::string Src = std::string("import vislib;\n") + C.Body + "\n";
@@ -524,6 +551,9 @@ extern fn strlen(s: string): int;
         std::cerr << "    case '" << C.Label << "': hint was: " << D.Hint << "\n";
       CHECK(!D.Related.empty()); // the note at the declaration
       CHECK(D.Message.find("private to module 'vislib'") != std::string::npos);
+      // Never a raw `.`-joined internal key in a user-facing message: it
+      // would read "Function 'Shown.hidden'" instead of naming what it is.
+      CHECK(D.Message.find("Function 'Shown") == std::string::npos);
       break;
     }
     CHECK(Found);

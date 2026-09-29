@@ -5,9 +5,9 @@
 // Named `..._module.tr` so scripts/test_runner.sh's `grep -v "_module.tr"`
 // skips it as a standalone test entry point; it only exists to be imported.
 pub struct Point {
-    x: int,
-    y: int,
-    z: int
+    pub x: int,
+    pub y: int,
+    pub z: int
 }
 
 pub fn makeB(): Point {

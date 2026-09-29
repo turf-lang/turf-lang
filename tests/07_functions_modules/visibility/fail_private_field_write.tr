@@ -1,0 +1,9 @@
+// LEC-002 E088: writing a private field is rejected the same way reading one
+// is -- an assignment's left-hand side goes through the same field check.
+import visibility_lib_module::Shown;
+
+fn main(): int {
+    mut s: Shown = Shown::default();
+    s.secret = 1;
+    return 0;
+}

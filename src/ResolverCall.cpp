@@ -274,6 +274,10 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
           for (const auto &Match : SymTable_.findInModules(CtorKey))
             if (Match.ModuleName == OwningModule)
               RawModuleMatches.push_back(Match);
+          // LEC-002: `m::T::new(...)` where `new` is not `pub`. (`default()`
+          // is never gated -- see FREEZE.md §6.15.)
+          if (!filterToVisibleOverloads(RawModuleMatches, Node.getLoc(), CtorKey))
+            return;
         }
 
         if (RawCurrentFileMatches.empty() && RawModuleMatches.empty()) {
@@ -375,6 +379,10 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
         for (const auto &Match : SymTable_.findInModules(MethodKey))
           if (Match.ModuleName == OwningModule)
             ModuleMatches.push_back(Match);
+        // LEC-002: `T::method(...)` on a method its module did not mark `pub`.
+        if (!filterToVisibleOverloads(ModuleMatches, ScopeCallee->getRightLoc(),
+                                      MethodKey))
+          return;
       }
     } else if (!SymTable_.hasModule(LeftName)) {
       // Not an enum, struct, or module -- but if it's a real, declared

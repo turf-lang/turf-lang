@@ -646,6 +646,19 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
     if (M.Symbol)
       Candidates.push_back(M.Symbol);
 
+  // LEC-002: call syntax must not bypass visibility -- a function another
+  // module did not mark `pub` is not a UFCS candidate outside its module.
+  // The hidden ones are kept aside only to tell "no such function" from
+  // "there is one, but it is private" below.
+  std::vector<const ResolverFunctionSymbol *> HiddenCandidates;
+  {
+    std::vector<const ResolverFunctionSymbol *> Visible;
+    for (const auto *C : Candidates)
+      (C->IsPublic || C->SourceModule == CurrentModule_ ? Visible : HiddenCandidates)
+          .push_back(C);
+    Candidates = std::move(Visible);
+  }
+
   // Populated regardless of whether this call ultimately resolves -- a
   // caller with no other fallback left (the primitive-receiver path) needs
   // this even on failure, to tell "no such function anywhere" apart from
@@ -665,8 +678,22 @@ bool TypeChecker::tryUFCSFallback(MethodCallExprAST &Node,
         ufcsReceiverTypeMatches(C->Params[0].Type.get(), BaseTy))
       ReceiverMatches.push_back(C);
   }
-  if (ReceiverMatches.empty())
+  if (ReceiverMatches.empty()) {
+    // LEC-002: nothing visible fits -- but if a PRIVATE function would have,
+    // say that instead of a bare "no such method", so the writer learns the
+    // function exists and what to do about it.
+    std::vector<const ResolverFunctionSymbol *> HiddenMatches;
+    for (const auto *C : HiddenCandidates)
+      if (C->arity() == ArgCount + 1 && !C->Params.empty() &&
+          ufcsReceiverTypeMatches(C->Params[0].Type.get(), BaseTy))
+        HiddenMatches.push_back(C);
+    if (!HiddenMatches.empty()) {
+      filterVisibleCandidates(HiddenMatches, Node.getLoc(), MethodName, "");
+      setType(&Node, nullptr);
+      return true; // reported -- the caller must not also report
+    }
     return false;
+  }
 
   // The REMAINING, explicitly-written call arguments are not an implicit
   // binding -- they use the ordinary typesCompatible() coercion rules, same
@@ -1070,6 +1097,9 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
         for (const auto &Match : RST_.findInModules(StructName + "." + MethodName))
           if (Match.Symbol)
             Candidates.push_back(Match.Symbol);
+        // LEC-002: `x.method(...)` on a method its module did not mark `pub`.
+        if (!filterVisibleCandidates(Candidates, Node.getLoc(), MethodName, StructName))
+          return;
         // Recover the struct's own generic-parameter substitution (e.g.
         // `l: List<int>` => T=int) BEFORE picking a candidate, not just
         // after, so it can be used to check ARGUMENT type compatibility
@@ -1671,6 +1701,17 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
                                 Node.getFieldName(), Suggestions)
             .raise();
         return;
+      }
+
+      // LEC-002: a field is private to the module that declared its struct
+      // unless written `pub` -- even in a `pub struct`. Checked against
+      // CurrentModule_, so the owning module's own methods (and their
+      // monomorphized clones) still reach every field.
+      for (const auto &F : STy->getFields()) {
+        if (F.Name == Node.getFieldName() && !memberVisible(F.Vis, STy->getName())) {
+          raisePrivateField(Node.getNameLoc(), *STy, F);
+          return;
+        }
       }
 
       // Substitute this struct's own generic type parameter(s) into the

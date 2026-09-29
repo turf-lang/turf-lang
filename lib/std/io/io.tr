@@ -201,7 +201,7 @@ pub fn read_lines(path: string): !List<string> {
 
     mut lines: List<string> = strings::split(content, "\n");
     if lines.length() > 0 {
-        if lines.data[lines.length() - 1] == "" {
+        if lines.get(lines.length() - 1) == "" {
             lines.pop();
         }
     }

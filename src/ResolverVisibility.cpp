@@ -48,6 +48,27 @@ void Resolver::raisePrivateType(SourceLocation Loc, const std::string &Identity)
       .raise();
 }
 
+void Resolver::raisePrivateMethod(SourceLocation Loc, const std::string &Module,
+                                  const std::string &Key) const {
+  // A method is registered as "<owner identity>.<method>"; an identity holds
+  // `::` but never `.`, so the first `.` splits the two.
+  const size_t Dot = Key.find('.');
+  const std::string OwnerIdentity = Dot == std::string::npos ? Key : Key.substr(0, Dot);
+  const std::string Method = Dot == std::string::npos ? Key : Key.substr(Dot + 1);
+  SourceLocation DeclLoc = Loc;
+  for (const auto &Match : SymTable_.findInModules(Key)) {
+    if (Match.ModuleName != Module || Match.Symbol->IsPublic)
+      continue;
+    DeclLoc = toSourceLocation(Match.Symbol->DeclLoc);
+    break;
+  }
+  PrivateSymbolAccessError(Loc, PrivateSymbolAccessError::Kind::Method, Method,
+                           Module, DeclLoc, "fn",
+                           SymTable_.getPublicMethodNames(OwnerIdentity),
+                           TypeIdentity::bareName(OwnerIdentity))
+      .raise();
+}
+
 bool Resolver::filterToVisibleOverloads(
     std::vector<ResolverSymbolTable::ModuleFunctionMatch> &Matches,
     SourceLocation Loc, const std::string &Name) const {
@@ -61,7 +82,11 @@ bool Resolver::filterToVisibleOverloads(
       FirstDropped = &Match;
   }
   if (Kept.empty() && FirstDropped) {
-    raisePrivateFunction(Loc, FirstDropped->ModuleName, Name);
+    // "Owner.method" keys are methods (static calls and `Owner::new`).
+    if (Name.find('.') != std::string::npos)
+      raisePrivateMethod(Loc, FirstDropped->ModuleName, Name);
+    else
+      raisePrivateFunction(Loc, FirstDropped->ModuleName, Name);
     return false;
   }
   Matches = std::move(Kept);

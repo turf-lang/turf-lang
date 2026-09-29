@@ -30,6 +30,31 @@ The error appears however the private name is reached:
     import util::helper;         // asking for it by name
     import util::[api, helper];  // ...in a list
 
+Members of a `pub` type are checked the same way -- a struct's fields and
+methods are private to its module unless written `pub`, even when the struct
+itself is `pub`:
+
+    // shapes.tr
+    pub struct Point { pub x: int, pub y: int, cache: int }
+    pub fn Point.len(): int { ... }
+    fn Point.refresh(): void { ... }
+
+    // main.tr
+    p.x            // ok: a `pub` field
+    p.cache        // ERROR: Field 'Point.cache' is private to module 'shapes'.
+    p.len()        // ok: a `pub` method
+    p.refresh()    // ERROR: Method 'Point.refresh' is private to module 'shapes'.
+    Point::default()   // always fine -- it only zero-fills, so it cannot
+                       // break an invariant that zero cannot
+
+For a private field the hint names the type's public methods, because that is
+usually how the data is meant to be reached: `List.data` is a raw pointer, so
+`l.data[0]` says to use `get`, `set`, `length` and the rest instead.
+
+Call syntax cannot get around it. `p.secret_twice()` resolves through
+"uniform function call syntax" to a free function `secret_twice(p)` -- and a
+free function another module did not mark `pub` is not a candidate there.
+
 A `[*]` import (`import util::[*];`) is different: it just skips the private
 names, so it never raises this error, and a private name in `util` can never
 clash with one of your own.
@@ -46,8 +71,8 @@ There are two ways to fix it, and the hint offers both:
 
 Two things that are NOT errors, because they never cross a module boundary:
 a module using its own private names (`api()` above calling `helper()`), and
-a `pub` generic function whose body calls a private helper -- when you
-instantiate it from your own file, the copy is still resolved inside the
-module that wrote it.
+a `pub` generic -- function or struct method -- whose body uses a private
+helper or a private field: when you instantiate it from your own file, the
+copy is still checked as the module that wrote it.
 
 `export immut` constants are always public: `export` is their `pub`.

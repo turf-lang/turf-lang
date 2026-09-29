@@ -491,9 +491,21 @@ void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
   bool SavedInCallerLocationFunc = InCallerLocationFunc_;
   InCallerLocationFunc_ = Node.hasCallerLocation();
 
+  // LEC-002: this body was WRITTEN in the function's own declaring module.
+  // A monomorphized clone has had its SourceModule CLEARED on purpose
+  // (Monomorphize.cpp, a mangling requirement) and is checked by a checker
+  // that was already told the template's module (setCurrentModule()) -- an
+  // empty SourceModule therefore means "keep the context I was given", not
+  // "the main file". (A main-file function's context is "" anyway.)
+  const std::string SavedModule = CurrentModule_;
+  if (const auto *Def = Node.getResolvedDef())
+    if (!Def->SourceModule.empty())
+      CurrentModule_ = Def->SourceModule;
+
   if (Node.getBody())
     const_cast<ExprAST *>(Node.getBody())->accept(*this);
 
+  CurrentModule_ = SavedModule;
   InCallerLocationFunc_ = SavedInCallerLocationFunc;
   ReturnTypeStack_.pop_back();
   setType(&Node, TurfVoid());
@@ -666,8 +678,13 @@ void TypeChecker::visitArrayLiteral(ArrayLiteralExprAST &Node) {
 // ─── Modules & misc ───────────────────────────────────────────────────────────
 
 void TypeChecker::visitModuleImport(ModuleImportExprAST &Node) {
+  // LEC-002: everything under this import was written in that module (each
+  // function refines this from its own declaration, see visitFuncDef()).
+  const std::string SavedModule = CurrentModule_;
+  CurrentModule_ = Node.getModuleName();
   if (Node.getBody())
     const_cast<ExprAST *>(Node.getBody())->accept(*this);
+  CurrentModule_ = SavedModule;
   setType(&Node, TurfVoid());
 }
 

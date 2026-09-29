@@ -120,9 +120,17 @@ public:
    */
   std::vector<std::string> getModuleFunctionNames(
       const std::string &ModuleName) const;
-  /// LEC-002: the `pub` subset of getModuleFunctionNames().
+  /// LEC-002: the `pub` FREE functions of getModuleFunctionNames() (a method
+  /// is registered as "Type.name" and is listed by getPublicMethodNames()
+  /// instead, so a hint about a private function never offers `List.push`).
   std::vector<std::string> getModulePublicFunctionNames(
       const std::string &ModuleName) const;
+  /// LEC-002: bare names of the `pub` methods of type @p OwnerIdentity,
+  /// wherever they are declared (the receiver's module, an importer's
+  /// extension methods, or the main file), sorted. The "use one of these
+  /// instead" list in a private-field or private-method hint.
+  std::vector<std::string> getPublicMethodNames(
+      const std::string &OwnerIdentity) const;
 
   /**
    * @brief Return all `export immut` constant names registered under

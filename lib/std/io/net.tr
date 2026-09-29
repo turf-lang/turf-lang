@@ -223,7 +223,7 @@ fn buildSockAddr(a: int, b: int, c: int, d: int, port: int): void* {
 // read()/write().
 
 pub struct TcpConnection {
-    pub fd: int
+    fd: int
 }
 
 pub fn TcpConnection.new(fd: int): void {
@@ -289,7 +289,7 @@ pub fn TcpConnection.close(): void {
 // A server-side listening socket, bound to all local interfaces.
 
 pub struct TcpListener {
-    pub fd: int
+    fd: int
 }
 
 pub fn TcpListener.new(fd: int): void {

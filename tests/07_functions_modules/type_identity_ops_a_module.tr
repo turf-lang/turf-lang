@@ -2,7 +2,7 @@
 // (FDN-003): an operator, an error type, a machine and a local struct,
 // each sharing its name with type_identity_ops_b_module.tr's.
 pub struct Vec {
-    x: int
+    pub x: int
 }
 
 pub fn vec(x: int): Vec {

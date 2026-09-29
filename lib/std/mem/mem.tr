@@ -210,9 +210,9 @@ pub fn unroot(p: void*): void {
 //   mem::free_pool(pool);         // frees every tracked allocation
 
 pub struct Pool<T> {
-    pub items: T*,
-    pub len: int,
-    pub cap: int
+    items: T*,
+    len: int,
+    cap: int
 }
 
 // Registers `item` with this pool -- does NOT allocate anything itself;

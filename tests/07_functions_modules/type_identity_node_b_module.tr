@@ -3,9 +3,9 @@
 // doubles here, an int and a string there), so a lookup that confused the
 // two would read the wrong field offsets, not just the wrong method.
 pub struct Node {
-    x: double,
-    y: double,
-    z: double
+    pub x: double,
+    pub y: double,
+    pub z: double
 }
 
 pub fn Node.new(x: double): void {

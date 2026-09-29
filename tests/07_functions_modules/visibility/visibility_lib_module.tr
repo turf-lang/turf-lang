@@ -23,7 +23,67 @@ fn pick(x: string): int {
 
 // ── types ───────────────────────────────────────────────────────────────────
 pub struct Shown {
-    v: int
+    pub v: int,
+    secret: int
+}
+
+// ── members of a `pub` struct: methods, static methods, UFCS ───────────────
+pub fn Shown.get(): int {
+    return self.v + self.secret;
+}
+
+fn Shown.hidden(): int {
+    return self.secret;
+}
+
+pub fn Shown.make(v: int) static: Shown {
+    mut s: Shown = Shown::default();
+    s.v = v;
+    s.secret = 7;
+    return s;
+}
+
+fn Shown.make_private() static: Shown {
+    return Shown::default();
+}
+
+// A free function is a UFCS candidate (`s.twice()`) only where it is visible.
+pub fn twice(x: Shown): int {
+    return x.get() * 2;
+}
+
+fn secret_twice(x: Shown): int {
+    return x.secret * 2;
+}
+
+// A constructor is an ordinary method with its own visibility: `Guarded::new`
+// is private, `Guarded::make` is the public way in.
+pub struct Guarded {
+    pub v: int
+}
+
+fn Guarded.new(v: int): void {
+    self.v = v;
+}
+
+pub fn Guarded.make(v: int) static: Guarded {
+    return Guarded::new(v);
+}
+
+// A generic struct: the private field is reached by the module's own
+// methods, including their monomorphized clones instantiated from elsewhere.
+pub struct Cell<T> {
+    value: T,
+    pub count: int
+}
+
+pub fn<T> Cell.put(v: T): void {
+    self.value = v;
+    self.count = self.count + 1;
+}
+
+pub fn<T> Cell.take(): T {
+    return self.value;
 }
 
 struct Hidden {

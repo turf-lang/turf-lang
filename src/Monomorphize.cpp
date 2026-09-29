@@ -475,6 +475,10 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
   // requests its body produced" -- the fixed point the caller's while loop
   // already provides, for free, once this line wires it through).
   CloneTC.setMonomorphizationCollector(&Collector);
+  // LEC-002: the clone is the template's code -- it may touch the template
+  // module's private fields and helpers. Its own SourceModule was cleared
+  // above, so the checker must be told the module directly.
+  CloneTC.setCurrentModule(Entry.Request.SourceModule);
   {
     const bool SavedRecoverActive = g_recoverActive;
     jmp_buf SavedJmpBuf;

@@ -164,6 +164,14 @@ public:
    */
   TypeChecker(const ResolverSymbolTable &RST, ErrorHandler Handler);
 
+  /// LEC-002: tell this checker which module the code it is about to check
+  /// was written in ("" = the main file). Needed only for a monomorphized
+  /// clone, which the Monomorphizer type-checks in a FRESH TypeChecker after
+  /// clearing the clone's own `SourceModule` (a mangling requirement): the
+  /// clone is the template's code, so it must see the template's private
+  /// fields and helpers, whichever module asked for the instantiation.
+  void setCurrentModule(std::string Module) { CurrentModule_ = std::move(Module); }
+
   // ── Error handler replacement ─────────────────────────────────────────────
 
   /// Replace the error handler after construction (useful in tests).
@@ -604,6 +612,35 @@ private:
   /// by visitCallerLocation(); save/restored around visitFuncDef()'s body
   /// traversal exactly like UnsafeDepth_ is for visitUnsafeBlock().
   bool InCallerLocationFunc_ = false;
+
+  // ── Visibility (LEC-002, FREEZE.md §6.15) ──────────────────────────────────
+  //
+  // Field and method access can only be checked here: the Resolver does not
+  // know a receiver's type. Both are private-to-module unless `pub`, so the
+  // checker needs to know which module the code it is looking at was WRITTEN in.
+
+  /// The module whose source is being checked ("" = the main file). Set by
+  /// visitFuncDef() from the function's own declaring module -- not from the
+  /// enclosing import -- so a monomorphized clone is checked as its TEMPLATE's
+  /// module: `List<int>.push`'s body reads the private `self.data` because
+  /// `list` wrote it, whichever module asked for the instantiation.
+  std::string CurrentModule_;
+
+  /// True if code in CurrentModule_ may use member @p Vis of type
+  /// @p OwnerIdentity: it is public, or CurrentModule_ owns the type.
+  bool memberVisible(const VisibilityMark &Vis, const std::string &OwnerIdentity) const;
+
+  /// Raises E088 for private field @p FieldName of struct @p STy at @p Loc.
+  void raisePrivateField(SourceLocation Loc, const TurfStructType &STy,
+                         const StructField &Field) const;
+
+  /// Drops from @p Candidates every method/function CurrentModule_ may not
+  /// call (private, declared in another module). If that empties a non-empty
+  /// list, raises E088 (as a method of @p OwnerIdentity when non-empty, else
+  /// as a free function) and returns false.
+  bool filterVisibleCandidates(std::vector<const ResolverFunctionSymbol *> &Candidates,
+                               SourceLocation Loc, const std::string &Name,
+                               const std::string &OwnerIdentity);
 
   /// Whether we had at least one error during this pass.
   bool HadError_ = false;

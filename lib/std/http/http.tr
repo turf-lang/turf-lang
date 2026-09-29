@@ -314,7 +314,7 @@ pub fn Server.get(path: string, handler: fn(Request, Response): void): void {
 // scan is no longer needed here; see docs/development/changes/STD-003.md
 // and docs/planning/LIMITATIONS.md's (now closed) item 1 for the full
 // history.
-pub fn Server.route_index(path: string): int {
+fn Server.route_index(path: string): int {
     return self.routes.indexOf(path);
 }
 
@@ -327,16 +327,11 @@ pub fn Server.get_route(path: string): fn(Request, Response): void {
     if idx < 0 {
         sys::panic("Server.get_route: no such route '" + path + "'");
     }
-    // `Map<K, V>.values` is a raw `V*` (map.tr), not a `List<V>` -- OVH-003
-    // gated raw-pointer indexing outside `unsafe { }`/a capability module,
-    // and this file holds neither (deliberately -- see this file's header
-    // comment, "No raw sockets, `ptr`, or manual memory management is ever
-    // visible to a caller of this module"). `idx` is already bounds-proven
-    // by `route_index()` (a `Map.indexOf()` result checked above), so this
-    // is exactly the single-expression inline gate the raw-pointer docs
-    // recommend (docs/architecture/pointers_and_references.md §1.4) rather
-    // than granting the whole file raw-pointer capability for one read.
-    return unsafe { self.routes.values[idx]; };
+    // This used to read `Map<K, V>.values[idx]` -- a raw `V*` -- through an
+    // inline `unsafe { }` (OVH-003). `values` is private to map.tr now
+    // (LEC-002), and the key is known to be present (`route_index()` found
+    // it above), so the safe `get()` does the same job with no raw pointer.
+    return self.routes.get(path);
 }
 
 // Binds `port` and serves forever, dispatching each accepted connection to

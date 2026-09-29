@@ -33,11 +33,11 @@ import sys;
 import hashing;
 
 pub struct Set<T> {
-  pub items: T*,
-  pub len: int,
-  pub cap: int,
-  pub buckets: int*,
-  pub bcap: int
+  items: T*,
+  len: int,
+  cap: int,
+  buckets: int*,
+  bcap: int
 }
 
 // ─── hash index (internal) ──────────────────────────────────────────────
@@ -45,7 +45,7 @@ pub struct Set<T> {
 // `keys` and no parallel `values` array to keep in sync. See that file's
 // header for the full design rationale.
 
-pub fn<T> Set.bucketFind(item: T): int {
+fn<T> Set.bucketFind(item: T): int {
   if (self.bcap == 0) {
     return -1;
   }
@@ -65,7 +65,7 @@ pub fn<T> Set.bucketFind(item: T): int {
   return -1;
 }
 
-pub fn<T> Set.bucketInsertSlot(item: T): int {
+fn<T> Set.bucketInsertSlot(item: T): int {
   mut slot: int = hashing::hash(item) & (self.bcap - 1);
   mut tomb: int = -1;
   mut probes: int = 0;
@@ -90,7 +90,7 @@ pub fn<T> Set.bucketInsertSlot(item: T): int {
 // factor (or on first use, from `bcap == 0`). See map.tr's identical
 // `Map.bucketRehash()` for the full rationale (can't be a realloc -- every
 // entry's bucket slot depends on `bcap` itself).
-pub fn<T> Set.bucketRehash(newBcap: int): void {
+fn<T> Set.bucketRehash(newBcap: int): void {
   self.buckets = gc_alloc(newBcap * sizeof(int)) to int*;
   mut z: int = 0;
   while z < newBcap {
@@ -107,7 +107,7 @@ pub fn<T> Set.bucketRehash(newBcap: int): void {
   }
 }
 
-pub fn<T> Set.bucketMaybeGrow(): void {
+fn<T> Set.bucketMaybeGrow(): void {
   if (self.bcap == 0) {
     self.bucketRehash(8);
     return;

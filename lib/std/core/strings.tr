@@ -439,7 +439,7 @@ pub fn join(items: List<string>, sep: string): string {
         if i > 0 {
             result = result + sep;
         }
-        result = result + items.data[i];
+        result = result + items.get(i);
         i = i + 1;
     }
     return result;

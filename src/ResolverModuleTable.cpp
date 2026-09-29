@@ -48,12 +48,17 @@ std::vector<std::string> ResolverModule::getFunctionNames() const {
 
 std::vector<std::string> ResolverModule::getPublicFunctionNames() const {
   std::vector<std::string> Names;
-  for (const auto &Pair : Functions)
+  for (const auto &Pair : Functions) {
+    // "Type.method" is a method, not a free function -- see
+    // ResolverModuleTable::getPublicMethodNames().
+    if (Pair.first.find('.') != std::string::npos)
+      continue;
     for (const auto &Sym : Pair.second)
       if (Sym.IsPublic) {
         Names.push_back(Pair.first);
         break;
       }
+  }
   std::sort(Names.begin(), Names.end());
   return Names;
 }
@@ -124,6 +129,32 @@ std::vector<std::string> ResolverModuleTable::getModulePublicFunctionNames(
   if (It == Modules_.end())
     return {};
   return It->second->getPublicFunctionNames();
+}
+
+std::vector<std::string> ResolverModuleTable::getPublicMethodNames(
+    const std::string &OwnerIdentity) const {
+  const std::string Prefix = OwnerIdentity + ".";
+  std::vector<std::string> Names;
+  auto Collect = [&](const std::string &Key,
+                     const std::vector<ResolverFunctionSymbol> &Overloads) {
+    if (Key.compare(0, Prefix.size(), Prefix) != 0)
+      return;
+    // `new` is how a struct is constructed (`T::new(...)`) and belongs in the
+    // list; the rest of the name is what the reader would write.
+    for (const auto &Sym : Overloads)
+      if (Sym.IsPublic) {
+        Names.push_back(Key.substr(Prefix.size()));
+        return;
+      }
+  };
+  for (const auto &ModPair : Modules_)
+    for (const auto &FuncPair : ModPair.second->Functions)
+      Collect(FuncPair.first, FuncPair.second);
+  for (const auto &FuncPair : CurrentFileFunctions_)
+    Collect(FuncPair.first, FuncPair.second);
+  std::sort(Names.begin(), Names.end());
+  Names.erase(std::unique(Names.begin(), Names.end()), Names.end());
+  return Names;
 }
 
 std::vector<std::string> ResolverModuleTable::getModuleConstantNames(

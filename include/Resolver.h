@@ -512,6 +512,11 @@ private:
                             const std::string &Name) const;
   /// Raises PrivateSymbolAccessError (E088) for private type @p Identity.
   void raisePrivateType(SourceLocation Loc, const std::string &Identity) const;
+  /// Raises PrivateSymbolAccessError (E088) for a private method, given its
+  /// registered key @p Key ("<owner identity>.<method>") and the module that
+  /// declares it.
+  void raisePrivateMethod(SourceLocation Loc, const std::string &Module,
+                          const std::string &Key) const;
   /// Drops, from @p Matches, every overload the current module may not call
   /// (private, declared in another module). If that leaves nothing but at
   /// least one overload was dropped, raises E088 at @p Loc and returns false.

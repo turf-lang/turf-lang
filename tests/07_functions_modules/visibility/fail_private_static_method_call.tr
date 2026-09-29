@@ -1,0 +1,8 @@
+// LEC-002 E088: `Type::method(...)` on a static method its module did not
+// mark `pub`.
+import visibility_lib_module::Shown;
+
+fn main(): int {
+    mut s: Shown = Shown::make_private();
+    return s.v;
+}

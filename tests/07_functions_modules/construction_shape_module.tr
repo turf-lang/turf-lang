@@ -3,8 +3,8 @@
 // method, both using the '.'-declaration syntax (static or not).
 
 pub struct Shape {
-    sides: int,
-    label: string
+    pub sides: int,
+    pub label: string
 }
 
 pub fn Shape.new(sides: int, name: string): void {

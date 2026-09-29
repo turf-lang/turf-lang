@@ -24,10 +24,10 @@ unsafe module;
 import sys;
 
 pub struct Queue<T> {
-  pub data: T*,
-  pub len: int,
-  pub cap: int,
-  pub head: int
+  data: T*,
+  len: int,
+  cap: int,
+  head: int
 }
 
 pub fn<T> Queue.enqueue(item: T): void {

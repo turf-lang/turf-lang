@@ -1,8 +1,8 @@
 // Companion module for type_identity_operators_errors_machines.tr -- see
 // type_identity_ops_a_module.tr.
 pub struct Vec {
-    x: double,
-    y: double
+    pub x: double,
+    pub y: double
 }
 
 pub fn vec(x: double): Vec {

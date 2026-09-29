@@ -6,8 +6,8 @@
 // program-wide namespace, so importing both modules was a
 // DuplicateTypeNameError; each type is now identified by (module, name).
 pub struct Node {
-    a: int,
-    tag: string
+    pub a: int,
+    pub tag: string
 }
 
 pub fn Node.new(v: int): void {

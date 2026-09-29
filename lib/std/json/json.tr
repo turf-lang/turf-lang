@@ -347,7 +347,7 @@ struct Parser {
     pub len: int
 }
 
-pub fn Parser.peek(): int {
+fn Parser.peek(): int {
     if self.pos >= self.len {
         return 0 - 1;
     }
@@ -357,7 +357,7 @@ pub fn Parser.peek(): int {
     return self.s[self.pos] to int;
 }
 
-pub fn Parser.skip_ws(): void {
+fn Parser.skip_ws(): void {
     while self.pos < self.len {
         immut c: int = self.s[self.pos] to int;
         if c == 32 || c == 9 || c == 10 || c == 13 {
@@ -368,7 +368,7 @@ pub fn Parser.skip_ws(): void {
     }
 }
 
-pub fn Parser.parse_value(): !JsonValue {
+fn Parser.parse_value(): !JsonValue {
     self.skip_ws();
     immut c: int = self.peek();
     if c == (0 - 1) {
@@ -414,7 +414,7 @@ pub fn Parser.parse_value(): !JsonValue {
     return JsonError::UnexpectedChar;
 }
 
-pub fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
+fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
     immut n: int = strings::length(lit);
     mut i: int = 0;
     while i < n {
@@ -427,7 +427,7 @@ pub fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
     return value;
 }
 
-pub fn Parser.parse_string(): !string {
+fn Parser.parse_string(): !string {
     // Precondition: self.peek() == '"' (only ever called from a context
     // that already checked this).
     self.pos = self.pos + 1; // consume opening quote
@@ -471,7 +471,7 @@ pub fn Parser.parse_string(): !string {
     return JsonError::UnterminatedString;
 }
 
-pub fn Parser.parse_number(): !JsonValue {
+fn Parser.parse_number(): !JsonValue {
     // FDN-004: `self.s[self.pos]` is `char`; every raw comparison below is
     // cast to `int` at the point of use rather than through an intermediate
     // variable, since this function reads a different position on almost
@@ -515,7 +515,7 @@ pub fn Parser.parse_number(): !JsonValue {
     return JsonValue::from_number(n);
 }
 
-pub fn Parser.parse_array(): !JsonValue {
+fn Parser.parse_array(): !JsonValue {
     self.pos = self.pos + 1; // consume '['
     mut arr: JsonValue = JsonValue::new_array();
     self.skip_ws();
@@ -546,7 +546,7 @@ pub fn Parser.parse_array(): !JsonValue {
     // `while true` with no further statement.
 }
 
-pub fn Parser.parse_object(): !JsonValue {
+fn Parser.parse_object(): !JsonValue {
     self.pos = self.pos + 1; // consume '{'
     mut obj: JsonValue = JsonValue::new_object();
     self.skip_ws();

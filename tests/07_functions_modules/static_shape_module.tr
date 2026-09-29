@@ -1,6 +1,6 @@
 pub struct Vec2 {
-    x: int,
-    y: int
+    pub x: int,
+    pub y: int
 }
 
 pub fn Vec2.zero() static: Vec2 {

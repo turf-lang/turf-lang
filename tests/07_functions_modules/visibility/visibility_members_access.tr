@@ -1,0 +1,38 @@
+// LEC-002 stage 4: what another module CAN do with a `pub struct`'s members.
+// A field is private unless written `pub` -- even inside a `pub struct` -- and
+// a method is private unless written `pub`; but the struct's own module
+// always reaches all of them, including through generic instantiations
+// requested from here.
+import test;
+import visibility_lib_module::[Shown, Guarded, Cell];
+
+fn main(): int {
+    // `T::default()` is legal from anywhere even though `secret` is private:
+    // it only zero-fills, so it cannot break an invariant zero cannot.
+    mut a: Shown = Shown::default();
+    a.v = 3;                       // pub field: read and write
+    test::assert(a.v == 3, "pub field");
+    test::assert(a.get() == 3, "pub method reads the private field 'secret' (0)");
+
+    mut b: Shown = Shown::make(5); // pub static method
+    test::assert(b.get() == 12, "pub static method sets the private field to 7");
+
+    test::assert(b.twice() == 24, "UFCS on a pub free function");
+
+    // A private constructor with a public way in.
+    mut g: Guarded = Guarded::make(9);
+    test::assert(g.v == 9, "pub factory around a private `new`");
+
+    // Generic: Cell<T>.put()/take() are the module's own methods; their clones
+    // (instantiated here for `string` and `int`) still see the private
+    // `value` field, and `count` is pub.
+    mut cs: Cell<string> = Cell::default();
+    cs.put("hello");
+    test::assert(cs.take() == "hello", "generic clone reaches its private field (string)");
+    test::assert(cs.count == 1, "pub field of a generic struct");
+    mut ci: Cell<int> = Cell::default();
+    ci.put(41);
+    ci.put(42);
+    test::assert(ci.take() == 42 && ci.count == 2, "generic clone reaches its private field (int)");
+    return 0;
+}

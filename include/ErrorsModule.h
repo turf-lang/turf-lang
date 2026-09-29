@@ -538,36 +538,61 @@ public:
 // would leave the writer to guess which of the two the module author meant.
 class PrivateSymbolAccessError : public TurfError {
 public:
-  enum class Kind { Function, Type };
+  /// Field and Method are about a member of a type: @p Owner names the type.
+  enum class Kind { Function, Type, Field, Method };
 
-  /// @param Keyword what to write after `pub` -- "fn" for a function, the
-  ///        declaring keyword ("struct"/"enum"/"error"/"machine") for a type.
-  /// @param PublicAlternatives the module's own `pub` names of the same kind,
-  ///        offered in the hint; may be empty.
+  /// @param Keyword what to write after `pub` -- "fn" for a function or
+  ///        method, the declaring keyword ("struct"/"enum"/"error"/"machine")
+  ///        for a type; unused for a field (its declaration is `name: T`).
+  /// @param PublicAlternatives the `pub` names of the same kind to offer in
+  ///        the hint -- the module's public functions or types, or the owner
+  ///        type's public methods (also what a private FIELD is reached
+  ///        through, so it is what the hint lists for one); may be empty.
+  /// @param Owner the bare name of the type a Field/Method belongs to.
   PrivateSymbolAccessError(SourceLocation Loc, Kind K, const std::string &Name,
                            const std::string &Module, SourceLocation DeclLoc,
                            const std::string &Keyword,
-                           const std::vector<std::string> &PublicAlternatives)
+                           const std::vector<std::string> &PublicAlternatives,
+                           const std::string &Owner = "")
       : TurfError(Loc, "") {
     Category_ = SLM::ErrorCategory::DECLARATION;
-    const std::string What = K == Kind::Function ? "Function" : "Type";
-    Message = Colors::BRIGHT_RED + What + " '" + Colors::CYAN + Name +
+    // What the reader wrote and how to spell the declaration that needs `pub`.
+    std::string What, Shown, Fix, Noun;
+    switch (K) {
+    case Kind::Function:
+      What = "Function"; Shown = Name;
+      Fix = "`pub " + Keyword + " " + Name + "(...)`"; Noun = "functions";
+      break;
+    case Kind::Type:
+      What = "Type"; Shown = Name;
+      Fix = "`pub " + Keyword + " " + Name + "`"; Noun = "types";
+      break;
+    case Kind::Field:
+      What = "Field"; Shown = Owner + "." + Name;
+      Fix = "`pub " + Name + ": ...` inside `struct " + Owner + "`";
+      Noun = "methods";
+      break;
+    case Kind::Method:
+      What = "Method"; Shown = Owner + "." + Name;
+      Fix = "`pub fn " + Owner + "." + Name + "(...)`"; Noun = "methods";
+      break;
+    }
+    const std::string Subject = K == Kind::Field || K == Kind::Method
+                                    ? "'" + Owner + "'"
+                                    : "'" + Module + "'";
+    Message = Colors::BRIGHT_RED + What + " '" + Colors::CYAN + Shown +
               Colors::BRIGHT_RED + "' is private to module '" + Colors::CYAN +
               Module + Colors::BRIGHT_RED + "'." + Colors::RESET;
-    withRelated(DeclLoc, "'" + Name + "' is declared in module '" + Module +
+    withRelated(DeclLoc, "'" + Shown + "' is declared in module '" + Module +
                              "' without `pub`");
 
     const std::string File = Module + ".tr";
-    Hint_ = "If '" + Name + "' is meant to be used from other modules, mark "
-            "it `pub` in " + File + ": `pub " + Keyword + " " + Name +
-            (K == Kind::Function ? "(...)" : "") + "`.";
+    Hint_ = "If '" + Shown + "' is meant to be used from other modules, mark "
+            "it `pub` in " + File + ": " + Fix + ".";
     if (PublicAlternatives.empty()) {
-      Hint_ += std::string(" '") + Module + "' has no public " +
-               (K == Kind::Function ? "functions" : "types") +
-               " to use instead.";
+      Hint_ += " " + Subject + " has no public " + Noun + " to use instead.";
     } else {
-      Hint_ += std::string(" Otherwise, '") + Module + "' offers these public " +
-               (K == Kind::Function ? "functions" : "types") + ": ";
+      Hint_ += " Otherwise, " + Subject + " offers these public " + Noun + ": ";
       size_t Shown = 0;
       for (const auto &Alt : PublicAlternatives) {
         if (Shown == 5) {

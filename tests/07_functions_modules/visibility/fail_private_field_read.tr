@@ -1,0 +1,8 @@
+// LEC-002 E088: `secret` is a field of a `pub struct` but was not written
+// `pub`, so it is private to visibility_lib_module.
+import visibility_lib_module::Shown;
+
+fn main(): int {
+    mut s: Shown = Shown::default();
+    return s.secret;
+}

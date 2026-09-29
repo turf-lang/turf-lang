@@ -3,8 +3,8 @@
 // Declares an operator overload for a struct defined in THIS module, to be
 // used from another file that imports it.
 pub struct Point {
-    x: int,
-    y: int
+    pub x: int,
+    pub y: int
 }
 
 operator +(a: Point, b: Point): Point {

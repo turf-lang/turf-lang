@@ -18,9 +18,9 @@ unsafe module;
 import sys;
 
 pub struct Stack<T> {
-  pub data: T*,
-  pub len: int,
-  pub cap: int
+  data: T*,
+  len: int,
+  cap: int
 }
 
 pub fn<T> Stack.push(item: T): void {

@@ -26,6 +26,9 @@ fn main(): int {
         io::printline("33/02 PASS: accept() on a closed listener reports AcceptFailed");
         return 0;
     };
-    test::fail("accept() on a closed listener returned a connection (fd " + (conn.fd to string) + ")");
+    // (The connection's `fd` field is private to net.tr, LEC-002 -- the
+    // failure is the same whatever its value: accept() must not have returned.)
+    conn.close();
+    test::fail("accept() on a closed listener returned a connection");
     return 1;
 }

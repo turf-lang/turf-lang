@@ -18,18 +18,27 @@
 
 unsafe module;
 
-import list::List;
 import test;
 import io;
 
+// LEC-002: this used to build a `List<int>` and take `&l.data[1]`. `data` is
+// private to list.tr now, so the test owns its buffer holder -- a struct with
+// the same `data: int*` field, backed by the same GC allocator List uses
+// (`gc_alloc`), which is all the interior-pointer property needs.
+struct Buf {
+    data: int*,
+    len: int
+}
+
 fn make_interior_ptr(): &int {
-    mut l: List<int> = List::default();
-    l.push(10);
-    l.push(20);
-    l.push(30);
-    l.push(40);
+    mut b: Buf = Buf::default();
+    b.data = gc_alloc(4 * 8) to int*;
+    b.data[0] = 10;
+    b.data[1] = 20;
+    b.data[2] = 30;
+    b.data[3] = 40;
     unsafe {
-        return &l.data[1]; // points at the '20' element, not the buffer's start
+        return &b.data[1]; // points at the '20' element, not the buffer's start
     }
 }
 
@@ -65,6 +74,6 @@ fn main(): int {
         test::assert(mid[0] == 20, "interior pointer survives a collection with correct value");
     }
 
-    io::printline("41/03 PASS: interior pointer into a List<int> buffer survives a forced collection");
+    io::printline("41/03 PASS: interior pointer into a gc_alloc'd buffer survives a forced collection");
     return 0;
 }

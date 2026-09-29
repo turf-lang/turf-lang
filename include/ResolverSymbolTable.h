@@ -128,10 +128,16 @@ public:
     return ModuleTable_.getModuleFunctionNames(ModuleName);
   }
 
-  /// LEC-002: the `pub` subset of getModuleFunctionNames().
+  /// LEC-002: the `pub` free functions of getModuleFunctionNames().
   std::vector<std::string> getModulePublicFunctionNames(
       const std::string &ModuleName) const {
     return ModuleTable_.getModulePublicFunctionNames(ModuleName);
+  }
+
+  /// LEC-002: bare names of type @p OwnerIdentity's `pub` methods.
+  std::vector<std::string> getPublicMethodNames(
+      const std::string &OwnerIdentity) const {
+    return ModuleTable_.getPublicMethodNames(OwnerIdentity);
   }
 
   std::vector<std::string> getModuleConstantNames(

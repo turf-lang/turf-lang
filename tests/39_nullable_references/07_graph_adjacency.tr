@@ -74,17 +74,18 @@ fn main(): int {
     gc_collect();
     churn(24);
 
-    unsafe {
-        i = 0;
-        while i < n {
-            mut nd: &GraphNode = nodes.data[i];
-            test::assert(nd.id == i, "each node's id survives collection intact");
-            mut nextNode: &GraphNode = nodes.data[nextIdx[i]];
-            test::assert(nextNode.id == (i + 1) % n, "next-edge neighbor has the expected id");
-            mut skipNode: &GraphNode = nodes.data[skipIdx[i]];
-            test::assert(skipNode.id == (i + 2) % n, "skip-edge neighbor has the expected id");
-            i = i + 1;
-        }
+    // Reads go through the bounds-checked `List.get()`: `List.data` is private
+    // to list.tr (LEC-002), and this test is about the GC keeping every
+    // `&GraphNode` alive, not about raw-pointer indexing.
+    i = 0;
+    while i < n {
+        mut nd: &GraphNode = nodes.get(i);
+        test::assert(nd.id == i, "each node's id survives collection intact");
+        mut nextNode: &GraphNode = nodes.get(nextIdx[i]);
+        test::assert(nextNode.id == (i + 1) % n, "next-edge neighbor has the expected id");
+        mut skipNode: &GraphNode = nodes.get(skipIdx[i]);
+        test::assert(skipNode.id == (i + 2) % n, "skip-edge neighbor has the expected id");
+        i = i + 1;
     }
 
     // Walk the whole cycle starting from node 0 -- n hops on the next-edge

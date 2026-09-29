@@ -2,9 +2,9 @@
 // type_identity_box_a_module.tr. Fields deliberately reordered and padded so
 // a mixed-up instantiation reads the wrong offsets.
 pub struct Box<T> {
-    tag: int,
-    val: T,
-    extra: int
+    pub tag: int,
+    pub val: T,
+    pub extra: int
 }
 
 pub fn<T> Box.new(v: T): void {
@@ -18,8 +18,8 @@ pub fn<T> Box.get(): T {
 }
 
 pub struct Item {
-    s: string,
-    n: int
+    pub s: string,
+    pub n: int
 }
 
 pub fn item(n: int): Item {

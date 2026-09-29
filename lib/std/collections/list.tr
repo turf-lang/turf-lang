@@ -34,9 +34,9 @@ unsafe module;
 import sys;
 
 pub struct List<T> {
-  pub data: T*,
-  pub len: int,
-  pub cap: int
+  data: T*,
+  len: int,
+  cap: int
 }
 
 pub fn<T> List.push(item: T): void {

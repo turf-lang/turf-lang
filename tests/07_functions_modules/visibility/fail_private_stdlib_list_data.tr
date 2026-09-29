@@ -1,0 +1,13 @@
+// LEC-002 E088: the flagship case. `List<T>.data` is a raw pointer that used to
+// be reachable from any module only because nothing could be private
+// (STD-003 item 5); it is now private to list.tr, and the hint points at the
+// public methods (`get`, `set`, `length`, ...) instead.
+import list::List;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(1);
+    unsafe {
+        return l.data[0];
+    }
+}
