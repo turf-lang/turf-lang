@@ -26,6 +26,29 @@ find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
+# ─── --smart's local-model runtime: optional ─────────────────────────────────
+# llama.cpp is only what `--smart` runs its model on, yet it used to be a hard
+# build dependency: a source build that only wanted to print hello world had to
+# clone the submodule and build an ML runtime first (and link OpenMP, and on
+# macOS Metal/Accelerate). OFF compiles src/SLMEngineDisabled.cpp instead of
+# src/SLMEngine.cpp -- the only file that includes llama.h -- and `--smart`
+# then says it is not built in and shows the compiler's own diagnostics, which
+# is what it already does when the model file is missing. Deterministic fixes
+# and every other compiler feature are unaffected.
+option(TURF_SMART "Build the local-model runtime behind --smart (vendored llama.cpp)" ON)
+set(LLAMA_IMPORTED_TARGETS "")
+set(OPENMP_LINK_FLAGS "")
+set(PLATFORM_LIBS "")
+if(TURF_SMART AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/llama.cpp/CMakeLists.txt")
+  message(FATAL_ERROR
+    "TURF_SMART is ON but the llama.cpp submodule is not checked out "
+    "(external/llama.cpp is empty). Either fetch it:\n"
+    "  git submodule update --init external/llama.cpp\n"
+    "or build without --smart's model runtime:\n"
+    "  cmake -DTURF_SMART=OFF ...")
+endif()
+if(TURF_SMART)
+
 # ─── llama.cpp (external static build) ───────────────────────────────────────
 # NOTE: local/uncommitted fix, see https://github.com/turf-lang/turf-lang/issues/229 --
 # CMAKE_SOURCE_DIR is always the top-level project's root, which breaks this
@@ -143,7 +166,7 @@ foreach(_lib ${LLAMA_STATIC_LIBS})
 endforeach()
 
 # ─── OpenMP (conditional, mirroring the build script logic) ──────────────────
-set(OPENMP_LINK_FLAGS "")
+# ggml's threading; only linked when TURF_SMART builds the model runtime.
 if(APPLE)
   find_package(OpenMP QUIET)
   if(OpenMP_CXX_FOUND)
@@ -158,7 +181,7 @@ else()
 endif()
 
 # ─── Platform-specific frameworks ────────────────────────────────────────────
-set(PLATFORM_LIBS "")
+# Metal/Accelerate are ggml's backends, so they too only come with TURF_SMART.
 if(APPLE)
   find_library(ACCELERATE_FRAMEWORK Accelerate REQUIRED)
   list(APPEND PLATFORM_LIBS ${ACCELERATE_FRAMEWORK})
@@ -166,6 +189,16 @@ if(APPLE)
   find_library(METALKIT_FRAMEWORK MetalKit REQUIRED)
   find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
   list(APPEND PLATFORM_LIBS ${METAL_FRAMEWORK} ${METALKIT_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
+endif()
+
+endif() # TURF_SMART
+
+# The one translation unit that differs: the real engine needs llama.h, the
+# stub needs nothing (include/SLMEngine.h only forward-declares llama types).
+if(TURF_SMART)
+  set(TURF_SLM_ENGINE_SOURCE src/SLMEngine.cpp)
+else()
+  set(TURF_SLM_ENGINE_SOURCE src/SLMEngineDisabled.cpp)
 endif()
 
 # ─── Core library (everything but main.cpp) ─────────────────────────────────
@@ -203,7 +236,7 @@ add_library(turfcore STATIC
   src/ParserModule.cpp
   src/PackageGraph.cpp
   src/Sandbox.cpp
-  src/SLMEngine.cpp
+  ${TURF_SLM_ENGINE_SOURCE}
   src/SLMIntegration.cpp
   src/ResolverSymbolTable.cpp
   src/ResolverScopeTable.cpp
@@ -230,10 +263,14 @@ add_library(turfcore STATIC
 
 target_include_directories(turfcore PUBLIC
   include
-  external/llama.cpp/include
-  external/llama.cpp/ggml/include
   ${LLVM_INCLUDE_DIRS}
 )
+if(TURF_SMART)
+  target_include_directories(turfcore PUBLIC
+    external/llama.cpp/include
+    external/llama.cpp/ggml/include
+  )
+endif()
 
 # LLVM_DEFINITIONS (from LLVMConfig.cmake) is a single space-separated
 # STRING of "-Dname" / "-Dname=value" flags, not a proper CMake

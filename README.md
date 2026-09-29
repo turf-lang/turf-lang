@@ -743,19 +743,29 @@ A larger FFI showcase (file I/O, `libm`, environment variables, sockets, variadi
 
 - **LLVM 22** (via `LLVMConfig.cmake`)
 - **CMake 3.20+**
-- **C++20** compiler (Clang recommended)
-- `llama.cpp` (vendored as a submodule under `external/llama.cpp`; built   automatically as a static library on first configure if not already built)
+- **C++20** compiler (Clang recommended), which also provides the `cc` that `turfc` links every program with
+- **Go 1.26+**, optional: only for the `turf` front end (`build/turf`). Without it you get `build/turfc` alone.
+- `llama.cpp`, optional: only for `--smart`'s local model. It is vendored as a submodule under `external/llama.cpp` and built automatically as a static library on the first configure.
 
 ### Build
 
 ```bash
 git clone --recursive <this-repo>
 cd turf
-chmod +x scripts/cmake_build.sh
-./scripts/cmake_build.sh --release
+./scripts/cmake_build.sh --release              # everything, including --smart's model runtime
 ```
 
-`cmake_build.sh` detects available CPU cores and builds in parallel; the resulting compiler binary is placed at `build/turfc`. On first run, if `llama.cpp`'s static libraries aren't already built, CMake builds them automatically before building Turf itself — this can take a while the first time.
+Just the compiler and `turf`, without the llama.cpp submodule or its (slow) first build:
+
+```bash
+git clone <this-repo>
+cd turf
+./scripts/cmake_build.sh --release --no-smart   # same as cmake -DTURF_SMART=OFF
+```
+
+A `--no-smart` build is the same compiler: every diagnostic, deterministic fix and feature works. The only difference is that `--smart` says its model runtime isn't built in and shows the compiler's own diagnostics.
+
+`cmake_build.sh` detects available CPU cores and builds in parallel. The compiler is placed at `build/turfc` and, if Go is installed, the front end at `build/turf`. On the first `--smart`-enabled configure, CMake builds `llama.cpp`'s static libraries before building Turf itself, which takes a while the first time.
 
 ### Compile and run a file directly
 

@@ -276,16 +276,20 @@ jobs:
   # without needing a second, hand-written test corpus of its own.
   #
   # A separate job, not more steps in build_and_test above: a second full
-  # CMake configure+build (LLVM/llama.cpp/turfcore, unavoidable -- turfcore
-  # links llama.cpp unconditionally, TURF_RT_SANITIZE only affects the
+  # CMake configure+build (LLVM/turfcore; TURF_RT_SANITIZE only affects the
   # runtime half) is expensive enough to want its own parallel job rather
   # than serializing after the first build's own five -O-level sweeps.
+  #
+  # Built with -DTURF_SMART=OFF: nothing here uses --smart's model, so there
+  # is no llama.cpp submodule to fetch or build. It also makes this job CI's
+  # standing proof that the compiler builds and passes the whole suite
+  # without llama.cpp (CMakeLists.txt, TURF_SMART).
   gc_hardening_asan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
 
       - name: Cache LLVM
         id: cache-llvm
@@ -303,31 +307,8 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 22
-          sudo apt-get install -y llvm-22-dev cmake libomp-22-dev
+          sudo apt-get install -y llvm-22-dev cmake
       - run: echo "/usr/lib/llvm-22/bin" >> $GITHUB_PATH
-
-      - name: Get llama.cpp commit hash
-        id: llama-sha
-        run: echo "sha=$(git -C external/llama.cpp rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache llama.cpp build
-        id: cache-llama
-        uses: actions/cache@v4
-        with:
-          path: external/llama.cpp/build
-          key: llama-build-${{ runner.os }}-${{ steps.llama-sha.outputs.sha }}
-
-      - name: Build llama.cpp
-        if: steps.cache-llama.outputs.cache-hit != 'true'
-        run: |
-          cd external/llama.cpp
-          cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_SERVER=OFF -DGGML_OPENMP=OFF
-          cmake --build build --config Release -j $(nproc)
-
-      - name: Configure OpenMP
-        run: |
-          echo "LIBRARY_PATH=/usr/lib/llvm-22/lib:$LIBRARY_PATH" >> $GITHUB_ENV
-          echo "LD_LIBRARY_PATH=/usr/lib/llvm-22/lib:$LD_LIBRARY_PATH" >> $GITHUB_ENV
 
       - name: Install ccache
         run: sudo apt-get install -y ccache
@@ -349,7 +330,7 @@ jobs:
         run: |
           export CC="ccache gcc"
           export CXX="ccache g++"
-          cmake -S . -B build_asan -DCMAKE_BUILD_TYPE=Release -DTURF_RT_SANITIZE=ON
+          cmake -S . -B build_asan -DCMAKE_BUILD_TYPE=Release -DTURF_RT_SANITIZE=ON -DTURF_SMART=OFF
           cmake --build build_asan -j $(nproc)
 
       # detect_leaks=0: MEM-002's own documented, deliberate design decision

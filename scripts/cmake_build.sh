@@ -9,21 +9,27 @@ RED="\033[0;31m"
 RESET="\033[0m"
 BUILD_TYPE="Debug"
 BUILD_DIR="build"
+# --no-smart: build without --smart's model runtime (llama.cpp). No submodule,
+# no ML build, no OpenMP -- the fast path for anyone who just wants the
+# compiler. See TURF_SMART in CMakeLists.txt.
+SMART="ON"
 # Parse arguments
 for arg in "$@"; do
   case $arg in
     --release)   BUILD_TYPE="Release" ;;
     --debug)     BUILD_TYPE="Debug" ;;
+    --no-smart)  SMART="OFF" ;;
     --clean)     rm -rf "$BUILD_DIR" && echo -e "${YELLOW}Cleaned build directory.${RESET}" ;;
     --help)
-      echo "Usage: $0 [--debug] [--release] [--clean]"
+      echo "Usage: $0 [--debug] [--release] [--no-smart] [--clean]"
       exit 0
       ;;
   esac
 done
-echo -e "${GREEN}[1 / 3]${RESET} ${BOLD}Configuring (${BUILD_TYPE})...${RESET}"
+echo -e "${GREEN}[1 / 3]${RESET} ${BOLD}Configuring (${BUILD_TYPE}, --smart runtime ${SMART})...${RESET}"
 cmake -S . -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+  -DTURF_SMART="$SMART" \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 # Symlink compile_commands.json to project root for clangd/IDEs
 if [ -f "$BUILD_DIR/compile_commands.json" ] && [ ! -L "compile_commands.json" ]; then

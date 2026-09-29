@@ -12,6 +12,8 @@ An LLVM-backed, statically-typed, AOT-compiled language. Pipeline: `Lexer → Pa
 ./scripts/cmake_build.sh --release   # first run also builds the vendored llama.cpp submodule — slow once, fast after
 ```
 
+`--no-smart` (`-DTURF_SMART=OFF`) builds without `--smart`'s model runtime: no llama.cpp submodule, no OpenMP. `src/SLMEngineDisabled.cpp` replaces `src/SLMEngine.cpp`, the only file that includes `llama.h`, so keep llama.cpp out of every other file or this build breaks. The test suite and `turf-api-tests` pass either way (neither needs a model).
+
 The build produces **two binaries** (LEC-001, `docs/development/FREEZE.md` §6.16, F-PKG-1):
 - `build/turfc` is the compiler. Everything in this file that says "the compiler" means it: the test runner, the smoke scripts and CI run it directly, and `TURF_COMPILER` (the override the runner reads) points at `turfc`, never at `turf`.
 - `build/turf` is the Go front end under `cli/` (it finds `turfc`, checks its driver interface, and forwards; `turf file.tr` is `turfc file.tr`). **Go is optional**: it is only needed for `build/turf`, and without `go` on `PATH` CMake prints `Go not found: build/turf ... will not be built; build/turfc is unaffected` and the compiler and the whole test suite build and run as usual. `-DTURF_BUILD_CLI=OFF` skips it explicitly.
