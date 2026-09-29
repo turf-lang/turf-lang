@@ -17,7 +17,7 @@ const (
 
 const (
 	groupAny     = "Any file"
-	groupProject = "Project (not yet implemented)"
+	groupProject = "Project"
 	groupOther   = "Other"
 )
 

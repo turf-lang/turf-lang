@@ -32,11 +32,36 @@ is forwarded the same way.
 | `turf migrate <name> [--write] <files...>` | `turfc --migrate=<name>` (`pub`) |
 | `turf version`, `turf help [command]` | |
 
-The project commands (`new`, `init`, `build`, `test`, `clean`, `fetch`, `add`,
-`remove`, `update`) have their names reserved but are not implemented; each says
-which stage of LEC-001 builds it. `publish` is reserved: there is no registry in
-2.0. The pre-2.0 registry-model command files (`cmd/turf/{init,install,add,
-remove,update,publish}.go`) are kept unused for stages 5 and 6 to rework.
+### Projects
+
+A project is a directory tree with a `turf.toml` (see `FREEZE.md` §6.16 for the
+layout and rules). Run these anywhere inside one; `turf` walks up to the nearest
+`turf.toml`.
+
+| Command | Does |
+|---|---|
+| `turf new <name> [--lib]` | create `<name>/` with `turf.toml`, `src/main.tr` (or `src/<name>.tr`, the root module, with `--lib`) and a `.gitignore` |
+| `turf init [--lib] [name]` | the same, in the current directory; never overwrites a source file |
+| `turf build [flags]` | resolve path dependencies into a package graph (`build/package-graph.json`) and run `turfc --package-graph`; the program goes to `build/<name>`, a library is only checked |
+| `turf run [flags] [-- args]` | with no `.tr` argument: `turf build`, then run `build/<name>` |
+| `turf check [flags]` | with no `.tr` argument: the same compiler runs as `build`, each with `--check`, and no executable |
+| `turf clean` | remove `build/` |
+| `turf add <name> --path <dir>` | add a path dependency (one line of `turf.toml`; comments and layout are kept) |
+| `turf remove <name>` | delete that dependency's line |
+
+`-o` and `--package-graph` are refused in a project build: `turf` owns both.
+Dependencies are `path` dependencies for now. `fetch`, `update` (git
+dependencies, the cache and `turf.lock`) are stage 6 of LEC-001 and `test` is
+REL-002; each says so and exits 2. `publish` is reserved: there is no registry in
+2.0. The pre-2.0 registry-model command files (`cmd/turf/{install,update,
+publish}.go`, and `internal/legacymanifest`) are kept unused for stage 6 to
+rework.
+
+The manifest is read with `github.com/BurntSushi/toml`, the module's one
+dependency. `internal/manifest` validates it (unknown keys are errors) and
+edits it as text, never by re-encoding, so a user's comments survive;
+`internal/project` builds the graph; `internal/stdlib` lists the stdlib module
+names a package may not take.
 
 ## Finding the compiler
 
@@ -54,6 +79,7 @@ fine.
 cmake --build build            # builds build/turfc and, if Go is installed, build/turf
 cd cli && go vet ./... && go test ./...
 ./scripts/cli_smoke.sh         # the front end against the real compiler
+./scripts/project_smoke.sh     # projects: new/add/build/run/check, manifests, graph errors
 ```
 
 A plain `go build ./cmd/turf` works too, since nothing is stamped at build time.
