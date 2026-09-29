@@ -1,0 +1,6 @@
+// LEC-002 E089: a `pub` method whose parameter is a private type.
+import fail_private_in_public_method_module;
+
+fn main(): int {
+    return 0;
+}

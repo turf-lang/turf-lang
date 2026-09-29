@@ -276,6 +276,9 @@ public:
   std::vector<std::string> getModulePublicTypeNames(const std::string &ModuleName) const {
     return TypeRegistry_.getModulePublicTypeNames(ModuleName);
   }
+  bool isTypePublic(const std::string &Identity) const {
+    return TypeRegistry_.isTypePublic(Identity);
+  }
 
   /**
    * @brief Whether code in module @p FromModule ("" = the main file) may name

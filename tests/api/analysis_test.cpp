@@ -579,6 +579,85 @@ fn main(): int {
     std::cerr << render(R);
 }
 
+// LEC-002 stage 5: private-in-public. A `pub` signature or field that mentions
+// a private type of its own module is E089, reported at the public item with a
+// note at the private type and a hint offering both fixes. Asserted here (not
+// just by fail_*.tr files) because an earlier draft of one of those files
+// "failed" for an unrelated reason -- a reserved word in its companion module
+// -- and the runner counted it as passing.
+static void testPrivateInPublic(const ScratchDir &Dir) {
+  CurrentTest = "private in public";
+  const std::string Main = Dir.write("pipuser.tr", "");
+  struct Case {
+    const char *Label;
+    const char *Module;
+    const char *Item;         // the public item the message must name
+    const char *HintFragment; // must appear in the hint
+  };
+  const Case Cases[] = {
+      {"return type",
+       "struct Hidden { pub n: int }\npub fn make(): Hidden { return Hidden::default(); }",
+       "Public function 'make'", "`pub struct Hidden` in pipmod.tr"},
+      {"parameter",
+       "enum Mode { A }\npub fn start(m: Mode): int { return 1; }",
+       "Public function 'start'", "`pub enum Mode` in pipmod.tr"},
+      {"field",
+       "struct Inner { pub n: int }\npub struct Outer { pub inner: Inner }",
+       "Public field 'Outer.inner'", "keep the field internal by removing its `pub`"},
+      {"generic argument",
+       "import list::List;\nstruct H { pub n: int }\npub fn all(): List<H> { return List::default(); }",
+       "Public function 'all'", "`pub struct H` in pipmod.tr"},
+      {"method",
+       "struct Token { pub id: int }\npub struct Lexer { pub pos: int }\n"
+       "pub fn Lexer.accept(t: Token): int { return t.id; }",
+       "Public method 'Lexer.accept'", "keep the method internal"},
+      {"error union",
+       "struct R { pub n: int }\npub fn try_make(): !R { return R::default(); }",
+       "Public function 'try_make'", "`pub struct R` in pipmod.tr"},
+  };
+  for (const auto &C : Cases) {
+    Dir.write("pipmod.tr", C.Module);
+    auto R = turf::analyze({{Main, "import pipmod;\nfn main(): int { return 0; }\n"}});
+    CHECK(!R.succeeded());
+    bool Found = false;
+    for (const auto &D : R.diagnostics()) {
+      if (D.Code != "E089")
+        continue;
+      Found = true;
+      CHECK(D.Message.find(C.Item) != std::string::npos);
+      CHECK(D.Hint.find(C.HintFragment) != std::string::npos);
+      if (D.Hint.find(C.HintFragment) == std::string::npos)
+        std::cerr << "    case '" << C.Label << "': hint was: " << D.Hint << "\n";
+      CHECK(!D.Related.empty()); // the note at the private type
+      break;
+    }
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << C.Label << "' produced:\n" << render(R);
+  }
+
+  // Accepted: private types in private signatures and inside pub bodies, a
+  // `pub` method on a private type, generic signatures, pub over pub -- and,
+  // in the main file, `pub` over a private type (a single-file program has no
+  // importer to leak to).
+  Dir.write("pipmod.tr", R"(struct Secret { pub n: int }
+pub struct Open { pub v: int, hidden: Secret }
+fn make(n: int): Secret { mut s: Secret = Secret::default(); s.n = n; return s; }
+pub fn compute(n: int): int { mut s: Secret = make(n); return s.n; }
+pub fn Secret.doubled(): int { return self.n * 2; }
+pub fn<T> identity(x: T): T { return x; }
+pub fn sum(a: Open, b: Open): int { return a.v + b.v; }
+)");
+  auto R = turf::analyze({{Main, R"(import pipmod;
+struct Local { n: int }
+pub fn from_local(x: Local): int { return x.n; }
+fn main(): int { return pipmod::compute(1); }
+)"}});
+  CHECK(R.succeeded());
+  if (!R.succeeded())
+    std::cerr << render(R);
+}
+
 int main() {
   ScratchDir Dir;
   testCleanProgramQueries();
@@ -594,6 +673,7 @@ int main() {
   testEmptyInput();
   testVisibilityModifierPlacement();
   testPrivateSymbolAccess(Dir);
+  testPrivateInPublic(Dir);
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

@@ -69,6 +69,65 @@ void Resolver::raisePrivateMethod(SourceLocation Loc, const std::string &Module,
       .raise();
 }
 
+namespace {
+
+/// Every named user-type identity @p T mentions, at any depth. Generic type
+/// parameters and primitives are not registered identities, so the caller's
+/// isKnownTypeIdentity() test drops them.
+void collectMentionedTypes(const TurfType *T, std::vector<std::string> &Out) {
+  if (!T)
+    return;
+  if (const auto *NT = dynamic_cast<const NamedType *>(T)) {
+    Out.push_back(NT->getName());
+  } else if (const auto *GT = dynamic_cast<const GenericType *>(T)) {
+    Out.push_back(GT->getBaseName());
+    for (const auto &Arg : GT->getTypeArgs())
+      collectMentionedTypes(Arg.get(), Out);
+  } else if (const auto *PT = dynamic_cast<const TurfPointerType *>(T)) {
+    // Also `&T` and `&?T`, which are TurfPointerType subclasses.
+    collectMentionedTypes(PT->getPointee().get(), Out);
+  } else if (const auto *AT = dynamic_cast<const ArrayType *>(T)) {
+    collectMentionedTypes(AT->getElementTypePtr().get(), Out);
+  } else if (const auto *EU = dynamic_cast<const TurfErrorUnionType *>(T)) {
+    collectMentionedTypes(EU->getSuccessTypePtr().get(), Out);
+  } else if (const auto *FT = dynamic_cast<const FuncType *>(T)) {
+    for (const auto &P : FT->getParamTypes())
+      collectMentionedTypes(P.get(), Out);
+    collectMentionedTypes(FT->getReturnType().get(), Out);
+  }
+}
+
+} // namespace
+
+void Resolver::checkNoPrivateInPublic(
+    SourceLocation Loc, const std::string &ItemKind, const std::string &ItemName,
+    const std::vector<const TurfType *> &Types) const {
+  const std::string Module = currentModuleName();
+  if (Module.empty() || FunctionNestingDepth_ > 0 || SuppressUnqualifiedVisibilityCheck_)
+    return;
+  std::vector<std::string> Mentioned;
+  for (const auto *T : Types)
+    collectMentionedTypes(T, Mentioned);
+  for (const auto &Id : Mentioned) {
+    // Only this module's own private types can leak through its own
+    // signatures: a type of another module that is not `pub` could not have
+    // been written here at all (E088).
+    if (!SymTable_.isKnownTypeIdentity(Id) || TypeIdentity::owningModule(Id) != Module ||
+        SymTable_.isTypePublic(Id))
+      continue;
+    SourceLocation DeclLoc = Loc;
+    std::string Keyword = "struct";
+    if (const auto *Info = SymTable_.typeVisibility(Id)) {
+      DeclLoc = toSourceLocation(Info->DeclLoc);
+      Keyword = Info->Keyword;
+    }
+    PrivateInPublicError(Loc, ItemKind, ItemName, TypeIdentity::bareName(Id), Keyword,
+                         Module, DeclLoc)
+        .raise();
+    return; // one diagnostic per item is enough
+  }
+}
+
 bool Resolver::filterToVisibleOverloads(
     std::vector<ResolverSymbolTable::ModuleFunctionMatch> &Matches,
     SourceLocation Loc, const std::string &Name) const {

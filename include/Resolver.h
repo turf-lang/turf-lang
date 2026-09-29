@@ -517,6 +517,17 @@ private:
   /// declares it.
   void raisePrivateMethod(SourceLocation Loc, const std::string &Module,
                           const std::string &Key) const;
+  /// Private-in-public (LEC-002 stage 5): raises E089 if any of @p Types
+  /// mentions -- at any depth: pointer/reference target, array element,
+  /// generic argument, `!T` success type, function-type parameter -- a type
+  /// declared in the CURRENT module without `pub`. Called for each `pub`
+  /// function signature and `pub` field. A no-op in the main file (a
+  /// single-file program has no importer), inside a function body, and while
+  /// re-resolving a monomorphized clone (its substituted types are the call
+  /// site's, not something the declaration wrote).
+  void checkNoPrivateInPublic(SourceLocation Loc, const std::string &ItemKind,
+                              const std::string &ItemName,
+                              const std::vector<const TurfType *> &Types) const;
   /// Drops, from @p Matches, every overload the current module may not call
   /// (private, declared in another module). If that leaves nothing but at
   /// least one overload was dropped, raises E088 at @p Loc and returns false.

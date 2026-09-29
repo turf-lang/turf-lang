@@ -1,0 +1,12 @@
+// Companion for fail_private_in_public_generic_arg.tr: the private type is only
+// a generic ARGUMENT (`List<Hidden>`), not the outermost type -- it still
+// leaks through the signature.
+import list::List;
+
+struct Hidden {
+    pub n: int
+}
+
+pub fn all(): List<Hidden> {
+    return List::default();
+}

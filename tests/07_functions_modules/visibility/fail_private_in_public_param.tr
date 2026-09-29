@@ -1,0 +1,6 @@
+// LEC-002 E089: a `pub` function with a private enum in its parameter list.
+import fail_private_in_public_param_module;
+
+fn main(): int {
+    return 0;
+}

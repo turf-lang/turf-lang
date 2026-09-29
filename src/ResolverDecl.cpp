@@ -68,6 +68,22 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
     return;
   }
 
+  // LEC-002 stage 5: a `pub` signature may not mention this module's private
+  // types. The receiver (`self`) is skipped: a `pub` method of a private type
+  // is not a leak, since no importer can obtain that type's value except
+  // through some other public item, which is checked in its own right.
+  if (Node.isPublic()) {
+    std::vector<const TurfType *> Mentioned;
+    for (const auto &P : Node.getParams())
+      if (P.Name != "self")
+        Mentioned.push_back(P.Type.get());
+    Mentioned.push_back(Node.getReturnType());
+    const std::string Shown = TypeIdentity::bareName(Node.getName());
+    checkNoPrivateInPublic(Node.getNameLoc(),
+                           Shown.find('.') != std::string::npos ? "method" : "function",
+                           Shown, Mentioned);
+  }
+
   // `new`/`default`/`static` reservation checks. These are all syntactically
   // valid (ParseFuncDef() parses them fine -- see its own comment on why:
   // this mirrors how `export mut` parses fine and is rejected here, in the
@@ -616,6 +632,13 @@ void Resolver::visitStructDecl(StructDeclExprAST &Node) {
         MisplacedVisibilityError(F.Vis.Loc,
                                  MisplacedVisibilityError::Where::InsideFunction)
             .raise();
+  // LEC-002 stage 5: a `pub` field may not have a type this module keeps
+  // private (checkNoPrivateInPublic() explains the scope).
+  for (const auto &F : Node.getFields())
+    if (F.Vis.IsPublic)
+      checkNoPrivateInPublic(F.NameLoc, "field",
+                             TypeIdentity::bareName(Node.getName()) + "." + F.Name,
+                             {F.Type.get()});
   // Pass 1 (hoistTopLevel) already registered this struct's name -- but ONLY
   // for a struct declared at the TOP LEVEL of a file or an imported module's
   // body. hoistTopLevel() never recurses into a FUNCTION BODY looking for
@@ -810,6 +833,15 @@ void Resolver::visitExternFuncDecl(ExternFuncDeclExprAST &Node) {
   for (const auto &[ParamName, ParamType] : Node.getParams())
     validateNamedType(ParamType, Node.getLoc());
   validateNamedType(Node.getReturnType(), Node.getLoc());
+
+  // LEC-002 stage 5: a `pub extern fn` is a public signature like any other.
+  if (Node.isPublic()) {
+    std::vector<const TurfType *> Mentioned;
+    for (const auto &[ParamName, ParamType] : Node.getParams())
+      Mentioned.push_back(ParamType.get());
+    Mentioned.push_back(Node.getReturnType().get());
+    checkNoPrivateInPublic(Node.getNameLoc(), "extern function", Node.getName(), Mentioned);
+  }
 
   if (FunctionNestingDepth_ > 0) {
     ResolverFunctionSymbol Sym;

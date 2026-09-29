@@ -1,0 +1,8 @@
+// LEC-002 E089: `pub inner: Inner` -- an importer reading `outer.inner` would
+// hold an `Inner` it cannot name. Making the field private (drop its `pub`) or
+// `Inner` public both fix it; the hint says so.
+import fail_private_in_public_field_module;
+
+fn main(): int {
+    return 0;
+}

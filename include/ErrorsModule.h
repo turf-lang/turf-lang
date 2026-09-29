@@ -606,4 +606,41 @@ public:
   }
 };
 
+// LEC-002 stage 5 (FREEZE.md §6.15, "private-in-public"): a `pub` function
+// signature or `pub` field that mentions a type its own module did not mark
+// `pub`. Legal in a private declaration; illegal here because an importer
+// could then hold a value of a type it cannot spell (`guess`, or passing it
+// straight on) -- the privacy the type asked for would leak through the
+// signature. Names BOTH declarations: the primary location is the public
+// item, the related note is the private type; the hint offers the two ways
+// out, and says which one is usually the right one to take.
+class PrivateInPublicError : public TurfError {
+public:
+  /// @param ItemKind "function", "method", "extern function" or "field".
+  /// @param ItemName the public item (a method as "Owner.name", a field as
+  ///        "Owner.name"), shown to the reader without module qualifiers.
+  /// @param TypeName the private type's bare name; @p TypeKeyword its
+  ///        declaring keyword (struct/enum/error/machine).
+  PrivateInPublicError(SourceLocation Loc, const std::string &ItemKind,
+                       const std::string &ItemName, const std::string &TypeName,
+                       const std::string &TypeKeyword, const std::string &Module,
+                       SourceLocation TypeDeclLoc)
+      : TurfError(Loc, "") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    const bool IsField = ItemKind == "field";
+    Message = Colors::BRIGHT_RED + "Public " + ItemKind + " '" + Colors::CYAN +
+              ItemName + Colors::BRIGHT_RED + "' exposes the private type '" +
+              Colors::CYAN + TypeName + Colors::BRIGHT_RED + "'." + Colors::RESET;
+    withRelated(TypeDeclLoc, "'" + TypeName + "' is declared in module '" +
+                                 Module + "' without `pub`");
+    const std::string File = Module + ".tr";
+    Hint_ = "Anything `pub` is visible to other modules, but '" + TypeName +
+            "' is not, so they would receive values of a type they cannot "
+            "name. Either make the type public -- `pub " + TypeKeyword + " " +
+            TypeName + "` in " + File + " -- or keep " +
+            (IsField ? "the field" : "the " + ItemKind) +
+            " internal by removing its `pub`.";
+  }
+};
+
 #endif

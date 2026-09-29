@@ -1,0 +1,8 @@
+// LEC-002 E089: the private type hides inside `List<Hidden>`; the rule looks
+// through generic arguments (and pointer targets, references, arrays, `!T`
+// success types and function-type parameters).
+import fail_private_in_public_generic_arg_module;
+
+fn main(): int {
+    return 0;
+}

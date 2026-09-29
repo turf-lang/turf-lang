@@ -1,0 +1,55 @@
+// Companion for private_in_public_allowed.tr (ends in _module.tr, so the
+// runner treats it as a helper with no main()). Everything here is legal:
+// a private type may appear in PRIVATE signatures and inside `pub` bodies --
+// what it may not do is appear in a `pub` signature or a `pub` field.
+struct Secret {
+    pub n: int
+}
+
+enum Mood { Calm, Loud }
+
+pub struct Open {
+    pub v: int,
+    hidden: Secret      // a PRIVATE field of a private type is fine
+}
+
+// Private signature, private type.
+fn make_secret(n: int): Secret {
+    mut s: Secret = Secret::default();
+    s.n = n;
+    return s;
+}
+
+// A `pub` function may USE a private type internally -- only its signature
+// is public.
+pub fn compute(n: int): int {
+    mut s: Secret = make_secret(n);
+    immut m: Mood = Mood::Loud;
+    if (m == Mood::Loud) {
+        return s.n * 2;
+    }
+    return s.n;
+}
+
+// A `pub` method on a PRIVATE type is not a leak: an importer cannot name
+// `Secret`, so it can never call this; the receiver is not part of the
+// signature that is checked.
+pub fn Secret.doubled(): int {
+    return self.n * 2;
+}
+
+// A generic signature has only type PARAMETERS, not this module's types.
+pub fn<T> identity(x: T): T {
+    return x;
+}
+
+// A `pub` function over a `pub` type.
+pub fn open_sum(a: Open, b: Open): int {
+    return a.v + b.v;
+}
+
+pub fn make_open(v: int): Open {
+    mut o: Open = Open::default();
+    o.v = v;
+    return o;
+}

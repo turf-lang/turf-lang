@@ -199,6 +199,10 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // LEC-002: a reference from one module to a function, type (or, from
     // stage 4, method/field) another module did not mark `pub`.
     {"E088", "PrivateSymbolAccessError", "Private symbol access", SLM::ErrorCategory::DECLARATION, true},
+
+    // LEC-002 stage 5: a `pub` function signature or `pub` field mentions a
+    // type its own module did not mark `pub` (private-in-public).
+    {"E089", "PrivateInPublicError", "Private type in public signature", SLM::ErrorCategory::DECLARATION, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);
