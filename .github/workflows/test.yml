@@ -124,6 +124,13 @@ jobs:
         run: cd cli && go vet ./... && go test ./...
       - name: turf front end smoke test (passthrough, subcommands, handshake)
         run: CI=1 ./scripts/cli_smoke.sh
+      # LEC-001 stage 5: `turf` reads projects -- turf.toml, path dependencies,
+      # the package graph handed to `turfc --package-graph`. Covers new/init/
+      # add/remove/build/run/check/clean against the real compiler, the
+      # manifest rules, name conflicts and cycles, [unsafe] allow, and that
+      # `add`/`remove` edit one line and keep the user's comments.
+      - name: turf project smoke test (new, add, build, run, manifests, graph errors)
+        run: CI=1 ./scripts/project_smoke.sh
 
       # OPT-001 (docs/development/changes/OPT-001.md, INV-OPT-1): optimization
       # levels must never change a program's observable behaviour. The default
