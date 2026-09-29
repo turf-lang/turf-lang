@@ -69,12 +69,13 @@ void turf_gc_note_alloc(size_t bytes);
 int turf_gc_is_registered(const void *p);
 
 /*
- * Captures the process's approximate stack base -- the high-address end of
- * the range conservative scanning walks down from. Called exactly once,
- * from turf_rt_init(), before a single line of Turf-level code has run.
- * See turfrt_gc.c's own top comment for why "the address of a local
- * variable inside turf_rt_init()'s own frame" is a correct (if slightly
- * loose) choice.
+ * Captures the process's stack base -- the high-address end of the range
+ * conservative scanning walks down from. Called exactly once, from
+ * turf_rt_init(), before a single line of Turf-level code has run. Queries
+ * the OS/libc for the real stack bounds; never "the address of a local in
+ * turf_rt_init()", whose frame is a sibling of the user's main(), not an
+ * ancestor (turfrt_gc.c's doc comment on the definition). Panics if no
+ * source is available rather than under-scan.
  */
 void turf_gc_record_stack_base(void);
 

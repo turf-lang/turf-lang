@@ -257,10 +257,10 @@ docs/planning/OVERHAUL_REMAINING_WORK.md's OVH-013."
  * `gc_mark()` itself, which was the first fix attempted) matters: `gc_
  * mark()` also does real GC-heap block-table reads/writes that should
  * stay fully ASan-checked, and a plain "return &local" body has no memory
- * access worth checking anyway. Both existing call sites (gc_mark()'s own
- * "current SP", and turf_gc_record_stack_base()'s /proc-unavailable
- * fallback) now go through this instead of taking a local's address
- * directly.
+ * access worth checking anyway. gc_mark()'s "current SP" is the only
+ * caller: turf_gc_record_stack_base()'s /proc-unavailable fallback used to
+ * be the second, and was removed because a local's address there is not an
+ * ancestor of the user's main() (see that function).
  */
 __attribute__((noinline))
 #ifdef TURF_GC_ASAN
@@ -369,6 +369,43 @@ static void gc_arr_grow(void **arr, size_t *cap, size_t elem_size,
  * bounds, the same relationship `/proc/self/maps`'s "[stack]" mapping has
  * to Linux.
  */
+#if defined(TURF_GC_STACKBASE_PROCFS)
+#if defined(__GLIBC__)
+/* Not in any public header, but a stable exported glibc symbol
+ * (GLIBC_2.1): the stack pointer at process entry, recorded by the
+ * dynamic loader / static startup code before `main` -- or anything that
+ * calls it -- exists. It is glibc's own answer to this question: its
+ * pthread_getattr_np() uses it to find the main thread's stack mapping. */
+extern void *__libc_stack_end;
+#else
+#include <pthread.h>
+#endif
+
+/*
+ * turf_gc_record_stack_base()'s answer when /proc/self/maps is unavailable
+ * (a container or sandbox without procfs). Every source here is an ANCESTOR
+ * of every Turf frame -- the property the old local-address fallback lacked.
+ * Returns 0 if the query fails; the caller panics then.
+ */
+static uintptr_t gc_stack_base_without_procfs(void) {
+#if defined(__GLIBC__)
+  return (uintptr_t)__libc_stack_end;
+#else
+  /* musl (and bionic) answer this for the main thread without procfs (it probes the
+   * mapping with mremap), unlike glibc, which reads /proc/self/maps --
+   * hence glibc takes the branch above instead. */
+  pthread_attr_t attr;
+  void *addr = NULL;
+  size_t size = 0;
+  if (pthread_getattr_np(pthread_self(), &attr) != 0)
+    return 0;
+  int ok = pthread_attr_getstack(&attr, &addr, &size) == 0;
+  pthread_attr_destroy(&attr);
+  return ok ? (uintptr_t)addr + size : 0;
+#endif
+}
+#endif
+
 void turf_gc_record_stack_base(void) {
 #if defined(TURF_GC_STACKBASE_APPLE)
   /* Highest address of the CURRENT thread's stack -- the stack grows down
@@ -383,7 +420,16 @@ void turf_gc_record_stack_base(void) {
    * this function returns everywhere else. */
   g_stack_base = (uintptr_t)high_limit;
 #else
-  FILE *f = fopen("/proc/self/maps", "r");
+  /* TURF_GC_NO_PROCFS=1 (a testing aid, like TURF_GC_STRESS) skips this
+   * file's own /proc read so the fallback chain below can be exercised on a
+   * machine that does have procfs -- ROADMAP_v2.0.0.md REL-003 requires the
+   * no-/proc path be tested, and a minimal container is the only place it
+   * runs for real. */
+  const char *no_procfs = getenv("TURF_GC_NO_PROCFS");
+  FILE *f = (no_procfs != NULL && no_procfs[0] != '\0' &&
+             strcmp(no_procfs, "0") != 0)
+                ? NULL
+                : fopen("/proc/self/maps", "r");
   if (f) {
     char line[512];
     while (fgets(line, sizeof(line), f)) {
@@ -397,14 +443,22 @@ void turf_gc_record_stack_base(void) {
     }
     fclose(f);
   }
+  if (g_stack_base == 0)
+    g_stack_base = gc_stack_base_without_procfs();
 #endif
   if (g_stack_base == 0) {
-    /* The platform query above found nothing (e.g. /proc unavailable in a
-     * minimal container/sandbox without procfs) -- degrade to the
-     * call-depth-dependent local-variable capture rather than scanning
-     * nothing at all. Known pitfall, not silently accepted as equivalent:
-     * see docs/development/changes/MEM-002.md. */
-    g_stack_base = gc_approx_sp();
+    /* FDN-005: this used to degrade to gc_approx_sp() -- a local's address
+     * in THIS frame, which is exactly the sibling-frame capture the doc
+     * comment above explains is wrong. Measured with TURF_GC_NO_PROCFS=1
+     * under TURF_GC_STRESS=1: 11 of 12 tests/41_gc programs freed live
+     * objects (asserts, SIGSEGV, glibc heap-corruption aborts) at both -O0
+     * and -O2. A collector that silently frees live data is worse than a
+     * program that refuses to start, so there is no under-scanning
+     * fallback any more. */
+    turf_rt_panic("cannot locate the stack",
+                  "the garbage collector could not determine this thread's "
+                  "stack bounds on this platform",
+                  "<runtime>", 0);
   }
 }
 
