@@ -134,7 +134,9 @@ bool ParseLeadingUnsafeModuleDecl(std::unique_ptr<ExprAST> &OutBlock);
 // side effects. See its definition in ParserModule.cpp for the full
 // rationale (built for tooling -- an LSP's go-to-definition -- that needs
 // "where does this module live" without compiling it). Returns "" if the
-// module can't be found anywhere in the search order.
+// module can't be found anywhere in the search order, and also "" if more
+// than one file answers to the name (LEC-001 stage 3): a real import of an
+// ambiguous name is E090, not a file.
 std::string ResolveModuleFile(const std::string &ModuleName,
                               const std::string &ImportingFile = "");
 

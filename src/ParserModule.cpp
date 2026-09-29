@@ -765,8 +765,130 @@ IndexModuleDir(const std::string &Root, const char *SubdirName) {
   return Cache.emplace(std::move(Key), std::move(Index)).first->second;
 }
 
+namespace {
+
+// Where a module candidate was found. The order is the search order the
+// resolver used before LEC-001 stage 3, kept so the candidate list reads the
+// same way the old precedence did.
+enum class ModuleRootKind { Stdlib, Installed, Sibling, Cwd };
+
+struct ModuleCandidate {
+  ModuleRootKind Kind;
+  // Spelled exactly as the pre-stage-3 first-hit search spelled it (an index
+  // path, `<importer dir>/<m>.tr`, or a bare `<m>.tr` for the cwd). This
+  // string becomes ModuleImportExprAST::ResolvedPath, the identity key of
+  // ImportedFiles/ImportStack, so it must not change spelling just because
+  // the search stopped short-circuiting.
+  std::string Path;
+};
+
+} // namespace
+
+// An import written inside the standard library resolves in the standard
+// library only. The stdlib is one package (FREEZE.md 6.16, F-PKG-2: a package
+// imports its own modules, its dependencies and the stdlib), and its own
+// modules ARE stdlib modules -- so `strings.tr`'s `import list;` must mean
+// lib/std's list even when the user's program sits next to a `list.tr` of its
+// own. Without this, examining every root (below) would turn the user's
+// harmless local list.tr into an ambiguity error raised from inside the
+// stdlib, in a file the user never wrote and cannot change.
+static bool ImportsResolveInStdlibOnly(const std::string &ImportingFile) {
+  return IsLibStdWarningLocation(ImportingFile);
+}
+
+// LEC-001 stage 3 (FREEZE.md 6.16, F-PKG-2): EVERY place `import ModuleName;`
+// could name, not just the first. Before this, the four roots were tried in
+// order and the first hit won, so a local json.tr beside main.tr was silently
+// never loaded while the stdlib had a `json` (audit F-19). More than one
+// entry in the result is an error for the caller to raise, never a
+// precedence to apply.
+//
+// Deduplicated by canonical path, keeping the first spelling: the test runner
+// (and anyone running `turfc foo.tr` from foo.tr's own directory) has the
+// importing file's directory EQUAL to the cwd, so steps 3 and 4 find the same
+// file twice. Counting spellings instead of files would make every local
+// import in that setup a false ambiguity.
+//
+// `StdlibOnly` restricts the search to lib/std: the prelude (a synthetic
+// import of stdlib modules by definition -- there is no import statement the
+// user could disambiguate) and imports written inside lib/std itself (see
+// ImportsResolveInStdlibOnly()).
+static std::vector<ModuleCandidate>
+CollectModuleCandidates(const std::string &ModuleName,
+                        const std::string &ImportingFile, bool StdlibOnly) {
+  std::vector<ModuleCandidate> Found;
+  std::vector<std::string> SeenCanonical;
+  auto Add = [&](ModuleRootKind Kind, const std::string &Path) {
+    llvm::SmallString<256> Canonical;
+    std::string Key =
+        llvm::sys::fs::real_path(Path, Canonical) ? Path : Canonical.str().str();
+    for (const auto &S : SeenCanonical)
+      if (S == Key)
+        return;
+    SeenCanonical.push_back(Key);
+    Found.push_back({Kind, Path});
+  };
+
+  std::string Root = TurfInstallRoot();
+  const auto &StdIndex = IndexModuleDir(Root, "std");
+  if (auto It = StdIndex.find(ModuleName); It != StdIndex.end())
+    Add(ModuleRootKind::Stdlib, It->second);
+  if (StdlibOnly)
+    return Found;
+
+  const auto &UsrIndex = IndexModuleDir(Root, "usr");
+  if (auto It = UsrIndex.find(ModuleName); It != UsrIndex.end())
+    Add(ModuleRootKind::Installed, It->second);
+
+  // Issue #19: relative to the importing file's directory, so that
+  // `turfc path/to/file.tr` finds sibling modules without a cd first.
+  if (!ImportingFile.empty()) {
+    llvm::SmallString<256> SrcRelPath(ImportingFile);
+    llvm::sys::path::remove_filename(SrcRelPath);
+    llvm::sys::path::append(SrcRelPath, ModuleName + ".tr");
+    if (llvm::sys::fs::is_regular_file(SrcRelPath))
+      Add(ModuleRootKind::Sibling, SrcRelPath.str().str());
+  }
+
+  std::string CwdCandidate = ModuleName + ".tr";
+  if (llvm::sys::fs::is_regular_file(CwdCandidate))
+    Add(ModuleRootKind::Cwd, CwdCandidate);
+
+  return Found;
+}
+
+// The human-facing half of a candidate, for AmbiguousModuleError. The path is
+// canonicalized (the stdlib index spells paths through the install root,
+// which for a dev build is `<repo>/build/../lib/std/...`), then shown as
+// `./rel/path` when it is under the cwd: the user's own files are almost
+// always there, and the hint repeats the path, so an absolute temp-directory
+// path twice per error buries the one part that matters.
+static ModuleCandidateView
+DescribeModuleCandidate(const ModuleCandidate &C, const std::string &ImportingFile) {
+  llvm::SmallString<256> Canonical;
+  std::string Shown =
+      llvm::sys::fs::real_path(C.Path, Canonical) ? C.Path : Canonical.str().str();
+  llvm::SmallString<256> Cwd;
+  if (!llvm::sys::fs::current_path(Cwd) && !llvm::sys::fs::real_path(Cwd, Canonical)) {
+    std::string Base = Canonical.str().str() + "/";
+    if (Shown.compare(0, Base.size(), Base) == 0)
+      Shown = "./" + Shown.substr(Base.size());
+  }
+  switch (C.Kind) {
+  case ModuleRootKind::Stdlib:
+    return {"standard library", Shown, true};
+  case ModuleRootKind::Installed:
+    return {"installed package (lib/usr)", Shown, false};
+  case ModuleRootKind::Sibling:
+    return {"next to " + llvm::sys::path::filename(ImportingFile).str(), Shown, false};
+  case ModuleRootKind::Cwd:
+    return {"current directory", Shown, false};
+  }
+  return {"", Shown, false};
+}
+
 // Pure "where would this module resolve to on disk" lookup -- the same
-// four-step search order ParseModuleImportByName() below uses (stdlib ->
+// candidate collection ParseModuleImportByName() below uses (stdlib ->
 // installed user package -> ImportingFile's own directory -> cwd), but
 // without ever calling ParseFile(): no ImportedFiles/ImportStack mutation, no
 // diagnostics, no circular-import bookkeeping. For tooling that needs to
@@ -785,35 +907,17 @@ IndexModuleDir(const std::string &Root, const char *SubdirName) {
 // step. Pass "" to skip step 3 (e.g. when the importing file isn't a real
 // on-disk path, or is unknown to the caller).
 //
-// Returns "" if no `<name>.tr` exists at any search location. Existence is
-// checked with llvm::sys::fs::exists(), not by attempting a parse -- a
-// module that exists but has a syntax error still resolves to a real path
-// here (this function answers "where", not "is it valid").
+// Returns "" if no `<name>.tr` exists at any search location, and also "" if
+// more than one does: a real import of an ambiguous name is an error
+// (AmbiguousModuleError), not a file, and this must never disagree with what
+// a real import resolves to. Existence is checked on disk, not by attempting a
+// parse -- a module that exists but has a syntax error still resolves to a
+// real path here (this function answers "where", not "is it valid").
 std::string ResolveModuleFile(const std::string &ModuleName,
                               const std::string &ImportingFile) {
-  std::string Root = TurfInstallRoot();
-
-  const auto &StdIndex = IndexModuleDir(Root, "std");
-  if (auto It = StdIndex.find(ModuleName); It != StdIndex.end())
-    return It->second;
-
-  const auto &UsrIndex = IndexModuleDir(Root, "usr");
-  if (auto It = UsrIndex.find(ModuleName); It != UsrIndex.end())
-    return It->second;
-
-  if (!ImportingFile.empty()) {
-    llvm::SmallString<256> SrcRelPath(ImportingFile);
-    llvm::sys::path::remove_filename(SrcRelPath);
-    llvm::sys::path::append(SrcRelPath, ModuleName + ".tr");
-    if (llvm::sys::fs::exists(SrcRelPath))
-      return SrcRelPath.str().str();
-  }
-
-  std::string CwdCandidate = ModuleName + ".tr";
-  if (llvm::sys::fs::exists(CwdCandidate))
-    return CwdCandidate;
-
-  return "";
+  auto Candidates = CollectModuleCandidates(
+      ModuleName, ImportingFile, ImportsResolveInStdlibOnly(ImportingFile));
+  return Candidates.size() == 1 ? Candidates.front().Path : "";
 }
 
 // See declaration in Parser.h. Sibling of ResolveModuleFile(): same search
@@ -871,80 +975,47 @@ std::unique_ptr<ExprAST>
 ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
                         SourceLocation NameLoc,
                         ImportMode Mode = ImportMode::Bare,
-                        std::vector<ImportedSymbolRef> RequestedSymbols = {}) {
-  // Search order:
-  //   1. Installation stdlib   -- $TURF_HOME (or <binary>/..)/lib/std/**/<module>.tr
-  //   2. Installed user package -- $TURF_HOME (or <binary>/..)/lib/usr/**/<module>.tr
-  //   3. Same directory as the source file being compiled
-  //   4. Current working directory
+                        std::vector<ImportedSymbolRef> RequestedSymbols = {},
+                        bool StdlibOnly = false) {
+  // Every search root is examined (CollectModuleCandidates()): stdlib,
+  // installed user package, the importing file's directory, the cwd. Exactly
+  // one must hold the module. More than one is E090, raised at the module
+  // name -- never "the first root wins", which is how a local json.tr used to
+  // be silently shadowed by the stdlib's (LEC-001 stage 3, F-PKG-2).
   //
-  // A ParseFile() call can return nullptr for two very different reasons:
-  // the file simply doesn't exist at that path (fine, keep trying the next
-  // one), or the file DOES exist but has a genuine syntax error inside it
-  // (LogErrorAt already recorded a real diagnostic -- trying the NEXT
-  // fallback path at that point would be wrong: it can only ever produce a
-  // confusing, unrelated "module not found" error stacked on top of the
-  // real one, since the module WAS found, just broken). Distinguish the two
-  // by snapshotting the diagnostic count before each attempt and checking
-  // whether it grew.
-  // ResolvedPath tracks whichever candidate actually got parsed -- it's the
-  // canonical identity of "this physical module file", used by both
-  // circular-import detection (Parser-level) and per-file import scoping
-  // (Resolver-level) so neither has to re-derive or guess a path string
-  // independently of the other.
-  std::string Root = TurfInstallRoot();
-  std::string ResolvedPath;
-  std::unique_ptr<ExprAST> Block;
-  size_t DiagCountBefore;
-  bool FoundButBroken = false;
+  // ResolvedPath is the chosen candidate's path, spelled as before -- the
+  // identity of "this physical module file" for both circular-import
+  // detection (Parser-level) and per-file import scoping (Resolver-level).
+  const std::string ImportingFile = SourceFilename;
+  auto Candidates = CollectModuleCandidates(
+      ModuleName, ImportingFile,
+      StdlibOnly || ImportsResolveInStdlibOnly(ImportingFile));
 
-  const auto &StdIndex = IndexModuleDir(Root, "std");
-  if (auto It = StdIndex.find(ModuleName); It != StdIndex.end()) {
-    ResolvedPath = It->second;
-    DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-    Block = ParseFile(ResolvedPath, ModuleName, Loc);
-    FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
-  }
-
-  if (!Block && !FoundButBroken) {
-    const auto &UsrIndex = IndexModuleDir(Root, "usr");
-    if (auto It = UsrIndex.find(ModuleName); It != UsrIndex.end()) {
-      ResolvedPath = It->second;
-      DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-      Block = ParseFile(ResolvedPath, ModuleName, Loc);
-      FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
-    }
-  }
-
-  if (!Block && !FoundButBroken) {
-    // Issue #19 fix: resolve relative to the source file's directory so that
-    // `turf path/to/file.tr` can find sibling modules without a cd first.
-    if (!SourceFilename.empty()) {
-      llvm::SmallString<256> SrcRelPath(SourceFilename);
-      llvm::sys::path::remove_filename(SrcRelPath);
-      llvm::sys::path::append(SrcRelPath, ModuleName + ".tr");
-      ResolvedPath = SrcRelPath.str().str();
-      DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-      Block = ParseFile(ResolvedPath, ModuleName, Loc);
-      FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
-    }
-  }
-  if (!Block && !FoundButBroken) {
-    ResolvedPath = ModuleName + ".tr";
-    DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-    Block = ParseFile(ResolvedPath, ModuleName, Loc);
-    FoundButBroken = !Block && DiagnosticEngine::getDiagnosticCount() > DiagCountBefore;
-    if (!Block && !FoundButBroken) {
-      ModuleNotFoundError(Loc, ModuleName).raise();
-      return nullptr;
-    }
-  }
-
-  // The module WAS found at some path but failed to parse -- a real
-  // diagnostic was already recorded there (see FoundButBroken's doc comment
-  // above); don't construct a ModuleImportExprAST wrapping a null Block.
-  if (!Block)
+  if (Candidates.empty()) {
+    ModuleNotFoundError(Loc, ModuleName).raise();
     return nullptr;
+  }
+  if (Candidates.size() > 1) {
+    std::vector<ModuleCandidateView> Views;
+    for (const auto &C : Candidates)
+      Views.push_back(DescribeModuleCandidate(C, ImportingFile));
+    AmbiguousModuleError(NameLoc.Line > 0 ? NameLoc : Loc, ModuleName, Views)
+        .raise();
+    return nullptr;
+  }
+
+  const std::string ResolvedPath = Candidates.front().Path;
+  size_t DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
+  std::unique_ptr<ExprAST> Block = ParseFile(ResolvedPath, ModuleName, Loc);
+  if (!Block) {
+    // Found on disk but not parsed. Usually a syntax error inside it, already
+    // reported there -- adding "module not found" on top would contradict the
+    // real diagnostic. Only an unreadable file (no diagnostic recorded) is
+    // reported as not found.
+    if (DiagnosticEngine::getDiagnosticCount() == DiagCountBefore)
+      ModuleNotFoundError(Loc, ModuleName).raise();
+    return nullptr;
+  }
 
   return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, NameLoc, ResolvedPath,
                                                 std::move(Block), Mode,
@@ -1103,7 +1174,11 @@ std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc) {
       }
     }
 
-    auto AST = ParseModuleImportByName(Name, Loc, /*NameLoc=*/Loc);
+    // StdlibOnly: the prelude is stdlib modules by definition, and there is
+    // no import statement for the user to disambiguate -- a local strings.tr
+    // must not break every program in its directory.
+    auto AST = ParseModuleImportByName(Name, Loc, /*NameLoc=*/Loc, ImportMode::Bare,
+                                       {}, /*StdlibOnly=*/true);
     if (!AST) {
       llvm::report_fatal_error(
           llvm::StringRef(std::string("Internal error: prelude module '") +

@@ -775,6 +775,82 @@ static void testMigratePub(const ScratchDir &Dir) {
   }
 }
 
+// LEC-001 stage 3 (FREEZE.md 6.16, F-PKG-2): `import m;` that more than one
+// search root can answer is E090, naming every file -- never the old "first
+// root wins", under which a local list.tr was silently replaced by the
+// stdlib's. Asserted by code and hint here because the cwd case cannot be a
+// tests/ file at all: the runner always cds into the test's own directory,
+// which makes "next to the importing file" and "the cwd" the same place.
+static void testAmbiguousModuleImport(const ScratchDir &Dir) {
+  CurrentTest = "ambiguous module import";
+  fs::create_directories(Dir.Root / "amb" / "app");
+  fs::create_directories(Dir.Root / "amb" / "elsewhere");
+  const std::string Main = Dir.write("amb/app/main.tr", "");
+  auto FindE090 = [](const turf::AnalysisResult &R) -> const turf::Diagnostic * {
+    for (const auto &D : R.diagnostics())
+      if (D.Code == "E090")
+        return &D;
+    return nullptr;
+  };
+
+  // A local module named like a stdlib module: the user's file must move.
+  Dir.write("amb/app/list.tr", "pub fn f(): int { return 1; }\n");
+  {
+    auto R = turf::analyze({{Main, "import list;\nfn main(): int { return 0; }\n"}});
+    const turf::Diagnostic *D = FindE090(R);
+    CHECK(D != nullptr);
+    if (D) {
+      CHECK(D->Message.find("standard library") != std::string::npos);
+      CHECK(D->Message.find("next to main.tr") != std::string::npos);
+      CHECK(D->Hint.find("may not share its name with a standard-library module") !=
+            std::string::npos);
+      CHECK(D->Hint.find("my_list.tr") != std::string::npos);
+    } else {
+      std::cerr << render(R);
+    }
+  }
+  // ...but only when the program imports it. The prelude (`strings` imports
+  // `list` internally) resolves stdlib-only, so a local list.tr never breaks
+  // a program that does not name it.
+  {
+    auto R = turf::analyze(
+        {{Main, "fn main(): int {\n    mut s: string = \"a\" + \"b\";\n    return 0;\n}\n"}});
+    CHECK(R.succeeded());
+    if (!R.succeeded())
+      std::cerr << render(R);
+  }
+  fs::remove(Dir.Root / "amb" / "app" / "list.tr");
+
+  // Two user files: next to the importing file, and in the cwd.
+  Dir.write("amb/app/util.tr", "pub fn f(): int { return 1; }\n");
+  Dir.write("amb/elsewhere/util.tr", "pub fn f(): int { return 2; }\n");
+  const std::string UsesUtil = "import util;\nfn main(): int { return util::f(); }\n";
+  const fs::path SavedCwd = fs::current_path();
+  fs::current_path(Dir.Root / "amb" / "elsewhere");
+  {
+    auto R = turf::analyze({{Main, UsesUtil}});
+    const turf::Diagnostic *D = FindE090(R);
+    CHECK(D != nullptr);
+    if (D) {
+      CHECK(D->Message.find("current directory") != std::string::npos);
+      CHECK(D->Hint.find("Rename one of them") != std::string::npos);
+    } else {
+      std::cerr << render(R);
+    }
+  }
+  // The importing file's directory IS the cwd: one file found twice is one
+  // candidate, not an ambiguity. (Every test in tests/ runs this way.)
+  fs::current_path(Dir.Root / "amb" / "app");
+  {
+    auto R = turf::analyze({{Main, UsesUtil}});
+    CHECK(FindE090(R) == nullptr);
+    CHECK(R.succeeded());
+    if (!R.succeeded())
+      std::cerr << render(R);
+  }
+  fs::current_path(SavedCwd);
+}
+
 int main() {
   ScratchDir Dir;
   testCleanProgramQueries();
@@ -792,6 +868,7 @@ int main() {
   testPrivateSymbolAccess(Dir);
   testPrivateInPublic(Dir);
   testMigratePub(Dir);
+  testAmbiguousModuleImport(Dir);
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

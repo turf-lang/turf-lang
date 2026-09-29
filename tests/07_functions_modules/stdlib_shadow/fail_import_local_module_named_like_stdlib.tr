@@ -1,0 +1,9 @@
+// LEC-001 stage 3, E090: `import list;` with a list.tr beside this file and
+// the stdlib's list.tr. Until stage 3 the stdlib's won silently, so the local
+// module was never loaded and nothing said so (audit F-19). Now it is an error
+// naming both files, with a hint to rename the local one.
+import list;
+
+fn main(): int {
+    return 0;
+}

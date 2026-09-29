@@ -203,6 +203,10 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // LEC-002 stage 5: a `pub` function signature or `pub` field mentions a
     // type its own module did not mark `pub` (private-in-public).
     {"E089", "PrivateInPublicError", "Private type in public signature", SLM::ErrorCategory::DECLARATION, true},
+
+    // LEC-001 stage 3: `import m;` matches more than one file across the
+    // module search roots (never silent shadowing, FREEZE.md 6.16 F-PKG-2).
+    {"E090", "AmbiguousModuleError", "Ambiguous module import", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

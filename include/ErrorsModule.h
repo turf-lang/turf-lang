@@ -2,6 +2,7 @@
 #define ERRORS_MODULE_H
 
 #include "Errors.h"
+#include <algorithm>
 
 // `export` used inside a function body -- only legal at the top level of a
 // file or module (see VarDeclExprAST::IsExported's doc comment).
@@ -143,6 +144,63 @@ public:
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
+// LEC-001 stage 3 (FREEZE.md 6.16, F-PKG-2): `import m;` names more than one
+// file. The search roots used to be tried in order with the first hit winning,
+// so a local json.tr beside main.tr was silently never loaded while the stdlib
+// had a `json` (audit F-19) -- the program ran code its author did not write,
+// and nothing said so. Every root is now examined and more than one distinct
+// file is this error: never silent shadowing, never "local wins".
+//
+// The candidates go in the message body, one per line, rather than as
+// withRelated() notes: a related note renders as "(line, col)" with no file
+// name, and naming the files IS the diagnostic here.
+struct ModuleCandidateView {
+  std::string Kind; // "standard library", "next to main.tr", ...
+  std::string Path; // for display
+  bool IsStdlib = false;
+};
+class AmbiguousModuleError : public TurfError {
+public:
+  AmbiguousModuleError(SourceLocation Loc, const std::string &ModuleName,
+                       const std::vector<ModuleCandidateView> &Candidates)
+      : TurfError(Loc, "") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    Message = Colors::BRIGHT_RED + "Module '" + Colors::CYAN + ModuleName +
+              Colors::BRIGHT_RED + "' is ambiguous: " +
+              std::to_string(Candidates.size()) +
+              " different files answer to that name." + Colors::RESET;
+    size_t Width = 0;
+    for (const auto &C : Candidates)
+      Width = std::max(Width, C.Kind.size());
+    for (const auto &C : Candidates)
+      Message += "\n    " + C.Kind + std::string(Width - C.Kind.size() + 2, ' ') +
+                 C.Path;
+
+    // The fix differs by what collided. Against the standard library the
+    // user's file is the one that can move (a stdlib name is not theirs to
+    // change); two user files are the user's to tell apart either way.
+    std::vector<std::string> Own;
+    bool HasStdlib = false;
+    for (const auto &C : Candidates) {
+      if (C.IsStdlib)
+        HasStdlib = true;
+      else
+        Own.push_back(C.Path);
+    }
+    if (HasStdlib) {
+      std::string Files;
+      for (size_t I = 0; I < Own.size(); ++I)
+        Files += (I ? (I + 1 == Own.size() ? " and " : ", ") : "") + Own[I];
+      Hint_ = "A module may not share its name with a standard-library "
+              "module. Rename " + Files + " (for example to 'my_" +
+              ModuleName + ".tr') and import it by the new name.";
+    } else {
+      Hint_ = "These are different files that both answer to '" + ModuleName +
+              "'. Rename one of them, or delete the one you did not mean.";
+    }
+  }
+};
+
 // A single hop in a detected import cycle: which module, and the location
 // of the `import` statement that pulled it onto the in-progress stack.
 struct ImportChainEntry {
