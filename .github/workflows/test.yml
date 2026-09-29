@@ -168,13 +168,32 @@ jobs:
       # findings across the entire suite (measured live, both opt levels
       # below) is itself real evidence for MEM-002's own disclosed open
       # question #2 (docs/development/changes/MEM-002.md).
-      - name: GC root-finding cross-validation (independent register capture)
+      #
+      # The same variable also runs the full-stack mark-set comparison
+      # (gc_independent_mark()/gc_compare_mark_sets()), which DOES panic: its
+      # range is a subset of the production scan's, so a mismatch is a real
+      # missed root, and the test fails on its own. The grep still catches
+      # the report-only register finding.
+      - name: GC root-finding cross-validation (register capture + full-stack mark sets)
         run: |
-          TURF_GC_VALIDATE=1 ./scripts/test_runner.sh 2>&1 | tee /tmp/gc_validate.log
-          if grep -q "TURF_GC_VALIDATE:" /tmp/gc_validate.log; then
-            echo "::error::TURF_GC_VALIDATE reported a finding -- see the log above."
-            exit 1
-          fi
+          for O in "" -O0; do
+            TURF_GC_VALIDATE=1 ./scripts/test_runner.sh $O 2>&1 | tee /tmp/gc_validate.log
+            test "${PIPESTATUS[0]}" -eq 0 || exit 1
+            if grep -q "TURF_GC_VALIDATE:" /tmp/gc_validate.log; then
+              echo "::error::TURF_GC_VALIDATE reported a finding -- see the log above."
+              exit 1
+            fi
+          done
+
+      # FDN-005 follow-up: the stack-base fallback for a machine without
+      # /proc (ROADMAP_v2.0.0.md REL-003 -- minimal containers). Until this
+      # existed it had never run, and was freeing live objects.
+      # TURF_GC_NO_PROCFS=1 forces it; TURF_GC_VALIDATE=1 makes any root it
+      # misses a deterministic panic at the first collection.
+      - name: GC stack-base fallback (no /proc) -- full suite under validation
+        run: TURF_GC_NO_PROCFS=1 TURF_GC_VALIDATE=1 ./scripts/test_runner.sh -O0
+      - name: GC stack-base fallback (no /proc) smoke test
+        run: ./scripts/gc_no_procfs_smoke.sh
 
       # OVH-015: the smoke scripts below already existed as each named
       # feature group's own regression coverage for behaviour test_runner.sh
@@ -327,6 +346,10 @@ jobs:
       # entirely by that single file, not a general slowdown.
       - name: GC stress test under ASan -- collect on every allocation (-O0)
         run: TURF_COMPILER="$(pwd)/build_asan/turf" ASAN_OPTIONS=detect_leaks=0 TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O0
+      # The roadmap's criterion names -O2 as well; the FDN-005 landing ran
+      # only -O0 under this combination.
+      - name: GC stress test under ASan -- collect on every allocation (-O2)
+        run: TURF_COMPILER="$(pwd)/build_asan/turf" ASAN_OPTIONS=detect_leaks=0 TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=700 ./scripts/test_runner.sh -O2
 
       - name: Tool API tests (compiler query facade) under ASan
         run: ./build_asan/turf-api-tests
