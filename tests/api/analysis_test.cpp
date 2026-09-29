@@ -14,6 +14,7 @@
 #include "turf/Analysis.h"
 
 #include "Lexer.h"
+#include "MigratePub.h"
 #include "Parser.h"
 #include "SymbolTable.h"
 #include "Types.h"
@@ -658,6 +659,122 @@ fn main(): int { return pipmod::compute(1); }
     std::cerr << render(R);
 }
 
+// LEC-002 stage 6: `turf --migrate=pub`'s engine. It rewrites source text, so
+// the properties worth pinning are exact: which tokens get `pub`, which must
+// not (a keyword in a comment or string, a function-local struct, a function
+// TYPE, an operator, `export immut`, `import`), that everything else passes
+// through byte for byte (CRLF included), that it is idempotent, and that the
+// result is what makes a 1.x module usable again.
+static void testMigratePub(const ScratchDir &Dir) {
+  CurrentTest = "migrate pub";
+
+  {
+    auto R = turf::migrate::migratePub("fn a(): int { return 1; }\n"
+                                       "struct S { x: int, y: int }\n");
+    CHECK_EQ(R.Text, std::string("pub fn a(): int { return 1; }\n"
+                                 "pub struct S { pub x: int, pub y: int }\n"));
+    CHECK_EQ(R.Insertions.size(), 4u);
+    if (R.Insertions.size() == 4) {
+      CHECK_EQ(R.Insertions[0].Line, 1);
+      CHECK_EQ(R.Insertions[0].Col, 1);
+      CHECK(R.Insertions[0].What.find("fn a") == 0);
+      CHECK(R.Insertions[2].What == "field x");
+    }
+  }
+
+  // Nothing to touch: a comment naming keywords, an import, an `export
+  // immut`, an operator and the `unsafe module;` pragma come back
+  // byte-identical.
+  {
+    const std::string Src =
+        "// fn struct enum -- only a comment\n"
+        "import io;\n"
+        "export immut N: int = 1;\n"
+        "operator +(a: int32, b: string): string { return b; }\n"
+        "unsafe module;\n";
+    auto R = turf::migrate::migratePub(Src);
+    CHECK_EQ(R.Text, Src);
+    CHECK(R.Insertions.empty());
+  }
+
+  // Function-local struct, a function TYPE, and a string that names keywords:
+  // only the top-level `fn` is migrated.
+  {
+    auto R = turf::migrate::migratePub(
+        "fn g(f: fn(int): int): int {\n"
+        "    struct L { a: int }\n"
+        "    mut s: string = \"struct fn\";\n"
+        "    return f(1);\n"
+        "}\n");
+    CHECK_EQ(R.Insertions.size(), 1u);
+    CHECK(R.Text.find("pub fn g(f: fn(int): int)") == 0);
+    CHECK(R.Text.find("pub struct L") == std::string::npos);
+    CHECK(R.Text.find("pub a:") == std::string::npos);
+  }
+
+  // `extern from "m" fn` is ONE declaration; a decorator comes first.
+  {
+    auto R = turf::migrate::migratePub("extern from \"m\" fn sqrt(x: double): double;\n"
+                                       "@caller_location\nfn w(): string { return caller_location; }\n");
+    CHECK_EQ(R.Text, std::string("pub extern from \"m\" fn sqrt(x: double): double;\n"
+                                 "@caller_location\npub fn w(): string { return caller_location; }\n"));
+  }
+
+  // A top-level `unsafe { }` block is flattened into the file, so what is
+  // inside it is top level.
+  {
+    auto R = turf::migrate::migratePub("unsafe {\n    struct P { p: int* }\n}\n");
+    CHECK_EQ(R.Text, std::string("unsafe {\n    pub struct P { pub p: int* }\n}\n"));
+  }
+
+  // Already `pub`/`public` (any spelling): left alone.
+  {
+    const std::string Src = "pub fn a(): int { return 1; }\npublic struct S { pub x: int, public y: int }\n";
+    auto R = turf::migrate::migratePub(Src);
+    CHECK_EQ(R.Text, Src);
+    CHECK(R.Insertions.empty());
+  }
+
+  // CRLF and a missing final newline pass through untouched.
+  {
+    auto R = turf::migrate::migratePub("fn a(): int {\r\n    return 1;\r\n}");
+    CHECK_EQ(R.Text, std::string("pub fn a(): int {\r\n    return 1;\r\n}"));
+  }
+
+  // Idempotent.
+  {
+    const std::string Src = "struct S { x: int }\nfn a(): int { return 1; }\nenum E { A }\n";
+    auto Once = turf::migrate::migratePub(Src);
+    auto Twice = turf::migrate::migratePub(Once.Text);
+    CHECK_EQ(Twice.Text, Once.Text);
+    CHECK(Twice.Insertions.empty());
+  }
+
+  // The point of it all: a 1.x module is unusable as written (E088) and
+  // usable once migrated.
+  {
+    const std::string Old = "struct Point { x: int, y: int }\n"
+                            "fn Point.sum(): int { return self.x + self.y; }\n"
+                            "fn make(): Point { mut p: Point = Point::default(); p.x = 1; return p; }\n";
+    const std::string Main = Dir.write("migmain.tr", "");
+    const std::string Use =
+        "import migmod;\nfn main(): int { mut p: migmod::Point = migmod::make(); "
+        "return p.sum() + p.x; }\n";
+    Dir.write("migmod.tr", Old);
+    auto Before = turf::analyze({{Main, Use}});
+    CHECK(!Before.succeeded());
+    bool SawE088 = false;
+    for (const auto &D : Before.diagnostics())
+      SawE088 = SawE088 || D.Code == "E088";
+    CHECK(SawE088);
+    Dir.write("migmod.tr", turf::migrate::migratePub(Old).Text);
+    auto After = turf::analyze({{Main, Use}});
+    CHECK(After.succeeded());
+    if (!After.succeeded())
+      std::cerr << render(After);
+  }
+}
+
 int main() {
   ScratchDir Dir;
   testCleanProgramQueries();
@@ -674,6 +791,7 @@ int main() {
   testVisibilityModifierPlacement();
   testPrivateSymbolAccess(Dir);
   testPrivateInPublic(Dir);
+  testMigratePub(Dir);
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

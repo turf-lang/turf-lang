@@ -179,6 +179,7 @@ add_library(turfcore STATIC
   src/CodegenArray.cpp
   src/CodegenStruct.cpp
   src/Formatter.cpp
+  src/MigratePub.cpp
   src/Lexer.cpp
   src/Lint.cpp
   src/Monomorphize.cpp

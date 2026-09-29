@@ -23,6 +23,7 @@
 #include "Formatter.h"
 #include "Lexer.h"
 #include "Lint.h"
+#include "MigratePub.h"
 #include "Parser.h"
 #include "CFG.h"
 #include "Monomorphize.h" // TYPE-002 (S11b): --dump-instantiations
@@ -93,7 +94,9 @@ struct CompilerOptions {
   bool DumpModules = false;           // --dump-modules: print full module-system introspection
   bool DumpInstantiations = false;    // --dump-instantiations: TYPE-002 (S11b) report-only census
   bool Format = false;                // --format: print the formatted source to stdout and exit
-  bool FormatWrite = false;           // --write (with --format): rewrite the file in place instead
+  bool FormatWrite = false;           // --write (with --format or --migrate=pub): rewrite the file(s) in place instead
+  bool MigratePub = false;            // --migrate=pub: LEC-002 -- add `pub` to every top-level declaration and struct field of the given files
+  std::vector<std::string> PositionalFiles; // every non-option argument, in order (--migrate=pub takes several)
   std::vector<std::string> LinkLibs;  // --link <name>: extra libraries to pass to the linker as -l<name>
   // OPT-001: `-O2` is the FROZEN default (FREEZE.md §6.10/§17.2) so a user
   // who never passes `-O` at all sees the exact optimization behavior this
@@ -200,6 +203,95 @@ static void printHumanExplainDoc(std::istream &Doc) {
   }
 }
 
+/// `turf --migrate=pub [--write] <module.tr>...` (LEC-002 stage 6): put `pub`
+/// on every top-level declaration and struct field of each file, so a module
+/// written for 1.x -- where everything was visible to importers -- keeps
+/// exactly that surface under 2.0's private-by-default rule. Without
+/// `--write` it only REPORTS what it would change (a line-by-line before/after
+/// per touched line) and modifies nothing; with `--write` it rewrites the
+/// files in place. Files with nothing to add are not mentioned, so running it
+/// twice is quiet. Exit status is 1 only if a file could not be read or
+/// written; "there was something to migrate" is not a failure.
+static int runMigratePub(const std::vector<std::string> &Files, bool Write) {
+  if (Files.empty()) {
+    std::cerr << "Usage: turf --migrate=pub [--write] <module.tr>...\n"
+                 "  Adds `pub` to every top-level fn/struct/enum/error/machine/extern fn and\n"
+                 "  every struct field, i.e. the exact 1.x behaviour, as a starting point.\n"
+                 "  Without --write it only reports what it would change.\n";
+    return 1;
+  }
+
+  auto splitLines = [](const std::string &Text) {
+    std::vector<std::string> Lines;
+    size_t Start = 0;
+    while (true) {
+      size_t Nl = Text.find('\n', Start);
+      if (Nl == std::string::npos) {
+        Lines.push_back(Text.substr(Start));
+        break;
+      }
+      Lines.push_back(Text.substr(Start, Nl - Start));
+      Start = Nl + 1;
+    }
+    return Lines;
+  };
+
+  int Status = 0;
+  size_t FilesTouched = 0, Marks = 0;
+  for (const auto &Path : Files) {
+    std::ifstream In(Path, std::ios::binary);
+    if (!In) {
+      std::cerr << "Error: Could not open file " << Path << "\n";
+      Status = 1;
+      continue;
+    }
+    std::stringstream Buf;
+    Buf << In.rdbuf();
+    const std::string Original = Buf.str();
+
+    auto Result = turf::migrate::migratePub(Original);
+    if (Result.Insertions.empty())
+      continue;
+    ++FilesTouched;
+    Marks += Result.Insertions.size();
+
+    if (Write) {
+      std::ofstream Out(Path, std::ios::trunc | std::ios::binary);
+      Out << Result.Text;
+      if (!Out) {
+        std::cerr << "Error: Could not write file " << Path << "\n";
+        Status = 1;
+        continue;
+      }
+    }
+
+    std::cout << (Write ? "migrated " : "would migrate ") << Path << " ("
+              << Result.Insertions.size() << " `pub`)\n";
+    if (!Write) {
+      const auto Old = splitLines(Original);
+      const auto New = splitLines(Result.Text);
+      int LastLine = -1;
+      for (const auto &I : Result.Insertions) {
+        if (I.Line == LastLine || I.Line < 1 || I.Line > static_cast<int>(Old.size()) ||
+            I.Line > static_cast<int>(New.size()))
+          continue;
+        LastLine = I.Line;
+        std::cout << "  " << Path << ":" << I.Line << ":\n"
+                  << "    - " << Old[I.Line - 1] << "\n"
+                  << "    + " << New[I.Line - 1] << "\n";
+      }
+    }
+  }
+
+  std::cout << (Write ? "Migrated " : "Would migrate ") << Marks << " declaration"
+            << (Marks == 1 ? "" : "s") << "/field" << (Marks == 1 ? "" : "s")
+            << " in " << FilesTouched << " file" << (FilesTouched == 1 ? "" : "s") << ".";
+  if (!Write && FilesTouched)
+    std::cout << " Re-run with --write to apply.";
+  std::cout << "\n";
+  return Status;
+}
+
 static void handleExplainFlagIfPresent(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
     if (std::string(argv[i]) != "--explain")
@@ -292,6 +384,17 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.Format = true;
     } else if (arg == "--write") {
       opts.FormatWrite = true;
+    } else if (arg.rfind("--migrate=", 0) == 0) {
+      // Only one migration exists (LEC-002). An unknown name is a hard error,
+      // like an unknown -O level: a typo must not silently do nothing to a
+      // whole project.
+      const std::string Kind = arg.substr(std::string("--migrate=").size());
+      if (Kind != "pub") {
+        std::cerr << "Error: unknown migration '" << Kind
+                  << "' (the only one is --migrate=pub).\n";
+        std::exit(1);
+      }
+      opts.MigratePub = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
     } else if (arg == "--link" && i + 1 < argc) {
@@ -323,8 +426,15 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       std::exit(1);
     } else {
       opts.InputFile = arg;
+      opts.PositionalFiles.push_back(arg);
     }
   }
+
+  // --migrate=pub takes any number of files and never compiles anything, so
+  // it skips the single-input-file checks below (runMigratePub() reports its
+  // own usage error).
+  if (opts.MigratePub)
+    return opts;
 
   if (opts.InputFile.empty()) {
     std::cerr
@@ -336,6 +446,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
            "[--allow-unsafe-modules] [--stdlib-warnings] "
            "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
            "       turf --format [--write] <filename.tr>\n"
+           "       turf --migrate=pub [--write] <module.tr>...\n"
            "       turf --explain E0NN\n";
     std::exit(1);
   }
@@ -762,6 +873,11 @@ static int runCompilerMain(int argc, char **argv) {
   } cleanup;
 
   auto opts = parseArgs(argc, argv);
+
+  // LEC-002 stage 6: needs only the files' text, like --format below, so it
+  // runs before any compiler state is initialized.
+  if (opts.MigratePub)
+    return runMigratePub(opts.PositionalFiles, opts.FormatWrite);
 
   // Set the global AI flag so DiagnosticEngine knows whether to invoke the SLM.
   g_AIEnabled = opts.AIEnabled;

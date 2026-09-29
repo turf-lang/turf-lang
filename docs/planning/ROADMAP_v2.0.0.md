@@ -25,9 +25,13 @@
 > comparison and the no-`/proc` fallback, which was freeing live objects
 > and is now fixed). The one criterion item not yet observed complete is
 > `TURF_GC_STRESS` + ASan at `-O2`, now a CI step. Its CI jobs stay on
-> through RC as a gate. Part I's sequence has the
-> current state of every Phase 1 item; the rest of Phase 1 and all of
-> Phases 2+ remain unimplemented. Items marked
+> through RC as a gate. **Phase 2's `LEC-002` (visibility, `pub`/`public`,
+> D13) is done** — see `docs/development/changes/LEC-002.md` (landed
+> 2026-09-29; DEC-7 answered "private by default", with `pub` and `public` as
+> synonyms, frozen as `FREEZE.md` §6.15; `turf --migrate=pub` is the
+> migration). Part I's sequence has the
+> current state of every Phase 1 item; the rest of Phase 1 and the other
+> Phase 2+ items remain unimplemented. Items marked
 > **DECISION** need an explicit answer from the project owner before their
 > session starts; each carries a recommendation so the default is never
 > ambiguous.
@@ -119,7 +123,7 @@ PHASE 1  Foundation                   SMP-002  one generic type walker      DONE
    │                                  SMP-001  compiler query facade (parallel, any time in 1–2)  stages 1–2 DONE, turf-lsp port pending (SMP-001.md, 2026-09-28)
    │                                  FDN-005  GC hardening  stages 1–4 DONE (FDN-005.md, 2026-09-28/29); runs on to RC as a CI gate
    ▼
-PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D13)  stages 1–5 DONE (LEC-002.md, 2026-09-29)
+PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D13)  DONE (LEC-002.md, 2026-09-29)
    │                                  LEC-001  projects, dependencies, build (D7)
    │                                  LEC-003  pattern matching (D14)
    │                                  LEC-004  error payloads + `try` (D15)

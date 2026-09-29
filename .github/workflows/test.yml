@@ -208,6 +208,13 @@ jobs:
       # the real model against tests/custom/aggressive/ and needs the
       # multi-gigabyte GGUF weights this repo's .gitignore deliberately
       # keeps out of a checkout -- a manual/local sanity script, not a CI gate.
+      # LEC-002 stage 6: `turf --migrate=pub` turns a 1.x-style project (no
+      # `pub` anywhere) into one that compiles and runs under 2.0's
+      # private-by-default rule, reports-only without --write, and is
+      # idempotent. test_runner.sh cannot express this (it needs to rewrite
+      # source and re-run the compiler on the result).
+      - name: "Migration tool smoke test (turf --migrate=pub)"
+        run: ./scripts/migrate_pub_smoke.sh
       - name: Runtime smoke test (libturfrt link wiring, descriptors, panics)
         run: ./scripts/runtime_smoke.sh
       - name: "Manual-heap allocation smoke test (mem:: accounting)"

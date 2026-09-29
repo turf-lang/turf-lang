@@ -138,10 +138,10 @@ if [ -z "$DWARFDUMP" ]; then
   note "no llvm-dwarfdump on PATH -- skipping, not a failure"
 else
   cat > "$WORKDIR/shapes_module.tr" << 'EOF2'
-struct Point { x: int }
-enum Kind { A, B }
-fn origin(): Point { return Point::default(); }
-fn kind(): Kind { return Kind::B; }
+pub struct Point { pub x: int }
+pub enum Kind { A, B }
+pub fn origin(): Point { return Point::default(); }
+pub fn kind(): Kind { return Kind::B; }
 EOF2
   cat > "$WORKDIR/names.tr" << 'EOF2'
 import shapes_module;
