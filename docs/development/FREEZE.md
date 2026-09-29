@@ -352,6 +352,75 @@ account: `docs/development/changes/FDN-004.md`.
   cannot afford the repeated `strlen()` — unchecked, like any other raw
   pointer read.
 
+### 6.15 Per-declaration visibility — FROZEN (LEC-002, 2026-09-29)
+
+Recorded on the project owner's explicit instruction to start LEC-002 at
+stage 1 with `ROADMAP_v2.0.0.md` as the authority (DEC-7's recommendation,
+"private by default, `pub`"), plus one owner amendment to the roadmap's
+table: the keyword has **two spellings**, exactly as `mut`/`mutable` and
+`immut`/`immutable` do. §6.0 rule 3's explicit request, not a session's own
+initiative. Full account: `docs/development/changes/LEC-002.md`.
+
+- **Default: private to the declaring module.** A top-level declaration is
+  visible to another module only if marked `pub`. Breaking (R1): after 2.0
+  this can only change again in 3.0.
+- **Keyword: `pub` or `public`, synonyms.** Both lex to one token
+  (`TOK_PUB`), the way `mut`/`mutable` share `TOK_MUTABLE`. There is no
+  semantic, stylistic or diagnostic difference between them; a diagnostic's
+  hint spells it `pub`. Both become reserved words (checked 2026-09-29: no
+  identifier named `pub` or `public` exists in `tests/`, `lib/std/` or
+  `showcase/`; the word occurs only in prose comments).
+- **Position: a prefix modifier** on the declaration it applies to
+  (`pub fn f()`, `pub fn Point.len()`, `pub struct S`, `pub x: int` inside a
+  struct body).
+- **What can be `pub`:** `fn`, methods (instance and `static`), `struct`,
+  `enum`, `error`, `machine`, struct **fields**, and `extern fn`
+  (engineering judgement, recorded in the change record: `extern fn` is a
+  named top-level function, so the uniform rule applies to it).
+- **Fields are private unless `pub`, even in a `pub struct`.** This is what
+  lets `List<T>.data` (a raw pointer) be hidden. `T::default()` stays legal
+  from any module — it zero-fills and cannot break an invariant that zero
+  cannot. `T::new()` is an ordinary method with its own visibility.
+- **Enum/error variants and machine states are public iff their type is.**
+  No per-variant privacy.
+- **Operators are visible wherever their operand types are.** `pub` on an
+  `operator` declaration is rejected (with a hint saying why): dispatch is
+  type-directed (F-OP-3) and the orphan rule already ties an operator to a
+  type's module; a private operator would make `a + b` depend on import
+  visibility.
+- **`export immut` keeps its meaning** — `export` *is* its `pub`. `pub`
+  combined with `export` is rejected, with a hint to drop one. A plain
+  top-level `immut`/`mut` remains illegal; private top-level constants are
+  additive later.
+- **Private-in-public is an error:** a `pub` function signature (parameters
+  and return type) or `pub` field may not mention a private type, or an
+  importer could hold a value of a type it cannot spell.
+- **UFCS respects visibility:** a private function is not a UFCS candidate
+  outside its module. Call syntax never bypasses visibility.
+- **Generics:** a `pub` generic's body may call private helpers; the
+  monomorphized clone is resolved in the **template's** module context,
+  never the instantiation site's.
+- **Packages (LEC-001):** exactly two levels, module-private and `pub`. A
+  package's internal modules are not importable from outside the package, so
+  their `pub` items are package-visible. `pub(package)` is FUTURE.
+- **Where `pub` is meaningless it is an error, not ignored:** on a local
+  variable or a statement, on `import`, on `operator`, on a `machine`
+  transition line, on a parameter — always with a hint saying what to do
+  instead. A silently-ignored modifier is how a typo becomes a policy.
+- **Single-file programs are unaffected.** Visibility is only ever checked
+  across a module boundary; a main program's own declarations never need
+  `pub`, and a stray `pub` on them is accepted.
+- **Diagnostic contract (owner-directed emphasis on hints).** Every
+  visibility diagnostic is a typed `TurfError` with its own code, carries a
+  **hint that names the concrete fix** (which file to edit and which keyword
+  to add, or which public function/constructor to call instead), and names
+  the declaration site with a related-location note. Diagnostics for the
+  same rule differ by *what* is private (function, type, field, method,
+  constant) in their wording and hint, not by adding an error class per
+  kind. No new `SLM::ErrorCategory` and no `docs/slm/` files (§6.9).
+- **Non-goals:** `pub(package)`/`protected`, friend modules, per-variant
+  visibility, private top-level constants.
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -401,6 +470,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-HEAP-1** | `heap(expr): &T` is the closed-list intrinsic for safe heap allocation — no `new T` keyword, no grammar change. Always allocates with `T`'s real `TurfTypeDesc`, never `NULL`. | §6.12 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-001) |
 | **F-MEM-5** | A `Stack`-provenance reference (points into the current frame) can never flow into a `return`, a field of a `Param`/`Heap`-owned object, a collection mutator/`operator[]=`, or `heap()`'s own operand — enforced by `EscapePass`, intraprocedurally, with no lifetime syntax. | §6.13 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-002) |
 | **F-STR-1** | `s[i]` on a `string` is `char`, bounds-checked against `strlen(s)` on read (`i < 0` or `i >= strlen(s)` panics); a write checks `i < 0` only, by design — no upper bound, since a `string` under construction has no recoverable capacity to check against. | §6.14 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-004) |
+| **F-VIS-1** | A top-level declaration and a struct field are private to their module unless prefixed `pub`/`public` (synonyms, one token); enum/error variants and machine states follow their type; operators are visible wherever their operand types are; `export immut` is its own `pub`; a `pub` signature may not mention a private type; UFCS and monomorphized clones never bypass or leak visibility; every visibility diagnostic carries a fix-naming hint. | §6.15 above (post-Overhaul: `ROADMAP_v2.0.0.md` LEC-002) |
 
 ---
 

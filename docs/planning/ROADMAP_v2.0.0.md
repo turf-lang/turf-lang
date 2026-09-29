@@ -119,7 +119,7 @@ PHASE 1  Foundation                   SMP-002  one generic type walker      DONE
    │                                  SMP-001  compiler query facade (parallel, any time in 1–2)  stages 1–2 DONE, turf-lsp port pending (SMP-001.md, 2026-09-28)
    │                                  FDN-005  GC hardening  stages 1–4 DONE (FDN-005.md, 2026-09-28/29); runs on to RC as a CI gate
    ▼
-PHASE 2  Language & ecosystem         LEC-002  visibility — `pub` (D13)
+PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D13)  stage 1 DONE (LEC-002.md, 2026-09-29)
    │                                  LEC-001  projects, dependencies, build (D7)
    │                                  LEC-003  pattern matching (D14)
    │                                  LEC-004  error payloads + `try` (D15)
@@ -673,7 +673,7 @@ STD-003 item 5).
 | Question | Recommendation | Why |
 |---|---|---|
 | Default | **private to the module**; `pub` opts in | A package's API must be explicit to be versionable (LEC-001); "public by default" makes every helper a semver commitment. 2.0 is the only cheap moment to flip it (R1). |
-| Keyword | `pub` (prefix) | Short, precedent (Rust), no conflict found in `tests/`/`lib/std`/`showcase` — **grep before freezing**. |
+| Keyword | `pub` or `public` (prefix; synonyms, like `mut`/`mutable`) | Short, precedent (Rust), no conflict found in `tests/`/`lib/std`/`showcase` — grep done 2026-09-29, no identifier uses either word. The `public` spelling is an owner amendment (2026-09-29). |
 | What can be `pub` | `fn`, methods (`pub fn Point.len()`), `struct`, `enum`, `error`, `machine`, struct **fields**, `export immut` | Uniform rule: every named declaration. |
 | Fields | private unless `pub`, even in a `pub struct` | Needed to hide `List.data`; consistent with the uniform rule. `T::default()` stays legal from other modules (it zero-fills and cannot break an invariant zero cannot); `T::new()` is an ordinary method with its own visibility. |
 | Enum/error variants, machine states | public iff the type is | A variant is part of the type's meaning; per-variant privacy has no use case. |
@@ -1481,7 +1481,7 @@ TurfLang 2.0.0 ships only when every line is demonstrated:
 | DEC-4 | Suppress `lib/std`-origin warnings by default | Yes, with `--stdlib-warnings` | OVH-012 / LEC-005 |
 | DEC-5 | Heap allocation surface (FDN-001) | `heap(expr): &T` intrinsic — **decided 2026-09-27** (`FREEZE.md` §6.12) | FDN-001 |
 | DEC-6 | `s[i]` becomes `char` (D17) | Yes, with bounds checks | FDN-004 |
-| DEC-7 | Visibility default and keyword (LEC-002) | Private by default, `pub` | LEC-002 |
+| DEC-7 | Visibility default and keyword (LEC-002) | Private by default, `pub`/`public` — **decided 2026-09-29** (`FREEZE.md` §6.15) | LEC-002 |
 | DEC-8 | Project tool ownership (LEC-001) | Compiler driver subcommands; `turf-cli` not shipped | LEC-001 |
 | DEC-9 | Package/module identity and collision rule (LEC-001) | Package root module = package name; collisions are errors | LEC-001 |
 | DEC-10 | Pattern syntax (LEC-003) | Top-level `matches expr` unchanged; destructuring forms bind | LEC-003 |
