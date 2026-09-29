@@ -1,9 +1,9 @@
-struct Empty {}
+pub struct Empty {}
 
-fn Empty.make() static: Empty {
+pub fn Empty.make() static: Empty {
     return Empty::default();
 }
 
-fn identity(e: Empty): Empty {
+pub fn identity(e: Empty): Empty {
     return e;
 }

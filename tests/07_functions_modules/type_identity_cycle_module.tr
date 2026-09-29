@@ -1,9 +1,9 @@
 // Companion module for fail_type_identity_layout_cycle_inside_imported_file.tr: a
 // by-value struct cycle declared entirely inside a module.
-struct P {
+pub struct P {
     q: Q
 }
 
-struct Q {
+pub struct Q {
     p: P
 }

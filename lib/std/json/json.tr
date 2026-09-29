@@ -260,7 +260,7 @@ pub fn stringify(v: JsonValue): string {
     return stringify_object(v);
 }
 
-pub fn stringify_array(v: JsonValue): string {
+fn stringify_array(v: JsonValue): string {
     mut result: string = "[";
     mut i: int = 0;
     mut n: int = v.arr_val.length();
@@ -275,7 +275,7 @@ pub fn stringify_array(v: JsonValue): string {
     return result;
 }
 
-pub fn stringify_object(v: JsonValue): string {
+fn stringify_object(v: JsonValue): string {
     mut result: string = "{";
     mut i: int = 0;
     mut n: int = v.obj_keys.length();
@@ -293,7 +293,7 @@ pub fn stringify_object(v: JsonValue): string {
 // Escapes the handful of bytes JSON strings require escaped (`"`, `\`, and
 // the common control characters) -- see this file's header comment for
 // what's NOT handled (\uXXXX round-tripping).
-pub fn escape_string(s: string): string {
+fn escape_string(s: string): string {
     mut result: string = "";
     mut i: int = 0;
     mut n: int = strings::length(s);
@@ -341,7 +341,7 @@ pub error JsonError {
 // List<T>/Map<K,V>'s own methods mutate `self.len` in place -- see
 // list.tr's own design note on why this compiler's generic collections
 // already rely on that same "self is mutated in place" method semantics.
-pub struct Parser {
+struct Parser {
     pub s: string,
     pub pos: int,
     pub len: int

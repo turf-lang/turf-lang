@@ -61,14 +61,14 @@ import strings;
 // tolower bindings are (see strings.tr's own comment on that).
 pub extern fn mkdir(path: string, mode: int32): int32;
 // remove()/rmdir() both return a real (32-bit) C `int`, same reasoning.
-pub extern fn remove(path: string): int32;
-pub extern fn rmdir(path: string): int32;
+extern fn remove(path: string): int32;
+extern fn rmdir(path: string): int32;
 // opendir()/closedir() only ever need their handle checked for null and
 // then closed -- never dereferenced -- so `ptr` (this language's opaque
 // pointer type) is the right binding: there is no Turf struct that could
 // describe a real `DIR*`'s layout, and none is needed.
-pub extern fn opendir(path: string): ptr;
-pub extern fn closedir(d: ptr): int32;
+extern fn opendir(path: string): ptr;
+extern fn closedir(d: ptr): int32;
 
 // ─── Turf-level helpers (path strings) ──────────────────────────────────────
 
@@ -76,7 +76,7 @@ pub extern fn closedir(d: ptr): int32;
 // `ch` in `s`, or -1 if it doesn't appear. Internal helper -- strings.tr
 // only has a forward `index_of`, and dirname/basename/extension below all
 // need to search from the end.
-pub fn last_index_of_char(s: string, ch: int): int {
+fn last_index_of_char(s: string, ch: int): int {
     mut i: int = strings::length(s) - 1;
     while i >= 0 {
         // FDN-004: `s[i]` is `char`; widen to `int` before comparing with

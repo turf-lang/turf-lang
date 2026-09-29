@@ -4,6 +4,6 @@
 // net.tr). Must NOT be flagged as a conflict when both are imported.
 extern fn strlen(s: string): int;
 
-fn wraps_a(s: string): int {
+pub fn wraps_a(s: string): int {
     return strlen(s);
 }

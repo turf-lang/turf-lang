@@ -39,10 +39,12 @@ A module is **always fully parsed** regardless of form — even a single-symbol 
 
 ### 1.3 Visibility rules
 
-> **LEC-002 in progress (stage 2 of 6).** `pub`/`public` (synonyms) now parse before every declaration form and struct field and are stored on the AST, but **nothing is enforced yet** — everything below still describes actual behaviour. Stage 3 flips the default to private-unless-`pub`; see `docs/development/changes/LEC-002.md` and `FREEZE.md` §6.15. `pub` in a meaningless place is already an error, `E087`.
+> **LEC-002 in progress (stage 3 of 6).** A module's top-level **functions and types are private unless written `pub`/`public`** (synonyms), and another module can only reach the `pub` ones — see "`pub` visibility" below. **Not yet enforced:** methods, static methods, `T::new`, struct fields and UFCS calls (stage 4), and the rule that a `pub` signature may not mention a private type (stage 5). Full status: `docs/development/changes/LEC-002.md`; the rules are frozen in `FREEZE.md` §6.15. `pub` where it means nothing is `E087`; reaching a private name is `E088`.
+
+**`pub` visibility (LEC-002).** Every cross-module reference to a function or type is checked against the declaration's `pub` mark — by qualified name (`m::f()`, `m::T`, `m::T::default()`, `m::T::Variant`) and by `import m::name;`. A module always sees its own declarations. `import m::[*]` brings in only the `pub` names, so a private name of `m` can never collide with one of yours; an explicit `import m::helper;` of a private name is `E088` (not "unknown symbol" — the module has it, it just did not export it). If a name has both `pub` and private overloads, only the `pub` ones take part in overload resolution from outside. `export immut` constants are always public (`export` is their `pub`). Operators are not gated: they are visible wherever their operand types are.
 
 **Bare calls to functions** resolve only to:
-1. Something declared directly in the current file, or
+1. Something declared directly in the current file — *when that file is the main program*. A module's body never sees the main program's functions (an importer cannot leak into what it imports; this used to be violated, so a module's bare `helper()` could silently call the importer's unrelated `helper()`), or
 2. If the call is textually inside a module's own body, another function declared in that **same** module (self-reference — e.g. `math.tr`'s `power()` calling its own `pow()` bare, no import needed, since this is same-file visibility, not a module feature), or
 3. A name explicitly brought in via an on-demand import (forms 2–4 above), scoped to whichever file/module's own `import` statement requested it.
 
@@ -132,7 +134,7 @@ Two on-demand imports that both bring in a `Point` are still rejected at the sec
 
 ### 1.7 Exporting constants: `export immut`
 
-Functions, structs, and enums are exportable with no keyword at all — anything declared at a file or module's top level is automatically visible to importers per the visibility rules above. Plain variables are different: a bare `mut`/`immut` declaration only ever makes sense *inside* a function (it's destroyed when that scope ends), so there is no existing top-level-variable syntax to piggyback on. `export` fills exactly that gap, and **only** that gap:
+Functions, structs, enums, errors and machines are exported with `pub` (`public` is the same word) — see the `pub` rule in 1.3; without it they are private to their module. Plain variables are different: a bare `mut`/`immut` declaration only ever makes sense *inside* a function (it's destroyed when that scope ends), so there is no existing top-level-variable syntax to piggyback on. `export` fills exactly that gap, and **only** that gap:
 
 ```turf
 export immut PI: double = 3.14159;
@@ -182,6 +184,7 @@ VERSION                 // bare access -- only after an on-demand import (or sel
 | `AmbiguousTypeReferenceError` (E085) | A bare type name that could mean two visible types — this file's own and an on-demand-imported one (FDN-003) |
 | `DuplicateTypeNameError` (E034) | The same type name declared twice in ONE file or module (two different modules may each declare it — FDN-003) |
 | `TypeError` (several shapes) | Calling an enum variant as a function; using a module or static-method reference as a bare value; a module name nonsensically qualified by another module name (`Module::Module2::func(...)`); a generic struct named without type arguments in a type annotation (`mut b: Box = ...` — "Missing type arguments!") |
+| `PrivateSymbolAccessError` (E088) | A function or type another module declared without `pub`, reached by qualified name or by `import m::name;`; the hint names the file and the exact `pub` spelling to write, and lists the module's own public alternatives (LEC-002; see `docs/errors/codes/E088.txt`) |
 | `MisplacedVisibilityError` (E087) | `pub`/`public` where visibility means nothing — on an operator/import/variable, on a variant or parameter, inside a function, with `export`, before a decorator, or as a name (LEC-002; each shape's hint is in `docs/errors/codes/E087.txt`) |
 | `ExportOutsideTopLevelError` | `export` used inside a function body |
 | `ExportMutNotSupportedError` | `export mut` — only `export immut` is supported today |

@@ -62,6 +62,8 @@ void Resolver::hoistTypesIn(const ExprAST *Node, const std::string &ModuleName) 
                              {PrevLoc->Line, PrevLoc->Col})
           .raise();
     }
+    SymTable_.markTypeVisibility(Struct->getName(),
+                                 {Struct->isPublic(), {Loc.Line, Loc.Col}, "struct"});
     // Keep the AST node itself, not just its name -- checkStructLayoutAcyclicity()
     // needs the actual field types, which ResolverTypeRegistry never stores.
     HoistedStructDecls_.push_back(Struct);
@@ -80,6 +82,8 @@ void Resolver::hoistTypesIn(const ExprAST *Node, const std::string &ModuleName) 
                              {PrevLoc->Line, PrevLoc->Col})
           .raise();
     }
+    SymTable_.markTypeVisibility(Enum->getName(),
+                                 {Enum->isPublic(), {Loc.Line, Loc.Col}, "enum"});
     return;
   }
 
@@ -101,6 +105,8 @@ void Resolver::hoistTypesIn(const ExprAST *Node, const std::string &ModuleName) 
                              {PrevLoc->Line, PrevLoc->Col})
           .raise();
     }
+    SymTable_.markTypeVisibility(Machine->getName(),
+                                 {Machine->isPublic(), {Loc.Line, Loc.Col}, "machine"});
     return;
   }
 
@@ -114,6 +120,8 @@ void Resolver::hoistTypesIn(const ExprAST *Node, const std::string &ModuleName) 
                              {PrevLoc->Line, PrevLoc->Col})
           .raise();
     }
+    SymTable_.markTypeVisibility(ErrDecl->getName(),
+                                 {ErrDecl->isPublic(), {Loc.Line, Loc.Col}, "error"});
     return;
   }
 
@@ -181,9 +189,15 @@ void Resolver::registerOnDemandTypeImports(const ModuleImportExprAST &Import,
   const std::string &SourceModule = Import.getModuleName();
 
   auto Register = [&](const std::string &BareName, SourceLocation Loc) {
-    if (!SymTable_.isKnownTypeIdentity(TypeIdentity::make(SourceModule, BareName)))
+    const std::string Id = TypeIdentity::make(SourceModule, BareName);
+    if (!SymTable_.isKnownTypeIdentity(Id))
       return; // not a type of SourceModule -- registerOnDemandImports() decides
               // whether it is something else or an unknown symbol.
+    // LEC-002: a private type is never flat-imported. A `[*]` import just
+    // skips it; an explicit `import m::Hidden;` is reported by
+    // registerOnDemandImports(), which sees every kind of name at once.
+    if (!SymTable_.isTypeVisibleFrom(Id, ContextLabel))
+      return;
     ResolverSymbolTable::FlatImportedSymbol Sym{SourceModule, {Loc.Line, Loc.Col}};
     if (auto Prev = SymTable_.registerFlatTypeImport(ContextLabel, BareName, Sym)) {
       if (Prev->SourceModule != SourceModule) {
@@ -271,8 +285,14 @@ Resolver::tryResolveTypeSpelling(const std::string &Qualifier, const std::string
     if (!SymTable_.hasModule(Qualifier))
       return std::nullopt;
     std::string Id = TypeIdentity::make(Qualifier, Name);
-    return SymTable_.isKnownTypeIdentity(Id) ? std::optional<std::string>(Id)
-                                             : std::nullopt;
+    // LEC-002: a private type stays UNRESOLVED here, silently, so Pass 2's
+    // validateNamedType() sees an unresolved spelling and reports it (with
+    // the location and hints). Resolving it here would mark the spelling
+    // resolved and Pass 2 would never look at it again.
+    return SymTable_.isKnownTypeIdentity(Id) &&
+                   SymTable_.isTypeVisibleFrom(Id, Context)
+               ? std::optional<std::string>(Id)
+               : std::nullopt;
   }
   // Resolving a monomorphized clone: an unresolved bare name can only be a
   // type argument substituted in from the CALL SITE's module, never
@@ -351,6 +371,12 @@ std::string Resolver::resolveScopeLeftType(ScopeAccessExprAST &Node, SourceLocat
   if (!Qualifier.empty()) {
     std::string Id = TypeIdentity::make(Qualifier, Left);
     if (SymTable_.isKnownTypeIdentity(Id)) {
+      // LEC-002: `m::Hidden::default()` / `m::Hidden::Variant` on a type m
+      // did not mark `pub`.
+      if (!SymTable_.isTypeVisibleFrom(Id, currentModuleName())) {
+        raisePrivateType(Loc, Id);
+        return "";
+      }
       Node.resolveLeftTypeTo(Id);
       return Id;
     }

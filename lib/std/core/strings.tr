@@ -34,10 +34,10 @@ import list::List;
 // ─── C bindings ───────────────────────────────────────────────────────────────
 
 pub extern fn strlen(s: string): int;
-pub extern fn strstr(haystack: string, needle: string): string;
-pub extern fn strncpy(dst: string, src: string, n: int): string;
-pub extern fn strcpy(dst: string, src: string): string;
-pub extern fn strcat(dst: string, src: string): string;
+extern fn strstr(haystack: string, needle: string): string;
+extern fn strncpy(dst: string, src: string, n: int): string;
+extern fn strcpy(dst: string, src: string): string;
+extern fn strcat(dst: string, src: string): string;
 // strcmp/toupper/tolower are declared with their REAL C ABI signatures --
 // all three genuinely take/return a 32-bit C `int`, not Turf's 64-bit
 // `int`. Declaring them as `int` builds the wrong LLVM function signature
@@ -45,9 +45,9 @@ pub extern fn strcat(dst: string, src: string): string;
 // 4294967295 instead of signed -1, because the call read a full 64-bit
 // register through a prototype that only ever had 32 valid bits). See
 // Int32Type's doc comment in Types.h.
-pub extern fn strcmp(a: string, b: string): int32;
-pub extern fn toupper(c: int32): int32;
-pub extern fn tolower(c: int32): int32;
+extern fn strcmp(a: string, b: string): int32;
+extern fn toupper(c: int32): int32;
+extern fn tolower(c: int32): int32;
 
 // ─── operator overloads ─────────────────────────────────────────────────────
 //

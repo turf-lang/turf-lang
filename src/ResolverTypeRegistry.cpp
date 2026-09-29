@@ -81,6 +81,32 @@ bool ResolverTypeRegistry::isKnownTypeIdentity(const std::string &Identity) cons
   return TypeOwningModule_.count(Identity) > 0;
 }
 
+void ResolverTypeRegistry::markTypeVisibility(const std::string &Identity,
+                                              TypeVisibilityInfo Info) {
+  TypeVisibility_[Identity] = std::move(Info);
+}
+
+const ResolverTypeRegistry::TypeVisibilityInfo *
+ResolverTypeRegistry::typeVisibility(const std::string &Identity) const {
+  auto It = TypeVisibility_.find(Identity);
+  return It == TypeVisibility_.end() ? nullptr : &It->second;
+}
+
+bool ResolverTypeRegistry::isTypePublic(const std::string &Identity) const {
+  auto *Info = typeVisibility(Identity);
+  return Info && Info->IsPublic;
+}
+
+std::vector<std::string> ResolverTypeRegistry::getModulePublicTypeNames(
+    const std::string &ModuleName) const {
+  std::vector<std::string> Names;
+  for (const auto &Pair : TypeOwningModule_)
+    if (Pair.second == ModuleName && isTypePublic(Pair.first))
+      Names.push_back(TypeIdentity::bareName(Pair.first));
+  std::sort(Names.begin(), Names.end());
+  return Names;
+}
+
 std::vector<std::string>
 ResolverTypeRegistry::identitiesWithBareName(const std::string &BareName) const {
   std::vector<std::string> Ids;

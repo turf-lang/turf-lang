@@ -17,6 +17,6 @@
 // excludes it as a helper, not a standalone test.
 import entry_file_reimported_transitively;
 
-fn companionMarker(): int {
+pub fn companionMarker(): int {
     return 7;
 }

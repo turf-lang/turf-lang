@@ -46,6 +46,18 @@ std::vector<std::string> ResolverModule::getFunctionNames() const {
   return Names;
 }
 
+std::vector<std::string> ResolverModule::getPublicFunctionNames() const {
+  std::vector<std::string> Names;
+  for (const auto &Pair : Functions)
+    for (const auto &Sym : Pair.second)
+      if (Sym.IsPublic) {
+        Names.push_back(Pair.first);
+        break;
+      }
+  std::sort(Names.begin(), Names.end());
+  return Names;
+}
+
 // ─── ResolverModuleTable ──────────────────────────────────────────────────────
 
 void ResolverModuleTable::registerModule(const std::string &ModuleName) {
@@ -104,6 +116,14 @@ std::vector<std::string> ResolverModuleTable::getModuleFunctionNames(
   if (It == Modules_.end())
     return {};
   return It->second->getFunctionNames();
+}
+
+std::vector<std::string> ResolverModuleTable::getModulePublicFunctionNames(
+    const std::string &ModuleName) const {
+  auto It = Modules_.find(ModuleName);
+  if (It == Modules_.end())
+    return {};
+  return It->second->getPublicFunctionNames();
 }
 
 std::vector<std::string> ResolverModuleTable::getModuleConstantNames(

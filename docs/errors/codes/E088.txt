@@ -1,0 +1,53 @@
+A name you used belongs to another module, which did not mark it `pub`
+
+    // util.tr
+    pub fn api(): int { return helper() + 1; }
+    fn helper(): int { return 41; }
+
+    // main.tr
+    import util;
+    fn main(): int {
+        return util::helper();
+        // ERROR: Function 'helper' is private to module 'util'.
+        //   Note: 'helper' is declared in module 'util' without `pub`
+        //   Hint: If 'helper' is meant to be used from other modules, mark
+        //   it `pub` in util.tr: `pub fn helper(...)`. Otherwise, 'util'
+        //   offers these public functions: api.
+    }
+
+Everything a module declares at its top level -- functions, structs, enums,
+errors, machines, extern fns -- is private to that module unless it is written
+with `pub` (or `public`, the same word). Another module can only use the
+`pub` ones. That keeps a module's helpers free to change, and makes its
+public surface something you can read off the file.
+
+The error appears however the private name is reached:
+
+    util::helper()               // a qualified call
+    mut h: util::Hidden = ...;   // a type annotation
+    util::Hidden::default()      // constructing a private struct
+    util::HiddenColor::A         // a variant of a private enum
+    import util::helper;         // asking for it by name
+    import util::[api, helper];  // ...in a list
+
+A `[*]` import (`import util::[*];`) is different: it just skips the private
+names, so it never raises this error, and a private name in `util` can never
+clash with one of your own.
+
+There are two ways to fix it, and the hint offers both:
+
+ 1. The module is yours and the name is meant to be shared: add `pub` to the
+    declaration in the module's own file --
+
+        pub fn helper(): int { return 41; }
+
+ 2. The name is an implementation detail of somebody else's module: use what
+    the module does offer. The hint lists its `pub` functions or types.
+
+Two things that are NOT errors, because they never cross a module boundary:
+a module using its own private names (`api()` above calling `helper()`), and
+a `pub` generic function whose body calls a private helper -- when you
+instantiate it from your own file, the copy is still resolved inside the
+module that wrote it.
+
+`export immut` constants are always public: `export` is their `pub`.

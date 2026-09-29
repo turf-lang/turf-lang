@@ -62,21 +62,21 @@ import mem;
 // failure (tests/33_net_dns/02_accept_failure_is_reported.tr). recv()/send()
 // return a 64-bit ssize_t, so `int` is right for those.
 
-pub extern fn socket(domain: int, socktype: int, protocol: int): int32;
-pub extern fn bind(fd: int, addr: void*, len: int): int32;
-pub extern fn listen(fd: int, backlog: int): int32;
-pub extern fn accept(fd: int, addr: void*, len: void*): int32;
-pub extern fn connect(fd: int, addr: void*, len: int): int32;
-pub extern fn recv(fd: int, buf: void*, len: int, flags: int): int;
-pub extern fn send(fd: int, buf: string, len: int, flags: int): int;
-pub extern fn close(fd: int): int32;
-pub extern fn setsockopt(fd: int, level: int, optname: int, optval: void*, optlen: int): int32;
-pub extern fn strlen(s: string): int;
+extern fn socket(domain: int, socktype: int, protocol: int): int32;
+extern fn bind(fd: int, addr: void*, len: int): int32;
+extern fn listen(fd: int, backlog: int): int32;
+extern fn accept(fd: int, addr: void*, len: void*): int32;
+extern fn connect(fd: int, addr: void*, len: int): int32;
+extern fn recv(fd: int, buf: void*, len: int, flags: int): int;
+extern fn send(fd: int, buf: string, len: int, flags: int): int;
+extern fn close(fd: int): int32;
+extern fn setsockopt(fd: int, level: int, optname: int, optval: void*, optlen: int): int32;
+extern fn strlen(s: string): int;
 
 // The classic (deprecated, but still universally present and ABI-stable on
 // Linux glibc) hostname-lookup call -- see resolve_hostname() below for the
 // full explanation of why this one, and how its result is read.
-pub extern fn gethostbyname(name: string): ptr;
+extern fn gethostbyname(name: string): ptr;
 
 // Named POSIX constants, exported so callers of net.tr could reference them
 // too if they ever needed to (e.g. a future UdpSocket built the same way).
@@ -198,7 +198,7 @@ pub fn resolve_hostname(host: string): !string {
 // image as one packed little-endian integer and writes it through a
 // `void* to int*` indexed store -- the same pointer-indexing idiom
 // list.tr/stack.tr already use for their own `data: T*` fields.
-pub fn buildSockAddr(a: int, b: int, c: int, d: int, port: int): void* {
+fn buildSockAddr(a: int, b: int, c: int, d: int, port: int): void* {
     mut addr: void* = mem::alloc_zeroed(1, 16);
     mut iaddr: int* = addr to int*;
 

@@ -200,6 +200,7 @@ add_library(turfcore STATIC
   src/ResolverDecl.cpp
   src/ResolverCall.cpp
   src/ResolverTypeIdentity.cpp
+  src/ResolverVisibility.cpp
   src/SymbolTable.cpp
   src/TypeCheckerCore.cpp
   src/TypeCheckerExpr.cpp

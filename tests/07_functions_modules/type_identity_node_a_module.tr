@@ -5,37 +5,37 @@
 // test file's own. Before FDN-003 a struct/enum/error name was one
 // program-wide namespace, so importing both modules was a
 // DuplicateTypeNameError; each type is now identified by (module, name).
-struct Node {
+pub struct Node {
     a: int,
     tag: string
 }
 
-fn Node.new(v: int): void {
+pub fn Node.new(v: int): void {
     self.a = v;
     self.tag = "a";
 }
 
-fn Node.describe(): string {
+pub fn Node.describe(): string {
     return "a.Node";
 }
 
-fn Node.origin() static: Node {
+pub fn Node.origin() static: Node {
     return Node::new(1);
 }
 
-enum Mode { Fast, Slow }
+pub enum Mode { Fast, Slow }
 
-error Oops { Bad }
+pub error Oops { Bad }
 
-fn make(v: int): Node {
+pub fn make(v: int): Node {
     return Node::new(v);
 }
 
-fn mode(): Mode {
+pub fn mode(): Mode {
     return Mode::Slow;
 }
 
-fn check(n: int): !int {
+pub fn check(n: int): !int {
     if (n < 0) {
         return Oops::Bad;
     }

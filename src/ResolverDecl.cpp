@@ -407,8 +407,14 @@ void Resolver::validateNamedType(
     const std::vector<std::string> Everywhere = SymTable_.identitiesWithBareName(Spelling);
     if (!Qualifier.empty()) {
       std::string Id = TypeIdentity::make(Qualifier, Spelling);
-      if (SymTable_.hasModule(Qualifier) && SymTable_.isKnownTypeIdentity(Id))
+      if (SymTable_.hasModule(Qualifier) && SymTable_.isKnownTypeIdentity(Id)) {
+        // LEC-002: a qualified spelling of another module's private type.
+        if (!SymTable_.isTypeVisibleFrom(Id, currentModuleName())) {
+          raisePrivateType(Loc, Id);
+          return std::nullopt;
+        }
         return Id;
+      }
       if (Everywhere.empty()) {
         RankedSuggestions Suggestions;
         Suggestions.Local = SuggestionIndex::suggestVisible(Spelling, Candidates);
@@ -587,6 +593,14 @@ bool Resolver::validateModuleQualifier(const std::string &Qualifier,
         Suggestions.Module[Owner].push_back(Bare);
     }
     UnknownModuleSymbolError(Loc, Qualifier, Bare, Suggestions).raise();
+    return false;
+  }
+
+  // LEC-002: the qualifier is right and the type exists -- but it may still
+  // be another module's private type.
+  const std::string Id = TypeIdentity::make(Qualifier, Bare);
+  if (!SymTable_.isTypeVisibleFrom(Id, currentModuleName())) {
+    raisePrivateType(Loc, Id);
     return false;
   }
 

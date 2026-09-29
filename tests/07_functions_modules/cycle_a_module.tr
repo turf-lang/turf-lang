@@ -5,6 +5,6 @@
 // exists to be imported.
 import cycle_b_module;
 
-fn cycleA(): int {
+pub fn cycleA(): int {
     return 1;
 }

@@ -128,6 +128,12 @@ public:
     return ModuleTable_.getModuleFunctionNames(ModuleName);
   }
 
+  /// LEC-002: the `pub` subset of getModuleFunctionNames().
+  std::vector<std::string> getModulePublicFunctionNames(
+      const std::string &ModuleName) const {
+    return ModuleTable_.getModulePublicFunctionNames(ModuleName);
+  }
+
   std::vector<std::string> getModuleConstantNames(
       const std::string &ModuleName) const {
     return ModuleTable_.getModuleConstantNames(ModuleName);
@@ -249,6 +255,34 @@ public:
 
   std::vector<std::string> getModuleTypeNames(const std::string &ModuleName) const {
     return TypeRegistry_.getModuleTypeNames(ModuleName);
+  }
+
+  // ── Visibility (LEC-002, FREEZE.md §6.15) ───────────────────────────────────
+
+  void markTypeVisibility(const std::string &Identity,
+                          ResolverTypeRegistry::TypeVisibilityInfo Info) {
+    TypeRegistry_.markTypeVisibility(Identity, std::move(Info));
+  }
+  const ResolverTypeRegistry::TypeVisibilityInfo *
+  typeVisibility(const std::string &Identity) const {
+    return TypeRegistry_.typeVisibility(Identity);
+  }
+  std::vector<std::string> getModulePublicTypeNames(const std::string &ModuleName) const {
+    return TypeRegistry_.getModulePublicTypeNames(ModuleName);
+  }
+
+  /**
+   * @brief Whether code in module @p FromModule ("" = the main file) may name
+   *        type @p Identity: it owns the type, or the type is `pub`.
+   *
+   * The single rule every cross-module type reference is checked against. A
+   * type never marked (a local type, a monomorphized clone) is private, which
+   * is right: neither can be spelled by another module.
+   */
+  bool isTypeVisibleFrom(const std::string &Identity,
+                         const std::string &FromModule) const {
+    return TypeIdentity::owningModule(Identity) == FromModule ||
+           TypeRegistry_.isTypePublic(Identity);
   }
 
   // ── Two-tier diagnostic helpers ──────────────────────────────────────────────

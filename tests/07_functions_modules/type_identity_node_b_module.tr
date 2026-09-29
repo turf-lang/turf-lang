@@ -2,39 +2,39 @@
 // type_identity_node_a_module.tr. Same names, different layouts (three
 // doubles here, an int and a string there), so a lookup that confused the
 // two would read the wrong field offsets, not just the wrong method.
-struct Node {
+pub struct Node {
     x: double,
     y: double,
     z: double
 }
 
-fn Node.new(x: double): void {
+pub fn Node.new(x: double): void {
     self.x = x;
     self.y = 2.0;
     self.z = 3.0;
 }
 
-fn Node.describe(): string {
+pub fn Node.describe(): string {
     return "b.Node";
 }
 
-fn Node.origin() static: Node {
+pub fn Node.origin() static: Node {
     return Node::new(0.5);
 }
 
-enum Mode { Up, Down, Sideways }
+pub enum Mode { Up, Down, Sideways }
 
-error Oops { Worse, Worst }
+pub error Oops { Worse, Worst }
 
-fn make(x: double): Node {
+pub fn make(x: double): Node {
     return Node::new(x);
 }
 
-fn mode(): Mode {
+pub fn mode(): Mode {
     return Mode::Sideways;
 }
 
-fn check(n: int): !int {
+pub fn check(n: int): !int {
     if (n < 0) {
         return Oops::Worst;
     }

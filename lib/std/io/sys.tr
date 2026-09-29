@@ -32,14 +32,14 @@
 
 pub extern fn abort(): void;
 pub extern fn exit(code: int): void;
-pub extern fn write(fd: int, buf: string, count: int): int;
+extern fn write(fd: int, buf: string, count: int): int;
 // A local strlen extern, not `import strings;` -- strings.tr itself needs
 // sys.tr for panics (see panic()'s own doc comment below on the circular-
 // import constraint this avoids). Safe to declare independently: this is
 // the same identical-signature-across-modules pattern strlen/malloc/calloc
 // already use elsewhere in the stdlib (RFC step 5's extern-conflict fix
 // explicitly allows this, rejecting only genuinely conflicting signatures).
-pub extern fn strlen(s: string): int;
+extern fn strlen(s: string): int;
 
 // ─── Turf-level helpers ───────────────────────────────────────────────────
 

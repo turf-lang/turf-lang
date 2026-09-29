@@ -1,5 +1,5 @@
 import io;
 
-fn greet(): void {
+pub fn greet(): void {
     io::printline("Hello, World!");
 }

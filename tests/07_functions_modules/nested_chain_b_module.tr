@@ -3,6 +3,6 @@
 // user file), so bFunc() can call cFunc() bare.
 import nested_chain_c_module::cFunc;
 
-fn bFunc(): int {
+pub fn bFunc(): int {
     return cFunc() + 1;
 }

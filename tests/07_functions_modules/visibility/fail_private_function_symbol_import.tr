@@ -1,0 +1,8 @@
+// LEC-002 E088: an explicit `import m::name;` of a private function is
+// rejected at the import itself -- the module HAS the name, it just is not
+// `pub`, which is a different problem from a misspelling and gets its own hint.
+import visibility_lib_module::[api, helper];
+
+fn main(): int {
+    return api();
+}

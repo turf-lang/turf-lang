@@ -39,12 +39,12 @@
 
 // ─── libc bindings ────────────────────────────────────────────────────────
 
-pub extern fn getenv(name: string): string;
+extern fn getenv(name: string): string;
 // setenv returns a real (32-bit) C `int`, not Turf's 64-bit `int` -- same
 // reasoning as strings.tr's strcmp binding (see its own comment): declaring
 // it as Turf `int` would read the full 64-bit return register, whose upper
 // 32 bits a 32-bit C return value never defines.
-pub extern fn setenv(name: string, value: string, overwrite: int): int32;
+extern fn setenv(name: string, value: string, overwrite: int): int32;
 
 // ─── compiler-synthesized argv/argc bindings ───────────────────────────────
 // These two symbols exist only because main's own codegen synthesizes them
@@ -52,8 +52,8 @@ pub extern fn setenv(name: string, value: string, overwrite: int): int32;
 // from a program whose `main` the compiler didn't itself compile (i.e.
 // anywhere outside this pipeline) would be undefined.
 
-pub extern fn TurfRuntimeGetArgc(): int;
-pub extern fn TurfRuntimeGetArgv(index: int): string;
+extern fn TurfRuntimeGetArgc(): int;
+extern fn TurfRuntimeGetArgv(index: int): string;
 
 // ─── Turf-level helpers ────────────────────────────────────────────────────
 

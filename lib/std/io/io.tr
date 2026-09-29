@@ -31,22 +31,22 @@ import strings;
 
 // ─── libc bindings ────────────────────────────────────────────────────────
 
-pub extern fn printf(fmt: string, ...): int;
-pub extern fn scanf(fmt: string, ...): int;
-pub extern fn getchar(): int;
+extern fn printf(fmt: string, ...): int;
+extern fn scanf(fmt: string, ...): int;
+extern fn getchar(): int;
 
 // Buffered file I/O (fopen/fclose/fseek/ftell/fread/fwrite/fflush) --
 // `string` and `void*` are the same opaque pointer at the LLVM level in
 // this compiler (confirmed by net.tr's TcpConnection.read()), so a `string`
 // buffer is passed wherever a C function wants a `char*`/`void*` and back,
 // exactly like net.tr/strings.tr already do.
-pub extern fn fopen(path: string, mode: string): void*;
-pub extern fn fclose(stream: void*): int;
-pub extern fn fseek(stream: void*, offset: int, whence: int): int;
-pub extern fn ftell(stream: void*): int;
-pub extern fn fread(buf: void*, size: int, count: int, stream: void*): int;
-pub extern fn fwrite(buf: string, size: int, count: int, stream: void*): int;
-pub extern fn fflush(stream: void*): int;
+extern fn fopen(path: string, mode: string): void*;
+extern fn fclose(stream: void*): int;
+extern fn fseek(stream: void*, offset: int, whence: int): int;
+extern fn ftell(stream: void*): int;
+extern fn fread(buf: void*, size: int, count: int, stream: void*): int;
+extern fn fwrite(buf: string, size: int, count: int, stream: void*): int;
+extern fn fflush(stream: void*): int;
 
 // A raw POSIX write(2) syscall, not buffered stdio -- eprint/eprintline use
 // this instead of an fprintf+FILE* stream, mirroring sys.tr's own panic()
@@ -57,8 +57,8 @@ pub extern fn fflush(stream: void*): int;
 // only `export immut` constants exist at module scope, not mutable
 // globals). A raw write() to the well-known stderr fd sidesteps both
 // problems entirely.
-pub extern fn write(fd: int, buf: string, count: int): int;
-pub extern fn strlen(s: string): int;
+extern fn write(fd: int, buf: string, count: int): int;
+extern fn strlen(s: string): int;
 
 // ─── print ────────────────────────────────────────────────────────────────
 

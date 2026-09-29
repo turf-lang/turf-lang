@@ -1,0 +1,6 @@
+// LEC-002 E088: `import m::Hidden;` of a private type.
+import visibility_lib_module::Hidden;
+
+fn main(): int {
+    return 0;
+}

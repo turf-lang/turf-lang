@@ -41,6 +41,9 @@ public:
 
   /// Return all registered base names (for suggestion / diagnostics).
   std::vector<std::string> getFunctionNames() const;
+  /// LEC-002: names with at least one `pub` overload, sorted -- what another
+  /// module may actually call, and so what a private-access hint offers.
+  std::vector<std::string> getPublicFunctionNames() const;
 };
 
 // ─── ResolverModuleTable ─────────────────────────────────────────────────────
@@ -116,6 +119,9 @@ public:
    * @brief Return all base function names registered under @p ModuleName.
    */
   std::vector<std::string> getModuleFunctionNames(
+      const std::string &ModuleName) const;
+  /// LEC-002: the `pub` subset of getModuleFunctionNames().
+  std::vector<std::string> getModulePublicFunctionNames(
       const std::string &ModuleName) const;
 
   /**

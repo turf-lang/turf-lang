@@ -1,0 +1,8 @@
+// LEC-002 E088: a variant is public exactly when its enum is, so
+// `m::HiddenColor::A` on a private enum is rejected.
+import visibility_lib_module;
+
+fn main(): int {
+    immut x: int = visibility_lib_module::HiddenColor::A to int;
+    return x;
+}

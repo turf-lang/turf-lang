@@ -97,6 +97,22 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
 
     CurrentFileMatches = SymTable_.lookupCurrentFileFunctions(CalleeName);
 
+    // Inside a MODULE's body, the main file's own functions are not in scope:
+    // a module cannot see its importer. Without this, a module function's bare
+    // call to its own `helper()` also matched the main program's unrelated
+    // `helper()`, and the program silently called the wrong one (found while
+    // implementing LEC-002 -- privacy makes same-named module helpers the
+    // normal case, so the collision is no longer exotic). The one exception
+    // is an `extern fn` declared inside a function body, which the Resolver
+    // registers in the current-file table regardless of where it appears
+    // (visitExternFuncDecl()); those must stay callable.
+    if (!currentModuleName().empty()) {
+      CurrentFileMatches.erase(
+          std::remove_if(CurrentFileMatches.begin(), CurrentFileMatches.end(),
+                         [](const ResolverFunctionSymbol *S) { return !S->IsExtern; }),
+          CurrentFileMatches.end());
+    }
+
     // A bare (unqualified) call may only resolve to a function declared in
     // the SAME module currently being walked -- i.e. genuine self-
     // reference, like math.tr's abs() calling its own fabs() bare, or
@@ -129,8 +145,10 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     // exactly the right key (empty = main file), matching whatever
     // registerOnDemandImports() registered things under during hoisting.
     if (const auto *Flat = SymTable_.lookupFlatFunctionImport(SelfModule, CalleeName)) {
+      // LEC-002: the flat import only ever registered the name; overloads of
+      // it that the module did not mark `pub` must not join resolution.
       for (const auto &Match : SymTable_.findInModules(CalleeName))
-        if (Match.ModuleName == Flat->SourceModule)
+        if (Match.ModuleName == Flat->SourceModule && Match.Symbol->IsPublic)
           ModuleMatches.push_back(Match);
     }
   } else {
@@ -410,6 +428,10 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
       for (const auto &Match : SymTable_.findInModules(CalleeName))
         if (Match.ModuleName == LeftName)
           ModuleMatches.push_back(Match);
+      // LEC-002: `m::helper(...)` where m did not mark `helper` `pub`.
+      if (!filterToVisibleOverloads(ModuleMatches, ScopeCallee->getRightLoc(),
+                                    CalleeName))
+        return;
     }
   }
 

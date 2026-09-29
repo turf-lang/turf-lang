@@ -376,6 +376,7 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   Sym.ReturnType = substituteTypeParams(Node.getReturnTypePtr(), TypeParams);
   Sym.TypeParams = TypeParams;
   Sym.HasCallerLocation = Node.hasCallerLocation();
+  Sym.IsPublic = Node.isPublic();
   ResolverSourceLocation DeclLoc;
   // getNameLoc(), not getLoc() -- getLoc() is the 'fn'/'operator' keyword's
   // own position (see FuncDefExprAST's doc comment in ASTDecl.h), which
@@ -620,6 +621,8 @@ void Resolver::hoistTopLevel(const ExprAST *Node) {
     Sym.ReturnType = Extern->getReturnType();
     Sym.IsExtern    = true; // see IsExtern's doc comment in ResolverSymbolTable.h
     Sym.IsVarArg    = Extern->isVarArg(); // propagate '...' to arity check
+    Sym.IsPublic    = Extern->isPublic();
+    Sym.DeclLoc     = {Extern->getNameLoc().Line, Extern->getNameLoc().Col};
     for (const auto &[PName, PType] : Extern->getParams())
       Sym.Params.push_back({PName, PType});
     SymTable_.registerCurrentFileFunction(Sym);
@@ -672,6 +675,8 @@ void Resolver::hoistModuleBody(const ExprAST *Body,
       Sym.ReturnType = Extern->getReturnType();
       Sym.IsExtern = true; // see IsExtern's doc comment in ResolverSymbolTable.h
       Sym.IsVarArg = Extern->isVarArg();
+      Sym.IsPublic = Extern->isPublic();
+      Sym.DeclLoc = {Extern->getNameLoc().Line, Extern->getNameLoc().Col};
       for (const auto &[PName, PType] : Extern->getParams())
         Sym.Params.push_back({PName, PType});
       SymTable_.registerModuleFunction(ModuleName, Sym);
@@ -935,12 +940,21 @@ void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
   // function) -- the caller uses this to decide whether an explicit
   // Symbol/SymbolList request also needs to fall back to checking the
   // type registry (RegisterTypeIfOwned below) before giving up.
+  //
+  // LEC-002: only `pub` overloads are imported. A private overload is skipped
+  // silently for a `[*]` import; for an explicit request the caller checks
+  // @p SawPrivate to tell "not there" from "there, but private".
   auto RegisterFunctionIfPresent = [&](const std::string &Name,
-                                       SourceLocation Loc) -> bool {
+                                       SourceLocation Loc,
+                                       bool &SawPrivate) -> bool {
     bool Found = false;
     for (const auto &Match : SymTable_.findInModules(Name)) {
       if (Match.ModuleName != SourceModule)
         continue;
+      if (!Match.Symbol->IsPublic) {
+        SawPrivate = true;
+        continue;
+      }
       Found = true;
       ResolverSymbolTable::FlatImportedSymbol Sym{SourceModule, {Loc.Line, Loc.Col}};
       if (auto Prev = SymTable_.registerFlatFunctionImport(ContextLabel, Name, Sym)) {
@@ -966,10 +980,17 @@ void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
   // registerOnDemandTypeImports() in Pass 1a; re-registering the same
   // (context, name, module) triple below is a no-op. Returns whether Name is
   // a real type owned by SourceModule at all.
-  auto RegisterTypeIfOwned = [&](const std::string &Name,
-                                 SourceLocation Loc) -> bool {
-    if (!SymTable_.isKnownTypeIdentity(TypeIdentity::make(SourceModule, Name)))
+  auto RegisterTypeIfOwned = [&](const std::string &Name, SourceLocation Loc,
+                                 bool &SawPrivate) -> bool {
+    const std::string Id = TypeIdentity::make(SourceModule, Name);
+    if (!SymTable_.isKnownTypeIdentity(Id))
       return false;
+    // LEC-002: a private type is not importable (see registerOnDemandType-
+    // Imports(), which skips it for the same reason).
+    if (!SymTable_.isTypeVisibleFrom(Id, ContextLabel)) {
+      SawPrivate = true;
+      return false;
+    }
     ResolverSymbolTable::FlatImportedSymbol Sym{SourceModule, {Loc.Line, Loc.Col}};
     if (auto Prev = SymTable_.registerFlatTypeImport(ContextLabel, Name, Sym)) {
       if (Prev->SourceModule != SourceModule) {
@@ -1003,10 +1024,11 @@ void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
   if (Import.getMode() == ImportMode::Wildcard) {
     // Every function, struct/enum type, AND `export immut` constant
     // SourceModule declares becomes flat-visible.
+    bool IgnoredPrivate = false; // a `[*]` import just skips private names
     for (const auto &Name : SymTable_.getModuleFunctionNames(SourceModule))
-      RegisterFunctionIfPresent(Name, Import.getLoc());
+      RegisterFunctionIfPresent(Name, Import.getLoc(), IgnoredPrivate);
     for (const auto &Name : SymTable_.getModuleTypeNames(SourceModule))
-      RegisterTypeIfOwned(Name, Import.getLoc());
+      RegisterTypeIfOwned(Name, Import.getLoc(), IgnoredPrivate);
     for (const auto &Name : SymTable_.getModuleConstantNames(SourceModule))
       RegisterConstantIfPresent(Name, Import.getLoc());
     return;
@@ -1015,9 +1037,19 @@ void Resolver::registerOnDemandImports(const ModuleImportExprAST &Import,
   // Symbol / SymbolList: each requested name must resolve to SOMETHING
   // SourceModule actually owns -- a function, a struct/enum, or a constant.
   for (const auto &Ref : Import.getRequestedSymbols()) {
-    bool FoundFn = RegisterFunctionIfPresent(Ref.Name, Ref.Loc);
-    bool FoundType = RegisterTypeIfOwned(Ref.Name, Ref.Loc);
+    bool PrivateFn = false, PrivateType = false;
+    bool FoundFn = RegisterFunctionIfPresent(Ref.Name, Ref.Loc, PrivateFn);
+    bool FoundType = RegisterTypeIfOwned(Ref.Name, Ref.Loc, PrivateType);
     bool FoundConst = RegisterConstantIfPresent(Ref.Name, Ref.Loc);
+    if (!FoundFn && !FoundType && !FoundConst && (PrivateFn || PrivateType)) {
+      // LEC-002: the module HAS this name -- it just isn't `pub`. That is a
+      // different problem from a misspelling and needs a different hint.
+      if (PrivateFn)
+        raisePrivateFunction(Ref.Loc, SourceModule, Ref.Name);
+      else
+        raisePrivateType(Ref.Loc, TypeIdentity::make(SourceModule, Ref.Name));
+      continue;
+    }
     if (!FoundFn && !FoundType && !FoundConst) {
       RankedSuggestions Suggestions;
       // Candidates must cover every name-kind the gate above actually

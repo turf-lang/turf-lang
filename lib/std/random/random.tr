@@ -61,8 +61,8 @@ import time;
 // C return value never defines. srand()'s parameter is `unsigned int` in
 // C; int32 round-trips it exactly the same way (bit pattern only, no sign
 // meaning is ever relied on below).
-pub extern fn rand(): int32;
-pub extern fn srand(seed: int32): void;
+extern fn rand(): int32;
+extern fn srand(seed: int32): void;
 
 // ─── constants ──────────────────────────────────────────────────────────────
 

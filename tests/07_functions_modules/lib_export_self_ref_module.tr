@@ -10,6 +10,6 @@
 
 export immut SCALE: int = 10;
 
-fn scaleUp(x: int): int {
+pub fn scaleUp(x: int): int {
     return x * SCALE;
 }

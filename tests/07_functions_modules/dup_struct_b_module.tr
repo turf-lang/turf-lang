@@ -4,12 +4,12 @@
 // THAT it silently reached Codegen and crashed ("Internal compiler error").
 // Named `..._module.tr` so scripts/test_runner.sh's `grep -v "_module.tr"`
 // skips it as a standalone test entry point; it only exists to be imported.
-struct Point {
+pub struct Point {
     x: int,
     y: int,
     z: int
 }
 
-fn makeB(): Point {
+pub fn makeB(): Point {
     return Point::default();
 }

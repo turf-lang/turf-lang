@@ -1,11 +1,11 @@
 // Companion module for type_identity_operators_errors_machines.tr -- see
 // type_identity_ops_a_module.tr.
-struct Vec {
+pub struct Vec {
     x: double,
     y: double
 }
 
-fn vec(x: double): Vec {
+pub fn vec(x: double): Vec {
     mut v: Vec = Vec::default();
     v.x = x;
     v.y = 1.0;
@@ -16,26 +16,26 @@ operator +(a: Vec, b: Vec): Vec {
     return vec(a.x + b.x);
 }
 
-error Bad { Nope }
+pub error Bad { Nope }
 
-fn check(n: int): !int {
+pub fn check(n: int): !int {
     if (n < 0) {
         return Bad::Nope;
     }
     return n * 2;
 }
 
-machine Light { On -> Off, Off -> On }
+pub machine Light { On -> Off, Off -> On }
 
-fn light(): Light {
+pub fn light(): Light {
     return Light::Off;
 }
 
-fn vecSize(): int {
+pub fn vecSize(): int {
     return sizeof(Vec);
 }
 
-fn local(): int {
+pub fn local(): int {
     struct Tmp { z: string }
     mut t: Tmp = Tmp::default();
     t.z = "hello";

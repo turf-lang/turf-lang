@@ -332,6 +332,14 @@ struct ResolverFunctionSymbol {
   /// that was never actually registered anywhere.
   bool                     IsExtern    = false;
 
+  /// LEC-002 (FREEZE.md §6.15): declared `pub`/`public`. Private by default --
+  /// a symbol built anywhere that forgets to set this is invisible to other
+  /// modules, so a missed construction site fails loudly in the suite rather
+  /// than silently leaking. Only consulted for a reference that crosses a
+  /// module boundary (a same-module call is always allowed), and never for an
+  /// operator: those are visible wherever their operand types are.
+  bool                     IsPublic    = false;
+
   /// STD-002: true when this declaration was written `@caller_location
   /// fn ...` (FuncDefExprAST::hasCallerLocation()). Read by Codegen
   /// (FuncCallExprAST::codegen(), CodegenFunc.cpp) via ResolvedCallTarget to

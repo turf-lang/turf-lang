@@ -497,6 +497,31 @@ private:
   /// own @p TypeName (e.g. `mem::List` when List actually lives in
   /// `list`). Returns false in either error case (already raised), true
   /// if the qualifier is empty or correct.
+  // ── Visibility (LEC-002, FREEZE.md §6.15) ──────────────────────────────────
+  //
+  // Every cross-module reference to a function or type is checked against the
+  // declaration's `pub` mark. A reference from inside the declaring module is
+  // never checked. All the diagnostics go through the two raise helpers so the
+  // wording and the hints (which name the file, the keyword and the module's
+  // public alternatives) cannot drift between the ways a private name can be
+  // reached: `m::f()`, `m::T`, and `import m::name;`.
+
+  /// Raises PrivateSymbolAccessError (E088) for private function @p Name of
+  /// module @p Module, pointing at its declaration.
+  void raisePrivateFunction(SourceLocation Loc, const std::string &Module,
+                            const std::string &Name) const;
+  /// Raises PrivateSymbolAccessError (E088) for private type @p Identity.
+  void raisePrivateType(SourceLocation Loc, const std::string &Identity) const;
+  /// Drops, from @p Matches, every overload the current module may not call
+  /// (private, declared in another module). If that leaves nothing but at
+  /// least one overload was dropped, raises E088 at @p Loc and returns false.
+  /// Overloads of one name can differ in visibility: a caller who can only
+  /// see the `pub` ones must not have the private one join overload
+  /// resolution -- it would make the call's meaning depend on a hidden name.
+  bool filterToVisibleOverloads(
+      std::vector<ResolverSymbolTable::ModuleFunctionMatch> &Matches,
+      SourceLocation Loc, const std::string &Name) const;
+
   bool validateModuleQualifier(const std::string &Qualifier,
                                const std::string &TypeName,
                                SourceLocation Loc) const;

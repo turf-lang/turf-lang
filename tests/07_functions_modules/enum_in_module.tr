@@ -7,13 +7,13 @@
 // "_module.tr" (scripts/test_runner.sh's exclusion pattern matches it as a
 // substring, not just a suffix), so this is correctly skipped as a
 // standalone test entry point -- see enum_module_import.tr for the real one.
-enum Status {
+pub enum Status {
     Ok,
     Failed,
     Pending
 }
 
-fn describe(s: Status): int {
+pub fn describe(s: Status): int {
     compare s {
         matches Status::Ok:
             return 1;

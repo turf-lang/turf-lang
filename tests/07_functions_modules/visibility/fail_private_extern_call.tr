@@ -1,0 +1,7 @@
+// LEC-002 E088: a module's own `extern fn` bindings are private unless
+// declared `pub extern fn` -- here `strlen` is not.
+import visibility_lib_module;
+
+fn main(): int {
+    return visibility_lib_module::strlen("abc");
+}

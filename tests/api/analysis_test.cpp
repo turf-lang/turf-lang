@@ -317,7 +317,7 @@ static void testImportedModuleOverlay(const ScratchDir &Dir) {
       "main.tr", "import helper;\n\nfn main(): int {\n"
                  "    return helper::value();\n}\n");
   const std::string Helper =
-      Dir.write("helper.tr", "fn value(): int {\n    return 1;\n}\n");
+      Dir.write("helper.tr", "pub fn value(): int {\n    return 1;\n}\n");
   const std::string MainText =
       "import helper;\n\nfn main(): int {\n    return helper::value();\n}\n";
 
@@ -333,13 +333,17 @@ static void testImportedModuleOverlay(const ScratchDir &Dir) {
   // The unsaved edit changes value()'s return type: main no longer checks.
   auto Edited = turf::analyze(
       {{Main, MainText},
-       {Helper, "fn value(): string {\n    return \"one\";\n}\n"}});
+       {Helper, "pub fn value(): string {\n    return \"one\";\n}\n"}});
   CHECK(!Edited.succeeded());
+  // ...and it is a TYPE error, not a visibility one: value() is still `pub`,
+  // so a failure that is really "helper::value is private" cannot pass here.
+  for (const auto &D : Edited.diagnostics())
+    CHECK(D.Code != "E088");
 
   // An error inside the edited module is reported against that module.
   auto Broken = turf::analyze(
       {{Main, MainText},
-       {Helper, "fn value(): int {\n    return nothing;\n}\n"}});
+       {Helper, "pub fn value(): int {\n    return nothing;\n}\n"}});
   bool InHelper = false;
   for (const auto &D : Broken.diagnostics())
     if (D.Level == turf::Severity::Error && fs::equivalent(D.Where.Path, Helper) &&
@@ -465,6 +469,86 @@ public fn main(): int { return helper(); }
     std::cerr << render(R);
 }
 
+// LEC-002 stage 3: every way of reaching another module's private function or
+// type is E088, and the diagnostic carries what a reader needs to act on it --
+// a note at the declaration and a hint naming the file, the keyword and the
+// module's own public alternatives. As with the placement test above, the
+// runner cannot see WHY a fail_*.tr failed, so the code and the hint are
+// asserted here.
+static void testPrivateSymbolAccess(const ScratchDir &Dir) {
+  CurrentTest = "private symbol access";
+  Dir.write("vislib.tr", R"(pub fn api(): int { return helper(); }
+fn helper(): int { return 1; }
+pub fn pick(x: int): int { return x; }
+fn pick(x: string): int { return 0; }
+pub struct Shown { v: int }
+struct Hidden { v: int }
+enum HiddenColor { A }
+extern fn strlen(s: string): int;
+)");
+  const std::string Main = Dir.write("visuser.tr", "");
+  struct Case {
+    const char *Label;
+    const char *Body;
+    const char *HintFragment;
+  };
+  const Case Cases[] = {
+      {"qualified call", "fn main(): int { return vislib::helper(); }",
+       "`pub fn helper(...)`"},
+      {"symbol import", "import vislib::helper;\nfn main(): int { return 0; }",
+       "in vislib.tr"},
+      {"list import", "import vislib::[api, helper];\nfn main(): int { return 0; }",
+       "vislib' offers these public functions: api, pick"},
+      {"type annotation",
+       "fn main(): int { mut h: vislib::Hidden = vislib::Hidden::default(); return 0; }",
+       "`pub struct Hidden`"},
+      {"type import", "import vislib::Hidden;\nfn main(): int { return 0; }",
+       "public types: Shown"},
+      {"enum variant",
+       "fn main(): int { immut x: int = vislib::HiddenColor::A to int; return x; }",
+       "`pub enum HiddenColor`"},
+      {"extern fn", "fn main(): int { return vislib::strlen(\"a\"); }",
+       "`pub extern fn strlen(...)`"},
+  };
+  for (const auto &C : Cases) {
+    const std::string Src = std::string("import vislib;\n") + C.Body + "\n";
+    auto R = turf::analyze({{Main, Src}});
+    CHECK(!R.succeeded());
+    bool Found = false;
+    for (const auto &D : R.diagnostics()) {
+      if (D.Code != "E088")
+        continue;
+      Found = true;
+      CHECK(D.Hint.find(C.HintFragment) != std::string::npos);
+      if (D.Hint.find(C.HintFragment) == std::string::npos)
+        std::cerr << "    case '" << C.Label << "': hint was: " << D.Hint << "\n";
+      CHECK(!D.Related.empty()); // the note at the declaration
+      CHECK(D.Message.find("private to module 'vislib'") != std::string::npos);
+      break;
+    }
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << C.Label << "' produced:\n" << render(R);
+  }
+
+  // What must NOT be rejected: the pub members of the same module, a
+  // wildcard import that simply skips the private names, and this file's own
+  // declarations that share a name with the module's private ones.
+  const char *Accepted = R"(import vislib::[*];
+fn helper(): int { return 100; }
+struct Hidden { z: int }
+fn main(): int {
+    mut s: Shown = Shown::default();
+    mut h: Hidden = Hidden::default();
+    return api() + pick(1) + helper() + s.v + h.z;
+}
+)";
+  auto R = turf::analyze({{Main, Accepted}});
+  CHECK(R.succeeded());
+  if (!R.succeeded())
+    std::cerr << render(R);
+}
+
 int main() {
   ScratchDir Dir;
   testCleanProgramQueries();
@@ -479,6 +563,7 @@ int main() {
   testLintIsOptIn();
   testEmptyInput();
   testVisibilityModifierPlacement();
+  testPrivateSymbolAccess(Dir);
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

@@ -5,6 +5,6 @@
 // `grep -v "_module.tr"` skips it as a standalone test entry point.
 import broken_extern_param_module;
 
-fn helperB(): int {
+pub fn helperB(): int {
     return 1;
 }

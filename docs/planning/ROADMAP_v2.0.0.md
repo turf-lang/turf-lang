@@ -119,7 +119,7 @@ PHASE 1  Foundation                   SMP-002  one generic type walker      DONE
    │                                  SMP-001  compiler query facade (parallel, any time in 1–2)  stages 1–2 DONE, turf-lsp port pending (SMP-001.md, 2026-09-28)
    │                                  FDN-005  GC hardening  stages 1–4 DONE (FDN-005.md, 2026-09-28/29); runs on to RC as a CI gate
    ▼
-PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D13)  stages 1–2 DONE (LEC-002.md, 2026-09-29)
+PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D13)  stages 1–3 DONE (LEC-002.md, 2026-09-29)
    │                                  LEC-001  projects, dependencies, build (D7)
    │                                  LEC-003  pattern matching (D14)
    │                                  LEC-004  error payloads + `try` (D15)

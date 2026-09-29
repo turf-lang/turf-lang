@@ -5,10 +5,10 @@
 // dup_struct_b_module::Point. Named `..._module.tr` so
 // scripts/test_runner.sh's `grep -v "_module.tr"` skips it as a standalone
 // test entry point; it only exists to be imported.
-struct Point {
+pub struct Point {
     x: int
 }
 
-fn makeA(): Point {
+pub fn makeA(): Point {
     return Point::default();
 }

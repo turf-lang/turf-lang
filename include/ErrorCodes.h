@@ -195,6 +195,10 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // an enum variant, a parameter, inside a function, ...). Rejected rather
     // than ignored; the hint names what to write instead.
     {"E087", "MisplacedVisibilityError", "Misplaced visibility modifier", SLM::ErrorCategory::DECLARATION},
+
+    // LEC-002: a reference from one module to a function, type (or, from
+    // stage 4, method/field) another module did not mark `pub`.
+    {"E088", "PrivateSymbolAccessError", "Private symbol access", SLM::ErrorCategory::DECLARATION, true},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

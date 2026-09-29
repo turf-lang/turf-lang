@@ -2,4 +2,4 @@
 // enum, zero functions/externs. Named `..._module.tr` so
 // scripts/test_runner.sh's `grep -v "_module.tr"` skips it as a standalone
 // test entry point; it only exists to be imported.
-enum Shade { Light, Medium, Dark }
+pub enum Shade { Light, Medium, Dark }

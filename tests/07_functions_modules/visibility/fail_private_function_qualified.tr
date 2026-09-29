@@ -1,0 +1,7 @@
+// LEC-002 E088: `helper` is private to visibility_lib_module (declared without
+// `pub`), so another module cannot call it even fully qualified.
+import visibility_lib_module;
+
+fn main(): int {
+    return visibility_lib_module::helper();
+}

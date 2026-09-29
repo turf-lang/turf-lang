@@ -1,0 +1,65 @@
+// Companion module for the LEC-002 visibility tests (ends in _module.tr, so
+// the runner treats it as a helper with no main()). Every kind of declaration
+// appears once as `pub` and once private, so a test can reach for either.
+
+// ── functions ───────────────────────────────────────────────────────────────
+pub fn api(): int {
+    return helper() + 1;
+}
+
+fn helper(): int {
+    return 41;
+}
+
+// One name, two overloads of different visibility: only the `pub` one may be
+// seen from another module.
+pub fn pick(x: int): int {
+    return x;
+}
+
+fn pick(x: string): int {
+    return 0;
+}
+
+// ── types ───────────────────────────────────────────────────────────────────
+pub struct Shown {
+    v: int
+}
+
+struct Hidden {
+    v: int
+}
+
+pub enum PubColor { Red, Green }
+
+enum HiddenColor { A, B }
+
+pub error PubErr { Bad }
+
+error HiddenErr { Worse }
+
+pub machine PubMachine { Off -> On, On -> Off }
+
+machine HiddenMachine { Off -> On, On -> Off }
+
+// ── constants: `export immut` is its own `pub` ──────────────────────────────
+export immut LIMIT: int = 10;
+
+// ── generics: a pub generic may use a private helper; the monomorphized
+// clone is resolved in THIS module, not at the caller ──────────────────────
+fn<T> hidden_generic(x: T): int {
+    return 5;
+}
+
+pub fn<T> wrap_generic(x: T): int {
+    return hidden_generic(x) + helper();
+}
+
+// ── extern fns ──────────────────────────────────────────────────────────────
+extern fn strlen(s: string): int;
+
+pub extern fn abs(x: int32): int32;
+
+pub fn length_of(s: string): int {
+    return strlen(s);
+}

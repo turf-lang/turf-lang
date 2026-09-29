@@ -117,6 +117,25 @@ public:
   /// main-file name) is a registered struct/enum/machine/error type.
   bool isKnownTypeIdentity(const std::string &Identity) const;
 
+  /// LEC-002: what the declaration said about visibility, and where it
+  /// stands, kept beside the registry so a diagnostic about a private type
+  /// can point at it without walking the AST again.
+  struct TypeVisibilityInfo {
+    bool IsPublic = false;
+    ResolverSourceLocation DeclLoc;
+    std::string Keyword; ///< "struct" | "enum" | "error" | "machine"
+  };
+  /// Records @p Identity's visibility. Called once per declaration by Pass 1a
+  /// (hoistTypesIn); a type never marked is private, the frozen default.
+  void markTypeVisibility(const std::string &Identity, TypeVisibilityInfo Info);
+  /// nullptr if @p Identity was never marked (local types, monomorphized
+  /// clones) -- callers treat that as private but never need to report it.
+  const TypeVisibilityInfo *typeVisibility(const std::string &Identity) const;
+  bool isTypePublic(const std::string &Identity) const;
+  /// Bare names of @p ModuleName's `pub` types, sorted -- the "use one of
+  /// these instead" list in a private-access hint.
+  std::vector<std::string> getModulePublicTypeNames(const std::string &ModuleName) const;
+
   /// FDN-003: every registered type identity whose bare name is
   /// @p BareName, sorted -- one per module that declares a type spelled that
   /// way. Answers "does this spelling name a type ANYWHERE" (for "isn't
@@ -156,6 +175,9 @@ private:
   /// Which module owns each struct/enum/error name ("" = main file). See
   /// getTypeOwningModule()'s doc comment.
   std::unordered_map<std::string, std::string> TypeOwningModule_;
+
+  /// LEC-002: see markTypeVisibility().
+  std::unordered_map<std::string, TypeVisibilityInfo> TypeVisibility_;
 };
 
 #endif // RESOLVER_TYPE_REGISTRY_H

@@ -529,4 +529,56 @@ public:
   }
 };
 
+// LEC-002 (docs/development/changes/LEC-002.md, FREEZE.md §6.15): a reference
+// from one module to a declaration another module did not mark `pub`. One
+// class for every kind of private thing (function, type, ...) -- the message
+// says WHAT is private and where it lives, and the hint says what to do about
+// it: either open it up (name the exact file and keyword) or, if the module
+// offers a public way to get the same result, name those. A bare "is private"
+// would leave the writer to guess which of the two the module author meant.
+class PrivateSymbolAccessError : public TurfError {
+public:
+  enum class Kind { Function, Type };
+
+  /// @param Keyword what to write after `pub` -- "fn" for a function, the
+  ///        declaring keyword ("struct"/"enum"/"error"/"machine") for a type.
+  /// @param PublicAlternatives the module's own `pub` names of the same kind,
+  ///        offered in the hint; may be empty.
+  PrivateSymbolAccessError(SourceLocation Loc, Kind K, const std::string &Name,
+                           const std::string &Module, SourceLocation DeclLoc,
+                           const std::string &Keyword,
+                           const std::vector<std::string> &PublicAlternatives)
+      : TurfError(Loc, "") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+    const std::string What = K == Kind::Function ? "Function" : "Type";
+    Message = Colors::BRIGHT_RED + What + " '" + Colors::CYAN + Name +
+              Colors::BRIGHT_RED + "' is private to module '" + Colors::CYAN +
+              Module + Colors::BRIGHT_RED + "'." + Colors::RESET;
+    withRelated(DeclLoc, "'" + Name + "' is declared in module '" + Module +
+                             "' without `pub`");
+
+    const std::string File = Module + ".tr";
+    Hint_ = "If '" + Name + "' is meant to be used from other modules, mark "
+            "it `pub` in " + File + ": `pub " + Keyword + " " + Name +
+            (K == Kind::Function ? "(...)" : "") + "`.";
+    if (PublicAlternatives.empty()) {
+      Hint_ += std::string(" '") + Module + "' has no public " +
+               (K == Kind::Function ? "functions" : "types") +
+               " to use instead.";
+    } else {
+      Hint_ += std::string(" Otherwise, '") + Module + "' offers these public " +
+               (K == Kind::Function ? "functions" : "types") + ": ";
+      size_t Shown = 0;
+      for (const auto &Alt : PublicAlternatives) {
+        if (Shown == 5) {
+          Hint_ += ", ...";
+          break;
+        }
+        Hint_ += (Shown++ ? ", " : "") + Alt;
+      }
+      Hint_ += ".";
+    }
+  }
+};
+
 #endif
