@@ -91,6 +91,15 @@ jobs:
             ccache-${{ runner.os }}-${{ github.ref }}-
             ccache-${{ runner.os }}-
 
+      # Go, before the CMake build, so it finds `go` and builds build/turf (the
+      # front end under cli/, LEC-001). The ASan job below deliberately does NOT
+      # install Go: its CMake configure prints "Go not found" and carries on,
+      # which doubles as the standing proof that the compiler builds without Go.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
       - name: Build Turf Compiler
         run: |
           export CC="ccache gcc"
@@ -105,6 +114,16 @@ jobs:
       # which test_runner.sh (.tr files only) never runs.
       - name: Tool API tests (compiler query facade)
         run: ./build/turf-api-tests
+
+      # LEC-001 stage 2: the `turf` front end (cli/). The Go tests cover argv
+      # classification, discovery order and the version handshake in isolation;
+      # cli_smoke.sh covers what only a real build shows -- byte-identical
+      # passthrough, every subcommand, the mismatch refusal. CI=1 makes a
+      # missing build/turf a failure instead of a SKIP.
+      - name: turf front end (Go vet and unit tests)
+        run: cd cli && go vet ./... && go test ./...
+      - name: turf front end smoke test (passthrough, subcommands, handshake)
+        run: CI=1 ./scripts/cli_smoke.sh
 
       # OPT-001 (docs/development/changes/OPT-001.md, INV-OPT-1): optimization
       # levels must never change a program's observable behaviour. The default

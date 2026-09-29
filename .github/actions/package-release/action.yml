@@ -11,7 +11,7 @@ inputs:
     description: "tar.gz or zip"
     required: true
   extra-files:
-    description: "Newline-separated list of additional files to bundle next to the binary (e.g. DLLs)"
+    description: "Newline-separated list of additional files to bundle next to the binary (e.g. the turf front end build/turf, and DLLs)"
     required: false
     default: ""
 outputs:

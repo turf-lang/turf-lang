@@ -51,6 +51,13 @@ jobs:
           path: external/llama.cpp/build
           key: llama-build-linux-x86_64-${{ steps.llama-sha.outputs.sha }}
 
+      # Go, before the CMake build, so it builds build/turf (the front end under
+      # cli/, LEC-001) beside build/turfc; the archive ships both.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
       - name: Build Turf
         run: |
           chmod +x scripts/cmake_build.sh
@@ -63,6 +70,7 @@ jobs:
           platform-suffix: linux-x86_64
           binary-path: build/turfc
           archive-format: tar.gz
+          extra-files: build/turf
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -98,6 +106,11 @@ jobs:
         run: |
           pacman -Sy --noconfirm --needed base-devel llvm clang cmake openmp git tar
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
       - name: Build Turf
         run: |
           chmod +x scripts/cmake_build.sh
@@ -110,6 +123,7 @@ jobs:
           platform-suffix: linux-arch-x86_64
           binary-path: build/turfc
           archive-format: tar.gz
+          extra-files: build/turf
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -132,6 +146,11 @@ jobs:
           brew install llvm cmake
           echo "$(brew --prefix llvm)/bin" >> $GITHUB_PATH
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
       - name: Build Turf
         run: |
           export PATH="$(brew --prefix llvm)/bin:$PATH"
@@ -145,6 +164,7 @@ jobs:
           platform-suffix: macos-arm64
           binary-path: build/turfc
           archive-format: tar.gz
+          extra-files: build/turf
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -181,11 +201,27 @@ jobs:
           # found"), confirmed live via the v1.0.0-rc1 dry-run release build.
           install: mingw-w64-x86_64-llvm mingw-w64-x86_64-clang mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-llvm-openmp
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+
       - name: Build Turf
         shell: msys2 {0}
         run: |
           chmod +x scripts/cmake_build.sh
           ./scripts/cmake_build.sh --release
+
+      # CMake only builds build/turf.exe if it can find `go` from inside the
+      # MSYS2 shell, and setup-go puts Go on the WINDOWS path, which a default
+      # (`path-type: minimal`) MSYS2 shell does not see. Untested here (no
+      # Windows runner in the authoring session): if this fires, the fix is
+      # `path-type: inherit` on Setup MSYS2 or a separate `go build` step, not
+      # shipping an archive without the front end.
+      - name: Check the turf front end was built
+        shell: msys2 {0}
+        run: |
+          test -f build/turf.exe || { echo "::error::build/turf.exe was not built: CMake did not find Go inside the MSYS2 shell"; exit 1; }
 
       - name: Collect runtime DLL dependencies
         id: dlls
@@ -209,7 +245,11 @@ jobs:
           platform-suffix: windows-x86_64
           binary-path: build/turfc.exe
           archive-format: zip
-          extra-files: ${{ steps.dlls.outputs.list }}
+          # turf.exe has no DLL dependencies (CGO_ENABLED=0 in the CMake target),
+          # so it needs no ldd sweep; it is listed here only to be bundled.
+          extra-files: |
+            build/turf.exe
+            ${{ steps.dlls.outputs.list }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
