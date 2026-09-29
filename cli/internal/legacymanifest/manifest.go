@@ -1,4 +1,8 @@
-package manifest
+// Package legacymanifest is the pre-2.0 turf-cli manifest reader: a
+// line-based `key = "value"` scanner that cannot parse inline tables. It is
+// kept only so the unwired install/update/publish files still compile until
+// LEC-001 stage 6 decides their fate; the 2.0 manifest is internal/manifest.
+package legacymanifest
 
 import (
 	"bufio"

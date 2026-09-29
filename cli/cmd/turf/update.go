@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
+	manifest "github.com/turf-lang/turf-lang/cli/internal/legacymanifest"
 )
 
 func runUpdate(args []string) error {

@@ -14,7 +14,7 @@ import (
 	"github.com/turf-lang/turf-lang/cli/internal/archive"
 	"github.com/turf-lang/turf-lang/cli/internal/checksum"
 	"github.com/turf-lang/turf-lang/cli/internal/config"
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
+	manifest "github.com/turf-lang/turf-lang/cli/internal/legacymanifest"
 )
 
 func runPublish(args []string) error {

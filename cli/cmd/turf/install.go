@@ -15,8 +15,8 @@ import (
 	"github.com/turf-lang/turf-lang/cli/internal/cache"
 	"github.com/turf-lang/turf-lang/cli/internal/checksum"
 	"github.com/turf-lang/turf-lang/cli/internal/config"
+	manifest "github.com/turf-lang/turf-lang/cli/internal/legacymanifest"
 	"github.com/turf-lang/turf-lang/cli/internal/lockfile"
-	"github.com/turf-lang/turf-lang/cli/internal/manifest"
 	"github.com/turf-lang/turf-lang/cli/internal/resolver"
 	"github.com/turf-lang/turf-lang/cli/internal/semver"
 )
