@@ -373,6 +373,34 @@ if(TURF_RT_SANITIZE)
   add_dependencies(turfc turfrt_asan)
 endif()
 
+# ─── The `turf` front end (LEC-001, FREEZE.md 6.16 F-PKG-1) ──────────────────
+# The Go program under cli/, built into build/turf beside build/turfc, stamped
+# with the same TURF_VERSION the compiler was (its handshake refuses a turfc of
+# a different version). Optional on purpose: the compiler and the whole test
+# suite must build with no Go toolchain, so a missing `go` only skips this.
+# Top-level builds only, so turf-lsp's add_subdirectory() never needs Go.
+#
+# The target is named `turf-cli`, NOT `turf`. Under Ninja a phony target named
+# like the file it writes (build/turf) is considered up to date whenever that
+# file exists, and silently never rebuilds. `ALL` is fine: Go's build cache
+# makes a no-op rebuild take milliseconds.
+option(TURF_BUILD_CLI "Build the Go front end (cli/) as build/turf" ON)
+if(TURF_BUILD_CLI AND PROJECT_IS_TOP_LEVEL)
+  find_program(TURF_GO go)
+  if(TURF_GO)
+    add_custom_target(turf-cli ALL
+      COMMAND ${CMAKE_COMMAND} -E env CGO_ENABLED=0
+        ${TURF_GO} build -trimpath
+        -ldflags "-X github.com/turf-lang/turf-lang/cli/internal/version.Version=${TURF_VERSION}"
+        -o "${CMAKE_BINARY_DIR}/turf${CMAKE_EXECUTABLE_SUFFIX}" ./cmd/turf
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/cli"
+      COMMENT "Building the turf front end (Go)"
+      VERBATIM)
+  else()
+    message(STATUS "Go not found: build/turf (the CLI) will not be built; build/turfc is unaffected")
+  endif()
+endif()
+
 # ─── Tool API tests (SMP-001) ────────────────────────────────────────────────
 # Unit tests for the compiler query facade (include/turf/Analysis.h), run by
 # CI next to test_runner.sh. Placed beside `turfc` so the facade finds lib/std
