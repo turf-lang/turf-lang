@@ -763,10 +763,12 @@ tool, last touched 2026-06) writes `turf.toml`/`turf.lock` and installs into
 
    > **Overturned by the owner, 2026-09-30** (`FREEZE.md` §6.16, F-PKG-1):
    > the Go CLI moves into this repository as `cli/` and becomes `turf`; the
-   > compiler is renamed `turfc`. The *why* above survives as constraints:
-   > one tree, one version and one archive for both, a version handshake,
-   > no two programs called `turf`. Entries 2–6 below are frozen as written,
-   > with the details §6.16 adds.
+   > compiler is renamed `turfc`. "No two programs called `turf`" survives.
+   > "One version" does not: a second owner decision the same day made the
+   > two independently versioned, agreeing on a `major.minor` driver
+   > interface that `turfc --version` reports, with `turf` as the user's
+   > tool and `turfc` as the tooling interface. Entries 2–6 below are frozen
+   > as written, with the details §6.16 adds.
 2. **Package layout.**
    ```
    myapp/
@@ -1124,7 +1126,9 @@ driver documented (0 ok, 1 compile error, 2 usage error — decide and
 freeze); unknown flags fail with a suggestion; subcommand dispatch
 (`new/build/run/test/fmt/clean`, LEC-001/REL-002) with `turf <cmd> --help`.
 Since LEC-001's freeze (§6.16) the dispatch lives in the Go CLI `turf`;
-`turfc --version` is what its version handshake reads.
+`turfc --version` line 1 is the compiler's release version and line 2 its
+driver-interface version, which is what `turf` checks (§6.16). The two
+programs' release versions are independent, and `turf version` prints both.
 **Tests** a `scripts/cli_smoke.sh`. **Completion** the smoke passes; README
 shows `turf --version` output.
 
@@ -1498,7 +1502,7 @@ TurfLang 2.0.0 ships only when every line is demonstrated:
 | DEC-5 | Heap allocation surface (FDN-001) | `heap(expr): &T` intrinsic — **decided 2026-09-27** (`FREEZE.md` §6.12) | FDN-001 |
 | DEC-6 | `s[i]` becomes `char` (D17) | Yes, with bounds checks | FDN-004 |
 | DEC-7 | Visibility default and keyword (LEC-002) | Private by default, `pub`/`public` — **decided 2026-09-29** (`FREEZE.md` §6.15) | LEC-002 |
-| DEC-8 | Project tool ownership (LEC-001) | ~~Compiler driver subcommands; `turf-cli` not shipped~~ — **decided otherwise 2026-09-30**: the Go CLI (`cli/`) is `turf`, the compiler is `turfc`, one tree and one version (`FREEZE.md` §6.16, F-PKG-1) | LEC-001 |
+| DEC-8 | Project tool ownership (LEC-001) | ~~Compiler driver subcommands; `turf-cli` not shipped~~ — **decided otherwise 2026-09-30**: the Go CLI (`cli/`) is `turf`, the compiler is `turfc`, independently versioned, agreeing on a driver interface (`FREEZE.md` §6.16, F-PKG-1) | LEC-001 |
 | DEC-9 | Package/module identity and collision rule (LEC-001) | Package root module = package name; collisions are errors — **decided 2026-09-30** (`FREEZE.md` §6.16, F-PKG-2) | LEC-001 |
 | DEC-10 | Pattern syntax (LEC-003) | Top-level `matches expr` unchanged; destructuring forms bind | LEC-003 |
 | DEC-11 | Propagation keyword (LEC-004) | Prefix `try` | LEC-004 |

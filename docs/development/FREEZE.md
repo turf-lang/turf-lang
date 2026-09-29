@@ -429,18 +429,29 @@ initiative). `ROADMAP_v2.0.0.md` LEC-001 entries 2–6 are frozen as
 recommended. Entry 1 (DEC-8, "one binary: project commands in the compiler
 driver, `turf-cli` not shipped") is **overturned by the owner**: the Go CLI
 becomes the `turf` front end and the compiler is renamed `turfc`, both in
-this repository. The roadmap's reasons for one binary are kept as
-constraints on the two (one version, lock-step, no two programs called
-`turf`) rather than dropped. Full account:
-`docs/development/changes/LEC-001.md`.
+this repository. The roadmap's "no two programs called `turf`" is kept.
+**Amended by the owner the same day**: its "one version, lock-step" was
+first kept as "same tree, same version, same archive", and is replaced by
+independent versions plus an interface check (the next bullet and *Driver
+interface* below). Full account: `docs/development/changes/LEC-001.md`.
 
 **The toolchain (F-PKG-1)**
 
-- **Two binaries, one toolchain.** `turf` is the Go program under `cli/`;
-  `turfc` is the compiler (`src/`, today's `build/turf`). Both are built
-  from the same tree, carry the same single-sourced version, and ship in the
-  same release archive (`bin/turf`, `bin/turfc`). Neither has its own
-  release cycle.
+- **Two programs, independently versioned.** `turf` is the Go program under
+  `cli/`; `turfc` is the compiler (`src/`, today's `build/turf`).
+  - Each has its own release version and may grow on its own schedule, for
+    example TurfLang 2.0.0 with CLI 1.0.0. `turf version` shows both.
+  - What must agree is the **driver interface** (below), not the versions.
+  - They live in one repository today. The owner plans to move the CLI out
+    before the public release, which this rule already allows.
+  - A release archive may still bundle both, as a distribution convenience
+    (REL-003).
+- **`turf` is the user's tool; `turfc` is the tooling interface.**
+  - User-facing documentation, help text and diagnostic hints name `turf`
+    (`turf explain E090`, `turf check`).
+  - `turfc` is documented for tool authors (the LSP, editor plugins, build
+    systems) and for the compiler's own test scripts.
+  - Users are never asked to type `turfc`.
 - **The boundary** — the same kind of rule as §6.8's B1/B2/B3:
   - **The compiler owns everything whose answer depends on TurfLang
     source:** parsing, which file an `import` names (every ambiguity and
@@ -477,9 +488,28 @@ constraints on the two (one version, lock-step, no two programs called
   4. `turfc` on `PATH`.
 
   No match is an error with a hint naming `TURF_COMPILER`.
-- **Version handshake.** `turf` runs `turfc --version` before driving it and
-  refuses a compiler whose version differs from its own. The error names
-  both paths and both versions. `TURF_COMPILER` does not bypass the check.
+  Step 3 is how an independently installed `turf` and `turfc` find each
+  other.
+- **Driver interface.** The contract between the two is a versioned
+  interface, `major.minor`, that `turfc` reports on line 2 of
+  `turfc --version` as `interface <major>.<minor>`. Line 1 stays
+  `turfc <release version>`.
+  - It covers exactly what `turf` relies on:
+    - the flags it passes (`--check`, `--module`, `--dump-*`, `--format`,
+      `--write`, `--migrate=`, `--explain`, `-o`, and from stage 4 the
+      package-graph input);
+    - the `--version` format;
+    - the exit statuses (0 success, 1 a reported error);
+    - passthrough of every other argument unchanged.
+  - An additive change (a new flag or input) bumps the minor. Removing or
+    changing the meaning of anything covered bumps the major.
+  - `turf` declares the interface it needs. It drives a `turfc` whose major
+    is equal and whose minor is at least the one it needs.
+  - Before driving the compiler, `turf` checks this and refuses an
+    incompatible compiler. The error names both release versions, both
+    interface versions, both paths, and which side to upgrade.
+    `TURF_COMPILER` does not bypass the check.
+  - A differing *release* version is never an error on its own.
 - **Passthrough.** When the first argument is not a subcommand name,
   `turf <args…>` runs `turfc <args…>` with the arguments, stdout, stderr
   and exit status all unchanged. So `turf file.tr -o x` keeps working
@@ -670,7 +700,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-MEM-5** | A `Stack`-provenance reference (points into the current frame) can never flow into a `return`, a field of a `Param`/`Heap`-owned object, a collection mutator/`operator[]=`, or `heap()`'s own operand — enforced by `EscapePass`, intraprocedurally, with no lifetime syntax. | §6.13 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-002) |
 | **F-STR-1** | `s[i]` on a `string` is `char`, bounds-checked against `strlen(s)` on read (`i < 0` or `i >= strlen(s)` panics); a write checks `i < 0` only, by design — no upper bound, since a `string` under construction has no recoverable capacity to check against. | §6.14 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-004) |
 | **F-VIS-1** | A top-level declaration and a struct field are private to their module unless prefixed `pub`/`public` (synonyms, one token); enum/error variants and machine states follow their type; operators are visible wherever their operand types are; `export immut` is its own `pub`; a `pub` signature may not mention a private type; UFCS and monomorphized clones never bypass or leak visibility; every visibility diagnostic carries a fix-naming hint. | §6.15 above (post-Overhaul: `ROADMAP_v2.0.0.md` LEC-002) |
-| **F-PKG-1** | Two binaries, one toolchain: `turf` (Go, `cli/`) drives, `turfc` compiles; same tree, same version, same archive, version handshake. The compiler owns everything that depends on TurfLang source (import resolution, visibility, capabilities) and never touches the network or the manifest; the CLI owns files, network and reproducibility, never parses TurfLang, and never rewrites a diagnostic; they meet at an explicit package graph. `turf <non-subcommand args>` is `turfc <args>` unchanged. | §6.16 above (owner decision 2026-09-30, overturning `ROADMAP_v2.0.0.md` LEC-001 entry 1 / DEC-8) |
+| **F-PKG-1** | Two independently versioned programs: `turf` (Go, `cli/`) is the user's tool and drives; `turfc` compiles and is the tooling interface (users are never asked to type it). They agree on a `major.minor` driver interface reported by `turfc --version` (same major, minor at least what `turf` needs), not on release versions. The compiler owns everything that depends on TurfLang source (import resolution, visibility, capabilities) and never touches the network or the manifest; the CLI owns files, network and reproducibility, never parses TurfLang, and never rewrites a diagnostic; they meet at an explicit package graph. `turf <non-subcommand args>` is `turfc <args>` unchanged. | §6.16 above (owner decisions 2026-09-30: overturning `ROADMAP_v2.0.0.md` LEC-001 entry 1 / DEC-8, then replacing "same version" with the driver interface) |
 | **F-PKG-2** | A module is (package, path under `src/`). `import foo;` resolves to exactly one of {own module, **direct** dependency's root module, stdlib module}; more than one is a hard error naming every candidate, never silent shadowing, also in single-file mode. Internal modules are package-private. The manifest rejects unknown keys. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entries 2–4, DEC-9) |
 | **F-PKG-3** | Dependencies are `path` or `git` (`tag`/`rev`/`branch`) only; the root's `turf.lock` pins commit + SHA-256, verified on every build; one version per package name; `--offline`, `--locked`. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 5) |
 | **F-PKG-4** | A dependency's `unsafe module;` is honored only if the root manifest's `[unsafe] allow` names it (not transitive); the root package's own modules need no listing; the compiler enforces, the CLI only passes the bit. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 6) |
