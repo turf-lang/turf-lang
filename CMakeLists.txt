@@ -9,6 +9,17 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
 endif()
 
+# ─── Version ─────────────────────────────────────────────────────────────────
+# One source for the whole toolchain: `turfc --version` prints it and the Go
+# front end (cli/) is stamped with it, so the two can never be built at
+# different versions (FREEZE.md 6.16, F-PKG-1). CMAKE_CURRENT_SOURCE_DIR, not
+# CMAKE_SOURCE_DIR: turf-lsp consumes this file through add_subdirectory(),
+# where CMAKE_SOURCE_DIR is turf-lsp's own root and has no VERSION file.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" TURF_VERSION LIMIT_COUNT 1)
+# Re-run configure when VERSION changes; otherwise an edited VERSION would be
+# ignored until something unrelated forced a reconfigure.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+
 # ─── LLVM ────────────────────────────────────────────────────────────────────
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
@@ -356,6 +367,7 @@ endif()
 add_executable(turfc src/main.cpp)
 
 target_link_libraries(turfc PRIVATE turfcore)
+target_compile_definitions(turfc PRIVATE TURF_VERSION="${TURF_VERSION}")
 if(TURF_RT_SANITIZE)
   target_compile_definitions(turfc PRIVATE TURF_RT_ASAN_BUILD)
   add_dependencies(turfc turfrt_asan)

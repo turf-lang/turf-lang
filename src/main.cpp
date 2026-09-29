@@ -69,6 +69,14 @@
 
 using namespace llvm;
 
+// Single-sourced from the repo-root VERSION file by CMakeLists.txt so the
+// compiler and the `turf` front end cannot be built at different versions;
+// a missing definition must stop the build, not print a made-up version that
+// the front end's handshake would then either trust or reject at random.
+#ifndef TURF_VERSION
+#error "TURF_VERSION must be defined by the build (CMakeLists.txt reads it from VERSION)"
+#endif
+
 // OPT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §17.2): the five levels
 // the CLI's `-O` flag selects. Os is not "O1 through O3 plus one more" --
 // it is `PassBuilder::buildPerModuleDefaultPipeline(OptimizationLevel::Os)`,
@@ -90,6 +98,7 @@ struct CompilerOptions {
   bool RunResolver = false;           // --resolve: run Resolver pass (shadow mode, Issue #4)
   bool DumpResolverSymbols = false;   // --dump-resolver-symbols: print symbol table after resolution
   bool DumpResolved = false;          // --dump-resolved: run Resolver then print annotated AST (Issue #5)
+  bool Check = false;                 // --check: LEC-001 -- run every diagnostic, write no output file
   bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
   bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
   bool DumpModules = false;           // --dump-modules: print full module-system introspection
@@ -351,6 +360,12 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.AllowUnsafeModules = true;
     } else if (arg == "--stdlib-warnings") {
       opts.ShowStdlibWarnings = true;
+    } else if (arg == "--check") {
+      opts.Check = true;
+    } else if (arg == "--version") {
+      // Already answered at the top of runCompilerMain(), before any state
+      // exists; accepted here only so it is not reported as an unknown option
+      // if parseArgs() is ever reached by another route.
     } else if (arg == "--dump-ast") {
       opts.DumpAST = true;
     } else if (arg == "--dump-instantiations") {
@@ -445,7 +460,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
            "[--dump-resolved] [--typecheck] [--dump-typechecked] "
            "[--dump-modules] [--dump-instantiations] [--link <libname>] "
            "[--allow-unsafe-modules] [--stdlib-warnings] "
-           "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>]\n"
+           "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>] "
+           "[--check]\n"
            "       turfc --format [--write] <filename.tr>\n"
            "       turfc --migrate=pub [--write] <module.tr>...\n"
            "       turfc --explain E0NN\n";
@@ -865,6 +881,20 @@ static int linkObject(const std::string &ObjFile,
  * @return int Exit code (0 on success, non-zero on compilation failure).
  */
 static int runCompilerMain(int argc, char **argv) {
+  // The `turf` front end runs `turfc --version` before EVERY compile to check
+  // it is driving the compiler it shipped with (FREEZE.md 6.16, F-PKG-1), so
+  // this answers before anything else that costs time or touches global
+  // state (the SLM engine, source files, the install-root lookup).
+  // Line 1 is a contract -- the handshake parses exactly `turfc <version>`;
+  // any later line (LLVM version, runtime ABI, ...) may be added, but never
+  // by changing this one.
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--version") {
+      std::cout << "turfc " << TURF_VERSION << "\n";
+      return 0;
+    }
+  }
+
   CompilerExecutablePath = llvm::sys::fs::getMainExecutable(argv[0], (void *)(intptr_t)runCompilerMain);
 
   handleExplainFlagIfPresent(argc, argv);
@@ -1692,6 +1722,21 @@ static int runCompilerMain(int argc, char **argv) {
   DiagnosticEngine::flushAll();
   if (DiagnosticEngine::hasErrors())
     return 1;
+
+  // --check (LEC-001): `--typecheck`/`--resolve`/the `--dump-*` flags are named
+  // like check modes but all fall through to here and link an executable, so
+  // a check-only mode did not exist -- and the `turf` front end's `check`
+  // needs one that provably writes no file. This is the right return point,
+  // not "right after the TypeChecker": the CFG, definite-assignment, escape
+  // and lint diagnostics are raised inside FuncDefExprAST::codegen() during the
+  // pre-pass above (CodegenFunc.cpp), so every diagnostic a real compile can
+  // print has already been flushed by now. What is left below is only what
+  // needs a runnable program (entry point, runtime bootstrap, optimization,
+  // object emission, link) -- deliberately skipped, which also makes a
+  // library file with no `main` checkable. All --dump-* output prints before
+  // this line, so they combine with --check unchanged.
+  if (opts.Check)
+    return 0;
 
   // Verify that an explicit 'main' function was defined in the primary module
   Function *MainFunc = TheModule->getFunction("main");
