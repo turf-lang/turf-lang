@@ -141,10 +141,12 @@ what 2.0 does that this item builds on.
 - **F-7b A stable Turf-to-Turf binary ABI** (XL). Only needed for binary
   packages; source distribution makes it unnecessary. The stable interop ABI
   is the C ABI.
-- **F-7c Registry, semver ranges, publishing, workspaces** (L). `turf-cli`
-  (separate repository: manifest, lockfile, semver resolver, registry
-  server, checksums) is the starting point; its `turf_modules/` layout must
-  be reconciled with 2.0's cache layout first.
+- **F-7c Registry, semver ranges, publishing, workspaces** (L). The 2.0
+  CLI (`cli/`, the former `turf-cli` repository, `FREEZE.md` §6.16) keeps
+  the pre-2.0 semver resolver and checksum code, and reserves `turf
+  publish`. The registry server stays in the old `turf-cli` repository. Its
+  `turf_modules/` install layout is gone: 2.0 fetches into the
+  `~/.cache/turf/src/` cache.
 
 ### F-11 / F-11b / F-11c — Tooling beyond 2.0's (§27 D11, old item 1)
 

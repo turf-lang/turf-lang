@@ -30,6 +30,8 @@ docs/detailed/modules_and_stdlib.md :: docs/architecture/modules_and_scope_resol
 # --- not been written yet (2026-09-26 closure audit). Same rule as above: each
 # --- line dies, and must be deleted, when the milestone that writes it lands.
 docs/reference/projects_and_packages.md :: docs/planning/ROADMAP_v2.0.0.md :: written by LEC-001 (projects, dependencies, builds).
+docs/reference/projects_and_packages.md :: docs/development/FREEZE.md :: written by LEC-001 stage 8; §6.16 names it as the manifest's key reference.
+docs/reference/projects_and_packages.md :: docs/development/changes/LEC-001.md :: written by LEC-001 stage 8.
 docs/reference/memory_and_safety.md :: docs/planning/ROADMAP_v2.0.0.md :: written by REL-006 (the 2.0 memory-safety statement).
 docs/development/BENCHMARKS.md :: docs/planning/ROADMAP_v2.0.0.md :: written by REL-005 (performance baseline).
 docs/MIGRATING_TO_2.md :: docs/planning/ROADMAP_v2.0.0.md :: written by REL-006 from Part V's compatibility table.

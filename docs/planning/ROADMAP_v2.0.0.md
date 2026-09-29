@@ -29,7 +29,10 @@
 > D13) is done** — see `docs/development/changes/LEC-002.md` (landed
 > 2026-09-29; DEC-7 answered "private by default", with `pub` and `public` as
 > synonyms, frozen as `FREEZE.md` §6.15; `turf --migrate=pub` is the
-> migration). Part I's sequence has the
+> migration). **`LEC-001` is in progress**: stage 1 (freeze, `FREEZE.md`
+> §6.16) landed 2026-09-30, with DEC-8 decided *against* the recommendation
+> (the Go CLI becomes `turf`, the compiler `turfc`) and DEC-9 as
+> recommended; see `docs/development/changes/LEC-001.md`. Part I's sequence has the
 > current state of every Phase 1 item; the rest of Phase 1 and the other
 > Phase 2+ items remain unimplemented. Items marked
 > **DECISION** need an explicit answer from the project owner before their
@@ -757,6 +760,13 @@ tool, last touched 2026-06) writes `turf.toml`/`turf.lock` and installs into
    the reference for the FUTURE registry. *Why:* one version to ship,
    lock-step with the stdlib and runtime it must match, no second toolchain
    (Go) in the release pipeline, no two programs both called `turf`.
+
+   > **Overturned by the owner, 2026-09-30** (`FREEZE.md` §6.16, F-PKG-1):
+   > the Go CLI moves into this repository as `cli/` and becomes `turf`; the
+   > compiler is renamed `turfc`. The *why* above survives as constraints:
+   > one tree, one version and one archive for both, a version handshake,
+   > no two programs called `turf`. Entries 2–6 below are frozen as written,
+   > with the details §6.16 adds.
 2. **Package layout.**
    ```
    myapp/
@@ -1113,6 +1123,8 @@ option"); the version single-sourced from CMake into the binary, the runtime
 driver documented (0 ok, 1 compile error, 2 usage error — decide and
 freeze); unknown flags fail with a suggestion; subcommand dispatch
 (`new/build/run/test/fmt/clean`, LEC-001/REL-002) with `turf <cmd> --help`.
+Since LEC-001's freeze (§6.16) the dispatch lives in the Go CLI `turf`;
+`turfc --version` is what its version handshake reads.
 **Tests** a `scripts/cli_smoke.sh`. **Completion** the smoke passes; README
 shows `turf --version` output.
 
@@ -1163,7 +1175,7 @@ F-11c), REPL.
 | Tier 2 (built and smoke-tested per release, best effort) | **macOS arm64** — only if the runtime port (AAPCS64 callee-saved `x19–x28`, `fp`, `d8–d15`; stack bounds via `pthread_get_stackaddr_np`; no `/proc`) lands and passes `gc_smoke.sh` + FDN-005's stress mode; otherwise not shipped. |
 | Windows | **Not in 2.0** (FUTURE F-20b): Win64 callee-saved set (`rbx rbp rdi rsi r12–r15 xmm6–15`), stack limits via `GetCurrentThreadStackLimits`, MinGW vs MSVC toolchain, `libm`/`-l` differences. |
 | Cross-compilation (D20) | `--target` produces an **object file** for any LLVM triple; linking for a non-host triple fails with a TurfLang diagnostic ("cross-linking is not supported in 2.0; the runtime is built for <host>") instead of a host-linker error. Full cross-linking needs per-target runtime archives — FUTURE F-20. |
-| Install layout | `turf-<ver>-<platform>/{bin/turf, lib/libturfrt.a, lib/std/**, share/turf/examples/**, LICENSE, README.md}`; `TURF_HOME` optional (binary-relative discovery already works); `lib/usr` is retired in favour of LEC-001's cache. |
+| Install layout | `turf-<ver>-<platform>/{bin/turf, bin/turfc, lib/libturfrt.a, lib/std/**, share/turf/examples/**, LICENSE, README.md}`; `TURF_HOME` optional (binary-relative discovery already works); `lib/usr` is retired in favour of LEC-001's cache. |
 | Channels | GitHub release archives + SHA-256 (exists); an `install.sh` that verifies the checksum; Homebrew/Scoop/AUR recipes updated only for shipped platforms (their repos are at v0.6.0 today). |
 
 **Stages** (1) Tier-1 archive in the new layout + `install.sh` + a clean-VM
@@ -1486,8 +1498,8 @@ TurfLang 2.0.0 ships only when every line is demonstrated:
 | DEC-5 | Heap allocation surface (FDN-001) | `heap(expr): &T` intrinsic — **decided 2026-09-27** (`FREEZE.md` §6.12) | FDN-001 |
 | DEC-6 | `s[i]` becomes `char` (D17) | Yes, with bounds checks | FDN-004 |
 | DEC-7 | Visibility default and keyword (LEC-002) | Private by default, `pub`/`public` — **decided 2026-09-29** (`FREEZE.md` §6.15) | LEC-002 |
-| DEC-8 | Project tool ownership (LEC-001) | Compiler driver subcommands; `turf-cli` not shipped | LEC-001 |
-| DEC-9 | Package/module identity and collision rule (LEC-001) | Package root module = package name; collisions are errors | LEC-001 |
+| DEC-8 | Project tool ownership (LEC-001) | ~~Compiler driver subcommands; `turf-cli` not shipped~~ — **decided otherwise 2026-09-30**: the Go CLI (`cli/`) is `turf`, the compiler is `turfc`, one tree and one version (`FREEZE.md` §6.16, F-PKG-1) | LEC-001 |
+| DEC-9 | Package/module identity and collision rule (LEC-001) | Package root module = package name; collisions are errors — **decided 2026-09-30** (`FREEZE.md` §6.16, F-PKG-2) | LEC-001 |
 | DEC-10 | Pattern syntax (LEC-003) | Top-level `matches expr` unchanged; destructuring forms bind | LEC-003 |
 | DEC-11 | Propagation keyword (LEC-004) | Prefix `try` | LEC-004 |
 | DEC-12 | Payload + message coexistence (LEC-004) | N fields or N+1 with trailing message | LEC-004 |

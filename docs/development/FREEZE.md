@@ -421,6 +421,205 @@ initiative. Full account: `docs/development/changes/LEC-002.md`.
 - **Non-goals:** `pub(package)`/`protected`, friend modules, per-variant
   visibility, private top-level constants.
 
+### 6.16 Projects, packages and the toolchain — FROZEN (LEC-001, 2026-09-30)
+
+Recorded on the project owner's explicit instruction to start LEC-001 with
+the freeze entry (§6.0 rule 3's explicit request, not a session's own
+initiative). `ROADMAP_v2.0.0.md` LEC-001 entries 2–6 are frozen as
+recommended. Entry 1 (DEC-8, "one binary: project commands in the compiler
+driver, `turf-cli` not shipped") is **overturned by the owner**: the Go CLI
+becomes the `turf` front end and the compiler is renamed `turfc`, both in
+this repository. The roadmap's reasons for one binary are kept as
+constraints on the two (one version, lock-step, no two programs called
+`turf`) rather than dropped. Full account:
+`docs/development/changes/LEC-001.md`.
+
+**The toolchain (F-PKG-1)**
+
+- **Two binaries, one toolchain.** `turf` is the Go program under `cli/`;
+  `turfc` is the compiler (`src/`, today's `build/turf`). Both are built
+  from the same tree, carry the same single-sourced version, and ship in the
+  same release archive (`bin/turf`, `bin/turfc`). Neither has its own
+  release cycle.
+- **The boundary** — the same kind of rule as §6.8's B1/B2/B3:
+  - **The compiler owns everything whose answer depends on TurfLang
+    source:** parsing, which file an `import` names (every ambiguity and
+    collision error), visibility, the internal-module rule, and the
+    `unsafe module;` capability check. `turfc` never touches the network,
+    never reads `turf.toml` or `turf.lock`, and never searches for them.
+  - **The CLI owns everything about files, network and reproducibility:**
+    the manifest, dependency fetching, the cache, the lockfile, hashing,
+    `--offline`/`--locked`, and running the built executable. `turf` never
+    parses TurfLang source, never decides which module an import names, and
+    never re-renders or rewrites a compiler diagnostic.
+  - **They meet at an explicit package graph** that `turf` passes to
+    `turfc`. For each package it gives the name, the source root, the names
+    and roots of its **direct** dependencies, and whether its `unsafe
+    module;` declarations are honored. The concrete form (repeated flags or
+    a plan file) is an engineering judgement for the stage that implements
+    it. `turfc` given no graph is in single-file mode.
+- **`turfc` stays a complete compiler on its own.** Every `turf` command is
+  one or more `turfc` invocations plus file and network work. The CLI adds
+  convenience, never a compiler capability. Test scripts, the SLM Sandbox
+  and the LSP keep using the compiler (or the SMP-001 facade) directly.
+- **The one exception to "turfc never looks for a manifest":** when an
+  `import` fails to resolve in single-file mode and a `turf.toml` exists in
+  the source file's directory or an ancestor, the not-found diagnostic adds
+  a hint naming `turf build`. The file is only checked for existence, never
+  read.
+- **Finding the compiler**, first match wins:
+  1. `$TURF_COMPILER` (the variable `scripts/test_runner.sh` and CI already
+     use for exactly this).
+  2. `turfc` in the directory of the running `turf` executable, with
+     symlinks resolved. This is the installed layout and the dev layout
+     (`build/turf` beside `build/turfc`).
+  3. `$TURF_HOME/bin/turfc`.
+  4. `turfc` on `PATH`.
+
+  No match is an error with a hint naming `TURF_COMPILER`.
+- **Version handshake.** `turf` runs `turfc --version` before driving it and
+  refuses a compiler whose version differs from its own. The error names
+  both paths and both versions. `TURF_COMPILER` does not bypass the check.
+- **Passthrough.** When the first argument is not a subcommand name,
+  `turf <args…>` runs `turfc <args…>` with the arguments, stdout, stderr
+  and exit status all unchanged. So `turf file.tr -o x` keeps working
+  exactly as it does today. Exceptions: `--version` and `--help`/`-h` are
+  the CLI's own; a bare word that neither starts with `-` nor ends in `.tr`
+  is an unknown command, reported with a spelling suggestion rather than
+  passed to the compiler as a missing file.
+- **Command surface for 2.0** (names frozen; each command's options are
+  engineering judgement, recorded in the change record):
+  - **Any file, no manifest needed:** `compile`, `run <file>`, `check`,
+    `fmt`, `explain`, `migrate`, `dump`, `version`, `help`. Flags `compile`
+    does not recognise are forwarded to `turfc` unchanged, so a new compiler
+    flag works through `turf` the day it lands.
+  - **Project:** `new`, `init`, `build`, `run`, `test` (REL-002), `clean`,
+    `fetch`, `add`, `remove`, `update`. `run` without a file argument means
+    the project.
+  - **`publish`** is reserved. In 2.0 it exits non-zero with a message
+    saying the registry is FUTURE F-7c.
+  - The pre-2.0 `turf-cli` command `install` is **not** a 2.0 command: what
+    it did is `fetch`, and `install` is left free for installing a built
+    program later (FUTURE).
+- **Exit status.** `turf compile`/`check`/passthrough return `turfc`'s
+  status unchanged; `turf run` returns the program's. Codes for the CLI's
+  own failures (usage, manifest, fetch) are REL-001's decision.
+
+**Layout, manifest and module resolution (F-PKG-2)**
+
+- **Package layout** (roadmap entry 2):
+  ```
+  myapp/
+    turf.toml          # manifest
+    turf.lock          # generated by turf; committed
+    src/main.tr        # present => the package builds an executable
+    src/<name>.tr      # present => the package is a library; its root module
+    src/**.tr          # internal modules
+    tests/*.tr         # `turf test` (REL-002)
+  ```
+  A package may have both entry files. Only a package with a root module
+  can be a dependency; depending on one without it is a build-time error.
+- **Manifest** (roadmap entry 3): `turf.toml`, read by `turf` with a real
+  TOML parser; the accepted keys are documented in
+  `docs/reference/projects_and_packages.md`.
+  - `[package]` requires `name` and `version`. `turf` is optional and gives
+    a minimum compiler version whose major must match.
+  - `name` must be a valid TurfLang identifier and not a reserved word,
+    because it is spelled in `import`.
+  - `[dependencies]` entries are inline tables: `{ path = "…" }`, or
+    `{ git = "…", tag = "…" }` with exactly one of `tag`, `rev` or `branch`.
+    A registry-style string entry (`math = "^1.2.0"`) is an error whose hint
+    points to `path`/`git` (registries are F-7c).
+  - `[unsafe] allow` is covered under F-PKG-4 below.
+  - An **unknown key or table is an error**, not ignored, for the same
+    reason a stray `pub` is (§6.15): a silently-ignored setting is how a
+    typo becomes a policy. Pre-2.0 `turf-cli` manifests (flat `name =`,
+    string versions) are not accepted; that tool never shipped, so there is
+    nothing to migrate.
+- **Module identity** (roadmap entry 4, DEC-9) is **(package, path under
+  `src/`)**. Two packages' internal `util.tr` are two modules, and their
+  types are distinct under F-TYPE-1 (§6.11), whose module component becomes
+  package-qualified where needed. In single-file mode the package is
+  implicit and identities are exactly as today.
+- **Import resolution in a package-graph build.** From a module of package
+  P, `import foo;` looks for:
+  - (a) P's own module named `foo`: `src/**/foo.tr`. More than one match is
+    itself an ambiguity.
+  - (b) A **direct** dependency of P named `foo`, meaning its root module.
+    Transitive dependencies are not importable; to use one, P lists it
+    itself.
+  - (c) The stdlib module `foo`.
+
+  Exactly one of (a)/(b)/(c) must exist. **More than one is a hard error
+  naming every candidate by path and kind** (own module / dependency /
+  stdlib), with a hint naming the fix. There is never silent shadowing and
+  never "own wins". `import foo::bar` resolves `foo` by the same rule.
+  `lib/usr/**`, the source file's directory and the cwd are **not**
+  searched.
+- **Internal modules are package-private.** From outside its package, only a
+  package's root module is reachable, so an internal module's `pub` items
+  are visible within the package only (§6.15's two levels).
+- **Names that could never be imported are rejected early:**
+  - When the manifest is read, a dependency whose name equals a stdlib
+    module name is an error.
+  - So is a library package whose own name equals one (`turf new`/`init`
+    refuse it, and so does `turf build`).
+- **Single-file mode** keeps today's search order (install stdlib →
+  `lib/usr` → source directory → cwd) but examines **every** root, and more
+  than one distinct file (by canonical path) is the same ambiguity error.
+  The silent stdlib shadow (audit F-19) becomes an error (R1, safe). The
+  same file reached twice, for example when the source directory is the
+  cwd, is one candidate, not two. `lib/usr` stays in single-file mode until
+  REL-003 retires it.
+
+**Fetching and reproducibility (F-PKG-3)** (roadmap entry 5)
+
+- **Sources in 2.0 are `path` and `git` only.** Git is invoked through the
+  system `git` binary. Fetched trees live under
+  `<os.UserCacheDir()>/turf/src/<name>-<commit>/` (Linux:
+  `$XDG_CACHE_HOME/turf/…`, default `~/.cache/turf/…`). The cache is
+  disposable: deleting it only costs a re-fetch.
+- **`turf.lock` belongs to the root package only**; a dependency's own
+  `turf.lock` is ignored.
+  - A git entry records the package name, the source URL, the requested
+    ref, the resolved commit, and the SHA-256 of the fetched tree (VCS
+    metadata excluded, paths sorted, independent of mtimes and
+    permissions).
+  - A path entry records the name and path, with no hash: a path dependency
+    is live source.
+- **The hash is verified on every build**; a mismatch is a hard error (tamper
+  or cache corruption) that names the package and the cache path.
+- **`turf build` fetches as needed.** `turf fetch` resolves, fetches and
+  locks without compiling.
+  - `--offline` never touches the network, and a missing cache entry is an
+    error.
+  - `--locked` fails if the lockfile would change.
+  - `turf update [name]` is the only command that moves a `branch`
+    dependency, or re-resolves a `tag` that has moved, to a new commit.
+- **One version per package name.** Two routes to the same name with
+  different sources or commits (a diamond that disagrees) is a hard error
+  naming both requirers. There is no multi-version support.
+
+**Capabilities across packages (F-PKG-4)** (roadmap entry 6)
+
+- A dependency's `unsafe module;` declaration is honored only if the **root**
+  manifest's `[unsafe] allow` lists that dependency by name. Listing is not
+  transitive: the root names every package, direct or indirect, that needs
+  it. A name in `allow` that is not in the graph is an error.
+- **The root package's own modules are honored without listing.** The
+  manifest's author is the author of that code;
+  `--allow-unsafe-modules` exists for the case with no manifest to express
+  consent. `lib/std` stays unconditional (install root, INV-CAP-1).
+- The CLI never inspects source for `unsafe module;`: it passes each
+  package's allow bit in the graph, and the compiler enforces it with its
+  existing capability check (`HasRawPointerCapability`), made per-package.
+
+**Non-goals:** registry, `publish`, semver ranges (F-7c); workspaces; build
+scripts; separate compilation (F-7a); binary packages and a Turf ABI
+(F-7b); per-package compiler flags; dependency renaming; multiple versions
+of one package; `pub(package)`; path-qualified imports of internal modules
+(`import a::b` keeps its existing meaning, a symbol import).
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -471,6 +670,10 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-MEM-5** | A `Stack`-provenance reference (points into the current frame) can never flow into a `return`, a field of a `Param`/`Heap`-owned object, a collection mutator/`operator[]=`, or `heap()`'s own operand — enforced by `EscapePass`, intraprocedurally, with no lifetime syntax. | §6.13 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-002) |
 | **F-STR-1** | `s[i]` on a `string` is `char`, bounds-checked against `strlen(s)` on read (`i < 0` or `i >= strlen(s)` panics); a write checks `i < 0` only, by design — no upper bound, since a `string` under construction has no recoverable capacity to check against. | §6.14 above (post-Overhaul: `ROADMAP_v2.0.0.md` FDN-004) |
 | **F-VIS-1** | A top-level declaration and a struct field are private to their module unless prefixed `pub`/`public` (synonyms, one token); enum/error variants and machine states follow their type; operators are visible wherever their operand types are; `export immut` is its own `pub`; a `pub` signature may not mention a private type; UFCS and monomorphized clones never bypass or leak visibility; every visibility diagnostic carries a fix-naming hint. | §6.15 above (post-Overhaul: `ROADMAP_v2.0.0.md` LEC-002) |
+| **F-PKG-1** | Two binaries, one toolchain: `turf` (Go, `cli/`) drives, `turfc` compiles; same tree, same version, same archive, version handshake. The compiler owns everything that depends on TurfLang source (import resolution, visibility, capabilities) and never touches the network or the manifest; the CLI owns files, network and reproducibility, never parses TurfLang, and never rewrites a diagnostic; they meet at an explicit package graph. `turf <non-subcommand args>` is `turfc <args>` unchanged. | §6.16 above (owner decision 2026-09-30, overturning `ROADMAP_v2.0.0.md` LEC-001 entry 1 / DEC-8) |
+| **F-PKG-2** | A module is (package, path under `src/`). `import foo;` resolves to exactly one of {own module, **direct** dependency's root module, stdlib module}; more than one is a hard error naming every candidate, never silent shadowing, also in single-file mode. Internal modules are package-private. The manifest rejects unknown keys. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entries 2–4, DEC-9) |
+| **F-PKG-3** | Dependencies are `path` or `git` (`tag`/`rev`/`branch`) only; the root's `turf.lock` pins commit + SHA-256, verified on every build; one version per package name; `--offline`, `--locked`. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 5) |
+| **F-PKG-4** | A dependency's `unsafe module;` is honored only if the root manifest's `[unsafe] allow` names it (not transitive); the root package's own modules need no listing; the compiler enforces, the CLI only passes the bit. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 6) |
 
 ---
 
