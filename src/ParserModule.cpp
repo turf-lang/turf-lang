@@ -26,9 +26,11 @@
 #include "SuggestionIndex.h"
 #include "SymbolTable.h"
 #include "ParserInternal.h"
+#include "PackageGraph.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -39,6 +41,30 @@
 #include <vector>
 
 static std::unordered_set<std::string> ImportedFiles;
+
+// LEC-001 stage 4 (FREEZE.md 6.16, F-PKG-2): the file currently being
+// parsed's `import` spellings whose module identity differs from the
+// spelling -- a dependency package's modules, keyed `<package>/<path>` (see
+// ModuleCandidate::Key). The file writes `util::f()`; every later pass must
+// see the identity, because two packages may each have a `util`.
+//
+// Rewriting at parse time, in the three places a module qualifier is read
+// (ModuleKeyFor()), is what keeps the Resolver, TypeChecker, Monomorphizer
+// and Codegen unchanged: they already treat a module name as an identity, so
+// giving them an identity is the whole fix. The alternative -- every
+// module-name lookup downstream consulting a per-file alias table -- touches
+// every `hasModule()`/type-identity site and is exactly the kind of change
+// that misses one.
+//
+// Per file: ParseFile() saves the importer's map and starts the imported
+// file with an empty one (LexerStateGuard), and ParsePreludeImports() clears
+// it at the start of each top-level parse pass.
+static std::map<std::string, std::string> CurrentFileModuleAliases;
+
+const std::string &ModuleKeyFor(const std::string &Spelled) {
+  auto It = CurrentFileModuleAliases.find(Spelled);
+  return It == CurrentFileModuleAliases.end() ? Spelled : It->second;
+}
 
 // Tracks the chain of modules currently being parsed (not yet finished) so a
 // circular `import` (A -> B -> ... -> A) can be reported as a real
@@ -379,8 +405,14 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     // subsequent parsing must not inherit a bracket-depth counter left
     // mid-count by this file's abandoned parse.
     int SavedBraceDepth;
+    // LEC-001 stage 4: the importing file's module aliases. An imported file
+    // has its own imports; it must neither see the importer's aliases nor
+    // leave its own behind for the importer's remaining tokens.
+    std::map<std::string, std::string> SavedModuleAliases;
 
     LexerStateGuard() {
+      SavedModuleAliases = std::move(CurrentFileModuleAliases);
+      CurrentFileModuleAliases.clear();
       SavedSourceFile = SourceFile;
       SavedLastChar = GetLastChar();
       SavedCurTok = CurTok;
@@ -413,6 +445,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       StringVal = SavedStringVal;
       SourceLines = SavedSourceLines;
       g_braceDepth = SavedBraceDepth;
+      CurrentFileModuleAliases = std::move(SavedModuleAliases);
     }
   } LGuard;
 
@@ -684,7 +717,20 @@ bool HasRawPointerCapability(const std::string &Path) {
     return false;
   if (!UnsafeModuleFiles.count(CanonicalOrOriginal(Path)))
     return false;
-  return IsPathUnderInstallRoot(Path) || g_AllowUnsafeModules;
+  if (IsPathUnderInstallRoot(Path))
+    return true;
+  // LEC-001 stage 4 (FREEZE.md 6.16, F-PKG-4): in a package build the
+  // capability is per package -- the graph's allow bit, which the driver sets
+  // for the root package and for each dependency the root manifest lists
+  // under [unsafe] allow. The global --allow-unsafe-modules would otherwise
+  // grant it to every dependency at once, which is exactly the consent the
+  // per-package rule exists to make explicit. So in a package build that
+  // flag is not consulted at all.
+  if (g_PackageGraph.Active) {
+    const PackageInfo *P = g_PackageGraph.packageOf(Path);
+    return P && P->AllowUnsafe;
+  }
+  return g_AllowUnsafeModules;
 }
 
 // LANG-002: called as the very first thing after a top-level parse loop's
@@ -767,10 +813,11 @@ IndexModuleDir(const std::string &Root, const char *SubdirName) {
 
 namespace {
 
-// Where a module candidate was found. The order is the search order the
-// resolver used before LEC-001 stage 3, kept so the candidate list reads the
-// same way the old precedence did.
-enum class ModuleRootKind { Stdlib, Installed, Sibling, Cwd };
+// Where a module candidate was found. Single-file mode uses the first four,
+// in the search order the resolver used before LEC-001 stage 3, kept so the
+// candidate list reads the same way the old precedence did. A package-graph
+// build (stage 4) uses Stdlib, OwnModule and Dependency only.
+enum class ModuleRootKind { Stdlib, Installed, Sibling, Cwd, OwnModule, Dependency };
 
 struct ModuleCandidate {
   ModuleRootKind Kind;
@@ -780,9 +827,125 @@ struct ModuleCandidate {
   // ImportedFiles/ImportStack, so it must not change spelling just because
   // the search stopped short-circuiting.
   std::string Path;
+  // The module's identity (FREEZE.md 6.16 F-PKG-2: a module is (package,
+  // path under src/)). Empty means "the spelled name", which is right for the
+  // stdlib, for single-file mode and for the root package's own modules --
+  // none of them can collide, because a collision among them is already an
+  // E090 at the import. A dependency package's module gets
+  // `<package>/<path under src/ without .tr>` instead: two packages may each
+  // have an internal `util`, and the root may have its own, and those must be
+  // three modules with three sets of types. `/` cannot appear in a spelled
+  // module name, so no key can ever equal one.
+  std::string Key;
+  // For a Dependency / OwnModule candidate: the package it belongs to.
+  std::string Package;
 };
 
 } // namespace
+
+bool IsStdlibModuleName(const std::string &Name) {
+  return IndexModuleDir(TurfInstallRoot(), "std").count(Name) > 0;
+}
+
+// Every `.tr` file under a package's src/, by stem, keeping EVERY path for a
+// stem: within a package, `import util;` means `src/**/util.tr`, and two such
+// files are an ambiguity (E090), not "the first one the directory walk
+// happened to return". Cached per root for the compiler invocation, like
+// IndexModuleDir(), since every import in the package consults it.
+static const std::map<std::string, std::vector<std::string>> &
+IndexPackageSources(const std::string &SrcRoot) {
+  static std::map<std::string, std::map<std::string, std::vector<std::string>>> Cache;
+  auto Cached = Cache.find(SrcRoot);
+  if (Cached != Cache.end())
+    return Cached->second;
+  std::map<std::string, std::vector<std::string>> Index;
+  std::error_code EC;
+  for (llvm::sys::fs::recursive_directory_iterator I(SrcRoot, EC), E; !EC && I != E;
+       I.increment(EC)) {
+    if (I->type() == llvm::sys::fs::file_type::regular_file &&
+        llvm::sys::path::extension(I->path()) == ".tr")
+      Index[llvm::sys::path::stem(I->path()).str()].push_back(I->path());
+  }
+  for (auto &KV : Index)
+    std::sort(KV.second.begin(), KV.second.end()); // deterministic candidate order
+  return Cache.emplace(SrcRoot, std::move(Index)).first->second;
+}
+
+// `<package>/<path under src/ without .tr>`, the identity of a dependency
+// package's module (see ModuleCandidate::Key).
+static std::string DependencyModuleKey(const PackageInfo &Pkg, const std::string &Path) {
+  llvm::SmallString<256> Canonical;
+  std::string P = llvm::sys::fs::real_path(Path, Canonical) ? Path : Canonical.str().str();
+  std::string Rel = P.substr(std::min(P.size(), Pkg.SrcRoot.size() + 1));
+  if (Rel.size() > 3 && Rel.compare(Rel.size() - 3, 3, ".tr") == 0)
+    Rel.resize(Rel.size() - 3);
+  std::replace(Rel.begin(), Rel.end(), '\\', '/');
+  return Pkg.Name + "/" + Rel;
+}
+
+// A package-graph build (LEC-001 stage 4, F-PKG-2): from a module of package
+// P, `import m;` may name (a) P's own `src/**/m.tr`, (b) the root module of a
+// DIRECT dependency of P named m, or (c) the stdlib module m -- and nothing
+// else. lib/usr, the importing file's directory and the cwd are not searched:
+// a package build depends on the graph and nothing ambient.
+static std::vector<ModuleCandidate>
+CollectPackageModuleCandidates(const std::string &ModuleName, const PackageInfo &P) {
+  std::vector<ModuleCandidate> Found;
+  const bool IsRoot = P.Name == g_PackageGraph.Root;
+
+  const auto &StdIndex = IndexModuleDir(TurfInstallRoot(), "std");
+  if (auto It = StdIndex.find(ModuleName); It != StdIndex.end())
+    Found.push_back({ModuleRootKind::Stdlib, It->second, "", ""});
+
+  const auto &Own = IndexPackageSources(P.SrcRoot);
+  if (auto It = Own.find(ModuleName); It != Own.end())
+    for (const auto &Path : It->second)
+      Found.push_back({ModuleRootKind::OwnModule, Path,
+                       IsRoot ? "" : DependencyModuleKey(P, Path), P.Name});
+
+  if (std::find(P.Deps.begin(), P.Deps.end(), ModuleName) != P.Deps.end()) {
+    const PackageInfo *D = g_PackageGraph.find(ModuleName);
+    llvm::SmallString<256> RootModule(D->SrcRoot);
+    llvm::sys::path::append(RootModule, ModuleName + ".tr");
+    Found.push_back({ModuleRootKind::Dependency, RootModule.str().str(),
+                     DependencyModuleKey(*D, RootModule.str().str()), D->Name});
+  }
+  return Found;
+}
+
+// Why `import m;` found nothing in a package build although a file for `m`
+// exists somewhere in the graph -- the two rules that make a module
+// unreachable rather than missing. Returns false when m is simply not there.
+static bool ExplainUnreachableModule(const std::string &ModuleName, const PackageInfo &P,
+                                     SourceLocation Loc) {
+  // A package in the build, but not one P may import: a transitive
+  // dependency, or a package only some other package depends on.
+  if (const PackageInfo *Q = g_PackageGraph.find(ModuleName)) {
+    std::vector<std::string> Requirers;
+    for (const auto &Other : g_PackageGraph.Packages)
+      if (std::find(Other.Deps.begin(), Other.Deps.end(), ModuleName) != Other.Deps.end())
+        Requirers.push_back(Other.Name);
+    ModuleNotImportableError::notADirectDependency(Loc, P.Name, Q->Name, Requirers).raise();
+    return true;
+  }
+  // An internal module of some other package: only a package's root module
+  // is importable from outside it (FREEZE.md 6.16, F-PKG-2).
+  for (const auto &Q : g_PackageGraph.Packages) {
+    if (Q.Name == P.Name)
+      continue;
+    const auto &Idx = IndexPackageSources(Q.SrcRoot);
+    auto It = Idx.find(ModuleName);
+    if (It == Idx.end())
+      continue;
+    llvm::SmallString<256> Canonical;
+    std::string Shown = llvm::sys::fs::real_path(It->second.front(), Canonical)
+                            ? It->second.front()
+                            : Canonical.str().str();
+    ModuleNotImportableError::internalModule(Loc, ModuleName, P.Name, Q.Name, Shown).raise();
+    return true;
+  }
+  return false;
+}
 
 // An import written inside the standard library resolves in the standard
 // library only. The stdlib is one package (FREEZE.md 6.16, F-PKG-2: a package
@@ -826,8 +989,17 @@ CollectModuleCandidates(const std::string &ModuleName,
       if (S == Key)
         return;
     SeenCanonical.push_back(Key);
-    Found.push_back({Kind, Path});
+    Found.push_back({Kind, Path, "", ""});
   };
+
+  // A package-graph build resolves against the graph only (stage 4). An
+  // importer in no package -- only reachable through a path the graph does
+  // not describe -- gets the stdlib and nothing ambient.
+  if (g_PackageGraph.Active && !StdlibOnly) {
+    if (const PackageInfo *P = g_PackageGraph.packageOf(ImportingFile))
+      return CollectPackageModuleCandidates(ModuleName, *P);
+    StdlibOnly = true;
+  }
 
   std::string Root = TurfInstallRoot();
   const auto &StdIndex = IndexModuleDir(Root, "std");
@@ -883,6 +1055,10 @@ DescribeModuleCandidate(const ModuleCandidate &C, const std::string &ImportingFi
     return {"next to " + llvm::sys::path::filename(ImportingFile).str(), Shown, false};
   case ModuleRootKind::Cwd:
     return {"current directory", Shown, false};
+  case ModuleRootKind::OwnModule:
+    return {"module of package '" + C.Package + "'", Shown, false};
+  case ModuleRootKind::Dependency:
+    return {"dependency '" + C.Package + "'", Shown, false, true};
   }
   return {"", Shown, false};
 }
@@ -992,6 +1168,15 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
       StdlibOnly || ImportsResolveInStdlibOnly(ImportingFile));
 
   if (Candidates.empty()) {
+    // In a package build a module that exists somewhere in the graph but is
+    // out of this package's reach is E091, with the rule that forbids it --
+    // "could not find module" would send the user looking for a file that
+    // is already there.
+    if (g_PackageGraph.Active && !StdlibOnly) {
+      if (const PackageInfo *P = g_PackageGraph.packageOf(ImportingFile))
+        if (ExplainUnreachableModule(ModuleName, *P, NameLoc.Line > 0 ? NameLoc : Loc))
+          return nullptr;
+    }
     ModuleNotFoundError(Loc, ModuleName).raise();
     return nullptr;
   }
@@ -1005,8 +1190,16 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
   }
 
   const std::string ResolvedPath = Candidates.front().Path;
+  // The module's identity: the spelling, except for a dependency package's
+  // modules (ModuleCandidate::Key). From here on only the identity is used --
+  // it is what the ModuleImportExprAST carries, and what this file's later
+  // `util::` qualifiers are rewritten to (ModuleKeyFor()).
+  const std::string Identity =
+      Candidates.front().Key.empty() ? ModuleName : Candidates.front().Key;
+  if (Identity != ModuleName)
+    CurrentFileModuleAliases[ModuleName] = Identity;
   size_t DiagCountBefore = DiagnosticEngine::getDiagnosticCount();
-  std::unique_ptr<ExprAST> Block = ParseFile(ResolvedPath, ModuleName, Loc);
+  std::unique_ptr<ExprAST> Block = ParseFile(ResolvedPath, Identity, Loc);
   if (!Block) {
     // Found on disk but not parsed. Usually a syntax error inside it, already
     // reported there -- adding "module not found" on top would contradict the
@@ -1017,7 +1210,7 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
     return nullptr;
   }
 
-  return std::make_unique<ModuleImportExprAST>(Loc, ModuleName, NameLoc, ResolvedPath,
+  return std::make_unique<ModuleImportExprAST>(Loc, Identity, NameLoc, ResolvedPath,
                                                 std::move(Block), Mode,
                                                 std::move(RequestedSymbols));
 }
@@ -1129,6 +1322,13 @@ bool ClaimEntryFileImportSlot(const std::string &EntryPath) {
 // is an internal compiler error, not a user-facing diagnostic.
 std::vector<std::unique_ptr<ExprAST>> ParsePreludeImports(SourceLocation Loc) {
   std::vector<std::unique_ptr<ExprAST>> Result;
+
+  // LEC-001 stage 4: this runs once at the start of every top-level parse
+  // pass, in both drivers (main.cpp's two passes, the analysis facade), so it
+  // is where the entry file starts with no module aliases -- the previous
+  // pass's, or a previous analysis's program's, must not rewrite this one's
+  // qualifiers.
+  CurrentFileModuleAliases.clear();
 
   // A top-level file that IS one of these prelude modules itself (e.g.
   // compiling lib/std/char.tr directly -- `turf lib/std/char.tr`, or the

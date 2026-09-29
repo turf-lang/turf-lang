@@ -386,7 +386,9 @@ TurfTypePtr ParseType() {
       SyntaxError(CurLoc, "Expected a type name after '::'").raise();
       return nullptr;
     }
-    ModuleQualifier = BaseName;
+    // LEC-001 stage 4: the qualifier as written may be an alias for a
+    // dependency module's identity (ModuleKeyFor(), ParserModule.cpp).
+    ModuleQualifier = ModuleKeyFor(BaseName);
     BaseName = IdentifierStr;
     getNextToken();
   }
@@ -686,6 +688,13 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       std::string RightName = IdentifierStr;
       SourceLocation RightLoc = CurLoc;
       getNextToken(); // eat right-hand name
+
+      // LEC-001 stage 4: if `IdName` is this file's spelling of a dependency
+      // module, every consumer below (the ScopeAccessExprAST, including the
+      // 3-part `Module::Enum::Variant` chain's qualifier) must see its
+      // identity. Only imported module spellings are ever aliased, so an
+      // enum or struct name passes through unchanged.
+      IdName = ModuleKeyFor(IdName);
 
       // Same removed-syntax hint as the bare form above, for the qualified
       // `Module::StructName { ... }` spelling -- looked up by the identity

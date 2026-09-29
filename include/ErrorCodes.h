@@ -207,6 +207,11 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // LEC-001 stage 3: `import m;` matches more than one file across the
     // module search roots (never silent shadowing, FREEZE.md 6.16 F-PKG-2).
     {"E090", "AmbiguousModuleError", "Ambiguous module import", SLM::ErrorCategory::DECLARATION},
+
+    // LEC-001 stage 4: in a package build, `import m;` names a module that
+    // exists but that this package may not import (a transitive dependency,
+    // or another package's internal module).
+    {"E091", "ModuleNotImportableError", "Module not importable from this package", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

@@ -4,6 +4,33 @@
 #include "Errors.h"
 #include <algorithm>
 
+// LEC-001 stage 4: how a module identity reads in a message. A dependency
+// package's modules have identities `<package>/<path>` (ParserModule.cpp,
+// ModuleCandidate::Key); the package's ROOT module, `geometry/geometry`, is
+// what the user imports as `geometry`, so it is shown that way. An internal
+// module keeps its `<package>/` prefix -- "util" alone would be ambiguous
+// with the importer's own util, which is the very collision identities exist
+// to separate. Every other identity has no '/' and is shown as is.
+inline std::string DisplayModuleName(const std::string &Identity) {
+  size_t Slash = Identity.find('/');
+  if (Slash == std::string::npos)
+    return Identity;
+  if (Identity.compare(Slash + 1, std::string::npos, Identity, 0, Slash) == 0)
+    return Identity.substr(0, Slash);
+  return Identity;
+}
+
+// The file a "mark it `pub` in <file>" hint names: the declaration's own file
+// when its location is known. `<module>.tr` was right while a module's name
+// was always its file stem, and is wrong for a dependency's `geometry/util`.
+inline std::string DeclaringFileName(const SourceLocation &DeclLoc,
+                                     const std::string &Module) {
+  if (DeclLoc.Filename.empty())
+    return DisplayModuleName(Module) + ".tr";
+  size_t Sep = DeclLoc.Filename.find_last_of("/\\");
+  return Sep == std::string::npos ? DeclLoc.Filename : DeclLoc.Filename.substr(Sep + 1);
+}
+
 // `export` used inside a function body -- only legal at the top level of a
 // file or module (see VarDeclExprAST::IsExported's doc comment).
 class ExportOutsideTopLevelError : public TurfError {
@@ -158,6 +185,7 @@ struct ModuleCandidateView {
   std::string Kind; // "standard library", "next to main.tr", ...
   std::string Path; // for display
   bool IsStdlib = false;
+  bool IsDependency = false; // a dependency's root module: its name is fixed by its package
 };
 class AmbiguousModuleError : public TurfError {
 public:
@@ -180,24 +208,84 @@ public:
     // user's file is the one that can move (a stdlib name is not theirs to
     // change); two user files are the user's to tell apart either way.
     std::vector<std::string> Own;
-    bool HasStdlib = false;
+    bool HasStdlib = false, HasDependency = false;
     for (const auto &C : Candidates) {
       if (C.IsStdlib)
         HasStdlib = true;
+      else if (C.IsDependency)
+        HasDependency = true;
       else
         Own.push_back(C.Path);
     }
-    if (HasStdlib) {
-      std::string Files;
-      for (size_t I = 0; I < Own.size(); ++I)
-        Files += (I ? (I + 1 == Own.size() ? " and " : ", ") : "") + Own[I];
+    std::string Files;
+    for (size_t I = 0; I < Own.size(); ++I)
+      Files += (I ? (I + 1 == Own.size() ? " and " : ", ") : "") + Own[I];
+    if (HasStdlib && !Own.empty()) {
       Hint_ = "A module may not share its name with a standard-library "
               "module. Rename " + Files + " (for example to 'my_" +
               ModuleName + ".tr') and import it by the new name.";
+    } else if (HasDependency && !Own.empty()) {
+      // A dependency is imported by its package name, which the user
+      // cannot change from here; their own module can move.
+      Hint_ = "A module may not share its name with a dependency. Rename " +
+              Files + " (for example to 'my_" + ModuleName +
+              ".tr') and import it by the new name.";
     } else {
       Hint_ = "These are different files that both answer to '" + ModuleName +
               "'. Rename one of them, or delete the one you did not mean.";
     }
+  }
+};
+
+// LEC-001 stage 4 (FREEZE.md 6.16, F-PKG-2): in a package build, `import m;`
+// names a module that exists in the build but that this package may not
+// import. Distinct from E027 "not found" on purpose: the file is there, a rule
+// forbids it, and the fix is different (edit the manifest, or import the
+// package's root module instead) -- "could not find module" would send the
+// user looking for a file that already exists.
+class ModuleNotImportableError : public TurfError {
+  ModuleNotImportableError(SourceLocation Loc) : TurfError(Loc, "") {
+    Category_ = SLM::ErrorCategory::DECLARATION;
+  }
+
+public:
+  /// @p Package is in the build, but not a direct dependency of @p Importer.
+  /// @p Requirers are the packages that do depend on it.
+  static ModuleNotImportableError
+  notADirectDependency(SourceLocation Loc, const std::string &Importer,
+                       const std::string &Package,
+                       const std::vector<std::string> &Requirers) {
+    ModuleNotImportableError E(Loc);
+    std::string By;
+    for (size_t I = 0; I < Requirers.size(); ++I)
+      By += (I ? ", '" : "'") + Requirers[I] + "'";
+    E.Message = Colors::BRIGHT_RED + "Package '" + Colors::CYAN + Package +
+                Colors::BRIGHT_RED + "' is not a dependency of '" + Importer +
+                "'." + Colors::RESET;
+    if (!By.empty())
+      E.Message += "\n    It is in this build because " + By +
+                   (Requirers.size() == 1 ? " depends" : " depend") + " on it.";
+    E.Hint_ = "A package can import only its own modules, its direct "
+              "dependencies and the standard library. Add '" + Package +
+              "' to [dependencies] in " + Importer +
+              "'s turf.toml to import it here.";
+    return E;
+  }
+
+  /// @p Name is an internal (non-root) module of @p Owner, at @p Path.
+  static ModuleNotImportableError
+  internalModule(SourceLocation Loc, const std::string &Name,
+                 const std::string &Importer, const std::string &Owner,
+                 const std::string &Path) {
+    ModuleNotImportableError E(Loc);
+    E.Message = Colors::BRIGHT_RED + "Module '" + Colors::CYAN + Name +
+                Colors::BRIGHT_RED + "' is internal to package '" + Owner +
+                "'." + Colors::RESET + "\n    " + Path;
+    E.Hint_ = "Only a package's root module can be imported from outside it. "
+              "Import '" + Owner + "' and use what its root module makes "
+              "`pub`" + (Importer == Owner ? "" : "; if '" + Owner +
+              "' should offer this, its root module has to expose it") + ".";
+    return E;
   }
 };
 
@@ -635,16 +723,17 @@ public:
       Fix = "`pub fn " + Owner + "." + Name + "(...)`"; Noun = "methods";
       break;
     }
+    const std::string ModuleShown = DisplayModuleName(Module);
     const std::string Subject = K == Kind::Field || K == Kind::Method
                                     ? "'" + Owner + "'"
-                                    : "'" + Module + "'";
+                                    : "'" + ModuleShown + "'";
     Message = Colors::BRIGHT_RED + What + " '" + Colors::CYAN + Shown +
               Colors::BRIGHT_RED + "' is private to module '" + Colors::CYAN +
-              Module + Colors::BRIGHT_RED + "'." + Colors::RESET;
-    withRelated(DeclLoc, "'" + Shown + "' is declared in module '" + Module +
+              ModuleShown + Colors::BRIGHT_RED + "'." + Colors::RESET;
+    withRelated(DeclLoc, "'" + Shown + "' is declared in module '" + ModuleShown +
                              "' without `pub`");
 
-    const std::string File = Module + ".tr";
+    const std::string File = DeclaringFileName(DeclLoc, Module);
     Hint_ = "If '" + Shown + "' is meant to be used from other modules, mark "
             "it `pub` in " + File + ": " + Fix + ".";
     if (PublicAlternatives.empty()) {
@@ -690,8 +779,8 @@ public:
               ItemName + Colors::BRIGHT_RED + "' exposes the private type '" +
               Colors::CYAN + TypeName + Colors::BRIGHT_RED + "'." + Colors::RESET;
     withRelated(TypeDeclLoc, "'" + TypeName + "' is declared in module '" +
-                                 Module + "' without `pub`");
-    const std::string File = Module + ".tr";
+                                 DisplayModuleName(Module) + "' without `pub`");
+    const std::string File = DeclaringFileName(TypeDeclLoc, Module);
     Hint_ = "Anything `pub` is visible to other modules, but '" + TypeName +
             "' is not, so they would receive values of a type they cannot "
             "name. Either make the type public -- `pub " + TypeKeyword + " " +

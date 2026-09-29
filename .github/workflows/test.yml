@@ -234,6 +234,14 @@ jobs:
       # source and re-run the compiler on the result).
       - name: "Migration tool smoke test (turfc --migrate=pub)"
         run: ./scripts/migrate_pub_smoke.sh
+      # LEC-001 stage 4: package builds (`turfc --package-graph`). The test
+      # runner is single-file and cannot hand the compiler a graph, so this
+      # builds multi-package trees in a temp directory: two packages' `util`
+      # modules and their types coexisting, direct-dependencies-only (E091),
+      # internal modules, E090 against a dependency, graph validation, and
+      # the per-package unsafe bit.
+      - name: "Package-graph smoke test (turfc --package-graph)"
+        run: ./scripts/package_graph_smoke.sh
       - name: Runtime smoke test (libturfrt link wiring, descriptors, panics)
         run: ./scripts/runtime_smoke.sh
       - name: "Manual-heap allocation smoke test (mem:: accounting)"

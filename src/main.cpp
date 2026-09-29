@@ -25,6 +25,7 @@
 #include "Lint.h"
 #include "MigratePub.h"
 #include "Parser.h"
+#include "PackageGraph.h"
 #include "CFG.h"
 #include "Monomorphize.h" // TYPE-002 (S11b): --dump-instantiations
 #include "Resolver.h"
@@ -94,8 +95,11 @@ using namespace llvm;
 // and reset MINOR, when anything covered is removed or changes meaning --
 // that is what makes every existing driver refuse this compiler instead of
 // misbehaving with it.
+//
+// History: 1.0 (LEC-001 stage 2) the first interface; 1.1 (stage 4) adds
+// `--package-graph <file>`.
 static constexpr int TurfcInterfaceMajor = 1;
-static constexpr int TurfcInterfaceMinor = 0;
+static constexpr int TurfcInterfaceMinor = 1;
 
 // OPT-001 (docs/planning/ARCHITECTURE_OVERHAUL.md §17.2): the five levels
 // the CLI's `-O` flag selects. Os is not "O1 through O3 plus one more" --
@@ -120,6 +124,7 @@ struct CompilerOptions {
   bool DumpResolved = false;          // --dump-resolved: run Resolver then print annotated AST (Issue #5)
   bool Check = false;                 // --check: LEC-001 -- run every diagnostic, write no output file
   bool CheckAsModule = false;         // --module (with --check): the file is an imported module, so no `main` is required
+  std::string PackageGraphFile;       // --package-graph <file>: LEC-001 stage 4, a package build (PackageGraph.h)
   bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
   bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
   bool DumpModules = false;           // --dump-modules: print full module-system introspection
@@ -436,6 +441,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.MigratePub = true;
     } else if (arg == "-o" && i + 1 < argc) {
       opts.OutputName = argv[++i];
+    } else if (arg == "--package-graph" && i + 1 < argc) {
+      opts.PackageGraphFile = argv[++i];
     } else if (arg == "--link" && i + 1 < argc) {
       opts.LinkLibs.push_back(argv[++i]);
     } else if (arg.rfind("--target=", 0) == 0) {
@@ -493,7 +500,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
            "[--dump-modules] [--dump-instantiations] [--link <libname>] "
            "[--allow-unsafe-modules] [--stdlib-warnings] "
            "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>] "
-           "[--check [--module]]\n"
+           "[--check [--module]] [--package-graph <file>]\n"
            "       turfc --format [--write] <filename.tr>\n"
            "       turfc --migrate=pub [--write] <module.tr>...\n"
            "       turfc --explain E0NN\n";
@@ -951,6 +958,21 @@ static int runCompilerMain(int argc, char **argv) {
   // (ParserModule.cpp) consults it for every `unsafe module;` pragma outside
   // the install root.
   g_AllowUnsafeModules = opts.AllowUnsafeModules;
+
+  // LEC-001 stage 4: a package build. Loaded and validated before anything is
+  // parsed, since every import resolves against it; a malformed graph stops
+  // here with the reason rather than as a "module not found" deep inside a
+  // dependency.
+  if (!opts.PackageGraphFile.empty()) {
+    std::string GraphError;
+    auto Graph = LoadPackageGraph(opts.PackageGraphFile, opts.InputFile, GraphError);
+    if (!Graph) {
+      std::cerr << "Error: " << GraphError << "\n";
+      return 1;
+    }
+    g_PackageGraph = std::move(*Graph);
+  }
+
   // OVH-012: consulted only by DiagnosticEngine::flushAll() at print time,
   // so it's fine to set this any time before that runs -- unlike
   // g_AllowUnsafeModules just above, nothing during parsing/resolving reads it.

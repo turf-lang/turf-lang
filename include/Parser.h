@@ -140,6 +140,18 @@ bool ParseLeadingUnsafeModuleDecl(std::unique_ptr<ExprAST> &OutBlock);
 std::string ResolveModuleFile(const std::string &ModuleName,
                               const std::string &ImportingFile = "");
 
+// LEC-001 stage 4: the module identity the file being parsed means by the
+// module qualifier @p Spelled (`util` in `util::f()`, `util::T`). Equal to
+// @p Spelled except for a dependency package's modules, whose identity is
+// `<package>/<path>`. Called wherever the parser reads a qualifier, so every
+// later pass sees identities only (see ParserModule.cpp).
+const std::string &ModuleKeyFor(const std::string &Spelled);
+
+// True if @p Name is a module of this installation's standard library
+// (lib/std/**). Used to reject a dependency package named like a stdlib
+// module, which `import <name>;` could never reach (LEC-001 stage 4).
+bool IsStdlibModuleName(const std::string &Name);
+
 // Lists every module name resolvable via the same search order
 // ResolveModuleFile()/ParseModuleImportByName() use: stdlib (lib/std/**),
 // then installed user packages (lib/usr/**), then any sibling ".tr" file

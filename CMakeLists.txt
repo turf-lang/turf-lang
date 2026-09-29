@@ -201,6 +201,7 @@ add_library(turfcore STATIC
   src/ParserStmt.cpp
   src/ParserDecl.cpp
   src/ParserModule.cpp
+  src/PackageGraph.cpp
   src/Sandbox.cpp
   src/SLMEngine.cpp
   src/SLMIntegration.cpp
