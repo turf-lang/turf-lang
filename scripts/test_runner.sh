@@ -306,6 +306,10 @@ run_one_test() {
     else
         echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${GREEN}PASS${RESET}"
         echo "STATUS=PASS" > "$RESULT_FILE"
+        # A passing test's output is otherwise discarded -- which made
+        # TURF_GC_VALIDATE's report-only findings (runtime/turfrt_gc.c) and
+        # CI's grep for them invisible. Nothing else prints this prefix.
+        grep "^TURF_GC_VALIDATE:" "$LOGFILE" | sed "s|^|[${SUITE}/${FILE_NAME}] |"
     fi
 
     # Cleanup compiled program
