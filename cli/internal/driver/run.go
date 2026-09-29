@@ -15,6 +15,16 @@ func Run(path string, args []string) int {
 	return ExitCode(Command(path, args).Run())
 }
 
+// RunIn is Run with the child's working directory set to dir. A project build
+// runs turfc from the project root so diagnostics name files as src/main.tr
+// however deep in the tree the user typed `turf build`, and the same file is
+// always spelled the same way.
+func RunIn(dir, path string, args []string) int {
+	cmd := Command(path, args)
+	cmd.Dir = dir
+	return ExitCode(cmd.Run())
+}
+
 // Command builds a child with stdio inherited, so its output reaches the
 // user's terminal (or pipe) directly and is never re-rendered by turf.
 func Command(path string, args []string) *exec.Cmd {

@@ -61,4 +61,6 @@ CMake just puts the result at `build/turf`, beside `build/turfc`, where it finds
 the compiler with no setup. Go is optional; without it only `build/turf` is
 skipped. When turfc gains something turf will use (a new flag, the stage 4
 package graph), turfc bumps its interface minor and turf raises
-`version.Required` to it.
+`version.Required` to it. `Required` is 1.1 because project builds pass
+`turfc --package-graph`, which interface 1.1 added; a turfc that only speaks 1.0
+is refused before any command runs.

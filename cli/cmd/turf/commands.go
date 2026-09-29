@@ -46,9 +46,9 @@ func init() {
 
 		{"new", groupProject, "create a project", stubHelp("new"), stubCmd("new")},
 		{"init", groupProject, "make the current directory a project", stubHelp("init"), stubCmd("init")},
-		{"build", groupProject, "build the project", stubHelp("build"), stubCmd("build")},
+		{"build", groupProject, "build the project", helpBuild, cmdBuild},
 		{"test", groupProject, "run the project's tests", stubHelp("test"), stubCmd("test")},
-		{"clean", groupProject, "remove build output", stubHelp("clean"), stubCmd("clean")},
+		{"clean", groupProject, "remove build output", helpClean, cmdClean},
 		{"fetch", groupProject, "download dependencies", stubHelp("fetch"), stubCmd("fetch")},
 		{"add", groupProject, "add a dependency", stubHelp("add"), stubCmd("add")},
 		{"remove", groupProject, "remove a dependency", stubHelp("remove"), stubCmd("remove")},

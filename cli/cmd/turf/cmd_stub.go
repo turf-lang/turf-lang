@@ -8,8 +8,6 @@ import "fmt"
 var stubWhen = map[string]string{
 	"new":    "LEC-001 stage 5",
 	"init":   "LEC-001 stage 5",
-	"build":  "LEC-001 stage 5",
-	"clean":  "LEC-001 stage 5",
 	"add":    "LEC-001 stage 5",
 	"remove": "LEC-001 stage 5",
 	"fetch":  "LEC-001 stage 6",

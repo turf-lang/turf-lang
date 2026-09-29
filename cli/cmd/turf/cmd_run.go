@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -15,7 +14,7 @@ import (
 //
 //	turf run <file.tr> [compiler flags...] [-- program args...]
 //
-// Project mode (`turf run` with no file) is LEC-001 stage 5.
+// With no .tr argument it runs the project instead (projectRun).
 func cmdRun(args []string) int {
 	before, after := splitAtDashDash(args)
 
@@ -29,7 +28,7 @@ func cmdRun(args []string) int {
 		flags = append(flags, a)
 	}
 	if file == "" {
-		return usagef("project builds arrive in LEC-001 stage 5; use 'turf run <file.tr>'")
+		return projectRun(flags, after)
 	}
 	for _, f := range flags {
 		if f == "-o" {
@@ -50,14 +49,9 @@ func cmdRun(args []string) int {
 		// path out, including a failed compile and a program killed by a signal.
 		defer os.RemoveAll(tmp)
 
-		// Ctrl-C must reach the child and turf must still clean up. signal.Notify
-		// (a handler that discards the signal) achieves both; signal.Ignore does
-		// not, because an ignored disposition is inherited across exec and the
-		// program would then ignore Ctrl-C too. A caught signal is reset to the
-		// default in a child.
-		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, os.Interrupt)
-		defer signal.Stop(sigs)
+		// Ctrl-C must reach the child and turf must still clean up (see
+		// catchInterrupt for why a discarding handler and not signal.Ignore).
+		defer catchInterrupt()()
 
 		stem := strings.TrimSuffix(filepath.Base(file), ".tr")
 		if stem == "" {
@@ -91,10 +85,11 @@ func splitAtDashDash(args []string) (before, after []string) {
 	return args, nil
 }
 
-const helpRun = `turf run - compile a file and run it
+const helpRun = `turf run - compile a file or the project and run it
 
 Usage:
   turf run <file.tr> [compiler flags...] [-- program args...]
+  turf run [compiler flags...] [-- program args...]          (inside a project)
 
 Compiles to a temporary executable (turfc <file.tr> <flags> -o <temp>), runs
 it with the arguments after --, and deletes it. The exit status is the
@@ -102,5 +97,9 @@ program's, or 128+N if signal N killed it. A failed compile exits with the
 compiler's status. Ctrl-C goes to the program.
 
 -o is refused: the executable is deleted afterwards. Use 'turf compile -o'.
-Project mode ('turf run' with no file) arrives in LEC-001 stage 5.
+
+With no file, run anywhere inside a project: 'turf build', then run
+build/<name> with the arguments after --, in the directory you typed the
+command in. A library-only project has nothing to run. Compiler flags are
+passed through; -o and --package-graph are refused, because turf owns both.
 `

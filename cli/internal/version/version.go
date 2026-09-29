@@ -17,7 +17,7 @@ type Interface struct {
 // Required is the driver interface this turf speaks. A compiler is usable if
 // it has the same Major and at least this Minor (turfc bumps Minor for
 // additive changes and Major for anything removed or changed). Raise Minor
-// here when turf starts passing something a newer turfc added, such as the
-// LEC-001 stage 4 package graph; raise Major only together with a turfc
-// that raised its own.
-var Required = Interface{Major: 1, Minor: 0}
+// here when turf starts passing something a newer turfc added; raise Major
+// only together with a turfc that raised its own. 1.1 is the package graph
+// (`--package-graph`, LEC-001 stage 4), which project builds pass.
+var Required = Interface{Major: 1, Minor: 1}

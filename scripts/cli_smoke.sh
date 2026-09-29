@@ -248,7 +248,7 @@ expect_rc "run -o" ro.turf 2
 expect_err "run -o" ro.turf "temporary file"
 capture rn.turf "$TURF" run
 expect_rc "run (no file)" rn.turf 2
-expect_err "run (no file)" rn.turf "stage 5"
+expect_err "run (no file)" rn.turf "not inside a TurfLang project"
 
 # --- version and the handshake ------------------------------------------------
 capture v.turf "$TURF" version
@@ -317,7 +317,7 @@ expect_rc "turf publish" up.turf 1
 expect_err "turf publish" up.turf "F-7c"
 capture ubd.turf "$TURF" build
 expect_rc "turf build" ubd.turf 2
-expect_err "turf build" ubd.turf "stage 5"
+expect_err "turf build" ubd.turf "not inside a TurfLang project"
 capture un.turf "$TURF"
 expect_rc "no arguments" un.turf 2
 capture h.turf "$TURF" compile --help
