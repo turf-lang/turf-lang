@@ -18,6 +18,8 @@ The build produces **two binaries** (LEC-001, `docs/development/FREEZE.md` §6.1
 
 Rebuild after any `src/`/`include/` change with `cmake --build build -j$(nproc)` (no need to re-run the full `cmake_build.sh` script unless `CMakeLists.txt` itself changed). `build/turf` and `build/turfc` must come from the same build: `turf` refuses a `turfc` of a different version, and both are stamped from the root `VERSION` file. The front end's own checks are `cd cli && go vet ./... && go test ./...` and `./scripts/cli_smoke.sh` (SKIP if `build/turf` is absent, unless `CI` is set).
 
+`./scripts/dev_install.sh` symlinks `build/turf` and `build/turfc` into `~/.local/bin` (`--prefix DIR` for elsewhere, `--uninstall` to undo), so `turf`/`turfc` work from any directory. **Don't export `TURF_HOME` for a dev checkout**: both binaries already find their install root from their own real path, and a `TURF_HOME` pointing at one checkout silently makes every *other* build (a worktree, a scratch build directory) use that checkout's `lib/std` and runtime.
+
 ## Test
 
 ```bash
