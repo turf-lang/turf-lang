@@ -99,6 +99,7 @@ struct CompilerOptions {
   bool DumpResolverSymbols = false;   // --dump-resolver-symbols: print symbol table after resolution
   bool DumpResolved = false;          // --dump-resolved: run Resolver then print annotated AST (Issue #5)
   bool Check = false;                 // --check: LEC-001 -- run every diagnostic, write no output file
+  bool CheckAsModule = false;         // --module (with --check): the file is an imported module, so no `main` is required
   bool RunTypeChecker = false;        // --typecheck: run TypeChecker pass (shadow mode, Issue #7)
   bool DumpTypechecked = false;       // --dump-typechecked: run TypeChecker then print type-annotated AST
   bool DumpModules = false;           // --dump-modules: print full module-system introspection
@@ -362,6 +363,8 @@ static CompilerOptions parseArgs(int argc, char **argv) {
       opts.ShowStdlibWarnings = true;
     } else if (arg == "--check") {
       opts.Check = true;
+    } else if (arg == "--module") {
+      opts.CheckAsModule = true;
     } else if (arg == "--version") {
       // Already answered at the top of runCompilerMain(), before any state
       // exists; accepted here only so it is not reported as an unknown option
@@ -452,6 +455,15 @@ static CompilerOptions parseArgs(int argc, char **argv) {
   if (opts.MigratePub)
     return opts;
 
+  // A module has no `main`, so it can be checked but never linked. Silently
+  // ignoring `--module` on a real compile would let a typo'd `--check` build
+  // (or fail to build) something the user meant only to check.
+  if (opts.CheckAsModule && !opts.Check) {
+    std::cerr << "Error: --module only applies with --check (a module has no "
+                 "entry point, so it cannot be linked).\n";
+    std::exit(1);
+  }
+
   if (opts.InputFile.empty()) {
     std::cerr
         << "Usage: turfc <filename.tr> [-o output] [--emit-llvm] [--smart] "
@@ -461,7 +473,7 @@ static CompilerOptions parseArgs(int argc, char **argv) {
            "[--dump-modules] [--dump-instantiations] [--link <libname>] "
            "[--allow-unsafe-modules] [--stdlib-warnings] "
            "[-O0|-O1|-O2|-O3|-Os] [-g] [--target=<triple>] [-mcpu=<cpu>] "
-           "[--check]\n"
+           "[--check [--module]]\n"
            "       turfc --format [--write] <filename.tr>\n"
            "       turfc --migrate=pub [--write] <module.tr>...\n"
            "       turfc --explain E0NN\n";
@@ -1730,21 +1742,34 @@ static int runCompilerMain(int argc, char **argv) {
   // not "right after the TypeChecker": the CFG, definite-assignment, escape
   // and lint diagnostics are raised inside FuncDefExprAST::codegen() during the
   // pre-pass above (CodegenFunc.cpp), so every diagnostic a real compile can
-  // print has already been flushed by now. What is left below is only what
-  // needs a runnable program (entry point, runtime bootstrap, optimization,
-  // object emission, link) -- deliberately skipped, which also makes a
-  // library file with no `main` checkable. All --dump-* output prints before
-  // this line, so they combine with --check unchanged.
+  // print has already been flushed by now. What is left below the entry-point
+  // check is only what needs a runnable program (runtime bootstrap,
+  // optimization, object emission, link) and is deliberately skipped. All
+  // --dump-* output prints before this line, so they combine with --check
+  // unchanged.
+  //
+  // The entry-point check itself stays IN --check: a checked program must fail
+  // exactly where its compile would, or `turf check` passes a file `turf
+  // compile` rejects. Nothing in a file says whether it is a program or a
+  // module (a module is only "a file someone imports"), so the caller says so:
+  // `--module` checks a file as an importable module and skips the `main`
+  // requirement. In a package build (LEC-001 stage 4) the package graph
+  // answers this instead: only src/main.tr is an entry point.
+  if (!(opts.Check && opts.CheckAsModule)) {
+    // Verify that an explicit 'main' function was defined in the primary module
+    Function *MainFunc = TheModule->getFunction("main");
+    if (!MainFunc || MainFunc->empty()) {
+      std::cerr << "Error: No entry point found. Please define 'fn main(): int' "
+                   "in your file.\n";
+      if (opts.Check)
+        std::cerr << "  (checking a module that is only ever imported? add "
+                     "--module: `turf check --module <file.tr>`)\n";
+      return 1;
+    }
+  }
+
   if (opts.Check)
     return 0;
-
-  // Verify that an explicit 'main' function was defined in the primary module
-  Function *MainFunc = TheModule->getFunction("main");
-  if (!MainFunc || MainFunc->empty()) {
-    std::cerr << "Error: No entry point found. Please define 'fn main(): int' "
-                 "in your file.\n";
-    return 1;
-  }
 
   // RT-001: wrap the user's compiled main with the turf_rt_init/
   // turf_rt_shutdown process bootstrap (see include/Codegen.h's doc comment

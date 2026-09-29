@@ -165,15 +165,34 @@ expect_rc "check fail_x.tr" ck_fail 1
 identical "check fail_x.tr vs turfc --check" ck_fail ck_failc
 [ "$(listing "$d")" = "$before" ] || fail "check created a file: before='$before' after='$(listing "$d")'"
 
-# --- dump: turfc --check --dump-<what>, no file ------------------------------
+# A file with no main is checked as a program by default -- the same verdict
+# `turf compile` gives -- and as an importable module only with --module.
+# Before this, `turf check` passed a file that `turf compile` rejects.
+capture ck_nomain  "$TURF" check m.tr
+expect_rc "check m.tr (no main)" ck_nomain 1
+expect_err "check m.tr (no main)" ck_nomain "No entry point found"
+expect_err "check m.tr (no main)" ck_nomain "--module"
+capture ck_module  "$TURF" check --module m.tr
+expect_rc "check --module m.tr" ck_module 0
+capture ck_modprog "$TURF" check --module pass.tr
+expect_rc "check --module pass.tr (a program is a fine module too)" ck_modprog 0
+capture mod_nock   "$TURFC" --module pass.tr
+expect_rc "turfc --module without --check" mod_nock 1
+expect_err "turfc --module without --check" mod_nock "only applies with --check"
+
+# --- dump: turfc --check --module --dump-<what>, no file ---------------------
 d=$(fresh pass.tr)
 before=$(listing "$d")
 capture_in "$d" dd.turf  "$TURF"  dump ast pass.tr
-capture_in "$d" dd.turfc "$TURFC" --check --dump-ast pass.tr
+capture_in "$d" dd.turfc "$TURFC" --check --module --dump-ast pass.tr
 identical "dump ast" dd.turf dd.turfc
 expect_rc "dump ast" dd.turf 0
 [ -s "$WORK/dd.turf.out" ] || fail "dump ast printed nothing"
 [ "$(listing "$d")" = "$before" ] || fail "dump created a file: '$(listing "$d")'"
+# A dump is an inspection, not a verdict: a module with no main dumps cleanly.
+capture dm.turf "$TURF" dump ast m.tr
+expect_rc "dump ast m.tr (no main)" dm.turf 0
+[ -s "$WORK/dm.turf.out" ] || fail "dump ast m.tr printed nothing"
 
 capture db.turf "$TURF" dump bogus pass.tr
 expect_rc "dump bogus" db.turf 2

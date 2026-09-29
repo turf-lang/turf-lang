@@ -35,9 +35,11 @@ func dumpNames() []string {
 	return names
 }
 
-// cmdDump is `turfc --check --dump-<what>`. --check is added because the raw
-// --dump-* flags continue into codegen and link an executable; a dump is an
-// inspection and must not leave a binary behind.
+// cmdDump is `turfc --check --module --dump-<what>`. --check is added because
+// the raw --dump-* flags continue into codegen and link an executable; a dump
+// is an inspection and must not leave a binary behind. --module is added
+// because a dump is not a verdict on the file: dumping a module that has no
+// `main` must not end in "No entry point found" after the dump printed fine.
 func cmdDump(args []string) int {
 	if len(args) == 0 {
 		return dumpUsage("dump: missing what to dump")
@@ -50,7 +52,7 @@ func cmdDump(args []string) int {
 		}
 		return dumpUsage(msg)
 	}
-	return forward(append([]string{"--check", flag}, args[1:]...))
+	return forward(append([]string{"--check", "--module", flag}, args[1:]...))
 }
 
 func dumpUsage(msg string) int {
@@ -72,5 +74,6 @@ Usage:
   symbols          the symbol table after resolution     (--dump-resolver-symbols)
   instantiations   the generic-instantiation census      (--dump-instantiations)
 
-Runs turfc --check --dump-<what>, so no executable is produced.
+Runs turfc --check --module --dump-<what>: no executable is produced, and a
+file without a main function (a module) dumps the same as a program.
 `

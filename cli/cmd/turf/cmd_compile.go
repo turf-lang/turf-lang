@@ -33,6 +33,7 @@ Output:
 
 Checking and inspection:
   --check                   report every diagnostic and write no file
+  --module                  with --check: the file is a module, no main needed
   --resolve                 run and report the name-resolution pass
   --typecheck               run and report the type-checking pass
   --dump-ast                print the parsed AST

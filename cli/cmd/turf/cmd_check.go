@@ -12,8 +12,13 @@ const helpCheck = `turf check - report every diagnostic without producing a file
 
 Usage:
   turf check <file.tr> [flags]
+  turf check --module <file.tr> [flags]
 
 Runs turfc --check: the same diagnostics, in the same words, as a normal
 compile, and the same exit status (0 clean, 1 on any error), but nothing is
 written. Other flags are passed to turfc unchanged.
+
+The file is checked as a program, so a missing main function is an error,
+exactly as it is for turf compile. Pass --module to check a file that is
+only ever imported: the main requirement is skipped.
 `
