@@ -262,7 +262,9 @@ run_one_test() {
         echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${RED}COMPILE FAILED${RESET}"
         {
             echo "STATUS=FAIL"
-            echo "DETAIL=$test_file (Compile Error):"
+            # The exit code is the only clue when the compiler dies from a
+            # signal (>= 128) with no output at all.
+            echo "DETAIL=$test_file (Compile Error, exit $COMPILE_STATUS):"
             echo "$COMPILE_OUTPUT"
         } > "$RESULT_FILE"
         rm -f "$PROGRAM" "$LOGFILE"

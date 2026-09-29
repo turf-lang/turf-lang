@@ -38,6 +38,7 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
@@ -1883,6 +1884,11 @@ static int runCompilerMain(int argc, char **argv) {
  * a vendored-library issue outside this compiler's control.
  */
 int main(int argc, char **argv) {
+  // A crash in the compiler itself (SIGSEGV etc.) otherwise dies silently:
+  // nothing reaches stderr, and stdout's pipe buffer is lost with the
+  // process. Seen once in CI as a "Compile Error" with empty output that
+  // never reproduced; this at least leaves a stack trace next time.
+  llvm::sys::PrintStackTraceOnErrorSignal(argv[0]);
   int ExitCode = runCompilerMain(argc, argv);
   std::cout.flush();
   std::cerr.flush();
