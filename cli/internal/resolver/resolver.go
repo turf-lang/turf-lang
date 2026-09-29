@@ -1,7 +1,7 @@
 package resolver
 
 import (
-	"github.com/turf-lang/turf-cli/internal/manifest"
+	"github.com/turf-lang/turf-lang/cli/internal/manifest"
 )
 
 type Node struct {

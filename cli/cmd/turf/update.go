@@ -1,10 +1,12 @@
+// Pre-2.0 registry-model command; not dispatched. Reworked by LEC-001 stage 5/6 (docs/development/changes/LEC-001.md).
+
 package main
 
 import (
 	"fmt"
 	"os"
 
-	"github.com/turf-lang/turf-cli/internal/manifest"
+	"github.com/turf-lang/turf-lang/cli/internal/manifest"
 )
 
 func runUpdate(args []string) error {

@@ -1,3 +1,5 @@
+// Pre-2.0 registry-model command; not dispatched. Reworked by LEC-001 stage 5/6 (docs/development/changes/LEC-001.md).
+
 package main
 
 import (
@@ -9,10 +11,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/turf-lang/turf-cli/internal/archive"
-	"github.com/turf-lang/turf-cli/internal/checksum"
-	"github.com/turf-lang/turf-cli/internal/config"
-	"github.com/turf-lang/turf-cli/internal/manifest"
+	"github.com/turf-lang/turf-lang/cli/internal/archive"
+	"github.com/turf-lang/turf-lang/cli/internal/checksum"
+	"github.com/turf-lang/turf-lang/cli/internal/config"
+	"github.com/turf-lang/turf-lang/cli/internal/manifest"
 )
 
 func runPublish(args []string) error {
