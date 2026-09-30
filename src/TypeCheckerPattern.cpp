@@ -273,6 +273,122 @@ bool TypeChecker::checkPattern(
     return Irrefutable;
   }
 
+  // ── An error-variant pattern: `E::V(sub, ..)` (LEC-004) ───────────────────
+  if (auto *EV = dynamic_cast<ErrorVariantPatternExprAST *>(Pat)) {
+    TurfTypePtr Subject = resolveNamed(Ty);
+    if (!Subject || !(Subject->isAnyError() || Subject->isUserError())) {
+      InvalidPatternError(
+          EV->getLoc(),
+          "this is an error-variant pattern, but the value it is matched "
+          "against has type '" + (Ty ? Ty->getName() : std::string("<unknown>")) +
+              "', which is not an error.",
+          "An error-variant pattern (`IOError::NotFound(path)`) matches an "
+          "error value -- the `err` bound by `recover as err run`. Match an "
+          "int, string, char, bool or enum against a value instead "
+          "(`matches 3:`, `matches Color::Red:`).")
+          .raise();
+      return false;
+    }
+
+    const auto *Head = dynamic_cast<const ScopeAccessExprAST *>(EV->getHead());
+    const TurfUserErrorType *ET = nullptr;
+    if (Head && GlobalSymbolTable)
+      if (auto T = GlobalSymbolTable->LookupType(Head->getLeftName()))
+        ET = dynamic_cast<const TurfUserErrorType *>(T.get());
+    const ErrorVariantInfo *Info = ET ? ET->getVariantInfo(Head->getRightName()) : nullptr;
+    if (!Info) // The Resolver already reported an unknown type or variant.
+      return false;
+
+    const std::string Full =
+        TypeIdentity::bareName(ET->getName()) + "::" + Head->getRightName();
+
+    // A subject of a declared error type can only ever hold that type's
+    // variants; a pattern over another type's is a pattern that can never
+    // match. (An open `AnyErrorType` subject can hold anything.)
+    if (Subject->isUserError() && Subject->getName() != ET->getName()) {
+      InvalidPatternError(
+          EV->getLoc(),
+          "this pattern is over '" + Full + "', but the value being matched is "
+          "a '" + Subject->getName() + "'.",
+          "A value of the error type '" + Subject->getName() +
+              "' can only be one of its own variants -- name one of those.")
+          .raise();
+      return false;
+    }
+
+    const size_t N = Info->Fields.size();
+    const size_t Listed = EV->getSubs().size();
+
+    if (!EV->hasParens()) {
+      // Bare `E::V:` matches a variant that has nothing to destructure. One
+      // that has fields must say what happens to them, so the pattern cannot
+      // keep compiling, meaning something different, after a field is added.
+      if (N > 0) {
+        InvalidPatternError(
+            EV->getLoc(),
+            "'" + Full + "' has " + std::to_string(N) + " field" +
+                (N == 1 ? "" : "s") + ", so a pattern for it must say what to "
+                "do with " + (N == 1 ? "it" : "them") + ".",
+            "Write `" + Full + "(..)` to ignore the payload, or list the fields: `" +
+                Full + "(" + Info->Fields[0].Name + (N > 1 ? ", ..)" : ")") + "`.")
+            .raise();
+        return false;
+      }
+    } else {
+      if (Listed == 0 && !EV->hasRest()) {
+        InvalidPatternError(
+            EV->getLoc(), "'" + Full + "' has empty parentheses.",
+            N == 0 ? "'" + Full + "' has no fields: write it without parentheses, `" +
+                         Full + ":`."
+                   : "List the fields (`" + Full + "(" + Info->Fields[0].Name +
+                         (N > 1 ? ", ..)" : ")") + "`) or write `" + Full +
+                         "(..)` to ignore them.")
+            .raise();
+        return false;
+      }
+      if (Listed > N) {
+        InvalidPatternError(
+            EV->getLoc(),
+            "this pattern lists " + std::to_string(Listed) + " field" +
+                (Listed == 1 ? "" : "s") + ", but '" + Full + "' declares " +
+                std::to_string(N) + ".",
+            N == 0 ? "'" + Full + "' has no fields; match it as `" + Full + ":`."
+                   : "Match one sub-pattern per declared field, in order.")
+            .raise();
+        return false;
+      }
+      if (Listed < N && !EV->hasRest()) {
+        std::string Missing;
+        for (size_t I = Listed; I < N; ++I)
+          Missing += (I > Listed ? ", '" : "'") + Info->Fields[I].Name + "'";
+        InvalidPatternError(
+            EV->getLoc(),
+            "this pattern doesn't mention the field" +
+                std::string(N - Listed > 1 ? "s " : " ") + Missing + " of '" + Full +
+                "'.",
+            "List every field, or end the pattern with `..` to ignore the ones "
+            "you don't need: `" + Full + "(" + (Listed ? "... , " : "") + "..)`.")
+            .raise();
+        return false;
+      }
+    }
+
+    EV->FieldTypes.clear();
+    bool AllIrrefutable = true;
+    for (size_t I = 0; I < Listed; ++I) {
+      EV->FieldTypes.push_back(Info->Fields[I].Type);
+      if (!checkPattern(EV->getSubsMut()[I].get(), Info->Fields[I].Type, EV->getLoc(),
+                        ArmBindingTypes))
+        AllIrrefutable = false;
+    }
+    // Fields a trailing `..` ignores are irrefutable by construction.
+    EV->FieldsIrrefutable = AllIrrefutable;
+
+    // Never a catch-all: it covers one variant, and an error value is an open
+    // union. Coverage of a declared error type's variants is visitCompare()'s.
+    return false;
+  }
+
   // ── A value sub-pattern: a literal or an enum variant ─────────────────────
   //
   // (A value pattern at the top of a header never reaches here; it is the

@@ -1242,7 +1242,9 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
 
   // What the UNGUARDED headers cover, for the exhaustiveness check below:
   // enum/machine variant names, or "true"/"false" for a bool subject. A
-  // guarded header is left out on purpose -- its guard may fail.
+  // guarded header is left out on purpose -- its guard may fail. For a subject
+  // of a declared error type (LEC-004) it also holds the variants covered by
+  // a variant pattern whose every field pattern is irrefutable.
   std::set<std::string> CoveredValues;
 
   // The one raw pointer a pattern may look through is `self` (never null;
@@ -1282,7 +1284,8 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
       // the original equality pattern, checked below exactly as before.
       const bool IsDestructuring =
           dynamic_cast<WildcardPatternExprAST *>(PatExpr.get()) ||
-          dynamic_cast<StructPatternExprAST *>(PatExpr.get());
+          dynamic_cast<StructPatternExprAST *>(PatExpr.get()) ||
+          dynamic_cast<ErrorVariantPatternExprAST *>(PatExpr.get());
 
       if (IsDestructuring) {
         const bool Irrefutable =
@@ -1293,6 +1296,13 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
           else
             ArmCatchAllLoc = static_cast<StructPatternExprAST *>(PatExpr.get())->getLoc();
         }
+        // An error-variant pattern is never a catch-all (checkPattern() says
+        // so by returning false), but an unguarded one whose fields all match
+        // anything covers its whole variant.
+        if (auto *EV = dynamic_cast<ErrorVariantPatternExprAST *>(PatExpr.get());
+            EV && !Guard && EV->FieldsIrrefutable)
+          if (const auto *Head = dynamic_cast<const ScopeAccessExprAST *>(EV->getHead()))
+            CoveredValues.insert(Head->getRightName());
       } else {
       check(PatExpr.get());
       TurfTypePtr PatTy = getType(PatExpr.get());
@@ -1460,6 +1470,27 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
             "Add `matches true:` and `matches false:` arms, or 'otherwise:' "
             "to handle the rest. A guarded arm doesn't count: its guard may "
             "be false.")
+            .raise();
+    } else if (const auto *UET =
+                   SubjectTy ? dynamic_cast<const TurfUserErrorType *>(SubjectTy.get())
+                             : nullptr) {
+      // A DECLARED error type has a closed, listable set of variants (unlike
+      // the open union), so covering them all is exhaustive -- each by an
+      // unguarded variant pattern that matches every payload it can carry.
+      std::vector<std::string> Missing;
+      for (const auto &V : UET->getVariants())
+        if (!CoveredValues.count(V))
+          Missing.push_back(TypeIdentity::bareName(UET->getName()) + "::" + V);
+      if (Missing.empty())
+        Covered = true;
+      else
+        NonExhaustiveCompareError(
+            Node.getLoc(), "error comparison", UET->getName(), "Missing variants:",
+            Missing,
+            "Add an arm for each missing variant, or 'otherwise:' (or `matches "
+            "_:`) to handle the rest. A guarded arm doesn't count, and neither "
+            "does one whose payload pattern can fail to match (`E::V(0)`): use "
+            "`E::V(..)` or `E::V(name)` to cover the variant.")
             .raise();
     } else if (SubjectTy && SubjectTy->isAnyError()) {
       NonExhaustiveCompareError(

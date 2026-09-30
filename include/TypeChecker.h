@@ -244,6 +244,7 @@ public:
     // visitFuncDef()'s own restore of InCallerLocationFunc_ on the way out
     // via longjmp.
     InCallerLocationFunc_ = false;
+    CurrentFuncName_.clear(); // LEC-004: same reasoning, visitFuncDef()'s restore
   }
 
   // ── Type query ────────────────────────────────────────────────────────────
@@ -307,6 +308,7 @@ public:
   void visitMachineDecl(MachineDeclExprAST &Node) override;
   void visitErrorDecl(ErrorDeclExprAST &Node) override;
   void visitRecoverExpr(RecoverExprAST &Node) override;
+  void visitTry(TryExprAST &Node) override;
   void visitScopeAccess(ScopeAccessExprAST &Node) override;
   void visitStructDecl(StructDeclExprAST &Node) override;
 
@@ -612,6 +614,13 @@ private:
   /// by visitCallerLocation(); save/restored around visitFuncDef()'s body
   /// traversal exactly like UnsafeDepth_ is for visitUnsafeBlock().
   bool InCallerLocationFunc_ = false;
+
+  /// The name of the function whose body is being checked ("" at the top
+  /// level), save/restored around visitFuncDef()'s body traversal. Only
+  /// visitTry() reads it, to tell a `try` in `main` -- which can never be made
+  /// fallible, so the hint differs -- from one in any other function that
+  /// returns a plain type (LEC-004).
+  std::string CurrentFuncName_;
 
   // ── Visibility (LEC-002, FREEZE.md §6.15) ──────────────────────────────────
   //

@@ -248,29 +248,75 @@ void TypeChecker::visitFuncCall(FuncCallExprAST &Node) {
     return;
   }
 
-  // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
-  // messageExpr)` -- exactly one `string` argument, the message attached to
-  // this specific error occurrence. Short-circuited here for the identical
-  // reason DefaultConstruct is just above: Resolver::visitFuncCall never
-  // populates ResolvedCandidates for this kind either (ResolverCall.cpp's
-  // isErrorTypeName() branch), so the ordinary candidate-matching path
-  // below would treat it as unresolved. Result type is the SAME
-  // TurfUserErrorType a bare `ErrorType::Variant` reference already gets
-  // (visitScopeAccess()'s ErrorVariantRef branch) -- constructing WITH a
-  // message doesn't change what kind of value this is, only what runtime
-  // data it carries (Codegen's ErrorVariantConstructWithMessage branch,
-  // CodegenFunc.cpp).
+  // `ErrorType::Variant(args)` -- the construction of an error value: the
+  // variant's payload fields in order, then optionally a trailing `string`
+  // message (STD-002's, LEC-004's FREEZE.md §6.18); a variant with no fields
+  // takes just the message. Resolver::visitFuncCall() already settled the
+  // COUNT; what is checked here is each argument's TYPE. Short-circuited for
+  // the identical reason DefaultConstruct is just above: Resolver never
+  // populates ResolvedCandidates for this kind (ResolverCall.cpp's
+  // isErrorTypeName() branch), so the ordinary candidate-matching path below
+  // would treat it as unresolved. Result type is the SAME TurfUserErrorType a
+  // bare `ErrorType::Variant` reference already gets (visitScopeAccess()'s
+  // ErrorVariantRef branch) -- a payload and a message change what data the
+  // value carries, not what kind of value it is (Codegen's
+  // ErrorVariantConstruct branch, CodegenFunc.cpp).
   if (ScopeCallee &&
-      ScopeCallee->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage) {
-    if (ArgCount == 1 && ArgTypes[0] && !ArgTypes[0]->isNamed("string")) {
-      reportError(Node.getLoc(),
-                  "'" + ScopeCallee->getLeftName() + "::" + CalleeName +
-                      "(...)' expects a 'string' message, got '" +
-                      ArgTypes[0]->getName() + "'.",
-                  {}, "Pass a 'string' expression as the error's message.",
-                  "Wrong message type!");
+      ScopeCallee->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct) {
+    const std::string Full =
+        TypeIdentity::bareName(ScopeCallee->getLeftName()) + "::" + CalleeName;
+    const ErrorVariantInfo *Info = nullptr;
+    if (GlobalSymbolTable)
+      if (auto T = GlobalSymbolTable->LookupType(ScopeCallee->getLeftName()))
+        if (const auto *ET = dynamic_cast<const TurfUserErrorType *>(T.get()))
+          Info = ET->getVariantInfo(CalleeName);
+    const size_t FieldCount = Info ? Info->Fields.size() : 0;
+    const size_t NArgs = Node.getArgs().size();
+
+    for (size_t I = 0; I < FieldCount && I < NArgs; ++I) {
+      const ErrorPayloadField &Field = Info->Fields[I];
+      const ExprAST *Arg = Node.getArgs()[I].get();
+      // An untyped literal acquires 'int32' directly (OVH-005), as it would
+      // initialising a struct field or a variable of that type.
+      if (ArgTypes[I] && Field.Type &&
+          !typesCompatible(ArgTypes[I].get(), Field.Type.get()) &&
+          !untypedLiteralAcquiresInt32(Arg, Field.Type.get())) {
+        ErrorPayloadError(
+            Node.getLoc(),
+            "'" + Full + "' field '" + Field.Name + "' has type '" +
+                Field.Type->getName() + "' but the argument has type '" +
+                ArgTypes[I]->getName() + "'.",
+            "Pass a value of type '" + Field.Type->getName() + "' for '" +
+                Field.Name + "' (argument " + std::to_string(I + 1) +
+                "), as the variant declares it.")
+            .raise();
+      } else if (Field.Type) {
+        checkLiteralRepresentable(Arg, Field.Type.get(), Node.getLoc());
+      }
     }
-    setType(&Node, makeResolvedNamedType(ScopeCallee->getLeftName()));
+    if (NArgs == FieldCount + 1 && ArgTypes[FieldCount] &&
+        !ArgTypes[FieldCount]->isNamed("string")) {
+      ErrorPayloadError(
+          Node.getLoc(),
+          "the last argument of '" + Full + "(...)' is its message, which must be "
+          "a 'string', but it has type '" + ArgTypes[FieldCount]->getName() + "'.",
+          FieldCount == 0
+              ? "Pass a 'string' expression as the error's message."
+              : "'" + Full + "' takes " + std::to_string(FieldCount) +
+                    " payload field" + (FieldCount == 1 ? "" : "s") +
+                    "; an extra argument after them must be a 'string' message.")
+          .raise();
+    }
+    // The registered TurfUserErrorType itself, exactly what a bare reference
+    // gets -- not a NamedType standing in for it. `err == E::V("msg")` needs
+    // the real thing: inferRelationalType() allows `==` between an open
+    // `AnyErrorType` and a value whose type isUserError(), which a NamedType
+    // is not, so the comparison was a type error ("Cannot compare '<error>'
+    // with 'E'") for as long as STD-002's construction returned the NamedType.
+    TurfTypePtr ErrTy = GlobalSymbolTable
+                            ? GlobalSymbolTable->LookupType(ScopeCallee->getLeftName())
+                            : nullptr;
+    setType(&Node, ErrTy ? ErrTy : makeResolvedNamedType(ScopeCallee->getLeftName()));
     return;
   }
 
@@ -1814,6 +1860,21 @@ static bool AllPathsDiverge(const ExprAST *E) {
         return false;
     return AllPathsDiverge(If->getElseBody());
   }
+  // LEC-004: a `compare` diverges when some arm is certain to run -- an
+  // `otherwise`, or arms that provably cover every value (Exhaustive, set by
+  // visitCompare() on this same, already-checked block) -- and every arm body,
+  // `otherwise` included, itself diverges. Needed because reading an error's
+  // payload IS a `compare` over `err` (`recover as err run { compare err {
+  // matches IOError::NotFound(path): ... return 1; done otherwise: return 2; }
+  // }`), and without this every such block needed a dead `return` after it.
+  if (auto *Cmp = dynamic_cast<const CompareExprAST *>(E)) {
+    if (!Cmp->getOtherBody() && !Cmp->Exhaustive)
+      return false; // no arm need run -- falls through
+    for (const auto &Arm : Cmp->getArms())
+      if (!AllPathsDiverge(Arm.Body.get()))
+        return false;
+    return !Cmp->getOtherBody() || AllPathsDiverge(Cmp->getOtherBody());
+  }
   return false; // while/for/anything else: conservatively assume it can fall through
 }
 
@@ -1885,6 +1946,73 @@ void TypeChecker::visitRecoverExpr(RecoverExprAST &Node) {
   }
 
   // All three forms recover to the success type T, not `!T` (confirmed).
+  setType(&Node, SuccessTy);
+}
+
+
+// `try <expr>` (LEC-004, FREEZE.md §6.18): the operand must be a `!U`, the
+// whole expression is a `U`, and on failure the operand's error is returned
+// from the enclosing function -- which therefore has to return a `!V`. `V` is
+// free: the error union is open, so the error passes through unchanged and
+// nothing converts it. Whether a `try` is inside a `defer` is the Resolver's
+// check (it counts enclosing `defer`s); this owns the two typing rules.
+void TypeChecker::visitTry(TryExprAST &Node) {
+  if (Node.getOperand())
+    Node.getOperand()->accept(*this);
+  TurfTypePtr OperandTy = getType(Node.getOperand());
+
+  // The enclosing function: empty ReturnTypeStack_ means the top level.
+  const TurfType *Declared =
+      ReturnTypeStack_.empty() ? nullptr : ReturnTypeStack_.back().get();
+  if (!Declared) {
+    TryMisuseError(Node.getLoc(), "'try' can only be used inside a function.",
+                   "It returns the error from the function it is in. At the top "
+                   "level there is none -- move this into a function that "
+                   "returns '!T'.")
+        .raise();
+    return;
+  }
+  if (!Declared->isErrorUnion()) {
+    const std::string Fn = CurrentFuncName_;
+    if (Fn == "main") {
+      TryMisuseError(
+          Node.getLoc(),
+          "'main' returns '" + Declared->getName() + "', so there is nowhere to "
+          "propagate an error to.",
+          "Handle the error here instead: `f() recover as err run { ... return "
+          "1; };`, or `recover produce <value>` for a fallback. To use `try`, "
+          "move the fallible work into a function that returns '!T' and call "
+          "that from `main` with `recover`.")
+          .raise();
+    } else {
+      TryMisuseError(
+          Node.getLoc(),
+          "this function returns '" + Declared->getName() + "', which can't "
+          "carry an error, so 'try' has nowhere to return one to.",
+          "Declare the function's return type as '!" + Declared->getName() +
+              "' so a failure can leave it, or handle the error in place with "
+              "`recover`.")
+          .raise();
+    }
+    return;
+  }
+
+  if (!OperandTy || !OperandTy->isErrorUnion()) {
+    TryMisuseError(
+        Node.getLoc(),
+        "'try' needs a fallible operand, but this has type '" +
+            (OperandTy ? OperandTy->getName() : std::string("<unknown>")) + "'.",
+        "`try` propagates the error of a call whose return type is '!T'. An "
+        "ordinary, non-fallible expression has no error to propagate -- drop "
+        "the `try`.")
+        .raise();
+    return;
+  }
+
+  TurfTypePtr SuccessTy =
+      static_cast<const TurfErrorUnionType *>(OperandTy.get())->getSuccessTypePtr();
+  // Codegen unboxes the success value with it; see TryExprAST::ResolvedSuccessType.
+  Node.ResolvedSuccessType = SuccessTy;
   setType(&Node, SuccessTy);
 }
 

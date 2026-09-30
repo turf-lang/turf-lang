@@ -330,6 +330,17 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
         Compatible = typesCompatible(RetTy.get(), EU->getSuccessType()) ||
                      isDeclaredErrorTypeValue(RetTy.get()) ||
                      untypedLiteralAcquiresInt32(Node.getVal(), EU->getSuccessType());
+        // LEC-004 (FREEZE.md §6.18): `return f();` where `f` returns exactly
+        // the `!T` this function declares hands the fallible value back as it
+        // is -- success or error, never unwrapped. Before, it was rejected
+        // with "declares '!Rec' but returns '!Rec'" (audit F-21): the success
+        // type was compared with the operand's WHOLE union. Recorded on the
+        // node because Codegen cannot tell this from `return g(x);` by shape.
+        if (!Compatible && RetTy->isErrorUnion() &&
+            typesCompatible(RetTy.get(), Declared)) {
+          Compatible = true;
+          Node.PassesThroughFallible = true;
+        }
       } else {
         Compatible = typesCompatible(RetTy.get(), Declared) ||
                      untypedLiteralAcquiresInt32(Node.getVal(), Declared);
@@ -358,10 +369,37 @@ void TypeChecker::visitReturn(ReturnExprAST &Node) {
       }
 
       if (!Compatible) {
-        reportError(Node.getLoc(),
-                    "Return type mismatch: function declares '" +
-                        Declared->getName() + "' but returns '" +
-                        RetTy->getName() + "'.");
+        // A fallible value returned where it cannot be passed through is the
+        // commonest way to reach this, and the plain message gives no way out
+        // of it (audit F-21), so name the two that exist.
+        if (RetTy->isErrorUnion()) {
+          // Already fallible, but of a different success type: the value can
+          // only be passed through as exactly the `!T` this function returns,
+          // so the way out is to take the success value out first.
+          const std::string Hint =
+              Declared->isErrorUnion()
+                  ? "A `return f();` passes a fallible value through only when it "
+                    "is exactly this function's '" + Declared->getName() +
+                        "'; nothing converts a '" + RetTy->getName() + "' into it. "
+                        "Take the value out first with `try f()` (an error still "
+                        "leaves this function) or `recover`, then return a '" +
+                        static_cast<const TurfErrorUnionType *>(Declared)
+                            ->getSuccessType()->getName() + "'."
+                  : "That value can fail. Handle the failure here with `recover`, "
+                    "or declare this function '" + RetTy->getName() +
+                        "' so it can pass the error on -- then `return f();` or "
+                        "`try f()` both work.";
+          reportError(Node.getLoc(),
+                      "Return type mismatch: function declares '" +
+                          Declared->getName() + "' but returns '" +
+                          RetTy->getName() + "'.",
+                      {}, Hint);
+        } else {
+          reportError(Node.getLoc(),
+                      "Return type mismatch: function declares '" +
+                          Declared->getName() + "' but returns '" +
+                          RetTy->getName() + "'.");
+        }
       } else {
         // SEM-002 -- see visitVarDecl()'s identical comment
         // (TypeCheckerDecl.cpp). For a '!T'-declared function, the

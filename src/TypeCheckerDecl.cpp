@@ -490,6 +490,8 @@ void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
   // the outer function's InCallerLocationFunc_ = true into its own body.
   bool SavedInCallerLocationFunc = InCallerLocationFunc_;
   InCallerLocationFunc_ = Node.hasCallerLocation();
+  const std::string SavedFuncName = CurrentFuncName_;
+  CurrentFuncName_ = Node.getName();
 
   // LEC-002: this body was WRITTEN in the function's own declaring module.
   // A monomorphized clone has had its SourceModule CLEARED on purpose
@@ -507,6 +509,7 @@ void TypeChecker::visitFuncDef(FuncDefExprAST &Node) {
 
   CurrentModule_ = SavedModule;
   InCallerLocationFunc_ = SavedInCallerLocationFunc;
+  CurrentFuncName_ = SavedFuncName;
   ReturnTypeStack_.pop_back();
   setType(&Node, TurfVoid());
 }
@@ -547,6 +550,23 @@ void TypeChecker::visitMachineDecl(MachineDeclExprAST &Node) {
 
 
 void TypeChecker::visitErrorDecl(ErrorDeclExprAST &Node) {
+  // LEC-004: a payload field is a struct field in every way the checker
+  // cares about. A raw pointer needs `unsafe` (one diagnostic per
+  // declaration, as a struct gives one), and a generic type used ONLY as a
+  // field -- `List<string>` -- would otherwise never be recorded as an
+  // instantiation request, so its layout would never be built (TYPE-002 S15/D2;
+  // see recordGenericFieldInstantiations()).
+  bool Gated = false;
+  for (const auto &Variant : Node.getVariantInfos()) {
+    for (const auto &Field : Variant.Fields) {
+      if (!Gated && isRawPointer(Field.Type.get())) {
+        checkUnsafeGate(Field.Type.get(), Node.getLoc(), &Node);
+        Gated = true;
+      }
+      recordGenericFieldInstantiations(Field.Type, Node.getLoc(), &Node, MonoCollector_);
+    }
+  }
+
   // Declaration itself has no value-type, mirroring visitEnumDecl/
   // visitStructDecl.
   setType(&Node, TurfVoid());
