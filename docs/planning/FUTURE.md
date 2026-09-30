@@ -186,6 +186,32 @@ cross-compilation with a diagnostic at link time (ROADMAP REL-003).
   `GetCurrentThreadStackLimits`, toolchain choice (MinGW was used for v1.0.0
   archives). Other architectures need their own register-capture code
   (MEM-002 *Known pitfalls*).
+  - **Install:** an `install.ps1` for `irm https://…/install.ps1 | iex`,
+    which is how rustup, deno and bun install on Windows. It mirrors
+    REL-003's `install.sh`: detect the architecture, download the zip,
+    verify its SHA-256, unpack under `%LOCALAPPDATA%\turf`, add `bin` to the
+    user `PATH`.
+  - **"Unzip and run" needs F-20c:** today `turfc.exe` links through MinGW
+    `gcc`, which a normal Windows machine does not have.
+  - **Shell:** nothing in `turf.exe`/`turfc.exe` needs a Unix shell. They
+    run from PowerShell or cmd once their DLLs are beside them (the release
+    zip bundles them) and a linker is available. MSYS2 is only the
+    *from-source* build environment (LLVM 22, MinGW, CMake packages; bash
+    build scripts).
+- **F-20c A bundled linker and C runtime** (M–L). Release `turfc` links with
+  an embedded **lld** instead of running the system `cc`, and the archive
+  carries a C runtime to link against: musl's `libc.a` and start-up objects
+  on Linux, the MinGW-w64 CRT import libraries on Windows, the macOS SDK
+  stubs (which is its own licensing question).
+  - Result: installing TurfLang needs nothing else installed, and every
+    compiled program is fully static. That is how Zig ships.
+  - It is also F-20's cross-linking story: per-target runtimes plus one
+    linker.
+  - Trade-offs: archive size (tens of MB), and a libc to keep patched.
+    Programs `extern from` a system C library still need that library at
+    link time.
+  - ROADMAP REL-003's *Linker and C runtime* row is where 2.0 decides
+    whether this is pulled forward.
 
 ---
 
