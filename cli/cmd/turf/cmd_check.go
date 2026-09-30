@@ -38,5 +38,6 @@ only ever imported: the main requirement is skipped.
 With no .tr argument, run anywhere inside a project: the package graph is
 written to build/package-graph.json and src/main.tr and/or src/<name>.tr are
 checked with it, exactly as 'turf build' compiles them, but no executable is
-produced.
+produced. --offline and --locked apply as they do to 'turf build' (see
+'turf help build'); turf.lock is kept up to date the same way.
 `

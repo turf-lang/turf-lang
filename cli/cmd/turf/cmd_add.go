@@ -95,7 +95,7 @@ func cmdAdd(args []string) int {
 	// guarantees `add` never writes a dependency `build` then rejects (a key
 	// that is not the package's name, no root module, a cycle, a second
 	// directory for a name already in the graph).
-	g, err := project.Resolve(em)
+	g, _, err := resolveGraph(em, netFlags{}, nil)
 	if err != nil {
 		return failf("cannot add '%s' (nothing was written): %v", name, err)
 	}

@@ -77,9 +77,20 @@ func dependenciesRange(lines []string) (start, end int, ok bool) {
 // With no [dependencies] table one is appended. Only lines are inserted; every
 // existing byte is kept.
 func AddDependency(text, name, path string) (string, error) {
+	return addEntry(text, name, fmt.Sprintf("{ path = %q }", path))
+}
+
+// AddGitDependency is AddDependency for `name = { git = "<url>", <kind> = "<ref>" }`,
+// where kind is "tag", "rev" or "branch". Same placement, same guarantee that
+// every existing byte is kept.
+func AddGitDependency(text, name, url, kind, ref string) (string, error) {
+	return addEntry(text, name, fmt.Sprintf("{ git = %q, %s = %q }", url, kind, ref))
+}
+
+func addEntry(text, name, value string) (string, error) {
 	lines := splitLines(text)
 	eol := eolOf(text)
-	entry := fmt.Sprintf("%s = { path = %q }%s", name, path, eol)
+	entry := fmt.Sprintf("%s = %s%s", name, value, eol)
 
 	start, end, ok := dependenciesRange(lines)
 	if !ok {

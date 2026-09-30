@@ -102,4 +102,5 @@ With no file, run anywhere inside a project: 'turf build', then run
 build/<name> with the arguments after --, in the directory you typed the
 command in. A library-only project has nothing to run. Compiler flags are
 passed through; -o and --package-graph are refused, because turf owns both.
+--offline and --locked apply to the project build as for 'turf build'.
 `

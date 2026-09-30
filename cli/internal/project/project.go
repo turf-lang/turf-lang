@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/turf-lang/turf-lang/cli/internal/gitdep"
+	"github.com/turf-lang/turf-lang/cli/internal/lockfile"
 	"github.com/turf-lang/turf-lang/cli/internal/manifest"
 )
 
@@ -51,6 +53,20 @@ type Package struct {
 	Manifest    *manifest.Manifest
 	Deps        []string // direct dependencies, in the order the manifest declares them
 	AllowUnsafe bool     // whether the compiler honors `unsafe module;` here
+
+	// Git is set for a git dependency: what turf.lock pins for it.
+	Git *GitPin
+	// TreeRoot is the extracted git tree this package lives in, for the git
+	// package itself and for every path dependency reached through it; empty
+	// for a package on disk in the project. Such packages are covered by their
+	// git ancestor's tree hash, so they get no lock entry of their own, and a
+	// path dependency may not leave the tree.
+	TreeRoot string
+}
+
+// GitPin is the pinned identity of a git dependency.
+type GitPin struct {
+	URL, Ref, Commit, Hash string
 }
 
 // Src is the package's source root.
@@ -106,14 +122,25 @@ func canonical(path string) (string, error) {
 // symlink or a `..` detour is one package (a diamond that agrees), while two
 // different directories with the same package name are the error F-PKG-3
 // forbids: one version per name.
-func Resolve(root *manifest.Manifest) (*Graph, error) {
+//
+// Resolve knows only path dependencies; a git dependency is an error, because
+// nothing here can fetch one. ResolveWith is the same walk with a git source.
+func Resolve(root *manifest.Manifest) (*Graph, error) { return ResolveWith(root, nil) }
+
+// ResolveWith resolves root's dependencies, fetching git dependencies through
+// git. A git dependency's package directory is its extracted cache tree, and
+// from there the walk treats it like any other directory (its turf.toml is
+// loaded and the same name and library rules apply), so the "one directory per
+// name" rule that catches two path versions of a package also catches two
+// commits of a git one.
+func ResolveWith(root *manifest.Manifest, git gitdep.Source) (*Graph, error) {
 	dir, err := canonical(filepath.Dir(root.Path))
 	if err != nil {
 		return nil, err
 	}
 	rp := &Package{Name: root.Package.Name, Dir: dir, Manifest: root, AllowUnsafe: true}
 	g := &Graph{Root: rp, Packages: map[string]*Package{rp.Name: rp}}
-	w := &walker{g: g, byDir: map[string]*Package{dir: rp}, requirer: map[string]string{rp.Name: "the root package"}}
+	w := &walker{g: g, git: git, byDir: map[string]*Package{dir: rp}, requirer: map[string]requirer{rp.Name: {who: "the root package", where: dir}}}
 	if err := w.visit(rp); err != nil {
 		return nil, err
 	}
@@ -123,11 +150,122 @@ func Resolve(root *manifest.Manifest) (*Graph, error) {
 	return g, nil
 }
 
+// requirer records who first asked for a package and where it is, so the
+// message for a second, different request can name both.
+type requirer struct {
+	who   string // "package 'a' (/p/a/turf.toml)"
+	where string // a directory, or "git <url> (<ref>, commit <12 hex>)"
+}
+
 type walker struct {
 	g        *Graph
+	git      gitdep.Source // nil: git dependencies cannot be resolved
 	byDir    map[string]*Package
-	requirer map[string]string // package name -> who first asked for it, for the conflict message
+	requirer map[string]requirer
 	stack    []*Package
+}
+
+// found is one dependency edge's target, before the checks every edge shares.
+type found struct {
+	pkg   *Package
+	seen  bool   // already in the graph
+	where string // for the conflict message
+	spec  string // how the requirer spelled it, for the key/name message
+}
+
+func (w *walker) conflict(name string, who, where string) error {
+	other := w.requirer[name]
+	return fmt.Errorf("package '%s' is required from two different directories, and a build has one package per name:\n  %s needs it at %s\n  %s needs it at %s",
+		name, other.who, other.where, who, where)
+}
+
+// pathDep resolves a `path` dependency of p. A path dependency of a package
+// inside a git tree is resolved against that tree and must stay inside it: the
+// tree hash pins the tree, so a path that escaped it would be an unpinned
+// input to the build.
+func (w *walker) pathDep(p *Package, name string, d manifest.Dep) (found, error) {
+	m := p.Manifest
+	declared := d.Path
+	if !filepath.IsAbs(declared) {
+		declared = filepath.Join(p.Dir, filepath.FromSlash(declared))
+	}
+	dir, err := canonical(declared)
+	if err != nil {
+		return found{}, fmt.Errorf("dependency '%s' in %s: cannot use path \"%s\": %v", name, m.Path, d.Path, pathErr(err))
+	}
+	if p.TreeRoot != "" {
+		if rel, err := filepath.Rel(p.TreeRoot, dir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return found{}, fmt.Errorf("dependency '%s' in %s: a git dependency's path dependencies must stay inside its repository (\"%s\" is %s, outside %s)", name, m.Path, d.Path, dir, p.TreeRoot)
+		}
+	}
+	dep, seen := w.byDir[dir]
+	if !seen {
+		dm, err := manifest.Load(filepath.Join(dir, ManifestFile))
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return found{}, fmt.Errorf("dependency '%s' in %s: %s has no %s, so it is not a TurfLang package", name, m.Path, dir, ManifestFile)
+			}
+			return found{}, err
+		}
+		dep = &Package{Name: dm.Package.Name, Dir: dir, Manifest: dm, TreeRoot: p.TreeRoot}
+	}
+	return found{pkg: dep, seen: seen, where: dir, spec: d.Path}, nil
+}
+
+func pinWhere(url, ref, commit string) string {
+	return fmt.Sprintf("git %s (%s, commit %s)", url, ref, commit[:12])
+}
+
+// gitDep resolves a `git` dependency of p.
+//
+// A package that is already in the graph is not fetched again. From the same
+// URL and the same ref string it is the very same request. From the same URL
+// with a different ref string (a tag and a rev, or two tags) the new ref is
+// resolved and compared: two spellings of one commit agree, two commits are
+// the one-version-per-name conflict. Any other source for the name is a
+// conflict outright.
+func (w *walker) gitDep(p *Package, name string, d manifest.Dep, who string) (found, error) {
+	m := p.Manifest
+	if w.git == nil {
+		return found{}, fmt.Errorf("dependency '%s' in %s is a git dependency, and this resolution has no git source to fetch it with", name, m.Path)
+	}
+	req := gitdep.Request{Name: name, URL: d.Git, Ref: d.RefSpec(), File: m.Path}
+	spec := d.Git + ", " + req.Ref
+	if existing, ok := w.g.Packages[name]; ok {
+		pin := existing.Git
+		if pin == nil || pin.URL != d.Git {
+			return found{}, w.conflict(name, who, fmt.Sprintf("git %s (%s)", d.Git, req.Ref))
+		}
+		if pin.Ref == req.Ref {
+			return found{pkg: existing, seen: true, where: pinWhere(pin.URL, pin.Ref, pin.Commit), spec: spec}, nil
+		}
+		commit, err := w.git.ResolveCommit(req)
+		if err != nil {
+			return found{}, err
+		}
+		if commit != pin.Commit {
+			return found{}, w.conflict(name, who, pinWhere(d.Git, req.Ref, commit))
+		}
+		return found{pkg: existing, seen: true, where: pinWhere(d.Git, req.Ref, commit), spec: spec}, nil
+	}
+	tree, err := w.git.Materialize(req)
+	if err != nil {
+		return found{}, err
+	}
+	dir, err := canonical(tree.Dir)
+	if err != nil {
+		return found{}, err
+	}
+	dm, err := manifest.Load(filepath.Join(dir, ManifestFile))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return found{}, fmt.Errorf("dependency '%s' in %s: %s (%s) has no %s at its root, so it is not a TurfLang package", name, m.Path, d.Git, req.Ref, ManifestFile)
+		}
+		return found{}, err
+	}
+	dep := &Package{Name: dm.Package.Name, Dir: dir, Manifest: dm, TreeRoot: dir,
+		Git: &GitPin{URL: d.Git, Ref: req.Ref, Commit: tree.Commit, Hash: tree.Hash}}
+	return found{pkg: dep, where: pinWhere(d.Git, req.Ref, tree.Commit), spec: spec}, nil
 }
 
 func (w *walker) visit(p *Package) error {
@@ -137,33 +275,22 @@ func (w *walker) visit(p *Package) error {
 	m := p.Manifest
 	for _, name := range m.DepOrder {
 		d := m.Deps[name]
-		if d.Git != "" {
-			return fmt.Errorf("git dependencies arrive in LEC-001 stage 6 ('%s' in %s)", name, m.Path)
-		}
-		declared := d.Path
-		if !filepath.IsAbs(declared) {
-			declared = filepath.Join(p.Dir, filepath.FromSlash(declared))
-		}
-		dir, err := canonical(declared)
-		if err != nil {
-			return fmt.Errorf("dependency '%s' in %s: cannot use path \"%s\": %v", name, m.Path, d.Path, pathErr(err))
-		}
 		who := fmt.Sprintf("package '%s' (%s)", p.Name, m.Path)
-
-		dep, seen := w.byDir[dir]
-		if !seen {
-			mp := filepath.Join(dir, ManifestFile)
-			dm, err := manifest.Load(mp)
-			if err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					return fmt.Errorf("dependency '%s' in %s: %s has no %s, so it is not a TurfLang package", name, m.Path, dir, ManifestFile)
-				}
-				return err
-			}
-			dep = &Package{Name: dm.Package.Name, Dir: dir, Manifest: dm}
+		var (
+			f   found
+			err error
+		)
+		if d.Git != "" {
+			f, err = w.gitDep(p, name, d, who)
+		} else {
+			f, err = w.pathDep(p, name, d)
 		}
+		if err != nil {
+			return err
+		}
+		dep, seen := f.pkg, f.seen
 		if dep.Name != name {
-			return fmt.Errorf("dependency '%s' (%s) in %s is the package '%s'; the key must be its package name", name, d.Path, m.Path, dep.Name)
+			return fmt.Errorf("dependency '%s' (%s) in %s is the package '%s'; the key must be its package name", name, f.spec, m.Path, dep.Name)
 		}
 		if !dep.IsLibrary() {
 			return fmt.Errorf("dependency '%s' in %s is not a library package: it has no src/%s.tr", name, m.Path, name)
@@ -181,16 +308,15 @@ func (w *walker) visit(p *Package) error {
 			}
 		}
 		if other, ok := w.g.Packages[dep.Name]; ok && other.Dir != dep.Dir {
-			return fmt.Errorf("package '%s' is required from two different directories, and a build has one package per name:\n  %s needs it at %s\n  %s needs it at %s",
-				dep.Name, w.requirer[dep.Name], other.Dir, who, dep.Dir)
+			return w.conflict(dep.Name, who, f.where)
 		}
 		p.Deps = append(p.Deps, name)
 		if seen {
 			continue
 		}
 		w.g.Packages[dep.Name] = dep
-		w.byDir[dir] = dep
-		w.requirer[dep.Name] = who
+		w.byDir[dep.Dir] = dep
+		w.requirer[dep.Name] = requirer{who: who, where: f.where}
 		if err := w.visit(dep); err != nil {
 			return err
 		}
@@ -224,6 +350,36 @@ func (g *Graph) applyUnsafe() error {
 		p.AllowUnsafe = true
 	}
 	return nil
+}
+
+// Lock is what turf.lock must say for this graph: one entry per package but
+// the root, path packages by their directory relative to the root and git
+// packages by URL, ref, commit and tree hash.
+//
+// A package inside a git tree (a monorepo sibling the git package depends on
+// by path) gets no entry: its bytes are already pinned by the tree hash of the
+// git package that contains it, and the only path it could be named by is one
+// inside the cache, which differs on every machine.
+func (g *Graph) Lock() *lockfile.Lock {
+	l := &lockfile.Lock{}
+	for _, n := range g.Names() {
+		p := g.Packages[n]
+		switch {
+		case p == g.Root:
+		case p.Git != nil:
+			l.Packages = append(l.Packages, lockfile.Package{
+				Name: n, Source: lockfile.GitSource(p.Git.URL), Ref: p.Git.Ref, Commit: p.Git.Commit, Hash: p.Git.Hash,
+			})
+		case p.TreeRoot != "":
+		default:
+			rel := filepath.ToSlash(p.Dir)
+			if r, err := filepath.Rel(g.Root.Dir, p.Dir); err == nil {
+				rel = filepath.ToSlash(r)
+			}
+			l.Packages = append(l.Packages, lockfile.Package{Name: n, Source: lockfile.PathSource(rel)})
+		}
+	}
+	return l
 }
 
 // CheckStdlibNames rejects a package that could never be imported because its

@@ -43,6 +43,8 @@ unset TURF_HOME TURF_COMPILER
 V=$(head -1 VERSION)
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
+# Git dependencies fetch into a cache; never the developer's own.
+export TURF_CACHE_DIR="$WORK/cache"
 FAILED=0
 fail() { echo "FAIL: $1"; FAILED=$((FAILED + 1)); }
 
@@ -359,11 +361,14 @@ name = "app"
 version = "0.1.0"
 [dependencies]
 m = { path = "../m", git = "https://example.invalid/m", tag = "v1" }'
-manifest_case "a git dependency" 1 "git dependencies arrive in LEC-001 stage 6 ('m' in" '[package]
+# A git dependency is now fetched, so this one names a repository that cannot
+# exist (a local path: no network, whatever the machine's DNS does). The
+# behaviour of real ones is git_deps_smoke.sh's.
+manifest_case "a git dependency that cannot be fetched" 1 "cannot fetch 'm' from /nonexistent/turf-smoke/m.git" '[package]
 name = "app"
 version = "0.1.0"
 [dependencies]
-m = { git = "https://example.invalid/m", tag = "v1" }'
+m = { git = "/nonexistent/turf-smoke/m.git", tag = "v1" }'
 manifest_case "reserved word as the package name" 1 "'fn' is a reserved word" '[package]
 name = "fn"
 version = "0.1.0"'

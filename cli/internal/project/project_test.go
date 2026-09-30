@@ -167,21 +167,15 @@ func TestNotALibrary(t *testing.T) {
 	mustFail(t, g, err, "'tool'", "is not a library package: it has no src/tool.tr")
 }
 
-func TestGitDependency(t *testing.T) {
+// Resolve, with no git source, cannot fetch anything, and says which entry
+// asked for it.
+func TestGitDependencyWithoutASource(t *testing.T) {
 	root := layout(t,
 		pkgSpec{dir: "app", name: "app", main: true, deps: "net = { git = \"https://x/net\", tag = \"v1\" }"},
+		pkgSpec{dir: "a", name: "a", lib: true, deps: "deep = { git = \"u\", rev = \"abcd\" }"},
 	)
 	g, err := build(t, root, "app")
-	mustFail(t, g, err, "git dependencies arrive in LEC-001 stage 6 ('net' in ", "turf.toml")
-}
-
-func TestGitDependencyDeepInTheGraph(t *testing.T) {
-	root := layout(t,
-		pkgSpec{dir: "app", name: "app", main: true, deps: "a = " + dep("../a")},
-		pkgSpec{dir: "a", name: "a", lib: true, deps: "net = { git = \"u\", rev = \"r\" }"},
-	)
-	g, err := build(t, root, "app")
-	mustFail(t, g, err, "('net' in ", filepath.Join(root, "a", "turf.toml"))
+	mustFail(t, g, err, "dependency 'net' in ", "is a git dependency", filepath.Join(root, "app", "turf.toml"))
 }
 
 func TestMissingDirectoryAndManifest(t *testing.T) {

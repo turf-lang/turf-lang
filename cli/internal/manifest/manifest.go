@@ -36,10 +36,25 @@ type Package struct {
 }
 
 // Dep is one [dependencies] entry. Exactly one of Path or Git is set; a git
-// dependency has exactly one of Tag, Rev, Branch. Git dependencies parse (so
-// `turf add` and the errors are uniform) but building one is stage 6.
+// dependency has exactly one of Tag, Rev, Branch.
 type Dep struct {
 	Path, Git, Tag, Rev, Branch string
+}
+
+// RefSpec spells a git dependency's ref the way turf.lock records it:
+// "tag=v1.2.0", "rev=3f2a9c1" or "branch=main". Two requests are the same
+// request only if their URL and this string are equal, which is what lets a
+// lock entry stand for a manifest line without re-resolving anything.
+func (d Dep) RefSpec() string {
+	switch {
+	case d.Tag != "":
+		return "tag=" + d.Tag
+	case d.Rev != "":
+		return "rev=" + d.Rev
+	case d.Branch != "":
+		return "branch=" + d.Branch
+	}
+	return ""
 }
 
 // Error is a manifest failure the user can act on: what is wrong, where, and

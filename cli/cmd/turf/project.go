@@ -61,31 +61,45 @@ func checkProjectFlags(flags []string) int {
 	return 0
 }
 
+// loadRootManifest finds the project from the cwd and reads its turf.toml: the
+// part of every project command that needs neither a compiler nor the network.
+func loadRootManifest() (*manifest.Manifest, int) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, failf("cannot determine the current directory: %v", err)
+	}
+	dir, err := project.FindRoot(cwd)
+	if errors.Is(err, project.ErrNoProject) {
+		return nil, usagef("%s", noProjectMsg)
+	} else if err != nil {
+		return nil, failf("%v", err)
+	}
+	m, err := manifest.Load(filepath.Join(dir, project.ManifestFile))
+	if err != nil {
+		return nil, failf("%v", err)
+	}
+	return m, 0
+}
+
 // withProject does everything a project command needs before it can call the
 // compiler, in the order that gives the most useful first error: find the
 // project and read its manifest (no compiler needed to say "no turf.toml"),
 // then locate the compiler, then resolve and check the graph, then write it.
-func withProject(fn func(p *projectBuild) int) int {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return failf("cannot determine the current directory: %v", err)
-	}
-	dir, err := project.FindRoot(cwd)
-	if errors.Is(err, project.ErrNoProject) {
-		return usagef("%s", noProjectMsg)
-	} else if err != nil {
-		return failf("%v", err)
-	}
-	m, err := manifest.Load(filepath.Join(dir, project.ManifestFile))
-	if err != nil {
-		return failf("%v", err)
+//
+// The lock is committed last of all (commitLock), after the compiler and every
+// name check have passed, so a build that fails for another reason does not
+// leave turf.lock half updated.
+func withProject(nf netFlags, fn func(p *projectBuild) int) int {
+	m, code := loadRootManifest()
+	if code != 0 {
+		return code
 	}
 
 	return withCompiler(func(compiler string) int {
 		if abs, err := filepath.Abs(compiler); err == nil {
 			compiler = abs
 		}
-		g, err := project.Resolve(m)
+		g, oldLock, err := resolveGraph(m, nf, nil)
 		if err != nil {
 			return failf("%v", err)
 		}
@@ -106,6 +120,10 @@ func withProject(fn func(p *projectBuild) int) int {
 		root := g.Root
 		if !root.HasMain() && !root.IsLibrary() {
 			return failf("package '%s' has neither src/main.tr (a program) nor src/%s.tr (a library)", root.Name, root.Name)
+		}
+
+		if err := commitLock(m, g, oldLock, nf); err != nil {
+			return failf("%v", err)
 		}
 
 		data, err := g.JSON()
@@ -167,10 +185,11 @@ func catchInterrupt() (stop func()) {
 }
 
 func projectRun(flags, programArgs []string) int {
+	nf, flags := splitNetFlags(flags)
 	if code := checkProjectFlags(flags); code != 0 {
 		return code
 	}
-	return withProject(func(p *projectBuild) int {
+	return withProject(nf, func(p *projectBuild) int {
 		if !p.graph.Root.HasMain() {
 			return failf("'%s' is a library; there is nothing to run", p.name())
 		}
@@ -187,17 +206,19 @@ func projectRun(flags, programArgs []string) int {
 }
 
 func cmdBuild(args []string) int {
+	nf, args := splitNetFlags(args)
 	if code := checkProjectFlags(args); code != 0 {
 		return code
 	}
-	return withProject(func(p *projectBuild) int { return p.compile(args, false) })
+	return withProject(nf, func(p *projectBuild) int { return p.compile(args, false) })
 }
 
 func projectCheck(flags []string) int {
+	nf, flags := splitNetFlags(flags)
 	if code := checkProjectFlags(flags); code != 0 {
 		return code
 	}
-	return withProject(func(p *projectBuild) int { return p.compile(flags, true) })
+	return withProject(nf, func(p *projectBuild) int { return p.compile(flags, true) })
 }
 
 func cmdClean(args []string) int {
@@ -224,10 +245,10 @@ func cmdClean(args []string) int {
 const helpBuild = `turf build - build the project
 
 Usage:
-  turf build [compiler flags...]
+  turf build [--offline] [--locked] [compiler flags...]
 
 Run anywhere inside a project (a directory tree with a turf.toml). Reads the
-manifests, resolves the path dependencies into a package graph, writes it to
+manifests, resolves the dependencies into a package graph, writes it to
 build/package-graph.json, and drives the compiler with it:
 
   src/main.tr present      turfc --package-graph ... src/main.tr -o build/<name>
@@ -237,8 +258,21 @@ so a library's errors show even when no program imports it. Compiler flags such
 as -O2 or -g are passed through. -o and --package-graph are refused: turf owns
 both. The exit status is the first failing compiler status.
 
-Dependencies are 'path' dependencies for now; git dependencies and the lockfile
-arrive in LEC-001 stage 6.
+Dependencies are 'path' (a directory) or 'git' (a URL with a tag, rev or
+branch). A git dependency is fetched once into the cache ($TURF_CACHE_DIR, else
+your user cache directory's turf/) and pinned in turf.lock, next to turf.toml,
+by commit and by a SHA-256 of its extracted tree. Every build checks that hash,
+so a cached tree that was edited is an error, not a silent change. Commit
+turf.lock. Only 'turf update' moves a pin: a re-pointed tag or a branch that
+moved is not noticed by build.
+
+  --offline   run no git network command; a dependency that is not both locked
+              and cached is an error naming it
+  --locked    turf.lock must already be exactly what this build needs (CI):
+              any difference, or no turf.lock, is an error and nothing is
+              written
+
+--offline and --locked are turf's own and are not passed to the compiler.
 `
 
 const helpClean = `turf clean - remove the project's build output
