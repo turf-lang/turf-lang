@@ -718,54 +718,94 @@ void CFGBuilder::visitCompare(ExprAST *E) {
   // of uninitialized variables used as the compare subject.
   if (Cmp->getSubject())
     CmpEntry->addStatement(const_cast<ExprAST *>(Cmp->getSubject()));
-  CmpEntry->setTerminator(TerminatorKind::Branch, Cmp->getLoc());
+
+  // LEC-003 (FREEZE.md §6.17): arms are tried in SOURCE ORDER and the first
+  // header that matches wins, so the graph is a chain, not the old fan-out
+  // from the subject to every arm. Each `matches` header is its own test
+  // block holding what that header reads and defines -- a value pattern's
+  // expression, a struct pattern's bindings (definitions, on the edge into
+  // the arm), then its guard LAST, so a guard is a real two-way branch whose
+  // true edge (successor 0, into the arm body) NullabilityPass narrows
+  // through, exactly like an `if` condition. Every header of an arm reaches
+  // the same body block, which is how stacked headers share one body.
+  //
+  //   Prev --fail--> test(arm0,h0) --match--> body0
+  //   test(arm0,h0) --fail--> test(arm0,h1) --match--> body0 ...
+  //   last test --fail--> otherwise | end (unless the compare is exhaustive)
+  //
+  // `Prev` is the block whose FAIL edge leads to the next test. The match edge
+  // is added before the fail edge, so successor 0 is always the match.
+  TurfBasicBlock *Prev = CmpEntry;
+  CmpEntry->setTerminator(TerminatorKind::Unconditional, Cmp->getLoc());
+  bool PrevIsRealTest = false;
 
   for (const auto &Arm : Cmp->getArms()) {
-    TurfBasicBlock *ArmBB = createBlock("compare.arm");
-    CurrentCFG->addEdge(CmpEntry, ArmBB);
+    TurfBasicBlock *ArmBodyBB = createBlock("compare.arm");
 
-    setInsertPoint(ArmBB);
+    for (size_t K = 0; K < Arm.Values.size(); ++K) {
+      TurfBasicBlock *TestBB = createBlock("compare.test");
+      CurrentCFG->addEdge(Prev, TestBB); // Prev's fail edge (or the entry's only one)
+      if (PrevIsRealTest)
+        Prev->setTerminator(TerminatorKind::Branch, Cmp->getLoc());
+
+      TestBB->addStatement(Arm.Values[K].get());
+      if (K < Arm.Guards.size() && Arm.Guards[K])
+        TestBB->addStatement(Arm.Guards[K].get());
+      CurrentCFG->addEdge(TestBB, ArmBodyBB); // the match edge: successor 0 once a fail edge follows
+      TestBB->setTerminator(TerminatorKind::Unconditional, Cmp->getLoc());
+
+      Prev = TestBB;
+      PrevIsRealTest = true;
+    }
+
+    setInsertPoint(ArmBodyBB);
     visitExpr(Arm.Body.get());
     if (CurrentBlock && !CurrentBlock->hasExplicitTerminator())
       CurrentCFG->addEdge(CurrentBlock, MergeBB);
   }
 
+  // Where a failed last header goes. The fail edge of a test was appended AFTER
+  // its match edge, which is the order NullabilityPass reads as (true, false).
+  auto linkFail = [&](TurfBasicBlock *To) {
+    CurrentCFG->addEdge(Prev, To);
+    if (PrevIsRealTest)
+      Prev->setTerminator(TerminatorKind::Branch, Cmp->getLoc());
+  };
+
   if (Cmp->getOtherBody()) {
     TurfBasicBlock *OtherBB = createBlock("compare.otherwise");
-    CurrentCFG->addEdge(CmpEntry, OtherBB);
+    linkFail(OtherBB);
 
     setInsertPoint(OtherBB);
     visitExpr(Cmp->getOtherBodyMut());
     if (CurrentBlock && !CurrentBlock->hasExplicitTerminator())
       CurrentCFG->addEdge(CurrentBlock, MergeBB);
-  } else if (!Cmp->SubjectIsEnum) {
-    // No `otherwise`, and not a verified-exhaustive enum compare (the only
-    // other way TypeChecker allows omitting `otherwise` -- see its
-    // "Exhaustiveness gate for Enums"): the "nothing matched" fallthrough
-    // path is genuinely possible and reaches MergeBB directly without
-    // running any arm.
+  } else if (!Cmp->Exhaustive) {
+    // No `otherwise`, and the TypeChecker could not prove the arms cover every
+    // value (an enum/bool with every value listed, or an unguarded header
+    // that matches everything -- see its exhaustiveness step): "nothing
+    // matched" is genuinely possible and reaches MergeBB without running any
+    // arm.
     //
-    // Deliberately NOT added when SubjectIsEnum is true: doing so
-    // unconditionally (regardless of exhaustiveness) was tried and reverted
-    // -- it doesn't affect reachability/unreachable-code detection (see
-    // this function's doc comment, `setInsertPoint(MergeBB)` runs either
-    // way below), but it DOES corrupt DefiniteAssignmentPass's dataflow:
-    // that pass computes "is X assigned at this point" as the INTERSECTION
-    // of "assigned at end" across every predecessor block, and a spurious
-    // edge to MergeBB directly from CmpEntry -- with the compare's actual
-    // arms never having run at all -- is a predecessor where nothing is
-    // assigned. That drags the intersection down to
-    // "unassigned" even when every real arm assigns the same variable,
-    // producing a false "used before it has a value" error for a variable
-    // that's genuinely assigned on every reachable path through an
-    // exhaustive compare.
-    CurrentCFG->addEdge(CmpEntry, MergeBB);
+    // Deliberately NOT added for a proven-exhaustive compare: doing so
+    // unconditionally was tried and reverted -- it doesn't affect
+    // reachability/unreachable-code detection (see this function's doc
+    // comment, `setInsertPoint(MergeBB)` runs either way below), but it DOES
+    // corrupt DefiniteAssignmentPass's dataflow: that pass computes "is X
+    // assigned at this point" as the INTERSECTION of "assigned at end" across
+    // every predecessor block, and a spurious edge to MergeBB from the last
+    // test -- with no arm having run -- is a predecessor where nothing is
+    // assigned. That drags the intersection down to "unassigned" even when
+    // every real arm assigns the same variable, producing a false "used
+    // before it has a value" error for a variable that's genuinely assigned
+    // on every reachable path through an exhaustive compare.
+    linkFail(MergeBB);
   }
-  // else: SubjectIsEnum && no otherwise -- no direct CmpEntry->MergeBB edge
-  // is added; MergeBB's only predecessors are the arms themselves (or none,
-  // if every arm terminates -- in which case MergeBB is simply unreachable,
-  // which is fine: see this function's doc comment for why unreachable
-  // trailing code is never flagged as an error for this construct anyway).
+  // else: proven exhaustive, no `otherwise` -- the last test has no fail edge;
+  // MergeBB's only predecessors are the arms themselves (or none, if every arm
+  // terminates -- in which case MergeBB is simply unreachable, which is fine:
+  // see this function's doc comment for why unreachable trailing code is never
+  // flagged as an error for this construct anyway).
 
   // See this function's doc comment: `compare` never counts as a hard
   // terminator on its own, so execution always continues from MergeBB,

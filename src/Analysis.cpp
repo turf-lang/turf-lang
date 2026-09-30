@@ -149,6 +149,23 @@ public:
     visitChild(Node.getBody());
   }
 
+  // LEC-003: a `compare` header's pattern is a CFG statement (see
+  // CFGBuilder::visitCompare()), so this is where a binding becomes a
+  // DEFINITION -- on the edge into the arm, exactly as FREEZE.md §6.17 says.
+  // Without it a binding would be an "undeclared-here" local that no pass ever
+  // saw assigned, and a binding read in the arm body could never be proven
+  // defined. A struct pattern's value sub-patterns (`x: 0`) read nothing
+  // (literals and enum variants), so only the bindings matter.
+  void visitBindingPattern(BindingPatternExprAST &Node) override {
+    if (Node.ResolvedVar)
+      onDef(Node.getLoc(), Node.ResolvedVar.get());
+  }
+
+  void visitStructPattern(StructPatternExprAST &Node) override {
+    for (auto &F : Node.getFieldsMut())
+      visitChild(F.Sub.get());
+  }
+
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
 
   // LANG-003: without this, a variable read or defined ONLY inside a
@@ -252,6 +269,12 @@ class BodyDeclCollector : public ASTVisitor {
 
 public:
   AssignSet LocalDecls; // All locally-declared symbols (with or without init)
+  /// The subset of LocalDecls that are `compare` pattern bindings (LEC-003).
+  /// A binding is immutable and defined exactly once, on entry to its arm, so
+  /// "assigned but never read" would only repeat the unused-variable warning
+  /// the same name already gets -- LivenessAnalysisPass skips dead-store
+  /// reports for these.
+  AssignSet PatternBindings;
 
   void visitVarDecl(VarDeclExprAST &Node) override {
     if (Node.ResolvedSymbol)
@@ -285,6 +308,19 @@ public:
   }
   void visitForEach(ForEachExprAST &Node) override {
     visitChild(Node.getIterable()); visitChild(Node.getBody());
+  }
+  // LEC-003: a binding is a body-declared local, like a `mut` -- it MUST be in
+  // this set, or DefiniteAssignmentPass treats it as parameter-like (never
+  // flagged) and LivenessAnalysisPass never reports it unused.
+  void visitBindingPattern(BindingPatternExprAST &Node) override {
+    if (Node.ResolvedVar) {
+      LocalDecls.insert(Node.ResolvedVar.get());
+      PatternBindings.insert(Node.ResolvedVar.get());
+    }
+  }
+  void visitStructPattern(StructPatternExprAST &Node) override {
+    for (auto &F : Node.getFieldsMut())
+      visitChild(F.Sub.get());
   }
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
   void visitAssignment(AssignmentExprAST &Node) override {
@@ -461,6 +497,8 @@ void LivenessAnalysisPass::runOnCFG(
   // Mirrors DefiniteAssignmentPass's AllBodyDeclared. Parameters are excluded
   // so we never warn about an unused parameter.
   AssignSet AllBodyDeclared;
+  // The pattern bindings among them (LEC-003): see BodyDeclCollector.
+  AssignSet BindingSyms;
   // Also collect the SourceLocation of each VarDecl for the declaration site
   // in UnusedVariableWarning.
   std::unordered_map<const VariableSymbol *, SourceLocation> DeclLocMap;
@@ -473,6 +511,8 @@ void LivenessAnalysisPass::runOnCFG(
         // DeclLoc from ResolverSourceLocation → SourceLocation
         DeclLocMap[Sym] = {Sym->DeclLoc.Line, Sym->DeclLoc.Col};
       }
+      for (const VariableSymbol *Sym : Coll.PatternBindings)
+        BindingSyms.insert(Sym);
     }
   }
 
@@ -560,6 +600,11 @@ void LivenessAnalysisPass::runOnCFG(
   // A variable declared in the body that's never in EverRead (collected
   // above, in Step 1) is never read anywhere. Flag it at its declaration site.
   for (const VariableSymbol *Sym : AllBodyDeclared) {
+    // A name starting with '_' says "deliberately unused" -- the convention
+    // the warning's own hint recommends, which only became true once `_name`
+    // lexed (LEC-003, FREEZE.md §6.17).
+    if (!Sym->Name.empty() && Sym->Name[0] == '_')
+      continue;
     if (!EverRead.count(Sym) && !ParamSymbols.count(Sym)) {
       auto LocIt = DeclLocMap.find(Sym);
       SourceLocation Loc = (LocIt != DeclLocMap.end()) ? LocIt->second : SourceLocation{0, 0};
@@ -600,7 +645,10 @@ void LivenessAnalysisPass::runOnCFG(
       // Any def whose target is NOT in LiveAfter is a dead store.
       // Only flag locals (in AllBodyDeclared), not parameters.
       for (auto &[Loc, Sym] : StmtDefs) {
-        if (AllBodyDeclared.count(Sym) && !LiveAfter.count(Sym)) {
+        if (AllBodyDeclared.count(Sym) && !LiveAfter.count(Sym) &&
+            !BindingSyms.count(Sym) &&
+            // `_name`: same "deliberately unused" convention as Step 3.
+            !(!Sym->Name.empty() && Sym->Name[0] == '_')) {
           DeadStoreWarning(Loc, Sym->Name).emit();
         }
       }
@@ -724,6 +772,8 @@ public:
     for (auto &Arm : Node.getArmsMut()) {
       for (auto &Val : Arm.Values)
         visitChild(Val.get());
+      for (auto &G : Arm.Guards)
+        visitChild(G.get());
       visitChild(Arm.Body.get());
     }
     visitChild(Node.getOtherBodyMut());
@@ -1010,6 +1060,8 @@ public:
     for (const auto &Arm : Node.getArms()) {
       for (const auto &V : Arm.Values)
         visitChild(V.get());
+      for (const auto &G : Arm.Guards)
+        visitChild(G.get());
       visitChild(Arm.Body.get());
     }
     visitChild(Node.getOtherBody());
@@ -1721,6 +1773,10 @@ public:
     for (const auto &Arm : Node.getArms()) {
       for (const auto &V : Arm.Values)
         recurse(V.get());
+      // A guard is an ordinary expression and can hold anything an `if`
+      // condition can -- including a call that takes `&local`.
+      for (const auto &G : Arm.Guards)
+        recurse(G.get());
       recurse(Arm.Body.get());
     }
     recurse(Node.getOtherBody());
