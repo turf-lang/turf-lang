@@ -29,10 +29,16 @@
 > D13) is done** — see `docs/development/changes/LEC-002.md` (landed
 > 2026-09-29; DEC-7 answered "private by default", with `pub` and `public` as
 > synonyms, frozen as `FREEZE.md` §6.15; `turf --migrate=pub` is the
-> migration). **`LEC-001` is in progress**: stage 1 (freeze, `FREEZE.md`
-> §6.16) landed 2026-09-30, with DEC-8 decided *against* the recommendation
-> (the Go CLI becomes `turf`, the compiler `turfc`) and DEC-9 as
-> recommended; see `docs/development/changes/LEC-001.md`. Part I's sequence has the
+> migration). **`LEC-001` (projects, dependencies, builds, D7 scoped) is
+> done** — see `docs/development/changes/LEC-001.md` (landed 2026-09-30):
+> `FREEZE.md` §6.16 (DEC-8 decided *against* the recommendation, so the Go CLI
+> is `turf` and the compiler `turfc`, independently versioned; DEC-9 as
+> recommended), path and git dependencies with a verified `turf.lock`,
+> collision-free module resolution (E090/E091), `[unsafe] allow`, `examples/`,
+> and `docs/reference/projects_and_packages.md`. One completion criterion is
+> handed on rather than met: the Part IX walkthrough "verbatim on a clean
+> machine" needs REL-008's installer and `turf test` is REL-002 (Part IX now
+> says line by line what works today). Part I's sequence has the
 > current state of every Phase 1 item; the rest of Phase 1 and the other
 > Phase 2+ items remain unimplemented. Items marked
 > **DECISION** need an explicit answer from the project owner before their
@@ -127,7 +133,7 @@ PHASE 1  Foundation                   SMP-002  one generic type walker      DONE
    │                                  FDN-005  GC hardening  stages 1–4 DONE (FDN-005.md, 2026-09-28/29); runs on to RC as a CI gate
    ▼
 PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D13)  DONE (LEC-002.md, 2026-09-29)
-   │                                  LEC-001  projects, dependencies, build (D7)
+   │                                  LEC-001  projects, dependencies, build (D7)  DONE (LEC-001.md, 2026-09-30; Part IX clean-machine walkthrough handed to REL-008)
    │                                  LEC-003  pattern matching (D14)
    │                                  LEC-004  error payloads + `try` (D15)
    │                                  LEC-006  collection indexing coherence (generic operators)
