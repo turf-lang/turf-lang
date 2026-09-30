@@ -53,6 +53,9 @@ Value *BindingPatternExprAST::codegen() {
 Value *StructPatternExprAST::codegen() {
   report_fatal_error("Internal error: a struct pattern reached Codegen as an expression.");
 }
+Value *ErrorVariantPatternExprAST::codegen() {
+  report_fatal_error("Internal error: an error-variant pattern reached Codegen as an expression.");
+}
 
 namespace {
 
@@ -129,6 +132,55 @@ bool emitPatternTest(ExprAST *Pat, Value *Addr, const TurfType *Ty, Type *LoadTy
       Value *FieldAddr = Builder->CreateStructGEP(LLVMST, StructAddr, Idx, "pat.field");
       if (!emitPatternTest(F.Sub.get(), FieldAddr, F.FieldType.get(),
                            getLLVMType(F.FieldType.get()), FailBB, TheFunction, Slots))
+        return false;
+    }
+    return true;
+  }
+
+  // An error-variant pattern (LEC-004): the slot holds a `TurfErrorValue*`.
+  // The header matches when its tag is this variant's (strcmp on the tag
+  // strings, exactly what `err == E::V` compares), and then each listed
+  // payload field, read positionally out of the payload struct, matches its
+  // sub-pattern. A variant with no fields has a null payload, which is never
+  // read: the TypeChecker only lets a pattern with nothing to destructure name
+  // no fields, so `NeedsPayload` below is false for it.
+  if (auto *EV = dynamic_cast<ErrorVariantPatternExprAST *>(Pat)) {
+    const auto *Head = static_cast<const ScopeAccessExprAST *>(EV->getHead());
+    Value *ErrPtr = Builder->CreateLoad(PointerType::get(*TheContext, 0), Addr, "pat.err");
+
+    Value *Tag = LoadErrorValueField(ErrPtr, /*FieldIdx=*/0, "tag");
+    Value *Cmp = Builder->CreateCall(
+        getOrCreateStrcmpFn(),
+        {Tag, BuildErrorVariantTag(Head->getLeftName(), Head->getRightName())},
+        "pat.tagcmp");
+    Value *SameTag = Builder->CreateICmpEQ(
+        Cmp, ConstantInt::get(Type::getInt32Ty(*TheContext), 0), "pat.tageq");
+    BasicBlock *TagOkBB = BasicBlock::Create(*TheContext, "pat.tagok", TheFunction);
+    Builder->CreateCondBr(SameTag, TagOkBB, FailBB);
+    Builder->SetInsertPoint(TagOkBB);
+
+    bool NeedsPayload = false;
+    for (const auto &Sub : EV->getSubs())
+      if (!dynamic_cast<WildcardPatternExprAST *>(Sub.get()))
+        NeedsPayload = true;
+    if (!NeedsPayload)
+      return true;
+
+    llvm::StructType *PTy =
+        getErrorPayloadStructType(Head->getLeftName(), Head->getRightName());
+    if (!PTy)
+      report_fatal_error("Internal error: an error-variant pattern names fields "
+                         "of a variant that has none. The TypeChecker should "
+                         "have rejected it.");
+    Value *Payload = LoadErrorValueField(ErrPtr, /*FieldIdx=*/2, "payload");
+    for (size_t I = 0; I < EV->getSubs().size(); ++I) {
+      ExprAST *Sub = EV->getSubsMut()[I].get();
+      if (dynamic_cast<WildcardPatternExprAST *>(Sub))
+        continue;
+      Value *FieldAddr = Builder->CreateStructGEP(PTy, Payload, I, "pat.payload");
+      if (!emitPatternTest(Sub, FieldAddr, EV->FieldTypes[I].get(),
+                           getLLVMType(EV->FieldTypes[I].get()), FailBB, TheFunction,
+                           Slots))
         return false;
     }
     return true;

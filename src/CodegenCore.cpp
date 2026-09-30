@@ -180,14 +180,18 @@ static llvm::StructType *getFallibleValueType() {
 }
 
 
-/// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `{ i8* tag, i8* message }`
-/// -- cached, built once. An error value's runtime representation, UNIFORM
-/// across every occurrence (a bare `ErrorType::Variant` reference and an
-/// `ErrorType::Variant("msg")` construction produce the exact same SHAPE,
-/// differing only in what `message` points to) -- deliberately not a
-/// discriminated union, since telling the two cases apart at runtime
-/// without a discriminant would mean reading an arbitrary number of bytes
-/// past a bare tag string's own NUL terminator. `errorPayload` in
+/// `{ i8* tag, i8* message, i8* payload }` -- cached, built once. An error
+/// value's runtime representation, UNIFORM across every occurrence (a bare
+/// `ErrorType::Variant` reference, an `ErrorType::Variant("msg")` and a
+/// `ErrorType::Variant(path, "msg")` construction produce the exact same
+/// SHAPE, differing only in what `message` and `payload` point to) --
+/// deliberately not a discriminated union, since telling the cases apart at
+/// runtime without a discriminant would mean reading an arbitrary number of
+/// bytes past a bare tag string's own NUL terminator (STD-002). `payload`
+/// (LEC-004, FREEZE.md §6.18) is null for a variant with no fields, else a
+/// GC-allocated per-variant struct (getErrorPayloadStructType()) with its own
+/// type descriptor, so the collector traces a `string` or collection held in
+/// a payload exactly as it traces `message`. `errorPayload` in
 /// FallibleValue above, and `err`'s own alloca (RecoverExprAST::codegen(),
 /// this file, further down), both still just hold an OPAQUE i8*/ptr to one
 /// of these -- neither needed any change, since LLVM pointers carry no
@@ -197,8 +201,60 @@ static llvm::StructType *getErrorValueType() {
   if (!Ty) {
     Ty = llvm::StructType::create(*TheContext, "TurfErrorValue");
     Ty->setBody({PointerType::get(*TheContext, 0),
+                PointerType::get(*TheContext, 0),
                 PointerType::get(*TheContext, 0)});
   }
+  return Ty;
+}
+
+
+/// The registered declaration of error type @p ErrorTypeName, or nullptr.
+static const TurfUserErrorType *lookupErrorTypeDecl(const std::string &ErrorTypeName) {
+  if (!GlobalSymbolTable)
+    return nullptr;
+  auto T = GlobalSymbolTable->LookupType(ErrorTypeName);
+  return T ? dynamic_cast<const TurfUserErrorType *>(T.get()) : nullptr;
+}
+
+
+std::vector<TurfTypePtr> ErrorVariantFieldTypes(const std::string &ErrorTypeName,
+                                                const std::string &VariantName) {
+  std::vector<TurfTypePtr> Out;
+  if (const auto *ET = lookupErrorTypeDecl(ErrorTypeName))
+    if (const auto *Info = ET->getVariantInfo(VariantName))
+      for (const auto &F : Info->Fields)
+        Out.push_back(F.Type);
+  return Out;
+}
+
+
+/// One named LLVM struct per error variant that has fields, holding those
+/// fields by value in declaration order. NAMED so that EmitAllTurfTypeDescs()
+/// (which emits a descriptor for every identified struct in the module)
+/// covers it without any special case -- a payload is a GC block like any
+/// struct instance, and its descriptor is what keeps a `string` field inside
+/// it alive across a collection. Built lazily at first use, which is always
+/// inside a function body: by then every struct a field can name is complete
+/// (main.cpp builds all of them before any body), so the layout is never
+/// computed against an opaque stub.
+llvm::StructType *getErrorPayloadStructType(const std::string &ErrorTypeName,
+                                            const std::string &VariantName) {
+  static std::map<std::string, llvm::StructType *> Cache;
+  const std::string Key = ErrorTypeName + "::" + VariantName;
+  auto It = Cache.find(Key);
+  if (It != Cache.end())
+    return It->second;
+
+  std::vector<TurfTypePtr> Fields = ErrorVariantFieldTypes(ErrorTypeName, VariantName);
+  if (Fields.empty())
+    return nullptr;
+
+  std::vector<llvm::Type *> LLVMFields;
+  for (const auto &F : Fields)
+    LLVMFields.push_back(getLLVMType(F.get()));
+  auto *Ty = llvm::StructType::create(*TheContext, LLVMFields,
+                                      "errpayload." + ErrorTypeName + "." + VariantName);
+  Cache[Key] = Ty;
   return Ty;
 }
 
@@ -241,12 +297,17 @@ static llvm::Constant *BuildBareTagString(const std::string &ErrorTypeName,
       Builder->CreateGlobalString(ErrorTypeName + "::" + VariantName, "errtag"));
 }
 
+Value *BuildErrorVariantTag(const std::string &ErrorTypeName,
+                            const std::string &VariantName) {
+  return BuildBareTagString(ErrorTypeName, VariantName);
+}
+
 
 /// Declares (once) or looks up `libturfrt`'s `turf_rt_alloc` -- the typed,
 /// COLLECTED GC-heap allocation entrypoint (`runtime/turfrt.h`), used to
 /// heap-box a success value that doesn't fit in a FallibleValue's 64-bit
-/// successBits slot (BoxToI64Slot()'s struct branch) and a message-carrying
-/// error value (CodegenErrorVariantConstructWithMessage(), below). OVH-002
+/// successBits slot (BoxToI64Slot()'s struct branch) and a constructed
+/// error value and its payload (CodegenErrorVariantConstruct(), below). OVH-002
 /// (docs/development/changes/OVH-002.md): both call sites used to
 /// reach a bare `malloc` instead -- correct before MEM-002's collector
 /// existed, a live use-after-free once it did, because a GC-heap pointer
@@ -391,20 +452,26 @@ Function *getOrCreateStrcmpFn() {
 /// Builds the runtime value of a BARE `ErrorType::Variant` reference
 /// (docs/architecture/errors_and_recover.md), e.g. `return
 /// MathError::DivisionByZero;` -- a pointer to a global constant
-/// `TurfErrorValue{tag, message=""}` (STD-002: see getErrorValueType()'s
-/// own doc comment for why this is the UNIFORM shape every error value now
-/// has, message-carrying or not). No heap allocation is needed here
-/// specifically -- everything is compile-time-known -- unlike
-/// ErrorVariantConstructWithMessage's own Codegen branch
-/// (FuncCallExprAST::codegen(), CodegenFunc.cpp), which GC-heap-allocates
-/// (OVH-002) because its message is, in general, a runtime-computed value.
+/// `TurfErrorValue{tag, message="", payload=null}` (STD-002: see
+/// getErrorValueType()'s own doc comment for why this is the UNIFORM shape
+/// every error value has, message-carrying or not). No heap allocation is
+/// needed here specifically -- everything is compile-time-known -- unlike
+/// ErrorVariantConstruct's own Codegen branch (FuncCallExprAST::codegen(),
+/// CodegenFunc.cpp), which GC-heap-allocates (OVH-002) because its message
+/// and payload are, in general, runtime-computed values. Only a variant with
+/// NO fields reaches here: a bare reference to one that has fields is
+/// rejected by the Resolver (it has no payload to fill in), except as an
+/// `==`/`!=` operand, which never builds a value (GetErrorTagValue()).
 Value *BuildErrorTag(const std::string &ErrorTypeName,
                             const std::string &VariantName) {
   llvm::StructType *EVTy = getErrorValueType();
   llvm::Constant *TagPtr =
       BuildBareTagString(ErrorTypeName, VariantName);
   llvm::Constant *MsgPtr = BuildGlobalCStringPtr("", "errmsg_empty");
-  llvm::Constant *EVConst = llvm::ConstantStruct::get(EVTy, {TagPtr, MsgPtr});
+  llvm::Constant *NoPayload =
+      llvm::ConstantPointerNull::get(PointerType::get(*TheContext, 0));
+  llvm::Constant *EVConst =
+      llvm::ConstantStruct::get(EVTy, {TagPtr, MsgPtr, NoPayload});
   auto *GV = new llvm::GlobalVariable(
       *TheModule, EVTy, /*isConstant=*/true, llvm::GlobalValue::PrivateLinkage,
       EVConst, "errval");
@@ -412,27 +479,52 @@ Value *BuildErrorTag(const std::string &ErrorTypeName,
 }
 
 
-/// STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
-/// messageExpr)` -- the message-carrying construction. Unlike BuildErrorTag()
-/// (fully compile-time-known, a global constant suffices), @p MessageVal is
-/// in general a RUNTIME value (e.g. built from string concatenation), so
-/// this heap-allocates on the GC HEAP (OVH-002: was a bare `malloc` before
-/// MEM-002's collector existed to trace into it -- `message` is a GC-heap
-/// `string` pointer, and a `TurfErrorValue` reachable only through manual
-/// memory made it invisible to the collector's mark phase, F-MEM-3) --
-/// same "the value must outlive the function that returns it" reasoning
-/// BoxToI64Slot() already uses for an oversized success value, just for
-/// the error side. `TurfErrorValue`'s own descriptor (both fields are
-/// pointers) is the SAME one `EmitAllTurfTypeDescs()` emits for it as an
-/// ordinary named struct type, referenced here before that late pass runs
-/// (getOrForwardDeclareTurfTypeDescGlobal(), OVH-002). Called from
-/// FuncCallExprAST::codegen() (CodegenFunc.cpp), which evaluates the
-/// message argument and passes the resulting Value* in.
-Value *CodegenErrorVariantConstructWithMessage(const std::string &ErrorTypeName,
-                                               const std::string &VariantName,
-                                               Value *MessageVal) {
-  llvm::StructType *EVTy = getErrorValueType();
+/// `ErrorType::Variant(fields..., [message])` -- the construction of an error
+/// value: STD-002's message and LEC-004's payload (FREEZE.md §6.18). Unlike
+/// BuildErrorTag() (fully compile-time-known, a global constant suffices), the
+/// message and the fields are in general RUNTIME values, so this heap-allocates
+/// on the GC HEAP (OVH-002: was a bare `malloc` before MEM-002's collector
+/// existed to trace into it -- `message` is a GC-heap `string` pointer, and a
+/// `TurfErrorValue` reachable only through manual memory made it invisible to
+/// the collector's mark phase, F-MEM-3) -- same "the value must outlive the
+/// function that returns it" reasoning BoxToI64Slot() already uses for an
+/// oversized success value, just for the error side.
+///
+/// Two blocks for a variant with fields: the payload struct first, then the
+/// `TurfErrorValue` pointing at it. Each has the descriptor
+/// `EmitAllTurfTypeDescs()` emits for its (named) LLVM struct type, referenced
+/// here before that late pass runs (getOrForwardDeclareTurfTypeDescGlobal(),
+/// OVH-002), so a `string` or `List<T>` inside the payload is traced exactly
+/// like the message. Nothing needs the payload's pointer kept anywhere but a
+/// register between the two allocations: the collector scans registers
+/// conservatively, so the second allocation cannot free the first.
+/// Called from FuncCallExprAST::codegen() (CodegenFunc.cpp), which evaluates
+/// the arguments and passes the resulting Value*s in.
+Value *CodegenErrorVariantConstruct(const std::string &ErrorTypeName,
+                                    const std::string &VariantName,
+                                    const std::vector<Value *> &FieldVals,
+                                    Value *MessageVal) {
   llvm::DataLayout DL = TheModule->getDataLayout();
+  PointerType *PtrTy = PointerType::get(*TheContext, 0);
+
+  Value *PayloadPtr = ConstantPointerNull::get(PtrTy);
+  if (!FieldVals.empty()) {
+    llvm::StructType *PTy = getErrorPayloadStructType(ErrorTypeName, VariantName);
+    assert(PTy && PTy->getNumElements() == FieldVals.size() &&
+           "LEC-004: constructor arguments must match the variant's fields");
+    Value *PDesc = getOrForwardDeclareTurfTypeDescGlobal(PTy);
+    PayloadPtr = Builder->CreateCall(
+        getOrCreateTurfRtAllocFn(),
+        {ConstantInt::get(Type::getInt64Ty(*TheContext),
+                          DL.getTypeAllocSize(PTy).getFixedValue()),
+         PDesc},
+        "errpayload");
+    for (size_t I = 0; I < FieldVals.size(); ++I)
+      Builder->CreateStore(FieldVals[I],
+                           Builder->CreateStructGEP(PTy, PayloadPtr, I, "payload.field"));
+  }
+
+  llvm::StructType *EVTy = getErrorValueType();
   uint64_t Size = DL.getTypeAllocSize(EVTy).getFixedValue();
   Value *DescArg = getOrForwardDeclareTurfTypeDescGlobal(EVTy);
   Value *HeapSlot = Builder->CreateCall(
@@ -442,15 +534,19 @@ Value *CodegenErrorVariantConstructWithMessage(const std::string &ErrorTypeName,
   Value *TagFieldPtr = Builder->CreateStructGEP(EVTy, HeapSlot, 0, "tag");
   Builder->CreateStore(BuildBareTagString(ErrorTypeName, VariantName), TagFieldPtr);
   Value *MsgFieldPtr = Builder->CreateStructGEP(EVTy, HeapSlot, 1, "message");
-  Builder->CreateStore(MessageVal, MsgFieldPtr);
+  Builder->CreateStore(MessageVal ? MessageVal : BuildGlobalCStringPtr("", "errmsg_empty"),
+                       MsgFieldPtr);
+  Value *PayloadFieldPtr = Builder->CreateStructGEP(EVTy, HeapSlot, 2, "payload");
+  Builder->CreateStore(PayloadPtr, PayloadFieldPtr);
   return HeapSlot;
 }
 
 
-/// Reads field @p FieldIdx (0 = tag, 1 = message) out of a runtime
-/// `TurfErrorValue*` value -- shared by GetErrorTagValue() (field 0, for
-/// `==`/`!=`) and FieldAccessExprAST::codegen()'s `err.message` special
-/// case (field 1, CodegenStruct.cpp).
+/// Reads field @p FieldIdx (0 = tag, 1 = message, 2 = payload) out of a
+/// runtime `TurfErrorValue*` value -- shared by GetErrorTagValue() (field 0,
+/// for `==`/`!=`), FieldAccessExprAST::codegen()'s `err.message` special case
+/// (field 1, CodegenStruct.cpp) and an error-variant pattern (fields 0 and
+/// 2, CodegenPattern.cpp).
 Value *LoadErrorValueField(Value *ErrValPtr, unsigned FieldIdx, const char *Name) {
   llvm::StructType *EVTy = getErrorValueType();
   Value *FieldPtr = Builder->CreateStructGEP(EVTy, ErrValPtr, FieldIdx, Name);
@@ -490,7 +586,7 @@ bool IsErrorTagExpr(const ExprAST *E) {
   // reference) but not illegal -- handled here rather than left to crash.
   if (auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
     if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()))
-      return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage;
+      return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct;
   }
   if (auto *Var = dynamic_cast<const VariableExprAST *>(E)) {
     if (const auto *Sym = Var->getResolvedSymbol())
@@ -519,7 +615,7 @@ Value *GetErrorTagValue(const ExprAST *E) {
   }
   if (auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
     if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee())) {
-      if (SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage)
+      if (SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct)
         return BuildBareTagString(SA->getLeftName(), SA->getRightName());
     }
   }
@@ -532,7 +628,7 @@ Value *GetErrorTagValue(const ExprAST *E) {
 
 /// True if `E` is a value-producing `ErrorType::Variant` shape
 /// (docs/architecture/errors_and_recover.md) -- either the bare reference
-/// or STD-002's `ErrorType::Variant("msg")` construction -- mirrors
+/// or a `ErrorType::Variant(fields..., "msg")` construction -- mirrors
 /// Resolver's CollectReturnedErrorTypeNames' identical structural
 /// recognition, used here to decide whether a `return`ed value is an error
 /// tag or a genuine success value, since Codegen can't rely on
@@ -546,7 +642,7 @@ bool IsErrorConstructionExpr(const ExprAST *E) {
     return SA->ResolvedKind == ScopeAccessKind::ErrorVariantRef;
   if (auto *FC = dynamic_cast<const FuncCallExprAST *>(E)) {
     if (auto *SA = dynamic_cast<const ScopeAccessExprAST *>(FC->getCallee()))
-      return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage;
+      return SA->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct;
   }
   return false;
 }
@@ -2298,6 +2394,7 @@ SourceLocation GetNodeDebugLoc(const ExprAST *E) {
   TRY_LOC(ContinueExprAST)
   TRY_LOC(ReturnExprAST)
   TRY_LOC(RecoverExprAST)
+  TRY_LOC(TryExprAST)
   TRY_LOC(ModuleImportExprAST)
   TRY_LOC(VarDeclExprAST)
   TRY_LOC(FuncDefExprAST)

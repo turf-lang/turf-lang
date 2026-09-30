@@ -1073,7 +1073,15 @@ Value *ReturnExprAST::codegen() {
 
     // Type validation and compatibility are handled by the TypeChecker.
 
-    if (IsFallibleReturn) {
+    if (IsFallibleReturn && PassesThroughFallible) {
+      // LEC-004, `return f();` where `f` returns the `!T` this function
+      // returns: RetVal already IS a FallibleValue, success or error, so it is
+      // handed back as it is -- wrapping it again would box a whole
+      // FallibleValue into the success slot of another. Set by the
+      // TypeChecker (TypeChecker::visitReturn()): nothing in the operand's
+      // shape says it is fallible.
+      Builder->CreateRet(RetVal);
+    } else if (IsFallibleReturn) {
       // NOT IsErrorConstructionExpr() alone -- that only recognizes the
       // bare `ErrorType::Variant` shape, not `return err;` propagating a
       // caught error straight out of an outer `!T` function (`inner()
@@ -1109,4 +1117,44 @@ Value *ReturnExprAST::codegen() {
 
   // Return a dummy null so the AST node has a non-null value
   return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+}
+
+
+// `try <expr>` (LEC-004, FREEZE.md §6.18): evaluates the `!U` operand; on
+// success the value is the unboxed `U`, on failure this RETURNS the error from
+// the enclosing `!V` function -- the same `{false, 0, error}` FallibleValue a
+// `return err;` builds, after the same pending `defer`s a `return` runs.
+//
+// The error value travels as the operand's own errorPayload pointer, never
+// copied or re-wrapped, so a `try` passes on exactly what failed: the same tag,
+// message and payload. `V` and `U` are unrelated (the error union is open), and
+// the function's return type is always one fixed FallibleValue whatever `V` is,
+// so nothing here depends on either.
+//
+// The failure block ends in `ret`, so it needs no "dead block after the
+// return" the way ReturnExprAST does: control only continues on the success
+// block, which is where the builder is left.
+Value *TryExprAST::codegen() {
+  Value *FV = Operand ? Operand->codegen() : nullptr;
+  if (!FV)
+    return nullptr;
+
+  TurfTypePtr SuccessTy = ResolvedSuccessType ? ResolvedSuccessType : TurfVoid();
+
+  Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Value *IsOk = Builder->CreateExtractValue(FV, 0, "try.isok");
+  BasicBlock *OkBB = BasicBlock::Create(*TheContext, "try.ok", TheFunction);
+  BasicBlock *FailBB = BasicBlock::Create(*TheContext, "try.fail", TheFunction);
+  Builder->CreateCondBr(IsOk, OkBB, FailBB);
+
+  Builder->SetInsertPoint(FailBB);
+  Value *ErrPayload = Builder->CreateExtractValue(FV, 2, "try.err");
+  FlushPendingDefers(0);
+  Builder->CreateRet(WrapFallibleValue(ErrPayload, /*IsError=*/true));
+
+  Builder->SetInsertPoint(OkBB);
+  if (SuccessTy->isVoid())
+    return Constant::getNullValue(Type::getInt64Ty(*TheContext));
+  Value *Bits = Builder->CreateExtractValue(FV, 1, "try.bits");
+  return UnboxFromI64Slot(Bits, SuccessTy.get());
 }

@@ -119,16 +119,41 @@ llvm::Value *GetErrorTagValue(const ExprAST *E);
 /// value is an error tag or a genuine success value).
 bool IsErrorConstructionExpr(const ExprAST *E);
 
-/// STD-002: builds a message-carrying error value
-/// (`ErrorType::Variant(messageExpr)`). Needed by CodegenFunc.cpp
-/// (FuncCallExprAST::codegen()'s ErrorVariantConstructWithMessage branch).
-llvm::Value *CodegenErrorVariantConstructWithMessage(
-    const std::string &ErrorTypeName, const std::string &VariantName,
-    llvm::Value *MessageVal);
+/// The declared payload field types of variant @p VariantName of the error
+/// type @p ErrorTypeName (an identity), in declaration order -- empty for a
+/// variant with none, or an unknown name. LEC-004. Needed by CodegenFunc.cpp
+/// (casting each constructor argument) and CodegenPattern.cpp.
+std::vector<TurfTypePtr> ErrorVariantFieldTypes(const std::string &ErrorTypeName,
+                                                const std::string &VariantName);
 
-/// STD-002: reads field @p FieldIdx (0 = tag, 1 = message) out of a runtime
-/// `TurfErrorValue*` value. Needed by CodegenStruct.cpp
-/// (FieldAccessExprAST::codegen()'s `err.message` special case, field 1).
+/// The LLVM struct a variant's payload is stored as -- one named struct per
+/// variant with fields (`errpayload.<Error>.<Variant>`), built on first use
+/// and cached, so EmitAllTurfTypeDescs() gives it the descriptor the collector
+/// traces its `string`/collection fields through (LEC-004). nullptr for a
+/// variant with no fields. Needed by CodegenPattern.cpp (reading a payload).
+llvm::StructType *getErrorPayloadStructType(const std::string &ErrorTypeName,
+                                            const std::string &VariantName);
+
+/// The tag string (i8*) naming one error variant -- exactly what an error
+/// value's tag field holds and what `==` compares. Needed by CodegenPattern.cpp.
+llvm::Value *BuildErrorVariantTag(const std::string &ErrorTypeName,
+                                  const std::string &VariantName);
+
+/// Builds an error value (`ErrorType::Variant(fields..., [message])`):
+/// GC-allocates the payload struct (if the variant has fields) and the
+/// `TurfErrorValue` pointing at it. @p FieldVals are already cast to the
+/// declared field types; @p MessageVal is null when no message was written.
+/// Needed by CodegenFunc.cpp (FuncCallExprAST::codegen()'s
+/// ErrorVariantConstruct branch).
+llvm::Value *CodegenErrorVariantConstruct(const std::string &ErrorTypeName,
+                                          const std::string &VariantName,
+                                          const std::vector<llvm::Value *> &FieldVals,
+                                          llvm::Value *MessageVal);
+
+/// Reads field @p FieldIdx (0 = tag, 1 = message, 2 = payload) out of a
+/// runtime `TurfErrorValue*` value. Needed by CodegenStruct.cpp
+/// (FieldAccessExprAST::codegen()'s `err.message` special case, field 1) and
+/// CodegenPattern.cpp (tag and payload).
 llvm::Value *LoadErrorValueField(llvm::Value *ErrValPtr, unsigned FieldIdx,
                                  const char *Name);
 

@@ -977,19 +977,31 @@ Value *FuncCallExprAST::codegen() {
     return Builder->CreateCall(FnLLVMType, CalleeVal, ArgVals, "calltmp");
   }
 
-  // `ErrorType::Variant(messageExpr)` -- STD-002's message-carrying
-  // construction (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)). Every OTHER call
-  // arity on an error variant still never reaches Codegen at all --
-  // Resolver::visitFuncCall rejects it with a TypeError ("is an error
-  // variant, not a function") before this point, exactly like a plain
-  // `enum` variant.
+  // `ErrorType::Variant(fields..., [message])` -- the construction of an error
+  // value: STD-002's message (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)) and, since
+  // LEC-004 (FREEZE.md §6.18), the variant's payload fields. Every call with
+  // a count the variant does not accept never reaches Codegen at all --
+  // Resolver::visitFuncCall rejects it first. The arguments are evaluated in
+  // source order, fields (each cast to its declared type, as a struct field
+  // initialiser would be) and then the trailing message if one was written.
   if (ScopeCallee &&
-      ScopeCallee->ResolvedKind == ScopeAccessKind::ErrorVariantConstructWithMessage) {
-    Value *MsgVal = Args[0]->codegen();
-    if (!MsgVal)
-      return nullptr;
-    return CodegenErrorVariantConstructWithMessage(
-        ScopeCallee->getLeftName(), ScopeCallee->getRightName(), MsgVal);
+      ScopeCallee->ResolvedKind == ScopeAccessKind::ErrorVariantConstruct) {
+    const std::vector<TurfTypePtr> FieldTypes =
+        ErrorVariantFieldTypes(ScopeCallee->getLeftName(), ScopeCallee->getRightName());
+    std::vector<Value *> FieldVals;
+    Value *MsgVal = nullptr;
+    for (size_t I = 0; I < Args.size(); ++I) {
+      Value *V = Args[I]->codegen();
+      if (!V)
+        return nullptr;
+      if (I < FieldTypes.size())
+        FieldVals.push_back(CastToType(V, FieldTypes[I], "payloadcast", Loc));
+      else
+        MsgVal = V;
+    }
+    return CodegenErrorVariantConstruct(ScopeCallee->getLeftName(),
+                                        ScopeCallee->getRightName(), FieldVals,
+                                        MsgVal);
   }
 
   // `StructName::default()` / `StructName::new(...)` -- construction.
