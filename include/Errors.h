@@ -304,5 +304,6 @@ public:
 #include "ErrorsFlow.h"
 #include "ErrorsArray.h"
 #include "ErrorsMemory.h"
+#include "ErrorsPattern.h"
 
 #endif

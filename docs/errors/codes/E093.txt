@@ -1,0 +1,29 @@
+A `compare` doesn't cover every value of its subject
+
+    enum Color { Red, Green, Blue }
+
+    compare c {
+        matches Color::Red:  ...  done
+        matches Color::Green ...  done
+    }
+    // ERROR: Non-exhaustive enum comparison on 'Color'.
+    //        Missing variants: Color::Blue
+    //   Hint: Add an arm for each missing variant, or 'otherwise:' (or
+    //   `matches _:`) to handle the rest.
+
+With no `otherwise` and no unguarded `_`, these subjects must be covered
+completely, because nothing else says what should happen to a value no arm
+names:
+
+- an enum or machine: every variant;
+- a `bool`: both `true` and `false`;
+- an error value (`err` in `recover as err run`): it can be any error a callee
+  returns, so the set can't be listed and it always needs `otherwise` or `_`.
+
+A guarded arm never counts toward coverage, however complete it looks:
+
+    matches Color::Green if ready:    // ready may be false, so Green is
+                                      // still not covered
+
+An `int`, `string` or `char` subject is different: a `compare` over one may
+match nothing, in which case it does nothing.

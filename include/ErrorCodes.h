@@ -238,6 +238,14 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // exists but that this package may not import (a transitive dependency,
     // or another package's internal module).
     {"E091", "ModuleNotImportableError", "Module not importable from this package", SLM::ErrorCategory::DECLARATION},
+
+    // LEC-003 (docs/development/changes/LEC-003.md): destructuring patterns
+    // and guards in `compare`. One class for every structural pattern rule
+    // (the message and hint name which), one for a compare that does not
+    // cover its subject, one warning for an arm that can never run.
+    {"E092", "InvalidPatternError", "Invalid pattern", SLM::ErrorCategory::CONTROL_FLOW},
+    {"E093", "NonExhaustiveCompareError", "Non-exhaustive compare", SLM::ErrorCategory::CONTROL_FLOW},
+    {"E094", "UnreachableArmWarning", "Unreachable compare arm", SLM::ErrorCategory::CONTROL_FLOW},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);
