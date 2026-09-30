@@ -1,6 +1,7 @@
 package project
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -297,6 +298,42 @@ func TestPathDependencyThatEscapesAGitTree(t *testing.T) {
 	}
 	g, err = buildGit(t, root, "app", git)
 	mustFail(t, g, err, "a git dependency's path dependencies must stay inside its repository")
+}
+
+// The usual real case: the sibling exists only on the author's machine, so
+// nothing is at the path in the cache. It must still be reported as leaving the
+// repository, not as a missing directory.
+func TestEscapingPathThatDoesNotExistIsStillAnEscape(t *testing.T) {
+	root := layout(t,
+		pkgSpec{dir: "app", name: "app", main: true, deps: "a = " + gitDepLine("u/mono", `tag = "v1"`)},
+		pkgSpec{dir: "cache/mono-1", name: "a", lib: true, deps: "sib = " + dep("../sib")},
+	)
+	git := &fakeGit{
+		trees:   map[string]string{"u/mono|tag=v1": filepath.Join(root, "cache/mono-1")},
+		commits: map[string]string{"u/mono|tag=v1": commit("a")},
+	}
+	g, err := buildGit(t, root, "app", git)
+	mustFail(t, g, err, "must stay inside its repository", "\"../sib\"")
+}
+
+func TestSymlinkInAGitTreeCannotLeadOut(t *testing.T) {
+	elsewhere := layout(t, pkgSpec{dir: "x", name: "out", lib: true})
+	root := layout(t,
+		pkgSpec{dir: "app", name: "app", main: true, deps: "a = " + gitDepLine("u/mono", `tag = "v1"`)},
+		pkgSpec{dir: "cache/mono-1", name: "a", lib: true, deps: "out = " + dep("vendor/out")},
+	)
+	if err := os.MkdirAll(filepath.Join(root, "cache/mono-1/vendor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(elsewhere, "x"), filepath.Join(root, "cache/mono-1/vendor/out")); err != nil {
+		t.Skip("symlinks unavailable: ", err)
+	}
+	git := &fakeGit{
+		trees:   map[string]string{"u/mono|tag=v1": filepath.Join(root, "cache/mono-1")},
+		commits: map[string]string{"u/mono|tag=v1": commit("a")},
+	}
+	g, err := buildGit(t, root, "app", git)
+	mustFail(t, g, err, "must stay inside its repository")
 }
 
 func TestLockOfAPathOnlyProject(t *testing.T) {

@@ -189,14 +189,22 @@ func (w *walker) pathDep(p *Package, name string, d manifest.Dep) (found, error)
 	if !filepath.IsAbs(declared) {
 		declared = filepath.Join(p.Dir, filepath.FromSlash(declared))
 	}
+	escapes := func(at string) error {
+		return fmt.Errorf("dependency '%s' in %s: a git dependency's path dependencies must stay inside its repository (\"%s\" is %s, outside %s)", name, m.Path, d.Path, at, p.TreeRoot)
+	}
+	// Checked twice. Lexically first, so `../x` is reported as leaving the
+	// repository even when nothing exists there (the usual case: the directory
+	// only exists on the author's machine), and again after symlinks are
+	// resolved, because a link inside the tree can point out of it.
+	if p.TreeRoot != "" && !within(p.TreeRoot, filepath.Clean(declared)) {
+		return found{}, escapes(filepath.Clean(declared))
+	}
 	dir, err := canonical(declared)
 	if err != nil {
 		return found{}, fmt.Errorf("dependency '%s' in %s: cannot use path \"%s\": %v", name, m.Path, d.Path, pathErr(err))
 	}
-	if p.TreeRoot != "" {
-		if rel, err := filepath.Rel(p.TreeRoot, dir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return found{}, fmt.Errorf("dependency '%s' in %s: a git dependency's path dependencies must stay inside its repository (\"%s\" is %s, outside %s)", name, m.Path, d.Path, dir, p.TreeRoot)
-		}
+	if p.TreeRoot != "" && !within(p.TreeRoot, dir) {
+		return found{}, escapes(dir)
 	}
 	dep, seen := w.byDir[dir]
 	if !seen {
@@ -210,6 +218,12 @@ func (w *walker) pathDep(p *Package, name string, d manifest.Dep) (found, error)
 		dep = &Package{Name: dm.Package.Name, Dir: dir, Manifest: dm, TreeRoot: p.TreeRoot}
 	}
 	return found{pkg: dep, seen: seen, where: dir, spec: d.Path}, nil
+}
+
+// within reports whether path is root or below it.
+func within(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func pinWhere(url, ref, commit string) string {

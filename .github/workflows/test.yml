@@ -131,6 +131,12 @@ jobs:
       # `add`/`remove` edit one line and keep the user's comments.
       - name: turf project smoke test (new, add, build, run, manifests, graph errors)
         run: CI=1 ./scripts/project_smoke.sh
+      # LEC-001 stage 6: git dependencies -- the fetch cache, turf.lock pinning
+      # commit and tree hash, --offline/--locked, fetch/update/add --git. Every
+      # upstream is a local bare repository the script builds, so there is no
+      # network; git is present on the runner.
+      - name: turf git dependencies smoke test (cache, turf.lock, offline, locked, update)
+        run: CI=1 ./scripts/git_deps_smoke.sh
 
       # OPT-001 (docs/development/changes/OPT-001.md, INV-OPT-1): optimization
       # levels must never change a program's observable behaviour. The default
