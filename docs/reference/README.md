@@ -36,7 +36,8 @@ For internals — how the compiler actually implements any of this (stack vs. he
 21. [Testing](stdlib/testing.md) — `test`
 
 **Tooling**
-22. [CLI & Diagnostics](cli_and_diagnostics.md) — the `turf` command, error codes, `--explain`, compile-time static analysis
+22. [Projects & Packages](projects_and_packages.md) — `turf.toml`, dependencies (`path`/`git`), `turf.lock`, how imports resolve across packages, the `turf new`/`build`/`run`/`add`/`update` commands
+23. [CLI & Diagnostics](cli_and_diagnostics.md) — the `turf` command, error codes, `--explain`, compile-time static analysis
 
 ## Scope note
 
