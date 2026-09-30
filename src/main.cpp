@@ -708,7 +708,30 @@ static int emitObjectFile(Module &M, TargetMachine &TM,
   std::error_code EC;
   raw_fd_ostream dest(ObjFilename, EC, sys::fs::OF_None);
   if (EC) {
-    std::cerr << "Could not open file: " << EC.message() << "\n";
+    // The object file (and then the executable) is written next to where the
+    // compiler was run, or where -o points. The common failure is running it
+    // from a directory the user cannot write to -- `/` on Linux, and on macOS
+    // always, since `/` is a read-only system volume there. This used to
+    // print only "Could not open file: Permission denied", which names
+    // neither the file nor the directory, so it read like the SOURCE file
+    // could not be opened.
+    SmallString<256> Dir(ObjFilename);
+    sys::path::remove_filename(Dir);
+    // Best effort, for the message only: if either query fails, the path is
+    // shown as written, which still beats naming no directory at all.
+    if (Dir.empty())
+      (void)sys::fs::current_path(Dir);
+    else
+      (void)sys::fs::make_absolute(Dir);
+    std::cerr << "Error: cannot write the object file '"
+              << sys::path::filename(ObjFilename).str() << "' in " << Dir.str().str()
+              << ": " << EC.message() << ".\n"
+              << "  Hint: the compiler writes its output in the directory you run it "
+                 "from, or where -o points. Run it from a directory you can write to, "
+                 "pass -o <path> (for example -o ~/"
+              << sys::path::stem(ObjFilename).str()
+              << "), or use `turf run <file.tr>`, which builds in a temporary "
+                 "directory.\n";
     return 1;
   }
 
