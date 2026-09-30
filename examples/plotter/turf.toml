@@ -1,0 +1,7 @@
+[package]
+name = "plotter"
+version = "0.1.0"
+turf = "2.0"
+
+[dependencies]
+geometry = { path = "../geometry" }

@@ -1,0 +1,43 @@
+// The root module of the package `geometry`, and the only module another
+// package can `import geometry;`. Everything here is private unless it says
+// `pub`, so this file is the package's API.
+
+import vecmath;
+
+pub struct Point {
+    pub x: int,
+    pub y: int
+}
+
+pub fn Point.new(x: int, y: int): void {
+    self.x = x;
+    self.y = y;
+}
+
+// The squared distance keeps everything in `int`; a square root would need
+// the `math` module and buys nothing for comparing two distances.
+pub fn distanceSquared(a: Point, b: Point): int {
+    return vecmath::square(a.x - b.x) + vecmath::square(a.y - b.y);
+}
+
+// Manhattan distance, through the internal module's other helper.
+pub fn manhattan(a: Point, b: Point): int {
+    return vecmath::absolute(a.x - b.x) + vecmath::absolute(a.y - b.y);
+}
+
+// A generic function is compiled from source in the package that calls it,
+// with the caller's type: `pick` below can be called with a struct that only
+// the calling package knows about, which no separately compiled library
+// could support.
+pub fn<T> pick(useFirst: bool, first: T, second: T): T {
+    if useFirst {
+        return first;
+    }
+    return second;
+}
+
+// The size in bytes of whatever type the caller passes. It is different for
+// each caller's type because each call gets its own monomorphized copy.
+pub fn<T> sizeOfType(sample: T): int {
+    return sizeof(T);
+}

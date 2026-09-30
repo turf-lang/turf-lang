@@ -1,0 +1,15 @@
+// An internal module of the package `geometry`: nothing outside this package
+// can `import vecmath;`, whatever it marks `pub`. `pub` here only lets the
+// package's other modules use these functions, which is how a package keeps
+// its helpers out of its API.
+
+pub fn square(n: int): int {
+    return n * n;
+}
+
+pub fn absolute(n: int): int {
+    if n < 0 {
+        return 0 - n;
+    }
+    return n;
+}
