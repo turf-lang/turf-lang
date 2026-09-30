@@ -111,12 +111,12 @@ turf version                      # prints both the turf and turfc versions
 
 (`--no-smart` skips the llama.cpp model runtime for `--smart` and its slow first build; see [Building from Source](#building-from-source).)
 
-**A first project.** `turf new` makes a directory with a `turf.toml` and a starter program, and `turf run` builds and runs it:
+**A first project.** `turf new` makes a directory with a `turf.toml`, a starter `src/main.tr` and a `README.md` of the everyday commands, and `turf run` builds and runs it:
 
 ```bash
 turf new hello
 cd hello
-turf run                          # prints: Hello, hello!
+turf run                          # prints: Hello, TurfLang! This is hello.
 ```
 
 **A dependency.** A library is a package too (`turf new geometry --lib`, whose root module `src/geometry.tr` is the only thing another package can import). `turf add` records it in `turf.toml`, and `import geometry;` then reaches its `pub` items:

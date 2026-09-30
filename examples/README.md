@@ -32,8 +32,10 @@ an int is 8 bytes
 ```
 
 `turf build` in `plotter/` leaves the executable at `build/plotter`.
-`turf check` in `geometry/` checks the library without producing anything;
-there is nothing to run in a library, and `turf run` there says so.
+`turf check` in `geometry/` checks the library without producing anything.
+`geometry` deliberately has no `src/main.tr`, so `turf run` there says there
+is nothing to run and shows the `src/main.tr` to create. A library made with
+`turf new --lib` gets one from the start.
 
 Both directories hold a `turf.lock`, which `turf` generates and which is meant
 to be committed. It has no git entries here, because both packages are `path`

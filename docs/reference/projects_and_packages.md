@@ -21,10 +21,7 @@ Two multi-package projects you can build and run are in
 > `turf` and copied. In the messages, the absolute paths `turf` prints are
 > shortened to `…/`, and a few long hashes to `…`. Diagnostics from the compiler
 > say `turf --explain E0NN`, which is what `turfc` prints today; `turf explain
-> E0NN` is the same command. (It prints the full write-up only when run from
-> the root of a Turf checkout, because it looks for `docs/errors/codes/`
-> relative to the current directory; anywhere else it prints the one-line
-> description.)
+> E0NN` is the same command, and prints the full write-up from any directory.
 
 ## 1. A project
 
@@ -38,14 +35,40 @@ myapp/
   build/             output: the executable and package-graph.json; not committed
 ```
 
-- **A program** has `src/main.tr`. `turf build` produces `build/<name>`.
+- **A program** has `src/main.tr`: the package's one entry point.
+  - `turf build` produces `build/<name>` from it, and `turf run` runs it and
+    nothing else.
+  - No other file of a package can be its program: the compiler refuses one
+    in a package build. `turf run <file.tr>` runs a single file on its own,
+    outside the package.
 - **A library** has `src/<name>.tr`, its **root module**, named after the
-  package. It is the only module another package can `import`. A library
-  builds no executable; `turf build` still compiles it (as a module, so it
-  needs no `main`), so its errors show even when nothing imports it.
-- **A package may be both.** With `src/main.tr` and `src/both.tr`, `turf build`
-  builds the program and `turf run` runs it; another package can still depend
-  on it and import `both`.
+  package. It is the only module another package can `import`.
+  - `turf build` always checks it (as a module, so it needs no `main`), so
+    its errors show even when nothing imports it.
+  - A library without `src/main.tr` builds no executable, and `turf run`
+    there says how to add one (below).
+- **A package may be both,** and `turf new --lib` makes it so. With
+  `src/main.tr` and `src/both.tr`, `turf run` runs the program, and another
+  package can still depend on it and import `both`. The dependency sees only
+  the root module; its `src/main.tr` is ignored.
+- **`turf run` with no `src/main.tr`:**
+
+  ```
+  $ turf run
+  turf: package 'geometry' has no src/main.tr, so there is nothing to run.
+  hint: `turf run` runs src/main.tr, the package's entry point. Create it, for example:
+
+          // src/main.tr: this package's entry point. `turf run` builds and runs it.
+          // The library itself is src/geometry.tr; other packages import that, never this.
+          import io;
+          import geometry;
+
+          fn main(): int {
+              io::printline("Hello, TurfLang! geometry::answer() is " + (geometry::answer() to string) + ".");
+              return 0;
+          }
+        To run some other file on its own instead: turf run <file.tr>
+  ```
 - **A package with neither** cannot be built:
 
   ```
@@ -68,24 +91,42 @@ $ turf new hello
 Created program package 'hello' in hello/
   hello/turf.toml
   hello/src/main.tr
+  hello/README.md
   hello/.gitignore
 $ cd hello
 $ turf run
 Compiled to build/hello.o
 Successfully compiled to build/hello
-Hello, hello!
+Hello, TurfLang! This is hello.
 ```
 
-`turf new geometry --lib` creates a library instead: `src/geometry.tr` in place
-of `src/main.tr`. `turf init` does the same in the current directory. Its
-name defaults to the directory's, an existing `src/main.tr` is never
-overwritten, and `/build/` is added to an existing `.gitignore`:
+Every new package runs straight away. The generated `README.md` lists the
+everyday commands (`turf run`, `build`, `check`, `add`, `remove`, `update`,
+`clean`, `fmt`, `explain`, `help`) and the project's layout.
+
+`turf new geometry --lib` also creates the root module `src/geometry.tr`. Its
+`src/main.tr` imports it, so the library can be tried with `turf run`:
+
+```
+$ turf new geometry --lib
+Created library package 'geometry' in geometry/
+  geometry/turf.toml
+  geometry/src/main.tr
+  geometry/src/geometry.tr
+  geometry/README.md
+  geometry/.gitignore
+```
+
+`turf init` does the same in the current directory. Its name defaults to the
+directory's; an existing `src/main.tr`, root module or `README.md` is never
+overwritten; and `/build/` is added to an existing `.gitignore`:
 
 ```
 $ turf init
 Initialized package 'existing' in …/existing
   turf.toml
   src/main.tr (already there, left as it is)
+  README.md
   .gitignore
 ```
 
@@ -335,14 +376,12 @@ The directory of the importing file, the current directory and `lib/usr` are
 `lib/usr`, is not found by `import helper;`:
 
 ```
-── error at line 2, col 1 [E027]
+── error at line 1, col 1 [E027]
 
   Could not find module 'helper'.
 
-  Hint: Make sure the file 'helper.tr' exists in the standard library or your current directory.
+  Hint: In a project, `import helper;` names one of three things: a module of this package (a file 'helper.tr' anywhere under hello's src/), a package listed under [dependencies] in its turf.toml, or a standard-library module. Check the spelling, create src/helper.tr, or add the dependency (`turf add helper --path <dir>`).
 ```
-
-(That hint is the single-file wording; in a project, put the file under `src/`.)
 
 ### E090: two things answer to one name
 

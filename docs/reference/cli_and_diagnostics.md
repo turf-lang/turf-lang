@@ -175,16 +175,21 @@ turf explain E001
 - Unknown code → `Unknown error code: E999`, then a line saying what a code looks like, exit 1.
 - On success: prints a bold-cyan `E0NN  ClassName (CATEGORY)` header, then the explanation text, then exits 0.
 
-The explanation text is resolved from `docs/errors/codes/` **relative to the current directory** using a three-tier fallback (most specific first): a per-code doc file (`E0NN.txt`), then a construct-specific doc (routed by keyword classification of the error's short description), then a plain per-category doc as the coarsest fallback. If no doc file can be found there, the code's short auto-generated description is printed instead. So the full write-up appears when you run the command from the root of a Turf checkout, and a run from any other directory gets only the one-line description:
+The explanation text is read from the **installation** (the directory holding `lib/std`: `$TURF_HOME`, or the directory above the compiler binary), not from the current directory, so it is the same wherever you run the command. It uses a three-tier fallback, most specific first:
+1. a per-code doc file (`docs/errors/codes/E0NN.txt`);
+2. a construct-specific doc, routed by keyword classification of the error's short description;
+3. a plain per-category doc, as the coarsest fallback.
+
+Only if the installation is missing its docs is the code's short auto-generated description printed instead. Release archives ship `docs/errors/` and `docs/slm/` for this reason.
 
 ```
 $ cd /tmp && turf explain E091
 E091  ModuleNotImportableError (DECLARATION)
 
-Module not importable from this package.
+A module exists in this build, but this package may not import it
 ```
 
-(This is a known limitation of the lookup, not a choice: the docs are not yet found relative to the installation root.)
+(Before 2026-09-30 the lookup was relative to the current directory, so only a run from a checkout's root got the full text.)
 
 Rendering: the first non-blank line is a bold cyan title; any line indented four or more spaces is rendered as a green "code sample" line; everything else is body prose, with `` `backtick` `` spans highlighted in bold bright-green (backticks stripped).
 

@@ -356,20 +356,43 @@ p::get(); // ERROR — '::' on a real instance; use p.get()
 > }
 > ```
 
-### 4.4 Module search path
+### 4.4 Where `import <name>;` looks
 
-When resolving `import <name>;`, the compiler looks for `<name>.tr` in
-order:
+`import <name>;` must name **exactly one** file. The compiler looks everywhere
+it is allowed to and never picks a "first" match. Two different files
+answering to the name is error **E090**, listing both, even when one of them is
+the standard library's. (Until 2.0 the first match silently won, so a local
+`json.tr` was quietly replaced by the stdlib's.)
 
-1. `$TURF_HOME/lib/std/**` (standard library; falls back to
-   `<compiler_dir>/../lib/std/**` if `TURF_HOME` is unset).
-2. `$TURF_HOME/lib/usr/**` (installed user packages).
-3. The same directory as the file being compiled.
-4. The current working directory.
+**In a project** (a directory with a `turf.toml`, built with `turf build`,
+`turf run` or `turf check`), a module of the package can import one of:
+- one of the package's own modules: a `<name>.tr` anywhere under its `src/`;
+- a package listed under `[dependencies]` in its `turf.toml`, by package name;
+- a standard-library module.
 
-The search recurses into subfolders, so a stdlib module's location under
-`lib/std/core/`, `lib/std/io/`, etc. is an implementation detail — moving a
-file between subfolders never breaks an `import`.
+Nothing else is searched: not the file's directory, the current directory or
+`lib/usr`. A module that exists in the build but is out of reach (a dependency
+of a dependency, or another package's internal module) is error **E091**. The
+full rules are in [Projects and packages](projects_and_packages.md#4-how-imports-resolve).
+
+**For a single file** (`turf file.tr`, `turf run file.tr`), the places are:
+1. the standard library, `lib/std/**` under the installation
+   (`$TURF_HOME`, or the directory above the compiler binary);
+2. `lib/usr/**` under the installation;
+3. the directory of the file doing the import;
+4. the current directory.
+
+The same file reached twice (compiling from the file's own directory makes
+3 and 4 the same place) is one match, not two.
+
+Either way, an `import` written *inside* the standard library, and the
+automatic prelude imports (4.5), look only in the standard library. So a
+`list.tr` of your own never interferes with the stdlib's internal use of its
+`list`; it only matters if you write `import list;` yourself.
+
+The standard library's subfolders (`lib/std/core/`, `lib/std/io/`, …) are for
+browsing only. A module name is never a path, and moving a file between
+subfolders never breaks an `import`.
 
 ### 4.5 The prelude — modules auto-imported for you
 
