@@ -1307,9 +1307,31 @@ archive (REL-008), not "only `cc`".
    - `SOL_SOCKET`/`SO_REUSEADDR` values;
    - `SIGBUS` stack overflow (handled since FDN-005).
 7. **Installers:** `install.sh` (Linux, macOS) and `install.ps1` (Windows).
-   Each detects the platform, downloads, verifies the SHA-256, unpacks
-   (`~/.turf` / `%LOCALAPPDATA%\turf`) and prints or sets `PATH`. Archive
-   signing (minisign or cosign) is recommended.
+   Each detects the platform, downloads, verifies the SHA-256 and unpacks
+   (`~/.turf` / `%LOCALAPPDATA%\turf`). Archive signing (minisign or cosign)
+   is recommended.
+   - **PATH management on every OS** (owner requirement, 2026-09-30). After
+     installing, `turf` must work from any directory in a *new* terminal,
+     without the user editing anything by hand:
+     - **Linux and macOS:** detect the login shell and add one clearly
+       marked, idempotent block to the right start-up file: zsh
+       `~/.zshrc`, macOS's default shell and login-shell semantics; bash
+       `~/.bashrc`, or `~/.bash_profile` on macOS; fish via
+       `fish_add_path`; anything else via `~/.profile`, and say so. Offer
+       `--no-modify-path`.
+     - **Windows:** add `bin` to the **user** PATH (no admin rights), and
+       broadcast the environment change so new terminals see it.
+     - **Uninstall:** each installer's uninstall removes exactly what it
+       added.
+     - **Verify:** the clean-machine smoke (stage 8) checks that a fresh
+       shell resolves `turf`, not only that the files exist.
+   - **Replace the "for now" hints when this lands.** What exists today only
+     *prints* the right command and edits nothing: `scripts/dev_install.sh`
+     and `turf version` / `turf help` (`cli/cmd/turf/pathhint.go`, shown
+     when the running `turf` is not the one `PATH` resolves to). Both carry
+     comments pointing here. Keep the `turf version` hint, since a user may
+     still run an unpacked archive by its full path, but point it at the
+     installer.
 8. **Clean-machine proof, release-blocking** (`scripts/release_smoke.sh`,
    and a `.ps1` twin):
    - **Linux:** `docker run ubuntu:24.04` / `debian:stable` with **no**
