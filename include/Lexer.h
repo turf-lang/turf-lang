@@ -437,6 +437,8 @@ enum Token {
                        ///< of its own, not an identifier named "_", so it is reserved everywhere
                        ///< a name is expected without any per-site check; `_name` (an underscore
                        ///< FOLLOWED by anything) is an ordinary TOK_IDENTIFIER.
+  TOK_TRY = -108, ///< `try` keyword -- prefix error propagation, `try f()` (LEC-004,
+                  ///< FREEZE.md §6.18 / F-ERR-1). Reserved: no identifier may be spelled `try`.
   TOK_CALLER_LOCATION = -105
                         ///< `caller_location` keyword — a bare, non-callable expression of type
                         ///< `string`, legal only inside a function declared `@caller_location`

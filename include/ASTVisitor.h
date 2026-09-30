@@ -60,6 +60,7 @@ class MachineDeclExprAST;
 class ScopeAccessExprAST;
 class ErrorDeclExprAST;
 class RecoverExprAST;
+class TryExprAST;
 class DeferExprAST;
 class StructDeclExprAST;
 class ModuleImportExprAST;
@@ -71,6 +72,7 @@ class CompareExprAST;
 class WildcardPatternExprAST;
 class BindingPatternExprAST;
 class StructPatternExprAST;
+class ErrorVariantPatternExprAST;
 
 
 // ─── ASTVisitor base class ────────────────────────────────────────────────────
@@ -139,6 +141,7 @@ public:
   virtual void visitWildcardPattern(WildcardPatternExprAST &Node) {}
   virtual void visitBindingPattern(BindingPatternExprAST &Node) {}
   virtual void visitStructPattern(StructPatternExprAST &Node) {}
+  virtual void visitErrorVariantPattern(ErrorVariantPatternExprAST &Node) {}
 
 
   // ── Functions & Calls ─────────────────────────────────────────────────────
@@ -153,6 +156,7 @@ public:
   virtual void visitScopeAccess(ScopeAccessExprAST &Node) {}
   virtual void visitErrorDecl(ErrorDeclExprAST &Node) {}
   virtual void visitRecoverExpr(RecoverExprAST &Node) {}
+  virtual void visitTry(TryExprAST &Node) {}
   virtual void visitStructDecl(StructDeclExprAST &Node) {}
 
   // ── Arrays ────────────────────────────────────────────────────────────────

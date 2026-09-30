@@ -878,32 +878,55 @@ public:
 
 // ─── TurfUserErrorType ────────────────────────────────────────────────────────
 
+/// One declared field of an error variant's payload: `path: string` in
+/// `NotFound(path: string)` (LEC-004, FREEZE.md §6.18). The type is shared
+/// (not copied) between the declaration node and every registered
+/// TurfUserErrorType, so the Resolver's in-place spelling -> identity rewrite
+/// (NamedType::resolveTo()) is seen by all of them -- the same arrangement a
+/// struct's field types have.
+struct ErrorPayloadField {
+    std::string    Name;
+    TurfTypePtr    Type;
+    SourceLocation Loc;
+};
+
+/// One variant of an error type, with its (possibly empty) payload fields.
+struct ErrorVariantInfo {
+    std::string                   Name;
+    std::vector<ErrorPayloadField> Fields;
+    SourceLocation                Loc;
+};
+
 /**
- * @brief A user-declared `error Name { Variant, ... }` type
+ * @brief A user-declared `error Name { Variant, Variant(field: T, ...) }` type
  * (docs/architecture/errors_and_recover.md). Deliberately NOT named
  * `TurfErrorType` -- one character away from `TurfError` (include/Errors.h),
  * the compiler's own internal diagnostic base class, which is an entirely
  * unrelated concept.
  *
- * Variants are bare names only, exactly like `TurfEnumType` -- no payload
- * fields. This is a deliberate scope decision (see errors_and_recover.md
- * §5.1): a variant with fields, and a real destructuring syntax to read them
- * back safely, is deferred until there's an actual need for it.
+ * A variant is a bare name or carries typed payload fields (LEC-004,
+ * FREEZE.md §6.18 / F-ERR-1), read back only by destructuring patterns -- which
+ * fields exist depends on which variant occurred, so there is no `err.field`.
  */
 class TurfUserErrorType : public TurfType {
-    std::string               Name_;
-    std::vector<std::string> Variants_;
-    bool                      IsBareForm_; // true for `error Name;` (implicit single DEFAULT variant)
+    std::string                   Name_;
+    std::vector<ErrorVariantInfo> VariantInfos_;
+    std::vector<std::string>      Variants_;   // names only, in declaration order
+    bool                          IsBareForm_; // true for `error Name;` (implicit single DEFAULT variant)
 
 public:
-    TurfUserErrorType(std::string Name, std::vector<std::string> Variants, bool IsBareForm)
-        : Name_(std::move(Name)), Variants_(std::move(Variants)), IsBareForm_(IsBareForm) {}
+    TurfUserErrorType(std::string Name, std::vector<ErrorVariantInfo> Variants, bool IsBareForm)
+        : Name_(std::move(Name)), VariantInfos_(std::move(Variants)), IsBareForm_(IsBareForm) {
+        for (const auto &V : VariantInfos_)
+            Variants_.push_back(V.Name);
+    }
 
     std::string getName() const override { return Name_; }
     bool isUserError() const override { return true; }
     bool isBareForm() const { return IsBareForm_; }
 
     const std::vector<std::string>& getVariants() const { return Variants_; }
+    const std::vector<ErrorVariantInfo>& getVariantInfos() const { return VariantInfos_; }
 
     bool hasVariant(const std::string& V) const {
         for (const auto& Variant : Variants_)
@@ -911,15 +934,16 @@ public:
         return false;
     }
 
+    /// The declaration of variant @p V, or nullptr if there is no such variant.
+    const ErrorVariantInfo *getVariantInfo(const std::string &V) const {
+        for (const auto &Info : VariantInfos_)
+            if (Info.Name == V) return &Info;
+        return nullptr;
+    }
+
     /// Alias for getVariants() -- for Damerau-Levenshtein suggestion
     /// diagnostics (mirrors TurfEnumType::getVariants(), already bare names).
-    std::vector<std::string> getVariantNames() const {
-        std::vector<std::string> Names;
-        Names.reserve(Variants_.size());
-        for (const auto& Variant : Variants_)
-            Names.push_back(Variant);
-        return Names;
-    }
+    std::vector<std::string> getVariantNames() const { return Variants_; }
 
     std::string getMangledName() const override { return Name_ + "_error"; }
 };

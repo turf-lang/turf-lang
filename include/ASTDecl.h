@@ -243,6 +243,16 @@ public:
   void setName(std::string N) { Name = std::move(N); }
   bool isStaticDecl() const { return IsStaticDecl; }
   bool hasCallerLocation() const { return HasCallerLocation; }
+
+  /// True if a `try` is written anywhere in this function's own body (not in a
+  /// nested function's), set by the Parser (LEC-004, FREEZE.md §6.18). A `try`
+  /// passes on the error of whatever it wraps, which is an error type no scan
+  /// of this function's `return`s can name -- so, like the old `recover as err
+  /// run { return err; }`, it makes the function "returns a rethrown error":
+  /// ResolverFunctionSymbol::ReturnsReboundError is computed from this in
+  /// Pass 1, before any expression is visited, which is why the Parser (which
+  /// sees every `try`) records it rather than a later scan trying to find one.
+  bool UsesTry = false;
   const SourceLocation &getLoc() const { return Loc; }
   const SourceLocation &getNameLoc() const { return NameLoc; }
   const TurfType *getReturnType() const { return ReturnType.get(); }
@@ -289,6 +299,7 @@ public:
         Loc, Name, NameLoc, ReturnType, Params, CloneExprAST(Body.get()), TypeParams,
         IsStaticDecl, HasCallerLocation);
     Cloned->setVisibility(getVisibility());
+    Cloned->UsesTry = UsesTry;
     return Cloned;
     // Note: ResolvedDef is intentionally NOT copied — cloned ASTs are stale
     // until re-resolved. The default-constructed field is nullptr.
@@ -405,27 +416,38 @@ public:
 // clear of TurfError (include/Errors.h), the compiler's own internal diagnostic
 // base class -- an unrelated concept that happens to share the English word
 // "error". `IsBareForm` distinguishes the sugar `error Name;` (a single
-// implicit `DEFAULT` variant) from the full braced form. Variants are bare
-// names only, exactly like EnumDeclExprAST -- no payload fields (deferred,
-// see errors_and_recover.md §5.1).
+// implicit `DEFAULT` variant) from the full braced form. A variant is a bare
+// name or carries typed payload fields (`NotFound(path: string)`, LEC-004,
+// FREEZE.md §6.18); `getVariants()` is the names alone (what an enum's is) and
+// `getVariantInfos()` the declarations.
 class ErrorDeclExprAST : public ExprAST, public VisibleDecl {
-    std::string              Name;
-    std::vector<std::string> Variants;
-    bool                     IsBareForm;
-    SourceLocation           Loc;
+    std::string                   Name;
+    std::vector<ErrorVariantInfo> VariantInfos;
+    std::vector<std::string>      Variants;
+    bool                          IsBareForm;
+    SourceLocation                Loc;
 public:
     ErrorDeclExprAST(SourceLocation Loc, std::string Name,
-                     std::vector<std::string> Variants, bool IsBareForm)
-        : Name(std::move(Name)), Variants(std::move(Variants)),
-          IsBareForm(IsBareForm), Loc(Loc) {}
+                     std::vector<ErrorVariantInfo> VariantInfos, bool IsBareForm)
+        : Name(std::move(Name)), VariantInfos(std::move(VariantInfos)),
+          IsBareForm(IsBareForm), Loc(Loc) {
+        for (const auto &V : this->VariantInfos)
+            Variants.push_back(V.Name);
+    }
     const std::string&              getName()       const { return Name; }
     const std::vector<std::string>& getVariants()    const { return Variants; }
+    const std::vector<ErrorVariantInfo>& getVariantInfos() const { return VariantInfos; }
+    /// Mutable so the Resolver can rewrite a payload field's type spelling to
+    /// its TypeIdentity in place (Pass 1b), exactly as a struct's fields are.
+    std::vector<ErrorVariantInfo>&  getVariantInfosMut() { return VariantInfos; }
     bool                             isBareForm()     const { return IsBareForm; }
     const SourceLocation&            getLoc()         const { return Loc; }
     llvm::Value* codegen() override;
     void accept(ASTVisitor& V) override { V.visitErrorDecl(*this); }
     std::unique_ptr<ExprAST> clone() const override {
-        auto Cloned = std::make_unique<ErrorDeclExprAST>(Loc, Name, Variants, IsBareForm);
+        // Field types are shared, not deep-copied, by design (see
+        // ErrorPayloadField): a clone keeps the resolution its original got.
+        auto Cloned = std::make_unique<ErrorDeclExprAST>(Loc, Name, VariantInfos, IsBareForm);
         Cloned->setVisibility(getVisibility());
         return Cloned;
     }

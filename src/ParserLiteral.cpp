@@ -131,7 +131,19 @@ std::unique_ptr<ExprAST> ParseNullExpr() {
 }
 
 std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base) {
+  // LEC-004: ParsePattern() arms this for the ONE primary that starts a
+  // `matches` header. `E::V(` there is an error-variant pattern whose argument
+  // list holds patterns (`_`, `..`, `Name { .. }`), not expressions, so this
+  // stops at the '(' and leaves it for ParsePattern() to read. Taken at entry
+  // so it covers exactly the first primary whatever follows it.
+  const bool StopAtPatternCall = PatternHeadCallPending;
+  PatternHeadCallPending = false;
+
   while (true) {
+    if (StopAtPatternCall && CurTok == '(' &&
+        dynamic_cast<ScopeAccessExprAST *>(Base.get()))
+      return Base;
+
     if (CurTok == '[') {
       SourceLocation Loc = CurLoc;
       getNextToken();

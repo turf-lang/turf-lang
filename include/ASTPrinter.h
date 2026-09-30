@@ -363,6 +363,28 @@ public:
     ascend();
   }
 
+  void visitErrorVariantPattern(ErrorVariantPatternExprAST &N) override {
+    printIndent(Depth_);
+    std::string Name = "?";
+    if (const auto *H = dynamic_cast<const ScopeAccessExprAST *>(N.getHead()))
+      Name = H->getLeftName() + "::" + H->getRightName();
+    std::cout << "ErrorVariantPattern(" << Name << (N.hasParens() ? "(...)" : "")
+              << (N.hasRest() ? ", .." : "") << ")\n";
+    descend();
+    for (const auto &S : N.getSubs())
+      print(S.get(), Depth_);
+    ascend();
+  }
+
+  // `try <expr>` (LEC-004)
+  void visitTry(TryExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "TryExpr\n";
+    descend();
+    print(N.getOperand(), Depth_);
+    ascend();
+  }
+
   // ── Functions ───────────────────────────────────────────────────────────────
   void visitFuncDef(FuncDefExprAST &N) override {
     printIndent(Depth_);

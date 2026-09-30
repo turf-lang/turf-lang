@@ -727,6 +727,73 @@ public:
   }
 };
 
+/// `Type::Variant`, `Type::Variant(sub, sub)` or `Type::Variant(sub, ..)` --
+/// destructures an error value (LEC-004, FREEZE.md §6.18 / F-ERR-1): matches
+/// when the value's tag is this variant and each listed payload field, read
+/// positionally, matches its sub-pattern.
+///
+/// Sub-patterns are what a struct pattern's fields take (`_`, a name that
+/// binds, a literal, an enum variant, a nested struct pattern). Like a struct
+/// pattern it lists every field or ends in `..`, so it cannot keep compiling,
+/// meaning something different, after a field is added to the variant.
+class ErrorVariantPatternExprAST : public ExprAST {
+  SourceLocation Loc;
+  /// The `Left::Right` that names the variant, always the ScopeAccessExprAST
+  /// the expression parser built for it (held as ExprAST only because that
+  /// class is declared after this header, ASTAccess.h), so the Resolver
+  /// validates and rewrites it the way it does any other scope access: the
+  /// error type's identity, visibility, "no such variant" suggestions. Never
+  /// visited as an expression -- a pattern is lowered by
+  /// CompareExprAST::codegenPatterns().
+  std::unique_ptr<ExprAST> Head;
+  std::vector<std::unique_ptr<ExprAST>> Subs;
+  bool HasParens; ///< written `E::V(...)` versus the bare `E::V`
+  bool HasRest;   ///< a trailing `..`: fields not listed are ignored
+  SourceLocation RestLoc;
+
+public:
+  ErrorVariantPatternExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Head,
+                             std::vector<std::unique_ptr<ExprAST>> Subs,
+                             bool HasParens, bool HasRest, SourceLocation RestLoc)
+      : Loc(Loc), Head(std::move(Head)), Subs(std::move(Subs)),
+        HasParens(HasParens), HasRest(HasRest), RestLoc(RestLoc) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const ExprAST *getHead() const { return Head.get(); }
+  ExprAST *getHeadMut() { return Head.get(); }
+  std::unique_ptr<ExprAST> releaseHead() { return std::move(Head); }
+  const std::vector<std::unique_ptr<ExprAST>> &getSubs() const { return Subs; }
+  std::vector<std::unique_ptr<ExprAST>> &getSubsMut() { return Subs; }
+  bool hasParens() const { return HasParens; }
+  bool hasRest() const { return HasRest; }
+  const SourceLocation &getRestLoc() const { return RestLoc; }
+
+  /// Set by the TypeChecker: one entry per listed sub-pattern, the declared
+  /// type of the payload field it is matched against (NamedType resolved), for
+  /// Codegen to load and compare the field without re-deriving it.
+  std::vector<TurfTypePtr> FieldTypes;
+
+  /// Set by the TypeChecker: every listed field's pattern is irrefutable (`_`
+  /// or a name), so this header matches EVERY error of its variant. That is
+  /// what lets the variants of a declared error type, covered one by one,
+  /// make a `compare` exhaustive without `otherwise` -- though never a
+  /// catch-all arm, which only `_` is for an error value.
+  bool FieldsIrrefutable = false;
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitErrorVariantPattern(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    std::vector<std::unique_ptr<ExprAST>> ClonedSubs;
+    ClonedSubs.reserve(Subs.size());
+    for (const auto &S : Subs)
+      ClonedSubs.push_back(CloneExprAST(S.get()));
+    return std::make_unique<ErrorVariantPatternExprAST>(
+        Loc, CloneExprAST(Head.get()), std::move(ClonedSubs), HasParens, HasRest,
+        RestLoc);
+    // Note: FieldTypes is TypeChecker output, intentionally NOT copied. ✓
+  }
+};
+
 /// compare (subject) { matches val: ... done  otherwise: ... }
 class CompareExprAST : public ExprAST {
   SourceLocation Loc;
@@ -759,7 +826,8 @@ public:
       for (const auto &V : Arm.Values)
         if (dynamic_cast<const WildcardPatternExprAST *>(V.get()) ||
             dynamic_cast<const BindingPatternExprAST *>(V.get()) ||
-            dynamic_cast<const StructPatternExprAST *>(V.get()))
+            dynamic_cast<const StructPatternExprAST *>(V.get()) ||
+            dynamic_cast<const ErrorVariantPatternExprAST *>(V.get()))
           return true;
     }
     return false;

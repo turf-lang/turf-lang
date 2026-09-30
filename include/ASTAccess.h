@@ -109,18 +109,18 @@ enum class ScopeAccessKind {
     // participate in `!T`/`recover`/AnyErrorType comparisons that plain enums
     // don't.
     ErrorVariantRef,
-    // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
-    // messageExpr)` -- exactly ONE argument, a `string`-typed message
-    // attached to this specific error occurrence. NOT a general reopening
-    // of §5.1's deferred payload-fields gap: a variant still carries no
-    // PER-VARIANT-DECLARED fields, and this is not callable with any other
-    // arity (0 args stays ErrorVariantRef's ordinary "not a function"
-    // rejection; 2+ args is also rejected -- see
-    // Resolver::visitFuncCall()'s isErrorTypeName() branch,
-    // ResolverCall.cpp). Reuses `Left::Right(args)`'s existing generic call
-    // parsing (§2.3/§2.5 of errors_and_recover.md) with zero new grammar,
-    // exactly like ConstructorCall/DefaultConstruct above.
-    ErrorVariantConstructWithMessage,
+    // `ErrorType::Variant(args)` -- the construction of an error value, as a
+    // call target. A variant with N >= 1 declared payload fields takes those N
+    // arguments, or N + 1 where the extra trailing `string` is the message
+    // (LEC-004, FREEZE.md §6.18); a variant with no fields takes exactly one
+    // argument, its message (STD-002, ARCHITECTURE_OVERHAUL.md
+    // §8/§15.6(c)). Any other count is rejected by Resolver::visitFuncCall()'s
+    // isErrorTypeName() branch (ResolverCall.cpp). Reuses `Left::Right(args)`'s
+    // existing generic call parsing (§2.3/§2.5 of errors_and_recover.md) with
+    // zero new grammar, exactly like ConstructorCall/DefaultConstruct above.
+    // (Named ErrorVariantConstructWithMessage until LEC-004 gave variants
+    // fields of their own.)
+    ErrorVariantConstruct,
 };
 
 // `Left::Right` -- the general namespace-resolution operator. Originally
@@ -161,6 +161,14 @@ public:
     // LSP driving the same Resolver can read this post-resolution to know
     // what kind of hover/go-to-definition target this is.
     ScopeAccessKind ResolvedKind = ScopeAccessKind::Unresolved;
+
+    /// Set by the Resolver on a bare `ErrorType::Variant` that is a direct
+    /// operand of `==`/`!=` or the head of a pattern, where only the variant's
+    /// IDENTITY is read. Only there may it name a variant that has payload
+    /// fields: anywhere else a bare reference is a value, and a variant with
+    /// fields has no value without its payload (LEC-004, FREEZE.md §6.18).
+    /// Resolve-time state: never copied by clone().
+    bool IsTagOperand = false;
 
     /// Populated by the Resolver when ResolvedKind == ModuleConstantRef
     /// (a qualified `module::CONST` value reference) -- see

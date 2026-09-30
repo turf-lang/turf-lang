@@ -427,6 +427,8 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
   return std::make_unique<MachineDeclExprAST>(Loc, Identity, States, Edges);
 }
 
+bool ParsingFuncUsesTry = false;
+
 // ParseErrorDecl - called when CurTok == TOK_ERROR
 // (docs/architecture/errors_and_recover.md). Parses either:
 //   error Name;                                          -- bare form, sugar
@@ -434,6 +436,10 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
 //                                                            implicit
 //                                                            DEFAULT variant
 //   error Name { Variant(f: type, ...), Variant2, ... }   -- braced form
+// A variant's parenthesised field list is its typed payload (LEC-004,
+// FREEZE.md §6.18): each entry is `name: Type`. Whether a field's TYPE is
+// allowed (not an error type, not `!T`) is the Resolver's check -- only the
+// Resolver can tell a type name from an error type name.
 std::unique_ptr<ExprAST> ParseErrorDecl() {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat 'error'
@@ -447,7 +453,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
   std::string Name = IdentifierStr;
   getNextToken();
 
-  std::vector<std::string> Variants;
+  std::vector<ErrorVariantInfo> Variants;
   bool IsBareForm = false;
 
   if (CurTok == ';') {
@@ -461,7 +467,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
     // "Unexpected ';'". Same self-terminating convention as TOK_EXPORT's
     // branch in ParseBlock().
     IsBareForm = true;
-    Variants.push_back("DEFAULT");
+    Variants.push_back({"DEFAULT", {}, Loc});
     getNextToken(); // eat ';'
 
     // `error Name;` already fully declares the type (an implicit DEFAULT
@@ -483,11 +489,8 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
   } else if (CurTok == '{') {
     getNextToken(); // eat '{'
 
-    // Variants are bare names only, exactly like ParseEnumDecl's loop -- no
-    // payload fields (a deliberate scope decision, see
-    // errors_and_recover.md §5.1; a variant with fields and a real
-    // destructuring syntax to read it back safely is deferred rather than
-    // half-built now).
+    // Variants follow ParseEnumDecl's loop, plus an optional payload field
+    // list after the name (LEC-004).
     while (CurTok != '}' && CurTok != TOK_EOF) {
       if (CurTok == TOK_PUB) {
         MisplacedVisibilityError(CurLoc, MisplacedVisibilityError::Where::OnErrorVariant).raise();
@@ -505,7 +508,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
       std::string VariantName = IdentifierStr;
       SourceLocation VariantLoc = CurLoc;
       for (const auto &Existing : Variants) {
-        if (Existing == VariantName) {
+        if (Existing.Name == VariantName) {
           LogErrorAt(VariantLoc,
                      "Error type '" + Name + "' already has a variant named '" +
                          VariantName + "'."
@@ -515,8 +518,75 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
         }
       }
 
-      Variants.push_back(VariantName);
+      ErrorVariantInfo Info;
+      Info.Name = VariantName;
+      Info.Loc = VariantLoc;
       getNextToken(); // eat variant name
+
+      if (CurTok == '(') {
+        getNextToken(); // eat '('
+        if (CurTok == ')') {
+          ErrorPayloadError(
+              VariantLoc,
+              "'" + Name + "::" + VariantName + "' has empty parentheses.",
+              "A variant with no fields is written without parentheses: `" +
+                  VariantName + "`. List each field as `name: Type`: `" +
+                  VariantName + "(path: string)`.")
+              .raise();
+          return nullptr;
+        }
+        while (CurTok != ')') {
+          if (CurTok != TOK_IDENTIFIER) {
+            ErrorPayloadError(
+                CurLoc,
+                "expected a field name in '" + Name + "::" + VariantName + "'.",
+                "Each payload field is `name: Type`, separated by commas: `" +
+                    VariantName + "(path: string, mode: int)`.")
+                .raise();
+            return nullptr;
+          }
+          ErrorPayloadField Field;
+          Field.Name = IdentifierStr;
+          Field.Loc = CurLoc;
+          for (const auto &Prev : Info.Fields) {
+            if (Prev.Name == Field.Name) {
+              ErrorPayloadError(
+                  Field.Loc,
+                  "'" + Name + "::" + VariantName + "' already has a field named '" +
+                      Field.Name + "'.",
+                  "Field names must be unique within a variant -- rename one of them.")
+                  .raise();
+              return nullptr;
+            }
+          }
+          getNextToken(); // eat the field name
+          if (CurTok != TOK_COLON) {
+            ErrorPayloadError(
+                CurLoc,
+                "field '" + Field.Name + "' of '" + Name + "::" + VariantName +
+                    "' has no type.",
+                "Write the type after a colon: `" + Field.Name + ": string`.")
+                .raise();
+            return nullptr;
+          }
+          getNextToken(); // eat ':'
+          Field.Type = ParseType();
+          if (!Field.Type)
+            return nullptr;
+          Info.Fields.push_back(std::move(Field));
+
+          if (CurTok == ',') {
+            getNextToken();
+          } else if (CurTok != ')') {
+            LogErrorAt(CurLoc, "Expected ',' or ')' after a payload field of '" +
+                                   Name + "::" + VariantName + "'",
+                       SLM::ErrorCategory::DECLARATION);
+            return nullptr;
+          }
+        }
+        getNextToken(); // eat ')'
+      }
+      Variants.push_back(std::move(Info));
 
       if (CurTok == ',') {
         getNextToken();
@@ -547,7 +617,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
     GlobalSymbolTable->RegisterGlobalType(Identity, ErrType);
   }
 
-  return std::make_unique<ErrorDeclExprAST>(Loc, Identity, Variants, IsBareForm);
+  return std::make_unique<ErrorDeclExprAST>(Loc, Identity, std::move(Variants), IsBareForm);
 }
 
 // ParseExternDecl - called when CurTok == TOK_EXTERN.
@@ -1040,15 +1110,16 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
     LogErrorAt(FnLoc, "Expected '{' to begin function body for '" + FuncName + "'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
+  FuncBodyTryScope TryScope;
   auto Body = ParseBlock();
   if (!Body)
     return nullptr;
 
-
-
-  return std::make_unique<FuncDefExprAST>(FnLoc, FuncName, NameLoc, RetType, Params,
-                                          std::move(Body), TypeParams,
-                                          IsStaticMethodDecl, HasCallerLocation);
+  auto Def = std::make_unique<FuncDefExprAST>(FnLoc, FuncName, NameLoc, RetType, Params,
+                                              std::move(Body), TypeParams,
+                                              IsStaticMethodDecl, HasCallerLocation);
+  Def->UsesTry = TryScope.used();
+  return Def;
 }
 
 // ParseOperatorDecl -- called when CurTok == TOK_OPERATOR.
@@ -1246,13 +1317,16 @@ std::unique_ptr<ExprAST> ParseOperatorDecl() {
                           FuncName.substr(8) + "'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;
   }
+  FuncBodyTryScope TryScope;
   auto Body = ParseBlock();
   if (!Body)
     return nullptr;
 
-  return std::make_unique<FuncDefExprAST>(OpLoc, FuncName, OpLoc, RetType, Params,
-                                          std::move(Body), std::vector<std::string>{},
-                                          /*IsStaticMethodDecl=*/false);
+  auto Def = std::make_unique<FuncDefExprAST>(OpLoc, FuncName, OpLoc, RetType, Params,
+                                              std::move(Body), std::vector<std::string>{},
+                                              /*IsStaticMethodDecl=*/false);
+  Def->UsesTry = TryScope.used();
+  return Def;
 }
 
 // ParseVisibilityPrefixed - called when CurTok == TOK_PUB (`pub`/`public`).

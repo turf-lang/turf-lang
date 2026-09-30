@@ -476,11 +476,13 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 //
 //   pattern := '_'                                   wildcard
 //            | Name [ '::' Name ] '{' fields '}'     struct pattern
+//            | Name '::' Name '(' subs ')'           error-variant pattern (LEC-004)
 //            | <any expression>                      value pattern
 //   (nested only: a bare identifier is a BINDING)
 //   fields  := [ field { ',' field } [ ',' ] ] [ '..' ]
 //   field   := name                                  binds the field as `name`
 //            | name ':' pattern
+//   subs    := [ pattern { ',' pattern } [ ',' ] ] [ '..' ]   positional fields
 //
 // Nothing here needs lookahead beyond the current token, because a header's
 // pattern is read by the ordinary expression parser first and only
@@ -492,6 +494,7 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 // removed literal.
 
 bool ParsingPatternHeader = false;
+bool PatternHeadCallPending = false;
 
 namespace {
 
@@ -502,6 +505,65 @@ struct PatternHeaderScope {
 };
 
 std::unique_ptr<ExprAST> ParsePattern(bool Nested);
+
+// Parses `( sub, sub, .. )` after an error variant's name was read -- the
+// `Type::Variant` in `matches IOError::Denied(path, _, ..):` (LEC-004,
+// FREEZE.md §6.18). Sub-patterns are exactly what a struct pattern's fields
+// take, and read positionally. CurTok is the '('.
+std::unique_ptr<ExprAST> ParseErrorVariantPatternBody(std::unique_ptr<ExprAST> Head) {
+  const SourceLocation Loc = static_cast<ScopeAccessExprAST *>(Head.get())->getLoc();
+  getNextToken(); // eat '('
+
+  std::vector<std::unique_ptr<ExprAST>> Subs;
+  bool HasRest = false;
+  SourceLocation RestLoc{0, 0};
+
+  while (CurTok != ')') {
+    if (CurTok == TOK_EOF) {
+      LogErrorAt(Loc, "Missing closing ')' for error pattern.",
+                 SLM::ErrorCategory::CONTROL_FLOW);
+      return nullptr;
+    }
+
+    if (CurTok == TOK_RANGE) {
+      HasRest = true;
+      RestLoc = CurLoc;
+      getNextToken(); // eat '..'
+      if (CurTok == ',')
+        getNextToken(); // a trailing comma after '..' is harmless
+      if (CurTok != ')') {
+        InvalidPatternError(CurLoc,
+                            "'..' must be the last thing in an error pattern.",
+                            "Move '..' to the end: `IOError::Denied(path, ..)`. "
+                            "It stands for every field you did not list.")
+            .raise();
+        return nullptr;
+      }
+      break;
+    }
+
+    auto Sub = ParsePattern(/*Nested=*/true);
+    if (!Sub)
+      return nullptr;
+    Subs.push_back(std::move(Sub));
+
+    if (CurTok == ',') {
+      getNextToken();
+      continue;
+    }
+    if (CurTok != ')') {
+      InvalidPatternError(CurLoc, "expected ',' or ')' after a field pattern.",
+                          "Separate a variant's fields with commas: "
+                          "`IOError::Denied(path, mode)`.")
+          .raise();
+      return nullptr;
+    }
+  }
+  getNextToken(); // eat ')'
+
+  return std::make_unique<ErrorVariantPatternExprAST>(
+      Loc, std::move(Head), std::move(Subs), /*HasParens=*/true, HasRest, RestLoc);
+}
 
 // Parses `{ field, field: pattern, .. }` after the struct's name was read.
 // CurTok is the '{'.
@@ -595,10 +657,21 @@ std::unique_ptr<ExprAST> ParsePattern(bool Nested) {
   std::unique_ptr<ExprAST> E;
   {
     PatternHeaderScope Guard;
+    // Arms ParsePostfixExpression() to stop at the '(' of `Type::Variant(`.
+    // Cleared again here, not only by the callee: a parse that fails before
+    // reaching a primary must not leave it armed for the next expression.
+    PatternHeadCallPending = true;
     E = ParseExpression();
+    PatternHeadCallPending = false;
   }
   if (!E)
     return nullptr;
+
+  // `Type::Variant(...)`: an error-variant pattern. Whether `Type` really is
+  // an error type is the Resolver's to say (the parser never knows); when it
+  // is not, the Resolver turns this back into the call it always was.
+  if (CurTok == '(' && dynamic_cast<ScopeAccessExprAST *>(E.get()))
+    return ParseErrorVariantPatternBody(std::move(E));
 
   if (CurTok == '{') {
     // `Name {` or `module::Name {`: a struct pattern. Recover the spelling

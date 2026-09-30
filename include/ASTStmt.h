@@ -281,6 +281,14 @@ public:
   const SourceLocation &getLoc() const { return Loc; }
   const ExprAST *getVal() const { return Val.get(); }
 
+  /// Set by TypeChecker::visitReturn (LEC-004, FREEZE.md §6.18): this
+  /// `return`'s operand is itself a `!T` and the enclosing function returns
+  /// exactly that `!T`, so the value is returned as it is -- never unwrapped,
+  /// never wrapped a second time. Codegen can't tell this from the operand's
+  /// shape alone (`return f();` and `return g(x);` look alike whatever they
+  /// return). Nulled by clone(): a cloned tree is re-typechecked.
+  bool PassesThroughFallible = false;
+
   llvm::Value *codegen() override;
   void accept(ASTVisitor &V) override { V.visitReturn(*this); }
   std::unique_ptr<ExprAST> clone() const override {
@@ -344,6 +352,39 @@ public:
             Loc, Wrapped ? Wrapped->clone() : nullptr, Kind,
             ProduceExpr ? ProduceExpr->clone() : nullptr, BoundName,
             Block ? Block->clone() : nullptr);
+    }
+};
+
+// `try <expr>` -- propagate a `!T`'s error out of the enclosing function
+// (LEC-004, FREEZE.md §6.18 / F-ERR-1). On success it is the wrapped
+// expression's success value; on failure it RETURNS the error value,
+// unchanged, from the enclosing `!V` function (running pending `defer`s like
+// any `return`), so it is sugar for `<expr> recover as e run { return e; }`.
+// A node of its own rather than that desugaring, because the desugaring would
+// misreport: a type error would say "return type mismatch", the bare-error
+// restriction on `recover as` would fire on an error that is merely being
+// passed on, and "a `try` in `main`" has a far better message than either.
+class TryExprAST : public ExprAST {
+    std::unique_ptr<ExprAST> Operand;
+    SourceLocation           Loc;
+public:
+    TryExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Operand)
+        : Operand(std::move(Operand)), Loc(Loc) {}
+
+    ExprAST*              getOperand() const { return Operand.get(); }
+    const SourceLocation& getLoc()     const { return Loc; }
+
+    /// The operand's success type U (the type of the whole expression), set
+    /// by TypeChecker::visitTry and read by Codegen to unbox the FallibleValue's
+    /// successBits slot -- the same cross-pass channel
+    /// RecoverExprAST::ResolvedSuccessType uses, for the same reason (every
+    /// `!T` lowers to one struct regardless of T). Nulled by clone().
+    TurfTypePtr ResolvedSuccessType;
+
+    llvm::Value* codegen() override;
+    void accept(ASTVisitor& V) override { V.visitTry(*this); }
+    std::unique_ptr<ExprAST> clone() const override {
+        return std::make_unique<TryExprAST>(Loc, Operand ? Operand->clone() : nullptr);
     }
 };
 

@@ -37,6 +37,9 @@ std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base);
 // guard around the one ParseExpression() call that reads the header, never
 // left set across a statement.
 extern bool ParsingPatternHeader;
+// LEC-004: set by ParsePattern() just before it reads a header, taken (and
+// cleared) by the first ParsePostfixExpression() call. See there.
+extern bool PatternHeadCallPending;
 std::unique_ptr<ExprAST> ParseBlock();
 std::unique_ptr<ExprAST> ParseIfExpr();
 std::unique_ptr<ExprAST> ParseWhileExpr();
@@ -53,6 +56,18 @@ std::unique_ptr<ExprAST> ParseUnsafeExpr();
 std::unique_ptr<ExprAST> ParseUnsafeBlockBody(SourceLocation KeywordLoc);
 
 // Defined in ParserDecl.cpp
+//
+// LEC-004: true while the innermost function body being parsed has had a `try`
+// in it. ParseUnary() sets it; FuncBodyTryScope (ParserDecl.cpp) saves, clears
+// and restores it around each function body, so a `try` in a nested function
+// marks that function and not its enclosing one.
+extern bool ParsingFuncUsesTry;
+struct FuncBodyTryScope {
+  bool Saved;
+  FuncBodyTryScope() : Saved(ParsingFuncUsesTry) { ParsingFuncUsesTry = false; }
+  bool used() const { return ParsingFuncUsesTry; }
+  ~FuncBodyTryScope() { ParsingFuncUsesTry = Saved; }
+};
 std::unique_ptr<ExprAST> ParseStructDecl();
 std::unique_ptr<ExprAST> ParseEnumDecl();
 std::unique_ptr<ExprAST> ParseMachineDecl();

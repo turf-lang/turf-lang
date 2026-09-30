@@ -84,7 +84,7 @@ var reserved = []string{
 	"for", "in", "step", "elseif", "struct", "self", "sizeof", "import",
 	"enum", "machine", "null", "mutable", "mut", "immutable", "immut", "to",
 	"give", "otherwise", "extern", "ptr", "compare", "matches", "done",
-	"export", "static", "operator", "int32", "error", "recover", "produce",
+	"export", "static", "operator", "int32", "error", "recover", "try", "produce",
 	"run", "as", "unsafe", "guess", "defer", "pub", "public",
 	"caller_location",
 }

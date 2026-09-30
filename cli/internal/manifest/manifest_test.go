@@ -148,7 +148,7 @@ func TestReservedWords(t *testing.T) {
 			t.Errorf("%q should not be reserved", w)
 		}
 	}
-	if n := len(ReservedWords()); n != 55 {
+	if n := len(ReservedWords()); n != 56 {
 		t.Errorf("reserved word count = %d; if the lexer's table changed, update the list (see Drift comment)", n)
 	}
 }

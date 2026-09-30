@@ -1218,6 +1218,19 @@ std::unique_ptr<ExprAST> ParseUnary() {
     return nullptr;
   }
 
+  // `try <expr>` -- error propagation (LEC-004, FREEZE.md §6.18). A prefix
+  // operator with `!`/`-`'s precedence, so `try a() + try b()` is
+  // `(try a()) + (try b())` and `try x.f(1)` propagates the whole call.
+  if (CurTok == TOK_TRY) {
+    SourceLocation Loc = CurLoc;
+    getNextToken(); // consume 'try'
+    auto Operand = ParseUnary();
+    if (!Operand)
+      return nullptr;
+    ParsingFuncUsesTry = true; // see FuncBodyTryScope (ParserInternal.h)
+    return std::make_unique<TryExprAST>(Loc, std::move(Operand));
+  }
+
   if (CurTok == '!') {
     SourceLocation Loc = CurLoc;
     getNextToken(); // consume '!'
