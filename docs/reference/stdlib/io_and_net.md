@@ -54,8 +54,12 @@ io::printline("Hello, " + name + "!");
 ### File I/O: `error FileError`, `read_to_string`, `read_lines`, `write_string`, `exists`
 
 ```turflang
-error FileError { NotFound, ReadFailed }
+error FileError { NotFound(path: string), ReadFailed(path: string) }
 ```
+
+Each variant carries the path it failed on: `matches io::FileError::NotFound(path):`
+in a `compare` over `err`. `err == io::FileError::NotFound` still works and
+compares the variant only.
 
 - **`read_to_string(path: string): !string`** — reads an entire file into
   one string (`fopen`/`fseek`/`ftell`/`fread`). `FileError::NotFound` if

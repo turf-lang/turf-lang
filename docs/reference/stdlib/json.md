@@ -54,10 +54,15 @@ config.set("rolls", json::JsonValue::from_number(5.0));
 ### `json::parse(s: string): !JsonValue`
 
 Parses a JSON text into a `JsonValue` tree. Returns
-`error JsonError { UnexpectedEnd, UnexpectedChar, InvalidNumber,
-InvalidLiteral, UnterminatedString, ExpectedColon, ExpectedComma }` on
-malformed input, rather than panicking — malformed JSON (a truncated file,
-a hand-edited config) is an ordinary, expected failure mode.
+`error JsonError { UnexpectedEnd(offset: int), UnexpectedChar(offset: int),
+InvalidNumber(offset: int), InvalidLiteral(offset: int),
+UnterminatedString(offset: int), ExpectedColon(offset: int),
+ExpectedComma(offset: int) }` on malformed input, rather than panicking —
+malformed JSON (a truncated file, a hand-edited config) is an ordinary,
+expected failure mode. Every variant carries the byte offset into the text at
+which the parser gave up; read it with
+`matches json::JsonError::UnexpectedChar(at):` in a `compare` over `err`, or
+ignore it and compare `err == json::JsonError::UnexpectedChar` as before.
 
 ```turflang
 mut v: json::JsonValue = json::parse("{\"a\": 1}") recover run {

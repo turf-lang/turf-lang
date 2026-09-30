@@ -135,7 +135,7 @@ PHASE 1  Foundation                   SMP-002  one generic type walker      DONE
 PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D13)  DONE (LEC-002.md, 2026-09-29)
    │                                  LEC-001  projects, dependencies, build (D7)  DONE (LEC-001.md, 2026-09-30; Part IX clean-machine walkthrough handed to REL-008)
    │                                  LEC-003  pattern matching (D14)  DONE (LEC-003.md, 2026-10-01)
-   │                                  LEC-004  error payloads + `try` (D15)
+   │                                  LEC-004  error payloads + `try` (D15)  DONE (LEC-004.md, 2026-10-01)
    │                                  LEC-006  collection indexing coherence (generic operators)
    │                                  LEC-005  diagnostics reliability (incl. D25)
    │                                  LEC-007  standard library 2.0 surface
@@ -944,6 +944,19 @@ exist; confirm with the parser. **Non-goals** as excluded above.
 ---
 
 ### LEC-004 — Error payloads and propagation (D15)
+
+> **Landed 2026-10-01** — `docs/development/changes/LEC-004.md`; frozen as
+> `FREEZE.md` §6.18. Where the implementation differs from the design below: a
+> variant pattern cannot bind the message (`err.message` reads it); a bare
+> `E::V` for a variant with fields is also legal as an `==`/`!=` operand, since
+> equality reads only the variant; a variant pattern lists every field or ends in
+> `..`, like a struct pattern (§6.17); a subject of a *declared* error type is
+> exhaustive when every variant is covered (the open `AnyErrorType` still always
+> needs `otherwise`); only `io::FileError` and `json::JsonError` gained payloads
+> (`fs`/`http` declare no errors, `net`/`math`/`map`/`strings` had no data a caller
+> wants); and three pre-existing bugs were found and fixed on the way (`err ==
+> E::V("msg")` was a type error, a `return` in a `recover` in a `defer` crashed the
+> compiler, `AllPathsDiverge` ignored `compare`).
 
 **Kind** Language/ecosystem · **Rule** R4 · **Size** L · **Prereqs** LEC-003, FDN-001, OVH-002
 

@@ -372,12 +372,14 @@ compare p {
 }
 ```
 
+**Error values.** `Type::Variant(sub, sub, ..)` destructures an error value's payload, positionally, with these same sub-patterns (`matches IOError::Denied(path, 0):`). It lists every field or ends in `..`, and a variant with no fields is written bare (`matches IOError::Timeout:`). It is never a catch-all. See [Error Handling](error_handling.md#payloads-data-on-a-variant).
+
 **Order.** Headers are tried top to bottom, and the first one that matches (pattern **and** guard) runs; a guard that fails falls through to the next header, not out of the `compare`. The subject is evaluated **once** and every header tests that one value.
 
 **Exhaustiveness.** With no `otherwise`:
 
 - an enum or machine subject must have every variant covered by an **unguarded** header, and a `bool` subject both `true` and `false` (a guarded arm never counts, because its guard may be false) - otherwise E093;
-- an error value (`err` inside `recover as err run`) can be any error a callee returns, so it always needs `otherwise` or an unguarded `_`;
+- an error value (`err` inside `recover as err run`) can be any error a callee returns, so it always needs `otherwise` or an unguarded `_`, even when every arm is an error-variant pattern; a value of a *declared* error type must have each of its variants covered by an unguarded variant pattern whose fields all match anything;
 - an `int`, `string` or `char` subject, or a struct with a refutable pattern, may still match nothing, in which case the `compare` does nothing.
 
 `matches _:` (unguarded) counts as covering everything, which is the way to say "and everything else" without `otherwise`.

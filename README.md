@@ -376,6 +376,38 @@ writeFile("a.txt", "hi") recover run {
 };
 ```
 
+An error variant can carry typed data, read back by destructuring it in a `compare`, and `try` passes a failure on to your own caller instead of handling it:
+
+```
+error IOError {
+    NotFound(path: string),
+    Timeout
+}
+
+fn open(path: string): !int { ... }
+
+fn load(path: string): !int {
+    immut fd: int = try open(path);      // on failure: returns open's error, unchanged
+    return fd;
+}
+
+fn report(path: string): int {
+    immut v: int = load(path) recover as err run {
+        compare err {
+            matches IOError::NotFound(p):
+                io::printline("not found: " + p);
+                return 1;
+            done
+            otherwise:
+                return 2;
+        }
+    };
+    return v;
+}
+```
+
+`docs/reference/error_handling.md` has the full rules (payload construction, `err.message`, `try` in `main`, returning a fallible call directly).
+
 `recover as err run { ... }` requires the callee to declare a real `error` type — a bare `error GeneralError;` type (no variants beyond the implicit `GeneralError::DEFAULT`) can still use `recover produce`/`recover run`, just not `recover as`. See `docs/architecture/errors_and_recover.md` for the full spec.
 
 ### `defer`
