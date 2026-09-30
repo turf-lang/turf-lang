@@ -1,37 +1,106 @@
 # CLI, Diagnostics & Static Analysis
 
-Reference for the `turf` compiler's command-line interface, its error/warning reporting system, and the compile-time control-flow (CFG) analyses that run on every build.
+Reference for the `turf` command line, its error/warning reporting system, and the compile-time control-flow (CFG) analyses that run on every build. Projects, `turf.toml` and dependencies have their own page: [Projects & Packages](projects_and_packages.md).
 
 ---
 
-## Part 1 — CLI Usage
+## Part 1 — The command line
 
-### Basic invocation
+### `turf` and `turfc`
 
-```
-turf <input.tr> -o <output_name>
-./<output_name>
-```
+There are two programs, released separately:
 
-The compiler binary is named `turf`. The input file is a required positional argument and its name **must end in `.tr`** — anything else is a hard error (`Input file must have a '.tr' extension`). If `-o` is omitted, the output name defaults to the input filename's basename with `.tr` stripped (falling back to `program` if that would be empty).
+- **`turf`** is the command you type. It is the front end: it compiles single files, and in a project it reads `turf.toml`, fetches dependencies and drives the compiler.
+- **`turfc`** is the compiler. It is the interface tools use (an editor plugin, a build system, the compiler's own test scripts), and section "For tool authors" at the end of this part documents it. You are never asked to type it.
 
-Two usage forms exist:
+`turf` finds the compiler by itself and checks that the two agree on the *driver interface* before it runs anything (see "Versions" below). Everything on this page that says `turf` works the same on a single file with no manifest.
 
 ```
-turf <filename.tr> [-o output] [--emit-llvm] [--smart] [--dump-ast] [--resolve]
-     [--dump-resolver-symbols] [--dump-resolved] [--typecheck]
-     [--dump-typechecked] [--dump-modules] [--link <libname>]
-turf --explain E0NN
+$ turf help
+turf - the TurfLang toolchain front end
+
+Usage:
+  turf <command> [args]
+  turf <file.tr> [flags]      same as: turfc <file.tr> [flags]  (flags forwarded unchanged)
+
+Any file:
+  compile   compile a file to an executable
+  run       compile to a temporary executable and run it
+  check     report every diagnostic, write no file
+  fmt       format source files
+  explain   explain an error code
+  migrate   migrate source across a language change
+  dump      print an intermediate form (ast, resolved, ...)
+
+Project:
+  new       create a project
+  init      make the current directory a project
+  build     build the project
+  test      run the project's tests
+  clean     remove build output
+  fetch     download dependencies
+  add       add a dependency
+  remove    remove a dependency
+  update    update git dependencies
+
+Other:
+  publish   reserved: there is no registry in 2.0
+  version   print the turf and turfc versions
+  help      show help: turf help <command>
+
+Run 'turf help <command>' for a command's options.
 ```
 
-Any other token starting with `-` that isn't recognized is rejected with `Unknown option: <arg>` and exit code 1.
+`turf help <command>` prints each command's options. The project commands (`new`, `init`, `build`, `run` without a file, `check` without a file, `clean`, `fetch`, `add`, `remove`, `update`) are documented in [Projects & Packages](projects_and_packages.md). `turf test` is reserved for REL-002 and says so; `turf publish` is reserved because there is no registry in 2.0.
+
+### Compiling a file
+
+```
+turf hello.tr -o hello
+./hello
+```
+
+`turf <file.tr> [flags]` and `turf compile <file.tr> [flags]` are the same thing: when the first argument is not a command name, `turf` runs `turfc` with **the same arguments**, and the compiler's output and exit status come back unchanged. `compile` is the spelled-out form. The input file is a required positional argument and its name **must end in `.tr`**; anything else is a hard error. If `-o` is omitted, the output name defaults to the input filename's basename with `.tr` stripped (falling back to `program` if that would be empty).
+
+```
+$ turf hello.tr -o hello_a
+Compiled to hello_a.o
+Successfully compiled to hello_a
+$ turf compile notes.txt
+Error: Input file must have a '.tr' extension (got: notes.txt).
+$ turf compile hello.tr --bogus
+Unknown option: --bogus
+```
+
+Flags that `turf compile` does not know about are forwarded to the compiler unchanged, so a new compiler flag works through `turf` the day it lands. Any other token starting with `-` that the *compiler* does not recognize is rejected with `Unknown option: <arg>` and exit code 1.
+
+A bare word that neither starts with `-` nor ends in `.tr` is not passed to the compiler as a missing file; it is an unknown command, with a spelling suggestion:
+
+```
+$ turf notes.txt
+turf: unknown command 'notes.txt'
+run `turf help` for the list of commands
+$ turf biuld
+turf: unknown command 'biuld'
+  did you mean 'build'?
+run `turf help` for the list of commands
+```
 
 ### Flags
 
 | Flag | Implies | What it does |
 |---|---|---|
+| `-O0` `-O1` `-O2` `-O3` `-Os` | — | Optimization level; `-O2` is the default. Any other spelling is a hard error (`Error: unknown optimization level '-O4' (expected one of -O0, -O1, -O2, -O3, -Os).`), never a silent fallback. Levels change speed and size only, never what a program does. |
+| `-g` | — | Emits DWARF debug info. |
+| `--target=<triple>` | — | Cross-compiles for that target triple (default: the host). |
+| `-mcpu=<cpu>` | — | Target CPU (default: `generic`). |
+| `--check` | — | Reports every diagnostic and writes no file. Also `turf check`. |
+| `--module` | `--check` only | With `--check`: the file is a module that is only ever imported, so it needs no `main`. Without `--check` it is an error (`Error: --module only applies with --check (a module has no entry point, so it cannot be linked).`). |
+| `--dump-instantiations` | — | Prints the generic-instantiation census (`-- monomorphization instantiation census (N distinct requests) --`). |
+| `--stdlib-warnings` | — | Shows warnings anchored inside the standard library, which are hidden by default. |
+| `--allow-unsafe-modules` | — | Honors `unsafe module;` outside the install root, in a single-file compile. It does not apply in a project, where the manifest's `[unsafe] allow` decides ([Projects & Packages](projects_and_packages.md)). |
 | `--emit-llvm` | — | Writes human-readable LLVM IR to `<output>.ll` instead of compiling and linking a native binary. |
-| `--smart` | — | Enables the SLM (AI-assisted) fix-suggestion pipeline. See below — deliberately not documented in depth here. |
+| `--smart` | — | Enables the SLM (AI-assisted) fix-suggestion pipeline. See below — deliberately not documented in depth here. `--smart-write-fix=<path>` writes the first validated fix there. |
 | `--dump-ast` | — | Prints the parsed AST (functions/structs, then top-level statements) via `ASTPrinter`. Runs *before* the Resolver, so nodes show no resolution annotations. |
 | `--resolve` | — | Prints a `[Resolver] ...` banner confirming the Resolver pass succeeded, plus the final scope depth. |
 | `--dump-resolver-symbols` | `--resolve` | Same banner, plus a full dump of the symbol table. |
@@ -44,19 +113,78 @@ Any other token starting with `-` that isn't recognized is rejected with `Unknow
 
 > **Note — these flags don't turn the passes on.** The Resolver and TypeChecker run **unconditionally on every compile**, regardless of any flag. `--resolve`, `--typecheck`, and the `--dump-*` family only control whether extra banners or AST dumps are printed — never whether the underlying pass runs. If either pass fails, compilation aborts before code generation ever sees the AST, flags or no flags.
 
-### `--explain E0NN`
+### Other single-file commands
+
+These need no manifest and work on any `.tr` file. Each one runs the compiler in a particular mode and adds nothing of its own to what the compiler says.
+
+**`turf check <file.tr>`** reports every diagnostic and writes no file, with the same words and the same exit status (0 clean, 1 on any error) as a compile. Silence and exit 0 mean the file is clean. The file is checked as a *program*, so a missing `main` is an error, exactly as it is for a compile; `--module` says the file is only ever imported:
 
 ```
-turf --explain E001
+$ turf check mod.tr
+Error: No entry point found. Please define 'fn main(): int' in your file.
+  (checking a module that is only ever imported? add --module: `turf check --module <file.tr>`)
+$ turf check --module mod.tr
+$ turf check hello.tr
 ```
 
-A separate mode, handled before normal argument parsing — it takes no `.tr` input file at all.
+**`turf run <file.tr> [flags] [-- args…]`** compiles to a temporary executable, runs it with the arguments after `--`, and deletes it. The exit status is the program's (`turf run three.tr`, whose `main` returns 3, exits 3), or 128+N if signal N killed it; a failed compile exits with the compiler's status. `-o` is refused, because the executable is deleted afterwards.
 
-- Missing code argument → `Usage: turfc --explain E0NN`, exit 1.
-- Unknown code → `Unknown error code: E0NN`, exit 1.
+**`turf dump <what> <file.tr>`** prints an intermediate form without producing an executable, and a file with no `main` (a module) dumps the same as a program. `<what>` is `ast`, `resolved`, `typechecked`, `modules`, `symbols` or `instantiations`, which are `--dump-ast`, `--dump-resolved`, `--dump-typechecked`, `--dump-modules`, `--dump-resolver-symbols` and `--dump-instantiations`.
+
+**`turf fmt <file.tr>`** prints the formatted file to stdout, and `turf fmt --write <file.tr>...` rewrites files in place (each is attempted, and the exit status is the first failure's). Without `--write` exactly one file is accepted, because the output goes to stdout. The formatter re-derives **indentation** from the bracket structure, strips trailing whitespace, collapses runs of blank lines and ends the file with one newline. It never changes anything else on a line. It is idempotent, and it does not normalize spacing inside a line: `fn   main( ):int{return   0;}` is left exactly as written.
+
+```
+$ turf fmt messy.tr
+fn main(): int {
+    if true {
+        return 1;
+    }
+    return 0;
+
+}
+$ turf fmt a.tr b.tr
+turf: fmt: without --write the formatted text goes to stdout, so exactly one file is accepted; pass --write to format several in place
+```
+
+**`turf migrate pub [--write] <files…>`** adds `pub` to every top-level declaration and struct field, which keeps the pre-2.0 behaviour where everything a module declared was importable (see [Functions & Modules](functions_and_modules.md)). Without `--write` it only reports what it would change:
+
+```
+$ turf migrate pub oldmod.tr
+would migrate oldmod.tr (2 `pub`)
+  oldmod.tr:1:
+    - fn f(): int {
+    + pub fn f(): int {
+  oldmod.tr:4:
+    - fn main(): int {
+    + pub fn main(): int {
+Would migrate 2 declarations/fields in 1 file. Re-run with --write to apply.
+$ turf migrate pub --write oldmod.tr
+migrated oldmod.tr (2 `pub`)
+Migrated 2 declarations/fields in 1 file.
+```
+
+### `turf explain E0NN`
+
+```
+turf explain E001
+```
+
+`turf explain E001` and `turf --explain E001` are the same command (the second is the compiler's own spelling, and it is what error footers print). It takes a code and no `.tr` input file at all.
+
+- No code → `turf: explain: expected exactly one error code, for example: turf explain E001`, exit 2 (through `turfc --explain` with no code it is `Usage: turfc --explain E0NN`, exit 1).
+- Unknown code → `Unknown error code: E999`, then a line saying what a code looks like, exit 1.
 - On success: prints a bold-cyan `E0NN  ClassName (CATEGORY)` header, then the explanation text, then exits 0.
 
-The explanation text is resolved from `docs/errors/codes/` on disk using a three-tier fallback (most specific first): a per-code doc file (`E0NN.txt`), then a construct-specific doc (routed by keyword classification of the error's short description), then a plain per-category doc as the coarsest fallback. If no doc file can be found on disk at all, the code's short auto-generated description is printed instead.
+The explanation text is resolved from `docs/errors/codes/` **relative to the current directory** using a three-tier fallback (most specific first): a per-code doc file (`E0NN.txt`), then a construct-specific doc (routed by keyword classification of the error's short description), then a plain per-category doc as the coarsest fallback. If no doc file can be found there, the code's short auto-generated description is printed instead. So the full write-up appears when you run the command from the root of a Turf checkout, and a run from any other directory gets only the one-line description:
+
+```
+$ cd /tmp && turf explain E091
+E091  ModuleNotImportableError (DECLARATION)
+
+Module not importable from this package.
+```
+
+(This is a known limitation of the lookup, not a choice: the docs are not yet found relative to the installation root.)
 
 Rendering: the first non-blank line is a bold cyan title; any line indented four or more spaces is rendered as a green "code sample" line; everything else is body prose, with `` `backtick` `` spans highlighted in bold bright-green (backticks stripped).
 
@@ -71,6 +199,99 @@ You tried to reach past the end of an array
 ### `--smart`
 
 `--smart` enables an AI-assisted fix-suggestion pipeline: when the first *error* in a compile pass fires, the compiler asks a small language model for a suggested fix, sandbox-validates it, and — if the model is confident — replaces the plain error message with an `[AI Suggestion]` block (explanation, optional code patch, optional warning) instead of the default diagnostic. Subsequent errors in the same pass just note that they may be a cascading effect of the first one, rather than triggering another model call. Warnings never invoke this pipeline. The prompt design, sandbox mechanics, and model internals are out of scope for this reference.
+
+### Exit status
+
+`turf compile`, `turf check` and `turf <file.tr>` return the compiler's status unchanged (0 success, 1 a reported error). `turf run` returns the program's. For `turf`'s own failures the codes today are **2** for a usage error (an unknown command, a missing argument, a project command outside a project) and **1** for everything else (a manifest error, a failed fetch, a compile error inside a project build). The final numbering of those is REL-001's decision.
+
+### Versions
+
+`turf` and `turfc` have separate version numbers, and `turf version` (or `turf --version`) shows both:
+
+```
+$ turf version
+turf 1.0.0-dev  (needs turfc interface 1.1+)
+turfc 2.0.0-dev  (interface 1.1, …/build/turfc)
+```
+
+The two need not match. What must fit is the **driver interface**, a `major.minor` pair that `turfc` reports and `turf` needs: the same major and at least the minor `turf` names. Before it runs anything, `turf` checks this and refuses a compiler that does not fit, naming both sides and which one to upgrade (`TURF_COMPILER` does not bypass the check):
+
+```
+turf: this compiler does not speak the interface this turf needs
+  turf  1.0.0-dev  needs interface 1.1 or a later 1.x  (…/build/turf)
+  turfc 9.0.0  speaks interface 2.0  (…/fake/turfc)
+hint: upgrade turf: this compiler's interface is newer than this turf understands
+```
+
+A differing *release* version is never an error on its own. In a project, a manifest's `turf = "2.0"` is about the compiler's release version and is checked separately ([Projects & Packages](projects_and_packages.md)).
+
+### Finding the compiler
+
+`turf` looks for `turfc` in this order and takes the first match:
+
+1. `$TURF_COMPILER`, a path to the binary (this is also what the compiler's own test scripts set).
+2. `turfc` in the directory of the running `turf`, with symlinks resolved (an installed pair, or `build/turf` beside `build/turfc` in a checkout).
+3. `$TURF_HOME/bin/turfc`.
+4. `turfc` on `PATH`.
+
+Nothing found is an error that lists what was looked at:
+
+```
+turf: cannot find the compiler (turfc)
+  looked in:
+    $TURF_COMPILER (not set)
+    …/alone/turfc
+    $TURF_HOME/bin/turfc (TURF_HOME not set)
+    turfc on PATH
+hint: set TURF_COMPILER to the turfc binary, or build it with `cmake --build build`
+```
+
+A `TURF_COMPILER` naming a file that does not exist is its own error (`turf: TURF_COMPILER is set to "…/nonexistent", which is not an existing file`). Do not export `TURF_HOME` in a development checkout: both binaries find their install root (`lib/std`, the runtime library) from their own location, and a `TURF_HOME` pointing at one checkout silently makes every other build use that checkout's library.
+
+### For tool authors: `turfc`
+
+Everything above is `turf`. This section is for whoever drives the compiler directly: an editor plugin, a build system, a script. (The language server uses the in-process facade `include/turf/Analysis.h`, not the command line.) `turfc` is a complete compiler on its own. It never touches the network, never reads `turf.toml` or `turf.lock`, and never searches for them. The one exception is a hint: when an `import` fails in single-file mode and a `turf.toml` exists beside the file or above it, the error names `turf build`, and the manifest is only checked for existence, never opened.
+
+**The driver interface.** `turfc --version` prints two lines. Line 1 is the release version, line 2 is the interface `turf` checks:
+
+```
+$ turfc --version
+turfc 2.0.0-dev
+interface 1.1
+```
+
+The interface covers exactly what `turf` relies on: the flags it passes (`--check`, `--module`, `--dump-*`, `--format`, `--write`, `--migrate=`, `--explain`, `-o`, and `--package-graph`), the two-line `--version` format, the exit statuses (0 success, 1 a reported error), and every other argument being accepted exactly as a direct invocation accepts it. An additive change (a new flag or input) bumps the **minor**; removing or changing the meaning of anything covered bumps the **major**. So a tool that needs `--package-graph` requires interface 1.1 or later.
+
+**Modes a tool uses:**
+
+- `turfc --check <file.tr>` runs every diagnostic and writes nothing; the output and status match a normal compile of the same file. It checks a **program**, so it wants a `main`; `turfc --check --module <file.tr>` checks a file that is only ever imported (`--module` alone is an error). This is what `turf check`, `turf dump` and a library's `turf build` run.
+- `turfc --package-graph <file.json> <file.tr>` compiles as a package build, and is the only way the compiler learns about packages. The graph lists each package's source root, its **direct** dependencies and whether its `unsafe module;` declarations are honored; its exact format is documented in `include/PackageGraph.h`. `turf` writes it for you as `build/package-graph.json`:
+
+  ```json
+  {
+    "format": 1,
+    "root": "plotter",
+    "packages": {
+      "geometry": {
+        "src": "…/ex/geometry/src",
+        "deps": [],
+        "allow_unsafe": false
+      },
+      "plotter": {
+        "src": "…/ex/plotter/src",
+        "deps": [
+          "geometry"
+        ],
+        "allow_unsafe": true
+      }
+    }
+  }
+  ```
+
+  Given that file, `turfc --package-graph build/package-graph.json src/main.tr -o direct` builds the program by itself, and a bad graph is one line naming the file, exit 1 (`Error: package graph bad1.json: "format" must be 1 (this turfc reads package-graph format 1)`). Without the flag `turfc` is in single-file mode. In a package build the file you name must be inside the root package's `src` (otherwise: `Error: package graph …: the file being compiled (…) is not inside the root package's src …`); which file is the program is up to the caller, and `turf` always passes `src/main.tr`.
+- `turfc --format [--write] <file.tr>`, `turfc --migrate=pub [--write] <files…>` and `turfc --explain E0NN` are what `turf fmt`, `turf migrate` and `turf explain` run.
+
+**`turf` never rewrites a compiler diagnostic.** A tool that runs `turf check` or `turfc --check` sees the same text and the same `[E0NN]` codes either way, and can match on them. The footer of a coded diagnostic still spells the command as ``Run `turf --explain E0NN` ``, which works through the passthrough.
 
 ### Compilation pipeline (context, not a flag)
 
@@ -93,11 +314,11 @@ Diagnostics can carry:
 
 ### Error codes
 
-Every registered error class has a stable `E0NN` code, assigned once and never reassigned. As of this writing there are **68 codes, E001–E068**.
+Every registered error class has a stable `E0NN` code, assigned once and never reassigned. As of this writing there are **91 codes, E001–E091** (`turf explain E091` works and `turf explain E092` is `Unknown error code: E092`).
 
-> **Note:** the source's own header comment claims "67" registered call sites — that count is stale by one. `E068` (`UnknownStructFieldError`) was appended after the comment was written. Treat 68 as the current, correct count.
+> **Note:** the comment at the top of `include/ErrorCodes.h` still says "currently 67" registered call sites. It is stale; the table has 91 rows.
 
-Assignment order is alphabetical by (source file, class name) at the time each code was added — it's an opaque identifier, not a severity or category ranking.
+Assignment order is alphabetical by (source file, class name) at the time each code was first added, and later codes are appended — it's an opaque identifier, not a severity or category ranking.
 
 A small curated subset of codes is flagged `Important` — genuinely non-obvious concepts where the one-line message alone probably isn't enough:
 
@@ -106,27 +327,43 @@ A small curated subset of codes is flagged `Important` — genuinely non-obvious
 - **E018** `UseAfterFreeError`
 - **E035** `InvalidTransitionError`
 - **E036** `InvalidTransitionTargetError`
+- **E069** `StructLayoutCycleError`
+- **E086** `DanglingReferenceEscapeError`
+- **E088** `PrivateSymbolAccessError`
+- **E089** `PrivateInPublicError`
 
-These get a stronger, differently-colored footer nudge (see below) urging you to read the full `--explain` entry before patching the code.
+These get a stronger, differently-colored footer nudge (see below) urging you to read the full `turf explain` entry before patching the code.
+
+**Modules and packages.** Four codes concern how an `import` resolves, and the fix differs for each:
+
+- **E027** `ModuleNotFoundError`: nothing answers to that module name. Inside a project, a single-file compile adds a hint that a dependency is only visible to `turf build`.
+- **E090** `AmbiguousModuleError`: two or more different files answer to one name (your own module and the standard library, your own module and a dependency, or two of your own). The message lists every candidate with its kind and path, and the hint says which to rename.
+- **E091** `ModuleNotImportableError`: the module exists in this build but this package may not import it, because it belongs to a *transitive* dependency or is another package's *internal* module.
+- **E088** `PrivateSymbolAccessError` (and **E089** `PrivateInPublicError`): the module is reachable but the item is not `pub`.
+
+Real examples of each, and the rules behind them, are in [Projects & Packages](projects_and_packages.md#4-how-imports-resolve); E090 and E091 have `turf explain` pages.
 
 ### How a diagnostic is printed
 
 ```
-── error at line 4, col 12 [E001], in file geometry.tr
+$ turf check oob.tr
+── error at line 3, col 27 [E001]
 
-You tried to reach past the end of an array
+  Array index out of bounds!
+  You tried to access 'primes[3]', but 'primes' only has 3 elements (indices 0 to 2).
+  Note: array declared here (line 2, col 11)
 
-Note: declared here (line 2, col 5)
-Hint: array size is fixed at declaration — did you mean a smaller index?
-   4 │ mut last: int = primes[3];
-     │                        ^ Here!
+  Hint: Array indices start at 0 and go up to size - 1.
 
-Run `turf --explain E001` for more details.
+  3 │     mut last: int = primes[3];
+    │                           ^ Here!
+
+  Run `turf --explain E001` for more details.
 ```
 
 Top to bottom:
 
-1. **Header** — `── error at line X, col Y [E0NN], in file <name>` (bright red for errors, bright yellow for warnings). The `[E0NN]` tag only appears if the diagnostic resolved to a real code. The `, in file ...` clause only appears when the diagnostic came from an imported module, not the file you compiled directly.
+1. **Header** — `── error at line X, col Y [E0NN], in file <name>` (bright red for errors, bright yellow for warnings). The `[E0NN]` tag only appears if the diagnostic resolved to a real code. The `, in file ...` clause only appears when the diagnostic came from an imported module, not the file you compiled directly (so an error in a dependency's file names it, as `in file …/ffi/src/rawmod.tr`, and an error in the entry file does not).
 2. **Message body**.
 3. Zero or more blue `Note: ...` lines, one per related location.
 4. An optional green `Hint: ...` line.
@@ -150,10 +387,17 @@ When you reference an unknown name — a variable, type, keyword, struct field, 
 Matching uses restricted Damerau-Levenshtein edit distance, meaning an adjacent-character transposition (`itn` vs. `int`) counts as a single edit rather than two substitutions. The distance threshold scales with query length: 1 for queries of four characters or fewer, 2 for up to seven characters, and roughly a third of the string's length beyond that.
 
 ```
-$ turf typo.tr
-── error [E0NN]
-Undeclared variable 'contuner'.
-Hint: did you mean 'container'?
+$ turf check typo.tr
+── error at line 3, col 12 [E040]
+
+  I can't find anything named 'contuner'.
+
+  Hint: It may be from the current file: 'container'
+
+  3 │     return contuner;
+    │            ^~~~~~~~ Here!
+
+  Run `turf --explain E040` for more details.
 ```
 
 Categories covered: undeclared variables, unknown type names, misspelled keywords, unknown struct fields, unknown struct methods, unknown module functions/symbols, and unknown enum variants. (Keyword matching deliberately excludes `static` — it sits at edit-distance 2 from the very common identifier `state`, which produced constant false-positive "did you mean 'static'?" suggestions on ordinary parameter names.)
