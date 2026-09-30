@@ -134,7 +134,7 @@ PHASE 1  Foundation                   SMP-002  one generic type walker      DONE
    ▼
 PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D13)  DONE (LEC-002.md, 2026-09-29)
    │                                  LEC-001  projects, dependencies, build (D7)  DONE (LEC-001.md, 2026-09-30; Part IX clean-machine walkthrough handed to REL-008)
-   │                                  LEC-003  pattern matching (D14)
+   │                                  LEC-003  pattern matching (D14)  DONE (LEC-003.md, 2026-10-01)
    │                                  LEC-004  error payloads + `try` (D15)
    │                                  LEC-006  collection indexing coherence (generic operators)
    │                                  LEC-005  diagnostics reliability (incl. D25)
@@ -856,6 +856,15 @@ verbatim on a clean machine.
 ---
 
 ### LEC-003 — Richer pattern matching (D14)
+
+> **Landed 2026-10-01** — `docs/development/changes/LEC-003.md`; frozen as
+> `FREEZE.md` §6.17. Where the implementation differs from the design below:
+> a struct pattern must list every field or end in `..` (a judgement call); the
+> existing hard error for a duplicate value pattern is kept rather than
+> downgraded to a warning (only an arm behind a catch-all is the new warning,
+> E094); `bool` exhaustiveness is new, not "existing" as the text says (and the
+> original `switch` lowering never matched `matches true:` — fixed); stacked
+> headers each carry their own guard.
 
 **Kind** Language/ecosystem · **Rule** R4 · **Size** L · **Prereqs** SMP-002, FDN-004
 

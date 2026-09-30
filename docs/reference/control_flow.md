@@ -303,3 +303,85 @@ compare x {
 - `break`, `continue`, `return`, nested `if`, and any other ordinary statement are all valid inside a `matches`/`otherwise` body.
 
 > **Note — keyword reuse:** `otherwise` here is unrelated to the ternary's `otherwise` above beyond sharing a spelling — see the note in that section.
+
+### Patterns: `_`, destructuring and guards
+
+A `matches` header is either a **value** (everything above: the subject is compared with it by equality) or one of three newer forms that look inside the subject. A bare identifier at the top of a header is still an ordinary variable to compare against; it never binds.
+
+```turflang
+struct Point { x: int, y: int }
+
+fn classify(p: Point): int {
+    mut r: int;
+    compare p {
+        matches Point { x: 0, y: 0 }:     // test both fields
+            r = 1;
+        done
+        matches Point { x, y } if x == y: // bind both, then a guard
+            r = 2;
+        done
+        matches Point { x: 0, .. }:       // test x, ignore every other field
+            r = 3;
+        done
+        matches _:                        // anything at all
+            r = -1;
+        done
+    }
+    return r;
+}
+```
+
+| Form | Meaning |
+|---|---|
+| `_` | Matches anything, binds nothing. Usable at the top of a header and as a field's pattern (`x: _`). |
+| `Name { field: pattern, field, .. }` | Destructures a struct. Also spelled `module::Name { ... }`. A field written alone (`y`) **binds** it under its own name; `field: name` binds it under another; `field: 0` tests it. |
+| `<pattern> if <condition>` | A guard: the header matches only if the pattern matches **and** the condition is true. The header's bindings are visible in the condition. |
+
+**What can sit in a field's position** (inside a struct pattern): an integer literal (`5`, `-5`), a `char`, `string` or `bool` literal, an enum or machine variant (`Color::Red`), `_`, a name to bind, or another struct pattern (any depth). Inside a destructuring pattern a bare identifier always **binds**; to compare a field with a variable or any other expression, bind it and use a guard:
+
+```turflang
+matches Point { x, .. } if x == limit:    // not `Point { x: limit }`
+```
+
+`double` literals are not patterns (exact float equality is almost never meant); bind the field and test it in a guard.
+
+**Every field is listed, or the pattern ends in `..`.** `Point { x }` is an error for a two-field struct (E092) so that adding a field to `Point` later cannot change what an existing pattern means. A pattern reads fields exactly as `p.field` would, so another module's private field cannot be destructured (E088); wave it off with `..`.
+
+**What can be matched with a struct pattern:** a struct value, a `&T` reference, and `self`. A `&?T` (which may be null) and a raw `T*` are refused; test a `&?T` for null first.
+
+**Bindings** are immutable copies of the matched value. They are visible to the header's guard and to the arm's body and to nothing else, and they shadow an outer variable of the same name inside the arm only.
+
+```turflang
+mut x: int = 100;
+compare p {
+    matches Point { x, .. }:   // this x is p.x
+        ...
+    done
+}
+// x is 100 again here
+```
+
+**Stacked headers** remain the way to write alternatives. They share one body, so each header must bind exactly the same names at the same types (or none); a guard belongs to its own header:
+
+```turflang
+compare p {
+    matches Point { x: 0, y }:
+    matches Point { x: 1, y }:      // either header runs the body, with y bound
+        r = y * 10;
+    done
+}
+```
+
+**Order.** Headers are tried top to bottom, and the first one that matches (pattern **and** guard) runs; a guard that fails falls through to the next header, not out of the `compare`. The subject is evaluated **once** and every header tests that one value.
+
+**Exhaustiveness.** With no `otherwise`:
+
+- an enum or machine subject must have every variant covered by an **unguarded** header, and a `bool` subject both `true` and `false` (a guarded arm never counts, because its guard may be false) - otherwise E093;
+- an error value (`err` inside `recover as err run`) can be any error a callee returns, so it always needs `otherwise` or an unguarded `_`;
+- an `int`, `string` or `char` subject, or a struct with a refutable pattern, may still match nothing, in which case the `compare` does nothing.
+
+`matches _:` (unguarded) counts as covering everything, which is the way to say "and everything else" without `otherwise`.
+
+**Unreachable arms.** An arm - or `otherwise` - after an unguarded header that matches everything (`_`, or a struct pattern whose fields all bind or ignore) can never run and is a warning (E094). A duplicate *value* pattern is still an error, as before.
+
+**`_name` is an identifier.** An underscore followed by anything is an ordinary name (`_unused`, `_why`), and - as the unused-variable warning's hint has always said - a name that starts with `_` is never reported as unused. A lone `_` is reserved for the wildcard and cannot be a variable, parameter or function name.

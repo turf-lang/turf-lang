@@ -921,6 +921,20 @@ analysis exists.
 
 ---
 
+### Pattern matching through the passes — `compare` with patterns (LEC-003)
+
+`FREEZE.md` §6.17 is the rule; this is where each pass does its part. A `matches` header is an `ExprAST` in `MatchesArm::Values` (parallel `Guards`, plus the arm's `Bindings` symbols): an ordinary expression is the original equality pattern, and `WildcardPatternExprAST` / `BindingPatternExprAST` / `StructPatternExprAST` (`include/ASTExpr.h`) are the destructuring forms. Patterns are never evaluated as expressions (`codegen()` is a fatal error); each pass that cares handles them explicitly.
+
+| Pass | What it does with a pattern |
+|---|---|
+| Lexer | `_` alone is `TOK_WILDCARD`; `_name` is an identifier (`src/Lexer.cpp`). |
+| Parser | `ParsePattern()` (`src/ParserStmt.cpp`) reads a header with the ordinary expression parser and reinterprets it: an expression followed by `{` was a struct name; in a nested position a bare identifier becomes a binding. `ParsingPatternHeader` switches off the "struct brace-literal is removed" hint for exactly that one call. |
+| Resolver | `resolveArmPattern()` (`src/ResolverExpr.cpp`): one arm scope, each binding declared once (immutable, placeholder type), a struct pattern's name validated by `validateNamedType()` like any type annotation, stacked headers' binding sets compared. |
+| TypeChecker | `visitCompare()` (`TypeCheckerExpr.cpp`) owns arm order, guards, unreachable arms and exhaustiveness; `checkPattern()` (`TypeCheckerPattern.cpp`) types one pattern against the value's type, using `instantiatedFieldType()` (shared with `p.field`) so a field's type for a generic instance is identical either way, and records `FieldPattern::FieldType` / `StructPatternExprAST::MatchedType` for Codegen. |
+| CFG | `CFGBuilder::visitCompare()`: a **chain**, not a fan-out — one test block per header holding the pattern and then the guard as its last statement, the match edge to the arm body first, the fail edge to the next header. A pattern is a block statement, so `AnalysisVisitor::visitBindingPattern()` makes each binding a definition on the edge into the arm, and `NullabilityPass` narrows through a guard exactly as through an `if`. The last header's fail edge is omitted when `CompareExprAST::Exhaustive` (set by the TypeChecker) proves nothing can fall through. |
+| Monomorphizer | A guard is substituted like any body expression (`substituteTypesInBody()`); a pattern over a generic struct records the instantiation as a field access would. `StructPatternExprAST::clone()` shares its type spelling, so a clone keeps the template's resolution. |
+| Codegen | `needsPatternCodegen()` (any struct pattern, `_` or guard) selects `CompareExprAST::codegenPatterns()` (`src/CodegenPattern.cpp`); otherwise the original `switch`/`strcmp` lowering runs unchanged. The pattern lowering snapshots the subject once into an entry-block slot and emits the ordered test chain described above; bindings are entry-block allocas registered for the guard and body only. |
+
 ## 7. Generic monomorphization
 
 Turf's generics are implemented as **monomorphization**: one fully
