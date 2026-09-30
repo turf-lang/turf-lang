@@ -1,0 +1,9 @@
+// LEC-003: a literal pattern has the field's own type. Expected: E092.
+struct P { s: string }
+fn main(): int {
+    mut p: P = P::default();
+    compare p {
+        matches P { s: 3 }: return 1; done
+        otherwise: return 0;
+    }
+}

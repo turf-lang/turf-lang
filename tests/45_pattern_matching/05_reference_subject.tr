@@ -1,0 +1,41 @@
+// LEC-003: a pattern looks through a safe `&T` reference, and through `self`.
+import test;
+
+struct Point { x: int, y: int }
+
+fn viaRef(p: &Point): int {
+    mut r: int;
+    compare p {
+        matches Point { x, y } if x > y:
+            r = x;
+        done
+        matches Point { y, .. }:
+            r = y;
+        done
+    }
+    return r;
+}
+
+fn Point.larger(): int {
+    mut r: int;
+    compare self {
+        matches Point { x, y } if x >= y:
+            r = x;
+        done
+        matches Point { y, .. }:
+            r = y;
+        done
+    }
+    return r;
+}
+
+fn main(): int {
+    mut p: Point = Point::default();
+    p.x = 10;
+    p.y = 3;
+    test::assert(viaRef(&p) == 10, "x > y through a reference");
+    p.y = 30;
+    test::assert(viaRef(&p) == 30, "else arm through a reference");
+    test::assert(p.larger() == 30, "self is destructurable");
+    return 0;
+}

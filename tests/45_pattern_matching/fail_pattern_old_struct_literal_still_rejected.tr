@@ -1,0 +1,7 @@
+// LEC-003 must not resurrect struct brace-literals: `P { x: 1 }` as an
+// EXPRESSION is still the removed syntax. Expected: a parse error.
+struct P { x: int }
+fn main(): int {
+    mut p: P = P { x: 1 };
+    return p.x;
+}

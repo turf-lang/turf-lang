@@ -896,6 +896,96 @@ static void testModuleNotFoundHintsAtProject(const ScratchDir &Dir) {
   }
 }
 
+
+// LEC-003: destructuring patterns and guards. The runner cannot see WHY a
+// fail_*.tr failed, so each diagnostic's code and a fragment of its hint are
+// asserted here, and the warnings the runner never sees at all (an arm that
+// can never run, an unused binding, `_name` silencing one) are asserted too.
+static void testPatternDiagnostics() {
+  CurrentTest = "pattern diagnostics";
+  const std::string Prelude = "struct P { x: int, y: int }\nenum Color { Red, Green }\n";
+  struct Case {
+    const char *Label;
+    const char *Body;
+    const char *Code;
+    const char *HintFragment;
+  };
+  const Case Cases[] = {
+      {"struct pattern on an int",
+       "fn main(): int { mut n: int = 1; compare n { matches P { x }: return x; done otherwise: return 0; } }",
+       "E092", "destructures a struct value"},
+      {"wrong struct",
+       "struct Q { x: int }\nfn main(): int { mut p: P = P::default(); compare p { matches Q { x }: return x; done otherwise: return 0; } }",
+       "E092", "Name the value's own struct"},
+      {"field left out without ..",
+       "fn main(): int { mut p: P = P::default(); compare p { matches P { x }: return x; done otherwise: return 0; } }",
+       "E092", "end the pattern with `..`"},
+      {"non-literal field pattern",
+       "fn main(): int { mut p: P = P::default(); compare p { matches P { x: 1 + 2, .. }: return 1; done otherwise: return 0; } }",
+       "E092", "bind it and use a guard"},
+      {"name bound twice",
+       "fn main(): int { mut p: P = P::default(); compare p { matches P { x, y: x }: return x; done otherwise: return 0; } }",
+       "E092", "write '_' to ignore it"},
+      {"stacked headers bind different names",
+       "fn main(): int { mut p: P = P::default(); mut r: int = 0; compare p { matches P { x, .. }: matches P { y, .. }: r = 1; done otherwise: r = 2; } return r; }",
+       "E092", "exactly the same names"},
+      {"guard not bool",
+       "fn main(): int { mut p: P = P::default(); compare p { matches P { x, .. } if x + 1: return x; done otherwise: return 0; } }",
+       "E092", "Write a comparison"},
+      {"wildcard as a name", "fn main(): int { mut _: int = 1; return 0; }", "E092",
+       "prefix one with an underscore"},
+      {"guarded arm is not coverage",
+       "fn main(): int { mut r: int = 0; compare Color::Red { matches Color::Red: r = 1; done matches Color::Green if r == 0: r = 2; done } return r; }",
+       "E093", "A guarded arm doesn't count"},
+      {"bool missing a value",
+       "fn main(): int { mut r: int = 0; compare true { matches true: r = 1; done } return r; }",
+       "E093", "`matches false:`"},
+  };
+  for (const auto &C : Cases) {
+    auto R = turf::analyze({{"pat.tr", Prelude + C.Body + "\n"}});
+    CHECK(!R.succeeded());
+    bool Found = false;
+    for (const auto &D : R.diagnostics()) {
+      if (D.Code != C.Code)
+        continue;
+      Found = true;
+      CHECK(D.Hint.find(C.HintFragment) != std::string::npos);
+      if (D.Hint.find(C.HintFragment) == std::string::npos)
+        std::cerr << "    case '" << C.Label << "': hint was: " << D.Hint << "\n";
+      break;
+    }
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << C.Label << "' produced:\n" << render(R);
+  }
+
+  // A well-formed program succeeds.
+  auto Ok = turf::analyze(
+      {{"patok.tr", Prelude + "fn main(): int { mut p: P = P::default(); mut r: int; "
+                              "compare p { matches P { x: 0, y } if y == 0: r = 1; done "
+                              "matches P { x, .. }: r = x; done } return r; }\n"}});
+  CHECK(Ok.succeeded());
+  if (!Ok.succeeded())
+    std::cerr << render(Ok);
+
+  // An arm behind a catch-all is ONE warning, not one per checking pass (the
+  // TypeChecker runs over every body twice), and it is still reported when
+  // the same file is analysed again.
+  const std::string Unreachable =
+      Prelude + "fn main(): int { mut p: P = P::default(); mut r: int; "
+                "compare p { matches _: r = 1; done matches P { x: 3, .. }: r = 2; done } "
+                "return r; }\n";
+  for (int Round = 0; Round < 2; ++Round) {
+    auto R = turf::analyze({{"unreach.tr", Unreachable}});
+    CHECK(R.succeeded());
+    int Count = 0;
+    for (const auto &D : R.diagnostics())
+      if (D.Code == "E094")
+        ++Count;
+    CHECK_EQ(Count, 1);
+  }
+}
+
 int main() {
   ScratchDir Dir;
   testCleanProgramQueries();
@@ -915,6 +1005,7 @@ int main() {
   testMigratePub(Dir);
   testAmbiguousModuleImport(Dir);
   testModuleNotFoundHintsAtProject(Dir);
+  testPatternDiagnostics();
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

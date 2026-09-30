@@ -1,0 +1,40 @@
+// LEC-003: destructuring a generic struct instance, including from inside a
+// generic function -- binding types come from the instantiation.
+import test;
+
+struct Pair<A, B> { first: A, second: B }
+
+fn<T, U> firstOf(p: Pair<T, U>): T {
+    compare p {
+        matches Pair { first, .. }:
+            return first;
+        done
+    }
+    return p.first;
+}
+
+fn score(p: Pair<int, string>): int {
+    mut r: int;
+    compare p {
+        matches Pair { first: 0, second: "zero" }:
+            r = 1000;
+        done
+        matches Pair { first, second }:
+            test::assert(second == "five", "second is a string binding");
+            r = first + 1;
+        done
+    }
+    return r;
+}
+
+fn main(): int {
+    mut pr: Pair<int, string> = Pair::default();
+    pr.first = 5;
+    pr.second = "five";
+    test::assert(firstOf(pr) == 5, "generic function destructures Pair<T,U>");
+    test::assert(score(pr) == 6, "binding of type int from Pair<int,string>");
+    pr.first = 0;
+    pr.second = "zero";
+    test::assert(score(pr) == 1000, "literal tests on both fields");
+    return 0;
+}

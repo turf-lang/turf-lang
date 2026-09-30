@@ -1,0 +1,10 @@
+// LEC-003: a bool compare without `otherwise` must cover true and false.
+// Expected: E093.
+fn f(b: bool): int {
+    mut r: int = 0;
+    compare b {
+        matches true: r = 1; done
+    }
+    return r;
+}
+fn main(): int { return f(true) - 1; }

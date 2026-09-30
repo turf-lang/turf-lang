@@ -1,0 +1,9 @@
+// LEC-003: a guard is a bool condition. Expected: E092.
+struct P { x: int }
+fn main(): int {
+    mut p: P = P::default();
+    compare p {
+        matches P { x } if x + 1: return x; done
+        otherwise: return 0;
+    }
+}

@@ -1,0 +1,10 @@
+// LEC-003: a field pattern is a literal, variant, `_`, binding or nested
+// struct pattern -- never an arbitrary expression (use a guard). Expected: E092.
+struct P { x: int }
+fn main(): int {
+    mut p: P = P::default();
+    compare p {
+        matches P { x: 1 + 2 }: return 1; done
+        otherwise: return 0;
+    }
+}

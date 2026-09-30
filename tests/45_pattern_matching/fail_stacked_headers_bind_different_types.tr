@@ -1,0 +1,12 @@
+// LEC-003: same name, different types across stacked headers. Expected: E092.
+struct P { x: int, s: string }
+fn main(): int {
+    mut p: P = P::default();
+    compare p {
+        matches P { x: v, .. }:
+        matches P { s: v, .. }:
+            return 1;
+        done
+        otherwise: return 2;
+    }
+}

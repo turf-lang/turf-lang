@@ -1,0 +1,31 @@
+// LEC-003: stacked `matches` headers are alternatives sharing one body, and a
+// name bound by each of them is one symbol in that body.
+import test;
+
+struct Point { x: int, y: int }
+
+fn f(p: Point): int {
+    mut r: int;
+    compare p {
+        matches Point { x: 0, y }:
+        matches Point { x: 1, y }:
+            r = y * 10;
+        done
+        matches Point { .. }:
+            r = -1;
+        done
+    }
+    return r;
+}
+
+fn main(): int {
+    mut p: Point = Point::default();
+    p.x = 1;
+    p.y = 4;
+    test::assert(f(p) == 40, "second header");
+    p.x = 0;
+    test::assert(f(p) == 40, "first header");
+    p.x = 9;
+    test::assert(f(p) == -1, "neither");
+    return 0;
+}

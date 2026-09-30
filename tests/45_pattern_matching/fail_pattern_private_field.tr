@@ -1,0 +1,11 @@
+// LEC-003: a pattern reads fields exactly as `.field` does, so another
+// module's private field is refused. Expected: E088.
+import shapes_module::Shape;
+
+fn main(): int {
+    mut s: Shape = Shape::default();
+    compare s {
+        matches Shape { secret, .. }: return secret; done
+        otherwise: return 0;
+    }
+}

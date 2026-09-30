@@ -1,0 +1,32 @@
+// LEC-003: a binding shadows an outer name for its arm only, including a
+// `for` loop variable.
+import test;
+
+struct Point { x: int, y: int }
+
+fn main(): int {
+    mut x: int = 100;
+    mut p: Point = Point::default();
+    p.x = 5;
+    p.y = 6;
+    compare p {
+        matches Point { x, y }:
+            test::assert(x == 5, "binding x shadows the outer x");
+            test::assert(y == 6, "binding y");
+        done
+    }
+    test::assert(x == 100, "the outer x is untouched and visible again");
+
+    mut seen: int = 0;
+    for i in 0..3 step i += 1 {
+        p.x = i + 10;
+        compare p {
+            matches Point { x: i, .. }:
+                seen = seen + i;
+            done
+        }
+        seen = seen + i;
+    }
+    test::assert(seen == 10 + 11 + 12 + 0 + 1 + 2, "binding named like the loop variable");
+    return 0;
+}

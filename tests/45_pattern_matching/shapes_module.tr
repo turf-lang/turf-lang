@@ -1,0 +1,17 @@
+// Companion module for 16_cross_module_patterns.tr and
+// fail_pattern_private_field.tr: a struct with one public and one private
+// field, and a generic struct with public fields.
+pub struct Shape {
+    pub kind: int,
+    secret: int,
+}
+
+pub fn Shape.make(kind: int, secret: int): void {
+    self.kind = kind;
+    self.secret = secret;
+}
+
+pub struct Wrap<T> {
+    pub inner: T,
+    pub tag: int,
+}

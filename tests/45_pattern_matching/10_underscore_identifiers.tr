@@ -1,0 +1,27 @@
+// LEC-003: `_name` is an ordinary identifier everywhere (parameter, local,
+// binding, function); only a lone `_` is reserved.
+import test;
+
+struct P { x: int, y: int }
+
+fn _helper(_unused: int, b: int): int { return b; }
+fn __twice(v: int): int { return v * 2; }
+
+fn main(): int {
+    mut _scratch: int = 5;
+    mut p: P = P::default();
+    p.x = 7;
+    mut r: int = 0;
+    compare p {
+        matches P { x, y: _why }:
+            r = _helper(1, x);
+        done
+        matches _:
+            r = -1;
+        done
+    }
+    test::assert(r == 7, "_why binds but is deliberately unused");
+    test::assert(__twice(4) == 8, "leading double underscore");
+    test::assert(_scratch == 5, "underscore local");
+    return 0;
+}

@@ -1,0 +1,9 @@
+// LEC-003: a field can be listed once. Expected: E092.
+struct P { x: int, y: int }
+fn main(): int {
+    mut p: P = P::default();
+    compare p {
+        matches P { x: 0, x, .. }: return x; done
+        otherwise: return 0;
+    }
+}

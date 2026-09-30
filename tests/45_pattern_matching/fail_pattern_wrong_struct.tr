@@ -1,0 +1,11 @@
+// LEC-003: the pattern must name the struct it is matched against.
+// Expected: E092.
+struct P { x: int }
+struct Q { x: int }
+fn main(): int {
+    mut p: P = P::default();
+    compare p {
+        matches Q { x }: return x; done
+        otherwise: return 0;
+    }
+}

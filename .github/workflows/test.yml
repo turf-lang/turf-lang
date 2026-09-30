@@ -252,6 +252,12 @@ jobs:
       # source and re-run the compiler on the result).
       - name: "Migration tool smoke test (turfc --migrate=pub)"
         run: ./scripts/migrate_pub_smoke.sh
+      # LEC-003: the warnings a `compare` with patterns produces (an unused
+      # binding, `_name` silencing it, an arm behind a catch-all reported once)
+      # come from the CFG passes, which neither test_runner.sh nor the
+      # turf::analyze() facade can see.
+      - name: "Pattern warnings smoke test"
+        run: ./scripts/pattern_warnings_smoke.sh
       # LEC-001 stage 4: package builds (`turfc --package-graph`). The test
       # runner is single-file and cannot hand the compiler a graph, so this
       # builds multi-package trees in a temp directory: two packages' `util`

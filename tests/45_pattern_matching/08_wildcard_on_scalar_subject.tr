@@ -1,0 +1,34 @@
+// LEC-003: `_` (optionally guarded) on an int subject, mixed with ordinary
+// value patterns.
+import test;
+
+fn f(n: int): int {
+    mut r: int;
+    compare n {
+        matches 1: r = 10; done
+        matches 2: r = 20; done
+        matches _ if n > 100: r = 99; done
+        matches _: r = 0; done
+    }
+    return r;
+}
+
+fn name(s: string): int {
+    mut r: int = 0;
+    compare s {
+        matches "a": r = 1; done
+        matches _ if s == "b": r = 2; done
+    }
+    return r;
+}
+
+fn main(): int {
+    test::assert(f(1) == 10, "value pattern before a wildcard");
+    test::assert(f(2) == 20, "second value pattern");
+    test::assert(f(500) == 99, "guarded wildcard");
+    test::assert(f(7) == 0, "plain wildcard");
+    test::assert(name("a") == 1, "string value");
+    test::assert(name("b") == 2, "string subject, guarded wildcard");
+    test::assert(name("c") == 0, "non-exhaustive string compare is still a no-op");
+    return 0;
+}

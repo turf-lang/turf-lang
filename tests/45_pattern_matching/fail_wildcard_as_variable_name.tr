@@ -1,0 +1,5 @@
+// LEC-003: a lone `_` is reserved for the wildcard. Expected: E092.
+fn main(): int {
+    mut _: int = 3;
+    return 0;
+}

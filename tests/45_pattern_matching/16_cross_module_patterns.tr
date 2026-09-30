@@ -1,0 +1,37 @@
+// LEC-003: destructuring another module's struct -- by bare name when it is
+// on-demand imported, and by `module::Name` -- reading only its `pub` fields
+// and waving the private one off with `..`; also a generic struct from a
+// module.
+import test;
+import shapes_module::Shape;
+import shapes_module;
+
+fn main(): int {
+    mut s: Shape = Shape::default();
+    s.kind = 3;
+    mut r: int;
+    compare s {
+        matches Shape { kind: 3, .. }:
+            r = 1;
+        done
+        matches _:
+            r = 2;
+        done
+    }
+    test::assert(r == 1, "public field literal, private field ignored by ..");
+
+    mut w: shapes_module::Wrap<int> = shapes_module::Wrap::default();
+    w.inner = 41;
+    w.tag = 1;
+    mut q: int;
+    compare w {
+        matches shapes_module::Wrap { inner, tag: 1 }:
+            q = inner + 1;
+        done
+        matches _:
+            q = -1;
+        done
+    }
+    test::assert(q == 42, "module-qualified generic struct pattern");
+    return 0;
+}

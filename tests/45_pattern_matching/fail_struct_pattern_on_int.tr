@@ -1,0 +1,9 @@
+// LEC-003: a struct pattern needs a struct subject. Expected: E092.
+struct P { x: int }
+fn main(): int {
+    mut n: int = 3;
+    compare n {
+        matches P { x }: return x; done
+        otherwise: return 0;
+    }
+}
