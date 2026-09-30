@@ -139,6 +139,7 @@ PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D1
 PHASE 3  Stabilization & release      REL-001  version, CLI, runtime ABI stamp
                                       REL-002  tooling: `turf test`, `turf fmt`, LSP, VS Code
                                       REL-003  platforms & distribution (D20)
+                                      REL-008  self-contained Linux/Windows/macOS (DEC-2/14/15)
                                       REL-004  conformance suite, CI, fuzzing, sanitizers
                                       REL-005  performance baseline (starts in Phase 1)
                                       REL-006  documentation (reference rewrite, migration guide)
@@ -1175,14 +1176,14 @@ F-11c), REPL.
 
 | Question | Recommendation |
 |---|---|
-| Tier 1 (tested every commit, release-blocking) | **Linux x86-64, glibc** |
-| Tier 2 (built and smoke-tested per release, best effort) | **macOS arm64** — only if the runtime port (AAPCS64 callee-saved `x19–x28`, `fp`, `d8–d15`; stack bounds via `pthread_get_stackaddr_np`; no `/proc`) lands and passes `gc_smoke.sh` + FDN-005's stress mode; otherwise not shipped. |
-| Windows | **Not in 2.0** (FUTURE F-20b): Win64 callee-saved set (`rbx rbp rdi rsi r12–r15 xmm6–15`), stack limits via `GetCurrentThreadStackLimits`, MinGW vs MSVC toolchain, `libm`/`-l` differences. |
+| Tier 1 (tested every commit, release-blocking) | **Decided 2026-09-30 (owner, DEC-2): Linux x86-64, Windows x86-64 and macOS arm64, all three self-contained** (REL-008). Was: Linux x86-64 only. |
+| ~~Tier 2~~ | ~~macOS arm64 only if ported~~. **Superseded by DEC-2:** macOS arm64 is Tier 1 (REL-008 stage 6 does the runtime port: AAPCS64 callee-saved `x19–x28`, `fp`, `d8–d15`; stack bounds via `pthread_get_stackaddr_np`; no `/proc`). |
+| Windows | ~~Not in 2.0~~. **Superseded by DEC-2:** Windows x86-64 is Tier 1, self-contained, and the user never installs MSYS2 (CI may use it to build). REL-008 stage 5 does the runtime and stdlib port: Win64 callee-saved set `rbx rbp rdi rsi r12–r15 xmm6–15`, `GetCurrentThreadStackLimits`, and `net` on Winsock (DEC-15). |
 | Cross-compilation (D20) | `--target` produces an **object file** for any LLVM triple; linking for a non-host triple fails with a TurfLang diagnostic ("cross-linking is not supported in 2.0; the runtime is built for <host>") instead of a host-linker error. Full cross-linking needs per-target runtime archives — FUTURE F-20. |
 | Install layout | `turf-<ver>-<platform>/{bin/turf, bin/turfc, lib/libturfrt.a, lib/std/**, share/turf/examples/**, LICENSE, README.md}`; `TURF_HOME` optional (binary-relative discovery already works); `lib/usr` is retired in favour of LEC-001's cache. |
 | Channels | GitHub release archives + SHA-256 (exists); an `install.sh` that verifies the checksum; Homebrew/Scoop/AUR recipes updated only for shipped platforms (their repos are at v0.6.0 today). |
 | **Compiler self-containment** (found 2026-09-30, LEC-001) | **`turfc` is not self-contained today, and the clean-VM smoke in stage 1 would fail on it.** It links LLVM *dynamically* (target `LLVM` = `libLLVM.so.22.1`) and drags in that library's own dependencies. `ldd build/turfc` shows `libLLVM.so.22.1`, `libgomp.so.1`, `libstdc++`, `libffi.so.8`, `libedit`, `libz`, `libzstd`, `libxml2.so.16`, `libncursesw`, `libicuuc.so.78`/`libicudata`. So a user of a release archive would need exactly LLVM 22's shared library and matching versions of the rest — no better than building from source. What is already fine: the Go `turf` is fully static, and a *compiled program* needs only libc/libm (`libturfrt` is linked in statically). **Recommendation:** release builds link LLVM's static component libraries (`llvm_map_components_to_libnames(...)` over the components Codegen uses, instead of the `LLVM` dylib; `llvm-22-dev` ships the `.a` archives) plus `-static-libstdc++ -static-libgcc`, and are built with `-DTURF_SMART=OFF` or a static OpenMP, so that `ldd bin/turfc` lists only libc, libm, libz and the dynamic loader. Keep dev builds on the dylib (link time). Gate it with a CI check that runs `ldd` on the release binary against an allowlist. |
-| **Linker and C runtime: what "only `cc`" really requires** (2026-09-30) | `turfc` links every program by running the system `cc` (`gcc` on Windows; `linkObject()`, `src/main.cpp`). A self-contained `turfc` (row above) still leaves the user needing a C toolchain. That is `build-essential` on Ubuntu, which does not ship `cc` or libc's start-up files (`crt1.o`, from `libc6-dev`) by default, and on Windows a MinGW `gcc` that almost no Windows machine has. This is the gap between TurfLang and "installs and runs like Java or Python". **Two parts, fixable separately:** (1) *the linker*: embed **lld** (LLVM's linker, usable as a library, shipped as `liblld*` static archives next to LLVM's) in the release `turfc`, so no external linker runs; (2) *the C runtime*: ship one in the archive (for example musl's `libc.a` and start-up objects on Linux, the MinGW-w64 CRT import libraries on Windows), which also makes every compiled Turf program fully static. That is Zig's model: its archive needs nothing installed. **Decide.** Recommendation: 2.0 on Linux keeps the system `cc` (one package on every distribution; documented in the Part IX walkthrough, and the clean-container smoke installs it explicitly); lld plus a bundled C runtime is FUTURE F-20c and a prerequisite for a Windows release that "just works" (F-20b). The owner may prefer to pull F-20c into 2.0: it is the difference between "install TurfLang" and "install TurfLang and a C compiler". |
+| **Linker and C runtime: what "only `cc`" really requires** (2026-09-30) | `turfc` links every program by running the system `cc` (`gcc` on Windows; `linkObject()`, `src/main.cpp`). A self-contained `turfc` (row above) still leaves the user needing a C toolchain. That is `build-essential` on Ubuntu, which does not ship `cc` or libc's start-up files (`crt1.o`, from `libc6-dev`) by default, and on Windows a MinGW `gcc` that almost no Windows machine has. This is the gap between TurfLang and "installs and runs like Java or Python". **Two parts, fixable separately:** (1) *the linker*: embed **lld** (LLVM's linker, usable as a library, shipped as `liblld*` static archives next to LLVM's) in the release `turfc`, so no external linker runs; (2) *the C runtime*: ship one in the archive (for example musl's `libc.a` and start-up objects on Linux, the MinGW-w64 CRT import libraries on Windows), which also makes every compiled Turf program fully static. That is Zig's model: its archive needs nothing installed. **Decided 2026-09-30 (owner, DEC-14): pulled into 2.0** as REL-008. The earlier recommendation (keep the system `cc` for 2.0) is withdrawn. |
 | **`--smart` in a release** (found 2026-09-30) | The archive has never contained the GGUF model (~1 GB, `models/` is git-ignored), so `--smart` in any release so far silently falls back to plain diagnostics. It is optional at build time since LEC-001 (`-DTURF_SMART=OFF`, `scripts/cmake_build.sh --no-smart`; `src/SLMEngineDisabled.cpp` prints why). **Decide** one of: (a) release builds without it (`TURF_SMART=OFF`, smallest and self-contained, `--smart` says it is not built in); (b) ship the runtime and fetch the model on demand (a future `turf smart install` into the cache, with a checksum); (c) a separate "with model" archive. Recommendation: (a) for 2.0, and (b) as FUTURE. A release must never ship a runtime that silently does nothing. |
 
 **Stages** (1) Tier-1 archive in the new layout, with a **self-contained
@@ -1201,7 +1202,152 @@ links, the Linux-only `sockaddr_in` layout and socket constants, no
 Winsock, 32-bit `long` returns) are tabled in `FDN-005.md` *Portability
 review*.
 **Completion** the clean-machine walkthrough of Part IX passes on every
-shipped platform.
+shipped platform. Since DEC-14 that means with *nothing* installed but the
+archive (REL-008), not "only `cc`".
+
+---
+
+### REL-008 — Self-contained distribution: Linux, Windows, macOS
+
+**Kind** Release engineering · **Rules** R3 · **Size** XL (several sessions; most proof only possible on CI runners) · **Prereqs** REL-003's layout decisions, FDN-005, LEC-001 (`turf`) · **Decided** 2026-09-30 by the owner: DEC-2, DEC-14, DEC-15
+
+**The promise.** TurfLang 2.0.0 installs and runs like Java or Python.
+- On Linux x86-64, Windows x86-64 and macOS arm64, a user downloads one
+  archive (or runs `install.sh` / `install.ps1`) and then:
+  ```
+  turf new hello
+  cd hello
+  turf run
+  ```
+  prints hello **with nothing else installed**: no LLVM, no C compiler, no
+  libc development files, no MSYS2, no Xcode.
+- Release-blocking on all three platforms.
+- CI may use any toolchain to *build* the archives (apt LLVM, MSYS2, Homebrew);
+  the user never sees it.
+
+**Owner decisions (2026-09-30).**
+- **DEC-2, platforms:** Linux x86-64, Windows x86-64 and macOS arm64 are all
+  Tier 1. This supersedes REL-003's "Linux Tier 1, macOS Tier 2, Windows not
+  in 2.0".
+- **DEC-14, linking:** self-contained, and **hybrid**.
+  - A program that links no system C library (no `extern from "lib"`, no
+    `--link`) is linked by the embedded lld against the **bundled** C
+    runtime, and is fully static.
+  - A program that does name one links against the system's C library with
+    the system toolchain, and needs that library's development files, as in
+    any language. The diagnostic when they are missing says exactly that.
+  - Pure-Turf programs (the stdlib only) never need the system toolchain.
+- **DEC-15:** `net` is ported to **Winsock** for Windows, not left
+  unsupported.
+- **CI-only MSYS2:** allowed as Windows build machinery.
+
+**Current state (verified 2026-09-30).**
+- `turfc` links `libLLVM.so.22.1` dynamically, with a dozen transitive
+  shared libraries (REL-003's *Compiler self-containment* row).
+- It links programs by running `cc`/`gcc` (`linkObject()`).
+- The Win64 and macOS GC paths exist (`runtime/turfrt_gc.c`) but have never
+  run.
+- The Windows stack-overflow handler is a stub (`runtime/turfrt_signal.c`).
+- The stdlib's `mem`/`net` breakages on macOS and Windows are tabled in
+  `FDN-005.md` *Portability review*.
+- The development machine this was written on (Arch, no Docker daemon, no
+  Windows or Mac) cannot run any of the proofs below. They run on GitHub
+  Actions runners (ubuntu, windows, macos arm64), so this milestone needs
+  the branch pushed.
+
+**Stages** (dependency order; each ends green on all three runners):
+1. **Release-shaped CI on every push, not only on tags.**
+   - Build the release configuration on each runner.
+   - Inspect the artifacts against an allowlist: `ldd` / `objdump -p` /
+     `otool -L`. The allowlist is libc, libm and the loader on Linux; system
+     DLLs only (`KERNEL32`, `UCRT`/`api-ms-win-*`) on Windows; `libSystem`
+     on macOS.
+   - The check fails today, by design, until stages 2–4 land.
+2. **Self-contained `turfc`.**
+   - `-DTURF_RELEASE_STATIC=ON` links LLVM's static component libraries
+     (`llvm_map_components_to_libnames`) plus the static C++ runtime
+     (`-static-libstdc++ -static-libgcc`, and `libwinpthread` statically on
+     MinGW).
+   - `-DTURF_SMART=OFF`, pending REL-003's `--smart` row.
+   - Dev builds stay on the dylib.
+3. **Embedded lld.** `linkObject()` calls lld in-process: `lld::elf::link`,
+   `lld::mingw::link` (COFF), `lld::macho::link`. The system `cc` is still
+   spawned, but only on the hybrid path, for programs that name a system C
+   library.
+4. **Bundled C runtime**, shipped under `lib/rt/<platform>/`:
+   - **Linux:** musl `libc.a` + `crt1.o`/`crti.o`/`crtn.o`, built from
+     source in CI. **`libturfrt` is compiled against musl** (clang
+     `--target=x86_64-linux-musl` with the musl sysroot), since a
+     glibc-compiled runtime cannot be linked into a musl-static program.
+   - **Windows:** the MinGW-w64 CRT objects and import libraries
+     (`crt2.o`, `libmingw32.a`, `libucrt*.a`, `libkernel32.a`, …) taken from
+     the build's MinGW, targeting UCRT (present on Windows 10+).
+   - **macOS:** `libSystem` `.tbd` link stubs, which is how Zig links
+     without Xcode. **Risk:** confirm the stubs are redistributable before
+     shipping (they are symbol lists generated from the SDK; record the
+     finding in the change record).
+   - The hybrid rule is decided by `turfc` per program: bundled if
+     `g_RequiredLibs` and `--link` are empty, otherwise system.
+5. **The Windows port**, running on the windows runner:
+   - the test suite under Git Bash on the runner, fixing what fails;
+   - the GC's Win64 register capture and stack base, validated, including
+     `TURF_GC_STRESS`;
+   - stack-overflow handling via a vectored exception handler, replacing
+     the stub;
+   - `mem` uses `_msize`;
+   - **`net` on Winsock:** `WSAStartup`/`WSACleanup`, `SOCKET` is pointer
+     sized (not `int32`), `closesocket`, `WSAGetLastError`, Windows socket
+     constants;
+   - `fs`, `sys`, `time` and `random` checked;
+   - `turf` project commands and git dependencies exercised.
+6. **The macOS port**, running on the macos arm64 runner:
+   - the suite and GC stress;
+   - `mem` uses `malloc_size`;
+   - BSD `sockaddr_in` with `sin_len`;
+   - `SOL_SOCKET`/`SO_REUSEADDR` values;
+   - `SIGBUS` stack overflow (handled since FDN-005).
+7. **Installers:** `install.sh` (Linux, macOS) and `install.ps1` (Windows).
+   Each detects the platform, downloads, verifies the SHA-256, unpacks
+   (`~/.turf` / `%LOCALAPPDATA%\turf`) and prints or sets `PATH`. Archive
+   signing (minisign or cosign) is recommended.
+8. **Clean-machine proof, release-blocking** (`scripts/release_smoke.sh`,
+   and a `.ps1` twin):
+   - **Linux:** `docker run ubuntu:24.04` / `debian:stable` with **no**
+     `cc`.
+   - **Windows:** a `PATH` holding only `System32` and the unpacked
+     archive, with no MSYS2, MinGW or Git.
+   - **macOS:** a `PATH` without Xcode's toolchain, with a check that no
+     `clang`/`ld` was executed.
+   - Each runs install → `turf new hello` → `turf run` → `turf build` with a
+     path dependency and with a git dependency → a program using `net`
+     (loopback).
+9. **Recipes:** Homebrew, Scoop and AUR generated from the archives, and
+   bumped by CI after a release.
+
+**Tests.**
+- Every stage adds its CI job.
+- The artifact allowlist (stage 1) and the clean-machine smokes (stage 8)
+  are what *prove* the promise. Neither may be skipped or softened to get a
+  release out (R3).
+
+**Risks.**
+- Archive size: tens of MB per platform (static LLVM plus lld plus a C
+  runtime).
+- musl's performance differences (`malloc`) against glibc.
+- macOS stub redistribution (stage 4).
+- A second supported libc to keep patched.
+- Windows antivirus heuristics on unsigned executables (signing helps).
+- The GC ports are the most likely source of real bugs. That is why stages
+  5–6 run the stress modes, not just the suite.
+
+**Non-goals.**
+- Linux arm64, Windows arm64, the BSDs;
+- cross-linking between platforms (F-20);
+- an MSVC-built compiler;
+- bundling a model for `--smart`.
+
+**Completion.** Stage 8 passes on all three platforms from the published
+release archives, with the artifact allowlist green.
 
 ---
 
@@ -1513,6 +1659,12 @@ TurfLang 2.0.0 ships only when every line is demonstrated:
 | DEC-11 | Propagation keyword (LEC-004) | Prefix `try` | LEC-004 |
 | DEC-12 | Payload + message coexistence (LEC-004) | N fields or N+1 with trailing message | LEC-004 |
 | DEC-13 | Main-file module name for qualified type identity (FDN-003) | `main` — **decided 2026-09-27** (`FREEZE.md` §6.11; never spelled: a main-file type's identity is its bare name) | FDN-003 |
+| DEC-14 | Self-contained release, and how programs link | **Decided 2026-09-30 (owner):** the 2.0.0 archive needs nothing installed. `turfc` has static LLVM and an embedded lld and ships a C runtime (musl / MinGW-w64 CRT on UCRT / macOS `.tbd` stubs). Hybrid linking: pure-Turf programs are fully static against the bundled runtime; a program naming a system C library uses the system toolchain | REL-008 |
+| DEC-15 | `net` on Windows | **Decided 2026-09-30 (owner):** ported to Winsock, full parity | REL-008 |
+
+**DEC-2 amended 2026-09-30 (owner):** Linux x86-64, Windows x86-64 and macOS
+arm64 are all Tier 1 and self-contained for 2.0 (REL-008). The row above
+records the original recommendation; REL-003's table records the decision.
 
 ---
 
@@ -1523,8 +1675,9 @@ public, stable language project. From the day it ships:
 
 - `docs/planning/FUTURE.md` is the backlog. Its first section is the
   deliberately excluded 2.0 candidates (closures, collection iteration,
-  slices, expression-position type arguments, enum payloads, Windows,
-  cross-linking, registry, separate compilation), each with the rationale
+  slices, expression-position type arguments, enum payloads, cross-linking,
+  registry, separate compilation; Windows moved into 2.0 by DEC-2's
+  amendment, REL-008), each with the rationale
   recorded when it was excluded.
 - The post-2.0 Simplification phases (F-S0 … F-S5) become a tracked
   initiative with their own freeze entries and change records.

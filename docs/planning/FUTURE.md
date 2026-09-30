@@ -177,11 +177,15 @@ coherence; the open union (`!T`) is the frozen design.
 
 ### F-20 / F-20b — Cross-linking and more platforms (§27 D20)
 
-2.0: Linux x86-64 Tier 1, macOS arm64 Tier 2 only if ported, object-only
-cross-compilation with a diagnostic at link time (ROADMAP REL-003).
+2.0 (owner decision 2026-09-30, ROADMAP DEC-2 amended, DEC-14, REL-008):
+Linux x86-64, Windows x86-64 and macOS arm64, all Tier 1 and
+self-contained. Object-only cross-compilation keeps its link-time diagnostic
+(REL-003). **F-20b and F-20c below were pulled into 2.0 as REL-008.** Their
+text stays here as the design notes REL-008 was written from; F-20 itself
+(cross-linking) and other platforms stay FUTURE.
 - **F-20** Per-target `libturfrt` archives and a cross-linker story (LLD or
   a target `cc`).
-- **F-20b** Windows x86-64: the GC's register capture for the Win64
+- **F-20b** (now REL-008 stage 5) Windows x86-64: the GC's register capture for the Win64
   callee-saved set (`rbx rbp rdi rsi r12–r15 xmm6–15`), stack bounds via
   `GetCurrentThreadStackLimits`, toolchain choice (MinGW was used for v1.0.0
   archives). Other architectures need their own register-capture code
@@ -198,7 +202,7 @@ cross-compilation with a diagnostic at link time (ROADMAP REL-003).
     zip bundles them) and a linker is available. MSYS2 is only the
     *from-source* build environment (LLVM 22, MinGW, CMake packages; bash
     build scripts).
-- **F-20c A bundled linker and C runtime** (M–L). Release `turfc` links with
+- **F-20c** (now REL-008 stages 2–4) **A bundled linker and C runtime** (M–L). Release `turfc` links with
   an embedded **lld** instead of running the system `cc`, and the archive
   carries a C runtime to link against: musl's `libc.a` and start-up objects
   on Linux, the MinGW-w64 CRT import libraries on Windows, the macOS SDK
@@ -210,8 +214,9 @@ cross-compilation with a diagnostic at link time (ROADMAP REL-003).
   - Trade-offs: archive size (tens of MB), and a libc to keep patched.
     Programs `extern from` a system C library still need that library at
     link time.
-  - ROADMAP REL-003's *Linker and C runtime* row is where 2.0 decides
-    whether this is pulled forward.
+  - Pulled forward on 2026-09-30 (ROADMAP DEC-14), with **hybrid**
+    linking: only programs that name a system C library use the system
+    toolchain.
 
 ---
 
