@@ -1,0 +1,22 @@
+// LEC-004: a subject of a DECLARED error type can only hold that type's own
+// variants, so a pattern naming another error type's variant can never match:
+// E092.
+error IOError {
+    NotFound
+}
+
+error NetError {
+    Refused
+}
+
+fn main(): int {
+    mut e: IOError = IOError::NotFound;
+    compare e {
+        matches NetError::Refused:
+            return 1;
+        done
+        otherwise:
+            return 2;
+    }
+    return 0;
+}

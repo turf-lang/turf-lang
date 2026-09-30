@@ -1,0 +1,49 @@
+// LEC-004: a value of a DECLARED error type (not just the open `err`) can be
+// destructured too, and -- since its variants are listable -- a compare that
+// covers every variant with a variant pattern whose fields all match anything
+// is exhaustive WITHOUT `otherwise`.
+import io;
+import test;
+
+error IOError {
+    NotFound(path: string),
+    Denied(path: string, mode: int),
+    Timeout
+}
+
+fn weight(e: IOError): int {
+    compare e {
+        matches IOError::NotFound(_path):
+            return 1;
+        done
+        matches IOError::Denied(_, mode):
+            return 10 + mode;
+        done
+        matches IOError::Timeout:
+            return 100;
+        done
+    }
+}
+
+fn weightWithCatchAll(e: IOError): int {
+    compare e {
+        matches IOError::Denied(_, 3):
+            return 3;
+        done
+        otherwise:
+            return 0;
+    }
+}
+
+fn main(): int {
+    mut a: IOError = IOError::NotFound("x");
+    mut b: IOError = IOError::Denied("y", 4);
+    mut c: IOError = IOError::Timeout;
+    test::assert(weight(a) == 1, "NotFound");
+    test::assert(weight(b) == 14, "Denied binds mode");
+    test::assert(weight(c) == 100, "Timeout");
+    test::assert(weightWithCatchAll(IOError::Denied("z", 3)) == 3, "a refutable payload pattern matches");
+    test::assert(weightWithCatchAll(IOError::Denied("z", 2)) == 0, "and falls to otherwise when it fails");
+    io::printline("25/20 PASS");
+    return 0;
+}

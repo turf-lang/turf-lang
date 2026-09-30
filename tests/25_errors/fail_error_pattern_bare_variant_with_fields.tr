@@ -1,0 +1,29 @@
+// LEC-004: a bare `E::V:` header matches a variant that has nothing to
+// destructure. One that has fields must say what happens to them -- here it
+// must be `E::V(..)` -- so the pattern can't keep compiling, meaning something
+// different, after a field is added. E092 with that hint.
+error IOError {
+    NotFound(path: string),
+    Timeout
+}
+
+fn open(p: string): !int {
+    return IOError::NotFound(p);
+}
+
+fn code(): int {
+    immut v: int = open("x") recover as err run {
+        compare err {
+            matches IOError::NotFound:
+                return 1;
+            done
+            otherwise:
+                return 2;
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    return 0;
+}

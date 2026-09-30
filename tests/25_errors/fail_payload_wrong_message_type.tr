@@ -1,0 +1,13 @@
+// LEC-004: the argument after the fields is the STD-002 message, which must be
+// a `string`. An int there is E096 (and not read as a missing field).
+error IOError {
+    NotFound(path: string)
+}
+
+fn open(p: string): !int {
+    return IOError::NotFound(p, 42);
+}
+
+fn main(): int {
+    return 0;
+}

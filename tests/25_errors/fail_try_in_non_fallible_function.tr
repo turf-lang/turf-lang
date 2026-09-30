@@ -1,0 +1,18 @@
+// LEC-004: `try` returns the error from the function it is in, so that
+// function must return `!V`. One that returns a plain `int` is E095, and the
+// hint says to declare it `!int`.
+error IOError {
+    NotFound
+}
+
+fn open(): !int {
+    return IOError::NotFound;
+}
+
+fn helper(): int {
+    return try open();
+}
+
+fn main(): int {
+    return 0;
+}

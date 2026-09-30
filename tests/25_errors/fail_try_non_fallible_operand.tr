@@ -1,0 +1,18 @@
+// LEC-004: `try` propagates the error of a `!T`. An ordinary call has none,
+// so `try` on it is E095 (drop the `try`), not silently accepted.
+error IOError {
+    NotFound
+}
+
+fn plain(): int {
+    return 3;
+}
+
+fn helper(): !int {
+    immut n: int = try plain();
+    return n;
+}
+
+fn main(): int {
+    return 0;
+}

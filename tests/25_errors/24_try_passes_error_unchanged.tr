@@ -1,0 +1,56 @@
+// LEC-004: `try` returns the error value UNCHANGED -- same tag, same payload,
+// same message -- through any number of levels, even across functions whose
+// success types have nothing in common (the error union is open, so there is
+// nothing to convert).
+import io;
+import test;
+
+error DbError {
+    Missing(table: string, id: int),
+    Locked
+}
+
+fn fetch(id: int): !string {
+    if id == 0 { return DbError::Missing("users", id, "no such user"); }
+    if id == 1 { return DbError::Locked; }
+    return "user-" + (id to string);
+}
+
+fn fetchLen(id: int): !int {
+    immut s: string = try fetch(id);
+    return strings::length(s);
+}
+
+fn fetchDouble(id: int): !double {
+    immut n: int = try fetchLen(id);
+    return (n to double) * 2.0;
+}
+
+fn fetchFlag(id: int): !bool {
+    immut d: double = try fetchDouble(id);
+    return d > 10.0;
+}
+
+fn trace(id: int): string {
+    immut _f: bool = fetchFlag(id) recover as err run {
+        compare err {
+            matches DbError::Missing(table, row):
+                return table + "#" + (row to string) + ":" + err.message;
+            done
+            matches DbError::Locked:
+                return "locked";
+            done
+            otherwise:
+                return "?";
+        }
+    };
+    return "ok";
+}
+
+fn main(): int {
+    test::assert(trace(0) == "users#0:no such user", "tag, payload and message survive four levels");
+    test::assert(trace(1) == "locked", "a variant with no fields survives too");
+    test::assert(trace(2) == "ok", "success passes through untouched");
+    io::printline("25/24 PASS");
+    return 0;
+}

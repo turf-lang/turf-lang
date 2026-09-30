@@ -1,0 +1,124 @@
+// tests/41_gc/09_error_payload_survives_collection.tr
+// LEC-004 (FREEZE.md §6.18): an error value is `{ tag, message, payload }`, the
+// payload a GC-allocated per-variant struct with its OWN type descriptor
+// (`errpayload.<Error>.<Variant>`). A `string`, a `List<string>` and a nested
+// struct held ONLY inside a payload must be traced through a forced collection
+// that runs inside `recover as err run` -- after `err` is bound, before its
+// payload is read -- exactly the window 08 uses for the message. Were the
+// payload block untraced (or its descriptor wrong), the strings would be swept
+// and later reused by `junk()`'s throwaway allocations, so the contents would no
+// longer match. Run at `-O0` as well (AGENTS.md): conservative register scanning
+// can otherwise mask a missed root by luck.
+import list::List;
+import strings;
+import test;
+import io;
+
+struct Point { x: int, y: int }
+
+fn mkpoint(a: int, b: int): Point {
+    mut p: Point = Point::default();
+    p.x = a;
+    p.y = b;
+    return p;
+}
+
+error Shape {
+    Dot(p: Point),
+    Labels(names: List<string>, count: int),
+    Named(label: string, at: Point),
+    Empty
+}
+
+fn mkdot(a: int, b: int): !int {
+    return Shape::Dot(mkpoint(a, b));
+}
+
+fn mklabels(n: int): !int {
+    mut l: List<string> = List::default();
+    mut i: int = 0;
+    while i < n {
+        l.push(strings::repeat("L", 40 + i));
+        i = i + 1;
+    }
+    return Shape::Labels(l, n, "with message");
+}
+
+fn mknamed(): !int {
+    return Shape::Named(strings::repeat("o", 40), mkpoint(7, 8));
+}
+
+fn junk(n: int): void {
+    mut i: int = 0;
+    while i < n {
+        strings::repeat("j", 40);
+        i = i + 1;
+    }
+}
+
+fn readDot(): int {
+    immut v: int = mkdot(3, 4) recover as err run {
+        junk(2000);
+        gc_collect();
+        compare err {
+            matches Shape::Dot(Point { x, y }):
+                test::assert(x == 3, "dot x");
+                test::assert(y == 4, "dot y");
+                return x + y;
+            done
+            otherwise:
+                return 0 - 1;
+        }
+    };
+    return v;
+}
+
+fn readLabels(): int {
+    immut v: int = mklabels(5) recover as err run {
+        junk(2000);
+        gc_collect();
+        junk(2000);
+        gc_collect();
+        compare err {
+            matches Shape::Labels(names, count):
+                test::assert(count == 5, "count");
+                test::assert(names.length() == 5, "len");
+                test::assert(strings::length(names.get(4)) == 44, "element 4 length");
+                test::assert(strings::starts_with(names.get(2), "L"), "element 2");
+                test::assert(err.message == "with message", "msg");
+                return count;
+            done
+            otherwise:
+                return 0 - 2;
+        }
+    };
+    return v;
+}
+
+fn readNamed(): int {
+    immut v: int = mknamed() recover as err run {
+        junk(2000);
+        gc_collect();
+        compare err {
+            matches Shape::Named(label, Point { x: 7, y }):
+                test::assert(strings::length(label) == 40, "label");
+                test::assert(y == 8, "y");
+                return y;
+            done
+            matches Shape::Named(_, _):
+                return 0 - 3;
+            done
+            otherwise:
+                return 0 - 4;
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    test::assert(readDot() == 7, "dot");
+    test::assert(readLabels() == 5, "labels");
+    test::assert(readNamed() == 8, "named");
+    io::printline("41/09 PASS: a payload's GC-heap string, List<string> and nested struct are traced through a forced collection");
+    return 0;
+}

@@ -1,0 +1,61 @@
+// LEC-004: `try` IS a return, so it runs the pending `defer`s exactly as
+// `return` does -- in every open block, innermost first, LIFO -- before leaving.
+// A `try` inside a loop leaves the whole function, not just the iteration.
+import io;
+import test;
+
+error StopError {
+    Stop(at: int)
+}
+
+struct Trail {
+    log: string
+}
+
+fn Trail.new(): void {
+    self.log = "";
+}
+
+fn advance(i: int): !int {
+    if i == 3 { return StopError::Stop(i); }
+    return i;
+}
+
+fn walk(t: &Trail, limit: int): !int {
+    defer t.log = t.log + "F";
+    mut total: int = 0;
+    mut i: int = 0;
+    while i < limit {
+        defer t.log = t.log + "i";
+        total = total + try advance(i);
+        i = i + 1;
+    }
+    return total;
+}
+
+fn failedAt(t: &Trail, limit: int): int {
+    immut v: int = walk(t, limit) recover as err run {
+        compare err {
+            matches StopError::Stop(at):
+                return at;
+            done
+            otherwise:
+                return 99;
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    mut ok: Trail = Trail::new();
+    immut total: int = walk(&ok, 3) recover produce -1;
+    test::assert(total == 3, "0 + 1 + 2");
+    test::assert(ok.log == "iiiF", "each iteration's defer, then the function's");
+
+    mut bad: Trail = Trail::new();
+    test::assert(failedAt(&bad, 10) == 3, "the error reaches the caller with its payload");
+    test::assert(bad.log == "iiiiF",
+        "iterations 0-2 finished, iteration 3's defer ran when `try` left, then the function's");
+    io::printline("25/23 PASS");
+    return 0;
+}

@@ -1,0 +1,13 @@
+// LEC-004: each constructor argument is checked against its field's declared
+// type. A string where `mode: int` is declared is E096 naming the field.
+error IOError {
+    Denied(path: string, mode: int)
+}
+
+fn open(p: string): !int {
+    return IOError::Denied(p, "rw");
+}
+
+fn main(): int {
+    return 0;
+}

@@ -1,0 +1,41 @@
+// LEC-004: `try` on a `!void` is a statement: nothing to unbox, only the error
+// to pass on.
+import io;
+import test;
+
+error IoError {
+    Closed(fd: int)
+}
+
+fn write(fd: int): !void {
+    if fd < 0 { return IoError::Closed(fd); }
+    return;
+}
+
+fn writeBoth(a: int, b: int): !void {
+    try write(a);
+    try write(b);
+    return;
+}
+
+fn outcome(a: int, b: int): int {
+    writeBoth(a, b) recover as err run {
+        compare err {
+            matches IoError::Closed(f):
+                return f;
+            done
+            otherwise:
+                return 99;
+        }
+    };
+    return 0;
+}
+
+fn main(): int {
+    test::assert(outcome(5, 6) == 0, "both writes succeed");
+    test::assert(outcome(0 - 4, 6) == 0 - 4, "the first write fails and leaves");
+    test::assert(outcome(5, 0 - 7) == 0 - 7, "the second write fails after the first succeeded");
+    test::assert(outcome(0 - 4, 0 - 7) == 0 - 4, "the first error wins: the second write never runs");
+    io::printline("25/26 PASS");
+    return 0;
+}

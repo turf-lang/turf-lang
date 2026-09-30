@@ -1,0 +1,17 @@
+// LEC-004: an error-variant pattern matches an error value. Matched against an
+// int it can never succeed, which is E092 rather than a silent never-taken arm.
+error IOError {
+    NotFound(path: string)
+}
+
+fn main(): int {
+    mut n: int = 3;
+    compare n {
+        matches IOError::NotFound(path):
+            return 1;
+        done
+        otherwise:
+            return 2;
+    }
+    return 0;
+}

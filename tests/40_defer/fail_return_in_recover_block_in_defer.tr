@@ -1,0 +1,21 @@
+// INV-DEFER-2: a deferred statement may not return out of the function it is
+// deferred in. A `return` inside a `recover` block returns from the function
+// CONTAINING the recover (errors_and_recover.md §1.4.2), so one inside a
+// deferred `recover` is exactly that -- E083. It used to slip past the
+// structural check (which did not look inside `recover`) and crash Codegen.
+error E {
+    Bad
+}
+
+fn failing(): !int {
+    return E::Bad;
+}
+
+fn g(): int {
+    defer failing() recover run { return 5; };
+    return 1;
+}
+
+fn main(): int {
+    return g();
+}

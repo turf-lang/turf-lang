@@ -1,0 +1,75 @@
+// LEC-004: a variant pattern's sub-patterns are the ones a struct pattern's
+// fields take: a name that binds, `_`, a literal, an enum variant, and a
+// trailing `..`. Headers are tried in source order (LEC-003): a failing literal
+// or guard falls through to the next header; stacked headers share bindings.
+import io;
+import test;
+
+enum Mode { Read, Write }
+
+error IOError {
+    Denied(path: string, mode: int, kind: Mode),
+    Closed(reason: string)
+}
+
+fn fail(m: int, k: Mode): !int {
+    return IOError::Denied("p", m, k);
+}
+
+fn classify(m: int, k: Mode): int {
+    immut v: int = fail(m, k) recover as err run {
+        compare err {
+            matches IOError::Denied(_, 0, _):
+                return 1;
+            done
+            matches IOError::Denied(_, _, Mode::Write) if m > 100:
+                return 2;
+            done
+            matches IOError::Denied(path, mode, Mode::Write):
+                test::assert(path == "p", "binds a string");
+                return 3 + mode;
+            done
+            matches IOError::Denied(_, mode, ..):
+                return 50 + mode;
+            done
+            matches IOError::Closed(..):
+                return 60;
+            done
+            otherwise:
+                return 99;
+        }
+    };
+    return v;
+}
+
+fn sharedBinding(flag: bool): int {
+    immut v: int = failFlag(flag) recover as err run {
+        compare err {
+            matches IOError::Denied(why, _, _):
+                matches IOError::Closed(why):
+                return why == "shut" give 1 otherwise 2;
+            done
+            otherwise:
+                return 99;
+        }
+    };
+    return v;
+}
+
+fn failFlag(flag: bool): !int {
+    if flag {
+        return IOError::Closed("shut");
+    }
+    return IOError::Denied("opened", 1, Mode::Read);
+}
+
+fn main(): int {
+    test::assert(classify(0, Mode::Read) == 1, "a literal sub-pattern tests a field");
+    test::assert(classify(200, Mode::Write) == 2, "a guard can read a name from outside the pattern");
+    test::assert(classify(5, Mode::Write) == 8, "a failing guard falls through to the next header");
+    test::assert(classify(5, Mode::Read) == 55, "an enum-variant sub-pattern that fails falls through");
+    test::assert(sharedBinding(true) == 1, "stacked headers share one binding (Closed)");
+    test::assert(sharedBinding(false) == 2, "stacked headers share one binding (Denied)");
+    io::printline("25/19 PASS");
+    return 0;
+}

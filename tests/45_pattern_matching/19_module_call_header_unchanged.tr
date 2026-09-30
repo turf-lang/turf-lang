@@ -1,0 +1,27 @@
+// LEC-004: the parser reads `Name::Name(...)` at the top of a `matches` header
+// as an error-variant pattern, because only the Resolver knows whether `Name` is
+// an error type. When it is not, the header must mean what it always meant: a
+// value pattern that CALLS a module function (legal against a string subject).
+// `strings::to_upper("ab")` here is such a call, not a pattern.
+import strings;
+import test;
+
+fn classify(s: string): int {
+    compare s {
+        matches strings::to_upper("ab"):
+            return 1;
+        done
+        matches strings::to_lower("CD"):
+            return 2;
+        done
+        otherwise:
+            return 3;
+    }
+}
+
+fn main(): int {
+    test::assert(classify("AB") == 1, "a module call in a header is still a value pattern");
+    test::assert(classify("cd") == 2, "a second one");
+    test::assert(classify("zz") == 3, "otherwise");
+    return 0;
+}

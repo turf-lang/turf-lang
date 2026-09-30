@@ -1,0 +1,8 @@
+// LEC-004: a variant's field names are unique. A repeat is E096.
+error IOError {
+    Denied(path: string, path: int)
+}
+
+fn main(): int {
+    return 0;
+}

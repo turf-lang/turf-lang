@@ -1,0 +1,43 @@
+// LEC-004: every json::JsonError variant carries the byte offset at which the
+// parser gave up, read by destructuring; comparing with `==` (which looks at the
+// variant only) keeps working exactly as before.
+import json;
+import test;
+
+fn offsetOf(text: string): int {
+    immut _v: json::JsonValue = json::parse(text) recover as err run {
+        compare err {
+            matches json::JsonError::UnexpectedChar(at):
+                return at;
+            done
+            matches json::JsonError::UnexpectedEnd(at):
+                return 1000 + at;
+            done
+            matches json::JsonError::ExpectedComma(at):
+                return 2000 + at;
+            done
+            matches json::JsonError::ExpectedColon(at):
+                return 3000 + at;
+            done
+            otherwise:
+                return 0 - 1;
+        }
+    };
+    return 0 - 2;
+}
+
+fn isUnexpectedChar(text: string): bool {
+    immut _v: json::JsonValue = json::parse(text) recover as err run {
+        return err == json::JsonError::UnexpectedChar;
+    };
+    return false;
+}
+
+fn main(): int {
+    test::assert(offsetOf("[1, ?]") == 4, "an unexpected character reports its offset");
+    test::assert(offsetOf("[1, 2") == 2005, "a missing comma/bracket reports the offset it stopped at");
+    test::assert(offsetOf("{\"a\" 1}") == 3005, "a missing colon reports its offset");
+    test::assert(offsetOf("") == 1000, "end of input at offset 0");
+    test::assert(isUnexpectedChar("[1, ?]"), "== still identifies the variant");
+    return 0;
+}

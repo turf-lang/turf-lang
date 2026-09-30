@@ -1,0 +1,13 @@
+// LEC-004: an error value carries data about what went wrong, not another
+// error, so a payload field can't have an error type (E096).
+error Inner {
+    Bad
+}
+
+error Outer {
+    Wrapped(cause: Inner)
+}
+
+fn main(): int {
+    return 0;
+}

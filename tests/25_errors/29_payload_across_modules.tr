@@ -1,0 +1,34 @@
+// LEC-004: an error declared in another module. The type is `pub`, so its
+// variants and payload fields follow it (FREEZE.md §6.15): the main file
+// constructs it (`payload_module::...` is only ever constructed by the module),
+// names it in a pattern -- qualified -- and binds a field of a struct type the
+// module declared.
+import payload_module;
+import io;
+import test;
+
+fn where(n: int): int {
+    immut _v: int = payload_module::parse(n) recover as err run {
+        compare err {
+            matches payload_module::ParseFailure::Syntax(payload_module::Where { file, line }, expected):
+                test::assert(file == "in.tr", "a module struct nested in a payload");
+                test::assert(expected == "a number", "a string field");
+                return line;
+            done
+            matches payload_module::ParseFailure::Eof:
+                return 0 - 1;
+            done
+            otherwise:
+                return 0 - 2;
+        }
+    };
+    return 0;
+}
+
+fn main(): int {
+    test::assert(where(0) == 12, "qualified error pattern destructures a module's payload");
+    test::assert(where(1) == 0 - 1, "a variant with no fields, qualified");
+    test::assert(where(5) == 0, "success");
+    io::printline("25/29 PASS");
+    return 0;
+}

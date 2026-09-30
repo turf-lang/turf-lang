@@ -1,0 +1,15 @@
+// LEC-004: `main` returns `int`, so nothing can fail out of it and `try` has
+// nowhere to propagate to (E095). The hint says how to handle the error
+// instead -- this is the case the message is most needed for.
+error IOError {
+    NotFound
+}
+
+fn open(): !int {
+    return IOError::NotFound;
+}
+
+fn main(): int {
+    immut n: int = try open();
+    return n;
+}

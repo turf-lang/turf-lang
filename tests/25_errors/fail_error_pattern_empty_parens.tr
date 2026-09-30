@@ -1,0 +1,26 @@
+// LEC-004: `IOError::NotFound()` -- empty parentheses -- is neither "no fields"
+// (write it bare) nor "ignore the fields" (write `(..)`): E092 says so.
+error IOError {
+    NotFound(path: string)
+}
+
+fn open(p: string): !int {
+    return IOError::NotFound(p);
+}
+
+fn code(): int {
+    immut v: int = open("x") recover as err run {
+        compare err {
+            matches IOError::NotFound():
+                return 1;
+            done
+            otherwise:
+                return 2;
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    return 0;
+}

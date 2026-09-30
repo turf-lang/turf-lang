@@ -1,0 +1,13 @@
+// LEC-004: N fields take N arguments, or N + 1 where the extra one is the
+// `string` message. N + 2 is E096.
+error IOError {
+    NotFound(path: string)
+}
+
+fn open(p: string): !int {
+    return IOError::NotFound(p, "message", "one too many");
+}
+
+fn main(): int {
+    return 0;
+}

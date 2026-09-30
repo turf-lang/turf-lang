@@ -986,6 +986,124 @@ static void testPatternDiagnostics() {
   }
 }
 
+// LEC-004: error-variant payloads, variant patterns and `try`. Same reason as
+// testPatternDiagnostics(): the runner cannot see WHY a fail_*.tr failed, so each
+// code and a hint fragment is asserted, and so are the warnings it never sees.
+static void testErrorPayloadDiagnostics() {
+  CurrentTest = "error payload diagnostics";
+  const std::string Prelude =
+      "error IOError { NotFound(path: string), Denied(path: string, mode: int), Timeout }\n"
+      "fn open(p: string): !int { return IOError::NotFound(p); }\n"
+      "fn plain(): int { return 3; }\n";
+  struct Case {
+    const char *Label;
+    const char *Body;
+    const char *Code;
+    const char *HintFragment;
+  };
+  const Case Cases[] = {
+      {"too few arguments",
+       "fn f(): !int { return IOError::Denied(\"p\"); }\nfn main(): int { return 0; }",
+       "E096", "takes 2, or 3 with a trailing 'string' message"},
+      {"wrong field type",
+       "fn f(): !int { return IOError::Denied(\"p\", \"rw\"); }\nfn main(): int { return 0; }",
+       "E096", "Pass a value of type 'int' for 'mode'"},
+      {"wrong message type",
+       "fn f(): !int { return IOError::NotFound(\"p\", 3); }\nfn main(): int { return 0; }",
+       "E096", "must be a 'string'"},
+      {"bare reference to a fielded variant",
+       "fn f(): !int { return IOError::NotFound; }\nfn main(): int { return 0; }",
+       "E096", "compare with '=='"},
+      {"field that is an error type",
+       "error Outer { Wrapped(cause: IOError) }\nfn main(): int { return 0; }", "E096",
+       "not another failure"},
+      {"bare variant pattern over a fielded variant",
+       "fn f(): int { immut v: int = open(\"x\") recover as err run { compare err { "
+       "matches IOError::NotFound: return 1; done otherwise: return 2; } }; return v; }\n"
+       "fn main(): int { return 0; }",
+       "E092", "IOError::NotFound(..)"},
+      {"variant pattern leaves a field out",
+       "fn f(): int { immut v: int = open(\"x\") recover as err run { compare err { "
+       "matches IOError::Denied(p): return 1; done otherwise: return 2; } }; return v; }\n"
+       "fn main(): int { return 0; }",
+       "E092", "end the pattern with `..`"},
+      {"open error union needs otherwise",
+       "fn f(): int { immut v: int = open(\"x\") recover as err run { compare err { "
+       "matches IOError::Timeout: return 1; done } }; return v; }\n"
+       "fn main(): int { return 0; }",
+       "E093", "End the compare with 'otherwise:'"},
+      {"declared error type, variant missing",
+       "fn main(): int { mut e: IOError = IOError::Timeout; compare e { "
+       "matches IOError::NotFound(_): return 1; done matches IOError::Timeout: return 2; done } "
+       "return 0; }",
+       "E093", "neither does one whose payload pattern can fail to match"},
+      {"try in main",
+       "fn main(): int { immut n: int = try open(\"x\"); return n; }", "E095",
+       "Handle the error here instead"},
+      {"try in a function returning int",
+       "fn f(): int { return try open(\"x\"); }\nfn main(): int { return 0; }", "E095",
+       "Declare the function's return type as '!int'"},
+      {"try on a non-fallible operand",
+       "fn f(): !int { return try plain(); }\nfn main(): int { return 0; }", "E095",
+       "drop the `try`"},
+      {"try inside a defer",
+       "fn f(): !int { mut n: int = 0; defer n = try open(\"x\"); return n; }\n"
+       "fn main(): int { return 0; }",
+       "E095", "Handle the error inside the deferred statement"},
+  };
+  for (const auto &C : Cases) {
+    auto R = turf::analyze({{"payload.tr", Prelude + C.Body + "\n"}});
+    CHECK(!R.succeeded());
+    bool Found = false;
+    for (const auto &D : R.diagnostics()) {
+      if (D.Code != C.Code)
+        continue;
+      Found = true;
+      CHECK(D.Hint.find(C.HintFragment) != std::string::npos);
+      if (D.Hint.find(C.HintFragment) == std::string::npos)
+        std::cerr << "    case '" << C.Label << "': hint was: " << D.Hint << "\n";
+      break;
+    }
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << C.Label << "' produced:\n" << render(R);
+  }
+
+  // A well-formed program succeeds.
+  auto Ok = turf::analyze(
+      {{"payok.tr",
+        Prelude + "fn relay(): !int { immut n: int = try open(\"x\"); return n; }\n"
+                  "fn pass(): !int { return open(\"x\"); }\n"
+                  "fn f(): int { immut v: int = relay() recover as err run { compare err { "
+                  "matches IOError::NotFound(path): return 1; done "
+                  "matches IOError::Denied(_, 2): return 2; done otherwise: return 3; } }; "
+                  "return v; }\n"
+                  "fn main(): int { return f(); }\n"}});
+  CHECK(Ok.succeeded());
+  if (!Ok.succeeded())
+    std::cerr << render(Ok);
+
+  // A function whose only way to fail is a `try`, or a `return` of another
+  // fallible call, really can fail: no "never returns an error" warning. One
+  // that only returns a plain value still gets it.
+  auto NeverReturns = [](const turf::AnalysisResult &R, const char *Fn) {
+    for (const auto &D : R.diagnostics())
+      if (D.Message.find("never actually returns an error") != std::string::npos &&
+          D.Message.find(Fn) != std::string::npos)
+        return true;
+    return false;
+  };
+  auto W = turf::analyze(
+      {{"never.tr",
+        Prelude + "fn viaTry(): !int { immut n: int = try open(\"x\"); return n; }\n"
+                  "fn viaReturn(): !int { return open(\"x\"); }\n"
+                  "fn neverFails(): !int { return plain(); }\n"
+                  "fn main(): int { return 0; }\n"}});
+  CHECK(!NeverReturns(W, "viaTry"));
+  CHECK(!NeverReturns(W, "viaReturn"));
+  CHECK(NeverReturns(W, "neverFails"));
+}
+
 int main() {
   ScratchDir Dir;
   testCleanProgramQueries();
@@ -1006,6 +1124,7 @@ int main() {
   testAmbiguousModuleImport(Dir);
   testModuleNotFoundHintsAtProject(Dir);
   testPatternDiagnostics();
+  testErrorPayloadDiagnostics();
 
   if (Failures) {
     std::cerr << Failures << " check(s) failed\n";

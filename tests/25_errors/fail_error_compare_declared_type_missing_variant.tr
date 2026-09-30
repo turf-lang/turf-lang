@@ -1,0 +1,20 @@
+// LEC-004: a subject of a DECLARED error type has a listable set of variants,
+// so leaving one uncovered without `otherwise` is E093 naming it.
+error IOError {
+    NotFound(path: string),
+    Timeout,
+    Closed
+}
+
+fn main(): int {
+    mut e: IOError = IOError::Timeout;
+    compare e {
+        matches IOError::NotFound(_):
+            return 1;
+        done
+        matches IOError::Timeout:
+            return 2;
+        done
+    }
+    return 0;
+}

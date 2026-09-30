@@ -1,0 +1,58 @@
+// LEC-004: any sized type is a payload field. Primitives of every width,
+// enums, arrays and structs round-trip through construction and a pattern,
+// including literal sub-patterns on each comparable type and a guard on a double.
+import io;
+import test;
+
+enum Level { Low, High }
+
+struct Pair { a: int, b: int }
+
+fn mkpair(a: int, b: int): Pair {
+    mut p: Pair = Pair::default();
+    p.a = a;
+    p.b = b;
+    return p;
+}
+
+error Wide {
+    Prims(i: int, n: int32, d: double, flag: bool, c: char, s: string),
+    Mixed(level: Level, p: Pair),
+    Arr(values: int[3])
+}
+
+fn fail(which: int): !int {
+    if which == 0 { return Wide::Prims(1, 2, 3.5, true, 'z', "str"); }
+    if which == 1 { return Wide::Mixed(Level::High, mkpair(10, 20)); }
+    immut a: int[3] = [7, 8, 9];
+    return Wide::Arr(a);
+}
+
+fn probe(which: int): int {
+    immut _v: int = fail(which) recover as err run {
+        compare err {
+            matches Wide::Prims(1, n, d, true, 'z', s) if d > 3.0:
+                test::assert(n == 2, "int32");
+                test::assert(s == "str", "string");
+                return 1;
+            done
+            matches Wide::Mixed(Level::High, Pair { a, b }):
+                return a + b;
+            done
+            matches Wide::Arr(values):
+                return values[0] + values[1] + values[2];
+            done
+            otherwise:
+                return 0 - 1;
+        }
+    };
+    return 0;
+}
+
+fn main(): int {
+    test::assert(probe(0) == 1, "primitives, literals of every kind and a double guard");
+    test::assert(probe(1) == 30, "an enum variant literal and a nested struct pattern");
+    test::assert(probe(2) == 24, "a fixed array field");
+    io::printline("25/28 PASS");
+    return 0;
+}

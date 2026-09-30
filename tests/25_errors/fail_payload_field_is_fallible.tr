@@ -1,0 +1,8 @@
+// LEC-004: nor can a payload field be a `!T`, for the same reason (E096).
+error Outer {
+    Wrapped(cause: !int)
+}
+
+fn main(): int {
+    return 0;
+}

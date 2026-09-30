@@ -1,0 +1,18 @@
+// LEC-004: passing a `!T` through never unwraps it: a function that returns a
+// plain `int` still can't `return` a `!int` call (audit F-21's own example, now
+// with a hint naming `recover` and the `!int` declaration).
+error IOError {
+    NotFound
+}
+
+fn open(): !int {
+    return IOError::NotFound;
+}
+
+fn helper(): int {
+    return open();
+}
+
+fn main(): int {
+    return 0;
+}

@@ -1,0 +1,56 @@
+// LEC-004 (DEC-11): `try <expr>` is prefix error propagation. On success it is
+// the value; on failure it returns the error, unchanged, from the enclosing
+// `!V` function. It binds like a prefix operator, so `try a() + try b()` is
+// `(try a()) + (try b())`.
+import io;
+import test;
+
+error MathError {
+    Negative(value: int),
+    TooBig(value: int, limit: int)
+}
+
+fn check(n: int): !int {
+    if n < 0 { return MathError::Negative(n); }
+    if n > 100 { return MathError::TooBig(n, 100); }
+    return n;
+}
+
+fn sum(a: int, b: int): !int {
+    return try check(a) + try check(b);
+}
+
+fn chain(a: int, b: int, c: int): !int {
+    immut x: int = try check(a);
+    immut y: int = try check(b);
+    immut z: int = try check(c);
+    return x + y + z;
+}
+
+fn describe(r: int, a: int, b: int): int {
+    immut v: int = sum(a, b) recover as err run {
+        compare err {
+            matches MathError::Negative(v):
+                return 0 - v;
+            done
+            matches MathError::TooBig(v, limit):
+                return v - limit;
+            done
+            otherwise:
+                return 999;
+        }
+    };
+    return v;
+}
+
+fn main(): int {
+    test::assert(describe(0, 3, 4) == 7, "both operands succeed");
+    test::assert(describe(0, 0 - 5, 4) == 5, "the first operand's error leaves the function");
+    test::assert(describe(0, 4, 150) == 50, "the second operand's error leaves the function");
+    immut ok: int = chain(1, 2, 3) recover produce -1;
+    immut bad: int = chain(1, 200, 3) recover produce -1;
+    test::assert(ok == 6, "three trys in a row");
+    test::assert(bad == 0 - 1, "the middle one fails, the rest never run");
+    io::printline("25/22 PASS");
+    return 0;
+}

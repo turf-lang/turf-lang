@@ -1,0 +1,14 @@
+// LEC-004 (FREEZE.md §6.18): a variant with N >= 1 declared fields takes N
+// arguments (or N + 1 with a trailing message). One argument for a two-field
+// variant is E096, and its hint names the declared fields.
+error IOError {
+    Denied(path: string, mode: int)
+}
+
+fn open(p: string): !int {
+    return IOError::Denied(p);
+}
+
+fn main(): int {
+    return 0;
+}

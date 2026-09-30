@@ -1,0 +1,32 @@
+// INV-DEFER-2's other side: a deferred `recover` whose block does NOT jump out
+// of the function (here it only records the failure; `!void` so it need not
+// diverge) is fine, and runs when the block exits.
+import test;
+
+error E {
+    Bad
+}
+
+struct Seen {
+    n: int
+}
+
+fn Seen.new(): void {
+    self.n = 0;
+}
+
+fn failing(): !void {
+    return E::Bad;
+}
+
+fn g(s: &Seen): int {
+    defer failing() recover run { s.n = s.n + 1; };
+    return 1;
+}
+
+fn main(): int {
+    mut s: Seen = Seen::new();
+    test::assert(g(&s) == 1, "g returns its own value");
+    test::assert(s.n == 1, "the deferred recover block ran");
+    return 0;
+}
