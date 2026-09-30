@@ -251,16 +251,119 @@ void Resolver::visitPostfixExpr(PostfixExprAST &Node) {
 }
 
 
+void Resolver::resolveArmPattern(
+    ExprAST *Pat, MatchesArm &Arm,
+    std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> &ArmNames,
+    std::vector<std::string> &HeaderNames) {
+  if (!Pat)
+    return;
+
+  if (dynamic_cast<WildcardPatternExprAST *>(Pat))
+    return;
+
+  if (auto *B = dynamic_cast<BindingPatternExprAST *>(Pat)) {
+    if (std::find(HeaderNames.begin(), HeaderNames.end(), B->getName()) !=
+        HeaderNames.end()) {
+      InvalidPatternError(
+          B->getLoc(),
+          "'" + B->getName() + "' is bound twice in the same pattern.",
+          "A name can bind one value per pattern. Give the second one its "
+          "own name, or write '_' to ignore it.")
+          .raise();
+      return;
+    }
+    HeaderNames.push_back(B->getName());
+
+    auto Existing = ArmNames.find(B->getName());
+    if (Existing != ArmNames.end()) {
+      B->ResolvedVar = Existing->second;
+      return;
+    }
+    // Immutable, like `immut`: a binding names a value, and assigning to it
+    // would only change a private copy of the field. The type is a
+    // placeholder until TypeChecker::visitCompare() writes the field's real
+    // one in -- the contract ForEachExprAST's loop variable already uses.
+    ResolverSourceLocation Loc{B->getLoc().Line, B->getLoc().Col};
+    B->ResolvedVar = SymTable_.declareVariable(B->getName(), TurfInt(), Loc,
+                                               /*IsImmutable=*/true);
+    ArmNames[B->getName()] = B->ResolvedVar;
+    Arm.Bindings.push_back(B->ResolvedVar);
+    return;
+  }
+
+  if (auto *S = dynamic_cast<StructPatternExprAST *>(Pat)) {
+    // The struct is a type SPELLING: validating it also rewrites it to its
+    // TypeIdentity (FDN-003), and reports an unknown, ambiguous or private
+    // type the way a type annotation would. A generic struct is named bare
+    // (`Pair { a, b }`): its arguments come from the subject, not the pattern.
+    validateNamedType(S->getTypeSpelling(), S->getLoc(), CurrentFuncTypeParams_,
+                      /*AllowBareGeneric=*/true);
+
+    std::vector<std::string> SeenFields;
+    for (auto &F : S->getFieldsMut()) {
+      if (std::find(SeenFields.begin(), SeenFields.end(), F.Name) !=
+          SeenFields.end()) {
+        InvalidPatternError(
+            F.Loc, "field '" + F.Name + "' is listed twice in this pattern.",
+            "Each field can appear once. To test a field and also keep its "
+            "value, bind it and add a guard: `matches P { x } if x == 0:`.")
+            .raise();
+        continue;
+      }
+      SeenFields.push_back(F.Name);
+      resolveArmPattern(F.Sub.get(), Arm, ArmNames, HeaderNames);
+    }
+    return;
+  }
+
+  // A value pattern: an ordinary expression (a literal, an enum variant, or
+  // -- at the top of a header only -- any expression at all).
+  visitChild(Pat);
+}
+
+
 void Resolver::visitCompare(CompareExprAST &Node) {
   // Resolve the compare subject
   visitChild(Node.getSubjectMut());
 
-  // Resolve each arm: patterns then body (in its own scope)
+  // Resolve each arm: patterns, guards, then body, all in the arm's own scope
+  // so a binding is visible to its guard and body and to nothing else.
   for (auto &Arm : Node.getArmsMut()) {
-    for (auto &Val : Arm.Values)
-      visitChild(Val.get());
     // Each arm body gets its own scope so declarations don't leak between arms
     SymTable_.enterScope();
+
+    std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> ArmNames;
+    std::vector<std::string> FirstHeaderNames;
+    for (size_t K = 0; K < Arm.Values.size(); ++K) {
+      std::vector<std::string> HeaderNames;
+      resolveArmPattern(Arm.Values[K].get(), Arm, ArmNames, HeaderNames);
+
+      // Every stacked header feeds the ONE shared body, which reads one
+      // symbol per name. A name one header binds and another does not would
+      // leave the body reading a value that, on that path, was never bound.
+      if (K == 0) {
+        FirstHeaderNames = HeaderNames;
+      } else {
+        auto Sorted = [](std::vector<std::string> V) {
+          std::sort(V.begin(), V.end());
+          return V;
+        };
+        if (Sorted(HeaderNames) != Sorted(FirstHeaderNames)) {
+          InvalidPatternError(
+              Arm.Loc,
+              "stacked `matches` headers must bind the same names, but this "
+              "arm's headers bind different ones.",
+              "The arms share one body, so every header has to bind exactly "
+              "the same names (or none): either give each header the same "
+              "bindings, or split them into separate arms.")
+              .raise();
+        }
+      }
+    }
+
+    for (auto &G : Arm.Guards)
+      visitChild(G.get());
+
     visitChild(Arm.Body.get());
     SymTable_.exitScope();
   }

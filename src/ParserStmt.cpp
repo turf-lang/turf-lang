@@ -472,6 +472,168 @@ std::unique_ptr<ExprAST> ParseForExpr() {
                                           std::move(Start), std::move(Body));
 }
 
+// ─── Patterns (LEC-003, FREEZE.md §6.17) ─────────────────────────────────────
+//
+//   pattern := '_'                                   wildcard
+//            | Name [ '::' Name ] '{' fields '}'     struct pattern
+//            | <any expression>                      value pattern
+//   (nested only: a bare identifier is a BINDING)
+//   fields  := [ field { ',' field } [ ',' ] ] [ '..' ]
+//   field   := name                                  binds the field as `name`
+//            | name ':' pattern
+//
+// Nothing here needs lookahead beyond the current token, because a header's
+// pattern is read by the ordinary expression parser first and only
+// reinterpreted afterwards: `Point` parses as a variable and `geometry::Point`
+// as a scope access, and it is the '{' that follows which says "this was a
+// struct name". That is unambiguous -- struct brace-literal EXPRESSIONS were
+// removed (C-3), so an expression is never followed by '{' in this position.
+// ParsingPatternHeader keeps ParsePrimary() from mistaking that '{' for the
+// removed literal.
+
+bool ParsingPatternHeader = false;
+
+namespace {
+
+struct PatternHeaderScope {
+  bool Saved;
+  PatternHeaderScope() : Saved(ParsingPatternHeader) { ParsingPatternHeader = true; }
+  ~PatternHeaderScope() { ParsingPatternHeader = Saved; }
+};
+
+std::unique_ptr<ExprAST> ParsePattern(bool Nested);
+
+// Parses `{ field, field: pattern, .. }` after the struct's name was read.
+// CurTok is the '{'.
+std::unique_ptr<ExprAST> ParseStructPatternBody(SourceLocation Loc,
+                                                TurfTypePtr TypeSpelling) {
+  getNextToken(); // eat '{'
+
+  std::vector<FieldPattern> Fields;
+  bool HasRest = false;
+  SourceLocation RestLoc{0, 0};
+
+  while (CurTok != '}') {
+    if (CurTok == TOK_EOF) {
+      LogErrorAt(Loc, "Missing closing '}' for struct pattern.",
+                 SLM::ErrorCategory::CONTROL_FLOW);
+      return nullptr;
+    }
+
+    if (CurTok == TOK_RANGE) {
+      HasRest = true;
+      RestLoc = CurLoc;
+      getNextToken(); // eat '..'
+      if (CurTok == ',')
+        getNextToken(); // a trailing comma after '..' is harmless
+      if (CurTok != '}') {
+        InvalidPatternError(CurLoc,
+                            "'..' must be the last thing in a struct pattern.",
+                            "Move '..' to the end: `Point { x, .. }`. It "
+                            "stands for every field you did not list.")
+            .raise();
+        return nullptr;
+      }
+      break;
+    }
+
+    if (CurTok != TOK_IDENTIFIER) {
+      InvalidPatternError(
+          CurLoc, "expected a field name in a struct pattern.",
+          "List the struct's fields by name: `Point { x, y }` binds both, "
+          "`Point { x: 0, y }` tests x and binds y, and `..` ignores the rest.")
+          .raise();
+      return nullptr;
+    }
+
+    FieldPattern F;
+    F.Name = IdentifierStr;
+    F.Loc = CurLoc;
+    getNextToken(); // eat the field name
+
+    if (CurTok == TOK_COLON) {
+      getNextToken(); // eat ':'
+      F.Sub = ParsePattern(/*Nested=*/true);
+      if (!F.Sub)
+        return nullptr;
+    } else {
+      F.IsShorthand = true;
+      F.Sub = std::make_unique<BindingPatternExprAST>(F.Loc, F.Name);
+    }
+    Fields.push_back(std::move(F));
+
+    if (CurTok == ',') {
+      getNextToken();
+      continue;
+    }
+    if (CurTok != '}') {
+      InvalidPatternError(CurLoc,
+                          "expected ',' or '}' after a field pattern.",
+                          "Separate fields with commas: `Point { x, y }`.")
+          .raise();
+      return nullptr;
+    }
+  }
+  getNextToken(); // eat '}'
+
+  return std::make_unique<StructPatternExprAST>(Loc, std::move(TypeSpelling),
+                                                std::move(Fields), HasRest,
+                                                RestLoc);
+}
+
+// Nested == true inside a struct pattern's field list, where a bare
+// identifier BINDS. At the top of a `matches` header it stays an ordinary
+// value expression (equality against a variable), which is what keeps every
+// pre-LEC-003 program meaning what it meant.
+std::unique_ptr<ExprAST> ParsePattern(bool Nested) {
+  if (CurTok == TOK_WILDCARD) {
+    SourceLocation Loc = CurLoc;
+    getNextToken(); // eat '_'
+    return std::make_unique<WildcardPatternExprAST>(Loc);
+  }
+
+  std::unique_ptr<ExprAST> E;
+  {
+    PatternHeaderScope Guard;
+    E = ParseExpression();
+  }
+  if (!E)
+    return nullptr;
+
+  if (CurTok == '{') {
+    // `Name {` or `module::Name {`: a struct pattern. Recover the spelling
+    // from the node ParseExpression() built for it.
+    std::string Module, Name;
+    SourceLocation Loc{0, 0};
+    if (auto *V = dynamic_cast<VariableExprAST *>(E.get())) {
+      Name = V->getName();
+      Loc = V->getLoc();
+    } else if (auto *S = dynamic_cast<ScopeAccessExprAST *>(E.get());
+               S && S->getModuleQualifier().empty()) {
+      Module = S->getLeftName();
+      Name = S->getRightName();
+      Loc = S->getLoc();
+    } else {
+      InvalidPatternError(
+          CurLoc, "a '{' after a value is not a pattern.",
+          "A struct pattern names the struct first: `Point { x, y }` or "
+          "`geometry::Point { x, y }`.")
+          .raise();
+      return nullptr;
+    }
+    return ParseStructPatternBody(
+        Loc, std::make_shared<NamedType>(std::move(Name), std::move(Module)));
+  }
+
+  if (Nested) {
+    if (auto *V = dynamic_cast<VariableExprAST *>(E.get()))
+      return std::make_unique<BindingPatternExprAST>(V->getLoc(), V->getName());
+  }
+  return E;
+}
+
+} // namespace
+
 // ParseCompareExpr — parses:
 //   compare [( ] subject [ )] {
 //       matches [( ] val [ )] :
@@ -482,6 +644,9 @@ std::unique_ptr<ExprAST> ParseForExpr() {
 //       otherwise:
 //           body statements
 //   }
+//
+// A header's `val` may also be a destructuring pattern (see "Patterns"
+// above) and may end in `if <guard>` just before its ':'.
 //
 // Rules enforced here (parse-time errors):
 //   • Missing 'done' after arm body → error
@@ -634,25 +799,37 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
 
     SourceLocation ArmLoc = CurLoc;
     std::vector<std::unique_ptr<ExprAST>> Patterns;
+    std::vector<std::unique_ptr<ExprAST>> Guards; // parallel to Patterns; nullptr = none
 
     // Collect all stacked 'matches val:' headers
     while (CurTok == TOK_MATCHES) {
       getNextToken(); // eat 'matches'
 
-      // Optional parens around the pattern value
-      bool PatternParen = (CurTok == '(');
-      if (PatternParen)
+      // Optional parens around a plain value pattern. A destructuring
+      // pattern is never parenthesised: its own '{' ... '}' already delimits.
+      std::unique_ptr<ExprAST> Val;
+      if (CurTok == '(') {
         getNextToken(); // eat '('
-
-      auto Val = ParseExpression();
-      if (!Val) return nullptr;
-
-      if (PatternParen) {
+        Val = ParseExpression();
+        if (!Val) return nullptr;
         if (CurTok != ')') {
           LogErrorAt(CurLoc, "Expected ')' to close matches pattern.", SLM::ErrorCategory::CONTROL_FLOW);
           return nullptr;
         }
         getNextToken(); // eat ')'
+      } else {
+        Val = ParsePattern(/*Nested=*/false);
+        if (!Val) return nullptr;
+      }
+
+      // Optional guard: `matches <pattern> if <condition>:`. It belongs to
+      // THIS header (FREEZE.md §6.17), so `matches A if g: matches B:` runs
+      // the shared body for (A and g) or B.
+      std::unique_ptr<ExprAST> Guard;
+      if (CurTok == TOK_IF) {
+        getNextToken(); // eat 'if'
+        Guard = ParseExpression();
+        if (!Guard) return nullptr;
       }
 
       if (CurTok != TOK_COLON) {
@@ -662,6 +839,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
       getNextToken(); // eat ':'
 
       Patterns.push_back(std::move(Val));
+      Guards.push_back(std::move(Guard));
 
       // If the very next non-semicolon token is not another 'matches' or 'done'
       // or 'otherwise' or '}', the user has put a body statement between
@@ -747,6 +925,7 @@ std::unique_ptr<ExprAST> ParseCompareExpr() {
     MatchesArm Arm;
     Arm.Loc = ArmLoc;
     Arm.Values = std::move(Patterns);
+    Arm.Guards = std::move(Guards);
     Arm.Body = std::make_unique<BlockExprAST>(std::move(ArmStmts));
     Arms.push_back(std::move(Arm));
   }
@@ -774,7 +953,7 @@ std::unique_ptr<ExprAST> ParseLetStatement(bool IsImmutable) {
   getNextToken(); // eat mutable or immutable
 
   if (CurTok != TOK_IDENTIFIER) {
-    if (RejectVisibilityKeywordAsName())
+    if (RejectReservedWordAsName())
       return nullptr;
     LogErrorAt(CurLoc, "Expected a variable name after 'mutable' or 'immutable'.", SLM::ErrorCategory::DECLARATION);
     return nullptr;

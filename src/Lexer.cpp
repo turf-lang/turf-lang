@@ -545,8 +545,15 @@ static int gettokScan() {
   // and SourceFilename itself has changed. See AllSourceLines' doc comment.
   CurLoc = {CurLine, CurCol, SourceFilename};
 
-  // Identifiers of the types: id = [a-zA-Z][a-zA-Z0-9_]*
-  if (isalpha(LastChar)) {
+  // Identifiers: id = [a-zA-Z_][a-zA-Z0-9_]*
+  //
+  // A leading '_' used to be unlexable, although the unused-variable hint
+  // tells the user to prefix a name with one (audit F-22). LEC-003 (FREEZE.md
+  // §6.17) makes `_name` an ordinary identifier -- which, by convention, also
+  // silences the unused-variable warning -- and reserves `_` ALONE as the
+  // wildcard pattern. The lone-`_` test below is on the WHOLE spelling, so
+  // `__` and `_1` stay identifiers.
+  if (isalpha(LastChar) || LastChar == '_') {
     IdentifierStr = LastChar;
     LastChar = SourceFile->get();
     CurCol++;
@@ -556,6 +563,9 @@ static int gettokScan() {
       LastChar = SourceFile->get();
       CurCol++;
     }
+
+    if (IdentifierStr == "_")
+      return TOK_WILDCARD;
 
     // Check for keywords
     auto It = Keywords.find(IdentifierStr);

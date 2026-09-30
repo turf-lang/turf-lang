@@ -577,8 +577,154 @@ public:
 // → one MatchesArm with Values = {1, 2} and the shared body.
 struct MatchesArm {
   SourceLocation Loc;                           ///< location of the first 'matches'
-  std::vector<std::unique_ptr<ExprAST>> Values; ///< one entry per stacked matches
+  /// One entry per stacked `matches` header. A plain expression is the
+  /// original value pattern (equality against the subject, unchanged since
+  /// before LEC-003); a WildcardPatternExprAST, BindingPatternExprAST or
+  /// StructPatternExprAST is one of the destructuring forms (FREEZE.md §6.17).
+  std::vector<std::unique_ptr<ExprAST>> Values;
+  /// Parallel to `Values` (always the same length): header K's `if <guard>`,
+  /// or nullptr. A guard belongs to ITS header, not the arm -- `matches A if
+  /// g: matches B:` runs the shared body for (A and g) or B -- so every
+  /// header is an independent alternative tried in source order.
+  std::vector<std::unique_ptr<ExprAST>> Guards;
   std::unique_ptr<ExprAST> Body;                ///< shared arm body (BlockExprAST)
+  /// The arm's bindings, one symbol per distinct name, declared by the
+  /// Resolver in the arm's own scope. Every header of the arm must bind
+  /// exactly these names (same name, same type), so the shared body reads
+  /// one symbol no matter which header matched. Resolve-time state: never
+  /// copied by clone(): cloned ASTs must be re-resolved.
+  std::vector<std::shared_ptr<VariableSymbol>> Bindings;
+};
+
+// ── Destructuring patterns (LEC-003, FREEZE.md §6.17 / F-PAT-1) ──────────────
+//
+// Patterns are ExprAST nodes (they are children of a CompareExprAST, appear
+// as CFG statements and are visited by the same ASTVisitor as everything
+// else) but they are never evaluated: codegen() is deliberately a fatal
+// error, because a pattern is lowered by CompareExprAST::codegen() as part of
+// the arm's test, never on its own.
+//
+// Which node a `matches` header produces:
+//   matches 3:               -> NumberExprAST (the legacy value pattern)
+//   matches _:               -> WildcardPatternExprAST
+//   matches Point { x, .. }: -> StructPatternExprAST
+//   (nested, inside a struct pattern's field list)
+//   x: 0 / x: Color::Red     -> the value expression itself
+//   x: _                     -> WildcardPatternExprAST
+//   x / x: name              -> BindingPatternExprAST
+//   x: Inner { a }           -> StructPatternExprAST
+// A bare identifier is a BINDING only inside a destructuring pattern; at the
+// top of a header it stays an ordinary value expression (equality against a
+// variable), which is what keeps every pre-LEC-003 program meaning what it
+// meant.
+
+/// `_` -- matches anything, binds nothing.
+class WildcardPatternExprAST : public ExprAST {
+  SourceLocation Loc;
+
+public:
+  explicit WildcardPatternExprAST(SourceLocation Loc) : Loc(Loc) {}
+  const SourceLocation &getLoc() const { return Loc; }
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitWildcardPattern(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<WildcardPatternExprAST>(Loc);
+  }
+};
+
+/// A name inside a destructuring pattern: binds the matched value,
+/// immutably, for the arm's guard and body.
+class BindingPatternExprAST : public ExprAST {
+  std::string Name;
+  SourceLocation Loc;
+
+public:
+  BindingPatternExprAST(SourceLocation Loc, std::string Name)
+      : Name(std::move(Name)), Loc(Loc) {}
+  const SourceLocation &getLoc() const { return Loc; }
+  const std::string &getName() const { return Name; }
+
+  /// Set by the Resolver (the arm's shared symbol for this name). The
+  /// symbol's Type is a placeholder until TypeChecker::visitCompare() writes
+  /// the matched field's real type into it -- the same "placeholder now,
+  /// refine later" contract ForEachExprAST's loop variable uses.
+  std::shared_ptr<VariableSymbol> ResolvedVar;
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitBindingPattern(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    return std::make_unique<BindingPatternExprAST>(Loc, Name);
+    // Note: ResolvedVar intentionally NOT copied. ✓
+  }
+};
+
+/// One `name` or `name: <pattern>` entry of a struct pattern.
+struct FieldPattern {
+  std::string Name;             ///< the struct field being matched
+  SourceLocation Loc;           ///< the field name's location
+  std::unique_ptr<ExprAST> Sub; ///< what the field's value must match
+  /// `{ x }` (true) versus `{ x: x }`: the shorthand's sub-pattern is a
+  /// BindingPatternExprAST synthesized by the Parser, so a diagnostic about
+  /// it can say "the field `x`" rather than point at text that isn't there.
+  bool IsShorthand = false;
+  /// Set by the TypeChecker: the field's type for THIS instantiation (generic
+  /// parameters substituted, NamedType resolved), which Codegen reads to load
+  /// and compare the field without re-deriving it.
+  TurfTypePtr FieldType;
+};
+
+/// `Name { field: pattern, field, .. }` -- destructures a struct value.
+class StructPatternExprAST : public ExprAST {
+  SourceLocation Loc;
+  /// The struct as SPELLED (`Point`, `geometry::Point`), a NamedType the
+  /// Resolver validates and rewrites to a TypeIdentity exactly like a type
+  /// annotation's. Shared, not deep-copied, by clone() -- like every other
+  /// AST type pointer -- so a cloned pattern keeps its resolution.
+  TurfTypePtr TypeSpelling;
+  std::vector<FieldPattern> Fields;
+  bool HasRest;            ///< a trailing `..`: fields not listed are ignored
+  SourceLocation RestLoc;
+
+public:
+  StructPatternExprAST(SourceLocation Loc, TurfTypePtr TypeSpelling,
+                       std::vector<FieldPattern> Fields, bool HasRest,
+                       SourceLocation RestLoc)
+      : Loc(Loc), TypeSpelling(std::move(TypeSpelling)),
+        Fields(std::move(Fields)), HasRest(HasRest), RestLoc(RestLoc) {}
+
+  const SourceLocation &getLoc() const { return Loc; }
+  const TurfTypePtr &getTypeSpelling() const { return TypeSpelling; }
+  const std::vector<FieldPattern> &getFields() const { return Fields; }
+  std::vector<FieldPattern> &getFieldsMut() { return Fields; }
+  bool hasRest() const { return HasRest; }
+  const SourceLocation &getRestLoc() const { return RestLoc; }
+
+  /// Set by the TypeChecker: the type of the value this pattern is matched
+  /// against -- a struct, or a `&Struct` the pattern looks through. Kept as
+  /// the subject/field declared it (a NamedType or GenericType is NOT
+  /// resolved here): Codegen resolves it to the instantiated LLVM struct the
+  /// same way FieldAccessExprAST::codegen() resolves a base's type.
+  TurfTypePtr MatchedType;
+
+  llvm::Value *codegen() override;
+  void accept(ASTVisitor &V) override { V.visitStructPattern(*this); }
+  std::unique_ptr<ExprAST> clone() const override {
+    std::vector<FieldPattern> ClonedFields;
+    ClonedFields.reserve(Fields.size());
+    for (const auto &F : Fields) {
+      FieldPattern C;
+      C.Name = F.Name;
+      C.Loc = F.Loc;
+      C.Sub = CloneExprAST(F.Sub.get());
+      C.IsShorthand = F.IsShorthand;
+      ClonedFields.push_back(std::move(C));
+    }
+    return std::make_unique<StructPatternExprAST>(
+        Loc, TypeSpelling, std::move(ClonedFields), HasRest, RestLoc);
+    // Note: MatchedType and each FieldType are TypeChecker output,
+    // intentionally NOT copied -- a clone is re-typechecked. ✓
+  }
 };
 
 /// compare (subject) { matches val: ... done  otherwise: ... }
@@ -593,6 +739,31 @@ public:
   /// Set by TypeChecker when the subject is a string — selects strcmp chain codegen.
   bool SubjectIsString = false;
   bool SubjectIsEnum   = false;
+  /// Set by the TypeChecker: with no `otherwise`, the arms provably cover
+  /// every value of the subject (FREEZE.md §6.17: a complete set of enum
+  /// variants or bool values, or an unguarded irrefutable header), so the
+  /// "no arm matched" path cannot happen. The CFG reads it to decide whether
+  /// that path exists at all -- see CFGBuilder::visitCompare(). Generalizes
+  /// what SubjectIsEnum alone used to say before patterns existed.
+  bool Exhaustive = false;
+
+  /// True when this compare needs the ordered test-chain lowering rather than
+  /// the original `switch`/`strcmp` one: some header is a destructuring
+  /// pattern or carries a guard. A compare of plain value patterns never
+  /// does, so every pre-LEC-003 program keeps its exact code generation.
+  bool needsPatternCodegen() const {
+    for (const auto &Arm : Arms) {
+      for (const auto &G : Arm.Guards)
+        if (G)
+          return true;
+      for (const auto &V : Arm.Values)
+        if (dynamic_cast<const WildcardPatternExprAST *>(V.get()) ||
+            dynamic_cast<const BindingPatternExprAST *>(V.get()) ||
+            dynamic_cast<const StructPatternExprAST *>(V.get()))
+          return true;
+    }
+    return false;
+  }
 
   CompareExprAST(SourceLocation Loc, std::unique_ptr<ExprAST> Subject,
                  std::vector<MatchesArm> Arms,
@@ -611,6 +782,9 @@ public:
         ExprAST *getOtherBodyMut()           { return OtherBody.get(); }
 
   llvm::Value *codegen() override;
+  /// The ordered test-chain lowering codegen() hands off to when
+  /// needsPatternCodegen() (CodegenPattern.cpp).
+  llvm::Value *codegenPatterns();
   void accept(ASTVisitor &V) override { V.visitCompare(*this); }
   std::unique_ptr<ExprAST> clone() const override {
     std::vector<MatchesArm> ClonedArms;
@@ -620,6 +794,8 @@ public:
       CA.Loc = Arm.Loc;
       for (const auto &V : Arm.Values)
         CA.Values.push_back(CloneExprAST(V.get()));
+      for (const auto &G : Arm.Guards)
+        CA.Guards.push_back(CloneExprAST(G.get()));
       CA.Body = CloneExprAST(Arm.Body.get());
       ClonedArms.push_back(std::move(CA));
     }

@@ -308,8 +308,16 @@ public:
       printIndent(Depth_);
       std::cout << "Arm[" << i << "] (" << Arm.Values.size() << " pattern(s)):\n";
       descend();
-      for (const auto &V : Arm.Values)
-        print(const_cast<ExprAST *>(V.get()), Depth_);
+      for (size_t k = 0; k < Arm.Values.size(); ++k) {
+        print(const_cast<ExprAST *>(Arm.Values[k].get()), Depth_);
+        if (k < Arm.Guards.size() && Arm.Guards[k]) {
+          printIndent(Depth_);
+          std::cout << "Guard:\n";
+          descend();
+          print(Arm.Guards[k].get(), Depth_);
+          ascend();
+        }
+      }
       printIndent(Depth_);
       std::cout << "Body:\n";
       descend();
@@ -322,6 +330,34 @@ public:
       std::cout << "Otherwise:\n";
       descend();
       print(const_cast<ExprAST *>(N.getOtherBody()), Depth_);
+      ascend();
+    }
+    ascend();
+  }
+
+  // ── Destructuring patterns (LEC-003) ────────────────────────────────────────
+
+  void visitWildcardPattern(WildcardPatternExprAST &) override {
+    printIndent(Depth_);
+    std::cout << "WildcardPattern\n";
+  }
+
+  void visitBindingPattern(BindingPatternExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "BindingPattern(" << N.getName() << ")\n";
+  }
+
+  void visitStructPattern(StructPatternExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "StructPattern(" << N.getTypeSpelling()->getName()
+              << (N.hasRest() ? ", ..)" : ")") << "\n";
+    descend();
+    for (const auto &F : N.getFields()) {
+      printIndent(Depth_);
+      std::cout << "Field(" << F.Name << (F.IsShorthand ? ", shorthand" : "")
+                << "):\n";
+      descend();
+      print(F.Sub.get(), Depth_);
       ascend();
     }
     ascend();

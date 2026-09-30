@@ -61,7 +61,7 @@ struct SymbolScopeGuard {
 std::unique_ptr<ExprAST> ParseStructDecl() {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat 'struct'
-  if (RejectVisibilityKeywordAsName())
+  if (RejectReservedWordAsName())
     return nullptr;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(CurLoc, "Expected identifier after 'struct'", SLM::ErrorCategory::DECLARATION);
@@ -220,7 +220,7 @@ std::unique_ptr<ExprAST> ParseEnumDecl() {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat 'enum'
   
-  if (RejectVisibilityKeywordAsName())
+  if (RejectReservedWordAsName())
     return nullptr;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(CurLoc, "Expected identifier after 'enum'", SLM::ErrorCategory::DECLARATION);
@@ -312,7 +312,7 @@ std::unique_ptr<ExprAST> ParseMachineDecl() {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat 'machine'
 
-  if (RejectVisibilityKeywordAsName())
+  if (RejectReservedWordAsName())
     return nullptr;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(CurLoc, "Expected identifier after 'machine'", SLM::ErrorCategory::DECLARATION);
@@ -438,7 +438,7 @@ std::unique_ptr<ExprAST> ParseErrorDecl() {
   SourceLocation Loc = CurLoc;
   getNextToken(); // eat 'error'
 
-  if (RejectVisibilityKeywordAsName())
+  if (RejectReservedWordAsName())
     return nullptr;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(CurLoc, "Expected identifier after 'error'", SLM::ErrorCategory::DECLARATION);
@@ -841,7 +841,7 @@ std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation) {
   }
 
   // Expect TOK_IDENTIFIER → save as FuncName
-  if (RejectVisibilityKeywordAsName())
+  if (RejectReservedWordAsName())
     return nullptr;
   if (CurTok != TOK_IDENTIFIER) {
     LogErrorAt(FnLoc, "Expected a function name after 'fn'.", SLM::ErrorCategory::DECLARATION);
@@ -1329,12 +1329,25 @@ std::unique_ptr<ExprAST> ParseVisibilityPrefixed() {
   return Decl;
 }
 
-// RejectVisibilityKeywordAsName - call where a NAME is expected and the token
-// is not an identifier. `pub`/`public` became reserved words in LEC-002, so
-// `mut pub: int` used to be a valid program and is now a rejected one; the
-// bare "Expected a variable name" would leave the writer guessing why, so this
+// RejectReservedWordAsName - call where a NAME is expected and the token is
+// not an identifier. `pub`/`public` became reserved words in LEC-002 and a
+// lone `_` in LEC-003, so `mut pub: int` and `mut _: int` used to be valid
+// (or at least lexable) programs and are now rejected ones; the bare
+// "Expected a variable name" would leave the writer guessing why, so this
 // names the cause and suggests a rename. Returns true if it reported.
-bool RejectVisibilityKeywordAsName() {
+bool RejectReservedWordAsName() {
+  if (CurTok == TOK_WILDCARD) {
+    // `_` alone is the wildcard pattern. `_name` is an ordinary identifier, and
+    // is the spelling the unused-variable hint already recommends.
+    InvalidPatternError(
+        CurLoc,
+        "'_' is the wildcard pattern, so it can't be used as a name.",
+        "Pick a real name, or prefix one with an underscore ('_unused') to "
+        "say a variable is deliberately unused. A bare '_' only means "
+        "\"match anything\" in a `compare` pattern.")
+        .raise();
+    return true;
+  }
   if (CurTok != TOK_PUB)
     return false;
   MisplacedVisibilityError(CurLoc, MisplacedVisibilityError::Where::UsedAsName).raise();

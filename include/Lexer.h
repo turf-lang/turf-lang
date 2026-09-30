@@ -433,6 +433,10 @@ enum Token {
   TOK_PUB = -106,  ///< `pub`/`public` keyword (synonyms, one token, exactly like `mut`/`mutable`
                    ///< share TOK_MUTABLE) -- a declaration's visibility prefix (LEC-002,
                    ///< FREEZE.md §6.15). Reserved: no identifier may be spelled either way.
+  TOK_WILDCARD = -107, ///< `_` ALONE -- the wildcard pattern (LEC-003, FREEZE.md §6.17). A token
+                       ///< of its own, not an identifier named "_", so it is reserved everywhere
+                       ///< a name is expected without any per-site check; `_name` (an underscore
+                       ///< FOLLOWED by anything) is an ordinary TOK_IDENTIFIER.
   TOK_CALLER_LOCATION = -105
                         ///< `caller_location` keyword — a bare, non-callable expression of type
                         ///< `string`, legal only inside a function declared `@caller_location`

@@ -68,6 +68,9 @@ class CallerLocationExprAST;
 class ExternFuncDeclExprAST;
 class AddressOfExprAST;
 class CompareExprAST;
+class WildcardPatternExprAST;
+class BindingPatternExprAST;
+class StructPatternExprAST;
 
 
 // ─── ASTVisitor base class ────────────────────────────────────────────────────
@@ -128,6 +131,14 @@ public:
   virtual void visitReturn(ReturnExprAST &Node) {}
   virtual void visitCompare(CompareExprAST &Node) {}
   virtual void visitDefer(DeferExprAST &Node) {}
+
+  // ── Destructuring patterns (LEC-003) ──────────────────────────────────────
+  // Children of a CompareExprAST arm header. A visitor that walks a compare
+  // and cares about what a header READS or DEFINES must implement these: the
+  // no-op default is exactly how a pattern's bindings would go unseen.
+  virtual void visitWildcardPattern(WildcardPatternExprAST &Node) {}
+  virtual void visitBindingPattern(BindingPatternExprAST &Node) {}
+  virtual void visitStructPattern(StructPatternExprAST &Node) {}
 
 
   // ── Functions & Calls ─────────────────────────────────────────────────────

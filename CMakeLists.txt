@@ -221,6 +221,7 @@ add_library(turfcore STATIC
   src/CodegenExpr.cpp
   src/CodegenVar.cpp
   src/CodegenControlFlow.cpp
+  src/CodegenPattern.cpp
   src/CodegenFunc.cpp
   src/CodegenArray.cpp
   src/CodegenStruct.cpp

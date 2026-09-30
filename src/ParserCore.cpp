@@ -654,7 +654,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
     // error a few tokens later -- a forward-declared struct just won't hit
     // this check, which is fine, since the ordinary parse failure that
     // follows is still a real, if less specific, diagnostic.
-    if (CurTok == '{' && GlobalSymbolTable) {
+    if (CurTok == '{' && GlobalSymbolTable && !ParsingPatternHeader) {
       // FDN-003: a struct declared earlier in THIS module is registered
       // under its identity (`M::IdName`), not its bare spelling.
       if (auto T = GlobalSymbolTable->LookupType(
@@ -700,7 +700,7 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
       // `Module::StructName { ... }` spelling -- looked up by the identity
       // the qualifier names (FDN-003: `IdName::RightName` IS that identity
       // when IdName is the owning module).
-      if (CurTok == '{' && GlobalSymbolTable) {
+      if (CurTok == '{' && GlobalSymbolTable && !ParsingPatternHeader) {
         if (auto T = GlobalSymbolTable->LookupType(
                 TypeIdentity::make(IdName, RightName))) {
           if (dynamic_cast<TurfStructType *>(T.get())) {

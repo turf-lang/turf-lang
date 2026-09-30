@@ -28,6 +28,15 @@ std::unique_ptr<ExprAST> ParseNullExpr();
 std::unique_ptr<ExprAST> ParsePostfixExpression(std::unique_ptr<ExprAST> Base);
 
 // Defined in ParserStmt.cpp
+//
+// LEC-003: true only while ParseCompareExpr() parses a `matches` header's
+// pattern. There `Name {` is the START of a struct pattern (`matches Point
+// { x, y }:`), not the removed struct brace-literal, so ParsePrimary()'s
+// "'Name { ... }' is no longer valid syntax" hint -- which fires whenever a
+// known struct name is followed by '{' -- must stand down. Scoped by an RAII
+// guard around the one ParseExpression() call that reads the header, never
+// left set across a statement.
+extern bool ParsingPatternHeader;
 std::unique_ptr<ExprAST> ParseBlock();
 std::unique_ptr<ExprAST> ParseIfExpr();
 std::unique_ptr<ExprAST> ParseWhileExpr();
@@ -53,8 +62,9 @@ std::unique_ptr<ExprAST> ParseExportDecl();
 std::unique_ptr<ExprAST> ParseFuncDef(bool HasCallerLocation = false);
 std::unique_ptr<ExprAST> ParseOperatorDecl();
 std::unique_ptr<ExprAST> ParseVisibilityPrefixed();
-// LEC-002: true (after reporting) if CurTok is `pub`/`public` where a name is expected.
-bool RejectVisibilityKeywordAsName();
+// LEC-002/LEC-003: true (after reporting) if CurTok is `pub`/`public` or a lone
+// `_` where a name is expected -- a reserved word, not a missing identifier.
+bool RejectReservedWordAsName();
 
 // Defined in ParserModule.cpp
 std::unique_ptr<ExprAST> ParseImport();

@@ -35,8 +35,20 @@
 // -- a second analysis in one process (an editor re-checking the same file
 // on every keystroke) silently lost the warning -- and one file's function
 // at 10:1 hid the warning for another file's at 10:1.
+//
+// LEC-003: also holds the keys FirstWarningAt() hands out -- the TypeChecker's
+// own warnings hit the same two-ASTs-per-function duplication (it runs over
+// both the pre-pass and the main-pass tree), and need the same per-compile
+// reset the facade's Push/PopResolverCompileState() already gives this set.
 static std::unordered_set<std::string> NeverReturnsErrorWarned;
 static std::vector<std::unordered_set<std::string>> SavedResolverCompileStates;
+
+bool FirstWarningAt(const std::string &Kind, const SourceLocation &Loc) {
+  return NeverReturnsErrorWarned
+      .insert(Kind + "@" + Loc.Filename + ":" + std::to_string(Loc.Line) + ":" +
+              std::to_string(Loc.Col))
+      .second;
+}
 
 void PushResolverCompileState() {
   SavedResolverCompileStates.push_back(std::move(NeverReturnsErrorWarned));

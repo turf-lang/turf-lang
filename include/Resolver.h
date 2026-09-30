@@ -487,6 +487,23 @@ private:
                          const std::vector<std::string> &TypeParams = {},
                          bool AllowBareGeneric = false) const;
 
+  /**
+   * @brief LEC-003: resolves one `matches` header's pattern tree inside its
+   *        arm's scope -- declares each binding, validates each struct
+   *        pattern's type spelling, resolves the value sub-patterns.
+   *
+   * @p ArmNames maps a binding name to the arm's ONE symbol for it. Every
+   * stacked header of an arm shares the body, so the same name in two headers
+   * must resolve to the same symbol; the first header to bind a name declares
+   * it. @p HeaderNames collects the names THIS header binds, for the
+   * same-names check the caller runs once all headers are read and for
+   * catching `Point { x, y: x }` (one name bound twice in one pattern).
+   */
+  void resolveArmPattern(
+      ExprAST *Pat, MatchesArm &Arm,
+      std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> &ArmNames,
+      std::vector<std::string> &HeaderNames);
+
   /// Validates an explicit `Module::TypeName` qualifier (from NamedType::
   /// getModule()/GenericType::getModule(), or a qualified struct-literal's
   /// ModuleQualifier) once @p TypeName is already confirmed to be a real,
@@ -737,5 +754,13 @@ private:
 // PushParserCompileState() (Parser.h).
 void PushResolverCompileState();
 void PopResolverCompileState();
+
+/// True the FIRST time a warning of @p Kind is reported at @p Loc in the
+/// current compile. This compiler checks every function body twice (once on
+/// the pre-pass tree, once on the main-pass tree), so a warning raised from a
+/// pass that runs on both would otherwise appear twice; the set it consults is
+/// the one Push/PopResolverCompileState() scope, so an embedding tool that
+/// re-analyses in one process does not lose a warning the second time.
+bool FirstWarningAt(const std::string &Kind, const SourceLocation &Loc);
 
 #endif // RESOLVER_H
