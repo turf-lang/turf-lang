@@ -719,6 +719,81 @@ confirmation; each is settled below.
   unreachable arm) and a hint that names the concrete fix. No new
   `SLM::ErrorCategory` and no `docs/slm/` files (§6.9).
 
+### 6.18 Error payloads and propagation — FROZEN (LEC-004, 2026-10-01)
+
+Recorded on the project owner's explicit instruction to implement LEC-004 with
+`ROADMAP_v2.0.0.md` as the authority (DEC-11: prefix `try`; DEC-12: N fields
+or N+1 with a trailing message) — §6.0 rule 3's explicit request, the same
+footing §6.17 was frozen on. Full account:
+`docs/development/changes/LEC-004.md`.
+
+- **Declaration.** `error IOError { NotFound(path: string), Denied(path: string,
+  mode: int), Timeout }`. A variant's fields are named and typed, separated by
+  commas; a variant with none is written bare, exactly as before (and
+  `error Name;` is unchanged). Field names are unique within a variant. A field
+  may have any sized type — a primitive, a struct, a generic instance, a
+  pointer, an array — except an error type, a `!T`, or `void` (an error value
+  does not contain another error). A raw-pointer field needs `unsafe` exactly
+  as a struct field does. A type spelled in a field resolves under FDN-003's
+  identity rules, like a struct field's.
+- **Construction is positional:** `IOError::NotFound(p)`. A variant with *N ≥ 1*
+  fields takes *N* arguments (the fields), or *N+1* where the extra trailing
+  argument is the STD-002 `string` message; a variant with no fields takes
+  exactly one (the message), unchanged. Any other count is an error naming the
+  declared fields. The message stays universal: `err.message` still reads it,
+  `""` when absent, on an open-union `err` with no destructuring.
+- **A bare `E::V` for a variant that has fields is not a value.** It can be
+  neither returned nor stored (there is no payload to fill in). It is still
+  legal as an operand of `==`/`!=` (tag identity, as it always was — equality
+  never looks at a payload or a message) and as the head of a pattern.
+- **Payloads are read by patterns, and only by patterns** — no `err.path`. In a
+  `compare`, `matches E::V(p1, p2):` matches an error value whose tag is `E::V`
+  and whose fields match `p1`, `p2` **positionally**. A sub-pattern is what
+  §6.17 allows inside a struct pattern (`_`, a name that binds, a literal, an
+  enum/machine variant, a nested struct pattern). Like a struct pattern, it
+  lists every field or ends in `..` (`E::V(path, ..)`, `E::V(..)`). A bare
+  `E::V:` header matches a variant that has no fields; for one that has, the
+  header is `E::V(..)` (error E092 with that hint), so a pattern cannot keep
+  compiling, meaning something different, after a field is added. The message
+  is not bindable in a pattern. A variant pattern's subject is an error value
+  (`AnyErrorType`, or a declared error type); anything else is E092. Bindings,
+  guards, stacking, source order and single evaluation are §6.17's, unchanged.
+- **Exhaustiveness.** A variant pattern never makes an arm a catch-all. An
+  open error union (`AnyErrorType`) still always needs `otherwise` or an
+  unguarded `_` (E093). A subject of a *declared* error type must have every
+  one of its variants covered by an unguarded variant pattern whose fields are
+  all irrefutable, or end in `otherwise`/`_` (E093).
+- **Propagation is the prefix keyword `try`** (DEC-11; `?` was rejected — this
+  language spells control flow with words). `try <expr>` has the precedence of
+  a prefix operator, so `try a() + try b()` is `(try a()) + (try b())`. The
+  operand must be a `!U`; the result is `U`. On failure `try` returns the error
+  value **unchanged** from the enclosing function — it *is* a `return`: pending
+  `defer`s run exactly as for one. The enclosing function must return `!V` (any
+  `V`: the error union is open, so no conversion exists or is needed). `try` is
+  an error (E095) outside a function, in a function whose return type is not
+  `!V` (`main` returns `int`, so `main` included — the hint says how to handle
+  the error there), inside a `defer` (INV-DEFER-2: a deferred statement may not
+  return), and on an operand that is not fallible. `try` is a reserved word.
+- **Pass-through return.** `return f();` where `f(): !T` and the enclosing
+  function returns exactly `!T` is legal and returns the fallible value
+  unchanged. It never unwraps, and nothing converts a `!T` into a plain `T`
+  (§5.2's rule stays).
+- **Runtime representation.** An error value is `%TurfErrorValue = { i8* tag,
+  i8* message, i8* payload }`. `payload` is null for a variant with no fields;
+  otherwise it points to a GC-allocated per-variant struct with its own
+  `TurfTypeDesc`, so the collector traces a `string` or a `List<T>` held in a
+  payload exactly as it traces the message. `%FallibleValue` is unchanged, and
+  tag equality stays `strcmp` on tag strings.
+- **Excluded from 2.0:** closed error sets in signatures (`!IOError int`),
+  error-type conversion, stack traces (FUTURE F-15), payloads on plain `enum`s
+  (F-14b), binding the message in a pattern, and `try` as a statement-position
+  shorthand with a custom handler.
+- **Diagnostic contract (owner emphasis on hints, as §6.15).** Typed, coded
+  errors with a hint naming the concrete fix: E095 misplaced or ill-typed
+  `try`, E096 an error-variant payload declared or constructed wrongly; variant
+  patterns reuse E092/E093. No new `SLM::ErrorCategory` and no `docs/slm/`
+  files (§6.9).
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -774,6 +849,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-PKG-3** | Dependencies are `path` or `git` (`tag`/`rev`/`branch`) only; the root's `turf.lock` pins commit + SHA-256, verified on every build; one version per package name; `--offline`, `--locked`. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 5) |
 | **F-PKG-4** | A dependency's `unsafe module;` is honored only if the root manifest's `[unsafe] allow` names it (not transitive); the root package's own modules need no listing; the compiler enforces, the CLI only passes the bit. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 6) |
 | **F-PAT-1** | A top-level `matches <expr>:` keeps its meaning (equality; a bare identifier is a variable); destructuring forms (`_`, `Name { field: pattern, .. }`, guards `if`) are new syntax where a bare identifier BINDS. Arms are tried in source order, first matching header wins, the subject is evaluated once. `_` alone is reserved; `_name` is an identifier. A struct pattern lists every field or ends in `..`, and reads fields as `.field` does (visibility included). Bindings are immutable and arm-scoped. A guarded arm never counts toward exhaustiveness; enum/machine/`bool` subjects and open error unions are checked. | §6.17 above (`ROADMAP_v2.0.0.md` LEC-003, DEC-10) |
+| **F-ERR-1** | An error variant may declare typed fields (`NotFound(path: string)`), constructed positionally with N arguments (or N+1 with a trailing `string` message) and read back only by patterns (`matches E::V(path, ..):`), never as a field. A bare `E::V` with fields is not a value, only an `==`/`!=` operand or a pattern head. A variant pattern never makes an arm a catch-all; an open error union still needs `otherwise`/`_`. `try <expr>` (prefix keyword, reserved) returns the error unchanged from the enclosing `!V` function, running pending `defer`s, and is an error in `main`, a non-fallible function, a `defer` or on a non-fallible operand. `return f();` of a `!T` from a `!T` function passes the value through. An error value is `{ tag, message, payload }`, the payload a GC-allocated per-variant struct with its own descriptor. | §6.18 above (`ROADMAP_v2.0.0.md` LEC-004, DEC-11, DEC-12) |
 
 ---
 
