@@ -253,6 +253,7 @@ public:
    */
   void resetForRecovery() {
     FunctionNestingDepth_ = 0;
+    DeferDepth_ = 0; // a failed `defer` statement skips visitDefer()'s decrement
     SymTable_.resetToDepth(0);
     ModuleStack_.clear();
     CurrentFuncTypeParams_.clear();
@@ -329,6 +330,7 @@ public:
   void visitScopeAccess(ScopeAccessExprAST &Node) override;
   void visitErrorDecl(ErrorDeclExprAST &Node) override;
   void visitRecoverExpr(RecoverExprAST &Node) override;
+  void visitTry(TryExprAST &Node) override;
 
   void visitArrayDecl(ArrayDeclExprAST &Node) override;
   void visitArrayLiteral(ArrayLiteralExprAST &Node) override;
@@ -386,6 +388,16 @@ private:
   ScopeSnapshotCallback ScopeSnapshotCB_;
   ResolverSymbolTable SymTable_;
   int FunctionNestingDepth_ = 0;
+  // How many `defer` statements enclose the node being visited (LEC-004): a
+  // `try` inside one is an error, since it would return out of a statement
+  // that has already been scheduled to run on the way out (INV-DEFER-2).
+  // Nested function definitions are forbidden, so a plain counter is enough --
+  // no function body can start inside a `defer` and inherit its depth.
+  int DeferDepth_ = 0;
+  // True once the function being resolved has a `return <call>` whose callee
+  // can return a `!T` (LEC-004: a pass-through return). Reset at the start of
+  // each visitFuncDef() and read at its end, for NeverReturnsErrorWarning.
+  bool ReturnPassesFallible_ = false;
   std::vector<std::string> ModuleStack_;
   // TYPE-002 (S12b): see resolveMonomorphizedClone()'s doc comment. Always
   // false outside that one method's own scoped set/restore.
@@ -503,6 +515,22 @@ private:
       ExprAST *Pat, MatchesArm &Arm,
       std::unordered_map<std::string, std::shared_ptr<VariableSymbol>> &ArmNames,
       std::vector<std::string> &HeaderNames);
+
+  /**
+   * @brief LEC-004: settles what a `matches` header's `Type::Variant` spelling
+   *        means, in place, before resolveArmPattern() reads it.
+   *
+   * The Parser cannot tell an error type from any other, so it reads
+   * `Name::Name(...)` in a header as an error-variant pattern and a bare
+   * `Name::Name` as an ordinary value. Here, with the type registry in hand:
+   *  - a bare `E::V` whose `E` is an error type becomes an error-variant
+   *    pattern (an error value has no other meaning a header could give it);
+   *  - an error-variant pattern whose `Name` is NOT an error type is put back
+   *    as the function call it was written as, so `matches strings::upper(x):`
+   *    keeps the meaning it had before error patterns existed (a value
+   *    pattern calling a module function, legal against a string subject).
+   */
+  void normalizeHeaderPattern(std::unique_ptr<ExprAST> &Slot);
 
   /// Validates an explicit `Module::TypeName` qualifier (from NamedType::
   /// getModule()/GenericType::getModule(), or a qualified struct-literal's

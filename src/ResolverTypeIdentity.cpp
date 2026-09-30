@@ -112,7 +112,7 @@ void Resolver::hoistTypesIn(const ExprAST *Node, const std::string &ModuleName) 
 
   if (const auto *ErrDecl = dynamic_cast<const ErrorDeclExprAST *>(Node)) {
     auto ET = std::make_shared<TurfUserErrorType>(
-        ErrDecl->getName(), ErrDecl->getVariants(), ErrDecl->isBareForm());
+        ErrDecl->getName(), ErrDecl->getVariantInfos(), ErrDecl->isBareForm());
     SourceLocation Loc = ErrDecl->getLoc();
     if (auto PrevLoc = SymTable_.registerErrorType(
             ErrDecl->getName(), {Loc.Line, Loc.Col}, ET, ModuleName)) {
@@ -172,7 +172,7 @@ void Resolver::registerLocalTypeDecl(const ExprAST &Node, SourceLocation Loc) {
     Kind = "error";
     Prev = SymTable_.registerErrorType(
         Name, {Loc.Line, Loc.Col},
-        std::make_shared<TurfUserErrorType>(Name, ErrDecl->getVariants(),
+        std::make_shared<TurfUserErrorType>(Name, ErrDecl->getVariantInfos(),
                                             ErrDecl->isBareForm()),
         Module);
   } else {
@@ -232,6 +232,16 @@ void Resolver::resolveDeclarationSpellingsIn(ExprAST *Node, const std::string &M
   if (auto *Struct = dynamic_cast<StructDeclExprAST *>(Node)) {
     for (auto &Field : Struct->getFieldsMut())
       resolveTypeSpellingsSilently(Field.Type, Module, Struct->getTypeParams());
+    return;
+  }
+
+  // LEC-004: a payload field's type is a spelling like a struct field's. The
+  // registered TurfUserErrorTypes share these very TurfType objects, so the
+  // rewrite is seen by every one of them.
+  if (auto *Err = dynamic_cast<ErrorDeclExprAST *>(Node)) {
+    for (auto &Variant : Err->getVariantInfosMut())
+      for (auto &Field : Variant.Fields)
+        resolveTypeSpellingsSilently(Field.Type, Module, {});
     return;
   }
 

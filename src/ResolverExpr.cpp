@@ -119,6 +119,16 @@ void Resolver::visitVariable(VariableExprAST &Node) {
 // ─── Structural visitors (recurse into children) ──────────────────────────────
 
 void Resolver::visitBinary(BinaryExprAST &Node) {
+  // LEC-004: `err == IOError::NotFound` reads only which variant occurred, so
+  // the bare reference may name a variant that has payload fields -- which no
+  // other position may (visitScopeAccess()). Marked before the operands are
+  // visited, and only for a DIRECT operand: `(f(IOError::NotFound)) == x` is
+  // still a bare value.
+  if (Node.getOp() == TOK_EQ || Node.getOp() == TOK_NEQ) {
+    for (const ExprAST *Operand : {Node.getLHS(), Node.getRHS()})
+      if (auto *SA = dynamic_cast<ScopeAccessExprAST *>(const_cast<ExprAST *>(Operand)))
+        SA->IsTagOperand = true;
+  }
   visitChild(Node.getLHS());
   visitChild(Node.getRHS());
 
@@ -316,9 +326,84 @@ void Resolver::resolveArmPattern(
     return;
   }
 
+  // LEC-004: `Type::Variant(sub, sub, ..)`. The head is an ordinary scope
+  // access (resolving it validates the type, its visibility and that the
+  // variant exists, with suggestions), marked so a variant that has payload
+  // fields is not rejected as a value -- a pattern head only reads its tag.
+  // Each sub-pattern is then resolved exactly as a struct pattern's field is.
+  if (auto *EV = dynamic_cast<ErrorVariantPatternExprAST *>(Pat)) {
+    if (auto *Head = dynamic_cast<ScopeAccessExprAST *>(EV->getHeadMut())) {
+      Head->IsTagOperand = true;
+      visitChild(Head);
+    }
+    for (auto &Sub : EV->getSubsMut())
+      resolveArmPattern(Sub.get(), Arm, ArmNames, HeaderNames);
+    return;
+  }
+
   // A value pattern: an ordinary expression (a literal, an enum variant, or
   // -- at the top of a header only -- any expression at all).
   visitChild(Pat);
+}
+
+
+void Resolver::normalizeHeaderPattern(std::unique_ptr<ExprAST> &Slot) {
+  // `E::V(...)` where E is not an error type: the call it always was. Only a
+  // plain expression survives the trip -- a binding turns back into the
+  // variable it was spelled as -- and anything pattern-only (`_`, `..`, a
+  // struct pattern) has no call to go back to.
+  if (auto *EV = dynamic_cast<ErrorVariantPatternExprAST *>(Slot.get())) {
+    auto *Head = dynamic_cast<ScopeAccessExprAST *>(EV->getHeadMut());
+    if (!Head)
+      return;
+    resolveScopeLeftType(*Head, Head->getLeftLoc());
+    if (SymTable_.isErrorTypeName(Head->getLeftName()))
+      return;
+
+    std::vector<std::unique_ptr<ExprAST>> Args;
+    for (auto &Sub : EV->getSubsMut()) {
+      if (auto *B = dynamic_cast<BindingPatternExprAST *>(Sub.get())) {
+        Args.push_back(std::make_unique<VariableExprAST>(B->getLoc(), B->getName()));
+      } else if (dynamic_cast<WildcardPatternExprAST *>(Sub.get()) ||
+                 dynamic_cast<StructPatternExprAST *>(Sub.get()) ||
+                 dynamic_cast<ErrorVariantPatternExprAST *>(Sub.get())) {
+        InvalidPatternError(
+            EV->getLoc(),
+            "'" + Head->getLeftName() + "::" + Head->getRightName() +
+                "(...)' is not an error variant, so it can't be destructured.",
+            "Only an error type's variant takes a pattern in parentheses. If "
+            "'" + Head->getRightName() + "' is a function, pass it plain "
+            "arguments; if you meant an error, check the type's name.")
+            .raise();
+        return;
+      } else {
+        Args.push_back(std::move(Sub));
+      }
+    }
+    if (EV->hasRest()) {
+      InvalidPatternError(
+          EV->getRestLoc(), "'..' is only meaningful in a pattern over an error variant.",
+          "'" + Head->getLeftName() + "' is not an error type.")
+          .raise();
+      return;
+    }
+    SourceLocation Loc = EV->getLoc();
+    Slot = std::make_unique<FuncCallExprAST>(Loc, EV->releaseHead(), std::move(Args));
+    return;
+  }
+
+  // A bare `E::V` over an error type is a variant pattern with no
+  // sub-patterns. (Whether it may be one -- a variant with fields must say
+  // `E::V(..)` -- is the TypeChecker's rule, which knows the variant.)
+  if (auto *SA = dynamic_cast<ScopeAccessExprAST *>(Slot.get())) {
+    resolveScopeLeftType(*SA, SA->getLeftLoc());
+    if (!SymTable_.isErrorTypeName(SA->getLeftName()))
+      return;
+    SourceLocation Loc = SA->getLoc();
+    Slot = std::make_unique<ErrorVariantPatternExprAST>(
+        Loc, std::move(Slot), std::vector<std::unique_ptr<ExprAST>>{},
+        /*HasParens=*/false, /*HasRest=*/false, SourceLocation{0, 0});
+  }
 }
 
 
@@ -336,6 +421,7 @@ void Resolver::visitCompare(CompareExprAST &Node) {
     std::vector<std::string> FirstHeaderNames;
     for (size_t K = 0; K < Arm.Values.size(); ++K) {
       std::vector<std::string> HeaderNames;
+      normalizeHeaderPattern(Arm.Values[K]);
       resolveArmPattern(Arm.Values[K].get(), Arm, ArmNames, HeaderNames);
 
       // Every stacked header feeds the ONE shared body, which reads one

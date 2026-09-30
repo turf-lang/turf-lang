@@ -397,6 +397,14 @@ struct ResolverFunctionSymbol {
   /// recognize exactly this shape (and no other bare-variable return, which
   /// stays unclassified -- consistent with this whole scan's conservative,
   /// non-interprocedural nature).
+  ///
+  /// LEC-004: also true when the function contains a `try` (FuncDefExprAST::
+  /// UsesTry) -- the same "passes another call's error on" meaning, and the
+  /// scan above cannot find one since a `try` is an expression that can sit
+  /// anywhere, so the Parser records it. The bare-error check on
+  /// `recover as err` (Resolver::visitRecoverExpr()) skips a callee with this
+  /// set, because its PossibleErrorTypeNames is then not the whole set of
+  /// errors it can fail with.
   bool ReturnsReboundError = false;
 
   /// TYPE-002 (S15/D6): this declaration's OWN `fn<...>` type-parameter

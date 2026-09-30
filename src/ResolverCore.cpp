@@ -397,6 +397,11 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
     Sym.MutatesSelf = MutatesSelfField(Node.getBody());
   CollectReturnedErrorTypeNames(Node.getBody(), Sym.PossibleErrorTypeNames,
                                 Sym.ReturnsReboundError);
+  // LEC-004: a `try` returns another call's error, unchanged -- no type name
+  // for the scan above to collect, exactly like `return err;` inside a
+  // `recover as err run` block. The Parser recorded whether one exists.
+  if (Node.UsesTry)
+    Sym.ReturnsReboundError = true;
   // FDN-003: in Pass 1 the body's `Err::Variant` nodes are still spellings;
   // consumers (isErrorTypeName()/lookupErrorType(), visitRecoverExpr and
   // visitFuncDef) key on identities. Same resolution rule as the `Left` of

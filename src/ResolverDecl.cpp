@@ -269,6 +269,7 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
 
   // See CurrentFuncTypeParams_'s doc comment in Resolver.h.
   CurrentFuncTypeParams_ = Node.getTypeParams();
+  ReturnPassesFallible_ = false;
   visitChild(Node.getBody());
   CurrentFuncTypeParams_.clear();
 
@@ -299,7 +300,7 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
     // any name in PossibleErrorTypeNames -- it names no specific error type
     // (there is none to name, `err` is type-erased AnyErrorType), so it
     // can't go through the isErrorTypeName() filter below at all.
-    bool ReturnsRealError = Sym->ReturnsReboundError;
+    bool ReturnsRealError = Sym->ReturnsReboundError || ReturnPassesFallible_;
     for (const auto &Name : Sym->PossibleErrorTypeNames) {
       if (SymTable_.isErrorTypeName(Name)) {
         ReturnsRealError = true;
@@ -342,6 +343,42 @@ void Resolver::visitMachineDecl(MachineDeclExprAST &Node) {
 void Resolver::visitErrorDecl(ErrorDeclExprAST &Node) {
   rejectLocalVisibility(Node, FunctionNestingDepth_);
   registerLocalTypeDecl(Node, Node.getLoc());
+
+  // LEC-004 (FREEZE.md §6.18): a payload field's type is validated like a
+  // struct field's -- an unknown name gets the same suggestions and the
+  // spelling is rewritten to its TypeIdentity -- and is then held to the two
+  // rules only an error payload has. An error value doesn't contain another
+  // error, so a field can't be an error type or a `!T`; `void` holds nothing.
+  // Checked here rather than in the Parser because only the Resolver can tell
+  // an error type's NAME from any other type's.
+  for (auto &Variant : Node.getVariantInfosMut()) {
+    const std::string Where =
+        TypeIdentity::bareName(Node.getName()) + "::" + Variant.Name;
+    for (auto &Field : Variant.Fields) {
+      validateNamedType(Field.Type, Field.Loc, {});
+      if (Node.isPublic())
+        checkNoPrivateInPublic(Field.Loc, "payload field", Where + "." + Field.Name,
+                               {Field.Type.get()});
+
+      const TurfType *T = Field.Type.get();
+      std::string Why;
+      if (T->isErrorUnion())
+        Why = "a '!T' (a fallible value)";
+      else if (T->isVoid())
+        Why = "'void'";
+      else if (const auto *NT = dynamic_cast<const NamedType *>(T);
+               NT && SymTable_.isErrorTypeName(NT->getName()))
+        Why = "the error type '" + TypeIdentity::bareName(NT->getName()) + "'";
+      if (!Why.empty())
+        ErrorPayloadError(
+            Field.Loc,
+            "field '" + Field.Name + "' of '" + Where + "' is " + Why + ".",
+            "An error value carries data describing what went wrong, not "
+            "another failure. Use the information itself -- a `string`, an "
+            "`int`, a struct -- as the field's type.")
+            .raise();
+    }
+  }
 }
 
 

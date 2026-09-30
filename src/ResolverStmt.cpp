@@ -263,6 +263,25 @@ void Resolver::visitForEach(ForEachExprAST &Node) {
 
 void Resolver::visitReturn(ReturnExprAST &Node) {
   visitChild(Node.getVal());
+
+  // LEC-004: `return f();` in a `!T` function hands `f`'s error back
+  // unchanged when `f` itself returns a `!T` (the pass-through return,
+  // FREEZE.md §6.18) -- as much "this function can fail" as returning an
+  // error by name, which CollectReturnedErrorTypeNames() cannot see (it runs
+  // before anything is resolved, so it has no idea what `f` returns). Noted
+  // here, where a call's overloads are known: a free function's candidates
+  // directly. A method call's target is only chosen by the TypeChecker (it
+  // depends on the receiver's type), so one is assumed to pass through --
+  // the warning this feeds (NeverReturnsErrorWarning) only ever suppresses.
+  if (const auto *Val = Node.getVal()) {
+    if (const auto *Call = dynamic_cast<const FuncCallExprAST *>(Val)) {
+      for (const auto &Candidate : Call->getResolvedCandidates())
+        if (Candidate && Candidate->ReturnType && Candidate->ReturnType->isErrorUnion())
+          ReturnPassesFallible_ = true;
+    } else if (dynamic_cast<const MethodCallExprAST *>(Val)) {
+      ReturnPassesFallible_ = true;
+    }
+  }
 }
 
 namespace {
@@ -310,12 +329,23 @@ const ExprAST *FindEscapingControlFlow(const ExprAST *E, bool InLoop) {
     return FindEscapingControlFlow(F->getBody(), /*InLoop=*/true);
   if (auto *FE = dynamic_cast<const ForEachExprAST *>(E))
     return FindEscapingControlFlow(FE->getBody(), /*InLoop=*/true);
+  // `defer f() recover run { return 5; };`: a `recover` block's `return` /
+  // `break` / `continue` operates on the function or loop CONTAINING the
+  // `recover` (docs/architecture/errors_and_recover.md §1.4.2), which here is
+  // the one the defer is about to leave. Found live while writing LEC-004's `try`
+  // check: this used to pass the check and then crash Codegen
+  // (sanitizeSymbolName). Only the block can jump; `produce`'s expression
+  // cannot hold a statement.
+  if (auto *Rec = dynamic_cast<const RecoverExprAST *>(E))
+    return FindEscapingControlFlow(Rec->getBlock(), InLoop);
   return nullptr;
 }
 } // namespace
 
 void Resolver::visitDefer(DeferExprAST &Node) {
+  ++DeferDepth_;
   visitChild(Node.getStmt());
+  --DeferDepth_;
 
   if (const ExprAST *Bad = FindEscapingControlFlow(Node.getStmt(), false)) {
     // ExprAST has no virtual getLoc() (every concrete node type defines its

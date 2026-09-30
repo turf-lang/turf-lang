@@ -174,44 +174,69 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     }
 
     if (SymTable_.isErrorTypeName(LeftName)) {
-      // STD-002 (ARCHITECTURE_OVERHAUL.md §8/§15.6(c)): `ErrorType::Variant(
-      // messageExpr)` -- exactly ONE argument -- is now a legal
-      // construction form carrying a message, NOT a general reopening of
-      // §5.1's deferred per-variant-fields gap. Checked BEFORE the
-      // unconditional "not callable" rejection below, which still applies
-      // to every other arity (0 args, or 2+). Args are already resolved
-      // (visitChild() at the top of this function) -- only variant
-      // EXISTENCE needs checking here, mirroring visitScopeAccess()'s bare-
-      // reference branch below exactly (same NoSuchVariantError, same
-      // suggestion mechanism).
-      if (Node.getArgs().size() == 1) {
-        auto ET = SymTable_.lookupErrorType(LeftName);
-        if (ET && !ET->hasVariant(CalleeName)) {
-          RankedSuggestions Suggestions;
-          Suggestions.Local =
-              SuggestionIndex::suggestVisible(CalleeName, ET->getVariantNames());
-          NoSuchVariantError(ScopeCallee->getRightLoc(), "error", LeftName,
-                             CalleeName, Suggestions)
-              .raise();
-          return;
-        }
-        ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantConstructWithMessage;
+      // `ErrorType::Variant(args)` is the construction of an error value. A
+      // variant with N >= 1 declared payload fields takes those N arguments,
+      // or N + 1 where the extra trailing `string` is the message (LEC-004,
+      // FREEZE.md §6.18); a variant with no fields takes exactly one
+      // argument, its message (STD-002). Any other count is rejected here, by
+      // arity alone -- the TypeChecker checks what each argument's TYPE is.
+      // Args are already resolved (visitChild() at the top of this function),
+      // so only the variant's EXISTENCE and arity need checking, mirroring
+      // visitScopeAccess()'s bare-reference branch below (same
+      // NoSuchVariantError, same suggestion mechanism).
+      auto ET = SymTable_.lookupErrorType(LeftName);
+      if (ET && !ET->hasVariant(CalleeName)) {
+        RankedSuggestions Suggestions;
+        Suggestions.Local =
+            SuggestionIndex::suggestVisible(CalleeName, ET->getVariantNames());
+        NoSuchVariantError(ScopeCallee->getRightLoc(), "error", LeftName,
+                           CalleeName, Suggestions)
+            .raise();
         return;
       }
-      // e.g. `MathError::DivisionByZero(...)` -- a real error type, but
-      // variants are bare, non-callable names, exactly like a plain `enum`
-      // variant just above (docs/architecture/errors_and_recover.md -- payload
-      // fields on a variant are deferred, see errors_and_recover.md §5.1),
-      // for every arity OTHER than the one-message-argument form above.
+
+      const ErrorVariantInfo *Info = ET ? ET->getVariantInfo(CalleeName) : nullptr;
+      const size_t FieldCount = Info ? Info->Fields.size() : 0;
+      const size_t ArgCount = Node.getArgs().size();
+      const std::string Full = TypeIdentity::bareName(LeftName) + "::" + CalleeName;
+
+      if (FieldCount == 0) {
+        if (ArgCount == 1) {
+          ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantConstruct;
+          return;
+        }
+        // e.g. `MathError::DivisionByZero(...)` with no message or several --
+        // a variant with no fields is a value, not a function, exactly like a
+        // plain `enum` variant just above.
+        ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantRef;
+        TypeError(Node.getLoc(), "'" + Full + "' is an error variant, not a function -- "
+                                     "it can't be called.",
+                  "Drop the '(...)' -- '" + Full + "' is already a complete value on "
+                      "its own, or pass exactly one 'string' message: '" + Full +
+                      "(\"...\")'.",
+                  "Not callable!")
+            .raise();
+        return;
+      }
+
+      if (ArgCount == FieldCount || ArgCount == FieldCount + 1) {
+        ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantConstruct;
+        return;
+      }
+
+      std::string Sig;
+      for (size_t I = 0; I < Info->Fields.size(); ++I)
+        Sig += (I ? ", " : "") + Info->Fields[I].Name + ": " +
+               Info->Fields[I].Type->getName();
       ScopeCallee->ResolvedKind = ScopeAccessKind::ErrorVariantRef;
-      TypeError(Node.getLoc(), "'" + LeftName + "::" + CalleeName +
-                                   "' is an error variant, not a function -- "
-                                   "it can't be called.",
-                "Drop the '(...)' -- '" + LeftName + "::" + CalleeName +
-                    "' is already a complete value on its own, or pass "
-                    "exactly one 'string' message: '" + LeftName + "::" +
-                    CalleeName + "(\"...\")'.",
-                "Not callable!")
+      ErrorPayloadError(
+          Node.getLoc(),
+          "'" + Full + "' declares " + std::to_string(FieldCount) + " field" +
+              (FieldCount == 1 ? "" : "s") + " (" + Sig + ") but was given " +
+              std::to_string(ArgCount) + " argument" + (ArgCount == 1 ? "" : "s") + ".",
+          "Pass one argument per field, in order: '" + Full + "(...)' takes " +
+              std::to_string(FieldCount) + ", or " + std::to_string(FieldCount + 1) +
+              " with a trailing 'string' message.")
           .raise();
       return;
     }
@@ -759,8 +784,15 @@ void Resolver::visitRecoverExpr(RecoverExprAST &Node) {
     // apparent error-shaped return at all, conservatively allow it --
     // erring toward under-flagging, same rationale as MutatesSelfField's
     // doc comment for hard-error-gating checks.
+    //
+    // LEC-004: a callee that passes another call's error on (a `try`, or the
+    // older `recover as err run { return err; }`) can fail with an error type
+    // none of its own `return`s names, so what its PossibleErrorTypeNames
+    // lists is not everything it can fail with -- the check would be guessing
+    // from half the set. Skipped for it, the same conservative side as above.
     if (const auto *Call = dynamic_cast<const FuncCallExprAST *>(Node.getWrapped())) {
-      if (const auto *Target = Call->getResolvedCallTarget()) {
+      if (const auto *Target = Call->getResolvedCallTarget();
+          Target && !Target->ReturnsReboundError) {
         std::vector<std::string> RealErrorTypes;
         for (const auto &Name : Target->PossibleErrorTypeNames)
           if (SymTable_.isErrorTypeName(Name))
@@ -789,6 +821,27 @@ void Resolver::visitRecoverExpr(RecoverExprAST &Node) {
 
   visitChild(const_cast<ExprAST *>(Node.getBlock()));
   SymTable_.exitScope();
+}
+
+
+// `try <expr>` (LEC-004, FREEZE.md §6.18). The operand is an ordinary
+// expression. The one rule the Resolver owns is that a `try` may not sit inside
+// a `defer`: it returns out of the enclosing function, which a statement that
+// is already running on the way out of that function may not do (INV-DEFER-2).
+// `FindEscapingControlFlow()` (ResolverStmt.cpp) cannot catch it -- a `try` is
+// an EXPRESSION, buried wherever an expression can be, where that finder only
+// walks statements -- so this counts the `defer`s around the node instead.
+// Whether the enclosing function can be returned from at all, and whether the
+// operand can fail, are typing questions (TypeChecker::visitTry()).
+void Resolver::visitTry(TryExprAST &Node) {
+  if (DeferDepth_ > 0)
+    TryMisuseError(
+        Node.getLoc(), "a deferred statement can't use 'try'.",
+        "A `defer` runs while the function is already returning, so it has "
+        "nowhere to propagate an error to. Handle the error inside the "
+        "deferred statement: `defer f() recover run { ... };`.")
+        .raise();
+  visitChild(Node.getOperand());
 }
 
 
@@ -835,9 +888,9 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
     // Bare `ErrorType::Variant` reference
     // (docs/architecture/errors_and_recover.md) -- e.g. `return
     // MathError::DivisionByZero;` or `err == MathError:: DivisionByZero`.
-    // Mirrors the EnumVariant branch above exactly: a variant is always a bare
-    // name, never callable (payload fields are deferred, see
-    // errors_and_recover.md §5.1).
+    // Mirrors the EnumVariant branch above: a bare variant is a complete
+    // value -- unless it declares payload fields (LEC-004), in which case it
+    // has no value of its own, only an identity.
     Node.ResolvedKind = ScopeAccessKind::ErrorVariantRef;
     auto ET = SymTable_.lookupErrorType(LeftName);
     if (!ET)
@@ -847,6 +900,27 @@ void Resolver::visitScopeAccess(ScopeAccessExprAST &Node) {
       RankedSuggestions Suggestions;
       Suggestions.Local = SuggestionIndex::suggestVisible(RightName, ET->getVariantNames());
       NoSuchVariantError(Node.getRightLoc(), "error", LeftName, RightName, Suggestions)
+          .raise();
+      return;
+    }
+
+    // A variant with fields can't be a value without its payload. It stays
+    // legal where only its identity is read -- `err == E::V`, never looking at
+    // a payload -- which Resolver::visitBinary() marks, and as a pattern head.
+    const ErrorVariantInfo *Info = ET->getVariantInfo(RightName);
+    if (Info && !Info->Fields.empty() && !Node.IsTagOperand) {
+      const std::string Full = TypeIdentity::bareName(LeftName) + "::" + RightName;
+      std::string Sig;
+      for (size_t I = 0; I < Info->Fields.size(); ++I)
+        Sig += (I ? ", " : "") + Info->Fields[I].Name + ": " +
+               Info->Fields[I].Type->getName();
+      ErrorPayloadError(
+          Node.getLoc(),
+          "'" + Full + "' declares payload fields (" + Sig +
+              ") so it can't be used as a value on its own.",
+          "Construct it with its payload: '" + Full + "(...)'. To test which "
+          "error occurred, compare with '==' or destructure it in a compare: "
+          "`matches " + Full + "(..):`.")
           .raise();
     }
     return;
