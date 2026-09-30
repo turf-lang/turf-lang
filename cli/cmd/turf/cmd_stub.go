@@ -6,9 +6,7 @@ import "fmt"
 // stage table in docs/development/changes/LEC-001.md. `test` is REL-002's, not
 // LEC-001's. None of these runs the compiler, so none runs the handshake.
 var stubWhen = map[string]string{
-	"fetch":  "LEC-001 stage 6",
-	"update": "LEC-001 stage 6",
-	"test":   "REL-002",
+	"test": "REL-002",
 }
 
 // stubCmd is a command whose name is frozen (FREEZE.md 6.16) but whose

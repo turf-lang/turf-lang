@@ -53,6 +53,44 @@ func TestAddThenRemoveIsByteIdentical(t *testing.T) {
 	}
 }
 
+func TestAddGitDependencyIsOneLineAndRemovable(t *testing.T) {
+	for _, tc := range []struct{ kind, ref string }{{"tag", "v1.2.0"}, {"branch", "main"}, {"rev", "3f2a9c1"}} {
+		added, err := AddGitDependency(rich, "jsonx", "https://github.com/someone/jsonx", tc.kind, tc.ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line := "jsonx = { git = \"https://github.com/someone/jsonx\", " + tc.kind + " = \"" + tc.ref + "\" }\n"
+		want := strings.Replace(rich, "alpha = { path = \"../alpha\" }\n", "alpha = { path = \"../alpha\" }\n"+line, 1)
+		if added != want {
+			t.Fatalf("%s: add changed more than one line:\n%s", tc.kind, added)
+		}
+		m, err := Parse("/p/turf.toml", []byte(added))
+		if err != nil {
+			t.Fatalf("%s: edited text must validate: %v", tc.kind, err)
+		}
+		if d := m.Deps["jsonx"]; d.Git != "https://github.com/someone/jsonx" || d.RefSpec() != tc.kind+"="+tc.ref {
+			t.Fatalf("%s: read back %+v (%s)", tc.kind, d, d.RefSpec())
+		}
+		back, err := RemoveDependency(added, "jsonx")
+		if err != nil || back != rich {
+			t.Fatalf("%s: remove did not restore the original: %v\n%s", tc.kind, err, back)
+		}
+	}
+	if _, err := AddGitDependency(rich, "alpha", "u", "tag", "v"); err == nil {
+		t.Error("adding a name that is already there must be refused")
+	}
+	// A URL with characters TOML must escape survives the round trip.
+	odd := "C:\\repos\\my \"lib\""
+	added, err := AddGitDependency("[package]\nname = \"a\"\nversion = \"1\"\n", "lib", odd, "rev", "abcd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := Parse("/p/turf.toml", []byte(added))
+	if err != nil || m.Deps["lib"].Git != odd {
+		t.Fatalf("odd URL: %v %+v", err, m.Deps["lib"])
+	}
+}
+
 func TestAddIntoEmptyTable(t *testing.T) {
 	in := "[package]\nname = \"a\"\nversion = \"1\"\n\n[dependencies]\n"
 	got, err := AddDependency(in, "g", "../g")

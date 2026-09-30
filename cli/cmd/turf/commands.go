@@ -49,10 +49,10 @@ func init() {
 		{"build", groupProject, "build the project", helpBuild, cmdBuild},
 		{"test", groupProject, "run the project's tests", stubHelp("test"), stubCmd("test")},
 		{"clean", groupProject, "remove build output", helpClean, cmdClean},
-		{"fetch", groupProject, "download dependencies", stubHelp("fetch"), stubCmd("fetch")},
+		{"fetch", groupProject, "download dependencies", helpFetch, cmdFetch},
 		{"add", groupProject, "add a dependency", helpAdd, cmdAdd},
 		{"remove", groupProject, "remove a dependency", helpRemove, cmdRemove},
-		{"update", groupProject, "update dependencies", stubHelp("update"), stubCmd("update")},
+		{"update", groupProject, "update git dependencies", helpUpdate, cmdUpdate},
 
 		{"publish", groupOther, "reserved: there is no registry in 2.0", helpPublish, cmdPublish},
 		{"version", groupOther, "print the turf and turfc versions", helpVersion, cmdVersion},

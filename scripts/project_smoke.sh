@@ -201,9 +201,9 @@ expect_rc "turf add with a key that is not the package name" add_wrongkey 1
 expect_out "turf add with a key that is not the package name" add_wrongkey "the key must be its package name"
 t add_nopkg "$P2/app" add ghost --path ../ghost
 expect_rc "turf add of a missing directory" add_nopkg 1
-t add_git "$P2/app" add net --git https://example.invalid/net --tag v1
-expect_rc "turf add --git" add_git 2
-expect_out "turf add --git" add_git "stage 6"
+t add_git "$P2/app" add net --git /nonexistent/turf-smoke/net.git
+expect_rc "turf add --git without a ref" add_git 2
+expect_out "turf add --git without a ref" add_git "needs exactly one of --tag, --branch or --rev"
 same "a refused add writes nothing" "$WORK/toml.before2" "$P2/app/turf.toml"
 
 # A dependency spread over several lines is refused, not half-deleted.
