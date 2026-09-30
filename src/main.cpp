@@ -354,13 +354,16 @@ static void handleExplainFlagIfPresent(int argc, char **argv) {
     std::string DocPath = ErrorCodes::getHumanCodeDocPath(Entry->Code);
     if (DocPath.empty()) {
       std::string Keyword = SLM::extractContextKeyword(Entry->Description);
-      DocPath = SLM::getCategoryDocPath(Entry->Category, Keyword);
+      // Category docs come back relative; resolve them against the install
+      // root like the per-code ones (InstalledDocPath(), ErrorCodes.h), not
+      // against whatever directory `turf explain` was run from.
+      DocPath = InstalledDocPath(SLM::getCategoryDocPath(Entry->Category, Keyword));
     }
     std::ifstream Doc(DocPath);
     if (Doc.is_open()) {
       printHumanExplainDoc(Doc);
     } else {
-      // Doc file missing on disk (e.g. run from outside the repo root) --
+      // Doc file missing from the installation (a partial install) --
       // fall back to the short auto-generated description rather than
       // printing nothing.
       std::cout << Entry->Description << ".\n";

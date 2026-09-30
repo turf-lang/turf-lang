@@ -8,7 +8,9 @@
 // TurfError::getCode()) rather than a per-constructor `Code_ = "E0NN";`
 // line -- this means adding a brand-new TurfError subclass elsewhere in the
 // compiler costs exactly one line here, not a constructor-body edit at each
-// of the (currently 67) call sites. Assignment order is alphabetical by
+// of its call sites. (How many codes exist is AllErrorCodesCount below; a
+// count written in this comment went stale at 67 while the table grew past
+// 90.) Assignment order is alphabetical by
 // (header file, class name) -- stable and reproducible, but NOT meaningful
 // (an E0NN code is an opaque identifier, not a severity/category ranking).
 // A code, once shipped, should never be reassigned to a different class --
@@ -25,6 +27,30 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+
+// The installation root (src/ParserModule.cpp): $TURF_HOME, else the
+// compiler binary's own <dir>/.., the anchor `import` already resolves lib/std
+// against. Declared here, not by including Parser.h, so this header stays
+// free of the parser.
+std::string TurfInstallRoot();
+
+// A doc shipped with the compiler (`docs/errors/codes/E090.txt`,
+// `docs/slm/structs.txt`), resolved against the installation root. These
+// paths used to be opened relative to the CURRENT DIRECTORY, so `turf explain`
+// printed its full write-up only when run from the repository root, and fell
+// back to a one-line description everywhere else; `--smart` lost its category
+// docs the same way. The docs belong to the installation exactly as lib/std
+// does, and the release archive ships them under the same root.
+inline std::string InstalledDocPath(const std::string &Relative) {
+  if (!Relative.empty() && (Relative[0] == '/' || Relative[0] == '\\' ||
+                            (Relative.size() > 1 && Relative[1] == ':')))
+    return Relative; // already absolute (POSIX, or a Windows drive path)
+  std::string Root = TurfInstallRoot();
+  if (Root.empty())
+    return Relative;
+  char Last = Root.back();
+  return Root + (Last == '/' || Last == '\\' ? "" : "/") + Relative;
+}
 
 struct ErrorCodeEntry {
   const char *Code;
@@ -263,13 +289,13 @@ inline const ErrorCodeEntry *lookupByCode(const std::string &Code) {
 // exists in that tree; callers should fall back to the coarser
 // keyword/category doc in that case, exactly like today.
 inline std::string getSlmCodeDocPath(const std::string &Code) {
-  std::string Path = "docs/slm/codes/" + Code + ".txt";
+  std::string Path = InstalledDocPath("docs/slm/codes/" + Code + ".txt");
   std::ifstream Test(Path);
   return Test.is_open() ? Path : "";
 }
 
 inline std::string getHumanCodeDocPath(const std::string &Code) {
-  std::string Path = "docs/errors/codes/" + Code + ".txt";
+  std::string Path = InstalledDocPath("docs/errors/codes/" + Code + ".txt");
   std::ifstream Test(Path);
   return Test.is_open() ? Path : "";
 }

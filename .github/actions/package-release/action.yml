@@ -39,6 +39,11 @@ runs:
         # at all once separated from a full repo checkout. See TURF_HOME in
         # README.md for pointing a relocated binary back at this lib/ dir.
         cp -r lib "${DIR}/"
+        # `turf explain E0NN` and --smart read these from the installation
+        # root, like lib/std (InstalledDocPath(), include/ErrorCodes.h).
+        # Without them an installed compiler explains every code in one line.
+        mkdir -p "${DIR}/docs"
+        cp -r docs/errors docs/slm "${DIR}/docs/"
 
         if [ -n "${{ inputs.extra-files }}" ]; then
           while IFS= read -r f; do

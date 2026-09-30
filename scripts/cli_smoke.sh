@@ -210,6 +210,14 @@ capture ex.turf  "$TURF"  explain E001
 capture ex.turfc "$TURFC" --explain E001
 identical "explain E001" ex.turf ex.turfc
 expect_rc "explain E001" ex.turf 0
+# This script runs from a temp directory, not the checkout, which is exactly
+# where `turf explain` used to degrade to a one-line description: its docs
+# were opened relative to the cwd. The full write-up (a per-code page, and a
+# category page) must appear from anywhere.
+grep -qF "A module name matches more than one file" <("$TURF" explain E090 | strip) ||
+  fail "explain E090 outside the checkout: the per-code page was not found"
+grep -qF "reach past the end of an array" <("$TURF" explain E001 | strip) ||
+  fail "explain E001 outside the checkout: the category page was not found"
 capture exn.turf "$TURF" explain
 expect_rc "explain (no code)" exn.turf 2
 

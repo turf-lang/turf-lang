@@ -18,6 +18,7 @@
 #include "SLMIntegration.h"
 #include "Colors.h"
 #include "ErrorCategory.h"
+#include "ErrorCodes.h" // InstalledDocPath()
 #include "Lexer.h"
 #include "Sandbox.h"
 #include <SLMEngine.h>
@@ -43,8 +44,12 @@ static std::string stripAnsiCodes(const std::string &input) {
 
 // Reads an external documentation file into a string.
 // Returns empty string on failure (file missing, unreadable, etc.).
+// A relative path (`docs/slm/structs.txt`) is resolved against the
+// installation root, not the current directory: --smart run from any
+// directory but the repository root used to prompt the model without its
+// category doc (InstalledDocPath(), ErrorCodes.h).
 static std::string loadDocFile(const std::string &path) {
-  std::ifstream file(path);
+  std::ifstream file(InstalledDocPath(path));
   if (!file.is_open())
     return "";
 
