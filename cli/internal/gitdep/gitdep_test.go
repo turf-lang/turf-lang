@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/turf-lang/turf-lang/cli/internal/lockfile"
 	"github.com/turf-lang/turf-lang/cli/internal/treehash"
@@ -492,6 +493,37 @@ func TestOneMirrorRefreshPerProcess(t *testing.T) {
 	mustMaterialize(t, f, r2)
 	if n := strings.Count(log.String(), "turf: fetching"); n != 1 {
 		t.Errorf("one URL should be fetched once per process, log:\n%s", log.String())
+	}
+}
+
+// An interrupted extraction leaves a .tmp- directory. It must never be taken
+// for a tree, and the next extraction sweeps it once no live process can still
+// be writing it.
+func TestInterruptedExtractionsAreSweptWhenOld(t *testing.T) {
+	cache := cacheEnv(t)
+	u := newUpstream(t)
+	u.commit(map[string]string{"turf.toml": "1"})
+	u.tag("v1")
+	src := filepath.Join(cache, "src")
+	old, fresh := filepath.Join(src, ".tmp-jsonx-old"), filepath.Join(src, ".tmp-jsonx-fresh")
+	for _, d := range []string{old, fresh} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	twoHoursAgo := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(old, twoHoursAgo, twoHoursAgo); err != nil {
+		t.Fatal(err)
+	}
+	tr := mustMaterialize(t, NewFetcher(nil, false), u.req("tag=v1"))
+	if _, err := os.Stat(old); err == nil {
+		t.Error("a two-hour-old temporary extraction should be swept")
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Error("a fresh temporary extraction may belong to a running process and must be left alone")
+	}
+	if _, err := os.Stat(tr.Dir); err != nil {
+		t.Errorf("the real tree is missing: %v", err)
 	}
 }
 
