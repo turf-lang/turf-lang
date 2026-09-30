@@ -17,6 +17,10 @@ import (
 func cmdVersion([]string) int {
 	fmt.Printf("turf %s  (needs turfc interface %d.%d+)\n",
 		version.Version, version.Required.Major, version.Required.Minor)
+	// Before anything can fail: `turf version` is what someone runs first,
+	// typically as ./build/turf, and this is where they learn how to make
+	// plain `turf` work.
+	printPathHint()
 	compiler, err := driver.Discover()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "turf: %v\n", err)

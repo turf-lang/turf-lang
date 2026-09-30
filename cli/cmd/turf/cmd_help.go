@@ -29,6 +29,7 @@ func overallHelp() string {
 func cmdHelp(args []string) int {
 	if len(args) == 0 {
 		fmt.Print(overallHelp())
+		printPathHint()
 		return 0
 	}
 	c := find(args[0])

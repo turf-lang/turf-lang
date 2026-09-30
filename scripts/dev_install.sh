@@ -79,9 +79,35 @@ for name in $NAMES; do
   ln -sfn "$target" "$link" && echo "$link -> $target"
 done
 
+# Print the exact command that puts $BIN on PATH for the user's shell, not
+# just "add it to your rc file", which assumes the reader knows which file and
+# what to write.
+#
+# FOR NOW ONLY. This is a developer script, and printing a command is all it
+# can safely do: editing someone's shell start-up files unasked is not.
+# Proper PATH management for every OS belongs to the release installers
+# (ROADMAP_v2.0.0.md REL-008 stage 7: install.sh / install.ps1, covering
+# bash/zsh/fish, macOS's login shells, and the Windows user PATH). Revisit
+# this, and the matching note in `turf version` (cli/cmd/turf/pathhint.go),
+# when those land.
 case ":$PATH:" in
   *":$BIN:"*) ;;
-  *) echo "note: $BIN is not on your PATH; add it in your shell's rc file." ;;
+  *)
+    echo "note: $BIN is not on your PATH yet, so 'turf' will not be found."
+    case "$(basename "${SHELL:-sh}")" in
+      zsh)
+        echo "      Add it (zsh):   echo 'export PATH=\"$BIN:\$PATH\"' >> ~/.zshrc" ;;
+      bash)
+        # macOS starts bash as a login shell, which reads ~/.bash_profile, not ~/.bashrc.
+        if [ "$(uname -s)" = "Darwin" ]; then RC="~/.bash_profile"; else RC="~/.bashrc"; fi
+        echo "      Add it (bash):  echo 'export PATH=\"$BIN:\$PATH\"' >> $RC" ;;
+      fish)
+        echo "      Add it (fish):  fish_add_path $BIN" ;;
+      *)
+        echo "      Add this line to your shell's start-up file:  export PATH=\"$BIN:\$PATH\"" ;;
+    esac
+    echo "      Then open a new terminal (or run the same export line in this one)."
+    ;;
 esac
 if [ -n "${TURF_HOME:-}" ]; then
   echo "note: TURF_HOME is set ($TURF_HOME). It is not needed with these links,"
