@@ -174,6 +174,7 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialA
           // Recurse into children (basic traversal)
           if (auto B = dynamic_cast<const BinaryExprAST *>(N)) { checkAccesses(B->getLHS()); checkAccesses(B->getRHS()); }
           else if (auto U = dynamic_cast<const UnaryExprAST *>(N)) checkAccesses(U->getOperand());
+          else if (auto Tr = dynamic_cast<const TryExprAST *>(N)) checkAccesses(Tr->getOperand()); // LEC-004
           else if (auto A = dynamic_cast<const AssignmentExprAST *>(N)) { checkAccesses(A->getRHS()); checkAccesses(A->getLHS()); }
           else if (auto Vd = dynamic_cast<const VarDeclExprAST *>(N)) checkAccesses(Vd->getInitializer());
           else if (auto If = dynamic_cast<const IfExprAST *>(N)) {
@@ -325,6 +326,11 @@ static void collectAddressTaken(const ExprAST *N,
   }
   if (auto B = dynamic_cast<const BinaryExprAST *>(N)) { collectAddressTaken(B->getLHS(), Out); collectAddressTaken(B->getRHS(), Out); }
   else if (auto U = dynamic_cast<const UnaryExprAST *>(N)) collectAddressTaken(U->getOperand(), Out);
+  // LEC-004: `try f(&x)` forms a reference to `x` just as `f(&x)` does, and
+  // `try` is the idiomatic way to call a fallible function -- without this,
+  // `x` would not count as address-taken and a range fact about it could
+  // survive a call that changes it.
+  else if (auto Tr = dynamic_cast<const TryExprAST *>(N)) collectAddressTaken(Tr->getOperand(), Out);
   else if (auto A = dynamic_cast<const AssignmentExprAST *>(N)) { collectAddressTaken(A->getRHS(), Out); collectAddressTaken(A->getLHS(), Out); }
   else if (auto Vd = dynamic_cast<const VarDeclExprAST *>(N)) collectAddressTaken(Vd->getInitializer(), Out);
   else if (auto If = dynamic_cast<const IfExprAST *>(N)) {
@@ -452,6 +458,11 @@ static void markNode(ExprAST *N, const ConstMap &Cur,
       if (Ov.has_value() && negProvablySafe(*Ov)) U->ProvenNoOverflow = true;
     }
     markNode(const_cast<ExprAST *>(U->getOperand()), Cur, AddressTaken);
+    return;
+  }
+
+  if (auto *Tr = dynamic_cast<TryExprAST *>(N)) { // LEC-004
+    markNode(Tr->getOperand(), Cur, AddressTaken);
     return;
   }
 

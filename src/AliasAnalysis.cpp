@@ -269,6 +269,7 @@ void AliasAnalysisPass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*Initi
         // descend
         if (auto B = dynamic_cast<const BinaryExprAST*>(N)) { recurse(B->getLHS()); recurse(B->getRHS()); }
         else if (auto U = dynamic_cast<const UnaryExprAST*>(N)) recurse(U->getOperand());
+        else if (auto Tr = dynamic_cast<const TryExprAST*>(N)) recurse(Tr->getOperand()); // LEC-004
         else if (auto As = dynamic_cast<const AssignmentExprAST*>(N)) { recurse(As->getLHS()); recurse(As->getRHS()); }
         else if (auto Vd = dynamic_cast<const VarDeclExprAST*>(N)) recurse(Vd->getInitializer());
         else if (auto Bl = dynamic_cast<const BlockExprAST*>(N)) for (const auto &e : Bl->getExpressions()) recurse(e.get());

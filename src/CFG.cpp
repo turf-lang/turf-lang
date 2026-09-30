@@ -294,6 +294,8 @@ static bool blockContainsSelfCall(const TurfBasicBlock *BB,
         return scan(B->getLHS()) || scan(B->getRHS());
       if (const auto *U = dynamic_cast<const UnaryExprAST *>(E))
         return scan(U->getOperand());
+      if (const auto *T = dynamic_cast<const TryExprAST *>(E))
+        return scan(T->getOperand()); // LEC-004: `return try f(n - 1);` calls f
       if (const auto *R = dynamic_cast<const ReturnExprAST *>(E))
         return scan(R->getVal());
       if (const auto *V = dynamic_cast<const VarDeclExprAST *>(E))

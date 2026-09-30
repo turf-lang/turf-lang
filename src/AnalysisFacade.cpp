@@ -209,11 +209,13 @@ public:
   TURF_SPAN_LOC(visitCompare, CompareExprAST)
   TURF_SPAN_LOC(visitWildcardPattern, WildcardPatternExprAST)
   TURF_SPAN_LOC(visitStructPattern, StructPatternExprAST)
+  TURF_SPAN_LOC(visitErrorVariantPattern, ErrorVariantPatternExprAST) // LEC-004
   TURF_SPAN_LOC(visitFuncCall, FuncCallExprAST)
   TURF_SPAN_LOC(visitEnumDecl, EnumDeclExprAST)
   TURF_SPAN_LOC(visitMachineDecl, MachineDeclExprAST)
   TURF_SPAN_LOC(visitErrorDecl, ErrorDeclExprAST)
   TURF_SPAN_LOC(visitRecoverExpr, RecoverExprAST)
+  TURF_SPAN_LOC(visitTry, TryExprAST) // LEC-004
   TURF_SPAN_LOC(visitArrayDecl, ArrayDeclExprAST)
   TURF_SPAN_LOC(visitArrayLiteral, ArrayLiteralExprAST)
   TURF_SPAN_LOC(visitArrayAccess, ArrayAccessExprAST)

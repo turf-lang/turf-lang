@@ -166,7 +166,21 @@ public:
       visitChild(F.Sub.get());
   }
 
+  // LEC-004: an error-variant pattern's bindings are definitions on the edge
+  // into the arm, exactly like a struct pattern's.
+  void visitErrorVariantPattern(ErrorVariantPatternExprAST &Node) override {
+    for (auto &Sub : Node.getSubsMut())
+      visitChild(Sub.get());
+  }
+
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
+
+  // LEC-004: `try f(x)` reads whatever its operand reads. (It also returns --
+  // but, like a `return` inside a `recover` block, that is not modelled as a
+  // CFG edge: the path that continues is the one every later statement is on,
+  // and a variable assigned only after a `try` is still unassigned at the
+  // point the `try` leaves, which no pass here needs to know.)
+  void visitTry(TryExprAST &Node) override { visitChild(Node.getOperand()); }
 
   // LANG-003: without this, a variable read or defined ONLY inside a
   // `defer <statement>;` would be invisible to DefiniteAssignmentPass/
@@ -321,6 +335,10 @@ public:
   void visitStructPattern(StructPatternExprAST &Node) override {
     for (auto &F : Node.getFieldsMut())
       visitChild(F.Sub.get());
+  }
+  void visitErrorVariantPattern(ErrorVariantPatternExprAST &Node) override {
+    for (auto &Sub : Node.getSubsMut())
+      visitChild(Sub.get());
   }
   void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
   void visitAssignment(AssignmentExprAST &Node) override {
@@ -734,6 +752,7 @@ public:
   }
 
   void visitUnary(UnaryExprAST &Node) override { visitChild(Node.getOperand()); }
+  void visitTry(TryExprAST &Node) override { visitChild(Node.getOperand()); } // LEC-004
 
   void visitCast(CastExprAST &Node) override { visitChild(Node.getOperand()); }
 
@@ -1034,6 +1053,7 @@ public:
     visitChild(Node.getRHS());
   }
   void visitUnary(UnaryExprAST &Node) override { visitChild(Node.getOperand()); }
+  void visitTry(TryExprAST &Node) override { visitChild(Node.getOperand()); } // LEC-004
   void visitAddressOf(AddressOfExprAST &Node) override { visitChild(Node.getOperand()); }
   void visitCast(CastExprAST &Node) override { visitChild(Node.getOperand()); }
   void visitFieldAccess(FieldAccessExprAST &Node) override { visitChild(Node.getBase()); }
@@ -1272,6 +1292,9 @@ public:
     checkOnly(Node.getOperand(), OnTrue, Tracked, DoReport);
   }
   void visitUnary(UnaryExprAST &Node) override {
+    checkOnly(Node.getOperand(), OnTrue, Tracked, DoReport);
+  }
+  void visitTry(TryExprAST &Node) override { // LEC-004
     checkOnly(Node.getOperand(), OnTrue, Tracked, DoReport);
   }
   void visitAddressOf(AddressOfExprAST &Node) override {
@@ -1753,6 +1776,7 @@ public:
   }
   void visitPostfixExpr(PostfixExprAST &Node) override { recurse(Node.getOperand()); }
   void visitUnary(UnaryExprAST &Node) override { recurse(Node.getOperand()); }
+  void visitTry(TryExprAST &Node) override { recurse(Node.getOperand()); } // LEC-004
   void visitAddressOf(AddressOfExprAST &Node) override { recurse(Node.getOperand()); }
   void visitCast(CastExprAST &Node) override { recurse(Node.getOperand()); }
   void visitBinary(BinaryExprAST &Node) override {

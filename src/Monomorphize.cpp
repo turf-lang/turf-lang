@@ -249,6 +249,21 @@ void substituteTypesInBody(const ExprAST *Node,
     substituteTypesInBody(Rec->getBlock(), Subst);
     return;
   }
+  // LEC-004: `try f(x as T)` -- the operand is an ordinary expression that can
+  // name `T`.
+  if (auto *Try = dynamic_cast<const TryExprAST *>(Node)) {
+    substituteTypesInBody(Try->getOperand(), Subst);
+    return;
+  }
+  // LEC-004: an error-variant pattern names its error type (never a type
+  // PARAMETER -- an error type can't be generic), so, like a struct pattern,
+  // only its sub-patterns are walked, so that a future sub-pattern that does
+  // carry a type cannot be silently skipped.
+  if (auto *EV = dynamic_cast<const ErrorVariantPatternExprAST *>(Node)) {
+    for (const auto &S : EV->getSubs())
+      substituteTypesInBody(S.get(), Subst);
+    return;
+  }
   // LEC-003: a struct pattern names its struct (`Pair { a, b }`), never a type
   // PARAMETER -- the arguments come from the subject's own type -- so its
   // TypeSpelling needs no substitution. Its sub-patterns are walked only so a
