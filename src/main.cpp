@@ -728,6 +728,24 @@ static int emitObjectFile(Module &M, TargetMachine &TM,
 // 'extern from "libname" fn' declaration encountered during code generation.
 extern std::set<std::string> g_RequiredLibs;
 
+#ifdef _WIN32
+// The file a Windows link writes for `-o Name`: Name with ".exe" appended,
+// unless it already ends in ".exe" (any case). Appending unconditionally
+// turned `-o app.exe`, which a driver on Windows naturally passes (the `turf`
+// front end does, for `turf run` and project builds), into `app.exe.exe`, and
+// the driver then found no executable where it had asked for one.
+static std::string WindowsExecutableName(const std::string &Name) {
+  if (Name.size() >= 4) {
+    std::string Ext = Name.substr(Name.size() - 4);
+    for (char &C : Ext)
+      C = static_cast<char>(std::tolower(static_cast<unsigned char>(C)));
+    if (Ext == ".exe")
+      return Name;
+  }
+  return Name + ".exe";
+}
+#endif
+
 // Invoke system linker
 //
 // Runs the linker directly via fork+exec (POSIX) / _spawnvp (Windows) with
@@ -800,7 +818,7 @@ static int linkObject(const std::string &ObjFile,
   }
 
 #ifdef _WIN32
-  std::string FinalOutput = OutputName + ".exe";
+  std::string FinalOutput = WindowsExecutableName(OutputName);
   std::vector<std::string> Args = {"gcc",       ObjFile, "-o", FinalOutput,
                                     "-L" + TurfLibDir, "-l" + RtLibName, "-lm"};
 #else
@@ -1971,7 +1989,7 @@ static int runCompilerMain(int argc, char **argv) {
     std::remove(ObjFile.c_str());
 
 #ifdef _WIN32
-    std::cout << "Successfully compiled to " << opts.OutputName << ".exe\n";
+    std::cout << "Successfully compiled to " << WindowsExecutableName(opts.OutputName) << "\n";
 #else
     std::cout << "Successfully compiled to " << opts.OutputName << "\n";
 #endif
