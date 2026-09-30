@@ -1,0 +1,45 @@
+An error variant's payload is declared or used wrongly
+
+    error IOError {
+        NotFound(path: string),
+        Denied(path: string, mode: int),
+        Timeout
+    }
+
+    IOError::NotFound("a.txt")             // ok
+    IOError::NotFound("a.txt", "message")  // ok: fields, then a string message
+    IOError::Denied("a.txt")               // ERROR: declares 2 fields, given 1
+    IOError::Denied("a.txt", "rw")         // ERROR: 'mode' is an int
+    IOError::NotFound                      // ERROR: has fields, so it isn't a value
+    //   Hint: Pass one argument per field, in order: 'IOError::Denied(...)'
+    //   takes 2, or 3 with a trailing 'string' message.
+
+A variant may declare typed fields, written `Name(field: Type, ...)`. A variant
+with *N* fields is built with *N* arguments, or *N+1* when the extra trailing
+argument is the `string` message (`err.message` still reads it). A variant with
+no fields is written without parentheses and takes no arguments, or exactly
+one, its message -- as it always did.
+
+A payload is read only by destructuring it in a `compare`:
+
+    compare err {
+        matches IOError::NotFound(path):   ...
+        matches IOError::Denied(path, _):  ...
+        otherwise:                         ...
+    }
+
+What this code reports:
+
+- Empty parentheses in a declaration (`NotFound()`), a field with no type
+  (`NotFound(path)`), or a field name used twice in one variant.
+- A field whose type is an error type, a `!T` or `void`: an error value carries
+  data about what went wrong, not another failure.
+- A constructor call with the wrong number of arguments, or an argument whose
+  type is not its field's (or, past the fields, not a `string` message).
+- A bare `IOError::NotFound` where a value is wanted, for a variant that has
+  fields: without its payload there is no value. It is still fine as an `==`
+  or `!=` operand (`err == IOError::NotFound`, which compares the variant only)
+  and as the head of a pattern.
+
+An unknown field type is the ordinary unknown-type error, and a pattern that
+does not fit its variant is E092.

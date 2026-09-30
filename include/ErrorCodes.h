@@ -246,6 +246,14 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     {"E092", "InvalidPatternError", "Invalid pattern", SLM::ErrorCategory::CONTROL_FLOW},
     {"E093", "NonExhaustiveCompareError", "Non-exhaustive compare", SLM::ErrorCategory::CONTROL_FLOW},
     {"E094", "UnreachableArmWarning", "Unreachable compare arm", SLM::ErrorCategory::CONTROL_FLOW},
+
+    // LEC-004 (docs/development/changes/LEC-004.md): error-variant payloads
+    // and `try`. One class for every payload rule (declaration, construction,
+    // a bare reference to a variant that has fields), one for `try` used where
+    // it cannot work. A destructuring pattern over an error value reuses
+    // E092/E093.
+    {"E095", "TryMisuseError", "Misplaced try", SLM::ErrorCategory::CONTROL_FLOW},
+    {"E096", "ErrorPayloadError", "Invalid error payload", SLM::ErrorCategory::DECLARATION},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

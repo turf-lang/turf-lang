@@ -305,5 +305,6 @@ public:
 #include "ErrorsArray.h"
 #include "ErrorsMemory.h"
 #include "ErrorsPattern.h"
+#include "ErrorsPayload.h"
 
 #endif

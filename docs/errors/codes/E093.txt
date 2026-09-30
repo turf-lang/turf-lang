@@ -27,3 +27,9 @@ A guarded arm never counts toward coverage, however complete it looks:
 
 An `int`, `string` or `char` subject is different: a `compare` over one may
 match nothing, in which case it does nothing.
+
+A value of a *declared* error type (`mut e: IOError = ...`, unlike the open
+`err`) has a listable set of variants, so covering all of them is exhaustive
+without `otherwise`: each by an unguarded variant pattern whose fields all match
+anything (`IOError::Denied(_, mode)`). A variant whose pattern can fail
+(`IOError::Denied(_, 0)`) is not yet covered.

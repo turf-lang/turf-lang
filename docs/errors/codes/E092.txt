@@ -45,3 +45,19 @@ wrong; the message says which, and the hint says what to write instead:
 Inside a destructuring pattern a bare identifier always binds. At the top of a
 header it is still a variable compared by equality, exactly as before patterns
 existed.
+
+An error value can be matched too: `IOError::Denied(path, mode)` destructures
+a variant's payload positionally, inside a `compare` over an error (the `err`
+of `recover as err run`, or a value of a declared error type). Its
+sub-patterns are a struct pattern's -- a name that binds, `_`, a literal, an
+enum variant, a nested struct pattern -- and, like a struct pattern, it lists
+every field or ends in `..`:
+
+    matches IOError::Denied(path, ..):     // ok
+    matches IOError::Denied(path):         // ERROR: doesn't mention 'mode'
+    matches IOError::NotFound:             // ERROR: it has a field; write (..)
+    matches IOError::Timeout:              // ok: no fields, matched by tag
+
+More ways such a header can be wrong: matching an error-variant pattern against
+a value that is not an error, naming the variant of a different error type than
+a declared-error subject holds, or empty parentheses (`IOError::NotFound()`).
