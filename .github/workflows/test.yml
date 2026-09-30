@@ -137,6 +137,11 @@ jobs:
       # network; git is present on the runner.
       - name: turf git dependencies smoke test (cache, turf.lock, offline, locked, update)
         run: CI=1 ./scripts/git_deps_smoke.sh
+      # LEC-001 stage 8: examples/ builds and runs with the real `turf`, and its
+      # committed turf.lock files are current (--locked --offline). Nothing else
+      # builds examples/; the docs quote its output.
+      - name: turf examples smoke test (examples/ build, run, locked and offline)
+        run: CI=1 ./scripts/examples_smoke.sh
 
       # OPT-001 (docs/development/changes/OPT-001.md, INV-OPT-1): optimization
       # levels must never change a program's observable behaviour. The default
