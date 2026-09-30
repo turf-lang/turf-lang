@@ -82,8 +82,59 @@ func manifestText(name, turfReq string) string {
 	return fmt.Sprintf("[package]\nname = %q\nversion = \"0.1.0\"\nturf = %q\n\n[dependencies]\n", name, turfReq)
 }
 
-func mainTemplate(name string) string {
-	return fmt.Sprintf("import io;\n\nfn main(): int {\n    io::printline(\"Hello, %s!\");\n    return 0;\n}\n", name)
+// mainTemplate is src/main.tr for a new package. Every new package gets one,
+// a library too, so `turf run` works straight after `turf new`: the first
+// thing anyone does with a new project is run it. In a library it also shows
+// how the package's own root module is imported.
+func mainTemplate(name string, lib bool) string {
+	head := "// src/main.tr: this package's entry point. `turf run` builds and runs it.\n"
+	if !lib {
+		return head + fmt.Sprintf("import io;\n\nfn main(): int {\n    io::printline(\"Hello, TurfLang! This is %s.\");\n    return 0;\n}\n", name)
+	}
+	return head + fmt.Sprintf("// The library itself is src/%s.tr; other packages import that, never this.\n"+
+		"import io;\nimport %s;\n\nfn main(): int {\n"+
+		"    io::printline(\"Hello, TurfLang! %s::answer() is \" + (%s::answer() to string) + \".\");\n"+
+		"    return 0;\n}\n", name, name, name, name)
+}
+
+// indent prefixes every non-empty line of s, for quoting a file in a message.
+func indent(s, prefix string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	for i, l := range lines {
+		if l != "" {
+			lines[i] = prefix + l
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// readmeTemplate is the README.md of a new package: the handful of commands
+// someone needs in a TurfLang project, where they will look first.
+func readmeTemplate(name string, lib bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\nA TurfLang package, created with `turf new`.\n\n", name)
+	b.WriteString("## Everyday commands\n\n")
+	b.WriteString("| Command | What it does |\n|---|---|\n")
+	b.WriteString("| `turf run` | build and run `src/main.tr` |\n")
+	fmt.Fprintf(&b, "| `turf build` | build without running; the program is `build/%s` |\n", name)
+	b.WriteString("| `turf check` | report every error and warning, without building |\n")
+	b.WriteString("| `turf add <dep> --path ../<dep>` | depend on a package on disk |\n")
+	b.WriteString("| `turf add <dep> --git <url> --tag <tag>` | depend on a package in a git repository |\n")
+	b.WriteString("| `turf remove <dep>` | stop depending on it |\n")
+	b.WriteString("| `turf update` | move git dependencies to the newest commit their tag or branch names |\n")
+	b.WriteString("| `turf clean` | delete `build/` |\n")
+	b.WriteString("| `turf fmt --write src/main.tr` | format a file in place |\n")
+	b.WriteString("| `turf explain E090` | explain an error code |\n")
+	b.WriteString("| `turf help` | every command |\n\n")
+	b.WriteString("## Layout\n\n")
+	b.WriteString("- `turf.toml`: the package's name, version and dependencies\n")
+	b.WriteString("- `turf.lock`: pins every dependency; written by the first build, commit it\n")
+	b.WriteString("- `src/main.tr`: the entry point, what `turf run` runs\n")
+	if lib {
+		fmt.Fprintf(&b, "- `src/%s.tr`: the library's root module, the only module other packages can `import %s;`\n", name, name)
+	}
+	b.WriteString("- `build/`: build output, ignored by git\n")
+	return b.String()
 }
 
 func libTemplate(name string) string {
@@ -203,18 +254,23 @@ func scaffold(dir, name string, lib bool) ([]string, error) {
 	}
 	out = append(out, pre+project.ManifestFile)
 
-	srcFile, content := "main.tr", mainTemplate(name)
+	// Every package gets src/main.tr so `turf run` works at once; a library
+	// also gets its root module. Neither overwrites a file `turf init` finds.
+	files := []struct{ rel, content string }{{"src/main.tr", mainTemplate(name, lib)}}
 	if lib {
-		srcFile, content = name+".tr", libTemplate(name)
+		files = append(files, struct{ rel, content string }{"src/" + name + ".tr", libTemplate(name)})
 	}
-	src := filepath.Join(dir, "src", srcFile)
-	if _, err := os.Lstat(src); err == nil {
-		out = append(out, pre+"src/"+srcFile+" (already there, left as it is)")
-	} else {
-		if err := os.WriteFile(src, []byte(content), 0o644); err != nil {
+	files = append(files, struct{ rel, content string }{"README.md", readmeTemplate(name, lib)})
+	for _, f := range files {
+		path := filepath.Join(dir, filepath.FromSlash(f.rel))
+		if _, err := os.Lstat(path); err == nil {
+			out = append(out, pre+f.rel+" (already there, left as it is)")
+			continue
+		}
+		if err := os.WriteFile(path, []byte(f.content), 0o644); err != nil {
 			return nil, err
 		}
-		out = append(out, pre+"src/"+srcFile)
+		out = append(out, pre+f.rel)
 	}
 
 	note, err := ensureGitignore(filepath.Join(dir, ".gitignore"))
@@ -259,11 +315,13 @@ Usage:
 Creates <name>/ (which must not exist) holding:
 
   turf.toml       [package] name/version/turf, and an empty [dependencies]
-  src/main.tr     a hello-world program
+  src/main.tr     the entry point, a hello-world program: 'turf run' works at once
+  README.md       the everyday turf commands and the project's layout
   .gitignore      /build/
 
-With --lib the source file is src/<name>.tr instead, the package's root
-module: the only module another package can import. <name> must be a valid
+With --lib it also creates src/<name>.tr, the package's root module: the
+only module another package can import. src/main.tr then imports it, so the
+library can be run and tried out on its own. <name> must be a valid
 identifier and not a reserved word, because it is spelled in 'import'. A
 library named like a standard-library module is refused, since
 'import <name>;' could never reach it.
@@ -279,7 +337,7 @@ Usage:
 
 Like 'turf new', in the current directory. The name defaults to the
 directory's name and must be a valid package name. A turf.toml already there
-is refused. An existing src/main.tr (or src/<name>.tr with --lib) is never
-overwritten, and /build/ is appended to an existing .gitignore only if it is
-not already ignored.
+is refused. An existing src/main.tr, src/<name>.tr (with --lib) or README.md
+is never overwritten, and /build/ is appended to an existing .gitignore only
+if it is not already ignored.
 `

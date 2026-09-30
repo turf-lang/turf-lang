@@ -88,7 +88,9 @@ grep -q "^turf = \"$(echo "$V" | cut -d. -f1,2)\"$" "$P1/app/turf.toml" ||
 
 t run_app "$P1/app" run
 expect_rc "turf run in a new project" run_app 0
-expect_out "turf run in a new project" run_app "Hello, app!"
+expect_out "turf run in a new project" run_app "Hello, TurfLang! This is app."
+[ -f "$P1/app/README.md" ] && grep -qF '`turf run`' "$P1/app/README.md" ||
+  fail "turf new app: README.md with the everyday commands was not created"
 [ -x "$P1/app/build/app" ] || fail "turf run in a new project: build/app was not left behind"
 [ -f "$P1/app/build/package-graph.json" ] || fail "turf run: build/package-graph.json was not written"
 # From a subdirectory: found by walking up, and diagnostics still say src/main.tr
@@ -102,15 +104,25 @@ expect_out "turf new over an existing directory" new_dir_exists "already exists"
 
 t new_geo "$P1" new geometry --lib
 expect_rc "turf new geometry --lib" new_geo 0
-[ -f "$P1/geometry/src/geometry.tr" ] && [ ! -f "$P1/geometry/src/main.tr" ] ||
-  fail "turf new --lib: only src/geometry.tr should exist"
+# Every new package is runnable at once: --lib creates the root module AND a
+# src/main.tr that imports it (owner decision, 2026-09-30).
+[ -f "$P1/geometry/src/geometry.tr" ] && [ -f "$P1/geometry/src/main.tr" ] ||
+  fail "turf new --lib: both src/geometry.tr and src/main.tr should exist"
 t build_geo "$P1/geometry" build
 expect_rc "turf build in a library" build_geo 0
-[ ! -e "$P1/geometry/build/geometry" ] || fail "a library must not produce an executable"
 [ -f "$P1/geometry/build/package-graph.json" ] || fail "library build: no graph file"
 t run_geo "$P1/geometry" run
-expect_rc "turf run in a library" run_geo 1
-expect_out "turf run in a library" run_geo "is a library; there is nothing to run"
+expect_rc "turf run in a new library" run_geo 0
+expect_out "turf run in a new library" run_geo "geometry::answer() is 42."
+# Without src/main.tr there is nothing to run, and turf says what to create.
+mv "$P1/geometry/src/main.tr" "$P1/geometry/main.tr.aside"
+t build_geo_nomain "$P1/geometry" build
+expect_rc "turf build in a library with no main.tr" build_geo_nomain 0
+[ ! -e "$P1/geometry/build/geometry" ] || rm "$P1/geometry/build/geometry"
+t run_geo_nomain "$P1/geometry" run
+expect_rc "turf run with no src/main.tr" run_geo_nomain 1
+expect_out "turf run with no src/main.tr" run_geo_nomain "has no src/main.tr, so there is nothing to run"
+mv "$P1/geometry/main.tr.aside" "$P1/geometry/src/main.tr"
 
 # A library with an error: checked even though nothing imports it.
 printf 'pub fn broken(): int {\n    return nope;\n}\n' > "$P1/geometry/src/geometry.tr"

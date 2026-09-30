@@ -190,8 +190,16 @@ func projectRun(flags, programArgs []string) int {
 		return code
 	}
 	return withProject(nf, func(p *projectBuild) int {
+		// `turf run` with no file runs src/main.tr and only that: it is the
+		// package's one entry point (FREEZE.md 6.16; turfc enforces it in a
+		// package build). Without it, say how to add one rather than only
+		// that nothing can run. `turf run <file.tr>` stays the way to run
+		// some other single file.
 		if !p.graph.Root.HasMain() {
-			return failf("'%s' is a library; there is nothing to run", p.name())
+			return failf("package '%s' has no src/main.tr, so there is nothing to run.\n"+
+				"hint: `turf run` runs src/main.tr, the package's entry point. Create it, for example:\n\n%s\n"+
+				"      To run some other file on its own instead: turf run <file.tr>",
+				p.name(), indent(mainTemplate(p.name(), p.graph.Root.IsLibrary()), "        "))
 		}
 		defer catchInterrupt()()
 		if st := p.compile(flags, false); st != 0 {

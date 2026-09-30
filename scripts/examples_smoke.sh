@@ -96,9 +96,12 @@ expect_out "plotter: the same function with int" run_plotter "an int is 8 bytes"
 # --- the library ---------------------------------------------------------------------
 t check_geometry "$EX/geometry" check
 expect_rc "turf check in geometry" check_geometry 0
+# examples/geometry has no src/main.tr (it is only a library), so `turf run`
+# says what to create rather than just that nothing can run.
 t run_geometry "$EX/geometry" run
-expect_rc "turf run in a library" run_geometry 1
-expect_out "turf run in a library" run_geometry "is a library; there is nothing to run"
+expect_rc "turf run in a library with no main.tr" run_geometry 1
+expect_out "turf run in a library with no main.tr" run_geometry "has no src/main.tr, so there is nothing to run"
+expect_out "turf run in a library with no main.tr" run_geometry "fn main(): int"
 
 if [ "$FAILED" -ne 0 ]; then
   echo "examples_smoke: $FAILED check(s) failed"
