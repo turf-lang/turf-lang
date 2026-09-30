@@ -238,26 +238,33 @@ pub fn JsonValue.length(): int {
 // ─── stringify ───────────────────────────────────────────────────────────
 
 // Serializes `v` to compact JSON text (no extra whitespace).
+//
+// Destructuring (LEC-003): only the field(s) that are meaningful for a kind are
+// named in its arm, which is exactly what the header comment above says about
+// `.kind` -- the other fields "sit at" their defaults and are ignored by `..`.
 pub fn stringify(v: JsonValue): string {
-    if v.kind == JsonType::Null {
-        return "null";
-    }
-    if v.kind == JsonType::Bool {
-        if v.bool_val {
+    compare v {
+        matches JsonValue { kind: JsonType::Null, .. }:
+            return "null";
+        done
+        matches JsonValue { kind: JsonType::Bool, bool_val: true, .. }:
             return "true";
-        }
-        return "false";
+        done
+        matches JsonValue { kind: JsonType::Bool, .. }:
+            return "false";
+        done
+        matches JsonValue { kind: JsonType::Number, num_val, .. }:
+            return num_val to string;
+        done
+        matches JsonValue { kind: JsonType::String, str_val, .. }:
+            return "\"" + escape_string(str_val) + "\"";
+        done
+        matches JsonValue { kind: JsonType::Array, .. }:
+            return stringify_array(v);
+        done
+        otherwise:
+            return stringify_object(v);
     }
-    if v.kind == JsonType::Number {
-        return v.num_val to string;
-    }
-    if v.kind == JsonType::String {
-        return "\"" + escape_string(v.str_val) + "\"";
-    }
-    if v.kind == JsonType::Array {
-        return stringify_array(v);
-    }
-    return stringify_object(v);
 }
 
 fn stringify_array(v: JsonValue): string {
