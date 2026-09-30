@@ -1203,9 +1203,14 @@ ParseModuleImportByName(const std::string &ModuleName, SourceLocation Loc,
     // "could not find module" would send the user looking for a file that
     // is already there.
     if (g_PackageGraph.Active && !StdlibOnly) {
-      if (const PackageInfo *P = g_PackageGraph.packageOf(ImportingFile))
+      if (const PackageInfo *P = g_PackageGraph.packageOf(ImportingFile)) {
         if (ExplainUnreachableModule(ModuleName, *P, NameLoc.Line > 0 ? NameLoc : Loc))
           return nullptr;
+        // Genuinely absent: the hint names the three places a package build
+        // looks, not single-file mode's "your current directory".
+        ModuleNotFoundError::inPackage(Loc, ModuleName, P->Name).raise();
+        return nullptr;
+      }
     }
     // Single-file mode only: in a package build the graph already decided what
     // is reachable, so a manifest somewhere above is beside the point.

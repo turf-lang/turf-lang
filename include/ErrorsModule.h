@@ -182,6 +182,25 @@ public:
                       (ExtraHint.empty() ? "" : " " + ExtraHint)) {
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
+
+  /// A package build (LEC-001 stage 4): the only places `import m;` can
+  /// resolve are the package's own src/, its direct dependencies and the
+  /// stdlib. The single-file hint above names "your current directory", which
+  /// a package build never searches, so it pointed the user at the one place
+  /// a new file would still not be found. Same message and code; only the
+  /// hint changes.
+  static ModuleNotFoundError inPackage(SourceLocation Loc, const std::string &ModuleName,
+                                       const std::string &Package) {
+    ModuleNotFoundError E(Loc, ModuleName);
+    E.Hint_ = "In a project, `import " + ModuleName + ";` names one of three "
+              "things: a module of this package (a file '" + ModuleName +
+              ".tr' anywhere under " + Package + "'s src/), a package listed "
+              "under [dependencies] in its turf.toml, or a standard-library "
+              "module. Check the spelling, create src/" + ModuleName +
+              ".tr, or add the dependency (`turf add " + ModuleName +
+              " --path <dir>`).";
+    return E;
+  }
 };
 // LEC-001 stage 3 (FREEZE.md 6.16, F-PKG-2): `import m;` names more than one
 // file. The search roots used to be tried in order with the first hit winning,
