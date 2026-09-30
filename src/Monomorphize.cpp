@@ -234,6 +234,10 @@ void substituteTypesInBody(const ExprAST *Node,
     for (const auto &Arm : Cmp->getArms()) {
       for (const auto &V : Arm.Values)
         substituteTypesInBody(V.get(), Subst);
+      // LEC-003: a guard is an arbitrary expression (a cast to `T`, a call to
+      // a generic function) and needs the same substitution as the body.
+      for (const auto &G : Arm.Guards)
+        substituteTypesInBody(G.get(), Subst);
       substituteTypesInBody(Arm.Body.get(), Subst);
     }
     substituteTypesInBody(Cmp->getOtherBody(), Subst);
@@ -245,8 +249,19 @@ void substituteTypesInBody(const ExprAST *Node,
     substituteTypesInBody(Rec->getBlock(), Subst);
     return;
   }
+  // LEC-003: a struct pattern names its struct (`Pair { a, b }`), never a type
+  // PARAMETER -- the arguments come from the subject's own type -- so its
+  // TypeSpelling needs no substitution. Its sub-patterns are walked only so a
+  // future sub-pattern that does carry a type cannot be silently skipped
+  // (INV-LINT-1's risk class, above).
+  if (auto *SP = dynamic_cast<const StructPatternExprAST *>(Node)) {
+    for (const auto &F : SP->getFields())
+      substituteTypesInBody(F.Sub.get(), Subst);
+    return;
+  }
   // Leaves with no children and no parse-time TurfTypePtr of their own:
-  // Break/Continue/Number/Bool/Char/String/Null/Variable/ScopeAccess.
+  // Break/Continue/Number/Bool/Char/String/Null/Variable/ScopeAccess, and the
+  // wildcard/binding patterns.
 }
 
 } // namespace

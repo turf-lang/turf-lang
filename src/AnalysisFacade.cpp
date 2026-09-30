@@ -207,6 +207,8 @@ public:
   TURF_SPAN_LOC(visitContinue, ContinueExprAST)
   TURF_SPAN_LOC(visitReturn, ReturnExprAST)
   TURF_SPAN_LOC(visitCompare, CompareExprAST)
+  TURF_SPAN_LOC(visitWildcardPattern, WildcardPatternExprAST)
+  TURF_SPAN_LOC(visitStructPattern, StructPatternExprAST)
   TURF_SPAN_LOC(visitFuncCall, FuncCallExprAST)
   TURF_SPAN_LOC(visitEnumDecl, EnumDeclExprAST)
   TURF_SPAN_LOC(visitMachineDecl, MachineDeclExprAST)
@@ -223,6 +225,7 @@ public:
     set(Node.LocGetter(), Node.NameGetter().size());                         \
   }
   TURF_SPAN_NAME(visitVariable, VariableExprAST, getLoc, getName)
+  TURF_SPAN_NAME(visitBindingPattern, BindingPatternExprAST, getLoc, getName)
   TURF_SPAN_NAME(visitVarDecl, VarDeclExprAST, getNameLoc, getName)
   TURF_SPAN_NAME(visitFuncDef, FuncDefExprAST, getNameLoc, getName)
   TURF_SPAN_NAME(visitExternFuncDecl, ExternFuncDeclExprAST, getNameLoc,
