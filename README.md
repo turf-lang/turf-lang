@@ -65,7 +65,7 @@ No package-manager distribution yet. Build from source (see [Building from Sourc
 
 ### Setting up `TURF_HOME`
 
-The compiler resolves every `import` (its own standard library under `lib/std/`, and — once a package format exists — third-party packages under `lib/usr/`) against the `TURF_HOME` environment variable: it should point at the Turf installation root, i.e. the folder that directly contains `lib/`. Running the binary from right inside an extracted release archive, or a source checkout you've just built, needs no setup at all — with `TURF_HOME` unset, the compiler falls back to looking for `lib/` next to its own binary. You only need to set `TURF_HOME` once you move the binary somewhere else: a system-wide install, a symlink on `PATH`, a shortcut, etc.
+The compiler resolves the standard library's `import`s (under `lib/std/`) against the `TURF_HOME` environment variable (dependencies in a project come from `turf.toml`, not from here, and `lib/usr/` is searched only by single-file builds until it is retired): it should point at the Turf installation root, i.e. the folder that directly contains `lib/`. Running the binary from right inside an extracted release archive, or a source checkout you've just built, needs no setup at all — with `TURF_HOME` unset, the compiler falls back to looking for `lib/` next to its own binary. You only need to set `TURF_HOME` once you move the binary somewhere else: a system-wide install, a symlink on `PATH`, a shortcut, etc.
 
 **Linux / macOS** (bash or zsh) — add one line to your shell profile (`~/.bashrc`, `~/.zshrc`, or `~/.profile`, whichever your shell reads) so it's set in every new terminal:
 
@@ -100,6 +100,36 @@ set TURF_HOME=C:\path\to\turf-installation
 Once set, verify it from a fresh terminal: `cd` somewhere completely unrelated to your Turf installation (e.g. your home directory) and compile the `hello.tr` from [Quick Start](#quick-start) below. If `TURF_HOME` is wired up correctly, `import io;` resolves regardless of your current directory or where the `turf` binary itself lives.
 
 ## Quick Start
+
+**Get `turf`.** There is no download-and-run installer yet (a self-contained release archive and `install.sh` are planned: `ROADMAP_v2.0.0.md` REL-008), so build from source. This produces `build/turf` and `build/turfc`, and `dev_install.sh` links `turf` into `~/.local/bin` so it works from any directory:
+
+```bash
+./scripts/cmake_build.sh --release --no-smart
+./scripts/dev_install.sh          # --prefix DIR for elsewhere; put DIR/bin on your PATH
+turf version                      # prints both the turf and turfc versions
+```
+
+(`--no-smart` skips the llama.cpp model runtime for `--smart` and its slow first build; see [Building from Source](#building-from-source).)
+
+**A first project.** `turf new` makes a directory with a `turf.toml` and a starter program, and `turf run` builds and runs it:
+
+```bash
+turf new hello
+cd hello
+turf run                          # prints: Hello, hello!
+```
+
+**A dependency.** A library is a package too (`turf new geometry --lib`, whose root module `src/geometry.tr` is the only thing another package can import). `turf add` records it in `turf.toml`, and `import geometry;` then reaches its `pub` items:
+
+```bash
+turf new geometry --lib           # next to hello/
+cd hello
+turf add geometry --path ../geometry
+```
+
+A dependency can also be `{ git = "…", tag = "…" }`, which `turf` fetches, pins in `turf.lock` and verifies on every build. Manifest keys, dependencies, imports across packages, the lock file and the cache are documented in [`docs/reference/projects_and_packages.md`](docs/reference/projects_and_packages.md), and [`examples/`](examples/README.md) holds a library and a program that depends on it, ready to run.
+
+**A single file** needs no project:
 
 ```
 // hello.tr
@@ -777,7 +807,7 @@ Compiles, runs, and cleans up the produced binary.
 
 ## Documentation
 
-- **[`docs/reference/`](docs/reference/)** — the full language reference, one topic per page (variables & types, control flow, error handling, functions & modules, FFI & `unsafe`, structs & enums, state machines, generics & operators, arrays, the standard library, CLI & diagnostics). Start at [`docs/reference/README.md`](docs/reference/README.md).
+- **[`docs/reference/`](docs/reference/)** — the full language reference, one topic per page (variables & types, control flow, error handling, functions & modules, FFI & `unsafe`, structs & enums, state machines, generics & operators, arrays, the standard library, projects & packages, CLI & diagnostics). Start at [`docs/reference/README.md`](docs/reference/README.md).
 - **[`docs/architecture/`](docs/architecture/)** — deep internals references for contributors: the module/`::` system, pointers/`unsafe`/`&T`, error handling/`recover`, the compiler's memory model (what's heap vs. stack, in plain CS terms, not LLVM internals), and the full Lexer→Parser→Resolver→TypeChecker→Codegen pipeline plus its CFG static-analysis passes.
 - **[`docs/planning/`](docs/planning/)** — `ROADMAP_v1.0.0_COMPLETE.md` (the completed v1.0.0 tracker) and `FUTURE.md` (what's next, see below).
 
@@ -787,7 +817,7 @@ Compiles, runs, and cleans up the produced binary.
 
 What's next is tracked in **[`docs/planning/FUTURE.md`](docs/planning/FUTURE.md)**, roughly in priority order:
 
-- Developer tooling: an LSP server, `turf fmt`, `turf test`, a package manager.
+- Developer tooling: an LSP server and `turf test` (REL-002). `turf fmt` and a project/dependency tool (`turf new`, `build`, `add`; path and git dependencies) exist today; a package registry does not (`FUTURE.md` F-7c).
 - `@slm { }` in-source syntax (Prompt-Oriented Programming) — the `--smart` error-healing pipeline is live today; writing natural-language blocks that generate real code is not.
 - LoRA fine-tuning for the local SLM.
 - A hashed `HashMap<K, V>` (today's `map`/`set` are linear-scan association lists — see the Standard Library section above; a struct key can supply its own `hash()` now that generics are monomorphized, see `docs/reference/stdlib/collections.md`).

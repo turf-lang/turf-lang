@@ -1617,6 +1617,31 @@ invocation, monomorphizing generics across package boundaries exactly as it
 does within one file today. No binary artifacts, registry, or ABI
 compatibility are involved, by design (Part IV LEC-001).
 
+**What is real today** (annotated 2026-09-30 at the close of LEC-001; each line
+below was run with the built `turf`/`turfc`; the walkthrough above is the
+target and is unchanged):
+
+| Walkthrough line | Today |
+|---|---|
+| `curl -fsSL … install.sh \| sh` | **Not real.** There is no installer and no release archive that runs with nothing else installed. REL-008 builds them. Today `turf` is built from source (`./scripts/cmake_build.sh --release --no-smart`, then `./scripts/dev_install.sh`), and README's Quick Start says so. |
+| `turf --version` | Real. Prints two lines, `turf 1.0.0-dev …` and `turfc 2.0.0-dev  (interface 1.1, …)`, since the two are versioned separately. |
+| `turf new geometry --lib` / `turf new plotter` | Real. `src/geometry.tr` and `src/main.tr`. |
+| `[dependencies]` with `geometry = { path = "../geometry" }` | Real (`turf add geometry --path ../geometry` writes it). |
+| `jsonx = { git = "…", tag = "v1.2.0" }` | The **form** is real and tested (`scripts/git_deps_smoke.sh`, against local bare repositories); `jsonx` is illustrative, there is no such repository. |
+| `import geometry;` `import jsonx;` `import io;` | Real. |
+| `turf build` "fetches, writes `turf.lock`, compiles everything from source" | Real. It also prints `turf: fetching <name> (<url>)` per repository, and `turf.lock` pins the commit and a SHA-256 of the tree. |
+| `turf run` | Real. |
+| `turf test` | **Not implemented.** It exits 2 with `turf: 'test' is not implemented yet (REL-002)`. |
+| `git tag v0.1.0 && git push --tags` | Plain git; consumers then write `{ git = "…", tag = "v0.1.0" }`, which is real. |
+| `cp build/plotter /somewhere` | Real: the copy runs from any directory. "Static-runtime" is accurate (`libturfrt` is linked in), but the program is not fully static: `ldd` shows `libm`, `libc` and the loader, and `turfc` still links with the system `cc`. Fully static programs and a `turfc` that needs no C toolchain are REL-008. |
+
+In "What happens underneath", "the driver" is `turf`, the Go front end (the
+compiler `turfc` never fetches or reads a manifest); it fetches into
+`<user cache dir>/turf/src/` (`~/.cache/turf/src/` on Linux, or
+`$TURF_CACHE_DIR`). Everything else in that paragraph is real, including the
+generics claim: `examples/plotter` calls a generic function of `examples/geometry`
+with a struct declared only in `plotter`.
+
 ---
 
 ## Part X — 2.0.0 Definition of Done
