@@ -330,18 +330,20 @@ fn escape_string(s: string): string {
 
 // Every distinct way a JSON text can fail to parse -- kept as separate
 // variants (docs/planning/Errors.md) so a caller using
-// `recover as err run { ... }` can tell them apart, even though a variant
-// itself carries no payload/position (a documented simplification -- a
-// real "line/column of the error" would need SourceLocation-style
-// tracking this hand-rolled parser doesn't attempt).
+// `recover as err run { ... }` can tell them apart. Every variant carries the
+// byte offset into the text at which the parser gave up (LEC-004): read it with
+// `matches json::JsonError::UnexpectedChar(at):`, or ignore it and compare with
+// `err == json::JsonError::UnexpectedChar` as before. (A line/column would need
+// position tracking this hand-rolled parser doesn't attempt; an offset is what
+// it already has.)
 pub error JsonError {
-    UnexpectedEnd,
-    UnexpectedChar,
-    InvalidNumber,
-    InvalidLiteral,
-    UnterminatedString,
-    ExpectedColon,
-    ExpectedComma,
+    UnexpectedEnd(offset: int),
+    UnexpectedChar(offset: int),
+    InvalidNumber(offset: int),
+    InvalidLiteral(offset: int),
+    UnterminatedString(offset: int),
+    ExpectedColon(offset: int),
+    ExpectedComma(offset: int),
 }
 
 // Parser state, threaded through by-reference via `self` exactly like
@@ -379,46 +381,35 @@ fn Parser.parse_value(): !JsonValue {
     self.skip_ws();
     immut c: int = self.peek();
     if c == (0 - 1) {
-        return JsonError::UnexpectedEnd;
+        return JsonError::UnexpectedEnd(self.pos);
     }
+    // `return self.parse_object();` would do for the `{`/`[` cases (LEC-004: a
+    // `!T` returned from a function declaring exactly that `!T` passes
+    // through), but `try` reads the same everywhere below, where the result
+    // needs unwrapping before it is wrapped again.
     if c == 123 { // '{'
-        // NOT a direct `return self.parse_object();` -- this compiler
-        // doesn't support propagating one `!T`-returning call's whole
-        // result (success-or-error) directly as another `!T` function's
-        // own return value; confirmed live ("Return type mismatch:
-        // function declares '!JsonValue' but returns '!JsonValue'" --
-        // Declared's success type gets compared against RetTy's WHOLE
-        // error-union type, not its success type, so they never match no
-        // matter what T is). Unwrap explicitly instead, same pattern every
-        // other call site in this file already uses.
-        immut obj: JsonValue = self.parse_object() recover as err run { return err; };
-        return obj;
+        return self.parse_object();
     }
     if c == 91 { // '['
-        immut arr: JsonValue = self.parse_array() recover as err run { return err; };
-        return arr;
+        return self.parse_array();
     }
     if c == 34 { // '"'
-        immut s: string = self.parse_string() recover as err run { return err; };
+        immut s: string = try self.parse_string();
         return JsonValue::from_string(s);
     }
     if c == 116 { // 't' -- true
-        immut b: JsonValue = self.parse_literal("true", JsonValue::from_bool(true)) recover as err run { return err; };
-        return b;
+        return self.parse_literal("true", JsonValue::from_bool(true));
     }
     if c == 102 { // 'f' -- false
-        immut b: JsonValue = self.parse_literal("false", JsonValue::from_bool(false)) recover as err run { return err; };
-        return b;
+        return self.parse_literal("false", JsonValue::from_bool(false));
     }
     if c == 110 { // 'n' -- null
-        immut nv: JsonValue = self.parse_literal("null", JsonValue::null_value()) recover as err run { return err; };
-        return nv;
+        return self.parse_literal("null", JsonValue::null_value());
     }
     if (c >= 48 && c <= 57) || c == 45 { // digit or '-'
-        immut num: JsonValue = self.parse_number() recover as err run { return err; };
-        return num;
+        return self.parse_number();
     }
-    return JsonError::UnexpectedChar;
+    return JsonError::UnexpectedChar(self.pos);
 }
 
 fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
@@ -426,7 +417,7 @@ fn Parser.parse_literal(lit: string, value: JsonValue): !JsonValue {
     mut i: int = 0;
     while i < n {
         if self.pos >= self.len || self.s[self.pos] != lit[i] {
-            return JsonError::InvalidLiteral;
+            return JsonError::InvalidLiteral(self.pos);
         }
         self.pos = self.pos + 1;
         i = i + 1;
@@ -448,7 +439,7 @@ fn Parser.parse_string(): !string {
         if c == 92 { // backslash
             self.pos = self.pos + 1;
             if self.pos >= self.len {
-                return JsonError::UnterminatedString;
+                return JsonError::UnterminatedString(self.pos);
             }
             immut esc: int = self.s[self.pos] to int;
             if esc == 34 {
@@ -475,7 +466,7 @@ fn Parser.parse_string(): !string {
             self.pos = self.pos + 1;
         }
     }
-    return JsonError::UnterminatedString;
+    return JsonError::UnterminatedString(self.pos);
 }
 
 fn Parser.parse_number(): !JsonValue {
@@ -513,11 +504,11 @@ fn Parser.parse_number(): !JsonValue {
         }
     }
     if !sawDigit {
-        return JsonError::InvalidNumber;
+        return JsonError::InvalidNumber(start);
     }
     immut numStr: string = strings::substring(self.s, start, self.pos);
     immut n: double = strings::parse_double(numStr) recover run {
-        return JsonError::InvalidNumber;
+        return JsonError::InvalidNumber(start);
     };
     return JsonValue::from_number(n);
 }
@@ -531,7 +522,7 @@ fn Parser.parse_array(): !JsonValue {
         return arr;
     }
     while true {
-        immut item: JsonValue = self.parse_value() recover as err run { return err; };
+        immut item: JsonValue = try self.parse_value();
         arr.push(item);
         self.skip_ws();
         immut c: int = self.peek();
@@ -542,7 +533,7 @@ fn Parser.parse_array(): !JsonValue {
             self.pos = self.pos + 1;
             return arr;
         } else {
-            return JsonError::ExpectedComma;
+            return JsonError::ExpectedComma(self.pos);
         }
     }
     // No trailing `return arr;` here: every path through the loop above
@@ -564,16 +555,16 @@ fn Parser.parse_object(): !JsonValue {
     while true {
         self.skip_ws();
         if self.peek() != 34 { // '"'
-            return JsonError::UnexpectedChar;
+            return JsonError::UnexpectedChar(self.pos);
         }
-        immut key: string = self.parse_string() recover as err run { return err; };
+        immut key: string = try self.parse_string();
         self.skip_ws();
         if self.peek() != 58 { // ':'
-            return JsonError::ExpectedColon;
+            return JsonError::ExpectedColon(self.pos);
         }
         self.pos = self.pos + 1;
         self.skip_ws();
-        immut value: JsonValue = self.parse_value() recover as err run { return err; };
+        immut value: JsonValue = try self.parse_value();
         obj.set(key, value);
         self.skip_ws();
         immut c: int = self.peek();
@@ -583,7 +574,7 @@ fn Parser.parse_object(): !JsonValue {
             self.pos = self.pos + 1;
             return obj;
         } else {
-            return JsonError::ExpectedComma;
+            return JsonError::ExpectedComma(self.pos);
         }
     }
     // No trailing `return obj;` here -- same unreachable-`while true`-tail
@@ -600,6 +591,5 @@ pub fn parse(s: string): !JsonValue {
     p.s = s;
     p.pos = 0;
     p.len = strings::length(s);
-    immut v: JsonValue = p.parse_value() recover as err run { return err; };
-    return v;
+    return p.parse_value();
 }

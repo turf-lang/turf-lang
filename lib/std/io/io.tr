@@ -127,9 +127,13 @@ pub fn input(): string {
 // can still tell "the file isn't there" apart from "it's there but
 // something went wrong reading/writing it", mirroring net.tr's
 // NetworkError split.
+//
+// Each carries the path it failed on (LEC-004): read it by destructuring --
+// `matches io::FileError::NotFound(path):` -- or ignore it and compare with
+// `err == io::FileError::NotFound` as before (equality looks at the variant only).
 pub error FileError {
-    NotFound,
-    ReadFailed,
+    NotFound(path: string),
+    ReadFailed(path: string),
 }
 
 // ─── read_to_string ───────────────────────────────────────────────────────
@@ -160,7 +164,7 @@ pub error FileError {
 pub fn read_to_string(path: string): !string {
     mut stream: void* = fopen(path, "rb");
     if stream == null {
-        return FileError::NotFound;
+        return FileError::NotFound(path);
     }
 
     fseek(stream, 0, 2); // SEEK_END
@@ -172,7 +176,7 @@ pub fn read_to_string(path: string): !string {
     fclose(stream);
 
     if readCount != size {
-        return FileError::ReadFailed;
+        return FileError::ReadFailed(path);
     }
 
     return buf to string;
@@ -196,7 +200,7 @@ pub fn read_to_string(path: string): !string {
 // trailing empty element is ever dropped.
 pub fn read_lines(path: string): !List<string> {
     immut content: string = read_to_string(path) recover run {
-        return FileError::NotFound;
+        return FileError::NotFound(path);
     };
 
     mut lines: List<string> = strings::split(content, "\n");
