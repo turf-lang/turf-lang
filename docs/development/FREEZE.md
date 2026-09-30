@@ -650,6 +650,75 @@ scripts; separate compilation (F-7a); binary packages and a Turf ABI
 of one package; `pub(package)`; path-qualified imports of internal modules
 (`import a::b` keeps its existing meaning, a symbol import).
 
+### 6.17 Pattern matching — FROZEN (LEC-003, 2026-10-01)
+
+Recorded on the project owner's explicit instruction to implement LEC-003 with
+`ROADMAP_v2.0.0.md` as the authority (DEC-10's recommendation: a top-level
+`matches expr` is unchanged, destructuring forms bind) — §6.0 rule 3's explicit
+request, not a session's own initiative. Full account:
+`docs/development/changes/LEC-003.md`. The roadmap marks four points for
+confirmation; each is settled below.
+
+- **Backward compatibility first.** `matches <expr>:` at the top of a header
+  keeps its exact meaning: equality against a value expression (which may be a
+  variable, e.g. a string). A bare identifier at the top of a header is still
+  that variable, never a binding. Every `compare` that uses only value patterns
+  keeps its original `switch`/`strcmp` code generation.
+- **Arms are tried in source order; the first header that matches wins.**
+  Confirmed against the current lowering (a duplicate value pattern is already
+  rejected, so order never mattered for plain values) and frozen: a guard that
+  fails falls through to the next header, not out of the `compare`.
+- **Reserved word:** `_` alone is the wildcard and is reserved everywhere a name
+  is expected (its own token). `_name` — an underscore followed by anything — is
+  an ordinary identifier, and by convention silences the unused-variable
+  warning (the hint always promised this; it was untrue while `_x` did not lex).
+- **Pattern forms.** Wildcard `_`; struct destructuring `Name { field: pattern,
+  field, .. }` (also `module::Name`); a value sub-pattern inside a struct
+  pattern: an integer (`5`, `-5`), `char`, `string` or `bool` literal, or an
+  enum/machine variant. **Inside a destructuring pattern a bare identifier
+  binds** (Rust's rule); to compare a field with a variable or any expression,
+  bind it and use a guard. A `double` literal is not a pattern.
+- **A struct pattern lists every field or ends in `..`.** A field left
+  unmentioned without `..` is an error (E092), so a pattern cannot keep
+  compiling, meaning something different, after the struct gains a field.
+  Fields are read exactly as `p.field` reads them: another module's private
+  field is E088 (and must be waved off with `..`).
+- **Subjects a struct pattern accepts:** a struct value, a safe `&T`, and
+  `self`. A `&?T` (may be null) and a raw `T*` are refused with a hint.
+- **Guards:** `matches <pattern> if <bool expression>:`. A guard belongs to its
+  header; bindings of that header are visible in it.
+- **Alternatives:** existing header stacking only (no nested `|` in 2.0). Every
+  stacked header of an arm must bind exactly the same names at the same types
+  (the shared body reads one symbol per name), else E092. Each header keeps its
+  own guard.
+- **Bindings** are immutable copies of the matched value, scoped to the arm's
+  guards and body, shadow any outer name for that arm only, and are definitely
+  assigned on entry to the arm (the CFG models them as definitions on the edge
+  into the arm; each guard is a real two-way branch).
+- **The subject is evaluated once** and snapshotted; every header and guard
+  tests that one value.
+- **Exhaustiveness.** With no `otherwise` and no unguarded catch-all, an enum,
+  machine or `bool` subject must have every value covered by an **unguarded**
+  header (E093); a guarded arm never counts. An error value (`AnyErrorType`, an
+  open union) always needs `otherwise` or an unguarded `_` (E093). An `int`,
+  `string` or `char` subject, or a struct with a refutable pattern, may still
+  fall through to "no arm ran" (existing behaviour; changing it would be R1
+  breakage with no soundness gain). A struct pattern is irrefutable when every
+  field pattern is a binding, `_` or an irrefutable struct pattern; an
+  unguarded irrefutable header is a **catch-all**.
+- **Unreachable arms** (an arm, or `otherwise`, after an unguarded catch-all)
+  are warnings (E094), once per site. The pre-existing hard error for a
+  duplicate unguarded value pattern is kept (not relaxed to a warning: every
+  existing test depends on it, and relaxing it would buy nothing).
+- **`compare` stays a statement.** An expression form is FUTURE (F-14).
+- **Excluded from 2.0:** range patterns, `double` literal patterns, nested
+  or-patterns, enum payloads (plain enums stay ordinal-only), and error-variant
+  destructuring, which arrives with LEC-004 on top of the same machinery.
+- **Diagnostic contract (owner emphasis on hints, as §6.15).** Typed errors
+  with codes (E092 invalid pattern, E093 non-exhaustive compare, E094
+  unreachable arm) and a hint that names the concrete fix. No new
+  `SLM::ErrorCategory` and no `docs/slm/` files (§6.9).
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -704,6 +773,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-PKG-2** | A module is (package, path under `src/`). `import foo;` resolves to exactly one of {own module, **direct** dependency's root module, stdlib module}; more than one is a hard error naming every candidate, never silent shadowing, also in single-file mode. Internal modules are package-private. The manifest rejects unknown keys. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entries 2–4, DEC-9) |
 | **F-PKG-3** | Dependencies are `path` or `git` (`tag`/`rev`/`branch`) only; the root's `turf.lock` pins commit + SHA-256, verified on every build; one version per package name; `--offline`, `--locked`. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 5) |
 | **F-PKG-4** | A dependency's `unsafe module;` is honored only if the root manifest's `[unsafe] allow` names it (not transitive); the root package's own modules need no listing; the compiler enforces, the CLI only passes the bit. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 6) |
+| **F-PAT-1** | A top-level `matches <expr>:` keeps its meaning (equality; a bare identifier is a variable); destructuring forms (`_`, `Name { field: pattern, .. }`, guards `if`) are new syntax where a bare identifier BINDS. Arms are tried in source order, first matching header wins, the subject is evaluated once. `_` alone is reserved; `_name` is an identifier. A struct pattern lists every field or ends in `..`, and reads fields as `.field` does (visibility included). Bindings are immutable and arm-scoped. A guarded arm never counts toward exhaustiveness; enum/machine/`bool` subjects and open error unions are checked. | §6.17 above (`ROADMAP_v2.0.0.md` LEC-003, DEC-10) |
 
 ---
 
