@@ -53,9 +53,8 @@ layout and rules). Run these anywhere inside one; `turf` walks up to the nearest
 Dependencies are `path` dependencies for now. `fetch`, `update` (git
 dependencies, the cache and `turf.lock`) are stage 6 of LEC-001 and `test` is
 REL-002; each says so and exits 2. `publish` is reserved: there is no registry in
-2.0. The pre-2.0 registry-model command files (`cmd/turf/{install,update,
-publish}.go`, and `internal/legacymanifest`) are kept unused for stage 6 to
-rework.
+2.0. The pre-2.0 registry-model code (semver resolver, checksums, archives,
+`install`/`update`/`publish`) is deleted; it is in git history (`350acd8`).
 
 The manifest is read with `github.com/BurntSushi/toml`, the module's one
 dependency. `internal/manifest` validates it (unknown keys are errors) and

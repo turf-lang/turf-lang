@@ -14,9 +14,6 @@ var stubWhen = map[string]string{
 // stubCmd is a command whose name is frozen (FREEZE.md 6.16) but whose
 // behaviour is not built yet. It says so and exits 2, rather than being left
 // out (which would make the name look free to reuse) or half-working.
-//
-// The pre-2.0 turf-cli implementations of install/update/publish are still in
-// this package, unused: stage 6 reworks them, so they are not wired in.
 func stubCmd(name string) func([]string) int {
 	return func([]string) int {
 		return usagef("'%s' is not implemented yet (%s)", name, stubWhen[name])
