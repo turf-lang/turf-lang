@@ -67,6 +67,7 @@ static bool IsIdentifier(const std::string &S) {
 
 std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
                                              const std::string &EntryFile,
+                                             bool EntryIsModule,
                                              std::string &Error) {
   auto Fail = [&](const std::string &Msg) -> std::optional<PackageGraph> {
     Error = "package graph " + File + ": " + Msg;
@@ -185,5 +186,19 @@ std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
   if (Entry.empty() || !IsUnder(Entry, Root->SrcRoot))
     return Fail("the file being compiled (" + EntryFile + ") is not inside the root package's src " +
                 Root->SrcRoot);
+  // A package has ONE program entry point, src/main.tr (FREEZE.md 6.16's
+  // layout; owner decision 2026-09-30). Accepting any file under src/ as a
+  // program made "which file is the program?" a question each driver answered
+  // for itself, and let a helper module with a stray `fn main` be built as a
+  // second program. Any other file is a module, checked with --module.
+  if (!EntryIsModule) {
+    llvm::SmallString<256> Main(Root->SrcRoot);
+    llvm::sys::path::append(Main, "main.tr");
+    if (Entry != Canonical(Main.str().str()))
+      return Fail("in a package build the program's entry point is the root package's "
+                  "src/main.tr, not " + EntryFile +
+                  " (check another file of the package with --check --module; run a "
+                  "single file on its own without --package-graph)");
+  }
   return G;
 }

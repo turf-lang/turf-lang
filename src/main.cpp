@@ -1009,7 +1009,8 @@ static int runCompilerMain(int argc, char **argv) {
   // dependency.
   if (!opts.PackageGraphFile.empty()) {
     std::string GraphError;
-    auto Graph = LoadPackageGraph(opts.PackageGraphFile, opts.InputFile, GraphError);
+    auto Graph = LoadPackageGraph(opts.PackageGraphFile, opts.InputFile,
+                                  /*EntryIsModule=*/opts.Check && opts.CheckAsModule, GraphError);
     if (!Graph) {
       std::cerr << "Error: " << GraphError << "\n";
       return 1;

@@ -110,19 +110,37 @@ run build --package-graph g.json myapp/src/main.tr -o app
 expect_rc "two packages, two util modules" build 0
 [ -x app ] && { ./app; r=$?; [ $r = 21 ] || fail "two packages: program exited $r, expected 21"; }
 
-cat > myapp/src/flat.tr <<'EOF'
+# A package has one program entry point, the root's src/main.tr, so each case
+# below that needs a different program writes it there (as_main) and puts the
+# original back afterwards (restore_main). The case sources live outside src/,
+# where the package build would otherwise see them as modules.
+mkdir -p cases
+cp myapp/src/main.tr cases/main.orig.tr
+as_main() { cp "cases/$1" myapp/src/main.tr; }
+restore_main() { cp cases/main.orig.tr myapp/src/main.tr; }
+
+# Any other file is refused as the program, and accepted as a module.
+run notmain --package-graph g.json myapp/src/util.tr -o notmain
+expect_rc "a non-main.tr entry point" notmain 1
+expect_out "a non-main.tr entry point" notmain "the program's entry point is the root package's src/main.tr"
+run notmain_mod --check --module --package-graph g.json myapp/src/util.tr
+expect_rc "the same file checked as a module" notmain_mod 0
+
+cat > cases/flat.tr <<'EOF'
 import geometry::area;
 fn main(): int {
     return area();
 }
 EOF
-run flat --package-graph g.json myapp/src/flat.tr -o flat
+as_main flat.tr
+run flat --package-graph g.json myapp/src/main.tr -o flat
+restore_main
 expect_rc "flat import from a dependency" flat 0
 [ -x flat ] && { ./flat; r=$?; [ $r = 20 ] || fail "flat import: exited $r, expected 20"; }
 
 # A diamond: myapp -> plotter -> geometry and myapp -> geometry. geometry is
 # one package with one identity, loaded once.
-cat > myapp/src/diamond.tr <<'EOF'
+cat > cases/diamond.tr <<'EOF'
 import geometry;
 import plotter;
 fn main(): int {
@@ -133,7 +151,9 @@ graph gd.json '{"format": 1, "root": "myapp", "packages": {
   "myapp":    {"src": "myapp/src",    "deps": ["geometry", "plotter"]},
   "plotter":  {"src": "plotter/src",  "deps": ["geometry"]},
   "geometry": {"src": "geometry/src", "deps": []}}}'
-run diamond --package-graph gd.json myapp/src/diamond.tr -o diamond
+as_main diamond.tr
+run diamond --package-graph gd.json myapp/src/main.tr -o diamond
+restore_main
 expect_rc "diamond dependency" diamond 0
 [ -x diamond ] && { ./diamond; r=$?; [ $r = 20 ] || fail "diamond: exited $r, expected 20"; }
 
@@ -155,8 +175,10 @@ expect_out "transitive dependency" transitive "[E091]"
 expect_out "transitive dependency" transitive "'plotter' depends on it"
 expect_out "transitive dependency" transitive "Add 'geometry' to [dependencies]"
 
-printf 'import shapes;\nfn main(): int {\n    return 0;\n}\n' > myapp/src/internal.tr
-run internal --check --package-graph g.json myapp/src/internal.tr
+printf 'import shapes;\nfn main(): int {\n    return 0;\n}\n' > cases/internal.tr
+as_main internal.tr
+run internal --check --package-graph g.json myapp/src/main.tr
+restore_main
 expect_rc "another package's internal module" internal 1
 expect_out "another package's internal module" internal "[E091]"
 expect_out "another package's internal module" internal "internal to package 'geometry'"
@@ -172,14 +194,20 @@ rm myapp/src/geometry.tr
 # Not searched in a package build: the cwd. A stray module there must not be
 # found (single-file mode would find it).
 printf 'pub fn s(): int {\n    return 1;\n}\n' > stray.tr
-printf 'import stray;\nfn main(): int {\n    return stray::s();\n}\n' > myapp/src/stray_user.tr
-run stray --check --package-graph g.json myapp/src/stray_user.tr
+printf 'import stray;\nfn main(): int {\n    return stray::s();\n}\n' > cases/stray_user.tr
+as_main stray_user.tr
+run stray --check --package-graph g.json myapp/src/main.tr
+restore_main
 expect_rc "cwd is not searched" stray 1
 expect_out "cwd is not searched" stray "[E027]"
+# ...and the hint names the places a package build does look, not the cwd.
+expect_out "cwd is not searched" stray "In a project, \`import stray;\` names one of three things"
 
 # A dependency's private function: E088 names the package, not its identity.
-printf 'import geometry;\nfn main(): int {\n    return geometry::hidden();\n}\n' > myapp/src/priv.tr
-run priv --check --package-graph g.json myapp/src/priv.tr
+printf 'import geometry;\nfn main(): int {\n    return geometry::hidden();\n}\n' > cases/priv.tr
+as_main priv.tr
+run priv --check --package-graph g.json myapp/src/main.tr
+restore_main
 expect_rc "private function of a dependency" priv 1
 expect_out "private function of a dependency" priv "[E088]"
 expect_out "private function of a dependency" priv "is private to module 'geometry'"

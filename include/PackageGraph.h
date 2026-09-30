@@ -45,9 +45,13 @@ extern PackageGraph g_PackageGraph;
 /// Reads and validates a package-graph file. On failure returns std::nullopt
 /// and sets @p Error to a message naming the file and the problem; the caller
 /// reports it and stops, since no import can be resolved against a graph that
-/// is not well formed. @p EntryFile must lie inside the root package's src/.
+/// is not well formed. @p EntryFile must lie inside the root package's src/,
+/// and unless @p EntryIsModule (`--check --module`, checking a library's root
+/// module) it must be exactly the root package's src/main.tr: a package has
+/// one program entry point.
 std::optional<PackageGraph> LoadPackageGraph(const std::string &File,
                                              const std::string &EntryFile,
+                                             bool EntryIsModule,
                                              std::string &Error);
 
 #endif
