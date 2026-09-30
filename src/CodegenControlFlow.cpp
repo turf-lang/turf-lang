@@ -789,6 +789,12 @@ Value *ForEachExprAST::codegen() {
 //  Both paths guarantee no fall-through: every body always branches to MergeBB.
 //
 Value *CompareExprAST::codegen() {
+  // LEC-003: a struct pattern, `_` or a guard cannot be a switch/strcmp chain.
+  // Decided BEFORE the subject is evaluated -- the pattern lowering evaluates
+  // it itself, once, and this function must not have already done so.
+  if (needsPatternCodegen())
+    return codegenPatterns();
+
   // Codegen the subject exactly once
   Value *SubjectV = Subject->codegen();
   if (!SubjectV)
@@ -928,8 +934,15 @@ Value *CompareExprAST::codegen() {
             .raise();
         return nullptr;
       }
-      // Normalise to i64 width
-      APInt CaseVal = PatConst->getValue().sextOrTrunc(64);
+      // Normalise to i64 width. A bool pattern (`matches true:`) is an i1,
+      // and sign-extending it gives -1 while the subject above was widened
+      // with CastToType(), which zero-extends an i1 to 1 -- so `matches true:`
+      // used to never match (found by LEC-003 once bool compares became
+      // exhaustiveness-checked and so actually written). Zero-extend a 1-bit
+      // constant to agree with the subject.
+      APInt CaseVal = PatConst->getValue().getBitWidth() == 1
+                          ? PatConst->getValue().zext(64)
+                          : PatConst->getValue().sextOrTrunc(64);
       SI->addCase(
           llvm::cast<ConstantInt>(
               ConstantInt::get(Type::getInt64Ty(*TheContext), CaseVal)),
