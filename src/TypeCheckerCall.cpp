@@ -1555,6 +1555,54 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
 
 // ─── Structs & field access ───────────────────────────────────────────────────
 
+// The type a struct's field has for ONE instantiation of that struct.
+//
+// Substitutes the struct's own generic type parameter(s) into the field's
+// declared type -- e.g. `data: T*` on a List<Entry>-typed base must report
+// `Entry*`, not the bare, unsubstituted `T*`. Mirrors visitMethodCall()'s
+// identical Subst-recovery technique (scan every field for a
+// TurfGenericParamType/NamedType name -- see that function's own doc comment
+// for why the NamedType branch is a defensive fallback, not the common case,
+// since OVH-006). Without this, `someList.data[0].value`'s type came back as
+// the generic placeholder instead of the real field type, and something
+// depending on the real type downstream (e.g. `printline`'s overload pick)
+// silently chose the wrong one instead of erroring -- confirmed live: printed
+// a raw pointer bit pattern as a number instead of the actual string. Reuses
+// the same substituteReturnType() helper visitMethodCall() already uses for
+// return types. Then resolves a NamedType field type to the real registered
+// type, so chained access (a.b.c) and nested patterns propagate.
+//
+// Extracted from visitFieldAccess() for LEC-003: a struct pattern reads the
+// same fields and must see exactly the types `p.field` would, or
+// `matches Pair { a, b }` over a `Pair<int, string>` would bind `a` as the
+// bare `T`.
+TurfTypePtr TypeChecker::instantiatedFieldType(
+    const TurfStructType &STy, const std::vector<TurfTypePtr> &GenericTypeArgs,
+    TurfTypePtr FieldTy) {
+  if (FieldTy && !GenericTypeArgs.empty()) {
+    std::unordered_map<std::string, TurfTypePtr> Subst;
+    for (const auto &F : STy.getFields())
+      TypeWalk::collectOrderedFieldSubstitution(
+          F.Type, GenericTypeArgs, Subst,
+          [](const std::string &Name) {
+            return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
+          });
+    if (!Subst.empty())
+      FieldTy = substituteReturnType(FieldTy, Subst);
+  }
+
+  if (FieldTy) {
+    if (auto *NT = dynamic_cast<const NamedType *>(FieldTy.get())) {
+      if (GlobalSymbolTable) {
+        if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
+          FieldTy = R;
+      }
+    }
+  }
+  return FieldTy;
+}
+
+
 void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
   if (Node.getBase())
     const_cast<ExprAST *>(Node.getBase())->accept(*this);
@@ -1714,42 +1762,7 @@ void TypeChecker::visitFieldAccess(FieldAccessExprAST &Node) {
         }
       }
 
-      // Substitute this struct's own generic type parameter(s) into the
-      // field's declared type -- e.g. `data: T*` on a List<Entry>-typed
-      // base must report `Entry*`, not the bare, unsubstituted `T*`.
-      // Mirrors visitMethodCall()'s identical Subst-recovery technique
-      // (scan every field for a TurfGenericParamType/NamedType name --
-      // see that function's own doc comment for why the NamedType branch
-      // is a defensive fallback, not the common case, since OVH-006).
-      // Without this, `someList.data[0].value`'s type came back as the generic
-      // placeholder instead of the real field type, and something
-      // depending on the real type downstream (e.g. `printline`'s
-      // overload pick) silently chose the wrong one instead of erroring
-      // -- confirmed live: printed a raw pointer bit pattern as a number
-      // instead of the actual string. Reuses the same substituteReturnType()
-      // helper visitMethodCall() already uses for return types.
-      if (FieldTy && !GenericTypeArgs.empty()) {
-        std::unordered_map<std::string, TurfTypePtr> Subst;
-        for (const auto &F : STy->getFields())
-          TypeWalk::collectOrderedFieldSubstitution(
-              F.Type, GenericTypeArgs, Subst,
-              [](const std::string &Name) {
-                return GlobalSymbolTable && GlobalSymbolTable->LookupType(Name) != nullptr;
-              });
-        if (!Subst.empty())
-          FieldTy = substituteReturnType(FieldTy, Subst);
-      }
-
-      // Resolve NamedType field types so chained access (a.b.c) propagates
-      if (FieldTy) {
-        if (auto *NT = dynamic_cast<const NamedType *>(FieldTy.get())) {
-          if (GlobalSymbolTable) {
-            if (auto R = GlobalSymbolTable->LookupType(NT->getName()))
-              FieldTy = R;
-          }
-        }
-      }
-      setType(&Node, FieldTy);
+      setType(&Node, instantiatedFieldType(*STy, GenericTypeArgs, FieldTy));
       return;
     }
   }

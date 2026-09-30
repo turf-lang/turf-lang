@@ -642,6 +642,33 @@ private:
                                SourceLocation Loc, const std::string &Name,
                                const std::string &OwnerIdentity);
 
+  // ── Destructuring patterns (LEC-003, FREEZE.md §6.17) ──────────────────────
+
+  /// The type a field of @p STy has in ONE instantiation of that struct:
+  /// generic parameters substituted from @p GenericTypeArgs, a NamedType
+  /// resolved to its registered type. @p FieldTy is the field's declared type.
+  /// Shared by `p.field` (visitFieldAccess) and by struct patterns, so a
+  /// destructured field can never disagree with the same field read directly.
+  TurfTypePtr instantiatedFieldType(const TurfStructType &STy,
+                                    const std::vector<TurfTypePtr> &GenericTypeArgs,
+                                    TurfTypePtr FieldTy);
+
+  /// Types one pattern against the type @p Ty of the value it is matched
+  /// with, writing each binding's type and each struct pattern's field types
+  /// into the AST. Returns true if the pattern is IRREFUTABLE -- it matches
+  /// every value of @p Ty -- which is what makes an arm a catch-all.
+  ///
+  /// @p Where is the enclosing header's or field's location, for diagnostics
+  /// about a value sub-pattern (an expression has no location of its own).
+  /// @p ArmBindingTypes maps each name the arm's earlier headers bound to the
+  /// type it was bound at, so a name bound at two different types by two
+  /// stacked headers is caught. @p SelfSubject is true only for the top-level
+  /// subject `self`, the one raw pointer a pattern may look through (it is
+  /// never null, and field access exempts it the same way).
+  bool checkPattern(ExprAST *Pat, const TurfTypePtr &Ty, SourceLocation Where,
+                    std::unordered_map<std::string, TurfTypePtr> &ArmBindingTypes,
+                    bool SelfSubject = false);
+
   /// Whether we had at least one error during this pass.
   bool HadError_ = false;
 };

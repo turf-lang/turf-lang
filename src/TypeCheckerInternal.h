@@ -46,4 +46,11 @@ bool operatorSelfOperandMatches(const TurfType *ParamTy,
 bool isOrWrapsGenericParam(const TurfType *Ty);
 bool isFullyConcreteType(const TurfType *Ty);
 
+// LEC-003: defined in ResolverDecl.cpp and documented in Resolver.h (declared
+// here too so the TypeChecker needn't pull in the whole Resolver). True the
+// first time a warning of this kind is reported at this location in the
+// current compile -- the TypeChecker runs over every function body twice, and
+// a warning raised from it would otherwise print twice.
+bool FirstWarningAt(const std::string &Kind, const SourceLocation &Loc);
+
 #endif

@@ -1233,9 +1233,67 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
   // error), so nothing checkable here is being skipped.
   std::set<std::string> SeenPatternKeys;
 
+  // LEC-003 (FREEZE.md §6.17). Arms are tried in source order and the first
+  // header that matches wins, so one UNGUARDED header that matches every value
+  // (`_`, or a struct pattern whose fields all bind or ignore) makes every
+  // later arm, and `otherwise`, dead code. Remembered as the location of the
+  // first such header, to point the warning at.
+  std::optional<SourceLocation> CatchAllLoc;
+
+  // What the UNGUARDED headers cover, for the exhaustiveness check below:
+  // enum/machine variant names, or "true"/"false" for a bool subject. A
+  // guarded header is left out on purpose -- its guard may fail.
+  std::set<std::string> CoveredValues;
+
+  // The one raw pointer a pattern may look through is `self` (never null;
+  // field access exempts it the same way).
+  const bool SelfSubject = [&] {
+    const auto *V = dynamic_cast<const VariableExprAST *>(Node.getSubject());
+    return V && V->getName() == "self";
+  }();
+
   // 2. Type-check each arm's patterns and body
   for (auto &Arm : Node.getArmsMut()) {
-    for (auto &PatExpr : Arm.Values) {
+    if (CatchAllLoc && FirstWarningAt("unreachable-arm", Arm.Loc))
+      UnreachableArmWarning(Arm.Loc, "This arm", *CatchAllLoc).emit();
+
+    // A binding shadows anything of the same name for the whole arm. A `for`
+    // loop variable lives in LoopVarTypes_ and visitVariable() consults it
+    // BEFORE the resolved symbol, so it would otherwise win over the binding.
+    std::vector<std::pair<std::string, std::optional<TurfTypePtr>>> ShadowedLoopVars;
+    for (const auto &B : Arm.Bindings) {
+      auto It = LoopVarTypes_.find(B->Name);
+      ShadowedLoopVars.push_back(
+          {B->Name, It == LoopVarTypes_.end()
+                        ? std::nullopt
+                        : std::optional<TurfTypePtr>(It->second)});
+      if (It != LoopVarTypes_.end())
+        LoopVarTypes_.erase(It);
+    }
+
+    std::unordered_map<std::string, TurfTypePtr> ArmBindingTypes;
+    std::optional<SourceLocation> ArmCatchAllLoc;
+
+    for (size_t K = 0; K < Arm.Values.size(); ++K) {
+      auto &PatExpr = Arm.Values[K];
+      ExprAST *Guard = K < Arm.Guards.size() ? Arm.Guards[K].get() : nullptr;
+
+      // `_` and `Name { ... }` are the destructuring forms; everything else is
+      // the original equality pattern, checked below exactly as before.
+      const bool IsDestructuring =
+          dynamic_cast<WildcardPatternExprAST *>(PatExpr.get()) ||
+          dynamic_cast<StructPatternExprAST *>(PatExpr.get());
+
+      if (IsDestructuring) {
+        const bool Irrefutable =
+            checkPattern(PatExpr.get(), SubjectTy, Arm.Loc, ArmBindingTypes, SelfSubject);
+        if (Irrefutable && !Guard && !ArmCatchAllLoc) {
+          if (auto *W = dynamic_cast<WildcardPatternExprAST *>(PatExpr.get()))
+            ArmCatchAllLoc = W->getLoc();
+          else
+            ArmCatchAllLoc = static_cast<StructPatternExprAST *>(PatExpr.get())->getLoc();
+        }
+      } else {
       check(PatExpr.get());
       TurfTypePtr PatTy = getType(PatExpr.get());
 
@@ -1271,7 +1329,11 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
         PatternKey = "str:" + Str->getValue();
       }
 
-      if (PatternKey && !SeenPatternKeys.insert(*PatternKey).second) {
+      // A GUARDED header can legitimately repeat a value its guard makes
+      // conditional (`matches 1 if a:` then `matches 1 if b:`), so only an
+      // unguarded one is a duplicate -- and only an unguarded one is
+      // remembered for the next header to collide with.
+      if (PatternKey && !Guard && !SeenPatternKeys.insert(*PatternKey).second) {
         reportError(Arm.Loc,
                     "Duplicate 'matches' pattern: this value is already "
                     "handled by an earlier arm in this compare block, so "
@@ -1282,7 +1344,35 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
                     "`matches B:` sharing one body).",
                     "Duplicate pattern!");
       }
+
+      if (!Guard) {
+        if (auto *EA = dynamic_cast<ScopeAccessExprAST *>(PatExpr.get()))
+          CoveredValues.insert(EA->getVariant());
+        else if (auto *BL = dynamic_cast<BoolExprAST *>(PatExpr.get()))
+          CoveredValues.insert(BL->getVal() ? "true" : "false");
+      }
+      } // original equality pattern
+
+      // A guard is a plain condition, evaluated with the header's bindings in
+      // scope. Checked after the pattern so those bindings have their types.
+      if (Guard) {
+        check(Guard);
+        TurfTypePtr GuardTy = getType(Guard);
+        if (GuardTy && !GuardTy->isNamed("bool")) {
+          InvalidPatternError(
+              Arm.Loc,
+              "a guard must be a 'bool' condition, but this one has type '" +
+                  GuardTy->getName() + "'.",
+              "Write a comparison, e.g. `matches Point { x, y } if x == y:`.")
+              .raise();
+        }
+      }
     }
+
+    // Only once every header of THIS arm is read: the arm's own later headers
+    // are not shadowed by its first.
+    if (ArmCatchAllLoc && !CatchAllLoc)
+      CatchAllLoc = ArmCatchAllLoc;
 
     // Narrow a TurfMachineType-typed, plain-variable subject to one specific
     // state for the duration of this arm's body -- see MachineNarrowStack_'s
@@ -1311,43 +1401,76 @@ void TypeChecker::visitCompare(CompareExprAST &Node) {
 
     if (PushedNarrow)
       MachineNarrowStack_.pop_back();
+
+    // Hand the shadowed loop variables back.
+    for (auto &[Name, Saved] : ShadowedLoopVars)
+      if (Saved)
+        LoopVarTypes_[Name] = *Saved;
   }
 
   // 3. Type-check the 'otherwise' body if present
-  if (Node.getOtherBodyMut())
+  if (Node.getOtherBodyMut()) {
+    if (CatchAllLoc && FirstWarningAt("unreachable-arm", Node.getOtherLoc()))
+      UnreachableArmWarning(Node.getOtherLoc(), "The 'otherwise' arm", *CatchAllLoc).emit();
     check(Node.getOtherBodyMut());
+  }
 
-  // 4. Exhaustiveness gate for Enums
+  // 4. Exhaustiveness (FREEZE.md §6.17). With no `otherwise` and no header
+  //    that matches everything, an enum/machine or bool subject must have
+  //    every value covered by an UNGUARDED header, and an open error union
+  //    can never be -- it always needs an arm that takes the rest. An int or
+  //    string subject, or a struct with a refutable pattern, may still fall
+  //    through to "no arm ran" (existing behaviour; rejecting it would add
+  //    no soundness, only breakage).
   bool IsEnum = SubjectTy && SubjectTy->isEnum();
   Node.SubjectIsEnum = IsEnum;
 
   const TurfEnumType* ET = IsEnum
       ? dynamic_cast<const TurfEnumType*>(SubjectTy.get()) : nullptr;
 
-  if (ET && !Node.getOtherBody()) {
-      std::set<std::string> CoveredVariants;
-      for (auto &Arm : Node.getArms()) {
-          for (auto &PatExpr : Arm.Values) {
-              if (auto* EA = dynamic_cast<ScopeAccessExprAST*>(PatExpr.get()))
-                  CoveredVariants.insert(EA->getVariant());
-          }
-      }
-
+  bool Covered = false;
+  if (!Node.getOtherBody()) {
+    if (CatchAllLoc) {
+      Covered = true;
+    } else if (ET) {
       std::vector<std::string> Missing;
-      for (const auto& V : ET->getVariants())
-          if (!CoveredVariants.count(V))
-              Missing.push_back(V);
-
-      if (!Missing.empty()) {
-          std::string Msg = "Non-exhaustive enum comparison on '" + ET->getName()
-                          + "'.\nMissing variants:";
-          for (const auto& M : Missing)
-              Msg += "\n    " + ET->getName() + "::" + M;
-          reportError(Node.getLoc(), Msg, {},
-                      "Add 'otherwise:' to handle remaining variants.",
-                      "Non-exhaustive match!");
-      }
+      for (const auto &V : ET->getVariants())
+        if (!CoveredValues.count(V))
+          Missing.push_back(ET->getName() + "::" + V);
+      if (Missing.empty())
+        Covered = true;
+      else
+        NonExhaustiveCompareError(
+            Node.getLoc(), "enum comparison", ET->getName(), "Missing variants:",
+            Missing,
+            "Add an arm for each missing variant, or 'otherwise:' (or "
+            "`matches _:`) to handle the rest. A guarded arm doesn't count: "
+            "its guard may be false.")
+            .raise();
+    } else if (SubjectTy && SubjectTy->isNamed("bool")) {
+      std::vector<std::string> Missing;
+      for (const char *V : {"true", "false"})
+        if (!CoveredValues.count(V))
+          Missing.push_back(V);
+      if (Missing.empty())
+        Covered = true;
+      else
+        NonExhaustiveCompareError(
+            Node.getLoc(), "bool comparison", "bool", "Missing values:", Missing,
+            "Add `matches true:` and `matches false:` arms, or 'otherwise:' "
+            "to handle the rest. A guarded arm doesn't count: its guard may "
+            "be false.")
+            .raise();
+    } else if (SubjectTy && SubjectTy->isAnyError()) {
+      NonExhaustiveCompareError(
+          Node.getLoc(), "comparison", SubjectTy->getName(), "", {},
+          "An error value can be any error a callee might return, which "
+          "can't be listed. End the compare with 'otherwise:' (or `matches "
+          "_:`) to handle the ones you don't name.")
+          .raise();
+    }
   }
+  Node.Exhaustive = Covered;
 
   // 5. Empty compare{} warning was already emitted by the Parser
   setType(&Node, TurfVoid());
