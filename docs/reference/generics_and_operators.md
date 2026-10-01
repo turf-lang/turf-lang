@@ -412,6 +412,14 @@ nodes[0].v = 10;     // an element that is a `&T`/`T*`: the write goes through i
 
 The test is whether the destination is a *field or `self` of the returned
 copy*: `grid[i][j] = v` stores through a pointer inside the copy, `outer[0].push(v)`
-assigns `len` inside it. The method check uses the same conservative
-`MutatesSelf` scan as the immutable-variable check: a method that only changes
-its receiver by calling *another* mutating method is not detected.
+assigns `len` inside it. "Changes its receiver" means the method assigns to
+`self.<field>` itself, or calls (through any chain of `self.m()` calls) a method
+that does — the same answer the immutable-variable check uses, so
+`bs[0].wrapper()` is rejected when `wrapper` only calls `self.bump()`. Two
+limits: the check is conservative about overloads (a call counts only if every
+same-name, same-arity method it could mean mutates), and an assignment counts
+only if it lands in the struct's own value storage — `self.n = …`, `self.arr[i]
+= …`, `self.inner.f = …`, including inside `if`, `compare`, `defer` and loops.
+A write through a pointer or reference field does not (it changes the pointee),
+which is why `list.set(i, v)` stays callable on a copy. One case is not seen: a
+mutating method called on a value field (`self.inner.bump()`).

@@ -1095,7 +1095,9 @@ An `operator<T> ...` declaration is a `FuncDefExprAST` with non-empty
   spilled copy would lose the write. The TypeChecker therefore rejects every
   write into it (**E098**, `operatorIndexTemporaryRoot()` /
   `rejectOperatorTemporaryWrite()` in `TypeCheckerExpr.cpp`, called from
-  assignment, compound assignment, `++`/`--`, a `MutatesSelf` method call and a
+  assignment, compound assignment, `++`/`--`, a call to a method that mutates self (directly, or through `self.m()` calls —
+  `ResolverSymbolTable::mutatesSelfTransitively()`, whose call graph the Resolver
+  records during Pass 2) and a
   by-reference `[]=`), stopping at a pointer or reference base. The Codegen
   diagnostic in `AssignmentExprAST::codegen()` for the nested `[]=` shape is now
   an unreachable backstop. Do not add a new write path that calls

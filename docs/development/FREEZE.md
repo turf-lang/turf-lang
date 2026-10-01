@@ -833,7 +833,8 @@ changes. Full account: `docs/development/changes/LEC-006.md`.
   `l[i].method()` read it as an r-value. A write whose destination is a field of
   that copy, or `self` of a method that assigns to it, would be silently lost,
   so it is rejected: `bs[0].a = v`, `bs[0].a += v`, `bs[0].a++`,
-  `bs[0].bump()` (a `MutatesSelf` method), `outer[0].push(v)`, and a `[]=`
+  `bs[0].bump()` (a method that assigns to `self`, directly or through a chain
+  of `self.m()` calls), `outer[0].push(v)`, and a `[]=`
   whose container is declared `&T` applied to another `[]`'s result
   (`mm["a"]["b"] = v`). It stops at a pointer or reference: an element that is
   `&T`/`T*` is written through. `grid[i][j] = v` for a `List` is allowed — its
