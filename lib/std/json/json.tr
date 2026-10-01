@@ -299,33 +299,58 @@ fn stringify_object(v: JsonValue): string {
     return result;
 }
 
-// Escapes the handful of bytes JSON strings require escaped (`"`, `\`, and
-// the common control characters) -- see this file's header comment for
-// what's NOT handled (\uXXXX round-tripping).
-fn escape_string(s: string): string {
-    mut result: string = "";
+// escape_string: the body of a JSON string literal for `s` (WITHOUT the
+// surrounding quotes), for a caller assembling JSON text by hand -- an HTTP
+// handler splicing a user-supplied name into a response, say. `stringify`
+// uses it for every string it writes, so the two can never disagree.
+//
+// Escapes `"` and `\`, uses the short forms `\n \r \t \b \f`, and writes every
+// other control byte below 0x20 as `\u00XX`, because RFC 8259 forbids a raw
+// control character inside a string: the old version covered only
+// `" \ \n \r \t` and emitted invalid JSON for the rest. A byte >= 0x80 is
+// copied through untouched (UTF-8 passes through; `char` is a SIGNED byte, so
+// the `c >= 0` guard below is what keeps those bytes out of the control-
+// character branch). `/` is not escaped (permitted, not required).
+//
+// parse() does NOT read `\u00XX` back (the documented \uXXXX gap in this
+// file's header), so a string containing a control byte other than
+// `\n \r \t` does not round-trip through stringify/parse; the OUTPUT is valid
+// JSON, which is the part a caller splicing text into a response needs.
+// Linear: built through a StringBuilder, not `result = result + piece`.
+pub fn escape_string(s: string): string {
+    mut sb: strings::StringBuilder = strings::StringBuilder::default();
+    immut n: int = strings::length(s);
+    sb.reserve(n);
+    immut hex: string = "0123456789abcdef";
     mut i: int = 0;
-    mut n: int = strings::length(s);
     while i < n {
-        // FDN-004: `s[i]` is `char`; widen to `int` here so every
-        // comparison below can stay unchanged.
-        immut c: int = s[i] to int;
+        immut ch: char = strings::byte_at_unchecked(s, i);
+        // FDN-004: `char` is not a number; widen to `int` for the comparisons.
+        immut c: int = ch to int;
         if c == 34 { // '"'
-            result = result + "\\\"";
+            sb.append("\\\"");
         } elseif c == 92 { // '\'
-            result = result + "\\\\";
+            sb.append("\\\\");
         } elseif c == 10 { // '\n'
-            result = result + "\\n";
+            sb.append("\\n");
         } elseif c == 13 { // '\r'
-            result = result + "\\r";
+            sb.append("\\r");
         } elseif c == 9 { // '\t'
-            result = result + "\\t";
+            sb.append("\\t");
+        } elseif c == 8 { // backspace
+            sb.append("\\b");
+        } elseif c == 12 { // form feed
+            sb.append("\\f");
+        } elseif c >= 0 && c < 32 {
+            sb.append("\\u00");
+            sb.append_char(strings::byte_at_unchecked(hex, c / 16));
+            sb.append_char(strings::byte_at_unchecked(hex, c % 16));
         } else {
-            result = result + strings::substring(s, i, i + 1);
+            sb.append_char(ch);
         }
         i = i + 1;
     }
-    return result;
+    return sb.to_string();
 }
 
 // ─── parse ───────────────────────────────────────────────────────────────

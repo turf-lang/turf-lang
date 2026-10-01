@@ -81,6 +81,7 @@ unsafe module;
 
 import sys;
 import hashing;
+import list::List;
 
 pub struct Map<K, V> {
   keys: K*,
@@ -287,6 +288,36 @@ pub fn<K, V> Map.remove(key: K): void {
 
 pub fn<K, V> Map.length(): int {
   return self.len;
+}
+
+// ─── iteration (LEC-007) ────────────────────────────────────────────────────
+//
+// `keys`/`values` are private since LEC-002, which left a Map with no way to
+// enumerate it at all: a caller could look a key up but never ask which keys
+// exist. These return COPIES in the dense array's order -- insertion order
+// until the first remove(), then whatever swap-with-last compaction left (see
+// remove()). A copy rather than a view, so mutating the map while walking the
+// result can neither invalidate it nor reach the raw storage. keys()[i] and
+// values()[i] belong to the same entry as long as the map is not modified
+// between the two calls.
+pub fn<K, V> Map.keys(): List<K> {
+  mut out: List<K> = List::default();
+  mut i: int = 0;
+  while i < self.len {
+    out.push(self.keys[i]);
+    i = i + 1;
+  }
+  return out;
+}
+
+pub fn<K, V> Map.values(): List<V> {
+  mut out: List<V> = List::default();
+  mut i: int = 0;
+  while i < self.len {
+    out.push(self.values[i]);
+    i = i + 1;
+  }
+  return out;
 }
 
 // ─── operator[] / operator[]= (LANG-001) ────────────────────────────────────
