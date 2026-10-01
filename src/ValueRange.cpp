@@ -1,5 +1,6 @@
 #include "ValueRange.h"
 #include "AST.h"
+#include "ASTChildWalker.h"
 #include "Errors.h"
 
 #include "llvm/ADT/APInt.h"
@@ -311,57 +312,40 @@ static std::optional<long long> evalConstExprElidable(
 // sees the entire function body) collecting every VariableSymbol whose
 // address is taken anywhere at all, conservatively: this pass never tries
 // to reason about what happens to the reference afterward, only whether
-// one was ever formed. Mirrors runOnCFG()'s own checkAccesses() traversal
-// coverage (same node kinds), since that is this codebase's established
-// answer for "what can appear inside one CFG statement."
+// one was ever formed.
+//
+// An ASTChildWalker (LEC-005, INV-LINT-1), because here a node the walk does
+// not reach is not a missed warning but a MISCOMPILE: an unseen `&x` leaves
+// `x` looking never-aliased, so a range fact about it survives a call that
+// changes it, and a bounds/overflow check is elided with no fallback.
+// This was a hand-written chain of dynamic_casts with no branch for
+// `recover`, `defer`, `unsafe`, `compare`, do-while or for-each -- confirmed
+// live, `mutate(&i) recover run { ... }; return a[i];` with `i` set to 99
+// through the reference read `a[99]` of a 3-element array with no check and
+// exit 0 -- LEC-004 had already hit the same hole once for `try` and patched
+// that one node. Every node kind is now reached by construction.
+namespace {
+class AddressTakenCollector : public ASTChildWalker {
+  std::unordered_set<const VariableSymbol *> &Out;
+
+public:
+  explicit AddressTakenCollector(std::unordered_set<const VariableSymbol *> &Out)
+      : Out(Out) {}
+
+  void visitAddressOf(AddressOfExprAST &Node) override {
+    if (auto *V = dynamic_cast<const VariableExprAST *>(Node.getOperand()))
+      if (const VariableSymbol *S = V->getResolvedSymbol())
+        Out.insert(S);
+    ASTChildWalker::visitAddressOf(Node); // `&f(&x)`: the inner one counts too
+  }
+};
+} // namespace
+
 static void collectAddressTaken(const ExprAST *N,
                                 std::unordered_set<const VariableSymbol *> &Out) {
   if (!N) return;
-  if (auto *Addr = dynamic_cast<const AddressOfExprAST *>(N)) {
-    if (auto *V = dynamic_cast<const VariableExprAST *>(Addr->getOperand())) {
-      if (const VariableSymbol *S = V->getResolvedSymbol()) Out.insert(S);
-    }
-    collectAddressTaken(Addr->getOperand(), Out);
-    return;
-  }
-  if (auto B = dynamic_cast<const BinaryExprAST *>(N)) { collectAddressTaken(B->getLHS(), Out); collectAddressTaken(B->getRHS(), Out); }
-  else if (auto U = dynamic_cast<const UnaryExprAST *>(N)) collectAddressTaken(U->getOperand(), Out);
-  // LEC-004: `try f(&x)` forms a reference to `x` just as `f(&x)` does, and
-  // `try` is the idiomatic way to call a fallible function -- without this,
-  // `x` would not count as address-taken and a range fact about it could
-  // survive a call that changes it.
-  else if (auto Tr = dynamic_cast<const TryExprAST *>(N)) collectAddressTaken(Tr->getOperand(), Out);
-  else if (auto A = dynamic_cast<const AssignmentExprAST *>(N)) { collectAddressTaken(A->getRHS(), Out); collectAddressTaken(A->getLHS(), Out); }
-  else if (auto Vd = dynamic_cast<const VarDeclExprAST *>(N)) collectAddressTaken(Vd->getInitializer(), Out);
-  else if (auto If = dynamic_cast<const IfExprAST *>(N)) {
-    for (const auto &Br : If->getBranches()) { collectAddressTaken(Br.Cond.get(), Out); collectAddressTaken(Br.Body.get(), Out); }
-    collectAddressTaken(If->getElse(), Out);
-  } else if (auto Bl = dynamic_cast<const BlockExprAST *>(N)) {
-    for (const auto &E2 : Bl->getExpressions()) collectAddressTaken(E2.get(), Out);
-  } else if (auto F = dynamic_cast<const FuncCallExprAST *>(N)) {
-    for (const auto &Arg : F->getArgs()) collectAddressTaken(Arg.get(), Out);
-    collectAddressTaken(F->getCallee(), Out);
-  } else if (auto ArrA = dynamic_cast<const ArrayAccessExprAST *>(N)) {
-    collectAddressTaken(ArrA->getBase(), Out); collectAddressTaken(ArrA->getIndex(), Out);
-  } else if (auto R = dynamic_cast<const ReturnExprAST *>(N)) {
-    collectAddressTaken(R->getVal(), Out);
-  } else if (auto CA = dynamic_cast<const CompoundAssignmentExprAST *>(N)) {
-    collectAddressTaken(CA->getLHS(), Out); collectAddressTaken(CA->getRHS(), Out);
-  } else if (auto P = dynamic_cast<const PostfixExprAST *>(N)) {
-    collectAddressTaken(P->getOperand(), Out);
-  } else if (auto M = dynamic_cast<const MethodCallExprAST *>(N)) {
-    collectAddressTaken(M->getBase(), Out);
-    for (const auto &Arg : M->getArgs()) collectAddressTaken(Arg.get(), Out);
-  } else if (auto FA = dynamic_cast<const FieldAccessExprAST *>(N)) {
-    collectAddressTaken(FA->getBase(), Out);
-  } else if (auto AL = dynamic_cast<const ArrayLiteralExprAST *>(N)) {
-    for (const auto &E2 : AL->getElements()) collectAddressTaken(E2.get(), Out);
-  } else if (auto AD = dynamic_cast<const ArrayDeclExprAST *>(N)) {
-    for (const auto &E2 : AD->getInitList()) collectAddressTaken(E2.get(), Out);
-    if (AD->getInitExpr()) collectAddressTaken(AD->getInitExpr().get(), Out);
-  } else if (auto C = dynamic_cast<const CastExprAST *>(N)) {
-    collectAddressTaken(C->getOperand(), Out);
-  }
+  AddressTakenCollector Collector(Out);
+  const_cast<ExprAST *>(N)->accept(Collector);
 }
 
 // The dataflow transfer for one top-level CFG statement -- shared by both
