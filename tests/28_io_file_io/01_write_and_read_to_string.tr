@@ -12,8 +12,11 @@ extern fn remove(path: string): int;
 fn main(): int {
     immut path: string = "01_write_and_read_to_string.tmp";
 
-    immut ok: bool = io::write_string(path, "hello from turf\nsecond line\n");
-    test::assert(ok, "write_string should report success on a writable path");
+    // write_string is `!void` (LEC-007; it returned bool): the recover block
+    // runs only on failure, so reaching the next line is the success check.
+    io::write_string(path, "hello from turf\nsecond line\n") recover run {
+        test::fail("write_string should report success on a writable path");
+    };
 
     immut content: string = io::read_to_string(path) recover run {
         test::fail("read_to_string should succeed right after write_string wrote the file");

@@ -47,18 +47,32 @@ test::assert(fs::is_absolute("/etc/hosts"), "");
 
 Real `extern fn` bindings.
 
-### `mkdir(path: string): bool`
+All three return `!void` and fail with an `FsError` variant that carries the
+path (`matches fs::FsError::MkdirFailed(path):`). **Changed in 2.0 (LEC-007):**
+they returned `bool`, which could not say which operation failed or on what.
 
-Creates a directory with mode `0755`. Returns `true` on success.
+```turflang
+error FsError {
+    MkdirFailed(path: string),
+    RemoveFileFailed(path: string),
+    RemoveDirFailed(path: string),
+}
+```
 
-### `remove_file(path: string): bool`
+### `mkdir(path: string): !void`
 
-Deletes a file (`remove(2)`).
+Creates a directory with mode `0755`. `FsError::MkdirFailed(path)` if the
+parent is missing, `path` exists, or permission is denied.
 
-### `remove_dir(path: string): bool`
+### `remove_file(path: string): !void`
+
+Deletes a file (`remove(2)`). `FsError::RemoveFileFailed(path)`.
+
+### `remove_dir(path: string): !void`
 
 Removes a directory — **only if it's empty** (`rmdir(2)`'s own restriction,
-not additionally checked/worked around here).
+not additionally checked/worked around here). `FsError::RemoveDirFailed(path)`,
+including when the directory is not empty.
 
 ### `is_dir(path: string): bool`
 
@@ -69,7 +83,7 @@ this compiler can't bind an arbitrary C struct's field layout (see
 and `opendir` succeeding is a sufficient, simpler test.
 
 ```turflang
-fs::mkdir("scratch");
+fs::mkdir("scratch") recover run { test::fail("mkdir"); };
 test::assert(fs::is_dir("scratch"), "");
-fs::remove_dir("scratch");
+fs::remove_dir("scratch") recover run { test::fail("rmdir"); };
 ```

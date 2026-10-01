@@ -134,6 +134,7 @@ pub fn input(): string {
 pub error FileError {
     NotFound(path: string),
     ReadFailed(path: string),
+    WriteFailed(path: string),
 }
 
 // ─── read_to_string ───────────────────────────────────────────────────────
@@ -216,22 +217,30 @@ pub fn read_lines(path: string): !List<string> {
 // ─── write_string ─────────────────────────────────────────────────────────
 
 // write_string: writes `content` to the file at `path`, overwriting it if
-// it already exists (creating it if not). Returns true on success, false
-// on any failure (can't open the path, or a short write) -- a plain bool
-// rather than `!void`, since "did the write succeed" is a simple binary
-// outcome here, not something callers typically need to distinguish
-// further.
-pub fn write_string(path: string, content: string): bool {
+// it already exists (creating it if not). Returns `!void`:
+// FileError::WriteFailed(path) if the path can't be opened for writing (a
+// missing directory, no permission) or the write comes up short.
+//
+// This returned a bare `bool` until LEC-007. That broke the module's own
+// rule -- read_to_string / read_lines report a failure on the same file as
+// `!T` carrying the path -- and a caller with a bool had no way to say which
+// of several writes failed. A failed write is input-dependent, not a
+// programming error, so it is `!void` and not a panic (the stdlib rule is in
+// docs/reference/stdlib/README.md).
+pub fn write_string(path: string, content: string): !void {
     mut stream: void* = fopen(path, "wb");
     if stream == null {
-        return false;
+        return FileError::WriteFailed(path);
     }
 
     immut n: int = strlen(content);
     immut written: int = fwrite(content, 1, n, stream);
     fclose(stream);
 
-    return written == n;
+    if written != n {
+        return FileError::WriteFailed(path);
+    }
+    return;
 }
 
 // ─── exists ────────────────────────────────────────────────────────────────

@@ -1,0 +1,27 @@
+// LEC-007: io::write_string returns `!void` and fails with
+// FileError::WriteFailed(path) -- it returned a bare bool before, while the
+// read functions on the same file already reported `!T` carrying the path.
+// The failure is real (a directory that does not exist), and WriteFailed is
+// told apart from the read-side variants.
+import io;
+import test;
+
+fn write_failure_path(path: string): string {
+    io::write_string(path, "data") recover as err run {
+        compare err {
+            matches io::FileError::WriteFailed(p):
+                return p;
+            done
+            otherwise:
+                return "wrong variant";
+        }
+    };
+    return "";
+}
+
+fn main(): int {
+    immut bad: string = "/definitely/not/a/dir/out.txt";
+    test::assert(write_failure_path(bad) == bad, "WriteFailed carries the path that could not be written");
+    test::assert(!io::exists(bad), "and nothing was created");
+    return 0;
+}

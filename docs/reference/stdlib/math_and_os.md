@@ -121,13 +121,15 @@ test::assert(os::env("TURF_TEST_DEFINITELY_UNSET_VAR_239") == "",
              "reading an unset environment variable returns \"\", not a null crash");
 ```
 
-### `set_env(name: string, value: string, overwrite: int): bool`
+### `error OsError { SetEnvFailed(name: string) }` / `set_env(name: string, value: string, overwrite: int): !void`
 
 Wraps `setenv`. `overwrite` is a C-style int flag: `0` means do not clobber
-an existing value, nonzero means overwrite it. Returns `true` on success.
+an existing value (and still succeeds), nonzero means overwrite it. Fails
+with `OsError::SetEnvFailed(name)` for a name `setenv` rejects (empty, or
+containing `=`). **Changed in 2.0 (LEC-007):** this returned `bool`.
 
 ```turflang
-immut set_ok: bool = os::set_env("TURF_TEST_VAR_239", "hello", 1);
+os::set_env("TURF_TEST_VAR_239", "hello", 1) recover run { test::fail("set_env"); };
 os::set_env("TURF_TEST_VAR_239", "should_not_overwrite", 0); // no-op, value stays "hello"
 os::set_env("TURF_TEST_VAR_239", "updated", 1);              // clobbers -> "updated"
 ```

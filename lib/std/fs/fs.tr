@@ -129,23 +129,43 @@ pub fn is_absolute(path: string): bool {
 
 // ─── Turf-level helpers (directories) ───────────────────────────────────────
 
+// One variant per operation, each carrying the path it failed on -- the same
+// shape as io::FileError, so `matches fs::FsError::MkdirFailed(p):` reads the
+// path and `err == fs::FsError::MkdirFailed` still compares the variant.
+// These three returned a bare `bool` until LEC-007; the reasoning is on
+// io::write_string, which had the same defect.
+pub error FsError {
+    MkdirFailed(path: string),
+    RemoveFileFailed(path: string),
+    RemoveDirFailed(path: string),
+}
+
 // mkdir: creates the directory at `path` with permissions 0755
-// (rwxr-xr-x). Returns true on success, false on failure (e.g. the parent
-// doesn't exist, or `path` already exists).
-pub fn mkdir(path: string): bool {
-    return mkdir(path, 493 to int32) == (0 to int32); // 493 == 0755 octal
+// (rwxr-xr-x). Fails with FsError::MkdirFailed(path) if the parent doesn't
+// exist, `path` already exists, or the process lacks permission.
+pub fn mkdir(path: string): !void {
+    if mkdir(path, 493 to int32) != (0 to int32) { // 493 == 0755 octal
+        return FsError::MkdirFailed(path);
+    }
+    return;
 }
 
-// remove_file: deletes the file at `path`. Returns true on success. Does
-// NOT remove directories -- use remove_dir for those.
-pub fn remove_file(path: string): bool {
-    return remove(path) == (0 to int32);
+// remove_file: deletes the file at `path`. Does NOT remove directories --
+// use remove_dir for those. Fails with FsError::RemoveFileFailed(path).
+pub fn remove_file(path: string): !void {
+    if remove(path) != (0 to int32) {
+        return FsError::RemoveFileFailed(path);
+    }
+    return;
 }
 
-// remove_dir: removes the EMPTY directory at `path`. Returns true on
-// success, false on failure -- including when the directory is not empty.
-pub fn remove_dir(path: string): bool {
-    return rmdir(path) == (0 to int32);
+// remove_dir: removes the EMPTY directory at `path`. Fails with
+// FsError::RemoveDirFailed(path) -- including when the directory is not empty.
+pub fn remove_dir(path: string): !void {
+    if rmdir(path) != (0 to int32) {
+        return FsError::RemoveDirFailed(path);
+    }
+    return;
 }
 
 // is_dir: true if `path` names a directory that can be opened. Uses the

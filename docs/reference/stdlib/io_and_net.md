@@ -54,7 +54,7 @@ io::printline("Hello, " + name + "!");
 ### File I/O: `error FileError`, `read_to_string`, `read_lines`, `write_string`, `exists`
 
 ```turflang
-error FileError { NotFound(path: string), ReadFailed(path: string) }
+error FileError { NotFound(path: string), ReadFailed(path: string), WriteFailed(path: string) }
 ```
 
 Each variant carries the path it failed on: `matches io::FileError::NotFound(path):`
@@ -68,13 +68,19 @@ compares the variant only.
   newline split, with exactly one spurious trailing empty element (caused
   by the file's own final `\n`) dropped; a genuine blank line before EOF is
   preserved.
-- **`write_string(path: string, content: string): bool`** — opens `"wb"`,
-  writes, closes. `true` iff the write was complete.
+- **`write_string(path: string, content: string): !void`** — opens `"wb"`,
+  writes, closes. `FileError::WriteFailed(path)` if the path can't be opened
+  for writing (missing directory, no permission) or the write is short.
+  **Changed in 2.0 (LEC-007):** this returned `bool`; use
+  `io::write_string(p, s) recover run { ... };` to handle failure.
 - **`exists(path: string): bool`** — `true` if the path can be opened for
   reading.
 
 ```turflang
-io::write_string("notes.txt", "hello\nworld\n");
+io::write_string("notes.txt", "hello\nworld\n") recover run {
+    io::eprintline("could not write notes.txt");
+    sys::exit(1);
+};
 immut content: string = io::read_to_string("notes.txt") recover produce "";
 test::assert(io::exists("notes.txt"), "...");
 ```
