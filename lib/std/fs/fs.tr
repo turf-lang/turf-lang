@@ -72,22 +72,9 @@ extern fn closedir(d: ptr): int32;
 
 // ─── Turf-level helpers (path strings) ──────────────────────────────────────
 
-// last_index_of_char: the byte offset of the last occurrence of the byte
-// `ch` in `s`, or -1 if it doesn't appear. Internal helper -- strings.tr
-// only has a forward `index_of`, and dirname/basename/extension below all
-// need to search from the end.
-fn last_index_of_char(s: string, ch: int): int {
-    mut i: int = strings::length(s) - 1;
-    while i >= 0 {
-        // FDN-004: `s[i]` is `char`; widen to `int` before comparing with
-        // the `int` parameter (no implicit char<->numeric conversion).
-        if (s[i] to int) == ch {
-            return i;
-        }
-        i = i - 1;
-    }
-    return 0 - 1;
-}
+// dirname/basename/extension below all search from the end of the path, via
+// strings::last_index_of (this module used to carry a private
+// `last_index_of_char` for that; LEC-007 made the general version public).
 
 // join: joins path segments `a` and `b` with exactly one `/` between them --
 // no `//` if `a` already ends in `/`, no missing separator if it doesn't.
@@ -102,7 +89,7 @@ pub fn join(a: string, b: string): string {
 // contains no `/` at all, or "/" if the last `/` is the very first byte
 // (e.g. "/file.txt" -> "/", matching POSIX dirname's own root-path case).
 pub fn dirname(path: string): string {
-    immut idx: int = last_index_of_char(path, 47); // '/'
+    immut idx: int = strings::last_index_of(path, "/");
     if idx == (0 - 1) {
         return ".";
     }
@@ -115,7 +102,7 @@ pub fn dirname(path: string): string {
 // basename: everything after the last `/` in `path`. Returns `path`
 // unchanged if it contains no `/` at all.
 pub fn basename(path: string): string {
-    immut idx: int = last_index_of_char(path, 47); // '/'
+    immut idx: int = strings::last_index_of(path, "/");
     if idx == (0 - 1) {
         return path;
     }
@@ -128,7 +115,7 @@ pub fn basename(path: string): string {
 // very first byte of the basename counts.
 pub fn extension(path: string): string {
     immut b: string = basename(path);
-    immut idx: int = last_index_of_char(b, 46); // '.'
+    immut idx: int = strings::last_index_of(b, ".");
     if idx == (0 - 1) || idx == 0 {
         return "";
     }

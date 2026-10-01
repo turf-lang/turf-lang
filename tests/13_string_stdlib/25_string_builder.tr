@@ -1,0 +1,72 @@
+// tests/13_string_stdlib/25_string_builder.tr
+// LEC-007: strings::StringBuilder, the incremental-construction half of the
+// frozen "a string is an immutable C pointer" decision (FREEZE.md §6.14).
+// Covers every public method, growth across several doublings, the
+// independence of a to_string() copy from later appends, reuse after clear(),
+// and the empty builder (no buffer allocated yet).
+
+import strings;
+import test;
+
+fn main(): int {
+    mut sb: strings::StringBuilder = strings::StringBuilder::default();
+
+    // Empty builder: no buffer yet, but still a valid (empty) string.
+    test::assert(sb.length() == 0, "fresh builder is empty");
+    test::assert(sb.to_string() == "", "fresh builder converts to \"\"");
+    sb.clear();
+    test::assert(sb.to_string() == "", "clear() on a never-used builder is harmless");
+
+    sb.append("hello");
+    sb.append_char(' ');
+    sb.append("world");
+    test::assert(sb.length() == 11, "length counts every appended byte");
+    test::assert(sb.to_string() == "hello world", "append / append_char / append");
+
+    // Appending the empty string and a zero-length builder is a no-op.
+    sb.append("");
+    test::assert(sb.length() == 11, "append(\"\") adds nothing");
+
+    // to_string() is a copy: later appends must not change a string already
+    // handed out (a `string` stays immutable to whoever holds it).
+    immut snapshot: string = sb.to_string();
+    sb.append("!!!");
+    test::assert(snapshot == "hello world", "an earlier to_string() is not mutated by append");
+    test::assert(sb.to_string() == "hello world!!!", "the builder kept growing");
+
+    // clear() empties it, and the buffer is reusable.
+    sb.clear();
+    test::assert(sb.length() == 0, "clear() resets the length");
+    test::assert(sb.to_string() == "", "clear() leaves an empty string");
+    sb.append("again");
+    test::assert(sb.to_string() == "again", "reused after clear()");
+
+    // Growth: 16 -> 32 -> 64 -> ... Check content, not just length, so a
+    // realloc that dropped or reordered bytes cannot pass.
+    mut big: strings::StringBuilder = strings::StringBuilder::default();
+    mut i: int = 0;
+    while i < 1000 {
+        big.append("0123456789");
+        big.append_char('|');
+        i = i + 1;
+    }
+    test::assert(big.length() == 11000, "1000 x 11 bytes");
+    immut out: string = big.to_string();
+    test::assert(strings::length(out) == 11000, "converted length matches");
+    test::assert(strings::starts_with(out, "0123456789|0123456789|"), "first pieces intact");
+    test::assert(strings::ends_with(out, "0123456789|"), "last piece intact");
+    test::assert(strings::count_char(out, 124) == 1000, "one '|' per iteration, none lost to a realloc");
+
+    // reserve() up front, then fill exactly: no growth needed, same result.
+    mut r: strings::StringBuilder = strings::StringBuilder::default();
+    r.reserve(5000);
+    mut k: int = 0;
+    while k < 5000 {
+        r.append_char('z');
+        k = k + 1;
+    }
+    test::assert(r.length() == 5000, "reserved builder filled to its reservation");
+    test::assert(strings::length(r.to_string()) == 5000, "and converts to a 5000-byte string");
+
+    return 0;
+}

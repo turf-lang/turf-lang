@@ -1,0 +1,30 @@
+// tests/13_string_stdlib/27_str_last_index_of.tr
+// LEC-007: strings::last_index_of, promoted from fs.tr's private
+// `last_index_of_char` and generalised from one byte to a substring.
+
+import strings;
+import test;
+
+fn main(): int {
+    test::assert(strings::last_index_of("a/b/c", "/") == 3, "last of two slashes");
+    test::assert(strings::last_index_of("abc", "/") == -1, "absent -> -1");
+    test::assert(strings::last_index_of("", "/") == -1, "empty haystack -> -1");
+    test::assert(strings::last_index_of("/abc", "/") == 0, "only occurrence at byte 0");
+    test::assert(strings::last_index_of("abc/", "/") == 3, "occurrence at the last byte");
+
+    // A multi-byte needle, overlapping candidates, and the whole string.
+    test::assert(strings::last_index_of("abcabcabc", "abc") == 6, "last of three");
+    test::assert(strings::last_index_of("aaaa", "aa") == 2, "overlapping: last start, not last non-overlapping");
+    test::assert(strings::last_index_of("abc", "abc") == 0, "needle == haystack");
+    test::assert(strings::last_index_of("ab", "abc") == -1, "needle longer than haystack");
+
+    // The empty needle matches at the end, mirroring index_of("") == 0.
+    test::assert(strings::last_index_of("abc", "") == 3, "empty needle -> strlen");
+    test::assert(strings::index_of("abc", "") == 0, "index_of(\"\") is the documented mirror");
+
+    // It agrees with index_of when there is exactly one occurrence.
+    test::assert(strings::last_index_of("hello world", "world") == strings::index_of("hello world", "world"),
+                 "single occurrence: first == last");
+
+    return 0;
+}

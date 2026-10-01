@@ -1,0 +1,50 @@
+// tests/13_string_stdlib/26_str_building_is_linear.tr
+// LEC-007: repeat / replace / join were all `result = result + piece` loops,
+// i.e. O(n^2): every pass re-copied the whole accumulated string.
+//
+// The repeat size is the one that carries the timing assertion. Measured
+// 2026-10-01 with the old loop shape (`result = result + "ab"`): 200,000
+// pieces took 1.9 s and 600,000 took 23 s, against the runner's 5 s
+// per-test limit (TURF_TEST_TIMEOUT_SEC) -- so a regression back to
+// concatenation fails here as a TIMEOUT, while the builder takes
+// milliseconds. The replace/join sizes are not calibrated that way; they are
+// content checks at a size where an off-by-one in the buffer growth shows up.
+
+import strings;
+import list::List;
+import test;
+
+fn main(): int {
+    // repeat: 600,000 x "ab" = 1,200,000 bytes.
+    immut r: string = strings::repeat("ab", 600000);
+    test::assert(strings::length(r) == 1200000, "repeat length");
+    test::assert(strings::starts_with(r, "abab"), "repeat start");
+    test::assert(strings::ends_with(r, "abab"), "repeat end");
+    test::assert(strings::repeat("x", 0) == "", "repeat 0 -> \"\"");
+    test::assert(strings::repeat("x", -3) == "", "repeat negative -> \"\"");
+    test::assert(strings::repeat("", 1000) == "", "repeat of \"\" -> \"\"");
+
+    // replace: 20,000 matches in a 100,000-byte string, changing the length.
+    immut src: string = strings::repeat("a,b,c,d,e,", 10000);
+    immut swapped: string = strings::replace(src, ",", "::");
+    test::assert(strings::length(src) == 100000, "source length");
+    test::assert(strings::length(swapped) == 100000 + 50000, "each of 50,000 commas grew by 1 byte");
+    test::assert(strings::starts_with(swapped, "a::b::c::d::e::a::"), "replace start");
+    test::assert(strings::count_char(swapped, 44) == 0, "no comma survived");
+    // Deleting every match shrinks it back to the letters.
+    test::assert(strings::length(strings::replace(src, ",", "")) == 50000, "replace with \"\"");
+
+    // join: 20,000 items.
+    mut items: List<string> = List::default();
+    mut i: int = 0;
+    while i < 20000 {
+        items.push("item");
+        i = i + 1;
+    }
+    immut joined: string = strings::join(items, ", ");
+    test::assert(strings::length(joined) == 20000 * 4 + 19999 * 2, "join length");
+    test::assert(strings::starts_with(joined, "item, item, item"), "join start");
+    test::assert(strings::ends_with(joined, ", item"), "join end has no trailing separator");
+
+    return 0;
+}

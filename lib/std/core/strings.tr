@@ -124,6 +124,118 @@ pub fn byte_at_unchecked(s: string, i: int): char {
     return p[i];
 }
 
+// ─── StringBuilder ──────────────────────────────────────────────────────────
+//
+// Incremental string construction in amortised O(1) per appended byte
+// (LEC-007, FREEZE.md §6.14 / F-STD-3). A `string` is an immutable
+// NUL-terminated pointer, so `s = s + piece` allocates and copies the whole
+// accumulated string every time: building n bytes a piece at a time is
+// O(n^2). The frozen decision to keep `string` a C pointer rests on there
+// being a builder for exactly that job, so this is the thing that makes the
+// decision honest. `repeat`, `replace` and `join` below are built on it; use
+// it directly whenever a loop appends to a string.
+//
+//   mut sb: strings::StringBuilder = strings::StringBuilder::default();
+//   sb.append("a");
+//   sb.append_char('b');
+//   immut s: string = sb.to_string();   // "ab"
+//
+// The buffer always holds a NUL terminator one past `len`, so a failed
+// `to_string()` can never hand back an unterminated string. Every field is
+// private: `buf` is a raw buffer whose NUL invariant only these methods
+// maintain, and `cap` would let a caller claim room that is not there.
+// `to_string()` returns a COPY, so appending afterwards never changes a
+// string already handed out -- a `string` stays immutable to its holders.
+//
+// Reads of the appended `s` go through byte_at_unchecked: `append` has
+// already taken `strlen(s)` once, so the per-byte `strlen` that FDN-004's
+// bounds-checked `s[i]` would add is pure waste (and would make the loop
+// quadratic again at -O0).
+pub struct StringBuilder {
+    buf: string,
+    len: int,
+    cap: int
+}
+
+// reserve: guarantees room for `extra` more bytes (plus the terminator)
+// without another allocation. Growth doubles from 16, so a caller that knows
+// the final size (repeat() does) can pay for one allocation, and one that
+// does not still gets amortised O(1) appends. A negative `extra` is a
+// programming error, not a request to shrink.
+@caller_location
+pub fn StringBuilder.reserve(extra: int): void {
+    if extra < 0 {
+        sys::panic(caller_location + ": StringBuilder.reserve: negative size");
+    }
+    immut need: int = self.len + extra + 1;
+    if need <= self.cap {
+        return;
+    }
+    mut new_cap: int = self.cap;
+    if new_cap < 16 {
+        new_cap = 16;
+    }
+    while new_cap < need {
+        new_cap = new_cap * 2;
+    }
+    if self.cap == 0 {
+        self.buf = gc_alloc(new_cap) to string;
+        self.buf[0] = 0 to char;
+    } else {
+        self.buf = gc_realloc(self.buf, new_cap) to string;
+    }
+    self.cap = new_cap;
+}
+
+// append: adds every byte of `s`. O(strlen(s)) amortised.
+pub fn StringBuilder.append(s: string): void {
+    immut n: int = strlen(s);
+    self.reserve(n);
+    mut i: int = 0;
+    while i < n {
+        self.buf[self.len + i] = byte_at_unchecked(s, i);
+        i = i + 1;
+    }
+    self.len = self.len + n;
+    self.buf[self.len] = 0 to char;
+}
+
+// append_char: adds one byte. A NUL `c` is stored but ends the string for
+// every reader that stops at NUL, exactly as it would in any `string`.
+pub fn StringBuilder.append_char(c: char): void {
+    self.reserve(1);
+    self.buf[self.len] = c;
+    self.len = self.len + 1;
+    self.buf[self.len] = 0 to char;
+}
+
+// length: bytes appended so far.
+pub fn StringBuilder.length(): int {
+    return self.len;
+}
+
+// clear: forgets the contents but keeps the buffer, so a builder reused in a
+// loop (one line per iteration) stops allocating after the first few.
+pub fn StringBuilder.clear(): void {
+    self.len = 0;
+    if self.cap > 0 {
+        self.buf[0] = 0 to char;
+    }
+}
+
+// to_string: a fresh, independent copy of the contents ("" when nothing was
+// appended). O(length). Safe to call repeatedly and to keep appending after.
+pub fn StringBuilder.to_string(): string {
+    mut out: string = gc_alloc(self.len + 1) to string;
+    mut i: int = 0;
+    while i < self.len {
+        out[i] = byte_at_unchecked(self.buf, i);
+        i = i + 1;
+    }
+    out[self.len] = 0 to char;
+    return out;
+}
+
 // ─── contains ─────────────────────────────────────────────────────────────────
 
 // contains: returns true if `needle` occurs anywhere in `s`.
@@ -158,6 +270,34 @@ pub fn index_of(s: string, needle: string): int {
             return i;
         }
         i = i + 1;
+    }
+    return 0 - 1;
+}
+
+// ─── last_index_of ────────────────────────────────────────────────────────────
+
+// last_index_of: the byte offset of the LAST occurrence of `needle` in `s`, or
+// -1 if there is none. An empty `needle` matches at `strlen(s)`, the mirror of
+// index_of("") == 0. Was `fs.last_index_of_char`, a private helper written
+// because path splitting needs to search from the end and nothing public did
+// (LEC-007: a helper the standard library needs itself is one users need).
+pub fn last_index_of(s: string, needle: string): int {
+    immut slen: int = strlen(s);
+    immut nlen: int = strlen(needle);
+    mut i: int = slen - nlen;
+    while i >= 0 {
+        mut is_match: bool = true;
+        mut j: int = 0;
+        while is_match && j < nlen {
+            if byte_at_unchecked(s, i + j) != byte_at_unchecked(needle, j) {
+                is_match = false;
+            }
+            j = j + 1;
+        }
+        if is_match {
+            return i;
+        }
+        i = i - 1;
     }
     return 0 - 1;
 }
@@ -203,15 +343,24 @@ pub fn ends_with(s: string, suffix: string): bool {
 
 // ─── repeat ───────────────────────────────────────────────────────────────────
 
-// repeat: returns a string consisting of `n` copies of `s` concatenated.
+// repeat: returns a string consisting of `n` copies of `s` concatenated
+// ("" for `n <= 0`). Linear in the result: it used to be `result = result + s`
+// in a loop, which re-copies the whole accumulated string on every pass
+// (O(n^2): measured 1.9 s for 200,000 copies of "ab" and 23 s for 600,000).
+// One reserve() sizes the buffer for the final length, so there is exactly
+// one allocation to grow it.
 pub fn repeat(s: string, n: int): string {
-    mut result: string = "";
+    if n <= 0 {
+        return "";
+    }
+    mut sb: StringBuilder = StringBuilder::default();
+    sb.reserve(strlen(s) * n);
     mut i: int = 0;
     while i < n {
-        result = result + s;
+        sb.append(s);
         i = i + 1;
     }
-    return result;
+    return sb.to_string();
 }
 
 // ─── count_char ───────────────────────────────────────────────────────────────
@@ -246,8 +395,12 @@ pub fn substring(s: string, start: int, end: int): string {
     // Allocate len+1 bytes (for null terminator)
     mut buf: string = gc_alloc(len + 1) to string;
     mut i: int = 0;
+    // The range was validated against `n` above, so the unchecked read is
+    // safe -- and necessary: `s[start + i]` re-runs strlen(s) on every byte
+    // (FDN-004), which made substring (and so trim/split, built on it) cost
+    // O(len * strlen(s)) at -O0.
     while i < len {
-        buf[i] = s[start + i];
+        buf[i] = byte_at_unchecked(s, start + i);
         i = i + 1;
     }
     buf[len] = 0 to char;
@@ -257,42 +410,38 @@ pub fn substring(s: string, start: int, end: int): string {
 // ─── replace ──────────────────────────────────────────────────────────────────
 
 // replace: returns a copy of `s` with every non-overlapping occurrence of `old`
-// replaced by `new_str`.
+// replaced by `new_str`, scanning left to right. An empty `old` returns `s`
+// itself (there is no sensible place to insert). Linear in |s| plus the
+// replacements: the old version allocated a 2-byte string per unmatched byte
+// and concatenated it onto the result, i.e. O(|s|^2) allocations of
+// ever-growing strings.
 pub fn replace(s: string, old: string, new_str: string): string {
-    mut result: string = "";
-    mut oldlen: int = strlen(old);
+    immut oldlen: int = strlen(old);
     if oldlen == 0 {
         return s;
     }
-    mut slen: int = strlen(s);
+    immut slen: int = strlen(s);
+    mut sb: StringBuilder = StringBuilder::default();
+    sb.reserve(slen);
     mut i: int = 0;
     while i < slen {
-        mut is_match: bool = true;
-        if i + oldlen > slen {
-            is_match = false;
-        }
-        if is_match {
-            mut j: int = 0;
-            while j < oldlen {
-                if s[i + j] != old[j] {
-                    is_match = false;
-                }
-                j = j + 1;
+        mut is_match: bool = i + oldlen <= slen;
+        mut j: int = 0;
+        while is_match && j < oldlen {
+            if byte_at_unchecked(s, i + j) != byte_at_unchecked(old, j) {
+                is_match = false;
             }
+            j = j + 1;
         }
         if is_match {
-            result = result + new_str;
+            sb.append(new_str);
             i = i + oldlen;
         } else {
-            // Append single character as a 2-byte heap buffer
-            mut chbuf: string = gc_alloc(2) to string;
-            chbuf[0] = s[i];
-            chbuf[1] = 0 to char;
-            result = result + chbuf;
+            sb.append_char(byte_at_unchecked(s, i));
             i = i + 1;
         }
     }
-    return result;
+    return sb.to_string();
 }
 
 // ─── to_upper ─────────────────────────────────────────────────────────────────
@@ -432,17 +581,17 @@ pub fn split(s: string, delimiter: string): List<string> {
 // (no leading/trailing `sep`). Returns "" for an empty list. The exact
 // inverse of `split` -- see the block comment above.
 pub fn join(items: List<string>, sep: string): string {
-    mut result: string = "";
+    mut sb: StringBuilder = StringBuilder::default();
     mut n: int = items.length();
     mut i: int = 0;
     while i < n {
         if i > 0 {
-            result = result + sep;
+            sb.append(sep);
         }
-        result = result + items.get(i);
+        sb.append(items.get(i));
         i = i + 1;
     }
-    return result;
+    return sb.to_string();
 }
 
 // ─── pad_left / pad_right ───────────────────────────────────────────────────────
