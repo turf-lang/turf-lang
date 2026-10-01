@@ -39,12 +39,11 @@ fn main(): int {
     mut bs: List<Big> = List::default();
     bs.push(Big::new(1, 2, 3));
     bs.push(Big::new(4, 5, 6));
-    immut second: Big = bs[1];
-    test::assert(second.c == 6, "List<Big>[1] is the whole struct");
+    test::assert(bs[1].c == 6, "List<Big>[1].c -- field of an operator[] result");
+    test::assert(bs[0].sum() == 6, "List<Big>[0].sum() -- method on an operator[] result");
     bs[0] = Big::new(7, 8, 9);
-    immut first: Big = bs[0];
-    test::assert(first.b == 8, "List<Big>[]= should store a whole struct");
-    test::assert(second.a == 4, "List<Big>[]= should not touch a neighbour");
+    test::assert(bs[0].b == 8, "List<Big>[]= should store a whole struct");
+    test::assert(bs[1].a == 4, "List<Big>[]= should not touch a neighbour");
 
     mut ds: List<double> = List::default();
     ds.push(1.5);

@@ -259,6 +259,8 @@ inline const ErrorCodeEntry AllErrorCodes[] = {
     // declaration whose type parameter no operand binds, or that owns none
     // of its operand types.
     {"E097", "GenericOperatorError", "Invalid generic operator", SLM::ErrorCategory::DECLARATION},
+    // LEC-006: a write into the by-value result of an `operator[]` read.
+    {"E098", "OperatorTemporaryWriteError", "Write to a temporary", SLM::ErrorCategory::TYPE_MISMATCH},
 };
 
 inline constexpr size_t AllErrorCodesCount = sizeof(AllErrorCodes) / sizeof(AllErrorCodes[0]);

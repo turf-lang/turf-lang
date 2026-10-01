@@ -312,6 +312,22 @@ Value *AssignmentExprAST::codegen() {
       Value *BaseVal = SelfByRef
           ? const_cast<ExprAST *>(ArrAcc->getBase())->codegenLValue()
           : const_cast<ExprAST *>(ArrAcc->getBase())->codegen();
+      if (SelfByRef && !BaseVal && dynamic_cast<const ArrayAccessExprAST *>(ArrAcc->getBase())) {
+        // `outer[a][b] = v` where `outer[a]` is an operator[] result: the
+        // container being written to is a temporary copy, so the write would
+        // be lost. The TypeChecker rejects this first (E098); this is the
+        // backstop so a path that skips that check cannot silently drop the
+        // write (a null here reads to every caller as "an error was already
+        // reported").
+        LogErrorAt(Loc,
+                   "Cannot assign through 'operator[]=' on a temporary: the "
+                   "container being indexed is the result of another "
+                   "'operator[]' call, so the write would only change a copy."
+                   "\n  Hint: read the inner container into a variable first, "
+                   "write to it there, and store it back.",
+                   SLM::ErrorCategory::TYPE_MISMATCH);
+        return nullptr;
+      }
       if (!BaseVal)
         return nullptr;
       Value *IndexVal = const_cast<ExprAST *>(ArrAcc->getIndex())->codegen();

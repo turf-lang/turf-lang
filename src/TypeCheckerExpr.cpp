@@ -463,6 +463,62 @@ void TypeChecker::visitAddressOf(AddressOfExprAST &Node) {
 }
 
 
+const ArrayAccessExprAST *
+TypeChecker::operatorIndexTemporaryRoot(const ExprAST *Place) {
+  // Is the value at E reached through a pointer/reference? Then whatever is
+  // written below E lands in the pointee, not in a copy.
+  auto IsPointerValued = [&](const ExprAST *E) {
+    TurfTypePtr T = getType(E);
+    return T && T->isPointer();
+  };
+
+  const ExprAST *E = Place;
+  while (E) {
+    if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(E)) {
+      // An `operator[]` READ is a call that returns the element by value.
+      if (AA->ResolvedIndexGetTarget)
+        return IsPointerValued(AA) ? nullptr : AA;
+      // A builtin index: addressable storage, unless it indexes a pointer
+      // (then the element is the pointee's), in which case there is nothing
+      // to find. Otherwise the array lives inside whatever its base is.
+      if (IsPointerValued(AA->getBase()))
+        return nullptr;
+      E = AA->getBase();
+    } else if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(E)) {
+      // `p.x` with `p` a pointer/reference writes through `p`.
+      if (IsPointerValued(FA->getBase()))
+        return nullptr;
+      E = FA->getBase();
+    } else {
+      return nullptr; // a variable, a call result, ...: not this check's job
+    }
+  }
+  return nullptr;
+}
+
+
+bool TypeChecker::rejectOperatorTemporaryWrite(const ExprAST *Place,
+                                               SourceLocation Loc,
+                                               const std::string &What,
+                                               bool PlaceIsStoreTarget) {
+  // A RECEIVER or container that is itself pointer-valued is written through;
+  // a store TARGET is the slot being assigned, so its own type says nothing.
+  if (!PlaceIsStoreTarget) {
+    TurfTypePtr T = getType(Place);
+    if (T && T->isPointer())
+      return false;
+  }
+  if (!operatorIndexTemporaryRoot(Place))
+    return false;
+#ifndef TYPECHECKER_NO_ERRORS
+  OperatorTemporaryWriteError(Loc, What).raise();
+#else
+  throw std::runtime_error("OperatorTemporaryWriteError");
+#endif
+  return true;
+}
+
+
 void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
   if (Node.getLHS())
     const_cast<ExprAST *>(Node.getLHS())->accept(*this);
@@ -478,6 +534,20 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
     throw std::runtime_error("InvalidAssignmentTargetError");
 #endif
     return;
+  }
+
+  // LEC-006: `bs[0].a = 50` writes into the copy `bs[0]` returned. A target
+  // that is itself an `operator[]` access is the `[]=` path below, not this.
+  {
+    const auto *LAA = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS());
+    TurfTypePtr LBase = LAA ? getType(LAA->getBase()) : nullptr;
+    const bool IsOperatorIndex = LAA && LBase && needsOperatorIndex(LBase.get());
+    if (!IsOperatorIndex)
+      rejectOperatorTemporaryWrite(
+          Node.getLHS(), Node.getLoc(),
+          "Cannot assign to part of the value an 'operator[]' read returned: "
+          "it is a copy, so the write would be lost.",
+          /*PlaceIsStoreTarget=*/true);
   }
 
   TurfTypePtr LhsTy = getType(Node.getLHS());
@@ -535,6 +605,20 @@ void TypeChecker::visitAssignment(AssignmentExprAST &Node) {
         }
       }
       HandledViaOperatorIndexSet = MutableArrAcc->ResolvedIndexSetTarget != nullptr;
+      // LEC-006: a `[]=` that takes its container by reference exists to
+      // MUTATE it (Map: put() changes len/cap). If the container is itself
+      // the by-value result of another `[]`, that mutation hits a copy.
+      // A by-value self (List) writes through its shared buffer and is fine.
+      if (HandledViaOperatorIndexSet &&
+          !MutableArrAcc->ResolvedIndexSetTarget->Params.empty() &&
+          MutableArrAcc->ResolvedIndexSetTarget->Params[0].Type &&
+          MutableArrAcc->ResolvedIndexSetTarget->Params[0].Type->isReference())
+        rejectOperatorTemporaryWrite(
+            ArrAcc->getBase(), Node.getLoc(),
+            "Cannot assign through 'operator[]=' on the value another "
+            "'operator[]' read returned: the container is a copy, so the "
+            "write would be lost.",
+            /*PlaceIsStoreTarget=*/false);
     }
     // A struct/enum base with no matching `operator[]=` (either none
     // declared, or none with this exact (base, index, value) signature) is
@@ -687,6 +771,19 @@ void TypeChecker::visitCompoundAssignment(CompoundAssignmentExprAST &Node) {
     throw std::runtime_error("InvalidAssignmentTargetError");
 #endif
     return;
+  }
+
+  // LEC-006: `bs[0].n += 1` updates the copy `bs[0]` returned. (A target that
+  // is itself an `operator[]` access is rejected by its own check below.)
+  {
+    const auto *LAA = dynamic_cast<const ArrayAccessExprAST *>(Node.getLHS());
+    TurfTypePtr LBase = LAA ? getType(LAA->getBase()) : nullptr;
+    if (!(LAA && LBase && needsOperatorIndex(LBase.get())))
+      rejectOperatorTemporaryWrite(
+          Node.getLHS(), Node.getLoc(),
+          "Cannot update part of the value an 'operator[]' read returned: "
+          "it is a copy, so the update would be lost.",
+          /*PlaceIsStoreTarget=*/true);
   }
 
   TurfTypePtr LhsTy = getType(Node.getLHS());
@@ -907,6 +1004,18 @@ void TypeChecker::visitPostfixExpr(PostfixExprAST &Node) {
 #endif
     setType(&Node, nullptr);
     return;
+  }
+
+  // LEC-006: `bs[0].n++` updates the copy `bs[0]` returned.
+  {
+    const auto *OAA = dynamic_cast<const ArrayAccessExprAST *>(Node.getOperand());
+    TurfTypePtr OBase = OAA ? getType(OAA->getBase()) : nullptr;
+    if (!(OAA && OBase && needsOperatorIndex(OBase.get())))
+      rejectOperatorTemporaryWrite(
+          Node.getOperand(), Node.getLoc(),
+          "Cannot update part of the value an 'operator[]' read returned: "
+          "it is a copy, so the update would be lost.",
+          /*PlaceIsStoreTarget=*/true);
   }
 
   TurfTypePtr OpTy = getType(Node.getOperand());

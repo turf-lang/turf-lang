@@ -1,0 +1,16 @@
+// Negative test (LEC-006): `mm["a"]["b"] = 1` writes into the Map that
+// `mm["a"]` RETURNS -- operator[] returns the element by value, so that is a
+// copy, and `operator<K, V> []=` takes its container by reference to mutate
+// it. The write would be silently lost, so it is a clean error instead of an
+// ICE (before LEC-006 it was "Base is not an array or pointer") or a quiet
+// no-op. (A List's `[]=` takes its header by value and writes through the
+// shared buffer, so `grid[i][j] = v` is fine -- 22_index_result_writes_that_land.tr.)
+// Expected: E098, "Cannot assign through 'operator[]=' on the value another
+// 'operator[]' read returned".
+import map::Map;
+
+fn main(): int {
+    mut mm: Map<string, Map<string, int>> = Map::default();
+    mm["a"]["b"] = 1;
+    return 0;
+}

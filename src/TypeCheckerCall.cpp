@@ -1342,6 +1342,18 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // positive here (a genuinely read-only method can never be
           // wrongly rejected).
           if (!IsStaticMethod && Best->MutatesSelf) {
+            // LEC-006: `outer[0].push(5)` mutates the copy `outer[0]`
+            // returned, so the change vanishes. Not for a pointer-valued
+            // receiver (`List<Node*>`'s `nodes[0].bump()` writes through it).
+            // MutatesSelf is the same conservative, non-interprocedural scan
+            // the immutable-variable check just below uses: a method that
+            // only mutates by calling ANOTHER mutating method is not seen.
+            rejectOperatorTemporaryWrite(
+                Node.getBase(), Node.getLoc(),
+                "Cannot call '" + MethodName + "' on the value an 'operator[]' "
+                "read returned: it changes its receiver, but the receiver is a "
+                "copy, so the change would be lost.",
+                /*PlaceIsStoreTarget=*/false);
             if (auto *BaseVarForImmut =
                     dynamic_cast<const VariableExprAST *>(Node.getBase())) {
               if (BaseVarForImmut->ResolvedSymbol &&

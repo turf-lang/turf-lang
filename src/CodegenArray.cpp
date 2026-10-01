@@ -230,6 +230,22 @@ static void EmitStringBoundsCheck(Value *StrVal, Value *IndexVal,
 
 
 Value *ArrayAccessExprAST::codegenLValue() {
+  // LEC-006: an `operator[]` read is a function call returning the element BY
+  // VALUE, so there is no address to hand back. Returning null is the
+  // existing "not addressable" answer -- FieldAccessExprAST::codegenLValue()
+  // and MethodCallExprAST::codegen() both react to it by evaluating the
+  // expression as an r-value and spilling it, which is exactly what
+  // `list[i].field` / `list[i].method()` need. Before this, a struct-valued
+  // element fell through to the "Base is not an array or pointer" fatal
+  // error below: `bigList[1].c` was an ICE for any `List<T>` whose element
+  // is a struct, however it was declared.
+  //
+  // The spill is only sound for a READ. A write into the spilled copy would
+  // be silently lost, which is why the TypeChecker rejects every such write
+  // (E098, TypeChecker::rejectOperatorTemporaryWrite()) before Codegen runs.
+  if (ResolvedIndexGetTarget)
+    return nullptr;
+
   const TurfType *BaseTy = getExprType(Base.get());
   if (!BaseTy) {
     llvm::report_fatal_error("Internal error: Could not determine type of array/list base");
@@ -342,6 +358,15 @@ Value *ArrayAccessExprAST::codegen() {
         ResolvedIndexGetTarget->Params[0].Type &&
         ResolvedIndexGetTarget->Params[0].Type->isReference();
     Value *BaseVal = SelfByRef ? Base->codegenLValue() : Base->codegen();
+    if (SelfByRef && !BaseVal) {
+      // The base has no address (`outer[a][b]`, where `outer[a]` is itself an
+      // operator[] result). A read through a copy is a correct read, so spill
+      // the value and pass that slot's address.
+      if (Value *Tmp = Base->codegen()) {
+        BaseVal = Builder->CreateAlloca(Tmp->getType(), nullptr, "tmp.idxbase");
+        Builder->CreateStore(Tmp, BaseVal);
+      }
+    }
     if (!BaseVal)
       return nullptr;
     Value *IndexVal = Index->codegen();

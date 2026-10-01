@@ -145,6 +145,24 @@ public:
     Category_ = SLM::ErrorCategory::DECLARATION;
   }
 };
+// LEC-006: a write whose destination is the BY-VALUE result of an
+// `operator[]` read -- `bs[0].a = 50`, `outer[0].push(5)`, `mm["a"]["b"] = 1`
+// with a by-reference `[]=`. The index operator returns a copy, so the write
+// would change the copy and vanish. This is the rule C# calls CS1612 and Go
+// applies to a struct held in a map; without it the compiler used to spill
+// the copy and mutate that, silently losing the write.
+class OperatorTemporaryWriteError : public TurfError {
+public:
+  OperatorTemporaryWriteError(SourceLocation Loc, const std::string &Problem)
+      : TurfError(Loc, Colors::BRIGHT_RED + Problem + Colors::RESET,
+                  "'x[i]' returns the element by value, so this would only change "
+                  "a copy. Read the element into a variable, change that, and "
+                  "store it back: `mut e: T = x[i]; e.field = v; x[i] = e;`. "
+                  "Writing THROUGH a pointer or reference element, or into a "
+                  "nested list (`grid[i][j] = v`), is fine.") {
+    Category_ = SLM::ErrorCategory::TYPE_MISMATCH;
+  }
+};
 // Two `extern fn` declarations for the same raw C name with genuinely
 // different signatures (arity, parameter types, return type, or variadic-
 // ness). Extern mangled names are just the bare C symbol name (not

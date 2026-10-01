@@ -88,6 +88,7 @@ struct SourceLocation;
 // hasType queries.  The full definition lives in AST.h (which is LLVM-dependent)
 // and is included only in TypeChecker.cpp.
 class ExprAST;
+class ArrayAccessExprAST;
 
 // TYPE-002 (docs/development/changes/TYPE-002.md, S11b): forward-declared
 // for the same reason as ExprAST above -- TypeChecker only ever stores a
@@ -550,6 +551,25 @@ private:
   /// alongside typesCompatible() before treating a mismatch as real, since
   /// typesCompatible() itself has no ExprAST access to tell the two apart.
   bool untypedLiteralAcquiresInt32(const ExprAST *Val, const TurfType *Dest);
+
+  /// LEC-006: if writing into @p Place would write into the by-value result
+  /// of an `operator[]` read (`bs[0].a`, `outer[0]`, `bs[0].inner.x`), the
+  /// ArrayAccessExprAST that produced the temporary; null otherwise. Walks
+  /// down field accesses and builtin indexing, and STOPS at a pointer or
+  /// reference base: a write through one lands in real storage, so
+  /// `nodes[0].next = p` for a `List<Node*>` is fine. Only meaningful after
+  /// the operands have been type-checked (it reads their types).
+  const ArrayAccessExprAST *operatorIndexTemporaryRoot(const ExprAST *Place);
+
+  /// Reports E098 (@p What is the whole problem sentence) for a write into
+  /// an operator-index temporary, if operatorIndexTemporaryRoot(@p Place)
+  /// finds one. @p PlaceIsStoreTarget is true when @p Place is the slot being
+  /// assigned (its own type is the value stored), false when it is a method
+  /// receiver or the container of a `[]=` -- a pointer-valued one of those is
+  /// written through, so it is never a temporary.
+  bool rejectOperatorTemporaryWrite(const ExprAST *Place, SourceLocation Loc,
+                                    const std::string &What,
+                                    bool PlaceIsStoreTarget);
 
   /// LEC-006: the one place an `operator` overload candidate is matched
   /// against concrete operand types -- every operator form (binary, unary,
