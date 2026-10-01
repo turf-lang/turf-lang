@@ -288,9 +288,16 @@ pub fn Response.send_json(status: int, body: string): void {
 // documented, accepted tradeoff for a small stdlib collection (see
 // map.tr's own design note), and a real path-pattern matcher is a
 // separate, bigger feature this module doesn't attempt.
+// Both fields are private (LEC-007 API review): they are implementation, not
+// something a program does anything with. `routes` is the storage behind
+// get()/has_route()/get_route(); writing `listener` from outside would swap
+// the socket listen() is serving on. (They were `pub` only because the
+// LEC-002 sweep marked everything public.) The rule used across the stdlib:
+// a function that does a job is public whether or not the repo itself calls
+// it; a struct's internals are public only if a real program needs them.
 pub struct Server {
-    pub listener: net::TcpListener,
-    pub routes: Map<string, fn(Request, Response): void>
+    listener: net::TcpListener,
+    routes: Map<string, fn(Request, Response): void>
 }
 
 // Registers `handler` to run for an exact-match request to `path`.
