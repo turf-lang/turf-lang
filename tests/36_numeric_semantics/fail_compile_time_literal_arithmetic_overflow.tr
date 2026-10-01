@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E076
+// EXPECT-DIAG: not representable in type 'int'
 // SEM-002 (FREEZE.md §6.2 row 6, ARCHITECTURE_OVERHAUL.md §10.2's own
 // worked example): "compile-time arithmetic over untyped literals is
 // exact; only the final value is checked" -- each literal individually

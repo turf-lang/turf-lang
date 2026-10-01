@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
 // SEM-002 (FREEZE.md §6.2 row 7 names '<<' explicitly): traps when a set
 // bit is shifted out past the sign bit. See EmitCheckedShl()'s own doc
 // comment (CodegenCore.cpp) for the exact overflow definition used (LLVM

@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E076
+// EXPECT-DIAG: not representable in type 'int'
 // OVH-014 (docs/planning/OVERHAUL_REMAINING_WORK.md), FREEZE.md §6.2 row 6.
 // The `export immut` twin of fail_immut_constant_reference_arithmetic_
 // overflow.tr in this same folder: an `export immut int` constant's exact

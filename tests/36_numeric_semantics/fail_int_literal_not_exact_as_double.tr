@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E077
+// EXPECT-DIAG: cannot be represented EXACTLY as a 'double'
 // SEM-002 (FREEZE.md §6.2 row 9): an untyped integer literal implicitly
 // converting to 'double' must round EXACTLY -- INT64_MAX itself has no
 // exact double representation (a double has only 53 bits of mantissa).

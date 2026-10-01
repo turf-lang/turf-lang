@@ -147,6 +147,86 @@ wait_with_timeout() {
 }
 export -f wait_with_timeout
 
+# EXPECT-DIAG (LEC-005): a test file may pin what the COMPILER SAID, not just
+# whether it succeeded. Without this a `fail_*.tr` proves only that the file
+# failed to compile -- not that it failed for the reason it names (the
+# "wrong-reason pass" AGENTS.md records twice from LEC-002: a reserved word
+# used as a name, a test that started failing on E088 instead of the gate it
+# was written for) -- and a warning, which never fails a compile, could not be
+# asserted at all.
+#
+#   // EXPECT-DIAG: E011          the output contains the code `[E011]`
+#   // EXPECT-DIAG: dead store    the output contains this text (use this for a
+#                                 warning: warnings carry no code)
+#   // EXPECT-NO-DIAG: dead store the output does NOT contain this text (the
+#                                 shape of a false-positive or cascade fix)
+#   // EXPECT-RUNTIME: Integer overflow
+#                                 (RUNTIME_ABORT_EXPECTED tests only; see
+#                                 check_runtime_expectations() below)
+#
+# Any number of lines, all must hold. The text is matched literally against the
+# compiler's output with ANSI colour stripped, so match on prose, never on
+# escape codes or column numbers. Applies to the COMPILE output of every kind of
+# test -- fail_*, plain and RUNTIME_ABORT_EXPECTED -- never the program's own
+# output. Prints nothing and returns 0 when every expectation holds; otherwise
+# prints one line per miss and returns 1.
+check_diag_expectations() {
+    local file="$1" output="$2" esc plain line kind arg missed=0
+    grep -qE '^[[:space:]]*//[[:space:]]*EXPECT(-NO)?-DIAG:' "$file" || return 0
+    esc=$(printf '\033')
+    plain=$(printf '%s' "$output" | sed "s/${esc}\[[0-9;]*m//g")
+    while IFS= read -r line; do
+        kind="${line%%:*}"
+        arg="${line#*:}"
+        arg="${arg#"${arg%%[![:space:]]*}"}"   # trim leading blanks
+        arg="${arg%"${arg##*[![:space:]]}"}"   # trim trailing blanks
+        [ -n "$arg" ] || continue
+        if [[ "$kind" == *EXPECT-NO-DIAG ]]; then
+            if grep -qF -- "$arg" <<< "$plain"; then
+                echo "EXPECT-NO-DIAG violated: the compiler output contains '$arg'"
+                missed=1
+            fi
+        elif [[ "$arg" =~ ^E[0-9]{3}$ ]]; then
+            if ! grep -qF -- "[$arg]" <<< "$plain"; then
+                echo "EXPECT-DIAG missed: no [$arg] in the compiler output"
+                missed=1
+            fi
+        else
+            if ! grep -qF -- "$arg" <<< "$plain"; then
+                echo "EXPECT-DIAG missed: the compiler output does not contain '$arg'"
+                missed=1
+            fi
+        fi
+    done < <(grep -E '^[[:space:]]*//[[:space:]]*EXPECT(-NO)?-DIAG:' "$file" \
+                 | sed -E 's|^[[:space:]]*//[[:space:]]*||')
+    return $missed
+}
+export -f check_diag_expectations
+
+# EXPECT-RUNTIME (LEC-005): the runtime half of the same idea, for a
+# `// RUNTIME_ABORT_EXPECTED` test -- whose compile output has nothing to say
+# about WHY the program aborted. `// EXPECT-RUNTIME: Integer overflow` requires
+# the program's own output (stdout and stderr together) to contain that text,
+# so a test written for one trap cannot keep passing because some other abort
+# fired first. Same contract as check_diag_expectations(): nothing printed and
+# 0 when every line holds, else one line per miss and 1.
+check_runtime_expectations() {
+    local file="$1" output="$2" line arg missed=0
+    grep -qE '^[[:space:]]*//[[:space:]]*EXPECT-RUNTIME:' "$file" || return 0
+    while IFS= read -r line; do
+        arg="${line#*:}"
+        arg="${arg#"${arg%%[![:space:]]*}"}"
+        arg="${arg%"${arg##*[![:space:]]}"}"
+        [ -n "$arg" ] || continue
+        if ! grep -qF -- "$arg" <<< "$output"; then
+            echo "EXPECT-RUNTIME missed: the program's output does not contain '$arg'"
+            missed=1
+        fi
+    done < <(grep -E '^[[:space:]]*//[[:space:]]*EXPECT-RUNTIME:' "$file")
+    return $missed
+}
+export -f check_runtime_expectations
+
 # Runs exactly one test file end to end (compile, classify, execute, judge)
 # and writes its outcome to $RESULTS_DIR. This is the SAME logic the old
 # sequential loop body had, unchanged test-classification-wise (fail_*
@@ -208,6 +288,12 @@ run_one_test() {
             { echo "STATUS=FAIL"; echo "DETAIL=$test_file (No executable)"; } > "$RESULT_FILE"
             return
         fi
+        if ! DIAG_MISS=$(check_diag_expectations "$FILE_NAME" "$COMPILE_OUTPUT"); then
+            echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${RED}FAILED (EXPECT-DIAG)${RESET}"
+            { echo "STATUS=FAIL"; echo "DETAIL=$test_file (EXPECT-DIAG):"; echo "$DIAG_MISS"; echo "$COMPILE_OUTPUT"; } > "$RESULT_FILE"
+            rm -f "$PROGRAM" "$LOGFILE"
+            return
+        fi
         "$PROGRAM" > "$LOGFILE" 2>&1 &
         CMD_PID=$!
         wait_with_timeout $CMD_PID 5
@@ -220,6 +306,14 @@ run_one_test() {
             {
                 echo "STATUS=FAIL"
                 echo "DETAIL=$test_file (Expected runtime abort, got exit $RUN_STATUS):"
+                echo "$RUN_OUTPUT"
+            } > "$RESULT_FILE"
+        elif ! DIAG_MISS=$(check_runtime_expectations "$FILE_NAME" "$RUN_OUTPUT"); then
+            echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${RED}FAILED (Aborted, but EXPECT-RUNTIME not met)${RESET}"
+            {
+                echo "STATUS=FAIL"
+                echo "DETAIL=$test_file (Aborted at runtime, but EXPECT-RUNTIME not met):"
+                echo "$DIAG_MISS"
                 echo "$RUN_OUTPUT"
             } > "$RESULT_FILE"
         else
@@ -252,6 +346,15 @@ run_one_test() {
                 echo "DETAIL=$test_file (Compiler crashed with exit $COMPILE_STATUS instead of a clean diagnostic):"
                 echo "$COMPILE_OUTPUT"
             } > "$RESULT_FILE"
+        elif ! DIAG_MISS=$(check_diag_expectations "$FILE_NAME" "$COMPILE_OUTPUT"); then
+            # Rejected -- but not (only) for the reason the file says it should be.
+            echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${RED}FAILED (Rejected, but EXPECT-DIAG not met)${RESET}"
+            {
+                echo "STATUS=FAIL"
+                echo "DETAIL=$test_file (Rejected, but EXPECT-DIAG not met):"
+                echo "$DIAG_MISS"
+                echo "$COMPILE_OUTPUT"
+            } > "$RESULT_FILE"
         else
             echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${GREEN}PASS (Rejected properly)${RESET}"
             echo "STATUS=PASS" > "$RESULT_FILE"
@@ -280,6 +383,15 @@ run_one_test() {
         return
     fi
 
+    # A plain test compiles, so what it can pin is the WARNINGS (or their
+    # absence) -- checked before the program runs, on the compile output.
+    if ! DIAG_MISS=$(check_diag_expectations "$FILE_NAME" "$COMPILE_OUTPUT"); then
+        echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${RED}FAILED (EXPECT-DIAG)${RESET}"
+        { echo "STATUS=FAIL"; echo "DETAIL=$test_file (EXPECT-DIAG):"; echo "$DIAG_MISS"; echo "$COMPILE_OUTPUT"; } > "$RESULT_FILE"
+        rm -f "$PROGRAM" "$LOGFILE"
+        return
+    fi
+
     # Special handling for I/O tests that expect input
     if [[ "$SUITE" == "io" ]]; then
         # Pipe dummy values (e.g., name and age) to avoid blocking
@@ -298,8 +410,21 @@ run_one_test() {
     fi
 
     if [ $RUN_STATUS -eq 137 ] || [ $RUN_STATUS -eq 143 ] || [ $RUN_STATUS -eq 211 ]; then
-        echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${YELLOW}TIMEOUT (Likely infinite loop)${RESET}"
-        { echo "STATUS=FAIL"; echo "DETAIL=$test_file (Timed out after ${RUN_TIMEOUT_SEC}s)"; } > "$RESULT_FILE"
+        # "Likely infinite loop" is the right guess at the default 5s bound and
+        # the wrong one under TURF_GC_STRESS, where an allocation-heavy test
+        # (07_heap_bounded_allocation.tr: ~200s on a developer machine) is
+        # merely slow and a loaded CI runner can exceed a bound that is only
+        # ~1.5x its own measurement. Say which it probably is, and what to try.
+        if [ -n "${TURF_GC_STRESS:-}" ] && [ "${TURF_GC_STRESS}" != "0" ]; then
+            echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${YELLOW}TIMEOUT (TURF_GC_STRESS is on: possibly just slow, see TURF_TEST_TIMEOUT_SEC)${RESET}"
+            {
+                echo "STATUS=FAIL"
+                echo "DETAIL=$test_file (Timed out after ${RUN_TIMEOUT_SEC}s under TURF_GC_STRESS -- a collection per allocation makes allocation-heavy tests slow, not hung: time it with a larger TURF_TEST_TIMEOUT_SEC before assuming a loop)"
+            } > "$RESULT_FILE"
+        else
+            echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${YELLOW}TIMEOUT (Likely infinite loop)${RESET}"
+            { echo "STATUS=FAIL"; echo "DETAIL=$test_file (Timed out after ${RUN_TIMEOUT_SEC}s)"; } > "$RESULT_FILE"
+        fi
     elif [ $RUN_STATUS -ne 0 ]; then
         echo -e "[${CYAN}${SUITE}${RESET}] ${FILE_NAME} ... ${RED}RUNTIME FAILED${RESET} (Exit code $RUN_STATUS)"
         {
@@ -320,7 +445,7 @@ run_one_test() {
     rm -f "$PROGRAM" "$LOGFILE"
 }
 export -f run_one_test
-export RESULTS_DIR COMPILER TURF_OPT_FLAG RUN_TIMEOUT_SEC
+export RESULTS_DIR COMPILER TURF_OPT_FLAG RUN_TIMEOUT_SEC # + check_*_expectations, above
 export BOLD GREEN RED YELLOW CYAN RESET
 
 printf '%s\0' "${TEST_FILES[@]}" | xargs -0 -P "$JOBS" -I{} bash -c 'run_one_test "$@"' _ {}

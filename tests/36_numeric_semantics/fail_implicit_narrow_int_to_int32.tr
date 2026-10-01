@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Cannot initialise 'int32' variable 'b' with value of type 'int'
 // Regression (pre-existing behavior, unchanged by SEM-002): 'int -> int32'
 // is NOT one of the three implicit conversions (FREEZE.md §6.2 row 4) --
 // narrowing always needs an explicit 'to int32'. Confirmed still correct

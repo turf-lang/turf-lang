@@ -1,3 +1,5 @@
+// EXPECT-DIAG: E066
+// EXPECT-DIAG: Cannot initialise 'int' variable 'x' with value of type 'double'
 // Regression (pre-existing behavior, unchanged by SEM-002): 'double -> int'
 // is NOT one of the three implicit conversions (FREEZE.md §6.2 row 4) --
 // needs an explicit 'to int' (which truncates toward zero). Confirmed

@@ -1,4 +1,5 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: runtime check: Integer overflow
 // SEM-002 (FREEZE.md §6.2 row 7 names negation explicitly): negating a
 // genuine RUNTIME INT64_MIN value traps -- contrast with
 // 01_int_literal_bounds_round_trip.tr's `-9223372036854775808` LITERAL,
