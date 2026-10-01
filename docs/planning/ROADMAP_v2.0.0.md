@@ -138,7 +138,7 @@ PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D1
    │                                  LEC-004  error payloads + `try` (D15)  DONE (LEC-004.md, 2026-10-01)
    │                                  LEC-006  collection indexing coherence (generic operators)  DONE (LEC-006.md, 2026-10-01)
    │                                  LEC-005  diagnostics reliability (incl. D25)  DONE (LEC-005.md, 2026-10-01)
-   │                                  LEC-007  standard library 2.0 surface
+   │                                  LEC-007  standard library 2.0 surface  DONE (LEC-007.md, 2026-10-01; not tagged)
    ▼
 ═══════  LANGUAGE FREEZE  (Part VI)   tag v2.0.0-freeze
    ▼
@@ -1138,6 +1138,19 @@ test added after this milestone and back-filled for `tests/36_numeric_semantics/
 ---
 
 ### LEC-007 — Standard library 2.0 surface
+
+> **Landed 2026-10-01** — `docs/development/changes/LEC-007.md`; frozen as
+> `FREEZE.md` §6.20 (F-API-1..4). Where the implementation differs from the
+> design below: the item list is done as written except that **no new module
+> API was added beyond `StringBuilder`** and "every example uses `defer
+> x.close();`" is `showcase/` plus `http::Server.listen` (there is no `fs` file
+> handle type to give a `close()`). Fallibility turned out to be the larger
+> change than the removals: four bool-returning functions became `!void`. The
+> API lock is `tests/46_stdlib_surface/` **plus** `scripts/stdlib_surface_check.sh`
+> (a test cannot notice a new, unlocked public item). The owner's rule for what
+> is public is F-API-4. Open items for the owner are in the record's
+> *Unresolved questions* (JSON field exposure, panics on remote input, and the
+> capability gaps: seeding, append/file handles, directory listing).
 
 **Kind** Language/ecosystem · **Rules** R5, R1 (API removals) · **Size** M · **Prereqs** LEC-002, LEC-004, LEC-006, FDN-004
 

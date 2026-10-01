@@ -81,6 +81,24 @@ Serializes a `JsonValue` back to compact JSON text — the inverse of
 immut text: string = json::stringify(config);
 ```
 
+### `json::escape_string(s: string): string`
+
+The body of a JSON string literal for `s`, **without** the surrounding quotes —
+for assembling JSON text by hand (a handler splicing a user-supplied name into a
+response, say). `stringify` uses it for every string and key it writes. It
+escapes `"` and `\`, uses `\n \r \t \b \f`, writes every other byte below `0x20`
+as `\u00XX` (a raw control character is invalid JSON), and copies bytes `>= 0x80`
+through untouched, so UTF-8 survives. `/` is not escaped. Public since 2.0, and
+corrected then: it used to escape only `" \ \n \r \t`.
+
+```turflang
+immut line: string = "{\"name\":\"" + json::escape_string(user_input) + "\"}";
+```
+
+`parse` does not read `\u00XX` back (see *Known gaps*), so a string containing a
+control byte other than `\n \r \t` does not round-trip through
+`stringify`/`parse`; the output is valid JSON.
+
 ## Known gaps
 
 Handles the common real cases correctly (objects, arrays, strings,

@@ -29,6 +29,7 @@ LIST_ONLY=0
 LOCK_SRC=$(cat "$LOCK_DIR"/*.tr 2>/dev/null | sed 's://.*$::')
 
 missing=0
+badnames=0
 total=0
 
 check() { # kind, module, name, regex
@@ -38,6 +39,18 @@ check() { # kind, module, name, regex
     echo "$mod $kind $name"
     return
   fi
+  # F-API-2 (FREEZE.md 6.20): public functions, methods and fields are
+  # snake_case. Types are PascalCase and constants UPPER_CASE by the same rule,
+  # but those were never in question; the camelCase that existed was all in
+  # function and method names.
+  local last=${name##*.}
+  case $kind in
+    fn|method|field)
+      if ! [[ "$last" =~ ^[a-z][a-z0-9_]*$ ]]; then
+        echo "  NOT snake_case: $mod $kind $name"
+        badnames=$((badnames + 1))
+      fi ;;
+  esac
   if ! printf '%s\n' "$LOCK_SRC" | grep -Eq "$re"; then
     echo "  NOT LOCKED: $mod $kind $name"
     missing=$((missing + 1))
@@ -82,5 +95,5 @@ done < <(find lib/std -name '*.tr' | sort)
 if [ "$LIST_ONLY" = 1 ]; then
   exit 0
 fi
-echo "stdlib surface: $total public items, $missing not locked by $LOCK_DIR"
-[ "$missing" -eq 0 ]
+echo "stdlib surface: $total public items, $missing not locked by $LOCK_DIR, $badnames not snake_case"
+[ "$missing" -eq 0 ] && [ "$badnames" -eq 0 ]

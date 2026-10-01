@@ -209,8 +209,15 @@ conn.write("hello back");
 
 #### `TcpConnection.close(): void`
 
-Closes the file descriptor. Safe to call once; the fd is not reusable
-afterward.
+Closes the file descriptor and marks the connection closed. **Idempotent**
+(2.0): a second `close()` does nothing. That matters with
+`defer conn.close();` plus an explicit early close — closing the same number
+twice can shut a *different* descriptor the kernel reused in between.
+
+#### `TcpConnection.raw_fd(): int`
+
+The underlying descriptor, for FFI; `-1` after `close()`. The counterpart of
+`TcpConnection::new(fd)`, which wraps one.
 
 ### `struct TcpListener { fd: int }`
 
@@ -244,7 +251,11 @@ mut conn: net::TcpConnection = server.accept() recover run {
 
 #### `TcpListener.close(): void`
 
-Stops listening and closes the socket.
+Stops listening and closes the socket. Idempotent, like `TcpConnection.close()`.
+
+#### `TcpListener.raw_fd(): int`
+
+The listening descriptor; `-1` after `close()`.
 
 ### Full example: an HTTP server and client, entirely in Turf
 
@@ -259,6 +270,7 @@ import net;
 import strings;
 
 fn handle(conn: net::TcpConnection): void {
+    defer conn.close();
     immut request: string = conn.read(4096);
 
     mut body: string = "";
@@ -278,7 +290,6 @@ fn handle(conn: net::TcpConnection): void {
         "HTTP/1.1 " + status + "\nContent-Type: text/plain\nContent-Length: "
         + (bodyLen to string) + "\nConnection: close\n\n" + body;
     conn.write(response);
-    conn.close();
 }
 
 fn main(): int {
@@ -286,6 +297,7 @@ fn main(): int {
         io::printline("Could not start the server -- is port 8080 already in use?");
         return 1;
     };
+    defer server.close();
 
     mut requestCount: int = 0;
     while requestCount < 1000 {
@@ -297,7 +309,6 @@ fn main(): int {
         requestCount = requestCount + 1;
     }
 
-    server.close();
     return 0;
 }
 ```

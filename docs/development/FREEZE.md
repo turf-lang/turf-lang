@@ -850,6 +850,52 @@ changes. Full account: `docs/development/changes/LEC-006.md`.
   the fix. No new `SLM::ErrorCategory`, no
   `docs/slm/` file (§6.9).
 
+### 6.20 The standard library's 2.x surface — FROZEN (LEC-007, 2026-10-01)
+
+Recorded on the project owner's instruction to implement LEC-007 as
+`ROADMAP_v2.0.0.md` specifies it ("frozen as the 2.x compatibility surface"),
+with the owner's direction on what counts as public (below). Full account and
+the per-module review: `docs/development/changes/LEC-007.md`. User-facing
+statement: `docs/reference/stdlib/README.md`.
+
+- **The public items of `lib/std/**` are the 2.x surface (F-API-1).** A `pub`
+  function, method, type, error, constant or field is not removed, renamed, or
+  given a different signature or failure shape before 3.0; additions are
+  allowed in a minor release. Enforced by `tests/46_stdlib_surface/` (a use of
+  every public item, compiled and run) and `scripts/stdlib_surface_check.sh`
+  (fails on a public item no test mentions).
+- **Naming (F-API-2).** Public functions, methods and fields are `snake_case`;
+  types `PascalCase`; constants `UPPER_CASE`. The twelve camelCase names that
+  existed were renamed without aliases (a kept alias would freeze two
+  spellings). Checked by the same script.
+- **Failure shape (F-API-3).** A function that can fail because of its input or
+  environment returns `!T` with a variant carrying what failed; one that fails
+  only because the caller broke a precondition panics, and the message starts
+  with the caller's `file:line:` (`@caller_location`); a question
+  (`exists`, `contains`, `index_of`) returns `bool` or a sentinel. Where a call
+  has both a panicking and a recoverable form they are a pair (`Map.get` /
+  `Map.try_get`) with a predicate to ask first (`contains`).
+- **What is public (F-API-4), the owner's rule.** A function that does a job a
+  real program might want is public whether or not the repository itself calls
+  it; hiding it because "we" do not use it is not a reason. A struct's
+  internals are public only if a real program does something with them
+  (`Request.method`: yes; `List`'s buffer, `Map`'s hash index, `Server`'s route
+  table: no). Raw C bindings (`fopen`, `getenv`, `socket`, `strstr`, ...) stay
+  private: the library wraps them in checked Turf functions, and those are the
+  interface. A pre-existing `pub extern` (`mem::malloc`, `time::usleep`,
+  `sys::exit`) is part of the surface as it stands; no new one is added by
+  this record.
+- **Resource handles (F-MEM-2 applied).** Every handle type has an explicit
+  `close()`, idempotent, and the documented idiom is `defer x.close();`.
+  `raw_fd()` exposes the descriptor; there is no public `fd` field.
+- **`string` stays a C pointer (F-STR-1, F-STD-3).** `strings::StringBuilder`
+  is the incremental-construction answer that decision relied on; its buffer is
+  private and `to_string()` returns a copy.
+- **Not part of the surface:** the behaviour of `json::parse` for `\uXXXX`
+  escapes (a documented gap), the iteration order of `Map.keys()` after a
+  `remove()`, and `mem::malloc_usable_size`/`usable_size`, which are glibc-only
+  and may be unavailable on a platform the release adds.
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -907,6 +953,10 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-PKG-4** | A dependency's `unsafe module;` is honored only if the root manifest's `[unsafe] allow` names it (not transitive); the root package's own modules need no listing; the compiler enforces, the CLI only passes the bit. | §6.16 above (`ROADMAP_v2.0.0.md` LEC-001 entry 6) |
 | **F-PAT-1** | A top-level `matches <expr>:` keeps its meaning (equality; a bare identifier is a variable); destructuring forms (`_`, `Name { field: pattern, .. }`, guards `if`) are new syntax where a bare identifier BINDS. Arms are tried in source order, first matching header wins, the subject is evaluated once. `_` alone is reserved; `_name` is an identifier. A struct pattern lists every field or ends in `..`, and reads fields as `.field` does (visibility included). Bindings are immutable and arm-scoped. A guarded arm never counts toward exhaustiveness; enum/machine/`bool` subjects and open error unions are checked. | §6.17 above (`ROADMAP_v2.0.0.md` LEC-003, DEC-10) |
 | **F-ERR-1** | An error variant may declare typed fields (`NotFound(path: string)`), constructed positionally with N arguments (or N+1 with a trailing `string` message) and read back only by patterns (`matches E::V(path, ..):`), never as a field. A bare `E::V` with fields is not a value, only an `==`/`!=` operand or a pattern head. A variant pattern never makes an arm a catch-all; an open error union still needs `otherwise`/`_`. `try <expr>` (prefix keyword, reserved) returns the error unchanged from the enclosing `!V` function, running pending `defer`s, and is an error in `main`, a non-fallible function, a `defer` or on a non-fallible operand. `return f();` of a `!T` from a `!T` function passes the value through. An error value is `{ tag, message, payload }`, the payload a GC-allocated per-variant struct with its own descriptor. | §6.18 above (`ROADMAP_v2.0.0.md` LEC-004, DEC-11, DEC-12) |
+| **F-API-1** | The public items of `lib/std/**` are the 2.x compatibility surface: not removed, renamed, or re-signatured before 3.0; additions allowed in a minor. Locked by `tests/46_stdlib_surface/` + `scripts/stdlib_surface_check.sh`. | §6.20 above (`ROADMAP_v2.0.0.md` LEC-007) |
+| **F-API-2** | Public stdlib functions, methods and fields are `snake_case`; no aliases are kept for a renamed name. | §6.20 above |
+| **F-API-3** | Stdlib failure shapes: input/environment failure → `!T` carrying what failed; violated precondition → panic naming the caller's `file:line:`; a question → `bool` or sentinel. A panicking lookup has a predicate to ask first and, where useful, a `try_` twin. | §6.20 above |
+| **F-API-4** | A function that does a job a real program might want is public whether or not the repository uses it; a struct's internals are public only if a real program does something with them; raw C bindings stay private behind checked Turf wrappers. | §6.20 above (owner's rule, 2026-10-01) |
 
 ---
 

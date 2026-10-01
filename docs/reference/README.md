@@ -22,7 +22,7 @@ For internals — how the compiler actually implements any of this (stack vs. he
 **Systems programming**
 10. [FFI & `unsafe`](ffi_and_unsafe.md) — `extern fn`, `unsafe { }`, `&T` references, raw pointers
 
-**Standard library** (in [`stdlib/`](stdlib/))
+**Standard library** (in [`stdlib/`](stdlib/)) — start with the [conventions and the 2.x surface](stdlib/README.md): naming, the failure rule, `defer` for resources, what is public
 11. [Core](stdlib/core.md) — `int`/`double`/`bool`/`char`/`array`/`strings` (the prelude)
 12. [Collections](stdlib/collections.md) — `List`/`Stack`/`Queue`/`Map`/`Set`
 13. [I/O & Networking](stdlib/io_and_net.md) — `io` (incl. file I/O), `net` (incl. DNS resolution), `sys`

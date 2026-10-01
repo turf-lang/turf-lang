@@ -9,7 +9,7 @@
 // has no built-in arithmetic) -- every helper below does that internally.
 //
 // Names are snake_case like every other public function in the standard
-// library (LEC-007, FREEZE.md §6.20 F-STD-1). They were camelCase
+// library (LEC-007, FREEZE.md §6.20 F-API-2). They were camelCase
 // (`isDigit`, `toUpper`) until that milestone, the one place the stdlib
 // disagreed with itself.
 

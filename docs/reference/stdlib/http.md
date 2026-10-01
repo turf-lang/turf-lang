@@ -100,11 +100,13 @@ function exported for it); it's applied automatically inside `send_raw`.
 
 ---
 
-## `struct Server { listener: net::TcpListener, routes: Map<string, fn(Request, Response): void> }`
+## `struct Server`
 
 A route table keyed by exact request path, storing a first-class function
 handler per route. Route matching is **exact-path only** — no `:id`-style
-parameter segments, no wildcards.
+parameter segments, no wildcards. Its fields (`listener`, `routes`) are
+**private** since 2.0: they are the storage behind `get`/`has_route`/
+`get_route`/`listen`, which are the interface.
 
 ### `Server.get(path: string, handler: fn(Request, Response): void): void`
 
@@ -168,6 +170,7 @@ fn main(): int {
     };
     while true {
         mut conn: net::TcpConnection = listener.accept() recover run { continue; };
+        defer conn.close();   // runs at the end of this iteration, on every path
         mut req: http::Request = http::parse_request(conn);
         mut res: http::Response;
         res.conn = conn;
@@ -176,7 +179,6 @@ fn main(): int {
         } else {
             res.send_text(404, "not found");
         }
-        conn.close();
     }
     return 0;
 }

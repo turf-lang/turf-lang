@@ -254,8 +254,10 @@ Current element count (`self.len` — not `cap`, and not `head + len`).
 struct Map<K, V> { keys: K*, values: V*, len: int, cap: int, buckets: int*, bcap: int }
 ```
 
-A **real hash table, O(1) average lookup** — not the linear scan this type
-used to be. Two parts:
+Every field above is **private** (LEC-002) — the layout is described here for
+how the methods behave, not as something to read; use `keys()`/`values()` to
+iterate. A **real hash table, O(1) average lookup** — not the linear scan this
+type used to be. Two parts:
 
 - `keys`/`values`/`len`/`cap` are a dense, insertion-ordered pair of arrays
   (exactly as before) — grown the same way `List<T>.push()` is.
@@ -379,6 +381,25 @@ test::assert(m.contains("b") == false, "");
 ### `Map.length(): int`
 
 Current key/value pair count.
+
+### `Map.keys(): List<K>` / `Map.values(): List<V>`
+
+How to iterate a map (2.0). The storage (`keys`, `values`, the hash index) is
+private, so these return **copies** in the dense array's order: insertion order
+until the first `remove()`, then whatever swap-with-last compaction left (see
+the gotcha on `remove`). `keys()[i]` and `values()[i]` belong to the same entry
+as long as the map is not modified between the two calls. A copy means changing
+the map while you walk a result can neither invalidate it nor reach the raw
+storage.
+
+```turflang
+immut ks: List<string> = m.keys();
+mut i: int = 0;
+while i < ks.length() {
+    io::printline(ks.get(i) + " = " + (m.get(ks.get(i)) to string));
+    i = i + 1;
+}
+```
 
 ### `operator<K, V> [](m: Map<K, V>, key: K): V` / `operator<K, V> []=(m: &Map<K, V>, key: K, value: V): void`
 

@@ -376,6 +376,17 @@ test::assert(strings::index_of("hello world", "world") == 6, "index_of: world at
 test::assert(strings::index_of("", "a") == 0 - 1, "index_of: empty string");
 ```
 
+### `last_index_of(s: string, needle: string): int`
+
+Byte offset of the **last** occurrence of `needle` in `s`, or `-1`. An empty
+`needle` matches at `strlen(s)`, the mirror of `index_of("")` being `0`.
+Overlapping matches count: `last_index_of("aaaa", "aa")` is `2`. Added in 2.0
+(it was `fs`'s private helper).
+
+```turflang
+test::assert(strings::last_index_of("a/b/c", "/") == 3, "");
+```
+
 ### `starts_with(s: string, prefix: string): bool`
 
 Byte-compares the first `strlen(prefix)` bytes of `s`; `false` if `prefix`
@@ -392,7 +403,8 @@ Mirror of `starts_with`; compares the tail of `s`.
 
 ### `repeat(s: string, n: int): string`
 
-Concatenates `n` copies of `s`. `n <= 0` returns `""`.
+Concatenates `n` copies of `s`. `n <= 0` returns `""`. Linear in the result
+(it was a quadratic `result = result + s` loop before 2.0).
 
 ```turflang
 mut r0: string = strings::repeat("hello", 0);
@@ -410,15 +422,14 @@ Counts occurrences of the byte `ch` (an `int` byte code, not a `char`) in
 
 Slices `[start, end)` — `start` inclusive, `end` exclusive.
 
-> **Gotcha: hard-panics instead of returning `!string`.** If
-> `start < 0 || end < start || end > strlen(s)`, `substring` calls
-> `sys::panic("strings.substring: index out of bounds")` and aborts the
-> process. This is inconsistent with the rest of the standard library's
-> error-handling story — `math::divide`, `Map.try_get`, and every `net`
-> connection function return a recoverable `!T` for "ordinary expected
-> failure," but a bad substring range is instead treated as a programming
-> bug. Validate your indices before calling, or use `trim`, which never
-> passes an out-of-range slice.
+> **Panics instead of returning `!string` — on purpose.** If
+> `start < 0 || end < start || end > strlen(s)`, `substring` aborts with
+> `<your file>:<your line>: strings.substring: index out of bounds`. A range
+> your own code computed wrongly is a bug, not input that can be
+> recovered from (see the [failure rule](README.md#2-failure-three-kinds-three-shapes)):
+> `math::divide` and `parse_int` return `!T` because *their input* can be
+> bad. Validate indices before calling, or use `trim`, which never passes an
+> out-of-range slice.
 
 ### `replace(s: string, old: string, new_str: string): string`
 
@@ -510,3 +521,32 @@ test::assert(n == 42, "parse_int: ordinary case");
 immut bad: int = strings::parse_int("not a number") recover produce -1;
 test::assert(bad == -1, "parse_int: malformed input recovers to -1");
 ```
+
+### `StringBuilder`
+
+Incremental string construction. A `string` is an immutable NUL-terminated
+pointer, so `s = s + piece` in a loop copies the whole accumulated string on
+every pass — quadratic. (Measured: 200,000 pieces took 1.9 s, 600,000 took
+23 s.) A `StringBuilder` appends in amortised constant time per byte; `repeat`,
+`replace` and `join` are built on it, and so should any loop of yours that
+builds a string.
+
+```turflang
+mut sb: strings::StringBuilder = strings::StringBuilder::default();
+sb.append("hello");
+sb.append_char(' ');
+sb.append("world");
+immut s: string = sb.to_string();   // "hello world"
+```
+
+| Method | |
+|---|---|
+| `append(s: string): void` | adds every byte of `s` |
+| `append_char(c: char): void` | adds one byte |
+| `reserve(extra: int): void` | makes room for `extra` more bytes up front (panics on a negative `extra`); an optimisation only |
+| `length(): int` | bytes appended so far |
+| `clear(): void` | forgets the contents, keeps the buffer — reuse one builder per loop iteration |
+| `to_string(): string` | a **copy** of the contents, `""` when empty. Appending afterwards never changes a string already returned |
+
+The buffer, length and capacity are private: the buffer's NUL terminator is an
+invariant only the methods keep.

@@ -1,5 +1,5 @@
 // Every public helper in lib/std/core/char.tr, by its snake_case name
-// (LEC-007, F-STD-1: these were isDigit/isUpper/... until then). Both
+// (LEC-007, F-API-2: these were isDigit/isUpper/... until then). Both
 // directions for each predicate, plus the two case conversions -- including
 // `to_upper`/`to_lower` on a char sharing a name with strings::to_upper on a
 // string, which UFCS must keep apart by receiver type.
