@@ -1,0 +1,34 @@
+// KNOWN BUG, NOT FIXED (found by LEC-005's audit of hand-written visitors; not
+// run by test_runner.sh, which excludes this directory). Delete this file and
+// add the fixed form to tests/39_nullable_references/ when it is fixed.
+//
+// What it should do: reject the program with E081 ("Possible null
+// dereference"), exactly as it does for the same `p.val` anywhere outside a
+// `recover` block (try the body of f() without the recover).
+//
+// What it does: compiles clean, and dereferences null when `p` is null.
+//
+// Why: NullabilityPass narrows `&?T` flow-sensitively over the CFG, and a
+// `recover run { ... }` block is not split into CFG statements, so
+// NarrowingVisitor receives the whole block as one statement and has no branch
+// for `recover`. The tempting fix -- recurse into the block with the
+// statement's incoming facts -- is WRONG: it would reject correctly guarded
+// code (`recover run { if (p != null) { return p.val; } return 0; }`), because
+// the `if` inside the block narrows nothing without its own control flow. The
+// block has to be modelled in the CFG (its statements as blocks, an edge for
+// "falls off the end", `return` as an exit) so the existing narrowing handles
+// it; see docs/development/changes/LEC-005.md, Unresolved questions.
+struct Node { val: int }
+
+fn g(): !int {
+    return 1;
+}
+
+fn f(p: &?Node): int {
+    mut v: int = g() recover run { return p.val; };
+    return v;
+}
+
+fn main(): int {
+    return 0;
+}

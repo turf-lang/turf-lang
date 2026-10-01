@@ -1,6 +1,7 @@
 #include "Analysis.h"
 #include "Errors.h"
 #include "AST.h"
+#include "ASTChildWalker.h"
 #include "SymbolTable.h"
 #include "ResolverSymbolTable.h"
 
@@ -21,15 +22,19 @@ namespace {
 // ─── AnalysisVisitor ─────────────────────────────────────────────────────────
 // Walks an expression and fires onRead/onDef callbacks with the VariableSymbol*
 // that the Resolver attached to each variable reference / declaration.
+//
+// An ASTChildWalker (LEC-005, INV-LINT-1): every node kind is reached, and a
+// node kind added later cannot compile until the walker says where ITS
+// children are. This class used to keep its own list of container nodes, and
+// every omission was a silent false positive -- `defer` (LANG-003) and
+// `recover` (OVH-012) each went unseen until a stdlib file tripped over it,
+// and `&x` was still skipped, so a variable read only through its address was
+// "declared but never used". It now overrides only what has dataflow meaning
+// of its own: a read, a definition, or a definition-plus-read.
 
-class AnalysisVisitor : public ASTVisitor {
+class AnalysisVisitor : public ASTChildWalker {
   const std::function<void(SourceLocation, const VariableSymbol *)> &onRead;
   const std::function<void(SourceLocation, const VariableSymbol *)> &onDef;
-
-  void visitChild(const ExprAST *Node) {
-    if (Node)
-      const_cast<ExprAST *>(Node)->accept(*this);
-  }
 
 public:
   AnalysisVisitor(
@@ -108,46 +113,15 @@ public:
     }
   }
 
-  void visitBinary(BinaryExprAST &Node) override {
-    visitChild(Node.getLHS());
-    visitChild(Node.getRHS());
-  }
-
-  void visitUnary(UnaryExprAST &Node) override {
-    visitChild(Node.getOperand());
-  }
-
-  void visitCast(CastExprAST &Node) override { visitChild(Node.getOperand()); }
-
-  void visitBlock(BlockExprAST &Node) override {
-    for (const auto &E : Node.getExpressions())
-      visitChild(E.get());
-  }
-
-  void visitIf(IfExprAST &Node) override {
-    for (const auto &Branch : Node.getBranches()) {
-      visitChild(Branch.Cond.get());
-      visitChild(Branch.Body.get());
-    }
-    visitChild(Node.getElse());
-  }
-
-  void visitWhile(WhileExprAST &Node) override {
-    visitChild(Node.getCond());
-    visitChild(Node.getBody());
-  }
-
-  void visitFor(ForExprAST &Node) override {
-    visitChild(Node.getStart());
-    visitChild(Node.getEnd());
-    visitChild(Node.getStep());
-    visitChild(Node.getBody());
-  }
-
-  void visitForEach(ForEachExprAST &Node) override {
-    visitChild(Node.getIterable());
-    visitChild(Node.getBody());
-  }
+  // Containers and operators (binary/unary/cast/block/if/while/for/for-each,
+  // `defer`, `recover`, `try`, calls, field and array access, `&x`, ...) take
+  // ASTChildWalker's recursion: reading a node's children reads whatever they
+  // read. A call's CALLEE is a child too -- `f(3)` where `f` is a local of
+  // `fn(...)` type is a genuine read of `f` (an ordinary direct call's
+  // VariableExprAST callee never gets a ResolvedSymbol, so visitVariable() is a
+  // no-op for it). The deferred statement is recorded as a read/def at its
+  // REGISTRATION point (LANG-003): the symbol must already be assigned by
+  // there for the eventual deferred use to be sound.
 
   // LEC-003: a `compare` header's pattern is a CFG statement (see
   // CFGBuilder::visitCompare()), so this is where a binding becomes a
@@ -161,101 +135,21 @@ public:
       onDef(Node.getLoc(), Node.ResolvedVar.get());
   }
 
-  void visitStructPattern(StructPatternExprAST &Node) override {
-    for (auto &F : Node.getFieldsMut())
-      visitChild(F.Sub.get());
-  }
-
-  // LEC-004: an error-variant pattern's bindings are definitions on the edge
-  // into the arm, exactly like a struct pattern's.
-  void visitErrorVariantPattern(ErrorVariantPatternExprAST &Node) override {
-    for (auto &Sub : Node.getSubsMut())
-      visitChild(Sub.get());
-  }
-
-  void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
-
-  // LEC-004: `try f(x)` reads whatever its operand reads. (It also returns --
-  // but, like a `return` inside a `recover` block, that is not modelled as a
-  // CFG edge: the path that continues is the one every later statement is on,
-  // and a variable assigned only after a `try` is still unassigned at the
-  // point the `try` leaves, which no pass here needs to know.)
-  void visitTry(TryExprAST &Node) override { visitChild(Node.getOperand()); }
-
-  // LANG-003: without this, a variable read or defined ONLY inside a
-  // `defer <statement>;` would be invisible to DefiniteAssignmentPass/
-  // LivenessAnalysisPass (both built on this visitor via
-  // collectReadsAndDefs()) -- ASTVisitor's default visitDefer() is a no-op,
-  // so a deferred read of an uninitialized local would go uncaught, and a
-  // local only ever read via `defer` would be falsely flagged
-  // UnusedVariableWarning/DeadStoreWarning. The defer's registration point
-  // (this textual position, not whenever it actually runs later) is
-  // exactly where the read/def dataflow-wise needs to be recorded: the
-  // deferred value doesn't exist yet, but the SYMBOL must already be
-  // assigned by here for the eventual deferred use to be sound, which is
-  // precisely what "treat it as an ordinary read/def right here" checks.
-  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
-
-  // OVH-012: without this, a variable read ONLY as the operand of a
-  // `recover` expression's WRAPPED call (`immut numStr: string = ...;
-  // strings::parse_double(numStr) recover run { ... };`, lib/std/json/
-  // json.tr) was invisible to both DefiniteAssignmentPass and
-  // LivenessAnalysisPass -- ASTVisitor's default visitRecoverExpr() is a
-  // no-op, so `numStr` was falsely flagged BOTH UnusedVariableWarning
-  // ("declared but never used") and DeadStoreWarning ("assigned but never
-  // read"), confirmed live. Same reasoning as visitDefer() just above (LANG-003).
-  // Wrapped is always visited (it's evaluated unconditionally); ProduceExpr
-  // only runs on the failure path of `recover produce`, Block only on the
-  // failure path of `recover run`/`recover as err run` -- mutually
-  // exclusive per RecoverKind, so exactly one of the two is ever non-null.
-  void visitRecoverExpr(RecoverExprAST &Node) override {
-    visitChild(Node.getWrapped());
-    if (Node.getKind() == RecoverKind::Produce)
-      visitChild(Node.getProduceExpr());
-    else
-      visitChild(Node.getBlock());
-  }
-
-  void visitFuncCall(FuncCallExprAST &Node) override {
-    // First-class functions: `f(x)` where `f` is a local variable/parameter
-    // of fn(...):... type is a genuine READ of `f` -- unlike an ordinary
-    // direct call (`double_it(5)`), whose VariableExprAST callee never gets
-    // a ResolvedSymbol attached (Resolver::visitFuncCall intercepts it
-    // before visitVariable() ever runs; see its comment), so visitVariable()
-    // above is naturally a no-op for that case and only fires onRead for the
-    // genuine indirect-call shape. Without this, `mut f: fn(int):int = ...;
-    // f(3);` falsely warned "'f' is declared but never used" / "assigned but
-    // never read" -- confirmed live before this fix.
-    visitChild(Node.getCallee());
-    for (const auto &Arg : Node.getArgs())
-      visitChild(Arg.get());
-  }
-
-  void visitMethodCall(MethodCallExprAST &Node) override {
-    visitChild(Node.getBase());
-    for (const auto &Arg : Node.getArgs())
-      visitChild(Arg.get());
-  }
-
-  void visitFieldAccess(FieldAccessExprAST &Node) override {
-    visitChild(Node.getBase());
-  }
-
-  void visitArrayAccess(ArrayAccessExprAST &Node) override {
-    visitChild(Node.getBase());
-    visitChild(Node.getIndex());
-  }
-
-  void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
-    for (const auto &Elem : Node.getElements())
-      visitChild(Elem.get());
-  }
+  // Struct and error-variant patterns (LEC-003/LEC-004) take the walker's
+  // recursion into their sub-patterns, which is where the bindings are: each
+  // one is a definition on the edge into the arm (visitBindingPattern above).
+  //
+  // `recover`/`defer`/`try` (OVH-012, LANG-003, LEC-004) take it too. For
+  // `recover`, `Wrapped` always runs while the produce expression / run block
+  // only run on the failure path -- exactly one of the two exists per
+  // RecoverKind -- and a variable read ONLY as the wrapped call's operand
+  // (`strings::parse_double(numStr) recover run { ... };`, lib/std/json/
+  // json.tr) was once flagged BOTH never-used and a dead store for lack of
+  // exactly this recursion. `try f(x)` reads what its operand reads; its early
+  // return is not modelled as a CFG edge, which nothing here needs.
 
   void visitArrayDecl(ArrayDeclExprAST &Node) override {
-    for (const auto &Init : Node.getInitList())
-      visitChild(Init.get());
-    if (Node.getInitExpr())
-      visitChild(Node.getInitExpr().get());
+    ASTChildWalker::visitArrayDecl(Node);
     // SEM-004 (§12.6, FREEZE.md §6.4): storage is always zero-filled
     // (ArrayDeclExprAST::codegen() memsets unconditionally), but that's a
     // runtime guarantee, not a static one -- an array declared with NEITHER
@@ -275,12 +169,13 @@ public:
 // distinguish local variables (which must be assigned before use) from function
 // parameters (which are always defined when the function is called).
 
-class BodyDeclCollector : public ASTVisitor {
-  void visitChild(const ExprAST *Node) {
-    if (Node)
-      const_cast<ExprAST *>(Node)->accept(*this);
-  }
+//
+// An ASTChildWalker (LEC-005, INV-LINT-1), so a declaration nested under ANY
+// node kind is found -- it used to recurse through a hand-written list of
+// containers, and a local declared inside (say) a `do`/`while` body or an
+// `unsafe` block was invisible to it.
 
+class BodyDeclCollector : public ASTChildWalker {
 public:
   AssignSet LocalDecls; // All locally-declared symbols (with or without init)
   /// The subset of LocalDecls that are `compare` pattern bindings (LEC-003).
@@ -299,30 +194,9 @@ public:
   void visitArrayDecl(ArrayDeclExprAST &Node) override {
     if (Node.ResolvedSymbol)
       LocalDecls.insert(Node.ResolvedSymbol.get());
-    for (const auto &I : Node.getInitList()) visitChild(I.get());
-    if (Node.getInitExpr()) visitChild(Node.getInitExpr().get());
+    ASTChildWalker::visitArrayDecl(Node);
   }
 
-  // Recurse into compound statements
-  void visitBlock(BlockExprAST &Node) override {
-    for (const auto &E : Node.getExpressions()) visitChild(E.get());
-  }
-  void visitIf(IfExprAST &Node) override {
-    for (const auto &Br : Node.getBranches()) {
-      visitChild(Br.Cond.get()); visitChild(Br.Body.get());
-    }
-    visitChild(Node.getElse());
-  }
-  void visitWhile(WhileExprAST &Node) override {
-    visitChild(Node.getCond()); visitChild(Node.getBody());
-  }
-  void visitFor(ForExprAST &Node) override {
-    visitChild(Node.getStart()); visitChild(Node.getEnd());
-    visitChild(Node.getStep()); visitChild(Node.getBody());
-  }
-  void visitForEach(ForEachExprAST &Node) override {
-    visitChild(Node.getIterable()); visitChild(Node.getBody());
-  }
   // LEC-003: a binding is a body-declared local, like a `mut` -- it MUST be in
   // this set, or DefiniteAssignmentPass treats it as parameter-like (never
   // flagged) and LivenessAnalysisPass never reports it unused.
@@ -332,26 +206,8 @@ public:
       PatternBindings.insert(Node.ResolvedVar.get());
     }
   }
-  void visitStructPattern(StructPatternExprAST &Node) override {
-    for (auto &F : Node.getFieldsMut())
-      visitChild(F.Sub.get());
-  }
-  void visitErrorVariantPattern(ErrorVariantPatternExprAST &Node) override {
-    for (auto &Sub : Node.getSubsMut())
-      visitChild(Sub.get());
-  }
-  void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
-  void visitAssignment(AssignmentExprAST &Node) override {
-    visitChild(Node.getLHS()); visitChild(Node.getRHS());
-  }
-  void visitBinary(BinaryExprAST &Node) override {
-    visitChild(Node.getLHS()); visitChild(Node.getRHS());
-  }
-  // LANG-003: a `defer` could (rarely) wrap a nested loop whose body
-  // declares its own local (e.g. `defer for (i in 0..n) { mut x = ...; }`)
-  // -- recurse in so DefiniteAssignmentPass's "AllBodyDeclared" set still
-  // sees it, same reasoning as AnalysisVisitor::visitDefer() above.
-  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
+  // Everything else -- including a `defer` wrapping a loop that declares its
+  // own local (LANG-003) -- takes the walker's recursion.
 };
 
 } // namespace
@@ -639,42 +495,45 @@ void LivenessAnalysisPass::runOnCFG(
     // We start at the end of the block with LiveOut[b] and walk backward.
     LiveSet Current = LiveOut[b];
     const auto &Stmts = Blocks[b]->getStatements();
-    // Collect (def-location, symbol) pairs forward first, then process backward
-    struct DefEntry { SourceLocation Loc; const VariableSymbol *Sym; };
-    std::vector<DefEntry> Defs;
-    std::vector<DefEntry> Reads;
-
-    for (ExprAST *Stmt : Stmts) {
-      collectReadsAndDefs(Stmt,
-        [&](SourceLocation L, const VariableSymbol *S) { Reads.push_back({L, S}); },
-        [&](SourceLocation L, const VariableSymbol *S) { Defs.push_back({L, S}); });
-    }
     // For dead-store detection we need statement-level granularity:
     // re-walk in statement order, maintaining a "live after" set that
-    // shrinks when we pass a use and grows when we pass a def.
+    // shrinks when we pass a def and grows when we pass a use.
     LiveSet LiveAfter = LiveOut[b];
     for (size_t s = Stmts.size(); s-- > 0;) {
-      // Collect reads and defs for this single statement
-      std::vector<std::pair<SourceLocation, const VariableSymbol *>> StmtDefs, StmtReads;
+      // This statement's reads and defs as ONE ordered event list. They used
+      // to be two separate lists applied "reads, then defs", which is wrong
+      // exactly for a read-modify-write: `x += 1` reads x and then defines it,
+      // so walking backward the def must be applied first (x is not live
+      // before it by virtue of the def) and the read after (x IS live before
+      // it, because the statement uses the old value). Applying the read
+      // first and letting the def erase it made the PREVIOUS store to x look
+      // dead -- `mut x: int = 0; x += 1; return x;` warned about `= 0`.
+      struct Event { bool IsDef; SourceLocation Loc; const VariableSymbol *Sym; };
+      std::vector<Event> Events;
       collectReadsAndDefs(Stmts[s],
-        [&](SourceLocation L, const VariableSymbol *S) { StmtReads.push_back({L, S}); },
-        [&](SourceLocation L, const VariableSymbol *S) { StmtDefs.push_back({L, S}); });
+        [&](SourceLocation L, const VariableSymbol *S) { Events.push_back({false, L, S}); },
+        [&](SourceLocation L, const VariableSymbol *S) { Events.push_back({true, L, S}); });
 
-      // Any def whose target is NOT in LiveAfter is a dead store.
-      // Only flag locals (in AllBodyDeclared), not parameters.
-      for (auto &[Loc, Sym] : StmtDefs) {
-        if (AllBodyDeclared.count(Sym) && !LiveAfter.count(Sym) &&
-            !BindingSyms.count(Sym) &&
-            // `_name`: same "deliberately unused" convention as Step 3.
-            !(!Sym->Name.empty() && Sym->Name[0] == '_')) {
-          DeadStoreWarning(Loc, Sym->Name).emit();
+      for (size_t e = Events.size(); e-- > 0;) {
+        const Event &Ev = Events[e];
+        if (!Ev.IsDef) {
+          LiveAfter.insert(Ev.Sym);
+          continue;
         }
+        // A def whose target is NOT live after it is a dead store. Only
+        // locals (in AllBodyDeclared), not parameters.
+        if (AllBodyDeclared.count(Ev.Sym) && !LiveAfter.count(Ev.Sym) &&
+            !BindingSyms.count(Ev.Sym) &&
+            // A variable that is never read at all is already reported once,
+            // by Step 3 ("declared but never used"); a second "assigned but
+            // never read" for its initializer is the same finding twice.
+            EverRead.count(Ev.Sym) &&
+            // `_name`: same "deliberately unused" convention as Step 3.
+            !(!Ev.Sym->Name.empty() && Ev.Sym->Name[0] == '_')) {
+          DeadStoreWarning(Ev.Loc, Ev.Sym->Name).emit();
+        }
+        LiveAfter.erase(Ev.Sym);
       }
-      // Update LiveAfter: reads make variables live (add), defs kill liveness (remove)
-      // Process in backward order for the statement: first reads (going backward)
-      // then defs.
-      for (auto &[Loc, Sym] : StmtReads)  LiveAfter.insert(Sym);
-      for (auto &[Loc, Sym] : StmtDefs)   LiveAfter.erase(Sym);
     }
   }
 }
@@ -693,13 +552,11 @@ namespace {
 // AnalysisVisitor's exact traversal shape above (same node types recursed
 // into) so every place a `self.field = ...` could legally appear inside a
 // constructor body is actually reached.
-class SelfFieldDefVisitor : public ASTVisitor {
+//
+// An ASTChildWalker (LEC-005): overrides only the three forms that DEFINE a
+// field and the one container (`recover`) whose children must not all count.
+class SelfFieldDefVisitor : public ASTChildWalker {
   std::function<void(const std::string &)> onFieldDef;
-
-  void visitChild(const ExprAST *Node) {
-    if (Node)
-      const_cast<ExprAST *>(Node)->accept(*this);
-  }
 
   // Returns the field name if LHS is exactly `self.<field>`, else nullptr.
   static const std::string *asSelfFieldName(const ExprAST *LHS) {
@@ -742,100 +599,17 @@ public:
       visitChild(Node.getOperand());
   }
 
-  void visitVarDecl(VarDeclExprAST &Node) override {
-    visitChild(Node.getInitializer());
+  // `g() recover run { self.b = 2; }`: only the WRAPPED expression counts. A
+  // `recover run` block must diverge (E066 "Non-diverging 'recover run'"), so a
+  // field assigned inside it is not assigned on the path that continues -- the
+  // walker's default would walk the block and wrongly count it. This used to
+  // be right only by accident (the base class's no-op); now it is a decision.
+  void visitRecoverExpr(RecoverExprAST &Node) override {
+    visitChild(Node.getWrapped());
   }
 
-  void visitBinary(BinaryExprAST &Node) override {
-    visitChild(Node.getLHS());
-    visitChild(Node.getRHS());
-  }
-
-  void visitUnary(UnaryExprAST &Node) override { visitChild(Node.getOperand()); }
-  void visitTry(TryExprAST &Node) override { visitChild(Node.getOperand()); } // LEC-004
-
-  void visitCast(CastExprAST &Node) override { visitChild(Node.getOperand()); }
-
-  void visitBlock(BlockExprAST &Node) override {
-    for (const auto &E : Node.getExpressions())
-      visitChild(E.get());
-  }
-
-  void visitIf(IfExprAST &Node) override {
-    for (const auto &Branch : Node.getBranches()) {
-      visitChild(Branch.Cond.get());
-      visitChild(Branch.Body.get());
-    }
-    visitChild(Node.getElse());
-  }
-
-  void visitWhile(WhileExprAST &Node) override {
-    visitChild(Node.getCond());
-    visitChild(Node.getBody());
-  }
-
-  void visitFor(ForExprAST &Node) override {
-    visitChild(Node.getStart());
-    visitChild(Node.getEnd());
-    visitChild(Node.getStep());
-    visitChild(Node.getBody());
-  }
-
-  void visitForEach(ForEachExprAST &Node) override {
-    visitChild(Node.getIterable());
-    visitChild(Node.getBody());
-  }
-
-  void visitCompare(CompareExprAST &Node) override {
-    visitChild(Node.getSubjectMut());
-    for (auto &Arm : Node.getArmsMut()) {
-      for (auto &Val : Arm.Values)
-        visitChild(Val.get());
-      for (auto &G : Arm.Guards)
-        visitChild(G.get());
-      visitChild(Arm.Body.get());
-    }
-    visitChild(Node.getOtherBodyMut());
-  }
-
-  void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
-
-  // LANG-003: a `self.field = ...` cleanup line is exactly the sort of
-  // thing a constructor might reasonably `defer` -- recurse in so
-  // ConstructorFieldAssignmentPass still sees it as a real field def.
-  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
-
-  void visitFuncCall(FuncCallExprAST &Node) override {
-    for (const auto &Arg : Node.getArgs())
-      visitChild(Arg.get());
-  }
-
-  void visitMethodCall(MethodCallExprAST &Node) override {
-    visitChild(Node.getBase());
-    for (const auto &Arg : Node.getArgs())
-      visitChild(Arg.get());
-  }
-
-  void visitFieldAccess(FieldAccessExprAST &Node) override {
-    visitChild(Node.getBase());
-  }
-
-  void visitArrayAccess(ArrayAccessExprAST &Node) override {
-    visitChild(Node.getBase());
-    visitChild(Node.getIndex());
-  }
-
-  void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
-    for (const auto &Elem : Node.getElements())
-      visitChild(Elem.get());
-  }
-
-  void visitArrayDecl(ArrayDeclExprAST &Node) override {
-    for (const auto &Init : Node.getInitList())
-      visitChild(Init.get());
-    if (Node.getInitExpr())
-      visitChild(Node.getInitExpr().get());
-  }
+  // Everything else -- including a `defer`red `self.field = ...` cleanup line
+  // (LANG-003) -- takes ASTChildWalker's recursion.
 };
 
 } // namespace
@@ -978,11 +752,11 @@ bool isTrackedNullableRef(const VariableSymbol *Sym) {
 // ResolvedSymbol, so scanning reads finds it too. A &?T parameter that is
 // never read anywhere has nothing to narrow or check, so missing it here is
 // harmless by construction.
-class NullableRefCollector : public ASTVisitor {
-  void visitChild(const ExprAST *Node) {
-    if (Node)
-      const_cast<ExprAST *>(Node)->accept(*this);
-  }
+//
+// An ASTChildWalker (LEC-005): a symbol touched only where this visitor did
+// not look (inside a `recover`) was never Tracked, and an empty Tracked set
+// makes NullabilityPass skip the whole function.
+class NullableRefCollector : public ASTChildWalker {
   void addIfTracked(const VariableSymbol *Sym) {
     if (isTrackedNullableRef(Sym))
       Tracked.insert(Sym);
@@ -998,94 +772,9 @@ public:
     addIfTracked(Node.getResolvedSymbol());
     visitChild(Node.getInitializer());
   }
-  void visitArrayDecl(ArrayDeclExprAST &Node) override {
-    for (const auto &I : Node.getInitList())
-      visitChild(I.get());
-    if (Node.getInitExpr())
-      visitChild(Node.getInitExpr().get());
-  }
-  void visitBlock(BlockExprAST &Node) override {
-    for (const auto &E : Node.getExpressions())
-      visitChild(E.get());
-  }
-  void visitIf(IfExprAST &Node) override {
-    for (const auto &Br : Node.getBranches()) {
-      visitChild(Br.Cond.get());
-      visitChild(Br.Body.get());
-    }
-    visitChild(Node.getElse());
-  }
-  void visitWhile(WhileExprAST &Node) override {
-    visitChild(Node.getCond());
-    visitChild(Node.getBody());
-  }
-  void visitDoWhile(DoWhileExprAST &Node) override {
-    visitChild(Node.getCond());
-    visitChild(Node.getBody());
-  }
-  void visitFor(ForExprAST &Node) override {
-    visitChild(Node.getStart());
-    visitChild(Node.getEnd());
-    visitChild(Node.getStep());
-    visitChild(Node.getBody());
-  }
-  void visitForEach(ForEachExprAST &Node) override {
-    visitChild(Node.getIterable());
-    visitChild(Node.getBody());
-  }
-  void visitReturn(ReturnExprAST &Node) override { visitChild(Node.getVal()); }
-  // LANG-003: discovers every &?T-typed symbol the function touches AT ALL
-  // (see this class's own doc comment above) -- one only ever read/assigned
-  // inside a `defer` must still end up Tracked, or NullabilityPass would
-  // silently skip checking it everywhere else too.
-  void visitDefer(DeferExprAST &Node) override { visitChild(Node.getStmt()); }
-  void visitAssignment(AssignmentExprAST &Node) override {
-    visitChild(Node.getLHS());
-    visitChild(Node.getRHS());
-  }
-  void visitCompoundAssignment(CompoundAssignmentExprAST &Node) override {
-    visitChild(Node.getLHS());
-    visitChild(Node.getRHS());
-  }
-  void visitPostfixExpr(PostfixExprAST &Node) override { visitChild(Node.getOperand()); }
-  void visitBinary(BinaryExprAST &Node) override {
-    visitChild(Node.getLHS());
-    visitChild(Node.getRHS());
-  }
-  void visitUnary(UnaryExprAST &Node) override { visitChild(Node.getOperand()); }
-  void visitTry(TryExprAST &Node) override { visitChild(Node.getOperand()); } // LEC-004
-  void visitAddressOf(AddressOfExprAST &Node) override { visitChild(Node.getOperand()); }
-  void visitCast(CastExprAST &Node) override { visitChild(Node.getOperand()); }
-  void visitFieldAccess(FieldAccessExprAST &Node) override { visitChild(Node.getBase()); }
-  void visitArrayAccess(ArrayAccessExprAST &Node) override {
-    visitChild(Node.getBase());
-    visitChild(Node.getIndex());
-  }
-  void visitArrayLiteral(ArrayLiteralExprAST &Node) override {
-    for (const auto &E : Node.getElements())
-      visitChild(E.get());
-  }
-  void visitFuncCall(FuncCallExprAST &Node) override {
-    visitChild(Node.getCallee());
-    for (const auto &A : Node.getArgs())
-      visitChild(A.get());
-  }
-  void visitMethodCall(MethodCallExprAST &Node) override {
-    visitChild(Node.getBase());
-    for (const auto &A : Node.getArgs())
-      visitChild(A.get());
-  }
-  void visitCompare(CompareExprAST &Node) override {
-    visitChild(Node.getSubject());
-    for (const auto &Arm : Node.getArms()) {
-      for (const auto &V : Arm.Values)
-        visitChild(V.get());
-      for (const auto &G : Arm.Guards)
-        visitChild(G.get());
-      visitChild(Arm.Body.get());
-    }
-    visitChild(Node.getOtherBody());
-  }
+  // Every other node kind -- `defer` (LANG-003: a symbol only ever touched
+  // inside one must still be Tracked or the whole pass skips it), `recover`,
+  // `unsafe`, loops, calls, patterns -- takes ASTChildWalker's recursion.
 };
 
 // If exactly one of LHS/RHS is a literal `null` and the other is a bare,
@@ -1662,7 +1351,17 @@ bool isCollectionMutatorCall(const MethodCallExprAST &Node) {
 // NarrowingVisitor (LANG-002, above in this file) already uses for the
 // identical reason: this codebase's existing tree-walking idiom for a CFG
 // pass, not the dynamic_cast-chain style CFG.cpp itself uses.
-class EscapeCheckVisitor : public ASTVisitor {
+//
+// An ASTChildWalker (LEC-005, INV-LINT-1): this enforces F-MEM-5, so a node it
+// skips is a dangling-reference hole, not a missed warning. The CFG hands it
+// one statement at a time, but a `recover run { ... }` block (and any `unsafe`
+// block, `defer`, or loop nested in one) is NOT split into CFG statements, so
+// it arrives as one statement whose inside this visitor must walk itself --
+// the hand-written overrides below covered operators and calls but had no
+// branch for `recover`, so `mut v: int = g() recover run { return &local; };`
+// returned a reference to a dead frame and compiled clean (confirmed live).
+// Nodes without a branch below now take the walker's plain recursion.
+class EscapeCheckVisitor : public ASTChildWalker {
   ProvMap &Map;
   bool DoReport;
 

@@ -16,6 +16,7 @@
  */
 
 #include "Sandbox.h"
+#include "ASTChildWalker.h" // CollectAllNodeIDsInternal()
 #include "Codegen.h"
 #include "Colors.h"
 #include "Lexer.h"

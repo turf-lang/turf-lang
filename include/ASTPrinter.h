@@ -36,7 +36,7 @@
 // TypeChecker.cpp needed the identical fix for its own diagnostics) --
 // transitively available here via AST.h's include of Lexer.h.
 
-class ASTPrinter : public ASTVisitor {
+class ASTPrinter : public ExhaustiveASTVisitor {
 public:
   // ── Public entry point ──────────────────────────────────────────────────────
   /// Print the entire subtree rooted at @p Node to stdout.
@@ -511,6 +511,104 @@ public:
     printIndent(Depth_);
     std::cout << "SizeOf("
               << (N.getTypeArg() ? N.getTypeArg()->getName() : "?") << ")\n";
+  }
+
+  // ── Nodes the dump used to skip silently (LEC-005 audit) ───────────────────
+  // A dump that prints nothing for a node kind reads as "that node is not
+  // there" -- LEC-004 noticed `--dump-ast` never showed the inside of a
+  // `recover`. ASTPrinter is an ExhaustiveASTVisitor now, so a node kind
+  // added later cannot be omitted without a compile error.
+  void visitAddressOf(AddressOfExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "AddressOf";
+    printTypeBadge(&N);
+    std::cout << "\n";
+    descend();
+    print(const_cast<ExprAST *>(N.getOperand()), Depth_);
+    ascend();
+  }
+
+  void visitCallerLocation(CallerLocationExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "CallerLocation";
+    printTypeBadge(&N);
+    std::cout << "\n";
+  }
+
+  void visitDefer(DeferExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "Defer\n";
+    descend();
+    print(N.getStmt(), Depth_);
+    ascend();
+  }
+
+  void visitUnsafeBlock(UnsafeBlockExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "UnsafeBlock\n";
+    descend();
+    print(N.getBodyMut(), Depth_);
+    ascend();
+  }
+
+  void visitRecoverExpr(RecoverExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "RecoverExpr(";
+    if (N.getKind() == RecoverKind::Produce)
+      std::cout << "produce";
+    else if (!N.getBoundName().empty())
+      std::cout << "as " << N.getBoundName() << " run";
+    else
+      std::cout << "run";
+    std::cout << ")";
+    printTypeBadge(&N);
+    std::cout << "\n";
+    descend();
+    printIndent(Depth_);
+    std::cout << "Wrapped:\n";
+    descend();
+    print(N.getWrapped(), Depth_);
+    ascend();
+    printIndent(Depth_);
+    std::cout << (N.getKind() == RecoverKind::Produce ? "Produce:\n" : "Handler:\n");
+    descend();
+    print(N.getKind() == RecoverKind::Produce ? N.getProduceExpr() : N.getBlock(),
+          Depth_);
+    ascend();
+    ascend();
+  }
+
+  void visitScopeAccess(ScopeAccessExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "ScopeAccess(" << N.getLeftName() << "::" << N.getRightName()
+              << ")";
+    printTypeBadge(&N);
+    std::cout << "\n";
+  }
+
+  // Top-level declarations are listed by name only; their members are printed
+  // by the declaration kinds above that carry expressions.
+  void visitEnumDecl(EnumDeclExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "EnumDecl(" << N.getName() << ", " << N.getVariants().size()
+              << " variants)\n";
+  }
+
+  void visitErrorDecl(ErrorDeclExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "ErrorDecl(" << N.getName() << ", " << N.getVariants().size()
+              << " variants)\n";
+  }
+
+  void visitMachineDecl(MachineDeclExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "MachineDecl(" << N.getName() << ", " << N.getStates().size()
+              << " states)\n";
+  }
+
+  void visitExternFuncDecl(ExternFuncDeclExprAST &N) override {
+    printIndent(Depth_);
+    std::cout << "ExternFuncDecl(" << N.getName() << ")\n";
   }
 
 private:

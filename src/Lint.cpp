@@ -17,6 +17,7 @@
 
 #include "Lint.h"
 #include "AST.h"
+#include "ASTChildWalker.h"
 #include "Errors.h"
 #include "Lexer.h"
 #include "Types.h"
@@ -282,6 +283,41 @@ static void LintIf(const IfExprAST *If);
 
 static void LintFor(const ForExprAST *For);
 
+namespace {
+/**
+ * The lint walk. Derives from ASTChildWalker -- an ExhaustiveASTVisitor -- so
+ * every node kind is reached and a node kind added later cannot compile
+ * without the walker deciding where its children are (LEC-005, INV-LINT-1).
+ * This replaced a chain of independent `dynamic_cast`s that silently skipped
+ * every kind nobody wrote a branch for: a call argument, an `unsafe` block, a
+ * `defer`, an array literal (`io::printline(a / 0)` warned about nothing),
+ * and once a declaration's initializer (DIAG-001's point fix).
+ *
+ * Only a node with its own check is overridden. The per-node checks below
+ * that RECURSE THEMSELVES (While/DoWhile/For/If, which need their own
+ * children visited in a specific order around the check) are called without
+ * the walker's default recursion, so nothing is linted twice.
+ */
+class LintVisitor : public ASTChildWalker {
+public:
+  void visitBinary(BinaryExprAST &Node) override {
+    LintBinaryExpr(&Node);
+    ASTChildWalker::visitBinary(Node);
+  }
+  void visitAssignment(AssignmentExprAST &Node) override {
+    LintAssignment(&Node);
+    ASTChildWalker::visitAssignment(Node);
+  }
+  void visitWhile(WhileExprAST &Node) override { LintWhile(&Node); }
+  void visitDoWhile(DoWhileExprAST &Node) override { LintDoWhile(&Node); }
+  // `for` over a range has a "loop variable never advances" check;
+  // for-each has no analog (its value/index vars are never advanced by hand
+  // by design), so ForEach takes the walker's plain recursion.
+  void visitFor(ForExprAST &Node) override { LintFor(&Node); }
+  void visitIf(IfExprAST &Node) override { LintIf(&Node); }
+};
+} // namespace
+
 // Main entry point
 /**
  * @brief Recursively lints an AST expression or statement.
@@ -295,76 +331,8 @@ static void LintFor(const ForExprAST *For);
 void LintExpression(ExprAST *E) {
   if (!E)
     return;
-
-  if (auto *Bin = dynamic_cast<BinaryExprAST *>(E)) {
-    LintBinaryExpr(Bin);
-    LintExpression(const_cast<ExprAST*>(Bin->getLHS()));
-    LintExpression(const_cast<ExprAST*>(Bin->getRHS()));
-  }
-
-  if (auto *Assign = dynamic_cast<AssignmentExprAST *>(E)) {
-    LintAssignment(Assign);
-    LintExpression(const_cast<ExprAST*>(Assign->getLHS()));
-    LintExpression(const_cast<ExprAST*>(Assign->getRHS()));
-  }
-
-  if (auto *While = dynamic_cast<WhileExprAST *>(E)) {
-    LintWhile(While);
-  }
-
-  if (auto *DoWhile = dynamic_cast<DoWhileExprAST *>(E)) {
-    LintDoWhile(DoWhile);
-  }
-
-  if (auto *For = dynamic_cast<ForExprAST *>(E)) {
-    LintFor(For);
-  }
-
-  if (auto *ForEach = dynamic_cast<ForEachExprAST *>(E)) {
-    // No LintForEach() helper needed: there's no "loop variable never
-    // advances" analog for for-each (the value/index vars are never
-    // manually advanced by design -- that check is ForExprAST-specific by
-    // construction), so a bare recursion into children is sufficient.
-    LintExpression(const_cast<ExprAST *>(ForEach->getIterable()));
-    LintExpression(ForEach->getBody());
-  }
-
-  if (auto *If = dynamic_cast<IfExprAST *>(E)) {
-    LintIf(If);
-  }
-
-  if (auto *Ret = dynamic_cast<ReturnExprAST *>(E)) {
-    LintExpression(const_cast<ExprAST*>(Ret->getVal()));
-  }
-
-  if (auto *FD = dynamic_cast<FuncDefExprAST *>(E)) {
-    LintExpression(FD->getBodyMut());
-  }
-
-  // Recurse into block children
-  if (auto *Blk = dynamic_cast<BlockExprAST *>(E)) {
-    for (const auto &Child : Blk->getExpressions()) {
-      LintExpression(Child.get());
-    }
-  }
-
-  if (auto *CAssign = dynamic_cast<CompoundAssignmentExprAST *>(E)) {
-    LintExpression(const_cast<ExprAST*>(CAssign->getLHS()));
-    LintExpression(const_cast<ExprAST*>(CAssign->getRHS()));
-  }
-
-  if (auto *Post = dynamic_cast<PostfixExprAST *>(E)) {
-    LintExpression(const_cast<ExprAST*>(Post->getOperand()));
-  }
-
-  // A variable declaration's initializer used to be entirely skipped here --
-  // no branch below ever recursed into VarDeclExprAST at all, so every lint
-  // check silently never ran over the right-hand side of any declaration
-  // (`mut x: int = 5 / 0;` warned about nothing; confirmed live before this
-  // fix). DIAG-001, INV-LINT-1.
-  if (auto *VD = dynamic_cast<VarDeclExprAST *>(E)) {
-    LintExpression(const_cast<ExprAST*>(VD->getInitializer()));
-  }
+  LintVisitor V;
+  E->accept(V);
 }
 
 // Check: redundant boolean comparison, self-comparison, division by zero
@@ -614,120 +582,53 @@ static void LintIf(const IfExprAST *If) {
 }
 
 // Semantic Pruning: Only lint nodes that have changed (by node ID)
-// Internal recursive helper for semantic pruning
-static void
-LintChangedNodesOnlyInternal(ExprAST *E,
-                             const std::set<uint64_t> &ChangedNodeIDs) {
-  if (!E)
-    return;
+//
+// Same walk as LintVisitor, but the per-node checks run only for nodes in
+// `ChangedNodeIDs` (or for every node when it is empty). Children are visited
+// regardless -- a changed node can sit under an unchanged parent -- and,
+// because this is an ASTChildWalker, "children" now means every node kind's
+// children, not just the nine a hand-written chain used to recurse into
+// (LEC-005, INV-LINT-1).
+namespace {
+class ChangedNodesLintVisitor : public ASTChildWalker {
+  const std::set<uint64_t> &ChangedNodeIDs;
 
-  // Only lint this node if it's in the changed set
-  // (or if ChangedNodeIDs is empty, lint everything)
-  uint64_t NodeID = E->getNodeID();
-  bool ShouldLintThisNode =
-      ChangedNodeIDs.empty() || ChangedNodeIDs.count(NodeID) > 0;
-
-  if (ShouldLintThisNode) {
-    // Run normal lint checks on this node
-    if (auto *Bin = dynamic_cast<BinaryExprAST *>(E))
-      LintBinaryExpr(Bin);
-
-    if (auto *Assign = dynamic_cast<AssignmentExprAST *>(E))
-      LintAssignment(Assign);
-
-    if (auto *While = dynamic_cast<WhileExprAST *>(E))
-      LintWhile(While);
-
-    if (auto *If = dynamic_cast<IfExprAST *>(E))
-      LintIf(If);
+  bool shouldLint(const ExprAST &Node) const {
+    return ChangedNodeIDs.empty() || ChangedNodeIDs.count(Node.getNodeID()) > 0;
   }
 
-  // Recurse into block children regardless (they might have changed nodes)
-  if (auto *Blk = dynamic_cast<BlockExprAST *>(E)) {
-    for (const auto &Child : Blk->getExpressions()) {
-      LintChangedNodesOnlyInternal(Child.get(), ChangedNodeIDs);
-    }
-    return;
-  }
+public:
+  explicit ChangedNodesLintVisitor(const std::set<uint64_t> &Changed)
+      : ChangedNodeIDs(Changed) {}
 
-  // Recurse into binary expression children
-  if (auto *Bin = dynamic_cast<BinaryExprAST *>(E)) {
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Bin->getLHS()),
-                                 ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Bin->getRHS()),
-                                 ChangedNodeIDs);
-    return;
+  void visitBinary(BinaryExprAST &Node) override {
+    if (shouldLint(Node))
+      LintBinaryExpr(&Node);
+    ASTChildWalker::visitBinary(Node);
   }
-
-  // Recurse into assignment children
-  if (auto *Assign = dynamic_cast<AssignmentExprAST *>(E)) {
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Assign->getLHS()),
-                                 ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Assign->getRHS()),
-                                 ChangedNodeIDs);
-    return;
+  void visitAssignment(AssignmentExprAST &Node) override {
+    if (shouldLint(Node))
+      LintAssignment(&Node);
+    ASTChildWalker::visitAssignment(Node);
   }
-
-  // Recurse into if expression children
-  if (auto *If = dynamic_cast<IfExprAST *>(E)) {
-    const auto &Branches = If->getBranches();
-    for (const auto &Branch : Branches) {
-      LintChangedNodesOnlyInternal(Branch.Cond.get(), ChangedNodeIDs);
-      LintChangedNodesOnlyInternal(Branch.Body.get(), ChangedNodeIDs);
-    }
-    LintChangedNodesOnlyInternal(If->getElseBody(), ChangedNodeIDs);
-    return;
+  void visitWhile(WhileExprAST &Node) override {
+    if (shouldLint(Node))
+      LintWhile(&Node);
+    ASTChildWalker::visitWhile(Node);
   }
-
-  // Recurse into while loop children
-  if (auto *While = dynamic_cast<WhileExprAST *>(E)) {
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(While->getCond()),
-                                 ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(While->getBody(), ChangedNodeIDs);
-    return;
+  void visitIf(IfExprAST &Node) override {
+    if (shouldLint(Node))
+      LintIf(&Node);
+    ASTChildWalker::visitIf(Node);
   }
-
-  // Recurse into for loop children
-  if (auto *For = dynamic_cast<ForExprAST *>(E)) {
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getStart()),
-                                 ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getEnd()),
-                                 ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(For->getStep()),
-                                 ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(For->getBody(), ChangedNodeIDs);
-    return;
-  }
-
-  // Recurse into for-each loop children
-  if (auto *ForEach = dynamic_cast<ForEachExprAST *>(E)) {
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(ForEach->getIterable()),
-                                 ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(ForEach->getBody(), ChangedNodeIDs);
-    return;
-  }
-
-  // Recurse into compound assignment children
-  if (auto *CAssign = dynamic_cast<CompoundAssignmentExprAST *>(E)) {
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(CAssign->getLHS()),
-                                 ChangedNodeIDs);
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(CAssign->getRHS()),
-                                 ChangedNodeIDs);
-    return;
-  }
-
-  // Recurse into postfix expression operand
-  if (auto *Post = dynamic_cast<PostfixExprAST *>(E)) {
-    LintChangedNodesOnlyInternal(const_cast<ExprAST *>(Post->getOperand()),
-                                 ChangedNodeIDs);
-    return;
-  }
-}
+};
+} // namespace
 
 // Public API: Semantic pruning for incremental validation
 void LintChangedNodesOnly(ExprAST *E,
                           const std::set<uint64_t> &ChangedNodeIDs) {
   if (!E)
     return;
-  LintChangedNodesOnlyInternal(E, ChangedNodeIDs);
+  ChangedNodesLintVisitor V(ChangedNodeIDs);
+  E->accept(V);
 }

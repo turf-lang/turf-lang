@@ -23,169 +23,17 @@ CloneExprList(const std::vector<std::unique_ptr<ExprAST>> &Nodes) {
   return Result;
 }
 
-// Collect every node ID reachable from a tree. Used as a fallback when the
-// baseline AST is missing so incremental validation still sees the whole tree.
+// CollectAllNodeIDsInternal(): every node ID reachable from a tree (the
+// Sandbox's fallback when the baseline AST is missing, so incremental
+// validation still sees the whole tree). Defined in ASTChildWalker.h as an
+// ASTChildWalker -- it was a hand-written dynamic_cast chain that stopped at any
+// node kind it had no branch for, so the IDs under a `recover`, `defer`,
+// `unsafe` block or `compare` were never collected and incremental validation
+// never linted them (LEC-005, INV-LINT-1). Declared here for the diffing code
+// below; the definition needs the walker, which cannot be included from here
+// (AST.h includes this file last).
 inline void CollectAllNodeIDsInternal(const ExprAST *Node,
-                                      std::set<uint64_t> &NodeIDs) {
-  if (!Node)
-    return;
-
-  NodeIDs.insert(Node->getNodeID());
-
-  if (const auto *Binary = dynamic_cast<const BinaryExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(Binary->getLHS(), NodeIDs);
-    CollectAllNodeIDsInternal(Binary->getRHS(), NodeIDs);
-    return;
-  }
-
-  if (const auto *Unary = dynamic_cast<const UnaryExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(Unary->getOperand(), NodeIDs);
-    return;
-  }
-
-  if (const auto *Assign = dynamic_cast<const AssignmentExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(Assign->getLHS(), NodeIDs);
-    CollectAllNodeIDsInternal(Assign->getRHS(), NodeIDs);
-    return;
-  }
-
-  if (const auto *CompoundAssign =
-          dynamic_cast<const CompoundAssignmentExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(CompoundAssign->getLHS(), NodeIDs);
-    CollectAllNodeIDsInternal(CompoundAssign->getRHS(), NodeIDs);
-    return;
-  }
-
-  if (const auto *Postfix = dynamic_cast<const PostfixExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(Postfix->getOperand(), NodeIDs);
-    return;
-  }
-
-
-  if (const auto *Decl = dynamic_cast<const VarDeclExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(Decl->getInitializer(), NodeIDs);
-    return;
-  }
-
-  if (const auto *Cast = dynamic_cast<const CastExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(Cast->getOperand(), NodeIDs);
-    return;
-  }
-
-  if (const auto *BlockNode = dynamic_cast<const BlockExprAST *>(Node)) {
-    for (const auto &Expr : BlockNode->getExpressions())
-      CollectAllNodeIDsInternal(Expr.get(), NodeIDs);
-    return;
-  }
-
-  if (const auto *ModuleImportNode =
-          dynamic_cast<const ModuleImportExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(ModuleImportNode->getBody(), NodeIDs);
-    return;
-  }
-
-  if (const auto *IfNode = dynamic_cast<const IfExprAST *>(Node)) {
-    for (const auto &Branch : IfNode->getBranches()) {
-      CollectAllNodeIDsInternal(Branch.Cond.get(), NodeIDs);
-      CollectAllNodeIDsInternal(Branch.Body.get(), NodeIDs);
-    }
-    CollectAllNodeIDsInternal(IfNode->getElseBody(), NodeIDs);
-    return;
-  }
-
-  if (const auto *While = dynamic_cast<const WhileExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(While->getCond(), NodeIDs);
-    CollectAllNodeIDsInternal(While->getBody(), NodeIDs);
-    return;
-  }
-
-  if (const auto *DoWhile = dynamic_cast<const DoWhileExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(DoWhile->getBody(), NodeIDs);
-    CollectAllNodeIDsInternal(DoWhile->getCond(), NodeIDs);
-    return;
-  }
-
-  if (const auto *For = dynamic_cast<const ForExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(For->getStart(), NodeIDs);
-    CollectAllNodeIDsInternal(For->getEnd(), NodeIDs);
-    CollectAllNodeIDsInternal(For->getStep(), NodeIDs);
-    CollectAllNodeIDsInternal(For->getBody(), NodeIDs);
-    return;
-  }
-
-  if (const auto *ForEach = dynamic_cast<const ForEachExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(ForEach->getIterable(), NodeIDs);
-    CollectAllNodeIDsInternal(ForEach->getBody(), NodeIDs);
-    return;
-  }
-
-  if (const auto *FuncCall = dynamic_cast<const FuncCallExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(FuncCall->getCallee(), NodeIDs);
-    for (const auto &Arg : FuncCall->getArgs())
-      CollectAllNodeIDsInternal(Arg.get(), NodeIDs);
-    return;
-  }
-
-  if (const auto *FuncDef = dynamic_cast<const FuncDefExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(FuncDef->getBody(), NodeIDs);
-    return;
-  }
-
-  if (const auto *ReturnNode = dynamic_cast<const ReturnExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(ReturnNode->getVal(), NodeIDs);
-    return;
-  }
-
-
-  if (const auto *ArrayDecl = dynamic_cast<const ArrayDeclExprAST *>(Node)) {
-    for (const auto &Init : ArrayDecl->getInitList())
-      CollectAllNodeIDsInternal(Init.get(), NodeIDs);
-    CollectAllNodeIDsInternal(ArrayDecl->getInitExpr().get(), NodeIDs);
-    return;
-  }
-
-  if (const auto *ArrayAccess =
-          dynamic_cast<const ArrayAccessExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(ArrayAccess->getBase(), NodeIDs);
-    CollectAllNodeIDsInternal(ArrayAccess->getIndex(), NodeIDs);
-    return;
-  }
-
-
-
-  if (const auto *MethodCall = dynamic_cast<const MethodCallExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(MethodCall->getBase(), NodeIDs);
-    for (const auto &A : MethodCall->getArgs()) {
-      if (A)
-        CollectAllNodeIDsInternal(A.get(), NodeIDs);
-    }
-    return;
-  }
-
-  if (const auto *ArrayLit = dynamic_cast<const ArrayLiteralExprAST *>(Node)) {
-    for (const auto &Elem : ArrayLit->getElements())
-      CollectAllNodeIDsInternal(Elem.get(), NodeIDs);
-    return;
-  }
-
-
-  if (const auto *FieldAccess =
-          dynamic_cast<const FieldAccessExprAST *>(Node)) {
-    CollectAllNodeIDsInternal(FieldAccess->getBase(), NodeIDs);
-    return;
-  }
-
-  if (dynamic_cast<const BreakExprAST *>(Node) ||
-      dynamic_cast<const ContinueExprAST *>(Node) ||
-      dynamic_cast<const NumberExprAST *>(Node) ||
-      dynamic_cast<const BoolExprAST *>(Node) ||
-      dynamic_cast<const StringExprAST *>(Node) ||
-      dynamic_cast<const VariableExprAST *>(Node) ||
-      dynamic_cast<const StructDeclExprAST *>(Node) ||
-      dynamic_cast<const SizeOfExprAST *>(Node)) {
-    return;
-  }
-}
+                                      std::set<uint64_t> &NodeIDs);
 
 // AST Diffing Implementation: Per-node-type structural comparison
 // Forward declaration for recursive diffing
