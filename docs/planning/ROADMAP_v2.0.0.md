@@ -137,7 +137,7 @@ PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D1
    │                                  LEC-003  pattern matching (D14)  DONE (LEC-003.md, 2026-10-01)
    │                                  LEC-004  error payloads + `try` (D15)  DONE (LEC-004.md, 2026-10-01)
    │                                  LEC-006  collection indexing coherence (generic operators)  DONE (LEC-006.md, 2026-10-01)
-   │                                  LEC-005  diagnostics reliability (incl. D25)
+   │                                  LEC-005  diagnostics reliability (incl. D25)  DONE (LEC-005.md, 2026-10-01)
    │                                  LEC-007  standard library 2.0 surface
    ▼
 ═══════  LANGUAGE FREEZE  (Part VI)   tag v2.0.0-freeze
@@ -1078,6 +1078,23 @@ arguments (`List<int>::default()`, FUTURE F-6c).
 ---
 
 ### LEC-005 — Diagnostics reliability (includes D25)
+
+> **Landed 2026-10-01** — `docs/development/changes/LEC-005.md`; no new freeze
+> (`FREEZE.md` §6.0 rule 3: none was asked for). Where the implementation differs
+> from the design below: (1) item 1's depth cap was worse than described — it
+> capped the *total* instantiations, so 65 independent `ident<S>` calls failed
+> with a bogus E079; it now measures the chain, with a 4096 total backstop for a
+> generic that fans out; (2) item 6 is a compile-time guarantee, not a runtime
+> check — `ExhaustiveASTVisitor` has every `visit*` pure virtual, generated from
+> one node list, and a shared `ASTChildWalker` supplies the children; (3) the
+> same hand-written-chain defect was **a soundness bug** in two safety passes,
+> fixed on the way (an `&x` inside `recover` hid the address from check
+> elision — an out-of-bounds read at exit 0 — and `return &local` inside
+> `recover` was never E086) and a third, null-narrowing inside `recover`, is
+> documented and **not** fixed (`tests/99_known_bugs/`, record *Unresolved
+> questions* 2); (4) `EXPECT-DIAG` also has `EXPECT-NO-DIAG` and
+> `EXPECT-RUNTIME`, and `tests/36_numeric_semantics/` is back-filled; (5) item 7
+> was already done by OVH-012 and was re-verified, not re-implemented.
 
 **Kind** Language/ecosystem · **Rule** R5 · **Size** M · **Prereqs** LEC-003, LEC-004 (so their new diagnostics are covered)
 
