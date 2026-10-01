@@ -61,9 +61,10 @@ pub fn<T> Queue.enqueue(item: T): void {
   self.len = self.len + 1;
 }
 
+@caller_location
 pub fn<T> Queue.dequeue(): T {
   if (self.len == 0) {
-    sys::panic("Queue.dequeue: dequeue on empty queue");
+    sys::panic(caller_location + ": Queue.dequeue: dequeue on empty queue");
   }
 
   immutable item: T = self.data[self.head];
@@ -72,9 +73,10 @@ pub fn<T> Queue.dequeue(): T {
   return item;
 }
 
+@caller_location
 pub fn<T> Queue.peek(): T {
   if (self.len == 0) {
-    sys::panic("Queue.peek: peek on empty queue");
+    sys::panic(caller_location + ": Queue.peek: peek on empty queue");
   }
 
   return self.data[self.head];

@@ -174,6 +174,7 @@ pub fn JsonValue.set(key: string, value: JsonValue): void {
 // Looks up `key` on an Object-kind value. Aborts if the key is missing --
 // mirrors map.tr's Map.get()'s identical "missing key is a programming
 // bug" default; check `.has(key)` first if a miss is expected input.
+@caller_location
 pub fn JsonValue.get(key: string): JsonValue {
     mut i: int = 0;
     while i < self.obj_keys.length() {
@@ -182,7 +183,7 @@ pub fn JsonValue.get(key: string): JsonValue {
         }
         i = i + 1;
     }
-    sys::panic("JsonValue.get: no such key '" + key + "'");
+    sys::panic(caller_location + ": JsonValue.get: no such key '" + key + "'");
     return JsonValue::null_value();
 }
 
@@ -216,9 +217,10 @@ pub fn JsonValue.get_bool(key: string): bool {
 
 // Indexes an Array-kind value. Aborts on an out-of-bounds index, mirroring
 // strings.tr's substring()'s identical "this is a programming bug" abort.
+@caller_location
 pub fn JsonValue.at(index: int): JsonValue {
     if index < 0 || index >= self.arr_val.length() {
-        sys::panic("JsonValue.at: index out of bounds");
+        sys::panic(caller_location + ": JsonValue.at: index out of bounds");
     }
     return self.arr_val.get(index);
 }

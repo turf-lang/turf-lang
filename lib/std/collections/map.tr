@@ -231,10 +231,11 @@ pub fn<K, V> Map.put(key: K, value: V): void {
   self.len = self.len + 1;
 }
 
+@caller_location
 pub fn<K, V> Map.get(key: K): V {
   immutable idx: int = self.index_of(key);
   if (idx < 0) {
-    sys::panic("Map.get: no such key");
+    sys::panic(caller_location + ": Map.get: no such key");
   }
   return self.values[idx];
 }

@@ -68,9 +68,10 @@ pub fn<T> List.push(item: T): void {
   self.len = self.len + 1;
 }
 
+@caller_location
 pub fn<T> List.pop(): T {
   if (self.len == 0) {
-    sys::panic("List.pop: pop on empty list");
+    sys::panic(caller_location + ": List.pop: pop on empty list");
   }
 
   self.len = self.len - 1;

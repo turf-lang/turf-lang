@@ -52,18 +52,20 @@ pub fn<T> Stack.push(item: T): void {
   self.len = self.len + 1;
 }
 
+@caller_location
 pub fn<T> Stack.pop(): T {
   if (self.len == 0) {
-    sys::panic("Stack.pop: pop on empty stack");
+    sys::panic(caller_location + ": Stack.pop: pop on empty stack");
   }
 
   self.len = self.len - 1;
   return self.data[self.len];
 }
 
+@caller_location
 pub fn<T> Stack.peek(): T {
   if (self.len == 0) {
-    sys::panic("Stack.peek: peek on empty stack");
+    sys::panic(caller_location + ": Stack.peek: peek on empty stack");
   }
 
   return self.data[self.len - 1];

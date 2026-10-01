@@ -386,10 +386,11 @@ pub fn count_char(s: string, ch: int): int {
 
 // substring: returns the slice of `s` from byte index `start` (inclusive) to
 // `end` (exclusive). Aborts if the range is out of bounds.
+@caller_location
 pub fn substring(s: string, start: int, end: int): string {
     mut n: int = strlen(s);
     if start < 0 || end < start || end > n {
-        sys::panic("strings.substring: index out of bounds");
+        sys::panic(caller_location + ": strings.substring: index out of bounds");
     }
     mut len: int = end - start;
     // Allocate len+1 bytes (for null terminator)

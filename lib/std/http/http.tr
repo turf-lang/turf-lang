@@ -143,9 +143,10 @@ pub struct Request {
 // scan is no longer needed here; see docs/development/changes/STD-003.md
 // and docs/planning/LIMITATIONS.md's (now closed) item 1 for the full
 // history.
+@caller_location
 pub fn Request.get_header(name: string): string {
     return self.headers.try_get(name) recover run {
-        sys::panic("Request.get_header: no such header '" + name + "'");
+        sys::panic(caller_location + ": Request.get_header: no such header '" + name + "'");
         return ""; // unreachable (sys::panic never returns) -- see
                     // Server.listen()'s identical 'recover run'
                     // non-diverging-block rule, below.
@@ -322,10 +323,11 @@ pub fn Server.has_route(path: string): bool {
     return self.route_index(path) >= 0;
 }
 
+@caller_location
 pub fn Server.get_route(path: string): fn(Request, Response): void {
     immut idx: int = self.route_index(path);
     if idx < 0 {
-        sys::panic("Server.get_route: no such route '" + path + "'");
+        sys::panic(caller_location + ": Server.get_route: no such route '" + path + "'");
     }
     // This used to read `Map<K, V>.values[idx]` -- a raw `V*` -- through an
     // inline `unsafe { }` (OVH-003). `values` is private to map.tr now

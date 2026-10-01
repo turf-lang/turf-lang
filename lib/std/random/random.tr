@@ -51,6 +51,7 @@
 //   if random::random_bool() { ... }                 // coin flip
 
 import time;
+import sys;
 
 // ─── libc bindings ────────────────────────────────────────────────────────
 
@@ -90,7 +91,15 @@ pub fn reseed(): void {
 // slight bias toward the low end of the range whenever `range` doesn't
 // evenly divide RAND_MAX + 1 -- fine for games/tests/sampling, not for
 // anything that needs a provably uniform distribution.
+@caller_location
 pub fn random_int(min: int, max: int): int {
+    // `max < min` leaves `range` <= 0, and `r % 0` is a divide trap with a
+    // message that says nothing about random_int; a negative range silently
+    // returns a value outside [min, max]. Neither is input a caller can
+    // recover from, so it is a precondition panic that names the call.
+    if max < min {
+        sys::panic(caller_location + ": random_int: max (" + (max to string) + ") is less than min (" + (min to string) + ")");
+    }
     reseed();
     immut range: int = max - min + 1;
     immut r: int = rand();
