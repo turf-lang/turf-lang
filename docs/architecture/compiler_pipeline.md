@@ -1057,6 +1057,50 @@ independently reimplements the same pattern in at least two more places
 and was deliberately left out of this unification — see the change
 record's *Unresolved questions* for why.
 
+### 7.x Generic operators (LEC-006)
+
+An `operator<T> ...` declaration is a `FuncDefExprAST` with non-empty
+`TypeParams`, so the monomorphizer treats it as a template like any `fn<T>`
+(`FREEZE.md` §6.19). What differs is the call site: the requester is an
+*operator node* (`BinaryExprAST`, `UnaryExprAST`, `CompoundAssignmentExprAST`,
+`PostfixExprAST`, `ArrayAccessExprAST`), not a `FuncCallExprAST`.
+
+- **Matching** — `TypeChecker::matchOperatorOverload()` (`TypeCheckerCall.cpp`)
+  is the one place a candidate meets concrete operands, for all seven operator
+  resolution sites. Generic candidate: `unify()` each declared operand against
+  its operand, require every type parameter bound, *substitute*, then require
+  `sameTypeExact()` per operand. The last step is not redundant — `unify()`
+  skips a structural mismatch silently, so without it `Cell<int> == Cell<string>`
+  would match `operator<T> ==(a: Cell<T>, b: Cell<T>)` with `T = int`.
+- **Request identity** — a request carries `Decl`, the exact template
+  (`ResolverFunctionSymbol::Decl`, set in `buildFunctionSymbol()`).
+  `(SourceModule, DeclKey)` alone cannot tell overloads apart, and every operator
+  spelling is overloaded. `drainFreeFunctionRequests()` instantiates `Decl`
+  directly and only falls back to the name registry without one; the method
+  and constructor drains do the same, so overloaded generic methods
+  (`Box.put(x)` / `Box.put(x, y)`) and constructors are separate templates too.
+- **Rewriting sites** — `retargetOperatorSite()` (`Monomorphize.cpp`) writes the
+  clone into the node's own target field. `DeclKey` disambiguates the two
+  things one node can need: `a[i]` is the site of both an `operator[]` and an
+  `operator[]=` request, and a user-written `!x` (a `BinaryExprAST`) keeps its
+  `operator!` target apart from its `!=` one.
+- **Not recorded for an open type parameter** — checking the template body
+  itself sees `List<T>`; only a fully concrete tuple is requested, the same gate
+  `visitFuncCall()` uses. The clone's own re-check, at a concrete type, is what
+  finds the nested operator use.
+- **Codegen** — an `operator[]` read returns its element by value, so
+  `ArrayAccessExprAST::codegenLValue()` answers "no address" (null), and
+  `FieldAccessExprAST`/`MethodCallExprAST` spill the r-value, which is what
+  `list[i].field` needs. That spill is only sound for a READ: mutating the
+  spilled copy would lose the write. The TypeChecker therefore rejects every
+  write into it (**E098**, `operatorIndexTemporaryRoot()` /
+  `rejectOperatorTemporaryWrite()` in `TypeCheckerExpr.cpp`, called from
+  assignment, compound assignment, `++`/`--`, a `MutatesSelf` method call and a
+  by-reference `[]=`), stopping at a pointer or reference base. The Codegen
+  diagnostic in `AssignmentExprAST::codegen()` for the nested `[]=` shape is now
+  an unreachable backstop. Do not add a new write path that calls
+  `codegenLValue()` on an index result without going through that check.
+
 ---
 
 ## 8. Running the front end from a tool: the query facade

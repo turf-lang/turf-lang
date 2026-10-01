@@ -166,7 +166,8 @@ fn main(): int {
 ### Syntax
 
 Operators are declared at the top level with the `operator` keyword — never
-`.`- or `::`-qualified, never generic, never `static`:
+`.`- or `::`-qualified, never `static`. They may take a type-parameter list
+right after the keyword (see [Generic operators](#generic-operators)):
 
 ```turflang
 struct Vec2 {
@@ -202,33 +203,29 @@ treats it exactly like any other overloaded function.
 
 ### The overloadable set
 
-Only ten binary symbols can be overloaded:
+Overloadable:
 
 ```
-+  -  *  /  ==  !=  <  >  <=  >=
+binary   +  -  *  /  %  **  &  |  ^  <<  >>  ==  !=  <  >  <=  >=
+unary    -  !  ~
+indexing []  (read, `x[i]`)   []=  (write, `x[i] = v`)
 ```
 
-That's it. Deliberately **not** overloadable:
+A one-parameter `operator -(a: Vec2): Vec2` is unary negation and a
+two-parameter one is subtraction; arity tells them apart. `operator []`
+takes `(container, index)` and `operator []=` takes `(container, index,
+value)`. The container of `[]=` may be declared `&T` so the write reaches the
+caller's value (`Map` does this); the other operands are never taken by
+reference implicitly.
 
-- `%`, `**`
-- Bitwise operators: `& | ^ << >>`
-- Logical operators: `&& ||`
-- Any assignment form, including compound assignment (`+=`, etc.)
+Deliberately **not** overloadable:
 
-Declaring an operator outside the whitelist (e.g. `operator &(...)`) is a
-parse-time error.
+- Logical operators: `&& ||` (they short-circuit, which a call cannot)
+- Assignment `=`, call `()`, member access `.`, and `to` conversions
+- Compound assignment as its own operator: `a += b` is exactly
+  `a = a + b` and uses `operator +`; there is no `operator +=`
 
-> [!NOTE]
-> There is **no indexing-operator overloading** (`operator [](...)` /
-> `operator []=(...)`) anywhere in the language. If you need
-> container-style indexing behavior on your own type, expose it as a named
-> method instead.
->
-> There is also **no unary operator overloading**. A one-parameter
-> `operator` declaration (e.g. `operator -(a: Vec2): Vec2` for negation)
-> is explicitly rejected with *"Unary operator overloading is not
-> supported yet."* Every `operator` declaration must take exactly two
-> parameters.
+Declaring an operator outside this set is a parse-time error.
 
 ### Both operands already builtin
 
@@ -327,10 +324,94 @@ visibility gate independent of the operator overload's own visibility.
 Using an operator on a type with no matching overload declared anywhere is
 a clean type error, not an internal compiler error.
 
-### Gotcha: compound assignment isn't routed through operators
+### Compound assignment
 
-`s += t` is **not** routed through `operator +` resolution. This is a
-known, deliberate gap — using compound assignment on a type that only has
-an `operator +` overload (and no native `+=` support) is a clean compile
-error today, not a crash, but it is also not silently rewritten to
-`s = s + t` for you.
+`a += b` desugars to `a = a + b`, so it uses `operator +` and the result type
+must be exactly the type of `a`. `x++` / `x--` use `operator +` / `operator -`
+with a right operand of `int`. Compound assignment and `++`/`--` **through an
+indexing operator** (`m[k] += 1`, `l[i]++`) are not supported; write
+`m[k] = m[k] + 1`.
+
+### Generic operators
+
+An operator may declare type parameters right after the keyword, exactly where
+`fn<T>` puts them. The standard collections index this way:
+
+```turflang
+// lib/std/collections/list.tr
+operator<T> [](l: List<T>, i: int): T { ... }
+operator<T> []=(l: List<T>, i: int, value: T): void { ... }
+
+// lib/std/collections/map.tr
+operator<K, V> [](m: Map<K, V>, key: K): V { ... }
+```
+
+so `l[i]`, `l[i] = v`, `m[k]` and `s[i]` work for **every** `List<T>`,
+`Map<K, V>` and `Set<T>`, including a struct element of any size and nested
+containers (`m["k"][1]` on a `Map<string, List<int>>`).
+
+A user generic struct gets the same, in any operator form:
+
+```turflang
+struct Cell<T> { v: T, n: int }
+
+operator<T> +(a: Cell<T>, k: int): Cell<T> { ... }   // Cell<int> + int, Cell<string> + int, ...
+operator<T> <(a: Cell<T>, b: Cell<T>): bool { ... }  // `<` right after `operator<T>` is the operator
+```
+
+How a call is resolved:
+
+1. The type parameters are **inferred from the operands** (there is no way to
+   write them at a use).
+2. Each declared operand type is then substituted with that binding and must
+   match its operand **exactly** — the same rule as a concrete operator. A
+   generic operator adds inference and nothing else: `Cell<string> + 1.5`
+   still fails against `operator<T> +(a: Cell<T>, k: int)`, and
+   `Cell<int> == Cell<string>` fails against `operator<T> ==(a: Cell<T>, b:
+   Cell<T>)` because `T` is `int` from the left operand.
+3. One copy of the operator is compiled per distinct set of type arguments,
+   like any generic function.
+
+Two rules apply to the declaration (both error **E097**):
+
+- Every type parameter must appear in some operand. One that appears only in
+  the return type (`operator<T> [](p: Cell<int>, i: int): T`) could never be
+  inferred.
+- At least one operand must be a struct or enum **declared in the same
+  module** — looked for through `&`/`*` and through a generic type's base, so
+  `List<T>` counts for the module that declares `List`. `operator<T> +(a: T,
+  b: T): T` would match every type, including types from modules that never
+  imported yours, so it is rejected; declared in another module's type it is the
+  ordinary orphan rule (**E080**).
+
+### Gotcha: `x[i]` is a value, not a place (E098)
+
+An index operator returns the element **by value**. Reading through it works —
+`l[i].field`, `l[i].method()`, `outer[a][b]`. Writing into *part of* the
+returned value would only change a copy, so each of these is a compile error
+(**E098**) instead of a silently lost write:
+
+```turflang
+bs[0].a = 50;          // assign to a field of the copy
+bs[0].a += 1;          // ... or update it
+bs[0].a++;
+bs[0].bump();          // a method that assigns to self
+outer[0].push(5);      // push bumps `len` in the copy of the inner list's header
+mm["a"]["b"] = 1;      // a Map's []= mutates the Map header, which is the copy
+```
+
+This is the rule C# calls CS1612 and Go applies to a struct stored in a map.
+What is *not* rejected, because the write reaches real storage:
+
+```turflang
+mut e: Big = bs[0];  e.a = 50;  bs[0] = e;   // read, change, store back (the fix)
+grid[i][j] = v;      // List's []= takes the header by value but writes through
+                     // the shared buffer, so the row you wrote to is the real row
+nodes[0].v = 10;     // an element that is a `&T`/`T*`: the write goes through it
+```
+
+The test is whether the destination is a *field or `self` of the returned
+copy*: `grid[i][j] = v` stores through a pointer inside the copy, `outer[0].push(v)`
+assigns `len` inside it. The method check uses the same conservative
+`MutatesSelf` scan as the immutable-variable check: a method that only changes
+its receiver by calling *another* mutating method is not detected.

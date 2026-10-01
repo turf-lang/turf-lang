@@ -794,6 +794,61 @@ footing §6.17 was frozen on. Full account:
   patterns reuse E092/E093. No new `SLM::ErrorCategory` and no `docs/slm/`
   files (§6.9).
 
+### 6.19 Generic operators — FROZEN (LEC-006, 2026-10-01)
+
+Recorded on the project owner's instruction to implement LEC-006 as
+`ROADMAP_v2.0.0.md` specifies it. Extends §6.7 (operators); nothing there
+changes. Full account: `docs/development/changes/LEC-006.md`.
+
+- **Declaration.** `operator<T> [](l: List<T>, i: int): T`, `operator<K, V>
+  []=(m: &Map<K, V>, key: K, value: V): void` — a `<...>` type-parameter list
+  immediately after the keyword, where `fn<T>` puts it, valid on every
+  overloadable operator. After the keyword `<` followed by an identifier opens
+  a parameter list; `<` followed by `(` is the less-than operator
+  (`operator<T> <(a: C<T>, b: C<T>)` declares `<` generically).
+- **Resolution is still exact-match (F-OP-1).** Candidate matching infers the
+  parameters by unifying each declared operand type against the concrete
+  operand (`TypeWalk::unify`), then **substitutes and requires the same
+  `sameTypeExact`** a concrete candidate gets, per operand. Inference never
+  widens an operand: unify skips a structural mismatch silently, so the
+  substituted re-check is what rejects `Cell<int> == Cell<string>`. Every type
+  parameter must be bound by an operand. The one §6.7 relaxation — the
+  `operator[]`/`operator[]=` self operand may be declared `&T` — applies to a
+  generic candidate too.
+- **Instantiation.** A generic operator is a template like `fn<T>`: one clone
+  per distinct type-argument tuple, requested at the operator's node and
+  pointed at it by the monomorphizer. Request identity includes the exact
+  declaration, so overloads sharing a name (`operator-` unary and binary, two
+  `operator+`s, and ordinary `fn<T> f(x)` / `fn<T> f(x, y)`, `Box.put(x)` /
+  `Box.put(x, y)`, `Box::new(v)` / `Box::new(v, w)`) are separate
+  instantiations. Never instantiated for a still-open type parameter.
+- **Declaration rules (E097).** (1) Every type parameter appears in some
+  operand — they cannot be written at a use. (2) The orphan rule (INV-OP-2) is
+  **not vacuous** for a generic operator: at least one operand, looked for
+  through `&`/`*` and a generic type's base, must be a struct/enum declared in
+  the operator's own module, because a bare `T` operand matches every type.
+  An operand owned by another module is the existing E080.
+- **An index result is a value, not a place (E098).** An `operator[]` read is a
+  call returning the element by value, so it has no address: `l[i].field` and
+  `l[i].method()` read it as an r-value. A write whose destination is a field of
+  that copy, or `self` of a method that assigns to it, would be silently lost,
+  so it is rejected: `bs[0].a = v`, `bs[0].a += v`, `bs[0].a++`,
+  `bs[0].bump()` (a `MutatesSelf` method), `outer[0].push(v)`, and a `[]=`
+  whose container is declared `&T` applied to another `[]`'s result
+  (`mm["a"]["b"] = v`). It stops at a pointer or reference: an element that is
+  `&T`/`T*` is written through. `grid[i][j] = v` for a `List` is allowed — its
+  `[]=` takes the header by value and stores through the shared buffer, which
+  writes no field of the copy. The same rule C# calls CS1612 and Go applies to a
+  struct in a map. Index operators that yield a place (Rust's `IndexMut`) are out
+  of scope: they conflict with F-MEM-5 and need their own design.
+- **Excluded:** explicit type arguments at a use, generic arithmetic on types
+  with no owned operand, and compound assignment through an indexing operator
+  (§6.7, unchanged).
+- **Diagnostic contract.** E097 `GenericOperatorError` (a declaration) and E098
+  `OperatorTemporaryWriteError` (a use), typed and coded, each with a hint naming
+  the fix. No new `SLM::ErrorCategory`, no
+  `docs/slm/` file (§6.9).
+
 ---
 
 ## Appendix — frozen-decision IDs
@@ -830,6 +885,7 @@ Overhaul (F-TYPE-1), whose third column points at their section above.
 | **F-OP-2** | Compound assignment desugars; there is no `operator+=`. | §13 |
 | **F-OP-3** | Operator overloads live in the ordinary name-keyed overload map under synthesized names. No separate table. | §13 |
 | **F-OP-4** | `&&`, `\|\|`, `=`, `()`, `.`, and conversion operators are **not** overloadable. | §13, §25 |
+| **F-OP-5** | `operator` declarations may be generic (`operator<T> [](l: List<T>, i: int): T`). Parameters are inferred from the operands, then every substituted operand must match **exactly** (F-OP-1 holds); each type parameter must appear in an operand, and at least one operand must be a type the declaring module owns (E097). Instantiated like `fn<T>`, one clone per type-argument tuple and per declaration. | §6.19 above (`ROADMAP_v2.0.0.md` LEC-006) |
 | **F-STD-1** | Standard-library privileges are **declared in source**, never inferred from a file path. | §15 |
 | **F-STD-2** | The intrinsic/builtin list is **closed and enumerated** in one place. | §15 |
 | **F-STD-3** | `string` remains a NUL-terminated byte pointer. | §15, §25 |

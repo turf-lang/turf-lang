@@ -164,7 +164,7 @@ Status vocabulary per the audit brief. "Action" names the follow-up.
 | SEM-003 | `guess`, Model A | present | `37_guess_inference` | holds | COMPLETE | — |
 | SEM-004 | one initialization rule | present | `10_default_init` | holds | COMPLETE | reference docs → REL-006 |
 | TYPE-002 | monomorphization, INV-GEN-1, instantiation-site errors | present | `38_monomorphization` | name capture (F-06), nested field chain (F-07), `>>` (F-09), `&T→&?T` (F-08), noisy E079 (F-14) | PARTIALLY COMPLETE | OVH-004, 006–009, 014 |
-| LANG-001 | operator completion, `List<T>[i]` | present; `[]` only for `List<int>`/`Map<string,int>`/`Set<int>` | `18_operator_overload` | "`List<T>[i]` works" true only for `int` | PARTIALLY COMPLETE | OVH-003 (safe `get`/`set`); generic operators → LEC-006 |
+| LANG-001 | operator completion, `List<T>[i]` | present; `[]` only for `List<int>`/`Map<string,int>`/`Set<int>` | `18_operator_overload` | "`List<T>[i]` works" true only for `int` | PARTIALLY COMPLETE | OVH-003 (safe `get`/`set`); generic operators → LEC-006 (**landed 2026-10-01**) |
 | LANG-002 | `&?T`, declared capability, safe linked structures | present | `39_nullable_references` | raw-pointer indexing ungated (F-03); dynamic structures impossible (F-16) | PARTIALLY COMPLETE | OVH-003; FDN-001/002 |
 | LANG-003 | `defer` | present | `40_defer` | holds | COMPLETE | — |
 | RT-001 | `libturfrt`, panic, descriptors, packaging | present | `runtime_smoke.sh` | 64-word descriptor limit (F-01); packaging claims unsupported platforms (F-13); no runtime version check | PARTIALLY COMPLETE | OVH-001, OVH-013; REL-001 |

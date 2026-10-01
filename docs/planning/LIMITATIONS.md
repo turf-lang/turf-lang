@@ -215,13 +215,14 @@ Regression test: `tests/07_functions_modules/generic_partial_type_arg_match.tr`.
 
 ## 4. `List<T>` has no `get(i)`/`set(i, val)` indexing methods
 
-**Status: FIXED — LANG-001.** `operator[]`/`operator[]=` (declared for the
-concrete `List<int>`, matching `operator` declarations' general inability
-to be generic — see `list.tr`'s own comment) give `l[i]`/`l[i] = v` with
-bounds checking, the "better form of this request" LANG-001's own stdlib
-commit message names directly. For any other element type, `l.data[i]`
-direct field access remains the way to index — never generic, for the same
-`operator` declarations aren't generic reason.
+**Status: FIXED — LANG-001, completed by LEC-006.** `operator[]`/`operator[]=`
+give `l[i]`/`l[i] = v` with bounds checking, the "better form of this
+request" LANG-001's own stdlib commit message names directly. LANG-001
+declared them for the concrete `List<int>` only, because `operator`
+declarations could not be generic; LEC-006 lifted that, so they are now
+`operator<T> [](l: List<T>, i: int): T` and work for every element type
+(`Map<K, V>` and `Set<T>` likewise). `l.data[i]` remains the unchecked,
+`unsafe`-gated raw path.
 
 **Where the gap used to be (kept for history):**
 `lib/std/collections/list.tr` used to expose `push`/`pop`/`length` only,

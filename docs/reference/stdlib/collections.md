@@ -86,17 +86,12 @@ test::assert(l.pop() == 30, "");
 
 Returns the current element count (`self.len`) — not the backing capacity.
 
-`List<T>` has no genuinely generic `get`/`set` — reach into the public
-`data: T*` field directly (`l.data[i]`, `l.data[i] = x`) for any element
-type. `operator[]`/`operator[]=` below cover the common `List<int>` case
-with bounds checking instead.
+### `operator<T> [](l: List<T>, i: int): T` / `operator<T> []=(l: List<T>, i: int, value: T): void`
 
-### `operator [](l: List<int>, i: int): int` / `operator []=(l: List<int>, i: int, value: int): void`
-
-`l[i]` / `l[i] = v` — bounds-checked (`sys::panic` out of range), declared
-for the concrete `List<int>` only (`operator` declarations can't be generic
-— see the file's own comment). For any other element type, use `l.data[i]`
-directly (unchecked, like any other raw-pointer indexing).
+`l[i]` / `l[i] = v` for **every** element type (LEC-006) — bounds-checked
+(`sys::panic` out of range). `l.get(i)` / `l.set(i, v)` are the same
+operations as named methods. Indexing a `List<T>` is never `unsafe`; the raw
+`l.data[i]` is, and is unchecked.
 
 ```turflang
 mut l: List<int> = List::default();
@@ -104,7 +99,18 @@ l.push(1);
 test::assert(l[0] == 1, "");
 l[0] = 99;
 test::assert(l[0] == 99, "");
+
+mut names: List<string> = List::default();
+names.push("ada");
+names[0] = "grace";
+test::assert(names[0] == "grace", "");
 ```
+
+`l[i]` yields the element **by value**, so `l[i].field` and `l[i].method()`
+read through it (for a struct element of any size), but you cannot assign
+into a field of it (`l[i].f = v`), or call a method that changes it
+(`outer[i].push(v)`) — those are E098; `grid[i][j] = v` is fine. See
+[Generics and Operators](../generics_and_operators.md#gotcha-xi-is-a-value-not-a-place-e098).
 
 ### `List.sort(cmp: fn(T, T): int): void` / `List.binary_search(target: T, cmp: fn(T, T): int): int` / `List.find(predicate: fn(T): bool): int`
 
@@ -374,10 +380,19 @@ test::assert(m.contains("b") == false, "");
 
 Current key/value pair count.
 
-### `operator [](m: Map<string, int>, key: string): int` / `operator []=(m: &Map<string, int>, key: string, value: int): void`
+### `operator<K, V> [](m: Map<K, V>, key: K): V` / `operator<K, V> []=(m: &Map<K, V>, key: K, value: V): void`
 
-`m[key]` / `m[key] = v`, wrapping `get()`/`put()`. Declared for the
-concrete `Map<string, int>` only (`operator` declarations can't be generic).
+`m[key]` / `m[key] = v`, wrapping `get()`/`put()`, for **every** `Map<K, V>`
+(LEC-006). `m[key]` on a missing key panics, like `get()`; use `contains()`
+first, or the recoverable lookup above.
+
+```turflang
+mut m: Map<string, List<int>> = Map::default();
+mut inner: List<int> = List::default();
+inner.push(10);
+m["k"] = inner;
+test::assert(m["k"][0] == 10, "");
+```
 
 ---
 
@@ -417,13 +432,13 @@ test::assert(seen.length() == 2, "");
 test::assert(seen.contains(2), "");
 ```
 
-### `operator [](s: Set<int>, i: int): int`
+### `operator<T> [](s: Set<T>, i: int): T`
 
 `s[i]` — positional read of the i-th element **in insertion order** (the
 dense `items` array is unaffected by hash-bucket order; only a `remove()`
 breaks strict insertion order, exactly like `Map`'s own gotcha above).
-Bounds-checked (`sys::panic` out of range). Declared for the concrete
-`Set<int>` only. Deliberately no `operator[]=` — a set's invariant is
+Bounds-checked (`sys::panic` out of range). Works for every `Set<T>`
+(LEC-006). Deliberately no `operator[]=` — a set's invariant is
 uniqueness, and positional overwrite could silently violate it; `add()`/
 `remove()` stay the only way to mutate a `Set`'s contents.
 

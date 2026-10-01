@@ -136,7 +136,7 @@ PHASE 2  Language & ecosystem         LEC-002  visibility — `pub`/`public` (D1
    │                                  LEC-001  projects, dependencies, build (D7)  DONE (LEC-001.md, 2026-09-30; Part IX clean-machine walkthrough handed to REL-008)
    │                                  LEC-003  pattern matching (D14)  DONE (LEC-003.md, 2026-10-01)
    │                                  LEC-004  error payloads + `try` (D15)  DONE (LEC-004.md, 2026-10-01)
-   │                                  LEC-006  collection indexing coherence (generic operators)
+   │                                  LEC-006  collection indexing coherence (generic operators)  DONE (LEC-006.md, 2026-10-01)
    │                                  LEC-005  diagnostics reliability (incl. D25)
    │                                  LEC-007  standard library 2.0 surface
    ▼
@@ -1029,6 +1029,21 @@ resolved.
 ---
 
 ### LEC-006 — Collection indexing coherence: generic operator declarations
+
+> **Landed 2026-10-01** — `docs/development/changes/LEC-006.md`; frozen as
+> `FREEZE.md` §6.19 (F-OP-5). Where the implementation differs from the design
+> below: resolution unifies the operands and then re-checks the *substituted*
+> signature with `sameTypeExact` (unify alone skips a mismatch silently); the
+> orphan rule is made non-vacuous for a generic operator, and a type parameter no
+> operand mentions is rejected (both new **E097**); the concrete `List<int>`,
+> `Map<string,int>` and `Set<int>` operators were deleted outright rather than
+> kept alongside (both would match every `List<int>` use). Three things the design
+> did not anticipate had to be fixed for it to work: overloaded generic functions
+> shared one clone, as did overloaded generic methods and constructors (a request now
+> names its template declaration), `l[i].field` crashed Codegen for any operator returning a
+> struct, and every write into that by-value result (`bs[0].a = v`,
+> `outer[0].push(v)`, a by-reference nested `[]=`) needed a clean error (new
+> **E098**) instead of a silently lost write.
 
 **Kind** Language/ecosystem · **Rule** R5 · **Size** M · **Prereqs** SMP-002, OVH-003
 
