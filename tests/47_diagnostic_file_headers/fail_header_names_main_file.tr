@@ -1,0 +1,21 @@
+// EXPECT-DIAG: fail_header_names_main_file.tr (
+// EXPECT-DIAG: errors)
+// EXPECT-NO-DIAG: , in file
+// #266: every batch of diagnostics opens with the path of the file it belongs
+// to and a count, so a reader never has to infer the file from the command
+// line. The parser recovers after an error (the type checker stops at its
+// first), so two syntax errors in two functions are what make this a batch --
+// and pin the plural in the count.
+fn first(): int {
+    mut a: int = 1
+    return a;
+}
+
+fn second(): int {
+    mut b: int = 2
+    return b;
+}
+
+fn main(): int {
+    return first() + second();
+}

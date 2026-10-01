@@ -352,6 +352,8 @@ Real examples of each, and the rules behind them, are in [Projects & Packages](p
 
 ```
 $ turf check oob.tr
+oob.tr (1 error)
+
 ── error at line 3, col 27 [E001]
 
   Array index out of bounds!
@@ -368,12 +370,13 @@ $ turf check oob.tr
 
 Top to bottom:
 
-1. **Header** — `── error at line X, col Y [E0NN], in file <name>` (bright red for errors, bright yellow for warnings). The `[E0NN]` tag only appears if the diagnostic resolved to a real code. The `, in file ...` clause only appears when the diagnostic came from an imported module, not the file you compiled directly (so an error in a dependency's file names it, as `in file …/ffi/src/rawmod.tr`, and an error in the entry file does not).
-2. **Message body**.
-3. Zero or more blue `Note: ...` lines, one per related location.
-4. An optional green `Hint: ...` line.
-5. A **source snippet** with a `│` gutter, showing the exact source line with an underline beneath the offending span, suffixed `" Here!"`.
-6. A footer (only when the diagnostic has a resolved code):
+1. **File header** — the path of the file the diagnostics below belong to, then a count: `src/main.tr (2 errors, 1 warning)`. Diagnostics are batched **per file**: the file you compiled comes first, then each imported module in path order, and within a file they are sorted by line and column. The path is relative to the directory you ran the compiler from (an absolute path would differ per machine); a standard-library file is shown from `lib/std/` on, and a file outside the working directory keeps the spelling it was given with. A file whose only diagnostics were suppressed standard-library warnings gets no header.
+2. **Diagnostic header** — `── error at line X, col Y [E0NN]` (bright red for errors, bright yellow for warnings). The `[E0NN]` tag only appears if the diagnostic resolved to a real code. There is no per-diagnostic file name: the file header above it already names the file, whether it is your own or an imported module.
+3. **Message body**.
+4. Zero or more blue `Note: ...` lines, one per related location.
+5. An optional green `Hint: ...` line.
+6. A **source snippet** with a `│` gutter, showing the exact source line with an underline beneath the offending span, suffixed `" Here!"`.
+7. A footer (only when the diagnostic has a resolved code):
    - Ordinary codes: dim `Run \`turf --explain E0NN\` for more details.`
    - `Important`-flagged codes: a bolder, bright-cyan `Worth reading in full -- run \`turf --explain E0NN\` before you patch this one.`
 

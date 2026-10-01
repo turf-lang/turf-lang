@@ -713,7 +713,9 @@ A module that begins `unsafe module;` may use raw pointers (`int*`) outside an
 
 ```
 $ turf build
-── error at line 3, col 5 [E066], in file …/ffi/src/rawmod.tr
+../ffi/src/rawmod.tr (1 error)
+
+── error at line 3, col 5 [E066]
 
   Unsafe pointer use!
   Raw pointer type 'int*' cannot be used outside an 'unsafe' block.

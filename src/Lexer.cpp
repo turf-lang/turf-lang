@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -40,7 +41,8 @@ std::string SourceFilename;
 // The ORIGINAL top-level file passed to the compiler, set once in main.cpp
 // and never touched again (unlike SourceFilename, which is repointed at
 // each imported module while it's being parsed, then restored). Used only
-// by printDiag() to decide whether to print an "in file: ..." note --
+// by flushAll() to print the main file's batch of diagnostics before the
+// imported modules' --
 // comparing against SourceFilename wouldn't work reliably since by the time
 // flushAll() runs (after every pass has completed) it's already back to
 // this same value for every diagnostic, imported-module ones included.
@@ -194,6 +196,33 @@ static bool isMessageWarning(const std::string &Msg) {
          Msg.find("warning:") != std::string::npos;
 }
 
+/**
+ * @brief The path a diagnostic names a file by: relative to where the compiler
+ *        was run, never an absolute path that differs per machine.
+ *
+ * Standard-library files are shown from `lib/std/` on (an install path says
+ * nothing about which module it is). A path outside the working directory
+ * keeps the spelling it was given with -- `../../x.tr` computed from an
+ * absolute path is longer and no clearer than what the user typed. Never
+ * throws: a diagnostic must still print when the file no longer exists or
+ * the working directory is unreadable.
+ */
+static std::string displayPath(const std::string &Path) {
+  if (const size_t Std = Path.rfind("lib/std/"); Std != std::string::npos)
+    return Path.substr(Std);
+
+  namespace fs = std::filesystem;
+  std::error_code EC;
+  const fs::path Abs = fs::absolute(fs::path(Path), EC).lexically_normal();
+  const fs::path Cwd = fs::current_path(EC);
+  if (EC || Abs.empty() || Cwd.empty())
+    return Path;
+  const std::string Rel = Abs.lexically_relative(Cwd).generic_string();
+  if (Rel.empty() || Rel == "." || Rel.rfind("..", 0) == 0)
+    return Path;
+  return Rel;
+}
+
 // Internal helper: physically print one diagnostic to stderr.
 static void printDiag(const DiagnosticEngine::Diag &D) {
   bool isWarning = D.IsWarning || isMessageWarning(D.Msg);
@@ -214,12 +243,9 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
             << D.Loc.Line << ", col " << D.Loc.Col;
   if (!D.Code.empty())
     std::cerr << " [" << D.Code << "]";
-  // Only worth calling out when it's NOT the file the user actually
-  // compiled -- i.e. the diagnostic is about content inside an imported
-  // module, which is otherwise easy to mistake for a problem in your own
-  // file since nothing else in the output says otherwise.
-  if (!D.Filename.empty() && D.Filename != MainSourceFilename)
-    std::cerr << ", in file " << D.Filename;
+  // No ", in file X" here any more: flushAll() prints a file header (#266)
+  // before each file's batch, so every diagnostic's file is already named
+  // above it -- the main file's included, not only an imported module's.
   std::cerr << Colors::RESET << "\n\n";
 
   // Message body — embedded ANSI codes from error classes render intact.
@@ -245,11 +271,7 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
     // own file. Same-file notes are unchanged.
     const bool OtherFile = !Rel.Loc.Filename.empty() &&
                            Rel.Loc.Filename != D.Filename;
-    // A stdlib path is shown from `lib/std/` on, not as an absolute install
-    // path that differs per machine and buries the position.
-    std::string RelFile = Rel.Loc.Filename;
-    if (const size_t Std = RelFile.rfind("lib/std/"); Std != std::string::npos)
-      RelFile = RelFile.substr(Std);
+    const std::string RelFile = displayPath(Rel.Loc.Filename);
     std::cerr << "  " << Colors::BRIGHT_BLUE << "Note: " << Rel.Description
               << " (" << (OtherFile ? RelFile + ", " : std::string())
               << "line " << Rel.Loc.Line << ", col " << Rel.Loc.Col << ")"
@@ -453,25 +475,77 @@ bool DiagnosticEngine::hasErrorAt(int Line) {
 }
 
 void DiagnosticEngine::flushAll() {
-  // Sort by line, then column
-  std::sort(Diagnostics.begin(), Diagnostics.end(),
-            [](const Diag &A, const Diag &B) {
-              return A.Loc.Line < B.Loc.Line ||
-                     (A.Loc.Line == B.Loc.Line && A.Loc.Col < B.Loc.Col);
-            });
+  // #266: one batch per file, each opened by a line naming the file. The
+  // main file comes first (it is the one the user asked about), then the
+  // modules it imported, by path so the order never depends on which pass
+  // happened to reach a file first. Within a file: line, then column.
+  //
+  // Grouping by file also fixes a latent interleave: the old sort compared
+  // line numbers alone, so an error at line 5 of an imported module and one
+  // at line 5 of the main file were ordered arbitrarily relative to each
+  // other, and neither said which file it was in unless it was the imported
+  // one. stable_sort keeps emission order for diagnostics at the same
+  // position, which std::sort did not promise.
+  std::stable_sort(Diagnostics.begin(), Diagnostics.end(),
+                   [](const Diag &A, const Diag &B) {
+                     const bool AMain = A.Filename == MainSourceFilename;
+                     const bool BMain = B.Filename == MainSourceFilename;
+                     if (AMain != BMain)
+                       return AMain;
+                     if (A.Filename != B.Filename)
+                       return A.Filename < B.Filename;
+                     return A.Loc.Line < B.Loc.Line ||
+                            (A.Loc.Line == B.Loc.Line && A.Loc.Col < B.Loc.Col);
+                   });
 
+  // OVH-012: a warning anchored inside the standard library itself (e.g.
+  // `NeverReturnsErrorWarning`/`InfiniteLoopWarning` on stdlib code a
+  // user merely `import`ed, never wrote) is a "system-module warning" --
+  // suppressed at PRINT time only (Diagnostics itself, getDiagnostics(),
+  // and getDiagnosticCount() are untouched, so nothing that inspects
+  // diagnostics directly -- ParserModule.cpp's speculative-parse retry,
+  // the query facade (AnalysisFacade.cpp) -- changes behavior). An error is
+  // never filtered here: only IsWarning diagnostics reach this check. The
+  // filter runs BEFORE grouping so a file whose only diagnostics were
+  // suppressed gets no header and no "0 errors" line.
+  std::vector<const Diag *> Shown;
   for (const auto &D : Diagnostics) {
-    // OVH-012: a warning anchored inside the standard library itself (e.g.
-    // `NeverReturnsErrorWarning`/`InfiniteLoopWarning` on stdlib code a
-    // user merely `import`ed, never wrote) is a "system-module warning" --
-    // suppressed at PRINT time only (Diagnostics itself, getDiagnostics(),
-    // and getDiagnosticCount() are untouched, so nothing that inspects
-    // diagnostics directly -- ParserModule.cpp's speculative-parse retry,
-    // the query facade (AnalysisFacade.cpp) -- changes behavior). An error is
-    // never filtered here: only IsWarning diagnostics reach this check.
     if (D.IsWarning && !g_ShowStdlibWarnings && IsLibStdWarningLocation(D.Filename))
       continue;
-    printDiag(D);
+    Shown.push_back(&D);
+  }
+
+  for (size_t Begin = 0; Begin < Shown.size();) {
+    size_t End = Begin;
+    size_t Errors = 0, Warnings = 0;
+    while (End < Shown.size() && Shown[End]->Filename == Shown[Begin]->Filename) {
+      // Same rule as printDiag()'s own label, so the counts agree with what is
+      // printed under them (a raw LogErrorAt() "warning:" message counts too).
+      if (Shown[End]->IsWarning || isMessageWarning(Shown[End]->Msg))
+        ++Warnings;
+      else
+        ++Errors;
+      ++End;
+    }
+
+    if (!Shown[Begin]->Filename.empty()) {
+      auto Plural = [](size_t N, const char *Word) {
+        return std::to_string(N) + " " + Word + (N == 1 ? "" : "s");
+      };
+      std::string Counts;
+      if (Errors)
+        Counts += Plural(Errors, "error");
+      if (Warnings)
+        Counts += (Counts.empty() ? "" : ", ") + Plural(Warnings, "warning");
+      std::cerr << Colors::BOLD << Colors::BRIGHT_CYAN
+                << displayPath(Shown[Begin]->Filename) << Colors::RESET << " "
+                << Colors::BRIGHT_BLACK << "(" << Counts << ")" << Colors::RESET
+                << "\n\n";
+    }
+
+    for (size_t I = Begin; I < End; ++I)
+      printDiag(*Shown[I]);
+    Begin = End;
   }
 
   Diagnostics.clear();

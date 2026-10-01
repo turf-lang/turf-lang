@@ -1,0 +1,11 @@
+// EXPECT-DIAG: header_broken_module.tr (1 error)
+// EXPECT-NO-DIAG: , in file
+// #266: an error inside an imported module is reported under that module's
+// own header, and no longer needs a ", in file X" tail on each diagnostic to
+// say so -- the old tail was the ONLY place a file was named, and only for a
+// file other than the one being compiled.
+import header_broken_module;
+
+fn main(): int {
+    return header_broken_module::broken();
+}
