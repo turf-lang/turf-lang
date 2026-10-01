@@ -3,6 +3,32 @@
 
 #include "Errors.h"
 
+/// LEC-005: the hint for a TYPE name (@p TypeKind: "struct", "enum",
+/// "error type", anything else = a plain "type") written where a value
+/// (@p Called false: `x = Node;`) or a function (@p Called true: `Node(5)`)
+/// belongs. E040/E041's fallback hint -- "create a variable like `mut Node: int
+/// = 5;`" -- is advice for a misspelled variable and is actively wrong for a
+/// name that IS declared, as a type; what the user wants is a value of that
+/// type, and Turf has exactly one construction syntax (`T::new(...)` /
+/// `T::default()`, structs_and_enums.md).
+inline std::string typeUsedAsValueHint(const std::string &Name,
+                                       const std::string &TypeKind,
+                                       bool Called) {
+  const std::string Is = "'" + Name + "' is " +
+                         (TypeKind == "enum" ? "an " : "a ") + TypeKind;
+  if (TypeKind == "struct")
+    return Is + (Called ? ", and Turf has no `" + Name + "(...)` constructor-call "
+                          "syntax. "
+                        : ", not a value. ") +
+           "Build one with `" + Name + "::default()` (or `" + Name +
+           "::new(...)` if it declares a `.new` method), e.g. `mut v: " + Name +
+           " = " + Name + "::default();`.";
+  if (TypeKind == "enum" || TypeKind == "error type")
+    return Is + (Called ? ", not a function. " : ", not a value. ") +
+           "Name one of its variants instead, as `" + Name + "::Variant`.";
+  return Is + (Called ? ", not a function." : ", not a value.");
+}
+
 // Lookup Error : Typo/Unknown function name
 class LookupError : public TurfError {
 public:
@@ -27,12 +53,21 @@ public:
 
 class UnknownFunctionError : public TurfError {
 public:
+  /// LEC-005: @p TypeKind is non-empty when @p Name is a visible TYPE
+  /// ("struct", "enum", "error type", "type") called like a function --
+  /// `Node(5)`. The suggestions would be a typo fix for a name that is not a
+  /// typo, so the hint says what the language actually offers instead.
   UnknownFunctionError(SourceLocation Loc, const std::string &Name,
-                       const RankedSuggestions &Suggestions)
+                       const RankedSuggestions &Suggestions,
+                       const std::string &TypeKind = "")
       : TurfError(Loc, Colors::BRIGHT_RED + "Error: Unknown function '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'." +
                            Colors::RESET) {
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR; // see LookupError's note above
+    if (!TypeKind.empty()) {
+      Hint_ = typeUsedAsValueHint(Name, TypeKind, /*Called=*/true);
+      return;
+    }
     Hint_ = suggestionsOrFallback(Suggestions,
       "Double-check the spelling or import the module that "
       "defines it.");
@@ -92,11 +127,19 @@ public:
 // Reference Error : Variable lookup issues
 class ReferenceError : public TurfError {
 public:
+  /// LEC-005: @p TypeKind is non-empty when @p Name is a visible TYPE used as
+  /// a value (`mut a: int = Node;`) -- see typeUsedAsValueHint() for why the
+  /// create-a-variable fallback and a rename suggestion are both wrong there.
   ReferenceError(SourceLocation Loc, const std::string &Name,
-                 const RankedSuggestions &Suggestions)
+                 const RankedSuggestions &Suggestions,
+                 const std::string &TypeKind = "")
       : TurfError(Loc, Colors::BRIGHT_RED + "I can't find anything named '" +
                            Colors::CYAN + Name + Colors::BRIGHT_RED + "'.") {
     Category_ = SLM::ErrorCategory::UNDECLARED_VAR;
+    if (!TypeKind.empty()) {
+      Hint_ = typeUsedAsValueHint(Name, TypeKind, /*Called=*/false);
+      return;
+    }
     Hint_ = suggestionsOrFallback(Suggestions,
       "Did you forget to create this variable? You have to "
       "create it before you can use it, like this: `mut " +

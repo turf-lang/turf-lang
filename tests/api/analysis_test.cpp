@@ -1220,8 +1220,99 @@ static void testGenericOperatorDiagnostics() {
     std::cerr << render(Ok);
 }
 
+// LEC-005. The facade recovers from a parse error with the same
+// SkipToNextTopLevelBoundary() the compiler driver uses, so an editor shows the
+// same cascade -- or the lack of one -- as the command line.
+static void testParseErrorRecoveryAndTypeNameHints() {
+  CurrentTest = "parse-error recovery and type-name hints";
+
+  // An error INSIDE a body must resynchronise at that function's closing
+  // brace. Before, recovery stopped at the next `;` still inside the body, and
+  // the rest of the body parsed as top-level statements.
+  {
+    auto R = turf::analyze({{"cascade.tr",
+                             "fn main(): int {\n"
+                             "    mut x: int = 1;\n"
+                             "    mut f = fn(a: int): int { return a; };\n"
+                             "    x = x + 1;\n"
+                             "    return x;\n"
+                             "}\n"}});
+    CHECK(!R.succeeded());
+    CHECK(hasDiagnostic(R, "Expected a function name after 'fn'"));
+    CHECK(!hasDiagnostic(R, "Statements are not allowed outside of a function"));
+    if (R.diagnostics().size() != 1)
+      std::cerr << "    expected exactly one diagnostic, got:\n" << render(R);
+    CHECK_EQ(R.diagnostics().size(), static_cast<size_t>(1));
+  }
+
+  // ...and it must land on THAT function's brace: not before it (the
+  // cascade), and not after it (swallowing `second`, hiding its own error).
+  {
+    auto R = turf::analyze({{"resync.tr",
+                             "fn first(): int {\n"
+                             "    mut i: int = 0;\n"
+                             "    while (i < 3) {\n"
+                             "        if (i == 1) {\n"
+                             "            mut f = fn(a: int): int { return a; };\n"
+                             "        }\n"
+                             "        i = i + 1;\n"
+                             "    }\n"
+                             "    return i;\n"
+                             "}\n"
+                             "fn second(): int {\n"
+                             "    mut z: int = 5\n"
+                             "    return z;\n"
+                             "}\n"
+                             "fn main(): int { return 0; }\n"}});
+    CHECK(!R.succeeded());
+    CHECK(hasDiagnostic(R, "Expected a function name after 'fn'"));
+    CHECK(hasDiagnostic(R, "Expected ';' after statement"));
+    CHECK(!hasDiagnostic(R, "Statements are not allowed outside of a function"));
+  }
+
+  // (A real stray top-level statement is still reported -- the fix removes the
+  // false positive, not the check; testTopLevelStatementIsADiagnostic() pins it.)
+
+  // E040/E041 hints follow what the name IS (resolver: visibleTypeKind()).
+  struct Case {
+    const char *Label;
+    const char *Body;
+    const char *Code;
+    const char *HintFragment;
+    const char *HintMustNotContain;
+  };
+  const Case Cases[] = {
+      {"struct used as a value",
+       "struct Node { v: int }\nfn main(): int { mut a: int = Node; return a; }",
+       "E040", "'Node' is a struct, not a value", "mut Node: int = 5"},
+      {"struct called like a function",
+       "struct Node { v: int }\nfn main(): int { mut a: Node = Node(5); return a.v; }",
+       "E041", "no `Node(...)` constructor-call syntax", "import the module"},
+      {"enum used as a value", "enum Color { Red }\nfn main(): int { mut c: int = Color; return c; }",
+       "E040", "'Color' is an enum, not a value", "mut Color: int = 5"},
+      {"unknown name keeps the create-it hint",
+       "fn main(): int { return counter; }", "E040", "Did you forget to create this variable",
+       "is a struct"},
+  };
+  for (const auto &C : Cases) {
+    auto R = turf::analyze({{"hint.tr", C.Body}});
+    bool Found = false;
+    for (const auto &D : R.diagnostics()) {
+      if (D.Code != C.Code)
+        continue;
+      Found = D.Hint.find(C.HintFragment) != std::string::npos &&
+              D.Hint.find(C.HintMustNotContain) == std::string::npos;
+      break;
+    }
+    CHECK(Found);
+    if (!Found)
+      std::cerr << "    case '" << C.Label << "' produced:\n" << render(R);
+  }
+}
+
 int main() {
   ScratchDir Dir;
+  testParseErrorRecoveryAndTypeNameHints();
   testCleanProgramQueries();
   testErrorDiagnostic();
   testTopLevelStatementIsADiagnostic();

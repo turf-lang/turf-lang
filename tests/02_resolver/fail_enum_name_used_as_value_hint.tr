@@ -1,0 +1,12 @@
+// EXPECT-DIAG: E040
+// EXPECT-DIAG: 'Color' is an enum, not a value
+// EXPECT-DIAG: Color::Variant
+// LEC-005: the enum flavour of fail_struct_name_used_as_value_hint.tr -- the
+// kind word and the suggested form both follow what the name actually is
+// (an enum's values are its variants, not `::default()`).
+enum Color { Red, Green }
+
+fn main(): int {
+    mut c: int = Color;
+    return c;
+}

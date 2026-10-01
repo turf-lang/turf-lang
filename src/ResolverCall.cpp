@@ -585,7 +585,9 @@ void Resolver::visitFuncCall(FuncCallExprAST &Node) {
     for (const auto &B : BuiltinMatches)
       Suggestions.Local.push_back(B + "(...)");
 
-    UnknownFunctionError(Node.getLoc(), CalleeName, Suggestions).raise();
+    UnknownFunctionError(Node.getLoc(), CalleeName, Suggestions,
+                         visibleTypeKind(CalleeName))
+        .raise();
     return;
   }
 

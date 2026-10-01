@@ -18,4 +18,11 @@ In Turf, you always create a variable with `mut` or `immut` before you can use i
     mut undeclaredVariable: int = 5;
     mut n: int = undeclaredVariable;   // now this works
 
-If neither of those is it, one more thing worth checking: is the name something from a module you haven't imported yet? A function or type that lives in another module needs `import` (or the right `::` qualifier) before Turf can see it. Once the name resolves to something real, this error clears right up.
+There is a third case, and the error's hint says so when it applies: the name IS declared, but as a type. A struct, enum or error type is not a value, so it can't stand alone in an expression:
+
+    struct Node { v: int }
+    mut a: int = Node;        // 'Node' is a struct, not a value
+
+To get a value of a struct type, build one with `Node::default()` (or `Node::new(...)` if the struct declares a `.new` method); for an enum, name one of its variants, `Color::Red`.
+
+If none of those is it, one more thing worth checking: is the name something from a module you haven't imported yet? A function or type that lives in another module needs `import` (or the right `::` qualifier) before Turf can see it. Once the name resolves to something real, this error clears right up.

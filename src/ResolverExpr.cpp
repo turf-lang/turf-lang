@@ -112,7 +112,22 @@ void Resolver::visitVariable(VariableExprAST &Node) {
   Suggestions.Local =
       SuggestionIndex::suggestVisible(Node.getName(), VisibleNames);
 
-  ReferenceError(Node.getLoc(), Node.getName(), Suggestions).raise();
+  ReferenceError(Node.getLoc(), Node.getName(), Suggestions,
+                 visibleTypeKind(Node.getName()))
+      .raise();
+}
+
+std::string Resolver::visibleTypeKind(const std::string &Name) const {
+  auto Identity = tryResolveTypeSpelling("", Name, currentModuleName());
+  if (!Identity)
+    return "";
+  if (SymTable_.isKnownStruct(*Identity))
+    return "struct";
+  if (SymTable_.isEnumName(*Identity))
+    return "enum";
+  if (SymTable_.isErrorTypeName(*Identity))
+    return "error type";
+  return "type";
 }
 
 

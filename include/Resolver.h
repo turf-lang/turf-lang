@@ -649,6 +649,12 @@ private:
                                                     const std::string &Name,
                                                     const std::string &Context) const;
 
+  /// LEC-005: what kind of type a bare @p Name is in the current module --
+  /// "struct", "enum", "error type", or a generic "type" (a machine) -- or ""
+  /// when it names no visible type. Only feeds E040/E041's hint (a type used
+  /// where a value or a function belongs), so it never raises.
+  std::string visibleTypeKind(const std::string &Name) const;
+
   /// Walks every shape @p Ty can take (pointer, reference, array, generic
   /// arguments, error union, function type) and resolves each still-
   /// unresolved NamedType/GenericType base in place via

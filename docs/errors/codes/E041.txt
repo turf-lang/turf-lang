@@ -15,3 +15,5 @@ Usually this is just a small typo in the function's name:
 Just like with variable names, Turf will often notice a close match nearby and suggest it for you, so check the error message for a suggestion before anything else.
 
 If it's not a typo, the function might genuinely not exist yet in your code (you can write it yourself with `fn`), or it might live in a standard-library module you haven't imported. Things like `strings::length(...)` or `mem::malloc(...)` need their module imported first with `import strings;` or `import mem;` before Turf can see them. Once the name matches something real and reachable, you're good to go.
+
+One more cause, specific to types: Turf has no constructor-call syntax, so `Node(5)` for a struct named `Node` is an unknown function too -- the error's hint says so when that is what happened. Build the value with `Node::new(5)` (if `Node` declares a `.new` method) or `Node::default()`, and for an enum or error type name one of its variants (`Color::Red`).
