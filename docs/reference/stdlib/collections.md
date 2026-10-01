@@ -261,7 +261,7 @@ used to be. Two parts:
   (exactly as before) — grown the same way `List<T>.push()` is.
 - `buckets`/`bcap` are a separate open-addressing hash INDEX layered on top
   — `hash(key)` picks a bucket, which stores the DENSE ARRAY INDEX of that
-  key (or an empty/tombstone sentinel). `indexOf()`/`get()`/`contains()`/
+  key (or an empty/tombstone sentinel). `index_of()`/`get()`/`contains()`/
   `put()`/`remove()` all probe this index instead of scanning `keys`
   linearly.
 
@@ -283,14 +283,14 @@ caveat (a struct whose `operator==` compares a pointer-shaped field, e.g.
 another string, by content rather than identity, isn't guaranteed to hash
 consistently with it; not a concern for any plain-data key).
 
-### `Map.indexOf(key: K): int`
+### `Map.index_of(key: K): int`
 
 O(1) average; returns the dense-array index of `key`, or `-1` if not
 present.
 
 ### `Map.contains(key: K): bool`
 
-`indexOf(key) >= 0`.
+`index_of(key) >= 0`.
 
 ```turflang
 mut m: Map<string, int>;
@@ -318,7 +318,7 @@ test::assert(m.get("a") == 100, "");
 Returns the value for `key`.
 
 > **Panics, doesn't return `!V`.** Calls `sys::panic("Map.get: no such
-> key")` if `key` is missing. Check `.contains()` first, or use `tryGet`
+> key")` if `key` is missing. Check `.contains()` first, or use `try_get`
 > below if a missing key is an expected, recoverable case.
 
 ```turflang
@@ -327,9 +327,9 @@ test::assert(m.get("a") == 1, "");
 
 ### `error MapError { KeyNotFound }`
 
-The error type `tryGet` produces on a miss.
+The error type `try_get` produces on a miss.
 
-### `Map.tryGet(key: K): !V`
+### `Map.try_get(key: K): !V`
 
 Recoverable alternative to `get()` — produces `MapError::KeyNotFound`
 instead of panicking on a missing key.
@@ -340,14 +340,14 @@ import map::Map;
 
 fn tryGetExisting(): int {
     mut m: Map<string, int> = buildMap();
-    return m.tryGet("b") recover as err run {
+    return m.try_get("b") recover as err run {
         return -1;
     };
 }
 
 fn tryGetMissing(): int {
     mut m: Map<string, int> = buildMap();
-    return m.tryGet("missing") recover as err run {
+    return m.try_get("missing") recover as err run {
         if err == map::MapError::KeyNotFound {
             return -3;
         }
@@ -356,8 +356,8 @@ fn tryGetMissing(): int {
 }
 
 // Or, with a plain default value instead of distinguishing the error:
-mut x: int = m.tryGet("a") recover produce -1;      // succeeds -> 1
-mut y: int = m.tryGet("nope") recover produce -1;   // recovers -> -1
+mut x: int = m.try_get("a") recover produce -1;      // succeeds -> 1
+mut y: int = m.try_get("nope") recover produce -1;   // recovers -> -1
 ```
 
 ### `Map.remove(key: K): void`

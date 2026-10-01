@@ -14,7 +14,7 @@ unsafe module;
 // instantiation's method body its own re-typecheck with K/T concrete,
 // which is what makes `hash(key)` dispatch correctly now, verified live
 // the same way `self.keys[i] == key` already does (map.tr's own
-// Map.indexOf() doc comment).
+// Map.index_of() doc comment).
 //
 // `unsafe module;` stays (STD-003 item 8 considered and rejected here too
 // -- see list.tr's own note for the full reasoning): `fn<T> hash(x: T):

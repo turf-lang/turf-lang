@@ -421,7 +421,7 @@ What the prelude buys you with zero imports:
   // No imports anywhere in this file.
   fn main(): int {
       mut c: char = '7';
-      c.isDigit();       // UFCS on char, from the char prelude module
+      c.is_digit();      // UFCS on char, from the char prelude module
       mut n: int = 8;
       n.is_even();        // UFCS on int
       mut a: string = "foo";
@@ -437,7 +437,7 @@ What it does **not** buy you:
 // No imports.
 fn main(): int {
     mut c: char = '7';
-    isDigit(c); // ERROR — bare call, not UFCS; prelude does not flatten names
+    is_digit(c); // ERROR — bare call, not UFCS; prelude does not flatten names
     return 0;
 }
 ```

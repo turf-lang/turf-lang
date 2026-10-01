@@ -190,55 +190,61 @@ ASCII-only helpers, matching `char`'s 1-byte, no-Unicode design. Turf has no
 built-in arithmetic on `char` — every helper below internally casts to `int`
 (`c to int`) before comparing.
 
-### `isDigit(c: char): bool`
+> **Renamed in 2.0 (LEC-007).** These were `isDigit`, `isUpper`, `isLower`,
+> `isAlpha`, `isAlphaNumeric`, `isPunctuation`, `isWhitespace`, `toUpper` and
+> `toLower`. Every public name in the standard library is now `snake_case`.
+> `char.to_upper` and `strings.to_upper` share a name and are told apart by
+> their receiver (`'a'.to_upper()` vs `"abc".to_upper()`).
+
+### `is_digit(c: char): bool`
 
 `'0'..'9'` (ASCII 48–57).
 
-### `isUpper(c: char): bool`
+### `is_upper(c: char): bool`
 
 `'A'..'Z'` (ASCII 65–90).
 
-### `isLower(c: char): bool`
+### `is_lower(c: char): bool`
 
 `'a'..'z'` (ASCII 97–122).
 
-### `isAlpha(c: char): bool`
+### `is_alpha(c: char): bool`
 
-`isUpper() || isLower()`.
+`is_upper() || is_lower()`.
 
-### `isAlphaNumeric(c: char): bool`
+### `is_alphanumeric(c: char): bool`
 
-`isAlpha() || isDigit()`.
+`is_alpha() || is_digit()`.
 
 ```turflang
 mut a: char = 'a';
 mut nine: char = '9';
 mut space: char = ' ';
-test::assert(a.isAlphaNumeric(), "'a' is alphanumeric");
-test::assert(nine.isAlphaNumeric(), "'9' is alphanumeric");
-test::assert(!space.isAlphaNumeric(), "' ' is not alphanumeric");
+test::assert(a.is_alphanumeric(), "'a' is alphanumeric");
+test::assert(nine.is_alphanumeric(), "'9' is alphanumeric");
+test::assert(!space.is_alphanumeric(), "' ' is not alphanumeric");
 ```
 
-### `isPunctuation(c: char): bool`
+### `is_punctuation(c: char): bool`
 
 Printable ASCII (33–126) that is neither alpha nor digit — e.g. `.`, `,`,
 `!`, `(`.
 
 ```turflang
 mut bang: char = '!';
-test::assert(bang.isPunctuation(), "'!' is punctuation");
+test::assert(bang.is_punctuation(), "'!' is punctuation");
 ```
 
-### `isWhitespace(c: char): bool`
+### `is_whitespace(c: char): bool`
 
 Space (32), tab (9), `\n` (10), or `\r` (13).
 
-### `toUpper(c: char): char`
+### `to_upper(c: char): char`
 
 Subtracts 32 if `c` is lowercase; otherwise returns `c` unchanged
 (non-letters pass through).
 
-### `toLower(c: char): char`
+### `to_lower(c: char): char`
 
 Adds 32 if `c` is uppercase; otherwise returns `c` unchanged.
 
@@ -408,7 +414,7 @@ Slices `[start, end)` — `start` inclusive, `end` exclusive.
 > `start < 0 || end < start || end > strlen(s)`, `substring` calls
 > `sys::panic("strings.substring: index out of bounds")` and aborts the
 > process. This is inconsistent with the rest of the standard library's
-> error-handling story — `math::divide`, `Map.tryGet`, and every `net`
+> error-handling story — `math::divide`, `Map.try_get`, and every `net`
 > connection function return a recoverable `!T` for "ordinary expected
 > failure," but a bad substring range is instead treated as a programming
 > bug. Validate your indices before calling, or use `trim`, which never

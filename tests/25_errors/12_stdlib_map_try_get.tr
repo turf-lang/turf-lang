@@ -1,4 +1,4 @@
-// Map::tryGet (lib/std/map.tr) -- the recoverable alternative to get(),
+// Map::try_get (lib/std/map.tr) -- the recoverable alternative to get(),
 // which hard-panics on a missing key. Exercises a GENERIC function
 // returning `!V` (V is Map's own type parameter, substituted to a concrete
 // type at the call site -- see the generic-substitution fix this depends
@@ -18,14 +18,14 @@ fn buildMap(): Map<string, int> {
 
 fn tryGetExisting(): int {
     mut m: Map<string, int> = buildMap();
-    return m.tryGet("b") recover as err run {
+    return m.try_get("b") recover as err run {
         return -1;
     };
 }
 
 fn tryGetMissing(): int {
     mut m: Map<string, int> = buildMap();
-    return m.tryGet("missing") recover as err run {
+    return m.try_get("missing") recover as err run {
         if err == map::MapError::KeyNotFound {
             return -3;
         }
@@ -36,11 +36,11 @@ fn tryGetMissing(): int {
 fn main(): int {
     mut m: Map<string, int> = buildMap();
 
-    mut x: int = m.tryGet("a") recover produce -1;
-    test::assert_eq(x, 1, "tryGet on an existing key should succeed with the real value");
+    mut x: int = m.try_get("a") recover produce -1;
+    test::assert_eq(x, 1, "try_get on an existing key should succeed with the real value");
 
-    mut y: int = m.tryGet("nope") recover produce -1;
-    test::assert_eq(y, -1, "tryGet on a missing key should recover instead of aborting");
+    mut y: int = m.try_get("nope") recover produce -1;
+    test::assert_eq(y, -1, "try_get on a missing key should recover instead of aborting");
 
     test::assert_eq(tryGetExisting(), 2, "success path should never touch the recover-as-err block");
     test::assert_eq(tryGetMissing(), -3, "failure path should correctly identify MapError::KeyNotFound");

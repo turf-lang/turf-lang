@@ -16,7 +16,7 @@
 // lacking an operation its generic body needs is now a real, reachable
 // instantiation-site error.
 //
-// `Set<T>` requires `T` to support `==` (`Set.indexOf()`'s own
+// `Set<T>` requires `T` to support `==` (`Set.index_of()`'s own
 // `self.items[i] == item`) -- a plain struct doesn't, by design (no
 // trait/constraint system, F-GEN-3 frozen; struct `==` requires an
 // explicit `operator ==` overload, tests/18_operator_overload/

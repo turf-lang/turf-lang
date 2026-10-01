@@ -9,7 +9,7 @@ unsafe module;
 //   mut x: int = m.get("a");        // 1
 //   mut has: bool = m.contains("z"); // false
 //   mut n: int = m.length();         // 2
-//   mut y: int = m.tryGet("z") recover produce -1; // -1, no abort
+//   mut y: int = m.try_get("z") recover produce -1; // -1, no abort
 //
 // Design (STD-003, ARCHITECTURE_OVERHAUL.md §8, item 6 -- rewritten from
 // the pre-TYPE-002 linear-scan version this file used to be):
@@ -19,7 +19,7 @@ unsafe module;
 //     them dense; nothing here relies on hash-bucket order for storage.
 //   - NEW: a separate open-addressing hash index (`buckets`/`bcap`) maps
 //     `hash(key) -> a slot in `buckets`, which holds the DENSE ARRAY INDEX
-//     of that key (or a sentinel -- see below). `indexOf()`/`get()`/
+//     of that key (or a sentinel -- see below). `index_of()`/`get()`/
 //     `contains()`/`put()`/`remove()` all probe this index instead of
 //     scanning `keys` linearly, which is what makes lookup O(1) average
 //     instead of O(n). Every consumer of the dense arrays -- direct
@@ -183,7 +183,7 @@ fn<K, V> Map.bucketMaybeGrow(): void {
 
 // Returns the DENSE-array index of `key`, or -1 if absent. O(1) average
 // (was O(n) before this group, see this file's header).
-pub fn<K, V> Map.indexOf(key: K): int {
+pub fn<K, V> Map.index_of(key: K): int {
   immutable slot: int = self.bucketFind(key);
   if (slot < 0) {
     return -1;
@@ -192,7 +192,7 @@ pub fn<K, V> Map.indexOf(key: K): int {
 }
 
 pub fn<K, V> Map.contains(key: K): bool {
-  return self.indexOf(key) >= 0;
+  return self.index_of(key) >= 0;
 }
 
 pub fn<K, V> Map.put(key: K, value: V): void {
@@ -232,7 +232,7 @@ pub fn<K, V> Map.put(key: K, value: V): void {
 }
 
 pub fn<K, V> Map.get(key: K): V {
-  immutable idx: int = self.indexOf(key);
+  immutable idx: int = self.index_of(key);
   if (idx < 0) {
     sys::panic("Map.get: no such key");
   }
@@ -242,7 +242,7 @@ pub fn<K, V> Map.get(key: K): V {
 // Recoverable alternative to get() (docs/planning/Errors.md): a missing key
 // is often an ordinary, expected outcome (checking a cache, an optional
 // config value, ...), not a programming bug worth aborting the whole
-// process over -- `m.tryGet(key) recover produce default;` or a full
+// process over -- `m.try_get(key) recover produce default;` or a full
 // `recover run { ... }` lets the caller decide, instead of get()'s
 // unconditional abort. get() itself is left as-is (unchanged behavior,
 // still the right choice when a missing key really would be a bug).
@@ -250,8 +250,8 @@ pub error MapError {
   KeyNotFound,
 }
 
-pub fn<K, V> Map.tryGet(key: K): !V {
-  immutable idx: int = self.indexOf(key);
+pub fn<K, V> Map.try_get(key: K): !V {
+  immutable idx: int = self.index_of(key);
   if (idx < 0) {
     return MapError::KeyNotFound;
   }

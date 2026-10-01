@@ -121,7 +121,7 @@ fn<T> Set.bucketMaybeGrow(): void {
 
 // Returns the DENSE-array index of `item`, or -1 if absent. O(1) average
 // (was O(n) before this group, see this file's header).
-pub fn<T> Set.indexOf(item: T): int {
+pub fn<T> Set.index_of(item: T): int {
   immutable slot: int = self.bucketFind(item);
   if (slot < 0) {
     return -1;
@@ -130,7 +130,7 @@ pub fn<T> Set.indexOf(item: T): int {
 }
 
 pub fn<T> Set.contains(item: T): bool {
-  return self.indexOf(item) >= 0;
+  return self.index_of(item) >= 0;
 }
 
 pub fn<T> Set.add(item: T): void {

@@ -24,7 +24,7 @@
 //     own doc comment below explains in full (a generic method's body used
 //     to be type-checked/codegenned once, shared across every
 //     instantiation, so `self.routes.keys[i] == path` inside `Map`'s own
-//     `.tryGet()`/`.contains()` could never see the concrete `string` type
+//     `.try_get()`/`.contains()` could never see the concrete `string` type
 //     needed to dispatch `strings.tr`'s real `operator==`). `Request.get_header()`/
 //     `has_header()` and `Server.route_index()`/`has_route()`/`get_route()`
 //     used to hand-roll their own linear scan to sidestep this; STD-003
@@ -127,15 +127,15 @@ pub struct Request {
 }
 
 // get_header/has_header exist as thin, named wrappers over
-// `self.headers.tryGet(name)`/`.contains(name)` (STD-003, item 4,
+// `self.headers.try_get(name)`/`.contains(name)` (STD-003, item 4,
 // ARCHITECTURE_OVERHAUL.md §8) -- kept as their own methods rather than
 // inlined at every call site both for the more specific panic message
 // below (`Map.get`'s own is generic, "no such key", with no header name in
-// it -- `tryGet` + `recover run` is what lets this method supply its own)
+// it -- `try_get` + `recover run` is what lets this method supply its own)
 // and because `req.get_header(name)`/`req.has_header(name)` reads better
 // than `req.headers.get(name)` at a call site that has no reason to know
 // `headers` is a `Map` at all. Until this group, `Map<K, V>`'s own generic
-// `.get()`/`.tryGet()`/`.contains()` were content-INCORRECT for `K =
+// `.get()`/`.try_get()`/`.contains()` were content-INCORRECT for `K =
 // string` (compared by raw pointer identity, not bytes, under Type
 // Erasure) and this file hand-rolled a linear scan over
 // `self.headers.keys[i]`/`.values[i]` instead -- monomorphization
@@ -144,7 +144,7 @@ pub struct Request {
 // and docs/planning/LIMITATIONS.md's (now closed) item 1 for the full
 // history.
 pub fn Request.get_header(name: string): string {
-    return self.headers.tryGet(name) recover run {
+    return self.headers.try_get(name) recover run {
         sys::panic("Request.get_header: no such header '" + name + "'");
         return ""; // unreachable (sys::panic never returns) -- see
                     // Server.listen()'s identical 'recover run'
@@ -280,7 +280,7 @@ pub fn Response.send_json(status: int, body: string): void {
 // still be blocked, and neither is. Route DISPATCH (finding the right
 // handler by path) needed its own additional fix on top of that, though --
 // see route_index()/has_route()/get_route() below and this file's header
-// comment for why `self.routes.tryGet(path)` doesn't work.
+// comment for why `self.routes.try_get(path)` doesn't work.
 //
 // Route matching is EXACT-PATH ONLY (no `:id`-style parameter segments,
 // no wildcards) -- Map<K,V>'s own linear-scan lookup is already the
@@ -299,10 +299,10 @@ pub fn Server.get(path: string, handler: fn(Request, Response): void): void {
     self.routes.put(path, handler);
 }
 
-// route_index is a thin, named wrapper over `self.routes.indexOf(path)`
+// route_index is a thin, named wrapper over `self.routes.index_of(path)`
 // (STD-003, item 4) -- kept as its own method since has_route()/
 // get_route() below both already call it by name. Until this group,
-// `Map<string, V>`'s own generic `.indexOf()`/`.tryGet()`/`.contains()`
+// `Map<string, V>`'s own generic `.index_of()`/`.try_get()`/`.contains()`
 // were content-INCORRECT for `K = string` (compared a freshly-PARSED
 // request path against a route registered with a string literal by raw
 // pointer identity, not content -- confirmed live: this is what made
@@ -315,7 +315,7 @@ pub fn Server.get(path: string, handler: fn(Request, Response): void): void {
 // and docs/planning/LIMITATIONS.md's (now closed) item 1 for the full
 // history.
 fn Server.route_index(path: string): int {
-    return self.routes.indexOf(path);
+    return self.routes.index_of(path);
 }
 
 pub fn Server.has_route(path: string): bool {

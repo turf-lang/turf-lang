@@ -55,7 +55,7 @@ if req.has_header("Content-Type") {
 > (`docs/development/changes/STD-003.md`) `Map<K, V>`'s own generic
 > `.get()`/`.contains()` are content-correct for `K = string` too — see
 > [`collections.md`](collections.md)'s `Map<K, V>` section. `get_header`/
-> `has_header` are kept as thin, named wrappers over `self.headers.tryGet(name)`/
+> `has_header` are kept as thin, named wrappers over `self.headers.try_get(name)`/
 > `.contains(name)` purely for readability (`req.get_header(name)` reads
 > better than `req.headers.get(name)`) and for `get_header`'s own more
 > specific panic message (naming the missing header).
@@ -124,7 +124,7 @@ app.get("/", home);
 
 Look up the handler registered for `path`. `get_route` panics if `path`
 isn't registered — check `has_route` first. Both are thin wrappers around
-`self.routes.indexOf(path)` (see `Request.get_header`'s identical note,
+`self.routes.index_of(path)` (see `Request.get_header`'s identical note,
 above, for why these exist as named methods at all rather than inlining
 `Map<K, V>`'s own accessors at every call site).
 

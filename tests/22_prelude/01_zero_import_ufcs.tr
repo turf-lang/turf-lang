@@ -6,18 +6,18 @@
 // so it signals success/failure via main()'s own exit code instead.
 fn main(): int {
     mut c: char = '7';
-    if !c.isDigit() {
+    if !c.is_digit() {
         return 1;
     }
-    if c.isAlpha() {
+    if c.is_alpha() {
         return 2;
     }
 
     mut letter: char = 'a';
-    if !letter.isLower() {
+    if !letter.is_lower() {
         return 3;
     }
-    if letter.toUpper() != 'A' {
+    if letter.to_upper() != 'A' {
         return 4;
     }
 
