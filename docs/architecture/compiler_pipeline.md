@@ -993,17 +993,35 @@ storage-layout consequences (in particular: there is no pointer-sized
 "erased slot" any more, so a struct-typed `T` larger than one machine word
 is not a special case).
 
-**Instantiation depth is capped.** A genuinely unbounded recursive generic
-instantiation (a generic function whose body calls itself through its own
-still-open type parameter in a way that would keep generating new,
-distinct concrete instantiations forever) is rejected with a dedicated
-diagnostic (`E079`, `GenericInstantiationDepthError`) once the worklist's
-drain depth exceeds `Monomorphize::kMaxInstantiationDepth` (64, FREEZE.md
-§6.1) — a compile-time error naming the instantiation chain, not an
-unbounded compile or a stack overflow in the compiler itself. `TYPE-002`'s
-own `Known pitfalls`/`OVH-014` document the diagnostic's one remaining
-rough edge (it currently names the whole instantiation cache rather than
-just the offending chain — tracked as roadmap `LEC-005`, not a soundness gap).
+**Instantiation chains are tracked, and their depth is capped.** Every
+`InstantiationRequest` records its `Parent`: the cache index of the
+instantiation whose body was being re-typechecked when it was discovered, or
+`-1` when ordinary code asked for it (`InstantiationCollector::
+setCurrentParent()`, set around the monomorphizer's nested `TypeChecker` in
+`finishInstantiation()` — a set/restore pair, not an RAII guard, because that
+checker reports by `longjmp`). Following `Parent` to `-1`
+(`InstantiationCollector::chainTo()`) gives the real chain — user call →
+`Set<Big>.add` → `Set<Big>.contains` → … — which two things need:
+
+- **Where an instantiation error points.** An error found while
+  re-typechecking a clone is anchored at the **outermost user-code request**
+  in its chain (`anchorIndex()`: the first hop whose site is not under
+  `lib/std`), with a note per hop (`'Set<Big>.add' requires 'Set<Big>.contains'
+  here`) and one for the error itself, so a user whose `s.add(b)` has an
+  unsupported `T` sees the error on that line rather than inside `set.tr`.
+  (INV-DIAG-3.)
+- **The depth cap.** A genuinely unbounded recursive generic (a generic whose
+  body requests a strictly larger instance of itself forever) is rejected with
+  `E079` (`GenericInstantiationDepthError`) once a request's chain is longer
+  than `Monomorphize::kMaxInstantiationDepth` (64, FREEZE.md §6.1), printing
+  that chain (long names clipped, the middle elided). Until LEC-005 this capped
+  the *total* number of instantiations drained instead — so 65 independent
+  `ident<S1> .. ident<S65>` calls were rejected, with the whole cache as the
+  "chain". A generic that fans out (`f<T>` requesting both `f<Box<T>>` and
+  `f<Pair<T>>`) reaches depth 64 only after enumerating exponentially many
+  instances, so `kMaxTotalInstantiations` (4096) backstops it, reported
+  through the same error. The analysis facade does not run the monomorphizer,
+  so none of this is visible to a tool built on it.
 
 **Why monomorphization over type erasure**: the project's earlier
 erasure-based implementation traded away real correctness, not just

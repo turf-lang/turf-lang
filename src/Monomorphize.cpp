@@ -4,6 +4,7 @@
 #include "ASTDiff.h"
 #include "Errors.h"
 #include "ErrorsMonomorphize.h"
+#include "Parser.h" // IsLibStdWarningLocation(): which hop of a chain is user code
 #include "Resolver.h"
 #include "SymbolTable.h" // GlobalSymbolTable -- RegisterType()'s target, distinct from Resolver's own SymTable_
 #include "TypeChecker.h"
@@ -42,6 +43,95 @@ void InstantiationCollector::report(std::ostream &OS) const {
        << (Entry.Sites.size() == 1 ? "" : "s") << ")\n";
   }
 }
+
+// ─── Chain rendering and the instantiation limits (LEC-005, D25) ────────────
+
+std::string describeRequest(const InstantiationRequest &Req) {
+  std::string Args;
+  if (!Req.TypeArgs.empty()) {
+    Args = "<";
+    for (size_t i = 0; i < Req.TypeArgs.size(); ++i) {
+      if (i)
+        Args += ", ";
+      Args += Req.TypeArgs[i] ? Req.TypeArgs[i]->getName() : "?";
+    }
+    Args += ">";
+  }
+  // A struct declared in a module is keyed "set::Set"; the user writes `Set`.
+  std::string Key = Req.DeclKey;
+  if (const size_t Scope = Key.rfind("::"); Scope != std::string::npos)
+    Key = Key.substr(Scope + 2);
+  // A method's DeclKey is "Struct.method" and its TypeArgs are the struct's
+  // (the receiver's) -- the arguments belong after the struct name, the way
+  // the user wrote the type: `Set<Big>.add`, not `Set.add<Big>`.
+  const size_t Dot = Key.find('.');
+  if (Dot == std::string::npos)
+    return Key + Args;
+  return Key.substr(0, Dot) + Args + Key.substr(Dot);
+}
+
+std::vector<std::string>
+describeChain(const std::vector<const InstantiationEntry *> &Chain) {
+  constexpr size_t kHead = 5, kTail = 4, kMaxName = 60;
+  // The runaway this exists for grows its type argument every hop
+  // (`wrap<Box<Box<...>>>`), so by hop 60 a single name is hundreds of
+  // characters; clip each one so the chain stays a line you can read.
+  auto Name = [&](const InstantiationEntry *E) {
+    std::string S = describeRequest(E->Request);
+    if (S.size() > kMaxName)
+      S = S.substr(0, kMaxName - 3) + "...";
+    return S;
+  };
+  std::vector<std::string> Out;
+  if (Chain.size() <= kHead + kTail + 1) {
+    for (const auto *E : Chain)
+      Out.push_back(Name(E));
+    return Out;
+  }
+  for (size_t i = 0; i < kHead; ++i)
+    Out.push_back(Name(Chain[i]));
+  Out.push_back("... " + std::to_string(Chain.size() - kHead - kTail) +
+                " more ...");
+  for (size_t i = Chain.size() - kTail; i < Chain.size(); ++i)
+    Out.push_back(Name(Chain[i]));
+  return Out;
+}
+
+namespace {
+
+/// The index into @p Chain of the request a diagnostic should point at: the
+/// OUTERMOST one whose site is the user's own code. An error inside
+/// `Set<Big>.bucketFind` is, from the user's side, a problem with their
+/// `s.add(b)` -- the first hop -- not with a line of `set.tr` three
+/// instantiations down. Falls back to the outermost request when every site is
+/// in `lib/std` (a non-generic stdlib function asked for it; there is no
+/// user-code hop to name).
+size_t anchorIndex(const std::vector<const InstantiationEntry *> &Chain) {
+  for (size_t i = 0; i < Chain.size(); ++i)
+    if (!IsLibStdWarningLocation(Chain[i]->Request.Site.Filename))
+      return i;
+  return 0;
+}
+
+/// Raises E079 and returns true when @p Entry's request chain is longer than
+/// kMaxInstantiationDepth, or the cache has outgrown kMaxTotalInstantiations
+/// (the fan-out backstop -- see its doc comment). The chain printed is the
+/// real one, not the cache.
+bool exceedsInstantiationLimit(const InstantiationCollector &Collector,
+                               const InstantiationEntry &Entry) {
+  auto Chain = Collector.chainTo(Entry);
+  const bool TooDeep = Chain.size() > static_cast<size_t>(kMaxInstantiationDepth);
+  const bool TooMany = Collector.cache().size() > kMaxTotalInstantiations;
+  if (!TooDeep && !TooMany)
+    return false;
+  GenericInstantiationDepthError(Chain[anchorIndex(Chain)]->Request.Site,
+                                 describeChain(Chain), Chain.size(),
+                                 TooDeep ? 0 : Collector.cache().size())
+      .raise();
+  return true;
+}
+
+} // namespace
 
 // ─── Concrete-map type substitution ─────────────────────────────────────────
 // Relocated verbatim from TypeCheckerCall.cpp's file-local
@@ -517,23 +607,46 @@ std::shared_ptr<ResolverFunctionSymbol> finishInstantiation(
     jmp_buf SavedJmpBuf;
     std::memcpy(SavedJmpBuf, g_recoverJmp, sizeof(jmp_buf));
     g_recoverActive = true;
+    // LEC-005 (D25): every request this body discovers is a child of Entry.
+    // Restored on BOTH exits -- the error path leaves via longjmp.
+    const int SavedParent =
+        Collector.setCurrentParent(static_cast<int>(Entry.Index));
     if (setjmp(g_recoverJmp) == 0) {
       CloneTC.check(Clone);
     }
+    Collector.setCurrentParent(SavedParent);
     g_recoverActive = SavedRecoverActive;
     std::memcpy(g_recoverJmp, SavedJmpBuf, sizeof(jmp_buf));
   }
   if (CheckFailed) {
+    // D25: the user wrote `s.add(b)`; the error is three instantiations down
+    // in `set.tr`. Point at the user's call (the outermost user-code request)
+    // and say how it got from there to the failure, instead of at the
+    // innermost requester -- one hop short of the user, and in a file they
+    // did not write.
+    const auto Chain = Collector.chainTo(Entry);
+    const size_t Anchor = anchorIndex(Chain);
+
     std::string FullMsg = "In this instantiation: " + InnerMsg;
     if (!InnerHint.empty())
       FullMsg += " (" + InnerHint + ")";
-    SemanticError Err(Entry.Request.Site, FullMsg);
+    SemanticError Err(Chain[Anchor]->Request.Site, FullMsg);
+    for (size_t i = Anchor + 1; i < Chain.size(); ++i)
+      Err.withRelated(Chain[i]->Request.Site,
+                      "'" + describeRequest(Chain[i - 1]->Request) +
+                          "' requires '" + describeRequest(Chain[i]->Request) +
+                          "' here");
+    Err.withRelated(InnerLoc, "the error itself, inside '" +
+                                  describeRequest(Entry.Request) + "'");
     Err.withRelated(Template->getNameLoc(),
                     "in generic declaration '" + Entry.Request.DeclKey + "'");
-    for (size_t i = 1; i < Entry.Sites.size(); ++i) {
-      if (auto *FC = dynamic_cast<FuncCallExprAST *>(Entry.Sites[i]))
+    // The anchor's other call sites -- the same instantiation, asked for from
+    // several places in the user's code.
+    const InstantiationEntry &AnchorEntry = *Chain[Anchor];
+    for (size_t i = 1; i < AnchorEntry.Sites.size(); ++i) {
+      if (auto *FC = dynamic_cast<FuncCallExprAST *>(AnchorEntry.Sites[i]))
         Err.withRelated(FC->getLoc(), "also instantiated here");
-      else if (auto *MC = dynamic_cast<MethodCallExprAST *>(Entry.Sites[i]))
+      else if (auto *MC = dynamic_cast<MethodCallExprAST *>(AnchorEntry.Sites[i]))
         Err.withRelated(MC->getLoc(), "also instantiated here");
     }
     Err.raise();
@@ -642,7 +755,6 @@ bool drainFreeFunctionRequests(
   std::unordered_map<std::string, FuncDefExprAST *> Registry =
       buildDeclRegistry(PrePassASTs);
 
-  int TotalDrained = 0;
   bool DidWork = false;
 
   // Index-based full-cache sweep, not a destructive worklist pop (S12b
@@ -728,13 +840,8 @@ bool drainFreeFunctionRequests(
         Template->getName().rfind("operator", 0) != 0)
       continue;
 
-    if (++TotalDrained > kMaxInstantiationDepth) {
-      std::vector<std::string> Chain;
-      for (const auto &E : Collector.cache().all())
-        Chain.push_back(E.Request.DeclKey);
-      GenericInstantiationDepthError(Entry.Request.Site, Chain).raise();
+    if (exceedsInstantiationLimit(Collector, Entry))
       return DidWork;
-    }
 
     // Build the name->concrete substitution map from TypeParams (declared
     // order) paired positionally with the request's own ordered TypeArgs
@@ -888,7 +995,6 @@ bool drainMethodRequests(
   std::unordered_map<std::string, FuncDefExprAST *> Registry =
       buildDeclRegistry(PrePassASTs);
 
-  int TotalDrained = 0;
   bool DidWork = false;
 
   for (size_t Idx = 0; Idx < Collector.cache().size(); ++Idx) {
@@ -948,13 +1054,8 @@ bool drainMethodRequests(
       return DidWork;
     }
 
-    if (++TotalDrained > kMaxInstantiationDepth) {
-      std::vector<std::string> Chain;
-      for (const auto &E : Collector.cache().all())
-        Chain.push_back(E.Request.DeclKey);
-      GenericInstantiationDepthError(Entry.Request.Site, Chain).raise();
+    if (exceedsInstantiationLimit(Collector, Entry))
       return DidWork;
-    }
 
     // TYPE-002 (S14a): a Method-kind request's TypeArgs can come from the
     // RECEIVER's own GenericType (struct is generic -- self needs
@@ -1021,7 +1122,6 @@ bool drainConstructorRequests(
   std::unordered_map<std::string, FuncDefExprAST *> Registry =
       buildDeclRegistry(PrePassASTs);
 
-  int TotalDrained = 0;
   bool DidWork = false;
 
   for (size_t Idx = 0; Idx < Collector.cache().size(); ++Idx) {
@@ -1077,13 +1177,8 @@ bool drainConstructorRequests(
         Template->getName().rfind("operator", 0) == 0)
       continue; // Not struct-bound -- drainFreeFunctionRequests()'s job.
 
-    if (++TotalDrained > kMaxInstantiationDepth) {
-      std::vector<std::string> Chain;
-      for (const auto &E : Collector.cache().all())
-        Chain.push_back(E.Request.DeclKey);
-      GenericInstantiationDepthError(Entry.Request.Site, Chain).raise();
+    if (exceedsInstantiationLimit(Collector, Entry))
       return DidWork;
-    }
 
     // TYPE-002 (S14a): `Box::new(...)`'s TypeArgs come from unifying the
     // constructor's OWN params against its call arguments (visitFuncCall,
@@ -1188,7 +1283,6 @@ bool drainStructRequests(
   std::unordered_map<std::string, StructRegistryEntry> Registry =
       buildStructDeclRegistry(PrePassASTs);
 
-  int TotalDrained = 0;
   bool DidWork = false;
 
   for (size_t Idx = 0; Idx < Collector.cache().size(); ++Idx) {
@@ -1223,13 +1317,8 @@ bool drainStructRequests(
     StructDeclExprAST *Template = RegIt->second.Decl;
     const std::string &TemplateModule = RegIt->second.Module;
 
-    if (++TotalDrained > kMaxInstantiationDepth) {
-      std::vector<std::string> Chain;
-      for (const auto &E : Collector.cache().all())
-        Chain.push_back(E.Request.DeclKey);
-      GenericInstantiationDepthError(Entry.Request.Site, Chain).raise();
+    if (exceedsInstantiationLimit(Collector, Entry))
       return DidWork;
-    }
 
     // Build the name->concrete substitution map from the struct's OWN
     // TypeParams (declared order, e.g. `struct Map<K, V>` -> ["K", "V"])

@@ -12,9 +12,14 @@ compiles a brand new specialized copy of it. That's normally invisible --
 But a generic that calls itself with a type that keeps growing (here,
 `wrap<T>` always calls `wrap<Box<T>>`) would need an infinite number of
 distinct compiled copies: wrap<int>, wrap<Box<int>>, wrap<Box<Box<int>>>,
-forever. The compiler stops after 64 levels rather than exhausting memory
-trying to finish, and reports the whole chain so you can see exactly which
-call keeps growing the type.
+forever. The compiler stops once a chain of instantiations requesting each
+other is 64 deep rather than exhausting memory trying to finish, and prints
+that chain (starting at the call in your own code) so you can see exactly
+which call keeps growing the type. Independent calls never add up toward the
+limit: calling one generic function on a hundred different types is a hundred
+chains of length one. (A generic that keeps requesting more than one new
+instantiation per level hits a separate, much larger cap on the total, and
+says "too many generic instantiations" instead.)
 
 This is almost never what you actually want. If you're trying to write a
 recursive data structure or algorithm, use a pointer/reference

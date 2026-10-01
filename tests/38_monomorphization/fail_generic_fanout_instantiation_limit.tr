@@ -1,0 +1,26 @@
+// EXPECT-DIAG: E079
+// EXPECT-DIAG: too many generic instantiations
+// EXPECT-DIAG: chain: f<int> -> f<Pair<int>>
+// EXPECT-NO-DIAG: generic instantiation depth exceeded
+// LEC-005: the backstop for a generic that FANS OUT. `f<T>` requests both
+// `f<Box<T>>` and `f<Pair<T>>`, so level n of the instantiation tree holds
+// 2^n distinct entries. The chain-depth cap (Monomorphize::
+// kMaxInstantiationDepth, 64) is only reached after enumerating every
+// instantiation above it -- 2^64 of them -- which is a hang, not a
+// diagnostic. Monomorphize::kMaxTotalInstantiations is what turns it into
+// E079, reported with the chain of the request that tripped it.
+//
+// If this test ever times out instead of failing to compile, the total cap
+// has been removed or raised past what the compiler can enumerate.
+struct Box<T> { val: T }
+struct Pair<T> { a: T, b: T }
+
+fn<T> f(x: T): int {
+    mut b: Box<T> = Box::default();
+    mut p: Pair<T> = Pair::default();
+    return f(b) + f(p);
+}
+
+fn main(): int {
+    return f(1);
+}

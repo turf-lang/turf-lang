@@ -3,10 +3,11 @@ TURF E079 -- GENERIC INSTANTIATION DEPTH EXCEEDED:
 CAUSE:
   Turf's generics are monomorphized (TYPE-002): a distinct compiled copy
   is generated per distinct tuple of concrete type arguments a generic
-  function/method/struct is ever used with. The monomorphizer's worklist
-  (ARCHITECTURE_OVERHAUL.md §9.5) is depth-capped at
-  Monomorphize::kMaxInstantiationDepth (default 64) rather than run to real
-  exhaustion.
+  function/method/struct is ever used with. The monomorphizer caps the LENGTH
+  of a chain of instantiation requests (each one made while instantiating the
+  previous) at Monomorphize::kMaxInstantiationDepth (64) rather than run to
+  real exhaustion, and the total number of instantiations at
+  kMaxTotalInstantiations (4096) as a backstop for a generic that fans out.
 
   This fires when a chain of instantiation requests never bottoms out --
   each request asks for a new, distinct type-argument tuple, so the
@@ -24,7 +25,10 @@ CAUSE:
   finite, cache-hitting recursive generic would.
 
 DIAGNOSTIC SHAPE:
-  The full chain is rendered in traversal order (`chain: wrap<int> ->
+  The primary location is the outermost request in YOUR code. The real
+  request chain (not every instantiation the compiler has made) is rendered
+  in traversal order, with very long names clipped and the middle of a long
+  chain elided (`chain: wrap<int> ->
   wrap<Box<int>> -> wrap<Box<Box<int>>> -> ...`), the same convention as
   E069 (StructLayoutCycleError)'s cycle path -- show the whole chain, not
   just where the cap was hit, since the interesting fact is usually near

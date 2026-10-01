@@ -35,6 +35,7 @@
 #include "Lexer.h" // SourceLocation
 #include "Types.h"
 
+#include <algorithm>
 #include <deque>
 #include <memory>
 #include <ostream>
@@ -88,6 +89,16 @@ struct InstantiationRequest {
   /// the behaviour of every request kind that does not set it.
   const FuncDefExprAST *Decl = nullptr;
 
+  /// LEC-005 (D25): the cache index of the instantiation whose BODY was being
+  /// re-typechecked when this request was discovered, or -1 when it came from
+  /// ordinary (non-instantiated) code. Following it to -1 reconstructs the
+  /// real chain -- user call -> `Set<Big>.add` -> `Set<Big>.contains` -> ... --
+  /// that a diagnostic about the innermost request needs and that the cache
+  /// itself (one flat dump of everything ever requested) cannot give. Only the
+  /// FIRST discoverer is kept (see InstantiationCollector::record()); not part
+  /// of sameInstantiationAs(), since who asked never changes what is built.
+  int Parent = -1;
+
   /// Structural equality, deliberately never by getName() string
   /// (INV-TYPE-1) -- two requests are the same instantiation only if every
   /// type argument is pairwise isEquivalent(), not merely same-spelled.
@@ -107,18 +118,27 @@ struct InstantiationRequest {
   }
 };
 
-/// Total instantiations this compile will process before giving up and
-/// reporting GenericInstantiationDepthError (E079). §9.5 step 4 frames
-/// this as a CHAIN-depth cap (like a C++ template recursion limit); S12a's
-/// actual implementation caps total distinct instantiations drained
-/// instead of the true parent-chain length, since the worklist doesn't
-/// track per-request parents. A total-count cap catches the same failure
-/// mode (a generic that requests a new, ever-growing instantiation of
-/// itself, forever) -- U-2's census (~18-20 real instantiations in the
-/// whole corpus) means this never fires for a legitimate program either
-/// way. Documented as a simplification, not silently passed off as the
-/// literal chain-depth measurement §9.5 describes.
+/// The longest chain of instantiations requesting each other
+/// (InstantiationRequest::Parent) this compile will follow before reporting
+/// GenericInstantiationDepthError (E079) -- a C++-template-recursion-limit
+/// analogue, and what §9.5 step 4 always said it was.
+///
+/// History: S12a could not measure this (requests had no parent), so it capped
+/// the TOTAL number of instantiations drained at 64 instead and documented
+/// that as a simplification. That was wrong in both directions: a perfectly
+/// ordinary program with 70 independent `ident<S1> .. ident<S70>` calls was
+/// rejected with E079, and the "chain" it printed was a dump of the whole
+/// cache. LEC-005 gives requests parents, so the cap is now the real thing.
 inline constexpr int kMaxInstantiationDepth = 64;
+
+/// A runaway that FANS OUT (`f<T>` requests both `f<Box<T>>` and
+/// `f<Pair<T>>`) reaches kMaxInstantiationDepth only after enumerating
+/// breadth-first every instantiation above it -- exponentially many -- so the
+/// depth cap alone would be an effective hang. This bounds the TOTAL, set far
+/// above anything a real program instantiates (the whole stdlib plus a large
+/// application is hundreds), purely as the backstop that keeps a pathological
+/// generic a diagnostic instead of an out-of-memory.
+inline constexpr size_t kMaxTotalInstantiations = 4096;
 
 /// One already-seen (or in-flight) instantiation request, plus every call
 /// site that asked for it -- S12a needs the full site list, not just a
@@ -127,6 +147,9 @@ inline constexpr int kMaxInstantiationDepth = 64;
 /// them must be rewritten to the same clone once it exists.
 struct InstantiationEntry {
   InstantiationRequest Request;
+  /// This entry's own position in the cache -- what a child request stores as
+  /// its `Parent`. Set by InstantiationCache::insert().
+  size_t Index = 0;
   std::vector<ExprAST *> Sites;
   /// TYPE-002 (S12b): set once a drain function has actually processed
   /// this entry (cloned/substituted/registered it, or deliberately left it
@@ -190,12 +213,14 @@ public:
   InstantiationEntry &insert(InstantiationRequest Req) {
     InstantiationEntry NewEntry;
     NewEntry.Request = std::move(Req);
+    NewEntry.Index = Entries_.size();
     Entries_.push_back(std::move(NewEntry));
     return Entries_.back();
   }
   size_t size() const { return Entries_.size(); }
   const std::deque<InstantiationEntry> &all() const { return Entries_; }
   InstantiationEntry &at(size_t Idx) { return Entries_[Idx]; }
+  const InstantiationEntry &at(size_t Idx) const { return Entries_[Idx]; }
 };
 
 /// Collector: TypeChecker feeds it via record() during sub-pass 2b (report-
@@ -223,6 +248,9 @@ public:
 /// internal fixed point isn't the whole story.
 class InstantiationCollector {
   InstantiationCache Cache_;
+  /// Cache index of the entry whose clone is being re-typechecked right now,
+  /// or -1. See ParentScope.
+  int CurrentParent_ = -1;
 
 public:
   /// Record one instantiation request from one call/decl site. A
@@ -231,13 +259,54 @@ public:
   /// site to point at the cached instantiation" (the rewrite itself
   /// happens once, in a drain function, once the cached instantiation
   /// exists).
+  ///
+  /// LEC-005 (D25): a NEW entry is stamped with the instantiation currently
+  /// being re-typechecked (setCurrentParent()), or -1 outside one. A repeat
+  /// request keeps its first parent, with one correction: if ordinary code
+  /// asks for something an instantiation had asked for first, the entry is
+  /// re-rooted -- the shortest chain, and the one that ends at a call the user
+  /// actually wrote, is the useful one to report.
   void record(InstantiationRequest Req, ExprAST *Site) {
     if (auto *Existing = Cache_.find(Req)) {
       if (Site) Existing->Sites.push_back(Site);
+      if (CurrentParent_ < 0 && Existing->Request.Parent >= 0) {
+        Existing->Request.Parent = -1;
+        Existing->Request.Site = Req.Site;
+      }
       return;
     }
+    Req.Parent = CurrentParent_;
     auto &NewEntry = Cache_.insert(std::move(Req));
     if (Site) NewEntry.Sites.push_back(Site);
+  }
+
+  /// From now on every NEW request recorded is a child of @p Parent (the
+  /// cache index of the entry whose clone is being re-typechecked), or a root
+  /// for -1. Returns the previous value so the caller can put it back.
+  ///
+  /// Deliberately a set/restore pair, not an RAII guard: the monomorphizer's
+  /// nested TypeChecker reports an error by `longjmp`, which skips
+  /// destructors, so a guard would never restore on exactly the path that
+  /// matters. The nested TypeChecker shares this collector, which is how "the
+  /// current parent" reaches it.
+  int setCurrentParent(int Parent) {
+    const int Previous = CurrentParent_;
+    CurrentParent_ = Parent;
+    return Previous;
+  }
+
+  /// The chain of requests ending at @p Entry, outermost first (`[0]` is the
+  /// one ordinary code asked for; `.back()` is @p Entry itself).
+  std::vector<const InstantiationEntry *>
+  chainTo(const InstantiationEntry &Entry) const {
+    std::vector<const InstantiationEntry *> Chain{&Entry};
+    // A parent is always an earlier entry (it exists before its children), so
+    // this strictly descends in index and cannot loop.
+    for (int P = Entry.Request.Parent; P >= 0;
+         P = Cache_.at(static_cast<size_t>(P)).Request.Parent)
+      Chain.push_back(&Cache_.at(static_cast<size_t>(P)));
+    std::reverse(Chain.begin(), Chain.end());
+    return Chain;
   }
 
   /// The returned reference stays valid across further record() calls
@@ -251,6 +320,18 @@ public:
   /// Human-readable dump for `--dump-instantiations`.
   void report(std::ostream &OS) const;
 };
+
+/// How a request reads in a diagnostic: `Set<Big>.add` for a method,
+/// `identity<int>` for a free function, `Set<Big>` for a struct -- the form a
+/// user would recognise from their own source, not a mangled or module-
+/// qualified internal name.
+std::string describeRequest(const InstantiationRequest &Req);
+
+/// The chain @p Chain (InstantiationCollector::chainTo()) as
+/// `a -> b -> c`, eliding the middle of a long one (`first, ..., last`) so a
+/// 65-deep runaway stays readable. Used by E079.
+std::vector<std::string>
+describeChain(const std::vector<const InstantiationEntry *> &Chain);
 
 /// TYPE-002 (S12a): rewrite @p Ty, replacing any TurfGenericParamType OR
 /// bare NamedType occurrence found in @p Subst (recursively through
