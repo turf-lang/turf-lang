@@ -149,7 +149,7 @@ nums.sort(byValue);
 test::assert(nums.find(isEven) >= 0, "found an even number");
 ```
 
-`list::list_sort(l: List<int>, cmp: fn(int, int): int): void` / `list::list_binary_search(...)` / `list::list_find(...)` still exist as thin, **deprecated** wrappers over the concrete `List<int>` case, kept for one cycle so existing callers keep working unchanged — prefer the methods above in new code.
+> **Removed in 2.0 (LEC-007).** The concrete `list::list_sort`, `list::list_binary_search` and `list::list_find` free functions (deprecated wrappers over the `List<int>` case since STD-003) no longer exist. Call the methods above: `l.sort(cmp)`, `l.binary_search(target, cmp)`, `l.find(predicate)` — they work for every element type, not just `int`.
 
 ---
 

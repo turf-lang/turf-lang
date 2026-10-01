@@ -2,9 +2,8 @@
 // reports line/word counts and the distribution of word lengths, and
 // times the analysis. Exercises, in one realistic program: strings::split/
 // pad_right, fs's pure path-string helpers, collections::Set<int>,
-// list_sort/list_find (the List<int>-only free functions -- see
-// lib/std/collections/list.tr's own comment on why they're not generic
-// List<T> methods), and time's CPU-time measurement.
+// List.sort/List.find (generic List<T> methods taking a comparator /
+// predicate function), and time's CPU-time measurement.
 //
 // Deliberately does NOT use io::read_to_string/read_lines/write_string --
 // a real, unresolved heap-corruption bug was found in that combination
@@ -77,14 +76,14 @@ fn main(): int {
     io::print("  distinct word lengths: ");
     io::printline(distinctLengths.length() to string);
 
-    immut foundLongWord: bool = list::list_find(wordLengths, isLongWord) >= 0;
+    immut foundLongWord: bool = wordLengths.find(isLongWord) >= 0;
     if foundLongWord {
         io::printline("  found a word at least 7 characters long.");
     }
 
     // Sort word lengths ascending, then drain (pop takes the last/largest
     // element first, so this naturally prints longest-to-shortest).
-    list::list_sort(wordLengths, compareLengths);
+    wordLengths.sort(compareLengths);
     io::print("  longest word length: ");
     io::printline(wordLengths.pop() to string);
 

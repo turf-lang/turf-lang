@@ -611,7 +611,7 @@ Every module is an ordinary `.tr` file under `lib/std/` — no compiler special-
 |---|---|
 | `strings` | length/contains/index_of/starts_with/ends_with/repeat/substring/replace/to_upper/to_lower/trim(_start/_end), `split`/`join`, `pad_left`/`pad_right`, `parse_int`/`parse_double` |
 | `io` | `print`/`printline`/`input`, plus file I/O: `read_to_string`, `read_lines`, `write_string`, `exists`, `eprint`/`eprintline`, `flush` |
-| `list` / `stack` / `queue` / `map` / `set` | `List<T>`/`Stack<T>`/`Queue<T>`/`Map<K,V>`/`Set<T>`, plus `list_sort`/`list_binary_search`/`list_find` free functions over `List<int>` |
+| `list` / `stack` / `queue` / `map` / `set` | `List<T>`/`Stack<T>`/`Queue<T>`/`Map<K,V>`/`Set<T>` (`List<T>` has `sort`/`binary_search`/`find` methods) |
 | `mem` | checked `alloc`/`alloc_zeroed`/`grow`/`dup`/`zero` wrappers over `malloc`/`calloc`/`realloc`/`free`, plus `Pool<T>` |
 | `math` | `abs`/`power`/`min`/`max`/`clamp`, libm bindings (`sqrt`, `sin`, `pow`, ...), `PI`/`E` |
 | `time` | `now_seconds()` (wall clock), `clock_ticks()`/`elapsed_ms()` (CPU time — not wall time, see the module's own doc comment), `sleep_seconds`/`sleep_ms` |

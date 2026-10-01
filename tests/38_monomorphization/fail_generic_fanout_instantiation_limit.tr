@@ -1,7 +1,11 @@
 // EXPECT-DIAG: E079
 // EXPECT-DIAG: too many generic instantiations
-// EXPECT-DIAG: chain: f<int> -> f<Pair<int>>
+// EXPECT-DIAG: chain: f<int> -> f<
 // EXPECT-NO-DIAG: generic instantiation depth exceeded
+// (The second hop is deliberately not pinned: which of f<Box<T>> / f<Pair<T>>
+// is the 4097th request depends on how many instantiations precede it, and
+// LEC-007 removing three non-generic functions from list.tr flipped it from
+// Pair to Box with no change to the cap or to the diagnostic.)
 // LEC-005: the backstop for a generic that FANS OUT. `f<T>` requests both
 // `f<Box<T>>` and `f<Pair<T>>`, so level n of the instantiation tree holds
 // 2^n distinct entries. The chain-depth cap (Monomorphize::

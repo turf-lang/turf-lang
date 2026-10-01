@@ -132,8 +132,8 @@ operator<T> [](l: List<T>, i: int): T {
 
 // Self taken BY VALUE, not `&List<T>` -- unlike a plain value struct,
 // that's sufficient for this write to persist: `data` is a heap pointer
-// (list_sort()'s own doc comment above makes the identical point about
-// List<int> more generally), so copying the List<T> header still shares
+// (the same reason `List.sort` below can reorder a list it was handed by
+// value), so copying the List<T> header still shares
 // the same backing buffer, and `l.data[i] = value` writes through it.
 operator<T> []=(l: List<T>, i: int, value: T): void {
   if (i < 0 || i >= l.len) {
@@ -147,9 +147,9 @@ operator<T> []=(l: List<T>, i: int, value: T): void {
 // Genuinely generic `List<T>` methods (STD-003, ARCHITECTURE_OVERHAUL.md
 // §8, item 3) -- NOT possible until this group. `sort`/`binary_search`/
 // `find` used to be concrete, `List<int>`-only FREE functions
-// (`list_sort`/`list_binary_search`/`list_find`, kept below as thin
-// deprecated wrappers over these methods, for one cycle, per this group's
-// own "prefer keeping wrappers" guidance) because a comparator parameter
+// (`list_sort`/`list_binary_search`/`list_find`; STD-003 kept them as thin
+// wrappers over these methods for one cycle and LEC-007 removed them)
+// because a comparator parameter
 // typed `fn(T, T): int` never type-checked correctly at the call site:
 // nothing in the substitution machinery recursed into a `FuncType`'s own
 // parameter/return types (`collectGenericSubstitution()`/
@@ -221,27 +221,4 @@ pub fn<T> List.find(predicate: fn(T): bool): int {
     i = i + 1;
   }
   return -1;
-}
-
-// ─── deprecated free-function wrappers ───────────────────────────────────
-//
-// `list_sort`/`list_binary_search`/`list_find` are the pre-STD-003 concrete
-// `List<int>`-only free functions this file used to have no alternative
-// to. Kept as thin wrappers over the real generic methods above, for one
-// cycle, per this group's own "Breaking changes" guidance (prefer keeping
-// wrappers over removing outright) -- existing callers
-// (`tests/32_set_and_sort_stdlib/02_list_sort.tr` and siblings) keep
-// working unchanged. Prefer `l.sort(cmp)`/`l.binary_search(target, cmp)`/
-// `l.find(predicate)` directly in new code; these three may be removed in
-// a future cycle.
-pub fn list_sort(l: List<int>, cmp: fn(int, int): int): void {
-  l.sort(cmp);
-}
-
-pub fn list_binary_search(l: List<int>, target: int, cmp: fn(int, int): int): int {
-  return l.binary_search(target, cmp);
-}
-
-pub fn list_find(l: List<int>, predicate: fn(int): bool): int {
-  return l.find(predicate);
 }
