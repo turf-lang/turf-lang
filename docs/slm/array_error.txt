@@ -30,11 +30,16 @@ ELEMENT ACCESS:
 
   RULES:
   - Indices are zero-based: valid range is 0 to SIZE-1.
+  - A negative index counts back from the end, Python-style: arr[-1] is the
+    last element and arr[-SIZE] the first, so the full valid range is
+    -SIZE to SIZE-1. An index below -SIZE is out of bounds; it does not
+    wrap around.
   - Index must be of type int.
   - Accessing out of bounds with a LITERAL index is a compile-time error:
     "Array index out of bounds! You tried to access 'array[5]', but the
-    array only has 3 elements (indices 0 to 2)." A computed (non-literal)
-    out-of-bounds index is not caught at compile time.
+    array only has 3 elements (indices 0 to 2, or -1 to -3 counting from
+    the end)." A computed (non-literal) out-of-bounds index is not caught at
+    compile time; it panics at run time instead.
 
 ARRAY LENGTH:
   Both of these work and return the same value:

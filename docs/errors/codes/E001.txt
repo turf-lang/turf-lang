@@ -6,6 +6,11 @@ Turf arrays have a fixed size you choose when you declare them, and their valid 
     mut first: int = primes[0];   // correct -- the first element
     mut last: int = primes[2];    // correct -- the last element (size - 1)
 
+A negative index counts back from the end, so `primes[-1]` is that same last element and `primes[-3]` is the first. The valid range is `-3` to `2` -- an index below `-3` is out of bounds just like one above `2`:
+
+    mut also_last: int = primes[-1];   // correct -- the last element
+    mut oops2: int = primes[-4];       // there is no primes[-4]!
+
 If you ask for one index too many:
 
     mut oops: int = primes[3];   // there is no primes[3]!

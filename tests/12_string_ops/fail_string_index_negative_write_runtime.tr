@@ -1,14 +1,16 @@
 // RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: String index out of bounds
 // FDN-004: the write side (`s[i] = c;`, ArrayAccessExprAST::codegenLValue())
-// only checks for a negative index -- it deliberately does NOT check the
-// `strlen()` upper bound a read gets, because the write target is very
-// often a `gc_alloc`'d buffer being filled one byte at a time BEFORE its
-// NUL terminator is written (every strings.tr function that builds a
-// string this way would panic on its own very first write otherwise -- see
+// does NOT check the `strlen()` upper bound a read gets, because the write
+// target is very often a `gc_alloc`'d buffer being filled one byte at a time
+// BEFORE its NUL terminator is written (every strings.tr function that builds
+// a string this way would panic on its own very first write otherwise -- see
 // EmitStringBoundsCheck()'s doc comment, src/CodegenArray.cpp, for the
-// confirmed-live failure this test's positive counterpart would be). A
-// negative index is unconditionally wrong regardless of that, so it still
-// panics on the write side too.
+// confirmed-live failure this test's positive counterpart would be).
+//
+// #256: a negative index is now counted from the end, so the write is bad only
+// when it reaches past the start. A fresh `gc_alloc` buffer has strlen 0, so
+// even `buf[-1]` wraps to -1 and still panics -- which is what this pins.
 fn main(): int {
     unsafe {
         mut buf: string = gc_alloc(4) to string;

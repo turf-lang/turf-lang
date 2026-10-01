@@ -89,9 +89,12 @@ Returns the current element count (`self.len`) — not the backing capacity.
 ### `operator<T> [](l: List<T>, i: int): T` / `operator<T> []=(l: List<T>, i: int, value: T): void`
 
 `l[i]` / `l[i] = v` for **every** element type (LEC-006) — bounds-checked
-(`sys::panic` out of range). `l.get(i)` / `l.set(i, v)` are the same
-operations as named methods. Indexing a `List<T>` is never `unsafe`; the raw
-`l.data[i]` is, and is unchecked.
+(`sys::panic` out of range). A negative index counts from the end, as for an
+array: `l[-1]` is the last element, and the valid range is `-len <= i < len`
+(`l[-len - 1]` panics; it does not wrap twice). `l.get(i)` / `l.set(i, v)` are
+the same operations as named methods, **except** that they take only
+`0 <= i < len`: a negative index to `get`/`set` panics. Indexing a `List<T>`
+is never `unsafe`; the raw `l.data[i]` is, and is unchecked.
 
 ```turflang
 mut l: List<int> = List::default();

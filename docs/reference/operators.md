@@ -240,16 +240,27 @@ mut status_msg: string = "ID_" + (999 to string) + "_Active_" + (true to string)
 ### String indexing `s[i]`
 
 Unlike the other string operators, indexing **is** a genuine compiler-level
-construct, not a stdlib overload. It reads one raw byte at offset `i` and
-zero-extends it to a full `int` — so `s[i]` has static type `int`, not
-`char`, even though it's indexing into byte data:
+construct, not a stdlib overload. It reads one raw byte at offset `i`, and
+`s[i]` has static type `char` (not `int`). Compare it against a `char`
+literal directly; cast with `to int` when you want the byte's numeric value:
 
 ```turflang
 mut s: string = "hello";
-mut c0: int = s[0];
-test::assert(c0 == 104, "s[0] should be 104 ('h')");   // note: int, not char
-test::assert("hello"[1] == 101, "direct literal indexing also works");
+mut c0: char = s[0];
+test::assert(c0 == 'h', "s[0] is 'h'");
+test::assert(s[0] to int == 104, "an explicit cast gives the byte value");
+test::assert("hello"[1] == 'e', "direct literal indexing also works");
 ```
+
+Assigning `s[i]` straight into an `int` is a type error (E066).
+
+A negative index counts back from the end, as it does for arrays
+([Negative indices](arrays.md#negative-indices)): `s[-1]` is the last byte and
+`s[-n]` the first byte of an `n`-byte string. An index outside `-n <= i < n`
+panics with
+`String index out of bounds` on a read. A write (`s[-1] = c;`) wraps the same
+way but checks only the lower end, because a `string` carries no length and a
+buffer still being filled has no terminator yet to measure.
 
 ---
 

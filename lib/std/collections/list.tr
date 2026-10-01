@@ -124,11 +124,21 @@ pub fn<T> List.set(i: int, value: T): void {
 // above) already trusts the caller; operator[] deliberately does not,
 // since `l[i]` reads exactly like array indexing to a caller and array
 // indexing IS bounds-checked everywhere else in the language.
+//
+// #256: a negative index counts from the end, as it does for a fixed-size
+// array -- `l[-1]` is the last element. Valid range is `-len <= i < len`; the
+// wrap happens once, so `l[-len - 1]` still panics instead of landing back in
+// range. `get`/`set` above keep their strict `0 <= i < len` contract: they are
+// named calls, not array-shaped syntax.
 operator<T> [](l: List<T>, i: int): T {
-  if (i < 0 || i >= l.len) {
+  mut idx: int = i;
+  if (idx < 0) {
+    idx = idx + l.len;
+  }
+  if (idx < 0 || idx >= l.len) {
     sys::panic("List[]: index out of bounds");
   }
-  return l.data[i];
+  return l.data[idx];
 }
 
 // Self taken BY VALUE, not `&List<T>` -- unlike a plain value struct,
@@ -137,10 +147,14 @@ operator<T> [](l: List<T>, i: int): T {
 // value), so copying the List<T> header still shares
 // the same backing buffer, and `l.data[i] = value` writes through it.
 operator<T> []=(l: List<T>, i: int, value: T): void {
-  if (i < 0 || i >= l.len) {
+  mut idx: int = i;
+  if (idx < 0) {
+    idx = idx + l.len;
+  }
+  if (idx < 0 || idx >= l.len) {
     sys::panic("List[]=: index out of bounds");
   }
-  l.data[i] = value;
+  l.data[idx] = value;
 }
 
 // ─── sort / search ──────────────────────────────────────────────────────────

@@ -1,0 +1,35 @@
+// #256: List's operator[] / operator[]= count a negative index from the end,
+// matching a fixed-size array (tests/05_arrays_pointers_ffi/
+// negative_array_index.tr). List<string> is covered as well as List<int>
+// because the operators are generic (LEC-006), not List<int>-only.
+import list::List;
+import test;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l.push(10);
+    l.push(20);
+    l.push(30);
+
+    test::assert(l[-1] == 30, "l[-1] is the last element");
+    test::assert(l[-3] == 10, "l[-len] is the first element");
+    test::assert(l[-2] == l[1], "l[-2] == l[len - 2]");
+
+    l[-1] = 31;
+    test::assert(l[2] == 31, "l[-1] = v wrote the last element");
+    l[-3] = 11;
+    test::assert(l[0] == 11, "l[-len] = v wrote the first element");
+    test::assert(l.length() == 3, "indexing never changes the length");
+
+    // A list that has grown: the wrap uses the current length, not capacity.
+    l.push(40);
+    test::assert(l[-1] == 40, "l[-1] follows a push");
+    test::assert(l[-4] == 11, "l[-len] follows a push");
+
+    mut s: List<string> = List::default();
+    s.push("x");
+    s.push("y");
+    test::assert(s[-1] == "y", "negative index on List<string>");
+
+    return 0;
+}

@@ -161,7 +161,9 @@ void ValueRangePass::runOnCFG(CFG &Cfg, const std::vector<SymbolID> & /*InitialA
                     int sz = AT->getSize();
                     if (sz > 0) {
                       long long iv = *idxVal;
-                      if (iv < 0 || iv >= sz) {
+                      // #256: negative indices count from the end, so the
+                      // valid range is -sz <= iv < sz (CodegenArray.cpp).
+                      if (iv < -static_cast<long long>(sz) || iv >= sz) {
                         ArrayBoundsError err(AA->getLoc(), BaseVar->getName(), iv, sz);
                         err.raise();
                       }

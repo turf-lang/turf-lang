@@ -1,0 +1,38 @@
+// #256: a negative string index counts from the end, Python-style: `s[-1]` is
+// the last byte, `s[-strlen(s)]` the first. Both the read path (strlen is
+// already computed for the upper bound) and the write path (strlen only runs
+// when the index is negative, see EmitStringBoundsCheck()).
+import test;
+
+fn neg(n: int): int {
+    return 0 - n;
+}
+
+fn main(): int {
+    // Literal and runtime-computed indices take different codegen paths only
+    // for arrays, but both are exercised here so a string regression in either
+    // shows up.
+    immut s: string = "abc";
+    test::assert(s[-1] == 'c', "s[-1] is the last byte");
+    test::assert(s[-2] == 'b', "s[-2]");
+    test::assert(s[-3] == 'a', "s[-3] is the first byte");
+    test::assert(s[neg(1)] == 'c', "runtime -1");
+    test::assert(s[neg(3)] == 'a', "runtime -3");
+    test::assert(s[2] == s[-1], "s[len-1] == s[-1]");
+
+    // Write through a negative index.
+    unsafe {
+        mut buf: string = gc_alloc(4) to string;
+        buf[0] = 'x';
+        buf[1] = 'y';
+        buf[2] = 'z';
+        buf[3] = '\0';
+        buf[-1] = 'Q';
+        buf[neg(3)] = 'P';
+        test::assert(buf[0] == 'P', "buf[-3] = 'P' wrote the first byte");
+        test::assert(buf[1] == 'y', "the middle byte is untouched");
+        test::assert(buf[2] == 'Q', "buf[-1] = 'Q' wrote the last byte");
+    }
+
+    return 0;
+}

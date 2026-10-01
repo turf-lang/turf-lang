@@ -1,0 +1,15 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: Array index out of bounds
+// #256: the run-time half of fail_array_negative_index_out_of_range.tr. The
+// index comes back from a call, so the compiler cannot fold it and the
+// select-based wrap in EmitRuntimeBoundsCheck() decides. -4 on an `int[3]`
+// wraps to -1, which must still panic: the wrap happens once, it is not
+// modular. If it were, this would read a[2] and exit 0.
+fn idx(): int {
+    return 0 - 4;
+}
+
+fn main(): int {
+    mut a: int[3] = [1, 2, 3];
+    return a[idx()];
+}

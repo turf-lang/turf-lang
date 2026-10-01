@@ -146,6 +146,30 @@ fn main(): int {
   **different** concrete size is a type error — sizes are part of an
   array type's identity, not just its element type.
 
+## Negative indices
+
+A negative index counts back from the end, as in Python: `a[-1]` is the last
+element, `a[-2]` the one before it, and `a[-N]` the first element of an
+`N`-element array.
+
+```turflang
+mut a: int[4] = [10, 20, 30, 40];
+a[-1];        // 40, the same element as a[3]
+a[-4];        // 10, the same element as a[0]
+a[-1] = 41;   // writes a[3]
+a[-2] += 5;   // compound assignment works too
+```
+
+The valid range is therefore `-N <= i < N`. It does **not** wrap around:
+`a[-5]` and `a[4]` are both out of bounds on a 4-element array, caught at
+compile time when the index is a constant and by the runtime check otherwise.
+
+The same rule applies to `string` indexing (`s[-1]` is the last byte; see
+[String indexing](operators.md#string-indexing-si)) and to `List<T>`'s `l[i]`
+/ `l[i] = v` ([stdlib](stdlib/collections.md)). It does **not** apply to a raw
+pointer (`T*`) or an unsized parameter (`T[]`), which carry no length to count
+back from — there `p[-1]` stays plain pointer arithmetic and is unchecked.
+
 ## Bounds checking
 
 Turflang catches array out-of-bounds accesses at **compile time** whenever
@@ -181,8 +205,10 @@ block rather than directly alongside the array.
 When the index genuinely cannot be proven constant at compile time (for
 example, it depends on a loop counter, a function argument, or other
 runtime-computed value), the compiler instead emits a runtime bounds
-check: `idx < 0 || idx >= size`. On violation, the program panics with a
-message like:
+check. A negative index first has `size` added to it (see
+[Negative indices](#negative-indices)); the result must then satisfy
+`0 <= idx < size`, so the check fires for `idx < -size` as well as
+`idx >= size`. On violation, the program panics with a message like:
 
 ```
 Array index out of bounds for '<name>'

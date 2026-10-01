@@ -16,8 +16,11 @@ public:
                       Colors::RESET + "' only has " +
                       Colors::CYAN + std::to_string(ArraySize) + Colors::RESET +
                       " elements (indices 0 to " +
-                      std::to_string(ArraySize - 1) + ").",
-                  "Array indices start at 0 and go up to size - 1.") {
+                      std::to_string(ArraySize - 1) + ", or -1 to -" +
+                      std::to_string(ArraySize) + " counting from the end).",
+                  "Array indices start at 0 and go up to size - 1; a "
+                  "negative index counts back from the end (-1 is the last "
+                  "element).") {
     Category_ = SLM::ErrorCategory::ARRAY_ERROR;
   }
 };

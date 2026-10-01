@@ -1,11 +1,17 @@
 // RUNTIME_ABORT_EXPECTED
-// FDN-004 (D17, ROADMAP_v2.0.0.md): a negative `s[i]` index must also panic
-// -- the "index < 0" half of EmitStringBoundsCheck() (src/CodegenArray.cpp),
+// EXPECT-RUNTIME: String index out of bounds
+// FDN-004 (D17, ROADMAP_v2.0.0.md): an index below the start must panic -- the
+// "normalized index < 0" half of EmitStringBoundsCheck() (src/CodegenArray.cpp),
 // distinct from the "index >= strlen(s)" half fail_string_index_oob_read_
 // runtime.tr (this folder) already covers.
+//
+// #256: `-1` itself is no longer such an index -- a negative index counts from
+// the end (14_string_negative_index.tr), so "abc" accepts -3..-1. -4 is the
+// first one past the start; if the wrap were modular instead of checked it
+// would land on 'c' and this would exit 0.
 fn main(): int {
     immut s: string = "abc";
-    immut i: int = 0 - 1;
+    immut i: int = 0 - 4;
     immut c: char = s[i];
     return c to int;
 }

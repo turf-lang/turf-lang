@@ -34,6 +34,7 @@
 #include "llvm/IR/Verifier.h"
 #include <algorithm>
 #include <iostream>
+#include <optional>
 #include <set>
 #include <unordered_map>
 
@@ -135,16 +136,30 @@ Value *ArrayLiteralExprAST::codegen() {
 }
 
 
-// Helper function to emit runtime bounds check
-static void EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
-                                   const std::string &ArrayName,
-                                   SourceLocation Loc) {
+// #256: a fixed-size array accepts Python-style negative indices -- `a[-1]` is
+// the last element, `a[-N]` the first -- so the valid range is `-N <= i < N`,
+// not `0 <= i < N`. This is the one place the wrap is decided, for both the
+// l-value and the r-value access paths: a negative index has `N` added to it,
+// and the result must then be a real position, so `a[-N-1]` and `a[N]` both
+// still panic rather than wrapping a second time (no modular arithmetic: an
+// off-by-one that happens to land back in range would hide the bug).
+// `i + N` cannot overflow for `i < 0 && N > 0`. Constant indices never reach
+// here -- the callers fold them at compile time and raise ArrayBoundsError.
+//
+// Returns the normalized, non-negative index to GEP with.
+static Value *EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
+                                     const std::string &ArrayName,
+                                     SourceLocation Loc) {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
-  // Check: index < 0 || index >= size
   Value *SizeVal = ConstantInt::get(Type::getInt64Ty(*TheContext), ArraySize);
   Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
 
+  Value *IsNeg = Builder->CreateICmpSLT(IndexVal, Zero, "idx_isneg");
+  Value *Wrapped = Builder->CreateAdd(IndexVal, SizeVal, "idx_wrapped");
+  IndexVal = Builder->CreateSelect(IsNeg, Wrapped, IndexVal, "idx_norm");
+
+  // Check the normalized index: index < 0 || index >= size
   Value *TooSmall = Builder->CreateICmpSLT(IndexVal, Zero, "idx_neg");
   Value *TooBig = Builder->CreateICmpSGE(IndexVal, SizeVal, "idx_toobig");
   Value *OutOfBounds = Builder->CreateOr(TooSmall, TooBig, "oob");
@@ -165,6 +180,27 @@ static void EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
   // Continue block
   TheFunction->insert(TheFunction->end(), ContBB);
   Builder->SetInsertPoint(ContBB);
+  return IndexVal;
+}
+
+// Compile-time half of the same rule, for a constant index: validates
+// `-N <= Idx < N` (raising ArrayBoundsError otherwise) and returns the
+// non-negative position. `nullopt` means the error was raised.
+static std::optional<long long>
+FoldConstantArrayIndex(long long Idx, int ArraySize, ExprAST *Base,
+                       SourceLocation Loc) {
+  if (Idx >= -static_cast<long long>(ArraySize) && Idx < ArraySize)
+    return Idx < 0 ? Idx + ArraySize : Idx;
+
+  auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base);
+  ArrayBoundsError Err(Loc, BaseVar ? BaseVar->getName() : "array", Idx,
+                       ArraySize);
+  if (BaseVar && GlobalSymbolTable) {
+    if (Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName()))
+      Err.withRelated(S->DeclLoc, "array declared here");
+  }
+  Err.raise();
+  return std::nullopt;
 }
 
 
@@ -195,19 +231,52 @@ static void EmitRuntimeBoundsCheck(Value *IndexVal, int ArraySize,
 // intentional residual gap (see FDN-004's change record's *Known
 // pitfalls*), not an oversight: `s[huge_positive_i] = c;` on an
 // already-complete string is still unchecked, exactly as it always was.
-static void EmitStringBoundsCheck(Value *StrVal, Value *IndexVal,
-                                  SourceLocation Loc, bool CheckUpperBound) {
+//
+// #256: a negative index counts from the end, Python-style (`s[-1]` is the
+// last byte, `s[-strlen(s)]` the first), so the check is `-len <= i < len`.
+// Returns the normalized, non-negative index to GEP with. On the read path
+// the `strlen` is already there, so the wrap is a branch-free select. On the
+// write path `strlen` must NOT run for an ordinary non-negative store (the
+// buffer-fill case above), so a negative index alone takes a branch to
+// compute it -- `s[-1] = c;` is the only kind of write that pays for it.
+static Value *EmitStringBoundsCheck(Value *StrVal, Value *IndexVal,
+                                    SourceLocation Loc, bool CheckUpperBound) {
   Function *TheFunction = Builder->GetInsertBlock()->getParent();
 
   Value *Zero = ConstantInt::get(Type::getInt64Ty(*TheContext), 0);
-  Value *OutOfBounds = Builder->CreateICmpSLT(IndexVal, Zero, "sidx_neg");
+  FunctionType *StrlenTy = FunctionType::get(
+      Type::getInt64Ty(*TheContext), {PointerType::get(*TheContext, 0)},
+      /*isVarArg=*/false);
+  FunctionCallee StrlenFn = TheModule->getOrInsertFunction("strlen", StrlenTy);
 
+  Value *IsNeg = Builder->CreateICmpSLT(IndexVal, Zero, "sidx_isneg");
+  Value *LenVal = nullptr;
   if (CheckUpperBound) {
-    FunctionType *StrlenTy = FunctionType::get(
-        Type::getInt64Ty(*TheContext), {PointerType::get(*TheContext, 0)},
-        /*isVarArg=*/false);
-    FunctionCallee StrlenFn = TheModule->getOrInsertFunction("strlen", StrlenTy);
-    Value *LenVal = Builder->CreateCall(StrlenFn, {StrVal}, "strlen_bc");
+    LenVal = Builder->CreateCall(StrlenFn, {StrVal}, "strlen_bc");
+    Value *Wrapped = Builder->CreateAdd(IndexVal, LenVal, "sidx_wrapped");
+    IndexVal = Builder->CreateSelect(IsNeg, Wrapped, IndexVal, "sidx_norm");
+  } else {
+    BasicBlock *EntryBB = Builder->GetInsertBlock();
+    BasicBlock *NegBB = BasicBlock::Create(*TheContext, "sidx_wrap", TheFunction);
+    BasicBlock *JoinBB = BasicBlock::Create(*TheContext, "sidx_join");
+    Builder->CreateCondBr(IsNeg, NegBB, JoinBB);
+
+    Builder->SetInsertPoint(NegBB);
+    Value *NegLen = Builder->CreateCall(StrlenFn, {StrVal}, "strlen_wr");
+    Value *Wrapped = Builder->CreateAdd(IndexVal, NegLen, "sidx_wrapped");
+    Builder->CreateBr(JoinBB);
+
+    TheFunction->insert(TheFunction->end(), JoinBB);
+    Builder->SetInsertPoint(JoinBB);
+    PHINode *Norm = Builder->CreatePHI(Type::getInt64Ty(*TheContext), 2, "sidx_norm");
+    Norm->addIncoming(Wrapped, NegBB);
+    Norm->addIncoming(IndexVal, EntryBB);
+    IndexVal = Norm;
+  }
+
+  // Wrapped-negative that is still below zero (`s[-len-1]`) lands here too.
+  Value *OutOfBounds = Builder->CreateICmpSLT(IndexVal, Zero, "sidx_neg");
+  if (CheckUpperBound) {
     Value *TooBig = Builder->CreateICmpSGE(IndexVal, LenVal, "sidx_toobig");
     OutOfBounds = Builder->CreateOr(OutOfBounds, TooBig, "soob");
   }
@@ -226,6 +295,7 @@ static void EmitStringBoundsCheck(Value *StrVal, Value *IndexVal,
 
   TheFunction->insert(TheFunction->end(), ContBB);
   Builder->SetInsertPoint(ContBB);
+  return IndexVal;
 }
 
 
@@ -262,10 +332,11 @@ Value *ArrayAccessExprAST::codegenLValue() {
       return nullptr;
     IndexVal = CastToType(IndexVal, TurfInt(), "stridx", Loc);
 
-    // FDN-004: write-side -- negative-index check only. See
-    // EmitStringBoundsCheck()'s own doc comment for why the `strlen()`
-    // upper bound can't apply to a write.
-    EmitStringBoundsCheck(StrVal, IndexVal, Loc, /*CheckUpperBound=*/false);
+    // FDN-004: write-side -- no `strlen()` upper bound. See
+    // EmitStringBoundsCheck()'s own doc comment for why it can't apply to a
+    // write, and for how a negative (from-the-end) index is still handled.
+    IndexVal =
+        EmitStringBoundsCheck(StrVal, IndexVal, Loc, /*CheckUpperBound=*/false);
 
     return Builder->CreateGEP(Type::getInt8Ty(*TheContext), StrVal, IndexVal,
                               "charptr");
@@ -305,25 +376,18 @@ Value *ArrayAccessExprAST::codegenLValue() {
 
   if (ArraySize > 0) {
     if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
-      long long Idx = CI->getSExtValue();
-      if (Idx < 0 || Idx >= ArraySize) {
-        auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base.get());
-        ArrayBoundsError Err(Loc, BaseVar ? BaseVar->getName() : "array", Idx,
-                             ArraySize);
-        if (BaseVar && GlobalSymbolTable) {
-          if (Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName()))
-            Err.withRelated(S->DeclLoc, "array declared here");
-        }
-        Err.raise();
+      auto Folded =
+          FoldConstantArrayIndex(CI->getSExtValue(), ArraySize, Base.get(), Loc);
+      if (!Folded)
         return nullptr;
-      }
+      IndexVal = ConstantInt::get(Type::getInt64Ty(*TheContext), *Folded);
     } else if (!ProvenInBounds) {
       // OPT-002: ProvenInBounds is set by ValueRangePass::markElidableChecks()
       // (ValueRange.cpp), which runs on a throwaway CFG BEFORE Body->codegen()
       // -- see that call site's own comment (CodegenFunc.cpp). F-OPT-2
       // (ARCHITECTURE_OVERHAUL.md §17.3): removal by proof only, independent
       // of `-O` level -- this is not gated on any optimization flag.
-      EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
+      IndexVal = EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
     }
   }
 
@@ -396,7 +460,8 @@ Value *ArrayAccessExprAST::codegen() {
 
     // FDN-004: read-side bounds check -- see EmitStringBoundsCheck()'s own
     // doc comment for why this can't be a fixed-size check like an array's.
-    EmitStringBoundsCheck(StrVal, IndexVal, Loc, /*CheckUpperBound=*/true);
+    IndexVal =
+        EmitStringBoundsCheck(StrVal, IndexVal, Loc, /*CheckUpperBound=*/true);
 
     Value *CharPtr = Builder->CreateGEP(Type::getInt8Ty(*TheContext), StrVal,
                                         IndexVal, "charptr");
@@ -443,19 +508,12 @@ Value *ArrayAccessExprAST::codegen() {
 
   if (ArraySize > 0) {
     if (auto *CI = dyn_cast<ConstantInt>(IndexVal)) {
-      long long Idx = CI->getSExtValue();
-      if (Idx < 0 || Idx >= ArraySize) {
-        auto *BaseVar = dynamic_cast<const VariableExprAST *>(Base.get());
-        ArrayBoundsError Err(Loc, BaseVar ? BaseVar->getName() : "array", Idx,
-                             ArraySize);
-        if (BaseVar && GlobalSymbolTable) {
-          if (Symbol *S = GlobalSymbolTable->LookupSymbol(BaseVar->getName()))
-            Err.withRelated(S->DeclLoc, "array declared here");
-        }
-        Err.raise();
+      auto Folded =
+          FoldConstantArrayIndex(CI->getSExtValue(), ArraySize, Base.get(), Loc);
+      if (!Folded)
         return nullptr;
-      }
-      return Builder->CreateExtractValue(BaseVal, CI->getZExtValue(), "arrextract");
+      return Builder->CreateExtractValue(BaseVal, static_cast<unsigned>(*Folded),
+                                         "arrextract");
     } else {
       // Dynamic index on an R-value array. We must dump it into an alloca to GEP into it.
       Function *TheFunction = Builder->GetInsertBlock()->getParent();
@@ -471,7 +529,7 @@ Value *ArrayAccessExprAST::codegen() {
       // reason the compile-time-constant check just above is duplicated
       // rather than shared between the two branches.
       if (!ProvenInBounds)
-        EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
+        IndexVal = EmitRuntimeBoundsCheck(IndexVal, ArraySize, "array", Loc);
 
       Type *ElemTy = getLLVMType(ElemType);
       llvm::ArrayType *ArrTy = llvm::ArrayType::get(ElemTy, ArraySize);

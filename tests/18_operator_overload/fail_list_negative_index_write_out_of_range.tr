@@ -1,0 +1,11 @@
+// RUNTIME_ABORT_EXPECTED
+// EXPECT-RUNTIME: List[]=: index out of bounds
+// #256: the write twin of fail_list_negative_index_out_of_range.tr, and the
+// empty-list edge: with len == 0 even `l[-1]` has nothing to count back to.
+import list::List;
+
+fn main(): int {
+    mut l: List<int> = List::default();
+    l[-1] = 5;
+    return 0;
+}

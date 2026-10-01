@@ -355,10 +355,10 @@ $ turf check oob.tr
 ── error at line 3, col 27 [E001]
 
   Array index out of bounds!
-  You tried to access 'primes[3]', but 'primes' only has 3 elements (indices 0 to 2).
+  You tried to access 'primes[3]', but 'primes' only has 3 elements (indices 0 to 2, or -1 to -3 counting from the end).
   Note: array declared here (line 2, col 11)
 
-  Hint: Array indices start at 0 and go up to size - 1.
+  Hint: Array indices start at 0 and go up to size - 1; a negative index counts back from the end (-1 is the last element).
 
   3 │     mut last: int = primes[3];
     │                           ^ Here!
