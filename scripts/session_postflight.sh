@@ -122,6 +122,16 @@ else
   rm -f /tmp/turf_postflight_showcase.out
   [ $SHOW_BAD -eq 0 ] && pass "every showcase program compiles ($(find showcase -name '*.tr' | wc -l) files)"
 
+  # LEC-007: every `pub` item in lib/std is referenced by
+  # tests/46_stdlib_surface/, so a removal fails a compile and a NEW public
+  # item that nobody locked fails here.
+  if SURFACE_OUT=$(./scripts/stdlib_surface_check.sh 2>&1); then
+    pass "$(echo "$SURFACE_OUT" | tail -1)"
+  else
+    fail "stdlib public surface is not fully locked by tests/46_stdlib_surface:"
+    echo "$SURFACE_OUT" | head -8 | sed 's/^/       /'
+  fi
+
   # OVH-012: a plain 'import io; import json; import http;' ("hello world")
   # must print NO warning by default. A warning anchored inside lib/std is a
   # "system-module warning" -- recorded but not printed unless

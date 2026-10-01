@@ -1,0 +1,211 @@
+// LEC-007 API lock, part 2: math, time, random, os, sys, mem, io, fs and test.
+// See 01_core_and_collections.tr for what this folder is. Items that cannot
+// run in a test (exit, abort, panic, blocking input, GC pinning) are
+// REFERENCED in `never_called()`, which type-checks them but is guarded so it
+// does not run -- the compile is what locks the signature.
+import fs;
+import io;
+import list::List;
+import math;
+import mem;
+import os;
+import random;
+import sys;
+import test;
+import time;
+
+// `return` inside `recover as err run` returns from the ENCLOSING function, so
+// each error-type reference lives in its own helper.
+fn divide_error_is_division_by_zero(): bool {
+    immut _v: int = math::divide(1, 0) recover as err run {
+        return err == math::MathError::DivisionByZero;
+    };
+    return false;
+}
+
+fn read_error_is_not_found(path: string): bool {
+    immut _s: string = io::read_to_string(path) recover as err run {
+        return err == io::FileError::NotFound;
+    };
+    return false;
+}
+
+fn mkdir_error_is_mkdir_failed(path: string): bool {
+    fs::mkdir(path) recover as err run {
+        return err == fs::FsError::MkdirFailed;
+    };
+    return false;
+}
+
+fn set_env_error_is_set_env_failed(): bool {
+    os::set_env("A=B", "x", 1) recover as err run {
+        return err == os::OsError::SetEnvFailed;
+    };
+    return false;
+}
+
+fn never_called(): void {
+    sys::exit(1);
+    sys::abort();
+    sys::panic("unreachable");
+    test::fail("unreachable");
+    immut line: string = io::input();
+    io::printline(line);
+    unsafe {
+        mut p: void* = mem::alloc(8);
+        mem::root(p);
+        mem::unroot(p);
+        mem::free(p);
+    }
+}
+
+fn main(): int {
+    // Everything that must not run stays behind a condition no run satisfies.
+    if os::argc() > 1000000 {
+        never_called();
+    }
+
+    // ── math ───────────────────────────────────────────────────────────────
+    test::assert(math::abs(-3) == 3 && math::abs(-1.5) == 1.5 && math::fabs(-2.0) == 2.0, "math::abs / fabs");
+    test::assert(math::min(1, 2) == 1 && math::max(1, 2) == 2 && math::min(1.0, 2.0) == 1.0 && math::max(1.0, 2.0) == 2.0, "math::min / max");
+    test::assert(math::clamp(5, 0, 3) == 3 && math::clamp(5.0, 0.0, 3.0) == 3.0, "math::clamp");
+    test::assert(math::power(2, 3) == 8 && math::power(2.0, 3.0) == 8.0 && math::power(2, 3.0) == 8.0 && math::power(2.0, 3) == 8.0, "math::power");
+    test::assert(math::pow(2.0, 3.0) == 8.0 && math::sqrt(9.0) == 3.0, "math::pow / sqrt");
+    test::assert(math::floor(1.5) == 1.0 && math::ceil(1.5) == 2.0 && math::round(1.5) == 2.0, "math::floor / ceil / round");
+    test::assert(math::sin(0.0) == 0.0 && math::cos(0.0) == 1.0 && math::tan(0.0) == 0.0, "math::sin / cos / tan");
+    test::assert(math::exp(0.0) == 1.0 && math::log(1.0) == 0.0 && math::log2(8.0) == 3.0 && math::log10(100.0) == 2.0, "math::exp / log / log2 / log10");
+    immut q: int = math::divide(6, 3) recover produce -1;
+    immut qd: double = math::divide(6.0, 3.0) recover produce -1.0;
+    test::assert(q == 2 && qd == 2.0, "math::divide (int / double)");
+    test::assert(divide_error_is_division_by_zero(), "math::MathError");
+    test::assert(math::PI > 3.14 && math::E > 2.71, "math::PI / E");
+
+    // ── time ───────────────────────────────────────────────────────────────
+    immut t0: int = time::clock_ticks();
+    time::sleep_ms(0);
+    time::sleep_seconds(0);
+    time::usleep(0 to int32);
+    test::assert(time::now_seconds() > 0 && time::time(null) > 0 && time::clock() >= 0, "time::now_seconds / time / clock");
+    test::assert(time::elapsed_ms(t0) >= 0 && time::elapsed_seconds(t0) >= 0, "time::elapsed_ms / elapsed_seconds");
+    test::assert(time::CLOCKS_PER_SEC > 0 && time::MAX_USLEEP_USEC > 0, "time constants");
+
+    // ── random ─────────────────────────────────────────────────────────────
+    random::reseed();
+    test::assert(random::random_int(4, 4) == 4, "random::random_int");
+    immut rd: double = random::random_double();
+    test::assert(rd >= 0.0 && rd < 1.0, "random::random_double");
+    immut rb: bool = random::random_bool();
+    test::assert(rb || !rb, "random::random_bool");
+    test::assert(random::RAND_MAX > 0, "random::RAND_MAX");
+
+    // ── os ─────────────────────────────────────────────────────────────────
+    os::set_env("TURF_LOCK_SURFACE", "1", 1) recover run { test::fail("set_env"); };
+    test::assert(os::env("TURF_LOCK_SURFACE") == "1", "os::env / set_env");
+    test::assert(os::argc() >= 1 && os::argv(0) != "", "os::argc / argv");
+    test::assert(set_env_error_is_set_env_failed(), "os::OsError");
+
+    // ── sys ────────────────────────────────────────────────────────────────
+    test::assert(sys::STDERR_FD == 2, "sys::STDERR_FD");
+
+    // ── mem ────────────────────────────────────────────────────────────────
+    unsafe {
+        mut a: void* = mem::alloc(16);
+        mem::zero(a, 16);
+        mut b: void* = mem::alloc_zeroed(2, 8);
+        mut c: void* = mem::grow(a, 32);
+        mut d: void* = mem::dup(c, 16);
+        test::assert(mem::usable_size(c) >= 32, "mem::usable_size");
+        test::assert(mem::malloc_usable_size(d) >= 16, "mem::malloc_usable_size");
+        mem::free(b);
+        mem::free(c);
+        mem::free(d);
+
+        mut e: void* = mem::alloc_aligned(64, 128);
+        mem::free(e);
+
+        mut r: void* = mem::malloc(8);
+        mut z: void* = mem::calloc(1, 8);
+        r = mem::realloc(r, 16);
+        mem::memset(r, 7, 16);
+        mem::memcpy(z, r, 8);
+        mem::memmove(z, r, 8);
+        test::assert(mem::memcmp(z, r, 8) == 0, "mem::malloc / calloc / realloc / memset / memcpy / memmove / memcmp");
+        mem::free(r);
+        mem::free(z);
+
+        mut slot: void* = mem::alloc(8);
+        test::assert(mem::posix_memalign(slot, 16, 64) == 0, "mem::posix_memalign");
+        mut slot_i: int* = slot to int*;
+        mem::free(slot_i[0] to void*);
+        mem::free(slot);
+
+        mut pool: mem::Pool<void*> = mem::Pool::default();
+        pool.track(mem::alloc(8));
+        pool.track(mem::alloc(8));
+        test::assert(pool.length() == 2, "mem::Pool.track / length");
+        mem::free_pool(pool);
+    }
+
+    // ── fs + io, against a real temp directory ─────────────────────────────
+    immut dir: string = "tmp_lock_surface_dir";
+    immut file: string = fs::join(dir, "f.txt");
+    fs::remove_file(file);
+    fs::remove_dir(dir);
+    fs::mkdir(dir) recover run { test::fail("mkdir"); };
+    test::assert(fs::is_dir(dir) && !fs::is_absolute(dir), "fs::mkdir / is_dir / is_absolute");
+    test::assert(mkdir_error_is_mkdir_failed(dir), "fs::FsError");
+    test::assert(fs::mkdir(fs::join(dir, "sub"), 493 to int32) == (0 to int32), "fs::mkdir (explicit mode)");
+    fs::remove_dir(fs::join(dir, "sub")) recover run { test::fail("remove_dir"); };
+
+    io::write_string(file, "a\nb\n") recover run { test::fail("write_string"); };
+    test::assert(io::exists(file), "io::exists");
+    immut text: string = io::read_to_string(file) recover produce "";
+    immut lines: List<string> = io::read_lines(file) recover run { test::fail("read_lines"); return 1; };
+    test::assert(text == "a\nb\n" && lines.length() == 2, "io::read_to_string / read_lines");
+    test::assert(read_error_is_not_found("tmp_lock_surface_missing.txt"), "io::FileError");
+    test::assert(fs::basename(file) == "f.txt" && fs::dirname(file) == dir && fs::extension(file) == "txt", "fs::basename / dirname / extension");
+    fs::remove_file(file) recover run { test::fail("remove_file"); };
+    fs::remove_dir(dir) recover run { test::fail("remove_dir"); };
+    test::assert(!fs::is_dir(dir), "fs::remove_file / remove_dir");
+
+    // io output: every print / printline overload, plus stderr and flush.
+    io::print(1);
+    io::print(1.5);
+    io::print(true);
+    io::print('c');
+    io::print("s");
+    io::printline(1);
+    io::printline(1.5);
+    io::printline(true);
+    io::printline('c');
+    io::printline("s");
+    io::eprint("");
+    io::eprintline("");
+    io::flush();
+
+    // ── test ───────────────────────────────────────────────────────────────
+    test::assert(true);
+    test::assert(true, "assert (with message)");
+    test::assert_eq(1, 1);
+    test::assert_eq(1, 1, "m");
+    test::assert_eq(1.0, 1.0);
+    test::assert_eq(1.0, 1.0, "m");
+    test::assert_eq(true, true);
+    test::assert_eq(true, true, "m");
+    test::assert_eq("a", "a");
+    test::assert_eq("a", "a", "m");
+    test::assert_neq(1, 2);
+    test::assert_neq(1, 2, "m");
+    test::assert_neq(1.0, 2.0);
+    test::assert_neq(1.0, 2.0, "m");
+    test::assert_neq(true, false);
+    test::assert_neq(true, false, "m");
+    test::assert_neq("a", "b");
+    test::assert_neq("a", "b", "m");
+    if os::argc() > 1000000 {
+        test::assert_fail_eq("a", "b", "unreachable");
+        test::assert_fail_neq("a", "a", "unreachable");
+    }
+
+    return 0;
+}

@@ -115,6 +115,13 @@ jobs:
       - name: Tool API tests (compiler query facade)
         run: ./build/turf-api-tests
 
+      # LEC-007: the stdlib's public surface is the 2.x compatibility surface.
+      # The tests in tests/46_stdlib_surface/ lock it by compiling a use of every
+      # `pub` item; this fails if a pub item exists that none of them mentions,
+      # i.e. a new public name added without being locked.
+      - name: Stdlib public surface is fully locked
+        run: ./scripts/stdlib_surface_check.sh
+
       # LEC-001 stage 2: the `turf` front end (cli/). The Go tests cover argv
       # classification, discovery order and the version handshake in isolation;
       # cli_smoke.sh covers what only a real build shows -- byte-identical
