@@ -180,16 +180,28 @@ jobs:
       # (measured live) purely from paying a full stop-the-world collection
       # per allocation instead of per heap-doubling -- expected under stress
       # mode, not a regression; every other test in the suite still finishes
-      # in seconds. -O0 and -O2 only (not the full -O1/-O3/-Os sweep above):
+      # in seconds.
+      #
+      # The bound is 900s, not 300s. 300 left under 1.5x of headroom over the
+      # ~200s a developer machine takes (re-measured 2026-10-01 at HEAD:
+      # 193s at -O0, 205s at -O2, matching the original 3.5-minute figure --
+      # so nothing had regressed), and a loaded shared CI runner exceeded it:
+      # the suite's one failure was "07_heap_bounded_allocation.tr (Timed out
+      # after 300s)" with 993 of 994 passing. The cost is the mark phase over
+      # the ~1000-node live list on every one of 5M collections -- inherent to
+      # collecting on every allocation, not a hang -- so the fix is the bound,
+      # sized like the ASan job's own 700s (which measured 637s). Re-sorting the
+      # block table in gc_rebuild_index() was tried and is only ~15% of it.
+      # -O0 and -O2 only (not the full -O1/-O3/-Os sweep above):
       # this is validating the collector's root-finding, which AGENTS.md's
       # own GC-testing note already identifies -O0/-O2 as the two levels
       # that matter (conservative scanning can mask a real bug at -O2 purely
       # by register-allocation luck; -O0 is the level least likely to hide
       # one by accident).
       - name: GC stress test -- collect on every allocation (-O0)
-        run: TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=300 ./scripts/test_runner.sh -O0
+        run: TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=900 ./scripts/test_runner.sh -O0
       - name: GC stress test -- collect on every allocation (-O2)
-        run: TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=300 ./scripts/test_runner.sh -O2
+        run: TURF_GC_STRESS=1 TURF_TEST_TIMEOUT_SEC=900 ./scripts/test_runner.sh -O2
 
       # FDN-005 stage 3 (docs/planning/ROADMAP_v2.0.0.md): TURF_GC_VALIDATE=1
       # cross-checks the primary register-capture technique (runtime/
