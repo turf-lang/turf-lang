@@ -1625,6 +1625,17 @@ static int runCompilerMain(int argc, char **argv) {
             !dynamic_cast<EnumDeclExprAST *>(AST.get()) &&
             !dynamic_cast<ModuleImportExprAST *>(AST.get()) &&
             !dynamic_cast<ExternFuncDeclExprAST *>(AST.get())) {
+          // LEC-005: when a parse error was already reported, this "statement"
+          // is almost certainly what recovery left of the broken construct,
+          // not something the user wrote outside a function -- and it would
+          // print BEFORE the real error (this raw write bypasses the
+          // diagnostic engine's own ordering). The compile is already
+          // doomed by the earlier error; drop the node and keep parsing so
+          // any independent later error is still found.
+          if (DiagnosticEngine::hasErrors()) {
+            g_recoverActive = false; // `continue` skips the reset below
+            continue;
+          }
           std::cerr
               << "Error: Statements are not allowed outside of a function. "
                  "Please define 'fn main(): int' and move this code inside.\n";

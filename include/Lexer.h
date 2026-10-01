@@ -156,6 +156,15 @@ extern bool g_protoOnlyPass; // true during sub-pass 3a: emit prototypes only
 // error recovery in main.cpp is what actually consumes this).
 extern int g_braceDepth;
 
+// LEC-005: the '{'/'}' share of g_braceDepth alone. A parse error inside a
+// function body leaves the body's own `{` open; resynchronising on that
+// count (not on the all-bracket one, which an unclosed `(` makes useless --
+// issue #245) is what lets recovery skip to the function's closing brace
+// instead of stopping at the next `;` inside the body and parsing the rest of
+// the body as top-level statements. Maintained by getNextToken() and
+// saved/restored everywhere g_braceDepth is.
+extern int g_curlyDepth;
+
 // The recursive-descent parser has no built-in recursion-depth limit --
 // ParseExpression()/ParseUnary()/ParsePrimary()/ParseBlock()/ParseType()
 // etc. are ordinary unbounded C++ recursion. Deeply nested malformed input

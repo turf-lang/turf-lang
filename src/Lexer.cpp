@@ -70,6 +70,7 @@ bool g_protoOnlyPass = false; // set by pre-pass 3a to stop after prototype
 // enough. Reset to 0 by resetLexer() so a fresh parse pass (pre-pass vs.
 // main pass, or a Sandbox.cpp re-parse) never inherits a stale value.
 int g_braceDepth = 0;
+int g_curlyDepth = 0; // see Lexer.h
 
 // See Lexer.h for the full doc comment. Reset to 0 on longjmp (TurfError::
 // raise(), Errors.h) since a RAII ParseRecursionGuard's destructor never
@@ -238,8 +239,20 @@ static void printDiag(const DiagnosticEngine::Diag &D) {
   // existed (now redundant there and removed, see DuplicateDeclarationError/
   // ShadowingWarning).
   for (const auto &Rel : D.RelatedLocations) {
+    // LEC-005: a note in a DIFFERENT file than the diagnostic (an
+    // instantiation chain walks from the user's file into `lib/std`) names
+    // it -- "line 125, col 29" alone would read as a position in the user's
+    // own file. Same-file notes are unchanged.
+    const bool OtherFile = !Rel.Loc.Filename.empty() &&
+                           Rel.Loc.Filename != D.Filename;
+    // A stdlib path is shown from `lib/std/` on, not as an absolute install
+    // path that differs per machine and buries the position.
+    std::string RelFile = Rel.Loc.Filename;
+    if (const size_t Std = RelFile.rfind("lib/std/"); Std != std::string::npos)
+      RelFile = RelFile.substr(Std);
     std::cerr << "  " << Colors::BRIGHT_BLUE << "Note: " << Rel.Description
-              << " (line " << Rel.Loc.Line << ", col " << Rel.Loc.Col << ")"
+              << " (" << (OtherFile ? RelFile + ", " : std::string())
+              << "line " << Rel.Loc.Line << ", col " << Rel.Loc.Col << ")"
               << Colors::RESET << "\n";
   }
 
@@ -509,6 +522,7 @@ void resetLexer() {
   CurCol = 0;
   CurLoc = {1, 0};
   g_braceDepth = 0;
+  g_curlyDepth = 0;
 }
 
 /**

@@ -405,6 +405,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
     // subsequent parsing must not inherit a bracket-depth counter left
     // mid-count by this file's abandoned parse.
     int SavedBraceDepth;
+    int SavedCurlyDepth; // LEC-005: g_curlyDepth, saved for the same reason
     // LEC-001 stage 4: the importing file's module aliases. An imported file
     // has its own imports; it must neither see the importer's aliases nor
     // leave its own behind for the importer's remaining tokens.
@@ -428,6 +429,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       SavedStringVal = StringVal;
       SavedSourceLines = SourceLines;
       SavedBraceDepth = g_braceDepth;
+      SavedCurlyDepth = g_curlyDepth;
     }
     ~LexerStateGuard() {
       SourceFile = SavedSourceFile;
@@ -445,6 +447,7 @@ std::unique_ptr<ExprAST> ParseFile(const std::string &Path,
       StringVal = SavedStringVal;
       SourceLines = SavedSourceLines;
       g_braceDepth = SavedBraceDepth;
+      g_curlyDepth = SavedCurlyDepth;
       CurrentFileModuleAliases = std::move(SavedModuleAliases);
     }
   } LGuard;

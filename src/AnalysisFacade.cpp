@@ -76,6 +76,7 @@ public:
     SavedIdentifierStr_ = IdentifierStr;
     SavedStringVal_ = StringVal;
     SavedBraceDepth_ = g_braceDepth;
+    SavedCurlyDepth_ = g_curlyDepth;
     SavedParseRecursionDepth_ = g_parseRecursionDepth;
     SavedProtoOnlyPass_ = g_protoOnlyPass;
 
@@ -105,6 +106,7 @@ public:
     PushResolverCompileState();
 
     g_braceDepth = 0;
+    g_curlyDepth = 0;
     g_parseRecursionDepth = 0;
     g_protoOnlyPass = false;
     g_recoverActive = false;
@@ -131,6 +133,7 @@ public:
     g_protoOnlyPass = SavedProtoOnlyPass_;
     g_parseRecursionDepth = SavedParseRecursionDepth_;
     g_braceDepth = SavedBraceDepth_;
+    g_curlyDepth = SavedCurlyDepth_;
     StringVal = SavedStringVal_;
     IdentifierStr = SavedIdentifierStr_;
     CharVal = SavedCharVal_;
@@ -158,7 +161,7 @@ private:
   bool SavedBoolVal_;
   char SavedCharVal_;
   std::string SavedIdentifierStr_, SavedStringVal_;
-  int SavedBraceDepth_, SavedParseRecursionDepth_;
+  int SavedBraceDepth_, SavedCurlyDepth_, SavedParseRecursionDepth_;
   bool SavedProtoOnlyPass_;
   std::string SavedSourceFilename_, SavedMainSourceFilename_;
   std::vector<std::string> SavedSourceLines_;

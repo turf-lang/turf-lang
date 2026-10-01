@@ -1,0 +1,27 @@
+// EXPECT-DIAG: Expected a function name after 'fn'
+// EXPECT-DIAG: Expected ';' after statement
+// EXPECT-NO-DIAG: Statements are not allowed outside of a function
+// LEC-005: recovery must land on the closing brace of the BROKEN function --
+// not before it (the old behaviour: leftover body parsed as top-level
+// statements) and not after it (which would swallow the next function and
+// hide its own error). Both errors below must be reported, the first from
+// three levels of nesting down.
+fn first(): int {
+    mut i: int = 0;
+    while (i < 3) {
+        if (i == 1) {
+            mut f = fn(a: int): int { return a; };
+        }
+        i = i + 1;
+    }
+    return i;
+}
+
+fn second(): int {
+    mut z: int = 5
+    return z;
+}
+
+fn main(): int {
+    return 0;
+}

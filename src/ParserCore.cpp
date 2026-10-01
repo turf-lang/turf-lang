@@ -61,6 +61,10 @@ int getNextToken() {
     g_braceDepth++;
   else if ((CurTok == '}' || CurTok == ')' || CurTok == ']') && g_braceDepth > 0)
     g_braceDepth--;
+  if (CurTok == '{')
+    g_curlyDepth++;
+  else if (CurTok == '}' && g_curlyDepth > 0)
+    g_curlyDepth--;
   return CurTok = gettok();
 }
 
@@ -173,7 +177,17 @@ void SkipToNextTopLevelBoundary() {
   // correctly walks forward through the real, still-untouched '{'...'}'
   // body by tracking depth incrementally from this point on, exactly as
   // before.
-  g_braceDepth = 0;
+  //
+  // LEC-005: reset to the CURLY depth, not to 0. For an error in a function's
+  // own header (the `fn broken(: int {` above) the two agree -- no `{` is open
+  // yet -- but an error in the BODY (a lambda attempt, `List<int>::default()`,
+  // `fn(` where an expression belongs) leaves the body's `{` open, and a 0
+  // here made the skip stop at the next `;` inside that body: the rest of the
+  // body then parsed as top-level statements and drew a false "Statements are
+  // not allowed outside of a function" that was usually printed before the
+  // real error. Dropping only the stray `(`/`[` imbalance and keeping the
+  // `{` count resynchronises on the function's own closing brace.
+  g_braceDepth = g_curlyDepth;
 
   if (CurTok == TOK_EOF) return;
 
@@ -205,6 +219,12 @@ void SkipToNextTopLevelBoundary() {
     getNextToken();
   } while (CurTok != TOK_EOF &&
            (g_braceDepth > 0 || !IsTopLevelBoundaryToken(CurTok)));
+
+  // Stopped at a top-level boundary, so by definition no `{` is open -- even
+  // if the skipped text closed a `(` with a `}` and left the counters
+  // disagreeing, which must not leak into the next declaration.
+  g_braceDepth = 0;
+  g_curlyDepth = 0;
 }
 
 // Returns the priority of the current operator. If it's not an operator (like a
@@ -528,7 +548,7 @@ TurfTypePtr ParseType() {
       getNextToken(); // eat the literal
     }
     if (CurTok != ']') {
-      SyntaxError(CurLoc, "Expected ']' to close array size — e.g. int[5] arr")
+      SyntaxError(CurLoc, "Expected ']' to close array size — e.g. mut arr: int[5];")
           .raise();
       return nullptr;
     }
@@ -867,7 +887,17 @@ static std::unique_ptr<ExprAST> ParsePrimaryBase() {
   case TOK_TYPE_STRING:
   case TOK_TYPE_BOOL:
   case TOK_TYPE_CHAR:
-    LogErrorAt(CurLoc, "Expected 'mutable' or 'immutable' to begin a declaration.", SLM::ErrorCategory::DECLARATION);
+    // A primitive type name is only ever valid after `mut x:` / `->`; here it
+    // usually means a generic type argument written in EXPRESSION position
+    // (`List<int>::default()` parses as `List < int ...`), which Turf does not
+    // have (FUTURE F-6c) -- say where the type goes instead of leaving the
+    // user to guess from "begin a declaration".
+    LogErrorAt(CurLoc,
+               "Expected 'mutable' or 'immutable' to begin a declaration."
+               "\n  Hint: if this is a generic type argument in an expression "
+               "(`List<int>::default()`), put the type on the variable "
+               "instead: `mut l: List<int> = List::default();`.",
+               SLM::ErrorCategory::DECLARATION);
     return nullptr;
 
   case TOK_TYPE_VOID:
