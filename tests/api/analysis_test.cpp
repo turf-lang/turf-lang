@@ -1164,6 +1164,7 @@ static void testGenericOperatorDiagnostics() {
       "struct Item { a: int }\n"
       "fn Item.new(a: int): void { self.a = a; }\n"
       "fn Item.bump(): void { self.a = self.a + 1; }\n"
+      "fn Item.wrapper(): void { self.bump(); }\n"
       "struct Bag { it: Item }\n"
       "fn Bag.new(): void { self.it = Item::new(1); }\n"
       "operator [](b: Bag, i: int): Item { return b.it; }\n";
@@ -1179,6 +1180,9 @@ static void testGenericOperatorDiagnostics() {
        "store it back"},
       {"mutating method on an index result",
        "fn main(): int { mut b: Bag = Bag::new(); b[0].bump(); return 0; }", "E098",
+       "store it back"},
+      {"method that only reaches a mutation through self.m()",
+       "fn main(): int { mut b: Bag = Bag::new(); b[0].wrapper(); return 0; }", "E098",
        "store it back"},
   };
   for (const auto &C : TempCases) {

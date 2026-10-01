@@ -1341,13 +1341,19 @@ void TypeChecker::visitMethodCall(MethodCallExprAST &Node) {
           // conservative in the direction of never producing a false
           // positive here (a genuinely read-only method can never be
           // wrongly rejected).
-          if (!IsStaticMethod && Best->MutatesSelf) {
+          // MutatesSelf is the method's own body; the symbol table also knows
+          // the methods that only reach a mutation through `self.m()` calls.
+          if (!IsStaticMethod &&
+              (Best->MutatesSelf || RST_.mutatesSelfTransitively(Best->Decl))) {
             // LEC-006: `outer[0].push(5)` mutates the copy `outer[0]`
             // returned, so the change vanishes. Not for a pointer-valued
             // receiver (`List<Node*>`'s `nodes[0].bump()` writes through it).
-            // MutatesSelf is the same conservative, non-interprocedural scan
-            // the immutable-variable check just below uses: a method that
-            // only mutates by calling ANOTHER mutating method is not seen.
+            // "Mutates self" is the same answer the immutable-variable check
+            // just below uses: an assignment in the method's own body that
+            // lands in self's value storage (ResolverCore.cpp's
+            // MutatesSelfField), or a chain of `self.m()` calls reaching one.
+            // It does NOT see a mutating call on a value FIELD
+            // (`self.inner.bump()`), or aliasing.
             rejectOperatorTemporaryWrite(
                 Node.getBase(), Node.getLoc(),
                 "Cannot call '" + MethodName + "' on the value an 'operator[]' "

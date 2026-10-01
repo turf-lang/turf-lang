@@ -1,0 +1,16 @@
+// Regression test (LEC-006 follow-up): a `defer` runs on the way out of the
+// method, but it still assigns to self. The scan did not look inside `defer`.
+// Expected: ImmutableAssignmentError on `c`.
+struct Counter {
+    val: int
+}
+
+fn Counter.mark(): void {
+    defer self.val = 9;
+}
+
+fn main(): int {
+    immut c: Counter = Counter::default();
+    c.mark();
+    return 0;
+}

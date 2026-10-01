@@ -257,6 +257,7 @@ public:
     SymTable_.resetToDepth(0);
     ModuleStack_.clear();
     CurrentFuncTypeParams_.clear();
+    CurrentFuncDef_ = nullptr; // a failed body never reaches visitFuncDef()'s restore
   }
 
   // ── ASTVisitor overrides ───────────────────────────────────────────────────
@@ -388,6 +389,10 @@ private:
   ScopeSnapshotCallback ScopeSnapshotCB_;
   ResolverSymbolTable SymTable_;
   int FunctionNestingDepth_ = 0;
+  // The instance method whose body is being visited, or null (a free function,
+  // a static method, outside any function). Lets visitMethodCall() attribute a
+  // `self.m()` call to its caller -- ResolverSymbolTable::noteSelfCall().
+  const FuncDefExprAST *CurrentFuncDef_ = nullptr;
   // How many `defer` statements enclose the node being visited (LEC-004): a
   // `try` inside one is an error, since it would return out of a statement
   // that has already been scheduled to run on the way out (INV-DEFER-2).

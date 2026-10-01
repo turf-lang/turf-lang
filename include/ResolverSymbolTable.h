@@ -26,6 +26,10 @@
 #include "ResolverTypeRegistry.h"
 
 #include <ostream>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 // ─── ResolverSymbolTable ─────────────────────────────────────────────────────
 
@@ -362,6 +366,62 @@ public:
     return TypeRegistry_.getTypeOwningModule(Name);
   }
 
+  // ── Transitive "mutates self" (LEC-006 follow-up) ──────────────────────────
+  //
+  // ResolverFunctionSymbol::MutatesSelf is a DIRECT scan: the method's own body
+  // assigns to `self.<field>`. A method that only calls another mutating method
+  // on self (`fn wrapper() { self.bump(); }`) is missed, so
+  // `immutableVar.wrapper()` and `list[i].wrapper()` slipped past the
+  // immutable-variable check and E098. This records what is needed to close
+  // that: every instance method's declaration, which ones mutate directly, and
+  // every `self.m(...)` call a body makes. The closure is computed lazily, at
+  // query time -- the Resolver's Pass 2 is what discovers the calls, and the
+  // candidate symbols the TypeChecker copies are made DURING that pass, so a
+  // flag written back onto a symbol afterwards would never reach them.
+
+  /// An instance method's declaration. Called once per method from
+  /// Resolver::visitFuncDef(); @p DirectlyMutates is MutatesSelf as scanned.
+  void noteInstanceMethod(const FuncDefExprAST *Decl, const std::string &Module,
+                          bool DirectlyMutates) {
+    MethodsByKey_[methodKey(Module, Decl)].push_back(Decl);
+    if (DirectlyMutates)
+      DirectMutators_.insert(Decl);
+    ClosureDirty_ = true;
+  }
+
+  /// `self.<Method>(<Arity-1 args>)` was called from inside @p Caller. The
+  /// callee is the SAME struct's method in the SAME module; @p CalleeName is
+  /// the full "Struct.method" name and @p Arity counts `self`.
+  void noteSelfCall(const FuncDefExprAST *Caller, const std::string &Module,
+                    const std::string &CalleeName, int Arity) {
+    SelfCalls_[Caller].push_back(Module + "::" + CalleeName + "/" + std::to_string(Arity));
+    ClosureDirty_ = true;
+  }
+
+  /// Does the method declared by @p Decl change its receiver, directly or
+  /// through any chain of `self.m()` calls? Conservative in the direction the
+  /// direct scan is: a call counts only if EVERY same-name, same-arity method
+  /// it could mean mutates, so an overload that does not can never be rejected
+  /// by mistake. Null @p Decl (an extern, a builtin) is false.
+  bool mutatesSelfTransitively(const FuncDefExprAST *Decl) const {
+    if (!Decl)
+      return false;
+    if (ClosureDirty_)
+      computeMutatingClosure();
+    return Mutating_.count(Decl) != 0;
+  }
+
+private:
+  static std::string methodKey(const std::string &Module, const FuncDefExprAST *Decl);
+  void computeMutatingClosure() const;
+
+  std::unordered_map<std::string, std::vector<const FuncDefExprAST *>> MethodsByKey_;
+  std::unordered_set<const FuncDefExprAST *> DirectMutators_;
+  std::unordered_map<const FuncDefExprAST *, std::vector<std::string>> SelfCalls_;
+  mutable std::unordered_set<const FuncDefExprAST *> Mutating_;
+  mutable bool ClosureDirty_ = false;
+
+public:
   /**
    * @brief Dumps the contents of the symbol table (all scopes and modules) to the output stream.
    */

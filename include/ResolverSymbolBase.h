@@ -362,6 +362,12 @@ struct ResolverFunctionSymbol {
   /// bypassed entirely (ImmutableAssignmentError never even considered
   /// them). Always false for static methods, free functions, and module
   /// functions (none of which have a "self" to mutate).
+  ///
+  /// DIRECT only: it says nothing about a method that mutates by calling
+  /// `self.other()`. Consumers must ask `ResolverSymbolTable::
+  /// mutatesSelfTransitively(Decl)` as well -- the call graph is only known
+  /// after Pass 2, by which time candidate symbols have already been copied,
+  /// so the answer cannot be written back onto this flag.
   bool                     MutatesSelf = false;
 
   /// Candidate scope-qualifier names (`Left` in every `Left::Right` or

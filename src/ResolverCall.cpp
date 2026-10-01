@@ -667,6 +667,21 @@ void Resolver::visitMethodCall(MethodCallExprAST &Node) {
   for (const auto &Arg : Node.getArgs())
     visitChild(Arg.get());
 
+  // `self.m(...)` inside an instance method: an edge in the call graph the
+  // transitive "mutates self" closure is built from. Only a call on `self`
+  // itself -- `self.field.m()` mutates the FIELD's value, which is a different
+  // question this does not answer. The callee is the same struct's method, so
+  // its full name shares the caller's "Struct." prefix.
+  if (CurrentFuncDef_) {
+    const auto *BaseVar = dynamic_cast<const VariableExprAST *>(Node.getBase());
+    const std::string &CallerName = CurrentFuncDef_->getName();
+    const size_t Dot = CallerName.find('.');
+    if (BaseVar && BaseVar->getName() == "self" && Dot != std::string::npos)
+      SymTable_.noteSelfCall(CurrentFuncDef_, currentModuleName(),
+                             CallerName.substr(0, Dot + 1) + Node.getMethod(),
+                             static_cast<int>(Node.getArgs().size()) + 1);
+  }
+
   // 'new'/'default' are reserved for construction (StructName::new(...)/
   // StructName::default()) and can never be invoked via '.', on ANY base --
   // checked unconditionally, up front, so a real instance is rejected here

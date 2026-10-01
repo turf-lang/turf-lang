@@ -267,11 +267,23 @@ void Resolver::visitFuncDef(FuncDefExprAST &Node) {
 
   registerFunctionSignature(Node, currentModuleName());
 
+  // Transitive "mutates self": remember every instance method and whether it
+  // mutates directly, and (in visitMethodCall) every `self.m()` it makes. See
+  // ResolverSymbolTable::mutatesSelfTransitively().
+  const bool IsInstanceMethod =
+      !Node.getParams().empty() && Node.getParams()[0].Name == "self" &&
+      Node.getName().find('.') != std::string::npos;
+  if (IsInstanceMethod)
+    SymTable_.noteInstanceMethod(&Node, currentModuleName(), Sym->MutatesSelf);
+  const FuncDefExprAST *SavedFuncDef = CurrentFuncDef_;
+  CurrentFuncDef_ = IsInstanceMethod ? &Node : nullptr;
+
   // See CurrentFuncTypeParams_'s doc comment in Resolver.h.
   CurrentFuncTypeParams_ = Node.getTypeParams();
   ReturnPassesFallible_ = false;
   visitChild(Node.getBody());
   CurrentFuncTypeParams_.clear();
+  CurrentFuncDef_ = SavedFuncDef;
 
   // "Never returns an error" warning (docs/architecture/errors_and_recover.md):
   // a `!T`- declared function is PERMITTED, not obliged, to fail -- so this is

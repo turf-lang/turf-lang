@@ -1,0 +1,34 @@
+// Negative test (LEC-006 follow-up, E098): E098 used to rely on a method's own
+// body assigning to self. `bs[0].outer()` assigns nothing itself -- it calls
+// `self.wrapper()`, which calls `self.bump()`, which does the assignment -- so
+// it compiled and silently lost the write on the copy bs[0] returned. The
+// mutates-self check now follows those calls.
+// Expected: E098, "Cannot call 'outer' on the value an 'operator[]' read returned".
+import list::List;
+
+struct Big {
+    a: int
+}
+
+fn Big.new(a: int): void {
+    self.a = a;
+}
+
+fn Big.bump(): void {
+    self.a = self.a + 1;
+}
+
+fn Big.wrapper(): void {
+    self.bump();
+}
+
+fn Big.outer(): void {
+    self.wrapper();
+}
+
+fn main(): int {
+    mut bs: List<Big> = List::default();
+    bs.push(Big::new(1));
+    bs[0].outer();
+    return 0;
+}

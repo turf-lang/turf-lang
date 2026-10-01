@@ -1,0 +1,21 @@
+// Negative test (LEC-006 follow-up, E098): `bs[0].fill()` assigns to
+// `self.arr[0]`, an element of a fixed-array field inside the struct value. The
+// element bs[0] returned is a copy, so the list never sees it. E098 depends on
+// the "mutates self" scan, which used to miss this shape.
+// Expected: E098, "Cannot call 'fill' on the value an 'operator[]' read returned".
+import list::List;
+
+struct Slots {
+    arr: int[3]
+}
+
+fn Slots.fill(): void {
+    self.arr[0] = 1;
+}
+
+fn main(): int {
+    mut bs: List<Slots> = List::default();
+    bs.push(Slots::default());
+    bs[0].fill();
+    return 0;
+}

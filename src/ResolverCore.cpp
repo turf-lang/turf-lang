@@ -185,7 +185,9 @@ TurfTypePtr substituteTypeParams(const TurfTypePtr &Ty,
  * an `immut c` when `bump()` internally does `self.val += 1`).
  *
  * Deliberately NOT interprocedural (never looks inside a nested function/
- * method call the body makes) and NOT alias-aware (passing `self` or
+ * method call the body makes -- a method that only reaches a mutation through
+ * `self.m()` is found by ResolverSymbolTable::mutatesSelfTransitively()
+ * instead, which builds the call graph during Pass 2) and NOT alias-aware (passing `self` or
  * `&self.field` to another function is not itself treated as a mutation).
  * This is the opposite conservatism from Lint.cpp's MayModifyVariable(),
  * which backs a WARNING and so errs toward over-flagging; this result gates
@@ -196,42 +198,120 @@ TurfTypePtr substituteTypeParams(const TurfTypePtr &Ty,
  * MayModifyVariable's: some real mutations that only happen through a
  * nested call go undetected, same as before this check existed at all.
  */
-static bool MutatesSelfField(const ExprAST *E) {
-  if (!E)
+///
+/// LEC-006 follow-up: the scan used to recognise exactly `self.<field> = …`,
+/// and to recurse only through blocks, `if`, `while`, `for` and `for each`. So
+/// `self.arr[i] = v`, `self.inner.f = v`, and an assignment inside a `compare`
+/// arm, a `defer`, a `do/while` or an `unsafe` block all went unseen, and
+/// `immut s; s.viaArray();` compiled. It now (a) walks every statement kind that
+/// holds a body, and (b) treats an assignment target as a mutation of self when
+/// its place chain is ROOTED at `self` and stays in self's own value storage.
+///
+/// Staying in value storage needs the declared field types, which is why this
+/// takes the struct declaration: a field that is a pointer or reference ends the
+/// walk (`self.data[i] = v` on a `T*` writes the pointee, so List.set is NOT a
+/// mutation of the List value -- flagging it would reject `grid[i].set(j, v)`,
+/// which works). A fixed array or a value struct continues it. A type it cannot
+/// resolve (a bare type parameter, an unknown name) also ends it, in the
+/// under-flagging direction, like the rest of this function.
+using StructFinder = std::function<const StructDeclExprAST *(const TurfType *)>;
+
+static bool WritesSelfValueStorage(const ExprAST *Target,
+                                   const StructDeclExprAST *SelfDecl,
+                                   const StructFinder &FindStruct) {
+  // The place chain, outermost (the assigned slot) first, `self` last.
+  std::vector<const ExprAST *> Chain;
+  for (const ExprAST *E = Target; E;) {
+    Chain.push_back(E);
+    if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(E))
+      E = FA->getBase();
+    else if (const auto *AA = dynamic_cast<const ArrayAccessExprAST *>(E))
+      E = AA->getBase();
+    else
+      break;
+  }
+  const auto *Root = dynamic_cast<const VariableExprAST *>(Chain.back());
+  if (Chain.size() < 2 || !Root || Root->getName() != "self")
     return false;
 
-  auto IsSelfFieldAccess = [](const ExprAST *Candidate) {
-    auto *FA = dynamic_cast<const FieldAccessExprAST *>(Candidate);
-    if (!FA)
+  // First step out of `self` must be a field.
+  const auto *First = dynamic_cast<const FieldAccessExprAST *>(Chain[Chain.size() - 2]);
+  if (!First)
+    return false;
+  const TurfType *Slot = nullptr;
+  if (SelfDecl)
+    for (const StructField &F : SelfDecl->getFields())
+      if (F.Name == First->getFieldName()) { Slot = F.Type.get(); break; }
+  if (Chain.size() == 2)
+    return true; // `self.<field> = …` -- always, even if the field type is unresolved
+
+  for (size_t I = Chain.size() - 2; I > 0; --I) {
+    if (!Slot || Slot->isPointer())
+      return false; // unknown type, or a write THROUGH a pointer/reference
+    const ExprAST *Next = Chain[I - 1];
+    if (dynamic_cast<const ArrayAccessExprAST *>(Next)) {
+      if (!Slot->isArray())
+        return false; // indexing a struct/string goes through an operator call
+      const auto *Arr = dynamic_cast<const ::ArrayType *>(Slot);
+      Slot = Arr ? Arr->getElementTypePtr().get() : nullptr;
+    } else if (const auto *FA = dynamic_cast<const FieldAccessExprAST *>(Next)) {
+      const StructDeclExprAST *Inner = FindStruct(Slot);
+      const TurfType *FieldTy = nullptr;
+      if (Inner)
+        for (const StructField &F : Inner->getFields())
+          if (F.Name == FA->getFieldName()) { FieldTy = F.Type.get(); break; }
+      Slot = FieldTy;
+    } else {
       return false;
-    auto *Base = dynamic_cast<const VariableExprAST *>(FA->getBase());
-    return Base && Base->getName() == "self";
+    }
+  }
+  return true; // the assigned slot is inside self's own storage
+}
+
+static bool MutatesSelfField(const ExprAST *E, const StructDeclExprAST *SelfDecl,
+                             const StructFinder &FindStruct) {
+  if (!E)
+    return false;
+  auto Recurse = [&](const ExprAST *Child) {
+    return MutatesSelfField(Child, SelfDecl, FindStruct);
   };
 
   if (auto *Assign = dynamic_cast<const AssignmentExprAST *>(E))
-    return IsSelfFieldAccess(Assign->getLHS());
+    return WritesSelfValueStorage(Assign->getLHS(), SelfDecl, FindStruct);
   if (auto *CAssign = dynamic_cast<const CompoundAssignmentExprAST *>(E))
-    return IsSelfFieldAccess(CAssign->getLHS());
+    return WritesSelfValueStorage(CAssign->getLHS(), SelfDecl, FindStruct);
   if (auto *Post = dynamic_cast<const PostfixExprAST *>(E))
-    return IsSelfFieldAccess(Post->getOperand());
+    return WritesSelfValueStorage(Post->getOperand(), SelfDecl, FindStruct);
   if (auto *Blk = dynamic_cast<const BlockExprAST *>(E)) {
     for (const auto &Child : Blk->getExpressions())
-      if (MutatesSelfField(Child.get()))
+      if (Recurse(Child.get()))
         return true;
     return false;
   }
   if (auto *If = dynamic_cast<const IfExprAST *>(E)) {
     for (const auto &B : If->getBranches())
-      if (MutatesSelfField(B.Body.get()))
+      if (Recurse(B.Body.get()))
         return true;
-    return MutatesSelfField(If->getElseBody());
+    return Recurse(If->getElseBody());
   }
   if (auto *W = dynamic_cast<const WhileExprAST *>(E))
-    return MutatesSelfField(W->getBody());
+    return Recurse(W->getBody());
+  if (auto *DW = dynamic_cast<const DoWhileExprAST *>(E))
+    return Recurse(DW->getBody());
   if (auto *F = dynamic_cast<const ForExprAST *>(E))
-    return MutatesSelfField(F->getBody());
+    return Recurse(F->getBody());
   if (auto *FE = dynamic_cast<const ForEachExprAST *>(E))
-    return MutatesSelfField(FE->getBody());
+    return Recurse(FE->getBody());
+  if (auto *U = dynamic_cast<const UnsafeBlockExprAST *>(E))
+    return Recurse(U->getBody());
+  if (auto *D = dynamic_cast<const DeferExprAST *>(E))
+    return Recurse(D->getStmt());
+  if (auto *C = dynamic_cast<const CompareExprAST *>(E)) {
+    for (const auto &Arm : C->getArms())
+      if (Recurse(Arm.Body.get()))
+        return true;
+    return Recurse(C->getOtherBody());
+  }
   return false;
 }
 
@@ -394,8 +474,34 @@ Resolver::buildFunctionSymbol(const FuncDefExprAST &Node,
   // ParseFuncDef's self-parameter construction) can mutate self at all;
   // static methods and free/module functions leave MutatesSelf at its
   // default false.
-  if (!Sym.Params.empty() && Sym.Params[0].Name == "self")
-    Sym.MutatesSelf = MutatesSelfField(Node.getBody());
+  if (!Sym.Params.empty() && Sym.Params[0].Name == "self") {
+    // A struct declaration by name: exact first (a main-file struct is bare,
+    // and a spelling the Resolver already rewrote is an identity), then
+    // qualified by this method's own module. No match -> null, which the scan
+    // treats as "type unknown" and answers conservatively.
+    auto FindStructDecl = [&](const std::string &Name) -> const StructDeclExprAST * {
+      for (const auto *D : HoistedStructDecls_)
+        if (D->getName() == Name)
+          return D;
+      if (!ModuleName.empty())
+        for (const auto *D : HoistedStructDecls_)
+          if (D->getName() == ModuleName + "::" + Name)
+            return D;
+      return nullptr;
+    };
+    StructFinder FindStruct = [&](const TurfType *T) -> const StructDeclExprAST * {
+      if (!T)
+        return nullptr;
+      if (const auto *G = dynamic_cast<const GenericType *>(T))
+        return FindStructDecl(G->getBaseName());
+      return FindStructDecl(T->getName());
+    };
+    const std::string &FnName = Node.getName();
+    const size_t Dot = FnName.find('.');
+    const StructDeclExprAST *SelfDecl =
+        Dot == std::string::npos ? nullptr : FindStructDecl(FnName.substr(0, Dot));
+    Sym.MutatesSelf = MutatesSelfField(Node.getBody(), SelfDecl, FindStruct);
+  }
   CollectReturnedErrorTypeNames(Node.getBody(), Sym.PossibleErrorTypeNames,
                                 Sym.ReturnsReboundError);
   // LEC-004: a `try` returns another call's error, unchanged -- no type name
